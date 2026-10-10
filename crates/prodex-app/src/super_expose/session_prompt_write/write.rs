@@ -4,7 +4,7 @@ use super::{
     output_source_id, rollout_contains_exact_user_message,
 };
 use prodex_mojo_core::session_cli_policy::{
-    self as session_cli_mojo, SessionPromptWriteQueueAction, SessionPromptWriteQueuePlan,
+    self as session_cli_mojo, SessionPromptWriteQueuePlan, SessionPromptWriteVerification,
 };
 use std::path::{Path, PathBuf};
 use std::thread;
@@ -111,16 +111,21 @@ where
         rollout_before: Option<&(PathBuf, u64, String)>,
         invocation: &QueueInvocation,
     ) -> std::result::Result<&'static str, SessionPromptWriteError> {
-        match Self::queue_policy(invocation)?.action {
-            SessionPromptWriteQueueAction::QueueFailed => Err(SessionPromptWriteError::QueueFailed),
-            SessionPromptWriteQueueAction::NotAddressable => {
+        let action = Self::queue_policy(invocation)?.action;
+        match session_cli_mojo::prompt_write_verification_plan(action)
+            .map_err(|_| SessionPromptWriteError::VerificationInconclusive)?
+        {
+            SessionPromptWriteVerification::QueueFailed => {
+                Err(SessionPromptWriteError::QueueFailed)
+            }
+            SessionPromptWriteVerification::NotAddressable => {
                 Err(SessionPromptWriteError::SessionNotQueueAddressable)
             }
-            SessionPromptWriteQueueAction::Ambiguous => {
+            SessionPromptWriteVerification::Ambiguous => {
                 Err(SessionPromptWriteError::WriteAmbiguous)
             }
-            SessionPromptWriteQueueAction::PendingObserved => Ok("queue_pending_observed"),
-            SessionPromptWriteQueueAction::AwaitRollout => {
+            SessionPromptWriteVerification::PendingObserved => Ok("queue_pending_observed"),
+            SessionPromptWriteVerification::AwaitRollout => {
                 self.wait_for_rollout_user_message(
                     request,
                     workspace_root,
@@ -232,13 +237,16 @@ fn session_target_resolution_error(
     requested_thread_id: Option<&str>,
     error: SessionPromptWriteError,
 ) -> SessionPromptWriteError {
-    if error == SessionPromptWriteError::NoSession
-        && (binding.is_some() || requested_pid.is_some() || requested_thread_id.is_some())
-    {
-        SessionPromptWriteError::StaleTarget
-    } else {
-        error
+    if error == SessionPromptWriteError::NoSession {
+        let targeted =
+            binding.is_some() || requested_pid.is_some() || requested_thread_id.is_some();
+        return match session_cli_mojo::prompt_write_resolution_plan(targeted, true, false) {
+            Ok(plan) if plan.stale => SessionPromptWriteError::StaleTarget,
+            Ok(_) => error,
+            Err(_) => SessionPromptWriteError::VerificationInconclusive,
+        };
     }
+    error
 }
 
 pub(super) fn session_prompt_write_resolution_retryable(error: SessionPromptWriteError) -> bool {

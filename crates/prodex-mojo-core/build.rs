@@ -586,6 +586,7 @@ fn selected_sources() -> Vec<&'static str> {
     if env::var_os("CARGO_FEATURE_MOJO_PROVIDER_CONSTRAINTS").is_some()
         || env::var_os("CARGO_FEATURE_MOJO_CORE").is_some()
     {
+        sources.push("../../mojo/prodex_core/deepseek_attempt_policy.mojo");
         sources.push("../../mojo/prodex_core/rtk_noisy.mojo");
         sources.push("../../mojo/prodex_core/provider_constraints.mojo");
         sources.push("../../mojo/prodex_core/provider_registry.mojo");

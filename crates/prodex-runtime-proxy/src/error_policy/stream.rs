@@ -23,16 +23,24 @@ pub fn runtime_stream_error_policy_from_value(
     value: &serde_json::Value,
     phase: RuntimeHttpErrorPhase,
 ) -> RuntimeHttpErrorPolicy {
+    runtime_stream_error_policy_from_value_checked(value, phase)
+        .unwrap_or_else(|_| RuntimeHttpErrorPolicy::pass_through())
+}
+
+pub(crate) fn runtime_stream_error_policy_from_value_checked(
+    value: &serde_json::Value,
+    phase: RuntimeHttpErrorPhase,
+) -> Result<RuntimeHttpErrorPolicy, prodex_mojo_core::MojoError> {
     let Ok(body) = serde_json::to_vec(value) else {
-        return RuntimeHttpErrorPolicy::pass_through();
+        return Err(prodex_mojo_core::MojoError::InvalidInput);
     };
-    let policy = super::runtime_error_policy_from_mojo(
+    let policy = super::runtime_error_policy_from_mojo_checked(
         prodex_mojo_core::rich::RUNTIME_ERROR_MODE_STREAM,
         0,
         phase,
         &body,
-    );
-    with_json_retry_advice(value, body.len(), policy)
+    )?;
+    Ok(with_json_retry_advice(value, body.len(), policy))
 }
 
 fn with_json_retry_advice(

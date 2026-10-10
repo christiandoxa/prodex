@@ -74,16 +74,6 @@
     fn test_openai_quota_report(usage: UsageResponse) -> QuotaReport {
         test_quota_report("main", Ok(ProviderQuotaSnapshot::OpenAi(usage)))
     }
-    fn assert_refresh_interval_near(actual: Duration, expected_seconds: u64) {
-        let actual_seconds = actual.as_secs();
-        let jitter = (expected_seconds / 10).max(1);
-        assert!(
-            actual_seconds >= expected_seconds.saturating_sub(jitter)
-                && actual_seconds <= expected_seconds.saturating_add(jitter),
-            "expected {actual_seconds}s to be within +/-{jitter}s of {expected_seconds}s"
-        );
-    }
-
     fn test_gemini_quota(email: &str) -> ProviderQuotaSnapshot {
         ProviderQuotaSnapshot::Gemini(GeminiQuotaInfo {
             email: Some(email.to_string()),
@@ -190,107 +180,13 @@
     }
 
     #[test]
-    fn all_quota_watch_refresh_interval_is_five_seconds_for_stable_views() {
-        let now = Local::now().timestamp();
-        let reset_at = now + 60 * 60;
-        let snapshot = AllQuotaWatchSnapshot::Reports {
-            updated: "stable".to_string(),
-            profile_count: 1,
-            reports: vec![test_openai_quota_report(test_openai_usage_with_windows(
-                10, 20, reset_at,
-            ))],
+    fn live_refresh_policy_drives_human_watch_cadence() {
+        let snapshot = AllQuotaWatchSnapshot::Loading {
+            updated: "now".to_string(),
         };
-
-        assert_refresh_interval_near(
-            all_quota_watch_refresh_interval(&snapshot, true, now),
-            DEFAULT_WATCH_INTERVAL_SECONDS,
-        );
-        assert_refresh_interval_near(
-            all_quota_watch_refresh_interval(&snapshot, false, now),
-            DEFAULT_WATCH_INTERVAL_SECONDS,
-        );
-    }
-
-    #[test]
-    fn all_quota_watch_refresh_interval_stays_fast_for_blocked_accounts() {
-        let now = Local::now().timestamp();
-        let reset_at = now + 60 * 60;
-        let snapshot = AllQuotaWatchSnapshot::Reports {
-            updated: "blocked".to_string(),
-            profile_count: 1,
-            reports: vec![test_openai_quota_report(test_openai_usage_with_windows(
-                100, 20, reset_at,
-            ))],
-        };
-
-        assert_refresh_interval_near(
-            all_quota_watch_refresh_interval(&snapshot, true, now),
-            DEFAULT_WATCH_INTERVAL_SECONDS,
-        );
-    }
-
-    #[test]
-    fn all_quota_watch_refresh_interval_stays_fast_for_reset_credits() {
-        let now = Local::now().timestamp();
-        let reset_at = now + 60 * 60;
-        let mut usage = test_openai_usage_with_windows(10, 20, reset_at);
-        usage.rate_limit_reset_credits = Some(prodex_quota::RateLimitResetCreditsSummary {
-            available_count: 1,
-        });
-        let snapshot = AllQuotaWatchSnapshot::Reports {
-            updated: "credits".to_string(),
-            profile_count: 1,
-            reports: vec![test_openai_quota_report(usage)],
-        };
-
-        assert_refresh_interval_near(
-            all_quota_watch_refresh_interval(&snapshot, true, now),
-            DEFAULT_WATCH_INTERVAL_SECONDS,
-        );
-    }
-
-    #[test]
-    fn all_quota_watch_refresh_interval_stays_fast_near_reset() {
-        let now = Local::now().timestamp();
-        let reset_at = now + 119;
-        let snapshot = AllQuotaWatchSnapshot::Reports {
-            updated: "near-reset".to_string(),
-            profile_count: 1,
-            reports: vec![test_openai_quota_report(test_openai_usage_with_windows(
-                10, 20, reset_at,
-            ))],
-        };
-
-        assert_eq!(
-            all_quota_watch_refresh_interval(&snapshot, true, now),
-            Duration::from_secs(DEFAULT_WATCH_INTERVAL_SECONDS)
-        );
-    }
-
-    #[test]
-    fn all_quota_watch_refresh_interval_stays_five_seconds_with_many_profiles() {
-        let now = Local::now().timestamp();
-        let reset_at = now + 60 * 60;
-        let reports = (0..50)
-            .map(|index| {
-                test_quota_report(
-                    &format!("profile-{index}"),
-                    Ok(ProviderQuotaSnapshot::OpenAi(test_openai_usage_with_windows(
-                        10, 20, reset_at,
-                    ))),
-                )
-            })
-            .collect::<Vec<_>>();
-        let snapshot = AllQuotaWatchSnapshot::Reports {
-            updated: "many".to_string(),
-            profile_count: reports.len(),
-            reports,
-        };
-
-        assert_refresh_interval_near(
-            all_quota_watch_refresh_interval(&snapshot, true, now),
-            DEFAULT_WATCH_INTERVAL_SECONDS,
-        );
+        assert_eq!(quota_watch_refresh_duration(), Duration::from_secs(5));
+        assert_eq!(all_quota_watch_refresh_interval(&snapshot, true, 0), Duration::from_secs(5));
+        assert_eq!(all_quota_watch_refresh_interval(&snapshot, false, i64::MAX), Duration::from_secs(5));
     }
 
     #[test]
@@ -370,7 +266,10 @@
         let next = AllQuotaWatchSnapshot::Reports {
             updated: "after".to_string(),
             profile_count: 1,
-            reports: vec![test_quota_report("main", Err("HTTP 401".to_string()))],
+            reports: vec![test_quota_report(
+                "main",
+                Err("unauthorized: runtime saw token invalidated".to_string()),
+            )],
         };
 
         let merged = merge_all_quota_watch_snapshot(&previous, next);
@@ -378,7 +277,11 @@
         let AllQuotaWatchSnapshot::Reports { reports, .. } = merged else {
             panic!("expected report snapshot");
         };
-        assert!(reports[0].result.as_ref().unwrap_err().contains("401"));
+        assert!(reports[0]
+            .result
+            .as_ref()
+            .unwrap_err()
+            .contains("token invalidated"));
     }
 
     #[test]

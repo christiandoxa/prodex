@@ -71,6 +71,50 @@ pub enum TranscriptOutputTextMode {
     Name,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[repr(i64)]
+pub enum SessionPromptWriteProcessRole {
+    PlainProdex = 0,
+    CodexWriter = 1,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct SessionPromptWriteResolutionPlan {
+    pub stale: bool,
+    pub no_session: bool,
+    pub retry: bool,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum SessionPromptWriteOutputLineAction {
+    Process,
+    Limit,
+    Oversized,
+    InvalidUtf8,
+    Malformed,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct SessionPromptWriteOutputLineInput {
+    pub raw_length: usize,
+    pub read_limit: usize,
+    pub verify_limit: usize,
+    pub utf8_valid: bool,
+    pub json_valid: bool,
+    pub shape_valid: bool,
+    pub visible_user_message: bool,
+    pub limit_reached: bool,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum SessionPromptWriteVerification {
+    QueueFailed,
+    NotAddressable,
+    Ambiguous,
+    PendingObserved,
+    AwaitRollout,
+}
+
 unsafe extern "C" {
     fn prodex_session_cli_output_mode_v1(
         abi_version: i64,
@@ -116,7 +160,34 @@ unsafe extern "C" {
         output_capacity: i64,
         written_address: u64,
     ) -> i64;
+    fn prodex_session_prompt_write_policy_v1(
+        abi_version: i64,
+        operation: i64,
+        first: i64,
+        second: i64,
+        third: i64,
+        fourth: i64,
+        fifth: i64,
+        sixth: i64,
+        output_address: u64,
+    ) -> i64;
+    fn prodex_session_prompt_write_gap_text_v1(
+        abi_version: i64,
+        reason: i64,
+        output_address: u64,
+        output_capacity: i64,
+        written_address: u64,
+    ) -> i64;
 }
+
+const PROMPT_WRITE_POLICY_ABI_VERSION: i64 = 1;
+const PROMPT_WRITE_POLICY_PROCESS_ROLE: i64 = 1;
+const PROMPT_WRITE_POLICY_RESOLUTION: i64 = 2;
+const PROMPT_WRITE_POLICY_OUTPUT_LINE: i64 = 3;
+const PROMPT_WRITE_POLICY_VERIFICATION: i64 = 5;
+const PROMPT_WRITE_POLICY_RECORD_SHAPE: i64 = 6;
+const PROMPT_WRITE_POLICY_ENDPOINT_ARGS: i64 = 7;
+const PROMPT_WRITE_POLICY_USER_VISIBILITY: i64 = 8;
 
 fn valid_status(status: i64) -> Result<(), MojoError> {
     match status {
@@ -241,6 +312,236 @@ pub fn prompt_write_queue_plan(
         _ => return Err(MojoError::InvalidOutput),
     };
     Ok(SessionPromptWriteQueuePlan { retry, action })
+}
+
+pub fn prompt_write_process_role_allowed(
+    role: SessionPromptWriteProcessRole,
+    executable_matches: bool,
+    command: u8,
+    forbidden: bool,
+    remote: bool,
+) -> Result<bool, MojoError> {
+    if command > 3 {
+        return Err(MojoError::InvalidInput);
+    }
+    let mut output = [-1_i64; 8];
+    valid_status(unsafe {
+        prodex_session_prompt_write_policy_v1(
+            PROMPT_WRITE_POLICY_ABI_VERSION,
+            PROMPT_WRITE_POLICY_PROCESS_ROLE,
+            role as i64,
+            i64::from(executable_matches),
+            i64::from(command),
+            i64::from(forbidden),
+            i64::from(remote),
+            0,
+            output.as_mut_ptr() as usize as u64,
+        )
+    })?;
+    match output[0] {
+        0 => Ok(false),
+        1 => Ok(true),
+        _ => Err(MojoError::InvalidOutput),
+    }
+}
+
+pub fn prompt_write_resolution_plan(
+    targeted: bool,
+    no_session: bool,
+    retryable: bool,
+) -> Result<SessionPromptWriteResolutionPlan, MojoError> {
+    let mut output = [-1_i64; 8];
+    valid_status(unsafe {
+        prodex_session_prompt_write_policy_v1(
+            PROMPT_WRITE_POLICY_ABI_VERSION,
+            PROMPT_WRITE_POLICY_RESOLUTION,
+            i64::from(targeted),
+            i64::from(no_session),
+            i64::from(retryable),
+            0,
+            0,
+            0,
+            output.as_mut_ptr() as usize as u64,
+        )
+    })?;
+    let bool_output = |value| match value {
+        0 => Ok(false),
+        1 => Ok(true),
+        _ => Err(MojoError::InvalidOutput),
+    };
+    Ok(SessionPromptWriteResolutionPlan {
+        stale: bool_output(output[0])?,
+        no_session: bool_output(output[1])?,
+        retry: bool_output(output[2])?,
+    })
+}
+
+pub fn prompt_write_output_line_plan(
+    input: SessionPromptWriteOutputLineInput,
+) -> Result<SessionPromptWriteOutputLineAction, MojoError> {
+    let mut output = [-1_i64; 8];
+    output[7] = i64::from(input.visible_user_message) + 2 * i64::from(input.limit_reached);
+    valid_status(unsafe {
+        prodex_session_prompt_write_policy_v1(
+            PROMPT_WRITE_POLICY_ABI_VERSION,
+            PROMPT_WRITE_POLICY_OUTPUT_LINE,
+            i64::try_from(input.raw_length).map_err(|_| MojoError::InvalidInput)?,
+            i64::try_from(input.read_limit).map_err(|_| MojoError::InvalidInput)?,
+            i64::try_from(input.verify_limit).map_err(|_| MojoError::InvalidInput)?,
+            i64::from(input.utf8_valid),
+            i64::from(input.json_valid),
+            i64::from(input.shape_valid),
+            output.as_mut_ptr() as usize as u64,
+        )
+    })?;
+    match output[0] {
+        0 => Ok(SessionPromptWriteOutputLineAction::Process),
+        1 => Ok(SessionPromptWriteOutputLineAction::Limit),
+        2 => Ok(SessionPromptWriteOutputLineAction::Oversized),
+        3 => Ok(SessionPromptWriteOutputLineAction::InvalidUtf8),
+        4 => Ok(SessionPromptWriteOutputLineAction::Malformed),
+        _ => Err(MojoError::InvalidOutput),
+    }
+}
+
+pub fn prompt_write_gap_text(reason: u8) -> Result<String, MojoError> {
+    if reason > 2 {
+        return Err(MojoError::InvalidInput);
+    }
+    let mut output = vec![0_u8; 96];
+    let mut written = -1_i64;
+    valid_status(unsafe {
+        prodex_session_prompt_write_gap_text_v1(
+            PROMPT_WRITE_POLICY_ABI_VERSION,
+            i64::from(reason),
+            output.as_mut_ptr() as usize as u64,
+            output.len() as i64,
+            (&mut written as *mut i64) as usize as u64,
+        )
+    })?;
+    let written = usize::try_from(written).map_err(|_| MojoError::InvalidOutput)?;
+    String::from_utf8(
+        output
+            .get(..written)
+            .ok_or(MojoError::InvalidOutput)?
+            .to_vec(),
+    )
+    .map_err(|_| MojoError::InvalidOutput)
+}
+
+pub fn prompt_write_verification_plan(
+    action: SessionPromptWriteQueueAction,
+) -> Result<SessionPromptWriteVerification, MojoError> {
+    let mut output = [-1_i64; 8];
+    valid_status(unsafe {
+        prodex_session_prompt_write_policy_v1(
+            PROMPT_WRITE_POLICY_ABI_VERSION,
+            PROMPT_WRITE_POLICY_VERIFICATION,
+            action as i64,
+            0,
+            0,
+            0,
+            0,
+            0,
+            output.as_mut_ptr() as usize as u64,
+        )
+    })?;
+    match output[0] {
+        0 => Ok(SessionPromptWriteVerification::QueueFailed),
+        1 => Ok(SessionPromptWriteVerification::NotAddressable),
+        2 => Ok(SessionPromptWriteVerification::Ambiguous),
+        3 => Ok(SessionPromptWriteVerification::PendingObserved),
+        4 => Ok(SessionPromptWriteVerification::AwaitRollout),
+        _ => Err(MojoError::InvalidOutput),
+    }
+}
+
+pub fn prompt_write_record_shape(
+    record_type: u8,
+    payload_present: bool,
+    payload_object: bool,
+    payload_type_string: bool,
+) -> Result<bool, MojoError> {
+    if record_type > 5 {
+        return Err(MojoError::InvalidInput);
+    }
+    let mut output = [-1_i64; 8];
+    valid_status(unsafe {
+        prodex_session_prompt_write_policy_v1(
+            PROMPT_WRITE_POLICY_ABI_VERSION,
+            PROMPT_WRITE_POLICY_RECORD_SHAPE,
+            i64::from(record_type),
+            i64::from(payload_present),
+            i64::from(payload_object),
+            i64::from(payload_type_string),
+            0,
+            0,
+            output.as_mut_ptr() as usize as u64,
+        )
+    })?;
+    match output[0] {
+        0 => Ok(false),
+        1 => Ok(true),
+        _ => Err(MojoError::InvalidOutput),
+    }
+}
+
+pub fn prompt_write_endpoint_mode(
+    app_server_command: bool,
+    inline_listen: bool,
+    separate_listen: bool,
+    separate_value_present: bool,
+) -> Result<u8, MojoError> {
+    let mut output = [-1_i64; 8];
+    valid_status(unsafe {
+        prodex_session_prompt_write_policy_v1(
+            PROMPT_WRITE_POLICY_ABI_VERSION,
+            PROMPT_WRITE_POLICY_ENDPOINT_ARGS,
+            i64::from(app_server_command),
+            i64::from(inline_listen),
+            i64::from(separate_listen),
+            i64::from(separate_value_present),
+            0,
+            0,
+            output.as_mut_ptr() as usize as u64,
+        )
+    })?;
+    u8::try_from(output[0])
+        .ok()
+        .filter(|mode| *mode <= 2)
+        .ok_or(MojoError::InvalidOutput)
+}
+
+pub fn prompt_write_user_message_visible(
+    record_type: u8,
+    payload_user_message: bool,
+    role_user: bool,
+    metadata_present: bool,
+    kinds_nonempty: bool,
+    kinds_all_user_text: bool,
+) -> Result<bool, MojoError> {
+    if record_type > 2 {
+        return Err(MojoError::InvalidInput);
+    }
+    let mut output = [-1_i64; 8];
+    valid_status(unsafe {
+        prodex_session_prompt_write_policy_v1(
+            PROMPT_WRITE_POLICY_ABI_VERSION,
+            PROMPT_WRITE_POLICY_USER_VISIBILITY,
+            i64::from(record_type),
+            i64::from(payload_user_message),
+            i64::from(role_user),
+            i64::from(metadata_present),
+            i64::from(kinds_nonempty),
+            i64::from(kinds_all_user_text),
+            output.as_mut_ptr() as usize as u64,
+        )
+    })?;
+    match output[0] {
+        0 => Ok(false),
+        1 => Ok(true),
+        _ => Err(MojoError::InvalidOutput),
+    }
 }
 
 fn transcript_output_status(status: i64) -> Result<(), MojoError> {
@@ -439,6 +740,13 @@ mod tests {
             }
         );
         assert_eq!(
+            prompt_write_queue_plan(1, false).unwrap(),
+            SessionPromptWriteQueuePlan {
+                retry: true,
+                action: SessionPromptWriteQueueAction::NotAddressable,
+            }
+        );
+        assert_eq!(
             prompt_write_queue_plan(4, false),
             Err(MojoError::InvalidInput)
         );
@@ -513,6 +821,154 @@ mod tests {
                 )
             },
             3
+        );
+    }
+
+    #[test]
+    fn direct_mojo_prompt_write_policy_covers_roles_resolution_and_line_bounds() {
+        assert!(
+            prompt_write_process_role_allowed(
+                SessionPromptWriteProcessRole::PlainProdex,
+                true,
+                1,
+                false,
+                false,
+            )
+            .unwrap()
+        );
+        assert!(
+            !prompt_write_process_role_allowed(
+                SessionPromptWriteProcessRole::CodexWriter,
+                true,
+                3,
+                false,
+                false,
+            )
+            .unwrap()
+        );
+        assert_eq!(
+            prompt_write_resolution_plan(true, true, false).unwrap(),
+            SessionPromptWriteResolutionPlan {
+                stale: true,
+                no_session: false,
+                retry: false,
+            }
+        );
+        assert_eq!(
+            prompt_write_output_line_plan(SessionPromptWriteOutputLineInput {
+                raw_length: 70_000,
+                read_limit: 64 * 1024,
+                verify_limit: 512 * 1024,
+                utf8_valid: true,
+                json_valid: true,
+                shape_valid: true,
+                visible_user_message: true,
+                limit_reached: false,
+            })
+            .unwrap(),
+            SessionPromptWriteOutputLineAction::Process
+        );
+        assert_eq!(
+            prompt_write_output_line_plan(SessionPromptWriteOutputLineInput {
+                raw_length: 70_000,
+                read_limit: 64 * 1024,
+                verify_limit: 512 * 1024,
+                utf8_valid: true,
+                json_valid: true,
+                shape_valid: true,
+                visible_user_message: false,
+                limit_reached: false,
+            })
+            .unwrap(),
+            SessionPromptWriteOutputLineAction::Oversized
+        );
+        assert_eq!(
+            prompt_write_output_line_plan(SessionPromptWriteOutputLineInput {
+                raw_length: 4,
+                read_limit: 64 * 1024,
+                verify_limit: 512 * 1024,
+                utf8_valid: true,
+                json_valid: false,
+                shape_valid: false,
+                visible_user_message: false,
+                limit_reached: false,
+            })
+            .unwrap(),
+            SessionPromptWriteOutputLineAction::Malformed
+        );
+        assert_eq!(
+            prompt_write_gap_text(2).unwrap(),
+            "output gap: malformed_record; record omitted"
+        );
+        assert!(prompt_write_record_shape(1, true, true, true).unwrap());
+        assert!(!prompt_write_record_shape(1, true, true, false).unwrap());
+        assert!(prompt_write_record_shape(5, true, false, false).unwrap());
+        assert_eq!(
+            prompt_write_endpoint_mode(true, true, false, false).unwrap(),
+            1
+        );
+        assert_eq!(
+            prompt_write_endpoint_mode(true, false, true, true).unwrap(),
+            2
+        );
+        assert_eq!(
+            prompt_write_endpoint_mode(false, true, false, false).unwrap(),
+            0
+        );
+        assert!(prompt_write_user_message_visible(1, true, false, false, false, false).unwrap());
+        assert!(prompt_write_user_message_visible(2, true, true, false, false, false).unwrap());
+        assert!(!prompt_write_user_message_visible(2, true, true, true, true, false).unwrap());
+        for (action, expected) in [
+            (
+                SessionPromptWriteQueueAction::QueueFailed,
+                SessionPromptWriteVerification::QueueFailed,
+            ),
+            (
+                SessionPromptWriteQueueAction::NotAddressable,
+                SessionPromptWriteVerification::NotAddressable,
+            ),
+            (
+                SessionPromptWriteQueueAction::Ambiguous,
+                SessionPromptWriteVerification::Ambiguous,
+            ),
+            (
+                SessionPromptWriteQueueAction::PendingObserved,
+                SessionPromptWriteVerification::PendingObserved,
+            ),
+            (
+                SessionPromptWriteQueueAction::AwaitRollout,
+                SessionPromptWriteVerification::AwaitRollout,
+            ),
+        ] {
+            assert_eq!(prompt_write_verification_plan(action).unwrap(), expected);
+        }
+    }
+
+    #[test]
+    fn direct_mojo_prompt_write_policy_rejects_invalid_matrix_values() {
+        assert_eq!(
+            prompt_write_process_role_allowed(
+                SessionPromptWriteProcessRole::PlainProdex,
+                true,
+                4,
+                false,
+                false,
+            ),
+            Err(MojoError::InvalidInput)
+        );
+        assert_eq!(prompt_write_gap_text(3), Err(MojoError::InvalidInput));
+        assert_eq!(
+            prompt_write_output_line_plan(SessionPromptWriteOutputLineInput {
+                raw_length: 1,
+                read_limit: 2,
+                verify_limit: 3,
+                utf8_valid: true,
+                json_valid: true,
+                shape_valid: true,
+                visible_user_message: false,
+                limit_reached: false,
+            }),
+            Ok(SessionPromptWriteOutputLineAction::Process)
         );
     }
 }

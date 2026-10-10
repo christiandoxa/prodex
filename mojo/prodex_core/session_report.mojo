@@ -22,6 +22,7 @@ from rich_text import (
 comptime SESSION_REPORT_ABI_VERSION: Int64 = 1
 comptime SESSION_REPORT_OK: Int64 = 0
 comptime SESSION_REPORT_INVALID: Int64 = 1
+comptime SESSION_REPORT_CAPACITY: Int64 = 3
 
 def session_raw_present(bounds: Array[Int64, 2]) -> Bool:
     return bounds[0] >= 0 and bounds[1] > bounds[0]
@@ -1117,4 +1118,240 @@ def prodex_session_prompt_write_queue_plan_v1(
         output[unsafe_offset=1] = SESSION_PROMPT_WRITE_ACTION_PENDING
     else:
         output[unsafe_offset=1] = SESSION_PROMPT_WRITE_ACTION_AWAIT_ROLLOUT
+    return SESSION_REPORT_OK
+
+
+comptime SESSION_PROMPT_WRITE_POLICY_ABI_VERSION: Int64 = 1
+comptime SESSION_PROMPT_WRITE_POLICY_PROCESS_ROLE: Int64 = 1
+comptime SESSION_PROMPT_WRITE_POLICY_RESOLUTION: Int64 = 2
+comptime SESSION_PROMPT_WRITE_POLICY_OUTPUT_LINE: Int64 = 3
+comptime SESSION_PROMPT_WRITE_POLICY_GAP_TEXT: Int64 = 4
+comptime SESSION_PROMPT_WRITE_POLICY_VERIFICATION: Int64 = 5
+comptime SESSION_PROMPT_WRITE_POLICY_RECORD_SHAPE: Int64 = 6
+comptime SESSION_PROMPT_WRITE_POLICY_ENDPOINT_ARGS: Int64 = 7
+comptime SESSION_PROMPT_WRITE_POLICY_USER_VISIBILITY: Int64 = 8
+comptime SESSION_PROMPT_WRITE_ROLE_PLAIN_PRODEX: Int64 = 0
+comptime SESSION_PROMPT_WRITE_ROLE_CODEX_WRITER: Int64 = 1
+comptime SESSION_PROMPT_WRITE_LINE_PROCESS: Int64 = 0
+comptime SESSION_PROMPT_WRITE_LINE_LIMIT: Int64 = 1
+comptime SESSION_PROMPT_WRITE_LINE_OVERSIZED: Int64 = 2
+comptime SESSION_PROMPT_WRITE_LINE_INVALID_UTF8: Int64 = 3
+comptime SESSION_PROMPT_WRITE_LINE_MALFORMED: Int64 = 4
+comptime SESSION_PROMPT_WRITE_GAP_OVERSIZED: Int64 = 0
+comptime SESSION_PROMPT_WRITE_GAP_INVALID_UTF8: Int64 = 1
+comptime SESSION_PROMPT_WRITE_GAP_MALFORMED: Int64 = 2
+comptime SESSION_PROMPT_WRITE_VERIFY_QUEUE_FAILED: Int64 = 0
+comptime SESSION_PROMPT_WRITE_VERIFY_NOT_ADDRESSABLE: Int64 = 1
+comptime SESSION_PROMPT_WRITE_VERIFY_AMBIGUOUS: Int64 = 2
+comptime SESSION_PROMPT_WRITE_VERIFY_PENDING: Int64 = 3
+comptime SESSION_PROMPT_WRITE_VERIFY_ROLLOUT: Int64 = 4
+
+
+def session_prompt_write_valid_bool(value: Int64) -> Bool:
+    return value == 0 or value == 1
+
+
+@export("prodex_session_prompt_write_policy_v1")
+def prodex_session_prompt_write_policy_v1(
+    abi_version: Int64,
+    operation: Int64,
+    first: Int64,
+    second: Int64,
+    third: Int64,
+    fourth: Int64,
+    fifth: Int64,
+    sixth: Int64,
+    output_address: UInt,
+) abi("C") -> Int64:
+    if (
+        abi_version != SESSION_PROMPT_WRITE_POLICY_ABI_VERSION
+        or operation < SESSION_PROMPT_WRITE_POLICY_PROCESS_ROLE
+        or operation > SESSION_PROMPT_WRITE_POLICY_USER_VISIBILITY
+        or output_address == 0
+    ):
+        return SESSION_REPORT_INVALID
+    var output = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    var line_facts = output[unsafe_offset=7]
+    for index in range(7):
+        output[unsafe_offset=index] = -1
+
+    if operation == SESSION_PROMPT_WRITE_POLICY_PROCESS_ROLE:
+        if (
+            (first != SESSION_PROMPT_WRITE_ROLE_PLAIN_PRODEX and first != SESSION_PROMPT_WRITE_ROLE_CODEX_WRITER)
+            or not session_prompt_write_valid_bool(second)
+            or third < 0
+            or third > 3
+            or not session_prompt_write_valid_bool(fourth)
+            or not session_prompt_write_valid_bool(fifth)
+        ):
+            return SESSION_REPORT_INVALID
+        var accepted = second == 1
+        if first == SESSION_PROMPT_WRITE_ROLE_PLAIN_PRODEX:
+            accepted = accepted and third == 1 and fourth == 0
+        else:
+            accepted = accepted and fifth == 0 and (third == 0 or third == 1 or third == 2)
+        output[unsafe_offset=0] = Int64(accepted)
+        return SESSION_REPORT_OK
+
+    if operation == SESSION_PROMPT_WRITE_POLICY_RESOLUTION:
+        if (
+            not session_prompt_write_valid_bool(first)
+            or not session_prompt_write_valid_bool(second)
+            or not session_prompt_write_valid_bool(third)
+        ):
+            return SESSION_REPORT_INVALID
+        # first is a targeted request, second is the observed no-session result,
+        # and third reports whether the caller may poll before failing closed.
+        output[unsafe_offset=0] = Int64(second == 1 and first == 1)
+        output[unsafe_offset=1] = Int64(second == 1 and first == 0)
+        output[unsafe_offset=2] = Int64(third == 1)
+        return SESSION_REPORT_OK
+
+    if operation == SESSION_PROMPT_WRITE_POLICY_OUTPUT_LINE:
+        if (
+            first < 0
+            or second < 0
+            or third < 0
+            or not session_prompt_write_valid_bool(fourth)
+            or not session_prompt_write_valid_bool(fifth)
+            or not session_prompt_write_valid_bool(sixth)
+        ):
+            return SESSION_REPORT_INVALID
+        # first is the raw line length, second the read limit, third the
+        # verification limit, fourth UTF-8 validity, fifth JSON validity, and
+        # sixth record-shape validity. A visible user message is passed in the
+        # seventh slot through the output scratch word by the Rust adapter.
+        var visible_user = line_facts == 1 or line_facts == 3
+        var limit_reached = line_facts == 2 or line_facts == 3
+        if limit_reached:
+            output[unsafe_offset=0] = SESSION_PROMPT_WRITE_LINE_LIMIT
+        elif first > second and (not visible_user or first > third):
+            output[unsafe_offset=0] = SESSION_PROMPT_WRITE_LINE_OVERSIZED
+        elif fourth == 0:
+            output[unsafe_offset=0] = SESSION_PROMPT_WRITE_LINE_INVALID_UTF8
+        elif fifth == 0 or sixth == 0:
+            output[unsafe_offset=0] = SESSION_PROMPT_WRITE_LINE_MALFORMED
+        else:
+            output[unsafe_offset=0] = SESSION_PROMPT_WRITE_LINE_PROCESS
+        return SESSION_REPORT_OK
+
+    if operation == SESSION_PROMPT_WRITE_POLICY_GAP_TEXT:
+        if first < SESSION_PROMPT_WRITE_GAP_OVERSIZED or first > SESSION_PROMPT_WRITE_GAP_MALFORMED:
+            return SESSION_REPORT_INVALID
+        output[unsafe_offset=0] = first
+        return SESSION_REPORT_OK
+
+    if operation == SESSION_PROMPT_WRITE_POLICY_RECORD_SHAPE:
+        if (
+            first < 0 or first > 5
+            or not session_prompt_write_valid_bool(second)
+            or not session_prompt_write_valid_bool(third)
+            or not session_prompt_write_valid_bool(fourth)
+        ):
+            return SESSION_REPORT_INVALID
+        if second == 0:
+            output[unsafe_offset=0] = 0
+        elif first == 1 or first == 2:
+            output[unsafe_offset=0] = Int64(third == 1 and fourth == 1)
+        elif first == 3 or first == 4:
+            output[unsafe_offset=0] = Int64(third == 1)
+        else:
+            output[unsafe_offset=0] = 1
+        return SESSION_REPORT_OK
+
+    if operation == SESSION_PROMPT_WRITE_POLICY_ENDPOINT_ARGS:
+        if (
+            not session_prompt_write_valid_bool(first)
+            or not session_prompt_write_valid_bool(second)
+            or not session_prompt_write_valid_bool(third)
+            or not session_prompt_write_valid_bool(fourth)
+        ):
+            return SESSION_REPORT_INVALID
+        if first == 0:
+            output[unsafe_offset=0] = 0
+        elif second == 1 and third == 0:
+            output[unsafe_offset=0] = 1
+        elif second == 0 and third == 1 and fourth == 1:
+            output[unsafe_offset=0] = 2
+        else:
+            output[unsafe_offset=0] = 0
+        return SESSION_REPORT_OK
+
+    if operation == SESSION_PROMPT_WRITE_POLICY_USER_VISIBILITY:
+        if (
+            first < 0 or first > 2
+            or not session_prompt_write_valid_bool(second)
+            or not session_prompt_write_valid_bool(third)
+            or not session_prompt_write_valid_bool(fourth)
+            or not session_prompt_write_valid_bool(fifth)
+            or not session_prompt_write_valid_bool(sixth)
+        ):
+            return SESSION_REPORT_INVALID
+        if first == 1:
+            output[unsafe_offset=0] = Int64(second == 1)
+        elif first == 2:
+            output[unsafe_offset=0] = Int64(
+                second == 1
+                and third == 1
+                and (fourth == 0 or (fifth == 1 and sixth == 1))
+            )
+        else:
+            output[unsafe_offset=0] = 0
+        return SESSION_REPORT_OK
+
+    if first < SESSION_PROMPT_WRITE_VERIFY_QUEUE_FAILED or first > SESSION_PROMPT_WRITE_VERIFY_ROLLOUT:
+        return SESSION_REPORT_INVALID
+    output[unsafe_offset=0] = first
+    return SESSION_REPORT_OK
+
+
+@export("prodex_session_prompt_write_gap_text_v1")
+def prodex_session_prompt_write_gap_text_v1(
+    abi_version: Int64,
+    reason: Int64,
+    output_address: UInt,
+    output_capacity: Int64,
+    written_address: UInt,
+) abi("C") -> Int64:
+    if (
+        abi_version != SESSION_PROMPT_WRITE_POLICY_ABI_VERSION
+        or reason < SESSION_PROMPT_WRITE_GAP_OVERSIZED
+        or reason > SESSION_PROMPT_WRITE_GAP_MALFORMED
+        or output_capacity < 0
+        or written_address == 0
+        or (output_capacity > 0 and output_address == 0)
+    ):
+        return SESSION_REPORT_INVALID
+    var output = Pointer[mut=True, UInt8, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    var written = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(written_address)
+    )
+    var reason_text = StringSlice("oversized_record")
+    if reason == SESSION_PROMPT_WRITE_GAP_INVALID_UTF8:
+        reason_text = StringSlice("invalid_utf8")
+    elif reason == SESSION_PROMPT_WRITE_GAP_MALFORMED:
+        reason_text = StringSlice("malformed_record")
+    var prefix = StringSlice("output gap: ")
+    var suffix = StringSlice("; record omitted")
+    var required = Int64(prefix.byte_length()) + Int64(reason_text.byte_length()) + Int64(suffix.byte_length())
+    if output_capacity < required:
+        return SESSION_REPORT_CAPACITY
+    var cursor: Int64 = 0
+    var prefix_ptr = prefix.unsafe_ptr()
+    for index in range(Int64(prefix.byte_length())):
+        output[unsafe_offset=cursor] = prefix_ptr[unsafe_offset=index]
+        cursor += 1
+    var reason_ptr = reason_text.unsafe_ptr()
+    for index in range(Int64(reason_text.byte_length())):
+        output[unsafe_offset=cursor] = reason_ptr[unsafe_offset=index]
+        cursor += 1
+    var suffix_ptr = suffix.unsafe_ptr()
+    for index in range(Int64(suffix.byte_length())):
+        output[unsafe_offset=cursor] = suffix_ptr[unsafe_offset=index]
+        cursor += 1
+    written[] = cursor
     return SESSION_REPORT_OK

@@ -147,6 +147,23 @@ fn quota_error_summary_kind_matches_expected_precedence() {
 }
 
 #[test]
+fn quota_error_auth_failure_classification_preserves_watch_categories() {
+    for (message, expected) in [
+        ("HTTP 401 unauthorized", true),
+        ("token invalidated", false),
+        ("HTTP 503", false),
+        ("", false),
+    ] {
+        assert_eq!(
+            prodex_mojo_core::quota::quota_error_auth_failure(message, false).unwrap(),
+            expected,
+            "message={message:?}"
+        );
+    }
+    assert!(prodex_mojo_core::quota::quota_error_auth_failure("token invalidated", true).unwrap());
+}
+
+#[test]
 fn blocked_limit_kind_matches_expected_status_priority() {
     use prodex_mojo_core::quota::*;
     for (message, expected) in [

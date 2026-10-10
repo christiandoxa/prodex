@@ -12,7 +12,6 @@ mod types;
 #[path = "semantic_index/util.rs"]
 mod util;
 
-pub(super) use markers::*;
 pub(super) use ranges::*;
 pub(super) use types::*;
 pub(super) use util::*;
@@ -21,94 +20,48 @@ pub(super) fn runtime_smart_context_artifact_semantic_line_index(
     text: &str,
     lines: &[&str],
 ) -> RuntimeSmartContextArtifactSemanticLineIndexParts {
+    let semantic = prodex_mojo_core::smart_context_markers::semantic_index(
+        text,
+        lines,
+        RUNTIME_SMART_CONTEXT_MAX_SEMANTIC_LINE_INDEX_RANGES,
+        crate::runtime_state_shared::RUNTIME_SMART_CONTEXT_MAX_LINE_INDEX_EXCERPT_BYTES,
+    )
+    .expect("Mojo Smart Context semantic index returned invalid output");
+    let remaining =
+        RUNTIME_SMART_CONTEXT_MAX_SEMANTIC_LINE_INDEX_RANGES.saturating_sub(semantic.ranges.len());
     let mut parts = RuntimeSmartContextArtifactSemanticLineIndexParts {
-        complete: true,
+        complete: semantic.complete,
         symbol_complete: true,
+        command_kind: semantic.command_kind.map(|kind| {
+            match kind {
+                prodex_mojo_core::smart_context_markers::CommandLineKind::Python => "python",
+                prodex_mojo_core::smart_context_markers::CommandLineKind::Diff => "diff",
+                prodex_mojo_core::smart_context_markers::CommandLineKind::CargoTest => "cargo-test",
+                prodex_mojo_core::smart_context_markers::CommandLineKind::CargoBuild => {
+                    "cargo-build"
+                }
+                prodex_mojo_core::smart_context_markers::CommandLineKind::NpmTest => "npm-test",
+            }
+            .to_string()
+        }),
         ..Default::default()
     };
-    let mut remaining = RUNTIME_SMART_CONTEXT_MAX_SEMANTIC_LINE_INDEX_RANGES;
-    let mut current_diff_path: Option<String> = None;
 
-    for (index, line) in lines.iter().enumerate() {
-        let line_number = index + 1;
-
-        if let Some(path) = runtime_smart_context_parse_diff_file_path(line) {
-            current_diff_path = Some(path);
-        }
-
-        if let Some(hunk) = runtime_smart_context_parse_diff_hunk(line) {
-            let end = runtime_smart_context_diff_hunk_end(lines, index);
-            let metadata = RuntimeSmartContextSemanticRangeMetadata {
-                label: Some("diff_hunk".to_string()),
-                path: current_diff_path.clone(),
-                old_start: Some(hunk.old_start),
-                old_count: Some(hunk.old_count),
-                new_start: Some(hunk.new_start),
-                new_count: Some(hunk.new_count),
-                ..Default::default()
-            };
-            runtime_smart_context_push_semantic_range(
-                &mut parts.diff_hunk_ranges,
-                &mut remaining,
-                &mut parts.complete,
-                lines,
-                line_number,
-                end,
-                metadata,
-            );
-        }
-
-        if let Some(location) = runtime_smart_context_parse_file_location(line) {
-            let metadata = RuntimeSmartContextSemanticRangeMetadata {
-                label: Some("file_location".to_string()),
-                path: Some(location.path),
-                line: Some(location.line),
-                column: location.column,
-                ..Default::default()
-            };
-            runtime_smart_context_push_semantic_range(
-                &mut parts.file_location_ranges,
-                &mut remaining,
-                &mut parts.complete,
-                lines,
-                line_number,
-                line_number,
-                metadata,
-            );
-        }
-
-        if runtime_smart_context_is_test_failure_line(line) {
-            let metadata = RuntimeSmartContextSemanticRangeMetadata {
-                label: Some("test_failure".to_string()),
-                symbol: runtime_smart_context_parse_test_symbol(line),
-                ..Default::default()
-            };
-            runtime_smart_context_push_semantic_range(
-                &mut parts.test_failure_ranges,
-                &mut remaining,
-                &mut parts.complete,
-                lines,
-                line_number.saturating_sub(1).max(1),
-                (line_number + 1).min(lines.len()),
-                metadata,
-            );
-        }
-
-        if let Some(code) = runtime_smart_context_parse_error_code(line) {
-            let metadata = RuntimeSmartContextSemanticRangeMetadata {
-                label: Some("error".to_string()),
-                code: Some(code),
-                ..Default::default()
-            };
-            runtime_smart_context_push_semantic_range(
-                &mut parts.error_ranges,
-                &mut remaining,
-                &mut parts.complete,
-                lines,
-                line_number,
-                line_number,
-                metadata,
-            );
+    for plan in semantic.ranges {
+        let range = runtime_smart_context_materialize_semantic_range(lines, &plan);
+        match plan.kind {
+            prodex_mojo_core::smart_context_markers::SemanticRangeKind::FileLocation => {
+                parts.file_location_ranges.push(range)
+            }
+            prodex_mojo_core::smart_context_markers::SemanticRangeKind::DiffHunk => {
+                parts.diff_hunk_ranges.push(range)
+            }
+            prodex_mojo_core::smart_context_markers::SemanticRangeKind::TestFailure => {
+                parts.test_failure_ranges.push(range)
+            }
+            prodex_mojo_core::smart_context_markers::SemanticRangeKind::Error => {
+                parts.error_ranges.push(range)
+            }
         }
     }
 

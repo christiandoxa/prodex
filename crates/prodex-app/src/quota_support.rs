@@ -1,5 +1,4 @@
 use super::*;
-use prodex_mojo_core::rich::ascii_casefold_equal_exact;
 use prodex_mojo_core::super_provider_config::{
     RuntimeModelProviderClass, runtime_model_provider_class,
 };
@@ -83,16 +82,19 @@ impl QuotaProviderFilter {
     }
 
     pub(crate) fn next(self) -> Self {
-        match self {
-            Self::All => Self::OpenAi,
-            Self::OpenAi => Self::Gemini,
-            Self::Gemini => Self::Anthropic,
-            Self::Anthropic => Self::Copilot,
-            Self::Copilot => Self::Kiro,
-            Self::Kiro => Self::DeepSeek,
-            Self::DeepSeek => Self::Local,
-            Self::Local => Self::Agy,
-            Self::Agy => Self::All,
+        match prodex_mojo_core::quota_watch_policy::filter_next(self.policy_kind())
+            .expect("Mojo quota-watch filter cycle policy failed")
+        {
+            prodex_mojo_core::quota_watch_policy::FILTER_ALL => Self::All,
+            prodex_mojo_core::quota_watch_policy::FILTER_OPENAI => Self::OpenAi,
+            prodex_mojo_core::quota_watch_policy::FILTER_GEMINI => Self::Gemini,
+            prodex_mojo_core::quota_watch_policy::FILTER_ANTHROPIC => Self::Anthropic,
+            prodex_mojo_core::quota_watch_policy::FILTER_COPILOT => Self::Copilot,
+            prodex_mojo_core::quota_watch_policy::FILTER_KIRO => Self::Kiro,
+            prodex_mojo_core::quota_watch_policy::FILTER_DEEPSEEK => Self::DeepSeek,
+            prodex_mojo_core::quota_watch_policy::FILTER_LOCAL => Self::Local,
+            prodex_mojo_core::quota_watch_policy::FILTER_AGY => Self::Agy,
+            _ => unreachable!("validated Mojo quota-watch filter kind"),
         }
     }
 
@@ -110,40 +112,44 @@ impl QuotaProviderFilter {
         }
     }
 
+    #[cfg(test)]
     pub(crate) fn matches_report(self, report: &QuotaReport) -> bool {
-        if self == Self::All {
-            return true;
-        }
-        if self.matches_report_provider(report) {
-            return true;
-        }
-        match self {
-            Self::OpenAi => quota_label_matches(&report.auth.label, "chatgpt"),
-            Self::Gemini => quota_label_matches(&report.auth.label, "gemini"),
-            Self::Anthropic => quota_label_matches(&report.auth.label, "anthropic"),
-            Self::Copilot => quota_label_matches(&report.auth.label, "copilot"),
-            Self::Kiro => quota_label_matches(&report.auth.label, "kiro"),
-            Self::DeepSeek => quota_label_matches(&report.auth.label, "deepseek-key"),
-            Self::Local => quota_label_matches(&report.auth.label, "local"),
-            _ => false,
-        }
+        let (snapshot_kind, provider) = match report.result.as_ref() {
+            Ok(ProviderQuotaSnapshot::OpenAi(_)) => {
+                (prodex_mojo_core::quota_watch_policy::SNAPSHOT_OPENAI, None)
+            }
+            Ok(ProviderQuotaSnapshot::Gemini(_)) => {
+                (prodex_mojo_core::quota_watch_policy::SNAPSHOT_GEMINI, None)
+            }
+            Ok(ProviderQuotaSnapshot::Copilot(_)) => {
+                (prodex_mojo_core::quota_watch_policy::SNAPSHOT_COPILOT, None)
+            }
+            Ok(ProviderQuotaSnapshot::External(info)) => (
+                prodex_mojo_core::quota_watch_policy::SNAPSHOT_EXTERNAL,
+                Some(info.provider.as_str()),
+            ),
+            Err(_) => (prodex_mojo_core::quota_watch_policy::SNAPSHOT_NONE, None),
+        };
+        prodex_mojo_core::quota_watch_policy::filter_matches(
+            self.policy_kind(),
+            snapshot_kind,
+            &report.auth.label,
+            provider,
+        )
+        .expect("Mojo quota-watch report filter policy failed")
     }
 
-    fn matches_report_provider(self, report: &QuotaReport) -> bool {
-        let Ok(snapshot) = &report.result else {
-            return false;
-        };
-        match (self, snapshot) {
-            (Self::OpenAi, ProviderQuotaSnapshot::OpenAi(_))
-            | (Self::Gemini, ProviderQuotaSnapshot::Gemini(_))
-            | (Self::Copilot, ProviderQuotaSnapshot::Copilot(_)) => true,
-            (Self::DeepSeek, ProviderQuotaSnapshot::External(info)) => {
-                quota_label_matches(&info.provider, "DeepSeek")
-            }
-            (Self::Local, ProviderQuotaSnapshot::External(info)) => {
-                quota_label_matches(&info.provider, "Local OpenAI-compatible")
-            }
-            _ => false,
+    fn policy_kind(self) -> i64 {
+        match self {
+            Self::All => prodex_mojo_core::quota_watch_policy::FILTER_ALL,
+            Self::OpenAi => prodex_mojo_core::quota_watch_policy::FILTER_OPENAI,
+            Self::Gemini => prodex_mojo_core::quota_watch_policy::FILTER_GEMINI,
+            Self::Anthropic => prodex_mojo_core::quota_watch_policy::FILTER_ANTHROPIC,
+            Self::Copilot => prodex_mojo_core::quota_watch_policy::FILTER_COPILOT,
+            Self::Kiro => prodex_mojo_core::quota_watch_policy::FILTER_KIRO,
+            Self::DeepSeek => prodex_mojo_core::quota_watch_policy::FILTER_DEEPSEEK,
+            Self::Local => prodex_mojo_core::quota_watch_policy::FILTER_LOCAL,
+            Self::Agy => prodex_mojo_core::quota_watch_policy::FILTER_AGY,
         }
     }
 
@@ -169,11 +175,6 @@ impl QuotaProviderFilter {
             | Self::Agy => false,
         }
     }
-}
-
-fn quota_label_matches(value: &str, expected: &str) -> bool {
-    ascii_casefold_equal_exact(value, expected)
-        .expect("Mojo quota label comparison should accept Rust strings")
 }
 
 #[derive(Debug)]

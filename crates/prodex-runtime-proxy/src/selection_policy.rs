@@ -9,6 +9,10 @@ mod mojo;
 
 pub use prodex_mojo_core::runtime::{
     WebsocketChainReuseReason as RuntimeWebsocketChainReuseReason,
+    WebsocketFailureAction as RuntimeWebsocketFailureAction,
+    WebsocketFailureClass as RuntimeWebsocketFailureClass,
+    WebsocketFailureDecisionInput as RuntimeWebsocketFailureDecisionInput,
+    WebsocketFailureDecisionPlan as RuntimeWebsocketFailureDecisionPlan,
     WebsocketFailureDispositionPlan as RuntimeWebsocketFailureDispositionPlan,
     WebsocketFailureKind as RuntimeWebsocketFailureKind,
     WebsocketFailureStatePlan as RuntimeWebsocketFailureStatePlan,
@@ -17,6 +21,48 @@ pub use prodex_mojo_core::runtime::{
     WebsocketQuotaFallbackPlan as RuntimeWebsocketQuotaFallbackPlan,
     WebsocketTransportFailurePlan as RuntimeWebsocketTransportFailurePlan,
 };
+
+pub fn runtime_websocket_failure_decision(
+    input: RuntimeWebsocketFailureDecisionInput,
+) -> Result<RuntimeWebsocketFailureDecisionPlan, prodex_mojo_core::MojoError> {
+    prodex_mojo_core::runtime::websocket_failure_decision(input)
+}
+
+pub fn runtime_websocket_failure_frame_classification(
+    http_class: i64,
+    http_action: i64,
+    connection_limit: bool,
+    previous_response_not_found: bool,
+    stream_committed: bool,
+) -> Result<i64, prodex_mojo_core::MojoError> {
+    prodex_mojo_core::runtime::websocket_failure_frame_classification(
+        http_class,
+        http_action,
+        connection_limit,
+        previous_response_not_found,
+        stream_committed,
+    )
+}
+
+pub fn runtime_websocket_invalid_previous_response_recovery_plan(
+    previous_response_present: bool,
+    session_present: bool,
+    owner_matches: bool,
+    owner_generation_present: bool,
+    owner_generation_matches: bool,
+    recovery_available: bool,
+    stream_committed: bool,
+) -> Result<RuntimeWebsocketInvalidPreviousResponsePlan, prodex_mojo_core::MojoError> {
+    prodex_mojo_core::runtime::websocket_invalid_previous_response_recovery_plan(
+        previous_response_present,
+        session_present,
+        owner_matches,
+        owner_generation_present,
+        owner_generation_matches,
+        recovery_available,
+        stream_committed,
+    )
+}
 
 #[derive(Clone, Copy, Debug)]
 pub struct RuntimeCandidateAffinity<'a> {

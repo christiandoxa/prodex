@@ -120,23 +120,32 @@ struct QuotaWatchResetDetail {
 }
 
 fn quota_watch_reset_detail(resets: &str) -> QuotaWatchResetDetail {
-    if resets.trim_start().starts_with("error:") {
-        return QuotaWatchResetDetail {
+    match prodex_mojo_core::quota_watch_policy::reset_kind(resets)
+        .expect("Mojo quota-watch reset detail policy failed")
+    {
+        prodex_mojo_core::quota_watch_policy::RESET_ERROR => QuotaWatchResetDetail {
             windows: resets.to_string(),
             credits: None,
-        };
-    }
-    let (windows, credits) = resets
-        .strip_prefix("resets: ")
-        .unwrap_or(resets)
-        .split_once("; reset credits:")
-        .map_or(
-            (resets.strip_prefix("resets: ").unwrap_or(resets), None),
-            |(left, right)| (left, Some(right.trim())),
-        );
-    QuotaWatchResetDetail {
-        windows: format!("resets: {windows}"),
-        credits: credits.map(|credits| format!("reset credits: {credits}")),
+        },
+        prodex_mojo_core::quota_watch_policy::RESET_CREDITS => {
+            let (windows, credits) = resets
+                .strip_prefix("resets: ")
+                .unwrap_or(resets)
+                .split_once("; reset credits:")
+                .expect("Mojo quota-watch reset policy marked credits without delimiter");
+            QuotaWatchResetDetail {
+                windows: format!("resets: {windows}"),
+                credits: Some(format!("reset credits: {}", credits.trim())),
+            }
+        }
+        prodex_mojo_core::quota_watch_policy::RESET_NORMAL => QuotaWatchResetDetail {
+            windows: format!(
+                "resets: {}",
+                resets.strip_prefix("resets: ").unwrap_or(resets)
+            ),
+            credits: None,
+        },
+        _ => unreachable!("validated Mojo quota-watch reset detail kind"),
     }
 }
 

@@ -515,3 +515,602 @@ def prodex_smart_context_markers_v1(
 
     meta[unsafe_offset=0] = marker_command_kind(address, length)
     return MARKER_OK
+
+comptime SEMANTIC_ABI_VERSION: Int64 = 1
+comptime SEMANTIC_OK: Int64 = 0
+comptime SEMANTIC_INVALID: Int64 = 1
+comptime SEMANTIC_CAPACITY: Int64 = 3
+comptime SEMANTIC_ABI_MISMATCH: Int64 = 4
+comptime SEMANTIC_MAX_RANGES: Int64 = 256
+comptime SEMANTIC_MAX_EXCERPT_BYTES: Int64 = 16 * 1024
+comptime SEMANTIC_MAX_FIELD_BYTES: Int64 = 512
+comptime SEMANTIC_RECORD_WIDTH: Int64 = 15
+comptime SEMANTIC_NONE: UInt64 = 0xFFFFFFFFFFFFFFFF
+
+def semantic_line_value(
+    lines: Pointer[mut=False, UInt64, _], index: Int64, field: Int64
+) -> Int64:
+    return Int64(lines[unsafe_offset=index * 2 + field])
+
+def semantic_next_token(
+    address: UInt, start: Int64, end: Int64
+) -> Tuple[Bool, Int64, Int64]:
+    var cursor = marker_skip_unicode_ws(address, start, end)
+    if cursor >= end:
+        return (False, 0, 0)
+    var token_start = cursor
+    cursor = marker_token_end(address, cursor, end)
+    return (True, token_start, cursor)
+
+def semantic_excerpt_bytes(
+    lines: Pointer[mut=False, UInt64, _], start_line: Int64, end_line: Int64
+) -> Int64:
+    var total = end_line - start_line
+    for index in range(start_line - 1, end_line):
+        total += semantic_line_value(lines, index, 1) - semantic_line_value(lines, index, 0)
+    return total
+
+def semantic_line_starts_with[literal: StaticString](
+    address: UInt, length: Int64
+) -> Bool:
+    return marker_literal_at[literal](address, 0, length)
+
+def semantic_diff_path(
+    address: UInt, length: Int64, span: Pointer[mut=True, UInt64, _]
+) -> Bool:
+    if not (
+        semantic_line_starts_with["+++ "](address, length)
+        or semantic_line_starts_with["--- "](address, length)
+    ):
+        return False
+    var token = semantic_next_token(address, 4, length)
+    if not token[0]:
+        return False
+    if not marker_diff_file_path(address + UInt(token[1]), token[2] - token[1], span):
+        return False
+    span[unsafe_offset=0] += UInt64(token[1])
+    span[unsafe_offset=1] += UInt64(token[1])
+    return True
+
+def semantic_diff_hunk(
+    address: UInt,
+    length: Int64,
+    old_span: Pointer[mut=True, UInt64, _],
+    new_span: Pointer[mut=True, UInt64, _],
+) -> Bool:
+    var first = semantic_next_token(address, 0, length)
+    if not first[0] or not marker_range_equals["@@"](
+        address, first[1], first[2]
+    ):
+        return False
+    var second = semantic_next_token(address, first[2], length)
+    if not second[0] or not marker_diff_span(
+        address + UInt(second[1]), second[2] - second[1], 45, old_span
+    ):
+        return False
+    var third = semantic_next_token(address, second[2], length)
+    if not third[0] or not marker_diff_span(
+        address + UInt(third[1]), third[2] - third[1], 43, new_span
+    ):
+        return False
+    return True
+
+def semantic_diff_hunk_end(
+    text_address: UInt,
+    lines: Pointer[mut=False, UInt64, _],
+    line_count: Int64,
+    start_index: Int64,
+) -> Int64:
+    var max_end = start_index + 24
+    if max_end >= line_count:
+        max_end = line_count - 1
+    for index in range(start_index + 1, max_end + 1):
+        var address = text_address + UInt(semantic_line_value(lines, index, 0))
+        var length = semantic_line_value(lines, index, 1) - semantic_line_value(lines, index, 0)
+        if semantic_line_starts_with["@@ "](address, length) or semantic_line_starts_with[
+            "diff --git "
+        ](address, length):
+            return index
+        if length <= 0 or not (
+            marker_byte(address, 0) == 32
+            or marker_byte(address, 0) == 43
+            or marker_byte(address, 0) == 45
+            or semantic_line_starts_with["\\ No newline"](address, length)
+        ):
+            return index
+    return max_end + 1
+
+def semantic_copy_input(
+    address: UInt,
+    start: Int64,
+    end: Int64,
+    output: Pointer[mut=True, UInt8, _],
+    capacity: Int64,
+    written: Pointer[mut=True, Int64, _],
+) -> Tuple[Bool, UInt64, UInt64]:
+    if (
+        start < 0
+        or end <= start
+        or end - start > SEMANTIC_MAX_FIELD_BYTES
+        or written[] < 0
+        or written[] + end - start > capacity
+    ):
+        return (False, SEMANTIC_NONE, 0)
+    var source = marker_ptr(address)
+    var offset = written[]
+    for index in range(end - start):
+        output[unsafe_offset=offset + index] = source[unsafe_offset=start + index]
+    written[] += end - start
+    return (True, UInt64(offset), UInt64(end - start))
+
+def semantic_copy_buffer(
+    source: Pointer[mut=False, UInt8, _],
+    length: Int64,
+    output: Pointer[mut=True, UInt8, _],
+    capacity: Int64,
+    written: Pointer[mut=True, Int64, _],
+) -> Tuple[Bool, UInt64, UInt64]:
+    if (
+        length <= 0
+        or length > SEMANTIC_MAX_FIELD_BYTES
+        or written[] < 0
+        or written[] + length > capacity
+    ):
+        return (False, SEMANTIC_NONE, 0)
+    var offset = written[]
+    for index in range(length):
+        output[unsafe_offset=offset + index] = source[unsafe_offset=index]
+    written[] += length
+    return (True, UInt64(offset), UInt64(length))
+
+def semantic_fields_equal(
+    fields: Pointer[mut=False, UInt8, _],
+    left_start: UInt64,
+    left_length: UInt64,
+    right_start: UInt64,
+    right_length: UInt64,
+) -> Bool:
+    if left_length != right_length:
+        return False
+    if left_length == 0:
+        return True
+    if left_start == SEMANTIC_NONE or right_start == SEMANTIC_NONE:
+        return False
+    for index in range(Int64(left_length)):
+        if fields[unsafe_offset=Int64(left_start) + index] != fields[
+            unsafe_offset=Int64(right_start) + index
+        ]:
+            return False
+    return True
+
+def semantic_record_duplicate(
+    output: Pointer[mut=False, UInt64, _],
+    fields: Pointer[mut=False, UInt8, _],
+    count: Int64,
+    kind: UInt64,
+    start_line: UInt64,
+    end_line: UInt64,
+    path_start: UInt64,
+    path_length: UInt64,
+    code_start: UInt64,
+    code_length: UInt64,
+    symbol_start: UInt64,
+    symbol_length: UInt64,
+) -> Bool:
+    for row in range(count):
+        var base = row * SEMANTIC_RECORD_WIDTH
+        if (
+            output[unsafe_offset=base] == kind
+            and output[unsafe_offset=base + 1] == start_line
+            and output[unsafe_offset=base + 2] == end_line
+            and semantic_fields_equal(
+                fields,
+                output[unsafe_offset=base + 3],
+                output[unsafe_offset=base + 4],
+                path_start,
+                path_length,
+            )
+            and semantic_fields_equal(
+                fields,
+                output[unsafe_offset=base + 11],
+                output[unsafe_offset=base + 12],
+                code_start,
+                code_length,
+            )
+            and semantic_fields_equal(
+                fields,
+                output[unsafe_offset=base + 13],
+                output[unsafe_offset=base + 14],
+                symbol_start,
+                symbol_length,
+            )
+        ):
+            return True
+    return False
+
+def semantic_emit_range(
+    output: Pointer[mut=True, UInt64, _],
+    output_read: Pointer[mut=False, UInt64, _],
+    fields: Pointer[mut=False, UInt8, _],
+    lines: Pointer[mut=False, UInt64, _],
+    max_excerpt_bytes: Int64,
+    max_ranges: Int64,
+    count: Int64,
+    complete: Pointer[mut=True, Int64, _],
+    field_written: Pointer[mut=True, Int64, _],
+    kind: UInt64,
+    start_line: Int64,
+    end_line: Int64,
+    path_start: UInt64,
+    path_length: UInt64,
+    line: UInt64,
+    column: UInt64,
+    old_start: UInt64,
+    old_count: UInt64,
+    new_start: UInt64,
+    new_count: UInt64,
+    code_start: UInt64,
+    code_length: UInt64,
+    symbol_start: UInt64,
+    symbol_length: UInt64,
+) -> Int64:
+    var before = field_written[]
+    if count >= max_ranges:
+        complete[] = 0
+        field_written[] = before
+        return count
+    if (
+        start_line < 1
+        or end_line < start_line
+        or semantic_excerpt_bytes(lines, start_line, end_line) > max_excerpt_bytes
+    ):
+        complete[] = 0
+        field_written[] = before
+        return count
+    if semantic_record_duplicate(
+        output_read,
+        fields,
+        count,
+        kind,
+        UInt64(start_line),
+        UInt64(end_line),
+        path_start,
+        path_length,
+        code_start,
+        code_length,
+        symbol_start,
+        symbol_length,
+    ):
+        field_written[] = before
+        return count
+    var base = count * SEMANTIC_RECORD_WIDTH
+    output[unsafe_offset=base] = kind
+    output[unsafe_offset=base + 1] = UInt64(start_line)
+    output[unsafe_offset=base + 2] = UInt64(end_line)
+    output[unsafe_offset=base + 3] = path_start
+    output[unsafe_offset=base + 4] = path_length
+    output[unsafe_offset=base + 5] = line
+    output[unsafe_offset=base + 6] = column
+    output[unsafe_offset=base + 7] = old_start
+    output[unsafe_offset=base + 8] = old_count
+    output[unsafe_offset=base + 9] = new_start
+    output[unsafe_offset=base + 10] = new_count
+    output[unsafe_offset=base + 11] = code_start
+    output[unsafe_offset=base + 12] = code_length
+    output[unsafe_offset=base + 13] = symbol_start
+    output[unsafe_offset=base + 14] = symbol_length
+    return count + 1
+
+@export("prodex_smart_context_semantic_index_v1")
+def prodex_smart_context_semantic_index_v1(
+    abi_version: Int64,
+    text_address: UInt,
+    text_length: Int64,
+    line_spans_address: UInt,
+    line_count: Int64,
+    max_ranges: Int64,
+    max_excerpt_bytes: Int64,
+    output_address: UInt,
+    output_capacity: Int64,
+    field_address: UInt,
+    field_capacity: Int64,
+    metadata_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != SEMANTIC_ABI_VERSION:
+        return SEMANTIC_ABI_MISMATCH
+    if (
+        text_length < 0
+        or text_length > MAX_INPUT_BYTES
+        or (text_length > 0 and text_address == 0)
+        or line_count < 0
+        or line_count > text_length + 1
+        or (line_count > 0 and line_spans_address == 0)
+        or max_ranges < 0
+        or max_ranges > SEMANTIC_MAX_RANGES
+        or max_excerpt_bytes < 0
+        or max_excerpt_bytes > SEMANTIC_MAX_EXCERPT_BYTES
+        or output_capacity < max_ranges * SEMANTIC_RECORD_WIDTH
+        or output_address == 0
+        or field_capacity <= 0
+        or field_address == 0
+        or metadata_address == 0
+    ):
+        return SEMANTIC_INVALID
+
+    var view = ProdexRichStringView(text_address, UInt(text_length))
+    if not rich_view_valid(view, MAX_INPUT_BYTES):
+        return SEMANTIC_INVALID
+    var lines = Pointer[mut=False, UInt64, ImmUntrackedOrigin](
+        unsafe_from_address=Int(line_spans_address)
+    )
+    var previous_end: Int64 = 0
+    for index in range(line_count):
+        var start = semantic_line_value(lines, index, 0)
+        var end = semantic_line_value(lines, index, 1)
+        if start < previous_end or end < start or end > text_length:
+            return SEMANTIC_INVALID
+        previous_end = end
+
+    var output = Pointer[mut=True, UInt64, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    var output_read = Pointer[mut=False, UInt64, ImmUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    var fields = Pointer[mut=True, UInt8, MutUntrackedOrigin](
+        unsafe_from_address=Int(field_address)
+    )
+    var fields_read = Pointer[mut=False, UInt8, ImmUntrackedOrigin](
+        unsafe_from_address=Int(field_address)
+    )
+    var metadata = Pointer[mut=True, UInt64, MutUntrackedOrigin](
+        unsafe_from_address=Int(metadata_address)
+    )
+    metadata[unsafe_offset=0] = 0
+    metadata[unsafe_offset=1] = 1
+    metadata[unsafe_offset=2] = 0
+    metadata[unsafe_offset=3] = 0
+    var command_kind: UInt64 = 0
+    var saw_diff = False
+    var saw_cargo_test = False
+    var saw_cargo_build = False
+    var saw_npm_test = False
+    for index in range(line_count):
+        var start = semantic_line_value(lines, index, 0)
+        var end = semantic_line_value(lines, index, 1)
+        var kind = marker_command_kind(UInt(text_address + UInt(start)), end - start)
+        if kind == 1:
+            command_kind = 1
+            break
+        if kind == 2:
+            saw_diff = True
+        elif kind == 3:
+            saw_cargo_test = True
+        elif kind == 4:
+            saw_cargo_build = True
+        elif kind == 5:
+            saw_npm_test = True
+    if command_kind == 0:
+        if saw_cargo_test:
+            command_kind = 3
+        elif saw_npm_test:
+            command_kind = 5
+        elif saw_cargo_build:
+            command_kind = 4
+        elif saw_diff:
+            command_kind = 2
+    metadata[unsafe_offset=2] = command_kind
+
+    var field_written: Int64 = 0
+    var count: Int64 = 0
+    var complete: Int64 = 1
+    var current_path_start: UInt64 = SEMANTIC_NONE
+    var current_path_length: UInt64 = 0
+    for index in range(line_count):
+        var line_start = semantic_line_value(lines, index, 0)
+        var line_end = semantic_line_value(lines, index, 1)
+        var line_address = UInt(text_address + UInt(line_start))
+        var line_length = line_end - line_start
+
+        var path_meta = Array[UInt64, 4](fill=SEMANTIC_NONE)
+        if semantic_diff_path(line_address, line_length, Pointer(to=path_meta[0])):
+            var copied_path = semantic_copy_input(
+                line_address,
+                Int64(path_meta[0]),
+                Int64(path_meta[1]),
+                fields,
+                field_capacity,
+                Pointer(to=field_written),
+            )
+            if copied_path[0]:
+                current_path_start = copied_path[1]
+                current_path_length = copied_path[2]
+            else:
+                current_path_start = SEMANTIC_NONE
+                current_path_length = 0
+                complete = 0
+
+        var old_span = Array[UInt64, 4](fill=SEMANTIC_NONE)
+        var new_span = Array[UInt64, 4](fill=SEMANTIC_NONE)
+        if semantic_diff_hunk(
+            line_address, line_length, Pointer(to=old_span[0]), Pointer(to=new_span[0])
+        ):
+            var hunk_end = semantic_diff_hunk_end(
+                text_address, lines, line_count, index
+            )
+            count = semantic_emit_range(
+                output,
+                output_read,
+                fields_read,
+                lines,
+                max_excerpt_bytes,
+                max_ranges,
+                count,
+                Pointer(to=complete),
+                Pointer(to=field_written),
+                2,
+                index + 1,
+                hunk_end,
+                current_path_start,
+                current_path_length,
+                SEMANTIC_NONE,
+                SEMANTIC_NONE,
+                old_span[0],
+                old_span[1],
+                new_span[0],
+                new_span[1],
+                SEMANTIC_NONE,
+                0,
+                SEMANTIC_NONE,
+                0,
+            )
+
+        var cursor: Int64 = 0
+        while cursor < line_length:
+            var token = semantic_next_token(line_address, cursor, line_length)
+            if not token[0]:
+                break
+            var location_meta = Array[UInt64, 4](fill=SEMANTIC_NONE)
+            if marker_file_location(
+                line_address + UInt(token[1]),
+                token[2] - token[1],
+                Pointer(to=location_meta[0]),
+            ):
+                var copied_path = semantic_copy_input(
+                    line_address + UInt(token[1]),
+                    Int64(location_meta[0]),
+                    Int64(location_meta[1]),
+                    fields,
+                    field_capacity,
+                    Pointer(to=field_written),
+                )
+                if not copied_path[0]:
+                    complete = 0
+                else:
+                    count = semantic_emit_range(
+                        output,
+                        output_read,
+                        fields_read,
+                        lines,
+                        max_excerpt_bytes,
+                        max_ranges,
+                        count,
+                        Pointer(to=complete),
+                        Pointer(to=field_written),
+                        1,
+                        index + 1,
+                        index + 1,
+                        copied_path[1],
+                        copied_path[2],
+                        location_meta[2],
+                        location_meta[3],
+                        SEMANTIC_NONE,
+                        0,
+                        SEMANTIC_NONE,
+                        0,
+                        SEMANTIC_NONE,
+                        0,
+                        SEMANTIC_NONE,
+                        0,
+                    )
+                break
+            cursor = token[2]
+
+        if marker_test_failure(line_address, line_length):
+            var symbol_start: UInt64 = SEMANTIC_NONE
+            var symbol_length: UInt64 = 0
+            var symbol_meta = Array[UInt64, 4](fill=SEMANTIC_NONE)
+            if marker_test_symbol(
+                line_address, line_length, Pointer(to=symbol_meta[0])
+            ):
+                var copied_symbol = semantic_copy_input(
+                    line_address,
+                    Int64(symbol_meta[0]),
+                    Int64(symbol_meta[1]),
+                    fields,
+                    field_capacity,
+                    Pointer(to=field_written),
+                )
+                if copied_symbol[0]:
+                    symbol_start = copied_symbol[1]
+                    symbol_length = copied_symbol[2]
+                else:
+                    complete = 0
+            var failure_start = index if index > 0 else 1
+            var failure_end = min(index + 2, line_count)
+            count = semantic_emit_range(
+                output,
+                output_read,
+                fields_read,
+                lines,
+                max_excerpt_bytes,
+                max_ranges,
+                count,
+                Pointer(to=complete),
+                Pointer(to=field_written),
+                3,
+                failure_start,
+                failure_end,
+                SEMANTIC_NONE,
+                0,
+                SEMANTIC_NONE,
+                SEMANTIC_NONE,
+                SEMANTIC_NONE,
+                0,
+                SEMANTIC_NONE,
+                0,
+                SEMANTIC_NONE,
+                0,
+                symbol_start,
+                symbol_length,
+            )
+
+        var error_buffer = Array[UInt8, 512](fill=0)
+        var error_code_written: Int64 = 0
+        if marker_error_code(
+            line_address,
+            line_length,
+            Pointer(to=error_buffer[0]),
+            SEMANTIC_MAX_FIELD_BYTES,
+            Pointer(to=error_code_written),
+        ) and error_code_written > 0:
+            var copied_code = semantic_copy_buffer(
+                Pointer(to=error_buffer[0]),
+                error_code_written,
+                fields,
+                field_capacity,
+                Pointer(to=field_written),
+            )
+            if not copied_code[0]:
+                complete = 0
+            else:
+                count = semantic_emit_range(
+                output,
+                output_read,
+                fields_read,
+                lines,
+                max_excerpt_bytes,
+                max_ranges,
+                count,
+                Pointer(to=complete),
+                Pointer(to=field_written),
+                4,
+                index + 1,
+                index + 1,
+                SEMANTIC_NONE,
+                0,
+                SEMANTIC_NONE,
+                SEMANTIC_NONE,
+                SEMANTIC_NONE,
+                0,
+                SEMANTIC_NONE,
+                0,
+                copied_code[1],
+                copied_code[2],
+                SEMANTIC_NONE,
+                0,
+                )
+    metadata[unsafe_offset=0] = UInt64(count)
+    metadata[unsafe_offset=1] = UInt64(complete)
+    metadata[unsafe_offset=3] = UInt64(field_written)
+    return SEMANTIC_OK

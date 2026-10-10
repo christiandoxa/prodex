@@ -1,4 +1,6 @@
 from std.memory import Pointer
+from rich_text import rich_view_valid, rich_views_equal
+from rich_types import ProdexRichStringView
 
 from runtime_math import (
     INT64_MAX,
@@ -60,19 +62,32 @@ def prodex_runtime_precommit_budget_exhausted_v1(
     return 0
 
 
-@export("prodex_runtime_compact_retry_decision_v1")
-def prodex_runtime_compact_retry_decision_v1(
+@export("prodex_runtime_compact_retry_decision_v2")
+def prodex_runtime_compact_retry_decision_v2(
+    profile_views: Pointer[mut=False, ProdexRichStringView, _],
+    candidate_profile_present: Int64,
+    current_profile_present: Int64,
+    compact_followup_profile_present: Int64,
+    previous_response_profile_present: Int64,
+    session_profile_present: Int64,
     stage: Int64,
     overload: Int64,
     auto_redeemed: Int64,
     owner_retry_used: Int64,
-    owner_match: Int64,
     quota_fallback_available: Int64,
-    previous_response_owner: Int64,
     hard_affinity: Int64,
     committed: Int64,
     output: Pointer[mut=True, Int64, _],
 ) abi("C") -> Int64:
+    for flag in [
+        candidate_profile_present,
+        current_profile_present,
+        compact_followup_profile_present,
+        previous_response_profile_present,
+        session_profile_present,
+    ]:
+        if flag != 0 and flag != 1:
+            return 1
     if (
         stage < 0
         or stage > 5
@@ -82,12 +97,8 @@ def prodex_runtime_compact_retry_decision_v1(
         or auto_redeemed > 1
         or owner_retry_used < 0
         or owner_retry_used > 1
-        or owner_match < 0
-        or owner_match > 1
         or quota_fallback_available < -1
         or quota_fallback_available > 1
-        or previous_response_owner < 0
-        or previous_response_owner > 1
         or hard_affinity < 0
         or hard_affinity > 1
         or committed < 0
@@ -97,13 +108,48 @@ def prodex_runtime_compact_retry_decision_v1(
     ):
         return 1
 
+    var candidate = profile_views[unsafe_offset=0].copy()
+    var current = profile_views[unsafe_offset=1].copy()
+    var compact_followup = profile_views[unsafe_offset=2].copy()
+    var previous_response = profile_views[unsafe_offset=3].copy()
+    var session = profile_views[unsafe_offset=4].copy()
+    for index in range(5):
+        if not rich_view_valid(profile_views[unsafe_offset=index].copy(), INT64_MAX):
+            return 1
+
+    var current_match = (
+        candidate_profile_present == 1
+        and current_profile_present == 1
+        and rich_views_equal(candidate, current)
+    )
+    var compact_followup_match = (
+        candidate_profile_present == 1
+        and compact_followup_profile_present == 1
+        and rich_views_equal(candidate, compact_followup)
+    )
+    var previous_response_match = (
+        candidate_profile_present == 1
+        and previous_response_profile_present == 1
+        and rich_views_equal(candidate, previous_response)
+    )
+    var session_match = (
+        candidate_profile_present == 1
+        and session_profile_present == 1
+        and rich_views_equal(candidate, session)
+    )
+    var owner_match = (
+        current_match
+        or compact_followup_match
+        or previous_response_match
+        or session_match
+    )
     output[unsafe_offset=1] = overload
     if committed == 1:
         output[unsafe_offset=0] = 11
     elif stage == 0 or stage == 1:
         if stage == 0 and overload == 0 and auto_redeemed == 0:
             output[unsafe_offset=0] = 1
-        elif overload == 1 and owner_match == 1 and owner_retry_used == 0:
+        elif overload == 1 and owner_match and owner_retry_used == 0:
             output[unsafe_offset=0] = 2
         else:
             output[unsafe_offset=0] = 3
@@ -123,7 +169,7 @@ def prodex_runtime_compact_retry_decision_v1(
         else:
             output[unsafe_offset=0] = 7
     elif stage == 4:
-        if hard_affinity == 1 and (overload == 1 or previous_response_owner == 1):
+        if hard_affinity == 1 and (overload == 1 or previous_response_match):
             output[unsafe_offset=0] = 8
         elif overload == 1:
             output[unsafe_offset=0] = 10

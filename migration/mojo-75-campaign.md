@@ -5357,3 +5357,30 @@ The ownership manifest records `deepseek_response_usage_mapping` with
 `production_fallback`, `duplicate_production_owner`, and `platform_fallback` all
 false. Direct ABI and provider-boundary tests cover complete usage details,
 invalid-type defaults, overflow-safe totals, and custom provider labels.
+
+## DeepSeek pre-commit attempt migration
+
+DeepSeek pre-commit recovery now uses `deepseek_attempt_policy.mojo` for the
+model-before-credential retry precedence, the single-use native first-event
+retry budget, and bounded model/credential index validation. Rust retains
+provider error classification, retry facts, logging, transport, and applying
+the selected attempt. The public first-event retry-limit value remains only as
+compatibility metadata; runtime eligibility goes through the versioned Mojo
+ABI.
+
+Required-Mojo direct policy tests, DeepSeek provider tests, and the app caller
+tests pass. Ownership, authority, no-fallback, and production-share checks
+remain green; the 75% project target is still in progress.
+
+## Runtime launch mount-path normalization migration
+
+Runtime launch provider URLs now use the existing runtime proxy Mojo module for
+Unicode-aware trimming and slash-boundary mount normalization. Rust retains
+socket formatting, argument reconstruction, TOML string materialization, and
+process-launch effects. The Mojo result is bounded and materialized through a
+typed adapter, with direct ABI cases and a runtime-launch caller case covering
+empty, slash-only, Unicode-trimmed, and nested paths.
+
+The focused Mojo and runtime-launch tests, formatting, ownership, authority,
+no-fallback, and production-share checks pass. The 75% project target remains
+in progress.

@@ -269,7 +269,7 @@ impl RuntimeWebsocketResponseLoop<'_> {
             &inspected,
             prodex_mojo_core::websocket_response_tracking::FRAME_TEXT,
             false,
-        );
+        )?;
         self.observe_generation_start(plan.generation_start);
         if let Some(attempt) = self.retry_attempt(&plan, &inspected, &text) {
             return Ok(RuntimeWebsocketTextResult::Attempt(attempt));
@@ -291,7 +291,7 @@ impl RuntimeWebsocketResponseLoop<'_> {
                 &inspected,
                 prodex_mojo_core::websocket_response_tracking::FRAME_TEXT,
                 true,
-            );
+            )?;
         }
         if plan.commit {
             self.commit("committed")?;
@@ -330,14 +330,15 @@ impl RuntimeWebsocketResponseLoop<'_> {
         &mut self,
         text: &str,
     ) -> Result<runtime_proxy_crate::RuntimeInspectedWebsocketTextFrame> {
-        let mut inspected = inspect_runtime_websocket_text_frame_with_phase(
+        let mut inspected = inspect_runtime_websocket_text_frame_with_phase_checked(
             text,
             if self.committed {
                 runtime_proxy_crate::RuntimeHttpErrorPhase::Committed
             } else {
                 runtime_proxy_crate::RuntimeHttpErrorPhase::PreCommit
             },
-        );
+        )
+        .map_err(|error| anyhow::anyhow!("Mojo websocket failure inspection failed: {error:?}"))?;
         if self.realtime_websocket
             && inspected
                 .event_type
@@ -358,7 +359,7 @@ impl RuntimeWebsocketResponseLoop<'_> {
         inspected: &runtime_proxy_crate::RuntimeInspectedWebsocketTextFrame,
         frame_kind: i64,
         promoted_precommit_hold: bool,
-    ) -> prodex_mojo_core::websocket_response_tracking::WebsocketResponseFramePlan {
+    ) -> Result<prodex_mojo_core::websocket_response_tracking::WebsocketResponseFramePlan> {
         let retry_kind = match inspected.retry_kind {
             None => prodex_mojo_core::websocket_response_tracking::RETRY_NONE,
             Some(RuntimeWebsocketRetryInspectionKind::ConnectionLimitReached) => {
@@ -391,7 +392,7 @@ impl RuntimeWebsocketResponseLoop<'_> {
                 generation_started: self.generation_started_at.is_some(),
             },
         )
-        .expect("Mojo websocket response-frame planner returned an invalid result")
+        .map_err(|error| anyhow::anyhow!("Mojo websocket response-frame planner failed: {error:?}"))
     }
 
     fn retry_attempt(
@@ -720,7 +721,7 @@ impl RuntimeWebsocketResponseLoop<'_> {
             &inspected,
             prodex_mojo_core::websocket_response_tracking::FRAME_BINARY,
             false,
-        );
+        )?;
         if plan.commit {
             self.commit("committed_binary")?;
         }
@@ -749,7 +750,7 @@ impl RuntimeWebsocketResponseLoop<'_> {
             &inspected,
             prodex_mojo_core::websocket_response_tracking::FRAME_KEEPALIVE,
             false,
-        );
+        )?;
         if plan.commit {
             self.commit("committed_keepalive")?;
         }

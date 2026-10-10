@@ -2,6 +2,7 @@
 use super::TARGET_ENV_KEYS;
 use super::{PROCESS_ANCESTRY_LIMIT, SessionPromptWriteError};
 use prodex_mojo_core::rich::ascii_casefold_equal_exact;
+use prodex_mojo_core::session_cli_policy::SessionPromptWriteProcessRole;
 use std::collections::{BTreeMap, HashMap};
 #[cfg(target_os = "linux")]
 use std::fs;
@@ -331,31 +332,45 @@ pub(crate) fn is_rollout_file_name(name: &str) -> bool {
 }
 
 pub(crate) fn is_plain_prodex_session(process: &ProcessRecord) -> bool {
-    executable_name(process).is_some_and(|name| {
-        ascii_casefold_equal_exact(name, "prodex")
-            .expect("Mojo Prodex executable-name comparison failed")
-    }) && process.argv.get(1).is_some_and(|arg| arg == "s")
-        && !process.argv.iter().skip(2).any(|arg| {
-            matches!(arg.as_str(), "expose" | "super" | "exec" | "review")
-                || arg.starts_with("prodex_super_")
-                || arg.contains("__sub-agent")
-                || arg.contains("release-smoke")
-                || arg.contains("release_smoke")
-        })
+    let executable_matches = executable_name(process).is_some_and(|name| {
+        ascii_casefold_equal_exact(name, "prodex").is_ok_and(|matches| matches)
+    });
+    let plain_subcommand = process.argv.get(1).is_some_and(|arg| arg == "s");
+    let forbidden = process.argv.iter().skip(2).any(|arg| {
+        matches!(arg.as_str(), "expose" | "super" | "exec" | "review")
+            || arg.starts_with("prodex_super_")
+            || arg.contains("__sub-agent")
+            || arg.contains("release-smoke")
+            || arg.contains("release_smoke")
+    });
+    prodex_mojo_core::session_cli_policy::prompt_write_process_role_allowed(
+        SessionPromptWriteProcessRole::PlainProdex,
+        executable_matches,
+        u8::from(plain_subcommand),
+        forbidden,
+        false,
+    )
+    .is_ok_and(|allowed| allowed)
 }
 
 pub(crate) fn is_codex_writer(process: &ProcessRecord) -> bool {
-    if !executable_name(process).is_some_and(|name| {
-        ascii_casefold_equal_exact(name, "codex")
-            .expect("Mojo Codex executable-name comparison failed")
-    }) {
-        return false;
-    }
+    let executable_matches = executable_name(process)
+        .is_some_and(|name| ascii_casefold_equal_exact(name, "codex").is_ok_and(|matches| matches));
     let command = first_codex_positional_arg(&process.argv);
-    if has_remote_argument(&process.argv) {
-        return false;
-    }
-    command.is_none_or(|command| matches!(command, "resume" | "app-server"))
+    let command = match command {
+        None => 0,
+        Some("resume") => 1,
+        Some("app-server") => 2,
+        Some(_) => 3,
+    };
+    prodex_mojo_core::session_cli_policy::prompt_write_process_role_allowed(
+        SessionPromptWriteProcessRole::CodexWriter,
+        executable_matches,
+        command,
+        false,
+        has_remote_argument(&process.argv),
+    )
+    .is_ok_and(|allowed| allowed)
 }
 
 fn executable_name(process: &ProcessRecord) -> Option<&str> {

@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 use super::{RuntimeSmartContextParsedDiffHunk, RuntimeSmartContextParsedFileLocation};
 
 pub(in crate::runtime_state_shared) fn runtime_smart_context_parse_file_location(

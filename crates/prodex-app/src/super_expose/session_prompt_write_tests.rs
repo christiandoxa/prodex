@@ -665,6 +665,57 @@ fn accepted_queued_message_does_not_wait_for_busy_turn_completion() {
 }
 
 #[test]
+fn rejected_queue_submission_retries_once_then_fails_closed() {
+    let fixture = fixture();
+    let mut queue_control = queue(&fixture, None);
+    queue_control.invocations = Mutex::new(VecDeque::from([
+        QueueInvocation {
+            outcome: QueueRequestOutcome::Rejected,
+            ..QueueInvocation::default()
+        },
+        QueueInvocation {
+            outcome: QueueRequestOutcome::Rejected,
+            ..QueueInvocation::default()
+        },
+    ]));
+    let calls = Arc::clone(&queue_control.calls);
+
+    assert_eq!(
+        service(&fixture, queue_control)
+            .write(request(&fixture, "rejected twice"))
+            .unwrap_err(),
+        SessionPromptWriteError::QueueFailed
+    );
+    assert_eq!(calls.lock().unwrap().len(), 2);
+}
+
+#[test]
+fn preflight_queue_submission_retries_once_before_acceptance() {
+    let fixture = fixture();
+    let mut queue_control = queue(&fixture, None);
+    queue_control.invocations = Mutex::new(VecDeque::from([
+        QueueInvocation {
+            outcome: QueueRequestOutcome::Preflight,
+            ..QueueInvocation::default()
+        },
+        QueueInvocation {
+            outcome: QueueRequestOutcome::Accepted,
+            queued: true,
+            ..QueueInvocation::default()
+        },
+    ]));
+    let calls = Arc::clone(&queue_control.calls);
+
+    let result = service(&fixture, queue_control)
+        .write(request(&fixture, "retry preflight"))
+        .expect("preflight should retry before queue verification");
+
+    assert!(result.last_prompt_requeued);
+    assert_eq!(result.verification, "queue_pending_observed");
+    assert_eq!(calls.lock().unwrap().len(), 2);
+}
+
+#[test]
 fn queue_success_verifies_near_limit_escaped_message() {
     let fixture = fixture();
     let message = "\\".repeat(SESSION_PROMPT_WRITE_MAX_MESSAGE_BYTES - 1024);
@@ -676,6 +727,37 @@ fn queue_success_verifies_near_limit_escaped_message() {
         .expect("near-limit rollout message should verify");
 
     assert_eq!(result.verification, "rollout_user_event_observed");
+}
+
+#[test]
+fn process_argument_normalization_handles_values_separators_and_unknown_commands() {
+    use super::session_prompt_write::first_codex_positional_arg;
+
+    assert_eq!(
+        first_codex_positional_arg(&[
+            "codex".to_string(),
+            "--config".to_string(),
+            "model_provider=example".to_string(),
+            "resume".to_string(),
+        ]),
+        Some("resume")
+    );
+    assert_eq!(
+        first_codex_positional_arg(&[
+            "codex".to_string(),
+            "--".to_string(),
+            "app-server".to_string()
+        ]),
+        None
+    );
+    assert_eq!(
+        first_codex_positional_arg(&[
+            "codex".to_string(),
+            "--model=example".to_string(),
+            "app-server".to_string()
+        ]),
+        Some("app-server")
+    );
 }
 
 #[test]

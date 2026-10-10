@@ -84,13 +84,6 @@ pub(super) fn handle_runtime_proxy_compact_retryable_failure(
         saw_inflight_saturation,
         saw_transport_failure,
     } = failure;
-    let owner_match = compact_followup_profile
-        .as_ref()
-        .is_some_and(|(owner, _)| owner == &profile_name)
-        || previous_response_profile == Some(profile_name.as_str())
-        || session_profile.as_deref() == Some(profile_name.as_str())
-        || current_profile == profile_name;
-    let previous_response_owner = previous_response_profile == Some(profile_name.as_str());
     let mut stage = CompactRetryStage::Start;
     let mut quota_fallback_available = None;
     let mut released_affinity = false;
@@ -111,11 +104,16 @@ pub(super) fn handle_runtime_proxy_compact_retryable_failure(
                 overload,
                 auto_redeemed: auto_redeemed_profiles.contains(&profile_name),
                 owner_retry_used: conservative_overload_retried_profiles.contains(&profile_name),
-                owner_match,
                 quota_fallback_available,
-                previous_response_owner,
                 hard_affinity,
                 committed: false,
+                candidate_profile: &profile_name,
+                current_profile,
+                compact_followup_profile: compact_followup_profile
+                    .as_ref()
+                    .map(|(profile_name, _)| profile_name.as_str()),
+                previous_response_profile,
+                session_profile: session_profile.as_deref(),
             })
             .expect("Mojo compact retry decision returned invalid output");
 
@@ -514,11 +512,14 @@ pub(crate) fn test_runtime_compact_quota_fallback_exhausted(
             overload: false,
             auto_redeemed: false,
             owner_retry_used: false,
-            owner_match: false,
             quota_fallback_available: Some(quota_fallback_available),
-            previous_response_owner: false,
             hard_affinity: false,
             committed: false,
+            candidate_profile: profile_name,
+            current_profile: "",
+            compact_followup_profile: None,
+            previous_response_profile: None,
+            session_profile: None,
         })
         .expect("Mojo compact retry decision returned invalid output")
         .action

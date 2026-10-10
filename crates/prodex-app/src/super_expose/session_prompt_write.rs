@@ -552,7 +552,7 @@ where
             &details.record,
             &details.open_files,
             &environment.codex_home,
-        );
+        )?;
         let target = ResolvedTarget {
             prodex,
             writer: details.record,
@@ -641,7 +641,8 @@ where
             &details.record,
             &details.open_files,
             &environment.codex_home,
-        );
+        )
+        .map_err(|_| SessionPromptWriteError::StaleTarget)?;
         if current_endpoint != target.remote_endpoint {
             return Err(SessionPromptWriteError::StaleTarget);
         }

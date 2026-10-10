@@ -1,5 +1,5 @@
 use super::*;
-use prodex_mojo_core::rich::{ascii_casefold_contains, ascii_casefold_find};
+use prodex_mojo_core::rich::ascii_casefold_find;
 
 pub fn required_main_window_snapshot(
     usage: &UsageResponse,
@@ -455,10 +455,8 @@ pub fn format_blocked_quota_status(blocked: &[BlockedLimit]) -> String {
 }
 
 pub fn format_quota_error_status(error: &str) -> String {
-    let unauthorized = ascii_casefold_contains(error, "401")
-        .expect("Mojo quota error comparison failed")
-        || ascii_casefold_contains(error, "unauthorized")
-            .expect("Mojo quota error comparison failed");
+    let unauthorized = prodex_mojo_core::quota::quota_error_auth_failure(error, false)
+        .expect("Mojo quota error authentication classification failed");
     if unauthorized {
         "Blocked unauthorized".to_string()
     } else {
@@ -467,10 +465,8 @@ pub fn format_quota_error_status(error: &str) -> String {
 }
 
 pub fn format_quota_error_detail(error: &str) -> String {
-    let unauthorized = ascii_casefold_contains(error, "401")
-        .expect("Mojo quota error comparison failed")
-        || ascii_casefold_contains(error, "unauthorized")
-            .expect("Mojo quota error comparison failed");
+    let unauthorized = prodex_mojo_core::quota::quota_error_auth_failure(error, false)
+        .expect("Mojo quota error authentication classification failed");
     let summary = if unauthorized {
         "unauthorized".to_string()
     } else {

@@ -1,8 +1,6 @@
-use super::runtime_profile::{
-    QuotaWatchTui, print_quota_watch_plain_snapshot, quota_watch_quit_key,
-};
+use super::runtime_profile::{QuotaWatchTui, print_quota_watch_plain_snapshot};
 use super::*;
-use crossterm::event::{self, Event, KeyCode, KeyEventKind};
+use crossterm::event::{self, Event, KeyEventKind};
 use std::io::IsTerminal;
 
 pub(crate) fn watch_all_quotas(
@@ -403,18 +401,6 @@ fn handle_all_quota_watch_tui_input(context: AllQuotaWatchInputContext<'_>) -> R
             Ok(false)
         }
         _ => Ok(false),
-    }
-}
-
-fn quota_watch_command(key: crossterm::event::KeyEvent) -> Option<QuotaWatchCommand> {
-    match key.code {
-        _ if quota_watch_quit_key(key) => Some(QuotaWatchCommand::Quit),
-        KeyCode::Char('j') | KeyCode::Down => Some(QuotaWatchCommand::Down),
-        KeyCode::Char('k') | KeyCode::Up => Some(QuotaWatchCommand::Up),
-        KeyCode::Char('s') => Some(QuotaWatchCommand::Sort),
-        KeyCode::Char('f') => Some(QuotaWatchCommand::Filter),
-        KeyCode::Char('u') | KeyCode::Char('U') => Some(QuotaWatchCommand::Update),
-        _ => None,
     }
 }
 

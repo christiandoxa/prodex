@@ -20,6 +20,8 @@ mod state;
 
 #[path = "lib/args_mojo.rs"]
 mod args_mojo;
+#[path = "lib/mount_path.rs"]
+mod mount_path;
 
 #[path = "lib/args_codex_0161.rs"]
 mod args_codex_0161;

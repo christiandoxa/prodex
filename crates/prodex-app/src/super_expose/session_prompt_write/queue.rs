@@ -3,6 +3,7 @@ use super::{
     ResolvedTarget, SessionPromptWriteError, first_codex_positional_arg, is_control_socket,
     is_rollout_file_name,
 };
+use prodex_mojo_core::session_cli_policy;
 use rusqlite::{Connection, OpenFlags, OptionalExtension, params};
 use std::collections::BTreeSet;
 use std::ffi::OsString;
@@ -112,28 +113,49 @@ pub(crate) fn remote_endpoint(
     process: &ProcessRecord,
     open_files: &[OpenProcessFile],
     codex_home: &Path,
-) -> Option<String> {
-    if first_codex_positional_arg(&process.argv) != Some("app-server") {
-        return None;
-    }
+) -> std::result::Result<Option<String>, SessionPromptWriteError> {
+    let app_server_command = first_codex_positional_arg(&process.argv) == Some("app-server");
+    let mut inline_listen = false;
+    let mut separate_listen = false;
+    let mut separate_value = None;
     let mut index = 1;
-    let mut value = None;
     while index < process.argv.len() {
         let argument = process.argv[index].as_str();
         if argument == "--listen" {
-            value = process.argv.get(index + 1).cloned();
+            separate_listen = true;
+            separate_value = process.argv.get(index + 1).cloned();
             break;
         }
         if let Some(value) = argument.strip_prefix("--listen=") {
-            return valid_unix_endpoint(value, codex_home);
+            inline_listen = true;
+            separate_value = Some(value.to_string());
+            break;
         }
         index += 1;
     }
-    let value = value?;
-    let endpoint = valid_unix_endpoint(&value, codex_home)?;
-    let endpoint_path = endpoint.strip_prefix("unix://")?;
-    let endpoint_path = Path::new(endpoint_path).canonicalize().ok()?;
-    open_files
+    let mode = session_cli_policy::prompt_write_endpoint_mode(
+        app_server_command,
+        inline_listen,
+        separate_listen,
+        separate_value.is_some(),
+    )
+    .map_err(|_| SessionPromptWriteError::VerificationInconclusive)?;
+    if mode == 0 {
+        return Ok(None);
+    }
+    let Some(value) = separate_value else {
+        return Ok(None);
+    };
+    let Some(endpoint) = valid_unix_endpoint(&value, codex_home) else {
+        return Ok(None);
+    };
+    let Some(endpoint_path) = endpoint.strip_prefix("unix://") else {
+        return Ok(None);
+    };
+    let Ok(endpoint_path) = Path::new(endpoint_path).canonicalize() else {
+        return Ok(None);
+    };
+    Ok(open_files
         .iter()
         .any(|file| {
             is_control_socket(&file.path)
@@ -143,7 +165,7 @@ pub(crate) fn remote_endpoint(
                     .ok()
                     .is_some_and(|path| path == endpoint_path)
         })
-        .then_some(endpoint)
+        .then_some(endpoint))
 }
 
 fn valid_unix_endpoint(value: &str, codex_home: &Path) -> Option<String> {

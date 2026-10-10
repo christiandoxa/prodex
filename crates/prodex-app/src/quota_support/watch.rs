@@ -1,5 +1,4 @@
 use super::*;
-#[cfg(test)]
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 #[path = "watch_tui.rs"]
@@ -65,6 +64,55 @@ enum QuotaWatchCommandOutcome {
     Filter,
     Update,
     Quit,
+}
+
+fn quota_watch_command(key: KeyEvent) -> Option<QuotaWatchCommand> {
+    let (key_kind, char_code) = match key.code {
+        KeyCode::Esc => (1, None),
+        KeyCode::Char(value) => (2, Some(value)),
+        KeyCode::Down => (3, None),
+        KeyCode::Up => (4, None),
+        _ => (0, None),
+    };
+    match prodex_mojo_core::quota_watch_policy::key_action(
+        key_kind,
+        char_code,
+        key.modifiers.contains(KeyModifiers::CONTROL),
+    )
+    .expect("Mojo quota-watch key classification failed")
+    {
+        prodex_mojo_core::quota_watch_policy::ACTION_UP => Some(QuotaWatchCommand::Up),
+        prodex_mojo_core::quota_watch_policy::ACTION_DOWN => Some(QuotaWatchCommand::Down),
+        prodex_mojo_core::quota_watch_policy::ACTION_SORT => Some(QuotaWatchCommand::Sort),
+        prodex_mojo_core::quota_watch_policy::ACTION_FILTER => Some(QuotaWatchCommand::Filter),
+        prodex_mojo_core::quota_watch_policy::ACTION_UPDATE => Some(QuotaWatchCommand::Update),
+        prodex_mojo_core::quota_watch_policy::ACTION_QUIT => Some(QuotaWatchCommand::Quit),
+        -1 => None,
+        _ => unreachable!("validated Mojo quota-watch action"),
+    }
+}
+
+fn quota_watch_provider_filter_kind(provider_filter: QuotaProviderFilter) -> i64 {
+    provider_filter.policy_kind()
+}
+
+fn quota_watch_snapshot_kind(report: &QuotaReport) -> (i64, Option<&str>) {
+    match report.result.as_ref() {
+        Ok(ProviderQuotaSnapshot::OpenAi(_)) => {
+            (prodex_mojo_core::quota_watch_policy::SNAPSHOT_OPENAI, None)
+        }
+        Ok(ProviderQuotaSnapshot::Gemini(_)) => {
+            (prodex_mojo_core::quota_watch_policy::SNAPSHOT_GEMINI, None)
+        }
+        Ok(ProviderQuotaSnapshot::Copilot(_)) => {
+            (prodex_mojo_core::quota_watch_policy::SNAPSHOT_COPILOT, None)
+        }
+        Ok(ProviderQuotaSnapshot::External(info)) => (
+            prodex_mojo_core::quota_watch_policy::SNAPSHOT_EXTERNAL,
+            Some(info.provider.as_str()),
+        ),
+        Err(_) => (prodex_mojo_core::quota_watch_policy::SNAPSHOT_NONE, None),
+    }
 }
 #[derive(Debug, Clone)]
 struct ProfileQuotaWatchSnapshot {
@@ -308,21 +356,29 @@ fn quota_watch_without_interactive_scroll_notice(output: &str) -> String {
 }
 
 fn quota_watch_scroll_range(window: &RenderedQuotaReportWindow) -> Option<String> {
-    if window.total_profiles == 0 || (window.hidden_before == 0 && window.hidden_after == 0) {
-        return None;
-    }
-    if window.shown_profiles == 0 {
-        return Some(format!(
+    match prodex_mojo_core::quota_watch_policy::scroll_kind(
+        window.total_profiles,
+        window.shown_profiles,
+        window.hidden_before,
+        window.hidden_after,
+    )
+    .expect("Mojo quota-watch scroll visibility policy failed")
+    {
+        0 => None,
+        1 => Some(format!(
             "0/{} visible; {} above, {} below",
             window.total_profiles, window.hidden_before, window.hidden_after
-        ));
+        )),
+        2 => {
+            let first_visible = window.start_profile.saturating_add(1);
+            let last_visible = window.start_profile.saturating_add(window.shown_profiles);
+            Some(format!(
+                "{first_visible}-{last_visible}/{}; {} above, {} below",
+                window.total_profiles, window.hidden_before, window.hidden_after
+            ))
+        }
+        _ => unreachable!("validated Mojo quota-watch scroll kind"),
     }
-    let first_visible = window.start_profile.saturating_add(1);
-    let last_visible = window.start_profile.saturating_add(window.shown_profiles);
-    Some(format!(
-        "{first_visible}-{last_visible}/{}; {} above, {} below",
-        window.total_profiles, window.hidden_before, window.hidden_after
-    ))
 }
 
 fn filter_quota_reports_by_provider(
@@ -331,7 +387,16 @@ fn filter_quota_reports_by_provider(
 ) -> Vec<QuotaReport> {
     reports
         .iter()
-        .filter(|report| provider_filter.matches_report(report))
+        .filter(|report| {
+            let (snapshot_kind, provider) = quota_watch_snapshot_kind(report);
+            prodex_mojo_core::quota_watch_policy::filter_matches(
+                quota_watch_provider_filter_kind(provider_filter),
+                snapshot_kind,
+                &report.auth.label,
+                provider,
+            )
+            .expect("Mojo quota-watch provider filter policy failed")
+        })
         .cloned()
         .collect()
 }
@@ -339,7 +404,10 @@ fn filter_quota_reports_by_provider(
 fn quota_watch_available_report_lines(header: &str) -> Option<usize> {
     let terminal_height = terminal_height_lines()?;
     let reserved = header.lines().count().saturating_add(2);
-    Some(terminal_height.saturating_sub(reserved))
+    Some(
+        prodex_mojo_core::quota_watch_policy::available_lines(terminal_height, reserved)
+            .expect("Mojo quota-watch report viewport policy failed"),
+    )
 }
 
 fn quota_watch_tui_fallback_message(err: &anyhow::Error) -> String {
@@ -395,7 +463,7 @@ fn load_all_quota_watch_snapshot(
 }
 
 fn quota_watch_next_refresh_at() -> Instant {
-    Instant::now() + Duration::from_secs(DEFAULT_WATCH_INTERVAL_SECONDS)
+    Instant::now() + quota_watch_refresh_duration()
 }
 
 fn all_quota_watch_next_refresh_at(
@@ -438,12 +506,12 @@ fn quota_watch_runtime_usage_cache_enabled(
     auth_filter: &QuotaAuthFilter,
     provider_filter: QuotaProviderFilter,
 ) -> bool {
-    detail
-        && matches!(auth_filter, QuotaAuthFilter::All)
-        && matches!(
-            provider_filter,
-            QuotaProviderFilter::All | QuotaProviderFilter::OpenAi
-        )
+    prodex_mojo_core::quota_watch_policy::cache_is_eligible(
+        detail,
+        i64::from(!matches!(auth_filter, QuotaAuthFilter::All)),
+        quota_watch_provider_filter_kind(provider_filter),
+    )
+    .expect("Mojo quota-watch cache eligibility policy failed")
 }
 
 fn all_quota_watch_refresh_interval(
@@ -451,7 +519,14 @@ fn all_quota_watch_refresh_interval(
     _detail: bool,
     _now: i64,
 ) -> Duration {
-    Duration::from_secs(DEFAULT_WATCH_INTERVAL_SECONDS)
+    quota_watch_refresh_duration()
+}
+
+fn quota_watch_refresh_duration() -> Duration {
+    Duration::from_secs(
+        prodex_mojo_core::quota_watch_policy::live_refresh_seconds()
+            .expect("Mojo quota-watch live refresh policy failed"),
+    )
 }
 
 fn quota_watch_max_scroll_offset(
@@ -517,18 +592,29 @@ fn merge_all_quota_watch_snapshot(
     previous: &AllQuotaWatchSnapshot,
     next: AllQuotaWatchSnapshot,
 ) -> AllQuotaWatchSnapshot {
-    match (previous, next) {
-        (
-            AllQuotaWatchSnapshot::Reports {
+    let plan = prodex_mojo_core::quota_watch_policy::merge_plan(
+        all_quota_watch_snapshot_kind(previous),
+        all_quota_watch_snapshot_kind(&next),
+    )
+    .expect("Mojo quota-watch snapshot merge policy failed");
+    match plan {
+        prodex_mojo_core::quota_watch_policy::SNAPSHOT_KEEP_PREVIOUS => previous.clone(),
+        prodex_mojo_core::quota_watch_policy::SNAPSHOT_MERGE_REPORTS => {
+            let AllQuotaWatchSnapshot::Reports {
                 reports: previous_reports,
                 ..
-            },
-            AllQuotaWatchSnapshot::Reports {
+            } = previous
+            else {
+                unreachable!("Mojo quota-watch merge plan requires report snapshot");
+            };
+            let AllQuotaWatchSnapshot::Reports {
                 updated,
                 profile_count,
                 mut reports,
-            },
-        ) => {
+            } = next
+            else {
+                unreachable!("Mojo quota-watch merge plan requires report snapshot");
+            };
             preserve_previous_successful_quota_reports(previous_reports, &mut reports);
             AllQuotaWatchSnapshot::Reports {
                 updated,
@@ -536,10 +622,17 @@ fn merge_all_quota_watch_snapshot(
                 reports,
             }
         }
-        (AllQuotaWatchSnapshot::Reports { .. }, AllQuotaWatchSnapshot::Error { .. }) => {
-            previous.clone()
-        }
-        (_, next) => next,
+        prodex_mojo_core::quota_watch_policy::SNAPSHOT_USE_NEXT => next,
+        _ => unreachable!("validated Mojo quota-watch merge plan"),
+    }
+}
+
+fn all_quota_watch_snapshot_kind(snapshot: &AllQuotaWatchSnapshot) -> i64 {
+    match snapshot {
+        AllQuotaWatchSnapshot::Loading { .. } => 0,
+        AllQuotaWatchSnapshot::Reports { .. } => 1,
+        AllQuotaWatchSnapshot::Empty { .. } => 2,
+        AllQuotaWatchSnapshot::Error { .. } => 3,
     }
 }
 
@@ -579,12 +672,6 @@ fn preserve_previous_successful_quota_reports(
     reports: &mut [QuotaReport],
 ) {
     for report in reports {
-        if report.result.is_ok() {
-            continue;
-        }
-        if quota_watch_error_is_auth_failure(&report.result) {
-            continue;
-        }
         let Some(previous) = previous_reports.iter().find(|previous| {
             previous.name == report.name
                 && previous.result.is_ok()
@@ -592,18 +679,27 @@ fn preserve_previous_successful_quota_reports(
         }) else {
             continue;
         };
-        *report = previous.clone();
+        if prodex_mojo_core::quota_watch_policy::preserve_report(
+            previous.result.is_ok(),
+            report.result.is_ok(),
+            report
+                .result
+                .as_ref()
+                .err()
+                .is_some_and(|error| quota_watch_error_is_auth_failure(error)),
+            previous.name == report.name,
+            previous.auth.label == report.auth.label,
+        )
+        .expect("Mojo quota-watch report preservation policy failed")
+        {
+            *report = previous.clone();
+        }
     }
 }
 
-fn quota_watch_error_is_auth_failure(
-    result: &std::result::Result<ProviderQuotaSnapshot, String>,
-) -> bool {
-    let Err(error) = result else {
-        return false;
-    };
-    let lower = error.to_ascii_lowercase();
-    lower.contains("401") || lower.contains("unauthorized") || lower.contains("token invalidated")
+fn quota_watch_error_is_auth_failure(error: &str) -> bool {
+    prodex_mojo_core::quota::quota_error_auth_failure(error, true)
+        .expect("Mojo quota-watch error category policy failed")
 }
 
 fn apply_quota_watch_command(
@@ -611,17 +707,26 @@ fn apply_quota_watch_command(
     scroll_offset: usize,
     max_scroll_offset: usize,
 ) -> QuotaWatchCommandOutcome {
-    match command {
-        QuotaWatchCommand::Up => {
-            QuotaWatchCommandOutcome::Continue(scroll_offset.saturating_sub(1))
+    let action = match command {
+        QuotaWatchCommand::Up => prodex_mojo_core::quota_watch_policy::ACTION_UP,
+        QuotaWatchCommand::Down => prodex_mojo_core::quota_watch_policy::ACTION_DOWN,
+        QuotaWatchCommand::Sort => prodex_mojo_core::quota_watch_policy::ACTION_SORT,
+        QuotaWatchCommand::Filter => prodex_mojo_core::quota_watch_policy::ACTION_FILTER,
+        QuotaWatchCommand::Update => prodex_mojo_core::quota_watch_policy::ACTION_UPDATE,
+        QuotaWatchCommand::Quit => prodex_mojo_core::quota_watch_policy::ACTION_QUIT,
+    };
+    let (outcome, next_offset) =
+        prodex_mojo_core::quota_watch_policy::action(action, scroll_offset, max_scroll_offset)
+            .expect("Mojo quota-watch action policy failed");
+    match outcome {
+        prodex_mojo_core::quota_watch_policy::OUTCOME_CONTINUE => {
+            QuotaWatchCommandOutcome::Continue(next_offset)
         }
-        QuotaWatchCommand::Down => QuotaWatchCommandOutcome::Continue(
-            scroll_offset.saturating_add(1).min(max_scroll_offset),
-        ),
-        QuotaWatchCommand::Sort => QuotaWatchCommandOutcome::Sort,
-        QuotaWatchCommand::Filter => QuotaWatchCommandOutcome::Filter,
-        QuotaWatchCommand::Update => QuotaWatchCommandOutcome::Update,
-        QuotaWatchCommand::Quit => QuotaWatchCommandOutcome::Quit,
+        prodex_mojo_core::quota_watch_policy::OUTCOME_SORT => QuotaWatchCommandOutcome::Sort,
+        prodex_mojo_core::quota_watch_policy::OUTCOME_FILTER => QuotaWatchCommandOutcome::Filter,
+        prodex_mojo_core::quota_watch_policy::OUTCOME_UPDATE => QuotaWatchCommandOutcome::Update,
+        prodex_mojo_core::quota_watch_policy::OUTCOME_QUIT => QuotaWatchCommandOutcome::Quit,
+        _ => unreachable!("validated Mojo quota-watch action outcome"),
     }
 }
 

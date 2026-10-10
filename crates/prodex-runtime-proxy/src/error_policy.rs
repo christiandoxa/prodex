@@ -9,6 +9,7 @@ mod stream;
 pub use rate_limit_header::runtime_http_error_policy_with_headers;
 pub use retry_after::{runtime_retry_after_from_headers, runtime_retry_after_from_message};
 pub use signal::runtime_error_signal_message_from_value;
+pub(crate) use stream::runtime_stream_error_policy_from_value_checked;
 pub use stream::{
     runtime_http_error_action_label, runtime_http_error_class_label, runtime_stream_error_policy,
     runtime_stream_error_policy_from_value,
@@ -110,15 +111,25 @@ fn runtime_error_policy_from_mojo(
     phase: RuntimeHttpErrorPhase,
     body: &[u8],
 ) -> RuntimeHttpErrorPolicy {
+    runtime_error_policy_from_mojo_checked(operation, status, phase, body)
+        .unwrap_or_else(|_| RuntimeHttpErrorPolicy::pass_through())
+}
+
+pub(crate) fn runtime_error_policy_from_mojo_checked(
+    operation: i64,
+    status: u16,
+    phase: RuntimeHttpErrorPhase,
+    body: &[u8],
+) -> Result<RuntimeHttpErrorPolicy, prodex_mojo_core::MojoError> {
     let phase = match phase {
         RuntimeHttpErrorPhase::PreCommit => 0,
         RuntimeHttpErrorPhase::Committed => 1,
     };
-    let Ok((class, action, message)) =
-        prodex_mojo_core::MojoError::rich_runtime_error_policy(operation, status, phase, body)
-    else {
-        return RuntimeHttpErrorPolicy::pass_through();
-    };
+    let (class, action, message) =
+        prodex_mojo_core::MojoError::rich_runtime_error_policy(operation, status, phase, body)?;
+    if class == 0 && action == 0 && message.is_empty() {
+        return Ok(RuntimeHttpErrorPolicy::pass_through());
+    }
     let (class, rule) = match class {
         1 => (RuntimeHttpErrorClass::Quota, "explicit_quota"),
         2 => (RuntimeHttpErrorClass::RateLimited, "rate_limited"),
@@ -128,15 +139,15 @@ fn runtime_error_policy_from_mojo(
         ),
         4 => (RuntimeHttpErrorClass::Overload, "explicit_overload"),
         5 => (RuntimeHttpErrorClass::TransientServer, "transient_5xx"),
-        _ => return RuntimeHttpErrorPolicy::pass_through(),
+        _ => return Err(prodex_mojo_core::MojoError::InvalidOutput),
     };
     let action = match action {
         0 => RuntimeHttpErrorAction::PassThrough,
         1 => RuntimeHttpErrorAction::RotateProfile,
         2 => RuntimeHttpErrorAction::RetryProfile,
-        _ => return RuntimeHttpErrorPolicy::pass_through(),
+        _ => return Err(prodex_mojo_core::MojoError::InvalidOutput),
     };
-    RuntimeHttpErrorPolicy {
+    Ok(RuntimeHttpErrorPolicy {
         class,
         action,
         rule: Some(rule),
@@ -144,7 +155,7 @@ fn runtime_error_policy_from_mojo(
             .then(|| runtime_retry_after_from_message(&message))
             .flatten(),
         message: Some(message),
-    }
+    })
 }
 
 pub fn runtime_error_signal_message_from_text(
