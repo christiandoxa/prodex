@@ -57,10 +57,10 @@ capped by its existing hard limit, before reading state or launching workers.
 It does not lower a larger limit, alter the host hard limit, close other tasks'
 descriptors, rewrite state, or substitute a fabricated empty state.
 
-Two isolated child-process tests prove that exhausted descriptor capacity causes
+Three isolated child-process tests prove that exhausted descriptor capacity causes
 `EMFILE` while reading a synthetic state file, that the helper restores that read
 without changing its content, and that higher existing limits and the hard limit
-are preserved. This is a tested headroom mitigation, not a claim that every
+are preserved. A nested exec regression verifies that spawned child processes inherit the raised soft limit. This is a tested headroom mitigation, not a claim that every
 possible descriptor leak or host-wide resource shortage is fixed.
 
 ## Regression evidence
@@ -78,6 +78,7 @@ Focused tests include:
 - `runtime_proxy_websocket_owned_quota_replays_on_ready_profile`
 - `descriptor_headroom_recovers_state_reads_under_inherited_low_limit`
 - `descriptor_headroom_never_lowers_existing_limits`
+- `descriptor_headroom_is_inherited_by_exec_child`
 
 A mutation that falsely marked every alternate as quota-blocked made the busy-account
 regression fail with the expected assertion. Restoring the source byte-for-byte

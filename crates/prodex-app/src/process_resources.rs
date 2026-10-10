@@ -108,6 +108,52 @@ mod tests {
     }
 
     #[test]
+    fn descriptor_headroom_is_inherited_by_exec_child() {
+        const CHILD: &str = "PRODEX_DESCRIPTOR_EXEC_TEST_CHILD";
+        const TEST: &str =
+            "process_resources::tests::descriptor_headroom_is_inherited_by_exec_child";
+        let mode = std::env::var(CHILD).ok();
+        if mode.as_deref() == Some("observe") {
+            let inherited = limits();
+            assert_eq!(inherited.rlim_cur, inherited.rlim_max);
+            assert_eq!(inherited.rlim_max, 256);
+            println!("DESCRIPTOR_EXEC_CHILD_INHERITED");
+            return;
+        }
+        let child_mode = if mode.as_deref() == Some("prepare") {
+            let inherited = limits();
+            assert!(
+                inherited.rlim_max >= 256,
+                "test needs a hard limit of at least 256"
+            );
+            let low = libc::rlimit {
+                rlim_cur: 64,
+                rlim_max: 256,
+            };
+            assert_eq!(unsafe { libc::setrlimit(libc::RLIMIT_NOFILE, &low) }, 0);
+            prepare_descriptor_headroom().unwrap();
+            "observe"
+        } else {
+            "prepare"
+        };
+        let output = Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", TEST, "--nocapture"])
+            .env(CHILD, child_mode)
+            .output()
+            .expect("isolated inherited-limit test process must run");
+        assert!(
+            output.status.success(),
+            "{}{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert!(
+            String::from_utf8_lossy(&output.stdout).contains("DESCRIPTOR_EXEC_CHILD_INHERITED")
+        );
+        println!("DESCRIPTOR_EXEC_CHILD_INHERITED");
+    }
+
+    #[test]
     fn descriptor_headroom_never_lowers_existing_limits() {
         const CHILD: &str = "PRODEX_DESCRIPTOR_PRESERVE_TEST_CHILD";
         if std::env::var_os(CHILD).is_none() {
