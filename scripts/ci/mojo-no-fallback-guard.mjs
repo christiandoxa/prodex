@@ -98,6 +98,7 @@ const PROFILE_LOGIN_ADAPTER_FILE = "crates/prodex-mojo-core/src/profile_login_po
 const PROFILE_LOGIN_MOJO_FILE = "mojo/prodex_core/profile_login_policy.mojo";
 const PROFILE_LOGIN_TEST_FILE = "crates/prodex-mojo-core/tests/profile_login_policy.rs";
 const PROMOTED_FILES = [
+  "crates/prodex-mojo-core/src/rich/runtime_doctor_plan/tests.rs",
   "crates/prodex-runtime-broker/src/registry.rs",
   "crates/prodex-runtime-broker/src/process.rs",
   "mojo/prodex_core/runtime_broker_continuity.mojo",
@@ -4715,8 +4716,11 @@ export function findViolations(files) {
   const runtimeDoctorPlanInputViolations = files.flatMap(([filePath, contents]) => {
     if (filePath === RUNTIME_DOCTOR_PLAN_ADAPTER_FILE) {
       const rustValidators = /\bfn (?:input_is_valid|summary_plan_input_is_valid|state_plan_input_is_valid|route_plan_input_is_valid)\s*\(/u;
+      const callerTests = files.find(([candidate]) =>
+        candidate === "crates/prodex-mojo-core/src/rich/runtime_doctor_plan/tests.rs")?.[1] ?? "";
       return !rustValidators.test(contents) &&
-          contents.includes("input_contracts_are_validated_by_mojo")
+          (contents.includes("input_contracts_are_validated_by_mojo") ||
+            (contents.includes("mod tests;") && callerTests.includes("input_contracts_are_validated_by_mojo")))
         ? []
         : [`${filePath}: runtime-doctor fixed-layout input contracts must be validated by Mojo and covered through the real Rust caller`];
     }
