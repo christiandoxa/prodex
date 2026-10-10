@@ -173,7 +173,12 @@ def prodex_runtime_websocket_failure_decision_v2(
                 or direct_current_fallback == 1
             )
             retryable = True
-            last_failure_retryable = failure_kind != WEBSOCKET_FAILURE_RATE_LIMITED
+            # Preserve rate-limit/overload failures after candidate exhaustion;
+            # quota/auth failures with an available alternate remain retryable.
+            last_failure_retryable = (
+                failure_kind == WEBSOCKET_FAILURE_QUOTA
+                or failure_kind == WEBSOCKET_FAILURE_AUTH_FAILED
+            )
             record_rate_limit = failure_kind == WEBSOCKET_FAILURE_RATE_LIMITED
             record_overload = failure_kind == WEBSOCKET_FAILURE_OVERLOADED
     elif full_context_retry_available == 1:

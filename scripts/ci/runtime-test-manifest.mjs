@@ -747,6 +747,10 @@ export const RUNTIME_CI_TEST_CASES = [
     tags: CONTINUATION_TAGS,
   },
   {
+    name: "runtime_proxy_websocket_owned_quota_waits_for_busy_fallback_without_quota_leak",
+    tags: CONTINUATION_TAGS,
+  },
+  {
     name: "runtime_proxy_http_compact_previous_response_not_found_surfaces_stale_continuation",
     tags: CONTINUATION_TAGS,
   },

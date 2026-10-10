@@ -65,6 +65,65 @@ pub(crate) fn runtime_has_route_ready_quota_fallback_for_model(
     )
 }
 
+/// Full-context recovery can wait for an account; this is not immediate
+/// admission and must not replace normal ready/last-chance selection checks.
+pub(crate) fn runtime_has_route_recoverable_quota_fallback_for_model(
+    shared: &RuntimeRotationProxyShared,
+    profile_name: &str,
+    excluded_profiles: &BTreeSet<String>,
+    route_kind: RuntimeRouteKind,
+    requested_model: Option<&str>,
+) -> Result<bool> {
+    let now = Local::now().timestamp();
+    let mut runtime = shared
+        .runtime
+        .lock()
+        .map_err(|_| anyhow::anyhow!("runtime auto-rotate state is poisoned"))?;
+    prune_runtime_profile_selection_backoff(&mut runtime, now);
+    for (candidate_name, profile) in &runtime.state.profiles {
+        if candidate_name == profile_name || excluded_profiles.contains(candidate_name) {
+            continue;
+        }
+        let (summary, _) = runtime_profile_quota_summary_for_route_from_state_with_model(
+            &runtime,
+            candidate_name,
+            route_kind,
+            requested_model,
+            now,
+        );
+        let quota_quarantined = runtime
+            .profile_retry_backoff_until
+            .get(candidate_name)
+            .is_some_and(|until| *until > now);
+        let auth = runtime_profile_cached_auth_summary_from_maps_for_selection(
+            candidate_name,
+            &runtime.profile_usage_auth,
+            &runtime.profile_probe_cache,
+        );
+        if prodex_mojo_core::runtime::waitable_candidate_eligible(
+            prodex_mojo_core::runtime::WaitableCandidateMode::RetryablePool,
+            prodex_mojo_core::runtime::WaitableCandidateInput {
+                context_allowed: true,
+                auth_compatible: auth.is_some_and(|auth| auth.quota_compatible),
+                supports_runtime: profile.provider.supports_codex_runtime(),
+                auth_failure_active: runtime_profile_auth_failure_active_from_map(
+                    &runtime.profile_health,
+                    candidate_name,
+                    now,
+                ),
+                quota_blocked: quota_quarantined
+                    || runtime_quota_precommit_guard_reason(summary, route_kind).is_some(),
+                ..Default::default()
+            },
+        )
+        .map_err(|error| anyhow::anyhow!("Mojo quota recovery eligibility failed: {error:?}"))?
+        {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
 fn runtime_has_route_quota_fallback(
     shared: &RuntimeRotationProxyShared,
     profile_name: &str,

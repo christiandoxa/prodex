@@ -423,7 +423,7 @@ impl<'a> RuntimeWebsocketTextMessageFlow<'a> {
             runtime_proxy_log(
                 self.shared,
                 format!(
-                    "request={} websocket_session={} upstream_usage_limit_passthrough route=websocket profile={} reason=hard_affinity",
+                    "request={} websocket_session={} upstream_usage_limit_passthrough route=websocket profile={} reason=hard_affinity affinity_releasable={affinity_releasable} full_context_retry_available={full_context_retry_available} quota_fallback_available={quota_fallback_available}",
                     self.request_id, self.session_id, profile_name
                 ),
             );

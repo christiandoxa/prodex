@@ -238,7 +238,19 @@ impl<'a> RuntimeWebsocketTextMessageFlow<'a> {
         let force_reselection_after_wait = !(self.saw_overload_failure
             || self.saw_rate_limit_failure
             || self.saw_transport_failure);
-        if self.has_continuation_priority()
+        // Scheduling priority includes soft session affinity; recovery ownership
+        // must not. Full-history replay can wait for another account while
+        // opaque previous-response/turn-state and compact owners stay pinned.
+        let has_hard_recovery_owner = crate::runtime_proxy_has_continuation_priority(
+            self.previous_response_id.as_deref(),
+            self.pinned_profile.as_deref(),
+            self.request_turn_state.as_deref(),
+            self.turn_state_profile.as_deref(),
+            self.compact_followup_profile
+                .as_ref()
+                .map(|(profile, _)| profile.as_str()),
+        );
+        if has_hard_recovery_owner
             || !runtime_route_has_retryable_profile(self.shared, RuntimeRouteKind::Websocket)?
         {
             return Ok(false);
@@ -410,9 +422,17 @@ impl<'a> RuntimeWebsocketTextMessageFlow<'a> {
             route_kind: RuntimeRouteKind::Websocket,
             selection_started_at,
             continuation: self.has_continuation_priority(),
-            wait_affinity_owner: runtime_noncompact_session_priority_profile(
-                self.session_profile.as_deref(),
-                self.compact_session_profile.as_deref(),
+            // A session preference is soft after full-context replay. Waiting
+            // must retain strict/turn-state/verified-response ownership, but
+            // must not pin recovery to the exhausted prior session account.
+            wait_affinity_owner: crate::runtime_wait_affinity_owner(
+                self.compact_followup_profile
+                    .as_ref()
+                    .map(|(profile, _)| profile.as_str()),
+                self.pinned_profile.as_deref(),
+                self.turn_state_profile.as_deref(),
+                None,
+                self.trusted_previous_response_affinity,
             ),
             selected_profile: None,
         })? {

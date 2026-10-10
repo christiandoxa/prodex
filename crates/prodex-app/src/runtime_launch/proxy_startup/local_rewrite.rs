@@ -227,6 +227,8 @@ pub(super) fn start_runtime_local_rewrite_proxy_with_file_access(
             .expect("runtime local rewrite listener should start");
     }
     Ok(RuntimeRotationProxy {
+        #[cfg(test)]
+        test_lane_admission: shared.runtime_shared.lane_admission.clone(),
         runtime_config: Arc::clone(&runtime_config),
         server,
         draining,

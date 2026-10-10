@@ -3,6 +3,7 @@ use super::super::test_support::{
 };
 use super::*;
 use crate::{ProfileEntry, ProfileProvider, RuntimeRotationProxyShared};
+use std::collections::BTreeSet;
 use std::path::PathBuf;
 
 #[test]
@@ -108,6 +109,188 @@ fn retryable_pool_extends_fresh_budget_but_not_continuation_budget() {
     assert!(
         flow.precommit_budget_exhausted(expired, 1, false)
             .expect("continuation affinity should keep the retry budget authoritative")
+    );
+}
+
+#[test]
+fn quota_recovery_keeps_busy_positive_quota_account_eligible_for_full_context_retry() {
+    let _guard = acquire_test_runtime_lock();
+    let shared = capacity_ready_shared("quota-busy-alternative");
+    shared.lane_admission.set_profile_inflight("main", 2);
+    assert!(
+        crate::runtime_has_route_recoverable_quota_fallback_for_model(
+            &shared,
+            "exhausted",
+            &BTreeSet::new(),
+            RuntimeRouteKind::Websocket,
+            None
+        )
+        .unwrap(),
+        "temporary local load must not leak exhausted-owner quota to the client"
+    );
+    assert!(
+        crate::runtime_profile_inflight_hard_limited_for_context(
+            &shared,
+            "main",
+            "websocket_session"
+        )
+        .unwrap(),
+        "eligibility must not bypass actual admission limits"
+    );
+    assert!(
+        !crate::runtime_has_route_ready_quota_fallback_for_model(
+            &shared,
+            "exhausted",
+            &BTreeSet::new(),
+            RuntimeRouteKind::Websocket,
+            None
+        )
+        .unwrap(),
+        "ready-now and recoverable eligibility are different facts"
+    );
+}
+
+#[test]
+fn quota_recovery_keeps_temporary_transport_backoff_distinct_from_quota_exhaustion() {
+    let _guard = acquire_test_runtime_lock();
+    let shared = capacity_ready_shared("quota-backoff-alternative");
+    let now = chrono::Local::now().timestamp();
+    {
+        let mut runtime = shared.runtime.lock().unwrap();
+        runtime.profile_transport_backoff_until.insert(
+            crate::runtime_profile_transport_backoff_key("main", RuntimeRouteKind::Websocket),
+            now + 10,
+        );
+    }
+    assert!(
+        crate::runtime_has_route_recoverable_quota_fallback_for_model(
+            &shared,
+            "exhausted",
+            &BTreeSet::new(),
+            RuntimeRouteKind::Websocket,
+            None
+        )
+        .unwrap(),
+        "recoverable transport cooldown is not a terminal empty quota pool"
+    );
+    {
+        let mut runtime = shared.runtime.lock().unwrap();
+        runtime
+            .profile_retry_backoff_until
+            .insert("main".to_string(), now + 86400);
+    }
+    assert!(
+        !crate::runtime_has_route_recoverable_quota_fallback_for_model(
+            &shared,
+            "exhausted",
+            &BTreeSet::new(),
+            RuntimeRouteKind::Websocket,
+            None
+        )
+        .unwrap(),
+        "confirmed account quota quarantine must not be bypassed"
+    );
+}
+
+#[test]
+fn quota_replay_soft_session_can_wait_for_other_accounts_transport_recovery() {
+    let _guard = acquire_test_runtime_lock();
+    let mut shared = capacity_ready_shared("quota-replay-transport-recovery");
+    shared.async_runtime = std::sync::Arc::new(
+        tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(1)
+            .enable_all()
+            .build()
+            .expect("running timer executor for transient recovery"),
+    );
+    let now = chrono::Local::now().timestamp();
+    shared
+        .runtime
+        .lock()
+        .unwrap()
+        .profile_transport_backoff_until
+        .insert(
+            crate::runtime_profile_transport_backoff_key("main", RuntimeRouteKind::Websocket),
+            now + 1,
+        );
+    let (mut socket, _peer) = test_runtime_local_websocket_pair();
+    let mut session = RuntimeWebsocketSessionState::default();
+    let mut flow = test_runtime_websocket_flow(&mut socket, &shared, &mut session);
+    flow.session_profile = Some("exhausted-owner".to_string());
+    flow.request_session_id = Some("existing-conversation".to_string());
+    assert!(
+        flow.has_continuation_priority(),
+        "conversation keeps scheduling priority"
+    );
+    assert!(
+        flow.wait_for_transient_recovery().unwrap(),
+        "a soft session preference must not strand full-context replay behind a recoverable cooldown"
+    );
+    flow.previous_response_id = Some("resp-hard-owner".to_string());
+    assert!(
+        !flow.wait_for_transient_recovery().unwrap(),
+        "opaque previous-response ownership still fails closed before replay"
+    );
+}
+
+#[test]
+fn quota_recovery_does_not_reuse_excluded_or_auth_incompatible_accounts() {
+    let _guard = acquire_test_runtime_lock();
+    let shared = capacity_ready_shared("quota-recovery-negative-controls");
+    assert!(
+        !crate::runtime_has_route_recoverable_quota_fallback_for_model(
+            &shared,
+            "exhausted",
+            &BTreeSet::from(["main".to_string()]),
+            RuntimeRouteKind::Websocket,
+            None,
+        )
+        .unwrap()
+    );
+    {
+        let mut runtime = shared.runtime.lock().unwrap();
+        runtime.profile_usage_auth.clear();
+        runtime
+            .profile_probe_cache
+            .get_mut("main")
+            .unwrap()
+            .auth
+            .quota_compatible = false;
+    }
+    assert!(
+        !crate::runtime_has_route_recoverable_quota_fallback_for_model(
+            &shared,
+            "exhausted",
+            &BTreeSet::new(),
+            RuntimeRouteKind::Websocket,
+            None,
+        )
+        .unwrap()
+    );
+}
+
+#[test]
+fn quota_recovery_rejects_zero_quota_even_without_a_transport_backoff() {
+    let _guard = acquire_test_runtime_lock();
+    let shared = capacity_ready_shared("quota-recovery-empty-quota");
+    {
+        let mut runtime = shared.runtime.lock().unwrap();
+        let probe = runtime.profile_probe_cache.get_mut("main").unwrap();
+        let mut usage = serde_json::to_value(probe.result.as_ref().unwrap()).unwrap();
+        usage["rate_limit"]["primary_window"]["used_percent"] = serde_json::json!(100);
+        usage["rate_limit"]["secondary_window"]["used_percent"] = serde_json::json!(100);
+        probe.result = Ok(serde_json::from_value(usage).unwrap());
+    }
+    assert!(
+        !crate::runtime_has_route_recoverable_quota_fallback_for_model(
+            &shared,
+            "exhausted",
+            &BTreeSet::new(),
+            RuntimeRouteKind::Websocket,
+            None,
+        )
+        .unwrap(),
+        "zero-quota accounts must not manufacture an alternate destination"
     );
 }
 

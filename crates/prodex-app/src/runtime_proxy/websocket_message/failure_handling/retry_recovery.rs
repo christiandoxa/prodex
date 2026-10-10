@@ -100,6 +100,15 @@ impl<'a> RuntimeWebsocketTextMessageFlow<'a> {
     }
 
     fn prepare_full_context_fallback(&mut self, profile_name: &str) -> Result<bool> {
+        if crate::runtime_has_route_recoverable_quota_fallback_for_model(
+            self.shared,
+            profile_name,
+            &self.excluded_profiles,
+            RuntimeRouteKind::Websocket,
+            runtime_smart_context_model_name_from_body(self.request_text.as_bytes()).as_deref(),
+        )? {
+            return Ok(true);
+        }
         self.prepare_quota_fallback_with_context(profile_name, false)
     }
 
