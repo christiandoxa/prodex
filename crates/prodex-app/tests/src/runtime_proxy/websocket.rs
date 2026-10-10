@@ -250,10 +250,17 @@ fn websocket_response_frame_plan_reaches_live_consumer_once() {
     let upstream_addr = listener
         .local_addr()
         .expect("upstream websocket listener should expose address");
+    // Keep the mock connection alive until the real consumer observes the
+    // terminal frame. Dropping it with an unread automatic Pong can reset the
+    // TCP connection on Windows before response.completed is consumed.
+    let (release_upstream, keep_upstream_alive) = std::sync::mpsc::channel();
     let upstream = thread::spawn(move || {
         let (stream, _) = listener
             .accept()
             .expect("upstream websocket should accept connection");
+        stream
+            .set_read_timeout(Some(Duration::from_secs(10)))
+            .expect("upstream pong wait should be bounded");
         let mut socket = tungstenite::accept(stream).expect("upstream websocket handshake");
         let _request = socket
             .read()
@@ -279,6 +286,16 @@ fn websocket_response_frame_plan_reaches_live_consumer_once() {
                 r#"{"type":"response.completed","response":{"id":"resp-frame-plan"}}"#.into(),
             ))
             .expect("upstream should send a terminal frame");
+        assert!(
+            matches!(
+                socket.read().expect("consumer should acknowledge upstream ping"),
+                WsMessage::Pong(payload) if payload.as_ref() == b"upstream-keepalive"
+            ),
+            "upstream must drain the control-frame reply before teardown"
+        );
+        keep_upstream_alive
+            .recv_timeout(Duration::from_secs(10))
+            .expect("consumer should finish assertions before upstream teardown");
     });
 
     let shared = websocket_test_shared_with_main_profile("frame-plan-consumer", upstream_addr);
@@ -336,6 +353,9 @@ fn websocket_response_frame_plan_reaches_live_consumer_once() {
         "the first meaningful output must commit exactly once: {log}"
     );
 
+    release_upstream
+        .send(())
+        .expect("mock upstream must remain alive until completion is observed");
     upstream
         .join()
         .expect("upstream websocket thread should finish");
