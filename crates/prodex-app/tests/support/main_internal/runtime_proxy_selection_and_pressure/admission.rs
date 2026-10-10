@@ -8,6 +8,8 @@ mod continuation_store;
 mod doctor_summary;
 #[path = "admission/guards.rs"]
 mod guards;
+#[path = "admission/lock_order.rs"]
+mod lock_order;
 #[path = "admission/hard_affinity_replay.rs"]
 mod hard_affinity_replay;
 #[path = "admission/helpers.rs"]

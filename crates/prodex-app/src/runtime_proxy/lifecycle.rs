@@ -53,7 +53,8 @@ pub(crate) fn try_acquire_runtime_proxy_active_request_slot(
     transport: &str,
     path: &str,
 ) -> Result<RuntimeProxyActiveRequestGuard, RuntimeProxyAdmissionRejection> {
-    match probe_runtime_proxy_active_request_slot(shared, transport, path, None) {
+    let facts = runtime_proxy_admission_request_facts(shared, transport, path, None);
+    match probe_runtime_proxy_active_request_slot(shared, transport, path, facts) {
         Ok(guard) => Ok(guard),
         Err(rejection) => {
             record_runtime_proxy_admission_rejection(shared, transport, path, rejection);
@@ -62,12 +63,24 @@ pub(crate) fn try_acquire_runtime_proxy_active_request_slot(
     }
 }
 
-fn probe_runtime_proxy_active_request_slot(
+#[derive(Clone, Copy)]
+struct RuntimeProxyAdmissionRequestFacts {
+    selection_revision: u64,
+    lane: RuntimeRouteKind,
+    bypass_lane_limit: bool,
+    bypass_owned_affinity_lane_limit: bool,
+}
+
+// Project ownership before acquiring the admission notification mutex. State
+// writers notify while holding runtime state, so the reverse lock order would
+// deadlock all selection, quota updates and metadata requests in this proxy.
+fn runtime_proxy_admission_request_facts(
     shared: &RuntimeRotationProxyShared,
     transport: &str,
     path: &str,
     request: Option<&RuntimeProxyRequest>,
-) -> Result<RuntimeProxyActiveRequestGuard, RuntimeProxyAdmissionRejection> {
+) -> RuntimeProxyAdmissionRequestFacts {
+    let selection_revision = shared.lane_admission.selection_change_revision();
     let lane = runtime_proxy_request_lane(path, transport == "websocket");
     let bypass_owned_affinity_lane_limit = request.is_some_and(|request| {
         runtime_proxy_request_has_owned_lane_affinity(shared, lane, request)
@@ -75,6 +88,28 @@ fn probe_runtime_proxy_active_request_slot(
     let bypass_lane_limit = lane == RuntimeRouteKind::Standard
         && runtime_proxy_startup_standard_lane_priority_path(path)
         || bypass_owned_affinity_lane_limit;
+    RuntimeProxyAdmissionRequestFacts {
+        selection_revision,
+        lane,
+        bypass_lane_limit,
+        bypass_owned_affinity_lane_limit,
+    }
+}
+
+// Atomic-only recheck: safe under lane_admission.wait(). This fact snapshot
+// authorizes only admission, never provider selection or continuation replay.
+fn probe_runtime_proxy_active_request_slot(
+    shared: &RuntimeRotationProxyShared,
+    transport: &str,
+    path: &str,
+    facts: RuntimeProxyAdmissionRequestFacts,
+) -> Result<RuntimeProxyActiveRequestGuard, RuntimeProxyAdmissionRejection> {
+    let RuntimeProxyAdmissionRequestFacts {
+        lane,
+        bypass_lane_limit,
+        bypass_owned_affinity_lane_limit,
+        ..
+    } = facts;
     match shared.lane_admission.try_acquire(
         Arc::clone(&shared.active_request_count),
         shared.active_request_limit,
@@ -264,7 +299,11 @@ pub(crate) fn acquire_runtime_proxy_active_request_slot_with_wait_for_request(
     let mut wait_metric =
         RuntimeProxyWaitMetricGuard::new(shared.lane_admission.admission_wait_metric_counters());
     loop {
-        match probe_runtime_proxy_active_request_slot(shared, transport, path, request) {
+        // Refresh ownership after every wake, but never with the notification
+        // mutex held. The second probe below reuses these facts to avoid the
+        // lost-wakeup race without reversing state -> notification lock order.
+        let facts = runtime_proxy_admission_request_facts(shared, transport, path, request);
+        match probe_runtime_proxy_active_request_slot(shared, transport, path, facts) {
             Ok(guard) => {
                 if wait_metric.started() {
                     runtime_proxy_log(
@@ -292,8 +331,15 @@ pub(crate) fn acquire_runtime_proxy_active_request_slot_with_wait_for_request(
                 let wait_guard = mutex
                     .lock()
                     .unwrap_or_else(|poisoned| poisoned.into_inner());
+                // A state writer may have notified after projection but before
+                // this lock. Refresh outside the mutex instead of sleeping on
+                // stale ownership and losing that wakeup.
+                if shared.lane_admission.selection_change_revision() != facts.selection_revision {
+                    drop(wait_guard);
+                    continue;
+                }
                 if let Ok(guard) =
-                    probe_runtime_proxy_active_request_slot(shared, transport, path, request)
+                    probe_runtime_proxy_active_request_slot(shared, transport, path, facts)
                 {
                     return Ok(guard);
                 }
