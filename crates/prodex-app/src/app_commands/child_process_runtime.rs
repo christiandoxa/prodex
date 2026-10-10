@@ -41,7 +41,11 @@ fn run_runtime_launch_plan_unix(
     if let Some(socket) = plan.companion_unix_socket.as_ref() {
         let _ = std::fs::remove_file(socket);
     }
-    let private_process_group = super::child_owns_private_process_group();
+    // The companion is a background process even when the TUI shares its
+    // terminal process group. Isolate its entire launcher/native-server tree:
+    // killing only an npm launcher would orphan the actual Codex app-server
+    // while execute_runtime_launch removes its proxy and overlay.
+    let private_process_group = true;
     let mut companion = spawn_companion(companion_plan, private_process_group)?;
     let companion_lease = match runtime_proxy {
         Some(proxy) => match proxy.create_child_lease(companion.id()) {
@@ -98,6 +102,7 @@ fn spawn_companion(
         command.env(key, value);
     }
     super::configure_child_process_group(&mut command, private_process_group);
+    super::configure_child_parent_death(&mut command);
     command.spawn().with_context(|| {
         format!(
             "failed to execute companion {}",
@@ -120,3 +125,7 @@ fn wait_for_unix_socket(path: &std::path::Path, child: &mut std::process::Child)
     }
     false
 }
+
+#[cfg(all(test, unix))]
+#[path = "child_process_runtime_tests.rs"]
+mod tests;
