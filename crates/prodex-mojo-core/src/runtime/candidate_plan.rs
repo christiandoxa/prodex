@@ -153,37 +153,6 @@ fn plan_indices(values: &[i64], count: usize, candidate_count: usize) -> Option<
         .collect()
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn output_rejects_invalid_inflight_flags_and_buffer_shapes() {
-        let mut tags = [0_i64; RUNTIME_CANDIDATE_DECISION_FIELD_COUNT];
-        tags[5] = 2;
-        assert!(matches!(
-            output(0, 0, 0, &[0], &[0], &tags, 1),
-            Err(crate::MojoError::InvalidOutput)
-        ));
-
-        tags[5] = 1;
-        assert!(matches!(
-            output(0, 0, 0, &[], &[0], &tags, 1),
-            Err(crate::MojoError::InvalidOutput)
-        ));
-        assert!(matches!(
-            output(0, 0, 0, &[0], &[0], &tags[..5], 1),
-            Err(crate::MojoError::InvalidOutput)
-        ));
-
-        tags[5] = 0;
-        assert!(matches!(
-            output(0, 0, 0, &[], &[0], &tags, 1),
-            Err(crate::MojoError::InvalidOutput)
-        ));
-    }
-}
-
 pub fn runtime_candidate_plan_batch(
     fields: &[i64],
     excluded: &[i64],
@@ -229,4 +198,35 @@ pub fn runtime_candidate_plan_batch(
         fallback_indices,
         decisions,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn output_rejects_invalid_inflight_flags_and_buffer_shapes() {
+        let mut tags = [0_i64; RUNTIME_CANDIDATE_DECISION_FIELD_COUNT];
+        tags[5] = 2;
+        assert!(matches!(
+            output(0, 0, 0, &[0], &[0], &tags, 1),
+            Err(crate::MojoError::InvalidOutput)
+        ));
+
+        tags[5] = 1;
+        assert!(matches!(
+            output(0, 0, 0, &[], &[0], &tags, 1),
+            Err(crate::MojoError::InvalidOutput)
+        ));
+        assert!(matches!(
+            output(0, 0, 0, &[0], &[0], &tags[..5], 1),
+            Err(crate::MojoError::InvalidOutput)
+        ));
+
+        tags[5] = 0;
+        assert!(matches!(
+            output(0, 0, 0, &[], &[0], &tags, 1),
+            Err(crate::MojoError::InvalidOutput)
+        ));
+    }
 }
