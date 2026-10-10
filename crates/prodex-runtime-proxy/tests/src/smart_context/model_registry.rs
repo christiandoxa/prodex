@@ -2,7 +2,7 @@ use super::*;
 
 #[test]
 fn model_registry_resolves_known_models_after_normalization() {
-    let window = smart_context_model_context_window(Some(" GPT-5.1-Codex "))
+    let window = smart_context_model_context_window(Some("\u{2003}GPT-5.1-Codex\u{3000}"))
         .expect("known model should resolve");
 
     assert_eq!(window.tokens, 200_000);
@@ -10,6 +10,23 @@ fn model_registry_resolves_known_models_after_normalization() {
     assert_eq!(
         window.registry_version,
         SMART_CONTEXT_MODEL_REGISTRY_VERSION
+    );
+}
+
+#[test]
+fn model_registry_normalization_rejects_controls_and_keeps_exact_bound() {
+    let exact = "x".repeat(128);
+    assert_eq!(
+        smart_context_normalized_model_name(Some(&exact)).as_deref(),
+        Some(exact.as_str())
+    );
+    assert_eq!(
+        smart_context_normalized_model_name(Some(&"x".repeat(129))),
+        None
+    );
+    assert_eq!(
+        smart_context_normalized_model_name(Some("gpt-5\u{0007}")),
+        None
     );
 }
 

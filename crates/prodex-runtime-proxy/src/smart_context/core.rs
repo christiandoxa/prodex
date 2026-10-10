@@ -1,7 +1,6 @@
 use super::*;
 
 pub(super) const SMART_CONTEXT_MODEL_SCAN_MAX_BYTES: usize = 4 * 1024;
-pub(super) const SMART_CONTEXT_MODEL_NAME_MAX_BYTES: usize = 128;
 
 pub fn smart_context_model_name_from_body(body: &[u8]) -> Option<String> {
     if body.is_empty() {
@@ -22,14 +21,10 @@ pub fn smart_context_model_name_from_body(body: &[u8]) -> Option<String> {
 }
 
 pub fn smart_context_normalized_model_name(value: Option<&str>) -> Option<String> {
-    let value = value?.trim();
-    if value.is_empty()
-        || value.len() > SMART_CONTEXT_MODEL_NAME_MAX_BYTES
-        || value.chars().any(char::is_control)
-    {
-        return None;
-    }
-    Some(value.to_string())
+    value.and_then(|value| {
+        prodex_mojo_core::smart_context_model_registry::normalize_model_name(value)
+            .expect("Mojo Smart Context model-name normalizer returned invalid output")
+    })
 }
 
 pub(super) fn smart_context_model_name_from_value(value: &serde_json::Value) -> Option<String> {
@@ -55,7 +50,7 @@ pub(super) fn smart_context_model_name_from_json_prefix(text: &str) -> Option<St
         } else {
             model.push(ch);
         }
-        if model.len() > SMART_CONTEXT_MODEL_NAME_MAX_BYTES {
+        if model.len() > SMART_CONTEXT_MODEL_SCAN_MAX_BYTES {
             return None;
         }
     }
