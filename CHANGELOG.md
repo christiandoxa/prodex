@@ -2,6 +2,80 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.437.3 - 2026-10-10
+
+### Runtime
+
+- Reap the session-owned native app-server process tree (`2efed0b`)
+- Prevent admission and quota-state notification deadlock (`370ee38`)
+# Prodex 0.437.3
+
+## New Features
+
+No new user-facing features. This patch focuses on runtime recovery and
+session-owned process lifecycle correctness.
+
+## Bug Fixes
+
+### Keep quota recovery and admission from deadlocking each other
+
+The admission retry path could acquire the notification mutex and then read
+runtime ownership state. Quota, backoff, and binding writers take the opposite
+order: runtime state, then the notification mutex. Under local saturation these
+two paths could wait on each other indefinitely. New requests and model metadata
+refreshes could then time out at the local proxy before account rotation or an
+upstream request was reached.
+
+Admission now projects ownership facts before acquiring the notification mutex.
+The lost-wakeup recheck performs only the existing atomic/Mojo admission plan,
+and ownership is refreshed after each wake. A selection-revision recheck also
+prevents notifications arriving between projection and locking from being lost.
+The snapshot authorizes admission
+only: provider selection still validates the actual account and continuation.
+The patch does not increase retry counts, bypass quota, discard hard affinity,
+or replay output after it has been committed.
+
+### Stop the complete session-owned app-server process tree
+
+Interactive launches previously used the terminal's process-group policy for the
+background app-server companion as well. With an npm launcher in front of the
+native executable, terminating that wrapper could leave the native server alive
+while its session-local proxy and overlay were being removed.
+
+The companion now always has its own process group, independent of the TUI. Its
+owned descendants are terminated together on session teardown; Linux also sets
+the existing parent-death signal guard during companion startup. Explicit remote
+servers and other user sessions are not taken over or terminated.
+
+## Verification
+
+- Reproduce the admission lock inversion on the previous release before applying
+  the fix; verify the second probe does not hold the notification mutex while
+  attempting to read runtime state.
+- Verify new ownership is observed after a selection-change notification and
+  temporary load still backpressures rather than becoming account exhaustion.
+- Reproduce a wrapped native app-server surviving its interactive launcher;
+  verify the owned native process no longer survives companion teardown.
+- Retain real-socket quota-positive-account recovery and precommit/continuation
+  regression coverage, including a temporarily busy alternative account.
+
+## Upgrade Notes
+
+Restart Prodex after upgrading to load the patch. A session-local `codex --remote`
+socket printed by a terminated launch is not a persistent service endpoint.
+Resume the saved conversation through a new Prodex launch instead of reconnecting
+to a removed overlay socket. This release does not claim that account rotation can
+eliminate model-wide upstream outages or unrelated network failures.
+
+## Changelog
+
+- Remove admission/state notification lock inversion without changing account policy.
+- Preserve ownership notifications across the admission retry handoff.
+- Reap session-owned app-server descendants before their proxy and overlay go away.
+- Retain hard affinity, quota-positive-account recovery, and descriptor safeguards.
+
+Full Changelog: [0.437.2...0.437.3](https://github.com/christiandoxa/prodex/compare/0.437.2...0.437.3)
+
 ## 0.437.2 - 2026-10-10
 
 ### Runtime
@@ -26,72 +100,6 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 - Preserve DeepSeek usage output and metadata edge cases (`f71e135`)
 - Preserve Gemini data URL and media text contracts (`0b84d7a`)
 - Select oldest cookie across bounded ABI chunks without Rust fallback (`fff216f`)
-# Prodex 0.437.2
-
-## New Features
-
-Qualifies upstream Codex `rust-v0.162.1` while preserving its native multiline
-async-question rendering and explicit CLI feature-override compatibility checks
-for shared daemons. The upstream source and transport assumptions are recorded
-in the compatibility baseline; Prodex does not duplicate the upstream TUI.
-
-## Bug Fixes
-
-### Recover on quota-positive accounts that are temporarily busy
-
-A quota failure from a bound account could be shown to the user even when another
-account had remaining quota. The recovery-eligibility check incorrectly treated
-temporary local in-flight load or transport backoff as terminal unavailability.
-The existing Mojo retryable-pool policy now distinguishes recoverability from
-immediate readiness. Exhausted quota, incompatible auth, unsupported providers,
-model-specific quota restrictions, and explicit exclusions are still enforced.
-
-### Wait for the new account after safe full-context replay
-
-A retained soft session preference could keep capacity waiting scoped to the
-old, exhausted account after Codex resent complete conversation history. The
-wait now preserves hard continuation ownership without trapping the replay on a
-soft account preference. Temporary transport cooldowns on another account remain
-waitable after a full-context replay. Account B is not used until normal admission
-permits it.
-Opaque previous-response and turn-state ownership, precommit-only rotation, and
-no replay after visible output remain intact.
-
-### Preserve descriptor headroom before state loading
-
-On Unix, Prodex raises a low inherited soft file-descriptor limit toward 8,192,
-never above the existing hard limit and never lowering a larger limit. This runs
-before state reads and worker startup. It mitigates `Too many open files` from
-low inherited limits without discarding state or closing another process's files.
-It is not a claim that all descriptor leaks or host-wide resource shortages are
-eliminated. Already-running sessions must be restarted to load the patched binary.
-
-### Keep account selection portable across Windows and macOS
-
-The hard-binding conflict ABI now transports its sentinel string view as scalar
-address/length arguments instead of a by-value aggregate. This keeps the Rust/Mojo
-calling boundary consistent on Win64 without changing ownership decisions or
-adding a Rust fallback. A direct ABI regression exercises empty candidate sets,
-Unicode sentinels, invalid lengths, and old-version rejection. macOS process
-identity checks explicitly retain executable-path verification, and child-launch
-validation fixtures now use an absolute path on every supported platform.
-
-### Release validation corrections
-
-The release also rejects empty DeepSeek shell-command arrays and preserves the
-correct terminal overload/rate-limit classification after candidate exhaustion.
-CI and the full-test workflow require the real Mojo implementation rather than
-allowing an implicit feature-off substitute.
-
-## Changelog
-
-- Keep temporary local capacity separate from recoverable quota eligibility.
-- Preserve safe full-context account handoff and strict continuation ownership.
-- Cover busy-account rotation with real WebSocket and negative-control tests.
-- Add isolated descriptor-exhaustion, soft-limit preservation, and child-process inheritance regressions.
-- Qualify Codex `rust-v0.162.1` and synchronize standalone release metadata.
-
-Full Changelog: [0.437.1...0.437.2](https://github.com/christiandoxa/prodex/compare/0.437.1...0.437.2)
 
 ## 0.437.1 - 2026-10-09
 
@@ -218,9 +226,3 @@ Full Changelog: [0.437.1...0.437.2](https://github.com/christiandoxa/prodex/comp
 - Honor request-local quota exclusions (`4f3e21a`)
 - Reselect profiles after recovery wait (`12d69a1`)
 - Keep retryable profiles alive past precommit budget (`0934e00`)
-
-## 0.435.3 - 2026-10-04
-
-### Runtime
-
-- Backpressure local saturation (`8aaf4e9`)
