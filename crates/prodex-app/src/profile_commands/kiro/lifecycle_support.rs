@@ -144,6 +144,7 @@ fn find_kiro_profile_by_identity(
     Ok(index.and_then(|index| names.get(index).map(|name| (*name).clone())))
 }
 
+#[cfg(test)]
 fn validate_existing_kiro_import_name(
     existing_name: &str,
     requested_name: Option<&str>,
@@ -261,10 +262,10 @@ fn resolve_kiro_import_context() -> Result<KiroImportContext> {
 fn first_kiro_value(values: [Option<String>; 2]) -> Result<Option<String>> {
     let mut normalized = [const { None }; 2];
     for (index, value) in values.into_iter().enumerate() {
-        if let Some(value) = value {
-            if !value.trim().is_empty() {
-                normalized[index] = Some(value.trim().to_string());
-            }
+        if let Some(value) = value
+            && !value.trim().is_empty()
+        {
+            normalized[index] = Some(value.trim().to_string());
         }
     }
     let values = normalized;

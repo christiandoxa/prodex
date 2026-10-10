@@ -741,7 +741,12 @@ mod tests {
         let every_byte = (0..=255).map(|n| n as u8).collect::<Vec<_>>();
         let encoded = hex_digest(&every_byte);
         assert_eq!(encoded.len(), 512);
-        for (i, chunk) in encoded.as_bytes().chunks_exact(2).enumerate() {
+        let (pairs, remainder) = encoded.as_bytes().as_chunks::<2>();
+        assert!(
+            remainder.is_empty(),
+            "each digest byte must occupy two hex digits"
+        );
+        for (i, chunk) in pairs.iter().enumerate() {
             assert_eq!(
                 chunk,
                 format!("{:02x}", every_byte[i]).as_bytes(),
