@@ -506,35 +506,14 @@ pub fn runtime_broker_startup_grace_seconds(ready_timeout_ms: u64, idle_grace_se
 
 pub use prodex_mojo_core::runtime_broker_continuity::{
     BrokerIdleDecision, BrokerLeaseLifecycleAction, BrokerLeaseLifecycleOperation,
-    BrokerProcessIdentityPlan, BrokerReadinessDecision, BrokerRegistryProcessAction,
-    BrokerTerminationOutcomePlan, BrokerTerminationSignalAction,
+    BrokerProcessIdentityInput, BrokerProcessIdentityPlan, BrokerReadinessDecision,
+    BrokerRegistryProcessAction, BrokerTerminationOutcomePlan, BrokerTerminationSignalAction,
 };
 
-#[allow(clippy::too_many_arguments)]
 pub fn runtime_process_identity_plan(
-    process_absence_proven: bool,
-    expected_birth_present: bool,
-    birth_present: bool,
-    birth_matches: bool,
-    path_check_enabled: bool,
-    path_present: bool,
-    path_matches: bool,
-    recheck_enabled: bool,
-    recheck_present: bool,
-    recheck_matches: bool,
+    input: BrokerProcessIdentityInput,
 ) -> Result<BrokerProcessIdentityPlan, prodex_mojo_core::MojoError> {
-    prodex_mojo_core::runtime_broker_continuity::process_identity_plan(
-        process_absence_proven,
-        expected_birth_present,
-        birth_present,
-        birth_matches,
-        path_check_enabled,
-        path_present,
-        path_matches,
-        recheck_enabled,
-        recheck_present,
-        recheck_matches,
-    )
+    prodex_mojo_core::runtime_broker_continuity::process_identity_plan(input)
 }
 
 pub fn runtime_broker_termination_signal_plan(

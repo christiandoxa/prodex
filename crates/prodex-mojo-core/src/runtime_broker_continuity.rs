@@ -816,10 +816,10 @@ pub fn health_key_kind(key: &str) -> Result<HealthKeyKind, MojoError> {
 mod lifecycle;
 pub use lifecycle::{
     BrokerIdleDecision, BrokerLeaseLifecycleAction, BrokerLeaseLifecycleOperation,
-    BrokerProcessIdentityPlan, BrokerReadinessDecision, BrokerRegistryProcessAction,
-    BrokerTerminationOutcomePlan, BrokerTerminationSignalAction, idle_plan, lease_lifecycle_plan,
-    process_identity_plan, readiness_plan, registry_process_plan, termination_outcome_plan,
-    termination_signal_plan,
+    BrokerProcessIdentityInput, BrokerProcessIdentityPlan, BrokerReadinessDecision,
+    BrokerRegistryProcessAction, BrokerTerminationOutcomePlan, BrokerTerminationSignalAction,
+    idle_plan, lease_lifecycle_plan, process_identity_plan, readiness_plan, registry_process_plan,
+    termination_outcome_plan, termination_signal_plan,
 };
 
 #[cfg(test)]

@@ -285,50 +285,108 @@ fn broker_startup_grace_plan_preserves_timeout_rounding_and_idle_floor() {
 #[test]
 fn broker_process_identity_and_termination_plans_are_fail_closed() {
     let proven = |path_check_enabled, recheck_enabled| {
-        process_identity_plan(
-            false,
-            true,
-            true,
-            true,
+        process_identity_plan(BrokerProcessIdentityInput {
+            process_absence_proven: false,
+            expected_birth_present: true,
+            birth_present: true,
+            birth_matches: true,
             path_check_enabled,
-            true,
-            true,
+            path_present: true,
+            path_matches: true,
             recheck_enabled,
-            true,
-            true,
-        )
+            recheck_present: true,
+            recheck_matches: true,
+        })
         .unwrap()
     };
     assert_eq!(
-        process_identity_plan(false, true, true, true, true, true, true, true, true, true),
+        process_identity_plan(BrokerProcessIdentityInput {
+            process_absence_proven: false,
+            expected_birth_present: true,
+            birth_present: true,
+            birth_matches: true,
+            path_check_enabled: true,
+            path_present: true,
+            path_matches: true,
+            recheck_enabled: true,
+            recheck_present: true,
+            recheck_matches: true,
+        }),
         Ok(BrokerProcessIdentityPlan::Proven)
     );
     assert_eq!(
-        process_identity_plan(
-            true, true, false, false, false, false, false, false, false, false
-        ),
+        process_identity_plan(BrokerProcessIdentityInput {
+            process_absence_proven: true,
+            expected_birth_present: true,
+            birth_present: false,
+            birth_matches: false,
+            path_check_enabled: false,
+            path_present: false,
+            path_matches: false,
+            recheck_enabled: false,
+            recheck_present: false,
+            recheck_matches: false,
+        }),
         Ok(BrokerProcessIdentityPlan::Absent)
     );
     assert_eq!(
-        process_identity_plan(
-            false, false, false, false, false, false, false, false, false, false
-        ),
+        process_identity_plan(BrokerProcessIdentityInput {
+            process_absence_proven: false,
+            expected_birth_present: false,
+            birth_present: false,
+            birth_matches: false,
+            path_check_enabled: false,
+            path_present: false,
+            path_matches: false,
+            recheck_enabled: false,
+            recheck_present: false,
+            recheck_matches: false,
+        }),
         Ok(BrokerProcessIdentityPlan::OwnershipUnproven)
     );
     assert_eq!(
-        process_identity_plan(
-            false, true, true, false, false, false, false, false, false, false
-        ),
+        process_identity_plan(BrokerProcessIdentityInput {
+            process_absence_proven: false,
+            expected_birth_present: true,
+            birth_present: true,
+            birth_matches: false,
+            path_check_enabled: false,
+            path_present: false,
+            path_matches: false,
+            recheck_enabled: false,
+            recheck_present: false,
+            recheck_matches: false,
+        }),
         Ok(BrokerProcessIdentityPlan::OwnershipChanged)
     );
     assert_eq!(
-        process_identity_plan(
-            false, true, true, true, true, true, false, false, false, false
-        ),
+        process_identity_plan(BrokerProcessIdentityInput {
+            process_absence_proven: false,
+            expected_birth_present: true,
+            birth_present: true,
+            birth_matches: true,
+            path_check_enabled: true,
+            path_present: true,
+            path_matches: false,
+            recheck_enabled: false,
+            recheck_present: false,
+            recheck_matches: false,
+        }),
         Ok(BrokerProcessIdentityPlan::OwnershipChanged)
     );
     assert_eq!(
-        process_identity_plan(false, true, true, true, true, true, true, true, true, false),
+        process_identity_plan(BrokerProcessIdentityInput {
+            process_absence_proven: false,
+            expected_birth_present: true,
+            birth_present: true,
+            birth_matches: true,
+            path_check_enabled: true,
+            path_present: true,
+            path_matches: true,
+            recheck_enabled: true,
+            recheck_present: true,
+            recheck_matches: false,
+        }),
         Ok(BrokerProcessIdentityPlan::OwnershipChanged)
     );
     assert_eq!(proven(false, false), BrokerProcessIdentityPlan::Proven);
