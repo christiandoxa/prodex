@@ -35,7 +35,6 @@ use anyhow::Result;
 use prodex_provider_core::{
     ProviderEndpoint, ProviderId, ProviderTransformInput, RuntimeProviderBindingIdentity,
     deepseek_provider_core_auto_chat_fallback_body,
-    deepseek_provider_core_first_event_retry_allowed,
     deepseek_provider_core_native_translation_fallback_is_safe,
     deepseek_provider_core_request_body as core_deepseek_provider_core_request_body,
     deepseek_provider_core_simple_request, deepseek_provider_core_use_beta_binding_route,
@@ -259,40 +258,37 @@ fn runtime_deepseek_attempt_control(
     attempt_index: (usize, usize),
     first_event_retries: &mut u8,
 ) -> Result<RuntimeDeepSeekAttemptControl> {
-    Ok(
-        match runtime_deepseek_send_model_attempt(context, api_key_label, model, api_key, prepared)?
-        {
-            RuntimeDeepSeekModelAttempt::Live { response, pending } => {
-                RuntimeDeepSeekAttemptControl::Return(Box::new(runtime_deepseek_live_result(
-                    response, pending,
-                )))
-            }
-            RuntimeDeepSeekModelAttempt::NativeFirstEvent {
-                response,
-                pending,
-                class,
-            } => runtime_deepseek_native_first_event_control(
-                context,
-                api_key_label,
-                model,
-                attempt_index,
-                first_event_retries,
-                (response, pending, class),
-            ),
-            RuntimeDeepSeekModelAttempt::Error {
-                status,
-                parts,
-                class,
-            } => runtime_deepseek_error_control(
-                context,
-                api_key_label,
-                model,
-                attempt_index,
-                status,
-                (parts, class),
-            ),
-        },
-    )
+    match runtime_deepseek_send_model_attempt(context, api_key_label, model, api_key, prepared)? {
+        RuntimeDeepSeekModelAttempt::Live { response, pending } => {
+            Ok(RuntimeDeepSeekAttemptControl::Return(Box::new(
+                runtime_deepseek_live_result(response, pending),
+            )))
+        }
+        RuntimeDeepSeekModelAttempt::NativeFirstEvent {
+            response,
+            pending,
+            class,
+        } => runtime_deepseek_native_first_event_control(
+            context,
+            api_key_label,
+            model,
+            attempt_index,
+            first_event_retries,
+            (response, pending, class),
+        ),
+        RuntimeDeepSeekModelAttempt::Error {
+            status,
+            parts,
+            class,
+        } => runtime_deepseek_error_control(
+            context,
+            api_key_label,
+            model,
+            attempt_index,
+            status,
+            (parts, class),
+        ),
+    }
 }
 
 fn runtime_deepseek_native_first_event_control(
@@ -306,49 +302,63 @@ fn runtime_deepseek_native_first_event_control(
         RuntimeDeepSeekPendingRequest,
         RuntimeProviderErrorClass,
     ),
-) -> RuntimeDeepSeekAttemptControl {
+) -> Result<RuntimeDeepSeekAttemptControl> {
     let (api_key_index, model_index) = attempt_index;
     let (response, pending, class) = outcome;
-    let can_retry = deepseek_provider_core_first_event_retry_allowed(*first_event_retries, false);
-    if can_retry
-        && model_index + 1 < context.model_chain.len()
-        && runtime_gateway_application_provider_retry_precommit(
-            ProviderRetryCause::NextModel,
-            class,
+    let action = prodex_mojo_core::deepseek_attempt_policy::attempt_action(
+        prodex_mojo_core::deepseek_attempt_policy::DeepSeekAttemptInput {
+            kind: prodex_mojo_core::deepseek_attempt_policy::DeepSeekAttemptKind::NativeFirstEvent,
+            attempted_first_event_retries: *first_event_retries,
+            first_event_committed: false,
             model_index,
-            context.model_chain.len(),
-        )
-    {
-        runtime_deepseek_log_model_fallback(
-            context,
-            api_key_label,
-            model,
-            &context.model_chain[model_index + 1],
-            200,
-            class,
-        );
-        *first_event_retries += 1;
-        return RuntimeDeepSeekAttemptControl::NextModel;
+            model_count: context.model_chain.len(),
+            credential_index: api_key_index,
+            credential_count: context.api_key_attempt_count,
+            model_retry_allowed: runtime_gateway_application_provider_retry_precommit(
+                ProviderRetryCause::NextModel,
+                class,
+                model_index,
+                context.model_chain.len(),
+            ),
+            credential_retry_allowed: runtime_gateway_application_provider_retry_precommit(
+                ProviderRetryCause::RotateCredential,
+                class,
+                api_key_index,
+                context.api_key_attempt_count,
+            ),
+        },
+    )
+    .map_err(|error| anyhow::anyhow!("Mojo DeepSeek attempt planning failed: {error:?}"))?;
+    match action {
+        prodex_mojo_core::deepseek_attempt_policy::DeepSeekAttemptAction::NextModel => {
+            runtime_deepseek_log_model_fallback(
+                context,
+                api_key_label,
+                model,
+                &context.model_chain[model_index + 1],
+                200,
+                class,
+            );
+            *first_event_retries += 1;
+            Ok(RuntimeDeepSeekAttemptControl::NextModel)
+        }
+        prodex_mojo_core::deepseek_attempt_policy::DeepSeekAttemptAction::NextCredential => {
+            runtime_deepseek_log_auth_rotate(
+                context.shared,
+                context.request_id,
+                api_key_label,
+                200,
+                class,
+            );
+            *first_event_retries += 1;
+            Ok(RuntimeDeepSeekAttemptControl::NextCredential)
+        }
+        prodex_mojo_core::deepseek_attempt_policy::DeepSeekAttemptAction::Return => {
+            Ok(RuntimeDeepSeekAttemptControl::Return(Box::new(
+                runtime_deepseek_live_result(response, pending),
+            )))
+        }
     }
-    if can_retry
-        && runtime_gateway_application_provider_retry_precommit(
-            ProviderRetryCause::RotateCredential,
-            class,
-            api_key_index,
-            context.api_key_attempt_count,
-        )
-    {
-        runtime_deepseek_log_auth_rotate(
-            context.shared,
-            context.request_id,
-            api_key_label,
-            200,
-            class,
-        );
-        *first_event_retries += 1;
-        return RuntimeDeepSeekAttemptControl::NextCredential;
-    }
-    RuntimeDeepSeekAttemptControl::Return(Box::new(runtime_deepseek_live_result(response, pending)))
 }
 
 fn runtime_deepseek_error_control(
@@ -361,43 +371,61 @@ fn runtime_deepseek_error_control(
         RuntimeHeapTrimmedBufferedResponseParts,
         RuntimeProviderErrorClass,
     ),
-) -> RuntimeDeepSeekAttemptControl {
+) -> Result<RuntimeDeepSeekAttemptControl> {
     let (api_key_index, model_index) = attempt_index;
     let (parts, class) = error;
-    if model_index + 1 < context.model_chain.len()
-        && runtime_gateway_application_provider_retry_precommit(
-            ProviderRetryCause::NextModel,
-            class,
+    let action = prodex_mojo_core::deepseek_attempt_policy::attempt_action(
+        prodex_mojo_core::deepseek_attempt_policy::DeepSeekAttemptInput {
+            kind: prodex_mojo_core::deepseek_attempt_policy::DeepSeekAttemptKind::Error,
+            attempted_first_event_retries: 0,
+            first_event_committed: false,
             model_index,
-            context.model_chain.len(),
-        )
-    {
-        runtime_deepseek_log_model_fallback(
-            context,
-            api_key_label,
-            model,
-            &context.model_chain[model_index + 1],
-            status,
-            class,
-        );
-        return RuntimeDeepSeekAttemptControl::NextModel;
+            model_count: context.model_chain.len(),
+            credential_index: api_key_index,
+            credential_count: context.api_key_attempt_count,
+            model_retry_allowed: runtime_gateway_application_provider_retry_precommit(
+                ProviderRetryCause::NextModel,
+                class,
+                model_index,
+                context.model_chain.len(),
+            ),
+            credential_retry_allowed: runtime_gateway_application_provider_retry_precommit(
+                ProviderRetryCause::RotateCredential,
+                class,
+                api_key_index,
+                context.api_key_attempt_count,
+            ),
+        },
+    )
+    .map_err(|error| anyhow::anyhow!("Mojo DeepSeek attempt planning failed: {error:?}"))?;
+    match action {
+        prodex_mojo_core::deepseek_attempt_policy::DeepSeekAttemptAction::NextModel => {
+            runtime_deepseek_log_model_fallback(
+                context,
+                api_key_label,
+                model,
+                &context.model_chain[model_index + 1],
+                status,
+                class,
+            );
+            Ok(RuntimeDeepSeekAttemptControl::NextModel)
+        }
+        prodex_mojo_core::deepseek_attempt_policy::DeepSeekAttemptAction::NextCredential => {
+            runtime_deepseek_log_auth_rotate(
+                context.shared,
+                context.request_id,
+                api_key_label,
+                status,
+                class,
+            );
+            Ok(RuntimeDeepSeekAttemptControl::NextCredential)
+        }
+        prodex_mojo_core::deepseek_attempt_policy::DeepSeekAttemptAction::Return => {
+            Ok(RuntimeDeepSeekAttemptControl::Return(Box::new(
+                runtime_deepseek_buffered_result(parts),
+            )))
+        }
     }
-    if runtime_gateway_application_provider_retry_precommit(
-        ProviderRetryCause::RotateCredential,
-        class,
-        api_key_index,
-        context.api_key_attempt_count,
-    ) {
-        runtime_deepseek_log_auth_rotate(
-            context.shared,
-            context.request_id,
-            api_key_label,
-            status,
-            class,
-        );
-        return RuntimeDeepSeekAttemptControl::NextCredential;
-    }
-    RuntimeDeepSeekAttemptControl::Return(Box::new(runtime_deepseek_buffered_result(parts)))
 }
 
 struct RuntimeDeepSeekPreparedModelRequest {

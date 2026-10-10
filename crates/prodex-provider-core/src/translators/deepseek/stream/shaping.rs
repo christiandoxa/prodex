@@ -132,13 +132,18 @@ pub fn deepseek_provider_core_incremental_tool_argument_delta(
     (!incoming.is_empty()).then(|| incoming.to_string())
 }
 
+// Public compatibility value; runtime eligibility is delegated to Mojo below.
 pub const DEEPSEEK_PROVIDER_CORE_FIRST_EVENT_RETRY_LIMIT: u8 = 1;
 
 pub fn deepseek_provider_core_first_event_retry_allowed(
     attempted_retries: u8,
     first_event_committed: bool,
 ) -> bool {
-    !first_event_committed && attempted_retries < DEEPSEEK_PROVIDER_CORE_FIRST_EVENT_RETRY_LIMIT
+    prodex_mojo_core::deepseek_attempt_policy::first_event_retry_allowed(
+        attempted_retries,
+        first_event_committed,
+    )
+    .expect("Mojo DeepSeek first-event retry policy returned invalid output")
 }
 
 pub fn deepseek_provider_core_stream_fallback_tool_call_id(

@@ -15,6 +15,7 @@ pub const CONTINUATION_SHOULD_REPLACE: i64 = 18;
 pub const CONTINUATION_RETENTION_KEY: i64 = 21;
 pub const CONTINUATION_BINDING_SHOULD_RETAIN: i64 = 22;
 pub const CONTINUATION_BINDING_RETENTION_KEY: i64 = 23;
+pub const CONTINUATION_WEBSOCKET_INVALID_PREVIOUS_RESPONSE_PLAN: i64 = 28;
 
 unsafe extern "C" {
     fn prodex_runtime_continuation_status_transition_v1(
@@ -50,5 +51,50 @@ pub fn continuation_status_transition<const N: usize>(
         1 | 2 => Err(crate::MojoError::InvalidInput),
         4 => Err(crate::MojoError::AbiMismatch),
         _ => Err(crate::MojoError::InvalidOutput),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn websocket_recovery_operation_has_direct_abi_matrix_and_version_guard() {
+        let fields = [1_i64, 1, 1, 1, 0, 1, 0];
+        let mut output = [-1_i64; 5];
+        assert_eq!(
+            unsafe {
+                prodex_runtime_continuation_status_transition_v1(
+                    1,
+                    CONTINUATION_WEBSOCKET_INVALID_PREVIOUS_RESPONSE_PLAN,
+                    fields.as_ptr() as usize as u64,
+                    fields.len() as i64,
+                    output.as_mut_ptr() as usize as u64,
+                    output.len() as i64,
+                )
+            },
+            0
+        );
+        assert_eq!(output, [1, 1, 0, 1, 0]);
+        assert_eq!(
+            unsafe {
+                prodex_runtime_continuation_status_transition_v1(
+                    0,
+                    CONTINUATION_WEBSOCKET_INVALID_PREVIOUS_RESPONSE_PLAN,
+                    fields.as_ptr() as usize as u64,
+                    fields.len() as i64,
+                    output.as_mut_ptr() as usize as u64,
+                    output.len() as i64,
+                )
+            },
+            4
+        );
+        assert_eq!(
+            continuation_status_transition::<5>(
+                CONTINUATION_WEBSOCKET_INVALID_PREVIOUS_RESPONSE_PLAN,
+                &[2, 1, 1, 0, 0, 1, 0],
+            ),
+            Err(crate::MojoError::InvalidInput)
+        );
     }
 }

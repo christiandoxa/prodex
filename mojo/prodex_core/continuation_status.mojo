@@ -30,6 +30,7 @@ comptime OP_COMPACT_FOLLOWUP_PLAN: Int64 = 24
 comptime OP_PREVIOUS_RESPONSE_OWNER_PLAN: Int64 = 25
 comptime OP_PREVIOUS_RESPONSE_CANDIDATE_PLAN: Int64 = 26
 comptime OP_BINDING_SOURCE_PLAN: Int64 = 27
+comptime OP_WEBSOCKET_INVALID_PREVIOUS_RESPONSE_PLAN: Int64 = 28
 
 comptime COMPACT_FOLLOWUP_NONE: Int64 = 0
 comptime COMPACT_FOLLOWUP_OWNER: Int64 = 1
@@ -271,6 +272,34 @@ def prodex_runtime_continuation_status_transition_v1(
     )
     for index in range(output_count):
         output[unsafe_offset=index] = 0
+
+    if operation == OP_WEBSOCKET_INVALID_PREVIOUS_RESPONSE_PLAN:
+        if field_count != 7 or output_count != 5:
+            return 1
+        for index in range(7):
+            if not bool_field(fields[unsafe_offset=index]):
+                return 2
+        var recovery_signal = (
+            fields[unsafe_offset=0] == 1
+            and fields[unsafe_offset=1] == 1
+            and fields[unsafe_offset=2] == 1
+            and fields[unsafe_offset=5] == 1
+            and fields[unsafe_offset=6] == 0
+        )
+        var crossed_transport_generation = (
+            fields[unsafe_offset=3] == 1 and fields[unsafe_offset=4] == 0
+        )
+        var chain_reuse_reason: Int64 = 2
+        if crossed_transport_generation:
+            chain_reuse_reason = 0
+        elif fields[unsafe_offset=2] == 1:
+            chain_reuse_reason = 1
+        output[unsafe_offset=0] = Int64(recovery_signal)
+        output[unsafe_offset=1] = Int64(crossed_transport_generation)
+        output[unsafe_offset=2] = chain_reuse_reason
+        output[unsafe_offset=3] = Int64(recovery_signal)
+        output[unsafe_offset=4] = Int64(not recovery_signal)
+        return 0
 
     if operation == OP_TOUCH_SHOULD_PERSIST:
         if field_count != 3 or output_count != 1:

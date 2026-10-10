@@ -11,7 +11,6 @@ use crate::{
 pub(crate) const DEFAULT_CHATGPT_BASE_URL: &str = "https://chatgpt.com/backend-api";
 pub(crate) const RUNTIME_PROXY_OPENAI_MOUNT_PATH: &str = "/backend-api/prodex";
 pub(crate) const LEGACY_RUNTIME_PROXY_OPENAI_MOUNT_PATH_PREFIX: &str = "/backend-api/prodex/v";
-pub(crate) const DEFAULT_WATCH_INTERVAL_SECONDS: u64 = 5;
 pub(crate) const CHATGPT_AUTH_REFRESH_CLIENT_ID: &str = "app_EMoamEEZ73f0CkXaXp7hrann";
 pub(crate) const CHATGPT_AUTH_REFRESH_URL: &str = "https://auth.openai.com/oauth/token";
 pub(crate) const CHATGPT_AUTH_REFRESH_INTERVAL_DAYS: i64 = 8;

@@ -29,6 +29,7 @@ from launch_args_common import launch_rust_space
 from rich_text import (
     rich_codepoint,
     rich_codepoint_width,
+    rich_trim_bounds,
     rich_view_ptr,
     rich_view_valid,
 )
@@ -37,6 +38,7 @@ from rich_types import ProdexRichStringView
 comptime RUNTIME_PROXY_REQUEST_ABI_VERSION: Int64 = 1
 comptime RUNTIME_PROXY_REQUEST_OK: Int64 = 0
 comptime RUNTIME_PROXY_REQUEST_INVALID: Int64 = 1
+comptime RUNTIME_PROXY_REQUEST_CAPACITY: Int64 = 3
 
 comptime FALLBACK_TOOL_OUTPUT_ONLY: Int64 = 0
 comptime FALLBACK_CONTEXT_DEPENDENT: Int64 = 1
@@ -655,6 +657,80 @@ def runtime_proxy_mount_suffix_start(
         if path_end == mount_length or source[unsafe_offset=mount_length] == 47:
             return mount_length
     return -1
+
+
+def runtime_proxy_mount_path_copy(
+    source: Pointer[mut=False, UInt8, _],
+    start: Int64,
+    end: Int64,
+    output: Pointer[mut=True, UInt8, _],
+    capacity: Int64,
+    written: Pointer[mut=True, Int64, _],
+) -> Bool:
+    if start < 0 or end < start or capacity < 0 or written[] < 0:
+        return False
+    var mount_start = start
+    var mount_end = end
+    while mount_start < mount_end and source[unsafe_offset=mount_start] == 47:
+        mount_start += 1
+    while mount_end > mount_start and source[unsafe_offset=mount_end - 1] == 47:
+        mount_end -= 1
+    if mount_start == mount_end:
+        if written[] >= capacity:
+            return False
+        output[unsafe_offset=written[]] = 47
+        written[] += 1
+        return True
+    var length = mount_end - mount_start + 1
+    if length > capacity - written[]:
+        return False
+    output[unsafe_offset=written[]] = 47
+    written[] += 1
+    for index in range(mount_start, mount_end):
+        output[unsafe_offset=written[]] = source[unsafe_offset=index]
+        written[] += 1
+    return True
+
+
+@export("prodex_runtime_proxy_mount_path_v1")
+def prodex_runtime_proxy_mount_path_v1(
+    abi_version: Int64,
+    mount_address: UInt,
+    mount_length: Int64,
+    output_address: UInt,
+    output_capacity: Int64,
+    written_address: UInt,
+) abi("C") -> Int64:
+    if (
+        abi_version != RUNTIME_PROXY_REQUEST_ABI_VERSION
+        or mount_length < 0
+        or (mount_length > 0 and mount_address == 0)
+        or output_address == 0
+        or output_capacity < 1
+        or written_address == 0
+    ):
+        return RUNTIME_PROXY_REQUEST_INVALID
+    var view = ProdexRichStringView(mount_address, UInt(mount_length))
+    if not rich_view_valid(view, mount_length):
+        return RUNTIME_PROXY_REQUEST_INVALID
+    var bounds = rich_trim_bounds(view)
+    var output = Pointer[mut=True, UInt8, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    var written = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(written_address)
+    )
+    written[] = 0
+    if bounds[1] <= bounds[0] or (
+        bounds[1] - bounds[0] == 1
+        and rich_view_ptr(view)[unsafe_offset=bounds[0]] == 47
+    ):
+        return RUNTIME_PROXY_REQUEST_OK
+    if not runtime_proxy_mount_path_copy(
+        rich_view_ptr(view), bounds[0], bounds[1], output, output_capacity, written
+    ):
+        return RUNTIME_PROXY_REQUEST_CAPACITY
+    return RUNTIME_PROXY_REQUEST_OK
 
 
 def runtime_proxy_effective_ends(

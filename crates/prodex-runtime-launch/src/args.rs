@@ -239,11 +239,8 @@ fn codex_config_override_insertion_index(args: &[OsString]) -> usize {
 }
 
 fn normalize_mount_path(mount_path: &str) -> String {
-    let trimmed = mount_path.trim();
-    if trimmed.is_empty() || trimmed == "/" {
-        return String::new();
-    }
-    format!("/{}", trimmed.trim_matches('/'))
+    prodex_mojo_core::rich::runtime_proxy_mount_path(mount_path)
+        .expect("Mojo runtime proxy mount-path policy returned invalid output")
 }
 
 pub fn prepare_codex_launch_args(
@@ -281,5 +278,6 @@ pub fn is_review_invocation(args: &[OsString]) -> bool {
 }
 
 fn toml_string_literal(value: &str) -> String {
-    format!("\"{}\"", value.replace('\\', "\\\\").replace('"', "\\\""))
+    prodex_mojo_core::super_provider_config::toml_string_literal(value)
+        .expect("Mojo TOML string serializer returned invalid output")
 }

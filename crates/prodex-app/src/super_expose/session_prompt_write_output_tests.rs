@@ -658,6 +658,24 @@ fn output_read_recovers_malformed_utf8_and_oversized_records_without_payload() {
 }
 
 #[test]
+fn output_read_classifies_empty_and_unicode_records_without_leaking_payload() {
+    let fixture = fixture();
+    let path = fixture.root.join("empty-unicode.jsonl");
+    let unicode = serde_json::json!({
+        "timestamp": "2026-09-03T10:00:04Z",
+        "type": "event_msg",
+        "payload": {"type": "agent_message", "message": "こんにちは · café"}
+    });
+    std::fs::write(&path, format!("\n{unicode}\n")).unwrap();
+
+    let batch = read_output_events(&path, 0, 0, 10).unwrap();
+
+    assert_eq!(batch.events[0].kind, "gap");
+    assert_eq!(batch.events[0].name.as_deref(), Some("malformed_record"));
+    assert_eq!(batch.events[1].text, "こんにちは · café");
+}
+
+#[test]
 fn output_page_does_not_drop_events_from_one_rollout_line() {
     let fixture = fixture();
     let first = read_output_events(&fixture.rollout, 0, 0, 1).unwrap();

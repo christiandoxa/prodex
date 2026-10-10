@@ -49,6 +49,42 @@ pub struct RuntimeProxyPathPlan {
     pub long_lived: bool,
 }
 
+/// Normalizes a runtime proxy mount path using Rust-compatible Unicode trim
+/// and slash-boundary semantics. Rust materializes the validated bytes while
+/// Mojo owns the deterministic path decision.
+pub fn runtime_proxy_mount_path(mount_path: &str) -> Result<String, MojoError> {
+    ensure_rich_abi()?;
+    let capacity = mount_path
+        .len()
+        .checked_add(1)
+        .ok_or(MojoError::InvalidInput)?
+        .max(1);
+    let mut output = vec![0_u8; capacity];
+    let mut written = -1_i64;
+    let status = unsafe {
+        prodex_runtime_proxy_mount_path_v1(
+            1,
+            mount_path.as_ptr() as usize as u64,
+            i64::try_from(mount_path.len()).map_err(|_| MojoError::InvalidInput)?,
+            output.as_mut_ptr() as usize as u64,
+            i64::try_from(output.len()).map_err(|_| MojoError::InvalidInput)?,
+            &mut written,
+        )
+    };
+    match status {
+        0 => {}
+        1 => return Err(MojoError::InvalidInput),
+        3 => return Err(MojoError::Capacity),
+        4 => return Err(MojoError::AbiMismatch),
+        _ => return Err(MojoError::InvalidOutput),
+    }
+    let written = usize::try_from(written).map_err(|_| MojoError::InvalidOutput)?;
+    output
+        .get(..written)
+        .ok_or(MojoError::InvalidOutput)
+        .and_then(|value| String::from_utf8(value.to_vec()).map_err(|_| MojoError::InvalidOutput))
+}
+
 fn runtime_proxy_bool_output(value: i64) -> Result<bool, MojoError> {
     match value {
         0 => Ok(false),

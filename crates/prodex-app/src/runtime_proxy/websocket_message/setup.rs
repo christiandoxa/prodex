@@ -21,7 +21,6 @@ use super::super::{
     runtime_smart_context_effective_websocket_prompt_cache_key,
     runtime_smart_context_model_name_from_body, runtime_turn_state_affinity_profile,
     runtime_turn_state_is_dead_recovery_token,
-    runtime_websocket_request_requires_locked_previous_response_affinity,
     select_runtime_response_candidate_for_route_with_request,
     send_runtime_proxy_final_websocket_failure,
 };
@@ -373,15 +372,6 @@ impl<'a> RuntimeWebsocketTextMessageFlow<'a> {
             self.compact_followup_profile.as_ref(),
             self.request_session_id_header_present,
             self.bound_session_profile.as_deref(),
-        )
-    }
-
-    pub(super) fn request_requires_locked_previous_response_affinity(&self) -> bool {
-        runtime_websocket_request_requires_locked_previous_response_affinity(
-            self.request_requires_previous_response_affinity,
-            self.trusted_previous_response_affinity,
-            self.previous_response_id.as_deref(),
-            self.request_turn_state.as_deref(),
         )
     }
 

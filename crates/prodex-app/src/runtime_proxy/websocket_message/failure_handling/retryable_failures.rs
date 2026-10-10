@@ -19,16 +19,25 @@ impl<'a> RuntimeWebsocketTextMessageFlow<'a> {
                 retry_after.map_or(0, |delay| delay.as_millis()),
             ),
         );
-        let (disposition, state_plan) = websocket_failure_plans(
-            runtime_proxy_crate::RuntimeWebsocketFailureKind::RateLimited,
-            !self.candidate_has_hard_affinity(&profile_name),
+        let affinity_releasable = !self.candidate_has_hard_affinity(&profile_name);
+        let full_context_retry_available = if affinity_releasable {
+            false
+        } else {
+            self.full_context_retry_available(&profile_name)?
+        };
+        let plan = self.websocket_failure_plan(
+            runtime_proxy_crate::RuntimeWebsocketFailureClass::RateLimited,
+            affinity_releasable,
             false,
-        );
-        if disposition.mark_backoff {
+            full_context_retry_available,
+            true,
+            via == "direct_current_profile_fallback",
+        )?;
+        if plan.mark_backoff {
             mark_runtime_profile_retry_backoff_for_delay(self.shared, &profile_name, retry_after)?;
         }
-        if !disposition.continue_selection {
-            if self.full_context_retry_available(&profile_name)? {
+        match plan.action {
+            runtime_proxy_crate::RuntimeWebsocketFailureAction::FullContextRetry => {
                 let released_affinity = release_runtime_retryable_failure_affinity(
                     self.shared,
                     &profile_name,
@@ -44,17 +53,27 @@ impl<'a> RuntimeWebsocketTextMessageFlow<'a> {
                 )?;
                 return Ok(RuntimeWebsocketMessageLoopAction::Finished);
             }
-            forward_runtime_proxy_websocket_error(&mut *self.local_socket, &payload)?;
-            return Ok(RuntimeWebsocketMessageLoopAction::Finished);
+            runtime_proxy_crate::RuntimeWebsocketFailureAction::PassThrough => {
+                forward_runtime_proxy_websocket_error(&mut *self.local_socket, &payload)?;
+                return Ok(RuntimeWebsocketMessageLoopAction::Finished);
+            }
+            runtime_proxy_crate::RuntimeWebsocketFailureAction::Rotate
+            | runtime_proxy_crate::RuntimeWebsocketFailureAction::Continue => {}
+            _ => {
+                return Err(anyhow::anyhow!(
+                    "invalid rate-limit WebSocket failure action {:?}",
+                    plan.action
+                ));
+            }
         }
-        self.saw_rate_limit_failure = state_plan.record_rate_limit_failure;
-        if disposition.exclude_profile {
+        self.saw_rate_limit_failure |= plan.record_rate_limit_failure;
+        if plan.exclude_profile {
             self.excluded_profiles.insert(profile_name);
         }
-        if state_plan.store_last_failure {
+        if plan.store_last_failure {
             self.last_failure = Some((
                 RuntimeUpstreamFailureResponse::Websocket(payload),
-                state_plan.last_failure_retryable,
+                plan.last_failure_retryable,
             ));
         }
         Ok(RuntimeWebsocketMessageLoopAction::Continue)
@@ -73,13 +92,22 @@ impl<'a> RuntimeWebsocketTextMessageFlow<'a> {
                 self.request_id, self.session_id, profile_name, via
             ),
         );
-        let (disposition, state_plan) = websocket_failure_plans(
-            runtime_proxy_crate::RuntimeWebsocketFailureKind::AuthFailed,
-            !self.candidate_has_hard_affinity(&profile_name),
+        let affinity_releasable = !self.candidate_has_hard_affinity(&profile_name);
+        let full_context_retry_available = if affinity_releasable {
+            false
+        } else {
+            self.full_context_retry_available(&profile_name)?
+        };
+        let plan = self.websocket_failure_plan(
+            runtime_proxy_crate::RuntimeWebsocketFailureClass::AuthFailed,
+            affinity_releasable,
             false,
-        );
-        if !disposition.continue_selection {
-            if self.full_context_retry_available(&profile_name)? {
+            full_context_retry_available,
+            true,
+            false,
+        )?;
+        match plan.action {
+            runtime_proxy_crate::RuntimeWebsocketFailureAction::FullContextRetry => {
                 let released_affinity = release_runtime_auth_failed_affinity(
                     self.shared,
                     &profile_name,
@@ -94,10 +122,20 @@ impl<'a> RuntimeWebsocketTextMessageFlow<'a> {
                 )?;
                 return Ok(RuntimeWebsocketMessageLoopAction::Finished);
             }
-            forward_runtime_proxy_websocket_error(&mut *self.local_socket, &payload)?;
-            return Ok(RuntimeWebsocketMessageLoopAction::Finished);
+            runtime_proxy_crate::RuntimeWebsocketFailureAction::PassThrough => {
+                forward_runtime_proxy_websocket_error(&mut *self.local_socket, &payload)?;
+                return Ok(RuntimeWebsocketMessageLoopAction::Finished);
+            }
+            runtime_proxy_crate::RuntimeWebsocketFailureAction::Rotate
+            | runtime_proxy_crate::RuntimeWebsocketFailureAction::Continue => {}
+            _ => {
+                return Err(anyhow::anyhow!(
+                    "invalid auth WebSocket failure action {:?}",
+                    plan.action
+                ));
+            }
         }
-        if state_plan.clear_affinity {
+        if plan.release_affinity {
             let _ = release_runtime_auth_failed_affinity(
                 self.shared,
                 &profile_name,
@@ -107,13 +145,13 @@ impl<'a> RuntimeWebsocketTextMessageFlow<'a> {
             )?;
             self.clear_profile_affinity(&profile_name, true);
         }
-        if disposition.exclude_profile {
+        if plan.exclude_profile {
             self.excluded_profiles.insert(profile_name);
         }
-        if state_plan.store_last_failure {
+        if plan.store_last_failure {
             self.last_failure = Some((
                 RuntimeUpstreamFailureResponse::Websocket(payload),
-                state_plan.last_failure_retryable,
+                plan.last_failure_retryable,
             ));
         }
         Ok(RuntimeWebsocketMessageLoopAction::Continue)
@@ -156,5 +194,351 @@ impl<'a> RuntimeWebsocketTextMessageFlow<'a> {
         payload: RuntimeWebsocketErrorPayload,
     ) -> Result<RuntimeWebsocketMessageLoopAction> {
         self.handle_auth_failed(profile_name, payload, "candidate")
+    }
+}
+
+impl<'a> RuntimeWebsocketTextMessageFlow<'a> {
+    pub(super) fn handle_direct_current_transport_failed(
+        &mut self,
+        profile_name: String,
+        stage: &'static str,
+    ) -> Result<RuntimeWebsocketMessageLoopAction> {
+        self.handle_transport_failed(profile_name, stage, Some("direct_current_profile_fallback"))
+    }
+
+    pub(super) fn handle_candidate_transport_failed(
+        &mut self,
+        profile_name: String,
+        stage: &'static str,
+    ) -> Result<RuntimeWebsocketMessageLoopAction> {
+        self.handle_transport_failed(profile_name, stage, None)
+    }
+
+    fn handle_transport_failed(
+        &mut self,
+        profile_name: String,
+        stage: &'static str,
+        via: Option<&'static str>,
+    ) -> Result<RuntimeWebsocketMessageLoopAction> {
+        let via_suffix = via.map(|via| format!(" via={via}")).unwrap_or_default();
+        runtime_proxy_log(
+            self.shared,
+            format!(
+                "request={} websocket_session={} transport_failed profile={} stage={}{}",
+                self.request_id, self.session_id, profile_name, stage, via_suffix
+            ),
+        );
+        let affinity_releasable = !self.candidate_has_hard_affinity(&profile_name);
+        let full_context_retry_available = if affinity_releasable {
+            false
+        } else {
+            self.full_context_retry_available(&profile_name)?
+        };
+        let plan = self.websocket_failure_plan(
+            runtime_proxy_crate::RuntimeWebsocketFailureClass::TransportFailed,
+            affinity_releasable,
+            false,
+            full_context_retry_available,
+            false,
+            false,
+        )?;
+        match plan.action {
+            runtime_proxy_crate::RuntimeWebsocketFailureAction::FullContextRetry => {
+                let released_affinity = release_runtime_retryable_failure_affinity(
+                    self.shared,
+                    &profile_name,
+                    self.previous_response_id.as_deref(),
+                    self.request_turn_state.as_deref(),
+                    self.request_session_id.as_deref(),
+                    "transport_full_context_retry",
+                )?;
+                self.send_full_context_retry_signal(
+                    &profile_name,
+                    "transport_failure_full_context_retry_signal",
+                    released_affinity,
+                )?;
+                Ok(RuntimeWebsocketMessageLoopAction::Finished)
+            }
+            runtime_proxy_crate::RuntimeWebsocketFailureAction::Rotate
+            | runtime_proxy_crate::RuntimeWebsocketFailureAction::Continue => {
+                self.saw_transport_failure |= plan.retryable_failure;
+                if plan.exclude_profile {
+                    self.excluded_profiles.insert(profile_name);
+                }
+                if plan.store_last_failure {
+                    self.last_failure = Some((
+                        RuntimeUpstreamFailureResponse::Websocket(
+                            RuntimeWebsocketErrorPayload::Text(
+                                runtime_proxy_websocket_error_payload_text(
+                                    503,
+                                    "service_unavailable",
+                                    runtime_proxy_local_selection_failure_message(),
+                                ),
+                            ),
+                        ),
+                        plan.last_failure_retryable,
+                    ));
+                }
+                Ok(RuntimeWebsocketMessageLoopAction::Continue)
+            }
+            runtime_proxy_crate::RuntimeWebsocketFailureAction::PassThrough => {
+                send_runtime_proxy_websocket_error(
+                    &mut *self.local_socket,
+                    503,
+                    "service_unavailable",
+                    runtime_proxy_local_selection_failure_message(),
+                )?;
+                Ok(RuntimeWebsocketMessageLoopAction::Finished)
+            }
+            action => Err(anyhow::anyhow!(
+                "invalid transport WebSocket failure action {action:?}"
+            )),
+        }
+    }
+
+    pub(super) fn handle_direct_current_quota_blocked(
+        &mut self,
+        profile_name: String,
+        payload: RuntimeWebsocketErrorPayload,
+    ) -> Result<RuntimeWebsocketMessageLoopAction> {
+        let affinity_releasable = self.quota_blocked_affinity_is_releasable(
+            &profile_name,
+            self.request_requires_previous_response_affinity,
+        );
+        if !affinity_releasable
+            && self.try_rotate_quota_turn_state_full_context(&profile_name, payload.clone())?
+        {
+            return Ok(RuntimeWebsocketMessageLoopAction::Continue);
+        }
+        let full_context_retry_available = if affinity_releasable {
+            false
+        } else {
+            self.full_context_retry_available(&profile_name)?
+        };
+        let quota_fallback_available = if affinity_releasable {
+            self.prepare_quota_fallback(&profile_name)?
+        } else {
+            false
+        };
+        let plan = self.websocket_failure_plan(
+            runtime_proxy_crate::RuntimeWebsocketFailureClass::QuotaBlocked,
+            affinity_releasable,
+            false,
+            full_context_retry_available,
+            quota_fallback_available,
+            true,
+        )?;
+        if plan.mark_backoff {
+            mark_runtime_profile_retry_backoff(self.shared, &profile_name)?;
+        }
+        match plan.action {
+            runtime_proxy_crate::RuntimeWebsocketFailureAction::FullContextRetry => {
+                if self.try_signal_quota_full_context_retry(&profile_name)? {
+                    return Ok(RuntimeWebsocketMessageLoopAction::Finished);
+                }
+                forward_runtime_proxy_websocket_error(&mut *self.local_socket, &payload)?;
+                Ok(RuntimeWebsocketMessageLoopAction::Finished)
+            }
+            runtime_proxy_crate::RuntimeWebsocketFailureAction::PassThrough => {
+                forward_runtime_proxy_websocket_error(&mut *self.local_socket, &payload)?;
+                Ok(RuntimeWebsocketMessageLoopAction::Finished)
+            }
+            runtime_proxy_crate::RuntimeWebsocketFailureAction::Rotate
+            | runtime_proxy_crate::RuntimeWebsocketFailureAction::Continue => {
+                let released_affinity = if plan.release_affinity {
+                    let released_affinity = self.release_quota_blocked_affinity(&profile_name)?;
+                    if plan.clear_affinity {
+                        self.clear_profile_affinity(&profile_name, true);
+                    }
+                    released_affinity
+                } else {
+                    false
+                };
+                if released_affinity {
+                    runtime_proxy_log(
+                        self.shared,
+                        format!(
+                            "request={} websocket_session={} quota_blocked_affinity_released profile={} via=direct_current_profile_fallback",
+                            self.request_id, self.session_id, profile_name
+                        ),
+                    );
+                }
+                if plan.exclude_profile {
+                    self.excluded_profiles.insert(profile_name);
+                }
+                if plan.store_last_failure {
+                    self.last_failure = Some((
+                        RuntimeUpstreamFailureResponse::Websocket(payload),
+                        plan.last_failure_retryable,
+                    ));
+                }
+                Ok(RuntimeWebsocketMessageLoopAction::Continue)
+            }
+            action => Err(anyhow::anyhow!(
+                "invalid quota WebSocket failure action {action:?}"
+            )),
+        }
+    }
+
+    pub(super) fn handle_direct_current_overloaded(
+        &mut self,
+        profile_name: String,
+        payload: RuntimeWebsocketErrorPayload,
+    ) -> Result<RuntimeWebsocketMessageLoopAction> {
+        let overload_message =
+            extract_runtime_proxy_overload_message_from_websocket_payload(&payload);
+        runtime_proxy_log(
+            self.shared,
+            format!(
+                "request={} websocket_session={} upstream_overloaded route=websocket profile={} via=direct_current_profile_fallback message={}",
+                self.request_id,
+                self.session_id,
+                profile_name,
+                overload_message.as_deref().unwrap_or("-"),
+            ),
+        );
+        let affinity_releasable = !self.candidate_has_hard_affinity(&profile_name);
+        let full_context_retry_available = if affinity_releasable {
+            false
+        } else {
+            self.full_context_retry_available(&profile_name)?
+        };
+        let plan = self.websocket_failure_plan(
+            runtime_proxy_crate::RuntimeWebsocketFailureClass::Overloaded,
+            affinity_releasable,
+            false,
+            full_context_retry_available,
+            true,
+            true,
+        )?;
+        if plan.mark_backoff {
+            self.mark_overload_backoff(&profile_name)?;
+        }
+        match plan.action {
+            runtime_proxy_crate::RuntimeWebsocketFailureAction::FullContextRetry => {
+                let released_affinity = release_runtime_retryable_failure_affinity(
+                    self.shared,
+                    &profile_name,
+                    self.previous_response_id.as_deref(),
+                    self.request_turn_state.as_deref(),
+                    self.request_session_id.as_deref(),
+                    "overload_full_context_retry",
+                )?;
+                self.send_full_context_retry_signal(
+                    &profile_name,
+                    "upstream_overload_full_context_retry_signal",
+                    released_affinity,
+                )?;
+                return Ok(RuntimeWebsocketMessageLoopAction::Finished);
+            }
+            runtime_proxy_crate::RuntimeWebsocketFailureAction::PassThrough => {
+                runtime_proxy_log(
+                    self.shared,
+                    format!(
+                        "request={} websocket_session={} upstream_overload_passthrough route=websocket profile={} reason=hard_affinity via=direct_current_profile_fallback",
+                        self.request_id, self.session_id, profile_name
+                    ),
+                );
+                forward_runtime_proxy_websocket_error(&mut *self.local_socket, &payload)?;
+                return Ok(RuntimeWebsocketMessageLoopAction::Finished);
+            }
+            runtime_proxy_crate::RuntimeWebsocketFailureAction::Rotate
+            | runtime_proxy_crate::RuntimeWebsocketFailureAction::Continue => {}
+            action => {
+                return Err(anyhow::anyhow!(
+                    "invalid overload WebSocket failure action {action:?}"
+                ));
+            }
+        }
+        if plan.exclude_profile {
+            self.excluded_profiles.insert(profile_name);
+        }
+        if plan.store_last_failure {
+            self.last_failure = Some((
+                RuntimeUpstreamFailureResponse::Websocket(payload),
+                plan.last_failure_retryable,
+            ));
+        }
+        Ok(RuntimeWebsocketMessageLoopAction::Continue)
+    }
+
+    pub(super) fn handle_direct_current_local_selection_blocked(
+        &mut self,
+        profile_name: String,
+        reason: &'static str,
+        reset_previous_response_retry_index: bool,
+    ) -> Result<RuntimeWebsocketMessageLoopAction> {
+        let affinity_releasable = !self.candidate_has_hard_affinity(&profile_name);
+        let inflight_saturated = reason == "profile_inflight_saturated";
+        let full_context_retry_available = if affinity_releasable || inflight_saturated {
+            false
+        } else {
+            self.full_context_retry_available(&profile_name)?
+        };
+        let plan = self.websocket_failure_plan(
+            runtime_proxy_crate::RuntimeWebsocketFailureClass::LocalSelectionBlocked,
+            affinity_releasable,
+            inflight_saturated,
+            full_context_retry_available,
+            true,
+            true,
+        )?;
+        if plan.mark_backoff {
+            mark_runtime_profile_retry_backoff(self.shared, &profile_name)?;
+        }
+        match plan.action {
+            runtime_proxy_crate::RuntimeWebsocketFailureAction::FullContextRetry => {
+                let released_affinity = release_runtime_retryable_failure_affinity(
+                    self.shared,
+                    &profile_name,
+                    self.previous_response_id.as_deref(),
+                    self.request_turn_state.as_deref(),
+                    self.request_session_id.as_deref(),
+                    "local_selection_full_context_retry",
+                )?;
+                self.send_full_context_retry_signal(
+                    &profile_name,
+                    "local_selection_full_context_retry_signal",
+                    released_affinity,
+                )?;
+                return Ok(RuntimeWebsocketMessageLoopAction::Finished);
+            }
+            runtime_proxy_crate::RuntimeWebsocketFailureAction::PassThrough => {
+                send_runtime_proxy_websocket_error(
+                    &mut *self.local_socket,
+                    503,
+                    "service_unavailable",
+                    runtime_proxy_local_selection_failure_message(),
+                )?;
+                return Ok(RuntimeWebsocketMessageLoopAction::Finished);
+            }
+            runtime_proxy_crate::RuntimeWebsocketFailureAction::Rotate
+            | runtime_proxy_crate::RuntimeWebsocketFailureAction::Continue => {}
+            action => {
+                return Err(anyhow::anyhow!(
+                    "invalid local-pressure WebSocket failure action {action:?}"
+                ));
+            }
+        }
+        let released_affinity = if plan.clear_affinity {
+            let released_affinity = self.release_quota_blocked_affinity(&profile_name)?;
+            self.clear_profile_affinity(&profile_name, reset_previous_response_retry_index);
+            released_affinity
+        } else {
+            false
+        };
+        if released_affinity {
+            runtime_proxy_log(
+                self.shared,
+                format!(
+                    "request={} websocket_session={} quota_blocked_affinity_released profile={} reason={} via=direct_current_profile_fallback",
+                    self.request_id, self.session_id, profile_name, reason
+                ),
+            );
+        }
+        if plan.exclude_profile {
+            self.excluded_profiles.insert(profile_name);
+        }
+        Ok(RuntimeWebsocketMessageLoopAction::Continue)
     }
 }

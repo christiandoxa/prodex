@@ -44,7 +44,7 @@ pub(crate) fn build_all_quota_watch_tui_frame(
                 filter_quota_reports_by_provider(reports, layout.provider_filter);
             let sorted_indexes =
                 sorted_quota_report_indexes_by_sort(&filtered_reports, layout.sort);
-            let shown_profiles = quota_watch_visible_profile_count(
+            let window = quota_watch_tui_window_plan(
                 &filtered_reports,
                 &sorted_indexes,
                 layout.detail,
@@ -52,16 +52,13 @@ pub(crate) fn build_all_quota_watch_tui_frame(
                 layout.scroll_offset,
                 layout.total_width,
             );
-            let start_profile = layout.scroll_offset.min(filtered_reports.len());
             let scroll_range = quota_watch_scroll_range(&RenderedQuotaReportWindow {
                 output: String::new(),
-                shown_profiles,
+                shown_profiles: window.shown,
                 total_profiles: filtered_reports.len(),
-                start_profile,
-                hidden_before: start_profile,
-                hidden_after: filtered_reports
-                    .len()
-                    .saturating_sub(start_profile.saturating_add(shown_profiles)),
+                start_profile: window.start,
+                hidden_before: window.hidden_before,
+                hidden_after: window.hidden_after,
             });
             (
                 String::new(),
@@ -70,7 +67,8 @@ pub(crate) fn build_all_quota_watch_tui_frame(
                     &filtered_reports,
                     layout,
                     &sorted_indexes,
-                    shown_profiles,
+                    window.start,
+                    window.shown,
                 )),
                 scroll_range,
             )
@@ -142,12 +140,13 @@ fn build_all_quota_watch_tui_table(
     reports: &[QuotaReport],
     layout: AllQuotaWatchLayout,
     sorted_indexes: &[usize],
+    start_profile: usize,
     shown_profiles: usize,
 ) -> AllQuotaWatchTuiTable {
     let rows = sorted_indexes
         .iter()
         .copied()
-        .skip(layout.scroll_offset)
+        .skip(start_profile)
         .take(shown_profiles)
         .map(|index| build_all_quota_watch_tui_row(&reports[index], layout.detail))
         .collect::<Vec<_>>();
@@ -175,7 +174,10 @@ pub(crate) fn build_profile_quota_watch_tui_frame(
         body,
         overview_fields,
         table: None,
-        footer: "refresh 5s | q quit".to_string(),
+        footer: format!(
+            "refresh {}s | q quit",
+            quota_watch_refresh_duration().as_secs()
+        ),
     }
 }
 
@@ -252,9 +254,15 @@ fn render_all_quota_watch_tui_table(
 }
 
 pub(crate) fn quota_watch_overview_height(field_count: usize, max_height: u16) -> u16 {
-    u16::try_from(field_count)
-        .unwrap_or(max_height)
-        .min(max_height)
+    u16::try_from(
+        prodex_mojo_core::quota_watch_policy::viewport_lines(
+            usize::from(max_height).saturating_add(4),
+            field_count,
+        )
+        .expect("Mojo quota-watch viewport policy failed")
+        .0,
+    )
+    .expect("Mojo quota-watch overview height exceeded terminal dimensions")
 }
 
 #[cfg(test)]
@@ -496,15 +504,13 @@ pub(crate) fn quota_watch_tui_table_lines(
     terminal_height: u16,
     overview_field_count: usize,
 ) -> Option<usize> {
-    let body_inner = usize::from(terminal_height)
-        .saturating_sub(3)
-        .saturating_sub(1);
-    let overview_height = overview_field_count.min(body_inner);
     Some(
-        body_inner
-            .saturating_sub(overview_height)
-            .saturating_sub(1)
-            .max(1),
+        prodex_mojo_core::quota_watch_policy::viewport_lines(
+            usize::from(terminal_height),
+            overview_field_count,
+        )
+        .expect("Mojo quota-watch viewport policy failed")
+        .1,
     )
 }
 
@@ -523,29 +529,21 @@ pub(crate) fn quota_watch_snapshot_overview_field_count(
     }
 }
 
-fn quota_watch_visible_profile_count(
+fn quota_watch_tui_window_plan(
     reports: &[QuotaReport],
     sorted_indexes: &[usize],
     detail: bool,
     max_lines: Option<usize>,
     start_profile: usize,
     total_width: usize,
-) -> usize {
-    let Some(max_lines) = max_lines else {
-        return sorted_indexes.len().saturating_sub(start_profile);
-    };
-    let mut shown_profiles = 0_usize;
-    let mut remaining = max_lines.saturating_sub(1);
-    for index in sorted_indexes.iter().copied().skip(start_profile) {
-        let row_lines = usize::from(shown_profiles > 0)
-            + quota_watch_tui_row_line_count(&reports[index], detail, total_width);
-        if row_lines > remaining {
-            break;
-        }
-        remaining = remaining.saturating_sub(row_lines);
-        shown_profiles += 1;
-    }
-    shown_profiles
+) -> prodex_mojo_core::quota_watch_policy::WindowPlan {
+    let row_lines = sorted_indexes
+        .iter()
+        .copied()
+        .map(|index| quota_watch_tui_row_line_count(&reports[index], detail, total_width))
+        .collect::<Vec<_>>();
+    prodex_mojo_core::quota_watch_policy::window_plan(&row_lines, max_lines, start_profile)
+        .expect("Mojo quota-watch row visibility policy failed")
 }
 
 fn quota_watch_tui_row_line_count(report: &QuotaReport, detail: bool, total_width: usize) -> usize {
@@ -592,18 +590,13 @@ pub(crate) fn quota_watch_tui_max_scroll_offset_for_snapshot_with_width(
         return 0;
     }
     let sorted_indexes = sorted_quota_report_indexes_by_sort(&filtered_reports, sort);
-    for scroll_offset in 0..filtered_reports.len() {
-        let shown_profiles = quota_watch_visible_profile_count(
-            &filtered_reports,
-            &sorted_indexes,
-            detail,
-            max_lines,
-            scroll_offset,
-            total_width,
-        );
-        if scroll_offset.saturating_add(shown_profiles) >= filtered_reports.len() {
-            return scroll_offset;
-        }
-    }
-    filtered_reports.len().saturating_sub(1)
+    quota_watch_tui_window_plan(
+        &filtered_reports,
+        &sorted_indexes,
+        detail,
+        max_lines,
+        0,
+        total_width,
+    )
+    .max_scroll
 }

@@ -70,16 +70,19 @@ pub enum CompactRetryStage {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct CompactRetryDecisionInput {
+pub struct CompactRetryDecisionInput<'a> {
     pub stage: CompactRetryStage,
     pub overload: bool,
     pub auto_redeemed: bool,
     pub owner_retry_used: bool,
-    pub owner_match: bool,
     pub quota_fallback_available: Option<bool>,
-    pub previous_response_owner: bool,
     pub hard_affinity: bool,
     pub committed: bool,
+    pub candidate_profile: &'a str,
+    pub current_profile: &'a str,
+    pub compact_followup_profile: Option<&'a str>,
+    pub previous_response_profile: Option<&'a str>,
+    pub session_profile: Option<&'a str>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -126,14 +129,18 @@ pub struct CompactRetryDecision {
 }
 
 unsafe extern "C" {
-    fn prodex_runtime_compact_retry_decision_v1(
+    fn prodex_runtime_compact_retry_decision_v2(
+        profile_views: *const super::RuntimeStringView,
+        candidate_profile_present: i64,
+        current_profile_present: i64,
+        compact_followup_profile_present: i64,
+        previous_response_profile_present: i64,
+        session_profile_present: i64,
         stage: i64,
         overload: i64,
         auto_redeemed: i64,
         owner_retry_used: i64,
-        owner_match: i64,
         quota_fallback_available: i64,
-        previous_response_owner: i64,
         hard_affinity: i64,
         committed: i64,
         output: *mut i64,
@@ -186,20 +193,39 @@ unsafe extern "C" {
 }
 
 pub fn compact_retry_decision(
-    input: CompactRetryDecisionInput,
+    input: CompactRetryDecisionInput<'_>,
 ) -> Result<CompactRetryDecision, MojoError> {
     let bool_tag = i64::from;
     let quota_fallback_available = input.quota_fallback_available.map(bool_tag).unwrap_or(-1);
+    let profiles = [
+        Some(input.candidate_profile),
+        Some(input.current_profile),
+        input.compact_followup_profile,
+        input.previous_response_profile,
+        input.session_profile,
+    ];
+    let profile_views = profiles.map(|profile| {
+        profile.map_or(super::RuntimeStringView { ptr: 0, len: 0 }, |profile| {
+            super::RuntimeStringView {
+                ptr: profile.as_ptr() as usize as u64,
+                len: profile.len() as u64,
+            }
+        })
+    });
     let mut output = [i64::MIN; 2];
     let status = unsafe {
-        prodex_runtime_compact_retry_decision_v1(
+        prodex_runtime_compact_retry_decision_v2(
+            profile_views.as_ptr(),
+            bool_tag(profiles[0].is_some()),
+            bool_tag(profiles[1].is_some()),
+            bool_tag(profiles[2].is_some()),
+            bool_tag(profiles[3].is_some()),
+            bool_tag(profiles[4].is_some()),
             input.stage as i64,
             bool_tag(input.overload),
             bool_tag(input.auto_redeemed),
             bool_tag(input.owner_retry_used),
-            bool_tag(input.owner_match),
             quota_fallback_available,
-            bool_tag(input.previous_response_owner),
             bool_tag(input.hard_affinity),
             bool_tag(input.committed),
             output.as_mut_ptr(),
@@ -393,17 +419,20 @@ pub fn quota_gate_plan(input: QuotaGatePlanInput) -> Result<QuotaGatePlan, MojoE
 mod tests {
     use super::*;
 
-    fn compact_retry_input(stage: CompactRetryStage) -> CompactRetryDecisionInput {
+    fn compact_retry_input(stage: CompactRetryStage) -> CompactRetryDecisionInput<'static> {
         CompactRetryDecisionInput {
             stage,
             overload: false,
             auto_redeemed: false,
             owner_retry_used: false,
-            owner_match: false,
             quota_fallback_available: None,
-            previous_response_owner: false,
             hard_affinity: false,
             committed: false,
+            candidate_profile: "candidate",
+            current_profile: "current",
+            compact_followup_profile: None,
+            previous_response_profile: None,
+            session_profile: None,
         }
     }
 
@@ -426,7 +455,7 @@ mod tests {
 
         input.stage = CompactRetryStage::Start;
         input.overload = true;
-        input.owner_match = true;
+        input.compact_followup_profile = Some(input.candidate_profile);
         assert_eq!(
             compact_retry_decision(input),
             Ok(CompactRetryDecision {
@@ -436,11 +465,12 @@ mod tests {
         );
 
         input.stage = CompactRetryStage::AfterBackoff;
-        input.owner_match = false;
+        input.compact_followup_profile = None;
         assert_eq!(
             compact_retry_decision(input).unwrap().action,
             CompactRetryAction::RotateOverload
         );
+        input.session_profile = Some(input.candidate_profile);
         input.hard_affinity = true;
         assert_eq!(
             compact_retry_decision(input).unwrap().action,
@@ -459,6 +489,7 @@ mod tests {
             CompactRetryAction::ReturnQuotaExhausted
         );
         input.quota_fallback_available = Some(true);
+        input.compact_followup_profile = Some(input.candidate_profile);
         input.hard_affinity = true;
         assert_eq!(
             compact_retry_decision(input).unwrap().action,
@@ -466,12 +497,12 @@ mod tests {
         );
         input.stage = CompactRetryStage::AfterAffinityRecovery;
         input.quota_fallback_available = None;
-        input.previous_response_owner = true;
+        input.previous_response_profile = Some(input.candidate_profile);
         assert_eq!(
             compact_retry_decision(input).unwrap().action,
             CompactRetryAction::ReturnAffinityFailure
         );
-        input.previous_response_owner = false;
+        input.previous_response_profile = None;
         assert_eq!(
             compact_retry_decision(input).unwrap().action,
             CompactRetryAction::ReleaseQuotaState
@@ -481,6 +512,8 @@ mod tests {
             compact_retry_decision(input).unwrap().action,
             CompactRetryAction::ReturnAffinityFailure
         );
+        input.session_profile = None;
+        input.compact_followup_profile = None;
         input.hard_affinity = false;
         assert_eq!(
             compact_retry_decision(input).unwrap().action,
@@ -490,6 +523,56 @@ mod tests {
         assert_eq!(
             compact_retry_decision(input).unwrap().action,
             CompactRetryAction::ReturnCommitted
+        );
+    }
+
+    #[test]
+    fn compact_retry_owner_profile_matches_are_decided_at_the_mojo_boundary() {
+        let mut input = compact_retry_input(CompactRetryStage::Start);
+        input.overload = true;
+        assert_eq!(
+            compact_retry_decision(input).unwrap().action,
+            CompactRetryAction::MarkRetryBackoff
+        );
+
+        input.current_profile = input.candidate_profile;
+        assert_eq!(
+            compact_retry_decision(input).unwrap().action,
+            CompactRetryAction::RetryOwnerOverload
+        );
+        input.current_profile = "current";
+        input.compact_followup_profile = Some(input.candidate_profile);
+        assert_eq!(
+            compact_retry_decision(input).unwrap().action,
+            CompactRetryAction::RetryOwnerOverload
+        );
+        input.compact_followup_profile = None;
+        input.previous_response_profile = Some(input.candidate_profile);
+        assert_eq!(
+            compact_retry_decision(input).unwrap().action,
+            CompactRetryAction::RetryOwnerOverload
+        );
+        input.previous_response_profile = None;
+        input.session_profile = Some(input.candidate_profile);
+        assert_eq!(
+            compact_retry_decision(input).unwrap().action,
+            CompactRetryAction::RetryOwnerOverload
+        );
+
+        input.stage = CompactRetryStage::AfterBackoff;
+        input.hard_affinity = true;
+        assert_eq!(
+            compact_retry_decision(input).unwrap().action,
+            CompactRetryAction::RecoverHardAffinity
+        );
+        input.overload = false;
+        input.stage = CompactRetryStage::AfterAffinityRecovery;
+        input.session_profile = None;
+        input.previous_response_profile = Some(input.candidate_profile);
+        input.hard_affinity = true;
+        assert_eq!(
+            compact_retry_decision(input).unwrap().action,
+            CompactRetryAction::ReturnAffinityFailure
         );
     }
 
@@ -504,16 +587,21 @@ mod tests {
 
     #[test]
     fn compact_retry_raw_abi_rejects_out_of_range_stage_without_output() {
+        let profile_views = [super::super::RuntimeStringView { ptr: 0, len: 0 }; 5];
         let mut output = [i64::MIN; 2];
         let status = unsafe {
-            prodex_runtime_compact_retry_decision_v1(
+            prodex_runtime_compact_retry_decision_v2(
+                profile_views.as_ptr(),
+                1,
+                1,
+                0,
+                0,
+                0,
                 6,
                 0,
                 0,
                 0,
-                0,
                 -1,
-                0,
                 0,
                 0,
                 output.as_mut_ptr(),

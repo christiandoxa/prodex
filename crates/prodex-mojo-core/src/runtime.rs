@@ -45,7 +45,8 @@ pub use continuation_status::{
     CONTINUATION_SHOULD_PERSIST_TOUCH, CONTINUATION_SHOULD_REFRESH_VERIFIED,
     CONTINUATION_SHOULD_REPLACE, CONTINUATION_STALE_VERIFIED, CONTINUATION_SUSPECT_PLAN,
     CONTINUATION_TERMINAL_STATUS, CONTINUATION_TOUCH_PLAN, CONTINUATION_TOUCH_SHOULD_PERSIST,
-    CONTINUATION_VERIFY_PLAN, continuation_status_transition,
+    CONTINUATION_VERIFY_PLAN, CONTINUATION_WEBSOCKET_INVALID_PREVIOUS_RESPONSE_PLAN,
+    continuation_status_transition,
 };
 pub use noncompact_loop::{
     NoncompactLoopAction, NoncompactLoopInput, NoncompactLoopStage, NoncompactPrecommitAction,
@@ -106,7 +107,10 @@ pub use selection_planning::{
 };
 pub use smart_context_pressure::smart_context_pressure_snapshot;
 pub use websocket_failure::{
-    WebsocketFailureKind, WebsocketFailureStatePlan, websocket_failure_state_plan,
+    WebsocketFailureAction, WebsocketFailureClass, WebsocketFailureDecisionInput,
+    WebsocketFailureDecisionPlan, WebsocketFailureKind, WebsocketFailureStatePlan,
+    websocket_failure_decision, websocket_failure_frame_classification,
+    websocket_failure_state_plan, websocket_invalid_previous_response_recovery_plan,
 };
 pub use websocket_loop_control::{
     WebsocketErrorKind, WebsocketPrecommitBudgetInput, WebsocketReadAction, WebsocketReadFrame,

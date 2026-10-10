@@ -11,7 +11,7 @@ use super::{
     RuntimeSmartContextArtifactRepoMapEntry, RuntimeSmartContextArtifactRepoMapEntryKind,
     RuntimeSmartContextArtifactRepoMapKey, RuntimeSmartContextArtifactSemanticLineRange,
     runtime_smart_context_artifact_semantic_line_index, runtime_smart_context_bounded_string,
-    runtime_smart_context_infer_command_kind, runtime_smart_context_line_excerpt,
+    runtime_smart_context_line_excerpt,
 };
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write as _;
@@ -73,7 +73,7 @@ pub(super) fn runtime_smart_context_artifact_line_index(
         test_failure_ranges: semantic_index.test_failure_ranges,
         error_ranges: semantic_index.error_ranges,
         symbol_ranges: semantic_index.symbol_ranges,
-        command_kind: runtime_smart_context_infer_command_kind(&lines),
+        command_kind: semantic_index.command_kind.clone(),
     }
 }
 

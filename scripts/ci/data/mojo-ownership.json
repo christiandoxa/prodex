@@ -928,7 +928,8 @@
         "role": "semantic",
         "operations": [
           "runtime_proxy_request_metadata_policy",
-          "runtime_proxy_path_policy"
+          "runtime_proxy_path_policy",
+          "runtime_proxy_mount_path_policy"
         ]
       },
       {
@@ -1014,7 +1015,8 @@
         "production_reachable": true,
         "role": "semantic",
         "operations": [
-          "smart_context_semantic_marker_policy"
+          "smart_context_semantic_marker_policy",
+          "smart_context_semantic_index_planning"
         ]
       },
       {
@@ -1504,6 +1506,28 @@
         ]
       },
       {
+        "path": "mojo/prodex_core/deepseek_attempt_policy.mojo",
+        "language": "mojo",
+        "classification": "DETERMINISTIC_DOMAIN",
+        "production_reachable": true,
+        "role": "semantic",
+        "operations": [
+          "deepseek_precommit_attempt_policy",
+          "deepseek_first_event_retry_policy"
+        ]
+      },
+      {
+        "path": "crates/prodex-mojo-core/src/deepseek_attempt_policy.rs",
+        "language": "rust",
+        "classification": "MIXED",
+        "production_reachable": true,
+        "role": "adapter",
+        "operations": [
+          "deepseek_precommit_attempt_policy",
+          "deepseek_first_event_retry_policy"
+        ]
+      },
+      {
         "path": "mojo/prodex_core/runtime_responses_loop.mojo",
         "language": "mojo",
         "classification": "DETERMINISTIC_DOMAIN",
@@ -1661,6 +1685,16 @@
         "role": "semantic",
         "operations": [
           "gemini_response_media_projection"
+        ]
+      },
+      {
+        "path": "crates/prodex-mojo-core/src/rich/routing.rs",
+        "language": "rust",
+        "classification": "MIXED",
+        "production_reachable": true,
+        "role": "adapter",
+        "operations": [
+          "runtime_proxy_mount_path_policy"
         ]
       }
     ],
@@ -3471,6 +3505,29 @@
       "rust_adapter_scope": "borrowed suffix/query reconstruction and RuntimeRouteKind mapping from validated Mojo tags"
     },
     {
+      "name": "runtime_proxy_mount_path_policy",
+      "domain": "runtime-proxy/path-routing",
+      "introduced_in": "0.437.2",
+      "baseline_state": "candidate",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_runtime_proxy_mount_path_v1",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/runtime_proxy_request.mojo",
+      "consumer": "crates/prodex-runtime-launch/src/args.rs",
+      "consumer_marker": "prodex_mojo_core::rich::runtime_proxy_mount_path(",
+      "production_consumers": [
+        "crates/prodex-runtime-launch/src/args.rs"
+      ],
+      "production_reachability_test": "crates/prodex-runtime-launch/tests/src/lib/mount_path.rs",
+      "rust_owner_before": "runtime launch mount-path trimming and slash-boundary normalization used when constructing Codex provider URLs",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "none retained; direct ABI and runtime-launch argument tests cover empty, Unicode-trimmed, slash-only, and nested mount paths",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "borrowed UTF-8 input, caller-owned output allocation, validated String materialization, and URL composition"
+    },
+    {
       "name": "runtime_state_quota_policy",
       "domain": "runtime-state/quota",
       "introduced_in": "0.432.3",
@@ -3952,6 +4009,29 @@
       "duplicate_production_owner": false,
       "platform_fallback": false,
       "rust_adapter_scope": "line/token iteration, diff-hunk end scanning, command-kind aggregation precedence, DTO/string materialization and semantic-range storage remain Rust"
+    },
+    {
+      "name": "smart_context_semantic_index_planning",
+      "domain": "smart-context/semantic-index",
+      "introduced_in": "0.436.1",
+      "baseline_state": "candidate",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_smart_context_semantic_index_v1",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/smart_context_markers.mojo",
+      "consumer": "crates/prodex-app/src/runtime_state_shared/semantic_index.rs",
+      "consumer_marker": "prodex_mojo_core::smart_context_markers::semantic_index(",
+      "production_consumers": [
+        "crates/prodex-app/src/runtime_state_shared/semantic_index.rs"
+      ],
+      "production_reachability_test": "crates/prodex-mojo-core/src/smart_context_markers.rs",
+      "rust_owner_before": "Bounded semantic range scanning, diff-path state, hunk-end planning, global range-cap and duplicate decisions, and command-kind precedence across Smart Context artifact lines",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "deleted; the required-Mojo ABI test covers range metadata, diff state, duplicate/capacity behavior and command precedence, while the artifact-store caller test covers persisted semantic ranges",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "borrowed line-span preparation, validated ABI record decoding, UTF-8/string/hash materialization, and semantic-range DTO storage"
     },
     {
       "domain": "runtime-proxy/route-decision",
@@ -6884,6 +6964,53 @@
       "duplicate_production_owner": false,
       "platform_fallback": false,
       "rust_adapter_scope": "request and affinity fact acquisition, typed ABI mapping, and replay side effects"
+    },
+    {
+      "name": "deepseek_precommit_attempt_policy",
+      "domain": "provider/deepseek",
+      "introduced_in": "0.437.2",
+      "baseline_state": "candidate",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_deepseek_attempt_action_v1",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/deepseek_attempt_policy.mojo",
+      "consumer": "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_deepseek_send.rs",
+      "consumer_marker": "deepseek_attempt_policy::attempt_action(",
+      "production_consumers": [
+        "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_deepseek_send.rs"
+      ],
+      "production_reachability_test": "crates/prodex-mojo-core/tests/deepseek_attempt_policy.rs",
+      "rust_owner_before": "DeepSeek pre-commit model-versus-credential retry precedence and bounded native first-event recovery selection",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "none retained; direct Mojo matrix and DeepSeek caller coverage exercise model priority, credential rotation, one-shot first-event budget, and terminal boundaries",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "provider error classification, retry-policy facts, transport effects, logging, and selected-attempt application"
+    },
+    {
+      "name": "deepseek_first_event_retry_policy",
+      "domain": "provider/deepseek",
+      "introduced_in": "0.437.2",
+      "baseline_state": "candidate",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_deepseek_first_event_retry_allowed_v1",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/deepseek_attempt_policy.mojo",
+      "consumer": "crates/prodex-provider-core/src/translators/deepseek/stream/shaping.rs",
+      "consumer_marker": "deepseek_attempt_policy::first_event_retry_allowed(",
+      "production_consumers": [
+        "crates/prodex-provider-core/src/translators/deepseek/stream/shaping.rs",
+        "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_deepseek_send.rs"
+      ],
+      "production_reachability_test": "crates/prodex-mojo-core/tests/deepseek_attempt_policy.rs",
+      "rust_owner_before": "DeepSeek single-use first-event retry budget and stream-commit guard",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "none retained; direct Mojo ABI and provider stream tests cover zero, exhausted, and committed boundaries",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "u8 fact conversion and validated boolean mapping"
     },
     {
       "name": "runtime_responses_loop_policy",

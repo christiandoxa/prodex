@@ -22,7 +22,6 @@ pub(crate) use runtime_proxy_crate::{
     runtime_request_previous_response_fresh_fallback_shape, runtime_request_previous_response_id,
     runtime_request_prompt_cache_key, runtime_request_requires_previous_response_affinity,
     runtime_request_session_id, runtime_request_turn_state,
-    runtime_websocket_request_requires_locked_previous_response_affinity,
 };
 #[cfg(test)]
 pub(crate) use runtime_proxy_crate::{

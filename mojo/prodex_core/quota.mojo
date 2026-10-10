@@ -1226,6 +1226,29 @@ def prodex_quota_blocked_limit_kind(
         return QUOTA_BLOCKED_KIND_WEEKLY
     return QUOTA_BLOCKED_KIND_EXHAUSTED
 
+
+@export("prodex_quota_error_auth_failure_v1")
+def prodex_quota_error_auth_failure_v1(
+    address: UInt,
+    length: Int64,
+    include_token_invalidated: Int64,
+) abi("C") -> Int64:
+    if (
+        length < 0
+        or (length > 0 and address == 0)
+        or (include_token_invalidated != 0 and include_token_invalidated != 1)
+    ):
+        return -1
+    var auth = quota_text_contains_ascii_case_insensitive(address, length, StringSlice("401"))
+    auth = auth or quota_text_contains_ascii_case_insensitive(
+        address, length, StringSlice("unauthorized")
+    )
+    if include_token_invalidated == 1:
+        auth = auth or quota_text_contains_ascii_case_insensitive(
+            address, length, StringSlice("token invalidated")
+        )
+    return 1 if auth else 0
+
 comptime QUOTA_MODEL_POLICY_ABI_VERSION: Int64 = 1
 comptime QUOTA_MODEL_POLICY_OK: Int64 = 0
 comptime QUOTA_MODEL_POLICY_INVALID: Int64 = 1

@@ -150,6 +150,60 @@
     }
 
     #[test]
+    fn all_quota_watch_tui_zero_and_max_dimensions_keep_visibility_bounded() {
+        let reports = (0..2)
+            .map(|index| {
+                let mut report = test_openai_quota_report(test_openai_usage_with_windows(
+                    20,
+                    10,
+                    1_700_001_800,
+                ));
+                report.name = format!("profile-{index}");
+                report
+            })
+            .collect::<Vec<_>>();
+        let snapshot = AllQuotaWatchSnapshot::Reports {
+            updated: "2026-06-26 10:00:00 UTC".to_string(),
+            profile_count: reports.len(),
+            reports,
+        };
+
+        assert_eq!(quota_watch_tui_table_lines(0, 0), Some(1));
+        let zero = build_all_quota_watch_tui_frame(
+            &snapshot,
+            AllQuotaWatchLayout {
+                detail: false,
+                scroll_offset: 0,
+                sort: QuotaReportSort::Profile,
+                provider_filter: QuotaProviderFilter::All,
+                provider_filter_locked: false,
+                total_width: 0,
+                max_lines: Some(0),
+            },
+        );
+        assert!(zero.table.as_ref().expect("zero-height table").rows.is_empty());
+        assert!(zero.footer.contains("0/2 visible; 0 above, 2 below"));
+
+        let largest = i64::MAX as usize;
+        let wide = build_all_quota_watch_tui_frame(
+            &snapshot,
+            AllQuotaWatchLayout {
+                detail: false,
+                scroll_offset: 0,
+                sort: QuotaReportSort::Profile,
+                provider_filter: QuotaProviderFilter::All,
+                provider_filter_locked: false,
+                total_width: largest,
+                max_lines: Some(largest),
+            },
+        );
+        let rows = &wide.table.as_ref().expect("wide table").rows;
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0].profile, vec!["profile-0".to_string()]);
+        assert_eq!(rows[1].profile, vec!["profile-1".to_string()]);
+    }
+
+    #[test]
     fn all_quota_watch_tui_shows_four_profiles_when_table_has_room() {
         let reports = (0..4)
             .map(|index| {

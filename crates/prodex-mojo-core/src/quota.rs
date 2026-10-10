@@ -312,6 +312,11 @@ unsafe extern "C" {
     fn prodex_quota_openai_model_capacity_plan(fields_address: u64, output_address: u64) -> i64;
     fn prodex_quota_error_summary_kind(address: u64, length: i64) -> i64;
     fn prodex_quota_blocked_limit_kind(address: u64, length: i64) -> i64;
+    fn prodex_quota_error_auth_failure_v1(
+        address: u64,
+        length: i64,
+        include_token_invalidated: i64,
+    ) -> i64;
 }
 
 fn quota_text_address(value: Option<&str>) -> (u64, i64) {
@@ -461,6 +466,23 @@ pub fn blocked_limit_kind(value: &str) -> Result<i64, crate::MojoError> {
         Ok(kind)
     } else {
         Err(crate::MojoError::InvalidOutput)
+    }
+}
+
+pub fn quota_error_auth_failure(
+    value: &str,
+    include_token_invalidated: bool,
+) -> Result<bool, crate::MojoError> {
+    let (address, length) = quota_text_address(Some(value));
+    if length == i64::MAX {
+        return Err(crate::MojoError::InvalidInput);
+    }
+    match unsafe {
+        prodex_quota_error_auth_failure_v1(address, length, i64::from(include_token_invalidated))
+    } {
+        0 => Ok(false),
+        1 => Ok(true),
+        _ => Err(crate::MojoError::InvalidOutput),
     }
 }
 

@@ -9,6 +9,30 @@ use runtime_proxy_crate::{runtime_proxy_log_field, runtime_proxy_structured_log_
 use std::time::Instant;
 use tungstenite::Error as WsError;
 
+fn websocket_transport_failure_action(
+    committed: bool,
+    reuse_existing_session: bool,
+    precommit_transport_retry_allowed: bool,
+) -> Result<runtime_proxy_crate::RuntimeWebsocketFailureAction> {
+    runtime_proxy_crate::runtime_websocket_failure_decision(
+        runtime_proxy_crate::RuntimeWebsocketFailureDecisionInput {
+            failure_class: runtime_proxy_crate::RuntimeWebsocketFailureClass::TransportFailed,
+            stream_committed: committed,
+            hard_affinity: false,
+            affinity_releasable: true,
+            inflight_saturated: false,
+            full_context_retry_available: false,
+            quota_fallback_available: false,
+            direct_current_fallback: false,
+            reuse_existing_session,
+            precommit_transport_retry_allowed,
+            reset_retry_index: false,
+        },
+    )
+    .map(|plan| plan.action)
+    .map_err(|error| anyhow::anyhow!("Mojo WebSocket transport failure decision failed: {error:?}"))
+}
+
 pub(super) struct RuntimeWebsocketUpstreamFailureRequest<'a> {
     pub(super) request_id: u64,
     pub(super) shared: &'a RuntimeRotationProxyShared,
@@ -89,24 +113,28 @@ pub(super) fn handle_runtime_websocket_upstream_close(
         "websocket_upstream_close",
         &transport_error,
     );
-    match runtime_proxy_crate::runtime_websocket_transport_failure_plan(
+    match websocket_transport_failure_action(
         committed,
         reuse_existing_session,
         precommit_transport_retry_allowed,
-    ) {
-        runtime_proxy_crate::RuntimeWebsocketTransportFailurePlan::ReuseWatchdog => {
+    )? {
+        runtime_proxy_crate::RuntimeWebsocketFailureAction::ReuseWatchdog => {
             Ok(RuntimeWebsocketAttempt::ReuseWatchdogTripped {
                 profile_name: profile_name.to_string(),
                 event: "upstream_close_before_commit",
             })
         }
-        runtime_proxy_crate::RuntimeWebsocketTransportFailurePlan::RetryTransport => {
+        runtime_proxy_crate::RuntimeWebsocketFailureAction::RetryTransport => {
             Ok(RuntimeWebsocketAttempt::TransportFailed {
                 profile_name: profile_name.to_string(),
                 stage: "upstream_close_before_commit",
             })
         }
-        runtime_proxy_crate::RuntimeWebsocketTransportFailurePlan::Error => Err(transport_error),
+        runtime_proxy_crate::RuntimeWebsocketFailureAction::Error
+        | runtime_proxy_crate::RuntimeWebsocketFailureAction::PassThrough => Err(transport_error),
+        action => Err(anyhow::anyhow!(
+            "invalid WebSocket transport action {action:?}"
+        )),
     }
 }
 
@@ -162,24 +190,28 @@ pub(super) fn handle_runtime_websocket_connection_closed(
         "websocket_upstream_connection_closed",
         &transport_error,
     );
-    match runtime_proxy_crate::runtime_websocket_transport_failure_plan(
+    match websocket_transport_failure_action(
         committed,
         reuse_existing_session,
         precommit_transport_retry_allowed,
-    ) {
-        runtime_proxy_crate::RuntimeWebsocketTransportFailurePlan::ReuseWatchdog => {
+    )? {
+        runtime_proxy_crate::RuntimeWebsocketFailureAction::ReuseWatchdog => {
             Ok(RuntimeWebsocketAttempt::ReuseWatchdogTripped {
                 profile_name: profile_name.to_string(),
                 event: "connection_closed_before_commit",
             })
         }
-        runtime_proxy_crate::RuntimeWebsocketTransportFailurePlan::RetryTransport => {
+        runtime_proxy_crate::RuntimeWebsocketFailureAction::RetryTransport => {
             Ok(RuntimeWebsocketAttempt::TransportFailed {
                 profile_name: profile_name.to_string(),
                 stage: "connection_closed_before_commit",
             })
         }
-        runtime_proxy_crate::RuntimeWebsocketTransportFailurePlan::Error => Err(transport_error),
+        runtime_proxy_crate::RuntimeWebsocketFailureAction::Error
+        | runtime_proxy_crate::RuntimeWebsocketFailureAction::PassThrough => Err(transport_error),
+        action => Err(anyhow::anyhow!(
+            "invalid WebSocket transport action {action:?}"
+        )),
     }
 }
 
@@ -257,12 +289,12 @@ pub(super) fn handle_runtime_websocket_read_error(
             "websocket_first_frame_timeout",
             &transport_error,
         );
-        match runtime_proxy_crate::runtime_websocket_transport_failure_plan(
+        match websocket_transport_failure_action(
             committed,
             reuse_existing_session,
             precommit_transport_retry_allowed,
-        ) {
-            runtime_proxy_crate::RuntimeWebsocketTransportFailurePlan::ReuseWatchdog => {
+        )? {
+            runtime_proxy_crate::RuntimeWebsocketFailureAction::ReuseWatchdog => {
                 runtime_proxy_log(
                     shared,
                     runtime_proxy_structured_log_message(
@@ -283,14 +315,20 @@ pub(super) fn handle_runtime_websocket_read_error(
                     event: "no_first_upstream_frame_before_deadline",
                 });
             }
-            runtime_proxy_crate::RuntimeWebsocketTransportFailurePlan::RetryTransport => {
+            runtime_proxy_crate::RuntimeWebsocketFailureAction::RetryTransport => {
                 return Ok(RuntimeWebsocketAttempt::TransportFailed {
                     profile_name: profile_name.to_string(),
                     stage: "first_frame_timeout",
                 });
             }
-            runtime_proxy_crate::RuntimeWebsocketTransportFailurePlan::Error => {
+            runtime_proxy_crate::RuntimeWebsocketFailureAction::Error
+            | runtime_proxy_crate::RuntimeWebsocketFailureAction::PassThrough => {
                 return Err(transport_error);
+            }
+            action => {
+                return Err(anyhow::anyhow!(
+                    "invalid WebSocket transport action {action:?}"
+                ));
             }
         }
     }
@@ -335,23 +373,27 @@ pub(super) fn handle_runtime_websocket_read_error(
         "websocket_upstream_read",
         &transport_error,
     );
-    match runtime_proxy_crate::runtime_websocket_transport_failure_plan(
+    match websocket_transport_failure_action(
         committed,
         reuse_existing_session,
         precommit_transport_retry_allowed,
-    ) {
-        runtime_proxy_crate::RuntimeWebsocketTransportFailurePlan::ReuseWatchdog => {
+    )? {
+        runtime_proxy_crate::RuntimeWebsocketFailureAction::ReuseWatchdog => {
             Ok(RuntimeWebsocketAttempt::ReuseWatchdogTripped {
                 profile_name: profile_name.to_string(),
                 event: "upstream_read_error",
             })
         }
-        runtime_proxy_crate::RuntimeWebsocketTransportFailurePlan::RetryTransport => {
+        runtime_proxy_crate::RuntimeWebsocketFailureAction::RetryTransport => {
             Ok(RuntimeWebsocketAttempt::TransportFailed {
                 profile_name: profile_name.to_string(),
                 stage: "read_error",
             })
         }
-        runtime_proxy_crate::RuntimeWebsocketTransportFailurePlan::Error => Err(transport_error),
+        runtime_proxy_crate::RuntimeWebsocketFailureAction::Error
+        | runtime_proxy_crate::RuntimeWebsocketFailureAction::PassThrough => Err(transport_error),
+        action => Err(anyhow::anyhow!(
+            "invalid WebSocket transport action {action:?}"
+        )),
     }
 }

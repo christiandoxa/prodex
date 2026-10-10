@@ -208,11 +208,13 @@ pub(crate) fn read_output_events(
 ) -> std::result::Result<OutputReadBatch, SessionPromptWriteError> {
     let (source_len, complete, skipped_to) = read_complete_output(path, offset)?;
     if let Some(next_offset) = skipped_to {
+        let events = if limit > 0 {
+            vec![output_gap_event(offset, "oversized_record")?]
+        } else {
+            Vec::new()
+        };
         return Ok(OutputReadBatch {
-            events: (limit > 0)
-                .then(|| output_gap_event(offset, "oversized_record"))
-                .into_iter()
-                .collect(),
+            events,
             next_offset,
             next_event_index: 0,
             has_more: next_offset < source_len,
@@ -384,27 +386,40 @@ fn read_output_lines(
     for line in complete.split_inclusive(|byte| *byte == b'\n') {
         let line_start = offset.saturating_add(consumed as u64);
         let raw_len = line.len();
-        if events.len() >= limit {
-            return Ok(OutputReadBatch {
-                events,
-                next_offset: line_start,
-                next_event_index: 0,
-                has_more: true,
-            });
-        }
-        if raw_len > OUTPUT_READ_MAX_LINE_BYTES && !raw_line_is_visible_user_message(line) {
-            let next_offset = line_start.saturating_add(raw_len as u64);
-            events.push(output_gap_event(line_start, "oversized_record"));
-            consumed = consumed.saturating_add(raw_len);
-            if events.len() >= limit {
+        match output_line_plan(line, events.len() >= limit)? {
+            prodex_mojo_core::session_cli_policy::SessionPromptWriteOutputLineAction::Limit => {
                 return Ok(OutputReadBatch {
                     events,
-                    next_offset,
+                    next_offset: line_start,
                     next_event_index: 0,
-                    has_more: next_offset < source_len,
+                    has_more: true,
                 });
             }
-            continue;
+            prodex_mojo_core::session_cli_policy::SessionPromptWriteOutputLineAction::Oversized => {
+                let next_offset = line_start.saturating_add(raw_len as u64);
+                events.push(output_gap_event(line_start, "oversized_record")?);
+                consumed = consumed.saturating_add(raw_len);
+                if events.len() >= limit {
+                    return Ok(OutputReadBatch {
+                        events,
+                        next_offset,
+                        next_event_index: 0,
+                        has_more: next_offset < source_len,
+                    });
+                }
+                continue;
+            }
+            prodex_mojo_core::session_cli_policy::SessionPromptWriteOutputLineAction::InvalidUtf8 => {
+                events.push(output_gap_event(line_start, "invalid_utf8")?);
+                consumed = consumed.saturating_add(raw_len);
+                continue;
+            }
+            prodex_mojo_core::session_cli_policy::SessionPromptWriteOutputLineAction::Malformed => {
+                events.push(output_gap_event(line_start, "malformed_record")?);
+                consumed = consumed.saturating_add(raw_len);
+                continue;
+            }
+            prodex_mojo_core::session_cli_policy::SessionPromptWriteOutputLineAction::Process => {}
         }
         if let Some(batch) = read_output_line(
             line,
@@ -435,25 +450,8 @@ fn read_output_line(
     events: &mut Vec<PromptOutputEvent>,
     total_text_bytes: &mut usize,
 ) -> std::result::Result<Option<OutputReadBatch>, SessionPromptWriteError> {
-    let large_visible_user_message = raw_line.len() > OUTPUT_READ_MAX_LINE_BYTES
-        && raw_line.len() <= OUTPUT_VERIFY_MAX_LINE_BYTES
-        && raw_line_is_visible_user_message(raw_line);
-    if raw_line.len() > OUTPUT_READ_MAX_LINE_BYTES && !large_visible_user_message {
-        return Ok(None);
-    }
     let line = raw_line.strip_suffix(b"\n").unwrap_or(raw_line);
-    let Ok(line) = std::str::from_utf8(line) else {
-        events.push(output_gap_event(line_start, "invalid_utf8"));
-        return Ok(None);
-    };
-    let Ok(_) = serde_json::from_str::<serde_json::Value>(line) else {
-        events.push(output_gap_event(line_start, "malformed_record"));
-        return Ok(None);
-    };
-    if !transcript_record_shape_is_valid(line)? {
-        events.push(output_gap_event(line_start, "malformed_record"));
-        return Ok(None);
-    }
+    let line = std::str::from_utf8(line).map_err(|_| SessionPromptWriteError::OutputReadFailed)?;
     let mut visible_index = 0_usize;
     for event in crate::app_commands::transcript_events_from_session_line(line) {
         let sequence = line_start
@@ -494,48 +492,131 @@ fn read_output_line(
     Ok(None)
 }
 
-fn raw_line_is_visible_user_message(raw_line: &[u8]) -> bool {
+fn raw_line_is_visible_user_message(
+    raw_line: &[u8],
+) -> std::result::Result<bool, SessionPromptWriteError> {
     if raw_line.len() > OUTPUT_VERIFY_MAX_LINE_BYTES {
-        return false;
+        return Ok(false);
     }
     let line = raw_line.strip_suffix(b"\n").unwrap_or(raw_line);
     let Ok(value) = serde_json::from_slice::<serde_json::Value>(line) else {
-        return false;
+        return Ok(false);
     };
     let Some(payload) = value.get("payload") else {
-        return false;
+        return Ok(false);
     };
-    match value.get("type").and_then(serde_json::Value::as_str) {
-        Some("event_msg") => {
-            payload.get("type").and_then(serde_json::Value::as_str) == Some("user_message")
-                && payload
-                    .get("message")
-                    .and_then(serde_json::Value::as_str)
-                    .is_some()
-        }
-        Some("response_item") => {
-            crate::app_commands::transcript_exact_visible_user_message(payload).is_some()
-        }
-        _ => false,
-    }
+    let record_type = match value.get("type").and_then(serde_json::Value::as_str) {
+        Some("event_msg") => 1,
+        Some("response_item") => 2,
+        _ => 0,
+    };
+    let payload_user_message = if record_type == 1 {
+        payload.get("type").and_then(serde_json::Value::as_str) == Some("user_message")
+            && payload
+                .get("message")
+                .and_then(serde_json::Value::as_str)
+                .is_some()
+    } else {
+        payload.get("type").and_then(serde_json::Value::as_str) == Some("message")
+    };
+    let role_user = payload.get("role").and_then(serde_json::Value::as_str) == Some("user");
+    let kinds = payload
+        .get("internal_chat_message_metadata_passthrough")
+        .and_then(|metadata| metadata.get("content_item_kinds"))
+        .and_then(serde_json::Value::as_array);
+    let metadata_present = kinds.is_some();
+    let kinds_nonempty = kinds.is_some_and(|kinds| !kinds.is_empty());
+    let kinds_all_user_text =
+        kinds.is_some_and(|kinds| kinds.iter().all(|kind| kind.as_str() == Some("user.text")));
+    prodex_mojo_core::session_cli_policy::prompt_write_user_message_visible(
+        record_type,
+        payload_user_message,
+        role_user,
+        metadata_present,
+        kinds_nonempty,
+        kinds_all_user_text,
+    )
+    .map_err(|_| SessionPromptWriteError::OutputReadFailed)
 }
 
 fn transcript_record_shape_is_valid(
     line: &str,
 ) -> std::result::Result<bool, SessionPromptWriteError> {
-    prodex_mojo_core::json::session_report_record_shape(line)
-        .map_err(|_| SessionPromptWriteError::OutputReadFailed)
+    let value = serde_json::from_str::<serde_json::Value>(line)
+        .map_err(|_| SessionPromptWriteError::OutputReadFailed)?;
+    let record_type = match value.get("type").and_then(serde_json::Value::as_str) {
+        Some("event_msg") => 1,
+        Some("response_item") => 2,
+        Some("session_meta") => 3,
+        Some("turn_context") => 4,
+        Some(_) => 5,
+        None => 0,
+    };
+    let payload = value.get("payload");
+    prodex_mojo_core::session_cli_policy::prompt_write_record_shape(
+        record_type,
+        payload.is_some(),
+        payload.is_some_and(serde_json::Value::is_object),
+        payload
+            .and_then(|payload| payload.get("type"))
+            .and_then(serde_json::Value::as_str)
+            .is_some(),
+    )
+    .map_err(|_| SessionPromptWriteError::OutputReadFailed)
 }
 
-fn output_gap_event(sequence: u64, reason: &'static str) -> PromptOutputEvent {
-    PromptOutputEvent {
+fn output_gap_event(
+    sequence: u64,
+    reason: &'static str,
+) -> std::result::Result<PromptOutputEvent, SessionPromptWriteError> {
+    let reason_code = match reason {
+        "oversized_record" => 0,
+        "invalid_utf8" => 1,
+        "malformed_record" => 2,
+        _ => return Err(SessionPromptWriteError::OutputReadFailed),
+    };
+    let text = prodex_mojo_core::session_cli_policy::prompt_write_gap_text(reason_code)
+        .map_err(|_| SessionPromptWriteError::OutputReadFailed)?;
+    Ok(PromptOutputEvent {
         sequence: sequence.saturating_mul(65_536),
         timestamp: "-".to_string(),
         kind: "gap".to_string(),
         name: Some(reason.to_string()),
         status: Some("skipped".to_string()),
-        text: format!("output gap: {reason}; record omitted"),
-    }
+        text,
+    })
+}
+
+fn output_line_plan(
+    raw_line: &[u8],
+    limit_reached: bool,
+) -> std::result::Result<
+    prodex_mojo_core::session_cli_policy::SessionPromptWriteOutputLineAction,
+    SessionPromptWriteError,
+> {
+    let line = raw_line.strip_suffix(b"\n").unwrap_or(raw_line);
+    let utf8_valid = std::str::from_utf8(line).is_ok();
+    let json_valid = utf8_valid && serde_json::from_slice::<serde_json::Value>(line).is_ok();
+    let shape_valid = if json_valid {
+        let line =
+            std::str::from_utf8(line).map_err(|_| SessionPromptWriteError::OutputReadFailed)?;
+        transcript_record_shape_is_valid(line)?
+    } else {
+        false
+    };
+    prodex_mojo_core::session_cli_policy::prompt_write_output_line_plan(
+        prodex_mojo_core::session_cli_policy::SessionPromptWriteOutputLineInput {
+            raw_length: raw_line.len(),
+            read_limit: OUTPUT_READ_MAX_LINE_BYTES,
+            verify_limit: OUTPUT_VERIFY_MAX_LINE_BYTES,
+            utf8_valid,
+            json_valid,
+            shape_valid,
+            visible_user_message: raw_line_is_visible_user_message(raw_line)?,
+            limit_reached,
+        },
+    )
+    .map_err(|_| SessionPromptWriteError::OutputReadFailed)
 }
 
 fn output_event_from_transcript(
@@ -581,8 +662,9 @@ fn output_event_from_transcript(
         prodex_mojo_core::session_cli_policy::TranscriptOutputTextMode::Timestamp,
     )
     .map_err(|_| SessionPromptWriteError::OutputReadFailed)?;
+    let redacted = redaction::redaction_redact_secret_like_text(&event.text);
     let text = prodex_mojo_core::session_cli_policy::transcript_output_bounded(
-        &event.text,
+        &redacted,
         prodex_mojo_core::session_cli_policy::TranscriptOutputTextMode::Text,
     )
     .map_err(|_| SessionPromptWriteError::OutputReadFailed)?;

@@ -201,6 +201,7 @@ const PROMOTED_FILES = [
   "crates/prodex-app/src/runtime_proxy/lineage/remember.rs",
   "crates/prodex-app/src/runtime_proxy/health_circuit.rs",
   "crates/prodex-mojo-core/src/smart_context_markers.rs",
+  "mojo/prodex_core/smart_context_markers.mojo",
   "crates/prodex-app/src/runtime_state_shared/semantic_index/markers.rs",
   SMART_CONTEXT_SYMBOLS_CONSUMER_FILE,
   SMART_CONTEXT_SYMBOLS_ADAPTER_FILE,
@@ -5631,6 +5632,28 @@ export function findViolations(files) {
     return [];
   });
   const smartContextMarkerViolations = files.flatMap(([filePath, contents]) => {
+    if (filePath === "crates/prodex-app/src/runtime_state_shared/semantic_index.rs") {
+      const production = contents.split("#[cfg(test)]", 1)[0];
+      const violations = production.includes(
+        "prodex_mojo_core::smart_context_markers::semantic_index("
+      )
+        ? []
+        : [`${filePath}: semantic-index planning must use the Mojo batch planner`];
+      for (const restored of [
+        "runtime_smart_context_parse_file_location(",
+        "runtime_smart_context_parse_diff_hunk(",
+        "runtime_smart_context_diff_hunk_end(",
+        "runtime_smart_context_is_test_failure_line(",
+        "runtime_smart_context_parse_error_code(",
+        "runtime_smart_context_infer_command_kind(",
+        "runtime_smart_context_push_semantic_range(",
+      ]) {
+        if (production.includes(restored)) {
+          violations.push(`${filePath}: contains restored Rust semantic-index planning ${restored}`);
+        }
+      }
+      return violations;
+    }
     if (filePath === "crates/prodex-app/src/runtime_state_shared/semantic_index/markers.rs") {
       const required = [
         "prodex_mojo_core::smart_context_markers::parse_file_location_token(",
@@ -5670,10 +5693,24 @@ export function findViolations(files) {
         "pub fn test_symbol_span(",
         "pub fn error_code(",
         "pub fn command_line_kind(",
+        "prodex_smart_context_semantic_index_v1(",
+        "pub fn semantic_index(",
+        "semantic_index_batch_plans_ranges_and_command_precedence",
+        "semantic_index_batch_reports_bounded_capacity",
       ];
       return required
         .filter((call) => !contents.includes(call))
         .map((call) => filePath + ": smart-context marker ABI adapter must retain " + call);
+    }
+    if (filePath === "mojo/prodex_core/smart_context_markers.mojo") {
+      const required = [
+        '@export("prodex_smart_context_semantic_index_v1")',
+        "def semantic_emit_range(",
+        "def semantic_diff_hunk_end(",
+      ];
+      return required
+        .filter((call) => !contents.includes(call))
+        .map((call) => filePath + ": semantic-index planning must remain Mojo-owned (" + call + ")");
     }
     return [];
   });
@@ -6852,6 +6889,7 @@ function selfTest() {
   ]]).join("\n"), /ignored runtime-doctor log-value policy must remain Mojo-owned/u);
   const smartContextSymbolConsumer = [
     "fn runtime_smart_context_artifact_semantic_line_index() {",
+    "  prodex_mojo_core::smart_context_markers::semantic_index(text, lines, 256, 16 * 1024);",
     "  prodex_mojo_core::smart_context_symbols::index(text, remaining, max_excerpt_bytes);",
     "}",
   ].join("\n");

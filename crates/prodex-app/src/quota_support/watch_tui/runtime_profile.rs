@@ -1,5 +1,5 @@
 use super::*;
-use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
+use crossterm::event::{self, Event, KeyEvent, KeyEventKind};
 use std::io::IsTerminal;
 
 pub(super) type QuotaWatchTui = terminal_ui::AlternateScreenTerminal<io::Stdout>;
@@ -9,9 +9,7 @@ pub(crate) fn quota_watch_enabled(args: &QuotaArgs) -> bool {
 }
 
 pub(crate) fn quota_watch_quit_key(key: KeyEvent) -> bool {
-    matches!(key.code, KeyCode::Esc | KeyCode::Char('q'))
-        || (key.modifiers.contains(KeyModifiers::CONTROL)
-            && matches!(key.code, KeyCode::Char('c') | KeyCode::Char('z')))
+    matches!(quota_watch_command(key), Some(QuotaWatchCommand::Quit))
 }
 
 pub(crate) fn watch_quota(
@@ -48,7 +46,7 @@ pub(crate) fn watch_quota(
             detail,
         );
         print_quota_watch_plain_snapshot(&output)?;
-        thread::sleep(Duration::from_secs(DEFAULT_WATCH_INTERVAL_SECONDS));
+        thread::sleep(quota_watch_refresh_duration());
     }
 }
 
@@ -130,11 +128,15 @@ fn merge_profile_quota_watch_snapshot(
     previous: &ProfileQuotaWatchSnapshot,
     next: ProfileQuotaWatchSnapshot,
 ) -> ProfileQuotaWatchSnapshot {
-    if previous.quota.is_ok() && next.quota.is_err() {
-        previous.clone()
-    } else {
-        next
-    }
+    let preserve = prodex_mojo_core::quota_watch_policy::preserve_report(
+        previous.quota.is_ok(),
+        next.quota.is_ok(),
+        false,
+        true,
+        true,
+    )
+    .expect("Mojo quota-watch profile merge policy failed");
+    if preserve { previous.clone() } else { next }
 }
 
 fn profile_quota_tui_should_quit(redraw_needed: &mut bool) -> Result<bool> {

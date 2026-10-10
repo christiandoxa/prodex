@@ -1,10 +1,12 @@
+#[cfg(test)]
+use crate::RuntimeHttpErrorAction;
 use crate::{
-    RuntimeHttpErrorAction, RuntimeHttpErrorClass, RuntimeHttpErrorPhase, RuntimeTokenUsage,
-    RuntimeWebsocketErrorPayload, extract_runtime_proxy_previous_response_message,
+    RuntimeHttpErrorPhase, RuntimeTokenUsage, RuntimeWebsocketErrorPayload,
+    extract_runtime_proxy_previous_response_message,
     extract_runtime_proxy_previous_response_message_from_value,
     extract_runtime_response_ids_from_value, extract_runtime_token_usage_from_value,
     extract_runtime_turn_state_from_value, runtime_proxy_stale_continuation_message,
-    runtime_response_event_type_from_value, runtime_stream_error_policy_from_value,
+    runtime_response_event_type_from_value,
 };
 use prodex_mojo_core::rich::ascii_casefold_equal_exact;
 
@@ -200,35 +202,36 @@ pub fn inspect_runtime_websocket_text_frame_with_phase(
     payload: &str,
     phase: RuntimeHttpErrorPhase,
 ) -> RuntimeInspectedWebsocketTextFrame {
+    inspect_runtime_websocket_text_frame_with_phase_checked(payload, phase)
+        .expect("Mojo websocket failure classification returned invalid output")
+}
+
+/// Inspects a WebSocket frame through checked Mojo failure classification.
+pub fn inspect_runtime_websocket_text_frame_with_phase_checked(
+    payload: &str,
+    phase: RuntimeHttpErrorPhase,
+) -> Result<RuntimeInspectedWebsocketTextFrame, prodex_mojo_core::MojoError> {
     let Ok(value) = serde_json::from_str::<serde_json::Value>(payload) else {
-        return RuntimeInspectedWebsocketTextFrame::default();
+        return Ok(RuntimeInspectedWebsocketTextFrame::default());
     };
 
     let event_type = runtime_response_event_type_from_value(&value);
-    let error_policy = runtime_stream_error_policy_from_value(&value, phase);
-    let retry_kind = if runtime_websocket_connection_limit_reached(&value) {
-        Some(RuntimeWebsocketRetryInspectionKind::ConnectionLimitReached)
-    } else if extract_runtime_proxy_previous_response_message_from_value(&value).is_some() {
-        Some(RuntimeWebsocketRetryInspectionKind::PreviousResponseNotFound)
-    } else if error_policy.action == RuntimeHttpErrorAction::RetryProfile
-        && error_policy.class == RuntimeHttpErrorClass::RateLimited
-    {
-        Some(RuntimeWebsocketRetryInspectionKind::RateLimited)
-    } else if (error_policy.action == RuntimeHttpErrorAction::RetryProfile
-        && matches!(
-            error_policy.class,
-            RuntimeHttpErrorClass::Overload | RuntimeHttpErrorClass::TransientServer
-        ))
-        || error_policy.action == RuntimeHttpErrorAction::RotateProfile
-            && error_policy.class == RuntimeHttpErrorClass::ProfileUnavailable
-    {
-        Some(RuntimeWebsocketRetryInspectionKind::Overloaded)
-    } else if error_policy.action == RuntimeHttpErrorAction::RotateProfile
-        && error_policy.class == RuntimeHttpErrorClass::Quota
-    {
-        Some(RuntimeWebsocketRetryInspectionKind::QuotaBlocked)
-    } else {
-        None
+    let error_policy =
+        crate::error_policy::runtime_stream_error_policy_from_value_checked(&value, phase)?;
+    let retry_kind = match crate::runtime_websocket_failure_frame_classification(
+        error_policy.class as i64,
+        error_policy.action as i64,
+        runtime_websocket_connection_limit_reached(&value),
+        extract_runtime_proxy_previous_response_message_from_value(&value).is_some(),
+        matches!(phase, RuntimeHttpErrorPhase::Committed),
+    )? {
+        0 => None,
+        1 => Some(RuntimeWebsocketRetryInspectionKind::ConnectionLimitReached),
+        2 => Some(RuntimeWebsocketRetryInspectionKind::QuotaBlocked),
+        3 => Some(RuntimeWebsocketRetryInspectionKind::RateLimited),
+        4 => Some(RuntimeWebsocketRetryInspectionKind::Overloaded),
+        5 => Some(RuntimeWebsocketRetryInspectionKind::PreviousResponseNotFound),
+        _ => return Err(prodex_mojo_core::MojoError::InvalidOutput),
     };
     let precommit_hold = event_type
         .as_deref()
@@ -238,7 +241,7 @@ pub fn inspect_runtime_websocket_text_frame_with_phase(
         .is_some_and(runtime_responses_websocket_terminal_event_kind)
         || runtime_websocket_wrapped_error_is_terminal(&value);
 
-    RuntimeInspectedWebsocketTextFrame {
+    Ok(RuntimeInspectedWebsocketTextFrame {
         event_type,
         turn_state: extract_runtime_turn_state_from_value(&value),
         response_ids: extract_runtime_response_ids_from_value(&value),
@@ -247,7 +250,7 @@ pub fn inspect_runtime_websocket_text_frame_with_phase(
         precommit_hold,
         terminal_event,
         retry_after: error_policy.retry_after,
-    }
+    })
 }
 
 fn runtime_websocket_connection_limit_reached(value: &serde_json::Value) -> bool {

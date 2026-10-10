@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 use crate::runtime_state_shared::RuntimeSmartContextArtifactSemanticLineRange;
 
 #[derive(Default)]
@@ -12,6 +14,7 @@ pub(in crate::runtime_state_shared) struct RuntimeSmartContextArtifactSemanticLi
         Vec<RuntimeSmartContextArtifactSemanticLineRange>,
     pub(in crate::runtime_state_shared) symbol_ranges:
         Vec<RuntimeSmartContextArtifactSemanticLineRange>,
+    pub(in crate::runtime_state_shared) command_kind: Option<String>,
     pub(in crate::runtime_state_shared) complete: bool,
     pub(in crate::runtime_state_shared) symbol_complete: bool,
 }

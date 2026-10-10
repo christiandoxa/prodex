@@ -189,3 +189,82 @@ fn websocket_failure_state_plan_adapter_exercises_every_class_and_tie() {
     }
     assert!(confirmed > 0);
 }
+
+#[test]
+fn websocket_failure_decision_adapter_covers_affinity_pressure_transport_and_commit() {
+    let cases = [
+        (
+            RuntimeWebsocketFailureDecisionInput {
+                failure_class: RuntimeWebsocketFailureClass::QuotaBlocked,
+                stream_committed: false,
+                hard_affinity: false,
+                affinity_releasable: true,
+                inflight_saturated: false,
+                full_context_retry_available: false,
+                quota_fallback_available: true,
+                direct_current_fallback: false,
+                reuse_existing_session: false,
+                precommit_transport_retry_allowed: false,
+                reset_retry_index: false,
+            },
+            RuntimeWebsocketFailureAction::Rotate,
+        ),
+        (
+            RuntimeWebsocketFailureDecisionInput {
+                failure_class: RuntimeWebsocketFailureClass::AuthFailed,
+                stream_committed: false,
+                hard_affinity: true,
+                affinity_releasable: false,
+                inflight_saturated: false,
+                full_context_retry_available: true,
+                quota_fallback_available: true,
+                direct_current_fallback: false,
+                reuse_existing_session: false,
+                precommit_transport_retry_allowed: false,
+                reset_retry_index: false,
+            },
+            RuntimeWebsocketFailureAction::FullContextRetry,
+        ),
+        (
+            RuntimeWebsocketFailureDecisionInput {
+                failure_class: RuntimeWebsocketFailureClass::LocalSelectionBlocked,
+                stream_committed: false,
+                hard_affinity: false,
+                affinity_releasable: true,
+                inflight_saturated: true,
+                full_context_retry_available: false,
+                quota_fallback_available: true,
+                direct_current_fallback: false,
+                reuse_existing_session: false,
+                precommit_transport_retry_allowed: false,
+                reset_retry_index: false,
+            },
+            RuntimeWebsocketFailureAction::Continue,
+        ),
+        (
+            RuntimeWebsocketFailureDecisionInput {
+                failure_class: RuntimeWebsocketFailureClass::TransportFailed,
+                stream_committed: true,
+                hard_affinity: false,
+                affinity_releasable: true,
+                inflight_saturated: false,
+                full_context_retry_available: false,
+                quota_fallback_available: false,
+                direct_current_fallback: false,
+                reuse_existing_session: false,
+                precommit_transport_retry_allowed: true,
+                reset_retry_index: false,
+            },
+            RuntimeWebsocketFailureAction::Error,
+        ),
+    ];
+    let mut confirmed = 0;
+    for (input, expected) in cases {
+        assert_eq!(
+            runtime_websocket_failure_decision(input).unwrap().action,
+            expected
+        );
+        confirmed += 1;
+    }
+    assert_eq!(confirmed, 4);
+}
