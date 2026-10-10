@@ -298,6 +298,11 @@ pub(crate) fn acquire_runtime_proxy_active_request_slot_with_wait_for_request(
     );
     let mut wait_metric =
         RuntimeProxyWaitMetricGuard::new(shared.lane_admission.admission_wait_metric_counters());
+    let wait_for = if budget.is_zero() {
+        Duration::from_millis(1)
+    } else {
+        budget
+    };
     loop {
         // Refresh ownership after every wake, but never with the notification
         // mutex held. The second probe below reuses these facts to avoid the
@@ -343,11 +348,6 @@ pub(crate) fn acquire_runtime_proxy_active_request_slot_with_wait_for_request(
                 {
                     return Ok(guard);
                 }
-                let wait_for = if budget.is_zero() {
-                    Duration::from_millis(1)
-                } else {
-                    budget
-                };
                 let _ = condvar
                     .wait_timeout(wait_guard, wait_for)
                     .unwrap_or_else(|poisoned| poisoned.into_inner());
