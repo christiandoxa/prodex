@@ -405,3 +405,114 @@ fn previous_response_discovery_skips_exhausted_current_profile() {
         Some("second".to_string())
     );
 }
+
+#[test]
+fn previous_response_discovery_consumer_uses_mojo_order_and_keeps_hard_affinity() {
+    let temp_dir = TestDir::isolated();
+    let mut runtime = RuntimeProxyFixtureBuilder::new().build_runtime(&temp_dir);
+    for (name, account_id) in [
+        ("main", "main-account"),
+        ("second", "second-account"),
+        ("third", "third-account"),
+    ] {
+        let codex_home = temp_dir.path.join(format!("homes/{name}"));
+        write_auth_json(&codex_home.join("auth.json"), account_id);
+        runtime.state.profiles.insert(
+            name.to_string(),
+            ProfileEntry {
+                codex_home,
+                managed: true,
+                email: Some(format!("{name}@example.com")),
+                provider: ProfileProvider::Openai,
+            },
+        );
+    }
+    runtime.state.active_profile = Some("second".to_string());
+    runtime.current_profile = "second".to_string();
+    assert!(runtime.state.profiles.len() > 1);
+    let shared = runtime_rotation_proxy_shared(&temp_dir, runtime, usize::MAX);
+    let mut exercised = 0;
+
+    assert_eq!(
+        select_runtime_response_candidate_for_route(
+            &shared,
+            RuntimeResponseCandidateSelection {
+                discover_previous_response_owner: true,
+                previous_response_id: Some("resp-order"),
+                ..RuntimeResponseCandidateSelection::fresh(
+                    &BTreeSet::new(),
+                    RuntimeRouteKind::Responses,
+                )
+            },
+        )
+        .expect("unbound previous-response discovery should succeed"),
+        Some("second".to_string()),
+        "equal provider priorities must retain the Mojo current-relative order"
+    );
+    exercised += 1;
+
+    let now = Local::now().timestamp();
+    shared
+        .runtime
+        .lock()
+        .expect("runtime lock")
+        .state
+        .response_profile_bindings
+        .insert(
+            "resp-hard".to_string(),
+            ResponseProfileBinding {
+                binding_identity: None,
+                profile_name: "third".to_string(),
+                bound_at: now,
+            },
+        );
+    assert_eq!(
+        select_runtime_response_candidate_for_route(
+            &shared,
+            RuntimeResponseCandidateSelection {
+                discover_previous_response_owner: true,
+                previous_response_id: Some("resp-hard"),
+                ..RuntimeResponseCandidateSelection::fresh(
+                    &BTreeSet::new(),
+                    RuntimeRouteKind::Responses,
+                )
+            },
+        )
+        .expect("hard previous-response discovery should succeed"),
+        Some("third".to_string()),
+        "a bound continuation must stay on its owner"
+    );
+    exercised += 1;
+
+    shared
+        .runtime
+        .lock()
+        .expect("runtime lock")
+        .state
+        .response_profile_bindings
+        .insert(
+            "resp-malformed".to_string(),
+            ResponseProfileBinding {
+                binding_identity: None,
+                profile_name: "missing-profile".to_string(),
+                bound_at: now,
+            },
+        );
+    assert_eq!(
+        select_runtime_response_candidate_for_route(
+            &shared,
+            RuntimeResponseCandidateSelection {
+                discover_previous_response_owner: true,
+                previous_response_id: Some("resp-malformed"),
+                ..RuntimeResponseCandidateSelection::fresh(
+                    &BTreeSet::new(),
+                    RuntimeRouteKind::Responses,
+                )
+            },
+        )
+        .expect("malformed binding should fail closed"),
+        None
+    );
+    exercised += 1;
+    assert!(exercised > 0);
+}
