@@ -4,8 +4,9 @@ use prodex_mojo_core::runtime::{
     RuntimeContinuationBindingSource, RuntimeContinuationBindingSourceInput,
     RuntimeContinuationOwnerKind, RuntimePreviousResponseCandidateAction,
     RuntimePreviousResponseCandidateInput, RuntimePreviousResponseOwnerAction,
-    RuntimePreviousResponseOwnerInput, runtime_continuation_binding_source_plan,
-    runtime_previous_response_candidate_plan, runtime_previous_response_owner_plan,
+    RuntimePreviousResponseOwnerInput, profile_selection_order_batch,
+    runtime_continuation_binding_source_plan, runtime_previous_response_candidate_plan,
+    runtime_previous_response_owner_plan,
 };
 use prodex_mojo_core::runtime_responses_attempt::{
     RuntimeResponsesAttemptRecoveryInput, RuntimeResponsesAttemptRecoveryPlan,
@@ -87,6 +88,128 @@ fn required_mojo_candidate_plan_preserves_negative_auth_quota_precedence() {
     assert_eq!(
         runtime_previous_response_candidate_plan(input).unwrap(),
         RuntimePreviousResponseCandidateAction::RejectNegativeCache
+    );
+}
+
+#[test]
+fn required_mojo_previous_response_boundaries_fail_closed_with_nonzero_cases() {
+    const { assert!(prodex_mojo_core::MOJO_ACTIVE) }
+
+    let base = owner_input(RuntimeContinuationOwnerKind::Owned);
+    let owner_cases = [
+        (
+            false,
+            true,
+            RuntimeContinuationOwnerKind::Owned,
+            RuntimePreviousResponseOwnerAction::Unbound,
+        ),
+        (
+            true,
+            false,
+            RuntimeContinuationOwnerKind::Owned,
+            RuntimePreviousResponseOwnerAction::Unusable,
+        ),
+        (
+            true,
+            true,
+            RuntimeContinuationOwnerKind::Unavailable,
+            RuntimePreviousResponseOwnerAction::Unusable,
+        ),
+        (
+            true,
+            true,
+            RuntimeContinuationOwnerKind::Conflict,
+            RuntimePreviousResponseOwnerAction::Conflict,
+        ),
+    ];
+    let mut exercised = 0;
+    for (id_present, id_valid, owner_kind, expected) in owner_cases {
+        let mut input = base;
+        input.id_present = id_present;
+        input.id_valid = id_valid;
+        input.owner_kind = owner_kind;
+        assert_eq!(
+            runtime_previous_response_owner_plan(input).unwrap(),
+            expected
+        );
+        exercised += 1;
+    }
+    assert!(exercised > 0);
+
+    let mut candidate = RuntimePreviousResponseCandidateInput {
+        negative_cache: false,
+        auth_failure: false,
+        quota_exhausted: false,
+        quota_guard: false,
+        cached_auth_present: false,
+        cached_auth_compatible: false,
+        allow_disk_fallback: true,
+    };
+    assert_eq!(
+        runtime_previous_response_candidate_plan(candidate).unwrap(),
+        RuntimePreviousResponseCandidateAction::DiskFallback,
+        "an expired negative/auth/quota observation may use the disk fallback"
+    );
+    candidate.allow_disk_fallback = false;
+    assert_eq!(
+        runtime_previous_response_candidate_plan(candidate).unwrap(),
+        RuntimePreviousResponseCandidateAction::Skip
+    );
+    candidate.allow_disk_fallback = true;
+    candidate.cached_auth_present = true;
+    assert_eq!(
+        runtime_previous_response_candidate_plan(candidate).unwrap(),
+        RuntimePreviousResponseCandidateAction::Skip,
+        "an incompatible cached row must not silently fall back to disk"
+    );
+    candidate.cached_auth_compatible = true;
+    assert_eq!(
+        runtime_previous_response_candidate_plan(candidate).unwrap(),
+        RuntimePreviousResponseCandidateAction::SelectCached
+    );
+    candidate.quota_guard = true;
+    assert_eq!(
+        runtime_previous_response_candidate_plan(candidate).unwrap(),
+        RuntimePreviousResponseCandidateAction::RejectQuota
+    );
+    candidate.auth_failure = true;
+    assert_eq!(
+        runtime_previous_response_candidate_plan(candidate).unwrap(),
+        RuntimePreviousResponseCandidateAction::RejectAuth
+    );
+    candidate.negative_cache = true;
+    assert_eq!(
+        runtime_previous_response_candidate_plan(candidate).unwrap(),
+        RuntimePreviousResponseCandidateAction::RejectNegativeCache
+    );
+}
+
+#[test]
+fn required_mojo_previous_response_ordering_handles_empty_duplicate_and_malformed_rows() {
+    const { assert!(prodex_mojo_core::MOJO_ACTIVE) }
+
+    assert_eq!(
+        profile_selection_order_batch(&[], None, false).unwrap(),
+        Vec::<usize>::new()
+    );
+    assert_eq!(
+        profile_selection_order_batch(&[0, 0, 0], Some(1), true).unwrap(),
+        [1, 2, 0],
+        "equal provider priorities retain current-relative order"
+    );
+    assert_eq!(
+        profile_selection_order_batch(&[0, 0, 0], Some(1), false).unwrap(),
+        [2, 0],
+        "current profile exclusion stays bounded and deterministic"
+    );
+    assert_eq!(
+        profile_selection_order_batch(&[0], Some(1), true),
+        Err(prodex_mojo_core::MojoError::InvalidInput)
+    );
+    let oversized = vec![0; 257];
+    assert_eq!(
+        profile_selection_order_batch(&oversized, None, false),
+        Err(prodex_mojo_core::MojoError::InvalidInput)
     );
 }
 

@@ -189,7 +189,7 @@ fn discover_cached_previous_response_candidate(
         now,
     } = context;
     let mut disk_fallback_entries = Vec::new();
-    for (order_index, (_, name, profile)) in runtime_previous_response_ordered_profiles(runtime)
+    for (order_index, (_, name, profile)) in runtime_previous_response_ordered_profiles(runtime)?
         .into_iter()
         .enumerate()
     {
@@ -440,27 +440,33 @@ fn select_runtime_previous_response_disk_fallback(
 
 fn runtime_previous_response_ordered_profiles(
     runtime: &RuntimeRotationState,
-) -> Vec<(usize, &str, &ProfileEntry)> {
-    let mut ordered = runtime
+) -> Result<Vec<(usize, &str, &ProfileEntry)>> {
+    let profiles = runtime
         .state
         .profiles
         .iter()
         .enumerate()
         .map(|(index, (name, profile))| (index, name.as_str(), profile))
         .collect::<Vec<_>>();
-    let current_index = ordered
+    let provider_priorities = profiles
+        .iter()
+        .map(|(_, _, profile)| profile.provider.runtime_pool_priority())
+        .collect::<Vec<_>>();
+    let current_index = profiles
         .iter()
         .position(|(_, name, _)| *name == runtime.current_profile);
-    let profile_count = ordered.len();
-    ordered.sort_by_key(|(index, _, profile)| {
-        let rotation_index = current_index.map_or(*index, |current_index| {
-            if *index >= current_index {
-                index - current_index
-            } else {
-                profile_count - current_index + index
-            }
-        });
-        (profile.provider.runtime_pool_priority(), rotation_index)
-    });
-    ordered
+    let ordered_indices = prodex_mojo_core::runtime::profile_selection_order_batch(
+        &provider_priorities,
+        current_index,
+        current_index.is_some(),
+    )
+    .map_err(|error| anyhow::anyhow!("Mojo previous-response ordering failed: {error:?}"))?;
+    ordered_indices
+        .into_iter()
+        .map(|index| {
+            profiles.get(index).copied().ok_or_else(|| {
+                anyhow::anyhow!("Mojo previous-response ordering returned invalid profile index")
+            })
+        })
+        .collect()
 }
