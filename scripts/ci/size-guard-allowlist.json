@@ -55,19 +55,14 @@
     "reason": "Presidio HTTP and WebSocket regressions share one harness for effective fail-closed policy, external failure classes, telemetry, and no-upstream assertions."
   },
   {
-    "file": "crates/prodex-app/src/runtime_tools/sub_agents.rs",
-    "maxLines": 1472,
-    "reason": "Sub-agent concurrent slot I/O, configuration validation, and catalog policy now live in focused production sibling modules; ratchet the remaining orchestrator to the exact audited 1472-line cap pending further decomposition."
-  },
-  {
     "file": "crates/prodex-app/tests/src/runtime_proxy/smart_context/prepare.rs",
     "maxLines": 878,
     "reason": "Smart Context preparation regressions cover budget tiers, deterministic rehydration, static-context fingerprints, aliases, line ranges, and HTTP/WebSocket parity."
   },
   {
     "file": "crates/prodex-mojo-core/src/quota.rs",
-    "maxLines": 1253,
-    "reason": "Quota.rs remains the typed Rust ABI boundary for Mojo quota policy; report comparison and sort adapters now live in quota/report_sort.rs. This exact post-split cap blocks further growth until remaining policy families can move behind cohesive adapters."
+    "maxLines": 1194,
+    "reason": "Quota ABI boundary with unchanged public entry points; executable diagnostic self-checks now live in quota/self_checks.rs. Ratchet the previous 1253-line cap to the audited 1194 lines without changing the normal limit."
   },
   {
     "file": "crates/prodex-runtime-state/tests/src/lib.rs",
