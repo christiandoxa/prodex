@@ -142,6 +142,11 @@ export const RUNTIME_CI_WORKFLOW_SHARDS = [
         label: "admission-guards",
       },
       {
+        id: "admission-lock-order",
+        filter: `${ADMISSION_PREFIX}lock_order::`,
+        label: "admission-lock-order",
+      },
+      {
         id: "admission-pre-send",
         filter: `${ADMISSION_PREFIX}pre_send::`,
         label: "admission-pre-send",
