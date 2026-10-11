@@ -69,6 +69,26 @@ fn workflow_fixture() -> (PathBuf, TestEnvVarGuard, TestEnvVarGuard, PathBuf, St
 
 #[test]
 fn structured_terminal_error_relaunches_the_same_session_without_replay() {
+    assert_terminal_error_relaunches_without_replay(serde_json::json!({
+        "type":"event_msg", "payload":{
+            "type":"error",
+            "codex_error_info":{"response_too_many_failed_attempts":{"http_status_code":503}}
+        }
+    }));
+}
+
+#[test]
+fn native_task_complete_strategy_rotates_same_session_without_duplicate_side_effects() {
+    assert_terminal_error_relaunches_without_replay(serde_json::json!({
+        "type":"event_msg", "payload":{
+            "type":"task_complete", "root_turn_id":"synthetic-turn", "turn_id":"synthetic-turn",
+            "last_agent_message":null,
+            "error":{"message":"synthetic model capacity error", "codex_error_info":"server_overloaded"}
+        }
+    }));
+}
+
+fn assert_terminal_error_relaunches_without_replay(terminal: serde_json::Value) {
     let (_root, _home, _shared, session_path, session_id) = workflow_fixture();
     let mut strategy = RunCommandStrategy::new(RunArgs {
         profile: None,
@@ -138,18 +158,7 @@ fn structured_terminal_error_relaunches_the_same_session_without_replay() {
         })
     )
     .unwrap();
-    writeln!(
-        rollout,
-        "{}",
-        serde_json::json!({
-            "type": "event_msg",
-            "payload": {
-                "type": "error",
-                "codex_error_info": {"response_too_many_failed_attempts": {"http_status_code": 503}}
-            }
-        })
-    )
-    .unwrap();
+    writeln!(rollout, "{}", terminal).unwrap();
     drop(rollout);
     let before_relaunch = fs::read(&session_path).unwrap();
 
