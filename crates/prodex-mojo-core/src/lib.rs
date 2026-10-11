@@ -47,6 +47,7 @@ pub fn self_test() -> bool {
     let quota_aggregation_ok = quota::main_quota_aggregation_self_test();
     let provider_constraints_ok = provider_constraints::self_test();
     let provider_upstream_ok = provider_upstream::self_test();
+    let local_rewrite_transport_ok = runtime_local_rewrite_transport::self_test();
     let policy_validation_ok = policy::self_test();
     let context_ok = context::self_test();
     let tuning_defaults_ok = runtime_decisions::tuning_defaults_self_test();
@@ -65,6 +66,7 @@ pub fn self_test() -> bool {
         quota_aggregation_ok,
         provider_constraints_ok,
         provider_upstream_ok,
+        local_rewrite_transport_ok,
         policy_validation_ok,
         context_ok,
         tuning_defaults_ok,
@@ -181,6 +183,8 @@ pub mod runtime_cookie_policy;
 pub mod runtime_decisions;
 #[cfg(feature = "mojo-runtime")]
 pub mod runtime_lineage;
+#[cfg(feature = "mojo-runtime")]
+pub mod runtime_local_rewrite_transport;
 #[cfg(feature = "mojo-runtime")]
 pub mod runtime_overlay_policy;
 #[cfg(feature = "mojo-runtime")]
