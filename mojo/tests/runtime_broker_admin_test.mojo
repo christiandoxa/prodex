@@ -114,6 +114,19 @@ def test_admin_values_trim_and_bound_bytes() raises:
     assert (
         prodex_runtime_broker_admin_value_v1(
             1,
+            0,
+            UInt(Int(exact.unsafe_ptr())),
+            Int64(len(exact)),
+            UInt(Int(output.unsafe_ptr())),
+        )
+        == 0
+    )
+    assert output[0] == 1
+    assert output[2] == 257
+
+    assert (
+        prodex_runtime_broker_admin_value_v1(
+            1,
             1,
             UInt(Int(exact.unsafe_ptr())),
             Int64(len(exact)),
