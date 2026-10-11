@@ -35,12 +35,21 @@ fn reconnect_native_session_meta_repairs_only_its_goal_attachment_alias() {
         legacy_shared_codex_root: fixture.0.join("legacy"),
     };
     fs::create_dir_all(&paths.root).unwrap();
-    let stable = shared.join("attachments/453873cd-8ea3-4c85-832a-30728dd0954f/pasted-text-1.txt");
+    let attachment_id = "453873cd-8ea3-4c85-832a-30728dd0954f";
+    // Use native path components, not a mixed-separator display string on Windows.
+    // The assertion below still requires the exact repaired goal path.
+    let stable = shared
+        .join("attachments")
+        .join(attachment_id)
+        .join("pasted-text-1.txt");
     fs::create_dir_all(stable.parent().unwrap()).unwrap();
     fs::write(&stable, "Keep the original task; do not replay tools.").unwrap();
-    let stale = paths.managed_profiles_root.join(
-        ".prodex-overlay-old-0/attachments/453873cd-8ea3-4c85-832a-30728dd0954f/pasted-text-1.txt",
-    );
+    let stale = paths
+        .managed_profiles_root
+        .join(".prodex-overlay-old-0")
+        .join("attachments")
+        .join(attachment_id)
+        .join("pasted-text-1.txt");
     let objective = format!(
         "Read the pasted text file at {} before continuing.",
         stale.display()
