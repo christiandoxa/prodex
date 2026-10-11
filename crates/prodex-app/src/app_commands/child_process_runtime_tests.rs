@@ -95,3 +95,6 @@ else:
         "native app-server outlived its launcher; deleting its overlay/proxy leaves an orphan with broken retries",
     );
 }
+
+#[path = "child_process_reconnect_tests.rs"]
+mod reconnect_tests;
