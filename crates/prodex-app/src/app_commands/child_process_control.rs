@@ -193,9 +193,26 @@ pub(crate) fn terminate_child_gracefully(
     if (private_process_group && signal_child_process_group(child, libc::SIGTERM).is_ok())
         || child.try_wait()?.is_some()
     {
+        return Ok(());
+    }
+    // Interactive launchers share the terminal's process group. Signal only
+    // our owned launcher, allowing npm's SIGTERM handler to stop and await its
+    // native TUI before the companion/socket/overlay is removed. Child::kill
+    // sends SIGKILL and bypasses that handler, orphaning the old TUI. The
+    // caller retains its bounded deadline and force-kill escalation.
+    let pid = child.id() as libc::pid_t;
+    if pid <= 0 {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "invalid child process id",
+        ));
+    }
+    // SAFETY: the unreaped Child owns this positive PID; never target the
+    // inherited terminal process group or another session's processes.
+    if unsafe { libc::kill(pid, libc::SIGTERM) } == 0 {
         Ok(())
     } else {
-        child.kill()
+        Err(io::Error::last_os_error())
     }
 }
 
