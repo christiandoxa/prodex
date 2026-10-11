@@ -22,6 +22,12 @@ fn append_native_failure(path: &Path) {
     append_record(
         path,
         serde_json::json!({
+            "type":"event_msg", "payload":{"type":"task_started", "turn_id":"turn-fixture"}
+        }),
+    );
+    append_record(
+        path,
+        serde_json::json!({
             "type":"turn_context", "payload":{"model":"gpt-6-luna"}
         }),
     );
@@ -137,4 +143,56 @@ fn native_task_complete_post_exit_recovery_rotates_but_respects_cancellation_and
         drop(monitor);
         let _ = fs::remove_dir_all(root);
     }
+}
+
+#[test]
+fn native_task_started_prevents_recovery_using_previous_turn_side_effects() {
+    let root = fixture_root("native-start-evidence");
+    let (_home, _shared) = configured_env(&root);
+    let paths = AppPaths::discover().unwrap();
+    let session_path = populate_fixture(&root, &paths, &["a", "b"]);
+    blocked_goal(&paths);
+    let mut monitor = prepare_goal_usage_limit_monitor(
+        &[
+            OsString::from("exec"),
+            OsString::from("resume"),
+            OsString::from(SESSION_ID),
+        ],
+        false,
+    )
+    .unwrap()
+    .unwrap();
+    append_user_event(&session_path);
+    append_record(
+        &session_path,
+        serde_json::json!({
+            "type":"response_item","payload":{"type":"custom_tool_call_output","call_id":"previous-completed-tool","output":"already done"}
+        }),
+    );
+    assert_eq!(monitor.take_usage_limit_signal().unwrap(), None);
+    assert_eq!(monitor.recovery_evidence().side_effect_state, "observed");
+    append_record(
+        &session_path,
+        serde_json::json!({
+            "type":"event_msg","payload":{"type":"task_started","turn_id":"new-unaccepted-turn"}
+        }),
+    );
+    append_record(
+        &session_path,
+        serde_json::json!({
+            "type":"event_msg","payload":{"type":"task_complete","turn_id":"new-unaccepted-turn",
+                "error":{"codex_error_info":"server_overloaded","message":"synthetic capacity error"}}
+        }),
+    );
+    assert_eq!(
+        monitor.take_usage_limit_signal().unwrap(),
+        None,
+        "a previous turn's completed tool must not authorize replay of an unaccepted new turn"
+    );
+    assert_eq!(
+        monitor.recovery_evidence(),
+        RuntimeWorkflowEvidence::default()
+    );
+    drop(monitor);
+    let _ = fs::remove_dir_all(root);
 }
