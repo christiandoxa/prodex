@@ -118,6 +118,13 @@ if mode == 'native-tui':
         owned.peer.try_wait().unwrap().is_none(),
         "unrelated terminal peer must survive"
     );
+    // A killed process-group grandchild is reaped by the OS, not Child::wait
+    // on the launcher. Observe bounded socket closure as the existing companion
+    // teardown test does; do not assume signal delivery is synchronous.
+    let closed_by = Instant::now() + Duration::from_secs(1);
+    while Instant::now() < closed_by && UnixStream::connect(root.join("live")).is_ok() {
+        std::thread::sleep(Duration::from_millis(5));
+    }
     assert!(
         UnixStream::connect(root.join("live")).is_err(),
         "companion must be reaped"
