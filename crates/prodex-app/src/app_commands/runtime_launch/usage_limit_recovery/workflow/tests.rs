@@ -316,3 +316,26 @@ fn native_task_complete_rejects_success_cancelled_foreign_and_quoted_errors() {
         );
     }
 }
+
+#[test]
+fn native_task_started_resets_previous_turn_acceptance_evidence() {
+    for tag in ["task_started", "turn_started"] {
+        let start = serde_json::json!({"type":tag,"turn_id":"next-turn"});
+        for event in [
+            serde_json::json!({"type":"event_msg","payload":start}),
+            start,
+        ] {
+            let mut evidence = RuntimeWorkflowEvidence {
+                acceptance_state: "side_effect_observed",
+                stream_committed: Some(true),
+                side_effect_state: "observed",
+            };
+            observe_runtime_workflow_evidence(&event, &mut evidence);
+            assert_eq!(
+                evidence,
+                RuntimeWorkflowEvidence::default(),
+                "a new native turn must not reuse the previous turn's acceptance: {event}"
+            );
+        }
+    }
+}

@@ -104,7 +104,12 @@ pub(super) fn observe_runtime_workflow_evidence(
         .and_then(|payload| payload.get("role"))
         .and_then(Value::as_str);
 
-    let turn_started = outer == Some("event_msg") && payload_type == Some("turn_started")
+    // Native v1 uses task_started; turn_started is its v2 compatibility alias.
+    // Reset before interpreting a terminal error from the new turn so old tool
+    // effects cannot authorize recovery of input that has not been accepted.
+    let turn_started = outer == Some("event_msg")
+        && matches!(payload_type, Some("task_started" | "turn_started"))
+        || matches!(outer, Some("task_started" | "turn_started"))
         || object.get("method").and_then(Value::as_str) == Some("turn/started");
     if turn_started {
         *evidence = RuntimeWorkflowEvidence::default();
