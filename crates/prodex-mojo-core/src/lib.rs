@@ -176,6 +176,8 @@ pub mod rtk_noisy;
 #[cfg(feature = "mojo-runtime")]
 pub mod runtime;
 #[cfg(feature = "mojo-runtime")]
+pub mod runtime_broker_admin;
+#[cfg(feature = "mojo-runtime")]
 pub mod runtime_broker_continuity;
 #[cfg(feature = "mojo-rich")]
 pub mod runtime_cookie_policy;

@@ -58,7 +58,12 @@ pub fn runtime_broker_validate_admin_token(
 pub fn runtime_broker_validate_activation_method(
     method: &str,
 ) -> Result<(), RuntimeBrokerAdminError> {
-    if method == "POST" {
+    if prodex_mojo_core::runtime_broker_admin::method_is_post(
+        prodex_mojo_core::runtime_broker_admin::RuntimeBrokerAdminOperation::Activate,
+        method,
+    )
+    .unwrap_or(false)
+    {
         Ok(())
     } else {
         Err(RuntimeBrokerAdminError::new(
@@ -72,7 +77,12 @@ pub fn runtime_broker_validate_activation_method(
 pub fn runtime_broker_validate_session_affinity_release_method(
     method: &str,
 ) -> Result<(), RuntimeBrokerAdminError> {
-    if method == "POST" {
+    if prodex_mojo_core::runtime_broker_admin::method_is_post(
+        prodex_mojo_core::runtime_broker_admin::RuntimeBrokerAdminOperation::ReleaseSessionAffinity,
+        method,
+    )
+    .unwrap_or(false)
+    {
         Ok(())
     } else {
         Err(RuntimeBrokerAdminError::new(
@@ -86,9 +96,27 @@ pub fn runtime_broker_validate_session_affinity_release_method(
 pub fn runtime_broker_validate_session_affinity_release_id(
     session_id: Option<&str>,
 ) -> Result<String, RuntimeBrokerAdminError> {
+    let Some(session_id) = session_id else {
+        return Err(RuntimeBrokerAdminError::new(
+            400,
+            "invalid_request",
+            "runtime broker session affinity release requires a valid session_id",
+        ));
+    };
+    let Some((start, end)) = prodex_mojo_core::runtime_broker_admin::value_span(
+        prodex_mojo_core::runtime_broker_admin::RuntimeBrokerAdminValueKind::SessionId,
+        session_id,
+    )
+    .ok()
+    .flatten() else {
+        return Err(RuntimeBrokerAdminError::new(
+            400,
+            "invalid_request",
+            "runtime broker session affinity release requires a valid session_id",
+        ));
+    };
     session_id
-        .map(str::trim)
-        .filter(|value| !value.is_empty() && value.len() <= 256)
+        .get(start..end)
         .map(str::to_string)
         .ok_or_else(|| {
             RuntimeBrokerAdminError::new(
@@ -102,9 +130,27 @@ pub fn runtime_broker_validate_session_affinity_release_id(
 pub fn runtime_broker_validate_activation_profile(
     current_profile: Option<&str>,
 ) -> Result<String, RuntimeBrokerAdminError> {
+    let Some(current_profile) = current_profile else {
+        return Err(RuntimeBrokerAdminError::new(
+            400,
+            "invalid_request",
+            "runtime broker activation requires a non-empty current_profile",
+        ));
+    };
+    let Some((start, end)) = prodex_mojo_core::runtime_broker_admin::value_span(
+        prodex_mojo_core::runtime_broker_admin::RuntimeBrokerAdminValueKind::ActivationProfile,
+        current_profile,
+    )
+    .ok()
+    .flatten() else {
+        return Err(RuntimeBrokerAdminError::new(
+            400,
+            "invalid_request",
+            "runtime broker activation requires a non-empty current_profile",
+        ));
+    };
     current_profile
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
+        .get(start..end)
         .map(str::to_string)
         .ok_or_else(|| {
             RuntimeBrokerAdminError::new(
@@ -132,27 +178,21 @@ pub fn runtime_broker_session_affinity_release_success()
 pub fn runtime_broker_activation_profile_from_json(
     body: &[u8],
 ) -> Result<String, RuntimeBrokerAdminError> {
-    let current_profile = serde_json::from_slice::<serde_json::Value>(body)
-        .ok()
-        .and_then(|value| {
-            value
-                .get("current_profile")
-                .and_then(|value| value.as_str())
-                .map(str::to_string)
-        });
-    runtime_broker_validate_activation_profile(current_profile.as_deref())
+    let value = serde_json::from_slice::<serde_json::Value>(body).ok();
+    let current_profile = value
+        .as_ref()
+        .and_then(|value| value.get("current_profile"))
+        .and_then(serde_json::Value::as_str);
+    runtime_broker_validate_activation_profile(current_profile)
 }
 
 pub fn runtime_broker_session_affinity_release_id_from_json(
     body: &[u8],
 ) -> Result<String, RuntimeBrokerAdminError> {
-    let session_id = serde_json::from_slice::<serde_json::Value>(body)
-        .ok()
-        .and_then(|value| {
-            value
-                .get("session_id")
-                .and_then(|value| value.as_str())
-                .map(str::to_string)
-        });
-    runtime_broker_validate_session_affinity_release_id(session_id.as_deref())
+    let value = serde_json::from_slice::<serde_json::Value>(body).ok();
+    let session_id = value
+        .as_ref()
+        .and_then(|value| value.get("session_id"))
+        .and_then(serde_json::Value::as_str);
+    runtime_broker_validate_session_affinity_release_id(session_id)
 }
