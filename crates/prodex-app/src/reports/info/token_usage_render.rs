@@ -113,12 +113,14 @@ fn info_token_usage_event_from_line_with_event(
     });
     let generation_ms = reported_rate_is_valid.then_some(generation_ms).flatten();
     let output_tokens_per_second = reported_rate_is_valid
-        .then(|| generation_ms.filter(|_| output_tokens > 0))
-        .flatten()
-        .and_then(|duration| {
-            let rate = output_tokens as f64 * 1_000.0 / duration as f64;
-            rate.is_finite().then_some(rate)
-        });
+        .then(|| {
+            prodex_mojo_core::log_throughput_policy::completed_rate(
+                output_tokens,
+                generation_ms.unwrap_or_default(),
+            )
+            .expect("Mojo log-throughput completed-rate policy returned invalid output")
+        })
+        .flatten();
     Some(InfoTokenUsageEvent {
         timestamp: info_token_usage_timestamp(line),
         request: fields.get("request").and_then(|value| value.parse().ok()),

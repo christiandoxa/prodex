@@ -46,6 +46,17 @@ fn token_usage_event_parses_snapshot_fields() {
 }
 
 #[test]
+fn token_usage_event_uses_mojo_completed_rate() {
+    let event = info_token_usage_event_from_line(
+        "[2026-06-19 20:00:00.000 +07:00] token_usage profile=main input_tokens=1 output_tokens=15 generation_ms=1000",
+    )
+    .expect("token event");
+
+    assert_eq!(event.generation_ms, Some(1000));
+    assert_eq!(event.output_tokens_per_second, Some(15.0));
+}
+
+#[test]
 fn token_usage_event_uses_mojo_log_tokenizer_for_quoted_fields() {
     let event = info_token_usage_event_from_line(
         "[2026-06-19 20:00:00.000 +07:00] token_usage request=42 transport=http profile=\"main beta\" source=responses_unary input_tokens=120 output_tokens=15",
