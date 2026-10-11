@@ -20,7 +20,9 @@ mod goal_attachments;
 const SESSION_TIMESTAMP_PREFIX: &str = "\"timestamp\":\"";
 const SESSION_MAINTENANCE_CACHE_VERSION: u8 = 4;
 const SESSION_MAINTENANCE_CACHE_FILE: &str = "shared-codex-session-maintenance-v1.json";
-const RECENT_SESSION_MAINTENANCE_CACHE_VERSION: u8 = 2;
+// Version 2 could cache a native rollout without its session_meta.payload.id,
+// suppressing exact-goal attachment repair on later resumes.
+const RECENT_SESSION_MAINTENANCE_CACHE_VERSION: u8 = 3;
 const RECENT_SESSION_MAINTENANCE_CACHE_FILE: &str = "shared-codex-session-recent-v1.json";
 
 #[derive(Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
