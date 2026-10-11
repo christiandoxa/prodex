@@ -689,3 +689,6 @@ fn large_historical_rollout_keeps_incremental_monitor_available() {
     assert_eq!(monitor.take_usage_limit_signal().unwrap(), None);
     let _ = fs::remove_dir_all(root);
 }
+
+#[path = "native_task_complete_tests.rs"]
+mod native_task_complete;

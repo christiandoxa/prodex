@@ -157,8 +157,11 @@ fn terminal_error(value: &Value) -> Option<(&Map<String, Value>, Option<u16>)> {
     let kind = object.get("type").and_then(Value::as_str);
     if kind == Some("event_msg") {
         let payload = object.get("payload")?.as_object()?;
-        return (payload.get("type").and_then(Value::as_str) == Some("error"))
-            .then_some((payload, http_status(payload)));
+        return match payload.get("type").and_then(Value::as_str) {
+            Some("error") => Some((payload, http_status(payload))),
+            Some("task_complete" | "turn_complete") => native_task_error(payload),
+            _ => None,
+        };
     }
     if kind.is_some_and(|kind| matches!(kind, "error" | "turn.failed" | "turn_failed")) {
         let error = object
@@ -168,15 +171,33 @@ fn terminal_error(value: &Value) -> Option<(&Map<String, Value>, Option<u16>)> {
             .unwrap_or(object);
         return Some((error, http_status(object).or_else(|| http_status(error))));
     }
-    if kind
-        .is_some_and(|kind| matches!(kind, "turn.completed" | "turn_completed" | "task_complete"))
-    {
+    if kind.is_some_and(|kind| matches!(kind, "task_complete" | "turn_complete")) {
+        return native_task_error(object);
+    }
+    if kind.is_some_and(|kind| matches!(kind, "turn.completed" | "turn_completed")) {
         return failed_turn(object.get("turn").unwrap_or(value).as_object()?);
     }
     if object.get("method").and_then(Value::as_str) == Some("turn/completed") {
         return failed_turn(object.get("params")?.get("turn")?.as_object()?);
     }
     None
+}
+
+// Native TurnCompleteEvent is serialized as task_complete (turn_complete alias).
+// Unlike the app-server turn/completed notification, it carries an optional
+// ErrorEvent directly and has no status field. This is only JSON wire-shape
+// projection: retry classification, account eligibility and resume safety below
+// stay unchanged. Never infer failure from message text or from a successful,
+// cancelled, or contradictory completion envelope.
+fn native_task_error(task: &Map<String, Value>) -> Option<(&Map<String, Value>, Option<u16>)> {
+    if task
+        .get("status")
+        .is_some_and(|status| status.as_str() != Some("failed"))
+    {
+        return None;
+    }
+    let error = task.get("error")?.as_object()?;
+    Some((error, http_status(task).or_else(|| http_status(error))))
 }
 
 fn failed_turn(turn: &Map<String, Value>) -> Option<(&Map<String, Value>, Option<u16>)> {

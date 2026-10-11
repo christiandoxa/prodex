@@ -243,3 +243,76 @@ fn workflow_evidence_resets_per_user_turn_and_never_infers_non_acceptance() {
     assert_eq!(evidence.stream_committed, Some(false));
     assert_eq!(evidence.side_effect_state, "none");
 }
+
+#[test]
+fn native_task_complete_error_is_classified_from_real_rollout_shape() {
+    // The native Codex rollout persists terminal failures without a turn.status.
+    // Do not replace this fixture with the different app-server notification.
+    for (info, expected) in [
+        (
+            "server_overloaded",
+            Some(RuntimeWorkflowRecoveryClass::Overload),
+        ),
+        (
+            "usage_limit_exceeded",
+            Some(RuntimeWorkflowRecoveryClass::UsageLimit),
+        ),
+        (
+            "rate_limit_exceeded",
+            Some(RuntimeWorkflowRecoveryClass::RateLimit),
+        ),
+        ("context_window_exceeded", None),
+    ] {
+        let payload = serde_json::json!({
+            "type": "task_complete",
+            "root_turn_id": "turn-fixture",
+            "turn_id": "turn-fixture",
+            "last_agent_message": null,
+            "error": {
+                "message": "synthetic terminal failure",
+                "codex_error_info": info
+            },
+            "started_at": 1767225600,
+            "completed_at": 1767225601,
+            "duration_ms": 1000,
+            "time_to_first_token_ms": 10
+        });
+        let mut alias = payload.clone();
+        alias["type"] = serde_json::json!("turn_complete");
+        for record in [
+            serde_json::json!({"type":"event_msg", "payload":payload}),
+            payload,
+            serde_json::json!({"type":"event_msg", "payload":alias}),
+            alias,
+        ] {
+            assert_eq!(
+                runtime_workflow_recovery_class(&record, SESSION),
+                expected,
+                "native task completion: {record}"
+            );
+        }
+    }
+}
+
+#[test]
+fn native_task_complete_rejects_success_cancelled_foreign_and_quoted_errors() {
+    let failure =
+        serde_json::json!({"message":"synthetic overload", "codex_error_info":"server_overloaded"});
+    for record in [
+        serde_json::json!({"type":"event_msg","payload":{"type":"task_complete","error":null}}),
+        serde_json::json!({"type":"event_msg","payload":{"type":"task_complete","error":failure,"status":"cancelled"}}),
+        serde_json::json!({"type":"event_msg","payload":{"type":"task_complete","error":failure,"status":"completed"}}),
+        serde_json::json!({"type":"event_msg","payload":{"type":"task_complete","error":failure,"thread_id":"other-thread"}}),
+        serde_json::json!({"type":"response_item","payload":{"type":"message","role":"user","content":failure}}),
+        serde_json::json!({"type":"event_msg","payload":{"type":"task_complete","error":"server_overloaded"}}),
+        serde_json::json!({"type":"event_msg","payload":{"type":"task_complete","error":{"message":"Selected model is at capacity. Please try a different model."}}}),
+        serde_json::json!({"method":"turn/completed","params":{"threadId":SESSION,"turn":{"status":"completed","error":failure}}}),
+        serde_json::json!({"type":"event_msg","payload":{"type":"stream_error","error":failure}}),
+    ] {
+        assert_eq!(
+            runtime_workflow_recovery_class(&record, SESSION),
+            None,
+            "{record}"
+        );
+    }
+}
