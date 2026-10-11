@@ -419,6 +419,48 @@ pub(crate) fn handle_runtime_proxy_admin_request(
 mod tests {
     use super::*;
 
+    fn rendered_error_response(error: prodex_runtime_broker::RuntimeBrokerAdminError) -> Vec<u8> {
+        let response = runtime_broker_admin_error_response(error);
+        let mut bytes = Vec::new();
+        response
+            .raw_print(&mut bytes, (1, 0).into(), &[], false, None)
+            .expect("admin error response should render");
+        bytes
+    }
+
+    fn rendered_body(response: &[u8]) -> &[u8] {
+        let separator = response
+            .windows(4)
+            .position(|window| window == b"\r\n\r\n")
+            .expect("response should contain a header separator");
+        &response[separator + 4..]
+    }
+
+    #[test]
+    fn runtime_broker_admin_error_response_preserves_status_and_code() {
+        let method_error = rendered_error_response(
+            prodex_runtime_broker::runtime_broker_validate_activation_method("GET")
+                .expect_err("GET should be rejected"),
+        );
+        assert!(method_error.starts_with(b"HTTP/1.0 405 Method Not Allowed\r\n"));
+        assert_eq!(
+            serde_json::from_slice::<serde_json::Value>(rendered_body(&method_error))
+                .expect("method error should be JSON")["error"]["code"],
+            "method_not_allowed"
+        );
+
+        let value_error = rendered_error_response(
+            prodex_runtime_broker::runtime_broker_validate_activation_profile(None)
+                .expect_err("missing profile should be rejected"),
+        );
+        assert!(value_error.starts_with(b"HTTP/1.0 400 Bad Request\r\n"));
+        assert_eq!(
+            serde_json::from_slice::<serde_json::Value>(rendered_body(&value_error))
+                .expect("value error should be JSON")["error"]["code"],
+            "invalid_request"
+        );
+    }
+
     #[test]
     fn runtime_broker_activation_body_limit_allows_exact_limit() {
         let body = vec![b'a'; 4];
