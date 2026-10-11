@@ -257,6 +257,23 @@ mod tests {
             "the old overlay must already be gone"
         );
 
+        let goal_db =
+            rusqlite::Connection::open(paths.shared_codex_root.join("goals_1.sqlite")).unwrap();
+        goal_db.execute_batch("CREATE TABLE thread_goals (thread_id TEXT PRIMARY KEY, objective TEXT NOT NULL, status TEXT NOT NULL);").unwrap();
+        goal_db
+            .execute(
+                "INSERT INTO thread_goals VALUES (?1,?2,'blocked')",
+                rusqlite::params![
+                    session_id,
+                    format!(
+                        "Read {} and {}",
+                        stale_text.display(),
+                        stale_image.display()
+                    )
+                ],
+            )
+            .unwrap();
+
         let args = [OsString::from("resume"), OsString::from(session_id)];
         let repaired =
             repair_resume_session_for_launch(&paths, &args).expect("resume repair should succeed");
@@ -287,6 +304,24 @@ mod tests {
         );
         assert_eq!(fs::read(&stable_text).unwrap(), b"durable pasted text");
         assert_eq!(fs::read(&stable_image).unwrap(), b"durable image");
+        let (objective, status): (String, String) = goal_db
+            .query_row(
+                "SELECT objective,status FROM thread_goals WHERE thread_id=?1",
+                [session_id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert!(
+            objective.contains(stable_text.to_string_lossy().as_ref()),
+            "repair goal before relaunch"
+        );
+        assert!(objective.contains(stable_image.to_string_lossy().as_ref()));
+        assert!(!objective.contains(stale_overlay.to_string_lossy().as_ref()));
+        assert_eq!(
+            status, "blocked",
+            "repair must not resume or reset the goal"
+        );
+        drop(goal_db);
 
         fs::remove_dir_all(root).unwrap();
     }

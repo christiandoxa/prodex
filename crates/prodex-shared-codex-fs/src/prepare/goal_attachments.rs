@@ -159,6 +159,14 @@ pub(super) fn session_thread_id(contents: &str) -> Option<String> {
                 &["threadId"],
             ],
         )
+        .or_else(|| {
+            // Native Codex rollouts use session_meta.payload.id, not thread_id.
+            // This is a wire-envelope projection; arbitrary message/tool IDs
+            // must never select another thread's persisted goal.
+            (value.get("type").and_then(serde_json::Value::as_str) == Some("session_meta"))
+                .then(|| prodex_session_store::first_string_value(&value, &[&["payload", "id"]]))
+                .flatten()
+        })
     })
 }
 
@@ -175,3 +183,7 @@ fn path_looks_like_sqlite_db(path: &Path) -> bool {
     let mut header = [0; 16];
     file.read_exact(&mut header).is_ok() && &header == b"SQLite format 3\0"
 }
+
+#[cfg(test)]
+#[path = "../../tests/src/reconnect_attachments.rs"]
+mod reconnect_tests;
