@@ -4884,7 +4884,8 @@
       "mojo_source": "mojo/prodex_core/log_throughput_policy.mojo",
       "consumer": "crates/prodex-app/src/app_commands/log_throughput_state.rs",
       "production_consumers": [
-        "crates/prodex-app/src/app_commands/log_throughput_state.rs"
+        "crates/prodex-app/src/app_commands/log_throughput_state.rs",
+        "crates/prodex-app/src/reports/info/token_usage_render.rs"
       ],
       "production_reachability_test": "crates/prodex-mojo-core/src/log_throughput_policy.rs",
       "rust_state_after": "adapter-only",
@@ -4895,7 +4896,7 @@
       "mojo_entry": "prodex_log_throughput_completed_rate_v1",
       "consumer_marker": "prodex_mojo_core::log_throughput_policy::completed_rate",
       "rust_owner_before": "completed generation output-token rate validity and tokens-per-second calculation",
-      "rust_test_oracle": "deleted; direct kernel and throughput tests cover zero tokens/duration and valid final averages",
+      "rust_test_oracle": "deleted; direct kernel, throughput, and info-report caller tests cover zero tokens/duration and valid final averages",
       "rust_adapter_scope": "InfoTokenUsageEvent projection and sticky display-rate state"
     },
     {

@@ -2669,6 +2669,18 @@ export function findViolations(files) {
       }
       return violations;
     }
+    if (filePath === "crates/prodex-app/src/reports/info/token_usage_render.rs") {
+      const required = [
+        "prodex_mojo_core::log_throughput_policy::completed_rate(",
+      ];
+      const violations = required
+        .filter((call) => !contents.includes(call))
+        .map((call) => filePath + ": info token-usage rate migration must retain Mojo call " + call);
+      if (/output_tokens as f64 \* 1_000\.0 \/ duration as f64/u.test(contents)) {
+        violations.push(filePath + ": contains restored Rust log-throughput rate semantics");
+      }
+      return violations;
+    }
     if (filePath === "crates/prodex-mojo-core/src/log_throughput_policy.rs") {
       const required = [
         "prodex_log_throughput_sample_plan_v1(",
@@ -7113,6 +7125,19 @@ function selfTest() {
     [RUNTIME_LOG_RETENTION_SELECTION_FILE, runtimeLogSelectionCalls],
     ["crates/prodex-mojo-core/src/log_throughput_policy.rs", runtimeLogAdapterCalls],
   ]), []);
+  const tokenUsageRateCall = "prodex_mojo_core::log_throughput_policy::completed_rate(";
+  assert.deepEqual(findViolations([[
+    "crates/prodex-app/src/reports/info/token_usage_render.rs",
+    tokenUsageRateCall,
+  ]]), []);
+  assert.match(findViolations([[
+    "crates/prodex-app/src/reports/info/token_usage_render.rs",
+    "output_tokens as f64 * 1_000.0 / duration as f64",
+  ]]).join("\n"), /info token-usage rate migration must retain Mojo call/u);
+  assert.match(findViolations([[
+    "crates/prodex-app/src/reports/info/token_usage_render.rs",
+    `${tokenUsageRateCall}\noutput_tokens as f64 * 1_000.0 / duration as f64`,
+  ]]).join("\n"), /contains restored Rust log-throughput rate semantics/u);
   assert.match(findViolations([[RUNTIME_LOG_RETENTION_SELECTION_FILE,
     runtimeLogSelectionCalls + "\nlogs.sort_by(|left, right| left.modified_epoch_seconds.cmp(&right.modified_epoch_seconds));"]]).join("\n"),
   /contains restored Rust runtime-log retention selection semantics/u);
