@@ -180,13 +180,21 @@ pub fn runtime_profiles_needing_startup_probe_refresh<N, I>(
 where
     I: IntoIterator<Item = RuntimeStartupProbeRefreshCandidate<N>>,
 {
-    candidates
-        .into_iter()
-        .filter_map(|candidate| {
-            (!candidate.probe_fresh && !candidate.snapshot_usable).then_some(candidate.profile_name)
-        })
-        .take(warm_limit)
-        .collect()
+    let mut remaining = warm_limit;
+    let mut selected = Vec::new();
+    for candidate in candidates {
+        let plan = prodex_mojo_core::runtime_state_quota::startup_probe_refresh_candidate_plan(
+            candidate.probe_fresh,
+            candidate.snapshot_usable,
+            remaining,
+        )
+        .expect("Mojo startup probe refresh policy returned invalid output");
+        remaining = plan.remaining;
+        if plan.selected {
+            selected.push(candidate.profile_name);
+        }
+    }
+    selected
 }
 
 pub fn runtime_profiles_needing_startup_probe_refresh_from_snapshots<'a, N, W, I, F>(

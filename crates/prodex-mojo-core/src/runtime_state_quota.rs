@@ -10,6 +10,7 @@ const MODE_MODEL_CACHED_SOURCE: i64 = 5;
 const MODE_MODEL_FINALIZE: i64 = 6;
 const MODE_UNKNOWN_WINDOW: i64 = 7;
 const MODE_USAGE_SNAPSHOT_RETAIN: i64 = 8;
+const MODE_STARTUP_PROBE_REFRESH: i64 = 9;
 
 pub const CACHED_MODEL_STANDARD: i64 = 0;
 pub const CACHED_MODEL_LUNA: i64 = 1;
@@ -35,6 +36,12 @@ pub struct ProbeUsageSnapshotApplyPlan {
     pub blocking_reset_at: Option<i64>,
     pub retry_backoff_until: Option<i64>,
     pub retry_backoff_changed: bool,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct StartupProbeRefreshCandidatePlan {
+    pub selected: bool,
+    pub remaining: usize,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -226,6 +233,42 @@ pub fn usage_snapshot_should_retain(
             ],
         )?[0],
     )
+}
+
+pub fn startup_probe_refresh_candidate_plan(
+    probe_fresh: bool,
+    snapshot_usable: bool,
+    remaining: usize,
+) -> Result<StartupProbeRefreshCandidatePlan, MojoError> {
+    let remaining = i64::try_from(remaining).map_err(|_| MojoError::InvalidInput)?;
+    let output = call(
+        MODE_STARTUP_PROBE_REFRESH,
+        [
+            i64::from(probe_fresh),
+            i64::from(snapshot_usable),
+            remaining,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+        ],
+    )?;
+    let selected = bool_output(output[0])?;
+    let next_remaining = usize::try_from(output[1]).map_err(|_| MojoError::InvalidOutput)?;
+    if next_remaining > remaining as usize
+        || (selected && next_remaining.saturating_add(1) != remaining as usize)
+        || (!selected && next_remaining != remaining as usize)
+    {
+        return Err(MojoError::InvalidOutput);
+    }
+    Ok(StartupProbeRefreshCandidatePlan {
+        selected,
+        remaining: next_remaining,
+    })
 }
 
 pub fn snapshot_usability(
@@ -541,6 +584,31 @@ mod tests {
                             "profile_present={profile_present}, now={now}, checked_at={checked_at}, retention_seconds={retention_seconds}"
                         );
                     }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn startup_probe_refresh_candidate_plan_matches_independent_oracle() {
+        for probe_fresh in [false, true] {
+            for snapshot_usable in [false, true] {
+                for remaining in [0, 1, 2, 17, i64::MAX as usize] {
+                    let selected = remaining > 0 && !probe_fresh && !snapshot_usable;
+                    let expected = StartupProbeRefreshCandidatePlan {
+                        selected,
+                        remaining: remaining.saturating_sub(usize::from(selected)),
+                    };
+                    assert_eq!(
+                        startup_probe_refresh_candidate_plan(
+                            probe_fresh,
+                            snapshot_usable,
+                            remaining,
+                        )
+                        .expect("Mojo startup probe plan must preserve the boundary contract"),
+                        expected,
+                        "probe_fresh={probe_fresh} snapshot_usable={snapshot_usable} remaining={remaining}",
+                    );
                 }
             }
         }
