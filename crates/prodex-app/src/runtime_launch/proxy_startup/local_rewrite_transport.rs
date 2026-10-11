@@ -102,7 +102,7 @@ pub(super) fn send_runtime_local_rewrite_prepared_request(
         runtime_local_rewrite_apply_prepared_auth(upstream_request, request, shared, &body, auth)?;
     if !matches!(provider_kind, RuntimeProviderBridgeKind::OpenAiResponses) {
         upstream_request =
-            runtime_local_rewrite_copy_openai_headers(request, shared, upstream_request, true);
+            runtime_local_rewrite_copy_openai_headers(request, upstream_request, true)?;
     }
     runtime_proxy_log(
         &shared.runtime_shared,
@@ -194,9 +194,9 @@ fn runtime_local_rewrite_apply_prepared_auth(
                 api_key,
             )
         }
-        RuntimeLocalRewritePreparedAuth::OpenAiResponses { api_key } => Ok(
-            runtime_local_rewrite_apply_openai_auth(upstream_request, request, shared, api_key),
-        ),
+        RuntimeLocalRewritePreparedAuth::OpenAiResponses { api_key } => {
+            runtime_local_rewrite_apply_openai_auth(upstream_request, request, api_key)
+        }
         RuntimeLocalRewritePreparedAuth::DeepSeek {
             api_key,
             native_messages,
@@ -292,9 +292,8 @@ fn runtime_local_rewrite_apply_copilot_auth(
 fn runtime_local_rewrite_apply_openai_auth(
     upstream_request: reqwest::RequestBuilder,
     request: &RuntimeProxyRequest,
-    shared: &RuntimeLocalRewriteProxyShared,
     api_key: Option<&str>,
-) -> reqwest::RequestBuilder {
+) -> Result<reqwest::RequestBuilder> {
     let auth_shape = runtime_local_rewrite_mojo_auth_shape(
         RuntimeProviderBridgeKind::OpenAiResponses,
         api_key.is_some(),
@@ -307,10 +306,9 @@ fn runtime_local_rewrite_apply_openai_auth(
     );
     let mut upstream_request = runtime_local_rewrite_copy_openai_headers(
         request,
-        shared,
         upstream_request,
         replacing_openai_auth,
-    );
+    )?;
     if let Some(api_key) = api_key {
         upstream_request = match auth_shape {
             prodex_mojo_core::provider_upstream::ProviderAuthShape::Bearer => {
@@ -319,7 +317,7 @@ fn runtime_local_rewrite_apply_openai_auth(
             _ => unreachable!("validated Mojo OpenAI auth shape"),
         };
     }
-    upstream_request
+    Ok(upstream_request)
 }
 
 fn runtime_local_rewrite_apply_deepseek_auth(
@@ -550,10 +548,9 @@ mod anthropic_native_transport_tests {
 
 fn runtime_local_rewrite_copy_openai_headers(
     request: &RuntimeProxyRequest,
-    _shared: &RuntimeLocalRewriteProxyShared,
     mut upstream_request: reqwest::RequestBuilder,
     replacing_openai_auth: bool,
-) -> reqwest::RequestBuilder {
+) -> Result<reqwest::RequestBuilder> {
     let connection_headers = runtime_proxy_crate::runtime_connection_header_tokens(
         request
             .headers
@@ -564,21 +561,20 @@ fn runtime_local_rewrite_copy_openai_headers(
         if runtime_proxy_crate::runtime_header_name_matches_connection_token(
             name,
             &connection_headers,
-        ) || should_skip_runtime_local_rewrite_request_header(name)
-        {
-            continue;
-        }
-        if replacing_openai_auth
-            && (ascii_casefold_equal_exact(name, "authorization")
-                .expect("Mojo authorization header comparison failed")
-                || ascii_casefold_equal_exact(name, "chatgpt-account-id")
-                    .expect("Mojo ChatGPT account header comparison failed"))
+        ) || prodex_mojo_core::runtime_local_rewrite_transport::header_policy(
+            name,
+            replacing_openai_auth,
+        )
+        .map_err(|error| {
+            anyhow::anyhow!("Mojo local rewrite request-header policy failed: {error:?}")
+        })?
+        .should_skip()
         {
             continue;
         }
         upstream_request = upstream_request.header(name.as_str(), value.as_str());
     }
-    upstream_request
+    Ok(upstream_request)
 }
 
 pub(super) fn runtime_local_rewrite_api_key_attempts<'a>(
@@ -682,11 +678,6 @@ fn runtime_local_rewrite_header_if_allowed<'a>(
     expected_name: &str,
 ) -> Option<&'a str> {
     runtime_local_rewrite_header(request, expected_name)
-}
-
-fn should_skip_runtime_local_rewrite_request_header(name: &str) -> bool {
-    runtime_proxy_crate::is_runtime_transport_local_request_header(name)
-        || runtime_proxy_crate::is_prodex_internal_request_header(name)
 }
 
 #[cfg(test)]
