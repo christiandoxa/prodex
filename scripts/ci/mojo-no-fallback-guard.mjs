@@ -2565,6 +2565,7 @@ export function findViolations(files) {
       "prodex_mojo_core::runtime_state_quota::probe_cache_freshness(",
       "prodex_mojo_core::runtime_state_quota::snapshot_usability(",
       "prodex_mojo_core::runtime_state_quota::probe_usage_snapshot_apply_plan(",
+      "prodex_mojo_core::runtime_state_quota::startup_probe_refresh_candidate_plan(",
     ];
     const violations = required
       .filter((call) => !contents.includes(call))

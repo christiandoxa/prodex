@@ -14,6 +14,7 @@ comptime MODE_MODEL_CACHED_SOURCE: Int64 = 5
 comptime MODE_MODEL_FINALIZE: Int64 = 6
 comptime MODE_UNKNOWN_WINDOW: Int64 = 7
 comptime MODE_USAGE_SNAPSHOT_RETAIN: Int64 = 8
+comptime MODE_STARTUP_PROBE_REFRESH: Int64 = 9
 
 comptime CACHED_SUMMARY_UNKNOWN: Int64 = 0
 comptime CACHED_SUMMARY_LIVE: Int64 = 1
@@ -232,7 +233,7 @@ def prodex_runtime_state_quota_policy_v1(
 ) abi("C") -> Int64:
     if abi_version != RUNTIME_STATE_QUOTA_ABI_VERSION:
         return RUNTIME_STATE_QUOTA_ABI
-    if mode < MODE_TIMESTAMP_PERSIST or mode > MODE_USAGE_SNAPSHOT_RETAIN or output_address == 0:
+    if mode < MODE_TIMESTAMP_PERSIST or mode > MODE_STARTUP_PROBE_REFRESH or output_address == 0:
         return RUNTIME_STATE_QUOTA_INVALID
 
     var output = Pointer[mut=True, Int64, MutUntrackedOrigin](
@@ -375,6 +376,21 @@ def prodex_runtime_state_quota_policy_v1(
             input0 == 1
             and input1 >= state_quota_saturating_sub(input2, input3)
         )
+        return RUNTIME_STATE_QUOTA_OK
+
+    # startup probe refresh:
+    # 0 probe is fresh, 1 usage snapshot is usable, 2 remaining warm slots
+    if mode == MODE_STARTUP_PROBE_REFRESH:
+        if (
+            not state_quota_valid_bool(input0)
+            or not state_quota_valid_bool(input1)
+            or input2 < 0
+        ):
+            return RUNTIME_STATE_QUOTA_INVALID
+        output[unsafe_offset=0] = Int64(
+            input2 > 0 and input0 == 0 and input1 == 0
+        )
+        output[unsafe_offset=1] = input2 - output[unsafe_offset=0]
         return RUNTIME_STATE_QUOTA_OK
 
     # probe apply:
