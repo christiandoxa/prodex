@@ -160,22 +160,14 @@ pub fn info_runtime_parse_fields(line: &str) -> BTreeMap<String, String> {
             })
             .collect();
     }
-    let message = line
-        .split_once("] ")
+    runtime_proxy_crate::runtime_proxy_log_fields(info_runtime_log_message(line))
+}
+
+pub(crate) fn info_runtime_log_message(line: &str) -> &str {
+    line.split_once("] ")
         .map(|(_, message)| message)
         .unwrap_or(line)
-        .trim();
-    let mut fields = BTreeMap::new();
-    for token in message.split_whitespace() {
-        let Some((key, value)) = token.split_once('=') else {
-            continue;
-        };
-        if key.is_empty() || value.is_empty() {
-            continue;
-        }
-        fields.insert(key.to_string(), value.trim_matches('"').to_string());
-    }
-    fields
+        .trim()
 }
 
 fn info_runtime_json_field_value(value: &serde_json::Value) -> Option<String> {

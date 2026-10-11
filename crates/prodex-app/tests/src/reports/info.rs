@@ -44,6 +44,16 @@ fn token_usage_event_parses_snapshot_fields() {
     assert_eq!(event.output_tokens, 15);
     assert_eq!(event.reasoning_tokens, 3);
 }
+
+#[test]
+fn token_usage_event_uses_mojo_log_tokenizer_for_quoted_fields() {
+    let event = info_token_usage_event_from_line(
+        "[2026-06-19 20:00:00.000 +07:00] token_usage request=42 transport=http profile=\"main beta\" source=responses_unary input_tokens=120 output_tokens=15",
+    )
+    .expect("quoted token event");
+
+    assert_eq!(event.profile, "main beta");
+}
 #[test]
 fn token_usage_rejects_invalid_or_zero_output_rates() {
     for rate in ["0", "0.0", "-1", "NaN", "inf"] {

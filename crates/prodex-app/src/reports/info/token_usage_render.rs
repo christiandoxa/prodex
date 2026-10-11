@@ -153,11 +153,7 @@ fn info_runtime_line_has_event(line: &str, expected: &str) -> bool {
     if let Ok(value) = serde_json::from_str::<serde_json::Value>(line) {
         return value.get("event").and_then(serde_json::Value::as_str) == Some(expected);
     }
-    line.split_once("] ")
-        .map(|(_, message)| message)
-        .unwrap_or(line)
-        .split_whitespace()
-        .next()
+    runtime_proxy_crate::runtime_proxy_log_event(super::info_runtime_log_message(line))
         == Some(expected)
 }
 
