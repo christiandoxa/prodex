@@ -126,7 +126,7 @@ jobs:
           } >> "${GITHUB_OUTPUT}"
 
       - name: Install Node.js for release metadata checks
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
         with:
           node-version: 22
           package-manager-cache: false
@@ -150,7 +150,7 @@ jobs:
 
       - name: Upload optional-tool freshness evidence
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: optional-tools-freshness-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ runner.temp }}/optional-tools-freshness-B.json
@@ -340,7 +340,7 @@ jobs:
           fi
 
       - name: Upload target Mojo archive
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: mojo-archive-${{ matrix.target }}
           path: target/mojo-release/${{ matrix.target }}
@@ -464,7 +464,7 @@ jobs:
           key: release-${{ matrix.target }}
 
       - name: Download target Mojo archive
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
           name: mojo-archive-${{ matrix.target }}
           path: target/mojo-release/${{ matrix.target }}
@@ -675,7 +675,7 @@ jobs:
           cp "target/${{ matrix.target }}/release/${{ matrix.binary-name }}" "dist/${{ matrix.artifact-name }}/${{ matrix.binary-name }}"
 
       - name: Upload binary artifact
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: ${{ matrix.artifact-name }}
           path: dist/${{ matrix.artifact-name }}
@@ -685,7 +685,7 @@ jobs:
 
       - name: Install Node.js for native client probe
         if: ${{ matrix.target == 'x86_64-unknown-linux-gnu' }}
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
         with:
           node-version: 22
           package-manager-cache: false
@@ -807,13 +807,13 @@ jobs:
           persist-credentials: false
 
       - name: Install Node.js for artifact smoke
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
         with:
           node-version: 22
           package-manager-cache: false
 
       - name: Download official Linux artifact
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
           name: x86_64-unknown-linux-gnu
           path: artifact
@@ -849,7 +849,7 @@ jobs:
 
     steps:
       - name: Download binary artifacts
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
           path: artifacts
 
@@ -886,7 +886,7 @@ jobs:
           persist-credentials: false
 
       - name: Download built binaries
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
           path: artifacts
 
@@ -928,7 +928,7 @@ jobs:
           subject-path: release-sbom.spdx.json
 
       - name: Upload release SBOM
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: release-sbom
           path: release-sbom.spdx.json
@@ -973,7 +973,7 @@ jobs:
           persist-credentials: false
 
       - name: Install Node.js
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
         with:
           node-version: 22
           package-manager-cache: false
@@ -1053,12 +1053,12 @@ jobs:
           } >> "${GITHUB_OUTPUT}"
 
       - name: Download built binaries
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
           path: artifacts
 
       - name: Download release SBOM
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
           name: release-sbom
           path: artifacts/release-sbom
@@ -1297,7 +1297,7 @@ jobs:
         run: scripts/ci/runtime-dependency-freshness.sh
 
       - name: Upload pre-publication freshness evidence
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: optional-tools-freshness-publish-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ runner.temp }}/optional-tools-freshness-P.json
@@ -1383,7 +1383,7 @@ jobs:
           persist-credentials: false
 
       - name: Install Node.js
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
         with:
           node-version: 22
           package-manager-cache: false
@@ -1434,7 +1434,7 @@ jobs:
 
       - name: Upload publish duration telemetry
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: publish-duration-telemetry
           path: |
