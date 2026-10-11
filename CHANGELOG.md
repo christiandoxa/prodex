@@ -2,77 +2,96 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.437.5 - 2026-10-11
+
+### Runtime
+
+- Stop wrapped native TUI before retiring its endpoint (`1fe2262`)
+
+### CLI
+
+- Preserve long activation profile names (`386db91`)
+
+### Misc
+
+- Repair native goal attachment aliases before resume (`494c414`)
+# Prodex 0.437.5
+
+## New Features
+
+No new user-facing features. This patch corrects local session recovery and
+preserves goal attachment references across managed overlay replacement.
+
+## Bug Fixes
+
+### Stop the native frontend before retiring its endpoint
+
+Interactive launchers share a terminal process group. The graceful recovery
+path previously called `Child::kill` on that launcher, which sends `SIGKILL` on
+Unix. An npm-style launcher's signal handler therefore could not forward the
+termination to its native TUI. The supervisor could replace its companion and
+remove the old socket while the old frontend remained alive and attempted to
+reconnect to it.
+
+The graceful path now sends `SIGTERM` to the owned launcher PID, never to the
+inherited terminal process group. This lets the official npm launcher forward
+termination and wait for its native frontend. The existing bounded deadline and
+force-kill escalation remain available for an unresponsive child. Session-owned
+companions still have their own process group and are cleaned up after the
+frontend exits. Explicitly selected remote servers are not terminated.
+
+### Keep the goal's original instruction attachment reachable
+
+Native Codex rollouts identify a session with `session_meta.payload.id`. Recent
+session maintenance only recognized legacy `thread_id` spellings, so it could
+repair the rollout's attachment references but miss the matching goal row. The
+goal then referenced a deleted overlay path even though the attachment bytes
+were still present in shared storage.
+
+Maintenance now recognizes the native metadata envelope, invalidates the older
+recent-maintenance cache, and applies the existing attachment rewrite to the
+identified goal. Message and tool item IDs are not treated as session IDs. The
+goal status, objective content apart from path aliases, and other threads remain
+unchanged. Exact-session resume repair runs before a replacement frontend starts.
+
+## Verification
+
+- Reproduce a native frontend surviving its abruptly killed launcher before the
+  patch using a real process hierarchy and local Unix sockets.
+- Verify graceful forwarding, frontend-before-companion teardown, an unrelated
+  terminal peer remaining alive, monitor-error cleanup, and bounded escalation.
+- Reproduce the stale goal objective with native session metadata and preserved
+  shared attachment bytes; verify exact-thread repair and cache invalidation.
+- Retain terminal-error recovery, quota-positive alternatives, cancellation,
+  hard-affinity, descriptor-limit, and companion process-tree regressions.
+
+## Upgrade Notes
+
+Start a new Prodex process after updating. Already running supervisors and native
+frontends do not change when the executable on disk is replaced. Resume using
+`prodex s resume <session-id>` rather than an expired overlay's `codex --remote`
+socket. Copy any unsent draft before closing an old frontend.
+
+A ready quota pool does not imply that a local app-server socket is alive. This
+patch addresses the reproduced launcher and goal-path defects, not every possible
+network outage or model-wide upstream capacity event. It does not authorize
+mid-stream rotation, replay of completed tool effects, or automatic continuation
+of a user-cancelled goal.
+
+## Changelog
+
+- Deliver graceful termination to interactive native-TUI launchers before cleanup.
+- Preserve native session goal attachment references across overlay replacement.
+- Keep exact-session recovery and bounded process teardown behavior covered.
+
+Full Changelog: [0.437.4...0.437.5](https://github.com/christiandoxa/prodex/compare/0.437.4...0.437.5)
+
 ## 0.437.4 - 2026-10-11
 
 ### Runtime
 
 - Reset recovery evidence on native task start (`886bcc5`)
 - Recover native Codex task completion failures (`96cf9ab`)
-# Prodex 0.437.4
-
-## New Features
-
-No new user-facing features. This patch restores automatic session recovery for
-native Codex terminal-error records without changing account or model policies.
-
-## Bug Fixes
-
-### Recover a blocked goal after a native terminal capacity error
-
-Codex can persist an unsuccessful turn as an `event_msg` whose payload is
-`task_complete` and whose optional `error` contains `codex_error_info`. Unlike the
-app-server `turn/completed` notification, this native record has no `status`
-field. Prodex recognized standalone error events and failed app-server turns,
-but missed the native completion record. A goal could therefore remain blocked
-after a model-capacity error even when another eligible profile was available.
-
-The session monitor now projects terminal errors from native `task_complete`
-records and the upstream `turn_complete` alias, both wrapped and unwrapped. The
-existing error classifier, profile eligibility checks, resume planner, and
-completed-work protections remain authoritative. The small Rust change is at
-the native JSON wire-format boundary; it does not add a second retry algorithm
-or a Rust fallback for any Mojo-owned policy.
-
-Recovery resumes the persisted session rather than resubmitting the original
-prompt. Already-recorded tool effects and completed messages are preserved.
-Successful completions, cancellation, foreign-thread records, quoted errors,
-non-retryable failures, and untyped message-only failures do not arm recovery.
-Opting out with `--no-auto-rotate` remains respected. The native `task_started`
-record and its `turn_started` alias also reset per-turn acceptance evidence, so
-completed work from an earlier turn cannot authorize recovery of an unaccepted
-new turn.
-
-## Verification
-
-- Reproduce the missed native overload on the previous implementation through
-  classifier, live blocked-goal monitor, and post-child recovery tests.
-- Verify the production run strategy chooses another profile, retains the same
-  session and observed model, and does not append duplicate tool effects.
-- Cover both native completion spellings, success/cancellation negatives,
-  unknown failure classes, unrelated thread records, and consumed-record offsets.
-- Retain quota-positive alternative-account socket recovery, hard-affinity,
-  precommit/stream, admission lock-order, companion teardown, and descriptor tests.
-
-## Upgrade Notes
-
-Restart Prodex after updating so the running supervisor loads this fix. Existing
-processes do not change when the binary on disk is replaced. Resume a blocked
-conversation through a fresh Prodex launch; do not reconnect to an expired
-session-local overlay socket.
-
-Available account quota is not a guarantee that the selected model has upstream
-capacity. This patch fixes the missed recovery trigger; it does not eliminate
-model-wide overload, network outages, genuinely exhausted profile pools, or
-permission and continuation constraints. No rotation is introduced after a
-stream has committed, and user cancellation is not overridden.
-
-## Changelog
-
-- Recognize native Codex task-completion errors in the session recovery monitor.
-- Preserve strict app-server failure-status validation and account eligibility.
-- Add production-strategy regressions for persisted-session resume without replay.
-
-Full Changelog: [0.437.3...0.437.4](https://github.com/christiandoxa/prodex/compare/0.437.3...0.437.4)
 
 ## 0.437.3 - 2026-10-10
 
