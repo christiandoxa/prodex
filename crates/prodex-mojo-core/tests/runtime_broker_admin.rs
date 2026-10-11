@@ -30,4 +30,12 @@ fn strict_admin_value_adapter_preserves_trimmed_spans_and_rejections() {
         value_span(RuntimeBrokerAdminValueKind::SessionId, &"a".repeat(257)).unwrap(),
         None
     );
+    assert_eq!(
+        value_span(
+            RuntimeBrokerAdminValueKind::ActivationProfile,
+            &"a".repeat(257)
+        )
+        .unwrap(),
+        Some((0, 257))
+    );
 }

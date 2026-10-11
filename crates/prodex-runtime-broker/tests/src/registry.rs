@@ -140,6 +140,22 @@ fn admin_helpers_plan_errors_and_activation_success() {
 }
 
 #[test]
+fn admin_activation_profile_preserves_names_beyond_session_id_limit() {
+    for profile in ["a".repeat(257), "雪".repeat(257)] {
+        let padded = format!("\u{2003}{profile}\u{2003}");
+        let body = serde_json::to_vec(&serde_json::json!({
+            "current_profile": padded,
+        }))
+        .unwrap();
+        assert_eq!(
+            runtime_broker_activation_profile_from_json(&body),
+            Ok(profile)
+        );
+        assert!(runtime_broker_validate_session_affinity_release_id(Some(&padded)).is_err());
+    }
+}
+
+#[test]
 fn admin_helpers_validate_session_affinity_release() {
     assert_eq!(
         runtime_broker_validate_session_affinity_release_method("GET"),

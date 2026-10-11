@@ -81,7 +81,10 @@ def prodex_runtime_broker_admin_value_v1(
     output[unsafe_offset=1] = 0
     output[unsafe_offset=2] = 0
     var bounds = rich_trim_bounds(value)
-    if bounds[1] - bounds[0] > 0 and bounds[1] - bounds[0] <= BROKER_ADMIN_MAX_VALUE_BYTES:
+    var max_value_bytes = BROKER_ADMIN_MAX_VALUE_BYTES
+    if value_kind == BROKER_ADMIN_VALUE_ACTIVATION_PROFILE:
+        max_value_bytes = 0x7FFFFFFFFFFFFFFF
+    if bounds[1] - bounds[0] > 0 and bounds[1] - bounds[0] <= max_value_bytes:
         output[unsafe_offset=0] = 1
         output[unsafe_offset=1] = bounds[0]
         output[unsafe_offset=2] = bounds[1]
