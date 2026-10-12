@@ -1206,7 +1206,8 @@
         "role": "semantic",
         "operations": [
           "gemini_tool_name_policy",
-          "gemini3_model_toolset_policy"
+          "gemini3_model_toolset_policy",
+          "gemini_apply_patch_block_normalization"
         ]
       },
       {
@@ -5766,6 +5767,31 @@
       "duplicate_production_owner": false,
       "platform_fallback": false,
       "rust_adapter_scope": "borrow model string and map the Mojo boolean into existing declaration-override orchestration"
+    },
+    {
+      "name": "gemini_apply_patch_block_normalization",
+      "domain": "provider/gemini",
+      "introduced_in": "0.438.0",
+      "baseline_state": "Rust extracted Gemini apply-patch blocks, normalized CRLF/CR line endings, and repaired Add File content prefixes before response shaping",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_gemini_apply_patch_block_v1",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/gemini_tooling_policy.mojo",
+      "consumer": "crates/prodex-provider-core/src/translators/gemini/response_tool_calls_apply_patch.rs",
+      "consumer_marker": "gemini_apply_patch_block(",
+      "production_consumers": [
+        "crates/prodex-provider-core/src/translators/gemini/response_tool_calls_apply_patch.rs",
+        "crates/prodex-provider-core/src/translators/gemini/stream/shaping.rs",
+        "crates/prodex-provider-core/src/gemini_bridge/response/tool_calls.rs"
+      ],
+      "production_reachability_test": "crates/prodex-provider-core/src/translators/gemini_tool_call_tests.rs",
+      "rust_owner_before": "Apply-patch block extraction, newline normalization, Add File prefix repair, and response-tool custom input normalization",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "deleted; direct Mojo and provider-core tool-call regressions preserve block extraction, CRLF/CR normalization, Add File repair, and unified-diff compatibility",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "Serde argument extraction, bounded Mojo ABI invocation, UTF-8 result materialization, unified-diff Mojo dispatch, and edit-argument patch assembly"
     },
     {
       "name": "provider_scalar_policy",

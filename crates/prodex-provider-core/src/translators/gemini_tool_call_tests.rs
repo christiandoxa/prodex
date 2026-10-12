@@ -67,6 +67,8 @@ fn gemini_response_signature_selection_preserves_invalid_and_present_fields() {
 
 #[test]
 fn gemini_apply_patch_unified_diff_is_mojo_owned() {
+    const { assert!(prodex_mojo_core::MOJO_ACTIVE) }
+
     let input = concat!(
         "diff --git a/README.md b/docs/README.md\r\n",
         "--- a/README.md\r\n",
@@ -114,6 +116,18 @@ fn gemini_apply_patch_unified_diff_is_mojo_owned() {
             "*** Delete File: gone.txt\n",
             "*** End Patch",
         )
+    );
+}
+
+#[test]
+fn gemini_apply_patch_block_normalization_requires_mojo() {
+    const { assert!(prodex_mojo_core::MOJO_ACTIVE) }
+
+    assert_eq!(
+        gemini_custom_apply_patch_input(&json!({
+            "input": "  *** Begin Patch\r\n*** Add File: note.txt\r\nhello\r\n*** End Patch"
+        })),
+        "  *** Begin Patch\n*** Add File: note.txt\n+hello\n*** End Patch"
     );
 }
 
