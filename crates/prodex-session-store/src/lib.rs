@@ -238,9 +238,16 @@ pub fn resolve_session_report_by_id<'a>(
         });
     }
 
-    let exact_matches = reports
+    let ids = reports
         .iter()
-        .filter(|report| session_id_matches_selector(&report.id, selector, true))
+        .map(|report| report.id.as_str())
+        .collect::<Vec<_>>();
+    let (exact_indices, prefix_indices) =
+        prodex_mojo_core::json::session_selector_match_plan(&ids, selector)
+            .expect("Mojo session selector match planner failed");
+    let exact_matches = exact_indices
+        .into_iter()
+        .map(|index| &reports[index])
         .collect::<Vec<_>>();
     if exact_matches.len() == 1 {
         return Ok(exact_matches[0]);
@@ -252,9 +259,9 @@ pub fn resolve_session_report_by_id<'a>(
         });
     }
 
-    let prefix_matches = reports
-        .iter()
-        .filter(|report| session_id_matches_selector(&report.id, selector, false))
+    let prefix_matches = prefix_indices
+        .into_iter()
+        .map(|index| &reports[index])
         .collect::<Vec<_>>();
     match prefix_matches.len() {
         0 => Err(SessionResolveError::Missing {

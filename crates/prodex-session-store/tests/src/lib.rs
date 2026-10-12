@@ -378,6 +378,17 @@ fn session_resolver_handles_unique_ambiguous_and_missing_ids() {
 
     let reports =
         collect_session_reports(&root, None, &AppState::default()).expect("sessions collect");
+    let ids = reports
+        .iter()
+        .map(|report| report.id.as_str())
+        .collect::<Vec<_>>();
+    let plan = prodex_mojo_core::json::session_selector_match_plan(&ids, "11111111")
+        .expect("session selector planner should be available");
+    assert!(plan.0.is_empty());
+    assert_eq!(plan.1, [0, 1]);
+    let changed_plan = prodex_mojo_core::json::session_selector_match_plan(&ids, "11111112")
+        .expect("session selector planner should remain sensitive");
+    assert!(changed_plan.1.is_empty());
     assert_eq!(
         resolve_session_report_by_id(&reports, &first_id.to_uppercase())
             .expect("exact match should resolve")
@@ -397,6 +408,10 @@ fn session_resolver_handles_unique_ambiguous_and_missing_ids() {
     assert!(matches!(
         resolve_session_report_by_id(&reports, "99999999").unwrap_err(),
         SessionResolveError::Missing { .. }
+    ));
+    assert!(matches!(
+        resolve_session_report_by_id(&reports, "\u{3000}11111111\u{00a0}").unwrap_err(),
+        SessionResolveError::Ambiguous { .. }
     ));
 
     let _ = fs::remove_dir_all(root);

@@ -580,6 +580,26 @@
     },
     "additions": [
       {
+        "path": "mojo/prodex_core/session_selector.mojo",
+        "language": "mojo",
+        "classification": "DETERMINISTIC_DOMAIN",
+        "production_reachable": true,
+        "role": "semantic",
+        "operations": [
+          "session_selector_resolution_policy"
+        ]
+      },
+      {
+        "path": "crates/prodex-mojo-core/src/json/session_selector.rs",
+        "language": "rust",
+        "classification": "MIXED",
+        "production_reachable": true,
+        "role": "adapter",
+        "operations": [
+          "session_selector_resolution_policy"
+        ]
+      },
+      {
         "path": "mojo/prodex_core/quota_watch_policy.mojo",
         "language": "mojo",
         "classification": "DETERMINISTIC_DOMAIN",
@@ -3976,6 +3996,29 @@
       "duplicate_production_owner": false,
       "platform_fallback": false,
       "rust_adapter_scope": "Rust serializes caller-owned JSON values for the raw planner, decodes selected string spans, applies numeric timestamp fallback and chrono formatting, and keeps PathBuf/canonicalization, file discovery and report DTO mutation"
+    },
+    {
+      "name": "session_selector_resolution_policy",
+      "domain": "session-store/selection",
+      "introduced_in": "0.438.0",
+      "baseline_state": "candidate",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_session_selector_match_plan_v1",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/session_selector.mojo",
+      "consumer": "crates/prodex-session-store/src/lib.rs",
+      "consumer_marker": "prodex_mojo_core::json::session_selector_match_plan",
+      "production_consumers": [
+        "crates/prodex-session-store/src/lib.rs"
+      ],
+      "production_reachability_test": "crates/prodex-session-store/tests/src/lib.rs",
+      "rust_owner_before": "exact and prefix session-ID candidate matching, stable candidate collection, and exact-over-prefix ambiguity resolution",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "deleted; session-store caller tests cover exact case-folding, unique prefixes, ambiguous prefixes, missing selectors, and trimmed Unicode selectors",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "Rust owns selector trimming, report DTO indexing, error construction, and filesystem/state acquisition; Mojo owns candidate matching and stable exact/prefix index planning"
     },
     {
       "name": "smart_context_artifact_reference_policy",
