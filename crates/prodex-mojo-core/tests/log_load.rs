@@ -1,6 +1,8 @@
 #![cfg(feature = "mojo-rich")]
 
-use prodex_mojo_core::log_load::{LogLoadAggregateInput, aggregate_summary, aggregate_update};
+use prodex_mojo_core::log_load::{
+    LogLoadAggregateInput, aggregate_summary, aggregate_update, try_is_routine_event,
+};
 
 #[test]
 fn required_mojo_classifies_routine_load_events_exactly() {
@@ -34,6 +36,16 @@ fn required_mojo_classifies_routine_load_events_exactly() {
     })
     .unwrap();
     assert!(!plan.routine);
+}
+
+#[test]
+fn required_mojo_routine_event_classifier_rejects_mutated_names() {
+    const { assert!(prodex_mojo_core::MOJO_REQUIRED) };
+
+    assert!(try_is_routine_event("profile_inflight_saturated").unwrap());
+    assert!(!try_is_routine_event("profile_inflight_saturatedly").unwrap());
+    assert!(!try_is_routine_event("runtime_proxy_lane_limit_reached_extra").unwrap());
+    assert!(try_is_routine_event(&"x".repeat(257)).is_err());
 }
 
 #[test]

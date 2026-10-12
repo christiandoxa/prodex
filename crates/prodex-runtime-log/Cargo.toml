@@ -9,7 +9,7 @@ repository.workspace = true
 [dependencies]
 fs2 = { workspace = true }
 libc = { workspace = true }
-prodex_mojo_core = { workspace = true, features = ["mojo-runtime"] }
+prodex_mojo_core = { workspace = true, features = ["mojo-runtime", "mojo-rich"] }
 runtime_proxy_crate = { workspace = true }
 serde_json = { workspace = true }
 zstd = { workspace = true }
