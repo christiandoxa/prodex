@@ -86,6 +86,18 @@ unsafe extern "C" {
         count: i64,
         output: u64,
     ) -> i64;
+    fn prodex_mojo_runtime_doctor_route_health_groups_v1(
+        abi: i64,
+        profiles: u64,
+        routes: u64,
+        event_flags: u64,
+        count: i64,
+        representative_indices: u64,
+        event_counts: u64,
+        latest_event_indices: u64,
+        profile_row_indices: u64,
+        output_count: u64,
+    ) -> i64;
 }
 
 #[test]
@@ -245,6 +257,132 @@ fn marker_summary_counts_abi_tags_fixed_selection_and_failure_totals() {
     };
     assert_eq!(status, 5);
     assert!(overflow_accumulator.iter().all(|count| *count >= 0));
+}
+
+#[test]
+fn route_health_groups_abi_merges_latest_rows_and_orders_by_event_pressure() {
+    let inputs = [
+        ("beta", "responses", 1_i64),
+        ("alpha", "responses", 1),
+        ("alpha", "compact", 0),
+        ("beta", "responses", 1),
+        ("alpha", "responses", 0),
+        ("gamma", "standard", 1),
+        ("alpha", "responses", 1),
+    ];
+    let profiles = inputs
+        .iter()
+        .map(|(profile, _, _)| View {
+            ptr: profile.as_ptr() as u64,
+            len: profile.len() as u64,
+        })
+        .collect::<Vec<_>>();
+    let routes = inputs
+        .iter()
+        .map(|(_, route, _)| View {
+            ptr: route.as_ptr() as u64,
+            len: route.len() as u64,
+        })
+        .collect::<Vec<_>>();
+    let flags = inputs.map(|(_, _, is_event)| is_event);
+    let mut representatives = [i64::MIN; 7];
+    let mut event_counts = [i64::MIN; 7];
+    let mut latest_events = [i64::MIN; 7];
+    let mut profile_rows = [i64::MIN; 7];
+    let mut output_count = -1_i64;
+    let status = unsafe {
+        prodex_mojo_runtime_doctor_route_health_groups_v1(
+            1,
+            profiles.as_ptr() as u64,
+            routes.as_ptr() as u64,
+            flags.as_ptr() as u64,
+            inputs.len() as i64,
+            representatives.as_mut_ptr() as u64,
+            event_counts.as_mut_ptr() as u64,
+            latest_events.as_mut_ptr() as u64,
+            profile_rows.as_mut_ptr() as u64,
+            &mut output_count as *mut i64 as u64,
+        )
+    };
+    assert_eq!(status, 0);
+    assert_eq!(output_count, 4);
+    assert_eq!(&representatives[..4], &[1, 0, 5, 2]);
+    assert_eq!(&event_counts[..4], &[2, 2, 1, 0]);
+    assert_eq!(&latest_events[..4], &[6, 3, 5, -1]);
+    assert_eq!(&profile_rows[..4], &[4, -1, -1, 2]);
+
+    let mut invalid_flags = flags;
+    invalid_flags[0] = 2;
+    output_count = 91;
+    assert_eq!(
+        unsafe {
+            prodex_mojo_runtime_doctor_route_health_groups_v1(
+                1,
+                profiles.as_ptr() as u64,
+                routes.as_ptr() as u64,
+                invalid_flags.as_ptr() as u64,
+                inputs.len() as i64,
+                representatives.as_mut_ptr() as u64,
+                event_counts.as_mut_ptr() as u64,
+                latest_events.as_mut_ptr() as u64,
+                profile_rows.as_mut_ptr() as u64,
+                &mut output_count as *mut i64 as u64,
+            )
+        },
+        1
+    );
+    assert_eq!(output_count, 0);
+}
+
+#[test]
+fn route_health_groups_sorting_moves_late_high_pressure_group_across_two_predecessors() {
+    let inputs = [
+        ("alpha", "responses", 1_i64),
+        ("bravo", "responses", 1),
+        ("bravo", "responses", 1),
+        ("charlie", "responses", 1),
+        ("charlie", "responses", 1),
+        ("charlie", "responses", 1),
+    ];
+    let profiles = inputs
+        .iter()
+        .map(|(profile, _, _)| View {
+            ptr: profile.as_ptr() as u64,
+            len: profile.len() as u64,
+        })
+        .collect::<Vec<_>>();
+    let routes = inputs
+        .iter()
+        .map(|(_, route, _)| View {
+            ptr: route.as_ptr() as u64,
+            len: route.len() as u64,
+        })
+        .collect::<Vec<_>>();
+    let flags = inputs.map(|(_, _, is_event)| is_event);
+    let mut representatives = [-1_i64; 6];
+    let mut counts = [-1_i64; 6];
+    let mut latest = [-1_i64; 6];
+    let mut profile_rows = [-1_i64; 6];
+    let mut output_count = -1_i64;
+    let status = unsafe {
+        prodex_mojo_runtime_doctor_route_health_groups_v1(
+            1,
+            profiles.as_ptr() as u64,
+            routes.as_ptr() as u64,
+            flags.as_ptr() as u64,
+            inputs.len() as i64,
+            representatives.as_mut_ptr() as u64,
+            counts.as_mut_ptr() as u64,
+            latest.as_mut_ptr() as u64,
+            profile_rows.as_mut_ptr() as u64,
+            &mut output_count as *mut i64 as u64,
+        )
+    };
+    assert_eq!(status, 0);
+    assert_eq!(output_count, 3);
+    assert_eq!(&representatives[..3], &[3, 1, 0]);
+    assert_eq!(&counts[..3], &[3, 2, 1]);
+    assert_eq!(&latest[..3], &[5, 2, 0]);
 }
 
 #[test]
