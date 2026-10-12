@@ -3719,7 +3719,10 @@ export function findViolations(files) {
   });
   const nativeFirstErrorClassViolations = files.flatMap(([filePath, contents]) => {
     if (filePath !== NATIVE_FIRST_ERROR_CLASS_FILE) return [];
-    const violations = contents.includes("classify_provider_error(")
+    const violations = (
+      contents.includes("classify_provider_error(") ||
+      contents.includes("classify_native_event_error(")
+    )
       ? []
       : [filePath + ": native first-event error classification must retain canonical Mojo-backed provider classifier"];
     const production = contents.split("#[cfg(test)]", 1)[0];
