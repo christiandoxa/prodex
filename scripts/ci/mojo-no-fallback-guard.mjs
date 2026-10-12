@@ -534,6 +534,9 @@ const PROMOTED_FILES = [
   "crates/prodex-provider-core/src/translators/gemini/request_transform.rs",
   "crates/prodex-provider-core/src/translators/gemini/request/generation_config.rs",
   "crates/prodex-provider-core/src/translators/gemini/request/generation_config/thinking.rs",
+  "crates/prodex-provider-core/src/translators/gemini/request/tool_signatures.rs",
+  "crates/prodex-mojo-core/src/provider_constraints/gemini_bridge_request.rs",
+  "crates/prodex-mojo-core/tests/gemini_request_content.rs",
   "crates/prodex-provider-core/src/translators/deepseek/response.rs",
   "crates/prodex-provider-core/src/translators/deepseek/tooling/response_tool_calls.rs",
   "crates/prodex-provider-core/src/translators/deepseek.rs",
@@ -1161,6 +1164,9 @@ const GEMINI_TRANSLATOR_REQUEST_FILE = "crates/prodex-provider-core/src/translat
 const GEMINI_TRANSLATOR_GENERATION_CONFIG_FILE = "crates/prodex-provider-core/src/translators/gemini/request/generation_config.rs";
 const GEMINI_GENERATION_CONFIG_FILE = "crates/prodex-provider-core/src/translators/gemini/request/generation_config.rs";
 const GEMINI_THINKING_FILE = "crates/prodex-provider-core/src/translators/gemini/request/generation_config/thinking.rs";
+const GEMINI_SIGNATURE_CONSUMER_FILE = "crates/prodex-provider-core/src/translators/gemini/request/tool_signatures.rs";
+const GEMINI_SIGNATURE_ADAPTER_FILE = "crates/prodex-mojo-core/src/provider_constraints/gemini_bridge_request.rs";
+const GEMINI_SIGNATURE_TEST_FILE = "crates/prodex-mojo-core/tests/gemini_request_content.rs";
 const ANTHROPIC_RESPONSE_FORBIDDEN_PATTERNS = [
   [/\bfn\s+anthropic_response_block_input\s*\(/u, "Rust response block classifier"],
   [/\benum\s+ResponseBlockKind\b/u, "duplicate Rust response block kind"],
@@ -3699,6 +3705,36 @@ export function findViolations(files) {
          filePath === GEMINI_TRANSLATOR_GENERATION_CONFIG_FILE) &&
         /(?:gemini_validate_candidate_count|gemini_request_body_without_tool)/u.test(contents)) {
       return [`${filePath}: contains a deleted Gemini feature-off fallback adapter`];
+    }
+    return [];
+  });
+  const geminiSignatureViolations = files.flatMap(([filePath, contents]) => {
+    if (filePath === GEMINI_SIGNATURE_CONSUMER_FILE) {
+      const production = contents.split("#[cfg(test)]", 1)[0];
+      const required = [
+        "Document::default()",
+        "GeminiBridgeRequestOperation::PreserveToolCallSignatures",
+        "gemini_bridge_request_kernel(",
+      ];
+      const violations = required
+        .filter((marker) => !production.includes(marker))
+        .map((marker) => `${filePath}: Gemini thought-signature preservation must retain ${marker}`);
+      if (/\.get\("(?:extra_content|google|gemini_thought_signature|thought_signature|thoughtSignature)"\)/u.test(production)) {
+        violations.push(`${filePath}: contains restored Rust thought-signature alias selection`);
+      }
+      return violations;
+    }
+    if (filePath === GEMINI_SIGNATURE_ADAPTER_FILE) {
+      return contents.includes("PreserveToolCallSignatures = 12") &&
+        contents.includes("GEMINI_SIGNATURE_PRESERVATION_MAX_BYTES")
+        ? []
+        : [`${filePath}: thought-signature preservation ABI must retain operation 12 and its bounded input cap`];
+    }
+    if (filePath === GEMINI_SIGNATURE_TEST_FILE) {
+      return contents.includes("GeminiBridgeRequestOperation::PreserveToolCallSignatures") &&
+        contents.includes("signature_preservation_rewrites_tool_calls_in_mojo")
+        ? []
+        : [`${filePath}: thought-signature preservation needs direct Mojo ABI coverage`];
     }
     return [];
   });
@@ -6732,7 +6768,7 @@ export function findViolations(files) {
     ...anthropicEnvelopeViolations, ...anthropicRequestViolations,
     ...anthropicWebSearchViolations, ...superProviderConfigViolations, ...externalProviderCatalogViolations, ...subAgentPolicyViolations, ...runtimeOverlayPolicyViolations, ...cliRuntimeFeatureViolations,
     ...superExposeProtocolViolations, ...superExposeViolations,
-    ...geminiFallbackViolations, ...geminiGenerationViolations, ...geminiTranslatorHardReplacementViolations, ...geminiBridgeFallbackViolations,
+    ...geminiFallbackViolations, ...geminiGenerationViolations, ...geminiTranslatorHardReplacementViolations, ...geminiBridgeFallbackViolations, ...geminiSignatureViolations,
     ...geminiToolResponseOrderViolations, ...geminiApplyPatchViolations,
     ...hardReplacementViolations, ...precommitBudgetOracleViolations,
     ...deepseekRequestViolations, ...deepseekRequestRejectViolations,
@@ -8287,6 +8323,17 @@ function selfTest() {
   assert(findViolations([[GEMINI_BRIDGE_REQUEST_FILE,
     'pub fn gemini_provider_core_generate_content_body_value() {\n#[cfg(not(feature = "mojo"))]\nold_body();\n}']])
     .some((violation) => violation.includes("gemini_provider_core_generate_content_body_value must use Mojo")));
+  assert.deepEqual(findViolations([[GEMINI_SIGNATURE_CONSUMER_FILE,
+    'Document::default(); GeminiBridgeRequestOperation::PreserveToolCallSignatures; gemini_bridge_request_kernel(input);']]), []);
+  assert.match(findViolations([[GEMINI_SIGNATURE_CONSUMER_FILE,
+    'Document::default(); GeminiBridgeRequestOperation::PreserveToolCallSignatures; gemini_bridge_request_kernel(input); object.get("thought_signature");']]).join("\n"),
+    /restored Rust thought-signature alias selection/u);
+  assert.deepEqual(findViolations([[GEMINI_SIGNATURE_ADAPTER_FILE,
+    'PreserveToolCallSignatures = 12; GEMINI_SIGNATURE_PRESERVATION_MAX_BYTES']]), []);
+  assert.match(findViolations([[GEMINI_SIGNATURE_ADAPTER_FILE, 'PreserveToolCallSignatures = 12']]).join("\n"),
+    /operation 12 and its bounded input cap/u);
+  assert.deepEqual(findViolations([[GEMINI_SIGNATURE_TEST_FILE,
+    'GeminiBridgeRequestOperation::PreserveToolCallSignatures; signature_preservation_rewrites_tool_calls_in_mojo']]), []);
   for (const symbol of ["stream_chunk_metadata", "stream_tool_call_ids", "stream_tool_call_added_item"]) {
     assert.match(findViolations([["crates/prodex-provider-core/src/translators/gemini/stream/shaping.rs",
       `pub fn gemini_provider_core_${symbol}() {\n old_rust_selection();\n}`]]).join("\n"),

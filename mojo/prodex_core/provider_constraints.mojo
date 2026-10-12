@@ -3182,6 +3182,7 @@ comptime GEMINI_BRIDGE_REQUEST_STATUS_INVALID: Int64 = 1
 comptime GEMINI_BRIDGE_REQUEST_STATUS_CAPACITY: Int64 = 2
 comptime GEMINI_BRIDGE_REQUEST_STATUS_ABI_MISMATCH: Int64 = 3
 comptime GEMINI_BRIDGE_REQUEST_MAX_BYTES: Int64 = 4_194_304
+comptime GEMINI_SIGNATURE_PRESERVATION_MAX_BYTES: Int64 = 16_777_216
 
 comptime GEMINI_BRIDGE_REQUEST_GENERATE_CONTENT_REQUEST: Int64 = 1
 comptime GEMINI_BRIDGE_REQUEST_GENERATE_CONTENT_BODY: Int64 = 2
@@ -3194,6 +3195,7 @@ comptime GEMINI_BRIDGE_REQUEST_TOOL_CONFIG: Int64 = 8
 comptime GEMINI_BRIDGE_REQUEST_TEXT_CONTENTS: Int64 = 9
 comptime GEMINI_BRIDGE_REQUEST_RAW_TRANSLATOR: Int64 = 10
 comptime GEMINI_BRIDGE_REQUEST_VALIDATE_TRANSLATOR: Int64 = 11
+comptime GEMINI_BRIDGE_REQUEST_PRESERVE_TOOL_CALL_SIGNATURES: Int64 = 12
 
 @fieldwise_init
 struct GeminiBridgeRequestInput(Copyable):
@@ -3222,11 +3224,14 @@ def gemini_bridge_request_input_flag_valid(value: Int64) -> Bool:
 
 
 def gemini_bridge_request_input_valid(input: GeminiBridgeRequestInput) -> Bool:
-    if input.operation < GEMINI_BRIDGE_REQUEST_GENERATE_CONTENT_REQUEST or input.operation > GEMINI_BRIDGE_REQUEST_VALIDATE_TRANSLATOR:
+    if input.operation < GEMINI_BRIDGE_REQUEST_GENERATE_CONTENT_REQUEST or input.operation > GEMINI_BRIDGE_REQUEST_PRESERVE_TOOL_CALL_SIGNATURES:
         return False
     if not gemini_bridge_request_input_flag_valid(input.primary_present) or not gemini_bridge_request_input_flag_valid(input.secondary_present) or not gemini_bridge_request_input_flag_valid(input.tertiary_present) or not gemini_bridge_request_input_flag_valid(input.quaternary_present) or not gemini_bridge_request_input_flag_valid(input.quinary_present) or not gemini_bridge_request_input_flag_valid(input.senary_present) or not gemini_bridge_request_input_flag_valid(input.septenary_present) or not gemini_bridge_request_input_flag_valid(input.octonary_present):
         return False
-    if not gemini_request_content_view_valid(input.primary) or not gemini_request_content_view_valid(input.secondary) or not gemini_request_content_view_valid(input.tertiary) or not gemini_request_content_view_valid(input.quaternary) or not gemini_request_content_view_valid(input.quinary) or not gemini_request_content_view_valid(input.senary) or not gemini_request_content_view_valid(input.septenary) or not gemini_request_content_view_valid(input.octonary):
+    var primary_valid = gemini_request_content_view_valid(input.primary)
+    if input.operation == GEMINI_BRIDGE_REQUEST_PRESERVE_TOOL_CALL_SIGNATURES:
+        primary_valid = input.primary.len <= UInt64(GEMINI_SIGNATURE_PRESERVATION_MAX_BYTES) and (input.primary.len == 0 or input.primary.ptr != 0)
+    if not primary_valid or not gemini_request_content_view_valid(input.secondary) or not gemini_request_content_view_valid(input.tertiary) or not gemini_request_content_view_valid(input.quaternary) or not gemini_request_content_view_valid(input.quinary) or not gemini_request_content_view_valid(input.senary) or not gemini_request_content_view_valid(input.septenary) or not gemini_request_content_view_valid(input.octonary):
         return False
     if input.primary_present == 0 and input.primary.len != 0 or input.secondary_present == 0 and input.secondary.len != 0 or input.tertiary_present == 0 and input.tertiary.len != 0 or input.quaternary_present == 0 and input.quaternary.len != 0 or input.quinary_present == 0 and input.quinary.len != 0 or input.senary_present == 0 and input.senary.len != 0 or input.septenary_present == 0 and input.septenary.len != 0 or input.octonary_present == 0 and input.octonary.len != 0:
         return False
@@ -3265,6 +3270,12 @@ def gemini_bridge_request_input_valid(input: GeminiBridgeRequestInput) -> Bool:
     ):
         return False
     if input.operation == GEMINI_BRIDGE_REQUEST_VALIDATE_TRANSLATOR and input.primary_present == 0:
+        return False
+    if input.operation == GEMINI_BRIDGE_REQUEST_PRESERVE_TOOL_CALL_SIGNATURES and (
+        input.primary_present == 0 or input.secondary_present != 0 or input.tertiary_present != 0
+        or input.quaternary_present != 0 or input.quinary_present != 0 or input.senary_present != 0
+        or input.septenary_present != 0 or input.octonary_present != 0 or input.kind != 0
+    ):
         return False
     return True
 
@@ -4339,6 +4350,346 @@ def gemini_bridge_request_write_tool_config(
         and gemini_request_content_put_range(writer, input.primary, name[0], name[1])
         and gemini_request_content_put_literal(writer, StringSlice("]}}"))
     )
+
+
+def gemini_bridge_request_signature_view_valid(
+    view: GeminiRequestContentStringView,
+) -> Bool:
+    return view.len <= UInt64(GEMINI_SIGNATURE_PRESERVATION_MAX_BYTES) and (
+        view.len == 0 or view.ptr != 0
+    )
+
+
+def gemini_bridge_request_signature_fragment_valid(
+    view: GeminiRequestContentStringView,
+) -> Bool:
+    if not gemini_bridge_request_signature_view_valid(view) or view.len == 0:
+        return False
+    var end = Int64(view.len)
+    var value_end = gemini_request_content_value_end(view, 0, end, 0)
+    return value_end >= 0 and gemini_request_content_skip_ws(view, value_end, end) == end
+
+
+def gemini_bridge_request_signature_value_bounds(
+    view: GeminiRequestContentStringView,
+) -> Array[Int64, 2]:
+    var result = Array[Int64, 2](fill=-1)
+    if not gemini_bridge_request_signature_fragment_valid(view):
+        return result^
+    var end = Int64(view.len)
+    var start = gemini_request_content_skip_ws(view, 0, end)
+    var value_end = gemini_request_content_value_end(view, start, end, 0)
+    if value_end < 0 or gemini_request_content_skip_ws(view, value_end, end) != end:
+        return result^
+    result[0] = start
+    result[1] = value_end
+    return result^
+
+
+def gemini_bridge_request_signature_candidate(
+    source: GeminiRequestContentStringView,
+    object_start: Int64,
+    object_end: Int64,
+    index: Int64,
+) -> Array[Int64, 2]:
+    var result = Array[Int64, 2](fill=-1)
+    var parent = Array[Int64, 2](fill=-1)
+    if index == 0:
+        parent = gemini_bridge_request_object_member(
+            source, object_start, object_end, StringSlice("extra_content")
+        )
+        if gemini_bridge_request_is_object(source, parent[0], parent[1]):
+            parent = gemini_bridge_request_object_member(
+                source, parent[0], parent[1], StringSlice("google")
+            )
+            if gemini_bridge_request_is_object(source, parent[0], parent[1]):
+                return gemini_bridge_request_object_member(
+                    source, parent[0], parent[1], StringSlice("thought_signature")
+                )
+        return result^
+    if index == 1:
+        return gemini_bridge_request_object_member(
+            source, object_start, object_end, StringSlice("gemini_thought_signature")
+        )
+    if index == 2:
+        return gemini_bridge_request_object_member(
+            source, object_start, object_end, StringSlice("thought_signature")
+        )
+    if index == 3:
+        return gemini_bridge_request_object_member(
+            source, object_start, object_end, StringSlice("thoughtSignature")
+        )
+    parent = gemini_bridge_request_object_member(
+        source, object_start, object_end, StringSlice("function")
+    )
+    if not gemini_bridge_request_is_object(source, parent[0], parent[1]):
+        return result^
+    if index == 4:
+        return gemini_bridge_request_object_member(
+            source, parent[0], parent[1], StringSlice("gemini_thought_signature")
+        )
+    if index == 5:
+        return gemini_bridge_request_object_member(
+            source, parent[0], parent[1], StringSlice("thought_signature")
+        )
+    return gemini_bridge_request_object_member(
+        source, parent[0], parent[1], StringSlice("thoughtSignature")
+    )
+
+
+def gemini_bridge_request_signature_choice(
+    source: GeminiRequestContentStringView,
+    object_start: Int64,
+    object_end: Int64,
+) -> Array[Int64, 2]:
+    var selected = Array[Int64, 2](fill=-1)
+    for index in range(Int64(7)):
+        var candidate = gemini_bridge_request_signature_candidate(
+            source, object_start, object_end, index
+        )
+        # Presence is a barrier: a present null, non-string, or blank value
+        # suppresses lower-precedence aliases instead of falling through.
+        if candidate[0] >= 0:
+            if gemini_request_content_byte(source, candidate[0]) == 34 and gemini_request_content_string_has_non_space(
+                source, candidate[0], candidate[1]
+            ):
+                selected = candidate.copy()
+            return selected^
+    return selected^
+
+
+def gemini_bridge_request_write_signature_extra(
+    source: GeminiRequestContentStringView,
+    signature: Array[Int64, 2],
+    writer: Pointer[mut=True, GeminiRequestContentWriter, _],
+) -> Bool:
+    return (
+        gemini_request_content_put_literal(
+            writer, StringSlice('{"google":{"thought_signature":')
+        )
+        and gemini_request_content_put_range(writer, source, signature[0], signature[1])
+        and gemini_request_content_put_literal(writer, StringSlice("}}"))
+    )
+
+
+def gemini_bridge_request_write_signature_tool_call(
+    source: GeminiRequestContentStringView,
+    object_start: Int64,
+    object_end: Int64,
+    signature: Array[Int64, 2],
+    writer: Pointer[mut=True, GeminiRequestContentWriter, _],
+) -> Bool:
+    if not gemini_bridge_request_is_object(source, object_start, object_end):
+        return False
+    if not gemini_request_content_put_byte(writer, 123):
+        return False
+    var first = True
+    var found_extra_content = False
+    var index = gemini_request_content_skip_ws(source, object_start + 1, object_end - 1)
+    while index < object_end - 1 and gemini_request_content_byte(source, index) != 125:
+        var key_start = index
+        var key_end = gemini_request_content_string_end(source, key_start, object_end - 1)
+        if key_end < 0:
+            return False
+        index = gemini_request_content_skip_ws(source, key_end, object_end - 1)
+        if index >= object_end - 1 or gemini_request_content_byte(source, index) != 58:
+            return False
+        var value_start = gemini_request_content_skip_ws(source, index + 1, object_end - 1)
+        var value_end = gemini_request_content_value_end(source, value_start, object_end - 1, 0)
+        if value_end < 0:
+            return False
+        var legacy = gemini_request_content_raw_equals(source, key_start, key_end, StringSlice("gemini_thought_signature")) or gemini_request_content_raw_equals(source, key_start, key_end, StringSlice("thought_signature")) or gemini_request_content_raw_equals(source, key_start, key_end, StringSlice("thoughtSignature"))
+        if not legacy:
+            if not first and not gemini_request_content_put_byte(writer, 44):
+                return False
+            first = False
+            if not gemini_request_content_put_range(writer, source, key_start, key_end):
+                return False
+            if not gemini_request_content_put_byte(writer, 58):
+                return False
+            if gemini_request_content_raw_equals(source, key_start, key_end, StringSlice("extra_content")):
+                if not gemini_bridge_request_write_signature_extra(source, signature, writer):
+                    return False
+                found_extra_content = True
+            elif not gemini_request_content_put_range(writer, source, value_start, value_end):
+                return False
+        index = gemini_request_content_skip_ws(source, value_end, object_end - 1)
+        if index < object_end - 1 and gemini_request_content_byte(source, index) == 44:
+            index = gemini_request_content_skip_ws(source, index + 1, object_end - 1)
+        elif index != object_end - 1:
+            return False
+    if not found_extra_content:
+        if not first and not gemini_request_content_put_byte(writer, 44):
+            return False
+        first = False
+        if not gemini_request_content_put_literal(writer, StringSlice("\"extra_content\":")):
+            return False
+        if not gemini_bridge_request_write_signature_extra(source, signature, writer):
+            return False
+    return gemini_request_content_put_byte(writer, 125)
+
+
+def gemini_bridge_request_write_signature_tool_call(
+    source: GeminiRequestContentStringView,
+    object_start: Int64,
+    object_end: Int64,
+    writer: Pointer[mut=True, GeminiRequestContentWriter, _],
+) -> Bool:
+    var signature = gemini_bridge_request_signature_choice(source, object_start, object_end)
+    if signature[0] < 0:
+        return gemini_request_content_put_range(writer, source, object_start, object_end)
+    return gemini_bridge_request_write_signature_tool_call(
+        source, object_start, object_end, signature, writer
+    )
+
+
+def gemini_bridge_request_object_has_signature(
+    source: GeminiRequestContentStringView,
+    object_start: Int64,
+    object_end: Int64,
+) -> Bool:
+    if not gemini_bridge_request_is_object(source, object_start, object_end):
+        return False
+    return gemini_bridge_request_signature_choice(source, object_start, object_end)[0] >= 0
+
+
+def gemini_bridge_request_message_has_signature(
+    source: GeminiRequestContentStringView,
+    message_start: Int64,
+    message_end: Int64,
+) -> Bool:
+    if not gemini_bridge_request_is_object(source, message_start, message_end):
+        return False
+    var calls = gemini_bridge_request_object_member(
+        source, message_start, message_end, StringSlice("tool_calls")
+    )
+    if not gemini_bridge_request_is_array(source, calls[0], calls[1]):
+        return False
+    var index = gemini_request_content_skip_ws(source, calls[0] + 1, calls[1] - 1)
+    while index < calls[1] - 1 and gemini_request_content_byte(source, index) != 93:
+        var value_end = gemini_request_content_value_end(source, index, calls[1] - 1, 0)
+        if value_end < 0:
+            return False
+        if gemini_bridge_request_object_has_signature(source, index, value_end):
+            return True
+        index = gemini_request_content_skip_ws(source, value_end, calls[1] - 1)
+        if index < calls[1] - 1 and gemini_request_content_byte(source, index) == 44:
+            index = gemini_request_content_skip_ws(source, index + 1, calls[1] - 1)
+        elif index != calls[1] - 1:
+            return False
+    return False
+
+
+def gemini_bridge_request_write_signature_tool_calls(
+    source: GeminiRequestContentStringView,
+    calls_start: Int64,
+    calls_end: Int64,
+    writer: Pointer[mut=True, GeminiRequestContentWriter, _],
+) -> Bool:
+    if not gemini_bridge_request_is_array(source, calls_start, calls_end):
+        return False
+    if not gemini_request_content_put_byte(writer, 91):
+        return False
+    var first = True
+    var index = gemini_request_content_skip_ws(source, calls_start + 1, calls_end - 1)
+    while index < calls_end - 1 and gemini_request_content_byte(source, index) != 93:
+        var value_end = gemini_request_content_value_end(source, index, calls_end - 1, 0)
+        if value_end < 0:
+            return False
+        if not first and not gemini_request_content_put_byte(writer, 44):
+            return False
+        first = False
+        if gemini_bridge_request_object_has_signature(source, index, value_end):
+            if not gemini_bridge_request_write_signature_tool_call(source, index, value_end, writer):
+                return False
+        elif not gemini_request_content_put_range(writer, source, index, value_end):
+            return False
+        index = gemini_request_content_skip_ws(source, value_end, calls_end - 1)
+        if index < calls_end - 1 and gemini_request_content_byte(source, index) == 44:
+            index = gemini_request_content_skip_ws(source, index + 1, calls_end - 1)
+        elif index != calls_end - 1:
+            return False
+    return gemini_request_content_put_byte(writer, 93)
+
+
+def gemini_bridge_request_write_signature_message(
+    source: GeminiRequestContentStringView,
+    message_start: Int64,
+    message_end: Int64,
+    writer: Pointer[mut=True, GeminiRequestContentWriter, _],
+) -> Bool:
+    if not gemini_bridge_request_is_object(source, message_start, message_end):
+        return False
+    var calls = gemini_bridge_request_object_member(
+        source, message_start, message_end, StringSlice("tool_calls")
+    )
+    if not gemini_bridge_request_is_array(source, calls[0], calls[1]):
+        return gemini_request_content_put_range(writer, source, message_start, message_end)
+    if not gemini_request_content_put_byte(writer, 123):
+        return False
+    var first = True
+    var index = gemini_request_content_skip_ws(source, message_start + 1, message_end - 1)
+    while index < message_end - 1 and gemini_request_content_byte(source, index) != 125:
+        var key_start = index
+        var key_end = gemini_request_content_string_end(source, key_start, message_end - 1)
+        if key_end < 0:
+            return False
+        index = gemini_request_content_skip_ws(source, key_end, message_end - 1)
+        if index >= message_end - 1 or gemini_request_content_byte(source, index) != 58:
+            return False
+        var value_start = gemini_request_content_skip_ws(source, index + 1, message_end - 1)
+        var value_end = gemini_request_content_value_end(source, value_start, message_end - 1, 0)
+        if value_end < 0:
+            return False
+        if not first and not gemini_request_content_put_byte(writer, 44):
+            return False
+        first = False
+        if not gemini_request_content_put_range(writer, source, key_start, key_end) or not gemini_request_content_put_byte(writer, 58):
+            return False
+        if gemini_request_content_raw_equals(source, key_start, key_end, StringSlice("tool_calls")):
+            if not gemini_bridge_request_write_signature_tool_calls(source, value_start, value_end, writer):
+                return False
+        elif not gemini_request_content_put_range(writer, source, value_start, value_end):
+            return False
+        index = gemini_request_content_skip_ws(source, value_end, message_end - 1)
+        if index < message_end - 1 and gemini_request_content_byte(source, index) == 44:
+            index = gemini_request_content_skip_ws(source, index + 1, message_end - 1)
+        elif index != message_end - 1:
+            return False
+    return gemini_request_content_put_byte(writer, 125)
+
+
+def gemini_bridge_request_write_signature_preservation(
+    input: GeminiBridgeRequestInput,
+    writer: Pointer[mut=True, GeminiRequestContentWriter, _],
+) -> Bool:
+    if not gemini_bridge_request_signature_fragment_valid(input.primary):
+        return False
+    var bounds = gemini_bridge_request_signature_value_bounds(input.primary)
+    if not gemini_bridge_request_is_array(input.primary, bounds[0], bounds[1]):
+        return False
+    if not gemini_request_content_put_byte(writer, 91):
+        return False
+    var first = True
+    var index = gemini_request_content_skip_ws(input.primary, bounds[0] + 1, bounds[1] - 1)
+    while index < bounds[1] - 1 and gemini_request_content_byte(input.primary, index) != 93:
+        var value_end = gemini_request_content_value_end(input.primary, index, bounds[1] - 1, 0)
+        if value_end < 0:
+            return False
+        if not first and not gemini_request_content_put_byte(writer, 44):
+            return False
+        first = False
+        if gemini_bridge_request_message_has_signature(input.primary, index, value_end):
+            if not gemini_bridge_request_write_signature_message(input.primary, index, value_end, writer):
+                return False
+        elif not gemini_request_content_put_range(writer, input.primary, index, value_end):
+            return False
+        index = gemini_request_content_skip_ws(input.primary, value_end, bounds[1] - 1)
+        if index < bounds[1] - 1 and gemini_request_content_byte(input.primary, index) == 44:
+            index = gemini_request_content_skip_ws(input.primary, index + 1, bounds[1] - 1)
+        elif index != bounds[1] - 1:
+            return False
+    return gemini_request_content_put_byte(writer, 93)
 
 
 def gemini_bridge_request_string_starts_with(
@@ -7611,6 +7962,8 @@ def prodex_gemini_bridge_request_kernel_v1(
         ok = gemini_bridge_request_validate_translator(input, writer_ptr)
     elif input.operation == GEMINI_BRIDGE_REQUEST_RAW_TRANSLATOR:
         ok = gemini_bridge_request_write_raw_translator(input, writer_ptr)
+    elif input.operation == GEMINI_BRIDGE_REQUEST_PRESERVE_TOOL_CALL_SIGNATURES:
+        ok = gemini_bridge_request_write_signature_preservation(input, writer_ptr)
     if not ok:
         written[] = writer.written
         if writer.written >= output_capacity:
