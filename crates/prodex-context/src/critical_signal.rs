@@ -13,13 +13,8 @@ pub struct CriticalSignalCounts {
 
 impl CriticalSignalCounts {
     pub fn total(self) -> usize {
-        self.errors
-            + self.file_locations
-            + self.diff_hunks
-            + self.test_failures
-            + self.exit_codes
-            + self.stack_markers
-            + self.rust_diagnostics
+        prodex_mojo_core::context::signal_total(&self.values())
+            .expect("Mojo critical-signal total returned invalid output")
     }
 
     pub fn is_empty(self) -> bool {
@@ -297,5 +292,21 @@ mod tests {
     fn unchanged_text_passes() {
         let text = "error: stable\nsrc/lib.rs:2:1\n";
         assert!(critical_signal_self_check(text, text).passed());
+    }
+
+    #[test]
+    fn mojo_total_covers_every_signal_category_and_empty_input() {
+        let counts = CriticalSignalCounts {
+            errors: 2,
+            file_locations: 3,
+            diff_hunks: 5,
+            test_failures: 7,
+            exit_codes: 11,
+            stack_markers: 13,
+            rust_diagnostics: 17,
+        };
+        assert_eq!(counts.total(), 58);
+        assert!(!counts.is_empty());
+        assert!(CriticalSignalCounts::default().is_empty());
     }
 }

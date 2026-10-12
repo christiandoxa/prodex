@@ -458,6 +458,20 @@ def prodex_context_signal_diff(
     return 0
 
 
+@export("prodex_context_signal_total_v1")
+def prodex_context_signal_total_v1(
+    values: Pointer[mut=False, Int64, _], output: Pointer[mut=True, Int64, _]
+) abi("C") -> Int64:
+    var total: Int64 = 0
+    for index in range(CONTEXT_SIGNAL_COUNTER_COUNT):
+        var value = values[unsafe_offset=index]
+        if value < 0 or value > 9223372036854775807 - total:
+            return 1
+        total += value
+    output[] = total
+    return 0
+
+
 @export("prodex_context_prepare_signal_rows_v1")
 def prodex_context_prepare_signal_rows_v1(
     abi_version: Int64,

@@ -72,6 +72,7 @@ unsafe extern "C" {
         lost: *mut i64,
         gained: *mut i64,
     ) -> i64;
+    fn prodex_context_signal_total_v1(values: *const i64, output: *mut i64) -> i64;
     fn prodex_context_lost_line_ranges_batch(
         before_rows: *const i64,
         after_available: *mut i64,
@@ -349,6 +350,18 @@ pub fn signal_diff(
     Ok((lost, gained))
 }
 
+pub fn signal_total(
+    values: &[usize; CRITICAL_SIGNAL_COUNTER_COUNT],
+) -> Result<usize, crate::MojoError> {
+    let values = counters_to_i64(values)?;
+    let mut output = 0_i64;
+    let status = unsafe { prodex_context_signal_total_v1(values.as_ptr(), &mut output) };
+    if status != 0 {
+        return Err(crate::MojoError::InvalidInput);
+    }
+    usize::try_from(output).map_err(|_| crate::MojoError::InvalidOutput)
+}
+
 pub fn lost_line_ranges_batch(
     before_rows: &[i64],
     after_available: &mut [i64],
@@ -465,6 +478,21 @@ pub fn self_test() -> bool {
 #[test]
 fn signal_diff_self_test_passes() {
     assert!(self_test());
+}
+
+#[cfg(all(test, feature = "mojo-runtime"))]
+#[test]
+fn signal_total_is_owned_by_required_mojo_abi() {
+    assert_eq!(signal_total(&[0; CRITICAL_SIGNAL_COUNTER_COUNT]), Ok(0));
+    assert_eq!(signal_total(&[2, 3, 5, 7, 11, 13, 17]), Ok(58));
+    assert_eq!(
+        signal_total(&[i64::MAX as usize, 0, 0, 0, 0, 0, 0]),
+        Ok(i64::MAX as usize)
+    );
+    assert_eq!(
+        signal_total(&[i64::MAX as usize, 1, 0, 0, 0, 0, 0]),
+        Err(crate::MojoError::InvalidInput)
+    );
 }
 
 #[cfg(all(test, feature = "mojo-runtime"))]
