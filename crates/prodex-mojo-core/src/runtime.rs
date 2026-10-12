@@ -13,6 +13,7 @@ mod continuation_status;
 mod noncompact_loop;
 mod profile_health;
 mod profile_rotation;
+mod profile_route_circuit;
 mod prompt_cache_affinity;
 mod quota_decisions;
 mod quota_route_score;
@@ -70,6 +71,10 @@ pub use profile_health::{
     profile_transport_backoff_until,
 };
 pub use profile_rotation::profile_selection_order_batch;
+pub use profile_route_circuit::{
+    RuntimeProfileRouteCircuitAction, RuntimeProfileRouteCircuitActionInput,
+    runtime_profile_route_circuit_action,
+};
 pub use prompt_cache_affinity::prompt_cache_affinity_batch;
 pub use quota_decisions::{
     CompactRetryAction, CompactRetryDecision, CompactRetryDecisionInput, CompactRetryReason,

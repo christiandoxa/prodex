@@ -96,30 +96,47 @@ pub(crate) fn reserve_runtime_profile_route_circuit_half_open_probe(
     let now = Local::now().timestamp();
     let key = runtime_profile_route_circuit_key(profile_name, route_kind);
     let route_label = runtime_route_kind_label(route_kind);
-    let Some(until) = runtime.profile_route_circuit_open_until.get(&key).copied() else {
-        return Ok(true);
+    let circuit_until = runtime.profile_route_circuit_open_until.get(&key).copied();
+    let circuit_present = circuit_until.is_some();
+    let circuit_open = circuit_until.is_some_and(|until| until > now);
+    let health_score = if circuit_present && !circuit_open {
+        let health_key = runtime_profile_route_circuit_health_key(&key);
+        runtime_profile_effective_health_score_from_map(&runtime.profile_health, &health_key, now)
+    } else {
+        0
     };
-    if until > now {
-        return Ok(false);
-    }
-    let health_key = runtime_profile_route_circuit_health_key(&key);
-    let reopen_key = runtime_profile_route_circuit_reopen_key(profile_name, route_kind);
-    let health_score =
-        runtime_profile_effective_health_score_from_map(&runtime.profile_health, &health_key, now);
-    if health_score == 0 {
-        runtime.profile_route_circuit_open_until.remove(&key);
-        mark_runtime_profile_route_circuit_update(&mut runtime, &key);
-        prodex_runtime_store::clear_runtime_profile_score(
-            &mut runtime.profile_health,
-            &reopen_key,
-            now,
-        );
-        schedule_runtime_state_save_from_runtime(
-            shared,
-            &runtime,
-            RuntimeStateMutation::ProfileCircuitClear(format!("{profile_name}:{route_label}")),
-        );
-        return Ok(true);
+    let action = prodex_mojo_core::runtime::runtime_profile_route_circuit_action(
+        prodex_mojo_core::runtime::RuntimeProfileRouteCircuitActionInput {
+            circuit_present,
+            circuit_open,
+            health_score_zero: health_score == 0,
+        },
+    )
+    .map_err(|error| anyhow::anyhow!("Mojo route-circuit action planning failed: {error:?}"))?;
+    match action {
+        prodex_mojo_core::runtime::RuntimeProfileRouteCircuitAction::AllowNoCircuit => {
+            return Ok(true);
+        }
+        prodex_mojo_core::runtime::RuntimeProfileRouteCircuitAction::RejectOpen => {
+            return Ok(false);
+        }
+        prodex_mojo_core::runtime::RuntimeProfileRouteCircuitAction::ClearAndAllow => {
+            let reopen_key = runtime_profile_route_circuit_reopen_key(profile_name, route_kind);
+            runtime.profile_route_circuit_open_until.remove(&key);
+            mark_runtime_profile_route_circuit_update(&mut runtime, &key);
+            prodex_runtime_store::clear_runtime_profile_score(
+                &mut runtime.profile_health,
+                &reopen_key,
+                now,
+            );
+            schedule_runtime_state_save_from_runtime(
+                shared,
+                &runtime,
+                RuntimeStateMutation::ProfileCircuitClear(format!("{profile_name}:{route_label}")),
+            );
+            return Ok(true);
+        }
+        prodex_mojo_core::runtime::RuntimeProfileRouteCircuitAction::ReserveAndAllow => {}
     }
 
     let probe_seconds = runtime_profile_circuit_half_open_probe_seconds(health_score);

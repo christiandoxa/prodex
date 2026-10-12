@@ -326,6 +326,81 @@ fn runtime_route_circuit_probe_uses_mojo_half_open_policy() {
 }
 
 #[test]
+fn runtime_route_circuit_reservation_uses_mojo_action_plan() {
+    let temp_dir = TestDir::isolated();
+    let shared = RuntimeProxyFixtureBuilder::new().build_shared(&temp_dir);
+    let route_kind = RuntimeRouteKind::Responses;
+    let key = runtime_profile_route_circuit_key("main", route_kind);
+    let health_key = runtime_profile_route_circuit_health_key(&key);
+    let now = Local::now().timestamp();
+
+    assert!(reserve_runtime_profile_route_circuit_half_open_probe(
+        &shared, "main", route_kind
+    )
+    .expect("missing circuit should allow"));
+
+    shared
+        .runtime
+        .lock()
+        .expect("runtime lock should succeed")
+        .profile_route_circuit_open_until
+        .insert(key.clone(), now.saturating_add(60));
+    assert!(!reserve_runtime_profile_route_circuit_half_open_probe(
+        &shared, "main", route_kind
+    )
+    .expect("open circuit should reject"));
+
+    {
+        let mut runtime = shared.runtime.lock().expect("runtime lock should succeed");
+        runtime
+            .profile_route_circuit_open_until
+            .insert(key.clone(), now.saturating_sub(1));
+        runtime.profile_health.insert(
+            health_key.clone(),
+            RuntimeProfileHealth {
+                score: 0,
+                updated_at: now,
+            },
+        );
+    }
+    assert!(reserve_runtime_profile_route_circuit_half_open_probe(
+        &shared, "main", route_kind
+    )
+    .expect("expired healthy circuit should clear and allow"));
+    assert!(!shared
+        .runtime
+        .lock()
+        .expect("runtime lock should succeed")
+        .profile_route_circuit_open_until
+        .contains_key(&key));
+
+    {
+        let mut runtime = shared.runtime.lock().expect("runtime lock should succeed");
+        runtime
+            .profile_route_circuit_open_until
+            .insert(key.clone(), now.saturating_sub(1));
+        runtime.profile_health.insert(
+            health_key,
+            RuntimeProfileHealth {
+                score: 1,
+                updated_at: now,
+            },
+        );
+    }
+    assert!(reserve_runtime_profile_route_circuit_half_open_probe(
+        &shared, "main", route_kind
+    )
+    .expect("expired unhealthy circuit should reserve and allow"));
+    assert!(shared
+        .runtime
+        .lock()
+        .expect("runtime lock should succeed")
+        .profile_route_circuit_open_until
+        .get(&key)
+        .is_some_and(|until| *until > now));
+}
+
+#[test]
 fn runtime_softened_backoffs_persist_after_proxy_startup() {
     let backend = RuntimeProxyBackend::start();
     let temp_dir = TestDir::isolated();
