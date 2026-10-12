@@ -259,7 +259,7 @@ jobs:
       - name: Install Rust target
         uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
         with:
-          toolchain: 1.98.1
+          toolchain: 1.99.0
           targets: ${{ matrix.target }}
 
       - name: Install pinned uv
@@ -455,7 +455,7 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
         with:
-          toolchain: 1.98.1
+          toolchain: 1.99.0
           targets: ${{ matrix.target }}
 
       - name: Cache Rust dependencies

@@ -1,4 +1,4 @@
-# rust:1.98.1-bookworm; Dependabot updates the tag and digest together.
+# rust:1.99.0-bookworm; Dependabot updates the tag and digest together.
 FROM rust:1.99.0-bookworm@sha256:114c7a4425406451c2866b6aafe69fe29b1b298832db1277d411ac73c82d04d6 AS builder
 
 WORKDIR /workspace
