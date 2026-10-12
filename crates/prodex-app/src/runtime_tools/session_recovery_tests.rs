@@ -255,3 +255,63 @@ fn native_ambiguous_delivery_and_rejection_never_duplicate_the_mutation() {
         assert_eq!(mutations(&calls).len(), 1);
     }
 }
+
+#[test]
+fn native_terminal_system_error_recovers_same_thread_without_frontend_relaunch() {
+    let (outcome, calls, released) = mock_recovery(Scenario {
+        status: "systemError",
+        ..Scenario::default()
+    });
+    assert_eq!(outcome, NativeRecoveryOutcome::Accepted);
+    assert!(released);
+    let writes = mutations(&calls);
+    assert_eq!(writes.len(), 1);
+    assert_eq!(writes[0]["method"], "thread/goal/set");
+    assert_eq!(
+        writes[0]["params"],
+        json!({
+            "threadId":THREAD, "status":"active", "origin":"automatic"
+        })
+    );
+    assert!(!calls.iter().any(|call| call["method"] == "thread/resume"));
+}
+
+#[test]
+fn native_system_error_does_not_override_user_stops_or_budget() {
+    for goal in [
+        Some("paused"),
+        Some("budgetLimited"),
+        Some("complete"),
+        None,
+    ] {
+        let (outcome, calls, released) = mock_recovery(Scenario {
+            status: "systemError",
+            goal,
+            ..Scenario::default()
+        });
+        assert_eq!(outcome, NativeRecoveryOutcome::Stopped, "{goal:?}");
+        assert!(!released);
+        assert!(mutations(&calls).is_empty());
+    }
+    let (outcome, calls, released) = mock_recovery(Scenario {
+        status: "systemError",
+        exhausted_budget: true,
+        ..Scenario::default()
+    });
+    assert_eq!(outcome, NativeRecoveryOutcome::Stopped);
+    assert!(!released);
+    assert!(mutations(&calls).is_empty());
+}
+
+#[test]
+fn native_unloaded_and_unknown_thread_states_do_not_start_recovery() {
+    for status in ["active", "notLoaded", "unknown", "futureStatus"] {
+        let (outcome, calls, released) = mock_recovery(Scenario {
+            status,
+            ..Scenario::default()
+        });
+        assert_eq!(outcome, NativeRecoveryOutcome::Deferred, "{status}");
+        assert!(!released);
+        assert!(mutations(&calls).is_empty());
+    }
+}

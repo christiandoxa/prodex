@@ -1,7 +1,9 @@
 //! Recover an idle native thread through its owned app-server, without ending
 //! the frontend, reloading an overlay, or replaying terminal keyboard input.
 use anyhow::Result;
-use prodex_mojo_core::launch::{InPlaceRecoveryAction, NativeGoalStatus, in_place_recovery_action};
+use prodex_mojo_core::launch::{
+    InPlaceRecoveryAction, NativeGoalStatus, NativeThreadStatus, in_place_recovery_action,
+};
 use serde_json::{Value, json};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
@@ -114,53 +116,13 @@ fn native_goal_status(goal: Option<&Value>) -> NativeGoalStatus {
     }
 }
 
-fn recover_on_socket(
-    socket: &mut UnixAppServerSocket,
-    codex_home: &Path,
+/// Project the native wire status after verifying that this is our loaded,
+/// persistent workspace thread. Mojo owns quiescent-state recovery eligibility.
+fn verified_native_thread_status(
+    thread: &Value,
     workspace: &Path,
     session_id: &str,
-    expected_goal: bool,
-    release_affinity: impl FnOnce() -> Result<()>,
-) -> NativeRecoveryOutcome {
-    let Some(initialized) = accepted(request_result(
-        socket,
-        1,
-        "initialize",
-        json!({
-            "clientInfo": {"name":"prodex-native-recovery", "version":env!("CARGO_PKG_VERSION")},
-            "capabilities":{"experimentalApi":true}
-        }),
-    )) else {
-        return NativeRecoveryOutcome::Deferred;
-    };
-    if !initialized
-        .get("codexHome")
-        .and_then(Value::as_str)
-        .is_some_and(|home| prodex_core::same_path(Path::new(home), codex_home))
-    {
-        return NativeRecoveryOutcome::Stopped;
-    }
-    if socket
-        .send(Message::Text(
-            json!({"method":"initialized"}).to_string().into(),
-        ))
-        .is_err()
-    {
-        return NativeRecoveryOutcome::Deferred;
-    }
-    let Some(read) = accepted(request_result(
-        socket,
-        2,
-        "thread/read",
-        json!({
-            "threadId":session_id, "includeTurns":false
-        }),
-    )) else {
-        return NativeRecoveryOutcome::Deferred;
-    };
-    let Some(thread) = read.get("thread") else {
-        return NativeRecoveryOutcome::Deferred;
-    };
+) -> Result<NativeThreadStatus, NativeRecoveryOutcome> {
     let identity = thread.get("id").and_then(Value::as_str) == Some(session_id)
         && thread.get("sessionId").and_then(Value::as_str) == Some(session_id)
         && thread.get("ephemeral").and_then(Value::as_bool) == Some(false)
@@ -170,49 +132,130 @@ fn recover_on_socket(
             .and_then(Value::as_str)
             .is_some_and(|cwd| prodex_core::same_path(Path::new(cwd), workspace));
     if !identity {
-        return NativeRecoveryOutcome::Stopped;
+        return Err(NativeRecoveryOutcome::Stopped);
     }
-    let idle = thread
-        .get("status")
-        .and_then(|status| status.get("type"))
-        .and_then(Value::as_str)
-        == Some("idle");
-    if !idle {
-        return NativeRecoveryOutcome::Deferred;
-    }
-    let Some(goals) = accepted(request_result(
-        socket,
-        3,
-        "thread/goal/get",
-        json!({"threadId":session_id}),
-    )) else {
-        return NativeRecoveryOutcome::Deferred;
-    };
-    // A missing or malformed envelope is not proof that a prior goal was removed.
-    let Some(goal_field) = goals.get("goal") else {
-        return NativeRecoveryOutcome::Deferred;
-    };
-    let goal = (!goal_field.is_null()).then_some(goal_field);
-    if goal.is_some_and(|goal| goal.get("threadId").and_then(Value::as_str) != Some(session_id)) {
-        return NativeRecoveryOutcome::Stopped;
-    }
-    let budget_available = goal.is_none_or(|goal| match goal.get("tokenBudget") {
+    Ok(
+        match thread
+            .get("status")
+            .and_then(|status| status.get("type"))
+            .and_then(Value::as_str)
+        {
+            Some("idle") => NativeThreadStatus::Idle,
+            Some("systemError") => NativeThreadStatus::SystemError,
+            Some("active") => NativeThreadStatus::Active,
+            Some("notLoaded") => NativeThreadStatus::NotLoaded,
+            _ => NativeThreadStatus::Unknown,
+        },
+    )
+}
+
+fn native_goal_budget_available(goal: Option<&Value>) -> bool {
+    goal.is_none_or(|goal| match goal.get("tokenBudget") {
         None | Some(Value::Null) => true,
         Some(budget) => budget
             .as_i64()
             .zip(goal.get("tokensUsed").and_then(Value::as_i64))
             .is_some_and(|(limit, used)| limit > 0 && used >= 0 && used < limit),
-    });
-    let action = match in_place_recovery_action(
+    })
+}
+
+fn read_native_recovery_plan(
+    socket: &mut UnixAppServerSocket,
+    codex_home: &Path,
+    workspace: &Path,
+    session_id: &str,
+    expected_goal: bool,
+) -> Result<InPlaceRecoveryAction, NativeRecoveryOutcome> {
+    let initialized = accepted(request_result(
+        socket,
+        1,
+        "initialize",
+        json!({
+            "clientInfo":{"name":"prodex-native-recovery", "version":env!("CARGO_PKG_VERSION")},
+            "capabilities":{"experimentalApi":true}
+        }),
+    ))
+    .ok_or(NativeRecoveryOutcome::Deferred)?;
+    if !initialized
+        .get("codexHome")
+        .and_then(Value::as_str)
+        .is_some_and(|home| prodex_core::same_path(Path::new(home), codex_home))
+    {
+        return Err(NativeRecoveryOutcome::Stopped);
+    }
+    socket
+        .send(Message::Text(
+            json!({"method":"initialized"}).to_string().into(),
+        ))
+        .map_err(|_| NativeRecoveryOutcome::Deferred)?;
+    let read = accepted(request_result(
+        socket,
+        2,
+        "thread/read",
+        json!({
+            "threadId":session_id, "includeTurns":false
+        }),
+    ))
+    .ok_or(NativeRecoveryOutcome::Deferred)?;
+    let thread = read.get("thread").ok_or(NativeRecoveryOutcome::Deferred)?;
+    let thread_status = verified_native_thread_status(thread, workspace, session_id)?;
+    let goals = accepted(request_result(
+        socket,
+        3,
+        "thread/goal/get",
+        json!({
+            "threadId":session_id
+        }),
+    ))
+    .ok_or(NativeRecoveryOutcome::Deferred)?;
+    // Missing/malformed envelopes are not evidence that a saved goal was removed.
+    let goal_field = goals.get("goal").ok_or(NativeRecoveryOutcome::Deferred)?;
+    let goal = (!goal_field.is_null()).then_some(goal_field);
+    if goal.is_some_and(|goal| goal.get("threadId").and_then(Value::as_str) != Some(session_id)) {
+        return Err(NativeRecoveryOutcome::Stopped);
+    }
+    in_place_recovery_action(
         true,
-        idle,
+        thread_status,
         expected_goal,
         native_goal_status(goal),
-        budget_available,
-    ) {
-        Ok(action) => action,
-        Err(_) => return NativeRecoveryOutcome::Stopped,
-    };
+        native_goal_budget_available(goal),
+    )
+    .map_err(|_| NativeRecoveryOutcome::Stopped)
+}
+
+fn native_mutation_confirmed(
+    action: InPlaceRecoveryAction,
+    result: &Value,
+    session_id: &str,
+) -> bool {
+    match action {
+        InPlaceRecoveryAction::ResumeGoal => result.get("goal").is_some_and(|goal| {
+            goal.get("threadId").and_then(Value::as_str) == Some(session_id)
+                && goal.get("status").and_then(Value::as_str) == Some("active")
+        }),
+        InPlaceRecoveryAction::ContinueTurn => result.get("turn").is_some_and(|turn| {
+            turn.get("id")
+                .and_then(Value::as_str)
+                .is_some_and(|id| !id.is_empty())
+        }),
+        _ => false,
+    }
+}
+
+fn recover_on_socket(
+    socket: &mut UnixAppServerSocket,
+    codex_home: &Path,
+    workspace: &Path,
+    session_id: &str,
+    expected_goal: bool,
+    release_affinity: impl FnOnce() -> Result<()>,
+) -> NativeRecoveryOutcome {
+    let action =
+        match read_native_recovery_plan(socket, codex_home, workspace, session_id, expected_goal) {
+            Ok(action) => action,
+            Err(outcome) => return outcome,
+        };
     let (method, params) = match action {
         InPlaceRecoveryAction::Defer => return NativeRecoveryOutcome::Deferred,
         InPlaceRecoveryAction::Stop => return NativeRecoveryOutcome::Stopped,
@@ -235,26 +278,13 @@ fn recover_on_socket(
     }
     match request_result(socket, 4, method, params) {
         AppServerRequestOutcome::Accepted(result) => {
-            let confirmed = match action {
-                InPlaceRecoveryAction::ResumeGoal => result.get("goal").is_some_and(|goal| {
-                    goal.get("threadId").and_then(Value::as_str) == Some(session_id)
-                        && goal.get("status").and_then(Value::as_str) == Some("active")
-                }),
-                InPlaceRecoveryAction::ContinueTurn => result.get("turn").is_some_and(|turn| {
-                    turn.get("id")
-                        .and_then(Value::as_str)
-                        .is_some_and(|id| !id.is_empty())
-                }),
-                _ => false,
-            };
-            if confirmed {
+            if native_mutation_confirmed(action, &result, session_id) {
                 NativeRecoveryOutcome::Accepted
             } else {
                 NativeRecoveryOutcome::Ambiguous
             }
         }
-        // A rejected native mutation stays rejected; do not bypass its guard
-        // with a synthetic resume prompt or a replacement process.
+        // Preserve native rejection and never duplicate a possibly accepted RPC.
         AppServerRequestOutcome::Rejected => NativeRecoveryOutcome::Stopped,
         AppServerRequestOutcome::Ambiguous => NativeRecoveryOutcome::Ambiguous,
     }

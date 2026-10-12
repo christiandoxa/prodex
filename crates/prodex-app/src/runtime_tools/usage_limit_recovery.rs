@@ -39,21 +39,8 @@ impl RuntimeToolLaunchStrategy {
             return Ok(false);
         };
         #[cfg(unix)]
-        if let Some(recovery) = self.native_session_recovery.as_mut() {
-            use super::session_recovery::NativeRecoveryOutcome;
-            let outcome = recovery.recover(&session_id, resume_goal);
-            if outcome != NativeRecoveryOutcome::Deferred {
-                if let Some(monitor) = self.goal_usage_limit_monitor.as_mut() {
-                    monitor.acknowledge_in_place_recovery();
-                }
-                if let Some(target) = self.runtime_recovery_log_target.as_ref() {
-                    target.log(&format!(
-                        "runtime_session_recovery mode=in_place outcome={outcome:?} failure_class={failure_class} frontend_restarted=false last_prompt_requeued=false"
-                    ));
-                }
-            }
-            // The owned server handles native thread recovery. Never tear down
-            // its healthy frontend while an RPC or Codex retry may be active.
+        if self.observe_native_session_recovery(&session_id, resume_goal, failure_class) {
+            // A healthy owned frontend remains attached during native recovery.
             return Ok(false);
         }
         let state = AppState::load_and_repair(&paths)?;
@@ -97,6 +84,31 @@ impl RuntimeToolLaunchStrategy {
         plan.evidence = evidence;
         self.pending_goal_resume_plan = Some(plan);
         Ok(true)
+    }
+
+    #[cfg(unix)]
+    fn observe_native_session_recovery(
+        &mut self,
+        session_id: &str,
+        resume_goal: bool,
+        failure_class: &str,
+    ) -> bool {
+        use super::session_recovery::NativeRecoveryOutcome;
+        let Some(recovery) = self.native_session_recovery.as_mut() else {
+            return false;
+        };
+        let outcome = recovery.recover(session_id, resume_goal);
+        if outcome != NativeRecoveryOutcome::Deferred {
+            if let Some(monitor) = self.goal_usage_limit_monitor.as_mut() {
+                monitor.acknowledge_in_place_recovery();
+            }
+            if let Some(target) = self.runtime_recovery_log_target.as_ref() {
+                target.log(&format!(
+                    "runtime_session_recovery mode=in_place outcome={outcome:?} failure_class={failure_class} frontend_restarted=false last_prompt_requeued=false"
+                ));
+            }
+        }
+        true
     }
 
     fn apply_goal_resume_relaunch(&mut self, plan: GoalResumeRelaunchPlan) -> Result<()> {

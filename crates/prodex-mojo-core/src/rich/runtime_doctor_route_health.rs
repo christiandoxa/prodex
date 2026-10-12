@@ -90,30 +90,10 @@ pub fn runtime_doctor_route_health_groups<'a>(
         }
         let event_count =
             usize::try_from(event_counts[index]).map_err(|_| MojoError::InvalidOutput)?;
-        let latest_event_index = match latest_event_indices[index] {
-            -1 => None,
-            value if value >= 0 => {
-                Some(usize::try_from(value).map_err(|_| MojoError::InvalidOutput)?)
-            }
-            _ => return Err(MojoError::InvalidOutput),
-        };
-        if let Some(latest_event_index) = latest_event_index
-            && (latest_event_index >= profiles.len() || event_flags[latest_event_index] != 1)
-        {
-            return Err(MojoError::InvalidOutput);
-        }
-        let profile_row_index = match profile_row_indices[index] {
-            -1 => None,
-            value if value >= 0 => {
-                Some(usize::try_from(value).map_err(|_| MojoError::InvalidOutput)?)
-            }
-            _ => return Err(MojoError::InvalidOutput),
-        };
-        if let Some(profile_row_index) = profile_row_index
-            && (profile_row_index >= profiles.len() || event_flags[profile_row_index] != 0)
-        {
-            return Err(MojoError::InvalidOutput);
-        }
+        let latest_event_index =
+            route_health_source_index(latest_event_indices[index], &event_flags, 1)?;
+        let profile_row_index =
+            route_health_source_index(profile_row_indices[index], &event_flags, 0)?;
         groups.push(RuntimeDoctorRouteHealthGroup {
             representative_index,
             event_count,
@@ -122,4 +102,21 @@ pub fn runtime_doctor_route_health_groups<'a>(
         });
     }
     Ok(groups)
+}
+
+// Both optional indices carry the same ABI sentinel/range contract, with a
+// different source row kind. Keep validation shared, not the Mojo reducer.
+fn route_health_source_index(
+    value: i64,
+    event_flags: &[i64],
+    expected_kind: i64,
+) -> Result<Option<usize>, MojoError> {
+    if value == -1 {
+        return Ok(None);
+    }
+    let index = usize::try_from(value).map_err(|_| MojoError::InvalidOutput)?;
+    if event_flags.get(index) != Some(&expected_kind) {
+        return Err(MojoError::InvalidOutput);
+    }
+    Ok(Some(index))
 }

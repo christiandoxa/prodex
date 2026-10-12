@@ -18,8 +18,8 @@ pub use menu_policy::{
 #[path = "launch/recovery.rs"]
 mod recovery;
 pub use recovery::{
-    InPlaceRecoveryAction, NativeGoalStatus, RecoveryObservationAction, RecoveryObservationKind,
-    in_place_recovery_action, recovery_observation_action,
+    InPlaceRecoveryAction, NativeGoalStatus, NativeThreadStatus, RecoveryObservationAction,
+    RecoveryObservationKind, in_place_recovery_action, recovery_observation_action,
 };
 
 use crate::MojoError;

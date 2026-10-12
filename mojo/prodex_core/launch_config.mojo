@@ -156,24 +156,27 @@ def prodex_launch_recovery_observation_v1(
 
 # Goal status: absent=0, active=1, blocked=2, usageLimited=3,
 # paused=4, budgetLimited=5, complete=6, unknown=7.
+# Thread status: unknown=0, idle=1, systemError=2, active=3, notLoaded=4.
+# Native SystemError is quiescent: Codex's running work and approval/input
+# waits take precedence and are reported as Active. Never recover Active.
 # Action: defer=0, stop=1, resume goal=2, continue non-goal turn=3.
-@export("prodex_launch_in_place_recovery_v1")
-def prodex_launch_in_place_recovery_v1(
+@export("prodex_launch_in_place_recovery_v2")
+def prodex_launch_in_place_recovery_v2(
     abi_version: Int64,
     verified: Int64,
-    idle: Int64,
+    thread_status: Int64,
     expected_goal: Int64,
     goal_status: Int64,
     budget_available: Int64,
 ) abi("C") -> Int64:
-    if abi_version != 1:
+    if abi_version != 2:
         return -3
-    for flag in [verified, idle, expected_goal, budget_available]:
+    for flag in [verified, expected_goal, budget_available]:
         if flag != 0 and flag != 1:
             return -2
-    if goal_status < 0 or goal_status > 7:
+    if goal_status < 0 or goal_status > 7 or thread_status < 0 or thread_status > 4:
         return -2
-    if verified == 0 or idle == 0:
+    if verified == 0 or (thread_status != 1 and thread_status != 2):
         return 0
     if goal_status == 0:
         return 1 if expected_goal == 1 else 3
