@@ -1363,8 +1363,19 @@ export function findViolations(files) {
         .map((marker) => `${filePath}: recoverable quota pool must retain Mojo auth/quota gating (${marker})`);
     }
     if (filePath === "crates/prodex-app/src/runtime_proxy/websocket_message/failure_handling/retry_recovery.rs") {
-      return contents.includes("crate::runtime_has_route_recoverable_quota_fallback_for_model(")
-        ? [] : [`${filePath}: full-context recovery must not use only immediate readiness`];
+      const required = [
+        "runtime_proxy_crate::runtime_websocket_turn_state_replay_candidate(",
+        "runtime_proxy_crate::runtime_websocket_context_constraint(",
+        "crate::runtime_has_route_recoverable_quota_fallback_for_model(",
+      ];
+      const missing = required.filter((marker) => !contents.includes(marker));
+      if (contents.includes("let replayable = self.previous_response_id.is_none()")) {
+        missing.push("restored Rust WebSocket turn-state replay predicate");
+      }
+      if (contents.includes("let has_context_constraint = self.previous_response_id.is_some()")) {
+        missing.push("restored Rust WebSocket context-constraint predicate");
+      }
+      return missing.map((marker) => `${filePath}: full-context recovery must remain Mojo-owned (${marker})`);
     }
     return [];
   });
