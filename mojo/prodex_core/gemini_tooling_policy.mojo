@@ -441,6 +441,50 @@ def tooling_patch_put_output_line_range(
     )
 
 
+def tooling_patch_put_output_line_prefixed_range(
+    output: Pointer[mut=True, UInt8, _],
+    capacity: Int64,
+    written: Pointer[mut=True, Int64, _],
+    view: ProdexRichStringView,
+    start: Int64,
+    end: Int64,
+    prefix: UInt8,
+) -> Bool:
+    return (
+        tooling_patch_newline(output, capacity, written)
+        and tooling_patch_put_byte(output, capacity, written, prefix)
+        and tooling_patch_put_range(output, capacity, written, view, start, end)
+    )
+
+
+def tooling_patch_put_prefixed_lines(
+    output: Pointer[mut=True, UInt8, _],
+    capacity: Int64,
+    written: Pointer[mut=True, Int64, _],
+    view: ProdexRichStringView,
+    prefix: UInt8,
+    emit_empty: Bool,
+) -> Bool:
+    var length = Int64(view.len)
+    if length == 0:
+        if emit_empty:
+            return tooling_patch_put_output_line_prefixed_range(
+                output, capacity, written, view, 0, 0, prefix
+            )
+        return True
+    var cursor: Int64 = 0
+    while cursor < length:
+        var line = tooling_patch_line(view, cursor)
+        if not tooling_patch_put_output_line_prefixed_range(
+            output, capacity, written, view, line[0], line[1], prefix
+        ):
+            return False
+        if line[2] <= cursor:
+            break
+        cursor = line[2]
+    return True
+
+
 def tooling_patch_is_header_pair(
     view: ProdexRichStringView, line: Array[Int64, 3]
 ) -> Bool:
@@ -929,4 +973,100 @@ def prodex_gemini_apply_patch_block_v1(
     if result == GEMINI_PATCH_NO_MATCH:
         written[] = 0
         return GEMINI_PATCH_NO_MATCH
+    return GEMINI_TOOLING_OK
+
+
+@export("prodex_gemini_edit_patch_v1")
+def prodex_gemini_edit_patch_v1(
+    abi_version: Int64,
+    path_address: UInt,
+    path_length: Int64,
+    old_address: UInt,
+    old_length: Int64,
+    old_present: Int64,
+    new_address: UInt,
+    new_length: Int64,
+    new_present: Int64,
+    output_address: UInt,
+    output_capacity: Int64,
+    written_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != GEMINI_TOOLING_ABI_VERSION:
+        return GEMINI_TOOLING_ABI
+    if (
+        path_length <= 0
+        or path_length > GEMINI_PATCH_MAX_INPUT_BYTES
+        or old_length < 0
+        or old_length > GEMINI_PATCH_MAX_INPUT_BYTES
+        or new_length < 0
+        or new_length > GEMINI_PATCH_MAX_INPUT_BYTES
+        or old_present < 0
+        or old_present > 1
+        or new_present < 0
+        or new_present > 1
+        or output_capacity <= 0
+        or output_capacity > GEMINI_PATCH_MAX_OUTPUT_BYTES
+        or path_address == 0
+        or output_address == 0
+        or written_address == 0
+        or (old_length > 0 and old_address == 0)
+        or (new_length > 0 and new_address == 0)
+        or new_present == 0
+    ):
+        return GEMINI_PATCH_NO_MATCH
+
+    var path = ProdexRichStringView(path_address, UInt(path_length))
+    var old = ProdexRichStringView(old_address, UInt(old_length))
+    var new = ProdexRichStringView(new_address, UInt(new_length))
+    if (
+        not rich_view_valid(path, GEMINI_PATCH_MAX_INPUT_BYTES)
+        or not rich_view_valid(old, GEMINI_PATCH_MAX_INPUT_BYTES)
+        or not rich_view_valid(new, GEMINI_PATCH_MAX_INPUT_BYTES)
+    ):
+        return GEMINI_TOOLING_INVALID
+
+    var output = Pointer[mut=True, UInt8, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    var written = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(written_address)
+    )
+    written[] = 0
+    if not tooling_patch_put_literal["*** Begin Patch"](
+        output, output_capacity, written
+    ):
+        return GEMINI_TOOLING_CAPACITY
+
+    var add_file = old_present == 0 or old_length == 0
+    if add_file:
+        if not tooling_patch_put_output_line_literal["*** Add File: "](
+            output, output_capacity, written
+        ) or not tooling_patch_put_range(
+            output, output_capacity, written, path, 0, path_length
+        ):
+            return GEMINI_TOOLING_CAPACITY
+        if not tooling_patch_put_prefixed_lines(
+            output, output_capacity, written, new, 43, new_length == 0
+        ):
+            return GEMINI_TOOLING_CAPACITY
+    else:
+        if not tooling_patch_put_output_line_literal["*** Update File: "](
+            output, output_capacity, written
+        ) or not tooling_patch_put_range(
+            output, output_capacity, written, path, 0, path_length
+        ) or not tooling_patch_put_output_line_literal["@@"](
+            output, output_capacity, written
+        ):
+            return GEMINI_TOOLING_CAPACITY
+        if not tooling_patch_put_prefixed_lines(
+            output, output_capacity, written, old, 45, False
+        ) or not tooling_patch_put_prefixed_lines(
+            output, output_capacity, written, new, 43, False
+        ):
+            return GEMINI_TOOLING_CAPACITY
+
+    if not tooling_patch_put_output_line_literal["*** End Patch"](
+        output, output_capacity, written
+    ):
+        return GEMINI_TOOLING_CAPACITY
     return GEMINI_TOOLING_OK

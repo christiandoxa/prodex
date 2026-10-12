@@ -3721,13 +3721,20 @@ export function findViolations(files) {
   const geminiApplyPatchViolations = files.flatMap(([filePath, contents]) => {
     if (filePath === GEMINI_APPLY_PATCH_FILE) {
       const production = contents.split("#[cfg(test)]", 1)[0];
-      const required = "prodex_mojo_core::gemini_tooling_policy::gemini_apply_patch_block(";
-      const violations = production.includes(required)
-        ? []
-        : [`${filePath}: apply-patch block normalization must retain ${required}`];
+      const required = [
+        "prodex_mojo_core::gemini_tooling_policy::gemini_apply_patch_block(",
+        "prodex_mojo_core::gemini_tooling_policy::gemini_edit_patch(",
+      ];
+      const violations = required
+        .filter((marker) => !production.includes(marker))
+        .map((marker) => `${filePath}: apply-patch semantics must retain ${marker}`);
       for (const retired of [
         "fn gemini_extract_apply_patch_block(",
         "fn gemini_repair_apply_patch_block(",
+        "fn gemini_edit_args_to_apply_patch(",
+        "fn gemini_add_file_patch(",
+        "fn gemini_update_file_patch(",
+        "fn gemini_normalized_newlines(",
       ]) {
         if (production.includes(retired)) {
           violations.push(`${filePath}: contains restored Rust apply-patch block semantics (${retired})`);
@@ -3736,23 +3743,33 @@ export function findViolations(files) {
       return violations;
     }
     if (filePath === GEMINI_APPLY_PATCH_ADAPTER_FILE) {
-      return contents.includes("prodex_gemini_apply_patch_block_v1(")
-        ? []
-        : [`${filePath}: apply-patch block adapter must retain the Mojo ABI`];
+      const required = [
+        "prodex_gemini_apply_patch_block_v1(",
+        "prodex_gemini_edit_patch_v1(",
+      ];
+      return required
+        .filter((marker) => !contents.includes(marker))
+        .map((marker) => `${filePath}: apply-patch adapter must retain the Mojo ABI ${marker}`);
     }
     if (filePath === GEMINI_APPLY_PATCH_MOJO_FILE) {
       const required = [
         '@export("prodex_gemini_apply_patch_block_v1")',
         "tooling_patch_normalize_block(",
+        '@export("prodex_gemini_edit_patch_v1")',
+        "tooling_patch_put_prefixed_lines(",
       ];
       return required
         .filter((marker) => !contents.includes(marker))
         .map((marker) => `${filePath}: apply-patch block owner must retain ${marker}`);
     }
     if (filePath === GEMINI_APPLY_PATCH_TEST_FILE) {
-      return contents.includes("gemini_apply_patch_block_normalization_requires_mojo")
-        ? []
-        : [`${filePath}: required-Mojo apply-patch block caller coverage is required`];
+      const required = [
+        "gemini_apply_patch_block_normalization_requires_mojo",
+        "gemini_edit_patch_assembly_requires_mojo",
+      ];
+      return required
+        .filter((marker) => !contents.includes(marker))
+        .map((marker) => `${filePath}: required-Mojo apply-patch caller coverage is required (${marker})`);
     }
     return [];
   });
@@ -8285,24 +8302,31 @@ function selfTest() {
   assert.match(findViolations([[GEMINI_TOOL_RESPONSE_ORDER_MOJO_FILE,
     "fn unrelated_gemini_policy() {}"]]).join("\n"), /must be implemented in Mojo/u);
   const applyPatchConsumer =
-    "prodex_mojo_core::gemini_tooling_policy::gemini_apply_patch_block(input);";
+    "prodex_mojo_core::gemini_tooling_policy::gemini_apply_patch_block(input);\n" +
+    "prodex_mojo_core::gemini_tooling_policy::gemini_edit_patch(path, old, new);";
   assert.deepEqual(findViolations([[GEMINI_APPLY_PATCH_FILE, applyPatchConsumer]]), []);
   assert.match(findViolations([[
     GEMINI_APPLY_PATCH_FILE,
     `${applyPatchConsumer}\nfn gemini_extract_apply_patch_block(input: &str) {}`,
   ]]).join("\n"), /restored Rust apply-patch block semantics/u);
+  assert.match(findViolations([[
+    GEMINI_APPLY_PATCH_FILE,
+    `${applyPatchConsumer}\nfn gemini_edit_args_to_apply_patch(input: &str) {}`,
+  ]]).join("\n"), /restored Rust apply-patch block semantics/u);
   assert.match(findViolations([[GEMINI_APPLY_PATCH_FILE, "fn normalize(input: &str) {}"]]).join("\n"),
-    /apply-patch block normalization must retain/u);
+    /apply-patch semantics must retain/u);
   assert.deepEqual(findViolations([[GEMINI_APPLY_PATCH_ADAPTER_FILE,
-    "prodex_gemini_apply_patch_block_v1("]]), []);
+    "prodex_gemini_apply_patch_block_v1(\nprodex_gemini_edit_patch_v1("]]), []);
   assert.match(findViolations([[GEMINI_APPLY_PATCH_ADAPTER_FILE,
     "fn gemini_apply_patch_block() {}"]]).join("\n"), /must retain the Mojo ABI/u);
   assert.deepEqual(findViolations([[GEMINI_APPLY_PATCH_MOJO_FILE,
-    '@export("prodex_gemini_apply_patch_block_v1")\ntooling_patch_normalize_block(']]), []);
+    '@export("prodex_gemini_apply_patch_block_v1")\ntooling_patch_normalize_block(\n' +
+    '@export("prodex_gemini_edit_patch_v1")\ntooling_patch_put_prefixed_lines(']]), []);
   assert.match(findViolations([[GEMINI_APPLY_PATCH_MOJO_FILE,
     "fn unrelated_gemini_policy() {}"]]).join("\n"), /apply-patch block owner must retain/u);
   assert.deepEqual(findViolations([[GEMINI_APPLY_PATCH_TEST_FILE,
-    "gemini_apply_patch_block_normalization_requires_mojo"]]), []);
+    "gemini_apply_patch_block_normalization_requires_mojo\n" +
+    "gemini_edit_patch_assembly_requires_mojo"]]), []);
   assert.match(findViolations([["crates/prodex-provider-core/src/translators/gemini/request/optional_fields.rs",
     "fn gemini_apply_optional_request_fields() {}"]])[0], /Rust fallback or oracle/u);
   assert.match(findViolations([[ANTHROPIC_MESSAGES_FILE,
