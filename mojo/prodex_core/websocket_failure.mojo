@@ -20,6 +20,8 @@ comptime WEBSOCKET_FAILURE_ACTION_REUSE_WATCHDOG: Int64 = 4
 comptime WEBSOCKET_FAILURE_ACTION_CONTINUE: Int64 = 5
 comptime WEBSOCKET_FAILURE_ACTION_ERROR: Int64 = 6
 
+comptime WEBSOCKET_FAILURE_RECOVERY_ABI_VERSION: Int64 = 1
+
 comptime WEBSOCKET_FRAME_RETRY_NONE: Int64 = 0
 comptime WEBSOCKET_FRAME_RETRY_CONNECTION_LIMIT: Int64 = 1
 comptime WEBSOCKET_FRAME_RETRY_QUOTA: Int64 = 2
@@ -30,6 +32,65 @@ comptime WEBSOCKET_FRAME_RETRY_PREVIOUS_RESPONSE: Int64 = 5
 
 def websocket_failure_bool(value: Int64) -> Bool:
     return value == 0 or value == 1
+
+
+@export("prodex_runtime_websocket_turn_state_replay_candidate_v1")
+def prodex_runtime_websocket_turn_state_replay_candidate_v1(
+    abi_version: Int64,
+    previous_response_present: Int64,
+    turn_state_present: Int64,
+    turn_state_owner_matches: Int64,
+    compact_followup_present: Int64,
+    reconstructable_full_history: Int64,
+) abi("C") -> Int64:
+    if abi_version != WEBSOCKET_FAILURE_RECOVERY_ABI_VERSION:
+        return -4
+    if (
+        not websocket_failure_bool(previous_response_present)
+        or not websocket_failure_bool(turn_state_present)
+        or not websocket_failure_bool(turn_state_owner_matches)
+        or not websocket_failure_bool(compact_followup_present)
+        or not websocket_failure_bool(reconstructable_full_history)
+    ):
+        return -1
+    return Int64(
+        previous_response_present == 0
+        and turn_state_present == 1
+        and turn_state_owner_matches == 1
+        and compact_followup_present == 0
+        and reconstructable_full_history == 1
+    )
+
+
+@export("prodex_runtime_websocket_context_constraint_v1")
+def prodex_runtime_websocket_context_constraint_v1(
+    abi_version: Int64,
+    previous_response_present: Int64,
+    requires_previous_response_affinity: Int64,
+    turn_state_present: Int64,
+    pinned_profile_present: Int64,
+    turn_state_profile_present: Int64,
+    compact_followup_present: Int64,
+) abi("C") -> Int64:
+    if abi_version != WEBSOCKET_FAILURE_RECOVERY_ABI_VERSION:
+        return -4
+    if (
+        not websocket_failure_bool(previous_response_present)
+        or not websocket_failure_bool(requires_previous_response_affinity)
+        or not websocket_failure_bool(turn_state_present)
+        or not websocket_failure_bool(pinned_profile_present)
+        or not websocket_failure_bool(turn_state_profile_present)
+        or not websocket_failure_bool(compact_followup_present)
+    ):
+        return -1
+    return Int64(
+        previous_response_present == 1
+        or requires_previous_response_affinity == 1
+        or turn_state_present == 1
+        or pinned_profile_present == 1
+        or turn_state_profile_present == 1
+        or compact_followup_present == 1
+    )
 
 
 @export("prodex_runtime_websocket_failure_decision_v2")
@@ -117,10 +178,15 @@ def prodex_runtime_websocket_failure_decision_v2(
         output[unsafe_offset=7] = Int64(stateful_failure)
         output[unsafe_offset=8] = Int64(last_failure_retryable)
         output[unsafe_offset=9] = Int64(release_affinity)
-        output[unsafe_offset=10] = Int64(action == WEBSOCKET_FAILURE_ACTION_PASS_THROUGH)
+        output[unsafe_offset=10] = Int64(
+            action == WEBSOCKET_FAILURE_ACTION_PASS_THROUGH
+        )
         return 0
 
-    if failure_kind == WEBSOCKET_FAILURE_REJECTED or failure_kind == WEBSOCKET_FAILURE_PREVIOUS_RESPONSE:
+    if (
+        failure_kind == WEBSOCKET_FAILURE_REJECTED
+        or failure_kind == WEBSOCKET_FAILURE_PREVIOUS_RESPONSE
+    ):
         output[unsafe_offset=0] = WEBSOCKET_FAILURE_ACTION_PASS_THROUGH
         output[unsafe_offset=10] = 1
         return 0
@@ -136,7 +202,10 @@ def prodex_runtime_websocket_failure_decision_v2(
         elif affinity_releasable == 1:
             action = WEBSOCKET_FAILURE_ACTION_ROTATE
             stateful_failure = True
-            clear_affinity = failure_kind == WEBSOCKET_FAILURE_QUOTA or failure_kind == WEBSOCKET_FAILURE_AUTH_FAILED
+            clear_affinity = (
+                failure_kind == WEBSOCKET_FAILURE_QUOTA
+                or failure_kind == WEBSOCKET_FAILURE_AUTH_FAILED
+            )
             release_affinity = clear_affinity
             mark_backoff = True
         elif full_context_retry_available == 1:
@@ -147,11 +216,17 @@ def prodex_runtime_websocket_failure_decision_v2(
             action = WEBSOCKET_FAILURE_ACTION_PASS_THROUGH
         output[unsafe_offset=0] = action
         output[unsafe_offset=1] = Int64(mark_backoff)
-        output[unsafe_offset=2] = Int64(action == WEBSOCKET_FAILURE_ACTION_ROTATE)
+        output[unsafe_offset=2] = Int64(
+            action == WEBSOCKET_FAILURE_ACTION_ROTATE
+        )
         output[unsafe_offset=3] = Int64(clear_affinity)
         output[unsafe_offset=9] = Int64(release_affinity)
-        output[unsafe_offset=10] = Int64(action == WEBSOCKET_FAILURE_ACTION_PASS_THROUGH)
-        output[unsafe_offset=11] = Int64(clear_affinity and reset_retry_index == 1)
+        output[unsafe_offset=10] = Int64(
+            action == WEBSOCKET_FAILURE_ACTION_PASS_THROUGH
+        )
+        output[unsafe_offset=11] = Int64(
+            clear_affinity and reset_retry_index == 1
+        )
         return 0
 
     if affinity_releasable == 1 and (
@@ -160,7 +235,10 @@ def prodex_runtime_websocket_failure_decision_v2(
         or failure_kind == WEBSOCKET_FAILURE_AUTH_FAILED
         or failure_kind == WEBSOCKET_FAILURE_OVERLOADED
     ):
-        if failure_kind == WEBSOCKET_FAILURE_QUOTA and quota_fallback_available == 0:
+        if (
+            failure_kind == WEBSOCKET_FAILURE_QUOTA
+            and quota_fallback_available == 0
+        ):
             action = WEBSOCKET_FAILURE_ACTION_PASS_THROUGH
         else:
             action = WEBSOCKET_FAILURE_ACTION_ROTATE
@@ -198,7 +276,9 @@ def prodex_runtime_websocket_failure_decision_v2(
     output[unsafe_offset=7] = Int64(stateful_failure)
     output[unsafe_offset=8] = Int64(last_failure_retryable)
     output[unsafe_offset=9] = Int64(release_affinity)
-    output[unsafe_offset=10] = Int64(action == WEBSOCKET_FAILURE_ACTION_PASS_THROUGH)
+    output[unsafe_offset=10] = Int64(
+        action == WEBSOCKET_FAILURE_ACTION_PASS_THROUGH
+    )
     return 0
 
 

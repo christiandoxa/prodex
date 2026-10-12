@@ -18,13 +18,16 @@ impl<'a> RuntimeWebsocketTextMessageFlow<'a> {
         profile_name: &str,
         payload: RuntimeWebsocketErrorPayload,
     ) -> Result<bool> {
-        let replayable = self.previous_response_id.is_none()
-            && self.request_turn_state.is_some()
-            && self.turn_state_profile.as_deref() == Some(profile_name)
-            && self.compact_followup_profile.is_none()
-            && runtime_proxy_crate::runtime_request_text_has_reconstructable_full_history(
+        let replayable = runtime_proxy_crate::runtime_websocket_turn_state_replay_candidate(
+            self.previous_response_id.is_some(),
+            self.request_turn_state.is_some(),
+            self.turn_state_profile.as_deref() == Some(profile_name),
+            self.compact_followup_profile.is_some(),
+            runtime_proxy_crate::runtime_request_text_has_reconstructable_full_history(
                 &self.request_text,
-            );
+            ),
+        )
+        .map_err(|error| anyhow::anyhow!("Mojo WebSocket turn-state replay failed: {error:?}"))?;
         if !replayable || !self.prepare_full_context_fallback(profile_name)? {
             return Ok(false);
         }
@@ -90,12 +93,15 @@ impl<'a> RuntimeWebsocketTextMessageFlow<'a> {
     }
 
     pub(super) fn prepare_quota_fallback(&mut self, profile_name: &str) -> Result<bool> {
-        let has_context_constraint = self.previous_response_id.is_some()
-            || self.request_requires_previous_response_affinity
-            || self.request_turn_state.is_some()
-            || self.pinned_profile.is_some()
-            || self.turn_state_profile.is_some()
-            || self.compact_followup_profile.is_some();
+        let has_context_constraint = runtime_proxy_crate::runtime_websocket_context_constraint(
+            self.previous_response_id.is_some(),
+            self.request_requires_previous_response_affinity,
+            self.request_turn_state.is_some(),
+            self.pinned_profile.is_some(),
+            self.turn_state_profile.is_some(),
+            self.compact_followup_profile.is_some(),
+        )
+        .map_err(|error| anyhow::anyhow!("Mojo WebSocket context constraint failed: {error:?}"))?;
         self.prepare_quota_fallback_with_context(profile_name, has_context_constraint)
     }
 

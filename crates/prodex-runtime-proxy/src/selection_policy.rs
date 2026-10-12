@@ -757,6 +757,40 @@ pub fn runtime_websocket_full_context_signal_eligible(
     )
 }
 
+pub fn runtime_websocket_turn_state_replay_candidate(
+    previous_response_present: bool,
+    turn_state_present: bool,
+    turn_state_owner_matches: bool,
+    compact_followup_present: bool,
+    reconstructable_full_history: bool,
+) -> Result<bool, prodex_mojo_core::MojoError> {
+    prodex_mojo_core::runtime::websocket_turn_state_replay_candidate(
+        previous_response_present,
+        turn_state_present,
+        turn_state_owner_matches,
+        compact_followup_present,
+        reconstructable_full_history,
+    )
+}
+
+pub fn runtime_websocket_context_constraint(
+    previous_response_present: bool,
+    requires_previous_response_affinity: bool,
+    turn_state_present: bool,
+    pinned_profile_present: bool,
+    turn_state_profile_present: bool,
+    compact_followup_present: bool,
+) -> Result<bool, prodex_mojo_core::MojoError> {
+    prodex_mojo_core::runtime::websocket_context_constraint(
+        previous_response_present,
+        requires_previous_response_affinity,
+        turn_state_present,
+        pinned_profile_present,
+        turn_state_profile_present,
+        compact_followup_present,
+    )
+}
+
 pub fn runtime_websocket_quota_fallback_plan(
     route_eligible_fallback: bool,
     has_context_constraint: bool,

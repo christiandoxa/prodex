@@ -110,8 +110,9 @@ pub use smart_context_pressure::smart_context_pressure_snapshot;
 pub use websocket_failure::{
     WebsocketFailureAction, WebsocketFailureClass, WebsocketFailureDecisionInput,
     WebsocketFailureDecisionPlan, WebsocketFailureKind, WebsocketFailureStatePlan,
-    websocket_failure_decision, websocket_failure_frame_classification,
-    websocket_failure_state_plan, websocket_invalid_previous_response_recovery_plan,
+    websocket_context_constraint, websocket_failure_decision,
+    websocket_failure_frame_classification, websocket_failure_state_plan,
+    websocket_invalid_previous_response_recovery_plan, websocket_turn_state_replay_candidate,
 };
 pub use websocket_loop_control::{
     WebsocketErrorKind, WebsocketPrecommitBudgetInput, WebsocketReadAction, WebsocketReadFrame,

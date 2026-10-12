@@ -8,6 +8,7 @@ use super::{
 use crate::MojoError;
 
 const WEBSOCKET_FAILURE_DECISION_ABI_VERSION: i64 = 2;
+const WEBSOCKET_FAILURE_RECOVERY_ABI_VERSION: i64 = 1;
 const WEBSOCKET_FAILURE_DECISION_FIELD_COUNT: usize = 12;
 
 const WEBSOCKET_FAILURE_PLAN_FIELD_COUNT: usize = 5;
@@ -91,6 +92,23 @@ pub struct WebsocketFailureDecisionInput {
 }
 
 unsafe extern "C" {
+    fn prodex_runtime_websocket_turn_state_replay_candidate_v1(
+        abi_version: i64,
+        previous_response_present: i64,
+        turn_state_present: i64,
+        turn_state_owner_matches: i64,
+        compact_followup_present: i64,
+        reconstructable_full_history: i64,
+    ) -> i64;
+    fn prodex_runtime_websocket_context_constraint_v1(
+        abi_version: i64,
+        previous_response_present: i64,
+        requires_previous_response_affinity: i64,
+        turn_state_present: i64,
+        pinned_profile_present: i64,
+        turn_state_profile_present: i64,
+        compact_followup_present: i64,
+    ) -> i64;
     fn prodex_runtime_websocket_failure_state_plan_v1(
         failure_kind: i64,
         affinity_releasable: i64,
@@ -119,6 +137,60 @@ unsafe extern "C" {
         previous_response_not_found: i64,
         stream_committed: i64,
     ) -> i64;
+}
+
+/// Whether a quota-blocked turn-state request can safely replay from full history.
+pub fn websocket_turn_state_replay_candidate(
+    previous_response_present: bool,
+    turn_state_present: bool,
+    turn_state_owner_matches: bool,
+    compact_followup_present: bool,
+    reconstructable_full_history: bool,
+) -> Result<bool, MojoError> {
+    match unsafe {
+        prodex_runtime_websocket_turn_state_replay_candidate_v1(
+            WEBSOCKET_FAILURE_RECOVERY_ABI_VERSION,
+            i64::from(previous_response_present),
+            i64::from(turn_state_present),
+            i64::from(turn_state_owner_matches),
+            i64::from(compact_followup_present),
+            i64::from(reconstructable_full_history),
+        )
+    } {
+        0 => Ok(false),
+        1 => Ok(true),
+        -4 => Err(MojoError::AbiMismatch),
+        -1 => Err(MojoError::InvalidInput),
+        _ => Err(MojoError::InvalidOutput),
+    }
+}
+
+/// Whether a WebSocket quota fallback must preserve request context ownership.
+pub fn websocket_context_constraint(
+    previous_response_present: bool,
+    requires_previous_response_affinity: bool,
+    turn_state_present: bool,
+    pinned_profile_present: bool,
+    turn_state_profile_present: bool,
+    compact_followup_present: bool,
+) -> Result<bool, MojoError> {
+    match unsafe {
+        prodex_runtime_websocket_context_constraint_v1(
+            WEBSOCKET_FAILURE_RECOVERY_ABI_VERSION,
+            i64::from(previous_response_present),
+            i64::from(requires_previous_response_affinity),
+            i64::from(turn_state_present),
+            i64::from(pinned_profile_present),
+            i64::from(turn_state_profile_present),
+            i64::from(compact_followup_present),
+        )
+    } {
+        0 => Ok(false),
+        1 => Ok(true),
+        -4 => Err(MojoError::AbiMismatch),
+        -1 => Err(MojoError::InvalidInput),
+        _ => Err(MojoError::InvalidOutput),
+    }
 }
 
 /// Runs the checked versioned failure decision without a Rust fallback.
@@ -470,6 +542,60 @@ mod tests {
         assert_eq!(
             websocket_failure_frame_classification(9, 0, false, false, false),
             Err(MojoError::InvalidInput)
+        );
+    }
+
+    #[test]
+    fn recovery_policy_covers_replay_and_context_constraint_edges() {
+        for bits in 0_u8..32 {
+            let previous_response_present = bits & 1 != 0;
+            let turn_state_present = bits & 2 != 0;
+            let turn_state_owner_matches = bits & 4 != 0;
+            let compact_followup_present = bits & 8 != 0;
+            let reconstructable_full_history = bits & 16 != 0;
+            let expected = !previous_response_present
+                && turn_state_present
+                && turn_state_owner_matches
+                && !compact_followup_present
+                && reconstructable_full_history;
+            assert_eq!(
+                websocket_turn_state_replay_candidate(
+                    previous_response_present,
+                    turn_state_present,
+                    turn_state_owner_matches,
+                    compact_followup_present,
+                    reconstructable_full_history,
+                ),
+                Ok(expected),
+                "replay mismatch for input mask {bits:05b}"
+            );
+        }
+
+        assert!(!websocket_context_constraint(false, false, false, false, false, false).unwrap());
+        assert!(websocket_context_constraint(false, false, true, false, false, false).unwrap());
+        assert!(websocket_context_constraint(false, false, false, false, false, true).unwrap());
+        assert!(websocket_context_constraint(true, false, false, false, false, false).unwrap());
+    }
+
+    #[test]
+    fn recovery_policy_abi_rejects_wrong_version_and_non_boolean_input() {
+        assert_eq!(
+            unsafe { prodex_runtime_websocket_turn_state_replay_candidate_v1(0, 0, 1, 1, 0, 1,) },
+            -4
+        );
+        assert_eq!(
+            unsafe {
+                prodex_runtime_websocket_context_constraint_v1(
+                    WEBSOCKET_FAILURE_RECOVERY_ABI_VERSION,
+                    2,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                )
+            },
+            -1
         );
     }
 
