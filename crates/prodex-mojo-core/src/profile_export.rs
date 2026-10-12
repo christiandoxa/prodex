@@ -9,6 +9,7 @@ pub use envelope_schema::{
 
 const ABI_VERSION: i64 = 1;
 const PROFILE_IMPORT_PLAN_ABI_VERSION: i64 = 1;
+const PROFILE_IMPORT_AUTH_UPDATE_ABI_VERSION: i64 = 1;
 const PROFILE_IMPORT_PLAN_OUTPUT_STRIDE: usize = 5;
 const PROFILE_IMPORT_PLAN_SCRATCH_STRIDE: usize = 3;
 
@@ -66,6 +67,17 @@ unsafe extern "C" {
         abi_version: i64,
         existing_update_present: i64,
         incoming_email_present: i64,
+    ) -> i64;
+    fn prodex_profile_import_auth_update_target_v1(
+        abi_version: i64,
+        target_address: u64,
+        target_length: i64,
+        existing_names_address: u64,
+        existing_count: i64,
+        incoming_email_present: i64,
+        output_address: u64,
+        output_capacity: i64,
+        written_address: u64,
     ) -> i64;
     fn prodex_profile_export_policy_v1(
         abi_version: i64,
@@ -633,6 +645,13 @@ pub enum ProfileImportAuthUpdateAction {
     ReplaceAuthAndEmail,
 }
 
+/// Complete deterministic decision for one queued profile-auth update.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ProfileImportAuthUpdatePlan {
+    pub action: ProfileImportAuthUpdateAction,
+    pub existing_index: Option<usize>,
+}
+
 pub fn profile_import_auth_update_action(
     existing_update_present: bool,
     incoming_email_present: bool,
@@ -650,6 +669,65 @@ pub fn profile_import_auth_update_action(
         2 => Ok(ProfileImportAuthUpdateAction::ReplaceAuthAndEmail),
         -1 => Err(MojoError::InvalidInput),
         -4 => Err(MojoError::AbiMismatch),
+        _ => Err(MojoError::InvalidOutput),
+    }
+}
+
+/// Ask Mojo to choose the queued-auth update action and existing target index.
+pub fn profile_import_auth_update_plan(
+    target_profile_name: &str,
+    existing_profile_names: &[&str],
+    incoming_email_present: bool,
+) -> Result<ProfileImportAuthUpdatePlan, MojoError> {
+    ensure_rich_abi()?;
+    let target = ProfileImportStringView::from(Some(target_profile_name))?;
+    let existing = existing_profile_names
+        .iter()
+        .map(|name| ProfileImportStringView::from(Some(name)))
+        .collect::<Result<Vec<_>, _>>()?;
+    let mut output = [-1_i64; 2];
+    let mut written = 0_i64;
+    let status = unsafe {
+        prodex_profile_import_auth_update_target_v1(
+            PROFILE_IMPORT_AUTH_UPDATE_ABI_VERSION,
+            target.ptr,
+            i64::try_from(target.len).map_err(|_| MojoError::InvalidInput)?,
+            existing.as_ptr() as usize as u64,
+            i64::try_from(existing.len()).map_err(|_| MojoError::InvalidInput)?,
+            i64::from(incoming_email_present),
+            output.as_mut_ptr() as usize as u64,
+            i64::try_from(output.len()).map_err(|_| MojoError::InvalidInput)?,
+            (&mut written as *mut i64) as usize as u64,
+        )
+    };
+    match status {
+        0 if written == 2 => {
+            let existing_index = match output[1] {
+                -1 => None,
+                value if value >= 0 => {
+                    let index = usize::try_from(value).map_err(|_| MojoError::InvalidOutput)?;
+                    (index < existing_profile_names.len())
+                        .then_some(index)
+                        .ok_or(MojoError::InvalidOutput)
+                        .map(Some)?
+                }
+                _ => return Err(MojoError::InvalidOutput),
+            };
+            let action = match (output[0], existing_index) {
+                (0, None) => ProfileImportAuthUpdateAction::Append,
+                (1, Some(_)) => ProfileImportAuthUpdateAction::ReplaceAuth,
+                (2, Some(_)) => ProfileImportAuthUpdateAction::ReplaceAuthAndEmail,
+                _ => return Err(MojoError::InvalidOutput),
+            };
+            Ok(ProfileImportAuthUpdatePlan {
+                action,
+                existing_index,
+            })
+        }
+        0 => Err(MojoError::InvalidOutput),
+        2 => Err(MojoError::Capacity),
+        99 => Err(MojoError::InvalidInput),
+        100 => Err(MojoError::AbiMismatch),
         _ => Err(MojoError::InvalidOutput),
     }
 }

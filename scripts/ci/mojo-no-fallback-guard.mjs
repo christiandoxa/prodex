@@ -5308,6 +5308,8 @@ export function findViolations(files) {
       const required = [
         "prodex_profile_export_selection_v1(",
         "pub fn profile_export_selection_plan(",
+        "prodex_profile_import_auth_update_target_v1(",
+        "pub fn profile_import_auth_update_plan(",
         '#[path = "profile_export/tests.rs"]',
         '#[path = "profile_export/active_profile.rs"]',
       ];
@@ -5318,11 +5320,27 @@ export function findViolations(files) {
       const required = [
         "profile_export_selection_plan_is_mojo_owned",
         "profile_active_selection_and_import_plan_are_mojo_owned",
+        "profile_import_auth_update_plan_is_mojo_owned_and_input_sensitive",
         "profile_export_envelope_schema_is_owned_by_mojo_and_rejects_invalid_metadata",
         "prodex_mojo_core::profile_export",
       ];
       return required.filter((marker) => !contents.includes(marker))
         .map((marker) => `${filePath}: extracted profile-export ABI tests must retain ${marker}`);
+    }
+    if (filePath === "crates/prodex-profile-export/src/import_plan.rs") {
+      const production = contents.split("#[cfg(test)]", 1)[0];
+      const required = [
+        "prodex_mojo_core::profile_export::profile_import_auth_update_plan(",
+        "let existing_profile_names = auth_updates",
+      ];
+      const restoredRust = [
+        ".position(|update| update.target_profile_name == target_profile_name)",
+        "if let Some(existing) = auth_updates",
+      ];
+      return required.every((marker) => production.includes(marker)) &&
+        restoredRust.every((marker) => !production.includes(marker))
+        ? []
+        : [`${filePath}: queued auth-update planning must use Mojo without a Rust target/action copy`];
     }
     if (filePath === "crates/prodex-mojo-core/src/profile_export/active_profile.rs") {
       const required = [
@@ -5442,6 +5460,9 @@ export function findViolations(files) {
         "has_active_profile == 0 or activate_requested != 0",
         '@export("prodex_profile_import_lifecycle_order_v1")',
         "profile_import_views_equal(",
+        '@export("prodex_profile_import_auth_update_target_v1")',
+        "PROFILE_IMPORT_AUTH_UPDATE_REPLACE_AUTH_EMAIL",
+        "existing_index < 0",
         '@export("prodex_profile_import_secret_path_valid_v1")',
         "rich_trim_bounds(path)",
         '@export("prodex_profile_import_auth_journal_commit_v1")',
@@ -5459,6 +5480,7 @@ export function findViolations(files) {
         "export_active_profile_only_survives_when_selected",
         "copilot_config_parser_accepts_copilot_jsonc_comments",
         "copilot_url_helpers_match_import_expectations",
+        "queued_auth_update_uses_mojo_selected_first_matching_target",
       ];
       return required.filter((marker) => !contents.includes(marker))
         .map((marker) => `${filePath}: profile-export selection caller coverage must retain ${marker}`);
