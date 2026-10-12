@@ -110,6 +110,53 @@ fn only_known_native_capability_rejections_allow_auto_fallback() {
 }
 
 #[test]
+fn production_prepare_route_uses_mojo_plan_for_translation_outcomes() {
+    let body = br#"{"web_search_options":{}}"#;
+    let rejected = prodex_provider_core::ProviderTransformResult::rejected(
+        ProviderId::Anthropic,
+        ProviderEndpoint::Responses,
+        prodex_provider_core::ProviderWireFormat::OpenAiChatCompletions,
+        prodex_provider_core::ProviderWireFormat::AnthropicMessages,
+        "Anthropic Messages does not translate chat field `tools`",
+    );
+    assert_eq!(
+        runtime_deepseek_local_rewrite_route(
+            RuntimeDeepSeekWebSearchMode::Auto as i64,
+            body,
+            &rejected,
+        )
+        .unwrap(),
+        prodex_mojo_core::deepseek_local_rewrite::DeepSeekLocalRewriteRoute::AutoChatFallback
+    );
+
+    let mutated = prodex_provider_core::ProviderTransformResult::rejected(
+        ProviderId::Anthropic,
+        ProviderEndpoint::Responses,
+        prodex_provider_core::ProviderWireFormat::OpenAiChatCompletions,
+        prodex_provider_core::ProviderWireFormat::AnthropicMessages,
+        "translated message must be an object",
+    );
+    assert_eq!(
+        runtime_deepseek_local_rewrite_route(
+            RuntimeDeepSeekWebSearchMode::Auto as i64,
+            body,
+            &mutated,
+        )
+        .unwrap(),
+        prodex_mojo_core::deepseek_local_rewrite::DeepSeekLocalRewriteRoute::Incompatible
+    );
+    assert_eq!(
+        runtime_deepseek_local_rewrite_route(
+            RuntimeDeepSeekWebSearchMode::Auto as i64,
+            br#"{"messages":[]}"#,
+            &rejected,
+        )
+        .unwrap(),
+        prodex_mojo_core::deepseek_local_rewrite::DeepSeekLocalRewriteRoute::Chat
+    );
+}
+
+#[test]
 fn passthrough_url_selects_native_messages_without_changing_chat_completions() {
     assert_eq!(
         runtime_deepseek_passthrough_upstream_url(

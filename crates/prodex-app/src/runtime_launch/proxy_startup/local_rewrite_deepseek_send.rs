@@ -32,13 +32,15 @@ use super::super::provider_bridge::{
 };
 use crate::{RuntimeHeapTrimmedBufferedResponseParts, RuntimeProxyRequest, runtime_proxy_log};
 use anyhow::Result;
+use prodex_mojo_core::deepseek_local_rewrite::{
+    DeepSeekLocalRewriteRoute, DeepSeekTranslationStatus,
+};
+use prodex_provider_core::ProviderTransformLoss;
 use prodex_provider_core::{
     ProviderEndpoint, ProviderId, ProviderTransformInput, RuntimeProviderBindingIdentity,
     deepseek_provider_core_auto_chat_fallback_body,
-    deepseek_provider_core_native_translation_fallback_is_safe,
     deepseek_provider_core_request_body as core_deepseek_provider_core_request_body,
     deepseek_provider_core_simple_request, deepseek_provider_core_use_beta_binding_route,
-    deepseek_provider_core_uses_native_web_search, provider_core_rewritten_body,
     translate_openai_chat_request_to_anthropic_messages,
 };
 use prodex_provider_spi::ProviderRetryCause;
@@ -485,39 +487,56 @@ fn runtime_deepseek_prepare_model_request(
     {
         translated.body = body;
     }
-    let mut native_messages = deepseek_provider_core_uses_native_web_search(
+    let initial_route = prodex_mojo_core::deepseek_local_rewrite::route(
         context.web_search_mode as i64,
         translated.body.as_slice(),
+        DeepSeekTranslationStatus::Lossless,
+        None,
     )
-    .map_err(anyhow::Error::msg)?;
-    let body = if native_messages {
-        let mut input =
-            ProviderTransformInput::new(ProviderEndpoint::Responses, translated.body.clone());
-        input.model = Some(model.to_string());
-        let result = translate_openai_chat_request_to_anthropic_messages(input);
-        runtime_provider_log_request_conformance(
-            &context.shared.runtime_shared,
-            context.request_id,
-            RuntimeProviderBridgeKind::DeepSeek,
-            &result,
-        );
-        match provider_core_rewritten_body(Some(&result)) {
-            Some(body) => body,
-            None if deepseek_provider_core_native_translation_fallback_is_safe(&result) => {
-                let Some(body) = deepseek_provider_core_auto_chat_fallback_body(
-                    context.web_search_mode as i64,
-                    translated.body.as_slice(),
-                ) else {
-                    return Ok(None);
-                };
-                native_messages = false;
-                runtime_deepseek_log_native_search_fallback(context, model);
-                body
-            }
-            None => return Ok(None),
+    .map_err(|error| anyhow::anyhow!("Mojo DeepSeek local rewrite planning failed: {error:?}"))?;
+    if initial_route == DeepSeekLocalRewriteRoute::Chat {
+        return Ok(Some(RuntimeDeepSeekPreparedModelRequest {
+            body: translated.body,
+            native_messages: false,
+            pending: RuntimeDeepSeekPendingRequest {
+                messages: translated.messages,
+                response_metadata: translated.response_metadata,
+            },
+        }));
+    }
+    let mut input =
+        ProviderTransformInput::new(ProviderEndpoint::Responses, translated.body.clone());
+    input.model = Some(model.to_string());
+    let result = translate_openai_chat_request_to_anthropic_messages(input);
+    runtime_provider_log_request_conformance(
+        &context.shared.runtime_shared,
+        context.request_id,
+        RuntimeProviderBridgeKind::DeepSeek,
+        &result,
+    );
+    let route = runtime_deepseek_local_rewrite_route(
+        context.web_search_mode as i64,
+        translated.body.as_slice(),
+        &result,
+    )?;
+    let (body, native_messages) = match route {
+        DeepSeekLocalRewriteRoute::Chat => (translated.body, false),
+        DeepSeekLocalRewriteRoute::NativeMessages => (
+            result
+                .body
+                .ok_or_else(|| anyhow::anyhow!("DeepSeek native translation returned no body"))?,
+            true,
+        ),
+        DeepSeekLocalRewriteRoute::AutoChatFallback => {
+            let body = deepseek_provider_core_auto_chat_fallback_body(
+                context.web_search_mode as i64,
+                translated.body.as_slice(),
+            )
+            .ok_or_else(|| anyhow::anyhow!("DeepSeek automatic chat fallback produced no body"))?;
+            runtime_deepseek_log_native_search_fallback(context, model);
+            (body, false)
         }
-    } else {
-        translated.body
+        DeepSeekLocalRewriteRoute::Incompatible => return Ok(None),
     };
     Ok(Some(RuntimeDeepSeekPreparedModelRequest {
         body,
@@ -527,6 +546,28 @@ fn runtime_deepseek_prepare_model_request(
             response_metadata: translated.response_metadata,
         },
     }))
+}
+
+fn runtime_deepseek_local_rewrite_route(
+    mode: i64,
+    body: &[u8],
+    result: &prodex_provider_core::ProviderTransformResult,
+) -> Result<DeepSeekLocalRewriteRoute> {
+    let (status, reason) = match &result.loss {
+        ProviderTransformLoss::Lossless => (DeepSeekTranslationStatus::Lossless, None),
+        ProviderTransformLoss::DegradedButSafe { .. } => {
+            (DeepSeekTranslationStatus::Degraded, None)
+        }
+        ProviderTransformLoss::Rejected { reason } => {
+            (DeepSeekTranslationStatus::Rejected, Some(reason.as_str()))
+        }
+        ProviderTransformLoss::UnsupportedUpstream { reason } => (
+            DeepSeekTranslationStatus::Unsupported,
+            Some(reason.as_str()),
+        ),
+    };
+    prodex_mojo_core::deepseek_local_rewrite::route(mode, body, status, reason)
+        .map_err(|error| anyhow::anyhow!("Mojo DeepSeek local rewrite planning failed: {error:?}"))
 }
 
 fn runtime_deepseek_send_model_attempt(

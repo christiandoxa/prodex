@@ -485,6 +485,19 @@
           "catalog_ascii_casefold_find"
         ]
       },
+      "mojo/prodex_core/deepseek.mojo": {
+        "operations": [
+          "deepseek_simple_request_eligibility",
+          "deepseek_request_metadata_composition",
+          "deepseek_strict_schema_normalization",
+          "deepseek_stream_shape_fallbacks",
+          "deepseek_response_format_shape_policy",
+          "deepseek_request_metadata_shape_policy",
+          "deepseek_json_guidance_policy",
+          "deepseek_response_usage_mapping",
+          "deepseek_local_rewrite_route_policy"
+        ]
+      },
       "mojo/prodex_core/log_semantics.mojo": {
         "operations": [
           "runtime_log_level_classification",
@@ -791,7 +804,8 @@
           "deepseek_response_format_shape_policy",
           "deepseek_request_metadata_shape_policy",
           "deepseek_json_guidance_policy",
-          "deepseek_response_usage_mapping"
+          "deepseek_response_usage_mapping",
+          "deepseek_local_rewrite_route_policy"
         ]
       },
       {
@@ -1555,6 +1569,16 @@
         "operations": [
           "deepseek_precommit_attempt_policy",
           "deepseek_first_event_retry_policy"
+        ]
+      },
+      {
+        "path": "crates/prodex-mojo-core/src/deepseek_local_rewrite.rs",
+        "language": "rust",
+        "classification": "MIXED",
+        "production_reachable": true,
+        "role": "adapter",
+        "operations": [
+          "deepseek_local_rewrite_route_policy"
         ]
       },
       {
@@ -7235,6 +7259,29 @@
       "rust_adapter_scope": "u8 fact conversion and validated boolean mapping"
     },
     {
+      "name": "deepseek_local_rewrite_route_policy",
+      "domain": "provider/deepseek",
+      "introduced_in": "0.440.0",
+      "baseline_state": "Rust selected native Messages versus chat routes and safe automatic chat fallback from DeepSeek translation outcomes",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_deepseek_local_rewrite_route_v1",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/deepseek.mojo",
+      "consumer": "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_deepseek_send.rs",
+      "consumer_marker": "prodex_mojo_core::deepseek_local_rewrite::route(",
+      "production_consumers": [
+        "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_deepseek_send.rs"
+      ],
+      "production_reachability_test": "crates/prodex-mojo-core/tests/deepseek_local_rewrite.rs",
+      "rust_owner_before": "DeepSeek local rewrite routing, native translation fallback safety, and terminal incompatibility selection",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "deleted; direct Mojo ABI cases and required-Mojo production caller regressions preserve chat, native Messages, safe Auto fallback, and terminal incompatibility boundaries",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "bounded request/reason bytes, provider transform invocation and loss mapping, JSON body materialization, and transport/auth/logging effects"
+    },
+    {
       "name": "runtime_responses_loop_policy",
       "domain": "runtime-proxy/responses-loop",
       "introduced_in": "0.437.1",
@@ -8268,6 +8315,30 @@
       "production_consumer": "crates/prodex-provider-core/src/deepseek_bridge/request_tools.rs",
       "parity_test": "crates/prodex-provider-core/src/deepseek_bridge/tests/strict_schema.rs",
       "performance": "one bounded Mojo normalization call after validation"
+    },
+    {
+      "file": "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_deepseek_send.rs",
+      "symbol": "provider_core_rewritten_body",
+      "operation": "deepseek_local_rewrite_route_policy",
+      "previous_responsibility": "Rust selected the translated native body directly through the provider bridge before safe fallback planning",
+      "final_state": "deleted",
+      "rust_before": "provider_core_rewritten_body was imported by the DeepSeek local rewrite caller as part of the native route decision",
+      "rust_after": "the caller maps provider loss facts into the bounded Mojo route ABI and retains only body materialization and transport effects",
+      "mojo_owner": "mojo/prodex_core/deepseek.mojo::prodex_deepseek_local_rewrite_route_v1",
+      "mojo_source": "mojo/prodex_core/deepseek.mojo",
+      "mojo_entry": "prodex_deepseek_local_rewrite_route_v1",
+      "production_consumer": "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_deepseek_send.rs",
+      "parity_test": "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_deepseek_send_tests.rs",
+      "performance": "one bounded route decision per translated request",
+      "cleanup_loc": 6,
+      "cleanup_source": {
+        "kind": "deleted",
+        "baseline_range": {
+          "start": 35,
+          "end": 41
+        }
+      },
+      "cleanup_evidence": "The local rewrite caller no longer imports the provider bridge body-selection helper; route selection is performed by the required Mojo ABI and the Rust caller only materializes the selected body."
     },
     {
       "file": "crates/prodex-app/src/runtime_launch/proxy_startup/anthropic_messages_sse_reader.rs",

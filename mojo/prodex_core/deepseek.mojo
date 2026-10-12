@@ -49,6 +49,18 @@ comptime DEEPSEEK_KERNEL_STATUS_UTF8: Int64 = 2
 comptime DEEPSEEK_KERNEL_STATUS_CAPACITY: Int64 = 3
 comptime DEEPSEEK_KERNEL_STATUS_ABI: Int64 = 4
 
+# The local rewrite planner has its own small ABI because it combines the
+# request route with the provider translation result before any stream starts.
+comptime DEEPSEEK_LOCAL_REWRITE_ABI_VERSION: Int64 = 1
+comptime DEEPSEEK_LOCAL_REWRITE_CHAT: Int64 = 0
+comptime DEEPSEEK_LOCAL_REWRITE_NATIVE_MESSAGES: Int64 = 1
+comptime DEEPSEEK_LOCAL_REWRITE_AUTO_CHAT_FALLBACK: Int64 = 2
+comptime DEEPSEEK_LOCAL_REWRITE_INCOMPATIBLE: Int64 = 3
+comptime DEEPSEEK_TRANSLATION_LOSSLESS: Int64 = 0
+comptime DEEPSEEK_TRANSLATION_DEGRADED: Int64 = 1
+comptime DEEPSEEK_TRANSLATION_REJECTED: Int64 = 2
+comptime DEEPSEEK_TRANSLATION_UNSUPPORTED: Int64 = 3
+
 comptime DEEPSEEK_REQUEST_BODY: Int64 = 1
 comptime DEEPSEEK_SYSTEM_MESSAGE: Int64 = 2
 comptime DEEPSEEK_USER_MESSAGE: Int64 = 3
@@ -3110,6 +3122,67 @@ def deepseek_strict_binding_route_plan(
         return False
     deepseek_policy_set(output, Int64(1) if strict_tools and endpoint_tag == 0 else Int64(0))
     return True
+
+
+@export("prodex_deepseek_local_rewrite_route_v1")
+def prodex_deepseek_local_rewrite_route_v1(
+    abi_version: Int64,
+    mode: Int64,
+    body_address: UInt,
+    body_length: Int64,
+    translation_status: Int64,
+    reason_address: UInt,
+    reason_length: Int64,
+    output_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != DEEPSEEK_LOCAL_REWRITE_ABI_VERSION:
+        return DEEPSEEK_KERNEL_STATUS_ABI
+    if (
+        mode < 0
+        or mode > 3
+        or body_length < 0
+        or body_length > DEEPSEEK_KERNEL_MAX_BYTES
+        or translation_status < DEEPSEEK_TRANSLATION_LOSSLESS
+        or translation_status > DEEPSEEK_TRANSLATION_UNSUPPORTED
+        or reason_length < 0
+        or reason_length > DEEPSEEK_KERNEL_MAX_BYTES
+        or (body_length > 0 and body_address == 0)
+        or (reason_length > 0 and reason_address == 0)
+        or output_address == 0
+    ):
+        return DEEPSEEK_KERNEL_STATUS_INVALID
+
+    var output = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    var body = ProdexRichStringView(body_address, UInt(body_length))
+    if not rich_view_valid(body, DEEPSEEK_KERNEL_MAX_BYTES):
+        return DEEPSEEK_KERNEL_STATUS_UTF8
+    var native = Array[Int64, 1](fill=0)
+    if not deepseek_native_web_search_plan(body, mode, native.unsafe_ptr()):
+        return DEEPSEEK_KERNEL_STATUS_INVALID
+    if native[0] == 0:
+        output[] = DEEPSEEK_LOCAL_REWRITE_CHAT
+        return DEEPSEEK_KERNEL_STATUS_OK
+
+    if (
+        translation_status == DEEPSEEK_TRANSLATION_LOSSLESS
+        or translation_status == DEEPSEEK_TRANSLATION_DEGRADED
+    ):
+        output[] = DEEPSEEK_LOCAL_REWRITE_NATIVE_MESSAGES
+        return DEEPSEEK_KERNEL_STATUS_OK
+
+    var reason = ProdexRichStringView(reason_address, UInt(reason_length))
+    if not rich_view_valid(reason, DEEPSEEK_KERNEL_MAX_BYTES):
+        return DEEPSEEK_KERNEL_STATUS_UTF8
+    var safe = Array[Int64, 1](fill=0)
+    if not deepseek_native_fallback_safe_plan(reason, safe.unsafe_ptr()):
+        return DEEPSEEK_KERNEL_STATUS_INVALID
+    if mode == 0 and safe[0] == 1:
+        output[] = DEEPSEEK_LOCAL_REWRITE_AUTO_CHAT_FALLBACK
+    else:
+        output[] = DEEPSEEK_LOCAL_REWRITE_INCOMPATIBLE
+    return DEEPSEEK_KERNEL_STATUS_OK
 
 
 def deepseek_request_policy_v1(
