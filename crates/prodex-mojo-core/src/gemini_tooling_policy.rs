@@ -5,6 +5,8 @@ const FLAG_MUTATING: i64 = 1;
 const FLAG_CANONICAL_EXEC: i64 = 2;
 const GEMINI_PATCH_BLOCK_STATUS_NO_MATCH: i64 = 2;
 const GEMINI_PATCH_BLOCK_STATUS_CAPACITY: i64 = 3;
+const GEMINI_EDIT_PATCH_STATUS_NO_MATCH: i64 = 2;
+const GEMINI_EDIT_PATCH_STATUS_CAPACITY: i64 = 3;
 
 const ALIASES: &[(i64, &str)] = &[
     (1 << 0, "exec_command"),
@@ -65,6 +67,20 @@ unsafe extern "C" {
         abi_version: i64,
         input_address: u64,
         input_length: i64,
+        output_address: u64,
+        output_capacity: i64,
+        written_address: u64,
+    ) -> i64;
+    fn prodex_gemini_edit_patch_v1(
+        abi_version: i64,
+        path_address: u64,
+        path_length: i64,
+        old_address: u64,
+        old_length: i64,
+        old_present: i64,
+        new_address: u64,
+        new_length: i64,
+        new_present: i64,
         output_address: u64,
         output_capacity: i64,
         written_address: u64,
@@ -226,6 +242,70 @@ pub fn gemini_apply_patch_block(input: &str) -> Result<Option<String>, MojoError
     }
 }
 
+/// Assembles a Gemini edit-tool Add/Update patch through the Mojo policy.
+pub fn gemini_edit_patch(
+    path: &str,
+    old: Option<&str>,
+    new: Option<&str>,
+) -> Result<Option<String>, MojoError> {
+    const MAX_INPUT_BYTES: usize = 4 * 1024 * 1024;
+    const MAX_OUTPUT_BYTES: usize = 16 * 1024 * 1024;
+    let path = path.trim();
+    if path.is_empty()
+        || path.len() > MAX_INPUT_BYTES
+        || old.is_some_and(|value| value.len() > MAX_INPUT_BYTES)
+        || new.is_some_and(|value| value.len() > MAX_INPUT_BYTES)
+    {
+        return Ok(None);
+    }
+    let mut capacity = path
+        .len()
+        .saturating_add(old.map_or(0, str::len))
+        .saturating_add(new.map_or(0, str::len))
+        .saturating_add(128)
+        .clamp(128, MAX_OUTPUT_BYTES);
+    loop {
+        let mut output = vec![0_u8; capacity];
+        let mut written = 0_i64;
+        let result = unsafe {
+            prodex_gemini_edit_patch_v1(
+                ABI_VERSION,
+                path.as_ptr() as usize as u64,
+                signed(path.len())?,
+                old.map_or(0, |value| value.as_ptr() as usize as u64),
+                signed(old.map_or(0, str::len))?,
+                i64::from(old.is_some()),
+                new.map_or(0, |value| value.as_ptr() as usize as u64),
+                signed(new.map_or(0, str::len))?,
+                i64::from(new.is_some()),
+                output.as_mut_ptr() as usize as u64,
+                signed(output.len())?,
+                (&mut written as *mut i64) as usize as u64,
+            )
+        };
+        match result {
+            0 => {
+                let written = usize::try_from(written).map_err(|_| MojoError::InvalidOutput)?;
+                if written > output.len() {
+                    return Err(MojoError::InvalidOutput);
+                }
+                output.truncate(written);
+                return String::from_utf8(output)
+                    .map(Some)
+                    .map_err(|_| MojoError::InvalidOutput);
+            }
+            GEMINI_EDIT_PATCH_STATUS_NO_MATCH => return Ok(None),
+            GEMINI_EDIT_PATCH_STATUS_CAPACITY if capacity < MAX_OUTPUT_BYTES => {
+                capacity = capacity.saturating_mul(2).min(MAX_OUTPUT_BYTES);
+            }
+            1 => return Err(MojoError::InvalidInput),
+            GEMINI_EDIT_PATCH_STATUS_CAPACITY => return Err(MojoError::Capacity),
+            4 => return Err(MojoError::AbiMismatch),
+            _ => return Err(MojoError::InvalidOutput),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -314,6 +394,29 @@ mod tests {
             )
         );
         assert_eq!(gemini_apply_patch_block("plain text").unwrap(), None);
+    }
+
+    #[test]
+    fn gemini_edit_patch_kernel_selects_add_update_and_no_match() {
+        assert_eq!(
+            gemini_edit_patch("note.txt", None, Some("hello\r\nworld")).unwrap(),
+            Some(
+                "*** Begin Patch\n*** Add File: note.txt\n+hello\n+world\n*** End Patch"
+                    .to_string()
+            )
+        );
+        assert_eq!(
+            gemini_edit_patch("note.txt", Some("old"), Some("new")).unwrap(),
+            Some(
+                "*** Begin Patch\n*** Update File: note.txt\n@@\n-old\n+new\n*** End Patch"
+                    .to_string()
+            )
+        );
+        assert_eq!(
+            gemini_edit_patch("note.txt", Some("old"), None).unwrap(),
+            None
+        );
+        assert_eq!(gemini_edit_patch("  ", None, Some("new")).unwrap(), None);
     }
 
     #[test]

@@ -1207,7 +1207,8 @@
         "operations": [
           "gemini_tool_name_policy",
           "gemini3_model_toolset_policy",
-          "gemini_apply_patch_block_normalization"
+          "gemini_apply_patch_block_normalization",
+          "gemini_edit_patch_assembly"
         ]
       },
       {
@@ -5793,7 +5794,30 @@
       "production_fallback": false,
       "duplicate_production_owner": false,
       "platform_fallback": false,
-      "rust_adapter_scope": "Serde argument extraction, bounded Mojo ABI invocation, UTF-8 result materialization, unified-diff Mojo dispatch, and edit-argument patch assembly"
+      "rust_adapter_scope": "Serde argument extraction, bounded Mojo ABI invocation, UTF-8 result materialization, and unified-diff Mojo dispatch"
+    },
+    {
+      "name": "gemini_edit_patch_assembly",
+      "domain": "provider/gemini",
+      "introduced_in": "0.438.0",
+      "baseline_state": "Rust selected edit-tool path/old/new aliases and assembled Add File or Update File apply-patch text with newline normalization",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_gemini_edit_patch_v1",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/gemini_tooling_policy.mojo",
+      "consumer": "crates/prodex-provider-core/src/translators/gemini/response_tool_calls_apply_patch.rs",
+      "consumer_marker": "gemini_edit_patch(",
+      "production_consumers": [
+        "crates/prodex-provider-core/src/translators/gemini/response_tool_calls_apply_patch.rs"
+      ],
+      "production_reachability_test": "crates/prodex-provider-core/src/translators/gemini_tool_call_tests.rs",
+      "rust_owner_before": "Edit-tool alias selection, Add File versus Update File operation selection, CRLF/CR normalization, and patch line assembly",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "deleted; direct Mojo ABI and required-Mojo provider caller regressions preserve alias precedence, Add/Update selection, empty inputs, malformed values, and newline edges",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "Serde JSON candidate extraction, bounded Mojo ABI invocation, and UTF-8 result materialization"
     },
     {
       "name": "provider_scalar_policy",

@@ -132,6 +132,46 @@ fn gemini_apply_patch_block_normalization_requires_mojo() {
 }
 
 #[test]
+fn gemini_edit_patch_assembly_requires_mojo_and_preserves_edge_inputs() {
+    const { assert!(prodex_mojo_core::MOJO_ACTIVE) }
+
+    assert_eq!(
+        gemini_custom_apply_patch_input(&json!({
+            "path": " note.txt ",
+            "old": "",
+            "new": "hello\rworld"
+        })),
+        "*** Begin Patch\n*** Add File: note.txt\n+hello\n+world\n*** End Patch"
+    );
+    assert_eq!(
+        gemini_custom_apply_patch_input(&json!({
+            "filename": "note.txt",
+            "old_string": "old",
+            "new_string": "new"
+        })),
+        "*** Begin Patch\n*** Update File: note.txt\n@@\n-old\n+new\n*** End Patch"
+    );
+    assert_eq!(
+        gemini_custom_apply_patch_input(&json!({
+            "path": "note.txt",
+            "new": ""
+        })),
+        "*** Begin Patch\n*** Add File: note.txt\n+\n*** End Patch"
+    );
+    assert_eq!(
+        gemini_custom_apply_patch_input(&json!({"path": "note.txt"})),
+        r#"{"path":"note.txt"}"#
+    );
+    assert_eq!(
+        gemini_custom_apply_patch_input(&json!({
+            "path": 42,
+            "new": ["not", "text"]
+        })),
+        r#"{"new":["not","text"],"path":42}"#
+    );
+}
+
+#[test]
 fn gemini_provider_core_shapes_completed_stream_tool_call_items() {
     assert_eq!(
         gemini_provider_core_stream_completed_tool_call_arguments("apply_patch", "*** Begin Patch"),

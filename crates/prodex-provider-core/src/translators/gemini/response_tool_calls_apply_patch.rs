@@ -4,7 +4,11 @@ pub(crate) fn gemini_custom_apply_patch_input(args_value: &Value) -> String {
     if let Some(input) = gemini_explicit_apply_patch_input(args_value) {
         return gemini_normalize_apply_patch_input(input).unwrap_or_else(|| input.to_string());
     }
-    if let Some(input) = gemini_edit_args_to_apply_patch(args_value) {
+    if let Some((path, old_string, new_string)) = gemini_edit_args(args_value)
+        && let Some(input) =
+            prodex_mojo_core::gemini_tooling_policy::gemini_edit_patch(path, old_string, new_string)
+                .expect("Mojo Gemini edit patch assembly failed")
+    {
         return input;
     }
     if let Some(input) = gemini_content_apply_patch_input(args_value) {
@@ -40,7 +44,7 @@ fn gemini_normalize_apply_patch_input(input: &str) -> Option<String> {
         })
 }
 
-fn gemini_edit_args_to_apply_patch(args_value: &Value) -> Option<String> {
+fn gemini_edit_args(args_value: &Value) -> Option<(&str, Option<&str>, Option<&str>)> {
     let object = args_value.as_object()?;
     let path = ["file_path", "path", "filename"]
         .iter()
@@ -53,54 +57,5 @@ fn gemini_edit_args_to_apply_patch(args_value: &Value) -> Option<String> {
     let new_string = ["new_string", "new", "replace", "replacement", "content"]
         .iter()
         .find_map(|key| object.get(*key).and_then(Value::as_str));
-    match (old_string, new_string) {
-        (Some(""), Some(new_string)) => Some(gemini_add_file_patch(path, new_string)),
-        (Some(old_string), Some(new_string)) => {
-            Some(gemini_update_file_patch(path, old_string, new_string))
-        }
-        (None, Some(new_string)) => Some(gemini_add_file_patch(path, new_string)),
-        _ => None,
-    }
-}
-
-fn gemini_add_file_patch(path: &str, new_string: &str) -> String {
-    let mut lines = vec![
-        "*** Begin Patch".to_string(),
-        format!("*** Add File: {path}"),
-    ];
-    if new_string.is_empty() {
-        lines.push("+".to_string());
-    } else {
-        lines.extend(
-            gemini_normalized_newlines(new_string)
-                .lines()
-                .map(|line| format!("+{line}")),
-        );
-    }
-    lines.push("*** End Patch".to_string());
-    lines.join("\n")
-}
-
-fn gemini_update_file_patch(path: &str, old_string: &str, new_string: &str) -> String {
-    let mut lines = vec![
-        "*** Begin Patch".to_string(),
-        format!("*** Update File: {path}"),
-        "@@".to_string(),
-    ];
-    lines.extend(
-        gemini_normalized_newlines(old_string)
-            .lines()
-            .map(|line| format!("-{line}")),
-    );
-    lines.extend(
-        gemini_normalized_newlines(new_string)
-            .lines()
-            .map(|line| format!("+{line}")),
-    );
-    lines.push("*** End Patch".to_string());
-    lines.join("\n")
-}
-
-fn gemini_normalized_newlines(input: &str) -> String {
-    input.replace("\r\n", "\n").replace('\r', "\n")
+    Some((path, old_string, new_string))
 }
