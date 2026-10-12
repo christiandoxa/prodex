@@ -728,7 +728,8 @@
         "role": "semantic",
         "operations": [
           "provider_error_request_member_rejection",
-          "provider_error_code_extraction"
+          "provider_error_code_extraction",
+          "provider_native_sse_error_classification"
         ]
       },
       {
@@ -7392,6 +7393,26 @@
       "duplicate_production_owner": false,
       "platform_fallback": false,
       "rust_adapter_scope": "SSE parsing, BTreeSet membership and mutation, host timing, effect construction, and typed Mojo plan mapping"
+    },
+    {
+      "name": "provider_native_sse_error_classification",
+      "domain": "provider/error",
+      "introduced_in": "0.437.8",
+      "baseline_state": "Rust parsed native SSE error events and selected provider error-code precedence",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_provider_error_native_event_classify_v1",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/provider_error.mojo",
+      "consumer": "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_upstream/error_class.rs",
+      "consumer_marker": "prodex_mojo_core::rich::classify_native_event_error(",
+      "production_reachability_test": "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_upstream.rs",
+      "rust_owner_before": "Native SSE error-event gate, error-code precedence, and provider classification",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "deleted; required-Mojo caller tests and a deliberate code-precedence mutation prove the production boundary",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "bounded SSE framing, UTF-8/Serde acquisition, and typed provider-class mapping"
     }
   ],
   "rust_semantic_reductions": [
@@ -8323,26 +8344,6 @@
       "parity_test": "crates/prodex-mojo-core/tests/gemini_response_media.rs",
       "performance": "one bounded parsed-tree Mojo call per response part projection",
       "cleanup_evidence": "The prior Rust MIME, data-URL, special-text, and image-generation shaping branches are deleted; direct Mojo and provider-core caller tests retain fixed expected values."
-    },
-    {
-      "name": "provider_native_sse_error_classification",
-      "domain": "provider/error",
-      "introduced_in": "0.437.8",
-      "baseline_state": "Rust parsed native SSE error events and selected provider error-code precedence",
-      "final_state": "authoritative",
-      "mojo_entry": "prodex_provider_error_native_event_classify_v1",
-      "mojo_abi_version": 1,
-      "mojo_source": "mojo/prodex_core/provider_error.mojo",
-      "consumer": "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_upstream/error_class.rs",
-      "consumer_marker": "prodex_mojo_core::rich::classify_native_event_error(",
-      "production_reachability_test": "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_upstream.rs",
-      "rust_owner_before": "Native SSE error-event gate, error-code precedence, and provider classification",
-      "rust_state_after": "adapter-only",
-      "rust_test_oracle": "deleted; required-Mojo caller tests and a deliberate code-precedence mutation prove the production boundary",
-      "production_fallback": false,
-      "duplicate_production_owner": false,
-      "platform_fallback": false,
-      "rust_adapter_scope": "bounded SSE framing, UTF-8/Serde acquisition, and typed provider-class mapping"
     }
   ],
   "deleted_authoritative_operations": [
