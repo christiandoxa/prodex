@@ -62,6 +62,129 @@ unsafe extern "C" {
         goal_status: i64,
         budget_available: i64,
     ) -> i64;
+    fn prodex_launch_workflow_recovery_class_v1(
+        abi_version: i64,
+        name_address: u64,
+        name_length: i64,
+        status: i64,
+        output_address: u64,
+    ) -> i64;
+    fn prodex_launch_workflow_evidence_v1(
+        abi_version: i64,
+        observation: i64,
+        acceptance_state: i64,
+        stream_state: i64,
+        side_effect_state: i64,
+        output_address: u64,
+    ) -> i64;
+}
+
+#[repr(i64)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum WorkflowObservationKind {
+    Other = 0,
+    TurnStarted = 1,
+    UserAccepted = 2,
+    AssistantCommitted = 3,
+    SideEffectObserved = 4,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct WorkflowEvidencePlan {
+    pub acceptance_state: i64,
+    pub stream_state: i64,
+    pub side_effect_state: i64,
+}
+
+#[repr(i64)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum WorkflowRecoveryClass {
+    UsageLimit = 1,
+    RateLimit = 2,
+    Overload = 3,
+    Auth = 4,
+    Transport = 5,
+}
+
+/// Classify a bounded Codex error tag through the required Mojo owner.
+pub fn workflow_recovery_class(
+    name: &str,
+    status: Option<u16>,
+) -> Result<Option<WorkflowRecoveryClass>, MojoError> {
+    if name.len() > 256 {
+        return Err(MojoError::InvalidInput);
+    }
+    let mut output = 0_i64;
+    let status = status.map(i64::from).unwrap_or(-1);
+    let result = unsafe {
+        prodex_launch_workflow_recovery_class_v1(
+            1,
+            name.as_ptr() as usize as u64,
+            name.len() as i64,
+            status,
+            (&mut output as *mut i64) as usize as u64,
+        )
+    };
+    match result {
+        0 => match output {
+            0 => Ok(None),
+            1 => Ok(Some(WorkflowRecoveryClass::UsageLimit)),
+            2 => Ok(Some(WorkflowRecoveryClass::RateLimit)),
+            3 => Ok(Some(WorkflowRecoveryClass::Overload)),
+            4 => Ok(Some(WorkflowRecoveryClass::Auth)),
+            5 => Ok(Some(WorkflowRecoveryClass::Transport)),
+            _ => Err(MojoError::InvalidOutput),
+        },
+        1 => Err(MojoError::InvalidInput),
+        4 => Err(MojoError::AbiMismatch),
+        _ => Err(MojoError::InvalidOutput),
+    }
+}
+
+/// Apply the workflow acceptance transition selected by Mojo.
+pub fn workflow_evidence_plan(
+    observation: WorkflowObservationKind,
+    current: WorkflowEvidencePlan,
+) -> Result<WorkflowEvidencePlan, MojoError> {
+    if !(0..=3).contains(&current.acceptance_state)
+        || !(-1..=1).contains(&current.stream_state)
+        || !(0..=2).contains(&current.side_effect_state)
+    {
+        return Err(MojoError::InvalidInput);
+    }
+    let mut output = [
+        current.acceptance_state,
+        current.stream_state,
+        current.side_effect_state,
+    ];
+    let result = unsafe {
+        prodex_launch_workflow_evidence_v1(
+            1,
+            observation as i64,
+            current.acceptance_state,
+            current.stream_state,
+            current.side_effect_state,
+            output.as_mut_ptr() as usize as u64,
+        )
+    };
+    match result {
+        0 => {
+            if !(0..=3).contains(&output[0])
+                || !(-1..=1).contains(&output[1])
+                || !(0..=2).contains(&output[2])
+            {
+                return Err(MojoError::InvalidOutput);
+            }
+            Ok(WorkflowEvidencePlan {
+                acceptance_state: output[0],
+                stream_state: output[1],
+                side_effect_state: output[2],
+            })
+        }
+        1 => Err(MojoError::InvalidInput),
+        4 => Err(MojoError::AbiMismatch),
+        _ => Err(MojoError::InvalidOutput),
+    }
 }
 
 pub fn recovery_observation_action(
@@ -240,6 +363,80 @@ mod tests {
         assert_eq!(
             unsafe { prodex_launch_in_place_recovery_v2(2, 1, 5, 1, 2, 1) },
             -2
+        );
+    }
+
+    #[test]
+    fn workflow_recovery_class_and_evidence_are_mojo_owned() {
+        assert_eq!(
+            workflow_recovery_class("usageLimitExceeded", None),
+            Ok(Some(WorkflowRecoveryClass::UsageLimit))
+        );
+        assert_eq!(
+            workflow_recovery_class("responseStreamDisconnected", Some(503)),
+            Ok(Some(WorkflowRecoveryClass::Transport))
+        );
+        assert_eq!(
+            workflow_recovery_class("responseStreamDisconnected", Some(400)),
+            Ok(None)
+        );
+        assert_eq!(workflow_recovery_class("unrelated", None), Ok(None));
+
+        let accepted = workflow_evidence_plan(
+            WorkflowObservationKind::UserAccepted,
+            WorkflowEvidencePlan {
+                acceptance_state: 0,
+                stream_state: -1,
+                side_effect_state: 0,
+            },
+        )
+        .unwrap();
+        assert_eq!(
+            accepted,
+            WorkflowEvidencePlan {
+                acceptance_state: 1,
+                stream_state: 0,
+                side_effect_state: 1,
+            }
+        );
+        assert_eq!(
+            workflow_evidence_plan(
+                WorkflowObservationKind::TurnStarted,
+                WorkflowEvidencePlan {
+                    acceptance_state: 3,
+                    stream_state: 1,
+                    side_effect_state: 2,
+                },
+            ),
+            Ok(WorkflowEvidencePlan {
+                acceptance_state: 0,
+                stream_state: -1,
+                side_effect_state: 0,
+            })
+        );
+        assert_eq!(
+            workflow_recovery_class("usageLimitExceeded", None),
+            workflow_recovery_class("usage_limit_exceeded", Some(401))
+        );
+    }
+
+    #[test]
+    fn workflow_recovery_abi_rejects_invalid_inputs() {
+        assert_eq!(
+            unsafe { prodex_launch_workflow_recovery_class_v1(1, 0, 0, -1, 0) },
+            1
+        );
+        assert_eq!(
+            unsafe { prodex_launch_workflow_recovery_class_v1(99, 0, 0, -1, 1) },
+            4
+        );
+        assert_eq!(
+            unsafe { prodex_launch_workflow_evidence_v1(1, 9, 0, -1, 0, 1) },
+            1
+        );
+        assert_eq!(
+            unsafe { prodex_launch_workflow_evidence_v1(1, 0, 0, -1, 0, 0) },
+            1
         );
     }
 }

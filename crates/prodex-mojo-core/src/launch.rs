@@ -19,7 +19,9 @@ pub use menu_policy::{
 mod recovery;
 pub use recovery::{
     InPlaceRecoveryAction, NativeGoalStatus, NativeThreadStatus, RecoveryObservationAction,
-    RecoveryObservationKind, in_place_recovery_action, recovery_observation_action,
+    RecoveryObservationKind, WorkflowEvidencePlan, WorkflowObservationKind, WorkflowRecoveryClass,
+    in_place_recovery_action, recovery_observation_action, workflow_evidence_plan,
+    workflow_recovery_class,
 };
 
 use crate::MojoError;
