@@ -1,5 +1,4 @@
 use anyhow::{Context, Result, bail};
-use std::io::ErrorKind;
 use std::os::unix::net::UnixStream;
 use std::path::Path;
 use std::time::{Duration, Instant};
@@ -69,41 +68,47 @@ pub(crate) fn request_result(
         }
         let message = match socket.read() {
             Ok(message) => message,
-            Err(tungstenite::Error::Io(error))
-                if matches!(error.kind(), ErrorKind::TimedOut | ErrorKind::WouldBlock) =>
-            {
-                return AppServerRequestOutcome::Ambiguous;
-            }
             Err(_) => return AppServerRequestOutcome::Ambiguous,
         };
-        match message {
-            Message::Text(text) => {
-                let Ok(value) = serde_json::from_str::<serde_json::Value>(text.as_ref()) else {
-                    return AppServerRequestOutcome::Ambiguous;
-                };
-                if value.get("id").and_then(serde_json::Value::as_u64) != Some(request_id) {
-                    continue;
-                }
-                if value.get("error").is_some() {
-                    return AppServerRequestOutcome::Rejected;
-                }
-                return AppServerRequestOutcome::Accepted(
-                    value
-                        .get("result")
-                        .cloned()
-                        .unwrap_or(serde_json::Value::Null),
-                );
-            }
-            Message::Ping(payload) => {
-                if socket.send(Message::Pong(payload)).is_err() {
-                    return AppServerRequestOutcome::Ambiguous;
-                }
-            }
-            Message::Close(_) => return AppServerRequestOutcome::Ambiguous,
-            Message::Binary(_) | Message::Pong(_) | Message::Frame(_) => {}
+        if let Some(outcome) = handle_control_message(socket, request_id, message) {
+            return outcome;
         }
     }
     AppServerRequestOutcome::Ambiguous
+}
+
+fn decode_control_response(text: &str, request_id: u64) -> Option<AppServerRequestOutcome> {
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(text) else {
+        return Some(AppServerRequestOutcome::Ambiguous);
+    };
+    if value.get("id").and_then(serde_json::Value::as_u64) != Some(request_id) {
+        return None;
+    }
+    if value.get("error").is_some() {
+        return Some(AppServerRequestOutcome::Rejected);
+    }
+    Some(AppServerRequestOutcome::Accepted(
+        value
+            .get("result")
+            .cloned()
+            .unwrap_or(serde_json::Value::Null),
+    ))
+}
+
+fn handle_control_message(
+    socket: &mut UnixAppServerSocket,
+    request_id: u64,
+    message: Message,
+) -> Option<AppServerRequestOutcome> {
+    match message {
+        Message::Text(text) => decode_control_response(text.as_ref(), request_id),
+        Message::Ping(payload) => socket
+            .send(Message::Pong(payload))
+            .err()
+            .map(|_| AppServerRequestOutcome::Ambiguous),
+        Message::Close(_) => Some(AppServerRequestOutcome::Ambiguous),
+        Message::Binary(_) | Message::Pong(_) | Message::Frame(_) => None,
+    }
 }
 
 #[cfg(test)]

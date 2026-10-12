@@ -29,6 +29,16 @@ pub enum NativeGoalStatus {
     Unknown = 7,
 }
 
+#[repr(i64)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum NativeThreadStatus {
+    Unknown = 0,
+    Idle = 1,
+    SystemError = 2,
+    Active = 3,
+    NotLoaded = 4,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum InPlaceRecoveryAction {
     Defer,
@@ -44,10 +54,10 @@ unsafe extern "C" {
         session_matches: i64,
         recoverable: i64,
     ) -> i64;
-    fn prodex_launch_in_place_recovery_v1(
+    fn prodex_launch_in_place_recovery_v2(
         abi: i64,
         verified: i64,
-        idle: i64,
+        thread_status: i64,
         expected_goal: i64,
         goal_status: i64,
         budget_available: i64,
@@ -78,16 +88,16 @@ pub fn recovery_observation_action(
 
 pub fn in_place_recovery_action(
     verified: bool,
-    idle: bool,
+    thread_status: NativeThreadStatus,
     expected_goal: bool,
     goal_status: NativeGoalStatus,
     budget_available: bool,
 ) -> Result<InPlaceRecoveryAction, MojoError> {
     match unsafe {
-        prodex_launch_in_place_recovery_v1(
-            1,
+        prodex_launch_in_place_recovery_v2(
+            2,
             i64::from(verified),
-            i64::from(idle),
+            thread_status as i64,
             i64::from(expected_goal),
             goal_status as i64,
             i64::from(budget_available),
@@ -133,46 +143,102 @@ mod tests {
         use NativeGoalStatus::*;
         for status in [Active, Blocked, UsageLimited] {
             assert_eq!(
-                in_place_recovery_action(true, true, true, status, true),
+                in_place_recovery_action(true, NativeThreadStatus::Idle, true, status, true),
                 Ok(ResumeGoal)
             );
             assert_eq!(
-                in_place_recovery_action(true, false, true, status, true),
+                in_place_recovery_action(true, NativeThreadStatus::Active, true, status, true),
                 Ok(Defer)
             );
             assert_eq!(
-                in_place_recovery_action(false, true, true, status, true),
+                in_place_recovery_action(false, NativeThreadStatus::Idle, true, status, true),
                 Ok(Defer)
             );
             assert_eq!(
-                in_place_recovery_action(true, true, true, status, false),
+                in_place_recovery_action(true, NativeThreadStatus::Idle, true, status, false),
                 Ok(Stop)
             );
         }
         for status in [Paused, BudgetLimited, Complete, Unknown] {
             assert_eq!(
-                in_place_recovery_action(true, true, true, status, true),
+                in_place_recovery_action(true, NativeThreadStatus::Idle, true, status, true),
                 Ok(Stop)
             );
         }
         assert_eq!(
-            in_place_recovery_action(true, true, true, Absent, true),
+            in_place_recovery_action(true, NativeThreadStatus::Idle, true, Absent, true),
             Ok(Stop)
         );
         assert_eq!(
-            in_place_recovery_action(true, true, false, Absent, true),
+            in_place_recovery_action(true, NativeThreadStatus::Idle, false, Absent, true),
             Ok(ContinueTurn)
         );
         assert_eq!(
-            unsafe { prodex_launch_in_place_recovery_v1(2, 1, 1, 1, 1, 1) },
+            unsafe { prodex_launch_in_place_recovery_v2(1, 1, 1, 1, 1, 1) },
             -3
         );
         assert_eq!(
-            unsafe { prodex_launch_in_place_recovery_v1(1, 2, 1, 1, 1, 1) },
+            unsafe { prodex_launch_in_place_recovery_v2(2, 2, 1, 1, 1, 1) },
             -2
         );
         assert_eq!(
             unsafe { prodex_launch_recovery_observation_v1(1, 3, 1, 1) },
+            -2
+        );
+    }
+
+    #[test]
+    fn native_thread_recovery_recognizes_system_errors_without_interrupting_active_work() {
+        for thread_status in [NativeThreadStatus::Idle, NativeThreadStatus::SystemError] {
+            assert_eq!(
+                in_place_recovery_action(
+                    true,
+                    thread_status,
+                    true,
+                    NativeGoalStatus::Blocked,
+                    true
+                ),
+                Ok(InPlaceRecoveryAction::ResumeGoal)
+            );
+            assert_eq!(
+                in_place_recovery_action(
+                    true,
+                    thread_status,
+                    false,
+                    NativeGoalStatus::Absent,
+                    true
+                ),
+                Ok(InPlaceRecoveryAction::ContinueTurn)
+            );
+            for stopped_goal in [
+                NativeGoalStatus::Paused,
+                NativeGoalStatus::BudgetLimited,
+                NativeGoalStatus::Complete,
+            ] {
+                assert_eq!(
+                    in_place_recovery_action(true, thread_status, true, stopped_goal, true),
+                    Ok(InPlaceRecoveryAction::Stop)
+                );
+            }
+        }
+        for thread_status in [
+            NativeThreadStatus::Active,
+            NativeThreadStatus::NotLoaded,
+            NativeThreadStatus::Unknown,
+        ] {
+            assert_eq!(
+                in_place_recovery_action(
+                    true,
+                    thread_status,
+                    true,
+                    NativeGoalStatus::Blocked,
+                    true
+                ),
+                Ok(InPlaceRecoveryAction::Defer)
+            );
+        }
+        assert_eq!(
+            unsafe { prodex_launch_in_place_recovery_v2(2, 1, 5, 1, 2, 1) },
             -2
         );
     }

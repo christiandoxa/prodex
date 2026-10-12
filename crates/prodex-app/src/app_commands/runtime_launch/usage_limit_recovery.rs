@@ -599,8 +599,14 @@ fn goal_status_is_resumable(status: &str) -> bool {
             .then_some(tag)
     })
     .unwrap_or(NativeGoalStatus::Unknown);
-    prodex_mojo_core::launch::in_place_recovery_action(true, true, true, tag, true)
-        .expect("Mojo native goal recovery eligibility failed")
+    prodex_mojo_core::launch::in_place_recovery_action(
+        true,
+        prodex_mojo_core::launch::NativeThreadStatus::Idle,
+        true,
+        tag,
+        true,
+    )
+    .expect("Mojo native goal recovery eligibility failed")
         == InPlaceRecoveryAction::ResumeGoal
 }
 
