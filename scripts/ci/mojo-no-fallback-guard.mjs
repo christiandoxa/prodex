@@ -6499,6 +6499,8 @@ export function findViolations(files) {
         "self.log_token_usage(tap_plan,",
         "tap_plan & 4 != 0",
         "tap_plan & 8 != 0",
+        "prodex_mojo_core::runtime_response_forwarding::response_id_plan(",
+        "prodex_mojo_core::runtime_response_forwarding::token_usage_plan(",
       ];
       return required.filter((marker) => !production.includes(marker))
         .map((marker) => `${filePath}: SSE tap semantic policy must stay Mojo-owned via ${marker}`);
@@ -6506,6 +6508,10 @@ export function findViolations(files) {
     if (filePath === "mojo/prodex_core/response_forwarding.mojo" &&
         !contents.includes("if operation == RESPONSE_FORWARDING_TAP_PLAN:")) {
       return [`${filePath}: SSE tap event semantics must remain Mojo-owned`];
+    }
+    if (filePath === "mojo/prodex_core/response_forwarding.mojo" &&
+        !contents.includes('@export("prodex_runtime_response_forwarding_tap_state_plan_v1")')) {
+      return [`${filePath}: SSE tap state effects must remain Mojo-owned`];
     }
     return [];
   });

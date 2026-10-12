@@ -1730,6 +1730,26 @@
           "native_live_recovery_observation",
           "native_in_place_recovery_eligibility"
         ]
+      },
+      {
+        "path": "mojo/prodex_core/response_forwarding.mojo",
+        "language": "mojo",
+        "classification": "DETERMINISTIC_DOMAIN",
+        "production_reachable": true,
+        "role": "semantic",
+        "operations": [
+          "runtime_response_forwarding_tap_state_policy"
+        ]
+      },
+      {
+        "path": "crates/prodex-mojo-core/src/runtime_response_forwarding.rs",
+        "language": "rust",
+        "classification": "MIXED",
+        "production_reachable": true,
+        "role": "adapter",
+        "operations": [
+          "runtime_response_forwarding_tap_state_policy"
+        ]
       }
     ],
     "removed": [
@@ -7345,6 +7365,33 @@
       "duplicate_production_owner": false,
       "platform_fallback": false,
       "rust_adapter_scope": "native JSON projection, bounded socket I/O, thread identity validation, goal-budget metadata acquisition and typed action application"
+    },
+    {
+      "name": "runtime_response_forwarding_tap_state_policy",
+      "domain": "runtime-proxy/response-forwarding",
+      "introduced_in": "0.438.0",
+      "baseline_state": "candidate",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_runtime_response_forwarding_tap_state_plan_v1",
+      "mojo_abi_version": 1,
+      "mojo_operation_ids": {
+        "response_id": 0,
+        "token_usage": 1
+      },
+      "mojo_source": "mojo/prodex_core/response_forwarding.mojo",
+      "consumer": "crates/prodex-runtime-proxy/src/response_forwarding.rs",
+      "consumer_marker": "prodex_mojo_core::runtime_response_forwarding::",
+      "production_consumers": [
+        "crates/prodex-runtime-proxy/src/response_forwarding.rs"
+      ],
+      "production_reachability_test": "crates/prodex-runtime-proxy/src/response_forwarding/classifier_tests.rs",
+      "rust_owner_before": "RuntimeSseTapState response-ID rebinding and token-usage log effect precedence",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "deleted; direct Mojo tap-state mutation/sensitivity coverage and response-forwarding caller tests cover rebinding, backfill, deduplication and generation timing",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "SSE parsing, BTreeSet membership and mutation, host timing, effect construction, and typed Mojo plan mapping"
     }
   ],
   "rust_semantic_reductions": [
