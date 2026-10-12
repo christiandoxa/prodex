@@ -1,6 +1,6 @@
 //! Gemini media MIME and data-URL helpers.
 
-use prodex_mojo_core::rich::{ascii_casefold_ends_with, ascii_casefold_equal_exact};
+use prodex_mojo_core::rich::ascii_casefold_equal_exact;
 
 pub fn gemini_provider_core_data_url_parts(image_url: &str) -> Option<(&str, &str)> {
     let rest = image_url.strip_prefix("data:")?;
@@ -20,44 +20,13 @@ pub fn gemini_provider_core_data_url_parts(image_url: &str) -> Option<(&str, &st
 }
 
 pub fn gemini_provider_core_mime_type_for_uri(uri: &str) -> &'static str {
-    let uri = uri.split(['?', '#']).next().unwrap_or(uri);
-    let ends_with = |suffix| {
-        ascii_casefold_ends_with(uri, suffix).expect("Mojo Gemini MIME suffix comparison failed")
-    };
-    if ends_with(".png") {
-        "image/png"
-    } else if ends_with(".jpg") || ends_with(".jpeg") {
-        "image/jpeg"
-    } else if ends_with(".webp") {
-        "image/webp"
-    } else if ends_with(".gif") {
-        "image/gif"
-    } else if ends_with(".pdf") {
-        "application/pdf"
-    } else if ends_with(".mp3") || ends_with(".mpeg") {
-        "audio/mpeg"
-    } else if ends_with(".wav") {
-        "audio/wav"
-    } else if ends_with(".mp4") {
-        "video/mp4"
-    } else if ends_with(".mov") {
-        "video/quicktime"
-    } else {
-        "application/octet-stream"
-    }
+    prodex_mojo_core::rich::gemini_response_media_mime_for_uri(uri)
+        .expect("Mojo Gemini media MIME URI classification failed")
 }
 
 pub fn gemini_provider_core_mime_type_is_text(mime_type: &str) -> bool {
-    mime_type.starts_with("text/")
-        || matches!(
-            mime_type,
-            "application/json"
-                | "application/xml"
-                | "application/javascript"
-                | "application/typescript"
-                | "application/x-sh"
-                | "application/octet-stream"
-        )
+    prodex_mojo_core::rich::gemini_response_media_mime_is_text(mime_type)
+        .expect("Mojo Gemini media MIME text classification failed")
 }
 
 #[cfg(test)]
@@ -82,5 +51,31 @@ mod tests {
             gemini_provider_core_mime_type_for_uri("https://example.test/file.unknown"),
             "application/octet-stream"
         );
+        assert_eq!(
+            gemini_provider_core_mime_type_for_uri("https://example.test/photo.PNG?x=.jpg"),
+            "image/png"
+        );
+        assert_eq!(
+            gemini_provider_core_mime_type_for_uri("https://example.test/video.MOV#asset=.mp3"),
+            "video/quicktime"
+        );
+        assert_eq!(
+            gemini_provider_core_mime_type_for_uri("https://example.test/no-suffix?x=.png"),
+            "application/octet-stream"
+        );
+        for (mime, expected) in [
+            ("text/plain", true),
+            ("application/json", true),
+            ("application/x-sh", true),
+            ("application/octet-stream", true),
+            ("application/JSON", false),
+            ("image/png", false),
+        ] {
+            assert_eq!(
+                gemini_provider_core_mime_type_is_text(mime),
+                expected,
+                "{mime:?}"
+            );
+        }
     }
 }
