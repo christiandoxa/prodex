@@ -120,7 +120,7 @@ fn smart_context_window_uses_active_model_cache_metadata() {
 }
 
 #[test]
-fn smart_context_window_uses_gpt_5_6_maximum_cache_metadata() {
+fn smart_context_window_does_not_promote_gpt_5_6_maximum_cache_metadata() {
     let root = temp_dir("smart-context-window-gpt-5-6-maximum");
     fs::create_dir_all(&root).unwrap();
     fs::write(root.join("config.toml"), "model = 'gpt-5.6-luna'\n").unwrap();
@@ -151,7 +151,7 @@ fn smart_context_window_uses_gpt_5_6_maximum_cache_metadata() {
 
     assert_eq!(
         runtime_launch_effective_model_context_window_tokens(&request, &root).unwrap(),
-        Some(872_000)
+        Some(272_000)
     );
 }
 

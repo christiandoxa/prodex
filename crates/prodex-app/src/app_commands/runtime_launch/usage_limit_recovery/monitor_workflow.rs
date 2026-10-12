@@ -29,6 +29,7 @@ impl GoalUsageLimitMonitor {
         &mut self,
         session_id: &str,
     ) -> Result<Option<RuntimeWorkflowRecoveryClass>> {
+        self.workflow_activity_observed = false;
         if self
             .workflow_scan_retry_at
             .is_some_and(|retry_at| Instant::now() < retry_at)
@@ -39,6 +40,7 @@ impl GoalUsageLimitMonitor {
             return Ok(None);
         };
         let mut recovery = None;
+        let mut clear_pending = false;
         let mut model = self.workflow_model.clone();
         let mut evidence = self.workflow_evidence;
         let scan = match prodex_session_store::session_file_scan_since(
@@ -48,12 +50,34 @@ impl GoalUsageLimitMonitor {
                 let Ok(value) = serde_json::from_str::<serde_json::Value>(line) else {
                     return false;
                 };
+                if !workflow::record_matches_session(&value, session_id) {
+                    return false;
+                }
                 if let Some(observed) = runtime_workflow_effective_model(&value) {
                     model = Some(observed);
                 }
                 observe_runtime_workflow_evidence(&value, &mut evidence);
-                recovery = runtime_workflow_recovery_class(&value, session_id);
-                recovery.is_some()
+                let class = runtime_workflow_recovery_class(&value, session_id);
+                let action = prodex_mojo_core::launch::recovery_observation_action(
+                    workflow::live_recovery_observation_kind(&value),
+                    true,
+                    class.is_some(),
+                )
+                .expect("Mojo native recovery observation returned invalid output");
+                match action {
+                    prodex_mojo_core::launch::RecoveryObservationAction::Ignore => {}
+                    prodex_mojo_core::launch::RecoveryObservationAction::Clear => {
+                        recovery = None;
+                        clear_pending = true;
+                    }
+                    prodex_mojo_core::launch::RecoveryObservationAction::Arm => {
+                        recovery = class;
+                        clear_pending = false;
+                    }
+                }
+                // Drain complete bounded tail records. Stopping at the first
+                // failure can miss a subsequent retry, completion or user stop.
+                false
             },
         ) {
             Ok(scan) => scan,
@@ -70,6 +94,12 @@ impl GoalUsageLimitMonitor {
         self.session_scan_offset = scan.complete_offset;
         self.workflow_model = model;
         self.workflow_evidence = evidence;
+        self.workflow_activity_observed = clear_pending;
+        if clear_pending {
+            self.usage_limit_pending = false;
+            self.workflow_recovery_class = None;
+            self.session_usage_limit_reported = false;
+        }
         Ok(recovery)
     }
 

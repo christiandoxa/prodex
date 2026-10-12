@@ -18,6 +18,9 @@ mod provider_auth;
 #[cfg(test)]
 #[path = "runtime_tools/provider_auth_tests.rs"]
 mod provider_auth_tests;
+#[cfg(unix)]
+#[path = "runtime_tools/session_recovery.rs"]
+mod session_recovery;
 #[path = "runtime_tools/sub_agents.rs"]
 mod sub_agents;
 #[path = "runtime_tools/super_dry_run.rs"]
@@ -45,7 +48,6 @@ pub(super) fn session_app_server_companion_eligible(
 ) -> bool {
     strategy.args.super_mode
         && !prodex_runtime_launch::is_codex_exec_invocation(runtime_args)
-        && !prodex_runtime_launch::codex_resume_requested(runtime_args)
         && !runtime_args.iter().any(|arg| {
             let arg = arg.to_string_lossy();
             arg == "--remote" || arg.starts_with("--remote=")
@@ -67,6 +69,8 @@ pub(crate) struct RuntimeToolLaunchStrategy {
     auto_goal_resume_attempted_profiles: BTreeSet<String>,
     goal_usage_limit_monitor: Option<GoalUsageLimitMonitor>,
     pending_goal_resume_plan: Option<GoalResumeRelaunchPlan>,
+    #[cfg(unix)]
+    native_session_recovery: Option<session_recovery::NativeSessionRecovery>,
     goal_resume_session_affinity_release: Option<String>,
     recovery_model: Option<String>,
     runtime_recovery_log_target: Option<RuntimeRecoveryLogTarget>,
@@ -110,6 +114,8 @@ impl RuntimeToolLaunchStrategy {
             auto_goal_resume_attempted_profiles: BTreeSet::new(),
             goal_usage_limit_monitor: None,
             pending_goal_resume_plan: None,
+            #[cfg(unix)]
+            native_session_recovery: None,
             goal_resume_session_affinity_release: None,
             recovery_model: None,
             runtime_recovery_log_target: None,
@@ -350,6 +356,27 @@ mod tests {
             &strategy,
             &strategy.codex_args
         ));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn resumed_super_launch_retains_one_owned_companion_for_native_recovery() {
+        let strategy = RuntimeToolLaunchStrategy::new_with_sub_agent(
+            super_as_caveman_args(&[
+                "prodex",
+                "s",
+                "resume",
+                "00000000-0000-7000-8000-000000000042",
+            ]),
+            None,
+        )
+        .expect("Codex feature plan should succeed");
+        assert!(session_app_server_companion_eligible(
+            &strategy,
+            &strategy.codex_args
+        ));
+        let exec = ["exec", "resume", "00000000-0000-7000-8000-000000000042"].map(OsString::from);
+        assert!(!session_app_server_companion_eligible(&strategy, &exec));
     }
 
     #[cfg(unix)]

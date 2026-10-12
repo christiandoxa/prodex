@@ -593,13 +593,14 @@ fn prepare_session_app_server_companion(
 
 #[cfg(unix)]
 fn attach_session_app_server_companion(
-    strategy: &RuntimeToolLaunchStrategy,
+    strategy: &mut RuntimeToolLaunchStrategy,
     prepared: &PreparedRuntimeLaunch,
     overlay_home: &Path,
     runtime_proxy: Option<&RuntimeProxyEndpoint>,
     mut plan: RuntimeLaunchPlan,
     companion: Option<(prodex_runtime_launch::ChildProcessPlan, PathBuf)>,
 ) -> RuntimeLaunchPlan {
+    strategy.native_session_recovery = None;
     let Some((mut companion, socket)) = companion else {
         return plan;
     };
@@ -615,6 +616,22 @@ fn attach_session_app_server_companion(
             "CODEX_SQLITE_HOME".into(),
             prepared.paths.shared_codex_root.as_os_str().to_os_string(),
         ));
+    }
+    if let Ok(workspace) = std::env::current_dir() {
+        let sqlite_home = companion
+            .extra_env
+            .iter()
+            .find(|(key, _)| key == "CODEX_SQLITE_HOME")
+            .map(|(_, value)| PathBuf::from(value))
+            .unwrap_or_else(|| overlay_home.to_path_buf());
+        strategy.native_session_recovery =
+            Some(super::session_recovery::NativeSessionRecovery::new(
+                socket.clone(),
+                overlay_home.to_path_buf(),
+                sqlite_home,
+                workspace,
+                runtime_proxy.and_then(|proxy| proxy.broker_session_affinity_control.clone()),
+            ));
     }
     plan.with_unix_companion(companion, socket)
 }

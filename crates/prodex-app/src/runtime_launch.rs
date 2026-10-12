@@ -40,81 +40,20 @@ pub(super) use proxy_startup::{
     start_runtime_local_rewrite_proxy, start_runtime_rotation_proxy_with_options,
 };
 
+/// Native Codex owns model context and automatic compaction defaults.
+///
+/// This common run/Super boundary deliberately does not read the catalog or
+/// synthesize overrides. Explicit CLI/config/profile values retain their native
+/// precedence, including malformed values that Codex itself must diagnose.
 pub(super) fn runtime_launch_openai_model_context_codex_args(
-    codex_home: &Path,
+    _codex_home: &Path,
     args: &[OsString],
 ) -> Result<Vec<OsString>> {
-    if !runtime_launch_openai_provider_for_args(codex_home, args)? {
-        return Ok(args.to_vec());
-    }
-    let Some(model) = runtime_launch_openai_model(codex_home, args)? else {
-        return Ok(args.to_vec());
-    };
-    if !runtime_launch_openai_model_uses_large_context(&model) {
-        return Ok(args.to_vec());
-    }
-
-    let profile_v2_name = codex_cli_profile_v2_name(args);
-    let explicit_context_window = match runtime_launch_cli_model_context_window_tokens(args) {
-        Some(value) => Some(value),
-        None => runtime_launch_config_model_context_window_tokens_with_profile_v2(
-            codex_home,
-            profile_v2_name.as_deref(),
-        )?,
-    };
-    let Some(context_window) = explicit_context_window
-        .or(runtime_launch_openai_model_context_from_models_cache(
-            codex_home, &model,
-        ))
-        .or_else(|| {
-            prodex_provider_core::provider_catalog_entry(
-                prodex_provider_core::ProviderId::OpenAi,
-                &model,
-            )
-            .and_then(|entry| entry.context_window_tokens)
-        })
-    else {
-        return Ok(args.to_vec());
-    };
-    let mut overrides = Vec::new();
-    if explicit_context_window.is_none() {
-        overrides.push(format!("model_context_window={context_window}"));
-    }
-    if runtime_launch_cli_model_auto_compact_token_limit(args)
-        .or_else(|| {
-            runtime_launch_config_model_auto_compact_token_limit_with_profile_v2(
-                codex_home,
-                profile_v2_name.as_deref(),
-            )
-        })
-        .is_none()
-    {
-        overrides.push(format!(
-            "model_auto_compact_token_limit={}",
-            context_window * 9 / 10
-        ));
-    }
-    if overrides.is_empty() {
-        return Ok(args.to_vec());
-    }
-
-    let mut next_args = Vec::with_capacity(args.len() + overrides.len() * 2);
-    for override_entry in overrides {
-        next_args.push(OsString::from("-c"));
-        next_args.push(OsString::from(override_entry));
-    }
-    next_args.extend(args.iter().cloned());
-    Ok(next_args)
+    Ok(args.to_vec())
 }
 
 pub(super) fn runtime_launch_cli_model_context_window_tokens(args: &[OsString]) -> Option<u64> {
     codex_cli_config_override_value(args, "model_context_window")
-        .as_deref()
-        .and_then(runtime_launch_parse_model_context_window_tokens)
-}
-
-fn runtime_launch_cli_model_auto_compact_token_limit(args: &[OsString]) -> Option<u64> {
-    codex_cli_config_override_value(args, "model_auto_compact_token_limit")
         .as_deref()
         .and_then(runtime_launch_parse_model_context_window_tokens)
 }
@@ -204,30 +143,8 @@ pub(super) fn runtime_launch_config_gemini_thinking_budget_tokens_with_profile_v
         .or_else(|| runtime_launch_config_gemini_thinking_budget_tokens(codex_home))
 }
 
-fn runtime_launch_config_model_auto_compact_token_limit_with_profile_v2(
-    codex_home: &Path,
-    profile_v2_name: Option<&str>,
-) -> Option<u64> {
-    profile_v2_name
-        .and_then(|profile_v2_name| codex_profile_v2_config_path(codex_home, profile_v2_name))
-        .and_then(|config_path| {
-            runtime_launch_config_file_model_auto_compact_token_limit(&config_path)
-        })
-        .or_else(|| {
-            runtime_launch_config_file_model_auto_compact_token_limit(
-                &codex_home.join("config.toml"),
-            )
-        })
-}
-
 fn runtime_launch_config_file_model_context_window_tokens(config_path: &Path) -> Option<u64> {
     runtime_launch_config_file_value(config_path, "model_context_window")
-        .as_ref()
-        .and_then(runtime_launch_toml_model_context_window_tokens)
-}
-
-fn runtime_launch_config_file_model_auto_compact_token_limit(config_path: &Path) -> Option<u64> {
-    runtime_launch_config_file_value(config_path, "model_auto_compact_token_limit")
         .as_ref()
         .and_then(runtime_launch_toml_model_context_window_tokens)
 }
@@ -268,31 +185,6 @@ fn runtime_launch_parse_gemini_thinking_budget_tokens(value: &str) -> Option<u64
     value.trim().parse::<u64>().ok()
 }
 
-fn runtime_launch_openai_provider_for_args(codex_home: &Path, args: &[OsString]) -> Result<bool> {
-    let provider = match codex_cli_config_override_value(args, "model_provider") {
-        Some(provider) => Some(provider),
-        None => codex_config_value_for_args(codex_home, args, "model_provider")?,
-    };
-    Ok(provider.is_none_or(|provider| {
-        runtime_openai_scalar_policy(RuntimeOpenAiScalarPolicy::ProviderName, &provider)
-            .expect("runtime OpenAI provider policy should accept Rust strings")
-    }))
-}
-
-fn runtime_launch_openai_model(codex_home: &Path, args: &[OsString]) -> Result<Option<String>> {
-    if let Some(model) =
-        runtime_launch_cli_model(args).or_else(|| codex_cli_config_override_value(args, "model"))
-    {
-        return Ok(Some(model));
-    }
-    Ok(codex_config_value_for_args(codex_home, args, "model")?)
-}
-
-fn runtime_launch_openai_model_uses_large_context(model: &str) -> bool {
-    runtime_openai_scalar_policy(RuntimeOpenAiScalarPolicy::LargeContextModel, model)
-        .expect("runtime OpenAI model policy should accept Rust strings")
-}
-
 fn runtime_launch_openai_model_context_from_models_cache(
     codex_home: &Path,
     model: &str,
@@ -323,19 +215,10 @@ fn runtime_launch_openai_model_context_from_models_cache(
     let index = resolve_catalog_model(&catalog, model)
         .expect("Mojo OpenAI models-cache identity lookup failed")?;
     let entry = &entries[indexed[index].0];
-    let context_window = entry.get("context_window");
-    let max_context_window = entry
-        .get("max_context_window")
-        .or_else(|| entry.get("max_context_window_tokens"));
-    let prefer_max =
-        runtime_openai_scalar_policy(RuntimeOpenAiScalarPolicy::PreferMaxContextModel, model)
-            .expect("runtime OpenAI context policy should accept Rust strings");
-    let context_window = if prefer_max {
-        max_context_window.or(context_window)
-    } else {
-        context_window.or(max_context_window)
-    };
-    context_window
+    // max_context_window is a supported ceiling, not the active model window.
+    // Reading model metadata for proxy budgeting must not promote that ceiling.
+    entry
+        .get("context_window")
         .and_then(serde_json::Value::as_u64)
         .filter(|context_window| *context_window > 1)
 }
@@ -345,23 +228,7 @@ mod openai_model_policy_tests {
     use super::*;
 
     #[test]
-    fn openai_runtime_scalar_policy_preserves_trim_and_family_rules() {
-        assert!(runtime_launch_openai_model_uses_large_context(
-            " GPT-5.6-SOL "
-        ));
-        assert!(runtime_launch_openai_model_uses_large_context("gpt-5-mini"));
-        assert!(runtime_launch_openai_model_uses_large_context(
-            "gpt-6-astra"
-        ));
-        assert!(runtime_launch_openai_model_uses_large_context("gpt-6-luna"));
-        assert!(runtime_launch_openai_model_uses_large_context(
-            "codex-auto-review"
-        ));
-        assert!(!runtime_launch_openai_model_uses_large_context("gpt-4o"));
-    }
-
-    #[test]
-    fn openai_models_cache_uses_mojo_identity_and_context_precedence() {
+    fn openai_models_cache_uses_mojo_identity_without_promoting_max_context() {
         let root = crate::test_support::test_temp_root().join(format!(
             "prodex-openai-model-cache-policy-{}",
             std::process::id()
@@ -388,7 +255,7 @@ mod openai_model_policy_tests {
         .unwrap();
         assert_eq!(
             runtime_launch_openai_model_context_from_models_cache(&root, " gpt-5.6-sol "),
-            Some(1000000)
+            Some(200000)
         );
         assert_eq!(
             runtime_launch_openai_model_context_from_models_cache(&root, "GPT-5.5"),

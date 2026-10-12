@@ -1699,6 +1699,17 @@
         "operations": [
           "runtime_proxy_mount_path_policy"
         ]
+      },
+      {
+        "path": "mojo/prodex_core/launch_config.mojo",
+        "language": "mojo",
+        "classification": "DETERMINISTIC_DOMAIN",
+        "production_reachable": true,
+        "role": "semantic",
+        "operations": [
+          "native_live_recovery_observation",
+          "native_in_place_recovery_eligibility"
+        ]
       }
     ],
     "removed": [
@@ -7245,6 +7256,52 @@
       "duplicate_production_owner": false,
       "platform_fallback": false,
       "rust_adapter_scope": "log field parsing, profile/route string ownership, metadata projections and safe typed reconstruction from Mojo group indices"
+    },
+    {
+      "name": "native_live_recovery_observation",
+      "domain": "runtime/native-recovery",
+      "introduced_in": "0.437.7",
+      "baseline_state": "Live failures triggered frontend replacement before native retry and goal arbitration",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_launch_recovery_observation_v1",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/launch_config.mojo",
+      "consumer": "crates/prodex-app/src/app_commands/runtime_launch/usage_limit_recovery/monitor_workflow.rs",
+      "consumer_marker": "prodex_mojo_core::launch::recovery_observation_action(",
+      "production_consumers": [
+        "crates/prodex-app/src/app_commands/runtime_launch/usage_limit_recovery/monitor_workflow.rs"
+      ],
+      "production_reachability_test": "crates/prodex-mojo-core/src/launch/recovery.rs",
+      "rust_owner_before": "Recovery observation ordering and native idle-goal eligibility",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "deleted; typed ABI boundaries, native event regressions, Unix protocol tests and deliberate policy mutations establish ownership",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "native JSON projection, bounded socket I/O, thread identity validation, goal-budget metadata acquisition and typed action application"
+    },
+    {
+      "name": "native_in_place_recovery_eligibility",
+      "domain": "runtime/native-recovery",
+      "introduced_in": "0.437.7",
+      "baseline_state": "Live failures triggered frontend replacement before native retry and goal arbitration",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_launch_in_place_recovery_v1",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/launch_config.mojo",
+      "consumer": "crates/prodex-app/src/runtime_tools/session_recovery.rs",
+      "consumer_marker": "in_place_recovery_action(",
+      "production_consumers": [
+        "crates/prodex-app/src/runtime_tools/session_recovery.rs"
+      ],
+      "production_reachability_test": "crates/prodex-mojo-core/src/launch/recovery.rs",
+      "rust_owner_before": "Recovery observation ordering and native idle-goal eligibility",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "deleted; typed ABI boundaries, native event regressions, Unix protocol tests and deliberate policy mutations establish ownership",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "native JSON projection, bounded socket I/O, thread identity validation, goal-budget metadata acquisition and typed action application"
     }
   ],
   "rust_semantic_reductions": [

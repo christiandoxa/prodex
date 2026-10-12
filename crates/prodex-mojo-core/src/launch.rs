@@ -15,6 +15,13 @@ pub use menu_policy::{
     super_choice_visible_range,
 };
 
+#[path = "launch/recovery.rs"]
+mod recovery;
+pub use recovery::{
+    InPlaceRecoveryAction, NativeGoalStatus, RecoveryObservationAction, RecoveryObservationKind,
+    in_place_recovery_action, recovery_observation_action,
+};
+
 use crate::MojoError;
 
 const ABI_VERSION: i64 = 1;

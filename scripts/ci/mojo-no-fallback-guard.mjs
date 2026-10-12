@@ -1151,6 +1151,21 @@ const FORBIDDEN_MARKERS = [
 ];
 
 export function findViolations(files) {
+  const nativeRecoveryOwnershipViolations = files.flatMap(([filePath, contents]) => {
+    if (filePath === "crates/prodex-app/src/runtime_launch.rs") {
+      const body = contents.match(/fn runtime_launch_openai_model_context_codex_args\([^]*?^\}/mu)?.[0];
+      return body?.includes("Ok(args.to_vec())") &&
+        !/model_context_window=|model_auto_compact_token_limit=|provider_catalog_entry/u.test(body)
+        ? [] : [`${filePath}: native Codex context and compaction must pass through without synthesized defaults`];
+    }
+    if (filePath === "crates/prodex-app/src/runtime_tools/session_recovery.rs") {
+      return contents.includes("in_place_recovery_action(") &&
+        !contents.includes('"/goal resume"') && !contents.includes("retarget_codex_tui_resume_args(")
+        ? [] : [`${filePath}: native live recovery must use Mojo eligibility and same-thread RPC, not keyboard relaunch`];
+    }
+    return [];
+  });
+
   const responsesCapacityRecoveryViolations = files.flatMap(([filePath, contents]) => {
     const production = contents.split("#[cfg(test)]", 1)[0];
     if (filePath === "crates/prodex-app/src/runtime_proxy/response_forwarding.rs") {
@@ -6423,7 +6438,7 @@ export function findViolations(files) {
     }
     return [];
   });
-  return [...quotaRecoveryEligibilityViolations, ...runtimeBrokerReuseMojoViolations, ...geminiResponseMediaMojoViolations, ...cookieEvictionMojoViolations, ...websocketBudgetMojoViolations, ...affinityBindingMojoViolations, ...responsesCapacityRecoveryViolations, ...sseTapMojoOwnershipViolations, ...quotaWatchViolations, ...geminiCompactSnippetViolations, ...doctorSmartContextDecisionViolations, ...smartContextCapsuleOrderViolations, ...markerViolations, ...deepseekCatalogPolicyViolations, ...featureOffViolations, ...liveLogRecordViolations, ...runtimePolicyPresetViolations, ...profileHealthCircuitViolations, ...logThroughputViolations, ...operationalDetailSpecViolations, ...transcriptPolicyViolations, ...logLoadPolicyViolations, ...routeReasonViolations, ...runtimeStateQuotaViolations, ...runtimeStateRoutePolicyViolations, ...runtimeProxyRootViolations, ...brokerVersionGuardViolations, ...brokerContinuityViolations, ...brokerLogCacheViolations, ...codexConfigViolations, ...statePolicyViolations, ...quotaSelectionPolicyViolations, ...routeTagMirrorViolations, ...enumTagMirrorViolations, ...appSelectionPolicyMirrorViolations, ...runtimeStateBackgroundViolations, ...redactionViolations, ...profileIdentityViolations, ...governanceInspectionViolations, ...governanceInspectionOrderingViolations, ...exactnessPlannerViolations,
+  return [...nativeRecoveryOwnershipViolations, ...quotaRecoveryEligibilityViolations, ...runtimeBrokerReuseMojoViolations, ...geminiResponseMediaMojoViolations, ...cookieEvictionMojoViolations, ...websocketBudgetMojoViolations, ...affinityBindingMojoViolations, ...responsesCapacityRecoveryViolations, ...sseTapMojoOwnershipViolations, ...quotaWatchViolations, ...geminiCompactSnippetViolations, ...doctorSmartContextDecisionViolations, ...smartContextCapsuleOrderViolations, ...markerViolations, ...deepseekCatalogPolicyViolations, ...featureOffViolations, ...liveLogRecordViolations, ...runtimePolicyPresetViolations, ...profileHealthCircuitViolations, ...logThroughputViolations, ...operationalDetailSpecViolations, ...transcriptPolicyViolations, ...logLoadPolicyViolations, ...routeReasonViolations, ...runtimeStateQuotaViolations, ...runtimeStateRoutePolicyViolations, ...runtimeProxyRootViolations, ...brokerVersionGuardViolations, ...brokerContinuityViolations, ...brokerLogCacheViolations, ...codexConfigViolations, ...statePolicyViolations, ...quotaSelectionPolicyViolations, ...routeTagMirrorViolations, ...enumTagMirrorViolations, ...appSelectionPolicyMirrorViolations, ...runtimeStateBackgroundViolations, ...redactionViolations, ...profileIdentityViolations, ...governanceInspectionViolations, ...governanceInspectionOrderingViolations, ...exactnessPlannerViolations,
     ...adaptiveBudgetViolations,
     ...providerUsageViolations,
     ...auditUsageViolations,
@@ -6496,6 +6511,19 @@ async function promotedFiles() {
 }
 
 function selfTest() {
+  const nativeLaunch = "crates/prodex-app/src/runtime_launch.rs";
+  assert.deepEqual(findViolations([[nativeLaunch,
+    "fn runtime_launch_openai_model_context_codex_args() {\n    Ok(args.to_vec())\n}"
+  ]]), []);
+  assert.match(findViolations([[nativeLaunch,
+    'fn runtime_launch_openai_model_context_codex_args() {\n    model_context_window=272000;\n}'
+  ]]).join("\n"), /must pass through/u);
+  const nativeRecovery = "crates/prodex-app/src/runtime_tools/session_recovery.rs";
+  assert.deepEqual(findViolations([[nativeRecovery, "in_place_recovery_action("]]), []);
+  assert.match(findViolations([[nativeRecovery,
+    'in_place_recovery_action(\n let prompt = "/goal resume";'
+  ]]).join("\n"), /same-thread RPC/u);
+
   const mediaFile = "crates/prodex-provider-core/src/translators/gemini/response_media.rs";
   const mediaCanonical = [
     "GeminiResponseMediaOperation::Content",

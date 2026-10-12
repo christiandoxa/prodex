@@ -454,6 +454,22 @@ prodex super --presidio
 
 Interactive Super launches render a terminal Presidio opt-in screen. Pass `--presidio` or `--no-presidio` for non-interactive launches. Ordinary interactive `prodex s` still selects the main agent and provider, then reuses the remembered provider-scoped model and effort without reopening those pickers. Super is the explicit YOLO entrypoint: it launches Codex with approval and sandbox bypass, bypasses hook-trust confirmation, and trusts the current workspace for that invocation without changing persisted Codex configuration. Use `prodex run` for the normal approval and workspace-trust flow.
 
+Native OpenAI/Codex launches leave `model_context_window`,
+`model_auto_compact_token_limit`, and compaction scope to Codex. Prodex does not
+synthesize these settings from its static catalog, turn `max_context_window`
+into an active window, or compute a private 90% compaction threshold. Explicit
+CLI, `config.toml`, and named-profile overrides remain user-owned. A reported
+maximum is not a guarantee that an existing session automatically gains that
+window; Codex model metadata and configuration determine the active value.
+
+On Unix, interactive Super launches and saved-session resumes use an owned
+native app-server. After a terminal recoverable error, the supervisor first
+checks the same idle thread and its goal state, then requests native continuation
+without replacing the TUI or typing `/goal resume`. Native retries, progress,
+user pauses, completed goals, and exhausted goal budgets take precedence. An
+ambiguous RPC acknowledgement is not blindly replayed. Actual process-exit and
+non-companion paths retain safe persisted-session recovery.
+
 On Codex/provider-bridge paths, Smart Context preserves continuation metadata and critical signals while applying deterministic, validated context rewriting. Native opaque CLIs are outside that rewrite boundary. See [docs/smart-context.md](docs/smart-context.md) for its safety model and rollout controls.
 
 Managed optimizer roots are checked in this order: `PRODEX_OPTIMIZERS_HOME`, `$XDG_DATA_HOME/prodex-optimizers`, then `~/.local/share/prodex-optimizers`.

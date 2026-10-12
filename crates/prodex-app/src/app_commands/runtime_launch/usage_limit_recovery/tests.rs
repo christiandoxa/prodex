@@ -290,7 +290,8 @@ fn usage_limit_detection_accepts_error_envelopes_not_conversation_prose() {
 #[test]
 fn post_exit_recovery_requires_a_matching_resumable_goal_when_goal_store_exists() {
     for (label, thread_id, status, expected_profile) in [
-        ("paused", SESSION_ID, "paused", Some("b")),
+        ("paused", SESSION_ID, "paused", None),
+        ("blocked", SESSION_ID, "blocked", Some("b")),
         ("complete", SESSION_ID, "complete", None),
         ("unrelated", "other-thread", "paused", None),
     ] {
