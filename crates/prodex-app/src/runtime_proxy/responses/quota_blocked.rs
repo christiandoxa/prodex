@@ -43,7 +43,7 @@ pub(super) fn runtime_responses_full_context_retry_available(
     profile_name: &str,
     prompt_cache_key: Option<&str>,
     previous_response_id: Option<&str>,
-    request_session_id: Option<&str>,
+    _request_session_id: Option<&str>,
     request_model_name: Option<&str>,
     excluded_profiles: &BTreeSet<String>,
 ) -> Result<bool> {
@@ -54,19 +54,26 @@ pub(super) fn runtime_responses_full_context_retry_available(
         })
         .transpose()?
         .unwrap_or(false);
-    if !runtime_proxy_crate::runtime_full_context_retry_signal_eligible(
-        previous_response_id.is_some(),
-        request_session_id.is_some(),
-        owner_matches,
-    ) {
-        return Ok(false);
-    }
-    runtime_responses_full_context_fallback_available(
+    let fallback_available = runtime_responses_full_context_fallback_available(
         shared,
         profile_name,
         prompt_cache_key,
         excluded_profiles,
         request_model_name,
+    )?;
+    let plan =
+        prodex_mojo_core::runtime_responses_attempt::runtime_responses_attempt_retry_signal_plan(
+            prodex_mojo_core::runtime_responses_attempt::RuntimeResponsesAttemptRetrySignalInput {
+                previous_response_present: previous_response_id.is_some(),
+                owner_matches_profile: owner_matches,
+                fallback_available,
+            },
+        )
+        .map_err(|error| {
+            anyhow::anyhow!("Mojo Responses retry signal planning failed: {error:?}")
+        })?;
+    Ok(
+        plan == prodex_mojo_core::runtime_responses_attempt::RuntimeResponsesAttemptRetrySignalPlan::RetryFullHistory,
     )
 }
 

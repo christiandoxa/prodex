@@ -3,6 +3,7 @@
 use crate::MojoError;
 
 const ABI_VERSION: i64 = 1;
+const RETRY_SIGNAL_ABI_VERSION: i64 = 1;
 
 unsafe extern "C" {
     fn prodex_runtime_responses_attempt_recovery_v1(
@@ -15,6 +16,12 @@ unsafe extern "C" {
         reconstructable_full_history: i64,
         stream_committed: i64,
         hard_affinity: i64,
+    ) -> i64;
+    fn prodex_runtime_responses_attempt_retry_signal_v1(
+        abi_version: i64,
+        previous_response_present: i64,
+        owner_matches_profile: i64,
+        fallback_available: i64,
     ) -> i64;
 }
 
@@ -34,6 +41,21 @@ pub struct RuntimeResponsesAttemptRecoveryInput {
 /// Side-effect-free recovery action selected by Mojo.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RuntimeResponsesAttemptRecoveryPlan {
+    NoRetry,
+    RetryFullHistory,
+}
+
+/// Facts observed before deciding whether a failed continuation may request a full-history retry.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RuntimeResponsesAttemptRetrySignalInput {
+    pub previous_response_present: bool,
+    pub owner_matches_profile: bool,
+    pub fallback_available: bool,
+}
+
+/// Side-effect-free full-history retry signal selected by Mojo.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RuntimeResponsesAttemptRetrySignalPlan {
     NoRetry,
     RetryFullHistory,
 }
@@ -58,6 +80,27 @@ pub fn runtime_responses_attempt_recovery_plan(
     match result {
         0 => Ok(RuntimeResponsesAttemptRecoveryPlan::NoRetry),
         1 => Ok(RuntimeResponsesAttemptRecoveryPlan::RetryFullHistory),
+        -1 => Err(MojoError::InvalidInput),
+        -4 => Err(MojoError::AbiMismatch),
+        _ => Err(MojoError::InvalidOutput),
+    }
+}
+
+/// Decide whether a failed Responses continuation may signal full-history replay.
+pub fn runtime_responses_attempt_retry_signal_plan(
+    input: RuntimeResponsesAttemptRetrySignalInput,
+) -> Result<RuntimeResponsesAttemptRetrySignalPlan, MojoError> {
+    let result = unsafe {
+        prodex_runtime_responses_attempt_retry_signal_v1(
+            RETRY_SIGNAL_ABI_VERSION,
+            i64::from(input.previous_response_present),
+            i64::from(input.owner_matches_profile),
+            i64::from(input.fallback_available),
+        )
+    };
+    match result {
+        0 => Ok(RuntimeResponsesAttemptRetrySignalPlan::NoRetry),
+        1 => Ok(RuntimeResponsesAttemptRetrySignalPlan::RetryFullHistory),
         -1 => Err(MojoError::InvalidInput),
         -4 => Err(MojoError::AbiMismatch),
         _ => Err(MojoError::InvalidOutput),
@@ -149,5 +192,36 @@ mod tests {
             },
             -1
         );
+    }
+
+    #[test]
+    fn retry_signal_requires_owned_previous_response_and_fallback() {
+        let valid = RuntimeResponsesAttemptRetrySignalInput {
+            previous_response_present: true,
+            owner_matches_profile: true,
+            fallback_available: true,
+        };
+        assert_eq!(
+            runtime_responses_attempt_retry_signal_plan(valid).unwrap(),
+            RuntimeResponsesAttemptRetrySignalPlan::RetryFullHistory
+        );
+        let mutators: &[fn(&mut RuntimeResponsesAttemptRetrySignalInput)] = &[
+            |input: &mut RuntimeResponsesAttemptRetrySignalInput| {
+                input.previous_response_present = false
+            },
+            |input: &mut RuntimeResponsesAttemptRetrySignalInput| {
+                input.owner_matches_profile = false
+            },
+            |input: &mut RuntimeResponsesAttemptRetrySignalInput| input.fallback_available = false,
+        ];
+        for mutate in mutators {
+            let mut candidate = valid;
+            mutate(&mut candidate);
+            assert_eq!(
+                runtime_responses_attempt_retry_signal_plan(candidate).unwrap(),
+                RuntimeResponsesAttemptRetrySignalPlan::NoRetry,
+                "retry signal must fail closed for {candidate:?}"
+            );
+        }
     }
 }

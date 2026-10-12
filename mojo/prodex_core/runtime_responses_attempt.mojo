@@ -3,6 +3,7 @@
 comptime RESPONSES_ATTEMPT_RECOVERY_ABI_VERSION: Int64 = 1
 comptime RESPONSES_ATTEMPT_RECOVERY_SKIP: Int64 = 0
 comptime RESPONSES_ATTEMPT_RECOVERY_FULL_HISTORY: Int64 = 1
+comptime RESPONSES_ATTEMPT_RETRY_SIGNAL_ABI_VERSION: Int64 = 1
 
 
 def responses_attempt_recovery_bool(value: Int64) -> Bool:
@@ -48,6 +49,30 @@ def prodex_runtime_responses_attempt_recovery_v1(
         and owner_matches_profile == 1
         and session_present == 1
         and reconstructable_full_history == 1
+    ):
+        return RESPONSES_ATTEMPT_RECOVERY_FULL_HISTORY
+    return RESPONSES_ATTEMPT_RECOVERY_SKIP
+
+
+@export("prodex_runtime_responses_attempt_retry_signal_v1")
+def prodex_runtime_responses_attempt_retry_signal_v1(
+    abi_version: Int64,
+    previous_response_present: Int64,
+    owner_matches_profile: Int64,
+    fallback_available: Int64,
+) abi("C") -> Int64:
+    if abi_version != RESPONSES_ATTEMPT_RETRY_SIGNAL_ABI_VERSION:
+        return -4
+    if (
+        not responses_attempt_recovery_bool(previous_response_present)
+        or not responses_attempt_recovery_bool(owner_matches_profile)
+        or not responses_attempt_recovery_bool(fallback_available)
+    ):
+        return -1
+    if (
+        previous_response_present == 1
+        and owner_matches_profile == 1
+        and fallback_available == 1
     ):
         return RESPONSES_ATTEMPT_RECOVERY_FULL_HISTORY
     return RESPONSES_ATTEMPT_RECOVERY_SKIP
