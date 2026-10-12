@@ -104,6 +104,10 @@ const PROFILE_LOGIN_CLAUDE_FILE = "crates/prodex-app/src/profile_commands/login/
 const PROFILE_LOGIN_ADAPTER_FILE = "crates/prodex-mojo-core/src/profile_login_policy.rs";
 const PROFILE_LOGIN_MOJO_FILE = "mojo/prodex_core/profile_login_policy.mojo";
 const PROFILE_LOGIN_TEST_FILE = "crates/prodex-mojo-core/tests/profile_login_policy.rs";
+const MAIN_MODEL_CATALOG_FILE = "crates/prodex-app/src/app_commands/super_main_catalog.rs";
+const MAIN_MODEL_CATALOG_ADAPTER_FILE = "crates/prodex-mojo-core/src/rich/catalog_planner.rs";
+const MAIN_MODEL_CATALOG_MOJO_FILE = "mojo/prodex_core/rich_catalog.mojo";
+const MAIN_MODEL_CATALOG_TEST_FILE = "crates/prodex-mojo-core/src/rich_tests.rs";
 const PROMOTED_FILES = [
   "crates/prodex-app/src/runtime_proxy/quota/gate.rs",
   "crates/prodex-app/src/runtime_proxy/websocket_message/failure_handling/retry_recovery.rs",
@@ -335,6 +339,8 @@ const PROMOTED_FILES = [
   "crates/prodex-mojo-core/src/rich.rs",
   "crates/prodex-mojo-core/src/rich/catalog.rs",
   "crates/prodex-mojo-core/src/rich/catalog_planner.rs",
+  MAIN_MODEL_CATALOG_MOJO_FILE,
+  MAIN_MODEL_CATALOG_TEST_FILE,
   "crates/prodex-mojo-core/src/rich/context_plan.rs",
   "crates/prodex-mojo-core/src/log.rs",
   "crates/prodex-mojo-core/src/log_load.rs",
@@ -4946,6 +4952,48 @@ export function findViolations(files) {
       /\bfn\s+matches_id_or_alias\s*\(/u.test(contents) &&
       !contents.includes("resolve_catalog_model("))
     .map(([filePath]) => `${filePath}: model matcher must use the Mojo catalog kernel`);
+  const mainModelCatalogViolations = files.flatMap(([filePath, contents]) => {
+    if (filePath === MAIN_MODEL_CATALOG_FILE) {
+      const required = [
+        "plan_dynamic_catalog(",
+        "source.aliases.clone()",
+        "default_effort: model.default_effort",
+      ];
+      const violations = required
+        .filter((marker) => !contents.includes(marker))
+        .map((marker) => `${filePath}: main model catalog caller must retain ${marker}`);
+      if (contents.includes("valid_default_effort(") ||
+          /owned\.iter\(\)\.find\(\|entry\|\s*entry\.id\.trim\(\)/u.test(contents)) {
+        violations.push(`${filePath}: default-effort validation and source selection must remain Mojo-owned`);
+      }
+      return violations;
+    }
+    if (filePath === MAIN_MODEL_CATALOG_ADAPTER_FILE) {
+      const required = [
+        "plan_catalog_defaults(",
+        "prodex_mojo_rich_catalog_defaults_v1(",
+        "source_index:",
+      ];
+      return required
+        .filter((marker) => !contents.includes(marker))
+        .map((marker) => `${filePath}: dynamic catalog adapter must retain ${marker}`);
+    }
+    if (filePath === MAIN_MODEL_CATALOG_MOJO_FILE) {
+      const required = [
+        '@export("prodex_mojo_rich_catalog_defaults_v1")',
+        "catalog_plan_copy_validated_default(",
+      ];
+      return required
+        .filter((marker) => !contents.includes(marker))
+        .map((marker) => `${filePath}: dynamic catalog Mojo owner must retain ${marker}`);
+    }
+    if (filePath === MAIN_MODEL_CATALOG_TEST_FILE) {
+      return contents.includes("rich_catalog_dynamic_defaults_are_trimmed_and_validated_by_mojo")
+        ? []
+        : [`${filePath}: required-Mojo dynamic catalog test must cover default validation`];
+    }
+    return [];
+  });
   const catalogModelViolations = files.flatMap(([filePath, contents]) => {
     if (filePath !== "crates/prodex-app/src/runtime_external_provider_config/catalog_model.rs") return [];
     const body = contents.match(/\bpub\(super\) fn external_catalog_model_indices\([^]*?^\}/mu)?.[0];
@@ -6619,7 +6667,7 @@ export function findViolations(files) {
     ...deepseekResponseToolCallViolations, ...chatToolViolations,
     ...previousResponseOutcomeLabelViolations, ...affinityChainLogRenderViolations, ...previousResponseLogRenderViolations, ...structuredLogPolicyViolations, ...candidateSkipReasonViolations, ...runtimeProxyObservabilityLabelViolations, ...websocketExecutorLabelViolations, ...infoRenderViolations, ...doctorMarkerViolations, ...doctorFailureClassViolations, ...doctorMarkerSummaryCountsViolations, ...doctorCompactExitCountsViolations, ...doctorTimelineDetailViolations, ...doctorLastMarkerLineViolations, ...runtimeDoctorPlanInputViolations, ...cliDefaultRunViolations, ...responseMetadataViolations, ...doctorMarkerAbiViolations, ...statusSummaryViolations,
     ...geminiBufferedResponseViolations, ...fingerprintDeltaViolations, ...profileExportPolicyViolations, ...sessionReportViolations, ...runtimeLineageViolations, ...smartContextMarkerViolations, ...smartContextSymbolIndexViolations, ...sessionUsageLimitViolations, ...smartContextArtifactRefViolations, ...smartContextDuplicateTextViolations, ...runtimeRepoMapViolations,
-    ...modelSpecViolations, ...catalogModelViolations,
+    ...modelSpecViolations, ...mainModelCatalogViolations, ...catalogModelViolations,
     ...deepseekShapingViolations,
     ...deepseekStreamFallbackViolations,
     ...quotaWindowViolations, ...quotaResetEpochViolations,
@@ -8041,6 +8089,17 @@ function selfTest() {
   assert.match(findViolations([[MODEL_SPEC_FILE,
     "fn matches_id_or_alias() { self.id.eq_ignore_ascii_case(model) }"]]).join("\n"),
     /model matcher must use the Mojo catalog kernel/u);
+  assert.deepEqual(findViolations([[MAIN_MODEL_CATALOG_FILE,
+    "fn main_model_choices_from_catalog() { plan_dynamic_catalog(&models); default_effort: model.default_effort; source.aliases.clone(); }"]]), []);
+  assert.match(findViolations([[MAIN_MODEL_CATALOG_FILE,
+    "fn valid_default_effort() {}"]]).join("\n"),
+    /default-effort validation and source selection must remain Mojo-owned/u);
+  assert.deepEqual(findViolations([[MAIN_MODEL_CATALOG_ADAPTER_FILE,
+    "fn plan_catalog_defaults() { prodex_mojo_rich_catalog_defaults_v1(); source_index: 0; }"]]), []);
+  assert.deepEqual(findViolations([[MAIN_MODEL_CATALOG_MOJO_FILE,
+    '@export("prodex_mojo_rich_catalog_defaults_v1") def catalog_plan_copy_validated_default(): pass']]), []);
+  assert.deepEqual(findViolations([[MAIN_MODEL_CATALOG_TEST_FILE,
+    "fn rich_catalog_dynamic_defaults_are_trimmed_and_validated_by_mojo() {}"]]), []);
   assert.match(findViolations([[
     "crates/prodex-app/src/runtime_external_provider_config/catalog_model.rs",
     "let static_models = provider.models();\nfn external_catalog_model_indices_rust() {}",

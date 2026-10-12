@@ -170,6 +170,19 @@ struct ProdexRichCatalogPlanResult(Copyable):
     var issue_length: Int64
 
 
+@fieldwise_init
+struct ProdexRichCatalogDefaultsResult(Copyable):
+    var abi_version: Int64
+    var defaults_written: Int64
+    var required_defaults: Int64
+    var output_written: Int64
+    var required_output: Int64
+    var issue_kind: Int64
+    var issue_index: Int64
+    var issue_offset: Int64
+    var issue_length: Int64
+
+
 
 
 

@@ -402,13 +402,13 @@ pub(super) fn main_model_choices_from_catalog(
         default_effort: None,
     }];
     for model in plan.models {
-        let source = owned.iter().find(|entry| entry.id.trim() == model.id)?;
+        let source = owned.get(model.source_index)?;
         choices.push(MainModelChoice {
             choice: prodex_provider_core::ProviderModelChoice::Model(model.id),
             label: model.label,
             efforts: (!model.efforts.is_empty()).then_some(model.efforts.clone()),
             aliases: source.aliases.clone(),
-            default_effort: valid_default_effort(source.default_effort.as_deref(), &model.efforts),
+            default_effort: model.default_effort,
         });
     }
     choices.push(MainModelChoice {
@@ -428,19 +428,6 @@ fn catalog_entry_model_id(entry: &serde_json::Value) -> &str {
         .map(str::trim)
         .filter(|model| !model.is_empty())
         .unwrap_or("")
-}
-
-fn valid_default_effort(default_effort: Option<&str>, efforts: &[String]) -> Option<String> {
-    default_effort
-        .map(str::trim)
-        .filter(|default| !default.is_empty())
-        .filter(|default| {
-            efforts.iter().any(|effort| {
-                ascii_casefold_equal_exact(effort, default)
-                    .expect("Mojo catalog effort comparison failed")
-            })
-        })
-        .map(str::to_string)
 }
 
 fn main_model_prompt_title(
@@ -603,5 +590,28 @@ mod tests {
             ),
             "Main-agent model"
         );
+    }
+
+    #[test]
+    fn dynamic_catalog_defaults_follow_mojo_validation() {
+        let choices = main_model_choices_from_catalog(vec![
+            serde_json::json!({
+                "slug": "first",
+                "display_name": "First",
+                "supported_reasoning_levels": [{"effort": " LOW "}],
+                "default_reasoning_level": " low ",
+                "aliases": ["first-alias"],
+            }),
+            serde_json::json!({
+                "slug": "second",
+                "display_name": "Second",
+                "supported_reasoning_levels": [{"effort": "medium"}],
+                "default_reasoning_level": "high",
+            }),
+        ])
+        .expect("dynamic catalog should produce choices");
+        assert_eq!(choices[1].default_effort.as_deref(), Some("low"));
+        assert_eq!(choices[1].aliases, ["first-alias"]);
+        assert_eq!(choices[2].default_effort, None);
     }
 }

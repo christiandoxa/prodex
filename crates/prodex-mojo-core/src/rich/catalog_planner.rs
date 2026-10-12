@@ -156,22 +156,21 @@ pub fn plan_dynamic_catalog(
         return Err(status_error(status, 6, result.issue_kind, 0, 0));
     }
     validate_catalog_plan_result(&result, choices.len(), output_efforts.len(), output.len())?;
+    let defaults = plan_catalog_defaults(&rich_models, &efforts, &aliases)?;
     let choice_count = result.choices_written as usize;
     let output = &output[..result.output_written as usize];
     let output_efforts = &output_efforts[..result.efforts_written as usize];
     validate_catalog_choice_sentinels(&choices, choice_count)?;
+    let views = CatalogPlannedViews {
+        choices: &choices,
+        output_ids: &output_ids,
+        output_labels: &output_labels,
+        output_efforts,
+        output,
+        defaults: &defaults,
+    };
     let planned = (1..choice_count - 1)
-        .map(|index| {
-            planned_catalog_model(
-                index,
-                models,
-                &choices,
-                &output_ids,
-                &output_labels,
-                output_efforts,
-                output,
-            )
-        })
+        .map(|index| planned_catalog_model(index, models, views))
         .collect::<Result<Vec<_>, _>>()?;
     Ok(CatalogChoicesPlan { models: planned })
 }
@@ -198,6 +197,59 @@ fn validate_catalog_plan_result(
     Ok(())
 }
 
+fn plan_catalog_defaults(
+    models: &[RichCatalogPlanModel],
+    efforts: &[RichStringView],
+    aliases: &[RichStringView],
+) -> Result<Vec<Option<String>>, MojoError> {
+    let model_count = models.len();
+    let mut output_defaults = vec![RichSlice::default(); model_count.max(1)];
+    let output_capacity = models.iter().try_fold(1_usize, |total, model| {
+        total
+            .checked_add(
+                usize::try_from(model.default_effort.len).map_err(|_| MojoError::InvalidInput)?,
+            )
+            .ok_or(MojoError::InvalidInput)
+    })?;
+    let mut output = vec![0_u8; output_capacity];
+    let mut result = RichCatalogDefaultsResult::default();
+    let status = unsafe {
+        prodex_mojo_rich_catalog_defaults_v1(
+            RICH_ABI_VERSION,
+            address(models),
+            i64::try_from(model_count).map_err(|_| MojoError::InvalidInput)?,
+            address(efforts),
+            i64::try_from(efforts.len()).map_err(|_| MojoError::InvalidInput)?,
+            address(aliases),
+            i64::try_from(aliases.len()).map_err(|_| MojoError::InvalidInput)?,
+            mojo_mut_pointer_address(output_defaults.as_mut_ptr()),
+            i64::try_from(output_defaults.len()).map_err(|_| MojoError::InvalidInput)?,
+            mojo_mut_pointer_address(output.as_mut_ptr()),
+            i64::try_from(output.len()).map_err(|_| MojoError::InvalidInput)?,
+            mojo_mut_pointer_address(&mut result),
+        )
+    };
+    if status != 0 {
+        return Err(status_error(status, 6, result.issue_kind, 0, 0));
+    }
+    if result.abi_version != RICH_ABI_VERSION
+        || result.defaults_written < 0
+        || result.defaults_written as usize > output_defaults.len()
+        || result.required_defaults != result.defaults_written
+        || result.defaults_written as usize != model_count
+        || result.output_written < 0
+        || result.output_written as usize > output.len()
+        || result.required_output != result.output_written
+    {
+        return Err(MojoError::InvalidOutput);
+    }
+    let output = &output[..result.output_written as usize];
+    output_defaults[..model_count]
+        .iter()
+        .map(|default| checked_slice_text(output, *default))
+        .collect()
+}
+
 fn validate_catalog_choice_sentinels(
     choices: &[RichCatalogPlanChoice],
     choice_count: usize,
@@ -212,16 +264,22 @@ fn validate_catalog_choice_sentinels(
     Ok(())
 }
 
+#[derive(Clone, Copy)]
+struct CatalogPlannedViews<'a> {
+    choices: &'a [RichCatalogPlanChoice],
+    output_ids: &'a [RichSlice],
+    output_labels: &'a [RichSlice],
+    output_efforts: &'a [RichSlice],
+    output: &'a [u8],
+    defaults: &'a [Option<String>],
+}
+
 fn planned_catalog_model(
     index: usize,
     models: &[CatalogPlanModel<'_>],
-    choices: &[RichCatalogPlanChoice],
-    output_ids: &[RichSlice],
-    output_labels: &[RichSlice],
-    output_efforts: &[RichSlice],
-    output: &[u8],
+    views: CatalogPlannedViews<'_>,
 ) -> Result<CatalogPlannedModel, MojoError> {
-    let choice = choices[index];
+    let choice = views.choices[index];
     if choice.kind != CATALOG_CHOICE_CATALOG {
         return Err(MojoError::InvalidOutput);
     }
@@ -229,19 +287,30 @@ fn planned_catalog_model(
         .ok()
         .filter(|index| *index < models.len())
         .ok_or(MojoError::InvalidOutput)?;
-    let id = checked_slice_text(output, output_ids[index])?.ok_or(MojoError::InvalidOutput)?;
+    let id = checked_slice_text(views.output, views.output_ids[index])?
+        .ok_or(MojoError::InvalidOutput)?;
     if id != models[model_index].id.trim() {
         return Err(MojoError::InvalidOutput);
     }
-    let label =
-        checked_slice_text(output, output_labels[index])?.ok_or(MojoError::InvalidOutput)?;
+    let label = checked_slice_text(views.output, views.output_labels[index])?
+        .ok_or(MojoError::InvalidOutput)?;
     if label != models[model_index].label.trim() {
         return Err(MojoError::InvalidOutput);
     }
     let effort_count =
         usize::try_from(choice.effort_count).map_err(|_| MojoError::InvalidOutput)?;
-    let efforts = catalog_model_efforts(choice, effort_count, output_efforts, output)?;
-    Ok(CatalogPlannedModel { id, label, efforts })
+    let efforts = catalog_model_efforts(choice, effort_count, views.output_efforts, views.output)?;
+    Ok(CatalogPlannedModel {
+        source_index: model_index,
+        id,
+        label,
+        efforts,
+        default_effort: views
+            .defaults
+            .get(model_index)
+            .cloned()
+            .ok_or(MojoError::InvalidOutput)?,
+    })
 }
 
 fn catalog_model_efforts(
@@ -410,9 +479,11 @@ pub struct CatalogPlanModel<'a> {
 /// Ordered, filtered catalog models returned by Mojo.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CatalogPlannedModel {
+    pub source_index: usize,
     pub id: String,
     pub label: String,
     pub efforts: Vec<String>,
+    pub default_effort: Option<String>,
 }
 
 /// Validated dynamic catalog choice plan.
@@ -470,6 +541,20 @@ unsafe extern "C" {
         output_capacity: i64,
         result: u64,
     ) -> i64;
+    fn prodex_mojo_rich_catalog_defaults_v1(
+        abi_version: i64,
+        models: u64,
+        model_count: i64,
+        efforts: u64,
+        effort_count: i64,
+        aliases: u64,
+        alias_count: i64,
+        output_defaults: u64,
+        default_capacity: i64,
+        output: u64,
+        output_capacity: i64,
+        result: u64,
+    ) -> i64;
     fn prodex_mojo_rich_catalog_config_v1(
         abi_version: i64,
         role: i64,
@@ -523,9 +608,11 @@ mod tests {
         assert_eq!(
             plan.models,
             [CatalogPlannedModel {
+                source_index: 0,
                 id: "model".to_string(),
                 label: "Model".to_string(),
                 efforts: Vec::new(),
+                default_effort: None,
             }]
         );
     }

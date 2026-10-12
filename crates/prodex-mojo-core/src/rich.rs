@@ -335,6 +335,20 @@ struct RichCatalogPlanResult {
 
 #[repr(C)]
 #[derive(Debug, Clone, Copy, Default)]
+struct RichCatalogDefaultsResult {
+    abi_version: i64,
+    defaults_written: i64,
+    required_defaults: i64,
+    output_written: i64,
+    required_output: i64,
+    issue_kind: i64,
+    issue_index: i64,
+    issue_offset: i64,
+    issue_length: i64,
+}
+
+#[repr(C)]
+#[derive(Debug, Clone, Copy, Default)]
 struct RichFallbackRecord {
     model: RichSlice,
     source_kind: i64,
@@ -400,6 +414,7 @@ const _: () = {
     assert!(std::mem::size_of::<RichCatalogPlanModel>() == 96);
     assert!(std::mem::size_of::<RichCatalogPlanChoice>() == 32);
     assert!(std::mem::size_of::<RichCatalogPlanResult>() == 136);
+    assert!(std::mem::size_of::<RichCatalogDefaultsResult>() == 72);
     assert!(std::mem::size_of::<RichPlanItem>() == 32);
     assert!(std::mem::size_of::<RichPlanAction>() == 48);
     assert!(std::mem::size_of::<RichPlanResult>() == 72);
