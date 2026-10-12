@@ -61,8 +61,8 @@
   },
   {
     "file": "crates/prodex-mojo-core/src/quota.rs",
-    "maxLines": 1194,
-    "reason": "Quota ABI boundary with unchanged public entry points; executable diagnostic self-checks now live in quota/self_checks.rs. Ratchet the previous 1253-line cap to the audited 1194 lines without changing the normal limit."
+    "maxLines": 1123,
+    "reason": "Quota ABI root with stable public entry points; model-capacity marshalling is isolated in quota/model_capacity.rs, and diagnostic self-checks in quota/self_checks.rs. This cap is ratcheted down after the domain split."
   },
   {
     "file": "crates/prodex-runtime-state/tests/src/lib.rs",
