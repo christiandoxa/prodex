@@ -154,6 +154,115 @@ def prodex_launch_recovery_observation_v1(
     return 2 if recoverable == 1 else 1
 
 
+# Workflow recovery classes: none=0, usageLimit=1, rateLimit=2,
+# overload=3, auth=4, transport=5. The Rust adapter owns JSON envelope
+# projection; this operation owns the class decision for the bounded error tag.
+comptime PRODEX_WORKFLOW_CLASS_ABI_VERSION: Int64 = 1
+comptime PRODEX_WORKFLOW_CLASS_STATUS_OK: Int64 = 0
+comptime PRODEX_WORKFLOW_CLASS_STATUS_INVALID: Int64 = 1
+comptime PRODEX_WORKFLOW_CLASS_STATUS_ABI: Int64 = 4
+comptime PRODEX_WORKFLOW_CLASS_NONE: Int64 = 0
+comptime PRODEX_WORKFLOW_CLASS_USAGE: Int64 = 1
+comptime PRODEX_WORKFLOW_CLASS_RATE: Int64 = 2
+comptime PRODEX_WORKFLOW_CLASS_OVERLOAD: Int64 = 3
+comptime PRODEX_WORKFLOW_CLASS_AUTH: Int64 = 4
+comptime PRODEX_WORKFLOW_CLASS_TRANSPORT: Int64 = 5
+
+
+def launch_workflow_text_equals(address: UInt, length: Int64, literal: StringSlice) -> Bool:
+    var expected = Int64(literal.byte_length())
+    if address == 0 or length != expected or length < 0 or length > 256:
+        return False
+    var input = Pointer[mut=False, UInt8, ImmUntrackedOrigin](
+        unsafe_from_address=Int(address)
+    )
+    var target = literal.unsafe_ptr()
+    for index in range(expected):
+        if input[unsafe_offset=index] != target[unsafe_offset=index]:
+            return False
+    return True
+
+
+def launch_workflow_transient_status(status: Int64) -> Bool:
+    return status == -1 or status == 401 or status == 429 or status == 500 or status == 502 or status == 503 or status == 504 or status == 529
+
+
+@export("prodex_launch_workflow_recovery_class_v1")
+def prodex_launch_workflow_recovery_class_v1(
+    abi_version: Int64,
+    name_address: UInt,
+    name_length: Int64,
+    status: Int64,
+    output_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != PRODEX_WORKFLOW_CLASS_ABI_VERSION:
+        return PRODEX_WORKFLOW_CLASS_STATUS_ABI
+    if name_length < 0 or name_length > 256 or (name_length > 0 and name_address == 0) or output_address == 0:
+        return PRODEX_WORKFLOW_CLASS_STATUS_INVALID
+    var output = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    output[] = PRODEX_WORKFLOW_CLASS_NONE
+    if launch_workflow_text_equals(name_address, name_length, StringSlice("usage_limit_exceeded")) or launch_workflow_text_equals(name_address, name_length, StringSlice("usageLimitExceeded")):
+        output[] = PRODEX_WORKFLOW_CLASS_USAGE
+    elif launch_workflow_text_equals(name_address, name_length, StringSlice("rate_limit_exceeded")) or launch_workflow_text_equals(name_address, name_length, StringSlice("rateLimitExceeded")):
+        output[] = PRODEX_WORKFLOW_CLASS_RATE
+    elif launch_workflow_text_equals(name_address, name_length, StringSlice("server_overloaded")) or launch_workflow_text_equals(name_address, name_length, StringSlice("serverOverloaded")):
+        output[] = PRODEX_WORKFLOW_CLASS_OVERLOAD
+    elif launch_workflow_text_equals(name_address, name_length, StringSlice("unauthorized")):
+        output[] = PRODEX_WORKFLOW_CLASS_AUTH
+    elif launch_workflow_transient_status(status):
+        if launch_workflow_text_equals(name_address, name_length, StringSlice("internal_server_error")) or launch_workflow_text_equals(name_address, name_length, StringSlice("internalServerError")) or launch_workflow_text_equals(name_address, name_length, StringSlice("http_connection_failed")) or launch_workflow_text_equals(name_address, name_length, StringSlice("httpConnectionFailed")) or launch_workflow_text_equals(name_address, name_length, StringSlice("response_stream_connection_failed")) or launch_workflow_text_equals(name_address, name_length, StringSlice("responseStreamConnectionFailed")) or launch_workflow_text_equals(name_address, name_length, StringSlice("response_stream_disconnected")) or launch_workflow_text_equals(name_address, name_length, StringSlice("responseStreamDisconnected")) or launch_workflow_text_equals(name_address, name_length, StringSlice("response_too_many_failed_attempts")) or launch_workflow_text_equals(name_address, name_length, StringSlice("responseTooManyFailedAttempts")):
+            output[] = PRODEX_WORKFLOW_CLASS_TRANSPORT
+    return PRODEX_WORKFLOW_CLASS_STATUS_OK
+
+
+# Workflow evidence states: acceptance ambiguous=0, accepted=1, committed=2,
+# side effect=3; stream unknown=-1, false=0, true=1; side effect unknown=0,
+# none=1, observed=2. Rust supplies only the already parsed event kind.
+comptime PRODEX_WORKFLOW_EVIDENCE_ABI_VERSION: Int64 = 1
+comptime PRODEX_WORKFLOW_EVIDENCE_STATUS_OK: Int64 = 0
+comptime PRODEX_WORKFLOW_EVIDENCE_STATUS_INVALID: Int64 = 1
+comptime PRODEX_WORKFLOW_EVIDENCE_STATUS_ABI: Int64 = 4
+
+
+@export("prodex_launch_workflow_evidence_v1")
+def prodex_launch_workflow_evidence_v1(
+    abi_version: Int64,
+    observation: Int64,
+    acceptance_state: Int64,
+    stream_state: Int64,
+    side_effect_state: Int64,
+    output_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != PRODEX_WORKFLOW_EVIDENCE_ABI_VERSION:
+        return PRODEX_WORKFLOW_EVIDENCE_STATUS_ABI
+    if observation < 0 or observation > 4 or acceptance_state < 0 or acceptance_state > 3 or stream_state < -1 or stream_state > 1 or side_effect_state < 0 or side_effect_state > 2 or output_address == 0:
+        return PRODEX_WORKFLOW_EVIDENCE_STATUS_INVALID
+    var output = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    output[unsafe_offset=0] = acceptance_state
+    output[unsafe_offset=1] = stream_state
+    output[unsafe_offset=2] = side_effect_state
+    if observation == 1:
+        output[unsafe_offset=0] = 0
+        output[unsafe_offset=1] = -1
+        output[unsafe_offset=2] = 0
+    elif observation == 2:
+        output[unsafe_offset=0] = 1
+        output[unsafe_offset=1] = 0
+        output[unsafe_offset=2] = 1
+    elif observation == 3:
+        output[unsafe_offset=0] = 2
+        output[unsafe_offset=1] = 1
+    elif observation == 4:
+        output[unsafe_offset=0] = 3
+        output[unsafe_offset=1] = 1
+        output[unsafe_offset=2] = 2
+    return PRODEX_WORKFLOW_EVIDENCE_STATUS_OK
+
+
 # Goal status: absent=0, active=1, blocked=2, usageLimited=3,
 # paused=4, budgetLimited=5, complete=6, unknown=7.
 # Thread status: unknown=0, idle=1, systemError=2, active=3, notLoaded=4.

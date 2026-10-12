@@ -1734,7 +1734,9 @@
         "role": "semantic",
         "operations": [
           "native_live_recovery_observation",
-          "native_in_place_recovery_eligibility"
+          "native_in_place_recovery_eligibility",
+          "runtime_workflow_recovery_class",
+          "runtime_workflow_evidence_policy"
         ]
       },
       {
@@ -7531,6 +7533,53 @@
       "duplicate_production_owner": false,
       "platform_fallback": false,
       "rust_adapter_scope": "bounded SSE framing, UTF-8/Serde acquisition, and typed provider-class mapping"
+    },
+
+    {
+      "name": "runtime_workflow_recovery_class",
+      "domain": "app/runtime-launch",
+      "introduced_in": "0.439.0",
+      "baseline_state": "Rust classified structured workflow recovery errors and maintained acceptance evidence transitions.",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_launch_workflow_recovery_class_v1",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/launch_config.mojo",
+      "consumer": "crates/prodex-app/src/app_commands/runtime_launch/usage_limit_recovery/workflow.rs",
+      "consumer_marker": "workflow_recovery_class(",
+      "production_consumers": [
+        "crates/prodex-app/src/app_commands/runtime_launch/usage_limit_recovery/workflow.rs"
+      ],
+      "production_reachability_test": "crates/prodex-mojo-core/src/launch/recovery.rs",
+      "rust_owner_before": "Structured workflow recovery error-tag and HTTP-status classification.",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "deleted; production workflow regressions, required-Mojo ABI cases, and mutation proof cover recovery-class decisions.",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "Serde envelope projection, bounded error-tag/status extraction, typed ABI mapping, and recovery side effects."
+    },
+    {
+      "name": "runtime_workflow_evidence_policy",
+      "domain": "app/runtime-launch",
+      "introduced_in": "0.439.0",
+      "baseline_state": "Rust classified structured workflow recovery errors and maintained acceptance evidence transitions.",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_launch_workflow_evidence_v1",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/launch_config.mojo",
+      "consumer": "crates/prodex-app/src/app_commands/runtime_launch/usage_limit_recovery/workflow.rs",
+      "consumer_marker": "workflow_evidence_plan(",
+      "production_consumers": [
+        "crates/prodex-app/src/app_commands/runtime_launch/usage_limit_recovery/workflow.rs"
+      ],
+      "production_reachability_test": "crates/prodex-mojo-core/src/launch/recovery.rs",
+      "rust_owner_before": "Workflow acceptance, stream-commit, and tool-side-effect state transitions.",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "deleted; production workflow regressions, required-Mojo ABI cases, and mutation proof cover workflow-evidence decisions.",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "Serde envelope projection, bounded error-tag/status extraction, typed ABI mapping, and recovery side effects."
     }
   ],
   "rust_semantic_reductions": [

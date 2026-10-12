@@ -1,3 +1,7 @@
+use prodex_mojo_core::launch::{
+    WorkflowEvidencePlan, WorkflowObservationKind, WorkflowRecoveryClass, workflow_evidence_plan,
+    workflow_recovery_class,
+};
 use serde_json::{Map, Value};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -111,29 +115,10 @@ pub(super) fn observe_runtime_workflow_evidence(
         && matches!(payload_type, Some("task_started" | "turn_started"))
         || matches!(outer, Some("task_started" | "turn_started"))
         || object.get("method").and_then(Value::as_str) == Some("turn/started");
-    if turn_started {
-        *evidence = RuntimeWorkflowEvidence::default();
-        return;
-    }
-
     let user = matches!(outer, Some("response_item" | "message")) && role == Some("user")
         || outer == Some("event_msg") && payload_type == Some("user_message");
-    if user {
-        *evidence = RuntimeWorkflowEvidence {
-            acceptance_state: "accepted_but_uncommitted",
-            stream_committed: Some(false),
-            side_effect_state: "none",
-        };
-        return;
-    }
-
     let assistant = matches!(outer, Some("response_item" | "message")) && role == Some("assistant")
         || outer == Some("event_msg") && payload_type == Some("agent_message");
-    if assistant {
-        evidence.acceptance_state = "committed";
-        evidence.stream_committed = Some(true);
-    }
-
     let side_effect = outer == Some("response_item")
         && matches!(
             payload_type,
@@ -150,10 +135,57 @@ pub(super) fn observe_runtime_workflow_evidence(
                     "exec_command_end" | "patch_apply_end" | "mcp_tool_call_end" | "tool_completed"
                 )
             );
-    if side_effect {
-        evidence.acceptance_state = "side_effect_observed";
-        evidence.stream_committed = Some(true);
-        evidence.side_effect_state = "observed";
+    let observation = if turn_started {
+        WorkflowObservationKind::TurnStarted
+    } else if side_effect {
+        WorkflowObservationKind::SideEffectObserved
+    } else if assistant {
+        WorkflowObservationKind::AssistantCommitted
+    } else if user {
+        WorkflowObservationKind::UserAccepted
+    } else {
+        WorkflowObservationKind::Other
+    };
+    let current = WorkflowEvidencePlan {
+        acceptance_state: match evidence.acceptance_state {
+            "accepted_but_uncommitted" => 1,
+            "committed" => 2,
+            "side_effect_observed" => 3,
+            _ => 0,
+        },
+        stream_state: match evidence.stream_committed {
+            Some(false) => 0,
+            Some(true) => 1,
+            None => -1,
+        },
+        side_effect_state: match evidence.side_effect_state {
+            "none" => 1,
+            "observed" => 2,
+            _ => 0,
+        },
+    };
+    let plan = workflow_evidence_plan(observation, current)
+        .expect("Mojo workflow evidence transition failed");
+    *evidence = RuntimeWorkflowEvidence {
+        acceptance_state: match plan.acceptance_state {
+            1 => "accepted_but_uncommitted",
+            2 => "committed",
+            3 => "side_effect_observed",
+            _ => "acceptance_ambiguous",
+        },
+        stream_committed: match plan.stream_state {
+            0 => Some(false),
+            1 => Some(true),
+            _ => None,
+        },
+        side_effect_state: match plan.side_effect_state {
+            1 => "none",
+            2 => "observed",
+            _ => "unknown",
+        },
+    };
+    if turn_started {
+        return;
     }
 }
 
@@ -282,32 +314,20 @@ fn classify_codex_error(
         .and_then(|object| object.values().find_map(Value::as_object))
         .and_then(http_status);
     let status = outer_status.or(variant_status);
-    match name {
-        "usage_limit_exceeded" | "usageLimitExceeded" => {
-            Some(RuntimeWorkflowRecoveryClass::UsageLimit)
-        }
-        "rate_limit_exceeded" | "rateLimitExceeded" => {
-            Some(RuntimeWorkflowRecoveryClass::RateLimit)
-        }
-        "server_overloaded" | "serverOverloaded" => Some(RuntimeWorkflowRecoveryClass::Overload),
-        "unauthorized" => Some(RuntimeWorkflowRecoveryClass::Auth),
-        "internal_server_error"
-        | "internalServerError"
-        | "http_connection_failed"
-        | "httpConnectionFailed"
-        | "response_stream_connection_failed"
-        | "responseStreamConnectionFailed"
-        | "response_stream_disconnected"
-        | "responseStreamDisconnected"
-        | "response_too_many_failed_attempts"
-        | "responseTooManyFailedAttempts"
-            if transient_status(status) =>
-        {
-            Some(RuntimeWorkflowRecoveryClass::Transport)
-        }
-        "other" => classify_unexpected_status(error),
-        _ => None,
+    if let Some(class) =
+        workflow_recovery_class(name, status).expect("Mojo workflow recovery classification failed")
+    {
+        return Some(match class {
+            WorkflowRecoveryClass::UsageLimit => RuntimeWorkflowRecoveryClass::UsageLimit,
+            WorkflowRecoveryClass::RateLimit => RuntimeWorkflowRecoveryClass::RateLimit,
+            WorkflowRecoveryClass::Overload => RuntimeWorkflowRecoveryClass::Overload,
+            WorkflowRecoveryClass::Auth => RuntimeWorkflowRecoveryClass::Auth,
+            WorkflowRecoveryClass::Transport => RuntimeWorkflowRecoveryClass::Transport,
+        });
     }
+    (name == "other")
+        .then(|| classify_unexpected_status(error))
+        .flatten()
 }
 
 fn classify_unexpected_status(error: &Map<String, Value>) -> Option<RuntimeWorkflowRecoveryClass> {
@@ -352,10 +372,6 @@ fn classify_unexpected_profile_body(
         }
         _ => None,
     }
-}
-
-fn transient_status(status: Option<u16>) -> bool {
-    matches!(status, None | Some(401 | 429 | 500 | 502 | 503 | 504 | 529))
 }
 
 fn http_status(object: &Map<String, Value>) -> Option<u16> {
