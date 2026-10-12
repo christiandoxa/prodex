@@ -483,6 +483,34 @@ fn queued_auth_update_keeps_last_token_and_non_empty_email() {
 }
 
 #[test]
+fn queued_auth_update_uses_mojo_selected_first_matching_target() {
+    let mut updates = vec![
+        ProfileImportAuthUpdatePlan {
+            target_profile_name: "other".to_string(),
+            email: None,
+            auth_json: "other-auth".to_string(),
+        },
+        ProfileImportAuthUpdatePlan {
+            target_profile_name: "main".to_string(),
+            email: Some("first@example.com".to_string()),
+            auth_json: "first-auth".to_string(),
+        },
+        ProfileImportAuthUpdatePlan {
+            target_profile_name: "main".to_string(),
+            email: Some("second@example.com".to_string()),
+            auth_json: "second-auth".to_string(),
+        },
+    ];
+
+    queue_profile_import_auth_update(&mut updates, "main", None, "replacement-auth".to_string());
+
+    assert_eq!(updates[1].auth_json, "replacement-auth");
+    assert_eq!(updates[1].email.as_deref(), Some("first@example.com"));
+    assert_eq!(updates[2].auth_json, "second-auth");
+    assert_eq!(updates[2].email.as_deref(), Some("second@example.com"));
+}
+
+#[test]
 fn copilot_config_parser_treats_empty_file_as_logged_out() {
     let config = parse_copilot_config_file(" \n\t")
         .expect("blank config should parse as empty Copilot state");

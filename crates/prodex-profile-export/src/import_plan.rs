@@ -230,17 +230,20 @@ pub fn queue_profile_import_auth_update(
 ) {
     use prodex_mojo_core::profile_export::ProfileImportAuthUpdateAction;
 
-    let existing_index = auth_updates
+    let existing_profile_names = auth_updates
         .iter()
-        .position(|update| update.target_profile_name == target_profile_name);
-    let action = prodex_mojo_core::profile_export::profile_import_auth_update_action(
-        existing_index.is_some(),
+        .map(|update| update.target_profile_name.as_str())
+        .collect::<Vec<_>>();
+    let plan = prodex_mojo_core::profile_export::profile_import_auth_update_plan(
+        target_profile_name,
+        &existing_profile_names,
         email.is_some(),
     )
-    .expect("Mojo profile-import auth-update policy returned invalid output");
+    .expect("Mojo profile-import auth-update plan returned invalid output");
 
-    match action {
+    match plan.action {
         ProfileImportAuthUpdateAction::Append => {
+            debug_assert!(plan.existing_index.is_none());
             auth_updates.push(ProfileImportAuthUpdatePlan {
                 target_profile_name: target_profile_name.to_string(),
                 email,
@@ -249,13 +252,19 @@ pub fn queue_profile_import_auth_update(
         }
         ProfileImportAuthUpdateAction::ReplaceAuth => {
             auth_updates
-                .get_mut(existing_index.expect("Mojo replace action requires existing update"))
+                .get_mut(
+                    plan.existing_index
+                        .expect("Mojo replace action requires existing update"),
+                )
                 .expect("existing auth-update index remains valid")
                 .auth_json = auth_json;
         }
         ProfileImportAuthUpdateAction::ReplaceAuthAndEmail => {
             let existing = auth_updates
-                .get_mut(existing_index.expect("Mojo replace action requires existing update"))
+                .get_mut(
+                    plan.existing_index
+                        .expect("Mojo replace action requires existing update"),
+                )
                 .expect("existing auth-update index remains valid");
             existing.auth_json = auth_json;
             existing.email = email;

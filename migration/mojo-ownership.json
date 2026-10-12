@@ -985,6 +985,7 @@
           "profile_import_lifecycle_ordering",
           "profile_import_secret_path_safety",
           "profile_import_auth_journal_commit_policy",
+          "profile_import_auth_update_planning",
           "profile_export_envelope_schema_validation"
         ]
       },
@@ -3877,6 +3878,30 @@
       "duplicate_production_owner": false,
       "platform_fallback": false,
       "rust_adapter_scope": "BTreeMap iteration/order, borrowed string-view construction, output-index validation, and String materialization"
+    },
+    {
+      "name": "profile_import_auth_update_planning",
+      "domain": "profiles/import",
+      "introduced_in": "0.437.8",
+      "baseline_state": "Rust scanned queued auth updates and selected append versus replacement, including the first matching target index",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_profile_import_auth_update_target_v1",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/profile_export_policy.mojo",
+      "consumer": "crates/prodex-profile-export/src/import_plan.rs",
+      "consumer_marker": "prodex_mojo_core::profile_export::profile_import_auth_update_plan(",
+      "production_consumers": [
+        "crates/prodex-profile-export/src/import_plan.rs",
+        "crates/prodex-app/src/profile_commands/import_export/import.rs"
+      ],
+      "production_reachability_test": "crates/prodex-mojo-core/src/profile_export.rs",
+      "rust_owner_before": "Queued import-auth target lookup, stable first-match selection, append-versus-replace action, and email-preservation choice",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "deleted; required-Mojo adapter tests and profile-export caller regressions cover append, first-match replacement, email-preservation, and input-sensitive action changes",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "opaque auth/email ownership, Vec mutation, borrowed-name view construction, output-index validation, and user-facing error mapping"
     },
     {
       "domain": "smart-context/repo-map",

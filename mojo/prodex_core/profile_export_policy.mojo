@@ -152,6 +152,10 @@ def prodex_profile_export_policy_v1(
 comptime PROFILE_IMPORT_AUTH_UPDATE_APPEND: Int64 = 0
 comptime PROFILE_IMPORT_AUTH_UPDATE_REPLACE_AUTH: Int64 = 1
 comptime PROFILE_IMPORT_AUTH_UPDATE_REPLACE_AUTH_EMAIL: Int64 = 2
+comptime PROFILE_IMPORT_AUTH_UPDATE_ABI_VERSION: Int64 = 1
+comptime PROFILE_IMPORT_AUTH_UPDATE_OK: Int64 = 0
+comptime PROFILE_IMPORT_AUTH_UPDATE_INVALID: Int64 = 99
+comptime PROFILE_IMPORT_AUTH_UPDATE_ABI: Int64 = 100
 
 
 @export("prodex_profile_import_auth_update_plan_v1")
@@ -172,6 +176,66 @@ def prodex_profile_import_auth_update_plan_v1(
     if incoming_email_present == 1:
         return PROFILE_IMPORT_AUTH_UPDATE_REPLACE_AUTH_EMAIL
     return PROFILE_IMPORT_AUTH_UPDATE_REPLACE_AUTH
+
+
+@export("prodex_profile_import_auth_update_target_v1")
+def prodex_profile_import_auth_update_target_v1(
+    abi_version: Int64,
+    target_address: UInt,
+    target_length: Int64,
+    existing_names_address: UInt,
+    existing_count: Int64,
+    incoming_email_present: Int64,
+    output_address: UInt,
+    output_capacity: Int64,
+    written_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != PROFILE_IMPORT_AUTH_UPDATE_ABI_VERSION:
+        return PROFILE_IMPORT_AUTH_UPDATE_ABI
+    if (
+        target_length <= 0
+        or (target_length > 0 and target_address == 0)
+        or existing_count < 0
+        or existing_count > PROFILE_IMPORT_PLAN_MAX_PROFILES
+        or (existing_count > 0 and existing_names_address == 0)
+        or (incoming_email_present != 0 and incoming_email_present != 1)
+        or output_address == 0
+        or output_capacity < 2
+        or written_address == 0
+    ):
+        return PROFILE_IMPORT_AUTH_UPDATE_INVALID
+
+    var written = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(written_address)
+    )
+    written[] = 0
+    var target = ProdexRichStringView(target_address, UInt(target_length))
+    if not profile_import_view_valid(target, False):
+        return PROFILE_IMPORT_AUTH_UPDATE_INVALID
+
+    var existing_names = Pointer[
+        mut=False, ProdexRichStringView, ImmUntrackedOrigin
+    ](unsafe_from_address=Int(existing_names_address))
+    var output = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    var existing_index: Int64 = -1
+    for index in range(existing_count):
+        var existing = existing_names[unsafe_offset=index].copy()
+        if not profile_import_view_valid(existing, False):
+            return PROFILE_IMPORT_AUTH_UPDATE_INVALID
+        if existing_index < 0 and profile_import_views_equal(target, existing):
+            existing_index = index
+
+    output[unsafe_offset=1] = existing_index
+    if existing_index < 0:
+        output[unsafe_offset=0] = PROFILE_IMPORT_AUTH_UPDATE_APPEND
+    elif incoming_email_present == 1:
+        output[unsafe_offset=0] = PROFILE_IMPORT_AUTH_UPDATE_REPLACE_AUTH_EMAIL
+    else:
+        output[unsafe_offset=0] = PROFILE_IMPORT_AUTH_UPDATE_REPLACE_AUTH
+    written[] = 2
+    return PROFILE_IMPORT_AUTH_UPDATE_OK
 
 
 comptime PROFILE_IMPORT_PLAN_ABI_VERSION: Int64 = 1

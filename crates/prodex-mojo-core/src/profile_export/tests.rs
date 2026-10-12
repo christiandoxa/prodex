@@ -145,3 +145,38 @@ fn profile_export_policy_kernel_smoke() {
         ProfileImportAuthUpdateAction::ReplaceAuthAndEmail
     );
 }
+
+#[test]
+fn profile_import_auth_update_plan_is_mojo_owned_and_input_sensitive() {
+    let empty = profile_import_auth_update_plan("main", &[], false).unwrap();
+    assert_eq!(
+        empty,
+        ProfileImportAuthUpdatePlan {
+            action: ProfileImportAuthUpdateAction::Append,
+            existing_index: None,
+        }
+    );
+
+    let existing = ["other", "main", "main"];
+    let without_email = profile_import_auth_update_plan("main", &existing, false).unwrap();
+    assert_eq!(
+        without_email,
+        ProfileImportAuthUpdatePlan {
+            action: ProfileImportAuthUpdateAction::ReplaceAuth,
+            existing_index: Some(1),
+        }
+    );
+    let with_email = profile_import_auth_update_plan("main", &existing, true).unwrap();
+    assert_eq!(
+        with_email,
+        ProfileImportAuthUpdatePlan {
+            action: ProfileImportAuthUpdateAction::ReplaceAuthAndEmail,
+            existing_index: Some(1),
+        }
+    );
+    assert_ne!(without_email, with_email);
+    assert_ne!(
+        without_email,
+        profile_import_auth_update_plan("new", &existing, false).unwrap()
+    );
+}
