@@ -1,13 +1,21 @@
 from std.memory import Pointer
 
-from rich_text import rich_view_matches_literal, rich_view_ptr, rich_view_valid
+from rich_text import (
+    rich_view_matches_literal,
+    rich_view_ptr,
+    rich_view_valid,
+    rich_views_equal,
+)
 from rich_types import ProdexRichStringView
 
 comptime RUNTIME_DOCTOR_MARKER_ABI_VERSION: Int64 = 1
 comptime RUNTIME_DOCTOR_MARKER_SEMANTICS_ABI_VERSION: Int64 = 2
 comptime RUNTIME_DOCTOR_PROFILE_PROVIDER_KIND_ABI_VERSION: Int64 = 1
 comptime RUNTIME_DOCTOR_MESSAGE_PARSE_ABI_VERSION: Int64 = 2
+comptime RUNTIME_DOCTOR_ROUTE_HEALTH_GROUPS_ABI_VERSION: Int64 = 1
 comptime RUNTIME_DOCTOR_MARKER_MAX_BYTES: Int64 = 256
+comptime RUNTIME_DOCTOR_ROUTE_HEALTH_GROUPS_MAX_ROWS: Int64 = 65_536
+comptime RUNTIME_DOCTOR_ROUTE_HEALTH_GROUPS_MAX_TEXT_BYTES: Int64 = 4 * 1024 * 1024
 
 comptime PROFILE_PROVIDER_OPENAI: Int64 = 0
 comptime PROFILE_PROVIDER_GEMINI: Int64 = 1
@@ -1034,3 +1042,188 @@ def runtime_doctor_message_marker_bounds(
                 result[1] = index
                 return result^
     return result^
+
+
+def runtime_doctor_route_health_compare_text(
+    left: ProdexRichStringView, right: ProdexRichStringView
+) -> Int64:
+    var left_ptr = rich_view_ptr(left)
+    var right_ptr = rich_view_ptr(right)
+    var common = Int64(left.len)
+    if right.len < UInt(common):
+        common = Int64(right.len)
+    for index in range(common):
+        var left_byte = left_ptr[unsafe_offset=index]
+        var right_byte = right_ptr[unsafe_offset=index]
+        if left_byte < right_byte:
+            return -1
+        if left_byte > right_byte:
+            return 1
+    if left.len < right.len:
+        return -1
+    if left.len > right.len:
+        return 1
+    return 0
+
+
+def runtime_doctor_route_health_group_is_better(
+    candidate_representative: Int64,
+    candidate_count: Int64,
+    previous: Int64,
+    profiles: Pointer[mut=False, ProdexRichStringView, _],
+    routes: Pointer[mut=False, ProdexRichStringView, _],
+    representative_indices: Pointer[mut=True, Int64, _],
+    event_counts: Pointer[mut=True, Int64, _],
+) -> Bool:
+    # In insertion sort, a shift overwrites the slot at the original position.
+    # The candidate must remain the saved immutable row, not a reread slot.
+    var previous_count = event_counts[unsafe_offset=previous]
+    if candidate_count != previous_count:
+        return candidate_count > previous_count
+    var previous_representative = representative_indices[unsafe_offset=previous]
+    var profile_order = runtime_doctor_route_health_compare_text(
+        profiles[unsafe_offset=candidate_representative],
+        profiles[unsafe_offset=previous_representative],
+    )
+    if profile_order != 0:
+        return profile_order < 0
+    var route_order = runtime_doctor_route_health_compare_text(
+        routes[unsafe_offset=candidate_representative],
+        routes[unsafe_offset=previous_representative],
+    )
+    if route_order != 0:
+        return route_order < 0
+    return candidate_representative < previous_representative
+
+
+@export("prodex_mojo_runtime_doctor_route_health_groups_v1")
+def prodex_mojo_runtime_doctor_route_health_groups_v1(
+    abi_version: Int64,
+    profiles_address: UInt,
+    routes_address: UInt,
+    event_flags_address: UInt,
+    input_count: Int64,
+    representative_indices_address: UInt,
+    event_counts_address: UInt,
+    latest_event_indices_address: UInt,
+    profile_row_indices_address: UInt,
+    output_count_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != RUNTIME_DOCTOR_ROUTE_HEALTH_GROUPS_ABI_VERSION:
+        return 4
+    if (
+        output_count_address == 0
+        or input_count < 0
+        or input_count > RUNTIME_DOCTOR_ROUTE_HEALTH_GROUPS_MAX_ROWS
+    ):
+        return 1
+    var output_count = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_count_address)
+    )
+    output_count[] = 0
+    if input_count == 0:
+        return 0
+    if (
+        profiles_address == 0
+        or routes_address == 0
+        or event_flags_address == 0
+        or representative_indices_address == 0
+        or event_counts_address == 0
+        or latest_event_indices_address == 0
+        or profile_row_indices_address == 0
+    ):
+        return 1
+    var profiles = Pointer[mut=False, ProdexRichStringView, ImmUntrackedOrigin](
+        unsafe_from_address=Int(profiles_address)
+    )
+    var routes = Pointer[mut=False, ProdexRichStringView, ImmUntrackedOrigin](
+        unsafe_from_address=Int(routes_address)
+    )
+    var event_flags = Pointer[mut=False, Int64, ImmUntrackedOrigin](
+        unsafe_from_address=Int(event_flags_address)
+    )
+    var representative_indices = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(representative_indices_address)
+    )
+    var event_counts = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(event_counts_address)
+    )
+    var latest_event_indices = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(latest_event_indices_address)
+    )
+    var profile_row_indices = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(profile_row_indices_address)
+    )
+
+    for index in range(input_count):
+        var profile = profiles[unsafe_offset=index].copy()
+        var route = routes[unsafe_offset=index].copy()
+        if (
+            not rich_view_valid(profile, RUNTIME_DOCTOR_ROUTE_HEALTH_GROUPS_MAX_TEXT_BYTES)
+            or not rich_view_valid(route, RUNTIME_DOCTOR_ROUTE_HEALTH_GROUPS_MAX_TEXT_BYTES)
+        ):
+            return 2
+        var flag = event_flags[unsafe_offset=index]
+        if flag != 0 and flag != 1:
+            return 1
+        var group: Int64 = -1
+        for candidate in range(output_count[]):
+            var representative = representative_indices[unsafe_offset=candidate]
+            if (
+                rich_views_equal(profile, profiles[unsafe_offset=representative])
+                and rich_views_equal(route, routes[unsafe_offset=representative])
+            ):
+                group = candidate
+                break
+        if group < 0:
+            group = output_count[]
+            representative_indices[unsafe_offset=group] = index
+            event_counts[unsafe_offset=group] = 0
+            latest_event_indices[unsafe_offset=group] = -1
+            profile_row_indices[unsafe_offset=group] = -1
+            output_count[] = group + 1
+        if flag == 1:
+            event_counts[unsafe_offset=group] += 1
+            latest_event_indices[unsafe_offset=group] = index
+        else:
+            profile_row_indices[unsafe_offset=group] = index
+
+    var position: Int64 = 1
+    while position < output_count[]:
+        var selected = position
+        var selected_representative = representative_indices[unsafe_offset=selected]
+        var selected_count = event_counts[unsafe_offset=selected]
+        var selected_latest = latest_event_indices[unsafe_offset=selected]
+        var selected_profile_row = profile_row_indices[unsafe_offset=selected]
+        var candidate = position
+        while candidate > 0:
+            var previous = candidate - 1
+            if not runtime_doctor_route_health_group_is_better(
+                selected_representative,
+                selected_count,
+                previous,
+                profiles,
+                routes,
+                representative_indices,
+                event_counts,
+            ):
+                break
+            representative_indices[unsafe_offset=candidate] = representative_indices[
+                unsafe_offset=previous
+            ]
+            event_counts[unsafe_offset=candidate] = event_counts[
+                unsafe_offset=previous
+            ]
+            latest_event_indices[unsafe_offset=candidate] = latest_event_indices[
+                unsafe_offset=previous
+            ]
+            profile_row_indices[unsafe_offset=candidate] = profile_row_indices[
+                unsafe_offset=previous
+            ]
+            candidate -= 1
+        representative_indices[unsafe_offset=candidate] = selected_representative
+        event_counts[unsafe_offset=candidate] = selected_count
+        latest_event_indices[unsafe_offset=candidate] = selected_latest
+        profile_row_indices[unsafe_offset=candidate] = selected_profile_row
+        position += 1
+    return 0

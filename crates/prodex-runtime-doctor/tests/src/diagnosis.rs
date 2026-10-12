@@ -1,5 +1,8 @@
-use crate::RuntimeDoctorSummary;
 use crate::diagnosis::runtime_doctor_finalize_summary;
+use crate::{
+    RuntimeDoctorProfileSummary, RuntimeDoctorRouteProfileEvent, RuntimeDoctorRouteSummary,
+    RuntimeDoctorSummary,
+};
 
 #[test]
 fn runtime_doctor_finalize_summary_uses_broker_artifact_diagnosis() {
@@ -149,5 +152,169 @@ fn runtime_doctor_diagnosis_aggregates_compact_exit_alias_counts_in_stable_order
     assert_eq!(
         summary.diagnosis,
         "Recent compact exit paths were logged: candidate_exhausted=2, precommit_budget=1."
+    );
+}
+
+#[test]
+fn runtime_doctor_route_health_caller_preserves_mojo_grouping_order_and_sentinels() {
+    let mut summary = RuntimeDoctorSummary {
+        pointer_exists: true,
+        log_exists: true,
+        line_count: 7,
+        route_profile_events: vec![
+            RuntimeDoctorRouteProfileEvent {
+                profile: Some("beta".to_string()),
+                route: Some("responses".to_string()),
+                marker: "profile_health".to_string(),
+                action: "health".to_string(),
+                detail: "reason=first".to_string(),
+                ..RuntimeDoctorRouteProfileEvent::default()
+            },
+            RuntimeDoctorRouteProfileEvent {
+                profile: Some("alpha".to_string()),
+                route: Some("responses".to_string()),
+                marker: "profile_health".to_string(),
+                action: "health".to_string(),
+                detail: "reason=first".to_string(),
+                ..RuntimeDoctorRouteProfileEvent::default()
+            },
+            RuntimeDoctorRouteProfileEvent {
+                profile: Some("beta".to_string()),
+                route: Some("responses".to_string()),
+                marker: "profile_transport_failure".to_string(),
+                action: "transport_failure".to_string(),
+                detail: "reason=latest".to_string(),
+                ..RuntimeDoctorRouteProfileEvent::default()
+            },
+            RuntimeDoctorRouteProfileEvent {
+                profile: Some("alpha".to_string()),
+                route: Some("responses".to_string()),
+                marker: "profile_health".to_string(),
+                action: "health".to_string(),
+                detail: "reason=latest".to_string(),
+                ..RuntimeDoctorRouteProfileEvent::default()
+            },
+            RuntimeDoctorRouteProfileEvent {
+                profile: Some("gamma".to_string()),
+                route: Some("standard".to_string()),
+                marker: "profile_health".to_string(),
+                action: "health".to_string(),
+                detail: "reason=only".to_string(),
+                ..RuntimeDoctorRouteProfileEvent::default()
+            },
+            RuntimeDoctorRouteProfileEvent {
+                route: Some("responses".to_string()),
+                marker: "profile_health".to_string(),
+                action: "health".to_string(),
+                detail: "reason=missing_profile".to_string(),
+                ..RuntimeDoctorRouteProfileEvent::default()
+            },
+            RuntimeDoctorRouteProfileEvent {
+                profile: Some("omega".to_string()),
+                marker: "profile_health".to_string(),
+                action: "health".to_string(),
+                detail: "reason=missing_route".to_string(),
+                ..RuntimeDoctorRouteProfileEvent::default()
+            },
+        ],
+        marker_last_fields: [(
+            "profile_health".to_string(),
+            [
+                ("profile".to_string(), "alpha".to_string()),
+                ("route".to_string(), "responses".to_string()),
+                ("score".to_string(), "42".to_string()),
+                ("reason".to_string(), "marker_reason".to_string()),
+            ]
+            .into(),
+        )]
+        .into(),
+        profiles: vec![RuntimeDoctorProfileSummary {
+            profile: "alpha".to_string(),
+            routes: vec![
+                RuntimeDoctorRouteSummary {
+                    route: "responses".to_string(),
+                    health_score: 7,
+                    circuit_state: "closed".to_string(),
+                    ..RuntimeDoctorRouteSummary::default()
+                },
+                RuntimeDoctorRouteSummary {
+                    route: "compact".to_string(),
+                    health_score: 3,
+                    circuit_state: "half_open".to_string(),
+                    ..RuntimeDoctorRouteSummary::default()
+                },
+            ],
+            ..RuntimeDoctorProfileSummary::default()
+        }],
+        ..RuntimeDoctorSummary::default()
+    };
+
+    runtime_doctor_finalize_summary(&mut summary);
+
+    assert_eq!(
+        summary
+            .route_health
+            .iter()
+            .map(|route| (
+                route.profile.as_str(),
+                route.route.as_str(),
+                route.event_count
+            ))
+            .collect::<Vec<_>>(),
+        vec![
+            ("alpha", "responses", 2),
+            ("beta", "responses", 2),
+            ("gamma", "standard", 1),
+            ("omega", "unknown", 1),
+            ("unknown", "responses", 1),
+            ("alpha", "compact", 0),
+        ]
+    );
+    assert_eq!(summary.route_health[0].health_score, Some(42));
+    assert_eq!(
+        summary.route_health[0].latest_reason.as_deref(),
+        Some("latest")
+    );
+    assert_eq!(
+        summary.route_health[0].health_reason.as_deref(),
+        Some("marker_reason")
+    );
+    assert_eq!(
+        summary.route_health[5].circuit_state.as_deref(),
+        Some("half_open")
+    );
+}
+
+#[test]
+fn runtime_doctor_route_health_keeps_latest_reason_when_newer_event_has_none() {
+    let mut summary = RuntimeDoctorSummary {
+        route_profile_events: vec![
+            RuntimeDoctorRouteProfileEvent {
+                profile: Some("alpha".to_string()),
+                route: Some("responses".to_string()),
+                detail: "reason=transport_timeout".to_string(),
+                ..RuntimeDoctorRouteProfileEvent::default()
+            },
+            RuntimeDoctorRouteProfileEvent {
+                profile: Some("alpha".to_string()),
+                route: Some("responses".to_string()),
+                marker: "profile_transport_failure".to_string(),
+                ..RuntimeDoctorRouteProfileEvent::default()
+            },
+        ],
+        ..RuntimeDoctorSummary::default()
+    };
+
+    runtime_doctor_finalize_summary(&mut summary);
+
+    assert_eq!(summary.route_health.len(), 1);
+    assert_eq!(summary.route_health[0].event_count, 2);
+    assert_eq!(
+        summary.route_health[0].latest_marker.as_deref(),
+        Some("profile_transport_failure")
+    );
+    assert_eq!(
+        summary.route_health[0].latest_reason.as_deref(),
+        Some("transport_timeout")
     );
 }

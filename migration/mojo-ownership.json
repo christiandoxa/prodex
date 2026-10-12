@@ -1335,7 +1335,8 @@
         "operations": [
           "runtime_doctor_smart_context_fallback_decision",
           "runtime_doctor_log_value_absence_policy",
-          "runtime_doctor_smart_context_fallback_reason_source"
+          "runtime_doctor_smart_context_fallback_reason_source",
+          "runtime_doctor_route_health_grouping"
         ]
       },
       {
@@ -7221,6 +7222,29 @@
       "duplicate_production_owner": false,
       "platform_fallback": false,
       "rust_adapter_scope": "Serde envelope acquisition, reference-to-ABI marshalling, typed violation materialization, cryptography and persistence"
+    },
+    {
+      "name": "runtime_doctor_route_health_grouping",
+      "domain": "runtime/doctor-route-health",
+      "introduced_in": "0.438.0",
+      "baseline_state": "Rust BTreeMap grouped profile/route event rows and sorted route health summaries",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_mojo_runtime_doctor_route_health_groups_v1",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/runtime_doctor_marker.mojo",
+      "consumer": "crates/prodex-runtime-doctor/src/diagnosis/route_health.rs",
+      "consumer_marker": "prodex_mojo_core::rich::runtime_doctor_route_health_groups(",
+      "production_consumers": [
+        "crates/prodex-runtime-doctor/src/diagnosis/route_health.rs"
+      ],
+      "production_reachability_test": "crates/prodex-mojo-core/tests/runtime_doctor_markers.rs",
+      "rust_owner_before": "Route-health grouping by profile/route, event frequency, latest event and pressure-first lexical sorting",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "deleted; production diagnosis regressions, Mojo ABI group assertions and deliberate sorting mutation detect behavioral drift",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "log field parsing, profile/route string ownership, metadata projections and safe typed reconstruction from Mojo group indices"
     }
   ],
   "rust_semantic_reductions": [
