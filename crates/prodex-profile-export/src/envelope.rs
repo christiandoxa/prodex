@@ -26,7 +26,8 @@ use crate::data_model::{
     PROFILE_EXPORT_ARGON2_MAX_PARALLELISM,
 };
 use crate::{
-    PROFILE_EXPORT_CIPHER, PROFILE_EXPORT_KDF, ProfileExportEnvelope, ProfileExportKdfParameters,
+    PROFILE_EXPORT_ARGON2ID_KDF, PROFILE_EXPORT_CIPHER, ProfileExportEnvelope,
+    ProfileExportKdfParameters,
 };
 
 pub const PROFILE_EXPORT_BUNDLE_MAX_BYTES: u64 = 64 * 1024 * 1024;
@@ -293,40 +294,147 @@ fn derive_profile_export_key_into(
 }
 
 pub fn validate_profile_export_header(format: &str, version: u32) -> Result<()> {
-    if format != PROFILE_EXPORT_FORMAT {
-        bail!("unsupported profile export format");
-    }
-    if !matches!(
-        version,
-        PROFILE_EXPORT_VERSION_V1 | PROFILE_EXPORT_VERSION_V2
-    ) {
-        bail!(
-            "unsupported profile export version {} (supported: {}, {})",
+    validate_profile_export_schema_input(
+        prodex_mojo_core::profile_export::ProfileExportEnvelopeSchemaInput::Header {
+            format,
             version,
-            PROFILE_EXPORT_VERSION_V1,
-            PROFILE_EXPORT_VERSION_V2
-        );
-    }
-    Ok(())
+        },
+    )
 }
 
-fn validate_profile_export_header_version(format: &str, version: u32, expected: u32) -> Result<()> {
-    validate_profile_export_header(format, version)?;
-    if version != expected {
-        bail!(
-            "profile export envelope kind requires version {} (received {})",
-            expected,
-            version
-        );
+fn profile_export_schema_error(
+    error: prodex_mojo_core::profile_export::ProfileExportEnvelopeSchemaError,
+    expected_version: Option<u32>,
+    received_version: u32,
+    pbkdf2_iterations: Option<u32>,
+    argon2_version: Option<u32>,
+) -> anyhow::Error {
+    use prodex_mojo_core::profile_export::ProfileExportEnvelopeSchemaError;
+
+    match error {
+        ProfileExportEnvelopeSchemaError::Mojo(error) => {
+            anyhow::anyhow!("Mojo profile-export envelope validation failed: {error:?}")
+        }
+        ProfileExportEnvelopeSchemaError::Format => {
+            anyhow::anyhow!("unsupported profile export format")
+        }
+        ProfileExportEnvelopeSchemaError::Version => anyhow::anyhow!(
+            "unsupported profile export version {} (supported: {}, {})",
+            received_version,
+            PROFILE_EXPORT_VERSION_V1,
+            PROFILE_EXPORT_VERSION_V2
+        ),
+        ProfileExportEnvelopeSchemaError::KindVersion => {
+            let Some(expected_version) = expected_version else {
+                return anyhow::anyhow!("invalid profile export envelope version");
+            };
+            anyhow::anyhow!(
+                "profile export envelope kind requires version {} (received {})",
+                expected_version,
+                received_version
+            )
+        }
+        ProfileExportEnvelopeSchemaError::Cipher => {
+            anyhow::anyhow!("unsupported profile export cipher")
+        }
+        ProfileExportEnvelopeSchemaError::Kdf => anyhow::anyhow!("unsupported profile export KDF"),
+        ProfileExportEnvelopeSchemaError::SaltEncoding => {
+            anyhow::anyhow!("invalid encrypted export salt encoding")
+        }
+        ProfileExportEnvelopeSchemaError::SaltLength => {
+            anyhow::anyhow!("invalid encrypted export salt length")
+        }
+        ProfileExportEnvelopeSchemaError::NonceEncoding => {
+            anyhow::anyhow!("invalid encrypted export nonce encoding")
+        }
+        ProfileExportEnvelopeSchemaError::NonceLength => {
+            anyhow::anyhow!("invalid encrypted export nonce length")
+        }
+        ProfileExportEnvelopeSchemaError::CiphertextEncoding => {
+            anyhow::anyhow!("invalid encrypted export payload encoding")
+        }
+        ProfileExportEnvelopeSchemaError::CiphertextLength
+        | ProfileExportEnvelopeSchemaError::CiphertextMinimumLength => {
+            anyhow::anyhow!("invalid encrypted export payload length")
+        }
+        ProfileExportEnvelopeSchemaError::Pbkdf2Iterations => anyhow::anyhow!(
+            "profile export PBKDF2 iteration count {} is outside safe range {}..={}",
+            pbkdf2_iterations.unwrap_or_default(),
+            PROFILE_EXPORT_PBKDF2_MIN_ITERATIONS,
+            PROFILE_EXPORT_PBKDF2_MAX_ITERATIONS
+        ),
+        ProfileExportEnvelopeSchemaError::Argon2Version => {
+            anyhow::anyhow!(
+                "unsupported profile export Argon2id version {}",
+                argon2_version.unwrap_or_default()
+            )
+        }
+        ProfileExportEnvelopeSchemaError::Argon2Memory => {
+            anyhow::anyhow!("profile export Argon2id memory cost is outside safe range")
+        }
+        ProfileExportEnvelopeSchemaError::Argon2Iterations => {
+            anyhow::anyhow!("profile export Argon2id iteration count is outside safe range")
+        }
+        ProfileExportEnvelopeSchemaError::Argon2Parallelism => {
+            anyhow::anyhow!("profile export Argon2id parallelism is outside safe range")
+        }
     }
-    Ok(())
+}
+
+fn validate_profile_export_schema_input(
+    input: prodex_mojo_core::profile_export::ProfileExportEnvelopeSchemaInput<'_>,
+) -> Result<()> {
+    let (expected_version, received_version, pbkdf2_iterations, argon2_version) = match input {
+        prodex_mojo_core::profile_export::ProfileExportEnvelopeSchemaInput::Header {
+            version,
+            ..
+        } => (None, version, None, None),
+        prodex_mojo_core::profile_export::ProfileExportEnvelopeSchemaInput::Plain {
+            version,
+            ..
+        } => (Some(PROFILE_EXPORT_VERSION_V1), version, None, None),
+        prodex_mojo_core::profile_export::ProfileExportEnvelopeSchemaInput::EncryptedV1 {
+            version,
+            iterations,
+            ..
+        } => (
+            Some(PROFILE_EXPORT_VERSION_V1),
+            version,
+            Some(iterations),
+            None,
+        ),
+        prodex_mojo_core::profile_export::ProfileExportEnvelopeSchemaInput::EncryptedV2 {
+            version,
+            argon2_version,
+            ..
+        } => (
+            Some(PROFILE_EXPORT_VERSION_V2),
+            version,
+            None,
+            Some(argon2_version),
+        ),
+    };
+    prodex_mojo_core::profile_export::validate_profile_export_envelope_schema(input).map_err(
+        |error| {
+            profile_export_schema_error(
+                error,
+                expected_version,
+                received_version,
+                pbkdf2_iterations,
+                argon2_version,
+            )
+        },
+    )
 }
 
 fn validate_profile_export_envelope<T>(envelope: &ProfileExportEnvelope<T>) -> Result<()> {
-    match envelope {
+    let input = match envelope {
         ProfileExportEnvelope::Plain {
             format, version, ..
-        } => validate_profile_export_header_version(format, *version, PROFILE_EXPORT_VERSION_V1),
+        } => prodex_mojo_core::profile_export::ProfileExportEnvelopeSchemaInput::Plain {
+            format,
+            version: *version,
+        },
         ProfileExportEnvelope::Encrypted {
             format,
             version,
@@ -336,139 +444,45 @@ fn validate_profile_export_envelope<T>(envelope: &ProfileExportEnvelope<T>) -> R
             salt_base64,
             nonce_base64,
             ciphertext_base64,
-        } => {
-            validate_profile_export_header_version(format, *version, PROFILE_EXPORT_VERSION_V1)?;
-            validate_profile_export_cipher(cipher)?;
-            if kdf != PROFILE_EXPORT_KDF {
-                bail!("unsupported profile export KDF");
-            }
-            validate_profile_export_pbkdf2_iterations(*iterations)?;
-            validate_encrypted_profile_export_fields(salt_base64, nonce_base64, ciphertext_base64)
-        }
+        } => prodex_mojo_core::profile_export::ProfileExportEnvelopeSchemaInput::EncryptedV1 {
+            format,
+            version: *version,
+            cipher,
+            kdf,
+            iterations: *iterations,
+            salt_base64,
+            nonce_base64,
+            ciphertext_base64,
+        },
         ProfileExportEnvelope::EncryptedV2 {
             format,
             version,
             cipher,
-            kdf,
+            kdf:
+                ProfileExportKdfParameters::Argon2id {
+                    version: argon2_version,
+                    memory_kib,
+                    iterations: argon2_iterations,
+                    parallelism,
+                },
             salt_base64,
             nonce_base64,
             ciphertext_base64,
-        } => {
-            validate_profile_export_header_version(format, *version, PROFILE_EXPORT_VERSION_V2)?;
-            validate_profile_export_cipher(cipher)?;
-            match kdf {
-                ProfileExportKdfParameters::Argon2id {
-                    version,
-                    memory_kib,
-                    iterations,
-                    parallelism,
-                } => validate_profile_export_argon2id_parameters(
-                    *version,
-                    *memory_kib,
-                    *iterations,
-                    *parallelism,
-                )?,
-            }
-            validate_encrypted_profile_export_fields(salt_base64, nonce_base64, ciphertext_base64)
-        }
-    }
-}
-
-fn validate_profile_export_cipher(cipher: &str) -> Result<()> {
-    if cipher != PROFILE_EXPORT_CIPHER {
-        bail!("unsupported profile export cipher");
-    }
-    Ok(())
-}
-
-fn validate_profile_export_pbkdf2_iterations(iterations: u32) -> Result<()> {
-    use prodex_mojo_core::profile_export::ProfileExportPolicyViolation;
-    match prodex_mojo_core::profile_export::validate_pbkdf2_iterations(iterations) {
-        Ok(()) => Ok(()),
-        Err(ProfileExportPolicyViolation::Pbkdf2Iterations) => bail!(
-            "profile export PBKDF2 iteration count {} is outside safe range {}..={}",
-            iterations,
-            PROFILE_EXPORT_PBKDF2_MIN_ITERATIONS,
-            PROFILE_EXPORT_PBKDF2_MAX_ITERATIONS
-        ),
-        Err(other) => panic!("unexpected Mojo PBKDF2 policy result: {other:?}"),
-    }
-}
-
-fn validate_profile_export_argon2id_parameters(
-    version: u32,
-    memory_kib: u32,
-    iterations: u32,
-    parallelism: u32,
-) -> Result<()> {
-    use prodex_mojo_core::profile_export::ProfileExportPolicyViolation;
-    match prodex_mojo_core::profile_export::validate_argon2(
-        version,
-        memory_kib,
-        iterations,
-        parallelism,
-    ) {
-        Ok(()) => Ok(()),
-        Err(ProfileExportPolicyViolation::Argon2Version) => {
-            bail!("unsupported profile export Argon2id version {}", version)
-        }
-        Err(ProfileExportPolicyViolation::Argon2Memory) => {
-            bail!("profile export Argon2id memory cost is outside safe range")
-        }
-        Err(ProfileExportPolicyViolation::Argon2Iterations) => {
-            bail!("profile export Argon2id iteration count is outside safe range")
-        }
-        Err(ProfileExportPolicyViolation::Argon2Parallelism) => {
-            bail!("profile export Argon2id parallelism is outside safe range")
-        }
-        Err(other) => panic!("unexpected Mojo Argon2id policy result: {other:?}"),
-    }
-}
-
-fn validate_encrypted_profile_export_fields(
-    salt_base64: &str,
-    nonce_base64: &str,
-    ciphertext_base64: &str,
-) -> Result<()> {
-    validate_base64_field("salt", salt_base64, PROFILE_EXPORT_SALT_BYTES, true)?;
-    validate_base64_field("nonce", nonce_base64, PROFILE_EXPORT_NONCE_BYTES, true)?;
-    validate_base64_field(
-        "payload",
-        ciphertext_base64,
-        PROFILE_EXPORT_CIPHERTEXT_MAX_BYTES,
-        false,
-    )?;
-    let ciphertext_len = decoded_base64_length(ciphertext_base64)?;
-    if ciphertext_len < PROFILE_EXPORT_AUTH_TAG_BYTES {
-        bail!("invalid encrypted export payload length");
-    }
-    Ok(())
-}
-
-fn validate_base64_field(label: &str, value: &str, limit: usize, exact: bool) -> Result<()> {
-    let decoded_len = decoded_base64_length(value)
-        .with_context(|| format!("invalid encrypted export {label} encoding"))?;
-    if (exact && decoded_len != limit) || (!exact && decoded_len > limit) {
-        bail!("invalid encrypted export {label} length");
-    }
-    Ok(())
-}
-
-fn decoded_base64_length(value: &str) -> Result<usize> {
-    let bytes = value.as_bytes();
-    if !bytes.len().is_multiple_of(4) {
-        bail!("invalid base64 length");
-    }
-    let padding = bytes.iter().rev().take_while(|byte| **byte == b'=').count();
-    if padding > 2
-        || bytes[..bytes.len().saturating_sub(padding)]
-            .iter()
-            .any(|byte| !byte.is_ascii_alphanumeric() && !matches!(*byte, b'+' | b'/'))
-        || bytes[..bytes.len().saturating_sub(padding)].contains(&b'=')
-    {
-        bail!("invalid base64 encoding");
-    }
-    Ok(bytes.len() / 4 * 3 - padding)
+        } => prodex_mojo_core::profile_export::ProfileExportEnvelopeSchemaInput::EncryptedV2 {
+            format,
+            version: *version,
+            cipher,
+            kdf: PROFILE_EXPORT_ARGON2ID_KDF,
+            argon2_version: *argon2_version,
+            argon2_memory_kib: *memory_kib,
+            argon2_iterations: *argon2_iterations,
+            argon2_parallelism: *parallelism,
+            salt_base64,
+            nonce_base64,
+            ciphertext_base64,
+        },
+    };
+    validate_profile_export_schema_input(input)
 }
 
 fn validate_profile_export_password(password: &[u8]) -> Result<()> {

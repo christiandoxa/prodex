@@ -962,7 +962,8 @@
           "profile_export_copilot_import_state_planning",
           "profile_import_lifecycle_ordering",
           "profile_import_secret_path_safety",
-          "profile_import_auth_journal_commit_policy"
+          "profile_import_auth_journal_commit_policy",
+          "profile_export_envelope_schema_validation"
         ]
       },
       {
@@ -7197,6 +7198,29 @@
       "duplicate_production_owner": false,
       "platform_fallback": false,
       "rust_adapter_scope": "environment acquisition, mutex-protected key/value storage, and typed action application"
+    },
+    {
+      "name": "profile_export_envelope_schema_validation",
+      "domain": "profile/export-envelope",
+      "introduced_in": "0.438.0",
+      "baseline_state": "Rust duplicated header, envelope version, cipher, KDF parameters, and encoded-field validation branches",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_profile_export_envelope_schema_v1",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/profile_export_policy.mojo",
+      "consumer": "crates/prodex-profile-export/src/envelope.rs",
+      "consumer_marker": "prodex_mojo_core::profile_export::validate_profile_export_envelope_schema(",
+      "production_consumers": [
+        "crates/prodex-profile-export/src/envelope.rs"
+      ],
+      "production_reachability_test": "crates/prodex-mojo-core/src/profile_export.rs",
+      "rust_owner_before": "Envelope header/schema, PBKDF2/Argon2 plan, base64 encoding/length rules and payload auth-tag minimum",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "removed; direct required-Mojo schema ABI, round-trip import tests and deliberate KDF mutation enforce semantic authority",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "Serde envelope acquisition, reference-to-ABI marshalling, typed violation materialization, cryptography and persistence"
     }
   ],
   "rust_semantic_reductions": [

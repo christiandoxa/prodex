@@ -1,4 +1,5 @@
 use super::*;
+use crate::PROFILE_EXPORT_KDF;
 use crate::{ExportedProfile, ExportedSecretFile, ProfileExportPayload};
 use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -12,7 +13,8 @@ fn encrypted_envelope(iterations: u32, salt: &[u8]) -> ProfileExportEnvelope<ser
         salt_base64: base64::engine::general_purpose::STANDARD.encode(salt),
         nonce_base64: base64::engine::general_purpose::STANDARD
             .encode([0_u8; PROFILE_EXPORT_NONCE_BYTES]),
-        ciphertext_base64: String::new(),
+        ciphertext_base64: base64::engine::general_purpose::STANDARD
+            .encode([0_u8; PROFILE_EXPORT_AUTH_TAG_BYTES]),
     }
 }
 
@@ -84,20 +86,31 @@ fn encrypted_bundle_rejects_unbounded_kdf_iterations_before_password_lookup() {
 
 #[test]
 fn version_one_pbkdf2_range_is_bounded_not_exact() {
-    assert!(
-        validate_profile_export_pbkdf2_iterations(PROFILE_EXPORT_PBKDF2_MIN_ITERATIONS).is_ok()
-    );
-    assert!(
-        validate_profile_export_pbkdf2_iterations(PROFILE_EXPORT_PBKDF2_MAX_ITERATIONS).is_ok()
-    );
-    assert!(
-        validate_profile_export_pbkdf2_iterations(PROFILE_EXPORT_PBKDF2_MIN_ITERATIONS - 1)
-            .is_err()
-    );
-    assert!(
-        validate_profile_export_pbkdf2_iterations(PROFILE_EXPORT_PBKDF2_MAX_ITERATIONS + 1)
-            .is_err()
-    );
+    for iterations in [
+        PROFILE_EXPORT_PBKDF2_MIN_ITERATIONS,
+        PROFILE_EXPORT_PBKDF2_MAX_ITERATIONS,
+    ] {
+        let encoded = serde_json::to_vec(&encrypted_envelope(
+            iterations,
+            &[0_u8; PROFILE_EXPORT_SALT_BYTES],
+        ))
+        .expect("valid v1 envelope should serialize");
+        parse_profile_export_envelope::<serde_json::Value>(&encoded)
+            .expect("boundary PBKDF2 iterations should parse");
+    }
+    for iterations in [
+        PROFILE_EXPORT_PBKDF2_MIN_ITERATIONS - 1,
+        PROFILE_EXPORT_PBKDF2_MAX_ITERATIONS + 1,
+    ] {
+        let encoded = serde_json::to_vec(&encrypted_envelope(
+            iterations,
+            &[0_u8; PROFILE_EXPORT_SALT_BYTES],
+        ))
+        .expect("invalid v1 envelope should serialize");
+        let err = parse_profile_export_envelope::<serde_json::Value>(&encoded)
+            .expect_err("out-of-range PBKDF2 iterations should fail");
+        assert!(format!("{err:#}").contains("PBKDF2 iteration count"));
+    }
 }
 
 #[test]

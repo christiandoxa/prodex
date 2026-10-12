@@ -41,6 +41,41 @@ comptime PROFILE_EXPORT_ARGON2_MAX_ITERATIONS: UInt64 = 6
 comptime PROFILE_EXPORT_ARGON2_MIN_PARALLELISM: UInt64 = 1
 comptime PROFILE_EXPORT_ARGON2_MAX_PARALLELISM: UInt64 = 4
 
+comptime PROFILE_EXPORT_ENVELOPE_HEADER: Int64 = 0
+comptime PROFILE_EXPORT_ENVELOPE_PLAIN: Int64 = 1
+comptime PROFILE_EXPORT_ENVELOPE_ENCRYPTED_V1: Int64 = 2
+comptime PROFILE_EXPORT_ENVELOPE_ENCRYPTED_V2: Int64 = 3
+comptime PROFILE_EXPORT_ENVELOPE_FORMAT_ERROR: Int64 = 11
+comptime PROFILE_EXPORT_ENVELOPE_VERSION_ERROR: Int64 = 12
+comptime PROFILE_EXPORT_ENVELOPE_CIPHER_ERROR: Int64 = 13
+comptime PROFILE_EXPORT_ENVELOPE_KDF_ERROR: Int64 = 14
+comptime PROFILE_EXPORT_ENVELOPE_SALT_ENCODING_ERROR: Int64 = 15
+comptime PROFILE_EXPORT_ENVELOPE_SALT_LENGTH_ERROR: Int64 = 16
+comptime PROFILE_EXPORT_ENVELOPE_NONCE_ENCODING_ERROR: Int64 = 17
+comptime PROFILE_EXPORT_ENVELOPE_NONCE_LENGTH_ERROR: Int64 = 18
+comptime PROFILE_EXPORT_ENVELOPE_CIPHERTEXT_ENCODING_ERROR: Int64 = 19
+comptime PROFILE_EXPORT_ENVELOPE_CIPHERTEXT_LENGTH_ERROR: Int64 = 20
+comptime PROFILE_EXPORT_ENVELOPE_CIPHERTEXT_MIN_ERROR: Int64 = 21
+comptime PROFILE_EXPORT_ENVELOPE_KIND_VERSION_ERROR: Int64 = 22
+comptime PROFILE_EXPORT_ENVELOPE_CIPHERTEXT_MAX_BYTES: UInt64 = 32 * 1024 * 1024 + 16
+
+
+@fieldwise_init
+struct ProdexProfileExportEnvelopeSchemaInput(Copyable):
+    var kind: Int64
+    var version: Int64
+    var format: ProdexRichStringView
+    var cipher: ProdexRichStringView
+    var kdf: ProdexRichStringView
+    var salt_base64: ProdexRichStringView
+    var nonce_base64: ProdexRichStringView
+    var ciphertext_base64: ProdexRichStringView
+    var pbkdf2_iterations: UInt64
+    var argon2_version: UInt64
+    var argon2_memory_kib: UInt64
+    var argon2_iterations: UInt64
+    var argon2_parallelism: UInt64
+
 
 @export("prodex_profile_export_policy_v1")
 def prodex_profile_export_policy_v1(
@@ -170,6 +205,160 @@ def profile_import_view_valid(view: ProdexRichStringView, allow_empty: Bool) -> 
     if view.ptr == 0 or view.len > UInt(9_223_372_036_854_775_807):
         return False
     return rich_view_valid(view, Int64(view.len))
+
+
+def profile_export_base64_field_status(
+    view: ProdexRichStringView,
+    exact_bytes: Int64,
+    minimum_bytes: Int64,
+    maximum_bytes: Int64,
+    encoding_error: Int64,
+    length_error: Int64,
+    minimum_error: Int64,
+) -> Int64:
+    if not profile_import_view_valid(view, False):
+        return encoding_error
+    var length = Int64(view.len)
+    if length % 4 != 0:
+        return encoding_error
+
+    var padding: Int64 = 0
+    var index = length - 1
+    var bytes = rich_view_ptr(view)
+    while index >= 0 and bytes[unsafe_offset=index] == 61:
+        padding += 1
+        index -= 1
+    if padding > 2:
+        return encoding_error
+
+    var unpadded_length = length - padding
+    for offset in range(unpadded_length):
+        var value = bytes[unsafe_offset=offset]
+        if not (
+            (value >= 65 and value <= 90)
+            or (value >= 97 and value <= 122)
+            or (value >= 48 and value <= 57)
+            or value == 43
+            or value == 47
+        ):
+            return encoding_error
+
+    var decoded_length = length // 4 * 3 - padding
+    if exact_bytes >= 0 and decoded_length != exact_bytes:
+        return length_error
+    if maximum_bytes >= 0 and decoded_length > maximum_bytes:
+        return length_error
+    if minimum_bytes >= 0 and decoded_length < minimum_bytes:
+        return minimum_error
+    return PROFILE_EXPORT_POLICY_OK
+
+
+@export("prodex_profile_export_envelope_schema_v1")
+def prodex_profile_export_envelope_schema_v1(
+    abi_version: Int64,
+    input_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != PROFILE_EXPORT_POLICY_ABI_VERSION:
+        return PROFILE_EXPORT_POLICY_ABI
+    if input_address == 0:
+        return PROFILE_EXPORT_POLICY_INVALID
+
+    var input = Pointer[
+        mut=False, ProdexProfileExportEnvelopeSchemaInput, ImmUntrackedOrigin
+    ](unsafe_from_address=Int(input_address))[].copy()
+    if (
+        input.kind < PROFILE_EXPORT_ENVELOPE_HEADER
+        or input.kind > PROFILE_EXPORT_ENVELOPE_ENCRYPTED_V2
+        or not profile_import_view_valid(input.format, False)
+        or not rich_view_matches_literal["prodex_profile_export"](input.format, False)
+    ):
+        return PROFILE_EXPORT_ENVELOPE_FORMAT_ERROR
+    if input.version != 1 and input.version != 2:
+        return PROFILE_EXPORT_ENVELOPE_VERSION_ERROR
+    if input.kind == PROFILE_EXPORT_ENVELOPE_HEADER:
+        return PROFILE_EXPORT_POLICY_OK
+    if input.kind == PROFILE_EXPORT_ENVELOPE_PLAIN:
+        if input.version != 1:
+            return PROFILE_EXPORT_ENVELOPE_KIND_VERSION_ERROR
+        return PROFILE_EXPORT_POLICY_OK
+    if input.kind == PROFILE_EXPORT_ENVELOPE_ENCRYPTED_V1:
+        if input.version != 1:
+            return PROFILE_EXPORT_ENVELOPE_KIND_VERSION_ERROR
+        if (
+            not profile_import_view_valid(input.cipher, False)
+            or not rich_view_matches_literal["aes_256_gcm_siv"](input.cipher, False)
+        ):
+            return PROFILE_EXPORT_ENVELOPE_CIPHER_ERROR
+        if (
+            not profile_import_view_valid(input.kdf, False)
+            or not rich_view_matches_literal["pbkdf2_sha256"](input.kdf, False)
+        ):
+            return PROFILE_EXPORT_ENVELOPE_KDF_ERROR
+        var parameter_status = prodex_profile_export_policy_v1(
+            PROFILE_EXPORT_POLICY_ABI_VERSION,
+            PROFILE_EXPORT_POLICY_PBKDF2_ITERATIONS,
+            input.pbkdf2_iterations,
+            0,
+            0,
+            0,
+        )
+        if parameter_status != PROFILE_EXPORT_POLICY_OK:
+            return parameter_status
+    else:
+        if input.version != 2:
+            return PROFILE_EXPORT_ENVELOPE_KIND_VERSION_ERROR
+        if (
+            not profile_import_view_valid(input.cipher, False)
+            or not rich_view_matches_literal["aes_256_gcm_siv"](input.cipher, False)
+        ):
+            return PROFILE_EXPORT_ENVELOPE_CIPHER_ERROR
+        if (
+            not profile_import_view_valid(input.kdf, False)
+            or not rich_view_matches_literal["argon2id"](input.kdf, False)
+        ):
+            return PROFILE_EXPORT_ENVELOPE_KDF_ERROR
+        var parameter_status = prodex_profile_export_policy_v1(
+            PROFILE_EXPORT_POLICY_ABI_VERSION,
+            PROFILE_EXPORT_POLICY_ARGON2,
+            input.argon2_version,
+            input.argon2_memory_kib,
+            input.argon2_iterations,
+            input.argon2_parallelism,
+        )
+        if parameter_status != PROFILE_EXPORT_POLICY_OK:
+            return parameter_status
+
+    var status = profile_export_base64_field_status(
+        input.salt_base64,
+        16,
+        -1,
+        -1,
+        PROFILE_EXPORT_ENVELOPE_SALT_ENCODING_ERROR,
+        PROFILE_EXPORT_ENVELOPE_SALT_LENGTH_ERROR,
+        PROFILE_EXPORT_ENVELOPE_SALT_LENGTH_ERROR,
+    )
+    if status != PROFILE_EXPORT_POLICY_OK:
+        return status
+    status = profile_export_base64_field_status(
+        input.nonce_base64,
+        12,
+        -1,
+        -1,
+        PROFILE_EXPORT_ENVELOPE_NONCE_ENCODING_ERROR,
+        PROFILE_EXPORT_ENVELOPE_NONCE_LENGTH_ERROR,
+        PROFILE_EXPORT_ENVELOPE_NONCE_LENGTH_ERROR,
+    )
+    if status != PROFILE_EXPORT_POLICY_OK:
+        return status
+    return profile_export_base64_field_status(
+        input.ciphertext_base64,
+        -1,
+        16,
+        Int64(PROFILE_EXPORT_ENVELOPE_CIPHERTEXT_MAX_BYTES),
+        PROFILE_EXPORT_ENVELOPE_CIPHERTEXT_ENCODING_ERROR,
+        PROFILE_EXPORT_ENVELOPE_CIPHERTEXT_LENGTH_ERROR,
+        PROFILE_EXPORT_ENVELOPE_CIPHERTEXT_MIN_ERROR,
+    )
 
 
 def profile_import_views_equal(
