@@ -16,6 +16,7 @@ comptime UPDATE_NOTICE_CACHE_FRESH: Int64 = 2
 comptime UPDATE_NOTICE_RELEASE_VERSION_VALID: Int64 = 3
 comptime UPDATE_NOTICE_RELEASE_VERSION_COMPARE: Int64 = 4
 comptime UPDATE_NOTICE_UPDATE_DECISION: Int64 = 5
+comptime UPDATE_NOTICE_VERSION_STATUS: Int64 = 6
 
 comptime UPDATE_NOTICE_RELEASE_VERSION_TOTAL_ORDER: Int64 = 0
 comptime UPDATE_NOTICE_RELEASE_VERSION_PRECEDENCE: Int64 = 1
@@ -598,7 +599,7 @@ def prodex_update_notice_policy_v1(
         return UPDATE_NOTICE_ABI
     if (
         operation < UPDATE_NOTICE_INSTALL_CHANNEL
-        or operation > UPDATE_NOTICE_UPDATE_DECISION
+        or operation > UPDATE_NOTICE_VERSION_STATUS
         or text0_length < 0
         or text1_length < 0
         or text0_length > UPDATE_NOTICE_MAX_TEXT_BYTES
@@ -668,6 +669,18 @@ def prodex_update_notice_policy_v1(
         if ordering == UPDATE_NOTICE_RELEASE_VERSION_INVALID:
             return UPDATE_NOTICE_INVALID
         output[] = ordering + 1
+        return UPDATE_NOTICE_OK
+
+    if operation == UPDATE_NOTICE_VERSION_STATUS:
+        # tag0: latest release is present.  Invalid versions stay up to date,
+        # matching the existing notice behavior after a failed comparison.
+        if tag0 != 0 and tag0 != 1:
+            return UPDATE_NOTICE_INVALID
+        if tag0 == 0:
+            output[] = 0
+            return UPDATE_NOTICE_OK
+        var ordering = update_notice_release_version_compare(text0, text1, True)
+        output[] = 2 if ordering > 0 else 1
         return UPDATE_NOTICE_OK
 
     if operation == UPDATE_NOTICE_RELEASE_VERSION_COMPARE:
