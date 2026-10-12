@@ -49,6 +49,7 @@ pub fn self_test() -> bool {
     let provider_upstream_ok = provider_upstream::self_test();
     let local_rewrite_transport_ok = runtime_local_rewrite_transport::self_test();
     let policy_validation_ok = policy::self_test();
+    let deepseek_local_rewrite_ok = deepseek_local_rewrite::self_test();
     let context_ok = context::self_test();
     let tuning_defaults_ok = runtime_decisions::tuning_defaults_self_test();
     let smart_context_usage_ok = runtime_decisions::smart_context_token_usage_summary_self_test();
@@ -68,6 +69,7 @@ pub fn self_test() -> bool {
         provider_upstream_ok,
         local_rewrite_transport_ok,
         policy_validation_ok,
+        deepseek_local_rewrite_ok,
         context_ok,
         tuning_defaults_ok,
         smart_context_usage_ok,
@@ -107,6 +109,8 @@ pub mod copilot_request_policy;
 pub mod core_file_policy;
 #[cfg(feature = "mojo-provider-constraints")]
 pub mod deepseek_attempt_policy;
+#[cfg(feature = "mojo-rich")]
+pub mod deepseek_local_rewrite;
 #[cfg(feature = "mojo-rich")]
 pub mod gemini_code_assist_policy;
 #[cfg(feature = "mojo-rich")]
