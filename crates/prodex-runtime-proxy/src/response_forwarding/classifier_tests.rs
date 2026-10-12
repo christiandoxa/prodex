@@ -290,3 +290,35 @@ fn responses_stream_inspection_does_not_depend_on_a_missing_mime_header() {
     assert!(!runtime_response_content_type_is_sse(None));
     assert!(!runtime_response_content_type_is_sse(Some("")));
 }
+
+#[test]
+fn tap_state_policy_is_required_mojo_at_response_forwarding_caller() {
+    const { assert!(prodex_mojo_core::MOJO_ACTIVE) }
+
+    let response_id = prodex_mojo_core::runtime_response_forwarding::response_id_plan(
+        prodex_mojo_core::runtime_response_forwarding::RuntimeResponseForwardingResponseIdInput {
+            already_remembered: false,
+            turn_state_present: true,
+            remembered_count: 2,
+            bound_count: 1,
+        },
+    )
+    .expect("required Mojo response-ID planner failed");
+    assert!(response_id.record);
+    assert!(response_id.record_with_turn_state);
+    assert!(response_id.backfill_turn_state);
+
+    let usage = prodex_mojo_core::runtime_response_forwarding::token_usage_plan(
+        prodex_mojo_core::runtime_response_forwarding::RuntimeResponseForwardingTokenUsageInput {
+            token_usage_present: true,
+            duplicate_token_usage: false,
+            loggable_usage: true,
+            generation_present: true,
+        },
+    )
+    .expect("required Mojo token-usage planner failed");
+    assert_eq!(
+        usage,
+        prodex_mojo_core::runtime_response_forwarding::RuntimeResponseForwardingTokenUsagePlan::LogWithGeneration
+    );
+}

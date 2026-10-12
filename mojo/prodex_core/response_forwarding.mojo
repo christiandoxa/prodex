@@ -45,6 +45,15 @@ comptime RESPONSE_USAGE_PROGRESS_SUPPRESS: Int64 = 1
 comptime RESPONSE_USAGE_PROGRESS_LOG: Int64 = 2
 comptime RESPONSE_USAGE_PROGRESS_INTERVAL_MS: UInt64 = 250
 
+comptime RESPONSE_FORWARDING_TAP_STATE_ABI_VERSION: Int64 = 1
+comptime RESPONSE_FORWARDING_TAP_STATE_RESPONSE_ID: Int64 = 0
+comptime RESPONSE_FORWARDING_TAP_STATE_TOKEN_USAGE: Int64 = 1
+comptime RESPONSE_FORWARDING_TAP_STATE_RECORD_RESPONSE_ID: Int64 = 1
+comptime RESPONSE_FORWARDING_TAP_STATE_RECORD_WITH_TURN_STATE: Int64 = 2
+comptime RESPONSE_FORWARDING_TAP_STATE_BACKFILL_TURN_STATE: Int64 = 4
+comptime RESPONSE_FORWARDING_TAP_STATE_LOG_TOKEN_USAGE: Int64 = 1
+comptime RESPONSE_FORWARDING_TAP_STATE_LOG_TOKEN_USAGE_WITH_GENERATION: Int64 = 2
+
 
 def response_ascii_lower(value: UInt8) -> UInt8:
     if value >= 65 and value <= 90:
@@ -580,6 +589,51 @@ def prodex_runtime_token_usage_progress_plan_v1(
     ):
         return RESPONSE_USAGE_PROGRESS_SUPPRESS
     return RESPONSE_USAGE_PROGRESS_LOG
+
+
+@export("prodex_runtime_response_forwarding_tap_state_plan_v1")
+def prodex_runtime_response_forwarding_tap_state_plan_v1(
+    abi_version: Int64,
+    mode: Int64,
+    already_remembered: Int64,
+    turn_state_present: Int64,
+    remembered_count: UInt64,
+    bound_count: UInt64,
+    token_usage_present: Int64,
+    duplicate_token_usage: Int64,
+    loggable_usage: Int64,
+    generation_present: Int64,
+) abi("C") -> Int64:
+    if abi_version != RESPONSE_FORWARDING_TAP_STATE_ABI_VERSION:
+        return -4
+    if mode < RESPONSE_FORWARDING_TAP_STATE_RESPONSE_ID or mode > RESPONSE_FORWARDING_TAP_STATE_TOKEN_USAGE:
+        return -1
+    if (
+        (already_remembered != 0 and already_remembered != 1)
+        or (turn_state_present != 0 and turn_state_present != 1)
+        or (token_usage_present != 0 and token_usage_present != 1)
+        or (duplicate_token_usage != 0 and duplicate_token_usage != 1)
+        or (loggable_usage != 0 and loggable_usage != 1)
+        or (generation_present != 0 and generation_present != 1)
+        or bound_count > remembered_count
+    ):
+        return -1
+
+    if mode == RESPONSE_FORWARDING_TAP_STATE_RESPONSE_ID:
+        var fresh = already_remembered == 0
+        var backfill = turn_state_present == 1 and bound_count < remembered_count
+        return (
+            Int64(fresh) * RESPONSE_FORWARDING_TAP_STATE_RECORD_RESPONSE_ID
+            | Int64(fresh and turn_state_present == 1)
+                * RESPONSE_FORWARDING_TAP_STATE_RECORD_WITH_TURN_STATE
+            | Int64(backfill) * RESPONSE_FORWARDING_TAP_STATE_BACKFILL_TURN_STATE
+        )
+
+    if token_usage_present == 0 or duplicate_token_usage == 1 or loggable_usage == 0:
+        return 0
+    if generation_present == 1:
+        return RESPONSE_FORWARDING_TAP_STATE_LOG_TOKEN_USAGE_WITH_GENERATION
+    return RESPONSE_FORWARDING_TAP_STATE_LOG_TOKEN_USAGE
 
 
 @export("prodex_runtime_bound_overload_retry_v1")

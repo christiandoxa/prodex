@@ -671,21 +671,38 @@ impl RuntimeSseTapState {
         let turn_state = self.turn_state.clone();
         let mut fresh_ids = Vec::new();
         for response_id in response_ids {
-            if self.remembered_response_ids.contains(response_id.as_str()) {
+            let plan = prodex_mojo_core::runtime_response_forwarding::response_id_plan(
+                prodex_mojo_core::runtime_response_forwarding::RuntimeResponseForwardingResponseIdInput {
+                    already_remembered: self.remembered_response_ids.contains(response_id.as_str()),
+                    turn_state_present: turn_state.is_some(),
+                    remembered_count: self.remembered_response_ids.len() as u64,
+                    bound_count: self.response_ids_with_turn_state.len() as u64,
+                },
+            )
+            .expect("Mojo response forwarding ID planner failed");
+            if !plan.record {
                 continue;
             }
             let fresh_id = response_id.clone();
             self.remembered_response_ids.insert(fresh_id.clone());
-            if turn_state.is_some() {
+            if plan.record_with_turn_state {
                 self.response_ids_with_turn_state.insert(fresh_id.clone());
             }
             fresh_ids.push(fresh_id);
         }
 
         let mut response_ids_needing_turn_state = Vec::new();
-        if turn_state.is_some()
-            && self.response_ids_with_turn_state.len() < self.remembered_response_ids.len()
-        {
+        let backfill = prodex_mojo_core::runtime_response_forwarding::response_id_plan(
+            prodex_mojo_core::runtime_response_forwarding::RuntimeResponseForwardingResponseIdInput {
+                already_remembered: true,
+                turn_state_present: turn_state.is_some(),
+                remembered_count: self.remembered_response_ids.len() as u64,
+                bound_count: self.response_ids_with_turn_state.len() as u64,
+            },
+        )
+        .expect("Mojo response forwarding turn-state planner failed")
+        .backfill_turn_state;
+        if backfill {
             for response_id in &self.remembered_response_ids {
                 if self
                     .response_ids_with_turn_state
@@ -735,8 +752,27 @@ impl RuntimeSseTapState {
         let Some(token_usage) = token_usage else {
             return;
         };
-        if tap_plan & 8 != 0 && self.logged_token_usage.insert(token_usage) {
-            if let Some(generation_ms) = generation_ms {
+        let plan = prodex_mojo_core::runtime_response_forwarding::token_usage_plan(
+            prodex_mojo_core::runtime_response_forwarding::RuntimeResponseForwardingTokenUsageInput {
+                token_usage_present: true,
+                duplicate_token_usage: self.logged_token_usage.contains(&token_usage),
+                loggable_usage: tap_plan & 8 != 0,
+                generation_present: generation_ms.is_some(),
+            },
+        )
+        .expect("Mojo response forwarding token usage planner failed");
+        if !matches!(
+            plan,
+            prodex_mojo_core::runtime_response_forwarding::RuntimeResponseForwardingTokenUsagePlan::None
+        ) {
+            self.logged_token_usage.insert(token_usage);
+            if matches!(
+                plan,
+                prodex_mojo_core::runtime_response_forwarding::RuntimeResponseForwardingTokenUsagePlan::LogWithGeneration
+            ) {
+                let Some(generation_ms) = generation_ms else {
+                    unreachable!("Mojo token usage plan requires generation timing");
+                };
                 effects.push(RuntimeSseTapEffect::LogTokenUsageWithGeneration {
                     usage: token_usage,
                     generation_ms,
