@@ -1,60 +1,28 @@
 //! Gemini request tool-call thought-signature preservation.
 
-use serde_json::{Value, json};
+use crate::mojo_json::Document;
+use prodex_mojo_core::provider_constraints::{
+    GeminiBridgeRequestKernelInput, GeminiBridgeRequestOperation, gemini_bridge_request_kernel,
+};
+use serde_json::Value;
 
 pub(crate) fn gemini_preserve_tool_call_signatures(messages: &mut [Value]) {
-    for message in messages {
-        let Some(tool_calls) = message.get_mut("tool_calls").and_then(Value::as_array_mut) else {
-            continue;
-        };
-        for tool_call in tool_calls {
-            let Some(object) = tool_call.as_object_mut() else {
-                continue;
-            };
-            // The ABI describes candidate JSON fields; Mojo alone decides
-            // precedence, the first-present barrier, and Unicode trimming.
-            let google = object
-                .get("extra_content")
-                .and_then(|value| value.get("google"));
-            let function = object.get("function");
-            let values = [
-                google.and_then(|value| value.get("thought_signature")),
-                object.get("gemini_thought_signature"),
-                object.get("thought_signature"),
-                object.get("thoughtSignature"),
-                function.and_then(|value| value.get("gemini_thought_signature")),
-                function.and_then(|value| value.get("thought_signature")),
-                function.and_then(|value| value.get("thoughtSignature")),
-            ];
-            let candidates = values.map(|value| {
-                prodex_mojo_core::provider_constraints::GeminiSignatureCandidate {
-                    present: value.is_some(),
-                    text: value.and_then(Value::as_str),
-                }
-            });
-            let Some(selected) =
-                prodex_mojo_core::provider_constraints::gemini_signature_choice(&candidates)
-                    .expect("Mojo Gemini thought-signature precedence failed")
-            else {
-                continue;
-            };
-            let signature = values[selected]
-                .and_then(Value::as_str)
-                .expect("Mojo Gemini signature choice selected a non-string")
-                .to_string();
-            object.remove("gemini_thought_signature");
-            object.remove("thought_signature");
-            object.remove("thoughtSignature");
-            object.insert(
-                "extra_content".to_string(),
-                json!({
-                    "google": {
-                        "thought_signature": signature,
-                    }
-                }),
-            );
-        }
-    }
+    let mut document = Document::default();
+    document.array(messages.iter());
+    let raw = std::str::from_utf8(&document.raw).expect("Serde emits UTF-8 JSON");
+    let body = {
+        let mut input = GeminiBridgeRequestKernelInput::new(
+            GeminiBridgeRequestOperation::PreserveToolCallSignatures,
+        );
+        input.primary = Some(raw.as_bytes());
+        gemini_bridge_request_kernel(input)
+            .expect("Mojo Gemini thought-signature preservation failed")
+    };
+    drop(document);
+    let output: Vec<Value> = serde_json::from_slice(&body)
+        .expect("Mojo Gemini thought-signature preservation returned invalid JSON");
+    assert_eq!(output.len(), messages.len());
+    messages.clone_from_slice(&output);
 }
 
 #[cfg(test)]

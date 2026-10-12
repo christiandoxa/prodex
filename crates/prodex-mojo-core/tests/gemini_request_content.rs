@@ -27,6 +27,14 @@ fn validate_translator(request: &[u8]) -> Result<Vec<u8>, prodex_mojo_core::Mojo
     gemini_bridge_request_kernel(input)
 }
 
+fn preserve_tool_call_signatures(messages: &[u8]) -> Result<Vec<u8>, prodex_mojo_core::MojoError> {
+    let mut input = GeminiBridgeRequestKernelInput::new(
+        GeminiBridgeRequestOperation::PreserveToolCallSignatures,
+    );
+    input.primary = Some(messages);
+    gemini_bridge_request_kernel(input)
+}
+
 #[test]
 fn schema_union_ignores_empty_any_of_before_one_of() {
     assert_eq!(
@@ -218,6 +226,29 @@ fn signature_choice_keeps_invalid_presence_from_falling_through() {
         },
     ];
     assert_eq!(gemini_signature_choice(&candidates).unwrap(), Some(1));
+}
+
+#[test]
+fn signature_preservation_rewrites_tool_calls_in_mojo() {
+    let input = br#"[{"role":"assistant","tool_calls":[{"extra_content":{"google":{"thought_signature":"sig-a"}},"gemini_thought_signature":"ignored","function":{"name":"shell"}}]},{"tool_calls":[{"gemini_thought_signature":"  ","thought_signature":"fallback"}]},{"tool_calls":[{"function":{"thoughtSignature":"\u2003sig-b\u3000"}}]},{"tool_calls":[{"gemini_thought_signature":42,"thought_signature":"blocked"}]},{"role":"user","content":"unchanged"}]"#;
+
+    assert_eq!(
+        preserve_tool_call_signatures(input).unwrap(),
+        br#"[{"role":"assistant","tool_calls":[{"extra_content":{"google":{"thought_signature":"sig-a"}},"function":{"name":"shell"}}]},{"tool_calls":[{"gemini_thought_signature":"  ","thought_signature":"fallback"}]},{"tool_calls":[{"function":{"thoughtSignature":"\u2003sig-b\u3000"},"extra_content":{"google":{"thought_signature":"\u2003sig-b\u3000"}}}]},{"tool_calls":[{"gemini_thought_signature":42,"thought_signature":"blocked"}]},{"role":"user","content":"unchanged"}]"#
+    );
+}
+
+#[test]
+fn signature_preservation_accepts_empty_messages_and_rejects_non_array_json() {
+    assert_eq!(preserve_tool_call_signatures(b"[]").unwrap(), b"[]");
+    assert_eq!(
+        preserve_tool_call_signatures(br#"[{"tool_calls":[]}]"#).unwrap(),
+        br#"[{"tool_calls":[]}]"#
+    );
+    assert_eq!(
+        preserve_tool_call_signatures(br#"{}"#),
+        Err(prodex_mojo_core::MojoError::InvalidInput)
+    );
 }
 
 #[test]

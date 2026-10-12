@@ -568,6 +568,7 @@
           "gemini_bridge_request_kernel",
           "gemini_translator_request_planning",
           "gemini_bridge_request_fallbacks",
+          "gemini_tool_call_signature_preservation",
           "provider_scalar_policy"
         ]
       },
@@ -3158,6 +3159,33 @@
       "duplicate_production_owner": false,
       "platform_fallback": false,
       "rust_adapter_scope": "Serde normalization, error mapping, bridge helper dispatch and public API boundary handling"
+    },
+    {
+      "name": "gemini_tool_call_signature_preservation",
+      "domain": "provider/gemini",
+      "introduced_in": "0.437.8",
+      "baseline_state": "Rust traversed Gemini tool-call JSON, selected thought-signature aliases, and rewrote legacy fields into Google extra_content metadata",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_gemini_bridge_request_kernel_v1",
+      "mojo_abi_version": 1,
+      "mojo_operation_ids": {
+        "preserve_tool_call_signatures": 12
+      },
+      "mojo_source": "mojo/prodex_core/provider_constraints.mojo",
+      "consumer": "crates/prodex-provider-core/src/translators/gemini/request/tool_signatures.rs",
+      "consumer_marker": "GeminiBridgeRequestOperation::PreserveToolCallSignatures",
+      "production_consumers": [
+        "crates/prodex-provider-core/src/translators/gemini/request/tool_signatures.rs",
+        "crates/prodex-provider-core/src/gemini_bridge/response/tool_calls.rs"
+      ],
+      "production_reachability_test": "crates/prodex-mojo-core/tests/gemini_request_content.rs",
+      "rust_owner_before": "Gemini thought-signature alias precedence, Unicode-whitespace filtering, and tool-call metadata rewrite",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "Deleted; direct Mojo ABI and provider-core caller regressions cover alias precedence, presence barriers, Unicode whitespace, empty messages, and large signatures",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "Serde JSON array serialization/materialization, bounded ABI invocation, and public slice mutation"
     },
     {
       "name": "redaction_sensitive_key_classification",

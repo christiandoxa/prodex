@@ -5,6 +5,7 @@ const GEMINI_BRIDGE_REQUEST_STATUS_INVALID: i64 = 1;
 const GEMINI_BRIDGE_REQUEST_STATUS_CAPACITY: i64 = 2;
 const GEMINI_BRIDGE_REQUEST_STATUS_ABI_MISMATCH: i64 = 3;
 const GEMINI_BRIDGE_REQUEST_MAX_BYTES: usize = 4 * 1024 * 1024;
+const GEMINI_SIGNATURE_PRESERVATION_MAX_BYTES: usize = 16 * 1024 * 1024;
 
 /// Deterministic request operations that remain after the Gemini content kernel.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -21,6 +22,7 @@ pub enum GeminiBridgeRequestOperation {
     TextContents = 9,
     RawTranslatorRequest = 10,
     ValidateTranslatorRequest = 11,
+    PreserveToolCallSignatures = 12,
 }
 
 impl GeminiBridgeRequestOperation {
@@ -122,6 +124,11 @@ fn view(value: Option<&[u8]>) -> GeminiBridgeRequestStringView {
 }
 
 fn output_capacity(input: &GeminiBridgeRequestKernelInput<'_>) -> Result<usize, MojoError> {
+    let max_bytes = if input.operation == GeminiBridgeRequestOperation::PreserveToolCallSignatures {
+        GEMINI_SIGNATURE_PRESERVATION_MAX_BYTES
+    } else {
+        GEMINI_BRIDGE_REQUEST_MAX_BYTES
+    };
     [
         input.primary,
         input.secondary,
@@ -135,7 +142,7 @@ fn output_capacity(input: &GeminiBridgeRequestKernelInput<'_>) -> Result<usize, 
     .into_iter()
     .flatten()
     .try_fold(0_usize, |total, value| {
-        if value.len() > GEMINI_BRIDGE_REQUEST_MAX_BYTES {
+        if value.len() > max_bytes {
             return Err(MojoError::InvalidInput);
         }
         total
