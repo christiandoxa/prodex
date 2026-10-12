@@ -836,6 +836,9 @@ comptime QUOTA_MODEL_PAIR_RESERVE: Int64 = 2
 comptime QUOTA_MODEL_PAIR_DEFAULT: Int64 = 3
 
 comptime QUOTA_MODEL_CAPACITY_FIELD_COUNT: Int64 = 10
+comptime QUOTA_MODEL_CAPACITY_OBSERVATION_FIELD_COUNT: Int64 = 17
+comptime QUOTA_MODEL_CAPACITY_OBSERVATION_ABI_VERSION: Int64 = 1
+comptime QUOTA_MODEL_CAPACITY_OBSERVATION_ABI: Int64 = 4
 
 
 def quota_ascii_lower(value: UInt8) -> UInt8:
@@ -981,40 +984,18 @@ def quota_model_capacity_field(
     return fields[unsafe_offset=field]
 
 
-@export("prodex_quota_openai_model_capacity_plan")
-def prodex_quota_openai_model_capacity_plan(
-    fields_address: UInt,
-    output_address: UInt,
-) abi("C") -> Int64:
-    if fields_address == 0 or output_address == 0:
-        return 1
-    var fields = Pointer[mut=False, Int64, ImmUntrackedOrigin](
-        unsafe_from_address=Int(fields_address)
-    )
-    var output = Pointer[mut=True, Int64, MutUntrackedOrigin](
-        unsafe_from_address=Int(output_address)
-    )
-
-    var model_kind = quota_model_capacity_field(fields, 0)
-    if model_kind < QUOTA_MODEL_KIND_NONE or model_kind > QUOTA_MODEL_KIND_OTHER:
-        return 2
-    var field: Int64 = 1
-    while field < QUOTA_MODEL_CAPACITY_FIELD_COUNT:
-        var value = quota_model_capacity_field(fields, field)
-        if value != 0 and value != 1:
-            return 2
-        field += 1
-
-    var regular_present = quota_model_capacity_field(fields, 1)
-    var regular_ready = quota_model_capacity_field(fields, 2)
-    var generic_ready = quota_model_capacity_field(fields, 3)
-    var reserve_ready = quota_model_capacity_field(fields, 4)
-    var regular_blocked = quota_model_capacity_field(fields, 5)
-    var any_unknown_window = quota_model_capacity_field(fields, 6)
-    var any_exhausted_window = quota_model_capacity_field(fields, 7)
-    var include_code_review = quota_model_capacity_field(fields, 8)
-    var code_review_ready = quota_model_capacity_field(fields, 9)
-
+def quota_openai_model_capacity_decision(
+    model_kind: Int64,
+    regular_present: Int64,
+    regular_ready: Int64,
+    generic_ready: Int64,
+    reserve_ready: Int64,
+    regular_blocked: Int64,
+    any_unknown_window: Int64,
+    any_exhausted_window: Int64,
+    include_code_review: Int64,
+    code_review_ready: Int64,
+) -> Tuple[Int64, Int64, Int64, Int64]:
     var unknown_luna: Int64 = 0
     if (
         regular_present == 1
@@ -1051,11 +1032,153 @@ def prodex_quota_openai_model_capacity_plan(
         supports = 1
     if include_code_review == 1 and code_review_ready == 0:
         supports = 0
+    return selected_pair, ready, supports, unknown_luna
 
-    output[unsafe_offset=0] = selected_pair
-    output[unsafe_offset=1] = ready
-    output[unsafe_offset=2] = supports
-    output[unsafe_offset=3] = unknown_luna
+
+@export("prodex_quota_openai_model_capacity_plan")
+def prodex_quota_openai_model_capacity_plan(
+    fields_address: UInt,
+    output_address: UInt,
+) abi("C") -> Int64:
+    if fields_address == 0 or output_address == 0:
+        return 1
+    var fields = Pointer[mut=False, Int64, ImmUntrackedOrigin](
+        unsafe_from_address=Int(fields_address)
+    )
+    var output = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+
+    var model_kind = quota_model_capacity_field(fields, 0)
+    if model_kind < QUOTA_MODEL_KIND_NONE or model_kind > QUOTA_MODEL_KIND_OTHER:
+        return 2
+    var field: Int64 = 1
+    while field < QUOTA_MODEL_CAPACITY_FIELD_COUNT:
+        var value = quota_model_capacity_field(fields, field)
+        if value != 0 and value != 1:
+            return 2
+        field += 1
+
+    var regular_present = quota_model_capacity_field(fields, 1)
+    var regular_ready = quota_model_capacity_field(fields, 2)
+    var generic_ready = quota_model_capacity_field(fields, 3)
+    var reserve_ready = quota_model_capacity_field(fields, 4)
+    var regular_blocked = quota_model_capacity_field(fields, 5)
+    var any_unknown_window = quota_model_capacity_field(fields, 6)
+    var any_exhausted_window = quota_model_capacity_field(fields, 7)
+    var include_code_review = quota_model_capacity_field(fields, 8)
+    var code_review_ready = quota_model_capacity_field(fields, 9)
+
+    var plan = quota_openai_model_capacity_decision(
+        model_kind,
+        regular_present,
+        regular_ready,
+        generic_ready,
+        reserve_ready,
+        regular_blocked,
+        any_unknown_window,
+        any_exhausted_window,
+        include_code_review,
+        code_review_ready,
+    )
+    output[unsafe_offset=0] = plan[0]
+    output[unsafe_offset=1] = plan[1]
+    output[unsafe_offset=2] = plan[2]
+    output[unsafe_offset=3] = plan[3]
+    return 0
+
+
+@export("prodex_quota_openai_model_capacity_plan_v2")
+def prodex_quota_openai_model_capacity_plan_v2(
+    abi_version: Int64,
+    fields_address: UInt,
+    output_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != QUOTA_MODEL_CAPACITY_OBSERVATION_ABI_VERSION:
+        return QUOTA_MODEL_CAPACITY_OBSERVATION_ABI
+    if fields_address == 0 or output_address == 0:
+        return 1
+    var fields = Pointer[mut=False, Int64, ImmUntrackedOrigin](
+        unsafe_from_address=Int(fields_address)
+    )
+    var output = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+
+    var model_kind = fields[unsafe_offset=0]
+    if model_kind < QUOTA_MODEL_KIND_NONE or model_kind > QUOTA_MODEL_KIND_OTHER:
+        return 2
+    var field: Int64 = 1
+    while field < QUOTA_MODEL_CAPACITY_OBSERVATION_FIELD_COUNT:
+        if field != 8 and field != 11 and field != 13 and field != 15:
+            var value = fields[unsafe_offset=field]
+            if value != 0 and value != 1:
+                return 2
+        field += 1
+
+    var regular_present = fields[unsafe_offset=1]
+    var regular_ready = fields[unsafe_offset=2]
+    var generic_ready = fields[unsafe_offset=3]
+    var reserve_ready = fields[unsafe_offset=4]
+    var regular_blocked = fields[unsafe_offset=5]
+    var regular_primary_window_present = fields[unsafe_offset=6]
+    var regular_primary_used_present = fields[unsafe_offset=7]
+    var regular_primary_used = fields[unsafe_offset=8]
+    var regular_secondary_window_present = fields[unsafe_offset=9]
+    var regular_secondary_used_present = fields[unsafe_offset=10]
+    var regular_secondary_used = fields[unsafe_offset=11]
+    var code_review_primary_used_present = fields[unsafe_offset=12]
+    var code_review_primary_used = fields[unsafe_offset=13]
+    var code_review_secondary_used_present = fields[unsafe_offset=14]
+    var code_review_secondary_used = fields[unsafe_offset=15]
+    var include_code_review = fields[unsafe_offset=16]
+
+    var any_unknown_window: Int64 = 0
+    var any_exhausted_window: Int64 = 0
+    if regular_present == 1:
+        if (
+            (regular_primary_window_present == 1 and regular_primary_used_present == 0)
+            or (
+                regular_secondary_window_present == 1
+                and regular_secondary_used_present == 0
+            )
+        ):
+            any_unknown_window = 1
+        if (
+            (regular_primary_used_present == 1 and regular_primary_used >= 100)
+            or (
+                regular_secondary_used_present == 1
+                and regular_secondary_used >= 100
+            )
+        ):
+            any_exhausted_window = 1
+
+    var code_review_ready: Int64 = 1
+    if (
+        (code_review_primary_used_present == 1 and code_review_primary_used >= 100)
+        or (
+            code_review_secondary_used_present == 1
+            and code_review_secondary_used >= 100
+        )
+    ):
+        code_review_ready = 0
+
+    var plan = quota_openai_model_capacity_decision(
+        model_kind,
+        regular_present,
+        regular_ready,
+        generic_ready,
+        reserve_ready,
+        regular_blocked,
+        any_unknown_window,
+        any_exhausted_window,
+        include_code_review,
+        code_review_ready,
+    )
+    output[unsafe_offset=0] = plan[0]
+    output[unsafe_offset=1] = plan[1]
+    output[unsafe_offset=2] = plan[2]
+    output[unsafe_offset=3] = plan[3]
     return 0
 # Human-facing quota status classification. Rust keeps ownership of provider strings and
 # final allocation; Mojo owns deterministic classification and precedence.

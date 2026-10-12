@@ -271,6 +271,51 @@ fn unknown_luna_capacity_supports_only_unexhausted_unknown_windows() {
 }
 
 #[test]
+fn model_capacity_window_observations_reach_mojo_caller_plan() {
+    let mut partial = main_windows(50, 1_700_001_800, 60, 1_700_259_200);
+    partial
+        .rate_limit
+        .as_mut()
+        .unwrap()
+        .primary_window
+        .as_mut()
+        .unwrap()
+        .used_percent = None;
+    assert!(
+        !openai_usage_has_unknown_luna_capacity(&partial),
+        "one unknown window does not override another ready regular window"
+    );
+
+    let mut usage = partial;
+    usage
+        .rate_limit
+        .as_mut()
+        .unwrap()
+        .secondary_window
+        .as_mut()
+        .unwrap()
+        .used_percent = None;
+
+    assert!(openai_usage_has_unknown_luna_capacity(&usage));
+    assert!(openai_usage_supports_model(
+        &usage,
+        false,
+        Some(OPENAI_LUNA_MODEL)
+    ));
+
+    usage.code_review_rate_limit = Some(
+        main_windows(0, 1_700_001_800, 60, 1_700_259_200)
+            .rate_limit
+            .unwrap(),
+    );
+    assert!(!openai_usage_supports_model(
+        &usage,
+        true,
+        Some(OPENAI_LUNA_MODEL)
+    ));
+}
+
+#[test]
 fn exhausted_code_review_capacity_blocks_model_support() {
     let mut usage = main_windows(50, 1_700_001_800, 60, 1_700_259_200);
     usage.code_review_rate_limit = Some(
