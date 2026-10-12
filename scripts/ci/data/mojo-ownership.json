@@ -3579,7 +3579,7 @@
         "crates/prodex-profile-export/src/data_model.rs",
         "crates/prodex-profile-export/src/envelope.rs"
       ],
-      "production_reachability_test": "crates/prodex-mojo-core/src/profile_export.rs",
+      "production_reachability_test": "crates/prodex-mojo-core/src/profile_export/tests.rs",
       "rust_owner_before": "profile/secret-file count limits, nested secret byte limit, password byte-length limit, PBKDF2 iteration range and Argon2 numeric parameter range decisions",
       "rust_state_after": "adapter-only",
       "rust_test_oracle": "deleted; profile-export suite covers exact count/size/KDF boundaries, fail-before-password-lookup behavior, encrypted v1/v2 round trips, corruption and redacted failures",
@@ -7225,7 +7225,7 @@
       "production_consumers": [
         "crates/prodex-profile-export/src/envelope.rs"
       ],
-      "production_reachability_test": "crates/prodex-mojo-core/src/profile_export.rs",
+      "production_reachability_test": "crates/prodex-mojo-core/src/profile_export/tests.rs",
       "rust_owner_before": "Envelope header/schema, PBKDF2/Argon2 plan, base64 encoding/length rules and payload auth-tag minimum",
       "rust_state_after": "adapter-only",
       "rust_test_oracle": "removed; direct required-Mojo schema ABI, round-trip import tests and deliberate KDF mutation enforce semantic authority",

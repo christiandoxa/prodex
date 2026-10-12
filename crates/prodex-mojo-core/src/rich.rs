@@ -5,6 +5,13 @@
 //! and only validated offset-based records cross back. No Mojo or Rust heap
 //! object is shared across this boundary.
 
+#[path = "rich/runtime_doctor_route_health.rs"]
+mod runtime_doctor_route_health;
+pub use runtime_doctor_route_health::{
+    RUNTIME_DOCTOR_ROUTE_HEALTH_GROUPS_MAX_ROWS, RuntimeDoctorRouteHealthGroup,
+    runtime_doctor_route_health_groups,
+};
+
 use crate::{MojoError, MojoIssue};
 
 // v6 uses fixed-width UInt64 addresses for every pointer crossing the rich C

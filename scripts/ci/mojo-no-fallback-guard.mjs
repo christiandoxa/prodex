@@ -5261,12 +5261,21 @@ export function findViolations(files) {
       const required = [
         "prodex_profile_export_selection_v1(",
         "pub fn profile_export_selection_plan(",
-        "profile_export_selection_plan_is_mojo_owned",
+        '#[path = "profile_export/tests.rs"]',
         '#[path = "profile_export/active_profile.rs"]',
-        "profile_active_selection_and_import_plan_are_mojo_owned",
       ];
       return required.filter((marker) => !contents.includes(marker))
         .map((marker) => `${filePath}: profile-export selection adapter must retain ${marker}`);
+    }
+    if (filePath === "crates/prodex-mojo-core/src/profile_export/tests.rs") {
+      const required = [
+        "profile_export_selection_plan_is_mojo_owned",
+        "profile_active_selection_and_import_plan_are_mojo_owned",
+        "profile_export_envelope_schema_is_owned_by_mojo_and_rejects_invalid_metadata",
+        "prodex_mojo_core::profile_export",
+      ];
+      return required.filter((marker) => !contents.includes(marker))
+        .map((marker) => `${filePath}: extracted profile-export ABI tests must retain ${marker}`);
     }
     if (filePath === "crates/prodex-mojo-core/src/profile_export/active_profile.rs") {
       const required = [
