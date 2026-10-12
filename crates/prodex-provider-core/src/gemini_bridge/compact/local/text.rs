@@ -3,39 +3,9 @@
 pub(super) fn gemini_provider_core_local_compact_text_from_content(
     value: &serde_json::Value,
 ) -> Option<String> {
-    match value {
-        serde_json::Value::String(text) => Some(text.to_string()),
-        serde_json::Value::Array(values) => {
-            let text = values
-                .iter()
-                .filter_map(gemini_provider_core_local_compact_text_from_content)
-                .filter(|text| !text.trim().is_empty())
-                .collect::<Vec<_>>()
-                .join("\n");
-            (!text.trim().is_empty()).then_some(text)
-        }
-        serde_json::Value::Object(object) => {
-            for key in ["text", "output", "input", "query", "command", "commands"] {
-                if let Some(text) = object
-                    .get(key)
-                    .and_then(gemini_provider_core_local_compact_text_from_content)
-                    .filter(|text| !text.trim().is_empty())
-                {
-                    return Some(text);
-                }
-            }
-            let text = object
-                .values()
-                .filter_map(gemini_provider_core_local_compact_text_from_content)
-                .filter(|text| !text.trim().is_empty())
-                .collect::<Vec<_>>()
-                .join("\n");
-            (!text.trim().is_empty()).then_some(text)
-        }
-        serde_json::Value::Number(number) => Some(number.to_string()),
-        serde_json::Value::Bool(value) => Some(value.to_string()),
-        serde_json::Value::Null => None,
-    }
+    let raw = serde_json::to_string(value).expect("Serde JSON value serializes");
+    prodex_mojo_core::rich::extract_gemini_compact_text(&raw)
+        .expect("Mojo Gemini compact text extraction returned invalid output")
 }
 
 pub(super) fn gemini_provider_core_truncate_utf8_edges(text: String, max_bytes: usize) -> String {

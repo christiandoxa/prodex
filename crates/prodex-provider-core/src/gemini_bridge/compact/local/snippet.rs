@@ -87,6 +87,10 @@ mod tests {
                 Some("tool call function (unknown): snow"),
             ),
             (
+                serde_json::json!({"type":"other","payload":{"query":"nested"}}),
+                Some("other: nested\nother"),
+            ),
+            (
                 serde_json::json!({"type":"custom_tool_call","name":"patch","call_id":"c1","input":"x"}),
                 Some("custom tool call patch (c1): x"),
             ),
