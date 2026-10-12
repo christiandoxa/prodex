@@ -47,7 +47,7 @@ pub(crate) fn runtime_prefetch_release_queued_bytes(
     if bytes > 0 {
         let _ = shared
             .queued_bytes
-            .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |queued| {
+            .try_update(Ordering::SeqCst, Ordering::SeqCst, |queued| {
                 Some(queued.saturating_sub(bytes))
             });
     }

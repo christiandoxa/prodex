@@ -307,7 +307,7 @@ impl AuthRefreshServer {
                             .push(body);
                         let refresh_allowed = match successes_remaining.as_ref() {
                             Some(remaining) => remaining
-                                .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |current| {
+                                .try_update(Ordering::SeqCst, Ordering::SeqCst, |current| {
                                     current.checked_sub(1)
                                 })
                                 .is_ok(),
