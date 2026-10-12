@@ -29,7 +29,10 @@ impl GoalUsageLimitMonitor {
         &mut self,
         session_id: &str,
     ) -> Result<Option<RuntimeWorkflowRecoveryClass>> {
-        if self.workflow_scan_disabled {
+        if self
+            .workflow_scan_retry_at
+            .is_some_and(|retry_at| Instant::now() < retry_at)
+        {
             return Ok(None);
         }
         let Some(path) = self.workflow_session_path(session_id)? else {
@@ -55,10 +58,15 @@ impl GoalUsageLimitMonitor {
         ) {
             Ok(scan) => scan,
             Err(_) => {
-                self.workflow_scan_disabled = true;
+                // A transient file/decoder failure must not mute recovery for
+                // the rest of the native session. Keep cursor and evidence,
+                // and retry on a bounded schedule without replaying history.
+                self.workflow_scan_retry_at =
+                    Some(Instant::now() + GOAL_USAGE_LIMIT_RETRY_INTERVAL);
                 return Ok(None);
             }
         };
+        self.workflow_scan_retry_at = None;
         self.session_scan_offset = scan.complete_offset;
         self.workflow_model = model;
         self.workflow_evidence = evidence;

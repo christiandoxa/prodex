@@ -68,9 +68,14 @@ pub(super) fn visit_session_lines(path: &Path, mut visit: impl FnMut(&str) -> bo
 
 /// Returns the decoded byte length of a session file.
 ///
-/// Compressed rollouts use decoded offsets so callers can compare a marker written before and
-/// after a child attempt using the same coordinate system for both file formats.
+/// Plain JSONL uses the validated open file's metadata: a recovery cursor must
+/// not load or reject the historical document just because it is large.
+/// Compressed rollouts retain bounded decoding and use decoded offsets, so
+/// markers before and after a child attempt share one coordinate system.
 pub fn session_file_logical_len(path: &Path) -> Result<u64> {
+    if !is_compressed_session_file(path) {
+        return Ok(open_session_regular_file(path)?.metadata()?.len());
+    }
     Ok(read_session_file_to_string(path)?.len() as u64)
 }
 
@@ -362,11 +367,20 @@ mod tests {
         let file = fs::File::create(&path).unwrap();
         file.set_len(offset).unwrap();
         drop(file);
+        // Recovery must obtain this cursor through the production length API,
+        // not inject a known offset that bypasses the large-file failure.
+        assert_eq!(session_file_logical_len(&path).unwrap(), offset);
+        assert!(
+            read_session_file_to_string(&path).is_err(),
+            "obtaining a cursor must not relax whole-document allocation limits"
+        );
+        let observed_offset = session_file_logical_len(&path).unwrap();
         let mut file = fs::OpenOptions::new().append(true).open(&path).unwrap();
         use std::io::Write as _;
         file.write_all(b"{\"type\":\"error\"}\n").unwrap();
 
-        let scan = session_file_scan_since(&path, offset, |line| line.contains("error")).unwrap();
+        let scan =
+            session_file_scan_since(&path, observed_offset, |line| line.contains("error")).unwrap();
         assert!(scan.matched);
         assert_eq!(scan.complete_offset, fs::metadata(&path).unwrap().len());
         let _ = fs::remove_dir_all(root);

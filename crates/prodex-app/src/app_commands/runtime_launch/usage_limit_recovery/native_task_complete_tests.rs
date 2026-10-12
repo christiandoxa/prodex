@@ -196,3 +196,136 @@ fn native_task_started_prevents_recovery_using_previous_turn_side_effects() {
     drop(monitor);
     let _ = fs::remove_dir_all(root);
 }
+
+#[test]
+fn large_resumed_rollout_recovers_capacity_after_compaction_without_replaying_history() {
+    let root = fixture_root("large-rollout-compact-capacity");
+    let (_home, _shared) = configured_env(&root);
+    let paths = AppPaths::discover().unwrap();
+    let session_path = populate_fixture(&root, &paths, &["a", "b"]);
+    blocked_goal(&paths);
+    // A long-lived rollout exceeds the whole-document loading limit. Each
+    // record stays bounded and valid, as in real persisted tool histories.
+    let padding = serde_json::json!({
+        "type":"event_msg", "payload":{"type":"historical_padding", "value":"x".repeat(64 * 1024)}
+    });
+    {
+        let mut file = std::io::BufWriter::new(
+            fs::OpenOptions::new()
+                .append(true)
+                .open(&session_path)
+                .unwrap(),
+        );
+        let line = format!("{padding}\n");
+        for _ in 0..1025 {
+            file.write_all(line.as_bytes()).unwrap();
+        }
+        file.flush().unwrap();
+    }
+    append_native_failure(&session_path);
+    let baseline_len = fs::metadata(&session_path).unwrap().len();
+    assert!(baseline_len > 64 * 1024 * 1024);
+    let mut monitor = GoalUsageLimitMonitor::new(
+        paths.clone(),
+        Some(paths.shared_codex_root.join("goals_1.sqlite")),
+        root.join("marker"),
+        Some(SESSION_ID.to_string()),
+    );
+    assert_eq!(monitor.session_scan_offset, baseline_len);
+    assert_eq!(monitor.take_usage_limit_signal().unwrap(), None);
+    append_record(
+        &session_path,
+        serde_json::json!({
+            "type":"event_msg","payload":{"type":"task_started","turn_id":"new-turn"}
+        }),
+    );
+    append_user_event(&session_path);
+    append_record(
+        &session_path,
+        serde_json::json!({
+            "type":"response_item","payload":{"type":"custom_tool_call_output","call_id":"done-before-compact","output":"synthetic completed work"}
+        }),
+    );
+    append_record(
+        &session_path,
+        serde_json::json!({
+            "type":"compacted","payload":{"message":"synthetic compacted history","replacement_history":[]}
+        }),
+    );
+    append_record(
+        &session_path,
+        serde_json::json!({
+            "type":"event_msg","payload":{"type":"context_compacted"}
+        }),
+    );
+    append_user_event(&session_path);
+    append_record(
+        &session_path,
+        serde_json::json!({
+            "type":"event_msg","payload":{"type":"task_complete","turn_id":"new-turn","root_turn_id":"new-turn",
+            "error":{"message":"Selected model is at capacity. Please try a different model.","codex_error_info":"server_overloaded"}}
+        }),
+    );
+    assert_eq!(
+        monitor.take_usage_limit_signal().unwrap().as_deref(),
+        Some(SESSION_ID)
+    );
+    assert_eq!(monitor.recovery_failure_class(), "overload");
+    let attempted = BTreeSet::new();
+    let plan = next_observed_runtime_recovery_plan(
+        &monitor,
+        &resume_options(&attempted, false, Some("a")),
+    )
+    .unwrap()
+    .unwrap();
+    assert_eq!(plan.profile_name, "b");
+    assert_eq!(plan.session_id, SESSION_ID);
+    assert!(plan.resume_goal);
+    assert!(
+        runtime_session_recovery_message(&plan, 1, None, None)
+            .contains("last_prompt_requeued=false")
+    );
+    monitor.prepare_for_resume();
+    assert_eq!(monitor.take_usage_limit_signal().unwrap(), None);
+    drop(monitor);
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn live_monitor_recovers_after_transient_session_read_failure() {
+    let root = fixture_root("transient-rollout-read");
+    let (_home, _shared) = configured_env(&root);
+    let paths = AppPaths::discover().unwrap();
+    let session_path = populate_fixture(&root, &paths, &["a", "b"]);
+    let mut monitor = GoalUsageLimitMonitor::new(
+        paths,
+        None,
+        root.join("marker"),
+        Some(SESSION_ID.to_string()),
+    );
+    assert_eq!(monitor.take_usage_limit_signal().unwrap(), None);
+    let original_offset = monitor.session_scan_offset;
+    let held = root.join("held-rollout.jsonl");
+    fs::rename(&session_path, &held).unwrap();
+    fs::create_dir(&session_path).unwrap();
+    assert_eq!(monitor.take_usage_limit_signal().unwrap(), None);
+    assert!(monitor.workflow_scan_retry_at.is_some());
+    assert_eq!(monitor.session_scan_offset, original_offset);
+    fs::remove_dir(&session_path).unwrap();
+    fs::rename(&held, &session_path).unwrap();
+    append_native_failure(&session_path);
+    assert_eq!(
+        monitor.take_usage_limit_signal().unwrap(),
+        None,
+        "retry backoff prevents hot polling after an I/O failure"
+    );
+    monitor.workflow_scan_retry_at = Some(Instant::now());
+    assert_eq!(
+        monitor.take_usage_limit_signal().unwrap().as_deref(),
+        Some(SESSION_ID)
+    );
+    assert_eq!(monitor.recovery_failure_class(), "overload");
+    assert!(monitor.workflow_scan_retry_at.is_none());
+    drop(monitor);
+    fs::remove_dir_all(root).unwrap();
+}
