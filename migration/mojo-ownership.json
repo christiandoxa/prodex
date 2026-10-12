@@ -1836,6 +1836,36 @@
         "operations": [
           "runtime_response_forwarding_tap_state_policy"
         ]
+      },
+      {
+        "path": "mojo/prodex_core/runtime_profile_route_circuit.mojo",
+        "language": "mojo",
+        "classification": "DETERMINISTIC_DOMAIN",
+        "production_reachable": true,
+        "role": "semantic",
+        "operations": [
+          "runtime_profile_route_circuit_action_policy"
+        ]
+      },
+      {
+        "path": "crates/prodex-mojo-core/src/runtime/profile_route_circuit.rs",
+        "language": "rust",
+        "classification": "MIXED",
+        "production_reachable": true,
+        "role": "adapter",
+        "operations": [
+          "runtime_profile_route_circuit_action_policy"
+        ]
+      },
+      {
+        "path": "crates/prodex-app/tests/support/main_internal/runtime_proxy_selection_and_pressure/pressure.rs",
+        "language": "rust",
+        "classification": "MIXED",
+        "production_reachable": true,
+        "role": "test",
+        "operations": [
+          "runtime_profile_route_circuit_action_policy"
+        ]
       }
     ],
     "removed": [
@@ -7783,6 +7813,29 @@
       "duplicate_production_owner": false,
       "platform_fallback": false,
       "rust_adapter_scope": "Serde envelope projection, bounded error-tag/status extraction, typed ABI mapping, and recovery side effects."
+    },
+    {
+      "name": "runtime_profile_route_circuit_action_policy",
+      "domain": "runtime-proxy/profile-health",
+      "introduced_in": "0.437.7",
+      "baseline_state": "Rust chose whether a route circuit was absent, still open, ready to clear, or ready for a half-open probe.",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_runtime_profile_route_circuit_action_v1",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/runtime_profile_route_circuit.mojo",
+      "consumer": "crates/prodex-app/src/runtime_proxy/health_circuit.rs",
+      "consumer_marker": "runtime_profile_route_circuit_action(",
+      "production_consumers": [
+        "crates/prodex-app/src/runtime_proxy/health_circuit.rs"
+      ],
+      "production_reachability_test": "crates/prodex-mojo-core/tests/runtime_profile_route_circuit.rs",
+      "rust_owner_before": "Route-circuit action branching after Rust gathered the circuit timestamp and effective health score.",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "deleted; required-Mojo ABI matrix, route-circuit caller coverage, and mutation proof establish the action owner.",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "runtime lock and state reads, effective health-score acquisition, typed action mapping, circuit mutation, persistence scheduling, and diagnostics"
     }
   ],
   "rust_semantic_reductions": [

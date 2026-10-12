@@ -110,6 +110,9 @@ const MAIN_MODEL_CATALOG_FILE = "crates/prodex-app/src/app_commands/super_main_c
 const MAIN_MODEL_CATALOG_ADAPTER_FILE = "crates/prodex-mojo-core/src/rich/catalog_planner.rs";
 const MAIN_MODEL_CATALOG_MOJO_FILE = "mojo/prodex_core/rich_catalog.mojo";
 const MAIN_MODEL_CATALOG_TEST_FILE = "crates/prodex-mojo-core/src/rich_tests.rs";
+const PROFILE_ROUTE_CIRCUIT_ADAPTER_FILE = "crates/prodex-mojo-core/src/runtime/profile_route_circuit.rs";
+const PROFILE_ROUTE_CIRCUIT_MOJO_FILE = "mojo/prodex_core/runtime_profile_route_circuit.mojo";
+const PROFILE_ROUTE_CIRCUIT_TEST_FILE = "crates/prodex-mojo-core/tests/runtime_profile_route_circuit.rs";
 const PROMOTED_FILES = [
   "crates/prodex-app/src/runtime_proxy/quota/gate.rs",
   "crates/prodex-app/src/runtime_proxy/websocket_message/failure_handling/retry_recovery.rs",
@@ -230,6 +233,9 @@ const PROMOTED_FILES = [
   "crates/prodex-runtime-proxy/src/route_decision_trace/reason.rs",
   "crates/prodex-app/src/runtime_proxy/lineage/remember.rs",
   "crates/prodex-app/src/runtime_proxy/health_circuit.rs",
+  PROFILE_ROUTE_CIRCUIT_ADAPTER_FILE,
+  PROFILE_ROUTE_CIRCUIT_MOJO_FILE,
+  PROFILE_ROUTE_CIRCUIT_TEST_FILE,
   "crates/prodex-mojo-core/src/smart_context_markers.rs",
   "mojo/prodex_core/smart_context_markers.mojo",
   "crates/prodex-app/src/runtime_state_shared/semantic_index/markers.rs",
@@ -1596,14 +1602,67 @@ export function findViolations(files) {
     return [];
   });
   const profileHealthCircuitViolations = files.flatMap(([filePath, contents]) => {
-    if (filePath !== PROFILE_HEALTH_CIRCUIT_FILE) return [];
-    const body = contents.match(
-      /\bfn\s+runtime_profile_circuit_half_open_probe_seconds\s*\([^)]*\)\s*->\s*i64\s*\{([^{}]*)\}/u,
-    )?.[1];
-    return body?.includes("runtime_proxy_crate::runtime_profile_circuit_half_open_probe_seconds(")
-      && !/\b(?:checked_shl|saturating_(?:sub|mul))\b/u.test(body)
-      ? []
-      : [`${filePath}: half-open profile-health timing must delegate to the Mojo runtime-health adapter`];
+    if (filePath === PROFILE_HEALTH_CIRCUIT_FILE) {
+      const production = contents.split("#[cfg(test)]", 1)[0];
+      const required = [
+        "runtime_profile_route_circuit_action(",
+        "RuntimeProfileRouteCircuitAction::AllowNoCircuit",
+        "RuntimeProfileRouteCircuitAction::RejectOpen",
+        "RuntimeProfileRouteCircuitAction::ClearAndAllow",
+        "RuntimeProfileRouteCircuitAction::ReserveAndAllow",
+      ];
+      const violations = required
+        .filter((marker) => !production.includes(marker))
+        .map((marker) => `${filePath}: route-circuit admission must retain Mojo action planning (${marker})`);
+      if (/if\s+until\s*>\s*now\s*\{/u.test(production) || /if\s+health_score\s*==\s*0\s*\{/u.test(production)) {
+        violations.push(`${filePath}: contains restored Rust route-circuit action branching`);
+      }
+      const body = contents.match(
+        /\bfn\s+runtime_profile_circuit_half_open_probe_seconds\s*\([^)]*\)\s*->\s*i64\s*\{([^{}]*)\}/u,
+      )?.[1];
+      if (!body?.includes("runtime_proxy_crate::runtime_profile_circuit_half_open_probe_seconds(") ||
+          /\b(?:checked_shl|saturating_(?:sub|mul))\b/u.test(body)) {
+        violations.push(`${filePath}: half-open profile-health timing must delegate to the Mojo runtime-health adapter`);
+      }
+      return violations;
+    }
+    if (filePath === PROFILE_ROUTE_CIRCUIT_ADAPTER_FILE) {
+      const required = [
+        "prodex_runtime_profile_route_circuit_action_v1(",
+        "RuntimeProfileRouteCircuitActionInput",
+        "RuntimeProfileRouteCircuitAction::AllowNoCircuit",
+        "RuntimeProfileRouteCircuitAction::RejectOpen",
+        "RuntimeProfileRouteCircuitAction::ClearAndAllow",
+        "RuntimeProfileRouteCircuitAction::ReserveAndAllow",
+      ];
+      return required
+        .filter((marker) => !contents.includes(marker))
+        .map((marker) => `${filePath}: route-circuit adapter must retain versioned Mojo action ABI (${marker})`);
+    }
+    if (filePath === PROFILE_ROUTE_CIRCUIT_MOJO_FILE) {
+      const required = [
+        '@export("prodex_runtime_profile_route_circuit_action_v1")',
+        "RUNTIME_PROFILE_ROUTE_CIRCUIT_ALLOW_NO_CIRCUIT",
+        "RUNTIME_PROFILE_ROUTE_CIRCUIT_REJECT_OPEN",
+        "RUNTIME_PROFILE_ROUTE_CIRCUIT_CLEAR_AND_ALLOW",
+        "RUNTIME_PROFILE_ROUTE_CIRCUIT_RESERVE_AND_ALLOW",
+      ];
+      return required
+        .filter((marker) => !contents.includes(marker))
+        .map((marker) => `${filePath}: route-circuit action policy must remain Mojo-owned (${marker})`);
+    }
+    if (filePath === PROFILE_ROUTE_CIRCUIT_TEST_FILE) {
+      const required = [
+        "required_mojo_route_circuit_action_matrix_is_authoritative",
+        "MOJO_REQUIRED",
+        "RuntimeProfileRouteCircuitAction::ClearAndAllow",
+        "RuntimeProfileRouteCircuitAction::ReserveAndAllow",
+      ];
+      return required
+        .filter((marker) => !contents.includes(marker))
+        .map((marker) => `${filePath}: required-Mojo route-circuit action coverage must retain ${marker}`);
+    }
+    return [];
   });
   const exactnessPlannerViolations = files
     .filter(([filePath, contents]) => filePath === SMART_CONTEXT_CORE_FILE &&
@@ -7698,11 +7757,50 @@ function selfTest() {
       .filter((call) => !call.includes("prodex_log_retention_candidates_v1("))
       .join("\n"),
   ]]).join("\n"), /must retain prodex_log_retention_candidates_v1/u);
-  assert.deepEqual(findViolations([[PROFILE_HEALTH_CIRCUIT_FILE,
-    "fn runtime_profile_circuit_half_open_probe_seconds(score: u32) -> i64 { runtime_proxy_crate::runtime_profile_circuit_half_open_probe_seconds(score) }"]]), []);
+  const profileRouteCircuitConsumer = [
+    "fn runtime_profile_circuit_half_open_probe_seconds(score: u32) -> i64 { runtime_proxy_crate::runtime_profile_circuit_half_open_probe_seconds(score) }",
+    "let action = runtime_profile_route_circuit_action(input);",
+    "RuntimeProfileRouteCircuitAction::AllowNoCircuit",
+    "RuntimeProfileRouteCircuitAction::RejectOpen",
+    "RuntimeProfileRouteCircuitAction::ClearAndAllow",
+    "RuntimeProfileRouteCircuitAction::ReserveAndAllow",
+  ].join("\n");
+  assert.deepEqual(findViolations([[PROFILE_HEALTH_CIRCUIT_FILE, profileRouteCircuitConsumer]]), []);
   assert.match(findViolations([[PROFILE_HEALTH_CIRCUIT_FILE,
-    "fn runtime_profile_circuit_half_open_probe_seconds(score: u32) -> i64 { let multiplier = 1_i64.checked_shl(score.saturating_sub(4).min(3)).unwrap_or(i64::MAX); 5_i64.saturating_mul(multiplier).min(60) }"]]).join("\n"),
+    profileRouteCircuitConsumer.replace("runtime_profile_route_circuit_action(input)", "if circuit_open { return Ok(false); }")]]).join("\n"),
+  /route-circuit admission must retain Mojo action planning/u);
+  assert.match(findViolations([[PROFILE_HEALTH_CIRCUIT_FILE,
+    "fn runtime_profile_circuit_half_open_probe_seconds(score: u32) -> i64 { let multiplier = 1_i64.checked_shl(score.saturating_sub(4).min(3)).unwrap_or(i64::MAX); 5_i64.saturating_mul(multiplier).min(60) }\n" + profileRouteCircuitConsumer]]).join("\n"),
   /must delegate to the Mojo runtime-health adapter/u);
+  const profileRouteCircuitAdapter = [
+    "fn prodex_runtime_profile_route_circuit_action_v1(",
+    "RuntimeProfileRouteCircuitActionInput",
+    "RuntimeProfileRouteCircuitAction::AllowNoCircuit",
+    "RuntimeProfileRouteCircuitAction::RejectOpen",
+    "RuntimeProfileRouteCircuitAction::ClearAndAllow",
+    "RuntimeProfileRouteCircuitAction::ReserveAndAllow",
+  ].join("\n");
+  const profileRouteCircuitMojo = [
+    '@export("prodex_runtime_profile_route_circuit_action_v1")',
+    "RUNTIME_PROFILE_ROUTE_CIRCUIT_ALLOW_NO_CIRCUIT",
+    "RUNTIME_PROFILE_ROUTE_CIRCUIT_REJECT_OPEN",
+    "RUNTIME_PROFILE_ROUTE_CIRCUIT_CLEAR_AND_ALLOW",
+    "RUNTIME_PROFILE_ROUTE_CIRCUIT_RESERVE_AND_ALLOW",
+  ].join("\n");
+  const profileRouteCircuitTest = [
+    "required_mojo_route_circuit_action_matrix_is_authoritative",
+    "MOJO_REQUIRED",
+    "RuntimeProfileRouteCircuitAction::ClearAndAllow",
+    "RuntimeProfileRouteCircuitAction::ReserveAndAllow",
+  ].join("\n");
+  assert.deepEqual(findViolations([
+    [PROFILE_ROUTE_CIRCUIT_ADAPTER_FILE, profileRouteCircuitAdapter],
+    [PROFILE_ROUTE_CIRCUIT_MOJO_FILE, profileRouteCircuitMojo],
+    [PROFILE_ROUTE_CIRCUIT_TEST_FILE, profileRouteCircuitTest],
+  ]), []);
+  assert.match(findViolations([[PROFILE_ROUTE_CIRCUIT_MOJO_FILE,
+    profileRouteCircuitMojo.replace("RUNTIME_PROFILE_ROUTE_CIRCUIT_CLEAR_AND_ALLOW", "RUNTIME_PROFILE_ROUTE_CIRCUIT_RESERVE_AND_ALLOW")]]).join("\n"),
+  /route-circuit action policy must remain Mojo-owned/u);
   const routeAffinityLogFile = "crates/prodex-runtime-proxy/src/route_affinity_log.rs";
   const routeAffinityLogCalls = "prodex_mojo_core::log::render_route_affinity_log(); prodex_mojo_core::log::render_route_affinity_owner_logs();";
   assert.deepEqual(findViolations([[routeAffinityLogFile, routeAffinityLogCalls]]), []);
