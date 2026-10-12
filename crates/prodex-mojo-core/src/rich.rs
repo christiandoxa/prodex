@@ -107,6 +107,9 @@ pub use gemini_compact_snippet::{
     format_gemini_semantic_continuation_summary, plan_gemini_semantic_compact_indices,
     truncate_gemini_compact_utf8, truncate_gemini_compact_utf8_edges,
 };
+#[path = "rich/gemini_compact_text.rs"]
+mod gemini_compact_text;
+pub use gemini_compact_text::extract_gemini_compact_text;
 #[path = "rich/gemini_compact_rewrite.rs"]
 mod gemini_compact_rewrite;
 pub use gemini_compact_rewrite::{

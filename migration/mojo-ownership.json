@@ -498,6 +498,11 @@
           "deepseek_local_rewrite_route_policy"
         ]
       },
+      "mojo/prodex_core/gemini_compact_text.mojo": {
+        "operations": [
+          "gemini_compact_text_extraction"
+        ]
+      },
       "mojo/prodex_core/log_semantics.mojo": {
         "operations": [
           "runtime_log_level_classification",
@@ -1580,6 +1585,26 @@
         "role": "adapter",
         "operations": [
           "deepseek_local_rewrite_route_policy"
+        ]
+      },
+      {
+        "path": "mojo/prodex_core/gemini_compact_text.mojo",
+        "language": "mojo",
+        "classification": "DETERMINISTIC_DOMAIN",
+        "production_reachable": true,
+        "role": "semantic",
+        "operations": [
+          "gemini_compact_text_extraction"
+        ]
+      },
+      {
+        "path": "crates/prodex-mojo-core/src/rich/gemini_compact_text.rs",
+        "language": "rust",
+        "classification": "MIXED",
+        "production_reachable": true,
+        "role": "adapter",
+        "operations": [
+          "gemini_compact_text_extraction"
         ]
       },
       {
@@ -6640,6 +6665,31 @@
       "duplicate_production_owner": false,
       "platform_fallback": false,
       "rust_adapter_scope": "event DTO ownership, BTreeMap counters, iteration over Mojo-selected reason values, and validated tag application"
+    },
+    {
+      "name": "gemini_compact_text_extraction",
+      "domain": "provider/gemini",
+      "introduced_in": "0.440.0",
+      "baseline_state": "Rust recursively extracted compact text from serde_json values, including prioritized object fields, nested arrays, scalar values, and blank filtering",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_mojo_gemini_compact_text_v1",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/gemini_compact_text.mojo",
+      "consumer": "crates/prodex-provider-core/src/gemini_bridge/compact/local/text.rs",
+      "consumer_marker": "extract_gemini_compact_text(",
+      "production_consumers": [
+        "crates/prodex-provider-core/src/gemini_bridge/compact/local/text.rs",
+        "crates/prodex-provider-core/src/gemini_bridge/compact/local/snippet.rs",
+        "crates/prodex-provider-core/src/gemini_bridge/compact/local/semantic.rs"
+      ],
+      "production_reachability_test": "crates/prodex-provider-core/src/gemini_bridge/compact/local/snippet.rs",
+      "rust_owner_before": "Recursive serde_json text extraction, priority-key selection, nested-value joining, scalar conversion, and blank suppression",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "deleted; direct required-Mojo extraction coverage and provider-boundary snippet/semantic regressions preserve nested content, precedence, scalar, Unicode, and blank behavior",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "Serde Value serialization, Mojo ABI status mapping, output String ownership, and top-level field projection"
     },
     {
       "name": "gemini_compact_transcript_snippet_shaping",

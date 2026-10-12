@@ -97,6 +97,8 @@ const GEMINI_COMPACT_SEMANTIC_CONSUMER_FILE = "crates/prodex-provider-core/src/g
 const GEMINI_COMPACT_SNIPPET_REMOVED_RUST_FILE = "crates/prodex-provider-core/src/gemini_bridge/compact/local/snippet/tool.rs";
 const GEMINI_COMPACT_SNIPPET_ADAPTER_FILE = "crates/prodex-mojo-core/src/rich/gemini_compact_snippet.rs";
 const GEMINI_COMPACT_SNIPPET_MOJO_FILE = "mojo/prodex_core/gemini_compact_snippet.mojo";
+const GEMINI_COMPACT_TEXT_ADAPTER_FILE = "crates/prodex-mojo-core/src/rich/gemini_compact_text.rs";
+const GEMINI_COMPACT_TEXT_MOJO_FILE = "mojo/prodex_core/gemini_compact_text.mojo";
 const PROFILE_LOGIN_FILE = "crates/prodex-app/src/profile_commands/login.rs";
 const PROFILE_LOGIN_LIFECYCLE_FILE = "crates/prodex-app/src/profile_commands/login/lifecycle_support.rs";
 const PROFILE_LOGIN_API_KEY_FILE = "crates/prodex-app/src/profile_commands/login/api_key.rs";
@@ -153,6 +155,8 @@ const PROMOTED_FILES = [
   GEMINI_COMPACT_SEMANTIC_CONSUMER_FILE,
   GEMINI_COMPACT_SNIPPET_ADAPTER_FILE,
   GEMINI_COMPACT_SNIPPET_MOJO_FILE,
+  GEMINI_COMPACT_TEXT_ADAPTER_FILE,
+  GEMINI_COMPACT_TEXT_MOJO_FILE,
   OPERATIONAL_HISTOGRAM_CALLER_FILE,
   OPERATIONAL_HISTOGRAM_ADAPTER_FILE,
   OPERATIONAL_HISTOGRAM_MOJO_FILE,
@@ -6610,6 +6614,48 @@ export function findViolations(files) {
     }
     return [];
   });
+  const geminiCompactTextViolations = files.flatMap(([filePath, contents]) => {
+    if (filePath === GEMINI_COMPACT_TEXT_CONSUMER_FILE) {
+      const production = contents.split("#[cfg(test)]", 1)[0];
+      const required = [
+        "serde_json::to_string(value)",
+        "prodex_mojo_core::rich::extract_gemini_compact_text(&raw)",
+      ];
+      const restoredRust = [
+        "match value {",
+        "serde_json::Value::Array(values)",
+        "serde_json::Value::Object(object)",
+        'for key in ["text", "output", "input", "query", "command", "commands"]',
+        ".filter_map(gemini_provider_core_local_compact_text_from_content)",
+      ];
+      return required.every((marker) => production.includes(marker)) &&
+        restoredRust.every((marker) => !production.includes(marker))
+        ? []
+        : [`${filePath}: Gemini compact text extraction must use Mojo without a Rust semantic copy`];
+    }
+    if (filePath === GEMINI_COMPACT_TEXT_ADAPTER_FILE) {
+      const required = [
+        "prodex_mojo_gemini_compact_text_v1(",
+        "pub fn extract_gemini_compact_text(",
+        "extraction_is_mojo_owned_and_decodes_nested_json",
+      ];
+      return required.filter((marker) => !contents.includes(marker))
+        .map((marker) => `${filePath}: Gemini compact text adapter must retain ${marker}`);
+    }
+    if (filePath === GEMINI_COMPACT_TEXT_MOJO_FILE) {
+      const required = [
+        '@export("prodex_mojo_gemini_compact_text_v1")',
+        "gemini_compact_text_extract_object(",
+        "gemini_compact_text_extract_value(",
+        'StringSlice("text")',
+        'StringSlice("query")',
+        "gemini_compact_text_append_string(",
+      ];
+      return required.filter((marker) => !contents.includes(marker))
+        .map((marker) => `${filePath}: Gemini compact text semantics must remain Mojo-owned (${marker})`);
+    }
+    return [];
+  });
   const operationalHistogramViolations = files.flatMap(([filePath, contents]) => {
     if (filePath === OPERATIONAL_HISTOGRAM_CALLER_FILE) {
       const production = contents.split("#[cfg(test)]", 1)[0];
@@ -6740,7 +6786,7 @@ export function findViolations(files) {
     }
     return [];
   });
-  return [...nativeRecoveryOwnershipViolations, ...quotaRecoveryEligibilityViolations, ...runtimeBrokerReuseMojoViolations, ...geminiResponseMediaMojoViolations, ...cookieEvictionMojoViolations, ...websocketBudgetMojoViolations, ...affinityBindingMojoViolations, ...responsesCapacityRecoveryViolations, ...sseTapMojoOwnershipViolations, ...quotaWatchViolations, ...geminiCompactSnippetViolations, ...doctorSmartContextDecisionViolations, ...smartContextCapsuleOrderViolations, ...markerViolations, ...deepseekCatalogPolicyViolations, ...featureOffViolations, ...liveLogRecordViolations, ...runtimePolicyPresetViolations, ...profileHealthCircuitViolations, ...logThroughputViolations, ...operationalDetailSpecViolations, ...transcriptPolicyViolations, ...logLoadPolicyViolations, ...routeReasonViolations, ...runtimeStateQuotaViolations, ...runtimeStateRoutePolicyViolations, ...runtimeProxyRootViolations, ...brokerVersionGuardViolations, ...brokerContinuityViolations, ...brokerLogCacheViolations, ...codexConfigViolations, ...statePolicyViolations, ...quotaSelectionPolicyViolations, ...routeTagMirrorViolations, ...enumTagMirrorViolations, ...appSelectionPolicyMirrorViolations, ...runtimeStateBackgroundViolations, ...redactionViolations, ...profileIdentityViolations, ...governanceInspectionViolations, ...governanceInspectionOrderingViolations, ...exactnessPlannerViolations,
+  return [...nativeRecoveryOwnershipViolations, ...quotaRecoveryEligibilityViolations, ...runtimeBrokerReuseMojoViolations, ...geminiResponseMediaMojoViolations, ...cookieEvictionMojoViolations, ...websocketBudgetMojoViolations, ...affinityBindingMojoViolations, ...responsesCapacityRecoveryViolations, ...sseTapMojoOwnershipViolations, ...quotaWatchViolations, ...geminiCompactSnippetViolations, ...geminiCompactTextViolations, ...doctorSmartContextDecisionViolations, ...smartContextCapsuleOrderViolations, ...markerViolations, ...deepseekCatalogPolicyViolations, ...featureOffViolations, ...liveLogRecordViolations, ...runtimePolicyPresetViolations, ...profileHealthCircuitViolations, ...logThroughputViolations, ...operationalDetailSpecViolations, ...transcriptPolicyViolations, ...logLoadPolicyViolations, ...routeReasonViolations, ...runtimeStateQuotaViolations, ...runtimeStateRoutePolicyViolations, ...runtimeProxyRootViolations, ...brokerVersionGuardViolations, ...brokerContinuityViolations, ...brokerLogCacheViolations, ...codexConfigViolations, ...statePolicyViolations, ...quotaSelectionPolicyViolations, ...routeTagMirrorViolations, ...enumTagMirrorViolations, ...appSelectionPolicyMirrorViolations, ...runtimeStateBackgroundViolations, ...redactionViolations, ...profileIdentityViolations, ...governanceInspectionViolations, ...governanceInspectionOrderingViolations, ...exactnessPlannerViolations,
     ...adaptiveBudgetViolations,
     ...providerUsageViolations,
     ...auditUsageViolations,
@@ -7166,9 +7212,52 @@ function selfTest() {
   const geminiCompactConsumer = "GeminiCompactSnippetInput {\nformat_gemini_compact_snippet(";
   assert.deepEqual(findViolations([[GEMINI_COMPACT_SNIPPET_CONSUMER_FILE, geminiCompactConsumer]]), []);
   assert.match(findViolations([[GEMINI_COMPACT_SNIPPET_CONSUMER_FILE, geminiCompactConsumer + "\ngemini_provider_core_truncate_utf8(text, 768);"]]).join("\n"), /Gemini compact snippet shaping must use Mojo/u);
-  const geminiCompactTextConsumer = "truncate_gemini_compact_utf8_edges(&text, max_bytes)";
+  const geminiCompactTextConsumer = [
+    "truncate_gemini_compact_utf8_edges(&text, max_bytes)",
+    "serde_json::to_string(value)",
+    "prodex_mojo_core::rich::extract_gemini_compact_text(&raw)",
+  ].join("\n");
   assert.deepEqual(findViolations([[GEMINI_COMPACT_TEXT_CONSUMER_FILE, geminiCompactTextConsumer]]), []);
   assert.match(findViolations([[GEMINI_COMPACT_TEXT_CONSUMER_FILE, geminiCompactTextConsumer + "\ntext.is_char_boundary(end);"]]).join("\n"), /Gemini compact UTF-8 truncation must use Mojo/u);
+  const geminiCompactTextExtractionConsumer = [
+    "truncate_gemini_compact_utf8_edges(&text, max_bytes)",
+    "serde_json::to_string(value)",
+    "prodex_mojo_core::rich::extract_gemini_compact_text(&raw)",
+  ].join("\n");
+  assert.deepEqual(findViolations([[GEMINI_COMPACT_TEXT_CONSUMER_FILE, geminiCompactTextExtractionConsumer]]), []);
+  assert.match(
+    findViolations([[GEMINI_COMPACT_TEXT_CONSUMER_FILE,
+      `${geminiCompactTextExtractionConsumer}\nmatch value {\nserde_json::Value::Object(object) => {}`,
+    ]]).join("\n"),
+    /Gemini compact text extraction must use Mojo/u,
+  );
+  const geminiCompactTextAdapter = [
+    "prodex_mojo_gemini_compact_text_v1(",
+    "pub fn extract_gemini_compact_text(",
+    "extraction_is_mojo_owned_and_decodes_nested_json",
+  ].join("\n");
+  assert.deepEqual(findViolations([[GEMINI_COMPACT_TEXT_ADAPTER_FILE, geminiCompactTextAdapter]]), []);
+  assert.match(
+    findViolations([[GEMINI_COMPACT_TEXT_ADAPTER_FILE,
+      "prodex_mojo_gemini_compact_text_v1(\npub fn extract_gemini_compact_text(",
+    ]]).join("\n"),
+    /Gemini compact text adapter must retain/u,
+  );
+  const geminiCompactTextMojo = [
+    '@export("prodex_mojo_gemini_compact_text_v1")',
+    "gemini_compact_text_extract_object(",
+    "gemini_compact_text_extract_value(",
+    'StringSlice("text")',
+    'StringSlice("query")',
+    "gemini_compact_text_append_string(",
+  ].join("\n");
+  assert.deepEqual(findViolations([[GEMINI_COMPACT_TEXT_MOJO_FILE, geminiCompactTextMojo]]), []);
+  assert.match(
+    findViolations([[GEMINI_COMPACT_TEXT_MOJO_FILE,
+      '@export("prodex_mojo_gemini_compact_text_v1")',
+    ]]).join("\n"),
+    /Gemini compact text semantics must remain Mojo-owned/u,
+  );
   const geminiCompactSummaryConsumer = [
     "gemini_provider_core_local_compact_snippet",
     "format_gemini_local_compact_summary(",
