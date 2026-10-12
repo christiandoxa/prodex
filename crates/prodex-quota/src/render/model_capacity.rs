@@ -154,39 +154,34 @@ fn openai_model_capacity_plan_for_usage(
     let regular = usage.rate_limit.as_ref();
     let regular_ready = openai_quota_has_ready_regular_limit(usage);
     let regular_blocked = regular.is_some_and(super::windows::window_pair_has_blocking_admission);
-    let (any_unknown_window, any_exhausted_window) = regular.map_or((false, false), |pair| {
-        let windows = [pair.primary_window.as_ref(), pair.secondary_window.as_ref()];
-        (
-            windows
-                .into_iter()
-                .flatten()
-                .any(|window| window.used_percent.is_none()),
-            windows
-                .into_iter()
-                .flatten()
-                .any(|window| window.used_percent.is_some_and(|used| used >= 100)),
-        )
-    });
-    let code_review_ready = usage.code_review_rate_limit.as_ref().is_none_or(|pair| {
-        [
-            find_main_window(pair, "5h"),
-            find_main_window(pair, "weekly"),
-        ]
-        .into_iter()
-        .flatten()
-        .all(|window| window.used_percent.is_none_or(|used| used < 100))
-    });
-
-    crate::mojo::openai_model_capacity_plan(prodex_mojo_core::quota::OpenAiModelCapacityInput {
-        model_kind: crate::mojo::openai_model_kind(model),
-        regular_present: regular.is_some(),
-        regular_ready,
-        generic_ready: openai_quota_has_ready_limit(usage),
-        reserve_ready: ready_luna_reserve(usage).is_some(),
-        regular_blocked,
-        any_unknown_window,
-        any_exhausted_window,
-        include_code_review,
-        code_review_ready,
-    })
+    let code_review = usage.code_review_rate_limit.as_ref();
+    crate::mojo::openai_model_capacity_plan_with_observations(
+        prodex_mojo_core::quota::OpenAiModelCapacityObservedInput {
+            model_kind: crate::mojo::openai_model_kind(model),
+            regular_present: regular.is_some(),
+            regular_ready,
+            generic_ready: openai_quota_has_ready_limit(usage),
+            reserve_ready: ready_luna_reserve(usage).is_some(),
+            regular_blocked,
+            include_code_review,
+        },
+        prodex_mojo_core::quota::OpenAiModelCapacityObservation {
+            regular_primary_window_present: regular
+                .is_some_and(|pair| pair.primary_window.is_some()),
+            regular_primary_used_percent: regular
+                .and_then(|pair| pair.primary_window.as_ref())
+                .and_then(|window| window.used_percent),
+            regular_secondary_window_present: regular
+                .is_some_and(|pair| pair.secondary_window.is_some()),
+            regular_secondary_used_percent: regular
+                .and_then(|pair| pair.secondary_window.as_ref())
+                .and_then(|window| window.used_percent),
+            code_review_primary_used_percent: code_review
+                .and_then(|pair| find_main_window(pair, "5h"))
+                .and_then(|window| window.used_percent),
+            code_review_secondary_used_percent: code_review
+                .and_then(|pair| find_main_window(pair, "weekly"))
+                .and_then(|window| window.used_percent),
+        },
+    )
 }

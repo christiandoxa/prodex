@@ -316,3 +316,69 @@ fn gemini_bucket_batch_preserves_normalized_presence_states() {
         ]
     );
 }
+
+#[cfg(all(test, feature = "mojo-quota"))]
+#[test]
+fn model_capacity_observations_classify_unknown_exhausted_and_code_review_windows() {
+    assert!(crate::MOJO_ACTIVE);
+    let input = OpenAiModelCapacityObservedInput {
+        model_kind: QUOTA_MODEL_KIND_LUNA,
+        regular_present: true,
+        regular_ready: false,
+        generic_ready: false,
+        reserve_ready: false,
+        regular_blocked: false,
+        include_code_review: false,
+    };
+    let unknown = openai_model_capacity_plan_with_observations(
+        input,
+        OpenAiModelCapacityObservation {
+            regular_primary_window_present: true,
+            regular_primary_used_percent: None,
+            regular_secondary_window_present: true,
+            regular_secondary_used_percent: Some(40),
+            ..OpenAiModelCapacityObservation::default()
+        },
+    )
+    .expect("unknown window observation");
+    assert_eq!(
+        unknown,
+        OpenAiModelCapacityPlan {
+            selected_pair: QUOTA_MODEL_PAIR_REGULAR,
+            ready: false,
+            supports: true,
+            unknown_luna_capacity: true,
+        }
+    );
+
+    let exhausted = openai_model_capacity_plan_with_observations(
+        input,
+        OpenAiModelCapacityObservation {
+            regular_primary_window_present: true,
+            regular_primary_used_percent: None,
+            regular_secondary_window_present: true,
+            regular_secondary_used_percent: Some(100),
+            ..OpenAiModelCapacityObservation::default()
+        },
+    )
+    .expect("exhausted window observation");
+    assert!(!exhausted.supports);
+    assert!(!exhausted.unknown_luna_capacity);
+
+    let code_review = openai_model_capacity_plan_with_observations(
+        OpenAiModelCapacityObservedInput {
+            include_code_review: true,
+            ..input
+        },
+        OpenAiModelCapacityObservation {
+            regular_primary_window_present: true,
+            regular_primary_used_percent: Some(20),
+            regular_secondary_window_present: true,
+            regular_secondary_used_percent: Some(30),
+            code_review_primary_used_percent: Some(100),
+            ..OpenAiModelCapacityObservation::default()
+        },
+    )
+    .expect("code-review window observation");
+    assert!(!code_review.supports);
+}

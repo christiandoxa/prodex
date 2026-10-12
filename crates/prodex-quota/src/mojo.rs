@@ -56,9 +56,10 @@ pub(super) fn luna_reserve_identifier(
     .expect("Mojo Luna reserve identifier classification failed")
 }
 
-pub(super) fn openai_model_capacity_plan(
-    input: prodex_mojo_core::quota::OpenAiModelCapacityInput,
+pub(super) fn openai_model_capacity_plan_with_observations(
+    input: prodex_mojo_core::quota::OpenAiModelCapacityObservedInput,
+    observation: prodex_mojo_core::quota::OpenAiModelCapacityObservation,
 ) -> prodex_mojo_core::quota::OpenAiModelCapacityPlan {
-    prodex_mojo_core::quota::openai_model_capacity_plan(input)
-        .expect("Mojo OpenAI model capacity planning failed")
+    prodex_mojo_core::quota::openai_model_capacity_plan_with_observations(input, observation)
+        .expect("Mojo OpenAI model capacity observation planning failed")
 }
