@@ -109,6 +109,24 @@ fn affinity_outcome_precedence_is_mojo_authoritative() {
 }
 
 #[test]
+fn affinity_local_rejection_precedence_is_mojo_authoritative() {
+    const { assert!(prodex_mojo_core::MOJO_ACTIVE) }
+
+    assert_eq!(
+        runtime_affinity_local_rejection(true, false).unwrap(),
+        RuntimeAffinityLocalRejection::SelectionBackoff
+    );
+    assert_eq!(
+        runtime_affinity_local_rejection(false, false).unwrap(),
+        RuntimeAffinityLocalRejection::RouteCircuitHalfOpenProbeWait
+    );
+    assert_eq!(
+        runtime_affinity_local_rejection(false, true).unwrap(),
+        RuntimeAffinityLocalRejection::None
+    );
+}
+
+#[test]
 fn hard_affinity_detects_no_rotate_sources() {
     let affinity = RuntimeCandidateAffinity {
         route_kind: RuntimeRouteKind::Responses,

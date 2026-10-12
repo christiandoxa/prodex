@@ -736,6 +736,11 @@ comptime AFFINITY_OUTCOME_SELECT_HARD: Int64 = 1
 comptime AFFINITY_OUTCOME_SELECT_SOFT: Int64 = 2
 comptime AFFINITY_OUTCOME_REJECT_SOFT_QUOTA: Int64 = 3
 
+comptime AFFINITY_LOCAL_REJECTION_ABI_VERSION: Int64 = 1
+comptime AFFINITY_LOCAL_REJECTION_NONE: Int64 = 0
+comptime AFFINITY_LOCAL_REJECTION_SELECTION_BACKOFF: Int64 = 1
+comptime AFFINITY_LOCAL_REJECTION_ROUTE_CIRCUIT_HALF_OPEN_PROBE_WAIT: Int64 = 2
+
 comptime AFFINITY_REASON_NONE: Int64 = 0
 comptime AFFINITY_REASON_HARD_BINDING_CONFLICT: Int64 = 1
 comptime AFFINITY_REASON_BINDING_IDENTITY_MISMATCH: Int64 = 2
@@ -744,6 +749,26 @@ comptime AFFINITY_REASON_BOUND_PROFILE_UNAVAILABLE: Int64 = 4
 comptime AFFINITY_REASON_SELECTION_BACKOFF: Int64 = 5
 comptime AFFINITY_REASON_ROUTE_CIRCUIT_HALF_OPEN_PROBE_WAIT: Int64 = 6
 comptime AFFINITY_BINDING_CONFLICT_ABI_VERSION: Int64 = 2
+
+
+@export("prodex_runtime_affinity_local_rejection_plan_v1")
+def prodex_runtime_affinity_local_rejection_plan_v1(
+    abi_version: Int64,
+    selection_backoff_active: Int64,
+    half_open_probe_available: Int64,
+) abi("C") -> Int64:
+    if abi_version != AFFINITY_LOCAL_REJECTION_ABI_VERSION:
+        return -4
+    if (
+        (selection_backoff_active != 0 and selection_backoff_active != 1)
+        or (half_open_probe_available != 0 and half_open_probe_available != 1)
+    ):
+        return -1
+    if selection_backoff_active == 1:
+        return AFFINITY_LOCAL_REJECTION_SELECTION_BACKOFF
+    if half_open_probe_available == 0:
+        return AFFINITY_LOCAL_REJECTION_ROUTE_CIRCUIT_HALF_OPEN_PROBE_WAIT
+    return AFFINITY_LOCAL_REJECTION_NONE
 
 
 @export("prodex_runtime_affinity_binding_conflict_v2")

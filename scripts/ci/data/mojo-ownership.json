@@ -568,6 +568,7 @@
       "mojo/prodex_core/candidate_decision.mojo": {
         "operations": [
           "runtime_candidate_decision_kernel",
+          "runtime_affinity_local_rejection_policy",
           "quota_selection_policy"
         ]
       },
@@ -2152,6 +2153,29 @@
       "duplicate_production_owner": false,
       "platform_fallback": false,
       "rust_adapter_scope": "bounded DTO mapping; Mojo owns availability and affinity planning"
+    },
+    {
+      "name": "runtime_affinity_local_rejection_policy",
+      "domain": "runtime/selection",
+      "expanded_in": "0.438.0",
+      "baseline_state": "Rust selected the local rejection outcome after reading selection backoff and route-circuit probe state",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_runtime_affinity_local_rejection_plan_v1",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/candidate_decision.mojo",
+      "consumer": "crates/prodex-runtime-proxy/src/selection_policy.rs",
+      "consumer_marker": "runtime_affinity_local_rejection(",
+      "production_consumers": [
+        "crates/prodex-app/src/runtime_proxy/selection/affinity.rs"
+      ],
+      "production_reachability_test": "crates/prodex-runtime-proxy/tests/src/selection_policy.rs",
+      "rust_owner_before": "Selection backoff and route-circuit half-open probe precedence",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "deleted; direct Mojo ABI cases and soft-affinity caller coverage exercise precedence",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "runtime state reads, route-circuit probe reservation, and typed ABI result mapping"
     },
     {
       "name": "quota_route_score_resolution",

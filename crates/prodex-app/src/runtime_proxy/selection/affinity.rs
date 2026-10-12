@@ -339,7 +339,7 @@ fn runtime_soft_affinity_local_rejection(
     route_kind: RuntimeRouteKind,
 ) -> Result<runtime_proxy_crate::RuntimeAffinityLocalRejection> {
     let now = Local::now().timestamp();
-    let in_backoff = {
+    let selection_backoff_active = {
         let mut runtime = shared
             .runtime
             .lock()
@@ -363,15 +363,13 @@ fn runtime_soft_affinity_local_rejection(
             now,
         )?
     };
-    if in_backoff {
-        return Ok(runtime_proxy_crate::RuntimeAffinityLocalRejection::SelectionBackoff);
-    }
-    if !reserve_runtime_profile_route_circuit_half_open_probe(shared, profile_name, route_kind)? {
-        return Ok(
-            runtime_proxy_crate::RuntimeAffinityLocalRejection::RouteCircuitHalfOpenProbeWait,
-        );
-    }
-    Ok(runtime_proxy_crate::RuntimeAffinityLocalRejection::None)
+    let half_open_probe_available = !selection_backoff_active
+        && reserve_runtime_profile_route_circuit_half_open_probe(shared, profile_name, route_kind)?;
+    runtime_proxy_crate::runtime_affinity_local_rejection(
+        selection_backoff_active,
+        half_open_probe_available,
+    )
+    .map_err(|error| anyhow::anyhow!("Mojo affinity local-rejection planning failed: {error:?}"))
 }
 
 fn runtime_profile_is_usable_for_hard_binding(
