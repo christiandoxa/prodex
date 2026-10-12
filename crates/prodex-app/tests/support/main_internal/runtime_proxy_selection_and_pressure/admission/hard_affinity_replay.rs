@@ -406,6 +406,8 @@ fn run_retryable_hard_affinity_replay_case_after_delay(
     marker: &str,
     client_replay_delay: std::time::Duration,
 ) {
+    const { assert!(prodex_mojo_core::MOJO_ACTIVE) }
+
     let backend =
         RuntimeProxyBackend::start_with_fault_script(RuntimeProxyBackendFaultScript::new([fault]));
     let ready = runtime_usage_snapshot(
