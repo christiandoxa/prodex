@@ -775,7 +775,34 @@
           "deepseek_request_metadata_shape_policy",
           "deepseek_json_guidance_policy",
           "deepseek_response_usage_mapping",
-          "gemini_response_media_projection"
+          "gemini_response_media_projection",
+          "gemini_response_id_conformance"
+        ]
+      },
+      {
+        "path": "crates/prodex-mojo-core/src/rich/gemini_response.rs",
+        "language": "rust",
+        "classification": "MIXED",
+        "production_reachable": true,
+        "role": "adapter",
+        "operations": [
+          "gemini_response_id_conformance"
+        ]
+      },
+      {
+        "path": "mojo/prodex_core/gemini_response.mojo",
+        "language": "mojo",
+        "classification": "MIXED",
+        "semantic_ranges": [
+          {
+            "start": 672,
+            "end": 714
+          }
+        ],
+        "production_reachable": true,
+        "role": "semantic",
+        "operations": [
+          "gemini_response_id_conformance"
         ]
       },
       {
@@ -7265,6 +7292,33 @@
       "duplicate_production_owner": false,
       "platform_fallback": false,
       "rust_adapter_scope": "Serde response acquisition and serialization, bounded Mojo invocation, JSON decoding, and provider-label mapping"
+    },
+    {
+      "name": "gemini_response_id_conformance",
+      "domain": "provider/gemini",
+      "introduced_in": "0.437.8",
+      "baseline_state": "candidate",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_mojo_gemini_response_kernel_v1",
+      "mojo_abi_version": 6,
+      "mojo_operation_ids": {
+        "conformance_preserves_response_ids": 56
+      },
+      "mojo_source": "mojo/prodex_core/rich_abi.mojo",
+      "mojo_semantic_source": "mojo/prodex_core/gemini_response.mojo",
+      "consumer": "crates/prodex-provider-core/src/gemini_bridge/response.rs",
+      "consumer_marker": "gemini_response_conformance_preserves_response_ids",
+      "production_consumers": [
+        "crates/prodex-provider-core/src/gemini_bridge/response.rs"
+      ],
+      "production_reachability_test": "crates/prodex-mojo-core/tests/gemini_response.rs",
+      "rust_owner_before": "Rust inspected normalized responseId and first-candidate function-call IDs before reusing a translated Gemini response",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "Deleted; direct compiled Mojo predicate cases and provider-core caller regressions cover valid IDs, missing IDs, Unicode whitespace, null calls, and translated-response reuse",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "Serde JSON serialization, bounded Mojo invocation, and fail-closed boolean mapping"
     },
     {
       "name": "runtime_responses_attempt_recovery_policy",

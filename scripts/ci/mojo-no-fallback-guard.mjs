@@ -120,6 +120,11 @@ const PROMOTED_FILES = [
   "crates/prodex-provider-core/src/translators/gemini/response_media.rs",
   "crates/prodex-mojo-core/src/rich/gemini_response_media.rs",
   "mojo/prodex_core/gemini_response_media.mojo",
+  "crates/prodex-provider-core/src/gemini_bridge/response.rs",
+  "crates/prodex-provider-core/src/gemini_bridge/tests/response.rs",
+  "crates/prodex-mojo-core/src/rich/gemini_response.rs",
+  "crates/prodex-mojo-core/tests/gemini_response.rs",
+  "mojo/prodex_core/gemini_response.mojo",
   "crates/prodex-provider-core/src/translators/gemini/response_tool_calls_apply_patch.rs",
   "crates/prodex-mojo-core/src/gemini_tooling_policy.rs",
   "mojo/prodex_core/gemini_tooling_policy.mojo",
@@ -1171,6 +1176,11 @@ const GEMINI_THINKING_FILE = "crates/prodex-provider-core/src/translators/gemini
 const GEMINI_SIGNATURE_CONSUMER_FILE = "crates/prodex-provider-core/src/translators/gemini/request/tool_signatures.rs";
 const GEMINI_SIGNATURE_ADAPTER_FILE = "crates/prodex-mojo-core/src/provider_constraints/gemini_bridge_request.rs";
 const GEMINI_SIGNATURE_TEST_FILE = "crates/prodex-mojo-core/tests/gemini_request_content.rs";
+const GEMINI_RESPONSE_CONFORMANCE_FILE = "crates/prodex-provider-core/src/gemini_bridge/response.rs";
+const GEMINI_RESPONSE_CONFORMANCE_CALLER_TEST_FILE = "crates/prodex-provider-core/src/gemini_bridge/tests/response.rs";
+const GEMINI_RESPONSE_CONFORMANCE_ADAPTER_FILE = "crates/prodex-mojo-core/src/rich/gemini_response.rs";
+const GEMINI_RESPONSE_CONFORMANCE_TEST_FILE = "crates/prodex-mojo-core/tests/gemini_response.rs";
+const GEMINI_RESPONSE_CONFORMANCE_MOJO_FILE = "mojo/prodex_core/gemini_response.mojo";
 const ANTHROPIC_RESPONSE_FORBIDDEN_PATTERNS = [
   [/\bfn\s+anthropic_response_block_input\s*\(/u, "Rust response block classifier"],
   [/\benum\s+ResponseBlockKind\b/u, "duplicate Rust response block kind"],
@@ -3739,6 +3749,59 @@ export function findViolations(files) {
         contents.includes("signature_preservation_rewrites_tool_calls_in_mojo")
         ? []
         : [`${filePath}: thought-signature preservation needs direct Mojo ABI coverage`];
+    }
+    return [];
+  });
+  const geminiResponseConformanceViolations = files.flatMap(([filePath, contents]) => {
+    if (filePath === GEMINI_RESPONSE_CONFORMANCE_FILE) {
+      const body = contents.match(
+        /\bfn\s+gemini_provider_core_conformance_preserves_response_ids\([^]*?^\}/mu,
+      )?.[0] ?? "";
+      const required = [
+        "serde_json::to_string(value)",
+        "prodex_mojo_core::rich::gemini_response_conformance_preserves_response_ids(",
+      ];
+      const violations = required
+        .filter((marker) => !body.includes(marker))
+        .map((marker) => `${filePath}: response-ID conformance must retain ${marker}`);
+      if (/\.get\("responseId"\)|\.pointer\("\/candidates\/0\/content\/parts"\)|\.trim\(\)/u.test(body)) {
+        violations.push(`${filePath}: contains restored Rust response-ID conformance traversal`);
+      }
+      return violations;
+    }
+    if (filePath === GEMINI_RESPONSE_CONFORMANCE_CALLER_TEST_FILE) {
+      return contents.includes("gemini_provider_core_buffered_response_reuses_translated_only_with_preserved_ids")
+        ? []
+        : [`${filePath}: translated Gemini response reuse needs a caller regression`];
+    }
+    if (filePath === GEMINI_RESPONSE_CONFORMANCE_ADAPTER_FILE) {
+      const required = [
+        "ConformancePreservesResponseIds = 56",
+        "gemini_response_conformance_preserves_response_ids(",
+        "prodex_mojo_gemini_response_kernel_v1(",
+      ];
+      return required
+        .filter((marker) => !contents.includes(marker))
+        .map((marker) => `${filePath}: response-ID conformance adapter must retain ${marker}`);
+    }
+    if (filePath === GEMINI_RESPONSE_CONFORMANCE_MOJO_FILE) {
+      const required = [
+        "GEMINI_CONFORMANCE_PRESERVES_RESPONSE_IDS: Int64 = 56",
+        "def gemini_conformance_preserves_response_ids(",
+        "if operation == GEMINI_CONFORMANCE_PRESERVES_RESPONSE_IDS:",
+      ];
+      return required
+        .filter((marker) => !contents.includes(marker))
+        .map((marker) => `${filePath}: response-ID conformance semantics must remain in Mojo (${marker})`);
+    }
+    if (filePath === GEMINI_RESPONSE_CONFORMANCE_TEST_FILE) {
+      const required = [
+        "gemini_response_conformance_preserves_response_ids",
+        "response_conformance_mutations_change_the_mojo_result",
+      ];
+      return required
+        .filter((marker) => !contents.includes(marker))
+        .map((marker) => `${filePath}: response-ID conformance needs direct ABI and mutation coverage (${marker})`);
     }
     return [];
   });
@@ -6814,7 +6877,7 @@ export function findViolations(files) {
     ...anthropicEnvelopeViolations, ...anthropicRequestViolations,
     ...anthropicWebSearchViolations, ...superProviderConfigViolations, ...externalProviderCatalogViolations, ...subAgentPolicyViolations, ...runtimeOverlayPolicyViolations, ...cliRuntimeFeatureViolations,
     ...superExposeProtocolViolations, ...superExposeViolations,
-    ...geminiFallbackViolations, ...geminiGenerationViolations, ...geminiTranslatorHardReplacementViolations, ...geminiBridgeFallbackViolations, ...geminiSignatureViolations,
+    ...geminiFallbackViolations, ...geminiGenerationViolations, ...geminiTranslatorHardReplacementViolations, ...geminiBridgeFallbackViolations, ...geminiSignatureViolations, ...geminiResponseConformanceViolations,
     ...geminiToolResponseOrderViolations, ...geminiApplyPatchViolations,
     ...hardReplacementViolations, ...precommitBudgetOracleViolations,
     ...deepseekRequestViolations, ...deepseekRequestRejectViolations,
@@ -8423,6 +8486,33 @@ function selfTest() {
     /operation 12 and its bounded input cap/u);
   assert.deepEqual(findViolations([[GEMINI_SIGNATURE_TEST_FILE,
     'GeminiBridgeRequestOperation::PreserveToolCallSignatures; signature_preservation_rewrites_tool_calls_in_mojo']]), []);
+  const responseConformanceCanonical = [
+    "fn gemini_provider_core_conformance_preserves_response_ids(value: &serde_json::Value) -> bool {",
+    "    let Ok(raw) = serde_json::to_string(value) else { return false; };",
+    "    prodex_mojo_core::rich::gemini_response_conformance_preserves_response_ids(&raw)",
+    "}",
+  ].join("\n");
+  assert.deepEqual(findViolations([[GEMINI_RESPONSE_CONFORMANCE_FILE, responseConformanceCanonical]]), []);
+  assert.match(findViolations([[GEMINI_RESPONSE_CONFORMANCE_FILE,
+    responseConformanceCanonical.replace("\n}", "\n    value.pointer(\"/candidates/0/content/parts\")\n}" )]]).join("\n"),
+    /restored Rust response-ID conformance traversal/u);
+  assert.deepEqual(findViolations([[GEMINI_RESPONSE_CONFORMANCE_ADAPTER_FILE,
+    "ConformancePreservesResponseIds = 56; gemini_response_conformance_preserves_response_ids(; prodex_mojo_gemini_response_kernel_v1("]]), []);
+  assert.deepEqual(findViolations([[GEMINI_RESPONSE_CONFORMANCE_MOJO_FILE,
+    [
+      "def gemini_put_grounding_citation_text(",
+      "def gemini_put_grounding_web_search_call(",
+      "def gemini_grounding_v1(",
+      "gemini_grounding_source_duplicate(",
+      "gemini_citation_line_less(",
+      "GEMINI_CONFORMANCE_PRESERVES_RESPONSE_IDS: Int64 = 56;",
+      "def gemini_conformance_preserves_response_ids(",
+      "if operation == GEMINI_CONFORMANCE_PRESERVES_RESPONSE_IDS:",
+    ].join("\n")]]), []);
+  assert.deepEqual(findViolations([[GEMINI_RESPONSE_CONFORMANCE_TEST_FILE,
+    "gemini_response_conformance_preserves_response_ids; response_conformance_mutations_change_the_mojo_result"]]), []);
+  assert.deepEqual(findViolations([[GEMINI_RESPONSE_CONFORMANCE_CALLER_TEST_FILE,
+    "gemini_provider_core_buffered_response_reuses_translated_only_with_preserved_ids"]]), []);
   for (const symbol of ["stream_chunk_metadata", "stream_tool_call_ids", "stream_tool_call_added_item"]) {
     assert.match(findViolations([["crates/prodex-provider-core/src/translators/gemini/stream/shaping.rs",
       `pub fn gemini_provider_core_${symbol}() {\n old_rust_selection();\n}`]]).join("\n"),

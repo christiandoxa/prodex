@@ -104,6 +104,7 @@ pub enum GeminiResponseKernelOperation {
     StreamChunkMetadata = 54,
     RawFinishReason = 55,
     FunctionCallArgumentsDeltaWithThoughtSignature = 48,
+    ConformancePreservesResponseIds = 56,
 }
 
 /// Inputs for one bounded Gemini response or stream JSON shape.
@@ -311,6 +312,7 @@ fn gemini_kernel_operation(operation: GeminiResponseKernelOperation) -> i64 {
         GeminiResponseKernelOperation::StreamChunkMetadata => 54,
         GeminiResponseKernelOperation::RawFinishReason => 55,
         GeminiResponseKernelOperation::FunctionCallArgumentsDeltaWithThoughtSignature => 48,
+        GeminiResponseKernelOperation::ConformancePreservesResponseIds => 56,
     }
 }
 
@@ -422,6 +424,20 @@ pub fn gemini_response_kernel(input: GeminiResponseKernelInput<'_>) -> Result<Ve
         GEMINI_BUFFERED_RESPONSE_ABI_VERSION,
         prodex_mojo_gemini_buffered_response_kernel_v2,
     )
+}
+
+/// Checks whether a normalized Gemini response keeps the response and tool-call IDs needed by
+/// the translated fast path.
+pub fn gemini_response_conformance_preserves_response_ids(raw: &str) -> Result<bool, MojoError> {
+    let mut input = GeminiResponseKernelInput::new(
+        GeminiResponseKernelOperation::ConformancePreservesResponseIds,
+    );
+    input.response = Some(raw);
+    match gemini_response_kernel(input)?.as_slice() {
+        b"true" => Ok(true),
+        b"false" => Ok(false),
+        _ => Err(MojoError::InvalidOutput),
+    }
 }
 
 #[cfg(all(test, feature = "mojo-rich"))]
