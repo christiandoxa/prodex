@@ -2,6 +2,63 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.437.7 - 2026-10-12
+
+### Runtime
+
+- Preserve Codex context defaults and recover native threads in place (`82d311f`)
+# Prodex 0.437.7
+
+## New Features
+
+- Native OpenAI/Codex context-window and automatic-compaction settings now pass
+  through without Prodex-generated catalog/cache defaults. Explicit CLI and
+  profile configuration are preserved.
+- Interactive Unix Super launches, including saved-session resumes, can recover
+  an idle native thread through its owned app-server without reopening the TUI.
+
+## Bug Fixes
+
+- Stop treating a cached maximum context window as the active model window or
+  manufacturing a private 90% auto-compaction threshold.
+- Drain the complete bounded recovery-event tail so later native progress,
+  successful completion, or cancellation supersedes earlier transient failures.
+- Ignore intermediate error notifications while Codex is still performing its
+  own retry. Only terminal recoverable events arm live workflow recovery.
+- Clear stale pending recovery when a user pauses/stops a goal or newer native
+  activity supersedes an old usage-limited goal revision.
+- Resume eligible goals using `thread/goal/set` with automatic provenance while
+  preserving objective and token budget. Continue eligible non-goal tasks from
+  persisted state rather than replaying the original user prompt or completed
+  tool calls.
+- Verify server home, thread/session identity, workspace, idle status and native
+  goal eligibility before recovery. Never blindly resend ambiguous native RPCs.
+- Bound app-server control request time across unsolicited messages, not merely
+  per individual socket read.
+
+## Changelog
+
+- Include the main-branch Mojo migrations completed after 0.437.6: critical-signal
+  totals, Gemini media MIME classification, update-version decisions, observed
+  quota windows, profile-export envelope validation, and route-health grouping.
+- Keep Rust 1.99.0, Mojo 1.1.0, the pinned Codex compatibility baseline, and
+  provider/continuation safety guards.
+- Add native-event, typed Mojo ABI, local Unix app-server protocol, and
+  configuration passthrough regression coverage. No real upstream request is
+  required by the release fixtures.
+
+## Upgrade notes
+
+Existing processes keep their old supervisor and already-loaded Codex settings.
+After work is saved, exit the old launcher and resume the existing saved session
+using the updated binary. Do not resend the initial prompt. The change does not
+guarantee a particular upstream context-window size or model capacity. Explicit
+third-party/local-provider bridge context limits remain provider-specific;
+Smart Context request/tool-output optimization is independent of Codex's native
+context-window and auto-compaction configuration.
+
+Full Changelog: [0.437.6...0.437.7](https://github.com/christiandoxa/prodex/compare/0.437.6...0.437.7)
+
 ## 0.437.6 - 2026-10-12
 
 ### Runtime
@@ -19,83 +76,6 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 - Merge Dependabot PR #111 for 0.437.6 (`4ac9273`)
 - Merge Dependabot PR #110 for 0.437.6 (`02eb770`)
 - Merge Dependabot PR #109 for 0.437.6 (`0164486`)
-# Prodex 0.437.6
-
-## New Features
-
-No new user-facing features. This patch restores automatic recovery for large
-persisted sessions and qualifies the Rust 1.99.0 toolchain.
-
-## Bug Fixes
-
-### Keep recovery active on long-lived sessions
-
-The recovery monitor previously obtained a JSONL cursor by loading the entire
-rollout through a reader limited to 64 MiB. Large sessions could therefore start
-monitoring at offset zero instead of the current end. The next incremental scan
-then rejected the oversized historical tail and permanently disabled workflow
-monitoring. A native `task_complete` event carrying `server_overloaded` could be
-missed even when another profile was eligible for rotation. This was especially
-visible when a resumed task compacted its history and then encountered capacity
-pressure, leaving the goal stalled until another manual resume.
-
-Plain JSONL cursor acquisition now uses metadata from the validated open regular
-file, without loading historical content. Full-document reads retain their
-allocation limit; incremental tail limits, symlink rejection, path identity
-checks, complete-record boundaries, and compressed decoded offsets remain intact.
-Transient scan failures retain their cursor and evidence and retry after a bounded
-five-second delay rather than muting recovery for the rest of the process.
-
-Recovery continues the persisted session and goal. It does not resubmit the
-original prompt or repeat completed tool calls. Cancellation, explicit rotation
-opt-out, model selection, and existing ownership safeguards remain in effect.
-
-## Dependencies and Toolchain
-
-Rust 1.99.0 is pinned consistently in the workspace, toolchain configuration, CI,
-release jobs, and digest-pinned Docker builder. Atomic compare/update callers use
-the renamed `try_update` API without changing their ordering or closure behavior.
-
-This release incorporates Dependabot PRs #109, #110, and #111: the Cargo dependency
-group, the SHA-pinned GitHub Actions group, and the Rust Docker image update.
-The Cargo update includes Hyper, libc, Tokio, TOML, UUID, and zeroize together with
-the lockfile's related transitive updates. Mojo remains at 1.1.0.
-
-## Verification
-
-The original implementation fails a regression that obtains a large rollout's
-cursor through the production length API, instead of injecting a known offset.
-A production-monitor regression then verifies a rollout larger than 64 MiB,
-compaction, a native capacity failure, and selection of the next profile without
-replaying historical failures. A second regression covers a transient session
-read failure, bounded retry, and subsequent recovery.
-
-Both regressions reject deliberate reintroductions of their corresponding bugs.
-The mutated sources are restored byte-for-byte and the caller tests pass again.
-Existing compressed-session, cancellation, rotation opt-out, completed-work,
-foreign-session, and unaccepted-turn regressions remain required.
-
-## Upgrade Notes
-
-Start a new Prodex process after installing this release. A supervisor already
-running an older executable keeps its old monitoring state; replacing the binary
-on disk does not change that process. Preserve unsent drafts and finish or safely
-interrupt active work before relaunching and resuming the saved session.
-
-Available account quota does not guarantee upstream capacity for a particular
-model. This patch repairs local recovery observation and bounded retries; it does
-not promise that an unavailable upstream model will always accept a request.
-
-## Changelog
-
-- Obtain large JSONL recovery cursors without loading historical session content.
-- Retry transient session scans without losing recovery evidence or position.
-- Verify compaction-to-capacity recovery and reject deliberate bug reintroductions.
-- Adopt Rust 1.99.0 and its atomic update API with consistent CI and Docker pins.
-- Include Dependabot Cargo, GitHub Actions, and Docker updates from #109 to #111.
-- Retain the Mojo-owned runtime fault-budget transition checkpoint.
-
-Full Changelog: [0.437.5...0.437.6](https://github.com/christiandoxa/prodex/compare/0.437.5...0.437.6)
 
 ## 0.437.5 - 2026-10-11
 
