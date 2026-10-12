@@ -66,6 +66,7 @@ const LIVE_LOG_RECORD_FILE = "crates/prodex-runtime-log/src/live.rs";
 const LIVE_LOG_RECORD_ADAPTER_FILE = "crates/prodex-mojo-core/src/live_log_record.rs";
 const LIVE_LOG_RECORD_MOJO_FILE = "mojo/prodex_core/live_log_record.mojo";
 const LIVE_LOG_RECORD_DIRECT_TEST_FILE = "mojo/tests/live_log_record_test.mojo";
+const RUNTIME_LOG_EVENT_CLASSIFICATION_FILE = "crates/prodex-runtime-log/src/lib.rs";
 const RUNTIME_POLICY_PRESET_CONSUMER_FILE = "crates/prodex-runtime-policy/src/types/runtime_proxy_preset.rs";
 const RUNTIME_POLICY_PRESET_CALLER_FILE = "crates/prodex-runtime-policy/src/lib.rs";
 const RUNTIME_POLICY_PRESET_ADAPTER_FILE = "crates/prodex-mojo-core/src/runtime_decisions/preset.rs";
@@ -155,6 +156,7 @@ const PROMOTED_FILES = [
   LIVE_LOG_RECORD_ADAPTER_FILE,
   LIVE_LOG_RECORD_MOJO_FILE,
   LIVE_LOG_RECORD_DIRECT_TEST_FILE,
+  RUNTIME_LOG_EVENT_CLASSIFICATION_FILE,
   SMART_CONTEXT_CAPSULE_ORDER_ADAPTER_FILE,
   SMART_CONTEXT_CAPSULE_ORDER_MOJO_FILE,
   SMART_CONTEXT_CAPSULE_ARTIFACTS_FILE,
@@ -6189,6 +6191,22 @@ export function findViolations(files) {
     return [];
   });
   const logLoadPolicyViolations = files.flatMap(([filePath, contents]) => {
+    if (filePath === RUNTIME_LOG_EVENT_CLASSIFICATION_FILE) {
+      const required = "prodex_mojo_core::log_load::try_is_routine_event(";
+      const violations = contents.includes(required)
+        ? []
+        : [`${filePath}: runtime-log event classification must retain Mojo call ${required}`];
+      const production = contents.split("#[cfg(test)]", 1)[0];
+      if (
+        /matches!\s*\(\s*event\.event\(\)/u.test(production)
+        || production.includes('"profile_inflight_saturated"')
+        || production.includes('"runtime_proxy_active_limit_reached"')
+        || production.includes('"runtime_proxy_lane_limit_reached"')
+      ) {
+        violations.push(`${filePath}: contains restored Rust runtime-log event classification semantics`);
+      }
+      return violations;
+    }
     if (filePath === LOG_LOAD_APP_FILE) {
       const required = [
         "prodex_mojo_core::log_load::aggregate_update(",
@@ -7223,6 +7241,20 @@ function selfTest() {
   assert.match(findViolations([[LIVE_LOG_RECORD_FILE,
     liveLogRecordConsumer.replace("nested_string_clip_end(text)?", "clip_json_strings(value, 8192);")]])
     .join("\n"), /restored Rust live-log clipping or truncation policy|must propagate through Mojo/u);
+  const runtimeLogEventClassification =
+    "prodex_mojo_core::log_load::try_is_routine_event(event);";
+  assert.deepEqual(findViolations([[
+    RUNTIME_LOG_EVENT_CLASSIFICATION_FILE,
+    runtimeLogEventClassification,
+  ]]), []);
+  assert.match(findViolations([[
+    RUNTIME_LOG_EVENT_CLASSIFICATION_FILE,
+    `${runtimeLogEventClassification}\nmatch event.event() { Some("profile_inflight_saturated") => true, _ => false }`,
+  ]]).join("\n"), /restored Rust runtime-log event classification semantics/u);
+  assert.match(findViolations([[
+    RUNTIME_LOG_EVENT_CLASSIFICATION_FILE,
+    "fn runtime_log_message_is_routine_load(message: &str) -> bool { true }",
+  ]]).join("\n"), /runtime-log event classification must retain Mojo call/u);
   assert.deepEqual(findViolations([
     [LOG_LOAD_APP_FILE,
       "prodex_mojo_core::log_load::is_routine_event(name); prodex_mojo_core::log_load::aggregate_update(input); prodex_mojo_core::log_load::aggregate_summary(1, 0, false);"],

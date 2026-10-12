@@ -4799,16 +4799,17 @@
       "production_consumers": [
         "crates/prodex-app/src/app_commands/log_load.rs",
         "crates/prodex-app/src/app_commands/log_stream.rs",
-        "crates/prodex-app/src/app_commands/log_command_tui.rs"
+        "crates/prodex-app/src/app_commands/log_command_tui.rs",
+        "crates/prodex-runtime-log/src/lib.rs"
       ],
       "production_reachability_test": "crates/prodex-mojo-core/tests/log_load.rs",
       "rust_state_after": "adapter-only",
       "rust_owner_before": "routine load-event classification, same-key five-second episode coalescing, saturating occurrence updates, bounded unique-run deduplication, overflow marking, and summary suffix formatting",
-      "rust_test_oracle": "none retained; strict required-Mojo ABI tests and app TUI caller regression cover exact classification, freshness, deduplication, saturation, overflow, and formatting",
+      "rust_test_oracle": "none retained; strict required-Mojo ABI tests, app TUI caller regression, and runtime-log caller mutation coverage cover exact classification, freshness, deduplication, saturation, overflow, and formatting",
       "production_fallback": false,
       "duplicate_production_owner": false,
       "platform_fallback": false,
-      "rust_adapter_scope": "Instant sampling, bounded Vec/String state projection, fixed-width ABI marshaling, transcript DTO construction, and TUI effects"
+      "rust_adapter_scope": "runtime-log parsing and message projection, Instant sampling, bounded Vec/String state projection, fixed-width ABI marshaling, transcript DTO construction, and TUI effects"
     },
     {
       "name": "super_expose_dispatch_validation_policy",

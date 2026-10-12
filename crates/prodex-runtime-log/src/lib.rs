@@ -43,14 +43,10 @@ pub fn decode_zstd_bounded(payload: &[u8], max_bytes: usize) -> io::Result<Vec<u
 /// operational event. Human renderers may filter these after JSON/live capture.
 pub fn runtime_log_message_is_routine_load(message: &str) -> bool {
     let event = runtime_proxy::runtime_proxy_parse_log_message(message);
-    matches!(
-        event.event(),
-        Some(
-            "profile_inflight_saturated"
-                | "runtime_proxy_active_limit_reached"
-                | "runtime_proxy_lane_limit_reached",
-        )
-    )
+    event
+        .event()
+        .and_then(|name| prodex_mojo_core::log_load::try_is_routine_event(name).ok())
+        .unwrap_or(false)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -575,6 +571,27 @@ mod tests {
         assert!(!runtime_log_message_is_routine_load(
             "profile_auth_recovery_failed profile=main"
         ));
+    }
+
+    #[test]
+    fn routine_load_telemetry_classification_is_required_mojo_and_input_sensitive() {
+        const { assert!(prodex_mojo_core::MOJO_REQUIRED) };
+
+        for event in [
+            "profile_inflight_saturated",
+            "runtime_proxy_active_limit_reached",
+            "runtime_proxy_lane_limit_reached",
+        ] {
+            assert!(runtime_log_message_is_routine_load(event));
+        }
+        for event in [
+            "profile_inflight",
+            "runtime_proxy_lane_limit_reached_extra",
+            "profile_inflight_saturatedly",
+        ] {
+            assert!(!runtime_log_message_is_routine_load(event));
+        }
+        assert!(!runtime_log_message_is_routine_load(&"x".repeat(257)));
     }
 
     #[test]

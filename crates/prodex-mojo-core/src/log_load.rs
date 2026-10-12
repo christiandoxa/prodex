@@ -173,8 +173,8 @@ pub fn aggregate_summary(
     .map_err(|_| MojoError::InvalidOutput)
 }
 
-/// Classify routine load telemetry through the authoritative Mojo operation.
-pub fn is_routine_event(event_name: &str) -> bool {
+/// Classify one event name through the authoritative Mojo operation.
+pub fn try_is_routine_event(event_name: &str) -> Result<bool, MojoError> {
     aggregate_update(LogLoadAggregateInput {
         event_name,
         previous_key: None,
@@ -185,8 +185,13 @@ pub fn is_routine_event(event_name: &str) -> bool {
         run_count_overflow: false,
         run_id: None,
     })
-    .unwrap_or_else(|error| panic!("Mojo log-load classification failed: {error:?}"))
-    .routine
+    .map(|plan| plan.routine)
+}
+
+/// Classify routine load telemetry through the authoritative Mojo operation.
+pub fn is_routine_event(event_name: &str) -> bool {
+    try_is_routine_event(event_name)
+        .unwrap_or_else(|error| panic!("Mojo log-load classification failed: {error:?}"))
 }
 
 fn status(value: i64) -> Result<(), MojoError> {
