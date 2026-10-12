@@ -178,32 +178,37 @@ pub fn runtime_take_fault_injection(env_key: &str) -> bool {
 }
 
 pub fn runtime_take_fault_injection_budget(env_key: &str, configured: usize) -> bool {
-    let raw_value = configured.to_string();
-    if configured == 0 {
-        if let Ok(mut counters) = runtime_fault_counters().lock() {
-            counters.remove(env_key);
-        }
-        return false;
-    }
+    use prodex_mojo_core::runtime::RuntimeFaultBudgetAction;
 
+    let raw_value = configured.to_string();
     let Ok(mut counters) = runtime_fault_counters().lock() else {
         return false;
     };
-    let counter = counters
-        .entry(env_key.to_string())
-        .or_insert_with(|| RuntimeFaultBudget {
-            raw_value: raw_value.clone(),
-            remaining: configured,
-        });
-    if counter.raw_value != raw_value {
-        counter.raw_value = raw_value;
-        counter.remaining = configured;
-    }
-    if counter.remaining == 0 {
+    let (previous_remaining, changed) = counters.get(env_key).map_or((0, true), |counter| {
+        (counter.remaining, counter.raw_value != raw_value)
+    });
+    let Some(action) = mojo::runtime_fault_budget_step(configured, previous_remaining, changed)
+    else {
+        // No Rust fallback: an unavailable Mojo decision disables fault injection.
         return false;
+    };
+    match action {
+        RuntimeFaultBudgetAction::Clear => {
+            counters.remove(env_key);
+            false
+        }
+        RuntimeFaultBudgetAction::Skip => false,
+        RuntimeFaultBudgetAction::Consume { remaining } => {
+            counters.insert(
+                env_key.to_owned(),
+                RuntimeFaultBudget {
+                    raw_value,
+                    remaining,
+                },
+            );
+            true
+        }
     }
-    counter.remaining -= 1;
-    true
 }
 
 #[cfg(test)]

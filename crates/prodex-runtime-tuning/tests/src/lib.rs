@@ -239,3 +239,45 @@ fn snapshotted_fault_budget_is_consumed_without_environment_reads() {
     assert!(!runtime_take_fault_injection_budget(key, 1));
     assert!(!runtime_take_fault_injection_budget(key, 0));
 }
+
+#[test]
+fn mojo_fault_budget_transition_enforces_reset_and_exhaustion() {
+    use prodex_mojo_core::runtime::{
+        RuntimeFaultBudgetAction as Action, runtime_fault_budget_step,
+    };
+    assert_eq!(runtime_fault_budget_step(0, 500, false), Ok(Action::Clear));
+    assert_eq!(runtime_fault_budget_step(0, 500, true), Ok(Action::Clear));
+    assert_eq!(
+        runtime_fault_budget_step(2, 0, true),
+        Ok(Action::Consume { remaining: 1 })
+    );
+    assert_eq!(
+        runtime_fault_budget_step(2, 1, false),
+        Ok(Action::Consume { remaining: 0 })
+    );
+    assert_eq!(runtime_fault_budget_step(2, 0, false), Ok(Action::Skip));
+    assert_eq!(
+        runtime_fault_budget_step(1, 0, true),
+        Ok(Action::Consume { remaining: 0 })
+    );
+    assert_eq!(
+        runtime_fault_budget_step(usize::MAX, usize::MAX, false),
+        Ok(Action::Consume {
+            remaining: usize::MAX - 1
+        })
+    );
+}
+
+#[test]
+fn distinct_fault_injection_keys_have_independent_budgets() {
+    let first = "PRODEX_TEST_FAULT_MOJO_FIRST";
+    let second = "PRODEX_TEST_FAULT_MOJO_SECOND";
+    assert!(runtime_take_fault_injection_budget(first, 1));
+    assert!(!runtime_take_fault_injection_budget(first, 1));
+    assert!(runtime_take_fault_injection_budget(second, 2));
+    assert!(runtime_take_fault_injection_budget(second, 2));
+    assert!(!runtime_take_fault_injection_budget(second, 2));
+    assert!(!runtime_take_fault_injection_budget(first, 0));
+    assert!(runtime_take_fault_injection_budget(first, 1));
+    assert!(!runtime_take_fault_injection_budget(second, 0));
+}

@@ -505,7 +505,8 @@
           "runtime_tuning_defaults_kernel",
           "runtime_tuning_capacity_defaults",
           "runtime_policy_proxy_preset_resolution",
-          "runtime_scalar_config_policy"
+          "runtime_scalar_config_policy",
+          "runtime_fault_budget_transition"
         ]
       },
       "mojo/prodex_core/smart_context.mojo": {
@@ -7174,6 +7175,29 @@
       "duplicate_production_owner": false,
       "platform_fallback": false,
       "rust_adapter_scope": "request classification, bounded body capture, host admission, HTTP response construction, and typed action mapping"
+    },
+    {
+      "name": "runtime_fault_budget_transition",
+      "domain": "runtime/tuning",
+      "introduced_in": "0.438.0",
+      "baseline_state": "Rust tracked fault-injection budget reset, exhaustion and decrement decisions",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_runtime_fault_budget_step_v1",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/runtime_tuning.mojo",
+      "consumer": "crates/prodex-runtime-tuning/src/lib.rs",
+      "consumer_marker": "mojo::runtime_fault_budget_step(",
+      "production_consumers": [
+        "crates/prodex-runtime-tuning/src/lib.rs"
+      ],
+      "production_reachability_test": "crates/prodex-runtime-tuning/tests/src/lib.rs",
+      "rust_owner_before": "Per-key fault-budget reset, depletion, and injection eligibility decisions",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "deleted; required-Mojo transition and production caller tests cover refill, exhaustion, isolation and zero reset",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "environment acquisition, mutex-protected key/value storage, and typed action application"
     }
   ],
   "rust_semantic_reductions": [
