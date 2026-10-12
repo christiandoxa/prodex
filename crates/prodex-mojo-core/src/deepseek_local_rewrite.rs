@@ -141,19 +141,16 @@ mod tests {
     fn auto_mode_is_the_only_safe_chat_fallback() {
         let reason =
             "Anthropic Messages does not translate web_search_options field `web_search_options`";
-        for mode in [3] {
-            assert_eq!(
-                route(
-                    mode,
-                    br#"{"web_search_options":{}}"#,
-                    DeepSeekTranslationStatus::Rejected,
-                    Some(reason),
-                )
-                .unwrap(),
-                DeepSeekLocalRewriteRoute::Incompatible,
-                "mode={mode}"
-            );
-        }
+        assert_eq!(
+            route(
+                3,
+                br#"{"web_search_options":{}}"#,
+                DeepSeekTranslationStatus::Rejected,
+                Some(reason),
+            )
+            .unwrap(),
+            DeepSeekLocalRewriteRoute::Incompatible
+        );
         for mode in [1, 2] {
             assert_eq!(
                 route(
