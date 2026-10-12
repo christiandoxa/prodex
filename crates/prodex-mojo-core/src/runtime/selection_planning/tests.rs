@@ -254,6 +254,22 @@ mod affinity_selection_tests {
     use super::super::*;
 
     #[test]
+    fn local_rejection_plan_preserves_backoff_before_probe_precedence() {
+        assert_eq!(
+            affinity_local_rejection_plan(true, false).unwrap(),
+            AffinityLocalRejectionPlan::SelectionBackoff
+        );
+        assert_eq!(
+            affinity_local_rejection_plan(false, false).unwrap(),
+            AffinityLocalRejectionPlan::RouteCircuitHalfOpenProbeWait
+        );
+        assert_eq!(
+            affinity_local_rejection_plan(false, true).unwrap(),
+            AffinityLocalRejectionPlan::None
+        );
+    }
+
+    #[test]
     fn hard_binding_conflict_scalar_abi_preserves_view_words_and_rejects_old_version() {
         let sentinel = "__conflict_雪__";
         let profiles = [

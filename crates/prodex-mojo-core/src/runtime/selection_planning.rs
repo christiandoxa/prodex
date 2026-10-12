@@ -13,6 +13,11 @@ pub const SOFT_AFFINITY_POLICY_QUOTA_THIN: i64 = 5;
 pub const SOFT_AFFINITY_POLICY_QUOTA_CRITICAL: i64 = 6;
 pub const SOFT_AFFINITY_POLICY_QUOTA_UNKNOWN: i64 = 7;
 
+pub const AFFINITY_LOCAL_REJECTION_NONE: i64 = 0;
+pub const AFFINITY_LOCAL_REJECTION_SELECTION_BACKOFF: i64 = 1;
+pub const AFFINITY_LOCAL_REJECTION_ROUTE_CIRCUIT_HALF_OPEN_PROBE_WAIT: i64 = 2;
+const AFFINITY_LOCAL_REJECTION_ABI_VERSION: i64 = 1;
+
 pub const QUOTA_SELECTION_MODE_BAND_REASON: i64 = 0;
 pub const QUOTA_SELECTION_MODE_PRECOMMIT_FLOOR: i64 = 1;
 pub const QUOTA_SELECTION_MODE_WINDOW_GUARD: i64 = 2;
@@ -93,6 +98,13 @@ pub struct AffinityOutcomePlan {
     /// Stable reason tag; zero means no unavailable reason.
     pub reason: i64,
     pub unavailable_hard: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AffinityLocalRejectionPlan {
+    None,
+    SelectionBackoff,
+    RouteCircuitHalfOpenProbeWait,
 }
 
 /// Inputs for fail-closed validation of supplied profile affinities.
@@ -231,6 +243,11 @@ unsafe extern "C" {
         soft_policy_allowed: i64,
         local_rejection: i64,
         output: *mut i64,
+    ) -> i64;
+    fn prodex_runtime_affinity_local_rejection_plan_v1(
+        abi_version: i64,
+        selection_backoff_active: i64,
+        half_open_probe_available: i64,
     ) -> i64;
     fn prodex_runtime_affinity_binding_conflict_v2(
         abi_version: i64,
@@ -430,6 +447,31 @@ pub fn affinity_outcome_plan(
         reason: output[1],
         unavailable_hard: output[2] == 1,
     })
+}
+
+pub fn affinity_local_rejection_plan(
+    selection_backoff_active: bool,
+    half_open_probe_available: bool,
+) -> Result<AffinityLocalRejectionPlan, MojoError> {
+    let result = unsafe {
+        prodex_runtime_affinity_local_rejection_plan_v1(
+            AFFINITY_LOCAL_REJECTION_ABI_VERSION,
+            i64::from(selection_backoff_active),
+            i64::from(half_open_probe_available),
+        )
+    };
+    match result {
+        AFFINITY_LOCAL_REJECTION_NONE => Ok(AffinityLocalRejectionPlan::None),
+        AFFINITY_LOCAL_REJECTION_SELECTION_BACKOFF => {
+            Ok(AffinityLocalRejectionPlan::SelectionBackoff)
+        }
+        AFFINITY_LOCAL_REJECTION_ROUTE_CIRCUIT_HALF_OPEN_PROBE_WAIT => {
+            Ok(AffinityLocalRejectionPlan::RouteCircuitHalfOpenProbeWait)
+        }
+        -1 => Err(MojoError::InvalidInput),
+        -4 => Err(MojoError::AbiMismatch),
+        _ => Err(MojoError::InvalidOutput),
+    }
 }
 
 pub fn affinity_binding_conflict(

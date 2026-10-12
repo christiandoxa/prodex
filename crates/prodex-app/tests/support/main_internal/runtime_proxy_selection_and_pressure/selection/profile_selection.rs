@@ -98,3 +98,34 @@ fn selection_applies_route_scoped_affinity_conflict_policy() {
         );
     }
 }
+
+#[test]
+fn soft_session_affinity_rejects_route_selection_backoff_with_mojo_plan() {
+    const { assert!(prodex_mojo_core::MOJO_ACTIVE) }
+
+    let temp_dir = TestDir::isolated();
+    let shared = runtime_shared_for_affinity_selection(&temp_dir, BTreeMap::new());
+    shared
+        .runtime
+        .lock()
+        .expect("runtime lock should succeed")
+        .profile_probe_cache
+        .get_mut("main")
+        .expect("main probe should exist")
+        .result = Ok(usage_with_main_windows(80, 18_000, 80, 604_800));
+    apply_local_selection_penalties(&shared, "main", RuntimeRouteKind::Responses);
+
+    let selected = select_runtime_response_candidate_for_route(
+        &shared,
+        RuntimeResponseCandidateSelection {
+            session_profile: Some("main"),
+            ..RuntimeResponseCandidateSelection::fresh(
+                &BTreeSet::new(),
+                RuntimeRouteKind::Responses,
+            )
+        },
+    )
+    .expect("selection should succeed");
+
+    assert_eq!(selected.as_deref(), Some("second"));
+}

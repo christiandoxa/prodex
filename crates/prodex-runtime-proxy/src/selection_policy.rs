@@ -525,6 +525,26 @@ pub enum RuntimeAffinityLocalRejection {
     RouteCircuitHalfOpenProbeWait,
 }
 
+pub fn runtime_affinity_local_rejection(
+    selection_backoff_active: bool,
+    half_open_probe_available: bool,
+) -> Result<RuntimeAffinityLocalRejection, prodex_mojo_core::MojoError> {
+    match prodex_mojo_core::runtime::affinity_local_rejection_plan(
+        selection_backoff_active,
+        half_open_probe_available,
+    )? {
+        prodex_mojo_core::runtime::AffinityLocalRejectionPlan::None => {
+            Ok(RuntimeAffinityLocalRejection::None)
+        }
+        prodex_mojo_core::runtime::AffinityLocalRejectionPlan::SelectionBackoff => {
+            Ok(RuntimeAffinityLocalRejection::SelectionBackoff)
+        }
+        prodex_mojo_core::runtime::AffinityLocalRejectionPlan::RouteCircuitHalfOpenProbeWait => {
+            Ok(RuntimeAffinityLocalRejection::RouteCircuitHalfOpenProbeWait)
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug)]
 pub struct RuntimeAffinityOutcomeInput {
     pub hard_binding_conflict: bool,
