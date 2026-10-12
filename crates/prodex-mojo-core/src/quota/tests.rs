@@ -320,7 +320,7 @@ fn gemini_bucket_batch_preserves_normalized_presence_states() {
 #[cfg(all(test, feature = "mojo-quota"))]
 #[test]
 fn model_capacity_observations_classify_unknown_exhausted_and_code_review_windows() {
-    assert!(crate::MOJO_ACTIVE);
+    const { assert!(crate::MOJO_ACTIVE) };
     let input = OpenAiModelCapacityObservedInput {
         model_kind: QUOTA_MODEL_KIND_LUNA,
         regular_present: true,
