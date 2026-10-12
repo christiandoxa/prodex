@@ -10,6 +10,7 @@ const CACHE_FRESH: i64 = 2;
 const RELEASE_VERSION_VALID: i64 = 3;
 const RELEASE_VERSION_COMPARE: i64 = 4;
 const UPDATE_DECISION: i64 = 5;
+const VERSION_STATUS: i64 = 6;
 
 const RELEASE_VERSION_TOTAL_ORDER: i64 = 0;
 const RELEASE_VERSION_PRECEDENCE: i64 = 1;
@@ -27,6 +28,13 @@ pub enum UpdateNoticeCommandClass {
     Doctor,
     Update,
     Quota,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum UpdateVersionStatusClass {
+    Unknown,
+    UpToDate,
+    UpdateAvailable,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -202,6 +210,27 @@ pub fn update_decision(current: &str, target: &str) -> Result<i64, MojoError> {
     call(UPDATE_DECISION, current, target, PolicyInput::default())
 }
 
+pub fn version_status(
+    latest: Option<&str>,
+    current: &str,
+) -> Result<UpdateVersionStatusClass, MojoError> {
+    let latest_text = latest.unwrap_or_default();
+    match call(
+        VERSION_STATUS,
+        latest_text,
+        current,
+        PolicyInput {
+            tag0: i64::from(latest.is_some()),
+            ..PolicyInput::default()
+        },
+    )? {
+        0 => Ok(UpdateVersionStatusClass::Unknown),
+        1 => Ok(UpdateVersionStatusClass::UpToDate),
+        2 => Ok(UpdateVersionStatusClass::UpdateAvailable),
+        _ => Err(MojoError::InvalidOutput),
+    }
+}
+
 pub fn cache_is_fresh(
     source_equal: bool,
     now: i64,
@@ -307,6 +336,23 @@ mod tests {
         assert!(!cache_is_fresh(false, 100, 0, 300).unwrap());
         assert!(!cache_is_fresh(true, 300, 0, 300).unwrap());
         assert!(cache_is_fresh(true, i64::MIN, i64::MAX, 300).unwrap());
+
+        assert_eq!(
+            version_status(None, "0.437.5").unwrap(),
+            UpdateVersionStatusClass::Unknown
+        );
+        assert_eq!(
+            version_status(Some("0.438.0"), "0.437.5").unwrap(),
+            UpdateVersionStatusClass::UpdateAvailable
+        );
+        assert_eq!(
+            version_status(Some("1.0.0+build.2"), "1.0.0+build.1").unwrap(),
+            UpdateVersionStatusClass::UpdateAvailable
+        );
+        assert_eq!(
+            version_status(Some("not-a-version"), "0.437.5").unwrap(),
+            UpdateVersionStatusClass::UpToDate
+        );
     }
 
     #[test]

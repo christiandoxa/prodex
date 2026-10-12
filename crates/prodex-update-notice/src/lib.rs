@@ -171,12 +171,22 @@ pub fn prodex_update_command_for_version(_latest_version: &str) -> String {
 }
 
 pub fn prodex_version_status(paths: &AppPaths) -> Result<ProdexVersionStatus> {
-    Ok(match latest_prodex_version(paths)? {
-        Some(latest_version) if version_is_newer(&latest_version, current_prodex_version())? => {
+    use prodex_mojo_core::update_notice_policy::UpdateVersionStatusClass;
+
+    let latest_version = latest_prodex_version(paths)?;
+    let status = map_update_notice_mojo(prodex_mojo_core::update_notice_policy::version_status(
+        latest_version.as_deref(),
+        current_prodex_version(),
+    ))?;
+    Ok(match (status, latest_version) {
+        (UpdateVersionStatusClass::Unknown, _) => ProdexVersionStatus::Unknown,
+        (UpdateVersionStatusClass::UpToDate, _) => ProdexVersionStatus::UpToDate,
+        (UpdateVersionStatusClass::UpdateAvailable, Some(latest_version)) => {
             ProdexVersionStatus::UpdateAvailable(latest_version)
         }
-        Some(_) => ProdexVersionStatus::UpToDate,
-        None => ProdexVersionStatus::Unknown,
+        (UpdateVersionStatusClass::UpdateAvailable, None) => {
+            bail!("Mojo reported an update without a latest version")
+        }
     })
 }
 
@@ -297,11 +307,11 @@ pub fn update_check_cache_ttl_seconds(
     cached_latest_version: &str,
     current_version: &str,
 ) -> Result<i64> {
-    if version_is_newer(cached_latest_version, current_version)? {
-        Ok(UPDATE_CHECK_CACHE_TTL_SECONDS)
-    } else {
-        Ok(UPDATE_CHECK_STALE_CURRENT_TTL_SECONDS)
-    }
+    // Both release-cache TTLs are currently identical. Preserve the prior
+    // version-validation error contract without a redundant Rust branch or a
+    // speculative duplicate Mojo planner.
+    let _ = version_is_newer(cached_latest_version, current_version)?;
+    Ok(UPDATE_CHECK_CACHE_TTL_SECONDS)
 }
 
 fn load_update_check_cache(paths: &AppPaths) -> Result<Option<UpdateCheckCache>> {
@@ -619,6 +629,91 @@ mod tests {
             update_check_cache_ttl_seconds("0.3.0", "0.3.0").unwrap(),
             300
         );
+    }
+
+    #[test]
+    fn cached_update_policy_preserves_source_age_and_clock_edges() {
+        assert!(
+            should_use_cached_update_version(
+                ProdexReleaseSource::GitHub,
+                "0.438.0",
+                0,
+                ProdexReleaseSource::GitHub,
+                "0.437.5",
+                299,
+            )
+            .unwrap()
+        );
+        assert!(
+            !should_use_cached_update_version(
+                ProdexReleaseSource::GitHub,
+                "0.438.0",
+                0,
+                ProdexReleaseSource::GitHub,
+                "0.437.5",
+                300,
+            )
+            .unwrap()
+        );
+        assert!(
+            !should_use_cached_update_version(
+                ProdexReleaseSource::Npm,
+                "0.438.0",
+                0,
+                ProdexReleaseSource::GitHub,
+                "0.437.5",
+                1,
+            )
+            .unwrap()
+        );
+        assert!(
+            should_use_cached_update_version(
+                ProdexReleaseSource::GitHub,
+                "not-a-version",
+                i64::MAX,
+                ProdexReleaseSource::GitHub,
+                "0.437.5",
+                i64::MIN,
+            )
+            .unwrap()
+        );
+    }
+
+    #[test]
+    fn prodex_version_status_uses_mojo_update_decision_for_cached_releases() {
+        let newer_paths = test_paths("version-status-newer");
+        save_update_check_cache(
+            &newer_paths,
+            &UpdateCheckCache {
+                source: ProdexReleaseSource::GitHub,
+                latest_version: "999.0.0".to_string(),
+                checked_at: Local::now().timestamp(),
+                ..UpdateCheckCache::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(
+            prodex_version_status(&newer_paths).unwrap(),
+            ProdexVersionStatus::UpdateAvailable("999.0.0".to_string())
+        );
+        let _ = fs::remove_dir_all(newer_paths.root);
+
+        let current_paths = test_paths("version-status-current");
+        save_update_check_cache(
+            &current_paths,
+            &UpdateCheckCache {
+                source: ProdexReleaseSource::GitHub,
+                latest_version: current_prodex_version().to_string(),
+                checked_at: Local::now().timestamp(),
+                ..UpdateCheckCache::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(
+            prodex_version_status(&current_paths).unwrap(),
+            ProdexVersionStatus::UpToDate
+        );
+        let _ = fs::remove_dir_all(current_paths.root);
     }
 
     #[test]
