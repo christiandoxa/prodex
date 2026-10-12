@@ -5207,16 +5207,17 @@ export function findViolations(files) {
       return violations;
     }
     if (filePath === "crates/prodex-profile-export/src/envelope.rs") {
+      // envelope.rs has cfg(test) imports before production functions.
+      const production = contents;
       const required = [
         "prodex_mojo_core::profile_export::validate_password_bytes(",
-        "prodex_mojo_core::profile_export::validate_pbkdf2_iterations(",
-        "prodex_mojo_core::profile_export::validate_argon2(",
+        "prodex_mojo_core::profile_export::validate_profile_export_envelope_schema(",
       ];
       const violations = required
-        .filter((call) => !contents.includes(call))
-        .map((call) => `${filePath}: profile-export KDF/password limits must retain Mojo call ${call}`);
-      if (/password\.is_empty\(\)|PROFILE_EXPORT_PBKDF2_MIN_ITERATIONS\.\.=PROFILE_EXPORT_PBKDF2_MAX_ITERATIONS|PROFILE_EXPORT_ARGON2_MIN_(?:MEMORY_KIB|ITERATIONS|PARALLELISM)/u.test(contents.split("#[cfg(test)]", 1)[0])) {
-        violations.push(`${filePath}: contains restored Rust profile-export password/KDF range policy`);
+        .filter((call) => !production.includes(call))
+        .map((call) => `${filePath}: profile-export password/envelope semantics must retain Mojo call ${call}`);
+      if (/password\.is_empty\(\)|PROFILE_EXPORT_PBKDF2_MIN_ITERATIONS\.\.=PROFILE_EXPORT_PBKDF2_MAX_ITERATIONS|PROFILE_EXPORT_ARGON2_MIN_(?:MEMORY_KIB|ITERATIONS|PARALLELISM)|fn\s+(?:validate_profile_export_header_version|validate_profile_export_cipher|validate_profile_export_pbkdf2_iterations|validate_profile_export_argon2id_parameters|validate_encrypted_profile_export_fields|validate_base64_field|decoded_base64_length)\s*\(/u.test(production)) {
+        violations.push(`${filePath}: contains restored Rust profile-export schema/password/KDF semantic policy`);
       }
       return violations;
     }
@@ -6837,6 +6838,21 @@ function selfTest() {
     "crates/prodex-profile-export/src/selection.rs",
     profileExportSelectionCaller + "\nselected.iter().any(|name| name == active_profile);",
   ]]).join("\n"), /profile selection and active-profile resolution must use Mojo/u);
+  const envelopeOwnerCaller = [
+    "prodex_mojo_core::profile_export::validate_password_bytes(",
+    "prodex_mojo_core::profile_export::validate_profile_export_envelope_schema(",
+  ].join("\\n");
+  assert.deepEqual(findViolations([[
+    "crates/prodex-profile-export/src/envelope.rs", envelopeOwnerCaller,
+  ]]), []);
+  assert.match(findViolations([[
+    "crates/prodex-profile-export/src/envelope.rs",
+    "prodex_mojo_core::profile_export::validate_password_bytes(",
+  ]]).join("\\n"), /envelope semantics must retain Mojo call/u);
+  assert.match(findViolations([[
+    "crates/prodex-profile-export/src/envelope.rs",
+    envelopeOwnerCaller + "\\nfn validate_base64_field(value: &str) {}",
+  ]]).join("\\n"), /restored Rust profile-export schema/u);
   const profileCopilotJsoncCaller = [
     "prodex_mojo_core::profile_export::strip_copilot_json_line_comments(raw)",
     "prodex_mojo_core::profile_export::copilot_version_triplet(raw)",
