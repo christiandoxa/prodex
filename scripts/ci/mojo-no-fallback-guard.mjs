@@ -36,6 +36,8 @@ const SESSION_SELECTOR_MATCH_ADAPTER_FILE = "crates/prodex-mojo-core/src/json/se
 const SESSION_SELECTOR_MATCH_MOJO_FILE = "mojo/prodex_core/session_selector.mojo";
 const SESSION_SELECTOR_MATCH_CALLER_TEST_FILE = "crates/prodex-session-store/tests/src/lib.rs";
 const SESSION_SELECTOR_MATCH_MOJO_TEST_FILE = "mojo/tests/session_selector_policy_test.mojo";
+const SUPER_EXPOSE_OUTPUT_FILE = "crates/prodex-app/src/super_expose/session_prompt_write/output.rs";
+const SUPER_EXPOSE_OUTPUT_MOJO_FILE = "mojo/prodex_core/super_expose.mojo";
 const RUNTIME_DOCTOR_PLAN_ADAPTER_FILE = "crates/prodex-mojo-core/src/rich/runtime_doctor_plan.rs";
 const RUNTIME_DOCTOR_PLAN_MOJO_FILE = "mojo/prodex_core/runtime_doctor_plan.mojo";
 const GOVERNANCE_INSPECTION_CONSUMER_FILE = "crates/prodex-domain/src/governance/inspection.rs";
@@ -177,6 +179,8 @@ const PROMOTED_FILES = [
   "crates/prodex-mojo-core/src/runtime_overlay_policy.rs",
   "crates/prodex-app/src/runtime_tools/overlay.rs",
   "crates/prodex-mojo-core/src/rich/super_expose.rs",
+  SUPER_EXPOSE_OUTPUT_FILE,
+  SUPER_EXPOSE_OUTPUT_MOJO_FILE,
   "crates/prodex-app/src/super_expose/protocol/tool_contract.rs",
   "crates/prodex-app/src/super_expose/protocol/validation.rs",
   "crates/prodex-mojo-core/src/provider_usage.rs",
@@ -3424,6 +3428,29 @@ export function findViolations(files) {
       return required
         .filter((call) => !contents.includes(call))
         .map((call) => filePath + ": Super-expose ABI adapter must retain " + call);
+    }
+    if (filePath === SUPER_EXPOSE_OUTPUT_FILE) {
+      const required = "prodex_mojo_core::rich::super_expose_output_cursor_valid(";
+      const violations = contents.includes(required)
+        ? []
+        : [filePath + ": output cursor validation must retain Mojo call " + required];
+      for (const retired of [
+        "value.is_empty() || value.len() > 16 * 1024",
+        "cursor.version == OUTPUT_CURSOR_VERSION",
+        "cursor.event_index <= 65_536",
+      ]) {
+        if (contents.includes(retired)) {
+          violations.push(filePath + ": contains restored Rust output-cursor validation semantics");
+          break;
+        }
+      }
+      return violations;
+    }
+    if (filePath === SUPER_EXPOSE_OUTPUT_MOJO_FILE) {
+      const required = '@export("prodex_mojo_super_expose_output_cursor_valid_v1")';
+      return contents.includes(required)
+        ? []
+        : [filePath + ": output cursor validation must remain Mojo-owned via " + required];
     }
     return [];
   });
