@@ -32,49 +32,12 @@ fn gemini_content_apply_patch_input(args_value: &Value) -> Option<&str> {
 }
 
 fn gemini_normalize_apply_patch_input(input: &str) -> Option<String> {
-    gemini_extract_apply_patch_block(input).or_else(|| {
-        prodex_mojo_core::gemini_tooling_policy::gemini_unified_diff_to_apply_patch(input)
-            .expect("Mojo Gemini unified-diff conversion failed")
-    })
-}
-
-fn gemini_extract_apply_patch_block(input: &str) -> Option<String> {
-    let normalized = gemini_normalized_newlines(input);
-    let lines = normalized.lines().collect::<Vec<_>>();
-    let start = lines
-        .iter()
-        .position(|line| line.trim_start().starts_with("*** Begin Patch"))?;
-    let end = lines[start..]
-        .iter()
-        .position(|line| line.trim_start().starts_with("*** End Patch"))?
-        + start;
-    Some(gemini_repair_apply_patch_block(
-        &lines[start..=end].join("\n"),
-    ))
-}
-
-fn gemini_repair_apply_patch_block(input: &str) -> String {
-    let normalized = gemini_normalized_newlines(input);
-    let mut output = Vec::new();
-    let mut in_add_file = false;
-    for line in normalized.lines() {
-        if line.starts_with("*** Add File: ") {
-            in_add_file = true;
-            output.push(line.to_string());
-            continue;
-        }
-        if line.starts_with("*** ") {
-            in_add_file = false;
-            output.push(line.to_string());
-            continue;
-        }
-        if in_add_file && !line.starts_with('+') {
-            output.push(format!("+{line}"));
-            continue;
-        }
-        output.push(line.to_string());
-    }
-    output.join("\n")
+    prodex_mojo_core::gemini_tooling_policy::gemini_apply_patch_block(input)
+        .expect("Mojo Gemini apply-patch block normalization failed")
+        .or_else(|| {
+            prodex_mojo_core::gemini_tooling_policy::gemini_unified_diff_to_apply_patch(input)
+                .expect("Mojo Gemini unified-diff conversion failed")
+        })
 }
 
 fn gemini_edit_args_to_apply_patch(args_value: &Value) -> Option<String> {
@@ -138,6 +101,6 @@ fn gemini_update_file_patch(path: &str, old_string: &str, new_string: &str) -> S
     lines.join("\n")
 }
 
-pub(super) fn gemini_normalized_newlines(input: &str) -> String {
+fn gemini_normalized_newlines(input: &str) -> String {
     input.replace("\r\n", "\n").replace('\r', "\n")
 }

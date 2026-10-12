@@ -1,6 +1,13 @@
 from std.memory import Pointer
 
-from rich_text import rich_trim_bounds, rich_view_ptr, rich_view_valid
+from rich_text import (
+    rich_codepoint,
+    rich_codepoint_width,
+    rich_unicode_space,
+    rich_trim_bounds,
+    rich_view_ptr,
+    rich_view_valid,
+)
 from rich_types import ProdexRichStringView
 
 comptime GEMINI_TOOLING_ABI_VERSION: Int64 = 1
@@ -296,6 +303,19 @@ def tooling_patch_line(
     result[1] = cursor
     result[2] = next
     return result^
+
+
+def tooling_patch_trim_start(
+    view: ProdexRichStringView, start: Int64, end: Int64
+) -> Int64:
+    var cursor = start
+    var source = rich_view_ptr(view)
+    while cursor < end:
+        var width = rich_codepoint_width(source[unsafe_offset=cursor])
+        if not rich_unicode_space(rich_codepoint(source, cursor, width)):
+            break
+        cursor += width
+    return cursor
 
 
 def tooling_patch_range_starts[literal: StaticString](
@@ -717,6 +737,67 @@ def tooling_patch_convert_section(
     return 0
 
 
+def tooling_patch_normalize_block(
+    view: ProdexRichStringView,
+    output: Pointer[mut=True, UInt8, _],
+    capacity: Int64,
+    written: Pointer[mut=True, Int64, _],
+) -> Int64:
+    var begin: Int64 = -1
+    var finish: Int64 = -1
+    var cursor: Int64 = 0
+    var length = Int64(view.len)
+    while cursor < length:
+        var line = tooling_patch_line(view, cursor)
+        var trimmed = tooling_patch_trim_start(view, line[0], line[1])
+        if begin < 0 and tooling_patch_range_starts["*** Begin Patch"](
+            view, trimmed, line[1]
+        ):
+            begin = line[0]
+        elif begin >= 0 and tooling_patch_range_starts["*** End Patch"](
+            view, trimmed, line[1]
+        ):
+            finish = line[1]
+            break
+        if line[2] <= cursor:
+            break
+        cursor = line[2]
+
+    if begin < 0 or finish < begin:
+        return GEMINI_PATCH_NO_MATCH
+
+    cursor = begin
+    var first = True
+    var in_add_file = False
+    while cursor < length:
+        var line = tooling_patch_line(view, cursor)
+        if line[0] >= finish:
+            break
+        if not first and not tooling_patch_newline(output, capacity, written):
+            return -1
+        first = False
+        var add_file = tooling_patch_range_starts["*** Add File: "](
+            view, line[0], line[1]
+        )
+        if add_file:
+            in_add_file = True
+        elif tooling_patch_range_starts["*** "](view, line[0], line[1]):
+            in_add_file = False
+        if in_add_file and not add_file and not tooling_patch_range_starts["+"](
+            view, line[0], line[1]
+        ):
+            if not tooling_patch_put_byte(output, capacity, written, 43):
+                return -1
+        if not tooling_patch_put_range(
+            output, capacity, written, view, line[0], line[1]
+        ):
+            return -1
+        if line[1] >= finish or line[2] <= cursor:
+            break
+        cursor = line[2]
+    return 1
+
+
 @export("prodex_gemini_unified_diff_to_apply_patch_v1")
 def prodex_gemini_unified_diff_to_apply_patch_v1(
     abi_version: Int64,
@@ -806,4 +887,46 @@ def prodex_gemini_unified_diff_to_apply_patch_v1(
         output, output_capacity, written
     ):
         return GEMINI_TOOLING_CAPACITY
+    return GEMINI_TOOLING_OK
+
+
+@export("prodex_gemini_apply_patch_block_v1")
+def prodex_gemini_apply_patch_block_v1(
+    abi_version: Int64,
+    input_address: UInt,
+    input_length: Int64,
+    output_address: UInt,
+    output_capacity: Int64,
+    written_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != GEMINI_TOOLING_ABI_VERSION:
+        return GEMINI_TOOLING_ABI
+    if (
+        input_length < 0
+        or input_length > GEMINI_PATCH_MAX_INPUT_BYTES
+        or output_capacity <= 0
+        or output_capacity > GEMINI_PATCH_MAX_OUTPUT_BYTES
+        or output_address == 0
+        or written_address == 0
+        or (input_length > 0 and input_address == 0)
+    ):
+        return GEMINI_TOOLING_INVALID
+    var view = ProdexRichStringView(input_address, UInt(input_length))
+    if not rich_view_valid(view, GEMINI_PATCH_MAX_INPUT_BYTES):
+        return GEMINI_TOOLING_INVALID
+    var output = Pointer[mut=True, UInt8, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    var written = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(written_address)
+    )
+    written[] = 0
+    var result = tooling_patch_normalize_block(
+        view, output, output_capacity, written
+    )
+    if result == -1:
+        return GEMINI_TOOLING_CAPACITY
+    if result == GEMINI_PATCH_NO_MATCH:
+        written[] = 0
+        return GEMINI_PATCH_NO_MATCH
     return GEMINI_TOOLING_OK

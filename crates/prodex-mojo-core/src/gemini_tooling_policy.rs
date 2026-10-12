@@ -3,6 +3,8 @@ use crate::MojoError;
 const ABI_VERSION: i64 = 1;
 const FLAG_MUTATING: i64 = 1;
 const FLAG_CANONICAL_EXEC: i64 = 2;
+const GEMINI_PATCH_BLOCK_STATUS_NO_MATCH: i64 = 2;
+const GEMINI_PATCH_BLOCK_STATUS_CAPACITY: i64 = 3;
 
 const ALIASES: &[(i64, &str)] = &[
     (1 << 0, "exec_command"),
@@ -52,6 +54,14 @@ unsafe extern "C" {
         input_length: i64,
     ) -> i64;
     fn prodex_gemini_unified_diff_to_apply_patch_v1(
+        abi_version: i64,
+        input_address: u64,
+        input_length: i64,
+        output_address: u64,
+        output_capacity: i64,
+        written_address: u64,
+    ) -> i64;
+    fn prodex_gemini_apply_patch_block_v1(
         abi_version: i64,
         input_address: u64,
         input_length: i64,
@@ -172,6 +182,50 @@ pub fn gemini_unified_diff_to_apply_patch(input: &str) -> Result<Option<String>,
     }
 }
 
+/// Extracts and repairs one `*** Begin Patch` block through the Mojo policy.
+pub fn gemini_apply_patch_block(input: &str) -> Result<Option<String>, MojoError> {
+    const MAX_OUTPUT_BYTES: usize = 16 * 1024 * 1024;
+    if input.len() > 4 * 1024 * 1024 {
+        return Err(MojoError::InvalidInput);
+    }
+    let mut capacity = input.len().saturating_mul(2).saturating_add(1024).max(1024);
+    capacity = capacity.min(MAX_OUTPUT_BYTES);
+    loop {
+        let mut output = vec![0_u8; capacity];
+        let mut written = 0_i64;
+        let result = unsafe {
+            prodex_gemini_apply_patch_block_v1(
+                ABI_VERSION,
+                input.as_ptr() as usize as u64,
+                signed(input.len())?,
+                output.as_mut_ptr() as usize as u64,
+                signed(output.len())?,
+                (&mut written as *mut i64) as usize as u64,
+            )
+        };
+        match result {
+            0 => {
+                let written = usize::try_from(written).map_err(|_| MojoError::InvalidOutput)?;
+                if written > output.len() {
+                    return Err(MojoError::InvalidOutput);
+                }
+                output.truncate(written);
+                return String::from_utf8(output)
+                    .map(Some)
+                    .map_err(|_| MojoError::InvalidOutput);
+            }
+            GEMINI_PATCH_BLOCK_STATUS_NO_MATCH => return Ok(None),
+            GEMINI_PATCH_BLOCK_STATUS_CAPACITY if capacity < MAX_OUTPUT_BYTES => {
+                capacity = capacity.saturating_mul(2).min(MAX_OUTPUT_BYTES);
+            }
+            1 => return Err(MojoError::InvalidInput),
+            GEMINI_PATCH_BLOCK_STATUS_CAPACITY => return Err(MojoError::Capacity),
+            4 => return Err(MojoError::AbiMismatch),
+            _ => return Err(MojoError::InvalidOutput),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -247,6 +301,19 @@ mod tests {
             gemini_unified_diff_to_apply_patch("plain text").unwrap(),
             None
         );
+    }
+
+    #[test]
+    fn gemini_apply_patch_block_kernel_normalizes_newlines_and_add_file_lines() {
+        let input = "prefix\r\n  *** Begin Patch\r\n*** Add File: note.txt\r\nhello\r\n+world\r\n*** End Patch\r\ntrailer";
+        assert_eq!(
+            gemini_apply_patch_block(input).unwrap(),
+            Some(
+                "  *** Begin Patch\n*** Add File: note.txt\n+hello\n+world\n*** End Patch"
+                    .to_string()
+            )
+        );
+        assert_eq!(gemini_apply_patch_block("plain text").unwrap(), None);
     }
 
     #[test]
