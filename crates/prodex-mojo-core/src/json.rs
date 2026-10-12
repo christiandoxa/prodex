@@ -18,7 +18,9 @@ pub use self::session_report::{
 mod session_repair;
 pub use self::session_repair::{SessionRepairLine, SessionRepairPlan, session_repair_plan};
 mod session_selector;
-pub use self::session_selector::{session_selector_is_full, session_selector_matches};
+pub use self::session_selector::{
+    session_selector_is_full, session_selector_match_plan, session_selector_matches,
+};
 mod kiro_catalog;
 pub use self::kiro_catalog::{
     KiroModelCatalogModel, KiroModelCatalogPlan, kiro_model_catalog_plan,

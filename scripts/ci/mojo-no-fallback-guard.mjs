@@ -32,6 +32,10 @@ const PROVIDER_BINDING_IDENTITY_MOJO_FILE = "mojo/prodex_core/provider_binding_i
 const SESSION_REPAIR_CONSUMER_FILE = "crates/prodex-session-store/src/lib.rs";
 const SESSION_REPAIR_ADAPTER_FILE = "crates/prodex-mojo-core/src/json/session_repair.rs";
 const SESSION_REPAIR_MOJO_FILE = "mojo/prodex_core/session_repair.mojo";
+const SESSION_SELECTOR_MATCH_ADAPTER_FILE = "crates/prodex-mojo-core/src/json/session_selector.rs";
+const SESSION_SELECTOR_MATCH_MOJO_FILE = "mojo/prodex_core/session_selector.mojo";
+const SESSION_SELECTOR_MATCH_CALLER_TEST_FILE = "crates/prodex-session-store/tests/src/lib.rs";
+const SESSION_SELECTOR_MATCH_MOJO_TEST_FILE = "mojo/tests/session_selector_policy_test.mojo";
 const RUNTIME_DOCTOR_PLAN_ADAPTER_FILE = "crates/prodex-mojo-core/src/rich/runtime_doctor_plan.rs";
 const RUNTIME_DOCTOR_PLAN_MOJO_FILE = "mojo/prodex_core/runtime_doctor_plan.mojo";
 const GOVERNANCE_INSPECTION_CONSUMER_FILE = "crates/prodex-domain/src/governance/inspection.rs";
@@ -350,6 +354,10 @@ const PROMOTED_FILES = [
   SESSION_REPAIR_CONSUMER_FILE,
   SESSION_REPAIR_ADAPTER_FILE,
   SESSION_REPAIR_MOJO_FILE,
+  SESSION_SELECTOR_MATCH_ADAPTER_FILE,
+  SESSION_SELECTOR_MATCH_MOJO_FILE,
+  SESSION_SELECTOR_MATCH_CALLER_TEST_FILE,
+  SESSION_SELECTOR_MATCH_MOJO_TEST_FILE,
   "crates/prodex-app/src/runtime_external_provider_config.rs",
   "crates/prodex-app/src/runtime_external_provider_config/catalog_model.rs",
   "crates/prodex-app/src/super_expose/protocol.rs",
@@ -579,6 +587,10 @@ const UNCONDITIONAL_MOJO_FILES = new Set([
   "crates/prodex-app/src/runtime_proxy/smart_context/artifact_refs.rs",
   "crates/prodex-session-store/src/session_selector.rs",
   "crates/prodex-session-store/src/report.rs",
+  SESSION_SELECTOR_MATCH_ADAPTER_FILE,
+  SESSION_SELECTOR_MATCH_MOJO_FILE,
+  SESSION_SELECTOR_MATCH_CALLER_TEST_FILE,
+  SESSION_SELECTOR_MATCH_MOJO_TEST_FILE,
   "crates/prodex-mojo-core/src/runtime_lineage.rs",
   "crates/prodex-runtime-state/src/lineage.rs",
   "crates/prodex-app/src/runtime_state_shared/line_index.rs",
@@ -4492,6 +4504,8 @@ export function findViolations(files) {
       const required = [
         "prodex_mojo_core::json::{SessionRepairLine, session_repair_plan}",
         "let plan = session_repair_plan(",
+        "prodex_mojo_core::json::session_selector_match_plan(",
+        "let (exact_indices, prefix_indices)",
       ];
       const restoredRust = [
         "fn session_repair_metadata(",
@@ -4504,6 +4518,9 @@ export function findViolations(files) {
         .map((marker) => `${filePath}: session repair planning must retain Mojo call ${marker}`);
       if (restoredRust.some((marker) => production.includes(marker))) {
         violations.push(`${filePath}: contains restored Rust session repair semantics`);
+      }
+      if (production.includes("let exact_matches = reports") || production.includes("let prefix_matches = reports")) {
+        violations.push(`${filePath}: contains restored Rust session selector candidate filtering`);
       }
       return violations;
     }
@@ -5478,6 +5495,48 @@ export function findViolations(files) {
         violations.push(filePath + ": contains restored Rust session selector metadata semantics");
       }
       return violations;
+    }
+    if (filePath === SESSION_SELECTOR_MATCH_ADAPTER_FILE) {
+      const required = [
+        "fn prodex_session_selector_match_plan_v1(",
+        "pub fn session_selector_match_plan(",
+        "i64::try_from(ffi_ids.len())",
+        "prefix.binary_search(index).is_err()",
+        "match_plan_is_sensitive_to_selector_and_preserves_candidate_order",
+      ];
+      return required
+        .filter((marker) => !contents.includes(marker))
+        .map((marker) => filePath + ": session selector adapter must retain validated Mojo plan " + marker);
+    }
+    if (filePath === SESSION_SELECTOR_MATCH_MOJO_FILE) {
+      const required = [
+        '@export("prodex_session_selector_match_plan_v1")',
+        "session_selector_matches(id, selector, True)",
+        "session_selector_matches(id, selector, False)",
+        "output_capacity < 2 + ids_count * 2",
+      ];
+      return required
+        .filter((marker) => !contents.includes(marker))
+        .map((marker) => filePath + ": exact/prefix matching must remain in the bounded versioned Mojo plan " + marker);
+    }
+    if (filePath === SESSION_SELECTOR_MATCH_CALLER_TEST_FILE) {
+      const required = [
+        "session_selector_match_plan(&ids, \"11111111\")",
+        "resolve_session_report_by_id(&reports, \"\\u{3000}11111111\\u{00a0}\")",
+        "SessionResolveError::Ambiguous",
+      ];
+      return required
+        .filter((marker) => !contents.includes(marker))
+        .map((marker) => filePath + ": session selector caller tests must retain ambiguity, trim, and sensitivity coverage " + marker);
+    }
+    if (filePath === SESSION_SELECTOR_MATCH_MOJO_TEST_FILE) {
+      const required = [
+        "test_exact_prefix_and_mutation_sensitivity",
+        "changed_output[1] != prefix_output[1]",
+      ];
+      return required
+        .filter((marker) => !contents.includes(marker))
+        .map((marker) => filePath + ": direct Mojo tests must retain selector sensitivity proof " + marker);
     }
     if (filePath === "crates/prodex-mojo-core/src/json.rs") {
       const required = [
@@ -6649,12 +6708,19 @@ function selfTest() {
   const sessionRepairConsumerCanonical = [
     "prodex_mojo_core::json::{SessionRepairLine, session_repair_plan}",
     "let plan = session_repair_plan(",
+    "prodex_mojo_core::json::session_selector_match_plan(",
+    "let (exact_indices, prefix_indices)",
   ].join("\n");
   assert.deepEqual(findViolations([[SESSION_REPAIR_CONSUMER_FILE, sessionRepairConsumerCanonical]]), []);
   assert.match(
     findViolations([[SESSION_REPAIR_CONSUMER_FILE,
       `${sessionRepairConsumerCanonical}\nfn session_repair_metadata(`]]).join("\n"),
     /contains restored Rust session repair semantics/u,
+  );
+  assert.match(
+    findViolations([[SESSION_REPAIR_CONSUMER_FILE,
+      `${sessionRepairConsumerCanonical}\nlet exact_matches = reports`]]).join("\n"),
+    /contains restored Rust session selector candidate filtering/u,
   );
   const sessionRepairAdapterCanonical = [
     "const ABI_VERSION: i64 = 1",
@@ -6684,6 +6750,29 @@ function selfTest() {
       sessionRepairMojoCanonical.replace("metadata_index", "metadata_slot")]]).join("\n"),
     /session repair semantics must remain Mojo-owned/u,
   );
+  const sessionSelectorMatchAdapterCanonical = [
+    "fn prodex_session_selector_match_plan_v1(",
+    "pub fn session_selector_match_plan(",
+    "i64::try_from(ffi_ids.len())",
+    "prefix.binary_search(index).is_err()",
+    "match_plan_is_sensitive_to_selector_and_preserves_candidate_order",
+  ].join("\n");
+  assert.deepEqual(findViolations([[SESSION_SELECTOR_MATCH_ADAPTER_FILE,
+    sessionSelectorMatchAdapterCanonical]]), []);
+  assert.match(findViolations([[SESSION_SELECTOR_MATCH_ADAPTER_FILE,
+    sessionSelectorMatchAdapterCanonical.replace("pub fn session_selector_match_plan(", "fn old(")]]).join("\n"),
+  /session selector adapter must retain validated Mojo plan/u);
+  const sessionSelectorMatchMojoCanonical = [
+    '@export("prodex_session_selector_match_plan_v1")',
+    "session_selector_matches(id, selector, True)",
+    "session_selector_matches(id, selector, False)",
+    "output_capacity < 2 + ids_count * 2",
+  ].join("\n");
+  assert.deepEqual(findViolations([[SESSION_SELECTOR_MATCH_MOJO_FILE,
+    sessionSelectorMatchMojoCanonical]]), []);
+  assert.match(findViolations([[SESSION_SELECTOR_MATCH_MOJO_FILE,
+    sessionSelectorMatchMojoCanonical.replace("session_selector_matches(id, selector, True)", "old_match()")]]).join("\n"),
+  /exact\/prefix matching must remain in the bounded versioned Mojo plan/u);
   const runtimeStateRouteConsumerCanonical = [
     "prodex_mojo_core::runtime_state::route_kind_label(",
     "prodex_mojo_core::runtime_state::route_kind_from_label(",

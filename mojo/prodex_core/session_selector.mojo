@@ -107,3 +107,52 @@ def prodex_session_selector_matches_v1(
         session_selector_matches(id, selector, exact == 1)
     )
     return SESSION_SELECTOR_OK
+
+
+@export("prodex_session_selector_match_plan_v1")
+def prodex_session_selector_match_plan_v1(
+    abi_version: Int64,
+    ids_address: UInt,
+    ids_count: Int64,
+    selector_address: UInt,
+    selector_length: Int64,
+    output_address: UInt,
+    output_capacity: Int64,
+) abi("C") -> Int64:
+    if (
+        abi_version != SESSION_SELECTOR_ABI_VERSION
+        or ids_count < 0
+        or ids_count > (0x7FFFFFFFFFFFFFFF - 2) // 2
+        or selector_length < 0
+        or output_address == 0
+        or output_capacity < 2 + ids_count * 2
+        or (ids_count > 0 and ids_address == 0)
+        or (selector_length > 0 and selector_address == 0)
+    ):
+        return SESSION_SELECTOR_INVALID
+    var selector = ProdexRichStringView(selector_address, UInt(selector_length))
+    if not rich_view_valid(selector, 0x7FFFFFFFFFFFFFFF):
+        return SESSION_SELECTOR_INVALID
+    var ids = Pointer[mut=False, ProdexRichStringView, ImmUntrackedOrigin](
+        unsafe_from_address=Int(ids_address)
+    )
+    var output = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    var exact_count: Int64 = 0
+    var prefix_count: Int64 = 0
+    output[unsafe_offset=0] = 0
+    output[unsafe_offset=1] = 0
+    for index in range(ids_count):
+        var id = ids[unsafe_offset=index].copy()
+        if not rich_view_valid(id, 0x7FFFFFFFFFFFFFFF):
+            return SESSION_SELECTOR_INVALID
+        if session_selector_matches(id, selector, True):
+            output[unsafe_offset=2 + exact_count] = index
+            exact_count += 1
+        if session_selector_matches(id, selector, False):
+            output[unsafe_offset=2 + ids_count + prefix_count] = index
+            prefix_count += 1
+    output[unsafe_offset=0] = exact_count
+    output[unsafe_offset=1] = prefix_count
+    return SESSION_SELECTOR_OK
