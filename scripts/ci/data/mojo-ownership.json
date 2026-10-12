@@ -5409,10 +5409,9 @@
       "mojo_entry": "prodex_mojo_rich_ascii_casefold_relation_v1",
       "mojo_abi_version": 6,
       "mojo_source": "mojo/prodex_core/rich_catalog.mojo",
-      "consumer": "crates/prodex-provider-core/src/gemini_bridge/media/mime.rs",
+      "consumer": "crates/prodex-app/src/runtime_gemini_auth/code_assist/validation.rs",
       "consumer_marker": "ascii_casefold_ends_with",
       "production_consumers": [
-        "crates/prodex-provider-core/src/gemini_bridge/media/mime.rs",
         "crates/prodex-app/src/runtime_gemini_auth/code_assist/validation.rs",
         "crates/prodex-app/src/runtime_proxy/smart_context.rs",
         "crates/prodex-app/src/runtime_proxy/presidio/telemetry.rs",
@@ -5428,7 +5427,7 @@
         "crates/prodex-app/src/runtime_proxy/payload_detection.rs",
         "crates/prodex-quota/src/render/windows.rs"
       ],
-      "production_reachability_test": "crates/prodex-provider-core/src/gemini_bridge/media/mime.rs",
+      "production_reachability_test": "crates/prodex-app/src/runtime_gemini_auth/code_assist/validation.rs",
       "rust_owner_before": "ASCII case-insensitive prefix/suffix/contains matching across provider/runtime text classification, diagnostics, transport failures, usage-limit/compact/token policy, and quota-render error classification",
       "rust_state_after": "adapter-only",
       "rust_test_oracle": "deleted; direct Mojo relation coverage preserves Rust starts_with/ends_with/contains empty-needle semantics and 70k exact equality, with Copilot/Gemini caller regressions preserving case and trim behavior",

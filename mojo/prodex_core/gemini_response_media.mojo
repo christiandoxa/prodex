@@ -36,8 +36,14 @@ def media_image_mime(mime: ProdexRichStringView) -> Bool:
 
 
 def media_mime_for_uri(uri: ProdexRichStringView) -> ProdexRichStringView:
+    # URI query and fragment sections are not part of the filename extension.
     var ptr = rich_view_ptr(uri)
     var length = Int64(uri.len)
+    for position in range(length):
+        var current = ptr[unsafe_offset=position]
+        if current == 63 or current == 35:
+            length = position
+            break
     var dot: Int64 = -1
     var index = length - 1
     while index >= 0:
@@ -54,29 +60,93 @@ def media_mime_literal(value: StringSlice) -> ProdexRichStringView:
     return ProdexRichStringView(UInt(Int(value.unsafe_ptr())), UInt(value.byte_length()))
 
 
-def media_mime_label(uri: ProdexRichStringView) -> ProdexRichStringView:
+# This is the single Mojo owner of extension classification, shared by the
+# Gemini response JSON transformer and the provider's URI media adapter.
+def media_mime_kind(uri: ProdexRichStringView) -> Int64:
     var extension = media_mime_for_uri(uri)
     if rich_view_prefix["png"](extension, True) and extension.len == 3:
-        return media_mime_literal(StringSlice("image/png"))
+        return 1
     if (rich_view_prefix["jpg"](extension, True) and extension.len == 3) or (
         rich_view_prefix["jpeg"](extension, True) and extension.len == 4
     ):
-        return media_mime_literal(StringSlice("image/jpeg"))
-    if rich_view_prefix["gif"](extension, True) and extension.len == 3:
-        return media_mime_literal(StringSlice("image/gif"))
+        return 2
     if rich_view_prefix["webp"](extension, True) and extension.len == 4:
-        return media_mime_literal(StringSlice("image/webp"))
-    if rich_view_prefix["mp3"](extension, True) and extension.len == 3:
-        return media_mime_literal(StringSlice("audio/mpeg"))
-    if rich_view_prefix["wav"](extension, True) and extension.len == 3:
-        return media_mime_literal(StringSlice("audio/wav"))
-    if rich_view_prefix["mp4"](extension, True) and extension.len == 3:
-        return media_mime_literal(StringSlice("video/mp4"))
-    if rich_view_prefix["mov"](extension, True) and extension.len == 3:
-        return media_mime_literal(StringSlice("video/quicktime"))
+        return 3
+    if rich_view_prefix["gif"](extension, True) and extension.len == 3:
+        return 4
     if rich_view_prefix["pdf"](extension, True) and extension.len == 3:
+        return 5
+    if (rich_view_prefix["mp3"](extension, True) and extension.len == 3) or (
+        rich_view_prefix["mpeg"](extension, True) and extension.len == 4
+    ):
+        return 6
+    if rich_view_prefix["wav"](extension, True) and extension.len == 3:
+        return 7
+    if rich_view_prefix["mp4"](extension, True) and extension.len == 3:
+        return 8
+    if rich_view_prefix["mov"](extension, True) and extension.len == 3:
+        return 9
+    return 0
+
+
+def media_mime_label(uri: ProdexRichStringView) -> ProdexRichStringView:
+    var kind = media_mime_kind(uri)
+    if kind == 1:
+        return media_mime_literal(StringSlice("image/png"))
+    if kind == 2:
+        return media_mime_literal(StringSlice("image/jpeg"))
+    if kind == 3:
+        return media_mime_literal(StringSlice("image/webp"))
+    if kind == 4:
+        return media_mime_literal(StringSlice("image/gif"))
+    if kind == 5:
         return media_mime_literal(StringSlice("application/pdf"))
+    if kind == 6:
+        return media_mime_literal(StringSlice("audio/mpeg"))
+    if kind == 7:
+        return media_mime_literal(StringSlice("audio/wav"))
+    if kind == 8:
+        return media_mime_literal(StringSlice("video/mp4"))
+    if kind == 9:
+        return media_mime_literal(StringSlice("video/quicktime"))
     return media_mime_literal(StringSlice("application/octet-stream"))
+
+
+def media_mime_text_allowed(value: ProdexRichStringView) -> Bool:
+    if rich_view_prefix["text/"](value, False):
+        return True
+    return (
+        (value.len == 16 and rich_view_prefix["application/json"](value, False))
+        or (value.len == 15 and rich_view_prefix["application/xml"](value, False))
+        or (value.len == 22 and rich_view_prefix["application/javascript"](value, False))
+        or (value.len == 22 and rich_view_prefix["application/typescript"](value, False))
+        or (value.len == 16 and rich_view_prefix["application/x-sh"](value, False))
+        or (
+            value.len == 24
+            and rich_view_prefix["application/octet-stream"](value, False)
+        )
+    )
+
+
+# ABI operations: 0 = URI MIME label class; 1 = exact text MIME eligibility.
+# Negative return values are validation/ABI errors, never fallback decisions.
+@export("prodex_mojo_gemini_media_classification_v1")
+def prodex_mojo_gemini_media_classification_v1(
+    abi_version: Int64,
+    operation: Int64,
+    address: UInt,
+    length: Int64,
+) abi("C") -> Int64:
+    if abi_version != GEMINI_RESPONSE_MEDIA_ABI_VERSION:
+        return -3
+    if operation < 0 or operation > 1 or length < 0 or (
+        length > 0 and address == 0
+    ):
+        return -2
+    var view = ProdexRichStringView(address, UInt(length))
+    if operation == 0:
+        return media_mime_kind(view)
+    return Int64(media_mime_text_allowed(view))
 
 
 def media_put_u64(sink: Pointer[mut=True, JsonSink, _], value: UInt64):

@@ -87,7 +87,10 @@ pub use gemini_response::{
 };
 #[path = "rich/gemini_response_media.rs"]
 mod gemini_response_media;
-pub use gemini_response_media::{GeminiResponseMediaOperation, gemini_response_media};
+pub use gemini_response_media::{
+    GeminiResponseMediaOperation, gemini_response_media, gemini_response_media_mime_for_uri,
+    gemini_response_media_mime_is_text,
+};
 #[path = "rich/gemini_compact_snippet.rs"]
 mod gemini_compact_snippet;
 pub use gemini_compact_snippet::{
