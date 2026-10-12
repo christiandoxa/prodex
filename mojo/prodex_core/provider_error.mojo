@@ -656,6 +656,96 @@ def prodex_provider_error_classify_v1(
     output[unsafe_offset=1] = cooldown
     return 0
 
+comptime PROVIDER_ERROR_NATIVE_EVENT_ABI_VERSION: Int64 = 1
+
+# Select the first provider error code observed in a native SSE error event.
+# Rust owns bounded SSE/JSON acquisition; this operation owns the error-event
+# gate, code precedence, and provider classification.
+@export("prodex_provider_error_native_event_classify_v1")
+def prodex_provider_error_native_event_classify_v1(
+    abi: Int64,
+    event_type_address: UInt,
+    event_type_length: Int64,
+    error_present: Int64,
+    error_type_address: UInt,
+    error_type_length: Int64,
+    error_type_present: Int64,
+    error_code_address: UInt,
+    error_code_length: Int64,
+    error_code_present: Int64,
+    top_code_address: UInt,
+    top_code_length: Int64,
+    top_code_present: Int64,
+    output_address: UInt,
+) abi("C") -> Int64:
+    if abi != PROVIDER_ERROR_NATIVE_EVENT_ABI_VERSION:
+        return 4
+    if (
+        error_present < 0
+        or error_present > 1
+        or event_type_length < 0
+        or (event_type_length > 0 and event_type_address == 0)
+        or error_type_present < 0
+        or error_type_present > 1
+        or error_code_present < 0
+        or error_code_present > 1
+        or top_code_present < 0
+        or top_code_present > 1
+        or error_type_length < 0
+        or error_code_length < 0
+        or top_code_length < 0
+        or (error_type_present == 1 and error_type_length > 0 and error_type_address == 0)
+        or (error_code_present == 1 and error_code_length > 0 and error_code_address == 0)
+        or (top_code_present == 1 and top_code_length > 0 and top_code_address == 0)
+        or output_address == 0
+    ):
+        return 1
+
+    var output = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    var event_type = ProdexRichStringView(event_type_address, UInt(event_type_length))
+    if (
+        not rich_view_valid(event_type, PROVIDER_ERROR_REJECTION_MAX_INPUT_BYTES)
+        or not rich_view_valid(ProdexRichStringView(error_type_address, UInt(error_type_length)), PROVIDER_ERROR_REJECTION_MAX_INPUT_BYTES)
+        or not rich_view_valid(ProdexRichStringView(error_code_address, UInt(error_code_length)), PROVIDER_ERROR_REJECTION_MAX_INPUT_BYTES)
+        or not rich_view_valid(ProdexRichStringView(top_code_address, UInt(top_code_length)), PROVIDER_ERROR_REJECTION_MAX_INPUT_BYTES)
+    ):
+        return 1
+    if error_present == 0 and not rich_view_matches_literal["error"](event_type, False):
+        output[] = -1
+        return 0
+
+    var code_address = UInt(0)
+    var code_length: Int64 = 0
+    var code_present: Int64 = 0
+    if error_type_present == 1:
+        code_address = error_type_address
+        code_length = error_type_length
+        code_present = 1
+    elif error_code_present == 1:
+        code_address = error_code_address
+        code_length = error_code_length
+        code_present = 1
+    elif top_code_present == 1:
+        code_address = top_code_address
+        code_length = top_code_length
+        code_present = 1
+
+    # Reuse the canonical provider classifier in this module; no Rust
+    # classification or feature-off decision is allowed at this boundary.
+    return prodex_provider_error_classify_v1(
+        1,
+        0,
+        code_address,
+        code_length,
+        code_present,
+        0,
+        0,
+        0,
+        output_address,
+    )
+
 # The response-body merge policy is a separate canonical semantic decision
 # from classifying one individual provider status/code/text. It must not be
 # reproduced in the Rust traversal or proxy adapter.

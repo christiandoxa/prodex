@@ -44,6 +44,8 @@ pub use provider_binding_identity::{
     ProviderBindingIdentityInputPlan, provider_binding_identity_digest_is_public,
     provider_binding_identity_inputs,
 };
+mod provider_error_native_event;
+pub use provider_error_native_event::classify as classify_native_event_error;
 #[path = "rich/anthropic_request.rs"]
 mod anthropic_request;
 pub use anthropic_request::{

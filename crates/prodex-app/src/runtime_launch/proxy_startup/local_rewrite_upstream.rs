@@ -328,7 +328,7 @@ pub(super) fn runtime_local_rewrite_precommit_native_first_event(
                     &mut data_lines,
                     &mut event_start,
                     chunk,
-                ) {
+                )? {
                     return Ok(runtime_local_rewrite_finish_native_prefetch(
                         live, prefetch, prefix, false, decision,
                     ));
@@ -374,7 +374,7 @@ fn runtime_local_rewrite_inspect_native_chunk(
     data_lines: &mut Vec<String>,
     event_start: &mut usize,
     chunk: Vec<u8>,
-) -> Option<RuntimeLocalRewriteNativeFirstEvent> {
+) -> Result<Option<RuntimeLocalRewriteNativeFirstEvent>> {
     let inspect_len = chunk
         .len()
         .min(crate::RUNTIME_PROXY_SSE_LOOKAHEAD_BYTES - prefix.len());
@@ -397,7 +397,7 @@ fn runtime_local_rewrite_inspect_native_chunk(
             *event_start = prefix.len();
             continue;
         }
-        let decision = runtime_local_rewrite_native_first_event_error_class(event_body)
+        let decision = runtime_local_rewrite_native_first_event_error_class(event_body)?
             .map(RuntimeLocalRewriteNativeFirstEvent::Retry)
             .unwrap_or(RuntimeLocalRewriteNativeFirstEvent::Commit);
         if appended_until < chunk.len() {
@@ -405,7 +405,7 @@ fn runtime_local_rewrite_inspect_native_chunk(
                 chunk[appended_until..].to_vec(),
             ));
         }
-        return Some(decision);
+        return Ok(Some(decision));
     }
     prefix.extend_from_slice(&chunk[appended_until..inspect_len]);
     if inspect_len < chunk.len() {
@@ -413,7 +413,7 @@ fn runtime_local_rewrite_inspect_native_chunk(
             chunk[inspect_len..].to_vec(),
         ));
     }
-    None
+    Ok(None)
 }
 fn runtime_local_rewrite_finish_native_prefetch(
     live: &mut RuntimeLocalRewriteLiveResponse,
@@ -1781,11 +1781,11 @@ mod tests {
     #[test]
     fn native_first_event_malformed_and_oversized_inputs_fail_closed() {
         assert_eq!(
-            runtime_local_rewrite_native_first_event_error_class(b"data: {not-json}\n\n"),
+            runtime_local_rewrite_native_first_event_error_class(b"data: {not-json}\n\n").unwrap(),
             None
         );
         assert_eq!(
-            runtime_local_rewrite_native_first_event_error_class(&vec![b'x'; 65_537]),
+            runtime_local_rewrite_native_first_event_error_class(&vec![b'x'; 65_537]).unwrap(),
             None
         );
     }
