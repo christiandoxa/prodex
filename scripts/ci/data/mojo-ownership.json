@@ -477,6 +477,7 @@
           "provider_catalog_choice_planning",
           "provider_catalog_merge_dedup",
           "model_catalog_choice_planning",
+          "model_catalog_default_effort_validation",
           "model_catalog_configuration_resolution",
           "provider_catalog_exact_model_identity",
           "catalog_exact_ascii_casefold_equality",
@@ -2527,6 +2528,23 @@
       "consumer_marker": "plan_dynamic_catalog",
       "production_reachability_test": "crates/prodex-app/src/app_commands/super_main_prompt.rs",
       "rust_owner_before": "dynamic catalog filtering, ordering, and model-effort collection",
+      "rust_state_after": "adapter-only",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false
+    },
+    {
+      "name": "model_catalog_default_effort_validation",
+      "domain": "catalog/collections/default-effort",
+      "introduced_in": "0.420.0",
+      "baseline_state": "candidate",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_mojo_rich_catalog_defaults_v1",
+      "mojo_source": "mojo/prodex_core/rich_catalog.mojo",
+      "consumer": "crates/prodex-app/src/app_commands/super_main_catalog.rs",
+      "consumer_marker": "default_effort: model.default_effort",
+      "production_reachability_test": "crates/prodex-app/src/app_commands/super_main_catalog.rs",
+      "rust_owner_before": "default-effort trimming, supported-effort validation, and selected source-entry association",
       "rust_state_after": "adapter-only",
       "production_fallback": false,
       "duplicate_production_owner": false,
@@ -7769,6 +7787,31 @@
         "release_marker": "main_model_catalog_plan_with_mojo(entries)?"
       },
       "cleanup_evidence": "The public Rust entry is now an unconditional adapter to the Mojo-backed catalog planner; the feature-off Rust catalog algorithm and test oracle were deleted."
+    },
+    {
+      "file": "crates/prodex-app/src/app_commands/super_main_catalog.rs",
+      "symbol": "main_model_choices_from_catalog",
+      "operation": "model_catalog_default_effort_validation",
+      "previous_responsibility": "Rust default-effort trimming and supported-effort validation plus source-entry lookup after catalog planning",
+      "final_state": "adapter-only",
+      "rust_before": "crates/prodex-app/src/app_commands/super_main_catalog.rs::valid_default_effort and source-entry scan",
+      "rust_after": "adapter-only; Mojo validates defaults and returns the selected source index",
+      "mojo_owner": "mojo/prodex_core/rich_catalog.mojo::prodex_mojo_rich_catalog_defaults_v1",
+      "mojo_source": "mojo/prodex_core/rich_catalog.mojo",
+      "mojo_entry": "prodex_mojo_rich_catalog_defaults_v1",
+      "production_consumer": "crates/prodex-app/src/app_commands/super_main_catalog.rs",
+      "parity_test": "crates/prodex-mojo-core/src/rich_tests.rs",
+      "cleanup_loc": 17,
+      "cleanup_source": {
+        "kind": "collapsed-adapter",
+        "baseline_range": {
+          "start": 233,
+          "end": 250
+        },
+        "release_symbol": "pub(super) fn main_model_choices_from_catalog",
+        "release_marker": "let (owned, plan) = main_model_catalog_plan_with_mojo(entries)?;"
+      },
+      "cleanup_evidence": "Rust no longer scans catalog IDs or validates default efforts; it materializes aliases and Mojo-returned fields only."
     },
     {
       "file": "crates/prodex-app/src/app_commands/super_main_prompt.rs",

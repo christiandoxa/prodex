@@ -9,6 +9,7 @@ from rich_text import (
 )
 from rich_types import (
     ProdexRichCatalogPlanChoice,
+    ProdexRichCatalogDefaultsResult,
     ProdexRichCatalogPlanModel,
     ProdexRichCatalogPlanResult,
     ProdexRichCatalogReasoningResult,
@@ -1291,6 +1292,44 @@ def catalog_plan_copy_trimmed(
     )
 
 
+def catalog_plan_copy_validated_default(
+    model: ProdexRichCatalogPlanModel,
+    efforts: Pointer[mut=False, ProdexRichStringView, _],
+    output: Pointer[mut=True, UInt8, _],
+    output_capacity: Int64,
+    written: Pointer[mut=True, Int64, _],
+) -> ProdexRichSlice:
+    # A catalog default is usable only when it names one of the model's
+    # supported efforts. Preserve the source spelling after trimming, as the
+    # Rust adapter historically did after comparing case-insensitively.
+    var default_bounds = rich_trim_bounds(model.default_effort)
+    if default_bounds[1] <= default_bounds[0]:
+        return ProdexRichSlice(-1, 0)
+    for effort_offset in range(model.effort_count):
+        var effort = efforts[
+            unsafe_offset=model.effort_start + effort_offset
+        ].copy()
+        var effort_bounds = rich_trim_bounds(effort)
+        if effort_bounds[1] > effort_bounds[0] and catalog_view_equal_range(
+            model.default_effort,
+            default_bounds[0],
+            default_bounds[1],
+            effort,
+            effort_bounds[0],
+            effort_bounds[1],
+        ):
+            return rich_copy_range(
+                rich_view_ptr(model.default_effort),
+                default_bounds[0],
+                default_bounds[1],
+                output,
+                output_capacity,
+                written,
+                False,
+            )
+    return ProdexRichSlice(-1, 0)
+
+
 def catalog_plan_copy_first_effort(
     model_index: Int64,
     models: Pointer[mut=False, ProdexRichCatalogPlanModel, _],
@@ -1940,6 +1979,103 @@ def prodex_mojo_rich_catalog_choices_v2(
     result_ptr[].efforts_written = efforts_written
     result_ptr[].output_written = written
     result_ptr[].required_efforts = efforts_written
+    result_ptr[].required_output = written
+    return RICH_STATUS_OK
+
+
+@export("prodex_mojo_rich_catalog_defaults_v1")
+def prodex_mojo_rich_catalog_defaults_v1(
+    abi_version: Int64,
+    models_address: UInt,
+    model_count: Int64,
+    efforts_address: UInt,
+    effort_count: Int64,
+    aliases_address: UInt,
+    alias_count: Int64,
+    output_defaults_address: UInt,
+    default_capacity: Int64,
+    output_address: UInt,
+    output_capacity: Int64,
+    result_address: UInt,
+) abi("C") -> Int64:
+    if result_address == 0:
+        return RICH_STATUS_INVALID
+    var result_ptr = Pointer[
+        mut=True, ProdexRichCatalogDefaultsResult, MutUntrackedOrigin
+    ](unsafe_from_address=Int(result_address))
+    result_ptr[].abi_version = PRODEX_RICH_ABI_VERSION
+    result_ptr[].defaults_written = 0
+    result_ptr[].required_defaults = 0
+    result_ptr[].output_written = 0
+    result_ptr[].required_output = 0
+    result_ptr[].issue_kind = 0
+    result_ptr[].issue_index = -1
+    result_ptr[].issue_offset = -1
+    result_ptr[].issue_length = 0
+    if abi_version != PRODEX_RICH_ABI_VERSION:
+        result_ptr[].issue_kind = RICH_STATUS_ABI
+        return RICH_STATUS_ABI
+    if (
+        model_count < 0
+        or model_count > CATALOG_MAX_MODELS
+        or effort_count < 0
+        or effort_count > CATALOG_MAX_INPUT_MODELS
+        or alias_count < 0
+        or alias_count > CATALOG_MAX_INPUT_MODELS
+        or default_capacity < 0
+        or output_capacity < 0
+    ):
+        return RICH_STATUS_INVALID
+    if model_count > 0 and (
+        models_address == 0 or output_defaults_address == 0
+    ):
+        return RICH_STATUS_INVALID
+    if effort_count > 0 and efforts_address == 0:
+        return RICH_STATUS_INVALID
+    if alias_count > 0 and aliases_address == 0:
+        return RICH_STATUS_INVALID
+    if output_capacity > 0 and output_address == 0:
+        return RICH_STATUS_INVALID
+    if default_capacity < model_count:
+        result_ptr[].required_defaults = model_count
+        return RICH_STATUS_CAPACITY
+
+    var models = Pointer[
+        mut=False, ProdexRichCatalogPlanModel, ImmUntrackedOrigin
+    ](unsafe_from_address=Int(models_address))
+    var efforts = Pointer[
+        mut=False, ProdexRichStringView, ImmUntrackedOrigin
+    ](unsafe_from_address=Int(efforts_address))
+    var aliases = Pointer[
+        mut=False, ProdexRichStringView, ImmUntrackedOrigin
+    ](unsafe_from_address=Int(aliases_address))
+    if not catalog_plan_validate_models(
+        models, model_count, efforts, effort_count, aliases, alias_count
+    ):
+        return RICH_STATUS_UTF8
+    var output_defaults = Pointer[
+        mut=True, ProdexRichSlice, MutUntrackedOrigin
+    ](unsafe_from_address=Int(output_defaults_address))
+    var output = Pointer[mut=True, UInt8, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    result_ptr[].required_defaults = model_count
+    var written: Int64 = 0
+    for model_index in range(model_count):
+        var copied = catalog_plan_copy_validated_default(
+            models[unsafe_offset=model_index].copy(),
+            efforts,
+            output,
+            output_capacity,
+            Pointer(to=written),
+        )
+        if copied.len < 0:
+            result_ptr[].output_written = written
+            result_ptr[].required_output = written
+            return RICH_STATUS_CAPACITY
+        output_defaults[unsafe_offset=model_index] = copied.copy()
+        result_ptr[].defaults_written += 1
+    result_ptr[].output_written = written
     result_ptr[].required_output = written
     return RICH_STATUS_OK
 

@@ -366,9 +366,10 @@ fn rich_catalog_planner_matches_reference_order_filter_and_effort_rules() {
     ];
     let mut reference = models
         .iter()
-        .filter(|model| model.supported && !model.hidden && model.listed)
+        .enumerate()
+        .filter(|(_, model)| model.supported && !model.hidden && model.listed)
         .collect::<Vec<_>>();
-    reference.sort_by(|left, right| {
+    reference.sort_by(|(_, left), (_, right)| {
         left.priority
             .cmp(&right.priority)
             .then_with(|| left.id.trim().cmp(right.id.trim()))
@@ -376,11 +377,12 @@ fn rich_catalog_planner_matches_reference_order_filter_and_effort_rules() {
     let mut seen = BTreeSet::new();
     let reference = reference
         .into_iter()
-        .filter_map(|model| {
+        .filter_map(|(source_index, model)| {
             let id = model.id.trim();
             let mut effort_seen = BTreeSet::new();
             seen.insert(id.to_ascii_lowercase())
                 .then(|| CatalogPlannedModel {
+                    source_index,
                     id: id.to_string(),
                     label: model.label.trim().to_string(),
                     efforts: model
@@ -391,10 +393,44 @@ fn rich_catalog_planner_matches_reference_order_filter_and_effort_rules() {
                         .filter(|effort| effort_seen.insert(effort.to_ascii_lowercase()))
                         .map(str::to_string)
                         .collect(),
+                    default_effort: None,
                 })
         })
         .collect::<Vec<_>>();
     assert_eq!(plan_dynamic_catalog(&models).unwrap().models, reference);
+}
+
+#[test]
+fn rich_catalog_dynamic_defaults_are_trimmed_and_validated_by_mojo() {
+    let models = [
+        CatalogPlanModel {
+            id: "first",
+            aliases: &["first-alias"],
+            label: "First",
+            priority: 0,
+            supported: true,
+            hidden: false,
+            listed: true,
+            efforts: &[" LOW "],
+            default_effort: Some(" low "),
+        },
+        CatalogPlanModel {
+            id: "second",
+            aliases: &[],
+            label: "Second",
+            priority: 1,
+            supported: true,
+            hidden: false,
+            listed: true,
+            efforts: &["medium"],
+            default_effort: Some("high"),
+        },
+    ];
+    let plan = plan_dynamic_catalog(&models).unwrap();
+    assert_eq!(plan.models[0].source_index, 0);
+    assert_eq!(plan.models[0].default_effort.as_deref(), Some("low"));
+    assert_eq!(plan.models[1].source_index, 1);
+    assert_eq!(plan.models[1].default_effort, None);
 }
 
 #[test]
