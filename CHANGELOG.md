@@ -6,6 +6,7 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 
 ### Runtime
 
+- Recover terminal native threads without relaunch (`c554fc0`)
 - Preserve Codex context defaults and recover native threads in place (`82d311f`)
 # Prodex 0.437.7
 
@@ -18,6 +19,10 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
   an idle native thread through its owned app-server without reopening the TUI.
 
 ## Bug Fixes
+
+- Recognize a terminal native `systemError` thread as quiescent for recovery,
+  while deferring active, unloaded and unknown thread states. Keep paused,
+  completed and budget-limited goals stopped in either quiescent state.
 
 - Stop treating a cached maximum context window as the active model window or
   manufacturing a private 90% auto-compaction threshold.
