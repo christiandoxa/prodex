@@ -1,6 +1,6 @@
 use super::RuntimeTuningDefaults;
 use super::capacity::RuntimeProxyLaneLimitOverrides;
-use prodex_mojo_core::runtime::RuntimeTuningCapacityDefaults;
+use prodex_mojo_core::runtime::{RuntimeFaultBudgetAction, RuntimeTuningCapacityDefaults};
 
 pub(super) fn runtime_tuning_defaults(parallelism: usize) -> RuntimeTuningDefaults {
     prodex_mojo_core::runtime::runtime_tuning_defaults(parallelism)
@@ -34,4 +34,14 @@ pub(super) fn runtime_tuning_capacity_defaults(
 pub(super) fn capacity_default(operation: i64, value: usize, secondary: usize) -> usize {
     prodex_mojo_core::runtime::runtime_tuning_capacity_default(operation, value, secondary)
         .expect("Mojo runtime tuning capacity default returned an invalid result")
+}
+
+pub(super) fn runtime_fault_budget_step(
+    configured: usize,
+    previous_remaining: usize,
+    changed: bool,
+) -> Option<RuntimeFaultBudgetAction> {
+    // Invalid ABI/output fails closed: never invent a fault-injection event.
+    prodex_mojo_core::runtime::runtime_fault_budget_step(configured, previous_remaining, changed)
+        .ok()
 }

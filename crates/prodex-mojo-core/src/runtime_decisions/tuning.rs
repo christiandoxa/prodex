@@ -7,6 +7,13 @@ const RUNTIME_SCALAR_CONFIG_OPENAI_PROVIDER: i64 = 4;
 const RUNTIME_SCALAR_CONFIG_LOG_RECORDING: i64 = 5;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RuntimeFaultBudgetAction {
+    Clear,
+    Skip,
+    Consume { remaining: usize },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RuntimeLogFormatClass {
     Text,
     Json,
@@ -61,6 +68,14 @@ pub struct RuntimeTuningCapacityDefaults {
 }
 
 unsafe extern "C" {
+    fn prodex_runtime_fault_budget_step_v1(
+        abi_version: i64,
+        configured: u64,
+        previous_remaining: u64,
+        configuration_changed: i64,
+        next_remaining: *mut u64,
+    ) -> i64;
+
     fn prodex_runtime_tuning_capacity_default_v1(
         version: i64,
         operation: i64,
@@ -106,6 +121,38 @@ unsafe extern "C" {
         websocket_lane_limit: *mut i64,
         standard_lane_limit: *mut i64,
     ) -> i64;
+}
+
+/// Apply the Mojo-owned fault budget transition to an immutable snapshot.
+pub fn runtime_fault_budget_step(
+    configured: usize,
+    previous_remaining: usize,
+    configuration_changed: bool,
+) -> Result<RuntimeFaultBudgetAction, crate::MojoError> {
+    let configured = u64::try_from(configured).map_err(|_| crate::MojoError::InvalidInput)?;
+    let previous_remaining =
+        u64::try_from(previous_remaining).map_err(|_| crate::MojoError::InvalidInput)?;
+    let mut next_remaining = 0_u64;
+    let status = unsafe {
+        prodex_runtime_fault_budget_step_v1(
+            1,
+            configured,
+            previous_remaining,
+            i64::from(configuration_changed),
+            &mut next_remaining,
+        )
+    };
+    match status {
+        -3 => Err(crate::MojoError::AbiMismatch),
+        -2 => Err(crate::MojoError::InvalidInput),
+        0 if next_remaining == 0 => Ok(RuntimeFaultBudgetAction::Clear),
+        1 if next_remaining == 0 => Ok(RuntimeFaultBudgetAction::Skip),
+        2 => Ok(RuntimeFaultBudgetAction::Consume {
+            remaining: usize::try_from(next_remaining)
+                .map_err(|_| crate::MojoError::InvalidOutput)?,
+        }),
+        _ => Err(crate::MojoError::InvalidOutput),
+    }
 }
 
 fn runtime_scalar_config_policy(operation: i64, value: &str) -> Result<i64, crate::MojoError> {

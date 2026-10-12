@@ -3,6 +3,37 @@ from std.memory import Pointer
 from rich_text import rich_trim_bounds, rich_view_ptr, rich_view_valid
 from rich_types import ProdexRichStringView
 
+# Fault-injection budgets are a deterministic transition. Rust owns environment
+# acquisition and the mutex-protected per-key map; Mojo alone selects the step.
+@export("prodex_runtime_fault_budget_step_v1")
+def prodex_runtime_fault_budget_step_v1(
+    abi_version: Int64,
+    configured: UInt64,
+    previous_remaining: UInt64,
+    configuration_changed: Int64,
+    next_remaining: Pointer[mut=True, UInt64, _],
+) abi("C") -> Int64:
+    if abi_version != 1:
+        return -3
+    if configuration_changed != 0 and configuration_changed != 1:
+        return -2
+
+    if configured == 0:
+        next_remaining[unsafe_offset=0] = 0
+        return 0  # Clear this key.
+
+    var remaining = previous_remaining
+    if configuration_changed == 1:
+        remaining = configured
+
+    if remaining == 0:
+        next_remaining[unsafe_offset=0] = 0
+        return 1  # Do not inject.
+
+    next_remaining[unsafe_offset=0] = remaining - 1
+    return 2  # Inject once.
+
+
 comptime RUNTIME_TUNING_INT64_MAX: Int64 = 9223372036854775807
 
 comptime RUNTIME_SCALAR_CONFIG_ABI_VERSION: Int64 = 1
