@@ -8,6 +8,7 @@ pub use tunnel::{super_expose_tunnel_client_version_output_valid, super_expose_t
 const SUPER_EXPOSE_ABI_VERSION: i64 = 1;
 const SUPER_EXPOSE_MAX_NAME_BYTES: usize = 128;
 const SUPER_EXPOSE_MAX_CONCURRENCY_PRESETS: usize = 32;
+const SUPER_EXPOSE_OUTPUT_CURSOR_ABI_VERSION: i64 = 1;
 
 #[cfg(test)]
 #[path = "super_expose/tests.rs"]
@@ -604,6 +605,80 @@ pub fn super_expose_string_valid(value: &str, max_bytes: usize) -> Result<bool, 
     bool_output(output)
 }
 
+/// Facts used to validate one opaque session-output cursor after decoding.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SuperExposeOutputCursorInput {
+    pub encoded_length: usize,
+    pub version: u8,
+    pub prodex_pid: u32,
+    pub codex_pid: u32,
+    pub prodex_birth_present: bool,
+    pub codex_birth_present: bool,
+    pub thread_id_present: bool,
+    pub source_id_present: bool,
+    pub checkpoint_id_present: bool,
+    pub event_index: usize,
+}
+
+unsafe extern "C" {
+    fn prodex_mojo_super_expose_output_cursor_valid_v1(
+        abi_version: i64,
+        encoded_length: i64,
+        version: i64,
+        prodex_pid: i64,
+        codex_pid: i64,
+        prodex_birth_present: i64,
+        codex_birth_present: i64,
+        thread_id_present: i64,
+        source_id_present: i64,
+        checkpoint_id_present: i64,
+        event_index: u64,
+        output_address: u64,
+    ) -> i64;
+}
+
+/// Validate decoded cursor identity, version, required fields, and event bound in Mojo.
+pub fn super_expose_output_cursor_valid(
+    input: SuperExposeOutputCursorInput,
+) -> Result<bool, MojoError> {
+    ensure_rich_abi()?;
+    let mut output = -1_i64;
+    let status = unsafe {
+        prodex_mojo_super_expose_output_cursor_valid_v1(
+            SUPER_EXPOSE_OUTPUT_CURSOR_ABI_VERSION,
+            i64::try_from(input.encoded_length).map_err(|_| MojoError::InvalidInput)?,
+            i64::from(input.version),
+            i64::from(input.prodex_pid),
+            i64::from(input.codex_pid),
+            i64::from(input.prodex_birth_present),
+            i64::from(input.codex_birth_present),
+            i64::from(input.thread_id_present),
+            i64::from(input.source_id_present),
+            i64::from(input.checkpoint_id_present),
+            u64::try_from(input.event_index).map_err(|_| MojoError::InvalidInput)?,
+            mojo_mut_pointer_address(&mut output),
+        )
+    };
+    super_expose_status(status)?;
+    bool_output(output)
+}
+
+/// Apply the encoded cursor length bound before the host decodes untrusted input.
+pub fn super_expose_output_cursor_length_valid(encoded_length: usize) -> Result<bool, MojoError> {
+    super_expose_output_cursor_valid(SuperExposeOutputCursorInput {
+        encoded_length,
+        version: 1,
+        prodex_pid: 1,
+        codex_pid: 1,
+        prodex_birth_present: true,
+        codex_birth_present: true,
+        thread_id_present: true,
+        source_id_present: true,
+        checkpoint_id_present: true,
+        event_index: 0,
+    })
+}
+
 #[cfg(test)]
 mod protocol_policy_tests {
     use super::*;
@@ -844,5 +919,42 @@ mod protocol_policy_tests {
         assert!(!super_expose_string_valid("bad\nmodel", 256).unwrap());
         assert!(!super_expose_string_valid("bad\u{0085}model", 256).unwrap());
         assert!(!super_expose_string_valid(&"x".repeat(257), 256).unwrap());
+    }
+
+    #[test]
+    fn output_cursor_validation_is_mojo_owned_and_sensitive() {
+        const { assert!(crate::MOJO_ACTIVE) }
+
+        let base = SuperExposeOutputCursorInput {
+            encoded_length: 512,
+            version: 1,
+            prodex_pid: 42,
+            codex_pid: 43,
+            prodex_birth_present: true,
+            codex_birth_present: true,
+            thread_id_present: true,
+            source_id_present: true,
+            checkpoint_id_present: true,
+            event_index: 7,
+        };
+        assert!(super_expose_output_cursor_valid(base).unwrap());
+
+        let mutators: &[fn(&mut SuperExposeOutputCursorInput)] = &[
+            |input| input.encoded_length = 16 * 1024 + 1,
+            |input| input.version = 2,
+            |input| input.prodex_pid = 0,
+            |input| input.codex_pid = 0,
+            |input| input.prodex_birth_present = false,
+            |input| input.codex_birth_present = false,
+            |input| input.thread_id_present = false,
+            |input| input.source_id_present = false,
+            |input| input.checkpoint_id_present = false,
+            |input| input.event_index = 65_537,
+        ];
+        for mutate in mutators {
+            let mut candidate = base;
+            mutate(&mut candidate);
+            assert!(!super_expose_output_cursor_valid(candidate).unwrap());
+        }
     }
 }

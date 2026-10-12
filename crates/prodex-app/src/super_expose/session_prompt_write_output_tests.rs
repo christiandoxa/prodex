@@ -1,7 +1,7 @@
 use super::super::session_prompt_write::{
     ExistingSessionPromptWrite, OpenProcessFile, PromptOutputReadRequest, SessionPromptWriteError,
-    SessionPromptWriteService, read_output_events, valid_rollout_path_in_authoritative_open_files,
-    valid_rollout_path_in_roots,
+    SessionPromptWriteService, decode_output_cursor, encode_output_cursor, read_output_events,
+    valid_rollout_path_in_authoritative_open_files, valid_rollout_path_in_roots,
 };
 use super::{FakeProcessInspector, fixture, queue, service};
 use std::io::{Seek, SeekFrom, Write};
@@ -71,6 +71,43 @@ fn output_cursor_rejects_invalid_values() {
             prodex_pid: None,
             thread_id: None,
             binding_key: "test".to_string(),
+            shutdown: None,
+        }),
+        Err(SessionPromptWriteError::InvalidCursor)
+    );
+}
+
+#[test]
+fn output_cursor_validation_is_required_mojo_at_read_boundary() {
+    const { assert!(prodex_mojo_core::MOJO_ACTIVE) }
+
+    let fixture = fixture();
+    let service = service(&fixture, queue(&fixture, None));
+    let first = service
+        .read_output(PromptOutputReadRequest {
+            workspace_root: fixture.workspace.clone(),
+            cursor: None,
+            limit: 1,
+            wait_ms: 0,
+            prodex_pid: None,
+            thread_id: None,
+            binding_key: "required-mojo-cursor".to_string(),
+            shutdown: None,
+        })
+        .unwrap();
+    let mut cursor = decode_output_cursor(&first.next_cursor).unwrap();
+    cursor.event_index = 65_537;
+    let invalid = encode_output_cursor(cursor).unwrap();
+
+    assert_eq!(
+        service.read_output(PromptOutputReadRequest {
+            workspace_root: fixture.workspace.clone(),
+            cursor: Some(invalid),
+            limit: 1,
+            wait_ms: 0,
+            prodex_pid: None,
+            thread_id: None,
+            binding_key: "required-mojo-cursor".to_string(),
             shutdown: None,
         }),
         Err(SessionPromptWriteError::InvalidCursor)

@@ -1082,7 +1082,8 @@
           "super_expose_tool_argument_policy",
           "super_expose_run_id_policy",
           "super_expose_string_validation_policy",
-          "super_expose_dispatch_validation_policy"
+          "super_expose_dispatch_validation_policy",
+          "super_expose_output_cursor_validation_policy"
         ]
       },
       {
@@ -4782,6 +4783,29 @@
       "duplicate_production_owner": false,
       "platform_fallback": false,
       "rust_adapter_scope": "JSON parsing, request-id materialization, header validation ordering, audit timing, tool argument allowlist and exact HTTP/JSON-RPC response construction"
+    },
+    {
+      "name": "super_expose_output_cursor_validation_policy",
+      "domain": "super-expose/session-output",
+      "introduced_in": "0.437.7",
+      "baseline_state": "Rust session-output cursor validation",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_mojo_super_expose_output_cursor_valid_v1",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/super_expose.mojo",
+      "consumer": "crates/prodex-app/src/super_expose/session_prompt_write/output.rs",
+      "consumer_marker": "prodex_mojo_core::rich::super_expose_output_cursor_valid",
+      "production_consumers": [
+        "crates/prodex-app/src/super_expose/session_prompt_write/output.rs"
+      ],
+      "production_reachability_test": "crates/prodex-app/src/super_expose/session_prompt_write_output_tests.rs",
+      "rust_state_after": "adapter-only",
+      "rust_owner_before": "decoded output-cursor length, version, process identity, required field, and event-index bound validation",
+      "rust_test_oracle": "deleted; required-Mojo caller coverage and adapter mutation proof cover cursor limits, identity fields, required fields, and event-index bounds",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "base64/Serde decoding, UUID normalization, source checkpoint hashing, path/process identity checks, and typed cursor error mapping"
     },
     {
       "domain": "cli/super-provider-config",

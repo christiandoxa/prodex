@@ -81,7 +81,9 @@ pub(crate) fn encode_output_cursor(
 pub(crate) fn decode_output_cursor(
     value: &str,
 ) -> std::result::Result<OutputCursor, SessionPromptWriteError> {
-    if value.is_empty() || value.len() > 16 * 1024 {
+    if !prodex_mojo_core::rich::super_expose_output_cursor_length_valid(value.len())
+        .map_err(|_| SessionPromptWriteError::InvalidCursor)?
+    {
         return Err(SessionPromptWriteError::InvalidCursor);
     }
     let bytes = base64::engine::general_purpose::URL_SAFE_NO_PAD
@@ -93,17 +95,23 @@ pub(crate) fn decode_output_cursor(
         return Err(SessionPromptWriteError::InvalidCursor);
     };
     cursor.thread_id = thread_id.to_string();
-    (cursor.version == OUTPUT_CURSOR_VERSION
-        && cursor.prodex_pid > 0
-        && cursor.codex_pid > 0
-        && !cursor.prodex_birth.is_empty()
-        && !cursor.codex_birth.is_empty()
-        && !cursor.thread_id.is_empty()
-        && !cursor.source_id.is_empty()
-        && !cursor.checkpoint_id.is_empty()
-        && cursor.event_index <= 65_536)
-        .then_some(cursor)
-        .ok_or(SessionPromptWriteError::InvalidCursor)
+    prodex_mojo_core::rich::super_expose_output_cursor_valid(
+        prodex_mojo_core::rich::SuperExposeOutputCursorInput {
+            encoded_length: value.len(),
+            version: cursor.version,
+            prodex_pid: cursor.prodex_pid,
+            codex_pid: cursor.codex_pid,
+            prodex_birth_present: !cursor.prodex_birth.is_empty(),
+            codex_birth_present: !cursor.codex_birth.is_empty(),
+            thread_id_present: !cursor.thread_id.is_empty(),
+            source_id_present: !cursor.source_id.is_empty(),
+            checkpoint_id_present: !cursor.checkpoint_id.is_empty(),
+            event_index: cursor.event_index,
+        },
+    )
+    .map_err(|_| SessionPromptWriteError::InvalidCursor)?
+    .then_some(cursor)
+    .ok_or(SessionPromptWriteError::InvalidCursor)
 }
 
 pub(crate) fn output_source_id(

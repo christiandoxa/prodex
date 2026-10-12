@@ -14,6 +14,13 @@ from rich_types import ProdexRichStringView
 
 comptime SUPER_EXPOSE_ABI_VERSION: Int64 = 1
 comptime SUPER_EXPOSE_MAX_NAME_BYTES: Int64 = 128
+comptime SUPER_EXPOSE_OUTPUT_CURSOR_ABI_VERSION: Int64 = 1
+comptime SUPER_EXPOSE_OUTPUT_CURSOR_MAX_BYTES: Int64 = 16 * 1024
+comptime SUPER_EXPOSE_OUTPUT_CURSOR_VERSION: Int64 = 1
+comptime SUPER_EXPOSE_OUTPUT_CURSOR_MAX_EVENT_INDEX: UInt64 = 65_536
+
+def super_expose_output_cursor_valid_bool(value: Int64) -> Bool:
+    return value == 0 or value == 1
 
 comptime SUPER_EXPOSE_METHOD_UNKNOWN: Int64 = 0
 comptime SUPER_EXPOSE_METHOD_INITIALIZE: Int64 = 1
@@ -1154,4 +1161,49 @@ def prodex_mojo_super_expose_string_valid_v1(
                 break
             index += width
     output[] = Int64(valid)
+    return 0
+
+
+@export("prodex_mojo_super_expose_output_cursor_valid_v1")
+def prodex_mojo_super_expose_output_cursor_valid_v1(
+    abi_version: Int64,
+    encoded_length: Int64,
+    version: Int64,
+    prodex_pid: Int64,
+    codex_pid: Int64,
+    prodex_birth_present: Int64,
+    codex_birth_present: Int64,
+    thread_id_present: Int64,
+    source_id_present: Int64,
+    checkpoint_id_present: Int64,
+    event_index: UInt64,
+    output_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != SUPER_EXPOSE_OUTPUT_CURSOR_ABI_VERSION:
+        return 4
+    if (
+        output_address == 0
+        or not super_expose_output_cursor_valid_bool(prodex_birth_present)
+        or not super_expose_output_cursor_valid_bool(codex_birth_present)
+        or not super_expose_output_cursor_valid_bool(thread_id_present)
+        or not super_expose_output_cursor_valid_bool(source_id_present)
+        or not super_expose_output_cursor_valid_bool(checkpoint_id_present)
+    ):
+        return 1
+    var output = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    output[] = Int64(
+        encoded_length > 0
+        and encoded_length <= SUPER_EXPOSE_OUTPUT_CURSOR_MAX_BYTES
+        and version == SUPER_EXPOSE_OUTPUT_CURSOR_VERSION
+        and prodex_pid > 0
+        and codex_pid > 0
+        and prodex_birth_present == 1
+        and codex_birth_present == 1
+        and thread_id_present == 1
+        and source_id_present == 1
+        and checkpoint_id_present == 1
+        and event_index <= SUPER_EXPOSE_OUTPUT_CURSOR_MAX_EVENT_INDEX
+    )
     return 0
