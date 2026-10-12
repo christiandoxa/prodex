@@ -49,7 +49,7 @@ pub(crate) struct GoalUsageLimitMonitor {
     workflow_model: Option<String>,
     workflow_evidence: RuntimeWorkflowEvidence,
     session_goal_present: bool,
-    workflow_scan_disabled: bool,
+    workflow_scan_retry_at: Option<Instant>,
     session_usage_limit_reported: bool,
     session_scan_offset: u64,
     next_retry_at: Instant,
@@ -76,7 +76,7 @@ impl GoalUsageLimitMonitor {
             workflow_model: None,
             workflow_evidence: RuntimeWorkflowEvidence::default(),
             session_goal_present: false,
-            workflow_scan_disabled: false,
+            workflow_scan_retry_at: None,
             session_usage_limit_reported: false,
             session_scan_offset: 0,
             next_retry_at: Instant::now(),
@@ -216,7 +216,8 @@ impl GoalUsageLimitMonitor {
         }) {
             Ok(scan) => scan,
             Err(_) => {
-                self.workflow_scan_disabled = true;
+                self.workflow_scan_retry_at =
+                    Some(Instant::now() + GOAL_USAGE_LIMIT_RETRY_INTERVAL);
                 return Ok(false);
             }
         };
@@ -283,7 +284,7 @@ impl GoalUsageLimitMonitor {
         self.workflow_model = None;
         self.workflow_evidence = RuntimeWorkflowEvidence::default();
         self.session_goal_present = false;
-        self.workflow_scan_disabled = false;
+        self.workflow_scan_retry_at = None;
         self.session_usage_limit_reported = false;
         self.session_scan_offset =
             fs::read_to_string(runtime_goal_session_offset_path(&self.marker_path))
@@ -299,7 +300,7 @@ impl GoalUsageLimitMonitor {
         self.usage_limit_pending = false;
         self.workflow_recovery_class = None;
         self.workflow_evidence = RuntimeWorkflowEvidence::default();
-        self.workflow_scan_disabled = false;
+        self.workflow_scan_retry_at = None;
         self.session_path = None;
         self.session_usage_limit_reported = false;
         self.session_scan_offset = self.session_file_size();

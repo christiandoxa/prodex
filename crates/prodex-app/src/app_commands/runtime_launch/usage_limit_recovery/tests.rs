@@ -685,7 +685,7 @@ fn large_historical_rollout_keeps_incremental_monitor_available() {
     monitor.session_scan_offset = offset;
 
     assert_eq!(monitor.take_usage_limit_signal().unwrap(), None);
-    assert!(!monitor.workflow_scan_disabled);
+    assert!(monitor.workflow_scan_retry_at.is_none());
     assert_eq!(monitor.take_usage_limit_signal().unwrap(), None);
     let _ = fs::remove_dir_all(root);
 }
