@@ -157,6 +157,62 @@ pub(super) fn observe_runtime_workflow_evidence(
     }
 }
 
+/// Projects native event envelopes; policy and precedence are Mojo-owned.
+pub(super) fn live_recovery_observation_kind(
+    value: &Value,
+) -> prodex_mojo_core::launch::RecoveryObservationKind {
+    use prodex_mojo_core::launch::RecoveryObservationKind;
+    let outer = value.get("type").and_then(Value::as_str);
+    let kind = if outer == Some("event_msg") {
+        value
+            .get("payload")
+            .and_then(|payload| payload.get("type"))
+            .and_then(Value::as_str)
+    } else {
+        outer
+    };
+    let method = value.get("method").and_then(Value::as_str);
+    if matches!(
+        kind,
+        Some(
+            "task_complete"
+                | "turn_complete"
+                | "turn.completed"
+                | "turn_completed"
+                | "turn.failed"
+                | "turn_failed"
+        )
+    ) || method == Some("turn/completed")
+    {
+        return RecoveryObservationKind::Terminal;
+    }
+    if matches!(
+        kind,
+        Some(
+            "task_started"
+                | "turn_started"
+                | "user_message"
+                | "agent_message"
+                | "turn_aborted"
+                | "task_aborted"
+                | "turn_cancelled"
+                | "exec_command_end"
+                | "patch_apply_end"
+                | "mcp_tool_call_end"
+                | "tool_completed"
+                | "compacted"
+                | "context_compacted"
+        )
+    ) || matches!(outer, Some("response_item" | "message"))
+        || method == Some("turn/started")
+    {
+        return RecoveryObservationKind::Activity;
+    }
+    // An error notification is not a completed turn. Codex may still retry or
+    // compact in this same process. Post-exit recovery retains the broad parser.
+    RecoveryObservationKind::Other
+}
+
 fn terminal_error(value: &Value) -> Option<(&Map<String, Value>, Option<u16>)> {
     let object = value.as_object()?;
     let kind = object.get("type").and_then(Value::as_str);
@@ -315,7 +371,7 @@ fn http_status(object: &Map<String, Value>) -> Option<u16> {
     .and_then(|status| u16::try_from(status).ok())
 }
 
-fn record_matches_session(value: &Value, session_id: &str) -> bool {
+pub(super) fn record_matches_session(value: &Value, session_id: &str) -> bool {
     fn visit(value: &Value, session_id: &str, depth: usize) -> bool {
         if depth > 5 {
             return true;

@@ -130,3 +130,53 @@ def prodex_mojo_launch_config_v1(
                 replaced[unsafe_offset=matched] = 1
         index += 1
     return 0
+
+
+# Native recovery is an idle-thread operation, not a frontend relaunch.
+# 0 ignore, 1 clear stale recovery, 2 arm a terminal recoverable failure.
+@export("prodex_launch_recovery_observation_v1")
+def prodex_launch_recovery_observation_v1(
+    abi_version: Int64,
+    kind: Int64,
+    session_matches: Int64,
+    recoverable: Int64,
+) abi("C") -> Int64:
+    if abi_version != 1:
+        return -3
+    if kind < 0 or kind > 2 or (session_matches != 0 and session_matches != 1) or (
+        recoverable != 0 and recoverable != 1
+    ):
+        return -2
+    if session_matches == 0 or kind == 0:
+        return 0
+    if kind == 1:
+        return 1
+    return 2 if recoverable == 1 else 1
+
+
+# Goal status: absent=0, active=1, blocked=2, usageLimited=3,
+# paused=4, budgetLimited=5, complete=6, unknown=7.
+# Action: defer=0, stop=1, resume goal=2, continue non-goal turn=3.
+@export("prodex_launch_in_place_recovery_v1")
+def prodex_launch_in_place_recovery_v1(
+    abi_version: Int64,
+    verified: Int64,
+    idle: Int64,
+    expected_goal: Int64,
+    goal_status: Int64,
+    budget_available: Int64,
+) abi("C") -> Int64:
+    if abi_version != 1:
+        return -3
+    for flag in [verified, idle, expected_goal, budget_available]:
+        if flag != 0 and flag != 1:
+            return -2
+    if goal_status < 0 or goal_status > 7:
+        return -2
+    if verified == 0 or idle == 0:
+        return 0
+    if goal_status == 0:
+        return 1 if expected_goal == 1 else 3
+    if goal_status >= 4 or budget_available == 0:
+        return 1
+    return 2

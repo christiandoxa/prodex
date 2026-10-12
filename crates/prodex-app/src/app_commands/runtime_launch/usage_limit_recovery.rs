@@ -49,6 +49,9 @@ pub(crate) struct GoalUsageLimitMonitor {
     workflow_model: Option<String>,
     workflow_evidence: RuntimeWorkflowEvidence,
     session_goal_present: bool,
+    workflow_activity_observed: bool,
+    last_goal_update_ms: Option<i64>,
+    suppressed_goal_update_ms: Option<i64>,
     workflow_scan_retry_at: Option<Instant>,
     session_usage_limit_reported: bool,
     session_scan_offset: u64,
@@ -76,6 +79,9 @@ impl GoalUsageLimitMonitor {
             workflow_model: None,
             workflow_evidence: RuntimeWorkflowEvidence::default(),
             session_goal_present: false,
+            workflow_activity_observed: false,
+            last_goal_update_ms: None,
+            suppressed_goal_update_ms: None,
             workflow_scan_retry_at: None,
             session_usage_limit_reported: false,
             session_scan_offset: 0,
@@ -120,6 +126,19 @@ impl GoalUsageLimitMonitor {
         };
         let normalized = status.as_ref().map(|(status, _)| status.trim());
         self.session_goal_present = status.is_some();
+        self.last_goal_update_ms = status.as_ref().map(|(_, updated)| *updated);
+        if self.workflow_activity_observed {
+            // The goal DB may lag a native retry. Do not re-arm the same stale
+            // usage_limited row after newer progress/completion was observed.
+            self.suppressed_goal_update_ms = self.last_goal_update_ms;
+        }
+        if normalized.is_some_and(|status| !goal_status_is_resumable(status)) {
+            self.armed = false;
+            self.usage_limit_pending = false;
+            self.workflow_recovery_class = None;
+            self.suppressed_goal_update_ms = self.last_goal_update_ms;
+            return Ok(None);
+        }
         if let Some(class) = workflow_recovery
             && self.workflow_evidence.safe_to_resume()
             && normalized.is_none_or(goal_status_is_resumable)
@@ -145,6 +164,7 @@ impl GoalUsageLimitMonitor {
                     .expect("Mojo goal-status comparison failed")
             })
             && (self.armed || current_attempt_hit_limit)
+            && (self.last_goal_update_ms != self.suppressed_goal_update_ms)
         {
             self.armed = false;
             self.usage_limit_pending = true;
@@ -284,6 +304,9 @@ impl GoalUsageLimitMonitor {
         self.workflow_model = None;
         self.workflow_evidence = RuntimeWorkflowEvidence::default();
         self.session_goal_present = false;
+        self.workflow_activity_observed = false;
+        self.last_goal_update_ms = None;
+        self.suppressed_goal_update_ms = None;
         self.workflow_scan_retry_at = None;
         self.session_usage_limit_reported = false;
         self.session_scan_offset =
@@ -295,7 +318,23 @@ impl GoalUsageLimitMonitor {
         Ok(())
     }
 
+    /// Mark this observed failure handled without seeking past native events
+    /// emitted concurrently with the RPC acknowledgement. Ambiguous delivery is
+    /// also consumed: an unacknowledged write must never be replayed blindly.
+    pub(crate) fn acknowledge_in_place_recovery(&mut self) {
+        self.armed = false;
+        self.usage_limit_pending = false;
+        self.workflow_recovery_class = None;
+        self.workflow_activity_observed = false;
+        self.suppressed_goal_update_ms = self.last_goal_update_ms;
+        self.session_usage_limit_reported = true;
+        self.next_retry_at = Instant::now() + GOAL_USAGE_LIMIT_RETRY_INTERVAL;
+    }
+
     pub(crate) fn prepare_for_resume(&mut self) {
+        self.workflow_activity_observed = false;
+        self.last_goal_update_ms = None;
+        self.suppressed_goal_update_ms = None;
         self.armed = false;
         self.usage_limit_pending = false;
         self.workflow_recovery_class = None;
@@ -543,13 +582,26 @@ fn goal_status_for_thread(
 }
 
 fn goal_status_is_resumable(status: &str) -> bool {
+    use prodex_mojo_core::launch::{InPlaceRecoveryAction, NativeGoalStatus};
     let status = status.trim();
-    ["active", "paused", "blocked", "usage_limited"]
-        .into_iter()
-        .any(|expected| {
-            ascii_casefold_equal_exact(status, expected)
-                .expect("Mojo resumable goal-status comparison failed")
-        })
+    let tag = [
+        ("active", NativeGoalStatus::Active),
+        ("blocked", NativeGoalStatus::Blocked),
+        ("usage_limited", NativeGoalStatus::UsageLimited),
+        ("paused", NativeGoalStatus::Paused),
+        ("budget_limited", NativeGoalStatus::BudgetLimited),
+        ("complete", NativeGoalStatus::Complete),
+    ]
+    .into_iter()
+    .find_map(|(wire, tag)| {
+        ascii_casefold_equal_exact(status, wire)
+            .expect("Mojo native goal-status comparison failed")
+            .then_some(tag)
+    })
+    .unwrap_or(NativeGoalStatus::Unknown);
+    prodex_mojo_core::launch::in_place_recovery_action(true, true, true, tag, true)
+        .expect("Mojo native goal recovery eligibility failed")
+        == InPlaceRecoveryAction::ResumeGoal
 }
 
 #[cfg(test)]

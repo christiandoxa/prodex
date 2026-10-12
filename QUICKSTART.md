@@ -26,6 +26,20 @@ prodex --version
 codex --version
 ```
 
+## Codex context and recovery
+
+For native OpenAI/Codex sessions, Prodex passes context-window and automatic
+compaction configuration through unchanged. Codex chooses model defaults;
+explicit user `-c`, `config.toml`, and named-profile values still win. Prodex does
+not force a 500k/1M window or infer an active window from cached maximum capacity.
+
+Interactive Unix Super sessions recover through their owned native app-server
+when the thread is idle, preserving the frontend, goal objective, and token
+budget. Resume commands are not typed into a healthy TUI. Pauses, cancellation,
+goal completion, and native retry progress are respected. Restart an old Prodex
+launcher safely after upgrading to use the new supervisor; upgrading the binary
+does not replace already-running processes.
+
 ## 2. Import or create a profile
 
 Import the current Codex login:

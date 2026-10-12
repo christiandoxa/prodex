@@ -2,7 +2,7 @@ use anyhow::{Context, Result, bail};
 use std::io::ErrorKind;
 use std::os::unix::net::UnixStream;
 use std::path::Path;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tungstenite::client::{IntoClientRequest, client_with_config};
 use tungstenite::{Message, WebSocket};
 
@@ -61,7 +61,12 @@ pub(crate) fn request_result(
     {
         return AppServerRequestOutcome::Ambiguous;
     }
+    let deadline = Instant::now() + REQUEST_TIMEOUT;
     for _ in 0..MAX_MESSAGES {
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        if remaining.is_zero() || socket.get_mut().set_read_timeout(Some(remaining)).is_err() {
+            return AppServerRequestOutcome::Ambiguous;
+        }
         let message = match socket.read() {
             Ok(message) => message,
             Err(tungstenite::Error::Io(error))

@@ -135,6 +135,18 @@ fn run_strategy_plans_goal_resume_relaunch_after_usage_limit_with_active_goal() 
     assert!(analysis.saw_usage_limit);
     assert!(shared_goal_needs_resume(&paths.shared_codex_root, session_id).unwrap());
 
+    assert!(
+        strategy
+            .plan_goal_resume_relaunch(&exit_status(1))
+            .unwrap()
+            .is_none(),
+        "an explicitly paused goal must not be restarted automatically"
+    );
+    conn.execute(
+        "UPDATE thread_goals SET status='blocked' WHERE thread_id=?1",
+        [session_id],
+    )
+    .unwrap();
     let plan = strategy.plan_goal_resume_relaunch(&exit_status(1)).unwrap();
     assert_eq!(
         plan,
@@ -637,6 +649,15 @@ fn run_strategy_relaunch_after_child_exit_appends_goal_resume_and_releases_bindi
     )
     .unwrap();
 
+    assert!(
+        !strategy.relaunch_after_child_exit(&exit_status(1)).unwrap(),
+        "post-exit recovery must respect an explicit user pause"
+    );
+    conn.execute(
+        "UPDATE thread_goals SET status='blocked' WHERE thread_id='thread-1'",
+        [],
+    )
+    .unwrap();
     assert!(strategy.relaunch_after_child_exit(&exit_status(1)).unwrap());
     assert_eq!(strategy.args.profile.as_deref(), Some("second"));
     assert!(codex_args_include_goal_resume(&strategy.codex_args));

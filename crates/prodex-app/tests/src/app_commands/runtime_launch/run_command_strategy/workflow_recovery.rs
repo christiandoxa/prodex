@@ -71,8 +71,8 @@ fn workflow_fixture() -> (PathBuf, TestEnvVarGuard, TestEnvVarGuard, PathBuf, St
 fn structured_terminal_error_relaunches_the_same_session_without_replay() {
     assert_terminal_error_relaunches_without_replay(serde_json::json!({
         "type":"event_msg", "payload":{
-            "type":"error",
-            "codex_error_info":{"response_too_many_failed_attempts":{"http_status_code":503}}
+            "type":"task_complete",
+            "error":{"codex_error_info":{"response_too_many_failed_attempts":{"http_status_code":503}}}
         }
     }));
 }
@@ -252,10 +252,10 @@ fn transient_pool_waits_then_reconsiders_a_recovered_profile() {
             serde_json::json!({
                 "type": "event_msg",
                 "payload": {
-                    "type": "error",
-                    "codex_error_info": {
+                    "type": "task_complete",
+                    "error": {"codex_error_info": {
                         "response_too_many_failed_attempts": {"http_status_code": 503}
-                    }
+                    }}
                 }
             })
         )
@@ -396,9 +396,8 @@ fn hard_affinity_entitlement_errors_recover_to_the_next_profile() {
             serde_json::json!({
                 "type": "event_msg",
                 "payload": {
-                    "type": "error",
-                    "message": message,
-                    "codex_error_info": "other"
+                    "type": "task_complete",
+                    "error": {"message": message, "codex_error_info": "other"}
                 }
             })
         )

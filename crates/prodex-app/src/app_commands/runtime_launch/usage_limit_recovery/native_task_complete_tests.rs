@@ -329,3 +329,198 @@ fn live_monitor_recovers_after_transient_session_read_failure() {
     drop(monitor);
     fs::remove_dir_all(root).unwrap();
 }
+
+#[test]
+fn live_native_retry_notification_does_not_preempt_the_running_frontend() {
+    let root = fixture_root("live-native-intermediate-error");
+    let (_home, _shared) = configured_env(&root);
+    let paths = AppPaths::discover().unwrap();
+    let session = populate_fixture(&root, &paths, &["a", "b"]);
+    let mut monitor = GoalUsageLimitMonitor::new(
+        paths,
+        None,
+        root.join("marker"),
+        Some(SESSION_ID.to_string()),
+    );
+    append_user_event(&session);
+    append_record(
+        &session,
+        serde_json::json!({
+            "type":"event_msg", "payload":{"type":"error", "codex_error_info":"server_overloaded", "will_retry":true}
+        }),
+    );
+    assert_eq!(monitor.take_usage_limit_signal().unwrap(), None);
+    assert!(!monitor.usage_limit_pending);
+    drop(monitor);
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn live_native_terminal_failure_followed_by_progress_in_same_tail_is_not_replayed() {
+    let root = fixture_root("live-native-tail-chronology");
+    let (_home, _shared) = configured_env(&root);
+    let paths = AppPaths::discover().unwrap();
+    let session = populate_fixture(&root, &paths, &["a", "b"]);
+    blocked_goal(&paths);
+    let mut monitor = GoalUsageLimitMonitor::new(
+        paths.clone(),
+        Some(paths.shared_codex_root.join("goals_1.sqlite")),
+        root.join("marker"),
+        Some(SESSION_ID.to_string()),
+    );
+    append_native_failure(&session);
+    append_record(
+        &session,
+        serde_json::json!({"type":"event_msg","payload":{"type":"task_started","turn_id":"new-native-attempt"}}),
+    );
+    append_user_event(&session);
+    assert_eq!(monitor.take_usage_limit_signal().unwrap(), None);
+    assert!(!monitor.usage_limit_pending);
+    assert_eq!(
+        monitor.session_scan_offset,
+        fs::metadata(&session).unwrap().len()
+    );
+    drop(monitor);
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn live_native_new_activity_clears_latched_failure_and_stale_goal_revision() {
+    let root = fixture_root("live-native-stale-pending");
+    let (_home, _shared) = configured_env(&root);
+    let paths = AppPaths::discover().unwrap();
+    let session = populate_fixture(&root, &paths, &["a", "b"]);
+    blocked_goal(&paths);
+    let mut monitor = GoalUsageLimitMonitor::new(
+        paths.clone(),
+        Some(paths.shared_codex_root.join("goals_1.sqlite")),
+        root.join("marker"),
+        Some(SESSION_ID.to_string()),
+    );
+    append_native_failure(&session);
+    assert_eq!(
+        monitor.take_usage_limit_signal().unwrap().as_deref(),
+        Some(SESSION_ID)
+    );
+    let db = rusqlite::Connection::open(paths.shared_codex_root.join("goals_1.sqlite")).unwrap();
+    db.execute(
+        "UPDATE thread_goals SET status='usage_limited', updated_at_ms=?1",
+        [current_unix_time_millis() + 1000],
+    )
+    .unwrap();
+    append_record(
+        &session,
+        serde_json::json!({"type":"event_msg","payload":{"type":"task_started","turn_id":"native-retry"}}),
+    );
+    append_user_event(&session);
+    monitor.next_retry_at = Instant::now();
+    assert_eq!(monitor.take_usage_limit_signal().unwrap(), None);
+    monitor.next_retry_at = Instant::now();
+    assert_eq!(
+        monitor.take_usage_limit_signal().unwrap(),
+        None,
+        "same stale goal revision must not re-arm"
+    );
+    drop(monitor);
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn in_place_ack_consumes_failure_without_skipping_concurrent_native_events() {
+    let root = fixture_root("in-place-ack-cursor");
+    let (_home, _shared) = configured_env(&root);
+    let paths = AppPaths::discover().unwrap();
+    let session = populate_fixture(&root, &paths, &["a", "b"]);
+    let mut monitor = GoalUsageLimitMonitor::new(
+        paths,
+        None,
+        root.join("marker"),
+        Some(SESSION_ID.to_string()),
+    );
+    append_native_failure(&session);
+    assert_eq!(
+        monitor.take_usage_limit_signal().unwrap().as_deref(),
+        Some(SESSION_ID)
+    );
+    let cursor = monitor.session_scan_offset;
+    append_record(
+        &session,
+        serde_json::json!({"type":"event_msg","payload":{"type":"task_started","turn_id":"native-accepted"}}),
+    );
+    append_user_event(&session);
+    monitor.acknowledge_in_place_recovery();
+    assert_eq!(
+        monitor.session_scan_offset, cursor,
+        "RPC acknowledgement must not seek beyond concurrent events"
+    );
+    assert_eq!(monitor.take_usage_limit_signal().unwrap(), None);
+    assert_eq!(
+        monitor.workflow_evidence.acceptance_state,
+        "accepted_but_uncommitted"
+    );
+    assert!(
+        !monitor.session_usage_limit_reported,
+        "new activity opens a new recovery generation"
+    );
+    assert_eq!(monitor.take_usage_limit_signal().unwrap(), None);
+    drop(monitor);
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn foreign_session_activity_cannot_authorize_or_cancel_native_recovery() {
+    let root = fixture_root("live-native-other-session");
+    let (_home, _shared) = configured_env(&root);
+    let paths = AppPaths::discover().unwrap();
+    let session = populate_fixture(&root, &paths, &["a", "b"]);
+    let mut monitor = GoalUsageLimitMonitor::new(
+        paths,
+        None,
+        root.join("marker"),
+        Some(SESSION_ID.to_string()),
+    );
+    append_native_failure(&session);
+    append_record(
+        &session,
+        serde_json::json!({"type":"event_msg","session_id":"other-session","payload":{"type":"task_started"}}),
+    );
+    assert_eq!(
+        monitor.take_usage_limit_signal().unwrap().as_deref(),
+        Some(SESSION_ID)
+    );
+    assert_eq!(monitor.workflow_evidence.side_effect_state, "observed");
+    drop(monitor);
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn paused_goal_cancels_a_pending_live_recovery_before_another_poll() {
+    let root = fixture_root("native-recovery-explicit-pause");
+    let (_home, _shared) = configured_env(&root);
+    let paths = AppPaths::discover().unwrap();
+    let session = populate_fixture(&root, &paths, &["a", "b"]);
+    blocked_goal(&paths);
+    let db_path = paths.shared_codex_root.join("goals_1.sqlite");
+    let mut monitor = GoalUsageLimitMonitor::new(
+        paths,
+        Some(db_path.clone()),
+        root.join("marker"),
+        Some(SESSION_ID.to_string()),
+    );
+    append_native_failure(&session);
+    assert_eq!(
+        monitor.take_usage_limit_signal().unwrap().as_deref(),
+        Some(SESSION_ID)
+    );
+    let db = rusqlite::Connection::open(db_path).unwrap();
+    db.execute(
+        "UPDATE thread_goals SET status='paused', updated_at_ms=100",
+        [],
+    )
+    .unwrap();
+    monitor.next_retry_at = Instant::now();
+    assert_eq!(monitor.take_usage_limit_signal().unwrap(), None);
+    assert!(!monitor.usage_limit_pending);
+    drop(monitor);
+    let _ = fs::remove_dir_all(root);
+}

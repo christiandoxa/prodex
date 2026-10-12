@@ -12,6 +12,9 @@ use std::ffi::OsString;
 
 impl RuntimeToolLaunchStrategy {
     pub(super) fn observe_child_exit_request(&mut self) -> Result<bool> {
+        if self.args.no_auto_rotate {
+            return Ok(false);
+        }
         if self.pending_goal_resume_plan.is_some() {
             return Ok(true);
         }
@@ -35,6 +38,24 @@ impl RuntimeToolLaunchStrategy {
         let Some(session_id) = session_id else {
             return Ok(false);
         };
+        #[cfg(unix)]
+        if let Some(recovery) = self.native_session_recovery.as_mut() {
+            use super::session_recovery::NativeRecoveryOutcome;
+            let outcome = recovery.recover(&session_id, resume_goal);
+            if outcome != NativeRecoveryOutcome::Deferred {
+                if let Some(monitor) = self.goal_usage_limit_monitor.as_mut() {
+                    monitor.acknowledge_in_place_recovery();
+                }
+                if let Some(target) = self.runtime_recovery_log_target.as_ref() {
+                    target.log(&format!(
+                        "runtime_session_recovery mode=in_place outcome={outcome:?} failure_class={failure_class} frontend_restarted=false last_prompt_requeued=false"
+                    ));
+                }
+            }
+            // The owned server handles native thread recovery. Never tear down
+            // its healthy frontend while an RPC or Codex retry may be active.
+            return Ok(false);
+        }
         let state = AppState::load_and_repair(&paths)?;
         let requested_model = self.recovery_model.clone().or_else(|| {
             runtime_launch_cli_model(&self.codex_args)
