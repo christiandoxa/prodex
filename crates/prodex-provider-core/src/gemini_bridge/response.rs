@@ -169,20 +169,9 @@ pub fn gemini_provider_core_runtime_responses_value_with_fallback_ids(
 }
 
 fn gemini_provider_core_conformance_preserves_response_ids(value: &serde_json::Value) -> bool {
-    value
-        .get("responseId")
-        .and_then(serde_json::Value::as_str)
-        .is_some()
-        && value
-            .pointer("/candidates/0/content/parts")
-            .and_then(serde_json::Value::as_array)
-            .into_iter()
-            .flatten()
-            .filter_map(|part| part.get("functionCall"))
-            .all(|function_call| {
-                function_call
-                    .get("id")
-                    .and_then(serde_json::Value::as_str)
-                    .is_some_and(|id| !id.trim().is_empty())
-            })
+    let Ok(raw) = serde_json::to_string(value) else {
+        return false;
+    };
+    prodex_mojo_core::rich::gemini_response_conformance_preserves_response_ids(&raw)
+        .unwrap_or(false)
 }

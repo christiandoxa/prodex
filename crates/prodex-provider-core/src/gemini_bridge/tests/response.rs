@@ -3,6 +3,7 @@ use super::super::{
     gemini_provider_core_citation_text, gemini_provider_core_runtime_responses_value,
     gemini_provider_core_web_search_call_from_grounding,
 };
+use crate::{ProviderEndpoint, ProviderId, ProviderTransformResult, ProviderWireFormat};
 
 #[test]
 fn gemini_provider_core_web_search_call_from_grounding_opens_retrieved_context() {
@@ -236,6 +237,45 @@ fn gemini_provider_core_buffered_response_suppresses_visible_text_across_tool_ca
         |_| "call_fallback".to_string(),
     );
     assert_eq!(plain["output"][0]["content"][0]["text"], "visible");
+}
+
+#[test]
+fn gemini_provider_core_buffered_response_reuses_translated_only_with_preserved_ids() {
+    let translated = ProviderTransformResult::lossless(
+        ProviderId::Gemini,
+        ProviderEndpoint::Responses,
+        ProviderWireFormat::OpenAiResponses,
+        ProviderWireFormat::GeminiGenerateContent,
+        br#"{"id":"translated"}"#.to_vec(),
+    );
+    let valid = serde_json::json!({
+        "responseId": "resp_valid",
+        "candidates": [{"content": {"parts": [{"text": "visible"}]}}]
+    });
+    let reused = gemini_provider_core_buffered_responses_value_with_fallback_ids(
+        &valid,
+        Some(&translated),
+        |_, _| None,
+        || "resp_fallback".to_string(),
+        |_| "call_fallback".to_string(),
+    );
+    assert_eq!(reused["id"], "translated");
+
+    let missing_call_id = serde_json::json!({
+        "responseId": "resp_invalid",
+        "candidates": [{"content": {"parts": [{
+            "functionCall": {"name": "tool", "args": {}}
+        }]}}]
+    });
+    let rebuilt = gemini_provider_core_buffered_responses_value_with_fallback_ids(
+        &missing_call_id,
+        Some(&translated),
+        |_, _| None,
+        || "resp_fallback".to_string(),
+        |_| "call_fallback".to_string(),
+    );
+    assert_eq!(rebuilt["id"], "resp_invalid");
+    assert_eq!(rebuilt["output"][0]["call_id"], "call_fallback");
 }
 
 #[test]

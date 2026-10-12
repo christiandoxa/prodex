@@ -92,7 +92,8 @@ pub use gemini_response::{
     GEMINI_BUFFERED_RESPONSE_MAX_INPUT_BYTES, GEMINI_CHAT_ASSISTANT_MAX_INPUT_BYTES,
     GeminiBufferedResponseError, GeminiChatAssistantResponseOperation, GeminiResponseKernelInput,
     GeminiResponseKernelOperation, gemini_buffered_response_kernel,
-    gemini_chat_assistant_response_kernel, gemini_response_kernel,
+    gemini_chat_assistant_response_kernel, gemini_response_conformance_preserves_response_ids,
+    gemini_response_kernel,
 };
 #[path = "rich/gemini_response_media.rs"]
 mod gemini_response_media;

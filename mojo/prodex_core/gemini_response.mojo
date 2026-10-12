@@ -101,6 +101,7 @@ comptime GEMINI_STREAM_TOOL_CALL_IDS: Int64 = 52
 comptime GEMINI_STREAM_ADDED_TOOL_CALL_ITEM: Int64 = 53
 comptime GEMINI_STREAM_CHUNK_METADATA: Int64 = 54
 comptime GEMINI_RAW_FINISH_REASON: Int64 = 55
+comptime GEMINI_CONFORMANCE_PRESERVES_RESPONSE_IDS: Int64 = 56
 
 @fieldwise_init
 struct ProdexGeminiResponseKernelInput(Copyable):
@@ -350,7 +351,7 @@ def gemini_views_valid(
 ) -> Bool:
     return (
         input.operation >= GEMINI_RESPONSE_CREATED
-        and input.operation <= GEMINI_RAW_FINISH_REASON
+        and input.operation <= GEMINI_CONFORMANCE_PRESERVES_RESPONSE_IDS
         and input.response_id_present >= 0
         and input.response_id_present <= 1
         and input.call_id_present >= 0
@@ -666,6 +667,51 @@ def gemini_buffered_response_suppresses_visible_text(
         if flags[unsafe_offset=index] == 49:
             return True
     return False
+
+
+def gemini_conformance_preserves_response_ids(
+    source: ProdexRichStringView,
+) -> Bool:
+    var root = gemini_raw_root(source)
+    if not gemini_raw_bounds_present(root):
+        return False
+    var response_id = gemini_raw_member(source, root, StringSlice("responseId"))
+    if not gemini_raw_string_present(source, response_id):
+        return False
+
+    var candidates = gemini_raw_member(source, root, StringSlice("candidates"))
+    var candidate = gemini_raw_first_array_item(source, candidates)
+    if not gemini_raw_bounds_present(candidate):
+        return True
+    var content = gemini_raw_member(source, candidate, StringSlice("content"))
+    var parts = gemini_raw_member(source, content, StringSlice("parts"))
+    if not gemini_raw_bounds_present(parts) or deepseek_json_byte(source, parts[0]) != 91:
+        return True
+
+    var index = deepseek_json_skip_ws(source, parts[0] + 1, parts[1] - 1)
+    while index < parts[1] - 1 and deepseek_json_byte(source, index) != 93:
+        var item_end = deepseek_json_value_end(source, index, parts[1] - 1, 0)
+        if item_end < 0:
+            return False
+        if deepseek_json_byte(source, index) == 123:
+            var function_call = deepseek_json_object_member(
+                source, index, item_end, StringSlice("functionCall")
+            )
+            if gemini_raw_bounds_present(function_call):
+                if deepseek_json_byte(source, function_call[0]) != 123:
+                    return False
+                var call_id = deepseek_json_object_member(
+                    source, function_call[0], function_call[1], StringSlice("id")
+                )
+                if not kiro_raw_string_nonblank(source, call_id):
+                    return False
+
+        index = deepseek_json_skip_ws(source, item_end, parts[1] - 1)
+        if index < parts[1] - 1 and deepseek_json_byte(source, index) == 44:
+            index = deepseek_json_skip_ws(source, index + 1, parts[1] - 1)
+        elif index != parts[1] - 1:
+            return False
+    return True
 
 
 def gemini_put_buffered_failure(
@@ -2352,6 +2398,10 @@ def gemini_write_operation(
         if kiro_raw_string_nonblank(source, reason):
             return gemini_put_view_range(writer, source, reason[0], reason[1])
         return gemini_put_literal(writer, StringSlice("null"))
+    if operation == GEMINI_CONFORMANCE_PRESERVES_RESPONSE_IDS:
+        if gemini_conformance_preserves_response_ids(input.response):
+            return gemini_put_literal(writer, StringSlice("true"))
+        return gemini_put_literal(writer, StringSlice("false"))
     if operation == GEMINI_STREAM_CHUNK_METADATA:
         var field_input = input.copy()
         if not gemini_put_literal(writer, StringSlice('{"response_id":')):
