@@ -24,6 +24,18 @@ pub(crate) struct RuntimeProxyBackendFaultStep {
 }
 
 impl RuntimeProxyBackendFaultStep {
+    /// Upstream heartbeats are control traffic, not generated model output.
+    pub(crate) fn with_keepalive_prelude(mut self) -> Self {
+        self.body = format!(
+            concat!(
+                "data: {{\"type\":\"response.created\",\"response\":{{\"id\":\"resp-held\"}}}}\r\n\r\n",
+                "data: {{\"type\":\"keepalive\"}}\r\n\r\n{}"
+            ),
+            self.body,
+        );
+        self
+    }
+
     pub(crate) fn with_sse_retry_after(mut self, seconds: u64) -> Self {
         self.body = format!("data: {}\r\n\r\n", serde_json::json!({
             "type": "response.failed",
