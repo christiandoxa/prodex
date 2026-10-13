@@ -482,6 +482,7 @@ fn presidio_test_shared(
     runtime_config.tenant_detector_patterns = Default::default();
 
     RuntimeRotationProxyShared {
+        precommit_deadline: None,
         smart_context_engine: Arc::new(crate::RuntimeSmartContextEngine::default()),
         runtime_config: Arc::new(runtime_config),
         upstream_no_proxy: false,

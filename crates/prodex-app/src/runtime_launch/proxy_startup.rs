@@ -329,6 +329,7 @@ pub(crate) fn start_runtime_rotation_proxy_with_options(
         .filter(|key| key.starts_with("__route_success__"))
         .count();
     let shared = RuntimeRotationProxyShared {
+        precommit_deadline: None,
         smart_context_engine: std::sync::Arc::new(crate::RuntimeSmartContextEngine::default()),
         runtime_config: Arc::clone(&runtime_config),
         upstream_no_proxy,

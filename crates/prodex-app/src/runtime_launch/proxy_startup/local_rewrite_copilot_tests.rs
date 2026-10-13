@@ -23,6 +23,7 @@ fn copilot_runtime_shared() -> crate::RuntimeRotationProxyShared {
         root,
     };
     crate::RuntimeRotationProxyShared {
+        precommit_deadline: None,
         smart_context_engine: Arc::new(crate::RuntimeSmartContextEngine::default()),
         runtime_config: Arc::new(crate::RuntimeConfig::compatibility_current()),
         upstream_no_proxy: false,

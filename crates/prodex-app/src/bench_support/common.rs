@@ -123,6 +123,7 @@ pub(super) fn bench_runtime_shared(
     active_request_limit: usize,
 ) -> RuntimeRotationProxyShared {
     let shared = RuntimeRotationProxyShared {
+        precommit_deadline: None,
         smart_context_engine: std::sync::Arc::new(crate::RuntimeSmartContextEngine::default()),
         runtime_config: Arc::new(crate::RuntimeConfig::compatibility_current()),
         upstream_no_proxy: false,

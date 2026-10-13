@@ -49,6 +49,8 @@ pub(crate) type RuntimeProfileUsageSnapshot =
 
 #[derive(Debug, Clone)]
 pub(crate) struct RuntimeRotationProxyShared {
+    /// Request-local monotonic watchdog. Global broker clones keep None.
+    pub(crate) precommit_deadline: Option<Instant>,
     pub(crate) runtime_config: Arc<RuntimeConfig>,
     pub(crate) smart_context_engine: Arc<RuntimeSmartContextEngine>,
     pub(crate) upstream_no_proxy: bool,
