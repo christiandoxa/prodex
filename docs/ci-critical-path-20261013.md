@@ -280,3 +280,29 @@ artifact verification. The first cache-key use must populate the cache,
 so its push CI can still take the prior 4-minute archive build time.
 Measure the next trusted push with unchanged Mojo inputs to confirm
 cache-hit behavior and actual CI wall-clock improvement.
+
+
+## Second Windows continuation partitioning
+
+Successful push CI 38370749687 and 38372395176 showed that the largest
+remaining Windows library partition was **66 serial continuation/recovery
+tests**, taking close to five minutes including runner setup, while the
+other Windows remainder partitions finished sooner. Changing global
+libtest thread counts risks races in shared-port and session-affinity tests,
+so concurrency remains **across independent GitHub runners only**.
+
+The continuation partition is now divided into HTTP follow-ups,
+WebSocket continuation/recovery, and a catch-all continuation group.
+Each is run serially with the unchanged Windows global skips and zero-test
+match rejection. Targeted HTTP/WebSocket prefixes are excluded from the
+catch-all group using explicit libtest --skip filters, so newer continuation
+modules automatically stay covered by the catch-all.
+
+A real local prodex-app test-binary enumeration assigned **all 66** of the
+previous continuation test names **exactly once**: 25 HTTP follow-ups,
+23 WebSocket, 18 other continuation tests. CI's generator tests also
+exercise eleven representative path identities, including future new modules.
+The Windows matrix increases from 8 to 10 runners on heavy pushes, trading
+additional runner setup/billed minutes for lower wall-clock duration while
+preserving per-shard serialization. The next completed Windows CI is needed
+to confirm actual speedup and environment-specific test coverage.

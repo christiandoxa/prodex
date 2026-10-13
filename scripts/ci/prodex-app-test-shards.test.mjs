@@ -42,7 +42,7 @@ test("prodex-app shard manifest is disjoint and remainder-complete", () => {
   assert.equal(appMatrix.include.length, 11);
   assert.equal(ciMatrix.include.length, 8);
   assert.equal(fullMatrix.include.length, PRODEX_APP_FULL_TEST_SHARDS.length + 1);
-  assert.equal(windowsMatrix.include.length, 8);
+  assert.equal(windowsMatrix.include.length, 10);
   assert.equal(appMatrix.include.filter((entry) => entry.save_cache).length, 1);
   assert.equal(ciMatrix.include.filter((entry) => entry.save_cache).length, 1);
   assert.equal(fullMatrix.include.filter((entry) => entry.save_cache).length, 1);
@@ -99,15 +99,24 @@ test("prodex-app shard manifest is disjoint and remainder-complete", () => {
   assert.equal(windowsBaseFilters.length, PRODEX_APP_LIB_FILTERS.length);
   assert.deepEqual(new Set(windowsBaseFilters), new Set(PRODEX_APP_LIB_FILTERS));
 
-  const extra = windowsMatrix.include.slice(4, 7);
+  const extra = windowsMatrix.include.slice(4, 9);
   assert.deepEqual(extra.map((entry) => entry.suite), [
-    "remainder-continuations",
+    "remainder-continuations-http",
+    "remainder-continuations-websocket",
+    "remainder-continuations-other",
     "remainder-selection",
     "remainder-foundation",
   ]);
   const extraFilters = extra.flatMap((entry) => entry.filters.split("\n")).filter(Boolean);
-  assert.equal(extraFilters.length, 8);
+  assert.equal(extraFilters.length, 10);
   assert.equal(extra.find((entry) => entry.suite === "remainder-selection").skip_filters.split("\n").length, 16);
+  assert.deepEqual(
+    extra.find((entry) => entry.suite === "remainder-continuations-other").skip_filters.split("\n"),
+    [
+      "main_internal_tests::runtime_proxy_continuations::http_followups::",
+      "main_internal_tests::runtime_proxy_continuations::websocket_",
+    ],
+  );
   assert.deepEqual(
     windowsMatrix.include.at(-1).skip_filters.split("\n"),
     [...PRODEX_APP_LIB_FILTERS, ...extraFilters],
@@ -269,4 +278,34 @@ test("Windows remainder slices stay disjoint with substring-based libtest filter
   assert.ok(selection.skip_filters.split("\n").some((filter) => filter.includes("admission::guards::")));
   assert.ok(selection.skip_filters.split("\n").some((filter) => filter.includes("admission::compact::")));
   assert.ok(entries.at(-1).skip_filters.includes("main_internal_tests::runtime_proxy_continuations::"));
+});
+
+
+test("Windows HTTP/WebSocket/other continuation partitions preserve exactly one serial owner", () => {
+  const entries = windowsGithubMatrix().include;
+  const prefix = "main_internal_tests::runtime_proxy_continuations::";
+  const sampleCases = [
+    ["http_followups::quota::ready_profile", "remainder-continuations-http"],
+    ["http_followups::fresh_and_resume::no_replay", "remainder-continuations-http"],
+    ["websocket_precommit::keepalive_does_not_commit", "remainder-continuations-websocket"],
+    ["websocket_retry_recovery::budget_expired", "remainder-continuations-websocket"],
+    ["websocket_invalid_previous_response::reject_missing", "remainder-continuations-websocket"],
+    ["http_tool_and_compact::tool_guard", "remainder-continuations-other"],
+    ["http_backend_passthrough::native_headers", "remainder-continuations-other"],
+    ["http_compact_transparency::static_context", "remainder-continuations-other"],
+    ["parallel_capacity::reject_colliding_turns", "remainder-continuations-other"],
+    ["post_commit::forbid_replay", "remainder-continuations-other"],
+    ["future_continuation_module::new_regression", "remainder-continuations-other"],
+  ];
+  for (const [name, expected] of sampleCases) {
+    const testName = prefix + name;
+    const owners = entries.filter((entry) => {
+      const filters = entry.filters.split("\n").filter(Boolean);
+      const skips = entry.skip_filters.split("\n").filter(Boolean);
+      return (!filters.length || filters.some((filter) => testName.includes(filter)))
+        && !skips.some((filter) => testName.includes(filter));
+    });
+    assert.deepEqual(owners.map((entry) => entry.suite), [expected], testName);
+  }
+  assert.equal(entries.filter((entry) => entry.save_cache).length, 1);
 });
