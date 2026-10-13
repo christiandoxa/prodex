@@ -137,7 +137,9 @@ pub fn is_session_metadata_file(path: &Path) -> bool {
     path.file_name()
         .and_then(|name| name.to_str())
         .is_some_and(|name| {
-            name.ends_with(".jsonl") || name.ends_with(".jsonl.zst") || name.ends_with(".json")
+            prodex_mojo_core::json::session_file_name_plan(name)
+                .expect("Mojo session-file name policy returned invalid output")
+                .is_metadata
         })
 }
 
@@ -232,16 +234,12 @@ pub fn value_at_path<'a>(
 }
 
 pub fn session_id_from_path(path: &Path) -> String {
-    path.file_name()
-        .and_then(|name| name.to_str())
-        .and_then(|name| {
-            name.strip_suffix(".jsonl.zst")
-                .or_else(|| name.strip_suffix(".jsonl"))
-                .or_else(|| name.strip_suffix(".json"))
-                .or(Some(name))
-        })
-        .unwrap_or("unknown-session")
-        .to_string()
+    let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
+        return "unknown-session".to_string();
+    };
+    let plan = prodex_mojo_core::json::session_file_name_plan(name)
+        .expect("Mojo session-file name policy returned invalid output");
+    name[..plan.stem_length].to_string()
 }
 
 pub fn timestamp_label_sort_key(value: &str) -> Option<i64> {

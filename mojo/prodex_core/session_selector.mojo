@@ -9,6 +9,23 @@ comptime SESSION_SELECTOR_INVALID: Int64 = 1
 comptime SESSION_REPORT_QUERY_FIELD_COUNT: Int64 = 6
 
 
+def session_file_name_suffix_length(
+    view: ProdexRichStringView,
+    literal: StringSlice,
+) -> Int64:
+    var suffix_length = Int64(literal.byte_length())
+    var view_length = Int64(view.len)
+    if suffix_length > view_length:
+        return -1
+    var source = rich_view_ptr(view)
+    var suffix = literal.unsafe_ptr()
+    var start = view_length - suffix_length
+    for index in range(suffix_length):
+        if source[unsafe_offset=start + index] != suffix[unsafe_offset=index]:
+            return -1
+    return suffix_length
+
+
 def session_selector_ascii_lower(value: UInt8) -> UInt8:
     if value >= 65 and value <= 90:
         return value + 32
@@ -225,4 +242,39 @@ def prodex_session_report_query_matches_v1(
         if session_report_query_contains(fields[unsafe_offset=index], query):
             output[unsafe_offset=0] = 1
             break
+    return SESSION_SELECTOR_OK
+
+
+@export("prodex_session_file_name_policy_v1")
+def prodex_session_file_name_policy_v1(
+    abi_version: Int64,
+    name_address: UInt,
+    name_length: Int64,
+    output_address: UInt,
+) abi("C") -> Int64:
+    if (
+        abi_version != SESSION_SELECTOR_ABI_VERSION
+        or name_length < 0
+        or output_address == 0
+        or (name_length > 0 and name_address == 0)
+    ):
+        return SESSION_SELECTOR_INVALID
+    var name = ProdexRichStringView(name_address, UInt(name_length))
+    if not rich_view_valid(name, 0x7FFFFFFFFFFFFFFF):
+        return SESSION_SELECTOR_INVALID
+    var output = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    var stem_length = Int64(name.len)
+    var is_metadata = False
+    var suffix_length = session_file_name_suffix_length(name, StringSlice(".jsonl.zst"))
+    if suffix_length < 0:
+        suffix_length = session_file_name_suffix_length(name, StringSlice(".jsonl"))
+    if suffix_length < 0:
+        suffix_length = session_file_name_suffix_length(name, StringSlice(".json"))
+    if suffix_length >= 0:
+        is_metadata = True
+        stem_length -= suffix_length
+    output[unsafe_offset=0] = Int64(is_metadata)
+    output[unsafe_offset=1] = stem_length
     return SESSION_SELECTOR_OK
