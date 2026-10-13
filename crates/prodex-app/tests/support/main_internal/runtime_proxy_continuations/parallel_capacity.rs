@@ -5,9 +5,10 @@ fn runtime_proxy_two_sessions_with_sixteen_workers_complete_through_capacity_pre
     let _test_guard = crate::acquire_test_runtime_lock();
     let (_connect_timeout_guard, _progress_timeout_guard) =
         ci_runtime_proxy_websocket_timeout_guards();
-    // Keep the short synthetic 250ms idle timeout from turning a healthy
-    // one-second stream into a transport failure. The retry budget is unchanged.
-    let _idle_timeout = TestEnvVarGuard::set("PRODEX_RUNTIME_PROXY_STREAM_IDLE_TIMEOUT_MS", "5000");
+    // Exercise 34 queued streams with the production watchdog budget, rather
+    // than the shortened per-unit fixture timeout. Socket I/O remains bounded
+    // to 60 seconds and all identity/exactly-once assertions stay unchanged.
+    let _idle_timeout = TestEnvVarGuard::set("PRODEX_RUNTIME_PROXY_STREAM_IDLE_TIMEOUT_MS", "300000");
     let fixture = start_runtime_continuation_fixture(
         RuntimeProxyBackend::start_websocket_capacity_pressure(),
         "second",

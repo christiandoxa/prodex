@@ -21,6 +21,7 @@ mod previous_response_orchestration;
 mod profile_state;
 mod quota;
 mod realtime_sidecar;
+mod recovery_deadline;
 mod response_forwarding;
 mod responses;
 mod selection;
@@ -46,9 +47,12 @@ pub(super) use self::health::*;
 pub(crate) use self::lifecycle::*;
 pub(super) use self::lineage::*;
 pub(super) use self::payload_detection::*;
-#[cfg(test)]
-pub(crate) use self::precommit_loop::test_runtime_precommit_retryable_recovery_without_transient;
 use self::precommit_loop::*;
+#[cfg(test)]
+pub(crate) use self::precommit_loop::{
+    test_runtime_precommit_retryable_recovery_after_transport,
+    test_runtime_precommit_retryable_recovery_without_transient,
+};
 pub(super) use self::prefetch::*;
 pub(super) use self::presidio::*;
 pub(crate) use self::previous_response_log::*;
@@ -56,6 +60,7 @@ pub(crate) use self::previous_response_orchestration::*;
 pub(super) use self::profile_state::*;
 pub(super) use self::quota::*;
 pub(crate) use self::realtime_sidecar::*;
+pub(crate) use self::recovery_deadline::RuntimeProxyRecoveryTimeout;
 pub(crate) use self::response_forwarding::*;
 pub(crate) use self::responses::proxy_runtime_responses_request;
 #[cfg(test)]
@@ -121,14 +126,41 @@ where
         );
     }
 
+    shared.check_precommit_deadline()?;
+    let deadline = shared.precommit_deadline;
     let (sender, receiver) = mpsc::sync_channel(1);
     let task = shared.async_runtime.spawn(async move {
-        let result = future.await;
+        let result = match deadline {
+            Some(deadline) => {
+                tokio::time::timeout_at(tokio::time::Instant::from_std(deadline), future)
+                    .await
+                    .unwrap_or_else(|_| Err(RuntimeProxyRecoveryTimeout.into()))
+            }
+            None => future.await,
+        };
         let _ = sender.send(result);
     });
-    drop(task);
-
-    receiver
-        .recv()
-        .with_context(|| format!("runtime proxy async task '{task_name}' did not return"))?
+    match deadline {
+        Some(deadline) => {
+            match receiver.recv_timeout(deadline.saturating_duration_since(Instant::now())) {
+                Ok(result) => result,
+                Err(mpsc::RecvTimeoutError::Timeout) => {
+                    task.abort();
+                    runtime_proxy_log(
+                        shared,
+                        format!(
+                            "precommit_recovery_deadline_exceeded stage={task_name} stream_committed=false task_cancelled=true"
+                        ),
+                    );
+                    Err(RuntimeProxyRecoveryTimeout.into())
+                }
+                Err(mpsc::RecvTimeoutError::Disconnected) => Err(anyhow::anyhow!(
+                    "runtime proxy async task '{task_name}' did not return"
+                )),
+            }
+        }
+        None => receiver
+            .recv()
+            .with_context(|| format!("runtime proxy async task '{task_name}' did not return"))?,
+    }
 }

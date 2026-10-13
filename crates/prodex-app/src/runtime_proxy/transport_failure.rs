@@ -81,6 +81,12 @@ pub(crate) fn runtime_transport_failure_kind_from_ws(
 pub(crate) fn runtime_proxy_transport_failure_kind(
     err: &anyhow::Error,
 ) -> Option<RuntimeTransportFailureKind> {
+    // A local request watchdog says nothing about the upstream account's
+    // health. Preserve its typed error for a 504 and never quarantine a profile.
+    if err.is::<super::RuntimeProxyRecoveryTimeout>() {
+        return None;
+    }
+
     for cause in err.chain() {
         if let Some(reqwest_error) = cause.downcast_ref::<reqwest::Error>()
             && let Some(kind) = runtime_transport_failure_kind_from_reqwest(reqwest_error)

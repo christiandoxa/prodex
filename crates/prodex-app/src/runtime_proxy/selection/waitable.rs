@@ -321,9 +321,10 @@ fn run_runtime_inflight_backpressure_wait(
             state.wake_source = RuntimeProfileInFlightWaitOutcome::InflightRelease;
             return Ok(true);
         }
+        let wait_slice = wait.shared.precommit_wait_slice(wait_epoch)?;
         let outcome = runtime_profile_inflight_wait_outcome_since_with_selection_revision(
             wait.shared,
-            wait_epoch,
+            wait_slice,
             state.observed_revision,
             state.observed_selection_revision,
         );

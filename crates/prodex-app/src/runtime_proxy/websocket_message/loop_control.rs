@@ -37,6 +37,7 @@ impl<'a> RuntimeWebsocketTextMessageFlow<'a> {
         let mut selection_started_at = Instant::now();
         let mut selection_attempts = 0usize;
         loop {
+            self.shared.check_precommit_deadline()?;
             let pressure_mode = runtime_proxy_pressure_mode_active_for_route(
                 self.shared,
                 RuntimeRouteKind::Websocket,

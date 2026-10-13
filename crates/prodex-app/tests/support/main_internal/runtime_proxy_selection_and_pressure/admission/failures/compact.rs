@@ -582,3 +582,29 @@ fn generic_compact_429_rotates_before_commit() {
         "{log}"
     );
 }
+
+
+#[test]
+fn unbound_session_compaction_recovers_multiple_overload_epochs_without_losing_context() {
+    let faults = (0..2).map(|_| RuntimeProxyBackendFaultStep::overloaded_503(
+        RuntimeProxyBackendFaultRoute::Compact, "main-account",
+    ));
+    let faults = faults.chain([RuntimeProxyBackendFaultStep::success(RuntimeProxyBackendFaultRoute::Compact, "main-account")]);
+    let backend = RuntimeProxyBackend::start_with_fault_script(RuntimeProxyBackendFaultScript::new(faults));
+    let ready = runtime_usage_snapshot(quota_window_ready(80, 3600), quota_window_ready(80, 86400));
+    let harness = RuntimeProxyProfileHarnessBuilder::new()
+        .openai_profile("main", "main-account", Some("main@example.com"))
+        .active_profile("main").current_profile("main").upstream_base_url(backend.base_url())
+        .profile_usage_snapshot("main", ready).build();
+    let mut scoped = harness.shared().clone();
+    // Exercise two real recovery epochs and then a healthy upstream, without
+    // asking the fixture to bypass later exponential circuit-breaker cooldowns.
+    scoped.precommit_deadline = Some(Instant::now() + Duration::from_secs(180));
+    let response = proxy_runtime_standard_request(1203, &compact_request(Some("unbound-compact-session")), &scoped)
+        .unwrap_or_else(|error| panic!("{error:#}; accounts={:?}; log={}", backend.responses_accounts(), read_runtime_proxy_test_log(&scoped.log_path)));
+    let (status, body) = tiny_http_response_status_and_body(response);
+    assert_eq!(status, 200, "an unbound session ID must not strand a full-history compaction: {body}");
+    assert!(backend.responses_accounts().len() >= 3);
+    let log = read_runtime_proxy_test_log(&harness.shared().log_path);
+    assert!(log.contains("rotation_sweep_start"), "must really cross a recovery epoch: {log}");
+}

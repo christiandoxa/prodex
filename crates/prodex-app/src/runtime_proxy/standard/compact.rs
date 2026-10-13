@@ -253,6 +253,7 @@ impl RuntimeCompactSelectionContext<'_> {
     }
 
     fn budget_exhausted(&self) -> Result<bool> {
+        self.shared.check_precommit_deadline()?;
         let continuation = self.request_previous_response_id.is_some()
             || self.request_turn_state.is_some()
             || self.compact_followup_profile.is_some()
@@ -493,9 +494,13 @@ impl RuntimeCompactSelectionContext<'_> {
     }
 
     fn can_wait_for_retryable_recovery(&self) -> bool {
-        self.request_previous_response_id.is_none()
-            && self.request_turn_state.is_none()
-            && self.request_session_id.is_none()
+        prodex_mojo_core::runtime::compact_recovery_unpinned(
+            self.request_previous_response_id.is_some(),
+            self.request_turn_state.is_some(),
+            self.compact_followup_profile.is_some(),
+            self.session_profile.is_some(),
+        )
+        .expect("Mojo compact recovery ownership predicate failed")
     }
 
     fn wait_for_overload_recovery(&mut self) -> Result<bool> {

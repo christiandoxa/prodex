@@ -12,7 +12,8 @@ pub(crate) fn proxy_runtime_standard_request(
     shared: &RuntimeRotationProxyShared,
 ) -> Result<tiny_http::ResponseBox> {
     if is_runtime_compact_path(&request.path_and_query) {
-        compact::proxy_runtime_compact_request(request_id, request, shared)
+        let scoped_shared = shared.for_precommit_request();
+        compact::proxy_runtime_compact_request(request_id, request, &scoped_shared)
     } else if let Some(response) =
         runtime_startup_metadata_pressure_response(request_id, request, shared)
     {

@@ -46,6 +46,57 @@ def prodex_runtime_precommit_budget_plan_v2(
 
 
 
+# An absolute precommit watchdog is distinct from per-attempt selection budgets.
+# Keep enough time for an ordinary recovery epoch, but never reset this deadline
+# after backpressure or another account attempt. Rust owns the monotonic clock.
+@export("prodex_runtime_recovery_watchdog_budget_v1")
+def prodex_runtime_recovery_watchdog_budget_v1(
+    abi_version: Int64,
+    stream_idle_ms: UInt64,
+    recovery_epoch_ms: UInt64,
+) abi("C") -> UInt64:
+    if abi_version != 1:
+        return 0
+    return max(stream_idle_ms, recovery_epoch_ms)
+
+
+@export("prodex_runtime_recovery_epoch_pending_v1")
+def prodex_runtime_recovery_epoch_pending_v1(
+    abi_version: Int64,
+    recovered_profiles: UInt64,
+    eligible_profile_present: Int64,
+    request_watchdog_active: Int64,
+    force_reselection: Int64,
+) abi("C") -> Int64:
+    if abi_version != 1:
+        return -3
+    for value in [eligible_profile_present, request_watchdog_active, force_reselection]:
+        if value != 0 and value != 1:
+            return -2
+    # Only bounded interactive request scopes can extend transient wait epochs.
+    # Ordinary metadata/unary calls retain their prior finite retry behavior.
+    return Int64(
+        recovered_profiles > 0 or force_reselection == 1
+        or (request_watchdog_active == 1 and eligible_profile_present == 1)
+    )
+
+
+@export("prodex_runtime_compact_recovery_unpinned_v1")
+def prodex_runtime_compact_recovery_unpinned_v1(
+    abi_version: Int64,
+    previous_response_present: Int64,
+    turn_state_present: Int64,
+    compact_owner_present: Int64,
+    session_owner_present: Int64,
+) abi("C") -> Int64:
+    if abi_version != 1:
+        return -3
+    for value in [previous_response_present, turn_state_present, compact_owner_present, session_owner_present]:
+        if value != 0 and value != 1:
+            return -2
+    return Int64(previous_response_present == 0 and turn_state_present == 0 and compact_owner_present == 0 and session_owner_present == 0)
+
+
 @export("prodex_runtime_precommit_budget_exhausted_v1")
 def prodex_runtime_precommit_budget_exhausted_v1(
     attempts: UInt64,

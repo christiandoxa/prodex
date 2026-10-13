@@ -269,5 +269,11 @@ pub(super) fn wait_for_compact_overload_recovery(
             "request={request_id} transport=http rotation_sweep_start route=compact recovered_profiles={recovered} sweep={recovery_sweeps}"
         ),
     );
-    Ok(recovered > 0 || force_reselection_after_wait)
+    prodex_mojo_core::runtime::recovery_epoch_pending(
+        recovered,
+        runtime_route_has_retryable_profile(shared, RuntimeRouteKind::Compact)?,
+        shared.precommit_deadline.is_some(),
+        force_reselection_after_wait,
+    )
+    .map_err(|error| anyhow::anyhow!("Mojo recovery epoch policy failed: {error:?}"))
 }

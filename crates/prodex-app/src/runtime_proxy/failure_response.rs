@@ -39,6 +39,7 @@ pub(crate) fn runtime_proxy_precommit_budget_exhausted_for_route(
     continuation: bool,
     pressure_mode: bool,
 ) -> Result<bool> {
+    shared.check_precommit_deadline()?;
     let profile_count = {
         let runtime = shared
             .runtime

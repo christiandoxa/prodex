@@ -79,8 +79,9 @@ pub use prompt_cache_affinity::prompt_cache_affinity_batch;
 pub use quota_decisions::{
     CompactRetryAction, CompactRetryDecision, CompactRetryDecisionInput, CompactRetryReason,
     CompactRetryStage, PrecommitBudgetPlan, QuotaGatePlan, QuotaGatePlanInput, QuotaSnapshotPlan,
-    QuotaSnapshotPlanInput, compact_retry_decision, precommit_budget_exhausted,
-    precommit_budget_plan, quota_gate_plan, quota_snapshot_plan,
+    QuotaSnapshotPlanInput, compact_recovery_unpinned, compact_retry_decision,
+    precommit_budget_exhausted, precommit_budget_plan, quota_gate_plan, quota_snapshot_plan,
+    recovery_epoch_pending, recovery_watchdog_budget_ms,
 };
 pub use quota_route_score::quota_route_score_batch;
 pub use responses_loop_control::{

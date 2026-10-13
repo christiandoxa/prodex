@@ -129,3 +129,50 @@ fn response_processed_is_absorbed_without_touching_existing_upstream_session() {
     assert_eq!(websocket_session.profile_name.as_deref(), Some("alpha"));
     assert_eq!(websocket_session.turn_state.as_deref(), Some("turn-alpha"));
 }
+
+#[test]
+fn websocket_precommit_watchdog_reports_timeout_without_closing_existing_socket() {
+    let _guard = acquire_test_runtime_lock();
+    let mut shared = test_runtime_shared("setup-expired-precommit-watchdog");
+    shared.precommit_deadline = Some(std::time::Instant::now());
+    let (mut local_socket, mut client_socket) = test_runtime_local_websocket_pair();
+    let mut websocket_session = RuntimeWebsocketSessionState::default();
+    let metadata = RuntimeWebsocketRequestMetadata::default();
+    let handshake = RuntimeProxyRequest {
+        method: "GET".into(),
+        path_and_query: "/backend-api/prodex/responses".into(),
+        headers: Vec::new(),
+        body: Vec::new(),
+    };
+    for request_id in [900, 901] {
+        proxy_runtime_websocket_text_message(RuntimeWebsocketTextMessageInput {
+            session_id: 89,
+            request_id,
+            local_socket: &mut local_socket,
+            handshake_request: &handshake,
+            request_text: r#"{"type":"response.create","input":[]}"#,
+            request_metadata: &metadata,
+            shared: &shared,
+            websocket_session: &mut websocket_session,
+        })
+        .expect("a request timeout must not become a local socket close");
+        let text = super::super::test_support::read_runtime_websocket_text(&mut client_socket);
+        let value: serde_json::Value = serde_json::from_str(&text).unwrap();
+        assert_eq!(value["type"], "error");
+        assert_eq!(value["status"], 504);
+        assert_eq!(value["error"]["code"], "request_timeout");
+        assert_eq!(
+            value["error"]["message"], "request timed out",
+            "native Other compatibility must retain the exact timeout message"
+        );
+    }
+    assert!(
+        shared
+            .runtime
+            .lock()
+            .unwrap()
+            .profile_retry_backoff_until
+            .is_empty()
+    );
+    assert!(shared.runtime.lock().unwrap().profile_health.is_empty());
+}
