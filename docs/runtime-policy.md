@@ -773,3 +773,13 @@ responses_active_limit = 96
 profile_inflight_soft_limit = 6
 profile_inflight_hard_limit = 10
 ```
+
+
+### Native recovery root identity
+
+The launch-local recovery marker tracks canonical native `SessionStart.session_id`,
+not an arbitrary completing `notify.thread-id`. A legacy notification cannot replace
+an established different root. Repeated hooks for the same root preserve the unread
+rollout cursor instead of seeking past a terminal error. A genuine new SessionStart
+can switch roots; the existing app-server still verifies identity, workspace,
+persistence, quiescence and goal policy before any in-place continuation RPC.
