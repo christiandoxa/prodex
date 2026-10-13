@@ -92,13 +92,9 @@ pub(super) fn runtime_workflow_effective_model(value: &Value) -> Option<String> 
         .then(|| model.to_string())
 }
 
-pub(super) fn observe_runtime_workflow_evidence(
-    value: &Value,
-    evidence: &mut RuntimeWorkflowEvidence,
-) {
-    let Some(object) = value.as_object() else {
-        return;
-    };
+// Wire-envelope projection only; the existing Mojo transition remains the
+// single owner of acceptance, commitment, and side-effect state changes.
+fn native_workflow_observation_flags(object: &Map<String, Value>) -> [bool; 4] {
     let outer = object.get("type").and_then(Value::as_str);
     let payload = object.get("payload").and_then(Value::as_object);
     let payload_type = payload
@@ -135,7 +131,12 @@ pub(super) fn observe_runtime_workflow_evidence(
                     "exec_command_end" | "patch_apply_end" | "mcp_tool_call_end" | "tool_completed"
                 )
             );
-    let observation = if turn_started {
+    [turn_started, user, assistant, side_effect]
+}
+
+fn native_workflow_observation(object: &Map<String, Value>) -> WorkflowObservationKind {
+    let [turn_started, user, assistant, side_effect] = native_workflow_observation_flags(object);
+    if turn_started {
         WorkflowObservationKind::TurnStarted
     } else if side_effect {
         WorkflowObservationKind::SideEffectObserved
@@ -145,7 +146,17 @@ pub(super) fn observe_runtime_workflow_evidence(
         WorkflowObservationKind::UserAccepted
     } else {
         WorkflowObservationKind::Other
+    }
+}
+
+pub(super) fn observe_runtime_workflow_evidence(
+    value: &Value,
+    evidence: &mut RuntimeWorkflowEvidence,
+) {
+    let Some(object) = value.as_object() else {
+        return;
     };
+    let observation = native_workflow_observation(object);
     let current = WorkflowEvidencePlan {
         acceptance_state: match evidence.acceptance_state {
             "accepted_but_uncommitted" => 1,
