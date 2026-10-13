@@ -637,7 +637,8 @@
         "production_reachable": true,
         "role": "semantic",
         "operations": [
-          "session_selector_resolution_policy"
+          "session_selector_resolution_policy",
+          "session_report_query_matching_policy"
         ]
       },
       {
@@ -647,7 +648,8 @@
         "production_reachable": true,
         "role": "adapter",
         "operations": [
-          "session_selector_resolution_policy"
+          "session_selector_resolution_policy",
+          "session_report_query_matching_policy"
         ]
       },
       {
@@ -4340,6 +4342,29 @@
       "duplicate_production_owner": false,
       "platform_fallback": false,
       "rust_adapter_scope": "Rust owns selector trimming, report DTO indexing, error construction, and filesystem/state acquisition; Mojo owns candidate matching and stable exact/prefix index planning"
+    },
+    {
+      "name": "session_report_query_matching_policy",
+      "domain": "session-store/query",
+      "introduced_in": "0.438.0",
+      "baseline_state": "candidate",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_session_report_query_matches_v1",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/session_selector.mojo",
+      "consumer": "crates/prodex-session-store/src/lib.rs",
+      "consumer_marker": "prodex_mojo_core::json::session_report_query_matches",
+      "production_consumers": [
+        "crates/prodex-session-store/src/lib.rs"
+      ],
+      "production_reachability_test": "crates/prodex-session-store/tests/src/lib.rs",
+      "rust_owner_before": "case-insensitive substring matching across session ID, thread name, cwd, profile, model provider, and path",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "deleted; session-store caller tests cover ASCII matching, absent fields, empty queries, and Unicode lowercase expansion",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "SessionReport field acquisition plus standard-library Unicode lowercase normalization; Mojo owns the fixed six-field UTF-8 substring scan and typed result mapping"
     },
     {
       "name": "smart_context_artifact_reference_policy",

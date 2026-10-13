@@ -355,6 +355,20 @@ fn session_reports_filter_by_profile_and_query() {
 }
 
 #[test]
+fn session_report_query_preserves_unicode_lowercase_semantics() {
+    let mut report = SessionReport::from_path(
+        Path::new("/home/test-user/.codex/sessions/unicode.jsonl"),
+        0,
+    );
+    report.thread_name = Some("Straße İstanbul".to_string());
+
+    assert!(session_report_matches_query(&report, "STRAẞE"));
+    assert!(session_report_matches_query(&report, "İSTANBUL"));
+    assert!(!session_report_matches_query(&report, "strasse"));
+    assert!(session_report_matches_query(&report, ""));
+}
+
+#[test]
 fn session_resolver_handles_unique_ambiguous_and_missing_ids() {
     let root = test_temp_dir("session-resolve");
     let sessions = root.join("sessions");

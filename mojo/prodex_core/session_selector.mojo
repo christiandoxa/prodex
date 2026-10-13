@@ -6,6 +6,7 @@ from rich_types import ProdexRichStringView
 comptime SESSION_SELECTOR_ABI_VERSION: Int64 = 1
 comptime SESSION_SELECTOR_OK: Int64 = 0
 comptime SESSION_SELECTOR_INVALID: Int64 = 1
+comptime SESSION_REPORT_QUERY_FIELD_COUNT: Int64 = 6
 
 
 def session_selector_ascii_lower(value: UInt8) -> UInt8:
@@ -48,6 +49,36 @@ def session_selector_matches(
         if session_selector_ascii_lower(left[unsafe_offset=index]) != session_selector_ascii_lower(right[unsafe_offset=index]):
             return False
     return True
+
+
+def session_report_query_contains(
+    field: ProdexRichStringView,
+    query: ProdexRichStringView,
+) -> Bool:
+    """Search one already-normalized report field for the query bytes.
+
+    The Rust adapter applies Unicode ``str::to_lowercase`` before this call,
+    because that is the public session-filter contract. Mojo owns the bounded
+    field scan and therefore never needs to duplicate Rust's Unicode tables.
+    """
+    if query.len == 0:
+        return True
+    if query.len > field.len:
+        return False
+    var source = rich_view_ptr(field)
+    var wanted = rich_view_ptr(query)
+    var last_start = Int64(field.len - query.len)
+    var start: Int64 = 0
+    while start <= last_start:
+        var matched = True
+        for offset in range(Int64(query.len)):
+            if source[unsafe_offset=start + offset] != wanted[unsafe_offset=offset]:
+                matched = False
+                break
+        if matched:
+            return True
+        start += 1
+    return False
 
 
 @export("prodex_session_selector_is_full_v1")
@@ -155,4 +186,43 @@ def prodex_session_selector_match_plan_v1(
             prefix_count += 1
     output[unsafe_offset=0] = exact_count
     output[unsafe_offset=1] = prefix_count
+    return SESSION_SELECTOR_OK
+
+
+@export("prodex_session_report_query_matches_v1")
+def prodex_session_report_query_matches_v1(
+    abi_version: Int64,
+    query_address: UInt,
+    query_length: Int64,
+    fields_address: UInt,
+    fields_count: Int64,
+    output_address: UInt,
+) abi("C") -> Int64:
+    if (
+        abi_version != SESSION_SELECTOR_ABI_VERSION
+        or query_length < 0
+        or fields_count != SESSION_REPORT_QUERY_FIELD_COUNT
+        or output_address == 0
+        or (query_length > 0 and query_address == 0)
+        or (fields_count > 0 and fields_address == 0)
+    ):
+        return SESSION_SELECTOR_INVALID
+    var query = ProdexRichStringView(query_address, UInt(query_length))
+    if not rich_view_valid(query, 0x7FFFFFFFFFFFFFFF):
+        return SESSION_SELECTOR_INVALID
+    var fields = Pointer[
+        mut=False, ProdexRichStringView, ImmUntrackedOrigin
+    ](unsafe_from_address=Int(fields_address))
+    for index in range(SESSION_REPORT_QUERY_FIELD_COUNT):
+        var field = fields[unsafe_offset=index].copy()
+        if not rich_view_valid(field, 0x7FFFFFFFFFFFFFFF):
+            return SESSION_SELECTOR_INVALID
+    var output = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    output[unsafe_offset=0] = 0
+    for index in range(SESSION_REPORT_QUERY_FIELD_COUNT):
+        if session_report_query_contains(fields[unsafe_offset=index], query):
+            output[unsafe_offset=0] = 1
+            break
     return SESSION_SELECTOR_OK

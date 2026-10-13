@@ -4798,6 +4798,7 @@ export function findViolations(files) {
         "prodex_mojo_core::json::{SessionRepairLine, session_repair_plan}",
         "let plan = session_repair_plan(",
         "prodex_mojo_core::json::session_selector_match_plan(",
+        "prodex_mojo_core::json::session_report_query_matches(",
         "let (exact_indices, prefix_indices)",
       ];
       const restoredRust = [
@@ -4814,6 +4815,9 @@ export function findViolations(files) {
       }
       if (production.includes("let exact_matches = reports") || production.includes("let prefix_matches = reports")) {
         violations.push(`${filePath}: contains restored Rust session selector candidate filtering`);
+      }
+      if (production.includes("to_lowercase().contains(&query)")) {
+        violations.push(`${filePath}: contains restored Rust session-report query matching semantics`);
       }
       return violations;
     }
@@ -5857,9 +5861,12 @@ export function findViolations(files) {
       const required = [
         "fn prodex_session_selector_match_plan_v1(",
         "pub fn session_selector_match_plan(",
+        "fn prodex_session_report_query_matches_v1(",
+        "pub fn session_report_query_matches(",
         "i64::try_from(ffi_ids.len())",
         "prefix.binary_search(index).is_err()",
         "match_plan_is_sensitive_to_selector_and_preserves_candidate_order",
+        "report_query_matches_normalized_unicode_fields_and_absent_values",
       ];
       return required
         .filter((marker) => !contents.includes(marker))
@@ -5868,6 +5875,8 @@ export function findViolations(files) {
     if (filePath === SESSION_SELECTOR_MATCH_MOJO_FILE) {
       const required = [
         '@export("prodex_session_selector_match_plan_v1")',
+        '@export("prodex_session_report_query_matches_v1")',
+        "session_report_query_contains(",
         "session_selector_matches(id, selector, True)",
         "session_selector_matches(id, selector, False)",
         "output_capacity < 2 + ids_count * 2",
@@ -5881,6 +5890,7 @@ export function findViolations(files) {
         "session_selector_match_plan(&ids, \"11111111\")",
         "resolve_session_report_by_id(&reports, \"\\u{3000}11111111\\u{00a0}\")",
         "SessionResolveError::Ambiguous",
+        "session_report_query_preserves_unicode_lowercase_semantics",
       ];
       return required
         .filter((marker) => !contents.includes(marker))
@@ -5889,6 +5899,8 @@ export function findViolations(files) {
     if (filePath === SESSION_SELECTOR_MATCH_MOJO_TEST_FILE) {
       const required = [
         "test_exact_prefix_and_mutation_sensitivity",
+        "test_report_query_matches_fixed_fields",
+        "prodex_session_report_query_matches_v1(",
         "changed_output[1] != prefix_output[1]",
       ];
       return required
@@ -7135,6 +7147,7 @@ function selfTest() {
     "prodex_mojo_core::json::{SessionRepairLine, session_repair_plan}",
     "let plan = session_repair_plan(",
     "prodex_mojo_core::json::session_selector_match_plan(",
+    "prodex_mojo_core::json::session_report_query_matches(",
     "let (exact_indices, prefix_indices)",
   ].join("\n");
   assert.deepEqual(findViolations([[SESSION_REPAIR_CONSUMER_FILE, sessionRepairConsumerCanonical]]), []);
@@ -7179,9 +7192,12 @@ function selfTest() {
   const sessionSelectorMatchAdapterCanonical = [
     "fn prodex_session_selector_match_plan_v1(",
     "pub fn session_selector_match_plan(",
+    "fn prodex_session_report_query_matches_v1(",
+    "pub fn session_report_query_matches(",
     "i64::try_from(ffi_ids.len())",
     "prefix.binary_search(index).is_err()",
     "match_plan_is_sensitive_to_selector_and_preserves_candidate_order",
+    "report_query_matches_normalized_unicode_fields_and_absent_values",
   ].join("\n");
   assert.deepEqual(findViolations([[SESSION_SELECTOR_MATCH_ADAPTER_FILE,
     sessionSelectorMatchAdapterCanonical]]), []);
@@ -7190,6 +7206,8 @@ function selfTest() {
   /session selector adapter must retain validated Mojo plan/u);
   const sessionSelectorMatchMojoCanonical = [
     '@export("prodex_session_selector_match_plan_v1")',
+    '@export("prodex_session_report_query_matches_v1")',
+    "session_report_query_contains(",
     "session_selector_matches(id, selector, True)",
     "session_selector_matches(id, selector, False)",
     "output_capacity < 2 + ids_count * 2",
