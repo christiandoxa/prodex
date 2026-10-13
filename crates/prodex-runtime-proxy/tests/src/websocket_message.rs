@@ -424,6 +424,9 @@ fn responses_terminal_event_payloads_are_terminal() {
 #[test]
 fn websocket_event_kind_helpers_match_expected_values() {
     let cases = [
+        ("keepalive", true, false, false),
+        ("KeepAlive", false, false, false),
+        ("keepalive.output", false, false, false),
         ("codex.rate_limits", true, false, false),
         ("codex.response.metadata", true, false, false),
         ("response.metadata", true, false, false),

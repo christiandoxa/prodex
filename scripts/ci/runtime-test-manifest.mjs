@@ -334,6 +334,12 @@ export const RUNTIME_CI_WORKFLOW_SHARDS = [
         label: "quota-pool-exhaustion",
       },
       {
+        id: "continuation-http-keepalive-commit-boundary",
+        filter:
+          "main_internal_tests::runtime_proxy_continuations::http_followups::runtime_proxy_http_keepalive_",
+        label: "keepalive-commit-boundary",
+      },
+      {
         id: "continuation-http-fresh-sse-preoutput-quota",
         filter:
           "main_internal_tests::runtime_proxy_continuations::http_followups::runtime_proxy_http_fresh_sse_quota_after_output_item_added_rotates_before_model_output",

@@ -10,7 +10,8 @@ mod capacity;
 pub use capacity::quota_capacity_batch;
 mod report_sort;
 pub use report_sort::{
-    QuotaReportPagePlan, quota_report_compare, quota_report_page_plan, quota_report_sort_next,
+    QuotaReportPagePlan, quota_report_compare, quota_report_page_plan, quota_report_sort_label,
+    quota_report_sort_next,
 };
 mod usage_response;
 pub use usage_response::{
@@ -957,27 +958,6 @@ fn load_quota_display_label(kind: i64, value: i64) -> Result<String, crate::Mojo
         return Err(crate::MojoError::InvalidOutput);
     }
     String::from_utf8(output[..written].to_vec()).map_err(|_| crate::MojoError::InvalidOutput)
-}
-
-pub fn quota_report_sort_label(sort: i64) -> Result<&'static str, crate::MojoError> {
-    use std::sync::OnceLock;
-
-    static LABELS: OnceLock<Result<Vec<String>, crate::MojoError>> = OnceLock::new();
-    let sort = usize::try_from(sort)
-        .ok()
-        .filter(|sort| *sort < 6)
-        .ok_or(crate::MojoError::InvalidInput)?;
-    match LABELS.get_or_init(|| {
-        (0_i64..6)
-            .map(|value| load_quota_display_label(QUOTA_DISPLAY_LABEL_SORT, value))
-            .collect()
-    }) {
-        Ok(labels) => labels
-            .get(sort)
-            .map(String::as_str)
-            .ok_or(crate::MojoError::InvalidOutput),
-        Err(error) => Err(*error),
-    }
 }
 
 pub fn quota_blocked_status_label(kind: i64) -> Result<&'static str, crate::MojoError> {
