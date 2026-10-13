@@ -483,24 +483,7 @@ fn quota_error_summary(error: &str) -> String {
 
     let kind = prodex_mojo_core::quota::quota_error_summary_kind(&first_line)
         .expect("Mojo quota error summary classification failed");
-    let summary = match kind {
-        prodex_mojo_core::quota::QUOTA_ERROR_KIND_UNAVAILABLE => Some("unavailable"),
-        prodex_mojo_core::quota::QUOTA_ERROR_KIND_CONFIG => Some("config"),
-        prodex_mojo_core::quota::QUOTA_ERROR_KIND_SERVER => Some("server"),
-        prodex_mojo_core::quota::QUOTA_ERROR_KIND_TIMEOUT => Some("timeout"),
-        prodex_mojo_core::quota::QUOTA_ERROR_KIND_NETWORK => Some("network"),
-        prodex_mojo_core::quota::QUOTA_ERROR_KIND_PROXY => Some("proxy"),
-        prodex_mojo_core::quota::QUOTA_ERROR_KIND_CONNECTION => Some("connection"),
-        prodex_mojo_core::quota::QUOTA_ERROR_KIND_INVALID_AUTH => Some("invalid auth"),
-        prodex_mojo_core::quota::QUOTA_ERROR_KIND_RATE_LIMIT => Some("rate limit"),
-        prodex_mojo_core::quota::QUOTA_ERROR_KIND_PARSE => Some("parse"),
-        prodex_mojo_core::quota::QUOTA_ERROR_KIND_EMPTY => Some("empty"),
-        prodex_mojo_core::quota::QUOTA_ERROR_KIND_CANCELLED => Some("cancelled"),
-        prodex_mojo_core::quota::QUOTA_ERROR_KIND_FORBIDDEN => Some("forbidden"),
-        prodex_mojo_core::quota::QUOTA_ERROR_KIND_NOT_FOUND => Some("not found"),
-        prodex_mojo_core::quota::QUOTA_ERROR_KIND_UNKNOWN => Some("unknown"),
-        prodex_mojo_core::quota::QUOTA_ERROR_KIND_OTHER => None,
-        _ => unreachable!("validated Mojo quota error kind"),
-    };
-    summary.map(str::to_string).unwrap_or(first_line)
+    prodex_mojo_core::quota::quota_error_summary_label(kind)
+        .expect("Mojo quota error summary label returned invalid output")
+        .unwrap_or(first_line)
 }

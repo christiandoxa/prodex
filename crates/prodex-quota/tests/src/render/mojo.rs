@@ -147,6 +147,44 @@ fn quota_error_summary_kind_matches_expected_precedence() {
 }
 
 #[test]
+fn quota_error_summary_label_is_mojo_owned_and_preserves_unknown_upstream_text() {
+    use prodex_mojo_core::quota::*;
+    for (kind, expected) in [
+        (QUOTA_ERROR_KIND_UNKNOWN, Some("unknown")),
+        (QUOTA_ERROR_KIND_UNAVAILABLE, Some("unavailable")),
+        (QUOTA_ERROR_KIND_CONFIG, Some("config")),
+        (QUOTA_ERROR_KIND_SERVER, Some("server")),
+        (QUOTA_ERROR_KIND_TIMEOUT, Some("timeout")),
+        (QUOTA_ERROR_KIND_NETWORK, Some("network")),
+        (QUOTA_ERROR_KIND_PROXY, Some("proxy")),
+        (QUOTA_ERROR_KIND_CONNECTION, Some("connection")),
+        (QUOTA_ERROR_KIND_INVALID_AUTH, Some("invalid auth")),
+        (QUOTA_ERROR_KIND_RATE_LIMIT, Some("rate limit")),
+        (QUOTA_ERROR_KIND_PARSE, Some("parse")),
+        (QUOTA_ERROR_KIND_EMPTY, Some("empty")),
+        (QUOTA_ERROR_KIND_CANCELLED, Some("cancelled")),
+        (QUOTA_ERROR_KIND_FORBIDDEN, Some("forbidden")),
+        (QUOTA_ERROR_KIND_NOT_FOUND, Some("not found")),
+        (QUOTA_ERROR_KIND_OTHER, None),
+    ] {
+        assert_eq!(
+            quota_error_summary_label(kind).unwrap().as_deref(),
+            expected
+        );
+    }
+    assert!(quota_error_summary_label(-1).is_err());
+    assert!(quota_error_summary_label(16).is_err());
+    assert_eq!(
+        format_quota_error_status("opaque diagnostic: preserve original code"),
+        "Error opaque diagnostic: preserve original code"
+    );
+    assert_eq!(
+        format_quota_error_detail("opaque diagnostic: preserve original code\nignored"),
+        "error: opaque diagnostic: preserve original code"
+    );
+}
+
+#[test]
 fn quota_error_auth_failure_classification_preserves_watch_categories() {
     for (message, expected) in [
         ("HTTP 401 unauthorized", true),

@@ -587,7 +587,8 @@
           "quota_capacity_lane_planning",
           "quota_model_policy",
           "quota_reset_epoch_precedence",
-          "quota_report_page_planning"
+          "quota_report_page_planning",
+          "quota_error_summary_label_rendering"
         ]
       },
       "mojo/prodex_core/candidate_decision.mojo": {
@@ -7980,6 +7981,29 @@
       "duplicate_production_owner": false,
       "platform_fallback": false,
       "rust_adapter_scope": "validated hook JSON and UUID projection, per-marker file locking, logical rollout length and atomic file writes"
+    },
+    {
+      "name": "quota_error_summary_label_rendering",
+      "domain": "quota/display",
+      "introduced_in": "0.438.0",
+      "baseline_state": "The Rust quota renderer mapped every Mojo-classified error category to display text using a second hard-coded match ladder",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_quota_display_label_v1",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/quota.mojo",
+      "consumer": "crates/prodex-quota/src/render/windows.rs",
+      "consumer_marker": "prodex_mojo_core::quota::quota_error_summary_label(",
+      "production_consumers": [
+        "crates/prodex-quota/src/render/windows.rs"
+      ],
+      "production_reachability_test": "crates/prodex-quota/tests/src/render/mojo.rs",
+      "rust_owner_before": "Rust match table for unknown/unavailable/config/server/timeout/network/proxy/connection/auth/rate limit/parse/empty/cancelled/forbidden/not found",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "removed; actual production renderer and required-Mojo per-category tests retain exact labels and opaque upstream text",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "select first visible error line, call mandatory Mojo classifier and label renderer, retain unclassified upstream message verbatim"
     }
   ],
   "rust_semantic_reductions": [
