@@ -101,3 +101,28 @@ test("Apple Silicon Intel release benchmark is opt-in, source-pinned and cannot 
   assert.doesNotMatch(workflow, /git push/);
   assert.doesNotMatch(workflow, /attest-build-provenance/);
 });
+
+
+test("official Intel macOS release uses measured Apple Silicon cross-build with Rosetta safety", () => {
+  const build = workflowJob(release, "build", "attest-binaries");
+  const intel = build.match(/- target: x86_64-apple-darwin\n([\s\S]*?)- target: aarch64-apple-darwin/)?.[1];
+  assert.ok(intel, "x86_64 macOS release matrix entry missing");
+  assert.match(intel, /runs-on: macos-14/);
+  assert.doesNotMatch(intel, /macos-15-intel/);
+  assert.match(intel, /can-native-smoke: true/);
+  assert.match(intel, /can-mojo-runtime-smoke: true/);
+
+  assert.match(build, /name: Require Rosetta for Intel macOS cross-target smoke/);
+  assert.match(build, /test "\$\(uname -m\)" = arm64/);
+  assert.match(build, /softwareupdate --install-rosetta --agree-to-license/);
+  assert.match(build, /key: release-[^\n]*-arm64-cross/);
+  assert.match(build, /name: Verify macOS Intel artifact architecture and Rosetta execution/);
+  assert.match(build, /test "\$\(lipo -archs "\$\{binary\}"\)" = x86_64/);
+  assert.match(build, /arch -x86_64 "\$\{binary\}" --version/);
+  assert.match(build, /name: Verify compiled-in Mojo release/);
+  assert.match(build, /"implementation": "mojo-compiled-in"/);
+  assert.match(build, /"self_test": "passed"/);
+  assert.match(build, /name: Native smoke test/);
+  assert.match(build, /name: Upload binary artifact/);
+  assert.match(build, /needs:\s*\n\s*- verify-ci\n\s*- build-mojo-archives/);
+});
