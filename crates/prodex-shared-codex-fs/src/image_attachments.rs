@@ -2,6 +2,10 @@ use super::*;
 use std::borrow::Cow;
 use std::io::{Read, Write};
 
+#[path = "image_attachments/goal_file.rs"]
+mod goal_file;
+pub(crate) use goal_file::persist_codex_goal_objective_attachments;
+
 const CODEX_SESSION_ATTACHMENT_REWRITE_MAX_BYTES: u64 = 64 * 1024 * 1024;
 
 const SESSION_IMAGE_ATTACHMENT_DIR: &str = "image_attachments";

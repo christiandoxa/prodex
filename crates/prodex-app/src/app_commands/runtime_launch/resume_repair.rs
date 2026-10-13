@@ -18,6 +18,12 @@ pub(crate) fn repair_resume_session_for_launch(
     paths: &AppPaths,
     codex_args: &[OsString],
 ) -> Result<Option<std::path::PathBuf>> {
+    if prodex_runtime_launch::codex_resume_requested(codex_args) {
+        prodex_shared_codex_fs::repair_managed_codex_goal_attachments(
+            paths,
+            prodex_runtime_launch::codex_resume_session_id(codex_args),
+        )?;
+    }
     let session_file = repair_resume_session_in_shared_home(&paths.shared_codex_root, codex_args)?;
     if let Some(session_file) = session_file.as_deref() {
         prodex_shared_codex_fs::maintain_managed_codex_session_file(paths, session_file)?;
@@ -326,3 +332,7 @@ mod tests {
         fs::remove_dir_all(root).unwrap();
     }
 }
+
+#[cfg(test)]
+#[path = "resume_repair_media_tests.rs"]
+mod media_tests;

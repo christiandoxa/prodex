@@ -15,6 +15,7 @@ comptime SHARED_ATTACHMENT_ATTACHMENT_RANGE: Int64 = 2
 comptime SHARED_ATTACHMENT_CLIPBOARD_NAME: Int64 = 3
 comptime SHARED_ATTACHMENT_PERSISTABLE_NAME: Int64 = 4
 comptime SHARED_ATTACHMENT_ROLLOUT_NAME: Int64 = 5
+comptime SHARED_ATTACHMENT_GOAL_OBJECTIVE_NAME: Int64 = 6
 
 
 def shared_bytes_match(
@@ -252,7 +253,7 @@ def prodex_shared_attachment_policy_v1(
         return SHARED_ATTACHMENT_ABI
     if (
         operation < SHARED_ATTACHMENT_IMAGE_TAG_RANGE
-        or operation > SHARED_ATTACHMENT_ROLLOUT_NAME
+        or operation > SHARED_ATTACHMENT_GOAL_OBJECTIVE_NAME
         or input_length < 0
         or input_length > SHARED_ATTACHMENT_MAX_BYTES
         or cursor < 0
@@ -309,6 +310,12 @@ def prodex_shared_attachment_policy_v1(
         output[0] = Int64(
             shared_prefix(view, StringSlice("codex-clipboard-"))
         )
+        return SHARED_ATTACHMENT_OK
+
+    if operation == SHARED_ATTACHMENT_GOAL_OBJECTIVE_NAME:
+        # Only Codex-generated wrappers contain generated attachment addresses.
+        # Raw pasted instructions and image bytes are immutable user content.
+        output[0] = Int64(shared_equal(view, StringSlice("goal-objective.md")))
         return SHARED_ATTACHMENT_OK
 
     if operation == SHARED_ATTACHMENT_PERSISTABLE_NAME:
