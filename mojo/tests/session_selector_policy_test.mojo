@@ -2,7 +2,10 @@
 from std.collections.list import List
 
 from rich_types import ProdexRichStringView
-from session_selector import prodex_session_selector_match_plan_v1
+from session_selector import (
+    prodex_session_report_query_matches_v1,
+    prodex_session_selector_match_plan_v1,
+)
 
 
 def view(value: String) -> ProdexRichStringView:
@@ -62,5 +65,49 @@ def test_exact_prefix_and_mutation_sensitivity() raises:
     assert changed_output[1] != prefix_output[1]
 
 
+def test_report_query_matches_fixed_fields() raises:
+    var query = String("i\u0307stanbul")
+    var id = String("01900000-0000-7000-8000-000000000301")
+    var thread_name = String("straße i\u0307stanbul")
+    var cwd = String("/home/test-user/workspace")
+    var profile = String("main")
+    var provider = String("openai")
+    var path = String("/home/test-user/.codex/sessions/unicode.jsonl")
+    var fields = List[ProdexRichStringView]()
+    fields.append(view(id))
+    fields.append(view(thread_name))
+    fields.append(view(cwd))
+    fields.append(view(profile))
+    fields.append(view(provider))
+    fields.append(view(path))
+
+    var output = List[Int64]()
+    output.append(-1)
+    var status = prodex_session_report_query_matches_v1(
+        1,
+        UInt(Int(query.unsafe_ptr())),
+        Int64(query.byte_length()),
+        UInt(Int(fields.unsafe_ptr())),
+        Int64(len(fields)),
+        UInt(Int(output.unsafe_ptr())),
+    )
+    assert status == 0
+    assert output[0] == 1
+
+    var invalid_output = List[Int64]()
+    invalid_output.append(-1)
+    status = prodex_session_report_query_matches_v1(
+        1,
+        UInt(Int(query.unsafe_ptr())),
+        Int64(query.byte_length()),
+        UInt(Int(fields.unsafe_ptr())),
+        5,
+        UInt(Int(invalid_output.unsafe_ptr())),
+    )
+    assert status == 1
+    assert invalid_output[0] == -1
+
+
 def main() raises:
     test_exact_prefix_and_mutation_sensitivity()
+    test_report_query_matches_fixed_fields()

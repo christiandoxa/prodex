@@ -26,9 +26,18 @@ unsafe extern "C" {
         output_address: u64,
         output_capacity: i64,
     ) -> i64;
+    fn prodex_session_report_query_matches_v1(
+        abi_version: i64,
+        query_address: u64,
+        query_length: i64,
+        fields_address: u64,
+        fields_count: i64,
+        output_address: u64,
+    ) -> i64;
 }
 
 const SESSION_SELECTOR_ABI_VERSION: i64 = 1;
+const SESSION_REPORT_QUERY_FIELD_COUNT: usize = 6;
 
 #[repr(C)]
 #[derive(Clone, Copy)]
@@ -75,6 +84,39 @@ pub fn session_selector_matches(id: &str, selector: &str, exact: bool) -> Result
             selector.address,
             i64::try_from(selector.length).map_err(|_| MojoError::InvalidInput)?,
             i64::from(exact),
+            output.as_mut_ptr() as u64,
+        )
+    })?;
+    match output[0] {
+        0 => Ok(false),
+        1 => Ok(true),
+        _ => Err(MojoError::InvalidOutput),
+    }
+}
+
+/// Match a query against the six normalized fields shown by `prodex session list`.
+///
+/// Rust applies the standard-library Unicode lowercase mapping before crossing the
+/// ABI. Mojo then owns the bounded, allocation-free substring scan over those
+/// caller-owned UTF-8 views. The fields are ordered as id, thread name, cwd,
+/// profile, model provider, and path; `None` represents an absent optional field.
+pub fn session_report_query_matches(
+    query: &str,
+    fields: &[Option<&str>; SESSION_REPORT_QUERY_FIELD_COUNT],
+) -> Result<bool, MojoError> {
+    let query = view(query);
+    let ffi_fields = fields
+        .iter()
+        .map(|field| field.map_or_else(StringView::default, view))
+        .collect::<Vec<_>>();
+    let mut output = [-1_i64; 1];
+    status(unsafe {
+        prodex_session_report_query_matches_v1(
+            SESSION_SELECTOR_ABI_VERSION,
+            query.address,
+            i64::try_from(query.length).map_err(|_| MojoError::InvalidInput)?,
+            ffi_fields.as_ptr() as u64,
+            i64::try_from(ffi_fields.len()).map_err(|_| MojoError::InvalidInput)?,
             output.as_mut_ptr() as u64,
         )
     })?;
@@ -151,7 +193,7 @@ pub fn session_selector_match_plan(
 
 #[cfg(all(test, prodex_mojo_active))]
 mod tests {
-    use super::session_selector_match_plan;
+    use super::{session_report_query_matches, session_selector_match_plan};
 
     #[test]
     fn match_plan_is_sensitive_to_selector_and_preserves_candidate_order() {
@@ -171,5 +213,33 @@ mod tests {
         assert!(changed.0.is_empty());
         assert!(changed.1.is_empty());
         assert_ne!(prefix.1, changed.1);
+    }
+
+    #[test]
+    fn report_query_matches_normalized_unicode_fields_and_absent_values() {
+        let fields = [
+            Some("01900000-0000-7000-8000-000000000301"),
+            Some("Issue Triage"),
+            Some("/home/test-user/Workspace"),
+            None,
+            Some("OpenAI"),
+            Some("/home/test-user/.codex/sessions/triage.jsonl"),
+        ];
+        assert!(session_report_query_matches("triage", &fields).unwrap());
+        assert!(session_report_query_matches("WORKSPACE", &fields).unwrap());
+        assert!(session_report_query_matches("openai", &fields).unwrap());
+        assert!(!session_report_query_matches("missing", &fields).unwrap());
+        assert!(session_report_query_matches("", &fields).unwrap());
+
+        let unicode = [
+            Some("straße"),
+            Some("i\u{307}stanbul"),
+            None,
+            None,
+            None,
+            Some("/home/test-user/session"),
+        ];
+        assert!(session_report_query_matches("straße", &unicode).unwrap());
+        assert!(session_report_query_matches("i\u{307}", &unicode).unwrap());
     }
 }
