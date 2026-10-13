@@ -1,5 +1,7 @@
 use crate::runtime_proxy_normalize_openai_path;
-use prodex_mojo_core::rich::{ascii_casefold_equal_exact, ascii_casefold_starts_with};
+use prodex_mojo_core::rich::{
+    ascii_casefold_equal_exact, ascii_casefold_starts_with, runtime_proxy_escape_dot_segments,
+};
 use std::borrow::Cow;
 
 pub fn runtime_proxy_upstream_url(base_url: &str, path_and_query: &str) -> String {
@@ -22,58 +24,8 @@ pub fn runtime_proxy_upstream_url(base_url: &str, path_and_query: &str) -> Strin
 }
 
 pub fn runtime_escape_url_path_dot_segments(path_and_query: &str) -> Cow<'_, str> {
-    let (path, query) = path_and_query
-        .split_once('?')
-        .map(|(path, query)| (path, Some(query)))
-        .unwrap_or((path_and_query, None));
-    let mut escaped = String::new();
-    let mut changed = false;
-    for (index, segment) in path.split('/').enumerate() {
-        if index > 0 {
-            escaped.push('/');
-        }
-        match runtime_encoded_dot_segment_len(segment) {
-            Some(1) => {
-                escaped.push_str("%252e");
-                changed = true;
-            }
-            Some(2) => {
-                escaped.push_str("%252e%252e");
-                changed = true;
-            }
-            _ => escaped.push_str(segment),
-        }
-    }
-    if !changed {
-        return Cow::Borrowed(path_and_query);
-    }
-    if let Some(query) = query {
-        escaped.push('?');
-        escaped.push_str(query);
-    }
-    Cow::Owned(escaped)
-}
-
-fn runtime_encoded_dot_segment_len(segment: &str) -> Option<usize> {
-    let bytes = segment.as_bytes();
-    let mut index = 0;
-    let mut dots = 0;
-    while index < bytes.len() {
-        if bytes[index] == b'.' {
-            dots += 1;
-            index += 1;
-        } else if index + 2 < bytes.len()
-            && bytes[index] == b'%'
-            && bytes[index + 1] == b'2'
-            && bytes[index + 2].eq_ignore_ascii_case(&b'e')
-        {
-            dots += 1;
-            index += 3;
-        } else {
-            return None;
-        }
-    }
-    matches!(dots, 1 | 2).then_some(dots)
+    runtime_proxy_escape_dot_segments(path_and_query)
+        .expect("Mojo runtime dot-segment escaping returned invalid output")
 }
 
 const RUNTIME_TRANSPORT_LOCAL_REQUEST_HEADERS: &[&str] = &[

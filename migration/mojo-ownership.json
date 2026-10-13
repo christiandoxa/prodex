@@ -475,6 +475,14 @@
           "runtime_compact_unpinned_recovery"
         ]
       },
+      "mojo/prodex_core/runtime_proxy_request.mojo": {
+        "operations": [
+          "runtime_proxy_request_metadata_policy",
+          "runtime_proxy_path_policy",
+          "runtime_proxy_mount_path_policy",
+          "runtime_proxy_dot_segment_escaping_policy"
+        ]
+      },
       "mojo/prodex_core/rich_catalog.mojo": {
         "operations": [
           "provider_catalog_model_identity",
@@ -606,6 +614,14 @@
           "provider_model_fallback_parser",
           "session_usage_limit_marker",
           "gemini_invalid_stream_retry_delay_policy"
+        ]
+      },
+      "mojo/prodex_core/runtime_proxy_request.mojo": {
+        "operations": [
+          "runtime_proxy_request_metadata_policy",
+          "runtime_proxy_path_policy",
+          "runtime_proxy_mount_path_policy",
+          "runtime_proxy_dot_segment_escaping_policy"
         ]
       }
     },
@@ -1010,7 +1026,8 @@
         "operations": [
           "runtime_proxy_request_metadata_policy",
           "runtime_proxy_path_policy",
-          "runtime_proxy_mount_path_policy"
+          "runtime_proxy_mount_path_policy",
+          "runtime_proxy_dot_segment_escaping_policy"
         ]
       },
       {
@@ -8191,6 +8208,29 @@
       "duplicate_production_owner": false,
       "platform_fallback": false,
       "rust_adapter_scope": "checked retry-index conversion, mandatory Mojo invocation, and provider retry-policy error mapping"
+    },
+    {
+      "name": "runtime_proxy_dot_segment_escaping_policy",
+      "domain": "runtime-proxy/url-path",
+      "introduced_in": "0.438.0",
+      "baseline_state": "candidate",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_runtime_proxy_escape_dot_segments_v1",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/runtime_proxy_request.mojo",
+      "consumer": "crates/prodex-runtime-proxy/src/upstream.rs",
+      "consumer_marker": "runtime_proxy_escape_dot_segments(path_and_query)",
+      "production_consumers": [
+        "crates/prodex-runtime-proxy/src/upstream.rs"
+      ],
+      "production_reachability_test": "crates/prodex-mojo-core/src/rich/routing.rs",
+      "rust_owner_before": "Rust scanned each URL path segment and rewrote literal or percent-encoded dot segments while preserving the query suffix",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "deleted; direct Mojo wrapper coverage and runtime-proxy upstream URL tests cover literal, encoded, mixed, query, and unchanged paths",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "bounded input/output buffer allocation, Cow lifetime preservation, and checked ABI status/result mapping"
     }
   ],
   "rust_semantic_reductions": [
@@ -9234,6 +9274,21 @@
       "production_consumer": "crates/prodex-provider-core/src/gemini_bridge/errors/quota_retry/retry_delay.rs",
       "parity_test": "crates/prodex-mojo-core/src/rich_tests.rs",
       "performance": "one scalar Mojo call per pre-commit invalid-stream retry"
+    },
+    {
+      "file": "crates/prodex-runtime-proxy/src/upstream.rs",
+      "symbol": "runtime_escape_url_path_dot_segments",
+      "operation": "runtime_proxy_dot_segment_escaping_policy",
+      "previous_responsibility": "Rust scanned each path segment and escaped literal and percent-encoded dot-only segments",
+      "final_state": "adapter-only",
+      "rust_before": "crates/prodex-runtime-proxy/src/upstream.rs::runtime_escape_url_path_dot_segments and runtime_encoded_dot_segment_len",
+      "rust_after": "Rust delegates the bounded path transformation to Mojo and preserves the borrowed Cow result when unchanged",
+      "mojo_owner": "mojo/prodex_core/runtime_proxy_request.mojo::prodex_runtime_proxy_escape_dot_segments_v1",
+      "mojo_source": "mojo/prodex_core/runtime_proxy_request.mojo",
+      "mojo_entry": "prodex_runtime_proxy_escape_dot_segments_v1",
+      "production_consumer": "crates/prodex-runtime-proxy/src/upstream.rs",
+      "parity_test": "crates/prodex-mojo-core/src/rich_tests.rs",
+      "performance": "one bounded byte-buffer ABI call per upstream URL"
     }
   ],
   "deleted_authoritative_operations": [

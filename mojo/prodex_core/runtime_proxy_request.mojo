@@ -659,6 +659,148 @@ def runtime_proxy_mount_suffix_start(
     return -1
 
 
+def runtime_proxy_encoded_dot_segment_length(
+    source: Pointer[mut=False, UInt8, _], start: Int64, end: Int64
+) -> Int64:
+    var index = start
+    var dots: Int64 = 0
+    while index < end:
+        var value = source[unsafe_offset=index]
+        if value == 46:
+            dots += 1
+            index += 1
+        elif (
+            index + 2 < end
+            and value == 37
+            and source[unsafe_offset=index + 1] == 50
+            and (
+                source[unsafe_offset=index + 2] == 69
+                or source[unsafe_offset=index + 2] == 101
+            )
+        ):
+            dots += 1
+            index += 3
+        else:
+            return 0
+    return dots if dots == 1 or dots == 2 else 0
+
+
+@export("prodex_runtime_proxy_escape_dot_segments_v1")
+def prodex_runtime_proxy_escape_dot_segments_v1(
+    abi_version: Int64,
+    path_address: UInt,
+    path_length: Int64,
+    output_address: UInt,
+    output_capacity: Int64,
+    written_address: UInt,
+    changed_address: UInt,
+) abi("C") -> Int64:
+    if (
+        abi_version != RUNTIME_PROXY_REQUEST_ABI_VERSION
+        or path_length < 0
+        or (path_length > 0 and path_address == 0)
+        or output_address == 0
+        or output_capacity < 0
+        or written_address == 0
+        or changed_address == 0
+    ):
+        return RUNTIME_PROXY_REQUEST_INVALID
+    var source = Pointer[mut=False, UInt8, MutUntrackedOrigin](
+        unsafe_from_address=Int(path_address)
+    )
+    var output = Pointer[mut=True, UInt8, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    var written = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(written_address)
+    )
+    var changed = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(changed_address)
+    )
+    var path_end = path_length
+    var query_index: Int64 = 0
+    while query_index < path_length:
+        if source[unsafe_offset=query_index] == 63:
+            path_end = query_index
+            break
+        query_index += 1
+
+    var output_length: Int64 = 0
+    var index: Int64 = 0
+    var did_change = False
+    while index < path_end:
+        var segment_start = index
+        while index < path_end and source[unsafe_offset=index] != 47:
+            index += 1
+        var dots = runtime_proxy_encoded_dot_segment_length(
+            source, segment_start, index
+        )
+        if dots == 1:
+            output_length += 5
+            did_change = True
+        elif dots == 2:
+            output_length += 10
+            did_change = True
+        else:
+            output_length += index - segment_start
+        if index < path_end:
+            output_length += 1
+            index += 1
+    output_length += path_length - path_end
+    if output_length > output_capacity:
+        return RUNTIME_PROXY_REQUEST_CAPACITY
+
+    var output_index: Int64 = 0
+    index = 0
+    while index < path_end:
+        var segment_start = index
+        while index < path_end and source[unsafe_offset=index] != 47:
+            index += 1
+        var dots = runtime_proxy_encoded_dot_segment_length(
+            source, segment_start, index
+        )
+        if dots == 1:
+            output[unsafe_offset=output_index] = 37
+            output_index += 1
+            output[unsafe_offset=output_index] = 50
+            output_index += 1
+            output[unsafe_offset=output_index] = 53
+            output_index += 1
+            output[unsafe_offset=output_index] = 50
+            output_index += 1
+            output[unsafe_offset=output_index] = 101
+            output_index += 1
+        elif dots == 2:
+            for _ in range(2):
+                output[unsafe_offset=output_index] = 37
+                output_index += 1
+                output[unsafe_offset=output_index] = 50
+                output_index += 1
+                output[unsafe_offset=output_index] = 53
+                output_index += 1
+                output[unsafe_offset=output_index] = 50
+                output_index += 1
+                output[unsafe_offset=output_index] = 101
+                output_index += 1
+        else:
+            for source_index in range(segment_start, index):
+                output[unsafe_offset=output_index] = source[
+                    unsafe_offset=source_index
+                ]
+                output_index += 1
+        if index < path_end:
+            output[unsafe_offset=output_index] = 47
+            output_index += 1
+            index += 1
+    while index < path_length:
+        output[unsafe_offset=output_index] = source[unsafe_offset=index]
+        output_index += 1
+        index += 1
+    written[] = output_index
+    changed[] = Int64(did_change)
+    return RUNTIME_PROXY_REQUEST_OK
+
+
 def runtime_proxy_mount_path_copy(
     source: Pointer[mut=False, UInt8, _],
     start: Int64,

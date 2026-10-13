@@ -1,4 +1,5 @@
 use super::*;
+use std::borrow::Cow;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct WebsocketEventKind {
@@ -83,6 +84,49 @@ pub fn runtime_proxy_mount_path(mount_path: &str) -> Result<String, MojoError> {
         .get(..written)
         .ok_or(MojoError::InvalidOutput)
         .and_then(|value| String::from_utf8(value.to_vec()).map_err(|_| MojoError::InvalidOutput))
+}
+
+/// Escapes dot-only URL path segments before forwarding a runtime request.
+pub fn runtime_proxy_escape_dot_segments<'a>(
+    path_and_query: &'a str,
+) -> Result<Cow<'a, str>, MojoError> {
+    ensure_rich_abi()?;
+    let capacity = path_and_query
+        .len()
+        .checked_mul(5)
+        .ok_or(MojoError::InvalidInput)?
+        .max(1);
+    let mut output = vec![0_u8; capacity];
+    let mut written = -1_i64;
+    let mut changed = -1_i64;
+    let status = unsafe {
+        prodex_runtime_proxy_escape_dot_segments_v1(
+            1,
+            path_and_query.as_ptr() as usize as u64,
+            i64::try_from(path_and_query.len()).map_err(|_| MojoError::InvalidInput)?,
+            output.as_mut_ptr() as usize as u64,
+            i64::try_from(output.len()).map_err(|_| MojoError::InvalidInput)?,
+            &mut written,
+            &mut changed,
+        )
+    };
+    match status {
+        0 => {}
+        1 => return Err(MojoError::InvalidInput),
+        3 => return Err(MojoError::Capacity),
+        4 => return Err(MojoError::AbiMismatch),
+        _ => return Err(MojoError::InvalidOutput),
+    }
+    let written = usize::try_from(written).map_err(|_| MojoError::InvalidOutput)?;
+    let bytes = output.get(..written).ok_or(MojoError::InvalidOutput)?;
+    match changed {
+        0 if bytes == path_and_query.as_bytes() => Ok(Cow::Borrowed(path_and_query)),
+        0 => Err(MojoError::InvalidOutput),
+        1 => String::from_utf8(bytes.to_vec())
+            .map(Cow::Owned)
+            .map_err(|_| MojoError::InvalidOutput),
+        _ => Err(MojoError::InvalidOutput),
+    }
 }
 
 fn runtime_proxy_bool_output(value: i64) -> Result<bool, MojoError> {
