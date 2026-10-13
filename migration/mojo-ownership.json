@@ -530,7 +530,8 @@
       "mojo/prodex_core/profile_schedule.mojo": {
         "operations": [
           "runtime_profile_schedule_scoring",
-          "runtime_profile_rotation_planning"
+          "runtime_profile_rotation_planning",
+          "runtime_profile_candidate_source_planning"
         ]
       },
       "mojo/prodex_core/runtime_tuning.mojo": {
@@ -8257,6 +8258,29 @@
       "duplicate_production_owner": false,
       "platform_fallback": false,
       "rust_adapter_scope": "header iteration, connection-token filtering, and typed Mojo action mapping"
+    },
+    {
+      "name": "runtime_profile_candidate_source_planning",
+      "domain": "quota/profile-planning",
+      "introduced_in": "0.437.10",
+      "baseline_state": "Rust selected live probe versus usable persisted snapshot, applied quota compatibility and model-support gates, and discarded unavailable candidates",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_runtime_profile_candidate_source_batch_v1",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/profile_schedule.mojo",
+      "consumer": "crates/prodex-runtime-quota/src/selection.rs",
+      "consumer_marker": "profile_candidate_source_batch(",
+      "production_consumers": [
+        "crates/prodex-runtime-quota/src/selection.rs"
+      ],
+      "production_reachability_test": "crates/prodex-runtime-quota/tests/src/selection.rs",
+      "rust_owner_before": "Live-versus-snapshot source precedence, quota compatibility gating, stale-snapshot rejection, and requested-model support filtering for ready profile candidates",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "deleted; the runtime-quota caller test and direct required-Mojo batch cases cover live precedence, usable snapshot fallback, stale snapshots, unsupported models, and non-quota-compatible profiles",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "usage/snapshot acquisition, model-capacity observation, profile metadata and candidate DTO materialization"
     }
   ],
   "rust_semantic_reductions": [

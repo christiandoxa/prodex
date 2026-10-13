@@ -153,6 +153,23 @@ pub struct ProfileScheduleInput {
 pub const RUNTIME_PROFILE_SCHEDULE_FIELD_COUNT: usize = 16;
 pub const RUNTIME_PROFILE_SCHEDULE_MAX_COUNT: usize = 256;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ProfileCandidateSourceInput {
+    pub quota_compatible: bool,
+    pub live_present: bool,
+    pub snapshot_present: bool,
+    pub snapshot_usable: bool,
+    pub live_model_supported: bool,
+    pub snapshot_model_supported: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ProfileCandidateSource {
+    Reject,
+    Live,
+    Snapshot,
+}
+
 pub fn provider_aware_profile_order_batch(
     provider_priorities: &[usize],
     order_indices: &[usize],
@@ -195,6 +212,67 @@ pub fn provider_aware_profile_order_batch(
             }
             seen[index] = true;
             Ok(index)
+        })
+        .collect()
+}
+
+pub fn profile_candidate_source_batch(
+    inputs: &[ProfileCandidateSourceInput],
+) -> Result<Vec<ProfileCandidateSource>, crate::MojoError> {
+    if inputs.len() > RUNTIME_PROFILE_SCHEDULE_MAX_COUNT {
+        return Err(crate::MojoError::InvalidInput);
+    }
+    let quota_compatible = inputs
+        .iter()
+        .map(|input| i64::from(input.quota_compatible))
+        .collect::<Vec<_>>();
+    let live_present = inputs
+        .iter()
+        .map(|input| i64::from(input.live_present))
+        .collect::<Vec<_>>();
+    let snapshot_present = inputs
+        .iter()
+        .map(|input| i64::from(input.snapshot_present))
+        .collect::<Vec<_>>();
+    let snapshot_usable = inputs
+        .iter()
+        .map(|input| i64::from(input.snapshot_usable))
+        .collect::<Vec<_>>();
+    let live_model_supported = inputs
+        .iter()
+        .map(|input| i64::from(input.live_model_supported))
+        .collect::<Vec<_>>();
+    let snapshot_model_supported = inputs
+        .iter()
+        .map(|input| i64::from(input.snapshot_model_supported))
+        .collect::<Vec<_>>();
+    let mut output = vec![0_i64; inputs.len()];
+    let status = unsafe {
+        prodex_runtime_profile_candidate_source_batch_v1(
+            quota_compatible.as_ptr(),
+            live_present.as_ptr(),
+            snapshot_present.as_ptr(),
+            snapshot_usable.as_ptr(),
+            live_model_supported.as_ptr(),
+            snapshot_model_supported.as_ptr(),
+            output.as_mut_ptr(),
+            i64::try_from(inputs.len()).map_err(|_| crate::MojoError::InvalidInput)?,
+        )
+    };
+    if status != 0 {
+        return Err(if status == 1 {
+            crate::MojoError::InvalidInput
+        } else {
+            crate::MojoError::InvalidOutput
+        });
+    }
+    output
+        .into_iter()
+        .map(|source| match source {
+            0 => Ok(ProfileCandidateSource::Reject),
+            1 => Ok(ProfileCandidateSource::Live),
+            2 => Ok(ProfileCandidateSource::Snapshot),
+            _ => Err(crate::MojoError::InvalidOutput),
         })
         .collect()
 }
@@ -419,6 +497,16 @@ unsafe extern "C" {
         priorities: *const i64,
         order_indices: *const i64,
         ordered_indices: *mut i64,
+        count: i64,
+    ) -> i64;
+    fn prodex_runtime_profile_candidate_source_batch_v1(
+        quota_compatible: *const i64,
+        live_present: *const i64,
+        snapshot_present: *const i64,
+        snapshot_usable: *const i64,
+        live_model_supported: *const i64,
+        snapshot_model_supported: *const i64,
+        output_source: *mut i64,
         count: i64,
     ) -> i64;
     fn prodex_runtime_quota_score_batch(
