@@ -76,6 +76,7 @@ fn selection_health_shared(
     };
 
     let shared = RuntimeRotationProxyShared {
+        precommit_deadline: None,
         smart_context_engine: std::sync::Arc::new(crate::RuntimeSmartContextEngine::default()),
         runtime_config: Arc::new(crate::RuntimeConfig::compatibility_current()),
         auto_redeem_enabled: false,
@@ -253,6 +254,7 @@ fn next_runtime_response_candidate_prefers_lower_latency_penalty() {
         )]),
     };
     let shared = RuntimeRotationProxyShared {
+        precommit_deadline: None,
         smart_context_engine: std::sync::Arc::new(crate::RuntimeSmartContextEngine::default()),
         runtime_config: Arc::new(crate::RuntimeConfig::compatibility_current()),
         auto_redeem_enabled: false,
@@ -375,6 +377,7 @@ fn compact_health_penalty_does_not_degrade_responses_selection() {
         )]),
     };
     let shared = RuntimeRotationProxyShared {
+        precommit_deadline: None,
         smart_context_engine: std::sync::Arc::new(crate::RuntimeSmartContextEngine::default()),
         runtime_config: Arc::new(crate::RuntimeConfig::compatibility_current()),
         auto_redeem_enabled: false,
@@ -506,6 +509,7 @@ fn websocket_bad_pairing_lightly_degrades_responses_selection() {
         )]),
     };
     let shared = RuntimeRotationProxyShared {
+        precommit_deadline: None,
         smart_context_engine: std::sync::Arc::new(crate::RuntimeSmartContextEngine::default()),
         runtime_config: Arc::new(crate::RuntimeConfig::compatibility_current()),
         auto_redeem_enabled: false,
@@ -622,6 +626,7 @@ fn next_runtime_response_candidate_prefers_healthier_quota_window_mix() {
         profile_health: BTreeMap::new(),
     };
     let shared = RuntimeRotationProxyShared {
+        precommit_deadline: None,
         smart_context_engine: std::sync::Arc::new(crate::RuntimeSmartContextEngine::default()),
         runtime_config: Arc::new(crate::RuntimeConfig::compatibility_current()),
         auto_redeem_enabled: false,

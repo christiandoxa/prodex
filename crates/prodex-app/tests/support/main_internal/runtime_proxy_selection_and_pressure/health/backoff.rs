@@ -28,6 +28,7 @@ fn local_proxy_overload_backoff_activates_and_expires() {
         profile_health: BTreeMap::new(),
     };
     let shared = RuntimeRotationProxyShared {
+        precommit_deadline: None,
         smart_context_engine: std::sync::Arc::new(crate::RuntimeSmartContextEngine::default()),
         runtime_config: Arc::new(crate::RuntimeConfig::compatibility_current()),
         auto_redeem_enabled: false,
@@ -150,6 +151,7 @@ fn responses_selection_ignores_websocket_transport_backoff() {
         profile_health: BTreeMap::new(),
     };
     let shared = RuntimeRotationProxyShared {
+        precommit_deadline: None,
         smart_context_engine: std::sync::Arc::new(crate::RuntimeSmartContextEngine::default()),
         runtime_config: Arc::new(crate::RuntimeConfig::compatibility_current()),
         auto_redeem_enabled: false,
@@ -281,6 +283,7 @@ fn next_runtime_response_candidate_prefers_healthier_profile() {
         )]),
     };
     let shared = RuntimeRotationProxyShared {
+        precommit_deadline: None,
         smart_context_engine: std::sync::Arc::new(crate::RuntimeSmartContextEngine::default()),
         runtime_config: Arc::new(crate::RuntimeConfig::compatibility_current()),
         auto_redeem_enabled: false,
@@ -360,6 +363,7 @@ fn transport_backoff_escalates_for_repeated_failures() {
         profile_health: BTreeMap::new(),
     };
     let shared = RuntimeRotationProxyShared {
+        precommit_deadline: None,
         smart_context_engine: std::sync::Arc::new(crate::RuntimeSmartContextEngine::default()),
         runtime_config: Arc::new(crate::RuntimeConfig::compatibility_current()),
         auto_redeem_enabled: false,
@@ -506,6 +510,7 @@ fn next_runtime_response_candidate_skips_transport_backoff_when_alternative_is_r
         profile_health: BTreeMap::new(),
     };
     let shared = RuntimeRotationProxyShared {
+        precommit_deadline: None,
         smart_context_engine: std::sync::Arc::new(crate::RuntimeSmartContextEngine::default()),
         runtime_config: Arc::new(crate::RuntimeConfig::compatibility_current()),
         auto_redeem_enabled: false,
@@ -631,6 +636,7 @@ fn next_runtime_response_candidate_falls_back_to_soonest_transport_recovery() {
         profile_health: BTreeMap::new(),
     };
     let shared = RuntimeRotationProxyShared {
+        precommit_deadline: None,
         smart_context_engine: std::sync::Arc::new(crate::RuntimeSmartContextEngine::default()),
         runtime_config: Arc::new(crate::RuntimeConfig::compatibility_current()),
         auto_redeem_enabled: false,

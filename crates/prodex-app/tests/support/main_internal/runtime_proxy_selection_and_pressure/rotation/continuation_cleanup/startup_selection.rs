@@ -121,6 +121,7 @@ fn optimistic_current_candidate_skips_transport_backoff() {
         profile_health: BTreeMap::new(),
     };
     let shared = RuntimeRotationProxyShared {
+        precommit_deadline: None,
         smart_context_engine: std::sync::Arc::new(crate::RuntimeSmartContextEngine::default()),
         runtime_config: Arc::new(crate::RuntimeConfig::compatibility_current()),
         auto_redeem_enabled: false,

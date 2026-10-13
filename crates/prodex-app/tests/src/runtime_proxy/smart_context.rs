@@ -94,6 +94,7 @@ fn smart_context_test_shared(name: &str) -> RuntimeRotationProxyShared {
     prepare_runtime_proxy_test_log_path(&log_path);
 
     RuntimeRotationProxyShared {
+        precommit_deadline: None,
         smart_context_engine: std::sync::Arc::new(crate::RuntimeSmartContextEngine::default()),
         runtime_config: Arc::new(crate::RuntimeConfig::compatibility_current()),
         upstream_no_proxy: false,

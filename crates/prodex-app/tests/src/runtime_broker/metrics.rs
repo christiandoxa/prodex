@@ -59,6 +59,7 @@ fn test_runtime_broker_shared(log_path: PathBuf) -> RuntimeRotationProxyShared {
     };
 
     RuntimeRotationProxyShared {
+        precommit_deadline: None,
         smart_context_engine: std::sync::Arc::new(crate::RuntimeSmartContextEngine::default()),
         runtime_config: Arc::new(crate::RuntimeConfig::compatibility_current()),
         auto_redeem_enabled: false,

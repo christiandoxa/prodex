@@ -293,6 +293,7 @@ pub(super) fn prepare_runtime_local_rewrite_application(
             .context("failed to build runtime local rewrite async runtime")?,
     );
     let runtime_shared = RuntimeRotationProxyShared {
+        precommit_deadline: None,
         smart_context_engine: Arc::new(crate::RuntimeSmartContextEngine::default()),
         runtime_config: Arc::clone(&runtime_config),
         upstream_no_proxy,

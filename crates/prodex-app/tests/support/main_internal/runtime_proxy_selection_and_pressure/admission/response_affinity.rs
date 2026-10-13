@@ -115,6 +115,7 @@ fn response_affinity_touch_persists_recent_use_for_housekeeping() {
         .expect("initial state save should succeed");
 
     let shared = RuntimeRotationProxyShared {
+        precommit_deadline: None,
         smart_context_engine: std::sync::Arc::new(crate::RuntimeSmartContextEngine::default()),
         runtime_config: Arc::new(crate::RuntimeConfig::compatibility_current()),
         auto_redeem_enabled: false,
@@ -212,6 +213,7 @@ fn response_affinity_ignores_recent_negative_cache_for_same_route() {
     };
 
     let shared = RuntimeRotationProxyShared {
+        precommit_deadline: None,
         smart_context_engine: std::sync::Arc::new(crate::RuntimeSmartContextEngine::default()),
         runtime_config: Arc::new(crate::RuntimeConfig::compatibility_current()),
         auto_redeem_enabled: false,
@@ -306,6 +308,7 @@ fn response_affinity_ignores_dead_continuation_status_for_owner() {
     };
 
     let shared = RuntimeRotationProxyShared {
+        precommit_deadline: None,
         smart_context_engine: std::sync::Arc::new(crate::RuntimeSmartContextEngine::default()),
         runtime_config: Arc::new(crate::RuntimeConfig::compatibility_current()),
         auto_redeem_enabled: false,
@@ -407,6 +410,7 @@ fn response_affinity_keeps_stale_verified_continuation_status_bound() {
     };
 
     let shared = RuntimeRotationProxyShared {
+        precommit_deadline: None,
         smart_context_engine: std::sync::Arc::new(crate::RuntimeSmartContextEngine::default()),
         runtime_config: Arc::new(crate::RuntimeConfig::compatibility_current()),
         auto_redeem_enabled: false,
@@ -519,6 +523,7 @@ fn session_affinity_ignores_stale_verified_continuation_status_for_owner() {
     };
 
     let shared = RuntimeRotationProxyShared {
+        precommit_deadline: None,
         smart_context_engine: std::sync::Arc::new(crate::RuntimeSmartContextEngine::default()),
         runtime_config: Arc::new(crate::RuntimeConfig::compatibility_current()),
         auto_redeem_enabled: false,
