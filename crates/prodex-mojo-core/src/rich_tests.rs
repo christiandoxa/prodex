@@ -6,6 +6,17 @@ fn rich_domain_self_test_covers_structured_results() {
 }
 
 #[test]
+fn gemini_invalid_stream_retry_delay_is_bounded() {
+    assert_eq!(gemini_invalid_stream_retry_delay_ms(0), Ok(1_000));
+    assert_eq!(gemini_invalid_stream_retry_delay_ms(1), Ok(2_000));
+    assert_eq!(gemini_invalid_stream_retry_delay_ms(8), Ok(256_000));
+    assert_eq!(
+        gemini_invalid_stream_retry_delay_ms(usize::MAX),
+        Err(MojoError::InvalidInput)
+    );
+}
+
+#[test]
 fn rich_abi_rejects_null_views_and_reports_utf8_offsets() {
     ensure_rich_abi().expect("rich ABI layout should match");
     let mut result = RichContextResult::default();

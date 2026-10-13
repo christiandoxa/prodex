@@ -16,7 +16,6 @@ const GEMINI_PROVIDER_CORE_RATE_LIMIT_RETRY_DELAYS_MS: &[u64] = &[
     5_000, 10_000, 20_000, 30_000, 30_000, 30_000, 30_000, 30_000, 30_000,
 ];
 pub const GEMINI_PROVIDER_CORE_MAX_INLINE_RATE_LIMIT_RETRY_DELAY_MS: u64 = 30_000;
-const GEMINI_PROVIDER_CORE_INVALID_STREAM_RETRY_BASE_DELAY_MS: u64 = 1_000;
 
 pub fn gemini_provider_core_retry_delay_ms_from_body(body: &[u8]) -> Option<u64> {
     gemini_provider_core_values_from_body(body)
@@ -51,8 +50,8 @@ pub fn gemini_provider_core_should_inline_rate_limit_retry(delay_ms: u64) -> boo
 }
 
 pub fn gemini_provider_core_invalid_stream_retry_delay_ms(retry_index: usize) -> u64 {
-    GEMINI_PROVIDER_CORE_INVALID_STREAM_RETRY_BASE_DELAY_MS
-        .saturating_mul(1_u64 << retry_index.min(8))
+    prodex_mojo_core::rich::gemini_invalid_stream_retry_delay_ms(retry_index)
+        .expect("Mojo Gemini invalid-stream retry policy returned invalid output")
 }
 
 fn gemini_provider_core_retry_delay_ms_from_value(value: &serde_json::Value) -> Option<u64> {

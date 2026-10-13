@@ -2044,6 +2044,15 @@ def previous_response_retry_delay_ms(retry_index: Int64) -> Int64:
     return -1
 
 
+@export("prodex_mojo_gemini_invalid_stream_retry_delay_v1")
+def prodex_mojo_gemini_invalid_stream_retry_delay_v1(
+    abi_version: Int64, retry_index: Int64
+) abi("C") -> Int64:
+    if abi_version != PRODEX_RICH_ABI_VERSION or retry_index < 0:
+        return -1
+    return 1_000 * (1 << min(retry_index, 8))
+
+
 @export("prodex_runtime_previous_response_plan_v1")
 def prodex_runtime_previous_response_plan_v1(
     route: Int64,
