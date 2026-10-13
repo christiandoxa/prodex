@@ -212,6 +212,18 @@ unsafe extern "C" {
         default_auto_compact_token_limit: u64,
         output_address: u64,
     ) -> i64;
+
+    fn prodex_external_provider_token_limits_v1(
+        abi_version: i64,
+        is_copilot: i64,
+        default_context_window: u64,
+        default_auto_compact_token_limit: u64,
+        context_window: u64,
+        context_present: i64,
+        auto_compact_token_limit: u64,
+        auto_compact_present: i64,
+        output_address: u64,
+    ) -> i64;
 }
 
 fn signed_len(value: &str) -> Result<i64, MojoError> {
@@ -661,6 +673,44 @@ pub fn external_provider_numeric_config(
         1 => Err(ExternalProviderConfigError::Mojo(MojoError::InvalidInput)),
         4 => Err(ExternalProviderConfigError::Mojo(MojoError::AbiMismatch)),
         _ => Err(ExternalProviderConfigError::Mojo(MojoError::InvalidOutput)),
+    }
+}
+
+/// Applies provider defaults and explicit context/compact limits through the
+/// Mojo-owned Super provider policy. The caller resolves any model catalog
+/// override before passing `default_context_window`.
+pub fn external_provider_token_limits(
+    is_copilot: bool,
+    default_context_window: u64,
+    default_auto_compact_token_limit: u64,
+    context_window: Option<u64>,
+    auto_compact_token_limit: Option<u64>,
+) -> Result<ExternalProviderNumericConfig, MojoError> {
+    let (context_window, context_present) = context_window.map_or((0, 0), |value| (value, 1));
+    let (auto_compact_token_limit, auto_compact_present) =
+        auto_compact_token_limit.map_or((0, 0), |value| (value, 1));
+    let mut output = [0_u64; 2];
+    let status = unsafe {
+        prodex_external_provider_token_limits_v1(
+            ABI_VERSION,
+            i64::from(is_copilot),
+            default_context_window,
+            default_auto_compact_token_limit,
+            context_window,
+            context_present,
+            auto_compact_token_limit,
+            auto_compact_present,
+            output.as_mut_ptr() as usize as u64,
+        )
+    };
+    match status {
+        0 => Ok(ExternalProviderNumericConfig {
+            context_window: output[0],
+            auto_compact_token_limit: output[1],
+        }),
+        1 => Err(MojoError::InvalidInput),
+        4 => Err(MojoError::AbiMismatch),
+        _ => Err(MojoError::InvalidOutput),
     }
 }
 

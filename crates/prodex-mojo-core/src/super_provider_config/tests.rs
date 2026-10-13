@@ -46,6 +46,31 @@ fn rust_external_provider_numeric_config(
     })
 }
 
+fn rust_external_provider_token_limits(
+    is_copilot: bool,
+    default_context_window: u64,
+    default_auto_compact_token_limit: u64,
+    context_window: Option<u64>,
+    auto_compact_token_limit: Option<u64>,
+) -> ExternalProviderNumericConfig {
+    let context_window = context_window
+        .filter(|value| *value > 1)
+        .unwrap_or(default_context_window);
+    let default_auto_compact_token_limit = if is_copilot {
+        context_window.saturating_mul(95).saturating_div(100)
+    } else {
+        default_auto_compact_token_limit
+    };
+    let auto_compact_token_limit = auto_compact_token_limit
+        .filter(|value| *value > 0)
+        .unwrap_or(default_auto_compact_token_limit)
+        .min(context_window.saturating_sub(1));
+    ExternalProviderNumericConfig {
+        context_window,
+        auto_compact_token_limit,
+    }
+}
+
 #[test]
 fn super_provider_config_kernel_preserves_aliases_escaping_and_order() {
     assert_eq!(
@@ -283,4 +308,36 @@ fn external_provider_numeric_config_matches_rust_validation_oracle() {
             auto_compact_token_limit: 9,
         }
     );
+}
+
+#[test]
+fn external_provider_token_limits_matches_rust_precedence_oracle() {
+    let cases = [
+        (false, 100_000, 90_000, None, None),
+        (false, 100_000, 90_000, Some(10), None),
+        (false, 100_000, 90_000, Some(1), Some(0)),
+        (false, 100_000, 90_000, Some(u64::MAX), Some(u64::MAX)),
+        (true, 1_050_000, 1_000_000, None, None),
+        (true, 922_000, 900_000, None, None),
+        (true, 272_000, 258_400, Some(333_333), Some(222_222)),
+        (true, u64::MAX, u64::MAX, None, None),
+    ];
+    for (is_copilot, default_context, default_compact, context, compact) in cases {
+        let expected = rust_external_provider_token_limits(
+            is_copilot,
+            default_context,
+            default_compact,
+            context,
+            compact,
+        );
+        let actual = external_provider_token_limits(
+            is_copilot,
+            default_context,
+            default_compact,
+            context,
+            compact,
+        )
+        .unwrap();
+        assert_eq!(actual, expected, "{is_copilot}, {context:?}, {compact:?}");
+    }
 }

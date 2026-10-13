@@ -1195,6 +1195,7 @@
         "operations": [
           "super_external_provider_alias_policy",
           "super_provider_config_serialization",
+          "super_provider_token_limit_policy",
           "super_toml_string_serialization",
           "runtime_external_provider_classification",
           "runtime_model_provider_classification",
@@ -5179,6 +5180,30 @@
       "rust_owner_before": "ordered 14-entry local/external Codex provider override table and scalar/string serialization",
       "rust_test_oracle": "deleted; direct kernel plus full CLI/Copilot tests cover provider id/name/base URL/model, responses wire API, auth/websocket flags, context/compact limits, web search and image generation",
       "rust_adapter_scope": "security-sensitive URL validation, provider metadata lookup, token-limit calculation, OsString interleaving and API-key ownership remain Rust"
+    },
+    {
+      "domain": "cli/super-provider-config",
+      "introduced_in": "0.437.10",
+      "baseline_state": "Rust Super provider token-limit normalization",
+      "final_state": "authoritative",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/super_provider_config.mojo",
+      "consumer": "crates/prodex-cli/src/super_provider_limits.rs",
+      "production_consumers": [
+        "crates/prodex-cli/src/super_provider_limits.rs",
+        "crates/prodex-cli/src/runtime_args.rs"
+      ],
+      "production_reachability_test": "crates/prodex-mojo-core/src/super_provider_config.rs",
+      "rust_state_after": "adapter-only",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "name": "super_provider_token_limit_policy",
+      "mojo_entry": "prodex_external_provider_token_limits_v1",
+      "consumer_marker": "prodex_mojo_core::super_provider_config::external_provider_token_limits",
+      "rust_owner_before": "Copilot model-default context selection, explicit context/compact override precedence, and compact ceiling clamping for local and external Super providers",
+      "rust_test_oracle": "deleted; direct ABI matrix and CLI caller tests cover local/external defaults, Copilot model budgets, explicit overrides, invalid low values, and compact clamping",
+      "rust_adapter_scope": "model-catalog lookup, host-size to fixed-width ABI conversion, Mojo error mapping, and provider-config argument materialization"
     },
     {
       "domain": "cli/super-provider-config",
