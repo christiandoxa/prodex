@@ -1,8 +1,10 @@
 use crate::MojoError;
 
 mod doctor;
+mod runway;
 mod status;
 pub use doctor::{InfoDoctorViewportPlan, doctor_value_color, doctor_viewport_plan};
+pub use runway::{InfoRunwayEstimate, InfoRunwayObservation, estimate_info_runway};
 pub use status::{
     InfoStatusFields, InfoStatusProfileChoice, InfoStatusQuotaGauge, InfoStatusReset,
     InfoStatusResourceCounters, InfoStatusResourceMetrics, InfoStatusResources,

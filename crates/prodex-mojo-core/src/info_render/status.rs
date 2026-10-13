@@ -13,7 +13,6 @@ pub(super) const STATUS_TOKEN_PLAN: i64 = 21;
 pub(super) const STATUS_HISTORY_LIMIT: usize = 64;
 const STATUS_FIELD_COUNT: usize = 14;
 const STATUS_FIELDS_FIXED_INPUTS: usize = 18;
-
 /// One parsed status token event passed to Mojo for ordering and history selection.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct InfoStatusTokenEvent<'a> {

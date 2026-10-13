@@ -186,100 +186,33 @@ pub fn estimate_info_runway(
     now: i64,
     min_span_seconds: i64,
 ) -> Option<InfoRunwayEstimate> {
-    if current_remaining <= 0 {
-        return Some(InfoRunwayEstimate {
-            burn_per_hour: 0.0,
-            observed_profiles: 0,
-            observed_span_seconds: 0,
-            exhaust_at: now,
-        });
-    }
-
-    let mut by_profile = BTreeMap::<String, Vec<&InfoRuntimeQuotaObservation>>::new();
-    for observation in observations {
-        by_profile
-            .entry(observation.profile.clone())
-            .or_default()
-            .push(observation);
-    }
-
-    let mut burn_per_hour = 0.0;
-    let mut observed_profiles = 0;
-    let mut earliest = i64::MAX;
-    let mut latest = i64::MIN;
-
-    for profile_observations in by_profile.values_mut() {
-        profile_observations.sort_by_key(|observation| observation.timestamp);
-        let Some((profile_burn_per_hour, start, end)) =
-            info_profile_window_burn_rate(profile_observations, window, min_span_seconds)
-        else {
-            continue;
-        };
-        burn_per_hour += profile_burn_per_hour;
-        observed_profiles += 1;
-        earliest = earliest.min(start);
-        latest = latest.max(end);
-    }
-
-    if burn_per_hour <= 0.0 || observed_profiles == 0 || earliest == i64::MAX || latest == i64::MIN
-    {
-        return None;
-    }
-
-    let seconds_until_exhaustion =
-        ((current_remaining as f64 / burn_per_hour) * 3600.0).ceil() as i64;
-
-    Some(InfoRunwayEstimate {
-        burn_per_hour,
-        observed_profiles,
-        observed_span_seconds: latest.saturating_sub(earliest),
-        exhaust_at: now.saturating_add(seconds_until_exhaustion.max(0)),
+    let observations = observations
+        .iter()
+        .map(
+            |observation| prodex_mojo_core::info_render::InfoRunwayObservation {
+                timestamp: observation.timestamp,
+                profile: observation.profile.as_str(),
+                five_hour_remaining: observation.five_hour_remaining,
+                weekly_remaining: observation.weekly_remaining,
+            },
+        )
+        .collect::<Vec<_>>();
+    let window = match window {
+        InfoQuotaWindow::FiveHour => 0,
+        InfoQuotaWindow::Weekly => 1,
+    };
+    prodex_mojo_core::info_render::estimate_info_runway(
+        &observations,
+        window,
+        current_remaining,
+        now,
+        min_span_seconds,
+    )
+    .unwrap_or_else(|error| panic!("Mojo info runway estimator failed: {error:?}"))
+    .map(|estimate| InfoRunwayEstimate {
+        burn_per_hour: estimate.burn_per_hour,
+        observed_profiles: estimate.observed_profiles,
+        observed_span_seconds: estimate.observed_span_seconds,
+        exhaust_at: estimate.exhaust_at,
     })
-}
-
-pub fn info_profile_window_burn_rate(
-    observations: &[&InfoRuntimeQuotaObservation],
-    window: InfoQuotaWindow,
-    min_span_seconds: i64,
-) -> Option<(f64, i64, i64)> {
-    if observations.len() < 2 {
-        return None;
-    }
-
-    let latest = observations.last()?;
-    let mut earliest = *latest;
-    let mut current_remaining = info_observation_window_remaining(latest, window);
-
-    for observation in observations.iter().rev().skip(1) {
-        let remaining = info_observation_window_remaining(observation, window);
-        if remaining < current_remaining {
-            break;
-        }
-        earliest = *observation;
-        current_remaining = remaining;
-    }
-
-    let earliest_remaining = info_observation_window_remaining(earliest, window);
-    let latest_remaining = info_observation_window_remaining(latest, window);
-    let burned = earliest_remaining.saturating_sub(latest_remaining);
-    let span_seconds = latest.timestamp.saturating_sub(earliest.timestamp);
-    if burned <= 0 || span_seconds < min_span_seconds {
-        return None;
-    }
-
-    Some((
-        burned as f64 * 3600.0 / span_seconds as f64,
-        earliest.timestamp,
-        latest.timestamp,
-    ))
-}
-
-pub fn info_observation_window_remaining(
-    observation: &InfoRuntimeQuotaObservation,
-    window: InfoQuotaWindow,
-) -> i64 {
-    match window {
-        InfoQuotaWindow::FiveHour => observation.five_hour_remaining,
-        InfoQuotaWindow::Weekly => observation.weekly_remaining,
-    }
 }
