@@ -31,6 +31,24 @@ fn runtime_proxy_dot_segment_escaping_preserves_query_and_utf8() {
 }
 
 #[test]
+fn runtime_proxy_header_skip_kind_uses_trimmed_ascii_policy() {
+    assert_eq!(runtime_proxy_header_skip_kind("  HoSt ").unwrap(), 1);
+    assert_eq!(
+        runtime_proxy_header_skip_kind("X-Prodex-Internal-Test").unwrap(),
+        2
+    );
+    assert_eq!(runtime_proxy_header_skip_kind("authorization").unwrap(), 3);
+    assert_eq!(
+        runtime_proxy_header_skip_kind("ChatGPT-Account-Id").unwrap(),
+        4
+    );
+    assert_eq!(
+        runtime_proxy_header_skip_kind("x-codex-turn-state").unwrap(),
+        0
+    );
+}
+
+#[test]
 fn rich_abi_rejects_null_views_and_reports_utf8_offsets() {
     ensure_rich_abi().expect("rich ABI layout should match");
     let mut result = RichContextResult::default();

@@ -129,6 +129,31 @@ pub fn runtime_proxy_escape_dot_segments<'a>(
     }
 }
 
+/// Classifies a request header that must stay local to the proxy.
+pub fn runtime_proxy_header_skip_kind(name: &str) -> Result<i64, MojoError> {
+    ensure_rich_abi()?;
+    let mut output = -1_i64;
+    let status = unsafe {
+        prodex_runtime_proxy_header_skip_kind_v1(
+            1,
+            name.as_ptr() as usize as u64,
+            i64::try_from(name.len()).map_err(|_| MojoError::InvalidInput)?,
+            &mut output,
+        )
+    };
+    if status != 0 {
+        return Err(match status {
+            1 => MojoError::InvalidInput,
+            4 => MojoError::AbiMismatch,
+            _ => MojoError::InvalidOutput,
+        });
+    }
+    if !(0..=4).contains(&output) {
+        return Err(MojoError::InvalidOutput);
+    }
+    Ok(output)
+}
+
 fn runtime_proxy_bool_output(value: i64) -> Result<bool, MojoError> {
     match value {
         0 => Ok(false),
