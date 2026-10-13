@@ -352,3 +352,32 @@ the archive barrier; Windows ARM64 Rust binary compilation still
 determines a substantial portion of the remaining release critical path.
 No measured official release timing is claimed until a new release
 actually uses the cache.
+
+
+## Native Windows ARM64 release benchmark (opt-in; not yet adopted)
+
+Across published standalone releases 38351207430 and 38337354865,
+**Windows ARM64 binary compilation on an x86_64 Windows runner**
+took 9m42s and 8m54s respectively. This is the remaining largest
+production Rust binary-build step after moving Intel macOS compilation
+onto Apple Silicon. The release still uses the audited x86_64 runner
+until a native alternative proves both faster and equally correct.
+
+GitHub supports the generally available standard windows-11-arm
+hosted runner for Windows ARM64, and the current image uses VS2026.
+The new opt-in
+.github/workflows/release-windows-arm64-calibration.yml
+benchmark uses that native host and the pinned 0.437.9 source
+and ARM64 Mojo archive from the **same successful official release
+workflow**. It checks repository, workflow identity, commit SHA, main
+branch, completed-success provenance, and the actual checked-out HEAD.
+It builds a real Thin-LTO aarch64-pc-windows-msvc production binary,
+validates PE Machine 0xAA64, then runs version/help/runtime-doctor
+smokes **natively** with compiled-in Mojo required and no fallback.
+
+The benchmark uploads only a text timing record. It never publishes a
+binary, modifies tags or changes the official six-platform release
+matrix. The official Windows ARM64 runner must remain unchanged until
+the benchmark succeeds in compilation, native ABI/runtime, and measured
+critical-path performance. Any failure is a reason to investigate
+platform portability, not to disable supply-chain or smoke checks.

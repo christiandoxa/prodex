@@ -252,3 +252,35 @@ test("release-only ARM64 archive cache is bounded, source-addressed and preserve
   assert.match(build, /needs:\s*\n\s*- verify-ci\n\s*- build-mojo-archives/);
   assert.equal((archive.match(/^          - target: /gm) ?? []).length, 6);
 });
+
+
+test("native Windows ARM64 release calibration is source-pinned, opt-in and cannot publish", () => {
+  const workflow = readFileSync(".github/workflows/release-windows-arm64-calibration.yml", "utf8");
+  assert.match(workflow, /name: Windows ARM64 native release build calibration/);
+  assert.match(workflow, /workflow_dispatch:/);
+  assert.match(workflow, /runs-on: windows-11-arm/);
+  assert.doesNotMatch(workflow, /^  push:/m);
+  assert.match(workflow, /permissions:\n  contents: read\n  actions: read/);
+  assert.match(workflow, /\.head_sha -cne \$env:TARGET_SHA/);
+  assert.match(workflow, /\.event -cne 'workflow_dispatch'/);
+  assert.match(workflow, /\.path -cne '\.github\/workflows\/standalone-release.yml'/);
+  assert.match(workflow, /\.conclusion -cne 'success'/);
+  assert.match(workflow, /\.repository\.full_name -cne \$env:GITHUB_REPOSITORY/);
+  assert.match(workflow, /- name: Check out exact release source/);
+  assert.match(workflow, /ref: \$\{\{ inputs\.target_sha \}\}/);
+  assert.match(workflow, /name: mojo-archive-aarch64-pc-windows-msvc/);
+  assert.match(workflow, /run-id: \$\{\{ inputs\.source_release_run_id \}\}/);
+  assert.match(workflow, /PRODEX_MOJO_REQUIRED: "1"/);
+  assert.match(workflow, /PRODEX_MOJO_ARCHIVE:/);
+  assert.match(workflow, /llvm-nm -g/);
+  assert.match(workflow, /KGEN_CompilerRT_/);
+  assert.match(workflow, /cargo build --release --locked --target aarch64-pc-windows-msvc --features mojo-core --bin prodex/);
+  assert.match(workflow, /\$machine -ne 0xAA64/);
+  assert.match(workflow, /- name: Run real native ARM64 Mojo smoke/);
+  assert.match(workflow, /"implementation": "mojo-compiled-in"/);
+  assert.match(workflow, /"fallback": false/);
+  assert.match(workflow, /"self_test": "passed"/);
+  assert.doesNotMatch(workflow, /gh release (?:create|edit|upload)/);
+  assert.doesNotMatch(workflow, /git push/);
+  assert.doesNotMatch(workflow, /- name: Upload binary artifact/);
+});
