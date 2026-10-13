@@ -51,8 +51,8 @@
   },
   {
     "file": "crates/prodex-app/src/runtime_proxy/presidio/tests.rs",
-    "maxLines": 1075,
-    "reason": "Presidio HTTP and WebSocket regressions share one harness for effective fail-closed policy, external failure classes, telemetry, and no-upstream assertions."
+    "maxLines": 1002,
+    "reason": "Presidio transport-policy regressions retain fail-closed and telemetry coverage; shared runtime construction is extracted into tests/shared.rs and the reviewed cap is ratcheted down."
   },
   {
     "file": "crates/prodex-app/tests/src/runtime_proxy/smart_context/prepare.rs",
