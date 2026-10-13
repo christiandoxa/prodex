@@ -13,6 +13,7 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 
 ### Deps
 
+- Audit Ponytail 5.1.1 stable source (`ef94261`)
 - Update quinn-proto past peer-triggered panic advisories (`f7e2028`)
 
 ### Misc
@@ -44,6 +45,8 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
   budget-exhausted 503. Drop cancelled transport work instead of orphaning it.
 - Update transitive `quinn-proto` to 0.11.18 for the peer-triggered panic
   advisories reported by the release dependency audit.
+- Refresh the verified Ponytail stable reference to 5.1.1, including its upstream
+  bounded SessionStart mapping and repository-text/symlink isolation fixes.
 
 ## Changelog
 
