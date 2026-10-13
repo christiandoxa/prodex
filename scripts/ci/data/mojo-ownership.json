@@ -589,6 +589,7 @@
           "gemini_translator_request_planning",
           "gemini_bridge_request_fallbacks",
           "gemini_tool_call_signature_preservation",
+          "gemini_tool_call_thought_signature_hardening",
           "provider_scalar_policy"
         ]
       },
@@ -8281,6 +8282,33 @@
       "duplicate_production_owner": false,
       "platform_fallback": false,
       "rust_adapter_scope": "usage/snapshot acquisition, model-capacity observation, profile metadata and candidate DTO materialization"
+    },
+    {
+      "name": "gemini_tool_call_thought_signature_hardening",
+      "domain": "provider/gemini",
+      "introduced_in": "0.438.0",
+      "baseline_state": "candidate",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_gemini_bridge_request_kernel_v1",
+      "mojo_abi_version": 1,
+      "mojo_operation_ids": {
+        "harden_tool_call_thought_signatures": 13
+      },
+      "mojo_source": "mojo/prodex_core/provider_constraints.mojo",
+      "consumer": "crates/prodex-provider-core/src/gemini_bridge/hardening/thought_signature.rs",
+      "consumer_marker": "GeminiBridgeRequestOperation::HardenToolCallThoughtSignatures",
+      "production_consumers": [
+        "crates/prodex-provider-core/src/gemini_bridge/hardening/thought_signature.rs",
+        "crates/prodex-app/src/runtime_launch/proxy_startup/gemini_thought_signatures.rs"
+      ],
+      "production_reachability_test": "crates/prodex-mojo-core/tests/gemini_request_content.rs",
+      "rust_owner_before": "Rust selected Gemini 3 model content, found the first unsigned function call, injected the synthetic thought signature, and counted injections",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "existing provider-runtime caller tests cover Gemini 3 injection and Gemini 2.5 no-op behavior; direct ABI fixtures cover request/root contents precedence and signature aliases",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "model gate, borrowed body marshalling, envelope decoding, and caller-owned byte replacement"
     }
   ],
   "rust_semantic_reductions": [
@@ -9354,6 +9382,21 @@
       "production_consumer": "crates/prodex-runtime-proxy/src/upstream.rs",
       "parity_test": "crates/prodex-mojo-core/src/rich_tests.rs",
       "performance": "one scalar Mojo header classification call per forwarded header"
+    },
+    {
+      "file": "crates/prodex-provider-core/src/gemini_bridge/hardening/thought_signature.rs",
+      "symbol": "gemini_provider_core_harden_tool_call_thought_signatures",
+      "operation": "gemini_tool_call_thought_signature_hardening",
+      "previous_responsibility": "Gemini 3 model gate, first unsigned function-call selection, synthetic thought-signature injection, and injection counting",
+      "final_state": "adapter-only",
+      "rust_before": "crates/prodex-provider-core/src/gemini_bridge/hardening/thought_signature.rs::gemini_provider_core_harden_tool_call_thought_signatures",
+      "rust_after": "Rust retains model gating, bounded Mojo invocation, envelope decoding, and byte replacement",
+      "mojo_owner": "mojo/prodex_core/provider_constraints.mojo::prodex_gemini_bridge_request_kernel_v1(operation=13)",
+      "mojo_source": "mojo/prodex_core/provider_constraints.mojo",
+      "mojo_entry": "prodex_gemini_bridge_request_kernel_v1",
+      "production_consumer": "crates/prodex-provider-core/src/gemini_bridge/hardening/thought_signature.rs",
+      "parity_test": "crates/prodex-mojo-core/tests/gemini_request_content.rs",
+      "performance": "one bounded body rewrite per Gemini 3 request"
     }
   ],
   "deleted_authoritative_operations": [

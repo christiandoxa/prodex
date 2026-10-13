@@ -35,6 +35,16 @@ fn preserve_tool_call_signatures(messages: &[u8]) -> Result<Vec<u8>, prodex_mojo
     gemini_bridge_request_kernel(input)
 }
 
+fn harden_tool_call_thought_signatures(
+    body: &[u8],
+) -> Result<Vec<u8>, prodex_mojo_core::MojoError> {
+    let mut input = GeminiBridgeRequestKernelInput::new(
+        GeminiBridgeRequestOperation::HardenToolCallThoughtSignatures,
+    );
+    input.primary = Some(body);
+    gemini_bridge_request_kernel(input)
+}
+
 #[test]
 fn schema_union_ignores_empty_any_of_before_one_of() {
     assert_eq!(
@@ -249,6 +259,27 @@ fn signature_preservation_accepts_empty_messages_and_rejects_non_array_json() {
         preserve_tool_call_signatures(br#"{}"#),
         Err(prodex_mojo_core::MojoError::InvalidInput)
     );
+}
+
+#[test]
+fn thought_signature_hardening_returns_body_and_injection_count_envelope() {
+    let output = harden_tool_call_thought_signatures(
+        br#"{"request":{"contents":[{"role":"model","parts":[{"functionCall":{"name":"first"}},{"functionCall":{"name":"second"}}]}]}}"#,
+    )
+    .unwrap();
+    let output = String::from_utf8(output).unwrap();
+    assert!(output.ends_with(",1]"), "output={output}");
+    assert!(
+        output.contains("\"thoughtSignature\":\"skip_thought_signature_validator\""),
+        "output={output}"
+    );
+    assert_eq!(output.matches("\"thoughtSignature\"").count(), 1);
+}
+
+#[test]
+fn thought_signature_hardening_keeps_valid_scalar_json_as_a_noop() {
+    let output = harden_tool_call_thought_signatures(b"null").unwrap();
+    assert_eq!(output, br#"[null,0]"#);
 }
 
 #[test]

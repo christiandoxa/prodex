@@ -23,6 +23,7 @@ pub enum GeminiBridgeRequestOperation {
     RawTranslatorRequest = 10,
     ValidateTranslatorRequest = 11,
     PreserveToolCallSignatures = 12,
+    HardenToolCallThoughtSignatures = 13,
 }
 
 impl GeminiBridgeRequestOperation {
@@ -124,7 +125,11 @@ fn view(value: Option<&[u8]>) -> GeminiBridgeRequestStringView {
 }
 
 fn output_capacity(input: &GeminiBridgeRequestKernelInput<'_>) -> Result<usize, MojoError> {
-    let max_bytes = if input.operation == GeminiBridgeRequestOperation::PreserveToolCallSignatures {
+    let max_bytes = if matches!(
+        input.operation,
+        GeminiBridgeRequestOperation::PreserveToolCallSignatures
+            | GeminiBridgeRequestOperation::HardenToolCallThoughtSignatures
+    ) {
         GEMINI_SIGNATURE_PRESERVATION_MAX_BYTES
     } else {
         GEMINI_BRIDGE_REQUEST_MAX_BYTES

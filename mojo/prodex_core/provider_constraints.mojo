@@ -3196,6 +3196,7 @@ comptime GEMINI_BRIDGE_REQUEST_TEXT_CONTENTS: Int64 = 9
 comptime GEMINI_BRIDGE_REQUEST_RAW_TRANSLATOR: Int64 = 10
 comptime GEMINI_BRIDGE_REQUEST_VALIDATE_TRANSLATOR: Int64 = 11
 comptime GEMINI_BRIDGE_REQUEST_PRESERVE_TOOL_CALL_SIGNATURES: Int64 = 12
+comptime GEMINI_BRIDGE_REQUEST_HARDEN_TOOL_CALL_THOUGHT_SIGNATURES: Int64 = 13
 
 @fieldwise_init
 struct GeminiBridgeRequestInput(Copyable):
@@ -3224,12 +3225,12 @@ def gemini_bridge_request_input_flag_valid(value: Int64) -> Bool:
 
 
 def gemini_bridge_request_input_valid(input: GeminiBridgeRequestInput) -> Bool:
-    if input.operation < GEMINI_BRIDGE_REQUEST_GENERATE_CONTENT_REQUEST or input.operation > GEMINI_BRIDGE_REQUEST_PRESERVE_TOOL_CALL_SIGNATURES:
+    if input.operation < GEMINI_BRIDGE_REQUEST_GENERATE_CONTENT_REQUEST or input.operation > GEMINI_BRIDGE_REQUEST_HARDEN_TOOL_CALL_THOUGHT_SIGNATURES:
         return False
     if not gemini_bridge_request_input_flag_valid(input.primary_present) or not gemini_bridge_request_input_flag_valid(input.secondary_present) or not gemini_bridge_request_input_flag_valid(input.tertiary_present) or not gemini_bridge_request_input_flag_valid(input.quaternary_present) or not gemini_bridge_request_input_flag_valid(input.quinary_present) or not gemini_bridge_request_input_flag_valid(input.senary_present) or not gemini_bridge_request_input_flag_valid(input.septenary_present) or not gemini_bridge_request_input_flag_valid(input.octonary_present):
         return False
     var primary_valid = gemini_request_content_view_valid(input.primary)
-    if input.operation == GEMINI_BRIDGE_REQUEST_PRESERVE_TOOL_CALL_SIGNATURES:
+    if input.operation == GEMINI_BRIDGE_REQUEST_PRESERVE_TOOL_CALL_SIGNATURES or input.operation == GEMINI_BRIDGE_REQUEST_HARDEN_TOOL_CALL_THOUGHT_SIGNATURES:
         primary_valid = input.primary.len <= UInt64(GEMINI_SIGNATURE_PRESERVATION_MAX_BYTES) and (input.primary.len == 0 or input.primary.ptr != 0)
     if not primary_valid or not gemini_request_content_view_valid(input.secondary) or not gemini_request_content_view_valid(input.tertiary) or not gemini_request_content_view_valid(input.quaternary) or not gemini_request_content_view_valid(input.quinary) or not gemini_request_content_view_valid(input.senary) or not gemini_request_content_view_valid(input.septenary) or not gemini_request_content_view_valid(input.octonary):
         return False
@@ -3272,6 +3273,12 @@ def gemini_bridge_request_input_valid(input: GeminiBridgeRequestInput) -> Bool:
     if input.operation == GEMINI_BRIDGE_REQUEST_VALIDATE_TRANSLATOR and input.primary_present == 0:
         return False
     if input.operation == GEMINI_BRIDGE_REQUEST_PRESERVE_TOOL_CALL_SIGNATURES and (
+        input.primary_present == 0 or input.secondary_present != 0 or input.tertiary_present != 0
+        or input.quaternary_present != 0 or input.quinary_present != 0 or input.senary_present != 0
+        or input.septenary_present != 0 or input.octonary_present != 0 or input.kind != 0
+    ):
+        return False
+    if input.operation == GEMINI_BRIDGE_REQUEST_HARDEN_TOOL_CALL_THOUGHT_SIGNATURES and (
         input.primary_present == 0 or input.secondary_present != 0 or input.tertiary_present != 0
         or input.quaternary_present != 0 or input.quinary_present != 0 or input.senary_present != 0
         or input.septenary_present != 0 or input.octonary_present != 0 or input.kind != 0
@@ -4689,6 +4696,312 @@ def gemini_bridge_request_write_signature_preservation(
             index = gemini_request_content_skip_ws(input.primary, index + 1, bounds[1] - 1)
         elif index != bounds[1] - 1:
             return False
+    return gemini_request_content_put_byte(writer, 93)
+
+
+def gemini_bridge_request_has_thought_signature(
+    source: GeminiRequestContentStringView,
+    object_start: Int64,
+    object_end: Int64,
+) -> Bool:
+    var candidate = gemini_bridge_request_object_member(
+        source, object_start, object_end, StringSlice("thoughtSignature")
+    )
+    if candidate[0] < 0:
+        candidate = gemini_bridge_request_object_member(
+            source, object_start, object_end, StringSlice("thought_signature")
+        )
+    if candidate[0] < 0 or gemini_request_content_byte(source, candidate[0]) != 34:
+        return False
+    return gemini_request_content_string_has_non_space(
+        source, candidate[0], candidate[1]
+    )
+
+
+def gemini_bridge_request_write_hardened_part(
+    source: GeminiRequestContentStringView,
+    object_start: Int64,
+    object_end: Int64,
+    writer: Pointer[mut=True, GeminiRequestContentWriter, _],
+) -> Bool:
+    if not gemini_bridge_request_is_object(source, object_start, object_end):
+        return gemini_request_content_put_range(writer, source, object_start, object_end)
+    if not gemini_request_content_put_byte(writer, 123):
+        return False
+    var first = True
+    var index = gemini_request_content_skip_ws(source, object_start + 1, object_end - 1)
+    while index < object_end - 1:
+        var key_start = index
+        var key_end = gemini_request_content_string_end(source, key_start, object_end - 1)
+        if key_end < 0:
+            return False
+        index = gemini_request_content_skip_ws(source, key_end, object_end - 1)
+        if index >= object_end - 1 or gemini_request_content_byte(source, index) != 58:
+            return False
+        var value_start = gemini_request_content_skip_ws(source, index + 1, object_end - 1)
+        var value_end = gemini_request_content_value_end(source, value_start, object_end - 1, 0)
+        if value_end < 0:
+            return False
+        if not first and not gemini_request_content_put_byte(writer, 44):
+            return False
+        first = False
+        if not gemini_request_content_put_range(writer, source, key_start, key_end):
+            return False
+        if not gemini_request_content_put_byte(writer, 58):
+            return False
+        if not gemini_request_content_put_range(writer, source, value_start, value_end):
+            return False
+        index = gemini_request_content_skip_ws(source, value_end, object_end - 1)
+        if index < object_end - 1 and gemini_request_content_byte(source, index) == 44:
+            index = gemini_request_content_skip_ws(source, index + 1, object_end - 1)
+            continue
+        if index != object_end - 1:
+            return False
+        break
+    if not first and not gemini_request_content_put_byte(writer, 44):
+        return False
+    return (
+        gemini_request_content_put_literal(
+            writer, StringSlice("\"thoughtSignature\":\"skip_thought_signature_validator\"")
+        )
+        and gemini_request_content_put_byte(writer, 125)
+    )
+
+
+def gemini_bridge_request_write_hardened_parts(
+    source: GeminiRequestContentStringView,
+    array_start: Int64,
+    array_end: Int64,
+    writer: Pointer[mut=True, GeminiRequestContentWriter, _],
+    injected: Pointer[mut=True, Int64, _],
+) -> Bool:
+    if not gemini_bridge_request_is_array(source, array_start, array_end):
+        return False
+    if not gemini_request_content_put_byte(writer, 91):
+        return False
+    var first = True
+    var found_call = False
+    var index = gemini_request_content_skip_ws(source, array_start + 1, array_end - 1)
+    while index < array_end - 1:
+        var value_end = gemini_request_content_value_end(source, index, array_end - 1, 0)
+        if value_end < 0:
+            return False
+        if not first and not gemini_request_content_put_byte(writer, 44):
+            return False
+        first = False
+        var is_call = gemini_bridge_request_is_object(source, index, value_end) and gemini_bridge_request_object_member(
+            source, index, value_end, StringSlice("functionCall")
+        )[0] >= 0
+        if is_call and not found_call:
+            found_call = True
+            if not gemini_bridge_request_has_thought_signature(source, index, value_end):
+                if not gemini_bridge_request_write_hardened_part(source, index, value_end, writer):
+                    return False
+                injected[] += 1
+            else:
+                if not gemini_request_content_put_range(writer, source, index, value_end):
+                    return False
+        elif not gemini_request_content_put_range(writer, source, index, value_end):
+            return False
+        index = gemini_request_content_skip_ws(source, value_end, array_end - 1)
+        if index < array_end - 1 and gemini_request_content_byte(source, index) == 44:
+            index = gemini_request_content_skip_ws(source, index + 1, array_end - 1)
+            continue
+        if index != array_end - 1:
+            return False
+        break
+    return gemini_request_content_put_byte(writer, 93)
+
+
+def gemini_bridge_request_write_hardened_content(
+    source: GeminiRequestContentStringView,
+    object_start: Int64,
+    object_end: Int64,
+    writer: Pointer[mut=True, GeminiRequestContentWriter, _],
+    injected: Pointer[mut=True, Int64, _],
+) -> Bool:
+    if not gemini_bridge_request_is_object(source, object_start, object_end):
+        return gemini_request_content_put_range(writer, source, object_start, object_end)
+    var role = gemini_bridge_request_object_member(
+        source, object_start, object_end, StringSlice("role")
+    )
+    var parts = gemini_bridge_request_object_member(
+        source, object_start, object_end, StringSlice("parts")
+    )
+    if not gemini_request_content_string_equals(
+        source, role[0], role[1], StringSlice("model"), False
+    ) or not gemini_bridge_request_is_array(source, parts[0], parts[1]):
+        return gemini_request_content_put_range(writer, source, object_start, object_end)
+    if not gemini_request_content_put_byte(writer, 123):
+        return False
+    var first = True
+    var index = gemini_request_content_skip_ws(source, object_start + 1, object_end - 1)
+    while index < object_end - 1:
+        var key_start = index
+        var key_end = gemini_request_content_string_end(source, key_start, object_end - 1)
+        if key_end < 0:
+            return False
+        index = gemini_request_content_skip_ws(source, key_end, object_end - 1)
+        if index >= object_end - 1 or gemini_request_content_byte(source, index) != 58:
+            return False
+        var value_start = gemini_request_content_skip_ws(source, index + 1, object_end - 1)
+        var value_end = gemini_request_content_value_end(source, value_start, object_end - 1, 0)
+        if value_end < 0:
+            return False
+        if not first and not gemini_request_content_put_byte(writer, 44):
+            return False
+        first = False
+        if not gemini_request_content_put_range(writer, source, key_start, key_end) or not gemini_request_content_put_byte(writer, 58):
+            return False
+        if gemini_request_content_raw_equals(source, key_start, key_end, StringSlice("parts")):
+            if not gemini_bridge_request_write_hardened_parts(source, value_start, value_end, writer, injected):
+                return False
+        elif not gemini_request_content_put_range(writer, source, value_start, value_end):
+            return False
+        index = gemini_request_content_skip_ws(source, value_end, object_end - 1)
+        if index < object_end - 1 and gemini_request_content_byte(source, index) == 44:
+            index = gemini_request_content_skip_ws(source, index + 1, object_end - 1)
+            continue
+        if index != object_end - 1:
+            return False
+        break
+    return gemini_request_content_put_byte(writer, 125)
+
+
+def gemini_bridge_request_write_hardened_contents(
+    source: GeminiRequestContentStringView,
+    array_start: Int64,
+    array_end: Int64,
+    writer: Pointer[mut=True, GeminiRequestContentWriter, _],
+    injected: Pointer[mut=True, Int64, _],
+) -> Bool:
+    if not gemini_bridge_request_is_array(source, array_start, array_end):
+        return False
+    if not gemini_request_content_put_byte(writer, 91):
+        return False
+    var first = True
+    var index = gemini_request_content_skip_ws(source, array_start + 1, array_end - 1)
+    while index < array_end - 1:
+        var value_end = gemini_request_content_value_end(source, index, array_end - 1, 0)
+        if value_end < 0:
+            return False
+        if not first and not gemini_request_content_put_byte(writer, 44):
+            return False
+        first = False
+        if not gemini_bridge_request_write_hardened_content(source, index, value_end, writer, injected):
+            return False
+        index = gemini_request_content_skip_ws(source, value_end, array_end - 1)
+        if index < array_end - 1 and gemini_request_content_byte(source, index) == 44:
+            index = gemini_request_content_skip_ws(source, index + 1, array_end - 1)
+            continue
+        if index != array_end - 1:
+            return False
+        break
+    return gemini_request_content_put_byte(writer, 93)
+
+
+def gemini_bridge_request_write_hardened_object(
+    source: GeminiRequestContentStringView,
+    object_start: Int64,
+    object_end: Int64,
+    target_request: Bool,
+    target_root: Bool,
+    writer: Pointer[mut=True, GeminiRequestContentWriter, _],
+    injected: Pointer[mut=True, Int64, _],
+) -> Bool:
+    if not gemini_bridge_request_is_object(source, object_start, object_end):
+        return gemini_request_content_put_range(writer, source, object_start, object_end)
+    if not gemini_request_content_put_byte(writer, 123):
+        return False
+    var first = True
+    var index = gemini_request_content_skip_ws(source, object_start + 1, object_end - 1)
+    while index < object_end - 1:
+        var key_start = index
+        var key_end = gemini_request_content_string_end(source, key_start, object_end - 1)
+        if key_end < 0:
+            return False
+        index = gemini_request_content_skip_ws(source, key_end, object_end - 1)
+        if index >= object_end - 1 or gemini_request_content_byte(source, index) != 58:
+            return False
+        var value_start = gemini_request_content_skip_ws(source, index + 1, object_end - 1)
+        var value_end = gemini_request_content_value_end(source, value_start, object_end - 1, 0)
+        if value_end < 0:
+            return False
+        if not first and not gemini_request_content_put_byte(writer, 44):
+            return False
+        first = False
+        if not gemini_request_content_put_range(writer, source, key_start, key_end) or not gemini_request_content_put_byte(writer, 58):
+            return False
+        var rewrite_contents = target_root and gemini_request_content_raw_equals(
+            source, key_start, key_end, StringSlice("contents")
+        )
+        var rewrite_request = target_request and gemini_request_content_raw_equals(
+            source, key_start, key_end, StringSlice("request")
+        )
+        if rewrite_contents:
+            if not gemini_bridge_request_write_hardened_contents(source, value_start, value_end, writer, injected):
+                return False
+        elif rewrite_request and gemini_bridge_request_is_object(source, value_start, value_end):
+            if not gemini_bridge_request_write_hardened_object(source, value_start, value_end, False, True, writer, injected):
+                return False
+        elif not gemini_request_content_put_range(writer, source, value_start, value_end):
+            return False
+        index = gemini_request_content_skip_ws(source, value_end, object_end - 1)
+        if index < object_end - 1 and gemini_request_content_byte(source, index) == 44:
+            index = gemini_request_content_skip_ws(source, index + 1, object_end - 1)
+            continue
+        if index != object_end - 1:
+            return False
+        break
+    return gemini_request_content_put_byte(writer, 125)
+
+
+def gemini_bridge_request_write_hardened_request(
+    input: GeminiBridgeRequestInput,
+    writer: Pointer[mut=True, GeminiRequestContentWriter, _],
+) -> Bool:
+    if not gemini_bridge_request_signature_fragment_valid(input.primary):
+        return False
+    var root = gemini_bridge_request_signature_value_bounds(input.primary)
+    if not gemini_bridge_request_is_object(input.primary, root[0], root[1]):
+        return (
+            gemini_request_content_put_byte(writer, 91)
+            and gemini_request_content_put_range(writer, input.primary, root[0], root[1])
+            and gemini_request_content_put_literal(writer, StringSlice(",0]"))
+        )
+    var request = gemini_bridge_request_object_member(
+        input.primary, root[0], root[1], StringSlice("request")
+    )
+    var target_request = gemini_bridge_request_is_object(input.primary, request[0], request[1])
+    if target_request:
+        var nested = gemini_bridge_request_object_member(
+            input.primary, request[0], request[1], StringSlice("contents")
+        )
+        target_request = gemini_bridge_request_is_array(input.primary, nested[0], nested[1])
+    var root_contents = gemini_bridge_request_object_member(
+        input.primary, root[0], root[1], StringSlice("contents")
+    )
+    var target_root = not target_request and gemini_bridge_request_is_array(
+        input.primary, root_contents[0], root_contents[1]
+    )
+    if not gemini_request_content_put_byte(writer, 91):
+        return False
+    var injected: Int64 = 0
+    var injected_ptr = Pointer(to=injected)
+    if not gemini_bridge_request_write_hardened_object(
+        input.primary, root[0], root[1], target_request, target_root, writer, injected_ptr
+    ):
+        return False
+    if not gemini_request_content_put_byte(writer, 44):
+        return False
+    var divisor: Int64 = 1
+    while injected / divisor >= 10:
+        divisor *= 10
+    while divisor > 0:
+        if not gemini_request_content_put_byte(writer, UInt8(injected / divisor) + 48):
+            return False
+        injected %= divisor
+        divisor /= 10
     return gemini_request_content_put_byte(writer, 93)
 
 
@@ -7964,6 +8277,8 @@ def prodex_gemini_bridge_request_kernel_v1(
         ok = gemini_bridge_request_write_raw_translator(input, writer_ptr)
     elif input.operation == GEMINI_BRIDGE_REQUEST_PRESERVE_TOOL_CALL_SIGNATURES:
         ok = gemini_bridge_request_write_signature_preservation(input, writer_ptr)
+    elif input.operation == GEMINI_BRIDGE_REQUEST_HARDEN_TOOL_CALL_THOUGHT_SIGNATURES:
+        ok = gemini_bridge_request_write_hardened_request(input, writer_ptr)
     if not ok:
         written[] = writer.written
         if writer.written >= output_capacity:
