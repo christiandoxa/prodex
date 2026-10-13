@@ -140,9 +140,9 @@ test("standalone release reuses only verified same-SHA CI Mojo archives with str
   assert.match(archives, /RELEASE_TARGET_SHA:/);
   assert.match(archives, /python3 scripts\/ci\/reuse_mojo_ci_archive\.py/);
   assert.equal(
-    [...archives.matchAll(/if: \$\{\{ steps\.reuse-ci-archive\.outputs\.reused != 'true' \}\}/g)].length,
+    [...archives.matchAll(/if: \$\{\{ steps\.reuse-ci-archive\.outputs\.reused != 'true' && steps\.release-arm64-archive-cache\.outputs\.cache-hit != 'true' \}\}/g)].length,
     4,
-    "verified archive must skip all four expensive install and compile steps",
+    "both verified CI artifact and strict ARM cache must skip the four expensive install and compile steps",
   );
   assert.match(archives, /name: Verify target archive/);
   assert.match(archives, /llvm-nm --format=posix/);
@@ -168,20 +168,22 @@ test("trusted main archive cache preserves strict Mojo compile and ABI verificat
     "crates/prodex-mojo-core/build.rs",
     "crates/prodex-mojo-core/build/*.rs",
     "crates/prodex-mojo-core/Cargo.toml",
-    "Cargo.toml",
-    "Cargo.lock",
   ];
   for (const block of [linux, platform]) {
     assert.match(block, /uses: actions\/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9/);
     assert.match(block, /id: mojo-archive-cache/);
     assert.match(block, /if: \$\{\{ github.event_name == 'push' && github.ref == 'refs\/heads\/main' \}\}/);
-    assert.match(block, /mojo-static-v1-/);
+    assert.match(block, /mojo-static-v2-/);
     assert.match(block, /rust1\.99\.0/);
     assert.match(block, /env\.MOJO_VERSION/);
     for (const item of requiredHashes) {
       assert.ok(block.includes("'" + item + "'"), "cache fingerprint missing " + item);
     }
     assert.doesNotMatch(block, /restore-keys:/);
+    // Workspace release version and unrelated dependency lock changes do
+    // not change Mojo compiler objects. The actual Mojo and owner inputs do.
+    assert.doesNotMatch(block, /'Cargo\.lock'/);
+    assert.doesNotMatch(block, /'Cargo\.toml'/);
     assert.equal(
       [...block.matchAll(/if: \$\{\{ steps\.mojo-archive-cache\.outputs\.cache-hit != 'true' \}\}/g)].length,
       4,
@@ -203,8 +205,50 @@ test("trusted main archive cache preserves strict Mojo compile and ABI verificat
   assert.match(linux, /KGEN_CompilerRT_/);
   assert.match(platform, /KGEN_CompilerRT_/);
   assert.match(platform, /MSVC Mojo archive contains duplicate weak static-string aliases/);
-  assert.match(linux, /key: mojo-static-v1-\$\{\{ runner.os \}\}-x86_64-unknown-linux-gnu-x86-64/);
+  assert.match(linux, /key: mojo-static-v2-\$\{\{ runner.os \}\}-x86_64-unknown-linux-gnu-x86-64/);
   for (const variable of ["matrix.target", "matrix.mojo_target_cpu"]) {
     assert.ok(platform.includes(variable), "multi-target cache key missing " + variable);
   }
+});
+
+
+test("release-only ARM64 archive cache is bounded, source-addressed and preserves all six gates", () => {
+  const archive = workflowJob(release, "build-mojo-archives", "build");
+  const build = workflowJob(release, "build", "attest-binaries");
+  const cache = archive.match(/      - name: Restore strict release-only ARM64 Mojo archive cache\n([\s\S]*?)\n      - name: Install Rust target/)?.[1];
+  assert.ok(cache);
+  assert.match(cache, /id: release-arm64-archive-cache/);
+  assert.match(cache, /uses: actions\/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9/);
+  assert.match(cache, /github\.event_name == 'workflow_dispatch'/);
+  assert.match(cache, /github\.ref == 'refs\/heads\/main'/);
+  for (const target of ["aarch64-unknown-linux-gnu", "aarch64-pc-windows-msvc"]) {
+    assert.match(cache, new RegExp("matrix.target == '" + target + "'"));
+  }
+  assert.match(cache, /mojo-release-arm64-v1-/);
+  assert.match(cache, /matrix\.target/);
+  assert.match(cache, /matrix\.mojo-target-cpu/);
+  assert.match(cache, /env\.MOJO_VERSION/);
+  assert.match(cache, /rust1\.99\.0/);
+  assert.match(archive, /- name: Verify target archive\n\s+shell: bash/);
+  for (const input of [
+    "mojo/**/*.mojo", "crates/prodex-mojo-core/build.rs",
+    "crates/prodex-mojo-core/build/*.rs",
+    "crates/prodex-mojo-core/Cargo.toml",
+  ]) {
+    assert.ok(cache.includes("'" + input + "'"), "cache missing " + input);
+  }
+  assert.doesNotMatch(cache, /'Cargo\.toml'|'Cargo\.lock'/);
+  assert.doesNotMatch(cache, /restore-keys:/);
+  assert.match(archive, /name: Validate archive source identity before expensive compilation/);
+  assert.match(archive, /test "\$\{GITHUB_SHA\}" = "\$\{RELEASE_TARGET_SHA\}"/);
+  assert.match(archive, /name: Reuse exact-source strict CI Mojo archive when available/);
+  assert.match(archive, /name: Build target Mojo archive/);
+  assert.match(archive, /-p prodex-mojo-core --features mojo-core/);
+  assert.match(archive, /name: Verify target archive\n\s+shell: bash/);
+  assert.doesNotMatch(archive, /name: Verify target archive\n\s+if:/);
+  assert.match(archive, /KGEN_CompilerRT_/);
+  assert.match(archive, /duplicate_weak=/);
+  assert.match(archive, /name: Upload target Mojo archive/);
+  assert.match(build, /needs:\s*\n\s*- verify-ci\n\s*- build-mojo-archives/);
+  assert.equal((archive.match(/^          - target: /gm) ?? []).length, 6);
 });

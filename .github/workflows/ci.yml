@@ -124,7 +124,7 @@ jobs:
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
         with:
           path: target/mojo-runtime/x86_64-unknown-linux-gnu/libprodex_mojo_core.a
-          key: mojo-static-v1-${{ runner.os }}-x86_64-unknown-linux-gnu-x86-64-mojo-${{ env.MOJO_VERSION }}-rust1.99.0-${{ hashFiles('mojo/**/*.mojo', 'crates/prodex-mojo-core/build.rs', 'crates/prodex-mojo-core/build/*.rs', 'crates/prodex-mojo-core/Cargo.toml', 'Cargo.toml', 'Cargo.lock') }}
+          key: mojo-static-v2-${{ runner.os }}-x86_64-unknown-linux-gnu-x86-64-mojo-${{ env.MOJO_VERSION }}-rust1.99.0-${{ hashFiles('mojo/**/*.mojo', 'crates/prodex-mojo-core/build.rs', 'crates/prodex-mojo-core/build/*.rs', 'crates/prodex-mojo-core/Cargo.toml') }}
 
       - name: Install Rust toolchain
         if: ${{ steps.mojo-archive-cache.outputs.cache-hit != 'true' }}
@@ -237,7 +237,7 @@ jobs:
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
         with:
           path: target/mojo-runtime/${{ matrix.target }}/${{ matrix.archive_name }}
-          key: mojo-static-v1-${{ runner.os }}-${{ matrix.target }}-${{ matrix.mojo_target_cpu }}-mojo-${{ env.MOJO_VERSION }}-rust1.99.0-${{ hashFiles('mojo/**/*.mojo', 'crates/prodex-mojo-core/build.rs', 'crates/prodex-mojo-core/build/*.rs', 'crates/prodex-mojo-core/Cargo.toml', 'Cargo.toml', 'Cargo.lock') }}
+          key: mojo-static-v2-${{ runner.os }}-${{ matrix.target }}-${{ matrix.mojo_target_cpu }}-mojo-${{ env.MOJO_VERSION }}-rust1.99.0-${{ hashFiles('mojo/**/*.mojo', 'crates/prodex-mojo-core/build.rs', 'crates/prodex-mojo-core/build/*.rs', 'crates/prodex-mojo-core/Cargo.toml') }}
 
       - name: Install Rust target
         if: ${{ steps.mojo-archive-cache.outputs.cache-hit != 'true' }}
