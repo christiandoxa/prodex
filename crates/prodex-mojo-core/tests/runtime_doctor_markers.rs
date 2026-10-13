@@ -64,6 +64,7 @@ fn long_unknown_marker_is_not_an_invalid_event() {
     assert!(runtime_doctor_marker_known("first_local_chunk").unwrap());
 }
 
+#[derive(Clone, Copy)]
 #[repr(C)]
 struct View {
     ptr: u64,
@@ -85,6 +86,21 @@ unsafe extern "C" {
         counts: u64,
         count: i64,
         output: u64,
+    ) -> i64;
+    fn prodex_mojo_runtime_doctor_marker_aggregation_v1(
+        abi: i64,
+        markers: u64,
+        values: u64,
+        presence: u64,
+        weights: u64,
+        input_count: i64,
+        representatives: u64,
+        kinds: u64,
+        value_slots: u64,
+        counts: u64,
+        output_capacity: i64,
+        output_count: u64,
+        latest_stale_reason_index: u64,
     ) -> i64;
     fn prodex_mojo_runtime_doctor_route_health_groups_v1(
         abi: i64,
@@ -257,6 +273,259 @@ fn marker_summary_counts_abi_tags_fixed_selection_and_failure_totals() {
     };
     assert_eq!(status, 5);
     assert!(overflow_accumulator.iter().all(|count| *count >= 0));
+}
+
+#[test]
+fn marker_aggregation_abi_groups_context_reasons_continuations_facets_and_sentinels() {
+    const WIDTH: usize = 38;
+    const FACET_BASE: i64 = 10;
+    const CONTEXT_ROUTE: i64 = 1;
+    const CONTEXT_LANE: i64 = 2;
+    const CONTEXT_PROFILE: i64 = 3;
+    const CHAIN_REASON: i64 = 4;
+    const STALE_REASON: i64 = 6;
+    const PREVIOUS_ROUTE: i64 = 7;
+    const PREVIOUS_TRANSPORT: i64 = 8;
+    const PREVIOUS_REQUEST_SHAPE: i64 = 9;
+    let markers = [
+        "selection_pick",
+        "selection_pick",
+        "chain_retried_owner",
+        "stale_continuation",
+        "stale_continuation",
+        "previous_response_not_found",
+        "previous_response_fresh_fallback_blocked",
+        "chain_dead_upstream_confirmed",
+    ];
+    let mut values = vec![View { ptr: 0, len: 0 }; markers.len() * WIDTH];
+    let mut presence = vec![0_i64; markers.len()];
+    let weights = vec![1_i64; markers.len()];
+    let mut set = |event: usize, slot: usize, value: &str| {
+        values[event * WIDTH + slot] = View {
+            ptr: value.as_ptr() as u64,
+            len: value.len() as u64,
+        };
+        presence[event] |= 1_i64 << slot;
+    };
+    set(0, 0, "/responses");
+    set(0, 1, "responses");
+    set(0, 2, "alpha");
+    set(0, 6 + 1, "responses");
+    set(0, 6 + 2, "/responses");
+    set(1, 0, "-");
+    set(1, 1, "responses");
+    set(1, 2, "alpha");
+    set(1, 6 + 1, "responses");
+    set(2, 3, "owner_retry");
+    set(2, 6 + 3, "owner_retry");
+    set(3, 3, "old_reason");
+    set(4, 3, "new_reason");
+    set(5, 0, "/responses");
+    set(5, 4, "http");
+    set(6, 5, "session_replayable");
+    let facet_values = (0..32)
+        .map(|index| format!("facet_{index}"))
+        .collect::<Vec<_>>();
+    for (index, value) in facet_values.iter().enumerate() {
+        set(6, 6 + index, value);
+    }
+    set(7, 3, "dead_reason");
+    let marker_views = markers
+        .iter()
+        .map(|marker| View {
+            ptr: marker.as_ptr() as u64,
+            len: marker.len() as u64,
+        })
+        .collect::<Vec<_>>();
+    let mut representatives = vec![-1_i64; 256];
+    let mut kinds = vec![-1_i64; 256];
+    let mut value_slots = vec![-1_i64; 256];
+    let mut counts = vec![-1_i64; 256];
+    let mut output_count = -1_i64;
+    let mut latest_stale_reason_index = -1_i64;
+    let status = unsafe {
+        prodex_mojo_runtime_doctor_marker_aggregation_v1(
+            1,
+            marker_views.as_ptr() as u64,
+            values.as_ptr() as u64,
+            presence.as_ptr() as u64,
+            weights.as_ptr() as u64,
+            markers.len() as i64,
+            representatives.as_mut_ptr() as u64,
+            kinds.as_mut_ptr() as u64,
+            value_slots.as_mut_ptr() as u64,
+            counts.as_mut_ptr() as u64,
+            representatives.len() as i64,
+            &mut output_count as *mut i64 as u64,
+            &mut latest_stale_reason_index as *mut i64 as u64,
+        )
+    };
+    assert_eq!(status, 0);
+    assert_eq!(latest_stale_reason_index, 4);
+
+    let rows = (0..output_count as usize)
+        .map(|index| (kinds[index], value_slots[index], counts[index]))
+        .collect::<Vec<_>>();
+    assert!(rows.contains(&(0, -1, 2)), "marker totals: {rows:?}");
+    assert!(
+        rows.contains(&(CONTEXT_ROUTE, 0, 1)),
+        "route context: {rows:?}"
+    );
+    assert!(
+        rows.contains(&(CONTEXT_LANE, 1, 2)),
+        "lane context: {rows:?}"
+    );
+    assert!(
+        rows.contains(&(CONTEXT_PROFILE, 2, 2)),
+        "profile context: {rows:?}"
+    );
+    assert!(
+        rows.contains(&(CHAIN_REASON, 3, 1)),
+        "chain reason: {rows:?}"
+    );
+    assert!(rows.contains(&(5, 3, 1)), "dead-upstream reason: {rows:?}");
+    assert_eq!(
+        rows.iter()
+            .filter(|row| **row == (STALE_REASON, 3, 1))
+            .count(),
+        2,
+        "stale reasons: {rows:?}"
+    );
+    assert!(
+        rows.contains(&(PREVIOUS_ROUTE, 0, 1)),
+        "previous route: {rows:?}"
+    );
+    assert!(
+        rows.contains(&(PREVIOUS_TRANSPORT, 4, 1)),
+        "previous transport: {rows:?}"
+    );
+    assert!(
+        rows.contains(&(PREVIOUS_REQUEST_SHAPE, 5, 1)),
+        "request shape: {rows:?}"
+    );
+    assert!(
+        rows.contains(&(FACET_BASE + 1, 7, 2)),
+        "lane facet: {rows:?}"
+    );
+    assert!(
+        rows.contains(&(FACET_BASE + 2, 8, 1)),
+        "route facet: {rows:?}"
+    );
+    assert!(
+        rows.contains(&(FACET_BASE + 3, 9, 1)),
+        "reason facet: {rows:?}"
+    );
+    for (index, _) in facet_values.iter().enumerate() {
+        assert!(
+            rows.contains(&(FACET_BASE + index as i64, 6 + index as i64, 1)),
+            "facet {index}: {rows:?}"
+        );
+    }
+
+    let mut unchanged = [77_i64; 256];
+    let status = unsafe {
+        prodex_mojo_runtime_doctor_marker_aggregation_v1(
+            9,
+            marker_views.as_ptr() as u64,
+            values.as_ptr() as u64,
+            presence.as_ptr() as u64,
+            weights.as_ptr() as u64,
+            markers.len() as i64,
+            unchanged.as_mut_ptr() as u64,
+            unchanged.as_mut_ptr() as u64,
+            unchanged.as_mut_ptr() as u64,
+            unchanged.as_mut_ptr() as u64,
+            unchanged.len() as i64,
+            &mut output_count as *mut i64 as u64,
+            &mut latest_stale_reason_index as *mut i64 as u64,
+        )
+    };
+    assert_eq!(status, 4);
+
+    let mut overflow_weights = weights.clone();
+    overflow_weights[0] = i64::MAX;
+    overflow_weights[1] = 1;
+    let status = unsafe {
+        prodex_mojo_runtime_doctor_marker_aggregation_v1(
+            1,
+            marker_views.as_ptr() as u64,
+            values.as_ptr() as u64,
+            presence.as_ptr() as u64,
+            overflow_weights.as_ptr() as u64,
+            markers.len() as i64,
+            representatives.as_mut_ptr() as u64,
+            kinds.as_mut_ptr() as u64,
+            value_slots.as_mut_ptr() as u64,
+            counts.as_mut_ptr() as u64,
+            representatives.len() as i64,
+            &mut output_count as *mut i64 as u64,
+            &mut latest_stale_reason_index as *mut i64 as u64,
+        )
+    };
+    assert_eq!(status, 5);
+
+    let mut invalid_presence = presence.clone();
+    invalid_presence[0] = 1_i64 << WIDTH;
+    let mut invalid_output_count = 77_i64;
+    let mut invalid_latest_stale_reason_index = 77_i64;
+    let status = unsafe {
+        prodex_mojo_runtime_doctor_marker_aggregation_v1(
+            1,
+            marker_views.as_ptr() as u64,
+            values.as_ptr() as u64,
+            invalid_presence.as_ptr() as u64,
+            weights.as_ptr() as u64,
+            markers.len() as i64,
+            representatives.as_mut_ptr() as u64,
+            kinds.as_mut_ptr() as u64,
+            value_slots.as_mut_ptr() as u64,
+            counts.as_mut_ptr() as u64,
+            representatives.len() as i64,
+            &mut invalid_output_count as *mut i64 as u64,
+            &mut invalid_latest_stale_reason_index as *mut i64 as u64,
+        )
+    };
+    assert_eq!(status, 2);
+    assert_eq!(invalid_output_count, 0);
+    assert_eq!(invalid_latest_stale_reason_index, -1);
+
+    let status = unsafe {
+        prodex_mojo_runtime_doctor_marker_aggregation_v1(
+            1,
+            marker_views.as_ptr() as u64,
+            values.as_ptr() as u64,
+            presence.as_ptr() as u64,
+            weights.as_ptr() as u64,
+            markers.len() as i64,
+            representatives.as_mut_ptr() as u64,
+            kinds.as_mut_ptr() as u64,
+            value_slots.as_mut_ptr() as u64,
+            counts.as_mut_ptr() as u64,
+            0,
+            &mut invalid_output_count as *mut i64 as u64,
+            &mut invalid_latest_stale_reason_index as *mut i64 as u64,
+        )
+    };
+    assert_eq!(status, 3);
+
+    let status = unsafe {
+        prodex_mojo_runtime_doctor_marker_aggregation_v1(
+            1,
+            marker_views.as_ptr() as u64,
+            values.as_ptr() as u64,
+            presence.as_ptr() as u64,
+            weights.as_ptr() as u64,
+            257,
+            representatives.as_mut_ptr() as u64,
+            kinds.as_mut_ptr() as u64,
+            value_slots.as_mut_ptr() as u64,
+            counts.as_mut_ptr() as u64,
+            representatives.len() as i64,
+            &mut invalid_output_count as *mut i64 as u64,
+            &mut invalid_latest_stale_reason_index as *mut i64 as u64,
+        )
+    };
+    assert_eq!(status, 1);
 }
 
 #[test]
