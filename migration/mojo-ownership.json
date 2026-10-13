@@ -1846,7 +1846,8 @@
         "production_reachable": true,
         "role": "semantic",
         "operations": [
-          "runtime_websocket_failure_state_policy"
+          "runtime_websocket_failure_state_policy",
+          "runtime_websocket_stale_frame_policy"
         ]
       },
       {
@@ -1856,7 +1857,8 @@
         "production_reachable": true,
         "role": "adapter",
         "operations": [
-          "runtime_websocket_failure_state_policy"
+          "runtime_websocket_failure_state_policy",
+          "runtime_websocket_stale_frame_policy"
         ]
       },
       {
@@ -7966,6 +7968,30 @@
       "duplicate_production_owner": false,
       "platform_fallback": false,
       "rust_adapter_scope": "failure classification, affinity/state mutation, response handling, and typed plan mapping"
+    },
+    {
+      "name": "runtime_websocket_stale_frame_policy",
+      "domain": "runtime-proxy/websocket-failure",
+      "introduced_in": "0.438.0",
+      "baseline_state": "Rust selected the stale-continuation WebSocket error envelope from parsed JSON shape",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_runtime_websocket_stale_frame_plan_v1",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/websocket_failure.mojo",
+      "consumer": "crates/prodex-runtime-proxy/src/websocket_message.rs",
+      "consumer_marker": "websocket_stale_frame_plan(",
+      "production_consumers": [
+        "crates/prodex-runtime-proxy/src/websocket_message.rs",
+        "crates/prodex-app/src/runtime_proxy/websocket/response_tracking/precommit.rs"
+      ],
+      "production_reachability_test": "crates/prodex-runtime-proxy/tests/src/websocket_message.rs",
+      "rust_owner_before": "WebSocket stale-continuation payload shape selection for generic, response.failed, and nested response.failed envelopes",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "deleted; the production WebSocket caller tests preserve no-marker passthrough, malformed-text fallback, generic errors, and both response.failed envelope shapes",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "UTF-8/Serde parsing, previous-response marker extraction, and caller-owned JSON response materialization"
     },
     {
       "name": "runtime_proxy_dispatch_policy",

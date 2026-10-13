@@ -9,6 +9,7 @@ use crate::{
     runtime_response_event_type_from_value,
 };
 use prodex_mojo_core::rich::ascii_casefold_equal_exact;
+use prodex_mojo_core::runtime::{WebsocketStaleFrameAction, websocket_stale_frame_plan};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RuntimeBufferedWebsocketTextFrame {
@@ -152,32 +153,43 @@ pub fn runtime_translate_invalid_previous_response_websocket_error(
 }
 
 pub fn runtime_translate_precommit_previous_response_websocket_text_frame(payload: &str) -> String {
-    if extract_runtime_proxy_previous_response_message(payload.as_bytes()).is_none() {
-        return payload.to_string();
-    }
-
     let message = runtime_proxy_stale_continuation_message();
+    let previous_response_message_present =
+        extract_runtime_proxy_previous_response_message(payload.as_bytes()).is_some();
     let Ok(value) = serde_json::from_str::<serde_json::Value>(payload) else {
-        return runtime_proxy_websocket_error_payload_text(409, "stale_continuation", message);
+        return match websocket_stale_frame_plan(
+            previous_response_message_present,
+            false,
+            false,
+            false,
+        )
+        .expect("Mojo stale-frame plan returned an invalid result")
+        {
+            WebsocketStaleFrameAction::Forward => payload.to_string(),
+            WebsocketStaleFrameAction::GenericError
+            | WebsocketStaleFrameAction::FailedError
+            | WebsocketStaleFrameAction::FailedResponseError => {
+                runtime_proxy_websocket_error_payload_text(409, "stale_continuation", message)
+            }
+        };
     };
 
-    let event_type = runtime_response_event_type_from_value(&value);
-    if event_type.as_deref() == Some("response.failed") {
-        if value.get("response").is_some() {
-            return serde_json::json!({
-                "type": "response.failed",
-                "status": 409,
-                "response": {
-                    "error": {
-                        "code": "stale_continuation",
-                        "message": message,
-                    }
-                }
-            })
-            .to_string();
+    let response_failed =
+        runtime_response_event_type_from_value(&value).as_deref() == Some("response.failed");
+    let response_object_present = value.get("response").is_some();
+    match websocket_stale_frame_plan(
+        previous_response_message_present,
+        true,
+        response_failed,
+        response_object_present,
+    )
+    .expect("Mojo stale-frame plan returned an invalid result")
+    {
+        WebsocketStaleFrameAction::Forward => payload.to_string(),
+        WebsocketStaleFrameAction::GenericError => {
+            runtime_proxy_websocket_error_payload_text(409, "stale_continuation", message)
         }
-
-        return serde_json::json!({
+        WebsocketStaleFrameAction::FailedError => serde_json::json!({
             "type": "response.failed",
             "status": 409,
             "error": {
@@ -185,10 +197,19 @@ pub fn runtime_translate_precommit_previous_response_websocket_text_frame(payloa
                 "message": message,
             }
         })
-        .to_string();
+        .to_string(),
+        WebsocketStaleFrameAction::FailedResponseError => serde_json::json!({
+            "type": "response.failed",
+            "status": 409,
+            "response": {
+                "error": {
+                    "code": "stale_continuation",
+                    "message": message,
+                }
+            }
+        })
+        .to_string(),
     }
-
-    runtime_proxy_websocket_error_payload_text(409, "stale_continuation", message)
 }
 
 #[cfg(test)]

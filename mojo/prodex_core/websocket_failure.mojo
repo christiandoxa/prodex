@@ -29,9 +29,40 @@ comptime WEBSOCKET_FRAME_RETRY_RATE_LIMITED: Int64 = 3
 comptime WEBSOCKET_FRAME_RETRY_OVERLOADED: Int64 = 4
 comptime WEBSOCKET_FRAME_RETRY_PREVIOUS_RESPONSE: Int64 = 5
 
+comptime WEBSOCKET_STALE_FRAME_FORWARD: Int64 = 0
+comptime WEBSOCKET_STALE_FRAME_GENERIC_ERROR: Int64 = 1
+comptime WEBSOCKET_STALE_FRAME_FAILED_ERROR: Int64 = 2
+comptime WEBSOCKET_STALE_FRAME_FAILED_RESPONSE_ERROR: Int64 = 3
+
 
 def websocket_failure_bool(value: Int64) -> Bool:
     return value == 0 or value == 1
+
+
+@export("prodex_runtime_websocket_stale_frame_plan_v1")
+def prodex_runtime_websocket_stale_frame_plan_v1(
+    abi_version: Int64,
+    previous_response_message_present: Int64,
+    json_valid: Int64,
+    response_failed: Int64,
+    response_object_present: Int64,
+) abi("C") -> Int64:
+    if abi_version != 1:
+        return -4
+    if (
+        not websocket_failure_bool(previous_response_message_present)
+        or not websocket_failure_bool(json_valid)
+        or not websocket_failure_bool(response_failed)
+        or not websocket_failure_bool(response_object_present)
+    ):
+        return -1
+    if previous_response_message_present == 0:
+        return WEBSOCKET_STALE_FRAME_FORWARD
+    if json_valid == 0 or response_failed == 0:
+        return WEBSOCKET_STALE_FRAME_GENERIC_ERROR
+    if response_object_present == 1:
+        return WEBSOCKET_STALE_FRAME_FAILED_RESPONSE_ERROR
+    return WEBSOCKET_STALE_FRAME_FAILED_ERROR
 
 
 @export("prodex_runtime_websocket_turn_state_replay_candidate_v1")

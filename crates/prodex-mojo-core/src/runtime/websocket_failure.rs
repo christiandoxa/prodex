@@ -12,6 +12,7 @@ const WEBSOCKET_FAILURE_RECOVERY_ABI_VERSION: i64 = 1;
 const WEBSOCKET_FAILURE_DECISION_FIELD_COUNT: usize = 12;
 
 const WEBSOCKET_FAILURE_PLAN_FIELD_COUNT: usize = 5;
+const WEBSOCKET_STALE_FRAME_ABI_VERSION: i64 = 1;
 
 /// Failure class whose pre-commit state transition is planned by Mojo.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -91,6 +92,15 @@ pub struct WebsocketFailureDecisionInput {
     pub reset_retry_index: bool,
 }
 
+/// Selects the stale-continuation WebSocket wire shape after Rust parses JSON.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WebsocketStaleFrameAction {
+    Forward,
+    GenericError,
+    FailedError,
+    FailedResponseError,
+}
+
 unsafe extern "C" {
     fn prodex_runtime_websocket_turn_state_replay_candidate_v1(
         abi_version: i64,
@@ -136,6 +146,13 @@ unsafe extern "C" {
         connection_limit: i64,
         previous_response_not_found: i64,
         stream_committed: i64,
+    ) -> i64;
+    fn prodex_runtime_websocket_stale_frame_plan_v1(
+        abi_version: i64,
+        previous_response_message_present: i64,
+        json_valid: i64,
+        response_failed: i64,
+        response_object_present: i64,
     ) -> i64;
 }
 
@@ -271,6 +288,33 @@ pub fn websocket_failure_frame_classification(
     };
     match result {
         0..=5 => Ok(result),
+        -4 => Err(MojoError::AbiMismatch),
+        -1 => Err(MojoError::InvalidInput),
+        _ => Err(MojoError::InvalidOutput),
+    }
+}
+
+/// Plans stale-continuation framing without crossing the ABI with JSON values.
+pub fn websocket_stale_frame_plan(
+    previous_response_message_present: bool,
+    json_valid: bool,
+    response_failed: bool,
+    response_object_present: bool,
+) -> Result<WebsocketStaleFrameAction, MojoError> {
+    let result = unsafe {
+        prodex_runtime_websocket_stale_frame_plan_v1(
+            WEBSOCKET_STALE_FRAME_ABI_VERSION,
+            i64::from(previous_response_message_present),
+            i64::from(json_valid),
+            i64::from(response_failed),
+            i64::from(response_object_present),
+        )
+    };
+    match result {
+        0 => Ok(WebsocketStaleFrameAction::Forward),
+        1 => Ok(WebsocketStaleFrameAction::GenericError),
+        2 => Ok(WebsocketStaleFrameAction::FailedError),
+        3 => Ok(WebsocketStaleFrameAction::FailedResponseError),
         -4 => Err(MojoError::AbiMismatch),
         -1 => Err(MojoError::InvalidInput),
         _ => Err(MojoError::InvalidOutput),
@@ -542,6 +586,59 @@ mod tests {
         assert_eq!(
             websocket_failure_frame_classification(9, 0, false, false, false),
             Err(MojoError::InvalidInput)
+        );
+    }
+
+    #[test]
+    fn stale_frame_plan_preserves_json_shape_precedence() {
+        let cases = [
+            (
+                (false, false, false, false),
+                WebsocketStaleFrameAction::Forward,
+            ),
+            (
+                (true, false, false, false),
+                WebsocketStaleFrameAction::GenericError,
+            ),
+            (
+                (true, true, false, true),
+                WebsocketStaleFrameAction::GenericError,
+            ),
+            (
+                (true, true, true, false),
+                WebsocketStaleFrameAction::FailedError,
+            ),
+            (
+                (true, true, true, true),
+                WebsocketStaleFrameAction::FailedResponseError,
+            ),
+        ];
+        for ((previous, json, failed, response), expected) in cases {
+            assert_eq!(
+                websocket_stale_frame_plan(previous, json, failed, response),
+                Ok(expected),
+                "previous={previous} json={json} failed={failed} response={response}"
+            );
+        }
+    }
+
+    #[test]
+    fn stale_frame_plan_rejects_wrong_version_and_non_boolean_input() {
+        assert_eq!(
+            unsafe { prodex_runtime_websocket_stale_frame_plan_v1(0, 0, 0, 0, 0) },
+            -4
+        );
+        assert_eq!(
+            unsafe {
+                prodex_runtime_websocket_stale_frame_plan_v1(
+                    WEBSOCKET_STALE_FRAME_ABI_VERSION,
+                    2,
+                    0,
+                    0,
+                    0,
+                )
+            },
+            -1
         );
     }
 
