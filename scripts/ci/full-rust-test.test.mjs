@@ -99,6 +99,8 @@ test("scheduled full suite runs disjoint workspace and prodex-app partitions in 
   assert.match(workflow, /--timings-json \\\n\s+--no-prodex-app-lib/);
   assert.match(workflow, /matrix\.skip_filters/);
   assert.match(workflow, /--test-threads=1/);
+  assert.match(workflow, /skip_args\+=\(--skip "\$\{skip\}"\)/);
+  assert.match(workflow, /"\$\{filter\}" -- --test-threads=1 "\$\{skip_args\[@\]\}"/);
   assert.match(workflow, /Test temp-backed state with a symlinked TMPDIR[\s\S]*?if: matrix\.suite == 'remainder'/);
   assert.match(workflow, /filter_status=\$\?/);
   assert.doesNotMatch(workflow, /if \[ "\$\{status\}" -ne 0 \]; then\n\s+break/);

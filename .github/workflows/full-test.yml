@@ -251,10 +251,17 @@ jobs:
             *)
               : > "${cargo_log}"
               filter_log="${artifact_dir}/filter.log"
+              # Broad remainder families must skip already-owned selectors.
+              # They remain serial within each runner to protect native state.
+              skip_args=()
+              while IFS= read -r skip; do
+                [ -z "${skip}" ] && continue
+                skip_args+=(--skip "${skip}")
+              done <<< "${PRODEX_APP_SKIP_FILTERS}"
               while IFS= read -r filter; do
                 [ -z "${filter}" ] && continue
                 cargo test --locked -q -p prodex-app --lib \
-                  "${filter}" -- --test-threads=1 \
+                  "${filter}" -- --test-threads=1 "${skip_args[@]}" \
                   > "${filter_log}" 2>&1
                 filter_status=$?
                 cat "${filter_log}" >> "${cargo_log}"
