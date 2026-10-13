@@ -13,6 +13,7 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 
 ### Deps
 
+- Align Kiro stable native release probe (`082bfc9`)
 - Verify Ponytail 5.2.0 compaction compatibility (`38112e8`)
 - Audit Ponytail 5.1.1 stable source (`ef94261`)
 - Update quinn-proto past peer-triggered panic advisories (`f7e2028`)
@@ -49,6 +50,8 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 - Refresh the verified Ponytail stable reference to 5.2.0, including its upstream
   compaction-level persistence, synchronous hook output, bounded SessionStart
   mapping, and repository-text/symlink isolation fixes.
+- Align the release-only native Kiro compatibility probe with official stable
+  CLI 2.30.0 while retaining the existing verified installer digest.
 
 ## Changelog
 
