@@ -30,6 +30,8 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 
 ## Changelog
 
+- Refresh the externally managed RTK release-qualified reference to verified
+  0.52.0. Keep the existing minimum version and mandatory release freshness checks.
 - Add real caller regressions for concurrent sessions, selector-less resume,
   missing attachments, symlink boundaries, nested objectives and repeated resume.
 - Extend the existing compiled Mojo attachment policy to distinguish generated
