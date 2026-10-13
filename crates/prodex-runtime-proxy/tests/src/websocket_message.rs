@@ -188,6 +188,55 @@ fn websocket_precommit_previous_response_plain_text_translation_uses_proxy_error
 }
 
 #[test]
+fn websocket_precommit_stale_translation_preserves_failed_response_and_generic_shapes() {
+    let response_payload = serde_json::json!({
+        "type": "response.failed",
+        "response": {"id": "resp-123"},
+        "error": {
+            "code": "previous_response_not_found",
+            "message": "Previous response with id 'resp-123' not found."
+        }
+    })
+    .to_string();
+    let response_value = serde_json::from_str::<serde_json::Value>(
+        &runtime_translate_precommit_previous_response_websocket_text_frame(&response_payload),
+    )
+    .expect("json");
+    assert_eq!(
+        response_value
+            .get("response")
+            .and_then(|value| value.get("error"))
+            .and_then(|value| value.get("code"))
+            .and_then(serde_json::Value::as_str),
+        Some("stale_continuation")
+    );
+
+    let generic_payload = serde_json::json!({
+        "type": "error",
+        "code": "previous_response_not_found",
+        "message": "Previous response with id 'resp-123' not found."
+    })
+    .to_string();
+    let generic_value = serde_json::from_str::<serde_json::Value>(
+        &runtime_translate_precommit_previous_response_websocket_text_frame(&generic_payload),
+    )
+    .expect("json");
+    assert_eq!(
+        generic_value
+            .get("type")
+            .and_then(serde_json::Value::as_str),
+        Some("error")
+    );
+    assert_eq!(
+        generic_value
+            .get("error")
+            .and_then(|value| value.get("code"))
+            .and_then(serde_json::Value::as_str),
+        Some("stale_continuation")
+    );
+}
+
+#[test]
 fn websocket_text_frame_inspection_classifies_retry_and_terminal_events() {
     for code in [
         "insufficient_quota",
