@@ -111,7 +111,8 @@
     "MIXED": "A source containing both boundary and deterministic code; semantic_ranges identify the counted region when needed."
   },
   "baseline_optional_sources": [
-    "mojo/prodex_core/runtime_health.mojo"
+    "mojo/prodex_core/runtime_health.mojo",
+    "mojo/prodex_core/info_runway.mojo"
   ],
   "baseline_inventory": [
     {
@@ -1903,6 +1904,16 @@
         "role": "adapter",
         "operations": [
           "shared_attachment_sqlite_header_classification"
+        ]
+      },
+      {
+        "path": "mojo/prodex_core/info_runway.mojo",
+        "language": "mojo",
+        "classification": "DETERMINISTIC_DOMAIN",
+        "production_reachable": true,
+        "role": "semantic",
+        "operations": [
+          "info_runtime_quota_runway_estimate"
         ]
       }
     ],
@@ -8084,6 +8095,29 @@
       "duplicate_production_owner": false,
       "platform_fallback": false,
       "rust_adapter_scope": "filesystem metadata/open/read, fixed-size header acquisition, and typed Mojo result/error propagation"
+    },
+    {
+      "name": "info_runtime_quota_runway_estimate",
+      "domain": "info/quota-runway",
+      "introduced_in": "0.437.10",
+      "baseline_state": "Rust grouped runtime quota observations by profile, selected the latest monotonic segment, calculated aggregate burn rate, and projected exhaustion",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_mojo_info_runway_estimate_v1",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/info_runway.mojo",
+      "consumer": "crates/prodex-app/src/reports/info/runtime_load.rs",
+      "consumer_marker": "prodex_mojo_core::info_render::estimate_info_runway(",
+      "production_consumers": [
+        "crates/prodex-app/src/reports/info/runtime_load.rs"
+      ],
+      "production_reachability_test": "crates/prodex-mojo-core/src/info_render/runway.rs",
+      "rust_owner_before": "Per-profile chronological ordering, monotonic burn-window selection, aggregate burn arithmetic, and exhaustion projection",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "deleted; required-Mojo adapter tests cover profile grouping, reset segments, exhaustion, empty input, and invalid windows",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "log parsing remains Rust; the adapter marshals borrowed profile views, numeric observations, and checked scalar results"
     }
   ],
   "rust_semantic_reductions": [
