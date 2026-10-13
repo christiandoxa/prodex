@@ -1475,6 +1475,160 @@ def quota_model_policy_copy_label(
     return QUOTA_MODEL_POLICY_OK
 
 
+# The caller provides only the suffix after Mojo's "try again at " marker.
+# Parse candidate tokens and normalize an ordinal date in the authoritative
+# Mojo kernel. Rust retains chrono/Local timezone resolution as a host boundary.
+# kind: 0 not a recognized shape, 1 local clock, 2 absolute local datetime.
+def quota_retry_ascii_space(value: UInt8) -> Bool:
+    return value == 9 or value == 10 or value == 13 or value == 32
+
+
+def quota_retry_copy_span(
+    source: Pointer[mut=False, UInt8, ImmUntrackedOrigin],
+    output: Pointer[mut=True, UInt8, MutUntrackedOrigin],
+    begin: Int64,
+    end: Int64,
+    offset: Int64,
+) -> Int64:
+    var cursor = offset
+    for index in range(begin, end):
+        output[unsafe_offset=cursor] = source[unsafe_offset=index]
+        cursor += 1
+    return cursor
+
+
+@export("prodex_quota_retry_time_plan_v1")
+def prodex_quota_retry_time_plan_v1(
+    abi_version: Int64,
+    input_address: UInt,
+    input_length: Int64,
+    output_address: UInt,
+    output_capacity: Int64,
+    written_address: UInt,
+    kind_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != QUOTA_MODEL_POLICY_ABI_VERSION:
+        return QUOTA_MODEL_POLICY_ABI
+    if (
+        input_length < 0
+        or (input_length > 0 and input_address == 0)
+        or output_address == 0
+        or output_capacity < 0
+        or written_address == 0
+        or kind_address == 0
+    ):
+        return QUOTA_MODEL_POLICY_INVALID
+
+    var kind = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(kind_address)
+    )
+    var written = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(written_address)
+    )
+    kind[] = 0
+    written[] = 0
+    if input_length > 8192 or input_length == 0:
+        return QUOTA_MODEL_POLICY_OK
+
+    var source = Pointer[mut=False, UInt8, ImmUntrackedOrigin](
+        unsafe_from_address=Int(input_address)
+    )
+    # Fixed scalar bounds avoid std Array dynamic-index runtime dependencies
+    # in the freestanding statically linked Mojo archive.
+    var s0: Int64 = 0
+    var e0: Int64 = 0
+    var s1: Int64 = 0
+    var e1: Int64 = 0
+    var s2: Int64 = 0
+    var e2: Int64 = 0
+    var s3: Int64 = 0
+    var e3: Int64 = 0
+    var s4: Int64 = 0
+    var e4: Int64 = 0
+    var token_count: Int64 = 0
+    var cursor: Int64 = 0
+    while cursor < input_length and token_count < 5:
+        while cursor < input_length and quota_retry_ascii_space(source[unsafe_offset=cursor]):
+            cursor += 1
+        if cursor >= input_length:
+            break
+        var begin = cursor
+        while cursor < input_length and not quota_retry_ascii_space(source[unsafe_offset=cursor]):
+            cursor += 1
+        if token_count == 0:
+            s0 = begin
+            e0 = cursor
+        elif token_count == 1:
+            s1 = begin
+            e1 = cursor
+        elif token_count == 2:
+            s2 = begin
+            e2 = cursor
+        elif token_count == 3:
+            s3 = begin
+            e3 = cursor
+        else:
+            s4 = begin
+            e4 = cursor
+        token_count += 1
+
+    if token_count < 2:
+        return QUOTA_MODEL_POLICY_OK
+    var first_is_clock = False
+    for index in range(s0, e0):
+        if source[unsafe_offset=index] == 58:
+            first_is_clock = True
+            break
+    var normalized_kind: Int64 = 0
+    var day_end: Int64 = 0
+    var needed: Int64 = 0
+    if first_is_clock:
+        normalized_kind = 1
+        needed = (e0 - s0) + 1 + (e1 - s1)
+    else:
+        if token_count < 5:
+            return QUOTA_MODEL_POLICY_OK
+        day_end = s1
+        while day_end < e1:
+            var value = source[unsafe_offset=day_end]
+            if value < 48 or value > 57:
+                break
+            day_end += 1
+        if day_end == s1:
+            return QUOTA_MODEL_POLICY_OK
+        normalized_kind = 2
+        needed = (
+            (e0 - s0) + 1 + (day_end - s1) + 2
+            + (e2 - s2) + 1 + (e3 - s3) + 1 + (e4 - s4)
+        )
+
+    if needed > output_capacity:
+        return QUOTA_MODEL_POLICY_CAPACITY
+    var output = Pointer[mut=True, UInt8, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    var used = quota_retry_copy_span(source, output, s0, e0, 0)
+    output[unsafe_offset=used] = 32
+    used += 1
+    if normalized_kind == 1:
+        used = quota_retry_copy_span(source, output, s1, e1, used)
+    else:
+        used = quota_retry_copy_span(source, output, s1, day_end, used)
+        output[unsafe_offset=used] = 44
+        output[unsafe_offset=used + 1] = 32
+        used += 2
+        used = quota_retry_copy_span(source, output, s2, e2, used)
+        output[unsafe_offset=used] = 32
+        used += 1
+        used = quota_retry_copy_span(source, output, s3, e3, used)
+        output[unsafe_offset=used] = 32
+        used += 1
+        used = quota_retry_copy_span(source, output, s4, e4, used)
+    kind[] = normalized_kind
+    written[] = used
+    return QUOTA_MODEL_POLICY_OK
+
+
 @export("prodex_quota_display_label_v1")
 def prodex_quota_display_label_v1(
     abi_version: Int64,

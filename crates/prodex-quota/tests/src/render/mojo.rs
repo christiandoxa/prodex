@@ -185,6 +185,49 @@ fn quota_error_summary_label_is_mojo_owned_and_preserves_unknown_upstream_text()
 }
 
 #[test]
+fn quota_retry_text_grammar_and_ordinal_normalization_are_mojo_owned() {
+    use prodex_mojo_core::quota::{QuotaRetryTimeCandidate, quota_retry_time_candidate};
+
+    for (candidate, expected) in [
+        (
+            "5:08 PM",
+            Some(QuotaRetryTimeCandidate::LocalClock("5:08 PM".to_string())),
+        ),
+        (
+            "5:08 PM trailing",
+            Some(QuotaRetryTimeCandidate::LocalClock("5:08 PM".to_string())),
+        ),
+        (
+            "Mar 24th, 2026 2:04 AM",
+            Some(QuotaRetryTimeCandidate::LocalDateTime(
+                "Mar 24, 2026 2:04 AM".to_string(),
+            )),
+        ),
+        (
+            "Jan 1st, 2028 11:59 PM",
+            Some(QuotaRetryTimeCandidate::LocalDateTime(
+                "Jan 1, 2028 11:59 PM".to_string(),
+            )),
+        ),
+        (
+            "Sep 22nd, 2026 12:00 AM",
+            Some(QuotaRetryTimeCandidate::LocalDateTime(
+                "Sep 22, 2026 12:00 AM".to_string(),
+            )),
+        ),
+        ("garbage", None),
+        ("Mar unknown, 2026 2:04 AM", None),
+    ] {
+        assert_eq!(
+            quota_retry_time_candidate(candidate).unwrap(),
+            expected,
+            "{candidate}"
+        );
+    }
+    assert_eq!(quota_retry_time_candidate(&"a".repeat(8193)).unwrap(), None);
+}
+
+#[test]
 fn quota_error_auth_failure_classification_preserves_watch_categories() {
     for (message, expected) in [
         ("HTTP 401 unauthorized", true),

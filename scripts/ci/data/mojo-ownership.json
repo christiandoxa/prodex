@@ -588,7 +588,8 @@
           "quota_model_policy",
           "quota_reset_epoch_precedence",
           "quota_report_page_planning",
-          "quota_error_summary_label_rendering"
+          "quota_error_summary_label_rendering",
+          "quota_human_retry_time_normalization"
         ]
       },
       "mojo/prodex_core/candidate_decision.mojo": {
@@ -8004,6 +8005,29 @@
       "duplicate_production_owner": false,
       "platform_fallback": false,
       "rust_adapter_scope": "select first visible error line, call mandatory Mojo classifier and label renderer, retain unclassified upstream message verbatim"
+    },
+    {
+      "name": "quota_human_retry_time_normalization",
+      "domain": "quota/reset-time",
+      "introduced_in": "0.438.0",
+      "baseline_state": "Rust split freeform human reset notices, selected clock/date token grammar, extracted numeric day prefixes, and normalized ordinal date suffixes",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_quota_retry_time_plan_v1",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/quota.mojo",
+      "consumer": "crates/prodex-quota/src/render/windows.rs",
+      "consumer_marker": "prodex_mojo_core::quota::quota_retry_time_candidate(",
+      "production_consumers": [
+        "crates/prodex-quota/src/render/windows.rs"
+      ],
+      "production_reachability_test": "crates/prodex-quota/tests/src/render/mojo.rs",
+      "rust_owner_before": "Rust tokenization, clock/date shape selection, ordinal day extraction and normalization of human retry time notices",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "deleted; required-Mojo tests validate timestamp forms, ordinal normalization, malformed values and timezone integration; ABI mutation tested at production caller",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "extract the bounded human message substring and resolve the Mojo-projected normalized clock/date using Chrono and local OS timezone"
     }
   ],
   "rust_semantic_reductions": [
