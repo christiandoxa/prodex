@@ -42,3 +42,6 @@ mod standard_retry_recovery;
 mod standard_session_recovery;
 #[path = "admission/turn_state.rs"]
 mod turn_state;
+
+#[path = "admission/recovery_watchdog.rs"]
+mod recovery_watchdog;

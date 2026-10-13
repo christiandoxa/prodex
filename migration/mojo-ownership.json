@@ -468,7 +468,10 @@
           "quota_pressure_score_batch",
           "quota_pressure_band_and_reserve_scoring",
           "quota_route_score_resolution",
-          "runtime_precommit_retry_exhaustion"
+          "runtime_precommit_retry_exhaustion",
+          "runtime_recovery_watchdog_budget",
+          "runtime_recovery_cooldown_epoch",
+          "runtime_compact_unpinned_recovery"
         ]
       },
       "mojo/prodex_core/rich_catalog.mojo": {
@@ -7835,6 +7838,76 @@
       "duplicate_production_owner": false,
       "platform_fallback": false,
       "rust_adapter_scope": "runtime lock and state reads, effective health-score acquisition, typed action mapping, circuit mutation, persistence scheduling, and diagnostics"
+    },
+    {
+      "name": "runtime_recovery_watchdog_budget",
+      "domain": "runtime/recovery",
+      "introduced_in": "0.437.8",
+      "baseline_state": "Missing absolute precommit wait bound; attempt and queue epochs could continue indefinitely",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_runtime_recovery_watchdog_budget_v1",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/quota_pressure.mojo",
+      "consumer": "crates/prodex-app/src/runtime_proxy/recovery_deadline.rs",
+      "consumer_marker": "prodex_mojo_core::runtime::recovery_watchdog_budget_ms(",
+      "production_consumers": [
+        "crates/prodex-app/src/runtime_proxy/recovery_deadline.rs"
+      ],
+      "production_reachability_test": "crates/prodex-mojo-core/src/runtime/quota_decisions.rs",
+      "rust_owner_before": "Missing absolute precommit wait bound; attempt and queue epochs could continue indefinitely",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "none; required-Mojo ABI and actual caller regressions plus independent C-ABI mutation fixtures exercise bounds, cooldown continuation and hard-owner rejection",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "clock/deadline storage, async cancellation and typed HTTP error materialization"
+    },
+    {
+      "name": "runtime_recovery_cooldown_epoch",
+      "domain": "runtime/recovery",
+      "introduced_in": "0.437.8",
+      "baseline_state": "Rust equated a capped wait epoch with recovery exhaustion while a provider cooldown remained",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_runtime_recovery_epoch_pending_v1",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/quota_pressure.mojo",
+      "consumer": "crates/prodex-app/src/runtime_proxy/precommit_loop.rs",
+      "consumer_marker": "prodex_mojo_core::runtime::recovery_epoch_pending(",
+      "production_consumers": [
+        "crates/prodex-app/src/runtime_proxy/precommit_loop.rs",
+        "crates/prodex-app/src/runtime_proxy/standard/compact/recovery.rs"
+      ],
+      "production_reachability_test": "crates/prodex-mojo-core/src/runtime/quota_decisions.rs",
+      "rust_owner_before": "Rust equated a capped wait epoch with recovery exhaustion while a provider cooldown remained",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "none; required-Mojo ABI and actual caller regressions plus independent C-ABI mutation fixtures exercise bounds, cooldown continuation and hard-owner rejection",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "provider state snapshots, timer waits and application of typed Mojo continuation decision"
+    },
+    {
+      "name": "runtime_compact_unpinned_recovery",
+      "domain": "runtime/recovery",
+      "introduced_in": "0.437.8",
+      "baseline_state": "Rust treated any session identifier as a hard compact recovery binding",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_runtime_compact_recovery_unpinned_v1",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/quota_pressure.mojo",
+      "consumer": "crates/prodex-app/src/runtime_proxy/standard/compact.rs",
+      "consumer_marker": "prodex_mojo_core::runtime::compact_recovery_unpinned(",
+      "production_consumers": [
+        "crates/prodex-app/src/runtime_proxy/standard/compact.rs"
+      ],
+      "production_reachability_test": "crates/prodex-mojo-core/src/runtime/quota_decisions.rs",
+      "rust_owner_before": "Rust treated any session identifier as a hard compact recovery binding",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "none; required-Mojo ABI and actual caller regressions plus independent C-ABI mutation fixtures exercise bounds, cooldown continuation and hard-owner rejection",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "request metadata acquisition and immutable ownership facts; runtime bindings remain protected"
     }
   ],
   "rust_semantic_reductions": [

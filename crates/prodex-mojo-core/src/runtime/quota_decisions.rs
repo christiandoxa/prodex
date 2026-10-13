@@ -129,6 +129,27 @@ pub struct CompactRetryDecision {
 }
 
 unsafe extern "C" {
+    fn prodex_runtime_recovery_epoch_pending_v1(
+        abi_version: i64,
+        recovered_profiles: u64,
+        eligible_profile_present: i64,
+        request_watchdog_active: i64,
+        force_reselection: i64,
+    ) -> i64;
+
+    fn prodex_runtime_recovery_watchdog_budget_v1(
+        abi_version: i64,
+        stream_idle_ms: u64,
+        recovery_epoch_ms: u64,
+    ) -> u64;
+    fn prodex_runtime_compact_recovery_unpinned_v1(
+        abi_version: i64,
+        previous_response_present: i64,
+        turn_state_present: i64,
+        compact_owner_present: i64,
+        session_owner_present: i64,
+    ) -> i64;
+
     fn prodex_runtime_compact_retry_decision_v2(
         profile_views: *const super::RuntimeStringView,
         candidate_profile_present: i64,
@@ -418,6 +439,47 @@ pub fn quota_gate_plan(input: QuotaGatePlanInput) -> Result<QuotaGatePlan, MojoE
 #[cfg(all(test, feature = "mojo-runtime"))]
 mod tests {
     use super::*;
+    #[test]
+    fn recovery_watchdog_and_compact_ownership_are_mojo_owned() {
+        assert_eq!(recovery_epoch_pending(0, true, true, false), Ok(true));
+        assert_eq!(recovery_epoch_pending(0, true, false, false), Ok(false));
+        assert_eq!(recovery_epoch_pending(0, false, false, true), Ok(true));
+        assert_eq!(recovery_epoch_pending(1, false, false, false), Ok(true));
+        assert_eq!(recovery_epoch_pending(0, false, true, false), Ok(false));
+        assert_eq!(recovery_watchdog_budget_ms(300_000, 30_000), Ok(300_000));
+        assert_eq!(recovery_watchdog_budget_ms(250, 5_000), Ok(5_000));
+        assert_eq!(
+            recovery_watchdog_budget_ms(0, 0),
+            Err(MojoError::InvalidInput)
+        );
+        assert_eq!(
+            unsafe { prodex_runtime_recovery_watchdog_budget_v1(2, 300, 100) },
+            0
+        );
+        assert_eq!(
+            compact_recovery_unpinned(false, false, false, false),
+            Ok(true)
+        );
+        for facts in [
+            (true, false, false, false),
+            (false, true, false, false),
+            (false, false, true, false),
+            (false, false, false, true),
+        ] {
+            assert_eq!(
+                compact_recovery_unpinned(facts.0, facts.1, facts.2, facts.3),
+                Ok(false)
+            );
+        }
+        assert_eq!(
+            unsafe { prodex_runtime_compact_recovery_unpinned_v1(1, 0, 2, 0, 0) },
+            -2
+        );
+        assert_eq!(
+            unsafe { prodex_runtime_compact_recovery_unpinned_v1(2, 0, 0, 0, 0) },
+            -3
+        );
+    }
 
     fn compact_retry_input(stage: CompactRetryStage) -> CompactRetryDecisionInput<'static> {
         CompactRetryDecisionInput {
@@ -609,5 +671,62 @@ mod tests {
         };
         assert_eq!(status, 1);
         assert_eq!(output, [i64::MIN; 2]);
+    }
+}
+
+/// Absolute recovery watchdog budget, independent from per-attempt selection.
+pub fn recovery_watchdog_budget_ms(
+    stream_idle_ms: u64,
+    recovery_epoch_ms: u64,
+) -> Result<u64, MojoError> {
+    let budget =
+        unsafe { prodex_runtime_recovery_watchdog_budget_v1(1, stream_idle_ms, recovery_epoch_ms) };
+    if budget == 0 {
+        return Err(MojoError::InvalidInput);
+    }
+    Ok(budget)
+}
+
+/// A session identifier alone is not hard affinity after owner release.
+pub fn compact_recovery_unpinned(
+    previous_response_present: bool,
+    turn_state_present: bool,
+    compact_owner_present: bool,
+    session_owner_present: bool,
+) -> Result<bool, MojoError> {
+    match unsafe {
+        prodex_runtime_compact_recovery_unpinned_v1(
+            1,
+            previous_response_present.into(),
+            turn_state_present.into(),
+            compact_owner_present.into(),
+            session_owner_present.into(),
+        )
+    } {
+        0 => Ok(false),
+        1 => Ok(true),
+        _ => Err(MojoError::InvalidOutput),
+    }
+}
+
+/// Waiting through one capped cooldown epoch cannot exhaust an eligible pool.
+pub fn recovery_epoch_pending(
+    recovered_profiles: usize,
+    eligible_profile_present: bool,
+    request_watchdog_active: bool,
+    force_reselection: bool,
+) -> Result<bool, MojoError> {
+    match unsafe {
+        prodex_runtime_recovery_epoch_pending_v1(
+            1,
+            u64::try_from(recovered_profiles).unwrap_or(u64::MAX),
+            eligible_profile_present.into(),
+            request_watchdog_active.into(),
+            force_reselection.into(),
+        )
+    } {
+        0 => Ok(false),
+        1 => Ok(true),
+        _ => Err(MojoError::InvalidOutput),
     }
 }

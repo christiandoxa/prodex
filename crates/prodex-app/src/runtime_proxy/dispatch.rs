@@ -381,6 +381,20 @@ fn dispatch_runtime_http_responses_request(
     let response = match proxy_runtime_responses_request(request_id, captured, shared) {
         Ok(response) => response,
         Err(err) => {
+            if err.is::<RuntimeProxyRecoveryTimeout>() {
+                runtime_proxy_log_dispatch_error(
+                    shared,
+                    request_id,
+                    "request_recovery_timeout",
+                    err.to_string(),
+                );
+                let _ = request.respond(build_runtime_proxy_json_error_response(
+                    504,
+                    "request_timeout",
+                    "request timed out while waiting for upstream recovery before output started",
+                ));
+                return;
+            }
             match runtime_proxy_upstream_error_response(is_runtime_proxy_transport_failure(&err)) {
                 prodex_mojo_core::runtime_proxy_dispatch::RuntimeProxyErrorResponse::TransportFailed => {
                     runtime_proxy_log_dispatch_error(
@@ -428,6 +442,20 @@ fn dispatch_runtime_http_standard_request(
     let response = match proxy_runtime_standard_request(request_id, captured, shared) {
         Ok(response) => response,
         Err(err) => {
+            if err.is::<RuntimeProxyRecoveryTimeout>() {
+                runtime_proxy_log_dispatch_error(
+                    shared,
+                    request_id,
+                    "request_recovery_timeout",
+                    err.to_string(),
+                );
+                let _ = request.respond(build_runtime_proxy_json_error_response(
+                    504,
+                    "request_timeout",
+                    "request timed out while waiting for upstream recovery before output started",
+                ));
+                return;
+            }
             match runtime_proxy_upstream_error_response(is_runtime_proxy_transport_failure(&err)) {
                 prodex_mojo_core::runtime_proxy_dispatch::RuntimeProxyErrorResponse::TransportFailed => {
                     runtime_proxy_log_dispatch_error(

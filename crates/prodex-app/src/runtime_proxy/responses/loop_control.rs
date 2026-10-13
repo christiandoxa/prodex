@@ -98,6 +98,8 @@ pub(crate) fn proxy_runtime_responses_request(
     request: &RuntimeProxyRequest,
     shared: &RuntimeRotationProxyShared,
 ) -> Result<RuntimeResponsesReply> {
+    let scoped_shared = shared.for_precommit_request();
+    let shared = &scoped_shared;
     let mut request = request.clone();
     let mut request_turn_state = runtime_request_turn_state(&request);
     if let Some(turn_state) = request_turn_state.as_deref()

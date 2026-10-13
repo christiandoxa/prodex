@@ -69,7 +69,9 @@ pub(super) fn proxy_runtime_websocket_text_message(
         return Ok(());
     }
 
-    RuntimeWebsocketTextMessageFlow::new(RuntimeWebsocketTextMessageInput {
+    let scoped_shared = shared.for_precommit_request();
+    let shared = &scoped_shared;
+    let result = RuntimeWebsocketTextMessageFlow::new(RuntimeWebsocketTextMessageInput {
         session_id,
         request_id,
         local_socket,
@@ -78,8 +80,21 @@ pub(super) fn proxy_runtime_websocket_text_message(
         request_metadata,
         shared,
         websocket_session,
-    })?
-    .run()
+    })
+    .and_then(|mut flow| flow.run());
+    match result {
+        Err(error) if error.is::<super::RuntimeProxyRecoveryTimeout>() => {
+            // The logical request ended before output, not the local session.
+            // Let native Codex handle a typed timeout over the existing socket.
+            send_runtime_proxy_websocket_error(
+                local_socket,
+                504,
+                "request_timeout",
+                "request timed out",
+            )
+        }
+        other => other,
+    }
 }
 
 fn forward_runtime_response_processed_websocket_request(
@@ -239,6 +254,7 @@ pub(super) mod test_support {
         crate::runtime_core_shared::prepare_runtime_proxy_test_log_path(&log_path);
 
         RuntimeRotationProxyShared {
+            precommit_deadline: None,
             smart_context_engine: std::sync::Arc::new(crate::RuntimeSmartContextEngine::default()),
             runtime_config: Arc::new(crate::RuntimeConfig::compatibility_current()),
             upstream_no_proxy: false,

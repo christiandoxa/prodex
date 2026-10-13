@@ -246,12 +246,19 @@ fn compact_final_failure_logs_overload_terminal_reason() {
         },
         usize::MAX,
     );
+    // This fixture tests terminal failure under real owner affinity. Unbound
+    // compaction now waits across recovery epochs until its request watchdog.
+    shared.runtime.lock().unwrap().turn_state_bindings.insert(
+        "terminal-overload-owner".into(),
+        ResponseProfileBinding { binding_identity: None, profile_name: "main".into(), bound_at: now },
+    );
     let request = RuntimeProxyRequest {
         method: "POST".to_string(),
         path_and_query: "/backend-api/codex/responses/compact".to_string(),
         headers: vec![
             ("Content-Type".to_string(), "application/json".to_string()),
             ("x-openai-subagent".to_string(), "compact".to_string()),
+            ("x-codex-turn-state".to_string(), "terminal-overload-owner".to_string()),
         ],
         body: br#"{"input":[],"instructions":"compact"}"#.to_vec(),
     };
@@ -263,8 +270,9 @@ fn compact_final_failure_logs_overload_terminal_reason() {
 
     assert_eq!(status, 500);
     let overload_terminal_marker = log
-        .contains("compact_final_failure exit=candidate_exhausted reason=overload")
-        || log.contains("compact_final_failure exit=precommit_budget_exhausted reason=overload");
+        .contains("compact_final_failure exit=hard_affinity_retryable_failure reason=overload");
+    assert!(log.contains("compact_followup_owner profile=main source=turn_state"), "{log}");
+    assert!(!log.contains("rotation_sweep_start"), "a real compact owner must not enter a free pool recovery sweep: {log}");
     assert!(
         overload_terminal_marker,
         "compact overload terminal marker should identify overload exhaustion: {log}"
