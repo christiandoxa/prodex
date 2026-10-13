@@ -15,6 +15,42 @@ fn parses_session_metadata_from_jsonl_values() {
 }
 
 #[test]
+fn session_file_name_policy_preserves_extension_precedence() {
+    let mojo_plan = prodex_mojo_core::json::session_file_name_plan("session.jsonl.zst").unwrap();
+    assert!(mojo_plan.is_metadata);
+    assert_eq!(mojo_plan.stem_length, "session".len());
+
+    assert_eq!(
+        session_id_from_path(Path::new("/home/test-user/session-a.jsonl")),
+        "session-a"
+    );
+    assert_eq!(
+        session_id_from_path(Path::new("/home/test-user/session-a.jsonl.zst")),
+        "session-a"
+    );
+    assert_eq!(
+        session_id_from_path(Path::new("/home/test-user/session-a.json")),
+        "session-a"
+    );
+    assert_eq!(
+        session_id_from_path(Path::new("/home/test-user/session-a.jsonl.zst.json")),
+        "session-a.jsonl.zst"
+    );
+    assert!(is_session_metadata_file(Path::new(
+        "/home/test-user/session-a.jsonl"
+    )));
+    assert!(is_session_metadata_file(Path::new(
+        "/home/test-user/session-a.jsonl.zst"
+    )));
+    assert!(is_session_metadata_file(Path::new(
+        "/home/test-user/session-a.json"
+    )));
+    assert!(!is_session_metadata_file(Path::new(
+        "/home/test-user/session-a.txt"
+    )));
+}
+
+#[test]
 fn parses_subagent_parent_thread_id() {
     let mut report = SessionReport::from_path(Path::new("/tmp/child.jsonl"), 0);
     apply_session_json_line(

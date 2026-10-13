@@ -34,6 +34,12 @@ unsafe extern "C" {
         fields_count: i64,
         output_address: u64,
     ) -> i64;
+    fn prodex_session_file_name_policy_v1(
+        abi_version: i64,
+        name_address: u64,
+        name_length: i64,
+        output_address: u64,
+    ) -> i64;
 }
 
 const SESSION_SELECTOR_ABI_VERSION: i64 = 1;
@@ -92,6 +98,41 @@ pub fn session_selector_matches(id: &str, selector: &str, exact: bool) -> Result
         1 => Ok(true),
         _ => Err(MojoError::InvalidOutput),
     }
+}
+
+/// Classifies a session filename and returns the suffix-stripped stem length.
+///
+/// The filename is supplied by the storage adapter; Mojo owns the extension
+/// precedence used by both metadata discovery and report ID initialization.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SessionFileNamePlan {
+    pub is_metadata: bool,
+    pub stem_length: usize,
+}
+
+pub fn session_file_name_plan(name: &str) -> Result<SessionFileNamePlan, MojoError> {
+    let mut output = [-1_i64; 2];
+    status(unsafe {
+        prodex_session_file_name_policy_v1(
+            SESSION_SELECTOR_ABI_VERSION,
+            name.as_ptr() as u64,
+            i64::try_from(name.len()).map_err(|_| MojoError::InvalidInput)?,
+            output.as_mut_ptr() as u64,
+        )
+    })?;
+    let is_metadata = match output[0] {
+        0 => false,
+        1 => true,
+        _ => return Err(MojoError::InvalidOutput),
+    };
+    let stem_length = usize::try_from(output[1]).map_err(|_| MojoError::InvalidOutput)?;
+    if stem_length > name.len() || !name.is_char_boundary(stem_length) {
+        return Err(MojoError::InvalidOutput);
+    }
+    Ok(SessionFileNamePlan {
+        is_metadata,
+        stem_length,
+    })
 }
 
 /// Match a query against the six normalized fields shown by `prodex session list`.
@@ -193,7 +234,27 @@ pub fn session_selector_match_plan(
 
 #[cfg(all(test, prodex_mojo_active))]
 mod tests {
-    use super::{session_report_query_matches, session_selector_match_plan};
+    use super::{
+        session_file_name_plan, session_report_query_matches, session_selector_match_plan,
+    };
+
+    #[test]
+    fn file_name_plan_matches_storage_suffix_contract() {
+        let compressed = session_file_name_plan("session.jsonl.zst").unwrap();
+        assert!(compressed.is_metadata);
+        assert_eq!(compressed.stem_length, "session".len());
+
+        let overlapping = session_file_name_plan("session.jsonl.zst.json").unwrap();
+        assert!(overlapping.is_metadata);
+        assert_eq!(
+            &"session.jsonl.zst.json"[..overlapping.stem_length],
+            "session.jsonl.zst"
+        );
+
+        let other = session_file_name_plan("session.txt").unwrap();
+        assert!(!other.is_metadata);
+        assert_eq!(other.stem_length, "session.txt".len());
+    }
 
     #[test]
     fn match_plan_is_sensitive_to_selector_and_preserves_candidate_order() {
