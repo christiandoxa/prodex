@@ -6,6 +6,8 @@ use std::{
     io::ErrorKind,
     path::{Path, PathBuf},
     process::{Command, ExitStatus},
+    sync::atomic::{AtomicBool, AtomicUsize, Ordering},
+    thread,
 };
 
 fn main() {
@@ -170,13 +172,30 @@ fn build_mojo_archive(sources: Vec<&'static str>, manifest_dir: PathBuf, strict:
         verify_mojo_version(&mojo, version);
     }
 
-    let mut objects = Vec::with_capacity(sources.len());
-    for (index, source) in sources.iter().enumerate() {
-        let source = manifest_dir.join(source);
-        let object = out_dir.join(format!("prodex_mojo_core_{index}.o"));
-        compile_mojo_source(&mojo, &target, &target_cpu, &source, &object);
-        objects.push(object);
-    }
+    // Keep archive member order stable while independent Mojo translation
+    // units compile in parallel. Every task succeeds before archiving.
+    let work = sources
+        .iter()
+        .enumerate()
+        .map(|(index, source)| {
+            (
+                manifest_dir.join(source),
+                out_dir.join(format!("prodex_mojo_core_{index}.o")),
+            )
+        })
+        .collect::<Vec<_>>();
+    let jobs = mojo_compile_jobs(work.len());
+    let compile_start = std::time::Instant::now();
+    compile_mojo_objects(&mojo, &target, &target_cpu, &work, jobs);
+    println!(
+        "cargo:warning=compiled {} Mojo objects with {jobs} workers in {:.1}s",
+        work.len(),
+        compile_start.elapsed().as_secs_f64()
+    );
+    let objects = work
+        .into_iter()
+        .map(|(_, object)| object)
+        .collect::<Vec<_>>();
 
     if target.ends_with("-msvc") {
         namespace_conflicting_msvc_weak_static_strings(&objects, &out_dir);
@@ -240,33 +259,147 @@ fn link_prebuilt_archive(
     emit_link(out_dir, target);
 }
 
+/// Bound subprocess concurrency independently of the number of Mojo files.
+/// Cargo supplies NUM_JOBS for build scripts; an override controls memory use.
+fn mojo_compile_jobs(source_count: usize) -> usize {
+    let available = thread::available_parallelism()
+        .map(|count| count.get())
+        .unwrap_or(1);
+    let cargo_jobs = env::var("NUM_JOBS").ok();
+    let override_jobs = env::var("PRODEX_MOJO_COMPILE_JOBS").ok();
+    configured_mojo_jobs(
+        source_count,
+        cargo_jobs.as_deref(),
+        override_jobs.as_deref(),
+        available,
+    )
+    .unwrap_or_else(|error| panic!("{error}"))
+}
+
+fn configured_mojo_jobs(
+    source_count: usize,
+    cargo_jobs: Option<&str>,
+    override_jobs: Option<&str>,
+    available: usize,
+) -> Result<usize, String> {
+    // One Mojo compiler can use substantial memory, especially on CI.
+    const MAX_MOJO_JOBS: usize = 8;
+    const DEFAULT_MOJO_JOBS: usize = 4;
+    if source_count == 0 {
+        return Ok(1);
+    }
+    let default = cargo_jobs
+        .and_then(|value| value.parse::<usize>().ok())
+        .filter(|jobs| *jobs > 0)
+        .unwrap_or(available.max(1))
+        .min(DEFAULT_MOJO_JOBS);
+    let selected = match override_jobs {
+        None => default,
+        Some(value) => {
+            let jobs = value.parse::<usize>().map_err(|_| {
+                format!("PRODEX_MOJO_COMPILE_JOBS must be an integer from 1 to {MAX_MOJO_JOBS}")
+            })?;
+            if !(1..=MAX_MOJO_JOBS).contains(&jobs) {
+                return Err(format!(
+                    "PRODEX_MOJO_COMPILE_JOBS must be an integer from 1 to {MAX_MOJO_JOBS}"
+                ));
+            }
+            jobs
+        }
+    };
+    Ok(selected.min(source_count).max(1))
+}
+
+/// Multiple child compilers may emit diagnostics, but the archive remains
+/// fail-closed: a failed child suppresses subsequent archive/link steps.
+fn compile_mojo_objects(
+    mojo: &OsString,
+    target: &str,
+    target_cpu: &str,
+    work: &[(PathBuf, PathBuf)],
+    jobs: usize,
+) {
+    assert!(jobs >= 1, "Mojo worker count must be positive");
+    if jobs == 1 {
+        for (source, object) in work {
+            if let Err(error) = compile_mojo_source(mojo, target, target_cpu, source, object) {
+                panic!("{error}");
+            }
+        }
+        return;
+    }
+    let cursor = AtomicUsize::new(0);
+    let failed = AtomicBool::new(false);
+    let errors = thread::scope(|scope| {
+        let mut handles = Vec::with_capacity(jobs);
+        for _ in 0..jobs {
+            handles.push(scope.spawn(|| {
+                loop {
+                    if failed.load(Ordering::Acquire) {
+                        return None;
+                    }
+                    let index = cursor.fetch_add(1, Ordering::Relaxed);
+                    let (source, object) = work.get(index)?;
+                    if let Err(error) =
+                        compile_mojo_source(mojo, target, target_cpu, source, object)
+                    {
+                        failed.store(true, Ordering::Release);
+                        return Some(error);
+                    }
+                }
+            }));
+        }
+        handles
+            .into_iter()
+            .filter_map(|handle| handle.join().expect("Mojo worker thread panicked"))
+            .collect::<Vec<_>>()
+    });
+    if !errors.is_empty() {
+        panic!(
+            "one or more Mojo translation units failed:\n{}",
+            errors.join("\n")
+        );
+    }
+}
+
 fn compile_mojo_source(
     mojo: &OsString,
     target: &str,
     target_cpu: &str,
     source: &Path,
     object: &Path,
-) {
-    let status = Command::new(mojo)
+) -> Result<(), String> {
+    let output = Command::new(mojo)
         .arg("build")
         .arg(source)
         .args(["-D", "HEAP_BUFFER_BYTES=4096"])
         .args(["--target-triple", target, "--target-cpu", target_cpu])
         .args(["--emit", "object", "--optimization-level=3", "-o"])
         .arg(object)
-        .status();
-    match status {
-        Ok(status) if status.success() => {}
-        Err(error) if error.kind() == ErrorKind::NotFound => {
-            panic!(
-                "Mojo compiler was required but not found on PATH; install Mojo or set PRODEX_MOJO"
-            );
+        .output();
+    match output {
+        Ok(output) if output.status.success() => {
+            if !output.stderr.is_empty() {
+                eprintln!("{}", String::from_utf8_lossy(&output.stderr));
+            }
+            Ok(())
         }
-        Ok(status) => panic_on_failure("Mojo compiler", status, source),
-        Err(error) => panic!(
-            "failed to run Mojo compiler `{}`: {error}; fix PRODEX_MOJO or disable Mojo features",
-            mojo.to_string_lossy()
+        Err(error) if error.kind() == ErrorKind::NotFound => Err(
+            "Mojo compiler was required but not found on PATH; install Mojo or set PRODEX_MOJO"
+                .to_string(),
         ),
+        Ok(output) => Err(format!(
+            "Mojo compiler failed for {} ({}):\n{}{}",
+            source.display(),
+            output.status,
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        )),
+        Err(error) => Err(format!(
+            "failed to run Mojo compiler {} for {}: {error}; fix PRODEX_MOJO",
+            mojo.to_string_lossy(),
+            source.display()
+        )),
     }
 }
 
@@ -626,3 +759,7 @@ fn resolve_archive_path(path: PathBuf, manifest_dir: &Path) -> PathBuf {
 fn panic_on_failure(tool: &str, status: ExitStatus, path: &Path) -> ! {
     panic!("{tool} failed for {} ({status})", path.display());
 }
+
+#[cfg(test)]
+#[path = "build/parallel_compile_tests.rs"]
+mod tests;
