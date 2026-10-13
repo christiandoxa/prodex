@@ -170,6 +170,35 @@ const WINDOWS_SHARD_GROUPS = Object.freeze([
   },
 ]);
 
+// The old single Windows remainder took >8 minutes to run 362 tests
+// serially. These are disjoint, independently compiled serial test groups;
+// the broad selection group skips the already-owned selection/admission tests.
+const WINDOWS_REMAINDER_SHARDS = Object.freeze([
+  {
+    suite: "remainder-continuations",
+    label: "prodex-app remaining continuation tests",
+    filters: ["main_internal_tests::runtime_proxy_continuations::"],
+  },
+  {
+    suite: "remainder-selection",
+    label: "prodex-app remaining selection and admission tests",
+    filters: [SELECTION_PREFIX],
+    skipFilters: PRODEX_APP_LIB_FILTERS.filter((filter) => filter.startsWith(SELECTION_PREFIX)),
+  },
+  {
+    suite: "remainder-foundation",
+    label: "prodex-app remaining runtime foundation tests",
+    filters: [
+      "runtime_store::",
+      "runtime_external_provider_config::",
+      "runtime_core_shared::",
+      "reports::",
+      "runtime_background::",
+      "runtime_thread_index::",
+    ],
+  },
+]);
+
 function collectDuplicates(values) {
   const indexesByValue = new Map();
   values.forEach((value, index) => {
@@ -298,8 +327,15 @@ export function windowsGithubMatrix() {
       return shard.filters;
     }),
   }));
+  const leftover = {
+    ...PRODEX_APP_LIB_SHARDS.at(-1),
+    skipFilters: [
+      ...PRODEX_APP_LIB_FILTERS,
+      ...WINDOWS_REMAINDER_SHARDS.flatMap((shard) => shard.filters),
+    ],
+  };
   return {
-    include: [...grouped, PRODEX_APP_LIB_SHARDS.at(-1)].map(matrixEntry),
+    include: [...grouped, ...WINDOWS_REMAINDER_SHARDS, leftover].map(matrixEntry),
   };
 }
 
@@ -361,7 +397,7 @@ function printHelp() {
       "",
       "Validates or prints the shared prodex-app library CI shard plan.",
       "--github-matrix emits the push/PR app matrix without runtime-owned filters.",
-      "--windows-github-matrix emits five grouped Windows partitions to avoid duplicate compilation.",
+      "--windows-github-matrix emits eight disjoint Windows partitions with one cache writer.",
       "--full-test-matrix emits the scheduled full-test matrix including workspace coverage.",
     ].join("\n") + "\n",
   );

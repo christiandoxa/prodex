@@ -678,12 +678,20 @@ jobs:
             --skip continuity_failure_reason_metrics_
             --skip rtk::tests::
           )
+          # A dedicated Windows-only selection remainder overlaps base filter
+          # prefixes by name, but explicitly skips already-assigned cases.
+          # Apply the same skip contract to filtered and residual partitions.
+          shard_skips=()
+          while IFS= read -r filter; do
+            [[ -z "${filter}" ]] && continue
+            shard_skips+=(--skip "${filter}")
+          done <<< "${PRODEX_APP_SKIP_FILTERS}"
           if [[ -n "${PRODEX_APP_FILTERS}" ]]; then
             status=0
             while IFS= read -r filter; do
               [[ -z "${filter}" ]] && continue
               if ! cargo test --locked -q -p prodex-app --lib \
-                "${filter}" -- --test-threads=1 "${windows_skips[@]}" 2>&1 | tee "${test_log}"; then
+                "${filter}" -- --test-threads=1 "${shard_skips[@]}" "${windows_skips[@]}" 2>&1 | tee "${test_log}"; then
                 status=1
               fi
               if grep -Fq 'running 0 tests' "${test_log}"; then
@@ -693,11 +701,6 @@ jobs:
             done <<< "${PRODEX_APP_FILTERS}"
             exit "${status}"
           else
-            shard_skips=()
-            while IFS= read -r filter; do
-              [[ -z "${filter}" ]] && continue
-              shard_skips+=(--skip "${filter}")
-            done <<< "${PRODEX_APP_SKIP_FILTERS}"
             cargo test --locked -q -p prodex-app --lib -- \
               --test-threads=1 "${shard_skips[@]}" "${windows_skips[@]}" 2>&1 | tee "${test_log}"
             if grep -Fq 'running 0 tests' "${test_log}"; then
