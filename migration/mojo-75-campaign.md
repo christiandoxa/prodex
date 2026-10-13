@@ -5384,3 +5384,15 @@ empty, slash-only, Unicode-trimmed, and nested paths.
 The focused Mojo and runtime-launch tests, formatting, ownership, authority,
 no-fallback, and production-share checks pass. The 75% project target remains
 in progress.
+
+## Runtime-doctor marker context aggregation migration
+
+`runtime_doctor_marker_summary.mojo` now owns bounded marker total, route/lane/profile context, reason, and facet aggregation through `prodex_mojo_runtime_doctor_marker_context_reason_facet_aggregation_v1`. Rust retains log-line parsing, redaction, BTreeMap materialization, and diagnostic DTO construction; the prior per-marker semantic grouping and reason/facet classification no longer runs in Rust. Required-Mojo ABI and runtime-doctor caller tests passed, with 12 direct ABI cases and the focused/all runtime-doctor suites green. Ownership, authority, no-fallback, and production-share guards passed.
+
+## Shared Codex attachment SQLite-header migration
+
+`shared_attachment_policy.mojo` now owns the fixed SQLite header decision through operation 7 of `prodex_shared_attachment_policy_v1`. Rust retains filesystem metadata, bounded file reads, and error propagation; raw bytes cross the ABI so invalid UTF-8 cannot trigger a semantic fallback. Required-Mojo adapter tests and the shared-filesystem caller suite passed, alongside focused Clippy and ownership, authority, no-fallback, production-share, size, and diff checks.
+
+## Info quota-runway migration
+
+`info_runway.mojo` now owns per-profile observation ordering, monotonic burn-window selection, aggregate burn-rate arithmetic, and exhaustion projection through `prodex_mojo_info_runway_estimate_v1`. Rust retains runtime-log parsing, clock acquisition, borrowed-view marshalling, and validated result materialization. The adapter tests cover profile grouping, reset segments, exhaustion, empty input, and invalid window tags; the ownership, authority, no-fallback, production-share, formatting, and diff guards pass. A clean strict archive build remains pending because the local Mojo optimizer is slow on this translation unit.
