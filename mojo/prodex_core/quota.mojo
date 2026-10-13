@@ -1438,6 +1438,7 @@ comptime QUOTA_DISPLAY_LABEL_SORT: Int64 = 0
 comptime QUOTA_DISPLAY_LABEL_BLOCKED_STATUS: Int64 = 1
 comptime QUOTA_DISPLAY_LABEL_AUTH_SYNC_SOURCE: Int64 = 2
 comptime QUOTA_DISPLAY_LABEL_AUTH_SUMMARY: Int64 = 3
+comptime QUOTA_DISPLAY_LABEL_ERROR_SUMMARY: Int64 = 4
 
 comptime QUOTA_WINDOW_LABEL_USAGE: Int64 = 0
 comptime QUOTA_WINDOW_LABEL_FIVE_HOUR: Int64 = 1
@@ -1511,6 +1512,39 @@ def prodex_quota_display_label_v1(
             label = StringSlice("Blocked weekly")
         elif value == QUOTA_BLOCKED_KIND_FIVE_HOUR:
             label = StringSlice("Blocked 5h")
+        else:
+            return QUOTA_MODEL_POLICY_INVALID
+    elif label_kind == QUOTA_DISPLAY_LABEL_ERROR_SUMMARY:
+        if value == 0:
+            label = StringSlice("unknown")
+        elif value == 1:
+            label = StringSlice("unavailable")
+        elif value == 2:
+            label = StringSlice("config")
+        elif value == 3:
+            label = StringSlice("server")
+        elif value == 4:
+            label = StringSlice("timeout")
+        elif value == 5:
+            label = StringSlice("network")
+        elif value == 6:
+            label = StringSlice("proxy")
+        elif value == 7:
+            label = StringSlice("connection")
+        elif value == 8:
+            label = StringSlice("invalid auth")
+        elif value == 9:
+            label = StringSlice("rate limit")
+        elif value == 10:
+            label = StringSlice("parse")
+        elif value == 11:
+            label = StringSlice("empty")
+        elif value == 12:
+            label = StringSlice("cancelled")
+        elif value == 13:
+            label = StringSlice("forbidden")
+        elif value == 14:
+            label = StringSlice("not found")
         else:
             return QUOTA_MODEL_POLICY_INVALID
     elif label_kind == QUOTA_DISPLAY_LABEL_AUTH_SYNC_SOURCE:

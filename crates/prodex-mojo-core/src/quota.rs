@@ -523,6 +523,7 @@ const QUOTA_DISPLAY_LABEL_SORT: i64 = 0;
 const QUOTA_DISPLAY_LABEL_BLOCKED_STATUS: i64 = 1;
 const QUOTA_DISPLAY_LABEL_AUTH_SYNC_SOURCE: i64 = 2;
 const QUOTA_DISPLAY_LABEL_AUTH_SUMMARY: i64 = 3;
+const QUOTA_DISPLAY_LABEL_ERROR_SUMMARY: i64 = 4;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum QuotaAuthFilterPlan {
@@ -958,6 +959,20 @@ fn load_quota_display_label(kind: i64, value: i64) -> Result<String, crate::Mojo
         return Err(crate::MojoError::InvalidOutput);
     }
     String::from_utf8(output[..written].to_vec()).map_err(|_| crate::MojoError::InvalidOutput)
+}
+
+/// Render the canonical quota error label through the compiled Mojo owner.
+///
+/// `Ok(None)` means an unclassified upstream message must be preserved verbatim,
+/// rather than silently replacing it with a guessed error category.
+pub fn quota_error_summary_label(kind: i64) -> Result<Option<String>, crate::MojoError> {
+    if !(QUOTA_ERROR_KIND_UNKNOWN..=QUOTA_ERROR_KIND_OTHER).contains(&kind) {
+        return Err(crate::MojoError::InvalidInput);
+    }
+    if kind == QUOTA_ERROR_KIND_OTHER {
+        return Ok(None);
+    }
+    load_quota_display_label(QUOTA_DISPLAY_LABEL_ERROR_SUMMARY, kind).map(Some)
 }
 
 pub fn quota_blocked_status_label(kind: i64) -> Result<&'static str, crate::MojoError> {
