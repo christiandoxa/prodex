@@ -1963,6 +1963,26 @@
         "operations": [
           "info_runtime_quota_runway_estimate"
         ]
+      },
+      {
+        "path": "mojo/prodex_core/deepseek_stream_policy.mojo",
+        "language": "mojo",
+        "classification": "DETERMINISTIC_DOMAIN",
+        "production_reachable": true,
+        "role": "semantic",
+        "operations": [
+          "deepseek_stream_tool_arguments_policy"
+        ]
+      },
+      {
+        "path": "crates/prodex-mojo-core/src/deepseek_stream_policy.rs",
+        "language": "rust",
+        "classification": "MIXED",
+        "production_reachable": true,
+        "role": "adapter",
+        "operations": [
+          "deepseek_stream_tool_arguments_policy"
+        ]
       }
     ],
     "removed": [
@@ -8402,6 +8422,29 @@
       "duplicate_production_owner": false,
       "platform_fallback": false,
       "rust_adapter_scope": "model gate, borrowed body marshalling, envelope decoding, and caller-owned byte replacement"
+    },
+    {
+      "name": "deepseek_stream_tool_arguments_policy",
+      "domain": "provider/deepseek",
+      "introduced_in": "0.438.0",
+      "baseline_state": "Rust trimmed streamed function names and parsed streamed tool-call argument JSON before accepting a DeepSeek stream delta",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_deepseek_stream_tool_arguments_policy_v1",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/deepseek_stream_policy.mojo",
+      "consumer": "crates/prodex-provider-core/src/translators/deepseek/stream/shaping.rs",
+      "consumer_marker": "deepseek_stream_policy::stream_tool_arguments_policy(",
+      "production_consumers": [
+        "crates/prodex-provider-core/src/translators/deepseek/stream/shaping.rs"
+      ],
+      "production_reachability_test": "crates/prodex-provider-core/src/translators/deepseek.rs",
+      "rust_owner_before": "Rust streamed function-name trim/emptiness validation and full JSON argument validation",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "deleted; direct Mojo adapter and DeepSeek stream caller tests cover Unicode whitespace, empty arguments, malformed JSON, and valid scalar/object arguments",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "borrowed string projection, typed result mapping, and provider-specific human-readable error text"
     }
   ],
   "rust_semantic_reductions": [

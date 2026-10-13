@@ -74,21 +74,23 @@ pub fn deepseek_provider_core_validate_stream_tool_call_arguments(
     name: Option<&str>,
     arguments: &str,
 ) -> Result<(), String> {
-    let Some(name) = name.filter(|name| !name.trim().is_empty()) else {
-        return Err(format!(
-            "{provider_label} streamed a tool call without a function name at index {index}"
-        ));
-    };
-    if arguments.trim().is_empty() {
-        return Ok(());
+    let plan =
+        prodex_mojo_core::deepseek_stream_policy::stream_tool_arguments_policy(name, arguments)
+            .expect("Mojo DeepSeek stream tool argument policy returned invalid output");
+    match plan {
+        prodex_mojo_core::deepseek_stream_policy::DeepSeekStreamToolArgumentsPlan::Valid => Ok(()),
+        prodex_mojo_core::deepseek_stream_policy::DeepSeekStreamToolArgumentsPlan::MissingName => {
+            Err(format!(
+                "{provider_label} streamed a tool call without a function name at index {index}"
+            ))
+        }
+        prodex_mojo_core::deepseek_stream_policy::DeepSeekStreamToolArgumentsPlan::InvalidArguments => {
+            let name = name.unwrap_or_default().trim();
+            Err(format!(
+                "{provider_label} streamed malformed JSON arguments for tool call `{name}` at index {index}: invalid JSON"
+            ))
+        }
     }
-    serde_json::from_str::<Value>(arguments)
-        .map(|_| ())
-        .map_err(|error| {
-            format!(
-                "{provider_label} streamed malformed JSON arguments for tool call `{name}` at index {index}: {error}"
-            )
-        })
 }
 
 pub fn deepseek_provider_core_validate_stream_tool_call_delta(
