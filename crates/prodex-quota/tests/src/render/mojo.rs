@@ -7,6 +7,15 @@ fn real_mojo_quota_smoke_calls_exported_c_abi() {
 }
 
 #[test]
+fn quota_panel_first_line_normalization_is_mojo_owned() {
+    assert_eq!(
+        prodex_mojo_core::quota::quota_panel_first_line("\n  first line  \r\nsecond"),
+        Ok("first line".to_string())
+    );
+    assert_eq!(first_line_of_error("\n\t\n"), "-");
+}
+
+#[test]
 fn gemini_renderer_uses_normalized_batch_results() {
     let info = |bucket: GeminiQuotaBucket| GeminiQuotaInfo {
         email: None,

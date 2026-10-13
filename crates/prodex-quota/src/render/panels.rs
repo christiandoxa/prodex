@@ -269,10 +269,11 @@ fn additional_window_label(base: &str, window: &UsageWindow) -> String {
 }
 
 pub fn first_line_of_error(input: &str) -> String {
-    input
-        .lines()
-        .find(|line| !line.trim().is_empty())
-        .unwrap_or("-")
-        .trim()
-        .to_string()
+    let line = prodex_mojo_core::quota::quota_panel_first_line(input)
+        .expect("Mojo quota panel first-line normalization failed");
+    if line.is_empty() {
+        "-".to_string()
+    } else {
+        line
+    }
 }

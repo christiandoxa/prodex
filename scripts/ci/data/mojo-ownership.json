@@ -590,6 +590,7 @@
           "quota_reset_epoch_precedence",
           "quota_report_page_planning",
           "quota_error_summary_label_rendering",
+          "quota_panel_first_line_normalization",
           "quota_human_retry_time_normalization"
         ]
       },
@@ -8049,6 +8050,30 @@
       "rust_adapter_scope": "validated hook JSON and UUID projection, per-marker file locking, logical rollout length and atomic file writes"
     },
     {
+      "name": "quota_panel_first_line_normalization",
+      "domain": "quota/display",
+      "introduced_in": "0.438.0",
+      "baseline_state": "Rust selected and trimmed the first non-empty error line before quota panel rendering and Mojo classification",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_quota_panel_first_line_v1",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/quota.mojo",
+      "consumer": "crates/prodex-quota/src/render/panels.rs",
+      "consumer_marker": "prodex_mojo_core::quota::quota_panel_first_line(",
+      "production_consumers": [
+        "crates/prodex-quota/src/render/panels.rs",
+        "crates/prodex-quota/src/render/windows.rs"
+      ],
+      "production_reachability_test": "crates/prodex-quota/tests/src/render/mojo.rs",
+      "rust_owner_before": "Rust first-line scanning, whitespace trimming, and empty-message sentinel selection",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "deleted; required-Mojo caller test covers blank lines, trimming, and sentinel preservation",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "borrowed UTF-8 input/output allocation, ABI status mapping, and final terminal panel composition"
+    },
+    {
       "name": "quota_error_summary_label_rendering",
       "domain": "quota/display",
       "introduced_in": "0.438.0",
@@ -9145,6 +9170,31 @@
         }
       },
       "cleanup_evidence": "The former Rust context, reason, continuation, and facet loops are removed from the parser; direct ABI and caller tests exercise the replacement reducer."
+    },
+    {
+      "file": "crates/prodex-quota/src/render/panels.rs",
+      "symbol": "first_line_of_error",
+      "operation": "quota_panel_first_line_normalization",
+      "previous_responsibility": "first non-empty line selection, whitespace trimming, and empty-message sentinel",
+      "final_state": "adapter-only",
+      "rust_before": "crates/prodex-quota/src/render/panels.rs::first_line_of_error",
+      "rust_after": "adapter-only; Mojo owns line selection and trim semantics",
+      "mojo_owner": "mojo/prodex_core/quota.mojo::prodex_quota_panel_first_line_v1",
+      "mojo_source": "mojo/prodex_core/quota.mojo",
+      "mojo_entry": "prodex_quota_panel_first_line_v1",
+      "production_consumer": "crates/prodex-quota/src/render/panels.rs",
+      "parity_test": "crates/prodex-quota/tests/src/render/mojo.rs",
+      "performance": "one bounded borrowed-text ABI call per rendered error",
+      "cleanup_loc": 7,
+      "cleanup_source": {
+        "kind": "collapsed-adapter",
+        "baseline_range": {
+          "start": 271,
+          "end": 278
+        },
+        "release_symbol": "pub fn first_line_of_error",
+        "release_marker": "prodex_mojo_core::quota::quota_panel_first_line("
+      }
     }
   ],
   "deleted_authoritative_operations": [
