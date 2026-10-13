@@ -9,21 +9,6 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 - Integrate native capacity recovery safeguards (`bd3c1d5`)
 - Preserve root session recovery ownership and cursor (`bca7e83`)
 - Keep Responses heartbeats uncommitted (`6e49493`)
-- Bound recovery waits without reopening live sessions (`ef7cf36`)
-- Recover native request timeouts after compaction (`cc146bb`)
-- Plan runtime route circuit actions (`dec6d74`)
-- Migrate websocket recovery predicates (`3421a40`)
-
-### Deps
-
-- Align Kiro stable native release probe (`082bfc9`)
-- Verify Ponytail 5.2.0 compaction compatibility (`38112e8`)
-- Audit Ponytail 5.1.1 stable source (`ef94261`)
-- Update quinn-proto past peer-triggered panic advisories (`f7e2028`)
-
-### Misc
-
-- Migrate Gemini thought signatures (`eacb848`)
 # Prodex 0.437.9
 
 ## New Features
@@ -73,6 +58,26 @@ See [the heartbeat incident and safety contract](https://github.com/christiandox
 and [the native root-session ownership investigation](https://github.com/christiandoxa/prodex/blob/main/migration/native-root-marker-04379.md).
 
 Full Changelog: [0.437.8...0.437.9](https://github.com/christiandoxa/prodex/compare/0.437.8...0.437.9)
+
+## 0.437.8 - 2026-10-13
+
+### Runtime
+
+- Bound recovery waits without reopening live sessions (`ef7cf36`)
+- Recover native request timeouts after compaction (`cc146bb`)
+- Plan runtime route circuit actions (`dec6d74`)
+- Migrate websocket recovery predicates (`3421a40`)
+
+### Deps
+
+- Align Kiro stable native release probe (`082bfc9`)
+- Verify Ponytail 5.2.0 compaction compatibility (`38112e8`)
+- Audit Ponytail 5.1.1 stable source (`ef94261`)
+- Update quinn-proto past peer-triggered panic advisories (`f7e2028`)
+
+### Misc
+
+- Migrate Gemini thought signatures (`eacb848`)
 
 ## 0.437.7 - 2026-10-12
 
