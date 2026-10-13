@@ -69,6 +69,15 @@ unsafe extern "C" {
         status: i64,
         output_address: u64,
     ) -> i64;
+    fn prodex_launch_workflow_recovery_class_v2(
+        abi_version: i64,
+        name_address: u64,
+        name_length: i64,
+        status: i64,
+        message_address: u64,
+        message_length: i64,
+        output_address: u64,
+    ) -> i64;
     fn prodex_launch_workflow_evidence_v1(
         abi_version: i64,
         observation: i64,
@@ -125,6 +134,40 @@ pub fn workflow_recovery_class(
             (&mut output as *mut i64) as usize as u64,
         )
     };
+    decode_workflow_recovery_class(result, output)
+}
+
+/// Classify a native terminal error including its exact compatibility message.
+/// Envelope/session validation remains the caller's responsibility.
+pub fn workflow_recovery_class_with_message(
+    name: &str,
+    status: Option<u16>,
+    message: Option<&str>,
+) -> Result<Option<WorkflowRecoveryClass>, MojoError> {
+    if name.len() > 256 {
+        return Err(MojoError::InvalidInput);
+    }
+    let message = message.unwrap_or_default();
+    let message_length = i64::try_from(message.len()).map_err(|_| MojoError::InvalidInput)?;
+    let mut output = 0_i64;
+    let result = unsafe {
+        prodex_launch_workflow_recovery_class_v2(
+            2,
+            name.as_ptr() as usize as u64,
+            name.len() as i64,
+            status.map(i64::from).unwrap_or(-1),
+            message.as_ptr() as usize as u64,
+            message_length,
+            (&mut output as *mut i64) as usize as u64,
+        )
+    };
+    decode_workflow_recovery_class(result, output)
+}
+
+fn decode_workflow_recovery_class(
+    result: i64,
+    output: i64,
+) -> Result<Option<WorkflowRecoveryClass>, MojoError> {
     match result {
         0 => match output {
             0 => Ok(None),
@@ -363,6 +406,63 @@ mod tests {
         assert_eq!(
             unsafe { prodex_launch_in_place_recovery_v2(2, 1, 5, 1, 2, 1) },
             -2
+        );
+    }
+
+    #[test]
+    fn native_timeout_message_uses_versioned_mojo_policy_without_overriding_tags() {
+        for status in [None, Some(408), Some(504)] {
+            assert_eq!(
+                workflow_recovery_class_with_message("other", status, Some("request timed out")),
+                Ok(Some(WorkflowRecoveryClass::Transport))
+            );
+        }
+        assert_eq!(workflow_recovery_class("other", None), Ok(None));
+        assert_eq!(
+            workflow_recovery_class_with_message("other", None, None),
+            Ok(None)
+        );
+        assert_eq!(
+            workflow_recovery_class_with_message("other", Some(400), Some("request timed out")),
+            Ok(None)
+        );
+        assert_eq!(
+            workflow_recovery_class_with_message("other", None, Some("quoted request timed out")),
+            Ok(None)
+        );
+        assert_eq!(
+            workflow_recovery_class_with_message("server_overloaded", None, Some("unrelated")),
+            Ok(Some(WorkflowRecoveryClass::Overload))
+        );
+        let mut output = 77_i64;
+        assert_eq!(
+            unsafe {
+                prodex_launch_workflow_recovery_class_v2(
+                    1,
+                    0,
+                    0,
+                    -1,
+                    0,
+                    0,
+                    (&mut output as *mut i64) as u64,
+                )
+            },
+            4
+        );
+        assert_eq!(output, 77, "bad ABI must not touch output");
+        assert_eq!(
+            unsafe {
+                prodex_launch_workflow_recovery_class_v2(
+                    2,
+                    0,
+                    0,
+                    -1,
+                    0,
+                    1,
+                    (&mut output as *mut i64) as u64,
+                )
+            },
+            1
         );
     }
 

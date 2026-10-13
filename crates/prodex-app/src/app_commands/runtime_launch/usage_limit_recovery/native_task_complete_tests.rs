@@ -524,3 +524,65 @@ fn paused_goal_cancels_a_pending_live_recovery_before_another_poll() {
     drop(monitor);
     let _ = fs::remove_dir_all(root);
 }
+
+#[test]
+fn terminal_timeout_after_compaction_arms_one_in_place_recovery_without_replaying_work() {
+    let root = fixture_root("native-compact-timeout");
+    let (_home, _shared) = configured_env(&root);
+    let paths = AppPaths::discover().unwrap();
+    let session_path = populate_fixture(&root, &paths, &["a", "b"]);
+    blocked_goal(&paths);
+    let mut monitor = GoalUsageLimitMonitor::new(
+        paths.clone(),
+        Some(paths.shared_codex_root.join("goals_1.sqlite")),
+        root.join("marker"),
+        Some(SESSION_ID.to_string()),
+    );
+    append_user_event(&session_path);
+    append_record(
+        &session_path,
+        serde_json::json!({"type":"response_item","payload":{
+            "type":"custom_tool_call_output","call_id":"finished-before-compact","output":"done"
+        }}),
+    );
+    append_record(
+        &session_path,
+        serde_json::json!({"type":"compacted","payload":{
+            "message":"synthetic summary", "replacement_history":[]
+        }}),
+    );
+    append_record(
+        &session_path,
+        serde_json::json!({"type":"event_msg","payload":{
+            "type":"error","message":"request timed out","codex_error_info":"other"
+        }}),
+    );
+    assert_eq!(
+        monitor.take_usage_limit_signal().unwrap(),
+        None,
+        "a retryable notice is not a completed turn and must not race native compaction"
+    );
+    append_record(
+        &session_path,
+        serde_json::json!({"type":"event_msg","payload":{
+            "type":"task_complete", "error":{
+                "message":"request timed out", "codex_error_info":"other"
+            }
+        }}),
+    );
+    assert_eq!(
+        monitor.take_usage_limit_signal().unwrap().as_deref(),
+        Some(SESSION_ID)
+    );
+    assert_eq!(monitor.recovery_failure_class(), "transport");
+    assert!(monitor.recovery_retries_after_pool_round());
+    assert_eq!(monitor.recovery_evidence().side_effect_state, "observed");
+    monitor.acknowledge_in_place_recovery();
+    assert_eq!(
+        monitor.take_usage_limit_signal().unwrap(),
+        None,
+        "acknowledged timeout must not cause duplicate recovery or repeat completed tool calls"
+    );
+    drop(monitor);
+    let _ = fs::remove_dir_all(root);
+}

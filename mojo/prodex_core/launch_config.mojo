@@ -217,6 +217,52 @@ def prodex_launch_workflow_recovery_class_v1(
     return PRODEX_WORKFLOW_CLASS_STATUS_OK
 
 
+# Native RequestTimeout is serialized as codex_error_info=other. Restrict the
+# compatibility projection to exact native error messages in a failed event;
+# arbitrary text mentioning timeouts or explicit auth/client errors must not
+# authorize a retry or account change.
+@export("prodex_launch_workflow_recovery_class_v2")
+def prodex_launch_workflow_recovery_class_v2(
+    abi_version: Int64,
+    name_address: UInt,
+    name_length: Int64,
+    status: Int64,
+    message_address: UInt,
+    message_length: Int64,
+    output_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != 2:
+        return PRODEX_WORKFLOW_CLASS_STATUS_ABI
+    if message_length < 0 or (message_length > 0 and message_address == 0):
+        return PRODEX_WORKFLOW_CLASS_STATUS_INVALID
+    var result = prodex_launch_workflow_recovery_class_v1(
+        PRODEX_WORKFLOW_CLASS_ABI_VERSION,
+        name_address, name_length, status, output_address,
+    )
+    if result != PRODEX_WORKFLOW_CLASS_STATUS_OK:
+        return result
+    var output = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    if output[] != PRODEX_WORKFLOW_CLASS_NONE:
+        return result
+    if (
+        (status == -1 or status == 408 or status == 504)
+        and launch_workflow_text_equals(name_address, name_length, StringSlice("other"))
+        and (
+            launch_workflow_text_equals(
+                message_address, message_length, StringSlice("request timed out")
+            )
+            or launch_workflow_text_equals(
+                message_address, message_length,
+                StringSlice("Error running remote compact task: request timed out")
+            )
+        )
+    ):
+        output[] = PRODEX_WORKFLOW_CLASS_TRANSPORT
+    return PRODEX_WORKFLOW_CLASS_STATUS_OK
+
+
 # Workflow evidence states: acceptance ambiguous=0, accepted=1, committed=2,
 # side effect=3; stream unknown=-1, false=0, true=1; side effect unknown=0,
 # none=1, observed=2. Rust supplies only the already parsed event kind.

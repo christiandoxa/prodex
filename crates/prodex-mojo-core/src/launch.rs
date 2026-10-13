@@ -21,7 +21,7 @@ pub use recovery::{
     InPlaceRecoveryAction, NativeGoalStatus, NativeThreadStatus, RecoveryObservationAction,
     RecoveryObservationKind, WorkflowEvidencePlan, WorkflowObservationKind, WorkflowRecoveryClass,
     in_place_recovery_action, recovery_observation_action, workflow_evidence_plan,
-    workflow_recovery_class,
+    workflow_recovery_class, workflow_recovery_class_with_message,
 };
 
 use crate::MojoError;
