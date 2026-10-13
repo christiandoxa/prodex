@@ -16,7 +16,7 @@ pub(super) fn collect_status_resource_counters(
     pids.insert(std::process::id());
     let Some(system_cpu_ticks) = fs::read_to_string("/proc/stat")
         .ok()
-        .and_then(|text| parse_system_cpu_ticks(&text))
+        .and_then(|text| prodex_mojo_core::status_resource::parse_system_cpu_ticks(&text))
     else {
         return StatusResourceCounters {
             process_count: pids.len(),
@@ -32,7 +32,7 @@ pub(super) fn collect_status_resource_counters(
         system_cpu_ticks,
         memory_total_bytes: fs::read_to_string("/proc/meminfo")
             .ok()
-            .and_then(|text| parse_kib_field(&text, "MemTotal"))
+            .and_then(|text| prodex_mojo_core::status_resource::parse_kib_field(&text, "MemTotal"))
             .unwrap_or_default(),
         ..StatusResourceCounters::default()
     };
@@ -43,22 +43,24 @@ pub(super) fn collect_status_resource_counters(
         counters.process_cpu_ticks = counters.process_cpu_ticks.saturating_add(
             fs::read_to_string(dir.join("stat"))
                 .ok()
-                .and_then(|text| parse_process_cpu_ticks(&text))
+                .and_then(|text| prodex_mojo_core::status_resource::parse_process_cpu_ticks(&text))
                 .unwrap_or_default(),
         );
         counters.resident_bytes = counters.resident_bytes.saturating_add(
             fs::read_to_string(dir.join("status"))
                 .ok()
-                .and_then(|text| parse_kib_field(&text, "VmRSS"))
+                .and_then(|text| prodex_mojo_core::status_resource::parse_kib_field(&text, "VmRSS"))
                 .unwrap_or_default(),
         );
         if let Ok(io) = fs::read_to_string(dir.join("io")) {
-            counters.disk_read_bytes = counters
-                .disk_read_bytes
-                .saturating_add(parse_u64_field(&io, "read_bytes").unwrap_or_default());
-            counters.disk_write_bytes = counters
-                .disk_write_bytes
-                .saturating_add(parse_u64_field(&io, "write_bytes").unwrap_or_default());
+            counters.disk_read_bytes = counters.disk_read_bytes.saturating_add(
+                prodex_mojo_core::status_resource::parse_u64_field(&io, "read_bytes")
+                    .unwrap_or_default(),
+            );
+            counters.disk_write_bytes = counters.disk_write_bytes.saturating_add(
+                prodex_mojo_core::status_resource::parse_u64_field(&io, "write_bytes")
+                    .unwrap_or_default(),
+            );
         }
         collect_socket_inodes(&dir.join("fd"), &mut socket_inodes);
     }
@@ -73,7 +75,8 @@ pub(super) fn collect_status_resource_counters(
         let Ok(table) = fs::read_to_string(path) else {
             continue;
         };
-        let (rx, tx) = parse_network_queues(&table, &socket_inodes);
+        let (rx, tx) =
+            prodex_mojo_core::status_resource::parse_network_queues(&table, &socket_inodes);
         counters.network_rx_queue_bytes = counters.network_rx_queue_bytes.saturating_add(rx);
         counters.network_tx_queue_bytes = counters.network_tx_queue_bytes.saturating_add(tx);
     }
@@ -125,53 +128,6 @@ pub(super) fn status_resource_snapshot(
     }
 }
 
-pub(super) fn parse_process_cpu_ticks(text: &str) -> Option<u64> {
-    let fields = text
-        .rsplit_once(')')?
-        .1
-        .split_whitespace()
-        .collect::<Vec<_>>();
-    Some(
-        fields
-            .get(11)?
-            .parse::<u64>()
-            .ok()?
-            .saturating_add(fields.get(12)?.parse::<u64>().ok()?),
-    )
-}
-
-pub(super) fn parse_system_cpu_ticks(text: &str) -> Option<u64> {
-    let mut fields = text.lines().next()?.split_whitespace();
-    if fields.next()? != "cpu" {
-        return None;
-    }
-    let mut total = 0_u64;
-    for value in fields.take(8) {
-        total = total.saturating_add(value.parse::<u64>().ok()?);
-    }
-    Some(total)
-}
-
-pub(super) fn parse_kib_field(text: &str, key: &str) -> Option<u64> {
-    let value = text.lines().find_map(|line| {
-        let (candidate, value) = line.split_once(':')?;
-        (candidate == key).then_some(value)
-    })?;
-    value
-        .split_whitespace()
-        .next()?
-        .parse::<u64>()
-        .ok()
-        .map(|kib| kib.saturating_mul(1024))
-}
-
-pub(super) fn parse_u64_field(text: &str, key: &str) -> Option<u64> {
-    text.lines().find_map(|line| {
-        let (candidate, value) = line.split_once(':')?;
-        (candidate == key).then(|| value.trim().parse::<u64>().ok())?
-    })
-}
-
 fn collect_socket_inodes(fd_dir: &Path, inodes: &mut HashSet<u64>) {
     let Ok(entries) = fs::read_dir(fd_dir) else {
         return;
@@ -183,32 +139,8 @@ fn collect_socket_inodes(fd_dir: &Path, inodes: &mut HashSet<u64>) {
         let Some(target) = target.to_str() else {
             continue;
         };
-        if let Some(inode) = target
-            .strip_prefix("socket:[")
-            .and_then(|value| value.strip_suffix(']'))
-            .and_then(|value| value.parse::<u64>().ok())
-        {
+        if let Some(inode) = prodex_mojo_core::status_resource::socket_inode_target(target) {
             inodes.insert(inode);
         }
     }
-}
-
-pub(super) fn parse_network_queues(text: &str, inodes: &HashSet<u64>) -> (u64, u64) {
-    let mut rx = 0_u64;
-    let mut tx = 0_u64;
-    for line in text.lines().skip(1) {
-        let fields = line.split_whitespace().collect::<Vec<_>>();
-        let Some(inode) = fields.get(9).and_then(|value| value.parse::<u64>().ok()) else {
-            continue;
-        };
-        if !inodes.contains(&inode) {
-            continue;
-        }
-        let Some((tx_hex, rx_hex)) = fields.get(4).and_then(|value| value.split_once(':')) else {
-            continue;
-        };
-        tx = tx.saturating_add(u64::from_str_radix(tx_hex, 16).unwrap_or_default());
-        rx = rx.saturating_add(u64::from_str_radix(rx_hex, 16).unwrap_or_default());
-    }
-    (rx, tx)
 }

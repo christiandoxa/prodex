@@ -36,11 +36,6 @@ mod resource;
 use prodex_mojo_core::info_render::format_text_sparkline as text_sparkline;
 use render::{render_status_dashboard, status_fields};
 use resource::{collect_status_resource_counters, status_resource_snapshot};
-#[cfg(test)]
-use resource::{
-    parse_kib_field, parse_network_queues, parse_process_cpu_ticks, parse_system_cpu_ticks,
-    parse_u64_field,
-};
 
 const STATUS_OVERVIEW_REFRESH: Duration = Duration::from_secs(5);
 const STATUS_INPUT_POLL: Duration = Duration::from_millis(100);
