@@ -470,6 +470,17 @@ user pauses, completed goals, and exhausted goal budgets take precedence. An
 ambiguous RPC acknowledgement is not blindly replayed. Actual process-exit and
 non-companion paths retain safe persisted-session recovery.
 
+Recovery waits honor provider cooldowns across multiple wait epochs while an
+eligible profile remains. One request-scoped pre-commit watchdog bounds total
+local waiting and cancels stalled async work instead of leaving detached tasks.
+Its budget is the larger of the configured stream idle timeout and the existing
+recovery epoch budget (five minutes with default production settings). This is a
+transport/recovery bound, not a context-window or auto-compaction setting; it
+never resets a committed stream or marks account quota exhausted. A local
+watchdog expiry is reported as a typed timeout. Native terminal `request timed
+out` errors can recover through the same idle thread after compaction, without
+replaying completed tools or overriding paused/cancelled goals.
+
 On Codex/provider-bridge paths, Smart Context preserves continuation metadata and critical signals while applying deterministic, validated context rewriting. Native opaque CLIs are outside that rewrite boundary. See [docs/smart-context.md](docs/smart-context.md) for its safety model and rollout controls.
 
 Managed optimizer roots are checked in this order: `PRODEX_OPTIMIZERS_HOME`, `$XDG_DATA_HOME/prodex-optimizers`, then `~/.local/share/prodex-optimizers`.
