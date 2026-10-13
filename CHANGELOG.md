@@ -2,10 +2,13 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
-## 0.437.8 - 2026-10-13
+## 0.437.9 - 2026-10-13
 
 ### Runtime
 
+- Integrate native capacity recovery safeguards (`bd3c1d5`)
+- Preserve root session recovery ownership and cursor (`bca7e83`)
+- Keep Responses heartbeats uncommitted (`6e49493`)
 - Bound recovery waits without reopening live sessions (`ef7cf36`)
 - Recover native request timeouts after compaction (`cc146bb`)
 - Plan runtime route circuit actions (`dec6d74`)
@@ -21,63 +24,55 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 ### Misc
 
 - Migrate Gemini thought signatures (`eacb848`)
-# Prodex 0.437.8
+# Prodex 0.437.9
 
 ## New Features
 
-- Add a request-scoped pre-commit watchdog for HTTP Responses, unary compaction,
-  and WebSocket message recovery. The deadline follows one logical request,
-  cannot be reset by account retries or admission backpressure, and cancels
-  pending async transport work when it expires.
+- No new end-user features; this release repairs capacity recovery without changing
+  native context-window, compaction, model selection, or post-output safety contracts.
 
 ## Bug Fixes
 
-- Recover exact native `request timed out` terminal events serialized as
-  `codex_error_info=other`, including the remote-compaction wrapper. Keep
-  explicit auth/client errors, unrelated prose, successful completion, foreign
-  sessions, and cancelled goals out of that compatibility rule.
-- Do not mistake a capped recovery sleep for completion of a longer provider
-  cooldown. Keep waiting across epochs while an eligible profile remains, but
-  preserve the account backoff and the absolute request watchdog.
-- Permit full-history compaction recovery when a session identifier exists but
-  no previous-response, turn-state, compact-owner or session-owner binding is
-  active. Never relax a real hard binding or rotate after output is committed.
-- Distinguish a local watchdog timeout from quota exhaustion or profile health
-  failure; HTTP clients receive a typed 504 rather than a misleading local
-  budget-exhausted 503. Drop cancelled transport work instead of orphaning it.
-- Update transitive `quinn-proto` to 0.11.18 for the peer-triggered panic
-  advisories reported by the release dependency audit.
-- Refresh the verified Ponytail stable reference to 5.2.0, including its upstream
-  compaction-level persistence, synchronous hook output, bounded SessionStart
-  mapping, and repository-text/symlink isolation fixes.
-- Align the release-only native Kiro compatibility probe with official stable
-  CLI 2.30.0 while retaining the existing verified installer digest.
+- Keep upstream Responses `keepalive` frames uncommitted in HTTP SSE and WebSocket.
+  A heartbeat is not model output: a later capacity failure can now use the existing
+  safe precommit retry/rotation path instead of being exposed after a false commit.
+- Preserve post-output safety: once real text, reasoning, or tool arguments have been
+  committed, an overload cannot trigger duplicate execution or cross-account replay.
+- Preserve the native root-session recovery marker when inherited legacy
+  notifications arrive from descendant threads. Canonical SessionStart identity
+  takes precedence over a completing agent's concrete thread ID.
+- Keep the unread rollout cursor stable across repeated root/compact notifications,
+  so ordinary non-goal capacity failures cannot be silently skipped. Serialize and
+  atomically publish marker updates; retain explicit new-session transitions.
 
 ## Changelog
 
-- Preserve native Codex ownership of `model_context_window`,
-  `model_auto_compact_token_limit`, and compaction scope. Explicit user settings
-  and provider model metadata remain untouched.
-- Retain same-process, same-thread native recovery from 0.437.7. Do not reopen the
-  TUI, send the original prompt again, or replay completed tools on a live
-  recovery path.
-- Include already-completed main-branch Mojo migration checkpoints without
-  discarding active worktrees or `.codebase-memory/`.
-- Extract oversized transport-result and test-fixture modules, preserving their
-  public contracts while tightening the existing source-size limits.
-- Add native-event, ownership, cooldown, cancellation, committed-stream and
-  multi-epoch compaction regressions backed by required-Mojo ABI tests and
-  mutation checks. Runtime fixtures use local synthetic backends only.
+- Add production-inspector regressions for heartbeats followed by capacity errors,
+  every byte-split boundary, WebSocket failure phases, and successful terminal events.
+- Exercise the async prefetch boundary and full HTTP account rotation with synthetic
+  upstreams, including missing Content-Type, unchanged session/input, discarded failed
+  preludes, and no rotation after visible output.
+- Register the new HTTP regressions in serialized CI. Retain the required-Mojo ownership
+  and no-fallback guards, bounded watchdogs, and native Codex context/compaction settings.
+- Reproduce root-marker redirection and cursor loss on the prior implementation;
+  cover same-thread in-place recovery, explicit session switches, legacy bootstrap,
+  malformed inputs, concurrent descendant callbacks and independent Mojo mutations.
 
 ## Upgrade notes
 
-Existing processes retain the supervisor loaded before the update. Save work,
-exit an old launcher when safe, then resume the same persisted session with the
-new binary; do not resend the initial prompt. Remaining quota does not guarantee
-upstream model capacity. A bounded timeout remains possible when every eligible
-route stays unavailable. No context-window size is promised or synthesized.
+Existing processes keep the binary loaded at launch. Save work and exit an old launcher
+when safe, then resume the same persisted session with the new version. This release does
+not require deleting sessions or caches, changing models, or disabling safeguards.
 
-Full Changelog: [0.437.7...0.437.8](https://github.com/christiandoxa/prodex/compare/0.437.7...0.437.8)
+Quota and model capacity remain separate. A model can be saturated across all eligible
+accounts; this fix prevents a local heartbeat-classification defect, not upstream-wide
+capacity errors. BRP incident investigation was read-only; patching and release validation
+were performed on PDX.
+
+See [the heartbeat incident and safety contract](https://github.com/christiandoxa/prodex/blob/main/migration/capacity-keepalive-04379.md)
+and [the native root-session ownership investigation](https://github.com/christiandoxa/prodex/blob/main/migration/native-root-marker-04379.md).
+
+Full Changelog: [0.437.8...0.437.9](https://github.com/christiandoxa/prodex/compare/0.437.8...0.437.9)
 
 ## 0.437.7 - 2026-10-12
 
