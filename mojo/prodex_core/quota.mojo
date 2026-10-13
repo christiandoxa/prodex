@@ -15,6 +15,74 @@ from rich_types import ProdexRichStringView, rich_view_ptr
 comptime INT64_MAX: Int64 = 9223372036854775807
 comptime INT64_MIN: Int64 = -9223372036854775808
 
+comptime QUOTA_PANEL_ABI_VERSION: Int64 = 1
+comptime QUOTA_PANEL_OK: Int64 = 0
+comptime QUOTA_PANEL_INVALID: Int64 = 1
+comptime QUOTA_PANEL_CAPACITY: Int64 = 2
+comptime QUOTA_PANEL_ABI: Int64 = 4
+
+
+@export("prodex_quota_panel_first_line_v1")
+def prodex_quota_panel_first_line_v1(
+    abi_version: Int64,
+    input_address: UInt,
+    input_length: Int64,
+    output_address: UInt,
+    output_capacity: Int64,
+    written_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != QUOTA_PANEL_ABI_VERSION:
+        return QUOTA_PANEL_ABI
+    if (
+        input_length < 0
+        or (input_length > 0 and input_address == 0)
+        or output_address == 0
+        or output_capacity < 0
+        or written_address == 0
+    ):
+        return QUOTA_PANEL_INVALID
+
+    var written = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(written_address)
+    )
+    written[] = 0
+    if input_length == 0:
+        return QUOTA_PANEL_OK
+
+    var source = Pointer[mut=False, UInt8, ImmUntrackedOrigin](
+        unsafe_from_address=Int(input_address)
+    )
+    var line_start: Int64 = 0
+    while line_start < input_length:
+        var line_end = line_start
+        while line_end < input_length:
+            var value = source[unsafe_offset=line_end]
+            if value == 10:
+                break
+            line_end += 1
+
+        var view = ProdexRichStringView(
+            UInt(Int(input_address) + Int(line_start)), UInt(line_end - line_start)
+        )
+        var bounds = rich_trim_bounds(view)
+        if bounds[0] < bounds[1]:
+            var length = bounds[1] - bounds[0]
+            if length > output_capacity:
+                return QUOTA_PANEL_CAPACITY
+            var output = Pointer[mut=True, UInt8, MutUntrackedOrigin](
+                unsafe_from_address=Int(output_address)
+            )
+            var trimmed = rich_view_ptr(view)
+            for index in range(length):
+                output[unsafe_offset=index] = trimmed[unsafe_offset=bounds[0] + index]
+            written[] = length
+            return QUOTA_PANEL_OK
+
+        if line_end >= input_length:
+            break
+        line_start = line_end + 1
+    return QUOTA_PANEL_OK
+
 
 @export("prodex_quota_round_f64")
 def prodex_quota_round_f64(value: Float64) abi("C") -> Int64:
