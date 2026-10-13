@@ -1,0 +1,159 @@
+name: macOS Intel cross-build calibration
+
+# Opt-in, artifact-only benchmark. Never publishes or edits a release.
+on:
+  workflow_dispatch:
+    inputs:
+      target_sha:
+        description: Immutable source SHA that CI compiled
+        required: true
+        type: string
+      ci_run_id:
+        description: Successful push CI run with matching x86_64 macOS Mojo archive
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: macos-cross-calibration-${{ inputs.target_sha }}
+  cancel-in-progress: true
+
+env:
+  CARGO_INCREMENTAL: "0"
+  CARGO_PROFILE_RELEASE_DEBUG: "0"
+  SCCACHE_GHA_ENABLED: "true"
+  SCCACHE_CACHE_SIZE: 2G
+  PRODEX_MOJO_REQUIRED: "1"
+  PRODEX_MOJO_VERSION: "1.1.0"
+  PRODEX_MOJO_TARGET: x86_64-apple-darwin
+  PRODEX_MOJO_TARGET_CPU: x86-64
+  RUSTC_WRAPPER: sccache
+  PRODEX_MOJO_ARCHIVE: ${{ github.workspace }}/.prodex-ci/mojo-runtime/x86_64-apple-darwin/libprodex_mojo_core.a
+
+jobs:
+  cross-build:
+    name: Benchmark Intel macOS release on Apple Silicon
+    runs-on: macos-14
+    timeout-minutes: 65
+
+    steps:
+      - name: Validate exact source and successful CI provenance
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TARGET_SHA: ${{ inputs.target_sha }}
+          SOURCE_CI_RUN_ID: ${{ inputs.ci_run_id }}
+        run: |
+          set -euo pipefail
+          [[ "${TARGET_SHA}" =~ ^[0-9a-f]{40}$ ]]
+          [[ "${SOURCE_CI_RUN_ID}" =~ ^[0-9]+$ ]]
+          run_json="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${SOURCE_CI_RUN_ID}")"
+          jq -e --arg sha "${TARGET_SHA}" '
+            .head_sha == $sha and
+            .event == "push" and
+            .path == ".github/workflows/ci.yml" and
+            .status == "completed" and
+            .conclusion == "success"
+          ' <<<"${run_json}" >/dev/null
+
+      - name: Check out exact CI source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ inputs.target_sha }}
+          persist-credentials: false
+
+      - name: Confirm source checkout matches CI
+        env:
+          TARGET_SHA: ${{ inputs.target_sha }}
+        run: test "$(git rev-parse HEAD)" = "${TARGET_SHA}"
+
+      - name: Download same-source compiled Mojo archive
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
+        with:
+          name: mojo-runtime-archive-x86_64-apple-darwin
+          run-id: ${{ inputs.ci_run_id }}
+          github-token: ${{ github.token }}
+          path: .prodex-ci/mojo-runtime/x86_64-apple-darwin
+
+      - name: Verify strict target archive and host architecture
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -s "${PRODEX_MOJO_ARCHIVE}"
+          test "$(uname -m)" = arm64
+          file "${PRODEX_MOJO_ARCHIVE}"
+          nm -g "${PRODEX_MOJO_ARCHIVE}" | grep -F prodex_mojo_rich_abi_version
+          nm -g "${PRODEX_MOJO_ARCHIVE}" | grep -F prodex_mojo_log_level_classify_v1
+          if nm -u "${PRODEX_MOJO_ARCHIVE}" | grep -F KGEN_CompilerRT_; then
+            echo "Mojo compiler-runtime dependency is forbidden" >&2
+            exit 1
+          fi
+
+      - name: Install Rust 1.99 target and compiler cache
+        uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
+        with:
+          toolchain: 1.99.0
+          targets: x86_64-apple-darwin
+
+      - name: Install sccache
+        uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
+
+      - name: Cache Rust build dependencies
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+        with:
+          key: macos-cross-intel-release-calibration
+          cache-bin: false
+
+      - name: Build production x86_64 macOS binary under Apple Silicon
+        shell: bash
+        run: |
+          set -euo pipefail
+          start="${SECONDS}"
+          cargo build --release --locked --target x86_64-apple-darwin             --features mojo-core --bin prodex
+          elapsed="$((SECONDS - start))"
+          binary="target/x86_64-apple-darwin/release/prodex"
+          test -s "${binary}"
+          file "${binary}"
+          test "$(lipo -archs "${binary}")" = x86_64
+          echo "Intel macOS cross-release build seconds: ${elapsed}" >> "${GITHUB_STEP_SUMMARY}"
+          echo "${elapsed}" > "${RUNNER_TEMP}/cross-build-seconds.txt"
+
+      - name: Smoke the x86_64 binary under Rosetta
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! arch -x86_64 /usr/bin/true; then
+            sudo softwareupdate --install-rosetta --agree-to-license
+          fi
+          binary="target/x86_64-apple-darwin/release/prodex"
+          arch -x86_64 "${binary}" --version
+          arch -x86_64 "${binary}" --help > "${RUNNER_TEMP}/intel-help.txt"
+          PRODEX_HOME="${RUNNER_TEMP}/prodex-cross-smoke"             arch -x86_64 "${binary}" doctor --runtime --json             > "${RUNNER_TEMP}/intel-doctor.json"
+          grep -F '"implementation": "mojo-compiled-in"' "${RUNNER_TEMP}/intel-doctor.json"
+          grep -F '"fallback": false' "${RUNNER_TEMP}/intel-doctor.json"
+          grep -F '"self_test": "passed"' "${RUNNER_TEMP}/intel-doctor.json"
+
+      - name: Report compiler cache and benchmark evidence
+        if: always()
+        shell: bash
+        run: |
+          sccache --show-stats || true
+          {
+            echo "### macOS Intel cross-build calibration"
+            echo "Host: ${RUNNER_ARCH} / $(uname -m)"
+            echo "Compiled target: x86_64-apple-darwin"
+            echo "Source SHA: ${{ inputs.target_sha }}"
+            echo "Mojo archive CI run: ${{ inputs.ci_run_id }}"
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+      - name: Upload build-time evidence only
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: macos-intel-cross-build-timing
+          path: ${{ runner.temp }}/cross-build-seconds.txt
+          if-no-files-found: ignore
+          retention-days: 7
