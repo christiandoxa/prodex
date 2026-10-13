@@ -135,53 +135,36 @@ pub fn quota_reset_at_from_message(message: &str) -> Option<i64> {
         .get(marker + "try again at ".len()..)?
         .trim()
         .trim_end_matches('.');
-    let now = Local::now();
-    if let Some((time_text, meridiem)) = candidate
-        .split_whitespace()
-        .collect::<Vec<_>>()
-        .get(..2)
-        .and_then(|parts| (parts.len() == 2).then_some((parts[0], parts[1])))
-        && let Ok(time) =
-            chrono::NaiveTime::parse_from_str(&format!("{time_text} {meridiem}"), "%I:%M %p")
-    {
-        let mut naive = now.date_naive().and_time(time);
-        let mut parsed = Local
-            .from_local_datetime(&naive)
-            .single()
-            .or_else(|| Local.from_local_datetime(&naive).earliest())?;
-        if parsed.timestamp() <= now.timestamp() {
-            naive = naive.checked_add_signed(chrono::Duration::days(1))?;
-            parsed = Local
+    let parsed = prodex_mojo_core::quota::quota_retry_time_candidate(candidate)
+        .expect("Mojo quota retry-time text parser returned invalid output")?;
+    match parsed {
+        prodex_mojo_core::quota::QuotaRetryTimeCandidate::LocalClock(clock) => {
+            let time = chrono::NaiveTime::parse_from_str(&clock, "%I:%M %p").ok()?;
+            let now = Local::now();
+            let mut naive = now.date_naive().and_time(time);
+            let mut parsed = Local
                 .from_local_datetime(&naive)
                 .single()
                 .or_else(|| Local.from_local_datetime(&naive).earliest())?;
+            if parsed.timestamp() <= now.timestamp() {
+                naive = naive.checked_add_signed(chrono::Duration::days(1))?;
+                parsed = Local
+                    .from_local_datetime(&naive)
+                    .single()
+                    .or_else(|| Local.from_local_datetime(&naive).earliest())?;
+            }
+            Some(parsed.timestamp())
         }
-        return Some(parsed.timestamp());
+        prodex_mojo_core::quota::QuotaRetryTimeCandidate::LocalDateTime(normalized) => {
+            let naive =
+                chrono::NaiveDateTime::parse_from_str(&normalized, "%b %d, %Y %I:%M %p").ok()?;
+            Local
+                .from_local_datetime(&naive)
+                .single()
+                .or_else(|| Local.from_local_datetime(&naive).earliest())
+                .map(|datetime| datetime.timestamp())
+        }
     }
-
-    let mut parts = candidate
-        .split_whitespace()
-        .map(|part| part.to_string())
-        .collect::<Vec<_>>();
-    if parts.len() < 5 {
-        return None;
-    }
-    let day_digits = parts[1]
-        .trim_end_matches(',')
-        .chars()
-        .take_while(|ch| ch.is_ascii_digit())
-        .collect::<String>();
-    if day_digits.is_empty() {
-        return None;
-    }
-    parts[1] = format!("{day_digits},");
-    let normalized = parts[..5].join(" ");
-    let naive = chrono::NaiveDateTime::parse_from_str(&normalized, "%b %d, %Y %I:%M %p").ok()?;
-    Local
-        .from_local_datetime(&naive)
-        .single()
-        .or_else(|| Local.from_local_datetime(&naive).earliest())
-        .map(|datetime| datetime.timestamp())
 }
 
 fn quota_reset_at_from_json_message(message: &str) -> Option<i64> {

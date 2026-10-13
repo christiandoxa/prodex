@@ -85,3 +85,26 @@ fn quota_reset_json_ignores_malformed_and_non_object_values() {
         assert_eq!(quota_reset_at_from_message(message), None, "{message}");
     }
 }
+
+#[test]
+fn human_retry_clock_is_future_local_time_without_changing_model_or_session() {
+    let before = chrono::Local::now().timestamp();
+    let parsed = quota_reset_at_from_message("You've hit your usage limit. Try again at 5:08 PM.")
+        .expect("local clock should parse");
+    let after = chrono::Local::now().timestamp();
+    assert!(
+        parsed > before - 120,
+        "must not return a long expired retry window"
+    );
+    assert!(
+        parsed <= after + 26 * 3_600,
+        "a local clock must resolve by next day"
+    );
+    for malformed in [
+        "Your account is limited. Try again at yesterday.",
+        "Your account is limited. Try again at Mar unknown, 2026 2:04 AM.",
+        "Your account is limited. Try again at 99:88 PM.",
+    ] {
+        assert_eq!(quota_reset_at_from_message(malformed), None, "{malformed}");
+    }
+}

@@ -9,6 +9,10 @@ pub use self_checks::{main_quota_aggregation_self_test, self_test};
 mod capacity;
 pub use capacity::quota_capacity_batch;
 mod report_sort;
+mod retry_time;
+pub use retry_time::{QuotaRetryTimeCandidate, quota_retry_time_candidate};
+mod error_label;
+pub use error_label::{quota_error_summary_kind, quota_error_summary_label};
 pub use report_sort::{
     QuotaReportPagePlan, quota_report_compare, quota_report_page_plan, quota_report_sort_label,
     quota_report_sort_next,
@@ -221,7 +225,6 @@ unsafe extern "C" {
         metered_feature_address: u64,
         metered_feature_length: i64,
     ) -> i64;
-    fn prodex_quota_error_summary_kind(address: u64, length: i64) -> i64;
     fn prodex_quota_blocked_limit_kind(address: u64, length: i64) -> i64;
     fn prodex_quota_error_auth_failure_v1(
         address: u64,
@@ -296,19 +299,6 @@ pub fn luna_reserve_identifier(
         0 => Ok(false),
         1 => Ok(true),
         _ => Err(crate::MojoError::InvalidOutput),
-    }
-}
-
-pub fn quota_error_summary_kind(value: &str) -> Result<i64, crate::MojoError> {
-    let (address, length) = quota_text_address(Some(value));
-    if length == i64::MAX {
-        return Err(crate::MojoError::InvalidInput);
-    }
-    let kind = unsafe { prodex_quota_error_summary_kind(address, length) };
-    if (QUOTA_ERROR_KIND_UNKNOWN..=QUOTA_ERROR_KIND_OTHER).contains(&kind) {
-        Ok(kind)
-    } else {
-        Err(crate::MojoError::InvalidOutput)
     }
 }
 
@@ -959,20 +949,6 @@ fn load_quota_display_label(kind: i64, value: i64) -> Result<String, crate::Mojo
         return Err(crate::MojoError::InvalidOutput);
     }
     String::from_utf8(output[..written].to_vec()).map_err(|_| crate::MojoError::InvalidOutput)
-}
-
-/// Render the canonical quota error label through the compiled Mojo owner.
-///
-/// `Ok(None)` means an unclassified upstream message must be preserved verbatim,
-/// rather than silently replacing it with a guessed error category.
-pub fn quota_error_summary_label(kind: i64) -> Result<Option<String>, crate::MojoError> {
-    if !(QUOTA_ERROR_KIND_UNKNOWN..=QUOTA_ERROR_KIND_OTHER).contains(&kind) {
-        return Err(crate::MojoError::InvalidInput);
-    }
-    if kind == QUOTA_ERROR_KIND_OTHER {
-        return Ok(None);
-    }
-    load_quota_display_label(QUOTA_DISPLAY_LABEL_ERROR_SUMMARY, kind).map(Some)
 }
 
 pub fn quota_blocked_status_label(kind: i64) -> Result<&'static str, crate::MojoError> {
