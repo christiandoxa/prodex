@@ -493,6 +493,7 @@ unsafe extern "C" {
         hash_capacity: i64,
         result: u64,
     ) -> i64;
+    fn prodex_mojo_gemini_invalid_stream_retry_delay_v1(abi_version: i64, retry_index: i64) -> i64;
 }
 
 #[inline]
@@ -595,6 +596,15 @@ fn slice(output: &[u8], value: RichSlice) -> Result<&[u8], MojoError> {
 
 pub(crate) fn ensure_rich_abi() -> Result<(), MojoError> {
     rich_abi_ready().then_some(()).ok_or(MojoError::AbiMismatch)
+}
+
+/// Returns the bounded retry delay for a pre-commit Gemini stream failure.
+pub fn gemini_invalid_stream_retry_delay_ms(retry_index: usize) -> Result<u64, MojoError> {
+    ensure_rich_abi()?;
+    let retry_index = i64::try_from(retry_index).map_err(|_| MojoError::InvalidInput)?;
+    let delay =
+        unsafe { prodex_mojo_gemini_invalid_stream_retry_delay_v1(RICH_ABI_VERSION, retry_index) };
+    u64::try_from(delay).map_err(|_| MojoError::InvalidInput)
 }
 
 pub fn provider_error_classify(
