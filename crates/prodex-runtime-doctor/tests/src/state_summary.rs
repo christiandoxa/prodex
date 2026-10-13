@@ -184,6 +184,70 @@ fn runtime_doctor_degraded_routes_formats_neutral_maps() {
 }
 
 #[test]
+fn runtime_doctor_degraded_routes_preserves_key_fallbacks_decay_and_top_eight_order() {
+    let retry = BTreeMap::from([("zeta".to_string(), 10), ("alpha".to_string(), 10)]);
+    let transport = BTreeMap::from([
+        (
+            "__route_transport_backoff__:responses:alpha".to_string(),
+            10,
+        ),
+        ("beta".to_string(), 10),
+    ]);
+    let circuits = BTreeMap::from([
+        ("__route_circuit__:responses:alpha".to_string(), 11),
+        ("__route_circuit__:compact:beta".to_string(), 9),
+        ("malformed-circuit-key".to_string(), 20),
+    ]);
+    let scores = BTreeMap::from([
+        (
+            "__route_health__:responses:alpha".to_string(),
+            RuntimeDoctorHealthScore {
+                score: 5,
+                updated_at: 0,
+            },
+        ),
+        (
+            "__route_bad_pairing__:compact:beta".to_string(),
+            RuntimeDoctorHealthScore {
+                score: 4,
+                updated_at: 5,
+            },
+        ),
+        (
+            "__route_health__:standard:ignored".to_string(),
+            RuntimeDoctorHealthScore {
+                score: 1,
+                updated_at: 0,
+            },
+        ),
+    ]);
+    let mut config = test_config();
+    config.health_decay_seconds = 10;
+    config.bad_pairing_decay_seconds = 5;
+
+    let routes = runtime_doctor_degraded_routes(
+        backoffs(&retry, &transport, &circuits),
+        &scores,
+        10,
+        config,
+    );
+
+    assert_eq!(
+        routes,
+        vec![
+            "alpha/responses circuit=open until=11",
+            "alpha/responses health=4",
+            "alpha/responses transport_backoff until=10",
+            "alpha/retry retry_backoff until=10",
+            "beta/compact bad_pairing=3",
+            "beta/compact circuit=half-open until=9",
+            "beta/transport transport_backoff until=10",
+            "zeta/retry retry_backoff until=10",
+        ]
+    );
+}
+
+#[test]
 fn runtime_doctor_quota_freshness_label_preserves_hold_rules() {
     let now = 1_000;
     assert_eq!(

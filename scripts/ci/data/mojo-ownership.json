@@ -1447,6 +1447,26 @@
         ]
       },
       {
+        "path": "mojo/prodex_core/runtime_doctor_degraded_routes.mojo",
+        "language": "mojo",
+        "classification": "DETERMINISTIC_DOMAIN",
+        "production_reachable": true,
+        "role": "semantic",
+        "operations": [
+          "runtime_doctor_degraded_route_selection"
+        ]
+      },
+      {
+        "path": "crates/prodex-mojo-core/src/rich/runtime_doctor_degraded_routes.rs",
+        "language": "rust",
+        "classification": "MIXED",
+        "production_reachable": true,
+        "role": "adapter",
+        "operations": [
+          "runtime_doctor_degraded_route_selection"
+        ]
+      },
+      {
         "path": "mojo/prodex_core/gemini_compact_snippet.mojo",
         "language": "mojo",
         "classification": "DETERMINISTIC_DOMAIN",
@@ -7770,6 +7790,29 @@
       "duplicate_production_owner": false,
       "platform_fallback": false,
       "rust_adapter_scope": "log field parsing, profile/route string ownership, metadata projections and safe typed reconstruction from Mojo group indices"
+    },
+    {
+      "name": "runtime_doctor_degraded_route_selection",
+      "domain": "runtime/doctor-degraded-routes",
+      "introduced_in": "0.439.0",
+      "baseline_state": "Rust traversed retry, transport, circuit, and route-score maps, parsed route keys, decayed scores, rendered degraded-route rows, sorted, deduplicated, and truncated them",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_mojo_runtime_doctor_degraded_routes_v1",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/runtime_doctor_degraded_routes.mojo",
+      "consumer": "crates/prodex-runtime-doctor/src/state_summary/routes.rs",
+      "consumer_marker": "prodex_mojo_core::rich::runtime_doctor_degraded_routes(",
+      "production_consumers": [
+        "crates/prodex-runtime-doctor/src/state_summary/routes.rs"
+      ],
+      "production_reachability_test": "crates/prodex-mojo-core/tests/runtime_doctor_degraded_routes.rs",
+      "rust_owner_before": "degraded-route key parsing, circuit state labels, score decay/filtering, lexical row ordering, deduplication, and eight-row truncation",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "deleted; direct Mojo ABI cases and the runtime-doctor state-summary caller regression cover all row classes, decay boundaries, malformed keys, ordering, deduplication, and truncation",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "BTreeMap acquisition, borrowed key/value marshalling, validated source/slice reconstruction, and final diagnostic string materialization"
     },
     {
       "name": "native_live_recovery_observation",
