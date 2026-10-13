@@ -803,7 +803,7 @@ def prodex_runtime_proxy_escape_dot_segments_v1(
 
 def runtime_proxy_header_equals(
     source: Pointer[mut=False, UInt8, _],
-    bounds: Array[Int64, 2],
+    bounds: Tuple[Int64, Int64],
     literal: StringSlice,
 ) -> Bool:
     var length = bounds[1] - bounds[0]
@@ -821,7 +821,7 @@ def runtime_proxy_header_equals(
 
 def runtime_proxy_header_starts_with(
     source: Pointer[mut=False, UInt8, _],
-    bounds: Array[Int64, 2],
+    bounds: Tuple[Int64, Int64],
     literal: StringSlice,
 ) -> Bool:
     var length = Int64(literal.byte_length())
@@ -838,7 +838,7 @@ def runtime_proxy_header_starts_with(
 
 
 def runtime_proxy_header_skip_kind(
-    source: Pointer[mut=False, UInt8, _], bounds: Array[Int64, 2]
+    source: Pointer[mut=False, UInt8, _], bounds: Tuple[Int64, Int64]
 ) -> Int64:
     if (
         runtime_proxy_header_equals(source, bounds, StringSlice("connection"))
