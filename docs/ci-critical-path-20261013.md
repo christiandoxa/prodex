@@ -63,3 +63,40 @@ before those remote measurements complete.
 
 Do not remove upstream integration, supply-chain, malware, cross-platform,
 or provenance gates merely to make a duration number smaller.
+
+
+## Measured post-optimization CI and Windows follow-up
+
+[Successful push CI 38360757092](https://github.com/christiandoxa/prodex/actions/runs/38360757092)
+on commit 44b54131c completed in **18 min 27 sec** (07:07:55 to 07:26:22
+UTC), versus **37 min 02 sec** for [successful push CI 38348114868](https://github.com/christiandoxa/prodex/actions/runs/38348114868).
+The environments and cache state differ, so this is an observed comparison,
+not a controlled benchmark. The strict real-Mojo lint/binary-smoke job
+completed in 1.5 min; its package, provider, and app/core parity partitions
+completed in about 1.4, 2.3, and 4.0 min.
+
+That run identified the **new critical path**: Windows prodex-app remaining
+library tests. The runner executed **362 tests serially in 531.09 seconds**,
+with a total remaining-library job duration of more than 11 minutes; sccache
+reported 37 hits and one miss (97% cache hit rate). The problem is therefore
+test execution serialization, not primarily dependency compilation.
+
+The Windows-only remainder is now partitioned into four mutually exclusive
+runner jobs: continuation/recovery tests, selection/admission tests,
+runtime-foundation tests, and the true remainder. Existing targeted Windows
+partitions are unchanged. The selection remainder uses a broad libtest match
+with explicit skip filters for tests already owned by an earlier Windows
+partition. Standard Windows global exclusions, serial execution within each
+partition, zero-test rejection, and one cache writer are unchanged.
+
+The hermetic regression tests verify all matrix entries and filter/subfilter
+ownership. Against an available local production test binary, **388
+representative Linux remainder test names were assigned exactly once**:
+66 continuation, 89 selection/admission, 90 runtime-foundation and 143
+residual. The actual Windows collection is OS-conditioned (362 in the
+measured run), so the next successful Windows CI is authoritative for timing
+and platform-specific completeness.
+
+In particular, do not replace the serial Windows suites with a single
+multithreaded process: some environment-sensitive tests deliberately require
+isolation. Independent GitHub-hosted runners preserve that property.

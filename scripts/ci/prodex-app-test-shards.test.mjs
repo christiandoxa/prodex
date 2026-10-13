@@ -42,7 +42,7 @@ test("prodex-app shard manifest is disjoint and remainder-complete", () => {
   assert.equal(appMatrix.include.length, 11);
   assert.equal(ciMatrix.include.length, 8);
   assert.equal(fullMatrix.include.length, PRODEX_APP_FULL_TEST_SHARDS.length + 1);
-  assert.equal(windowsMatrix.include.length, 5);
+  assert.equal(windowsMatrix.include.length, 8);
   assert.equal(appMatrix.include.filter((entry) => entry.save_cache).length, 1);
   assert.equal(ciMatrix.include.filter((entry) => entry.save_cache).length, 1);
   assert.equal(fullMatrix.include.filter((entry) => entry.save_cache).length, 1);
@@ -92,14 +92,25 @@ test("prodex-app shard manifest is disjoint and remainder-complete", () => {
     fullMatrix.include.filter((entry) => entry.suite.startsWith("launch-providers-")).length,
     8,
   );
-  const windowsFilters = windowsMatrix.include
+  const windowsBaseFilters = windowsMatrix.include
+    .slice(0, 4)
     .flatMap((entry) => entry.filters.split("\n"))
     .filter(Boolean);
-  assert.equal(windowsFilters.length, PRODEX_APP_LIB_FILTERS.length);
-  assert.deepEqual(new Set(windowsFilters), new Set(PRODEX_APP_LIB_FILTERS));
+  assert.equal(windowsBaseFilters.length, PRODEX_APP_LIB_FILTERS.length);
+  assert.deepEqual(new Set(windowsBaseFilters), new Set(PRODEX_APP_LIB_FILTERS));
+
+  const extra = windowsMatrix.include.slice(4, 7);
+  assert.deepEqual(extra.map((entry) => entry.suite), [
+    "remainder-continuations",
+    "remainder-selection",
+    "remainder-foundation",
+  ]);
+  const extraFilters = extra.flatMap((entry) => entry.filters.split("\n")).filter(Boolean);
+  assert.equal(extraFilters.length, 8);
+  assert.equal(extra.find((entry) => entry.suite === "remainder-selection").skip_filters.split("\n").length, 16);
   assert.deepEqual(
     windowsMatrix.include.at(-1).skip_filters.split("\n"),
-    PRODEX_APP_LIB_FILTERS,
+    [...PRODEX_APP_LIB_FILTERS, ...extraFilters],
   );
 });
 
@@ -223,4 +234,39 @@ test("manifest rejects a remainder that drops a targeted filter", () => {
     shard.skipFilters ? { ...shard, skipFilters: shard.skipFilters.slice(1) } : shard,
   );
   assert.ok(validateShards(broken).some((issue) => issue.includes("remainder shard")));
+});
+
+
+test("Windows remainder slices stay disjoint with substring-based libtest filters", () => {
+  const entries = windowsGithubMatrix().include;
+  const representativeNames = [
+    "app_commands::tests::pings_all_profiles",
+    "main_internal_tests::runtime_proxy_selection_and_pressure::admission::guards::never_rotate_after_commit",
+    "main_internal_tests::runtime_proxy_selection_and_pressure::admission::rotation_matrix::rotation_covers_ready_profiles",
+    "main_internal_tests::runtime_proxy_selection_and_pressure::persistence::affinity::affinity_saved",
+    "main_internal_tests::runtime_proxy_continuations::http_followups::quota_rotates_before_commit",
+    "main_internal_tests::runtime_proxy_continuations::websocket_precommit::precommit_retry",
+    "runtime_store::io::tests::recovers_cached_profiles",
+    "runtime_external_provider_config::tests::normalizes_models",
+    "runtime_core_shared::tests::runtime_profile_limits",
+    "reports::info::tests::snapshot_preserved",
+    "runtime_background::worker_spawn::tests::does_not_duplicate_workers",
+    "runtime_thread_index::tests::canonical_thread_identity",
+    "main_internal_tests::quota_selection::uses_ready_profiles",
+    "runtime_launch::execution::tests::native_process_exit",
+    "update_notice::tests::parses_current_version",
+  ];
+  for (const name of representativeNames) {
+    const owners = entries.filter((entry) => {
+      const filters = entry.filters.split("\n").filter(Boolean);
+      const skips = entry.skip_filters.split("\n").filter(Boolean);
+      return (!filters.length || filters.some((filter) => name.includes(filter)))
+        && !skips.some((filter) => name.includes(filter));
+    });
+    assert.equal(owners.length, 1, name + " belongs to " + owners.map((entry) => entry.suite).join(","));
+  }
+  const selection = entries.find((entry) => entry.suite === "remainder-selection");
+  assert.ok(selection.skip_filters.split("\n").some((filter) => filter.includes("admission::guards::")));
+  assert.ok(selection.skip_filters.split("\n").some((filter) => filter.includes("admission::compact::")));
+  assert.ok(entries.at(-1).skip_filters.includes("main_internal_tests::runtime_proxy_continuations::"));
 });
