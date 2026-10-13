@@ -117,6 +117,19 @@ fn goal_resume_repairs_pasted_media_even_when_another_session_is_live() {
     crate::maintain_managed_codex_sessions(&f.paths).unwrap();
     f.assert_goal_preserved("thread-1");
 }
+
+#[test]
+fn goal_repair_accepts_non_utf8_non_sqlite_header() {
+    let f = MediaFixture::new();
+    let header = [0xff_u8; 16];
+    fs::write(f.paths.shared_codex_root.join("goals_2.sqlite"), header).unwrap();
+    persist_codex_goal_attachment_paths(&f.paths.shared_codex_root).unwrap();
+    assert_eq!(
+        fs::read(f.paths.shared_codex_root.join("goals_2.sqlite")).unwrap(),
+        header
+    );
+}
+
 #[test]
 fn exact_session_goal_repair_does_not_wait_for_unrelated_native_child() {
     let f = MediaFixture::new();

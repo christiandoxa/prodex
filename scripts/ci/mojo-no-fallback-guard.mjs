@@ -216,6 +216,7 @@ const PROMOTED_FILES = [
   UPDATE_NOTICE_VERSION_UPDATER_FILE,
   UPDATE_NOTICE_VERSION_ADAPTER_MODULE_FILE,
   "crates/prodex-shared-codex-fs/src/image_attachments.rs",
+  "crates/prodex-shared-codex-fs/src/prepare/goal_attachments.rs",
   "crates/prodex-runtime-cookies/src/lib.rs",
   "crates/prodex-mojo-core/src/runtime_cookie_policy.rs",
   "crates/prodex-mojo-core/src/shared_attachment_policy.rs",
@@ -1942,6 +1943,19 @@ export function findViolations(files) {
         || /CODEX_ATTACHMENT_PATH_MARKERS/u.test(contents)
       ) {
         violations.push(filePath + ": contains restored Rust shared-attachment scanner semantics");
+      }
+      return violations;
+    }
+    if (filePath === "crates/prodex-shared-codex-fs/src/prepare/goal_attachments.rs") {
+      const required = ["shared_attachment_policy::sqlite_header_is_sqlite("];
+      const violations = required
+        .filter((call) => !contents.includes(call))
+        .map((call) => filePath + ": SQLite header classification must retain " + call);
+      if (!/sqlite_header_is_sqlite\(&header\)\s*\.map_err\(/u.test(contents)) {
+        violations.push(filePath + ": SQLite header Mojo errors must propagate to the caller");
+      }
+      if (/SQLite format 3\\0/u.test(contents) || /header\s*==\s*b/u.test(contents)) {
+        violations.push(filePath + ": contains restored Rust SQLite header semantics");
       }
       return violations;
     }

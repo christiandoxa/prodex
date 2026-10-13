@@ -25,7 +25,7 @@ pub(super) fn persist_codex_goal_attachment_paths(codex_home: &Path) -> Result<(
 }
 
 fn persist_codex_goal_attachment_paths_in_db(codex_home: &Path, db_path: &Path) -> Result<()> {
-    if !path_looks_like_sqlite_db(db_path) {
+    if !path_looks_like_sqlite_db(db_path)? {
         return Ok(());
     }
     let Ok(conn) = Connection::open(db_path) else {
@@ -101,7 +101,7 @@ fn persist_codex_goal_attachment_path_for_thread_in_db(
     db_path: &Path,
     thread_id: &str,
 ) -> Result<()> {
-    if !path_looks_like_sqlite_db(db_path) {
+    if !path_looks_like_sqlite_db(db_path)? {
         return Ok(());
     }
     let conn = Connection::open(db_path)
@@ -206,18 +206,22 @@ pub(super) fn session_thread_id(contents: &str) -> Option<String> {
     })
 }
 
-fn path_looks_like_sqlite_db(path: &Path) -> bool {
+fn path_looks_like_sqlite_db(path: &Path) -> Result<bool> {
     let Ok(metadata) = fs::symlink_metadata(path) else {
-        return false;
+        return Ok(false);
     };
     if !metadata.file_type().is_file() {
-        return false;
+        return Ok(false);
     }
     let Ok(mut file) = fs::File::open(path) else {
-        return false;
+        return Ok(false);
     };
     let mut header = [0; 16];
-    file.read_exact(&mut header).is_ok() && &header == b"SQLite format 3\0"
+    if file.read_exact(&mut header).is_err() {
+        return Ok(false);
+    }
+    prodex_mojo_core::shared_attachment_policy::sqlite_header_is_sqlite(&header)
+        .map_err(|error| anyhow::anyhow!("Mojo SQLite header policy failed: {error:?}"))
 }
 
 #[cfg(test)]
