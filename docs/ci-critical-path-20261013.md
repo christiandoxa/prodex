@@ -115,7 +115,27 @@ SHA, independently verifies that a successful push CI for that SHA produced
 the matching strict x86_64 Mojo archive, and builds the **identical Thin-LTO
 release target** on macos-14 (Apple Silicon). It verifies Mach-O x86_64
 architecture and requires an actual Rosetta-executed prodex runtime diagnostic.
-It publishes neither a binary nor a release. Use its recorded build duration
-and platform smoke result before considering a release matrix runner change.
-A cross-build that fails on compiler, linker, architecture, or runtime tests is
-a rejected experiment, not permission to weaken release smoke tests.
+It publishes neither a binary nor a release. A cross-build that fails on
+compiler, linker, architecture, or runtime tests is a rejected experiment,
+not permission to weaken release smoke tests.
+
+The actual [cross-build calibration run 38364094252](https://github.com/christiandoxa/prodex/actions/runs/38364094252)
+**succeeded** on the pinned 44b54131c source and successful same-SHA
+38360757092 CI archive. Full release-profile x86_64 compilation took
+**404 seconds (6 min 44 sec)** on macos-14 Apple Silicon and produced a
+verified x86_64 Mach-O executable. The actual binary passed version, help
+and native Mojo diagnostics **executed under Rosetta**. The preceding
+0.437.9 x86_64 native Intel release compilation took **16 min 24 sec**.
+This measured build-step improvement is about **59%**, but it is not yet
+a controlled comparison of complete standalone release runtimes.
+
+The release matrix therefore switches **only** x86_64-apple-darwin
+to the proven macos-14 cross-host. It installs Rosetta if needed, asserts
+an actual x86_64 Mach-O target, runs version smoke under Rosetta, and
+retains all existing compiled-in Mojo diagnostics and clean-machine smoke.
+Its Rust cache key is namespaced to the new cross-host; all other target
+caches retain their previous keys. CI verification, six-target compilation
+and provenance, checksum, SBOM, malware scan, and publication gates remain
+unchanged. Compare the first successful official release after this patch;
+it may differ from the isolated calibration due to cold cache and runner
+variance.

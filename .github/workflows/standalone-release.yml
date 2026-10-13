@@ -401,7 +401,7 @@ jobs:
             mojo-target-cpu: generic
             mojo-features: mojo-core
           - target: x86_64-apple-darwin
-            runs-on: macos-15-intel
+            runs-on: macos-14
             artifact-name: x86_64-apple-darwin
             binary-name: prodex
             use-cross: false
@@ -476,10 +476,21 @@ jobs:
           toolchain: 1.99.0
           targets: ${{ matrix.target }}
 
+      - name: Require Rosetta for Intel macOS cross-target smoke
+        if: ${{ matrix.target == 'x86_64-apple-darwin' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(uname -m)" = arm64
+          if ! arch -x86_64 /usr/bin/true; then
+            sudo softwareupdate --install-rosetta --agree-to-license
+          fi
+          arch -x86_64 /usr/bin/true
+
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
         with:
-          key: release-${{ matrix.target }}
+          key: release-${{ matrix.target }}${{ matrix.target == 'x86_64-apple-darwin' && '-arm64-cross' || '' }}
 
       - name: Download target Mojo archive
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
@@ -551,6 +562,17 @@ jobs:
             fi
             sleep "$((attempt * 10))"
           done
+
+      - name: Verify macOS Intel artifact architecture and Rosetta execution
+        if: ${{ matrix.target == 'x86_64-apple-darwin' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          binary="target/x86_64-apple-darwin/release/prodex"
+          test -s "${binary}"
+          file "${binary}"
+          test "$(lipo -archs "${binary}")" = x86_64
+          arch -x86_64 "${binary}" --version
 
       - name: Verify compiled-in Mojo release
         if: ${{ matrix.mojo-release && matrix.can-mojo-runtime-smoke }}
