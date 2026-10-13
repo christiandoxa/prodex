@@ -381,3 +381,38 @@ matrix. The official Windows ARM64 runner must remain unchanged until
 the benchmark succeeds in compilation, native ABI/runtime, and measured
 critical-path performance. Any failure is a reason to investigate
 platform portability, not to disable supply-chain or smoke checks.
+
+
+## Official Windows ARM64 native release runner (measured)
+
+The opt-in [native ARM64 Windows calibration 38378915483](https://github.com/christiandoxa/prodex/actions/runs/38378915483)
+completed **successfully** using the **exact 0.437.9 release source**
+and Mojo archive from the successful official release 38351207430.
+The binary was a valid PE ARM64 executable (Machine 0xAA64) and
+actually executed version/help and compiled-in Mojo diagnostics on
+a native windows-11-arm runner. The archive's ABI symbols and absence
+of forbidden CompilerRT dependencies were independently checked.
+
+Measured Thin-LTO production ARM64 build duration: **336 seconds
+(5m36s)** versus **582 seconds (9m42s)** on the previous official
+x86_64 Windows runner for 0.437.9. This is a measured **42% decrease
+in that build step** with the same source and release target, though
+runner cache/image differences still affect a direct comparison.
+A second previous release required 8m54s. The benchmark did not
+publish binaries or change release tags.
+
+Official standalone release now uses the verified native ARM64 image
+**for only aarch64-pc-windows-msvc**. Its Rust cache namespace is
+separated from x86 cross-host objects, native ARM builds use Cargo
+directly without assuming an ARM64-compatible sccache wrapper, and
+every ARM binary must pass an explicit PE architecture check, native
+version smoke, and the full existing compiled-in Mojo/clean-machine
+runtime diagnostics (the latter were previously unexecutable on x86
+runners). The same six-target matrix and full CI/archive/provenance
+publication dependencies remain intact.
+
+The first full standalone release using this runner is still needed
+to quantify its overall wall-clock benefit; the previous bottleneck
+also included antivirus and other independent release gates. If a
+platform-specific smoke check fails, fix its platform behavior rather
+than dropping the diagnostic or weakening security.
