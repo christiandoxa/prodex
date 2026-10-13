@@ -187,3 +187,7 @@ fn path_looks_like_sqlite_db(path: &Path) -> bool {
 #[cfg(test)]
 #[path = "../../tests/src/reconnect_attachments.rs"]
 mod reconnect_tests;
+
+#[cfg(test)]
+#[path = "../../tests/src/resume_media.rs"]
+mod resume_media_tests;
