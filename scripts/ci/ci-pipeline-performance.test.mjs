@@ -313,3 +313,47 @@ test("official Windows ARM64 release uses native benchmark, strict PE and runtim
   assert.match(build, /needs:\s*\n\s*- verify-ci\n\s*- build-mojo-archives/);
   assert.equal((build.match(/^          - target: /gm) ?? []).length, 6);
 });
+
+
+test("nightly full Rust suite reuses trusted main CI Mojo archive with strict fallback", () => {
+  const nightly = readFileSync(".github/workflows/full-test.yml", "utf8");
+  const archive = workflowJob(nightly, "mojo-runtime-linux-archive", "full_test_shards");
+  const ciArchive = workflowJob(ci, "mojo-runtime-linux-archive", "mojo-runtime-platform-archives");
+
+  const ciKey = ciArchive.match(/^          key: (mojo-static-v2-.*)$/m)?.[1];
+  const nightlyKey = archive.match(/^          key: (mojo-static-v2-.*)$/m)?.[1];
+  assert.ok(ciKey, "CI source fingerprint archive key missing");
+  assert.equal(nightlyKey, ciKey, "nightly and push CI must share byte-identical immutable cache keys");
+
+  assert.match(archive, /id: mojo-archive-cache/);
+  assert.match(archive, /uses: actions\/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9/);
+  assert.match(archive, /github\.ref == 'refs\/heads\/main'/);
+  assert.match(archive, /github\.event_name == 'schedule'/);
+  assert.match(archive, /github\.event_name == 'workflow_dispatch'/);
+  assert.doesNotMatch(archive, /restore-keys:/);
+  assert.equal(
+    [...archive.matchAll(/if: \$\{\{ steps\.mojo-archive-cache\.outputs\.cache-hit != 'true' \}\}/g)].length,
+    4,
+    "pinned Rust, uv, Mojo install and strict compilation must all run when cache misses",
+  );
+  assert.match(archive, /Install pinned Mojo toolchain/);
+  assert.match(archive, /mojo==\$\{MOJO_VERSION\}/);
+  assert.match(archive, /PRODEX_MOJO_REQUIRED=1/);
+  assert.match(archive, /cargo build --release --locked --target .* -p prodex-mojo-core/);
+  assert.match(archive, /--features mojo-core/);
+  assert.match(archive, /- name: Validate cached or freshly compiled strict Linux Mojo archive\n\s+shell: bash/);
+  assert.doesNotMatch(archive, /- name: Validate cached or freshly compiled strict Linux Mojo archive\n\s+if:/);
+  assert.match(archive, /prodex_runtime_profile_provider_order_batch/);
+  assert.match(archive, /prodex_mojo_provider_registry_plan_v1/);
+  assert.match(archive, /KGEN_CompilerRT_/);
+  assert.match(archive, /name: Upload Linux runtime Mojo archive/);
+  assert.match(archive, /path: target\/mojo-runtime\/x86_64-unknown-linux-gnu\/libprodex_mojo_core\.a/);
+
+  // The producer and consumer are different runners. Preserve the original
+  // download path and failure propagation of all production tests.
+  assert.match(nightly, /needs: \[full_test_shards, mojo-runtime-linux-archive\]/);
+  assert.match(nightly, /path: \.prodex-ci\/mojo-runtime\/x86_64-unknown-linux-gnu/);
+  assert.match(nightly, /--test-threads=1/);
+  assert.match(nightly, /Run full test partition/);
+  assert.match(nightly, /if \[ "\$\{status\}" -eq 0 \]; then/);
+});
