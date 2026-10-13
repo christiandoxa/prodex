@@ -234,3 +234,49 @@ Windows ARM64 still compile, and runner scheduling may dominate wall time.
 Hermetic tests cover source/run provenance, canceled CI, expired archives,
 interrupted download, and required fresh-build fallback. The CI static
 guards execute them for future changes.
+
+
+## Trust-scoped source-fingerprint cache for CI Mojo archives
+
+After the four-worker compiler improvement, the fully successful push CI
+[38370749687](https://github.com/christiandoxa/prodex/actions/runs/38370749687)
+completed in about **12 min 9 sec**, compared to **18 min 27 sec** on the
+earlier full push CI [38360757092](https://github.com/christiandoxa/prodex/actions/runs/38360757092).
+Different cache/runner states mean this is an observed comparison, not a
+guaranteed future speedup.
+
+The next repeated expense was compiling all **four** strict Mojo archives
+on each heavy push, including pushes that only modify Rust adapters, CI
+scripts, or documentation. CI build steps on commit 4b1c9de03 each still
+took approximately **3 min 41 sec to 3 min 52 sec**. The assembled archive
+depends on the Mojo source tree and build-script code, not on the identity
+of the Git commit itself.
+
+On **trusted main-branch push runs only**, the x86_64 Linux, x86_64 Windows,
+x86_64 macOS, and aarch64 macOS archive jobs now use an immutable GitHub
+cache key with the exact target triple, target CPU, Mojo version, pinned
+Rust version, and hash of all Mojo modules, the Mojo build script and
+helper modules, workspace Cargo manifests and Cargo.lock. The key does not
+have prefix restores; a changed input cannot select a nearby cached
+archive. Pull requests, schedules and manual dispatches always compile
+from source because they do not qualify for a trusted push cache entry.
+
+With a hit, the job avoids redundant Rust/uv/Mojo toolchain installation
+and 129-object Mojo compilation. It still obtains the LLVM archive tools,
+verifies exported ABI symbols, rejects forbidden Mojo compiler-runtime
+references, and applies the existing MSVC duplicate weak-symbol check
+before publishing the ordinary CI archive artifact. With a miss, every
+original strict build step executes. The GitHub cache is saved only after
+the verification and upload job succeeds. The release-specific same-SHA
+archive reuse continues to work independently.
+
+The LLVM setup additionally avoids apt-get update/install when all three
+required LLVM tools are already present, while keeping the original
+installer if any are unavailable.
+
+This optimization removes redundant **compilation** on repeated unchanged
+Mojo inputs; it does not remove tests, audits, supply-chain checks, or
+artifact verification. The first cache-key use must populate the cache,
+so its push CI can still take the prior 4-minute archive build time.
+Measure the next trusted push with unchanged Mojo inputs to confirm
+cache-hit behavior and actual CI wall-clock improvement.

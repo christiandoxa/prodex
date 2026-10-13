@@ -118,19 +118,30 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
+      - name: Restore exact-input Mojo archive from trusted main cache
+        if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+        id: mojo-archive-cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
+        with:
+          path: target/mojo-runtime/x86_64-unknown-linux-gnu/libprodex_mojo_core.a
+          key: mojo-static-v1-${{ runner.os }}-x86_64-unknown-linux-gnu-x86-64-mojo-${{ env.MOJO_VERSION }}-rust1.99.0-${{ hashFiles('mojo/**/*.mojo', 'crates/prodex-mojo-core/build.rs', 'crates/prodex-mojo-core/build/*.rs', 'crates/prodex-mojo-core/Cargo.toml', 'Cargo.toml', 'Cargo.lock') }}
+
       - name: Install Rust toolchain
+        if: ${{ steps.mojo-archive-cache.outputs.cache-hit != 'true' }}
         uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
         with:
           toolchain: 1.99.0
           targets: x86_64-unknown-linux-gnu
 
       - name: Install pinned uv
+        if: ${{ steps.mojo-archive-cache.outputs.cache-hit != 'true' }}
         uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
           version: ${{ env.UV_VERSION }}
           enable-cache: false
 
       - name: Install pinned Mojo toolchain
+        if: ${{ steps.mojo-archive-cache.outputs.cache-hit != 'true' }}
         shell: bash
         run: |
           set -euo pipefail
@@ -138,10 +149,21 @@ jobs:
           uv pip install --python .venv/bin/python "mojo==${MOJO_VERSION}"
           echo "${GITHUB_WORKSPACE}/.venv/bin" >> "${GITHUB_PATH}"
 
-      - name: Install LLVM archive tools
-        run: sudo apt-get update && sudo apt-get install -y llvm
+      - name: Ensure LLVM archive tools
+        shell: bash
+        run: |
+          set -euo pipefail
+          if command -v llvm-nm >/dev/null 2>&1 &&
+             command -v llvm-ar >/dev/null 2>&1 &&
+             command -v llvm-lib >/dev/null 2>&1; then
+            echo "LLVM archive tools already installed"
+          else
+            sudo apt-get update
+            sudo apt-get install -y llvm
+          fi
 
       - name: Build strict runtime Mojo archive
+        if: ${{ steps.mojo-archive-cache.outputs.cache-hit != 'true' }}
         shell: bash
         run: |
           set -euo pipefail
@@ -159,11 +181,22 @@ jobs:
           test -s "${archive}"
           mkdir -p "target/mojo-runtime/${target}"
           cp "${archive}" "target/mojo-runtime/${target}/libprodex_mojo_core.a"
+
+      - name: Validate cached or fresh Linux archive
+        shell: bash
+        run: |
+          set -euo pipefail
+          archive="target/mojo-runtime/x86_64-unknown-linux-gnu/libprodex_mojo_core.a"
+          test -s "${archive}"
           llvm-nm -g "${archive}" | grep -F 'prodex_runtime_profile_provider_order_batch'
           llvm-nm -g "${archive}" | grep -F 'prodex_runtime_profile_rotation_order_batch'
           llvm-nm -g "${archive}" | grep -F 'prodex_mojo_abi_version'
           llvm-nm -g "${archive}" | grep -F 'prodex_mojo_observability_label_v1'
           llvm-nm -g "${archive}" | grep -F 'prodex_mojo_provider_registry_plan_v1'
+          if llvm-nm -u "${archive}" | grep -F 'KGEN_CompilerRT_'; then
+            echo "Linux Mojo archive unexpectedly needs the Mojo compiler runtime" >&2
+            exit 1
+          fi
 
       - name: Upload Linux runtime Mojo archive
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
@@ -198,19 +231,30 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
+      - name: Restore exact-input platform Mojo archive from trusted main cache
+        if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+        id: mojo-archive-cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
+        with:
+          path: target/mojo-runtime/${{ matrix.target }}/${{ matrix.archive_name }}
+          key: mojo-static-v1-${{ runner.os }}-${{ matrix.target }}-${{ matrix.mojo_target_cpu }}-mojo-${{ env.MOJO_VERSION }}-rust1.99.0-${{ hashFiles('mojo/**/*.mojo', 'crates/prodex-mojo-core/build.rs', 'crates/prodex-mojo-core/build/*.rs', 'crates/prodex-mojo-core/Cargo.toml', 'Cargo.toml', 'Cargo.lock') }}
+
       - name: Install Rust target
+        if: ${{ steps.mojo-archive-cache.outputs.cache-hit != 'true' }}
         uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
         with:
           toolchain: 1.99.0
           targets: ${{ matrix.target }}
 
       - name: Install pinned uv
+        if: ${{ steps.mojo-archive-cache.outputs.cache-hit != 'true' }}
         uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
           version: ${{ env.UV_VERSION }}
           enable-cache: false
 
       - name: Install pinned Mojo toolchain
+        if: ${{ steps.mojo-archive-cache.outputs.cache-hit != 'true' }}
         shell: bash
         run: |
           set -euo pipefail
@@ -218,10 +262,21 @@ jobs:
           uv pip install --python .venv/bin/python "mojo==${MOJO_VERSION}"
           echo "${GITHUB_WORKSPACE}/.venv/bin" >> "${GITHUB_PATH}"
 
-      - name: Install LLVM archive tools
-        run: sudo apt-get update && sudo apt-get install -y llvm
+      - name: Ensure LLVM archive tools
+        shell: bash
+        run: |
+          set -euo pipefail
+          if command -v llvm-nm >/dev/null 2>&1 &&
+             command -v llvm-ar >/dev/null 2>&1 &&
+             command -v llvm-lib >/dev/null 2>&1; then
+            echo "LLVM archive tools already installed"
+          else
+            sudo apt-get update
+            sudo apt-get install -y llvm
+          fi
 
       - name: Build strict runtime Mojo archive
+        if: ${{ steps.mojo-archive-cache.outputs.cache-hit != 'true' }}
         shell: bash
         run: |
           set -euo pipefail
@@ -244,6 +299,13 @@ jobs:
           test -s "${archive}"
           mkdir -p "target/mojo-runtime/${target}"
           cp "${archive}" "target/mojo-runtime/${target}/${{ matrix.archive_name }}"
+      - name: Validate cached or fresh platform archive
+        shell: bash
+        run: |
+          set -euo pipefail
+          target='${{ matrix.target }}'
+          archive="target/mojo-runtime/${target}/${{ matrix.archive_name }}"
+          test -s "${archive}"
           llvm-nm -g "${archive}" | grep -F 'prodex_runtime_profile_provider_order_batch'
           llvm-nm -g "${archive}" | grep -F 'prodex_runtime_profile_rotation_order_batch'
           llvm-nm -g "${archive}" | grep -F 'prodex_mojo_abi_version'
@@ -258,6 +320,11 @@ jobs:
               printf '%s\n' "${duplicate_weak}" >&2
               exit 1
             fi
+          fi
+
+          if llvm-nm -u "${archive}" | grep -F 'KGEN_CompilerRT_'; then
+            echo "platform Mojo archive unexpectedly needs Mojo compiler runtime" >&2
+            exit 1
           fi
 
       - name: Upload platform runtime Mojo archive
