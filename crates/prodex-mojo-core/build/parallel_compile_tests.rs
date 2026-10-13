@@ -1,3 +1,4 @@
+use super::compiler_workers::configured_mojo_jobs;
 use super::*;
 use std::time::{SystemTime, UNIX_EPOCH};
 
