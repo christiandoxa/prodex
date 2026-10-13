@@ -233,6 +233,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 90
     permissions:
+      actions: read
       contents: read
     strategy:
       fail-fast: false
@@ -274,19 +275,32 @@ jobs:
           )"
           test "${actual_version}" = "${RELEASE_VERSION}"
 
+      - name: Reuse exact-source strict CI Mojo archive when available
+        id: reuse-ci-archive
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TARGET_SHA: ${{ inputs.target_sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/ci/reuse_mojo_ci_archive.py             --target '${{ matrix.target }}'             --sha "${RELEASE_TARGET_SHA}"             --output-dir 'target/mojo-release/${{ matrix.target }}'
+
       - name: Install Rust target
+        if: ${{ steps.reuse-ci-archive.outputs.reused != 'true' }}
         uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
         with:
           toolchain: 1.99.0
           targets: ${{ matrix.target }}
 
       - name: Install pinned uv
+        if: ${{ steps.reuse-ci-archive.outputs.reused != 'true' }}
         uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
           version: ${{ env.UV_VERSION }}
           enable-cache: false
 
       - name: Install pinned Mojo compiler
+        if: ${{ steps.reuse-ci-archive.outputs.reused != 'true' }}
         shell: bash
         run: |
           set -euo pipefail
@@ -308,6 +322,7 @@ jobs:
           sudo apt-get install -y llvm
 
       - name: Build target Mojo archive
+        if: ${{ steps.reuse-ci-archive.outputs.reused != 'true' }}
         shell: bash
         run: |
           set -euo pipefail
