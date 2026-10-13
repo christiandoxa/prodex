@@ -604,7 +604,8 @@
       "mojo/prodex_core/rich_fallback.mojo": {
         "operations": [
           "provider_model_fallback_parser",
-          "session_usage_limit_marker"
+          "session_usage_limit_marker",
+          "gemini_invalid_stream_retry_delay_policy"
         ]
       }
     },
@@ -8167,6 +8168,29 @@
       "duplicate_production_owner": false,
       "platform_fallback": false,
       "rust_adapter_scope": "log parsing remains Rust; the adapter marshals borrowed profile views, numeric observations, and checked scalar results"
+    },
+    {
+      "name": "gemini_invalid_stream_retry_delay_policy",
+      "domain": "provider/gemini",
+      "introduced_in": "0.438.0",
+      "baseline_state": "candidate",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_mojo_gemini_invalid_stream_retry_delay_v1",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/rich_fallback.mojo",
+      "consumer": "crates/prodex-provider-core/src/gemini_bridge/errors/quota_retry/retry_delay.rs",
+      "consumer_marker": "gemini_provider_core_invalid_stream_retry_delay_ms(",
+      "production_consumers": [
+        "crates/prodex-provider-core/src/gemini_bridge/errors/quota_retry/retry_delay.rs"
+      ],
+      "production_reachability_test": "crates/prodex-mojo-core/src/rich.rs",
+      "rust_owner_before": "Rust bounded exponential delay selection for pre-commit Gemini invalid-stream retries",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "deleted; direct Mojo ABI and provider-core retry tests cover zero, capped, and invalid retry indices",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "checked retry-index conversion, mandatory Mojo invocation, and provider retry-policy error mapping"
     }
   ],
   "rust_semantic_reductions": [
@@ -9195,6 +9219,21 @@
         "release_symbol": "pub fn first_line_of_error",
         "release_marker": "prodex_mojo_core::quota::quota_panel_first_line("
       }
+    },
+    {
+      "file": "crates/prodex-provider-core/src/gemini_bridge/errors/quota_retry/retry_delay.rs",
+      "symbol": "gemini_provider_core_invalid_stream_retry_delay_ms",
+      "operation": "gemini_invalid_stream_retry_delay_policy",
+      "previous_responsibility": "bounded exponential retry delay calculation for invalid Gemini stream responses",
+      "final_state": "adapter-only",
+      "rust_before": "crates/prodex-provider-core/src/gemini_bridge/errors/quota_retry/retry_delay.rs::gemini_provider_core_invalid_stream_retry_delay_ms",
+      "rust_after": "Rust converts the retry index and invokes the mandatory Mojo policy; the arithmetic is deleted",
+      "mojo_owner": "mojo/prodex_core/rich_fallback.mojo::prodex_mojo_gemini_invalid_stream_retry_delay_v1",
+      "mojo_source": "mojo/prodex_core/rich_fallback.mojo",
+      "mojo_entry": "prodex_mojo_gemini_invalid_stream_retry_delay_v1",
+      "production_consumer": "crates/prodex-provider-core/src/gemini_bridge/errors/quota_retry/retry_delay.rs",
+      "parity_test": "crates/prodex-mojo-core/src/rich_tests.rs",
+      "performance": "one scalar Mojo call per pre-commit invalid-stream retry"
     }
   ],
   "deleted_authoritative_operations": [
