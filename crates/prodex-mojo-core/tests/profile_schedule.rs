@@ -1,7 +1,8 @@
 #![cfg(feature = "mojo-runtime")]
 
 use prodex_mojo_core::runtime::{
-    ProfileScheduleInput, ProfileScoreInput, profile_schedule_batch, profile_selection_order_batch,
+    ProfileCandidateSource, ProfileCandidateSourceInput, ProfileScheduleInput, ProfileScoreInput,
+    profile_candidate_source_batch, profile_schedule_batch, profile_selection_order_batch,
 };
 
 fn input(
@@ -297,4 +298,65 @@ fn profile_selection_order_rotates_before_provider_ranking() {
         profile_selection_order_batch(&priorities, None, true).unwrap(),
         [1, 2, 0, 3]
     );
+}
+
+#[test]
+fn profile_candidate_source_batch_preserves_live_precedence_and_snapshot_gates() {
+    let plan = profile_candidate_source_batch(&[
+        ProfileCandidateSourceInput {
+            quota_compatible: true,
+            live_present: true,
+            snapshot_present: true,
+            snapshot_usable: true,
+            live_model_supported: true,
+            snapshot_model_supported: true,
+        },
+        ProfileCandidateSourceInput {
+            quota_compatible: true,
+            live_present: false,
+            snapshot_present: true,
+            snapshot_usable: true,
+            live_model_supported: false,
+            snapshot_model_supported: true,
+        },
+        ProfileCandidateSourceInput {
+            quota_compatible: true,
+            live_present: false,
+            snapshot_present: true,
+            snapshot_usable: false,
+            live_model_supported: false,
+            snapshot_model_supported: true,
+        },
+        ProfileCandidateSourceInput {
+            quota_compatible: false,
+            live_present: true,
+            snapshot_present: true,
+            snapshot_usable: true,
+            live_model_supported: true,
+            snapshot_model_supported: true,
+        },
+    ])
+    .expect("valid profile candidate source inputs");
+    assert_eq!(
+        plan,
+        [
+            ProfileCandidateSource::Live,
+            ProfileCandidateSource::Snapshot,
+            ProfileCandidateSource::Reject,
+            ProfileCandidateSource::Reject,
+        ]
+    );
+}
+
+#[test]
+fn profile_candidate_source_batch_rejects_over_capacity() {
+    let invalid = ProfileCandidateSourceInput {
+        quota_compatible: true,
+        live_present: false,
+        snapshot_present: true,
+        snapshot_usable: true,
+        live_model_supported: false,
+        snapshot_model_supported: true,
+    };
+    assert!(profile_candidate_source_batch(&vec![invalid; 257]).is_err());
 }

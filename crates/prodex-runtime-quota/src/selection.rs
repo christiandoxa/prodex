@@ -3,6 +3,9 @@ use crate::{
     usage_from_runtime_usage_snapshot,
 };
 use chrono::Local;
+use prodex_mojo_core::runtime::{
+    ProfileCandidateSource, ProfileCandidateSourceInput, profile_candidate_source_batch,
+};
 use prodex_quota::collect_blocked_limits;
 use prodex_shared_types::{
     ReadyProfileCandidate, RunProfileProbeReport, RuntimeProfileProbeCacheEntry, RuntimeQuotaSource,
@@ -225,36 +228,66 @@ pub fn ready_profile_candidates_with_view_for_model<S: ProfileSelectionRead>(
     stale_grace_seconds: i64,
     requested_model: Option<&str>,
 ) -> Vec<ReadyProfileCandidate> {
+    let now = Local::now().timestamp();
+    let mut usages = Vec::with_capacity(reports.len());
+    let mut gate_inputs = Vec::with_capacity(reports.len());
+    for report in reports {
+        let quota_compatible = report.auth.quota_compatible;
+        let live_usage = report.result.as_ref().ok().cloned();
+        let snapshot_usage = persisted_usage_snapshots
+            .and_then(|snapshots| snapshots.get(&report.name))
+            .map(usage_from_runtime_usage_snapshot);
+        let snapshot_usable = quota_compatible
+            && live_usage.is_none()
+            && persisted_usage_snapshots
+                .and_then(|snapshots| snapshots.get(&report.name))
+                .is_some_and(|snapshot| {
+                    runtime_usage_snapshot_is_usable(snapshot, now, stale_grace_seconds)
+                });
+        let live_model_supported = quota_compatible
+            && live_usage.as_ref().is_some_and(|usage| {
+                prodex_quota::openai_usage_supports_model(
+                    usage,
+                    include_code_review,
+                    requested_model,
+                )
+            });
+        let snapshot_model_supported = snapshot_usable
+            && snapshot_usage.as_ref().is_some_and(|usage| {
+                prodex_quota::openai_usage_supports_model(
+                    usage,
+                    include_code_review,
+                    requested_model,
+                )
+            });
+        gate_inputs.push(ProfileCandidateSourceInput {
+            quota_compatible,
+            live_present: live_usage.is_some(),
+            snapshot_present: snapshot_usage.is_some(),
+            snapshot_usable,
+            live_model_supported,
+            snapshot_model_supported,
+        });
+        usages.push((live_usage, snapshot_usage));
+    }
+    let sources = profile_candidate_source_batch(&gate_inputs)
+        .expect("Mojo profile candidate source planner returned invalid output");
     let candidates = reports
         .iter()
-        .filter_map(|report| {
-            if !report.auth.quota_compatible {
-                return None;
-            }
-
-            let (usage, quota_source) = match report.result.as_ref() {
-                Ok(usage) => (usage.clone(), RuntimeQuotaSource::LiveProbe),
-                Err(_) => {
-                    let snapshot = persisted_usage_snapshots
-                        .and_then(|snapshots| snapshots.get(&report.name))?;
-                    let now = Local::now().timestamp();
-                    if !runtime_usage_snapshot_is_usable(snapshot, now, stale_grace_seconds) {
-                        return None;
-                    }
-                    (
-                        usage_from_runtime_usage_snapshot(snapshot),
-                        RuntimeQuotaSource::PersistedSnapshot,
-                    )
-                }
+        .zip(usages)
+        .zip(sources)
+        .filter_map(|((report, (live_usage, snapshot_usage)), source)| {
+            let (usage, quota_source) = match source {
+                ProfileCandidateSource::Reject => return None,
+                ProfileCandidateSource::Live => (
+                    live_usage.expect("Mojo selected a missing live profile usage"),
+                    RuntimeQuotaSource::LiveProbe,
+                ),
+                ProfileCandidateSource::Snapshot => (
+                    snapshot_usage.expect("Mojo selected a missing profile snapshot"),
+                    RuntimeQuotaSource::PersistedSnapshot,
+                ),
             };
-            if !prodex_quota::openai_usage_supports_model(
-                &usage,
-                include_code_review,
-                requested_model,
-            ) {
-                return None;
-            }
-
             Some(ReadyProfileCandidate {
                 name: report.name.clone(),
                 usage,

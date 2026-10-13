@@ -9,6 +9,10 @@ from runtime_math import (
 
 comptime RUNTIME_PROFILE_SCHEDULE_FIELD_COUNT: Int64 = 16
 comptime RUNTIME_PROFILE_SCHEDULE_MAX_COUNT: Int64 = 256
+comptime RUNTIME_PROFILE_CANDIDATE_SOURCE_REJECT: Int64 = 0
+comptime RUNTIME_PROFILE_CANDIDATE_SOURCE_LIVE: Int64 = 1
+comptime RUNTIME_PROFILE_CANDIDATE_SOURCE_SNAPSHOT: Int64 = 2
+
 
 def runtime_profile_rotation_index(
     offset: Int64,
@@ -95,6 +99,7 @@ def prodex_runtime_profile_rotation_order_batch(
     ordered_count[unsafe_offset=0] = total_count
     return 0
 
+
 @export("prodex_runtime_profile_provider_order_batch")
 def prodex_runtime_profile_provider_order_batch(
     priorities: Pointer[mut=False, Int64, _],
@@ -126,6 +131,82 @@ def prodex_runtime_profile_provider_order_batch(
             insertion -= 1
         ordered_indices[unsafe_offset=insertion] = selected
         position += 1
+    return 0
+
+
+@export("prodex_runtime_profile_candidate_source_batch_v1")
+def prodex_runtime_profile_candidate_source_batch_v1(
+    quota_compatible_address: UInt,
+    live_present_address: UInt,
+    snapshot_present_address: UInt,
+    snapshot_usable_address: UInt,
+    live_model_supported_address: UInt,
+    snapshot_model_supported_address: UInt,
+    output_source_address: UInt,
+    count: Int64,
+) abi("C") -> Int64:
+    if count < 0 or count > RUNTIME_PROFILE_SCHEDULE_MAX_COUNT:
+        return 1
+    if count > 0 and (
+        quota_compatible_address == 0
+        or live_present_address == 0
+        or snapshot_present_address == 0
+        or snapshot_usable_address == 0
+        or live_model_supported_address == 0
+        or snapshot_model_supported_address == 0
+        or output_source_address == 0
+    ):
+        return 1
+
+    var quota_compatible = Pointer[mut=False, Int64, ImmUntrackedOrigin](
+        unsafe_from_address=Int(quota_compatible_address)
+    )
+    var live_present = Pointer[mut=False, Int64, ImmUntrackedOrigin](
+        unsafe_from_address=Int(live_present_address)
+    )
+    var snapshot_present = Pointer[mut=False, Int64, ImmUntrackedOrigin](
+        unsafe_from_address=Int(snapshot_present_address)
+    )
+    var snapshot_usable = Pointer[mut=False, Int64, ImmUntrackedOrigin](
+        unsafe_from_address=Int(snapshot_usable_address)
+    )
+    var live_model_supported = Pointer[mut=False, Int64, ImmUntrackedOrigin](
+        unsafe_from_address=Int(live_model_supported_address)
+    )
+    var snapshot_model_supported = Pointer[
+        mut=False, Int64, ImmUntrackedOrigin
+    ](unsafe_from_address=Int(snapshot_model_supported_address))
+    var output_source = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_source_address)
+    )
+
+    for index in range(count):
+        for flag in [
+            quota_compatible[unsafe_offset=index],
+            live_present[unsafe_offset=index],
+            snapshot_present[unsafe_offset=index],
+            snapshot_usable[unsafe_offset=index],
+            live_model_supported[unsafe_offset=index],
+            snapshot_model_supported[unsafe_offset=index],
+        ]:
+            if flag < 0 or flag > 1:
+                return 2
+
+        var source = RUNTIME_PROFILE_CANDIDATE_SOURCE_REJECT
+        if quota_compatible[unsafe_offset=index] == 1:
+            if (
+                live_present[unsafe_offset=index] == 1
+                and live_model_supported[unsafe_offset=index] == 1
+            ):
+                source = RUNTIME_PROFILE_CANDIDATE_SOURCE_LIVE
+            elif (
+                live_present[unsafe_offset=index] == 0
+                and snapshot_present[unsafe_offset=index] == 1
+                and snapshot_usable[unsafe_offset=index] == 1
+                and snapshot_model_supported[unsafe_offset=index] == 1
+            ):
+                source = RUNTIME_PROFILE_CANDIDATE_SOURCE_SNAPSHOT
+        output_source[unsafe_offset=index] = source
     return 0
 
 
