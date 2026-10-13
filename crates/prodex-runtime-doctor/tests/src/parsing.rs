@@ -358,6 +358,60 @@ fn runtime_doctor_summarizes_marker_context_by_route_lane_and_profile() {
 }
 
 #[test]
+fn runtime_doctor_marker_context_reason_continuation_and_facets_batch_through_mojo() {
+    let mut lines = vec![
+        r#"[2026-05-12 00:00:00Z] chain_retried_owner reason=owner_retry route=responses profile=alpha"#.to_string(),
+        r#"[2026-05-12 00:00:01Z] stale_continuation reason=old_reason route=responses profile=alpha"#.to_string(),
+        r#"[2026-05-12 00:00:02Z] stale_continuation reason=new_reason route=responses profile=alpha"#.to_string(),
+        r#"[2026-05-12 00:00:02Z] chain_dead_upstream_confirmed reason=dead_reason route=responses profile=alpha"#.to_string(),
+        r#"[2026-05-12 00:00:03Z] previous_response_not_found route=responses transport=http"#.to_string(),
+        r#"[2026-05-12 00:00:04Z] previous_response_fresh_fallback_blocked request_shape=session_replayable"#.to_string(),
+        r#"{"event":"selection_pick","fields":{"route":"","lane":"-","profile":"sentinel","reason":""}}"#.to_string(),
+    ];
+    lines.extend((0..257).map(|_| {
+        r#"[2026-05-12 00:00:05Z] selection_pick route=/responses lane=responses profile=alpha reason=quota"#.to_string()
+    }));
+
+    let summary = summarize_runtime_log_tail(lines.join("\n").as_bytes());
+
+    let selection = summary
+        .marker_context_summary
+        .iter()
+        .find(|entry| entry.marker == "selection_pick")
+        .expect("selection marker context should be aggregated");
+    assert_eq!(selection.total, 258);
+    assert_eq!(selection.routes["/responses"], 257);
+    assert!(!selection.routes.contains_key(""));
+    assert_eq!(selection.lanes["responses"], 257);
+    assert!(!selection.lanes.contains_key("-"));
+    assert_eq!(selection.profiles["alpha"], 257);
+    assert_eq!(summary.chain_retried_owner_by_reason["owner_retry"], 1);
+    assert_eq!(
+        summary.chain_dead_upstream_confirmed_by_reason["dead_reason"],
+        1
+    );
+    assert_eq!(summary.stale_continuation_by_reason["old_reason"], 1);
+    assert_eq!(summary.stale_continuation_by_reason["new_reason"], 1);
+    assert_eq!(
+        summary.latest_stale_continuation_reason.as_deref(),
+        Some("new_reason")
+    );
+    assert_eq!(summary.previous_response_not_found_by_route["responses"], 1);
+    assert_eq!(summary.previous_response_not_found_by_transport["http"], 1);
+    assert_eq!(
+        summary.previous_response_fresh_fallback_blocked_by_request_shape["session_replayable"],
+        1
+    );
+    assert_eq!(summary.facet_counts["route"]["responses"], 4);
+    assert_eq!(summary.facet_counts["route"]["/responses"], 257);
+    assert_eq!(summary.facet_counts["route"][""], 1);
+    assert_eq!(summary.facet_counts["lane"]["responses"], 257);
+    assert_eq!(summary.facet_counts["lane"]["-"], 1);
+    assert_eq!(summary.facet_counts["reason"]["quota"], 257);
+    assert_eq!(summary.facet_counts["reason"][""], 1);
+}
+
+#[test]
 fn runtime_doctor_marker_classification_matches_fixed_values_at_log_boundary() {
     assert_eq!(EXPECTED_RUNTIME_DOCTOR_MARKERS.len(), 167);
     let mut log = EXPECTED_RUNTIME_DOCTOR_MARKERS

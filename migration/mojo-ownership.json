@@ -1274,7 +1274,8 @@
         "role": "semantic",
         "operations": [
           "runtime_doctor_marker_summary_counts",
-          "runtime_doctor_compact_exit_counts"
+          "runtime_doctor_compact_exit_counts",
+          "runtime_doctor_marker_context_reason_facet_aggregation"
         ]
       },
       {
@@ -6090,6 +6091,29 @@
       "rust_adapter_scope": "marker selection, numeric duration parsing, duration clamping, and caller-specific retry policy mapping"
     },
     {
+      "name": "runtime_doctor_marker_context_reason_facet_aggregation",
+      "domain": "runtime/diagnostics",
+      "introduced_in": "0.420.0",
+      "baseline_state": "candidate",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_mojo_runtime_doctor_marker_aggregation_v1",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/runtime_doctor_marker_summary.mojo",
+      "consumer": "crates/prodex-runtime-doctor/src/parsing.rs",
+      "consumer_marker": "prodex_mojo_core::rich::runtime_doctor_marker_aggregation(",
+      "production_consumers": [
+        "crates/prodex-runtime-doctor/src/parsing.rs"
+      ],
+      "production_reachability_test": "crates/prodex-mojo-core/tests/runtime_doctor_markers.rs",
+      "rust_owner_before": "Rust grouped marker route/lane/profile context, marker-specific chain and stale reasons, previous-response route/transport/request-shape fields, and all runtime-doctor facet counters",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "deleted; direct real-Mojo ABI coverage and runtime-doctor caller fixtures cover batching, sentinels, stale-reason chronology, continuation fields, facets, and overflow",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "line/JSON recognition, redaction, owned field materialization, bounded batch construction, validated representative projection, and existing DTO/map assembly"
+    },
+    {
       "name": "runtime_doctor_marker_summary_counts",
       "domain": "runtime/diagnostics",
       "introduced_in": "0.436.0",
@@ -9098,6 +9122,29 @@
       "parity_test": "crates/prodex-mojo-core/tests/gemini_response_media.rs",
       "performance": "one bounded parsed-tree Mojo call per response part projection",
       "cleanup_evidence": "The prior Rust MIME, data-URL, special-text, and image-generation shaping branches are deleted; direct Mojo and provider-core caller tests retain fixed expected values."
+    },
+    {
+      "file": "crates/prodex-runtime-doctor/src/parsing.rs",
+      "symbol": "runtime_doctor_count_context_value",
+      "operation": "runtime_doctor_marker_context_reason_facet_aggregation",
+      "previous_responsibility": "Rust grouped marker context values, marker-specific chain/stale reasons, previous-response fields, and every runtime-doctor facet",
+      "final_state": "deleted",
+      "rust_before": "crates/prodex-runtime-doctor/src/parsing.rs::runtime_doctor_count_context_value and adjacent marker aggregation helpers",
+      "rust_after": "the parser batches owned parsed fields into the versioned Mojo reducer and materializes its validated rows into the existing summary maps",
+      "mojo_owner": "mojo/prodex_core/runtime_doctor_marker_summary.mojo::prodex_mojo_runtime_doctor_marker_aggregation_v1",
+      "mojo_source": "mojo/prodex_core/runtime_doctor_marker_summary.mojo",
+      "mojo_entry": "prodex_mojo_runtime_doctor_marker_aggregation_v1",
+      "production_consumer": "crates/prodex-runtime-doctor/src/parsing.rs",
+      "parity_test": "crates/prodex-runtime-doctor/tests/src/parsing.rs::runtime_doctor_marker_context_reason_continuation_and_facets_batch_through_mojo",
+      "cleanup_loc": 112,
+      "cleanup_source": {
+        "kind": "deleted",
+        "baseline_range": {
+          "start": 25,
+          "end": 149
+        }
+      },
+      "cleanup_evidence": "The former Rust context, reason, continuation, and facet loops are removed from the parser; direct ABI and caller tests exercise the replacement reducer."
     }
   ],
   "deleted_authoritative_operations": [
