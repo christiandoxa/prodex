@@ -126,3 +126,34 @@ test("official Intel macOS release uses measured Apple Silicon cross-build with 
   assert.match(build, /name: Upload binary artifact/);
   assert.match(build, /needs:\s*\n\s*- verify-ci\n\s*- build-mojo-archives/);
 });
+
+
+test("standalone release reuses only verified same-SHA CI Mojo archives with strict fallback", () => {
+  const verification = workflowJob(release, "verify-ci", "build-mojo-archives");
+  const archives = workflowJob(release, "build-mojo-archives", "build");
+  const build = workflowJob(release, "build", "attest-binaries");
+
+  assert.match(archives, /actions: read/);
+  assert.match(archives, /name: Reuse exact-source strict CI Mojo archive when available/);
+  assert.match(archives, /id: reuse-ci-archive/);
+  assert.match(archives, /GH_TOKEN:/);
+  assert.match(archives, /RELEASE_TARGET_SHA:/);
+  assert.match(archives, /python3 scripts\/ci\/reuse_mojo_ci_archive\.py/);
+  assert.equal(
+    [...archives.matchAll(/if: \$\{\{ steps\.reuse-ci-archive\.outputs\.reused != 'true' \}\}/g)].length,
+    4,
+    "verified archive must skip all four expensive install and compile steps",
+  );
+  assert.match(archives, /name: Verify target archive/);
+  assert.match(archives, /llvm-nm --format=posix/);
+  assert.match(archives, /KGEN_CompilerRT_/);
+  assert.match(archives, /name: Upload target Mojo archive/);
+
+  assert.match(verification, /name: Wait for CI success/);
+  assert.match(verification, /conclusion.*success/);
+  assert.match(build, /needs:\s*\n\s*- verify-ci\n\s*- build-mojo-archives/);
+  assert.match(build, /name: Download target Mojo archive/);
+  assert.match(build, /name: Verify compiled-in Mojo release/);
+  assert.match(release, /Verify release provenance/);
+  assert.match(release, /sha256sum --check SHA256SUMS/);
+});

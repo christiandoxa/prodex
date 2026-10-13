@@ -16,6 +16,7 @@ const steps = [
   ["smart-context", "scripts/ci/smart-context-guard.mjs", "--self-test"],
   ["full-test-shards", "scripts/ci/prodex-app-test-shards.mjs", "--check"],
   ["mojo-compiler-pool", "scripts/ci/mojo-compiler-pool-check.mjs"],
+  ["release-mojo-archive-reuse", "--test", "scripts/ci/reuse-mojo-ci-archive.test.mjs"],
   ["provider-subprocess", "--test", "scripts/lib/checked-subprocess.test.mjs"],
   ["provider-capabilities", "scripts/catalog/provider-capability-matrix.mjs"],
   ["runtime-manifest", "scripts/ci/runtime-test-manifest-guard.mjs"],

@@ -188,3 +188,49 @@ In subsequent GitHub Actions compare the per-platform strict Mojo archive
 worker count and translation-unit compile duration directly. The source must
 still pass all existing platform archive, compiled-in runtime, and release
 provenance checks before publishing.
+
+
+## Reuse verified CI Mojo archives during standalone release
+
+The parallel compiler still left expensive duplication: a successful heavy
+CI push already builds and verifies strict archives for Linux x86_64, macOS
+x86_64, macOS ARM64, and Windows x86_64, and standalone release previously
+compiled these **same four archives again** on the same source SHA, target CPU
+policy, and Mojo 1.1.0 compiler. Only Linux ARM64 and Windows ARM64 lack CI
+platform archive artifacts.
+
+The release archive matrix still prepares all **six** release archives,
+but first attempts to reuse the four same-source CI archives. The helper
+scripts/ci/reuse_mojo_ci_archive.py requires matching checked-out HEAD,
+release dispatch SHA and GitHub workflow SHA; it also verifies the source
+CI run's repository, push event, main branch, workflow path and eligible
+status, and checks that the named artifact is present, nonexpired and
+nonempty. It extracts to a temporary directory and atomically places the
+verified payload under the existing release archive path.
+
+If **any condition fails**, including a lightweight CI with no platform
+archive, network interruption, missing run, or mismatched SHA, the job runs
+the original pinned Mojo compiler installation and strict source compilation.
+It never accepts a matching archive solely by filename. Both reused and
+freshly built archives still pass the unchanged exported-symbol and
+compiler-runtime checks; binary builds continue to require complete
+successful CI and the full six-target release archive matrix.
+
+One real integration exercise used successful push CI
+[38360757092](https://github.com/christiandoxa/prodex/actions/runs/38360757092)
+from source 44b54131c8b91e17f728be7854a16882e6867c80.
+The exact-source Linux x86_64 archive was downloaded and passed the required
+ABI symbol and forbidden compiler-runtime checks; its SHA-256 was
+9507aedd97278644e8be6684c1ca79c3eef3e399d52e1b68ec66cec8ecec63b3.
+The same exercise confirmed Linux ARM64 correctly selects strict fresh
+compilation because CI does not publish that platform archive.
+
+This removes repeated Mojo toolchain installations and four unnecessary
+archive compilations from many standalone releases, reducing billed runner
+time. Do **not** claim a specific official standalone release wall-clock
+speedup before completing a release on the updated path: Linux ARM64 and
+Windows ARM64 still compile, and runner scheduling may dominate wall time.
+
+Hermetic tests cover source/run provenance, canceled CI, expired archives,
+interrupted download, and required fresh-build fallback. The CI static
+guards execute them for future changes.
