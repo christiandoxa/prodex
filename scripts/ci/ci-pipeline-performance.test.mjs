@@ -157,3 +157,54 @@ test("standalone release reuses only verified same-SHA CI Mojo archives with str
   assert.match(release, /Verify release provenance/);
   assert.match(release, /sha256sum --check SHA256SUMS/);
 });
+
+
+test("trusted main archive cache preserves strict Mojo compile and ABI verification for all four targets", () => {
+  const linux = workflowJob(ci, "mojo-runtime-linux-archive", "mojo-runtime-platform-archives");
+  const platform = workflowJob(ci, "mojo-runtime-platform-archives", "fmt");
+  const cacheSource = "mojo/**/*.mojo";
+  const requiredHashes = [
+    cacheSource,
+    "crates/prodex-mojo-core/build.rs",
+    "crates/prodex-mojo-core/build/*.rs",
+    "crates/prodex-mojo-core/Cargo.toml",
+    "Cargo.toml",
+    "Cargo.lock",
+  ];
+  for (const block of [linux, platform]) {
+    assert.match(block, /uses: actions\/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9/);
+    assert.match(block, /id: mojo-archive-cache/);
+    assert.match(block, /if: \$\{\{ github.event_name == 'push' && github.ref == 'refs\/heads\/main' \}\}/);
+    assert.match(block, /mojo-static-v1-/);
+    assert.match(block, /rust1\.99\.0/);
+    assert.match(block, /env\.MOJO_VERSION/);
+    for (const item of requiredHashes) {
+      assert.ok(block.includes("'" + item + "'"), "cache fingerprint missing " + item);
+    }
+    assert.doesNotMatch(block, /restore-keys:/);
+    assert.equal(
+      [...block.matchAll(/if: \$\{\{ steps\.mojo-archive-cache\.outputs\.cache-hit != 'true' \}\}/g)].length,
+      4,
+      "Rust/toolchain install, pinned Mojo install, and strict compilation must all run on cache miss",
+    );
+    assert.match(block, /- name: Ensure LLVM archive tools/);
+    assert.match(block, /command -v llvm-nm/);
+    assert.match(block, /command -v llvm-ar/);
+    assert.match(block, /command -v llvm-lib/);
+    assert.match(block, /sudo apt-get install -y llvm/);
+    assert.match(block, /- name: Build strict runtime Mojo archive/);
+    assert.match(block, /--features mojo-core/);
+    assert.match(block, /- name: Upload (?:Linux|platform) runtime Mojo archive/);
+  }
+  assert.match(linux, /Validate cached or fresh Linux archive/);
+  assert.match(platform, /Validate cached or fresh platform archive/);
+  assert.match(linux, /prodex_runtime_profile_provider_order_batch/);
+  assert.match(platform, /prodex_runtime_profile_rotation_order_batch/);
+  assert.match(linux, /KGEN_CompilerRT_/);
+  assert.match(platform, /KGEN_CompilerRT_/);
+  assert.match(platform, /MSVC Mojo archive contains duplicate weak static-string aliases/);
+  assert.match(linux, /key: mojo-static-v1-\$\{\{ runner.os \}\}-x86_64-unknown-linux-gnu-x86-64/);
+  for (const variable of ["matrix.target", "matrix.mojo_target_cpu"]) {
+    assert.ok(platform.includes(variable), "multi-target cache key missing " + variable);
+  }
+});
