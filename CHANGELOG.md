@@ -2,6 +2,60 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.437.10 - 2026-10-13
+
+### Misc
+
+- Preserve pasted goal media across overlay exit and resume (`0548b3f`)
+# Prodex 0.437.10
+
+## New Features
+
+- No new runtime mode. This release restores durable pasted goal text and images
+  when a temporary Codex home is removed and the same saved session is resumed.
+
+## Bug Fixes
+
+- Repair persisted goal attachment references before native resume and picker
+  launch, including goals whose original overlay is already gone. Existing shared
+  attachment bytes remain the source of truth; missing files are not fabricated.
+- Decouple independent goal SQLite repair from the global rollout maintenance
+  lock. Another live Codex session can no longer silently suppress goal repair.
+  Live rollouts retain their existing exclusive-write protection.
+- Repair nested pasted-text and image references inside generated
+  `goal-objective.md` files, including when the outer reference is already stable.
+  Raw pasted instructions and images are preserved byte-for-byte.
+- Use conditional goal updates so a concurrent new objective, goal identity,
+  paused/active state, token accounting and timestamps are not overwritten.
+
+## Changelog
+
+- Add real caller regressions for concurrent sessions, selector-less resume,
+  missing attachments, symlink boundaries, nested objectives and repeated resume.
+- Extend the existing compiled Mojo attachment policy to distinguish generated
+  goal wrappers from raw user content without a duplicated Rust fallback.
+- Verify the defect and repair using fresh native Codex 0.162.1 app-server
+  processes, real goal storage and native file read/write APIs. No upstream
+  inference request is needed to prove the restored content and attachment bytes.
+- Include the previously committed CI/release improvements: parallel strict Mojo
+  compilation, source-keyed archive reuse, disjoint test shards, and validated
+  native/cross-platform release runners. Safety and provenance gates stay intact.
+
+## Upgrade notes
+
+Run `prodex update`, confirm `prodex --version`, and reopen the saved session with
+that binary after exiting the old launcher safely. The next launch/resume repairs
+recoverable saved goal references automatically. It does not activate a paused goal,
+change context-window or compaction settings, replay tools or restart other sessions.
+
+Do not delete sessions, shared attachments or goal databases as a workaround.
+Files absent both from the original location and shared storage cannot be recreated
+from an address alone; this release does not invent lost goal contents.
+
+See [the attachment persistence investigation](https://github.com/christiandoxa/prodex/blob/main/migration/attachment-resume-043710.md).
+
+Full Changelog: [0.437.9...0.437.10](https://github.com/christiandoxa/prodex/compare/0.437.9...0.437.10)
+
 ## 0.437.9 - 2026-10-13
 
 ### Runtime
@@ -9,55 +63,6 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 - Integrate native capacity recovery safeguards (`bd3c1d5`)
 - Preserve root session recovery ownership and cursor (`bca7e83`)
 - Keep Responses heartbeats uncommitted (`6e49493`)
-# Prodex 0.437.9
-
-## New Features
-
-- No new end-user features; this release repairs capacity recovery without changing
-  native context-window, compaction, model selection, or post-output safety contracts.
-
-## Bug Fixes
-
-- Keep upstream Responses `keepalive` frames uncommitted in HTTP SSE and WebSocket.
-  A heartbeat is not model output: a later capacity failure can now use the existing
-  safe precommit retry/rotation path instead of being exposed after a false commit.
-- Preserve post-output safety: once real text, reasoning, or tool arguments have been
-  committed, an overload cannot trigger duplicate execution or cross-account replay.
-- Preserve the native root-session recovery marker when inherited legacy
-  notifications arrive from descendant threads. Canonical SessionStart identity
-  takes precedence over a completing agent's concrete thread ID.
-- Keep the unread rollout cursor stable across repeated root/compact notifications,
-  so ordinary non-goal capacity failures cannot be silently skipped. Serialize and
-  atomically publish marker updates; retain explicit new-session transitions.
-
-## Changelog
-
-- Add production-inspector regressions for heartbeats followed by capacity errors,
-  every byte-split boundary, WebSocket failure phases, and successful terminal events.
-- Exercise the async prefetch boundary and full HTTP account rotation with synthetic
-  upstreams, including missing Content-Type, unchanged session/input, discarded failed
-  preludes, and no rotation after visible output.
-- Register the new HTTP regressions in serialized CI. Retain the required-Mojo ownership
-  and no-fallback guards, bounded watchdogs, and native Codex context/compaction settings.
-- Reproduce root-marker redirection and cursor loss on the prior implementation;
-  cover same-thread in-place recovery, explicit session switches, legacy bootstrap,
-  malformed inputs, concurrent descendant callbacks and independent Mojo mutations.
-
-## Upgrade notes
-
-Existing processes keep the binary loaded at launch. Save work and exit an old launcher
-when safe, then resume the same persisted session with the new version. This release does
-not require deleting sessions or caches, changing models, or disabling safeguards.
-
-Quota and model capacity remain separate. A model can be saturated across all eligible
-accounts; this fix prevents a local heartbeat-classification defect, not upstream-wide
-capacity errors. BRP incident investigation was read-only; patching and release validation
-were performed on PDX.
-
-See [the heartbeat incident and safety contract](https://github.com/christiandoxa/prodex/blob/main/migration/capacity-keepalive-04379.md)
-and [the native root-session ownership investigation](https://github.com/christiandoxa/prodex/blob/main/migration/native-root-marker-04379.md).
-
-Full Changelog: [0.437.8...0.437.9](https://github.com/christiandoxa/prodex/compare/0.437.8...0.437.9)
 
 ## 0.437.8 - 2026-10-13
 
