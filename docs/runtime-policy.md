@@ -639,6 +639,10 @@ shared-state integration around those operations.
 - Prodex stays a scoped Codex gateway, not a general-purpose LLM SDK.
 - Profile selection must be visible through policy, `prodex info`, `prodex doctor`, and runtime logs.
 - Pre-commit retry and fallback paths must stay bounded per request.
+- Responses `keepalive` events are liveness metadata, not generated output. Both HTTP SSE
+  and WebSocket hold these events before commitment, so a later capacity failure can still
+  use the existing bounded retry/rotation policy. A heartbeat never resets the request
+  deadline, relaxes hard continuation ownership, or makes already-committed output replayable.
 - Healthy local capacity contention waits for a permit instead of consuming an upstream retry.
   The retry clock starts with the first upstream dispatch and pauses during capacity waits;
   waiting never clears failed-profile exclusions or replenishes the actual attempt limit.

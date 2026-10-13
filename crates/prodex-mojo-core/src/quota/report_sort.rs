@@ -1,3 +1,4 @@
+use super::{QUOTA_DISPLAY_LABEL_SORT, load_quota_display_label};
 use super::{QUOTA_MODEL_POLICY_ABI_VERSION, prodex_quota_report_compare_v1};
 
 unsafe extern "C" {
@@ -181,4 +182,25 @@ fn quota_report_page_plan_handles_pagination_budget_and_scroll_edges() {
         quota_report_page_plan(4, 2, 3, 0, 1, None),
         Err(crate::MojoError::InvalidInput)
     );
+}
+
+pub fn quota_report_sort_label(sort: i64) -> Result<&'static str, crate::MojoError> {
+    use std::sync::OnceLock;
+
+    static LABELS: OnceLock<Result<Vec<String>, crate::MojoError>> = OnceLock::new();
+    let sort = usize::try_from(sort)
+        .ok()
+        .filter(|sort| *sort < 6)
+        .ok_or(crate::MojoError::InvalidInput)?;
+    match LABELS.get_or_init(|| {
+        (0_i64..6)
+            .map(|value| load_quota_display_label(QUOTA_DISPLAY_LABEL_SORT, value))
+            .collect()
+    }) {
+        Ok(labels) => labels
+            .get(sort)
+            .map(String::as_str)
+            .ok_or(crate::MojoError::InvalidOutput),
+        Err(error) => Err(*error),
+    }
 }

@@ -25,8 +25,12 @@ def prodex_runtime_websocket_event_kind_v1(
     if not rich_view_valid(kind, RICH_MAX_IDENTIFIER_BYTES):
         return RICH_STATUS_UTF8
 
+    # Responses keepalive is transport liveness, not model output. Committing
+    # on this ignored native event would expose a later capacity failure and
+    # disable otherwise-safe precommit retry/rotation in both SSE and WebSocket.
     var precommit_hold = (
-        rich_view_matches_literal["codex.rate_limits"](kind, False)
+        rich_view_matches_literal["keepalive"](kind, False)
+        or rich_view_matches_literal["codex.rate_limits"](kind, False)
         or rich_view_matches_literal["codex.response.metadata"](kind, False)
         or rich_view_matches_literal["response.metadata"](kind, False)
         or rich_view_matches_literal["response.created"](kind, False)

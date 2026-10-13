@@ -10,3 +10,7 @@ pub use sse::*;
 #[cfg(test)]
 #[path = "../tests/src/payload_detection.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "../tests/src/keepalive_precommit.rs"]
+mod keepalive_precommit_tests;
