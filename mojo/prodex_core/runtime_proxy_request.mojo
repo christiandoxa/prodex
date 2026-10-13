@@ -801,6 +801,98 @@ def prodex_runtime_proxy_escape_dot_segments_v1(
     return RUNTIME_PROXY_REQUEST_OK
 
 
+def runtime_proxy_header_equals(
+    source: Pointer[mut=False, UInt8, _],
+    bounds: Array[Int64, 2],
+    literal: StringSlice,
+) -> Bool:
+    var length = bounds[1] - bounds[0]
+    if length != Int64(literal.byte_length()):
+        return False
+    var expected = literal.unsafe_ptr()
+    for index in range(length):
+        var value = source[unsafe_offset=bounds[0] + index]
+        if value >= 65 and value <= 90:
+            value += 32
+        if value != expected[unsafe_offset=index]:
+            return False
+    return True
+
+
+def runtime_proxy_header_starts_with(
+    source: Pointer[mut=False, UInt8, _],
+    bounds: Array[Int64, 2],
+    literal: StringSlice,
+) -> Bool:
+    var length = Int64(literal.byte_length())
+    if bounds[1] - bounds[0] < length:
+        return False
+    var expected = literal.unsafe_ptr()
+    for index in range(length):
+        var value = source[unsafe_offset=bounds[0] + index]
+        if value >= 65 and value <= 90:
+            value += 32
+        if value != expected[unsafe_offset=index]:
+            return False
+    return True
+
+
+def runtime_proxy_header_skip_kind(
+    source: Pointer[mut=False, UInt8, _], bounds: Array[Int64, 2]
+) -> Int64:
+    if (
+        runtime_proxy_header_equals(source, bounds, StringSlice("connection"))
+        or runtime_proxy_header_equals(source, bounds, StringSlice("content-length"))
+        or runtime_proxy_header_equals(source, bounds, StringSlice("host"))
+        or runtime_proxy_header_equals(source, bounds, StringSlice("keep-alive"))
+        or runtime_proxy_header_equals(source, bounds, StringSlice("proxy-authenticate"))
+        or runtime_proxy_header_equals(source, bounds, StringSlice("proxy-authorization"))
+        or runtime_proxy_header_equals(source, bounds, StringSlice("te"))
+        or runtime_proxy_header_equals(source, bounds, StringSlice("trailer"))
+        or runtime_proxy_header_equals(source, bounds, StringSlice("transfer-encoding"))
+        or runtime_proxy_header_equals(source, bounds, StringSlice("upgrade"))
+        or runtime_proxy_header_starts_with(
+            source, bounds, StringSlice("sec-websocket-")
+        )
+    ):
+        return 1
+    if runtime_proxy_header_starts_with(
+        source, bounds, StringSlice("x-prodex-internal-")
+    ):
+        return 2
+    if runtime_proxy_header_equals(source, bounds, StringSlice("authorization")):
+        return 3
+    if runtime_proxy_header_equals(source, bounds, StringSlice("chatgpt-account-id")):
+        return 4
+    return 0
+
+
+@export("prodex_runtime_proxy_header_skip_kind_v1")
+def prodex_runtime_proxy_header_skip_kind_v1(
+    abi_version: Int64,
+    name_address: UInt,
+    name_length: Int64,
+    output_address: UInt,
+) abi("C") -> Int64:
+    if (
+        abi_version != RUNTIME_PROXY_REQUEST_ABI_VERSION
+        or name_length < 0
+        or (name_length > 0 and name_address == 0)
+        or output_address == 0
+    ):
+        return RUNTIME_PROXY_REQUEST_INVALID
+    var view = ProdexRichStringView(name_address, UInt(name_length))
+    if not rich_view_valid(view, name_length):
+        return RUNTIME_PROXY_REQUEST_INVALID
+    var source = rich_view_ptr(view)
+    var bounds = rich_trim_bounds(view)
+    var output = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    output[] = runtime_proxy_header_skip_kind(source, bounds)
+    return RUNTIME_PROXY_REQUEST_OK
+
+
 def runtime_proxy_mount_path_copy(
     source: Pointer[mut=False, UInt8, _],
     start: Int64,

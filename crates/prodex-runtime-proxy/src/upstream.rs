@@ -1,6 +1,6 @@
 use crate::runtime_proxy_normalize_openai_path;
 use prodex_mojo_core::rich::{
-    ascii_casefold_equal_exact, ascii_casefold_starts_with, runtime_proxy_escape_dot_segments,
+    ascii_casefold_equal_exact, runtime_proxy_escape_dot_segments, runtime_proxy_header_skip_kind,
 };
 use std::borrow::Cow;
 
@@ -28,45 +28,22 @@ pub fn runtime_escape_url_path_dot_segments(path_and_query: &str) -> Cow<'_, str
         .expect("Mojo runtime dot-segment escaping returned invalid output")
 }
 
-const RUNTIME_TRANSPORT_LOCAL_REQUEST_HEADERS: &[&str] = &[
-    "connection",
-    "content-length",
-    "host",
-    "keep-alive",
-    "proxy-authenticate",
-    "proxy-authorization",
-    "te",
-    "trailer",
-    "transfer-encoding",
-    "upgrade",
-];
-
-fn runtime_header_name_starts_with_ignore_ascii_case(name: &str, prefix: &str) -> bool {
-    ascii_casefold_starts_with(name, prefix).expect("Mojo runtime header-prefix comparison failed")
-}
-
 pub fn is_runtime_transport_local_request_header(name: &str) -> bool {
-    let name = name.trim();
-    RUNTIME_TRANSPORT_LOCAL_REQUEST_HEADERS
-        .iter()
-        .any(|transport_name| {
-            ascii_casefold_equal_exact(name, transport_name)
-                .expect("Mojo transport header-name comparison failed")
-        })
-        || runtime_header_name_starts_with_ignore_ascii_case(name, "sec-websocket-")
+    runtime_proxy_header_skip_kind(name)
+        .expect("Mojo runtime header policy returned invalid output")
+        == 1
 }
 
 pub fn is_prodex_internal_request_header(name: &str) -> bool {
-    runtime_header_name_starts_with_ignore_ascii_case(name.trim(), "x-prodex-internal-")
+    runtime_proxy_header_skip_kind(name)
+        .expect("Mojo runtime header policy returned invalid output")
+        == 2
 }
 
 pub fn should_skip_runtime_request_header(name: &str) -> bool {
-    is_runtime_transport_local_request_header(name)
-        || is_prodex_internal_request_header(name)
-        || ascii_casefold_equal_exact(name.trim(), "authorization")
-            .expect("Mojo authorization header comparison failed")
-        || ascii_casefold_equal_exact(name.trim(), "chatgpt-account-id")
-            .expect("Mojo ChatGPT account header comparison failed")
+    runtime_proxy_header_skip_kind(name)
+        .expect("Mojo runtime header policy returned invalid output")
+        != 0
 }
 
 pub fn runtime_forward_request_headers<'a>(

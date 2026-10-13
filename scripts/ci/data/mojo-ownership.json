@@ -480,7 +480,8 @@
           "runtime_proxy_request_metadata_policy",
           "runtime_proxy_path_policy",
           "runtime_proxy_mount_path_policy",
-          "runtime_proxy_dot_segment_escaping_policy"
+          "runtime_proxy_dot_segment_escaping_policy",
+          "runtime_proxy_header_skip_policy"
         ]
       },
       "mojo/prodex_core/rich_catalog.mojo": {
@@ -621,7 +622,8 @@
           "runtime_proxy_request_metadata_policy",
           "runtime_proxy_path_policy",
           "runtime_proxy_mount_path_policy",
-          "runtime_proxy_dot_segment_escaping_policy"
+          "runtime_proxy_dot_segment_escaping_policy",
+          "runtime_proxy_header_skip_policy"
         ]
       }
     },
@@ -1027,7 +1029,8 @@
           "runtime_proxy_request_metadata_policy",
           "runtime_proxy_path_policy",
           "runtime_proxy_mount_path_policy",
-          "runtime_proxy_dot_segment_escaping_policy"
+          "runtime_proxy_dot_segment_escaping_policy",
+          "runtime_proxy_header_skip_policy"
         ]
       },
       {
@@ -8231,6 +8234,29 @@
       "duplicate_production_owner": false,
       "platform_fallback": false,
       "rust_adapter_scope": "bounded input/output buffer allocation, Cow lifetime preservation, and checked ABI status/result mapping"
+    },
+    {
+      "name": "runtime_proxy_header_skip_policy",
+      "domain": "runtime-proxy/request-headers",
+      "introduced_in": "0.438.0",
+      "baseline_state": "candidate",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_runtime_proxy_header_skip_kind_v1",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/runtime_proxy_request.mojo",
+      "consumer": "crates/prodex-runtime-proxy/src/upstream.rs",
+      "consumer_marker": "runtime_proxy_header_skip_kind(name)",
+      "production_consumers": [
+        "crates/prodex-runtime-proxy/src/upstream.rs"
+      ],
+      "production_reachability_test": "crates/prodex-mojo-core/src/rich/routing.rs",
+      "rust_owner_before": "Rust trimmed and case-folded transport-local, Prodex-internal, authorization, and account headers",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "deleted; direct Mojo policy coverage and runtime-proxy header forwarding tests preserve skip and forward cases",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "header iteration, connection-token filtering, and typed Mojo action mapping"
     }
   ],
   "rust_semantic_reductions": [
@@ -9289,6 +9315,21 @@
       "production_consumer": "crates/prodex-runtime-proxy/src/upstream.rs",
       "parity_test": "crates/prodex-mojo-core/src/rich_tests.rs",
       "performance": "one bounded byte-buffer ABI call per upstream URL"
+    },
+    {
+      "file": "crates/prodex-runtime-proxy/src/upstream.rs",
+      "symbol": "should_skip_runtime_request_header",
+      "operation": "runtime_proxy_header_skip_policy",
+      "previous_responsibility": "Rust classified hop-by-hop, internal, authorization, and account headers with local ASCII comparisons",
+      "final_state": "adapter-only",
+      "rust_before": "crates/prodex-runtime-proxy/src/upstream.rs::RUNTIME_TRANSPORT_LOCAL_REQUEST_HEADERS, is_runtime_transport_local_request_header, is_prodex_internal_request_header, and should_skip_runtime_request_header",
+      "rust_after": "Rust delegates header classification to the versioned Mojo scalar policy; it retains forwarding and connection-token effects",
+      "mojo_owner": "mojo/prodex_core/runtime_proxy_request.mojo::prodex_runtime_proxy_header_skip_kind_v1",
+      "mojo_source": "mojo/prodex_core/runtime_proxy_request.mojo",
+      "mojo_entry": "prodex_runtime_proxy_header_skip_kind_v1",
+      "production_consumer": "crates/prodex-runtime-proxy/src/upstream.rs",
+      "parity_test": "crates/prodex-mojo-core/src/rich_tests.rs",
+      "performance": "one scalar Mojo header classification call per forwarded header"
     }
   ],
   "deleted_authoritative_operations": [
