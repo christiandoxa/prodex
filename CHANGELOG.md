@@ -2,67 +2,81 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.437.8 - 2026-10-13
+
+### Runtime
+
+- Bound recovery waits without reopening live sessions (`ef7cf36`)
+- Recover native request timeouts after compaction (`cc146bb`)
+- Plan runtime route circuit actions (`dec6d74`)
+- Migrate websocket recovery predicates (`3421a40`)
+
+### Deps
+
+- Update quinn-proto past peer-triggered panic advisories (`f7e2028`)
+
+### Misc
+
+- Migrate Gemini thought signatures (`eacb848`)
+# Prodex 0.437.8
+
+## New Features
+
+- Add a request-scoped pre-commit watchdog for HTTP Responses, unary compaction,
+  and WebSocket message recovery. The deadline follows one logical request,
+  cannot be reset by account retries or admission backpressure, and cancels
+  pending async transport work when it expires.
+
+## Bug Fixes
+
+- Recover exact native `request timed out` terminal events serialized as
+  `codex_error_info=other`, including the remote-compaction wrapper. Keep
+  explicit auth/client errors, unrelated prose, successful completion, foreign
+  sessions, and cancelled goals out of that compatibility rule.
+- Do not mistake a capped recovery sleep for completion of a longer provider
+  cooldown. Keep waiting across epochs while an eligible profile remains, but
+  preserve the account backoff and the absolute request watchdog.
+- Permit full-history compaction recovery when a session identifier exists but
+  no previous-response, turn-state, compact-owner or session-owner binding is
+  active. Never relax a real hard binding or rotate after output is committed.
+- Distinguish a local watchdog timeout from quota exhaustion or profile health
+  failure; HTTP clients receive a typed 504 rather than a misleading local
+  budget-exhausted 503. Drop cancelled transport work instead of orphaning it.
+- Update transitive `quinn-proto` to 0.11.18 for the peer-triggered panic
+  advisories reported by the release dependency audit.
+
+## Changelog
+
+- Preserve native Codex ownership of `model_context_window`,
+  `model_auto_compact_token_limit`, and compaction scope. Explicit user settings
+  and provider model metadata remain untouched.
+- Retain same-process, same-thread native recovery from 0.437.7. Do not reopen the
+  TUI, send the original prompt again, or replay completed tools on a live
+  recovery path.
+- Include already-completed main-branch Mojo migration checkpoints without
+  discarding active worktrees or `.codebase-memory/`.
+- Extract oversized transport-result and test-fixture modules, preserving their
+  public contracts while tightening the existing source-size limits.
+- Add native-event, ownership, cooldown, cancellation, committed-stream and
+  multi-epoch compaction regressions backed by required-Mojo ABI tests and
+  mutation checks. Runtime fixtures use local synthetic backends only.
+
+## Upgrade notes
+
+Existing processes retain the supervisor loaded before the update. Save work,
+exit an old launcher when safe, then resume the same persisted session with the
+new binary; do not resend the initial prompt. Remaining quota does not guarantee
+upstream model capacity. A bounded timeout remains possible when every eligible
+route stays unavailable. No context-window size is promised or synthesized.
+
+Full Changelog: [0.437.7...0.437.8](https://github.com/christiandoxa/prodex/compare/0.437.7...0.437.8)
+
 ## 0.437.7 - 2026-10-12
 
 ### Runtime
 
 - Recover terminal native threads without relaunch (`c554fc0`)
 - Preserve Codex context defaults and recover native threads in place (`82d311f`)
-# Prodex 0.437.7
-
-## New Features
-
-- Native OpenAI/Codex context-window and automatic-compaction settings now pass
-  through without Prodex-generated catalog/cache defaults. Explicit CLI and
-  profile configuration are preserved.
-- Interactive Unix Super launches, including saved-session resumes, can recover
-  an idle native thread through its owned app-server without reopening the TUI.
-
-## Bug Fixes
-
-- Recognize a terminal native `systemError` thread as quiescent for recovery,
-  while deferring active, unloaded and unknown thread states. Keep paused,
-  completed and budget-limited goals stopped in either quiescent state.
-
-- Stop treating a cached maximum context window as the active model window or
-  manufacturing a private 90% auto-compaction threshold.
-- Drain the complete bounded recovery-event tail so later native progress,
-  successful completion, or cancellation supersedes earlier transient failures.
-- Ignore intermediate error notifications while Codex is still performing its
-  own retry. Only terminal recoverable events arm live workflow recovery.
-- Clear stale pending recovery when a user pauses/stops a goal or newer native
-  activity supersedes an old usage-limited goal revision.
-- Resume eligible goals using `thread/goal/set` with automatic provenance while
-  preserving objective and token budget. Continue eligible non-goal tasks from
-  persisted state rather than replaying the original user prompt or completed
-  tool calls.
-- Verify server home, thread/session identity, workspace, idle status and native
-  goal eligibility before recovery. Never blindly resend ambiguous native RPCs.
-- Bound app-server control request time across unsolicited messages, not merely
-  per individual socket read.
-
-## Changelog
-
-- Include the main-branch Mojo migrations completed after 0.437.6: critical-signal
-  totals, Gemini media MIME classification, update-version decisions, observed
-  quota windows, profile-export envelope validation, and route-health grouping.
-- Keep Rust 1.99.0, Mojo 1.1.0, the pinned Codex compatibility baseline, and
-  provider/continuation safety guards.
-- Add native-event, typed Mojo ABI, local Unix app-server protocol, and
-  configuration passthrough regression coverage. No real upstream request is
-  required by the release fixtures.
-
-## Upgrade notes
-
-Existing processes keep their old supervisor and already-loaded Codex settings.
-After work is saved, exit the old launcher and resume the existing saved session
-using the updated binary. Do not resend the initial prompt. The change does not
-guarantee a particular upstream context-window size or model capacity. Explicit
-third-party/local-provider bridge context limits remain provider-specific;
-Smart Context request/tool-output optimization is independent of Codex's native
-context-window and auto-compaction configuration.
-
-Full Changelog: [0.437.6...0.437.7](https://github.com/christiandoxa/prodex/compare/0.437.6...0.437.7)
 
 ## 0.437.6 - 2026-10-12
 
