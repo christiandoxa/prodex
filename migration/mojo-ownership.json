@@ -1874,6 +1874,36 @@
         "operations": [
           "runtime_profile_route_circuit_action_policy"
         ]
+      },
+      {
+        "path": "mojo/prodex_core/shared_attachment_policy.mojo",
+        "language": "mojo",
+        "classification": "DETERMINISTIC_DOMAIN",
+        "semantic_ranges": [
+          {
+            "start": 19,
+            "end": 19
+          },
+          {
+            "start": 274,
+            "end": 284
+          }
+        ],
+        "production_reachable": true,
+        "role": "semantic",
+        "operations": [
+          "shared_attachment_sqlite_header_classification"
+        ]
+      },
+      {
+        "path": "crates/prodex-mojo-core/src/shared_attachment_policy.rs",
+        "language": "rust",
+        "classification": "MIXED",
+        "production_reachable": true,
+        "role": "adapter",
+        "operations": [
+          "shared_attachment_sqlite_header_classification"
+        ]
       }
     ],
     "removed": [
@@ -8028,6 +8058,32 @@
       "duplicate_production_owner": false,
       "platform_fallback": false,
       "rust_adapter_scope": "extract the bounded human message substring and resolve the Mojo-projected normalized clock/date using Chrono and local OS timezone"
+    },
+    {
+      "name": "shared_attachment_sqlite_header_classification",
+      "domain": "shared-codex-fs/attachment",
+      "introduced_in": "0.438.0",
+      "baseline_state": "Rust compared the fixed SQLite header after filesystem metadata and bounded file reads",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_shared_attachment_policy_v1",
+      "mojo_abi_version": 1,
+      "mojo_operation_ids": {
+        "sqlite_header": 7
+      },
+      "mojo_source": "mojo/prodex_core/shared_attachment_policy.mojo",
+      "consumer": "crates/prodex-shared-codex-fs/src/prepare/goal_attachments.rs",
+      "consumer_marker": "shared_attachment_policy::sqlite_header_is_sqlite(",
+      "production_consumers": [
+        "crates/prodex-shared-codex-fs/src/prepare/goal_attachments.rs"
+      ],
+      "production_reachability_test": "crates/prodex-mojo-core/src/shared_attachment_policy.rs",
+      "rust_owner_before": "SQLite magic-header comparison after Rust filesystem stat/open/read effects",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "deleted; required-Mojo raw-byte adapter coverage and goal-preparation caller coverage exercise exact and invalid-UTF-8 headers",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "filesystem metadata/open/read, fixed-size header acquisition, and typed Mojo result/error propagation"
     }
   ],
   "rust_semantic_reductions": [

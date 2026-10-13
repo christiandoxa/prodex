@@ -16,6 +16,7 @@ comptime SHARED_ATTACHMENT_CLIPBOARD_NAME: Int64 = 3
 comptime SHARED_ATTACHMENT_PERSISTABLE_NAME: Int64 = 4
 comptime SHARED_ATTACHMENT_ROLLOUT_NAME: Int64 = 5
 comptime SHARED_ATTACHMENT_GOAL_OBJECTIVE_NAME: Int64 = 6
+comptime SHARED_ATTACHMENT_SQLITE_HEADER: Int64 = 7
 
 
 def shared_bytes_match(
@@ -253,7 +254,7 @@ def prodex_shared_attachment_policy_v1(
         return SHARED_ATTACHMENT_ABI
     if (
         operation < SHARED_ATTACHMENT_IMAGE_TAG_RANGE
-        or operation > SHARED_ATTACHMENT_GOAL_OBJECTIVE_NAME
+        or operation > SHARED_ATTACHMENT_SQLITE_HEADER
         or input_length < 0
         or input_length > SHARED_ATTACHMENT_MAX_BYTES
         or cursor < 0
@@ -263,16 +264,28 @@ def prodex_shared_attachment_policy_v1(
     ):
         return SHARED_ATTACHMENT_INVALID
 
-    var view = ProdexRichStringView(input_address, UInt(input_length))
-    if not rich_view_valid(view, SHARED_ATTACHMENT_MAX_BYTES):
-        return SHARED_ATTACHMENT_INVALID
-
     var output = Pointer[mut=True, Int64, MutUntrackedOrigin](
         unsafe_from_address=Int(output_address)
     )
     output[0] = 0
     output[1] = 0
     output[2] = 0
+
+    if operation == SHARED_ATTACHMENT_SQLITE_HEADER:
+        var matches = False
+        if input_length == 16:
+            var source = Pointer[mut=False, UInt8, ImmUntrackedOrigin](
+                unsafe_from_address=Int(input_address)
+            )
+            matches = shared_bytes_match(
+                source, 0, input_length, StringSlice("SQLite format 3")
+            ) and source[unsafe_offset=15] == 0
+        output[0] = Int64(matches)
+        return SHARED_ATTACHMENT_OK
+
+    var view = ProdexRichStringView(input_address, UInt(input_length))
+    if not rich_view_valid(view, SHARED_ATTACHMENT_MAX_BYTES):
+        return SHARED_ATTACHMENT_INVALID
 
     if operation == SHARED_ATTACHMENT_IMAGE_TAG_RANGE:
         var result = shared_image_tag_range(view)

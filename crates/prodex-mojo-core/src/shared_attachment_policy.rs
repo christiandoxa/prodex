@@ -8,6 +8,7 @@ const CLIPBOARD_NAME: i64 = 3;
 const PERSISTABLE_NAME: i64 = 4;
 const ROLLOUT_NAME: i64 = 5;
 const GOAL_OBJECTIVE_NAME: i64 = 6;
+const SQLITE_HEADER: i64 = 7;
 
 unsafe extern "C" {
     fn prodex_shared_attachment_policy_v1(
@@ -29,7 +30,7 @@ fn status(value: i64) -> Result<(), MojoError> {
     }
 }
 
-fn call(operation: i64, input: &str, cursor: usize) -> Result<[i64; 3], MojoError> {
+fn call_bytes(operation: i64, input: &[u8], cursor: usize) -> Result<[i64; 3], MojoError> {
     let mut output = [0_i64; 3];
     status(unsafe {
         prodex_shared_attachment_policy_v1(
@@ -42,6 +43,10 @@ fn call(operation: i64, input: &str, cursor: usize) -> Result<[i64; 3], MojoErro
         )
     })?;
     Ok(output)
+}
+
+fn call(operation: i64, input: &str, cursor: usize) -> Result<[i64; 3], MojoError> {
+    call_bytes(operation, input.as_bytes(), cursor)
 }
 
 fn optional_range(
@@ -112,6 +117,10 @@ pub fn rollout_file_name(file_name: &str) -> Result<bool, MojoError> {
     bool_output(call(ROLLOUT_NAME, file_name, 0)?)
 }
 
+pub fn sqlite_header_is_sqlite(header: &[u8]) -> Result<bool, MojoError> {
+    bool_output(call_bytes(SQLITE_HEADER, header, 0)?)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -175,5 +184,12 @@ mod tests {
         assert!(rollout_file_name("rollout.jsonl").unwrap());
         assert!(rollout_file_name("rollout.jsonl.zst").unwrap());
         assert!(!rollout_file_name("rollout.json").unwrap());
+    }
+
+    #[test]
+    fn sqlite_header_policy_compares_raw_bytes_without_utf8_fallback() {
+        assert!(sqlite_header_is_sqlite(b"SQLite format 3\0").unwrap());
+        assert!(!sqlite_header_is_sqlite(&[0xff; 16]).unwrap());
+        assert!(!sqlite_header_is_sqlite(b"SQLite format 3").unwrap());
     }
 }
