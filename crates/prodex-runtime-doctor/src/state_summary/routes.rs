@@ -14,12 +14,6 @@ pub fn runtime_doctor_route_kind_label(route_kind: RuntimeDoctorRouteKind) -> &'
     }
 }
 
-fn runtime_doctor_route_key_parts<'a>(key: &'a str, prefix: &str) -> Option<(&'a str, &'a str)> {
-    let rest = key.strip_prefix(prefix)?;
-    let (route, profile_name) = rest.split_once(':')?;
-    Some((route, profile_name))
-}
-
 #[cfg(feature = "state-summary-mojo")]
 pub(super) fn runtime_doctor_route_health_key(
     profile_name: &str,
@@ -75,10 +69,9 @@ pub(super) fn runtime_doctor_transport_backoff_key(
     )
 }
 
-fn runtime_doctor_transport_backoff_key_parts(key: &str) -> Option<(&str, &str)> {
-    runtime_doctor_route_key_parts(key, "__route_transport_backoff__:")
-}
-
+// Keep the score edge-case oracle available to the existing state-summary
+// tests while production degraded-route selection is fully Mojo-owned.
+#[cfg(test)]
 fn runtime_doctor_effective_score(
     entry: &RuntimeDoctorHealthScore,
     now: i64,
@@ -98,6 +91,7 @@ fn runtime_doctor_effective_score(
     .effective_score as u32
 }
 
+#[cfg(test)]
 pub(super) fn runtime_doctor_effective_health_score(
     entry: &RuntimeDoctorHealthScore,
     now: i64,
@@ -106,92 +100,79 @@ pub(super) fn runtime_doctor_effective_health_score(
     runtime_doctor_effective_score(entry, now, config.health_decay_seconds)
 }
 
-fn runtime_doctor_push_route_circuits(
-    routes: &mut Vec<String>,
-    backoffs: RuntimeDoctorBackoffMaps<'_>,
-    now: i64,
-) {
-    for (key, until) in backoffs.route_circuit_open_until {
-        if let Some((route, profile_name)) =
-            runtime_doctor_route_key_parts(key, "__route_circuit__:")
-        {
-            let state = if *until > now { "open" } else { "half-open" };
-            routes.push(format!(
-                "{profile_name}/{route} circuit={state} until={until}"
-            ));
-        }
-    }
-}
-
-fn runtime_doctor_push_transport_backoffs(
-    routes: &mut Vec<String>,
-    backoffs: RuntimeDoctorBackoffMaps<'_>,
-) {
-    for (profile_name, until) in backoffs.transport_backoff_until {
-        if let Some((route, profile_name)) =
-            runtime_doctor_transport_backoff_key_parts(profile_name)
-        {
-            routes.push(format!(
-                "{profile_name}/{route} transport_backoff until={until}"
-            ));
-        } else {
-            routes.push(format!(
-                "{profile_name}/transport transport_backoff until={until}"
-            ));
-        }
-    }
-}
-
-fn runtime_doctor_push_retry_backoffs(
-    routes: &mut Vec<String>,
-    backoffs: RuntimeDoctorBackoffMaps<'_>,
-) {
-    for (profile_name, until) in backoffs.retry_backoff_until {
-        routes.push(format!("{profile_name}/retry retry_backoff until={until}"));
-    }
-}
-
-fn runtime_doctor_push_score_degradations(
-    routes: &mut Vec<String>,
-    scores: &BTreeMap<String, RuntimeDoctorHealthScore>,
-    now: i64,
-    config: RuntimeDoctorStateSummaryConfig,
-) {
-    for (key, health) in scores {
-        if let Some((route, profile_name)) =
-            runtime_doctor_route_key_parts(key, "__route_bad_pairing__:")
-        {
-            let score =
-                runtime_doctor_effective_score(health, now, config.bad_pairing_decay_seconds);
-            if score > 0 {
-                routes.push(format!("{profile_name}/{route} bad_pairing={score}"));
-            }
-            continue;
-        }
-        if let Some((route, profile_name)) =
-            runtime_doctor_route_key_parts(key, "__route_health__:")
-        {
-            let score = runtime_doctor_effective_health_score(health, now, config);
-            if score > 0 {
-                routes.push(format!("{profile_name}/{route} health={score}"));
-            }
-        }
-    }
-}
-
 pub fn runtime_doctor_degraded_routes(
     backoffs: RuntimeDoctorBackoffMaps<'_>,
     scores: &BTreeMap<String, RuntimeDoctorHealthScore>,
     now: i64,
     config: RuntimeDoctorStateSummaryConfig,
 ) -> Vec<String> {
-    let mut routes = Vec::new();
-    runtime_doctor_push_route_circuits(&mut routes, backoffs, now);
-    runtime_doctor_push_transport_backoffs(&mut routes, backoffs);
-    runtime_doctor_push_retry_backoffs(&mut routes, backoffs);
-    runtime_doctor_push_score_degradations(&mut routes, scores, now, config);
-    routes.sort();
-    routes.dedup();
-    routes.truncate(8);
-    routes
+    let plan = prodex_mojo_core::rich::runtime_doctor_degraded_routes(
+        backoffs
+            .retry_backoff_until
+            .iter()
+            .map(|(key, until)| (key.as_str(), *until)),
+        backoffs
+            .transport_backoff_until
+            .iter()
+            .map(|(key, until)| (key.as_str(), *until)),
+        backoffs
+            .route_circuit_open_until
+            .iter()
+            .map(|(key, until)| (key.as_str(), *until)),
+        scores
+            .iter()
+            .map(|(key, health)| (key.as_str(), i64::from(health.score), health.updated_at)),
+        now,
+        config.health_decay_seconds,
+        config.bad_pairing_decay_seconds,
+    )
+    .expect("Mojo runtime-doctor degraded-route plan returned invalid output");
+    let keys = plan.keys;
+    plan.records
+        .into_iter()
+        .map(|record| {
+            let key = keys[usize::try_from(record.source_index)
+                .expect("validated Mojo degraded-route source index")];
+            let profile_start = usize::try_from(record.profile_start)
+                .expect("validated Mojo degraded-route profile offset");
+            let profile_end = usize::try_from(record.profile_start + record.profile_len)
+                .expect("validated Mojo degraded-route profile end");
+            let profile = &key[profile_start..profile_end];
+            let route = if record.route_start < 0 {
+                match record.kind {
+                    prodex_mojo_core::rich::RUNTIME_DOCTOR_DEGRADED_ROUTE_KIND_RETRY => "retry",
+                    _ => "transport",
+                }
+            } else {
+                let route_start = usize::try_from(record.route_start)
+                    .expect("validated Mojo degraded-route route offset");
+                let route_end = usize::try_from(record.route_start + record.route_len)
+                    .expect("validated Mojo degraded-route route end");
+                &key[route_start..route_end]
+            };
+            match record.kind {
+                prodex_mojo_core::rich::RUNTIME_DOCTOR_DEGRADED_ROUTE_KIND_CIRCUIT => {
+                    let state = if record.value > now {
+                        "open"
+                    } else {
+                        "half-open"
+                    };
+                    format!("{profile}/{route} circuit={state} until={}", record.value)
+                }
+                prodex_mojo_core::rich::RUNTIME_DOCTOR_DEGRADED_ROUTE_KIND_TRANSPORT => {
+                    format!("{profile}/{route} transport_backoff until={}", record.value)
+                }
+                prodex_mojo_core::rich::RUNTIME_DOCTOR_DEGRADED_ROUTE_KIND_RETRY => {
+                    format!("{profile}/{route} retry_backoff until={}", record.value)
+                }
+                prodex_mojo_core::rich::RUNTIME_DOCTOR_DEGRADED_ROUTE_KIND_BAD_PAIRING => {
+                    format!("{profile}/{route} bad_pairing={}", record.value)
+                }
+                prodex_mojo_core::rich::RUNTIME_DOCTOR_DEGRADED_ROUTE_KIND_HEALTH => {
+                    format!("{profile}/{route} health={}", record.value)
+                }
+                _ => unreachable!("validated Mojo degraded-route kind"),
+            }
+        })
+        .collect()
 }
