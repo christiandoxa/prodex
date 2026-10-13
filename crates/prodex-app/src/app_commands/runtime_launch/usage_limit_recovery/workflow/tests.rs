@@ -339,3 +339,54 @@ fn native_task_started_resets_previous_turn_acceptance_evidence() {
         }
     }
 }
+
+#[test]
+fn native_request_timeout_has_a_recoverable_transport_class() {
+    for message in [
+        "request timed out",
+        "Error running remote compact task: request timed out",
+    ] {
+        let record = serde_json::json!({
+            "type":"event_msg", "payload":{
+                "type":"task_complete", "turn_id":"synthetic-timeout-turn",
+                "error":{"message":message, "codex_error_info":"other"}
+            }
+        });
+        assert_eq!(
+            runtime_workflow_recovery_class(&record, SESSION),
+            Some(RuntimeWorkflowRecoveryClass::Transport),
+            "native timeout must not strand a completed failed turn: {message}"
+        );
+    }
+}
+
+#[test]
+fn timeout_text_does_not_override_explicit_failure_or_terminal_guards() {
+    for (info, status, message) in [
+        ("other", Some(400_u16), "request timed out"),
+        ("other", Some(401), "request timed out"),
+        ("other", Some(429), "request timed out"),
+        ("contextWindowExceeded", None, "request timed out"),
+        ("other", None, "a tool reported request timed out"),
+        ("other", None, "request timed out; rerun all tools"),
+    ] {
+        let record = serde_json::json!({"type":"event_msg","payload":{
+            "type":"task_complete", "error":{
+                "message":message, "codex_error_info":info, "http_status_code":status
+            }
+        }});
+        assert_eq!(
+            runtime_workflow_recovery_class(&record, SESSION),
+            None,
+            "{record}"
+        );
+    }
+    for status in ["completed", "cancelled", "interrupted"] {
+        let record = serde_json::json!({"type":"task_complete","status":status,
+            "error":{"message":"request timed out","codex_error_info":"other"}});
+        assert_eq!(runtime_workflow_recovery_class(&record, SESSION), None);
+    }
+    let foreign = serde_json::json!({"type":"task_complete","session_id":"other-session",
+        "error":{"message":"request timed out","codex_error_info":"other"}});
+    assert_eq!(runtime_workflow_recovery_class(&foreign, SESSION), None);
+}

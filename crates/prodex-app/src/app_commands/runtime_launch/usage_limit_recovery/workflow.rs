@@ -1,6 +1,6 @@
 use prodex_mojo_core::launch::{
     WorkflowEvidencePlan, WorkflowObservationKind, WorkflowRecoveryClass, workflow_evidence_plan,
-    workflow_recovery_class,
+    workflow_recovery_class_with_message,
 };
 use serde_json::{Map, Value};
 
@@ -184,9 +184,6 @@ pub(super) fn observe_runtime_workflow_evidence(
             _ => "unknown",
         },
     };
-    if turn_started {
-        return;
-    }
 }
 
 /// Projects native event envelopes; policy and precedence are Mojo-owned.
@@ -314,8 +311,12 @@ fn classify_codex_error(
         .and_then(|object| object.values().find_map(Value::as_object))
         .and_then(http_status);
     let status = outer_status.or(variant_status);
-    if let Some(class) =
-        workflow_recovery_class(name, status).expect("Mojo workflow recovery classification failed")
+    if let Some(class) = workflow_recovery_class_with_message(
+        name,
+        status,
+        error.get("message").and_then(Value::as_str),
+    )
+    .expect("Mojo workflow recovery classification failed")
     {
         return Some(match class {
             WorkflowRecoveryClass::UsageLimit => RuntimeWorkflowRecoveryClass::UsageLimit,
