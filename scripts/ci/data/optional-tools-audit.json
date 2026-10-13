@@ -26,17 +26,17 @@
     {
       "id": "rtk",
       "repository": "https://github.com/rtk-ai/rtk",
-      "latest_stable": "0.51.0",
-      "release": "v0.51.0",
-      "commit": "e001f773f80b22b7dc4c7a79521b30e35aaef026",
-      "git_tree": "629a681dd003b85320ae1c49189cbd3fec551c0c",
-      "checksums_asset": "sha256:02368b8bb526e8a6e00299bfb9d27aa8feb0364228b48a707e1410e4e903ed31",
+      "latest_stable": "0.52.0",
+      "release": "v0.52.0",
+      "commit": "b35f2c912bd41ab96593401bfdf213ebbcca1723",
+      "git_tree": "b072b54f0492a13e6d5b9b852431c922de448d64",
+      "checksums_asset": "sha256:011d9aff5f020f5df419ae00269c2f7a2f2d07c6007a59c60b3989363aaf2e12",
       "assets": {
-        "linux-x86_64-musl": "sha256:5028d3b19a8f0990d30fec9fbb07e32782bc5698e618fb1861aad8a9ccba4eb5",
-        "linux-aarch64-gnu": "sha256:8d6d1aad9e69b42481eda7039507d1f7ee93698f87713cecd873d287c1931632",
-        "darwin-x86_64": "sha256:bd39c8153f4147358360c7dc51665a8131cc9ee16f81f69a9402ffa500be3cc2",
-        "darwin-aarch64": "sha256:8817d8b71afc02ac8bf06eb24bcc41c306592ab735b68e8fee9db1ba0de7cb59",
-        "windows-x86_64": "sha256:1623e9b45d28b15122d69e7314776e1123a804224885ce07e7182fb40080f05c"
+        "linux-x86_64-musl": "sha256:46765d4e570ccb3d759e95bcec11feb42fceed5ab2453eac8d787f81d4a0cdab",
+        "linux-aarch64-gnu": "sha256:b1de881a0381f1f059ce9dbb0cfb97e0f94f22460965f39aaff77b2956024fa9",
+        "darwin-x86_64": "sha256:81748ec5557b21965097531653fc5198bf734cdf240484816f6d9cfa9e816034",
+        "darwin-aarch64": "sha256:49ac56bc5edd58ce0c03bf7cc137f8cf2a6253e7707b8236e07321ad66cdc043",
+        "windows-x86_64": "sha256:76055258f531830e7ae25c9152c2428ed9932533df4ad07ad74e684e25e1b125"
       },
       "license": "Apache-2.0",
       "runtime": "Externally managed executable; recommended, not latest-only",
@@ -46,7 +46,8 @@
         "windows"
       ],
       "decision": "ADOPT_PACKAGE",
-      "notes": "v0.51.0 is the latest stable release; the exact release commit, Git tree, GitHub asset digests, and checksum manifest digest are pinned."
+      "notes": "Re-audited for Prodex 0.437.10 after the release freshness gate detected v0.52.0. Exact upstream tag/commit/Git tree, all five platform archive SHA-256 digests and the checksum manifest were verified. The verified Linux binary reports rtk 0.52.0 and proxy passthrough smoke succeeds. RTK remains externally managed with the unchanged 0.46.0 minimum; no optional-tool installation, minimum-version tightening or freshness bypass.",
+      "audited_at": "2026-10-13T13:35:20.931493+00:00"
     },
     {
       "id": "codebase-memory-mcp",

@@ -104,7 +104,7 @@ Ponytail uses the same versioned manifest/tree contract, accepts stable 4.9.0 or
 
 The 5.1.0 qualified reference requires its exact audited commit and complete tree digest. Existing stable 4.10.x checkouts remain accepted through the minimum-version and manifest-digest compatibility rules, including the previously qualified 4.10.0 legacy-manifest rule. Future stable releases are accepted when the plugin version matches the managed manifest and the recomputed tree digest matches that manifest.
 
-RTK requires `0.46.0` or newer; `0.51.0` is the latest stable release-qualified reference for this Prodex release. It remains externally managed and version-compatible rather than latest-only. Codebase Memory MCP
+RTK requires `0.46.0` or newer; `0.52.0` is the latest stable release-qualified reference for this Prodex release. It remains externally managed and version-compatible rather than latest-only. Codebase Memory MCP
 `0.11.0` is the latest stable release validated for this Prodex release. Both resolve from
 managed roots first and then `PATH`.
 The README installs the current stable Codebase Memory MCP `0.11.0`; Prodex
