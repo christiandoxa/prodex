@@ -552,6 +552,26 @@ export const RUNTIME_STRESS_WEIGHT_HINTS = Object.freeze([
 
 export const RUNTIME_CI_TEST_CASES = [
   {
+    name: "recovery_watchdog_is_request_local_and_not_reset_by_retry_clones",
+    tags: SERIALIZED_TAGS,
+  },
+  {
+    name: "recovery_watchdog_cancels_precommit_async_wait_instead_of_orphaning_it",
+    tags: SERIALIZED_TAGS,
+  },
+  {
+    name: "saturated_pool_watchdog_leaves_quota_intact_and_next_request_usable",
+    tags: SERIALIZED_TAGS,
+  },
+  {
+    name: "committed_stream_remains_readable_after_precommit_watchdog_expires",
+    tags: SERIALIZED_TAGS,
+  },
+  {
+    name: "retryable_profile_cooldown_outliving_one_wait_epoch_does_not_surface_local_503",
+    tags: SERIALIZED_TAGS,
+  },
+  {
     name: "missing_content_type_capacity_must_not_commit_as_unary_success",
     tags: SERIALIZED_TAGS,
   },
