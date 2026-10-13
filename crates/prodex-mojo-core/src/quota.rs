@@ -9,7 +9,9 @@ pub use self_checks::{main_quota_aggregation_self_test, self_test};
 mod capacity;
 pub use capacity::quota_capacity_batch;
 mod report_sort;
-pub use report_sort::{quota_report_compare, quota_report_sort_next};
+pub use report_sort::{
+    QuotaReportPagePlan, quota_report_compare, quota_report_page_plan, quota_report_sort_next,
+};
 mod usage_response;
 pub use usage_response::{
     QuotaIndexedRateLimitInput, QuotaIndexedRateLimitPlan, QuotaUsageAdmissionAliases,

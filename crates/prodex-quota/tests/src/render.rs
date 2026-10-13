@@ -646,3 +646,34 @@ fn quota_reset_at_from_message_parses_codex_reset_headers() {
 
 #[path = "render/provider.rs"]
 mod provider;
+
+#[test]
+fn quota_report_pagination_mojo_clamps_extreme_scroll_and_respects_tight_height() {
+    let reports = vec![
+        openai_report("first", main_windows(90, 1_700_001_800, 95, 1_700_259_200)),
+        openai_report("second", main_windows(70, 1_700_007_200, 80, 1_700_172_800)),
+    ];
+    let last =
+        render_quota_reports_window_with_layout(&reports, false, None, 100, usize::MAX, true);
+    assert_eq!(last.start_profile, 1);
+    assert_eq!(last.total_profiles, 2);
+    assert_eq!(last.hidden_before, 1);
+    assert_eq!(last.shown_profiles, 1);
+    assert_eq!(last.hidden_after, 0);
+    assert!(last.output.contains("1 above"));
+
+    let tiny =
+        render_quota_reports_window_with_layout(&reports, false, Some(0), 80, usize::MAX, true);
+    assert!(tiny.output.is_empty());
+    assert_eq!(tiny.shown_profiles, 0);
+    assert_eq!(tiny.start_profile, 1);
+    assert_eq!(tiny.hidden_before, 1);
+    assert_eq!(tiny.hidden_after, 1);
+
+    let empty = render_quota_reports_window_with_layout(&[], false, None, 80, usize::MAX, true);
+    assert_eq!(empty.total_profiles, 0);
+    assert_eq!(empty.start_profile, 0);
+    assert_eq!(empty.hidden_before, 0);
+    assert_eq!(empty.hidden_after, 0);
+    assert!(empty.output.contains("No quota profiles."));
+}

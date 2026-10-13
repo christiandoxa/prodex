@@ -2813,6 +2813,59 @@ def prodex_quota_report_compare_v1(
     return quota_report_compare_text(left_text, right_text)
 
 
+# Quota report display-window capacity and scroll math is a deterministic
+# semantic policy shared by interactive quota renderers. Rust owns rendering
+# individual sections; Mojo alone decides viewport inclusion and notices.
+@export("prodex_quota_report_page_plan_v1")
+def prodex_quota_report_page_plan_v1(
+    abi_version: Int64,
+    total_profiles: UInt64,
+    requested_start: UInt64,
+    shown_profiles: UInt64,
+    existing_lines: UInt64,
+    section_lines: UInt64,
+    line_limit: UInt64,
+    limit_present: Int64,
+    output: Pointer[mut=True, UInt64, _],
+) abi("C") -> Int64:
+    if abi_version != 1:
+        return 4
+    if limit_present != 0 and limit_present != 1:
+        return 1
+
+    var start: UInt64 = 0
+    if total_profiles > 0:
+        start = min(requested_start, total_profiles - 1)
+    var remaining = total_profiles - start
+    if shown_profiles > remaining:
+        return 1
+
+    var hidden_before = start
+    var hidden_after = remaining - shown_profiles
+    var has_hidden = hidden_before > 0 or hidden_after > 0
+    var has_room = limit_present == 0 or existing_lines < line_limit
+    var show_notice = has_hidden and has_room
+
+    var append_section = shown_profiles < remaining
+    if append_section and limit_present == 1:
+        var available: UInt64 = 0
+        if existing_lines <= line_limit:
+            available = line_limit - existing_lines
+        if section_lines > available:
+            append_section = False
+        else:
+            var need_notice = start > 0 or shown_profiles + 1 < remaining
+            var notice_lines = UInt64(1) if need_notice else UInt64(0)
+            append_section = notice_lines <= available - section_lines
+
+    output[unsafe_offset=0] = start
+    output[unsafe_offset=1] = hidden_before
+    output[unsafe_offset=2] = hidden_after
+    output[unsafe_offset=3] = UInt64(show_notice)
+    output[unsafe_offset=4] = UInt64(append_section)
+    return 0
+
+
 @export("prodex_quota_report_sort_next_v1")
 def prodex_quota_report_sort_next_v1(
     abi_version: Int64, sort: Int64
