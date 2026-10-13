@@ -139,3 +139,52 @@ and provenance, checksum, SBOM, malware scan, and publication gates remain
 unchanged. Compare the first successful official release after this patch;
 it may differ from the isolated calibration due to cold cache and runner
 variance.
+
+
+## Parallel Mojo translation-unit compilation (2026-10-13)
+
+The strict Mojo archive compiler in crates/prodex-mojo-core/build.rs previously
+called the external Mojo compiler once **serially** for every translation unit.
+A complete release-profile Linux archive currently contains 129 separate
+compiled objects. This is shared by all CI strict archive targets and six
+standalone-release archive targets, so reducing the root compile cost improves
+both pipelines.
+
+The build script now runs independent Mojo compilation processes concurrently:
+it defaults to at most **4** subprocesses (also bounded by Cargo's NUM_JOBS
+and the number of sources). Resource-constrained developers may set
+PRODEX_MOJO_COMPILE_JOBS=1; values 1 through 8 are accepted, while malformed
+or excessive overrides fail explicitly rather than silently continuing with
+an unsafe value. A failure in any compiler aborts archive creation and Rust
+linking, after waiting for the remaining in-flight children. Archiving still
+uses the original indexed object order and Windows COFF weak-symbol isolation
+still runs *after* all compilation, not concurrently with it.
+
+A controlled local Mojo 1.1.0 / Rust 1.99.0 release-profile comparison of the
+same 129-source x86_64 Linux archive recorded:
+
+| Compilation | Total Cargo build duration | Archive member count |
+| --- | ---: | ---: |
+| Serial, 1 Mojo worker | **142 seconds** | 129 |
+| Parallel, 4 Mojo workers | **44 seconds** | 129 |
+
+That is a **69% reduction in local build duration**, or about **3.2 times
+faster** for this workload. The two resulting archives had identical ordered
+member names and identical sets of exported symbols, including all inspected
+ABI entry points. Neither archive referenced the forbidden Mojo compiler
+runtime. Separate Cargo target directories were used to avoid shared-cache
+races, and both tests used the same source, target, release profile, and
+pinned toolchains. This result is a local benchmark, not yet a promise of
+specific Windows/macOS CI runtime reductions.
+
+The build-script unit tests check worker limits, deterministic object
+creation, and fail-closed behavior on a deliberate failing child. A lightweight
+Rust test harness is included in the existing CI static-guard fan-out, so
+future changes cannot accidentally revert to serial-only compilation or
+silently allow a partial archive.
+
+In subsequent GitHub Actions compare the per-platform strict Mojo archive
+*build steps* with the old 4-7 minute timings; a new timing log exposes the
+worker count and translation-unit compile duration directly. The source must
+still pass all existing platform archive, compiled-in runtime, and release
+provenance checks before publishing.
