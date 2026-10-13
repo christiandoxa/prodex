@@ -586,3 +586,6 @@ fn terminal_timeout_after_compaction_arms_one_in_place_recovery_without_replayin
     drop(monitor);
     let _ = fs::remove_dir_all(root);
 }
+
+#[path = "session_marker_tests.rs"]
+mod session_marker_tests;

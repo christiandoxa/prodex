@@ -379,6 +379,7 @@ impl Drop for GoalUsageLimitMonitor {
     fn drop(&mut self) {
         let _ = fs::remove_file(&self.marker_path);
         let _ = fs::remove_file(runtime_goal_session_offset_path(&self.marker_path));
+        let _ = fs::remove_file(crate::runtime_store::json_lock_file_path(&self.marker_path));
     }
 }
 

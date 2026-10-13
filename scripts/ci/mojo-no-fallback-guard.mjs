@@ -1216,6 +1216,11 @@ export function findViolations(files) {
         !/model_context_window=|model_auto_compact_token_limit=|provider_catalog_entry/u.test(body)
         ? [] : [`${filePath}: native Codex context and compaction must pass through without synthesized defaults`];
     }
+    if (filePath === "crates/prodex-app/src/app_commands/runtime_launch/goal_resume.rs") {
+      return contents.includes("prodex_mojo_core::launch::session_marker_should_update(") &&
+        !/\.get\("thread-id"\)\s*\.or_else\(\|\| payload\.get\("session_id"\)\)/u.test(contents)
+        ? [] : [`${filePath}: root session marker arbitration must remain Mojo-owned; legacy thread-id must not override canonical session_id`];
+    }
     if (filePath === "crates/prodex-app/src/runtime_tools/session_recovery.rs") {
       return contents.includes("in_place_recovery_action(") &&
         !contents.includes('"/goal resume"') && !contents.includes("retarget_codex_tui_resume_args(")
@@ -6988,6 +6993,11 @@ function selfTest() {
   assert.match(findViolations([[nativeLaunch,
     'fn runtime_launch_openai_model_context_codex_args() {\n    model_context_window=272000;\n}'
   ]]).join("\n"), /must pass through/u);
+  const nativeMarker = "crates/prodex-app/src/app_commands/runtime_launch/goal_resume.rs";
+  const nativeMarkerOwner = "prodex_mojo_core::launch::session_marker_should_update(";
+  assert.deepEqual(findViolations([[nativeMarker, nativeMarkerOwner]]), []);
+  assert.match(findViolations([[nativeMarker, "fn write_runtime_goal_session_marker() {}"]]).join("\n"), /root session marker arbitration must remain Mojo-owned/u);
+  assert.match(findViolations([[nativeMarker, nativeMarkerOwner + '\npayload.get("thread-id").or_else(|| payload.get("session_id"))']]).join("\n"), /legacy thread-id must not override/u);
   const nativeRecovery = "crates/prodex-app/src/runtime_tools/session_recovery.rs";
   assert.deepEqual(findViolations([[nativeRecovery, "in_place_recovery_action("]]), []);
   assert.match(findViolations([[nativeRecovery,
