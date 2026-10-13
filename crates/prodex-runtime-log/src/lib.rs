@@ -72,44 +72,32 @@ pub fn runtime_format_log_line(
 ) -> String {
     let sanitized =
         runtime_proxy::runtime_proxy_redact_log_text(message).replace(['\r', '\n'], " ");
-    match format {
-        RuntimeLogFormat::Text => format!("[{timestamp}] {sanitized}\n"),
+    // Text logs never required structured parsing; preserve the old hot-path
+    // cost while Mojo owns both final output formats.
+    let (format, event, fields) = match format {
+        RuntimeLogFormat::Text => (
+            prodex_mojo_core::log::RUNTIME_LOG_FORMAT_TEXT,
+            None,
+            BTreeMap::new(),
+        ),
         RuntimeLogFormat::Json => {
-            let mut value = serde_json::Map::new();
-            value.insert(
-                "timestamp".to_string(),
-                serde_json::Value::String(timestamp.to_string()),
-            );
-            value.insert("pid".to_string(), serde_json::Value::Number(pid.into()));
-            value.insert(
-                "message".to_string(),
-                serde_json::Value::String(sanitized.clone()),
-            );
             let parsed = runtime_proxy::runtime_proxy_parse_log_message(&sanitized);
-            if let Some(event) = parsed.event() {
-                value.insert(
-                    "event".to_string(),
-                    serde_json::Value::String(event.to_string()),
-                );
-            }
-            let fields = parsed.fields_map();
-            if !fields.is_empty() {
-                value.insert(
-                    "fields".to_string(),
-                    serde_json::Value::Object(
-                        fields
-                            .into_iter()
-                            .map(|(key, value)| (key, serde_json::Value::String(value)))
-                            .collect(),
-                    ),
-                );
-            }
-            match serde_json::to_string(&serde_json::Value::Object(value)) {
-                Ok(serialized) => format!("{serialized}\n"),
-                Err(_) => format!("[{timestamp}] {sanitized}\n"),
-            }
+            (
+                prodex_mojo_core::log::RUNTIME_LOG_FORMAT_JSON,
+                parsed.event().map(str::to_owned),
+                parsed.fields_map(),
+            )
         }
-    }
+    };
+    prodex_mojo_core::log::render_runtime_log_line(
+        format,
+        timestamp,
+        pid,
+        &sanitized,
+        event.as_deref(),
+        &fields,
+    )
+    .expect("Mojo runtime-log renderer returned invalid output")
 }
 
 #[derive(Debug)]
@@ -558,6 +546,30 @@ mod tests {
         assert!(line.contains("api_key=<redacted>"));
         assert!(!line.contains("fixture-token"));
         assert!(!line.contains("fixture-key"));
+    }
+
+    #[test]
+    fn mojo_runtime_log_render_preserves_exact_text_and_json_output() {
+        let timestamp = "2026-10-13T10:45:00Z";
+        let text =
+            runtime_format_log_line("first\r\nsecond", RuntimeLogFormat::Text, timestamp, 123);
+        assert_eq!(text, format!("[{timestamp}] first  second\n"));
+
+        let json_line = runtime_format_log_line(
+            r#"stream_read_error request=7 error="failed with spaces" note=東京"#,
+            RuntimeLogFormat::Json,
+            timestamp,
+            123,
+        );
+        assert!(json_line.ends_with('\n'));
+        let json: serde_json::Value =
+            serde_json::from_str(&json_line).expect("Mojo emitted valid JSON");
+        assert_eq!(json["timestamp"], timestamp);
+        assert_eq!(json["pid"], 123);
+        assert_eq!(json["event"], "stream_read_error");
+        assert_eq!(json["fields"]["error"], "failed with spaces");
+        assert_eq!(json["fields"]["request"], "7");
+        assert_eq!(json["fields"]["note"], "東京");
     }
 
     #[test]
