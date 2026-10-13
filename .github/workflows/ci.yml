@@ -1787,19 +1787,26 @@ jobs:
 
   real-mojo:
     name: Real Mojo / parity
-    needs: changes
+    needs: [changes, mojo-runtime-linux-archive]
     if: ${{ github.event_name != 'schedule' && needs.changes.outputs.heavy == 'true' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     env:
       MOJO_VERSION: "1.1.0"
-      UV_VERSION: "0.11.7"
       PRODEX_MOJO_REQUIRED: "1"
       RUSTC_WRAPPER: sccache
+      # Reuse the strict, pinned Mojo archive produced for this exact commit.
+      PRODEX_MOJO_ARCHIVE: ${{ github.workspace }}/.prodex-ci/mojo-runtime/x86_64-unknown-linux-gnu/libprodex_mojo_core.a
 
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Download strict Linux Mojo archive
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
+        with:
+          name: mojo-runtime-archive-x86_64-unknown-linux-gnu
+          path: .prodex-ci/mojo-runtime/x86_64-unknown-linux-gnu
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
@@ -1815,31 +1822,11 @@ jobs:
         with:
           cache-bin: false
 
-      - name: Install pinned uv
-        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
-        with:
-          version: ${{ env.UV_VERSION }}
-          enable-cache: false
-
-      - name: Install pinned Mojo toolchain
+      - name: Verify strict Mojo archive and Rust toolchain
         shell: bash
         run: |
           set -euo pipefail
-          uv venv --python 3.12 .venv
-          uv pip install --python .venv/bin/python "mojo==${MOJO_VERSION}"
-          echo "${GITHUB_WORKSPACE}/.venv/bin" >> "${GITHUB_PATH}"
-
-      - name: Verify toolchains
-        shell: bash
-        run: |
-          set -euo pipefail
-          mojo_version="$(mojo --version)"
-          printf '%s\n' "${mojo_version}"
-          case "${mojo_version}" in
-            "Mojo ${MOJO_VERSION}"*) ;;
-            *) echo "unexpected Mojo version: ${mojo_version}" >&2; exit 1 ;;
-          esac
-          command -v mojo
+          test -s "${PRODEX_MOJO_ARCHIVE}"
           rustc --version
           cargo --version
           ar --version | head -n 1
@@ -1886,7 +1873,60 @@ jobs:
           printf '%s\n' "${diagnostics}" | grep -F '"rich_context_parser": true'
           printf '%s\n' "${diagnostics}" | grep -F '"rich_provider_routing": true'
 
+  real-mojo-parity:
+    name: Real Mojo parity (${{ matrix.label }})
+    needs: [changes, mojo-runtime-linux-archive]
+    if: ${{ github.event_name != 'schedule' && needs.changes.outputs.heavy == 'true' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - group: package
+            label: quota, runtime proxy, SPI
+          - group: provider
+            label: providers, runtime policies, context
+          - group: app-core
+            label: app, CLI, and Mojo core
+    env:
+      PRODEX_MOJO_REQUIRED: "1"
+      PRODEX_MOJO_VERSION: "1.1.0"
+      RUSTC_WRAPPER: sccache
+      PRODEX_MOJO_ARCHIVE: ${{ github.workspace }}/.prodex-ci/mojo-runtime/x86_64-unknown-linux-gnu/libprodex_mojo_core.a
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Download strict Linux Mojo archive
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
+        with:
+          name: mojo-runtime-archive-x86_64-unknown-linux-gnu
+          path: .prodex-ci/mojo-runtime/x86_64-unknown-linux-gnu
+
+      - name: Verify strict Mojo archive
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -s "${PRODEX_MOJO_ARCHIVE}"
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
+        with:
+          toolchain: 1.99.0
+
+      - name: Install sccache
+        uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+        with:
+          cache-bin: false
+          key: real-mojo-parity-${{ matrix.group }}
+
       - name: Run independent Mojo package parity tests in parallel
+        if: ${{ matrix.group == 'package' }}
         shell: bash
         run: |
           set -uo pipefail
@@ -1915,6 +1955,7 @@ jobs:
           exit "${status}"
 
       - name: Run remaining Mojo parity tests in parallel
+        if: ${{ matrix.group == 'provider' }}
         shell: bash
         run: |
           set -euo pipefail
@@ -1935,6 +1976,32 @@ jobs:
           run_test runtime-launch cargo test --locked -q -p prodex-runtime-launch --features mojo -- --test-threads=1
           run_test context cargo test --locked -q -p prodex-context --features mojo -- --test-threads=1
           run_test runtime-policy cargo test --locked -q -p prodex-runtime-policy --features mojo -- --test-threads=1
+
+          status=0
+          for index in "${!pids[@]}"; do
+            if ! wait "${pids[index]}"; then
+              status=1
+            fi
+            cat "${log_dir}/${labels[index]}.log"
+          done
+          exit "${status}"
+
+      - name: Run app and Mojo-core parity tests in parallel
+        if: ${{ matrix.group == 'app-core' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          log_dir="${RUNNER_TEMP}/mojo-remaining-tests"
+          mkdir -p "${log_dir}"
+          pids=()
+          labels=()
+          run_test() {
+            local label="$1"
+            shift
+            labels+=("${label}")
+            "$@" >"${log_dir}/${label}.log" 2>&1 &
+            pids+=("$!")
+          }
           run_test gateway-constraints cargo test --locked -q -p prodex-app --features mojo-core --lib resolved_gateway_request_constraints -- --test-threads=1
           run_test smart-context-rehydrate cargo test --locked -q -p prodex-app --features mojo-core --lib smart_context_auto_rehydrate_plan_defers_over_budget_refs -- --test-threads=1
           run_test mojo-cli cargo test --locked -q -p prodex-cli --features mojo-core -- --test-threads=1
@@ -1978,6 +2045,7 @@ jobs:
       - runtime-load-smoke
       - runtime-stress
       - real-mojo
+      - real-mojo-parity
     if: ${{ always() && github.event_name != 'pull_request' }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
