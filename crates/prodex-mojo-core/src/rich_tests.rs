@@ -17,6 +17,20 @@ fn gemini_invalid_stream_retry_delay_is_bounded() {
 }
 
 #[test]
+fn runtime_proxy_dot_segment_escaping_preserves_query_and_utf8() {
+    assert_eq!(
+        runtime_proxy_escape_dot_segments("/v1/%2E/../caf%C3%A9?q=./..")
+            .unwrap()
+            .as_ref(),
+        "/v1/%252e/%252e%252e/caf%C3%A9?q=./.."
+    );
+    assert!(matches!(
+        runtime_proxy_escape_dot_segments("/v1/items").unwrap(),
+        std::borrow::Cow::Borrowed(_)
+    ));
+}
+
+#[test]
 fn rich_abi_rejects_null_views_and_reports_utf8_offsets() {
     ensure_rich_abi().expect("rich ABI layout should match");
     let mut result = RichContextResult::default();
