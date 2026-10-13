@@ -454,12 +454,12 @@ jobs:
             mojo-target-cpu: x86-64
             mojo-features: mojo-core
           - target: aarch64-pc-windows-msvc
-            runs-on: windows-latest
+            runs-on: windows-11-arm
             artifact-name: aarch64-pc-windows-msvc
             binary-name: prodex.exe
             use-cross: false
-            can-native-smoke: false
-            can-mojo-runtime-smoke: false
+            can-native-smoke: true
+            can-mojo-runtime-smoke: true
             mojo-release: true
             mojo-target-cpu: generic
             mojo-features: mojo-core
@@ -513,7 +513,7 @@ jobs:
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
         with:
-          key: release-${{ matrix.target }}${{ matrix.target == 'x86_64-apple-darwin' && '-arm64-cross' || '' }}
+          key: release-${{ matrix.target }}${{ matrix.target == 'x86_64-apple-darwin' && '-arm64-cross' || '' }}${{ matrix.target == 'aarch64-pc-windows-msvc' && '-arm64-native' || '' }}
 
       - name: Download target Mojo archive
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
@@ -522,7 +522,9 @@ jobs:
           path: target/mojo-release/${{ matrix.target }}
 
       - name: Install sccache
-        if: ${{ matrix.use-cross == false || matrix.can-native-smoke || matrix.mojo-release }}
+        # The verified native ARM64 benchmark used Cargo directly; sccache
+        # currently has no production-proven native ARM64 setup in this job.
+        if: ${{ matrix.target != 'aarch64-pc-windows-msvc' && (matrix.use-cross == false || matrix.can-native-smoke || matrix.mojo-release) }}
         uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
 
       - name: Install cross
@@ -578,13 +580,37 @@ jobs:
             if [ "${{ matrix.use-cross }}" = "true" ]; then
               cross build --locked "${build_args[@]}" && exit 0
             else
-              RUSTC_WRAPPER=sccache cargo build --locked "${build_args[@]}" && exit 0
+              if [ "${{ matrix.target }}" = "aarch64-pc-windows-msvc" ]; then
+                cargo build --locked "${build_args[@]}" && exit 0
+              else
+                RUSTC_WRAPPER=sccache cargo build --locked "${build_args[@]}" && exit 0
+              fi
             fi
             if [ "${attempt}" = "3" ]; then
               exit 1
             fi
             sleep "$((attempt * 10))"
           done
+
+      - name: Verify native Windows ARM64 artifact architecture
+        if: ${{ matrix.target == 'aarch64-pc-windows-msvc' }}
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if ($env:PROCESSOR_ARCHITECTURE -cne 'ARM64') {
+            throw "Wrong Windows ARM64 build host: $env:PROCESSOR_ARCHITECTURE"
+          }
+          $binary = 'target/aarch64-pc-windows-msvc/release/prodex.exe'
+          if (-not (Test-Path $binary -PathType Leaf)) { throw 'Windows ARM64 binary missing' }
+          $bytes = [System.IO.File]::ReadAllBytes((Resolve-Path $binary))
+          $offset = [BitConverter]::ToInt32($bytes, 60)
+          if ($offset -le 0 -or $offset + 6 -ge $bytes.Length) {
+            throw 'Invalid Windows PE executable header'
+          }
+          $machine = [BitConverter]::ToUInt16($bytes, $offset + 4)
+          if ($machine -ne 0xAA64) { throw "Expected Windows ARM64 PE (0xAA64), got $machine" }
+          & $binary --version
+          if ($LASTEXITCODE -ne 0) { throw 'Native Windows ARM64 version smoke failed' }
 
       - name: Verify macOS Intel artifact architecture and Rosetta execution
         if: ${{ matrix.target == 'x86_64-apple-darwin' }}

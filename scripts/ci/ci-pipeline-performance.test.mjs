@@ -284,3 +284,32 @@ test("native Windows ARM64 release calibration is source-pinned, opt-in and cann
   assert.doesNotMatch(workflow, /git push/);
   assert.doesNotMatch(workflow, /- name: Upload binary artifact/);
 });
+
+
+test("official Windows ARM64 release uses native benchmark, strict PE and runtime smoke", () => {
+  const build = workflowJob(release, "build", "attest-binaries");
+  const start = build.indexOf("          - target: aarch64-pc-windows-msvc\n");
+  const end = build.indexOf("\n    steps:\n", start);
+  assert.ok(start >= 0 && end > start, "official ARM64 matrix entry missing");
+  const arm = build.slice(start, end);
+  assert.match(arm, /runs-on: windows-11-arm/);
+  assert.match(arm, /use-cross: false/);
+  assert.match(arm, /can-native-smoke: true/);
+  assert.match(arm, /can-mojo-runtime-smoke: true/);
+  assert.match(arm, /mojo-release: true/);
+  assert.match(arm, /mojo-features: mojo-core/);
+  assert.match(build, /key: release-[^\n]*-arm64-native/);
+  assert.match(build, /matrix.target != 'aarch64-pc-windows-msvc'/);
+  assert.match(build, /if \[ "\$\{\{ matrix.target \}\}" = "aarch64-pc-windows-msvc" \]; then\n\s+cargo build --locked/);
+  assert.match(build, /name: Verify native Windows ARM64 artifact architecture/);
+  assert.match(build, /\$env:PROCESSOR_ARCHITECTURE -cne 'ARM64'/);
+  assert.match(build, /\$machine -ne 0xAA64/);
+  assert.match(build, /Native Windows ARM64 version smoke failed/);
+  assert.match(build, /name: Verify compiled-in Mojo release/);
+  assert.match(build, /"implementation": "mojo-compiled-in"/);
+  assert.match(build, /"self_test": "passed"/);
+  assert.match(build, /name: Native smoke test/);
+  assert.match(build, /name: Upload binary artifact/);
+  assert.match(build, /needs:\s*\n\s*- verify-ci\n\s*- build-mojo-archives/);
+  assert.equal((build.match(/^          - target: /gm) ?? []).length, 6);
+});
