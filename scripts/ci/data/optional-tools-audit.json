@@ -99,11 +99,11 @@
     {
       "id": "ponytail",
       "repository": "https://github.com/DietrichGebert/ponytail",
-      "latest_stable": "5.1.0",
-      "release": "v5.1.0",
-      "commit": "9cc65d03aa2da1db7121b912d03596409ee340b8",
-      "git_tree": "42320b8382d3bd9eb59521e6b7f2735edcd9b649",
-      "prodex_tree_sha256": "40281142115c85272f3a3cf6fb4fbd357aea38d6a5be434fee5fe40fad22240c",
+      "latest_stable": "5.1.1",
+      "release": "v5.1.1",
+      "commit": "6135ace05cd72736594fcf2c6830bea22780f91a",
+      "git_tree": "279cb66a349c84d6156350792778928a2835ae3d",
+      "prodex_tree_sha256": "8ff072f3252c87852edc41864511bd9021afe2383998737fa404bdf2d61f39c2",
       "license": "MIT",
       "runtime": "Node.js plugin; externally managed immutable checkout",
       "platforms": [
@@ -112,8 +112,8 @@
         "windows"
       ],
       "decision": "ADOPT_PACKAGE",
-      "notes": "Latest stable v5.1.0 was checked at the 0.437.0 release prerequisite using the exact official tag, commit and Git tree. The full Prodex digest covers 199 regular files / 10530987 bytes; no symlinks or tree-limit exceptions are needed. Required plugin names, versions and hook/skill paths remain compatible. No upstream hooks or installers were executed; existing minimum-version and legacy-manifest rules remain unchanged.",
-      "source_archive_sha256": "b460dbaff20a7e366ff597477d6ddfd4ea8f3454c5780e6b6003d5a3b625db6a"
+      "notes": "Audited for Prodex 0.437.8 against the exact official v5.1.1 tag, commit and recursive Git tree. Every archive blob matches the upstream Git tree. The bounded Prodex digest covers 202 regular files / 10571841 bytes with no symlinks. Codex and Claude plugin manifests report 5.1.1 and preserve required hook and skill paths. This upstream fix bounds optional SessionStart mapping and excludes repository-controlled text and symlinked files. No upstream hooks or installers were executed; minimum-version and legacy-manifest policies are unchanged.",
+      "source_archive_sha256": "8fc49ddace7e8830369358ea80bbbe9a8c1bd8de717fb9a6c5f1015871cd177e"
     },
     {
       "id": "presidio",
