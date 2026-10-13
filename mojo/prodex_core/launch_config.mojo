@@ -338,3 +338,30 @@ def prodex_launch_in_place_recovery_v2(
     if goal_status >= 4 or budget_available == 0:
         return 1
     return 2
+
+
+# SessionStart identifies the root session shared by its agent tree. Legacy
+# notify identifies the concrete completing thread and inherits the parent's
+# hook command. It must not redirect an established root recovery monitor.
+# Actions: 0=preserve existing marker/cursor; 1=install a new root marker.
+@export("prodex_launch_session_marker_update_v1")
+def prodex_launch_session_marker_update_v1(
+    abi_version: Int64,
+    canonical_session: Int64,
+    existing_marker: Int64,
+    same_session: Int64,
+) abi("C") -> Int64:
+    if abi_version != 1:
+        return -3
+    if (
+        (canonical_session != 0 and canonical_session != 1)
+        or (existing_marker != 0 and existing_marker != 1)
+        or (same_session != 0 and same_session != 1)
+        or (existing_marker == 0 and same_session == 1)
+    ):
+        return -2
+    # Keeping the cursor is equally important: repeated notify/compact hooks
+    # must not seek beyond an unobserved terminal capacity error.
+    if existing_marker == 1 and (same_session == 1 or canonical_session == 0):
+        return 0
+    return 1

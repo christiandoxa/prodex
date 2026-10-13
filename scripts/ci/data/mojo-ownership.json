@@ -1819,7 +1819,8 @@
           "native_live_recovery_observation",
           "native_in_place_recovery_eligibility",
           "runtime_workflow_recovery_class",
-          "runtime_workflow_evidence_policy"
+          "runtime_workflow_evidence_policy",
+          "native_session_marker_arbitration"
         ]
       },
       {
@@ -7956,6 +7957,29 @@
       "duplicate_production_owner": false,
       "platform_fallback": false,
       "rust_adapter_scope": "runtime redaction, structured event parser, bounded buffer allocation, typed map/string ownership, and actual logging I/O"
+    },
+    {
+      "name": "native_session_marker_arbitration",
+      "domain": "runtime/native-session-recovery",
+      "introduced_in": "0.437.9",
+      "baseline_state": "Inherited legacy child-thread notifications could overwrite the root recovery marker and repeated hooks advanced the unread cursor",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_launch_session_marker_update_v1",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/launch_config.mojo",
+      "consumer": "crates/prodex-app/src/app_commands/runtime_launch/goal_resume.rs",
+      "consumer_marker": "prodex_mojo_core::launch::session_marker_should_update(",
+      "production_consumers": [
+        "crates/prodex-app/src/app_commands/runtime_launch/goal_resume.rs"
+      ],
+      "production_reachability_test": "crates/prodex-mojo-core/src/launch/recovery.rs",
+      "rust_owner_before": "Root-versus-descendant marker replacement and repeated-notification cursor preservation",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "No alternate Rust decision; native caller regression and deliberate Mojo ownership mutation detect drift",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "validated hook JSON and UUID projection, per-marker file locking, logical rollout length and atomic file writes"
     }
   ],
   "rust_semantic_reductions": [

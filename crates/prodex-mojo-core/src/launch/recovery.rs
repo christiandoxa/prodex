@@ -48,6 +48,12 @@ pub enum InPlaceRecoveryAction {
 }
 
 unsafe extern "C" {
+    fn prodex_launch_session_marker_update_v1(
+        abi_version: i64,
+        canonical_session: i64,
+        existing_marker: i64,
+        same_session: i64,
+    ) -> i64;
     fn prodex_launch_recovery_observation_v1(
         abi: i64,
         kind: i64,
@@ -86,6 +92,29 @@ unsafe extern "C" {
         side_effect_state: i64,
         output_address: u64,
     ) -> i64;
+}
+
+/// Decide whether a native hook may replace this launch's recovery marker.
+/// Filesystem observations stay in Rust; Mojo owns identity/cursor arbitration.
+pub fn session_marker_should_update(
+    canonical_session: bool,
+    existing_marker: bool,
+    same_session: bool,
+) -> Result<bool, MojoError> {
+    match unsafe {
+        prodex_launch_session_marker_update_v1(
+            1,
+            i64::from(canonical_session),
+            i64::from(existing_marker),
+            i64::from(same_session),
+        )
+    } {
+        0 => Ok(false),
+        1 => Ok(true),
+        -2 => Err(MojoError::InvalidInput),
+        -3 => Err(MojoError::AbiMismatch),
+        _ => Err(MojoError::InvalidOutput),
+    }
 }
 
 #[repr(i64)]
@@ -281,6 +310,37 @@ pub fn in_place_recovery_action(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn session_marker_policy_protects_root_owner_and_unread_error_cursor() {
+        use super::*;
+        for canonical in [false, true] {
+            assert_eq!(
+                session_marker_should_update(canonical, false, false),
+                Ok(true)
+            );
+            assert_eq!(
+                session_marker_should_update(canonical, true, true),
+                Ok(false)
+            );
+        }
+        assert_eq!(session_marker_should_update(false, true, false), Ok(false));
+        assert_eq!(session_marker_should_update(true, true, false), Ok(true));
+        assert_eq!(
+            session_marker_should_update(true, false, true),
+            Err(MojoError::InvalidInput)
+        );
+        assert_eq!(
+            unsafe { prodex_launch_session_marker_update_v1(2, 1, 1, 0) },
+            -3
+        );
+        for fields in [(2, 1, 0), (1, 2, 0), (1, 1, 2), (0, 0, 1)] {
+            assert_eq!(
+                unsafe { prodex_launch_session_marker_update_v1(1, fields.0, fields.1, fields.2) },
+                -2
+            );
+        }
+    }
+
     use super::*;
 
     #[test]

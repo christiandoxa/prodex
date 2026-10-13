@@ -390,12 +390,32 @@ pub(super) fn write_runtime_goal_session_marker(marker_path: &Path, payload: &Os
         bail!("invalid runtime goal session marker path");
     }
     let payload: serde_json::Value = serde_json::from_str(&payload.to_string_lossy())?;
-    let session_id = payload
-        .get("thread-id")
-        .or_else(|| payload.get("session_id"))
+    // SessionStart's session_id is the root agent-tree identity. Legacy notify
+    // carries a concrete thread-id and may run for an inherited child thread.
+    let canonical_session = payload.get("session_id");
+    let session_id = canonical_session
+        .or_else(|| payload.get("thread-id"))
         .and_then(serde_json::Value::as_str)
         .context("runtime goal session payload is missing a session id")?;
-    uuid::Uuid::parse_str(session_id).context("invalid runtime goal session id")?;
+    let incoming_id =
+        uuid::Uuid::parse_str(session_id).context("invalid runtime goal session id")?;
+    // Serialize inherited hook writers; publish the offset before the atomic ID
+    // replacement so a polling monitor never observes a partially written UUID.
+    let _lock = crate::runtime_store::acquire_json_file_lock(marker_path)?;
+    let existing_id = match fs::read_to_string(marker_path) {
+        Ok(raw) => uuid::Uuid::parse_str(raw.trim()).ok(),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+        Err(error) => return Err(error).context("failed to read runtime goal session marker"),
+    };
+    let should_update = prodex_mojo_core::launch::session_marker_should_update(
+        canonical_session.is_some(),
+        existing_id.is_some(),
+        existing_id == Some(incoming_id),
+    )
+    .expect("Mojo native session marker arbitration returned invalid output");
+    if !should_update {
+        return Ok(());
+    }
     let offset = AppState::load_and_repair(&paths)
         .ok()
         .and_then(|state| {
@@ -406,14 +426,18 @@ pub(super) fn write_runtime_goal_session_marker(marker_path: &Path, payload: &Os
             )
             .ok()
         })
-        .and_then(|report| fs::metadata(report.path).ok())
-        .map(|metadata| metadata.len())
+        .and_then(|report| {
+            prodex_session_store::session_file_logical_len(Path::new(&report.path)).ok()
+        })
         .unwrap_or(0);
-    fs::write(
-        runtime_goal_session_offset_path(marker_path),
-        format!("{offset}\n"),
+    crate::runtime_store::write_private_file_atomic(
+        &runtime_goal_session_offset_path(marker_path),
+        format!("{offset}\n").as_bytes(),
     )?;
-    fs::write(marker_path, format!("{session_id}\n"))?;
+    crate::runtime_store::write_private_file_atomic(
+        marker_path,
+        format!("{incoming_id}\n").as_bytes(),
+    )?;
     Ok(())
 }
 
