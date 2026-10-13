@@ -406,6 +406,13 @@ def config_external_provider_optional_view_valid(
     return False
 
 
+def config_saturating_mul_u64(value: UInt64, factor: UInt64) -> UInt64:
+    var maximum = UInt64(0xFFFFFFFFFFFFFFFF)
+    if factor != 0 and value > maximum / factor:
+        return maximum
+    return value * factor
+
+
 @export("prodex_external_provider_numeric_config_v1")
 def prodex_external_provider_numeric_config_v1(
     abi_version: Int64,
@@ -460,6 +467,54 @@ def prodex_external_provider_numeric_config_v1(
     )
     output[0] = context_window
     output[1] = auto_compact_token_limit
+    return SUPER_PROVIDER_CONFIG_OK
+
+
+@export("prodex_external_provider_token_limits_v1")
+def prodex_external_provider_token_limits_v1(
+    abi_version: Int64,
+    is_copilot: Int64,
+    default_context_window: UInt64,
+    default_auto_compact_token_limit: UInt64,
+    context_window: UInt64,
+    context_present: Int64,
+    auto_compact_token_limit: UInt64,
+    auto_compact_present: Int64,
+    output_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != SUPER_PROVIDER_CONFIG_ABI_VERSION:
+        return SUPER_PROVIDER_CONFIG_ABI
+    if (
+        (is_copilot != 0 and is_copilot != 1)
+        or (context_present != 0 and context_present != 1)
+        or (auto_compact_present != 0 and auto_compact_present != 1)
+        or output_address == 0
+    ):
+        return SUPER_PROVIDER_CONFIG_INVALID
+
+    var effective_context_window = default_context_window
+    if context_present == 1 and context_window > 1:
+        effective_context_window = context_window
+
+    var effective_auto_compact_token_limit = default_auto_compact_token_limit
+    if is_copilot == 1:
+        effective_auto_compact_token_limit = config_saturating_mul_u64(
+            effective_context_window, UInt64(95)
+        ) / UInt64(100)
+    if auto_compact_present == 1 and auto_compact_token_limit > 0:
+        effective_auto_compact_token_limit = auto_compact_token_limit
+
+    var compact_ceiling = UInt64(0)
+    if effective_context_window > 0:
+        compact_ceiling = effective_context_window - 1
+    if effective_auto_compact_token_limit > compact_ceiling:
+        effective_auto_compact_token_limit = compact_ceiling
+
+    var output = Pointer[mut=True, UInt64, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    output[0] = effective_context_window
+    output[1] = effective_auto_compact_token_limit
     return SUPER_PROVIDER_CONFIG_OK
 
 

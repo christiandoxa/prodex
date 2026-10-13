@@ -230,13 +230,15 @@ fn super_local_provider_codex_args(
     let model = model
         .filter(|model| !model.trim().is_empty())
         .unwrap_or(SUPER_DEFAULT_LOCAL_MODEL);
-    let context_window = context_window
-        .filter(|value| *value > 1)
-        .unwrap_or(SUPER_DEFAULT_CONTEXT_WINDOW);
-    let auto_compact_token_limit = auto_compact_token_limit
-        .filter(|value| *value > 0)
-        .unwrap_or(SUPER_DEFAULT_AUTO_COMPACT_LIMIT)
-        .min(context_window.saturating_sub(1));
+    let (context_window, auto_compact_token_limit) =
+        crate::super_provider_limits::provider_token_limits(
+            model,
+            false,
+            SUPER_DEFAULT_CONTEXT_WINDOW,
+            SUPER_DEFAULT_AUTO_COMPACT_LIMIT,
+            context_window,
+            auto_compact_token_limit,
+        );
     super_provider_config_codex_args(
         prodex_mojo_core::super_provider_config::ProviderConfigInput {
             provider_id: SUPER_LOCAL_PROVIDER_ID,
@@ -264,7 +266,7 @@ pub fn super_external_provider_codex_args(
         .filter(|model| !model.trim().is_empty())
         .unwrap_or_else(|| provider.default_model());
     let (context_window, auto_compact_token_limit) =
-        crate::super_provider_limits::external_provider_token_limits(
+        crate::super_provider_limits::provider_token_limits(
             model,
             provider == SuperExternalProvider::Copilot,
             provider.default_context_window(),

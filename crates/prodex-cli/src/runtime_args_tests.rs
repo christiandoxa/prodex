@@ -409,6 +409,21 @@ fn super_external_provider_codex_args_support_copilot_compact() {
 }
 
 #[test]
+fn super_local_provider_token_limits_use_mojo_precedence() {
+    let rendered = super_local_provider_codex_args(
+        "http://127.0.0.1:4317",
+        Some("local-model"),
+        Some(10),
+        Some(999),
+    )
+    .into_iter()
+    .map(|arg| arg.to_string_lossy().into_owned())
+    .collect::<Vec<_>>();
+    assert!(rendered.contains(&"model_context_window=10".to_string()));
+    assert!(rendered.contains(&"model_auto_compact_token_limit=9".to_string()));
+}
+
+#[test]
 fn extract_noop_when_no_provider_flags_in_codex_args() {
     let mut args = super_args_from(&["just", "some", "codex", "args"]);
     args.extract_provider_overrides_from_codex_args().unwrap();
