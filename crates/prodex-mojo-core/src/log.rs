@@ -2,8 +2,10 @@ use crate::MojoError;
 
 mod event_name;
 mod level;
+mod runtime_line;
 pub use event_name::render_log_event_name;
 pub use level::classify_log_level;
+pub use runtime_line::{RUNTIME_LOG_FORMAT_JSON, RUNTIME_LOG_FORMAT_TEXT, render_runtime_log_line};
 
 const _: () = assert!(std::mem::size_of::<usize>() == std::mem::size_of::<u64>());
 

@@ -2563,3 +2563,269 @@ def prodex_mojo_log_load_semantics_v1(
             input_address, output_address, output_capacity, written_address
         )
     return 1
+
+
+comptime PRODEX_RUNTIME_LOG_ABI_VERSION: Int64 = 1
+comptime PRODEX_RUNTIME_LOG_FORMAT_TEXT: Int64 = 0
+comptime PRODEX_RUNTIME_LOG_FORMAT_JSON: Int64 = 1
+
+
+def runtime_log_put_view(
+    writer: Pointer[mut=True, StructuredLogWriter, _],
+    value: ProdexRichStringView,
+) -> Bool:
+    return structured_log_put_range(
+        writer, rich_view_ptr(value), 0, Int64(value.len)
+    )
+
+
+def runtime_log_put_u64(
+    writer: Pointer[mut=True, StructuredLogWriter, _], value: UInt64
+) -> Bool:
+    if value == 0:
+        return structured_log_put_byte(writer, UInt8(48))
+    var divisor: UInt64 = 1
+    while value / divisor >= UInt64(10):
+        divisor *= UInt64(10)
+    var remaining = value
+    while divisor > 0:
+        if not structured_log_put_byte(
+            writer, UInt8(remaining / divisor) + UInt8(48)
+        ):
+            return False
+        remaining %= divisor
+        divisor //= UInt64(10)
+    return True
+
+
+def runtime_log_put_json_string(
+    writer: Pointer[mut=True, StructuredLogWriter, _],
+    value: ProdexRichStringView,
+) -> Bool:
+    if not structured_log_put_byte(writer, UInt8(34)):
+        return False
+    var source = rich_view_ptr(value)
+    var run_start: Int64 = 0
+    for index in range(Int64(value.len)):
+        var byte = source[unsafe_offset=index]
+        if byte != UInt8(34) and byte != UInt8(92) and byte >= UInt8(32):
+            continue
+        if not structured_log_put_range(
+            writer,
+            source,
+            run_start,
+            index,
+        ):
+            return False
+        run_start = index + 1
+        if byte == UInt8(34) or byte == UInt8(92):
+            if not structured_log_put_byte(writer, UInt8(92)) or not structured_log_put_byte(
+                writer, byte
+            ):
+                return False
+        elif byte == UInt8(8):
+            if not structured_log_put_literal(writer, StringSlice("\\b")):
+                return False
+        elif byte == UInt8(9):
+            if not structured_log_put_literal(writer, StringSlice("\\t")):
+                return False
+        elif byte == UInt8(10):
+            if not structured_log_put_literal(writer, StringSlice("\\n")):
+                return False
+        elif byte == UInt8(12):
+            if not structured_log_put_literal(writer, StringSlice("\\f")):
+                return False
+        elif byte == UInt8(13):
+            if not structured_log_put_literal(writer, StringSlice("\\r")):
+                return False
+        else:
+            if not structured_log_put_literal(writer, StringSlice("\\u00")):
+                return False
+            var high = byte >> 4
+            var low = byte & UInt8(15)
+            if not structured_log_put_byte(
+                writer, high + UInt8(48 if high < UInt8(10) else UInt8(87))
+            ) or not structured_log_put_byte(
+                writer, low + UInt8(48 if low < UInt8(10) else UInt8(87))
+            ):
+                return False
+    if not structured_log_put_range(
+        writer,
+        source,
+        run_start,
+        Int64(value.len),
+    ):
+        return False
+    return structured_log_put_byte(writer, UInt8(34))
+
+
+def runtime_log_put_flattened_text(
+    writer: Pointer[mut=True, StructuredLogWriter, _],
+    value: ProdexRichStringView,
+) -> Bool:
+    var source = rich_view_ptr(value)
+    for index in range(Int64(value.len)):
+        var byte = source[unsafe_offset=index]
+        if byte == UInt8(10) or byte == UInt8(13):
+            byte = UInt8(32)
+        if not structured_log_put_byte(writer, byte):
+            return False
+    return True
+
+
+def runtime_log_text_render(
+    writer: Pointer[mut=True, StructuredLogWriter, _],
+    timestamp: ProdexRichStringView,
+    message: ProdexRichStringView,
+) -> Bool:
+    return (
+        structured_log_put_literal(writer, StringSlice("["))
+        and runtime_log_put_view(writer, timestamp)
+        and structured_log_put_literal(writer, StringSlice("] "))
+        and runtime_log_put_flattened_text(writer, message)
+        and structured_log_put_byte(writer, UInt8(10))
+    )
+
+
+def runtime_log_field_views(
+    fields_address: UInt, field_count: Int64
+) -> Pointer[mut=False, ProdexRichStringView, ImmUntrackedOrigin]:
+    return Pointer[
+        mut=False, ProdexRichStringView, ImmUntrackedOrigin
+    ](unsafe_from_address=Int(fields_address))
+
+
+def runtime_log_json_render(
+    writer: Pointer[mut=True, StructuredLogWriter, _],
+    timestamp: ProdexRichStringView,
+    message: ProdexRichStringView,
+    pid: UInt64,
+    event: ProdexRichStringView,
+    event_present: Bool,
+    fields_address: UInt,
+    field_count: Int64,
+) -> Bool:
+    var fields = runtime_log_field_views(fields_address, field_count)
+    if not structured_log_put_literal(writer, StringSlice("{")):
+        return False
+    var first = True
+    if event_present:
+        if not structured_log_put_literal(writer, StringSlice("\"event\":")) or not runtime_log_put_json_string(
+            writer, event
+        ):
+            return False
+        first = False
+    if field_count > 0:
+        if not first and not structured_log_put_byte(writer, UInt8(44)):
+            return False
+        if not structured_log_put_literal(writer, StringSlice("\"fields\":{")):
+            return False
+        for index in range(field_count):
+            if index > 0 and not structured_log_put_byte(writer, UInt8(44)):
+                return False
+            var key = fields[unsafe_offset=index * 2].copy()
+            var value = fields[unsafe_offset=index * 2 + 1].copy()
+            if not runtime_log_put_json_string(writer, key) or not structured_log_put_byte(
+                writer, UInt8(58)
+            ) or not runtime_log_put_json_string(writer, value):
+                return False
+        if not structured_log_put_literal(writer, StringSlice("}")):
+            return False
+        first = False
+    if not first and not structured_log_put_byte(writer, UInt8(44)):
+        return False
+    return (
+        structured_log_put_literal(writer, StringSlice("\"message\":"))
+        and runtime_log_put_json_string(writer, message)
+        and structured_log_put_literal(writer, StringSlice(",\"pid\":"))
+        and runtime_log_put_u64(writer, pid)
+        and structured_log_put_literal(writer, StringSlice(",\"timestamp\":"))
+        and runtime_log_put_json_string(writer, timestamp)
+        and structured_log_put_literal(writer, StringSlice("}\n"))
+    )
+
+
+@export("prodex_mojo_runtime_log_render_v1")
+def prodex_mojo_runtime_log_render_v1(
+    abi_version: Int64,
+    format: Int64,
+    timestamp_address: UInt,
+    timestamp_length: Int64,
+    pid: UInt64,
+    message_address: UInt,
+    message_length: Int64,
+    event_address: UInt,
+    event_length: Int64,
+    event_present: Int64,
+    fields_address: UInt,
+    field_count: Int64,
+    output_address: UInt,
+    output_capacity: Int64,
+    written_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != PRODEX_RUNTIME_LOG_ABI_VERSION:
+        return 4
+    if (
+        (format != PRODEX_RUNTIME_LOG_FORMAT_TEXT and format != PRODEX_RUNTIME_LOG_FORMAT_JSON)
+        or timestamp_length < 0
+        or message_length < 0
+        or event_length < 0
+        or event_present < 0
+        or event_present > 1
+        or field_count < 0
+        or output_capacity < 0
+        or output_address == 0
+        or written_address == 0
+        or (timestamp_length > 0 and timestamp_address == 0)
+        or (message_length > 0 and message_address == 0)
+        or (event_length > 0 and event_address == 0)
+        or (event_present == 0 and (event_address != 0 or event_length != 0))
+        or (event_present == 1 and event_address == 0 and event_length > 0)
+        or (field_count > 0 and fields_address == 0)
+    ):
+        return 1
+    if field_count > 0 and field_count > 4_611_686_018_427_387_903:
+        return 1
+
+    var timestamp = ProdexRichStringView(timestamp_address, UInt(timestamp_length))
+    var message = ProdexRichStringView(message_address, UInt(message_length))
+    var event = ProdexRichStringView(event_address, UInt(event_length))
+    if (
+        not rich_view_valid(timestamp, timestamp_length)
+        or not rich_view_valid(message, message_length)
+        or (event_present == 1 and not rich_view_valid(event, event_length))
+    ):
+        return 1
+    var fields = runtime_log_field_views(fields_address, field_count)
+    for index in range(field_count):
+        var key = fields[unsafe_offset=index * 2].copy()
+        var value = fields[unsafe_offset=index * 2 + 1].copy()
+        if not rich_view_valid(key, Int64(key.len)) or not rich_view_valid(
+            value, Int64(value.len)
+        ):
+            return 1
+    var output = Pointer[mut=True, UInt8, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    var writer = StructuredLogWriter(output, output_capacity, 0)
+    var ok = False
+    if format == PRODEX_RUNTIME_LOG_FORMAT_TEXT:
+        ok = runtime_log_text_render(
+            Pointer(to=writer), timestamp, message
+        )
+    else:
+        ok = runtime_log_json_render(
+            Pointer(to=writer),
+            timestamp,
+            message,
+            pid,
+            event,
+            event_present == 1,
+            fields_address,
+            field_count,
+        )
+    var written = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(written_address)
+    )
+    written[] = writer.written
+    return 0 if ok else 2

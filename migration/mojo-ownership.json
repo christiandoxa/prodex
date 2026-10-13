@@ -513,7 +513,8 @@
           "transcript_item_classification",
           "transcript_operation_value_policy",
           "transcript_tool_name_policy",
-          "log_load_aggregation"
+          "log_load_aggregation",
+          "runtime_log_line_rendering"
         ]
       },
       "mojo/prodex_core/profile_schedule.mojo": {
@@ -7932,6 +7933,29 @@
       "duplicate_production_owner": false,
       "platform_fallback": false,
       "rust_adapter_scope": "rendering profile content, line-count acquisition, textual output and applying the Mojo viewport/scroll plan"
+    },
+    {
+      "name": "runtime_log_line_rendering",
+      "domain": "runtime/log-render",
+      "introduced_in": "0.438.0",
+      "baseline_state": "Rust emitted text and JSON runtime-log lines and recomputed a text fallback if JSON serialization failed",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_mojo_runtime_log_render_v1",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/log_semantics.mojo",
+      "consumer": "crates/prodex-runtime-log/src/lib.rs",
+      "consumer_marker": "prodex_mojo_core::log::render_runtime_log_line(",
+      "production_consumers": [
+        "crates/prodex-runtime-log/src/lib.rs"
+      ],
+      "production_reachability_test": "crates/prodex-runtime-log/src/lib.rs",
+      "rust_owner_before": "Runtime log plain-text/JSON field ordering, text shape, JSON escaping and fallback rendering",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "deleted; real caller JSON/text parity, direct ABI invalid-status tests, and deliberate Mojo text-prefix mutation prove authority",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "runtime redaction, structured event parser, bounded buffer allocation, typed map/string ownership, and actual logging I/O"
     }
   ],
   "rust_semantic_reductions": [
