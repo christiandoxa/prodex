@@ -112,6 +112,8 @@ pub mod deepseek_attempt_policy;
 #[cfg(feature = "mojo-rich")]
 pub mod deepseek_local_rewrite;
 #[cfg(feature = "mojo-rich")]
+pub mod deepseek_stream_policy;
+#[cfg(feature = "mojo-rich")]
 pub mod gemini_code_assist_policy;
 #[cfg(feature = "mojo-rich")]
 pub mod gemini_guardrails;

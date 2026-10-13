@@ -151,6 +151,15 @@ mod tests {
             ),
             Ok(())
         );
+        assert_eq!(
+            deepseek_provider_core_validate_stream_tool_call_arguments(
+                "DeepSeek",
+                3,
+                Some(" \u{2003}shell\u{3000}"),
+                " 1 ",
+            ),
+            Ok(())
+        );
         let error = deepseek_provider_core_validate_stream_tool_call_arguments(
             "DeepSeek",
             4,
