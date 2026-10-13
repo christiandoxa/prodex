@@ -41,7 +41,7 @@ test("prodex-app shard manifest is disjoint and remainder-complete", () => {
   const windowsMatrix = windowsGithubMatrix();
   assert.equal(appMatrix.include.length, 11);
   assert.equal(ciMatrix.include.length, 8);
-  assert.equal(fullMatrix.include.length, PRODEX_APP_FULL_TEST_SHARDS.length + 1);
+  assert.equal(fullMatrix.include.length, PRODEX_APP_FULL_TEST_SHARDS.length + 4);
   assert.equal(windowsMatrix.include.length, 10);
   assert.equal(appMatrix.include.filter((entry) => entry.save_cache).length, 1);
   assert.equal(ciMatrix.include.filter((entry) => entry.save_cache).length, 1);
@@ -86,7 +86,10 @@ test("prodex-app shard manifest is disjoint and remainder-complete", () => {
     ciMatrix.include.find((entry) => entry.suite === "launch-providers").filters.split("\n").length,
     8,
   );
-  const fullFilters = fullMatrix.include.flatMap((entry) => entry.filters.split("\n")).filter(Boolean);
+  const fullFilters = fullMatrix.include
+    .slice(1, PRODEX_APP_FULL_TEST_SHARDS.length)
+    .flatMap((entry) => entry.filters.split("\n"))
+    .filter(Boolean);
   assert.deepEqual(new Set(fullFilters), new Set(PRODEX_APP_LIB_FILTERS));
   assert.equal(
     fullMatrix.include.filter((entry) => entry.suite.startsWith("launch-providers-")).length,
@@ -132,7 +135,7 @@ test("shard planner dry-run and matrix output are compile-free", () => {
   assert.equal(dryRun.status, 0, dryRun.stderr);
   assert.match(
     dryRun.stdout,
-    new RegExp(`dry-run: ${PRODEX_APP_FULL_TEST_SHARDS.length + 1} full-test shard\\(s\\)`),
+    new RegExp(`dry-run: ${githubMatrix({ includeWorkspace: true }).include.length} full-test shard\\(s\\)`),
   );
   assert.match(dryRun.stdout, /selection-1: cargo test .*--test-threads=1/);
   assert.match(dryRun.stdout, /remainder: cargo test .*--skip/);
@@ -308,4 +311,81 @@ test("Windows HTTP/WebSocket/other continuation partitions preserve exactly one 
     assert.deepEqual(owners.map((entry) => entry.suite), [expected], testName);
   }
   assert.equal(entries.filter((entry) => entry.save_cache).length, 1);
+});
+
+
+test("nightly full suite shards unassigned cases without changing ordinary app or Windows matrices", () => {
+  const full = githubMatrix({ includeWorkspace: true });
+  const app = githubMatrix();
+  const windows = windowsGithubMatrix();
+  const names = [
+    "full-remainder-continuations",
+    "full-remainder-selection",
+    "full-remainder-foundation",
+    "remainder",
+  ];
+  const extras = full.include.filter((entry) => names.includes(entry.suite));
+  assert.deepEqual(extras.map((entry) => entry.suite), names);
+  assert.equal(full.include.filter((entry) => entry.save_cache).length, 1);
+  assert.deepEqual(app.include.map((entry) => entry.suite), PRODEX_APP_LIB_SHARDS.map((entry) => entry.suite));
+  assert.equal(windows.include.length, 10, "nightly sharding cannot alter Windows CI");
+
+  const foundation = extras.find((entry) => entry.suite === "full-remainder-foundation");
+  assert.equal(foundation.filters.split("\n").length, 6);
+  const selection = extras.find((entry) => entry.suite === "full-remainder-selection");
+  assert.equal(
+    selection.skip_filters.split("\n").length,
+    PRODEX_APP_LIB_FILTERS.filter((filter) =>
+      filter.startsWith("main_internal_tests::runtime_proxy_selection_and_pressure::"),
+    ).length,
+  );
+  const broadSkips = extras.at(-1).skip_filters.split("\n");
+  assert.deepEqual(
+    broadSkips,
+    [
+      ...PRODEX_APP_LIB_FILTERS,
+      ...extras.slice(0, -1).flatMap((entry) => entry.filters.split("\n")),
+    ],
+    "the residual suite must exclude all other full-suite owners",
+  );
+
+  const corpus = [
+    ["main_internal_tests::runtime_proxy_continuations::http_followups::rotates_before_commit", "full-remainder-continuations"],
+    ["main_internal_tests::runtime_proxy_continuations::websocket_precommit::keepalive", "full-remainder-continuations"],
+    ["main_internal_tests::runtime_proxy_selection_and_pressure::admission::guards::never_replay", "targeted-admission"],
+    ["main_internal_tests::runtime_proxy_selection_and_pressure::admission::persistence::affinity_store", "full-remainder-selection"],
+    ["main_internal_tests::runtime_proxy_selection_and_pressure::persistence::affinity", "full-remainder-selection"],
+    ["runtime_store::io::tests::restores_profiles", "full-remainder-foundation"],
+    ["runtime_external_provider_config::tests::catalog_parse", "full-remainder-foundation"],
+    ["runtime_core_shared::tests::profile_resolution", "full-remainder-foundation"],
+    ["reports::info::tests::status", "full-remainder-foundation"],
+    ["runtime_background::worker_spawn::tests::start", "full-remainder-foundation"],
+    ["runtime_thread_index::tests::canonical", "full-remainder-foundation"],
+    ["main_internal_tests::quota_selection::plans_valid_quota", "remainder"],
+    ["runtime_claude_auth::tests::rejects_missing_secret", "remainder"],
+    ["future_unassigned_test_module::test_new_case", "remainder"],
+  ];
+  for (const [testName, expected] of corpus) {
+    const owners = full.include.filter((entry) => {
+      if (entry.suite === "workspace") return false;
+      const filters = entry.filters.split("\n").filter(Boolean);
+      const skips = entry.skip_filters.split("\n").filter(Boolean);
+      return (!filters.length || filters.some((value) => testName.includes(value)))
+        && !skips.some((value) => testName.includes(value));
+    });
+    if (expected === "targeted-admission") {
+      assert.equal(owners.length, 1, testName);
+      assert.match(owners[0].suite, /^admission-affinity-/);
+    } else {
+      assert.deepEqual(owners.map((entry) => entry.suite), [expected], testName);
+    }
+  }
+
+  const matrixPlan = runPlanner("--full-test-matrix");
+  assert.equal(matrixPlan.status, 0, matrixPlan.stderr);
+  assert.deepEqual(JSON.parse(matrixPlan.stdout), full);
+  const dryRun = runPlanner("--dry-run");
+  assert.equal(dryRun.status, 0, dryRun.stderr);
+  assert.match(dryRun.stdout, /full-remainder-selection: cargo test [^\n]+ --skip/);
+  assert.match(dryRun.stdout, /full-remainder-foundation: cargo test /);
 });

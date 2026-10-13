@@ -452,3 +452,39 @@ be smaller or larger due to runner contention, cache access, and other
 independent tests; no optimized nightly run is claimed until measured.
 Regression tests require byte-identical cache keys, all mandatory guards
 and the original consumer matrix/downstream test execution.
+
+
+## Shard the nightly unassigned prodex-app remainder
+
+Even after caching the Mojo prerequisite, the scheduled Full Rust suite's
+unassigned prodex-app remainder was an independent critical path. It took
+**338 seconds** of test execution on successful nightly run 38289151967
+and **287 seconds** on 38149665434, plus runner preparation. The
+remainder contained 388 existing prodex-app tests previously run serially
+in one job. Increasing libtest threads within the runner would introduce
+shared session, port and filesystem interference; independent serial
+runner groups preserve that isolation.
+
+The scheduled full-test matrix now has **four disjoint remainder
+partitions**, each still executing with test-threads=1: continuation
+and recovery (**66 tests**), remaining selection/admission and persistence
+(**89**), core runtime foundation (**90**), and genuinely unassigned
+tests (**143**). The broad selection partition explicitly skips all
+existing targeted selection/admission prefixes; the final catch-all
+skips all three new families in addition to the old targeted prefixes.
+The ordinary push/PR prodex-app matrix, Windows matrix and base shard
+manifest remain unchanged. Future new unassigned cases automatically
+enter the catch-all rather than disappearing from CI.
+
+Coverage was proven against a compiled prodex-app library test binary
+listing **2,220 real cases**: each test had **exactly one** owner across
+all 42 scheduled prodex-app partitions, including 388 remainder cases
+with the above 66/89/90/143 breakdown. Permanent matrix regression
+tests also check representative coverage, skip ownership, cache-writer
+uniqueness, and an accurate compile-free dry run.
+
+This change adds 3 full-test runner jobs in exchange for reducing the
+single ~5-6 minute serial tail; it does not remove tests. Together with
+the cached Mojo prerequisite, it should reduce the nightly suite
+critical path, but actual end-to-end savings are not claimed until a new
+scheduled or full manually dispatched run completes.

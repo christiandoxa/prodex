@@ -124,6 +124,51 @@ function splitIndependentShards(shards) {
 
 export const PRODEX_APP_FULL_TEST_SHARDS = Object.freeze(splitIndependentShards(PRODEX_APP_LIB_SHARDS));
 
+
+// The scheduled full suite previously ran ~388 unassigned prodex-app tests
+// serially in one 5-6 minute runner. These families are independent runners
+// but each preserves --test-threads=1 and explicit ownership exclusions.
+const FULL_TEST_REMAINDER_SHARDS = Object.freeze([
+  {
+    suite: "full-remainder-continuations",
+    label: "prodex-app native continuation and recovery tests",
+    filters: ["main_internal_tests::runtime_proxy_continuations::"],
+  },
+  {
+    suite: "full-remainder-selection",
+    label: "prodex-app remaining admission and persistence tests",
+    filters: [SELECTION_PREFIX],
+    skipFilters: PRODEX_APP_LIB_FILTERS.filter((filter) => filter.startsWith(SELECTION_PREFIX)),
+  },
+  {
+    suite: "full-remainder-foundation",
+    label: "prodex-app remaining runtime foundation tests",
+    filters: [
+      "runtime_store::",
+      "runtime_external_provider_config::",
+      "runtime_core_shared::",
+      "reports::",
+      "runtime_background::",
+      "runtime_thread_index::",
+    ],
+  },
+]);
+
+function scheduledFullTestShards() {
+  const remainder = PRODEX_APP_FULL_TEST_SHARDS.at(-1);
+  return [
+    ...PRODEX_APP_FULL_TEST_SHARDS.slice(0, -1),
+    ...FULL_TEST_REMAINDER_SHARDS,
+    {
+      ...remainder,
+      skipFilters: [
+        ...PRODEX_APP_LIB_FILTERS,
+        ...FULL_TEST_REMAINDER_SHARDS.flatMap((shard) => shard.filters),
+      ],
+    },
+  ];
+}
+
 // Dedicated Ubuntu jobs own all main-internal and profile-command-internal tests.
 // Keep related filters together so each push/PR job reuses one compilation.
 const CI_TARGETED_SHARDS = Object.freeze(
@@ -310,7 +355,7 @@ function matrixEntry(shard, index) {
 }
 
 export function githubMatrix({ includeWorkspace = false } = {}) {
-  const shards = includeWorkspace ? PRODEX_APP_FULL_TEST_SHARDS : PRODEX_APP_LIB_SHARDS;
+  const shards = includeWorkspace ? scheduledFullTestShards() : PRODEX_APP_LIB_SHARDS;
   const include = shards.map((shard, index) =>
     matrixEntry(shard, includeWorkspace ? index + 1 : index),
   );
@@ -359,10 +404,13 @@ function stepCommand(shard) {
     return "node scripts/ci/full-rust-test.mjs --jobs 6 --test-threads 4 --timings --timings-json --no-prodex-app-lib";
   }
   if (shard.filters) {
+    const skips = (shard.skipFilters ?? [])
+      .map((filter) => "--skip '" + filter + "'")
+      .join(" ");
     return shard.filters
-      .map(
-        (filter) =>
-          `cargo test --locked -q -p prodex-app --lib '${filter}' -- --test-threads=1`,
+      .map((filter) =>
+        "cargo test --locked -q -p prodex-app --lib '" + filter + "' -- --test-threads=1" +
+          (skips ? " " + skips : ""),
       )
       .join(" && ");
   }
@@ -458,7 +506,7 @@ function main() {
     return;
   }
 
-  const shards = args.dryRun ? [WORKSPACE_SHARD, ...PRODEX_APP_FULL_TEST_SHARDS] : [];
+  const shards = args.dryRun ? [WORKSPACE_SHARD, ...scheduledFullTestShards()] : [];
   process.stdout.write(`dry-run: ${shards.length} full-test shard(s)\n`);
   for (const shard of shards) {
     process.stdout.write(`  ${shard.suite}: ${stepCommand(shard)}\n`);
