@@ -135,18 +135,22 @@ test("fresh benchmark compiles required Mojo runtime with the pinned toolchain",
 test("native builds link strict runtime archives while the real Mojo lane owns all-feature lint", () => {
   const ci = readFileSync(".github/workflows/ci.yml", "utf8");
   const full = readFileSync(".github/workflows/full-test.yml", "utf8");
-  const mojoJob = ci.match(/\n  real-mojo:\n([\s\S]*?)\n  ci-duration-telemetry:/);
+  const mojoJob = ci.match(/\n  real-mojo:\n([\s\S]*?)\n  real-mojo-parity:/);
+  const mojoParity = ci.match(/\n  real-mojo-parity:\n([\s\S]*?)\n  ci-duration-telemetry:/);
   const linuxArchive = ci.match(/\n  mojo-runtime-linux-archive:\n([\s\S]*?)\n  mojo-runtime-platform-archives:/);
 
-  assert.ok(mojoJob, "real-mojo job missing");
+  assert.ok(mojoJob, "real-mojo lint and smoke job missing");
+  assert.ok(mojoParity, "real-mojo parity fan-out missing");
   assert.ok(linuxArchive, "Linux runtime archive job missing");
-  assert.doesNotMatch(ci.replace(mojoJob[0], ""), /--all-features/);
+  assert.doesNotMatch(ci.replace(mojoJob[0], "").replace(mojoParity[0], ""), /--all-features/);
   assert.doesNotMatch(full, /--all-features/);
   assert.match(linuxArchive[0], /PRODEX_MOJO_REQUIRED=1/);
   assert.match(linuxArchive[0], /cargo build --release --locked --target .* -p prodex-mojo-core/);
   assert.match(ci, /PRODEX_MOJO_ARCHIVE: \$\{\{ github\.workspace \}\}\/\.prodex-ci\/mojo-runtime\//);
   assert.match(mojoJob[0], /name: Real Mojo \/ parity/);
-  assert.match(mojoJob[0], /Install pinned Mojo toolchain/);
+  assert.match(linuxArchive[0], /Install pinned Mojo toolchain/);
+  assert.match(mojoJob[0], /Download strict Linux Mojo archive/);
+  assert.doesNotMatch(mojoJob[0], /Install pinned Mojo toolchain/);
   assert.match(mojoJob[0], /cargo clippy .* --all-features -- -D warnings/);
   assert.match(mojoJob[0], /cargo build --locked --features mojo-core --bin prodex/);
 });
@@ -154,7 +158,7 @@ test("native builds link strict runtime archives while the real Mojo lane owns a
 test("slow independent CI phases fan out without dropping their gates", () => {
   const workflow = readFileSync(".github/workflows/ci.yml", "utf8");
   const supplyChain = workflow.match(/\n  supply-chain:\n([\s\S]*?)\n  release-sync:/)?.[1];
-  const mojo = workflow.match(/\n  real-mojo:\n([\s\S]*?)\n  ci-duration-telemetry:/)?.[1];
+  const mojo = workflow.match(/\n  real-mojo-parity:\n([\s\S]*?)\n  ci-duration-telemetry:/)?.[1];
 
   assert.ok(supplyChain, "supply-chain job missing");
   assert.ok(mojo, "real-mojo job missing");

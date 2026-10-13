@@ -228,7 +228,8 @@ jobs:
 
   build-mojo-archives:
     name: Build Mojo archive ${{ matrix.target }}
-    needs: verify-ci
+    # Speculative compilation of immutable source can overlap CI verification.
+    # No binary build or publication may bypass the verify-ci dependency.
     runs-on: ubuntu-24.04
     timeout-minutes: 90
     permissions:
@@ -255,6 +256,23 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false
+
+      - name: Validate archive source identity before expensive compilation
+        env:
+          RELEASE_TARGET_SHA: ${{ inputs.target_sha }}
+          RELEASE_VERSION: ${{ inputs.version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "${RELEASE_TARGET_SHA}" =~ ^[0-9a-f]{40}$ ]]
+          test "${GITHUB_SHA}" = "${RELEASE_TARGET_SHA}"
+          actual_version="$(python3 - <<'PY'
+          import tomllib
+          with open("Cargo.toml", "rb") as handle:
+              print(tomllib.load(handle)["package"]["version"])
+          PY
+          )"
+          test "${actual_version}" = "${RELEASE_VERSION}"
 
       - name: Install Rust target
         uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
