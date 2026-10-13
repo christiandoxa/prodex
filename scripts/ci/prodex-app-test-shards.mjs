@@ -172,12 +172,27 @@ const WINDOWS_SHARD_GROUPS = Object.freeze([
 
 // The old single Windows remainder took >8 minutes to run 362 tests
 // serially. These are disjoint, independently compiled serial test groups;
-// the broad selection group skips the already-owned selection/admission tests.
+// the broad selection and remaining-continuation groups skip the test
+// prefixes already assigned to an earlier independent Windows runner.
 const WINDOWS_REMAINDER_SHARDS = Object.freeze([
   {
-    suite: "remainder-continuations",
-    label: "prodex-app remaining continuation tests",
+    suite: "remainder-continuations-http",
+    label: "prodex-app remaining HTTP follow-up tests",
+    filters: ["main_internal_tests::runtime_proxy_continuations::http_followups::"],
+  },
+  {
+    suite: "remainder-continuations-websocket",
+    label: "prodex-app remaining WebSocket continuation tests",
+    filters: ["main_internal_tests::runtime_proxy_continuations::websocket_"],
+  },
+  {
+    suite: "remainder-continuations-other",
+    label: "prodex-app remaining other continuation tests",
     filters: ["main_internal_tests::runtime_proxy_continuations::"],
+    skipFilters: [
+      "main_internal_tests::runtime_proxy_continuations::http_followups::",
+      "main_internal_tests::runtime_proxy_continuations::websocket_",
+    ],
   },
   {
     suite: "remainder-selection",
