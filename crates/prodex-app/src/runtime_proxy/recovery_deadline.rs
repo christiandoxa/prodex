@@ -39,7 +39,7 @@ impl RuntimeRotationProxyShared {
         {
             runtime_proxy_log(
                 self,
-                "precommit_recovery_deadline_exceeded stream_committed=false".to_string(),
+                "precommit_recovery_deadline_exceeded stream_committed=false",
             );
             return Err(RuntimeProxyRecoveryTimeout.into());
         }
