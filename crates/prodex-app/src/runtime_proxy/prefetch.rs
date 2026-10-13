@@ -186,6 +186,22 @@ mod tests {
     }
 
     #[test]
+    fn prefetch_lookahead_keepalive_does_not_commit_a_later_capacity_failure() {
+        let (inspection, _) = block_on_lookahead(
+            vec![
+                RuntimePrefetchChunk::Data(b"data: {\"type\":\"response.created\",\"response\":{\"id\":\"resp-held\"}}\r\n\r\n".to_vec()),
+                RuntimePrefetchChunk::Data(b"data: {\"type\":\"keepalive\"}\r\n\r\n".to_vec()),
+                RuntimePrefetchChunk::Data(b"data: {\"type\":\"response.failed\",\"response\":{\"error\":{\"code\":\"server_is_overloaded\"}}}\r\n\r\n".to_vec()),
+            ],
+            "keepalive-before-capacity",
+        ).expect("lookahead should inspect all control frames");
+        assert!(
+            matches!(inspection, RuntimeSseInspection::Overloaded(_)),
+            "{inspection:?}"
+        );
+    }
+
+    #[test]
     fn prefetch_lookahead_commits_on_first_output_event() {
         let (inspection, _prefetch) = block_on_lookahead(
             vec![RuntimePrefetchChunk::Data(
