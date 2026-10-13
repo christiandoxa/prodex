@@ -7,6 +7,7 @@ const ATTACHMENT_RANGE: i64 = 2;
 const CLIPBOARD_NAME: i64 = 3;
 const PERSISTABLE_NAME: i64 = 4;
 const ROLLOUT_NAME: i64 = 5;
+const GOAL_OBJECTIVE_NAME: i64 = 6;
 
 unsafe extern "C" {
     fn prodex_shared_attachment_policy_v1(
@@ -101,6 +102,12 @@ pub fn persistable_attachment_file_name(file_name: &str) -> Result<bool, MojoErr
     bool_output(call(PERSISTABLE_NAME, file_name, 0)?)
 }
 
+/// Whether an attachment is a generated goal wrapper whose nested references
+/// may be repaired. Raw user pasted text and image payloads remain opaque.
+pub fn goal_objective_file_name(file_name: &str) -> Result<bool, MojoError> {
+    bool_output(call(GOAL_OBJECTIVE_NAME, file_name, 0)?)
+}
+
 pub fn rollout_file_name(file_name: &str) -> Result<bool, MojoError> {
     bool_output(call(ROLLOUT_NAME, file_name, 0)?)
 }
@@ -151,6 +158,19 @@ mod tests {
         assert!(persistable_attachment_file_name("pasted-text-1.txt").unwrap());
         assert!(persistable_attachment_file_name("image-1.png").unwrap());
         assert!(persistable_attachment_file_name("goal-objective.md").unwrap());
+        assert!(goal_objective_file_name("goal-objective.md").unwrap());
+        for name in [
+            "pasted-text-1.txt",
+            "image-1.png",
+            "other.md",
+            "goal-objective.md.bak",
+            "../goal-objective.md",
+        ] {
+            assert!(
+                !goal_objective_file_name(name).unwrap(),
+                "never rewrite raw user attachment {name}"
+            );
+        }
         assert!(!persistable_attachment_file_name("other.txt").unwrap());
         assert!(rollout_file_name("rollout.jsonl").unwrap());
         assert!(rollout_file_name("rollout.jsonl.zst").unwrap());

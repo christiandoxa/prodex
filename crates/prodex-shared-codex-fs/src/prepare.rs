@@ -1,6 +1,6 @@
 use self::goal_attachments::{
     persist_codex_goal_attachment_path_for_thread, persist_codex_goal_attachment_paths,
-    session_thread_id,
+    persist_goal_attachments_for_session_file, session_thread_id,
 };
 use super::*;
 use crate::image_attachments::{
@@ -101,6 +101,10 @@ fn prepare_managed_codex_home_internal(
     }
     if maintain_sessions {
         maintain_managed_codex_sessions(paths)?;
+    } else {
+        // The native picker can select any saved goal, including one with no
+        // recent rollout. Other live processes must not suppress this repair.
+        persist_codex_goal_attachment_paths(&paths.shared_codex_root)?;
     }
 
     Ok(())
@@ -154,6 +158,7 @@ fn ensure_managed_codex_home_is_not_symlink(codex_home: &Path) -> Result<()> {
 }
 
 pub fn maintain_managed_codex_sessions(paths: &AppPaths) -> Result<()> {
+    persist_codex_goal_attachment_paths(&paths.shared_codex_root)?;
     let Some(_maintenance_lock) = try_lock_codex_session_maintenance(&paths.shared_codex_root)?
     else {
         return Ok(());
@@ -177,8 +182,6 @@ pub fn maintain_managed_codex_sessions(paths: &AppPaths) -> Result<()> {
         &previous,
         &mut next,
     )?;
-    persist_codex_goal_attachment_paths(&paths.shared_codex_root)?;
-
     if next != previous {
         // The cache only avoids repeat work. A read-only or contended cache must never prevent
         // attachment persistence, session ordering repair, or launch.
@@ -194,12 +197,12 @@ pub fn maintain_managed_codex_sessions(paths: &AppPaths) -> Result<()> {
 /// explicit full maintenance remains available through `maintain_managed_codex_sessions`.
 pub fn maintain_recent_managed_codex_sessions(paths: &AppPaths) -> Result<Option<PathBuf>> {
     let started = Instant::now();
-    let Some(_maintenance_lock) = try_lock_codex_session_maintenance(&paths.shared_codex_root)?
-    else {
+    let Some(session_file) = find_recent_session_file(&paths.shared_codex_root) else {
         return Ok(None);
     };
-
-    let Some(session_file) = find_recent_session_file(&paths.shared_codex_root) else {
+    persist_goal_attachments_for_session_file(&paths.shared_codex_root, &session_file)?;
+    let Some(_maintenance_lock) = try_lock_codex_session_maintenance(&paths.shared_codex_root)?
+    else {
         return Ok(None);
     };
     let (session_files_opened, session_bytes_read) =
@@ -210,8 +213,24 @@ pub fn maintain_recent_managed_codex_sessions(paths: &AppPaths) -> Result<Option
     Ok(Some(session_file))
 }
 
+/// Repair goal references independently of live rollout maintenance locks.
+/// A selector-less native resume picker requires all saved goal aliases prepared.
+pub fn repair_managed_codex_goal_attachments(
+    paths: &AppPaths,
+    thread_id: Option<&str>,
+) -> Result<()> {
+    if !paths.shared_codex_root.is_dir() {
+        return Ok(());
+    }
+    match thread_id {
+        Some(id) => persist_codex_goal_attachment_path_for_thread(&paths.shared_codex_root, id),
+        None => persist_codex_goal_attachment_paths(&paths.shared_codex_root),
+    }
+}
+
 /// Maintains one rollout whose path was already identified by a resume repair.
 pub fn maintain_managed_codex_session_file(paths: &AppPaths, session_file: &Path) -> Result<()> {
+    persist_goal_attachments_for_session_file(&paths.shared_codex_root, session_file)?;
     let Some(_maintenance_lock) = try_lock_codex_session_maintenance(&paths.shared_codex_root)?
     else {
         return Ok(());

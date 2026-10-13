@@ -194,3 +194,136 @@ fn already_canonical_goal_reference_still_repairs_nested_objective_media() {
             .contains(".prodex-overlay-deleted-0")
     );
 }
+
+#[test]
+fn repairing_goal_paths_preserves_a_concurrent_replacement_and_all_goal_state() {
+    let f = MediaFixture::new();
+    let before = f.objective();
+    f.insert("thread-1", &before);
+    let after = "A new user goal submitted while maintenance was reading";
+    f.db.execute("UPDATE thread_goals SET objective=?1, goal_id='replacement-goal', status='active', tokens_used=99, updated_at_ms=7777 WHERE thread_id='thread-1'",[after]).unwrap();
+    update_goal_attachment_reference(
+        &f.db,
+        &f.paths.shared_codex_root.join("goals_1.sqlite"),
+        "thread-1",
+        &before,
+        "stale repair would erase new goal",
+    )
+    .unwrap();
+    assert_eq!(
+        f.read("thread-1"),
+        after,
+        "compare-and-swap must preserve concurrently replaced goal"
+    );
+    let state:(String,String,i64,i64)=f.db.query_row("SELECT status,goal_id,tokens_used,updated_at_ms FROM thread_goals WHERE thread_id='thread-1'",[],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?))).unwrap();
+    assert_eq!(
+        state,
+        ("active".into(), "replacement-goal".into(), 99, 7777)
+    );
+}
+#[test]
+fn repair_does_not_change_raw_pasted_text_even_if_it_mentions_overlay_paths() {
+    let f = MediaFixture::new();
+    let payload = f.objective();
+    fs::write(f.stable.join("pasted-text-1.txt"), &payload).unwrap();
+    f.insert("thread-1", &f.objective());
+    persist_codex_goal_attachment_path_for_thread(&f.paths.shared_codex_root, "thread-1").unwrap();
+    assert!(!f.read("thread-1").contains(".prodex-overlay-deleted-0"));
+    assert_eq!(
+        fs::read_to_string(f.stable.join("pasted-text-1.txt")).unwrap(),
+        payload,
+        "user instructions are opaque bytes, not editable generated wrappers"
+    );
+}
+#[test]
+fn missing_both_source_and_shared_attachment_is_not_rewritten_to_an_invented_file() {
+    let f = MediaFixture::new();
+    let objective = f.objective();
+    fs::remove_file(f.stable.join("pasted-text-1.txt")).unwrap();
+    fs::remove_file(f.stable.join("image-1.png")).unwrap();
+    f.insert("thread-1", &objective);
+    persist_codex_goal_attachment_paths(&f.paths.shared_codex_root).unwrap();
+    assert_eq!(f.read("thread-1"), objective);
+    assert!(!f.stable.join("pasted-text-1.txt").exists());
+    assert!(!f.stable.join("image-1.png").exists());
+}
+#[cfg(unix)]
+#[test]
+fn generated_goal_wrapper_cannot_redirect_repair_through_a_symlink() {
+    let f = MediaFixture::new();
+    let outside = f.root.join("outside-user-objective.md");
+    let payload = f.objective();
+    fs::write(&outside, &payload).unwrap();
+    let goal = f.stable.join("goal-objective.md");
+    std::os::unix::fs::symlink(&outside, &goal).unwrap();
+    f.insert(
+        "thread-1",
+        &format!(
+            "Read the Codex goal objective file at {} before continuing.",
+            goal.display()
+        ),
+    );
+    persist_codex_goal_attachment_paths(&f.paths.shared_codex_root).unwrap();
+    assert_eq!(fs::read_to_string(&outside).unwrap(), payload);
+    assert!(goal.is_symlink());
+}
+#[test]
+fn canonical_goal_resume_is_idempotent_across_three_process_home_cycles() {
+    let f = MediaFixture::new();
+    f.insert("thread-1", &f.objective());
+    for _ in 0..3 {
+        crate::repair_managed_codex_goal_attachments(&f.paths, Some("thread-1")).unwrap();
+        f.assert_goal_preserved("thread-1");
+    }
+}
+
+#[test]
+fn compressed_rollout_header_repairs_goal_while_other_child_remains_active() {
+    let f = MediaFixture::new();
+    f.insert("thread-1", &f.objective());
+    let rollout = f
+        .paths
+        .shared_codex_root
+        .join("sessions/2026/10/13/rollout-thread-1.jsonl.zst");
+    fs::create_dir_all(rollout.parent().unwrap()).unwrap();
+    let content = b"{\"type\":\"session_meta\",\"payload\":{\"id\":\"thread-1\"}}\n";
+    let encoded = zstd::stream::encode_all(content.as_slice(), 3).unwrap();
+    fs::write(&rollout, &encoded).unwrap();
+    let held = crate::lock_codex_sessions_for_child(&f.paths.shared_codex_root).unwrap();
+    crate::maintain_managed_codex_session_file(&f.paths, &rollout).unwrap();
+    f.assert_goal_preserved("thread-1");
+    assert_eq!(
+        fs::read(&rollout).unwrap(),
+        encoded,
+        "do not mutate an active compressed rollout"
+    );
+    drop(held);
+}
+
+#[cfg(unix)]
+#[test]
+fn attachment_id_directory_cannot_redirect_generated_goal_repair_outside_storage() {
+    let f = MediaFixture::new();
+    let outside = f.root.join("external-user-dir");
+    fs::create_dir_all(&outside).unwrap();
+    let payload = f.objective();
+    fs::write(outside.join("goal-objective.md"), &payload).unwrap();
+    let alias = f
+        .paths
+        .shared_codex_root
+        .join("attachments")
+        .join("bbbbbbbb-cccc-4ddd-8eee-ffffffffffff");
+    std::os::unix::fs::symlink(&outside, &alias).unwrap();
+    f.insert(
+        "thread-1",
+        &format!(
+            "Read the Codex goal objective file at {} before continuing.",
+            alias.join("goal-objective.md").display()
+        ),
+    );
+    persist_codex_goal_attachment_paths(&f.paths.shared_codex_root).unwrap();
+    assert_eq!(
+        fs::read_to_string(outside.join("goal-objective.md")).unwrap(),
+        payload
+    );
+}

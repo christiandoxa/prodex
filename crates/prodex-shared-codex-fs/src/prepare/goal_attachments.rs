@@ -1,5 +1,7 @@
 use super::*;
-use crate::image_attachments::rewrite_codex_persisted_attachment_paths;
+use crate::image_attachments::{
+    persist_codex_goal_objective_attachments, rewrite_codex_persisted_attachment_paths,
+};
 use anyhow::{Context, Result};
 use rusqlite::{Connection, OptionalExtension, params};
 use std::io::Read;
@@ -59,18 +61,15 @@ fn persist_codex_goal_attachment_paths_in_db(codex_home: &Path, db_path: &Path) 
             continue;
         };
         let rewritten = rewrite_codex_persisted_attachment_paths(codex_home, &objective)?;
+        persist_codex_goal_objective_attachments(codex_home, &rewritten)?;
         if rewritten != objective {
-            updates.push((thread_id, rewritten));
+            updates.push((thread_id, objective, rewritten));
         }
     }
     drop(stmt);
 
-    for (thread_id, objective) in updates {
-        conn.execute(
-            "UPDATE thread_goals SET objective = ? WHERE thread_id = ?",
-            params![objective, thread_id],
-        )
-        .with_context(|| format!("failed to update goal attachments in {}", db_path.display()))?;
+    for (thread_id, previous, rewritten) in updates {
+        update_goal_attachment_reference(&conn, db_path, &thread_id, &previous, &rewritten)?;
     }
     Ok(())
 }
@@ -137,12 +136,49 @@ fn persist_codex_goal_attachment_path_for_thread_in_db(
         return Ok(());
     };
     let rewritten = rewrite_codex_persisted_attachment_paths(codex_home, &objective)?;
+    persist_codex_goal_objective_attachments(codex_home, &rewritten)?;
     if rewritten != objective {
-        conn.execute(
-            "UPDATE thread_goals SET objective = ? WHERE thread_id = ?",
-            params![rewritten, thread_id],
-        )
-        .with_context(|| format!("failed to update goal attachments in {}", db_path.display()))?;
+        update_goal_attachment_reference(&conn, db_path, thread_id, &objective, &rewritten)?;
+    }
+    Ok(())
+}
+
+// Repair the independent SQLite row without overwriting a newer objective,
+// resuming its status, resetting counters or touching another thread's goal.
+fn update_goal_attachment_reference(
+    conn: &Connection,
+    db_path: &Path,
+    thread_id: &str,
+    previous: &str,
+    rewritten: &str,
+) -> Result<()> {
+    conn.execute(
+        "UPDATE thread_goals SET objective = ?1 WHERE thread_id = ?2 AND objective = ?3",
+        params![rewritten, thread_id, previous],
+    )
+    .with_context(|| format!("failed to update goal attachments in {}", db_path.display()))?;
+    Ok(())
+}
+
+/// Reading the immutable header does not require stopping an unrelated child.
+/// Never rewrite rollouts without the existing exclusive maintenance lock.
+pub(super) fn persist_goal_attachments_for_session_file(
+    codex_home: &Path,
+    session_file: &Path,
+) -> Result<()> {
+    if !prodex_core::path_is_under_root(codex_home, session_file) {
+        return Ok(());
+    }
+    let file = prodex_core::open_regular_file_no_follow(session_file)?;
+    let mut reader: Box<dyn Read> = if session_file.to_string_lossy().ends_with(".jsonl.zst") {
+        Box::new(zstd::stream::read::Decoder::new(file)?)
+    } else {
+        Box::new(file)
+    };
+    let mut prefix = Vec::new();
+    reader.by_ref().take(64 * 1024).read_to_end(&mut prefix)?;
+    if let Some(id) = session_thread_id(&String::from_utf8_lossy(&prefix)) {
+        persist_codex_goal_attachment_path_for_thread(codex_home, &id)?;
     }
     Ok(())
 }
