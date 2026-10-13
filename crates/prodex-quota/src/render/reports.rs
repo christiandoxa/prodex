@@ -54,7 +54,16 @@ pub fn render_quota_reports_window_with_sort(
 ) -> RenderedQuotaReportWindow {
     let sorted = sort_quota_reports_for_display_with_sort(reports, sort);
     let total_profiles = sorted.len();
-    let start_profile = start_profile.min(total_profiles.saturating_sub(1));
+    let start_profile = prodex_mojo_core::quota::quota_report_page_plan(
+        total_profiles,
+        start_profile,
+        0,
+        0,
+        0,
+        max_lines,
+    )
+    .expect("Mojo quota pagination initial plan failed")
+    .start_profile;
     let mut lines = quota_report_header_lines(reports, total_width);
     let header_lines = lines.len();
     let shown_profiles = append_quota_profile_sections(
@@ -65,16 +74,25 @@ pub fn render_quota_reports_window_with_sort(
         total_width,
         start_profile,
     );
-    let hidden_before = start_profile;
-    let hidden_after = total_profiles.saturating_sub(start_profile.saturating_add(shown_profiles));
+    let page = prodex_mojo_core::quota::quota_report_page_plan(
+        total_profiles,
+        start_profile,
+        shown_profiles,
+        lines.len(),
+        0,
+        max_lines,
+    )
+    .expect("Mojo quota pagination visibility plan failed");
+    let hidden_before = page.hidden_before;
+    let hidden_after = page.hidden_after;
 
     append_quota_visibility_notice(
         &mut lines,
-        max_lines,
         interactive_scroll_hint,
         total_profiles,
         start_profile,
         shown_profiles,
+        page,
     );
     if lines.len() == header_lines && total_profiles == 0 {
         lines.push("No quota profiles.".to_string());
@@ -121,16 +139,16 @@ fn append_quota_profile_sections(
     let mut shown_profiles = 0usize;
     for report in sorted.iter().skip(start_profile) {
         let section = render_quota_report_section(report, detail, total_width);
-        let reserve_notice =
-            usize::from(start_profile > 0 || start_profile + shown_profiles + 1 < total_profiles);
-        let would_overflow = max_lines.is_some_and(|limit| {
-            lines
-                .len()
-                .saturating_add(section.len())
-                .saturating_add(reserve_notice)
-                > limit
-        });
-        if would_overflow {
+        let plan = prodex_mojo_core::quota::quota_report_page_plan(
+            total_profiles,
+            start_profile,
+            shown_profiles,
+            lines.len(),
+            section.len(),
+            max_lines,
+        )
+        .expect("Mojo quota pagination section-capacity plan failed");
+        if !plan.append_section {
             break;
         }
         lines.extend(section);
@@ -141,19 +159,17 @@ fn append_quota_profile_sections(
 
 fn append_quota_visibility_notice(
     lines: &mut Vec<String>,
-    max_lines: Option<usize>,
     interactive_scroll_hint: bool,
     total_profiles: usize,
     start_profile: usize,
     shown_profiles: usize,
+    page: prodex_mojo_core::quota::QuotaReportPagePlan,
 ) {
-    let hidden_before = start_profile;
-    let hidden_after = total_profiles.saturating_sub(start_profile.saturating_add(shown_profiles));
-    let has_hidden = hidden_before > 0 || hidden_after > 0;
-    let has_room = max_lines.is_none_or(|limit| lines.len() < limit);
-    if !has_hidden || !has_room {
+    if !page.show_notice {
         return;
     }
+    let hidden_before = page.hidden_before;
+    let hidden_after = page.hidden_after;
     let notice = if interactive_scroll_hint {
         format!(
             "profiles {}-{} of {total_profiles}; {hidden_before} above, {hidden_after} below",

@@ -585,7 +585,8 @@
           "quota_aggregation_kernel",
           "quota_capacity_lane_planning",
           "quota_model_policy",
-          "quota_reset_epoch_precedence"
+          "quota_reset_epoch_precedence",
+          "quota_report_page_planning"
         ]
       },
       "mojo/prodex_core/candidate_decision.mojo": {
@@ -7908,6 +7909,29 @@
       "duplicate_production_owner": false,
       "platform_fallback": false,
       "rust_adapter_scope": "request metadata acquisition and immutable ownership facts; runtime bindings remain protected"
+    },
+    {
+      "name": "quota_report_page_planning",
+      "domain": "quota/display-window",
+      "introduced_in": "0.438.0",
+      "baseline_state": "Rust quota report rendering decided scroll clamping, line-budget admission, hidden-profile counts and visibility notice scheduling",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_quota_report_page_plan_v1",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/quota.mojo",
+      "consumer": "crates/prodex-quota/src/render/reports.rs",
+      "consumer_marker": "prodex_mojo_core::quota::quota_report_page_plan(",
+      "production_consumers": [
+        "crates/prodex-quota/src/render/reports.rs"
+      ],
+      "production_reachability_test": "crates/prodex-mojo-core/src/quota/report_sort.rs",
+      "rust_owner_before": "Quota report viewport decisions: scroll clamp, capacity reservation for notices, row inclusion, hidden counts and notice eligibility",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "deleted; typed required-Mojo pagination tests and live report-renderer edge regressions cover zero/overflow width and hidden sections; deliberate Mojo budget mutation caught",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "rendering profile content, line-count acquisition, textual output and applying the Mojo viewport/scroll plan"
     }
   ],
   "rust_semantic_reductions": [
