@@ -306,3 +306,49 @@ The Windows matrix increases from 8 to 10 runners on heavy pushes, trading
 additional runner setup/billed minutes for lower wall-clock duration while
 preserving per-shard serialization. The next completed Windows CI is needed
 to confirm actual speedup and environment-specific test coverage.
+
+
+## Release metadata-aware archive fingerprints and ARM64 reuse
+
+GitHub CI source-fingerprint caching was verified on
+[run 38375872402](https://github.com/christiandoxa/prodex/actions/runs/38375872402):
+all four archive jobs skipped compilation and preserved their unconditional
+ABI checks and artifact uploads. The jobs finished in **17, 18, 22 and
+28 seconds**, versus ~4m15s–4m23s on the prior full compile. This
+is an observed same-input cache hit, not a promise that every push will hit.
+
+The initial fingerprint unnecessarily included the workspace Cargo.toml and
+Cargo.lock. Updating Prodex's package version or unrelated Rust dependencies
+can change these files without changing a Mojo translation unit. The CI
+fingerprint is now v2: it covers all Mojo source files (including imports),
+the complete build script and Rust helper source files, the
+prodex-mojo-core feature manifest, the target architecture and CPU, pinned
+Rust 1.99.0 and Mojo 1.1.0. Workspace version-only metadata no longer
+invalidates the archive, but any meaningful compiler/ABI/source change
+does. There are **no prefix restore keys**; a cache miss always uses a
+fresh strict source build, and the ABI/forbidden-runtime checks run on
+hits and misses alike. The new v2 fingerprint naturally needs to populate
+its cache once before the next run can hit.
+
+Standalone release additionally builds Linux ARM64 and Windows ARM64 Mojo
+archives; heavy CI currently publishes only the other four targets.
+These two remaining archives now have a **separate, immutable and
+architecture-scoped release-only cache** with the same compiler/source
+fingerprint. The workflow tries exact-SHA provenance-verified CI archive
+reuse first; on the ARM64 targets it then tries the immutable main-ref
+cache, and if neither succeeds installs the pinned compiler and builds
+the archive. The release archive cache is never used for other targets,
+PRs or forks, and it is saved only on a fully successful archive job.
+All six archives still undergo the same ABI symbol, MSVC weak-symbol,
+and forbidden Mojo CompilerRT checks before artifact publication.
+The binary build remains behind the successful full-CI and complete
+six-platform archive gates. Version changes alone no longer trigger
+ARM64 Mojo recompilation when sources and compiler inputs are unchanged.
+
+Expected benefit: eliminate **two redundant ARM64 archive builds** on
+subsequent source-identical releases. The first release with these cache keys
+must compile to populate them. This reduces release compute and may shorten
+the archive barrier; Windows ARM64 Rust binary compilation still
+determines a substantial portion of the remaining release critical path.
+No measured official release timing is claimed until a new release
+actually uses the cache.

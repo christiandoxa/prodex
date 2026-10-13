@@ -285,22 +285,30 @@ jobs:
           set -euo pipefail
           python3 scripts/ci/reuse_mojo_ci_archive.py             --target '${{ matrix.target }}'             --sha "${RELEASE_TARGET_SHA}"             --output-dir 'target/mojo-release/${{ matrix.target }}'
 
+      - name: Restore strict release-only ARM64 Mojo archive cache
+        if: ${{ steps.reuse-ci-archive.outputs.reused != 'true' && github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && (matrix.target == 'aarch64-unknown-linux-gnu' || matrix.target == 'aarch64-pc-windows-msvc') }}
+        id: release-arm64-archive-cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
+        with:
+          path: target/mojo-release/${{ matrix.target }}
+          key: mojo-release-arm64-v1-${{ runner.os }}-${{ matrix.target }}-${{ matrix.mojo-target-cpu }}-mojo-${{ env.MOJO_VERSION }}-rust1.99.0-${{ hashFiles('mojo/**/*.mojo', 'crates/prodex-mojo-core/build.rs', 'crates/prodex-mojo-core/build/*.rs', 'crates/prodex-mojo-core/Cargo.toml') }}
+
       - name: Install Rust target
-        if: ${{ steps.reuse-ci-archive.outputs.reused != 'true' }}
+        if: ${{ steps.reuse-ci-archive.outputs.reused != 'true' && steps.release-arm64-archive-cache.outputs.cache-hit != 'true' }}
         uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
         with:
           toolchain: 1.99.0
           targets: ${{ matrix.target }}
 
       - name: Install pinned uv
-        if: ${{ steps.reuse-ci-archive.outputs.reused != 'true' }}
+        if: ${{ steps.reuse-ci-archive.outputs.reused != 'true' && steps.release-arm64-archive-cache.outputs.cache-hit != 'true' }}
         uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
           version: ${{ env.UV_VERSION }}
           enable-cache: false
 
       - name: Install pinned Mojo compiler
-        if: ${{ steps.reuse-ci-archive.outputs.reused != 'true' }}
+        if: ${{ steps.reuse-ci-archive.outputs.reused != 'true' && steps.release-arm64-archive-cache.outputs.cache-hit != 'true' }}
         shell: bash
         run: |
           set -euo pipefail
@@ -322,7 +330,7 @@ jobs:
           sudo apt-get install -y llvm
 
       - name: Build target Mojo archive
-        if: ${{ steps.reuse-ci-archive.outputs.reused != 'true' }}
+        if: ${{ steps.reuse-ci-archive.outputs.reused != 'true' && steps.release-arm64-archive-cache.outputs.cache-hit != 'true' }}
         shell: bash
         run: |
           set -euo pipefail
