@@ -187,14 +187,23 @@ mod tests {
 
     #[test]
     fn prefetch_lookahead_keepalive_does_not_commit_a_later_capacity_failure() {
+        // The fixture preloads a bounded two-slot channel before consumption.
+        let prelude = concat!(
+            "data: {\"type\":\"response.created\",\"response\":{\"id\":\"resp-held\"}}\r\n\r\n",
+            "data: {\"type\":\"keepalive\"}\r\n\r\n",
+        );
+        let failure = concat!(
+            "data: {\"type\":\"response.failed\",\"response\":{\"error\":{",
+            "\"code\":\"server_is_overloaded\",\"message\":\"Server is overloaded\"}}}\r\n\r\n",
+        );
         let (inspection, _) = block_on_lookahead(
             vec![
-                RuntimePrefetchChunk::Data(b"data: {\"type\":\"response.created\",\"response\":{\"id\":\"resp-held\"}}\r\n\r\n".to_vec()),
-                RuntimePrefetchChunk::Data(b"data: {\"type\":\"keepalive\"}\r\n\r\n".to_vec()),
-                RuntimePrefetchChunk::Data(b"data: {\"type\":\"response.failed\",\"response\":{\"error\":{\"code\":\"server_is_overloaded\"}}}\r\n\r\n".to_vec()),
+                RuntimePrefetchChunk::Data(prelude.as_bytes().to_vec()),
+                RuntimePrefetchChunk::Data(failure.as_bytes().to_vec()),
             ],
             "keepalive-before-capacity",
-        ).expect("lookahead should inspect all control frames");
+        )
+        .expect("lookahead should inspect all control frames");
         assert!(
             matches!(inspection, RuntimeSseInspection::Overloaded(_)),
             "{inspection:?}"
