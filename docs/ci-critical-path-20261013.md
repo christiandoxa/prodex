@@ -416,3 +416,39 @@ to quantify its overall wall-clock benefit; the previous bottleneck
 also included antivirus and other independent release gates. If a
 platform-specific smoke check fails, fix its platform behavior rather
 than dropping the diagnostic or weakening security.
+
+
+## Eliminate duplicate nightly Mojo compilation
+
+The scheduled/dispatch Full Rust suite still ran its own strict Linux Mojo
+archive compiler despite the exact same binary archive already being cached
+by trusted main CI. Its archive-producing job blocks every full-test
+partition, so unlike a parallel independent stage, it directly adds to
+end-to-end critical-path time. The last two successful full-test runs showed:
+
+| Full test run | Archive job | Compilation step |
+| --- | ---: | ---: |
+| [38289151967](https://github.com/christiandoxa/prodex/actions/runs/38289151967) | 7.0 minutes | 396 seconds |
+| [38149665434](https://github.com/christiandoxa/prodex/actions/runs/38149665434) | 6.6 minutes | 373 seconds |
+
+The nightly Linux archive producer now uses the **exact same immutable
+source-fingerprint key** as CI's trusted v2 Linux archive, with the
+same archive path inside its own job. This allows scheduled main or
+explicit main dispatch to restore the already validated cache. It does
+not use the cache for any other source branch. If a cache misses, the
+original Rust 1.99.0 / uv / Mojo 1.1.0 toolchain is installed and the
+full strict compile executes exactly as before.
+
+After either a hit or a miss, it **unconditionally** checks exported ABI
+symbols, the forbidden Mojo compiler-runtime dependency and nonempty
+archive bytes before uploading the archive for all full-test consumers.
+Those test consumers still download into the same prior layout and
+execute every scheduled/full Rust test partition with the existing
+error propagation and per-test serialization.
+
+This change removes up to ~6.2–6.6 minutes of redundant compilation
+on a matching cache hit. Actual full-workflow wall-clock savings may
+be smaller or larger due to runner contention, cache access, and other
+independent tests; no optimized nightly run is claimed until measured.
+Regression tests require byte-identical cache keys, all mandatory guards
+and the original consumer matrix/downstream test execution.

@@ -88,19 +88,10 @@ test("scheduled full suite runs disjoint workspace and prodex-app partitions in 
   assert.match(archive, /PRODEX_MOJO_REQUIRED=1/);
   assert.match(workflow, /needs: \[full_test_shards, mojo-runtime-linux-archive\]/);
   assert.match(workflow, /name: Download runtime Mojo archive/);
-  assert.match(
-    archive,
-    /mkdir -p "\.prodex-ci\/mojo-runtime\/\$\{target\}"/,
-  );
-  assert.match(
-    archive,
-    /cp "\$\{archive\}" "\.prodex-ci\/mojo-runtime\/\$\{target\}\/libprodex_mojo_core\.a"/,
-  );
-  assert.match(
-    archive,
-    /path: \.prodex-ci\/mojo-runtime\/x86_64-unknown-linux-gnu\/libprodex_mojo_core\.a/,
-  );
-  assert.doesNotMatch(archive, /path: target\/mojo-runtime\//);
+  assert.match(archive, /mkdir -p "target\/mojo-runtime\/\$\{target\}"/);
+  assert.match(archive, /cp "\$\{archive\}" "target\/mojo-runtime\/\$\{target\}\/libprodex_mojo_core\.a"/);
+  assert.match(archive, /path: target\/mojo-runtime\/x86_64-unknown-linux-gnu\/libprodex_mojo_core\.a/);
+  assert.match(workflow, /path: \.prodex-ci\/mojo-runtime\/x86_64-unknown-linux-gnu/);
   assert.match(workflow, /name: Full tests \(\$\{\{ matrix\.label \}\}\)/);
   assert.match(workflow, /full_test_shards:/);
   assert.match(workflow, /--full-test-matrix/);
