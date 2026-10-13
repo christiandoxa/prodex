@@ -100,3 +100,22 @@ and platform-specific completeness.
 In particular, do not replace the serial Windows suites with a single
 multithreaded process: some environment-sensitive tests deliberately require
 isolation. Independent GitHub-hosted runners preserve that property.
+
+## Release Intel macOS cross-build hypothesis
+
+The most expensive stable-release build on 0.437.9 was x86_64 macOS on
+macos-15-intel: the binary compile itself took 16.4 minutes (20.8 minutes on
+another release), compared with about 5.4 minutes for aarch64 macOS on an
+Apple Silicon runner. Apple Silicon compilers support the x86_64-apple-darwin
+target, but native runtime smoke requires Rosetta. Production releases must
+not silently replace a tested Intel native build with an unproven cross build.
+
+The opt-in release-macos-cross-calibration workflow checks out a pinned source
+SHA, independently verifies that a successful push CI for that SHA produced
+the matching strict x86_64 Mojo archive, and builds the **identical Thin-LTO
+release target** on macos-14 (Apple Silicon). It verifies Mach-O x86_64
+architecture and requires an actual Rosetta-executed prodex runtime diagnostic.
+It publishes neither a binary nor a release. Use its recorded build duration
+and platform smoke result before considering a release matrix runner change.
+A cross-build that fails on compiler, linker, architecture, or runtime tests is
+a rejected experiment, not permission to weaken release smoke tests.

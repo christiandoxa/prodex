@@ -77,3 +77,27 @@ test("release archives overlap CI verification but binary publication remains ga
   assert.match(release, /sha256sum --check SHA256SUMS/);
   assert.match(release, /Scan release assets for malware/);
 });
+
+
+test("Apple Silicon Intel release benchmark is opt-in, source-pinned and cannot publish", () => {
+  const workflow = readFileSync(".github/workflows/release-macos-cross-calibration.yml", "utf8");
+  assert.match(workflow, /name: macOS Intel cross-build calibration/);
+  assert.match(workflow, /workflow_dispatch:/);
+  assert.doesNotMatch(workflow, /^  push:/m);
+  assert.match(workflow, /runs-on: macos-14/);
+  assert.match(workflow, /permissions:\n  contents: read\n  actions: read/);
+  assert.match(workflow, /\.head_sha == \$sha/);
+  assert.match(workflow, /\.conclusion == "success"/);
+  assert.match(workflow, /\.event == "push"/);
+  assert.match(workflow, /- name: Check out exact CI source/);
+  assert.match(workflow, /run-id:/);
+  assert.match(workflow, /name: mojo-runtime-archive-x86_64-apple-darwin/);
+  assert.match(workflow, /PRODEX_MOJO_REQUIRED: "1"/);
+  assert.match(workflow, /cargo build --release --locked --target x86_64-apple-darwin/);
+  assert.match(workflow, /lipo -archs/);
+  assert.match(workflow, /arch -x86_64/);
+  assert.match(workflow, /"implementation": "mojo-compiled-in"/);
+  assert.doesNotMatch(workflow, /gh release (?:create|upload|edit)/);
+  assert.doesNotMatch(workflow, /git push/);
+  assert.doesNotMatch(workflow, /attest-build-provenance/);
+});
