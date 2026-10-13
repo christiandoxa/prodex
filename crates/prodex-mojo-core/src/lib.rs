@@ -234,6 +234,8 @@ pub mod sse_precommit;
 #[cfg(feature = "mojo-runtime")]
 pub mod state_policy;
 #[cfg(feature = "mojo-runtime")]
+pub mod status_resource;
+#[cfg(feature = "mojo-runtime")]
 pub mod sub_agent_policy;
 #[cfg(feature = "mojo-runtime")]
 pub mod super_provider_config;

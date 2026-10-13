@@ -145,19 +145,26 @@ fn status_quota_fixture(
 #[test]
 fn proc_parsers_extract_cpu_memory_and_disk_counters() {
     assert_eq!(
-        parse_process_cpu_ticks("123 (prodex worker) S 1 2 3 4 5 6 7 8 9 10 120 30 0 0 0"),
+        prodex_mojo_core::status_resource::parse_process_cpu_ticks(
+            "123 (prodex worker) S 1 2 3 4 5 6 7 8 9 10 120 30 0 0 0"
+        ),
         Some(150)
     );
     assert_eq!(
-        parse_system_cpu_ticks("cpu  10 20 30 40 50 60 70 80 90\ncpu0 1 2 3 4"),
+        prodex_mojo_core::status_resource::parse_system_cpu_ticks(
+            "cpu  10 20 30 40 50 60 70 80 90\ncpu0 1 2 3 4"
+        ),
         Some(360)
     );
     assert_eq!(
-        parse_kib_field("VmRSS: 2048 kB\n", "VmRSS"),
+        prodex_mojo_core::status_resource::parse_kib_field("VmRSS: 2048 kB\n", "VmRSS"),
         Some(2_097_152)
     );
     assert_eq!(
-        parse_u64_field("read_bytes: 123\nwrite_bytes: 456\n", "write_bytes"),
+        prodex_mojo_core::status_resource::parse_u64_field(
+            "read_bytes: 123\nwrite_bytes: 456\n",
+            "write_bytes"
+        ),
         Some(456)
     );
 }
@@ -450,7 +457,7 @@ fn network_queue_parser_filters_prodex_socket_inodes() {
         "1: 0100007F:1F91 00000000:0000 0A 00000100:00000200 00:00000000 00000000 1000 0 99\n",
     );
     assert_eq!(
-        parse_network_queues(table, &HashSet::from([42])),
+        prodex_mojo_core::status_resource::parse_network_queues(table, &HashSet::from([42])),
         (0x20, 0x10)
     );
 }

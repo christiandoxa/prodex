@@ -58,6 +58,7 @@ fn emit_source_rerun_directives(sources: &[&str], manifest_dir: &Path) {
         "provider_binding_identity.mojo",
         "provider_upstream.mojo",
         "runtime_local_rewrite_transport.mojo",
+        "status_resource.mojo",
     ] {
         println!(
             "cargo:rerun-if-changed={}",
@@ -519,6 +520,7 @@ fn selected_sources() -> Vec<&'static str> {
         sources.push("../../mojo/prodex_core/sse_line.mojo");
         sources.push("../../mojo/prodex_core/provider_upstream.mojo");
         sources.push("../../mojo/prodex_core/runtime_local_rewrite_transport.mojo");
+        sources.push("../../mojo/prodex_core/status_resource.mojo");
     }
     if env::var_os("CARGO_FEATURE_MOJO_RICH").is_some()
         || env::var_os("CARGO_FEATURE_MOJO_CORE").is_some()

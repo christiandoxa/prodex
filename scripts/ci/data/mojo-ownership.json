@@ -635,6 +635,16 @@
           "session_file_name_policy"
         ]
       },
+    {
+      "path": "mojo/prodex_core/status_resource.mojo",
+      "language": "mojo",
+      "classification": "DETERMINISTIC_DOMAIN",
+      "production_reachable": true,
+      "role": "semantic",
+      "operations": [
+        "status_resource_proc_parser"
+      ]
+    },
       {
         "path": "crates/prodex-mojo-core/src/json/session_selector.rs",
         "language": "rust",
@@ -2124,6 +2134,29 @@
       "duplicate_production_owner": false,
       "platform_fallback": false,
       "rust_adapter_scope": "clock capture, persistence and refresh scheduler IO, borrowed reset-window marshalling, checked duration materialization"
+    },
+    {
+      "name": "status_resource_proc_parser",
+      "domain": "app/status-resource",
+      "introduced_in": "0.438.0",
+      "baseline_state": "candidate",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_status_resource_parser_v1",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/status_resource.mojo",
+      "consumer": "crates/prodex-app/src/app_commands/status/resource.rs",
+      "consumer_marker": "prodex_mojo_core::status_resource::",
+      "production_consumers": [
+        "crates/prodex-app/src/app_commands/status/resource.rs"
+      ],
+      "production_reachability_test": "crates/prodex-app/src/app_commands/status/tests.rs",
+      "rust_owner_before": "Rust parsed /proc CPU, memory, IO, socket inode, and network queue text in the status resource collector",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "caller tests in app_commands/status/tests.rs and direct ABI parser tests in prodex-mojo-core",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "filesystem reads, process/socket enumeration, HashSet preparation, and typed ABI result mapping"
     },
     {
       "name": "runtime_precommit_retry_exhaustion",
@@ -8974,6 +9007,30 @@
       "production_consumer": "crates/prodex-runtime-proxy/src/gateway_policy/selection.rs",
       "parity_test": "crates/prodex-runtime-proxy/src/gateway_policy/selection.rs",
       "performance": "one bounded route-candidate call"
+    },
+    {
+      "file": "crates/prodex-app/src/app_commands/status/resource.rs",
+      "symbol": "parse_process_cpu_ticks",
+      "operation": "status_resource_proc_parser",
+      "previous_responsibility": "Rust parsed /proc CPU, memory, IO, socket inode, and network queue text in the status resource collector",
+      "final_state": "adapter-only",
+      "cleanup_loc": 82,
+      "cleanup_source": {
+        "kind": "collapsed-adapter",
+        "baseline_range": {
+          "start": 130,
+          "end": 216
+        },
+        "release_symbol": "fs::read_to_string(\"/proc/stat\")",
+        "release_marker": "prodex_mojo_core::status_resource::parse_system_cpu_ticks("
+      },
+      "rust_before": "crates/prodex-app/src/app_commands/status/resource.rs::parse_process_cpu_ticks, parse_system_cpu_ticks, parse_kib_field, parse_u64_field, parse_network_queues, and collect_socket_inodes",
+      "rust_after": "Rust retains filesystem and process enumeration while Mojo owns bounded text and queue parsing",
+      "mojo_owner": "mojo/prodex_core/status_resource.mojo::prodex_status_resource_parser_v1",
+      "mojo_entry": "prodex_status_resource_parser_v1",
+      "production_consumer": "crates/prodex-app/src/app_commands/status/resource.rs",
+      "parity_test": "crates/prodex-app/src/app_commands/status/tests.rs",
+      "performance": "one bounded Mojo parser call per proc text or network table"
     },
     {
       "file": "crates/prodex-runtime-proxy/src/smart_context/rewrite_policy/adaptive.rs",
