@@ -137,3 +137,44 @@ def prodex_mojo_log_parse_v1(
     result[unsafe_offset=1] = event_length
     result[unsafe_offset=2] = fields
     return LOG_PARSE_STATUS_OK
+
+
+# Decode the first plain-text log envelope delimiter; UTF-8 slicing stays host-side.
+# Output: timestamp start (-1 if absent), timestamp end, message start.
+@export("prodex_mojo_log_plain_envelope_v1")
+def prodex_mojo_log_plain_envelope_v1(
+    abi_version: Int64,
+    line_address: UInt,
+    line_length: Int64,
+    output_address: UInt,
+    output_capacity: Int64,
+) abi("C") -> Int64:
+    if abi_version != 1:
+        return 4
+    if (
+        line_length < 0
+        or (line_length > 0 and line_address == 0)
+        or output_address == 0
+        or output_capacity < 3
+    ):
+        return LOG_PARSE_STATUS_INVALID
+
+    var source = Pointer[mut=False, UInt8, ImmUntrackedOrigin](
+        unsafe_from_address=Int(line_address)
+    )
+    var output = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    output[unsafe_offset=0] = -1
+    output[unsafe_offset=1] = 0
+    output[unsafe_offset=2] = 0
+    var cursor: Int64 = 0
+    while cursor + 1 < line_length:
+        if source[unsafe_offset=cursor] == 93 and source[unsafe_offset=cursor + 1] == 32:
+            output[unsafe_offset=2] = cursor + 2
+            if cursor > 0 and source[unsafe_offset=0] == 91:
+                output[unsafe_offset=0] = 1
+                output[unsafe_offset=1] = cursor
+            break
+        cursor += 1
+    return LOG_PARSE_STATUS_OK

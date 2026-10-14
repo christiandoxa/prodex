@@ -1291,6 +1291,26 @@
         ]
       },
       {
+        "path": "mojo/prodex_core/log_parser.mojo",
+        "language": "mojo",
+        "classification": "DETERMINISTIC_DOMAIN",
+        "production_reachable": true,
+        "role": "semantic",
+        "operations": [
+          "runtime_doctor_plain_text_log_envelope"
+        ]
+      },
+      {
+        "path": "crates/prodex-mojo-core/src/rich/log_parser.rs",
+        "language": "rust",
+        "classification": "MIXED",
+        "production_reachable": true,
+        "role": "adapter",
+        "operations": [
+          "runtime_doctor_plain_text_log_envelope"
+        ]
+      },
+      {
         "path": "mojo/prodex_core/runtime_doctor_marker_summary.mojo",
         "language": "mojo",
         "classification": "DETERMINISTIC_DOMAIN",
@@ -8787,6 +8807,29 @@
       "duplicate_production_owner": false,
       "platform_fallback": false,
       "rust_adapter_scope": "Rust measures post-truncation Unicode display width and materializes the Mojo-decided count of padding spaces"
+    },
+    {
+      "name": "runtime_doctor_plain_text_log_envelope",
+      "domain": "runtime-doctor/log-ingest",
+      "introduced_in": "0.438.0",
+      "baseline_state": "Rust searched and split the first ]-space delimiter and inferred a bracketed timestamp",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_mojo_log_plain_envelope_v1",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/log_parser.mojo",
+      "consumer": "crates/prodex-runtime-doctor/src/parsing/log_line.rs",
+      "consumer_marker": "prodex_mojo_core::rich::parse_plain_log_envelope(",
+      "production_consumers": [
+        "crates/prodex-runtime-doctor/src/parsing/log_line.rs"
+      ],
+      "production_reachability_test": "crates/prodex-runtime-doctor/src/parsing/log_line.rs",
+      "rust_owner_before": "Rust find, strip_prefix, and split_once chose plain-text log envelope offsets",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "removed from production; fixed delimiter and JSON precedence cases are asserted against the Mojo-linked caller",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "Rust retains safe UTF-8 borrowing, Unicode trim, JSON parsing, and log-field redaction; delimiter selection is Mojo-only"
     }
   ],
   "rust_semantic_reductions": [
