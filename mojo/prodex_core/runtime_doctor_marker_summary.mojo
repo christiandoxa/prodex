@@ -551,3 +551,56 @@ def prodex_mojo_runtime_doctor_marker_aggregation_v1(
                 if status != 0:
                     return status
     return 0
+
+
+# A single Mojo decision owns marker selection aggregation and the priority
+# of rejection-reason fields. Rust only updates caller-owned summary maps.
+# Slots: [marker bucket, selected/rejected destination, reason source].
+# Reason source: 1 reason, 2 outcome, 3 event, 4 status, 5 marker.
+@export("prodex_mojo_runtime_doctor_selection_record_plan_v1")
+def prodex_mojo_runtime_doctor_selection_record_plan_v1(
+    abi_version: Int64,
+    marker_address: UInt,
+    field_presence_bits: Int64,
+    output_address: UInt,
+    output_capacity: Int64,
+) abi("C") -> Int64:
+    if abi_version != 1:
+        return 4
+    if (
+        marker_address == 0
+        or output_address == 0
+        or output_capacity < 3
+        or field_presence_bits < 0
+        or field_presence_bits > 15
+    ):
+        return 1
+    var marker = Pointer[mut=False, ProdexRichStringView, ImmUntrackedOrigin](
+        unsafe_from_address=Int(marker_address)
+    )[].copy()
+    if not rich_view_valid(marker, INT64_MAX):
+        return 2
+    var bucket = runtime_doctor_marker_selection_bucket(marker)
+    var destination: Int64 = 0
+    var reason_source: Int64 = 0
+    if bucket == 1 or bucket == 2:
+        destination = 1
+    elif bucket == 3 or bucket == 4:
+        destination = 2
+        if field_presence_bits & 1 != 0:
+            reason_source = 1
+        elif field_presence_bits & 2 != 0:
+            reason_source = 2
+        elif field_presence_bits & 4 != 0:
+            reason_source = 3
+        elif field_presence_bits & 8 != 0:
+            reason_source = 4
+        else:
+            reason_source = 5
+    var output = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    output[unsafe_offset=0] = bucket
+    output[unsafe_offset=1] = destination
+    output[unsafe_offset=2] = reason_source
+    return 0
