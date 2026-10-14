@@ -5535,3 +5535,10 @@ including tool-call argument rewriting and lossless format metadata.
 
 The current broad report measures 110,309 reachable Mojo LOC and 222,558 Rust
 LOC (33.14% Mojo). The 75% project target remains in progress.
+
+## Profile-login lifecycle authority coverage
+
+The existing Mojo profile-login policy is now enforced by the no-fallback guard
+for status, API-key, and Claude login callers. Its transition and candidate
+selection matrices remain the single semantic owner; Rust retains credential,
+browser, filesystem, and persistence effects.
