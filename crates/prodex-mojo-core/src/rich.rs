@@ -9,7 +9,8 @@
 mod runtime_doctor_route_health;
 pub use runtime_doctor_route_health::{
     RUNTIME_DOCTOR_ROUTE_HEALTH_GROUPS_MAX_ROWS, RuntimeDoctorRouteHealthGroup,
-    runtime_doctor_route_health_groups,
+    RuntimeDoctorRouteReasonEvent, runtime_doctor_route_health_groups,
+    runtime_doctor_route_latest_reason,
 };
 #[path = "rich/runtime_doctor_degraded_routes.rs"]
 mod runtime_doctor_degraded_routes;

@@ -17,6 +17,17 @@ unsafe extern "C" {
         profile_row_indices: u64,
         output_count: u64,
     ) -> i64;
+    fn prodex_mojo_runtime_doctor_route_latest_reason_v1(
+        abi_version: i64,
+        event_profiles: u64,
+        event_routes: u64,
+        event_details: u64,
+        event_count: i64,
+        latest_index: i64,
+        requested_profile: u64,
+        requested_route: u64,
+        output: u64,
+    ) -> i64;
 }
 
 /// One grouped route-health row returned by the Mojo reducer.
@@ -102,6 +113,177 @@ pub fn runtime_doctor_route_health_groups<'a>(
         });
     }
     Ok(groups)
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct RuntimeDoctorRouteReasonEvent<'a> {
+    pub profile: &'a str,
+    pub route: &'a str,
+    pub detail: &'a str,
+}
+
+/// Mojo chooses the newest matching route event with a reason/outcome token,
+/// then returns a borrowed UTF-8 range. No Rust token parser is retained.
+pub fn runtime_doctor_route_latest_reason<'a>(
+    events: &[RuntimeDoctorRouteReasonEvent<'a>],
+    latest_index: usize,
+    profile: &str,
+    route: &str,
+) -> Result<Option<&'a str>, MojoError> {
+    ensure_rich_abi()?;
+    if events.len() > RUNTIME_DOCTOR_ROUTE_HEALTH_GROUPS_MAX_ROWS {
+        return Err(MojoError::Capacity);
+    }
+    if latest_index >= events.len() {
+        return Err(MojoError::InvalidInput);
+    }
+    let profiles = events
+        .iter()
+        .map(|event| view(event.profile))
+        .collect::<Vec<_>>();
+    let routes = events
+        .iter()
+        .map(|event| view(event.route))
+        .collect::<Vec<_>>();
+    let details = events
+        .iter()
+        .map(|event| view(event.detail))
+        .collect::<Vec<_>>();
+    let requested_profile = view(profile);
+    let requested_route = view(route);
+    let mut output = [-1_i64; 3];
+    let status = unsafe {
+        prodex_mojo_runtime_doctor_route_latest_reason_v1(
+            1,
+            mojo_pointer_address(profiles.as_ptr()),
+            mojo_pointer_address(routes.as_ptr()),
+            mojo_pointer_address(details.as_ptr()),
+            i64::try_from(events.len()).map_err(|_| MojoError::InvalidInput)?,
+            i64::try_from(latest_index).map_err(|_| MojoError::InvalidInput)?,
+            mojo_pointer_address(&requested_profile),
+            mojo_pointer_address(&requested_route),
+            mojo_mut_pointer_address(output.as_mut_ptr()),
+        )
+    };
+    if status != 0 {
+        return Err(match status {
+            1 => MojoError::InvalidInput,
+            2 => MojoError::InvalidOutput,
+            3 => MojoError::Capacity,
+            4 => MojoError::AbiMismatch,
+            _ => MojoError::InvalidOutput,
+        });
+    }
+    if output == [-1; 3] {
+        return Ok(None);
+    }
+    let index = usize::try_from(output[0]).map_err(|_| MojoError::InvalidOutput)?;
+    let start = usize::try_from(output[1]).map_err(|_| MojoError::InvalidOutput)?;
+    let end = usize::try_from(output[2]).map_err(|_| MojoError::InvalidOutput)?;
+    if index > latest_index {
+        return Err(MojoError::InvalidOutput);
+    }
+    let detail = events.get(index).ok_or(MojoError::InvalidOutput)?.detail;
+    detail
+        .get(start..end)
+        .map(Some)
+        .ok_or(MojoError::InvalidOutput)
+}
+
+#[cfg(test)]
+mod route_reason_tests {
+    use super::*;
+
+    #[test]
+    fn mojo_route_reason_finds_latest_matching_reason_and_unicode() {
+        let events = [
+            RuntimeDoctorRouteReasonEvent {
+                profile: "alpha",
+                route: "responses",
+                detail: "status=1 reason=old",
+            },
+            RuntimeDoctorRouteReasonEvent {
+                profile: "beta",
+                route: "responses",
+                detail: "reason=irrelevant",
+            },
+            RuntimeDoctorRouteReasonEvent {
+                profile: "alpha",
+                route: "responses",
+                detail: "status=2",
+            },
+            RuntimeDoctorRouteReasonEvent {
+                profile: "alpha",
+                route: "responses",
+                detail: "🧭\u{2003}outcome=ล่าสุด",
+            },
+            RuntimeDoctorRouteReasonEvent {
+                profile: "alpha",
+                route: "responses",
+                detail: "reason= outcome=ignored",
+            },
+        ];
+        assert_eq!(
+            runtime_doctor_route_latest_reason(&events, 2, "alpha", "responses").unwrap(),
+            Some("old")
+        );
+        assert_eq!(
+            runtime_doctor_route_latest_reason(&events, 3, "alpha", "responses").unwrap(),
+            Some("ล่าสุด")
+        );
+        assert_eq!(
+            runtime_doctor_route_latest_reason(&events, 4, "alpha", "responses").unwrap(),
+            Some("")
+        );
+        assert_eq!(
+            runtime_doctor_route_latest_reason(&events, 4, "alpha", "compact").unwrap(),
+            None
+        );
+        assert_eq!(
+            runtime_doctor_route_latest_reason(&events, 4, "missing", "responses").unwrap(),
+            None
+        );
+        assert_eq!(
+            runtime_doctor_route_latest_reason(&events, 5, "alpha", "responses"),
+            Err(MojoError::InvalidInput)
+        );
+    }
+
+    #[test]
+    fn mojo_route_reason_rejects_bad_abi_without_touching_output() {
+        let mut output = [99_i64; 3];
+        unsafe {
+            assert_eq!(
+                prodex_mojo_runtime_doctor_route_latest_reason_v1(
+                    2,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    mojo_mut_pointer_address(output.as_mut_ptr()),
+                ),
+                4,
+            );
+            assert_eq!(
+                prodex_mojo_runtime_doctor_route_latest_reason_v1(
+                    1,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    mojo_mut_pointer_address(output.as_mut_ptr()),
+                ),
+                1,
+            );
+        }
+        assert_eq!(output, [99; 3]);
+    }
 }
 
 // Both optional indices carry the same ABI sentinel/range contract, with a
