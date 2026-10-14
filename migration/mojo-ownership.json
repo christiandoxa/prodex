@@ -4617,7 +4617,7 @@
       "production_fallback": false,
       "duplicate_production_owner": false,
       "platform_fallback": false,
-      "rust_adapter_scope": "line/token iteration, diff-hunk end scanning, command-kind aggregation precedence, DTO/string materialization and semantic-range storage remain Rust"
+      "rust_adapter_scope": "line/token iteration, diff-hunk end scanning, DTO/string materialization and semantic-range storage remain Rust; command-kind aggregation precedence is owned by the batch semantic-index planner"
     },
     {
       "name": "smart_context_semantic_index_planning",
@@ -10076,6 +10076,29 @@
       "production_consumer": "crates/prodex-quota/src/render/windows.rs",
       "parity_test": "crates/prodex-mojo-core/tests/quota_reset_epoch.rs",
       "performance": "one scalar v1 ABI call per JSON reset message"
+    },
+    {
+      "file": "crates/prodex-app/src/runtime_state_shared/semantic_index/markers.rs",
+      "symbol": "runtime_smart_context_infer_command_kind",
+      "operation": "smart_context_semantic_index_planning",
+      "previous_responsibility": "Rust aggregated per-line Smart Context command classifications with Python short-circuiting and cargo-test, npm-test, cargo-build, and diff precedence",
+      "final_state": "deleted",
+      "rust_before": "crates/prodex-app/src/runtime_state_shared/semantic_index/markers.rs::runtime_smart_context_infer_command_kind and runtime_smart_context_command_line_kind",
+      "rust_after": "the duplicate Rust aggregation fallback is deleted; semantic_index.rs materializes the command kind selected by the Mojo batch planner",
+      "mojo_owner": "mojo/prodex_core/smart_context_markers.mojo::prodex_smart_context_semantic_index_v1",
+      "mojo_source": "mojo/prodex_core/smart_context_markers.mojo",
+      "mojo_entry": "prodex_smart_context_semantic_index_v1",
+      "production_consumer": "crates/prodex-app/src/runtime_state_shared/semantic_index.rs",
+      "parity_test": "crates/prodex-app/src/runtime_state_shared/artifact_tests.rs::runtime_smart_context_artifact_command_kind_precedence_uses_mojo_plan",
+      "cleanup_loc": 42,
+      "cleanup_source": {
+        "kind": "deleted",
+        "baseline_range": {
+          "start": 223,
+          "end": 265
+        }
+      },
+      "cleanup_evidence": "The former Rust command-kind precedence loop and its per-line adapter are absent from the release source; the artifact-store caller regression exercises the Mojo-selected precedence through the live semantic-index path."
     },
     {
       "file": "crates/prodex-app/src/runtime_state_shared/semantic_index/symbols.rs",

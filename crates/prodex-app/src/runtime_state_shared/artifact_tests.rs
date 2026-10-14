@@ -167,6 +167,18 @@ test result: FAILED. 0 passed; 1 failed";
     }
 
     #[test]
+    fn runtime_smart_context_artifact_command_kind_precedence_uses_mojo_plan() {
+        let text = "diff --git a/src/main.rs b/src/main.rs\nnpm ERR! failed\nerror: could not compile `demo`\nrunning 1 test\ntest result: FAILED";
+        let mut store = RuntimeSmartContextArtifactStore::default();
+        let artifact = store.insert_text(text).expect("artifact inserted");
+
+        let index = store
+            .line_index(&artifact.id)
+            .expect("new artifacts should carry a line index");
+        assert_eq!(index.command_kind.as_deref(), Some("cargo-test"));
+    }
+
+    #[test]
     fn runtime_smart_context_artifact_symbol_index_uses_mojo_ranges() {
         let text = "#[test]\nfn r#entry() {\n    enter();\n}\n\nasync def test_parse():\n    parse()\n\nit(\"unicode 雪\", () => {});\n";
         let mut store = RuntimeSmartContextArtifactStore::default();

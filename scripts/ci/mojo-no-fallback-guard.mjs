@@ -6169,7 +6169,6 @@ export function findViolations(files) {
         "prodex_mojo_core::smart_context_markers::is_test_failure_line(",
         "prodex_mojo_core::smart_context_markers::test_symbol_span(",
         "prodex_mojo_core::smart_context_markers::error_code(",
-        "prodex_mojo_core::smart_context_markers::command_line_kind(",
       ];
       const violations = required
         .filter((call) => !contents.includes(call))
@@ -6327,6 +6326,7 @@ export function findViolations(files) {
     if (filePath === SMART_CONTEXT_SYMBOLS_CALLER_TEST_FILE) {
       const required = [
         "runtime_smart_context_artifact_symbol_index_uses_mojo_ranges",
+        "runtime_smart_context_artifact_command_kind_precedence_uses_mojo_plan",
         "symbol_ranges",
         "unicode 雪",
         "content_hash",
@@ -7603,7 +7603,7 @@ function selfTest() {
     [SMART_CONTEXT_SYMBOLS_TEST_FILE,
       "source_symbol_ranges_cover_rust_python_and_javascript source_symbol_ranges_preserve_function_type_and_fallback_names symbol_index_reports_capacity_and_excerpt_truncation symbol_index_accepts_large_multi_line_artifacts_with_bounded_lines index(text, 16, 16 * 1024)"],
     [SMART_CONTEXT_SYMBOLS_CALLER_TEST_FILE,
-      "runtime_smart_context_artifact_symbol_index_uses_mojo_ranges symbol_ranges unicode 雪 content_hash"],
+      "runtime_smart_context_artifact_symbol_index_uses_mojo_ranges runtime_smart_context_artifact_command_kind_precedence_uses_mojo_plan symbol_ranges unicode 雪 content_hash"],
   ];
   assert.deepEqual(findViolations(smartContextSymbolFiles), []);
   assert.match(findViolations([[SMART_CONTEXT_SYMBOLS_CONSUMER_FILE,
