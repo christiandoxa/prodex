@@ -37,7 +37,7 @@ pub use routing::{
 };
 #[path = "rich/log_parser.rs"]
 mod log_parser;
-pub use log_parser::{LogFieldSpan, LogParsePlan, parse_log_message};
+pub use log_parser::{LogFieldSpan, LogParsePlan, parse_log_message, parse_plain_log_envelope};
 mod context_plan;
 pub use context_plan::{ContextPlan, ContextPlanAction, ContextPlanItem, plan_context_items};
 mod context;

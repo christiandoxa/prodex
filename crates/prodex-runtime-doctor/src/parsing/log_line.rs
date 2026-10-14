@@ -40,10 +40,9 @@ impl<'a> RuntimeDoctorParsedLogLine<'a> {
                 .and_then(serde_json::Value::as_str)
                 .map(runtime_proxy_redact_log_text);
         }
-        let end = self.line.find("] ")?;
-        self.line
-            .strip_prefix('[')
-            .and_then(|trimmed| trimmed.get(..end.saturating_sub(1)))
+        prodex_mojo_core::rich::parse_plain_log_envelope(self.line)
+            .expect("compiled Mojo runtime-doctor log envelope failed")
+            .timestamp
             .map(runtime_proxy_redact_log_text)
     }
 
@@ -55,13 +54,9 @@ impl<'a> RuntimeDoctorParsedLogLine<'a> {
         {
             return Cow::Borrowed(message);
         }
-        Cow::Borrowed(
-            self.line
-                .split_once("] ")
-                .map(|(_, message)| message)
-                .unwrap_or(self.line)
-                .trim(),
-        )
+        let envelope = prodex_mojo_core::rich::parse_plain_log_envelope(self.line)
+            .expect("compiled Mojo runtime-doctor log envelope failed");
+        Cow::Borrowed(envelope.message.trim())
     }
 
     #[cfg(feature = "runtime-log-mojo")]
@@ -236,5 +231,32 @@ mod expected_last_marker_line_output {
             runtime_doctor_truncate_line(&line),
             format!("{}…", "🧭".repeat(159))
         );
+    }
+}
+
+#[cfg(all(test, feature = "runtime-log-mojo"))]
+mod plain_envelope_tests {
+    use super::RuntimeDoctorParsedLogLine;
+
+    #[test]
+    fn compiled_mojo_envelope_owns_plain_text_while_json_keeps_precedence() {
+        let text =
+            RuntimeDoctorParsedLogLine::new("[2026-10-14 10:00:00Z]  selection_pick profile=🧭 ");
+        assert_eq!(text.timestamp().as_deref(), Some("2026-10-14 10:00:00Z"));
+        assert_eq!(text.message(), "selection_pick profile=🧭");
+
+        let raw = RuntimeDoctorParsedLogLine::new("note]  first] second ");
+        assert_eq!(raw.timestamp(), None);
+        assert_eq!(raw.message(), "first] second");
+
+        let unclosed = RuntimeDoctorParsedLogLine::new(" [missing");
+        assert_eq!(unclosed.timestamp(), None);
+        assert_eq!(unclosed.message(), "[missing");
+
+        let json = RuntimeDoctorParsedLogLine::new(
+            r#"{"timestamp":"2026-10-14T10:00Z","message":"JSON ] payload"}"#,
+        );
+        assert_eq!(json.timestamp().as_deref(), Some("2026-10-14T10:00Z"));
+        assert_eq!(json.message(), "JSON ] payload");
     }
 }
