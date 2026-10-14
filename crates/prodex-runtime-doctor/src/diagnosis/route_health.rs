@@ -1,14 +1,6 @@
 use super::*;
 use std::collections::BTreeMap;
 
-fn runtime_doctor_route_event_reason(event: &RuntimeDoctorRouteProfileEvent) -> Option<String> {
-    event.detail.split_whitespace().find_map(|part| {
-        part.strip_prefix("reason=")
-            .or_else(|| part.strip_prefix("outcome="))
-            .map(ToString::to_string)
-    })
-}
-
 fn runtime_doctor_route_marker_fields<'a>(
     summary: &'a RuntimeDoctorSummary,
     marker: &str,
@@ -31,30 +23,6 @@ fn runtime_doctor_parse_u32_field(fields: &BTreeMap<String, String>, key: &str) 
 
 fn runtime_doctor_parse_i64_field(fields: &BTreeMap<String, String>, key: &str) -> Option<i64> {
     fields.get(key)?.parse().ok()
-}
-
-fn runtime_doctor_latest_route_event_reason(
-    summary: &RuntimeDoctorSummary,
-    rows: &[(String, String, bool)],
-    latest_event_index: usize,
-    profile: &str,
-    route: &str,
-) -> Option<String> {
-    for index in (0..=latest_event_index).rev() {
-        let Some((event_profile, event_route, _)) = rows.get(index) else {
-            continue;
-        };
-        if event_profile == profile
-            && event_route == route
-            && let Some(reason) = summary
-                .route_profile_events
-                .get(index)
-                .and_then(runtime_doctor_route_event_reason)
-        {
-            return Some(reason);
-        }
-    }
-    None
 }
 
 fn runtime_doctor_apply_route_marker_fields(
@@ -114,6 +82,17 @@ pub(super) fn runtime_doctor_route_health(
     summary: &RuntimeDoctorSummary,
 ) -> Vec<RuntimeDoctorRouteHealthSummary> {
     let event_row_count = summary.route_profile_events.len();
+    let reason_events = summary
+        .route_profile_events
+        .iter()
+        .map(
+            |event| prodex_mojo_core::rich::RuntimeDoctorRouteReasonEvent {
+                profile: event.profile.as_deref().unwrap_or("unknown"),
+                route: event.route.as_deref().unwrap_or("unknown"),
+                detail: &event.detail,
+            },
+        )
+        .collect::<Vec<_>>();
     let mut rows = Vec::with_capacity(
         event_row_count
             + summary
@@ -169,13 +148,14 @@ pub(super) fn runtime_doctor_route_health(
                 .expect("Mojo runtime-doctor latest event is in range");
             entry.latest_timestamp = event.timestamp.clone();
             entry.latest_marker = Some(event.marker.clone());
-            entry.latest_reason = runtime_doctor_latest_route_event_reason(
-                summary,
-                &rows,
+            entry.latest_reason = prodex_mojo_core::rich::runtime_doctor_route_latest_reason(
+                &reason_events,
                 event_index,
                 profile,
                 route,
-            );
+            )
+            .expect("Mojo runtime-doctor latest route reason returned invalid output")
+            .map(str::to_string);
         }
         if let Some(profile_row_index) = group.profile_row_index {
             let profile_row = profile_row_index

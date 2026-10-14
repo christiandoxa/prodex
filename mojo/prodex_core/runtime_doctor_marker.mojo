@@ -1,6 +1,9 @@
 from std.memory import Pointer
 
 from rich_text import (
+    rich_codepoint,
+    rich_codepoint_width,
+    rich_unicode_space,
     rich_view_matches_literal,
     rich_view_ptr,
     rich_view_valid,
@@ -1226,4 +1229,136 @@ def prodex_mojo_runtime_doctor_route_health_groups_v1(
         latest_event_indices[unsafe_offset=candidate] = selected_latest
         profile_row_indices[unsafe_offset=candidate] = selected_profile_row
         position += 1
+    return 0
+
+
+# Reproduce the first whitespace-delimited "reason=" or "outcome=" value.
+# The returned byte range remains borrowed from the caller's validated UTF-8.
+def runtime_doctor_reason_token_prefix[literal: StaticString](
+    ptr: Pointer[mut=False, UInt8, _],
+    token_start: Int64,
+    token_end: Int64,
+) -> Bool:
+    var prefix_len = Int64(literal.byte_length())
+    if token_end - token_start < prefix_len:
+        return False
+    var expected = literal.unsafe_ptr()
+    for index in range(prefix_len):
+        if ptr[unsafe_offset=token_start + index] != expected[unsafe_offset=index]:
+            return False
+    return True
+
+
+def runtime_doctor_reason_token_offsets(
+    detail: ProdexRichStringView,
+) -> Tuple[Int64, Int64]:
+    var source = rich_view_ptr(detail)
+    var length = Int64(detail.len)
+    var cursor: Int64 = 0
+    while cursor < length:
+        while cursor < length:
+            var width = rich_codepoint_width(source[unsafe_offset=cursor])
+            if not rich_unicode_space(rich_codepoint(source, cursor, width)):
+                break
+            cursor += width
+        if cursor == length:
+            break
+        var token_start = cursor
+        while cursor < length:
+            var width = rich_codepoint_width(source[unsafe_offset=cursor])
+            if rich_unicode_space(rich_codepoint(source, cursor, width)):
+                break
+            cursor += width
+        var prefix: Int64 = 0
+        if runtime_doctor_reason_token_prefix["reason="](
+            source, token_start, cursor
+        ):
+            prefix = 7
+        elif runtime_doctor_reason_token_prefix["outcome="](
+            source, token_start, cursor
+        ):
+            prefix = 8
+        if prefix > 0:
+            return (token_start + prefix, cursor)
+    return (-1, -1)
+
+
+# Search in reverse through the latest event for the matching profile/route
+# whose details contain a reason token. Output [event index, start, end].
+@export("prodex_mojo_runtime_doctor_route_latest_reason_v1")
+def prodex_mojo_runtime_doctor_route_latest_reason_v1(
+    abi_version: Int64,
+    profile_views_address: UInt,
+    route_views_address: UInt,
+    detail_views_address: UInt,
+    event_count: Int64,
+    latest_index: Int64,
+    target_profile_address: UInt,
+    target_route_address: UInt,
+    output_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != 1:
+        return 4
+    if (
+        event_count < 0
+        or event_count > RUNTIME_DOCTOR_ROUTE_HEALTH_GROUPS_MAX_ROWS
+        or latest_index < 0
+        or latest_index >= event_count
+        or profile_views_address == 0
+        or route_views_address == 0
+        or detail_views_address == 0
+        or target_profile_address == 0
+        or target_route_address == 0
+        or output_address == 0
+    ):
+        return 1
+    var profiles = Pointer[mut=False, ProdexRichStringView, ImmUntrackedOrigin](
+        unsafe_from_address=Int(profile_views_address)
+    )
+    var routes = Pointer[mut=False, ProdexRichStringView, ImmUntrackedOrigin](
+        unsafe_from_address=Int(route_views_address)
+    )
+    var details = Pointer[mut=False, ProdexRichStringView, ImmUntrackedOrigin](
+        unsafe_from_address=Int(detail_views_address)
+    )
+    var target_profile = Pointer[mut=False, ProdexRichStringView, ImmUntrackedOrigin](
+        unsafe_from_address=Int(target_profile_address)
+    )[].copy()
+    var target_route = Pointer[mut=False, ProdexRichStringView, ImmUntrackedOrigin](
+        unsafe_from_address=Int(target_route_address)
+    )[].copy()
+    if (
+        not rich_view_valid(target_profile, Int64(4 * 1024 * 1024))
+        or not rich_view_valid(target_route, Int64(4 * 1024 * 1024))
+    ):
+        return 2
+    for index in range(event_count):
+        if (
+            not rich_view_valid(profiles[unsafe_offset=index].copy(), Int64(4 * 1024 * 1024))
+            or not rich_view_valid(routes[unsafe_offset=index].copy(), Int64(4 * 1024 * 1024))
+            or not rich_view_valid(details[unsafe_offset=index].copy(), Int64(4 * 1024 * 1024))
+        ):
+            return 2
+
+    var output = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    output[unsafe_offset=0] = -1
+    output[unsafe_offset=1] = -1
+    output[unsafe_offset=2] = -1
+    var cursor = latest_index
+    while cursor >= 0:
+        if (
+            rich_views_equal(profiles[unsafe_offset=cursor].copy(), target_profile)
+            and rich_views_equal(routes[unsafe_offset=cursor].copy(), target_route)
+        ):
+            var offsets = runtime_doctor_reason_token_offsets(
+                details[unsafe_offset=cursor].copy()
+            )
+            if offsets[0] >= 0:
+                output[unsafe_offset=0] = cursor
+                output[unsafe_offset=1] = offsets[0]
+                output[unsafe_offset=2] = offsets[1]
+                break
+        cursor -= 1
     return 0
