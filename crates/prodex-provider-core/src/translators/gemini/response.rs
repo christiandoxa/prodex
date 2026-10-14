@@ -34,20 +34,15 @@ mod response_status;
 mod response_tool_calls;
 
 pub(crate) fn gemini_normalized_response_value(value: &Value) -> Cow<'_, Value> {
-    let Some(response) = value.get("response") else {
-        return Cow::Borrowed(value);
-    };
-    let Some(trace_id) = value.get("traceId").and_then(Value::as_str) else {
-        return Cow::Borrowed(response);
-    };
-    let mut response = response.clone();
-    if let Some(object) = response.as_object_mut() {
-        object.insert(
-            "responseId".to_string(),
-            Value::String(trace_id.to_string()),
-        );
-    }
-    Cow::Owned(response)
+    let raw = serde_json::to_string(value).expect("Gemini response envelope serializes");
+    let normalized = prodex_mojo_core::rich::gemini_response_normalize_response_envelope(&raw)
+        .unwrap_or_else(|error| {
+            panic!("Mojo Gemini response envelope normalization failed: {error:?}")
+        });
+    Cow::Owned(
+        serde_json::from_slice(&normalized)
+            .expect("Mojo Gemini response envelope normalization returns JSON"),
+    )
 }
 
 pub(crate) fn gemini_runtime_responses_value_from_generate_value(

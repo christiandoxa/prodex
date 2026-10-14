@@ -105,6 +105,7 @@ pub enum GeminiResponseKernelOperation {
     RawFinishReason = 55,
     FunctionCallArgumentsDeltaWithThoughtSignature = 48,
     ConformancePreservesResponseIds = 56,
+    NormalizeResponseEnvelope = 57,
 }
 
 /// Inputs for one bounded Gemini response or stream JSON shape.
@@ -313,6 +314,7 @@ fn gemini_kernel_operation(operation: GeminiResponseKernelOperation) -> i64 {
         GeminiResponseKernelOperation::RawFinishReason => 55,
         GeminiResponseKernelOperation::FunctionCallArgumentsDeltaWithThoughtSignature => 48,
         GeminiResponseKernelOperation::ConformancePreservesResponseIds => 56,
+        GeminiResponseKernelOperation::NormalizeResponseEnvelope => 57,
     }
 }
 
@@ -406,6 +408,7 @@ pub fn gemini_response_kernel(input: GeminiResponseKernelInput<'_>) -> Result<Ve
             GeminiResponseKernelOperation::RawResponseUsage
                 | GeminiResponseKernelOperation::RawResponseMetadata
                 | GeminiResponseKernelOperation::RawFinishReason
+                | GeminiResponseKernelOperation::NormalizeResponseEnvelope
         )
     {
         return Err(MojoError::InvalidInput);
@@ -413,6 +416,9 @@ pub fn gemini_response_kernel(input: GeminiResponseKernelInput<'_>) -> Result<Ve
     let capacity = match input.operation {
         GeminiResponseKernelOperation::RawResponseUsage
         | GeminiResponseKernelOperation::RawFinishReason => 4 * 1024,
+        GeminiResponseKernelOperation::NormalizeResponseEnvelope => {
+            input_bytes.checked_add(64).ok_or(MojoError::InvalidInput)?
+        }
         GeminiResponseKernelOperation::RawResponseMetadata => input_bytes
             .checked_add(512)
             .ok_or(MojoError::InvalidInput)?,
@@ -438,6 +444,14 @@ pub fn gemini_response_conformance_preserves_response_ids(raw: &str) -> Result<b
         b"false" => Ok(false),
         _ => Err(MojoError::InvalidOutput),
     }
+}
+
+/// Normalizes a wrapped Gemini response envelope through the compiled Mojo kernel.
+pub fn gemini_response_normalize_response_envelope(raw: &str) -> Result<Vec<u8>, MojoError> {
+    let mut input =
+        GeminiResponseKernelInput::new(GeminiResponseKernelOperation::NormalizeResponseEnvelope);
+    input.response = Some(raw);
+    gemini_response_kernel(input)
 }
 
 #[cfg(all(test, feature = "mojo-rich"))]

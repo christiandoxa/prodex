@@ -813,7 +813,8 @@
           "deepseek_json_guidance_policy",
           "deepseek_response_usage_mapping",
           "gemini_response_media_projection",
-          "gemini_response_id_conformance"
+          "gemini_response_id_conformance",
+          "gemini_response_envelope_normalization"
         ]
       },
       {
@@ -823,7 +824,8 @@
         "production_reachable": true,
         "role": "adapter",
         "operations": [
-          "gemini_response_id_conformance"
+          "gemini_response_id_conformance",
+          "gemini_response_envelope_normalization"
         ]
       },
       {
@@ -834,12 +836,17 @@
           {
             "start": 672,
             "end": 714
+          },
+          {
+            "start": 719,
+            "end": 790
           }
         ],
         "production_reachable": true,
         "role": "semantic",
         "operations": [
-          "gemini_response_id_conformance"
+          "gemini_response_id_conformance",
+          "gemini_response_envelope_normalization"
         ]
       },
       {
@@ -7763,6 +7770,34 @@
       "rust_adapter_scope": "Serde JSON serialization, bounded Mojo invocation, and fail-closed boolean mapping"
     },
     {
+      "name": "gemini_response_envelope_normalization",
+      "domain": "provider/gemini",
+      "introduced_in": "0.438.0",
+      "baseline_state": "candidate",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_mojo_gemini_response_kernel_v1",
+      "mojo_abi_version": 6,
+      "mojo_operation_ids": {
+        "normalize_response_envelope": 57
+      },
+      "mojo_source": "mojo/prodex_core/rich_abi.mojo",
+      "mojo_semantic_source": "mojo/prodex_core/gemini_response.mojo",
+      "consumer": "crates/prodex-provider-core/src/translators/gemini/response.rs",
+      "consumer_marker": "gemini_response_normalize_response_envelope",
+      "production_consumers": [
+        "crates/prodex-provider-core/src/translators/gemini/response.rs",
+        "crates/prodex-provider-core/src/translators/gemini/response_transform.rs"
+      ],
+      "production_reachability_test": "crates/prodex-mojo-core/tests/gemini_response.rs",
+      "rust_owner_before": "Rust selected wrapped Gemini response envelopes, propagated traceId, and replaced nested responseId values before translation",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "Deleted; direct compiled Mojo envelope cases and provider-core response-transform coverage exercise direct, wrapped, missing/non-string trace IDs, object replacement, and large bounded input",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "Serde JSON serialization and materialization, bounded Mojo invocation, and returned JSON decoding"
+    },
+    {
       "name": "runtime_responses_attempt_recovery_policy",
       "domain": "runtime-proxy/responses-recovery",
       "introduced_in": "0.437.1",
@@ -10091,6 +10126,31 @@
         "release_marker": "prodex_mojo_core::rich::runtime_doctor_marker_context_summary_order("
       },
       "cleanup_evidence": "The former Rust filter and sort are deleted; the production parser now calls the versioned Mojo reducer and applies only its validated permutation."
+    },
+    {
+      "file": "crates/prodex-provider-core/src/translators/gemini/response.rs",
+      "symbol": "gemini_normalized_response_value",
+      "operation": "gemini_response_envelope_normalization",
+      "previous_responsibility": "Rust selected wrapped Gemini response envelopes, propagated traceId, and inserted or replaced nested responseId values",
+      "final_state": "adapter-only",
+      "rust_before": "crates/prodex-provider-core/src/translators/gemini/response.rs::gemini_normalized_response_value",
+      "rust_after": "Rust serializes and materializes the value around the mandatory Mojo envelope kernel",
+      "mojo_owner": "mojo/prodex_core/gemini_response.mojo::gemini_put_normalized_response_envelope",
+      "mojo_source": "mojo/prodex_core/gemini_response.mojo",
+      "mojo_entry": "prodex_mojo_gemini_response_kernel_v1 operation 57",
+      "production_consumer": "crates/prodex-provider-core/src/translators/gemini/response.rs",
+      "parity_test": "crates/prodex-mojo-core/tests/gemini_response.rs",
+      "cleanup_loc": 14,
+      "cleanup_source": {
+        "kind": "collapsed-adapter",
+        "baseline_range": {
+          "start": 36,
+          "end": 50
+        },
+        "release_symbol": "pub(crate) fn gemini_normalized_response_value",
+        "release_marker": "prodex_mojo_core::rich::gemini_response_normalize_response_envelope"
+      },
+      "cleanup_evidence": "The Rust envelope-selection and responseId mutation branches are removed; direct Mojo cases and the provider response-transform regression cover the replacement kernel."
     },
     {
       "file": "crates/prodex-quota/src/render/panels.rs",

@@ -121,6 +121,20 @@ mod tests {
     }
 
     #[test]
+    fn gemini_provider_core_buffered_response_transform_normalizes_wrapped_envelope() {
+        let response = translate_response(serde_json::json!({
+            "response": {
+                "responseId": "stale-response-id",
+                "candidates": [{"content": {"parts": [{"text": "wrapped"}]}}]
+            },
+            "traceId": "trace-response-id"
+        }));
+
+        assert_eq!(response["id"], "trace-response-id");
+        assert_eq!(response["output"][0]["content"][0]["text"], "wrapped");
+    }
+
+    #[test]
     fn gemini_provider_core_buffered_response_transform_rejects_oversized_input() {
         let text = "x".repeat(prodex_mojo_core::rich::GEMINI_BUFFERED_RESPONSE_MAX_INPUT_BYTES + 1);
         let body = serde_json::to_vec(&serde_json::json!({
