@@ -1311,6 +1311,26 @@
         ]
       },
       {
+        "path": "mojo/prodex_core/runtime_doctor_bindings.mojo",
+        "language": "mojo",
+        "classification": "DETERMINISTIC_DOMAIN",
+        "production_reachable": true,
+        "role": "semantic",
+        "operations": [
+          "runtime_doctor_binding_source_aggregation"
+        ]
+      },
+      {
+        "path": "crates/prodex-mojo-core/src/rich/runtime_doctor_bindings.rs",
+        "language": "rust",
+        "classification": "MIXED",
+        "production_reachable": true,
+        "role": "adapter",
+        "operations": [
+          "runtime_doctor_binding_source_aggregation"
+        ]
+      },
+      {
         "path": "mojo/prodex_core/runtime_doctor_marker_summary.mojo",
         "language": "mojo",
         "classification": "DETERMINISTIC_DOMAIN",
@@ -6313,6 +6333,29 @@
       "duplicate_production_owner": false,
       "platform_fallback": false,
       "rust_adapter_scope": "line/JSON recognition, redaction, owned field materialization, bounded batch construction, validated representative projection, and existing DTO/map assembly"
+    },
+    {
+      "name": "runtime_doctor_binding_source_aggregation",
+      "domain": "runtime/diagnostics",
+      "introduced_in": "0.438.0",
+      "baseline_state": "Rust accumulated binding type and profile totals, oldest/newest timestamps, missing-profile samples and sorted profile reports by total descending",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_mojo_runtime_doctor_binding_source_v1",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/runtime_doctor_bindings.mojo",
+      "consumer": "crates/prodex-runtime-doctor/src/state_summary/bindings.rs",
+      "consumer_marker": "prodex_mojo_core::rich::runtime_doctor_binding_source_plan(",
+      "production_consumers": [
+        "crates/prodex-runtime-doctor/src/state_summary/bindings.rs"
+      ],
+      "production_reachability_test": "crates/prodex-runtime-doctor/src/state_summary/bindings.rs",
+      "rust_owner_before": "Rust performed 4 source-kind passes, missing-sample cap, timestamp extrema, per-profile increments, and descending count/lexical tie-break sorting",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "Rust semantic reducer deleted; strict Mojo ABI and runtime-doctor caller tests cover missing profiles, sample cap, signed timestamps, per-kind counts and stable ordering",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "BTreeMap iteration, borrowed profile-name deduplication and known-name lookup, typed row marshalling, validated Mojo index materialization and string-owning diagnostic DTOs"
     },
     {
       "name": "runtime_doctor_selection_record_plan",
