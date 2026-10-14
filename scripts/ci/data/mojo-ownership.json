@@ -966,6 +966,28 @@
         ]
       },
       {
+        "path": "mojo/prodex_core/profile_login_policy.mojo",
+        "language": "mojo",
+        "classification": "DETERMINISTIC_DOMAIN",
+        "production_reachable": true,
+        "role": "semantic",
+        "operations": [
+          "profile_login_auto_transition",
+          "profile_login_candidate_selection"
+        ]
+      },
+      {
+        "path": "crates/prodex-mojo-core/src/profile_login_policy.rs",
+        "language": "rust",
+        "classification": "MIXED",
+        "production_reachable": true,
+        "role": "adapter",
+        "operations": [
+          "profile_login_auto_transition",
+          "profile_login_candidate_selection"
+        ]
+      },
+      {
         "path": "mojo/prodex_core/redaction.mojo",
         "language": "mojo",
         "classification": "DETERMINISTIC_DOMAIN",
@@ -2293,6 +2315,60 @@
       "duplicate_production_owner": false,
       "platform_fallback": false,
       "rust_adapter_scope": "JWT and access-token decoding, zeroized secret ownership, caller callbacks for unique-name availability, collection reconstruction and human-readable error mapping; migrated profile metadata decisions are Mojo-authoritative"
+    },
+    {
+      "name": "profile_login_auto_transition",
+      "domain": "profile/login",
+      "introduced_in": "0.436.1",
+      "baseline_state": "candidate",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_profile_login_policy_v1",
+      "mojo_operation_ids": {
+        "auto_transition": 6
+      },
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/profile_login_policy.mojo",
+      "consumer": "crates/prodex-app/src/profile_commands/login/lifecycle_support.rs",
+      "consumer_marker": "prodex_mojo_core::profile_login_policy::auto_login_transition(",
+      "production_consumers": [
+        "crates/prodex-app/src/profile_commands/login.rs",
+        "crates/prodex-app/src/profile_commands/login/lifecycle_support.rs",
+        "crates/prodex-app/src/profile_commands/login/api_key.rs"
+      ],
+      "production_reachability_test": "crates/prodex-mojo-core/tests/profile_login_policy.rs",
+      "rust_owner_before": "Rust selected status, Anthropic, API-key, and identity auto-login transitions, including existing versus new profile targets after auth classification",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "deleted; the Mojo transition matrix and app lifecycle caller regression cover status precedence, auth-label requirements, and existing/new target mapping",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "Login-method enum projection, auth-label presence, and profile-existence projection; credentials, browser/process execution, filesystem staging, and profile-state persistence remain Rust-owned"
+    },
+    {
+      "name": "profile_login_candidate_selection",
+      "domain": "profile/login",
+      "introduced_in": "0.436.1",
+      "baseline_state": "candidate",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_profile_login_policy_v1",
+      "mojo_operation_ids": {
+        "candidate_selection": 7
+      },
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/profile_login_policy.mojo",
+      "consumer": "crates/prodex-app/src/profile_commands/login/claude.rs",
+      "consumer_marker": "prodex_mojo_core::profile_login_policy::select_login_candidate(",
+      "production_consumers": [
+        "crates/prodex-app/src/profile_commands/login/claude.rs"
+      ],
+      "production_reachability_test": "crates/prodex-mojo-core/tests/profile_login_policy.rs",
+      "rust_owner_before": "Rust iterated Anthropic profiles to choose the first matching stored identity and detect whether a duplicate existed",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "deleted; the Mojo candidate-order regression covers first-match stability, duplicate counts, and the empty-candidate case",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "Provider match observation, stable profile-name projection, and typed index/result materialization; credential import and profile lifecycle effects remain Rust-owned"
     },
     {
       "name": "secret_reference_validation",
