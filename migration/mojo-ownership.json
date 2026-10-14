@@ -635,7 +635,8 @@
         "operations": [
           "session_selector_resolution_policy",
           "session_report_query_matching_policy",
-          "session_file_name_policy"
+          "session_file_name_policy",
+          "session_state_db_row_match_policy"
         ]
       },
     {
@@ -657,7 +658,8 @@
         "operations": [
           "session_selector_resolution_policy",
           "session_report_query_matching_policy",
-          "session_file_name_policy"
+          "session_file_name_policy",
+          "session_state_db_row_match_policy"
         ]
       },
       {
@@ -4632,6 +4634,29 @@
       "duplicate_production_owner": false,
       "platform_fallback": false,
       "rust_adapter_scope": "Path/file-name extraction, UTF-8 boundary validation, and String materialization remain Rust; Mojo owns bounded suffix precedence and metadata classification"
+    },
+    {
+      "name": "session_state_db_row_match_policy",
+      "domain": "session-store/state-db",
+      "introduced_in": "0.438.0",
+      "baseline_state": "candidate",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_session_state_db_row_match_plan_v1",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/session_selector.mojo",
+      "consumer": "crates/prodex-session-store/src/state_db_index.rs",
+      "consumer_marker": "prodex_mojo_core::json::session_state_db_row_match_plan",
+      "production_consumers": [
+        "crates/prodex-session-store/src/state_db_index.rs"
+      ],
+      "production_reachability_test": "crates/prodex-session-store/tests/src/state_db.rs",
+      "rust_owner_before": "SQLite row matching used exact-over-prefix precedence across raw and thread_-stripped IDs plus the rollout filename stem, then selected the first full UUID source for the resolved session ID",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "deleted; direct Mojo policy tests and the public session-store resolver regression cover thread_-normalization, exact precedence, raw-ID and path-stem source selection",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "Rust executes SQLite queries, extracts the UTF-8 path stem, validates containment and metadata files, materializes the selected session ID, and maps the typed plan to existing repair candidates"
     },
     {
       "name": "smart_context_artifact_reference_policy",

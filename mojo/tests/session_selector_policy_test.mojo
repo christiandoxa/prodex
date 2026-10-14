@@ -4,6 +4,7 @@ from std.collections.list import List
 from rich_types import ProdexRichStringView
 from session_selector import (
     prodex_session_report_query_matches_v1,
+    prodex_session_state_db_row_match_plan_v1,
     prodex_session_selector_match_plan_v1,
     prodex_session_selector_path_span_v1,
 )
@@ -44,6 +45,26 @@ def call_path_span(
         Int64(selector.byte_length()),
         exact,
         require_full,
+        UInt(Int(output.unsafe_ptr())),
+    )
+
+
+def call_state_db_row_plan(
+    thread_id: String,
+    path_stem: String,
+    path_stem_present: Int64,
+    selector: String,
+    output: List[Int64],
+) -> Int64:
+    return prodex_session_state_db_row_match_plan_v1(
+        1,
+        UInt(Int(thread_id.unsafe_ptr())),
+        Int64(thread_id.byte_length()),
+        UInt(Int(path_stem.unsafe_ptr())),
+        Int64(path_stem.byte_length()),
+        path_stem_present,
+        UInt(Int(selector.unsafe_ptr())),
+        Int64(selector.byte_length()),
         UInt(Int(output.unsafe_ptr())),
     )
 
@@ -159,7 +180,40 @@ def test_path_span_preserves_stem_and_window_contract() raises:
     assert output[1] == 43
 
 
+def test_state_db_row_plan_preserves_affinity_precedence() raises:
+    var exact_id = String("01900000-0000-7000-8000-000000000301")
+    var output = List[Int64]()
+    output.append(-1)
+    output.append(-1)
+    var thread_id = String("thread_01900000-0000-7000-8000-000000000301")
+    var path_stem = String("rollout-without-an-id")
+    assert call_state_db_row_plan(thread_id, path_stem, 1, exact_id, output) == 0
+    assert output[0] == 2
+    assert output[1] == 1
+
+    output[0] = -1
+    output[1] = -1
+    var raw_thread_id = String("01900000-0000-7000-8000-000000000301")
+    assert call_state_db_row_plan(raw_thread_id, path_stem, 1, String("01900000"), output) == 0
+    assert output[0] == 1
+    assert output[1] == 2
+
+    output[0] = -1
+    output[1] = -1
+    var path_id = String("rollout-01900000-0000-7000-8000-000000000301")
+    assert call_state_db_row_plan(String("unrelated"), path_id, 1, exact_id, output) == 0
+    assert output[0] == 2
+    assert output[1] == 3
+
+    output[0] = -1
+    output[1] = -1
+    assert call_state_db_row_plan(String("unrelated"), String(""), 0, exact_id, output) == 0
+    assert output[0] == 0
+    assert output[1] == 0
+
+
 def main() raises:
     test_exact_prefix_and_mutation_sensitivity()
     test_report_query_matches_fixed_fields()
     test_path_span_preserves_stem_and_window_contract()
+    test_state_db_row_plan_preserves_affinity_precedence()

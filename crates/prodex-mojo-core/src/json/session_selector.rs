@@ -50,6 +50,17 @@ unsafe extern "C" {
         name_length: i64,
         output_address: u64,
     ) -> i64;
+    fn prodex_session_state_db_row_match_plan_v1(
+        abi_version: i64,
+        thread_id_address: u64,
+        thread_id_length: i64,
+        path_stem_address: u64,
+        path_stem_length: i64,
+        path_stem_present: i64,
+        selector_address: u64,
+        selector_length: i64,
+        output_address: u64,
+    ) -> i64;
 }
 
 const SESSION_SELECTOR_ABI_VERSION: i64 = 1;
@@ -160,6 +171,32 @@ pub struct SessionFileNamePlan {
     pub stem_length: usize,
 }
 
+/// The deterministic selector result for one state-database thread row.
+///
+/// Rust keeps SQLite row acquisition and path/string materialization. Mojo owns
+/// exact-over-prefix precedence across the raw thread ID, the `thread_`-stripped
+/// ID, and the rollout filename stem.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SessionStateDbRowMatchKind {
+    None,
+    Prefix,
+    Exact,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SessionStateDbRowSessionIdSource {
+    None,
+    NormalizedThreadId,
+    ThreadId,
+    PathStem,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SessionStateDbRowMatchPlan {
+    pub match_kind: SessionStateDbRowMatchKind,
+    pub session_id_source: SessionStateDbRowSessionIdSource,
+}
+
 pub fn session_file_name_plan(name: &str) -> Result<SessionFileNamePlan, MojoError> {
     let mut output = [-1_i64; 2];
     status(unsafe {
@@ -182,6 +219,50 @@ pub fn session_file_name_plan(name: &str) -> Result<SessionFileNamePlan, MojoErr
     Ok(SessionFileNamePlan {
         is_metadata,
         stem_length,
+    })
+}
+
+/// Plans state-database row matching without touching SQLite or filesystem state.
+pub fn session_state_db_row_match_plan(
+    thread_id: &str,
+    path_stem: Option<&str>,
+    selector: &str,
+) -> Result<SessionStateDbRowMatchPlan, MojoError> {
+    let thread_id = view(thread_id);
+    let path_stem_present = path_stem.is_some();
+    let path_stem_value = path_stem.unwrap_or("");
+    let path_stem = view(path_stem_value);
+    let selector = view(selector);
+    let mut output = [-1_i64; 2];
+    status(unsafe {
+        prodex_session_state_db_row_match_plan_v1(
+            SESSION_SELECTOR_ABI_VERSION,
+            thread_id.address,
+            i64::try_from(thread_id.length).map_err(|_| MojoError::InvalidInput)?,
+            path_stem.address,
+            i64::try_from(path_stem.length).map_err(|_| MojoError::InvalidInput)?,
+            i64::from(path_stem_present),
+            selector.address,
+            i64::try_from(selector.length).map_err(|_| MojoError::InvalidInput)?,
+            output.as_mut_ptr() as u64,
+        )
+    })?;
+    let match_kind = match output[0] {
+        0 => SessionStateDbRowMatchKind::None,
+        1 => SessionStateDbRowMatchKind::Prefix,
+        2 => SessionStateDbRowMatchKind::Exact,
+        _ => return Err(MojoError::InvalidOutput),
+    };
+    let session_id_source = match output[1] {
+        0 => SessionStateDbRowSessionIdSource::None,
+        1 => SessionStateDbRowSessionIdSource::NormalizedThreadId,
+        2 => SessionStateDbRowSessionIdSource::ThreadId,
+        3 => SessionStateDbRowSessionIdSource::PathStem,
+        _ => return Err(MojoError::InvalidOutput),
+    };
+    Ok(SessionStateDbRowMatchPlan {
+        match_kind,
+        session_id_source,
     })
 }
 
@@ -289,8 +370,9 @@ pub fn session_selector_match_plan(
 #[cfg(all(test, prodex_mojo_active))]
 mod tests {
     use super::{
-        session_file_name_plan, session_report_query_matches, session_selector_match_plan,
-        session_selector_path_span,
+        SessionStateDbRowMatchKind, SessionStateDbRowSessionIdSource, session_file_name_plan,
+        session_report_query_matches, session_selector_match_plan, session_selector_path_span,
+        session_state_db_row_match_plan,
     };
 
     #[test]
@@ -350,6 +432,35 @@ mod tests {
         assert_eq!(
             session_selector_path_span(&format!("prefix-{id}-suffix"), "", true, true).unwrap(),
             Some((7, 43))
+        );
+    }
+
+    #[test]
+    fn state_db_row_plan_preserves_exact_precedence_and_id_source() {
+        let id = "01900000-0000-7000-8000-000000000301";
+        assert_eq!(
+            session_state_db_row_match_plan(
+                &format!("thread_{id}"),
+                Some(&format!("rollout-{id}")),
+                "01900000",
+            )
+            .unwrap(),
+            super::SessionStateDbRowMatchPlan {
+                match_kind: SessionStateDbRowMatchKind::Prefix,
+                session_id_source: SessionStateDbRowSessionIdSource::NormalizedThreadId,
+            }
+        );
+        assert_eq!(
+            session_state_db_row_match_plan(id, Some("rollout-unrelated"), id)
+                .unwrap()
+                .match_kind,
+            SessionStateDbRowMatchKind::Exact
+        );
+        assert_eq!(
+            session_state_db_row_match_plan("unrelated", Some(&format!("rollout-{id}")), id)
+                .unwrap()
+                .session_id_source,
+            SessionStateDbRowSessionIdSource::PathStem
         );
     }
 
