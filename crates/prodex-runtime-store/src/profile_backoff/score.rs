@@ -67,7 +67,7 @@ pub fn clear_runtime_profile_score(
 }
 
 pub fn runtime_profile_score_profile_name(key: &str) -> &str {
-    key.rsplit(':').next().unwrap_or(key)
+    prodex_runtime_state::runtime_profile_route_circuit_profile_name(key)
 }
 
 pub fn runtime_profile_effective_health_score(entry: &RuntimeProfileHealth, now: i64) -> u32 {
