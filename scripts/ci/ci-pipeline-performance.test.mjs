@@ -486,3 +486,22 @@ test("official Windows x64 ThinLTO release omits cold sccache and retains native
   assert.match(build, /name: Upload binary artifact/);
   assert.match(build, /needs:\s*\n\s*- verify-ci\n\s*- build-mojo-archives/);
 });
+
+
+test("release Mojo archive setup skips already-installed LLVM but still validates every platform", () => {
+  const archive = workflowJob(release, "build-mojo-archives", "build");
+  assert.match(archive, /- name: Ensure LLVM archive tools\n\s+shell: bash/);
+  for (const tool of ["llvm-nm", "llvm-ar", "llvm-lib"]) {
+    assert.match(archive, new RegExp("command -v " + tool));
+  }
+  assert.match(archive, /sudo apt-get update/);
+  assert.match(archive, /sudo apt-get install -y llvm/);
+  assert.match(archive, /- name: Verify target archive\n\s+shell: bash/);
+  assert.doesNotMatch(archive, /- name: Verify target archive\n\s+if:/);
+  assert.match(archive, /prodex_mojo_rich_abi_version/);
+  assert.match(archive, /KGEN_CompilerRT_/);
+  assert.match(archive, /duplicate_weak=/);
+  assert.match(archive, /- name: Upload target Mojo archive/);
+  const build = workflowJob(release, "build", "attest-binaries");
+  assert.match(build, /needs:\s*\n\s*- verify-ci\n\s*- build-mojo-archives/);
+});

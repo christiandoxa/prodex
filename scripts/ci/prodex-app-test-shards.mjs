@@ -209,10 +209,32 @@ const WINDOWS_SHARD_GROUPS = Object.freeze([
     members: ["support", "admission-affinity"],
   },
   {
-    suite: "selection-providers-runtime",
-    label: "prodex-app selection, providers, and runtime",
-    members: ["selection", "admission-core", "launch-providers", "runtime"],
+    suite: "selection-admission",
+    label: "prodex-app selection and admission",
+    members: ["selection", "admission-core"],
   },
+  {
+    suite: "provider-launches",
+    label: "prodex-app provider launches",
+    members: ["launch-providers"],
+  },
+  {
+    suite: "runtime-proxy",
+    label: "prodex-app runtime proxy",
+    members: ["runtime"],
+  },
+]);
+
+// The largest Windows remainder was 94 serial admission/selection tests in
+// the last verified corpus. Split known recovery paths from the broad catchall
+// without changing libtest's serial execution within either runner. A new
+// selection/admission module still enters the broad catchall automatically.
+const WINDOWS_SELECTION_RECOVERY_FILTERS = Object.freeze([
+  `${ADMISSION_PREFIX}rotation_matrix::`,
+  `${ADMISSION_PREFIX}hard_affinity_replay::`,
+  `${ADMISSION_PREFIX}responses_missing_content_type::`,
+  `${ADMISSION_PREFIX}responses_overload_recovery::`,
+  `${ADMISSION_PREFIX}standard_session_recovery::`,
 ]);
 
 // The old single Windows remainder took >8 minutes to run 362 tests
@@ -240,10 +262,18 @@ const WINDOWS_REMAINDER_SHARDS = Object.freeze([
     ],
   },
   {
+    suite: "remainder-selection-recovery",
+    label: "prodex-app remaining selection recovery tests",
+    filters: WINDOWS_SELECTION_RECOVERY_FILTERS,
+  },
+  {
     suite: "remainder-selection",
-    label: "prodex-app remaining selection and admission tests",
+    label: "prodex-app remaining other selection and admission tests",
     filters: [SELECTION_PREFIX],
-    skipFilters: PRODEX_APP_LIB_FILTERS.filter((filter) => filter.startsWith(SELECTION_PREFIX)),
+    skipFilters: [
+      ...PRODEX_APP_LIB_FILTERS.filter((filter) => filter.startsWith(SELECTION_PREFIX)),
+      ...WINDOWS_SELECTION_RECOVERY_FILTERS,
+    ],
   },
   {
     suite: "remainder-foundation",

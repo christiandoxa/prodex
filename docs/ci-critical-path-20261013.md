@@ -604,3 +604,49 @@ to cfg(test) on all targets; production builds still cannot use it.
 A mandatory source regression now rejects the Unix-only re-export.
 The previous running CI result is not considered green; the corrected
 commit requires new Windows CI verification.
+
+
+## Critical-path refresh: 2026-10-14 14:00 WIB
+
+[Push CI 38511339368](https://github.com/christiandoxa/prodex/actions/runs/38511339368)
+finished with **74/74 successful jobs**. Strict Mojo archive caching has
+removed the previous four-minute archive compiler barrier on unchanged
+Mojo inputs. The slowest jobs are now independently serialized Windows
+prodex-app suites:
+
+| Windows suite | Measured total | Measured test step | Local test corpus |
+| --- | ---: | ---: | ---: |
+| Remaining selection/admission | 5.02 min | 4.15 min | 94 tests |
+| Selection/providers/runtime | 4.42 min | 3.58 min | 711 tests |
+| Gateway/support/affinity | 4.28 min | 2.78 min | 398 tests |
+
+Rather than increasing libtest threads on stateful proxy/session tests,
+the Windows-only generator partitions the targeted selection/admission,
+provider launch and runtime-proxy groups into three independent serial
+runners. The 94-case remainder is split into five explicit recovery
+prefixes (52 cases) and a skip-filtered catch-all (42 cases). Future
+new selection/admission modules remain in the catch-all. The generated
+matrix now has **13 Windows partitions instead of 10**, with one Rust
+cache writer, existing zero-test failure handling and identical platform
+test flags.
+
+Coverage was checked against the 2,240 cases in a runnable prodex-app
+test binary: **2,240 assigned exactly once, zero missing and zero
+duplicate**, including the original 711 and 94 affected cases. Permanent
+source-level regression tests pin the 13 groups, all targeted filter
+identities, 15 representative test owners and disjoint catch-all rules.
+This is a wall-clock optimization at the cost of additional Windows
+runner provisioning; per-shard and full-CI speedups are not claimed until
+the first successful GitHub run with this matrix completes.
+
+[Standalone release 38504477460](https://github.com/christiandoxa/prodex/actions/runs/38504477460)
+finished in roughly 14 minutes with 19/19 successful jobs. Its six
+strict archive jobs were already very short, but each still ran a
+redundant sudo apt-get update and sudo apt-get install llvm even when
+LLVM tools are provided by the Ubuntu image. The release archive setup
+now probes for llvm-nm, llvm-ar and llvm-lib first, runs the original
+install command only if any are missing, and then unconditionally
+validates required tools and every archive symbol/security constraint.
+Binary linking, six-platform smokes, checksum/SBOM/antivirus and
+provenance gates are unchanged. This trims wasted package-manager work
+and runner minutes, not the dominant Windows x64 ThinLTO link time.
