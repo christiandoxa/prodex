@@ -505,3 +505,37 @@ test("release Mojo archive setup skips already-installed LLVM but still validate
   const build = workflowJob(release, "build", "attest-binaries");
   assert.match(build, /needs:\s*\n\s*- verify-ci\n\s*- build-mojo-archives/);
 });
+
+
+test("Windows ARM64-host x64 release calibration is opt-in and fails closed on ABI/runtime", () => {
+  const workflow = readFileSync(".github/workflows/release-windows-x64-arm-host-calibration.yml", "utf8");
+  assert.match(workflow, /name: Windows x64 ARM-host cross-release calibration/);
+  assert.match(workflow, /workflow_dispatch:/);
+  assert.doesNotMatch(workflow, /^  push:/m);
+  assert.match(workflow, /permissions:\n  contents: read\n  actions: read/);
+  assert.match(workflow, /runs-on: windows-11-arm/);
+  assert.match(workflow, /CARGO_PROFILE_RELEASE_CODEGEN_UNITS: "16"/);
+  assert.match(workflow, /\.head_sha -cne \$env:TARGET_SHA/);
+  assert.match(workflow, /\.event -cne 'workflow_dispatch'/);
+  assert.match(workflow, /\.head_branch -cne 'main'/);
+  assert.match(workflow, /\.path -cne '\.github\/workflows\/standalone-release.yml'/);
+  assert.match(workflow, /\.repository.full_name -cne \$env:GITHUB_REPOSITORY/);
+  assert.match(workflow, /\.conclusion -cne 'success'/);
+  assert.match(workflow, /ref: .*inputs.target_sha/);
+  assert.match(workflow, /name: mojo-archive-x86_64-pc-windows-msvc/);
+  assert.match(workflow, /run-id: .*inputs.source_release_run_id/);
+  assert.match(workflow, /\$env:PROCESSOR_ARCHITECTURE -cne 'ARM64'/);
+  assert.match(workflow, /llvm-nm -g/);
+  assert.match(workflow, /KGEN_CompilerRT_/);
+  assert.match(workflow, /CARGO_INCREMENTAL: "0"/);
+  assert.match(workflow, /cargo build --locked --release --target x86_64-pc-windows-msvc --features mojo-core/);
+  assert.match(workflow, /\$machine -ne 0x8664/);
+  assert.match(workflow, /Emulated x64 compiled-in Mojo smoke on ARM64/);
+  assert.match(workflow, /"implementation": "mojo-compiled-in"/);
+  assert.match(workflow, /"fallback": false/);
+  assert.match(workflow, /"self_test": "passed"/);
+  assert.match(workflow, /Upload text timings only/);
+  assert.doesNotMatch(workflow, /gh release (?:create|upload|edit)/);
+  assert.doesNotMatch(workflow, /git push/);
+  assert.doesNotMatch(workflow, /subject-path:|attest-build-provenance/);
+});

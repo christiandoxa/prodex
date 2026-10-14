@@ -650,3 +650,29 @@ validates required tools and every archive symbol/security constraint.
 Binary linking, six-platform smokes, checksum/SBOM/antivirus and
 provenance gates are unchanged. This trims wasted package-manager work
 and runner minutes, not the dominant Windows x64 ThinLTO link time.
+
+
+## Benchmark Windows x64 release compilation on native ARM64 hosted runners
+
+The official 0.437.11 standalone release spent **524 seconds** compiling
+Windows x86_64 on the native x64 runner. The same source/arch/codegen16
+benchmark without ineffective sccache took **482 seconds**; direct native
+Windows ARM64 release compilation, by contrast, took 325-336 seconds
+for the different ARM64 target. This suggests—but does not prove—that
+the more capable ARM64 runner might accelerate x64 cross compilation.
+
+An **opt-in, non-publishing** calibration workflow now checks out the
+exact SHA of a completed-success official release, verifies its
+repository/branch/workflow provenance, downloads the matching verified
+x64 Mojo COFF archive, and attempts the same Rust 1.99.0 / ThinLTO /
+16-codegen-unit x86_64-pc-windows-msvc release build on a windows-11-arm
+runner. It verifies that the output is PE Machine 0x8664, then requires
+the x64 binary to execute under Windows-on-ARM emulation with native
+version/help and compiled-in Mojo runtime self-tests. Any unsupported
+MSVC linker, x64 emulator, ABI, or runtime behavior fails the benchmark.
+
+Only **text timing and binary-size evidence** is uploaded; the workflow
+cannot publish assets, tags or packages. The official Windows x64 release
+matrix remains unchanged until this calibration proves it safe and faster.
+If the experiment fails, prefer the proven x64 host and maintain
+ThinLTO/runtime diagnostics over any unverified speed gain.
