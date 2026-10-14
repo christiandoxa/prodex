@@ -19,9 +19,10 @@ mod session_repair;
 pub use self::session_repair::{SessionRepairLine, SessionRepairPlan, session_repair_plan};
 mod session_selector;
 pub use self::session_selector::{
-    SessionFileNamePlan, session_file_name_plan, session_report_query_matches,
+    SessionFileNamePlan, SessionStateDbRowMatchKind, SessionStateDbRowMatchPlan,
+    SessionStateDbRowSessionIdSource, session_file_name_plan, session_report_query_matches,
     session_selector_is_full, session_selector_match_plan, session_selector_matches,
-    session_selector_path_span,
+    session_selector_path_span, session_state_db_row_match_plan,
 };
 mod kiro_catalog;
 pub use self::kiro_catalog::{

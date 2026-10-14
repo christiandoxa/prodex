@@ -1,7 +1,6 @@
 use super::{
     SessionRepairCandidate, SessionRepairMatchKind, codex_session_id_from_path,
     full_codex_session_id, is_session_metadata_file, session_file_has_resume_metadata_for_selector,
-    session_id_matches_selector, session_path_id_matches_selector,
     session_path_id_matching_selector,
 };
 use anyhow::{Context, Result};
@@ -378,12 +377,16 @@ fn append_state_db_rollout_rows(
     for row in rows {
         let (thread_id, rollout_path) =
             row.with_context(|| format!("failed to read state db {}", db_path.display()))?;
-        let Some(match_kind) = state_db_rollout_row_match_kind(&thread_id, &rollout_path, selector)
-        else {
+        let plan = state_db_rollout_row_match_plan(&thread_id, &rollout_path, selector);
+        let Some(match_kind) = session_repair_match_kind(plan.match_kind) else {
             continue;
         };
-        let resolved_session_id =
-            state_db_rollout_row_session_id(&thread_id, &rollout_path, selector);
+        let resolved_session_id = state_db_rollout_row_session_id(
+            &thread_id,
+            &rollout_path,
+            plan.session_id_source,
+            selector,
+        );
         let path = resolve_state_db_rollout_path(codex_home, &rollout_path);
         if path_is_contained_regular_file(codex_home, &path) && is_session_metadata_file(&path) {
             paths.push(SessionRepairCandidate {
@@ -396,44 +399,57 @@ fn append_state_db_rollout_rows(
     Ok(())
 }
 
-fn state_db_rollout_row_match_kind(
+fn state_db_rollout_row_match_plan(
     thread_id: &str,
     rollout_path: &str,
     selector: &str,
-) -> Option<SessionRepairMatchKind> {
-    let normalized_thread_id = thread_id.strip_prefix("thread_").unwrap_or(thread_id);
-    if session_id_matches_selector(thread_id, selector, true)
-        || session_id_matches_selector(normalized_thread_id, selector, true)
-        || session_path_id_matches_selector(Path::new(rollout_path), selector, true)
-    {
-        return Some(SessionRepairMatchKind::Exact);
-    }
-    if session_id_matches_selector(thread_id, selector, false)
-        || session_id_matches_selector(normalized_thread_id, selector, false)
-        || session_path_id_matches_selector(Path::new(rollout_path), selector, false)
-    {
-        return Some(SessionRepairMatchKind::Prefix);
-    }
-    None
+) -> prodex_mojo_core::json::SessionStateDbRowMatchPlan {
+    let path_stem = Path::new(rollout_path)
+        .file_stem()
+        .and_then(|stem| stem.to_str());
+    prodex_mojo_core::json::session_state_db_row_match_plan(thread_id, path_stem, selector)
+        .expect("Mojo state-db row selector planner returned invalid output")
 }
 
 fn state_db_rollout_row_session_id(
     thread_id: &str,
     rollout_path: &str,
+    source: prodex_mojo_core::json::SessionStateDbRowSessionIdSource,
     selector: &str,
 ) -> Option<String> {
     let normalized_thread_id = thread_id.strip_prefix("thread_").unwrap_or(thread_id);
-    if session_id_matches_selector(normalized_thread_id, selector, false)
-        && full_codex_session_id(normalized_thread_id).is_some()
-    {
-        return Some(normalized_thread_id.to_string());
+    match source {
+        prodex_mojo_core::json::SessionStateDbRowSessionIdSource::NormalizedThreadId
+            if full_codex_session_id(normalized_thread_id).is_some() =>
+        {
+            Some(normalized_thread_id.to_string())
+        }
+        prodex_mojo_core::json::SessionStateDbRowSessionIdSource::ThreadId
+            if full_codex_session_id(thread_id).is_some() =>
+        {
+            Some(thread_id.to_string())
+        }
+        prodex_mojo_core::json::SessionStateDbRowSessionIdSource::PathStem => {
+            session_path_id_matching_selector(Path::new(rollout_path), selector, false)
+        }
+        prodex_mojo_core::json::SessionStateDbRowSessionIdSource::None
+        | prodex_mojo_core::json::SessionStateDbRowSessionIdSource::NormalizedThreadId
+        | prodex_mojo_core::json::SessionStateDbRowSessionIdSource::ThreadId => None,
     }
-    if session_id_matches_selector(thread_id, selector, false)
-        && full_codex_session_id(thread_id).is_some()
-    {
-        return Some(thread_id.to_string());
+}
+
+fn session_repair_match_kind(
+    kind: prodex_mojo_core::json::SessionStateDbRowMatchKind,
+) -> Option<SessionRepairMatchKind> {
+    match kind {
+        prodex_mojo_core::json::SessionStateDbRowMatchKind::None => None,
+        prodex_mojo_core::json::SessionStateDbRowMatchKind::Prefix => {
+            Some(SessionRepairMatchKind::Prefix)
+        }
+        prodex_mojo_core::json::SessionStateDbRowMatchKind::Exact => {
+            Some(SessionRepairMatchKind::Exact)
+        }
     }
-    session_path_id_matching_selector(Path::new(rollout_path), selector, false)
 }
 
 fn resolve_state_db_rollout_path(codex_home: &Path, rollout_path: &str) -> PathBuf {

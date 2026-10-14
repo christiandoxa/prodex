@@ -7,6 +7,13 @@ comptime SESSION_SELECTOR_ABI_VERSION: Int64 = 1
 comptime SESSION_SELECTOR_OK: Int64 = 0
 comptime SESSION_SELECTOR_INVALID: Int64 = 1
 comptime SESSION_REPORT_QUERY_FIELD_COUNT: Int64 = 6
+comptime SESSION_STATE_DB_MATCH_NONE: Int64 = 0
+comptime SESSION_STATE_DB_MATCH_PREFIX: Int64 = 1
+comptime SESSION_STATE_DB_MATCH_EXACT: Int64 = 2
+comptime SESSION_STATE_DB_SOURCE_NONE: Int64 = 0
+comptime SESSION_STATE_DB_SOURCE_NORMALIZED_THREAD_ID: Int64 = 1
+comptime SESSION_STATE_DB_SOURCE_THREAD_ID: Int64 = 2
+comptime SESSION_STATE_DB_SOURCE_PATH_STEM: Int64 = 3
 
 
 def session_file_name_suffix_length(
@@ -66,6 +73,25 @@ def session_selector_matches(
         if session_selector_ascii_lower(left[unsafe_offset=index]) != session_selector_ascii_lower(right[unsafe_offset=index]):
             return False
     return True
+
+
+def session_selector_strip_thread_prefix(
+    view: ProdexRichStringView,
+) -> ProdexRichStringView:
+    if view.len < 7:
+        return view.copy()
+    var source = rich_view_ptr(view)
+    if (
+        source[unsafe_offset=0] != 116
+        or source[unsafe_offset=1] != 104
+        or source[unsafe_offset=2] != 114
+        or source[unsafe_offset=3] != 101
+        or source[unsafe_offset=4] != 97
+        or source[unsafe_offset=5] != 100
+        or source[unsafe_offset=6] != 95
+    ):
+        return view.copy()
+    return ProdexRichStringView(view.ptr + UInt(7), view.len - UInt(7))
 
 
 def session_selector_path_span(
@@ -240,6 +266,82 @@ def prodex_session_selector_path_span_v1(
     )
     output[unsafe_offset=0] = span[0]
     output[unsafe_offset=1] = span[1]
+    return SESSION_SELECTOR_OK
+
+
+@export("prodex_session_state_db_row_match_plan_v1")
+def prodex_session_state_db_row_match_plan_v1(
+    abi_version: Int64,
+    thread_id_address: UInt,
+    thread_id_length: Int64,
+    path_stem_address: UInt,
+    path_stem_length: Int64,
+    path_stem_present: Int64,
+    selector_address: UInt,
+    selector_length: Int64,
+    output_address: UInt,
+) abi("C") -> Int64:
+    if (
+        abi_version != SESSION_SELECTOR_ABI_VERSION
+        or thread_id_length < 0
+        or path_stem_length < 0
+        or selector_length < 0
+        or (path_stem_present != 0 and path_stem_present != 1)
+        or (path_stem_present == 0 and path_stem_length != 0)
+        or output_address == 0
+        or (thread_id_length > 0 and thread_id_address == 0)
+        or (path_stem_length > 0 and path_stem_address == 0)
+        or (selector_length > 0 and selector_address == 0)
+    ):
+        return SESSION_SELECTOR_INVALID
+    var thread_id = ProdexRichStringView(
+        thread_id_address, UInt(thread_id_length)
+    )
+    var path_stem = ProdexRichStringView(path_stem_address, UInt(path_stem_length))
+    var selector = ProdexRichStringView(selector_address, UInt(selector_length))
+    if (
+        not rich_view_valid(thread_id, 0x7FFFFFFFFFFFFFFF)
+        or not rich_view_valid(path_stem, 0x7FFFFFFFFFFFFFFF)
+        or not rich_view_valid(selector, 0x7FFFFFFFFFFFFFFF)
+    ):
+        return SESSION_SELECTOR_INVALID
+    var output = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    var normalized_thread_id = session_selector_strip_thread_prefix(thread_id)
+    var path_matches = path_stem_present == 1
+    var thread_id_has_prefix = normalized_thread_id.len != thread_id.len
+
+    var match_kind = SESSION_STATE_DB_MATCH_NONE
+    if session_selector_matches(thread_id, selector, True) or session_selector_matches(
+        normalized_thread_id, selector, True
+    ) or (
+        path_matches
+        and session_selector_path_span(path_stem, selector, True, False)[0] >= 0
+    ):
+        match_kind = SESSION_STATE_DB_MATCH_EXACT
+    elif session_selector_matches(thread_id, selector, False) or session_selector_matches(
+        normalized_thread_id, selector, False
+    ) or (
+        path_matches
+        and session_selector_path_span(path_stem, selector, False, False)[0] >= 0
+    ):
+        match_kind = SESSION_STATE_DB_MATCH_PREFIX
+
+    var session_id_source = SESSION_STATE_DB_SOURCE_NONE
+    if thread_id_has_prefix and session_selector_is_full_id(normalized_thread_id) and session_selector_matches(
+        normalized_thread_id, selector, False
+    ):
+        session_id_source = SESSION_STATE_DB_SOURCE_NORMALIZED_THREAD_ID
+    elif session_selector_is_full_id(thread_id) and session_selector_matches(
+        thread_id, selector, False
+    ):
+        session_id_source = SESSION_STATE_DB_SOURCE_THREAD_ID
+    elif path_matches and session_selector_path_span(path_stem, selector, False, False)[0] >= 0:
+        session_id_source = SESSION_STATE_DB_SOURCE_PATH_STEM
+
+    output[unsafe_offset=0] = match_kind
+    output[unsafe_offset=1] = session_id_source
     return SESSION_SELECTOR_OK
 
 

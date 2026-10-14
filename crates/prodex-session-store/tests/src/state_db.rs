@@ -64,6 +64,58 @@ fn latest_rollout_remains_resolvable_when_state_db_only_has_older_thread() {
 }
 
 #[test]
+fn resolve_session_report_uses_thread_prefixed_state_db_row() {
+    let root = test_temp_dir("session-resolve-thread-prefixed-state-row");
+    let session_id = "01900000-0000-7000-8000-000000000301";
+    let plan = prodex_mojo_core::json::session_state_db_row_match_plan(
+        &format!("thread_{session_id}"),
+        Some("rollout-without-an-id"),
+        session_id,
+    )
+    .expect("state-db selector plan should be available");
+    assert_eq!(
+        plan.match_kind,
+        prodex_mojo_core::json::SessionStateDbRowMatchKind::Exact
+    );
+    let rollout_dir = root.join("state-db-rollouts");
+    fs::create_dir_all(&rollout_dir).expect("rollout directory should be created");
+    let session_path = rollout_dir.join("rollout-without-an-id.jsonl");
+    fs::write(
+        &session_path,
+        format!(
+            "{{\"timestamp\":\"2026-08-18T11:00:00Z\",\"type\":\"session_meta\",\"payload\":{{\"id\":\"{session_id}\",\"cwd\":\"/home/test-user/project\"}}}}\n"
+        ),
+    )
+    .expect("rollout should be written");
+
+    let db_path = root.join("state_7.sqlite");
+    let connection = rusqlite::Connection::open(&db_path).expect("state db should open");
+    connection
+        .execute(
+            "CREATE TABLE threads (id TEXT PRIMARY KEY, rollout_path TEXT NOT NULL)",
+            [],
+        )
+        .expect("threads table should be created");
+    connection
+        .execute(
+            "INSERT INTO threads (id, rollout_path) VALUES (?1, ?2)",
+            rusqlite::params![
+                format!("thread_{session_id}"),
+                session_path.display().to_string()
+            ],
+        )
+        .expect("thread row should be indexed");
+    drop(connection);
+
+    let report = resolve_session_report_by_id_in_store(&root, &AppState::default(), session_id)
+        .expect("state-db indexed rollout should resolve");
+    assert_eq!(report.id, session_id);
+    assert_eq!(report.cwd.as_deref(), Some("/home/test-user/project"));
+
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
 fn repair_resume_session_metadata_prefix_ignores_unrelated_state_database_schema() {
     let root = test_temp_dir("session-repair-unrelated-state-schema");
     let session_id = "019ec6c3-28a4-79f0-91f9-74a2f34b0928";
