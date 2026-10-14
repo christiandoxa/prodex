@@ -2,61 +2,84 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.437.11 - 2026-10-14
+
+### Runtime
+
+- Persist session release fences across resume and rotation (`da0fabc`)
+- Accept trimmed header tuple bounds (`b4dea3f`)
+- Migrate marker aggregation to Mojo (`d37d0f9`)
+
+### CLI
+
+- Move panel error line normalization to Mojo (`2affd22`)
+
+### Docs
+
+- Record latest migration checkpoints (`5980212`)
+# Prodex 0.437.11
+
+## New Features
+
+No new user-facing feature flags are required. This maintenance release restores
+reliable session recovery and preserves existing saved goals and attachments.
+
+## Bug Fixes
+
+### Recovery after account rotation and session resume
+
+Session release is now persisted independently from transient verification
+status. A successful rebind cannot erase its release history, so old background
+snapshots no longer resurrect a former account or turn a legitimate account
+rotation into a permanent hard-binding conflict. Monotonic release epochs also
+cover repeated release and rebind within one clock second and restart from
+legacy state, sidecar and journal snapshots.
+
+An existing conflicting session routing hint can be repaired at the beginning
+of a self-contained full-history request. Requests carrying a previous-response
+identifier or an opaque turn-state token do not use this path. Existing
+response and turn-state ownership, exact account identity, committed-output
+protection, and explicit user cancellation remain enforced. Available quota
+still cannot guarantee that an upstream model has capacity.
+
+### Terminal and saved-session lifecycle
+
+The parent launch preflight relinquishes its inline terminal viewport before
+starting the native TUI. An interactive child also restores the inherited
+terminal mode and disables mouse, paste and focus reporting on every exit
+path, without flushing queued user input. After a session-owned app-server stops, Prodex prints
+saved-session resume guidance instead of leaving the native temporary-socket
+reconnect command unexplained. Resume a saved conversation with
+`prodex s resume`; do not reconnect to a removed overlay socket. Explicitly
+paused goals remain paused until the user resumes them. Saved attachment and
+goal storage is not deleted or rewritten by this recovery patch.
+
+## Changelog
+
+### Build and validation
+
+The session-query bridge applies its documented Unicode normalization once at
+the shared ABI boundary, so direct callers and session-list consumers agree.
+A semantically equivalent extraction of the quota-runway backwards scan avoids
+a Mojo compiler stall observed on the current source without changing the
+release optimization level. Small Rust adapters and existing test code are
+organized into focused modules to satisfy the existing source-size budget,
+without raising the budget or deleting tests.
+
+Regression coverage includes stale snapshot replay in either merge order,
+JSON round trips, same-second rotation, restart with conflicting legacy state,
+real HTTP forwarding to an eligible account, and negative cases preserving
+immutable continuation ownership. ABI and release-schema changes remain
+backward-compatible for saved sessions. Processes launched before upgrade must
+exit normally and be resumed with the new binary to use the recovery fixes.
+
+Full Changelog: [0.437.10...0.437.11](https://github.com/christiandoxa/prodex/compare/0.437.10...0.437.11)
+
 ## 0.437.10 - 2026-10-13
 
 ### Misc
 
 - Preserve pasted goal media across overlay exit and resume (`0548b3f`)
-# Prodex 0.437.10
-
-## New Features
-
-- No new runtime mode. This release restores durable pasted goal text and images
-  when a temporary Codex home is removed and the same saved session is resumed.
-
-## Bug Fixes
-
-- Repair persisted goal attachment references before native resume and picker
-  launch, including goals whose original overlay is already gone. Existing shared
-  attachment bytes remain the source of truth; missing files are not fabricated.
-- Decouple independent goal SQLite repair from the global rollout maintenance
-  lock. Another live Codex session can no longer silently suppress goal repair.
-  Live rollouts retain their existing exclusive-write protection.
-- Repair nested pasted-text and image references inside generated
-  `goal-objective.md` files, including when the outer reference is already stable.
-  Raw pasted instructions and images are preserved byte-for-byte.
-- Use conditional goal updates so a concurrent new objective, goal identity,
-  paused/active state, token accounting and timestamps are not overwritten.
-
-## Changelog
-
-- Refresh the externally managed RTK release-qualified reference to verified
-  0.52.0. Keep the existing minimum version and mandatory release freshness checks.
-- Add real caller regressions for concurrent sessions, selector-less resume,
-  missing attachments, symlink boundaries, nested objectives and repeated resume.
-- Extend the existing compiled Mojo attachment policy to distinguish generated
-  goal wrappers from raw user content without a duplicated Rust fallback.
-- Verify the defect and repair using fresh native Codex 0.162.1 app-server
-  processes, real goal storage and native file read/write APIs. No upstream
-  inference request is needed to prove the restored content and attachment bytes.
-- Include the previously committed CI/release improvements: parallel strict Mojo
-  compilation, source-keyed archive reuse, disjoint test shards, and validated
-  native/cross-platform release runners. Safety and provenance gates stay intact.
-
-## Upgrade notes
-
-Run `prodex update`, confirm `prodex --version`, and reopen the saved session with
-that binary after exiting the old launcher safely. The next launch/resume repairs
-recoverable saved goal references automatically. It does not activate a paused goal,
-change context-window or compaction settings, replay tools or restart other sessions.
-
-Do not delete sessions, shared attachments or goal databases as a workaround.
-Files absent both from the original location and shared storage cannot be recreated
-from an address alone; this release does not invent lost goal contents.
-
-See [the attachment persistence investigation](https://github.com/christiandoxa/prodex/blob/main/migration/attachment-resume-043710.md).
-
-Full Changelog: [0.437.9...0.437.10](https://github.com/christiandoxa/prodex/compare/0.437.9...0.437.10)
 
 ## 0.437.9 - 2026-10-13
 
