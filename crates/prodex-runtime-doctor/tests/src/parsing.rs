@@ -358,6 +358,35 @@ fn runtime_doctor_summarizes_marker_context_by_route_lane_and_profile() {
 }
 
 #[test]
+fn runtime_doctor_marker_context_ordering_uses_mojo_and_drops_contextless_rows() {
+    let log = br#"[2026-05-12 00:00:00.000 +00:00] runtime_proxy_lane_limit_reached lane=compact
+[2026-05-12 00:00:01.000 +00:00] profile_inflight_saturated route=responses
+[2026-05-12 00:00:02.000 +00:00] selection_pick reason=ignored
+[2026-05-12 00:00:03.000 +00:00] profile_inflight_saturated profile=alpha
+"#;
+
+    let summary = summarize_runtime_log_tail(log);
+
+    assert_eq!(
+        summary
+            .marker_context_summary
+            .iter()
+            .map(|entry| entry.marker.as_str())
+            .collect::<Vec<_>>(),
+        [
+            "profile_inflight_saturated",
+            "runtime_proxy_lane_limit_reached"
+        ],
+    );
+    assert!(
+        !summary
+            .marker_context_summary
+            .iter()
+            .any(|entry| entry.marker == "selection_pick")
+    );
+}
+
+#[test]
 fn runtime_doctor_marker_context_reason_continuation_and_facets_batch_through_mojo() {
     let mut lines = vec![
         r#"[2026-05-12 00:00:00Z] chain_retried_owner reason=owner_retry route=responses profile=alpha"#.to_string(),

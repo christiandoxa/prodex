@@ -35,19 +35,31 @@ use selection::runtime_doctor_record_selection_summary;
 fn runtime_doctor_marker_context_summary(
     context: BTreeMap<String, RuntimeDoctorMarkerContextSummary>,
 ) -> Vec<RuntimeDoctorMarkerContextSummary> {
-    let mut summary = context
-        .into_values()
-        .filter(|entry| {
-            !entry.routes.is_empty() || !entry.lanes.is_empty() || !entry.profiles.is_empty()
+    let entries = context.into_values().collect::<Vec<_>>();
+    let order = prodex_mojo_core::rich::runtime_doctor_marker_context_summary_order(
+        &entries
+            .iter()
+            .map(
+                |entry| prodex_mojo_core::rich::RuntimeDoctorMarkerContextSummaryOrderInput {
+                    marker: &entry.marker,
+                    total: entry.total,
+                    has_context: !entry.routes.is_empty()
+                        || !entry.lanes.is_empty()
+                        || !entry.profiles.is_empty(),
+                },
+            )
+            .collect::<Vec<_>>(),
+    )
+    .expect("Mojo runtime-doctor marker context ordering returned invalid output");
+    order
+        .into_iter()
+        .map(|index| {
+            entries
+                .get(index)
+                .expect("Mojo runtime-doctor marker context ordering returned an invalid index")
+                .clone()
         })
-        .collect::<Vec<_>>();
-    summary.sort_by(|left, right| {
-        right
-            .total
-            .cmp(&left.total)
-            .then_with(|| left.marker.cmp(&right.marker))
-    });
-    summary
+        .collect()
 }
 
 #[cfg(feature = "runtime-log-mojo")]

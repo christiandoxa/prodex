@@ -1,7 +1,7 @@
 from std.memory import Pointer
 
 from rich_text import rich_view_matches_literal, rich_view_valid, rich_views_equal
-from rich_types import ProdexRichStringView
+from rich_types import ProdexRichStringView, rich_view_ptr
 from runtime_doctor_marker import (
     RUNTIME_DOCTOR_MARKER_MAX_BYTES,
     runtime_doctor_marker_failure_class,
@@ -30,6 +30,146 @@ comptime RUNTIME_DOCTOR_MARKER_AGGREGATION_KIND_PREVIOUS_ROUTE: Int64 = 7
 comptime RUNTIME_DOCTOR_MARKER_AGGREGATION_KIND_PREVIOUS_TRANSPORT: Int64 = 8
 comptime RUNTIME_DOCTOR_MARKER_AGGREGATION_KIND_PREVIOUS_REQUEST_SHAPE: Int64 = 9
 comptime RUNTIME_DOCTOR_MARKER_AGGREGATION_KIND_FACET_BASE: Int64 = 10
+comptime RUNTIME_DOCTOR_MARKER_CONTEXT_SUMMARY_ORDER_ABI_VERSION: Int64 = 1
+comptime RUNTIME_DOCTOR_MARKER_CONTEXT_SUMMARY_ORDER_MAX_COUNT: Int64 = 65537
+comptime RUNTIME_DOCTOR_MARKER_CONTEXT_SUMMARY_ORDER_MAX_TEXT_BYTES: Int64 = 4 * 1024 * 1024
+
+
+def runtime_doctor_marker_context_summary_marker_compare(
+    markers: Pointer[mut=False, ProdexRichStringView, _],
+    left: Int64,
+    right: Int64,
+) -> Int64:
+    var left_view = markers[unsafe_offset=left].copy()
+    var right_view = markers[unsafe_offset=right].copy()
+    var left_bytes = rich_view_ptr(left_view)
+    var right_bytes = rich_view_ptr(right_view)
+    var common = Int64(left_view.len)
+    if right_view.len < left_view.len:
+        common = Int64(right_view.len)
+    for index in range(common):
+        if left_bytes[unsafe_offset=index] < right_bytes[unsafe_offset=index]:
+            return -1
+        if left_bytes[unsafe_offset=index] > right_bytes[unsafe_offset=index]:
+            return 1
+    if left_view.len < right_view.len:
+        return -1
+    if left_view.len > right_view.len:
+        return 1
+    return 0
+
+
+def runtime_doctor_marker_context_summary_order_before(
+    markers: Pointer[mut=False, ProdexRichStringView, _],
+    totals: Pointer[mut=False, Int64, _],
+    left: Int64,
+    right: Int64,
+) -> Bool:
+    var left_total = totals[unsafe_offset=left]
+    var right_total = totals[unsafe_offset=right]
+    if right_total != left_total:
+        return left_total > right_total
+    return (
+        runtime_doctor_marker_context_summary_marker_compare(markers, left, right)
+        < 0
+    )
+
+
+@export("prodex_mojo_runtime_doctor_marker_context_summary_order_v1")
+def prodex_mojo_runtime_doctor_marker_context_summary_order_v1(
+    abi_version: Int64,
+    marker_views_address: UInt,
+    totals_address: UInt,
+    included_address: UInt,
+    count: Int64,
+    permutation_address: UInt,
+    scratch_address: UInt,
+    output_count_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != RUNTIME_DOCTOR_MARKER_CONTEXT_SUMMARY_ORDER_ABI_VERSION:
+        return 4
+    if (
+        count < 0
+        or count > RUNTIME_DOCTOR_MARKER_CONTEXT_SUMMARY_ORDER_MAX_COUNT
+        or permutation_address == 0
+        or scratch_address == 0
+        or output_count_address == 0
+    ):
+        return 1
+    var output_count = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_count_address)
+    )
+    output_count[] = 0
+    if count > 0 and (
+        marker_views_address == 0 or totals_address == 0 or included_address == 0
+    ):
+        return 1
+
+    var markers = Pointer[mut=False, ProdexRichStringView, ImmUntrackedOrigin](
+        unsafe_from_address=Int(marker_views_address)
+    )
+    var totals = Pointer[mut=False, Int64, ImmUntrackedOrigin](
+        unsafe_from_address=Int(totals_address)
+    )
+    var included = Pointer[mut=False, Int64, ImmUntrackedOrigin](
+        unsafe_from_address=Int(included_address)
+    )
+    var permutation = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(permutation_address)
+    )
+    var scratch = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(scratch_address)
+    )
+
+    for index in range(count):
+        if (
+            not rich_view_valid(
+                markers[unsafe_offset=index].copy(),
+                RUNTIME_DOCTOR_MARKER_CONTEXT_SUMMARY_ORDER_MAX_TEXT_BYTES,
+            )
+            or totals[unsafe_offset=index] < 0
+            or (included[unsafe_offset=index] != 0 and included[unsafe_offset=index] != 1)
+        ):
+            return 1
+        if included[unsafe_offset=index] == 1:
+            permutation[unsafe_offset=output_count[]] = index
+            output_count[] += 1
+
+    var width: Int64 = 1
+    while width < output_count[]:
+        var begin: Int64 = 0
+        while begin < output_count[]:
+            var middle = min(begin + width, output_count[])
+            var finish = min(middle + width, output_count[])
+            var left = begin
+            var right = middle
+            var out = begin
+            while left < middle and right < finish:
+                if runtime_doctor_marker_context_summary_order_before(
+                    markers,
+                    totals,
+                    permutation[unsafe_offset=right],
+                    permutation[unsafe_offset=left],
+                ):
+                    scratch[unsafe_offset=out] = permutation[unsafe_offset=right]
+                    right += 1
+                else:
+                    scratch[unsafe_offset=out] = permutation[unsafe_offset=left]
+                    left += 1
+                out += 1
+            while left < middle:
+                scratch[unsafe_offset=out] = permutation[unsafe_offset=left]
+                left += 1
+                out += 1
+            while right < finish:
+                scratch[unsafe_offset=out] = permutation[unsafe_offset=right]
+                right += 1
+                out += 1
+            begin = finish
+        for index in range(output_count[]):
+            permutation[unsafe_offset=index] = scratch[unsafe_offset=index]
+        width *= 2
+    return 0
 
 
 @export("prodex_mojo_runtime_doctor_marker_summary_counts_v1")

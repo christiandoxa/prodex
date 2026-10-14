@@ -1350,7 +1350,8 @@
           "runtime_doctor_marker_summary_counts",
           "runtime_doctor_compact_exit_counts",
           "runtime_doctor_marker_context_reason_facet_aggregation",
-          "runtime_doctor_selection_record_plan"
+          "runtime_doctor_selection_record_plan",
+          "runtime_doctor_marker_context_summary_order"
         ]
       },
       {
@@ -6383,6 +6384,29 @@
       "rust_adapter_scope": "line/JSON recognition, redaction, owned field materialization, bounded batch construction, validated representative projection, and existing DTO/map assembly"
     },
     {
+      "name": "runtime_doctor_marker_context_summary_order",
+      "domain": "runtime/diagnostics",
+      "introduced_in": "0.437.12",
+      "baseline_state": "candidate",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_mojo_runtime_doctor_marker_context_summary_order_v1",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/runtime_doctor_marker_summary.mojo",
+      "consumer": "crates/prodex-runtime-doctor/src/parsing.rs",
+      "consumer_marker": "prodex_mojo_core::rich::runtime_doctor_marker_context_summary_order(",
+      "production_consumers": [
+        "crates/prodex-runtime-doctor/src/parsing.rs"
+      ],
+      "production_reachability_test": "crates/prodex-mojo-core/src/rich/runtime_doctor_marker_aggregation.rs",
+      "rust_owner_before": "Rust filtered contextless marker rows and sorted marker context summaries by total descending with lexical marker ties",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "deleted; strict Mojo adapter and runtime-doctor caller tests cover context filtering, descending totals, UTF-8 byte ties, and contextless rows",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "BTreeMap value collection, context-presence projection, validated Mojo permutation application, and DTO ownership"
+    },
+    {
       "name": "runtime_doctor_binding_source_aggregation",
       "domain": "runtime/diagnostics",
       "introduced_in": "0.438.0",
@@ -10042,6 +10066,31 @@
         }
       },
       "cleanup_evidence": "The former Rust context, reason, continuation, and facet loops are removed from the parser; direct ABI and caller tests exercise the replacement reducer."
+    },
+    {
+      "file": "crates/prodex-runtime-doctor/src/parsing.rs",
+      "symbol": "runtime_doctor_marker_context_summary",
+      "operation": "runtime_doctor_marker_context_summary_order",
+      "previous_responsibility": "Rust filtered contextless marker summaries and sorted the remaining rows by descending total with ascending marker ties",
+      "final_state": "adapter-only",
+      "rust_before": "crates/prodex-runtime-doctor/src/parsing.rs::runtime_doctor_marker_context_summary",
+      "rust_after": "Rust projects owned marker rows into the validated Mojo ordering permutation and materializes the existing DTOs",
+      "mojo_owner": "mojo/prodex_core/runtime_doctor_marker_summary.mojo::prodex_mojo_runtime_doctor_marker_context_summary_order_v1",
+      "mojo_source": "mojo/prodex_core/runtime_doctor_marker_summary.mojo",
+      "mojo_entry": "prodex_mojo_runtime_doctor_marker_context_summary_order_v1",
+      "production_consumer": "crates/prodex-runtime-doctor/src/parsing.rs",
+      "parity_test": "crates/prodex-runtime-doctor/tests/src/parsing.rs::runtime_doctor_marker_context_ordering_uses_mojo_and_drops_contextless_rows",
+      "cleanup_loc": 17,
+      "cleanup_source": {
+        "kind": "collapsed-adapter",
+        "baseline_range": {
+          "start": 56,
+          "end": 72
+        },
+        "release_symbol": "fn runtime_doctor_marker_context_summary",
+        "release_marker": "prodex_mojo_core::rich::runtime_doctor_marker_context_summary_order("
+      },
+      "cleanup_evidence": "The former Rust filter and sort are deleted; the production parser now calls the versioned Mojo reducer and applies only its validated permutation."
     },
     {
       "file": "crates/prodex-quota/src/render/panels.rs",
