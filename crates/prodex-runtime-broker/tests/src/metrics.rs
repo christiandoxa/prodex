@@ -56,6 +56,20 @@ fn metrics_snapshot_input_builds_broker_metrics_dto() {
                 updated_at: 99,
             },
         ),
+        (
+            "__previous_response_not_found__:compact:resp-2".to_string(),
+            RuntimeProfileHealth {
+                score: 2,
+                updated_at: 100,
+            },
+        ),
+        (
+            "__previous_response_not_found__:standard:resp-3".to_string(),
+            RuntimeProfileHealth {
+                score: 3,
+                updated_at: 100,
+            },
+        ),
     ]);
     let continuation_statuses = RuntimeContinuationStatuses {
         response: BTreeMap::from([(
@@ -145,6 +159,29 @@ fn metrics_snapshot_input_builds_broker_metrics_dto() {
             .negative_cache_entries
             .responses,
         1
+    );
+    assert_eq!(
+        metrics
+            .previous_response_continuity
+            .negative_cache_entries
+            .compact,
+        1
+    );
+    assert_eq!(
+        metrics
+            .previous_response_continuity
+            .negative_cache_entries
+            .standard,
+        1
+    );
+    assert_eq!(
+        metrics.previous_response_continuity.negative_cache_failures,
+        RuntimeBrokerRouteContinuityMetrics {
+            responses: 4,
+            compact: 2,
+            websocket: 0,
+            standard: 3,
+        }
     );
     assert_eq!(metrics.active_request_release_underflows_total, 1);
     assert_eq!(

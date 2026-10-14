@@ -301,6 +301,7 @@ const PROMOTED_FILES = [
   "crates/prodex-runtime-state/src/quota.rs",
   "crates/prodex-runtime-proxy/src/lib.rs",
   "crates/prodex-mojo-core/src/runtime_broker_continuity.rs",
+  "crates/prodex-mojo-core/src/runtime_broker_continuity/metrics.rs",
   "crates/prodex-runtime-broker/src/continuity.rs",
   "crates/prodex-runtime-broker-log/src/lib.rs",
   "crates/prodex-mojo-core/src/state_policy.rs",
@@ -1382,6 +1383,7 @@ export function findViolations(files) {
       return [
         '@export("prodex_runtime_broker_registry_reuse_plan_v1")',
         '@export("prodex_runtime_broker_startup_grace_seconds_v1")',
+        '@export("prodex_runtime_broker_previous_response_continuity_v1")',
       ].filter((marker) => !contents.includes(marker))
         .map((marker) => `${filePath}: broker policy must remain Mojo-owned (${marker})`);
     }
@@ -2909,6 +2911,11 @@ export function findViolations(files) {
         .filter((call) => !contents.includes(call))
         .map((call) => filePath + ": broker version-guard ABI adapter must retain " + call);
     }
+    if (filePath === "crates/prodex-mojo-core/src/runtime_broker_continuity/metrics.rs") {
+      return ["prodex_runtime_broker_previous_response_continuity_v1("].filter(
+        (marker) => !contents.includes(marker),
+      ).map((marker) => `${filePath}: broker continuity reducer adapter must retain ${marker}`);
+    }
     return [];
   });
   const brokerContinuityViolations = files.flatMap(([filePath, contents]) => {
@@ -2919,6 +2926,7 @@ export function findViolations(files) {
       "prodex_mojo_core::runtime_broker_continuity::stale_verified",
       "prodex_mojo_core::runtime_broker_continuity::route_kind",
       "prodex_mojo_core::runtime_broker_continuity::health_key_kind",
+      "prodex_mojo_core::runtime_broker_continuity::previous_response_continuity_metrics",
     ];
     const violations = required
       .filter((call) => !contents.includes(call))

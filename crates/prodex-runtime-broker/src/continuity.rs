@@ -70,30 +70,28 @@ pub fn runtime_broker_previous_response_continuity_metrics(
     now: i64,
     negative_cache_decay_seconds: i64,
 ) -> RuntimeBrokerPreviousResponseContinuityMetrics {
-    const PREFIX: &str = "__previous_response_not_found__:";
-
-    let mut metrics = RuntimeBrokerPreviousResponseContinuityMetrics::default();
-    for (key, entry) in profile_health {
-        let Some(rest) = key.strip_prefix(PREFIX) else {
-            continue;
-        };
-        let Some((route, _)) = rest.split_once(':') else {
-            continue;
-        };
-        let score = runtime_broker_effective_score(entry, now, negative_cache_decay_seconds);
-        if score == 0 {
-            continue;
-        }
-        if runtime_broker_add_route_continuity_signal(&mut metrics.negative_cache_entries, route, 1)
-        {
-            let _ = runtime_broker_add_route_continuity_signal(
-                &mut metrics.negative_cache_failures,
-                route,
-                score as usize,
-            );
-        }
+    let plan = prodex_mojo_core::runtime_broker_continuity::previous_response_continuity_metrics(
+        profile_health
+            .iter()
+            .map(|(key, entry)| (key.as_str(), entry.score, entry.updated_at)),
+        now,
+        negative_cache_decay_seconds,
+    )
+    .expect("Mojo broker previous-response continuity plan returned invalid output");
+    RuntimeBrokerPreviousResponseContinuityMetrics {
+        negative_cache_entries: RuntimeBrokerRouteContinuityMetrics {
+            responses: plan.entries[0],
+            compact: plan.entries[1],
+            websocket: plan.entries[2],
+            standard: plan.entries[3],
+        },
+        negative_cache_failures: RuntimeBrokerRouteContinuityMetrics {
+            responses: plan.failures[0],
+            compact: plan.failures[1],
+            websocket: plan.failures[2],
+            standard: plan.failures[3],
+        },
     }
-    metrics
 }
 
 pub fn runtime_broker_add_route_continuity_signal(

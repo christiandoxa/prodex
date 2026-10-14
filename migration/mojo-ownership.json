@@ -1030,11 +1030,22 @@
           "broker_continuity_stale_verification",
           "broker_continuity_route_classification",
           "broker_health_key_classification",
+          "broker_previous_response_continuity_metrics_reducer",
           "broker_binary_identity_policy",
           "broker_version_guard_planning",
           "broker_version_output_parsing",
           "broker_registry_reuse_planning",
           "broker_startup_grace_planning"
+        ]
+      },
+      {
+        "path": "crates/prodex-mojo-core/src/runtime_broker_continuity/metrics.rs",
+        "language": "rust",
+        "classification": "MIXED",
+        "production_reachable": true,
+        "role": "adapter",
+        "operations": [
+          "broker_previous_response_continuity_metrics_reducer"
         ]
       },
       {
@@ -3925,6 +3936,29 @@
       "rust_owner_before": "route-health/internal/profile key prefix classification",
       "rust_test_oracle": "deleted; degraded-health metrics fixtures cover route, profile and internal keys",
       "rust_adapter_scope": "metric counter mutation after validated key-kind tag"
+    },
+    {
+      "domain": "runtime-broker/continuity",
+      "introduced_in": "0.438.0",
+      "baseline_state": "Rust traversed profile-health keys, applied decay, parsed negative-cache routes, filtered inactive and unknown entries, and accumulated per-route continuity counters",
+      "final_state": "authoritative",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/runtime_broker_continuity.mojo",
+      "consumer": "crates/prodex-runtime-broker/src/continuity.rs",
+      "production_consumers": [
+        "crates/prodex-runtime-broker/src/continuity.rs"
+      ],
+      "production_reachability_test": "crates/prodex-mojo-core/src/runtime_broker_continuity/metrics.rs",
+      "rust_state_after": "adapter-only",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "name": "broker_previous_response_continuity_metrics_reducer",
+      "mojo_entry": "prodex_runtime_broker_previous_response_continuity_v1",
+      "consumer_marker": "prodex_mojo_core::runtime_broker_continuity::previous_response_continuity_metrics(",
+      "rust_owner_before": "negative-cache key-prefix and route parsing, effective health-score filtering, route classification, and per-route entry/failure counter reduction",
+      "rust_test_oracle": "deleted; required-Mojo adapter and runtime-broker metrics caller tests cover decay boundaries, active known routes, unknown routes, and DTO reconstruction",
+      "rust_adapter_scope": "BTreeMap iteration, borrowed key/score marshalling, validated Mojo counter conversion, and metric DTO materialization"
     },
     {
       "domain": "runtime-broker/registry",

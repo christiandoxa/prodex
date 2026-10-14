@@ -812,6 +812,10 @@ pub fn health_key_kind(key: &str) -> Result<HealthKeyKind, MojoError> {
     }
 }
 
+#[path = "runtime_broker_continuity/metrics.rs"]
+mod metrics;
+pub use metrics::{BrokerPreviousResponseContinuityPlan, previous_response_continuity_metrics};
+
 #[path = "runtime_broker_lifecycle.rs"]
 mod lifecycle;
 pub use lifecycle::{
