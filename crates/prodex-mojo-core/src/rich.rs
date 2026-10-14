@@ -181,6 +181,9 @@ pub use runtime_doctor_plan::*;
 #[path = "rich/runtime_doctor_marker.rs"]
 mod runtime_doctor_marker;
 pub use runtime_doctor_marker::*;
+#[path = "rich/runtime_doctor_selection_record.rs"]
+mod runtime_doctor_selection_record;
+pub use runtime_doctor_selection_record::*;
 #[path = "rich/runtime_doctor_marker_aggregation.rs"]
 mod runtime_doctor_marker_aggregation;
 pub use runtime_doctor_marker_aggregation::*;
