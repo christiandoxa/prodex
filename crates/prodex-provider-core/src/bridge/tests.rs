@@ -230,6 +230,102 @@ fn anthropic_provider_core_request_stays_lossless_for_simple_responses_history()
 }
 
 #[test]
+fn anthropic_chat_compat_response_and_stream_use_mojo_shape_at_provider_boundary() {
+    let response =
+        provider_translator(ProviderId::Anthropic).transform_response(ProviderTransformInput::new(
+            ProviderEndpoint::Responses,
+            serde_json::to_vec(&serde_json::json!({
+                "id": "chatcmpl_boundary",
+                "model": "compat-model",
+                "created": 1_700_000_001u64,
+                "choices": [{
+                    "message": {
+                        "role": "assistant",
+                        "content": "hello",
+                        "tool_calls": [{
+                            "id": "call_boundary",
+                            "function": {
+                                "name": "functions.exec_command",
+                                "arguments": "{\"cmd\":\"ls\"}"
+                            }
+                        }]
+                    }
+                }],
+                "usage": {"prompt_tokens": 2, "completion_tokens": 3}
+            }))
+            .expect("chat response fixture serializes"),
+        ));
+    assert_eq!(response.loss, ProviderTransformLoss::Lossless);
+    assert_eq!(
+        response.from_format,
+        ProviderWireFormat::OpenAiChatCompletions
+    );
+    assert_eq!(response.to_format, ProviderWireFormat::OpenAiResponses);
+    assert_eq!(
+        serde_json::from_slice::<serde_json::Value>(
+            response.body.as_deref().expect("translated response body"),
+        )
+        .expect("translated response parses"),
+        serde_json::json!({
+            "id": "chatcmpl_boundary",
+            "object": "response",
+            "created_at": 1_700_000_001u64,
+            "model": "compat-model",
+            "output": [
+                {
+                    "type": "message",
+                    "role": "assistant",
+                    "content": [{"type": "output_text", "text": "hello"}]
+                },
+                {
+                    "type": "function_call",
+                    "call_id": "call_boundary",
+                    "name": "exec_command",
+                    "namespace": "functions",
+                    "arguments": "{\"cmd\":\"rtk ls\"}"
+                }
+            ],
+            "usage": {"input_tokens": 2, "output_tokens": 3, "total_tokens": 5}
+        })
+    );
+
+    let stream = provider_translator(ProviderId::Anthropic).transform_stream_event(
+        ProviderTransformInput::new(
+            ProviderEndpoint::Responses,
+            br#"data: {"choices":[{"delta":{"content":"ignored","tool_calls":[{"id":"call_boundary","function":{"name":"functions.exec_command","arguments":"{\"cmd\":\"ls\"}"}}]}}]}
+
+"#
+                .to_vec(),
+        ),
+    );
+    assert_eq!(stream.loss, ProviderTransformLoss::Lossless);
+    assert_eq!(
+        stream.from_format,
+        ProviderWireFormat::OpenAiChatCompletions
+    );
+    assert_eq!(stream.to_format, ProviderWireFormat::OpenAiResponses);
+    let stream_body = String::from_utf8(stream.body.expect("translated stream body"))
+        .expect("translated stream is UTF-8");
+    assert_eq!(
+        stream_body.lines().next(),
+        Some("event: response.function_call_arguments.delta")
+    );
+    let payload = stream_body
+        .lines()
+        .find_map(|line| line.strip_prefix("data: "))
+        .and_then(|line| serde_json::from_str::<serde_json::Value>(line).ok())
+        .expect("translated stream payload");
+    assert_eq!(
+        payload,
+        serde_json::json!({
+            "type": "response.function_call_arguments.delta",
+            "call_id": "call_boundary",
+            "delta": "{\"cmd\":\"rtk ls\"}"
+        })
+    );
+}
+
+#[test]
 fn provider_core_rewritten_body_accepts_degraded_but_safe_payloads() {
     let degraded = ProviderTransformResult {
         provider: ProviderId::DeepSeek,
