@@ -318,7 +318,7 @@ fn ping_result_from_output(
     let (status, detail) = match validate_ping_output(output) {
         Ok(()) if output.status.success() => (
             PingStatus::Pass,
-            "valid model response received".to_string(),
+            ping_status_detail(prodex_mojo_core::rich::PING_STATUS_OK),
         ),
         Ok(()) => classify_failure(output),
         Err(failure) if no_stdout => {
@@ -374,37 +374,21 @@ fn ping_status_from_mojo(value: i64) -> PingStatus {
     }
 }
 
-fn ping_status_detail(status: PingStatus) -> &'static str {
-    match status {
-        PingStatus::Pass => "valid model response received",
-        PingStatus::AuthFailed => "OpenAI authentication failed",
-        PingStatus::DnsFailed => "OpenAI hostname resolution failed",
-        PingStatus::TlsFailed => "OpenAI TLS connection failed",
-        PingStatus::Timeout => "OpenAI diagnostic timed out",
-        PingStatus::RateLimited => "OpenAI temporarily rate limited the profile",
-        PingStatus::QuotaExhausted => "OpenAI reported quota exhaustion",
-        PingStatus::UpstreamOverloaded => "OpenAI upstream is temporarily unavailable",
-        PingStatus::ModelUnavailable => "selected OpenAI model is unavailable",
-        PingStatus::ProtocolFailed => "Codex did not complete a structured turn",
-        PingStatus::TurnFailed => "Codex turn failed",
-        PingStatus::ProcessFailed => "Codex diagnostic process failed",
-        PingStatus::SpawnFailed => "OpenAI application ping could not start",
-        PingStatus::Cancelled => "OpenAI ping was cancelled",
-        PingStatus::UnexpectedResponse => "completed turn did not return a model response",
-    }
+fn ping_status_detail(status: i64) -> String {
+    prodex_mojo_core::rich::ping_status_detail(status)
+        .expect("Mojo ping status detail formatter returned invalid output")
 }
 
 fn validate_ping_output(output: &Output) -> std::result::Result<(), PingValidationFailure> {
     let text = String::from_utf8_lossy(&output.stdout);
-    let status = ping_status_from_mojo(
-        prodex_mojo_core::rich::ping_validate_jsonl(&text)
-            .expect("Mojo ping protocol validator returned invalid output"),
-    );
+    let status_value = prodex_mojo_core::rich::ping_validate_jsonl(&text)
+        .expect("Mojo ping protocol validator returned invalid output");
+    let status = ping_status_from_mojo(status_value);
     if status == PingStatus::Pass {
         return Ok(());
     }
-    let detail = ping_structured_failure_detail(&text)
-        .unwrap_or_else(|| ping_status_detail(status).to_string());
+    let detail =
+        ping_structured_failure_detail(&text).unwrap_or_else(|| ping_status_detail(status_value));
     Err(PingValidationFailure { status, detail })
 }
 
@@ -459,15 +443,16 @@ fn classify_failure(output: &Output) -> (PingStatus, String) {
         String::from_utf8_lossy(&output.stderr)
     );
     let (status, detail) = classify_failure_text(&text);
-    (status, detail.to_string())
+    (status, detail)
 }
 
-fn classify_failure_text(text: &str) -> (PingStatus, &'static str) {
-    let status = ping_status_from_mojo(
-        prodex_mojo_core::rich::ping_classify_failure(text)
-            .expect("Mojo ping failure classifier returned invalid output"),
-    );
-    (status, ping_status_detail(status))
+fn classify_failure_text(text: &str) -> (PingStatus, String) {
+    let status_value = prodex_mojo_core::rich::ping_classify_failure(text)
+        .expect("Mojo ping failure classifier returned invalid output");
+    (
+        ping_status_from_mojo(status_value),
+        ping_status_detail(status_value),
+    )
 }
 
 #[cfg(test)]

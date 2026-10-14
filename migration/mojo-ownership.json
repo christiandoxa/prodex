@@ -111,6 +111,7 @@
     "MIXED": "A source containing both boundary and deterministic code; semantic_ranges identify the counted region when needed."
   },
   "baseline_optional_sources": [
+    "mojo/prodex_core/ping_protocol.mojo",
     "mojo/prodex_core/runtime_health.mojo",
     "mojo/prodex_core/info_runway.mojo"
   ],
@@ -2096,6 +2097,26 @@
         "role": "adapter",
         "operations": [
           "saved_session_exit_guidance"
+        ]
+      },
+      {
+        "path": "mojo/prodex_core/ping_protocol.mojo",
+        "language": "mojo",
+        "classification": "DETERMINISTIC_DOMAIN",
+        "production_reachable": true,
+        "role": "semantic",
+        "operations": [
+          "ping_status_detail_formatting"
+        ]
+      },
+      {
+        "path": "crates/prodex-mojo-core/src/rich/ping_protocol.rs",
+        "language": "rust",
+        "classification": "MIXED",
+        "production_reachable": true,
+        "role": "adapter",
+        "operations": [
+          "ping_status_detail_formatting"
         ]
       }
     ],
@@ -9075,6 +9096,29 @@
       "duplicate_production_owner": false,
       "platform_fallback": false,
       "rust_adapter_scope": "per-launch hook marker IO, UUID parsing, explicit resume identity, terminal detection and append-only stderr writes"
+    },
+    {
+      "name": "ping_status_detail_formatting",
+      "domain": "app/ping-diagnostics",
+      "introduced_in": "0.437.12",
+      "baseline_state": "candidate",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_mojo_ping_status_detail_v1",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/ping_protocol.mojo",
+      "consumer": "crates/prodex-app/src/app_commands/ping.rs",
+      "consumer_marker": "prodex_mojo_core::rich::ping_status_detail(",
+      "production_consumers": [
+        "crates/prodex-app/src/app_commands/ping.rs"
+      ],
+      "production_reachability_test": "crates/prodex-app/src/app_commands/ping_tests.rs",
+      "rust_owner_before": "Rust mapped ping status tags to user-facing diagnostic detail strings.",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "deleted; the required-Mojo caller regression verifies protocol-failure detail through validate_ping_output",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "status-tag mapping, bounded output allocation, ABI error mapping, and structured failure text extraction"
     }
   ],
   "rust_semantic_reductions": [

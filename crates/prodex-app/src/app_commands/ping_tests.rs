@@ -158,6 +158,23 @@ fn exit_zero_without_completed_turn_is_not_success() {
 }
 
 #[test]
+fn incomplete_turn_uses_mojo_status_detail_in_the_ping_caller() {
+    let result = validate_ping_output(&output(
+        r#"{"type":"thread.started","thread_id":"t"}"#,
+        true,
+    ));
+    let failure = result.unwrap_err();
+    assert_eq!(failure.status, PingStatus::ProtocolFailed);
+    assert_eq!(
+        failure.detail,
+        prodex_mojo_core::rich::ping_status_detail(
+            prodex_mojo_core::rich::PING_STATUS_PROTOCOL_FAILED
+        )
+        .unwrap()
+    );
+}
+
+#[test]
 fn tool_activity_is_rejected_even_with_a_model_response() {
     let result = validate_ping_output(&output(
         r#"{"type":"thread.started","thread_id":"t"}
