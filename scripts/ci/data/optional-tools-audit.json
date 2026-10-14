@@ -27,17 +27,17 @@
     {
       "id": "rtk",
       "repository": "https://github.com/rtk-ai/rtk",
-      "latest_stable": "1.0.0",
-      "release": "v1.0.0",
-      "commit": "01f819c41da43698f5aedf2a8d730f716779009a",
-      "git_tree": "bc3e4e3e7b65ef7ce7b6b0f9c5552e2036b7c944",
-      "checksums_asset": "sha256:832e7aeef14f16eb0dc11ff2d186d158c2a3235f1f83c7acb873cf3e66a1b43a",
+      "latest_stable": "1.0.1",
+      "release": "v1.0.1",
+      "commit": "4ef8730cf3a0dea11c8d64a9b90bc0616fe52100",
+      "git_tree": "6912dde8aea7aa9026e6382769d017679df6a01c",
+      "checksums_asset": "sha256:3dc6975d97c9faa43aa997a5d68a3255ceccea43ffa2d9d9ac22950b1b2d93a2",
       "assets": {
-        "linux-x86_64-musl": "sha256:b0b69fbed72f55d8eae18587c0b6bc140a8a8b39d5b7c6e6df33795249940926",
-        "linux-aarch64-gnu": "sha256:9438c2c99d428fa6fbe7f4d1c01a87babd5feec17ee6d7bb3372a613a21db7d3",
-        "darwin-x86_64": "sha256:69504389e1c43e7c850cf527b51c5f0ea31c3634d6c5359253e12eeebd521d11",
-        "darwin-aarch64": "sha256:6f3c50e9a9a0333b29cc2a2244782f6ac2052ec7e5b036c65d2116d35e1bc2c7",
-        "windows-x86_64": "sha256:011bffd00d3b9142987f77f9ec2c4db018d833ea9b2a175167068c2a74b2599e"
+        "linux-x86_64-musl": "sha256:5b919c3bccb799b67a61866d0e617410a4fcdf173e2614440e59de2fa2003436",
+        "linux-aarch64-gnu": "sha256:cd627c4091ad90b5e5aca83ca5af66ee4b8aa8537a736533fa90544f461f1c2b",
+        "darwin-x86_64": "sha256:4b716b2f45d677de41c99f77d9a71199ad060b98ec2f78ef712885312b3a6578",
+        "darwin-aarch64": "sha256:4aae2f60cfc49c9e81b8c8c57020aa0cb824da608c78b4f0cf5c0988e19e824e",
+        "windows-x86_64": "sha256:64b4807c50b61dddf2ac1e86751dbda9117ab94ed02bf266e6584da571c39896"
       },
       "license": "Apache-2.0 (CLI/rtk-oss); default full binary also includes BUSL-1.1 engine",
       "runtime": "Externally managed executable; recommended, not latest-only",
@@ -47,8 +47,8 @@
         "windows"
       ],
       "decision": "ADOPT_PACKAGE",
-      "notes": "Re-audited for Prodex 0.437.11 after latest stable moved to v1.0.0. Verified exact commit/tree, checksum manifest and five official platform archives against GitHub digests and checksums. Additionally verified the Apache-only rtk-oss Linux binary: rtk 1.0.0, bypass and legacy proxy alias smokes pass in isolated HOME with tracking disabled. Default full binary includes BUSL-1.1 engine; document this rather than treating all v1 binaries as Apache-only. No tool was installed or upgraded; RTK remains externally managed with unchanged 0.46.0 minimum. No removed ultra-compact flag is used by Prodex.",
-      "audited_at": "2026-10-14T01:14:46.074106+00:00"
+      "notes": "Re-audited for Prodex 0.437.13 after the release freshness check found v1.0.1. Verified exact upstream commit/tree, checksum manifest and five official platform archives against GitHub digests and downloaded SHA-256 checksums. Verified the Apache-only rtk-oss Linux binary version, bypass and legacy proxy alias in an isolated HOME with telemetry and tracking disabled. The full edition still includes the BUSL-1.1 engine. No installed user tool was changed; the compatible minimum remains 0.46.0.",
+      "audited_at": "2026-10-14T23:28:20.865629+00:00"
     },
     {
       "id": "codebase-memory-mcp",
