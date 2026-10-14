@@ -29,6 +29,71 @@ fn wrapping_counts_terminal_display_width() {
 }
 
 #[test]
+fn mojo_text_chunking_preserves_unicode_cell_boundaries_without_rust_fallback() {
+    for (token, width, expected) in [
+        ("", 0, vec![""]),
+        ("", 8, vec![""]),
+        ("abc", 0, vec![""]),
+        ("abcd", 2, vec!["ab", "cd"]),
+        ("表🙂", 2, vec!["表", "🙂"]),
+        ("🙂ab", 1, vec!["🙂", "a", "b"]),
+        ("e\u{301}a", 1, vec!["e", "\u{301}a"]),
+        ("e\u{301}a", 2, vec!["e\u{301}a"]),
+        ("e\u{301}a", 3, vec!["e\u{301}a"]),
+        ("x\u{301}\u{301}b", 1, vec!["x", "\u{301}\u{301}b"]),
+    ] {
+        assert_eq!(
+            chunk_token(token, width),
+            expected,
+            "compiled Mojo unicode chunking for {token:?}, width={width}",
+        );
+    }
+}
+
+#[test]
+fn mojo_fit_cells_preserves_ellipsis_and_combining_marks() {
+    for (value, width, expected) in [
+        ("", 0, ""),
+        ("abc", 0, ""),
+        ("abc", 3, "abc"),
+        ("abcdef", 1, "."),
+        ("abcdef", 3, "..."),
+        ("abcdef", 4, "a..."),
+        ("abcdef", 6, "abcdef"),
+        ("表🙂abcdef", 6, "表..."),
+        ("e\u{301}b123456", 4, "e\u{301}..."),
+        ("\u{301}abcdef", 4, "\u{301}a..."),
+    ] {
+        assert_eq!(
+            fit_cell(value, width),
+            expected,
+            "Mojo fit {value:?} / {width}"
+        );
+    }
+}
+
+#[test]
+fn mojo_wrap_and_pad_keep_terminal_invariants() {
+    for width in [0, 1, 2, 3, 4, 6, 8, 12, 48] {
+        for value in [
+            "",
+            "abcd",
+            "emoji🙂abc",
+            "表🙂",
+            "x\u{301}y",
+            "✓ visible data",
+        ] {
+            let chunks = wrap_text(value, width);
+            assert!(!chunks.is_empty(), "wrap {value:?} / {width}");
+            if width != 0 && !value.contains('🙂') && !value.contains('表') {
+                assert!(chunks.iter().all(|line| text_width(line) <= width));
+            }
+            assert_eq!(text_width(&pad_cell(value, width)), width);
+        }
+    }
+}
+
+#[test]
 fn field_layout_respects_requested_width() {
     let lines =
         format_field_lines_with_layout("Long Label", "some longer value that must wrap", 24, 10);
