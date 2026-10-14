@@ -41,8 +41,20 @@ pub const RUNTIME_DOCTOR_MARKER_AGGREGATION_KIND_PREVIOUS_TRANSPORT: i64 = 8;
 pub const RUNTIME_DOCTOR_MARKER_AGGREGATION_KIND_PREVIOUS_REQUEST_SHAPE: i64 = 9;
 /// First output kind assigned to the ordered `RUNTIME_DOCTOR_FACETS` values.
 pub const RUNTIME_DOCTOR_MARKER_AGGREGATION_KIND_FACET_BASE: i64 = 10;
+const RUNTIME_DOCTOR_MARKER_CONTEXT_SUMMARY_ORDER_ABI_VERSION: i64 = 1;
+const RUNTIME_DOCTOR_MARKER_CONTEXT_SUMMARY_ORDER_MAX_COUNT: usize = 65_537;
 
 unsafe extern "C" {
+    fn prodex_mojo_runtime_doctor_marker_context_summary_order_v1(
+        abi_version: i64,
+        marker_views: u64,
+        totals: u64,
+        included: u64,
+        input_count: i64,
+        permutation: u64,
+        scratch: u64,
+        output_count: u64,
+    ) -> i64;
     fn prodex_mojo_runtime_doctor_marker_aggregation_v1(
         abi_version: i64,
         markers: u64,
@@ -58,6 +70,75 @@ unsafe extern "C" {
         output_count: u64,
         latest_stale_reason_index: u64,
     ) -> i64;
+}
+
+/// One runtime-doctor marker context row projected into the Mojo ordering ABI.
+#[derive(Debug, Clone, Copy)]
+pub struct RuntimeDoctorMarkerContextSummaryOrderInput<'a> {
+    pub marker: &'a str,
+    pub total: usize,
+    pub has_context: bool,
+}
+
+/// Filter context-bearing rows and order them through the versioned Mojo reducer.
+pub fn runtime_doctor_marker_context_summary_order(
+    input: &[RuntimeDoctorMarkerContextSummaryOrderInput<'_>],
+) -> Result<Vec<usize>, MojoError> {
+    ensure_rich_abi()?;
+    if input.len() > RUNTIME_DOCTOR_MARKER_CONTEXT_SUMMARY_ORDER_MAX_COUNT {
+        return Err(MojoError::Capacity);
+    }
+    let markers = input.iter().map(|row| view(row.marker)).collect::<Vec<_>>();
+    let totals = input
+        .iter()
+        .map(|row| i64::try_from(row.total).map_err(|_| MojoError::InvalidInput))
+        .collect::<Result<Vec<_>, _>>()?;
+    let included = input
+        .iter()
+        .map(|row| i64::from(row.has_context))
+        .collect::<Vec<_>>();
+    let mut permutation = vec![-1_i64; input.len().max(1)];
+    let mut scratch = vec![-1_i64; input.len().max(1)];
+    let mut output_count = -1_i64;
+    let status = unsafe {
+        prodex_mojo_runtime_doctor_marker_context_summary_order_v1(
+            RUNTIME_DOCTOR_MARKER_CONTEXT_SUMMARY_ORDER_ABI_VERSION,
+            mojo_pointer_address(markers.as_ptr()),
+            mojo_pointer_address(totals.as_ptr()),
+            mojo_pointer_address(included.as_ptr()),
+            i64::try_from(input.len()).map_err(|_| MojoError::InvalidInput)?,
+            mojo_mut_pointer_address(permutation.as_mut_ptr()),
+            mojo_mut_pointer_address(scratch.as_mut_ptr()),
+            mojo_mut_pointer_address(&mut output_count),
+        )
+    };
+    if status != 0 {
+        return Err(match status {
+            1 => MojoError::InvalidInput,
+            3 => MojoError::Capacity,
+            4 => MojoError::AbiMismatch,
+            _ => MojoError::InvalidOutput,
+        });
+    }
+    let output_count = usize::try_from(output_count).map_err(|_| MojoError::InvalidOutput)?;
+    if output_count > input.len() {
+        return Err(MojoError::InvalidOutput);
+    }
+    let mut seen = vec![false; input.len()];
+    permutation
+        .get(..output_count)
+        .ok_or(MojoError::InvalidOutput)?
+        .iter()
+        .map(|index| {
+            let index = usize::try_from(*index).map_err(|_| MojoError::InvalidOutput)?;
+            let seen = seen.get_mut(index).ok_or(MojoError::InvalidOutput)?;
+            if *seen || !input[index].has_context {
+                return Err(MojoError::InvalidOutput);
+            }
+            *seen = true;
+            Ok(index)
+        })
+        .collect()
 }
 
 /// Parsed fields supplied to the bounded marker aggregation kernel.
@@ -286,5 +367,48 @@ fn validate_value_slot(kind: i64, value_slot: i64) -> Result<Option<usize>, Mojo
         (None, -1) => Ok(None),
         (Some(expected), actual) if actual == expected as i64 => Ok(Some(expected)),
         _ => Err(MojoError::InvalidOutput),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        RuntimeDoctorMarkerContextSummaryOrderInput, runtime_doctor_marker_context_summary_order,
+    };
+
+    #[test]
+    fn mojo_marker_context_order_filters_and_breaks_ties_by_marker_bytes() {
+        let input = [
+            RuntimeDoctorMarkerContextSummaryOrderInput {
+                marker: "zeta",
+                total: 3,
+                has_context: true,
+            },
+            RuntimeDoctorMarkerContextSummaryOrderInput {
+                marker: "alpha",
+                total: 3,
+                has_context: true,
+            },
+            RuntimeDoctorMarkerContextSummaryOrderInput {
+                marker: "ignored",
+                total: 99,
+                has_context: false,
+            },
+            RuntimeDoctorMarkerContextSummaryOrderInput {
+                marker: "beta",
+                total: 4,
+                has_context: true,
+            },
+            RuntimeDoctorMarkerContextSummaryOrderInput {
+                marker: "é",
+                total: 3,
+                has_context: true,
+            },
+        ];
+
+        assert_eq!(
+            runtime_doctor_marker_context_summary_order(&input).unwrap(),
+            [3, 1, 0, 4],
+        );
     }
 }
