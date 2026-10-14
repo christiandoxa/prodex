@@ -14,6 +14,11 @@ from rich_types import ProdexRichStringView
 
 comptime PING_PROTOCOL_ABI_VERSION: Int64 = 1
 comptime PING_PROTOCOL_MAX_BYTES: Int64 = 4_194_304
+comptime PING_DETAIL_STATUS_OK: Int64 = 0
+comptime PING_DETAIL_STATUS_INVALID: Int64 = 1
+comptime PING_DETAIL_STATUS_CAPACITY: Int64 = 3
+comptime PING_DETAIL_STATUS_ABI: Int64 = 4
+comptime PING_DETAIL_MAX_BYTES: Int64 = 128
 
 comptime PING_STATUS_OK: Int64 = 0
 comptime PING_STATUS_PROTOCOL_FAILED: Int64 = 1
@@ -30,6 +35,56 @@ comptime PING_STATUS_MODEL_UNAVAILABLE: Int64 = 11
 comptime PING_STATUS_PROCESS_FAILED: Int64 = 12
 comptime PING_STATUS_SPAWN_FAILED: Int64 = 13
 comptime PING_STATUS_CANCELLED: Int64 = 14
+
+def ping_status_detail_copy(
+    status: Int64,
+    output: Pointer[mut=True, UInt8, _],
+    capacity: Int64,
+    written: Pointer[mut=True, Int64, _],
+) -> Int64:
+    var detail = StringSlice("")
+    if status == PING_STATUS_OK:
+        detail = StringSlice("valid model response received")
+    elif status == PING_STATUS_AUTH_FAILED:
+        detail = StringSlice("OpenAI authentication failed")
+    elif status == PING_STATUS_DNS_FAILED:
+        detail = StringSlice("OpenAI hostname resolution failed")
+    elif status == PING_STATUS_TLS_FAILED:
+        detail = StringSlice("OpenAI TLS connection failed")
+    elif status == PING_STATUS_TIMEOUT:
+        detail = StringSlice("OpenAI diagnostic timed out")
+    elif status == PING_STATUS_RATE_LIMITED:
+        detail = StringSlice("OpenAI temporarily rate limited the profile")
+    elif status == PING_STATUS_QUOTA_EXHAUSTED:
+        detail = StringSlice("OpenAI reported quota exhaustion")
+    elif status == PING_STATUS_UPSTREAM_OVERLOADED:
+        detail = StringSlice("OpenAI upstream is temporarily unavailable")
+    elif status == PING_STATUS_MODEL_UNAVAILABLE:
+        detail = StringSlice("selected OpenAI model is unavailable")
+    elif status == PING_STATUS_PROTOCOL_FAILED:
+        detail = StringSlice("Codex did not complete a structured turn")
+    elif status == PING_STATUS_TURN_FAILED:
+        detail = StringSlice("Codex turn failed")
+    elif status == PING_STATUS_PROCESS_FAILED:
+        detail = StringSlice("Codex diagnostic process failed")
+    elif status == PING_STATUS_SPAWN_FAILED:
+        detail = StringSlice("OpenAI application ping could not start")
+    elif status == PING_STATUS_CANCELLED:
+        detail = StringSlice("OpenAI ping was cancelled")
+    elif status == PING_STATUS_UNEXPECTED_RESPONSE:
+        detail = StringSlice("completed turn did not return a model response")
+    else:
+        return PING_DETAIL_STATUS_INVALID
+    var length = Int64(detail.byte_length())
+    if length > PING_DETAIL_MAX_BYTES:
+        return PING_DETAIL_STATUS_INVALID
+    if capacity < length:
+        return PING_DETAIL_STATUS_CAPACITY
+    var source = detail.unsafe_ptr()
+    for index in range(length):
+        output[unsafe_offset=index] = source[unsafe_offset=index]
+    written[] = length
+    return PING_DETAIL_STATUS_OK
 
 def ping_ascii_lower(value: UInt8) -> UInt8:
     return value + 32 if value >= 65 and value <= 90 else value
@@ -378,3 +433,30 @@ def prodex_mojo_ping_classify_failure_v1(
     )
     status[] = ping_classify_failure(view)
     return 0
+
+@export("prodex_mojo_ping_status_detail_v1")
+def prodex_mojo_ping_status_detail_v1(
+    abi_version: Int64,
+    status: Int64,
+    output_address: UInt,
+    output_capacity: Int64,
+    written_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != PING_PROTOCOL_ABI_VERSION:
+        return PING_DETAIL_STATUS_ABI
+    if (
+        status < PING_STATUS_OK
+        or status > PING_STATUS_CANCELLED
+        or output_capacity < 0
+        or written_address == 0
+        or (output_capacity > 0 and output_address == 0)
+    ):
+        return PING_DETAIL_STATUS_INVALID
+    var output = Pointer[mut=True, UInt8, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    var written = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(written_address)
+    )
+    written[] = 0
+    return ping_status_detail_copy(status, output, output_capacity, written)

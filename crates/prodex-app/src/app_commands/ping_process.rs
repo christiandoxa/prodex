@@ -24,21 +24,24 @@ pub(super) fn classify_ping_process_error(error: &anyhow::Error) -> (PingStatus,
     let (status, detail) = if classified.0 != PingStatus::ProcessFailed {
         classified
     } else if message.contains("timed out") {
-        (PingStatus::Timeout, "OpenAI application ping timed out")
+        (
+            PingStatus::Timeout,
+            "OpenAI application ping timed out".to_string(),
+        )
     } else if message.contains("failed to start") {
         (
             PingStatus::SpawnFailed,
-            "OpenAI application ping could not start",
+            "OpenAI application ping could not start".to_string(),
         )
     } else if message.contains("clean the diagnostic directory") {
         (
             PingStatus::ProcessFailed,
-            "OpenAI application ping cleanup failed",
+            "OpenAI application ping cleanup failed".to_string(),
         )
     } else {
         (
             PingStatus::ProcessFailed,
-            "OpenAI application ping process failed",
+            "OpenAI application ping process failed".to_string(),
         )
     };
     let message = bounded_ping_detail(&message);

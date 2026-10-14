@@ -3,6 +3,7 @@ use crate::MojoError;
 
 const PING_PROTOCOL_ABI_VERSION: i64 = 1;
 const PING_PROTOCOL_MAX_BYTES: usize = 4 * 1024 * 1024;
+const PING_STATUS_DETAIL_MAX_BYTES: usize = 128;
 
 pub const PING_STATUS_OK: i64 = 0;
 pub const PING_STATUS_PROTOCOL_FAILED: i64 = 1;
@@ -32,6 +33,13 @@ unsafe extern "C" {
         input_address: u64,
         input_length: i64,
         status_address: u64,
+    ) -> i64;
+    fn prodex_mojo_ping_status_detail_v1(
+        abi_version: i64,
+        status: i64,
+        output_address: u64,
+        output_capacity: i64,
+        written_address: u64,
     ) -> i64;
 }
 
@@ -66,6 +74,32 @@ pub fn ping_validate_jsonl(input: &str) -> Result<i64, MojoError> {
 
 pub fn ping_classify_failure(input: &str) -> Result<i64, MojoError> {
     call(input, prodex_mojo_ping_classify_failure_v1)
+}
+
+pub fn ping_status_detail(status: i64) -> Result<String, MojoError> {
+    let mut output = vec![0_u8; PING_STATUS_DETAIL_MAX_BYTES];
+    let mut written = -1_i64;
+    let code = unsafe {
+        prodex_mojo_ping_status_detail_v1(
+            PING_PROTOCOL_ABI_VERSION,
+            status,
+            output.as_mut_ptr() as usize as u64,
+            i64::try_from(output.len()).map_err(|_| MojoError::InvalidInput)?,
+            (&mut written as *mut i64) as usize as u64,
+        )
+    };
+    match code {
+        0 => {}
+        1 => return Err(MojoError::InvalidInput),
+        3 => return Err(MojoError::Capacity),
+        4 => return Err(MojoError::AbiMismatch),
+        _ => return Err(MojoError::InvalidOutput),
+    }
+    let written = usize::try_from(written).map_err(|_| MojoError::InvalidOutput)?;
+    if written > output.len() {
+        return Err(MojoError::InvalidOutput);
+    }
+    String::from_utf8(output[..written].to_vec()).map_err(|_| MojoError::InvalidOutput)
 }
 
 #[cfg(test)]
@@ -156,6 +190,22 @@ mod tests {
         assert_eq!(
             ping_validate_jsonl(input).unwrap(),
             PING_STATUS_QUOTA_EXHAUSTED
+        );
+    }
+
+    #[test]
+    fn status_details_are_owned_by_the_ping_protocol_kernel() {
+        assert_eq!(
+            ping_status_detail(PING_STATUS_OK).unwrap(),
+            "valid model response received"
+        );
+        assert_eq!(
+            ping_status_detail(PING_STATUS_QUOTA_EXHAUSTED).unwrap(),
+            "OpenAI reported quota exhaustion"
+        );
+        assert_eq!(
+            ping_status_detail(PING_STATUS_UNEXPECTED_RESPONSE).unwrap(),
+            "completed turn did not return a model response"
         );
     }
 }
