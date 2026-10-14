@@ -71,7 +71,7 @@
   },
   {
     "file": "crates/prodex-mojo-core/src/log.rs",
-    "maxLines": 965,
-    "reason": "Log ABI surface ratcheted after extracting the cohesive snapshot-order adapter; public re-exports and Mojo ownership stay unchanged."
+    "maxLines": 959,
+    "reason": "Log Mojo ABI host surface ratcheted to 959 after extracting pointer marshaling helpers into the focused log/pointers module; transcript ANSI semantics moved exclusively to compiled Mojo."
   }
 ]

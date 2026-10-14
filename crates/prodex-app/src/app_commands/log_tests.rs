@@ -34,6 +34,29 @@ fn follows_only_complete_token_usage_lines() {
 }
 
 #[test]
+fn transcript_tool_output_escape_normalization_is_mojo_authoritative() {
+    let source = "one\\r\\ntwo\\rthree";
+    let source = source.replace("\\r", "\r").replace("\\n", "\n");
+    assert_eq!(
+        prodex_mojo_core::log::strip_transcript_ansi_codes(&source).unwrap(),
+        "one\ntwo\nthree"
+    );
+    let tool_output = "\u{1b}[31mhello 表🙂\u{1b}[0m\n\u{1b}]2;window\u{7}ready";
+    assert_eq!(
+        prodex_mojo_core::log::strip_transcript_ansi_codes(tool_output).unwrap(),
+        "hello 表🙂\nready"
+    );
+    assert_eq!(
+        super::log_transcript_text::transcript_visible_tool_output(tool_output),
+        Some("hello 表🙂\nready".to_string())
+    );
+    assert_eq!(
+        super::log_transcript_text::transcript_visible_tool_output("\u{1b}[8mhidden\u{1b}[0m"),
+        Some("hidden".to_string()),
+    );
+}
+
+#[test]
 fn parses_session_transcript_text_events() {
     let meta = r#"{"timestamp":"2026-06-20T01:00:00Z","type":"session_meta","payload":{"base_instructions":{"text":"System prompt."},"model_provider":"openai","source":"cli","originator":"codex-tui","cwd":"/repo"}}"#;
     let user = r#"{"timestamp":"2026-06-20T01:00:01Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"Hello model."}]}}"#;

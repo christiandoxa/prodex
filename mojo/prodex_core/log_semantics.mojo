@@ -2829,3 +2829,87 @@ def prodex_mojo_runtime_log_render_v1(
     )
     written[] = writer.written
     return 0 if ok else 2
+
+# The persisted-transcript viewer's ANSI/OSC/control normalizer has exactly
+# one semantic owner. The input is a valid caller-owned UTF-8 string and
+# the result is a byte-for-byte UTF-8 subsequence with CR normalization.
+# Rust retains memory ownership and user-facing transcript rendering.
+@export("prodex_mojo_transcript_ansi_strip_v1")
+def prodex_mojo_transcript_ansi_strip_v1(
+    abi_version: Int64,
+    input_address: UInt,
+    input_length: Int64,
+    output_address: UInt,
+    output_capacity: Int64,
+    written_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != 1:
+        return 4
+    if (
+        input_length < 0
+        or output_capacity < 0
+        or (input_length > 0 and input_address == 0)
+        or output_address == 0
+        or written_address == 0
+    ):
+        return 1
+
+    var source = Pointer[mut=False, UInt8, ImmUntrackedOrigin](
+        unsafe_from_address=Int(input_address)
+    )
+    var output = Pointer[mut=True, UInt8, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    var cursor: Int64 = 0
+    var emitted: Int64 = 0
+    while cursor < input_length:
+        var value = source[unsafe_offset=cursor]
+        cursor += 1
+        if value == 27:
+            if cursor >= input_length:
+                break
+            var escape_type = source[unsafe_offset=cursor]
+            cursor += 1
+            if escape_type == 91:
+                # ANSI CSI ends inclusively on the first ASCII final byte.
+                while cursor < input_length:
+                    var part = source[unsafe_offset=cursor]
+                    cursor += 1
+                    if part >= 64 and part <= 126:
+                        break
+            elif escape_type == 93:
+                # OSC terminates at BEL or at the ESC + backslash pair.
+                var previous: UInt8 = 0
+                while cursor < input_length:
+                    var part = source[unsafe_offset=cursor]
+                    cursor += 1
+                    if part == 7 or (previous == 27 and part == 92):
+                        break
+                    previous = part
+            else:
+                # A non-CSI/OSC escape discards one Unicode scalar, not
+                # merely its leading byte, preserving UTF-8 validity.
+                if escape_type >= 194 and escape_type <= 223:
+                    cursor += 1
+                elif escape_type >= 224 and escape_type <= 239:
+                    cursor += 2
+                elif escape_type >= 240 and escape_type <= 244:
+                    cursor += 3
+                if cursor > input_length:
+                    return 1
+            continue
+        if value == 13:
+            # Match the former Rust char iterator: CRLF becomes LF and
+            # a lone CR is replaced with LF, without adding an extra LF.
+            if cursor < input_length and source[unsafe_offset=cursor] == 10:
+                continue
+            value = 10
+        if emitted >= output_capacity:
+            return 2
+        output[unsafe_offset=emitted] = value
+        emitted += 1
+
+    Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(written_address)
+    )[] = emitted
+    return 0
