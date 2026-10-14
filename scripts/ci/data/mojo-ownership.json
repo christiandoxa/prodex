@@ -525,7 +525,8 @@
           "transcript_tool_name_policy",
           "log_load_aggregation",
           "runtime_log_line_rendering",
-          "transcript_tool_output_escape_normalization"
+          "transcript_tool_output_escape_normalization",
+          "transcript_binary_mojibake_classification"
         ]
       },
       "mojo/prodex_core/profile_schedule.mojo": {
@@ -8638,6 +8639,29 @@
       "duplicate_production_owner": false,
       "platform_fallback": false,
       "rust_adapter_scope": "borrow valid UTF-8 transcript data, allocate bounded caller-owned output, map ABI status, and render the visible log without duplicate escape parser"
+    },
+    {
+      "name": "transcript_binary_mojibake_classification",
+      "domain": "cli/transcript-visibility",
+      "introduced_in": "0.438.0",
+      "baseline_state": "Rust classified 4,096 Unicode scalars into punctuation, replacement, suspicious and text-control stats, then applied per-line and whole-text binary/mojibake thresholds to hide unsafe tool-output lines",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_mojo_transcript_binary_policy_v1",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/log_semantics.mojo",
+      "consumer": "crates/prodex-app/src/app_commands/log_transcript_text.rs",
+      "consumer_marker": "prodex_mojo_core::log::transcript_binary_like(",
+      "production_consumers": [
+        "crates/prodex-app/src/app_commands/log_transcript_text.rs"
+      ],
+      "production_reachability_test": "crates/prodex-app/src/app_commands/log_tests.rs",
+      "rust_owner_before": "Rust punctuation table, Unicode-scalar suspicious character classification, mojibake heuristics, and binary-output threshold decisions for transcript text and lines",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "deleted from production; bounded Unicode-facts adapter plus direct Mojo policy/ABI tests and real log caller tests cover ASCII, punctuation, Unicode, replacement, controls, mojibake and threshold boundaries",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "Rust reads Unicode whitespace/alphanumeric/control properties from its standard Unicode tables, packs at most 4096 scalars, validates Mojo boolean output and performs log I/O/visibility transformations; no Rust punctuation table or binary decision rules remain"
     }
   ],
   "rust_semantic_reductions": [
