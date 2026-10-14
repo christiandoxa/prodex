@@ -107,6 +107,11 @@ fn runtime_clock_source_config_value(source: RuntimeFeatureClockSource) -> &'sta
     }
 }
 
+fn runtime_feature_toml_string_literal(value: &str) -> Result<String, RuntimeFeaturePlanError> {
+    prodex_mojo_core::super_provider_config::toml_string_literal(value)
+        .map_err(|_| RuntimeFeaturePlanError)
+}
+
 impl CodexRuntimeFeatureArgs {
     pub fn to_codex_config_args(&self) -> Result<Vec<OsString>, RuntimeFeaturePlanError> {
         let plan = plan_runtime_feature_config(RuntimeFeatureConfigInput {
@@ -127,7 +132,7 @@ impl CodexRuntimeFeatureArgs {
         if let Some(mode) = plan.web_search_mode {
             overrides.push(format!(
                 "web_search={}",
-                toml_string_literal(runtime_web_search_config_value(mode))
+                runtime_feature_toml_string_literal(runtime_web_search_config_value(mode))?
             ));
         }
         if plan.rollout_budget_enabled {
@@ -175,7 +180,7 @@ impl CodexRuntimeFeatureArgs {
             if let Some(source) = plan.current_time_clock_source {
                 overrides.push(format!(
                     "features.current_time_reminder.clock_source={}",
-                    toml_string_literal(runtime_clock_source_config_value(source))
+                    runtime_feature_toml_string_literal(runtime_clock_source_config_value(source))?
                 ));
             }
         }
@@ -193,8 +198,4 @@ impl CodexRuntimeFeatureArgs {
         }
         Ok(args)
     }
-}
-
-fn toml_string_literal(value: &str) -> String {
-    format!("\"{}\"", value.replace('\\', "\\\\").replace('"', "\\\""))
 }

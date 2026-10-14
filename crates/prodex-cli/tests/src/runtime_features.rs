@@ -102,6 +102,41 @@ fn run_command_renders_respect_system_proxy_disable_override() {
 }
 
 #[test]
+fn run_command_renders_feature_string_literals_at_the_cli_boundary() {
+    let command = parse_cli_command_from([
+        "prodex",
+        "run",
+        "--web-search",
+        "disabled",
+        "--current-time-clock-source",
+        "external",
+        "hello",
+    ])
+    .expect("run command should parse");
+    let Commands::Run(args) = command else {
+        panic!("expected run command");
+    };
+
+    let rendered = rendered_os_args(
+        &args
+            .codex_args_with_feature_overrides()
+            .expect("runtime feature plan should succeed"),
+    );
+    assert_eq!(
+        rendered,
+        vec![
+            "hello".to_string(),
+            "-c".to_string(),
+            "web_search=\"disabled\"".to_string(),
+            "-c".to_string(),
+            "features.current_time_reminder.enabled=true".to_string(),
+            "-c".to_string(),
+            "features.current_time_reminder.clock_source=\"external\"".to_string(),
+        ]
+    );
+}
+
+#[test]
 fn rollout_budget_uses_valid_default_reminder_thresholds() {
     let command = parse_cli_command_from([
         "prodex",
