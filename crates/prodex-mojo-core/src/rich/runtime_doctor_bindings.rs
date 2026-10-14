@@ -127,7 +127,30 @@ pub fn runtime_doctor_binding_source_plan(
     if sample_count != missing_profile_bindings.min(samples.len()) {
         return Err(MojoError::InvalidOutput);
     }
-    let missing_sample_indices = samples[..sample_count]
+    let missing_sample_indices = binding_sample_indices(rows, &samples[..sample_count])?;
+    let profiles = binding_profile_rows(&order, &profile_counts, profile_count)?;
+    Ok(RuntimeDoctorBindingSourcePlan {
+        by_kind: [
+            nonnegative(c0)?,
+            nonnegative(c1)?,
+            nonnegative(c2)?,
+            nonnegative(c3)?,
+        ],
+        total,
+        oldest_bound_at: (has_entries == 1).then_some(oldest),
+        newest_bound_at: (has_entries == 1).then_some(newest),
+        missing_profile_bindings,
+        missing_sample_indices,
+        profiles,
+    })
+}
+
+/// Validate borrowed source indices, without selecting replacement samples.
+fn binding_sample_indices(
+    rows: &[RuntimeDoctorBindingRow],
+    samples: &[i64],
+) -> Result<Vec<usize>, MojoError> {
+    let missing_sample_indices = samples
         .iter()
         .map(|&index| {
             let index = nonnegative(index)?;
@@ -143,10 +166,18 @@ pub fn runtime_doctor_binding_source_plan(
     {
         return Err(MojoError::InvalidOutput);
     }
+    Ok(missing_sample_indices)
+}
 
+/// Materialize the authoritative permutation and check each fixed-width row.
+fn binding_profile_rows(
+    order: &[i64],
+    profile_counts: &[i64],
+    profile_count: usize,
+) -> Result<Vec<RuntimeDoctorBindingProfilePlan>, MojoError> {
     let mut seen = vec![false; profile_count];
     let mut profiles = Vec::with_capacity(profile_count);
-    for entry in order {
+    for &entry in order {
         let index = nonnegative(entry)?;
         if index >= profile_count || std::mem::replace(&mut seen[index], true) {
             return Err(MojoError::InvalidOutput);
@@ -165,25 +196,57 @@ pub fn runtime_doctor_binding_source_plan(
             total: counts[4],
         });
     }
-    Ok(RuntimeDoctorBindingSourcePlan {
-        by_kind: [
-            nonnegative(c0)?,
-            nonnegative(c1)?,
-            nonnegative(c2)?,
-            nonnegative(c3)?,
-        ],
-        total,
-        oldest_bound_at: (has_entries == 1).then_some(oldest),
-        newest_bound_at: (has_entries == 1).then_some(newest),
-        missing_profile_bindings,
-        missing_sample_indices,
-        profiles,
-    })
+    Ok(profiles)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn binding_decoder_keeps_rejecting_invalid_sample_indices() {
+        let rows = [
+            RuntimeDoctorBindingRow {
+                profile_index: 0,
+                kind: 0,
+                bound_at: 0,
+                known_profile: false,
+            },
+            RuntimeDoctorBindingRow {
+                profile_index: 1,
+                kind: 0,
+                bound_at: 0,
+                known_profile: true,
+            },
+        ];
+        assert_eq!(binding_sample_indices(&rows, &[0]), Ok(vec![0]));
+        for indices in [vec![-1], vec![2], vec![1], vec![0, 0]] {
+            assert_eq!(
+                binding_sample_indices(&rows, &indices),
+                Err(MojoError::InvalidOutput)
+            );
+        }
+    }
+
+    #[test]
+    fn binding_decoder_keeps_rejecting_invalid_profile_rows() {
+        let counts = [1, 0, 0, 0, 1];
+        assert_eq!(binding_profile_rows(&[0], &counts, 1).unwrap()[0].total, 1);
+        for order in [vec![-1], vec![1], vec![0, 0]] {
+            assert_eq!(
+                binding_profile_rows(&order, &counts, 1),
+                Err(MojoError::InvalidOutput)
+            );
+        }
+        assert_eq!(
+            binding_profile_rows(&[0], &[-1, 0, 0, 0, 1], 1),
+            Err(MojoError::InvalidOutput)
+        );
+        assert_eq!(
+            binding_profile_rows(&[0], &[1, 0, 0, 0, 2], 1),
+            Err(MojoError::InvalidOutput)
+        );
+    }
 
     #[test]
     fn mojo_binding_reducer_owns_counts_bounds_samples_and_tied_order() {
