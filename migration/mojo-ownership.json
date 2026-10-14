@@ -8712,7 +8712,7 @@
       "production_reachability_test": "crates/prodex-provider-core/src/translators/deepseek.rs",
       "rust_owner_before": "Rust streamed function-name trim/emptiness validation and full JSON argument validation",
       "rust_state_after": "adapter-only",
-      "rust_test_oracle": "deleted; direct Mojo adapter and DeepSeek stream caller tests cover Unicode whitespace, empty arguments, malformed JSON, and valid scalar/object arguments",
+      "rust_test_oracle": "deleted; direct Mojo adapter and DeepSeek stream caller tests cover Unicode whitespace, empty arguments, malformed JSON, escaped UTF-16 pairs, numeric range, nesting depth, and valid scalar/object arguments",
       "production_fallback": false,
       "duplicate_production_owner": false,
       "platform_fallback": false,

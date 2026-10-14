@@ -173,6 +173,44 @@ mod tests {
     }
 
     #[test]
+    fn deepseek_stream_argument_validation_matches_serde_json_boundaries() {
+        let mut cases = vec![
+            (r#"{"value":"\uD800"}"#.to_string(), false),
+            (r#"{"value":"\uDC00"}"#.to_string(), false),
+            (r#"{"value":"\uD800\u0041"}"#.to_string(), false),
+            (r#"{"value":"\uD83D\uDE00"}"#.to_string(), true),
+            (r#"{"value":1e309}"#.to_string(), false),
+            (r#"{"value":1e308}"#.to_string(), true),
+            (r#"{"value":0.1e309}"#.to_string(), true),
+            (r#"{"value":0.1e310}"#.to_string(), false),
+            (r#"{"value":0e999999999999999999999999}"#.to_string(), true),
+            (r#"{"value":1e-999999999999999999999999}"#.to_string(), true),
+        ];
+        cases.push((format!("{}0{}", "[".repeat(127), "]".repeat(127)), true));
+        cases.push((format!("{}0{}", "[".repeat(128), "]".repeat(128)), false));
+        cases.push((format!("{}0{}", "[".repeat(129), "]".repeat(129)), false));
+
+        for (arguments, expected) in cases {
+            assert_eq!(
+                serde_json::from_str::<serde_json::Value>(&arguments).is_ok(),
+                expected,
+                "serde_json probe expectation changed for {arguments}"
+            );
+            assert_eq!(
+                deepseek_provider_core_validate_stream_tool_call_arguments(
+                    "DeepSeek",
+                    5,
+                    Some("shell"),
+                    &arguments,
+                )
+                .is_ok(),
+                expected,
+                "Mojo stream argument policy diverged for {arguments}"
+            );
+        }
+    }
+
+    #[test]
     fn deepseek_provider_core_validates_stream_tool_call_delta_shape() {
         assert_eq!(
             deepseek_provider_core_validate_stream_tool_call_delta(
