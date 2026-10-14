@@ -1319,7 +1319,8 @@
         "operations": [
           "runtime_doctor_marker_summary_counts",
           "runtime_doctor_compact_exit_counts",
-          "runtime_doctor_marker_context_reason_facet_aggregation"
+          "runtime_doctor_marker_context_reason_facet_aggregation",
+          "runtime_doctor_selection_record_plan"
         ]
       },
       {
@@ -6312,6 +6313,29 @@
       "duplicate_production_owner": false,
       "platform_fallback": false,
       "rust_adapter_scope": "line/JSON recognition, redaction, owned field materialization, bounded batch construction, validated representative projection, and existing DTO/map assembly"
+    },
+    {
+      "name": "runtime_doctor_selection_record_plan",
+      "domain": "runtime/diagnostics",
+      "introduced_in": "0.438.0",
+      "baseline_state": "Rust chose selected/rejected selection map destinations and the reason/outcome/event/status/marker rejection precedence",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_mojo_runtime_doctor_selection_record_plan_v1",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/runtime_doctor_marker_summary.mojo",
+      "consumer": "crates/prodex-runtime-doctor/src/parsing/selection.rs",
+      "consumer_marker": "prodex_mojo_core::rich::runtime_doctor_selection_record_plan(",
+      "production_consumers": [
+        "crates/prodex-runtime-doctor/src/parsing/selection.rs"
+      ],
+      "production_reachability_test": "crates/prodex-runtime-doctor/src/parsing/selection.rs",
+      "rust_owner_before": "selection bucket to map destination and rejection reason field priority",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "test-only marker labels; direct ABI and production caller tests cover precedence including empty values",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "borrowed presence flags and owned BTreeMap counter materialization from validated Mojo output"
     },
     {
       "name": "runtime_doctor_marker_summary_counts",
