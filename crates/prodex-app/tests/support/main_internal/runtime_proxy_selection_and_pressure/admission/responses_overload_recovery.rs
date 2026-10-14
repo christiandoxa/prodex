@@ -105,7 +105,13 @@ fn fresh_responses_keep_recovering_past_old_two_sweep_limit() {
         body: br#"{"input":[]}"#.to_vec(),
     };
 
-    let response = proxy_runtime_responses_request(904, &request, harness.shared())
+    // This fixture verifies sweep count, not the default watchdog duration.
+    // Four provider backoffs plus slow native Windows I/O can cross that
+    // independent budget. Keep a finite request-local test deadline; the
+    // recovery_watchdog suite separately checks expiry and task cancellation.
+    let mut scoped = harness.shared().clone();
+    scoped.precommit_deadline = Some(Instant::now() + Duration::from_secs(90));
+    let response = proxy_runtime_responses_request(904, &request, &scoped)
         .expect("retryable provider overload must not leak while quota-positive profiles remain");
     let RuntimeResponsesReply::Streaming(mut response) = response else {
         panic!("recovered response should remain streaming");

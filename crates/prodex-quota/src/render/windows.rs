@@ -300,47 +300,7 @@ pub fn collect_blocked_limits(
     let mut windows = Vec::new();
 
     if !runtime_ready {
-        if let Some(main) = usage.rate_limit.as_ref() {
-            for label in ["5h", "weekly"] {
-                if let Some(window) = find_main_window(main, label) {
-                    windows.push(BlockedWindowRef {
-                        kind: prodex_mojo_core::quota::QUOTA_BLOCKED_WINDOW_KIND_MAIN,
-                        name: None,
-                        main_label: Some(label),
-                        window,
-                    });
-                }
-            }
-        } else {
-            blocked.push(BlockedLimit {
-                message: "5h quota unavailable".to_string(),
-            });
-            blocked.push(BlockedLimit {
-                message: "weekly quota unavailable".to_string(),
-            });
-        }
-
-        for additional in &usage.additional_rate_limits {
-            let label = additional
-                .limit_name
-                .as_deref()
-                .or(additional.metered_feature.as_deref())
-                .or(additional.limit_id.as_deref());
-            for window in [
-                additional.rate_limit.primary_window.as_ref(),
-                additional.rate_limit.secondary_window.as_ref(),
-            ]
-            .into_iter()
-            .flatten()
-            {
-                windows.push(BlockedWindowRef {
-                    kind: prodex_mojo_core::quota::QUOTA_BLOCKED_WINDOW_KIND_ADDITIONAL,
-                    name: label,
-                    main_label: None,
-                    window,
-                });
-            }
-        }
+        collect_runtime_blocked_window_refs(usage, &mut blocked, &mut windows);
     }
 
     let code_review_start = windows.len();
@@ -390,6 +350,56 @@ pub fn collect_blocked_limits(
     );
 
     blocked
+}
+
+// Project borrowed runtime windows in their existing main/additional order.
+// The Mojo planner remains responsible for blocking decisions.
+fn collect_runtime_blocked_window_refs<'a>(
+    usage: &'a UsageResponse,
+    blocked: &mut Vec<BlockedLimit>,
+    windows: &mut Vec<BlockedWindowRef<'a>>,
+) {
+    if let Some(main) = usage.rate_limit.as_ref() {
+        for label in ["5h", "weekly"] {
+            if let Some(window) = find_main_window(main, label) {
+                windows.push(BlockedWindowRef {
+                    kind: prodex_mojo_core::quota::QUOTA_BLOCKED_WINDOW_KIND_MAIN,
+                    name: None,
+                    main_label: Some(label),
+                    window,
+                });
+            }
+        }
+    } else {
+        blocked.push(BlockedLimit {
+            message: "5h quota unavailable".to_string(),
+        });
+        blocked.push(BlockedLimit {
+            message: "weekly quota unavailable".to_string(),
+        });
+    }
+
+    for additional in &usage.additional_rate_limits {
+        let label = additional
+            .limit_name
+            .as_deref()
+            .or(additional.metered_feature.as_deref())
+            .or(additional.limit_id.as_deref());
+        for window in [
+            additional.rate_limit.primary_window.as_ref(),
+            additional.rate_limit.secondary_window.as_ref(),
+        ]
+        .into_iter()
+        .flatten()
+        {
+            windows.push(BlockedWindowRef {
+                kind: prodex_mojo_core::quota::QUOTA_BLOCKED_WINDOW_KIND_ADDITIONAL,
+                name: label,
+                main_label: None,
+                window,
+            });
+        }
+    }
 }
 
 #[derive(Clone, Copy)]
