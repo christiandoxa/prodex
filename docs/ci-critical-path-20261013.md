@@ -511,11 +511,25 @@ Its two independent native Windows runners both build genuine ThinLTO:
 16 codegen units (the default) and 64 codegen units, without sccache.
 Both variants must validate the PE x64 architecture, version/help, and
 compiled-in Mojo diagnostics; timing/size text is the only uploaded
-artifact. No release or tag is modified. The official Windows runner,
-ThinLTO and package profile remain unchanged until this experiment
-provides verified correctness and a useful measured improvement; more
-codegen units may reduce final optimizer quality, so end-user performance
-remains a distinct concern.
+artifact. No release or tag is modified. The official Windows runner, ThinLTO and package profile remain
+unchanged while testing; more codegen units may reduce runtime optimizer
+quality, so end-user performance is a distinct concern.
+
+The [completed opt-in A/B run 38509522686](https://github.com/christiandoxa/prodex/actions/runs/38509522686)
+confirmed both native Windows x64 binaries passed PE Machine 0x8664 and
+version/help/Mojo runtime diagnostics, with no publication. Compiling
+the official 0.437.11 source without sccache took **482 seconds at the
+normal 16 codegen units**, compared with **510 seconds at 64 codegen
+units**. The 16-unit binary was also smaller (36,400,640 bytes versus
+36,803,584 bytes). The official 0.437.11 release compiler used
+**524 seconds with sccache** and 0% hits. These are cross-run
+comparisons, so the approximate **8% compilation speedup** from
+removing the cold wrapper is observational, not a controlled same-run
+wrapper A/B. Production therefore keeps the existing **ThinLTO and
+16 codegen units** but skips sccache on Windows x64. The verified native
+Windows ARM64 build already uses direct Cargo; macOS native builds
+retain sccache, which sometimes has nonzero reuse.
+
 
 On the CI side, [run 38503088881](https://github.com/christiandoxa/prodex/actions/runs/38503088881)
 succeeded on the second attempt after two unchanged Windows fake-Kiro
@@ -532,3 +546,61 @@ tests and child-invocation assertions remain intact; there are no
 live provider requests. Preventing false-negative CI attempts avoids
 a substantially more expensive rerun than a few seconds of test-only
 scheduling slack.
+
+
+### Remove unused host sccache from cross builds
+
+Actual 0.437.11 release stats confirm that both Linux builds invoke the
+cross container CLI directly and made **zero host sccache compiler requests**.
+Installing the host compiler wrapper for those jobs wasted setup/download
+and post-job bookkeeping, without any compilation cache benefit. Release
+now sets up sccache only for the two native macOS release jobs;
+Linux cross jobs continue to build identically with strict
+compiled-in Mojo checks, archive ABI validation and native/QEMU smokes.
+This is a small setup efficiency improvement, not a measured reduction in
+the release's long Windows x64 critical path.
+
+
+### Reuse third-party Rust object files across version-only release bumps
+
+The x64 Windows release ran 281 cold sccache compiles while
+Swatinem/rust-cache reported **No cache found**. The default
+rust-cache key includes all workspace Cargo.toml and Cargo.lock
+metadata, so changing every Prodex crate version invalidates the entire
+compilation cache even when third-party dependencies are unchanged.
+
+Directly comparing the official 0.437.10 and 0.437.11 Cargo.lock files
+confirmed **434 identical external package identities/checksums**.
+Only workspace version metadata changed. The new release cache helper
+fingerprints **only** sorted external package names, versions, source URLs
+and SHA-256 checksums. The fingerprint is unchanged across 0.437.10
+and 0.437.11 (e4e1da8a0f43f36358bd0823a4e8f714f1b911c202fbe9c7b34b00662e6618c1)
+but changes when a registry dependency version or checksum changes.
+
+The release cache key explicitly pins Rust 1.99.0, ThinLTO, codegen
+units, Mojo 1.1.0, target/CPU, OS and runner architecture, plus that
+dependency fingerprint. Swatinem's automatic workspace-metadata hash
+is disabled, **but workspace crates are explicitly excluded from the
+cache** and Cargo still validates all compile fingerprints against
+fresh source and lockfiles after restoring dependencies. A changed
+compiler, target or dependency receives a different key; a workspace
+code change is recompiled. All six build variants retain all their
+existing release correctness, binary smoke and provenance gates.
+
+This is a prospective acceleration; the first v1 cache must be saved
+successfully before an identical dependency set can hit. The new
+CI tests cover stable version-only identities, invalid source metadata,
+checksum/version invalidation, and package-order independence.
+
+
+### Windows CI compile-gate correction on the first candidate
+
+The first checkpoint CI failed nine prodex-app Windows shards at Rust
+compile time with E0425, before any Kiro fixture could run.
+The test-only timeout constructor was already implemented on all
+platforms, but its public(crate) test facade re-export was accidentally
+gated behind cfg(all(test, unix)). The correction scopes that facade
+to cfg(test) on all targets; production builds still cannot use it.
+A mandatory source regression now rejects the Unix-only re-export.
+The previous running CI result is not considered green; the corrected
+commit requires new Windows CI verification.

@@ -510,10 +510,29 @@ jobs:
           fi
           arch -x86_64 /usr/bin/true
 
+      - name: Fingerprint only pinned external Rust dependencies
+        id: rust-deps-cache-key
+        shell: bash
+        run: |
+          set -euo pipefail
+          # The macOS/Linux images provide Python 3; Windows has Python on
+          # PATH. The helper requires tomllib (3.11+) and fails closed.
+          if [[ "${RUNNER_OS}" == Windows ]]; then
+            python scripts/ci/release_cargo_deps_cache_key.py \
+              --lockfile Cargo.lock --output "${GITHUB_OUTPUT}"
+          else
+            python3 scripts/ci/release_cargo_deps_cache_key.py \
+              --lockfile Cargo.lock --output "${GITHUB_OUTPUT}"
+          fi
+
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
         with:
-          key: release-${{ matrix.target }}${{ matrix.target == 'x86_64-apple-darwin' && '-arm64-cross' || '' }}${{ matrix.target == 'aarch64-pc-windows-msvc' && '-arm64-native' || '' }}
+          # Cargo fingerprints still recompile anything stale after restore.
+          # Workspace production crates are never included in this cache.
+          add-rust-environment-hash-key: "false"
+          cache-workspace-crates: "false"
+          key: release-deps-v1-rust1.99.0-thinlto-cgu16-mojo${{ env.MOJO_VERSION }}-${{ runner.os }}-${{ runner.arch }}-${{ matrix.target }}-${{ matrix.mojo-target-cpu }}${{ matrix.target == 'x86_64-apple-darwin' && '-arm64-cross' || '' }}${{ matrix.target == 'aarch64-pc-windows-msvc' && '-arm64-native' || '' }}-${{ steps.rust-deps-cache-key.outputs.external_sha256 }}
 
       - name: Download target Mojo archive
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
@@ -522,9 +541,10 @@ jobs:
           path: target/mojo-release/${{ matrix.target }}
 
       - name: Install sccache
-        # The verified native ARM64 benchmark used Cargo directly; sccache
-        # currently has no production-proven native ARM64 setup in this job.
-        if: ${{ matrix.target != 'aarch64-pc-windows-msvc' && (matrix.use-cross == false || matrix.can-native-smoke || matrix.mojo-release) }}
+        # Linux cross never uses this host wrapper, while Windows x64 logged
+        # zero cache hits in 0.437.11 and measured faster without sccache.
+        # Windows ARM64 was already proven with direct native Cargo.
+        if: ${{ matrix.use-cross == false && (matrix.target == 'x86_64-apple-darwin' || matrix.target == 'aarch64-apple-darwin') }}
         uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
 
       - name: Install cross
@@ -580,7 +600,7 @@ jobs:
             if [ "${{ matrix.use-cross }}" = "true" ]; then
               cross build --locked "${build_args[@]}" && exit 0
             else
-              if [ "${{ matrix.target }}" = "aarch64-pc-windows-msvc" ]; then
+              if [[ "${{ matrix.target }}" == *-pc-windows-msvc ]]; then
                 cargo build --locked "${build_args[@]}" && exit 0
               else
                 RUSTC_WRAPPER=sccache cargo build --locked "${build_args[@]}" && exit 0
