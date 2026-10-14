@@ -402,13 +402,36 @@ fn runtime_doctor_marker_context_reason_continuation_and_facets_batch_through_mo
         summary.previous_response_fresh_fallback_blocked_by_request_shape["session_replayable"],
         1
     );
-    assert_eq!(summary.facet_counts["route"]["responses"], 4);
+    // Five fixture rows carry route=responses: retry, both stale events,
+    // dead-owner confirmation and the previous-response miss. The preceding
+    // per-marker assertions guard these identities independently.
+    assert_eq!(summary.facet_counts["route"]["responses"], 5);
     assert_eq!(summary.facet_counts["route"]["/responses"], 257);
     assert_eq!(summary.facet_counts["route"][""], 1);
     assert_eq!(summary.facet_counts["lane"]["responses"], 257);
     assert_eq!(summary.facet_counts["lane"]["-"], 1);
     assert_eq!(summary.facet_counts["reason"]["quota"], 257);
     assert_eq!(summary.facet_counts["reason"][""], 1);
+}
+
+#[test]
+fn runtime_doctor_facets_count_each_dead_owner_and_missing_response_event_once() {
+    for marker in [
+        "chain_dead_upstream_confirmed",
+        "previous_response_not_found",
+    ] {
+        let line = format!("{marker} route=responses profile=alpha reason=dead_owner");
+        let summary = summarize_runtime_log_tail(line.as_bytes());
+        assert_eq!(summary.marker_counts.get(marker), Some(&1), "{marker}");
+        assert_eq!(
+            summary.facet_counts.get("route"),
+            Some(&std::collections::BTreeMap::from([(
+                String::from("responses"),
+                1
+            )])),
+            "each independent marker contributes one route facet: {marker}",
+        );
+    }
 }
 
 #[test]

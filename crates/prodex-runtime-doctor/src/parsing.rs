@@ -139,128 +139,7 @@ fn runtime_doctor_apply_marker_aggregation(
         let event = batch
             .get(row.representative_index)
             .expect("Mojo runtime-doctor aggregation returned an invalid event index");
-        let amount = row.count;
-        match row.kind {
-            prodex_mojo_core::rich::RUNTIME_DOCTOR_MARKER_AGGREGATION_KIND_MARKER_TOTAL => {
-                let entry = context.entry(event.marker.clone()).or_insert_with(|| {
-                    RuntimeDoctorMarkerContextSummary {
-                        marker: event.marker.clone(),
-                        ..RuntimeDoctorMarkerContextSummary::default()
-                    }
-                });
-                entry.total = entry
-                    .total
-                    .checked_add(amount)
-                    .expect("runtime-doctor marker total overflow");
-            }
-            prodex_mojo_core::rich::RUNTIME_DOCTOR_MARKER_AGGREGATION_KIND_CONTEXT_ROUTE
-            | prodex_mojo_core::rich::RUNTIME_DOCTOR_MARKER_AGGREGATION_KIND_CONTEXT_LANE
-            | prodex_mojo_core::rich::RUNTIME_DOCTOR_MARKER_AGGREGATION_KIND_CONTEXT_PROFILE => {
-                let key = match row.kind {
-                    prodex_mojo_core::rich::RUNTIME_DOCTOR_MARKER_AGGREGATION_KIND_CONTEXT_ROUTE => {
-                        "route"
-                    }
-                    prodex_mojo_core::rich::RUNTIME_DOCTOR_MARKER_AGGREGATION_KIND_CONTEXT_LANE => {
-                        "lane"
-                    }
-                    _ => "profile",
-                };
-                let value = event
-                    .fields
-                    .get(key)
-                    .expect("Mojo context row lost its source field")
-                    .clone();
-                let entry = context.entry(event.marker.clone()).or_insert_with(|| {
-                    RuntimeDoctorMarkerContextSummary {
-                        marker: event.marker.clone(),
-                        ..RuntimeDoctorMarkerContextSummary::default()
-                    }
-                });
-                let counts = match row.kind {
-                    prodex_mojo_core::rich::RUNTIME_DOCTOR_MARKER_AGGREGATION_KIND_CONTEXT_ROUTE => {
-                        &mut entry.routes
-                    }
-                    prodex_mojo_core::rich::RUNTIME_DOCTOR_MARKER_AGGREGATION_KIND_CONTEXT_LANE => {
-                        &mut entry.lanes
-                    }
-                    _ => &mut entry.profiles,
-                };
-                runtime_doctor_add_aggregated_count(counts, value, amount);
-            }
-            prodex_mojo_core::rich::RUNTIME_DOCTOR_MARKER_AGGREGATION_KIND_CHAIN_RETRIED_REASON
-            | prodex_mojo_core::rich::RUNTIME_DOCTOR_MARKER_AGGREGATION_KIND_CHAIN_DEAD_REASON
-            | prodex_mojo_core::rich::RUNTIME_DOCTOR_MARKER_AGGREGATION_KIND_STALE_REASON => {
-                let reason = event
-                    .fields
-                    .get("reason")
-                    .expect("Mojo reason row lost its source field")
-                    .clone();
-                let counts = match row.kind {
-                    prodex_mojo_core::rich::RUNTIME_DOCTOR_MARKER_AGGREGATION_KIND_CHAIN_RETRIED_REASON => {
-                        &mut summary.chain_retried_owner_by_reason
-                    }
-                    prodex_mojo_core::rich::RUNTIME_DOCTOR_MARKER_AGGREGATION_KIND_CHAIN_DEAD_REASON => {
-                        &mut summary.chain_dead_upstream_confirmed_by_reason
-                    }
-                    _ => &mut summary.stale_continuation_by_reason,
-                };
-                runtime_doctor_add_aggregated_count(counts, reason, amount);
-            }
-            prodex_mojo_core::rich::RUNTIME_DOCTOR_MARKER_AGGREGATION_KIND_PREVIOUS_ROUTE
-            | prodex_mojo_core::rich::RUNTIME_DOCTOR_MARKER_AGGREGATION_KIND_PREVIOUS_TRANSPORT
-            | prodex_mojo_core::rich::RUNTIME_DOCTOR_MARKER_AGGREGATION_KIND_PREVIOUS_REQUEST_SHAPE => {
-                let key = match row.kind {
-                    prodex_mojo_core::rich::RUNTIME_DOCTOR_MARKER_AGGREGATION_KIND_PREVIOUS_ROUTE => {
-                        "route"
-                    }
-                    prodex_mojo_core::rich::RUNTIME_DOCTOR_MARKER_AGGREGATION_KIND_PREVIOUS_TRANSPORT => {
-                        "transport"
-                    }
-                    _ => "request_shape",
-                };
-                let value = event
-                    .fields
-                    .get(key)
-                    .expect("Mojo continuation row lost its source field")
-                    .clone();
-                let counts = match row.kind {
-                    prodex_mojo_core::rich::RUNTIME_DOCTOR_MARKER_AGGREGATION_KIND_PREVIOUS_ROUTE => {
-                        &mut summary.previous_response_not_found_by_route
-                    }
-                    prodex_mojo_core::rich::RUNTIME_DOCTOR_MARKER_AGGREGATION_KIND_PREVIOUS_TRANSPORT => {
-                        &mut summary.previous_response_not_found_by_transport
-                    }
-                    _ => &mut summary.previous_response_fresh_fallback_blocked_by_request_shape,
-                };
-                runtime_doctor_add_aggregated_count(counts, value, amount);
-            }
-            kind if (prodex_mojo_core::rich::RUNTIME_DOCTOR_MARKER_AGGREGATION_KIND_FACET_BASE
-                ..prodex_mojo_core::rich::RUNTIME_DOCTOR_MARKER_AGGREGATION_KIND_FACET_BASE
-                    + prodex_mojo_core::rich::RUNTIME_DOCTOR_MARKER_AGGREGATION_FACET_COUNT as i64)
-                .contains(&kind) => {
-                let facet_index = usize::try_from(
-                    kind - prodex_mojo_core::rich::RUNTIME_DOCTOR_MARKER_AGGREGATION_KIND_FACET_BASE,
-                )
-                .expect("Mojo facet index must fit usize");
-                let facet = RUNTIME_DOCTOR_FACETS
-                    .get(facet_index)
-                    .expect("Mojo facet index exceeds the Rust facet catalog");
-                let value = event
-                    .fields
-                    .get(*facet)
-                    .expect("Mojo facet row lost its source field")
-                    .clone();
-                runtime_doctor_add_aggregated_count(
-                    summary
-                        .facet_counts
-                        .entry((*facet).to_string())
-                        .or_default(),
-                    value,
-                    amount,
-                );
-            }
-            _ => panic!("Mojo runtime-doctor aggregation returned an unknown row kind"),
-        }
+        runtime_doctor_apply_aggregation_row(summary, context, event, row);
     }
     if let Some(index) = aggregation.latest_stale_reason_index {
         let reason = batch
@@ -268,6 +147,138 @@ fn runtime_doctor_apply_marker_aggregation(
             .and_then(|event| event.fields.get("reason"))
             .expect("Mojo stale-reason index lost its source field");
         summary.latest_stale_continuation_reason = Some(reason.clone());
+    }
+}
+
+#[cfg(feature = "runtime-log-mojo")]
+fn runtime_doctor_apply_aggregation_row(
+    summary: &mut RuntimeDoctorSummary,
+    context: &mut BTreeMap<String, RuntimeDoctorMarkerContextSummary>,
+    event: &RuntimeDoctorMarkerAggregationEvent,
+    row: prodex_mojo_core::rich::RuntimeDoctorMarkerAggregationRow,
+) {
+    let amount = row.count;
+    match row.kind {
+        prodex_mojo_core::rich::RUNTIME_DOCTOR_MARKER_AGGREGATION_KIND_MARKER_TOTAL => {
+            let entry = context.entry(event.marker.clone()).or_insert_with(|| {
+                RuntimeDoctorMarkerContextSummary {
+                    marker: event.marker.clone(),
+                    ..RuntimeDoctorMarkerContextSummary::default()
+                }
+            });
+            entry.total = entry
+                .total
+                .checked_add(amount)
+                .expect("runtime-doctor marker total overflow");
+        }
+        prodex_mojo_core::rich::RUNTIME_DOCTOR_MARKER_AGGREGATION_KIND_CONTEXT_ROUTE
+        | prodex_mojo_core::rich::RUNTIME_DOCTOR_MARKER_AGGREGATION_KIND_CONTEXT_LANE
+        | prodex_mojo_core::rich::RUNTIME_DOCTOR_MARKER_AGGREGATION_KIND_CONTEXT_PROFILE => {
+            let key = match row.kind {
+                prodex_mojo_core::rich::RUNTIME_DOCTOR_MARKER_AGGREGATION_KIND_CONTEXT_ROUTE => {
+                    "route"
+                }
+                prodex_mojo_core::rich::RUNTIME_DOCTOR_MARKER_AGGREGATION_KIND_CONTEXT_LANE => {
+                    "lane"
+                }
+                _ => "profile",
+            };
+            let value = event
+                .fields
+                .get(key)
+                .expect("Mojo context row lost its source field")
+                .clone();
+            let entry = context.entry(event.marker.clone()).or_insert_with(|| {
+                RuntimeDoctorMarkerContextSummary {
+                    marker: event.marker.clone(),
+                    ..RuntimeDoctorMarkerContextSummary::default()
+                }
+            });
+            let counts = match row.kind {
+                prodex_mojo_core::rich::RUNTIME_DOCTOR_MARKER_AGGREGATION_KIND_CONTEXT_ROUTE => {
+                    &mut entry.routes
+                }
+                prodex_mojo_core::rich::RUNTIME_DOCTOR_MARKER_AGGREGATION_KIND_CONTEXT_LANE => {
+                    &mut entry.lanes
+                }
+                _ => &mut entry.profiles,
+            };
+            runtime_doctor_add_aggregated_count(counts, value, amount);
+        }
+        prodex_mojo_core::rich::RUNTIME_DOCTOR_MARKER_AGGREGATION_KIND_CHAIN_RETRIED_REASON
+        | prodex_mojo_core::rich::RUNTIME_DOCTOR_MARKER_AGGREGATION_KIND_CHAIN_DEAD_REASON
+        | prodex_mojo_core::rich::RUNTIME_DOCTOR_MARKER_AGGREGATION_KIND_STALE_REASON => {
+            let reason = event
+                .fields
+                .get("reason")
+                .expect("Mojo reason row lost its source field")
+                .clone();
+            let counts = match row.kind {
+                prodex_mojo_core::rich::RUNTIME_DOCTOR_MARKER_AGGREGATION_KIND_CHAIN_RETRIED_REASON => {
+                    &mut summary.chain_retried_owner_by_reason
+                }
+                prodex_mojo_core::rich::RUNTIME_DOCTOR_MARKER_AGGREGATION_KIND_CHAIN_DEAD_REASON => {
+                    &mut summary.chain_dead_upstream_confirmed_by_reason
+                }
+                _ => &mut summary.stale_continuation_by_reason,
+            };
+            runtime_doctor_add_aggregated_count(counts, reason, amount);
+        }
+        prodex_mojo_core::rich::RUNTIME_DOCTOR_MARKER_AGGREGATION_KIND_PREVIOUS_ROUTE
+        | prodex_mojo_core::rich::RUNTIME_DOCTOR_MARKER_AGGREGATION_KIND_PREVIOUS_TRANSPORT
+        | prodex_mojo_core::rich::RUNTIME_DOCTOR_MARKER_AGGREGATION_KIND_PREVIOUS_REQUEST_SHAPE => {
+            let key = match row.kind {
+                prodex_mojo_core::rich::RUNTIME_DOCTOR_MARKER_AGGREGATION_KIND_PREVIOUS_ROUTE => {
+                    "route"
+                }
+                prodex_mojo_core::rich::RUNTIME_DOCTOR_MARKER_AGGREGATION_KIND_PREVIOUS_TRANSPORT => {
+                    "transport"
+                }
+                _ => "request_shape",
+            };
+            let value = event
+                .fields
+                .get(key)
+                .expect("Mojo continuation row lost its source field")
+                .clone();
+            let counts = match row.kind {
+                prodex_mojo_core::rich::RUNTIME_DOCTOR_MARKER_AGGREGATION_KIND_PREVIOUS_ROUTE => {
+                    &mut summary.previous_response_not_found_by_route
+                }
+                prodex_mojo_core::rich::RUNTIME_DOCTOR_MARKER_AGGREGATION_KIND_PREVIOUS_TRANSPORT => {
+                    &mut summary.previous_response_not_found_by_transport
+                }
+                _ => &mut summary.previous_response_fresh_fallback_blocked_by_request_shape,
+            };
+            runtime_doctor_add_aggregated_count(counts, value, amount);
+        }
+        kind if (prodex_mojo_core::rich::RUNTIME_DOCTOR_MARKER_AGGREGATION_KIND_FACET_BASE
+            ..prodex_mojo_core::rich::RUNTIME_DOCTOR_MARKER_AGGREGATION_KIND_FACET_BASE
+                + prodex_mojo_core::rich::RUNTIME_DOCTOR_MARKER_AGGREGATION_FACET_COUNT as i64)
+            .contains(&kind) =>
+        {
+            let facet_index = usize::try_from(
+                kind - prodex_mojo_core::rich::RUNTIME_DOCTOR_MARKER_AGGREGATION_KIND_FACET_BASE,
+            )
+            .expect("Mojo facet index must fit usize");
+            let facet = RUNTIME_DOCTOR_FACETS
+                .get(facet_index)
+                .expect("Mojo facet index exceeds the Rust facet catalog");
+            let value = event
+                .fields
+                .get(*facet)
+                .expect("Mojo facet row lost its source field")
+                .clone();
+            runtime_doctor_add_aggregated_count(
+                summary
+                    .facet_counts
+                    .entry((*facet).to_string())
+                    .or_default(),
+                value,
+                amount,
+            );
+        }
+        _ => panic!("Mojo runtime-doctor aggregation returned an unknown row kind"),
     }
 }
 

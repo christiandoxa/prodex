@@ -105,37 +105,12 @@ pub fn runtime_doctor_marker_aggregation<'a, 'b>(
         });
     }
 
-    let mut markers = Vec::with_capacity(input.len());
-    let mut values = Vec::with_capacity(
-        input
-            .len()
-            .checked_mul(VALUE_WIDTH)
-            .ok_or(MojoError::InvalidInput)?,
-    );
-    let mut presence = Vec::with_capacity(input.len());
+    let MarkerAggregationInputBuffers {
+        markers,
+        values,
+        presence,
+    } = MarkerAggregationInputBuffers::encode(input)?;
     let weights = vec![1_i64; input.len()];
-    for event in input {
-        if event.facets.len() != RUNTIME_DOCTOR_MARKER_AGGREGATION_FACET_COUNT {
-            return Err(MojoError::InvalidInput);
-        }
-        markers.push(view(event.marker));
-        let fixed = [
-            event.route,
-            event.lane,
-            event.profile,
-            event.reason,
-            event.transport,
-            event.request_shape,
-        ];
-        let mut mask = 0_i64;
-        for (slot, value) in fixed.into_iter().enumerate() {
-            append_value(&mut values, &mut mask, slot, value)?;
-        }
-        for (facet_index, value) in event.facets.iter().copied().enumerate() {
-            append_value(&mut values, &mut mask, 6 + facet_index, value)?;
-        }
-        presence.push(mask);
-    }
 
     let input_count = i64::try_from(input.len()).map_err(|_| MojoError::InvalidInput)?;
     let output_capacity = input
@@ -214,6 +189,54 @@ pub fn runtime_doctor_marker_aggregation<'a, 'b>(
         rows,
         latest_stale_reason_index,
     })
+}
+
+/// Rust owns string borrows and contiguous wire buffers; Mojo still owns all
+/// grouping, sentinel handling, counts and per-marker decisions.
+struct MarkerAggregationInputBuffers {
+    markers: Vec<RichStringView>,
+    values: Vec<RichStringView>,
+    presence: Vec<i64>,
+}
+
+impl MarkerAggregationInputBuffers {
+    fn encode(input: &[RuntimeDoctorMarkerAggregationInput<'_, '_>]) -> Result<Self, MojoError> {
+        let mut markers = Vec::with_capacity(input.len());
+        let mut values = Vec::with_capacity(
+            input
+                .len()
+                .checked_mul(VALUE_WIDTH)
+                .ok_or(MojoError::InvalidInput)?,
+        );
+        let mut presence = Vec::with_capacity(input.len());
+        for event in input {
+            if event.facets.len() != RUNTIME_DOCTOR_MARKER_AGGREGATION_FACET_COUNT {
+                return Err(MojoError::InvalidInput);
+            }
+            markers.push(view(event.marker));
+            let fixed = [
+                event.route,
+                event.lane,
+                event.profile,
+                event.reason,
+                event.transport,
+                event.request_shape,
+            ];
+            let mut mask = 0_i64;
+            for (slot, value) in fixed.into_iter().enumerate() {
+                append_value(&mut values, &mut mask, slot, value)?;
+            }
+            for (facet_index, value) in event.facets.iter().copied().enumerate() {
+                append_value(&mut values, &mut mask, 6 + facet_index, value)?;
+            }
+            presence.push(mask);
+        }
+        Ok(Self {
+            markers,
+            values,
+            presence,
+        })
+    }
 }
 
 fn append_value(
