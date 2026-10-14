@@ -490,7 +490,7 @@ function printHelp() {
       "",
       "Validates or prints the shared prodex-app library CI shard plan.",
       "--github-matrix emits the push/PR app matrix without runtime-owned filters.",
-      "--windows-github-matrix emits eight disjoint Windows partitions with one cache writer.",
+      "--windows-github-matrix emits thirteen disjoint Windows partitions with one cache writer.",
       "--full-test-matrix emits the scheduled full-test matrix including workspace coverage.",
     ].join("\n") + "\n",
   );

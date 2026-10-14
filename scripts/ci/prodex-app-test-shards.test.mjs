@@ -180,6 +180,12 @@ test("Windows critical-path partitions preserve targeted and recovery ownership 
   }
 });
 
+test("Windows matrix help documents the active partition count", () => {
+  const help = runPlanner("--help");
+  assert.equal(help.status, 0, help.stderr);
+  assert.match(help.stdout, /--windows-github-matrix emits thirteen disjoint Windows partitions/);
+});
+
 test("shard planner dry-run and matrix output are compile-free", () => {
   const check = runPlanner("--check");
   assert.equal(check.status, 0, check.stderr);
