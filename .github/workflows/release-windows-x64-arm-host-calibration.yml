@@ -1,0 +1,173 @@
+name: Windows x64 ARM-host cross-release calibration
+
+# Opt-in, exact-source Windows ARM64 x64 cross-build benchmark. Never publishes binaries.
+on:
+  workflow_dispatch:
+    inputs:
+      target_sha:
+        description: Exact source SHA of a previously successful official release
+        required: true
+        type: string
+      source_release_run_id:
+        description: Official completed-success release workflow for source SHA
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: windows-x64-arm-host-calibration-${{ inputs.target_sha }}
+  cancel-in-progress: true
+
+jobs:
+  benchmark:
+    name: Benchmark x64 release on native Windows ARM64
+    runs-on: windows-11-arm
+    timeout-minutes: 70
+    env:
+      CARGO_INCREMENTAL: "0"
+      CARGO_PROFILE_RELEASE_DEBUG: "0"
+      CARGO_PROFILE_RELEASE_CODEGEN_UNITS: "16"
+      PRODEX_MOJO_REQUIRED: "1"
+      PRODEX_MOJO_VERSION: "1.1.0"
+      PRODEX_MOJO_ARCHIVE: ${{ github.workspace }}\\target\\mojo-release\\x86_64-pc-windows-msvc\\prodex_mojo_core.lib
+
+    steps:
+      - name: Authenticate exact successful official release source
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TARGET_SHA: ${{ inputs.target_sha }}
+          RELEASE_RUN_ID: ${{ inputs.source_release_run_id }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if ($env:TARGET_SHA -cnotmatch '^[0-9a-f]{40}$') { throw 'Invalid source SHA' }
+          if ($env:RELEASE_RUN_ID -notmatch '^[0-9]+$') { throw 'Invalid release run ID' }
+          $data = gh api "repos/$env:GITHUB_REPOSITORY/actions/runs/$env:RELEASE_RUN_ID" | ConvertFrom-Json
+          if ($LASTEXITCODE -ne 0) { throw 'Cannot authenticate release run' }
+          if ($data.head_sha -cne $env:TARGET_SHA -or
+              $data.event -cne 'workflow_dispatch' -or
+              $data.head_branch -cne 'main' -or
+              $data.path -cne '.github/workflows/standalone-release.yml' -or
+              $data.repository.full_name -cne $env:GITHUB_REPOSITORY -or
+              $data.status -cne 'completed' -or
+              $data.conclusion -cne 'success') {
+            throw 'Refusing to benchmark from an untrusted source or release'
+          }
+
+      - name: Check out exact source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ inputs.target_sha }}
+          persist-credentials: false
+
+      - name: Verify checked-out source
+        shell: pwsh
+        env:
+          TARGET_SHA: ${{ inputs.target_sha }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $headSha = (git rev-parse HEAD).Trim()
+          if ($LASTEXITCODE -ne 0 -or $headSha -cne $env:TARGET_SHA) {
+            throw 'Source checkout differs from successful release'
+          }
+
+      - name: Download exact release Mojo COFF archive
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
+        with:
+          name: mojo-archive-x86_64-pc-windows-msvc
+          run-id: ${{ inputs.source_release_run_id }}
+          github-token: ${{ github.token }}
+          path: target/mojo-release/x86_64-pc-windows-msvc
+
+      - name: Verify ARM64 host and exact-source x64 Mojo archive
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if ($env:PROCESSOR_ARCHITECTURE -cne 'ARM64') {
+            throw "Not a native Windows ARM64 runner: $env:PROCESSOR_ARCHITECTURE"
+          }
+          if (-not (Test-Path -Path $env:PRODEX_MOJO_ARCHIVE -PathType Leaf) -or
+              (Get-Item $env:PRODEX_MOJO_ARCHIVE).Length -lt 1024) {
+            throw 'Strict Mojo COFF archive missing'
+          }
+          $symbols = & llvm-nm -g $env:PRODEX_MOJO_ARCHIVE
+          if ($LASTEXITCODE -ne 0) { throw 'Mojo archive symbols unreadable' }
+          foreach ($symbol in @('prodex_mojo_rich_abi_version', 'prodex_mojo_log_level_classify_v1')) {
+            if (-not ($symbols | Select-String -SimpleMatch $symbol -Quiet)) {
+              throw "Missing Mojo ABI symbol: $symbol"
+            }
+          }
+          $undefined = & llvm-nm -u $env:PRODEX_MOJO_ARCHIVE
+          if ($LASTEXITCODE -ne 0) { throw 'Mojo undefined-symbol scan failed' }
+          if ($undefined | Select-String -SimpleMatch 'KGEN_CompilerRT_' -Quiet) {
+            throw 'Mojo compiler-runtime dependency forbidden'
+          }
+
+      - name: Install pinned Rust release compiler
+        uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
+        with:
+          toolchain: 1.99.0
+          targets: x86_64-pc-windows-msvc
+
+      - name: Cache independent release dependency artifacts
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+        with:
+          key: windows-x64-arm-host-calibration
+          cache-bin: false
+
+      - name: Measure x64 ThinLTO production build on Windows ARM host
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $sw = [System.Diagnostics.Stopwatch]::StartNew()
+          cargo build --locked --release --target x86_64-pc-windows-msvc --features mojo-core
+          if ($LASTEXITCODE -ne 0) { throw 'Production-profile compilation failed' }
+          $sw.Stop()
+          $seconds = [int][Math]::Ceiling($sw.Elapsed.TotalSeconds)
+          $binary = 'target/x86_64-pc-windows-msvc/release/prodex.exe'
+          if (-not (Test-Path -Path $binary -PathType Leaf)) { throw 'Missing Prodex binary' }
+          $bytes = [System.IO.File]::ReadAllBytes((Resolve-Path $binary))
+          $offset = [BitConverter]::ToInt32($bytes, 60)
+          if ($offset -le 0 -or ($offset + 6) -ge $bytes.Length) {
+            throw 'Malformed PE executable header'
+          }
+          $machine = [BitConverter]::ToUInt16($bytes, $offset + 4)
+          if ($machine -ne 0x8664) { throw "Not PE x64: $machine" }
+          $size = (Get-Item $binary).Length
+          if ($size -lt 1024) { throw 'Empty compiled binary' }
+          "$seconds" | Set-Content -Path "$env:RUNNER_TEMP/codegen-seconds.txt"
+          "$size" | Set-Content -Path "$env:RUNNER_TEMP/codegen-bytes.txt"
+          "x64 cross-host=Windows ARM64, codegen=16, seconds=$seconds, bytes=$size" >> $env:GITHUB_STEP_SUMMARY
+
+      - name: Emulated x64 compiled-in Mojo smoke on ARM64
+        shell: pwsh
+        env:
+          PRODEX_HOME: ${{ runner.temp }}/windows-x64-arm-host-smoke
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $binary = 'target/x86_64-pc-windows-msvc/release/prodex.exe'
+          & $binary --version
+          if ($LASTEXITCODE -ne 0) { throw 'Version smoke failed' }
+          & $binary --help *> "$env:RUNNER_TEMP/help.txt"
+          if ($LASTEXITCODE -ne 0) { throw 'Help smoke failed' }
+          & $binary doctor --runtime --json *> "$env:RUNNER_TEMP/mojo-doctor.json"
+          if ($LASTEXITCODE -ne 0) { throw 'Runtime smoke failed' }
+          $text = Get-Content "$env:RUNNER_TEMP/mojo-doctor.json" -Raw
+          foreach ($required in @('"implementation": "mojo-compiled-in"', '"fallback": false',
+              '"compiler_required": false', '"self_test": "passed"')) {
+            if (-not $text.Contains($required)) { throw "Missing strict Mojo proof: $required" }
+          }
+
+      - name: Upload text timings only
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: windows-x64-arm-host-release-timing
+          path: |
+            ${{ runner.temp }}/codegen-seconds.txt
+            ${{ runner.temp }}/codegen-bytes.txt
+          if-no-files-found: ignore
+          retention-days: 7
