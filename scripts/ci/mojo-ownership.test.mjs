@@ -180,10 +180,27 @@ test("retired log event classification stays explicitly deleted", () => {
 
 test("Rust reductions are traceable in both baseline and release source", () => {
   const manifest = releaseManifest();
-  manifest.rust_semantic_reductions[0].symbol = "missing_reduction_symbol";
+  const frozenReduction = manifest.rust_semantic_reductions.find(
+    (candidate) => candidate.migrated_semantic_loc !== undefined,
+  );
+  assert.ok(frozenReduction, "fixture needs a frozen-baseline migration reduction");
+  frozenReduction.symbol = "missing_reduction_symbol";
   assert.throws(
     () => validateManifest(manifest, BASE_SHA, "WORKTREE"),
     /not traceable in the frozen baseline source/,
+  );
+});
+
+test("cleanup reductions retain independent baseline symbol validation", () => {
+  const manifest = releaseManifest();
+  const cleanup = manifest.rust_semantic_reductions.find(
+    (candidate) => candidate.cleanup_loc !== undefined,
+  );
+  assert.ok(cleanup, "fixture needs a source-only cleanup reduction");
+  cleanup.symbol = "missing_cleanup_symbol";
+  assert.throws(
+    () => validateManifest(manifest, BASE_SHA, "WORKTREE"),
+    /cleanup range does not contain its baseline symbol/,
   );
 });
 
@@ -219,7 +236,18 @@ test("source-only cleanup stays separate from frozen migration volume", () => {
   const expectedCleanupLoc = manifest.rust_semantic_reductions
     .reduce((total, reduction) => total + (reduction.cleanup_loc ?? 0), 0);
 
-  assert.equal(result.rust_semantic_loc_migrated, 423);
+  // Migration volume is scoped to the frozen release contract, including
+  // historical contract entries whose exported implementation later moved.
+  // Cleanup can grow independently; neither total is a fixed release floor.
+  const releaseOperations = new Set(result.authoritative_operations
+    .filter((operation) => operation.introduced_in === manifest.release_target ||
+      operation.expanded_in === manifest.release_target)
+    .map((operation) => operation.name));
+  const expectedMigratedLoc = manifest.rust_semantic_reductions
+    .filter((reduction) => releaseOperations.has(reduction.operation))
+    .reduce((total, reduction) => total + (reduction.migrated_semantic_loc ?? 0), 0);
+  assert.ok(expectedMigratedLoc >= manifest.minimum_migration_loc);
+  assert.equal(result.rust_semantic_loc_migrated, expectedMigratedLoc);
   assert.equal(result.source_cleanup_loc, expectedCleanupLoc);
   assert.notEqual(result.source_cleanup_loc, result.rust_semantic_loc_migrated);
   assert.equal(result.required_migration_volume_loc, 423);
