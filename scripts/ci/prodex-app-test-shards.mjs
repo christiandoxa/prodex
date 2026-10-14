@@ -199,9 +199,14 @@ const WINDOWS_SHARD_GROUPS = Object.freeze([
     members: ["commands", "launch-gemini"],
   },
   {
-    suite: "local-brokers-profiles",
-    label: "prodex-app local rewrite, brokers, and profiles",
-    members: ["launch-local", "profiles"],
+    suite: "local-rewrite",
+    label: "prodex-app local rewrite tests",
+    members: ["launch-local"],
+  },
+  {
+    suite: "profiles",
+    label: "prodex-app profile commands",
+    members: ["profiles"],
   },
   {
     suite: "gateway-support-affinity",
@@ -209,9 +214,14 @@ const WINDOWS_SHARD_GROUPS = Object.freeze([
     members: ["support", "admission-affinity"],
   },
   {
-    suite: "selection-admission",
-    label: "prodex-app selection and admission",
-    members: ["selection", "admission-core"],
+    suite: "selection",
+    label: "prodex-app selection and pressure",
+    members: ["selection"],
+  },
+  {
+    suite: "admission-core",
+    label: "prodex-app admission core",
+    members: ["admission-core"],
   },
   {
     suite: "provider-launches",
@@ -490,7 +500,7 @@ function printHelp() {
       "",
       "Validates or prints the shared prodex-app library CI shard plan.",
       "--github-matrix emits the push/PR app matrix without runtime-owned filters.",
-      "--windows-github-matrix emits thirteen disjoint Windows partitions with one cache writer.",
+      "--windows-github-matrix emits fifteen disjoint Windows partitions with one cache writer.",
       "--full-test-matrix emits the scheduled full-test matrix including workspace coverage.",
     ].join("\n") + "\n",
   );

@@ -676,3 +676,36 @@ cannot publish assets, tags or packages. The official Windows x64 release
 matrix remains unchanged until this calibration proves it safe and faster.
 If the experiment fails, prefer the proven x64 host and maintain
 ThinLTO/runtime diagnostics over any unverified speed gain.
+
+
+## Measured Windows CI rebalancing after 13-shard checkpoint
+
+[Push CI 38527770749](https://github.com/christiandoxa/prodex/actions/runs/38527770749)
+finished **77/77 jobs successfully** with the previous 13 Windows
+prodex-app partitions. The new slowest serial suites were:
+
+| Windows CI suite | Total job | Serial test step | Cases in local binary |
+| --- | ---: | ---: | ---: |
+| Selection/admission | 4m31s | 3m14s | 231 |
+| Local rewrite/profiles | 4m23s | 2m52s | 242 |
+| Remainder | 4m14s | 3m26s | 143 |
+| WebSocket continuation | 4m05s | 2m09s | 23 |
+
+These times are influenced by runner and cache contention. Rather than
+increasing libtest concurrency inside session-sensitive tests, the
+manifest now divides selection/admission into independent 72-case
+selection and 159-case admission-core runners, and local rewrite/profiles
+into 131-case and 111-case runners. Each invocation remains **serial
+within its own runner** with existing Windows exclusions and strict
+zero-test detection. This increases the heavy Windows matrix from 13
+to **15** runners, trading extra startup/billed minutes for a shorter
+likely wall-clock critical path.
+
+The actual compiled local prodex-app test binary lists **2,240 cases**.
+The complete 15-shard manifest assigns **2,240/2,240 exactly once**,
+with no missing or duplicate owners, and precisely one Rust cache
+writer. A source-level regression pins the grouping and representative
+runtime, admission, profile and local rewrite ownership. The
+scheduled full-suite and Linux/macOS test matrices are unchanged.
+The first completed CI run of the 15-shard configuration must be
+measured before claiming a new wall-clock improvement.
