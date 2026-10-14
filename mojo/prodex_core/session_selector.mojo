@@ -68,6 +68,53 @@ def session_selector_matches(
     return True
 
 
+def session_selector_path_span(
+    stem: ProdexRichStringView,
+    selector: ProdexRichStringView,
+    exact: Bool,
+    require_full: Bool,
+) -> Tuple[Int64, Int64]:
+    var stem_length = Int64(stem.len)
+    if require_full:
+        if session_selector_is_full_id(stem):
+            return (0, stem_length)
+    elif session_selector_matches(stem, selector, exact):
+        return (0, stem_length)
+
+    var source = rich_view_ptr(stem)
+    var start: Int64 = 0
+    while start <= stem_length:
+        var cursor = start
+        var separator_count: Int64 = 0
+        var next_start: Int64 = -1
+        while cursor < stem_length:
+            if source[unsafe_offset=cursor] == 45:
+                separator_count += 1
+                if separator_count == 1:
+                    next_start = cursor + 1
+                if separator_count == 4:
+                    break
+            cursor += 1
+        if separator_count < 4:
+            break
+
+        var candidate_end = cursor + 1
+        while candidate_end < stem_length and source[unsafe_offset=candidate_end] != 45:
+            candidate_end += 1
+        var candidate = ProdexRichStringView(
+            stem.ptr + UInt(start), UInt(candidate_end - start)
+        )
+        var matched = (
+            session_selector_is_full_id(candidate)
+            if require_full
+            else session_selector_matches(candidate, selector, exact)
+        )
+        if matched:
+            return (start, candidate_end)
+        start = next_start
+    return (-1, -1)
+
+
 def session_report_query_contains(
     field: ProdexRichStringView,
     query: ProdexRichStringView,
@@ -154,6 +201,45 @@ def prodex_session_selector_matches_v1(
     output[unsafe_offset=0] = Int64(
         session_selector_matches(id, selector, exact == 1)
     )
+    return SESSION_SELECTOR_OK
+
+
+@export("prodex_session_selector_path_span_v1")
+def prodex_session_selector_path_span_v1(
+    abi_version: Int64,
+    stem_address: UInt,
+    stem_length: Int64,
+    selector_address: UInt,
+    selector_length: Int64,
+    exact: Int64,
+    require_full: Int64,
+    output_address: UInt,
+) abi("C") -> Int64:
+    if (
+        abi_version != SESSION_SELECTOR_ABI_VERSION
+        or stem_length < 0
+        or selector_length < 0
+        or (exact != 0 and exact != 1)
+        or (require_full != 0 and require_full != 1)
+        or output_address == 0
+        or (stem_length > 0 and stem_address == 0)
+        or (selector_length > 0 and selector_address == 0)
+    ):
+        return SESSION_SELECTOR_INVALID
+    var stem = ProdexRichStringView(stem_address, UInt(stem_length))
+    var selector = ProdexRichStringView(selector_address, UInt(selector_length))
+    if not rich_view_valid(stem, 0x7FFFFFFFFFFFFFFF) or not rich_view_valid(
+        selector, 0x7FFFFFFFFFFFFFFF
+    ):
+        return SESSION_SELECTOR_INVALID
+    var output = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    var span = session_selector_path_span(
+        stem, selector, exact == 1, require_full == 1
+    )
+    output[unsafe_offset=0] = span[0]
+    output[unsafe_offset=1] = span[1]
     return SESSION_SELECTOR_OK
 
 

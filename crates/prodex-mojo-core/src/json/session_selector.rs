@@ -17,6 +17,16 @@ unsafe extern "C" {
         exact: i64,
         output_address: u64,
     ) -> i64;
+    fn prodex_session_selector_path_span_v1(
+        abi_version: i64,
+        stem_address: u64,
+        stem_length: i64,
+        selector_address: u64,
+        selector_length: i64,
+        exact: i64,
+        require_full: i64,
+        output_address: u64,
+    ) -> i64;
     fn prodex_session_selector_match_plan_v1(
         abi_version: i64,
         ids_address: u64,
@@ -98,6 +108,46 @@ pub fn session_selector_matches(id: &str, selector: &str, exact: bool) -> Result
         1 => Ok(true),
         _ => Err(MojoError::InvalidOutput),
     }
+}
+
+/// Find the first selector or full-ID span in a session filename stem.
+///
+/// Mojo owns whole-stem precedence and the five-component hyphen-window scan;
+/// Rust validates and materializes the returned UTF-8 byte span.
+pub fn session_selector_path_span(
+    stem: &str,
+    selector: &str,
+    exact: bool,
+    require_full: bool,
+) -> Result<Option<(usize, usize)>, MojoError> {
+    let mut output = [-1_i64; 2];
+    let stem_value = stem;
+    let stem = view(stem_value);
+    let selector = view(selector);
+    status(unsafe {
+        prodex_session_selector_path_span_v1(
+            SESSION_SELECTOR_ABI_VERSION,
+            stem.address,
+            i64::try_from(stem.length).map_err(|_| MojoError::InvalidInput)?,
+            selector.address,
+            i64::try_from(selector.length).map_err(|_| MojoError::InvalidInput)?,
+            i64::from(exact),
+            i64::from(require_full),
+            output.as_mut_ptr() as u64,
+        )
+    })?;
+    if output[0] == -1 && output[1] == -1 {
+        return Ok(None);
+    }
+    let start = usize::try_from(output[0]).map_err(|_| MojoError::InvalidOutput)?;
+    let end = usize::try_from(output[1]).map_err(|_| MojoError::InvalidOutput)?;
+    if start > end || end > stem_value.len() {
+        return Err(MojoError::InvalidOutput);
+    }
+    if !stem_value.is_char_boundary(start) || !stem_value.is_char_boundary(end) {
+        return Err(MojoError::InvalidOutput);
+    }
+    Ok(Some((start, end)))
 }
 
 /// Classifies a session filename and returns the suffix-stripped stem length.
@@ -240,6 +290,7 @@ pub fn session_selector_match_plan(
 mod tests {
     use super::{
         session_file_name_plan, session_report_query_matches, session_selector_match_plan,
+        session_selector_path_span,
     };
 
     #[test]
@@ -278,6 +329,28 @@ mod tests {
         assert!(changed.0.is_empty());
         assert!(changed.1.is_empty());
         assert_ne!(prefix.1, changed.1);
+    }
+
+    #[test]
+    fn path_span_preserves_window_order_empty_components_and_full_ids() {
+        let stem = "é--prefix-a-b-c-d";
+        assert_eq!(
+            session_selector_path_span(stem, "-prefix-a-b", false, false).unwrap(),
+            Some((3, 16))
+        );
+        assert_eq!(
+            session_selector_path_span("prefix-a-b-c-d-e", "prefix", false, false).unwrap(),
+            Some((0, "prefix-a-b-c-d-e".len()))
+        );
+        let id = "01900000-0000-7000-8000-000000000301";
+        assert_eq!(
+            session_selector_path_span(id, "", true, true).unwrap(),
+            Some((0, 36))
+        );
+        assert_eq!(
+            session_selector_path_span(&format!("prefix-{id}-suffix"), "", true, true).unwrap(),
+            Some((7, 43))
+        );
     }
 
     #[test]

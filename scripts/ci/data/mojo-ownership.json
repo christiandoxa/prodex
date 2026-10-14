@@ -4482,16 +4482,17 @@
       "consumer": "crates/prodex-session-store/src/lib.rs",
       "consumer_marker": "prodex_mojo_core::json::session_selector_match_plan",
       "production_consumers": [
-        "crates/prodex-session-store/src/lib.rs"
+        "crates/prodex-session-store/src/lib.rs",
+        "crates/prodex-session-store/src/session_selector.rs"
       ],
       "production_reachability_test": "crates/prodex-session-store/tests/src/lib.rs",
-      "rust_owner_before": "exact and prefix session-ID candidate matching, stable candidate collection, and exact-over-prefix ambiguity resolution",
+      "rust_owner_before": "exact and prefix session-ID candidate matching, stable candidate collection, exact-over-prefix ambiguity resolution, and filename-stem scanning across five hyphen components",
       "rust_state_after": "adapter-only",
-      "rust_test_oracle": "deleted; session-store caller tests cover exact case-folding, unique prefixes, ambiguous prefixes, missing selectors, and trimmed Unicode selectors",
+      "rust_test_oracle": "deleted; session-store caller tests cover exact case-folding, unique prefixes, ambiguous prefixes, missing selectors, trimmed Unicode selectors, and empty filename components",
       "production_fallback": false,
       "duplicate_production_owner": false,
       "platform_fallback": false,
-      "rust_adapter_scope": "Rust owns selector trimming, report DTO indexing, error construction, and filesystem/state acquisition; Mojo owns candidate matching and stable exact/prefix index planning"
+      "rust_adapter_scope": "Rust owns selector trimming, report DTO indexing, error construction, Path/file-stem extraction, UTF-8 span validation and String materialization, plus filesystem/state acquisition; Mojo owns candidate matching, stable exact/prefix index planning, whole-stem precedence, and bounded five-component filename scanning"
     },
     {
       "name": "session_report_query_matching_policy",

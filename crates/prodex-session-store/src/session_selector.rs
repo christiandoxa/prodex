@@ -58,15 +58,7 @@ pub(super) fn session_path_id_matching_selector(
     selector: &str,
     exact: bool,
 ) -> Option<String> {
-    let stem = path.file_stem().and_then(|stem| stem.to_str())?;
-    if session_id_matches_selector(stem, selector, exact) {
-        return Some(stem.to_string());
-    }
-    stem.split('-')
-        .collect::<Vec<_>>()
-        .windows(5)
-        .map(|parts| parts.join("-"))
-        .find(|candidate| session_id_matches_selector(candidate, selector, exact))
+    session_path_id_span(path, selector, exact, false)
 }
 
 pub(super) fn session_id_matches_selector(id: &str, selector: &str, exact: bool) -> bool {
@@ -81,15 +73,20 @@ pub(super) fn full_codex_session_id(selector: &str) -> Option<&str> {
 }
 
 pub(super) fn codex_session_id_from_path(path: &Path) -> Option<String> {
+    session_path_id_span(path, "", true, true)
+}
+
+fn session_path_id_span(
+    path: &Path,
+    selector: &str,
+    exact: bool,
+    require_full: bool,
+) -> Option<String> {
     let stem = path.file_stem().and_then(|stem| stem.to_str())?;
-    if full_codex_session_id(stem).is_some() {
-        return Some(stem.to_string());
-    }
-    stem.split('-')
-        .collect::<Vec<_>>()
-        .windows(5)
-        .map(|parts| parts.join("-"))
-        .find(|candidate| full_codex_session_id(candidate).is_some())
+    let (start, end) =
+        prodex_mojo_core::json::session_selector_path_span(stem, selector, exact, require_full)
+            .expect("Mojo session selector path scan failed")?;
+    Some(stem[start..end].to_owned())
 }
 
 #[cfg(test)]
