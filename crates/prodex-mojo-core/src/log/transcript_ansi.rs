@@ -3,6 +3,13 @@
 use crate::MojoError;
 
 unsafe extern "C" {
+    fn prodex_mojo_transcript_binary_policy_v1(
+        abi_version: i64,
+        mode: i64,
+        records_address: u64,
+        record_count: i64,
+        result_address: u64,
+    ) -> i64;
     fn prodex_mojo_transcript_ansi_strip_v1(
         abi_version: i64,
         input_address: u64,
@@ -44,6 +51,41 @@ pub fn strip_transcript_ansi_codes(input: &str) -> Result<String, MojoError> {
     String::from_utf8(output).map_err(|_| MojoError::InvalidOutput)
 }
 
+/// Rust supplies Unicode table facts, while compiled-in Mojo exclusively
+/// classifies suspicious terminal output, text controls, and mojibake.
+pub fn transcript_binary_like(text: &str, line: bool) -> Result<bool, MojoError> {
+    let packed = text
+        .chars()
+        .take(4096)
+        .map(|ch| {
+            u64::from(ch as u32)
+                | (u64::from(ch.is_whitespace()) << 21)
+                | (u64::from(ch.is_alphanumeric()) << 22)
+                | (u64::from(ch.is_control()) << 23)
+        })
+        .collect::<Vec<_>>();
+    let mut result = u64::MAX;
+    let status = unsafe {
+        prodex_mojo_transcript_binary_policy_v1(
+            1,
+            i64::from(line),
+            packed.as_ptr() as usize as u64,
+            i64::try_from(packed.len()).map_err(|_| MojoError::InvalidInput)?,
+            (&mut result as *mut u64) as usize as u64,
+        )
+    };
+    match status {
+        0 => match result {
+            0 => Ok(false),
+            1 => Ok(true),
+            _ => Err(MojoError::InvalidOutput),
+        },
+        1 => Err(MojoError::InvalidInput),
+        4 => Err(MojoError::AbiMismatch),
+        _ => Err(MojoError::InvalidOutput),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -71,6 +113,74 @@ mod tests {
                 "{input:?}"
             );
         }
+    }
+
+    #[test]
+    fn compiled_mojo_owns_binary_mojibake_unicode_threshold_policy() {
+        for (input, line, bad) in [
+            ("", true, false),
+            ("", false, false),
+            ("ASCII text 123 + !!", true, false),
+            ("表🙂", true, true),
+            ("hello 表🙂", true, false),
+            ("hello 表🙂", false, false),
+            ("\u{fffd}", true, true),
+            ("\u{fffd}", false, true),
+            ("\u{fffd}\u{fffd}\u{fffd}", false, true),
+            ("abc\u{0}def", true, true),
+            ("abc\u{0}def", false, true),
+            ("💥👍😊", true, true),
+            ("💥👍😊", false, true),
+            ("éééééééé", true, false),
+            ("a1234xyz", false, false),
+        ] {
+            assert_eq!(
+                transcript_binary_like(input, line).unwrap(),
+                bad,
+                "{input:?}/{line}",
+            );
+        }
+    }
+
+    #[test]
+    fn binary_policy_rejects_bad_abi_unknown_flags_and_record_count() {
+        let mut result = 17u64;
+        let ptr = (&mut result as *mut u64) as usize as u64;
+        let records = [0u64, 0x1_000_000u64, 0xD800u64];
+        let address = records.as_ptr() as usize as u64;
+        assert_eq!(
+            unsafe { prodex_mojo_transcript_binary_policy_v1(2, 1, address, 1, ptr) },
+            4
+        );
+        assert_eq!(
+            unsafe { prodex_mojo_transcript_binary_policy_v1(1, 2, address, 1, ptr) },
+            1
+        );
+        assert_eq!(
+            unsafe { prodex_mojo_transcript_binary_policy_v1(1, 1, 0, 1, ptr) },
+            1
+        );
+        assert_eq!(
+            unsafe { prodex_mojo_transcript_binary_policy_v1(1, 1, address, 4097, ptr) },
+            1
+        );
+        assert_eq!(
+            unsafe { prodex_mojo_transcript_binary_policy_v1(1, 1, address, 2, ptr) },
+            1
+        );
+        assert_eq!(
+            unsafe {
+                prodex_mojo_transcript_binary_policy_v1(
+                    1,
+                    1,
+                    records[2..].as_ptr() as usize as u64,
+                    1,
+                    ptr,
+                )
+            },
+            1
+        );
+        assert_eq!(result, 17);
     }
 
     #[test]

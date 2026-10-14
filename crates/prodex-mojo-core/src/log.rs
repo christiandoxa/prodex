@@ -11,7 +11,7 @@ pub use event_name::render_log_event_name;
 pub use level::classify_log_level;
 pub use runtime_line::{RUNTIME_LOG_FORMAT_JSON, RUNTIME_LOG_FORMAT_TEXT, render_runtime_log_line};
 pub use snapshot::{LogSnapshotItemKind, snapshot_item_order};
-pub use transcript_ansi::strip_transcript_ansi_codes;
+pub use transcript_ansi::{strip_transcript_ansi_codes, transcript_binary_like};
 
 const _: () = assert!(std::mem::size_of::<usize>() == std::mem::size_of::<u64>());
 

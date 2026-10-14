@@ -2913,3 +2913,119 @@ def prodex_mojo_transcript_ansi_strip_v1(
         unsafe_from_address=Int(written_address)
     )[] = emitted
     return 0
+
+# Rust supplies Unicode table facts only, packed per scalar:
+# bits 0..20 codepoint, 21 whitespace, 22 alphanumeric, 23 control.
+# The punctuation and suspicious-text semantics live only in Mojo.
+comptime TRANSCRIPT_BINARY_MAX_SCALARS: Int64 = 4096
+
+
+def transcript_common_punctuation(codepoint: UInt64) -> Bool:
+    return (
+        codepoint == 46 or codepoint == 44 or codepoint == 58
+        or codepoint == 59 or codepoint == 33 or codepoint == 63
+        or codepoint == 45 or codepoint == 95 or codepoint == 47
+        or codepoint == 92 or codepoint == 40 or codepoint == 41
+        or codepoint == 91 or codepoint == 93 or codepoint == 123
+        or codepoint == 125 or codepoint == 60 or codepoint == 62
+        or codepoint == 34 or codepoint == 39 or codepoint == 64
+        or codepoint == 35 or codepoint == 36 or codepoint == 37
+        or codepoint == 94 or codepoint == 38 or codepoint == 42
+        or codepoint == 43 or codepoint == 61 or codepoint == 124
+        or codepoint == 126 or codepoint == 96
+    )
+
+
+@export("prodex_mojo_transcript_binary_policy_v1")
+def prodex_mojo_transcript_binary_policy_v1(
+    abi_version: Int64,
+    mode: Int64,
+    records_address: UInt,
+    record_count: Int64,
+    result_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != 1:
+        return 4
+    if (
+        (mode != 0 and mode != 1)
+        or record_count < 0
+        or record_count > TRANSCRIPT_BINARY_MAX_SCALARS
+        or (record_count > 0 and records_address == 0)
+        or result_address == 0
+    ):
+        return 1
+
+    var source = Pointer[mut=False, UInt64, ImmUntrackedOrigin](
+        unsafe_from_address=Int(records_address)
+    )
+    var suspicious: Int64 = 0
+    var replacement: Int64 = 0
+    var control: Int64 = 0
+    var readable_ascii: Int64 = 0
+    var non_ascii: Int64 = 0
+    var whitespace: Int64 = 0
+
+    for index in range(record_count):
+        var packed = source[unsafe_offset=index]
+        var codepoint = packed & UInt64(0x1F_FFFF)
+        if (
+            packed >> 24 != 0
+            or codepoint > 0x10_FFFF
+            or (codepoint >= 0xD800 and codepoint <= 0xDFFF)
+        ):
+            return 1
+        var space = ((packed >> 21) & UInt64(1)) == UInt64(1)
+        var alphanumeric = ((packed >> 22) & UInt64(1)) == UInt64(1)
+        var rust_control = ((packed >> 23) & UInt64(1)) == UInt64(1)
+        var ascii = codepoint <= 127
+        var common = transcript_common_punctuation(codepoint)
+        var replaced = codepoint == 0xFFFD
+        var unsafe_control = (
+            rust_control and codepoint != 10 and codepoint != 13
+            and codepoint != 9
+        )
+        var readable = ascii and (alphanumeric or space or common)
+        var strange = replaced or unsafe_control or (
+            not ascii and not alphanumeric and not space and not common
+        )
+        if strange:
+            suspicious += 1
+        if replaced:
+            replacement += 1
+        if unsafe_control:
+            control += 1
+        if readable:
+            readable_ascii += 1
+        if not ascii:
+            non_ascii += 1
+        if space:
+            whitespace += 1
+
+    var bad = False
+    if record_count > 0:
+        if mode == 1:
+            var mojibake = (
+                record_count >= 24
+                and non_ascii >= 8
+                and non_ascii * 100 >= record_count * 20
+                and readable_ascii * 100 <= record_count * 55
+                and whitespace * 6 <= record_count
+            )
+            bad = (
+                replacement > 0
+                or control > 0
+                or mojibake
+                or suspicious * 5 >= record_count
+                or suspicious >= 6
+            )
+        else:
+            bad = (
+                replacement >= 3
+                or control > 0
+                or suspicious * 4 > record_count
+                or suspicious >= 8
+            )
+    Pointer[mut=True, UInt64, MutUntrackedOrigin](
+        unsafe_from_address=Int(result_address)
+    )[] = UInt64(1) if bad else UInt64(0)
+    return 0
