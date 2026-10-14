@@ -103,7 +103,7 @@ pub use gemini_response::{
     GeminiBufferedResponseError, GeminiChatAssistantResponseOperation, GeminiResponseKernelInput,
     GeminiResponseKernelOperation, gemini_buffered_response_kernel,
     gemini_chat_assistant_response_kernel, gemini_response_conformance_preserves_response_ids,
-    gemini_response_kernel,
+    gemini_response_kernel, gemini_response_normalize_response_envelope,
 };
 #[path = "rich/gemini_response_media.rs"]
 mod gemini_response_media;

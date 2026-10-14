@@ -102,6 +102,7 @@ comptime GEMINI_STREAM_ADDED_TOOL_CALL_ITEM: Int64 = 53
 comptime GEMINI_STREAM_CHUNK_METADATA: Int64 = 54
 comptime GEMINI_RAW_FINISH_REASON: Int64 = 55
 comptime GEMINI_CONFORMANCE_PRESERVES_RESPONSE_IDS: Int64 = 56
+comptime GEMINI_NORMALIZE_RESPONSE_ENVELOPE: Int64 = 57
 
 @fieldwise_init
 struct ProdexGeminiResponseKernelInput(Copyable):
@@ -351,7 +352,7 @@ def gemini_views_valid(
 ) -> Bool:
     return (
         input.operation >= GEMINI_RESPONSE_CREATED
-        and input.operation <= GEMINI_CONFORMANCE_PRESERVES_RESPONSE_IDS
+        and input.operation <= GEMINI_NORMALIZE_RESPONSE_ENVELOPE
         and input.response_id_present >= 0
         and input.response_id_present <= 1
         and input.call_id_present >= 0
@@ -712,6 +713,65 @@ def gemini_conformance_preserves_response_ids(
         elif index != parts[1] - 1:
             return False
     return True
+
+
+def gemini_put_normalized_response_envelope(
+    writer: Pointer[mut=True, GeminiResponseWriter, _],
+    source: ProdexRichStringView,
+) -> Bool:
+    var start = deepseek_json_skip_ws(source, 0, Int64(source.len))
+    if start >= Int64(source.len):
+        return False
+    var end = deepseek_json_value_end(source, start, Int64(source.len), 0)
+    if end < 0 or deepseek_json_skip_ws(source, end, Int64(source.len)) != Int64(source.len):
+        return False
+    if deepseek_json_byte(source, start) != 123:
+        return gemini_put_view(writer, source)
+
+    var root = gemini_raw_root(source)
+    var response = gemini_raw_member(source, root, StringSlice("response"))
+    if not gemini_raw_bounds_present(response):
+        return gemini_put_view(writer, source)
+    var trace_id = gemini_raw_member(source, root, StringSlice("traceId"))
+    if not gemini_raw_string_present(source, trace_id):
+        return gemini_put_view_range(writer, source, response[0], response[1])
+    if deepseek_json_byte(source, response[0]) != 123 or deepseek_json_byte(source, response[1] - 1) != 125:
+        return gemini_put_view_range(writer, source, response[0], response[1])
+
+    if not gemini_put_byte(writer, 123):
+        return False
+    var wrote_member = False
+    var index = deepseek_json_skip_ws(source, response[0] + 1, response[1] - 1)
+    while index < response[1] - 1:
+        var key_start = index
+        var key_end = deepseek_json_string_end(source, key_start, response[1] - 1)
+        if key_end < 0:
+            return False
+        index = deepseek_json_skip_ws(source, key_end, response[1] - 1)
+        if index >= response[1] - 1 or deepseek_json_byte(source, index) != 58:
+            return False
+        var value_start = deepseek_json_skip_ws(source, index + 1, response[1] - 1)
+        var value_end = deepseek_json_value_end(source, value_start, response[1] - 1, 0)
+        if value_end < 0:
+            return False
+        if not deepseek_json_raw_equals(source, key_start, key_end, StringSlice("responseId")):
+            if wrote_member and not gemini_put_byte(writer, 44):
+                return False
+            if not gemini_put_view_range(writer, source, key_start, value_end):
+                return False
+            wrote_member = True
+        index = deepseek_json_skip_ws(source, value_end, response[1] - 1)
+        if index < response[1] - 1:
+            if deepseek_json_byte(source, index) != 44:
+                return False
+            index = deepseek_json_skip_ws(source, index + 1, response[1] - 1)
+    if wrote_member and not gemini_put_byte(writer, 44):
+        return False
+    return (
+        gemini_put_literal(writer, StringSlice('"responseId":'))
+        and gemini_put_view_range(writer, source, trace_id[0], trace_id[1])
+        and gemini_put_byte(writer, 125)
+    )
 
 
 def gemini_put_buffered_failure(
@@ -2402,6 +2462,8 @@ def gemini_write_operation(
         if gemini_conformance_preserves_response_ids(input.response):
             return gemini_put_literal(writer, StringSlice("true"))
         return gemini_put_literal(writer, StringSlice("false"))
+    if operation == GEMINI_NORMALIZE_RESPONSE_ENVELOPE:
+        return gemini_put_normalized_response_envelope(writer, input.response)
     if operation == GEMINI_STREAM_CHUNK_METADATA:
         var field_input = input.copy()
         if not gemini_put_literal(writer, StringSlice('{"response_id":')):
@@ -2588,6 +2650,7 @@ def gemini_buffered_response_kernel_v2(
         and operation != GEMINI_RAW_RESPONSE_USAGE
         and operation != GEMINI_RAW_RESPONSE_METADATA
         and operation != GEMINI_RAW_FINISH_REASON
+        and operation != GEMINI_NORMALIZE_RESPONSE_ENVELOPE
     ):
         return GEMINI_KERNEL_STATUS_INVALID
     var maximum_bytes = (
