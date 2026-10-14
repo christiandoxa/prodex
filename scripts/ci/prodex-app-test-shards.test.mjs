@@ -42,7 +42,7 @@ test("prodex-app shard manifest is disjoint and remainder-complete", () => {
   assert.equal(appMatrix.include.length, 11);
   assert.equal(ciMatrix.include.length, 8);
   assert.equal(fullMatrix.include.length, PRODEX_APP_FULL_TEST_SHARDS.length + 4);
-  assert.equal(windowsMatrix.include.length, 13);
+  assert.equal(windowsMatrix.include.length, 15);
   assert.equal(appMatrix.include.filter((entry) => entry.save_cache).length, 1);
   assert.equal(ciMatrix.include.filter((entry) => entry.save_cache).length, 1);
   assert.equal(fullMatrix.include.filter((entry) => entry.save_cache).length, 1);
@@ -96,13 +96,13 @@ test("prodex-app shard manifest is disjoint and remainder-complete", () => {
     8,
   );
   const windowsBaseFilters = windowsMatrix.include
-    .slice(0, 6)
+    .slice(0, 8)
     .flatMap((entry) => entry.filters.split("\n"))
     .filter(Boolean);
   assert.equal(windowsBaseFilters.length, PRODEX_APP_LIB_FILTERS.length);
   assert.deepEqual(new Set(windowsBaseFilters), new Set(PRODEX_APP_LIB_FILTERS));
 
-  const extra = windowsMatrix.include.slice(6, 12);
+  const extra = windowsMatrix.include.slice(8, 14);
   assert.deepEqual(extra.map((entry) => entry.suite), [
     "remainder-continuations-http",
     "remainder-continuations-websocket",
@@ -130,14 +130,18 @@ test("prodex-app shard manifest is disjoint and remainder-complete", () => {
 
 test("Windows critical-path partitions preserve targeted and recovery ownership without overlap", () => {
   const entries = windowsGithubMatrix().include;
-  assert.equal(entries.length, 13);
+  assert.equal(entries.length, 15);
   assert.equal(entries.filter((entry) => entry.save_cache).length, 1);
-  assert.deepEqual(entries.slice(3, 6).map((entry) => entry.suite), [
-    "selection-admission",
+  assert.deepEqual(entries.slice(1, 8).map((entry) => entry.suite), [
+    "local-rewrite",
+    "profiles",
+    "gateway-support-affinity",
+    "selection",
+    "admission-core",
     "provider-launches",
     "runtime-proxy",
   ]);
-  const targetedFilters = entries.slice(0, 6).flatMap((entry) =>
+  const targetedFilters = entries.slice(0, 8).flatMap((entry) =>
     entry.filters.split("\n").filter(Boolean),
   );
   assert.deepEqual(new Set(targetedFilters), new Set(PRODEX_APP_LIB_FILTERS));
@@ -161,8 +165,11 @@ test("Windows critical-path partitions preserve targeted and recovery ownership 
     ["main_internal_tests::runtime_proxy_selection_and_pressure::admission::unknown_new_case::valid", "remainder-selection"],
     ["main_internal_tests::runtime_proxy_selection_and_pressure::persistence::session_affinity::valid", "remainder-selection"],
     ["main_internal_tests::runtime_proxy_selection_and_pressure::doctor::state_collect::valid", "remainder-selection"],
-    ["main_internal_tests::runtime_proxy_selection_and_pressure::selection::profile_selection::valid", "selection-admission"],
+    ["main_internal_tests::runtime_proxy_selection_and_pressure::selection::profile_selection::valid", "selection"],
     ["main_internal_tests::runtime_proxy_selection_and_pressure::admission::guards::valid", "gateway-support-affinity"],
+    ["runtime_launch::proxy_startup::local_rewrite_tests::valid", "local-rewrite"],
+    ["profile_commands::tests::valid", "profiles"],
+    ["main_internal_tests::runtime_proxy_selection_and_pressure::admission::compact::valid", "admission-core"],
     ["runtime_launch::proxy_startup::deepseek::valid", "provider-launches"],
     ["runtime_proxy::tests::valid", "runtime-proxy"],
     ["app_commands::tests::valid", "commands-gemini"],
@@ -183,7 +190,7 @@ test("Windows critical-path partitions preserve targeted and recovery ownership 
 test("Windows matrix help documents the active partition count", () => {
   const help = runPlanner("--help");
   assert.equal(help.status, 0, help.stderr);
-  assert.match(help.stdout, /--windows-github-matrix emits thirteen disjoint Windows partitions/);
+  assert.match(help.stdout, /--windows-github-matrix emits fifteen disjoint Windows partitions/);
 });
 
 test("shard planner dry-run and matrix output are compile-free", () => {
@@ -388,7 +395,7 @@ test("nightly full suite shards unassigned cases without changing ordinary app o
   assert.deepEqual(extras.map((entry) => entry.suite), names);
   assert.equal(full.include.filter((entry) => entry.save_cache).length, 1);
   assert.deepEqual(app.include.map((entry) => entry.suite), PRODEX_APP_LIB_SHARDS.map((entry) => entry.suite));
-  assert.equal(windows.include.length, 13, "nightly sharding cannot alter Windows CI");
+  assert.equal(windows.include.length, 15, "nightly sharding cannot alter Windows CI");
 
   const foundation = extras.find((entry) => entry.suite === "full-remainder-foundation");
   assert.equal(foundation.filters.split("\n").length, 6);
