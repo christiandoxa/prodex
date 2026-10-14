@@ -206,31 +206,36 @@ pub(super) fn select_runtime_cold_start_candidate(
         runtime_route_selection_view(selection_state),
         &selection_state.current_profile,
     ) {
-        if excluded_profiles.contains(&name) {
-            continue;
-        }
         let Some(entry) = selection_state.entry(&name) else {
             continue;
         };
-        if !entry.supports_codex_runtime()
-            || entry
-                .cached_auth_summary
-                .as_ref()
-                .is_some_and(|auth| !auth.quota_compatible)
-            || entry
-                .cached_probe_entry
-                .as_ref()
-                .is_some_and(|probe| probe.result.is_ok())
-            || entry.cached_usage_snapshot.is_some()
-            || entry.auth_failure_active
-            || entry.in_selection_backoff
-            || entry.health_sort_key > 0
-            || entry.inflight_count >= inflight_soft_limit
-            || runtime_profile_inflight_hard_limited_for_context(
-                shared,
-                &name,
-                runtime_route_kind_inflight_context(route_kind),
-            )?
+        let eligible = runtime_waitable_candidate_eligible(
+            prodex_mojo_core::runtime::WaitableCandidateMode::ColdStart,
+            prodex_mojo_core::runtime::WaitableCandidateInput {
+                context_allowed: !excluded_profiles.contains(&name),
+                auth_compatible: !entry
+                    .cached_auth_summary
+                    .as_ref()
+                    .is_some_and(|auth| !auth.quota_compatible),
+                supports_runtime: entry.supports_codex_runtime(),
+                cached_probe_present: entry
+                    .cached_probe_entry
+                    .as_ref()
+                    .is_some_and(|probe| probe.result.is_ok()),
+                soft_limited: entry.inflight_count >= inflight_soft_limit,
+                in_selection_backoff: entry.in_selection_backoff,
+                auth_failure_active: entry.auth_failure_active,
+                health_penalized: entry.health_sort_key > 0,
+                hard_limited: runtime_profile_inflight_hard_limited_for_context(
+                    shared,
+                    &name,
+                    runtime_route_kind_inflight_context(route_kind),
+                )?,
+                snapshot_blocks: entry.cached_usage_snapshot.is_some(),
+                quota_blocked: false,
+            },
+        )?;
+        if !eligible
             || !reserve_runtime_profile_route_circuit_half_open_probe(shared, &name, route_kind)?
         {
             continue;
