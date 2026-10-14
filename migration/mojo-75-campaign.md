@@ -5396,3 +5396,17 @@ in progress.
 ## Info quota-runway migration
 
 `info_runway.mojo` now owns per-profile observation ordering, monotonic burn-window selection, aggregate burn-rate arithmetic, and exhaustion projection through `prodex_mojo_info_runway_estimate_v1`. Rust retains runtime-log parsing, clock acquisition, borrowed-view marshalling, and validated result materialization. The adapter tests cover profile grouping, reset segments, exhaustion, empty input, and invalid window tags; the ownership, authority, no-fallback, production-share, formatting, and diff guards pass. A clean strict archive build remains pending because the local Mojo optimizer is slow on this translation unit.
+
+## Status proc-resource parser migration
+
+`status_resource.mojo` now owns deterministic `/proc` parsing for process and
+system CPU ticks, KiB and byte fields, socket inode targets, and network queue
+hex decoding. Rust retains filesystem reads, process enumeration, socket-link
+discovery, aggregation, and snapshot effects; parser failures remain explicit
+unavailable values without a Rust semantic fallback.
+
+Required-Mojo core parser tests passed (3), and the production `prodex-app`
+status tests passed (47). Formatting, ownership, authority, no-fallback,
+production-share, and diff checks passed. The broad report measured 109,537
+reachable Mojo LOC and 222,075 Rust LOC (33.03% Mojo); the 75% target remains
+in progress.
