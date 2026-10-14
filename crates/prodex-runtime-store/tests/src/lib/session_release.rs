@@ -139,3 +139,71 @@ fn differing_session_owners_without_release_remain_a_genuine_conflict() {
         prodex_state::HARD_BINDING_CONFLICT_PROFILE
     );
 }
+
+#[test]
+fn repeated_session_release_within_one_second_advances_past_last_verified_binding() {
+    let profiles = BTreeMap::from([("alpha".into(), profile()), ("beta".into(), profile())]);
+    let mut store = session_store("alpha", 100);
+    runtime_mark_continuation_status_verified(
+        &mut store.statuses,
+        RuntimeContinuationBindingKind::SessionId,
+        "session",
+        100,
+        Some("responses"),
+        status_policy(),
+    );
+    for index in 0..4 {
+        let stale = store.clone();
+        runtime_mark_continuation_status_dead(
+            &mut store.statuses,
+            RuntimeContinuationBindingKind::SessionId,
+            "session",
+            100,
+            status_policy(),
+        );
+        let next = prodex_mojo_core::runtime_lineage::session_binding_epoch(
+            100,
+            store
+                .statuses
+                .session_release_epochs
+                .get("session")
+                .copied(),
+        )
+        .unwrap();
+        let name = if index % 2 == 0 { "beta" } else { "alpha" };
+        store
+            .session_id_bindings
+            .insert("session".into(), owner(name, next));
+        store
+            .session_profile_bindings
+            .insert("session".into(), owner(name, next));
+        runtime_mark_continuation_status_verified(
+            &mut store.statuses,
+            RuntimeContinuationBindingKind::SessionId,
+            "session",
+            next,
+            Some("responses"),
+            status_policy(),
+        );
+        store = merge_runtime_continuation_store(
+            &stale,
+            &store,
+            &profiles,
+            100,
+            RuntimeContinuationCompactionPolicy::default(),
+        );
+        assert_eq!(
+            store.session_id_bindings["session"].profile_name, name,
+            "rotation {index}"
+        );
+        assert_eq!(
+            store.session_profile_bindings["session"].profile_name, name,
+            "rotation {index}"
+        );
+        assert!(
+            next > stale.session_id_bindings["session"].bound_at,
+            "logical lifecycle and binding time must advance despite unchanged wall clock"
+        );
+        assert!(next > store.statuses.session_release_epochs["session"]);
+    }
+}
