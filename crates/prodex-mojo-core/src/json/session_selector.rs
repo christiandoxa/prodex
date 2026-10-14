@@ -145,10 +145,14 @@ pub fn session_report_query_matches(
     query: &str,
     fields: &[Option<&str>; SESSION_REPORT_QUERY_FIELD_COUNT],
 ) -> Result<bool, MojoError> {
-    let query = view(query);
-    let ffi_fields = fields
+    // Own the normalized buffers for the whole FFI call. Applying this at the
+    // adapter boundary guarantees the documented contract for every caller.
+    let normalized_query = query.to_lowercase();
+    let normalized_fields = fields.map(|field| field.map(str::to_lowercase));
+    let query = view(&normalized_query);
+    let ffi_fields = normalized_fields
         .iter()
-        .map(|field| field.map_or_else(StringView::default, view))
+        .map(|field| field.as_deref().map_or_else(StringView::default, view))
         .collect::<Vec<_>>();
     let mut output = [-1_i64; 1];
     status(unsafe {

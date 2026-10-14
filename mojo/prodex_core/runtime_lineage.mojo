@@ -784,3 +784,57 @@ def prodex_runtime_lineage_owner_lookup_v1(
         profile_action = LINEAGE_PROFILE_CONFLICT_SENTINEL
 
     return normalized | (profile_action << 8)
+
+
+# Session routing can move only across an explicit release. Keep an independent
+# monotonic fence: verification/touch status must not erase that release proof.
+@export("prodex_runtime_session_epoch_v1")
+def prodex_runtime_session_epoch_v1(
+    abi_version: Int64, operation: Int64,
+    left_present: Int64, left: Int64,
+    right_present: Int64, right: Int64,
+) abi("C") -> Int64:
+    if abi_version != LINEAGE_ABI_VERSION:
+        return -4
+    if (left_present != 0 and left_present != 1) or (
+        right_present != 0 and right_present != 1
+    ):
+        return -1
+    # Legacy binding timestamps may predate the Unix epoch. They are valid
+    # ordering input, never permission to skip a nonnegative release fence.
+    if (operation != 1 and left_present == 1 and left < 0) or (right_present == 1 and right < 0):
+        return -1
+    if operation == 0:
+        if left_present == 0:
+            return right if right_present == 1 else 0
+        if right_present == 0:
+            return left
+        return max(left, right)
+    if operation == 1:
+        return Int64(left_present == 1 and (right_present == 0 or left > right))
+    if operation == 2:
+        if left_present == 0:
+            return -1
+        if right_present == 0:
+            return left
+        if right == 9223372036854775807:
+            return -3
+        return max(left, right + 1)
+    return -1
+
+
+# A stale session routing conflict may be reset only for a self-contained
+# pre-commit request. Never discard immutable response/opaque turn ownership.
+@export("prodex_runtime_session_replay_reset_v1")
+def prodex_runtime_session_replay_reset_v1(
+    abi_version: Int64, previous_response: Int64, turn_state: Int64,
+    full_history: Int64, conflict: Int64, committed: Int64,
+) abi("C") -> Int64:
+    if abi_version != LINEAGE_ABI_VERSION:
+        return -4
+    if (previous_response < 0 or previous_response > 1 or turn_state < 0 or turn_state > 1
+        or full_history < 0 or full_history > 1 or conflict < 0 or conflict > 1
+        or committed < 0 or committed > 1):
+        return -1
+    return Int64(previous_response == 0 and turn_state == 0 and full_history == 1
+        and conflict == 1 and committed == 0)

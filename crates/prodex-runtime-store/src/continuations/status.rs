@@ -99,6 +99,9 @@ pub fn merge_runtime_continuation_statuses(
     policy: RuntimeContinuationCompactionPolicy,
 ) -> RuntimeContinuationStatuses {
     RuntimeContinuationStatuses {
+        session_release_epochs: super::session_epoch::merge_session_release_epochs(
+            existing, incoming,
+        ),
         response: merge_runtime_continuation_status_map(
             &existing.response,
             &incoming.response,

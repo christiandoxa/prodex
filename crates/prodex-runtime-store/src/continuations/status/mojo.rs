@@ -238,11 +238,37 @@ mark_status!(
     suspect_not_found_streak_limit,
     suspect_confidence_penalty,
 );
-mark_status!(
-    runtime_mark_continuation_status_dead,
-    CONTINUATION_DEAD_PLAN,
-    suspect_not_found_streak_limit,
-);
+pub fn runtime_mark_continuation_status_dead(
+    statuses: &mut RuntimeContinuationStatuses,
+    kind: RuntimeContinuationBindingKind,
+    key: &str,
+    now: i64,
+    policy: RuntimeContinuationStatusPolicy,
+) -> bool {
+    let mut changed = apply(
+        entry(statuses, kind, key),
+        CONTINUATION_DEAD_PLAN,
+        &[now, i64::from(policy.suspect_not_found_streak_limit)],
+        None,
+    );
+    if kind == RuntimeContinuationBindingKind::SessionId {
+        let event_at = statuses
+            .session_id
+            .get(key)
+            .and_then(|status| status.last_not_found_at);
+        let previous = statuses.session_release_epochs.get(key).copied();
+        let epoch =
+            prodex_mojo_core::runtime_lineage::merge_session_release_epoch(previous, event_at)
+                .expect("Mojo session release epoch merge failed");
+        if let Some(epoch) = epoch {
+            changed |= previous != Some(epoch);
+            statuses
+                .session_release_epochs
+                .insert(key.to_owned(), epoch);
+        }
+    }
+    changed
+}
 
 macro_rules! compare_bool {
     ($name:ident, $op:ident, $($field:ident),+ $(,)?) => {

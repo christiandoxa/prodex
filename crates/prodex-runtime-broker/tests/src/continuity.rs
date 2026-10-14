@@ -5,6 +5,7 @@ use super::*;
 #[test]
 fn continuation_metrics_aggregate_lifecycle_signals_and_staleness() {
     let statuses = RuntimeContinuationStatuses {
+        session_release_epochs: BTreeMap::new(),
         response: BTreeMap::from([
             (
                 "resp-warm".to_string(),

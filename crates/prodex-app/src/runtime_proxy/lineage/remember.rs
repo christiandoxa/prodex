@@ -91,6 +91,24 @@ pub(crate) fn remember_runtime_external_binding_identity(
         .map(str::trim)
         .filter(|value| prodex_runtime_state::RuntimeHardBindingIdentity::session(value).is_some())
     {
+        let release_epoch = prodex_mojo_core::runtime_lineage::merge_session_release_epoch(
+            runtime
+                .continuation_statuses
+                .session_release_epochs
+                .get(session_id)
+                .copied(),
+            runtime
+                .continuation_statuses
+                .session_release_epochs
+                .get(&runtime_compact_session_lineage_key(session_id))
+                .copied(),
+        )
+        .map_err(|error| anyhow::anyhow!("invalid external session release epoch: {error:?}"))?;
+        let bound_at =
+            prodex_mojo_core::runtime_lineage::session_binding_epoch(bound_at, release_epoch)
+                .map_err(|error| {
+                    anyhow::anyhow!("invalid external session rebind epoch: {error:?}")
+                })?;
         changed = remember_hard_binding(
             &mut runtime.session_id_bindings,
             session_id,
@@ -225,7 +243,15 @@ pub(crate) fn remember_runtime_session_id(
         .runtime
         .lock()
         .map_err(|_| anyhow::anyhow!("runtime auto-rotate state is poisoned"))?;
-    let bound_at = Local::now().timestamp();
+    let bound_at = prodex_mojo_core::runtime_lineage::session_binding_epoch(
+        Local::now().timestamp(),
+        runtime
+            .continuation_statuses
+            .session_release_epochs
+            .get(session_id)
+            .copied(),
+    )
+    .map_err(|error| anyhow::anyhow!("invalid session rebind epoch: {error:?}"))?;
     let binding_identity = runtime_profile_binding_identity(&runtime, profile_name);
     let mut changed = false;
     let mut should_refresh_binding = false;

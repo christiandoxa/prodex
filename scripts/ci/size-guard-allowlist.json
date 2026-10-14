@@ -61,8 +61,8 @@
   },
   {
     "file": "crates/prodex-mojo-core/src/quota.rs",
-    "maxLines": 1096,
-    "reason": "Quota ABI surface ratcheted after extracting the error-label and retry-time host adapters into focused modules; no limit increase or semantic fallback."
+    "maxLines": 964,
+    "reason": "Quota ABI ratchet after extracting panel text and auth policy into cohesive adapter modules; no guard limit increase or semantic change."
   },
   {
     "file": "crates/prodex-runtime-state/tests/src/lib.rs",

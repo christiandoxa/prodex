@@ -209,17 +209,15 @@ pub fn session_report_matches_filter(
 }
 
 pub fn session_report_matches_query(report: &SessionReport, query: &str) -> bool {
-    let query = query.to_lowercase();
     let fields = [
-        Some(report.id.to_lowercase()),
-        report.thread_name.as_deref().map(str::to_lowercase),
-        report.cwd.as_deref().map(str::to_lowercase),
-        report.profile.as_deref().map(str::to_lowercase),
-        report.model_provider.as_deref().map(str::to_lowercase),
-        Some(report.path.to_lowercase()),
+        Some(report.id.as_str()),
+        report.thread_name.as_deref(),
+        report.cwd.as_deref(),
+        report.profile.as_deref(),
+        report.model_provider.as_deref(),
+        Some(report.path.as_str()),
     ];
-    let fields = fields.each_ref().map(|field| field.as_deref());
-    prodex_mojo_core::json::session_report_query_matches(&query, &fields)
+    prodex_mojo_core::json::session_report_query_matches(query, &fields)
         .expect("Mojo session-report query matcher returned invalid output")
 }
 

@@ -1,3 +1,5 @@
+#[path = "child_process_terminal.rs"]
+mod terminal_handoff;
 use anyhow::{Context, Result};
 use ratatui::layout::{Constraint, Direction, Layout};
 use ratatui::style::{Color, Modifier, Style};
@@ -109,6 +111,8 @@ fn run_child_plan_inner(
     } else {
         None
     };
+    super::finish_launch_status();
+    let _terminal_handoff = terminal_handoff::ChildTerminalHandoff::new(plan);
     reset_terminal_keyboard_enhancement_best_effort(plan);
     let child_spawn_started = Instant::now();
     let mut child = command

@@ -88,6 +88,15 @@ fn remember_runtime_compact_binding(
     verified_route: RuntimeRouteKind,
     binding_kind: RuntimeContinuationBindingKind,
 ) -> bool {
+    let bound_at = if binding_kind == RuntimeContinuationBindingKind::SessionId {
+        prodex_mojo_core::runtime_lineage::session_binding_epoch(
+            bound_at,
+            statuses.session_release_epochs.get(&key).copied(),
+        )
+        .expect("Mojo compact session rebind epoch failed")
+    } else {
+        bound_at
+    };
     let (binding_changed, should_refresh_binding) =
         remember_hard_binding(bindings, &key, profile_name, bound_at, binding_identity);
     let mut changed = binding_changed;

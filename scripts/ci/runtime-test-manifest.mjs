@@ -558,6 +558,22 @@ export const RUNTIME_STRESS_WEIGHT_HINTS = Object.freeze([
 
 export const RUNTIME_CI_TEST_CASES = [
   {
+    name: "explicit_session_recovery_then_same_second_rebind_survives_stale_persistence",
+    tags: SERIALIZED_TAGS,
+  },
+  {
+    name: "full_history_request_repairs_legacy_session_conflict_and_uses_ready_account",
+    tags: SERIALIZED_TAGS,
+  },
+  {
+    name: "newer_live_session_conflict_is_not_erased_by_an_older_release_epoch",
+    tags: SERIALIZED_TAGS,
+  },
+  {
+    name: "self_contained_session_request_rotates_away_from_known_exhausted_quota",
+    tags: SERIALIZED_TAGS,
+  },
+  {
     name: "recovery_watchdog_is_request_local_and_not_reset_by_retry_clones",
     tags: SERIALIZED_TAGS,
   },

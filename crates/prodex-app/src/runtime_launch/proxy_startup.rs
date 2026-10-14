@@ -1,3 +1,4 @@
+mod continuation_restore;
 use super::*;
 
 mod anthropic_messages_sse_reader;
@@ -233,13 +234,10 @@ pub(crate) fn start_runtime_rotation_proxy_with_options(
         "empty",
         RuntimeContinuationJournal::default(),
     );
-    let fallback_continuations = runtime_continuation_store_from_app_state(&restored_state);
-    let restored_continuations = merge_runtime_continuation_store(
-        &merge_runtime_continuation_store(
-            &fallback_continuations,
-            &persisted_continuations.value,
-            &restored_state.profiles,
-        ),
+    let restored_continuations = continuation_restore::restore_session_continuations(
+        state,
+        &persisted_state.value,
+        &persisted_continuations.value,
         &continuation_journal.value.continuations,
         &restored_state.profiles,
     );

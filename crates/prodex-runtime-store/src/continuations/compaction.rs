@@ -64,6 +64,7 @@ pub fn compact_runtime_continuation_store(
     now: i64,
     policy: RuntimeContinuationCompactionPolicy,
 ) -> RuntimeContinuationStore<ResponseProfileBinding> {
+    super::session_epoch::apply_session_release_fences(&mut continuations, now, policy);
     mark_unbounded_profile_bindings_as_conflict(&mut continuations.response_profile_bindings);
     mark_unbounded_profile_bindings_as_conflict(&mut continuations.session_profile_bindings);
     mark_unbounded_profile_bindings_as_conflict(&mut continuations.turn_state_bindings);
@@ -177,6 +178,8 @@ pub fn merge_runtime_continuation_store(
     now: i64,
     policy: RuntimeContinuationCompactionPolicy,
 ) -> RuntimeContinuationStore<ResponseProfileBinding> {
+    let session_release_epochs =
+        super::session_epoch::merge_session_release_epochs(&existing.statuses, &incoming.statuses);
     let response_profile_bindings = merge_runtime_hard_profile_bindings(
         &existing.response_profile_bindings,
         &incoming.response_profile_bindings,
@@ -185,9 +188,10 @@ pub fn merge_runtime_continuation_store(
         &existing.turn_state_bindings,
         &incoming.turn_state_bindings,
     );
-    let session_id_bindings = merge_runtime_hard_profile_bindings(
+    let session_id_bindings = super::session_epoch::merge_session_bindings(
         &existing.session_id_bindings,
         &incoming.session_id_bindings,
+        &session_release_epochs,
     );
     let statuses = merge_runtime_continuation_statuses(
         &existing.statuses,
@@ -201,9 +205,10 @@ pub fn merge_runtime_continuation_store(
     compact_runtime_continuation_store(
         RuntimeContinuationStore {
             response_profile_bindings,
-            session_profile_bindings: merge_runtime_hard_profile_bindings(
+            session_profile_bindings: super::session_epoch::merge_session_bindings(
                 &existing.session_profile_bindings,
                 &incoming.session_profile_bindings,
+                &session_release_epochs,
             ),
             turn_state_bindings: turn_state_bindings.clone(),
             session_id_bindings: session_id_bindings.clone(),
