@@ -1993,7 +1993,9 @@
           "terminal_panel_inline_viewport_planning",
           "terminal_token_cell_chunk_segmentation",
           "terminal_display_width_prefix_selection",
-          "terminal_fit_cell_ellipsis_policy"
+          "terminal_fit_cell_ellipsis_policy",
+          "terminal_wrap_piece_line_break_decision",
+          "terminal_cell_padding_policy"
         ]
       },
       {
@@ -2008,7 +2010,9 @@
           "terminal_panel_inline_viewport_planning",
           "terminal_token_cell_chunk_segmentation",
           "terminal_display_width_prefix_selection",
-          "terminal_fit_cell_ellipsis_policy"
+          "terminal_fit_cell_ellipsis_policy",
+          "terminal_wrap_piece_line_break_decision",
+          "terminal_cell_padding_policy"
         ]
       },
       {
@@ -8737,6 +8741,52 @@
       "duplicate_production_owner": false,
       "platform_fallback": false,
       "rust_adapter_scope": "Rust measures UnicodeWidthStr and constructs dots/ellipsis from mandatory Mojo mode and budget"
+    },
+    {
+      "name": "terminal_wrap_piece_line_break_decision",
+      "domain": "terminal/text-wrap",
+      "introduced_in": "0.438.0",
+      "baseline_state": "Rust decided start/join/flush of visible words based on Unicode display width, available columns and required separating space",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_terminal_wrap_piece_action_v1",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/terminal_layout.mojo",
+      "consumer": "crates/prodex-terminal-ui/src/text.rs",
+      "consumer_marker": "prodex_mojo_core::terminal_layout::wrap_piece_action(",
+      "production_consumers": [
+        "crates/prodex-terminal-ui/src/text.rs"
+      ],
+      "production_reachability_test": "crates/prodex-terminal-ui/tests/src/lib.rs",
+      "rust_owner_before": "Rust decided start/join/flush of visible words based on Unicode display width, available columns and required separating space",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "deleted from production; exact equivalence with earlier committed Rust was verified using an isolated test-only oracle",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "Unicode widths of current and pending piece measured by Rust; Mojo decides whether Rust appends, inserts a space or flushes a visible line"
+    },
+    {
+      "name": "terminal_cell_padding_policy",
+      "domain": "terminal/text-padding",
+      "introduced_in": "0.438.0",
+      "baseline_state": "Rust chose the space-padding count using saturating subtraction of content cell width from available terminal width",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_terminal_pad_cell_spaces_v1",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/terminal_layout.mojo",
+      "consumer": "crates/prodex-terminal-ui/src/text.rs",
+      "consumer_marker": "prodex_mojo_core::terminal_layout::pad_cell_spaces(",
+      "production_consumers": [
+        "crates/prodex-terminal-ui/src/text.rs"
+      ],
+      "production_reachability_test": "crates/prodex-terminal-ui/tests/src/lib.rs",
+      "rust_owner_before": "Rust chose the space-padding count using saturating subtraction of content cell width from available terminal width",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "deleted from production; exact equivalence with earlier committed Rust was verified using an isolated test-only oracle",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "Rust measures post-truncation Unicode display width and materializes the Mojo-decided count of padding spaces"
     }
   ],
   "rust_semantic_reductions": [

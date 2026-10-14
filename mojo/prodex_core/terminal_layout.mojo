@@ -238,3 +238,57 @@ def prodex_terminal_take_display_cells_v1(
         unsafe_from_address=Int(result_address)
     )[] = UInt64(prefix)
     return TERMINAL_LAYOUT_OK
+
+
+# Decide whether a visible piece starts the first line, joins the current
+# line with a space, or flushes the current line. Unicode width facts are
+# measured by Rust; the presentation policy is solely Mojo-owned.
+@export("prodex_terminal_wrap_piece_action_v1")
+def prodex_terminal_wrap_piece_action_v1(
+    abi: Int64,
+    current_empty: Int64,
+    current_cells: UInt64,
+    piece_cells: UInt64,
+    total_cells: UInt64,
+    result_address: UInt,
+) abi("C") -> Int64:
+    if abi != TERMINAL_LAYOUT_ABI:
+        return TERMINAL_LAYOUT_VERSION
+    if (current_empty != 0 and current_empty != 1) or result_address == 0:
+        return TERMINAL_LAYOUT_INVALID
+
+    var action: UInt64 = 0
+    if current_empty == 1:
+        action = 0
+    elif (
+        current_cells < total_cells
+        and piece_cells <= total_cells - current_cells - UInt64(1)
+    ):
+        action = 1
+    else:
+        action = 2
+    Pointer[mut=True, UInt64, MutUntrackedOrigin](
+        unsafe_from_address=Int(result_address)
+    )[] = action
+    return TERMINAL_LAYOUT_OK
+
+
+# Determine the requested padding under the visible terminal cell budget.
+@export("prodex_terminal_pad_cell_spaces_v1")
+def prodex_terminal_pad_cell_spaces_v1(
+    abi: Int64,
+    visible_cells: UInt64,
+    total_cells: UInt64,
+    result_address: UInt,
+) abi("C") -> Int64:
+    if abi != TERMINAL_LAYOUT_ABI:
+        return TERMINAL_LAYOUT_VERSION
+    if result_address == 0:
+        return TERMINAL_LAYOUT_INVALID
+    var padding: UInt64 = 0
+    if total_cells > visible_cells:
+        padding = total_cells - visible_cells
+    Pointer[mut=True, UInt64, MutUntrackedOrigin](
+        unsafe_from_address=Int(result_address)
+    )[] = padding
+    return TERMINAL_LAYOUT_OK
