@@ -471,7 +471,7 @@ test("official Windows x64 ThinLTO release omits cold sccache and retains native
   const build = workflowJob(release, "build", "attest-binaries");
   const x64 = build.match(/- target: x86_64-pc-windows-msvc\n([\s\S]*?)- target: aarch64-pc-windows-msvc/)?.[1];
   assert.ok(x64, "Windows x64 native release target missing");
-  assert.match(x64, /runs-on: windows-latest/);
+  assert.match(x64, /runs-on: windows-11-arm/);
   assert.match(x64, /mojo-features: mojo-core/);
   assert.match(x64, /can-native-smoke: true/);
   assert.match(x64, /can-mojo-runtime-smoke: true/);
@@ -479,6 +479,18 @@ test("official Windows x64 ThinLTO release omits cold sccache and retains native
   assert.match(build, /if \[\[ "\$\{\{ matrix.target \}\}" == \*-pc-windows-msvc \]\]; then\n\s+cargo build --locked/);
   assert.match(build, /build_args=\(--release --target/);
   assert.match(build, /PRODEX_MOJO_REQUIRED=1/);
+  const crossSmoke = build.match(
+    /- name: Verify emulated Windows x64 artifact on native ARM64 host\n([\s\S]*?)\n      - name: Verify native Windows ARM64 artifact architecture/,
+  )?.[1];
+  assert.ok(crossSmoke, "Windows x64 cross-host PE smoke must run before ARM64 smoke");
+  assert.match(crossSmoke, /if: .*matrix.target == 'x86_64-pc-windows-msvc'/);
+  assert.match(crossSmoke, /shell: pwsh/);
+  assert.match(crossSmoke, /\$machine -ne 0x8664/);
+  assert.match(crossSmoke, /Emulated Windows x64 version smoke failed/);
+  assert.match(build, /matrix.target == 'x86_64-pc-windows-msvc'/);
+  assert.match(build, /\$env:PROCESSOR_ARCHITECTURE -cne 'ARM64'/);
+  assert.match(build, /\$machine -ne 0x8664/);
+  assert.match(build, /Emulated Windows x64 version smoke failed/);
   assert.match(build, /name: Verify compiled-in Mojo release/);
   assert.match(build, /"fallback": false/);
   assert.match(build, /"self_test": "passed"/);

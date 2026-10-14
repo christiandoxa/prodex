@@ -455,7 +455,9 @@ jobs:
             mojo-target-cpu: generic
             mojo-features: mojo-core
           - target: x86_64-pc-windows-msvc
-            runs-on: windows-latest
+            # The source-pinned production-profile ARM-host benchmark built
+            # and executed PE x64 under Windows-on-ARM emulation in 314s.
+            runs-on: windows-11-arm
             artifact-name: x86_64-pc-windows-msvc
             binary-name: prodex.exe
             use-cross: false
@@ -622,6 +624,33 @@ jobs:
             fi
             sleep "$((attempt * 10))"
           done
+
+      - name: Verify emulated Windows x64 artifact on native ARM64 host
+        if: ${{ matrix.target == 'x86_64-pc-windows-msvc' }}
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if ($env:PROCESSOR_ARCHITECTURE -cne 'ARM64') {
+            throw "Expected native ARM64 cross-build host, got $env:PROCESSOR_ARCHITECTURE"
+          }
+          $binary = 'target/x86_64-pc-windows-msvc/release/prodex.exe'
+          if (-not (Test-Path $binary -PathType Leaf)) {
+            throw 'Windows x64 release binary missing'
+          }
+          $bytes = [System.IO.File]::ReadAllBytes((Resolve-Path $binary))
+          $offset = [BitConverter]::ToInt32($bytes, 60)
+          if ($offset -le 0 -or ($offset + 6) -ge $bytes.Length) {
+            throw 'Invalid Windows PE executable header'
+          }
+          $machine = [BitConverter]::ToUInt16($bytes, $offset + 4)
+          if ($machine -ne 0x8664) {
+            throw "Expected Windows x64 PE (0x8664), got $machine"
+          }
+          # Fail closed if Windows ARM emulation cannot execute the x64 binary.
+          & $binary --version
+          if ($LASTEXITCODE -ne 0) {
+            throw 'Emulated Windows x64 version smoke failed'
+          }
 
       - name: Verify native Windows ARM64 artifact architecture
         if: ${{ matrix.target == 'aarch64-pc-windows-msvc' }}

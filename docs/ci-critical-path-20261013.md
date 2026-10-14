@@ -709,3 +709,37 @@ runtime, admission, profile and local rewrite ownership. The
 scheduled full-suite and Linux/macOS test matrices are unchanged.
 The first completed CI run of the 15-shard configuration must be
 measured before claiming a new wall-clock improvement.
+
+
+## Measured Windows x64 cross-release build on Windows ARM64 host
+
+A successful source-pinned [calibration run 38529242049](https://github.com/christiandoxa/prodex/actions/runs/38529242049)
+used exactly the official 0.437.11 source SHA and verified x64 Mojo COFF
+archive from release 38504477460. It built the production ThinLTO,
+16-codegen-unit x86_64-pc-windows-msvc binary on a native
+windows-11-arm runner in **314 seconds**. The output was an actual PE
+x86_64 executable (Machine 0x8664, 36,406,784 bytes) and passed
+emulated version/help and the full strict Mojo runtime-doctor smoke:
+compiled-in, fallback disabled and self-test passed. No executable,
+tag or package was published by the benchmark.
+
+The previous same-source direct-x64 benchmark took **482 seconds**;
+the official 0.437.11 build with ineffective sccache took **524 seconds**.
+On this evidence, compilation on the ARM64 host was approximately
+**35% faster than direct native x64 benchmark**, or **40% faster than
+the earlier official release build**, under different runner/cache
+conditions. This is a per-build observed comparison, not a measured
+standalone-release end-to-end improvement.
+
+The release matrix now switches only the Windows x64 build host to
+windows-11-arm. It preserves the x86_64-pc-windows-msvc target,
+ThinLTO, the exact source/toolchain/ABI archive, all six platform
+artifacts, and the CI/attestations/checksum/SBOM/malware gates. Before
+the existing Mojo and clean-machine release smokes, this target must
+prove the physical build host is ARM64, the output PE machine is
+**0x8664**, and Windows-on-ARM emulation can execute its version probe.
+The dependency cache key already includes host runner architecture
+and target triple, isolating cross-host Rust artifacts from the native
+ARM64 and previous native x64 caches. The next official standalone
+release must independently validate the total duration and complete
+runtime compatibility.
