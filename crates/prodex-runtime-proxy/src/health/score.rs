@@ -295,7 +295,7 @@ fn runtime_profile_health_sort_key_mojo(
     .unwrap_or_else(|error| panic!("Mojo profile health score failed: {error:?}"))
     .into_iter()
     .next()
-    .unwrap_or(u32::MAX)
+    .expect("single profile health score must be returned")
 }
 
 #[cfg(test)]

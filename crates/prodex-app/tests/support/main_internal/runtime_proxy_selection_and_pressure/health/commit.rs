@@ -121,6 +121,41 @@ fn runtime_health(
 }
 
 #[test]
+fn bump_runtime_profile_health_score_keeps_transport_circuit_route_scoped() {
+    let fixture = commit_runtime_fixture(&[MAIN_PROFILE, SECOND_PROFILE]);
+    let shared = fixture.shared();
+
+    bump_runtime_profile_health_score(
+        shared,
+        "main",
+        RuntimeRouteKind::Responses,
+        runtime_proxy_crate::RUNTIME_PROFILE_CIRCUIT_OPEN_THRESHOLD,
+        "transport",
+    )
+    .expect("health bump should succeed");
+
+    let runtime = shared.runtime.lock().expect("runtime should lock");
+    let responses_health_key = runtime_profile_route_health_key("main", RuntimeRouteKind::Responses);
+    let responses_circuit_key = runtime_profile_route_circuit_key("main", RuntimeRouteKind::Responses);
+    let compact_health_key = runtime_profile_route_health_key("main", RuntimeRouteKind::Compact);
+    assert_eq!(
+        runtime.profile_health.get(&responses_health_key).map(|entry| entry.score),
+        Some(runtime_proxy_crate::RUNTIME_PROFILE_CIRCUIT_OPEN_THRESHOLD),
+    );
+    assert!(
+        runtime
+            .profile_route_circuit_open_until
+            .get(&responses_circuit_key)
+            .is_some_and(|until| *until > Local::now().timestamp()),
+        "Mojo health transition should open the affected route circuit"
+    );
+    assert!(
+        !runtime.profile_health.contains_key(&compact_health_key),
+        "transport health must not create a penalty for an unrelated route"
+    );
+}
+
+#[test]
 fn commit_runtime_proxy_profile_selection_skips_persist_when_nothing_changed() {
     let fixture = commit_runtime_fixture(&[MAIN_PROFILE]);
     let shared = fixture.shared();
