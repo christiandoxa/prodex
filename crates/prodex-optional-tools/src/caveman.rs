@@ -230,9 +230,12 @@ fn validate_caveman_install(allowed_root: &Path, candidate: &Path) -> Result<Res
             actual_digest == CAVEMAN_LATEST_STABLE_TREE_SHA256,
             "Caveman tree digest mismatch: expected {CAVEMAN_LATEST_STABLE_TREE_SHA256}, got {actual_digest}"
         );
-    } else if previous_stable_manifest_supported(&manifest, &actual_digest)
-        || legacy_manifest_supported(&manifest, &actual_digest)
-    {
+    } else if manifest.version == CAVEMAN_PREVIOUS_STABLE_REFERENCE {
+        ensure!(
+            previous_stable_manifest_supported(&manifest, &actual_digest),
+            "previously release-qualified Caveman 3.2.0 identity or content changed"
+        );
+    } else if legacy_manifest_supported(&manifest, &actual_digest) {
     } else {
         ensure!(
             actual_digest == manifest.tree_sha256,
