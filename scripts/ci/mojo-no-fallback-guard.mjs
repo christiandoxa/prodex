@@ -3168,6 +3168,7 @@ export function findViolations(files) {
         "prodex_mojo_core::profile_login_policy::login_execution(",
         "profile_login_auth_commit_plan(",
         "auto_login_route(",
+        "auto_login_transition(",
       ];
       const production = contents.split("#[cfg(test)]", 1)[0];
       const violations = required
@@ -3186,6 +3187,7 @@ export function findViolations(files) {
         "login_execution(",
         "profile_login_auth_commit_plan(",
         "auto_login_route(",
+        "auto_login_transition(",
       ];
       const production = contents.split("#[cfg(test)]", 1)[0];
       const violations = required
@@ -3199,13 +3201,20 @@ export function findViolations(files) {
       return violations;
     }
     if (filePath === PROFILE_LOGIN_API_KEY_FILE) {
-      return contents.includes("validate_api_key_profile_provider(") &&
+      const required = [
+        "validate_api_key_profile_provider(",
+        "auto_login_transition(",
+        "AutoLoginTransition::ApiKeyExisting",
+        "AutoLoginTransition::ApiKeyNew",
+      ];
+      return required.every((marker) => contents.includes(marker)) &&
           !contents.includes("supports_codex_runtime()")
         ? []
         : [`${filePath}: API-key profile eligibility must use the Mojo login policy`];
     }
     if (filePath === PROFILE_LOGIN_CLAUDE_FILE) {
       return contents.includes("validate_profile_login_provider(") &&
+          contents.includes("select_login_candidate(") &&
           !/matches!\(\s*profile\.provider,/u.test(contents)
         ? []
         : [`${filePath}: Claude profile eligibility must use the Mojo login policy`];
@@ -3219,6 +3228,8 @@ export function findViolations(files) {
         "auth_commit_plan(",
         "auto_login_route(",
         "login_method_plan(",
+        "auto_login_transition(",
+        "select_login_candidate(",
       ];
       return required
         .filter((marker) => !contents.includes(marker))
@@ -3233,6 +3244,8 @@ export function findViolations(files) {
         "profile_login_auth_commit(",
         "profile_login_auto_route(",
         "profile_login_method_route(",
+        "profile_login_auto_transition(",
+        "profile_login_candidate_selection(",
       ];
       return required
         .filter((marker) => !contents.includes(marker))
@@ -3244,6 +3257,8 @@ export function findViolations(files) {
         "validate_provider_login(\"openai\", 0)",
         "validate_login_target(true, false)",
         "auth_commit_plan(\"api-key\", true)",
+        "profile_login_transition_matrix_keeps_precedence_and_existing_state",
+        "profile_login_candidate_order_and_duplicate_count_are_mojo_owned",
       ];
       return required
         .filter((marker) => !contents.includes(marker))
@@ -7368,6 +7383,7 @@ function selfTest() {
     "prodex_mojo_core::profile_login_policy::login_execution(",
     "profile_login_auth_commit_plan(",
     "auto_login_route(",
+    "auto_login_transition(",
   ].join("\n");
   assert.deepEqual(findViolations([[PROFILE_LOGIN_FILE, profileLoginConsumer]]), []);
   assert.match(
@@ -7380,6 +7396,7 @@ function selfTest() {
     "login_execution(",
     "profile_login_auth_commit_plan(",
     "auto_login_route(",
+    "auto_login_transition(",
   ].join("\n");
   assert.deepEqual(findViolations([[PROFILE_LOGIN_LIFECYCLE_FILE, profileLoginLifecycle]]), []);
   assert.match(
@@ -7394,6 +7411,8 @@ function selfTest() {
     "auth_commit_plan(",
     "auto_login_route(",
     "login_method_plan(",
+    "auto_login_transition(",
+    "select_login_candidate(",
   ].join("\n")]]), []);
   assert.deepEqual(findViolations([[PROFILE_LOGIN_MOJO_FILE, [
     '@export("prodex_profile_login_policy_v1")',
@@ -7403,6 +7422,8 @@ function selfTest() {
     "profile_login_auth_commit(",
     "profile_login_auto_route(",
     "profile_login_method_route(",
+    "profile_login_auto_transition(",
+    "profile_login_candidate_selection(",
   ].join("\n")]]), []);
   const runtimeProxyAdmissionFile = "crates/prodex-runtime-proxy/src/admission.rs";
   const runtimeProxyAdmission = [
