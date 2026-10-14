@@ -10,6 +10,7 @@ comptime DEEPSEEK_STREAM_POLICY_MISSING_NAME: Int64 = 1
 comptime DEEPSEEK_STREAM_POLICY_INVALID_ARGUMENTS: Int64 = 2
 comptime DEEPSEEK_STREAM_POLICY_ABI: Int64 = -4
 comptime DEEPSEEK_STREAM_POLICY_INVALID: Int64 = -1
+comptime DEEPSEEK_STREAM_POLICY_MAX_DEPTH: Int64 = 127
 
 
 def deepseek_stream_policy_ptr(
@@ -38,12 +39,32 @@ def deepseek_stream_policy_skip_ws(
     return index
 
 
-def deepseek_stream_policy_hex(value: UInt8) -> Bool:
-    return (
-        value >= 48 and value <= 57
-        or value >= 65 and value <= 70
-        or value >= 97 and value <= 102
-    )
+def deepseek_stream_policy_hex_value(value: UInt8) -> Int64:
+    if value >= 48 and value <= 57:
+        return Int64(value - 48)
+    if value >= 65 and value <= 70:
+        return Int64(value - 55)
+    if value >= 97 and value <= 102:
+        return Int64(value - 87)
+    return -1
+
+
+def deepseek_stream_policy_unicode_unit(
+    ptr: Pointer[mut=False, UInt8, ImmUntrackedOrigin],
+    start: Int64,
+    end: Int64,
+) -> Int64:
+    if start < 0 or start + 4 > end:
+        return -1
+    var value: Int64 = 0
+    for offset in range(4):
+        var digit = deepseek_stream_policy_hex_value(
+            deepseek_stream_policy_byte(ptr, start + Int64(offset))
+        )
+        if digit < 0:
+            return -1
+        value = value * 16 + digit
+    return value
 
 
 def deepseek_stream_policy_string_end(
@@ -65,13 +86,24 @@ def deepseek_stream_policy_string_end(
                 return -1
             var escaped = deepseek_stream_policy_byte(ptr, index + 1)
             if escaped == 117:
-                if index + 5 >= end:
+                var unit = deepseek_stream_policy_unicode_unit(ptr, index + 2, end)
+                if unit < 0:
                     return -1
-                for offset in range(2, 6):
-                    if not deepseek_stream_policy_hex(
-                        deepseek_stream_policy_byte(ptr, index + Int64(offset))
-                    ):
+                if unit >= 55296 and unit <= 56319:
+                    var trailing_start = index + 6
+                    if trailing_start + 6 > end or deepseek_stream_policy_byte(
+                        ptr, trailing_start
+                    ) != 92 or deepseek_stream_policy_byte(ptr, trailing_start + 1) != 117:
                         return -1
+                    var trailing = deepseek_stream_policy_unicode_unit(
+                        ptr, trailing_start + 2, end
+                    )
+                    if trailing < 56320 or trailing > 57343:
+                        return -1
+                    index = trailing_start + 6
+                    continue
+                if unit >= 56320 and unit <= 57343:
+                    return -1
                 index += 6
                 continue
             if (
@@ -143,8 +175,103 @@ def deepseek_stream_policy_number_end(
                 index += 1
             if index == digits:
                 return -1
-        
-    return index
+
+    return index if deepseek_stream_policy_number_in_range(ptr, start, index) else -1
+
+
+def deepseek_stream_policy_number_in_range(
+    ptr: Pointer[mut=False, UInt8, ImmUntrackedOrigin],
+    start: Int64,
+    end: Int64,
+) -> Bool:
+    var index = start
+    if index < end and deepseek_stream_policy_byte(ptr, index) == 45:
+        index += 1
+
+    var digits_before_decimal: Int64 = 0
+    var digit_position: Int64 = 0
+    var first_nonzero: Int64 = -1
+    while index < end:
+        var value = deepseek_stream_policy_byte(ptr, index)
+        if value < 48 or value > 57:
+            break
+        if first_nonzero < 0 and value != 48:
+            first_nonzero = digit_position
+        digits_before_decimal += 1
+        digit_position += 1
+        index += 1
+
+    if index < end and deepseek_stream_policy_byte(ptr, index) == 46:
+        index += 1
+        while index < end:
+            var value = deepseek_stream_policy_byte(ptr, index)
+            if value < 48 or value > 57:
+                break
+            if first_nonzero < 0 and value != 48:
+                first_nonzero = digit_position
+            digit_position += 1
+            index += 1
+
+    if first_nonzero < 0:
+        return True
+    var exponent_negative = False
+    var exponent: Int64 = 0
+    if index < end and (
+        deepseek_stream_policy_byte(ptr, index) == 101
+        or deepseek_stream_policy_byte(ptr, index) == 69
+    ):
+        index += 1
+        if index < end and (
+            deepseek_stream_policy_byte(ptr, index) == 43
+            or deepseek_stream_policy_byte(ptr, index) == 45
+        ):
+            exponent_negative = deepseek_stream_policy_byte(ptr, index) == 45
+            index += 1
+        while index < end:
+            var value = deepseek_stream_policy_byte(ptr, index)
+            if value < 48 or value > 57:
+                break
+            if exponent > 10000:
+                return exponent_negative
+            exponent = exponent * 10 + Int64(value - 48)
+            index += 1
+
+    var adjusted = digits_before_decimal - first_nonzero - 1
+    if exponent_negative:
+        adjusted -= exponent
+    else:
+        adjusted += exponent
+    if adjusted < 308:
+        return True
+    if adjusted > 308:
+        return False
+
+    var limit = StringSlice("17976931348623157")
+    var limit_ptr = limit.unsafe_ptr()
+    index = start
+    if index < end and deepseek_stream_policy_byte(ptr, index) == 45:
+        index += 1
+    var significant = False
+    var compared: Int64 = 0
+    while index < end:
+        var value = deepseek_stream_policy_byte(ptr, index)
+        if value == 101 or value == 69:
+            break
+        if value >= 48 and value <= 57:
+            if not significant:
+                if value == 48:
+                    index += 1
+                    continue
+                significant = True
+            if compared < 17:
+                var expected = limit_ptr[unsafe_offset=compared]
+                if value > expected:
+                    return False
+                if value < expected:
+                    return True
+                compared += 1
+        index += 1
+    return True
 
 
 def deepseek_stream_policy_literal_end(
@@ -169,12 +296,14 @@ def deepseek_stream_policy_value_end(
     end: Int64,
     depth: Int64,
 ) -> Int64:
-    if depth > 256:
+    if depth > DEEPSEEK_STREAM_POLICY_MAX_DEPTH:
         return -1
     var index = deepseek_stream_policy_skip_ws(ptr, start, end)
     if index >= end:
         return -1
     var opening = deepseek_stream_policy_byte(ptr, index)
+    if depth == DEEPSEEK_STREAM_POLICY_MAX_DEPTH and (opening == 91 or opening == 123):
+        return -1
     if opening == 34:
         return deepseek_stream_policy_string_end(ptr, index, end)
     if opening == 116:
