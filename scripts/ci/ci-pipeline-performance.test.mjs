@@ -357,3 +357,58 @@ test("nightly full Rust suite reuses trusted main CI Mojo archive with strict fa
   assert.match(nightly, /Run full test partition/);
   assert.match(nightly, /if \[ "\$\{status\}" -eq 0 \]; then/);
 });
+
+
+test("Windows x64 codegen A/B is opt-in, same official source and cannot publish", () => {
+  const workflow = readFileSync(".github/workflows/release-windows-x64-codegen-calibration.yml", "utf8");
+  assert.match(workflow, /name: Windows x64 ThinLTO codegen calibration/);
+  assert.match(workflow, /workflow_dispatch:/);
+  assert.doesNotMatch(workflow, /^  push:/m);
+  assert.match(workflow, /permissions:\n  contents: read\n  actions: read/);
+  assert.match(workflow, /runs-on: windows-latest/);
+  assert.match(workflow, /units: \[16, 64\]/);
+  assert.match(workflow, /CARGO_PROFILE_RELEASE_CODEGEN_UNITS: \$\{\{ matrix.units \}\}/);
+  assert.match(workflow, /\.head_sha -cne \$env:TARGET_SHA/);
+  assert.match(workflow, /\.event -cne 'workflow_dispatch'/);
+  assert.match(workflow, /\.head_branch -cne 'main'/);
+  assert.match(workflow, /\.path -cne '\.github\/workflows\/standalone-release.yml'/);
+  assert.match(workflow, /\.conclusion -cne 'success'/);
+  assert.match(workflow, /\.repository.full_name -cne \$env:GITHUB_REPOSITORY/);
+  assert.match(workflow, /Check out exact source/);
+  assert.match(workflow, /ref: \$\{\{ inputs.target_sha \}\}/);
+  assert.match(workflow, /name: mojo-archive-x86_64-pc-windows-msvc/);
+  assert.match(workflow, /run-id: \$\{\{ inputs.source_release_run_id \}\}/);
+  assert.match(workflow, /PRODEX_MOJO_REQUIRED: "1"/);
+  assert.match(workflow, /KGEN_CompilerRT_/);
+  assert.match(workflow, /cargo build --locked --release --target x86_64-pc-windows-msvc --features mojo-core/);
+  assert.doesNotMatch(workflow, /cargo build[^\n]* --bin prodex/);
+  assert.match(workflow, /\$machine -ne 0x8664/);
+  assert.match(workflow, /Real native compiled-in Mojo smoke/);
+  assert.match(workflow, /"implementation": "mojo-compiled-in"/);
+  assert.match(workflow, /"fallback": false/);
+  assert.match(workflow, /"self_test": "passed"/);
+  assert.match(workflow, /Upload text timings only/);
+  assert.doesNotMatch(workflow, /gh release (?:create|upload|edit)/);
+  assert.doesNotMatch(workflow, /git push/);
+  assert.doesNotMatch(workflow, /subject-path:|attest-build-provenance/);
+});
+
+
+test("Windows fake Kiro ACP timing remains bounded without relaxing production deadlines", () => {
+  const production = readFileSync("crates/prodex-app/src/runtime_kiro_acp/process.rs", "utf8");
+  const tests = readFileSync("crates/prodex-app/src/runtime_kiro_acp/tests_bootstrap.rs", "utf8");
+  const fixture = readFileSync("crates/prodex-app/src/runtime_kiro_acp/tests.rs", "utf8");
+
+  assert.match(production, /RUNTIME_KIRO_ACP_BOOTSTRAP_TIMEOUT: Duration = Duration::from_secs\(5\)/);
+  assert.match(tests, /fn kiro_acp_test_start_budget\(\) -> Duration/);
+  assert.match(tests, /if cfg!\(windows\) \{\n\s+Duration::from_secs\(15\)/);
+  assert.match(tests, /fn kiro_acp_test_response_budget\(\) -> Duration/);
+  assert.match(tests, /Duration::from_secs\(10\)/);
+  assert.match(tests, /runtime_kiro_acp_bootstrap_with_command_and_timeout\(/);
+  assert.match(tests, /kiro_acp_test_start_budget\(\)/);
+  assert.match(tests, /started\.elapsed\(\) < kiro_acp_test_response_budget\(\)/);
+  assert.match(fixture, /time.sleep\(20 if os.name == "nt" else 5\)/);
+  assert.match(tests, /activity-agent-invocations/);
+  assert.match(tests, /kiro_acp_bootstrap_times_out_and_terminates_the_agent/);
+  assert.match(tests, /kiro_acp_prompt_turn_times_out_and_terminates_the_agent/);
+});
