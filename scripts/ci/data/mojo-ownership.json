@@ -605,7 +605,8 @@
           "quota_report_page_planning",
           "quota_error_summary_label_rendering",
           "quota_panel_first_line_normalization",
-          "quota_human_retry_time_normalization"
+          "quota_human_retry_time_normalization",
+          "quota_blocked_window_planning"
         ]
       },
       "mojo/prodex_core/candidate_decision.mojo": {
@@ -8585,6 +8586,29 @@
       "rust_adapter_scope": "extract the bounded human message substring and resolve the Mojo-projected normalized clock/date using Chrono and local OS timezone"
     },
     {
+      "name": "quota_blocked_window_planning",
+      "domain": "quota/display-policy",
+      "introduced_in": "0.420.0",
+      "baseline_state": "candidate",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_quota_blocked_window_plan_v1",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/quota.mojo",
+      "consumer": "crates/prodex-quota/src/render/windows.rs",
+      "consumer_marker": "prodex_mojo_core::quota::quota_blocked_window_plan(",
+      "production_consumers": [
+        "crates/prodex-quota/src/render/windows.rs"
+      ],
+      "production_reachability_test": "crates/prodex-mojo-core/tests/quota_blocked.rs",
+      "rust_owner_before": "Rust decided blocked quota rows from runtime readiness, unknown usage, exhaustion, and code-review inclusion",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "deleted; required-Mojo ABI and quota renderer caller tests cover readiness, unknown usage, exhaustion, code-review inclusion, batching, and provider ordering",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "provider window observation ordering, label/reset text formatting, and terminal row rendering"
+    },
+    {
       "name": "shared_attachment_sqlite_header_classification",
       "domain": "shared-codex-fs/attachment",
       "introduced_in": "0.438.0",
@@ -10099,6 +10123,22 @@
         }
       },
       "cleanup_evidence": "The former Rust command-kind precedence loop and its per-line adapter are absent from the release source; the artifact-store caller regression exercises the Mojo-selected precedence through the live semantic-index path."
+    },
+    {
+      "file": "crates/prodex-quota/src/render/windows.rs",
+      "symbol": "collect_blocked_limits",
+      "operation": "quota_blocked_window_planning",
+      "previous_responsibility": "Rust decided blocked quota rows from runtime readiness, unknown usage, exhaustion, and code-review inclusion",
+      "migrated_semantic_loc": 54,
+      "final_state": "adapter-only",
+      "rust_before": "crates/prodex-quota/src/render/windows.rs::collect_blocked_limits",
+      "rust_after": "Rust keeps provider observation ordering, unavailable-message construction, reset formatting and terminal row materialization while Mojo owns blocked-window eligibility",
+      "mojo_owner": "mojo/prodex_core/quota.mojo::prodex_quota_blocked_window_plan_v1",
+      "mojo_source": "mojo/prodex_core/quota.mojo",
+      "mojo_entry": "prodex_quota_blocked_window_plan_v1",
+      "production_consumer": "crates/prodex-quota/src/render/windows.rs",
+      "parity_test": "crates/prodex-quota/tests/src/render/windows.rs::blocked_window_planner_preserves_provider_order_and_rendered_messages",
+      "performance": "one bounded blocked-window plan call per rendered quota snapshot"
     },
     {
       "file": "crates/prodex-app/src/runtime_state_shared/semantic_index/symbols.rs",

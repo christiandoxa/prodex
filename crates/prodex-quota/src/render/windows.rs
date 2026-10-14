@@ -295,11 +295,22 @@ pub fn collect_blocked_limits(
     include_code_review: bool,
 ) -> Vec<BlockedLimit> {
     let mut blocked = Vec::new();
+    let runtime_ready = openai_quota_has_ready_runtime_limit(usage);
+    let main_pair_missing = !runtime_ready && usage.rate_limit.is_none();
+    let mut windows = Vec::new();
 
-    if !openai_quota_has_ready_runtime_limit(usage) {
+    if !runtime_ready {
         if let Some(main) = usage.rate_limit.as_ref() {
-            push_main_window_if_present(&mut blocked, main, "5h");
-            push_main_window_if_present(&mut blocked, main, "weekly");
+            for label in ["5h", "weekly"] {
+                if let Some(window) = find_main_window(main, label) {
+                    windows.push(BlockedWindowRef {
+                        kind: prodex_mojo_core::quota::QUOTA_BLOCKED_WINDOW_KIND_MAIN,
+                        name: None,
+                        main_label: Some(label),
+                        window,
+                    });
+                }
+            }
         } else {
             blocked.push(BlockedLimit {
                 message: "5h quota unavailable".to_string(),
@@ -315,58 +326,78 @@ pub fn collect_blocked_limits(
                 .as_deref()
                 .or(additional.metered_feature.as_deref())
                 .or(additional.limit_id.as_deref());
-            push_blocked_window(
-                &mut blocked,
-                label,
+            for window in [
                 additional.rate_limit.primary_window.as_ref(),
-            );
-            push_blocked_window(
-                &mut blocked,
-                label,
                 additional.rate_limit.secondary_window.as_ref(),
-            );
+            ]
+            .into_iter()
+            .flatten()
+            {
+                windows.push(BlockedWindowRef {
+                    kind: prodex_mojo_core::quota::QUOTA_BLOCKED_WINDOW_KIND_ADDITIONAL,
+                    name: label,
+                    main_label: None,
+                    window,
+                });
+            }
         }
+    }
 
-        if blocked.is_empty() {
-            blocked.push(BlockedLimit {
-                message: "quota unavailable".to_string(),
+    let code_review_start = windows.len();
+    if include_code_review && let Some(code_review) = usage.code_review_rate_limit.as_ref() {
+        for window in [
+            code_review.primary_window.as_ref(),
+            code_review.secondary_window.as_ref(),
+        ]
+        .into_iter()
+        .flatten()
+        {
+            windows.push(BlockedWindowRef {
+                kind: prodex_mojo_core::quota::QUOTA_BLOCKED_WINDOW_KIND_CODE_REVIEW,
+                name: Some("code-review"),
+                main_label: None,
+                window,
             });
         }
     }
 
-    if include_code_review && let Some(code_review) = usage.code_review_rate_limit.as_ref() {
-        push_blocked_window(
-            &mut blocked,
-            Some("code-review"),
-            code_review.primary_window.as_ref(),
-        );
-        push_blocked_window(
-            &mut blocked,
-            Some("code-review"),
-            code_review.secondary_window.as_ref(),
-        );
+    let plan = prodex_mojo_core::quota::quota_blocked_window_plan(
+        runtime_ready,
+        include_code_review,
+        &windows
+            .iter()
+            .map(|entry| prodex_mojo_core::quota::QuotaBlockedWindowInput {
+                kind: entry.kind,
+                used_percent: entry.window.used_percent,
+            })
+            .collect::<Vec<_>>(),
+    )
+    .expect("Mojo quota blocked-window planner returned invalid output");
+    append_planned_blocked_windows(
+        &mut blocked,
+        &windows[..code_review_start],
+        &plan[..code_review_start],
+    );
+    if !runtime_ready && !main_pair_missing && blocked.is_empty() {
+        blocked.push(BlockedLimit {
+            message: "quota unavailable".to_string(),
+        });
     }
+    append_planned_blocked_windows(
+        &mut blocked,
+        &windows[code_review_start..],
+        &plan[code_review_start..],
+    );
 
     blocked
 }
 
-fn push_main_window_if_present(blocked: &mut Vec<BlockedLimit>, main: &WindowPair, label: &str) {
-    let Some(window) = find_main_window(main, label) else {
-        return;
-    };
-
-    match window.used_percent {
-        Some(used) if used < 100 => {}
-        Some(_) => blocked.push(BlockedLimit {
-            message: format!(
-                "{label} exhausted until {}",
-                format_reset_time(window.reset_at)
-            ),
-        }),
-        None => blocked.push(BlockedLimit {
-            message: format!("{label} quota unknown"),
-        }),
-    }
+#[derive(Clone, Copy)]
+struct BlockedWindowRef<'a> {
+    kind: i64,
+    name: Option<&'a str>,
+    main_label: Option<&'static str>,
+    window: &'a UsageWindow,
 }
 
 pub fn find_main_window<'a>(main: &'a WindowPair, expected_label: &str) -> Option<&'a UsageWindow> {
@@ -376,34 +407,40 @@ pub fn find_main_window<'a>(main: &'a WindowPair, expected_label: &str) -> Optio
         .find(|window| window_label(window.limit_window_seconds) == expected_label)
 }
 
-fn push_blocked_window(
+fn append_planned_blocked_windows(
     blocked: &mut Vec<BlockedLimit>,
-    name: Option<&str>,
-    window: Option<&UsageWindow>,
+    windows: &[BlockedWindowRef<'_>],
+    plan: &[bool],
 ) {
-    let Some(window) = window else {
-        return;
-    };
-    let Some(used) = window.used_percent else {
-        return;
-    };
-    if used < 100 {
-        return;
-    }
-
-    let label = match name {
-        Some(base) if !base.is_empty() => {
-            format!("{base} {}", window_label(window.limit_window_seconds))
+    debug_assert_eq!(windows.len(), plan.len());
+    for (entry, should_block) in windows.iter().zip(plan) {
+        if !should_block {
+            continue;
         }
-        _ => window_label(window.limit_window_seconds),
-    };
-
-    blocked.push(BlockedLimit {
-        message: format!(
-            "{label} exhausted until {}",
-            format_reset_time(window.reset_at)
-        ),
-    });
+        if entry.kind == prodex_mojo_core::quota::QUOTA_BLOCKED_WINDOW_KIND_MAIN
+            && entry.window.used_percent.is_none()
+        {
+            blocked.push(BlockedLimit {
+                message: format!(
+                    "{} quota unknown",
+                    entry.main_label.expect("main window label is present")
+                ),
+            });
+            continue;
+        }
+        let label = match entry.name {
+            Some(base) if !base.is_empty() => {
+                format!("{base} {}", window_label(entry.window.limit_window_seconds))
+            }
+            _ => window_label(entry.window.limit_window_seconds),
+        };
+        blocked.push(BlockedLimit {
+            message: format!(
+                "{label} exhausted until {}",
+                format_reset_time(entry.window.reset_at)
+            ),
+        });
+    }
 }
 
 pub fn format_blocked_limits(blocked: &[BlockedLimit]) -> String {
