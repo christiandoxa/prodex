@@ -126,6 +126,71 @@ fn runtime_doctor_binding_state_summary_counts_sources_and_profiles() {
 }
 
 #[test]
+fn runtime_doctor_binding_mojo_owns_sample_cap_signed_bounds_and_tied_profile_rank() {
+    let profile_names = vec!["beta".to_owned(), "alpha".to_owned()];
+    let mut response = BTreeMap::new();
+    for index in 0..12 {
+        response.insert(format!("a{index:02}"), test_binding("gone", -500 + index));
+    }
+    response.insert("z-alpha".to_string(), test_binding("alpha", 33));
+    response.insert("z-beta".to_string(), test_binding("beta", 700));
+    let session = BTreeMap::from([
+        ("s-alpha".to_owned(), test_binding("alpha", 45)),
+        ("s-beta".to_owned(), test_binding("beta", 48)),
+    ]);
+    let empty = BTreeMap::<String, TestBinding>::new();
+    let state = RuntimeDoctorBindingSourceInput {
+        response_profile_bindings: &response,
+        session_profile_bindings: &session,
+        turn_state_bindings: &empty,
+        session_id_bindings: &empty,
+    };
+    let no_bindings = RuntimeDoctorBindingSourceInput {
+        response_profile_bindings: &empty,
+        session_profile_bindings: &empty,
+        turn_state_bindings: &empty,
+        session_id_bindings: &empty,
+    };
+    let summary = runtime_doctor_binding_state_summary(
+        RuntimeDoctorBindingStateInput {
+            active_profile: None,
+            profile_names: &profile_names,
+            last_run_selected_profiles: 0,
+            state,
+            runtime_continuations: no_bindings.clone(),
+            continuation_journal: no_bindings.clone(),
+            merged_continuations: no_bindings,
+        },
+        |binding| binding.profile_name.as_str(),
+        |binding| binding.bound_at,
+    );
+    assert_eq!(summary.state.total_bindings, 16);
+    assert_eq!(summary.state.response_bindings, 14);
+    assert_eq!(summary.state.session_bindings, 2);
+    assert_eq!(summary.state.missing_profile_bindings, 12);
+    assert_eq!(summary.state.oldest_bound_at, Some(-500));
+    assert_eq!(summary.state.newest_bound_at, Some(700));
+    assert_eq!(
+        summary.state.missing_profile_binding_samples,
+        (0..8)
+            .map(|index| format!("response:a{index:02}->gone"))
+            .collect::<Vec<_>>(),
+    );
+    assert_eq!(
+        summary
+            .state
+            .profiles
+            .iter()
+            .map(|profile| (profile.profile.as_str(), profile.total_bindings))
+            .collect::<Vec<_>>(),
+        [("gone", 12), ("alpha", 2), ("beta", 2)],
+    );
+    assert_eq!(summary.runtime_continuations.total_bindings, 0);
+    assert_eq!(summary.runtime_continuations.oldest_bound_at, None);
+    assert!(summary.runtime_continuations.profiles.is_empty());
+}
+
+#[test]
 fn runtime_doctor_degraded_routes_formats_neutral_maps() {
     let now = 1_000;
     let mut retry = BTreeMap::new();

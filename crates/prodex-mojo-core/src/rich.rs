@@ -183,6 +183,9 @@ pub use runtime_doctor_marker::*;
 #[path = "rich/runtime_doctor_marker_aggregation.rs"]
 mod runtime_doctor_marker_aggregation;
 pub use runtime_doctor_marker_aggregation::*;
+#[path = "rich/runtime_doctor_bindings.rs"]
+mod runtime_doctor_bindings;
+pub use runtime_doctor_bindings::*;
 #[path = "rich/runtime_doctor_render.rs"]
 mod runtime_doctor_render;
 pub use runtime_doctor_render::*;

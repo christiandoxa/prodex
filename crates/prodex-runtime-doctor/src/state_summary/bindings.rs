@@ -5,8 +5,6 @@ use crate::{
     RuntimeDoctorBindingStateSummary,
 };
 
-const RUNTIME_DOCTOR_BINDING_SAMPLE_LIMIT: usize = 8;
-
 #[derive(Debug, Clone, Copy)]
 pub struct RuntimeDoctorBindingSourceInput<'a, B> {
     pub response_profile_bindings: &'a BTreeMap<String, B>,
@@ -26,12 +24,19 @@ pub struct RuntimeDoctorBindingStateInput<'a, B> {
     pub merged_continuations: RuntimeDoctorBindingSourceInput<'a, B>,
 }
 
-fn runtime_doctor_record_binding_source_kind<B, F, G>(
-    source: &mut RuntimeDoctorBindingSourceSummary,
-    profile_counts: &mut BTreeMap<String, RuntimeDoctorBindingProfileSummary>,
-    known_profiles: &BTreeSet<&str>,
-    kind: &str,
-    bindings: &BTreeMap<String, B>,
+struct RuntimeDoctorBindingSourceEvent<'a> {
+    kind: i64,
+    label: &'static str,
+    key: &'a str,
+    profile: &'a str,
+    bound_at: i64,
+}
+
+fn runtime_doctor_collect_binding_kind<'a, B, F, G>(
+    events: &mut Vec<RuntimeDoctorBindingSourceEvent<'a>>,
+    kind: i64,
+    label: &'static str,
+    bindings: &'a BTreeMap<String, B>,
     profile_name: F,
     bound_at: G,
 ) where
@@ -39,42 +44,13 @@ fn runtime_doctor_record_binding_source_kind<B, F, G>(
     G: Fn(&B) -> i64 + Copy,
 {
     for (key, binding) in bindings {
-        let profile = profile_name(binding);
-        let bound_at = bound_at(binding);
-        source.oldest_bound_at = Some(
-            source
-                .oldest_bound_at
-                .map(|oldest| oldest.min(bound_at))
-                .unwrap_or(bound_at),
-        );
-        source.newest_bound_at = Some(
-            source
-                .newest_bound_at
-                .map(|newest| newest.max(bound_at))
-                .unwrap_or(bound_at),
-        );
-        if !known_profiles.contains(profile) {
-            source.missing_profile_bindings += 1;
-            if source.missing_profile_binding_samples.len() < RUNTIME_DOCTOR_BINDING_SAMPLE_LIMIT {
-                source
-                    .missing_profile_binding_samples
-                    .push(format!("{kind}:{key}->{profile}"));
-            }
-        }
-        let profile_entry = profile_counts
-            .entry(profile.to_string())
-            .or_insert_with(|| RuntimeDoctorBindingProfileSummary {
-                profile: profile.to_string(),
-                ..RuntimeDoctorBindingProfileSummary::default()
-            });
-        match kind {
-            "response" => profile_entry.response_bindings += 1,
-            "session" => profile_entry.session_bindings += 1,
-            "turn_state" => profile_entry.turn_state_bindings += 1,
-            "session_id" => profile_entry.session_id_bindings += 1,
-            _ => {}
-        }
-        profile_entry.total_bindings += 1;
+        events.push(RuntimeDoctorBindingSourceEvent {
+            kind,
+            label,
+            key,
+            profile: profile_name(binding),
+            bound_at: bound_at(binding),
+        });
     }
 }
 
@@ -88,63 +64,97 @@ where
     F: Fn(&B) -> &str + Copy,
     G: Fn(&B) -> i64 + Copy,
 {
-    let mut source = RuntimeDoctorBindingSourceSummary {
-        response_bindings: input.response_profile_bindings.len(),
-        session_bindings: input.session_profile_bindings.len(),
-        turn_state_bindings: input.turn_state_bindings.len(),
-        session_id_bindings: input.session_id_bindings.len(),
-        total_bindings: input.response_profile_bindings.len()
-            + input.session_profile_bindings.len()
-            + input.turn_state_bindings.len()
-            + input.session_id_bindings.len(),
-        ..RuntimeDoctorBindingSourceSummary::default()
-    };
-    let mut profile_counts = BTreeMap::new();
-    runtime_doctor_record_binding_source_kind(
-        &mut source,
-        &mut profile_counts,
-        known_profiles,
+    use prodex_mojo_core::rich::RuntimeDoctorBindingRow;
+
+    let mut events = Vec::new();
+    runtime_doctor_collect_binding_kind(
+        &mut events,
+        0,
         "response",
         input.response_profile_bindings,
         profile_name,
         bound_at,
     );
-    runtime_doctor_record_binding_source_kind(
-        &mut source,
-        &mut profile_counts,
-        known_profiles,
+    runtime_doctor_collect_binding_kind(
+        &mut events,
+        1,
         "session",
         input.session_profile_bindings,
         profile_name,
         bound_at,
     );
-    runtime_doctor_record_binding_source_kind(
-        &mut source,
-        &mut profile_counts,
-        known_profiles,
+    runtime_doctor_collect_binding_kind(
+        &mut events,
+        2,
         "turn_state",
         input.turn_state_bindings,
         profile_name,
         bound_at,
     );
-    runtime_doctor_record_binding_source_kind(
-        &mut source,
-        &mut profile_counts,
-        known_profiles,
+    runtime_doctor_collect_binding_kind(
+        &mut events,
+        3,
         "session_id",
         input.session_id_bindings,
         profile_name,
         bound_at,
     );
-    source.profiles = profile_counts.into_values().collect();
-    source.profiles.sort_by(|left, right| {
-        right
-            .total_bindings
-            .cmp(&left.total_bindings)
-            .then_with(|| left.profile.cmp(&right.profile))
-    });
-    source.profile_count = source.profiles.len();
-    source
+    // Rust preserves borrowed names and known-profile lookup; Mojo computes
+    // counts, chronology, sample admission and the ranked profile permutation.
+    let mut indices = BTreeMap::<&str, usize>::new();
+    for event in &events {
+        indices.entry(event.profile).or_default();
+    }
+    for (index, value) in indices.values_mut().enumerate() {
+        *value = index;
+    }
+    let names = indices.keys().copied().collect::<Vec<_>>();
+    let rows = events
+        .iter()
+        .map(|event| RuntimeDoctorBindingRow {
+            profile_index: *indices
+                .get(event.profile)
+                .expect("every scanned binding profile has a borrowed name index"),
+            kind: event.kind,
+            bound_at: event.bound_at,
+            known_profile: known_profiles.contains(event.profile),
+        })
+        .collect::<Vec<_>>();
+    let plan = prodex_mojo_core::rich::runtime_doctor_binding_source_plan(&rows, names.len())
+        .expect("Mojo runtime-doctor binding reducer returned invalid output");
+    let missing_profile_binding_samples = plan
+        .missing_sample_indices
+        .into_iter()
+        .map(|index| {
+            let event = &events[index];
+            format!("{}:{}->{}", event.label, event.key, event.profile)
+        })
+        .collect();
+    let profiles: Vec<_> = plan
+        .profiles
+        .into_iter()
+        .map(|profile| RuntimeDoctorBindingProfileSummary {
+            profile: names[profile.name_index].to_string(),
+            response_bindings: profile.counts[0],
+            session_bindings: profile.counts[1],
+            turn_state_bindings: profile.counts[2],
+            session_id_bindings: profile.counts[3],
+            total_bindings: profile.total,
+        })
+        .collect();
+    RuntimeDoctorBindingSourceSummary {
+        response_bindings: plan.by_kind[0],
+        session_bindings: plan.by_kind[1],
+        turn_state_bindings: plan.by_kind[2],
+        session_id_bindings: plan.by_kind[3],
+        total_bindings: plan.total,
+        profile_count: profiles.len(),
+        profiles,
+        missing_profile_bindings: plan.missing_profile_bindings,
+        missing_profile_binding_samples,
+        oldest_bound_at: plan.oldest_bound_at,
+        newest_bound_at: plan.newest_bound_at,
+    }
 }
 
 pub fn runtime_doctor_binding_state_summary<B, F, G>(

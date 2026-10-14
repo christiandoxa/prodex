@@ -562,6 +562,7 @@ fn selected_sources() -> Vec<&'static str> {
         sources.push("../../mojo/prodex_core/log_parser.mojo");
         sources.push("../../mojo/prodex_core/runtime_doctor_plan.mojo");
         sources.push("../../mojo/prodex_core/runtime_doctor_marker.mojo");
+        sources.push("../../mojo/prodex_core/runtime_doctor_bindings.mojo");
         sources.push("../../mojo/prodex_core/runtime_doctor_marker_summary.mojo");
         sources.push("../../mojo/prodex_core/runtime_doctor_degraded_routes.mojo");
         sources.push("../../mojo/prodex_core/runtime_doctor_render.mojo");
