@@ -2,6 +2,26 @@ use super::*;
 use std::ffi::OsString;
 use std::time::{Duration, Instant};
 
+// Python process startup on saturated Windows runners is slower than the
+// ACP protocol exchange. Keep these fixture tolerances separate from the
+// five-second production bootstrap deadline and retain a bounded limit.
+fn kiro_acp_test_start_budget() -> Duration {
+    if cfg!(windows) {
+        Duration::from_secs(15)
+    } else {
+        Duration::from_secs(5)
+    }
+}
+
+fn kiro_acp_test_response_budget() -> Duration {
+    if cfg!(windows) {
+        // Must remain shorter than the fake agent's 20-second linger.
+        Duration::from_secs(10)
+    } else {
+        Duration::from_secs(2)
+    }
+}
+
 #[test]
 fn kiro_acp_builds_initialize_and_session_requests() {
     let initialize = runtime_kiro_acp_initialize_request(
@@ -110,8 +130,13 @@ fn kiro_acp_accepts_string_request_ids() {
 fn kiro_acp_bootstrap_reads_initialize_session_and_notifications() {
     let root = temp_dir("bootstrap");
     let fake_agent = write_fake_kiro_acp_agent(&root);
-    let result = runtime_kiro_acp_bootstrap_with_command(fake_agent.as_os_str(), &root, &[])
-        .expect("bootstrap should succeed");
+    let result = runtime_kiro_acp_bootstrap_with_command_and_timeout(
+        fake_agent.as_os_str(),
+        &root,
+        &[],
+        kiro_acp_test_start_budget(),
+    )
+    .expect("bootstrap should succeed");
     assert_eq!(result.initialize.agent_info.version, "2.10.0");
     assert_eq!(result.session.session_id, "session-1");
     assert_eq!(
@@ -328,7 +353,7 @@ fn kiro_acp_prompt_turn_does_not_wait_for_agent_exit() {
     )
     .expect("prompt turn should stop after the terminal response");
 
-    assert!(started.elapsed() < Duration::from_secs(2));
+    assert!(started.elapsed() < kiro_acp_test_response_budget());
     let _ = fs::remove_dir_all(root);
 }
 
@@ -348,7 +373,7 @@ fn kiro_acp_internal_activity_smoke_is_non_executable_and_does_not_reconnect() {
     let response = runtime_kiro_acp_responses_value_from_prompt_turn(&turn, 11);
     let serialized = serde_json::to_string(&response).unwrap();
 
-    assert!(started.elapsed() < Duration::from_secs(2));
+    assert!(started.elapsed() < kiro_acp_test_response_budget());
     assert_eq!(turn.prompt_response.id, Some(json!(2)));
     assert!(serialized.contains("final answer"));
     assert!(serialized.contains("phase=started"));

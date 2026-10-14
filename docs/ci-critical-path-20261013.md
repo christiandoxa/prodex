@@ -488,3 +488,47 @@ single ~5-6 minute serial tail; it does not remove tests. Together with
 the cached Mojo prerequisite, it should reduce the nightly suite
 critical path, but actual end-to-end savings are not claimed until a new
 scheduled or full manually dispatched run completes.
+
+
+## Windows x64 ThinLTO codegen benchmark and CI fixture timing (October 14)
+
+The successful official
+[0.437.11 standalone release](https://github.com/christiandoxa/prodex/actions/runs/38504477460)
+finished in about **14m 9s** with 19/19 jobs green. The dominant
+single build was x86_64-pc-windows-msvc: **8m44s** compiling and **10m8s**
+including setup/cache upload. Native Windows ARM64 compilation took 5m25s
+and both macOS release builds finished in about 5 minutes each.
+All six Mojo archives were verified or safely reused in less than 30 seconds.
+The antivirus health check and release-asset scan took 39s and 58s;
+neither security gate is optional.
+
+The x64 Windows release compiler logged **281 sccache misses, zero hits**
+(0% cache reuse) on the version-bumped source. Before changing critical
+optimization flags or disabling a potentially useful cache, the
+opt-in release-windows-x64-codegen-calibration.yml performs a controlled
+A/B on the same official source SHA and its verified Mojo COFF archive.
+Its two independent native Windows runners both build genuine ThinLTO:
+16 codegen units (the default) and 64 codegen units, without sccache.
+Both variants must validate the PE x64 architecture, version/help, and
+compiled-in Mojo diagnostics; timing/size text is the only uploaded
+artifact. No release or tag is modified. The official Windows runner,
+ThinLTO and package profile remain unchanged until this experiment
+provides verified correctness and a useful measured improvement; more
+codegen units may reduce final optimizer quality, so end-user performance
+remains a distinct concern.
+
+On the CI side, [run 38503088881](https://github.com/christiandoxa/prodex/actions/runs/38503088881)
+succeeded on the second attempt after two unchanged Windows fake-Kiro
+ACP tests missed hard wall-clock assumptions on the first attempt.
+The deterministic Python agent performs valid local protocol operations;
+runner process startup and scheduling overhead can vary independently
+from the Kiro ACP implementation. The fixture bootstrap therefore
+allows up to 15 seconds on Windows but leaves the production 5-second
+deadline unchanged. Two fixture response-time assertions allow 10 seconds
+on Windows while retaining 2 seconds on Unix; the explicit fake-agent
+linger is increased from 5 to 20 seconds on Windows so a regression
+that incorrectly waits for child exit still fails. Timeout/termination
+tests and child-invocation assertions remain intact; there are no
+live provider requests. Preventing false-negative CI attempts avoids
+a substantially more expensive rerun than a few seconds of test-only
+scheduling slack.

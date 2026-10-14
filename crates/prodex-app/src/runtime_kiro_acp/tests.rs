@@ -76,7 +76,7 @@ print(json.dumps({"jsonrpc":"2.0","method":"_kiro.dev/metadata","params":{"sessi
 print(json.dumps({"jsonrpc":"2.0","result":{"status":"completed"},"id":2}), flush=True)
 if os.environ.get("LINGER_AFTER_RESPONSE"):
     import time
-    time.sleep(5)
+    time.sleep(20 if os.name == "nt" else 5)
 "#,
     )
 }
