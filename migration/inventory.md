@@ -71,7 +71,7 @@ not claims about the historical 0.419.0 wave.
 | `prodex-gateway-server` | Hyper/TLS serving and connection handling | IO/async | Hyper, Tokio, rustls | Critical | C | `KEEP_RUST` | Explicit ecosystem-heavy keep decision |
 | `prodex-storage*` | Adapter-neutral plans and DB/Redis drivers | IO/stateful | SQLite, PostgreSQL, Redis, async | Critical | C | `KEEP_RUST` | Do not recreate mature drivers or wire protocols |
 | `prodex-cli`, `prodex-app`, root binaries | CLI parsing, command routing, orchestration | IO/orchestration | Clap, Tokio, processes | Critical | C | `KEEP_RUST` | Rust remains host application |
-| `prodex-cli::CodexRuntimeFeatureArgs` | Plan Codex feature and rollout-budget configuration overrides | Pure after Clap parsing | Fixed-width modes, thresholds, weights, and flags | Low | A | `MOVE_NOW` | Mojo owns feature eligibility, reminder normalization/order, and proxy precedence; Rust retains Clap values and `OsString` rendering |
+| `prodex-cli::CodexRuntimeFeatureArgs` | Plan Codex feature and rollout-budget configuration overrides | Pure after Clap parsing | Fixed-width modes, thresholds, weights, and flags | Low | A | `MOVE_NOW` | Mojo owns feature eligibility, reminder normalization/order, proxy precedence, and TOML string escaping; Rust retains Clap values, numeric rendering, and `OsString` assembly |
 | prodex-app ping protocol core | Validate bounded Codex JSONL turn ordering and classify typed OpenAI failures | Pure after process output capture | borrowed JSONL/error text | Medium | A/B | MOVE_NOW | Release builds call prodex_mojo_ping_validate_jsonl_v1 and prodex_mojo_ping_classify_failure_v1; Rust retains process/profile/timeout/redaction/render boundaries and a feature-off oracle. |
 | `prodex-authn`, `prodex-secret-store`, `prodex-presidio` | OAuth, credentials, redaction | Security/IO | crypto, browser, secret stores | Critical | C | `KEEP_RUST` | Secrets never cross the initial Mojo boundary |
 | `prodex-profile-*`, `prodex-shared-codex-fs`, `prodex-core` | Profile/path/filesystem operations | IO | filesystem, platform | High | C | `KEEP_RUST` | OS semantics and secret paths remain Rust-owned |
@@ -132,8 +132,8 @@ compatibility build requires it.
 ## Codex runtime feature configuration wave (2026-09-25)
 
 `CodexRuntimeFeatureArgs` now delegates feature eligibility, rollout reminder
-filtering/defaults/sort/deduplication, current-time reminder enablement, and
-proxy override precedence to the compiled Mojo planner. Rust retains Clap
-values, fixed-width ABI mapping, validated result reconstruction, and ordered
-`OsString`/TOML rendering. The feature-off Rust plan remains a parity oracle;
-Mojo errors propagate without runtime recomputation.
+filtering/defaults/sort/deduplication, current-time reminder enablement, proxy
+override precedence, and TOML string escaping to compiled Mojo owners. Rust
+retains Clap values, fixed-width ABI mapping, validated result reconstruction,
+numeric rendering, and ordered `OsString` assembly. Mojo errors propagate
+without runtime recomputation.

@@ -3195,7 +3195,7 @@
       "production_fallback": false,
       "duplicate_production_owner": false,
       "platform_fallback": false,
-      "rust_adapter_scope": "Clap values, fixed-width ABI mapping, validated result mapping, and TOML/OsString rendering"
+      "rust_adapter_scope": "Clap values, fixed-width ABI mapping, validated result mapping, numeric TOML rendering, ordered override assembly, and OsString materialization"
     },
     {
       "name": "deepseek_simple_request_eligibility",
@@ -5455,7 +5455,8 @@
       "consumer": "crates/prodex-cli/src/runtime_args.rs",
       "production_consumers": [
         "crates/prodex-cli/src/runtime_args.rs",
-        "crates/prodex-cli/src/runtime_args/optional_tools.rs"
+        "crates/prodex-cli/src/runtime_args/optional_tools.rs",
+        "crates/prodex-cli/src/runtime_features.rs"
       ],
       "production_reachability_test": "crates/prodex-mojo-core/src/super_provider_config.rs",
       "rust_state_after": "adapter-only",
@@ -5466,8 +5467,8 @@
       "mojo_entry": "prodex_super_toml_string_v1",
       "consumer_marker": "prodex_mojo_core::super_provider_config::toml_string_literal",
       "rust_owner_before": "double-quoted TOML literal backslash and quote escaping used by Super model/provider overrides",
-      "rust_test_oracle": "deleted; direct kernel fixture covers backslash/quote escaping and CLI tests exercise Unicode model identifiers",
-      "rust_adapter_scope": "owned String materialization only"
+      "rust_test_oracle": "deleted; direct kernel fixture covers backslash/quote escaping and CLI tests exercise Unicode model identifiers plus runtime feature literals",
+      "rust_adapter_scope": "owned String materialization and RuntimeFeaturePlanError mapping only"
     },
     {
       "domain": "runtime-broker/version-guard",

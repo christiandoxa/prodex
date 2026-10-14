@@ -884,8 +884,11 @@ additional Mojo LOC are estimated at current Rust volume.
 `CodexRuntimeFeatureArgs` now calls `prodex_mojo_runtime_feature_plan_v1` for
 web-search selection, rollout-budget eligibility and reminder filtering,
 defaults, ordering and deduplication, current-time reminder enablement, and
-system-proxy precedence. Rust retains Clap and `OsString` ownership, fixed-width
-ABI mapping, validated result reconstruction, and TOML override rendering. The
+system-proxy precedence. The existing Super-provider Mojo serializer also owns
+the double-quoted TOML string escaping used by web-search and clock-source
+overrides. Rust retains Clap and `OsString` ownership, fixed-width ABI mapping,
+validated result reconstruction, numeric rendering, and ordered override
+assembly. The
 feature-off Rust planner and test oracle were deleted after parity; builds
 without `mojo-core` reject requested runtime feature overrides. Mojo errors
 propagate without Rust recomputation.
