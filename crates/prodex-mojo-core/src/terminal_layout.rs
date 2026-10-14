@@ -25,6 +25,29 @@ unsafe extern "C" {
         line_count: u64,
         result_address: u64,
     ) -> i64;
+    fn prodex_terminal_token_chunk_plan_v1(
+        abi: i64,
+        widths_address: u64,
+        scalar_count: i64,
+        maximum_cells: u64,
+        boundaries_address: u64,
+        boundaries_capacity: i64,
+        written_address: u64,
+    ) -> i64;
+    fn prodex_terminal_take_display_cells_v1(
+        abi: i64,
+        widths_address: u64,
+        scalar_count: i64,
+        maximum_cells: u64,
+        result_address: u64,
+    ) -> i64;
+    fn prodex_terminal_fit_cell_plan_v1(
+        abi: i64,
+        content_cells: u64,
+        available_cells: u64,
+        result_address: u64,
+        result_capacity: i64,
+    ) -> i64;
 }
 
 fn check_status(status: i64) -> Result<(), MojoError> {
@@ -38,6 +61,113 @@ fn check_status(status: i64) -> Result<(), MojoError> {
 
 fn from_usize(value: usize) -> Result<u64, MojoError> {
     u64::try_from(value).map_err(|_| MojoError::InvalidInput)
+}
+
+/// The host materializes strings only; the width and truncation decisions
+/// come from a compiled Mojo ABI, without a duplicated Rust fallback.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FitCellPlan {
+    Empty,
+    Keep,
+    Dots(usize),
+    Truncate(usize),
+}
+
+pub fn fit_cell_plan(
+    content_cells: usize,
+    available_cells: usize,
+) -> Result<FitCellPlan, MojoError> {
+    let mut result = [u64::MAX; 2];
+    check_status(unsafe {
+        prodex_terminal_fit_cell_plan_v1(
+            ABI_VERSION,
+            from_usize(content_cells)?,
+            from_usize(available_cells)?,
+            result.as_mut_ptr() as usize as u64,
+            2,
+        )
+    })?;
+    match result {
+        [0, 0] => Ok(FitCellPlan::Empty),
+        [1, 0] => Ok(FitCellPlan::Keep),
+        [2, n] if n > 0 && n <= 3 => Ok(FitCellPlan::Dots(
+            usize::try_from(n).map_err(|_| MojoError::InvalidOutput)?,
+        )),
+        [3, n] if n > 0 => Ok(FitCellPlan::Truncate(
+            usize::try_from(n).map_err(|_| MojoError::InvalidOutput)?,
+        )),
+        _ => Err(MojoError::InvalidOutput),
+    }
+}
+
+/// Mojo returns scalar indexes at which each visible Unicode token ends.
+/// The caller measures Unicode cell widths, never decides chunk boundaries.
+pub fn token_chunk_boundaries(
+    scalar_cells: &[u64],
+    max_cells: usize,
+) -> Result<Vec<usize>, MojoError> {
+    let capacity = scalar_cells
+        .len()
+        .checked_add(1)
+        .ok_or(MojoError::InvalidInput)?;
+    let count = i64::try_from(scalar_cells.len()).map_err(|_| MojoError::InvalidInput)?;
+    let mut endings = vec![u64::MAX; capacity];
+    let mut written = -1i64;
+    check_status(unsafe {
+        prodex_terminal_token_chunk_plan_v1(
+            ABI_VERSION,
+            scalar_cells.as_ptr() as usize as u64,
+            count,
+            from_usize(max_cells)?,
+            endings.as_mut_ptr() as usize as u64,
+            i64::try_from(capacity).map_err(|_| MojoError::InvalidInput)?,
+            (&mut written as *mut i64) as usize as u64,
+        )
+    })?;
+    let written = usize::try_from(written).map_err(|_| MojoError::InvalidOutput)?;
+    if written == 0 || written > capacity {
+        return Err(MojoError::InvalidOutput);
+    }
+    let endings = endings[..written]
+        .iter()
+        .map(|end| usize::try_from(*end).map_err(|_| MojoError::InvalidOutput))
+        .collect::<Result<Vec<_>, _>>()?;
+    if scalar_cells.is_empty() || max_cells == 0 {
+        return if endings == [0] {
+            Ok(endings)
+        } else {
+            Err(MojoError::InvalidOutput)
+        };
+    }
+    if endings.last() != Some(&scalar_cells.len())
+        || endings
+            .iter()
+            .any(|end| *end == 0 || *end > scalar_cells.len())
+        || endings.windows(2).any(|pair| pair[0] >= pair[1])
+    {
+        return Err(MojoError::InvalidOutput);
+    }
+    Ok(endings)
+}
+
+/// Plan the number of Unicode scalars fitting in an already measured cell
+/// budget. Zero-width grapheme marks follow the original scalar semantics.
+pub fn display_prefix_scalars(scalar_cells: &[u64], max_cells: usize) -> Result<usize, MojoError> {
+    let mut prefix = u64::MAX;
+    check_status(unsafe {
+        prodex_terminal_take_display_cells_v1(
+            ABI_VERSION,
+            scalar_cells.as_ptr() as usize as u64,
+            i64::try_from(scalar_cells.len()).map_err(|_| MojoError::InvalidInput)?,
+            from_usize(max_cells)?,
+            (&mut prefix as *mut u64) as usize as u64,
+        )
+    })?;
+    let prefix = usize::try_from(prefix).map_err(|_| MojoError::InvalidOutput)?;
+    if prefix > scalar_cells.len() {
+        return Err(MojoError::InvalidOutput);
+    }
+    Ok(prefix)
 }
 
 /// Plan the label column using the already measured Unicode cell width.
@@ -150,6 +280,98 @@ mod tests {
         ] {
             assert_eq!(panel_inline_height(lines).unwrap(), expected);
         }
+    }
+
+    #[test]
+    fn token_chunk_boundaries_preserve_oversized_and_zero_cell_segments() {
+        for (cells, maximum, expected) in [
+            (vec![], 2, vec![0]),
+            (vec![1, 1], 0, vec![0]),
+            (vec![1, 1, 1, 1], 2, vec![2, 4]),
+            (vec![2, 1], 3, vec![2]),
+            (vec![2, 1, 0, 2], 1, vec![1, 2, 4]),
+            (vec![0, 0, 1], 1, vec![3]),
+            (vec![0, 0], 1, vec![2]),
+            (vec![0, 0, 2, 1], 1, vec![3, 4]),
+            (vec![2], 1, vec![1]),
+            (vec![1, 0, 0, 1], 2, vec![4]),
+        ] {
+            assert_eq!(
+                token_chunk_boundaries(&cells, maximum).unwrap(),
+                expected,
+                "Mojo token chunking for widths {cells:?} / {maximum}",
+            );
+        }
+    }
+
+    #[test]
+    fn terminal_prefix_width_preserves_zero_width_unicode_scalars() {
+        for (widths, available, expected) in [
+            (vec![], 0, 0),
+            (vec![0, 0, 2, 1], 0, 2),
+            (vec![0, 0, 2, 1], 1, 2),
+            (vec![0, 0, 2, 1], 2, 3),
+            (vec![0, 0, 2, 1], 3, 4),
+            (vec![2, 2, 2], 4, 2),
+            (vec![1, 1, 1], usize::MAX, 3),
+        ] {
+            assert_eq!(
+                display_prefix_scalars(&widths, available).unwrap(),
+                expected
+            );
+        }
+    }
+
+    #[test]
+    fn terminal_fit_plan_retains_content_and_ellipsis_modes() {
+        for (content, available, expected) in [
+            (3, 0, FitCellPlan::Empty),
+            (0, 1, FitCellPlan::Keep),
+            (7, 7, FitCellPlan::Keep),
+            (7, 8, FitCellPlan::Keep),
+            (7, 3, FitCellPlan::Dots(3)),
+            (7, 1, FitCellPlan::Dots(1)),
+            (7, 4, FitCellPlan::Truncate(1)),
+            (7, 6, FitCellPlan::Truncate(3)),
+        ] {
+            assert_eq!(fit_cell_plan(content, available).unwrap(), expected);
+        }
+    }
+
+    #[test]
+    fn strict_chunk_and_truncate_abi_reject_invalid_input_and_capacity() {
+        let widths = [1u64, 3];
+        let mut boundaries = [u64::MAX; 3];
+        let mut written = -1i64;
+        let input = widths.as_ptr() as usize as u64;
+        let output = boundaries.as_mut_ptr() as usize as u64;
+        let count_ptr = (&mut written as *mut i64) as usize as u64;
+        assert_eq!(
+            unsafe { prodex_terminal_token_chunk_plan_v1(4, input, 2, 1, output, 3, count_ptr) },
+            4,
+        );
+        assert_eq!(
+            unsafe { prodex_terminal_token_chunk_plan_v1(1, input, 2, 1, output, 2, count_ptr) },
+            1,
+        );
+        assert_eq!(
+            unsafe { prodex_terminal_token_chunk_plan_v1(1, 0, 2, 1, output, 3, count_ptr) },
+            1,
+        );
+        assert_eq!(
+            unsafe { prodex_terminal_token_chunk_plan_v1(1, input, 2, 1, output, 3, count_ptr) },
+            1,
+            "reject cell widths outside Unicode's domain",
+        );
+        assert_eq!(
+            unsafe { prodex_terminal_take_display_cells_v1(1, input, 2, 2, 0) },
+            1,
+        );
+        assert_eq!(
+            unsafe { prodex_terminal_fit_cell_plan_v1(1, 4, 5, output, 1) },
+            1,
+        );
+        assert_eq!(written, -1, "invalid ABI must not publish a chunk count");
     }
 
     #[test]

@@ -1990,7 +1990,10 @@
         "operations": [
           "terminal_panel_label_column_planning",
           "terminal_session_report_column_planning",
-          "terminal_panel_inline_viewport_planning"
+          "terminal_panel_inline_viewport_planning",
+          "terminal_token_cell_chunk_segmentation",
+          "terminal_display_width_prefix_selection",
+          "terminal_fit_cell_ellipsis_policy"
         ]
       },
       {
@@ -2002,7 +2005,10 @@
         "operations": [
           "terminal_panel_label_column_planning",
           "terminal_session_report_column_planning",
-          "terminal_panel_inline_viewport_planning"
+          "terminal_panel_inline_viewport_planning",
+          "terminal_token_cell_chunk_segmentation",
+          "terminal_display_width_prefix_selection",
+          "terminal_fit_cell_ellipsis_policy"
         ]
       },
       {
@@ -8662,6 +8668,75 @@
       "duplicate_production_owner": false,
       "platform_fallback": false,
       "rust_adapter_scope": "Rust reads Unicode whitespace/alphanumeric/control properties from its standard Unicode tables, packs at most 4096 scalars, validates Mojo boolean output and performs log I/O/visibility transformations; no Rust punctuation table or binary decision rules remain"
+    },
+    {
+      "name": "terminal_token_cell_chunk_segmentation",
+      "domain": "terminal/text-wrap",
+      "introduced_in": "0.438.0",
+      "baseline_state": "Rust accumulated Unicode display widths and chose every token chunk boundary, including overwide and zero-width scalars",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_terminal_token_chunk_plan_v1",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/terminal_layout.mojo",
+      "consumer": "crates/prodex-terminal-ui/src/text.rs",
+      "consumer_marker": "prodex_mojo_core::terminal_layout::token_chunk_boundaries(",
+      "production_consumers": [
+        "crates/prodex-terminal-ui/src/text.rs"
+      ],
+      "production_reachability_test": "crates/prodex-terminal-ui/tests/src/lib.rs",
+      "rust_owner_before": "Rust accumulated Unicode display widths and chose every token chunk boundary, including overwide and zero-width scalars",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "deleted from production, compare actual linked Mojo callers against recovered original Rust test-only source",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "Rust uses the UnicodeWidthChar standard table and constructs UTF-8 strings from Mojo-returned scalar boundaries"
+    },
+    {
+      "name": "terminal_display_width_prefix_selection",
+      "domain": "terminal/text-truncation",
+      "introduced_in": "0.438.0",
+      "baseline_state": "Rust iterated Unicode scalars, accumulated cell widths and chose prefix boundary for truncation",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_terminal_take_display_cells_v1",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/terminal_layout.mojo",
+      "consumer": "crates/prodex-terminal-ui/src/text.rs",
+      "consumer_marker": "prodex_mojo_core::terminal_layout::display_prefix_scalars(",
+      "production_consumers": [
+        "crates/prodex-terminal-ui/src/text.rs"
+      ],
+      "production_reachability_test": "crates/prodex-terminal-ui/tests/src/lib.rs",
+      "rust_owner_before": "Rust iterated Unicode scalars, accumulated cell widths and chose prefix boundary for truncation",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "deleted from production, compare actual linked Mojo callers against recovered original Rust test-only source",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "Rust measures UnicodeWidthChar and slices the original UTF-8 string at the scalar index chosen by Mojo"
+    },
+    {
+      "name": "terminal_fit_cell_ellipsis_policy",
+      "domain": "terminal/text-fit",
+      "introduced_in": "0.438.0",
+      "baseline_state": "Rust chose when to keep content, clear a zero-width cell, fill dots, or calculate ellipsis prefix budget",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_terminal_fit_cell_plan_v1",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/terminal_layout.mojo",
+      "consumer": "crates/prodex-terminal-ui/src/text.rs",
+      "consumer_marker": "prodex_mojo_core::terminal_layout::fit_cell_plan(",
+      "production_consumers": [
+        "crates/prodex-terminal-ui/src/text.rs"
+      ],
+      "production_reachability_test": "crates/prodex-terminal-ui/tests/src/lib.rs",
+      "rust_owner_before": "Rust chose when to keep content, clear a zero-width cell, fill dots, or calculate ellipsis prefix budget",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "deleted from production, compare actual linked Mojo callers against recovered original Rust test-only source",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "Rust measures UnicodeWidthStr and constructs dots/ellipsis from mandatory Mojo mode and budget"
     }
   ],
   "rust_semantic_reductions": [
