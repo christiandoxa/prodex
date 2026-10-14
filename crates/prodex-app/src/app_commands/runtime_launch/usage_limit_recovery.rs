@@ -12,6 +12,8 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 #[path = "usage_limit_recovery/monitor_workflow.rs"]
 mod monitor_workflow;
+#[path = "usage_limit_recovery/observer_io.rs"]
+mod observer_io;
 #[path = "usage_limit_recovery/plan.rs"]
 mod plan;
 #[path = "usage_limit_recovery/telemetry.rs"]
@@ -53,6 +55,7 @@ pub(crate) struct GoalUsageLimitMonitor {
     last_goal_update_ms: Option<i64>,
     suppressed_goal_update_ms: Option<i64>,
     workflow_scan_retry_at: Option<Instant>,
+    observer_retry_at: Option<Instant>,
     session_usage_limit_reported: bool,
     session_scan_offset: u64,
     next_retry_at: Instant,
@@ -83,6 +86,7 @@ impl GoalUsageLimitMonitor {
             last_goal_update_ms: None,
             suppressed_goal_update_ms: None,
             workflow_scan_retry_at: None,
+            observer_retry_at: None,
             session_usage_limit_reported: false,
             session_scan_offset: 0,
             next_retry_at: Instant::now(),
@@ -94,12 +98,11 @@ impl GoalUsageLimitMonitor {
         monitor
     }
 
-    pub(crate) fn take_usage_limit_signal(&mut self) -> Result<Option<String>> {
+    fn poll_usage_limit_signal(&mut self) -> Result<Option<String>> {
         self.refresh_session_id()?;
         let Some(session_id) = self.session_id.clone() else {
             return Ok(None);
         };
-        let workflow_recovery = self.observe_workflow_recovery(&session_id)?;
         let status = if let Some(db_path) = self.db_path.as_ref() {
             if self.connection.is_none() {
                 self.connection = Some(
@@ -124,6 +127,13 @@ impl GoalUsageLimitMonitor {
         } else {
             None
         };
+        // Read the goal database before advancing the rollout cursor. If the
+        // observer runs out of descriptors or SQLite is busy, the terminal
+        // failure must remain unread until a later successful observation.
+        let workflow_recovery = self.observe_workflow_recovery(&session_id)?;
+        if self.workflow_scan_retry_at.is_some() {
+            return Ok(None);
+        }
         let normalized = status.as_ref().map(|(status, _)| status.trim());
         self.session_goal_present = status.is_some();
         self.last_goal_update_ms = status.as_ref().map(|(_, updated)| *updated);

@@ -693,3 +693,9 @@ fn large_historical_rollout_keeps_incremental_monitor_available() {
 
 #[path = "native_task_complete_tests.rs"]
 mod native_task_complete;
+
+#[path = "observer_resource_tests.rs"]
+mod observer_resource_tests;
+
+#[path = "websocket_timeout_tests.rs"]
+mod websocket_timeout_tests;

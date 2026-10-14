@@ -217,7 +217,8 @@ def prodex_launch_workflow_recovery_class_v1(
     return PRODEX_WORKFLOW_CLASS_STATUS_OK
 
 
-# Native RequestTimeout is serialized as codex_error_info=other. Restrict the
+# Native RequestTimeout and WebSocket idle disconnects can be serialized as
+# codex_error_info=other. Restrict the
 # compatibility projection to exact native error messages in a failed event;
 # arbitrary text mentioning timeouts or explicit auth/client errors must not
 # authorize a retry or account change.
@@ -256,6 +257,10 @@ def prodex_launch_workflow_recovery_class_v2(
             or launch_workflow_text_equals(
                 message_address, message_length,
                 StringSlice("Error running remote compact task: request timed out")
+            )
+            or launch_workflow_text_equals(
+                message_address, message_length,
+                StringSlice("stream disconnected before completion: idle timeout waiting for websocket")
             )
         )
     ):

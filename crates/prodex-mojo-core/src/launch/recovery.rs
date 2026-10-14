@@ -600,3 +600,38 @@ mod tests {
         );
     }
 }
+
+#[cfg(test)]
+mod websocket_timeout_tests {
+    use super::*;
+
+    #[test]
+    fn native_websocket_idle_timeout_is_exact_transport_not_generic_other() {
+        let message = "stream disconnected before completion: idle timeout waiting for websocket";
+        assert_eq!(
+            workflow_recovery_class_with_message("other", None, Some(message)).unwrap(),
+            Some(WorkflowRecoveryClass::Transport)
+        );
+        for status in [400, 401, 403, 429] {
+            assert_eq!(
+                workflow_recovery_class_with_message("other", Some(status), Some(message)).unwrap(),
+                None
+            );
+        }
+        for text in [
+            format!("quoted {message}"),
+            format!("{message}; rerun tools"),
+            "idle timeout waiting for websocket".to_string(),
+        ] {
+            assert_eq!(
+                workflow_recovery_class_with_message("other", None, Some(&text)).unwrap(),
+                None
+            );
+        }
+        assert_eq!(
+            workflow_recovery_class_with_message("contextWindowExceeded", None, Some(message))
+                .unwrap(),
+            None
+        );
+    }
+}
