@@ -112,7 +112,7 @@ test("inconsistent registry versions fail closed", async () => {
 test("runtime latest-stable reference drift fails even when online and audit versions agree", async () => {
   const { inventorySource, observed } = await auditedFixture();
   const staleInventory = inventorySource.replace(
-    'pub const RTK_LATEST_STABLE_REFERENCE: &str = "0.52.0";',
+    'pub const RTK_LATEST_STABLE_REFERENCE: &str = "1.0.0";',
     'pub const RTK_LATEST_STABLE_REFERENCE: &str = "0.50.0";',
   );
   await assert.rejects(
