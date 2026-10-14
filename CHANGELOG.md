@@ -22,6 +22,7 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 
 ### Misc
 
+- Audit RTK 1.0.1 release reference (`35f5b76`)
 - Migrate broker continuity metrics reducer (`229ec56`)
 - Align stream JSON validation with serde (`54235b5`)
 - Restore ownership manifest (`1087b5d`)
@@ -97,6 +98,12 @@ Clippy passed with all targets/features and warnings denied. The normal
 source-size limits remain unchanged (32 near-limit files); the obsolete
 quota adapter allowlist entry is removed rather than widened. Cargo audit
 reported zero vulnerabilities after the TLS update.
+
+The release freshness checkpoint also re-audits RTK 1.0.1 against the exact
+upstream commit/tree, checksum manifest and five platform archives. The OSS
+Linux edition passes version, bypass and legacy proxy alias smokes with
+telemetry and tracking disabled. The minimum compatible version is unchanged
+and no installed external tool is upgraded by this release.
 
 Full Changelog: [0.437.12...0.437.13](https://github.com/christiandoxa/prodex/compare/0.437.12...0.437.13)
 
