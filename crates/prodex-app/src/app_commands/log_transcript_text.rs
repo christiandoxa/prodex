@@ -1,6 +1,3 @@
-use std::iter::Peekable;
-use std::str::Chars;
-
 pub(super) fn transcript_text_from_content(content: &serde_json::Value) -> Option<String> {
     let values = content.as_array()?;
     let mut parts = Vec::new();
@@ -42,7 +39,8 @@ pub(super) fn transcript_visible_message_text(text: &str) -> Option<String> {
 }
 
 pub(super) fn transcript_visible_tool_output(output: &str) -> Option<String> {
-    let output = strip_transcript_ansi_codes(output);
+    let output = prodex_mojo_core::log::strip_transcript_ansi_codes(output)
+        .expect("compiled-in Mojo transcript normalizer failed");
     let output = output.trim();
     if output.is_empty() {
         return None;
@@ -149,50 +147,6 @@ fn transcript_line_looks_like_mojibake(stats: &TranscriptTextStats) -> bool {
         && stats.non_ascii.saturating_mul(100) >= stats.total.saturating_mul(20)
         && stats.readable_ascii.saturating_mul(100) <= stats.total.saturating_mul(55)
         && stats.whitespace.saturating_mul(6) <= stats.total
-}
-
-fn strip_transcript_ansi_codes(input: &str) -> String {
-    let mut output = String::with_capacity(input.len());
-    let mut chars = input.chars().peekable();
-    while let Some(ch) = chars.next() {
-        if ch == '\u{1b}' {
-            strip_escape_sequence(&mut chars);
-        } else if ch == '\r' {
-            if !matches!(chars.peek(), Some('\n')) {
-                output.push('\n');
-            }
-        } else {
-            output.push(ch);
-        }
-    }
-    output
-}
-
-fn strip_escape_sequence(chars: &mut Peekable<Chars<'_>>) {
-    match chars.peek().copied() {
-        Some('[') => {
-            chars.next();
-            for code in chars.by_ref() {
-                if ('@'..='~').contains(&code) {
-                    break;
-                }
-            }
-        }
-        Some(']') => {
-            chars.next();
-            let mut previous = '\0';
-            for code in chars.by_ref() {
-                if code == '\u{7}' || (previous == '\u{1b}' && code == '\\') {
-                    break;
-                }
-                previous = code;
-            }
-        }
-        Some(_) => {
-            chars.next();
-        }
-        None => {}
-    }
 }
 
 fn is_common_punctuation(ch: char) -> bool {

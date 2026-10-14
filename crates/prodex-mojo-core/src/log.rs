@@ -2,12 +2,16 @@ use crate::MojoError;
 
 mod event_name;
 mod level;
+mod pointers;
+use pointers::{mutable_pointer_address, pointer_address};
 mod runtime_line;
 mod snapshot;
+mod transcript_ansi;
 pub use event_name::render_log_event_name;
 pub use level::classify_log_level;
 pub use runtime_line::{RUNTIME_LOG_FORMAT_JSON, RUNTIME_LOG_FORMAT_TEXT, render_runtime_log_line};
 pub use snapshot::{LogSnapshotItemKind, snapshot_item_order};
+pub use transcript_ansi::strip_transcript_ansi_codes;
 
 const _: () = assert!(std::mem::size_of::<usize>() == std::mem::size_of::<u64>());
 
@@ -75,16 +79,6 @@ unsafe extern "C" {
         output_capacity: i64,
         written_address: u64,
     ) -> i64;
-}
-
-#[inline]
-fn pointer_address<T>(pointer: *const T) -> u64 {
-    pointer as usize as u64
-}
-
-#[inline]
-fn mutable_pointer_address<T>(pointer: *mut T) -> u64 {
-    pointer as usize as u64
 }
 
 const STRUCTURED_LOG_ABI_VERSION: i64 = 1;

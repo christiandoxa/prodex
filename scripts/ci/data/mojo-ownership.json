@@ -524,7 +524,8 @@
           "transcript_operation_value_policy",
           "transcript_tool_name_policy",
           "log_load_aggregation",
-          "runtime_log_line_rendering"
+          "runtime_log_line_rendering",
+          "transcript_tool_output_escape_normalization"
         ]
       },
       "mojo/prodex_core/profile_schedule.mojo": {
@@ -2001,6 +2002,16 @@
           "terminal_panel_label_column_planning",
           "terminal_session_report_column_planning",
           "terminal_panel_inline_viewport_planning"
+        ]
+      },
+      {
+        "path": "crates/prodex-mojo-core/src/log/transcript_ansi.rs",
+        "language": "rust",
+        "classification": "MIXED",
+        "production_reachable": true,
+        "role": "adapter",
+        "operations": [
+          "transcript_tool_output_escape_normalization"
         ]
       }
     ],
@@ -8604,6 +8615,29 @@
       "duplicate_production_owner": false,
       "platform_fallback": false,
       "rust_adapter_scope": "Create and draw Ratatui panels; Mojo determines the bounded viewport height"
+    },
+    {
+      "name": "transcript_tool_output_escape_normalization",
+      "domain": "cli/transcript-tool-output",
+      "introduced_in": "0.438.0",
+      "baseline_state": "Rust iterated Unicode scalars to strip ANSI CSI and OSC terminal sequences, discard ESC-prefixed scalars and normalize CRLF/lone CR in persisted transcript tool output",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_mojo_transcript_ansi_strip_v1",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/log_semantics.mojo",
+      "consumer": "crates/prodex-app/src/app_commands/log_transcript_text.rs",
+      "consumer_marker": "prodex_mojo_core::log::strip_transcript_ansi_codes(",
+      "production_consumers": [
+        "crates/prodex-app/src/app_commands/log_transcript_text.rs"
+      ],
+      "production_reachability_test": "crates/prodex-app/src/app_commands/log_tests.rs",
+      "rust_owner_before": "Rust transcript tool text ANSI/OSC/ESC parser and Unicode-scalar iterator including CR normalization",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "deleted; required-Mojo direct kernel cases plus native persisted-transcript caller tests cover ASCII CSI, OSC/BEL, ESC-backslash, Unicode, incomplete escapes, CRLF and junk stripping",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "borrow valid UTF-8 transcript data, allocate bounded caller-owned output, map ABI status, and render the visible log without duplicate escape parser"
     }
   ],
   "rust_semantic_reductions": [
