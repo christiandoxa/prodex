@@ -5489,3 +5489,49 @@ cover readiness, ordering, unknown values, code-review inclusion, and batches.
 
 The current broad report measures 110,104 reachable Mojo LOC and 222,387 Rust
 LOC (33.11% Mojo). The 75% project target remains in progress.
+
+## Broker previous-response continuity metrics migration
+
+`runtime_broker_continuity.mojo` now reduces negative-cache continuity metrics
+over route keys, effective-score decay, known-route filtering, and entry/failure
+counters. Rust retains profile-health map iteration and metric DTO materialization.
+Required-Mojo broker and runtime-broker caller tests cover decay, unknown routes,
+and all route counters.
+
+## Session state-database row matching migration
+
+The session selector Mojo owner now plans exact-over-prefix matching across raw
+thread IDs, `thread_`-stripped IDs, and rollout filename stems. Rust retains
+SQLite access, path containment checks, metadata validation, and selected-ID
+materialization. Session-store resolver tests cover thread-prefixed rows and the
+typed source plan.
+
+## Runtime feature TOML escaping migration
+
+CLI runtime-feature overrides now reuse the existing Mojo super-provider TOML
+literal serializer for quote and backslash escaping. Rust retains Clap values,
+numeric rendering, ordered override assembly, and `OsString` materialization.
+The CLI caller regression checks the rendered web-search and clock-source values.
+
+## Runtime cold-start eligibility migration
+
+Cold-start candidate eligibility now calls the existing Mojo waitable-candidate
+policy. Rust retains catalog projection, hard in-flight admission checks, route
+circuit reservation, and side effects. The app regression preserves failed-probe
+fallback eligibility while the runtime guards verify affinity and boundedness.
+
+## Runtime health ownership hardening
+
+The runtime health score adapter now fails closed when the Mojo score operation
+does not return its required result instead of substituting a Rust sentinel. A
+caller regression confirms transport penalties remain scoped to the affected
+route circuit.
+
+## OpenAI chat compatibility caller coverage
+
+Provider-core boundary coverage now exercises the existing Mojo OpenAI chat
+response and stream shaping operations through buffered and SSE transforms,
+including tool-call argument rewriting and lossless format metadata.
+
+The current broad report measures 110,309 reachable Mojo LOC and 222,558 Rust
+LOC (33.14% Mojo). The 75% project target remains in progress.
