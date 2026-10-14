@@ -2,68 +2,109 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.437.13 - 2026-10-15
+
+### Runtime
+
+- Preserve terminal output and recover observer pressure (`bf2cc2b`)
+
+### Docs
+
+- Record login authority coverage (`980c21d`)
+- Record extended Mojo wave (`e6c410a`)
+- Record Mojo 75 campaign wave (`8d4e04e`)
+- Record websocket frame checkpoint (`693bb73`)
+- Record status parser checkpoint (`bbc9646`)
+
+### Deps
+
+- Update rustls for October security advisories (`a2bd78c`)
+
+### Misc
+
+- Migrate broker continuity metrics reducer (`229ec56`)
+- Align stream JSON validation with serde (`54235b5`)
+- Restore ownership manifest (`1087b5d`)
+# Prodex 0.437.13
+
+## New Features
+
+No new CLI flags or saved-session storage changes are required.
+
+## Bug Fixes
+
+### Preserve session output after terminal teardown
+
+The post-child terminal cleanup selects the normal screen without restoring
+an obsolete saved cursor. Repeating the previous DEC 1049 reset after Codex
+had already exited its alternate screen restored the old cursor on VTE,
+causing even the plain-text footer to overwrite native output. A real VTE
+reproduction demonstrated the overlap and verified the idempotent DEC 1047
+handoff. Keyboard, mouse and paste cleanup and queued terminal input remain
+preserved. Session IDs and resume commands remain complete, Mojo-formatted
+plain text. No main-screen clear or scrollback purge is introduced.
+
+### Keep the frontend alive during observer descriptor pressure
+
+Temporary descriptor exhaustion while reading the launch-owned marker no
+longer propagates as a fatal child-wait error. The monitor releases only its
+own optional SQLite connection and retries after a bounded delay, keeping
+its identity and unread rollout cursor. SQLite availability is checked
+before advancing that cursor, so an unavailable goal store cannot consume
+a terminal failure without recovery. Unknown observation state authorizes
+neither replay nor account rotation. Invalid identities and non-transient
+errors still fail explicitly.
+
+An isolated low-RLIMIT test fills the child's descriptor table, checks
+that no termination is requested, releases pressure, recovers the unread
+failure exactly once and verifies stable descriptor usage across repeated
+polls. This addresses the demonstrated fatal observer behavior; the original
+exited process's descriptor consumers were unavailable for leak attribution.
+It does not claim to eliminate every possible source of descriptor pressure.
+
+### Recover a terminal WebSocket idle timeout
+
+The exact native message `stream disconnected before completion: idle timeout
+waiting for websocket`, recorded as `codex_error_info=other`, is now recognized
+by the compiled Mojo transport-error classifier. Existing terminal-event,
+root-session, acceptance, paused/completed-goal, budget and cancellation
+checks remain in force. Intermediate retry notifications do not interrupt
+the frontend; acknowledged or ambiguous mutations are not duplicated. This
+fixes recovery eligibility, not an upstream service's underlying timeout.
+
+### Security and release validation
+
+The locked TLS dependency is updated to rustls 0.23.46, resolving the four
+October 14 RustSec advisories found by the existing supply-chain gate.
+The prior main-branch size and quality failures are addressed by mechanical
+adapter splits and a smaller quota-input projection function. Ownership
+fixtures now distinguish source-only cleanup from the frozen release's
+migration volume without changing the denominator or minimum requirement.
+The multi-sweep Windows fixture retains a finite request-local deadline;
+separate watchdog tests still prove expiry and cancellation behavior.
+
+## Changelog
+
+Focused real-Mojo checks passed: 18 child-process/terminal lifecycle tests,
+49 usage-limit recovery tests, 18 session-recovery tests and the direct
+WebSocket classifier regression. Coverage includes low file-descriptor
+limits, retry backoff, unread-cursor preservation, blocked versus paused
+goals, complete session IDs and exact-message negative cases.
+
+The full Mojo-core library suite passed 397 tests; the quota library passed
+95 tests. Node tests reported 278 passes and one existing skip. Workspace
+Clippy passed with all targets/features and warnings denied. The normal
+source-size limits remain unchanged (32 near-limit files); the obsolete
+quota adapter allowlist entry is removed rather than widened. Cargo audit
+reported zero vulnerabilities after the TLS update.
+
+Full Changelog: [0.437.12...0.437.13](https://github.com/christiandoxa/prodex/compare/0.437.12...0.437.13)
+
 ## 0.437.12 - 2026-10-14
 
 ### Misc
 
 - Keep saved session IDs readable after Super exits (`f35210d`)
-# Prodex 0.437.12
-
-## New Features
-
-No new flags or changes to saved-session storage are required.
-
-## Bug Fixes
-
-### Readable session ID and resume command after exit
-
-After an interactive Super session exits, Prodex now appends a plain-text
-footer instead of opening another inline Ratatui panel over the native
-Codex usage and session summary. The previous panel could overwrite existing
-characters while leaving stale text in blank cells, obscuring the session ID.
-
-The footer prints the complete canonical session ID and a copyable
-`prodex s <session-id>` command on separate lines. It is appended with explicit
-line boundaries, with no cursor-position query, cursor movement, screen clear,
-software width truncation, or reference to a deleted overlay socket as a
-working resume endpoint. The footer appears only after the final child exit,
-not between automatic relaunch attempts, and is excluded from piped/non-TTY
-execution.
-
-Session identity comes from this launch's root-session notification. Fresh
-Super sessions still record that identity when automatic rotation is disabled
-or no rotation monitor exists. Existing user notification configuration is
-preserved. An explicit validated resume ID can be used when no hook reports
-an ID; otherwise the footer offers the session picker without guessing from
-another terminal's most recently saved session.
-
-Saved conversations, attachments, and paused goals are not changed. Only the
-launch-owned marker, offset, lock, and overlay are cleaned after their final
-consumer. Paused goals remain paused until `/goal resume`.
-
-## Changelog
-
-The formatter is compiled Mojo with bounded output and UUID validation;
-Rust retains terminal and filesystem operations. Regression tests cover
-exact session IDs, append-only output, unknown/invalid identities, root-marker
-precedence, marker cleanup, broken pipes, and record-only tracking without
-auto-rotation. Existing child teardown, terminal-mode restoration and queued
-input preservation tests remain in place. The prior runtime-doctor selection
-ABI and route-reason tests are separated into focused files to satisfy
-existing source-size and Clippy gates without removing tests or relaxing guards. The binding decoder also separates sample-index and
-profile-row validation into focused helpers while preserving all validation
-and Mojo ownership checks.
-
-### Validation evidence
-
-Local verification passed 6 saved-session regressions, 17 child-process and
-terminal lifecycle tests, 73 runtime-launch tests, and 386 Mojo-core tests.
-Workspace Clippy with all targets/features and warnings denied passed.
-The binding decoder regressions explicitly retain rejection of negative,
-out-of-range, duplicate, known-profile sample indexes and invalid profile totals.
-
-
-Full Changelog: [0.437.11...0.437.12](https://github.com/christiandoxa/prodex/compare/0.437.11...0.437.12)
 
 ## 0.437.11 - 2026-10-14
 
@@ -196,16 +237,3 @@ Full Changelog: [0.437.11...0.437.12](https://github.com/christiandoxa/prodex/co
 - Preserve DeepSeek usage output and metadata edge cases (`f71e135`)
 - Preserve Gemini data URL and media text contracts (`0b84d7a`)
 - Select oldest cookie across bounded ABI chunks without Rust fallback (`fff216f`)
-
-## 0.437.1 - 2026-10-09
-
-### Runtime
-
-- Preserve previous-response recovery precedence (`50f0004`)
-- Recover headerless and bound-turn upstream capacity (`bcecbb6`)
-- Move summary log formatting to Mojo (`e600780`)
-
-### CLI
-
-- Saturate profile geometry at integer boundaries (`75365cc`)
-- Migrate profile screen geometry policy (`9e04540`)
