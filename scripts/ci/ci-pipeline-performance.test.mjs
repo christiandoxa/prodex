@@ -299,8 +299,8 @@ test("official Windows ARM64 release uses native benchmark, strict PE and runtim
   assert.match(arm, /mojo-release: true/);
   assert.match(arm, /mojo-features: mojo-core/);
   assert.match(build, /key: release-[^\n]*-arm64-native/);
-  assert.match(build, /matrix.target != 'aarch64-pc-windows-msvc'/);
-  assert.match(build, /if \[ "\$\{\{ matrix.target \}\}" = "aarch64-pc-windows-msvc" \]; then\n\s+cargo build --locked/);
+  assert.match(build, /matrix.target == 'x86_64-apple-darwin' \|\| matrix.target == 'aarch64-apple-darwin'/);
+  assert.match(build, /if \[\[ "\$\{\{ matrix.target \}\}" == \*-pc-windows-msvc \]\]; then\n\s+cargo build --locked/);
   assert.match(build, /name: Verify native Windows ARM64 artifact architecture/);
   assert.match(build, /\$env:PROCESSOR_ARCHITECTURE -cne 'ARM64'/);
   assert.match(build, /\$machine -ne 0xAA64/);
@@ -395,6 +395,16 @@ test("Windows x64 codegen A/B is opt-in, same official source and cannot publish
 
 
 test("Windows fake Kiro ACP timing remains bounded without relaxing production deadlines", () => {
+  const facade = readFileSync("crates/prodex-app/src/runtime_kiro_acp.rs", "utf8");
+  assert.match(
+    facade,
+    /#\[cfg\(test\)\]\npub\(crate\) use self::process::runtime_kiro_acp_bootstrap_with_command_and_timeout;/,
+    "the timeout-capable fixture must be available on Windows, not only Unix",
+  );
+  assert.doesNotMatch(
+    facade,
+    /#\[cfg\(all\(test, unix\)\)\]\npub\(crate\) use self::process::runtime_kiro_acp_bootstrap_with_command_and_timeout;/,
+  );
   const production = readFileSync("crates/prodex-app/src/runtime_kiro_acp/process.rs", "utf8");
   const tests = readFileSync("crates/prodex-app/src/runtime_kiro_acp/tests_bootstrap.rs", "utf8");
   const fixture = readFileSync("crates/prodex-app/src/runtime_kiro_acp/tests.rs", "utf8");
@@ -411,4 +421,68 @@ test("Windows fake Kiro ACP timing remains bounded without relaxing production d
   assert.match(tests, /activity-agent-invocations/);
   assert.match(tests, /kiro_acp_bootstrap_times_out_and_terminates_the_agent/);
   assert.match(tests, /kiro_acp_prompt_turn_times_out_and_terminates_the_agent/);
+});
+
+
+test("Linux cross release does not install unused host sccache wrapper", () => {
+  const build = workflowJob(release, "build", "attest-binaries");
+  assert.match(build, /- name: Install sccache\n/);
+  assert.match(
+    build,
+    /if: \$\{\{ matrix.use-cross == false && \(matrix.target == 'x86_64-apple-darwin' \|\| matrix.target == 'aarch64-apple-darwin'\) \}\}/,
+  );
+  assert.match(build, /if \[ "\$\{\{ matrix.use-cross \}\}" = "true" \]; then\n\s+cross build --locked/);
+  assert.match(build, /RUSTC_WRAPPER=sccache cargo build --locked/);
+  assert.match(build, /name: Verify compiled-in Mojo release/);
+  assert.match(build, /name: Native smoke test/);
+});
+
+
+test("stable cargo release dependency cache keeps version churn out without accepting stale compiler targets", () => {
+  const build = workflowJob(release, "build", "attest-binaries");
+  const fingerprint = build.match(/- name: Fingerprint only pinned external Rust dependencies\n([\s\S]*?)- name: Cache Rust dependencies/)?.[1];
+  const cache = build.match(/- name: Cache Rust dependencies\n([\s\S]*?)- name: Download target Mojo archive/)?.[1];
+  assert.ok(fingerprint, "source fingerprint step missing");
+  assert.ok(cache, "release compiler dependency cache step missing");
+  assert.match(fingerprint, /id: rust-deps-cache-key/);
+  assert.match(fingerprint, /scripts\/ci\/release_cargo_deps_cache_key\.py/);
+  assert.match(fingerprint, /--lockfile Cargo\.lock/);
+  assert.match(fingerprint, /--output "\$\{GITHUB_OUTPUT\}"/);
+  assert.match(cache, /Swatinem\/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6/);
+  assert.match(cache, /add-rust-environment-hash-key: "false"/);
+  assert.match(cache, /cache-workspace-crates: "false"/);
+  assert.match(cache, /release-deps-v1-rust1\.99\.0-thinlto-cgu16/);
+  assert.match(cache, /env\.MOJO_VERSION/);
+  assert.match(cache, /runner\.os/);
+  assert.match(cache, /runner\.arch/);
+  assert.match(cache, /matrix\.target/);
+  assert.match(cache, /matrix\.mojo-target-cpu/);
+  assert.match(cache, /steps\.rust-deps-cache-key\.outputs\.external_sha256/);
+  assert.doesNotMatch(cache, /restore-keys:/);
+  assert.match(build, /name: Verify compiled-in Mojo release/);
+  assert.match(build, /"implementation": "mojo-compiled-in"/);
+  assert.match(build, /name: Native smoke test/);
+  assert.match(build, /name: Upload binary artifact/);
+  assert.match(build, /needs:\s*\n\s*- verify-ci\n\s*- build-mojo-archives/);
+});
+
+
+test("official Windows x64 ThinLTO release omits cold sccache and retains native Mojo checks", () => {
+  const build = workflowJob(release, "build", "attest-binaries");
+  const x64 = build.match(/- target: x86_64-pc-windows-msvc\n([\s\S]*?)- target: aarch64-pc-windows-msvc/)?.[1];
+  assert.ok(x64, "Windows x64 native release target missing");
+  assert.match(x64, /runs-on: windows-latest/);
+  assert.match(x64, /mojo-features: mojo-core/);
+  assert.match(x64, /can-native-smoke: true/);
+  assert.match(x64, /can-mojo-runtime-smoke: true/);
+  assert.match(build, /if: \$\{\{ matrix.use-cross == false && \(matrix.target == 'x86_64-apple-darwin' \|\| matrix.target == 'aarch64-apple-darwin'\) \}\}/);
+  assert.match(build, /if \[\[ "\$\{\{ matrix.target \}\}" == \*-pc-windows-msvc \]\]; then\n\s+cargo build --locked/);
+  assert.match(build, /build_args=\(--release --target/);
+  assert.match(build, /PRODEX_MOJO_REQUIRED=1/);
+  assert.match(build, /name: Verify compiled-in Mojo release/);
+  assert.match(build, /"fallback": false/);
+  assert.match(build, /"self_test": "passed"/);
+  assert.match(build, /name: Native smoke test/);
+  assert.match(build, /name: Upload binary artifact/);
+  assert.match(build, /needs:\s*\n\s*- verify-ci\n\s*- build-mojo-archives/);
 });

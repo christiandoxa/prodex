@@ -1,4 +1,4 @@
-#[cfg(all(test, unix))]
+#[cfg(test)]
 pub(crate) use self::process::runtime_kiro_acp_bootstrap_with_command_and_timeout;
 #[cfg(test)]
 pub(crate) use self::process::runtime_kiro_acp_prompt_turn_with_command;
