@@ -5424,3 +5424,65 @@ WebSocket boundary tests passed (18). Focused Clippy with all targets/features,
 formatting, ownership, authority, no-fallback, production-share, and diff checks
 passed. The broad report measured 109,564 reachable Mojo LOC and 222,137 Rust
 LOC (33.03% Mojo); the 75% target remains in progress.
+
+## Session filename span planning migration
+
+`session_selector.mojo` now owns whole-stem precedence and bounded five-component
+filename-window scanning for session repair and full Codex session-ID extraction.
+Rust retains `Path` and `file_stem` acquisition, UTF-8 span validation, and
+materialization. Empty filename components, prefix matching, exact matching, and
+full-ID precedence are covered at the session-store caller boundary.
+
+## DeepSeek stream JSON parity correction
+
+The DeepSeek stream argument validator now rejects malformed UTF-16 surrogate
+escapes, non-finite numeric values, and nesting beyond the `serde_json` depth
+boundary while preserving valid pairs, underflowing values, and supported JSON
+scalars. Caller tests compare the Mojo policy with `serde_json` for these boundary
+cases.
+
+## Runtime-doctor marker context ordering migration
+
+`runtime_doctor_marker_summary.mojo` now filters and orders marker context rows by
+descending total and bytewise marker ties. Rust retains log parsing, DTO
+materialization, and the validated permutation application. Runtime-doctor tests
+cover contextless rows, totals, and UTF-8 marker ties.
+
+## Gemini response-envelope normalization migration
+
+Gemini wrapped-response selection and `traceId` to `responseId` replacement now
+run through the compiled Mojo response kernel. Rust retains JSON serialization,
+bounded ABI invocation, and result decoding. Direct Mojo and provider response
+transform tests cover direct, wrapped, non-object, missing/non-string trace IDs,
+and large bounded envelopes.
+
+## Ping diagnostic detail migration
+
+Ping status-to-detail text now comes from the Mojo ping protocol ABI. Rust retains
+status-tag mapping, structured failure extraction, and bounded process-error text.
+The ping caller regression verifies the Mojo-owned protocol-failure detail.
+
+## Runtime route-score suffix migration
+
+Runtime-store score compaction now delegates persisted route-health profile suffix
+extraction to the existing Mojo-owned runtime-state route-key policy. Rust retains
+score storage and compaction; a colon-bearing profile regression protects the
+caller contract.
+
+## Smart-context command precedence cleanup
+
+The unused Rust command-kind aggregation loop was removed. The semantic-index
+caller now relies on the existing Mojo batch planner for Python, cargo-test,
+npm-test, cargo-build, and diff precedence; Rust retains line and DTO handling.
+An artifact-store caller test covers the precedence through the production path.
+
+## Quota blocked-window planning migration
+
+`quota.mojo` now decides which main, additional, and code-review windows produce
+blocked rows, including runtime readiness, unknown usage, exhaustion, and batching.
+Rust retains provider observation ordering, reset-time formatting, unavailable
+messages, and terminal row rendering. Required-Mojo ABI and quota-renderer tests
+cover readiness, ordering, unknown values, code-review inclusion, and batches.
+
+The current broad report measures 110,104 reachable Mojo LOC and 222,387 Rust
+LOC (33.11% Mojo). The 75% project target remains in progress.
