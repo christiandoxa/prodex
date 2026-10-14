@@ -174,6 +174,32 @@ fn repair_resume_session_metadata_prefix_moves_late_metadata_to_start() {
 }
 
 #[test]
+fn repair_resume_session_metadata_prefix_keeps_empty_filename_components() {
+    let root = test_temp_dir("session-repair-empty-filename-component");
+    let sessions = root.join("sessions/2026/06/13");
+    fs::create_dir_all(&sessions).expect("session dir should be created");
+    let session_path = sessions.join("é--prefix-a-b-c-d.jsonl");
+    fs::write(
+        &session_path,
+        "{\"timestamp\":\"2026-06-13T02:04:31Z\",\"type\":\"event\",\"payload\":{\"message\":\"legacy session\"}}\n",
+    )
+    .expect("session should be written");
+
+    let repaired = repair_resume_session_metadata_prefix(&root, "-prefix-a-b")
+        .expect("session repair should succeed");
+
+    assert_eq!(repaired.as_deref(), Some(session_path.as_path()));
+    let repaired_raw = fs::read_to_string(&session_path).expect("session should be readable");
+    let first_line = repaired_raw
+        .lines()
+        .next()
+        .expect("metadata should be first");
+    assert_codex_session_meta_line(first_line, "-prefix-a-b-c", Some("2026-06-13T02:04:31Z"));
+
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
 fn repair_resume_session_metadata_prefix_prefers_exact_rollout_path() {
     let root = test_temp_dir("session-repair-prefers-exact-path");
     let sessions = root.join("sessions/2026/06/13");

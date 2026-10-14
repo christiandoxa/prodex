@@ -21,6 +21,7 @@ mod session_selector;
 pub use self::session_selector::{
     SessionFileNamePlan, session_file_name_plan, session_report_query_matches,
     session_selector_is_full, session_selector_match_plan, session_selector_matches,
+    session_selector_path_span,
 };
 mod kiro_catalog;
 pub use self::kiro_catalog::{

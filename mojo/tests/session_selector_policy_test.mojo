@@ -5,6 +5,7 @@ from rich_types import ProdexRichStringView
 from session_selector import (
     prodex_session_report_query_matches_v1,
     prodex_session_selector_match_plan_v1,
+    prodex_session_selector_path_span_v1,
 )
 
 
@@ -25,6 +26,25 @@ def call_plan(
         Int64(selector.byte_length()),
         UInt(Int(output.unsafe_ptr())),
         Int64(len(output)),
+    )
+
+
+def call_path_span(
+    stem: String,
+    selector: String,
+    exact: Int64,
+    require_full: Int64,
+    output: List[Int64],
+) -> Int64:
+    return prodex_session_selector_path_span_v1(
+        1,
+        UInt(Int(stem.unsafe_ptr())),
+        Int64(stem.byte_length()),
+        UInt(Int(selector.unsafe_ptr())),
+        Int64(selector.byte_length()),
+        exact,
+        require_full,
+        UInt(Int(output.unsafe_ptr())),
     )
 
 
@@ -108,6 +128,38 @@ def test_report_query_matches_fixed_fields() raises:
     assert invalid_output[0] == -1
 
 
+def test_path_span_preserves_stem_and_window_contract() raises:
+    var output = List[Int64]()
+    output.append(-1)
+    output.append(-1)
+    var stem = String("é--prefix-a-b-c-d")
+    var selector = String("-prefix-a-b")
+    assert call_path_span(stem, selector, 0, 0, output) == 0
+    assert output[0] == 3
+    assert output[1] == 16
+
+    output[0] = -1
+    output[1] = -1
+    stem = String("prefix-a-b-c-d-e")
+    selector = String("prefix")
+    assert call_path_span(stem, selector, 0, 0, output) == 0
+    assert output[0] == 0
+    assert output[1] == Int64(stem.byte_length())
+
+    output[0] = -1
+    output[1] = -1
+    var id = String("01900000-0000-7000-8000-000000000301")
+    selector = String("")
+    assert call_path_span(id, selector, 1, 1, output) == 0
+    assert output[0] == 0
+    assert output[1] == 36
+    stem = String("prefix-01900000-0000-7000-8000-000000000301-suffix")
+    assert call_path_span(stem, selector, 1, 1, output) == 0
+    assert output[0] == 7
+    assert output[1] == 43
+
+
 def main() raises:
     test_exact_prefix_and_mutation_sensitivity()
     test_report_query_matches_fixed_fields()
+    test_path_span_preserves_stem_and_window_contract()
