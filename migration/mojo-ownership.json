@@ -1978,6 +1978,30 @@
         "operations": [
           "deepseek_stream_tool_arguments_policy"
         ]
+      },
+      {
+        "path": "mojo/prodex_core/terminal_layout.mojo",
+        "language": "mojo",
+        "classification": "DETERMINISTIC_DOMAIN",
+        "production_reachable": true,
+        "role": "semantic",
+        "operations": [
+          "terminal_panel_label_column_planning",
+          "terminal_session_report_column_planning",
+          "terminal_panel_inline_viewport_planning"
+        ]
+      },
+      {
+        "path": "crates/prodex-mojo-core/src/terminal_layout.rs",
+        "language": "rust",
+        "classification": "MIXED",
+        "production_reachable": true,
+        "role": "adapter",
+        "operations": [
+          "terminal_panel_label_column_planning",
+          "terminal_session_report_column_planning",
+          "terminal_panel_inline_viewport_planning"
+        ]
       }
     ],
     "removed": [
@@ -8511,6 +8535,75 @@
       "duplicate_production_owner": false,
       "platform_fallback": false,
       "rust_adapter_scope": "persist typed release observations and apply mandatory Mojo plan; Rust keeps locking, filesystem and broker side effects"
+    },
+    {
+      "name": "terminal_panel_label_column_planning",
+      "domain": "terminal/panel-label-layout",
+      "introduced_in": "0.438.0",
+      "baseline_state": "Rust measured Unicode display cells, then clamped terminal label length by available width, one-quarter preferred column and min/max limits",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_terminal_panel_label_width_v1",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/terminal_layout.mojo",
+      "consumer": "crates/prodex-terminal-ui/src/panel.rs",
+      "consumer_marker": "prodex_mojo_core::terminal_layout::panel_label_width(",
+      "production_consumers": [
+        "crates/prodex-terminal-ui/src/panel.rs"
+      ],
+      "production_reachability_test": "crates/prodex-terminal-ui/tests/src/lib.rs",
+      "rust_owner_before": "Rust measured Unicode display cells, then clamped terminal label length by available width, one-quarter preferred column and min/max limits",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "deleted; required-Mojo ABI tests plus terminal-ui caller tests cover tiny/large viewports, Unicode width and report columns",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "Measure Unicode cell widths and field counts on the host, then invoke Mojo for all label width decisions"
+    },
+    {
+      "name": "terminal_session_report_column_planning",
+      "domain": "terminal/session-layout",
+      "introduced_in": "0.438.0",
+      "baseline_state": "Rust chose ID/updated/thread caps, split leftover CWD/path columns and enforced the tiny-terminal layout floor",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_terminal_session_columns_v1",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/terminal_layout.mojo",
+      "consumer": "crates/prodex-terminal-ui/src/session.rs",
+      "consumer_marker": "prodex_mojo_core::terminal_layout::session_columns(",
+      "production_consumers": [
+        "crates/prodex-terminal-ui/src/session.rs"
+      ],
+      "production_reachability_test": "crates/prodex-terminal-ui/tests/src/lib.rs",
+      "rust_owner_before": "Rust chose ID/updated/thread caps, split leftover CWD/path columns and enforced the tiny-terminal layout floor",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "deleted; required-Mojo ABI tests plus terminal-ui caller tests cover tiny/large viewports, Unicode width and report columns",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "Measure terminal gap cell width, construct the session report DTO and perform row rendering; Mojo alone plans column widths"
+    },
+    {
+      "name": "terminal_panel_inline_viewport_planning",
+      "domain": "terminal/viewport",
+      "introduced_in": "0.438.0",
+      "baseline_state": "Rust clamped inline Ratatui viewport height between four rows and the u16 host terminal limit",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_terminal_panel_inline_height_v1",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/terminal_layout.mojo",
+      "consumer": "crates/prodex-terminal-ui/src/panel.rs",
+      "consumer_marker": "prodex_mojo_core::terminal_layout::panel_inline_height(",
+      "production_consumers": [
+        "crates/prodex-terminal-ui/src/panel.rs"
+      ],
+      "production_reachability_test": "crates/prodex-terminal-ui/tests/src/lib.rs",
+      "rust_owner_before": "Rust clamped inline Ratatui viewport height between four rows and the u16 host terminal limit",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "deleted; required-Mojo ABI tests plus terminal-ui caller tests cover tiny/large viewports, Unicode width and report columns",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "Create and draw Ratatui panels; Mojo determines the bounded viewport height"
     }
   ],
   "rust_semantic_reductions": [

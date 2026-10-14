@@ -58,14 +58,10 @@ struct SessionReportColumnWidths {
 }
 
 fn session_report_column_widths(total_width: usize) -> SessionReportColumnWidths {
-    let gap_width = text_width(CLI_TABLE_GAP) * 4;
-    let available = total_width.saturating_sub(gap_width).max(5);
-    let id = (available / 5).clamp(1, 26);
-    let updated = (available / 5).clamp(1, 22);
-    let thread = (available / 5).clamp(1, 24);
-    let remaining = available.saturating_sub(id + updated + thread);
-    let cwd = remaining / 2;
-    let path = remaining.saturating_sub(cwd);
+    let gap_width = text_width(CLI_TABLE_GAP).saturating_mul(4);
+    let [id, updated, thread, cwd, path] =
+        prodex_mojo_core::terminal_layout::session_columns(total_width, gap_width)
+            .expect("compiled-in Mojo session table column layout policy failed");
     SessionReportColumnWidths {
         id,
         updated,

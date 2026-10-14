@@ -45,6 +45,68 @@ fn panel_label_width_allows_tiny_terminals() {
 }
 
 #[test]
+fn mojo_panel_label_width_preserves_unicode_and_tiny_layouts() {
+    for (total, label, expected) in [
+        (0, "Label", 1),
+        (8, "表🙂", 1),
+        (24, "表🙂", 4),
+        (80, "Field", 10),
+        (110, "Very Long Field Description", 24),
+    ] {
+        assert_eq!(
+            panel_label_width(&[(label.to_string(), "value".to_string())], total),
+            expected,
+        );
+        let unicode_longest = text_width(label) + 1;
+        assert_eq!(
+            prodex_mojo_core::terminal_layout::panel_label_width(
+                unicode_longest,
+                total,
+                CLI_MIN_LABEL_WIDTH,
+                CLI_MAX_LABEL_WIDTH,
+            )
+            .unwrap(),
+            expected
+        );
+    }
+}
+
+#[test]
+fn mojo_session_column_policy_preserves_very_wide_and_tiny_reports() {
+    for width in [0, 8, 80, 400] {
+        let columns = prodex_mojo_core::terminal_layout::session_columns(
+            width,
+            text_width(CLI_TABLE_GAP) * 4,
+        )
+        .unwrap();
+        assert_eq!(columns.iter().filter(|value| **value == 0).count(), 0);
+        let rendered = render_session_reports_with_width(
+            &[SessionReportDisplay {
+                id: "sess-id",
+                updated_at: Some("2026-10-14"),
+                thread_name: Some("Table Session"),
+                cwd: Some("/repo"),
+                profile: None,
+                path: "/tmp/session.jsonl",
+            }],
+            width,
+        );
+        assert!(!rendered.is_empty(), "session report {width}");
+        assert!(rendered.contains("sess-id") || rendered.contains("  id: sess-id"));
+    }
+}
+
+#[test]
+fn mojo_terminal_panel_inline_height_keeps_ratatui_viewports_bounded() {
+    for (rows, expected) in [(0, 4), (4, 4), (20, 20), (usize::MAX, u16::MAX)] {
+        assert_eq!(
+            prodex_mojo_core::terminal_layout::panel_inline_height(rows).unwrap(),
+            expected
+        );
+    }
+}
+
+#[test]
 fn text_panel_renderer_adds_panel_header() {
     let rendered = render_text_panel("Audit", "line one\nline two");
     assert!(rendered.contains("[ Audit ]"));

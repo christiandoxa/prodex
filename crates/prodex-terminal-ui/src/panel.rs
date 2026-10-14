@@ -176,13 +176,16 @@ impl PanelBuilder {
 pub fn panel_label_width(fields: &[(String, String)], total_width: usize) -> usize {
     let longest = fields
         .iter()
-        .map(|(label, _)| text_width(label) + 1)
+        .map(|(label, _)| text_width(label).saturating_add(1))
         .max()
         .unwrap_or(CLI_LABEL_WIDTH);
-    let max_by_width = total_width.saturating_sub(20).clamp(1, CLI_MAX_LABEL_WIDTH);
-    let preferred_cap = (total_width / 4).clamp(1, CLI_MAX_LABEL_WIDTH);
-    let cap = max_by_width.min(preferred_cap);
-    longest.clamp(CLI_MIN_LABEL_WIDTH.min(cap), cap)
+    prodex_mojo_core::terminal_layout::panel_label_width(
+        longest,
+        total_width,
+        CLI_MIN_LABEL_WIDTH,
+        CLI_MAX_LABEL_WIDTH,
+    )
+    .expect("compiled-in Mojo panel label layout policy failed")
 }
 
 pub fn format_field_lines_with_layout(
@@ -307,7 +310,8 @@ fn print_panel_tui_stderr(title: &str, messages: &[String]) -> anyhow::Result<()
 }
 
 fn panel_inline_height(lines: usize) -> u16 {
-    lines.clamp(4, usize::from(u16::MAX)) as u16
+    prodex_mojo_core::terminal_layout::panel_inline_height(lines)
+        .expect("compiled-in Mojo terminal viewport layout policy failed")
 }
 
 fn draw_panel_terminal<B: Backend>(

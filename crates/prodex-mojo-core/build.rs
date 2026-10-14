@@ -458,6 +458,7 @@ fn selected_sources() -> Vec<&'static str> {
         sources.push("../../mojo/prodex_core/shared_history_policy.mojo");
         sources.push("../../mojo/prodex_core/info_runway.mojo");
         sources.push("../../mojo/prodex_core/info_render.mojo");
+        sources.push("../../mojo/prodex_core/terminal_layout.mojo");
         sources.push("../../mojo/prodex_core/launch_args.mojo");
         sources.push("../../mojo/prodex_core/runtime_feature_plan.mojo");
         sources.push("../../mojo/prodex_core/launch_config.mojo");
