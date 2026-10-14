@@ -630,9 +630,9 @@ dependencies = [
 
 [[package]]
 name = "inout"
-version = "0.2.2"
+version = "0.2.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4250ce6452e92010fdf7268ccc5d14faa80bb12fc741938534c58f16804e03c7"
+checksum = "d8c0d789294fb457b791f7797a04478704788f30b407e5d0b01deaa846572d9f"
 dependencies = [
  "block-padding",
  "hybrid-array",
@@ -916,7 +916,7 @@ dependencies = [
 
 [[package]]
 name = "prodex-domain"
-version = "0.437.12"
+version = "0.437.13"
 dependencies = [
  "prodex-mojo-core",
  "serde",
@@ -935,11 +935,11 @@ dependencies = [
 
 [[package]]
 name = "prodex-mojo-core"
-version = "0.437.12"
+version = "0.437.13"
 
 [[package]]
 name = "prodex-profile-export"
-version = "0.437.12"
+version = "0.437.13"
 dependencies = [
  "aes-gcm-siv",
  "anyhow",
@@ -957,7 +957,7 @@ dependencies = [
 
 [[package]]
 name = "prodex-secret-store"
-version = "0.437.12"
+version = "0.437.13"
 dependencies = [
  "aes-gcm-siv",
  "getrandom",
