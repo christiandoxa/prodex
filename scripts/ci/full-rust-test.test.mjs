@@ -245,7 +245,7 @@ test("release Mojo install activates the compiler in its current step", () => {
     /\n  build-mojo-archives:[\s\S]*?\n  build:\n/,
   )?.[0];
   const installStep = mojoJob?.match(
-    /- name: Install pinned Mojo compiler([\s\S]*?)- name: Install LLVM archive tools/,
+    /- name: Install pinned Mojo compiler([\s\S]*?)- name: Ensure LLVM archive tools/,
   )?.[1];
 
   assert.ok(installStep, "release Mojo install step missing");

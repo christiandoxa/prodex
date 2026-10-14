@@ -322,12 +322,23 @@ jobs:
             *) echo "unexpected Mojo version: ${mojo_version}" >&2; exit 1 ;;
           esac
 
-      - name: Install LLVM archive tools
+      - name: Ensure LLVM archive tools
         shell: bash
         run: |
           set -euo pipefail
-          sudo apt-get update
-          sudo apt-get install -y llvm
+          # The pinned Ubuntu release runner normally has LLVM already.
+          # Skip redundant apt update/install, but never skip archive checks.
+          if command -v llvm-nm >/dev/null 2>&1 &&
+             command -v llvm-ar >/dev/null 2>&1 &&
+             command -v llvm-lib >/dev/null 2>&1; then
+            echo "LLVM archive tools already available"
+          else
+            sudo apt-get update
+            sudo apt-get install -y llvm
+          fi
+          command -v llvm-nm
+          command -v llvm-ar
+          command -v llvm-lib
 
       - name: Build target Mojo archive
         if: ${{ steps.reuse-ci-archive.outputs.reused != 'true' && steps.release-arm64-archive-cache.outputs.cache-hit != 'true' }}

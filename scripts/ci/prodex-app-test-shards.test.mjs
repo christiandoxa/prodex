@@ -42,7 +42,7 @@ test("prodex-app shard manifest is disjoint and remainder-complete", () => {
   assert.equal(appMatrix.include.length, 11);
   assert.equal(ciMatrix.include.length, 8);
   assert.equal(fullMatrix.include.length, PRODEX_APP_FULL_TEST_SHARDS.length + 4);
-  assert.equal(windowsMatrix.include.length, 10);
+  assert.equal(windowsMatrix.include.length, 13);
   assert.equal(appMatrix.include.filter((entry) => entry.save_cache).length, 1);
   assert.equal(ciMatrix.include.filter((entry) => entry.save_cache).length, 1);
   assert.equal(fullMatrix.include.filter((entry) => entry.save_cache).length, 1);
@@ -96,23 +96,25 @@ test("prodex-app shard manifest is disjoint and remainder-complete", () => {
     8,
   );
   const windowsBaseFilters = windowsMatrix.include
-    .slice(0, 4)
+    .slice(0, 6)
     .flatMap((entry) => entry.filters.split("\n"))
     .filter(Boolean);
   assert.equal(windowsBaseFilters.length, PRODEX_APP_LIB_FILTERS.length);
   assert.deepEqual(new Set(windowsBaseFilters), new Set(PRODEX_APP_LIB_FILTERS));
 
-  const extra = windowsMatrix.include.slice(4, 9);
+  const extra = windowsMatrix.include.slice(6, 12);
   assert.deepEqual(extra.map((entry) => entry.suite), [
     "remainder-continuations-http",
     "remainder-continuations-websocket",
     "remainder-continuations-other",
+    "remainder-selection-recovery",
     "remainder-selection",
     "remainder-foundation",
   ]);
   const extraFilters = extra.flatMap((entry) => entry.filters.split("\n")).filter(Boolean);
-  assert.equal(extraFilters.length, 10);
-  assert.equal(extra.find((entry) => entry.suite === "remainder-selection").skip_filters.split("\n").length, 16);
+  assert.equal(extraFilters.length, 15);
+  assert.equal(extra.find((entry) => entry.suite === "remainder-selection").skip_filters.split("\n").length, 21);
+  assert.equal(extra.find((entry) => entry.suite === "remainder-selection-recovery").filters.split("\n").length, 5);
   assert.deepEqual(
     extra.find((entry) => entry.suite === "remainder-continuations-other").skip_filters.split("\n"),
     [
@@ -124,6 +126,58 @@ test("prodex-app shard manifest is disjoint and remainder-complete", () => {
     windowsMatrix.include.at(-1).skip_filters.split("\n"),
     [...PRODEX_APP_LIB_FILTERS, ...extraFilters],
   );
+});
+
+test("Windows critical-path partitions preserve targeted and recovery ownership without overlap", () => {
+  const entries = windowsGithubMatrix().include;
+  assert.equal(entries.length, 13);
+  assert.equal(entries.filter((entry) => entry.save_cache).length, 1);
+  assert.deepEqual(entries.slice(3, 6).map((entry) => entry.suite), [
+    "selection-admission",
+    "provider-launches",
+    "runtime-proxy",
+  ]);
+  const targetedFilters = entries.slice(0, 6).flatMap((entry) =>
+    entry.filters.split("\n").filter(Boolean),
+  );
+  assert.deepEqual(new Set(targetedFilters), new Set(PRODEX_APP_LIB_FILTERS));
+  assert.equal(targetedFilters.length, PRODEX_APP_LIB_FILTERS.length);
+
+  const recovery = entries.find((entry) => entry.suite === "remainder-selection-recovery");
+  const remaining = entries.find((entry) => entry.suite === "remainder-selection");
+  assert.ok(recovery && remaining);
+  const recoveryFilters = recovery.filters.split("\n").filter(Boolean);
+  assert.equal(recoveryFilters.length, 5);
+  const selectionSkips = remaining.skip_filters.split("\n").filter(Boolean);
+  assert.deepEqual(selectionSkips.slice(-5), recoveryFilters);
+  assert.ok(entries.at(-1).skip_filters.includes(recoveryFilters[0]));
+
+  const examples = [
+    ["main_internal_tests::runtime_proxy_selection_and_pressure::admission::rotation_matrix::valid", "remainder-selection-recovery"],
+    ["main_internal_tests::runtime_proxy_selection_and_pressure::admission::hard_affinity_replay::valid", "remainder-selection-recovery"],
+    ["main_internal_tests::runtime_proxy_selection_and_pressure::admission::responses_missing_content_type::valid", "remainder-selection-recovery"],
+    ["main_internal_tests::runtime_proxy_selection_and_pressure::admission::responses_overload_recovery::valid", "remainder-selection-recovery"],
+    ["main_internal_tests::runtime_proxy_selection_and_pressure::admission::standard_session_recovery::valid", "remainder-selection-recovery"],
+    ["main_internal_tests::runtime_proxy_selection_and_pressure::admission::unknown_new_case::valid", "remainder-selection"],
+    ["main_internal_tests::runtime_proxy_selection_and_pressure::persistence::session_affinity::valid", "remainder-selection"],
+    ["main_internal_tests::runtime_proxy_selection_and_pressure::doctor::state_collect::valid", "remainder-selection"],
+    ["main_internal_tests::runtime_proxy_selection_and_pressure::selection::profile_selection::valid", "selection-admission"],
+    ["main_internal_tests::runtime_proxy_selection_and_pressure::admission::guards::valid", "gateway-support-affinity"],
+    ["runtime_launch::proxy_startup::deepseek::valid", "provider-launches"],
+    ["runtime_proxy::tests::valid", "runtime-proxy"],
+    ["app_commands::tests::valid", "commands-gemini"],
+    ["runtime_kiro_acp::tests::valid", "gateway-support-affinity"],
+    ["future_new_module::valid", "remainder"],
+  ];
+  for (const [testName, expected] of examples) {
+    const owners = entries.filter((entry) => {
+      const includes = entry.filters.split("\n").filter(Boolean);
+      const skips = entry.skip_filters.split("\n").filter(Boolean);
+      return (!includes.length || includes.some((f) => testName.includes(f)))
+        && !skips.some((f) => testName.includes(f));
+    });
+    assert.deepEqual(owners.map((entry) => entry.suite), [expected], testName);
+  }
 });
 
 test("shard planner dry-run and matrix output are compile-free", () => {
@@ -328,7 +382,7 @@ test("nightly full suite shards unassigned cases without changing ordinary app o
   assert.deepEqual(extras.map((entry) => entry.suite), names);
   assert.equal(full.include.filter((entry) => entry.save_cache).length, 1);
   assert.deepEqual(app.include.map((entry) => entry.suite), PRODEX_APP_LIB_SHARDS.map((entry) => entry.suite));
-  assert.equal(windows.include.length, 10, "nightly sharding cannot alter Windows CI");
+  assert.equal(windows.include.length, 13, "nightly sharding cannot alter Windows CI");
 
   const foundation = extras.find((entry) => entry.suite === "full-remainder-foundation");
   assert.equal(foundation.filters.split("\n").length, 6);
