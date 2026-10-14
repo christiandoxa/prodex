@@ -49,6 +49,9 @@ pub(crate) use process_control::*;
 #[path = "child_process_runtime.rs"]
 mod runtime;
 pub(crate) use runtime::run_runtime_launch_plan;
+#[path = "child_process_saved_session.rs"]
+mod saved_session;
+pub(crate) use saved_session::print_saved_session_guidance;
 
 pub(crate) fn codex_child_plan(codex_home: PathBuf, args: Vec<OsString>) -> ChildProcessPlan {
     prodex_runtime_launch::codex_child_plan(codex_bin(), codex_home, args, SUPER_LOCAL_PROVIDER_ID)

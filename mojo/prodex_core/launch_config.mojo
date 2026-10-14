@@ -365,3 +365,69 @@ def prodex_launch_session_marker_update_v1(
     if existing_marker == 1 and (same_session == 1 or canonical_session == 0):
         return 0
     return 1
+
+
+# Append-only exit text: the host must not reopen an inline TUI over Codex's
+# existing session/usage footer. Only canonical UUIDs may enter the command.
+def launch_saved_session_literal(
+    output: Pointer[mut=True, UInt8, _], offset: Int64, text: StringSlice
+) -> Int64:
+    var source = text.unsafe_ptr()
+    for i in range(Int64(text.byte_length())):
+        output[unsafe_offset=offset + i] = source[unsafe_offset=i]
+    return offset + Int64(text.byte_length())
+
+
+@export("prodex_launch_saved_session_guidance_v1")
+def prodex_launch_saved_session_guidance_v1(
+    abi: Int64,
+    session_address: UInt,
+    session_length: Int64,
+    output_address: UInt,
+    output_capacity: Int64,
+) abi("C") -> Int64:
+    if abi != 1:
+        return -4
+    if (
+        (session_length != 0 and session_length != 36)
+        or (session_length > 0 and session_address == 0)
+        or output_address == 0
+    ):
+        return -1
+    if output_capacity < 512:
+        return -3
+    var session = Pointer[mut=False, UInt8, ImmUntrackedOrigin](
+        unsafe_from_address=Int(session_address)
+    )
+    for i in range(session_length):
+        var byte = session[unsafe_offset=i]
+        if i == 8 or i == 13 or i == 18 or i == 23:
+            if byte != 45:
+                return -1
+        elif not ((byte >= 48 and byte <= 57) or (byte >= 97 and byte <= 102)):
+            return -1
+    var output = Pointer[mut=True, UInt8, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    var offset = launch_saved_session_literal(output, 0, StringSlice("\r\nProdex saved session\r\n"))
+    if session_length == 36:
+        offset = launch_saved_session_literal(output, offset, StringSlice("Session ID: "))
+        for i in range(session_length):
+            output[unsafe_offset=offset + i] = session[unsafe_offset=i]
+        offset += session_length
+        offset = launch_saved_session_literal(output, offset, StringSlice("\r\nResume: prodex s "))
+        for i in range(session_length):
+            output[unsafe_offset=offset + i] = session[unsafe_offset=i]
+        offset += session_length
+        offset = launch_saved_session_literal(output, offset, StringSlice("\r\n"))
+    else:
+        offset = launch_saved_session_literal(output, offset, StringSlice(
+            "Session ID was not reported by this launch.\r\nResume: prodex s resume\r\n"
+        ))
+    offset = launch_saved_session_literal(output, offset, StringSlice(
+        "The temporary app-server has stopped; its socket is closed.\r\n"
+        "Saved conversation and attachments remain available.\r\n"
+        "Do not reuse the temporary codex --remote socket.\r\n"
+        "Paused goals stay paused until /goal resume.\r\n"
+    ))
+    return offset
