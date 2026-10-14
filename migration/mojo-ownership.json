@@ -3104,9 +3104,11 @@
       "production_consumers": [
         "crates/prodex-runtime-proxy/src/health/health_decisions.rs",
         "crates/prodex-runtime-proxy/src/health/inflight.rs",
-        "crates/prodex-runtime-proxy/src/health/latency.rs"
+        "crates/prodex-runtime-proxy/src/health/latency.rs",
+        "crates/prodex-app/src/runtime_proxy/health_performance.rs"
       ],
       "production_reachability_test": "crates/prodex-runtime-proxy/src/health/health_decisions.rs",
+      "caller_regression_test": "crates/prodex-app/tests/support/main_internal/runtime_proxy_selection_and_pressure/health/commit.rs",
       "rust_owner_before": "bad-pairing, health-transition, in-flight, and latency policy calculations in feature-off builds",
       "rust_state_after": "adapter-only",
       "production_fallback": false,
