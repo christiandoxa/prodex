@@ -48,6 +48,20 @@ unsafe extern "C" {
         result_address: u64,
         result_capacity: i64,
     ) -> i64;
+    fn prodex_terminal_wrap_piece_action_v1(
+        abi: i64,
+        current_empty: i64,
+        current_cells: u64,
+        piece_cells: u64,
+        total_cells: u64,
+        result_address: u64,
+    ) -> i64;
+    fn prodex_terminal_pad_cell_spaces_v1(
+        abi: i64,
+        visible_cells: u64,
+        total_cells: u64,
+        result_address: u64,
+    ) -> i64;
 }
 
 fn check_status(status: i64) -> Result<(), MojoError> {
@@ -168,6 +182,57 @@ pub fn display_prefix_scalars(scalar_cells: &[u64], max_cells: usize) -> Result<
         return Err(MojoError::InvalidOutput);
     }
     Ok(prefix)
+}
+
+/// Mojo-authoritative word wrapping action; Rust only materializes strings.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WrapPieceAction {
+    Start,
+    Join,
+    Flush,
+}
+
+pub fn wrap_piece_action(
+    current_empty: bool,
+    current_cells: usize,
+    piece_cells: usize,
+    total_cells: usize,
+) -> Result<WrapPieceAction, MojoError> {
+    let mut action = u64::MAX;
+    check_status(unsafe {
+        prodex_terminal_wrap_piece_action_v1(
+            ABI_VERSION,
+            i64::from(current_empty),
+            from_usize(current_cells)?,
+            from_usize(piece_cells)?,
+            from_usize(total_cells)?,
+            (&mut action as *mut u64) as usize as u64,
+        )
+    })?;
+    match action {
+        0 => Ok(WrapPieceAction::Start),
+        1 => Ok(WrapPieceAction::Join),
+        2 => Ok(WrapPieceAction::Flush),
+        _ => Err(MojoError::InvalidOutput),
+    }
+}
+
+/// Mojo-authoritative count of spaces for the host terminal cell.
+pub fn pad_cell_spaces(visible_cells: usize, total_cells: usize) -> Result<usize, MojoError> {
+    let mut spaces = u64::MAX;
+    check_status(unsafe {
+        prodex_terminal_pad_cell_spaces_v1(
+            ABI_VERSION,
+            from_usize(visible_cells)?,
+            from_usize(total_cells)?,
+            (&mut spaces as *mut u64) as usize as u64,
+        )
+    })?;
+    let spaces = usize::try_from(spaces).map_err(|_| MojoError::InvalidOutput)?;
+    if spaces > total_cells {
+        return Err(MojoError::InvalidOutput);
+    }
+    Ok(spaces)
 }
 
 /// Plan the label column using the already measured Unicode cell width.
@@ -372,6 +437,64 @@ mod tests {
             1,
         );
         assert_eq!(written, -1, "invalid ABI must not publish a chunk count");
+    }
+
+    #[test]
+    fn mojo_wrap_piece_action_keeps_exact_boundary_and_zero_width_semantics() {
+        for (empty, current, piece, total, expected) in [
+            (true, 0, 2, 3, WrapPieceAction::Start),
+            (true, 100, 100, 1, WrapPieceAction::Start),
+            (false, 4, 2, 7, WrapPieceAction::Join),
+            (false, 4, 3, 7, WrapPieceAction::Flush),
+            (false, 0, 0, 1, WrapPieceAction::Join),
+            (false, 0, 2, 1, WrapPieceAction::Flush),
+            (false, 1, 1, 1, WrapPieceAction::Flush),
+            (false, usize::MAX, 2, usize::MAX, WrapPieceAction::Flush),
+        ] {
+            assert_eq!(
+                wrap_piece_action(empty, current, piece, total).unwrap(),
+                expected,
+                "Mojo wrap policy for empty={empty} current={current} piece={piece} total={total}",
+            );
+        }
+    }
+
+    #[test]
+    fn mojo_padding_saturates_remaining_terminal_cells() {
+        for (visible, total, expected) in [
+            (0, 0, 0),
+            (0, 10, 10),
+            (10, 0, 0),
+            (10, 10, 0),
+            (10, 15, 5),
+            (usize::MAX, 0, 0),
+            (0, usize::MAX, usize::MAX),
+        ] {
+            assert_eq!(pad_cell_spaces(visible, total).unwrap(), expected);
+        }
+    }
+
+    #[test]
+    fn wrap_and_pad_abi_reject_null_output_and_invalid_selector() {
+        let mut output = u64::MAX;
+        let pointer = (&mut output as *mut u64) as usize as u64;
+        assert_eq!(
+            unsafe { prodex_terminal_wrap_piece_action_v1(99, 1, 0, 0, 4, pointer) },
+            4,
+        );
+        assert_eq!(
+            unsafe { prodex_terminal_wrap_piece_action_v1(1, 2, 0, 0, 4, pointer) },
+            1,
+        );
+        assert_eq!(
+            unsafe { prodex_terminal_wrap_piece_action_v1(1, 1, 0, 0, 4, 0) },
+            1,
+        );
+        assert_eq!(
+            unsafe { prodex_terminal_pad_cell_spaces_v1(1, 0, 10, 0) },
+            1,
+        );
+        assert_eq!(output, u64::MAX);
     }
 
     #[test]

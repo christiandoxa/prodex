@@ -22,7 +22,8 @@ pub fn fit_cell(value: &str, width: usize) -> String {
 
 pub fn pad_cell(value: &str, width: usize) -> String {
     let value = fit_cell(value, width);
-    let padding = width.saturating_sub(text_width(&value));
+    let padding = prodex_mojo_core::terminal_layout::pad_cell_spaces(text_width(&value), width)
+        .expect("compiled-in Mojo terminal padding policy failed");
     format!("{value}{}", " ".repeat(padding))
 }
 
@@ -97,13 +98,24 @@ fn wrap_paragraph(paragraph: &str, width: usize, lines: &mut Vec<String>) {
 }
 
 fn append_wrapped_piece(current: &mut String, lines: &mut Vec<String>, piece: &str, width: usize) {
-    if current.is_empty() {
-        current.push_str(piece);
-    } else if text_width(current) + 1 + text_width(piece) <= width {
-        current.push(' ');
-        current.push_str(piece);
-    } else {
-        lines.push(std::mem::take(current));
-        current.push_str(piece);
+    use prodex_mojo_core::terminal_layout::WrapPieceAction;
+
+    match prodex_mojo_core::terminal_layout::wrap_piece_action(
+        current.is_empty(),
+        text_width(current),
+        text_width(piece),
+        width,
+    )
+    .expect("compiled-in Mojo text-wrap decision failed")
+    {
+        WrapPieceAction::Start => current.push_str(piece),
+        WrapPieceAction::Join => {
+            current.push(' ');
+            current.push_str(piece);
+        }
+        WrapPieceAction::Flush => {
+            lines.push(std::mem::take(current));
+            current.push_str(piece);
+        }
     }
 }
