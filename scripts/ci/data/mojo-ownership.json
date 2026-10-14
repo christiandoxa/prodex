@@ -54,10 +54,6 @@
         "crates/prodex-app/src/app_commands/super_main_catalog.rs",
         "crates/prodex-app/src/runtime_tools/sub_agent_catalog.rs",
         "crates/prodex-app/src/profile_commands/copilot/runtime_auth.rs",
-        "crates/prodex-app/src/profile_commands/kiro/catalog.rs",
-        "crates/prodex-app/src/app_commands/super_main_catalog.rs",
-        "crates/prodex-app/src/runtime_tools/sub_agent_catalog.rs",
-        "crates/prodex-app/src/profile_commands/copilot/runtime_auth.rs",
         "crates/prodex-app/src/profile_commands/kiro/catalog.rs"
       ]
     },
@@ -97,8 +93,6 @@
       "rust_adapter_scope": "JWT and access-token ownership, zeroized secret ownership, caller callbacks for unique-name availability, collection reconstruction, provider enum dispatch, and human-readable error mapping; migrated profile metadata and match relations are Mojo-authoritative",
       "production_consumers": [
         "crates/prodex-profile-identity/src/lib.rs",
-        "crates/prodex-state/src/lib.rs",
-        "crates/prodex-profile-identity/src/lib.rs",
         "crates/prodex-state/src/lib.rs"
       ]
     },
@@ -117,8 +111,6 @@
     "MIXED": "A source containing both boundary and deterministic code; semantic_ranges identify the counted region when needed."
   },
   "baseline_optional_sources": [
-    "mojo/prodex_core/runtime_health.mojo",
-    "mojo/prodex_core/info_runway.mojo",
     "mojo/prodex_core/runtime_health.mojo",
     "mojo/prodex_core/info_runway.mojo"
   ],
@@ -243,7 +235,6 @@
       "source_sha256": "f6dbaa492a15f6ce688d1d2eb765289dbba120ea8a615ffc8f759c94847bea06",
       "operation": "runtime_candidate_decision_kernel",
       "operations": [
-        "runtime_candidate_decision_kernel",
         "runtime_candidate_decision_kernel"
       ]
     },
@@ -256,8 +247,6 @@
       "operation": "critical_signal_text_grouping",
       "operations": [
         "critical_signal_text_grouping",
-        "critical_signal_range_planning",
-        "critical_signal_text_grouping",
         "critical_signal_range_planning"
       ]
     },
@@ -266,14 +255,6 @@
       "language": "mojo",
       "classification": "MIXED",
       "semantic_ranges": [
-        {
-          "start": 40,
-          "end": 288
-        },
-        {
-          "start": 329,
-          "end": 484
-        },
         {
           "start": 40,
           "end": 288
@@ -311,7 +292,6 @@
       "source_sha256": "bb483bfbdc2e6867e0ffeda4ad157249c94766d5430891cec2c2d7a00da50ab7",
       "operation": "runtime_profile_schedule_kernel",
       "operations": [
-        "runtime_profile_schedule_scoring",
         "runtime_profile_schedule_scoring"
       ]
     },
@@ -332,8 +312,6 @@
       "operation": "quota_aggregation_kernel",
       "operations": [
         "quota_aggregation_kernel",
-        "quota_capacity_lane_planning",
-        "quota_aggregation_kernel",
         "quota_capacity_lane_planning"
       ]
     },
@@ -347,9 +325,6 @@
       "operations": [
         "quota_pressure_score_batch",
         "quota_pressure_band_and_reserve_scoring",
-        "quota_route_score_resolution",
-        "quota_pressure_score_batch",
-        "quota_pressure_band_and_reserve_scoring",
         "quota_route_score_resolution"
       ]
     },
@@ -361,9 +336,6 @@
       "source_sha256": "2b7a662bd8af6988d27acc334a1706450a304187b9ee64416fa93335a7324ba2",
       "operation": "critical_signal_text_grouping",
       "operations": [
-        "critical_signal_text_grouping",
-        "critical_signal_range_planning",
-        "critical_signal_line_classification",
         "critical_signal_text_grouping",
         "critical_signal_range_planning",
         "critical_signal_line_classification"
@@ -394,8 +366,6 @@
       "operation": "gateway_route_alias_policy",
       "operations": [
         "gateway_route_alias_policy",
-        "runtime_gateway_route_selection",
-        "gateway_route_alias_policy",
         "runtime_gateway_route_selection"
       ]
     },
@@ -420,10 +390,6 @@
       "language": "mojo",
       "classification": "MIXED",
       "semantic_ranges": [
-        {
-          "start": 192,
-          "end": 234
-        },
         {
           "start": 192,
           "end": 234
@@ -459,9 +425,6 @@
       "operations": [
         "smart_context_token_usage_summary",
         "smart_context_adaptive_budget_planning",
-        "smart_context_calibrated_estimate",
-        "smart_context_token_usage_summary",
-        "smart_context_adaptive_budget_planning",
         "smart_context_calibrated_estimate"
       ]
     },
@@ -482,8 +445,6 @@
       "operation": "runtime_tuning_defaults_kernel",
       "operations": [
         "runtime_tuning_defaults_kernel",
-        "runtime_tuning_capacity_defaults",
-        "runtime_tuning_defaults_kernel",
         "runtime_tuning_capacity_defaults"
       ]
     },
@@ -494,9 +455,6 @@
       "semantic_loc": 720,
       "source_sha256": "538d185dfd89385f7331560e36a7529b3c9cc53099b35698b74c7bb12e121447",
       "operations": [
-        "provider_catalog_model_identity",
-        "provider_catalog_choice_planning",
-        "provider_catalog_merge_dedup",
         "provider_catalog_model_identity",
         "provider_catalog_choice_planning",
         "provider_catalog_merge_dedup"
@@ -514,13 +472,6 @@
           "runtime_precommit_retry_exhaustion",
           "runtime_recovery_watchdog_budget",
           "runtime_recovery_cooldown_epoch",
-          "runtime_compact_unpinned_recovery",
-          "quota_pressure_score_batch",
-          "quota_pressure_band_and_reserve_scoring",
-          "quota_route_score_resolution",
-          "runtime_precommit_retry_exhaustion",
-          "runtime_recovery_watchdog_budget",
-          "runtime_recovery_cooldown_epoch",
           "runtime_compact_unpinned_recovery"
         ]
       },
@@ -530,26 +481,11 @@
           "runtime_proxy_path_policy",
           "runtime_proxy_mount_path_policy",
           "runtime_proxy_dot_segment_escaping_policy",
-          "runtime_proxy_header_skip_policy",
-          "runtime_proxy_request_metadata_policy",
-          "runtime_proxy_path_policy",
-          "runtime_proxy_mount_path_policy",
-          "runtime_proxy_dot_segment_escaping_policy",
           "runtime_proxy_header_skip_policy"
         ]
       },
       "mojo/prodex_core/rich_catalog.mojo": {
         "operations": [
-          "provider_catalog_model_identity",
-          "provider_catalog_choice_planning",
-          "provider_catalog_merge_dedup",
-          "model_catalog_choice_planning",
-          "model_catalog_default_effort_validation",
-          "model_catalog_configuration_resolution",
-          "provider_catalog_exact_model_identity",
-          "catalog_exact_ascii_casefold_equality",
-          "catalog_ascii_casefold_relations",
-          "catalog_ascii_casefold_find",
           "provider_catalog_model_identity",
           "provider_catalog_choice_planning",
           "provider_catalog_merge_dedup",
@@ -572,35 +508,16 @@
           "deepseek_request_metadata_shape_policy",
           "deepseek_json_guidance_policy",
           "deepseek_response_usage_mapping",
-          "deepseek_local_rewrite_route_policy",
-          "deepseek_simple_request_eligibility",
-          "deepseek_request_metadata_composition",
-          "deepseek_strict_schema_normalization",
-          "deepseek_stream_shape_fallbacks",
-          "deepseek_response_format_shape_policy",
-          "deepseek_request_metadata_shape_policy",
-          "deepseek_json_guidance_policy",
-          "deepseek_response_usage_mapping",
           "deepseek_local_rewrite_route_policy"
         ]
       },
       "mojo/prodex_core/gemini_compact_text.mojo": {
         "operations": [
-          "gemini_compact_text_extraction",
           "gemini_compact_text_extraction"
         ]
       },
       "mojo/prodex_core/log_semantics.mojo": {
         "operations": [
-          "runtime_log_level_classification",
-          "transcript_event_classification",
-          "transcript_item_classification",
-          "transcript_operation_value_policy",
-          "transcript_tool_name_policy",
-          "log_load_aggregation",
-          "runtime_log_line_rendering",
-          "transcript_tool_output_escape_normalization",
-          "transcript_binary_mojibake_classification",
           "runtime_log_level_classification",
           "transcript_event_classification",
           "transcript_item_classification",
@@ -616,9 +533,6 @@
         "operations": [
           "runtime_profile_schedule_scoring",
           "runtime_profile_rotation_planning",
-          "runtime_profile_candidate_source_planning",
-          "runtime_profile_schedule_scoring",
-          "runtime_profile_rotation_planning",
           "runtime_profile_candidate_source_planning"
         ]
       },
@@ -628,20 +542,11 @@
           "runtime_tuning_capacity_defaults",
           "runtime_policy_proxy_preset_resolution",
           "runtime_scalar_config_policy",
-          "runtime_fault_budget_transition",
-          "runtime_tuning_defaults_kernel",
-          "runtime_tuning_capacity_defaults",
-          "runtime_policy_proxy_preset_resolution",
-          "runtime_scalar_config_policy",
           "runtime_fault_budget_transition"
         ]
       },
       "mojo/prodex_core/smart_context.mojo": {
         "operations": [
-          "smart_context_token_usage_summary",
-          "smart_context_adaptive_budget_planning",
-          "smart_context_calibrated_estimate",
-          "smart_context_text_token_estimate",
           "smart_context_token_usage_summary",
           "smart_context_adaptive_budget_planning",
           "smart_context_calibrated_estimate",
@@ -657,19 +562,9 @@
           {
             "start": 329,
             "end": 484
-          },
-          {
-            "start": 40,
-            "end": 288
-          },
-          {
-            "start": 329,
-            "end": 484
           }
         ],
         "operations": [
-          "critical_signal_text_grouping",
-          "command_output_text_kernel",
           "critical_signal_text_grouping",
           "command_output_text_kernel"
         ]
@@ -679,30 +574,16 @@
           {
             "start": 1,
             "end": 261
-          },
-          {
-            "start": 1,
-            "end": 261
           }
         ]
       },
       "mojo/prodex_core/rich_route.mojo": {
         "operations": [
-          "runtime_websocket_event_classification",
           "runtime_websocket_event_classification"
         ]
       },
       "mojo/prodex_core/provider_constraints.mojo": {
         "operations": [
-          "gemini_request_field_planning",
-          "gemini_tool_call_indexing",
-          "gemini_request_content_kernel",
-          "gemini_bridge_request_kernel",
-          "gemini_translator_request_planning",
-          "gemini_bridge_request_fallbacks",
-          "gemini_tool_call_signature_preservation",
-          "gemini_tool_call_thought_signature_hardening",
-          "provider_scalar_policy",
           "gemini_request_field_planning",
           "gemini_tool_call_indexing",
           "gemini_request_content_kernel",
@@ -723,14 +604,6 @@
           "quota_report_page_planning",
           "quota_error_summary_label_rendering",
           "quota_panel_first_line_normalization",
-          "quota_human_retry_time_normalization",
-          "quota_aggregation_kernel",
-          "quota_capacity_lane_planning",
-          "quota_model_policy",
-          "quota_reset_epoch_precedence",
-          "quota_report_page_planning",
-          "quota_error_summary_label_rendering",
-          "quota_panel_first_line_normalization",
           "quota_human_retry_time_normalization"
         ]
       },
@@ -738,17 +611,11 @@
         "operations": [
           "runtime_candidate_decision_kernel",
           "runtime_affinity_local_rejection_policy",
-          "quota_selection_policy",
-          "runtime_candidate_decision_kernel",
-          "runtime_affinity_local_rejection_policy",
           "quota_selection_policy"
         ]
       },
       "mojo/prodex_core/rich_fallback.mojo": {
         "operations": [
-          "provider_model_fallback_parser",
-          "session_usage_limit_marker",
-          "gemini_invalid_stream_retry_delay_policy",
           "provider_model_fallback_parser",
           "session_usage_limit_marker",
           "gemini_invalid_stream_retry_delay_policy"
@@ -765,22 +632,19 @@
         "operations": [
           "session_selector_resolution_policy",
           "session_report_query_matching_policy",
-          "session_file_name_policy",
-          "session_selector_resolution_policy",
-          "session_report_query_matching_policy",
           "session_file_name_policy"
         ]
       },
-      {
-        "path": "mojo/prodex_core/status_resource.mojo",
-        "language": "mojo",
-        "classification": "DETERMINISTIC_DOMAIN",
-        "production_reachable": true,
-        "role": "semantic",
-        "operations": [
-          "status_resource_proc_parser"
-        ]
-      },
+    {
+      "path": "mojo/prodex_core/status_resource.mojo",
+      "language": "mojo",
+      "classification": "DETERMINISTIC_DOMAIN",
+      "production_reachable": true,
+      "role": "semantic",
+      "operations": [
+        "status_resource_proc_parser"
+      ]
+    },
       {
         "path": "crates/prodex-mojo-core/src/json/session_selector.rs",
         "language": "rust",
@@ -788,9 +652,6 @@
         "production_reachable": true,
         "role": "adapter",
         "operations": [
-          "session_selector_resolution_policy",
-          "session_report_query_matching_policy",
-          "session_file_name_policy",
           "session_selector_resolution_policy",
           "session_report_query_matching_policy",
           "session_file_name_policy"
@@ -803,7 +664,6 @@
         "production_reachable": true,
         "role": "semantic",
         "operations": [
-          "quota_watch_cadence_cache_lifetime",
           "quota_watch_cadence_cache_lifetime"
         ]
       },
@@ -814,7 +674,6 @@
         "production_reachable": true,
         "role": "adapter",
         "operations": [
-          "quota_watch_cadence_cache_lifetime",
           "quota_watch_cadence_cache_lifetime"
         ]
       },
@@ -825,7 +684,6 @@
         "production_reachable": true,
         "role": "semantic",
         "operations": [
-          "runtime_auto_redeem_capacity_planning",
           "runtime_auto_redeem_capacity_planning"
         ]
       },
@@ -836,7 +694,6 @@
         "production_reachable": true,
         "role": "semantic",
         "operations": [
-          "smart_context_rehydration_plan",
           "smart_context_rehydration_plan"
         ]
       },
@@ -847,7 +704,6 @@
         "production_reachable": true,
         "role": "semantic",
         "operations": [
-          "smart_context_capsule_order",
           "smart_context_capsule_order"
         ]
       },
@@ -858,9 +714,6 @@
         "production_reachable": true,
         "role": "semantic",
         "operations": [
-          "runtime_profile_health_sorting",
-          "runtime_profile_health_score_components",
-          "runtime_profile_health_policy",
           "runtime_profile_health_sorting",
           "runtime_profile_health_score_components",
           "runtime_profile_health_policy"
@@ -874,8 +727,6 @@
         "role": "semantic",
         "operations": [
           "quota_aggregation_kernel",
-          "status_quota_summary",
-          "quota_aggregation_kernel",
           "status_quota_summary"
         ]
       },
@@ -886,8 +737,6 @@
         "production_reachable": true,
         "role": "semantic",
         "operations": [
-          "critical_signal_text_grouping",
-          "critical_signal_range_planning",
           "critical_signal_text_grouping",
           "critical_signal_range_planning"
         ]
@@ -900,8 +749,6 @@
         "role": "semantic",
         "operations": [
           "openai_chat_compat_response_translation",
-          "deepseek_chat_stream_event_translation",
-          "openai_chat_compat_response_translation",
           "deepseek_chat_stream_event_translation"
         ]
       },
@@ -913,16 +760,11 @@
           {
             "start": 35,
             "end": 266
-          },
-          {
-            "start": 35,
-            "end": 266
           }
         ],
         "production_reachable": true,
         "role": "semantic",
         "operations": [
-          "super_override_argument_classification",
           "super_override_argument_classification"
         ]
       },
@@ -933,7 +775,6 @@
         "production_reachable": true,
         "role": "semantic",
         "operations": [
-          "codex_runtime_feature_configuration",
           "codex_runtime_feature_configuration"
         ]
       },
@@ -944,9 +785,6 @@
         "production_reachable": true,
         "role": "semantic",
         "operations": [
-          "provider_error_request_member_rejection",
-          "provider_error_code_extraction",
-          "provider_native_sse_error_classification",
           "provider_error_request_member_rejection",
           "provider_error_code_extraction",
           "provider_native_sse_error_classification"
@@ -975,23 +813,6 @@
           "deepseek_json_guidance_policy",
           "deepseek_response_usage_mapping",
           "gemini_response_media_projection",
-          "gemini_response_id_conformance",
-          "deepseek_simple_request_eligibility",
-          "deepseek_request_metadata_composition",
-          "deepseek_strict_schema_normalization",
-          "anthropic_web_search_result_shaping",
-          "kiro_chat_response_mapping",
-          "kiro_anthropic_response_mapping",
-          "kiro_response_shape_fallbacks",
-          "kiro_acp_shape_fallbacks",
-          "kiro_chat_message_prompt_construction",
-          "kiro_model_catalog_normalization",
-          "deepseek_stream_shape_fallbacks",
-          "deepseek_response_format_shape_policy",
-          "deepseek_request_metadata_shape_policy",
-          "deepseek_json_guidance_policy",
-          "deepseek_response_usage_mapping",
-          "gemini_response_media_projection",
           "gemini_response_id_conformance"
         ]
       },
@@ -1002,7 +823,6 @@
         "production_reachable": true,
         "role": "adapter",
         "operations": [
-          "gemini_response_id_conformance",
           "gemini_response_id_conformance"
         ]
       },
@@ -1014,16 +834,11 @@
           {
             "start": 672,
             "end": 714
-          },
-          {
-            "start": 672,
-            "end": 714
           }
         ],
         "production_reachable": true,
         "role": "semantic",
         "operations": [
-          "gemini_response_id_conformance",
           "gemini_response_id_conformance"
         ]
       },
@@ -1049,34 +864,9 @@
           {
             "start": 1874,
             "end": 2095
-          },
-          {
-            "start": 332,
-            "end": 632
-          },
-          {
-            "start": 1509,
-            "end": 1759
-          },
-          {
-            "start": 3893,
-            "end": 4008
-          },
-          {
-            "start": 1874,
-            "end": 2095
           }
         ],
         "operations": [
-          "deepseek_simple_request_eligibility",
-          "deepseek_request_metadata_composition",
-          "deepseek_strict_schema_normalization",
-          "deepseek_stream_shape_fallbacks",
-          "deepseek_response_format_shape_policy",
-          "deepseek_request_metadata_shape_policy",
-          "deepseek_json_guidance_policy",
-          "deepseek_response_usage_mapping",
-          "deepseek_local_rewrite_route_policy",
           "deepseek_simple_request_eligibility",
           "deepseek_request_metadata_composition",
           "deepseek_strict_schema_normalization",
@@ -1102,18 +892,9 @@
           {
             "start": 1114,
             "end": 1429
-          },
-          {
-            "start": 536,
-            "end": 590
-          },
-          {
-            "start": 1114,
-            "end": 1429
           }
         ],
         "operations": [
-          "anthropic_web_search_result_shaping",
           "anthropic_web_search_result_shaping"
         ]
       },
@@ -1131,22 +912,9 @@
           {
             "start": 3014,
             "end": 3663
-          },
-          {
-            "start": 2587,
-            "end": 2880
-          },
-          {
-            "start": 3014,
-            "end": 3663
           }
         ],
         "operations": [
-          "kiro_chat_response_mapping",
-          "kiro_anthropic_response_mapping",
-          "kiro_response_shape_fallbacks",
-          "kiro_acp_shape_fallbacks",
-          "kiro_chat_message_prompt_construction",
           "kiro_chat_response_mapping",
           "kiro_anthropic_response_mapping",
           "kiro_response_shape_fallbacks",
@@ -1161,7 +929,6 @@
         "production_reachable": true,
         "role": "semantic",
         "operations": [
-          "kiro_model_catalog_normalization",
           "kiro_model_catalog_normalization"
         ]
       },
@@ -1173,8 +940,6 @@
         "role": "semantic",
         "operations": [
           "governance_finding_classification",
-          "governance_inspection_collection_order",
-          "governance_finding_classification",
           "governance_inspection_collection_order"
         ]
       },
@@ -1185,7 +950,6 @@
         "production_reachable": true,
         "role": "semantic",
         "operations": [
-          "profile_identity_planning",
           "profile_identity_planning"
         ]
       },
@@ -1196,9 +960,6 @@
         "production_reachable": true,
         "role": "semantic",
         "operations": [
-          "redaction_sensitive_key_classification",
-          "redaction_secret_text",
-          "redaction_gateway_privacy",
           "redaction_sensitive_key_classification",
           "redaction_secret_text",
           "redaction_gateway_privacy"
@@ -1212,8 +973,6 @@
         "role": "semantic",
         "operations": [
           "runtime_state_background_policy",
-          "runtime_state_route_key_policy",
-          "runtime_state_background_policy",
           "runtime_state_route_key_policy"
         ]
       },
@@ -1224,7 +983,6 @@
         "production_reachable": true,
         "role": "adapter",
         "operations": [
-          "runtime_state_route_key_policy",
           "runtime_state_route_key_policy"
         ]
       },
@@ -1235,7 +993,6 @@
         "production_reachable": true,
         "role": "semantic",
         "operations": [
-          "state_core_policy",
           "state_core_policy"
         ]
       },
@@ -1249,10 +1006,6 @@
           "codex_profile_v2_arg_selection",
           "codex_config_override_selection",
           "codex_config_value_normalization",
-          "codex_model_provider_source_selection",
-          "codex_profile_v2_arg_selection",
-          "codex_config_override_selection",
-          "codex_config_value_normalization",
           "codex_model_provider_source_selection"
         ]
       },
@@ -1263,16 +1016,6 @@
         "production_reachable": true,
         "role": "semantic",
         "operations": [
-          "broker_continuity_log_semantics",
-          "broker_continuity_health_decay",
-          "broker_continuity_stale_verification",
-          "broker_continuity_route_classification",
-          "broker_health_key_classification",
-          "broker_binary_identity_policy",
-          "broker_version_guard_planning",
-          "broker_version_output_parsing",
-          "broker_registry_reuse_planning",
-          "broker_startup_grace_planning",
           "broker_continuity_log_semantics",
           "broker_continuity_health_decay",
           "broker_continuity_stale_verification",
@@ -1296,11 +1039,6 @@
           "runtime_proxy_path_policy",
           "runtime_proxy_mount_path_policy",
           "runtime_proxy_dot_segment_escaping_policy",
-          "runtime_proxy_header_skip_policy",
-          "runtime_proxy_request_metadata_policy",
-          "runtime_proxy_path_policy",
-          "runtime_proxy_mount_path_policy",
-          "runtime_proxy_dot_segment_escaping_policy",
           "runtime_proxy_header_skip_policy"
         ]
       },
@@ -1311,7 +1049,6 @@
         "production_reachable": true,
         "role": "semantic",
         "operations": [
-          "runtime_state_quota_policy",
           "runtime_state_quota_policy"
         ]
       },
@@ -1322,21 +1059,6 @@
         "production_reachable": true,
         "role": "semantic",
         "operations": [
-          "profile_export_policy_limits",
-          "profile_export_requested_profile_selection",
-          "profile_export_active_profile_membership",
-          "profile_import_active_profile_resolution",
-          "profile_export_copilot_jsonc_normalization",
-          "profile_export_copilot_version_parsing",
-          "profile_export_copilot_platform_mapping",
-          "profile_export_copilot_user_api_origin",
-          "profile_export_copilot_models_api_url",
-          "profile_export_copilot_import_state_planning",
-          "profile_import_lifecycle_ordering",
-          "profile_import_secret_path_safety",
-          "profile_import_auth_journal_commit_policy",
-          "profile_import_auth_update_planning",
-          "profile_export_envelope_schema_validation",
           "profile_export_policy_limits",
           "profile_export_requested_profile_selection",
           "profile_export_active_profile_membership",
@@ -1362,8 +1084,6 @@
         "role": "semantic",
         "operations": [
           "runtime_repo_module_like",
-          "runtime_repo_module_path",
-          "runtime_repo_module_like",
           "runtime_repo_module_path"
         ]
       },
@@ -1379,12 +1099,6 @@
           "runtime_lineage_response_parts",
           "local_rewrite_binding_candidate_policy",
           "runtime_session_release_epoch",
-          "runtime_session_full_history_conflict_recovery",
-          "runtime_lineage_classification",
-          "runtime_lineage_key_build",
-          "runtime_lineage_response_parts",
-          "local_rewrite_binding_candidate_policy",
-          "runtime_session_release_epoch",
           "runtime_session_full_history_conflict_recovery"
         ]
       },
@@ -1395,7 +1109,6 @@
         "production_reachable": true,
         "role": "semantic",
         "operations": [
-          "session_report_metadata_policy",
           "session_report_metadata_policy"
         ]
       },
@@ -1406,7 +1119,6 @@
         "production_reachable": true,
         "role": "semantic",
         "operations": [
-          "smart_context_artifact_reference_policy",
           "smart_context_artifact_reference_policy"
         ]
       },
@@ -1418,8 +1130,6 @@
         "role": "semantic",
         "operations": [
           "smart_context_semantic_marker_policy",
-          "smart_context_semantic_index_planning",
-          "smart_context_semantic_marker_policy",
           "smart_context_semantic_index_planning"
         ]
       },
@@ -1430,10 +1140,6 @@
         "production_reachable": true,
         "role": "semantic",
         "operations": [
-          "runtime_route_reason_lookup",
-          "runtime_route_reason_stage",
-          "runtime_route_reason_unknown_label",
-          "runtime_route_safe_identifier",
           "runtime_route_reason_lookup",
           "runtime_route_reason_stage",
           "runtime_route_reason_unknown_label",
@@ -1450,10 +1156,6 @@
           "provider_usage_extraction",
           "provider_usage_cost",
           "provider_usage_merged_total",
-          "provider_usage_sse_latest_present_merge",
-          "provider_usage_extraction",
-          "provider_usage_cost",
-          "provider_usage_merged_total",
           "provider_usage_sse_latest_present_merge"
         ]
       },
@@ -1464,15 +1166,6 @@
         "production_reachable": true,
         "role": "semantic",
         "operations": [
-          "super_expose_protocol_version_policy",
-          "super_expose_protocol_metadata_policy",
-          "super_expose_media_header_policy",
-          "super_expose_json_nesting_policy",
-          "super_expose_tool_argument_policy",
-          "super_expose_run_id_policy",
-          "super_expose_string_validation_policy",
-          "super_expose_dispatch_validation_policy",
-          "super_expose_output_cursor_validation_policy",
           "super_expose_protocol_version_policy",
           "super_expose_protocol_metadata_policy",
           "super_expose_media_header_policy",
@@ -1497,13 +1190,6 @@
           "sub_agent_model_nonempty_policy",
           "sub_agent_provider_url_policy",
           "sub_agent_child_spec_scalar_policy",
-          "sub_agent_config_validation_precedence",
-          "sub_agent_concurrency_parse_policy",
-          "sub_agent_concurrency_validate_policy",
-          "sub_agent_reasoning_effort_policy",
-          "sub_agent_model_nonempty_policy",
-          "sub_agent_provider_url_policy",
-          "sub_agent_child_spec_scalar_policy",
           "sub_agent_config_validation_precedence"
         ]
       },
@@ -1514,17 +1200,6 @@
         "production_reachable": true,
         "role": "semantic",
         "operations": [
-          "super_external_provider_alias_policy",
-          "super_provider_config_serialization",
-          "super_provider_token_limit_policy",
-          "super_toml_string_serialization",
-          "runtime_external_provider_classification",
-          "runtime_model_provider_classification",
-          "runtime_boolean_token_classification",
-          "deepseek_web_search_mode_classification",
-          "runtime_ci_truth_token_classification",
-          "profile_import_source_classification",
-          "runtime_openai_scalar_policy",
           "super_external_provider_alias_policy",
           "super_provider_config_serialization",
           "super_provider_token_limit_policy",
@@ -1552,14 +1227,6 @@
           "log_throughput_candidate_selection",
           "log_throughput_sample_freshness",
           "log_throughput_bounded_state_eviction",
-          "log_throughput_finish_rate_precedence",
-          "log_throughput_sample_planning",
-          "log_throughput_completed_rate",
-          "log_throughput_stream_rate",
-          "log_throughput_duplicate_replay_classification",
-          "log_throughput_candidate_selection",
-          "log_throughput_sample_freshness",
-          "log_throughput_bounded_state_eviction",
           "log_throughput_finish_rate_precedence"
         ]
       },
@@ -1570,7 +1237,6 @@
         "production_reachable": true,
         "role": "adapter",
         "operations": [
-          "gemini_stream_metadata_merge",
           "gemini_stream_metadata_merge"
         ]
       },
@@ -1581,7 +1247,6 @@
         "production_reachable": true,
         "role": "semantic",
         "operations": [
-          "gemini_stream_metadata_merge",
           "gemini_stream_metadata_merge"
         ]
       },
@@ -1592,11 +1257,6 @@
         "production_reachable": true,
         "role": "semantic",
         "operations": [
-          "gemini_guardrail_text_classification",
-          "gemini_exact_output_slice_policy",
-          "gemini_exact_output_marker_policy",
-          "gemini_command_normalized_empty_policy",
-          "gemini_command_match_policy",
           "gemini_guardrail_text_classification",
           "gemini_exact_output_slice_policy",
           "gemini_exact_output_marker_policy",
@@ -1614,10 +1274,6 @@
           "optional_tool_alias_classification",
           "optional_tool_descriptor_policy",
           "optional_tool_manifest_tree_compatibility",
-          "optional_tool_digest_hex_encoding",
-          "optional_tool_alias_classification",
-          "optional_tool_descriptor_policy",
-          "optional_tool_manifest_tree_compatibility",
           "optional_tool_digest_hex_encoding"
         ]
       },
@@ -1628,7 +1284,6 @@
         "production_reachable": true,
         "role": "semantic",
         "operations": [
-          "confirmation_token_policy",
           "confirmation_token_policy"
         ]
       },
@@ -1639,10 +1294,6 @@
         "production_reachable": true,
         "role": "semantic",
         "operations": [
-          "gemini_tool_name_policy",
-          "gemini3_model_toolset_policy",
-          "gemini_apply_patch_block_normalization",
-          "gemini_edit_patch_assembly",
           "gemini_tool_name_policy",
           "gemini3_model_toolset_policy",
           "gemini_apply_patch_block_normalization",
@@ -1699,10 +1350,7 @@
           "runtime_doctor_marker_summary_counts",
           "runtime_doctor_compact_exit_counts",
           "runtime_doctor_marker_context_reason_facet_aggregation",
-          "runtime_doctor_selection_record_plan",
-          "runtime_doctor_marker_summary_counts",
-          "runtime_doctor_compact_exit_counts",
-          "runtime_doctor_marker_context_reason_facet_aggregation"
+          "runtime_doctor_selection_record_plan"
         ]
       },
       {
@@ -1721,25 +1369,11 @@
           {
             "start": 651,
             "end": 654
-          },
-          {
-            "start": 31,
-            "end": 32
-          },
-          {
-            "start": 538,
-            "end": 628
-          },
-          {
-            "start": 651,
-            "end": 654
           }
         ],
         "production_reachable": true,
         "role": "semantic",
         "operations": [
-          "runtime_doctor_request_timeline_detail",
-          "runtime_doctor_last_marker_line_truncation",
           "runtime_doctor_request_timeline_detail",
           "runtime_doctor_last_marker_line_truncation"
         ]
@@ -1764,31 +1398,11 @@
           {
             "start": 1781,
             "end": 1799
-          },
-          {
-            "start": 230,
-            "end": 341
-          },
-          {
-            "start": 1414,
-            "end": 1448
-          },
-          {
-            "start": 1656,
-            "end": 1668
-          },
-          {
-            "start": 1781,
-            "end": 1799
           }
         ],
         "production_reachable": true,
         "role": "semantic",
         "operations": [
-          "runtime_doctor_plan_input_validation",
-          "runtime_doctor_summary_input_validation",
-          "runtime_doctor_state_input_validation",
-          "runtime_doctor_route_input_validation",
           "runtime_doctor_plan_input_validation",
           "runtime_doctor_summary_input_validation",
           "runtime_doctor_state_input_validation",
@@ -1803,8 +1417,6 @@
         "role": "semantic",
         "operations": [
           "secret_reference_validation",
-          "secret_rotation_policy_validation",
-          "secret_reference_validation",
           "secret_rotation_policy_validation"
         ]
       },
@@ -1815,7 +1427,6 @@
         "production_reachable": true,
         "role": "semantic",
         "operations": [
-          "gemini_internal_instruction_leak_detection",
           "gemini_internal_instruction_leak_detection"
         ]
       },
@@ -1826,7 +1437,6 @@
         "production_reachable": true,
         "role": "semantic",
         "operations": [
-          "gemini_internal_instruction_leak_detection",
           "gemini_internal_instruction_leak_detection"
         ]
       },
@@ -1837,10 +1447,6 @@
         "production_reachable": true,
         "role": "semantic",
         "operations": [
-          "runtime_live_log_record_bound",
-          "runtime_live_log_nested_string_clipping",
-          "runtime_live_log_json_fallback",
-          "runtime_live_log_plain_text_truncation",
           "runtime_live_log_record_bound",
           "runtime_live_log_nested_string_clipping",
           "runtime_live_log_json_fallback",
@@ -1855,8 +1461,6 @@
         "role": "semantic",
         "operations": [
           "runtime_operational_histogram_bucket_planning",
-          "runtime_operational_histogram_observation",
-          "runtime_operational_histogram_bucket_planning",
           "runtime_operational_histogram_observation"
         ]
       },
@@ -1867,7 +1471,6 @@
         "production_reachable": true,
         "role": "semantic",
         "operations": [
-          "update_notice_release_version_policy",
           "update_notice_release_version_policy"
         ]
       },
@@ -1878,7 +1481,6 @@
         "production_reachable": true,
         "role": "semantic",
         "operations": [
-          "smart_context_source_symbol_index",
           "smart_context_source_symbol_index"
         ]
       },
@@ -1893,11 +1495,7 @@
           "runtime_doctor_log_value_absence_policy",
           "runtime_doctor_smart_context_fallback_reason_source",
           "runtime_doctor_route_health_grouping",
-          "runtime_doctor_route_latest_reason",
-          "runtime_doctor_smart_context_fallback_decision",
-          "runtime_doctor_log_value_absence_policy",
-          "runtime_doctor_smart_context_fallback_reason_source",
-          "runtime_doctor_route_health_grouping"
+          "runtime_doctor_route_latest_reason"
         ]
       },
       {
@@ -1907,7 +1505,6 @@
         "production_reachable": true,
         "role": "semantic",
         "operations": [
-          "runtime_doctor_degraded_route_selection",
           "runtime_doctor_degraded_route_selection"
         ]
       },
@@ -1918,7 +1515,6 @@
         "production_reachable": true,
         "role": "adapter",
         "operations": [
-          "runtime_doctor_degraded_route_selection",
           "runtime_doctor_degraded_route_selection"
         ]
       },
@@ -1929,10 +1525,6 @@
         "production_reachable": true,
         "role": "semantic",
         "operations": [
-          "gemini_compact_transcript_snippet_shaping",
-          "gemini_compact_utf8_truncation",
-          "gemini_local_compact_summary_formatting",
-          "gemini_semantic_continuation_summary_formatting",
           "gemini_compact_transcript_snippet_shaping",
           "gemini_compact_utf8_truncation",
           "gemini_local_compact_summary_formatting",
@@ -1949,10 +1541,6 @@
           "gemini_compact_request_rewrite",
           "gemini_compact_summary_extraction",
           "gemini_compact_response_body_shaping",
-          "gemini_compact_error_classification",
-          "gemini_compact_request_rewrite",
-          "gemini_compact_summary_extraction",
-          "gemini_compact_response_body_shaping",
           "gemini_compact_error_classification"
         ]
       },
@@ -1964,8 +1552,6 @@
         "role": "semantic",
         "operations": [
           "status_command_presentation_policy",
-          "doctor_presentation_policy",
-          "status_command_presentation_policy",
           "doctor_presentation_policy"
         ]
       },
@@ -1976,7 +1562,6 @@
         "production_reachable": true,
         "role": "adapter",
         "operations": [
-          "doctor_presentation_policy",
           "doctor_presentation_policy"
         ]
       },
@@ -1987,8 +1572,6 @@
         "production_reachable": true,
         "role": "semantic",
         "operations": [
-          "provider_binding_identity_input_policy",
-          "provider_binding_identity_digest_policy",
           "provider_binding_identity_input_policy",
           "provider_binding_identity_digest_policy"
         ]
@@ -2001,8 +1584,6 @@
         "role": "adapter",
         "operations": [
           "provider_binding_identity_input_policy",
-          "provider_binding_identity_digest_policy",
-          "provider_binding_identity_input_policy",
           "provider_binding_identity_digest_policy"
         ]
       },
@@ -2013,7 +1594,6 @@
         "production_reachable": true,
         "role": "semantic",
         "operations": [
-          "session_repair_rewrite_policy",
           "session_repair_rewrite_policy"
         ]
       },
@@ -2024,7 +1604,6 @@
         "production_reachable": true,
         "role": "adapter",
         "operations": [
-          "session_repair_rewrite_policy",
           "session_repair_rewrite_policy"
         ]
       },
@@ -2035,7 +1614,6 @@
         "production_reachable": true,
         "role": "semantic",
         "operations": [
-          "profile_screen_geometry_and_value_color_policy",
           "profile_screen_geometry_and_value_color_policy"
         ]
       },
@@ -2046,7 +1624,6 @@
         "production_reachable": true,
         "role": "adapter",
         "operations": [
-          "profile_screen_geometry_and_value_color_policy",
           "profile_screen_geometry_and_value_color_policy"
         ]
       },
@@ -2057,7 +1634,6 @@
         "production_reachable": true,
         "role": "semantic",
         "operations": [
-          "runtime_responses_turn_state_quota_replay_policy",
           "runtime_responses_turn_state_quota_replay_policy"
         ]
       },
@@ -2068,7 +1644,6 @@
         "production_reachable": true,
         "role": "adapter",
         "operations": [
-          "runtime_responses_turn_state_quota_replay_policy",
           "runtime_responses_turn_state_quota_replay_policy"
         ]
       },
@@ -2079,7 +1654,6 @@
         "production_reachable": true,
         "role": "semantic",
         "operations": [
-          "runtime_proxy_body_limit_policy",
           "runtime_proxy_body_limit_policy"
         ]
       },
@@ -2090,7 +1664,6 @@
         "production_reachable": true,
         "role": "adapter",
         "operations": [
-          "runtime_proxy_body_limit_policy",
           "runtime_proxy_body_limit_policy"
         ]
       },
@@ -2101,7 +1674,6 @@
         "production_reachable": true,
         "role": "semantic",
         "operations": [
-          "runtime_responses_attempt_recovery_policy",
           "runtime_responses_attempt_recovery_policy"
         ]
       },
@@ -2112,7 +1684,6 @@
         "production_reachable": true,
         "role": "adapter",
         "operations": [
-          "runtime_responses_attempt_recovery_policy",
           "runtime_responses_attempt_recovery_policy"
         ]
       },
@@ -2123,8 +1694,6 @@
         "production_reachable": true,
         "role": "semantic",
         "operations": [
-          "deepseek_precommit_attempt_policy",
-          "deepseek_first_event_retry_policy",
           "deepseek_precommit_attempt_policy",
           "deepseek_first_event_retry_policy"
         ]
@@ -2137,8 +1706,6 @@
         "role": "adapter",
         "operations": [
           "deepseek_precommit_attempt_policy",
-          "deepseek_first_event_retry_policy",
-          "deepseek_precommit_attempt_policy",
           "deepseek_first_event_retry_policy"
         ]
       },
@@ -2149,7 +1716,6 @@
         "production_reachable": true,
         "role": "adapter",
         "operations": [
-          "deepseek_local_rewrite_route_policy",
           "deepseek_local_rewrite_route_policy"
         ]
       },
@@ -2160,7 +1726,6 @@
         "production_reachable": true,
         "role": "semantic",
         "operations": [
-          "gemini_compact_text_extraction",
           "gemini_compact_text_extraction"
         ]
       },
@@ -2171,7 +1736,6 @@
         "production_reachable": true,
         "role": "adapter",
         "operations": [
-          "gemini_compact_text_extraction",
           "gemini_compact_text_extraction"
         ]
       },
@@ -2182,7 +1746,6 @@
         "production_reachable": true,
         "role": "semantic",
         "operations": [
-          "runtime_responses_loop_policy",
           "runtime_responses_loop_policy"
         ]
       },
@@ -2193,7 +1756,6 @@
         "production_reachable": true,
         "role": "adapter",
         "operations": [
-          "runtime_responses_loop_policy",
           "runtime_responses_loop_policy"
         ]
       },
@@ -2204,7 +1766,6 @@
         "production_reachable": true,
         "role": "semantic",
         "operations": [
-          "runtime_continuation_compact_followup_policy",
           "runtime_continuation_compact_followup_policy"
         ]
       },
@@ -2215,7 +1776,6 @@
         "production_reachable": true,
         "role": "adapter",
         "operations": [
-          "runtime_continuation_compact_followup_policy",
           "runtime_continuation_compact_followup_policy"
         ]
       },
@@ -2226,7 +1786,6 @@
         "production_reachable": true,
         "role": "semantic",
         "operations": [
-          "runtime_noncompact_loop_policy",
           "runtime_noncompact_loop_policy"
         ]
       },
@@ -2237,7 +1796,6 @@
         "production_reachable": true,
         "role": "adapter",
         "operations": [
-          "runtime_noncompact_loop_policy",
           "runtime_noncompact_loop_policy"
         ]
       },
@@ -2248,7 +1806,6 @@
         "production_reachable": true,
         "role": "semantic",
         "operations": [
-          "runtime_websocket_read_loop_policy",
           "runtime_websocket_read_loop_policy"
         ]
       },
@@ -2259,7 +1816,6 @@
         "production_reachable": true,
         "role": "adapter",
         "operations": [
-          "runtime_websocket_read_loop_policy",
           "runtime_websocket_read_loop_policy"
         ]
       },
@@ -2270,7 +1826,6 @@
         "production_reachable": true,
         "role": "semantic",
         "operations": [
-          "runtime_websocket_response_tracking_policy",
           "runtime_websocket_response_tracking_policy"
         ]
       },
@@ -2281,7 +1836,6 @@
         "production_reachable": true,
         "role": "adapter",
         "operations": [
-          "runtime_websocket_response_tracking_policy",
           "runtime_websocket_response_tracking_policy"
         ]
       },
@@ -2292,7 +1846,6 @@
         "production_reachable": true,
         "role": "semantic",
         "operations": [
-          "runtime_websocket_failure_state_policy",
           "runtime_websocket_failure_state_policy"
         ]
       },
@@ -2303,7 +1856,6 @@
         "production_reachable": true,
         "role": "adapter",
         "operations": [
-          "runtime_websocket_failure_state_policy",
           "runtime_websocket_failure_state_policy"
         ]
       },
@@ -2314,7 +1866,6 @@
         "production_reachable": true,
         "role": "semantic",
         "operations": [
-          "runtime_proxy_dispatch_policy",
           "runtime_proxy_dispatch_policy"
         ]
       },
@@ -2325,7 +1876,6 @@
         "production_reachable": true,
         "role": "adapter",
         "operations": [
-          "runtime_proxy_dispatch_policy",
           "runtime_proxy_dispatch_policy"
         ]
       },
@@ -2336,7 +1886,6 @@
         "production_reachable": true,
         "role": "adapter",
         "operations": [
-          "gemini_response_media_projection",
           "gemini_response_media_projection"
         ]
       },
@@ -2347,7 +1896,6 @@
         "production_reachable": true,
         "role": "semantic",
         "operations": [
-          "gemini_response_media_projection",
           "gemini_response_media_projection"
         ]
       },
@@ -2358,7 +1906,6 @@
         "production_reachable": true,
         "role": "adapter",
         "operations": [
-          "runtime_proxy_mount_path_policy",
           "runtime_proxy_mount_path_policy"
         ]
       },
@@ -2374,12 +1921,7 @@
           "runtime_workflow_recovery_class",
           "runtime_workflow_evidence_policy",
           "native_session_marker_arbitration",
-          "saved_session_exit_guidance",
-          "native_live_recovery_observation",
-          "native_in_place_recovery_eligibility",
-          "runtime_workflow_recovery_class",
-          "runtime_workflow_evidence_policy",
-          "native_session_marker_arbitration"
+          "saved_session_exit_guidance"
         ]
       },
       {
@@ -2389,7 +1931,6 @@
         "production_reachable": true,
         "role": "semantic",
         "operations": [
-          "runtime_response_forwarding_tap_state_policy",
           "runtime_response_forwarding_tap_state_policy"
         ]
       },
@@ -2400,7 +1941,6 @@
         "production_reachable": true,
         "role": "adapter",
         "operations": [
-          "runtime_response_forwarding_tap_state_policy",
           "runtime_response_forwarding_tap_state_policy"
         ]
       },
@@ -2411,7 +1951,6 @@
         "production_reachable": true,
         "role": "semantic",
         "operations": [
-          "runtime_profile_route_circuit_action_policy",
           "runtime_profile_route_circuit_action_policy"
         ]
       },
@@ -2422,7 +1961,6 @@
         "production_reachable": true,
         "role": "adapter",
         "operations": [
-          "runtime_profile_route_circuit_action_policy",
           "runtime_profile_route_circuit_action_policy"
         ]
       },
@@ -2433,7 +1971,6 @@
         "production_reachable": true,
         "role": "test",
         "operations": [
-          "runtime_profile_route_circuit_action_policy",
           "runtime_profile_route_circuit_action_policy"
         ]
       },
@@ -2449,20 +1986,11 @@
           {
             "start": 274,
             "end": 284
-          },
-          {
-            "start": 19,
-            "end": 19
-          },
-          {
-            "start": 274,
-            "end": 284
           }
         ],
         "production_reachable": true,
         "role": "semantic",
         "operations": [
-          "shared_attachment_sqlite_header_classification",
           "shared_attachment_sqlite_header_classification"
         ]
       },
@@ -2473,7 +2001,6 @@
         "production_reachable": true,
         "role": "adapter",
         "operations": [
-          "shared_attachment_sqlite_header_classification",
           "shared_attachment_sqlite_header_classification"
         ]
       },
@@ -2484,7 +2011,6 @@
         "production_reachable": true,
         "role": "semantic",
         "operations": [
-          "info_runtime_quota_runway_estimate",
           "info_runtime_quota_runway_estimate"
         ]
       },
@@ -2495,7 +2021,6 @@
         "production_reachable": true,
         "role": "semantic",
         "operations": [
-          "deepseek_stream_tool_arguments_policy",
           "deepseek_stream_tool_arguments_policy"
         ]
       },
@@ -2506,7 +2031,6 @@
         "production_reachable": true,
         "role": "adapter",
         "operations": [
-          "deepseek_stream_tool_arguments_policy",
           "deepseek_stream_tool_arguments_policy"
         ]
       },
@@ -2517,14 +2041,6 @@
         "production_reachable": true,
         "role": "semantic",
         "operations": [
-          "terminal_panel_label_column_planning",
-          "terminal_session_report_column_planning",
-          "terminal_panel_inline_viewport_planning",
-          "terminal_token_cell_chunk_segmentation",
-          "terminal_display_width_prefix_selection",
-          "terminal_fit_cell_ellipsis_policy",
-          "terminal_wrap_piece_line_break_decision",
-          "terminal_cell_padding_policy",
           "terminal_panel_label_column_planning",
           "terminal_session_report_column_planning",
           "terminal_panel_inline_viewport_planning",
@@ -2549,14 +2065,6 @@
           "terminal_display_width_prefix_selection",
           "terminal_fit_cell_ellipsis_policy",
           "terminal_wrap_piece_line_break_decision",
-          "terminal_cell_padding_policy",
-          "terminal_panel_label_column_planning",
-          "terminal_session_report_column_planning",
-          "terminal_panel_inline_viewport_planning",
-          "terminal_token_cell_chunk_segmentation",
-          "terminal_display_width_prefix_selection",
-          "terminal_fit_cell_ellipsis_policy",
-          "terminal_wrap_piece_line_break_decision",
           "terminal_cell_padding_policy"
         ]
       },
@@ -2567,7 +2075,6 @@
         "production_reachable": true,
         "role": "adapter",
         "operations": [
-          "transcript_tool_output_escape_normalization",
           "transcript_tool_output_escape_normalization"
         ]
       },
@@ -2587,26 +2094,10 @@
       "crates/prodex-provider-core/src/constraints.rs",
       "crates/prodex-provider-spi/src/governed_routing.rs",
       "crates/prodex-runtime-policy/src/validate/gateway/routing.rs",
-      "mojo/prodex_core/rich_policy.mojo",
-      "crates/prodex-runtime-proxy/src/gateway_policy.rs",
-      "crates/prodex-provider-core/src/constraints.rs",
-      "crates/prodex-provider-spi/src/governed_routing.rs",
-      "crates/prodex-runtime-policy/src/validate/gateway/routing.rs",
       "mojo/prodex_core/rich_policy.mojo"
     ]
   },
   "supporting_operations": [
-    "quota_aggregation_kernel",
-    "runtime_policy_numeric_kernel",
-    "runtime_profile_schedule_kernel",
-    "runtime_tuning_defaults_kernel",
-    "runtime_websocket_event_classification",
-    "gemini_request_field_planning",
-    "gemini_tool_call_indexing",
-    "gemini_request_content_kernel",
-    "gemini_bridge_request_kernel",
-    "command_output_text_kernel",
-    "deepseek_chat_stream_event_translation",
     "quota_aggregation_kernel",
     "runtime_policy_numeric_kernel",
     "runtime_profile_schedule_kernel",
@@ -2632,8 +2123,6 @@
       "consumer": "crates/prodex-app/src/quota_support/adaptive_refresh.rs",
       "consumer_marker": "quota_watch_policy::refresh_seconds(",
       "production_consumers": [
-        "crates/prodex-app/src/quota_support/adaptive_refresh.rs",
-        "crates/prodex-app/src/app_commands/log_tui.rs",
         "crates/prodex-app/src/quota_support/adaptive_refresh.rs",
         "crates/prodex-app/src/app_commands/log_tui.rs"
       ],
@@ -2702,8 +2191,6 @@
       "consumer_marker": "governance_findings_exceed_classification",
       "production_consumers": [
         "crates/prodex-domain/src/governance/inspection.rs",
-        "crates/prodex-app/src/runtime_proxy/presidio/findings.rs",
-        "crates/prodex-domain/src/governance/inspection.rs",
         "crates/prodex-app/src/runtime_proxy/presidio/findings.rs"
       ],
       "production_reachability_test": "crates/prodex-domain/src/governance/inspection.rs",
@@ -2727,7 +2214,6 @@
       "consumer": "crates/prodex-domain/src/governance/inspection.rs",
       "consumer_marker": "prodex_mojo_core::policy::governance_inspection_order(",
       "production_consumers": [
-        "crates/prodex-domain/src/governance/inspection.rs",
         "crates/prodex-domain/src/governance/inspection.rs"
       ],
       "production_reachability_test": "crates/prodex-domain/tests/governance_inspection.rs",
@@ -2751,7 +2237,6 @@
       "consumer": "crates/prodex-profile-identity/src/lib.rs",
       "consumer_marker": "mojo_profile_identity::is_trimmed_nonempty",
       "production_consumers": [
-        "crates/prodex-profile-identity/src/lib.rs",
         "crates/prodex-profile-identity/src/lib.rs"
       ],
       "production_reachability_test": "crates/prodex-mojo-core/src/profile_identity.rs",
@@ -2776,8 +2261,6 @@
       "consumer_marker": "prodex_mojo_core::secret_policy::secret_reference_is_well_formed",
       "production_consumers": [
         "crates/prodex-secret-store/src/development_provider.rs",
-        "crates/prodex-secret-store/src/projected_provider.rs",
-        "crates/prodex-secret-store/src/development_provider.rs",
         "crates/prodex-secret-store/src/projected_provider.rs"
       ],
       "production_reachability_test": "crates/prodex-domain/tests/secrets.rs",
@@ -2801,7 +2284,6 @@
       "consumer": "crates/prodex-domain/src/secrets.rs",
       "consumer_marker": "prodex_mojo_core::secret_policy::secret_rotation_policy_decision(",
       "production_consumers": [
-        "crates/prodex-domain/src/secrets.rs",
         "crates/prodex-domain/src/secrets.rs"
       ],
       "production_reachability_test": "crates/prodex-domain/tests/secrets.rs",
@@ -3041,7 +2523,6 @@
       "consumer": "crates/prodex-runtime-proxy/src/selection_policy.rs",
       "consumer_marker": "runtime_affinity_local_rejection(",
       "production_consumers": [
-        "crates/prodex-app/src/runtime_proxy/selection/affinity.rs",
         "crates/prodex-app/src/runtime_proxy/selection/affinity.rs"
       ],
       "production_reachability_test": "crates/prodex-runtime-proxy/tests/src/selection_policy.rs",
@@ -3248,7 +2729,6 @@
       "consumer": "crates/prodex-quota/src/render/windows.rs",
       "consumer_marker": "prodex_mojo_core::quota::reset_epoch::quota_reset_json_epoch(&canonical)",
       "production_consumers": [
-        "crates/prodex-quota/src/render/windows.rs",
         "crates/prodex-quota/src/render/windows.rs"
       ],
       "production_reachability_test": "crates/prodex-mojo-core/tests/quota_reset_epoch.rs",
@@ -3272,8 +2752,6 @@
       "consumer": "crates/prodex-quota/src/models.rs",
       "consumer_marker": "prodex_mojo_core::quota::quota_auth_filter_parse",
       "production_consumers": [
-        "crates/prodex-quota/src/models.rs",
-        "crates/prodex-quota/src/capacity.rs",
         "crates/prodex-quota/src/models.rs",
         "crates/prodex-quota/src/capacity.rs"
       ],
@@ -3583,9 +3061,6 @@
       "production_consumers": [
         "crates/prodex-runtime-proxy/src/health/health_decisions.rs",
         "crates/prodex-runtime-proxy/src/health/inflight.rs",
-        "crates/prodex-runtime-proxy/src/health/latency.rs",
-        "crates/prodex-runtime-proxy/src/health/health_decisions.rs",
-        "crates/prodex-runtime-proxy/src/health/inflight.rs",
         "crates/prodex-runtime-proxy/src/health/latency.rs"
       ],
       "production_reachability_test": "crates/prodex-runtime-proxy/src/health/health_decisions.rs",
@@ -3613,9 +3088,6 @@
       "consumer": "crates/prodex-provider-core/src/translators/openai_chat_compat_response.rs",
       "consumer_marker": "transform_openai_chat_response",
       "production_consumers": [
-        "crates/prodex-provider-core/src/translators/openai_chat_compat_response.rs",
-        "crates/prodex-provider-core/src/translators/openai_chat_compat_response/stream.rs",
-        "crates/prodex-provider-core/src/translators/deepseek/response.rs",
         "crates/prodex-provider-core/src/translators/openai_chat_compat_response.rs",
         "crates/prodex-provider-core/src/translators/openai_chat_compat_response/stream.rs",
         "crates/prodex-provider-core/src/translators/deepseek/response.rs"
@@ -3648,8 +3120,6 @@
       "consumer_marker": "prodex_mojo_core::launch::scan_super_overrides",
       "production_consumers": [
         "crates/prodex-cli/src/runtime_args/super_tail_extract.rs",
-        "crates/prodex-cli/src/lib.rs",
-        "crates/prodex-cli/src/runtime_args/super_tail_extract.rs",
         "crates/prodex-cli/src/lib.rs"
       ],
       "production_reachability_test": "crates/prodex-mojo-core/tests/launch_args.rs",
@@ -3673,7 +3143,6 @@
       "consumer": "crates/prodex-cli/src/runtime_features.rs",
       "consumer_marker": "plan_runtime_feature_config",
       "production_consumers": [
-        "crates/prodex-cli/src/runtime_features.rs",
         "crates/prodex-cli/src/runtime_features.rs"
       ],
       "production_reachability_test": "crates/prodex-cli/tests/src/runtime_features.rs",
@@ -3700,7 +3169,6 @@
       "consumer": "crates/prodex-provider-core/src/deepseek_bridge/request_probe.rs",
       "consumer_marker": "DeepSeekRequestPolicyOperation::SimpleRequest",
       "production_consumers": [
-        "crates/prodex-provider-core/src/deepseek_bridge/request_probe.rs",
         "crates/prodex-provider-core/src/deepseek_bridge/request_probe.rs"
       ],
       "production_reachability_test": "crates/prodex-provider-core/src/deepseek_bridge/request_probe.rs",
@@ -3728,8 +3196,6 @@
       "consumer_marker": "prodex_mojo_core::rich::deepseek_kernel",
       "production_consumers": [
         "crates/prodex-provider-core/src/deepseek_bridge/request_params.rs",
-        "crates/prodex-provider-core/src/deepseek_bridge/request_params/metadata.rs",
-        "crates/prodex-provider-core/src/deepseek_bridge/request_params.rs",
         "crates/prodex-provider-core/src/deepseek_bridge/request_params/metadata.rs"
       ],
       "production_reachability_test": "crates/prodex-provider-core/src/deepseek_bridge/request_params.rs",
@@ -3756,7 +3222,6 @@
       "consumer": "crates/prodex-provider-core/src/deepseek_bridge/request_tools.rs",
       "consumer_marker": "DeepSeekKernelOperation::StrictFunctionSchema",
       "production_consumers": [
-        "crates/prodex-provider-core/src/deepseek_bridge/request_tools.rs",
         "crates/prodex-provider-core/src/deepseek_bridge/request_tools.rs"
       ],
       "production_reachability_test": "crates/prodex-provider-core/src/deepseek_bridge/request_tools.rs",
@@ -3785,8 +3250,6 @@
       "consumer_marker": "AnthropicRequestKernelOperation::WebSearchResult",
       "production_consumers": [
         "crates/prodex-provider-core/src/translators/anthropic/messages/web_search.rs",
-        "crates/prodex-app/src/runtime_launch/proxy_startup/anthropic_messages_sse_reader.rs",
-        "crates/prodex-provider-core/src/translators/anthropic/messages/web_search.rs",
         "crates/prodex-app/src/runtime_launch/proxy_startup/anthropic_messages_sse_reader.rs"
       ],
       "production_reachability_test": "crates/prodex-provider-core/src/translators/anthropic/messages/web_search.rs",
@@ -3811,8 +3274,6 @@
       "consumer": "crates/prodex-provider-core/src/translators/kiro/response.rs",
       "consumer_marker": "kiro_rewrite_chat_response_json",
       "production_consumers": [
-        "crates/prodex-provider-core/src/translators/kiro/response.rs",
-        "crates/prodex-provider-core/src/translators/kiro.rs",
         "crates/prodex-provider-core/src/translators/kiro/response.rs",
         "crates/prodex-provider-core/src/translators/kiro.rs"
       ],
@@ -3847,8 +3308,6 @@
       "consumer_marker": "KiroKernelOperation::FinishReason",
       "production_consumers": [
         "crates/prodex-provider-core/src/translators/kiro/response.rs",
-        "crates/prodex-provider-core/src/translators/kiro.rs",
-        "crates/prodex-provider-core/src/translators/kiro/response.rs",
         "crates/prodex-provider-core/src/translators/kiro.rs"
       ],
       "production_reachability_test": "crates/prodex-provider-core/tests/kiro_response.rs",
@@ -3873,8 +3332,6 @@
       "consumer": "crates/prodex-provider-core/src/translators/kiro/response.rs",
       "consumer_marker": "kiro_rewrite_anthropic_response_json",
       "production_consumers": [
-        "crates/prodex-provider-core/src/translators/kiro/response.rs",
-        "crates/prodex-provider-core/src/translators/kiro.rs",
         "crates/prodex-provider-core/src/translators/kiro/response.rs",
         "crates/prodex-provider-core/src/translators/kiro.rs"
       ],
@@ -3915,8 +3372,6 @@
       "consumer_marker": "KiroKernelOperation::AcpMetadata",
       "production_consumers": [
         "crates/prodex-provider-core/src/translators/kiro/acp.rs",
-        "crates/prodex-provider-core/src/translators/kiro.rs",
-        "crates/prodex-provider-core/src/translators/kiro/acp.rs",
         "crates/prodex-provider-core/src/translators/kiro.rs"
       ],
       "production_reachability_test": "crates/prodex-provider-core/src/translators/kiro/acp.rs",
@@ -3953,9 +3408,6 @@
       "production_consumers": [
         "crates/prodex-provider-core/src/translators/deepseek/stream/shaping.rs",
         "crates/prodex-provider-core/src/translators/deepseek/stream/response_values.rs",
-        "crates/prodex-provider-core/src/translators/deepseek/response/metadata.rs",
-        "crates/prodex-provider-core/src/translators/deepseek/stream/shaping.rs",
-        "crates/prodex-provider-core/src/translators/deepseek/stream/response_values.rs",
         "crates/prodex-provider-core/src/translators/deepseek/response/metadata.rs"
       ],
       "production_reachability_test": "crates/prodex-provider-core/src/translators/deepseek/stream/shaping.rs",
@@ -3984,13 +3436,6 @@
       "consumer": "crates/prodex-provider-core/src/gemini_bridge/request_contents.rs",
       "consumer_marker": "GeminiBridgeRequestOperation::ValidateTranslatorRequest",
       "production_consumers": [
-        "crates/prodex-provider-core/src/translators/gemini/request_transform.rs",
-        "crates/prodex-provider-core/src/gemini_bridge.rs",
-        "crates/prodex-provider-core/src/gemini_bridge/request.rs",
-        "crates/prodex-provider-core/src/gemini_bridge/request_contents.rs",
-        "crates/prodex-provider-core/src/translators/gemini/request_contents.rs",
-        "crates/prodex-provider-core/src/translators/gemini/request/tools.rs",
-        "crates/prodex-provider-core/src/chat_tools_bridge.rs",
         "crates/prodex-provider-core/src/translators/gemini/request_transform.rs",
         "crates/prodex-provider-core/src/gemini_bridge.rs",
         "crates/prodex-provider-core/src/gemini_bridge/request.rs",
@@ -4030,11 +3475,6 @@
         "crates/prodex-provider-core/src/gemini_bridge/request/native_project.rs",
         "crates/prodex-provider-core/src/gemini_bridge/request/simple.rs",
         "crates/prodex-provider-core/src/gemini_bridge/request/tools.rs",
-        "crates/prodex-provider-core/src/gemini_bridge/request_contents.rs",
-        "crates/prodex-provider-core/src/gemini_bridge/request.rs",
-        "crates/prodex-provider-core/src/gemini_bridge/request/native_project.rs",
-        "crates/prodex-provider-core/src/gemini_bridge/request/simple.rs",
-        "crates/prodex-provider-core/src/gemini_bridge/request/tools.rs",
         "crates/prodex-provider-core/src/gemini_bridge/request_contents.rs"
       ],
       "production_reachability_test": "crates/prodex-provider-core/src/gemini_bridge/request_contents.rs",
@@ -4062,8 +3502,6 @@
       "consumer_marker": "GeminiBridgeRequestOperation::PreserveToolCallSignatures",
       "production_consumers": [
         "crates/prodex-provider-core/src/translators/gemini/request/tool_signatures.rs",
-        "crates/prodex-provider-core/src/gemini_bridge/response/tool_calls.rs",
-        "crates/prodex-provider-core/src/translators/gemini/request/tool_signatures.rs",
         "crates/prodex-provider-core/src/gemini_bridge/response/tool_calls.rs"
       ],
       "production_reachability_test": "crates/prodex-mojo-core/tests/gemini_request_content.rs",
@@ -4087,7 +3525,6 @@
       "consumer": "crates/prodex-redaction/src/lib.rs",
       "consumer_marker": "prodex_mojo_core::redaction::key_looks_sensitive",
       "production_consumers": [
-        "crates/prodex-redaction/src/lib.rs",
         "crates/prodex-redaction/src/lib.rs"
       ],
       "production_reachability_test": "crates/prodex-mojo-core/src/redaction.rs",
@@ -4111,7 +3548,6 @@
       "consumer": "crates/prodex-redaction/src/lib.rs",
       "consumer_marker": "prodex_mojo_core::redaction::redact_secret_like_text",
       "production_consumers": [
-        "crates/prodex-redaction/src/lib.rs",
         "crates/prodex-redaction/src/lib.rs"
       ],
       "production_reachability_test": "crates/prodex-mojo-core/src/redaction.rs",
@@ -4135,7 +3571,6 @@
       "consumer": "crates/prodex-redaction/src/lib.rs",
       "consumer_marker": "prodex_mojo_core::redaction::redact_gateway_text",
       "production_consumers": [
-        "crates/prodex-redaction/src/lib.rs",
         "crates/prodex-redaction/src/lib.rs"
       ],
       "production_reachability_test": "crates/prodex-mojo-core/src/redaction.rs",
@@ -4159,8 +3594,6 @@
       "consumer": "crates/prodex-runtime-state/src/background.rs",
       "consumer_marker": "prodex_mojo_core::runtime_state::mutation_policy",
       "production_consumers": [
-        "crates/prodex-runtime-state/src/background.rs",
-        "crates/prodex-app/src/runtime_background/scheduled_save/queues.rs",
         "crates/prodex-runtime-state/src/background.rs",
         "crates/prodex-app/src/runtime_background/scheduled_save/queues.rs"
       ],
@@ -4194,7 +3627,6 @@
       "consumer": "crates/prodex-runtime-state/src/route.rs",
       "consumer_marker": "prodex_mojo_core::runtime_state::route_kind_label",
       "production_consumers": [
-        "crates/prodex-runtime-state/src/route.rs",
         "crates/prodex-runtime-state/src/route.rs"
       ],
       "production_reachability_test": "crates/prodex-mojo-core/src/runtime_state/route.rs",
@@ -4218,7 +3650,6 @@
       "consumer": "crates/prodex-runtime-proxy/src/selection_policy.rs",
       "consumer_marker": "prodex_mojo_core::runtime::quota_selection_policy",
       "production_consumers": [
-        "crates/prodex-runtime-proxy/src/selection_policy.rs",
         "crates/prodex-runtime-proxy/src/selection_policy.rs"
       ],
       "production_reachability_test": "crates/prodex-mojo-core/src/runtime/selection_planning.rs",
@@ -4242,7 +3673,6 @@
       "consumer": "crates/prodex-codex-config/src/lib.rs",
       "consumer_marker": "prodex_mojo_core::codex_config::profile_v2_name",
       "production_consumers": [
-        "crates/prodex-codex-config/src/lib.rs",
         "crates/prodex-codex-config/src/lib.rs"
       ],
       "production_reachability_test": "crates/prodex-mojo-core/src/codex_config.rs",
@@ -4266,7 +3696,6 @@
       "consumer": "crates/prodex-codex-config/src/lib.rs",
       "consumer_marker": "prodex_mojo_core::codex_config::config_override",
       "production_consumers": [
-        "crates/prodex-codex-config/src/lib.rs",
         "crates/prodex-codex-config/src/lib.rs"
       ],
       "production_reachability_test": "crates/prodex-mojo-core/src/codex_config.rs",
@@ -4290,7 +3719,6 @@
       "consumer": "crates/prodex-codex-config/src/lib.rs",
       "consumer_marker": "prodex_mojo_core::codex_config::normalize_value",
       "production_consumers": [
-        "crates/prodex-codex-config/src/lib.rs",
         "crates/prodex-codex-config/src/lib.rs"
       ],
       "production_reachability_test": "crates/prodex-mojo-core/src/codex_config.rs",
@@ -4314,7 +3742,6 @@
       "consumer": "crates/prodex-codex-config/src/lib.rs",
       "consumer_marker": "prodex_mojo_core::codex_config::model_provider_plan",
       "production_consumers": [
-        "crates/prodex-codex-config/src/lib.rs",
         "crates/prodex-codex-config/src/lib.rs"
       ],
       "production_reachability_test": "crates/prodex-mojo-core/src/codex_config.rs",
@@ -4340,9 +3767,6 @@
       "production_consumers": [
         "crates/prodex-state/src/lib.rs",
         "crates/prodex-state/src/provider_capabilities.rs",
-        "crates/prodex-app/src/runtime_proxy/lineage/remember.rs",
-        "crates/prodex-state/src/lib.rs",
-        "crates/prodex-state/src/provider_capabilities.rs",
         "crates/prodex-app/src/runtime_proxy/lineage/remember.rs"
       ],
       "production_reachability_test": "crates/prodex-mojo-core/src/state_policy.rs",
@@ -4363,7 +3787,6 @@
       "mojo_source": "mojo/prodex_core/runtime_broker_continuity.mojo",
       "consumer": "crates/prodex-runtime-broker/src/continuity.rs",
       "production_consumers": [
-        "crates/prodex-runtime-broker/src/continuity.rs",
         "crates/prodex-runtime-broker/src/continuity.rs"
       ],
       "production_reachability_test": "crates/prodex-mojo-core/src/runtime_broker_continuity.rs",
@@ -4387,7 +3810,6 @@
       "mojo_source": "mojo/prodex_core/runtime_broker_continuity.mojo",
       "consumer": "crates/prodex-runtime-broker/src/continuity.rs",
       "production_consumers": [
-        "crates/prodex-runtime-broker/src/continuity.rs",
         "crates/prodex-runtime-broker/src/continuity.rs"
       ],
       "production_reachability_test": "crates/prodex-mojo-core/src/runtime_broker_continuity.rs",
@@ -4411,7 +3833,6 @@
       "mojo_source": "mojo/prodex_core/runtime_broker_continuity.mojo",
       "consumer": "crates/prodex-runtime-broker/src/continuity.rs",
       "production_consumers": [
-        "crates/prodex-runtime-broker/src/continuity.rs",
         "crates/prodex-runtime-broker/src/continuity.rs"
       ],
       "production_reachability_test": "crates/prodex-mojo-core/src/runtime_broker_continuity.rs",
@@ -4435,7 +3856,6 @@
       "mojo_source": "mojo/prodex_core/runtime_broker_continuity.mojo",
       "consumer": "crates/prodex-runtime-broker/src/continuity.rs",
       "production_consumers": [
-        "crates/prodex-runtime-broker/src/continuity.rs",
         "crates/prodex-runtime-broker/src/continuity.rs"
       ],
       "production_reachability_test": "crates/prodex-mojo-core/src/runtime_broker_continuity.rs",
@@ -4459,7 +3879,6 @@
       "mojo_source": "mojo/prodex_core/runtime_broker_continuity.mojo",
       "consumer": "crates/prodex-runtime-broker/src/continuity.rs",
       "production_consumers": [
-        "crates/prodex-runtime-broker/src/continuity.rs",
         "crates/prodex-runtime-broker/src/continuity.rs"
       ],
       "production_reachability_test": "crates/prodex-mojo-core/src/runtime_broker_continuity.rs",
@@ -4483,7 +3902,6 @@
       "mojo_source": "mojo/prodex_core/runtime_broker_continuity.mojo",
       "consumer": "crates/prodex-runtime-broker/src/registry.rs",
       "production_consumers": [
-        "crates/prodex-runtime-broker/src/registry.rs",
         "crates/prodex-runtime-broker/src/registry.rs"
       ],
       "production_reachability_test": "crates/prodex-mojo-core/src/runtime_broker_continuity.rs",
@@ -4507,7 +3925,6 @@
       "mojo_source": "mojo/prodex_core/runtime_broker_continuity.mojo",
       "consumer": "crates/prodex-runtime-broker/src/process.rs",
       "production_consumers": [
-        "crates/prodex-runtime-broker/src/process.rs",
         "crates/prodex-runtime-broker/src/process.rs"
       ],
       "production_reachability_test": "crates/prodex-mojo-core/src/runtime_broker_continuity.rs",
@@ -4534,7 +3951,6 @@
       "consumer": "crates/prodex-runtime-proxy/src/lib.rs",
       "consumer_marker": "prodex_mojo_core::json::runtime_proxy_request_shape",
       "production_consumers": [
-        "crates/prodex-runtime-proxy/src/lib.rs",
         "crates/prodex-runtime-proxy/src/lib.rs"
       ],
       "production_reachability_test": "crates/prodex-runtime-proxy/src/lib.rs",
@@ -4558,7 +3974,6 @@
       "consumer": "crates/prodex-runtime-proxy/src/lib.rs",
       "consumer_marker": "prodex_mojo_core::rich::runtime_proxy_path_plan",
       "production_consumers": [
-        "crates/prodex-runtime-proxy/src/lib.rs",
         "crates/prodex-runtime-proxy/src/lib.rs"
       ],
       "production_reachability_test": "crates/prodex-runtime-proxy/src/lib.rs",
@@ -4582,7 +3997,6 @@
       "consumer": "crates/prodex-runtime-launch/src/args.rs",
       "consumer_marker": "prodex_mojo_core::rich::runtime_proxy_mount_path(",
       "production_consumers": [
-        "crates/prodex-runtime-launch/src/args.rs",
         "crates/prodex-runtime-launch/src/args.rs"
       ],
       "production_reachability_test": "crates/prodex-runtime-launch/tests/src/lib/mount_path.rs",
@@ -4606,7 +4020,6 @@
       "consumer": "crates/prodex-runtime-state/src/quota.rs",
       "consumer_marker": "prodex_mojo_core::runtime_state_quota::snapshot_usability",
       "production_consumers": [
-        "crates/prodex-runtime-state/src/quota.rs",
         "crates/prodex-runtime-state/src/quota.rs"
       ],
       "production_reachability_test": "crates/prodex-mojo-core/src/runtime_state_quota.rs",
@@ -4631,8 +4044,6 @@
       "consumer_marker": "prodex_mojo_core::profile_export::validate_collection",
       "production_consumers": [
         "crates/prodex-profile-export/src/data_model.rs",
-        "crates/prodex-profile-export/src/envelope.rs",
-        "crates/prodex-profile-export/src/data_model.rs",
         "crates/prodex-profile-export/src/envelope.rs"
       ],
       "production_reachability_test": "crates/prodex-mojo-core/src/profile_export/tests.rs",
@@ -4656,8 +4067,6 @@
       "consumer": "crates/prodex-profile-export/src/selection.rs",
       "consumer_marker": "prodex_mojo_core::profile_export::profile_export_selection_plan",
       "production_consumers": [
-        "crates/prodex-profile-export/src/selection.rs",
-        "crates/prodex-app/src/profile_commands/import_export/export.rs",
         "crates/prodex-profile-export/src/selection.rs",
         "crates/prodex-app/src/profile_commands/import_export/export.rs"
       ],
@@ -4685,7 +4094,6 @@
       "consumer": "crates/prodex-profile-export/src/copilot.rs",
       "consumer_marker": "prodex_mojo_core::profile_export::copilot_version_triplet",
       "production_consumers": [
-        "crates/prodex-profile-export/src/copilot.rs",
         "crates/prodex-profile-export/src/copilot.rs"
       ],
       "production_reachability_test": "crates/prodex-profile-export/src/copilot.rs",
@@ -4712,7 +4120,6 @@
       "consumer": "crates/prodex-profile-export/src/copilot.rs",
       "consumer_marker": "prodex_mojo_core::profile_export::copilot_platform_label",
       "production_consumers": [
-        "crates/prodex-profile-export/src/copilot.rs",
         "crates/prodex-profile-export/src/copilot.rs"
       ],
       "production_reachability_test": "crates/prodex-profile-export/src/copilot.rs",
@@ -4739,7 +4146,6 @@
       "consumer": "crates/prodex-profile-export/src/copilot.rs",
       "consumer_marker": "prodex_mojo_core::profile_export::copilot_user_api_origin",
       "production_consumers": [
-        "crates/prodex-profile-export/src/copilot.rs",
         "crates/prodex-profile-export/src/copilot.rs"
       ],
       "production_reachability_test": "crates/prodex-profile-export/src/copilot.rs",
@@ -4766,7 +4172,6 @@
       "consumer": "crates/prodex-profile-export/src/copilot.rs",
       "consumer_marker": "prodex_mojo_core::profile_export::copilot_models_api_url",
       "production_consumers": [
-        "crates/prodex-profile-export/src/copilot.rs",
         "crates/prodex-profile-export/src/copilot.rs"
       ],
       "production_reachability_test": "crates/prodex-profile-export/src/copilot.rs",
@@ -4791,8 +4196,6 @@
       "consumer_marker": "prodex_mojo_core::profile_export::copilot_import_state_plan",
       "production_consumers": [
         "crates/prodex-profile-export/src/copilot.rs",
-        "crates/prodex-app/src/profile_commands/copilot.rs",
-        "crates/prodex-profile-export/src/copilot.rs",
         "crates/prodex-app/src/profile_commands/copilot.rs"
       ],
       "production_reachability_test": "crates/prodex-profile-export/src/copilot.rs",
@@ -4816,7 +4219,6 @@
       "consumer": "crates/prodex-profile-export/src/copilot.rs",
       "consumer_marker": "prodex_mojo_core::profile_export::strip_copilot_json_line_comments",
       "production_consumers": [
-        "crates/prodex-profile-export/src/copilot.rs",
         "crates/prodex-profile-export/src/copilot.rs"
       ],
       "production_reachability_test": "crates/prodex-profile-export/src/copilot.rs",
@@ -4840,8 +4242,6 @@
       "consumer": "crates/prodex-profile-export/src/selection.rs",
       "consumer_marker": "prodex_mojo_core::profile_export::profile_export_active_profile_selected",
       "production_consumers": [
-        "crates/prodex-profile-export/src/selection.rs",
-        "crates/prodex-app/src/profile_commands/import_export/export.rs",
         "crates/prodex-profile-export/src/selection.rs",
         "crates/prodex-app/src/profile_commands/import_export/export.rs"
       ],
@@ -4868,9 +4268,6 @@
       "production_consumers": [
         "crates/prodex-profile-export/src/selection.rs",
         "crates/prodex-app/src/profile_commands/import_export/import.rs",
-        "crates/prodex-app/src/profile_commands/import_export/import/lifecycle_support.rs",
-        "crates/prodex-profile-export/src/selection.rs",
-        "crates/prodex-app/src/profile_commands/import_export/import.rs",
         "crates/prodex-app/src/profile_commands/import_export/import/lifecycle_support.rs"
       ],
       "production_reachability_test": "crates/prodex-profile-export/src/selection.rs",
@@ -4895,8 +4292,6 @@
       "consumer_marker": "prodex_mojo_core::profile_export::profile_import_auth_update_plan(",
       "production_consumers": [
         "crates/prodex-profile-export/src/import_plan.rs",
-        "crates/prodex-app/src/profile_commands/import_export/import.rs",
-        "crates/prodex-profile-export/src/import_plan.rs",
         "crates/prodex-app/src/profile_commands/import_export/import.rs"
       ],
       "production_reachability_test": "crates/prodex-mojo-core/src/profile_export.rs",
@@ -4917,8 +4312,6 @@
       "mojo_source": "mojo/prodex_core/runtime_repo_map.mojo",
       "consumer": "crates/prodex-app/src/runtime_state_shared/line_index.rs",
       "production_consumers": [
-        "crates/prodex-app/src/runtime_state_shared/line_index.rs",
-        "crates/prodex-app/src/runtime_state_shared/artifact_store/projection.rs",
         "crates/prodex-app/src/runtime_state_shared/line_index.rs",
         "crates/prodex-app/src/runtime_state_shared/artifact_store/projection.rs"
       ],
@@ -4944,8 +4337,6 @@
       "consumer": "crates/prodex-app/src/runtime_state_shared/line_index.rs",
       "production_consumers": [
         "crates/prodex-app/src/runtime_state_shared/line_index.rs",
-        "crates/prodex-app/src/runtime_state_shared/artifact_store/projection.rs",
-        "crates/prodex-app/src/runtime_state_shared/line_index.rs",
         "crates/prodex-app/src/runtime_state_shared/artifact_store/projection.rs"
       ],
       "production_reachability_test": "crates/prodex-mojo-core/src/runtime_repo_map.rs",
@@ -4969,7 +4360,6 @@
       "mojo_source": "mojo/prodex_core/runtime_lineage.mojo",
       "consumer": "crates/prodex-runtime-state/src/lineage.rs",
       "production_consumers": [
-        "crates/prodex-runtime-state/src/lineage.rs",
         "crates/prodex-runtime-state/src/lineage.rs"
       ],
       "production_reachability_test": "crates/prodex-mojo-core/src/runtime_lineage.rs",
@@ -4993,7 +4383,6 @@
       "mojo_source": "mojo/prodex_core/runtime_lineage.mojo",
       "consumer": "crates/prodex-runtime-state/src/lineage.rs",
       "production_consumers": [
-        "crates/prodex-runtime-state/src/lineage.rs",
         "crates/prodex-runtime-state/src/lineage.rs"
       ],
       "production_reachability_test": "crates/prodex-mojo-core/src/runtime_lineage.rs",
@@ -5017,7 +4406,6 @@
       "mojo_source": "mojo/prodex_core/runtime_lineage.mojo",
       "consumer": "crates/prodex-runtime-state/src/lineage.rs",
       "production_consumers": [
-        "crates/prodex-runtime-state/src/lineage.rs",
         "crates/prodex-runtime-state/src/lineage.rs"
       ],
       "production_reachability_test": "crates/prodex-mojo-core/src/runtime_lineage.rs",
@@ -5045,8 +4433,6 @@
       "consumer_marker": "prodex_mojo_core::runtime_lineage::local_rewrite_candidate_allowed",
       "production_consumers": [
         "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_upstream.rs",
-        "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_pipeline_dispatch.rs",
-        "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_upstream.rs",
         "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_pipeline_dispatch.rs"
       ],
       "production_reachability_test": "crates/prodex-mojo-core/src/runtime_lineage/binding_candidate.rs",
@@ -5071,8 +4457,6 @@
       "consumer_marker": "prodex_mojo_core::json::session_report_metadata",
       "production_consumers": [
         "crates/prodex-session-store/src/report.rs",
-        "crates/prodex-session-store/src/session_selector.rs",
-        "crates/prodex-session-store/src/report.rs",
         "crates/prodex-session-store/src/session_selector.rs"
       ],
       "production_reachability_test": "crates/prodex-session-store/src/report.rs",
@@ -5096,7 +4480,6 @@
       "consumer": "crates/prodex-session-store/src/lib.rs",
       "consumer_marker": "prodex_mojo_core::json::session_selector_match_plan",
       "production_consumers": [
-        "crates/prodex-session-store/src/lib.rs",
         "crates/prodex-session-store/src/lib.rs"
       ],
       "production_reachability_test": "crates/prodex-session-store/tests/src/lib.rs",
@@ -5120,7 +4503,6 @@
       "consumer": "crates/prodex-session-store/src/lib.rs",
       "consumer_marker": "prodex_mojo_core::json::session_report_query_matches",
       "production_consumers": [
-        "crates/prodex-session-store/src/lib.rs",
         "crates/prodex-session-store/src/lib.rs"
       ],
       "production_reachability_test": "crates/prodex-session-store/tests/src/lib.rs",
@@ -5144,9 +4526,6 @@
       "consumer": "crates/prodex-session-store/src/report.rs",
       "consumer_marker": "prodex_mojo_core::json::session_file_name_plan",
       "production_consumers": [
-        "crates/prodex-session-store/src/report.rs",
-        "crates/prodex-session-store/src/lib.rs",
-        "crates/prodex-session-store/src/state_db_index.rs",
         "crates/prodex-session-store/src/report.rs",
         "crates/prodex-session-store/src/lib.rs",
         "crates/prodex-session-store/src/state_db_index.rs"
@@ -5173,8 +4552,6 @@
       "consumer_marker": "prodex_mojo_core::smart_context_artifact_ref::parse_reference",
       "production_consumers": [
         "crates/prodex-app/src/runtime_proxy/smart_context/artifact_refs.rs",
-        "crates/prodex-app/src/runtime_proxy/smart_context/artifact_manifest.rs",
-        "crates/prodex-app/src/runtime_proxy/smart_context/artifact_refs.rs",
         "crates/prodex-app/src/runtime_proxy/smart_context/artifact_manifest.rs"
       ],
       "production_reachability_test": "crates/prodex-mojo-core/src/smart_context_artifact_ref.rs",
@@ -5198,7 +4575,6 @@
       "consumer": "crates/prodex-app/src/runtime_state_shared/semantic_index/markers.rs",
       "consumer_marker": "prodex_mojo_core::smart_context_markers::parse_file_location_token",
       "production_consumers": [
-        "crates/prodex-app/src/runtime_state_shared/semantic_index/markers.rs",
         "crates/prodex-app/src/runtime_state_shared/semantic_index/markers.rs"
       ],
       "production_reachability_test": "crates/prodex-mojo-core/src/smart_context_markers.rs",
@@ -5222,7 +4598,6 @@
       "consumer": "crates/prodex-app/src/runtime_state_shared/semantic_index.rs",
       "consumer_marker": "prodex_mojo_core::smart_context_markers::semantic_index(",
       "production_consumers": [
-        "crates/prodex-app/src/runtime_state_shared/semantic_index.rs",
         "crates/prodex-app/src/runtime_state_shared/semantic_index.rs"
       ],
       "production_reachability_test": "crates/prodex-mojo-core/src/smart_context_markers.rs",
@@ -5243,7 +4618,6 @@
       "mojo_source": "mojo/prodex_core/runtime_route_reason.mojo",
       "consumer": "crates/prodex-runtime-proxy/src/route_decision_trace/reason.rs",
       "production_consumers": [
-        "crates/prodex-runtime-proxy/src/route_decision_trace/reason.rs",
         "crates/prodex-runtime-proxy/src/route_decision_trace/reason.rs"
       ],
       "production_reachability_test": "crates/prodex-mojo-core/src/runtime_route_reason.rs",
@@ -5267,7 +4641,6 @@
       "mojo_source": "mojo/prodex_core/runtime_route_reason.mojo",
       "consumer": "crates/prodex-runtime-proxy/src/route_decision_trace/reason.rs",
       "production_consumers": [
-        "crates/prodex-runtime-proxy/src/route_decision_trace/reason.rs",
         "crates/prodex-runtime-proxy/src/route_decision_trace/reason.rs"
       ],
       "production_reachability_test": "crates/prodex-mojo-core/src/runtime_route_reason.rs",
@@ -5291,7 +4664,6 @@
       "mojo_source": "mojo/prodex_core/runtime_route_reason.mojo",
       "consumer": "crates/prodex-runtime-proxy/src/route_decision_trace/reason.rs",
       "production_consumers": [
-        "crates/prodex-runtime-proxy/src/route_decision_trace/reason.rs",
         "crates/prodex-runtime-proxy/src/route_decision_trace/reason.rs"
       ],
       "production_reachability_test": "crates/prodex-mojo-core/src/runtime_route_reason.rs",
@@ -5318,7 +4690,6 @@
       "consumer": "crates/prodex-runtime-proxy/src/route_decision_trace.rs",
       "consumer_marker": "prodex_mojo_core::runtime_route_reason::safe_identifier",
       "production_consumers": [
-        "crates/prodex-runtime-proxy/src/route_decision_trace.rs",
         "crates/prodex-runtime-proxy/src/route_decision_trace.rs"
       ],
       "production_reachability_test": "crates/prodex-mojo-core/src/runtime_route_reason.rs",
@@ -5340,7 +4711,6 @@
       "mojo_source": "mojo/prodex_core/rich_abi.mojo",
       "consumer": "crates/prodex-provider-core/src/deepseek_bridge/request_params/metadata.rs",
       "production_consumers": [
-        "crates/prodex-provider-core/src/deepseek_bridge/request_params/metadata.rs",
         "crates/prodex-provider-core/src/deepseek_bridge/request_params/metadata.rs"
       ],
       "production_reachability_test": "crates/prodex-provider-core/src/deepseek_bridge/request_params/metadata.rs",
@@ -5367,7 +4737,6 @@
       "mojo_source": "mojo/prodex_core/rich_abi.mojo",
       "consumer": "crates/prodex-provider-core/src/deepseek_bridge/request_params/metadata.rs",
       "production_consumers": [
-        "crates/prodex-provider-core/src/deepseek_bridge/request_params/metadata.rs",
         "crates/prodex-provider-core/src/deepseek_bridge/request_params/metadata.rs"
       ],
       "production_reachability_test": "crates/prodex-provider-core/src/deepseek_bridge/request_params/metadata.rs",
@@ -5394,7 +4763,6 @@
       "mojo_source": "mojo/prodex_core/rich_abi.mojo",
       "consumer": "crates/prodex-provider-core/src/deepseek_bridge/request_params/metadata.rs",
       "production_consumers": [
-        "crates/prodex-provider-core/src/deepseek_bridge/request_params/metadata.rs",
         "crates/prodex-provider-core/src/deepseek_bridge/request_params/metadata.rs"
       ],
       "production_reachability_test": "crates/prodex-provider-core/src/deepseek_bridge/request_params/metadata.rs",
@@ -5420,7 +4788,6 @@
       "mojo_source": "mojo/prodex_core/provider_usage.mojo",
       "consumer": "crates/prodex-provider-core/src/usage.rs",
       "production_consumers": [
-        "crates/prodex-provider-core/src/usage.rs",
         "crates/prodex-provider-core/src/usage.rs"
       ],
       "production_reachability_test": "crates/prodex-mojo-core/src/provider_usage.rs",
@@ -5444,7 +4811,6 @@
       "mojo_source": "mojo/prodex_core/provider_usage.mojo",
       "consumer": "crates/prodex-provider-core/src/usage.rs",
       "production_consumers": [
-        "crates/prodex-provider-core/src/usage.rs",
         "crates/prodex-provider-core/src/usage.rs"
       ],
       "production_reachability_test": "crates/prodex-mojo-core/src/provider_usage.rs",
@@ -5468,7 +4834,6 @@
       "mojo_source": "mojo/prodex_core/provider_usage.mojo",
       "consumer": "crates/prodex-provider-core/src/usage.rs",
       "production_consumers": [
-        "crates/prodex-provider-core/src/usage.rs",
         "crates/prodex-provider-core/src/usage.rs"
       ],
       "production_reachability_test": "crates/prodex-mojo-core/src/provider_usage.rs",
@@ -5492,7 +4857,6 @@
       "mojo_source": "mojo/prodex_core/provider_usage.mojo",
       "consumer": "crates/prodex-provider-core/src/usage.rs",
       "production_consumers": [
-        "crates/prodex-provider-core/src/usage.rs",
         "crates/prodex-provider-core/src/usage.rs"
       ],
       "production_reachability_test": "crates/prodex-mojo-core/src/provider_usage.rs",
@@ -5524,7 +4888,6 @@
       "consumer": "crates/prodex-app/src/super_expose/protocol.rs",
       "consumer_marker": "prodex_mojo_core::rich::super_expose_protocol_version_supported",
       "production_consumers": [
-        "crates/prodex-app/src/super_expose/protocol.rs",
         "crates/prodex-app/src/super_expose/protocol.rs"
       ],
       "rust_owner_before": "supported MCP protocol-version table membership used by initialize",
@@ -5548,7 +4911,6 @@
       "consumer": "crates/prodex-app/src/super_expose/protocol/validation.rs",
       "consumer_marker": "prodex_mojo_core::rich::super_expose_protocol_metadata",
       "production_consumers": [
-        "crates/prodex-app/src/super_expose/protocol/validation.rs",
         "crates/prodex-app/src/super_expose/protocol/validation.rs"
       ],
       "rust_owner_before": "header/body protocol-version precedence, current-version metadata requirements and Mcp-Method/Mcp-Name mismatch decisions",
@@ -5572,7 +4934,6 @@
       "consumer": "crates/prodex-app/src/super_expose/protocol/validation.rs",
       "consumer_marker": "prodex_mojo_core::rich::super_expose_content_type_allowed",
       "production_consumers": [
-        "crates/prodex-app/src/super_expose/protocol/validation.rs",
         "crates/prodex-app/src/super_expose/protocol/validation.rs"
       ],
       "rust_owner_before": "Content-Type and Accept media-type splitting, Unicode trim and ASCII case-insensitive application/json matching",
@@ -5596,7 +4957,6 @@
       "consumer": "crates/prodex-app/src/super_expose/protocol/validation.rs",
       "consumer_marker": "prodex_mojo_core::rich::super_expose_json_nesting_within_limit",
       "production_consumers": [
-        "crates/prodex-app/src/super_expose/protocol/validation.rs",
         "crates/prodex-app/src/super_expose/protocol/validation.rs"
       ],
       "rust_owner_before": "quote/escape-aware JSON brace/bracket nesting scan and malformed-close detection",
@@ -5620,7 +4980,6 @@
       "consumer": "crates/prodex-app/src/super_expose/protocol/tool_contract.rs",
       "consumer_marker": "prodex_mojo_core::rich::super_expose_tool_argument_allowed",
       "production_consumers": [
-        "crates/prodex-app/src/super_expose/protocol/tool_contract.rs",
         "crates/prodex-app/src/super_expose/protocol/tool_contract.rs"
       ],
       "rust_owner_before": "per-tool allowed argument-key tables for all exposed Super/session tools",
@@ -5644,7 +5003,6 @@
       "consumer": "crates/prodex-app/src/super_expose/protocol/tool_contract.rs",
       "consumer_marker": "prodex_mojo_core::rich::super_expose_run_id_valid",
       "production_consumers": [
-        "crates/prodex-app/src/super_expose/protocol/tool_contract.rs",
         "crates/prodex-app/src/super_expose/protocol/tool_contract.rs"
       ],
       "rust_owner_before": "spr_ run-id prefix and ASCII alphanumeric/underscore/hyphen validation",
@@ -5668,7 +5026,6 @@
       "consumer": "crates/prodex-app/src/super_expose/protocol/tool_contract.rs",
       "consumer_marker": "prodex_mojo_core::rich::super_expose_string_valid",
       "production_consumers": [
-        "crates/prodex-app/src/super_expose/protocol/tool_contract.rs",
         "crates/prodex-app/src/super_expose/protocol/tool_contract.rs"
       ],
       "rust_owner_before": "optional nonempty/max-byte and Unicode control-character rejection policy",
@@ -5685,7 +5042,6 @@
       "mojo_source": "mojo/prodex_core/sub_agent_policy.mojo",
       "consumer": "crates/prodex-cli/src/sub_agent.rs",
       "production_consumers": [
-        "crates/prodex-cli/src/sub_agent.rs",
         "crates/prodex-cli/src/sub_agent.rs"
       ],
       "production_reachability_test": "crates/prodex-mojo-core/src/sub_agent_policy.rs",
@@ -5712,7 +5068,6 @@
       "mojo_source": "mojo/prodex_core/sub_agent_policy.mojo",
       "consumer": "crates/prodex-cli/src/sub_agent.rs",
       "production_consumers": [
-        "crates/prodex-cli/src/sub_agent.rs",
         "crates/prodex-cli/src/sub_agent.rs"
       ],
       "production_reachability_test": "crates/prodex-mojo-core/src/sub_agent_policy.rs",
@@ -5739,7 +5094,6 @@
       "mojo_source": "mojo/prodex_core/sub_agent_policy.mojo",
       "consumer": "crates/prodex-cli/src/sub_agent.rs",
       "production_consumers": [
-        "crates/prodex-cli/src/sub_agent.rs",
         "crates/prodex-cli/src/sub_agent.rs"
       ],
       "production_reachability_test": "crates/prodex-mojo-core/src/sub_agent_policy.rs",
@@ -5767,8 +5121,6 @@
       "consumer": "crates/prodex-cli/src/sub_agent.rs",
       "production_consumers": [
         "crates/prodex-cli/src/sub_agent.rs",
-        "crates/prodex-app/src/runtime_tools/sub_agents.rs",
-        "crates/prodex-cli/src/sub_agent.rs",
         "crates/prodex-app/src/runtime_tools/sub_agents.rs"
       ],
       "production_reachability_test": "crates/prodex-mojo-core/src/sub_agent_policy.rs",
@@ -5794,7 +5146,6 @@
       "mojo_source": "mojo/prodex_core/log_semantics.mojo",
       "consumer": "crates/prodex-app/src/app_commands/log_transcript.rs",
       "production_consumers": [
-        "crates/prodex-app/src/app_commands/log_transcript.rs",
         "crates/prodex-app/src/app_commands/log_transcript.rs"
       ],
       "production_reachability_test": "crates/prodex-mojo-core/src/log.rs",
@@ -5818,7 +5169,6 @@
       "mojo_source": "mojo/prodex_core/log_semantics.mojo",
       "consumer": "crates/prodex-app/src/app_commands/log_transcript.rs",
       "production_consumers": [
-        "crates/prodex-app/src/app_commands/log_transcript.rs",
         "crates/prodex-app/src/app_commands/log_transcript.rs"
       ],
       "production_reachability_test": "crates/prodex-mojo-core/src/log.rs",
@@ -5842,7 +5192,6 @@
       "mojo_source": "mojo/prodex_core/log_semantics.mojo",
       "consumer": "crates/prodex-app/src/app_commands/log_transcript.rs",
       "production_consumers": [
-        "crates/prodex-app/src/app_commands/log_transcript.rs",
         "crates/prodex-app/src/app_commands/log_transcript.rs"
       ],
       "production_reachability_test": "crates/prodex-mojo-core/src/log.rs",
@@ -5866,7 +5215,6 @@
       "mojo_source": "mojo/prodex_core/log_semantics.mojo",
       "consumer": "crates/prodex-app/src/app_commands/log_transcript.rs",
       "production_consumers": [
-        "crates/prodex-app/src/app_commands/log_transcript.rs",
         "crates/prodex-app/src/app_commands/log_transcript.rs"
       ],
       "production_reachability_test": "crates/prodex-mojo-core/src/log.rs",
@@ -5900,10 +5248,6 @@
         "crates/prodex-app/src/app_commands/log_load.rs",
         "crates/prodex-app/src/app_commands/log_stream.rs",
         "crates/prodex-app/src/app_commands/log_command_tui.rs",
-        "crates/prodex-runtime-log/src/lib.rs",
-        "crates/prodex-app/src/app_commands/log_load.rs",
-        "crates/prodex-app/src/app_commands/log_stream.rs",
-        "crates/prodex-app/src/app_commands/log_command_tui.rs",
         "crates/prodex-runtime-log/src/lib.rs"
       ],
       "production_reachability_test": "crates/prodex-mojo-core/tests/log_load.rs",
@@ -5927,7 +5271,6 @@
       "consumer": "crates/prodex-app/src/super_expose/protocol/dispatch.rs",
       "consumer_marker": "prodex_mojo_core::rich::super_expose_dispatch_validation",
       "production_consumers": [
-        "crates/prodex-app/src/super_expose/protocol/dispatch.rs",
         "crates/prodex-app/src/super_expose/protocol/dispatch.rs"
       ],
       "production_reachability_test": "crates/prodex-mojo-core/src/rich/super_expose.rs",
@@ -5951,7 +5294,6 @@
       "consumer": "crates/prodex-app/src/super_expose/session_prompt_write/output.rs",
       "consumer_marker": "prodex_mojo_core::rich::super_expose_output_cursor_valid",
       "production_consumers": [
-        "crates/prodex-app/src/super_expose/session_prompt_write/output.rs",
         "crates/prodex-app/src/super_expose/session_prompt_write/output.rs"
       ],
       "production_reachability_test": "crates/prodex-app/src/super_expose/session_prompt_write_output_tests.rs",
@@ -5972,8 +5314,6 @@
       "mojo_source": "mojo/prodex_core/super_provider_config.mojo",
       "consumer": "crates/prodex-cli/src/runtime_args.rs",
       "production_consumers": [
-        "crates/prodex-cli/src/runtime_args.rs",
-        "crates/prodex-cli/src/runtime_args/optional_tools.rs",
         "crates/prodex-cli/src/runtime_args.rs",
         "crates/prodex-cli/src/runtime_args/optional_tools.rs"
       ],
@@ -5999,8 +5339,6 @@
       "consumer": "crates/prodex-cli/src/runtime_args.rs",
       "production_consumers": [
         "crates/prodex-cli/src/runtime_args.rs",
-        "crates/prodex-cli/src/runtime_args/optional_tools.rs",
-        "crates/prodex-cli/src/runtime_args.rs",
         "crates/prodex-cli/src/runtime_args/optional_tools.rs"
       ],
       "production_reachability_test": "crates/prodex-mojo-core/src/super_provider_config.rs",
@@ -6024,8 +5362,6 @@
       "mojo_source": "mojo/prodex_core/super_provider_config.mojo",
       "consumer": "crates/prodex-cli/src/super_provider_limits.rs",
       "production_consumers": [
-        "crates/prodex-cli/src/super_provider_limits.rs",
-        "crates/prodex-cli/src/runtime_args.rs",
         "crates/prodex-cli/src/super_provider_limits.rs",
         "crates/prodex-cli/src/runtime_args.rs"
       ],
@@ -6051,8 +5387,6 @@
       "consumer": "crates/prodex-cli/src/runtime_args.rs",
       "production_consumers": [
         "crates/prodex-cli/src/runtime_args.rs",
-        "crates/prodex-cli/src/runtime_args/optional_tools.rs",
-        "crates/prodex-cli/src/runtime_args.rs",
         "crates/prodex-cli/src/runtime_args/optional_tools.rs"
       ],
       "production_reachability_test": "crates/prodex-mojo-core/src/super_provider_config.rs",
@@ -6076,7 +5410,6 @@
       "mojo_source": "mojo/prodex_core/runtime_broker_continuity.mojo",
       "consumer": "crates/prodex-runtime-broker/src/version_guard.rs",
       "production_consumers": [
-        "crates/prodex-runtime-broker/src/version_guard.rs",
         "crates/prodex-runtime-broker/src/version_guard.rs"
       ],
       "production_reachability_test": "crates/prodex-mojo-core/src/runtime_broker_continuity.rs",
@@ -6106,7 +5439,6 @@
       "mojo_source": "mojo/prodex_core/runtime_broker_continuity.mojo",
       "consumer": "crates/prodex-runtime-broker/src/version_guard.rs",
       "production_consumers": [
-        "crates/prodex-runtime-broker/src/version_guard.rs",
         "crates/prodex-runtime-broker/src/version_guard.rs"
       ],
       "production_reachability_test": "crates/prodex-mojo-core/src/runtime_broker_continuity.rs",
@@ -6130,7 +5462,6 @@
       "mojo_source": "mojo/prodex_core/runtime_broker_continuity.mojo",
       "consumer": "crates/prodex-runtime-broker/src/version_guard.rs",
       "production_consumers": [
-        "crates/prodex-runtime-broker/src/version_guard.rs",
         "crates/prodex-runtime-broker/src/version_guard.rs"
       ],
       "production_reachability_test": "crates/prodex-mojo-core/src/runtime_broker_continuity.rs",
@@ -6154,7 +5485,6 @@
       "mojo_source": "mojo/prodex_core/log_throughput_policy.mojo",
       "consumer": "crates/prodex-app/src/app_commands/log_throughput_state.rs",
       "production_consumers": [
-        "crates/prodex-app/src/app_commands/log_throughput_state.rs",
         "crates/prodex-app/src/app_commands/log_throughput_state.rs"
       ],
       "production_reachability_test": "crates/prodex-mojo-core/src/log_throughput_policy.rs",
@@ -6179,8 +5509,6 @@
       "consumer": "crates/prodex-app/src/app_commands/log_throughput_state.rs",
       "production_consumers": [
         "crates/prodex-app/src/app_commands/log_throughput_state.rs",
-        "crates/prodex-app/src/reports/info/token_usage_render.rs",
-        "crates/prodex-app/src/app_commands/log_throughput_state.rs",
         "crates/prodex-app/src/reports/info/token_usage_render.rs"
       ],
       "production_reachability_test": "crates/prodex-mojo-core/src/log_throughput_policy.rs",
@@ -6204,7 +5532,6 @@
       "mojo_source": "mojo/prodex_core/log_throughput_policy.mojo",
       "consumer": "crates/prodex-app/src/app_commands/log_throughput_state.rs",
       "production_consumers": [
-        "crates/prodex-app/src/app_commands/log_throughput_state.rs",
         "crates/prodex-app/src/app_commands/log_throughput_state.rs"
       ],
       "production_reachability_test": "crates/prodex-mojo-core/src/log_throughput_policy.rs",
@@ -6228,8 +5555,6 @@
       "mojo_source": "mojo/prodex_core/deepseek_messages.mojo",
       "consumer": "crates/prodex-provider-core/src/translators/gemini/stream/shaping.rs",
       "production_consumers": [
-        "crates/prodex-provider-core/src/translators/gemini/stream/shaping.rs",
-        "crates/prodex-app/src/runtime_launch/proxy_startup/gemini_sse_state.rs",
         "crates/prodex-provider-core/src/translators/gemini/stream/shaping.rs",
         "crates/prodex-app/src/runtime_launch/proxy_startup/gemini_sse_state.rs"
       ],
@@ -6255,11 +5580,6 @@
       "mojo_source": "mojo/prodex_core/super_provider_config.mojo",
       "consumer": "crates/prodex-app/src/app_commands/runtime_launch/provider_names.rs",
       "production_consumers": [
-        "crates/prodex-app/src/app_commands/runtime_launch/provider_names.rs",
-        "crates/prodex-app/src/app_commands/runtime_launch/providers_mode.rs",
-        "crates/prodex-app/src/app_commands/runtime_launch/providers.rs",
-        "crates/prodex-app/src/app_commands/runtime_launch/selection.rs",
-        "crates/prodex-app/src/app_commands/runtime_launch/providers_profiles.rs",
         "crates/prodex-app/src/app_commands/runtime_launch/provider_names.rs",
         "crates/prodex-app/src/app_commands/runtime_launch/providers_mode.rs",
         "crates/prodex-app/src/app_commands/runtime_launch/providers.rs",
@@ -6293,13 +5613,6 @@
         "crates/prodex-app/src/runtime_local_provider_config.rs",
         "crates/prodex-app/src/runtime_external_provider_config.rs",
         "crates/prodex-app/src/quota_support/external_provider.rs",
-        "crates/prodex-app/src/quota_support.rs",
-        "crates/prodex-app/src/app_commands/runtime_launch/providers_mode.rs",
-        "crates/prodex-app/src/runtime_gemini_config.rs",
-        "crates/prodex-app/src/runtime_deepseek_config.rs",
-        "crates/prodex-app/src/runtime_local_provider_config.rs",
-        "crates/prodex-app/src/runtime_external_provider_config.rs",
-        "crates/prodex-app/src/quota_support/external_provider.rs",
         "crates/prodex-app/src/quota_support.rs"
       ],
       "production_reachability_test": "crates/prodex-mojo-core/src/super_provider_config.rs",
@@ -6323,8 +5636,6 @@
       "mojo_source": "mojo/prodex_core/sub_agent_policy.mojo",
       "consumer": "crates/prodex-app/src/runtime_tools/sub_agents.rs",
       "production_consumers": [
-        "crates/prodex-app/src/runtime_tools/sub_agents.rs",
-        "crates/prodex-cli/src/runtime_args/super_validation.rs",
         "crates/prodex-app/src/runtime_tools/sub_agents.rs",
         "crates/prodex-cli/src/runtime_args/super_validation.rs"
       ],
@@ -6352,7 +5663,6 @@
       "mojo_source": "mojo/prodex_core/sub_agent_policy.mojo",
       "consumer": "crates/prodex-app/src/runtime_tools/sub_agents.rs",
       "production_consumers": [
-        "crates/prodex-app/src/runtime_tools/sub_agents.rs",
         "crates/prodex-app/src/runtime_tools/sub_agents.rs"
       ],
       "production_reachability_test": "crates/prodex-mojo-core/src/sub_agent_policy.rs",
@@ -6382,10 +5692,6 @@
         "crates/prodex-app/src/runtime_deepseek_config.rs",
         "crates/prodex-app/src/runtime_config/environment.rs",
         "crates/prodex-app/src/app_commands/presidio.rs",
-        "crates/prodex-app/src/runtime_config/config/gemini.rs",
-        "crates/prodex-app/src/runtime_deepseek_config.rs",
-        "crates/prodex-app/src/runtime_config/environment.rs",
-        "crates/prodex-app/src/app_commands/presidio.rs",
         "crates/prodex-app/src/runtime_config/config/gemini.rs"
       ],
       "production_reachability_test": "crates/prodex-mojo-core/src/super_provider_config.rs",
@@ -6409,7 +5715,6 @@
       "mojo_source": "mojo/prodex_core/super_provider_config.mojo",
       "consumer": "crates/prodex-app/src/runtime_deepseek_config.rs",
       "production_consumers": [
-        "crates/prodex-app/src/runtime_deepseek_config.rs",
         "crates/prodex-app/src/runtime_deepseek_config.rs"
       ],
       "production_reachability_test": "crates/prodex-mojo-core/src/super_provider_config.rs",
@@ -6433,9 +5738,6 @@
       "mojo_source": "mojo/prodex_core/super_provider_config.mojo",
       "consumer": "crates/prodex-app/src/app_commands/shared.rs",
       "production_consumers": [
-        "crates/prodex-app/src/app_commands/shared.rs",
-        "crates/prodex-app/src/app_commands/session.rs",
-        "crates/prodex-app/src/profile_commands/manage.rs",
         "crates/prodex-app/src/app_commands/shared.rs",
         "crates/prodex-app/src/app_commands/session.rs",
         "crates/prodex-app/src/profile_commands/manage.rs"
@@ -6468,11 +5770,6 @@
         "crates/prodex-app/src/runtime_launch/proxy_startup/provider_models.rs",
         "crates/prodex-app/src/runtime_external_provider_config/catalog_model.rs",
         "crates/prodex-provider-core/src/translators/kiro/response.rs",
-        "crates/prodex-app/src/runtime_external_provider_config.rs",
-        "crates/prodex-app/src/app_commands/super_main_catalog.rs",
-        "crates/prodex-app/src/runtime_launch/proxy_startup/provider_models.rs",
-        "crates/prodex-app/src/runtime_external_provider_config/catalog_model.rs",
-        "crates/prodex-provider-core/src/translators/kiro/response.rs",
         "crates/prodex-app/src/runtime_external_provider_config.rs"
       ],
       "production_reachability_test": "crates/prodex-app/src/runtime_launch/proxy_startup/provider_models.rs",
@@ -6498,9 +5795,6 @@
       "production_consumers": [
         "crates/prodex-app/src/profile_commands/anthropic.rs",
         "crates/prodex-app/src/profile_commands/copilot.rs",
-        "crates/prodex-app/src/profile_commands/kiro.rs",
-        "crates/prodex-app/src/profile_commands/anthropic.rs",
-        "crates/prodex-app/src/profile_commands/copilot.rs",
         "crates/prodex-app/src/profile_commands/kiro.rs"
       ],
       "production_reachability_test": "crates/prodex-mojo-core/src/super_provider_config.rs",
@@ -6524,7 +5818,6 @@
       "consumer": "crates/prodex-app/src/runtime_launch.rs",
       "consumer_marker": "runtime_openai_scalar_policy",
       "production_consumers": [
-        "crates/prodex-app/src/runtime_launch.rs",
         "crates/prodex-app/src/runtime_launch.rs"
       ],
       "production_reachability_test": "crates/prodex-mojo-core/src/super_provider_config.rs",
@@ -6548,60 +5841,6 @@
       "consumer": "crates/prodex-app/src/app_commands/super_main_catalog.rs",
       "consumer_marker": "ascii_casefold_equal_exact",
       "production_consumers": [
-        "crates/prodex-app/src/app_commands/super_main_catalog.rs",
-        "crates/prodex-app/src/app_commands/super_main_prompt.rs",
-        "crates/prodex-app/src/app_commands/presidio.rs",
-        "crates/prodex-app/src/app_commands/runtime_launch/goal_resume.rs",
-        "crates/prodex-app/src/profile_commands/kiro_environment.rs",
-        "crates/prodex-app/src/quota_support/auth.rs",
-        "crates/prodex-app/src/quota_support/codex_openai_auth.rs",
-        "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_kiro.rs",
-        "crates/prodex-app/src/runtime_launch/proxy_startup/provider_bridge_routing.rs",
-        "crates/prodex-app/src/runtime_proxy/smart_context/runtime_rehydrate/basic.rs",
-        "crates/prodex-app/src/super_expose/session_prompt_write/process.rs",
-        "crates/prodex-app/src/app_commands/runtime_launch/resume_provider.rs",
-        "crates/prodex-app/src/quota_support/external_provider.rs",
-        "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_request.rs",
-        "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_transport.rs",
-        "crates/prodex-app/src/runtime_proxy/dispatch/websocket.rs",
-        "crates/prodex-app/src/runtime_proxy/smart_context/rollout.rs",
-        "crates/prodex-app/src/runtime_proxy/upstream.rs",
-        "crates/prodex-app/src/runtime_proxy/websocket.rs",
-        "crates/prodex-app/src/profile_commands/copilot/runtime_auth.rs",
-        "crates/prodex-app/src/runtime_tools/sub_agent_catalog.rs",
-        "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite.rs",
-        "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_gemini_compact.rs",
-        "crates/prodex-app/src/super_expose/protocol/validation.rs",
-        "crates/prodex-provider-core/src/translators/copilot/request.rs",
-        "crates/prodex-provider-core/src/gemini_bridge/media/mime.rs",
-        "crates/prodex-app/src/runtime_gemini_auth/code_assist/validation.rs",
-        "crates/prodex-provider-core/src/fallback/chains.rs",
-        "crates/prodex-provider-core/src/gemini_bridge/errors/quota_retry/body.rs",
-        "crates/prodex-provider-core/src/gemini_bridge/errors/quota_retry/retry_delay.rs",
-        "crates/prodex-provider-core/src/translators/gemini/response_media.rs",
-        "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_gemini_quota.rs",
-        "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_gemini_send.rs",
-        "crates/prodex-runtime-proxy/src/lib.rs",
-        "crates/prodex-runtime-proxy/src/upstream.rs",
-        "crates/prodex-runtime-proxy/src/response_forwarding.rs",
-        "crates/prodex-runtime-proxy/src/payload_detection/response_metadata.rs",
-        "crates/prodex-runtime-proxy/src/error_policy/rate_limit_header.rs",
-        "crates/prodex-runtime-proxy/src/error_policy/retry_after.rs",
-        "crates/prodex-runtime-proxy/src/log_event.rs",
-        "crates/prodex-runtime-proxy/src/websocket_message.rs",
-        "crates/prodex-app/src/quota_support.rs",
-        "crates/prodex-app/src/codex_binary.rs",
-        "crates/prodex-runtime-proxy/src/websocket_proxy.rs",
-        "crates/prodex-session-store/src/lib.rs",
-        "crates/prodex-session-store/src/session_selector.rs",
-        "crates/prodex-runtime-launch/src/child.rs",
-        "crates/prodex-runtime-launch/src/profile.rs",
-        "crates/prodex-app/src/app_commands/runtime_launch/usage_limit_recovery.rs",
-        "crates/prodex-quota/src/render/windows.rs",
-        "crates/prodex-runtime-cookies/src/lib.rs",
-        "crates/prodex-presidio/src/lib.rs",
-        "crates/prodex-profile-export/src/copilot.rs",
-        "crates/prodex-secret-store/src/model.rs",
         "crates/prodex-app/src/app_commands/super_main_catalog.rs",
         "crates/prodex-app/src/app_commands/super_main_prompt.rs",
         "crates/prodex-app/src/app_commands/presidio.rs",
@@ -6680,9 +5919,6 @@
       "production_consumers": [
         "crates/prodex-provider-core/src/gemini_bridge/tooling/guardrails.rs",
         "crates/prodex-provider-core/src/gemini_bridge/tooling/guardrails/intent.rs",
-        "crates/prodex-provider-core/src/gemini_bridge/tooling/guardrails/exact_output.rs",
-        "crates/prodex-provider-core/src/gemini_bridge/tooling/guardrails.rs",
-        "crates/prodex-provider-core/src/gemini_bridge/tooling/guardrails/intent.rs",
         "crates/prodex-provider-core/src/gemini_bridge/tooling/guardrails/exact_output.rs"
       ],
       "production_reachability_test": "crates/prodex-provider-core/src/gemini_bridge/tooling/guardrails.rs",
@@ -6707,8 +5943,6 @@
       "consumer_marker": "gemini_extract_command_output",
       "production_consumers": [
         "crates/prodex-provider-core/src/gemini_bridge/tooling/guardrails/exact_output.rs",
-        "crates/prodex-provider-core/src/gemini_bridge/tooling/guardrails/exact_output/commands.rs",
-        "crates/prodex-provider-core/src/gemini_bridge/tooling/guardrails/exact_output.rs",
         "crates/prodex-provider-core/src/gemini_bridge/tooling/guardrails/exact_output/commands.rs"
       ],
       "production_reachability_test": "crates/prodex-provider-core/src/gemini_bridge/tooling/guardrails/exact_output.rs",
@@ -6732,7 +5966,6 @@
       "consumer": "crates/prodex-provider-core/src/gemini_bridge/tooling/guardrails/exact_output/commands.rs",
       "consumer_marker": "gemini_exact_output_marker_match",
       "production_consumers": [
-        "crates/prodex-provider-core/src/gemini_bridge/tooling/guardrails/exact_output/commands.rs",
         "crates/prodex-provider-core/src/gemini_bridge/tooling/guardrails/exact_output/commands.rs"
       ],
       "production_reachability_test": "crates/prodex-provider-core/src/gemini_bridge/tooling/guardrails/exact_output/commands.rs",
@@ -6756,7 +5989,6 @@
       "consumer": "crates/prodex-provider-core/src/gemini_bridge/tooling/guardrails/exact_output/commands/matching.rs",
       "consumer_marker": "gemini_normalized_command_is_empty",
       "production_consumers": [
-        "crates/prodex-provider-core/src/gemini_bridge/tooling/guardrails/exact_output/commands/matching.rs",
         "crates/prodex-provider-core/src/gemini_bridge/tooling/guardrails/exact_output/commands/matching.rs"
       ],
       "production_reachability_test": "crates/prodex-provider-core/src/gemini_bridge/tooling/guardrails/exact_output/commands/matching.rs",
@@ -6780,7 +6012,6 @@
       "consumer": "crates/prodex-provider-core/src/gemini_bridge/tooling/guardrails/exact_output/commands/matching.rs",
       "consumer_marker": "gemini_command_matches_required",
       "production_consumers": [
-        "crates/prodex-provider-core/src/gemini_bridge/tooling/guardrails/exact_output/commands/matching.rs",
         "crates/prodex-provider-core/src/gemini_bridge/tooling/guardrails/exact_output/commands/matching.rs"
       ],
       "production_reachability_test": "crates/prodex-provider-core/src/gemini_bridge/tooling/guardrails/exact_output/commands/matching.rs",
@@ -6817,20 +6048,6 @@
         "crates/prodex-app/src/app_commands/runtime_launch/usage_limit_recovery.rs",
         "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_gemini_compact.rs",
         "crates/prodex-app/src/runtime_proxy/payload_detection.rs",
-        "crates/prodex-quota/src/render/windows.rs",
-        "crates/prodex-app/src/runtime_gemini_auth/code_assist/validation.rs",
-        "crates/prodex-app/src/runtime_proxy/smart_context.rs",
-        "crates/prodex-app/src/runtime_proxy/presidio/telemetry.rs",
-        "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_gemini_precommit.rs",
-        "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_pipeline_dispatch/provider_precommit.rs",
-        "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_upstream.rs",
-        "crates/prodex-optional-tools/src/optional_tools.rs",
-        "crates/prodex-runtime-proxy/src/transport_failure.rs",
-        "crates/prodex-app/src/codex_binary.rs",
-        "crates/prodex-runtime-proxy/src/websocket_proxy.rs",
-        "crates/prodex-app/src/app_commands/runtime_launch/usage_limit_recovery.rs",
-        "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_gemini_compact.rs",
-        "crates/prodex-app/src/runtime_proxy/payload_detection.rs",
         "crates/prodex-quota/src/render/windows.rs"
       ],
       "production_reachability_test": "crates/prodex-app/src/runtime_gemini_auth/code_assist/validation.rs",
@@ -6854,7 +6071,6 @@
       "consumer": "crates/prodex-optional-tools/src/optional_tools.rs",
       "consumer_marker": "optional_tool_class",
       "production_consumers": [
-        "crates/prodex-optional-tools/src/optional_tools.rs",
         "crates/prodex-optional-tools/src/optional_tools.rs"
       ],
       "production_reachability_test": "crates/prodex-mojo-core/src/optional_tools_policy.rs",
@@ -6878,7 +6094,6 @@
       "consumer": "crates/prodex-optional-tools/src/optional_tools.rs",
       "consumer_marker": "optional_tool_descriptor_policy",
       "production_consumers": [
-        "crates/prodex-optional-tools/src/optional_tools.rs",
         "crates/prodex-optional-tools/src/optional_tools.rs"
       ],
       "production_reachability_test": "crates/prodex-mojo-core/src/optional_tools_policy.rs",
@@ -6902,7 +6117,6 @@
       "consumer": "crates/prodex-optional-tools/src/optional_tools.rs",
       "consumer_marker": "optional_tool_manifest_tree_supported",
       "production_consumers": [
-        "crates/prodex-optional-tools/src/optional_tools.rs",
         "crates/prodex-optional-tools/src/optional_tools.rs"
       ],
       "production_reachability_test": "crates/prodex-mojo-core/src/optional_tools_policy.rs",
@@ -6926,7 +6140,6 @@
       "consumer": "crates/prodex-optional-tools/src/optional_tools.rs",
       "consumer_marker": "optional_tool_hex_encode",
       "production_consumers": [
-        "crates/prodex-optional-tools/src/optional_tools.rs",
         "crates/prodex-optional-tools/src/optional_tools.rs"
       ],
       "production_reachability_test": "crates/prodex-optional-tools/src/optional_tools.rs",
@@ -6951,8 +6164,6 @@
       "consumer_marker": "confirmation_value",
       "production_consumers": [
         "crates/prodex-app/src/app_commands/redeem.rs",
-        "crates/prodex-app/src/profile_commands/import_export/passwords.rs",
-        "crates/prodex-app/src/app_commands/redeem.rs",
         "crates/prodex-app/src/profile_commands/import_export/passwords.rs"
       ],
       "production_reachability_test": "crates/prodex-mojo-core/src/confirmation_policy.rs",
@@ -6976,7 +6187,6 @@
       "consumer": "crates/prodex-provider-core/src/gemini_bridge/tooling.rs",
       "consumer_marker": "gemini_tool_name_policy",
       "production_consumers": [
-        "crates/prodex-provider-core/src/gemini_bridge/tooling.rs",
         "crates/prodex-provider-core/src/gemini_bridge/tooling.rs"
       ],
       "production_reachability_test": "crates/prodex-mojo-core/src/gemini_tooling_policy.rs",
@@ -7000,7 +6210,6 @@
       "consumer": "crates/prodex-provider-core/src/gemini_bridge/tooling/gemini3.rs",
       "consumer_marker": "gemini_model_uses_gemini3_toolset",
       "production_consumers": [
-        "crates/prodex-provider-core/src/gemini_bridge/tooling/gemini3.rs",
         "crates/prodex-provider-core/src/gemini_bridge/tooling/gemini3.rs"
       ],
       "production_reachability_test": "crates/prodex-mojo-core/src/gemini_tooling_policy.rs",
@@ -7026,9 +6235,6 @@
       "production_consumers": [
         "crates/prodex-provider-core/src/translators/gemini/response_tool_calls_apply_patch.rs",
         "crates/prodex-provider-core/src/translators/gemini/stream/shaping.rs",
-        "crates/prodex-provider-core/src/gemini_bridge/response/tool_calls.rs",
-        "crates/prodex-provider-core/src/translators/gemini/response_tool_calls_apply_patch.rs",
-        "crates/prodex-provider-core/src/translators/gemini/stream/shaping.rs",
         "crates/prodex-provider-core/src/gemini_bridge/response/tool_calls.rs"
       ],
       "production_reachability_test": "crates/prodex-provider-core/src/translators/gemini_tool_call_tests.rs",
@@ -7052,7 +6258,6 @@
       "consumer": "crates/prodex-provider-core/src/translators/gemini/response_tool_calls_apply_patch.rs",
       "consumer_marker": "gemini_edit_patch(",
       "production_consumers": [
-        "crates/prodex-provider-core/src/translators/gemini/response_tool_calls_apply_patch.rs",
         "crates/prodex-provider-core/src/translators/gemini/response_tool_calls_apply_patch.rs"
       ],
       "production_reachability_test": "crates/prodex-provider-core/src/translators/gemini_tool_call_tests.rs",
@@ -7081,9 +6286,6 @@
       "consumer": "crates/prodex-provider-core/src/reasoning_effort.rs",
       "consumer_marker": "provider_reasoning_effort_class",
       "production_consumers": [
-        "crates/prodex-provider-core/src/reasoning_effort.rs",
-        "crates/prodex-provider-core/src/runtime_metadata.rs",
-        "crates/prodex-provider-core/src/gemini_bridge/util.rs",
         "crates/prodex-provider-core/src/reasoning_effort.rs",
         "crates/prodex-provider-core/src/runtime_metadata.rs",
         "crates/prodex-provider-core/src/gemini_bridge/util.rs"
@@ -7118,9 +6320,6 @@
       "production_consumers": [
         "crates/prodex-runtime-policy/src/types.rs",
         "crates/prodex-cli/src/runtime_args/super_tail_extract.rs",
-        "crates/prodex-codex-config/src/lib.rs",
-        "crates/prodex-runtime-policy/src/types.rs",
-        "crates/prodex-cli/src/runtime_args/super_tail_extract.rs",
         "crates/prodex-codex-config/src/lib.rs"
       ],
       "production_reachability_test": "crates/prodex-mojo-core/src/runtime_decisions/tuning.rs",
@@ -7146,9 +6345,6 @@
       "production_consumers": [
         "crates/prodex-provider-core/src/gemini_bridge/errors/quota_retry/retry_delay/duration.rs",
         "crates/prodex-runtime-proxy/src/error_policy/retry_after.rs",
-        "crates/prodex-quota/src/render/windows.rs",
-        "crates/prodex-provider-core/src/gemini_bridge/errors/quota_retry/retry_delay/duration.rs",
-        "crates/prodex-runtime-proxy/src/error_policy/retry_after.rs",
         "crates/prodex-quota/src/render/windows.rs"
       ],
       "production_reachability_test": "crates/prodex-provider-core/src/gemini_bridge/errors/quota_retry/retry_delay/duration.rs",
@@ -7172,7 +6368,6 @@
       "consumer": "crates/prodex-runtime-doctor/src/parsing.rs",
       "consumer_marker": "prodex_mojo_core::rich::runtime_doctor_marker_aggregation(",
       "production_consumers": [
-        "crates/prodex-runtime-doctor/src/parsing.rs",
         "crates/prodex-runtime-doctor/src/parsing.rs"
       ],
       "production_reachability_test": "crates/prodex-mojo-core/tests/runtime_doctor_markers.rs",
@@ -7242,7 +6437,6 @@
       "consumer": "crates/prodex-runtime-doctor/src/diagnosis/final_summary/log_summary.rs",
       "consumer_marker": "prodex_mojo_core::rich::runtime_doctor_marker_summary_counts",
       "production_consumers": [
-        "crates/prodex-runtime-doctor/src/diagnosis/final_summary/log_summary.rs",
         "crates/prodex-runtime-doctor/src/diagnosis/final_summary/log_summary.rs"
       ],
       "production_reachability_test": "crates/prodex-mojo-core/tests/runtime_doctor_markers.rs",
@@ -7266,7 +6460,6 @@
       "consumer": "crates/prodex-runtime-doctor/src/diagnosis/final_summary/compact.rs",
       "consumer_marker": "prodex_mojo_core::rich::runtime_doctor_compact_exit_counts",
       "production_consumers": [
-        "crates/prodex-runtime-doctor/src/diagnosis/final_summary/compact.rs",
         "crates/prodex-runtime-doctor/src/diagnosis/final_summary/compact.rs"
       ],
       "production_reachability_test": "crates/prodex-mojo-core/tests/runtime_doctor_markers.rs",
@@ -7293,9 +6486,6 @@
       "consumer": "crates/prodex-runtime-doctor/src/parsing/request_timeline.rs",
       "consumer_marker": "prodex_mojo_core::rich::runtime_doctor_render",
       "production_consumers": [
-        "crates/prodex-runtime-doctor/src/parsing/request_timeline.rs",
-        "crates/prodex-runtime-doctor/src/parsing/selection.rs",
-        "crates/prodex-runtime-doctor/src/parsing/route_profile.rs",
         "crates/prodex-runtime-doctor/src/parsing/request_timeline.rs",
         "crates/prodex-runtime-doctor/src/parsing/selection.rs",
         "crates/prodex-runtime-doctor/src/parsing/route_profile.rs"
@@ -7325,8 +6515,6 @@
       "consumer_marker": "prodex_mojo_core::rich::runtime_doctor_render",
       "production_consumers": [
         "crates/prodex-runtime-doctor/src/parsing/log_line.rs",
-        "crates/prodex-runtime-doctor/src/parsing.rs",
-        "crates/prodex-runtime-doctor/src/parsing/log_line.rs",
         "crates/prodex-runtime-doctor/src/parsing.rs"
       ],
       "production_reachability_test": "crates/prodex-runtime-doctor/src/parsing/log_line.rs",
@@ -7351,8 +6539,6 @@
       "consumer_marker": "runtime_doctor_plan(runtime_doctor_plan_input(summary, operation))",
       "production_consumers": [
         "crates/prodex-runtime-doctor/src/diagnosis/next_steps/mojo_render.rs",
-        "crates/prodex-runtime-doctor/src/suggestions/mojo.rs",
-        "crates/prodex-runtime-doctor/src/diagnosis/next_steps/mojo_render.rs",
         "crates/prodex-runtime-doctor/src/suggestions/mojo.rs"
       ],
       "production_reachability_test": "crates/prodex-mojo-core/src/rich/runtime_doctor_plan.rs",
@@ -7376,7 +6562,6 @@
       "consumer": "crates/prodex-runtime-doctor/src/diagnosis/final_summary/mojo.rs",
       "consumer_marker": "prodex_mojo_core::rich::runtime_doctor_summary_plan(input(summary))",
       "production_consumers": [
-        "crates/prodex-runtime-doctor/src/diagnosis/final_summary/mojo.rs",
         "crates/prodex-runtime-doctor/src/diagnosis/final_summary/mojo.rs"
       ],
       "production_reachability_test": "crates/prodex-mojo-core/src/rich/runtime_doctor_plan.rs",
@@ -7402,9 +6587,6 @@
       "production_consumers": [
         "crates/prodex-runtime-doctor/src/state_summary/quota.rs",
         "crates/prodex-runtime-doctor/src/state_summary/profiles.rs",
-        "crates/prodex-runtime-doctor/src/state_summary/routes.rs",
-        "crates/prodex-runtime-doctor/src/state_summary/quota.rs",
-        "crates/prodex-runtime-doctor/src/state_summary/profiles.rs",
         "crates/prodex-runtime-doctor/src/state_summary/routes.rs"
       ],
       "production_reachability_test": "crates/prodex-mojo-core/src/rich/runtime_doctor_plan.rs",
@@ -7428,7 +6610,6 @@
       "consumer": "crates/prodex-runtime-doctor/src/state_summary/profiles.rs",
       "consumer_marker": "prodex_mojo_core::rich::runtime_doctor_route_plan(",
       "production_consumers": [
-        "crates/prodex-runtime-doctor/src/state_summary/profiles.rs",
         "crates/prodex-runtime-doctor/src/state_summary/profiles.rs"
       ],
       "production_reachability_test": "crates/prodex-mojo-core/src/rich/runtime_doctor_plan.rs",
@@ -7459,8 +6640,6 @@
       "consumer_marker": "prodex_mojo_core::gemini_internal_instruction",
       "production_consumers": [
         "crates/prodex-provider-core/src/gemini_bridge/leaks.rs",
-        "crates/prodex-provider-core/src/gemini_bridge/leaks/echo.rs",
-        "crates/prodex-provider-core/src/gemini_bridge/leaks.rs",
         "crates/prodex-provider-core/src/gemini_bridge/leaks/echo.rs"
       ],
       "production_reachability_test": "crates/prodex-provider-core/src/gemini_bridge/leaks.rs",
@@ -7484,7 +6663,6 @@
       "consumer": "crates/prodex-app/src/app_commands/log_throughput_state.rs",
       "consumer_marker": "prodex_mojo_core::log_throughput_policy::duplicate_live_disk_replay",
       "production_consumers": [
-        "crates/prodex-app/src/app_commands/log_throughput_state.rs",
         "crates/prodex-app/src/app_commands/log_throughput_state.rs"
       ],
       "production_reachability_test": "crates/prodex-mojo-core/src/log_throughput_policy/state.rs",
@@ -7508,7 +6686,6 @@
       "consumer": "crates/prodex-app/src/app_commands/log_throughput_state.rs",
       "consumer_marker": "prodex_mojo_core::log_throughput_policy::select_active_profile_candidate",
       "production_consumers": [
-        "crates/prodex-app/src/app_commands/log_throughput_state.rs",
         "crates/prodex-app/src/app_commands/log_throughput_state.rs"
       ],
       "production_reachability_test": "crates/prodex-mojo-core/src/log_throughput_policy/state.rs",
@@ -7532,7 +6709,6 @@
       "consumer": "crates/prodex-app/src/app_commands/log_throughput_state.rs",
       "consumer_marker": "prodex_mojo_core::log_throughput_policy::sample_expired",
       "production_consumers": [
-        "crates/prodex-app/src/app_commands/log_throughput_state.rs",
         "crates/prodex-app/src/app_commands/log_throughput_state.rs"
       ],
       "production_reachability_test": "crates/prodex-mojo-core/src/log_throughput_policy/state.rs",
@@ -7556,7 +6732,6 @@
       "consumer": "crates/prodex-app/src/app_commands/log_throughput_state.rs",
       "consumer_marker": "prodex_mojo_core::log_throughput_policy::bounded_insert_needs_eviction",
       "production_consumers": [
-        "crates/prodex-app/src/app_commands/log_throughput_state.rs",
         "crates/prodex-app/src/app_commands/log_throughput_state.rs"
       ],
       "production_reachability_test": "crates/prodex-mojo-core/src/log_throughput_policy/state.rs",
@@ -7580,7 +6755,6 @@
       "consumer": "crates/prodex-app/src/app_commands/log_throughput_state.rs",
       "consumer_marker": "prodex_mojo_core::log_throughput_policy::finish_rate_candidate",
       "production_consumers": [
-        "crates/prodex-app/src/app_commands/log_throughput_state.rs",
         "crates/prodex-app/src/app_commands/log_throughput_state.rs"
       ],
       "production_reachability_test": "crates/prodex-mojo-core/src/log_throughput_policy/state.rs",
@@ -7611,8 +6785,6 @@
       "consumer_marker": "KiroKernelOperation::PromptFromChatMessages",
       "production_consumers": [
         "crates/prodex-provider-core/src/translators/kiro/request/messages.rs",
-        "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_kiro.rs",
-        "crates/prodex-provider-core/src/translators/kiro/request/messages.rs",
         "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_kiro.rs"
       ],
       "production_reachability_test": "crates/prodex-mojo-core/tests/kiro_prompt.rs",
@@ -7638,8 +6810,6 @@
       "consumer_marker": "kiro_model_catalog_plan(",
       "production_consumers": [
         "crates/prodex-provider-core/src/catalog/kiro.rs",
-        "crates/prodex-app/src/profile_commands/kiro/catalog.rs",
-        "crates/prodex-provider-core/src/catalog/kiro.rs",
         "crates/prodex-app/src/profile_commands/kiro/catalog.rs"
       ],
       "production_reachability_test": "crates/prodex-provider-core/src/catalog/kiro.rs",
@@ -7663,7 +6833,6 @@
       "consumer": "crates/prodex-runtime-log/src/live.rs",
       "consumer_marker": "mojo_live_log_record::record_exceeds_bound",
       "production_consumers": [
-        "crates/prodex-runtime-log/src/live.rs",
         "crates/prodex-runtime-log/src/live.rs"
       ],
       "production_reachability_test": "crates/prodex-runtime-log/src/live.rs",
@@ -7687,7 +6856,6 @@
       "consumer": "crates/prodex-runtime-log/src/live.rs",
       "consumer_marker": "mojo_live_log_record::nested_string_clip_end",
       "production_consumers": [
-        "crates/prodex-runtime-log/src/live.rs",
         "crates/prodex-runtime-log/src/live.rs"
       ],
       "production_reachability_test": "crates/prodex-runtime-log/src/live.rs",
@@ -7711,7 +6879,6 @@
       "consumer": "crates/prodex-runtime-log/src/live.rs",
       "consumer_marker": "mojo_live_log_record::json_plan",
       "production_consumers": [
-        "crates/prodex-runtime-log/src/live.rs",
         "crates/prodex-runtime-log/src/live.rs"
       ],
       "production_reachability_test": "crates/prodex-runtime-log/src/live.rs",
@@ -7735,7 +6902,6 @@
       "consumer": "crates/prodex-runtime-log/src/live.rs",
       "consumer_marker": "mojo_live_log_record::truncate_plain_text",
       "production_consumers": [
-        "crates/prodex-runtime-log/src/live.rs",
         "crates/prodex-runtime-log/src/live.rs"
       ],
       "production_reachability_test": "crates/prodex-runtime-log/src/live.rs",
@@ -7760,8 +6926,6 @@
       "consumer_marker": "prodex_mojo_core::operational_metrics::histogram_bucket_bounds",
       "production_consumers": [
         "crates/prodex-observability/src/lib.rs",
-        "crates/prodex-app/src/runtime_operational_metrics.rs",
-        "crates/prodex-observability/src/lib.rs",
         "crates/prodex-app/src/runtime_operational_metrics.rs"
       ],
       "production_reachability_test": "crates/prodex-mojo-core/tests/operational_metrics.rs",
@@ -7785,7 +6949,6 @@
       "consumer": "crates/prodex-app/src/runtime_operational_metrics.rs",
       "consumer_marker": "prodex_mojo_core::operational_metrics::observe_histogram",
       "production_consumers": [
-        "crates/prodex-app/src/runtime_operational_metrics.rs",
         "crates/prodex-app/src/runtime_operational_metrics.rs"
       ],
       "production_reachability_test": "crates/prodex-app/src/runtime_operational_metrics.rs",
@@ -7815,9 +6978,6 @@
       "production_consumers": [
         "crates/prodex-update-notice/src/lib.rs",
         "crates/prodex-update-notice/src/updater.rs",
-        "crates/prodex-update-notice/src/release_version.rs",
-        "crates/prodex-update-notice/src/lib.rs",
-        "crates/prodex-update-notice/src/updater.rs",
         "crates/prodex-update-notice/src/release_version.rs"
       ],
       "production_reachability_test": "crates/prodex-update-notice/src/lib.rs",
@@ -7844,7 +7004,6 @@
       "consumer": "crates/prodex-app/src/app_commands/runtime_launch/usage_limit_recovery.rs",
       "consumer_marker": "runtime_session_usage_limit_marker(",
       "production_consumers": [
-        "crates/prodex-app/src/app_commands/runtime_launch/usage_limit_recovery.rs",
         "crates/prodex-app/src/app_commands/runtime_launch/usage_limit_recovery.rs"
       ],
       "production_reachability_test": "crates/prodex-mojo-core/src/rich/fallback.rs",
@@ -7868,7 +7027,6 @@
       "consumer": "crates/prodex-app/src/runtime_state_shared/semantic_index.rs",
       "consumer_marker": "prodex_mojo_core::smart_context_symbols::index(",
       "production_consumers": [
-        "crates/prodex-app/src/runtime_state_shared/semantic_index.rs",
         "crates/prodex-app/src/runtime_state_shared/semantic_index.rs"
       ],
       "production_reachability_test": "crates/prodex-mojo-core/tests/smart_context_symbols.rs",
@@ -7892,7 +7050,6 @@
       "consumer": "crates/prodex-runtime-doctor/src/smart_context.rs",
       "consumer_marker": "prodex_mojo_core::rich::runtime_doctor_smart_context_decision_is_fallback",
       "production_consumers": [
-        "crates/prodex-runtime-doctor/src/smart_context.rs",
         "crates/prodex-runtime-doctor/src/smart_context.rs"
       ],
       "production_reachability_test": "crates/prodex-mojo-core/tests/runtime_doctor_markers.rs",
@@ -7917,8 +7074,6 @@
       "consumer_marker": "prodex_mojo_core::rich::runtime_doctor_log_value_is_ignored",
       "production_consumers": [
         "crates/prodex-runtime-doctor/src/log_fields.rs",
-        "crates/prodex-runtime-doctor/src/smart_context.rs",
-        "crates/prodex-runtime-doctor/src/log_fields.rs",
         "crates/prodex-runtime-doctor/src/smart_context.rs"
       ],
       "production_reachability_test": "crates/prodex-mojo-core/tests/runtime_doctor_markers.rs",
@@ -7942,7 +7097,6 @@
       "consumer": "crates/prodex-runtime-doctor/src/smart_context.rs",
       "consumer_marker": "prodex_mojo_core::rich::runtime_doctor_smart_context_fallback_reason_source",
       "production_consumers": [
-        "crates/prodex-runtime-doctor/src/smart_context.rs",
         "crates/prodex-runtime-doctor/src/smart_context.rs"
       ],
       "production_reachability_test": "crates/prodex-mojo-core/tests/runtime_doctor_markers.rs",
@@ -7968,9 +7122,6 @@
       "production_consumers": [
         "crates/prodex-provider-core/src/gemini_bridge/compact/local/text.rs",
         "crates/prodex-provider-core/src/gemini_bridge/compact/local/snippet.rs",
-        "crates/prodex-provider-core/src/gemini_bridge/compact/local/semantic.rs",
-        "crates/prodex-provider-core/src/gemini_bridge/compact/local/text.rs",
-        "crates/prodex-provider-core/src/gemini_bridge/compact/local/snippet.rs",
         "crates/prodex-provider-core/src/gemini_bridge/compact/local/semantic.rs"
       ],
       "production_reachability_test": "crates/prodex-provider-core/src/gemini_bridge/compact/local/snippet.rs",
@@ -7994,7 +7145,6 @@
       "consumer": "crates/prodex-provider-core/src/gemini_bridge/compact/local/snippet.rs",
       "consumer_marker": "format_gemini_compact_snippet(",
       "production_consumers": [
-        "crates/prodex-provider-core/src/gemini_bridge/compact/local/snippet.rs",
         "crates/prodex-provider-core/src/gemini_bridge/compact/local/snippet.rs"
       ],
       "production_reachability_test": "crates/prodex-provider-core/src/gemini_bridge/compact/local/snippet.rs",
@@ -8023,8 +7173,6 @@
       "consumer_marker": "truncate_gemini_compact_utf8_edges",
       "production_consumers": [
         "crates/prodex-provider-core/src/gemini_bridge/compact/local/text.rs",
-        "crates/prodex-provider-core/src/gemini_bridge/compact/local/semantic.rs",
-        "crates/prodex-provider-core/src/gemini_bridge/compact/local/text.rs",
         "crates/prodex-provider-core/src/gemini_bridge/compact/local/semantic.rs"
       ],
       "production_reachability_test": "crates/prodex-provider-core/src/gemini_bridge/compact/local/text.rs",
@@ -8048,7 +7196,6 @@
       "consumer": "crates/prodex-provider-core/src/gemini_bridge/compact/local.rs",
       "consumer_marker": "format_gemini_local_compact_summary(",
       "production_consumers": [
-        "crates/prodex-provider-core/src/gemini_bridge/compact/local.rs",
         "crates/prodex-provider-core/src/gemini_bridge/compact/local.rs"
       ],
       "production_reachability_test": "crates/prodex-provider-core/src/gemini_bridge/compact/local.rs",
@@ -8072,7 +7219,6 @@
       "consumer": "crates/prodex-provider-core/src/gemini_bridge/compact/local/semantic.rs",
       "consumer_marker": "format_gemini_semantic_continuation_summary(",
       "production_consumers": [
-        "crates/prodex-provider-core/src/gemini_bridge/compact/local/semantic.rs",
         "crates/prodex-provider-core/src/gemini_bridge/compact/local/semantic.rs"
       ],
       "production_reachability_test": "crates/prodex-provider-core/src/gemini_bridge/compact/local/semantic.rs",
@@ -8096,7 +7242,6 @@
       "consumer": "crates/prodex-app/src/profile_commands/import_export/import/lifecycle_support.rs",
       "consumer_marker": "prodex_mojo_core::profile_export::profile_import_lifecycle_order(",
       "production_consumers": [
-        "crates/prodex-app/src/profile_commands/import_export/import/lifecycle_support.rs",
         "crates/prodex-app/src/profile_commands/import_export/import/lifecycle_support.rs"
       ],
       "production_reachability_test": "crates/prodex-mojo-core/src/profile_export/import_lifecycle.rs",
@@ -8120,7 +7265,6 @@
       "consumer": "crates/prodex-app/src/profile_commands/import_export/secrets.rs",
       "consumer_marker": "prodex_mojo_core::profile_export::profile_import_secret_path_is_safe(",
       "production_consumers": [
-        "crates/prodex-app/src/profile_commands/import_export/secrets.rs",
         "crates/prodex-app/src/profile_commands/import_export/secrets.rs"
       ],
       "production_reachability_test": "crates/prodex-mojo-core/src/profile_export/import_lifecycle.rs",
@@ -8144,7 +7288,6 @@
       "consumer": "crates/prodex-app/src/profile_commands/import_export/import/lifecycle_support.rs",
       "consumer_marker": "prodex_mojo_core::profile_export::profile_import_auth_journal_is_committed(",
       "production_consumers": [
-        "crates/prodex-app/src/profile_commands/import_export/import/lifecycle_support.rs",
         "crates/prodex-app/src/profile_commands/import_export/import/lifecycle_support.rs"
       ],
       "production_reachability_test": "crates/prodex-mojo-core/src/profile_export/import_lifecycle.rs",
@@ -8180,9 +7323,6 @@
       "production_consumers": [
         "crates/prodex-app/src/app_commands/status.rs",
         "crates/prodex-app/src/app_commands/status/render.rs",
-        "crates/prodex-app/src/app_commands/status/resource.rs",
-        "crates/prodex-app/src/app_commands/status.rs",
-        "crates/prodex-app/src/app_commands/status/render.rs",
         "crates/prodex-app/src/app_commands/status/resource.rs"
       ],
       "production_reachability_test": "crates/prodex-app/src/app_commands/status/tests.rs",
@@ -8210,7 +7350,6 @@
       "consumer": "crates/prodex-app/src/app_commands/doctor/render.rs",
       "consumer_marker": "doctor_viewport_plan(",
       "production_consumers": [
-        "crates/prodex-app/src/app_commands/doctor/render.rs",
         "crates/prodex-app/src/app_commands/doctor/render.rs"
       ],
       "production_reachability_test": "crates/prodex-app/src/app_commands/doctor/render.rs",
@@ -8237,7 +7376,6 @@
       "consumer": "crates/prodex-app/src/runtime_tools/sub_agents/config.rs",
       "consumer_marker": "config_validation_plan(",
       "production_consumers": [
-        "crates/prodex-app/src/runtime_tools/sub_agents/config.rs",
         "crates/prodex-app/src/runtime_tools/sub_agents/config.rs"
       ],
       "production_reachability_test": "crates/prodex-app/src/runtime_tools/sub_agents.rs",
@@ -8264,8 +7402,6 @@
       "consumer": "crates/prodex-provider-core/src/gemini_bridge/compact/semantic.rs",
       "consumer_marker": "gemini_provider_core_semantic_compact_request_body(",
       "production_consumers": [
-        "crates/prodex-provider-core/src/gemini_bridge/compact/semantic.rs",
-        "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_gemini_compact.rs",
         "crates/prodex-provider-core/src/gemini_bridge/compact/semantic.rs",
         "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_gemini_compact.rs"
       ],
@@ -8294,8 +7430,6 @@
       "consumer_marker": "gemini_provider_core_semantic_compact_summary(",
       "production_consumers": [
         "crates/prodex-provider-core/src/gemini_bridge/compact/semantic.rs",
-        "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_gemini_compact.rs",
-        "crates/prodex-provider-core/src/gemini_bridge/compact/semantic.rs",
         "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_gemini_compact.rs"
       ],
       "production_reachability_test": "crates/prodex-provider-core/src/gemini_bridge/compact/semantic.rs",
@@ -8320,8 +7454,6 @@
       "consumer_marker": "gemini_provider_core_compact_response_body(",
       "production_consumers": [
         "crates/prodex-provider-core/src/gemini_bridge/compact/local.rs",
-        "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_gemini_compact.rs",
-        "crates/prodex-provider-core/src/gemini_bridge/compact/local.rs",
         "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_gemini_compact.rs"
       ],
       "production_reachability_test": "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_gemini_compact.rs",
@@ -8345,7 +7477,6 @@
       "consumer": "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_gemini_compact.rs",
       "consumer_marker": "gemini_compact_error_reason(",
       "production_consumers": [
-        "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_gemini_compact.rs",
         "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_gemini_compact.rs"
       ],
       "production_reachability_test": "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_gemini_compact.rs",
@@ -8369,7 +7500,6 @@
       "consumer": "crates/prodex-provider-core/src/binding_identity.rs",
       "consumer_marker": "prodex_mojo_core::rich::provider_binding_identity_inputs(",
       "production_consumers": [
-        "crates/prodex-provider-core/src/binding_identity.rs",
         "crates/prodex-provider-core/src/binding_identity.rs"
       ],
       "production_reachability_test": "crates/prodex-provider-core/src/binding_identity.rs",
@@ -8393,7 +7523,6 @@
       "consumer": "crates/prodex-provider-core/src/binding_identity.rs",
       "consumer_marker": "prodex_mojo_core::rich::provider_binding_identity_digest_is_public(",
       "production_consumers": [
-        "crates/prodex-provider-core/src/binding_identity.rs",
         "crates/prodex-provider-core/src/binding_identity.rs"
       ],
       "production_reachability_test": "crates/prodex-provider-core/src/binding_identity.rs",
@@ -8417,7 +7546,6 @@
       "consumer": "crates/prodex-session-store/src/lib.rs",
       "consumer_marker": "session_repair_plan(",
       "production_consumers": [
-        "crates/prodex-session-store/src/lib.rs",
         "crates/prodex-session-store/src/lib.rs"
       ],
       "production_reachability_test": "crates/prodex-session-store/src/lib.rs",
@@ -8441,7 +7569,6 @@
       "consumer": "crates/prodex-provider-core/src/errors/body.rs",
       "consumer_marker": "prodex_mojo_core::json::provider_error_codes_json",
       "production_consumers": [
-        "crates/prodex-provider-core/src/errors/body.rs",
         "crates/prodex-provider-core/src/errors/body.rs"
       ],
       "production_reachability_test": "crates/prodex-provider-core/src/errors/body.rs",
@@ -8465,7 +7592,6 @@
       "consumer": "crates/prodex-app/src/profile_commands/manage.rs",
       "consumer_marker": "prodex_mojo_core::profile_ui_policy",
       "production_consumers": [
-        "crates/prodex-app/src/profile_commands/manage.rs",
         "crates/prodex-app/src/profile_commands/manage.rs"
       ],
       "production_reachability_test": "crates/prodex-mojo-core/tests/profile_ui_policy.rs",
@@ -8489,7 +7615,6 @@
       "consumer": "crates/prodex-app/src/runtime_proxy/dispatch.rs",
       "consumer_marker": "prodex_mojo_core::runtime_proxy_body_limit::runtime_proxy_body_size_exceeds_limit",
       "production_consumers": [
-        "crates/prodex-app/src/runtime_proxy/dispatch.rs",
         "crates/prodex-app/src/runtime_proxy/dispatch.rs"
       ],
       "production_reachability_test": "crates/prodex-mojo-core/tests/runtime_proxy_body_limit.rs",
@@ -8513,7 +7638,6 @@
       "consumer": "crates/prodex-app/src/runtime_proxy/responses/quota_blocked.rs",
       "consumer_marker": "prodex_mojo_core::runtime_responses_quota::turn_state_full_context_replay_candidate(",
       "production_consumers": [
-        "crates/prodex-app/src/runtime_proxy/responses/quota_blocked.rs",
         "crates/prodex-app/src/runtime_proxy/responses/quota_blocked.rs"
       ],
       "production_reachability_test": "crates/prodex-mojo-core/src/runtime_responses_quota.rs",
@@ -8542,9 +7666,6 @@
       "consumer": "crates/prodex-provider-core/src/translators/gemini/response_media.rs",
       "consumer_marker": "prodex_mojo_core::rich::gemini_response_media",
       "production_consumers": [
-        "crates/prodex-provider-core/src/translators/gemini/response_media.rs",
-        "crates/prodex-provider-core/src/translators/gemini/response/build.rs",
-        "crates/prodex-provider-core/src/translators/gemini/response/chat_messages.rs",
         "crates/prodex-provider-core/src/translators/gemini/response_media.rs",
         "crates/prodex-provider-core/src/translators/gemini/response/build.rs",
         "crates/prodex-provider-core/src/translators/gemini/response/chat_messages.rs"
@@ -8576,8 +7697,6 @@
       "consumer_marker": "DeepSeekKernelOperation::ResponseUsage",
       "production_consumers": [
         "crates/prodex-provider-core/src/translators/deepseek/response.rs",
-        "crates/prodex-provider-core/src/translators/deepseek/stream/shaping.rs",
-        "crates/prodex-provider-core/src/translators/deepseek/response.rs",
         "crates/prodex-provider-core/src/translators/deepseek/stream/shaping.rs"
       ],
       "production_reachability_test": "crates/prodex-mojo-core/tests/deepseek_response_usage.rs",
@@ -8605,7 +7724,6 @@
       "consumer": "crates/prodex-provider-core/src/gemini_bridge/response.rs",
       "consumer_marker": "gemini_response_conformance_preserves_response_ids",
       "production_consumers": [
-        "crates/prodex-provider-core/src/gemini_bridge/response.rs",
         "crates/prodex-provider-core/src/gemini_bridge/response.rs"
       ],
       "production_reachability_test": "crates/prodex-mojo-core/tests/gemini_response.rs",
@@ -8629,7 +7747,6 @@
       "consumer": "crates/prodex-app/src/runtime_proxy/responses/attempt.rs",
       "consumer_marker": "runtime_responses_attempt_recovery_plan(",
       "production_consumers": [
-        "crates/prodex-app/src/runtime_proxy/responses/attempt.rs",
         "crates/prodex-app/src/runtime_proxy/responses/attempt.rs"
       ],
       "production_reachability_test": "crates/prodex-mojo-core/tests/runtime_responses_attempt.rs",
@@ -8653,7 +7770,6 @@
       "consumer": "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_deepseek_send.rs",
       "consumer_marker": "deepseek_attempt_policy::attempt_action(",
       "production_consumers": [
-        "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_deepseek_send.rs",
         "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_deepseek_send.rs"
       ],
       "production_reachability_test": "crates/prodex-mojo-core/tests/deepseek_attempt_policy.rs",
@@ -8678,8 +7794,6 @@
       "consumer_marker": "deepseek_attempt_policy::first_event_retry_allowed(",
       "production_consumers": [
         "crates/prodex-provider-core/src/translators/deepseek/stream/shaping.rs",
-        "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_deepseek_send.rs",
-        "crates/prodex-provider-core/src/translators/deepseek/stream/shaping.rs",
         "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_deepseek_send.rs"
       ],
       "production_reachability_test": "crates/prodex-mojo-core/tests/deepseek_attempt_policy.rs",
@@ -8703,7 +7817,6 @@
       "consumer": "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_deepseek_send.rs",
       "consumer_marker": "prodex_mojo_core::deepseek_local_rewrite::route(",
       "production_consumers": [
-        "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_deepseek_send.rs",
         "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_deepseek_send.rs"
       ],
       "production_reachability_test": "crates/prodex-mojo-core/tests/deepseek_local_rewrite.rs",
@@ -8727,7 +7840,6 @@
       "consumer": "crates/prodex-app/src/runtime_proxy/responses/loop_control.rs",
       "consumer_marker": "responses_loop_action(",
       "production_consumers": [
-        "crates/prodex-app/src/runtime_proxy/responses/loop_control.rs",
         "crates/prodex-app/src/runtime_proxy/responses/loop_control.rs"
       ],
       "production_reachability_test": "crates/prodex-mojo-core/tests/runtime_responses_loop.rs",
@@ -8751,7 +7863,6 @@
       "consumer": "crates/prodex-app/src/runtime_proxy/continuation.rs",
       "consumer_marker": "runtime_continuation_compact_followup_plan(",
       "production_consumers": [
-        "crates/prodex-app/src/runtime_proxy/continuation.rs",
         "crates/prodex-app/src/runtime_proxy/continuation.rs"
       ],
       "production_reachability_test": "crates/prodex-app/src/runtime_proxy/continuation.rs",
@@ -8775,7 +7886,6 @@
       "consumer": "crates/prodex-app/src/runtime_proxy/standard/noncompact/loop_policy.rs",
       "consumer_marker": "noncompact_loop_action(",
       "production_consumers": [
-        "crates/prodex-app/src/runtime_proxy/standard/noncompact/loop_policy.rs",
         "crates/prodex-app/src/runtime_proxy/standard/noncompact/loop_policy.rs"
       ],
       "production_reachability_test": "crates/prodex-app/src/runtime_proxy/standard/noncompact/loop_policy.rs",
@@ -8799,7 +7909,6 @@
       "consumer": "crates/prodex-app/src/runtime_proxy/websocket.rs",
       "consumer_marker": "websocket_read_action(",
       "production_consumers": [
-        "crates/prodex-app/src/runtime_proxy/websocket.rs",
         "crates/prodex-app/src/runtime_proxy/websocket.rs"
       ],
       "production_reachability_test": "crates/prodex-app/src/runtime_proxy/websocket.rs",
@@ -8823,7 +7932,6 @@
       "consumer": "crates/prodex-app/src/runtime_proxy/websocket/response_tracking.rs",
       "consumer_marker": "websocket_response_frame_plan(",
       "production_consumers": [
-        "crates/prodex-app/src/runtime_proxy/websocket/response_tracking.rs",
         "crates/prodex-app/src/runtime_proxy/websocket/response_tracking.rs"
       ],
       "production_reachability_test": "crates/prodex-app/src/runtime_proxy/websocket/response_tracking.rs",
@@ -8848,8 +7956,6 @@
       "consumer_marker": "runtime_websocket_failure_state_plan(",
       "production_consumers": [
         "crates/prodex-runtime-proxy/src/selection_policy.rs",
-        "crates/prodex-app/src/runtime_proxy/websocket_message/failure_handling.rs",
-        "crates/prodex-runtime-proxy/src/selection_policy.rs",
         "crates/prodex-app/src/runtime_proxy/websocket_message/failure_handling.rs"
       ],
       "production_reachability_test": "crates/prodex-runtime-proxy/src/selection_policy.rs",
@@ -8873,7 +7979,6 @@
       "consumer": "crates/prodex-app/src/runtime_proxy/dispatch.rs",
       "consumer_marker": "prodex_mojo_core::runtime_proxy_dispatch::admission_plan(",
       "production_consumers": [
-        "crates/prodex-app/src/runtime_proxy/dispatch.rs",
         "crates/prodex-app/src/runtime_proxy/dispatch.rs"
       ],
       "production_reachability_test": "crates/prodex-app/src/runtime_proxy/dispatch.rs",
@@ -8897,7 +8002,6 @@
       "consumer": "crates/prodex-runtime-tuning/src/lib.rs",
       "consumer_marker": "mojo::runtime_fault_budget_step(",
       "production_consumers": [
-        "crates/prodex-runtime-tuning/src/lib.rs",
         "crates/prodex-runtime-tuning/src/lib.rs"
       ],
       "production_reachability_test": "crates/prodex-runtime-tuning/tests/src/lib.rs",
@@ -8921,7 +8025,6 @@
       "consumer": "crates/prodex-profile-export/src/envelope.rs",
       "consumer_marker": "prodex_mojo_core::profile_export::validate_profile_export_envelope_schema(",
       "production_consumers": [
-        "crates/prodex-profile-export/src/envelope.rs",
         "crates/prodex-profile-export/src/envelope.rs"
       ],
       "production_reachability_test": "crates/prodex-mojo-core/src/profile_export/tests.rs",
@@ -8945,7 +8048,6 @@
       "consumer": "crates/prodex-runtime-doctor/src/diagnosis/route_health.rs",
       "consumer_marker": "prodex_mojo_core::rich::runtime_doctor_route_health_groups(",
       "production_consumers": [
-        "crates/prodex-runtime-doctor/src/diagnosis/route_health.rs",
         "crates/prodex-runtime-doctor/src/diagnosis/route_health.rs"
       ],
       "production_reachability_test": "crates/prodex-mojo-core/tests/runtime_doctor_markers.rs",
@@ -8992,7 +8094,6 @@
       "consumer": "crates/prodex-runtime-doctor/src/state_summary/routes.rs",
       "consumer_marker": "prodex_mojo_core::rich::runtime_doctor_degraded_routes(",
       "production_consumers": [
-        "crates/prodex-runtime-doctor/src/state_summary/routes.rs",
         "crates/prodex-runtime-doctor/src/state_summary/routes.rs"
       ],
       "production_reachability_test": "crates/prodex-mojo-core/tests/runtime_doctor_degraded_routes.rs",
@@ -9016,7 +8117,6 @@
       "consumer": "crates/prodex-app/src/app_commands/runtime_launch/usage_limit_recovery/monitor_workflow.rs",
       "consumer_marker": "prodex_mojo_core::launch::recovery_observation_action(",
       "production_consumers": [
-        "crates/prodex-app/src/app_commands/runtime_launch/usage_limit_recovery/monitor_workflow.rs",
         "crates/prodex-app/src/app_commands/runtime_launch/usage_limit_recovery/monitor_workflow.rs"
       ],
       "production_reachability_test": "crates/prodex-mojo-core/src/launch/recovery.rs",
@@ -9040,7 +8140,6 @@
       "consumer": "crates/prodex-app/src/runtime_tools/session_recovery.rs",
       "consumer_marker": "in_place_recovery_action(",
       "production_consumers": [
-        "crates/prodex-app/src/runtime_tools/session_recovery.rs",
         "crates/prodex-app/src/runtime_tools/session_recovery.rs"
       ],
       "production_reachability_test": "crates/prodex-mojo-core/src/launch/recovery.rs",
@@ -9068,7 +8167,6 @@
       "consumer": "crates/prodex-runtime-proxy/src/response_forwarding.rs",
       "consumer_marker": "prodex_mojo_core::runtime_response_forwarding::",
       "production_consumers": [
-        "crates/prodex-runtime-proxy/src/response_forwarding.rs",
         "crates/prodex-runtime-proxy/src/response_forwarding.rs"
       ],
       "production_reachability_test": "crates/prodex-runtime-proxy/src/response_forwarding/classifier_tests.rs",
@@ -9112,7 +8210,6 @@
       "consumer": "crates/prodex-app/src/app_commands/runtime_launch/usage_limit_recovery/workflow.rs",
       "consumer_marker": "workflow_recovery_class_with_message(",
       "production_consumers": [
-        "crates/prodex-app/src/app_commands/runtime_launch/usage_limit_recovery/workflow.rs",
         "crates/prodex-app/src/app_commands/runtime_launch/usage_limit_recovery/workflow.rs"
       ],
       "production_reachability_test": "crates/prodex-mojo-core/src/launch/recovery.rs",
@@ -9136,7 +8233,6 @@
       "consumer": "crates/prodex-app/src/app_commands/runtime_launch/usage_limit_recovery/workflow.rs",
       "consumer_marker": "workflow_evidence_plan(",
       "production_consumers": [
-        "crates/prodex-app/src/app_commands/runtime_launch/usage_limit_recovery/workflow.rs",
         "crates/prodex-app/src/app_commands/runtime_launch/usage_limit_recovery/workflow.rs"
       ],
       "production_reachability_test": "crates/prodex-mojo-core/src/launch/recovery.rs",
@@ -9160,7 +8256,6 @@
       "consumer": "crates/prodex-app/src/runtime_proxy/health_circuit.rs",
       "consumer_marker": "runtime_profile_route_circuit_action(",
       "production_consumers": [
-        "crates/prodex-app/src/runtime_proxy/health_circuit.rs",
         "crates/prodex-app/src/runtime_proxy/health_circuit.rs"
       ],
       "production_reachability_test": "crates/prodex-mojo-core/tests/runtime_profile_route_circuit.rs",
@@ -9184,7 +8279,6 @@
       "consumer": "crates/prodex-app/src/runtime_proxy/recovery_deadline.rs",
       "consumer_marker": "prodex_mojo_core::runtime::recovery_watchdog_budget_ms(",
       "production_consumers": [
-        "crates/prodex-app/src/runtime_proxy/recovery_deadline.rs",
         "crates/prodex-app/src/runtime_proxy/recovery_deadline.rs"
       ],
       "production_reachability_test": "crates/prodex-mojo-core/src/runtime/quota_decisions.rs",
@@ -9209,8 +8303,6 @@
       "consumer_marker": "prodex_mojo_core::runtime::recovery_epoch_pending(",
       "production_consumers": [
         "crates/prodex-app/src/runtime_proxy/precommit_loop.rs",
-        "crates/prodex-app/src/runtime_proxy/standard/compact/recovery.rs",
-        "crates/prodex-app/src/runtime_proxy/precommit_loop.rs",
         "crates/prodex-app/src/runtime_proxy/standard/compact/recovery.rs"
       ],
       "production_reachability_test": "crates/prodex-mojo-core/src/runtime/quota_decisions.rs",
@@ -9234,7 +8326,6 @@
       "consumer": "crates/prodex-app/src/runtime_proxy/standard/compact.rs",
       "consumer_marker": "prodex_mojo_core::runtime::compact_recovery_unpinned(",
       "production_consumers": [
-        "crates/prodex-app/src/runtime_proxy/standard/compact.rs",
         "crates/prodex-app/src/runtime_proxy/standard/compact.rs"
       ],
       "production_reachability_test": "crates/prodex-mojo-core/src/runtime/quota_decisions.rs",
@@ -9258,7 +8349,6 @@
       "consumer": "crates/prodex-quota/src/render/reports.rs",
       "consumer_marker": "prodex_mojo_core::quota::quota_report_page_plan(",
       "production_consumers": [
-        "crates/prodex-quota/src/render/reports.rs",
         "crates/prodex-quota/src/render/reports.rs"
       ],
       "production_reachability_test": "crates/prodex-mojo-core/src/quota/report_sort.rs",
@@ -9282,7 +8372,6 @@
       "consumer": "crates/prodex-runtime-log/src/lib.rs",
       "consumer_marker": "prodex_mojo_core::log::render_runtime_log_line(",
       "production_consumers": [
-        "crates/prodex-runtime-log/src/lib.rs",
         "crates/prodex-runtime-log/src/lib.rs"
       ],
       "production_reachability_test": "crates/prodex-runtime-log/src/lib.rs",
@@ -9306,7 +8395,6 @@
       "consumer": "crates/prodex-app/src/app_commands/runtime_launch/goal_resume.rs",
       "consumer_marker": "prodex_mojo_core::launch::session_marker_should_update(",
       "production_consumers": [
-        "crates/prodex-app/src/app_commands/runtime_launch/goal_resume.rs",
         "crates/prodex-app/src/app_commands/runtime_launch/goal_resume.rs"
       ],
       "production_reachability_test": "crates/prodex-mojo-core/src/launch/recovery.rs",
@@ -9331,8 +8419,6 @@
       "consumer_marker": "prodex_mojo_core::quota::quota_panel_first_line(",
       "production_consumers": [
         "crates/prodex-quota/src/render/panels.rs",
-        "crates/prodex-quota/src/render/windows.rs",
-        "crates/prodex-quota/src/render/panels.rs",
         "crates/prodex-quota/src/render/windows.rs"
       ],
       "production_reachability_test": "crates/prodex-quota/tests/src/render/mojo.rs",
@@ -9356,7 +8442,6 @@
       "consumer": "crates/prodex-quota/src/render/windows.rs",
       "consumer_marker": "prodex_mojo_core::quota::quota_error_summary_label(",
       "production_consumers": [
-        "crates/prodex-quota/src/render/windows.rs",
         "crates/prodex-quota/src/render/windows.rs"
       ],
       "production_reachability_test": "crates/prodex-quota/tests/src/render/mojo.rs",
@@ -9380,7 +8465,6 @@
       "consumer": "crates/prodex-quota/src/render/windows.rs",
       "consumer_marker": "prodex_mojo_core::quota::quota_retry_time_candidate(",
       "production_consumers": [
-        "crates/prodex-quota/src/render/windows.rs",
         "crates/prodex-quota/src/render/windows.rs"
       ],
       "production_reachability_test": "crates/prodex-quota/tests/src/render/mojo.rs",
@@ -9407,7 +8491,6 @@
       "consumer": "crates/prodex-shared-codex-fs/src/prepare/goal_attachments.rs",
       "consumer_marker": "shared_attachment_policy::sqlite_header_is_sqlite(",
       "production_consumers": [
-        "crates/prodex-shared-codex-fs/src/prepare/goal_attachments.rs",
         "crates/prodex-shared-codex-fs/src/prepare/goal_attachments.rs"
       ],
       "production_reachability_test": "crates/prodex-mojo-core/src/shared_attachment_policy.rs",
@@ -9431,7 +8514,6 @@
       "consumer": "crates/prodex-app/src/reports/info/runtime_load.rs",
       "consumer_marker": "prodex_mojo_core::info_render::estimate_info_runway(",
       "production_consumers": [
-        "crates/prodex-app/src/reports/info/runtime_load.rs",
         "crates/prodex-app/src/reports/info/runtime_load.rs"
       ],
       "production_reachability_test": "crates/prodex-mojo-core/src/info_render/runway.rs",
@@ -9455,7 +8537,6 @@
       "consumer": "crates/prodex-provider-core/src/gemini_bridge/errors/quota_retry/retry_delay.rs",
       "consumer_marker": "gemini_provider_core_invalid_stream_retry_delay_ms(",
       "production_consumers": [
-        "crates/prodex-provider-core/src/gemini_bridge/errors/quota_retry/retry_delay.rs",
         "crates/prodex-provider-core/src/gemini_bridge/errors/quota_retry/retry_delay.rs"
       ],
       "production_reachability_test": "crates/prodex-mojo-core/src/rich.rs",
@@ -9479,7 +8560,6 @@
       "consumer": "crates/prodex-runtime-proxy/src/upstream.rs",
       "consumer_marker": "runtime_proxy_escape_dot_segments(path_and_query)",
       "production_consumers": [
-        "crates/prodex-runtime-proxy/src/upstream.rs",
         "crates/prodex-runtime-proxy/src/upstream.rs"
       ],
       "production_reachability_test": "crates/prodex-mojo-core/src/rich/routing.rs",
@@ -9503,7 +8583,6 @@
       "consumer": "crates/prodex-runtime-proxy/src/upstream.rs",
       "consumer_marker": "runtime_proxy_header_skip_kind(name)",
       "production_consumers": [
-        "crates/prodex-runtime-proxy/src/upstream.rs",
         "crates/prodex-runtime-proxy/src/upstream.rs"
       ],
       "production_reachability_test": "crates/prodex-mojo-core/src/rich/routing.rs",
@@ -9527,7 +8606,6 @@
       "consumer": "crates/prodex-runtime-quota/src/selection.rs",
       "consumer_marker": "profile_candidate_source_batch(",
       "production_consumers": [
-        "crates/prodex-runtime-quota/src/selection.rs",
         "crates/prodex-runtime-quota/src/selection.rs"
       ],
       "production_reachability_test": "crates/prodex-runtime-quota/tests/src/selection.rs",
@@ -9555,8 +8633,6 @@
       "consumer_marker": "GeminiBridgeRequestOperation::HardenToolCallThoughtSignatures",
       "production_consumers": [
         "crates/prodex-provider-core/src/gemini_bridge/hardening/thought_signature.rs",
-        "crates/prodex-app/src/runtime_launch/proxy_startup/gemini_thought_signatures.rs",
-        "crates/prodex-provider-core/src/gemini_bridge/hardening/thought_signature.rs",
         "crates/prodex-app/src/runtime_launch/proxy_startup/gemini_thought_signatures.rs"
       ],
       "production_reachability_test": "crates/prodex-mojo-core/tests/gemini_request_content.rs",
@@ -9580,7 +8656,6 @@
       "consumer": "crates/prodex-provider-core/src/translators/deepseek/stream/shaping.rs",
       "consumer_marker": "deepseek_stream_policy::stream_tool_arguments_policy(",
       "production_consumers": [
-        "crates/prodex-provider-core/src/translators/deepseek/stream/shaping.rs",
         "crates/prodex-provider-core/src/translators/deepseek/stream/shaping.rs"
       ],
       "production_reachability_test": "crates/prodex-provider-core/src/translators/deepseek.rs",
@@ -9604,7 +8679,6 @@
       "consumer": "crates/prodex-runtime-store/src/continuations/session_epoch.rs",
       "consumer_marker": "session_binding_survives_release(",
       "production_consumers": [
-        "crates/prodex-runtime-store/src/continuations/session_epoch.rs",
         "crates/prodex-runtime-store/src/continuations/session_epoch.rs"
       ],
       "production_reachability_test": "crates/prodex-mojo-core/src/runtime_lineage/session_epoch.rs",
@@ -9628,7 +8702,6 @@
       "consumer": "crates/prodex-app/src/runtime_proxy/responses/session_recovery.rs",
       "consumer_marker": "session_full_history_reset_allowed(",
       "production_consumers": [
-        "crates/prodex-app/src/runtime_proxy/responses/session_recovery.rs",
         "crates/prodex-app/src/runtime_proxy/responses/session_recovery.rs"
       ],
       "production_reachability_test": "crates/prodex-mojo-core/src/runtime_lineage/session_epoch.rs",
@@ -9652,7 +8725,6 @@
       "consumer": "crates/prodex-terminal-ui/src/panel.rs",
       "consumer_marker": "prodex_mojo_core::terminal_layout::panel_label_width(",
       "production_consumers": [
-        "crates/prodex-terminal-ui/src/panel.rs",
         "crates/prodex-terminal-ui/src/panel.rs"
       ],
       "production_reachability_test": "crates/prodex-terminal-ui/tests/src/lib.rs",
@@ -9676,7 +8748,6 @@
       "consumer": "crates/prodex-terminal-ui/src/session.rs",
       "consumer_marker": "prodex_mojo_core::terminal_layout::session_columns(",
       "production_consumers": [
-        "crates/prodex-terminal-ui/src/session.rs",
         "crates/prodex-terminal-ui/src/session.rs"
       ],
       "production_reachability_test": "crates/prodex-terminal-ui/tests/src/lib.rs",
@@ -9700,7 +8771,6 @@
       "consumer": "crates/prodex-terminal-ui/src/panel.rs",
       "consumer_marker": "prodex_mojo_core::terminal_layout::panel_inline_height(",
       "production_consumers": [
-        "crates/prodex-terminal-ui/src/panel.rs",
         "crates/prodex-terminal-ui/src/panel.rs"
       ],
       "production_reachability_test": "crates/prodex-terminal-ui/tests/src/lib.rs",
@@ -9724,7 +8794,6 @@
       "consumer": "crates/prodex-app/src/app_commands/log_transcript_text.rs",
       "consumer_marker": "prodex_mojo_core::log::strip_transcript_ansi_codes(",
       "production_consumers": [
-        "crates/prodex-app/src/app_commands/log_transcript_text.rs",
         "crates/prodex-app/src/app_commands/log_transcript_text.rs"
       ],
       "production_reachability_test": "crates/prodex-app/src/app_commands/log_tests.rs",
@@ -9748,7 +8817,6 @@
       "consumer": "crates/prodex-app/src/app_commands/log_transcript_text.rs",
       "consumer_marker": "prodex_mojo_core::log::transcript_binary_like(",
       "production_consumers": [
-        "crates/prodex-app/src/app_commands/log_transcript_text.rs",
         "crates/prodex-app/src/app_commands/log_transcript_text.rs"
       ],
       "production_reachability_test": "crates/prodex-app/src/app_commands/log_tests.rs",
@@ -9772,7 +8840,6 @@
       "consumer": "crates/prodex-terminal-ui/src/text.rs",
       "consumer_marker": "prodex_mojo_core::terminal_layout::token_chunk_boundaries(",
       "production_consumers": [
-        "crates/prodex-terminal-ui/src/text.rs",
         "crates/prodex-terminal-ui/src/text.rs"
       ],
       "production_reachability_test": "crates/prodex-terminal-ui/tests/src/lib.rs",
@@ -9796,7 +8863,6 @@
       "consumer": "crates/prodex-terminal-ui/src/text.rs",
       "consumer_marker": "prodex_mojo_core::terminal_layout::display_prefix_scalars(",
       "production_consumers": [
-        "crates/prodex-terminal-ui/src/text.rs",
         "crates/prodex-terminal-ui/src/text.rs"
       ],
       "production_reachability_test": "crates/prodex-terminal-ui/tests/src/lib.rs",
@@ -9820,7 +8886,6 @@
       "consumer": "crates/prodex-terminal-ui/src/text.rs",
       "consumer_marker": "prodex_mojo_core::terminal_layout::fit_cell_plan(",
       "production_consumers": [
-        "crates/prodex-terminal-ui/src/text.rs",
         "crates/prodex-terminal-ui/src/text.rs"
       ],
       "production_reachability_test": "crates/prodex-terminal-ui/tests/src/lib.rs",
@@ -9844,7 +8909,6 @@
       "consumer": "crates/prodex-terminal-ui/src/text.rs",
       "consumer_marker": "prodex_mojo_core::terminal_layout::wrap_piece_action(",
       "production_consumers": [
-        "crates/prodex-terminal-ui/src/text.rs",
         "crates/prodex-terminal-ui/src/text.rs"
       ],
       "production_reachability_test": "crates/prodex-terminal-ui/tests/src/lib.rs",
@@ -9868,7 +8932,6 @@
       "consumer": "crates/prodex-terminal-ui/src/text.rs",
       "consumer_marker": "prodex_mojo_core::terminal_layout::pad_cell_spaces(",
       "production_consumers": [
-        "crates/prodex-terminal-ui/src/text.rs",
         "crates/prodex-terminal-ui/src/text.rs"
       ],
       "production_reachability_test": "crates/prodex-terminal-ui/tests/src/lib.rs",
@@ -10301,9 +9364,7 @@
         "baseline_range": {
           "start": 672,
           "end": 751
-        },
-        "release_symbol": "pub fn with_effective_preset(",
-        "release_marker": "runtime_proxy_preset::RuntimePolicyProxySettings::resolve_effective_preset("
+        }
       },
       "cleanup_evidence": "Rust preset default values were removed; the versioned Mojo preset plan returns those defaults as part of the complete policy decision."
     },
