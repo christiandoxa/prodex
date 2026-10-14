@@ -109,6 +109,26 @@ fn broker_continuity_kernel_smoke() {
 }
 
 #[test]
+fn broker_previous_response_continuity_reducer_preserves_decay_and_route_filtering() {
+    const { assert!(crate::MOJO_REQUIRED) };
+    let plan = previous_response_continuity_metrics(
+        [
+            ("__previous_response_not_found__:responses:resp-1", 4, 90),
+            ("__previous_response_not_found__:compact:resp-2", 2, 99),
+            ("__previous_response_not_found__:websocket:resp-3", 1, 0),
+            ("__previous_response_not_found__:unknown:resp-4", 9, 99),
+            ("main", 9, 99),
+        ],
+        100,
+        5,
+    )
+    .unwrap();
+
+    assert_eq!(plan.entries, [1, 1, 0, 0]);
+    assert_eq!(plan.failures, [2, 2, 0, 0]);
+}
+
+#[test]
 fn broker_registry_reuse_plan_is_mojo_authoritative() {
     let matching = registry_reuse_plan(BrokerRegistryReuseInput {
         registry_upstream_base_url: "https://upstream.example",

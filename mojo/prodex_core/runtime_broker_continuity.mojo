@@ -8,6 +8,8 @@ comptime BROKER_CONTINUITY_INVALID: Int64 = -1
 comptime INT64_MAX: Int64 = 9223372036854775807
 comptime INT64_MIN: Int64 = -9223372036854775808
 comptime U32_MAX_I64: Int64 = 4294967295
+comptime BROKER_CONTINUITY_MAX_INPUTS: Int64 = 65536
+comptime BROKER_PREVIOUS_RESPONSE_OUTPUT_COUNT: Int64 = 8
 
 
 def broker_view(address: UInt, length: Int64) -> ProdexRichStringView:
@@ -248,6 +250,15 @@ def broker_saturating_sub(left: Int64, right: Int64) -> Int64:
     return left - right
 
 
+def broker_effective_score_value(
+    score: Int64, updated_at: Int64, now: Int64, decay_seconds: Int64
+) -> Int64:
+    var divisor = max(decay_seconds, Int64(1))
+    var decay = broker_saturating_sub(now, updated_at) // divisor
+    decay = min(max(decay, Int64(0)), U32_MAX_I64)
+    return max(score - decay, Int64(0))
+
+
 @export("prodex_runtime_broker_effective_score_v1")
 def prodex_runtime_broker_effective_score_v1(
     abi_version: Int64,
@@ -262,10 +273,36 @@ def prodex_runtime_broker_effective_score_v1(
         or score > U32_MAX_I64
     ):
         return BROKER_CONTINUITY_INVALID
-    var divisor = max(decay_seconds, Int64(1))
-    var decay = broker_saturating_sub(now, updated_at) // divisor
-    decay = min(max(decay, Int64(0)), U32_MAX_I64)
-    return max(score - decay, Int64(0))
+    return broker_effective_score_value(score, updated_at, now, decay_seconds)
+
+
+def broker_stale_verified_value(
+    verified: Int64,
+    not_found_present: Int64,
+    last_not_found_at: Int64,
+    verified_present: Int64,
+    last_verified_at: Int64,
+    touched_present: Int64,
+    last_touched_at: Int64,
+    now: Int64,
+    stale_verified_seconds: Int64,
+) -> Int64:
+    if verified == 0:
+        return 0
+    var present = False
+    var last: Int64 = INT64_MIN
+    if not_found_present == 1:
+        present = True
+        last = max(last, last_not_found_at)
+    if verified_present == 1:
+        present = True
+        last = max(last, last_verified_at)
+    if touched_present == 1:
+        present = True
+        last = max(last, last_touched_at)
+    if not present:
+        return 0
+    return Int64(broker_saturating_sub(now, last) >= stale_verified_seconds)
 
 
 @export("prodex_runtime_broker_stale_verified_v1")
@@ -289,22 +326,31 @@ def prodex_runtime_broker_stale_verified_v1(
         or (touched_present != 0 and touched_present != 1)
     ):
         return BROKER_CONTINUITY_INVALID
-    if verified == 0:
-        return 0
-    var present = False
-    var last: Int64 = INT64_MIN
-    if not_found_present == 1:
-        present = True
-        last = max(last, last_not_found_at)
-    if verified_present == 1:
-        present = True
-        last = max(last, last_verified_at)
-    if touched_present == 1:
-        present = True
-        last = max(last, last_touched_at)
-    if not present:
-        return 0
-    return Int64(broker_saturating_sub(now, last) >= stale_verified_seconds)
+    return broker_stale_verified_value(
+        verified,
+        not_found_present,
+        last_not_found_at,
+        verified_present,
+        last_verified_at,
+        touched_present,
+        last_touched_at,
+        now,
+        stale_verified_seconds,
+    )
+
+
+def broker_route_kind_ptr(
+    source: Pointer[mut=False, UInt8, _], start: Int64, end: Int64
+) -> Int64:
+    if broker_literal_equal(source, start, end, StringSlice("responses")):
+        return 1
+    if broker_literal_equal(source, start, end, StringSlice("compact")):
+        return 2
+    if broker_literal_equal(source, start, end, StringSlice("websocket")):
+        return 3
+    if broker_literal_equal(source, start, end, StringSlice("standard")):
+        return 4
+    return 0
 
 
 @export("prodex_runtime_broker_route_kind_v1")
@@ -322,16 +368,37 @@ def prodex_runtime_broker_route_kind_v1(
     var view = broker_view(route_address, route_length)
     if not rich_view_valid(view, route_length):
         return BROKER_CONTINUITY_INVALID
+    return broker_route_kind_ptr(rich_view_ptr(view), 0, route_length)
+
+
+def broker_health_key_kind_view(view: ProdexRichStringView) -> Int64:
+    var key_length = Int64(view.len)
     var ptr = rich_view_ptr(view)
-    if broker_literal_equal(ptr, 0, route_length, StringSlice("responses")):
+    if key_length >= 17 and broker_literal_equal(
+        ptr, 0, 17, StringSlice("__route_health__:")
+    ):
         return 1
-    if broker_literal_equal(ptr, 0, route_length, StringSlice("compact")):
-        return 2
-    if broker_literal_equal(ptr, 0, route_length, StringSlice("websocket")):
-        return 3
-    if broker_literal_equal(ptr, 0, route_length, StringSlice("standard")):
-        return 4
-    return 0
+    if key_length >= 2 and ptr[0] == 95 and ptr[1] == 95:
+        return 0
+    return 2
+
+
+def broker_previous_response_route_kind(view: ProdexRichStringView) -> Int64:
+    var key_length = Int64(view.len)
+    var ptr = rich_view_ptr(view)
+    var prefix_length = Int64(
+        StringSlice("__previous_response_not_found__:").byte_length()
+    )
+    if key_length < prefix_length or not broker_literal_equal(
+        ptr, 0, prefix_length, StringSlice("__previous_response_not_found__:")
+    ):
+        return 0
+    var separator = prefix_length
+    while separator < key_length and ptr[unsafe_offset=separator] != 58:
+        separator += 1
+    if separator >= key_length:
+        return 0
+    return broker_route_kind_ptr(ptr, prefix_length, separator)
 
 
 @export("prodex_runtime_broker_health_key_kind_v1")
@@ -349,14 +416,74 @@ def prodex_runtime_broker_health_key_kind_v1(
     var view = broker_view(key_address, key_length)
     if not rich_view_valid(view, key_length):
         return BROKER_CONTINUITY_INVALID
-    var ptr = rich_view_ptr(view)
-    if key_length >= 17 and broker_literal_equal(
-        ptr, 0, 17, StringSlice("__route_health__:")
+    return broker_health_key_kind_view(view)
+
+
+@export("prodex_runtime_broker_previous_response_continuity_v1")
+def prodex_runtime_broker_previous_response_continuity_v1(
+    abi_version: Int64,
+    keys_address: UInt,
+    lengths_address: UInt,
+    scores_address: UInt,
+    updated_address: UInt,
+    count: Int64,
+    now: Int64,
+    decay_seconds: Int64,
+    output_address: UInt,
+) abi("C") -> Int64:
+    if (
+        abi_version != BROKER_CONTINUITY_ABI_VERSION
+        or count < 0
+        or count > BROKER_CONTINUITY_MAX_INPUTS
+        or output_address == 0
+        or count > 0
+        and (
+            keys_address == 0
+            or lengths_address == 0
+            or scores_address == 0
+            or updated_address == 0
+        )
     ):
-        return 1
-    if key_length >= 2 and ptr[0] == 95 and ptr[1] == 95:
+        return BROKER_CONTINUITY_INVALID
+
+    var output = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    for index in range(BROKER_PREVIOUS_RESPONSE_OUTPUT_COUNT):
+        output[unsafe_offset=index] = 0
+    if count == 0:
         return 0
-    return 2
+
+    var keys = Pointer[mut=False, UInt, ImmUntrackedOrigin](
+        unsafe_from_address=Int(keys_address)
+    )
+    var lengths = Pointer[mut=False, Int64, ImmUntrackedOrigin](
+        unsafe_from_address=Int(lengths_address)
+    )
+    var scores = Pointer[mut=False, Int64, ImmUntrackedOrigin](
+        unsafe_from_address=Int(scores_address)
+    )
+    var updated = Pointer[mut=False, Int64, ImmUntrackedOrigin](
+        unsafe_from_address=Int(updated_address)
+    )
+    for index in range(count):
+        var key_length = lengths[unsafe_offset=index]
+        var score = scores[unsafe_offset=index]
+        if key_length < 0 or score < 0 or score > U32_MAX_I64:
+            return BROKER_CONTINUITY_INVALID
+        var key = broker_view(keys[unsafe_offset=index], key_length)
+        if not rich_view_valid(key, key_length):
+            return BROKER_CONTINUITY_INVALID
+
+        var effective = broker_effective_score_value(score, updated[unsafe_offset=index], now, decay_seconds)
+        if effective == 0:
+            continue
+        var route = broker_previous_response_route_kind(key)
+        if route == 0:
+            continue
+        output[unsafe_offset=route - 1] += 1
+        output[unsafe_offset=4 + route - 1] += effective
+    return 0
 
 
 comptime BROKER_REGISTRY_STATUS_NOT_LEGACY: Int64 = 0
