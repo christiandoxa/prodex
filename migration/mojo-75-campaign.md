@@ -5410,3 +5410,17 @@ status tests passed (47). Formatting, ownership, authority, no-fallback,
 production-share, and diff checks passed. The broad report measured 109,537
 reachable Mojo LOC and 222,075 Rust LOC (33.03% Mojo); the 75% target remains
 in progress.
+
+## WebSocket stale-continuation frame planning migration
+
+`websocket_failure.mojo` now chooses unchanged forwarding, generic errors,
+`response.failed` errors, and nested response errors through the versioned
+`prodex_runtime_websocket_stale_frame_plan_v1` ABI. Rust retains JSON parsing,
+error classification facts, and wire materialization. The previous Rust
+shape-selection branch tree is deleted without semantic recomputation.
+
+Required-Mojo core WebSocket policy tests passed (10), and runtime-proxy
+WebSocket boundary tests passed (18). Focused Clippy with all targets/features,
+formatting, ownership, authority, no-fallback, production-share, and diff checks
+passed. The broad report measured 109,564 reachable Mojo LOC and 222,137 Rust
+LOC (33.03% Mojo); the 75% target remains in progress.
