@@ -54,10 +54,27 @@ fn restore_termios(fd: libc::c_int, saved: &libc::termios) {
     }
 }
 
+/// Select the normal buffer without DECRC. The child may already have left
+/// its alternate screen and printed a footer. Repeating DECSET 1049's reset
+/// restores the old saved cursor even on an already-normal VTE/xterm screen,
+/// so later text overwrites that footer. Mode 1047 changes only the buffer.
+struct LeaveChildAlternateScreen;
+
+impl crossterm::Command for LeaveChildAlternateScreen {
+    fn write_ansi(&self, f: &mut impl std::fmt::Write) -> std::fmt::Result {
+        f.write_str("\x1b[?1047l")
+    }
+
+    #[cfg(windows)]
+    fn execute_winapi(&self) -> io::Result<()> {
+        crossterm::Command::execute_winapi(&crossterm::terminal::LeaveAlternateScreen)
+    }
+}
+
 fn reset_child_terminal_protocols(writer: &mut impl io::Write) -> io::Result<()> {
     crossterm::execute!(
         writer,
-        crossterm::terminal::LeaveAlternateScreen,
+        LeaveChildAlternateScreen,
         crossterm::event::DisableMouseCapture,
         crossterm::event::DisableBracketedPaste,
         crossterm::event::DisableFocusChange,
@@ -76,7 +93,7 @@ mod tests {
         reset_child_terminal_protocols(&mut output).unwrap();
         let text = String::from_utf8(output).unwrap();
         for control in [
-            "\x1b[?1049l",
+            "\x1b[?1047l",
             "\x1b[?1000l",
             "\x1b[?1006l",
             "\x1b[?2004l",
@@ -86,6 +103,34 @@ mod tests {
             assert!(
                 text.contains(control),
                 "missing terminal protocol cleanup {control:?}: {text:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn child_terminal_handoff_does_not_restore_stale_cursor_before_saved_session_footer() {
+        let id = "01900000-0000-7000-8000-000000000713";
+        let native = format!("Native usage line\r\nNative resume: {id}\r\n");
+        let mut output = native.as_bytes().to_vec();
+        // Exercise the complete handoff, not only the append-only formatter.
+        reset_child_terminal_protocols(&mut output).unwrap();
+        reset_child_terminal_protocols(&mut output).unwrap();
+        let footer = prodex_mojo_core::launch::saved_session_guidance(Some(id)).unwrap();
+        output.extend_from_slice(footer.as_bytes());
+        assert_eq!(&output[..native.len()], native.as_bytes());
+        let appended = std::str::from_utf8(&output[native.len()..]).unwrap();
+        assert!(appended.contains(&format!("Session ID: {id}\r\n")));
+        for forbidden in [
+            "\x1b[?1049l",
+            "\x1b[?1048l",
+            "\x1b8",
+            "\x1b[u",
+            "\x1b[2J",
+            "\x1b[3J",
+        ] {
+            assert!(
+                !appended.contains(forbidden),
+                "cursor restore or screen erase: {forbidden:?}"
             );
         }
     }
