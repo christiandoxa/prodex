@@ -568,6 +568,86 @@ def prodex_quota_main_aggregate_batch(
 comptime QUOTA_CAPACITY_FIELD_COUNT: Int64 = 22
 comptime QUOTA_CAPACITY_BATCH_MAX_COUNT: Int64 = 256
 
+comptime QUOTA_BLOCKED_WINDOW_ABI_VERSION: Int64 = 1
+comptime QUOTA_BLOCKED_WINDOW_ABI: Int64 = 4
+comptime QUOTA_BLOCKED_WINDOW_BATCH_MAX_COUNT: Int64 = 1_024
+comptime QUOTA_BLOCKED_WINDOW_KIND_MAIN: Int64 = 0
+comptime QUOTA_BLOCKED_WINDOW_KIND_ADDITIONAL: Int64 = 1
+comptime QUOTA_BLOCKED_WINDOW_KIND_CODE_REVIEW: Int64 = 2
+
+
+@export("prodex_quota_blocked_window_plan_v1")
+def prodex_quota_blocked_window_plan_v1(
+    abi_version: Int64,
+    runtime_ready: Int64,
+    include_code_review: Int64,
+    kind_address: UInt,
+    used_percent_address: UInt,
+    used_present_address: UInt,
+    blocked_address: UInt,
+    count: Int64,
+) abi("C") -> Int64:
+    if abi_version != QUOTA_BLOCKED_WINDOW_ABI_VERSION:
+        return QUOTA_BLOCKED_WINDOW_ABI
+    if (
+        runtime_ready != 0
+        and runtime_ready != 1
+        or include_code_review != 0
+        and include_code_review != 1
+        or count < 0
+        or count > QUOTA_BLOCKED_WINDOW_BATCH_MAX_COUNT
+    ):
+        return 1
+    if count == 0:
+        return 0
+    if (
+        kind_address == 0
+        or used_percent_address == 0
+        or used_present_address == 0
+        or blocked_address == 0
+    ):
+        return 1
+
+    var kinds = Pointer[mut=False, Int64, ImmUntrackedOrigin](
+        unsafe_from_address=Int(kind_address)
+    )
+    var used_percent = Pointer[mut=False, Int64, ImmUntrackedOrigin](
+        unsafe_from_address=Int(used_percent_address)
+    )
+    var used_present = Pointer[mut=False, Int64, ImmUntrackedOrigin](
+        unsafe_from_address=Int(used_present_address)
+    )
+    var blocked = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(blocked_address)
+    )
+
+    for index in range(count):
+        var kind = kinds[unsafe_offset=index]
+        var present = used_present[unsafe_offset=index]
+        if (
+            (kind < QUOTA_BLOCKED_WINDOW_KIND_MAIN
+            or kind > QUOTA_BLOCKED_WINDOW_KIND_CODE_REVIEW)
+            or (present != 0 and present != 1)
+        ):
+            return 2
+
+    for index in range(count):
+        var kind = kinds[unsafe_offset=index]
+        var present = used_present[unsafe_offset=index]
+        var used = used_percent[unsafe_offset=index]
+        var should_block: Int64 = 0
+        if kind == QUOTA_BLOCKED_WINDOW_KIND_CODE_REVIEW:
+            if include_code_review == 1 and present == 1 and used >= 100:
+                should_block = 1
+        elif runtime_ready == 0:
+            if kind == QUOTA_BLOCKED_WINDOW_KIND_MAIN:
+                if present == 0 or used >= 100:
+                    should_block = 1
+            elif present == 1 and used >= 100:
+                should_block = 1
+        blocked[unsafe_offset=index] = should_block
+    return 0
+
 
 def quota_capacity_field(
     fields: Pointer[mut=False, Int64, _], index: Int64, field: Int64

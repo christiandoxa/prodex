@@ -123,6 +123,67 @@ fn quota_window_selection_keeps_unknown_additional_lane_non_routable() {
     ));
 }
 
+#[cfg(feature = "mojo")]
+#[test]
+fn blocked_window_planner_preserves_provider_order_and_rendered_messages() {
+    let main = pair(
+        Some(window(None, None, Some(18_000))),
+        Some(window(Some(100), Some(2_000), Some(604_800))),
+    );
+    let additional = AdditionalRateLimit {
+        limit_id: None,
+        limit_name: Some("burst".to_string()),
+        metered_feature: None,
+        rate_limit: pair(
+            Some(window(Some(100), Some(3_000), Some(60))),
+            Some(window(Some(99), Some(3_500), Some(120))),
+        ),
+        allowed: None,
+        limit_reached: None,
+        extra: BTreeMap::new(),
+    };
+    let mut usage = usage(Some(main), vec![additional]);
+    usage.code_review_rate_limit = Some(pair(
+        Some(window(Some(100), Some(4_000), Some(120))),
+        Some(window(Some(0), Some(5_000), Some(60))),
+    ));
+
+    let messages = collect_blocked_limits(&usage, true)
+        .into_iter()
+        .map(|limit| limit.message)
+        .collect::<Vec<_>>();
+    assert_eq!(
+        messages,
+        vec![
+            "5h quota unknown".to_string(),
+            format!("weekly exhausted until {}", format_reset_time(Some(2_000))),
+            format!(
+                "burst 60s exhausted until {}",
+                format_reset_time(Some(3_000))
+            ),
+            format!(
+                "code-review 120s exhausted until {}",
+                format_reset_time(Some(4_000))
+            ),
+        ]
+    );
+
+    usage.rate_limit = Some(pair(
+        Some(window(Some(10), Some(2_000), Some(18_000))),
+        Some(window(Some(20), Some(3_000), Some(604_800))),
+    ));
+    assert_eq!(
+        collect_blocked_limits(&usage, true)
+            .into_iter()
+            .map(|limit| limit.message)
+            .collect::<Vec<_>>(),
+        vec![format!(
+            "code-review 120s exhausted until {}",
+            format_reset_time(Some(4_000))
+        )]
+    );
+}
+
 #[test]
 fn additional_capacity_preserves_unicode_label_rendering() {
     let additional = AdditionalRateLimit {
