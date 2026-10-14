@@ -181,3 +181,54 @@ fn hook_trust_bypass_stays_cli_only_in_overlay_config() {
 
     let _ = std::fs::remove_dir_all(root);
 }
+
+#[test]
+fn saved_session_marker_records_fresh_super_without_enabling_auto_rotate() {
+    let root = temp_overlay("saved-session-marker");
+    std::fs::create_dir_all(&root).unwrap();
+    let _home = crate::TestEnvVarGuard::set("PRODEX_HOME", root.to_str().unwrap());
+    let shared = root.join("shared-codex");
+    let _shared = crate::TestEnvVarGuard::set("PRODEX_SHARED_CODEX_HOME", shared.to_str().unwrap());
+    let paths = AppPaths::discover().unwrap();
+    let command = crate::parse_cli_command_from(["prodex", "s", "--no-auto-rotate"]).unwrap();
+    let crate::Commands::Super(args) = command else {
+        panic!("expected Super");
+    };
+    let args = args.into_runtime_tool_args_with_presidio(false).unwrap();
+    let mut strategy = RuntimeToolLaunchStrategy::new_with_sub_agent(args, None).unwrap();
+    assert!(strategy.args.no_auto_rotate);
+    assert!(strategy.goal_usage_limit_monitor.is_none());
+    let marker = saved_session_marker_for_launch(&strategy, &paths, &[])
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        marker.parent(),
+        Some(paths.root.join("runtime-goal-monitors").as_path())
+    );
+    assert!(
+        !marker.exists(),
+        "only the running launch's hook may report a session ID"
+    );
+    assert!(strategy.goal_usage_limit_monitor.is_none());
+    assert!(
+        saved_session_marker_for_launch(&strategy, &paths, &["exec".into(), "hi".into()])
+            .unwrap()
+            .is_none()
+    );
+    assert!(
+        saved_session_marker_for_launch(
+            &strategy,
+            &paths,
+            &["--remote".into(), "unix:///external".into()]
+        )
+        .unwrap()
+        .is_none()
+    );
+    strategy.args.dry_run = true;
+    assert!(
+        saved_session_marker_for_launch(&strategy, &paths, &[])
+            .unwrap()
+            .is_none()
+    );
+    std::fs::remove_dir_all(root).unwrap();
+}

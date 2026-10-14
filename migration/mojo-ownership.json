@@ -1910,7 +1910,8 @@
           "native_in_place_recovery_eligibility",
           "runtime_workflow_recovery_class",
           "runtime_workflow_evidence_policy",
-          "native_session_marker_arbitration"
+          "native_session_marker_arbitration",
+          "saved_session_exit_guidance"
         ]
       },
       {
@@ -2065,6 +2066,16 @@
         "role": "adapter",
         "operations": [
           "transcript_tool_output_escape_normalization"
+        ]
+      },
+      {
+        "path": "crates/prodex-mojo-core/src/launch/saved_session.rs",
+        "language": "rust",
+        "classification": "MIXED",
+        "production_reachable": true,
+        "role": "adapter",
+        "operations": [
+          "saved_session_exit_guidance"
         ]
       }
     ],
@@ -8921,6 +8932,29 @@
       "duplicate_production_owner": false,
       "platform_fallback": false,
       "rust_adapter_scope": "Rust retains safe UTF-8 borrowing, Unicode trim, JSON parsing, and log-field redaction; delimiter selection is Mojo-only"
+    },
+    {
+      "name": "saved_session_exit_guidance",
+      "domain": "runtime/launch-exit",
+      "introduced_in": "0.437.12",
+      "baseline_state": "A post-TUI inline panel overwrote native session output and offered only a generic resume picker",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_launch_saved_session_guidance_v1",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/launch_config.mojo",
+      "consumer": "crates/prodex-app/src/app_commands/child_process_saved_session.rs",
+      "consumer_marker": "prodex_mojo_core::launch::saved_session_guidance(",
+      "production_consumers": [
+        "crates/prodex-app/src/app_commands/child_process_saved_session.rs"
+      ],
+      "production_reachability_test": "crates/prodex-app/src/app_commands/child_process_saved_session.rs",
+      "rust_owner_before": "Static saved-session panel and generic resume advice",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "removed; direct compiled Mojo and real host-writer regressions assert exact ID, CRLF and no cursor controls",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "per-launch hook marker IO, UUID parsing, explicit resume identity, terminal detection and append-only stderr writes"
     }
   ],
   "rust_semantic_reductions": [

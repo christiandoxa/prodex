@@ -438,7 +438,19 @@ pub(crate) fn prepare_runtime_usage_limit_monitor(
             .map(|report| report.id)
         })
         .transpose()?;
-    let marker_dir = runtime_goal_monitor_dir(&paths);
+    let marker_path = allocate_runtime_session_marker(&paths)?;
+    Ok(Some(GoalUsageLimitMonitor::new(
+        paths,
+        None,
+        marker_path,
+        session_id,
+    )))
+}
+
+/// Allocate a private notification target without enabling retry/rotation.
+/// The caller owns cleanup after every child and hook writer has stopped.
+pub(crate) fn allocate_runtime_session_marker(paths: &AppPaths) -> Result<PathBuf> {
+    let marker_dir = runtime_goal_monitor_dir(paths);
     fs::create_dir_all(&marker_dir)
         .with_context(|| format!("failed to create {}", marker_dir.display()))?;
     let sequence = RUNTIME_USAGE_LIMIT_MONITOR_SEQUENCE.fetch_add(1, Ordering::Relaxed);
@@ -451,12 +463,7 @@ pub(crate) fn prepare_runtime_usage_limit_monitor(
                 .with_context(|| format!("failed to clear {}", marker_path.display()));
         }
     }
-    Ok(Some(GoalUsageLimitMonitor::new(
-        paths,
-        None,
-        marker_path,
-        session_id,
-    )))
+    Ok(marker_path)
 }
 
 pub(crate) fn runtime_goal_monitor_dir(paths: &AppPaths) -> PathBuf {

@@ -24,6 +24,10 @@ pub use recovery::{
     workflow_evidence_plan, workflow_recovery_class, workflow_recovery_class_with_message,
 };
 
+#[path = "launch/saved_session.rs"]
+mod saved_session;
+pub use saved_session::saved_session_guidance;
+
 use crate::MojoError;
 
 const ABI_VERSION: i64 = 1;

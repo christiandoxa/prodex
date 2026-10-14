@@ -59,6 +59,10 @@ where
         let shutdown_started = Instant::now();
         let relaunch = strategy.relaunch_after_child_exit(&completed.status)?;
         let after_result = strategy.after_child_exit(&completed.status, &completed.plan);
+        if !relaunch {
+            // No inline viewport after the native TUI; preserve its exit output.
+            crate::app_commands::print_saved_session_guidance(&completed.plan);
+        }
         let cleanup_started = Instant::now();
         cleanup_runtime_launch_plan(&completed.plan);
         emit_runtime_timing("shutdown.overlay_cleanup_ms", cleanup_started);

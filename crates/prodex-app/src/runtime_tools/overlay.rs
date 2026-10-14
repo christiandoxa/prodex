@@ -378,6 +378,7 @@ struct PreparedOverlayLaunch {
     overlay_home: PathBuf,
     tool_plan: prodex_optional_tools::ToolActivationPlan,
     runtime_args: Vec<std::ffi::OsString>,
+    saved_session_marker: Option<PathBuf>,
 }
 
 pub(super) fn build_plan(
@@ -392,6 +393,7 @@ pub(super) fn build_plan(
         overlay_home,
         tool_plan,
         runtime_args,
+        saved_session_marker,
     } = prepare_overlay_launch(strategy, prepared, runtime_proxy)?;
     if let Some(sub_agent) = strategy.sub_agent.as_ref() {
         super::write_sub_agent_overlay(&overlay_home, sub_agent)?;
@@ -447,7 +449,14 @@ pub(super) fn build_plan(
         &runtime_args,
         legacy_hook_bypass,
     )?;
-    let plan = RuntimeLaunchPlan::new(child).with_cleanup_path(cleanup.keep());
+    let mut plan = RuntimeLaunchPlan::new(child).with_cleanup_path(cleanup.keep());
+    if let Some(marker) = saved_session_marker {
+        plan = plan
+            .with_cleanup_path(marker.clone())
+            .with_cleanup_path(marker.with_extension("offset"))
+            .with_cleanup_path(crate::runtime_store::json_lock_file_path(&marker))
+            .with_saved_session_marker(marker);
+    }
     #[cfg(unix)]
     let plan = attach_session_app_server_companion(
         strategy,
@@ -458,6 +467,21 @@ pub(super) fn build_plan(
         companion,
     );
     Ok(plan)
+}
+
+fn saved_session_marker_for_launch(
+    strategy: &RuntimeToolLaunchStrategy,
+    paths: &AppPaths,
+    runtime_args: &[std::ffi::OsString],
+) -> Result<Option<PathBuf>> {
+    // Record identity without enabling recovery or changing --no-auto-rotate.
+    if strategy.args.dry_run || !session_app_server_companion_eligible(strategy, runtime_args) {
+        return Ok(None);
+    }
+    Ok(Some(match strategy.goal_usage_limit_monitor.as_ref() {
+        Some(monitor) => monitor.marker_path.clone(),
+        None => crate::app_commands::runtime_launch::allocate_runtime_session_marker(paths)?,
+    }))
 }
 
 fn prepare_overlay_launch(
@@ -486,12 +510,19 @@ fn prepare_overlay_launch(
         strategy.prepare_runtime_codex_args(&overlay_home, &prepared.paths, runtime_proxy)?;
     strategy.recovery_model =
         crate::codex_effective_config_value(&overlay_home, &runtime_args, "model")?;
-    if let Some(monitor) = strategy.goal_usage_limit_monitor.as_ref() {
+    let saved_session_marker =
+        saved_session_marker_for_launch(strategy, &prepared.paths, &runtime_args)?;
+    if let Some(marker) = saved_session_marker.as_deref().or_else(|| {
+        strategy
+            .goal_usage_limit_monitor
+            .as_ref()
+            .map(|monitor| monitor.marker_path.as_path())
+    }) {
         add_runtime_goal_session_tracking(
             &overlay_home,
             strategy.profile_v2_name.as_deref(),
             &mut runtime_args,
-            &monitor.marker_path,
+            marker,
         )?;
     }
     if !prodex_runtime_launch::is_codex_exec_invocation(&runtime_args)
@@ -544,6 +575,7 @@ fn prepare_overlay_launch(
         overlay_home,
         tool_plan,
         runtime_args,
+        saved_session_marker,
     })
 }
 

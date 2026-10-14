@@ -9,6 +9,8 @@ pub struct RuntimeLaunchPlan {
     pub companion: Option<ChildProcessPlan>,
     pub companion_unix_socket: Option<PathBuf>,
     pub cleanup_paths: Vec<PathBuf>,
+    /// Launch-owned root-session notification, never a global latest-session lookup.
+    pub saved_session_marker: Option<PathBuf>,
 }
 
 impl RuntimeLaunchPlan {
@@ -18,6 +20,7 @@ impl RuntimeLaunchPlan {
             companion: None,
             companion_unix_socket: None,
             cleanup_paths: Vec::new(),
+            saved_session_marker: None,
         }
     }
 
@@ -25,6 +28,11 @@ impl RuntimeLaunchPlan {
     pub fn with_unix_companion(mut self, companion: ChildProcessPlan, socket: PathBuf) -> Self {
         self.companion = Some(companion);
         self.companion_unix_socket = Some(socket);
+        self
+    }
+
+    pub fn with_saved_session_marker(mut self, path: PathBuf) -> Self {
+        self.saved_session_marker = Some(path);
         self
     }
 
@@ -36,7 +44,11 @@ impl RuntimeLaunchPlan {
 
 pub fn cleanup_runtime_launch_plan(plan: &RuntimeLaunchPlan) {
     for path in &plan.cleanup_paths {
-        let _ = fs::remove_dir_all(path);
+        if path.is_dir() {
+            let _ = fs::remove_dir_all(path);
+        } else {
+            let _ = fs::remove_file(path);
+        }
     }
 }
 

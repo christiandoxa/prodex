@@ -29,6 +29,7 @@ pub(crate) use session_delete::{
     maintain_shared_codex_sessions_after_child_exit,
 };
 use std::{borrow::Cow, path::Path, time::Instant};
+pub(crate) use usage_limit_recovery::allocate_runtime_session_marker;
 #[cfg(test)]
 pub(crate) use usage_limit_recovery::runtime_goal_monitor_dir;
 pub(crate) use usage_limit_recovery::{
