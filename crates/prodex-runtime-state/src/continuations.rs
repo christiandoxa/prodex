@@ -57,6 +57,10 @@ impl<B> Default for RuntimeContinuationStore<B> {
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct RuntimeContinuationStatuses {
+    /// Explicit session releases survive verification, save coalescing and stale
+    /// writers. Response/turn-state hard ownership is never relaxed by these.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub session_release_epochs: BTreeMap<String, i64>,
     #[serde(default)]
     pub response: BTreeMap<String, RuntimeContinuationBindingStatus>,
     #[serde(default)]

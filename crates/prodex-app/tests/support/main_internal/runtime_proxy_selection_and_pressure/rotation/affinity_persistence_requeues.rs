@@ -289,6 +289,7 @@ fn runtime_affinity_touch_lookups_do_not_requeue_persistence_before_interval() {
             ),
         ]),
         continuation_statuses: RuntimeContinuationStatuses {
+            session_release_epochs: BTreeMap::new(),
             response: BTreeMap::from([("resp-1".to_string(), verified_status("responses"))]),
             turn_state: BTreeMap::from([
                 ("turn-1".to_string(), verified_status("responses")),

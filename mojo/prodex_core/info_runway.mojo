@@ -69,6 +69,33 @@ def info_runway_index_less(
     return timestamps[unsafe_offset=left] < timestamps[unsafe_offset=right]
 
 
+@no_inline
+def info_runway_group_earliest(
+    group_start: Int64, group_end: Int64,
+    ordered: Pointer[mut=True, Int64, MutUntrackedOrigin],
+    five_hour: Pointer[mut=False, Int64, ImmUntrackedOrigin],
+    weekly: Pointer[mut=False, Int64, ImmUntrackedOrigin],
+    window: Int64,
+) -> Int64:
+    var latest_index = ordered[unsafe_offset=group_end - 1]
+    var earliest_index = latest_index
+    var current_window_remaining = info_runway_remaining(
+        five_hour, weekly, latest_index, window
+    )
+    var probe = group_end - 2
+    while probe >= group_start:
+        var candidate_index = ordered[unsafe_offset=probe]
+        var candidate_remaining = info_runway_remaining(
+            five_hour, weekly, candidate_index, window
+        )
+        if candidate_remaining < current_window_remaining:
+            break
+        earliest_index = candidate_index
+        current_window_remaining = candidate_remaining
+        probe -= 1
+    return earliest_index
+
+
 @export("prodex_mojo_info_runway_estimate_v1")
 def prodex_mojo_info_runway_estimate_v1(
     abi_version: Int64,
@@ -190,21 +217,7 @@ def prodex_mojo_info_runway_estimate_v1(
             group_end += 1
         if group_end - group_start >= 2:
             var latest_index = ordered[unsafe_offset=group_end - 1]
-            var earliest_index = latest_index
-            var current_window_remaining = info_runway_remaining(
-                five_hour, weekly, latest_index, window
-            )
-            var probe = group_end - 2
-            while probe >= group_start:
-                var candidate_index = ordered[unsafe_offset=probe]
-                var candidate_remaining = info_runway_remaining(
-                    five_hour, weekly, candidate_index, window
-                )
-                if candidate_remaining < current_window_remaining:
-                    break
-                earliest_index = candidate_index
-                current_window_remaining = candidate_remaining
-                probe -= 1
+            var earliest_index = info_runway_group_earliest(group_start, group_end, ordered, five_hour, weekly, window)
             var burned = info_runway_saturating_sub(
                 info_runway_remaining(five_hour, weekly, earliest_index, window),
                 info_runway_remaining(five_hour, weekly, latest_index, window),

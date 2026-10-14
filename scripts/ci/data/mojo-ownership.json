@@ -618,15 +618,6 @@
           "session_usage_limit_marker",
           "gemini_invalid_stream_retry_delay_policy"
         ]
-      },
-      "mojo/prodex_core/runtime_proxy_request.mojo": {
-        "operations": [
-          "runtime_proxy_request_metadata_policy",
-          "runtime_proxy_path_policy",
-          "runtime_proxy_mount_path_policy",
-          "runtime_proxy_dot_segment_escaping_policy",
-          "runtime_proxy_header_skip_policy"
-        ]
       }
     },
     "additions": [
@@ -638,8 +629,8 @@
         "role": "semantic",
         "operations": [
           "session_selector_resolution_policy",
-        "session_report_query_matching_policy",
-        "session_file_name_policy"
+          "session_report_query_matching_policy",
+          "session_file_name_policy"
         ]
       },
       {
@@ -650,8 +641,8 @@
         "role": "adapter",
         "operations": [
           "session_selector_resolution_policy",
-        "session_report_query_matching_policy",
-        "session_file_name_policy"
+          "session_report_query_matching_policy",
+          "session_file_name_policy"
         ]
       },
       {
@@ -1094,7 +1085,9 @@
           "runtime_lineage_classification",
           "runtime_lineage_key_build",
           "runtime_lineage_response_parts",
-          "local_rewrite_binding_candidate_policy"
+          "local_rewrite_binding_candidate_policy",
+          "runtime_session_release_epoch",
+          "runtime_session_full_history_conflict_recovery"
         ]
       },
       {
@@ -8472,6 +8465,52 @@
       "duplicate_production_owner": false,
       "platform_fallback": false,
       "rust_adapter_scope": "borrowed string projection, typed result mapping, and provider-specific human-readable error text"
+    },
+    {
+      "name": "runtime_session_release_epoch",
+      "domain": "runtime/session-recovery",
+      "introduced_in": "0.437.11",
+      "baseline_state": "Transient session release status was discarded on verification before stale owner maps were merged",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_runtime_session_epoch_v1",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/runtime_lineage.mojo",
+      "consumer": "crates/prodex-runtime-store/src/continuations/session_epoch.rs",
+      "consumer_marker": "session_binding_survives_release(",
+      "production_consumers": [
+        "crates/prodex-runtime-store/src/continuations/session_epoch.rs"
+      ],
+      "production_reachability_test": "crates/prodex-mojo-core/src/runtime_lineage/session_epoch.rs",
+      "rust_owner_before": "Transient session release status was discarded on verification before stale owner maps were merged",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "deleted; real persisted-store repro, HTTP integration, same-second restart and fail-closed ABI regressions",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "persist typed release observations and apply mandatory Mojo plan; Rust keeps locking, filesystem and broker side effects"
+    },
+    {
+      "name": "runtime_session_full_history_conflict_recovery",
+      "domain": "runtime/session-recovery",
+      "introduced_in": "0.437.11",
+      "baseline_state": "A legacy conflict sentinel prevented every account selection even for complete independent precommit history",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_runtime_session_replay_reset_v1",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/runtime_lineage.mojo",
+      "consumer": "crates/prodex-app/src/runtime_proxy/responses/session_recovery.rs",
+      "consumer_marker": "session_full_history_reset_allowed(",
+      "production_consumers": [
+        "crates/prodex-app/src/runtime_proxy/responses/session_recovery.rs"
+      ],
+      "production_reachability_test": "crates/prodex-mojo-core/src/runtime_lineage/session_epoch.rs",
+      "rust_owner_before": "A legacy conflict sentinel prevented every account selection even for complete independent precommit history",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "deleted; real persisted-store repro, HTTP integration, same-second restart and fail-closed ABI regressions",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "persist typed release observations and apply mandatory Mojo plan; Rust keeps locking, filesystem and broker side effects"
     }
   ],
   "rust_semantic_reductions": [

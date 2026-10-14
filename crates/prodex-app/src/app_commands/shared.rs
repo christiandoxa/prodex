@@ -103,6 +103,18 @@ pub(crate) fn print_launch_status(message: &str) {
     });
 }
 
+/// Relinquish the inline preflight viewport before a child TUI takes over.
+/// Keeping its saved cursor alive across the child's alternate screen makes
+/// shutdown/reconnect output overwrite the old three-line launch panel.
+pub(crate) fn finish_launch_status() {
+    LAUNCH_STATUS_TUI.with(|state| {
+        if let Some(mut terminal) = state.borrow_mut().terminal.take() {
+            let _ = terminal.clear();
+            let _ = terminal.show_cursor();
+        }
+    });
+}
+
 pub(crate) fn try_inline_stdout_terminal(
     height: u16,
 ) -> Option<Terminal<CrosstermBackend<io::Stdout>>> {

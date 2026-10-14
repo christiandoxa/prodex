@@ -45,3 +45,6 @@ mod turn_state;
 
 #[path = "admission/recovery_watchdog.rs"]
 mod recovery_watchdog;
+
+#[path = "admission/session_epoch_recovery.rs"]
+mod session_epoch_recovery;

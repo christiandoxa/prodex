@@ -78,7 +78,30 @@ fn run_runtime_launch_plan_unix(
         let _ = std::fs::remove_file(socket);
     }
     drop(companion_lease);
+    if status.is_ok() {
+        print_owned_companion_resume_guidance();
+    }
     status
+}
+
+#[cfg(unix)]
+fn print_owned_companion_resume_guidance() {
+    use std::io::IsTerminal;
+    if !std::io::stderr().is_terminal() {
+        return;
+    }
+    // Native remote-mode TUI assumes that its server survives detachment.
+    // Our companion is intentionally session-owned and has just been reaped.
+    // Never advertise the deleted overlay socket as a working reconnect URL.
+    let _ = crate::app_commands::print_user_stderr_text_panel(
+        "Prodex saved session",
+        concat!(
+            "This session's temporary app-server has stopped; its socket is closed.\n",
+            "The saved conversation and attachments remain available. Resume with: prodex s resume\n",
+            "Do not reuse the temporary codex --remote socket shown above.\n",
+            "Paused goals stay paused until /goal resume.",
+        ),
+    );
 }
 
 #[cfg(unix)]

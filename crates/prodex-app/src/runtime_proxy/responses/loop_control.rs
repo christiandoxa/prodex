@@ -119,6 +119,14 @@ pub(crate) fn proxy_runtime_responses_request(
     let previous_response_id = runtime_request_previous_response_id(&request);
     let explicit_request_session_id = runtime_request_explicit_session_id(&request);
     let request_session_id = runtime_request_session_id(&request);
+    super::session_recovery::reset_stale_session_conflict_for_full_history(
+        shared,
+        &request,
+        request_id,
+        previous_response_id.as_deref(),
+        request_turn_state.as_deref(),
+        request_session_id.as_deref(),
+    )?;
     let request_model_name = runtime_smart_context_model_name_from_body(&request.body);
     let prompt_cache_key = runtime_smart_context_effective_prompt_cache_key(
         &request,

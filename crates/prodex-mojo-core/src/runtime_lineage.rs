@@ -650,3 +650,10 @@ mod release_plan_tests {
         );
     }
 }
+
+mod session_epoch;
+pub use session_epoch::{
+    merge_session_release_epoch, session_binding_epoch, session_binding_survives_release,
+};
+
+pub use session_epoch::session_full_history_reset_allowed;

@@ -17,3 +17,6 @@ mod backoffs;
 mod continuations;
 #[path = "lib/selected_snapshot.rs"]
 mod selected_snapshot;
+
+#[path = "lib/session_release.rs"]
+mod session_release;
