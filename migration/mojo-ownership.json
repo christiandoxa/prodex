@@ -3637,16 +3637,17 @@
       "consumer": "crates/prodex-runtime-state/src/route.rs",
       "consumer_marker": "prodex_mojo_core::runtime_state::route_kind_label",
       "production_consumers": [
-        "crates/prodex-runtime-state/src/route.rs"
+        "crates/prodex-runtime-state/src/route.rs",
+        "crates/prodex-runtime-store/src/profile_backoff/score.rs"
       ],
       "production_reachability_test": "crates/prodex-mojo-core/src/runtime_state/route.rs",
       "rust_owner_before": "Runtime route label and parser tables, route coupling, profile route-key prefixes and composition, key component parsing, profile suffix extraction, and circuit-to-health key rewriting",
       "rust_state_after": "adapter-only",
-      "rust_test_oracle": "deleted; Mojo ABI and runtime-state caller tests cover labels, coupling, every key prefix, malformed keys, colon-bearing profile names, suffix behavior, and circuit-health rewriting",
+      "rust_test_oracle": "deleted; Mojo ABI, runtime-state caller tests, and runtime-store score compaction regression cover labels, coupling, every key prefix, malformed keys, colon-bearing profile names, suffix behavior, and circuit-health rewriting",
       "production_fallback": false,
       "duplicate_production_owner": false,
       "platform_fallback": false,
-      "rust_adapter_scope": "RuntimeRouteKind mapping, borrowed UTF-8 slice projection, and validated ABI result mapping"
+      "rust_adapter_scope": "RuntimeRouteKind mapping, borrowed UTF-8 slice projection, validated ABI result mapping, and runtime-store caller delegation"
     },
     {
       "name": "quota_selection_policy",
@@ -9620,6 +9621,24 @@
         "release_marker": "super::normalization::smart_context_select_memory_capsules_impl"
       },
       "cleanup_evidence": "The Rust required/optional partition and capsule comparators were removed. The public wrapper reaches the versioned Mojo ordering ABI before the existing bounded admission batches."
+    },
+    {
+      "file": "crates/prodex-runtime-store/src/profile_backoff/score.rs",
+      "symbol": "runtime_profile_score_profile_name",
+      "operation": "runtime_state_route_key_policy",
+      "previous_responsibility": "Rust extracted the profile suffix from persisted route-health keys during score compaction",
+      "final_state": "adapter-only",
+      "cleanup_loc": 3,
+      "cleanup_source": {
+        "kind": "collapsed-adapter",
+        "baseline_range": {
+          "start": 63,
+          "end": 65
+        },
+        "release_symbol": "pub fn runtime_profile_score_profile_name",
+        "release_marker": "prodex_runtime_state::runtime_profile_route_circuit_profile_name("
+      },
+      "cleanup_evidence": "The store keeps the profile-name helper as a narrow caller adapter and delegates suffix extraction to the existing Mojo-owned runtime-state route-key policy; compaction coverage preserves colon-bearing keys."
     },
     {
       "file": "crates/prodex-runtime-store/src/profile_backoff/score.rs",

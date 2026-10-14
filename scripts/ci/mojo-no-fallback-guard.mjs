@@ -513,6 +513,7 @@ const PROMOTED_FILES = [
   "crates/prodex-runtime-store/src/continuations/status/mojo.rs",
   "crates/prodex-runtime-store/src/profile_backoff/backoff.rs",
   "crates/prodex-runtime-store/src/profile_backoff/score.rs",
+  "crates/prodex-runtime-store/tests/src/lib/backoffs.rs",
   "crates/prodex-runtime-proxy/src/health/backoff.rs",
   "crates/prodex-runtime-proxy/src/health/score.rs",
   "crates/prodex-runtime-proxy/src/health/latency.rs",
@@ -986,6 +987,8 @@ const RUNTIME_STATE_BACKGROUND_MOJO_FILE = "mojo/prodex_core/runtime_state_backg
 const RUNTIME_STATE_ROUTE_FILE = "crates/prodex-runtime-state/src/route.rs";
 const RUNTIME_STATE_ROUTE_TEST_FILE = "crates/prodex-runtime-state/tests/src/profile_inflight.rs";
 const RUNTIME_STATE_ROUTE_ADAPTER_FILE = "crates/prodex-mojo-core/src/runtime_state/route.rs";
+const RUNTIME_PROFILE_SCORE_FILE = "crates/prodex-runtime-store/src/profile_backoff/score.rs";
+const RUNTIME_PROFILE_SCORE_TEST_FILE = "crates/prodex-runtime-store/tests/src/lib/backoffs.rs";
 const RUNTIME_LOG_RETENTION_FILE = "crates/prodex-runtime-log/src/retention.rs";
 const RUNTIME_LOG_RETENTION_SELECTION_FILE = "crates/prodex-runtime-log/src/retention_selection.rs";
 const RUNTIME_STATE_QUOTA_FILE = "crates/prodex-runtime-state/src/quota.rs";
@@ -2679,6 +2682,22 @@ export function findViolations(files) {
       return required
         .filter((marker) => !contents.includes(marker))
         .map((marker) => `${filePath}: runtime route adapter must retain ${marker}`);
+    }
+    if (filePath === RUNTIME_PROFILE_SCORE_FILE) {
+      const production = contents.split("#[cfg(test)]", 1)[0];
+      const marker = "prodex_runtime_state::runtime_profile_route_circuit_profile_name(";
+      const violations = production.includes(marker)
+        ? []
+        : [`${filePath}: profile-score compaction must delegate suffix extraction to Mojo-backed runtime state`];
+      if (/\.rsplit\(\s*['"]:\s*['"]\s*\)/u.test(production)) {
+        violations.push(`${filePath}: contains restored Rust profile-suffix parsing`);
+      }
+      return violations;
+    }
+    if (filePath === RUNTIME_PROFILE_SCORE_TEST_FILE) {
+      return contents.includes("profile_score_compaction_uses_mojo_profile_suffix_for_colon_bearing_keys")
+        ? []
+        : [`${filePath}: profile-score compaction needs a colon-bearing caller regression`];
     }
     if (filePath === RUNTIME_STATE_BACKGROUND_MOJO_FILE) {
       const required = [
@@ -7294,6 +7313,22 @@ function selfTest() {
     findViolations([[RUNTIME_STATE_BACKGROUND_MOJO_FILE,
       runtimeStateRouteMojoCanonical.replace("runtime_state_route_key_prefix(", "runtime_state_route_key_prefix_missing(")]]).join("\n"),
     /runtime route semantics must remain Mojo-owned/u,
+  );
+  const runtimeProfileScoreConsumerCanonical =
+    "prodex_runtime_state::runtime_profile_route_circuit_profile_name(";
+  assert.deepEqual(findViolations([[RUNTIME_PROFILE_SCORE_FILE, runtimeProfileScoreConsumerCanonical]]), []);
+  assert.match(
+    findViolations([[RUNTIME_PROFILE_SCORE_FILE,
+      `${runtimeProfileScoreConsumerCanonical}\nkey.rsplit(':').next()`]]).join("\n"),
+    /contains restored Rust profile-suffix parsing/u,
+  );
+  assert.deepEqual(findViolations([[
+    RUNTIME_PROFILE_SCORE_TEST_FILE,
+    "profile_score_compaction_uses_mojo_profile_suffix_for_colon_bearing_keys",
+  ]]), []);
+  assert.match(
+    findViolations([[RUNTIME_PROFILE_SCORE_TEST_FILE, "#[test] fn old_score_case() {}"]]).join("\n"),
+    /needs a colon-bearing caller regression/u,
   );
   const affinitySource = "crates/prodex-app/src/runtime_proxy/selection/affinity.rs";
   const affinityCanonical = [

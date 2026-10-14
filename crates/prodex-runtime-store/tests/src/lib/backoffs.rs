@@ -92,6 +92,23 @@ fn profile_score_compaction_supports_route_scoped_keys() {
 }
 
 #[test]
+fn profile_score_compaction_uses_mojo_profile_suffix_for_colon_bearing_keys() {
+    let profiles = BTreeMap::from([("colons".to_string(), profile())]);
+    let scores = BTreeMap::from([(
+        "__route_health__:responses:profile:with:colons".to_string(),
+        RuntimeProfileHealth {
+            score: 2,
+            updated_at: 200,
+        },
+    )]);
+
+    assert_eq!(
+        compact_runtime_profile_scores(scores, &profiles, 250).len(),
+        1
+    );
+}
+
+#[test]
 fn profile_score_timestamp_ties_merge_commutatively() {
     let profiles = BTreeMap::from([("alpha".to_string(), profile())]);
     let left = BTreeMap::from([(
