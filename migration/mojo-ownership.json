@@ -613,7 +613,8 @@
         "operations": [
           "runtime_candidate_decision_kernel",
           "runtime_affinity_local_rejection_policy",
-          "quota_selection_policy"
+          "quota_selection_policy",
+          "runtime_cold_start_candidate_eligibility"
         ]
       },
       "mojo/prodex_core/rich_fallback.mojo": {
@@ -2576,6 +2577,29 @@
       "duplicate_production_owner": false,
       "platform_fallback": false,
       "rust_adapter_scope": "runtime state reads, route-circuit probe reservation, and typed ABI result mapping"
+    },
+    {
+      "name": "runtime_cold_start_candidate_eligibility",
+      "domain": "runtime/selection",
+      "introduced_in": "0.420.0",
+      "baseline_state": "candidate",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_runtime_waitable_candidate_eligible_v1",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/candidate_decision.mojo",
+      "consumer": "crates/prodex-app/src/runtime_proxy/selection/next/candidates.rs",
+      "consumer_marker": "runtime_waitable_candidate_eligible(",
+      "production_consumers": [
+        "crates/prodex-app/src/runtime_proxy/selection/next/candidates.rs"
+      ],
+      "production_reachability_test": "crates/prodex-mojo-core/src/runtime/selection_planning.rs",
+      "rust_owner_before": "Rust selected cold-start fallback eligibility after excluded-profile, auth, probe, snapshot, health, backoff, and local-load checks",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "deleted; required-Mojo candidate-mode tests and the app selection regression preserve failed-probe fallback behavior",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "catalog field projection plus hard in-flight and route-circuit side-effect checks"
     },
     {
       "name": "quota_route_score_resolution",
@@ -9183,6 +9207,24 @@
     }
   ],
   "rust_semantic_reductions": [
+    {
+      "file": "crates/prodex-app/src/runtime_proxy/selection/next/candidates.rs",
+      "symbol": "entry.supports_codex_runtime()",
+      "operation": "runtime_cold_start_candidate_eligibility",
+      "previous_responsibility": "Rust selected cold-start fallback eligibility after excluded-profile, auth, probe, snapshot, health, backoff, and local-load checks",
+      "final_state": "adapter-only",
+      "cleanup_loc": 14,
+      "cleanup_source": {
+        "kind": "collapsed-adapter",
+        "baseline_range": {
+          "start": 203,
+          "end": 216
+        },
+        "release_symbol": "let eligible = runtime_waitable_candidate_eligible(",
+        "release_marker": "runtime_waitable_candidate_eligible("
+      },
+      "cleanup_evidence": "The cold-start eligibility predicate is removed from the candidate loop; Rust now projects cached state into the existing Mojo waitable-candidate ABI while retaining hard in-flight admission and route-circuit reservation."
+    },
     {
       "file": "crates/prodex-runtime-proxy/src/gateway_policy.rs",
       "symbol": "runtime_gateway_route_selected_model",

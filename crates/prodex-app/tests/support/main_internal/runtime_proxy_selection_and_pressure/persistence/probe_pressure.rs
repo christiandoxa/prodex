@@ -52,6 +52,40 @@ fn cold_start_candidate_is_allowed_without_cached_auth() {
 }
 
 #[test]
+fn cold_start_candidate_keeps_failed_probe_fallback_eligible() {
+    let temp_dir = TestDir::isolated();
+    let (listener, base_url) = unresponsive_loopback_backend_listener();
+    let shared = runtime_shared_for_cold_start_probe_selection(&temp_dir, base_url);
+    shared
+        .runtime
+        .lock()
+        .expect("runtime lock should succeed")
+        .profile_probe_cache
+        .insert(
+            "second".to_string(),
+            RuntimeProfileProbeCacheEntry {
+                checked_at: Local::now().timestamp(),
+                auth: AuthSummary {
+                    label: "chatgpt".to_string(),
+                    quota_compatible: true,
+                },
+                result: Err("probe failed".to_string()),
+            },
+        );
+
+    let excluded_candidate = next_runtime_response_candidate(&shared, &BTreeSet::from(["second".to_string()]))
+        .expect("excluded candidate lookup should succeed");
+    assert_eq!(excluded_candidate, None);
+
+    let candidate = next_runtime_response_candidate(&shared, &BTreeSet::new())
+        .expect("candidate lookup should succeed");
+    assert_eq!(candidate, Some("second".to_string()));
+
+    drop(listener);
+    wait_for_runtime_background_queues_idle();
+}
+
+#[test]
 fn sync_probe_pressure_mode_is_route_aware_for_background_queue_pressure() {
     assert!(!runtime_proxy_sync_probe_pressure_mode_for_route(
         RuntimeRouteKind::Responses,
