@@ -5574,3 +5574,11 @@ cursor for bounded live-log snapshots. Rust retains locked path lookup, sequence
 projection, dropped-count state, and entry materialization; required-Mojo ABI and
 runtime-log caller tests cover cursor boundaries and page clamping, while the ABI
 test rejects malformed ordering.
+
+## Shared Codex dynamic filename classification migration
+
+`shared_attachment_policy.mojo` now classifies profile-v2 config names and shared
+SQLite sidecar names through operation 8. Rust retains root enumeration, filename
+acquisition, set accumulation, and all filesystem and symlink effects. Compiled
+Mojo adapter cases and managed-home migration callers cover accepted and rejected
+names.

@@ -638,33 +638,19 @@ fn collect_dynamic_shared_codex_file_entries(
         let entry = entry.with_context(|| format!("failed to read entry in {}", root.display()))?;
         let file_name = entry.file_name();
         let file_name = file_name.to_string_lossy();
-        if is_shared_codex_sqlite_name(&file_name)
-            || is_shared_codex_profile_v2_config_name(&file_name)
-        {
+        let is_shared =
+            prodex_mojo_core::shared_attachment_policy::shared_codex_file_name_is_shared(
+                &file_name,
+            )
+            .map_err(|error| {
+                anyhow::anyhow!("Mojo shared Codex filename policy failed: {error:?}")
+            })?;
+        if is_shared {
             names.insert(file_name.into_owned());
         }
     }
 
     Ok(())
-}
-
-fn is_shared_codex_profile_v2_config_name(file_name: &str) -> bool {
-    let Some(profile_name) = file_name.strip_suffix(SHARED_CODEX_PROFILE_V2_CONFIG_SUFFIX) else {
-        return false;
-    };
-    !profile_name.is_empty()
-        && profile_name
-            .bytes()
-            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-'))
-}
-
-fn is_shared_codex_sqlite_name(file_name: &str) -> bool {
-    SHARED_CODEX_SQLITE_PREFIXES
-        .iter()
-        .any(|prefix| file_name.starts_with(prefix))
-        && SHARED_CODEX_SQLITE_SUFFIXES
-            .iter()
-            .any(|suffix| file_name.ends_with(suffix))
 }
 
 fn ensure_shared_codex_entry(

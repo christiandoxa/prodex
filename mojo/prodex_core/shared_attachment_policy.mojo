@@ -17,6 +17,7 @@ comptime SHARED_ATTACHMENT_PERSISTABLE_NAME: Int64 = 4
 comptime SHARED_ATTACHMENT_ROLLOUT_NAME: Int64 = 5
 comptime SHARED_ATTACHMENT_GOAL_OBJECTIVE_NAME: Int64 = 6
 comptime SHARED_ATTACHMENT_SQLITE_HEADER: Int64 = 7
+comptime SHARED_ATTACHMENT_DYNAMIC_FILE_NAME: Int64 = 8
 
 
 def shared_bytes_match(
@@ -66,6 +67,40 @@ def shared_suffix(view: ProdexRichStringView, literal: StringSlice) -> Bool:
 
 def shared_equal(view: ProdexRichStringView, literal: StringSlice) -> Bool:
     return Int64(view.len) == Int64(literal.byte_length()) and shared_prefix(view, literal)
+
+
+def shared_profile_v2_config_name(view: ProdexRichStringView) -> Bool:
+    var suffix = StringSlice(".config.toml")
+    var suffix_length = Int64(suffix.byte_length())
+    if Int64(view.len) <= suffix_length or not shared_suffix(view, suffix):
+        return False
+    var source = rich_view_ptr(view)
+    var profile_length = Int64(view.len) - suffix_length
+    for index in range(profile_length):
+        var byte = source[unsafe_offset=index]
+        if not (
+            (byte >= 48 and byte <= 57)
+            or (byte >= 65 and byte <= 90)
+            or (byte >= 97 and byte <= 122)
+            or byte == 95
+            or byte == 45
+        ):
+            return False
+    return True
+
+
+def shared_sqlite_file_name(view: ProdexRichStringView) -> Bool:
+    var has_prefix = (
+        shared_prefix(view, StringSlice("state_"))
+        or shared_prefix(view, StringSlice("logs_"))
+        or shared_prefix(view, StringSlice("goals_"))
+        or shared_prefix(view, StringSlice("memories_"))
+    )
+    return has_prefix and (
+        shared_suffix(view, StringSlice(".sqlite"))
+        or shared_suffix(view, StringSlice(".sqlite-shm"))
+        or shared_suffix(view, StringSlice(".sqlite-wal"))
+    )
 
 
 def shared_path_byte(byte: UInt8) -> Bool:
@@ -254,7 +289,7 @@ def prodex_shared_attachment_policy_v1(
         return SHARED_ATTACHMENT_ABI
     if (
         operation < SHARED_ATTACHMENT_IMAGE_TAG_RANGE
-        or operation > SHARED_ATTACHMENT_SQLITE_HEADER
+        or operation > SHARED_ATTACHMENT_DYNAMIC_FILE_NAME
         or input_length < 0
         or input_length > SHARED_ATTACHMENT_MAX_BYTES
         or cursor < 0
@@ -286,6 +321,12 @@ def prodex_shared_attachment_policy_v1(
     var view = ProdexRichStringView(input_address, UInt(input_length))
     if not rich_view_valid(view, SHARED_ATTACHMENT_MAX_BYTES):
         return SHARED_ATTACHMENT_INVALID
+
+    if operation == SHARED_ATTACHMENT_DYNAMIC_FILE_NAME:
+        output[0] = Int64(
+            shared_profile_v2_config_name(view) or shared_sqlite_file_name(view)
+        )
+        return SHARED_ATTACHMENT_OK
 
     if operation == SHARED_ATTACHMENT_IMAGE_TAG_RANGE:
         var result = shared_image_tag_range(view)

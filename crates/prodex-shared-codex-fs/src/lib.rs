@@ -65,9 +65,6 @@ const SHARED_CODEX_FILE_NAMES: &[&str] = &[
     ".tmp/app-server-remote-plugin-sync-v1",
 ];
 
-const SHARED_CODEX_SQLITE_PREFIXES: &[&str] = &["state_", "logs_", "goals_", "memories_"];
-const SHARED_CODEX_SQLITE_SUFFIXES: &[&str] = &[".sqlite", ".sqlite-shm", ".sqlite-wal"];
-const SHARED_CODEX_PROFILE_V2_CONFIG_SUFFIX: &str = ".config.toml";
 const CODEX_SESSION_MAINTENANCE_LOCK_FILE: &str = ".prodex-maintenance.lock";
 const CODEX_SESSION_CHILD_LOCK_TIMEOUT: Duration = Duration::from_secs(3);
 
