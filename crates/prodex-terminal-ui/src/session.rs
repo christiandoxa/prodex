@@ -4,6 +4,27 @@ use crate::terminal::current_cli_width;
 use crate::text::{pad_cell, text_width};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SessionReportViewportPlan {
+    pub total_lines: usize,
+    pub inline_height: u16,
+}
+
+pub fn session_report_viewport_plan(
+    report_count: usize,
+    terminal_height: u16,
+) -> SessionReportViewportPlan {
+    let plan = prodex_mojo_core::terminal_layout::session_report_viewport_plan(
+        report_count,
+        terminal_height,
+    )
+    .expect("compiled-in Mojo session report viewport policy failed");
+    SessionReportViewportPlan {
+        total_lines: plan.total_lines,
+        inline_height: plan.inline_height,
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SessionReportDisplay<'a> {
     pub id: &'a str,
     pub updated_at: Option<&'a str>,

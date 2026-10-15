@@ -7,6 +7,7 @@ comptime TERMINAL_LAYOUT_ABI: Int64 = 1
 comptime TERMINAL_LAYOUT_OK: Int64 = 0
 comptime TERMINAL_LAYOUT_INVALID: Int64 = 1
 comptime TERMINAL_LAYOUT_VERSION: Int64 = 4
+comptime TERMINAL_LAYOUT_UINT64_MAX: UInt64 = 18_446_744_073_709_551_615
 
 
 def terminal_clamp(value: UInt64, low: UInt64, high: UInt64) -> UInt64:
@@ -15,6 +16,18 @@ def terminal_clamp(value: UInt64, low: UInt64, high: UInt64) -> UInt64:
     if value > high:
         return high
     return value
+
+
+def terminal_saturating_mul_four(value: UInt64) -> UInt64:
+    if value > TERMINAL_LAYOUT_UINT64_MAX // UInt64(4):
+        return TERMINAL_LAYOUT_UINT64_MAX
+    return value * UInt64(4)
+
+
+def terminal_saturating_add_five(value: UInt64) -> UInt64:
+    if value > TERMINAL_LAYOUT_UINT64_MAX - UInt64(5):
+        return TERMINAL_LAYOUT_UINT64_MAX
+    return value + UInt64(5)
 
 
 @export("prodex_terminal_panel_label_width_v1")
@@ -97,6 +110,34 @@ def prodex_terminal_panel_inline_height_v1(
     Pointer[mut=True, UInt64, MutUntrackedOrigin](
         unsafe_from_address=Int(result_address)
     )[] = terminal_clamp(line_count, UInt64(4), UInt64(65535))
+    return TERMINAL_LAYOUT_OK
+
+
+# Plan the session-list scroll budget and inline viewport. Rust owns terminal
+# size acquisition and Ratatui; Mojo owns bounded report geometry.
+@export("prodex_terminal_session_report_viewport_v1")
+def prodex_terminal_session_report_viewport_v1(
+    abi: Int64,
+    report_count: UInt64,
+    terminal_height: UInt64,
+    result_address: UInt,
+    result_capacity: Int64,
+) abi("C") -> Int64:
+    if abi != TERMINAL_LAYOUT_ABI:
+        return TERMINAL_LAYOUT_VERSION
+    if result_address == 0 or result_capacity < 2:
+        return TERMINAL_LAYOUT_INVALID
+
+    var total_lines = terminal_saturating_mul_four(report_count)
+    var rows = terminal_saturating_add_five(total_lines)
+    rows = max(rows, UInt64(8))
+    var inline_height = min(rows, terminal_height)
+    inline_height = max(inline_height, UInt64(1))
+    var result = Pointer[mut=True, UInt64, MutUntrackedOrigin](
+        unsafe_from_address=Int(result_address)
+    )
+    result[unsafe_offset=0] = total_lines
+    result[unsafe_offset=1] = inline_height
     return TERMINAL_LAYOUT_OK
 
 

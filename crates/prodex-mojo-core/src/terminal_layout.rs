@@ -25,6 +25,13 @@ unsafe extern "C" {
         line_count: u64,
         result_address: u64,
     ) -> i64;
+    fn prodex_terminal_session_report_viewport_v1(
+        abi: i64,
+        report_count: u64,
+        terminal_height: u64,
+        result_address: u64,
+        result_capacity: i64,
+    ) -> i64;
     fn prodex_terminal_token_chunk_plan_v1(
         abi: i64,
         widths_address: u64,
@@ -294,6 +301,38 @@ pub fn panel_inline_height(lines: usize) -> Result<u16, MojoError> {
     u16::try_from(result).map_err(|_| MojoError::InvalidOutput)
 }
 
+/// Mojo plans the session-list scroll budget and bounded inline viewport.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SessionReportViewportPlan {
+    pub total_lines: usize,
+    pub inline_height: u16,
+}
+
+pub fn session_report_viewport_plan(
+    report_count: usize,
+    terminal_height: u16,
+) -> Result<SessionReportViewportPlan, MojoError> {
+    let mut result = [u64::MAX; 2];
+    check_status(unsafe {
+        prodex_terminal_session_report_viewport_v1(
+            ABI_VERSION,
+            from_usize(report_count)?,
+            u64::from(terminal_height),
+            result.as_mut_ptr() as usize as u64,
+            2,
+        )
+    })?;
+    let total_lines = usize::try_from(result[0]).map_err(|_| MojoError::InvalidOutput)?;
+    let inline_height = u16::try_from(result[1]).map_err(|_| MojoError::InvalidOutput)?;
+    if inline_height == 0 {
+        return Err(MojoError::InvalidOutput);
+    }
+    Ok(SessionReportViewportPlan {
+        total_lines,
+        inline_height,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -345,6 +384,29 @@ mod tests {
         ] {
             assert_eq!(panel_inline_height(lines).unwrap(), expected);
         }
+    }
+
+    #[test]
+    fn session_report_viewport_plan_preserves_scroll_and_height_bounds() {
+        for (reports, terminal_height, expected_lines, expected_height) in [
+            (0, 0, 0, 1),
+            (0, 24, 0, 8),
+            (1, 24, 4, 9),
+            (2, 24, 8, 13),
+            (100, 10, 400, 10),
+        ] {
+            let plan = session_report_viewport_plan(reports, terminal_height).unwrap();
+            assert_eq!(plan.total_lines, expected_lines);
+            assert_eq!(plan.inline_height, expected_height);
+        }
+    }
+
+    #[cfg(target_pointer_width = "64")]
+    #[test]
+    fn session_report_viewport_plan_saturates_at_host_maximum() {
+        let plan = session_report_viewport_plan(usize::MAX, u16::MAX).unwrap();
+        assert_eq!(plan.total_lines, usize::MAX);
+        assert_eq!(plan.inline_height, u16::MAX);
     }
 
     #[test]
@@ -518,5 +580,38 @@ mod tests {
             1
         );
         assert_eq!(result, 9876);
+    }
+
+    #[test]
+    fn session_report_viewport_abi_rejects_version_pointer_and_capacity() {
+        let mut result = [9876u64; 2];
+        let address = result.as_mut_ptr() as usize as u64;
+        assert_eq!(
+            unsafe { prodex_terminal_session_report_viewport_v1(99, 2, 24, address, 2) },
+            4
+        );
+        assert_eq!(
+            unsafe { prodex_terminal_session_report_viewport_v1(1, 2, 24, 0, 2) },
+            1
+        );
+        assert_eq!(
+            unsafe { prodex_terminal_session_report_viewport_v1(1, 2, 24, address, 1) },
+            1
+        );
+        assert_eq!(result, [9876, 9876]);
+
+        assert_eq!(
+            unsafe {
+                prodex_terminal_session_report_viewport_v1(
+                    1,
+                    u64::MAX,
+                    u64::from(u16::MAX),
+                    address,
+                    2,
+                )
+            },
+            0
+        );
+        assert_eq!(result, [u64::MAX, u64::from(u16::MAX)]);
     }
 }

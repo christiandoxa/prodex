@@ -107,11 +107,13 @@ fn session_mojo_adapter_rejects_invalid_scroll_bounds() {
 }
 
 #[test]
-fn session_report_tui_height_scales_with_reports() {
-    assert!(session_report_tui_height(&[] as &[SessionReport]) >= 1);
-    let reports = vec![test_session_report("a"), test_session_report("b")];
-    assert!(usize::from(session_report_tui_height(&reports)) >= 8);
-    assert_eq!(session_tui_item_count(&reports), 8);
+fn session_report_viewport_plan_scales_with_reports() {
+    let empty = terminal_ui::session_report_viewport_plan(0, 24);
+    assert!(empty.inline_height >= 1);
+    let reports = [test_session_report("a"), test_session_report("b")];
+    let plan = terminal_ui::session_report_viewport_plan(reports.len(), 24);
+    assert!(usize::from(plan.inline_height) >= 8);
+    assert_eq!(plan.total_lines, 8);
 }
 
 #[test]
