@@ -12,6 +12,7 @@ mod continuation_replay;
 mod continuation_status;
 mod noncompact_loop;
 mod profile_health;
+mod profile_jitter;
 mod profile_rotation;
 mod profile_route_circuit;
 mod prompt_cache_affinity;
@@ -75,6 +76,7 @@ pub use profile_health::{
     profile_score_should_retain, profile_selection_backoff_active, profile_soften_backoff_until,
     profile_transport_backoff_plan, profile_transport_backoff_until,
 };
+pub use profile_jitter::profile_selection_jitter;
 pub use profile_rotation::profile_selection_order_batch;
 pub use profile_route_circuit::{
     RuntimeProfileRouteCircuitAction, RuntimeProfileRouteCircuitActionInput,

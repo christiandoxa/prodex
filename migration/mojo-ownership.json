@@ -623,7 +623,8 @@
           "runtime_affinity_local_rejection_policy",
           "quota_selection_policy",
           "runtime_cold_start_candidate_eligibility",
-          "runtime_last_chance_candidate_eligibility"
+          "runtime_last_chance_candidate_eligibility",
+          "runtime_profile_selection_jitter"
         ]
       },
       "mojo/prodex_core/rich_fallback.mojo": {
@@ -2394,6 +2395,16 @@
         "role": "adapter",
         "operations": [
           "runtime_profile_active_backoff_max"
+        ]
+      },
+      {
+        "path": "crates/prodex-mojo-core/src/runtime/profile_jitter.rs",
+        "language": "rust",
+        "classification": "MIXED",
+        "production_reachable": true,
+        "role": "adapter",
+        "operations": [
+          "runtime_profile_selection_jitter"
         ]
       },
       {
@@ -10801,6 +10812,31 @@
       "duplicate_production_owner": false,
       "platform_fallback": false,
       "rust_adapter_scope": "Profile and route key lookup, BTreeMap iteration, borrowed timestamp collection and Mojo result validation"
+    },
+    {
+      "name": "runtime_profile_selection_jitter",
+      "domain": "runtime/profile-health-selection",
+      "introduced_in": "0.438.0",
+      "baseline_state": "Rust hashed the request sequence, profile name, and route label with DefaultHasher to produce a stable selection jitter.",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_runtime_profile_selection_jitter_v1",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/candidate_decision.mojo",
+      "consumer": "crates/prodex-runtime-proxy/src/health/health_decisions.rs",
+      "consumer_marker": "prodex_mojo_core::runtime::profile_selection_jitter(",
+      "production_consumers": [
+        "crates/prodex-runtime-proxy/src/health/health_decisions.rs",
+        "crates/prodex-app/src/runtime_proxy/health_score.rs"
+      ],
+      "production_reachability_test": "crates/prodex-mojo-core/tests/profile_selection_jitter.rs",
+      "caller_regression_test": "crates/prodex-runtime-proxy/tests/src/health.rs",
+      "rust_owner_before": "Rust performed the DefaultHasher input framing and SipHash selection-jitter calculation in the runtime health decision path.",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "Compiled Mojo ABI vectors preserve the existing DefaultHasher outputs, while the runtime-proxy caller keeps deterministic sequence, profile, and route coverage.",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "Route-tag conversion, bounded borrowed profile-view marshaling, and checked UInt64 result mapping"
     },
     {
       "name": "runtime_doctor_degraded_route_line_format",

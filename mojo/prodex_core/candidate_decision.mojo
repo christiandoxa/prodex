@@ -246,6 +246,289 @@ def runtime_prompt_cache_hash_byte(hash: UInt64, byte: UInt64) -> UInt64:
     return (hash ^ byte) * 1099511628211
 
 
+def runtime_profile_jitter_round(
+    v0: UInt64, v1: UInt64, v2: UInt64, v3: UInt64
+) -> Tuple[UInt64, UInt64, UInt64, UInt64]:
+    var left = v0 + v1
+    var right = (v1 << 13) | (v1 >> 51)
+    right ^= left
+    left = (left << 32) | (left >> 32)
+    var pair = v2 + v3
+    var tail = (v3 << 16) | (v3 >> 48)
+    tail ^= pair
+    left = left + tail
+    tail = (tail << 21) | (tail >> 43)
+    tail ^= left
+    pair = pair + right
+    right = (right << 17) | (right >> 47)
+    right ^= pair
+    pair = (pair << 32) | (pair >> 32)
+    return (left, right, pair, tail)
+
+
+def runtime_profile_jitter_append_byte(
+    v0: UInt64,
+    v1: UInt64,
+    v2: UInt64,
+    v3: UInt64,
+    tail: UInt64,
+    tail_length: Int64,
+    length: UInt64,
+    byte: UInt8,
+) -> Tuple[UInt64, UInt64, UInt64, UInt64, UInt64, Int64, UInt64]:
+    var next_tail = tail | (UInt64(byte) << UInt64(tail_length * 8))
+    var next_tail_length = tail_length + 1
+    var next_v0 = v0
+    var next_v1 = v1
+    var next_v2 = v2
+    var next_v3 = v3
+    if next_tail_length == 8:
+        next_v3 ^= next_tail
+        var rounded = runtime_profile_jitter_round(next_v0, next_v1, next_v2, next_v3)
+        next_v0 = rounded[0]
+        next_v1 = rounded[1]
+        next_v2 = rounded[2]
+        next_v3 = rounded[3]
+        next_v0 ^= next_tail
+        next_tail = 0
+        next_tail_length = 0
+    return (
+        next_v0,
+        next_v1,
+        next_v2,
+        next_v3,
+        next_tail,
+        next_tail_length,
+        length + 1,
+    )
+
+
+def runtime_profile_jitter_append_view(
+    v0: UInt64,
+    v1: UInt64,
+    v2: UInt64,
+    v3: UInt64,
+    tail: UInt64,
+    tail_length: Int64,
+    length: UInt64,
+    view: ProdexRichStringView,
+) -> Tuple[UInt64, UInt64, UInt64, UInt64, UInt64, Int64, UInt64]:
+    var next_v0 = v0
+    var next_v1 = v1
+    var next_v2 = v2
+    var next_v3 = v3
+    var next_tail = tail
+    var next_tail_length = tail_length
+    var next_length = length
+    var source = rich_view_ptr(view)
+    for index in range(Int64(view.len)):
+        var state = runtime_profile_jitter_append_byte(
+            next_v0,
+            next_v1,
+            next_v2,
+            next_v3,
+            next_tail,
+            next_tail_length,
+            next_length,
+            source[unsafe_offset=index],
+        )
+        next_v0 = state[0]
+        next_v1 = state[1]
+        next_v2 = state[2]
+        next_v3 = state[3]
+        next_tail = state[4]
+        next_tail_length = state[5]
+        next_length = state[6]
+    return (
+        next_v0,
+        next_v1,
+        next_v2,
+        next_v3,
+        next_tail,
+        next_tail_length,
+        next_length,
+    )
+
+
+def runtime_profile_jitter_append_static(
+    v0: UInt64,
+    v1: UInt64,
+    v2: UInt64,
+    v3: UInt64,
+    tail: UInt64,
+    tail_length: Int64,
+    length: UInt64,
+    literal: StringSlice,
+) -> Tuple[UInt64, UInt64, UInt64, UInt64, UInt64, Int64, UInt64]:
+    var next_v0 = v0
+    var next_v1 = v1
+    var next_v2 = v2
+    var next_v3 = v3
+    var next_tail = tail
+    var next_tail_length = tail_length
+    var next_length = length
+    var source = literal.unsafe_ptr()
+    for index in range(Int64(literal.byte_length())):
+        var state = runtime_profile_jitter_append_byte(
+            next_v0,
+            next_v1,
+            next_v2,
+            next_v3,
+            next_tail,
+            next_tail_length,
+            next_length,
+            source[unsafe_offset=index],
+        )
+        next_v0 = state[0]
+        next_v1 = state[1]
+        next_v2 = state[2]
+        next_v3 = state[3]
+        next_tail = state[4]
+        next_tail_length = state[5]
+        next_length = state[6]
+    return (
+        next_v0,
+        next_v1,
+        next_v2,
+        next_v3,
+        next_tail,
+        next_tail_length,
+        next_length,
+    )
+
+
+@export("prodex_runtime_profile_selection_jitter_v1")
+def prodex_runtime_profile_selection_jitter_v1(
+    abi_version: Int64,
+    request_sequence: UInt64,
+    profile_address: UInt,
+    profile_length: Int64,
+    route_kind: Int64,
+    output_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != 1:
+        return 4
+    if (
+        profile_length < 0
+        or profile_length > 4_096
+        or route_kind < 0
+        or route_kind > 3
+        or output_address == 0
+        or profile_length > 0 and profile_address == 0
+    ):
+        return 1
+    var profile = ProdexRichStringView(profile_address, UInt(profile_length))
+    if not rich_view_valid(profile, 4_096):
+        return 2
+
+    var v0: UInt64 = 0x736F6D6570736575
+    var v1: UInt64 = 0x646F72616E646F6D
+    var v2: UInt64 = 0x6C7967656E657261
+    var v3: UInt64 = 0x7465646279746573
+    var tail: UInt64 = 0
+    var tail_length: Int64 = 0
+    var length: UInt64 = 0
+    for index in range(Int64(8)):
+        var state = runtime_profile_jitter_append_byte(
+            v0,
+            v1,
+            v2,
+            v3,
+            tail,
+            tail_length,
+            length,
+            UInt8((request_sequence >> UInt64(index * 8)) & UInt64(0xFF)),
+        )
+        v0 = state[0]
+        v1 = state[1]
+        v2 = state[2]
+        v3 = state[3]
+        tail = state[4]
+        tail_length = state[5]
+        length = state[6]
+    var state = runtime_profile_jitter_append_view(
+        v0, v1, v2, v3, tail, tail_length, length, profile
+    )
+    v0 = state[0]
+    v1 = state[1]
+    v2 = state[2]
+    v3 = state[3]
+    tail = state[4]
+    tail_length = state[5]
+    length = state[6]
+    state = runtime_profile_jitter_append_byte(
+        v0, v1, v2, v3, tail, tail_length, length, UInt8(0xFF)
+    )
+    v0 = state[0]
+    v1 = state[1]
+    v2 = state[2]
+    v3 = state[3]
+    tail = state[4]
+    tail_length = state[5]
+    length = state[6]
+    if route_kind == 0:
+        state = runtime_profile_jitter_append_static(
+            v0, v1, v2, v3, tail, tail_length, length, StringSlice("responses")
+        )
+    elif route_kind == 1:
+        state = runtime_profile_jitter_append_static(
+            v0, v1, v2, v3, tail, tail_length, length, StringSlice("compact")
+        )
+    elif route_kind == 2:
+        state = runtime_profile_jitter_append_static(
+            v0, v1, v2, v3, tail, tail_length, length, StringSlice("websocket")
+        )
+    else:
+        state = runtime_profile_jitter_append_static(
+            v0, v1, v2, v3, tail, tail_length, length, StringSlice("standard")
+        )
+    v0 = state[0]
+    v1 = state[1]
+    v2 = state[2]
+    v3 = state[3]
+    tail = state[4]
+    tail_length = state[5]
+    length = state[6]
+    state = runtime_profile_jitter_append_byte(
+        v0, v1, v2, v3, tail, tail_length, length, UInt8(0xFF)
+    )
+    v0 = state[0]
+    v1 = state[1]
+    v2 = state[2]
+    v3 = state[3]
+    tail = state[4]
+    length = state[6]
+    var final_block = tail | ((length & UInt64(0xFF)) << 56)
+    v3 ^= final_block
+    var rounded = runtime_profile_jitter_round(v0, v1, v2, v3)
+    v0 = rounded[0]
+    v1 = rounded[1]
+    v2 = rounded[2]
+    v3 = rounded[3]
+    v0 ^= final_block
+    v2 ^= UInt64(0xFF)
+    rounded = runtime_profile_jitter_round(v0, v1, v2, v3)
+    v0 = rounded[0]
+    v1 = rounded[1]
+    v2 = rounded[2]
+    v3 = rounded[3]
+    rounded = runtime_profile_jitter_round(v0, v1, v2, v3)
+    v0 = rounded[0]
+    v1 = rounded[1]
+    v2 = rounded[2]
+    v3 = rounded[3]
+    rounded = runtime_profile_jitter_round(v0, v1, v2, v3)
+    v0 = rounded[0]
+    v1 = rounded[1]
+    v2 = rounded[2]
+    v3 = rounded[3]
+    var output = Pointer[mut=True, UInt64, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    output[] = v0 ^ v1 ^ v2 ^ v3
+    return 0
+
+
 @export("prodex_runtime_prompt_cache_affinity_batch_v1")
 def prodex_runtime_prompt_cache_affinity_batch_v1(
     profile_views_address: UInt,
