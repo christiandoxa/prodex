@@ -3674,7 +3674,7 @@
       "name": "super_override_argument_classification",
       "domain": "cli/super-arguments",
       "introduced_in": "0.431.7",
-      "expanded_in": "0.435.1",
+      "expanded_in": "0.438.0",
       "baseline_state": "candidate",
       "final_state": "authoritative",
       "mojo_entry": "prodex_mojo_launch_args_v1",
@@ -3682,7 +3682,11 @@
       "mojo_operation_ids": {
         "super_override_scan": 10,
         "super_expose_alias_scan": 11,
-        "cli_default_run": 13
+        "cli_default_run": 13,
+        "super_compat_alias": 16,
+        "super_literal_boundary": 17,
+        "super_positioned_alias": 18,
+        "codex_command_server": 19
       },
       "mojo_source": "mojo/prodex_core/launch_args.mojo",
       "consumer": "crates/prodex-cli/src/runtime_args/super_tail_extract.rs",
@@ -3692,13 +3696,13 @@
         "crates/prodex-cli/src/lib.rs"
       ],
       "production_reachability_test": "crates/prodex-mojo-core/tests/launch_args.rs",
-      "rust_owner_before": "Prodex option classification, inline values, paired value boundaries, Super expose alias scanning, and default-run command discovery",
+      "rust_owner_before": "Prodex option classification, inline values, paired value boundaries, Super expose alias scanning, default-run command discovery, Super provider shorthand rewriting, literal-boundary detection, positioned provider aliases, and command-server classification",
       "rust_state_after": "adapter-only",
-      "rust_test_oracle": "deleted after parity; independent caller-boundary values cover override kinds and expose alias boundaries",
+      "rust_test_oracle": "deleted after parity; direct ABI matrices and independent CLI caller cases cover override kinds, alias boundaries, provider shorthand, literal tails, and command-server classification",
       "production_fallback": false,
       "duplicate_production_owner": false,
       "platform_fallback": false,
-      "rust_adapter_scope": "OsString preservation, typed value parsing, SuperArgs mutation, and expose alias reassembly"
+      "rust_adapter_scope": "OsString preservation, typed value parsing, SuperArgs mutation, and expose/provider-alias reassembly"
     },
     {
       "name": "codex_runtime_feature_configuration",

@@ -4768,6 +4768,15 @@ Validation passed:
 - `node scripts/ci/mojo-production-share.mjs --check` — 27.83% Mojo; the 7% release floor passes and the 75% project target remains unmet.
 - `npm run test:changed` stopped at the size guard before test selection: it reported 7 violations and 34 near-limit Rust files against the budget of 32. No tests ran under that command.
 
+## Super CLI normalization expansion
+
+The versioned launch-arguments Mojo ABI now owns Super provider shorthand
+rewriting, literal `--` boundary detection, positioned provider aliases, and
+first-argument command-server classification. Rust keeps Clap, opaque
+`OsString` values, and argument reassembly. Direct ABI cases and production
+`prodex-cli` caller tests preserve provider aliases, literal tails, opaque
+arguments, and command-server passthrough behavior.
+
 ## Runtime-doctor compact-exit aggregation wave
 
 `runtime_doctor_compact_exit_counts` in `runtime_doctor_marker_summary.mojo`

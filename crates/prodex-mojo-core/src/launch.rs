@@ -10,9 +10,10 @@ pub use runtime_feature_plan::{
 #[path = "launch/menu_policy.rs"]
 mod menu_policy;
 pub use menu_policy::{
-    LoginArgumentMethod, LoginArgumentPlan, default_cli_invocation_to_run, login_argument_plan,
-    login_menu_key_plan, login_menu_layout, login_menu_window_offset, super_choice_key_plan,
-    super_choice_visible_range,
+    LoginArgumentMethod, LoginArgumentPlan, SuperProviderAlias, codex_command_server_subcommand,
+    default_cli_invocation_to_run, login_argument_plan, login_menu_key_plan, login_menu_layout,
+    login_menu_window_offset, positioned_super_provider_alias, super_choice_key_plan,
+    super_choice_visible_range, super_compat_provider_alias, super_literal_boundary,
 };
 
 #[path = "launch/recovery.rs"]
@@ -38,6 +39,10 @@ const LOGIN_POLICY: i64 = 12;
 const CLI_DEFAULT_RUN: i64 = 13;
 const SUPER_VALIDATE: i64 = 14;
 const SUPER_VALIDATE_SUB_AGENT: i64 = 15;
+pub(super) const SUPER_COMPAT_ALIAS: i64 = 16;
+pub(super) const SUPER_LITERAL_BOUNDARY: i64 = 17;
+pub(super) const SUPER_POSITIONED_ALIAS: i64 = 18;
+pub(super) const CODEX_COMMAND_SERVER: i64 = 19;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(i64)]

@@ -50,6 +50,7 @@ const CLI_DEFAULT_RUN_ADAPTER_FILE = "crates/prodex-mojo-core/src/launch/menu_po
 const CLI_DEFAULT_RUN_MOJO_FILE = "mojo/prodex_core/launch_args.mojo";
 const CLI_DEFAULT_RUN_ABI_TEST_FILE = "crates/prodex-mojo-core/tests/launch_args.rs";
 const CLI_DEFAULT_RUN_CALLER_TEST_FILE = "crates/prodex-cli/tests/src/shortcuts.rs";
+const CLI_NORMALIZATION_CALLER_TEST_FILE = "crates/prodex-cli/tests/src/super_expose_alias.rs";
 const SMART_CONTEXT_CAPSULE_ORDER_FILE = "crates/prodex-runtime-proxy/src/smart_context/normalization/token_budget.rs";
 const SMART_CONTEXT_CAPSULE_ARTIFACTS_FILE = "crates/prodex-runtime-proxy/src/smart_context/normalization/artifacts.rs";
 const SMART_CONTEXT_CAPSULE_ORDER_ADAPTER_FILE = "crates/prodex-mojo-core/src/rich/smart_context_capsule_order.rs";
@@ -276,6 +277,7 @@ const PROMOTED_FILES = [
   CLI_DEFAULT_RUN_MOJO_FILE,
   CLI_DEFAULT_RUN_ABI_TEST_FILE,
   CLI_DEFAULT_RUN_CALLER_TEST_FILE,
+  CLI_NORMALIZATION_CALLER_TEST_FILE,
   SESSION_USAGE_LIMIT_CONSUMER_FILE,
   SESSION_USAGE_LIMIT_ADAPTER_FILE,
   SESSION_USAGE_LIMIT_FACADE_FILE,
@@ -5202,6 +5204,89 @@ export function findViolations(files) {
     }
     return [];
   });
+  const cliNormalizationViolations = files.flatMap(([filePath, contents]) => {
+    if (filePath === CLI_DEFAULT_RUN_CONSUMER_FILE) {
+      const production = contents.split("#[cfg(test)]", 1)[0];
+      const required = [
+        "prodex_mojo_core::launch::super_compat_provider_alias(",
+        "prodex_mojo_core::launch::super_literal_boundary(",
+        "prodex_mojo_core::launch::positioned_super_provider_alias(",
+        "prodex_mojo_core::launch::codex_command_server_subcommand(",
+      ];
+      const violations = required
+        .filter((call) => !production.includes(call))
+        .map((call) => `${filePath}: CLI Super normalization must retain Mojo call ${call}`);
+      for (const retired of [
+        /\bconst\s+CODEX_COMMAND_SERVER_SUBCOMMANDS\b/u,
+        /"gemini"\s*\|\s*"deepseek"/u,
+        /\barg\s*==\s*"--"/u,
+        /\.find_map\(\|\(index,\s*arg\)\|/u,
+      ]) {
+        if (retired.test(production)) {
+          violations.push(`${filePath}: contains restored Rust CLI Super normalization semantics`);
+          break;
+        }
+      }
+      return violations;
+    }
+    if (filePath === CLI_DEFAULT_RUN_ABI_FILE) {
+      const required = [
+        "pub(super) const SUPER_COMPAT_ALIAS: i64 = 16;",
+        "pub(super) const SUPER_LITERAL_BOUNDARY: i64 = 17;",
+        "pub(super) const SUPER_POSITIONED_ALIAS: i64 = 18;",
+        "pub(super) const CODEX_COMMAND_SERVER: i64 = 19;",
+        "super_compat_provider_alias",
+        "super_literal_boundary",
+        "positioned_super_provider_alias",
+        "codex_command_server_subcommand",
+      ];
+      return required
+        .filter((marker) => !contents.includes(marker))
+        .map((marker) => `${filePath}: CLI Super normalization ABI must retain ${marker}`);
+    }
+    if (filePath === CLI_DEFAULT_RUN_ADAPTER_FILE) {
+      const required = [
+        "SUPER_COMPAT_ALIAS",
+        "SUPER_LITERAL_BOUNDARY",
+        "SUPER_POSITIONED_ALIAS",
+        "CODEX_COMMAND_SERVER",
+        "fn launch_scalar_policy(",
+        "fn decode_super_provider_alias(",
+        "prodex_mojo_launch_args_v1(",
+      ];
+      return required
+        .filter((marker) => !contents.includes(marker))
+        .map((marker) => `${filePath}: CLI Super normalization adapter must retain ${marker}`);
+    }
+    if (filePath === CLI_DEFAULT_RUN_MOJO_FILE) {
+      const required = [
+        "LAUNCH_SUPER_COMPAT_ALIAS: Int64 = 16",
+        "LAUNCH_SUPER_LITERAL_BOUNDARY: Int64 = 17",
+        "LAUNCH_SUPER_POSITIONED_ALIAS: Int64 = 18",
+        "LAUNCH_CODEX_COMMAND_SERVER: Int64 = 19",
+        "def launch_super_compat_alias_policy(",
+        "def launch_super_literal_boundary_policy(",
+        "def launch_super_positioned_alias_policy(",
+        "def launch_codex_command_server_policy(",
+        "operation == LAUNCH_SUPER_COMPAT_ALIAS",
+        "operation == LAUNCH_SUPER_LITERAL_BOUNDARY",
+        "operation == LAUNCH_SUPER_POSITIONED_ALIAS",
+        "operation == LAUNCH_CODEX_COMMAND_SERVER",
+      ];
+      return required
+        .filter((marker) => !contents.includes(marker))
+        .map((marker) => `${filePath}: CLI Super normalization must remain in the launch-arguments Mojo kernel (${marker})`);
+    }
+    if (filePath === CLI_DEFAULT_RUN_ABI_TEST_FILE &&
+        !contents.includes("super_cli_normalization_policy_uses_real_mojo_classification")) {
+      return [`${filePath}: direct real-Mojo CLI Super normalization coverage is required`];
+    }
+    if (filePath === CLI_NORMALIZATION_CALLER_TEST_FILE &&
+        !contents.includes("super_cli_normalization_preserves_provider_aliases_and_literal_tail")) {
+      return [`${filePath}: CLI Super normalization must retain production caller-boundary coverage`];
+    }
+    return [];
+  });
   const responseMetadataViolations = files.flatMap(([filePath, contents]) => {
     if (filePath === RESPONSE_METADATA_FILE) {
       const body = contents.match(/\bfn\s+runtime_response_metadata_from_value\s*\([^]*?^\}/mu)?.[0];
@@ -7034,7 +7119,7 @@ export function findViolations(files) {
     ...deepseekReasoningViolations,
     ...nativeFirstErrorClassViolations, ...providerBridgeMetadataViolations, ...websocketProxyPolicyViolations, ...transportFailurePolicyViolations, ...providerPrecommitPolicyViolations, ...providerErrorMemberViolations,
     ...deepseekResponseToolCallViolations, ...chatToolViolations,
-    ...previousResponseOutcomeLabelViolations, ...affinityChainLogRenderViolations, ...previousResponseLogRenderViolations, ...structuredLogPolicyViolations, ...candidateSkipReasonViolations, ...runtimeProxyObservabilityLabelViolations, ...websocketExecutorLabelViolations, ...infoRenderViolations, ...doctorMarkerViolations, ...doctorFailureClassViolations, ...doctorMarkerSummaryCountsViolations, ...doctorCompactExitCountsViolations, ...doctorTimelineDetailViolations, ...doctorLastMarkerLineViolations, ...runtimeDoctorPlanInputViolations, ...cliDefaultRunViolations, ...responseMetadataViolations, ...doctorMarkerAbiViolations, ...statusSummaryViolations,
+    ...previousResponseOutcomeLabelViolations, ...affinityChainLogRenderViolations, ...previousResponseLogRenderViolations, ...structuredLogPolicyViolations, ...candidateSkipReasonViolations, ...runtimeProxyObservabilityLabelViolations, ...websocketExecutorLabelViolations, ...infoRenderViolations, ...doctorMarkerViolations, ...doctorFailureClassViolations, ...doctorMarkerSummaryCountsViolations, ...doctorCompactExitCountsViolations, ...doctorTimelineDetailViolations, ...doctorLastMarkerLineViolations, ...runtimeDoctorPlanInputViolations, ...cliDefaultRunViolations, ...cliNormalizationViolations, ...responseMetadataViolations, ...doctorMarkerAbiViolations, ...statusSummaryViolations,
     ...geminiBufferedResponseViolations, ...fingerprintDeltaViolations, ...profileExportPolicyViolations, ...sessionReportViolations, ...runtimeLineageViolations, ...smartContextMarkerViolations, ...smartContextSymbolIndexViolations, ...sessionUsageLimitViolations, ...smartContextArtifactRefViolations, ...smartContextDuplicateTextViolations, ...runtimeRepoMapViolations,
     ...modelSpecViolations, ...mainModelCatalogViolations, ...catalogModelViolations,
     ...deepseekShapingViolations,
@@ -8315,7 +8400,11 @@ function selfTest() {
   assert.match(findViolations([[SUPER_EXPOSE_FILE, "fn rewrite_super_expose_alias() {}"]]).join("\n"),
     /Super expose alias scan must use Mojo/u);
   assert.deepEqual(findViolations([[SUPER_EXPOSE_FILE,
-    'fn reassemble_super_expose_alias() { prodex_mojo_core::launch::find_super_expose_alias_index(); }']]), []);
+    'fn reassemble_super_expose_alias() { prodex_mojo_core::launch::find_super_expose_alias_index(); }\n' +
+    'prodex_mojo_core::launch::super_compat_provider_alias(\n' +
+    'prodex_mojo_core::launch::super_literal_boundary(\n' +
+    'prodex_mojo_core::launch::positioned_super_provider_alias(\n' +
+    'prodex_mojo_core::launch::codex_command_server_subcommand(']]), []);
   assert.match(findViolations([[GEMINI_SCHEMA_FILE, "fn sanitized_required() {}"]]).join("\n"),
     /replaced Rust semantic implementation/u);
   assert.match(findViolations([[GEMINI_TOOLS_FILE, "fn gemini_tool_config_from_request_oracle() {}"]]).join("\n"),
@@ -8488,6 +8577,46 @@ function selfTest() {
   /direct real-Mojo CLI default-run coverage is required/u);
   assert.match(findViolations([[CLI_DEFAULT_RUN_CALLER_TEST_FILE, "fn unrelated_test() {}"]]).join("\n"),
   /CLI default-run behavior must retain caller-boundary coverage/u);
+  const cliNormalizationConsumer = [
+    "prodex_mojo_core::launch::find_super_expose_alias_index(",
+    "pub fn should_default_cli_invocation_to_run(args: &[OsString]) -> bool {",
+    "prodex_mojo_core::launch::default_cli_invocation_to_run(&[])",
+    "}",
+    "prodex_mojo_core::launch::super_compat_provider_alias(",
+    "prodex_mojo_core::launch::super_literal_boundary(",
+    "prodex_mojo_core::launch::positioned_super_provider_alias(",
+    "prodex_mojo_core::launch::codex_command_server_subcommand(",
+  ].join("\n");
+  assert.deepEqual(findViolations([[CLI_DEFAULT_RUN_CONSUMER_FILE, cliNormalizationConsumer]]), []);
+  assert.match(findViolations([[CLI_DEFAULT_RUN_CONSUMER_FILE,
+    `${cliNormalizationConsumer}\nconst CODEX_COMMAND_SERVER_SUBCOMMANDS = [];`,
+  ]]).join("\n"), /restored Rust CLI Super normalization semantics/u);
+  const cliNormalizationMojo = [
+    "LAUNCH_CLI_DEFAULT_RUN: Int64 = 13",
+    "def launch_cli_default_run_policy(",
+    "launch_cli_default_run_policy(arguments, count, metadata)",
+    "LAUNCH_SUPER_COMPAT_ALIAS: Int64 = 16",
+    "LAUNCH_SUPER_LITERAL_BOUNDARY: Int64 = 17",
+    "LAUNCH_SUPER_POSITIONED_ALIAS: Int64 = 18",
+    "LAUNCH_CODEX_COMMAND_SERVER: Int64 = 19",
+    "def launch_super_compat_alias_policy(",
+    "def launch_super_literal_boundary_policy(",
+    "def launch_super_positioned_alias_policy(",
+    "def launch_codex_command_server_policy(",
+    "operation == LAUNCH_SUPER_COMPAT_ALIAS",
+    "operation == LAUNCH_SUPER_LITERAL_BOUNDARY",
+    "operation == LAUNCH_SUPER_POSITIONED_ALIAS",
+    "operation == LAUNCH_CODEX_COMMAND_SERVER",
+  ].join("\n");
+  assert.deepEqual(findViolations([[CLI_DEFAULT_RUN_MOJO_FILE, cliNormalizationMojo]]), []);
+  assert.match(findViolations([[CLI_DEFAULT_RUN_MOJO_FILE,
+    cliNormalizationMojo.replace("def launch_super_literal_boundary_policy(", ""),
+  ]]).join("\n"), /must remain in the launch-arguments Mojo kernel/u);
+  assert.deepEqual(findViolations([[CLI_NORMALIZATION_CALLER_TEST_FILE,
+    "fn super_cli_normalization_preserves_provider_aliases_and_literal_tail() {}",
+  ]]), []);
+  assert.match(findViolations([[CLI_NORMALIZATION_CALLER_TEST_FILE, "fn unrelated_test() {}"]]).join("\n"),
+    /CLI Super normalization must retain production caller-boundary coverage/u);
   assert.deepEqual(findViolations([[RESPONSE_METADATA_FILE,
     "fn runtime_response_metadata_from_value(value: &Value) -> Plan {\n  prodex_mojo_core::json::runtime_response_metadata_json(&raw)\n}"]]), []);
   assert.match(findViolations([[RESPONSE_METADATA_FILE,

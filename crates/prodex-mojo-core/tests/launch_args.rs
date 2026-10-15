@@ -2,9 +2,11 @@
 #![allow(unsafe_code)]
 
 use prodex_mojo_core::launch::{
-    LaunchArgument, LaunchArgumentOperation, SuperValidationInput, SuperValidationScope,
-    SuperValidationViolation, default_cli_invocation_to_run, find_super_expose_alias_index,
-    inspect_launch_arguments, plan_launch_arguments, plan_super_validation,
+    LaunchArgument, LaunchArgumentOperation, SuperProviderAlias, SuperValidationInput,
+    SuperValidationScope, SuperValidationViolation, codex_command_server_subcommand,
+    default_cli_invocation_to_run, find_super_expose_alias_index, inspect_launch_arguments,
+    plan_launch_arguments, plan_super_validation, positioned_super_provider_alias,
+    super_compat_provider_alias, super_literal_boundary,
 };
 
 #[test]
@@ -56,6 +58,63 @@ fn default_cli_invocation_policy_uses_real_mojo_classification() {
     assert!(default_cli_invocation_to_run(&[Some("prodex"), Some("remote-control")]).unwrap());
     assert!(default_cli_invocation_to_run(&[Some("prodex"), Some("mcp-server")]).unwrap());
     assert!(!default_cli_invocation_to_run(&[None, Some("--help")]).unwrap());
+}
+
+#[test]
+fn super_cli_normalization_policy_uses_real_mojo_classification() {
+    const { assert!(prodex_mojo_core::MOJO_ACTIVE) }
+
+    assert_eq!(
+        super_compat_provider_alias(&[Some("prodex"), Some("s"), Some("gemini")]).unwrap(),
+        Some(SuperProviderAlias::Gemini)
+    );
+    assert_eq!(
+        super_compat_provider_alias(&[Some("prodex"), Some("super"), Some("deepseek")]).unwrap(),
+        Some(SuperProviderAlias::DeepSeek)
+    );
+    assert_eq!(
+        super_compat_provider_alias(&[Some("prodex"), Some("super"), Some("other")]).unwrap(),
+        None
+    );
+    assert_eq!(
+        super_compat_provider_alias(&[Some("prodex"), Some("super"), None]).unwrap(),
+        None
+    );
+
+    assert_eq!(
+        super_literal_boundary(&[
+            Some("prodex"),
+            Some("super"),
+            Some("--profile"),
+            Some("main"),
+            Some("--"),
+            Some("--provider=gemini"),
+        ])
+        .unwrap(),
+        Some(4)
+    );
+    assert_eq!(
+        super_literal_boundary(&[Some("prodex"), Some("s"), Some("gemini")]).unwrap(),
+        None
+    );
+    assert_eq!(
+        positioned_super_provider_alias(Some("gemini"), false, false).unwrap(),
+        Some(SuperProviderAlias::Gemini)
+    );
+    assert_eq!(
+        positioned_super_provider_alias(Some("deepseek"), true, false).unwrap(),
+        None
+    );
+    assert_eq!(
+        positioned_super_provider_alias(None, false, false).unwrap(),
+        None
+    );
+
+    for command in ["mcp-server", "app-server", "exec-server"] {
+        assert!(codex_command_server_subcommand(Some(command)).unwrap());
+    }
+    assert!(!codex_command_server_subcommand(Some("exec")).unwrap());
+    assert!(!codex_command_server_subcommand(None).unwrap());
 }
 
 #[test]
@@ -296,7 +355,8 @@ fn super_validation_abi_accepts_empty_and_max_flags_and_rejects_bad_limits() {
     metadata.fill(0x5a);
     for (version, operation, flags, count, expected) in [
         (1, 14, 2_097_152, 0, 1),
-        (1, 16, 0, 0, 1),
+        (1, 18, 4, 0, 1),
+        (1, 20, 0, 0, 1),
         (1, 14, 0, i64::MAX, 1),
         (2, 14, 0, 0, 4),
     ] {

@@ -1,8 +1,15 @@
 use super::{
-    ABI_VERSION, CLI_DEFAULT_RUN, LOGIN_POLICY, METADATA_WORDS, MojoError, boolean,
+    ABI_VERSION, CLI_DEFAULT_RUN, CODEX_COMMAND_SERVER, LOGIN_POLICY, METADATA_WORDS, MojoError,
+    SUPER_COMPAT_ALIAS, SUPER_LITERAL_BOUNDARY, SUPER_POSITIONED_ALIAS, boolean,
     prodex_login_menu_policy_v1, prodex_mojo_launch_args_v1, prodex_super_choice_policy_v1, status,
     views,
 };
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SuperProviderAlias {
+    Gemini,
+    DeepSeek,
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LoginArgumentMethod {
@@ -197,6 +204,77 @@ pub fn default_cli_invocation_to_run(arguments: &[Option<&str>]) -> Result<bool,
         )
     })?;
     boolean(meta[0])
+}
+
+fn launch_scalar_policy(
+    operation: i64,
+    full_access: i64,
+    arguments: &[Option<&str>],
+) -> Result<i64, MojoError> {
+    let input = views(arguments)?;
+    let mut meta = [0_i64; METADATA_WORDS];
+    status(unsafe {
+        prodex_mojo_launch_args_v1(
+            ABI_VERSION,
+            operation,
+            full_access,
+            input.as_ptr() as u64,
+            input.len() as i64,
+            0,
+            0,
+            0,
+            meta.as_mut_ptr() as u64,
+        )
+    })?;
+    Ok(meta[0])
+}
+
+fn decode_super_provider_alias(value: i64) -> Result<Option<SuperProviderAlias>, MojoError> {
+    match value {
+        0 => Ok(None),
+        1 => Ok(Some(SuperProviderAlias::Gemini)),
+        2 => Ok(Some(SuperProviderAlias::DeepSeek)),
+        _ => Err(MojoError::InvalidOutput),
+    }
+}
+
+/// Classifies the legacy `prodex s|super gemini|deepseek` shorthand.
+pub fn super_compat_provider_alias(
+    arguments: &[Option<&str>],
+) -> Result<Option<SuperProviderAlias>, MojoError> {
+    decode_super_provider_alias(launch_scalar_policy(SUPER_COMPAT_ALIAS, 0, arguments)?)
+}
+
+/// Finds the literal `--` boundary for a top-level Super invocation.
+pub fn super_literal_boundary(arguments: &[Option<&str>]) -> Result<Option<usize>, MojoError> {
+    let boundary = launch_scalar_policy(SUPER_LITERAL_BOUNDARY, 0, arguments)?;
+    if boundary < 0 {
+        return Ok(None);
+    }
+    let boundary = usize::try_from(boundary).map_err(|_| MojoError::InvalidOutput)?;
+    if boundary >= arguments.len() {
+        return Err(MojoError::InvalidOutput);
+    }
+    Ok(Some(boundary))
+}
+
+/// Classifies a positioned provider alias after Clap has parsed Super fields.
+pub fn positioned_super_provider_alias(
+    alias: Option<&str>,
+    provider_present: bool,
+    url_present: bool,
+) -> Result<Option<SuperProviderAlias>, MojoError> {
+    let flags = i64::from(provider_present) | (i64::from(url_present) << 1);
+    decode_super_provider_alias(launch_scalar_policy(
+        SUPER_POSITIONED_ALIAS,
+        flags,
+        &[alias],
+    )?)
+}
+
+/// Classifies Codex command-server launches from their first argument only.
+pub fn codex_command_server_subcommand(argument: Option<&str>) -> Result<bool, MojoError> {
+    boolean(launch_scalar_policy(CODEX_COMMAND_SERVER, 0, &[argument])?)
 }
 
 #[cfg(test)]

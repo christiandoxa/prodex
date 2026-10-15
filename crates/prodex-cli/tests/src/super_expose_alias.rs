@@ -28,6 +28,25 @@ fn literal_boundary_keeps_expose_as_codex_input() {
     assert_eq!(args.codex_args, os_args(&["--", "expose"]));
 }
 
+#[test]
+fn super_cli_normalization_preserves_provider_aliases_and_literal_tail() {
+    for provider in ["gemini", "deepseek"] {
+        let command = parse_cli_command_from(["prodex", "s", provider, "exec", "review"])
+            .expect("provider shorthand should parse through the production CLI caller");
+        let Commands::Super(args) = command else {
+            panic!("expected Super command");
+        };
+        assert_eq!(args.codex_args, os_args(&["exec", "review"]));
+    }
+
+    let command = parse_cli_command_from(["prodex", "s", "--", "gemini", "exec"])
+        .expect("literal provider text should remain Codex input");
+    let Commands::Super(args) = command else {
+        panic!("expected Super command");
+    };
+    assert_eq!(args.codex_args, os_args(&["--", "gemini", "exec"]));
+}
+
 #[cfg(unix)]
 #[test]
 fn opaque_os_arguments_are_preserved_before_and_after_rewrite() {

@@ -38,6 +38,14 @@ comptime LAUNCH_LOGIN_POLICY: Int64 = 12
 comptime LAUNCH_CLI_DEFAULT_RUN: Int64 = 13
 comptime LAUNCH_SUPER_VALIDATE: Int64 = 14
 comptime LAUNCH_SUPER_VALIDATE_SUB_AGENT: Int64 = 15
+comptime LAUNCH_SUPER_COMPAT_ALIAS: Int64 = 16
+comptime LAUNCH_SUPER_LITERAL_BOUNDARY: Int64 = 17
+comptime LAUNCH_SUPER_POSITIONED_ALIAS: Int64 = 18
+comptime LAUNCH_CODEX_COMMAND_SERVER: Int64 = 19
+
+comptime SUPER_ALIAS_NONE: Int64 = 0
+comptime SUPER_ALIAS_GEMINI: Int64 = 1
+comptime SUPER_ALIAS_DEEPSEEK: Int64 = 2
 
 comptime SUPER_VALIDATE_AUTO_ROTATE: Int64 = 1 << 0
 comptime SUPER_VALIDATE_NO_AUTO_ROTATE: Int64 = 1 << 1
@@ -362,6 +370,72 @@ def launch_cli_default_run_policy(
     metadata[unsafe_offset=0] = Int64(should_default)
 
 
+def launch_super_compat_alias_policy(
+    arguments: UInt64,
+    count: Int64,
+    metadata: Pointer[mut=True, Int64, _],
+):
+    var alias = SUPER_ALIAS_NONE
+    if count >= 3:
+        var command = launch_arg(arguments, 0, 1)
+        if launch_is["super"](command) or launch_is["s"](command):
+            var provider = launch_arg(arguments, 0, 2)
+            if launch_is["gemini"](provider):
+                alias = SUPER_ALIAS_GEMINI
+            elif launch_is["deepseek"](provider):
+                alias = SUPER_ALIAS_DEEPSEEK
+    metadata[unsafe_offset=0] = alias
+
+
+def launch_super_literal_boundary_policy(
+    arguments: UInt64,
+    count: Int64,
+    metadata: Pointer[mut=True, Int64, _],
+):
+    var boundary: Int64 = -1
+    if count >= 3:
+        var command = launch_arg(arguments, 0, 1)
+        if launch_is["super"](command) or launch_is["s"](command):
+            for index in range(2, Int(count)):
+                if launch_is["--"](launch_arg(arguments, 0, Int64(index))):
+                    boundary = Int64(index)
+                    break
+    metadata[unsafe_offset=0] = boundary
+
+
+def launch_super_positioned_alias_policy(
+    arguments: UInt64,
+    count: Int64,
+    provider_present: Bool,
+    url_present: Bool,
+    metadata: Pointer[mut=True, Int64, _],
+):
+    var alias = SUPER_ALIAS_NONE
+    if count == 1 and not provider_present and not url_present:
+        var value = launch_arg(arguments, 0, 0)
+        if launch_is["gemini"](value):
+            alias = SUPER_ALIAS_GEMINI
+        elif launch_is["deepseek"](value):
+            alias = SUPER_ALIAS_DEEPSEEK
+    metadata[unsafe_offset=0] = alias
+
+
+def launch_codex_command_server_policy(
+    arguments: UInt64,
+    count: Int64,
+    metadata: Pointer[mut=True, Int64, _],
+):
+    var is_server = False
+    if count > 0:
+        var command = launch_arg(arguments, 0, 0)
+        is_server = (
+            launch_is["mcp-server"](command)
+            or launch_is["app-server"](command)
+            or launch_is["exec-server"](command)
+        )
+    metadata[unsafe_offset=0] = Int64(is_server)
+
+
 def launch_super_validation_policy(
     arguments: UInt64,
     count: Int64,
@@ -666,13 +740,18 @@ def prodex_mojo_launch_args_v1(
     # Lengths are bounded by caller-owned storage and signed address arithmetic.
     if (
         operation < LAUNCH_INSPECT
-        or operation > LAUNCH_SUPER_VALIDATE_SUB_AGENT
+        or operation > LAUNCH_CODEX_COMMAND_SERVER
         or operation == 4
         or operation == 5
         or full_access < 0
         or (
             operation < LAUNCH_SUPER_VALIDATE
+            and operation != LAUNCH_SUPER_POSITIONED_ALIAS
             and full_access > 1
+        )
+        or (
+            operation == LAUNCH_SUPER_POSITIONED_ALIAS
+            and full_access > 3
         )
         or (
             operation >= LAUNCH_SUPER_VALIDATE
@@ -710,6 +789,26 @@ def prodex_mojo_launch_args_v1(
         return 0
     if operation == LAUNCH_CLI_DEFAULT_RUN:
         launch_cli_default_run_policy(arguments, count, metadata)
+        return 0
+    if operation == LAUNCH_SUPER_COMPAT_ALIAS:
+        launch_super_compat_alias_policy(arguments, count, metadata)
+        return 0
+    if operation == LAUNCH_SUPER_LITERAL_BOUNDARY:
+        launch_super_literal_boundary_policy(arguments, count, metadata)
+        return 0
+    if operation == LAUNCH_SUPER_POSITIONED_ALIAS:
+        if full_access > 3 or count > 1:
+            return 1
+        launch_super_positioned_alias_policy(
+            arguments,
+            count,
+            (full_access & 1) != 0,
+            (full_access & 2) != 0,
+            metadata,
+        )
+        return 0
+    if operation == LAUNCH_CODEX_COMMAND_SERVER:
+        launch_codex_command_server_policy(arguments, count, metadata)
         return 0
     if (
         operation == LAUNCH_SUPER_VALIDATE
