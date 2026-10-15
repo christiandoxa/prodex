@@ -59,3 +59,43 @@ fn provider_catalog_indices_abi_enforces_version_and_output_capacity() {
     assert_eq!(count, 1);
     assert_eq!(indices, [0]);
 }
+
+#[test]
+fn openai_retired_catalog_abi_enforces_version_and_boundaries() {
+    let model = b" SPARK\t";
+    let mut output = -1_i64;
+    assert_eq!(
+        unsafe {
+            prodex_mojo_rich_catalog_openai_retired_v1(
+                0,
+                address(model),
+                model.len() as i64,
+                count_address(&mut output),
+            )
+        },
+        RICH_STATUS_ABI
+    );
+    assert_eq!(
+        unsafe {
+            prodex_mojo_rich_catalog_openai_retired_v1(
+                RICH_ABI_VERSION,
+                address(model),
+                model.len() as i64,
+                count_address(&mut output),
+            )
+        },
+        0
+    );
+    assert_eq!(output, 1);
+    assert_eq!(
+        unsafe {
+            prodex_mojo_rich_catalog_openai_retired_v1(
+                RICH_ABI_VERSION,
+                0,
+                1,
+                count_address(&mut output),
+            )
+        },
+        RICH_STATUS_INVALID
+    );
+}
