@@ -166,7 +166,8 @@ pub use kiro::{
 mod smart_context_normalization;
 pub use smart_context_normalization::{
     SmartContextCapsuleInput, SmartContextCapsulePlan, SmartContextNormalizationMode,
-    normalize_smart_context_volatile, plan_smart_context_capsules, smart_context_budget_tier,
+    canonicalize_smart_context_static_text, normalize_smart_context_volatile,
+    plan_smart_context_capsules, smart_context_budget_tier,
     smart_context_memory_capsule_token_budget, smart_context_static_context_noise_line,
 };
 #[path = "rich/smart_context_capsule_order.rs"]

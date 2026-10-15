@@ -2,7 +2,14 @@ from std.collections import Array
 
 from std.memory import Pointer
 
-from rich_text import rich_trim_bounds, rich_view_ptr, rich_view_valid
+from rich_text import (
+    rich_codepoint,
+    rich_trim_bounds,
+    rich_utf8_continuation,
+    rich_unicode_space,
+    rich_view_ptr,
+    rich_view_valid,
+)
 from rich_types import ProdexRichStringView
 
 
@@ -839,39 +846,14 @@ def smart_context_normalization_mode_valid(mode: Int64) -> Bool:
     return mode == SMART_CONTEXT_MODE_COMMAND_OUTPUT or mode == SMART_CONTEXT_MODE_STATIC_CONTEXT or mode == SMART_CONTEXT_MODE_STATIC_NOISE
 
 
-@export("prodex_mojo_smart_context_normalization_v1")
-def prodex_mojo_smart_context_normalization_v1(
-    abi_version: Int64,
-    input_address: UInt,
+def smart_context_normalize_segment(
+    source: Pointer[mut=False, UInt8, _],
+    length: Int64,
     operation: Int64,
-    output_address: UInt,
+    output: Pointer[mut=True, UInt8, _],
     output_capacity: Int64,
-    written_address: UInt,
-    decision_address: UInt,
-) abi("C") -> Int64:
-    if abi_version != PRODEX_RICH_ABI_VERSION:
-        return SMART_CONTEXT_STATUS_ABI
-    if input_address == 0 or not smart_context_normalization_mode_valid(operation):
-        return SMART_CONTEXT_STATUS_INVALID
-    var input_ptr = Pointer[mut=False, ProdexRichStringView, ImmUntrackedOrigin](unsafe_from_address=Int(input_address))
-    var input = input_ptr[].copy()
-    if input.len > UInt(SMART_CONTEXT_NORMALIZATION_MAX_BYTES):
-        return SMART_CONTEXT_STATUS_INVALID
-    if not rich_view_valid(input, SMART_CONTEXT_NORMALIZATION_MAX_BYTES):
-        return SMART_CONTEXT_STATUS_UTF8
-    var source = rich_view_ptr(input)
-    var length = Int64(input.len)
-    if operation == SMART_CONTEXT_MODE_STATIC_NOISE:
-        if decision_address == 0:
-            return SMART_CONTEXT_STATUS_INVALID
-        var decision = Pointer[mut=True, Int64, MutUntrackedOrigin](unsafe_from_address=Int(decision_address))
-        decision[] = Int64(smart_context_static_noise(input, source, length))
-        return SMART_CONTEXT_STATUS_OK
-    if output_address == 0 or written_address == 0 or output_capacity < 1 or output_capacity > SMART_CONTEXT_NORMALIZATION_MAX_OUTPUT_BYTES:
-        return SMART_CONTEXT_STATUS_INVALID
-    var output = Pointer[mut=True, UInt8, MutUntrackedOrigin](unsafe_from_address=Int(output_address))
-    var written = Pointer[mut=True, Int64, MutUntrackedOrigin](unsafe_from_address=Int(written_address))
-    written[] = 0
+    written: Pointer[mut=True, Int64, _],
+) -> Int64:
     var index: Int64 = 0
     while index < length:
         var consumed = smart_context_ansi_escape_len(source, length, index)
@@ -921,6 +903,150 @@ def prodex_mojo_smart_context_normalization_v1(
         output[unsafe_offset=written[]] = source[unsafe_offset=index]
         written[] += 1
         index += 1
+    return SMART_CONTEXT_STATUS_OK
+
+
+@export("prodex_mojo_smart_context_normalization_v1")
+def prodex_mojo_smart_context_normalization_v1(
+    abi_version: Int64,
+    input_address: UInt,
+    operation: Int64,
+    output_address: UInt,
+    output_capacity: Int64,
+    written_address: UInt,
+    decision_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != PRODEX_RICH_ABI_VERSION:
+        return SMART_CONTEXT_STATUS_ABI
+    if input_address == 0 or not smart_context_normalization_mode_valid(operation):
+        return SMART_CONTEXT_STATUS_INVALID
+    var input_ptr = Pointer[mut=False, ProdexRichStringView, ImmUntrackedOrigin](unsafe_from_address=Int(input_address))
+    var input = input_ptr[].copy()
+    if input.len > UInt(SMART_CONTEXT_NORMALIZATION_MAX_BYTES):
+        return SMART_CONTEXT_STATUS_INVALID
+    if not rich_view_valid(input, SMART_CONTEXT_NORMALIZATION_MAX_BYTES):
+        return SMART_CONTEXT_STATUS_UTF8
+    var source = rich_view_ptr(input)
+    var length = Int64(input.len)
+    if operation == SMART_CONTEXT_MODE_STATIC_NOISE:
+        if decision_address == 0:
+            return SMART_CONTEXT_STATUS_INVALID
+        var decision = Pointer[mut=True, Int64, MutUntrackedOrigin](unsafe_from_address=Int(decision_address))
+        decision[] = Int64(smart_context_static_noise(input, source, length))
+        return SMART_CONTEXT_STATUS_OK
+    if output_address == 0 or written_address == 0 or output_capacity < 1 or output_capacity > SMART_CONTEXT_NORMALIZATION_MAX_OUTPUT_BYTES:
+        return SMART_CONTEXT_STATUS_INVALID
+    var output = Pointer[mut=True, UInt8, MutUntrackedOrigin](unsafe_from_address=Int(output_address))
+    var written = Pointer[mut=True, Int64, MutUntrackedOrigin](unsafe_from_address=Int(written_address))
+    written[] = 0
+    return smart_context_normalize_segment(
+        source, length, operation, output, output_capacity, written
+    )
+
+
+
+# The complete static-context pipeline is a single compiled Mojo owner.
+# Reuses the same volatile-value kernel as standalone normalization.
+@export("prodex_mojo_smart_context_static_canonicalize_v1")
+def prodex_mojo_smart_context_static_canonicalize_v1(
+    abi_version: Int64,
+    input_address: UInt,
+    output_address: UInt,
+    output_capacity: Int64,
+    written_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != PRODEX_RICH_ABI_VERSION:
+        return SMART_CONTEXT_STATUS_ABI
+    if (
+        input_address == 0
+        or output_address == 0
+        or written_address == 0
+        or output_capacity < 1
+        or output_capacity > SMART_CONTEXT_NORMALIZATION_MAX_OUTPUT_BYTES
+    ):
+        return SMART_CONTEXT_STATUS_INVALID
+    var source_view = Pointer[mut=False, ProdexRichStringView, ImmUntrackedOrigin](
+        unsafe_from_address=Int(input_address)
+    )[].copy()
+    if source_view.len > UInt(SMART_CONTEXT_NORMALIZATION_MAX_BYTES):
+        return SMART_CONTEXT_STATUS_INVALID
+    if not rich_view_valid(source_view, SMART_CONTEXT_NORMALIZATION_MAX_BYTES):
+        return SMART_CONTEXT_STATUS_UTF8
+    var source = rich_view_ptr(source_view)
+    var output = Pointer[mut=True, UInt8, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    var written = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(written_address)
+    )
+    written[] = 0
+    var length = Int64(source_view.len)
+    var cursor: Int64 = 0
+    var last_nonblank: Int64 = 0
+    var emitted = False
+    while cursor < length:
+        var begin = cursor
+        while cursor < length:
+            var byte = source[unsafe_offset=cursor]
+            if byte == 10 or byte == 13:
+                break
+            cursor += 1
+        var end = cursor
+        if cursor < length:
+            var delimiter = source[unsafe_offset=cursor]
+            cursor += 1
+            if delimiter == 13 and cursor < length:
+                if source[unsafe_offset=cursor] == 10:
+                    cursor += 1
+
+        # Rust's trim_end removes Unicode whitespace before both tests.
+        while end > begin:
+            var codepoint_start = end - 1
+            while codepoint_start > begin and rich_utf8_continuation(
+                source[unsafe_offset=codepoint_start]
+            ):
+                codepoint_start -= 1
+            var codepoint = rich_codepoint(
+                source, codepoint_start, end - codepoint_start
+            )
+            if not rich_unicode_space(codepoint):
+                break
+            end = codepoint_start
+        var line = ProdexRichStringView(
+            source_view.ptr + UInt(begin), UInt(end - begin)
+        )
+        if smart_context_static_noise(line, rich_view_ptr(line), end - begin):
+            continue
+
+        var previous = written[]
+        if emitted:
+            if written[] >= output_capacity:
+                return SMART_CONTEXT_STATUS_CAPACITY
+            output[unsafe_offset=written[]] = 10
+            written[] += 1
+        var segment_start = written[]
+        var status = smart_context_normalize_segment(
+            rich_view_ptr(line),
+            end - begin,
+            SMART_CONTEXT_MODE_STATIC_CONTEXT,
+            output,
+            output_capacity,
+            written,
+        )
+        if status != SMART_CONTEXT_STATUS_OK:
+            return status
+        var produced = ProdexRichStringView(
+            output_address + UInt(segment_start), UInt(written[] - segment_start)
+        )
+        var content = rich_trim_bounds(produced)
+        if content[0] != content[1]:
+            emitted = True
+            last_nonblank = written[]
+        elif not emitted:
+            # Skip a blank prefix, but retain interior empty lines until
+            # the final tail trim.
+            written[] = previous
+    written[] = last_nonblank
     return SMART_CONTEXT_STATUS_OK
 
 

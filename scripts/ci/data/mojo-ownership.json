@@ -700,7 +700,8 @@
         "production_reachable": true,
         "role": "semantic",
         "operations": [
-          "smart_context_rehydration_plan"
+          "smart_context_rehydration_plan",
+          "smart_context_static_canonicalization"
         ]
       },
       {
@@ -2582,6 +2583,29 @@
       "duplicate_production_owner": false,
       "platform_fallback": false,
       "rust_adapter_scope": "artifact acquisition, ordering, and adapter"
+    },
+    {
+      "name": "smart_context_static_canonicalization",
+      "domain": "smart-context/static-context",
+      "introduced_in": "0.438.0",
+      "baseline_state": "Rust normalized line breaks, trimmed per-line Unicode trailing whitespace, filtered volatile metadata, normalized volatile values and stripped blank outer lines",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_mojo_smart_context_static_canonicalize_v1",
+      "mojo_abi_version": 6,
+      "mojo_source": "mojo/prodex_core/smart_context_normalization.mojo",
+      "consumer": "crates/prodex-runtime-proxy/src/smart_context/static_context.rs",
+      "consumer_marker": "prodex_mojo_core::rich::canonicalize_smart_context_static_text(",
+      "production_consumers": [
+        "crates/prodex-runtime-proxy/src/smart_context/static_context.rs"
+      ],
+      "production_reachability_test": "crates/prodex-runtime-proxy/src/smart_context/static_context.rs",
+      "rust_owner_before": "Rust full-line normalization and blank/noise selection",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "Legacy Rust stabilizer deleted; compiled Mojo pipeline verified with caller static context fingerprint tests, Unicode and CRLF cases",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "Borrowed UTF-8 view, bounded output allocation, checked String materialization, hashes and fingerprint DTOs"
     },
     {
       "name": "smart_context_capsule_order",

@@ -93,23 +93,8 @@ pub(crate) fn smart_context_fingerprint(
 }
 
 pub fn smart_context_stabilize_static_context_text(text: &str) -> String {
-    let text = text.replace("\r\n", "\n").replace('\r', "\n");
-    let lines = text
-        .lines()
-        .map(str::trim_end)
-        .filter(|line| !smart_context_static_context_noise_line(line))
-        .map(|line| smart_context_normalize_volatile_static_context(line).into_owned())
-        .collect::<Vec<_>>();
-
-    let Some(start) = lines.iter().position(|line| !line.trim().is_empty()) else {
-        return String::new();
-    };
-    let end = lines
-        .iter()
-        .rposition(|line| !line.trim().is_empty())
-        .unwrap_or(start);
-
-    lines[start..=end].join("\n")
+    prodex_mojo_core::rich::canonicalize_smart_context_static_text(text)
+        .expect("Mojo Smart Context static canonicalizer returned invalid output")
 }
 
 pub fn smart_context_static_context_prompt_cache_fingerprint(
