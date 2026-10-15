@@ -64,7 +64,7 @@ pub use self::precommit::{
 };
 pub(crate) use self::request::{
     GeminiTranslatorValidationPlan, gemini_bridge_raw_translator_request,
-    gemini_bridge_validate_translator,
+    gemini_bridge_validate_translator, gemini_bridge_validate_translator_with_kind,
 };
 pub use self::request::{
     gemini_provider_core_exact_output_generate_chunk, gemini_provider_core_exact_output_sse_stream,
@@ -80,6 +80,7 @@ pub use self::request::{
     gemini_provider_core_tools_from_requests, gemini_provider_core_tools_from_requests_checked,
     gemini_provider_core_unsupported_tool_fallback_body,
     gemini_provider_core_validate_candidate_count, gemini_provider_core_validate_request_tools,
+    gemini_provider_core_validate_request_tools_with_nested_function_paths,
 };
 pub use self::response::{
     gemini_provider_core_buffered_responses_value,

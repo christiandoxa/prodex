@@ -61,6 +61,7 @@ pub(crate) use gemini::gemini_normalized_response_value;
 pub(crate) use gemini::gemini_preserve_tool_call_signatures;
 pub(crate) use gemini::gemini_sanitize_function_schema;
 pub(crate) use gemini::gemini_validate_openai_tools;
+pub(crate) use gemini::gemini_validate_openai_tools_with_nested_function_paths;
 pub use gemini::{
     GeminiProviderCoreStreamChunkMetadata, GeminiProviderCoreStreamFunctionCallDelta,
     GeminiProviderCoreStreamToolCall, gemini_provider_core_function_call_arguments_delta_event,

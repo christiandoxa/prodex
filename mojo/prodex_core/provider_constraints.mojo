@@ -3285,7 +3285,11 @@ def gemini_bridge_request_input_valid(input: GeminiBridgeRequestInput) -> Bool:
         or input.senary_present == 0
     ):
         return False
-    if input.operation == GEMINI_BRIDGE_REQUEST_VALIDATE_TRANSLATOR and input.primary_present == 0:
+    if input.operation == GEMINI_BRIDGE_REQUEST_VALIDATE_TRANSLATOR and (
+        input.primary_present == 0
+        or input.kind < GEMINI_TRANSLATOR_VALIDATION_DEFAULT_PATHS
+        or input.kind > GEMINI_TRANSLATOR_VALIDATION_NESTED_FUNCTION_PATHS
+    ):
         return False
     if input.operation == GEMINI_BRIDGE_REQUEST_PRESERVE_TOOL_CALL_SIGNATURES and (
         input.primary_present == 0 or input.secondary_present != 0 or input.tertiary_present != 0
@@ -6968,6 +6972,8 @@ comptime GEMINI_TRANSLATOR_VALIDATION_DESCRIPTION_STRING_WRAPPED: Int64 = 14
 comptime GEMINI_TRANSLATOR_VALIDATION_DESCRIPTION_STRING_FLAT: Int64 = 15
 comptime GEMINI_TRANSLATOR_VALIDATION_RUST_TOOL_BRIDGE: Int64 = 16
 comptime GEMINI_TRANSLATOR_VALIDATION_RESPONSE_FORMAT: Int64 = 17
+comptime GEMINI_TRANSLATOR_VALIDATION_DEFAULT_PATHS: Int64 = 0
+comptime GEMINI_TRANSLATOR_VALIDATION_NESTED_FUNCTION_PATHS: Int64 = 1
 
 def gemini_bridge_request_put_nonnegative_i64(
     writer: Pointer[mut=True, GeminiRequestContentWriter, _],
@@ -7188,6 +7194,7 @@ def gemini_bridge_validation_function_tool(
     start: Int64,
     end: Int64,
     index: Int64,
+    nested_function_paths: Bool,
     writer: Pointer[mut=True, GeminiRequestContentWriter, _],
 ) -> Int64:
     var function = gemini_bridge_request_object_member(
@@ -7222,7 +7229,7 @@ def gemini_bridge_validation_function_tool(
         )
     ):
         var tag = GEMINI_TRANSLATOR_VALIDATION_FUNCTION_NAME_FLAT
-        if wrapped:
+        if wrapped or nested_function_paths:
             tag = GEMINI_TRANSLATOR_VALIDATION_FUNCTION_NAME_WRAPPED
         if gemini_bridge_validation_put_plan(
             writer, source, tag, index
@@ -7235,7 +7242,7 @@ def gemini_bridge_validation_function_tool(
     )
     if parameters[0] < 0:
         var tag = GEMINI_TRANSLATOR_VALIDATION_PARAMETERS_REQUIRED_FLAT
-        if wrapped:
+        if wrapped or nested_function_paths:
             tag = GEMINI_TRANSLATOR_VALIDATION_PARAMETERS_REQUIRED_WRAPPED
         if gemini_bridge_validation_put_plan(
             writer, source, tag, index
@@ -7246,7 +7253,7 @@ def gemini_bridge_validation_function_tool(
         source, parameters[0], parameters[1]
     ):
         var tag = GEMINI_TRANSLATOR_VALIDATION_PARAMETERS_OBJECT_FLAT
-        if wrapped:
+        if wrapped or nested_function_paths:
             tag = GEMINI_TRANSLATOR_VALIDATION_PARAMETERS_OBJECT_WRAPPED
         if gemini_bridge_validation_put_plan(
             writer, source, tag, index
@@ -7265,7 +7272,7 @@ def gemini_bridge_validation_function_tool(
         and gemini_request_content_byte(source, description[0]) != 34
     ):
         var tag = GEMINI_TRANSLATOR_VALIDATION_DESCRIPTION_STRING_FLAT
-        if wrapped:
+        if wrapped or nested_function_paths:
             tag = GEMINI_TRANSLATOR_VALIDATION_DESCRIPTION_STRING_WRAPPED
         if gemini_bridge_validation_put_plan(
             writer, source, tag, index
@@ -7448,7 +7455,12 @@ def gemini_bridge_request_validate_translator(
         )
         if is_function:
             var result = gemini_bridge_validation_function_tool(
-                input.primary, cursor, item_end, item_index, writer
+                input.primary,
+                cursor,
+                item_end,
+                item_index,
+                input.kind == GEMINI_TRANSLATOR_VALIDATION_NESTED_FUNCTION_PATHS,
+                writer,
             )
             if result != 0:
                 return result > 0

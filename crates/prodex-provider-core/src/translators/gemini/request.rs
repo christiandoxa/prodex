@@ -16,4 +16,5 @@ pub(crate) use self::tool_signatures::gemini_preserve_tool_call_signatures;
 pub(crate) use self::tools::{
     gemini_builtin_tools_from_request, gemini_function_declaration_from_openai_tool,
     gemini_tool_config_from_request, gemini_validate_openai_tools,
+    gemini_validate_openai_tools_with_nested_function_paths,
 };

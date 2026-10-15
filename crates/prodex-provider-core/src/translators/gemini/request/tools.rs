@@ -9,23 +9,37 @@ use serde_json::{Value, json};
 use super::schema::sanitize_function_schema;
 
 pub(crate) fn gemini_validate_openai_tools(value: &Value) -> Result<(), String> {
+    gemini_validate_openai_tools_with_kind(value, 0)
+}
+
+pub(crate) fn gemini_validate_openai_tools_with_nested_function_paths(
+    value: &Value,
+) -> Result<(), String> {
+    gemini_validate_openai_tools_with_kind(value, 1)
+}
+
+fn gemini_validate_openai_tools_with_kind(value: &Value, kind: i64) -> Result<(), String> {
     let Some(tools) = value.as_array() else {
-        return gemini_validate_tool_value_with_mojo(value, None);
+        return gemini_validate_tool_value_with_mojo(value, None, kind);
     };
     for (index, tool) in tools.iter().enumerate() {
-        gemini_validate_tool_value_with_mojo(tool, Some(index))?;
+        gemini_validate_tool_value_with_mojo(tool, Some(index), kind)?;
     }
     Ok(())
 }
 
-fn gemini_validate_tool_value_with_mojo(tool: &Value, index: Option<usize>) -> Result<(), String> {
+fn gemini_validate_tool_value_with_mojo(
+    tool: &Value,
+    index: Option<usize>,
+    kind: i64,
+) -> Result<(), String> {
     let request = match index {
         Some(_) => json!({"tools": [tool]}),
         None => json!({"tools": tool}),
     };
     let body = serde_json::to_vec(&request)
         .map_err(|error| format!("failed to serialize Gemini tool validation: {error}"))?;
-    let plan = crate::gemini_bridge::gemini_bridge_validate_translator(&body)?;
+    let plan = crate::gemini_bridge::gemini_bridge_validate_translator_with_kind(&body, kind)?;
     if let Some(reason) = plan.reason {
         return Err(gemini_relabel_tool_validation_reason(&reason, index));
     }
@@ -47,7 +61,7 @@ fn gemini_validate_tool_value_with_mojo(tool: &Value, index: Option<usize>) -> R
             "invalid_tool_declaration: Gemini request field `tools[{index}]` is not a supported tool declaration"
         )
     })?;
-    gemini_validate_openai_tools(&Value::Array(translated)).map_err(|reason| {
+    gemini_validate_openai_tools_with_kind(&Value::Array(translated), kind).map_err(|reason| {
         format!(
             "invalid_tool_declaration: Gemini request field `tools[{index}]` translates to an invalid declaration: {reason}"
         )
