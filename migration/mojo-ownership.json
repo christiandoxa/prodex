@@ -703,7 +703,8 @@
         "operations": [
           "smart_context_rehydration_plan",
           "smart_context_static_canonicalization",
-          "smart_context_static_prompt_payload_format"
+          "smart_context_static_prompt_payload_format",
+          "smart_context_static_bounded_identifier"
         ]
       },
       {
@@ -2658,6 +2659,29 @@
       "duplicate_production_owner": false,
       "platform_fallback": false,
       "rust_adapter_scope": "Iterate host-owned canonical inputs, bind borrowed views, check output buffer and UTF-8, return Mojo-authored cache serialization"
+    },
+    {
+      "name": "smart_context_static_bounded_identifier",
+      "domain": "smart-context/static-context",
+      "introduced_in": "0.438.0",
+      "baseline_state": "Rust trimmed identifiers, converted backslashes to forward slashes, chose a safe 256-byte Unicode cutoff, and appended a salted-by-input SHA-256 marker when truncation was required",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_mojo_smart_context_static_bounded_id_v1",
+      "mojo_abi_version": 6,
+      "mojo_source": "mojo/prodex_core/smart_context_normalization.mojo",
+      "consumer": "crates/prodex-runtime-proxy/src/smart_context/static_context.rs",
+      "consumer_marker": "prodex_mojo_core::rich::smart_context_static_bounded_id(",
+      "production_consumers": [
+        "crates/prodex-runtime-proxy/src/smart_context/static_context.rs"
+      ],
+      "production_reachability_test": "crates/prodex-runtime-proxy/src/smart_context/static_context.rs",
+      "rust_owner_before": "Rust Unicode whitespace trim, 256-byte cutoff, slash normalization, hash-required branching and long-ID suffix formatting",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "Original Rust implementation deleted; real Mojo tests verify Unicode boundaries, slash normalization, exact-size cutoff, lazy hash request and ABI error status",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "SHA-256 digest computation only when requested by Mojo, borrowed text views, ABI state retry for required digest, and validated UTF-8 output"
     },
     {
       "name": "smart_context_capsule_order",

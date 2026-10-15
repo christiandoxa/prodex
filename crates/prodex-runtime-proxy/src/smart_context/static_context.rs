@@ -6,7 +6,6 @@ use std::fmt::Write as _;
 
 pub const SMART_CONTEXT_STATIC_CONTEXT_FINGERPRINT_MAX_ITEMS: usize = 128;
 pub const SMART_CONTEXT_STATIC_CONTEXT_FINGERPRINT_MAX_ITEM_BYTES: usize = 256 * 1024;
-const SMART_CONTEXT_STATIC_CONTEXT_FINGERPRINT_MAX_ID_BYTES: usize = 256;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum SmartContextFingerprintKind {
@@ -234,19 +233,8 @@ fn smart_context_add_static_context_overflow_digest(
 }
 
 fn smart_context_bounded_static_context_id(id: &str) -> String {
-    let trimmed = id.trim();
-    if trimmed.len() <= SMART_CONTEXT_STATIC_CONTEXT_FINGERPRINT_MAX_ID_BYTES {
-        return trimmed.replace('\\', "/");
-    }
-    let mut end = SMART_CONTEXT_STATIC_CONTEXT_FINGERPRINT_MAX_ID_BYTES;
-    while !trimmed.is_char_boundary(end) {
-        end -= 1;
-    }
-    format!(
-        "{}<id-hash={}>",
-        trimmed[..end].replace('\\', "/"),
-        smart_context_hash_text(id)
-    )
+    prodex_mojo_core::rich::smart_context_static_bounded_id(id, || smart_context_hash_text(id))
+        .expect("compiled Mojo static-context identifier policy returned invalid output")
 }
 
 fn smart_context_bounded_static_context_text(text: &str) -> String {
@@ -342,4 +330,29 @@ fn smart_context_fingerprint_delta_mojo(
         },
     )
     .collect()
+}
+
+#[cfg(test)]
+mod bounded_static_id_tests {
+    use super::*;
+
+    #[test]
+    fn static_id_uses_compiled_mojo_and_hashes_original_long_id() {
+        assert_eq!(
+            smart_context_bounded_static_context_id("  \\folder\\🧭  "),
+            "/folder/🧭"
+        );
+        let id = "🧭".repeat(65);
+        let expected = format!(
+            "{}<id-hash={}>",
+            "🧭".repeat(64),
+            smart_context_hash_text(&id),
+        );
+        assert_eq!(smart_context_bounded_static_context_id(&id), expected);
+        assert_eq!(
+            smart_context_bounded_static_context_id(&"é".repeat(128)),
+            "é".repeat(128),
+        );
+        assert_eq!(smart_context_bounded_static_context_id("\u{2003}  "), "");
+    }
 }

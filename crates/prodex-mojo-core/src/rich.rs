@@ -168,8 +168,8 @@ pub use smart_context_normalization::{
     SmartContextCapsuleInput, SmartContextCapsulePlan, SmartContextNormalizationMode,
     SmartContextStaticPayloadItem, canonicalize_smart_context_static_text,
     normalize_smart_context_volatile, plan_smart_context_capsules, smart_context_budget_tier,
-    smart_context_memory_capsule_token_budget, smart_context_static_context_noise_line,
-    smart_context_static_prompt_payload,
+    smart_context_memory_capsule_token_budget, smart_context_static_bounded_id,
+    smart_context_static_context_noise_line, smart_context_static_prompt_payload,
 };
 #[path = "rich/smart_context_capsule_order.rs"]
 mod smart_context_capsule_order;
