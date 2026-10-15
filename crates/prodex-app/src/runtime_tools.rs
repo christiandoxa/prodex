@@ -2,6 +2,8 @@ use super::*;
 use crate::app_commands::runtime_launch::{
     GoalResumeRelaunchPlan, GoalUsageLimitMonitor, prepare_goal_usage_limit_monitor,
 };
+#[path = "runtime_tools/app_server_args.rs"]
+mod app_server_args;
 #[path = "runtime_tools/child_env.rs"]
 mod child_env;
 #[path = "runtime_tools/hook_trust.rs"]
@@ -29,6 +31,7 @@ mod super_dry_run;
 mod super_trust;
 #[path = "runtime_tools/usage_limit_recovery.rs"]
 mod usage_limit_recovery;
+use app_server_args::project_app_server_config_args;
 pub(super) use child_env::{clear_rtk_auto_wrap_control_env, prepend_child_path};
 pub(crate) use overlay::{
     project_in_app_resume_model_settings, resolve_runtime_optional_tool_plan,

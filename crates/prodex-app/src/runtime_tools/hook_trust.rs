@@ -31,7 +31,7 @@ pub(super) fn trust_super_hooks(
     crate::validate_selected_codex_binary(&plan.binary)?;
 
     let mut command = Command::new(&plan.binary);
-    let mut preflight_args = app_server_config_args(&plan.args);
+    let mut preflight_args = super::project_app_server_config_args(&plan.args, true);
     preflight_args.extend([OsString::from("app-server"), OsString::from("--stdio")]);
     command
         .args(preflight_args)
@@ -183,55 +183,6 @@ fn rpc_result_or_legacy(reply: RpcReply, operation: &str) -> Result<Option<Value
         } => Ok(None),
         reply => expect_rpc_result(reply, operation).map(Some),
     }
-}
-
-fn app_server_config_args(runtime_args: &[OsString]) -> Vec<OsString> {
-    let mut args = Vec::new();
-    let mut index = 0;
-    while index < runtime_args.len() {
-        let argument = runtime_args[index].to_string_lossy();
-        let next = runtime_args.get(index + 1).cloned();
-        match argument.as_ref() {
-            "-c" | "--config" | "--enable" | "--disable" | "--code-mode-host" => {
-                if let Some(value) = next {
-                    args.extend([runtime_args[index].clone(), value]);
-                    index += 2;
-                    continue;
-                }
-            }
-            "--strict-config" => args.push(runtime_args[index].clone()),
-            "-m" | "--model" => {
-                if let Some(value) = next.and_then(|value| value.into_string().ok()) {
-                    args.extend([
-                        OsString::from("-c"),
-                        OsString::from(format!(
-                            "model={}",
-                            crate::runtime_catalog_config::toml_string_literal(&value)
-                        )),
-                    ]);
-                    index += 2;
-                    continue;
-                }
-            }
-            value if value.starts_with("--model=") => {
-                args.extend([
-                    OsString::from("-c"),
-                    OsString::from(format!(
-                        "model={}",
-                        crate::runtime_catalog_config::toml_string_literal(
-                            value.trim_start_matches("--model=")
-                        )
-                    )),
-                ]);
-            }
-            value if value.starts_with("--config=") || value.starts_with("-c=") => {
-                args.push(runtime_args[index].clone());
-            }
-            _ => {}
-        }
-        index += 1;
-    }
-    args
 }
 
 fn rpc_request(

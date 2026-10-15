@@ -24,6 +24,14 @@ pub struct OverlayTransportFlags {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AppServerConfigAction {
+    Keep(usize),
+    KeepPair(usize),
+    ModelPair { flag: usize, value: usize },
+    ModelInline { index: usize, value_start: usize },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FreshProjectionAction {
     Keep(usize),
     ConfigArg(usize),
@@ -68,6 +76,15 @@ unsafe extern "C" {
         arguments_address: u64,
         count: i64,
         result_address: u64,
+    ) -> i64;
+    fn prodex_runtime_overlay_app_server_config_v1(
+        abi_version: i64,
+        arguments_address: u64,
+        count: i64,
+        include_inline_config: i64,
+        records_address: u64,
+        record_capacity: i64,
+        written_address: u64,
     ) -> i64;
     fn prodex_runtime_overlay_fresh_projection_v1(
         abi_version: i64,
@@ -225,6 +242,69 @@ pub fn transport_flags(arguments: &[Option<&str>]) -> Result<OverlayTransportFla
         _ => return Err(MojoError::InvalidOutput),
     };
     Ok(OverlayTransportFlags { remote, no_daemon })
+}
+
+/// Plans the app-server-safe subset of runtime arguments; Rust materializes the returned args.
+pub fn app_server_config_plan(
+    arguments: &[Option<&str>],
+    include_inline_config: bool,
+) -> Result<Vec<AppServerConfigAction>, MojoError> {
+    let views = views(arguments)?;
+    let capacity = arguments.len();
+    let mut records = vec![-1_i64; capacity.saturating_mul(3)];
+    let mut written = -1_i64;
+    let status = unsafe {
+        prodex_runtime_overlay_app_server_config_v1(
+            ABI_VERSION,
+            views.as_ptr() as usize as u64,
+            i64::try_from(views.len()).map_err(|_| MojoError::InvalidInput)?,
+            i64::from(include_inline_config),
+            records.as_mut_ptr() as usize as u64,
+            i64::try_from(capacity).map_err(|_| MojoError::InvalidInput)?,
+            (&mut written as *mut i64) as usize as u64,
+        )
+    };
+    validate_status(status)?;
+    let written = usize::try_from(written).map_err(|_| MojoError::InvalidOutput)?;
+    if written > capacity {
+        return Err(MojoError::InvalidOutput);
+    }
+    (0..written)
+        .map(|record| {
+            let base = record * 3;
+            let kind = records[base];
+            let index = usize::try_from(records[base + 1]).map_err(|_| MojoError::InvalidOutput)?;
+            if index >= arguments.len() {
+                return Err(MojoError::InvalidOutput);
+            }
+            match kind {
+                0 => Ok(AppServerConfigAction::Keep(index)),
+                1 => {
+                    if index + 1 >= arguments.len() {
+                        return Err(MojoError::InvalidOutput);
+                    }
+                    Ok(AppServerConfigAction::KeepPair(index))
+                }
+                2 => {
+                    let value =
+                        usize::try_from(records[base + 2]).map_err(|_| MojoError::InvalidOutput)?;
+                    if value >= arguments.len() {
+                        return Err(MojoError::InvalidOutput);
+                    }
+                    Ok(AppServerConfigAction::ModelPair { flag: index, value })
+                }
+                3 => {
+                    let value_start =
+                        usize::try_from(records[base + 2]).map_err(|_| MojoError::InvalidOutput)?;
+                    arguments[index]
+                        .and_then(|value| value.get(value_start..))
+                        .ok_or(MojoError::InvalidOutput)?;
+                    Ok(AppServerConfigAction::ModelInline { index, value_start })
+                }
+                _ => Err(MojoError::InvalidOutput),
+            }
+        })
+        .collect()
 }
 
 pub fn fresh_projection(
@@ -410,6 +490,39 @@ mod tests {
                 FreshProjectionAction::ConfigArg(6),
                 FreshProjectionAction::Keep(7),
             ]
+        );
+
+        let app_server = [
+            Some("--model"),
+            Some("gpt-6.1-sol"),
+            Some("--config=projects={a=1}"),
+            Some("--strict-config"),
+            Some("--enable"),
+            Some("web_search"),
+        ];
+        assert_eq!(
+            app_server_config_plan(&app_server, true).unwrap(),
+            vec![
+                AppServerConfigAction::ModelPair { flag: 0, value: 1 },
+                AppServerConfigAction::Keep(2),
+                AppServerConfigAction::Keep(3),
+                AppServerConfigAction::KeepPair(4),
+            ]
+        );
+        assert_eq!(
+            app_server_config_plan(&app_server, false).unwrap(),
+            vec![
+                AppServerConfigAction::ModelPair { flag: 0, value: 1 },
+                AppServerConfigAction::Keep(3),
+                AppServerConfigAction::KeepPair(4),
+            ]
+        );
+        assert_eq!(
+            app_server_config_plan(&[Some("--model=gpt-6.1-sol")], true).unwrap(),
+            vec![AppServerConfigAction::ModelInline {
+                index: 0,
+                value_start: 8,
+            }]
         );
     }
 
