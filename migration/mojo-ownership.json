@@ -1597,7 +1597,8 @@
         "production_reachable": true,
         "role": "semantic",
         "operations": [
-          "runtime_doctor_degraded_route_selection"
+          "runtime_doctor_degraded_route_selection",
+          "runtime_doctor_degraded_route_line_format"
         ]
       },
       {
@@ -1607,7 +1608,8 @@
         "production_reachable": true,
         "role": "adapter",
         "operations": [
-          "runtime_doctor_degraded_route_selection"
+          "runtime_doctor_degraded_route_selection",
+          "runtime_doctor_degraded_route_line_format"
         ]
       },
       {
@@ -10025,6 +10027,29 @@
       "duplicate_production_owner": false,
       "platform_fallback": false,
       "rust_adapter_scope": "Profile and route key lookup, BTreeMap iteration, borrowed timestamp collection and Mojo result validation"
+    },
+    {
+      "name": "runtime_doctor_degraded_route_line_format",
+      "domain": "runtime-doctor/degraded-route-rendering",
+      "introduced_in": "0.438.0",
+      "baseline_state": "Rust formatted selected degraded route records, deciding fallback route names, circuit state, diagnostic suffix and signed integer strings",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_mojo_runtime_doctor_degraded_route_render_v1",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/runtime_doctor_degraded_routes.mojo",
+      "consumer": "crates/prodex-runtime-doctor/src/state_summary/routes.rs",
+      "consumer_marker": "prodex_mojo_core::rich::runtime_doctor_degraded_route_render(",
+      "production_consumers": [
+        "crates/prodex-runtime-doctor/src/state_summary/routes.rs"
+      ],
+      "production_reachability_test": "crates/prodex-runtime-doctor/src/state_summary/routes.rs",
+      "rust_owner_before": "Rust fallback transport/retry route labels, circuit open/half-open decision, diagnostic field suffix branching and format! for i64 values",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "Removed Rust line formatter; compiled Mojo and production runtime-doctor regressions cover all five route kinds, missing route, Unicode, i64 extrema and circuit threshold",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "BTreeMap input and normalized route selection via existing Mojo planner; checked borrowed slice projection; bounded ABI marshaling and validated UTF-8 String result"
     }
   ],
   "rust_semantic_reductions": [

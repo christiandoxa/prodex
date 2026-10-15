@@ -139,40 +139,22 @@ pub fn runtime_doctor_degraded_routes(
                 .expect("validated Mojo degraded-route profile end");
             let profile = &key[profile_start..profile_end];
             let route = if record.route_start < 0 {
-                match record.kind {
-                    prodex_mojo_core::rich::RUNTIME_DOCTOR_DEGRADED_ROUTE_KIND_RETRY => "retry",
-                    _ => "transport",
-                }
+                None
             } else {
                 let route_start = usize::try_from(record.route_start)
                     .expect("validated Mojo degraded-route route offset");
                 let route_end = usize::try_from(record.route_start + record.route_len)
                     .expect("validated Mojo degraded-route route end");
-                &key[route_start..route_end]
+                Some(&key[route_start..route_end])
             };
-            match record.kind {
-                prodex_mojo_core::rich::RUNTIME_DOCTOR_DEGRADED_ROUTE_KIND_CIRCUIT => {
-                    let state = if record.value > now {
-                        "open"
-                    } else {
-                        "half-open"
-                    };
-                    format!("{profile}/{route} circuit={state} until={}", record.value)
-                }
-                prodex_mojo_core::rich::RUNTIME_DOCTOR_DEGRADED_ROUTE_KIND_TRANSPORT => {
-                    format!("{profile}/{route} transport_backoff until={}", record.value)
-                }
-                prodex_mojo_core::rich::RUNTIME_DOCTOR_DEGRADED_ROUTE_KIND_RETRY => {
-                    format!("{profile}/{route} retry_backoff until={}", record.value)
-                }
-                prodex_mojo_core::rich::RUNTIME_DOCTOR_DEGRADED_ROUTE_KIND_BAD_PAIRING => {
-                    format!("{profile}/{route} bad_pairing={}", record.value)
-                }
-                prodex_mojo_core::rich::RUNTIME_DOCTOR_DEGRADED_ROUTE_KIND_HEALTH => {
-                    format!("{profile}/{route} health={}", record.value)
-                }
-                _ => unreachable!("validated Mojo degraded-route kind"),
-            }
+            prodex_mojo_core::rich::runtime_doctor_degraded_route_render(
+                record.kind,
+                profile,
+                route,
+                record.value,
+                now,
+            )
+            .expect("Mojo degraded-route formatter returned invalid output")
         })
         .collect()
 }

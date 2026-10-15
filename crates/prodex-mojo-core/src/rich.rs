@@ -19,7 +19,7 @@ pub use runtime_doctor_degraded_routes::{
     RUNTIME_DOCTOR_DEGRADED_ROUTE_KIND_HEALTH, RUNTIME_DOCTOR_DEGRADED_ROUTE_KIND_RETRY,
     RUNTIME_DOCTOR_DEGRADED_ROUTE_KIND_TRANSPORT, RUNTIME_DOCTOR_DEGRADED_ROUTES_MAX_ROWS,
     RuntimeDoctorDegradedRoutePlan, RuntimeDoctorDegradedRouteRecord,
-    runtime_doctor_degraded_routes,
+    runtime_doctor_degraded_route_render, runtime_doctor_degraded_routes,
 };
 
 use crate::{MojoError, MojoIssue};

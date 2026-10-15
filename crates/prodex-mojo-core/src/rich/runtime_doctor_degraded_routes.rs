@@ -31,6 +31,18 @@ pub struct RuntimeDoctorDegradedRoutePlan<'a> {
 }
 
 unsafe extern "C" {
+    fn prodex_mojo_runtime_doctor_degraded_route_render_v1(
+        abi_version: i64,
+        kind: i64,
+        profile: u64,
+        route: u64,
+        route_present: i64,
+        value: i64,
+        now: i64,
+        output: u64,
+        output_capacity: i64,
+        written: u64,
+    ) -> i64;
     fn prodex_mojo_runtime_doctor_degraded_routes_v1(
         abi_version: i64,
         now: i64,
@@ -181,4 +193,166 @@ where
         }
     }
     Ok(RuntimeDoctorDegradedRoutePlan { records, keys })
+}
+
+/// Materialize one Mojo-selected diagnostic row through the compiled Mojo
+/// renderer. The host passes borrowed profile/route text; there is no
+/// equivalent Rust formatter for the route kind or signed count.
+pub fn runtime_doctor_degraded_route_render(
+    kind: i64,
+    profile: &str,
+    route: Option<&str>,
+    value: i64,
+    now: i64,
+) -> Result<String, MojoError> {
+    ensure_rich_abi()?;
+    if !(RUNTIME_DOCTOR_DEGRADED_ROUTE_KIND_CIRCUIT..=RUNTIME_DOCTOR_DEGRADED_ROUTE_KIND_HEALTH)
+        .contains(&kind)
+    {
+        return Err(MojoError::InvalidInput);
+    }
+    let capacity = profile
+        .len()
+        .checked_add(route.map_or(0, str::len))
+        .and_then(|value| value.checked_add(100))
+        .ok_or(MojoError::InvalidInput)?;
+    let profile = view(profile);
+    let route_present = i64::from(route.is_some());
+    let route = view(route.unwrap_or(""));
+    let mut output = vec![0_u8; capacity];
+    let mut written = -1_i64;
+    let status = unsafe {
+        prodex_mojo_runtime_doctor_degraded_route_render_v1(
+            RUNTIME_DOCTOR_DEGRADED_ROUTES_ABI_VERSION,
+            kind,
+            mojo_pointer_address(&profile),
+            mojo_pointer_address(&route),
+            route_present,
+            value,
+            now,
+            mojo_mut_pointer_address(output.as_mut_ptr()),
+            i64::try_from(output.len()).map_err(|_| MojoError::InvalidInput)?,
+            mojo_mut_pointer_address(&mut written),
+        )
+    };
+    if status != 0 {
+        return Err(status_error(status));
+    }
+    let written = usize::try_from(written).map_err(|_| MojoError::InvalidOutput)?;
+    if written > output.len() {
+        return Err(MojoError::InvalidOutput);
+    }
+    output.truncate(written);
+    String::from_utf8(output).map_err(|_| MojoError::InvalidOutput)
+}
+
+#[cfg(test)]
+mod route_render_tests {
+    use super::*;
+
+    #[test]
+    fn mojo_route_renderer_owns_kind_state_and_signed_decimal() {
+        for (kind, route, value, now, expected) in [
+            (
+                0,
+                Some("responses"),
+                11,
+                10,
+                "東京/responses circuit=open until=11",
+            ),
+            (
+                0,
+                Some("responses"),
+                10,
+                10,
+                "東京/responses circuit=half-open until=10",
+            ),
+            (
+                0,
+                Some("websocket"),
+                i64::MIN,
+                0,
+                "東京/websocket circuit=half-open until=-9223372036854775808",
+            ),
+            (
+                1,
+                None,
+                i64::MAX,
+                0,
+                "東京/transport transport_backoff until=9223372036854775807",
+            ),
+            (
+                1,
+                Some("compact"),
+                0,
+                0,
+                "東京/compact transport_backoff until=0",
+            ),
+            (2, None, -1, 0, "東京/retry retry_backoff until=-1"),
+            (3, Some("compact"), 3, 0, "東京/compact bad_pairing=3"),
+            (4, Some("responses"), 0, 0, "東京/responses health=0"),
+        ] {
+            assert_eq!(
+                runtime_doctor_degraded_route_render(kind, "東京", route, value, now).unwrap(),
+                expected,
+            );
+        }
+    }
+
+    #[test]
+    fn mojo_route_renderer_rejects_malformed_input_before_mutation() {
+        let profile = view("alpha");
+        let route = view("responses");
+        let mut output = [99_u8; 128];
+        let mut written = 77_i64;
+        unsafe {
+            assert_eq!(
+                prodex_mojo_runtime_doctor_degraded_route_render_v1(
+                    2,
+                    0,
+                    mojo_pointer_address(&profile),
+                    mojo_pointer_address(&route),
+                    1,
+                    11,
+                    10,
+                    mojo_mut_pointer_address(output.as_mut_ptr()),
+                    128,
+                    mojo_mut_pointer_address(&mut written),
+                ),
+                4,
+            );
+            assert_eq!(
+                prodex_mojo_runtime_doctor_degraded_route_render_v1(
+                    1,
+                    0,
+                    mojo_pointer_address(&profile),
+                    mojo_pointer_address(&route),
+                    0,
+                    11,
+                    10,
+                    mojo_mut_pointer_address(output.as_mut_ptr()),
+                    128,
+                    mojo_mut_pointer_address(&mut written),
+                ),
+                1,
+            );
+            assert_eq!(
+                prodex_mojo_runtime_doctor_degraded_route_render_v1(
+                    1,
+                    5,
+                    mojo_pointer_address(&profile),
+                    mojo_pointer_address(&route),
+                    1,
+                    11,
+                    10,
+                    mojo_mut_pointer_address(output.as_mut_ptr()),
+                    128,
+                    mojo_mut_pointer_address(&mut written),
+                ),
+                1,
+            );
+        }
+        assert_eq!(output, [99; 128]);
+        assert_eq!(written, 77);
+    }
 }

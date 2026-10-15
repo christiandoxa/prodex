@@ -249,6 +249,39 @@ fn runtime_doctor_degraded_routes_formats_neutral_maps() {
 }
 
 #[test]
+fn runtime_doctor_degraded_route_lines_preserve_unicode_and_signed_bounds() {
+    let retry = BTreeMap::from([("🧭".to_string(), i64::MAX)]);
+    let transport =
+        BTreeMap::from([("__route_transport_backoff__:websocket:東京".to_string(), -1)]);
+    let circuits = BTreeMap::from([("__route_circuit__:responses:東京".to_string(), i64::MIN)]);
+    let scores = BTreeMap::new();
+    let routes = runtime_doctor_degraded_routes(
+        backoffs(&retry, &transport, &circuits),
+        &scores,
+        0,
+        test_config(),
+    );
+    assert!(
+        routes
+            .iter()
+            .any(|line| line == "東京/responses circuit=half-open until=-9223372036854775808"),
+        "{routes:?}",
+    );
+    assert!(
+        routes
+            .iter()
+            .any(|line| line == "🧭/retry retry_backoff until=9223372036854775807"),
+        "{routes:?}",
+    );
+    assert!(
+        routes
+            .iter()
+            .any(|line| line == "東京/websocket transport_backoff until=-1"),
+        "{routes:?}",
+    );
+}
+
+#[test]
 fn runtime_doctor_degraded_routes_preserves_key_fallbacks_decay_and_top_eight_order() {
     let retry = BTreeMap::from([("zeta".to_string(), 10), ("alpha".to_string(), 10)]);
     let transport = BTreeMap::from([
