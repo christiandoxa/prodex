@@ -113,6 +113,46 @@ pub struct SmartContextRewriteTelemetryInput {
     pub quality_risk: bool,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SmartContextJsonShapeViolation {
+    DepthLimit,
+    NodeLimit,
+}
+
+/// Evaluate one already-ordered bounded serde traversal batch in compiled
+/// Mojo. The host retains only Value ownership and traversal mechanics.
+pub fn smart_context_json_shape_scan(
+    depths: &[u64],
+    previous_nodes: usize,
+) -> Result<Option<SmartContextJsonShapeViolation>, crate::MojoError> {
+    if depths.is_empty() || depths.len() > 1_024 {
+        return Err(crate::MojoError::InvalidInput);
+    }
+    let mut violation = -1_i64;
+    let status = unsafe {
+        prodex_smart_context_json_shape_scan_v1(
+            1,
+            depths.as_ptr() as u64,
+            i64::try_from(depths.len()).map_err(|_| crate::MojoError::InvalidInput)?,
+            u64::try_from(previous_nodes).map_err(|_| crate::MojoError::InvalidInput)?,
+            &mut violation,
+        )
+    };
+    if status != 0 {
+        return Err(match status {
+            1 => crate::MojoError::InvalidInput,
+            4 => crate::MojoError::AbiMismatch,
+            _ => crate::MojoError::InvalidOutput,
+        });
+    }
+    match violation {
+        0 => Ok(None),
+        1 => Ok(Some(SmartContextJsonShapeViolation::DepthLimit)),
+        2 => Ok(Some(SmartContextJsonShapeViolation::NodeLimit)),
+        _ => Err(crate::MojoError::InvalidOutput),
+    }
+}
+
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct SmartContextRewriteQualityInput {
     pub upstream_context_errors: u16,
@@ -342,6 +382,13 @@ unsafe extern "C" {
         adjusted_inline_bytes: *mut u64,
         adjusted_inline_tool_output_bytes: *mut u64,
         adjusted_rehydrate_tokens: *mut u64,
+    ) -> i64;
+    fn prodex_smart_context_json_shape_scan_v1(
+        abi_version: i64,
+        depths: u64,
+        count: i64,
+        previous_nodes: u64,
+        violation: *mut i64,
     ) -> i64;
     fn prodex_smart_context_rewrite_quality_risk_v1(
         metrics_address: u64,
@@ -909,5 +956,89 @@ mod rewrite_quality_risk_tests {
             );
         }
         assert_eq!(decision, -7);
+    }
+}
+
+#[cfg(test)]
+mod json_shape_scan_tests {
+    use super::*;
+
+    #[test]
+    fn mojo_json_shape_scan_owns_depth_first_and_node_limits() {
+        use SmartContextJsonShapeViolation::{DepthLimit, NodeLimit};
+        assert_eq!(smart_context_json_shape_scan(&[1, 64, 1], 0), Ok(None));
+        assert_eq!(
+            smart_context_json_shape_scan(&[65], 0),
+            Ok(Some(DepthLimit))
+        );
+        assert_eq!(
+            smart_context_json_shape_scan(&[64], 50_000),
+            Ok(Some(NodeLimit))
+        );
+        assert_eq!(
+            smart_context_json_shape_scan(&[65], 50_000),
+            Ok(Some(DepthLimit))
+        );
+        assert_eq!(
+            smart_context_json_shape_scan(&[64, 65], 49_999),
+            Ok(Some(DepthLimit))
+        );
+        assert_eq!(
+            smart_context_json_shape_scan(&[64, 64], 49_999),
+            Ok(Some(NodeLimit))
+        );
+        assert_eq!(
+            smart_context_json_shape_scan(&[1_024; 1], 0),
+            Ok(Some(DepthLimit))
+        );
+        assert_eq!(
+            smart_context_json_shape_scan(&[1; 1_024], 48_977),
+            Ok(Some(NodeLimit))
+        );
+        assert_eq!(smart_context_json_shape_scan(&[1; 1_024], 48_976), Ok(None));
+    }
+
+    #[test]
+    fn mojo_json_shape_scan_abi_is_fail_closed_on_untrusted_depths() {
+        let mut violation = 77_i64;
+        let mut depths = [64_u64, 0];
+        unsafe {
+            assert_eq!(
+                prodex_smart_context_json_shape_scan_v1(
+                    2,
+                    depths.as_ptr() as u64,
+                    1,
+                    0,
+                    &mut violation,
+                ),
+                4,
+            );
+            assert_eq!(
+                prodex_smart_context_json_shape_scan_v1(
+                    1,
+                    depths.as_ptr() as u64,
+                    2,
+                    0,
+                    &mut violation,
+                ),
+                1,
+            );
+            depths[1] = 64;
+            assert_eq!(
+                prodex_smart_context_json_shape_scan_v1(
+                    1,
+                    depths.as_ptr() as u64,
+                    2,
+                    50_001,
+                    &mut violation,
+                ),
+                1,
+            );
+            assert_eq!(
+                prodex_smart_context_json_shape_scan_v1(1, 0, 2, 0, &mut violation,),
+                1,
+            );
+        }
+        assert_eq!(violation, 77);
     }
 }

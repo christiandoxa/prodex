@@ -552,7 +552,8 @@
           "smart_context_adaptive_budget_planning",
           "smart_context_calibrated_estimate",
           "smart_context_text_token_estimate",
-          "smart_context_rewrite_telemetry_quality_risk"
+          "smart_context_rewrite_telemetry_quality_risk",
+          "smart_context_json_shape_safety"
         ]
       },
       "mojo/prodex_core/context_text.mojo": {
@@ -10146,6 +10147,29 @@
       "duplicate_production_owner": false,
       "platform_fallback": false,
       "rust_adapter_scope": "Rust supplies measured item count and byte length, Mojo-provided checksum text and final String materialization"
+    },
+    {
+      "name": "smart_context_json_shape_safety",
+      "domain": "smart-context/json-safety",
+      "introduced_in": "0.438.0",
+      "baseline_state": "Rust traversed serde JSON nodes and decided first-violation precedence of maximum depth 64 and maximum node count 50000",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_smart_context_json_shape_scan_v1",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/smart_context.mojo",
+      "consumer": "crates/prodex-runtime-proxy/src/smart_context/safety.rs",
+      "consumer_marker": "prodex_mojo_core::runtime::smart_context_json_shape_scan(",
+      "production_consumers": [
+        "crates/prodex-runtime-proxy/src/smart_context/safety.rs"
+      ],
+      "production_reachability_test": "crates/prodex-runtime-proxy/src/smart_context/safety.rs",
+      "rust_owner_before": "Rust depth and node-count limits and early-exit precedence during iterative serde_json traversal",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "Removed Rust safety decision branches; compiled Mojo and caller regressions cover exact 64-level and 50000-node bounds, 1024-node batches, invalid depth, depth-first precedence and structured JSON",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "Host serde_json structural iteration in original depth-first order, checked depth facts and diagnostic error-tag projection"
     }
   ],
   "rust_semantic_reductions": [
