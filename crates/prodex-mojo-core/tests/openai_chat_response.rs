@@ -165,3 +165,21 @@ fn raw_response_boundary_rejects_bad_abi_without_writes() {
     assert_eq!(metadata, [31, 31]);
     assert_eq!(output, [0xa5; 8]);
 }
+
+#[test]
+fn chat_bridge_metadata_boundary_returns_empty_object_without_a_first_choice() {
+    let (nodes, raw) = response_document();
+    assert_eq!(
+        prodex_mojo_core::json::transform_chat_bridge_metadata(&nodes, raw).unwrap(),
+        b"{}"
+    );
+}
+
+#[test]
+fn chat_bridge_usage_boundary_rejects_incorrect_context_shape() {
+    let (nodes, raw) = response_document();
+    assert_eq!(
+        prodex_mojo_core::json::transform_chat_bridge_usage(&nodes, raw),
+        Err(MojoError::InvalidInput)
+    );
+}

@@ -69,7 +69,7 @@ pub fn provider_core_chat_compatible_responses_value_from_chat_value_with_fallba
     }) {
         response["usage"] = usage;
     }
-    let metadata = chat_compatible_response_metadata(value, message);
+    let metadata = chat_compatible_response_metadata(value);
     if !metadata.is_empty() {
         response["metadata"] = serde_json::json!({ provider_metadata_key: metadata });
     }
@@ -118,78 +118,33 @@ fn chat_compatible_response_output(
 
 fn chat_compatible_response_metadata(
     value: &serde_json::Value,
-    message: Option<&serde_json::Value>,
 ) -> serde_json::Map<String, serde_json::Value> {
-    let mut metadata = serde_json::Map::new();
-    if let Some(logprobs) = value
-        .get("choices")
-        .and_then(serde_json::Value::as_array)
-        .and_then(|choices| choices.first())
-        .and_then(|choice| choice.get("logprobs"))
-        .filter(|logprobs| !logprobs.is_null())
-    {
-        metadata.insert("logprobs".to_string(), logprobs.clone());
-    }
-    insert_non_empty_string_metadata(&mut metadata, message, "reasoning_content");
-    insert_non_empty_string_metadata(&mut metadata, message, "refusal");
-    if let Some(annotations) = message
-        .and_then(|message| message.get("annotations"))
-        .and_then(serde_json::Value::as_array)
-        .filter(|annotations| !annotations.is_empty())
-    {
-        metadata.insert(
-            "annotations".to_string(),
-            serde_json::Value::Array(annotations.clone()),
-        );
-    }
-    if let Some(finish_reason) = value
-        .get("choices")
-        .and_then(serde_json::Value::as_array)
-        .and_then(|choices| choices.first())
-        .and_then(|choice| choice.get("finish_reason"))
-        .and_then(serde_json::Value::as_str)
-    {
-        metadata.insert(
-            "finish_reason".to_string(),
-            serde_json::Value::String(finish_reason.to_string()),
-        );
-    }
-    insert_non_empty_value_metadata(&mut metadata, value, "system_fingerprint");
-    metadata
+    let mut document = crate::mojo_json::Document::default();
+    document.openai_chat_context(value, None);
+    let raw = std::str::from_utf8(&document.raw).expect("Serde emits UTF-8 JSON");
+    let output = prodex_mojo_core::json::transform_chat_bridge_metadata(&document.nodes, raw)
+        .expect("compiled Mojo chat bridge metadata mapping failed");
+    serde_json::from_slice(&output).expect("Mojo chat metadata must be a valid JSON object")
 }
 
-fn insert_non_empty_string_metadata(
-    metadata: &mut serde_json::Map<String, serde_json::Value>,
-    message: Option<&serde_json::Value>,
-    key: &str,
-) {
-    let Some(value) = message
-        .and_then(|message| message.get(key))
-        .and_then(serde_json::Value::as_str)
-        .filter(|value| !value.is_empty())
-    else {
-        return;
-    };
-    metadata.insert(
-        key.to_string(),
-        serde_json::Value::String(value.to_string()),
-    );
-}
+#[cfg(test)]
+mod metadata_tests {
+    use super::chat_compatible_response_metadata;
+    use serde_json::json;
 
-fn insert_non_empty_value_metadata(
-    metadata: &mut serde_json::Map<String, serde_json::Value>,
-    value: &serde_json::Value,
-    key: &str,
-) {
-    let Some(value) = value
-        .get(key)
-        .and_then(serde_json::Value::as_str)
-        .filter(|value| !value.is_empty())
-    else {
-        return;
-    };
-    metadata.insert(
-        key.to_string(),
-        serde_json::Value::String(value.to_string()),
-    );
+    #[test]
+    fn mojo_chat_metadata_preserves_type_presence_and_first_choice() {
+        let value = json!({"choices":[{"logprobs":[],"finish_reason":"","message":{
+            "reasoning_content":" ","refusal":"","annotations":[false],
+        }},{"logprobs":{"ignored":true}}],"system_fingerprint":"fp"});
+        assert_eq!(
+            serde_json::Value::Object(chat_compatible_response_metadata(&value)),
+            json!({
+                "logprobs":[],"finish_reason":"","reasoning_content":" ","annotations":[false],"system_fingerprint":"fp",
+            })
+        );
+        let invalid = json!({"choices":{"message":{"reasoning_content":"ignored"}},"system_fingerprint":false});
+        assert!(chat_compatible_response_metadata(&invalid).is_empty());
+        assert!(chat_compatible_response_metadata(&json!(null)).is_empty());
+    }
 }
