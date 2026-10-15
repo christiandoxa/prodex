@@ -40,9 +40,10 @@ pub(super) fn runtime_doctor_marker_last_usize_field(
     marker: impl AsRef<str>,
     field: &str,
 ) -> Option<usize> {
-    runtime_doctor_marker_last_field(summary, marker, field)?
-        .parse()
-        .ok()
+    prodex_mojo_core::rich::runtime_doctor_unsigned_field(runtime_doctor_marker_last_field(
+        summary, marker, field,
+    ))
+    .expect("Mojo runtime-doctor numeric marker field returned invalid output")
 }
 
 pub(super) fn runtime_doctor_marker_scope(
@@ -68,6 +69,32 @@ pub fn runtime_doctor_count_breakdown(counts: &BTreeMap<String, usize>) -> Strin
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn numeric_marker_value_is_parsed_only_by_mojo() {
+        let mut summary = RuntimeDoctorSummary::default();
+        assert_eq!(
+            runtime_doctor_marker_last_usize_field(&summary, "queued", "backlog"),
+            None,
+        );
+        for (input, expected) in [
+            ("+00017", Some(17)),
+            ("0", Some(0)),
+            (" 7", None),
+            ("-1", None),
+            ("18446744073709551616", None),
+        ] {
+            summary.marker_last_fields.insert(
+                "queued".to_string(),
+                BTreeMap::from([("backlog".to_string(), input.to_string())]),
+            );
+            assert_eq!(
+                runtime_doctor_marker_last_usize_field(&summary, "queued", "backlog"),
+                expected,
+                "{input}",
+            );
+        }
+    }
 
     #[test]
     fn marker_scope_and_breakdown_are_mojo_rendered_from_real_summary_maps() {
