@@ -20,6 +20,37 @@ pub fn fit_cell(value: &str, width: usize) -> String {
     }
 }
 
+pub fn middle_ellipsize(value: &str, width: usize) -> String {
+    use prodex_mojo_core::terminal_layout::MiddleEllipsisPlan;
+
+    let mut scalar_cells = Vec::new();
+    let mut byte_ends = vec![0usize];
+    for (byte_index, ch) in value.char_indices() {
+        scalar_cells.push(u64::try_from(ch.width().unwrap_or(0)).expect("Unicode cell width"));
+        byte_ends.push(byte_index + ch.len_utf8());
+    }
+
+    match prodex_mojo_core::terminal_layout::middle_ellipsis_plan(
+        &scalar_cells,
+        text_width(value),
+        width,
+    )
+    .expect("compiled-in Mojo terminal middle-ellipsis policy failed")
+    {
+        MiddleEllipsisPlan::Empty => String::new(),
+        MiddleEllipsisPlan::Keep => value.to_string(),
+        MiddleEllipsisPlan::Dots(count) => ".".repeat(count),
+        MiddleEllipsisPlan::Split {
+            left_scalars,
+            right_scalars,
+        } => {
+            let left_end = byte_ends[left_scalars];
+            let right_start = byte_ends[scalar_cells.len() - right_scalars];
+            format!("{}...{}", &value[..left_end], &value[right_start..])
+        }
+    }
+}
+
 pub fn pad_cell(value: &str, width: usize) -> String {
     let value = fit_cell(value, width);
     let padding = prodex_mojo_core::terminal_layout::pad_cell_spaces(text_width(&value), width)

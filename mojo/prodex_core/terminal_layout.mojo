@@ -175,6 +175,82 @@ def prodex_terminal_fit_cell_plan_v1(
     return TERMINAL_LAYOUT_OK
 
 
+# Plan middle ellipsis presentation from host-measured scalar cell widths.
+# 0: empty, 1: unchanged, 2: ASCII dots, 3: prefix/suffix scalar counts.
+@export("prodex_terminal_middle_ellipsis_plan_v1")
+def prodex_terminal_middle_ellipsis_plan_v1(
+    abi: Int64,
+    widths_address: UInt,
+    scalar_count: Int64,
+    content_cells: UInt64,
+    available_cells: UInt64,
+    result_address: UInt,
+    result_capacity: Int64,
+) abi("C") -> Int64:
+    if abi != TERMINAL_LAYOUT_ABI:
+        return TERMINAL_LAYOUT_VERSION
+    if (
+        scalar_count < 0
+        or (scalar_count > 0 and widths_address == 0)
+        or result_address == 0
+        or result_capacity < 3
+    ):
+        return TERMINAL_LAYOUT_INVALID
+
+    var widths = Pointer[mut=False, UInt64, ImmUntrackedOrigin](
+        unsafe_from_address=Int(widths_address)
+    )
+    for index in range(scalar_count):
+        if widths[unsafe_offset=index] > 2:
+            return TERMINAL_LAYOUT_INVALID
+
+    var mode: UInt64 = 0
+    var first: UInt64 = 0
+    var second: UInt64 = 0
+    if available_cells == 0:
+        mode = 0
+    elif content_cells <= available_cells:
+        mode = 1
+    elif available_cells <= 3:
+        mode = 2
+        first = available_cells
+    else:
+        if scalar_count == 0:
+            return TERMINAL_LAYOUT_INVALID
+        mode = 3
+        var left_limit = (available_cells - 3) // 2
+        var left_cells: UInt64 = 0
+        var left_count: Int64 = 0
+        for index in range(scalar_count):
+            var cells = widths[unsafe_offset=index]
+            if left_cells > left_limit or cells > left_limit - left_cells:
+                break
+            left_cells += cells
+            left_count += 1
+
+        var right_limit = available_cells - 3 - left_cells
+        var right_cells: UInt64 = 0
+        var right_count: Int64 = 0
+        var index = scalar_count - 1
+        while index >= 0:
+            var cells = widths[unsafe_offset=index]
+            if right_cells > right_limit or cells > right_limit - right_cells:
+                break
+            right_cells += cells
+            right_count += 1
+            index -= 1
+        first = UInt64(left_count)
+        second = UInt64(right_count)
+
+    var result = Pointer[mut=True, UInt64, MutUntrackedOrigin](
+        unsafe_from_address=Int(result_address)
+    )
+    result[unsafe_offset=0] = mode
+    result[unsafe_offset=1] = first
+    result[unsafe_offset=2] = second
+    return TERMINAL_LAYOUT_OK
+
+
 # Terminal token segmentation: Unicode cell widths from the host, all split
 # decisions from Mojo. Output chunk-ending *scalar indexes*, not byte offsets.
 @export("prodex_terminal_token_chunk_plan_v1")

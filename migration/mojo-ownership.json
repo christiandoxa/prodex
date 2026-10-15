@@ -2248,7 +2248,8 @@
           "terminal_display_width_prefix_selection",
           "terminal_fit_cell_ellipsis_policy",
           "terminal_wrap_piece_line_break_decision",
-          "terminal_cell_padding_policy"
+          "terminal_cell_padding_policy",
+          "terminal_middle_ellipsis_policy"
         ]
       },
       {
@@ -2266,7 +2267,8 @@
           "terminal_display_width_prefix_selection",
           "terminal_fit_cell_ellipsis_policy",
           "terminal_wrap_piece_line_break_decision",
-          "terminal_cell_padding_policy"
+          "terminal_cell_padding_policy",
+          "terminal_middle_ellipsis_policy"
         ]
       },
       {
@@ -10238,6 +10240,30 @@
       "rust_adapter_scope": "Rust measures post-truncation Unicode display width and materializes the Mojo-decided count of padding spaces"
     },
     {
+      "name": "terminal_middle_ellipsis_policy",
+      "domain": "terminal/text-truncation",
+      "introduced_in": "0.438.0",
+      "baseline_state": "Rust selected middle-ellipsis prefix and suffix boundaries from Unicode display-cell budgets",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_terminal_middle_ellipsis_plan_v1",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/terminal_layout.mojo",
+      "consumer": "crates/prodex-terminal-ui/src/text.rs",
+      "consumer_marker": "prodex_mojo_core::terminal_layout::middle_ellipsis_plan(",
+      "production_consumers": [
+        "crates/prodex-terminal-ui/src/text.rs",
+        "crates/prodex-app/src/app_commands/log_tui.rs"
+      ],
+      "production_reachability_test": "crates/prodex-terminal-ui/tests/src/lib.rs",
+      "rust_owner_before": "Rust split long log-header profile identities around a middle ellipsis, including wide and zero-cell Unicode scalars",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "deleted; compiled Mojo ABI cases and terminal-ui/log-header caller tests cover exact, tiny, wide and combining Unicode inputs",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "Rust measures Unicode cell widths, slices caller-owned UTF-8 at Mojo scalar counts, and materializes the ellipsis string"
+    },
+    {
       "name": "runtime_doctor_plain_text_log_envelope",
       "domain": "runtime-doctor/log-ingest",
       "introduced_in": "0.438.0",
@@ -12408,6 +12434,29 @@
       "production_consumer": "crates/prodex-provider-core/src/translators/deepseek/stream/shaping.rs",
       "parity_test": "crates/prodex-mojo-core/tests/deepseek_stream_error.rs",
       "cleanup_evidence": "The old DeepSeek error branch is absent from the release stream module; the shaping adapter retains only Serde serialization, Mojo invocation, and typed result mapping."
+    },
+    {
+      "file": "crates/prodex-app/src/app_commands/log_tui.rs",
+      "symbol": "fn middle_ellipsize(value: &str, width: usize)",
+      "operation": "terminal_middle_ellipsis_policy",
+      "previous_responsibility": "Rust selected the visible prefix and suffix of overlong log-header profile identities under a terminal cell budget",
+      "final_state": "deleted",
+      "cleanup_loc": 34,
+      "cleanup_source": {
+        "kind": "deleted",
+        "baseline_range": {
+          "start": 429,
+          "end": 464
+        }
+      },
+      "rust_before": "crates/prodex-app/src/app_commands/log_tui.rs::middle_ellipsize",
+      "rust_after": "The app caller delegates to terminal-ui; Rust retains only Unicode facts, UTF-8 slicing and TUI rendering",
+      "mojo_owner": "mojo/prodex_core/terminal_layout.mojo::prodex_terminal_middle_ellipsis_plan_v1",
+      "mojo_source": "mojo/prodex_core/terminal_layout.mojo",
+      "mojo_entry": "prodex_terminal_middle_ellipsis_plan_v1",
+      "production_consumer": "crates/prodex-terminal-ui/src/text.rs",
+      "parity_test": "crates/prodex-terminal-ui/tests/src/lib.rs::middle_ellipsis_preserves_unicode_zero_width_and_tiny_widths",
+      "cleanup_evidence": "The Rust middle-ellipsis loop is deleted from the log TUI; the compiled Mojo plan now selects presentation mode and scalar boundaries, with terminal-ui and log-header caller regressions preserving output."
     }
   ],
   "deleted_authoritative_operations": [
