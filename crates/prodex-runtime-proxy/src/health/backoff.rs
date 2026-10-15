@@ -216,21 +216,18 @@ pub fn runtime_soften_persisted_route_circuits_for_startup<T: RuntimeProfileHeal
 ) -> bool {
     let mut changed = false;
     route_circuit_open_until.retain(|route_profile_key, until| {
-        if *until <= now {
-            changed = true;
-            return false;
-        }
-        let max_until = now.saturating_add(runtime_profile_route_circuit_probe_seconds(
-            profile_scores,
-            route_profile_key,
+        // Rust resolves route/profile health observations; the existing
+        // compiled Mojo softening policy exclusively decides expiry,
+        // future clipping, retention and whether the value changed.
+        let softened = prodex_mojo_core::runtime::profile_soften_backoff_until(
+            *until,
             now,
-        ));
-        let next_until = (*until).min(max_until);
-        if next_until != *until {
-            changed = true;
-        }
-        *until = next_until;
-        true
+            runtime_profile_route_circuit_probe_seconds(profile_scores, route_profile_key, now),
+        )
+        .expect("Mojo persisted route circuit softening returned invalid output");
+        changed |= softened.changed;
+        *until = softened.until;
+        softened.keep
     });
     changed
 }

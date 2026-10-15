@@ -272,6 +272,39 @@ fn mojo_active_backoff_reduction_respects_route_scope_and_strict_deadline() {
 }
 
 #[test]
+fn mojo_route_circuit_startup_softening_expires_clamps_and_is_idempotent() {
+    let now = 1_000;
+    let response_key = runtime_profile_route_circuit_key("alpha", RuntimeRouteKind::Responses);
+    let websocket_key = runtime_profile_route_circuit_key("alpha", RuntimeRouteKind::Websocket);
+    let mut circuits = BTreeMap::from([
+        (response_key.clone(), now + 1_000),
+        (websocket_key.clone(), now),
+        ("unrecognized-circuit".to_owned(), now + 1_000),
+    ]);
+    let scores = BTreeMap::<String, RuntimeProfileHealth>::new();
+    assert!(runtime_soften_persisted_route_circuits_for_startup(
+        &mut circuits,
+        &scores,
+        now,
+    ));
+    let expected = now + RUNTIME_PROFILE_CIRCUIT_HALF_OPEN_PROBE_SECONDS;
+    assert_eq!(circuits.get(&response_key), Some(&expected));
+    assert_eq!(circuits.get(&websocket_key), None);
+    assert_eq!(circuits.get("unrecognized-circuit"), Some(&expected));
+    assert!(!runtime_soften_persisted_route_circuits_for_startup(
+        &mut circuits,
+        &scores,
+        now,
+    ));
+    assert!(runtime_soften_persisted_route_circuits_for_startup(
+        &mut circuits,
+        &scores,
+        expected,
+    ));
+    assert!(circuits.is_empty());
+}
+
+#[test]
 fn startup_softening_clamps_future_backoffs() {
     let now = 100;
     let mut backoffs = RuntimeProfileBackoffs::default();
