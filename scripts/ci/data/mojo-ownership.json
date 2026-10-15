@@ -633,6 +633,26 @@
     },
     "additions": [
       {
+        "path": "mojo/prodex_core/openai_chat_response_common.mojo",
+        "language": "mojo",
+        "classification": "DETERMINISTIC_DOMAIN",
+        "production_reachable": true,
+        "role": "semantic",
+        "operations": [
+          "chat_bridge_response_projection"
+        ]
+      },
+      {
+        "path": "mojo/prodex_core/openai_chat_bridge_response.mojo",
+        "language": "mojo",
+        "classification": "DETERMINISTIC_DOMAIN",
+        "production_reachable": true,
+        "role": "semantic",
+        "operations": [
+          "chat_bridge_response_projection"
+        ]
+      },
+      {
         "path": "mojo/prodex_core/session_selector.mojo",
         "language": "mojo",
         "classification": "DETERMINISTIC_DOMAIN",
@@ -786,7 +806,8 @@
           "openai_chat_compat_response_translation",
           "deepseek_chat_stream_event_translation",
           "chat_bridge_metadata_projection",
-          "chat_bridge_usage_projection"
+          "chat_bridge_usage_projection",
+          "chat_bridge_response_projection"
         ]
       },
       {
@@ -10121,6 +10142,32 @@
       "rust_adapter_scope": "Borrowed Serde-tree acquisition, measured output allocation and typed JSON decoding; no fallback calculation"
     },
     {
+      "name": "chat_bridge_response_projection",
+      "domain": "provider/chat-compatible-bridge",
+      "introduced_in": "0.438.0",
+      "baseline_state": "Rust assembled the buffered chat-compatible Responses envelope, assistant text item, tool-call output items, namespace fields, and output ordering",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_mojo_openai_chat_response_v1",
+      "mojo_abi_version": 1,
+      "mojo_operation_ids": {
+        "bridge_response": 5
+      },
+      "mojo_source": "mojo/prodex_core/openai_chat_response.mojo",
+      "consumer": "crates/prodex-provider-core/src/bridge/chat_compat/response.rs",
+      "consumer_marker": "prodex_mojo_core::json::transform_chat_bridge_response(",
+      "production_consumers": [
+        "crates/prodex-provider-core/src/bridge/chat_compat/response.rs"
+      ],
+      "production_reachability_test": "crates/prodex-provider-core/src/bridge/tests.rs",
+      "rust_owner_before": "Buffered chat bridge envelope assembly, first-choice content projection, prepared tool-call item serialization, flat namespace splitting, and output ordering",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "Deleted Rust envelope and output-item assembly; provider-boundary fixtures cover fallback IDs, Unicode, special tools, namespaces, and partial failures through the compiled Mojo operation",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "Serde tree acquisition, clock and ID generation, exact argument validation and diagnostics, existing RTK and apply-patch adapters, and typed Mojo result decoding"
+    },
+    {
       "name": "smart_context_rewrite_telemetry_quality_risk",
       "domain": "smart-context/rewrite-safety",
       "introduced_in": "0.438.0",
@@ -11636,6 +11683,36 @@
       "production_consumer": "crates/prodex-app/src/runtime_proxy/standard/compact/retryable.rs",
       "parity_test": "crates/prodex-mojo-core/src/runtime/quota_decisions.rs::compact_retry_hard_affinity_matches_only_bound_profiles",
       "cleanup_evidence": "The Rust hard-affinity boolean computation and input field were removed from the retryable caller. The caller source is traceable in the frozen baseline but is outside its counted Rust inventory, so this record claims no migration volume."
+    },
+    {
+      "file": "crates/prodex-provider-core/src/bridge/chat_compat/response.rs",
+      "symbol": "chat_compatible_response_output",
+      "operation": "chat_bridge_response_projection",
+      "previous_responsibility": "Rust assembled the assistant output item and ordered prepared tool-call items, including partial output before a validation error",
+      "final_state": "deleted",
+      "cleanup_loc": 39,
+      "cleanup_source": {
+        "kind": "deleted",
+        "baseline_range": {
+          "start": 79,
+          "end": 117
+        }
+      }
+    },
+    {
+      "file": "crates/prodex-provider-core/src/bridge/chat_compat/tool_calls.rs",
+      "symbol": "provider_core_chat_compatible_responses_tool_call_item",
+      "operation": "chat_bridge_response_projection",
+      "previous_responsibility": "Rust serialized prepared function, tool-search, and apply-patch output items after validating tool arguments and splitting flat namespaces",
+      "final_state": "deleted",
+      "cleanup_loc": 75,
+      "cleanup_source": {
+        "kind": "deleted",
+        "baseline_range": {
+          "start": 43,
+          "end": 117
+        }
+       }
     }
   ],
   "deleted_authoritative_operations": [

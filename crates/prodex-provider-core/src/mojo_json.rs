@@ -10,6 +10,14 @@ pub(crate) struct Document<'a> {
 }
 
 impl<'a> Document<'a> {
+    pub(crate) fn root(&mut self, value: &'a Value) {
+        assert!(
+            self.nodes.is_empty(),
+            "JSON document root can only be written once"
+        );
+        self.push(value, None, "");
+    }
+
     pub(crate) fn array(&mut self, values: impl IntoIterator<Item = &'a Value>) {
         self.nodes.push(JsonNode {
             kind: JsonKind::Array,

@@ -25,14 +25,16 @@ from openai_compat import (
     openai_compat_put_json_string,
     openai_compat_put_json_string_with_rtk_value,
     openai_compat_put_literal,
+    openai_compat_put_view,
     openai_compat_put_u64,
     openai_compat_split_tool_name_parts,
     openai_compat_write_usage_values,
     openai_compat_writer_status,
 )
-from rich_text import rich_view_ptr
 from rich_types import ProdexRichStringView
 from provider_usage import usage_saturating_add
+from openai_chat_bridge_response import ocr_bridge_response_write
+from openai_chat_response_common import ocr_response_u64
 
 comptime OPENAI_CHAT_RESPONSE_ABI: Int64 = 1
 
@@ -235,28 +237,6 @@ def ocr_response_write_tool_call(
         if not openai_compat_put_json_string(writer, parts[1]):
             return False
     return openai_compat_put_byte(writer, 125)
-
-
-def ocr_response_u64(tree: ParsedJson, index: Int64) -> Tuple[Bool, UInt64]:
-    if pj_kind(tree, index) != JSON_NUMBER:
-        return (False, UInt64(0))
-    var raw = js_raw_view(tree, index)
-    if raw.len == 0:
-        return (False, UInt64(0))
-    var ptr = rich_view_ptr(raw)
-    var value: UInt64 = 0
-    var maximum_prefix: UInt64 = 1844674407370955161
-    for offset in range(Int64(raw.len)):
-        var digit = ptr[unsafe_offset=offset]
-        if digit < 48 or digit > 57:
-            return (False, UInt64(0))
-        var numeric_digit = UInt64(digit - 48)
-        if value > maximum_prefix or (
-            value == maximum_prefix and numeric_digit > UInt64(5)
-        ):
-            return (False, UInt64(0))
-        value = value * UInt64(10) + numeric_digit
-    return (True, value)
 
 
 def ocr_response_usage_values(
@@ -498,15 +478,6 @@ def ocr_response_deepseek_stream_event_write(
     )
 
 
-def ocr_bridge_raw(writer: Pointer[mut=True, OpenAiCompatWriter, _], tree: ParsedJson, node: Int64) -> Bool:
-    var raw = js_raw_view(tree, node)
-    var bytes = rich_view_ptr(raw)
-    for index in range(Int64(raw.len)):
-        if not openai_compat_put_byte(writer, bytes[unsafe_offset=index]):
-            return False
-    return True
-
-
 def ocr_bridge_metadata_write(writer: Pointer[mut=True, OpenAiCompatWriter, _], tree: ParsedJson, response: Int64) -> Bool:
     var choices = pj_field(tree, response, StringSlice("choices"))
     var choice = pj_child(tree, choices) if pj_kind(tree, choices) == JSON_ARRAY else -1
@@ -544,7 +515,7 @@ def ocr_bridge_metadata_write(writer: Pointer[mut=True, OpenAiCompatWriter, _], 
             continue
         if emitted and not openai_compat_put_byte(writer, 44):
             return False
-        if not openai_compat_put_json_string(writer, pj_literal(key)) or not openai_compat_put_byte(writer, 58) or not ocr_bridge_raw(writer, tree, node):
+        if not openai_compat_put_json_string(writer, pj_literal(key)) or not openai_compat_put_byte(writer, 58) or not openai_compat_put_view(writer, js_raw_view(tree, node)):
             return False
         emitted = True
     return openai_compat_put_byte(writer, 125)
@@ -603,7 +574,7 @@ def prodex_mojo_openai_chat_response_v1(
 ) abi("C") -> Int64:
     if abi != OPENAI_CHAT_RESPONSE_ABI:
         return 4
-    if operation < 0 or operation > 4 or flag != 0 or measuring < 0 or measuring > 1 or raw_length < 0:
+    if operation < 0 or operation > 5 or flag != 0 or measuring < 0 or measuring > 1 or raw_length < 0:
         return 1
     if (
         capacity < 0
@@ -638,6 +609,10 @@ def prodex_mojo_openai_chat_response_v1(
         if pj_kind(tree, key) != JSON_STRING:
             return 1
         provider_key = pj_text(tree, key)
+    elif operation == 5:
+        if pj_kind(tree, 0) != JSON_OBJECT:
+            return 1
+        response = 0
     else:
         if pj_kind(tree, 0) != JSON_OBJECT:
             return 1
@@ -661,6 +636,8 @@ def prodex_mojo_openai_chat_response_v1(
     var success = True
     if operation == 0:
         success = ocr_response_write(writer_ptr, tree, response, default_created_at)
+    elif operation == 5:
+        success = ocr_bridge_response_write(writer_ptr, tree, response)
     elif operation == 3:
         success = ocr_bridge_metadata_write(writer_ptr, tree, response)
     elif operation == 4:

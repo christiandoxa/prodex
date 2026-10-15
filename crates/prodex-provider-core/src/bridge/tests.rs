@@ -210,6 +210,112 @@ fn provider_core_chat_compatible_response_maps_tools_usage_and_metadata() {
 }
 
 #[test]
+fn provider_core_chat_compatible_response_mojo_preserves_special_tools_and_unicode() {
+    let response = serde_json::json!({
+        "created": u64::MAX,
+        "choices": [{"message": {
+            "content": "完成 ✅",
+            "tool_calls": [
+                {"function": {"name": "mcp__prodex__读取", "arguments": "{\"path\":\"東京.txt\"}"}},
+                {"id": "search-1", "function": {"name": "tool_search", "arguments": "{\"query\":\"é\"}"}},
+                {"id": "patch-1", "function": {"name": "apply_patch", "arguments": "{\"input\":\"*** Begin Patch\\n*** End Patch\"}"}}
+            ]
+        }}]
+    });
+
+    let mapped = provider_core_chat_compatible_responses_value_from_chat_value_with_fallback_ids(
+        &response,
+        "東京",
+        "Gemini OpenAI-compatible",
+        "gemini-default",
+        || "resp_fallback_é".to_string(),
+        || "call_fallback_é".to_string(),
+    );
+
+    assert_eq!(mapped["id"], "resp_fallback_é");
+    assert_eq!(mapped["created_at"], u64::MAX);
+    assert_eq!(mapped["model"], "gemini-default");
+    assert_eq!(mapped["output"][0]["content"][0]["text"], "完成 ✅");
+    assert_eq!(mapped["output"][1]["call_id"], "call_fallback_é");
+    assert_eq!(mapped["output"][1]["namespace"], "mcp__prodex");
+    assert_eq!(mapped["output"][1]["name"], "读取");
+    assert_eq!(
+        mapped["output"][2],
+        serde_json::json!({
+            "type": "tool_search_call",
+            "call_id": "search-1",
+            "execution": "client",
+            "arguments": {"query": "é"}
+        })
+    );
+    assert_eq!(mapped["output"][3]["type"], "custom_tool_call");
+    assert_eq!(
+        mapped["output"][3]["input"],
+        "*** Begin Patch\n*** End Patch"
+    );
+}
+
+#[test]
+fn provider_core_chat_compatible_response_mojo_keeps_partial_output_on_tool_error() {
+    let response = serde_json::json!({
+        "id": "chat-error",
+        "model": "compat",
+        "created": 7,
+        "choices": [{"message": {
+            "content": "before",
+            "tool_calls": [
+                {"id": "good", "function": {"name": "shell", "arguments": "{}"}},
+                {"id": "bad", "function": {"name": "shell", "arguments": "{\"cmd\":"}}
+            ]
+        }}]
+    });
+
+    let mapped = provider_core_chat_compatible_responses_value_from_chat_value(
+        &response,
+        1,
+        "deepseek",
+        "DeepSeek",
+        "deepseek-chat",
+        "resp_deepseek",
+    );
+
+    assert_eq!(mapped["status"], "failed");
+    assert_eq!(mapped["error"]["code"], "invalid_tool_call_arguments");
+    assert_eq!(mapped["output"].as_array().map(Vec::len), Some(2));
+    assert_eq!(mapped["output"][1]["call_id"], "good");
+    assert!(
+        mapped["error"]["message"]
+            .as_str()
+            .is_some_and(|message| message.contains("DeepSeek returned malformed JSON arguments"))
+    );
+}
+
+#[test]
+fn provider_core_chat_compatible_response_mojo_operation_is_directly_reachable() {
+    let context = serde_json::json!({
+        "response": {
+            "id": "direct",
+            "model": "compat",
+            "created": 1,
+            "choices": [{"message": {"content": "ok"}}]
+        },
+        "fallback_response_id": "fallback",
+        "fallback_created_at": 0,
+        "default_model": "default",
+        "provider_metadata_key": "provider",
+        "tool_plans": []
+    });
+    let mut document = crate::mojo_json::Document::default();
+    document.root(&context);
+    let raw = std::str::from_utf8(&document.raw).unwrap();
+    let body = prodex_mojo_core::json::transform_chat_bridge_response(&document.nodes, raw)
+        .expect("compiled Mojo operation 5 must accept a valid bridge context");
+    let mapped: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(mapped["id"], "direct");
+    assert_eq!(mapped["output"][0]["content"][0]["text"], "ok");
+}
+
+#[test]
 fn anthropic_provider_core_request_stays_lossless_for_simple_responses_history() {
     let result =
         provider_translator(ProviderId::Anthropic).transform_request(ProviderTransformInput::new(
