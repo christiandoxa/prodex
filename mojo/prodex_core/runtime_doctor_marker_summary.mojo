@@ -860,3 +860,44 @@ def prodex_mojo_runtime_doctor_log_metric_plan_v1(
                 found[unsafe_offset=kind] = 1
                 break
     return 0
+
+# Single optional numeric marker field, used by multiple diagnostic callers.
+# The same unsigned decimal parser owns validity and host-size boundaries.
+@export("prodex_mojo_runtime_doctor_unsigned_field_v1")
+def prodex_mojo_runtime_doctor_unsigned_field_v1(
+    abi_version: Int64,
+    value_view_address: UInt,
+    input_present: Int64,
+    maximum: UInt64,
+    output_value_address: UInt,
+    output_present_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != RUNTIME_DOCTOR_LOG_METRIC_ABI_VERSION:
+        return 4
+    if (
+        value_view_address == 0
+        or output_value_address == 0
+        or output_present_address == 0
+        or (input_present != 0 and input_present != 1)
+    ):
+        return 1
+    var value_view = Pointer[mut=False, ProdexRichStringView, ImmUntrackedOrigin](
+        unsafe_from_address=Int(value_view_address)
+    )[].copy()
+    if not rich_view_valid(value_view, INT64_MAX):
+        return 2
+    var output_value = Pointer[mut=True, UInt64, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_value_address)
+    )
+    var output_present = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_present_address)
+    )
+    output_value[] = UInt64(0)
+    output_present[] = 0
+    if input_present == 0:
+        return 0
+    var parsed = runtime_doctor_log_metric_decimal(value_view, maximum)
+    if parsed[0]:
+        output_value[] = parsed[1]
+        output_present[] = 1
+    return 0

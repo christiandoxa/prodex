@@ -1392,7 +1392,8 @@
         "production_reachable": true,
         "role": "adapter",
         "operations": [
-          "runtime_doctor_log_metric_plan"
+          "runtime_doctor_log_metric_plan",
+          "runtime_doctor_unsigned_field"
         ]
       },
       {
@@ -1407,7 +1408,8 @@
           "runtime_doctor_marker_context_reason_facet_aggregation",
           "runtime_doctor_selection_record_plan",
           "runtime_doctor_marker_context_summary_order",
-          "runtime_doctor_log_metric_plan"
+          "runtime_doctor_log_metric_plan",
+          "runtime_doctor_unsigned_field"
         ]
       },
       {
@@ -6694,6 +6696,29 @@
       "duplicate_production_owner": false,
       "platform_fallback": false,
       "rust_adapter_scope": "Sorted BTreeMap iteration, checked output allocation, Mojo view and count marshalling, safe String decoding"
+    },
+    {
+      "name": "runtime_doctor_unsigned_field",
+      "domain": "runtime-doctor/log-ingest",
+      "introduced_in": "0.438.0",
+      "baseline_state": "Rust parsed an optional text marker field directly into usize with a hidden parse-error-to-None decision",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_mojo_runtime_doctor_unsigned_field_v1",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/runtime_doctor_marker_summary.mojo",
+      "consumer": "crates/prodex-runtime-doctor/src/diagnosis/marker_accessors.rs",
+      "consumer_marker": "prodex_mojo_core::rich::runtime_doctor_unsigned_field(",
+      "production_consumers": [
+        "crates/prodex-runtime-doctor/src/diagnosis/marker_accessors.rs"
+      ],
+      "production_reachability_test": "crates/prodex-runtime-doctor/src/diagnosis/marker_accessors.rs",
+      "rust_owner_before": "Rust Option field parse::<usize>() and error absorption",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "Direct Mojo and caller regressions cover absent, empty, signed, overflow, plus-prefixed and padded decimal values",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "Borrowed field lookup, ABI call and checked unsigned host-size projection"
     },
     {
       "name": "runtime_doctor_log_metric_plan",

@@ -8,6 +8,14 @@ const SOURCE_COUNT: usize = 13;
 const RESULT_COUNT: usize = 6;
 
 unsafe extern "C" {
+    fn prodex_mojo_runtime_doctor_unsigned_field_v1(
+        abi_version: i64,
+        value_view: u64,
+        input_present: i64,
+        maximum: u64,
+        output_value: u64,
+        output_present: u64,
+    ) -> i64;
     fn prodex_mojo_runtime_doctor_log_metric_plan_v1(
         abi_version: i64,
         views: u64,
@@ -60,9 +68,104 @@ pub fn runtime_doctor_log_metric_plan(
     Ok(result)
 }
 
+/// Decode an optional unsigned marker field only through compiled Mojo.
+/// Rust keeps the target-size projection and never re-parses invalid input.
+pub fn runtime_doctor_unsigned_field(value: Option<&str>) -> Result<Option<usize>, MojoError> {
+    ensure_rich_abi()?;
+    let source = view(value.unwrap_or(""));
+    let mut parsed = 0_u64;
+    let mut present = -1_i64;
+    let status = unsafe {
+        prodex_mojo_runtime_doctor_unsigned_field_v1(
+            1,
+            mojo_pointer_address(&source),
+            i64::from(value.is_some()),
+            usize::MAX as u64,
+            mojo_mut_pointer_address(&mut parsed),
+            mojo_mut_pointer_address(&mut present),
+        )
+    };
+    if status != 0 {
+        return Err(match status {
+            1 => MojoError::InvalidInput,
+            4 => MojoError::AbiMismatch,
+            _ => MojoError::InvalidOutput,
+        });
+    }
+    match present {
+        0 => Ok(None),
+        1 => usize::try_from(parsed)
+            .map(Some)
+            .map_err(|_| MojoError::InvalidOutput),
+        _ => Err(MojoError::InvalidOutput),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn mojo_optional_unsigned_field_has_no_rust_parser_fallback() {
+        for (source, expected) in [
+            (None, None),
+            (Some(""), None),
+            (Some("+"), None),
+            (Some("+00017"), Some(17)),
+            (Some("0"), Some(0)),
+            (Some("-4"), None),
+            (Some(" 7"), None),
+            (Some("7 "), None),
+            (Some("🧭"), None),
+        ] {
+            assert_eq!(
+                runtime_doctor_unsigned_field(source).unwrap(),
+                expected,
+                "{source:?}"
+            );
+        }
+        assert_eq!(
+            runtime_doctor_unsigned_field(Some(&usize::MAX.to_string())).unwrap(),
+            Some(usize::MAX),
+        );
+        assert_eq!(
+            runtime_doctor_unsigned_field(Some(&format!("{}0", usize::MAX))).unwrap(),
+            None,
+        );
+    }
+
+    #[test]
+    fn mojo_unsigned_field_rejects_malformed_abi_before_touching_output() {
+        let view = view("123");
+        let mut value = 77_u64;
+        let mut present = 77_i64;
+        unsafe {
+            assert_eq!(
+                prodex_mojo_runtime_doctor_unsigned_field_v1(
+                    2,
+                    mojo_pointer_address(&view),
+                    1,
+                    100,
+                    mojo_mut_pointer_address(&mut value),
+                    mojo_mut_pointer_address(&mut present),
+                ),
+                4,
+            );
+            assert_eq!(
+                prodex_mojo_runtime_doctor_unsigned_field_v1(
+                    1,
+                    mojo_pointer_address(&view),
+                    2,
+                    100,
+                    mojo_mut_pointer_address(&mut value),
+                    mojo_mut_pointer_address(&mut present),
+                ),
+                1,
+            );
+        }
+        assert_eq!(value, 77);
+        assert_eq!(present, 77);
+    }
 
     #[test]
     fn mojo_metric_planner_owns_priority_and_decimal_parsing() {
