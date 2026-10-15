@@ -419,7 +419,7 @@ fn import_identity_falls_back_to_exported_email() {
                 email: None,
                 account_id: Some("acct-main".to_string()),
             },
-            Some(" User@Example.com "),
+            Some("\u{2003} User@Example.com \u{3000}"),
         ),
         ProfileImportIdentity {
             email: Some("User@Example.com".to_string()),
@@ -437,6 +437,28 @@ fn import_identity_falls_back_to_exported_email() {
         .email
         .as_deref(),
         Some("auth@example.com")
+    );
+    assert_eq!(
+        resolve_profile_import_identity(
+            ProfileImportIdentity {
+                email: None,
+                account_id: None,
+            },
+            Some(" \u{2003} "),
+        )
+        .email,
+        None
+    );
+    assert_eq!(
+        resolve_profile_import_identity(
+            ProfileImportIdentity {
+                email: Some(String::new()),
+                account_id: None,
+            },
+            Some("fallback@example.com"),
+        )
+        .email,
+        Some(String::new())
     );
 }
 

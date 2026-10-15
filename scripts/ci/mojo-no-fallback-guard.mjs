@@ -5791,10 +5791,13 @@ export function findViolations(files) {
     if (filePath === "crates/prodex-profile-export/src/import_plan.rs") {
       const production = contents.split("#[cfg(test)]", 1)[0];
       const required = [
+        "prodex_mojo_core::profile_identity::profile_import_email(",
         "prodex_mojo_core::profile_export::profile_import_auth_update_plan(",
         "let existing_profile_names = auth_updates",
       ];
       const restoredRust = [
+        "fallback_email.map(str::trim)",
+        ".filter(|email| !email.is_empty())",
         ".position(|update| update.target_profile_name == target_profile_name)",
         "if let Some(existing) = auth_updates",
       ];
@@ -7625,6 +7628,18 @@ function selfTest() {
     "crates/prodex-profile-export/src/selection.rs",
     profileExportSelectionCaller + "\nselected.iter().any(|name| name == active_profile);",
   ]]).join("\n"), /profile selection and active-profile resolution must use Mojo/u);
+  const profileImportIdentityCaller = [
+    "prodex_mojo_core::profile_identity::profile_import_email(",
+    "prodex_mojo_core::profile_export::profile_import_auth_update_plan(",
+    "let existing_profile_names = auth_updates",
+  ].join("\n");
+  assert.deepEqual(findViolations([[
+    "crates/prodex-profile-export/src/import_plan.rs", profileImportIdentityCaller,
+  ]]), []);
+  assert.match(findViolations([[
+    "crates/prodex-profile-export/src/import_plan.rs",
+    profileImportIdentityCaller + "\nfallback_email.map(str::trim)",
+  ]]).join("\n"), /queued auth-update planning must use Mojo/u);
   const envelopeOwnerCaller = [
     "prodex_mojo_core::profile_export::validate_password_bytes(",
     "prodex_mojo_core::profile_export::validate_profile_export_envelope_schema(",

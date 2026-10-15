@@ -73,4 +73,20 @@ fn profile_identity_kernel_smoke() {
         removed_active_profile_choice(true, false, true).unwrap(),
         RemovedActiveProfileChoice::Current
     );
+    assert_eq!(
+        profile_import_email(None, Some("\u{2003} User@Example.com \u{3000}")).unwrap(),
+        Some("User@Example.com".to_string())
+    );
+    assert_eq!(
+        profile_import_email(Some("auth@example.com"), Some("fallback@example.com")).unwrap(),
+        Some("auth@example.com".to_string())
+    );
+    assert_eq!(
+        profile_import_email(None, Some(" \u{2003} ")).unwrap(),
+        None
+    );
+    assert_eq!(
+        profile_import_email(Some(""), Some("fallback")).unwrap(),
+        Some(String::new())
+    );
 }

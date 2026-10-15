@@ -1021,7 +1021,8 @@
         "production_reachable": true,
         "role": "semantic",
         "operations": [
-          "profile_identity_planning"
+          "profile_identity_planning",
+          "profile_import_identity_email_resolution"
         ]
       },
       {
@@ -2602,6 +2603,29 @@
       "baseline_state": "candidate",
       "final_state": "authoritative",
       "mojo_entry": "prodex_mojo_profile_identity_v2",
+      "mojo_operation_ids": {
+        "normalize_email": 0,
+        "normalize_account": 1,
+        "profile_name": 2,
+        "canonical_key": 3,
+        "validate_profile_name": 4,
+        "add_profile_source": 5,
+        "should_activate": 6,
+        "other_email_name": 7,
+        "find_match": 8,
+        "remove_targets": 9,
+        "delete_home": 10,
+        "sanitize_slug": 11,
+        "trimmed_equal": 12,
+        "trimmed_casefold_equal": 13,
+        "optional_casefold_equal": 14,
+        "optional_casefold_wildcard": 15,
+        "optional_nonempty_casefold_equal": 16,
+        "first_present_source": 17,
+        "removed_active_choice": 18,
+        "name_candidate": 19,
+        "trimmed_nonempty": 20
+      },
       "mojo_abi_version": 2,
       "mojo_source": "mojo/prodex_core/profile_identity.mojo",
       "consumer": "crates/prodex-profile-identity/src/lib.rs",
@@ -2617,6 +2641,33 @@
       "duplicate_production_owner": false,
       "platform_fallback": false,
       "rust_adapter_scope": "JWT and access-token decoding, zeroized secret ownership, caller callbacks for unique-name availability, collection reconstruction and human-readable error mapping; migrated profile metadata decisions are Mojo-authoritative"
+    },
+    {
+      "name": "profile_import_identity_email_resolution",
+      "domain": "profile/identity",
+      "introduced_in": "0.438.0",
+      "baseline_state": "Rust preserved an auth email when present and otherwise trimmed and filtered the exported fallback email during profile import",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_mojo_profile_identity_v2",
+      "mojo_operation_ids": {
+        "import_email": 21
+      },
+      "mojo_abi_version": 2,
+      "mojo_source": "mojo/prodex_core/profile_identity.mojo",
+      "consumer": "crates/prodex-profile-export/src/import_plan.rs",
+      "consumer_marker": "prodex_mojo_core::profile_identity::profile_import_email(",
+      "production_consumers": [
+        "crates/prodex-profile-export/src/import_plan.rs",
+        "crates/prodex-app/src/profile_commands/import_export/import.rs"
+      ],
+      "production_reachability_test": "crates/prodex-mojo-core/tests/profile_identity.rs",
+      "rust_owner_before": "Auth-email presence precedence and Unicode-trimmed exported-email fallback selection for imported profile identity",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "deleted; compiled Mojo ABI cases and profile-export caller regressions cover auth precedence, Unicode whitespace, empty fallback, and empty auth-email compatibility",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "ProfileIdentity field ownership, borrowed UTF-8 views, caller-owned output materialization, and typed identity DTO reconstruction"
     },
     {
       "name": "profile_login_auto_transition",
@@ -12224,6 +12275,31 @@
         }
       },
       "cleanup_evidence": "The provider-to-allowed-name match is removed; Rust only maps Mojo outcomes to compatibility error text and continues credential-content validation."
+    },
+    {
+      "file": "crates/prodex-profile-export/src/import_plan.rs",
+      "symbol": "fallback_email",
+      "operation": "profile_import_identity_email_resolution",
+      "previous_responsibility": "Rust selected auth-email precedence and trimmed and filtered the exported fallback email",
+      "final_state": "adapter-only",
+      "cleanup_loc": 6,
+      "cleanup_source": {
+        "kind": "collapsed-adapter",
+        "baseline_range": {
+          "start": 283,
+          "end": 288
+        },
+        "release_symbol": "pub fn resolve_profile_import_identity",
+        "release_marker": "prodex_mojo_core::profile_identity::profile_import_email("
+      },
+      "rust_before": "crates/prodex-profile-export/src/import_plan.rs::resolve_profile_import_identity",
+      "rust_after": "Rust retains identity DTO mutation and Mojo result materialization",
+      "mojo_owner": "mojo/prodex_core/profile_identity.mojo::prodex_mojo_profile_identity_v2 operation 21",
+      "mojo_source": "mojo/prodex_core/profile_identity.mojo",
+      "mojo_entry": "prodex_mojo_profile_identity_v2",
+      "production_consumer": "crates/prodex-profile-export/src/import_plan.rs",
+      "parity_test": "crates/prodex-profile-export/tests/src/lib.rs::import_identity_falls_back_to_exported_email",
+      "cleanup_evidence": "The Rust auth-presence, Unicode-trim, empty-filter, and fallback-copy branch is deleted; the required Mojo operation now owns source precedence and fallback normalization."
     },
     {
       "file": "crates/prodex-app/src/runtime_launch/proxy_startup/provider_bridge_routing.rs",
