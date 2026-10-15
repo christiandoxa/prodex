@@ -172,20 +172,19 @@ fn runtime_proxy_request_has_owned_lane_affinity(
         lane,
         RuntimeRouteKind::Responses | RuntimeRouteKind::Websocket
     ) {
-        if runtime_request_previous_response_id(request)
+        let previous_response_binding = runtime_request_previous_response_id(request)
             .as_deref()
             .and_then(|response_id| runtime.state.response_profile_bindings.get(response_id))
-            .is_some_and(binding_profile_exists)
-        {
-            return true;
-        }
-        if runtime_request_turn_state(request)
+            .is_some_and(binding_profile_exists);
+        let turn_state_binding = runtime_request_turn_state(request)
             .as_deref()
             .and_then(|turn_state| runtime.turn_state_bindings.get(turn_state))
-            .is_some_and(binding_profile_exists)
-        {
-            return true;
-        }
+            .is_some_and(binding_profile_exists);
+        return runtime_proxy_crate::runtime_proxy_owned_affinity_for_route(
+            lane,
+            previous_response_binding,
+            turn_state_binding,
+        );
     }
 
     if lane == RuntimeRouteKind::Compact {

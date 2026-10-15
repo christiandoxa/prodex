@@ -17,6 +17,7 @@ const MODE_SECTIONS_UNION: i64 = 9;
 const MODE_ADMISSION_RELEASE: i64 = 10;
 
 const RUNTIME_PROXY_ADMISSION_ABI_VERSION: i64 = 1;
+const RUNTIME_PROXY_ADMISSION_AFFINITY_ABI_VERSION: i64 = 1;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct RuntimeStateMutationPolicy {
@@ -87,6 +88,11 @@ pub struct RuntimeProxyAdmissionPolicy {
     pub shed_fresh_compact_request: bool,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct RuntimeProxyAdmissionAffinity {
+    pub owned: bool,
+}
+
 unsafe extern "C" {
     fn prodex_runtime_state_background_policy_v1(
         abi_version: i64,
@@ -117,6 +123,13 @@ unsafe extern "C" {
         local_overload_pressure: i64,
         background_queue_pressure: i64,
         session_profile_present: i64,
+        output_address: u64,
+    ) -> i64;
+    fn prodex_runtime_proxy_admission_affinity_v1(
+        abi_version: i64,
+        route_kind: i64,
+        previous_response_binding: i64,
+        turn_state_binding: i64,
         output_address: u64,
     ) -> i64;
 }
@@ -424,6 +437,31 @@ pub fn runtime_proxy_admission_policy(
             pressure_mode: bool_output(output[1])?,
             lane_limit_marks_global_overload: bool_output(output[2])?,
             shed_fresh_compact_request: bool_output(output[3])?,
+        }),
+        1 => Err(MojoError::InvalidInput),
+        4 => Err(MojoError::AbiMismatch),
+        _ => Err(MojoError::InvalidOutput),
+    }
+}
+
+pub fn runtime_proxy_admission_affinity(
+    route_kind: u8,
+    previous_response_binding: bool,
+    turn_state_binding: bool,
+) -> Result<RuntimeProxyAdmissionAffinity, MojoError> {
+    let mut output = [0_u64; 1];
+    let status = unsafe {
+        prodex_runtime_proxy_admission_affinity_v1(
+            RUNTIME_PROXY_ADMISSION_AFFINITY_ABI_VERSION,
+            i64::from(route_kind),
+            i64::from(previous_response_binding),
+            i64::from(turn_state_binding),
+            output.as_mut_ptr() as usize as u64,
+        )
+    };
+    match status {
+        0 => Ok(RuntimeProxyAdmissionAffinity {
+            owned: bool_output(output[0])?,
         }),
         1 => Err(MojoError::InvalidInput),
         4 => Err(MojoError::AbiMismatch),

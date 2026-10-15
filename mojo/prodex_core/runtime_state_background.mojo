@@ -10,6 +10,11 @@ comptime RUNTIME_PROXY_ADMISSION_OK: Int64 = 0
 comptime RUNTIME_PROXY_ADMISSION_INVALID: Int64 = 1
 comptime RUNTIME_PROXY_ADMISSION_ABI: Int64 = 4
 
+comptime RUNTIME_PROXY_ADMISSION_AFFINITY_ABI_VERSION: Int64 = 1
+comptime RUNTIME_PROXY_ADMISSION_AFFINITY_OK: Int64 = 0
+comptime RUNTIME_PROXY_ADMISSION_AFFINITY_INVALID: Int64 = 1
+comptime RUNTIME_PROXY_ADMISSION_AFFINITY_ABI: Int64 = 4
+
 comptime MODE_MUTATION_PLAN: Int64 = 0
 comptime MODE_QUEUE_PRESSURE: Int64 = 1
 comptime MODE_QUEUE_ENQUEUE: Int64 = 2
@@ -500,6 +505,38 @@ def prodex_runtime_proxy_admission_policy_v1(
         pressure_mode and session_profile_present == 0
     )
     return RUNTIME_PROXY_ADMISSION_OK
+
+
+@export("prodex_runtime_proxy_admission_affinity_v1")
+def prodex_runtime_proxy_admission_affinity_v1(
+    abi_version: Int64,
+    route_kind: Int64,
+    previous_response_binding: Int64,
+    turn_state_binding: Int64,
+    output_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != RUNTIME_PROXY_ADMISSION_AFFINITY_ABI_VERSION:
+        return RUNTIME_PROXY_ADMISSION_AFFINITY_ABI
+    if (
+        route_kind < RUNTIME_PROXY_ROUTE_RESPONSES
+        or route_kind > RUNTIME_PROXY_ROUTE_STANDARD
+        or previous_response_binding < 0
+        or previous_response_binding > 1
+        or turn_state_binding < 0
+        or turn_state_binding > 1
+        or output_address == 0
+    ):
+        return RUNTIME_PROXY_ADMISSION_AFFINITY_INVALID
+
+    var owned = (
+        route_kind == RUNTIME_PROXY_ROUTE_RESPONSES
+        or route_kind == RUNTIME_PROXY_ROUTE_WEBSOCKET
+    ) and (previous_response_binding == 1 or turn_state_binding == 1)
+    var output = Pointer[mut=True, UInt64, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    output[unsafe_offset=0] = runtime_state_flag(owned)
+    return RUNTIME_PROXY_ADMISSION_AFFINITY_OK
 
 
 def runtime_state_reason_put(
