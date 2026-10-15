@@ -36,6 +36,50 @@ pub fn websocket_event_kind(kind: &str) -> Result<WebsocketEventKind, MojoError>
     })
 }
 
+#[repr(i64)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RuntimeProviderModelsResponsePlan {
+    NoResponse = 0,
+    CatalogLimitExceeded = 1,
+    ModelsList = 2,
+    ModelFound = 3,
+    ModelMissing = 4,
+    CatalogRequired = 5,
+}
+
+pub fn runtime_provider_models_response_plan(
+    method: &str,
+    route_kind: i64,
+    catalog_state: i64,
+    model_present: bool,
+) -> Result<RuntimeProviderModelsResponsePlan, MojoError> {
+    ensure_rich_abi()?;
+    let method = view(method);
+    let mut output = -1_i64;
+    let status = unsafe {
+        prodex_runtime_provider_models_response_plan_v1(
+            RICH_ABI_VERSION,
+            mojo_pointer_address(&method),
+            route_kind,
+            catalog_state,
+            i64::from(model_present),
+            mojo_mut_pointer_address(&mut output),
+        )
+    };
+    if status != 0 {
+        return Err(status_error(status, 7, 0, 0, 0));
+    }
+    match output {
+        0 => Ok(RuntimeProviderModelsResponsePlan::NoResponse),
+        1 => Ok(RuntimeProviderModelsResponsePlan::CatalogLimitExceeded),
+        2 => Ok(RuntimeProviderModelsResponsePlan::ModelsList),
+        3 => Ok(RuntimeProviderModelsResponsePlan::ModelFound),
+        4 => Ok(RuntimeProviderModelsResponsePlan::ModelMissing),
+        5 => Ok(RuntimeProviderModelsResponsePlan::CatalogRequired),
+        _ => Err(MojoError::InvalidOutput),
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct RuntimeProxyPathPlan {
     pub mount_suffix_start: Option<usize>,

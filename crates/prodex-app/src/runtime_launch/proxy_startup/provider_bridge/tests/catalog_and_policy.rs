@@ -161,6 +161,30 @@ fn dynamic_models_endpoint_fails_explicitly_at_the_catalog_hard_limit() {
 }
 
 #[test]
+fn provider_models_response_policy_preserves_method_and_missing_model_status() {
+    assert!(
+        runtime_provider_models_buffered_response(
+            RuntimeProviderBridgeKind::Copilot,
+            None,
+            "POST",
+            "/v1/models",
+        )
+        .is_none()
+    );
+
+    let missing = runtime_provider_models_buffered_response(
+        RuntimeProviderBridgeKind::Copilot,
+        None,
+        "GET",
+        "/v1/models/no-such-model",
+    )
+    .expect("model lookup should return an explicit not-found response");
+    assert_eq!(missing.status, 404);
+    let body: serde_json::Value = serde_json::from_slice(&missing.body).unwrap();
+    assert_eq!(body["error"]["code"], "model_not_found");
+}
+
+#[test]
 fn every_provider_bridge_exposes_openai_client_contract() {
     for kind in [
         RuntimeProviderBridgeKind::OpenAiResponses,

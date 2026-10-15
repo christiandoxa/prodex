@@ -32,9 +32,10 @@ const _: () = assert!(std::mem::size_of::<usize>() == std::mem::size_of::<u64>()
 
 mod routing;
 pub use routing::{
-    RuntimeProviderRoutePlan, RuntimeProxyPathPlan, WebsocketEventKind,
-    runtime_provider_route_plan, runtime_proxy_escape_dot_segments, runtime_proxy_header_skip_kind,
-    runtime_proxy_mount_path, runtime_proxy_path_plan, websocket_event_kind,
+    RuntimeProviderModelsResponsePlan, RuntimeProviderRoutePlan, RuntimeProxyPathPlan,
+    WebsocketEventKind, runtime_provider_models_response_plan, runtime_provider_route_plan,
+    runtime_proxy_escape_dot_segments, runtime_proxy_header_skip_kind, runtime_proxy_mount_path,
+    runtime_proxy_path_plan, websocket_event_kind,
 };
 #[path = "rich/log_parser.rs"]
 mod log_parser;
@@ -518,6 +519,14 @@ unsafe extern "C" {
         path_address: u64,
         path_length: i64,
         output: *mut i64,
+    ) -> i64;
+    fn prodex_runtime_provider_models_response_plan_v1(
+        abi_version: i64,
+        method_address: u64,
+        route_kind: i64,
+        catalog_state: i64,
+        model_present: i64,
+        output_address: u64,
     ) -> i64;
     fn prodex_provider_error_classify_v1(
         status: i64,
