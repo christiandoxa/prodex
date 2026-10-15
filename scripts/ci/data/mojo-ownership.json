@@ -1171,6 +1171,7 @@
           "profile_export_copilot_import_state_planning",
           "profile_import_lifecycle_ordering",
           "profile_import_secret_path_safety",
+          "profile_import_secret_file_schema_policy",
           "profile_import_auth_journal_commit_policy",
           "profile_import_auth_update_planning",
           "profile_export_envelope_schema_validation"
@@ -8064,6 +8065,29 @@
       "rust_adapter_scope": "host path metadata acquisition and secure filesystem staging"
     },
     {
+      "name": "profile_import_secret_file_schema_policy",
+      "domain": "profiles/import",
+      "introduced_in": "0.438.0",
+      "baseline_state": "Rust selected provider-specific allowed secret filenames, rejected duplicates and unexpected names, and checked required secret-file presence",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_profile_import_secret_file_policy_v1",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/profile_export_policy.mojo",
+      "consumer": "crates/prodex-app/src/profile_commands/import_export/secrets.rs",
+      "consumer_marker": "prodex_mojo_core::profile_export::profile_import_secret_file_policy(",
+      "production_consumers": [
+        "crates/prodex-app/src/profile_commands/import_export/secrets.rs"
+      ],
+      "production_reachability_test": "crates/prodex-mojo-core/src/profile_export/tests.rs",
+      "rust_owner_before": "Provider-specific allowed and required secret filenames, duplicate detection, and unexpected-file rejection for imported profile bundles",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "deleted; direct required-Mojo schema tests and profile-import caller regressions cover accepted, duplicate, unexpected, and missing-file outcomes",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "provider-label and borrowed filename view construction, typed status/error mapping, user-facing error text, secret-content parsing, and secure file effects"
+    },
+    {
       "name": "profile_import_auth_journal_commit_policy",
       "domain": "profiles/import",
       "introduced_in": "0.436.1",
@@ -11844,6 +11868,56 @@
           "end": 117
         }
        }
+    },
+    {
+      "file": "crates/prodex-app/src/profile_commands/import_export/secrets.rs",
+      "symbol": "validate_exported_secret_files",
+      "operation": "profile_import_secret_file_schema_policy",
+      "previous_responsibility": "Rust performed duplicate and provider-specific allowed/required filename decisions while validating imported secret files",
+      "final_state": "adapter-only",
+      "cleanup_loc": 33,
+      "cleanup_source": {
+        "kind": "collapsed-adapter",
+        "baseline_range": {
+          "start": 39,
+          "end": 74
+        },
+        "release_symbol": "pub(super) fn validate_exported_secret_files",
+        "release_marker": "profile_import_secret_file_policy("
+      },
+      "cleanup_evidence": "The frozen validation function's BTreeSet duplicate branch, allowed-name branch, and required-name loop are deleted; Rust retains path safety, secret-content parsing, and error text while Mojo owns the schema result."
+    },
+    {
+      "file": "crates/prodex-app/src/profile_commands/import_export/secrets.rs",
+      "symbol": "required_exported_secret_file_names",
+      "operation": "profile_import_secret_file_schema_policy",
+      "previous_responsibility": "Rust mapped providers to required imported secret filenames",
+      "final_state": "deleted",
+      "cleanup_loc": 10,
+      "cleanup_source": {
+        "kind": "deleted",
+        "baseline_range": {
+          "start": 137,
+          "end": 146
+        }
+      },
+      "cleanup_evidence": "The provider-to-required-name match is removed from the production caller and is now represented by Mojo missing-result tags."
+    },
+    {
+      "file": "crates/prodex-app/src/profile_commands/import_export/secrets.rs",
+      "symbol": "allowed_exported_secret_file_names",
+      "operation": "profile_import_secret_file_schema_policy",
+      "previous_responsibility": "Rust mapped providers to allowed imported secret filenames",
+      "final_state": "deleted",
+      "cleanup_loc": 10,
+      "cleanup_source": {
+        "kind": "deleted",
+        "baseline_range": {
+          "start": 148,
+          "end": 157
+        }
+      },
+      "cleanup_evidence": "The provider-to-allowed-name match is removed; Rust only maps Mojo outcomes to compatibility error text and continues credential-content validation."
     }
   ],
   "deleted_authoritative_operations": [

@@ -18,6 +18,14 @@ unsafe extern "C" {
         path_address: u64,
         path_is_absolute: i64,
     ) -> i64;
+    fn prodex_profile_import_secret_file_policy_v1(
+        abi_version: i64,
+        operation: i64,
+        provider_address: u64,
+        current_address: u64,
+        previous_address: u64,
+        previous_count: i64,
+    ) -> i64;
     fn prodex_profile_import_auth_journal_commit_v1(
         abi_version: i64,
         profile_exists: i64,
@@ -224,6 +232,71 @@ pub fn profile_import_secret_path_is_safe(
     match status {
         0 => Ok(true),
         1 => Ok(false),
+        99 => Err(MojoError::InvalidInput),
+        100 => Err(MojoError::AbiMismatch),
+        _ => Err(MojoError::InvalidOutput),
+    }
+}
+
+/// Select the provider-specific imported secret-file schema result.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ProfileImportSecretFilePolicy {
+    Accepted,
+    Duplicate,
+    Unexpected,
+    MissingGemini,
+    MissingAnthropic,
+    MissingKiro,
+}
+
+/// Which bounded secret-file schema fact the Mojo operation should check.
+#[repr(i64)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ProfileImportSecretFilePolicyMode {
+    Item = 0,
+    Required = 1,
+}
+
+/// Ask Mojo to validate one imported filename or the provider's required filename.
+pub fn profile_import_secret_file_policy(
+    provider: &str,
+    mode: ProfileImportSecretFilePolicyMode,
+    current: Option<&str>,
+    previous: &[&str],
+) -> Result<ProfileImportSecretFilePolicy, MojoError> {
+    ensure_rich_abi()?;
+    let provider_view = ProfileImportStringView::from(Some(provider))?;
+    let current_view = current
+        .map(|value| ProfileImportStringView::from(Some(value)))
+        .transpose()?;
+    let previous_views = previous
+        .iter()
+        .map(|value| ProfileImportStringView::from(Some(value)))
+        .collect::<Result<Vec<_>, _>>()?;
+    let previous_address = if previous_views.is_empty() {
+        0
+    } else {
+        previous_views.as_ptr() as usize as u64
+    };
+    let status = unsafe {
+        prodex_profile_import_secret_file_policy_v1(
+            ABI_IMPORT_LIFECYCLE_VERSION,
+            mode as i64,
+            (&provider_view as *const ProfileImportStringView) as usize as u64,
+            current_view.as_ref().map_or(0, |view| {
+                (view as *const ProfileImportStringView) as usize as u64
+            }),
+            previous_address,
+            i64::try_from(previous_views.len()).map_err(|_| MojoError::InvalidInput)?,
+        )
+    };
+    match status {
+        0 => Ok(ProfileImportSecretFilePolicy::Accepted),
+        1 => Ok(ProfileImportSecretFilePolicy::Duplicate),
+        2 => Ok(ProfileImportSecretFilePolicy::Unexpected),
+        3 => Ok(ProfileImportSecretFilePolicy::MissingGemini),
+        4 => Ok(ProfileImportSecretFilePolicy::MissingAnthropic),
+        5 => Ok(ProfileImportSecretFilePolicy::MissingKiro),
         99 => Err(MojoError::InvalidInput),
         100 => Err(MojoError::AbiMismatch),
         _ => Err(MojoError::InvalidOutput),

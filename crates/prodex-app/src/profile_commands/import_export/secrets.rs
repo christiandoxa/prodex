@@ -3,7 +3,6 @@ use chrono::Local;
 use prodex_profile_export::{
     ImportedExistingProfileAuthUpdateJournal, ImportedExistingProfileFileUpdate,
 };
-use std::collections::BTreeSet;
 use std::fs;
 use std::path::Path;
 use std::path::PathBuf;
@@ -37,40 +36,74 @@ pub(super) fn profile_import_exported_profile(
 }
 
 pub(super) fn validate_exported_secret_files(exported: &ExportedProfile) -> Result<()> {
-    let required_files = required_exported_secret_file_names(&exported.provider);
-    let allowed_files = allowed_exported_secret_file_names(&exported.provider);
-    let mut seen_paths = BTreeSet::new();
+    let mut seen_paths = Vec::new();
 
     for secret_file in &exported.secret_files {
         validate_exported_secret_file_path(&secret_file.path, &exported.name)?;
-        if !seen_paths.insert(secret_file.path.clone()) {
-            bail!(
-                "profile export bundle contains duplicate secret file '{}' for profile '{}'",
-                secret_file.path,
-                exported.name
-            );
-        }
-        if !allowed_files.contains(&secret_file.path.as_str()) {
-            bail!(
-                "profile export bundle contains unexpected secret file '{}' for profile '{}'",
-                secret_file.path,
-                exported.name
-            );
+        let previous_paths = seen_paths.iter().map(String::as_str).collect::<Vec<_>>();
+        match prodex_mojo_core::profile_export::profile_import_secret_file_policy(
+            exported.provider.label(),
+            prodex_mojo_core::profile_export::ProfileImportSecretFilePolicyMode::Item,
+            Some(&secret_file.path),
+            &previous_paths,
+        )
+        .map_err(|error| {
+            anyhow::anyhow!("Mojo profile-import secret-file policy failed: {error:?}")
+        })? {
+            prodex_mojo_core::profile_export::ProfileImportSecretFilePolicy::Accepted => {}
+            prodex_mojo_core::profile_export::ProfileImportSecretFilePolicy::Duplicate => {
+                bail!(
+                    "profile export bundle contains duplicate secret file '{}' for profile '{}'",
+                    secret_file.path,
+                    exported.name
+                );
+            }
+            prodex_mojo_core::profile_export::ProfileImportSecretFilePolicy::Unexpected => {
+                bail!(
+                    "profile export bundle contains unexpected secret file '{}' for profile '{}'",
+                    secret_file.path,
+                    exported.name
+                );
+            }
+            _ => bail!("Mojo returned an invalid imported secret-file item result"),
         }
         validate_exported_secret_file_content(exported, &secret_file.path, &secret_file.text)?;
+        seen_paths.push(secret_file.path.clone());
     }
 
-    for required_file in required_files {
-        if !seen_paths.contains(*required_file) {
+    let previous_paths = seen_paths.iter().map(String::as_str).collect::<Vec<_>>();
+    match prodex_mojo_core::profile_export::profile_import_secret_file_policy(
+        exported.provider.label(),
+        prodex_mojo_core::profile_export::ProfileImportSecretFilePolicyMode::Required,
+        None,
+        &previous_paths,
+    )
+    .map_err(|error| anyhow::anyhow!("Mojo profile-import secret-file policy failed: {error:?}"))?
+    {
+        prodex_mojo_core::profile_export::ProfileImportSecretFilePolicy::Accepted => Ok(()),
+        prodex_mojo_core::profile_export::ProfileImportSecretFilePolicy::MissingGemini => {
             bail!(
                 "profile export bundle is missing secret file '{}' for profile '{}'",
-                required_file,
+                GEMINI_OAUTH_SECRET_FILE,
                 exported.name
             );
         }
+        prodex_mojo_core::profile_export::ProfileImportSecretFilePolicy::MissingAnthropic => {
+            bail!(
+                "profile export bundle is missing secret file '{}' for profile '{}'",
+                CLAUDE_CREDENTIALS_FILE,
+                exported.name
+            );
+        }
+        prodex_mojo_core::profile_export::ProfileImportSecretFilePolicy::MissingKiro => {
+            bail!(
+                "profile export bundle is missing secret file '{}' for profile '{}'",
+                KIRO_CREDENTIALS_FILE,
+                exported.name
+            );
+        }
+        _ => bail!("Mojo returned an invalid imported secret-file requirement result"),
     }
-
-    Ok(())
 }
 
 pub(super) fn validate_exported_secret_file_path(path: &str, profile_name: &str) -> Result<()> {
@@ -133,28 +166,6 @@ fn validate_exported_secret_file_content(
         }
     }
     Ok(())
-}
-
-fn required_exported_secret_file_names(provider: &ProfileProvider) -> &'static [&'static str] {
-    match provider {
-        ProfileProvider::Gemini { .. } => &[GEMINI_OAUTH_SECRET_FILE],
-        ProfileProvider::Anthropic { .. } => &[CLAUDE_CREDENTIALS_FILE],
-        ProfileProvider::Kiro { .. } => &[KIRO_CREDENTIALS_FILE],
-        ProfileProvider::Openai | ProfileProvider::Copilot { .. } | ProfileProvider::Agy { .. } => {
-            &[]
-        }
-    }
-}
-
-fn allowed_exported_secret_file_names(provider: &ProfileProvider) -> &'static [&'static str] {
-    match provider {
-        ProfileProvider::Gemini { .. } => &[GEMINI_OAUTH_SECRET_FILE],
-        ProfileProvider::Anthropic { .. } => &[CLAUDE_CREDENTIALS_FILE],
-        ProfileProvider::Kiro { .. } => &[KIRO_CREDENTIALS_FILE, KIRO_MODEL_CATALOG_FILE],
-        ProfileProvider::Openai | ProfileProvider::Copilot { .. } | ProfileProvider::Agy { .. } => {
-            &[]
-        }
-    }
 }
 
 pub(super) fn write_exported_secret_files(

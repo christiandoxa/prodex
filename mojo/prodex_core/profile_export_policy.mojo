@@ -1093,6 +1093,117 @@ def prodex_profile_import_secret_path_valid_v1(
     return 0
 
 
+comptime PROFILE_IMPORT_SECRET_FILE_POLICY_ITEM: Int64 = 0
+comptime PROFILE_IMPORT_SECRET_FILE_POLICY_REQUIRED: Int64 = 1
+comptime PROFILE_IMPORT_SECRET_FILE_POLICY_DUPLICATE: Int64 = 1
+comptime PROFILE_IMPORT_SECRET_FILE_POLICY_UNEXPECTED: Int64 = 2
+comptime PROFILE_IMPORT_SECRET_FILE_POLICY_MISSING_GEMINI: Int64 = 3
+comptime PROFILE_IMPORT_SECRET_FILE_POLICY_MISSING_ANTHROPIC: Int64 = 4
+comptime PROFILE_IMPORT_SECRET_FILE_POLICY_MISSING_KIRO: Int64 = 5
+
+
+def profile_import_secret_file_allowed(
+    provider: ProdexRichStringView, filename: ProdexRichStringView
+) -> Bool:
+    if rich_view_matches_literal["gemini"](provider, False):
+        return rich_view_matches_literal["gemini_oauth.json"](filename, False)
+    if rich_view_matches_literal["anthropic"](provider, False):
+        return rich_view_matches_literal[".credentials.json"](filename, False)
+    if rich_view_matches_literal["kiro"](provider, False):
+        return (
+            rich_view_matches_literal["kiro_auth.json"](filename, False)
+            or rich_view_matches_literal["kiro_model_catalog.json"](filename, False)
+        )
+    return False
+
+
+def profile_import_secret_file_required(
+    provider: ProdexRichStringView,
+) -> Int64:
+    if rich_view_matches_literal["gemini"](provider, False):
+        return PROFILE_IMPORT_SECRET_FILE_POLICY_MISSING_GEMINI
+    if rich_view_matches_literal["anthropic"](provider, False):
+        return PROFILE_IMPORT_SECRET_FILE_POLICY_MISSING_ANTHROPIC
+    if rich_view_matches_literal["kiro"](provider, False):
+        return PROFILE_IMPORT_SECRET_FILE_POLICY_MISSING_KIRO
+    return PROFILE_EXPORT_POLICY_OK
+
+
+@export("prodex_profile_import_secret_file_policy_v1")
+def prodex_profile_import_secret_file_policy_v1(
+    abi_version: Int64,
+    operation: Int64,
+    provider_address: UInt,
+    current_address: UInt,
+    previous_address: UInt,
+    previous_count: Int64,
+) abi("C") -> Int64:
+    if abi_version != PROFILE_IMPORT_LIFECYCLE_ABI_VERSION:
+        return PROFILE_EXPORT_POLICY_ABI
+    if (
+        (operation != PROFILE_IMPORT_SECRET_FILE_POLICY_ITEM
+         and operation != PROFILE_IMPORT_SECRET_FILE_POLICY_REQUIRED)
+        or provider_address == 0
+        or previous_count < 0
+        or previous_count > 4096
+        or (previous_count > 0 and previous_address == 0)
+    ):
+        return PROFILE_EXPORT_POLICY_INVALID
+
+    var provider = Pointer[mut=False, ProdexRichStringView, ImmUntrackedOrigin](
+        unsafe_from_address=Int(provider_address)
+    )[].copy()
+    if (
+        not profile_import_view_valid(provider, False)
+        or not profile_import_known_provider(provider)
+    ):
+        return PROFILE_EXPORT_POLICY_INVALID
+
+    var previous = Pointer[mut=False, ProdexRichStringView, ImmUntrackedOrigin](
+        unsafe_from_address=Int(previous_address)
+    )
+    for index in range(previous_count):
+        if not profile_import_view_valid(previous[unsafe_offset=index].copy(), False):
+            return PROFILE_EXPORT_POLICY_INVALID
+
+    if operation == PROFILE_IMPORT_SECRET_FILE_POLICY_ITEM:
+        if current_address == 0:
+            return PROFILE_EXPORT_POLICY_INVALID
+        var current = Pointer[mut=False, ProdexRichStringView, ImmUntrackedOrigin](
+            unsafe_from_address=Int(current_address)
+        )[].copy()
+        if not profile_import_view_valid(current, False):
+            return PROFILE_EXPORT_POLICY_INVALID
+        for index in range(previous_count):
+            if profile_import_views_equal(current, previous[unsafe_offset=index].copy()):
+                return PROFILE_IMPORT_SECRET_FILE_POLICY_DUPLICATE
+        return (
+            PROFILE_EXPORT_POLICY_OK
+            if profile_import_secret_file_allowed(provider, current)
+            else PROFILE_IMPORT_SECRET_FILE_POLICY_UNEXPECTED
+        )
+
+    if current_address != 0:
+        return PROFILE_EXPORT_POLICY_INVALID
+    var required = profile_import_secret_file_required(provider)
+    if required == PROFILE_EXPORT_POLICY_OK:
+        return PROFILE_EXPORT_POLICY_OK
+    for index in range(previous_count):
+        var candidate = previous[unsafe_offset=index].copy()
+        if (
+            required == PROFILE_IMPORT_SECRET_FILE_POLICY_MISSING_GEMINI
+            and rich_view_matches_literal["gemini_oauth.json"](candidate, False)
+        ) or (
+            required == PROFILE_IMPORT_SECRET_FILE_POLICY_MISSING_ANTHROPIC
+            and rich_view_matches_literal[".credentials.json"](candidate, False)
+        ) or (
+            required == PROFILE_IMPORT_SECRET_FILE_POLICY_MISSING_KIRO
+            and rich_view_matches_literal["kiro_auth.json"](candidate, False)
+        ):
+            return PROFILE_EXPORT_POLICY_OK
+    return required
+
+
 @export("prodex_profile_import_auth_journal_commit_v1")
 def prodex_profile_import_auth_journal_commit_v1(
     abi_version: Int64,
