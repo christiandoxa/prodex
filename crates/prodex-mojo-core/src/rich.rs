@@ -76,10 +76,12 @@ pub use fallback::{
     RUNTIME_ERROR_MODE_TEXT_PROFILE, RUNTIME_ERROR_MODE_TEXT_QUOTA, RUNTIME_ERROR_MODE_TEXT_RATE,
     RUNTIME_ERROR_MODE_TEXT_WORKSPACE, RUNTIME_ERROR_SESSION_USAGE_LIMIT_MAX_BYTES,
     RUNTIME_RETRY_AFTER_MODE_DURATION_MILLIS, RUNTIME_RETRY_AFTER_MODE_DURATION_SECONDS,
-    RUNTIME_RETRY_AFTER_MODE_HEADER_SECONDS, RuntimeUsageLimitInputFormat,
+    RUNTIME_RETRY_AFTER_MODE_HEADER_SECONDS, RUNTIME_RETRY_AFTER_TEXT_HEADER,
+    RUNTIME_RETRY_AFTER_TEXT_MESSAGE, RuntimeUsageLimitInputFormat,
     gemini_code_assist_model_allowed, model_fallback_chain, model_fallback_head,
     model_fallback_plan, previous_response_error_class, previous_response_plan,
-    rate_limit_header_class, runtime_retry_after_millis, runtime_session_usage_limit_marker,
+    rate_limit_header_class, runtime_retry_after_millis, runtime_retry_after_text_millis,
+    runtime_session_usage_limit_marker,
 };
 mod catalog;
 pub use catalog::{
