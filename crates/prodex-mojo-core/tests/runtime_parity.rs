@@ -1,8 +1,9 @@
 #![cfg(feature = "mojo-runtime")]
 
 use prodex_mojo_core::runtime::{
-    QuotaScore, QuotaScoreInput, RUNTIME_CANDIDATE_PLAN_FIELD_COUNT, quota_score_batch,
-    runtime_candidate_plan_batch, smart_context_pressure_snapshot,
+    LastChanceCandidateInput, QuotaScore, QuotaScoreInput, RUNTIME_CANDIDATE_PLAN_FIELD_COUNT,
+    last_chance_candidate_eligible, quota_score_batch, runtime_candidate_plan_batch,
+    smart_context_pressure_snapshot,
 };
 use std::cmp::Ordering;
 
@@ -243,6 +244,60 @@ fn candidate_plan_reports_bounded_availability_decisions() {
             .map(|decision| decision.inflight_soft_limited)
             .collect::<Vec<_>>(),
         [false, true, true, true]
+    );
+}
+
+#[test]
+fn required_mojo_last_chance_candidate_policy_preserves_route_and_backoff_gates() {
+    const { assert!(prodex_mojo_core::MOJO_ACTIVE) }
+
+    let base = LastChanceCandidateInput {
+        route_kind: 2,
+        context_allowed: true,
+        supports_runtime: true,
+        auth_compatible: true,
+        cached_probe_ready: false,
+        snapshot_blocks: false,
+        auth_failure_active: false,
+        backoff_kind: 4,
+        fallback_skip_present: false,
+    };
+    assert!(last_chance_candidate_eligible(base).unwrap());
+    for mutate in [
+        |input: &mut LastChanceCandidateInput| input.context_allowed = false,
+        |input: &mut LastChanceCandidateInput| input.supports_runtime = false,
+        |input: &mut LastChanceCandidateInput| input.auth_compatible = false,
+        |input: &mut LastChanceCandidateInput| input.cached_probe_ready = true,
+        |input: &mut LastChanceCandidateInput| input.snapshot_blocks = true,
+        |input: &mut LastChanceCandidateInput| input.auth_failure_active = true,
+        |input: &mut LastChanceCandidateInput| input.fallback_skip_present = true,
+    ] {
+        let mut input = base;
+        mutate(&mut input);
+        assert!(!last_chance_candidate_eligible(input).unwrap());
+    }
+    for backoff_kind in [0, 1, 2, 4] {
+        assert!(
+            last_chance_candidate_eligible(LastChanceCandidateInput {
+                backoff_kind,
+                ..base
+            })
+            .unwrap()
+        );
+    }
+    assert!(
+        !last_chance_candidate_eligible(LastChanceCandidateInput {
+            backoff_kind: 3,
+            ..base
+        })
+        .unwrap()
+    );
+    assert_eq!(
+        last_chance_candidate_eligible(LastChanceCandidateInput {
+            route_kind: 4,
+            ..base
+        }),
+        Err(prodex_mojo_core::MojoError::InvalidOutput)
     );
 }
 

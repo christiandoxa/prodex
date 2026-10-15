@@ -163,6 +163,20 @@ pub enum WaitableCandidateMode {
     RetryablePool,
 }
 
+/// Cached profile facts projected for one quota last-chance candidate.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct LastChanceCandidateInput {
+    pub route_kind: i64,
+    pub context_allowed: bool,
+    pub supports_runtime: bool,
+    pub auth_compatible: bool,
+    pub cached_probe_ready: bool,
+    pub snapshot_blocks: bool,
+    pub auth_failure_active: bool,
+    pub backoff_kind: i64,
+    pub fallback_skip_present: bool,
+}
+
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct WaitableCandidateInput {
     pub context_allowed: bool,
@@ -296,6 +310,17 @@ unsafe extern "C" {
         snapshot_blocks: i64,
         quota_blocked: i64,
     ) -> i64;
+    fn prodex_runtime_quota_last_chance_candidate_eligible_v1(
+        route_kind: i64,
+        context_allowed: i64,
+        supports_runtime: i64,
+        auth_compatible: i64,
+        cached_probe_ready: i64,
+        snapshot_blocks: i64,
+        auth_failure_active: i64,
+        backoff_kind: i64,
+        fallback_skip_present: i64,
+    ) -> i64;
     fn prodex_runtime_noncompact_failure_plan_v1(
         failure_kind: i64,
         session_owned: i64,
@@ -370,6 +395,26 @@ pub fn waitable_candidate_eligible(
             i64::from(input.hard_limited),
             i64::from(input.snapshot_blocks),
             i64::from(input.quota_blocked),
+        )
+    } {
+        0 => Ok(false),
+        1 => Ok(true),
+        _ => Err(MojoError::InvalidOutput),
+    }
+}
+
+pub fn last_chance_candidate_eligible(input: LastChanceCandidateInput) -> Result<bool, MojoError> {
+    match unsafe {
+        prodex_runtime_quota_last_chance_candidate_eligible_v1(
+            input.route_kind,
+            i64::from(input.context_allowed),
+            i64::from(input.supports_runtime),
+            i64::from(input.auth_compatible),
+            i64::from(input.cached_probe_ready),
+            i64::from(input.snapshot_blocks),
+            i64::from(input.auth_failure_active),
+            input.backoff_kind,
+            i64::from(input.fallback_skip_present),
         )
     } {
         0 => Ok(false),

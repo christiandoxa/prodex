@@ -190,8 +190,21 @@ pub(crate) fn runtime_quota_last_chance_profile_for_route(
     );
 
     for candidate in candidate_plan.fallback_candidates {
-        if candidate.fallback_skip_reason().is_some()
-            || !matches!(candidate.backoff_sort_key.0, 0 | 1 | 2 | 4)
+        let eligible = runtime_last_chance_candidate_eligible(
+            prodex_mojo_core::runtime::LastChanceCandidateInput {
+                route_kind: route_kind as i64,
+                context_allowed: true,
+                supports_runtime: true,
+                auth_compatible: true,
+                cached_probe_ready: false,
+                snapshot_blocks: false,
+                auth_failure_active: false,
+                backoff_kind: i64::try_from(candidate.backoff_sort_key.0)
+                    .map_err(|_| anyhow::anyhow!("candidate backoff kind exceeds ABI range"))?,
+                fallback_skip_present: candidate.fallback_skip_reason().is_some(),
+            },
+        )?;
+        if !eligible
             || runtime_profile_inflight_hard_limited_for_context(
                 shared,
                 &candidate.name,
@@ -206,24 +219,30 @@ pub(crate) fn runtime_quota_last_chance_profile_for_route(
         runtime_route_selection_view(&prepared.selection_state),
         &prepared.selection_state.current_profile,
     ) {
-        if excluded_profiles.contains(&name) {
-            continue;
-        }
         let Some(entry) = prepared.selection_state.entry(&name) else {
             continue;
         };
-        if !entry.supports_codex_runtime()
-            || !entry
-                .cached_auth_summary
-                .as_ref()
-                .is_some_and(|auth| auth.quota_compatible)
-            || entry
-                .cached_probe_entry
-                .as_ref()
-                .is_some_and(|probe| probe.result.is_ok())
-            || entry.cached_usage_snapshot.is_some()
-            || entry.auth_failure_active
-            || !matches!(entry.backoff_sort_key.0, 0 | 1 | 2 | 4)
+        let eligible = runtime_last_chance_candidate_eligible(
+            prodex_mojo_core::runtime::LastChanceCandidateInput {
+                route_kind: route_kind as i64,
+                context_allowed: !excluded_profiles.contains(&name),
+                supports_runtime: entry.supports_codex_runtime(),
+                auth_compatible: entry
+                    .cached_auth_summary
+                    .as_ref()
+                    .is_some_and(|auth| auth.quota_compatible),
+                cached_probe_ready: entry
+                    .cached_probe_entry
+                    .as_ref()
+                    .is_some_and(|probe| probe.result.is_ok()),
+                snapshot_blocks: entry.cached_usage_snapshot.is_some(),
+                auth_failure_active: entry.auth_failure_active,
+                backoff_kind: i64::try_from(entry.backoff_sort_key.0)
+                    .map_err(|_| anyhow::anyhow!("profile backoff kind exceeds ABI range"))?,
+                fallback_skip_present: false,
+            },
+        )?;
+        if !eligible
             || runtime_profile_inflight_hard_limited_for_context(
                 shared,
                 &name,
