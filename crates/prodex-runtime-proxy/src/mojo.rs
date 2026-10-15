@@ -7,9 +7,10 @@ use crate::{
 #[path = "quota/mojo.rs"]
 mod common_quota;
 pub(crate) use common_quota::{
-    pressure_band_for_route, quota_score_batch, runtime_response_candidate_plan_batch,
+    pressure_band_for_route, quota_band_from_tag, quota_score_batch,
+    runtime_response_candidate_plan_batch,
 };
-use common_quota::{quota_band_from_tag, quota_source_tag, quota_status_tag};
+use common_quota::{quota_source_tag, quota_status_tag};
 
 pub(crate) struct RuntimeQuotaSnapshotDecision {
     pub summary: RuntimeProxyQuotaSummary,

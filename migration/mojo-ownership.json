@@ -470,6 +470,7 @@
           "quota_pressure_score_batch",
           "quota_pressure_band_and_reserve_scoring",
           "quota_route_score_resolution",
+          "runtime_quota_summary_sort_key",
           "runtime_precommit_retry_exhaustion",
           "runtime_recovery_watchdog_budget",
           "runtime_recovery_cooldown_epoch",
@@ -2398,6 +2399,16 @@
         "operations": [
           "app_command_startup_policy"
         ]
+      },
+      {
+        "path": "crates/prodex-mojo-core/src/runtime/quota_route_score.rs",
+        "language": "rust",
+        "classification": "MIXED",
+        "production_reachable": true,
+        "role": "adapter",
+        "operations": [
+          "runtime_quota_summary_sort_key"
+        ]
       }
     ],
     "removed": [
@@ -3194,6 +3205,30 @@
       "duplicate_production_owner": false,
       "platform_fallback": false,
       "rust_adapter_scope": "window observation and result enum mapping"
+    },
+    {
+      "name": "runtime_quota_summary_sort_key",
+      "domain": "runtime/selection",
+      "introduced_in": "0.438.0",
+      "baseline_state": "candidate",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_runtime_quota_summary_sort_key_v1",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/quota_pressure.mojo",
+      "consumer": "crates/prodex-runtime-proxy/src/quota.rs",
+      "consumer_marker": "prodex_mojo_core::runtime::quota_summary_sort_key(",
+      "production_consumers": [
+        "crates/prodex-app/src/runtime_proxy/selection_plan.rs",
+        "crates/prodex-runtime-quota/src/pressure.rs"
+      ],
+      "production_reachability_test": "crates/prodex-mojo-core/tests/runtime_quota_summary_sort.rs",
+      "rust_owner_before": "Rust computed quota band and window-status ranks, the minimum remaining reserve, and persisted-summary tie-break ordering for fresh cold-start probe selection",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "deleted; direct required-Mojo ABI cases and the runtime-proxy caller regression preserve rank, reserve, remaining, and reset-time ordering",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "validated quota-summary field marshalling, enum conversion, and Reverse tuple materialization"
     },
     {
       "name": "smart_context_token_usage_summary",
