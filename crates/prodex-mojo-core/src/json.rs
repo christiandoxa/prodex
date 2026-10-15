@@ -622,6 +622,16 @@ pub fn transform_chat_bridge_usage(
         .ok_or(MojoError::InvalidOutput)
 }
 
+/// Convert one buffered chat-compatible response, including its prepared tool calls,
+/// to the Responses envelope. Serde still owns input acquisition and error details.
+pub fn transform_chat_bridge_response(
+    nodes: &[JsonNode<'_>],
+    raw: &str,
+) -> Result<Vec<u8>, MojoError> {
+    transform_json(nodes, raw, 5, false, prodex_mojo_openai_chat_response_v1)?
+        .ok_or(MojoError::InvalidOutput)
+}
+
 /// Convert one parsed chat completion SSE event to a Responses event.
 pub fn transform_openai_chat_stream_event(
     nodes: &[JsonNode<'_>],

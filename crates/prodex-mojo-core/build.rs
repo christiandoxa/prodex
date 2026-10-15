@@ -538,6 +538,8 @@ fn selected_sources() -> Vec<&'static str> {
         sources.push("../../mojo/prodex_core/runtime_cookie_policy.mojo");
         sources.push("../../mojo/prodex_core/chat_tools.mojo");
         sources.push("../../mojo/prodex_core/openai_chat_request.mojo");
+        sources.push("../../mojo/prodex_core/openai_chat_response_common.mojo");
+        sources.push("../../mojo/prodex_core/openai_chat_bridge_response.mojo");
         sources.push("../../mojo/prodex_core/openai_chat_response.mojo");
         sources.push("../../mojo/prodex_core/anthropic_chat_request.mojo");
         sources.push("../../mojo/prodex_core/provider_binding_identity.mojo");

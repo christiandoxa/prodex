@@ -40,7 +40,7 @@ pub fn provider_core_split_flat_namespace_tool_name(name: &str) -> (Option<Strin
     (Some(namespace), tool_name)
 }
 
-pub(super) fn provider_core_chat_compatible_responses_tool_call_item(
+pub(super) fn provider_core_chat_compatible_responses_tool_call_plan(
     tool_call: &serde_json::Value,
     provider_adapter_label: &str,
     fallback_call_id: &mut impl FnMut() -> String,
@@ -77,7 +77,7 @@ pub(super) fn provider_core_chat_compatible_responses_tool_call_item(
         provider_adapter_label,
     )?;
     if name == "tool_search" {
-        let arguments = serde_json::from_str::<serde_json::Value>(arguments).map_err(|error| {
+        serde_json::from_str::<serde_json::Value>(arguments).map_err(|error| {
             provider_core_chat_compatible_tool_call_arguments_error(
                 name,
                 error,
@@ -85,35 +85,30 @@ pub(super) fn provider_core_chat_compatible_responses_tool_call_item(
             )
         })?;
         return Ok(Some(serde_json::json!({
-            "type": "tool_search_call",
+            "kind": "tool_search",
             "call_id": call_id,
-            "execution": "client",
             "arguments": arguments,
         })));
     }
     if name == "apply_patch" {
         return Ok(Some(serde_json::json!({
-            "type": "custom_tool_call",
+            "kind": "apply_patch",
             "call_id": call_id,
             "name": name,
             "input": crate::gemini_bridge::gemini_provider_core_custom_tool_input_from_arguments(arguments),
         })));
     }
     let arguments = provider_core_chat_compatible_rtk_wrapped_tool_arguments(name, arguments);
-    let (namespace, name) = provider_core_split_flat_namespace_tool_name(name);
-    let mut item = serde_json::json!({
-        "type": "function_call",
+    let mut plan = serde_json::json!({
+        "kind": "function",
         "call_id": call_id,
-        "name": name,
         "arguments": arguments,
+        "name": name,
     });
-    if let Some(namespace) = namespace {
-        item["namespace"] = serde_json::Value::String(namespace);
-    }
     if let Some(signature) = provider_core_chat_compatible_tool_call_thought_signature(tool_call) {
-        item["gemini_thought_signature"] = serde_json::Value::String(signature);
+        plan["thought_signature"] = serde_json::Value::String(signature);
     }
-    Ok(Some(item))
+    Ok(Some(plan))
 }
 
 fn provider_core_chat_compatible_validate_tool_call_arguments(

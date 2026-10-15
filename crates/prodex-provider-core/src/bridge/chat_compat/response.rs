@@ -1,7 +1,7 @@
 //! Chat-compatible buffered response conversion.
 
 use super::provider_core_chat_compatible_created_at;
-use super::tool_calls::provider_core_chat_compatible_responses_tool_call_item;
+use super::tool_calls::provider_core_chat_compatible_responses_tool_call_plan;
 use super::usage::provider_core_chat_compatible_responses_usage;
 
 pub fn provider_core_chat_compatible_responses_value_from_chat_value(
@@ -30,16 +30,12 @@ pub fn provider_core_chat_compatible_responses_value_from_chat_value_with_fallba
     fallback_response_id: impl FnOnce() -> String,
     mut fallback_call_id: impl FnMut() -> String,
 ) -> serde_json::Value {
-    let response_id = value
+    let fallback_response_id = value
         .get("id")
         .and_then(serde_json::Value::as_str)
-        .map(str::to_string)
-        .unwrap_or_else(fallback_response_id);
-    let model = value
-        .get("model")
-        .and_then(serde_json::Value::as_str)
-        .unwrap_or(default_model);
-    let created_at = value
+        .is_none()
+        .then(fallback_response_id);
+    let fallback_created_at = value
         .get("created")
         .and_then(serde_json::Value::as_u64)
         .unwrap_or_else(provider_core_chat_compatible_created_at);
@@ -48,72 +44,61 @@ pub fn provider_core_chat_compatible_responses_value_from_chat_value_with_fallba
         .and_then(serde_json::Value::as_array)
         .and_then(|choices| choices.first())
         .and_then(|choice| choice.get("message"));
-    let (output, tool_call_error) =
-        chat_compatible_response_output(message, provider_adapter_label, &mut fallback_call_id);
-    let mut response = serde_json::json!({
-        "id": response_id,
-        "object": "response",
-        "created_at": created_at,
-        "model": model,
-        "output": output,
+    let (tool_plans, tool_call_error) =
+        chat_compatible_response_tool_plans(message, provider_adapter_label, &mut fallback_call_id);
+    let usage = value.get("usage").and_then(|usage| {
+        provider_core_chat_compatible_responses_usage(usage, provider_metadata_key)
+    });
+    let metadata = chat_compatible_response_metadata(value);
+    let mut context = serde_json::json!({
+        "response": value,
+        "fallback_response_id": fallback_response_id,
+        "fallback_created_at": fallback_created_at,
+        "default_model": default_model,
+        "provider_metadata_key": provider_metadata_key,
+        "tool_plans": tool_plans,
     });
     if let Some(message) = tool_call_error {
-        response["status"] = serde_json::Value::String("failed".to_string());
-        response["error"] = serde_json::json!({
-            "code": "invalid_tool_call_arguments",
-            "message": message,
-        });
+        context["tool_call_error"] = serde_json::Value::String(message);
     }
-    if let Some(usage) = value.get("usage").and_then(|usage| {
-        provider_core_chat_compatible_responses_usage(usage, provider_metadata_key)
-    }) {
-        response["usage"] = usage;
+    if let Some(usage) = usage {
+        context["usage"] = usage;
     }
-    let metadata = chat_compatible_response_metadata(value);
     if !metadata.is_empty() {
-        response["metadata"] = serde_json::json!({ provider_metadata_key: metadata });
+        context["metadata"] = serde_json::Value::Object(metadata);
     }
-    response
+    let mut document = crate::mojo_json::Document::default();
+    document.root(&context);
+    let raw = std::str::from_utf8(&document.raw).expect("Serde emits UTF-8 JSON");
+    let body = prodex_mojo_core::json::transform_chat_bridge_response(&document.nodes, raw)
+        .expect("compiled Mojo chat bridge response mapping failed");
+    serde_json::from_slice(&body).expect("Mojo chat bridge response must be valid JSON")
 }
 
-fn chat_compatible_response_output(
+fn chat_compatible_response_tool_plans(
     message: Option<&serde_json::Value>,
     provider_adapter_label: &str,
     fallback_call_id: &mut impl FnMut() -> String,
 ) -> (Vec<serde_json::Value>, Option<String>) {
-    let mut output = Vec::new();
-    if let Some(content) = message
-        .and_then(|message| message.get("content"))
-        .and_then(serde_json::Value::as_str)
-        .filter(|content| !content.is_empty())
-    {
-        output.push(serde_json::json!({
-            "type": "message",
-            "role": "assistant",
-            "content": [{
-                "type": "output_text",
-                "text": content,
-            }],
-        }));
-    }
+    let mut plans = Vec::new();
     let Some(tool_calls) = message
         .and_then(|message| message.get("tool_calls"))
         .and_then(serde_json::Value::as_array)
     else {
-        return (output, None);
+        return (plans, None);
     };
     for tool_call in tool_calls {
-        match provider_core_chat_compatible_responses_tool_call_item(
+        match provider_core_chat_compatible_responses_tool_call_plan(
             tool_call,
             provider_adapter_label,
             fallback_call_id,
         ) {
-            Ok(Some(item)) => output.push(item),
+            Ok(Some(plan)) => plans.push(plan),
             Ok(None) => {}
-            Err(message) => return (output, Some(message)),
+            Err(message) => return (plans, Some(message)),
         }
     }
-    (output, None)
+    (plans, None)
 }
 
 fn chat_compatible_response_metadata(
