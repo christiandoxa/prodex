@@ -170,6 +170,28 @@ fn proc_parsers_extract_cpu_memory_and_disk_counters() {
 }
 
 #[test]
+fn resource_counter_caller_uses_compiled_mojo_aggregation() {
+    let aggregate = prodex_mojo_core::status_resource::aggregate_counters(
+        &[
+            prodex_mojo_core::status_resource::StatusResourceCounterSample {
+                process_cpu_ticks: 12,
+                resident_bytes: 24,
+                disk_read_bytes: 48,
+                disk_write_bytes: 96,
+            },
+        ],
+        &[(3, 5), (7, 11)],
+    )
+    .expect("status resource caller should receive the Mojo aggregate");
+    assert_eq!(aggregate.process_cpu_ticks, 12);
+    assert_eq!(aggregate.resident_bytes, 24);
+    assert_eq!(aggregate.disk_read_bytes, 48);
+    assert_eq!(aggregate.disk_write_bytes, 96);
+    assert_eq!(aggregate.network_rx_queue_bytes, 10);
+    assert_eq!(aggregate.network_tx_queue_bytes, 16);
+}
+
+#[test]
 fn resource_snapshot_derives_cpu_and_disk_rates() {
     let previous = StatusResourceCounters {
         available: true,

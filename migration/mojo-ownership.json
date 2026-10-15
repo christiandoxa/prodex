@@ -679,7 +679,8 @@
         "role": "semantic",
         "operations": [
           "status_resource_proc_parser",
-          "status_process_rows_parser"
+          "status_process_rows_parser",
+          "status_resource_counter_aggregation"
         ]
       },
       {
@@ -2552,6 +2553,29 @@
       "duplicate_production_owner": false,
       "platform_fallback": false,
       "rust_adapter_scope": "bounded ps command execution, caller-owned span validation, UTF-8 slice materialization, and canonical CLI command classification"
+    },
+    {
+      "name": "status_resource_counter_aggregation",
+      "domain": "app/status-resource",
+      "introduced_in": "0.438.0",
+      "baseline_state": "candidate",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_status_resource_aggregate_v1",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/status_resource.mojo",
+      "consumer": "crates/prodex-app/src/app_commands/status/resource.rs",
+      "consumer_marker": "prodex_mojo_core::status_resource::aggregate_counters(",
+      "production_consumers": [
+        "crates/prodex-app/src/app_commands/status/resource.rs"
+      ],
+      "production_reachability_test": "crates/prodex-app/src/app_commands/status/tests.rs",
+      "rust_owner_before": "Rust summed per-process CPU, resident, disk, and network queue counters with saturating arithmetic",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "compiled Mojo aggregate ABI and status caller regression cover saturated totals and malformed ABI boundaries",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "filesystem reads, process/socket enumeration, parser result collection, socket identity sets, and typed ABI mapping"
     },
     {
       "name": "runtime_precommit_retry_exhaustion",
@@ -11156,6 +11180,32 @@
       "production_consumer": "crates/prodex-app/src/reports/info/processes.rs",
       "parity_test": "crates/prodex-app/tests/src/reports/info.rs",
       "performance": "two bounded Mojo passes over one ps snapshot for count and caller-owned span fill"
+    },
+    {
+      "file": "crates/prodex-app/src/app_commands/status/resource.rs",
+      "symbol": "counters.process_cpu_ticks",
+      "operation": "status_resource_counter_aggregation",
+      "previous_responsibility": "Rust accumulated process and network resource counters with saturating arithmetic after host reads and parser calls",
+      "final_state": "adapter-only",
+      "cleanup_loc": 38,
+      "cleanup_source": {
+        "kind": "collapsed-adapter",
+        "path": "crates/prodex-app/src/app_commands/status/resource.rs",
+        "baseline_range": {
+          "start": 41,
+          "end": 79
+        },
+        "release_symbol": "if let Ok(aggregate)",
+        "release_marker": "prodex_mojo_core::status_resource::aggregate_counters("
+      },
+      "rust_before": "crates/prodex-app/src/app_commands/status/resource.rs::collect_status_resource_counters",
+      "rust_after": "Rust retains filesystem reads, process/socket enumeration, parser result collection, and typed Mojo mapping while Mojo owns counter aggregation",
+      "mojo_owner": "mojo/prodex_core/status_resource.mojo::prodex_status_resource_aggregate_v1",
+      "mojo_source": "mojo/prodex_core/status_resource.mojo",
+      "mojo_entry": "prodex_status_resource_aggregate_v1",
+      "production_consumer": "crates/prodex-app/src/app_commands/status/resource.rs",
+      "parity_test": "crates/prodex-app/src/app_commands/status/tests.rs",
+      "performance": "one bounded Mojo aggregation call over caller-owned counter arrays"
     },
     {
       "file": "crates/prodex-runtime-proxy/src/smart_context/rewrite_policy/adaptive.rs",
