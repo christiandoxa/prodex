@@ -1,7 +1,6 @@
 use super::*;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
-use std::fmt::Write as _;
 
 pub const SMART_CONTEXT_STATIC_CONTEXT_FINGERPRINT_MAX_ITEMS: usize = 128;
 pub const SMART_CONTEXT_STATIC_CONTEXT_FINGERPRINT_MAX_ITEM_BYTES: usize = 256 * 1024;
@@ -102,17 +101,20 @@ pub fn smart_context_static_context_prompt_cache_fingerprint(
         smart_context_stabilize_static_context_items_bounded(items);
     let mut payload = smart_context_static_context_prompt_cache_payload(&items);
     if truncated {
-        payload.push_str("psc static fingerprint truncated ");
-        payload.push_str(&item_count.to_string());
-        payload.push(' ');
-        payload.push_str(&byte_len.to_string());
-        payload.push(' ');
-        payload.push_str(&overflow_hash);
-        payload.push('\n');
+        payload.push_str(
+            &prodex_mojo_core::rich::smart_context_static_truncation_line(
+                item_count,
+                byte_len,
+                &overflow_hash,
+            )
+            .expect("Mojo Smart Context static truncation formatter returned invalid output"),
+        );
     }
+    let digest = smart_context_sha256_digest(payload.as_bytes());
 
     SmartContextStaticContextPromptCacheFingerprint {
-        content_hash: smart_context_hash_text(&payload).replacen("sc2:", "scpc2:", 1),
+        content_hash: prodex_mojo_core::rich::smart_context_static_digest_text(&digest, true)
+            .expect("Mojo Smart Context prompt-cache digest formatter returned invalid output"),
         items: items
             .iter()
             .map(|item| SmartContextStaticContextItemFingerprint {
@@ -179,7 +181,8 @@ fn smart_context_stabilize_static_context_items_bounded(
         item_count,
         byte_len,
         truncated,
-        smart_context_hex_digest(overflow_digest),
+        prodex_mojo_core::rich::smart_context_static_digest_text(&overflow_digest, false)
+            .expect("Mojo Smart Context overflow digest formatter returned invalid output"),
     )
 }
 
@@ -241,14 +244,6 @@ fn smart_context_bounded_static_context_text(text: &str) -> String {
         smart_context_hash_text(text)
     })
     .expect("compiled Mojo bounded static text returned invalid output")
-}
-
-fn smart_context_hex_digest(digest: [u8; 32]) -> String {
-    let mut output = String::with_capacity(digest.len() * 2);
-    for byte in digest {
-        write!(output, "{byte:02x}").expect("writing to String cannot fail");
-    }
-    output
 }
 
 pub fn smart_context_fingerprint_delta(

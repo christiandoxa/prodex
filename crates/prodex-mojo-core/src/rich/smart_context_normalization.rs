@@ -35,6 +35,24 @@ const SMART_CONTEXT_NORMALIZATION_CAPACITY_STATUS: i64 = 3;
 const SMART_CONTEXT_CAPSULE_MAX_COUNT: usize = 65_536;
 
 unsafe extern "C" {
+    fn prodex_mojo_smart_context_static_digest_text_v1(
+        abi_version: i64,
+        mode: i64,
+        digest: u64,
+        digest_len: i64,
+        output: u64,
+        capacity: i64,
+        written: u64,
+    ) -> i64;
+    fn prodex_mojo_smart_context_static_truncation_line_v1(
+        abi_version: i64,
+        item_count: u64,
+        total_bytes: u64,
+        hash_view: u64,
+        output: u64,
+        capacity: i64,
+        written: u64,
+    ) -> i64;
     fn prodex_mojo_smart_context_static_overflow_preimage_v1(
         abi_version: i64,
         id_view: u64,
@@ -579,6 +597,67 @@ pub fn smart_context_static_overflow_accumulate(
         return Err(normalization_status_error(status));
     }
     Ok(output)
+}
+
+/// Render a host SHA-256 digest for static-context fingerprinting in
+/// compiled Mojo. Unprefixed output is the rolling overflow digest,
+/// prefixed output is the final stable scpc2: fingerprint.
+pub fn smart_context_static_digest_text(
+    digest: &[u8; 32],
+    prompt_cache_prefix: bool,
+) -> Result<String, MojoError> {
+    ensure_rich_abi()?;
+    let mut output = [0_u8; 70];
+    let mut written = -1_i64;
+    let status = unsafe {
+        prodex_mojo_smart_context_static_digest_text_v1(
+            RICH_ABI_VERSION,
+            i64::from(prompt_cache_prefix),
+            mojo_pointer_address(digest.as_ptr()),
+            32,
+            mojo_mut_pointer_address(output.as_mut_ptr()),
+            output.len() as i64,
+            mojo_mut_pointer_address(&mut written),
+        )
+    };
+    if status != 0 {
+        return Err(normalization_status_error(status));
+    }
+    let expected = if prompt_cache_prefix { 70 } else { 64 };
+    if written != expected {
+        return Err(MojoError::InvalidOutput);
+    }
+    String::from_utf8(output[..expected as usize].to_vec()).map_err(|_| MojoError::InvalidOutput)
+}
+
+/// Render one versioned overflow/truncation metadata line only in Mojo.
+/// Rust passes borrowed already-validated count and hash facts.
+pub fn smart_context_static_truncation_line(
+    item_count: usize,
+    total_bytes: usize,
+    overflow_hash: &str,
+) -> Result<String, MojoError> {
+    ensure_rich_abi()?;
+    let digest = view(overflow_hash);
+    let mut output = [0_u8; 160];
+    let mut written = -1_i64;
+    let status = unsafe {
+        prodex_mojo_smart_context_static_truncation_line_v1(
+            RICH_ABI_VERSION,
+            u64::try_from(item_count).map_err(|_| MojoError::InvalidInput)?,
+            u64::try_from(total_bytes).map_err(|_| MojoError::InvalidInput)?,
+            mojo_pointer_address(&digest),
+            mojo_mut_pointer_address(output.as_mut_ptr()),
+            output.len() as i64,
+            mojo_mut_pointer_address(&mut written),
+        )
+    };
+    if status != 0 {
+        return Err(normalization_status_error(status));
+    }
+    let count = usize::try_from(written).map_err(|_| MojoError::InvalidOutput)?;
+    let bytes = output.get(..count).ok_or(MojoError::InvalidOutput)?;
+    String::from_utf8(bytes.to_vec()).map_err(|_| MojoError::InvalidOutput)
 }
 
 /// Classify one static-context line as volatile metadata.
@@ -1138,6 +1217,83 @@ mod static_canonicalization_tests {
         }
         assert_eq!(output, [71; 64]);
         assert_eq!(written, 88);
+    }
+
+    #[test]
+    fn mojo_static_digest_and_truncation_text_preserves_checksum_protocol() {
+        let digest = [0_u8; 32];
+        let hex = "00".repeat(32);
+        assert_eq!(
+            smart_context_static_digest_text(&digest, false).unwrap(),
+            hex
+        );
+        assert_eq!(
+            smart_context_static_digest_text(&digest, true).unwrap(),
+            format!("scpc2:{hex}"),
+        );
+        let mut digest = [0_u8; 32];
+        digest[0] = 0xab;
+        digest[31] = 0xef;
+        assert_eq!(
+            smart_context_static_digest_text(&digest, false).unwrap(),
+            format!("ab{}ef", "00".repeat(30)),
+        );
+        assert_eq!(
+            smart_context_static_truncation_line(129, 9_999, &hex).unwrap(),
+            format!("psc static fingerprint truncated 129 9999 {hex}\n"),
+        );
+        assert_eq!(
+            smart_context_static_truncation_line(usize::MAX, 0, &hex).unwrap(),
+            format!("psc static fingerprint truncated {} 0 {hex}\n", usize::MAX),
+        );
+    }
+
+    #[test]
+    fn mojo_static_digest_and_truncation_abi_rejects_untrusted_fields() {
+        let digest = [0_u8; 32];
+        let bad_hash = view(&"gg".repeat(32));
+        let mut output = [89_u8; 160];
+        let mut written = 71_i64;
+        unsafe {
+            assert_eq!(
+                prodex_mojo_smart_context_static_digest_text_v1(
+                    RICH_ABI_VERSION + 1,
+                    1,
+                    mojo_pointer_address(digest.as_ptr()),
+                    32,
+                    mojo_mut_pointer_address(output.as_mut_ptr()),
+                    160,
+                    mojo_mut_pointer_address(&mut written),
+                ),
+                4,
+            );
+            assert_eq!(
+                prodex_mojo_smart_context_static_digest_text_v1(
+                    RICH_ABI_VERSION,
+                    2,
+                    mojo_pointer_address(digest.as_ptr()),
+                    32,
+                    mojo_mut_pointer_address(output.as_mut_ptr()),
+                    160,
+                    mojo_mut_pointer_address(&mut written),
+                ),
+                1,
+            );
+            assert_eq!(
+                prodex_mojo_smart_context_static_truncation_line_v1(
+                    RICH_ABI_VERSION,
+                    129,
+                    256,
+                    mojo_pointer_address(&bad_hash),
+                    mojo_mut_pointer_address(output.as_mut_ptr()),
+                    160,
+                    mojo_mut_pointer_address(&mut written),
+                ),
+                2,
+            );
+        }
+        assert_eq!(output, [89; 160]);
+        assert_eq!(written, 71);
     }
 
     #[test]
