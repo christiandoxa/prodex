@@ -224,6 +224,13 @@ fn body_snippet_normalizes_whitespace_and_truncates() {
         runtime_proxy_body_snippet(b"bad-\xff bytes", 64),
         "bad-\u{fffd} bytes"
     );
+    assert_eq!(
+        runtime_proxy_body_snippet(" \u{2003}🧭\u{00a0}東京\u{2028} ".as_bytes(), 20),
+        "🧭 東京"
+    );
+    assert_eq!(runtime_proxy_body_snippet("🧭東京".as_bytes(), 1), "🧭...");
+    assert_eq!(runtime_proxy_body_snippet(b"hello", 0), "...");
+    assert_eq!(runtime_proxy_body_snippet(b"hello\n\t", 5), "hello");
 }
 
 #[test]

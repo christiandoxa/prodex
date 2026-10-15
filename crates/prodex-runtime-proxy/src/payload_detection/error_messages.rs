@@ -107,20 +107,11 @@ pub(crate) fn extract_runtime_proxy_quota_message_from_value(
 }
 
 pub fn runtime_proxy_body_snippet(body: &[u8], max_chars: usize) -> String {
-    let normalized = String::from_utf8_lossy(body)
-        .split_whitespace()
-        .collect::<Vec<_>>()
-        .join(" ");
-    if normalized.is_empty() {
-        return "-".to_string();
-    }
-
-    let snippet = normalized.chars().take(max_chars).collect::<String>();
-    if normalized.chars().count() > max_chars {
-        format!("{snippet}...")
-    } else {
-        snippet
-    }
+    // This UTF-8 lossy boundary is host-side. Unicode whitespace decisions,
+    // clipping and ellipsis bytes are exclusively compiled Mojo semantics.
+    let body = String::from_utf8_lossy(body);
+    prodex_mojo_core::rich::runtime_proxy_body_snippet(&body, max_chars)
+        .expect("Mojo runtime proxy body snippet returned invalid output")
 }
 
 pub fn extract_runtime_proxy_previous_response_message_from_value(

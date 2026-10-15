@@ -622,7 +622,8 @@
           "provider_model_fallback_parser",
           "session_usage_limit_marker",
           "gemini_invalid_stream_retry_delay_policy",
-          "runtime_retry_after_text_policy"
+          "runtime_retry_after_text_policy",
+          "runtime_proxy_body_snippet_render"
         ]
       }
     },
@@ -2249,6 +2250,16 @@
         "role": "adapter",
         "operations": [
           "gemini_rtk_shell_wrapping"
+        ]
+      },
+      {
+        "path": "crates/prodex-mojo-core/src/rich/runtime_proxy_body_snippet.rs",
+        "language": "rust",
+        "classification": "MIXED",
+        "production_reachable": true,
+        "role": "adapter",
+        "operations": [
+          "runtime_proxy_body_snippet_render"
         ]
       }
     ],
@@ -9561,6 +9572,29 @@
       "duplicate_production_owner": false,
       "platform_fallback": false,
       "rust_adapter_scope": "Header-name filtering and byte-to-UTF-8 ownership, Mojo ABI marshalling, Duration projection, selecting maximum duration across upstream repeated headers"
+    },
+    {
+      "name": "runtime_proxy_body_snippet_render",
+      "domain": "runtime-proxy/error-rendering",
+      "introduced_in": "0.438.0",
+      "baseline_state": "Rust lossy UTF-8 text stream joined Unicode split_whitespace segments and truncated by char count with an ellipsis",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_mojo_rich_runtime_proxy_body_snippet_v1",
+      "mojo_abi_version": 6,
+      "mojo_source": "mojo/prodex_core/rich_fallback.mojo",
+      "consumer": "crates/prodex-runtime-proxy/src/payload_detection/error_messages.rs",
+      "consumer_marker": "prodex_mojo_core::rich::runtime_proxy_body_snippet(",
+      "production_consumers": [
+        "crates/prodex-runtime-proxy/src/payload_detection/error_messages.rs"
+      ],
+      "production_reachability_test": "crates/prodex-runtime-proxy/src/payload_detection/error_messages.rs",
+      "rust_owner_before": "Rust Unicode split_whitespace, token-joining policy, character truncation and ellipsis selection",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "Previous Rust text normalizer removed; strict Mojo ABI and production caller tests cover Unicode spaces, empty data, lossy UTF-8, zero budget and clipping",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "Lossy UTF-8 decoding for upstream bytes, FFI marshaling and verified returned UTF-8 String"
     },
     {
       "name": "runtime_authenticated_probe_recovery",
