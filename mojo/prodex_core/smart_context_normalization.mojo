@@ -1649,3 +1649,100 @@ def prodex_mojo_smart_context_scope_parse_v1(
     written[] = 73
     valid[] = 1
     return SMART_CONTEXT_STATUS_OK
+
+# Static fingerprint overflow records are hashed by the host SHA-256
+# primitive, but their binary framing and 32-byte wrapping aggregate
+# semantics belong to compiled Mojo.
+@export("prodex_mojo_smart_context_static_overflow_preimage_v1")
+def prodex_mojo_smart_context_static_overflow_preimage_v1(
+    abi_version: Int64,
+    id_view_address: UInt,
+    content_hash_view_address: UInt,
+    item_byte_length: UInt64,
+    host_usize_bytes: Int64,
+    output_address: UInt,
+    output_capacity: Int64,
+    written_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != PRODEX_RICH_ABI_VERSION:
+        return SMART_CONTEXT_STATUS_ABI
+    if (
+        id_view_address == 0
+        or content_hash_view_address == 0
+        or output_address == 0
+        or written_address == 0
+        or (host_usize_bytes != 4 and host_usize_bytes != 8)
+        or output_capacity < 1
+    ):
+        return SMART_CONTEXT_STATUS_INVALID
+    var id = Pointer[mut=False, ProdexRichStringView, ImmUntrackedOrigin](
+        unsafe_from_address=Int(id_view_address)
+    )[].copy()
+    var content_hash = Pointer[mut=False, ProdexRichStringView, ImmUntrackedOrigin](
+        unsafe_from_address=Int(content_hash_view_address)
+    )[].copy()
+    if (
+        not rich_view_valid(id, SMART_CONTEXT_NORMALIZATION_MAX_BYTES)
+        or not rich_view_valid(content_hash, SMART_CONTEXT_NORMALIZATION_MAX_BYTES)
+    ):
+        return SMART_CONTEXT_STATUS_UTF8
+    var required = Int64(id.len) + 1 + Int64(content_hash.len) + 1 + host_usize_bytes
+    if output_capacity < required:
+        return SMART_CONTEXT_STATUS_CAPACITY
+    var output = Pointer[mut=True, UInt8, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    var written = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(written_address)
+    )
+    written[] = 0
+    var id_bytes = rich_view_ptr(id)
+    for index in range(Int64(id.len)):
+        output[unsafe_offset=written[]] = id_bytes[unsafe_offset=index]
+        written[] += 1
+    output[unsafe_offset=written[]] = 0
+    written[] += 1
+    var hash_bytes = rich_view_ptr(content_hash)
+    for index in range(Int64(content_hash.len)):
+        output[unsafe_offset=written[]] = hash_bytes[unsafe_offset=index]
+        written[] += 1
+    output[unsafe_offset=written[]] = 0
+    written[] += 1
+    for index in range(host_usize_bytes):
+        output[unsafe_offset=written[]] = UInt8(
+            (item_byte_length >> UInt64(index * 8)) & UInt64(255)
+        )
+        written[] += 1
+    return SMART_CONTEXT_STATUS_OK
+
+
+@export("prodex_mojo_smart_context_static_overflow_accumulate_v1")
+def prodex_mojo_smart_context_static_overflow_accumulate_v1(
+    abi_version: Int64,
+    aggregate_address: UInt,
+    sha256_digest_address: UInt,
+    output_address: UInt,
+    output_capacity: Int64,
+) abi("C") -> Int64:
+    if abi_version != PRODEX_RICH_ABI_VERSION:
+        return SMART_CONTEXT_STATUS_ABI
+    if (
+        aggregate_address == 0
+        or sha256_digest_address == 0
+        or output_address == 0
+        or output_capacity < 32
+    ):
+        return SMART_CONTEXT_STATUS_INVALID
+    var aggregate = Pointer[mut=False, UInt8, ImmUntrackedOrigin](
+        unsafe_from_address=Int(aggregate_address)
+    )
+    var digest = Pointer[mut=False, UInt8, ImmUntrackedOrigin](
+        unsafe_from_address=Int(sha256_digest_address)
+    )
+    var output = Pointer[mut=True, UInt8, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    for index in range(32):
+        var sum = UInt16(aggregate[unsafe_offset=index]) + UInt16(digest[unsafe_offset=index])
+        output[unsafe_offset=index] = UInt8(sum & UInt16(255))
+    return SMART_CONTEXT_STATUS_OK

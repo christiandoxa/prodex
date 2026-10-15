@@ -35,6 +35,23 @@ const SMART_CONTEXT_NORMALIZATION_CAPACITY_STATUS: i64 = 3;
 const SMART_CONTEXT_CAPSULE_MAX_COUNT: usize = 65_536;
 
 unsafe extern "C" {
+    fn prodex_mojo_smart_context_static_overflow_preimage_v1(
+        abi_version: i64,
+        id_view: u64,
+        hash_view: u64,
+        byte_length: u64,
+        host_usize_bytes: i64,
+        output: u64,
+        output_capacity: i64,
+        written: u64,
+    ) -> i64;
+    fn prodex_mojo_smart_context_static_overflow_accumulate_v1(
+        abi_version: i64,
+        aggregate: u64,
+        digest: u64,
+        output: u64,
+        output_capacity: i64,
+    ) -> i64;
     fn prodex_mojo_smart_context_scope_parse_v1(
         abi_version: i64,
         input: u64,
@@ -501,6 +518,67 @@ pub fn smart_context_scope_parse(value: &str) -> Result<Option<String>, MojoErro
             .map_err(|_| MojoError::InvalidOutput),
         _ => Err(MojoError::InvalidOutput),
     }
+}
+
+/// Produce the exact platform-width overflow record preimage through Mojo.
+/// Host SHA-256 remains separate and is fed only the Mojo-authored bytes.
+pub fn smart_context_static_overflow_preimage(
+    id: &str,
+    content_hash: &str,
+    byte_len: usize,
+) -> Result<Vec<u8>, MojoError> {
+    ensure_rich_abi()?;
+    let capacity = id
+        .len()
+        .checked_add(content_hash.len())
+        .and_then(|value| value.checked_add(2 + size_of::<usize>()))
+        .ok_or(MojoError::InvalidInput)?;
+    let id_view = view(id);
+    let hash_view = view(content_hash);
+    let mut output = vec![0_u8; capacity];
+    let mut written = -1_i64;
+    let status = unsafe {
+        prodex_mojo_smart_context_static_overflow_preimage_v1(
+            RICH_ABI_VERSION,
+            mojo_pointer_address(&id_view),
+            mojo_pointer_address(&hash_view),
+            u64::try_from(byte_len).map_err(|_| MojoError::InvalidInput)?,
+            size_of::<usize>() as i64,
+            mojo_mut_pointer_address(output.as_mut_ptr()),
+            i64::try_from(capacity).map_err(|_| MojoError::InvalidInput)?,
+            mojo_mut_pointer_address(&mut written),
+        )
+    };
+    if status != 0 {
+        return Err(normalization_status_error(status));
+    }
+    if usize::try_from(written).map_err(|_| MojoError::InvalidOutput)? != capacity {
+        return Err(MojoError::InvalidOutput);
+    }
+    Ok(output)
+}
+
+/// Combine the SHA-256 result into the rolling 32-byte overflow checksum
+/// with the exact Mojo-owned wrapping addition semantics.
+pub fn smart_context_static_overflow_accumulate(
+    aggregate: &[u8; 32],
+    sha256_digest: &[u8; 32],
+) -> Result<[u8; 32], MojoError> {
+    ensure_rich_abi()?;
+    let mut output = [0_u8; 32];
+    let status = unsafe {
+        prodex_mojo_smart_context_static_overflow_accumulate_v1(
+            RICH_ABI_VERSION,
+            mojo_pointer_address(aggregate.as_ptr()),
+            mojo_pointer_address(sha256_digest.as_ptr()),
+            mojo_mut_pointer_address(output.as_mut_ptr()),
+            output.len() as i64,
+        )
+    };
+    if status != 0 {
+        return Err(normalization_status_error(status));
+    }
+    Ok(output)
 }
 
 /// Classify one static-context line as volatile metadata.
@@ -1060,6 +1138,120 @@ mod static_canonicalization_tests {
         }
         assert_eq!(output, [71; 64]);
         assert_eq!(written, 88);
+    }
+
+    #[test]
+    fn mojo_static_overflow_preimage_matches_legacy_binary_contract() {
+        let id = "🧭/α";
+        let hash = "sc2:abcdef";
+        let length = usize::MAX;
+        let bytes = smart_context_static_overflow_preimage(id, hash, length).unwrap();
+        let mut expected = Vec::new();
+        expected.extend_from_slice(id.as_bytes());
+        expected.push(0);
+        expected.extend_from_slice(hash.as_bytes());
+        expected.push(0);
+        expected.extend_from_slice(&length.to_le_bytes());
+        assert_eq!(bytes, expected);
+        assert_eq!(
+            smart_context_static_overflow_preimage("", "", 0).unwrap(),
+            [vec![0_u8, 0_u8], vec![0_u8; size_of::<usize>()]].concat(),
+        );
+    }
+
+    #[test]
+    fn mojo_static_overflow_accumulator_wraps_each_digest_byte_independently() {
+        let aggregate = [255_u8; 32];
+        let digest = [1_u8; 32];
+        assert_eq!(
+            smart_context_static_overflow_accumulate(&aggregate, &digest).unwrap(),
+            [0_u8; 32],
+        );
+        let aggregate = [200_u8; 32];
+        let digest = [200_u8; 32];
+        assert_eq!(
+            smart_context_static_overflow_accumulate(&aggregate, &digest).unwrap(),
+            [144_u8; 32],
+        );
+        assert_eq!(
+            smart_context_static_overflow_accumulate(&[0_u8; 32], &[255_u8; 32]).unwrap(),
+            [255_u8; 32],
+        );
+    }
+
+    #[test]
+    fn mojo_static_overflow_abi_rejects_bad_width_and_capacity_before_writes() {
+        let id = view("id");
+        let hash = view("sc2:hash");
+        let mut bytes = [42_u8; 40];
+        let mut written = 77_i64;
+        let mut accumulated = [42_u8; 32];
+        let aggregate = [1_u8; 32];
+        let digest = [2_u8; 32];
+        unsafe {
+            assert_eq!(
+                prodex_mojo_smart_context_static_overflow_preimage_v1(
+                    RICH_ABI_VERSION + 1,
+                    mojo_pointer_address(&id),
+                    mojo_pointer_address(&hash),
+                    4,
+                    8,
+                    mojo_mut_pointer_address(bytes.as_mut_ptr()),
+                    40,
+                    mojo_mut_pointer_address(&mut written),
+                ),
+                4,
+            );
+            assert_eq!(
+                prodex_mojo_smart_context_static_overflow_preimage_v1(
+                    RICH_ABI_VERSION,
+                    mojo_pointer_address(&id),
+                    mojo_pointer_address(&hash),
+                    4,
+                    3,
+                    mojo_mut_pointer_address(bytes.as_mut_ptr()),
+                    40,
+                    mojo_mut_pointer_address(&mut written),
+                ),
+                1,
+            );
+            assert_eq!(
+                prodex_mojo_smart_context_static_overflow_preimage_v1(
+                    RICH_ABI_VERSION,
+                    mojo_pointer_address(&id),
+                    mojo_pointer_address(&hash),
+                    4,
+                    8,
+                    mojo_mut_pointer_address(bytes.as_mut_ptr()),
+                    1,
+                    mojo_mut_pointer_address(&mut written),
+                ),
+                3,
+            );
+            assert_eq!(
+                prodex_mojo_smart_context_static_overflow_accumulate_v1(
+                    RICH_ABI_VERSION + 1,
+                    mojo_pointer_address(aggregate.as_ptr()),
+                    mojo_pointer_address(digest.as_ptr()),
+                    mojo_mut_pointer_address(accumulated.as_mut_ptr()),
+                    32,
+                ),
+                4,
+            );
+            assert_eq!(
+                prodex_mojo_smart_context_static_overflow_accumulate_v1(
+                    RICH_ABI_VERSION,
+                    mojo_pointer_address(aggregate.as_ptr()),
+                    mojo_pointer_address(digest.as_ptr()),
+                    mojo_mut_pointer_address(accumulated.as_mut_ptr()),
+                    31,
+                ),
+                1,
+            );
+        }
+        assert_eq!(bytes, [42; 40]);
+        assert_eq!(written, 77);
+        assert_eq!(accumulated, [42; 32]);
     }
 
     #[test]

@@ -710,7 +710,9 @@
           "smart_context_legacy_fnv_fingerprint",
           "smart_context_scope_preimage_framing",
           "smart_context_scope_digest_rendering",
-          "smart_context_scope_identifier_parse"
+          "smart_context_scope_identifier_parse",
+          "smart_context_static_overflow_preimage",
+          "smart_context_static_overflow_fold"
         ]
       },
       {
@@ -10050,6 +10052,52 @@
       "duplicate_production_owner": false,
       "platform_fallback": false,
       "rust_adapter_scope": "BTreeMap input and normalized route selection via existing Mojo planner; checked borrowed slice projection; bounded ABI marshaling and validated UTF-8 String result"
+    },
+    {
+      "name": "smart_context_static_overflow_preimage",
+      "domain": "smart-context/static-fingerprint-overflow",
+      "introduced_in": "0.438.0",
+      "baseline_state": "Rust manually concatenated id NUL content-hash NUL and host-width little-endian length before calling SHA-256",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_mojo_smart_context_static_overflow_preimage_v1",
+      "mojo_abi_version": 6,
+      "mojo_source": "mojo/prodex_core/smart_context_normalization.mojo",
+      "consumer": "crates/prodex-runtime-proxy/src/smart_context/static_context.rs",
+      "consumer_marker": "prodex_mojo_core::rich::smart_context_static_overflow_preimage(",
+      "production_consumers": [
+        "crates/prodex-runtime-proxy/src/smart_context/static_context.rs"
+      ],
+      "production_reachability_test": "crates/prodex-runtime-proxy/src/smart_context/static_context.rs",
+      "rust_owner_before": "Rust-built overflow framing id and hash text, NUL delimiters, host-width little-endian length",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "Original Rust framing/addition removed; compiled Mojo ABI golden fixtures plus production bounded 129+ item fingerprint regression prove byte equality and stable order",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "Host SHA-256 and borrowed identifier/hash materialization; Mojo writes binary preimage"
+    },
+    {
+      "name": "smart_context_static_overflow_fold",
+      "domain": "smart-context/static-fingerprint-overflow",
+      "introduced_in": "0.438.0",
+      "baseline_state": "Rust folded the SHA-256 of each evicted item into a 32-byte aggregate with per-byte wrapping addition",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_mojo_smart_context_static_overflow_accumulate_v1",
+      "mojo_abi_version": 6,
+      "mojo_source": "mojo/prodex_core/smart_context_normalization.mojo",
+      "consumer": "crates/prodex-runtime-proxy/src/smart_context/static_context.rs",
+      "consumer_marker": "prodex_mojo_core::rich::smart_context_static_overflow_accumulate(",
+      "production_consumers": [
+        "crates/prodex-runtime-proxy/src/smart_context/static_context.rs"
+      ],
+      "production_reachability_test": "crates/prodex-runtime-proxy/src/smart_context/static_context.rs",
+      "rust_owner_before": "Rust 32-byte zip iteration with wrapping_add over the SHA-256 result",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "Original Rust framing/addition removed; compiled Mojo ABI golden fixtures plus production bounded 129+ item fingerprint regression prove byte equality and stable order",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "Host SHA-256 and owned accumulator storage; Mojo owns bytewise addition"
     }
   ],
   "rust_semantic_reductions": [
