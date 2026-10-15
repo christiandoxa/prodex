@@ -5597,3 +5597,10 @@ the compatibility boundaries.
 from method, route, catalog, and model-presence facts. Rust retains catalog lookup,
 JSON/error materialization, and buffered HTTP effects; required-Mojo ABI and
 provider-bridge caller tests cover list, limit, found, missing, and no-response paths.
+
+## DeepSeek stream error classification migration
+
+`deepseek.mojo` now owns embedded stream-error code/message precedence and stable
+defaults. Rust retains Serde event acquisition, result decoding, and runtime error
+transport; compiled ABI and provider caller tests cover Unicode, numeric, absent, and
+malformed-field cases.

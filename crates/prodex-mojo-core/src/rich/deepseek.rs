@@ -56,6 +56,7 @@ pub enum DeepSeekKernelOperation {
     ChatRole = 47,
     InputItemValidation = 48,
     ChatAssistantMessages = 49,
+    StreamErrorClassification = 50,
 }
 
 #[repr(i64)]
@@ -315,6 +316,7 @@ fn operation_code(operation: DeepSeekKernelOperation) -> i64 {
         DeepSeekKernelOperation::ChatRole => 47,
         DeepSeekKernelOperation::InputItemValidation => 48,
         DeepSeekKernelOperation::ChatAssistantMessages => 49,
+        DeepSeekKernelOperation::StreamErrorClassification => 50,
     }
 }
 
