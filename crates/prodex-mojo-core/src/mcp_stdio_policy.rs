@@ -24,6 +24,11 @@ unsafe extern "C" {
         parse_kind_address: u64,
         value_address: u64,
     ) -> i64;
+    fn prodex_mcp_first_line_is_header_v1(
+        abi_version: i64,
+        first_byte: i64,
+        output_address: u64,
+    ) -> i64;
 }
 
 fn status(value: i64) -> Result<(), MojoError> {
@@ -73,6 +78,23 @@ pub fn parse_content_length(line: &str) -> Result<McpContentLengthParse, MojoErr
     }
 }
 
+/// Classify the first non-whitespace byte before selecting the bounded line limit.
+pub fn first_line_is_header(byte: u8) -> Result<bool, MojoError> {
+    let mut output = -1_i64;
+    status(unsafe {
+        prodex_mcp_first_line_is_header_v1(
+            ABI_VERSION,
+            i64::from(byte),
+            (&mut output as *mut i64) as usize as u64,
+        )
+    })?;
+    match output {
+        0 => Ok(false),
+        1 => Ok(true),
+        _ => Err(MojoError::InvalidOutput),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -94,5 +116,13 @@ mod tests {
             parse_content_length("Content-Length: 1_0").unwrap(),
             McpContentLengthParse::InvalidValue
         );
+    }
+
+    #[test]
+    fn mcp_first_line_policy_keeps_only_objects_and_batches_on_json_limit() {
+        assert!(!first_line_is_header(b'{').unwrap());
+        assert!(!first_line_is_header(b'[').unwrap());
+        assert!(first_line_is_header(b'C').unwrap());
+        assert!(first_line_is_header(0).unwrap());
     }
 }

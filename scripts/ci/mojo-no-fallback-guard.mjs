@@ -1829,6 +1829,7 @@ export function findViolations(files) {
       const required = [
         "mcp_stdio_policy::header_is_content_length(",
         "mcp_stdio_policy::parse_content_length(",
+        "mcp_stdio_policy::first_line_is_header(",
       ];
       const violations = required
         .filter((call) => !contents.includes(call))
@@ -1837,6 +1838,7 @@ export function findViolations(files) {
         /to_ascii_lowercase\(\)\.starts_with\("content-length:"\)/u.test(contents)
         || /split_once\(':'\)/u.test(contents)
         || /parse::<usize>\(\)/u.test(contents)
+        || /fn\s+mcp_first_line_looks_like_header\s*\(/u.test(contents)
       ) {
         violations.push(filePath + ": contains restored Rust MCP Content-Length semantics");
       }
@@ -1846,6 +1848,7 @@ export function findViolations(files) {
       const required = [
         "prodex_mcp_header_is_content_length_v1(",
         "prodex_mcp_content_length_parse_v1(",
+        "prodex_mcp_first_line_is_header_v1(",
       ];
       return required
         .filter((call) => !contents.includes(call))
