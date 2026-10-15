@@ -3,6 +3,9 @@ use crate::MojoError;
 const ABI_VERSION: i64 = 1;
 const FIELD_COUNT: usize = 10;
 const OUTPUT_COUNT: usize = 8;
+const PRECOMMIT_HOLD_ABI_VERSION: i64 = 1;
+const PRECOMMIT_HOLD_FIELD_COUNT: usize = 8;
+const PRECOMMIT_HOLD_OUTPUT_COUNT: usize = 4;
 
 pub const FRAME_TEXT: i64 = 0;
 pub const FRAME_BINARY: i64 = 1;
@@ -14,6 +17,44 @@ pub const RETRY_QUOTA: i64 = 2;
 pub const RETRY_RATE_LIMITED: i64 = 3;
 pub const RETRY_OVERLOADED: i64 = 4;
 pub const RETRY_PREVIOUS_RESPONSE_NOT_FOUND: i64 = 5;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WebsocketPrecommitHoldAction {
+    Buffer,
+    PromoteEvent,
+    PromoteLookahead,
+    RejectLimit,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct WebsocketPrecommitHoldInput {
+    pub hold_count: u64,
+    pub hold_bytes: u64,
+    pub frame_bytes: u64,
+    pub promotion_allowed: bool,
+    pub promotion_event_seen: bool,
+    pub hold_promotion_event_seen: bool,
+    pub hard_affinity_limit: u64,
+    pub lookahead_budget: u64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct WebsocketPrecommitHoldPlan {
+    pub hold_count: u64,
+    pub hold_bytes: u64,
+    pub promotion_event_seen: bool,
+    pub action: WebsocketPrecommitHoldAction,
+}
+
+unsafe extern "C" {
+    fn prodex_websocket_precommit_hold_plan_v1(
+        abi_version: i64,
+        fields_address: u64,
+        field_count: i64,
+        output_address: u64,
+        output_count: i64,
+    ) -> i64;
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum WebsocketResponseFrameAction {
@@ -66,6 +107,56 @@ unsafe extern "C" {
         output_address: u64,
         output_count: i64,
     ) -> i64;
+}
+
+/// Plans bounded WebSocket precommit hold state without touching transport or buffers.
+pub fn precommit_hold_state_plan(
+    input: WebsocketPrecommitHoldInput,
+) -> Result<WebsocketPrecommitHoldPlan, MojoError> {
+    let fields = [
+        input.hold_count,
+        input.hold_bytes,
+        input.frame_bytes,
+        u64::from(input.promotion_allowed),
+        u64::from(input.promotion_event_seen),
+        u64::from(input.hold_promotion_event_seen),
+        input.hard_affinity_limit,
+        input.lookahead_budget,
+    ];
+    let mut output = [u64::MAX; PRECOMMIT_HOLD_OUTPUT_COUNT];
+    let status = unsafe {
+        prodex_websocket_precommit_hold_plan_v1(
+            PRECOMMIT_HOLD_ABI_VERSION,
+            fields.as_ptr() as usize as u64,
+            i64::try_from(PRECOMMIT_HOLD_FIELD_COUNT).map_err(|_| MojoError::InvalidInput)?,
+            output.as_mut_ptr() as usize as u64,
+            i64::try_from(PRECOMMIT_HOLD_OUTPUT_COUNT).map_err(|_| MojoError::InvalidInput)?,
+        )
+    };
+    match status {
+        0 => {}
+        1 => return Err(MojoError::InvalidInput),
+        4 => return Err(MojoError::AbiMismatch),
+        _ => return Err(MojoError::InvalidOutput),
+    }
+    let promotion_event_seen = match output[2] {
+        0 => false,
+        1 => true,
+        _ => return Err(MojoError::InvalidOutput),
+    };
+    let action = match output[3] {
+        0 => WebsocketPrecommitHoldAction::Buffer,
+        1 => WebsocketPrecommitHoldAction::PromoteEvent,
+        2 => WebsocketPrecommitHoldAction::PromoteLookahead,
+        3 => WebsocketPrecommitHoldAction::RejectLimit,
+        _ => return Err(MojoError::InvalidOutput),
+    };
+    Ok(WebsocketPrecommitHoldPlan {
+        hold_count: output[0],
+        hold_bytes: output[1],
+        promotion_event_seen,
+        action,
+    })
 }
 
 fn map_action(value: i64) -> Result<WebsocketResponseFrameAction, MojoError> {
@@ -453,6 +544,93 @@ mod tests {
                     1,
                     output.as_mut_ptr() as usize as u64,
                     OUTPUT_COUNT as i64,
+                )
+            },
+            1
+        );
+    }
+
+    #[test]
+    fn precommit_hold_plan_preserves_limit_and_promotion_precedence() {
+        let input = WebsocketPrecommitHoldInput {
+            hold_count: 2,
+            hold_bytes: 100,
+            frame_bytes: 50,
+            promotion_allowed: true,
+            promotion_event_seen: false,
+            hold_promotion_event_seen: false,
+            hard_affinity_limit: 512,
+            lookahead_budget: 200,
+        };
+        assert_eq!(
+            precommit_hold_state_plan(input).expect("compiled hold plan"),
+            WebsocketPrecommitHoldPlan {
+                hold_count: 3,
+                hold_bytes: 150,
+                promotion_event_seen: false,
+                action: WebsocketPrecommitHoldAction::Buffer,
+            }
+        );
+
+        let mut budget = input;
+        budget.promotion_event_seen = true;
+        budget.frame_bytes = 100;
+        assert_eq!(
+            precommit_hold_state_plan(budget)
+                .expect("lookahead promotion")
+                .action,
+            WebsocketPrecommitHoldAction::PromoteLookahead
+        );
+
+        let mut event = input;
+        event.promotion_event_seen = true;
+        event.promotion_allowed = false;
+        event.frame_bytes = 1_000;
+        assert_eq!(
+            precommit_hold_state_plan(event)
+                .expect("event promotion")
+                .action,
+            WebsocketPrecommitHoldAction::PromoteEvent
+        );
+
+        let mut limit = input;
+        limit.promotion_allowed = false;
+        limit.frame_bytes = 413;
+        assert_eq!(
+            precommit_hold_state_plan(limit)
+                .expect("hard-affinity rejection")
+                .action,
+            WebsocketPrecommitHoldAction::RejectLimit
+        );
+    }
+
+    #[test]
+    fn precommit_hold_abi_rejects_bad_version_and_boolean_fields() {
+        let fields = [0_u64; PRECOMMIT_HOLD_FIELD_COUNT];
+        let mut output = [0_u64; PRECOMMIT_HOLD_OUTPUT_COUNT];
+        assert_eq!(
+            unsafe {
+                prodex_websocket_precommit_hold_plan_v1(
+                    PRECOMMIT_HOLD_ABI_VERSION + 1,
+                    fields.as_ptr() as usize as u64,
+                    PRECOMMIT_HOLD_FIELD_COUNT as i64,
+                    output.as_mut_ptr() as usize as u64,
+                    PRECOMMIT_HOLD_OUTPUT_COUNT as i64,
+                )
+            },
+            4
+        );
+
+        let mut invalid = fields;
+        invalid[3] = 2;
+        assert_eq!(
+            unsafe {
+                prodex_websocket_precommit_hold_plan_v1(
+                    PRECOMMIT_HOLD_ABI_VERSION,
+                    invalid.as_ptr() as usize as u64,
+                    PRECOMMIT_HOLD_FIELD_COUNT as i64,
+                    output.as_mut_ptr() as usize as u64,
+                    PRECOMMIT_HOLD_OUTPUT_COUNT as i64,
                 )
             },
             1
