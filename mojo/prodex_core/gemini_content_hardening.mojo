@@ -34,10 +34,11 @@ def gch_next_content(tree: ParsedJson, start: Int64) -> Int64:
 def gch_write_group(
     sink: Pointer[mut=True, JsonSink, _],
     tree: ParsedJson, first: Int64, end: Int64,
+    lead: Bool = False, tail: Bool = False,
 ):
     js_byte(sink, 123)
     # Preserve all non-role/parts metadata of the first retained content.
-    var field = pj_child(tree, first)
+    var field = -1 if lead else pj_child(tree, first)
     while field >= 0:
         var key = tree.nodes[unsafe_offset=field].key.copy()
         if not pj_equal(key, pj_literal(StringSlice("role"))) and not pj_equal(
@@ -52,7 +53,9 @@ def gch_write_group(
     js_string(sink, gch_role(tree, first))
     js_literal(sink, StringSlice(',"parts":['))
     var current = first
-    var emitted = False
+    var emitted = lead
+    if lead:
+        js_literal(sink, StringSlice('{"text":"[Continuing from previous Codex context.]"}'))
     while current >= 0 and current != end:
         var part = pj_child(tree, gch_parts(tree, current))
         while part >= 0:
@@ -62,23 +65,51 @@ def gch_write_group(
             emitted = True
             part = pj_next(tree, part)
         current = pj_next(tree, current)
+    if tail:
+        if emitted:
+            js_byte(sink, 44)
+        js_literal(sink, StringSlice('{"text":"Please continue."}'))
     js_literal(sink, StringSlice(']}'))
 
 
-def gch_coalesce(sink: Pointer[mut=True, JsonSink, _], tree: ParsedJson):
+def gch_coalesce(sink: Pointer[mut=True, JsonSink, _], tree: ParsedJson, shape: Bool = False):
     js_byte(sink, 91)
-    var current = gch_next_content(tree, pj_child(tree, 0))
+    var first_raw = pj_child(tree, 0)
+    var lead = shape and gch_role_is(tree, first_raw, StringSlice("model"))
+    var tail = False
+    if shape:
+        var last = first_raw
+        while last >= 0 and pj_next(tree, last) >= 0:
+            last = pj_next(tree, last)
+        tail = gch_role_is(tree, last, StringSlice("model"))
+    var current = gch_next_content(tree, first_raw)
     var emitted = False
+    if current < 0 and (lead or tail):
+        gch_write_group(sink, tree, -1, -1, lead, tail)
+        lead = False
+        tail = False
     while current >= 0:
         var role = gch_role(tree, current)
+        var user = pj_equal(role, pj_literal(StringSlice("user")))
         var next = gch_next_content(tree, pj_next(tree, current))
         while next >= 0 and pj_equal(role, gch_role(tree, next)):
             next = gch_next_content(tree, pj_next(tree, next))
+        if lead and not user:
+            gch_write_group(sink, tree, -1, -1, True, False)
+            emitted = True
         if emitted:
             js_byte(sink, 44)
-        gch_write_group(sink, tree, current, next)
+        var append_tail = tail and next < 0 and user
+        gch_write_group(sink, tree, current, next, lead and user, append_tail)
+        lead = False
+        if append_tail:
+            tail = False
         emitted = True
         current = next
+    if tail:
+        if emitted:
+            js_byte(sink, 44)
+        gch_write_group(sink, tree, -1, -1, False, True)
     js_byte(sink, 93)
 
 
@@ -234,7 +265,7 @@ def prodex_mojo_gemini_content_hardening_v1(
     if abi != 1:
         return 4
     if (
-        operation < 0 or operation > 2 or flag != 0 or measuring < 0 or measuring > 1
+        operation < 0 or operation > 3 or flag != 0 or measuring < 0 or measuring > 1
         or raw_length < 0 or nodes_address == 0 or metadata_address == 0
         or capacity < 0 or scratch_count < nodes_count or scratch_address == 0
     ):
@@ -255,8 +286,8 @@ def prodex_mojo_gemini_content_hardening_v1(
         Pointer[mut=True, UInt8, MutUntrackedOrigin](unsafe_from_address=Int(output_address)),
         capacity, 0, measuring == 1, False,
     )
-    if operation == 0:
-        gch_coalesce(Pointer(to=sink), tree)
+    if operation == 0 or operation == 3:
+        gch_coalesce(Pointer(to=sink), tree, operation == 3)
     else:
         gch_pair_tools(Pointer(to=sink), tree, operation == 2)
     if sink.failed:

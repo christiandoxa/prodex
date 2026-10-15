@@ -62,3 +62,45 @@ fn mojo_coalescing_is_used_by_complete_gemini_hardening() {
         ]
     );
 }
+
+#[test]
+fn mojo_role_shape_coalesces_synthetic_boundaries_using_original_metadata_rules() {
+    let mut contents = vec![
+        json!({"role": "model", "parts": []}),
+        json!({"role": "user", "parts": [{"text": "existing"}], "metadata": "must not replace synthetic first"}),
+        json!({"role": "model", "parts": false}),
+    ];
+    super::gemini_provider_core_enforce_content_role_shape(&mut contents);
+    assert_eq!(
+        contents,
+        vec![json!({"role": "user", "parts": [
+            {"text": "[Continuing from previous Codex context.]"},
+            {"text": "existing"},
+            {"text": "Please continue."},
+        ]})]
+    );
+}
+
+#[test]
+fn mojo_role_shape_preserves_the_raw_boundary_decision_before_invalid_rows_are_removed() {
+    let mut contents = vec![
+        json!(null),
+        json!({"role": "model", "parts": [{"text": "reply"}]}),
+    ];
+    super::gemini_provider_core_enforce_content_role_shape(&mut contents);
+    assert_eq!(
+        contents,
+        vec![
+            json!({"role": "model", "parts": [{"text": "reply"}]}),
+            json!({"role": "user", "parts": [{"text": "Please continue."}]}),
+        ]
+    );
+    let mut all_invalid = vec![json!({"role": "model", "parts": false})];
+    super::gemini_provider_core_enforce_content_role_shape(&mut all_invalid);
+    assert_eq!(
+        all_invalid,
+        vec![json!({"role":"user", "parts": [
+            {"text": "[Continuing from previous Codex context.]"}, {"text": "Please continue."},
+        ]})]
+    );
+}
