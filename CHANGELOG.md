@@ -2,9 +2,7 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
-## 0.437.14 - Unreleased
-
-Changes after `0.437.13`.
+## 0.437.14 - 2026-10-15
 
 ### Runtime
 
@@ -147,28 +145,3 @@ Changes after `0.437.13`.
 
 - Reap the session-owned native app-server process tree (`2efed0b`)
 - Prevent admission and quota-state notification deadlock (`370ee38`)
-
-## 0.437.2 - 2026-10-10
-
-### Runtime
-
-- Preserve portable affinity recovery and release validation (`a5b927b`)
-- Keep quota recovery reachable across busy accounts (`57a1ee2`)
-- Move compact continuation policy to Mojo (`5f91526`)
-- Exhaust websocket attempts correctly across recovery sweeps (`d191200`)
-- Map Mojo affinity policy errors at app boundary (`d7cc909`)
-- Migrate runtime proxy body limit policy (`5357e12`)
-
-### CLI
-
-- Preserve turn-state owner facts in quota replay eligibility (`77ffdf0`)
-
-### Docs
-
-- Qualify Codex rust-v0.162.1 (`d59ab48`)
-
-### Misc
-
-- Preserve DeepSeek usage output and metadata edge cases (`f71e135`)
-- Preserve Gemini data URL and media text contracts (`0b84d7a`)
-- Select oldest cookie across bounded ABI chunks without Rust fallback (`fff216f`)
