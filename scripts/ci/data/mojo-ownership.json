@@ -635,6 +635,18 @@
           "runtime_retry_after_text_policy",
           "runtime_proxy_body_snippet_render"
         ]
+      },
+      "mojo/prodex_core/websocket_response_tracking.mojo": {
+        "operations": [
+          "runtime_websocket_response_tracking_policy",
+          "runtime_websocket_precommit_hold_state_policy"
+        ]
+      },
+      "crates/prodex-mojo-core/src/websocket_response_tracking.rs": {
+        "operations": [
+          "runtime_websocket_response_tracking_policy",
+          "runtime_websocket_precommit_hold_state_policy"
+        ]
       }
     },
     "additions": [
@@ -2081,7 +2093,8 @@
         "production_reachable": true,
         "role": "semantic",
         "operations": [
-          "runtime_websocket_response_tracking_policy"
+          "runtime_websocket_response_tracking_policy",
+          "runtime_websocket_precommit_hold_state_policy"
         ]
       },
       {
@@ -2091,7 +2104,8 @@
         "production_reachable": true,
         "role": "adapter",
         "operations": [
-          "runtime_websocket_response_tracking_policy"
+          "runtime_websocket_response_tracking_policy",
+          "runtime_websocket_precommit_hold_state_policy"
         ]
       },
       {
@@ -9443,6 +9457,30 @@
       "rust_adapter_scope": "upstream frame acquisition, stream state mutation, response forwarding, and typed plan mapping"
     },
     {
+      "name": "runtime_websocket_precommit_hold_state_policy",
+      "domain": "runtime-proxy/websocket-response",
+      "introduced_in": "0.438.0",
+      "baseline_state": "candidate",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_websocket_precommit_hold_plan_v1",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/websocket_response_tracking.mojo",
+      "consumer": "crates/prodex-app/src/runtime_proxy/websocket/response_tracking/precommit.rs",
+      "consumer_marker": "precommit_hold_state_plan(",
+      "production_consumers": [
+        "crates/prodex-app/src/runtime_proxy/websocket/response_tracking/precommit.rs"
+      ],
+      "production_reachability_test": "crates/prodex-mojo-core/src/websocket_response_tracking.rs",
+      "caller_regression_test": "crates/prodex-app/tests/src/runtime_proxy/websocket/precommit_hold.rs",
+      "rust_owner_before": "Rust accumulated WebSocket precommit hold bytes and frames, applied the hard-affinity fail-closed limit, and selected event-versus-lookahead promotion.",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "deleted; compiled Mojo ABI cases and WebSocket hold caller regressions cover bounded accumulation, promotion precedence, and hard-affinity rejection",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "Rust retains event fact acquisition, bounded text buffering, log effects, error propagation, and host-size materialization; Mojo owns the pure hold-state transition."
+    },
+    {
       "name": "runtime_websocket_failure_state_policy",
       "domain": "runtime-proxy/websocket-failure",
       "introduced_in": "0.437.1",
@@ -13315,6 +13353,78 @@
       "production_consumer": "crates/prodex-app/src/app_commands/log_throughput.rs",
       "parity_test": "crates/prodex-mojo-core/tests/log_throughput_display.rs and crates/prodex-app/src/app_commands/log_throughput.rs tests",
       "cleanup_evidence": "The Rust rate filter, tenths arithmetic, and precision branch are removed; required-Mojo ABI and app caller regressions preserve invalid, threshold, tie, and display outputs."
+    },
+    {
+      "file": "crates/prodex-app/src/runtime_proxy/websocket/response_tracking/precommit.rs",
+      "symbol": "let next_hold_bytes",
+      "operation": "runtime_websocket_precommit_hold_state_policy",
+      "previous_responsibility": "Rust computed the next held-byte total and selected the hard-affinity limit rejection before buffering a WebSocket frame.",
+      "final_state": "deleted",
+      "cleanup_loc": 5,
+      "cleanup_source": {
+        "kind": "deleted",
+        "path": "crates/prodex-app/src/runtime_proxy/websocket/response_tracking/precommit.rs",
+        "baseline_range": {
+          "start": 127,
+          "end": 131
+        }
+      },
+      "rust_before": "crates/prodex-app/src/runtime_proxy/websocket/response_tracking/precommit.rs::runtime_websocket_buffer_precommit_hold",
+      "rust_after": "Rust keeps the limit log/error effect while Mojo returns the bounded next-state and rejection action.",
+      "mojo_owner": "mojo/prodex_core/websocket_response_tracking.mojo::prodex_websocket_precommit_hold_plan_v1",
+      "mojo_source": "mojo/prodex_core/websocket_response_tracking.mojo",
+      "mojo_entry": "prodex_websocket_precommit_hold_plan_v1",
+      "production_consumer": "crates/prodex-app/src/runtime_proxy/websocket/response_tracking/precommit.rs",
+      "parity_test": "crates/prodex-app/tests/src/runtime_proxy/websocket/precommit_regressions.rs::websocket_hard_affinity_precommit_hold_limit_fails_closed_without_forwarding",
+      "cleanup_evidence": "The Rust byte-total and limit branch now consume the required Mojo hold-state action; the caller still logs and returns the same fail-closed error."
+    },
+    {
+      "file": "crates/prodex-app/src/runtime_proxy/websocket/response_tracking/precommit.rs",
+      "symbol": "*precommit_hold_count = (*precommit_hold_count)",
+      "operation": "runtime_websocket_precommit_hold_state_policy",
+      "previous_responsibility": "Rust incremented held-frame count and held bytes after accepting a precommit frame.",
+      "final_state": "deleted",
+      "cleanup_loc": 1,
+      "cleanup_source": {
+        "kind": "deleted",
+        "path": "crates/prodex-app/src/runtime_proxy/websocket/response_tracking/precommit.rs",
+        "baseline_range": {
+          "start": 153,
+          "end": 156
+        }
+      },
+      "rust_before": "crates/prodex-app/src/runtime_proxy/websocket/response_tracking/precommit.rs::runtime_websocket_buffer_precommit_hold",
+      "rust_after": "Rust materializes Mojo's validated counters into the host state and appends the buffered frame.",
+      "mojo_owner": "mojo/prodex_core/websocket_response_tracking.mojo::prodex_websocket_precommit_hold_plan_v1",
+      "mojo_source": "mojo/prodex_core/websocket_response_tracking.mojo",
+      "mojo_entry": "prodex_websocket_precommit_hold_plan_v1",
+      "production_consumer": "crates/prodex-app/src/runtime_proxy/websocket/response_tracking/precommit.rs",
+      "parity_test": "crates/prodex-app/tests/src/runtime_proxy/websocket/precommit_hold.rs::websocket_precommit_hold_commits_when_lookahead_budget_is_exhausted",
+      "cleanup_evidence": "The direct Rust counter updates were replaced by checked Mojo output mapping without moving buffering or response effects across the host boundary."
+    },
+    {
+      "file": "crates/prodex-app/src/runtime_proxy/websocket/response_tracking/precommit.rs",
+      "symbol": "let lookahead_budget_exhausted",
+      "operation": "runtime_websocket_precommit_hold_state_policy",
+      "previous_responsibility": "Rust compared the accumulated hold bytes with the lookahead budget and selected event-versus-budget promotion.",
+      "final_state": "deleted",
+      "cleanup_loc": 4,
+      "cleanup_source": {
+        "kind": "deleted",
+        "path": "crates/prodex-app/src/runtime_proxy/websocket/response_tracking/precommit.rs",
+        "baseline_range": {
+          "start": 161,
+          "end": 164
+        }
+      },
+      "rust_before": "crates/prodex-app/src/runtime_proxy/websocket/response_tracking/precommit.rs::runtime_websocket_buffer_precommit_hold",
+      "rust_after": "Rust maps Mojo's promotion action to existing log text and forwards the buffered frame only after the state plan permits it.",
+      "mojo_owner": "mojo/prodex_core/websocket_response_tracking.mojo::prodex_websocket_precommit_hold_plan_v1",
+      "mojo_source": "mojo/prodex_core/websocket_response_tracking.mojo",
+      "mojo_entry": "prodex_websocket_precommit_hold_plan_v1",
+      "production_consumer": "crates/prodex-app/src/runtime_proxy/websocket/response_tracking/precommit.rs",
+      "parity_test": "crates/prodex-app/tests/src/runtime_proxy/websocket/precommit_hold.rs::websocket_precommit_hold_response_created_commits_at_terminal_event",
+       "cleanup_evidence": "The old Rust lookahead comparison and promotion precedence are gone; only effectful logging and frame buffering remain in the caller."
     }
   ],
   "deleted_authoritative_operations": [

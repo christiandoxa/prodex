@@ -9,6 +9,9 @@ use super::{
     runtime_websocket_precommit_hold_promotion_event_seen,
 };
 use anyhow::{Context, Result};
+use prodex_mojo_core::websocket_response_tracking::{
+    WebsocketPrecommitHoldAction, WebsocketPrecommitHoldInput, precommit_hold_state_plan,
+};
 use prodex_runtime_state::RuntimeRouteKind;
 use runtime_proxy_crate::{runtime_proxy_log_field, runtime_proxy_structured_log_message};
 use tungstenite::Message as WsMessage;
@@ -124,11 +127,25 @@ pub(super) fn runtime_websocket_buffer_precommit_hold(
         );
     }
     let promotion_event_seen = runtime_websocket_precommit_hold_promotion_event_seen(inspected);
-    let next_hold_bytes = precommit_hold_bytes.saturating_add(text.len());
-    if !precommit_hold_promotion_allowed
-        && !promotion_event_seen
-        && next_hold_bytes > RUNTIME_PROXY_WEBSOCKET_PRECOMMIT_HARD_AFFINITY_MAX_BYTES
-    {
+    let plan = precommit_hold_state_plan(WebsocketPrecommitHoldInput {
+        hold_count: u64::try_from(*precommit_hold_count)
+            .context("runtime websocket precommit hold count exceeds Mojo ABI")?,
+        hold_bytes: u64::try_from(*precommit_hold_bytes)
+            .context("runtime websocket precommit hold bytes exceeds Mojo ABI")?,
+        frame_bytes: u64::try_from(text.len())
+            .context("runtime websocket precommit frame exceeds Mojo ABI")?,
+        promotion_allowed: precommit_hold_promotion_allowed,
+        promotion_event_seen,
+        hold_promotion_event_seen: *precommit_hold_promotion_event_seen,
+        hard_affinity_limit: u64::try_from(
+            RUNTIME_PROXY_WEBSOCKET_PRECOMMIT_HARD_AFFINITY_MAX_BYTES,
+        )
+        .context("runtime websocket hard-affinity limit exceeds Mojo ABI")?,
+        lookahead_budget: u64::try_from(RUNTIME_PROXY_SSE_LOOKAHEAD_BYTES)
+            .context("runtime websocket lookahead budget exceeds Mojo ABI")?,
+    })
+    .map_err(|error| anyhow::anyhow!("Mojo websocket precommit hold planning failed: {error:?}"))?;
+    if plan.action == WebsocketPrecommitHoldAction::RejectLimit {
         runtime_proxy_log(
             shared,
             runtime_proxy_structured_log_message(
@@ -138,7 +155,7 @@ pub(super) fn runtime_websocket_buffer_precommit_hold(
                     runtime_proxy_log_field("transport", "websocket"),
                     runtime_proxy_log_field("profile", profile_name),
                     runtime_proxy_log_field("reuse", reuse_existing_session.to_string()),
-                    runtime_proxy_log_field("hold_bytes", next_hold_bytes.to_string()),
+                    runtime_proxy_log_field("hold_bytes", plan.hold_bytes.to_string()),
                     runtime_proxy_log_field(
                         "hold_limit",
                         RUNTIME_PROXY_WEBSOCKET_PRECOMMIT_HARD_AFFINITY_MAX_BYTES.to_string(),
@@ -151,47 +168,48 @@ pub(super) fn runtime_websocket_buffer_precommit_hold(
             "runtime websocket precommit hold exceeded its bounded hard-affinity limit"
         ));
     }
-    *precommit_hold_count = (*precommit_hold_count).saturating_add(1);
-    *precommit_hold_bytes = (*precommit_hold_bytes).saturating_add(text.len());
-    *precommit_hold_promotion_event_seen |= promotion_event_seen;
+    *precommit_hold_count = usize::try_from(plan.hold_count)
+        .context("Mojo websocket precommit hold count does not fit host usize")?;
+    *precommit_hold_bytes = usize::try_from(plan.hold_bytes)
+        .context("Mojo websocket precommit hold bytes do not fit host usize")?;
+    *precommit_hold_promotion_event_seen = plan.promotion_event_seen;
     buffered_precommit_text_frames.push(RuntimeBufferedWebsocketTextFrame {
         text: text.to_string(),
         response_ids: inspected.response_ids.clone(),
     });
-    let lookahead_budget_exhausted = precommit_hold_promotion_allowed
-        && *precommit_hold_bytes >= RUNTIME_PROXY_SSE_LOOKAHEAD_BYTES;
-    Ok(
-        if *precommit_hold_promotion_event_seen || lookahead_budget_exhausted {
-            runtime_proxy_log(
-                shared,
-                runtime_proxy_structured_log_message(
-                    "websocket_precommit_hold_promoted",
-                    [
-                        runtime_proxy_log_field("request", request_id.to_string()),
-                        runtime_proxy_log_field("profile", profile_name),
-                        runtime_proxy_log_field(
-                            "event",
-                            if lookahead_budget_exhausted {
-                                "lookahead_budget_exhausted"
-                            } else {
-                                "response_created"
-                            },
-                        ),
-                        runtime_proxy_log_field("reuse", reuse_existing_session.to_string()),
-                        runtime_proxy_log_field("hold_count", (*precommit_hold_count).to_string()),
-                        runtime_proxy_log_field("hold_bytes", (*precommit_hold_bytes).to_string()),
-                        runtime_proxy_log_field(
-                            "profile_promotion_allowed",
-                            precommit_hold_promotion_allowed.to_string(),
-                        ),
-                    ],
-                ),
-            );
-            true
-        } else {
-            false
-        },
-    )
+    let (promoted, promotion_event) = match plan.action {
+        WebsocketPrecommitHoldAction::PromoteEvent => (true, "response_created"),
+        WebsocketPrecommitHoldAction::PromoteLookahead => (true, "lookahead_budget_exhausted"),
+        WebsocketPrecommitHoldAction::Buffer => (false, ""),
+        WebsocketPrecommitHoldAction::RejectLimit => {
+            return Err(anyhow::anyhow!(
+                "Mojo websocket precommit hold returned an unhandled limit action"
+            ));
+        }
+    };
+    Ok(if promoted {
+        runtime_proxy_log(
+            shared,
+            runtime_proxy_structured_log_message(
+                "websocket_precommit_hold_promoted",
+                [
+                    runtime_proxy_log_field("request", request_id.to_string()),
+                    runtime_proxy_log_field("profile", profile_name),
+                    runtime_proxy_log_field("event", promotion_event),
+                    runtime_proxy_log_field("reuse", reuse_existing_session.to_string()),
+                    runtime_proxy_log_field("hold_count", (*precommit_hold_count).to_string()),
+                    runtime_proxy_log_field("hold_bytes", (*precommit_hold_bytes).to_string()),
+                    runtime_proxy_log_field(
+                        "profile_promotion_allowed",
+                        precommit_hold_promotion_allowed.to_string(),
+                    ),
+                ],
+            ),
+        );
+        true
+    } else {
+        false
+    })
 }
 
 pub(crate) struct RuntimeWebsocketAttemptRequest<'a> {

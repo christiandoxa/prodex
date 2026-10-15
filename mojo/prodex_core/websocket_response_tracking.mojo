@@ -7,6 +7,14 @@ from rich_types import ProdexRichStringView
 comptime WEBSOCKET_RESPONSE_TRACKING_ABI_VERSION: Int64 = 1
 comptime WEBSOCKET_RESPONSE_TRACKING_FIELD_COUNT: Int64 = 10
 comptime WEBSOCKET_RESPONSE_TRACKING_OUTPUT_COUNT: Int64 = 8
+comptime WEBSOCKET_PRECOMMIT_HOLD_ABI_VERSION: Int64 = 1
+comptime WEBSOCKET_PRECOMMIT_HOLD_FIELD_COUNT: Int64 = 8
+comptime WEBSOCKET_PRECOMMIT_HOLD_OUTPUT_COUNT: Int64 = 4
+comptime WEBSOCKET_PRECOMMIT_HOLD_ACTION_BUFFER: UInt64 = 0
+comptime WEBSOCKET_PRECOMMIT_HOLD_ACTION_PROMOTE_EVENT: UInt64 = 1
+comptime WEBSOCKET_PRECOMMIT_HOLD_ACTION_PROMOTE_BUDGET: UInt64 = 2
+comptime WEBSOCKET_PRECOMMIT_HOLD_ACTION_REJECT_LIMIT: UInt64 = 3
+comptime WEBSOCKET_PRECOMMIT_HOLD_UINT64_MAX: UInt64 = 18_446_744_073_709_551_615
 
 comptime FRAME_TEXT: Int64 = 0
 comptime FRAME_BINARY: Int64 = 1
@@ -57,6 +65,71 @@ def websocket_response_tracking_event_resets_socket(
         or response_equals(address, length, StringSlice("response.failed"))
         or response_equals(address, length, StringSlice("response.incomplete"))
     )
+
+
+def websocket_precommit_hold_saturating_add(left: UInt64, right: UInt64) -> UInt64:
+    if left > WEBSOCKET_PRECOMMIT_HOLD_UINT64_MAX - right:
+        return WEBSOCKET_PRECOMMIT_HOLD_UINT64_MAX
+    return left + right
+
+
+@export("prodex_websocket_precommit_hold_plan_v1")
+def prodex_websocket_precommit_hold_plan_v1(
+    abi_version: Int64,
+    fields_address: UInt,
+    field_count: Int64,
+    output_address: UInt,
+    output_count: Int64,
+) abi("C") -> Int64:
+    if abi_version != WEBSOCKET_PRECOMMIT_HOLD_ABI_VERSION:
+        return 4
+    if (
+        field_count != WEBSOCKET_PRECOMMIT_HOLD_FIELD_COUNT
+        or output_count != WEBSOCKET_PRECOMMIT_HOLD_OUTPUT_COUNT
+        or fields_address == 0
+        or output_address == 0
+    ):
+        return 1
+
+    var fields = Pointer[mut=False, UInt64, ImmUntrackedOrigin](
+        unsafe_from_address=Int(fields_address)
+    )
+    var output = Pointer[mut=True, UInt64, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    if (
+        fields[unsafe_offset=3] > 1
+        or fields[unsafe_offset=4] > 1
+        or fields[unsafe_offset=5] > 1
+    ):
+        return 1
+
+    var next_count = websocket_precommit_hold_saturating_add(
+        fields[unsafe_offset=0], UInt64(1)
+    )
+    var next_bytes = websocket_precommit_hold_saturating_add(
+        fields[unsafe_offset=1], fields[unsafe_offset=2]
+    )
+    var promotion_event_seen = (
+        fields[unsafe_offset=4] == 1 or fields[unsafe_offset=5] == 1
+    )
+    var action = WEBSOCKET_PRECOMMIT_HOLD_ACTION_BUFFER
+    if (
+        fields[unsafe_offset=3] == 0
+        and fields[unsafe_offset=4] == 0
+        and next_bytes > fields[unsafe_offset=6]
+    ):
+        action = WEBSOCKET_PRECOMMIT_HOLD_ACTION_REJECT_LIMIT
+    elif fields[unsafe_offset=3] == 1 and next_bytes >= fields[unsafe_offset=7]:
+        action = WEBSOCKET_PRECOMMIT_HOLD_ACTION_PROMOTE_BUDGET
+    elif promotion_event_seen:
+        action = WEBSOCKET_PRECOMMIT_HOLD_ACTION_PROMOTE_EVENT
+
+    output[unsafe_offset=0] = next_count
+    output[unsafe_offset=1] = next_bytes
+    output[unsafe_offset=2] = UInt64(promotion_event_seen)
+    output[unsafe_offset=3] = action
+    return 0
 
 
 @export("prodex_websocket_response_frame_plan_v1")
