@@ -155,6 +155,11 @@ unsafe extern "C" {
         same_auth: i64,
         result_address: u64,
     ) -> i64;
+    fn prodex_quota_watch_table_columns_v1(
+        abi_version: i64,
+        total_width: u64,
+        output_address: u64,
+    ) -> i64;
 }
 
 fn check(status: i64) -> Result<(), MojoError> {
@@ -376,6 +381,27 @@ pub fn viewport_lines(
     ))
 }
 
+/// Return the seven quota-watch table widths after the Mojo-owned shrink plan.
+pub fn table_columns(total_width: usize) -> Result<[usize; 7], MojoError> {
+    let mut output = [u64::MAX; 7];
+    check(unsafe {
+        prodex_quota_watch_table_columns_v1(
+            ABI_VERSION,
+            u64::try_from(total_width).map_err(|_| MojoError::InvalidInput)?,
+            output.as_mut_ptr() as usize as u64,
+        )
+    })?;
+    let output = output
+        .map(|value| usize::try_from(value).map_err(|_| MojoError::InvalidOutput))
+        .into_iter()
+        .collect::<Result<Vec<_>, _>>()?;
+    let output: [usize; 7] = output.try_into().map_err(|_| MojoError::InvalidOutput)?;
+    if output[..6].contains(&0) || output[6] == 0 {
+        return Err(MojoError::InvalidOutput);
+    }
+    Ok(output)
+}
+
 pub fn available_lines(terminal_height: usize, reserved_lines: usize) -> Result<usize, MojoError> {
     let terminal_height = i64::try_from(terminal_height).map_err(|_| MojoError::InvalidInput)?;
     let reserved_lines = i64::try_from(reserved_lines).map_err(|_| MojoError::InvalidInput)?;
@@ -568,6 +594,14 @@ mod tests {
             unsafe { prodex_quota_watch_refresh_v1(ABI_VERSION, 0, 1, 0, 1, 0, result_address) },
             1,
         );
+        assert_eq!(
+            unsafe { prodex_quota_watch_table_columns_v1(0, 80, result_address) },
+            4,
+        );
+        assert_eq!(
+            unsafe { prodex_quota_watch_table_columns_v1(ABI_VERSION, 80, 0) },
+            1,
+        );
     }
 
     #[test]
@@ -632,6 +666,24 @@ mod tests {
         assert_eq!(scroll_kind(4, 2, 2, 0).unwrap(), 2);
         let saturated = window_plan(&[usize::MAX], None, 0).unwrap_err();
         assert_eq!(saturated, MojoError::InvalidInput);
+    }
+
+    #[test]
+    fn quota_watch_table_columns_preserve_threshold_and_tiny_width_policy() {
+        for (total_width, expected) in [
+            (0, [1, 1, 1, 1, 1, 1, 1]),
+            (40, [4, 3, 4, 4, 4, 3, 12]),
+            (64, [9, 3, 6, 8, 6, 8, 18]),
+            (80, [15, 3, 6, 15, 6, 11, 18]),
+            (96, [20, 3, 7, 19, 8, 15, 18]),
+            (120, [24, 3, 7, 24, 8, 15, 33]),
+        ] {
+            assert_eq!(
+                table_columns(total_width).unwrap(),
+                expected,
+                "width={total_width}"
+            );
+        }
     }
 
     #[test]

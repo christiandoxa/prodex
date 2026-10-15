@@ -64,6 +64,30 @@ fn quota_watch_table_compacts_to_the_available_width() {
 }
 
 #[test]
+fn quota_watch_table_column_plan_reaches_the_mojo_linked_caller() {
+    let table = AllQuotaWatchTuiTable {
+        rows: vec![AllQuotaWatchTuiRow {
+            profile: vec!["profile".to_string()],
+            current: vec!["".to_string()],
+            auth: vec!["chatgpt".to_string()],
+            account: vec!["user@example.com".to_string()],
+            plan: vec!["plus".to_string()],
+            status: vec!["Ready".to_string()],
+            remaining: vec!["5h 80% | weekly 90%".to_string()],
+            detail: Vec::new(),
+        }],
+    };
+
+    let row = super::watch_tui::quota_watch_table_text_with_width(&table, 40).lines[1]
+        .spans
+        .iter()
+        .map(|span| span.content.as_ref())
+        .collect::<String>();
+    assert_eq!(terminal_ui::text_width(&row), 40);
+    assert!(row.contains("5h 80%"));
+}
+
+#[test]
 fn all_quota_watch_tui_detail_keeps_profile_column_clean() {
     let mut usage = test_openai_usage_with_windows(20, 10, 1_700_086_400);
     usage.rate_limit_reset_credits = Some(prodex_quota::RateLimitResetCreditsSummary {

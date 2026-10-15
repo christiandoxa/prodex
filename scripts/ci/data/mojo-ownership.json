@@ -695,7 +695,8 @@
         "production_reachable": true,
         "role": "semantic",
         "operations": [
-          "quota_watch_cadence_cache_lifetime"
+          "quota_watch_cadence_cache_lifetime",
+          "quota_watch_table_column_planning"
         ]
       },
       {
@@ -705,7 +706,8 @@
         "production_reachable": true,
         "role": "adapter",
         "operations": [
-          "quota_watch_cadence_cache_lifetime"
+          "quota_watch_cadence_cache_lifetime",
+          "quota_watch_table_column_planning"
         ]
       },
       {
@@ -2392,6 +2394,29 @@
       "duplicate_production_owner": false,
       "platform_fallback": false,
       "rust_adapter_scope": "clock capture, persistence and refresh scheduler IO, borrowed reset-window marshalling, checked duration materialization"
+    },
+    {
+      "name": "quota_watch_table_column_planning",
+      "domain": "terminal/quota-watch-layout",
+      "introduced_in": "0.438.0",
+      "baseline_state": "Rust selected width thresholds, fixed column defaults, tie-breaking shrink allocation, remaining-column floor, and tiny-terminal saturation",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_quota_watch_table_columns_v1",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/quota_watch_policy.mojo",
+      "consumer": "crates/prodex-app/src/quota_support/watch_tui/frame.rs",
+      "consumer_marker": "prodex_mojo_core::quota_watch_policy::table_columns(",
+      "production_consumers": [
+        "crates/prodex-app/src/quota_support/watch_tui/frame.rs"
+      ],
+      "production_reachability_test": "crates/prodex-mojo-core/src/quota_watch_policy.rs",
+      "rust_owner_before": "Rust selected width thresholds, fixed column defaults, tie-breaking shrink allocation, remaining-column floor, and tiny-terminal saturation",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "deleted; direct Mojo ABI cases and quota-watch table caller tests cover tiny widths, threshold transitions, and remaining-column preservation",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "terminal width acquisition, typed seven-column mapping, Unicode cell measurement and padding, and Ratatui rendering"
     },
     {
       "name": "status_resource_proc_parser",
