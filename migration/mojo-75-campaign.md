@@ -5582,3 +5582,11 @@ SQLite sidecar names through operation 8. Rust retains root enumeration, filenam
 acquisition, set accumulation, and all filesystem and symlink effects. Compiled
 Mojo adapter cases and managed-home migration callers cover accepted and rejected
 names.
+
+## App command startup policy migration
+
+`app_command_policy.mojo` now selects startup effects for parsed commands,
+including Super dry-run, update notices, profile recovery, housekeeping, and
+minimal startup. Rust retains command parsing, native Antigravity and doctor
+preflight, and all host effects. Required-Mojo ABI and app caller tests cover
+the compatibility boundaries.

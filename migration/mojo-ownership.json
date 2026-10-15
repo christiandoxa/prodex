@@ -2372,6 +2372,26 @@
         "operations": [
           "runtime_profile_active_backoff_max"
         ]
+      },
+      {
+        "path": "mojo/prodex_core/app_command_policy.mojo",
+        "language": "mojo",
+        "classification": "DETERMINISTIC_DOMAIN",
+        "production_reachable": true,
+        "role": "semantic",
+        "operations": [
+          "app_command_startup_policy"
+        ]
+      },
+      {
+        "path": "crates/prodex-mojo-core/src/app_command_policy.rs",
+        "language": "rust",
+        "classification": "MIXED",
+        "production_reachable": true,
+        "role": "adapter",
+        "operations": [
+          "app_command_startup_policy"
+        ]
       }
     ],
     "removed": [
@@ -2485,6 +2505,31 @@
       "duplicate_production_owner": false,
       "platform_fallback": false,
       "rust_adapter_scope": "monotonic host-clock acquisition and pause/resume effects, duration conversion and validated boolean result mapping"
+    },
+    {
+      "name": "app_command_startup_policy",
+      "domain": "app/command-startup",
+      "introduced_in": "0.438.0",
+      "baseline_state": "candidate",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_app_command_startup_policy_v1",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/app_command_policy.mojo",
+      "consumer": "crates/prodex-app/src/command_dispatch.rs",
+      "consumer_marker": "command_startup_policy(command)",
+      "production_consumers": [
+        "crates/prodex-app/src/command_dispatch.rs",
+        "crates/prodex-app/src/housekeeping.rs",
+        "crates/prodex-app/src/lib.rs"
+      ],
+      "production_reachability_test": "crates/prodex-mojo-core/tests/app_command_policy.rs",
+      "rust_owner_before": "Rust selected startup effects for Super dry-run, update notices, profile lifecycle recovery, automatic housekeeping, and minimal startup from parsed commands",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "deleted; required-Mojo ABI cases and app command caller regressions cover dry-run, native Antigravity, command exclusions, profile removal, and bridge/ping startup boundaries",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "Clap command parsing, command-family and dry-run fact projection, native Antigravity preflight, doctor install exception, and all filesystem/process/terminal effects"
     },
     {
       "name": "governance_finding_classification",
