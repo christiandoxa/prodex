@@ -4,12 +4,18 @@ use super::super::provider_models::{
 use super::{RuntimeProviderBridgeKind, runtime_provider_label};
 use crate::RuntimeHeapTrimmedBufferedResponseParts;
 use prodex_mojo_core::{
-    provider_constraints::provider_bridge_native_passthrough, rich::ascii_casefold_equal_exact,
+    provider_constraints::provider_bridge_native_passthrough,
+    rich::RuntimeProviderModelsResponsePlan,
 };
 use prodex_provider_core::{ProviderEndpoint, provider_adapter, provider_model_fallback_chain};
 use runtime_proxy_crate::{
     path_without_query, runtime_proxy_log_field, runtime_proxy_structured_log_message,
 };
+
+const RUNTIME_PROVIDER_MODELS_CATALOG_EMPTY: i64 = 0;
+const RUNTIME_PROVIDER_MODELS_CATALOG_READY: i64 = 1;
+const RUNTIME_PROVIDER_MODELS_CATALOG_LIMIT: i64 = 2;
+const RUNTIME_PROVIDER_MODELS_CATALOG_PENDING: i64 = 3;
 
 pub(in crate::runtime_launch::proxy_startup) fn runtime_provider_native_passthrough(
     kind: RuntimeProviderBridgeKind,
@@ -34,63 +40,109 @@ pub(in crate::runtime_launch::proxy_startup) fn runtime_provider_models_buffered
     method: &str,
     path_and_query: &str,
 ) -> Option<RuntimeHeapTrimmedBufferedResponseParts> {
-    if !ascii_casefold_equal_exact(method, "GET")
-        .expect("Mojo provider models-method comparison failed")
-    {
-        return None;
-    }
     let route = runtime_provider_route_kind(path_and_query)?;
-    if !matches!(
-        route,
-        RuntimeProviderRouteKind::ModelsList | RuntimeProviderRouteKind::ModelsSingle(_)
-    ) {
-        return None;
+    match prodex_mojo_core::rich::runtime_provider_models_response_plan(
+        method,
+        runtime_provider_route_kind_tag(route),
+        RUNTIME_PROVIDER_MODELS_CATALOG_PENDING,
+        false,
+    )
+    .expect("Mojo provider models-response policy returned invalid output")
+    {
+        RuntimeProviderModelsResponsePlan::NoResponse => return None,
+        RuntimeProviderModelsResponsePlan::CatalogRequired => {}
+        RuntimeProviderModelsResponsePlan::CatalogLimitExceeded
+        | RuntimeProviderModelsResponsePlan::ModelsList
+        | RuntimeProviderModelsResponsePlan::ModelFound
+        | RuntimeProviderModelsResponsePlan::ModelMissing => {
+            unreachable!(
+                "Mojo provider models-response policy returned a final plan before catalog facts"
+            )
+        }
     }
-    let models = match runtime_provider_model_catalog_json(kind, dynamic_catalog) {
-        Ok(models) => models,
-        Err(error) => {
-            return Some(runtime_provider_json_response(
+    let route_kind = runtime_provider_route_kind_tag(route);
+    let (models, catalog_state, catalog_error) =
+        match runtime_provider_model_catalog_json(kind, dynamic_catalog) {
+            Ok(models) => {
+                let state = if models.is_empty() {
+                    RUNTIME_PROVIDER_MODELS_CATALOG_EMPTY
+                } else {
+                    RUNTIME_PROVIDER_MODELS_CATALOG_READY
+                };
+                (models, state, None)
+            }
+            Err(error) => (
+                Vec::new(),
+                RUNTIME_PROVIDER_MODELS_CATALOG_LIMIT,
+                Some(error),
+            ),
+        };
+    let model = if catalog_state == RUNTIME_PROVIDER_MODELS_CATALOG_READY {
+        match route {
+            RuntimeProviderRouteKind::ModelsSingle(model_id) => {
+                runtime_provider_model_json_for(kind, &models, model_id)
+            }
+            RuntimeProviderRouteKind::ModelsList => None,
+            RuntimeProviderRouteKind::Responses
+            | RuntimeProviderRouteKind::ResponsesCompact
+            | RuntimeProviderRouteKind::ChatCompletions
+            | RuntimeProviderRouteKind::Messages
+            | RuntimeProviderRouteKind::Embeddings => None,
+        }
+    } else {
+        None
+    };
+    match prodex_mojo_core::rich::runtime_provider_models_response_plan(
+        method,
+        route_kind,
+        catalog_state,
+        model.is_some(),
+    )
+    .expect("Mojo provider models-response policy returned invalid output")
+    {
+        RuntimeProviderModelsResponsePlan::NoResponse => None,
+        RuntimeProviderModelsResponsePlan::CatalogLimitExceeded => {
+            Some(runtime_provider_json_response(
                 503,
                 serde_json::json!({
                     "error": {
-                        "message": error.to_string(),
+                        "message": catalog_error
+                            .expect("catalog-limit response requires catalog error")
+                            .to_string(),
                         "type": "service_unavailable",
                         "code": "model_catalog_limit_exceeded"
                     }
                 }),
-            ));
+            ))
         }
-    };
-    if models.is_empty() {
-        return None;
-    }
-    match route {
-        RuntimeProviderRouteKind::ModelsList => {
+        RuntimeProviderModelsResponsePlan::ModelsList => {
             let body = serde_json::json!({
                 "object": "list",
                 "data": models,
             });
             Some(runtime_provider_json_response(200, body))
         }
-        RuntimeProviderRouteKind::ModelsSingle(model_id) => {
-            let model = runtime_provider_model_json_for(kind, &models, model_id);
-            let status = if model.is_some() { 200 } else { 404 };
-            let body = model.unwrap_or_else(|| {
-                serde_json::json!({
-                    "error": {
-                        "message": format!("model '{model_id}' is not available for {}", runtime_provider_label(kind)),
-                        "type": "invalid_request_error",
-                        "code": "model_not_found"
-                    }
-                })
-            });
-            Some(runtime_provider_json_response(status, body))
+        RuntimeProviderModelsResponsePlan::ModelFound => Some(runtime_provider_json_response(
+            200,
+            model.expect("model-found response requires model JSON"),
+        )),
+        RuntimeProviderModelsResponsePlan::CatalogRequired => {
+            unreachable!("Mojo provider models-response policy requested catalog twice")
         }
-        RuntimeProviderRouteKind::Responses
-        | RuntimeProviderRouteKind::ResponsesCompact
-        | RuntimeProviderRouteKind::ChatCompletions
-        | RuntimeProviderRouteKind::Messages
-        | RuntimeProviderRouteKind::Embeddings => None,
+        RuntimeProviderModelsResponsePlan::ModelMissing => {
+            let model_id = match route {
+                RuntimeProviderRouteKind::ModelsSingle(model_id) => model_id,
+                _ => unreachable!("Mojo model response policy returned missing for a list route"),
+            };
+            let body = serde_json::json!({
+                "error": {
+                    "message": format!("model '{model_id}' is not available for {}", runtime_provider_label(kind)),
+                    "type": "invalid_request_error",
+                    "code": "model_not_found"
+                }
+            });
+            Some(runtime_provider_json_response(404, body))
+        }
     }
 }
 

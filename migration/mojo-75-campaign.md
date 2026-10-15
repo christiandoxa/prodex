@@ -5590,3 +5590,10 @@ including Super dry-run, update notices, profile recovery, housekeeping, and
 minimal startup. Rust retains command parsing, native Antigravity and doctor
 preflight, and all host effects. Required-Mojo ABI and app caller tests cover
 the compatibility boundaries.
+
+## Provider models response policy migration
+
+`rich_route.mojo` now decides provider model endpoint admission and response status
+from method, route, catalog, and model-presence facts. Rust retains catalog lookup,
+JSON/error materialization, and buffered HTTP effects; required-Mojo ABI and
+provider-bridge caller tests cover list, limit, found, missing, and no-response paths.

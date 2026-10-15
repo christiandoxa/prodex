@@ -583,7 +583,8 @@
       },
       "mojo/prodex_core/rich_route.mojo": {
         "operations": [
-          "runtime_websocket_event_classification"
+          "runtime_websocket_event_classification",
+          "runtime_provider_models_response_policy"
         ]
       },
       "mojo/prodex_core/provider_constraints.mojo": {
@@ -2083,7 +2084,8 @@
         "production_reachable": true,
         "role": "adapter",
         "operations": [
-          "runtime_proxy_mount_path_policy"
+          "runtime_proxy_mount_path_policy",
+          "runtime_provider_models_response_policy"
         ]
       },
       {
@@ -10668,6 +10670,29 @@
       "duplicate_production_owner": false,
       "platform_fallback": false,
       "rust_adapter_scope": "Host serde_json structural iteration in original depth-first order, checked depth facts and diagnostic error-tag projection"
+    },
+    {
+      "name": "runtime_provider_models_response_policy",
+      "domain": "gateway/provider-models",
+      "introduced_in": "0.438.0",
+      "baseline_state": "Rust admitted GET model routes and selected list, catalog-limit, found-model, or missing-model responses",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_runtime_provider_models_response_plan_v1",
+      "mojo_abi_version": 6,
+      "mojo_source": "mojo/prodex_core/rich_route.mojo",
+      "consumer": "crates/prodex-app/src/runtime_launch/proxy_startup/provider_bridge_routing.rs",
+      "consumer_marker": "prodex_mojo_core::rich::runtime_provider_models_response_plan(",
+      "production_consumers": [
+        "crates/prodex-app/src/runtime_launch/proxy_startup/provider_bridge_routing.rs"
+      ],
+      "production_reachability_test": "crates/prodex-mojo-core/tests/runtime_provider_models_response.rs",
+      "rust_owner_before": "Rust method admission, model-route response selection, empty-catalog suppression, catalog-limit status, and found/missing model status decisions",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "deleted; required-Mojo ABI matrix and provider-bridge caller regressions cover method, route, catalog, and model-presence boundaries",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "provider catalog acquisition and exact model lookup, route-tag mapping, JSON/error-body materialization, and buffered response construction"
     }
   ],
   "rust_semantic_reductions": [
@@ -12138,6 +12163,32 @@
         }
       },
       "cleanup_evidence": "The provider-to-allowed-name match is removed; Rust only maps Mojo outcomes to compatibility error text and continues credential-content validation."
+    },
+    {
+      "file": "crates/prodex-app/src/runtime_launch/proxy_startup/provider_bridge_routing.rs",
+      "symbol": "runtime_provider_models_buffered_response",
+      "operation": "runtime_provider_models_response_policy",
+      "previous_responsibility": "Rust selected GET model-route admission and list, catalog-limit, found-model, or missing-model response outcomes",
+      "final_state": "adapter-only",
+      "cleanup_loc": 64,
+      "cleanup_source": {
+        "kind": "collapsed-adapter",
+        "path": "crates/prodex-app/src/runtime_launch/proxy_startup/provider_bridge_routing.rs",
+        "baseline_range": {
+          "start": 41,
+          "end": 104
+        },
+        "release_symbol": "runtime_provider_models_buffered_response(",
+        "release_marker": "runtime_provider_models_response_plan("
+      },
+      "rust_before": "crates/prodex-app/src/runtime_launch/proxy_startup/provider_bridge_routing.rs::runtime_provider_models_buffered_response",
+      "rust_after": "Rust retains catalog acquisition, exact model lookup, route-tag mapping, JSON body construction, and response buffering while Mojo owns the response decision",
+      "mojo_owner": "mojo/prodex_core/rich_route.mojo::prodex_runtime_provider_models_response_plan_v1",
+      "mojo_source": "mojo/prodex_core/rich_route.mojo",
+      "mojo_entry": "prodex_runtime_provider_models_response_plan_v1",
+      "production_consumer": "crates/prodex-app/src/runtime_launch/proxy_startup/provider_bridge_routing.rs",
+      "parity_test": "crates/prodex-mojo-core/tests/runtime_provider_models_response.rs",
+      "cleanup_evidence": "The Rust method/status branch tree is replaced by the mandatory Mojo response plan; caller coverage preserves GET case-folding, non-model/no-catalog suppression, catalog-limit 503, list 200, found 200, and missing 404 behavior."
     }
   ],
   "deleted_authoritative_operations": [
