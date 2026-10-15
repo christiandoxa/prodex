@@ -901,3 +901,77 @@ def prodex_mojo_runtime_doctor_unsigned_field_v1(
         output_value[] = parsed[1]
         output_present[] = 1
     return 0
+
+
+# Facet winner selection is shared by diagnosis, summary, and report callers.
+# Rust supplies BTreeMap order; Mojo owns count precedence and lexical ties.
+comptime RUNTIME_DOCTOR_TOP_FACET_ABI_VERSION: Int64 = 1
+comptime RUNTIME_DOCTOR_TOP_FACET_MAX_COUNT: Int64 = 65536
+
+
+def runtime_doctor_top_facet_before(
+    values: Pointer[mut=False, ProdexRichStringView, _],
+    counts: Pointer[mut=False, UInt64, _],
+    left: Int64,
+    right: Int64,
+) -> Bool:
+    var left_count = counts[unsafe_offset=left]
+    var right_count = counts[unsafe_offset=right]
+    if left_count != right_count:
+        return left_count > right_count
+    return (
+        runtime_doctor_marker_context_summary_marker_compare(values, left, right)
+        > 0
+    )
+
+
+@export("prodex_mojo_runtime_doctor_top_facet_selection_v1")
+def prodex_mojo_runtime_doctor_top_facet_selection_v1(
+    abi_version: Int64,
+    values_address: UInt,
+    counts_address: UInt,
+    count: Int64,
+    selected_index_address: UInt,
+    selected_count_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != RUNTIME_DOCTOR_TOP_FACET_ABI_VERSION:
+        return 4
+    if (
+        count < 0
+        or count > RUNTIME_DOCTOR_TOP_FACET_MAX_COUNT
+        or selected_index_address == 0
+        or selected_count_address == 0
+    ):
+        return 1
+    var selected_index = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(selected_index_address)
+    )
+    var selected_count = Pointer[mut=True, UInt64, MutUntrackedOrigin](
+        unsafe_from_address=Int(selected_count_address)
+    )
+    selected_index[] = -1
+    selected_count[] = UInt64(0)
+    if count == 0:
+        return 0
+    if values_address == 0 or counts_address == 0:
+        return 1
+    var values = Pointer[mut=False, ProdexRichStringView, ImmUntrackedOrigin](
+        unsafe_from_address=Int(values_address)
+    )
+    var counts = Pointer[mut=False, UInt64, ImmUntrackedOrigin](
+        unsafe_from_address=Int(counts_address)
+    )
+    for index in range(count):
+        if not rich_view_valid(
+            values[unsafe_offset=index].copy(), RUNTIME_DOCTOR_MARKER_AGGREGATION_MAX_TEXT_BYTES
+        ):
+            return 2
+    var winner: Int64 = 0
+    var index: Int64 = 1
+    while index < count:
+        if runtime_doctor_top_facet_before(values, counts, index, winner):
+            winner = index
+        index += 1
+    selected_index[] = winner
+    selected_count[] = counts[unsafe_offset=winner]
+    return 0

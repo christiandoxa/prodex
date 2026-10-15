@@ -1,8 +1,98 @@
 use crate::diagnosis::runtime_doctor_finalize_summary;
 use crate::{
     RuntimeDoctorProfileSummary, RuntimeDoctorRouteProfileEvent, RuntimeDoctorRouteSummary,
-    RuntimeDoctorSummary,
+    RuntimeDoctorSummary, runtime_doctor_fields_for_summary,
 };
+use std::collections::BTreeMap;
+use std::path::Path;
+
+#[test]
+fn runtime_doctor_top_facet_uses_mojo_count_and_lexical_tie_at_caller_boundary() {
+    let summary = RuntimeDoctorSummary {
+        facet_counts: BTreeMap::from([(
+            "reason".to_string(),
+            BTreeMap::from([
+                ("alpha".to_string(), 2),
+                ("é".to_string(), 2),
+                ("highest".to_string(), 3),
+            ]),
+        )]),
+        ..RuntimeDoctorSummary::default()
+    };
+    assert_eq!(
+        crate::diagnosis::runtime_doctor_top_facet(&summary, "reason").as_deref(),
+        Some("highest (3)")
+    );
+
+    let tie = RuntimeDoctorSummary {
+        facet_counts: BTreeMap::from([(
+            "reason".to_string(),
+            BTreeMap::from([("alpha".to_string(), 2), ("é".to_string(), 2)]),
+        )]),
+        ..RuntimeDoctorSummary::default()
+    };
+    assert_eq!(
+        crate::diagnosis::runtime_doctor_top_facet(&tie, "reason").as_deref(),
+        Some("é (2)")
+    );
+}
+
+#[test]
+fn runtime_doctor_report_fields_use_mojo_optional_row_plan_at_caller_boundary() {
+    let summary = RuntimeDoctorSummary {
+        marker_counts: BTreeMap::from([
+            ("previous_response_fresh_fallback".to_string(), 1),
+            ("compact_final_failure".to_string(), 1),
+            ("selection_skip_sync_probe".to_string(), 1),
+            ("profile_probe_refresh_backpressure".to_string(), 1),
+        ]),
+        marker_last_fields: BTreeMap::from([
+            (
+                "compact_final_failure".to_string(),
+                BTreeMap::from([
+                    ("exit".to_string(), "candidate_exhausted".to_string()),
+                    ("reason".to_string(), "quota".to_string()),
+                    ("last_failure".to_string(), "quota".to_string()),
+                ]),
+            ),
+            (
+                "selection_skip_sync_probe".to_string(),
+                BTreeMap::from([
+                    ("cold_start_jobs".to_string(), "3".to_string()),
+                    ("cold_start_profiles".to_string(), "9".to_string()),
+                ]),
+            ),
+            (
+                "profile_probe_refresh_backpressure".to_string(),
+                BTreeMap::from([("profile".to_string(), "second".to_string())]),
+            ),
+        ]),
+        facet_counts: BTreeMap::from([(
+            "reason".to_string(),
+            BTreeMap::from([("quota".to_string(), 2)]),
+        )]),
+        ..RuntimeDoctorSummary::default()
+    };
+    let fields = runtime_doctor_fields_for_summary(&summary, Path::new("/tmp/pointer"));
+    let optional = fields
+        .iter()
+        .skip(13)
+        .map(|(name, value)| (name.as_str(), value.as_str()))
+        .collect::<Vec<_>>();
+    assert_eq!(
+        optional,
+        vec![
+            ("Legacy prev recovery", "1"),
+            ("Compact final", "1"),
+            ("Compact exit", "candidate_exhausted"),
+            ("Compact reason", "quota"),
+            ("Compact last fail", "quota"),
+            ("Sync-probe deferred", "3 job(s)"),
+            ("Probe pressure profile", "second"),
+            ("Hot reason", "quota (2)"),
+        ],
+    );
+}
 
 #[test]
 fn runtime_doctor_finalize_summary_uses_broker_artifact_diagnosis() {
