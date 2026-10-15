@@ -13,6 +13,14 @@ unsafe extern "C" {
         maximum: u64,
         result_address: u64,
     ) -> i64;
+    fn prodex_terminal_field_row_layout_v1(
+        abi: i64,
+        total_width: u64,
+        label_width: u64,
+        label_cells: u64,
+        result_address: u64,
+        result_capacity: i64,
+    ) -> i64;
     fn prodex_terminal_session_columns_v1(
         abi: i64,
         total_width: u64,
@@ -323,6 +331,43 @@ pub fn panel_label_width(
     Ok(result)
 }
 
+/// Plan the label padding and value width for one or more wrapped field rows.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct FieldRowLayoutPlan {
+    pub value_width: usize,
+    pub first_padding: usize,
+    pub continuation_padding: usize,
+}
+
+pub fn field_row_layout_plan(
+    total_width: usize,
+    label_width: usize,
+    label_cells: usize,
+) -> Result<FieldRowLayoutPlan, MojoError> {
+    let mut result = [u64::MAX; 3];
+    check_status(unsafe {
+        prodex_terminal_field_row_layout_v1(
+            ABI_VERSION,
+            from_usize(total_width)?,
+            from_usize(label_width)?,
+            from_usize(label_cells)?,
+            result.as_mut_ptr() as usize as u64,
+            3,
+        )
+    })?;
+    let value_width = usize::try_from(result[0]).map_err(|_| MojoError::InvalidOutput)?;
+    let first_padding = usize::try_from(result[1]).map_err(|_| MojoError::InvalidOutput)?;
+    let continuation_padding = usize::try_from(result[2]).map_err(|_| MojoError::InvalidOutput)?;
+    if value_width == 0 || first_padding > label_width || continuation_padding != label_width {
+        return Err(MojoError::InvalidOutput);
+    }
+    Ok(FieldRowLayoutPlan {
+        value_width,
+        first_padding,
+        continuation_padding,
+    })
+}
+
 /// Return [id, updated, thread, cwd, path] widths. No Rust layout fallback.
 pub fn session_columns(total_width: usize, gap_width: usize) -> Result<[usize; 5], MojoError> {
     let mut result = [u64::MAX; 5];
@@ -409,6 +454,47 @@ mod tests {
                 panel_label_width(longest, total, minimum, maximum).unwrap(),
                 expected,
                 "label width for {longest}/{total}"
+            );
+        }
+    }
+
+    #[test]
+    fn field_row_layout_preserves_tiny_width_and_unicode_padding() {
+        for (total, label, cells, expected) in [
+            (
+                24,
+                10,
+                5,
+                FieldRowLayoutPlan {
+                    value_width: 13,
+                    first_padding: 5,
+                    continuation_padding: 10,
+                },
+            ),
+            (
+                10,
+                10,
+                11,
+                FieldRowLayoutPlan {
+                    value_width: 1,
+                    first_padding: 0,
+                    continuation_padding: 10,
+                },
+            ),
+            (
+                0,
+                0,
+                0,
+                FieldRowLayoutPlan {
+                    value_width: 1,
+                    first_padding: 0,
+                    continuation_padding: 0,
+                },
+            ),
+        ] {
+            assert_eq!(
+                field_row_layout_plan(total, label, cells).unwrap(),
+                expected
             );
         }
     }
@@ -578,6 +664,10 @@ mod tests {
         );
         assert_eq!(
             unsafe { prodex_terminal_token_chunk_plan_v1(1, input, 2, 1, output, 2, count_ptr) },
+            1,
+        );
+        assert_eq!(
+            unsafe { prodex_terminal_field_row_layout_v1(1, 8, 4, 3, output, 2) },
             1,
         );
         assert_eq!(

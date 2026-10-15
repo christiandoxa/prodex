@@ -195,13 +195,22 @@ pub fn format_field_lines_with_layout(
     label_width: usize,
 ) -> Vec<String> {
     let label = format!("{label}:");
-    let value_width = total_width.saturating_sub(label_width + 1).max(1);
-    let wrapped = wrap_text(value, value_width);
+    let layout = prodex_mojo_core::terminal_layout::field_row_layout_plan(
+        total_width,
+        label_width,
+        text_width(&label),
+    )
+    .expect("compiled-in Mojo field-row layout policy failed");
+    let wrapped = wrap_text(value, layout.value_width);
     let mut lines = Vec::new();
 
     for (index, line) in wrapped.into_iter().enumerate() {
         let field_label = if index == 0 { label.as_str() } else { "" };
-        let padding = " ".repeat(label_width.saturating_sub(text_width(field_label)));
+        let padding = " ".repeat(if index == 0 {
+            layout.first_padding
+        } else {
+            layout.continuation_padding
+        });
         lines.push(format!("{field_label}{padding} {line}"));
     }
 
