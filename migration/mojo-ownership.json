@@ -1704,7 +1704,8 @@
         "production_reachable": true,
         "role": "semantic",
         "operations": [
-          "session_repair_rewrite_policy"
+          "session_repair_rewrite_policy",
+          "session_synthetic_metadata_repair"
         ]
       },
       {
@@ -1714,7 +1715,8 @@
         "production_reachable": true,
         "role": "adapter",
         "operations": [
-          "session_repair_rewrite_policy"
+          "session_repair_rewrite_policy",
+          "session_synthetic_metadata_repair"
         ]
       },
       {
@@ -8220,6 +8222,30 @@
       "rust_adapter_scope": "filesystem acquisition and transaction commit, JSONL fact projection, synthetic metadata construction, timestamps, and typed ABI result mapping"
     },
     {
+      "name": "session_synthetic_metadata_repair",
+      "domain": "session-store/repair-synthetic-metadata",
+      "introduced_in": "0.438.0",
+      "baseline_state": "Rust selected the first matching line, path-derived ID, or full selector, chose first valid timestamp/CWD/provider fields, and serialized the synthetic session metadata payload",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_session_repair_synthetic_plan_v1",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/session_repair.mojo",
+      "consumer": "crates/prodex-session-store/src/session_meta.rs",
+      "consumer_marker": "session_synthetic_metadata_plan(",
+      "production_consumers": [
+        "crates/prodex-session-store/src/session_meta.rs",
+        "crates/prodex-session-store/src/lib.rs"
+      ],
+      "production_reachability_test": "crates/prodex-mojo-core/src/json/session_repair.rs",
+      "rust_owner_before": "Rust selected synthetic session IDs and first valid repair fields across JSONL lines, applied clock/current-directory fallbacks, and constructed the JSON payload",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "Synthetic Rust selection and payload construction are deleted; compiled Mojo ABI tests and session-store repair regressions cover line/path/selector precedence, field ordering, JSON escaping, provider omission, and production rewrite",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "Rust retains filesystem/path acquisition, caller-owned JSONL fact projection, UTF-8 string-span decoding, clock/current-directory/package-version fallbacks, and transaction commit effects; Mojo owns deterministic precedence and JSON sink emission"
+    },
+    {
       "name": "provider_error_code_extraction",
       "domain": "provider/error",
       "introduced_in": "0.436.1",
@@ -11546,6 +11572,31 @@
       "production_consumer": "crates/prodex-runtime-proxy/src/smart_context/core.rs",
       "parity_test": "crates/prodex-runtime-proxy/tests/src/smart_context/core_artifacts.rs",
       "performance": "one bounded prefix ABI call for oversized request bodies"
+    },
+    {
+      "file": "crates/prodex-session-store/src/session_meta.rs",
+      "symbol": "synthetic_session_metadata_line",
+      "operation": "session_synthetic_metadata_repair",
+      "previous_responsibility": "Rust selected line, path, or full-selector session IDs, chose first valid timestamp/CWD/provider repair fields, and serialized the synthetic metadata JSON",
+      "final_state": "adapter-only",
+      "rust_before": "crates/prodex-session-store/src/session_meta.rs::synthetic_session_metadata_line and its synthetic_session_timestamp/synthetic_session_cwd helpers",
+      "rust_after": "Rust projects JSONL facts, retains path/clock/current-directory effects, decodes validated Mojo spans, and commits the resulting line; deterministic precedence and JSON emission execute through the mandatory Mojo ABI",
+      "mojo_owner": "mojo/prodex_core/session_repair.mojo::prodex_session_repair_synthetic_plan_v1 and prodex_session_repair_synthetic_json_v1",
+      "mojo_source": "mojo/prodex_core/session_repair.mojo",
+      "mojo_entry": "prodex_session_repair_synthetic_plan_v1",
+      "production_consumer": "crates/prodex-session-store/src/session_meta.rs",
+      "parity_test": "crates/prodex-mojo-core/src/json/session_repair.rs::synthetic_plan_keeps_id_precedence_and_first_valid_repair_fields",
+      "cleanup_loc": 87,
+      "cleanup_source": {
+        "kind": "collapsed-adapter",
+        "baseline_range": {
+          "start": 35,
+          "end": 124
+        },
+        "release_symbol": "pub(crate) fn synthetic_session_metadata_line(",
+        "release_marker": "session_synthetic_metadata_plan("
+      },
+      "cleanup_evidence": "The frozen baseline range contains 87 semantic Rust lines for synthetic session metadata selection and serialization; the current production function retains only host effects, validated span decoding, and the mandatory Mojo plan/JSON calls."
     }
   ],
   "deleted_authoritative_operations": [
