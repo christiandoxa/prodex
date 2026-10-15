@@ -557,6 +557,39 @@ export const RUNTIME_STRESS_WEIGHT_HINTS = Object.freeze([
 ]);
 
 export const RUNTIME_CI_TEST_CASES = [
+  // Auth/quota recovery exercises shared background queue and persistence boundaries.
+  {
+    name: "probe_recovery_043714_authenticated_success_clears_stale_auth_penalty",
+    tags: SERIALIZED_TAGS,
+  },
+  {
+    name: "probe_recovery_043714_ready_snapshot_releases_only_quota_quarantine",
+    tags: SERIALIZED_TAGS,
+  },
+  {
+    name: "probe_recovery_043714_restart_revalidates_auth_despite_fresh_ready_snapshot",
+    tags: SERIALIZED_TAGS,
+  },
+  {
+    name: "probe_recovery_043714_cached_ready_dto_cannot_clear_auth_or_newer_failures",
+    tags: SERIALIZED_TAGS,
+  },
+  {
+    name: "probe_recovery_043714_ready_probe_preserves_independent_backoffs",
+    tags: SERIALIZED_TAGS,
+  },
+  {
+    name: "probe_recovery_043714_failed_or_uninformative_probe_cannot_clear_auth",
+    tags: SERIALIZED_TAGS,
+  },
+  {
+    name: "probe_recovery_043714_delayed_success_keeps_newer_quarantine_until_fresh_proof",
+    tags: SERIALIZED_TAGS,
+  },
+  {
+    name: "quota_transition_043714_three_profiles_rotate_and_rejoin_after_both_window_resets",
+    tags: SERIALIZED_TAGS,
+  },
   {
     name: "explicit_session_recovery_then_same_second_rebind_survives_stale_persistence",
     tags: SERIALIZED_TAGS,
