@@ -905,6 +905,7 @@
           "kiro_response_shape_fallbacks",
           "kiro_acp_shape_fallbacks",
           "kiro_chat_message_prompt_construction",
+          "kiro_external_tool_control_stripping",
           "kiro_model_catalog_normalization",
           "deepseek_stream_shape_fallbacks",
           "deepseek_response_format_shape_policy",
@@ -1063,7 +1064,8 @@
           "kiro_anthropic_response_mapping",
           "kiro_response_shape_fallbacks",
           "kiro_acp_shape_fallbacks",
-          "kiro_chat_message_prompt_construction"
+          "kiro_chat_message_prompt_construction",
+          "kiro_external_tool_control_stripping"
         ]
       },
       {
@@ -11356,6 +11358,32 @@
       "duplicate_production_owner": false,
       "platform_fallback": false,
       "rust_adapter_scope": "Directory enumeration, filesystem metadata and deletion effects, retention input acquisition, cleanup counts, and failure reporting remain Rust-owned."
+    },
+    {
+      "name": "kiro_external_tool_control_stripping",
+      "domain": "provider/kiro",
+      "introduced_in": "0.438.0",
+      "baseline_state": "Rust parsed Kiro request objects and removed ACP-owned external tool declarations and controls",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_mojo_kiro_external_tool_controls_v1",
+      "mojo_abi_version": 6,
+      "mojo_source": "mojo/prodex_core/rich_abi.mojo",
+      "mojo_semantic_source": "mojo/prodex_core/kiro.mojo",
+      "consumer": "crates/prodex-provider-core/src/translators/kiro/request.rs",
+      "consumer_marker": "kiro_provider_core_strip_external_tool_controls",
+      "production_consumers": [
+        "crates/prodex-provider-core/src/translators/kiro/request.rs",
+        "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_kiro/request_validation.rs"
+      ],
+      "production_reachability_test": "crates/prodex-mojo-core/tests/kiro_request_controls.rs",
+      "caller_regression_test": "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_kiro/tests.rs",
+      "rust_owner_before": "Rust removed tools and functions for parent requests, and additionally removed parallel_tool_calls, tool_choice, function_call, and web_search_options for sub-agent requests.",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "Compiled Mojo caller and runtime Kiro request regressions preserve parent versus sub-agent field ownership, surviving field order, Unicode, and invalid-input handling.",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "Serde JSON parsing and canonicalization, bounded Mojo ABI invocation, output validation, and request error mapping remain in Rust."
     }
   ],
   "rust_semantic_reductions": [
@@ -13185,6 +13213,32 @@
       "production_consumer": "crates/prodex-housekeeping/src/lib.rs",
       "parity_test": "crates/prodex-housekeeping/tests/src/lib.rs::stale_login_cleanup_keeps_fresh_owned_directories",
       "cleanup_evidence": "The direct Rust modified-versus-cutoff comparison is deleted and replaced by the mandatory operation-7 Mojo call; stale deletion and fresh-directory retention remain covered at the housekeeping caller boundary."
+    },
+    {
+      "file": "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_kiro/request_validation.rs",
+      "symbol": "strip_kiro_external_tool_controls",
+      "operation": "kiro_external_tool_control_stripping",
+      "previous_responsibility": "Rust parsed Kiro request JSON and removed ACP-owned external tool declarations and controls before provider translation.",
+      "final_state": "adapter-only",
+      "cleanup_loc": 34,
+      "cleanup_source": {
+        "kind": "collapsed-adapter",
+        "path": "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_kiro/request_validation.rs",
+        "baseline_range": {
+          "start": 68,
+          "end": 101
+        },
+        "release_symbol": "let canonical = serde_json::to_string(&value)",
+        "release_marker": "kiro_provider_core_strip_external_tool_controls"
+      },
+      "rust_before": "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_kiro/request_validation.rs::strip_kiro_external_tool_controls",
+      "rust_after": "Rust retains request JSON acquisition, object validation, canonicalization, Mojo ABI invocation, and error mapping while Mojo owns field filtering and surviving-member order.",
+      "mojo_owner": "mojo/prodex_core/kiro.mojo::kiro_external_tool_controls_v1",
+      "mojo_source": "mojo/prodex_core/kiro.mojo",
+      "mojo_entry": "prodex_mojo_kiro_external_tool_controls_v1",
+      "production_consumer": "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_kiro/request_validation.rs",
+      "parity_test": "crates/prodex-mojo-core/tests/kiro_request_controls.rs",
+      "cleanup_evidence": "The Rust field-removal loop is deleted; the compiled Mojo caller and runtime Kiro request regressions preserve parent and sub-agent control ownership, Unicode, order, and invalid-input behavior."
     }
   ],
   "deleted_authoritative_operations": [

@@ -47,6 +47,13 @@ pub(super) fn kiro_mojo_body(input: KiroKernelInput<'_>) -> Vec<u8> {
     kiro_kernel(input).unwrap_or_else(|error| panic!("Mojo Kiro kernel failed: {error:?}"))
 }
 
+pub fn kiro_provider_core_strip_external_tool_controls(
+    body: &str,
+    sub_agent: bool,
+) -> Result<Vec<u8>, prodex_mojo_core::MojoError> {
+    prodex_mojo_core::rich::kiro_strip_external_tool_controls_json(body, sub_agent)
+}
+
 fn kiro_validation_error(
     plan: KiroRequestValidationPlan,
     object: &serde_json::Map<String, Value>,

@@ -69,36 +69,27 @@ fn strip_kiro_external_tool_controls(
     body: Vec<u8>,
     sub_agent: bool,
 ) -> std::result::Result<Vec<u8>, RuntimeHeapTrimmedBufferedResponseParts> {
-    let mut value: Value = serde_json::from_slice(&body)
+    let value: Value = serde_json::from_slice(&body)
         .map_err(|_| invalid_request("Kiro request body must be valid JSON", "invalid_json"))?;
-    let Some(object) = value.as_object_mut() else {
+    if !value.is_object() {
         return Err(invalid_request(
             "Kiro request body must be a JSON object",
             "invalid_request_body",
         ));
-    };
-    let fields = if sub_agent {
-        [
-            "parallel_tool_calls",
-            "tool_choice",
-            "tools",
-            "functions",
-            "function_call",
-            "web_search_options",
-        ]
-        .as_slice()
-    } else {
-        ["tools", "functions"].as_slice()
-    };
-    for field in fields {
-        object.remove(*field);
     }
-    serde_json::to_vec(&value).map_err(|_| {
+    let canonical = serde_json::to_string(&value).map_err(|_| {
         invalid_request(
             "failed to serialize rewritten Kiro request body",
             "invalid_request_body",
         )
-    })
+    })?;
+    prodex_provider_core::kiro_provider_core_strip_external_tool_controls(&canonical, sub_agent)
+        .map_err(|_| {
+            invalid_request(
+                "failed to rewrite Kiro request body",
+                "invalid_request_body",
+            )
+        })
 }
 
 fn invalid_request(message: &str, code: &str) -> RuntimeHeapTrimmedBufferedResponseParts {
