@@ -748,6 +748,12 @@ pub fn continuity_event_kind(event: &str) -> Result<Option<ContinuityEvent>, Moj
 mod metrics;
 pub use metrics::{BrokerPreviousResponseContinuityPlan, previous_response_continuity_metrics};
 
+#[path = "runtime_broker_continuity/continuation_metrics.rs"]
+mod continuation_metrics;
+pub use continuation_metrics::{
+    BrokerContinuationMetricRow, BrokerContinuationMetricsPlan, continuation_metrics,
+};
+
 #[path = "runtime_broker_lifecycle.rs"]
 mod lifecycle;
 pub use lifecycle::{

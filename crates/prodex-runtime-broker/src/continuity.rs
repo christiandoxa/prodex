@@ -1,68 +1,76 @@
 use super::*;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum RuntimeBrokerContinuationBindingKind {
-    Response,
-    TurnState,
-    SessionId,
-}
-
 pub fn runtime_broker_continuation_metrics(
     statuses: &RuntimeContinuationStatuses,
     now: i64,
     stale_verified_seconds: i64,
 ) -> RuntimeBrokerContinuationMetrics {
-    let mut metrics = RuntimeBrokerContinuationMetrics {
+    let rows = statuses
+        .response
+        .values()
+        .map(
+            |status| prodex_mojo_core::runtime_broker_continuity::BrokerContinuationMetricRow {
+                kind: 0,
+                state: status.state as i64,
+                failure_count: status.failure_count,
+                not_found_streak: status.not_found_streak,
+                last_not_found_at: status.last_not_found_at,
+                last_verified_at: status.last_verified_at,
+                last_touched_at: status.last_touched_at,
+            },
+        )
+        .chain(statuses.turn_state.values().map(|status| {
+            prodex_mojo_core::runtime_broker_continuity::BrokerContinuationMetricRow {
+                kind: 1,
+                state: status.state as i64,
+                failure_count: status.failure_count,
+                not_found_streak: status.not_found_streak,
+                last_not_found_at: status.last_not_found_at,
+                last_verified_at: status.last_verified_at,
+                last_touched_at: status.last_touched_at,
+            }
+        }))
+        .chain(statuses.session_id.values().map(|status| {
+            prodex_mojo_core::runtime_broker_continuity::BrokerContinuationMetricRow {
+                kind: 2,
+                state: status.state as i64,
+                failure_count: status.failure_count,
+                not_found_streak: status.not_found_streak,
+                last_not_found_at: status.last_not_found_at,
+                last_verified_at: status.last_verified_at,
+                last_touched_at: status.last_touched_at,
+            }
+        }));
+    let plan = prodex_mojo_core::runtime_broker_continuity::continuation_metrics(
+        rows,
+        now,
+        stale_verified_seconds,
+    )
+    .expect("Mojo broker continuation metrics plan returned invalid output");
+    RuntimeBrokerContinuationMetrics {
         response_bindings: statuses.response.len(),
         turn_state_bindings: statuses.turn_state.len(),
         session_id_bindings: statuses.session_id.len(),
-        warm: 0,
-        verified: 0,
-        suspect: 0,
-        dead: 0,
-        failure_counts: RuntimeBrokerContinuationSignalMetrics::default(),
-        not_found_streaks: RuntimeBrokerContinuationSignalMetrics::default(),
-        stale_verified_bindings: RuntimeBrokerContinuationSignalMetrics::default(),
-    };
-    for (kind, status) in statuses
-        .response
-        .values()
-        .map(|status| (RuntimeBrokerContinuationBindingKind::Response, status))
-        .chain(
-            statuses
-                .turn_state
-                .values()
-                .map(|status| (RuntimeBrokerContinuationBindingKind::TurnState, status)),
-        )
-        .chain(
-            statuses
-                .session_id
-                .values()
-                .map(|status| (RuntimeBrokerContinuationBindingKind::SessionId, status)),
-        )
-    {
-        match status.state {
-            RuntimeContinuationBindingLifecycle::Warm => metrics.warm += 1,
-            RuntimeContinuationBindingLifecycle::Verified => metrics.verified += 1,
-            RuntimeContinuationBindingLifecycle::Suspect => metrics.suspect += 1,
-            RuntimeContinuationBindingLifecycle::Dead => metrics.dead += 1,
-        }
-        runtime_broker_add_continuation_signal(
-            &mut metrics.failure_counts,
-            kind,
-            status.failure_count as usize,
-        );
-        runtime_broker_add_continuation_signal(
-            &mut metrics.not_found_streaks,
-            kind,
-            status.not_found_streak as usize,
-        );
-        if runtime_broker_continuation_status_is_stale_verified(status, now, stale_verified_seconds)
-        {
-            runtime_broker_add_continuation_signal(&mut metrics.stale_verified_bindings, kind, 1);
-        }
+        warm: plan.states[0],
+        verified: plan.states[1],
+        suspect: plan.states[2],
+        dead: plan.states[3],
+        failure_counts: RuntimeBrokerContinuationSignalMetrics {
+            response: plan.failures[0],
+            turn_state: plan.failures[1],
+            session_id: plan.failures[2],
+        },
+        not_found_streaks: RuntimeBrokerContinuationSignalMetrics {
+            response: plan.not_found_streaks[0],
+            turn_state: plan.not_found_streaks[1],
+            session_id: plan.not_found_streaks[2],
+        },
+        stale_verified_bindings: RuntimeBrokerContinuationSignalMetrics {
+            response: plan.stale_verified[0],
+            turn_state: plan.stale_verified[1],
+            session_id: plan.stale_verified[2],
+        },
     }
-    metrics
 }
 
 pub fn runtime_broker_previous_response_continuity_metrics(
@@ -267,34 +275,6 @@ pub fn runtime_broker_subtract_continuity_failure_reason_metrics(
             &delta.stale_continuation,
         ),
     }
-}
-
-fn runtime_broker_add_continuation_signal(
-    metrics: &mut RuntimeBrokerContinuationSignalMetrics,
-    kind: RuntimeBrokerContinuationBindingKind,
-    value: usize,
-) {
-    match kind {
-        RuntimeBrokerContinuationBindingKind::Response => metrics.response += value,
-        RuntimeBrokerContinuationBindingKind::TurnState => metrics.turn_state += value,
-        RuntimeBrokerContinuationBindingKind::SessionId => metrics.session_id += value,
-    }
-}
-
-fn runtime_broker_continuation_status_is_stale_verified(
-    status: &RuntimeContinuationBindingStatus,
-    now: i64,
-    stale_verified_seconds: i64,
-) -> bool {
-    prodex_mojo_core::runtime_broker_continuity::stale_verified(
-        status.state == RuntimeContinuationBindingLifecycle::Verified,
-        status.last_not_found_at,
-        status.last_verified_at,
-        status.last_touched_at,
-        now,
-        stale_verified_seconds,
-    )
-    .expect("Mojo broker stale-continuation policy returned invalid output")
 }
 
 fn runtime_broker_effective_score(

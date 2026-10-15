@@ -304,6 +304,7 @@ const PROMOTED_FILES = [
   "crates/prodex-runtime-proxy/src/lib.rs",
   "crates/prodex-mojo-core/src/runtime_broker_continuity.rs",
   "crates/prodex-mojo-core/src/runtime_broker_continuity/metrics.rs",
+  "crates/prodex-mojo-core/src/runtime_broker_continuity/continuation_metrics.rs",
   "crates/prodex-runtime-broker/src/continuity.rs",
   "crates/prodex-runtime-broker-log/src/lib.rs",
   "crates/prodex-mojo-core/src/state_policy.rs",
@@ -1387,6 +1388,7 @@ export function findViolations(files) {
         '@export("prodex_runtime_broker_registry_reuse_plan_v1")',
         '@export("prodex_runtime_broker_startup_grace_seconds_v1")',
         '@export("prodex_runtime_broker_previous_response_continuity_v1")',
+        '@export("prodex_runtime_broker_continuation_metrics_v1")',
       ].filter((marker) => !contents.includes(marker))
         .map((marker) => `${filePath}: broker policy must remain Mojo-owned (${marker})`);
     }
@@ -2919,6 +2921,11 @@ export function findViolations(files) {
         (marker) => !contents.includes(marker),
       ).map((marker) => `${filePath}: broker continuity reducer adapter must retain ${marker}`);
     }
+    if (filePath === "crates/prodex-mojo-core/src/runtime_broker_continuity/continuation_metrics.rs") {
+      return ["prodex_runtime_broker_continuation_metrics_v1("].filter(
+        (marker) => !contents.includes(marker),
+      ).map((marker) => `${filePath}: broker continuation metrics adapter must retain ${marker}`);
+    }
     return [];
   });
   const brokerContinuityViolations = files.flatMap(([filePath, contents]) => {
@@ -2926,10 +2933,10 @@ export function findViolations(files) {
     const required = [
       "prodex_mojo_core::runtime_broker_continuity::continuity_line_plan",
       "prodex_mojo_core::runtime_broker_continuity::effective_score",
-      "prodex_mojo_core::runtime_broker_continuity::stale_verified",
       "prodex_mojo_core::runtime_broker_continuity::route_kind",
       "prodex_mojo_core::runtime_broker_continuity::health_key_kind",
       "prodex_mojo_core::runtime_broker_continuity::previous_response_continuity_metrics",
+      "prodex_mojo_core::runtime_broker_continuity::continuation_metrics",
     ];
     const violations = required
       .filter((call) => !contents.includes(call))

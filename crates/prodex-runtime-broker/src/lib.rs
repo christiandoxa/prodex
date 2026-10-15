@@ -3,10 +3,7 @@
 //! This crate intentionally stays side-effect-free. The binary crate still owns
 //! broker leases, proxy handles, and registry file I/O.
 
-use prodex_runtime_state::{
-    RuntimeContinuationBindingLifecycle, RuntimeContinuationBindingStatus,
-    RuntimeContinuationStatuses, RuntimeProfileHealth,
-};
+use prodex_runtime_state::{RuntimeContinuationStatuses, RuntimeProfileHealth};
 pub use prodex_runtime_state::{RuntimeStateLockWaitMetrics, RuntimeWaitDurationMetrics};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
