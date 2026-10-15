@@ -30,6 +30,7 @@ comptime PROFILE_IDENTITY_FIRST_PRESENT_SOURCE: Int64 = 17
 comptime PROFILE_IDENTITY_REMOVED_ACTIVE_CHOICE: Int64 = 18
 comptime PROFILE_IDENTITY_NAME_CANDIDATE: Int64 = 19
 comptime PROFILE_IDENTITY_TRIMMED_NONEMPTY: Int64 = 20
+comptime PROFILE_IDENTITY_IMPORT_EMAIL: Int64 = 21
 
 comptime PROFILE_MANAGEMENT_STATUS_ABI_VERSION: Int64 = 1
 comptime PROFILE_MANAGEMENT_STATUS_OK: Int64 = 0
@@ -626,6 +627,39 @@ def profile_optional_nonempty_casefold_equal(
     return profile_normalized_equal(left, right, True)
 
 
+def profile_import_email(
+    primary: ProdexRichStringView,
+    secondary: ProdexRichStringView,
+    primary_present: Bool,
+    secondary_present: Bool,
+    output: Pointer[mut=True, UInt8, _],
+    capacity: Int64,
+    written: Pointer[mut=True, Int64, _],
+) -> Int64:
+    if primary_present:
+        if not profile_write_normalized_range(
+            primary,
+            0,
+            Int64(primary.len),
+            output,
+            capacity,
+            written,
+            False,
+        ):
+            return PROFILE_IDENTITY_CAPACITY
+        return 1
+    if not secondary_present:
+        return 0
+    var bounds = rich_trim_bounds(secondary)
+    if not profile_write_normalized_range(
+        secondary, bounds[0], bounds[1], output, capacity, written, False
+    ):
+        return PROFILE_IDENTITY_CAPACITY
+    if written[] == 0:
+        return 0
+    return 1
+
+
 @export("prodex_mojo_profile_identity_v2")
 def prodex_mojo_profile_identity_v2(
     abi_version: Int64,
@@ -646,7 +680,7 @@ def prodex_mojo_profile_identity_v2(
         return PROFILE_IDENTITY_ABI
     if (
         operation < 0
-        or operation > PROFILE_IDENTITY_TRIMMED_NONEMPTY
+        or operation > PROFILE_IDENTITY_IMPORT_EMAIL
         or primary_length < 0
         or secondary_length < 0
         or record_count < 0
@@ -908,6 +942,22 @@ def prodex_mojo_profile_identity_v2(
     if operation == PROFILE_IDENTITY_TRIMMED_NONEMPTY:
         var bounds = rich_trim_bounds(primary)
         result[] = Int64(bounds[1] > bounds[0])
+        return PROFILE_IDENTITY_OK
+
+    if operation == PROFILE_IDENTITY_IMPORT_EMAIL:
+        if flags < 0 or flags > 3:
+            return PROFILE_IDENTITY_INVALID
+        result[] = profile_import_email(
+            primary,
+            secondary,
+            (flags & PROFILE_PRIMARY_PRESENT) != 0,
+            (flags & PROFILE_SECONDARY_PRESENT) != 0,
+            output,
+            output_capacity,
+            written,
+        )
+        if result[] == PROFILE_IDENTITY_CAPACITY:
+            return PROFILE_IDENTITY_CAPACITY
         return PROFILE_IDENTITY_OK
 
     return PROFILE_IDENTITY_INVALID

@@ -213,12 +213,11 @@ pub fn resolve_profile_import_identity(
     mut auth_identity: ProfileImportIdentity,
     fallback_email: Option<&str>,
 ) -> ProfileImportIdentity {
-    if auth_identity.email.is_none() {
-        auth_identity.email = fallback_email
-            .map(str::trim)
-            .filter(|email| !email.is_empty())
-            .map(ToOwned::to_owned);
-    }
+    auth_identity.email = prodex_mojo_core::profile_identity::profile_import_email(
+        auth_identity.email.as_deref(),
+        fallback_email,
+    )
+    .expect("Mojo profile-import identity resolution returned invalid output");
     auth_identity
 }
 

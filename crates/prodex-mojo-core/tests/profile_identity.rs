@@ -6,6 +6,21 @@ use prodex_mojo_core::profile_identity::{
 };
 
 unsafe extern "C" {
+    fn prodex_mojo_profile_identity_v2(
+        abi_version: i64,
+        operation: i64,
+        primary_address: u64,
+        primary_length: i64,
+        secondary_address: u64,
+        secondary_length: i64,
+        flags: i64,
+        records_address: u64,
+        record_count: i64,
+        output_address: u64,
+        output_capacity: i64,
+        written_address: u64,
+        result_address: u64,
+    ) -> i64;
     fn prodex_profile_management_status_v1(
         abi_version: i64,
         active_profile_present: i64,
@@ -15,6 +30,81 @@ unsafe extern "C" {
         output_capacity: i64,
         written_address: u64,
     ) -> i64;
+}
+
+fn raw_profile_identity_call(
+    operation: i64,
+    primary: &[u8],
+    secondary: &[u8],
+    flags: i64,
+    output: &mut [u8],
+    written: &mut i64,
+    result: &mut i64,
+) -> i64 {
+    // SAFETY: test slices stay alive for the call and the declared lengths match their storage.
+    unsafe {
+        prodex_mojo_profile_identity_v2(
+            2,
+            operation,
+            primary.as_ptr() as usize as u64,
+            primary.len() as i64,
+            secondary.as_ptr() as usize as u64,
+            secondary.len() as i64,
+            flags,
+            0,
+            0,
+            output.as_mut_ptr() as usize as u64,
+            output.len() as i64,
+            written as *mut i64 as usize as u64,
+            result as *mut i64 as usize as u64,
+        )
+    }
+}
+
+#[test]
+fn profile_import_email_abi_preserves_auth_and_rejects_invalid_flags() {
+    const { assert!(prodex_mojo_core::MOJO_REQUIRED) }
+
+    let primary = b"auth@example.com";
+    let fallback = "\u{2003} fallback@example.com \u{3000}".as_bytes();
+    let mut output = [0_u8; 64];
+    let mut written = -1_i64;
+    let mut result = -1_i64;
+    assert_eq!(
+        raw_profile_identity_call(
+            21,
+            primary,
+            fallback,
+            1,
+            &mut output,
+            &mut written,
+            &mut result,
+        ),
+        0
+    );
+    assert_eq!(&output[..written as usize], primary);
+    assert_eq!(result, 1);
+
+    let mut output = [0_u8; 64];
+    written = -1;
+    result = -1;
+    assert_eq!(
+        raw_profile_identity_call(21, &[], fallback, 2, &mut output, &mut written, &mut result,),
+        0
+    );
+    assert_eq!(&output[..written as usize], b"fallback@example.com");
+    assert_eq!(result, 1);
+
+    let mut output = [91_u8; 8];
+    written = 92;
+    result = 93;
+    assert_eq!(
+        raw_profile_identity_call(21, &[], fallback, 4, &mut output, &mut written, &mut result,),
+        1
+    );
+    assert_eq!(output, [91; 8]);
+    assert_eq!(written, 0);
+    assert_eq!(result, 0);
 }
 
 fn rust_status_oracle(

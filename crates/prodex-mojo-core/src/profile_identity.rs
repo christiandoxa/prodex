@@ -31,6 +31,7 @@ enum ProfileIdentityOperation {
     RemovedActiveChoice = 18,
     NameCandidate = 19,
     TrimmedNonempty = 20,
+    ImportEmail = 21,
 }
 
 #[repr(C)]
@@ -518,6 +519,35 @@ pub fn is_trimmed_nonempty(value: &str) -> Result<bool, MojoError> {
     match result.result {
         0 => Ok(false),
         1 => Ok(true),
+        _ => Err(MojoError::InvalidOutput),
+    }
+}
+
+/// Resolve an imported profile email, preserving an auth email verbatim and
+/// trimming only the exported fallback email.
+pub fn profile_import_email(
+    auth_email: Option<&str>,
+    exported_email: Option<&str>,
+) -> Result<Option<String>, MojoError> {
+    let primary = auth_email.unwrap_or_default();
+    let secondary = exported_email.unwrap_or_default();
+    let capacity = primary.len().max(secondary.len()).max(1);
+    let flags = optional_flag(auth_email, PROFILE_PRIMARY_PRESENT)
+        | optional_flag(exported_email, PROFILE_SECONDARY_PRESENT);
+    let result = call_kernel(
+        ProfileIdentityOperation::ImportEmail,
+        primary,
+        secondary,
+        flags,
+        0,
+        0,
+        capacity,
+    )?;
+    match result.result {
+        0 if result.written == 0 => Ok(None),
+        1 => String::from_utf8(result.output[..result.written].to_vec())
+            .map(Some)
+            .map_err(|_| MojoError::InvalidOutput),
         _ => Err(MojoError::InvalidOutput),
     }
 }
