@@ -42,7 +42,11 @@ comptime ANTHROPIC_STREAM_ERROR: Int64 = 29
 comptime ANTHROPIC_STREAM_EVENT: Int64 = 30
 comptime ANTHROPIC_RESPONSE_ENVELOPE: Int64 = 31
 comptime ANTHROPIC_WEB_SEARCH_RESULT: Int64 = 32
+comptime ANTHROPIC_RESPONSE_OUTPUT: Int64 = 33
 comptime ANTHROPIC_UINT64_MAX: UInt64 = 18_446_744_073_709_551_615
+comptime ANTHROPIC_INT64_MAX: UInt64 = 9_223_372_036_854_775_807
+comptime ANTHROPIC_RESPONSE_OUTPUT_MAX_ITEMS: Int64 = 65_536
+comptime ANTHROPIC_RESPONSE_OUTPUT_MAP_CAPACITY: Int64 = 131_072
 
 
 @fieldwise_init
@@ -871,78 +875,17 @@ def anthropic_request_write_response_message(
     writer: Pointer[mut=True, AnthropicRequestKernelWriter, _],
     input: ProdexAnthropicRequestKernelInput,
 ) -> Bool:
-    if (
-        input.blocks.len < 2
-        or anthropic_request_byte(input.blocks, 0) != 91
-        or anthropic_request_byte(input.blocks, Int64(input.blocks.len) - 1) != 93
-    ):
-        return False
-    var end = Int64(input.blocks.len) - 1
-    var index = anthropic_request_skip_ws(input.blocks, 1, end)
-    if index >= end:
-        return False
-    if not anthropic_request_put_literal(
-        writer, StringSlice('{"type":"message","role":"assistant","content":[')
-    ):
-        return False
-    var first = True
-    while index < end:
-        var item_end = anthropic_request_value_end(input.blocks, index, end, 0)
-        if item_end < 0:
-            return False
-        var kind = anthropic_request_object_field(
-            input.blocks, index, item_end, StringSlice('"type"')
-        )
-        if kind[0] < 0 or not anthropic_request_range_matches_literal(
-            input.blocks, kind[0], kind[1], StringSlice('"text"')
-        ):
-            return False
-        var text = anthropic_request_object_field(
-            input.blocks, index, item_end, StringSlice('"text"')
-        )
-        if text[0] < 0:
-            return False
-        if not first and not anthropic_request_put_byte(writer, 44):
-            return False
-        first = False
-        if not anthropic_request_put_literal(
-            writer, StringSlice('{"type":"output_text","text":')
-        ) or not anthropic_request_put_view_range(
-            writer, input.blocks, text[0], text[1]
-        ) or not anthropic_request_put_byte(writer, 125):
-            return False
-        index = anthropic_request_skip_ws(input.blocks, item_end, end)
-        if index < end and anthropic_request_byte(input.blocks, index) == 44:
-            index = anthropic_request_skip_ws(input.blocks, index + 1, end)
-            if index >= end:
-                return False
-        elif index != end:
-            return False
-    return not first and anthropic_request_put_literal(writer, StringSlice("]}"))
+    return anthropic_request_write_response_message_range(
+        writer, input.blocks, 0, anthropic_request_array_count(input.blocks)
+    )
 
 
 def anthropic_request_write_response_reasoning(
     writer: Pointer[mut=True, AnthropicRequestKernelWriter, _],
     input: ProdexAnthropicRequestKernelInput,
 ) -> Bool:
-    if input.content.len < 2:
-        return False
-    var kind = anthropic_request_object_field(
-        input.content, 0, Int64(input.content.len), StringSlice('"type"')
-    )
-    var thinking = anthropic_request_object_field(
-        input.content, 0, Int64(input.content.len), StringSlice('"thinking"')
-    )
-    if kind[0] < 0 or not anthropic_request_range_matches_literal(
-        input.content, kind[0], kind[1], StringSlice('"thinking"')
-    ) or thinking[0] < 0:
-        return False
-    return (
-        anthropic_request_put_literal(
-            writer, StringSlice('{"type":"reasoning","summary":[{"type":"summary_text","text":')
-        )
-        and anthropic_request_put_view_range(writer, input.content, thinking[0], thinking[1])
-        and anthropic_request_put_literal(writer, StringSlice("}]}"))
+    return anthropic_request_write_response_reasoning_range(
+        writer, input.content, 0, Int64(input.content.len)
     )
 
 
@@ -1426,6 +1369,408 @@ def anthropic_request_write_web_search_result(
             index = anthropic_request_skip_ws(output, index + 1, end)
         else:
             break
+    return anthropic_request_put_byte(writer, 93)
+
+
+def anthropic_request_array_item_range(
+    view: ProdexRichStringView, wanted: Int64
+) -> Array[Int64, 2]:
+    var result = Array[Int64, 2](fill=-1)
+    if (
+        wanted < 0
+        or view.len < 2
+        or anthropic_request_byte(view, 0) != 91
+        or anthropic_request_byte(view, Int64(view.len) - 1) != 93
+    ):
+        return result^
+    var end = Int64(view.len) - 1
+    var index = anthropic_request_skip_ws(view, 1, end)
+    var current: Int64 = 0
+    while index < end:
+        var item_end = anthropic_request_value_end(view, index, end, 0)
+        if item_end < 0:
+            return Array[Int64, 2](fill=-1)^
+        if current == wanted:
+            result[0] = index
+            result[1] = item_end
+            return result^
+        current += 1
+        index = anthropic_request_skip_ws(view, item_end, end)
+        if index < end and anthropic_request_byte(view, index) == 44:
+            index = anthropic_request_skip_ws(view, index + 1, end)
+            if index >= end:
+                return Array[Int64, 2](fill=-1)^
+        elif index != end:
+            return Array[Int64, 2](fill=-1)^
+    return result^
+
+
+def anthropic_request_array_count(view: ProdexRichStringView) -> Int64:
+    if (
+        view.len < 2
+        or anthropic_request_byte(view, 0) != 91
+        or anthropic_request_byte(view, Int64(view.len) - 1) != 93
+    ):
+        return -1
+    var end = Int64(view.len) - 1
+    var index = anthropic_request_skip_ws(view, 1, end)
+    var count: Int64 = 0
+    while index < end:
+        var item_end = anthropic_request_value_end(view, index, end, 0)
+        if item_end < 0:
+            return -1
+        count += 1
+        if count > ANTHROPIC_RESPONSE_OUTPUT_MAX_ITEMS:
+            return -1
+        index = anthropic_request_skip_ws(view, item_end, end)
+        if index < end and anthropic_request_byte(view, index) == 44:
+            index = anthropic_request_skip_ws(view, index + 1, end)
+            if index >= end:
+                return -1
+        elif index != end:
+            return -1
+    return count
+
+
+def anthropic_request_json_index(
+    view: ProdexRichStringView, bounds: Array[Int64, 2]
+) -> Int64:
+    if not anthropic_request_range_is_u64(view, bounds):
+        return -1
+    var value = anthropic_request_json_u64(
+        ProdexRichStringView(
+            view.ptr + UInt(bounds[0]), UInt(bounds[1] - bounds[0])
+        )
+    )
+    if value > ANTHROPIC_INT64_MAX:
+        return -1
+    return Int64(value)
+
+
+def anthropic_request_response_plan_item(
+    plan: ProdexRichStringView, item_start: Int64, item_end: Int64
+) -> Array[Int64, 4]:
+    var result = Array[Int64, 4](fill=-1)
+    var kind = anthropic_request_object_field(
+        plan, item_start, item_end, StringSlice('"kind"')
+    )
+    var start = anthropic_request_object_field(
+        plan, item_start, item_end, StringSlice('"start"')
+    )
+    var count = anthropic_request_object_field(
+        plan, item_start, item_end, StringSlice('"count"')
+    )
+    var input_index = anthropic_request_object_field(
+        plan, item_start, item_end, StringSlice('"input_index"')
+    )
+    result[0] = anthropic_request_json_index(plan, kind)
+    result[1] = anthropic_request_json_index(plan, start)
+    result[2] = anthropic_request_json_index(plan, count)
+    result[3] = anthropic_request_json_index(plan, input_index)
+    return result^
+
+
+def anthropic_request_response_plan_call_id(
+    plan: ProdexRichStringView,
+    blocks: ProdexRichStringView,
+    plan_index: Int64,
+) -> Array[Int64, 2]:
+    var missing = Array[Int64, 2](fill=-1)
+    var item = anthropic_request_array_item_range(plan, plan_index)
+    if item[0] < 0:
+        return missing^
+    var parsed = anthropic_request_response_plan_item(plan, item[0], item[1])
+    var block = anthropic_request_array_item_range(blocks, parsed[3])
+    if block[0] < 0:
+        return missing^
+    return anthropic_request_object_field(
+        blocks, block[0], block[1], StringSlice('"id"')
+    )
+
+
+def anthropic_request_hash_range(
+    view: ProdexRichStringView, bounds: Array[Int64, 2]
+) -> UInt64:
+    var hash: UInt64 = 14695981039346656037
+    for index in range(bounds[0], bounds[1]):
+        hash = (hash ^ UInt64(anthropic_request_byte(view, index))) * 1099511628211
+    hash &= 140737488355327
+    if hash == 0:
+        return 1
+    return hash
+
+
+def anthropic_request_write_response_message_range(
+    writer: Pointer[mut=True, AnthropicRequestKernelWriter, _],
+    blocks: ProdexRichStringView,
+    start: Int64,
+    count: Int64,
+) -> Bool:
+    if count <= 0 or start < 0:
+        return False
+    var total = anthropic_request_array_count(blocks)
+    if total < 0 or start > total or count > total - start:
+        return False
+    var end = Int64(blocks.len) - 1
+    var index = anthropic_request_skip_ws(blocks, 1, end)
+    var current: Int64 = 0
+    while current < start:
+        var item_end = anthropic_request_value_end(blocks, index, end, 0)
+        if item_end < 0:
+            return False
+        index = anthropic_request_skip_ws(blocks, item_end, end)
+        if index >= end or anthropic_request_byte(blocks, index) != 44:
+            return False
+        index = anthropic_request_skip_ws(blocks, index + 1, end)
+        current += 1
+    if not anthropic_request_put_literal(
+        writer, StringSlice('{"type":"message","role":"assistant","content":[')
+    ):
+        return False
+    var first = True
+    var written: Int64 = 0
+    while written < count:
+        var item_end = anthropic_request_value_end(blocks, index, end, 0)
+        if item_end < 0:
+            return False
+        var kind = anthropic_request_object_field(
+            blocks, index, item_end, StringSlice('"type"')
+        )
+        var text = anthropic_request_object_field(
+            blocks, index, item_end, StringSlice('"text"')
+        )
+        if (
+            kind[0] < 0
+            or not anthropic_request_range_matches_literal(
+                blocks, kind[0], kind[1], StringSlice('"text"')
+            )
+            or text[0] < 0
+        ):
+            return False
+        if not first and not anthropic_request_put_byte(writer, 44):
+            return False
+        first = False
+        if not (
+            anthropic_request_put_literal(
+                writer, StringSlice('{"type":"output_text","text":')
+            )
+            and anthropic_request_put_view_range(writer, blocks, text[0], text[1])
+            and anthropic_request_put_byte(writer, 125)
+        ):
+            return False
+        written += 1
+        index = anthropic_request_skip_ws(blocks, item_end, end)
+        if written < count:
+            if index >= end or anthropic_request_byte(blocks, index) != 44:
+                return False
+            index = anthropic_request_skip_ws(blocks, index + 1, end)
+    return anthropic_request_put_literal(writer, StringSlice("]}"))
+
+
+def anthropic_request_write_response_reasoning_range(
+    writer: Pointer[mut=True, AnthropicRequestKernelWriter, _],
+    blocks: ProdexRichStringView,
+    block_start: Int64,
+    block_end: Int64,
+) -> Bool:
+    if block_start < 0 or block_end <= block_start:
+        return False
+    var kind = anthropic_request_object_field(
+        blocks, block_start, block_end, StringSlice('"type"')
+    )
+    var thinking = anthropic_request_object_field(
+        blocks, block_start, block_end, StringSlice('"thinking"')
+    )
+    if kind[0] < 0 or not anthropic_request_range_matches_literal(
+        blocks, kind[0], kind[1], StringSlice('"thinking"')
+    ) or thinking[0] < 0:
+        return False
+    return (
+        anthropic_request_put_literal(
+            writer, StringSlice('{"type":"reasoning","summary":[{"type":"summary_text","text":')
+        )
+        and anthropic_request_put_view_range(writer, blocks, thinking[0], thinking[1])
+        and anthropic_request_put_literal(writer, StringSlice("}]"))
+        and anthropic_request_put_byte(writer, 125)
+    )
+
+
+def anthropic_request_write_web_search_call_with_result(
+    writer: Pointer[mut=True, AnthropicRequestKernelWriter, _],
+    call: ProdexRichStringView,
+    result: ProdexRichStringView,
+) -> Bool:
+    var id = anthropic_request_object_field(call, 0, Int64(call.len), StringSlice('"id"'))
+    if not anthropic_request_range_is_string(call, id):
+        return False
+    if not (
+        anthropic_request_put_literal(writer, StringSlice('{"type":"web_search_call","id":'))
+        and anthropic_request_put_view_range(writer, call, id[0], id[1])
+        and anthropic_request_put_literal(
+            writer, StringSlice(',"status":"completed","action":{"type":"search","queries":')
+        )
+        and anthropic_request_write_web_search_queries(
+            writer, call, 0, Int64(call.len)
+        )
+        and anthropic_request_put_literal(writer, StringSlice(',"sources":'))
+        and anthropic_request_write_web_search_sources(
+            writer, result, 0, Int64(result.len)
+        )
+        and anthropic_request_put_literal(writer, StringSlice("}}"))
+    ):
+        return False
+    return True
+
+
+def anthropic_request_write_response_output(
+    writer: Pointer[mut=True, AnthropicRequestKernelWriter, _],
+    input: ProdexAnthropicRequestKernelInput,
+) -> Bool:
+    var block_count = anthropic_request_array_count(input.blocks)
+    var materialized_count = anthropic_request_array_count(input.content)
+    var plan_count = anthropic_request_array_count(input.arguments)
+    if (
+        block_count < 0
+        or materialized_count < 0
+        or plan_count < 0
+        or plan_count > ANTHROPIC_RESPONSE_OUTPUT_MAX_ITEMS
+        or materialized_count != block_count
+    ):
+        return False
+    var sources = Array[Int64, 65536](fill=-1)
+    var source_ptr = Pointer(to=sources[0])
+    var entries = Array[UInt64, 131072](fill=0)
+    var entry_ptr = Pointer(to=entries[0])
+    var map_mask: UInt64 = 131071
+    for plan_index in range(plan_count):
+        var plan_range = anthropic_request_array_item_range(input.arguments, plan_index)
+        if plan_range[0] < 0:
+            return False
+        var item = anthropic_request_response_plan_item(
+            input.arguments, plan_range[0], plan_range[1]
+        )
+        if item[0] < 0 or item[0] > 4 or item[1] < 0 or item[2] < 0 or item[3] < 0:
+            return False
+        if item[3] >= block_count:
+            return False
+        if item[0] == 2:
+            var call_range = anthropic_request_array_item_range(input.blocks, item[3])
+            if call_range[0] < 0:
+                return False
+            var id = anthropic_request_object_field(
+                input.blocks, call_range[0], call_range[1], StringSlice('"id"')
+            )
+            if not anthropic_request_range_is_string(input.blocks, id):
+                return False
+            var hash = anthropic_request_hash_range(input.blocks, id)
+            var slot = Int64(hash % UInt64(ANTHROPIC_RESPONSE_OUTPUT_MAP_CAPACITY))
+            var inserted = False
+            for _ in range(ANTHROPIC_RESPONSE_OUTPUT_MAP_CAPACITY):
+                var entry = entry_ptr[unsafe_offset=slot]
+                if entry == 0:
+                    entry_ptr[unsafe_offset=slot] = (hash << 17) | UInt64(plan_index + 1)
+                    inserted = True
+                    break
+                var entry_hash = entry >> 17
+                var entry_plan = Int64(entry & map_mask) - 1
+                if entry_hash == hash:
+                    var old_id = anthropic_request_response_plan_call_id(
+                        input.arguments, input.blocks, entry_plan
+                    )
+                    if anthropic_request_ranges_equal(
+                        input.blocks, id[0], id[1], input.blocks, old_id[0], old_id[1]
+                    ):
+                        entry_ptr[unsafe_offset=slot] = (hash << 17) | UInt64(plan_index + 1)
+                        inserted = True
+                        break
+                slot = (slot + 1) % ANTHROPIC_RESPONSE_OUTPUT_MAP_CAPACITY
+            if not inserted:
+                return False
+        elif item[0] == 3:
+            var result_range = anthropic_request_array_item_range(input.blocks, item[3])
+            if result_range[0] < 0:
+                return False
+            var tool_use_id = anthropic_request_object_field(
+                input.blocks, result_range[0], result_range[1], StringSlice('"tool_use_id"')
+            )
+            if not anthropic_request_range_is_string(input.blocks, tool_use_id):
+                continue
+            var hash = anthropic_request_hash_range(input.blocks, tool_use_id)
+            var slot = Int64(hash % UInt64(ANTHROPIC_RESPONSE_OUTPUT_MAP_CAPACITY))
+            for _ in range(ANTHROPIC_RESPONSE_OUTPUT_MAP_CAPACITY):
+                var entry = entry_ptr[unsafe_offset=slot]
+                if entry == 0:
+                    break
+                var entry_hash = entry >> 17
+                var entry_plan = Int64(entry & map_mask) - 1
+                if entry_hash == hash:
+                    var old_id = anthropic_request_response_plan_call_id(
+                        input.arguments, input.blocks, entry_plan
+                    )
+                    if anthropic_request_ranges_equal(
+                        input.blocks,
+                        tool_use_id[0],
+                        tool_use_id[1],
+                        input.blocks,
+                        old_id[0],
+                        old_id[1],
+                    ):
+                        source_ptr[unsafe_offset=entry_plan] = item[3]
+                        break
+                slot = (slot + 1) % ANTHROPIC_RESPONSE_OUTPUT_MAP_CAPACITY
+    if not anthropic_request_put_byte(writer, 91):
+        return False
+    var first = True
+    for plan_index in range(plan_count):
+        var plan_range = anthropic_request_array_item_range(input.arguments, plan_index)
+        var item = anthropic_request_response_plan_item(
+            input.arguments, plan_range[0], plan_range[1]
+        )
+        if item[0] == 3:
+            continue
+        if not first and not anthropic_request_put_byte(writer, 44):
+            return False
+        first = False
+        if item[0] == 0:
+            if not anthropic_request_write_response_message_range(
+                writer, input.blocks, item[1], item[2]
+            ):
+                return False
+        elif item[0] == 1:
+            var value = anthropic_request_array_item_range(input.content, item[3])
+            if value[0] < 0 or anthropic_request_byte(input.content, value[0]) == 110:
+                return False
+            if not anthropic_request_put_view_range(
+                writer, input.content, value[0], value[1]
+            ):
+                return False
+        elif item[0] == 2:
+            var source_index = source_ptr[unsafe_offset=plan_index]
+            if source_index >= 0:
+                var call = anthropic_request_array_item_range(input.blocks, item[3])
+                var result = anthropic_request_array_item_range(input.blocks, source_index)
+                if call[0] < 0 or result[0] < 0 or not anthropic_request_write_web_search_call_with_result(
+                    writer,
+                    ProdexRichStringView(input.blocks.ptr + UInt(call[0]), UInt(call[1] - call[0])),
+                    ProdexRichStringView(input.blocks.ptr + UInt(result[0]), UInt(result[1] - result[0])),
+                ):
+                    return False
+            else:
+                var value = anthropic_request_array_item_range(input.content, item[3])
+                if value[0] < 0 or anthropic_request_byte(input.content, value[0]) == 110:
+                    return False
+                if not anthropic_request_put_view_range(
+                    writer, input.content, value[0], value[1]
+                ):
+                    return False
+        elif item[0] == 4:
+            var block = anthropic_request_array_item_range(input.blocks, item[3])
+            if block[0] < 0 or not anthropic_request_write_response_reasoning_range(
+                writer, input.blocks, block[0], block[1]
+            ):
+                return False
+        else:
+            return False
     return anthropic_request_put_byte(writer, 93)
 
 
@@ -2044,7 +2389,7 @@ def anthropic_request_view_valid(view: ProdexRichStringView) -> Bool:
 def anthropic_request_input_valid(input: ProdexAnthropicRequestKernelInput) -> Bool:
     if (
         input.operation < ANTHROPIC_REQUEST_BODY
-        or input.operation > ANTHROPIC_WEB_SEARCH_RESULT
+        or input.operation > ANTHROPIC_RESPONSE_OUTPUT
     ):
         return False
     if input.stream < 0 or input.stream > 1 or input.choice_kind < -1 or input.choice_kind > 7:
@@ -2122,6 +2467,8 @@ def anthropic_request_write_operation(
         return anthropic_request_write_response_reasoning(writer, input)
     if input.operation == ANTHROPIC_WEB_SEARCH_RESULT:
         return anthropic_request_write_web_search_result(writer, input)
+    if input.operation == ANTHROPIC_RESPONSE_OUTPUT:
+        return anthropic_request_write_response_output(writer, input)
     if input.operation == ANTHROPIC_STREAM_EVENT:
         return anthropic_request_write_stream_event_result(writer, input)
     if input.operation == ANTHROPIC_RESPONSE_ENVELOPE:

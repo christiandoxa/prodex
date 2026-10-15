@@ -36,6 +36,7 @@ pub enum AnthropicRequestKernelOperation {
     StreamEvent = 30,
     ResponseEnvelope = 31,
     WebSearchResult = 32,
+    ResponseOutput = 33,
 }
 
 /// Inputs for one bounded Anthropic wire-shape operation.

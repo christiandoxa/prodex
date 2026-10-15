@@ -127,6 +127,23 @@ fn response_envelope_raw_source_fails_closed_for_malformed_and_oversized_input()
 }
 
 #[test]
+fn response_output_applies_mojo_plan_and_attaches_last_matching_search_result() {
+    let blocks = r#"[{"type":"text","text":"before 🦀"},{"type":"server_tool_use","id":"srv_duplicate","name":"web_search","input":{"query":"first"}},{"type":"server_tool_use","id":"srv_duplicate","name":"web_search","input":{"query":"last"}},{"type":"web_search_tool_result","tool_use_id":"srv_duplicate","content":[{"url":"https://example.com/result","title":"Result"}]},{"type":"thinking","thinking":"hidden \"step\""}]"#;
+    let materialized = r#"[null,{"type":"web_search_call","id":"srv_duplicate","status":"completed","action":{"type":"search","queries":["first"],"sources":[]}},{"type":"web_search_call","id":"srv_duplicate","status":"completed","action":{"type":"search","queries":["last"],"sources":[]}},null,null]"#;
+    let plan = r#"[{"kind":0,"start":0,"count":1,"input_index":0},{"kind":2,"start":0,"count":0,"input_index":1},{"kind":2,"start":0,"count":0,"input_index":2},{"kind":3,"start":0,"count":0,"input_index":3},{"kind":4,"start":0,"count":0,"input_index":4}]"#;
+    let mut input =
+        AnthropicRequestKernelInput::new(AnthropicRequestKernelOperation::ResponseOutput);
+    input.blocks = Some(blocks);
+    input.content = Some(materialized);
+    input.arguments = Some(plan);
+
+    assert_eq!(
+        run(input),
+        r#"[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"before 🦀"}]},{"type":"web_search_call","id":"srv_duplicate","status":"completed","action":{"type":"search","queries":["first"],"sources":[]}},{"type":"web_search_call","id":"srv_duplicate","status":"completed","action":{"type":"search","queries":["last"],"sources":[{"type":"url","url":"https://example.com/result","title":"Result"}]}},{"type":"reasoning","summary":[{"type":"summary_text","text":"hidden \"step\""}]}]"#
+    );
+}
+
+#[test]
 fn stream_event_kernel_preserves_finish_and_error_shapes() {
     let mut input = AnthropicRequestKernelInput::new(AnthropicRequestKernelOperation::StreamEvent);
     input.content = Some(r#"{"type":"content_block_delta","delta":{"type":"text_delta"}}"#);

@@ -3,8 +3,7 @@ use super::*;
 use prodex_mojo_core::rich::{
     AnthropicRequestKernelInput, AnthropicRequestKernelOperation, AnthropicResponseBlock,
     AnthropicResponseBlockClassificationError, AnthropicResponseBlockClassificationInput,
-    AnthropicResponseBlockKind, AnthropicResponsePlanItem, AnthropicResponsePlanKind,
-    plan_anthropic_response_blocks,
+    AnthropicResponseBlockKind, AnthropicResponsePlanItem, plan_anthropic_response_blocks,
 };
 
 type AnthropicResponsePlan = (
@@ -70,65 +69,43 @@ fn response_plan_with_mojo(content: &[Value]) -> Result<AnthropicResponsePlan, S
     Ok((plan.blocks, inputs, plan.items))
 }
 
-fn render_response_message(blocks: &[Value]) -> Result<Value, String> {
-    let blocks = super::json_fragment(&Value::Array(blocks.to_vec()))?;
-    let mut input =
-        AnthropicRequestKernelInput::new(AnthropicRequestKernelOperation::ResponseMessage);
-    input.blocks = Some(&blocks);
-    super::anthropic_mojo_value(input)
-}
-
-fn render_response_reasoning(block: &Value) -> Result<Value, String> {
-    let block = super::json_fragment(block)?;
-    let mut input =
-        AnthropicRequestKernelInput::new(AnthropicRequestKernelOperation::ResponseReasoning);
-    input.content = Some(&block);
-    super::anthropic_mojo_value(input)
-}
-
 pub(super) fn anthropic_response_output(content: &[Value]) -> Result<Vec<Value>, String> {
     let (_, inputs, plan) = response_plan_with_mojo(content)?;
-
-    let mut output = Vec::new();
-    for item in plan {
-        match item.kind {
-            AnthropicResponsePlanKind::Message => {
-                let end = item
-                    .start
-                    .checked_add(item.count)
-                    .ok_or_else(|| "Anthropic response plan range overflowed".to_string())?;
-                let blocks = content
-                    .get(item.start..end)
-                    .ok_or_else(|| "Anthropic response plan referenced invalid text".to_string())?;
-                output.push(render_response_message(blocks)?);
-            }
-            AnthropicResponsePlanKind::ToolUse | AnthropicResponsePlanKind::WebSearchCall => {
-                let value = inputs
-                    .get(item.input_index)
-                    .and_then(Clone::clone)
-                    .ok_or_else(|| "Anthropic response plan referenced invalid item".to_string())?;
-                output.push(value);
-            }
-            AnthropicResponsePlanKind::WebSearchResult => {
-                let block = content.get(item.input_index).ok_or_else(|| {
-                    "Anthropic response plan referenced invalid result".to_string()
-                })?;
-                merge_anthropic_web_search_result(&mut output, block)?;
-            }
-            AnthropicResponsePlanKind::Reasoning => {
-                let block = content.get(item.input_index).ok_or_else(|| {
-                    "Anthropic response plan referenced invalid reasoning".to_string()
-                })?;
-                output.push(render_response_reasoning(block)?);
-            }
-        }
-    }
-    Ok(output)
+    let blocks = super::json_fragment(&Value::Array(content.to_vec()))?;
+    let materialized = super::json_fragment(&Value::Array(
+        inputs
+            .into_iter()
+            .map(|value| value.unwrap_or(Value::Null))
+            .collect(),
+    ))?;
+    let plan = super::json_fragment(&Value::Array(
+        plan.into_iter()
+            .map(|item| {
+                serde_json::json!({
+                    "kind": item.kind as i64,
+                    "start": item.start,
+                    "count": item.count,
+                    "input_index": item.input_index,
+                })
+            })
+            .collect(),
+    ))?;
+    let mut input =
+        AnthropicRequestKernelInput::new(AnthropicRequestKernelOperation::ResponseOutput);
+    input.blocks = Some(&blocks);
+    input.content = Some(&materialized);
+    input.arguments = Some(&plan);
+    let output = super::anthropic_mojo_value(input)?;
+    output
+        .as_array()
+        .cloned()
+        .ok_or_else(|| "Anthropic response output kernel returned a non-array".to_string())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use prodex_mojo_core::rich::AnthropicResponsePlanKind;
 
     #[test]
     fn mojo_response_block_classification_and_plan_match_expected_values() {
