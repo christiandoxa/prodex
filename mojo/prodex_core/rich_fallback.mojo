@@ -15,6 +15,9 @@ from rich_text import (
     rich_codepoint,
     rich_codepoint_width,
     rich_unicode_space,
+    rich_codepoint,
+    rich_codepoint_width,
+    rich_unicode_space,
     rich_copy_range,
     rich_hash_slice,
     rich_required_hash_capacity,
@@ -2420,3 +2423,88 @@ def prodex_mojo_runtime_retry_after_json_v1(
     if delay < 0:
         delay = runtime_retry_header_object(tree, secondary, dates)
     return delay if delay >= 0 else fallback_millis
+
+
+# Body snippets used for runtime proxy diagnostics have a single Mojo text
+# policy. Rust converts upstream bytes to a lossy UTF-8 view, then Mojo owns
+# Unicode whitespace collapse, codepoint clipping, and ellipsis formatting.
+@export("prodex_mojo_rich_runtime_proxy_body_snippet_v1")
+def prodex_mojo_rich_runtime_proxy_body_snippet_v1(
+    abi_version: Int64,
+    input_view_address: UInt,
+    maximum_chars: UInt64,
+    output_address: UInt,
+    output_capacity: Int64,
+    written_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != PRODEX_RICH_ABI_VERSION:
+        return RICH_STATUS_ABI
+    if (
+        input_view_address == 0
+        or output_address == 0
+        or output_capacity <= 0
+        or written_address == 0
+    ):
+        return RICH_STATUS_INVALID
+    var input = Pointer[mut=False, ProdexRichStringView, ImmUntrackedOrigin](
+        unsafe_from_address=Int(input_view_address)
+    )[].copy()
+    if not rich_view_valid(input, RICH_MAX_FALLBACK_MODEL_BYTES):
+        return RICH_STATUS_UTF8
+    var source = rich_view_ptr(input)
+    var output = Pointer[mut=True, UInt8, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    var written = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(written_address)
+    )
+    written[] = 0
+    var cursor: Int64 = 0
+    var scalar_count: UInt64 = 0
+    var saw_word = False
+    var pending_space = False
+    var truncated = False
+    var length = Int64(input.len)
+    while cursor < length:
+        var width = rich_codepoint_width(source[unsafe_offset=cursor])
+        var codepoint = rich_codepoint(source, cursor, width)
+        if rich_unicode_space(codepoint):
+            if saw_word:
+                pending_space = True
+            cursor += width
+            continue
+        if pending_space:
+            if scalar_count < maximum_chars:
+                if written[] >= output_capacity:
+                    return RICH_STATUS_CAPACITY
+                output[unsafe_offset=written[]] = 32
+                written[] += 1
+            else:
+                truncated = True
+            scalar_count += 1
+            pending_space = False
+        if scalar_count < maximum_chars:
+            if width > output_capacity - written[]:
+                return RICH_STATUS_CAPACITY
+            for index in range(width):
+                output[unsafe_offset=written[] + index] = source[unsafe_offset=cursor + index]
+            written[] += width
+        else:
+            truncated = True
+        scalar_count += 1
+        saw_word = True
+        cursor += width
+    if not saw_word:
+        if output_capacity < 1:
+            return RICH_STATUS_CAPACITY
+        output[unsafe_offset=0] = 45
+        written[] = 1
+        return RICH_STATUS_OK
+    if truncated:
+        if output_capacity - written[] < 3:
+            return RICH_STATUS_CAPACITY
+        output[unsafe_offset=written[]] = 46
+        output[unsafe_offset=written[] + 1] = 46
+        output[unsafe_offset=written[] + 2] = 46
+        written[] += 3
+    return RICH_STATUS_OK

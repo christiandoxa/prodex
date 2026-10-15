@@ -176,6 +176,9 @@ mod smart_context_capsule_order;
 pub use smart_context_capsule_order::{
     SmartContextCapsuleOrderInput, order_smart_context_capsules,
 };
+#[path = "rich/runtime_proxy_body_snippet.rs"]
+mod runtime_proxy_body_snippet;
+pub use runtime_proxy_body_snippet::runtime_proxy_body_snippet;
 #[path = "rich/runtime_doctor_constants.rs"]
 mod runtime_doctor_constants;
 pub use runtime_doctor_constants::*;
