@@ -624,6 +624,24 @@ fn explicit_cancellation_does_not_resume_a_pending_session() {
     let _ = fs::remove_dir_all(root);
 }
 
+#[cfg(unix)]
+#[test]
+fn sigint_exit_status_uses_mojo_cancellation_policy() {
+    use std::os::unix::process::ExitStatusExt as _;
+
+    let status = std::process::ExitStatus::from_raw(libc::SIGINT);
+    assert!(runtime_exit_status_is_cancelled(&status));
+    assert_eq!(
+        prodex_mojo_core::launch::runtime_exit_status_cancelled(
+            -1,
+            libc::SIGINT.into(),
+            libc::SIGINT.into(),
+            -1,
+        ),
+        Ok(true)
+    );
+}
+
 #[test]
 fn session_recovery_telemetry_uses_observed_state_without_raw_profile_identity() {
     let _runtime_lock = crate::acquire_test_runtime_lock();

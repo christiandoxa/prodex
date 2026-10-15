@@ -54,6 +54,14 @@ unsafe extern "C" {
         existing_marker: i64,
         same_session: i64,
     ) -> i64;
+    fn prodex_launch_exit_status_cancelled_v1(
+        abi_version: i64,
+        exit_code: i64,
+        signal: i64,
+        interrupt_signal: i64,
+        control_c_exit_code: i64,
+        output_address: u64,
+    ) -> i64;
     fn prodex_launch_recovery_observation_v1(
         abi: i64,
         kind: i64,
@@ -111,6 +119,37 @@ pub fn session_marker_should_update(
     } {
         0 => Ok(false),
         1 => Ok(true),
+        -2 => Err(MojoError::InvalidInput),
+        -3 => Err(MojoError::AbiMismatch),
+        _ => Err(MojoError::InvalidOutput),
+    }
+}
+
+/// Decide whether a child exit is explicit cancellation before recovery.
+/// Platform status extraction stays in the host; Mojo owns precedence.
+pub fn runtime_exit_status_cancelled(
+    exit_code: i64,
+    signal: i64,
+    interrupt_signal: i64,
+    control_c_exit_code: i64,
+) -> Result<bool, MojoError> {
+    let mut output = 0_i64;
+    let result = unsafe {
+        prodex_launch_exit_status_cancelled_v1(
+            1,
+            exit_code,
+            signal,
+            interrupt_signal,
+            control_c_exit_code,
+            (&mut output as *mut i64) as usize as u64,
+        )
+    };
+    match result {
+        0 => match output {
+            0 => Ok(false),
+            1 => Ok(true),
+            _ => Err(MojoError::InvalidOutput),
+        },
         -2 => Err(MojoError::InvalidInput),
         -3 => Err(MojoError::AbiMismatch),
         _ => Err(MojoError::InvalidOutput),
@@ -339,6 +378,15 @@ mod tests {
                 -2
             );
         }
+    }
+
+    #[test]
+    fn exit_status_cancellation_keeps_platform_facts_at_the_boundary() {
+        assert!(runtime_exit_status_cancelled(130, -1, -1, -1).unwrap());
+        assert!(runtime_exit_status_cancelled(-1, 2, 2, -1).unwrap());
+        assert!(runtime_exit_status_cancelled(99, -1, -1, 99).unwrap());
+        assert!(!runtime_exit_status_cancelled(1, -1, 2, -1).unwrap());
+        assert!(!runtime_exit_status_cancelled(1, -1, -1, 99).unwrap());
     }
 
     use super::*;
@@ -598,6 +646,35 @@ mod tests {
             unsafe { prodex_launch_workflow_evidence_v1(1, 0, 0, -1, 0, 0) },
             1
         );
+        let mut output = 77_i64;
+        assert_eq!(
+            unsafe {
+                prodex_launch_exit_status_cancelled_v1(
+                    2,
+                    130,
+                    -1,
+                    -1,
+                    -1,
+                    (&mut output as *mut i64) as u64,
+                )
+            },
+            -3
+        );
+        assert_eq!(output, 77);
+        assert_eq!(
+            unsafe {
+                prodex_launch_exit_status_cancelled_v1(
+                    1,
+                    -2,
+                    -1,
+                    -1,
+                    -1,
+                    (&mut output as *mut i64) as u64,
+                )
+            },
+            -2
+        );
+        assert_eq!(output, 77);
     }
 }
 
