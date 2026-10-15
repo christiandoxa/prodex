@@ -2218,7 +2218,8 @@
         "operations": [
           "gemini_content_coalescing",
           "gemini_missing_tool_result_pairing",
-          "gemini_orphan_tool_response_repair"
+          "gemini_orphan_tool_response_repair",
+          "gemini_content_role_shape"
         ]
       },
       {
@@ -2230,7 +2231,8 @@
         "operations": [
           "gemini_content_coalescing",
           "gemini_missing_tool_result_pairing",
-          "gemini_orphan_tool_response_repair"
+          "gemini_orphan_tool_response_repair",
+          "gemini_content_role_shape"
         ]
       }
     ],
@@ -9621,6 +9623,32 @@
       "mojo_operation_ids": {
         "repair_orphan_responses": 2
       }
+    },
+    {
+      "name": "gemini_content_role_shape",
+      "domain": "provider/gemini-content-hardening",
+      "introduced_in": "0.438.0",
+      "baseline_state": "Rust prepended/appended user boundary messages for model content and coalesced the resulting sequence",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_mojo_gemini_content_hardening_v1",
+      "mojo_abi_version": 1,
+      "mojo_operation_ids": {
+        "enforce_role_shape": 3
+      },
+      "mojo_source": "mojo/prodex_core/gemini_content_hardening.mojo",
+      "consumer": "crates/prodex-provider-core/src/gemini_bridge/hardening/contents.rs",
+      "consumer_marker": "mojo::apply(",
+      "production_consumers": [
+        "crates/prodex-provider-core/src/gemini_bridge/hardening/contents.rs"
+      ],
+      "production_reachability_test": "crates/prodex-provider-core/src/gemini_bridge/hardening/contents.rs",
+      "rust_owner_before": "gemini_provider_core_enforce_content_role_shape role guards, synthetic boundary messages and sequence coalescing",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "Direct boundary fixtures preserve empty, malformed and mixed-role semantics; full-pipeline baseline comparison remains test-only and temporary",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "Serde acquisition and complete-array replacement through shared measured JSON adapter"
     }
   ],
   "rust_semantic_reductions": [

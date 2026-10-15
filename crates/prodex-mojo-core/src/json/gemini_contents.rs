@@ -9,6 +9,7 @@ pub enum GeminiContentOperation {
     Coalesce = 0,
     PairMissingResults = 1,
     RepairOrphanResponses = 2,
+    EnforceRoleShape = 3,
 }
 
 unsafe extern "C" {
@@ -65,6 +66,7 @@ mod tests {
             GeminiContentOperation::Coalesce,
             GeminiContentOperation::PairMissingResults,
             GeminiContentOperation::RepairOrphanResponses,
+            GeminiContentOperation::EnforceRoleShape,
         ] {
             assert_eq!(
                 gemini_content_hardening(&[root], "[]", operation).unwrap(),
