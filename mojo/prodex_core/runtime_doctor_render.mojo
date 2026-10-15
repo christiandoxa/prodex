@@ -857,3 +857,144 @@ def prodex_mojo_runtime_doctor_render_v1(
         return 3
     written[] = writer.written
     return 0
+
+# The existing writer already owns byte capacity, UTF-8 copying and scope
+# formatting. These public projections move remaining diagnostic text
+# composition from Rust to the same compiled Mojo renderer.
+@export("prodex_mojo_runtime_doctor_scope_v1")
+def prodex_mojo_runtime_doctor_scope_v1(
+    abi_version: Int64,
+    views_address: UInt,
+    presence_bits: Int64,
+    output_address: UInt,
+    output_capacity: Int64,
+    written_address: UInt,
+    scope_present_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != RUNTIME_DOCTOR_RENDER_ABI_VERSION:
+        return 4
+    if (
+        views_address == 0
+        or output_address == 0
+        or written_address == 0
+        or scope_present_address == 0
+        or output_capacity <= 0
+        or presence_bits < 0
+        or presence_bits > 3
+    ):
+        return 1
+    var views = Pointer[mut=False, ProdexRichStringView, ImmUntrackedOrigin](
+        unsafe_from_address=Int(views_address)
+    )
+    for index in range(2):
+        if not rich_view_valid(
+            views[unsafe_offset=index].copy(), RUNTIME_DOCTOR_RENDER_MAX_VALUE_BYTES
+        ):
+            return 2
+    var written = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(written_address)
+    )
+    var present = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(scope_present_address)
+    )
+    written[] = 0
+    present[] = 0
+    if presence_bits == 0:
+        return 0
+    var output = Pointer[mut=True, UInt8, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    var input = ProdexRuntimeDoctorRenderInput(
+        -1, 0, UInt64(presence_bits), views_address
+    )
+    var writer = RuntimeDoctorRenderWriter(output, output_capacity, 0)
+    if not runtime_doctor_render_put_scope(
+        Pointer(to=writer), input, 0, 1, StringSlice("")
+    ):
+        return 3
+    written[] = writer.written
+    present[] = 1
+    return 0
+
+
+def runtime_doctor_render_put_unsigned(
+    writer: Pointer[mut=True, RuntimeDoctorRenderWriter, _],
+    value: UInt64,
+) -> Bool:
+    var remaining = value
+    var divisor = UInt64(10000000000000000000)
+    var started = False
+    for _ in range(20):
+        var digit = remaining // divisor
+        if digit != 0 or started or divisor == 1:
+            if not runtime_doctor_render_put_byte(writer, UInt8(48) + UInt8(digit)):
+                return False
+            started = True
+        remaining = remaining % divisor
+        if divisor > 1:
+            divisor = divisor // UInt64(10)
+    return True
+
+
+@export("prodex_mojo_runtime_doctor_count_breakdown_v1")
+def prodex_mojo_runtime_doctor_count_breakdown_v1(
+    abi_version: Int64,
+    keys_address: UInt,
+    counts_address: UInt,
+    count: Int64,
+    output_address: UInt,
+    output_capacity: Int64,
+    written_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != RUNTIME_DOCTOR_RENDER_ABI_VERSION:
+        return 4
+    if (
+        count < 0
+        or count > 65536
+        or (count > 0 and (keys_address == 0 or counts_address == 0))
+        or output_address == 0
+        or output_capacity <= 0
+        or written_address == 0
+    ):
+        return 1
+    var keys = Pointer[mut=False, ProdexRichStringView, ImmUntrackedOrigin](
+        unsafe_from_address=Int(keys_address)
+    )
+    var counts = Pointer[mut=False, UInt64, ImmUntrackedOrigin](
+        unsafe_from_address=Int(counts_address)
+    )
+    for index in range(count):
+        if not rich_view_valid(
+            keys[unsafe_offset=index].copy(), RUNTIME_DOCTOR_RENDER_MAX_VALUE_BYTES
+        ):
+            return 2
+    var output = Pointer[mut=True, UInt8, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    var written = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(written_address)
+    )
+    written[] = 0
+    var writer = RuntimeDoctorRenderWriter(output, output_capacity, 0)
+    if count == 0:
+        if not runtime_doctor_render_put_literal(
+            Pointer(to=writer), StringSlice("-")
+        ):
+            return 3
+    for index in range(count):
+        if index > 0 and not runtime_doctor_render_put_literal(
+            Pointer(to=writer), StringSlice(", ")
+        ):
+            return 3
+        if not runtime_doctor_render_put_view(
+            Pointer(to=writer), keys[unsafe_offset=index].copy()
+        ):
+            return 3
+        if not runtime_doctor_render_put_byte(Pointer(to=writer), 61):
+            return 3
+        if not runtime_doctor_render_put_unsigned(
+            Pointer(to=writer), counts[unsafe_offset=index]
+        ):
+            return 3
+    written[] = writer.written
+    return 0
