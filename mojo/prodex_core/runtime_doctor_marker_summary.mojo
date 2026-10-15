@@ -744,3 +744,119 @@ def prodex_mojo_runtime_doctor_selection_record_plan_v1(
     output[unsafe_offset=1] = destination
     output[unsafe_offset=2] = reason_source
     return 0
+
+# Numeric log-metric precedence belongs to compiled Mojo. Each source group
+# is ordered by the same semantic priority as the original diagnostic report:
+# state backlog (2), state lag (3), journal backlog (2), journal lag (2),
+# probe backlog (2), probe lag (2).
+comptime RUNTIME_DOCTOR_LOG_METRIC_ABI_VERSION: Int64 = 1
+comptime RUNTIME_DOCTOR_LOG_METRIC_SOURCE_COUNT: Int64 = 13
+comptime RUNTIME_DOCTOR_LOG_METRIC_RESULT_COUNT: Int64 = 6
+
+
+def runtime_doctor_log_metric_decimal(
+    value: ProdexRichStringView, maximum: UInt64
+) -> Tuple[Bool, UInt64]:
+    var length = Int64(value.len)
+    if length == 0:
+        return (False, UInt64(0))
+    var bytes = rich_view_ptr(value)
+    var cursor: Int64 = 0
+    if bytes[unsafe_offset=0] == 43:
+        cursor = 1
+    if cursor == length:
+        return (False, UInt64(0))
+    var parsed = UInt64(0)
+    while cursor < length:
+        var byte = bytes[unsafe_offset=cursor]
+        if byte < 48 or byte > 57:
+            return (False, UInt64(0))
+        var digit = UInt64(byte - 48)
+        if parsed > (UInt64(18446744073709551615) - digit) // UInt64(10):
+            return (False, UInt64(0))
+        parsed = parsed * UInt64(10) + digit
+        cursor += 1
+    if parsed > maximum:
+        return (False, UInt64(0))
+    return (True, parsed)
+
+
+@export("prodex_mojo_runtime_doctor_log_metric_plan_v1")
+def prodex_mojo_runtime_doctor_log_metric_plan_v1(
+    abi_version: Int64,
+    views_address: UInt,
+    present_address: UInt,
+    source_count: Int64,
+    max_backlog: UInt64,
+    result_values_address: UInt,
+    result_present_address: UInt,
+    result_capacity: Int64,
+) abi("C") -> Int64:
+    if abi_version != RUNTIME_DOCTOR_LOG_METRIC_ABI_VERSION:
+        return 4
+    if (
+        views_address == 0
+        or present_address == 0
+        or result_values_address == 0
+        or result_present_address == 0
+        or source_count != RUNTIME_DOCTOR_LOG_METRIC_SOURCE_COUNT
+        or result_capacity < RUNTIME_DOCTOR_LOG_METRIC_RESULT_COUNT
+    ):
+        return 1
+    var views = Pointer[mut=False, ProdexRichStringView, ImmUntrackedOrigin](
+        unsafe_from_address=Int(views_address)
+    )
+    var presence = Pointer[mut=False, Int64, ImmUntrackedOrigin](
+        unsafe_from_address=Int(present_address)
+    )
+    var outputs = Pointer[mut=True, UInt64, MutUntrackedOrigin](
+        unsafe_from_address=Int(result_values_address)
+    )
+    var found = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(result_present_address)
+    )
+
+    # Reject malformed ABI facts before modifying any caller-owned buffers.
+    for index in range(RUNTIME_DOCTOR_LOG_METRIC_SOURCE_COUNT):
+        if presence[unsafe_offset=index] != 0 and presence[unsafe_offset=index] != 1:
+            return 1
+        if presence[unsafe_offset=index] == 1:
+            if not rich_view_valid(
+                views[unsafe_offset=index].copy(), INT64_MAX
+            ):
+                return 2
+
+    for kind in range(RUNTIME_DOCTOR_LOG_METRIC_RESULT_COUNT):
+        outputs[unsafe_offset=kind] = UInt64(0)
+        found[unsafe_offset=kind] = 0
+        var begin: Int64 = 0
+        var end: Int64 = 2
+        if kind == 1:
+            begin = 2
+            end = 5
+        elif kind == 2:
+            begin = 5
+            end = 7
+        elif kind == 3:
+            begin = 7
+            end = 9
+        elif kind == 4:
+            begin = 9
+            end = 11
+        elif kind == 5:
+            begin = 11
+            end = 13
+        var maximum = UInt64(18446744073709551615)
+        if kind == 0 or kind == 2 or kind == 4:
+            maximum = max_backlog
+        for source_index in range(begin, end):
+            if presence[unsafe_offset=source_index] == 0:
+                continue
+            var parsed = runtime_doctor_log_metric_decimal(
+                views[unsafe_offset=source_index].copy(), maximum
+            )
+            if parsed[0]:
+                outputs[unsafe_offset=kind] = parsed[1]
+                found[unsafe_offset=kind] = 1
+                break
+    return 0

@@ -1386,6 +1386,16 @@
         ]
       },
       {
+        "path": "crates/prodex-mojo-core/src/rich/runtime_doctor_log_metrics.rs",
+        "language": "rust",
+        "classification": "MIXED",
+        "production_reachable": true,
+        "role": "adapter",
+        "operations": [
+          "runtime_doctor_log_metric_plan"
+        ]
+      },
+      {
         "path": "mojo/prodex_core/runtime_doctor_marker_summary.mojo",
         "language": "mojo",
         "classification": "DETERMINISTIC_DOMAIN",
@@ -1396,7 +1406,8 @@
           "runtime_doctor_compact_exit_counts",
           "runtime_doctor_marker_context_reason_facet_aggregation",
           "runtime_doctor_selection_record_plan",
-          "runtime_doctor_marker_context_summary_order"
+          "runtime_doctor_marker_context_summary_order",
+          "runtime_doctor_log_metric_plan"
         ]
       },
       {
@@ -6620,6 +6631,29 @@
       "duplicate_production_owner": false,
       "platform_fallback": false,
       "rust_adapter_scope": "BTreeMap iteration, borrowed profile-name deduplication and known-name lookup, typed row marshalling, validated Mojo index materialization and string-owning diagnostic DTOs"
+    },
+    {
+      "name": "runtime_doctor_log_metric_plan",
+      "domain": "runtime-doctor/log-ingest",
+      "introduced_in": "0.438.0",
+      "baseline_state": "Rust parsed each decimal marker field and used ordered or_else fallback chains for six persistence and probe latency/backlog metrics",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_mojo_runtime_doctor_log_metric_plan_v1",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/runtime_doctor_marker_summary.mojo",
+      "consumer": "crates/prodex-runtime-doctor/src/diagnosis/final_summary/log_summary.rs",
+      "consumer_marker": "prodex_mojo_core::rich::runtime_doctor_log_metric_plan(",
+      "production_consumers": [
+        "crates/prodex-runtime-doctor/src/diagnosis/final_summary/log_summary.rs"
+      ],
+      "production_reachability_test": "crates/prodex-runtime-doctor/src/diagnosis/final_summary/log_summary.rs",
+      "rust_owner_before": "Numeric marker field parsing, overflow rejection, absent-source fallback and source precedence for six summary metrics",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "Deleted Rust metric precedence chains and numerical decoding; direct Mojo and production caller regressions assert empty, overflowing and sign-prefixed text and priority",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "BTreeMap borrowed string field lookup, Mojo ABI marshaling, bound-checked result projection and diagnostic DTO assignments"
     },
     {
       "name": "runtime_doctor_selection_record_plan",

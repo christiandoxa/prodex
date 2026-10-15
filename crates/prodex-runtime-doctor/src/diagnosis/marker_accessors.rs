@@ -45,16 +45,6 @@ pub(super) fn runtime_doctor_marker_last_usize_field(
         .ok()
 }
 
-pub(super) fn runtime_doctor_marker_last_u64_field(
-    summary: &RuntimeDoctorSummary,
-    marker: impl AsRef<str>,
-    field: &str,
-) -> Option<u64> {
-    runtime_doctor_marker_last_field(summary, marker, field)?
-        .parse()
-        .ok()
-}
-
 pub(super) fn runtime_doctor_marker_scope(
     summary: &RuntimeDoctorSummary,
     marker: impl AsRef<str>,
