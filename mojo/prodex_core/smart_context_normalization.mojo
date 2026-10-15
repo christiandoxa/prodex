@@ -1236,3 +1236,82 @@ def prodex_mojo_smart_context_capsule_plan_v1(
             selected[unsafe_offset=index] = 0
     used_tokens[] = used
     return SMART_CONTEXT_STATUS_OK
+
+
+# Smart Context identifiers are normalized and length-limited exclusively by
+# Mojo. Return 5 to request a host-computed SHA-256 digest only for long IDs.
+# The hash itself remains a host-side cryptographic primitive.
+@export("prodex_mojo_smart_context_static_bounded_id_v1")
+def prodex_mojo_smart_context_static_bounded_id_v1(
+    abi_version: Int64,
+    input_view_address: UInt,
+    hash_view_address: UInt,
+    output_address: UInt,
+    output_capacity: Int64,
+    written_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != PRODEX_RICH_ABI_VERSION:
+        return SMART_CONTEXT_STATUS_ABI
+    if (
+        input_view_address == 0
+        or output_address == 0
+        or output_capacity <= 0
+        or written_address == 0
+    ):
+        return SMART_CONTEXT_STATUS_INVALID
+    var input = Pointer[mut=False, ProdexRichStringView, ImmUntrackedOrigin](
+        unsafe_from_address=Int(input_view_address)
+    )[].copy()
+    if not rich_view_valid(input, 9_223_372_036_854_775_807):
+        return SMART_CONTEXT_STATUS_UTF8
+    var bounds = rich_trim_bounds(input)
+    var start = bounds[0]
+    var end = bounds[1]
+    var size = end - start
+    var prefix_end = end
+    var truncated = False
+    var source = rich_view_ptr(input)
+    if size > 256:
+        truncated = True
+        prefix_end = start + 256
+        while prefix_end > start and rich_utf8_continuation(
+            source[unsafe_offset=prefix_end]
+        ):
+            prefix_end -= 1
+        if hash_view_address == 0:
+            return 5
+    var digest = ProdexRichStringView(0, 0)
+    if truncated:
+        digest = Pointer[
+            mut=False, ProdexRichStringView, ImmUntrackedOrigin
+        ](unsafe_from_address=Int(hash_view_address))[].copy()
+        if not rich_view_valid(digest, 256):
+            return SMART_CONTEXT_STATUS_UTF8
+    var output = Pointer[mut=True, UInt8, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    var written = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(written_address)
+    )
+    written[] = 0
+    for index in range(start, prefix_end):
+        if written[] >= output_capacity:
+            return SMART_CONTEXT_STATUS_CAPACITY
+        var byte = source[unsafe_offset=index]
+        output[unsafe_offset=written[]] = 47 if byte == 92 else byte
+        written[] += 1
+    if truncated:
+        if (
+            not smart_context_emit_literal["<id-hash="](
+                output, output_capacity, written
+            )
+            or not smart_context_emit_range(
+                rich_view_ptr(digest), 0, Int64(digest.len),
+                output, output_capacity, written
+            )
+            or not smart_context_emit_literal[">"](
+                output, output_capacity, written
+            )
+        ):
+            return SMART_CONTEXT_STATUS_CAPACITY
+    return SMART_CONTEXT_STATUS_OK

@@ -35,6 +35,14 @@ const SMART_CONTEXT_NORMALIZATION_CAPACITY_STATUS: i64 = 3;
 const SMART_CONTEXT_CAPSULE_MAX_COUNT: usize = 65_536;
 
 unsafe extern "C" {
+    fn prodex_mojo_smart_context_static_bounded_id_v1(
+        abi_version: i64,
+        id: u64,
+        hash: u64,
+        output: u64,
+        output_capacity: i64,
+        written: u64,
+    ) -> i64;
     fn prodex_mojo_smart_context_static_prompt_payload_v1(
         abi_version: i64,
         ids: u64,
@@ -245,6 +253,48 @@ pub fn smart_context_static_prompt_payload(
     String::from_utf8(bytes.to_vec()).map_err(|_| MojoError::InvalidOutput)
 }
 
+/// Mojo alone chooses trimmed ID bytes, path separators and UTF-8 cutoff.
+/// The host computes SHA-256 only if the compiled kernel requests it.
+pub fn smart_context_static_bounded_id(
+    id: &str,
+    compute_hash: impl FnOnce() -> String,
+) -> Result<String, MojoError> {
+    ensure_rich_abi()?;
+    let input = view(id);
+    let mut output = vec![0_u8; 512];
+    let mut written = -1_i64;
+    let mut hash = None;
+    let mut compute_hash = Some(compute_hash);
+    loop {
+        let hash_view = hash.as_deref().map(view);
+        let status = unsafe {
+            prodex_mojo_smart_context_static_bounded_id_v1(
+                RICH_ABI_VERSION,
+                mojo_pointer_address(&input),
+                hash_view
+                    .as_ref()
+                    .map_or(0, |value| mojo_pointer_address(value)),
+                mojo_mut_pointer_address(output.as_mut_ptr()),
+                i64::try_from(output.len()).map_err(|_| MojoError::InvalidInput)?,
+                mojo_mut_pointer_address(&mut written),
+            )
+        };
+        if status == 5 && hash.is_none() {
+            hash = Some(compute_hash.take().ok_or(MojoError::InvalidOutput)?());
+            continue;
+        }
+        if status != 0 {
+            return Err(normalization_status_error(status));
+        }
+        let length = usize::try_from(written).map_err(|_| MojoError::InvalidOutput)?;
+        if length > output.len() {
+            return Err(MojoError::InvalidOutput);
+        }
+        output.truncate(length);
+        return String::from_utf8(output).map_err(|_| MojoError::InvalidOutput);
+    }
+}
+
 /// Classify one static-context line as volatile metadata.
 pub fn smart_context_static_context_noise_line(line: &str) -> Result<bool, MojoError> {
     ensure_rich_abi()?;
@@ -377,6 +427,72 @@ pub fn plan_smart_context_capsules(
 #[cfg(test)]
 mod static_canonicalization_tests {
     use super::*;
+
+    #[test]
+    fn bounded_static_id_uses_mojo_utf8_cutoff_and_lazy_host_hash() {
+        use std::cell::Cell;
+        assert_eq!(
+            smart_context_static_bounded_id("  \\folder\\🧭  ", || {
+                panic!("a short ID must not require SHA-256")
+            })
+            .unwrap(),
+            "/folder/🧭"
+        );
+        assert_eq!(
+            smart_context_static_bounded_id(&"é".repeat(128), || {
+                panic!("an exactly 256-byte ID is not truncated")
+            })
+            .unwrap(),
+            "é".repeat(128),
+        );
+        let input = "🧭".repeat(65);
+        let hashes = Cell::new(0);
+        let output = smart_context_static_bounded_id(&input, || {
+            hashes.set(hashes.get() + 1);
+            "sc2:verified".to_owned()
+        })
+        .unwrap();
+        assert_eq!(hashes.get(), 1);
+        assert_eq!(output, format!("{}<id-hash=sc2:verified>", "🧭".repeat(64)));
+        assert_eq!(
+            smart_context_static_bounded_id("  \u{2003}\t  ", || {
+                panic!("whitespace-only input must not be hashed")
+            })
+            .unwrap(),
+            "",
+        );
+    }
+
+    #[test]
+    fn bounded_static_id_rejects_invalid_abi_and_short_capacity() {
+        let id = view("hello");
+        let mut output = [21_u8; 2];
+        let mut written = 77_i64;
+        unsafe {
+            assert_eq!(
+                prodex_mojo_smart_context_static_bounded_id_v1(
+                    RICH_ABI_VERSION + 1,
+                    mojo_pointer_address(&id),
+                    0,
+                    mojo_mut_pointer_address(output.as_mut_ptr()),
+                    2,
+                    mojo_mut_pointer_address(&mut written),
+                ),
+                4,
+            );
+            assert_eq!(
+                prodex_mojo_smart_context_static_bounded_id_v1(
+                    RICH_ABI_VERSION,
+                    mojo_pointer_address(&id),
+                    0,
+                    mojo_mut_pointer_address(output.as_mut_ptr()),
+                    2,
+                    mojo_mut_pointer_address(&mut written),
+                ),
+                3,
+            );
+        }
+    }
 
     #[test]
     fn static_payload_serialization_is_mojo_owned_and_byte_exact() {
