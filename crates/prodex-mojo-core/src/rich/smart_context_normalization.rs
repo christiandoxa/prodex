@@ -35,6 +35,14 @@ const SMART_CONTEXT_NORMALIZATION_CAPACITY_STATUS: i64 = 3;
 const SMART_CONTEXT_CAPSULE_MAX_COUNT: usize = 65_536;
 
 unsafe extern "C" {
+    fn prodex_mojo_smart_context_static_bounded_text_v1(
+        abi_version: i64,
+        input: u64,
+        digest: u64,
+        output: u64,
+        capacity: i64,
+        written: u64,
+    ) -> i64;
     fn prodex_mojo_smart_context_static_bounded_id_v1(
         abi_version: i64,
         id: u64,
@@ -295,6 +303,55 @@ pub fn smart_context_static_bounded_id(
     }
 }
 
+/// Apply the complete Mojo-owned static text size bound, Unicode cutoff,
+/// volatile normalization and long-content marker. Rust supplies SHA-256
+/// only when the compiled policy explicitly requests the digest.
+pub fn smart_context_static_bounded_text(
+    text: &str,
+    compute_hash: impl FnOnce() -> String,
+) -> Result<String, MojoError> {
+    ensure_rich_abi()?;
+    let maximum = checked_output_capacity(
+        text.len().min(256 * 1024),
+        SMART_CONTEXT_NORMALIZATION_MAX_OUTPUT_MULTIPLIER,
+    )?
+    .checked_add(256)
+    .ok_or(MojoError::InvalidInput)?;
+    let input = view(text);
+    let mut output = vec![0_u8; maximum];
+    let mut written = -1_i64;
+    let mut hash = None;
+    let mut compute_hash = Some(compute_hash);
+    loop {
+        let hash_view = hash.as_deref().map(view);
+        let status = unsafe {
+            prodex_mojo_smart_context_static_bounded_text_v1(
+                RICH_ABI_VERSION,
+                mojo_pointer_address(&input),
+                hash_view
+                    .as_ref()
+                    .map_or(0, |value| mojo_pointer_address(value)),
+                mojo_mut_pointer_address(output.as_mut_ptr()),
+                i64::try_from(output.len()).map_err(|_| MojoError::InvalidInput)?,
+                mojo_mut_pointer_address(&mut written),
+            )
+        };
+        if status == 5 && hash.is_none() {
+            hash = Some(compute_hash.take().ok_or(MojoError::InvalidOutput)?());
+            continue;
+        }
+        if status != 0 {
+            return Err(normalization_status_error(status));
+        }
+        let length = usize::try_from(written).map_err(|_| MojoError::InvalidOutput)?;
+        if length > output.len() {
+            return Err(MojoError::InvalidOutput);
+        }
+        output.truncate(length);
+        return String::from_utf8(output).map_err(|_| MojoError::InvalidOutput);
+    }
+}
+
 /// Classify one static-context line as volatile metadata.
 pub fn smart_context_static_context_noise_line(line: &str) -> Result<bool, MojoError> {
     ensure_rich_abi()?;
@@ -427,6 +484,79 @@ pub fn plan_smart_context_capsules(
 #[cfg(test)]
 mod static_canonicalization_tests {
     use super::*;
+
+    #[test]
+    fn bounded_static_text_uses_mojo_prefix_normalization_and_lazy_digest() {
+        use std::cell::Cell;
+        assert_eq!(
+            smart_context_static_bounded_text(
+                "Generated at: 2026-10-15\nRule: Keep affinity\n",
+                || {
+                    panic!("short text must not request a digest");
+                },
+            )
+            .unwrap(),
+            "Rule: Keep affinity",
+        );
+        let text = "🧭".repeat(65_537);
+        let count = Cell::new(0);
+        let result = smart_context_static_bounded_text(&text, || {
+            count.set(count.get() + 1);
+            "sc2:verified".to_string()
+        })
+        .unwrap();
+        assert_eq!(count.get(), 1);
+        assert_eq!(
+            result,
+            format!(
+                "{}\npsc static fingerprint item truncated bytes={} hash=sc2:verified",
+                "🧭".repeat(65_536),
+                text.len()
+            )
+        );
+        let exact = "é".repeat(131_072);
+        assert_eq!(
+            smart_context_static_bounded_text(&exact, || {
+                panic!("exact 256 KiB source must not be truncated");
+            })
+            .unwrap(),
+            exact
+        );
+    }
+
+    #[test]
+    fn bounded_static_text_abi_requires_digest_without_changing_output() {
+        let text = "🧭".repeat(65_537);
+        let input = view(&text);
+        let mut output = [77_u8; 8];
+        let mut written = 55_i64;
+        unsafe {
+            assert_eq!(
+                prodex_mojo_smart_context_static_bounded_text_v1(
+                    RICH_ABI_VERSION + 1,
+                    mojo_pointer_address(&input),
+                    0,
+                    mojo_mut_pointer_address(output.as_mut_ptr()),
+                    8,
+                    mojo_mut_pointer_address(&mut written),
+                ),
+                4,
+            );
+            assert_eq!(
+                prodex_mojo_smart_context_static_bounded_text_v1(
+                    RICH_ABI_VERSION,
+                    mojo_pointer_address(&input),
+                    0,
+                    mojo_mut_pointer_address(output.as_mut_ptr()),
+                    8,
+                    mojo_mut_pointer_address(&mut written),
+                ),
+                5,
+            );
+        }
+        assert_eq!(output, [77; 8]);
+        assert_eq!(written, 55);
+    }
 
     #[test]
     fn bounded_static_id_uses_mojo_utf8_cutoff_and_lazy_host_hash() {
