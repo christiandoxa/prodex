@@ -733,7 +733,8 @@
           "runtime_profile_health_sorting",
           "runtime_profile_health_score_components",
           "runtime_profile_health_policy",
-          "runtime_authenticated_probe_recovery"
+          "runtime_authenticated_probe_recovery",
+          "runtime_profile_active_backoff_max"
         ]
       },
       {
@@ -2267,6 +2268,16 @@
         "role": "adapter",
         "operations": [
           "runtime_proxy_body_snippet_render"
+        ]
+      },
+      {
+        "path": "crates/prodex-mojo-core/src/runtime/profile_health.rs",
+        "language": "rust",
+        "classification": "MIXED",
+        "production_reachable": true,
+        "role": "adapter",
+        "operations": [
+          "runtime_profile_active_backoff_max"
         ]
       }
     ],
@@ -9991,6 +10002,29 @@
       "duplicate_production_owner": false,
       "platform_fallback": false,
       "rust_adapter_scope": "Typed sample field transfer into a fixed-width ABI, optional completion-state encoding, result validation and telemetry DTO assembly"
+    },
+    {
+      "name": "runtime_profile_active_backoff_max",
+      "domain": "runtime/profile-health-backoff",
+      "introduced_in": "0.438.0",
+      "baseline_state": "Rust selected maximum deadline after filtering expired retry/transport/route circuit cutoffs, including route/profile union and selection-backoff predicates",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_runtime_profile_active_backoff_max_v1",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/runtime_health.mojo",
+      "consumer": "crates/prodex-runtime-proxy/src/health/backoff.rs",
+      "consumer_marker": "prodex_mojo_core::runtime::profile_active_backoff_max(",
+      "production_consumers": [
+        "crates/prodex-runtime-proxy/src/health/backoff.rs"
+      ],
+      "production_reachability_test": "crates/prodex-runtime-proxy/src/health/backoff.rs",
+      "rust_owner_before": "Rust active deadline filtering, select maximum active transport/backoff/route timestamps and bool activation union across map values",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "Removed Rust active deadline and max branches; strict Mojo ABI tests and runtime-proxy production tests validate profile scope, expired cutoffs, mixed route/circuit and negative extrema",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "Profile and route key lookup, BTreeMap iteration, borrowed timestamp collection and Mojo result validation"
     }
   ],
   "rust_semantic_reductions": [

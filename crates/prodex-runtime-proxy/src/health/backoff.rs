@@ -13,6 +13,12 @@ use super::{
     runtime_profile_transport_backoff_key, runtime_profile_transport_backoff_profile_name,
 };
 
+fn mojo_active_profile_backoff(deadlines: impl IntoIterator<Item = i64>, now: i64) -> Option<i64> {
+    let deadlines = deadlines.into_iter().collect::<Vec<_>>();
+    prodex_mojo_core::runtime::profile_active_backoff_max(&deadlines, now)
+        .expect("Mojo active backoff deadline reduction returned invalid output")
+}
+
 pub fn runtime_profile_transport_backoff_until_from_map(
     transport_backoff_until: &BTreeMap<String, i64>,
     profile_name: &str,
@@ -20,14 +26,15 @@ pub fn runtime_profile_transport_backoff_until_from_map(
     now: i64,
 ) -> Option<i64> {
     let route_key = runtime_profile_transport_backoff_key(profile_name, route_kind);
-    [
-        transport_backoff_until.get(&route_key).copied(),
-        transport_backoff_until.get(profile_name).copied(),
-    ]
-    .into_iter()
-    .flatten()
-    .filter(|until| *until > now)
-    .max()
+    mojo_active_profile_backoff(
+        [
+            transport_backoff_until.get(&route_key).copied(),
+            transport_backoff_until.get(profile_name).copied(),
+        ]
+        .into_iter()
+        .flatten(),
+        now,
+    )
 }
 
 pub fn runtime_profile_transport_backoff_max_until(
@@ -35,13 +42,13 @@ pub fn runtime_profile_transport_backoff_max_until(
     profile_name: &str,
     now: i64,
 ) -> Option<i64> {
-    transport_backoff_until
-        .iter()
-        .filter(|(key, until)| {
-            runtime_profile_transport_backoff_profile_name(key) == profile_name && **until > now
-        })
-        .map(|(_, until)| *until)
-        .max()
+    mojo_active_profile_backoff(
+        transport_backoff_until
+            .iter()
+            .filter(|(key, _)| runtime_profile_transport_backoff_profile_name(key) == profile_name)
+            .map(|(_, until)| *until),
+        now,
+    )
 }
 
 pub fn runtime_profile_name_in_retry_backoff(
@@ -49,10 +56,7 @@ pub fn runtime_profile_name_in_retry_backoff(
     retry_backoff_until: &BTreeMap<String, i64>,
     now: i64,
 ) -> bool {
-    retry_backoff_until
-        .get(profile_name)
-        .copied()
-        .is_some_and(|until| until > now)
+    mojo_active_profile_backoff(retry_backoff_until.get(profile_name).copied(), now).is_some()
 }
 
 pub fn runtime_profile_name_in_transport_backoff(
@@ -77,13 +81,18 @@ pub fn runtime_profile_name_in_retry_or_transport_backoff(
     route_kind: RuntimeRouteKind,
     now: i64,
 ) -> bool {
-    runtime_profile_name_in_retry_backoff(profile_name, retry_backoff_until, now)
-        || runtime_profile_name_in_transport_backoff(
-            profile_name,
-            transport_backoff_until,
-            route_kind,
-            now,
-        )
+    let route_key = runtime_profile_transport_backoff_key(profile_name, route_kind);
+    mojo_active_profile_backoff(
+        [
+            retry_backoff_until.get(profile_name).copied(),
+            transport_backoff_until.get(&route_key).copied(),
+            transport_backoff_until.get(profile_name).copied(),
+        ]
+        .into_iter()
+        .flatten(),
+        now,
+    )
+    .is_some()
 }
 
 pub fn runtime_profile_name_in_selection_backoff(
@@ -94,22 +103,20 @@ pub fn runtime_profile_name_in_selection_backoff(
     route_kind: RuntimeRouteKind,
     now: i64,
 ) -> bool {
-    if retry_backoff_until.is_empty()
-        && transport_backoff_until.is_empty()
-        && route_circuit_open_until.is_empty()
-    {
-        return false;
-    }
-    runtime_profile_name_in_retry_or_transport_backoff(
-        profile_name,
-        retry_backoff_until,
-        transport_backoff_until,
-        route_kind,
+    let route_key = runtime_profile_transport_backoff_key(profile_name, route_kind);
+    let circuit_key = runtime_profile_route_circuit_key(profile_name, route_kind);
+    mojo_active_profile_backoff(
+        [
+            retry_backoff_until.get(profile_name).copied(),
+            transport_backoff_until.get(&route_key).copied(),
+            transport_backoff_until.get(profile_name).copied(),
+            route_circuit_open_until.get(&circuit_key).copied(),
+        ]
+        .into_iter()
+        .flatten(),
         now,
-    ) || route_circuit_open_until
-        .get(&runtime_profile_route_circuit_key(profile_name, route_kind))
-        .copied()
-        .is_some_and(|until| until > now)
+    )
+    .is_some()
 }
 
 pub fn runtime_profile_backoff_sort_key(
@@ -120,10 +127,7 @@ pub fn runtime_profile_backoff_sort_key(
     route_kind: RuntimeRouteKind,
     now: i64,
 ) -> (usize, i64, i64, i64) {
-    let retry_until = retry_backoff_until
-        .get(profile_name)
-        .copied()
-        .filter(|until| *until > now);
+    let retry_until = retry_backoff_until.get(profile_name).copied();
     let transport_until = runtime_profile_transport_backoff_until_from_map(
         transport_backoff_until,
         profile_name,
@@ -132,8 +136,7 @@ pub fn runtime_profile_backoff_sort_key(
     );
     let circuit_until = route_circuit_open_until
         .get(&runtime_profile_route_circuit_key(profile_name, route_kind))
-        .copied()
-        .filter(|until| *until > now);
+        .copied();
     prodex_mojo_core::runtime::profile_backoff_sort_key(
         circuit_until,
         transport_until,

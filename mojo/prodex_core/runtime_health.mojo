@@ -1018,3 +1018,40 @@ def prodex_runtime_probe_recovery_v1(
         and matches_quota_window and no_newer_backoff
     )
     return 0
+
+
+# Return the latest still-active retry/transport/circuit deadline in a
+# bounded collection. Profile-name matching and map ownership stay in Rust.
+@export("prodex_runtime_profile_active_backoff_max_v1")
+def prodex_runtime_profile_active_backoff_max_v1(
+    abi_version: Int64,
+    deadline_address: UInt,
+    deadline_count: Int64,
+    now: Int64,
+    output_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != 1:
+        return 4
+    if (
+        deadline_count < 0
+        or deadline_count > 1_000_000
+        or (deadline_count > 0 and deadline_address == 0)
+        or output_address == 0
+    ):
+        return 1
+    var values = Pointer[mut=False, Int64, ImmUntrackedOrigin](
+        unsafe_from_address=Int(deadline_address)
+    )
+    var found = False
+    var latest: Int64 = 0
+    for index in range(deadline_count):
+        var until = values[unsafe_offset=index]
+        if until > now and (not found or until > latest):
+            found = True
+            latest = until
+    var output = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    output[unsafe_offset=0] = Int64(found)
+    output[unsafe_offset=1] = latest if found else 0
+    return 0
