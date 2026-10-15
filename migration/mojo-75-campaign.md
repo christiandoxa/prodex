@@ -5558,3 +5558,11 @@ Imported profile bundles now use the compiled Mojo profile-export policy for
 provider-specific allowed filenames, duplicate detection, and required-file
 presence. Rust keeps path safety, secret-content parsing, error text, and all
 filesystem and credential effects, preserving the existing compatibility errors.
+
+## Broker continuation metrics migration
+
+`runtime_broker_continuity.mojo` now aggregates continuation lifecycle states,
+failure and not-found signals, and stale verified bindings over bounded typed
+rows. Rust retains broker-map traversal, status projection, ABI marshalling, and
+metrics DTO reconstruction. Required-Mojo direct ABI and runtime-broker caller
+tests cover valid totals, unknown values, failure precedence, and input bounds.

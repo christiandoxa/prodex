@@ -1111,6 +1111,7 @@
           "broker_continuity_route_classification",
           "broker_health_key_classification",
           "broker_previous_response_continuity_metrics_reducer",
+          "broker_continuation_metrics_reducer",
           "broker_binary_identity_policy",
           "broker_version_guard_planning",
           "broker_version_output_parsing",
@@ -1126,6 +1127,16 @@
         "role": "adapter",
         "operations": [
           "broker_previous_response_continuity_metrics_reducer"
+        ]
+      },
+      {
+        "path": "crates/prodex-mojo-core/src/runtime_broker_continuity/continuation_metrics.rs",
+        "language": "rust",
+        "classification": "MIXED",
+        "production_reachable": true,
+        "role": "adapter",
+        "operations": [
+          "broker_continuation_metrics_reducer"
         ]
       },
       {
@@ -4417,10 +4428,10 @@
       "platform_fallback": false,
       "name": "broker_continuity_stale_verification",
       "mojo_entry": "prodex_runtime_broker_stale_verified_v1",
-      "consumer_marker": "prodex_mojo_core::runtime_broker_continuity::stale_verified",
+      "consumer_marker": "prodex_mojo_core::runtime_broker_continuity::continuation_metrics(",
       "rust_owner_before": "latest continuation event timestamp selection and stale-verified threshold decision",
       "rust_test_oracle": "deleted; continuation metrics fixtures cover verified staleness and non-verified states",
-      "rust_adapter_scope": "lifecycle enum projection and optional timestamp passing"
+      "rust_adapter_scope": "optional timestamp projection shared with the bounded continuation metrics adapter"
     },
     {
       "domain": "runtime-broker/continuity",
@@ -4490,6 +4501,29 @@
       "rust_owner_before": "negative-cache key-prefix and route parsing, effective health-score filtering, route classification, and per-route entry/failure counter reduction",
       "rust_test_oracle": "deleted; required-Mojo adapter and runtime-broker metrics caller tests cover decay boundaries, active known routes, unknown routes, and DTO reconstruction",
       "rust_adapter_scope": "BTreeMap iteration, borrowed key/score marshalling, validated Mojo counter conversion, and metric DTO materialization"
+    },
+    {
+      "domain": "runtime-broker/continuity",
+      "introduced_in": "0.438.0",
+      "baseline_state": "Rust traversed response, turn-state, and session-ID continuation statuses, classified lifecycle states, summed failure signals, and counted stale verified bindings",
+      "final_state": "authoritative",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/runtime_broker_continuity.mojo",
+      "consumer": "crates/prodex-runtime-broker/src/continuity.rs",
+      "production_consumers": [
+        "crates/prodex-runtime-broker/src/continuity.rs"
+      ],
+      "production_reachability_test": "crates/prodex-mojo-core/src/runtime_broker_continuity/continuation_metrics.rs",
+      "rust_state_after": "adapter-only",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "name": "broker_continuation_metrics_reducer",
+      "mojo_entry": "prodex_runtime_broker_continuation_metrics_v1",
+      "consumer_marker": "prodex_mojo_core::runtime_broker_continuity::continuation_metrics(",
+      "rust_owner_before": "continuation lifecycle-state classification, per-binding failure and not-found signal aggregation, and stale verified counting",
+      "rust_test_oracle": "deleted; required-Mojo adapter, direct ABI, and runtime-broker caller tests cover bounded rows, unknown values, failure precedence, and lifecycle totals",
+      "rust_adapter_scope": "BTreeMap traversal, typed status/timestamp projection, bounded array marshalling, and continuation metric DTO reconstruction"
     },
     {
       "domain": "runtime-broker/registry",

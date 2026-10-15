@@ -486,6 +486,97 @@ def prodex_runtime_broker_previous_response_continuity_v1(
     return 0
 
 
+comptime BROKER_CONTINUATION_METRICS_RECORD_FIELDS: Int64 = 10
+comptime BROKER_CONTINUATION_METRICS_OUTPUT_COUNT: Int64 = 13
+comptime BROKER_CONTINUATION_KIND_RESPONSE: Int64 = 0
+comptime BROKER_CONTINUATION_KIND_TURN_STATE: Int64 = 1
+comptime BROKER_CONTINUATION_KIND_SESSION_ID: Int64 = 2
+comptime BROKER_CONTINUATION_STATE_WARM: Int64 = 0
+comptime BROKER_CONTINUATION_STATE_VERIFIED: Int64 = 1
+comptime BROKER_CONTINUATION_STATE_SUSPECT: Int64 = 2
+comptime BROKER_CONTINUATION_STATE_DEAD: Int64 = 3
+
+
+@export("prodex_runtime_broker_continuation_metrics_v1")
+def prodex_runtime_broker_continuation_metrics_v1(
+    abi_version: Int64,
+    records_address: UInt,
+    count: Int64,
+    now: Int64,
+    stale_verified_seconds: Int64,
+    output_address: UInt,
+) abi("C") -> Int64:
+    if (
+        abi_version != BROKER_CONTINUITY_ABI_VERSION
+        or count < 0
+        or count > BROKER_CONTINUITY_MAX_INPUTS
+        or output_address == 0
+        or count > 0 and records_address == 0
+    ):
+        return BROKER_CONTINUITY_INVALID
+
+    var records = Pointer[mut=False, Int64, ImmUntrackedOrigin](
+        unsafe_from_address=Int(records_address)
+    )
+
+    # Validate every row before writing output so a later malformed state cannot
+    # expose a partially reduced lifecycle snapshot.
+    for index in range(count):
+        var base = index * BROKER_CONTINUATION_METRICS_RECORD_FIELDS
+        var kind = records[unsafe_offset=base]
+        var state = records[unsafe_offset=base + 1]
+        if (
+            kind < BROKER_CONTINUATION_KIND_RESPONSE
+            or kind > BROKER_CONTINUATION_KIND_SESSION_ID
+            or state < BROKER_CONTINUATION_STATE_WARM
+            or state > BROKER_CONTINUATION_STATE_DEAD
+            or records[unsafe_offset=base + 2] < 0
+            or records[unsafe_offset=base + 2] > U32_MAX_I64
+            or records[unsafe_offset=base + 3] < 0
+            or records[unsafe_offset=base + 3] > U32_MAX_I64
+            or (
+                records[unsafe_offset=base + 4] != 0
+                and records[unsafe_offset=base + 4] != 1
+            )
+            or (
+                records[unsafe_offset=base + 6] != 0
+                and records[unsafe_offset=base + 6] != 1
+            )
+            or (
+                records[unsafe_offset=base + 8] != 0
+                and records[unsafe_offset=base + 8] != 1
+            )
+        ):
+            return BROKER_CONTINUITY_INVALID
+
+    var output = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    for index in range(BROKER_CONTINUATION_METRICS_OUTPUT_COUNT):
+        output[unsafe_offset=index] = 0
+
+    for index in range(count):
+        var base = index * BROKER_CONTINUATION_METRICS_RECORD_FIELDS
+        var kind = records[unsafe_offset=base]
+        var state = records[unsafe_offset=base + 1]
+        output[unsafe_offset=state] += 1
+        output[unsafe_offset=4 + kind] += records[unsafe_offset=base + 2]
+        output[unsafe_offset=7 + kind] += records[unsafe_offset=base + 3]
+        if state == BROKER_CONTINUATION_STATE_VERIFIED and broker_stale_verified_value(
+            1,
+            records[unsafe_offset=base + 4],
+            records[unsafe_offset=base + 5],
+            records[unsafe_offset=base + 6],
+            records[unsafe_offset=base + 7],
+            records[unsafe_offset=base + 8],
+            records[unsafe_offset=base + 9],
+            now,
+            stale_verified_seconds,
+        ) == 1:
+            output[unsafe_offset=10 + kind] += 1
+    return 0
+
+
 comptime BROKER_REGISTRY_STATUS_NOT_LEGACY: Int64 = 0
 comptime BROKER_REGISTRY_STATUS_VALID_LEGACY: Int64 = 1
 comptime BROKER_REGISTRY_STATUS_MALFORMED: Int64 = 2
