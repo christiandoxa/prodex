@@ -2,18 +2,15 @@ pub(crate) use super::log_throughput_state::{OutputThroughput, OutputThroughputD
 #[cfg(test)]
 use crate::reports::InfoTokenUsageEvent;
 pub(super) fn format_output_tokens_per_second(rate: Option<f64>) -> String {
-    let Some(rate) = rate.filter(|rate| rate.is_finite() && *rate > 0.0) else {
+    let Some(plan) = prodex_mojo_core::log_throughput_policy::rate_display_plan(rate)
+        .expect("Mojo log-throughput display policy returned invalid output")
+    else {
         return "— t/s".to_string();
     };
-    if rate >= 100.0 {
-        format!("{rate:.0} t/s")
-    } else {
-        let rounded = (rate * 10.0).round() / 10.0;
-        if rounded.fract() == 0.0 {
-            format!("{rounded:.0} t/s")
-        } else {
-            format!("{rounded:.1} t/s")
-        }
+    match plan.decimal_places {
+        0 => format!("{:.0} t/s", plan.display_rate),
+        1 => format!("{:.1} t/s", plan.display_rate),
+        _ => unreachable!("Mojo log-throughput display policy returned invalid precision"),
     }
 }
 
@@ -144,6 +141,9 @@ mod tests {
             assert_eq!(format_output_tokens_per_second(Some(rate)), "— t/s");
         }
         assert_eq!(format_output_tokens_per_second(Some(0.7)), "0.7 t/s");
+        assert_eq!(format_output_tokens_per_second(Some(0.01)), "0 t/s");
+        assert_eq!(format_output_tokens_per_second(Some(99.95)), "100 t/s");
+        assert_eq!(format_output_tokens_per_second(Some(100.6)), "101 t/s");
     }
 
     #[test]

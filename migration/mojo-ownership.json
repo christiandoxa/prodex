@@ -1420,7 +1420,8 @@
           "log_throughput_candidate_selection",
           "log_throughput_sample_freshness",
           "log_throughput_bounded_state_eviction",
-          "log_throughput_finish_rate_precedence"
+          "log_throughput_finish_rate_precedence",
+          "log_throughput_rate_display_formatting"
         ]
       },
       {
@@ -8094,6 +8095,29 @@
       "rust_adapter_scope": "candidate projection and selected-rate reconstruction"
     },
     {
+      "name": "log_throughput_rate_display_formatting",
+      "domain": "app/log-throughput",
+      "introduced_in": "0.437.14",
+      "baseline_state": "Rust output-rate validation, tenths rounding, and display precision selection",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_log_throughput_rate_display_plan_v1",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/log_throughput_policy.mojo",
+      "consumer": "crates/prodex-app/src/app_commands/log_throughput.rs",
+      "consumer_marker": "prodex_mojo_core::log_throughput_policy::rate_display_plan",
+      "production_consumers": [
+        "crates/prodex-app/src/app_commands/log_throughput.rs"
+      ],
+      "production_reachability_test": "crates/prodex-mojo-core/tests/log_throughput_display.rs",
+      "rust_owner_before": "positive-rate validation, tenths rounding below 100 t/s, and integer-versus-tenths display precision",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "deleted; compiled Mojo ABI and app caller regressions cover absent, non-finite, non-positive, tenths, threshold, and integer formatting",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "Option/f64 ABI projection, returned-plan validation, and final locale-free Rust string formatting"
+    },
+    {
       "name": "kiro_chat_message_prompt_construction",
       "domain": "provider/kiro",
       "introduced_in": "0.435.4",
@@ -13239,6 +13263,31 @@
       "production_consumer": "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_kiro/request_validation.rs",
       "parity_test": "crates/prodex-mojo-core/tests/kiro_request_controls.rs",
       "cleanup_evidence": "The Rust field-removal loop is deleted; the compiled Mojo caller and runtime Kiro request regressions preserve parent and sub-agent control ownership, Unicode, order, and invalid-input behavior."
+    },
+    {
+      "file": "crates/prodex-app/src/app_commands/log_throughput.rs",
+      "symbol": "format_output_tokens_per_second",
+      "operation": "log_throughput_rate_display_formatting",
+      "previous_responsibility": "Rust validated output rates, rounded sub-100 rates to tenths, and selected integer versus tenths display precision",
+      "final_state": "adapter-only",
+      "cleanup_loc": 15,
+      "cleanup_source": {
+        "kind": "collapsed-adapter",
+        "baseline_range": {
+          "start": 248,
+          "end": 262
+        },
+        "release_symbol": "format_output_tokens_per_second",
+        "release_marker": "prodex_mojo_core::log_throughput_policy::rate_display_plan"
+      },
+      "rust_before": "crates/prodex-app/src/app_commands/log_throughput.rs::format_output_tokens_per_second",
+      "rust_after": "Rust projects the optional f64, validates the bounded Mojo plan, and formats the selected precision",
+      "mojo_owner": "mojo/prodex_core/log_throughput_policy.mojo::prodex_log_throughput_rate_display_plan_v1",
+      "mojo_source": "mojo/prodex_core/log_throughput_policy.mojo",
+      "mojo_entry": "prodex_log_throughput_rate_display_plan_v1",
+      "production_consumer": "crates/prodex-app/src/app_commands/log_throughput.rs",
+      "parity_test": "crates/prodex-mojo-core/tests/log_throughput_display.rs and crates/prodex-app/src/app_commands/log_throughput.rs tests",
+      "cleanup_evidence": "The Rust rate filter, tenths arithmetic, and precision branch are removed; required-Mojo ABI and app caller regressions preserve invalid, threshold, tie, and display outputs."
     }
   ],
   "deleted_authoritative_operations": [
