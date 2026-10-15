@@ -1465,3 +1465,124 @@ def prodex_mojo_smart_context_fnv_hash_text_v1(
         shift -= 4
     written[] = required
     return SMART_CONTEXT_STATUS_OK
+
+
+# ContextScopeId wire contract: SHA-256 inputs are five length-delimited
+# UTF-8 fields after the versioned domain separator and a NUL byte.
+# Rust retains only the cryptographic SHA-256 primitive and DTO ownership.
+@export("prodex_mojo_smart_context_scope_preimage_v1")
+def prodex_mojo_smart_context_scope_preimage_v1(
+    abi_version: Int64,
+    field_views_address: UInt,
+    field_count: Int64,
+    output_address: UInt,
+    output_capacity: Int64,
+    written_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != PRODEX_RICH_ABI_VERSION:
+        return SMART_CONTEXT_STATUS_ABI
+    if (
+        field_count != 5
+        or field_views_address == 0
+        or output_address == 0
+        or written_address == 0
+        or output_capacity < 1
+    ):
+        return SMART_CONTEXT_STATUS_INVALID
+    var fields = Pointer[mut=False, ProdexRichStringView, ImmUntrackedOrigin](
+        unsafe_from_address=Int(field_views_address)
+    )
+    for index in range(5):
+        if not rich_view_valid(
+            fields[unsafe_offset=index].copy(), 9_223_372_036_854_775_807
+        ):
+            return SMART_CONTEXT_STATUS_UTF8
+    var output = Pointer[mut=True, UInt8, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    var written = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(written_address)
+    )
+    written[] = 0
+    if not smart_context_emit_literal["prodex-smart-context-scope-v1"](
+        output, output_capacity, written
+    ):
+        return SMART_CONTEXT_STATUS_CAPACITY
+    if written[] >= output_capacity:
+        return SMART_CONTEXT_STATUS_CAPACITY
+    output[unsafe_offset=written[]] = 0
+    written[] += 1
+    for index in range(5):
+        var field = fields[unsafe_offset=index].copy()
+        var byte_length = UInt64(field.len)
+        if output_capacity - written[] < 8:
+            return SMART_CONTEXT_STATUS_CAPACITY
+        for position in range(8):
+            var shift = UInt64((7 - position) * 8)
+            output[unsafe_offset=written[]] = UInt8(
+                (byte_length >> shift) & UInt64(255)
+            )
+            written[] += 1
+        if not smart_context_emit_range(
+            rich_view_ptr(field),
+            0,
+            Int64(field.len),
+            output,
+            output_capacity,
+            written,
+        ):
+            return SMART_CONTEXT_STATUS_CAPACITY
+    return SMART_CONTEXT_STATUS_OK
+
+
+# 32-byte SHA-256 digests become the exact stable scscope1: prefixed,
+# lowercase 64-hex scope value without a host formatting fallback.
+@export("prodex_mojo_smart_context_scope_digest_text_v1")
+def prodex_mojo_smart_context_scope_digest_text_v1(
+    abi_version: Int64,
+    digest_address: UInt,
+    digest_length: Int64,
+    output_address: UInt,
+    output_capacity: Int64,
+    written_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != PRODEX_RICH_ABI_VERSION:
+        return SMART_CONTEXT_STATUS_ABI
+    if (
+        digest_address == 0
+        or digest_length != 32
+        or output_address == 0
+        or written_address == 0
+    ):
+        return SMART_CONTEXT_STATUS_INVALID
+    if output_capacity < 73:
+        return SMART_CONTEXT_STATUS_CAPACITY
+    var digest = Pointer[mut=False, UInt8, ImmUntrackedOrigin](
+        unsafe_from_address=Int(digest_address)
+    )
+    var output = Pointer[mut=True, UInt8, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    var written = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(written_address)
+    )
+    written[] = 0
+    if not smart_context_emit_literal["scscope1:"](
+        output, output_capacity, written
+    ):
+        return SMART_CONTEXT_STATUS_CAPACITY
+    for index in range(32):
+        var byte = digest[unsafe_offset=index]
+        var high = byte >> UInt8(4)
+        var low = byte & UInt8(15)
+        if high < 10:
+            output[unsafe_offset=written[]] = UInt8(48) + high
+        else:
+            output[unsafe_offset=written[]] = UInt8(87) + high
+        written[] += 1
+        if low < 10:
+            output[unsafe_offset=written[]] = UInt8(48) + low
+        else:
+            output[unsafe_offset=written[]] = UInt8(87) + low
+        written[] += 1
+    return SMART_CONTEXT_STATUS_OK

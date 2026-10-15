@@ -16,16 +16,19 @@ impl ContextScopeId {
         workspace: &str,
         session: Option<&str>,
     ) -> Self {
-        let mut bytes = b"prodex-smart-context-scope-v1\0".to_vec();
-        for value in [tenant, profile, provider, workspace, session.unwrap_or("")] {
-            bytes.extend_from_slice(&(value.len() as u64).to_be_bytes());
-            bytes.extend_from_slice(value.as_bytes());
-        }
+        let bytes = prodex_mojo_core::rich::smart_context_scope_preimage([
+            tenant,
+            profile,
+            provider,
+            workspace,
+            session.unwrap_or(""),
+        ])
+        .expect("compiled Mojo Smart Context scope preimage returned invalid output");
         let digest = smart_context_sha256_digest(&bytes);
-        Self(format!(
-            "{SMART_CONTEXT_SCOPE_PREFIX}{}",
-            hex_digest(&digest)
-        ))
+        Self(
+            prodex_mojo_core::rich::smart_context_scope_digest_text(&digest)
+                .expect("compiled Mojo Smart Context scope formatter returned invalid output"),
+        )
     }
 
     pub fn parse(value: &str) -> Option<Self> {
@@ -60,16 +63,6 @@ impl fmt::Display for ContextScopeId {
     }
 }
 
-fn hex_digest(bytes: &[u8]) -> String {
-    const HEX: &[u8; 16] = b"0123456789abcdef";
-    let mut output = String::with_capacity(bytes.len() * 2);
-    for byte in bytes {
-        output.push(char::from(HEX[usize::from(byte >> 4)]));
-        output.push(char::from(HEX[usize::from(byte & 0x0f)]));
-    }
-    output
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -84,6 +77,10 @@ mod tests {
             Some("session-a"),
         );
         assert_eq!(ContextScopeId::parse(base.as_str()).as_ref(), Some(&base));
+        assert_eq!(
+            base.as_str(),
+            "scscope1:ce5890f9a6d06defd8ee9299ba746f4ae1d6bfa3a5b88bb9955a0f78e1870b8e"
+        );
         for changed in [
             ContextScopeId::new(
                 "tenant-b",
