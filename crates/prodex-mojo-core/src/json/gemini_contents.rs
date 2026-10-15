@@ -7,6 +7,8 @@ use crate::MojoError;
 #[repr(i64)]
 pub enum GeminiContentOperation {
     Coalesce = 0,
+    PairMissingResults = 1,
+    RepairOrphanResponses = 2,
 }
 
 unsafe extern "C" {
@@ -59,10 +61,16 @@ mod tests {
             raw_start: 0,
             raw_length: 2,
         };
-        assert_eq!(
-            gemini_content_hardening(&[root], "[]", GeminiContentOperation::Coalesce).unwrap(),
-            b"[]"
-        );
+        for operation in [
+            GeminiContentOperation::Coalesce,
+            GeminiContentOperation::PairMissingResults,
+            GeminiContentOperation::RepairOrphanResponses,
+        ] {
+            assert_eq!(
+                gemini_content_hardening(&[root], "[]", operation).unwrap(),
+                b"[]"
+            );
+        }
         root.first_child = Some(0);
         assert_eq!(
             gemini_content_hardening(&[root], "[]", GeminiContentOperation::Coalesce),
