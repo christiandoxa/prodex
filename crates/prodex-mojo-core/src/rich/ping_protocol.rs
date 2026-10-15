@@ -4,6 +4,7 @@ use crate::MojoError;
 const PING_PROTOCOL_ABI_VERSION: i64 = 1;
 const PING_PROTOCOL_MAX_BYTES: usize = 4 * 1024 * 1024;
 const PING_STATUS_DETAIL_MAX_BYTES: usize = 128;
+const PING_STATUS_LABEL_MAX_BYTES: usize = 32;
 
 pub const PING_STATUS_OK: i64 = 0;
 pub const PING_STATUS_PROTOCOL_FAILED: i64 = 1;
@@ -40,6 +41,19 @@ unsafe extern "C" {
         output_address: u64,
         output_capacity: i64,
         written_address: u64,
+    ) -> i64;
+    fn prodex_mojo_ping_status_label_v1(
+        abi_version: i64,
+        status: i64,
+        json_label: i64,
+        output_address: u64,
+        output_capacity: i64,
+        written_address: u64,
+    ) -> i64;
+    fn prodex_mojo_ping_status_temporary_v1(
+        abi_version: i64,
+        status: i64,
+        output_address: u64,
     ) -> i64;
 }
 
@@ -100,6 +114,50 @@ pub fn ping_status_detail(status: i64) -> Result<String, MojoError> {
         return Err(MojoError::InvalidOutput);
     }
     String::from_utf8(output[..written].to_vec()).map_err(|_| MojoError::InvalidOutput)
+}
+
+pub fn ping_status_label(status: i64, json_label: bool) -> Result<String, MojoError> {
+    let mut output = vec![0_u8; PING_STATUS_LABEL_MAX_BYTES];
+    let mut written = -1_i64;
+    let code = unsafe {
+        prodex_mojo_ping_status_label_v1(
+            PING_PROTOCOL_ABI_VERSION,
+            status,
+            i64::from(json_label),
+            output.as_mut_ptr() as usize as u64,
+            i64::try_from(output.len()).map_err(|_| MojoError::InvalidInput)?,
+            (&mut written as *mut i64) as usize as u64,
+        )
+    };
+    match code {
+        0 => {}
+        1 => return Err(MojoError::InvalidInput),
+        3 => return Err(MojoError::Capacity),
+        4 => return Err(MojoError::AbiMismatch),
+        _ => return Err(MojoError::InvalidOutput),
+    }
+    let written = usize::try_from(written).map_err(|_| MojoError::InvalidOutput)?;
+    if written > output.len() {
+        return Err(MojoError::InvalidOutput);
+    }
+    String::from_utf8(output[..written].to_vec()).map_err(|_| MojoError::InvalidOutput)
+}
+
+pub fn ping_status_is_temporary(status: i64) -> Result<bool, MojoError> {
+    let mut temporary = -1_i64;
+    let code = unsafe {
+        prodex_mojo_ping_status_temporary_v1(
+            PING_PROTOCOL_ABI_VERSION,
+            status,
+            (&mut temporary as *mut i64) as usize as u64,
+        )
+    };
+    match code {
+        0 if matches!(temporary, 0 | 1) => Ok(temporary == 1),
+        1 => Err(MojoError::InvalidInput),
+        4 => Err(MojoError::AbiMismatch),
+        _ => Err(MojoError::InvalidOutput),
+    }
 }
 
 #[cfg(test)]
@@ -207,5 +265,16 @@ mod tests {
             ping_status_detail(PING_STATUS_UNEXPECTED_RESPONSE).unwrap(),
             "completed turn did not return a model response"
         );
+    }
+
+    #[test]
+    fn status_labels_and_temporary_classification_are_owned_by_mojo() {
+        assert_eq!(ping_status_label(PING_STATUS_OK, false).unwrap(), "OK");
+        assert_eq!(
+            ping_status_label(PING_STATUS_QUOTA_EXHAUSTED, true).unwrap(),
+            "exhausted"
+        );
+        assert!(ping_status_is_temporary(PING_STATUS_TIMEOUT).unwrap());
+        assert!(!ping_status_is_temporary(PING_STATUS_QUOTA_EXHAUSTED).unwrap());
     }
 }

@@ -19,6 +19,7 @@ comptime PING_DETAIL_STATUS_INVALID: Int64 = 1
 comptime PING_DETAIL_STATUS_CAPACITY: Int64 = 3
 comptime PING_DETAIL_STATUS_ABI: Int64 = 4
 comptime PING_DETAIL_MAX_BYTES: Int64 = 128
+comptime PING_STATUS_LABEL_MAX_BYTES: Int64 = 32
 
 comptime PING_STATUS_OK: Int64 = 0
 comptime PING_STATUS_PROTOCOL_FAILED: Int64 = 1
@@ -85,6 +86,99 @@ def ping_status_detail_copy(
         output[unsafe_offset=index] = source[unsafe_offset=index]
     written[] = length
     return PING_DETAIL_STATUS_OK
+
+def ping_status_label_copy(
+    status: Int64,
+    json_label: Bool,
+    output: Pointer[mut=True, UInt8, _],
+    capacity: Int64,
+    written: Pointer[mut=True, Int64, _],
+) -> Int64:
+    if status < PING_STATUS_OK or status > PING_STATUS_CANCELLED or capacity < 0:
+        return PING_DETAIL_STATUS_INVALID
+    var label = StringSlice("")
+    if json_label:
+        if status == PING_STATUS_OK:
+            label = StringSlice("ok")
+        elif status == PING_STATUS_PROTOCOL_FAILED:
+            label = StringSlice("protocol_failed")
+        elif status == PING_STATUS_UNEXPECTED_RESPONSE:
+            label = StringSlice("unexpected_response")
+        elif status == PING_STATUS_TURN_FAILED:
+            label = StringSlice("turn_failed")
+        elif status == PING_STATUS_AUTH_FAILED:
+            label = StringSlice("auth_failed")
+        elif status == PING_STATUS_DNS_FAILED:
+            label = StringSlice("dns_failed")
+        elif status == PING_STATUS_TLS_FAILED:
+            label = StringSlice("tls_failed")
+        elif status == PING_STATUS_TIMEOUT:
+            label = StringSlice("timeout")
+        elif status == PING_STATUS_RATE_LIMITED:
+            label = StringSlice("rate_limited")
+        elif status == PING_STATUS_QUOTA_EXHAUSTED:
+            label = StringSlice("exhausted")
+        elif status == PING_STATUS_UPSTREAM_OVERLOADED:
+            label = StringSlice("upstream_overloaded")
+        elif status == PING_STATUS_MODEL_UNAVAILABLE:
+            label = StringSlice("model_unavailable")
+        elif status == PING_STATUS_PROCESS_FAILED:
+            label = StringSlice("process_failed")
+        elif status == PING_STATUS_SPAWN_FAILED:
+            label = StringSlice("spawn_failed")
+        elif status == PING_STATUS_CANCELLED:
+            label = StringSlice("cancelled")
+    elif status == PING_STATUS_OK:
+        label = StringSlice("OK")
+    elif status == PING_STATUS_PROTOCOL_FAILED:
+        label = StringSlice("PROTOCOL_FAILED")
+    elif status == PING_STATUS_UNEXPECTED_RESPONSE:
+        label = StringSlice("UNEXPECTED_RESPONSE")
+    elif status == PING_STATUS_TURN_FAILED:
+        label = StringSlice("TURN_FAILED")
+    elif status == PING_STATUS_AUTH_FAILED:
+        label = StringSlice("AUTH_FAILED")
+    elif status == PING_STATUS_DNS_FAILED:
+        label = StringSlice("DNS_FAILED")
+    elif status == PING_STATUS_TLS_FAILED:
+        label = StringSlice("TLS_FAILED")
+    elif status == PING_STATUS_TIMEOUT:
+        label = StringSlice("TIMEOUT")
+    elif status == PING_STATUS_RATE_LIMITED:
+        label = StringSlice("RATE_LIMITED")
+    elif status == PING_STATUS_QUOTA_EXHAUSTED:
+        label = StringSlice("EXHAUSTED")
+    elif status == PING_STATUS_UPSTREAM_OVERLOADED:
+        label = StringSlice("UPSTREAM_OVERLOADED")
+    elif status == PING_STATUS_MODEL_UNAVAILABLE:
+        label = StringSlice("MODEL_UNAVAILABLE")
+    elif status == PING_STATUS_PROCESS_FAILED:
+        label = StringSlice("PROCESS_FAILED")
+    elif status == PING_STATUS_SPAWN_FAILED:
+        label = StringSlice("SPAWN_FAILED")
+    elif status == PING_STATUS_CANCELLED:
+        label = StringSlice("CANCELLED")
+    if label.byte_length() == 0:
+        return PING_DETAIL_STATUS_INVALID
+    var length = Int64(label.byte_length())
+    if length > PING_STATUS_LABEL_MAX_BYTES:
+        return PING_DETAIL_STATUS_INVALID
+    if length > capacity:
+        return PING_DETAIL_STATUS_CAPACITY
+    var source = label.unsafe_ptr()
+    for index in range(length):
+        output[unsafe_offset=index] = source[unsafe_offset=index]
+    written[] = length
+    return PING_DETAIL_STATUS_OK
+
+def ping_status_is_temporary(status: Int64) -> Bool:
+    return (
+        status == PING_STATUS_DNS_FAILED
+        or status == PING_STATUS_TLS_FAILED
+        or status == PING_STATUS_TIMEOUT
+        or status == PING_STATUS_RATE_LIMITED
+        or status == PING_STATUS_UPSTREAM_OVERLOADED
+    )
 
 def ping_ascii_lower(value: UInt8) -> UInt8:
     return value + 32 if value >= 65 and value <= 90 else value
@@ -460,3 +554,49 @@ def prodex_mojo_ping_status_detail_v1(
     )
     written[] = 0
     return ping_status_detail_copy(status, output, output_capacity, written)
+
+@export("prodex_mojo_ping_status_label_v1")
+def prodex_mojo_ping_status_label_v1(
+    abi_version: Int64,
+    status: Int64,
+    json_label: Int64,
+    output_address: UInt,
+    output_capacity: Int64,
+    written_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != PING_PROTOCOL_ABI_VERSION:
+        return PING_DETAIL_STATUS_ABI
+    if (
+        status < PING_STATUS_OK
+        or status > PING_STATUS_CANCELLED
+        or json_label < 0
+        or json_label > 1
+        or output_capacity < 0
+        or written_address == 0
+        or (output_capacity > 0 and output_address == 0)
+    ):
+        return PING_DETAIL_STATUS_INVALID
+    var output = Pointer[mut=True, UInt8, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    var written = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(written_address)
+    )
+    written[] = 0
+    return ping_status_label_copy(status, json_label == 1, output, output_capacity, written)
+
+@export("prodex_mojo_ping_status_temporary_v1")
+def prodex_mojo_ping_status_temporary_v1(
+    abi_version: Int64,
+    status: Int64,
+    output_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != PING_PROTOCOL_ABI_VERSION:
+        return PING_DETAIL_STATUS_ABI
+    if status < PING_STATUS_OK or status > PING_STATUS_CANCELLED or output_address == 0:
+        return PING_DETAIL_STATUS_INVALID
+    var output = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    output[] = Int64(ping_status_is_temporary(status))
+    return PING_DETAIL_STATUS_OK
