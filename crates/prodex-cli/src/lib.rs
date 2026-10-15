@@ -1,8 +1,6 @@
 use clap::{Parser, Subcommand};
 use std::ffi::OsString;
 
-const CODEX_COMMAND_SERVER_SUBCOMMANDS: [&str; 3] = ["mcp-server", "app-server", "exec-server"];
-
 mod help;
 mod ping;
 mod presidio;
@@ -238,13 +236,20 @@ fn rewrite_positioned_super_alias(
         return Ok(Commands::Super(super_args));
     };
 
+    let alias = prodex_mojo_core::launch::positioned_super_provider_alias(
+        Some(alias),
+        super_args.provider.is_some(),
+        super_args.url.is_some(),
+    )
+    .expect("Mojo positioned Super provider-alias policy returned invalid output");
+
     match alias {
-        "gemini" if super_args.provider.is_none() && super_args.url.is_none() => {
+        Some(prodex_mojo_core::launch::SuperProviderAlias::Gemini) => {
             super_args.provider = Some(SuperExternalProvider::Gemini);
             super_args.codex_args.remove(0);
             Ok(Commands::Super(super_args))
         }
-        "deepseek" if super_args.provider.is_none() && super_args.url.is_none() => {
+        Some(prodex_mojo_core::launch::SuperProviderAlias::DeepSeek) => {
             super_args.provider = Some(SuperExternalProvider::DeepSeek);
             super_args.codex_args.remove(0);
             Ok(Commands::Super(super_args))
@@ -254,17 +259,9 @@ fn rewrite_positioned_super_alias(
 }
 
 fn super_literal_boundary(args: &[OsString]) -> Option<usize> {
-    matches!(
-        args.get(1).and_then(|arg| arg.to_str()),
-        Some("super" | "s")
-    )
-    .then(|| {
-        args.iter()
-            .enumerate()
-            .skip(2)
-            .find_map(|(index, arg)| (arg == "--").then_some(index))
-    })
-    .flatten()
+    let argument_views = args.iter().map(|arg| arg.to_str()).collect::<Vec<_>>();
+    prodex_mojo_core::launch::super_literal_boundary(&argument_views)
+        .expect("Mojo Super literal-boundary policy returned invalid output")
 }
 
 fn restore_super_literal_boundary(args: &[OsString], command: &mut Commands) {
@@ -288,13 +285,10 @@ fn restore_super_literal_boundary(args: &[OsString], command: &mut Commands) {
 }
 
 fn rewrite_super_compat_args(args: &[OsString]) -> Vec<OsString> {
-    let Some(command) = args.get(1).and_then(|arg| arg.to_str()) else {
-        return args.to_vec();
-    };
-    if !matches!(command, "s" | "super") {
-        return args.to_vec();
-    }
-    let Some(subcommand) = args.get(2).and_then(|arg| arg.to_str()) else {
+    let argument_views = args.iter().map(|arg| arg.to_str()).collect::<Vec<_>>();
+    let provider = prodex_mojo_core::launch::super_compat_provider_alias(&argument_views)
+        .expect("Mojo Super compatibility-alias policy returned invalid output");
+    let Some(_provider) = provider else {
         return args.to_vec();
     };
 
@@ -305,14 +299,9 @@ fn rewrite_super_compat_args(args: &[OsString]) -> Vec<OsString> {
             .unwrap_or_else(|| OsString::from("prodex")),
     );
 
-    match subcommand {
-        "gemini" | "deepseek" => {
-            rewritten.push(args[1].clone());
-            rewritten.push(OsString::from("--provider"));
-            rewritten.extend(args.iter().skip(2).cloned());
-        }
-        _ => return args.to_vec(),
-    }
+    rewritten.push(args[1].clone());
+    rewritten.push(OsString::from("--provider"));
+    rewritten.extend(args.iter().skip(2).cloned());
 
     rewritten
 }
@@ -327,10 +316,10 @@ pub fn should_default_cli_invocation_to_run(args: &[OsString]) -> bool {
 }
 
 pub fn is_codex_command_server_subcommand(args: &[OsString]) -> bool {
-    let Some(first_arg) = args.first().and_then(|arg| arg.to_str()) else {
-        return false;
-    };
-    CODEX_COMMAND_SERVER_SUBCOMMANDS.contains(&first_arg)
+    prodex_mojo_core::launch::codex_command_server_subcommand(
+        args.first().and_then(|arg| arg.to_str()),
+    )
+    .expect("Mojo Codex command-server policy returned invalid output")
 }
 
 pub fn rewrite_cli_args_as_run(args: &[OsString]) -> Vec<OsString> {
