@@ -431,6 +431,48 @@ def prodex_log_throughput_stream_rate_v1(
     return throughput_write_rate(True, rate, valid_address, rate_address)
 
 
+@export("prodex_log_throughput_rate_display_plan_v1")
+def prodex_log_throughput_rate_display_plan_v1(
+    abi_version: Int64,
+    rate_present: Int64,
+    rate: Float64,
+    valid_address: UInt,
+    precision_address: UInt,
+    display_rate_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != LOG_THROUGHPUT_ABI_VERSION:
+        return LOG_THROUGHPUT_ABI
+    if (
+        (rate_present != 0 and rate_present != 1)
+        or valid_address == 0
+        or precision_address == 0
+        or display_rate_address == 0
+    ):
+        return LOG_THROUGHPUT_INVALID
+    var valid = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(valid_address)
+    )
+    var precision = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(precision_address)
+    )
+    var display = Pointer[mut=True, Float64, MutUntrackedOrigin](
+        unsafe_from_address=Int(display_rate_address)
+    )
+    valid[] = 0
+    precision[] = 0
+    display[] = 0.0
+    if rate_present == 0 or not isfinite(rate) or rate <= 0.0:
+        return LOG_THROUGHPUT_OK
+    valid[] = 1
+    if rate >= 100.0:
+        display[] = rate
+        return LOG_THROUGHPUT_OK
+    var tenths = Int64(rate * 10.0 + 0.5)
+    display[] = Float64(tenths) / 10.0
+    precision[] = Int64(tenths % 10 != 0)
+    return LOG_THROUGHPUT_OK
+
+
 comptime LOG_RETENTION_POLICY_ABI_VERSION: Int64 = 1
 comptime LOG_RETENTION_POLICY_BOUNDED_VALUE: Int64 = 1
 comptime LOG_RETENTION_POLICY_ROTATION: Int64 = 2

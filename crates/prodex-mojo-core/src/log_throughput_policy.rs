@@ -57,6 +57,15 @@ unsafe extern "C" {
         valid_address: u64,
         rate_address: u64,
     ) -> i64;
+
+    fn prodex_log_throughput_rate_display_plan_v1(
+        abi_version: i64,
+        rate_present: i64,
+        rate: f64,
+        valid_address: u64,
+        precision_address: u64,
+        display_rate_address: u64,
+    ) -> i64;
 }
 
 fn status(value: i64) -> Result<(), MojoError> {
@@ -438,6 +447,44 @@ pub fn stream_rate(
         )
     };
     rate_output(status_code, valid, rate)
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ThroughputRateDisplayPlan {
+    pub display_rate: f64,
+    pub decimal_places: u8,
+}
+
+pub fn rate_display_plan(
+    rate: Option<f64>,
+) -> Result<Option<ThroughputRateDisplayPlan>, MojoError> {
+    let mut valid = -1_i64;
+    let mut precision = -1_i64;
+    let mut display_rate = 0.0_f64;
+    status(unsafe {
+        prodex_log_throughput_rate_display_plan_v1(
+            ABI_VERSION,
+            i64::from(rate.is_some()),
+            rate.unwrap_or_default(),
+            (&mut valid as *mut i64) as usize as u64,
+            (&mut precision as *mut i64) as usize as u64,
+            (&mut display_rate as *mut f64) as usize as u64,
+        )
+    })?;
+    match valid {
+        0 => Ok(None),
+        1 if display_rate.is_finite() && display_rate >= 0.0 => {
+            let decimal_places = match precision {
+                0 | 1 => u8::try_from(precision).map_err(|_| MojoError::InvalidOutput)?,
+                _ => return Err(MojoError::InvalidOutput),
+            };
+            Ok(Some(ThroughputRateDisplayPlan {
+                display_rate,
+                decimal_places,
+            }))
+        }
+        _ => Err(MojoError::InvalidOutput),
+    }
 }
 
 #[cfg(test)]
