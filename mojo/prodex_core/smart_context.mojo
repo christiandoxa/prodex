@@ -1524,3 +1524,48 @@ def prodex_smart_context_rewrite_quality_risk_v1(
     )
     result[] = Int64(risk)
     return 0
+
+# Enforce Smart Context's structural JSON safety contract in Mojo.
+# The host enumerates serde-owned nodes in the original LIFO traversal
+# order. Each bounded batch reports depths and previous node count.
+# Depth is checked *before* node count for every visited node.
+comptime SMART_CONTEXT_JSON_MAX_DEPTH: UInt64 = 64
+comptime SMART_CONTEXT_JSON_MAX_NODES: UInt64 = 50_000
+comptime SMART_CONTEXT_JSON_SCAN_MAX_COUNT: Int64 = 1_024
+
+@export("prodex_smart_context_json_shape_scan_v1")
+def prodex_smart_context_json_shape_scan_v1(
+    abi_version: Int64,
+    depths_address: UInt,
+    count: Int64,
+    previous_nodes: UInt64,
+    violation_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != 1:
+        return 4
+    if (
+        depths_address == 0
+        or violation_address == 0
+        or count < 1
+        or count > SMART_CONTEXT_JSON_SCAN_MAX_COUNT
+        or previous_nodes > SMART_CONTEXT_JSON_MAX_NODES
+    ):
+        return 1
+    var depths = Pointer[mut=False, UInt64, ImmUntrackedOrigin](
+        unsafe_from_address=Int(depths_address)
+    )
+    for index in range(count):
+        if depths[unsafe_offset=index] == 0:
+            return 1
+    var violation = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(violation_address)
+    )
+    violation[] = 0
+    for index in range(count):
+        if depths[unsafe_offset=index] > SMART_CONTEXT_JSON_MAX_DEPTH:
+            violation[] = 1
+            return 0
+        if previous_nodes + UInt64(index + 1) > SMART_CONTEXT_JSON_MAX_NODES:
+            violation[] = 2
+            return 0
+    return 0

@@ -27,6 +27,33 @@ fn unsupported_json_shape_rejects_too_many_nodes() {
 }
 
 #[test]
+fn unsupported_json_shape_mojo_checks_exact_node_limit_across_batches() {
+    let within_limit = serde_json::Value::Array(vec![
+        serde_json::Value::Null;
+        SMART_CONTEXT_MAX_JSON_NODES - 1
+    ]);
+    assert_eq!(
+        smart_context_unsupported_json_shape_reason(&within_limit),
+        None
+    );
+
+    let too_many =
+        serde_json::Value::Array(vec![serde_json::Value::Null; SMART_CONTEXT_MAX_JSON_NODES]);
+    assert_eq!(
+        smart_context_unsupported_json_shape_reason(&too_many),
+        Some("json_node_limit")
+    );
+
+    // Serde arrays/objects are traversed LIFO. Mojo sees the same
+    // node-depth order, including container nodes at chunk boundaries.
+    let structured = serde_json::json!({"outer": [1, 2, {"leaf": "ok"}]});
+    assert_eq!(
+        smart_context_unsupported_json_shape_reason(&structured),
+        None
+    );
+}
+
+#[test]
 fn affinity_pressure_rewrite_allows_affinity_without_global_exact_passthrough() {
     let exactness = SmartContextExactnessGuard {
         decision: SmartContextExactnessDecision::RequireExact,

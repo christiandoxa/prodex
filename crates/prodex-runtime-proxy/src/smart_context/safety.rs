@@ -6,25 +6,42 @@ pub const SMART_CONTEXT_MAX_JSON_NODES: usize = 50_000;
 pub fn smart_context_unsupported_json_shape_reason(
     value: &serde_json::Value,
 ) -> Option<&'static str> {
+    // Serde_json remains the host-owned tree representation. Mojo owns
+    // safety limits and first-violation precedence, evaluated in the
+    // original depth-first/LIFO order across bounded batches.
     let mut stack = vec![(value, 1usize)];
-    let mut nodes = 0usize;
-    while let Some((value, depth)) = stack.pop() {
-        if depth > SMART_CONTEXT_MAX_JSON_DEPTH {
-            return Some("json_depth_limit");
-        }
-        nodes = nodes.saturating_add(1);
-        if nodes > SMART_CONTEXT_MAX_JSON_NODES {
-            return Some("json_node_limit");
-        }
-        match value {
-            serde_json::Value::Array(items) => {
-                stack.extend(items.iter().map(|item| (item, depth.saturating_add(1))));
+    let mut previous_nodes = 0usize;
+    while !stack.is_empty() {
+        let mut depths = Vec::with_capacity(1_024);
+        for _ in 0..1_024 {
+            let Some((value, depth)) = stack.pop() else {
+                break;
+            };
+            depths.push(u64::try_from(depth).expect("JSON structural depth fits u64"));
+            match value {
+                serde_json::Value::Array(items) => {
+                    stack.extend(items.iter().map(|item| (item, depth.saturating_add(1))));
+                }
+                serde_json::Value::Object(object) => {
+                    stack.extend(object.values().map(|item| (item, depth.saturating_add(1))));
+                }
+                _ => {}
             }
-            serde_json::Value::Object(object) => {
-                stack.extend(object.values().map(|item| (item, depth.saturating_add(1))));
-            }
-            _ => {}
         }
+        if let Some(reason) =
+            prodex_mojo_core::runtime::smart_context_json_shape_scan(&depths, previous_nodes)
+                .expect("Mojo Smart Context JSON shape policy returned invalid output")
+        {
+            return Some(match reason {
+                prodex_mojo_core::runtime::SmartContextJsonShapeViolation::DepthLimit => {
+                    "json_depth_limit"
+                }
+                prodex_mojo_core::runtime::SmartContextJsonShapeViolation::NodeLimit => {
+                    "json_node_limit"
+                }
+            });
+        }
+        previous_nodes += depths.len();
     }
     None
 }
