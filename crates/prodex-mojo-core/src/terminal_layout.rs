@@ -55,6 +55,15 @@ unsafe extern "C" {
         result_address: u64,
         result_capacity: i64,
     ) -> i64;
+    fn prodex_terminal_middle_ellipsis_plan_v1(
+        abi: i64,
+        widths_address: u64,
+        scalar_count: i64,
+        content_cells: u64,
+        available_cells: u64,
+        result_address: u64,
+        result_capacity: i64,
+    ) -> i64;
     fn prodex_terminal_wrap_piece_action_v1(
         abi: i64,
         current_empty: i64,
@@ -117,6 +126,53 @@ pub fn fit_cell_plan(
         [3, n] if n > 0 => Ok(FitCellPlan::Truncate(
             usize::try_from(n).map_err(|_| MojoError::InvalidOutput)?,
         )),
+        _ => Err(MojoError::InvalidOutput),
+    }
+}
+
+/// The host slices UTF-8; Mojo chooses the middle-ellipsis presentation mode
+/// and the scalar counts for its retained prefix and suffix.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MiddleEllipsisPlan {
+    Empty,
+    Keep,
+    Dots(usize),
+    Split {
+        left_scalars: usize,
+        right_scalars: usize,
+    },
+}
+
+pub fn middle_ellipsis_plan(
+    scalar_cells: &[u64],
+    content_cells: usize,
+    available_cells: usize,
+) -> Result<MiddleEllipsisPlan, MojoError> {
+    let scalar_count = u64::try_from(scalar_cells.len()).map_err(|_| MojoError::InvalidInput)?;
+    let mut result = [u64::MAX; 3];
+    check_status(unsafe {
+        prodex_terminal_middle_ellipsis_plan_v1(
+            ABI_VERSION,
+            scalar_cells.as_ptr() as usize as u64,
+            i64::try_from(scalar_count).map_err(|_| MojoError::InvalidInput)?,
+            from_usize(content_cells)?,
+            from_usize(available_cells)?,
+            result.as_mut_ptr() as usize as u64,
+            3,
+        )
+    })?;
+    match result {
+        [0, 0, 0] => Ok(MiddleEllipsisPlan::Empty),
+        [1, 0, 0] => Ok(MiddleEllipsisPlan::Keep),
+        [2, count, 0] if count > 0 && count <= 3 => Ok(MiddleEllipsisPlan::Dots(
+            usize::try_from(count).map_err(|_| MojoError::InvalidOutput)?,
+        )),
+        [3, left, right] if left <= scalar_count && right <= scalar_count => {
+            Ok(MiddleEllipsisPlan::Split {
+                left_scalars: usize::try_from(left).map_err(|_| MojoError::InvalidOutput)?,
+                right_scalars: usize::try_from(right).map_err(|_| MojoError::InvalidOutput)?,
+            })
+        }
         _ => Err(MojoError::InvalidOutput),
     }
 }
@@ -466,6 +522,49 @@ mod tests {
     }
 
     #[test]
+    fn middle_ellipsis_plan_preserves_unicode_cell_budget_modes() {
+        for (cells, content, available, expected) in [
+            (vec![], 0, 0, MiddleEllipsisPlan::Empty),
+            (vec![1, 1, 1], 3, 8, MiddleEllipsisPlan::Keep),
+            (vec![1, 1, 1, 1], 4, 1, MiddleEllipsisPlan::Dots(1)),
+            (
+                vec![1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
+                12,
+                8,
+                MiddleEllipsisPlan::Split {
+                    left_scalars: 2,
+                    right_scalars: 3,
+                },
+            ),
+            (
+                vec![0, 0, 2, 2, 1],
+                6,
+                4,
+                MiddleEllipsisPlan::Split {
+                    left_scalars: 2,
+                    right_scalars: 1,
+                },
+            ),
+            (
+                vec![2, 2, 2, 2],
+                8,
+                6,
+                MiddleEllipsisPlan::Split {
+                    left_scalars: 0,
+                    right_scalars: 1,
+                },
+            ),
+            (vec![1, 1, 1], 3, usize::MAX, MiddleEllipsisPlan::Keep),
+        ] {
+            assert_eq!(
+                middle_ellipsis_plan(&cells, content, available).unwrap(),
+                expected,
+                "Mojo middle ellipsis for widths {cells:?} / {content} / {available}",
+            );
+        }
+    }
+
+    #[test]
     fn strict_chunk_and_truncate_abi_reject_invalid_input_and_capacity() {
         let widths = [1u64, 3];
         let mut boundaries = [u64::MAX; 3];
@@ -496,6 +595,19 @@ mod tests {
         );
         assert_eq!(
             unsafe { prodex_terminal_fit_cell_plan_v1(1, 4, 5, output, 1) },
+            1,
+        );
+        assert_eq!(
+            unsafe { prodex_terminal_middle_ellipsis_plan_v1(1, input, 2, 4, 8, output, 2) },
+            1,
+        );
+        assert_eq!(
+            unsafe { prodex_terminal_middle_ellipsis_plan_v1(1, input, 2, 4, 8, output, 3) },
+            1,
+            "reject cell widths outside Unicode's domain",
+        );
+        assert_eq!(
+            unsafe { prodex_terminal_middle_ellipsis_plan_v1(1, input, 2, 4, 8, 0, 3) },
             1,
         );
         assert_eq!(written, -1, "invalid ABI must not publish a chunk count");

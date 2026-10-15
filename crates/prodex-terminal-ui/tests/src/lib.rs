@@ -29,6 +29,35 @@ fn wrapping_counts_terminal_display_width() {
 }
 
 #[test]
+fn middle_ellipsis_preserves_unicode_zero_width_and_tiny_widths() {
+    for (value, width, expected) in [
+        ("abcdefghijkl", 8, "ab...jkl"),
+        ("表🙂abcdef", 6, "...def"),
+        ("e\u{301}abcdef", 6, "e\u{301}...ef"),
+        ("abcdef", 0, ""),
+        ("abcdef", 1, "."),
+        ("abcdef", 3, "..."),
+        ("abc", 8, "abc"),
+    ] {
+        assert_eq!(
+            middle_ellipsize(value, width),
+            expected,
+            "middle ellipsis {value:?} / {width}",
+        );
+        assert!(text_width(&middle_ellipsize(value, width)) <= width);
+    }
+}
+
+#[test]
+fn middle_ellipsis_accepts_u16_terminal_width_limits() {
+    assert_eq!(middle_ellipsize("表🙂", usize::from(u16::MAX)), "表🙂");
+    assert_eq!(
+        prodex_mojo_core::terminal_layout::panel_inline_height(usize::MAX).unwrap(),
+        u16::MAX
+    );
+}
+
+#[test]
 fn mojo_text_chunking_preserves_unicode_cell_boundaries_without_rust_fallback() {
     for (token, width, expected) in [
         ("", 0, vec![""]),

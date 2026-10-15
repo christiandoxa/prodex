@@ -147,7 +147,7 @@ impl LogTuiHeaderDetail {
             return String::new();
         }
         let Some(quota) = self.quota.as_ref() else {
-            return middle_ellipsize(&self.profile, width);
+            return terminal_ui::middle_ellipsize(&self.profile, width);
         };
         let suffix = format!("  {}  {}", quota.five_hour, quota.weekly);
         let profile_width = terminal_ui::text_width(&self.profile);
@@ -161,13 +161,13 @@ impl LogTuiHeaderDetail {
         if suffix_width + 3 <= width {
             return format!(
                 "{}{suffix}",
-                middle_ellipsize(&self.profile, width - suffix_width)
+                terminal_ui::middle_ellipsize(&self.profile, width - suffix_width)
             );
         }
         if profile_width <= width {
             return self.profile.clone();
         }
-        middle_ellipsize(&self.profile, width)
+        terminal_ui::middle_ellipsize(&self.profile, width)
     }
 }
 
@@ -451,43 +451,6 @@ fn format_snapshot_reset(reset_at: i64, pattern: &str) -> String {
         .unwrap_or_else(|| reset_at.to_string())
 }
 
-fn middle_ellipsize(value: &str, width: usize) -> String {
-    if width == 0 {
-        return String::new();
-    }
-    if terminal_ui::text_width(value) <= width {
-        return value.to_string();
-    }
-    if width <= 3 {
-        return ".".repeat(width);
-    }
-
-    let mut left = String::new();
-    let mut left_width = 0;
-    let left_limit = (width - 3) / 2;
-    for ch in value.chars() {
-        let ch_width = terminal_ui::text_width(&ch.to_string());
-        if left_width + ch_width > left_limit {
-            break;
-        }
-        left.push(ch);
-        left_width += ch_width;
-    }
-
-    let mut right = String::new();
-    let mut right_width = 0;
-    let right_limit = width - 3 - left_width;
-    for ch in value.chars().rev() {
-        let ch_width = terminal_ui::text_width(&ch.to_string());
-        if right_width + ch_width > right_limit {
-            break;
-        }
-        right.insert(0, ch);
-        right_width += ch_width;
-    }
-    format!("{left}...{right}")
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -597,9 +560,16 @@ mod tests {
 
     #[test]
     fn middle_ellipsizes_long_header_profile() {
-        assert_eq!(middle_ellipsize("abcdefghijkl", 8), "ab...jkl");
-        assert_eq!(middle_ellipsize("abc", 8), "abc");
-        assert_eq!(middle_ellipsize("abcdef", 3), "...");
+        let detail = LogTuiHeaderDetail::profile_only("abcdefghijkl".to_string(), Duration::ZERO);
+        assert_eq!(detail.render(8), "ab...jkl");
+        assert_eq!(
+            LogTuiHeaderDetail::profile_only("abc".to_string(), Duration::ZERO).render(8),
+            "abc"
+        );
+        assert_eq!(
+            LogTuiHeaderDetail::profile_only("abcdef".to_string(), Duration::ZERO).render(3),
+            "..."
+        );
     }
 
     #[test]
