@@ -20,28 +20,6 @@ pub(super) fn anthropic_web_search_call(block: &Value) -> Result<Value, String> 
     anthropic_mojo_value(input)
 }
 
-pub(super) fn merge_anthropic_web_search_result(
-    output: &mut [Value],
-    block: &Value,
-) -> Result<(), String> {
-    let blocks = json_fragment(&Value::Array(output.to_vec()))?;
-    let content = json_fragment(block)?;
-    let mut input =
-        AnthropicRequestKernelInput::new(AnthropicRequestKernelOperation::WebSearchResult);
-    input.choice_kind = 1;
-    input.blocks = Some(&blocks);
-    input.content = Some(&content);
-    let merged = anthropic_mojo_value(input)?;
-    let merged = merged
-        .as_array()
-        .ok_or_else(|| "Anthropic web-search result kernel returned a non-array".to_string())?;
-    if merged.len() != output.len() {
-        return Err("Anthropic web-search result kernel changed output count".to_string());
-    }
-    output.clone_from_slice(merged);
-    Ok(())
-}
-
 pub(super) fn anthropic_web_search_result_sources(block: &Value) -> Result<Vec<Value>, String> {
     let content = json_fragment(block)?;
     let mut input =

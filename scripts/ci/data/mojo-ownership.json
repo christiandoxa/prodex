@@ -861,6 +861,7 @@
           "deepseek_request_metadata_composition",
           "deepseek_strict_schema_normalization",
           "anthropic_web_search_result_shaping",
+          "anthropic_response_output_projection",
           "kiro_chat_response_mapping",
           "kiro_anthropic_response_mapping",
           "kiro_response_shape_fallbacks",
@@ -958,11 +959,12 @@
           },
           {
             "start": 1114,
-            "end": 1429
+            "end": 1835
           }
         ],
         "operations": [
-          "anthropic_web_search_result_shaping"
+          "anthropic_web_search_result_shaping",
+          "anthropic_response_output_projection"
         ]
       },
       {
@@ -3845,6 +3847,33 @@
       "duplicate_production_owner": false,
       "platform_fallback": false,
       "rust_adapter_scope": "Serde JSON serialization, typed ABI result mapping, and live stream state"
+    },
+    {
+      "name": "anthropic_response_output_projection",
+      "domain": "provider/anthropic",
+      "introduced_in": "0.438.0",
+      "baseline_state": "Rust iterated the Mojo response plan, rendered message and reasoning items, copied materialized tool items, and applied web-search results in output order",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_mojo_rich_anthropic_request_kernel_v1",
+      "mojo_abi_version": 6,
+      "mojo_operation_ids": {
+        "response_output": 33
+      },
+      "mojo_source": "mojo/prodex_core/rich_abi.mojo",
+      "mojo_semantic_source": "mojo/prodex_core/anthropic_request.mojo",
+      "consumer": "crates/prodex-provider-core/src/translators/anthropic/messages/response.rs",
+      "consumer_marker": "AnthropicRequestKernelOperation::ResponseOutput",
+      "production_consumers": [
+        "crates/prodex-provider-core/src/translators/anthropic/messages/response.rs"
+      ],
+      "production_reachability_test": "crates/prodex-provider-core/src/translators/anthropic/messages/response.rs",
+      "rust_owner_before": "Rust applied the ordered response plan and mutated the output vector around Mojo-rendered fragments",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "Deleted Rust response-output loop; compiled Mojo ABI and provider-boundary fixtures preserve text/tool/reasoning order, Unicode, duplicate search-call attachment, and result-before-call behavior",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "Serde acquisition, existing Mojo planner and item materialization, exact provider error mapping, bounded plan-fragment marshaling, and response-envelope clock effects"
     },
     {
       "name": "kiro_chat_response_mapping",
@@ -11304,15 +11333,24 @@
       "symbol": "merge_anthropic_web_search_result",
       "operation": "anthropic_web_search_result_shaping",
       "previous_responsibility": "Rust content-block URL and title filtering and source merge",
-      "final_state": "adapter-only",
+      "final_state": "deleted",
       "rust_before": "Rust source filter and output-array mutation",
-      "rust_after": "Serde fragments and Mojo result application only",
+      "rust_after": "The Rust result-merge adapter is deleted; source filtering and live stream item construction remain Mojo-owned",
       "mojo_owner": "mojo/prodex_core/anthropic_request.mojo::anthropic_request_write_web_search_result",
       "mojo_source": "mojo/prodex_core/anthropic_request.mojo",
       "mojo_entry": "prodex_mojo_rich_anthropic_request_kernel_v1 operation 32",
       "production_consumer": "crates/prodex-provider-core/src/translators/anthropic/messages/web_search.rs",
       "parity_test": "crates/prodex-provider-core/src/translators/anthropic/messages_tests.rs",
-      "performance": "one bounded Mojo result-source call per content block"
+      "performance": "one bounded Mojo result-source call per content block",
+      "cleanup_loc": 13,
+      "cleanup_source": {
+        "kind": "deleted",
+        "baseline_range": {
+          "start": 131,
+          "end": 143
+        }
+      },
+      "cleanup_evidence": "The response-output kernel now applies the ordered search-result attachment; the former Rust slice-mutation adapter no longer exists."
     },
     {
       "file": "crates/prodex-provider-core/src/translators/gemini/request_contents/system_instruction.rs",
@@ -11887,6 +11925,24 @@
           "end": 117
         }
       }
+    },
+    {
+      "file": "crates/prodex-provider-core/src/translators/anthropic/messages.rs",
+      "symbol": "anthropic_response_output",
+      "operation": "anthropic_response_output_projection",
+      "previous_responsibility": "Rust classified Anthropic response blocks, assembled ordered message/tool/reasoning output, and applied web-search result updates",
+      "final_state": "adapter-only",
+      "cleanup_loc": 56,
+      "cleanup_source": {
+        "kind": "collapsed-adapter",
+        "baseline_range": {
+          "start": 270,
+          "end": 327
+        },
+        "release_symbol": "let output = match",
+        "release_marker": "response::anthropic_response_output(content)"
+      },
+      "cleanup_evidence": "The frozen baseline response-output implementation was replaced by the existing Mojo response planner plus operation 33. The current Rust caller retains Serde acquisition, typed error mapping, and bounded plan/materialized-fragment marshaling."
     },
     {
       "file": "crates/prodex-provider-core/src/bridge/chat_compat/tool_calls.rs",
