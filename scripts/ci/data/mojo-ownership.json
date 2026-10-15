@@ -2472,6 +2472,26 @@
         "operations": [
           "provider_runtime_metadata"
         ]
+      },
+      {
+        "path": "mojo/prodex_core/mcp_stdio_policy.mojo",
+        "language": "mojo",
+        "classification": "DETERMINISTIC_DOMAIN",
+        "production_reachable": true,
+        "role": "semantic",
+        "operations": [
+          "mcp_stdio_first_line_classification"
+        ]
+      },
+      {
+        "path": "crates/prodex-mojo-core/src/mcp_stdio_policy.rs",
+        "language": "rust",
+        "classification": "MIXED",
+        "production_reachable": true,
+        "role": "adapter",
+        "operations": [
+          "mcp_stdio_first_line_classification"
+        ]
       }
     ],
     "removed": [
@@ -11137,6 +11157,29 @@
       "duplicate_production_owner": false,
       "platform_fallback": false,
       "rust_adapter_scope": "Serde event acquisition and serialization, bounded Mojo result decoding, and runtime error-event transport"
+    },
+    {
+      "name": "mcp_stdio_first_line_classification",
+      "domain": "mcp/stdio-framing",
+      "introduced_in": "0.438.0",
+      "baseline_state": "Rust classified the first non-whitespace MCP line byte as a JSON object or batch versus a bounded framing header",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_mcp_first_line_is_header_v1",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/mcp_stdio_policy.mojo",
+      "consumer": "crates/prodex-mcp-stdio/src/lib.rs",
+      "consumer_marker": "prodex_mojo_core::mcp_stdio_policy::first_line_is_header(",
+      "production_consumers": [
+        "crates/prodex-mcp-stdio/src/lib.rs"
+      ],
+      "production_reachability_test": "crates/prodex-mojo-core/tests/mcp_stdio_policy.rs",
+      "rust_owner_before": "Rust classified the first non-whitespace byte before selecting the bounded JSON or framing-header line limit",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "deleted; compiled Mojo byte-matrix and invalid-ABI tests plus MCP stdio framing regressions preserve bounded malformed-input behavior",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "Rust retains buffered stdin reads, UTF-8 and JSON parsing, framing budgets, size limits, and writes; the adapter validates the scalar Mojo result"
     }
   ],
   "rust_semantic_reductions": [
@@ -12892,6 +12935,29 @@
       "production_consumer": "crates/prodex-profile-export/src/copilot.rs",
       "parity_test": "crates/prodex-mojo-core/tests/profile_export_candidates.rs",
        "cleanup_evidence": "The app-local candidate loop is deleted; the compiled ABI and profile-export caller tests preserve last-user preference, exact pair deduplication, and stable order."
+    },
+    {
+      "file": "crates/prodex-mcp-stdio/src/lib.rs",
+      "symbol": "mcp_first_line_looks_like_header",
+      "operation": "mcp_stdio_first_line_classification",
+      "previous_responsibility": "Rust classified the first non-whitespace MCP line byte as a JSON object or batch versus a bounded framing header",
+      "final_state": "deleted",
+      "cleanup_loc": 3,
+      "cleanup_source": {
+        "kind": "deleted",
+        "baseline_range": {
+          "start": 125,
+          "end": 129
+        }
+      },
+      "rust_before": "crates/prodex-mcp-stdio/src/lib.rs::mcp_first_line_looks_like_header",
+      "rust_after": "Rust retains buffered line acquisition and size accounting while the required Mojo scalar policy selects JSON versus header bounds",
+      "mojo_owner": "mojo/prodex_core/mcp_stdio_policy.mojo::prodex_mcp_first_line_is_header_v1",
+      "mojo_source": "mojo/prodex_core/mcp_stdio_policy.mojo",
+      "mojo_entry": "prodex_mcp_first_line_is_header_v1",
+      "production_consumer": "crates/prodex-mcp-stdio/src/lib.rs",
+      "parity_test": "crates/prodex-mojo-core/tests/mcp_stdio_policy.rs",
+      "cleanup_evidence": "The Rust classifier is deleted; compiled Mojo byte-matrix and MCP caller regressions preserve object and batch JSON limits and bounded framing-header handling for every byte."
     }
   ],
   "deleted_authoritative_operations": [

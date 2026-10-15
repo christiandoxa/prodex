@@ -160,3 +160,20 @@ def prodex_mcp_content_length_parse_v1(
         value = value * UInt64(10) + digit
     output[] = value
     return MCP_STDIO_OK
+
+
+@export("prodex_mcp_first_line_is_header_v1")
+def prodex_mcp_first_line_is_header_v1(
+    abi_version: Int64,
+    first_byte: Int64,
+    output_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != MCP_STDIO_ABI_VERSION:
+        return MCP_STDIO_ABI
+    if first_byte < 0 or first_byte > 255 or output_address == 0:
+        return MCP_STDIO_INVALID
+    var output = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    output[] = Int64(first_byte != 123 and first_byte != 91)
+    return MCP_STDIO_OK

@@ -66,9 +66,11 @@ fn read_mcp_first_line<R: BufRead>(
             .iter()
             .find(|byte| !byte.is_ascii_whitespace())
             .copied();
-        if line.trim().is_empty()
-            || first_non_whitespace.is_some_and(mcp_first_line_looks_like_header)
-        {
+        let first_line_is_header = first_non_whitespace.is_some_and(|byte| {
+            prodex_mojo_core::mcp_stdio_policy::first_line_is_header(byte)
+                .expect("Mojo MCP first-line policy returned invalid output")
+        });
+        if line.trim().is_empty() || first_line_is_header {
             charge_mcp_framing_bytes(framing_bytes, line.len())?;
         }
         if !line.trim().is_empty() {
@@ -94,8 +96,14 @@ fn charge_mcp_framing_bytes(total: &mut usize, bytes: usize) -> io::Result<()> {
 fn read_mcp_physical_first_line<R: BufRead>(reader: &mut R) -> io::Result<Option<String>> {
     let mut bytes = Vec::new();
     let mut first_non_whitespace = None;
+    let mut first_line_is_header = None;
     loop {
-        match append_mcp_first_line_chunk(reader, &mut bytes, &mut first_non_whitespace)? {
+        match append_mcp_first_line_chunk(
+            reader,
+            &mut bytes,
+            &mut first_non_whitespace,
+            &mut first_line_is_header,
+        )? {
             McpFirstLineRead::Eof => return Ok(None),
             McpFirstLineRead::More => {}
             McpFirstLineRead::Complete => break,
@@ -116,6 +124,7 @@ fn append_mcp_first_line_chunk<R: BufRead>(
     reader: &mut R,
     bytes: &mut Vec<u8>,
     first_non_whitespace: &mut Option<u8>,
+    first_line_is_header: &mut Option<bool>,
 ) -> io::Result<McpFirstLineRead> {
     let available = reader.fill_buf()?;
     if available.is_empty() {
@@ -135,7 +144,15 @@ fn append_mcp_first_line_chunk<R: BufRead>(
         .find(|byte| !byte.is_ascii_whitespace())
         .copied();
     let first = first_non_whitespace.or(next_first_non_whitespace);
-    let limit = if first.is_some_and(|byte| !mcp_first_line_looks_like_header(byte)) {
+    if first_line_is_header.is_none()
+        && let Some(byte) = first
+    {
+        *first_line_is_header = Some(
+            prodex_mojo_core::mcp_stdio_policy::first_line_is_header(byte)
+                .expect("Mojo MCP first-line policy returned invalid output"),
+        );
+    }
+    let limit = if *first_line_is_header == Some(false) {
         MCP_MESSAGE_MAX_BYTES
     } else {
         MCP_FIRST_HEADER_LINE_MAX_BYTES
@@ -156,12 +173,6 @@ fn append_mcp_first_line_chunk<R: BufRead>(
     } else {
         McpFirstLineRead::More
     })
-}
-
-fn mcp_first_line_looks_like_header(byte: u8) -> bool {
-    // MCP JSON-RPC messages are objects or batches. Everything else is either
-    // a framing header or invalid input and must stay under the header bound.
-    !matches!(byte, b'{' | b'[')
 }
 
 fn read_limited_line<R: BufRead>(reader: &mut R, limit: usize) -> io::Result<Option<String>> {
@@ -397,6 +408,19 @@ mod tests {
 
         assert_eq!(framing, McpMessageFraming::JsonLine);
         assert_eq!(value["payload"].as_str().unwrap().len(), 8 * 1024);
+    }
+
+    #[test]
+    fn rejects_invalid_utf8_after_first_line_classification() {
+        let mut reader = BufReader::new(&[b'{', 0xff, b'\n'][..]);
+
+        let err = read_mcp_message(&mut reader).expect_err("invalid UTF-8 should fail closed");
+
+        assert_eq!(
+            err.downcast_ref::<std::io::Error>()
+                .map(std::io::Error::kind),
+            Some(std::io::ErrorKind::InvalidData)
+        );
     }
 
     #[test]
