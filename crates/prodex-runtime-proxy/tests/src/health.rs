@@ -115,6 +115,7 @@ fn latency_penalty_uses_route_stage_thresholds() {
 fn selection_jitter_uses_sequence_profile_and_route() {
     let first = runtime_profile_selection_jitter(42, "alpha", RuntimeRouteKind::Responses);
 
+    assert_eq!(first, 13_720_159_197_250_930_926);
     assert_eq!(
         first,
         runtime_profile_selection_jitter(42, "alpha", RuntimeRouteKind::Responses)
@@ -123,13 +124,25 @@ fn selection_jitter_uses_sequence_profile_and_route() {
         first,
         runtime_profile_selection_jitter(43, "alpha", RuntimeRouteKind::Responses)
     );
+    assert_eq!(
+        runtime_profile_selection_jitter(43, "alpha", RuntimeRouteKind::Responses),
+        2_052_999_783_678_899_254
+    );
     assert_ne!(
         first,
         runtime_profile_selection_jitter(42, "beta", RuntimeRouteKind::Responses)
     );
+    assert_eq!(
+        runtime_profile_selection_jitter(42, "beta", RuntimeRouteKind::Responses),
+        5_134_239_319_966_320_861
+    );
     assert_ne!(
         first,
         runtime_profile_selection_jitter(42, "alpha", RuntimeRouteKind::Websocket)
+    );
+    assert_eq!(
+        runtime_profile_selection_jitter(42, "alpha", RuntimeRouteKind::Websocket),
+        19_596_772_748_915_481
     );
 }
 

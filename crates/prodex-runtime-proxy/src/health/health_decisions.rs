@@ -1,7 +1,4 @@
-use std::collections::hash_map::DefaultHasher;
-use std::hash::{Hash, Hasher};
-
-use crate::{RuntimeRouteKind, runtime_route_kind_label};
+use crate::RuntimeRouteKind;
 
 use super::{
     RUNTIME_PROFILE_CIRCUIT_OPEN_THRESHOLD, RUNTIME_PROFILE_CIRCUIT_REOPEN_MAX_STAGE,
@@ -14,11 +11,12 @@ pub fn runtime_profile_selection_jitter(
     profile_name: &str,
     route_kind: RuntimeRouteKind,
 ) -> u64 {
-    let mut hasher = DefaultHasher::new();
-    request_sequence.hash(&mut hasher);
-    profile_name.hash(&mut hasher);
-    runtime_route_kind_label(route_kind).hash(&mut hasher);
-    hasher.finish()
+    prodex_mojo_core::runtime::profile_selection_jitter(
+        request_sequence,
+        profile_name,
+        route_kind as i64,
+    )
+    .unwrap_or_else(|error| panic!("Mojo profile selection jitter failed: {error:?}"))
 }
 
 pub fn runtime_profile_bad_pairing_next_score(current_score: u32, delta: u32) -> u32 {
