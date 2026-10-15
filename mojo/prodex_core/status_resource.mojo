@@ -12,13 +12,23 @@ comptime STATUS_RESOURCE_U64_FIELD: Int64 = 3
 comptime STATUS_RESOURCE_NETWORK_QUEUES: Int64 = 4
 comptime STATUS_RESOURCE_SOCKET_INODE: Int64 = 5
 comptime STATUS_RESOURCE_MAX: Int64 = 9_223_372_036_854_775_807
+comptime STATUS_RESOURCE_U64_MAX: UInt64 = 18_446_744_073_709_551_615
 comptime STATUS_PROCESS_ROWS_MAX_INPUT: Int64 = 1_048_576
 comptime STATUS_PROCESS_ROWS_MAX_ROWS: Int64 = 131_072
 comptime STATUS_PROCESS_ROWS_MAX_TOKENS: Int64 = 524_288
+comptime STATUS_RESOURCE_MAX_NETWORK_SAMPLES: Int64 = 1_024
+comptime STATUS_RESOURCE_COUNTER_WIDTH: Int64 = 4
+comptime STATUS_RESOURCE_AGGREGATE_WIDTH: Int64 = 6
 
 
 def status_resource_ptr(address: UInt64) -> Pointer[mut=False, UInt8, ImmUntrackedOrigin]:
     return Pointer[mut=False, UInt8, ImmUntrackedOrigin](unsafe_from_address=Int(address))
+
+
+def status_resource_u64_add(left: UInt64, right: UInt64) -> UInt64:
+    if STATUS_RESOURCE_U64_MAX - left < right:
+        return STATUS_RESOURCE_U64_MAX
+    return left + right
 
 
 def status_resource_space(value: UInt8) -> Bool:
@@ -294,6 +304,67 @@ def status_resource_socket_inode(
     if length < 10 or source[unsafe_offset=0] != 115 or source[unsafe_offset=1] != 111 or source[unsafe_offset=2] != 99 or source[unsafe_offset=3] != 107 or source[unsafe_offset=4] != 101 or source[unsafe_offset=5] != 116 or source[unsafe_offset=6] != 58 or source[unsafe_offset=7] != 91 or source[unsafe_offset=length - 1] != 93:
         return (False, 0)
     return status_resource_decimal(source, 8, length - 1)
+
+
+@export("prodex_status_resource_aggregate_v1")
+def prodex_status_resource_aggregate_v1(
+    abi_version: Int64,
+    process_address: UInt64,
+    process_count: Int64,
+    network_address: UInt64,
+    network_count: Int64,
+    output_address: UInt64,
+) abi("C") -> Int64:
+    if (
+        abi_version != STATUS_RESOURCE_ABI_VERSION
+        or process_count < 0
+        or network_count < 0
+        or output_address == 0
+    ):
+        return STATUS_RESOURCE_INVALID
+    if process_count > STATUS_PROCESS_ROWS_MAX_ROWS or network_count > STATUS_RESOURCE_MAX_NETWORK_SAMPLES:
+        return STATUS_RESOURCE_CAPACITY
+    if process_count > 0 and (process_address == 0 or process_address % 8 != 0):
+        return STATUS_RESOURCE_INVALID
+    if network_count > 0 and (network_address == 0 or network_address % 8 != 0):
+        return STATUS_RESOURCE_INVALID
+    if output_address % 8 != 0:
+        return STATUS_RESOURCE_INVALID
+
+    var processes = Pointer[mut=False, UInt64, ImmUntrackedOrigin](unsafe_from_address=Int(process_address))
+    var network = Pointer[mut=False, UInt64, ImmUntrackedOrigin](unsafe_from_address=Int(network_address))
+    var output = Pointer[mut=True, UInt64, MutUntrackedOrigin](unsafe_from_address=Int(output_address))
+    for index in range(STATUS_RESOURCE_AGGREGATE_WIDTH):
+        output[unsafe_offset=index] = 0
+
+    var process_index: Int64 = 0
+    while process_index < process_count:
+        var base = process_index * STATUS_RESOURCE_COUNTER_WIDTH
+        output[unsafe_offset=0] = status_resource_u64_add(
+            output[unsafe_offset=0], processes[unsafe_offset=base]
+        )
+        output[unsafe_offset=1] = status_resource_u64_add(
+            output[unsafe_offset=1], processes[unsafe_offset=base + 1]
+        )
+        output[unsafe_offset=2] = status_resource_u64_add(
+            output[unsafe_offset=2], processes[unsafe_offset=base + 2]
+        )
+        output[unsafe_offset=3] = status_resource_u64_add(
+            output[unsafe_offset=3], processes[unsafe_offset=base + 3]
+        )
+        process_index += 1
+
+    var network_index: Int64 = 0
+    while network_index < network_count:
+        var base = network_index * 2
+        output[unsafe_offset=4] = status_resource_u64_add(
+            output[unsafe_offset=4], network[unsafe_offset=base]
+        )
+        output[unsafe_offset=5] = status_resource_u64_add(
+            output[unsafe_offset=5], network[unsafe_offset=base + 1]
+        )
+        network_index += 1
+    return STATUS_RESOURCE_OK
 
 
 def status_process_row(

@@ -9,6 +9,10 @@ const U64_FIELD: i64 = 3;
 const NETWORK_QUEUES: i64 = 4;
 const SOCKET_INODE: i64 = 5;
 const PROCESS_ROWS_MAX_INPUT_BYTES: usize = 1024 * 1024;
+const PROCESS_COUNTER_WIDTH: usize = 4;
+const NETWORK_SAMPLE_WIDTH: usize = 2;
+const AGGREGATE_OUTPUT_WIDTH: usize = 6;
+const MAX_NETWORK_SAMPLES: usize = 1024;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ProcessRowSpan {
@@ -21,6 +25,26 @@ pub struct ProcessRowSpan {
 pub struct ProcessTokenSpan {
     pub start: usize,
     pub end: usize,
+}
+
+/// One host-collected process counter row passed to the Mojo aggregator.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct StatusResourceCounterSample {
+    pub process_cpu_ticks: u64,
+    pub resident_bytes: u64,
+    pub disk_read_bytes: u64,
+    pub disk_write_bytes: u64,
+}
+
+/// Saturated status resource totals selected by the compiled Mojo kernel.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct StatusResourceAggregate {
+    pub process_cpu_ticks: u64,
+    pub resident_bytes: u64,
+    pub disk_read_bytes: u64,
+    pub disk_write_bytes: u64,
+    pub network_rx_queue_bytes: u64,
+    pub network_tx_queue_bytes: u64,
 }
 
 unsafe extern "C" {
@@ -41,6 +65,14 @@ unsafe extern "C" {
         row_capacity: i64,
         token_output_address: u64,
         token_capacity: i64,
+        output_address: u64,
+    ) -> i64;
+    fn prodex_status_resource_aggregate_v1(
+        abi_version: i64,
+        process_address: u64,
+        process_count: i64,
+        network_address: u64,
+        network_count: i64,
         output_address: u64,
     ) -> i64;
 }
@@ -148,6 +180,58 @@ pub fn parse_network_queues(text: &str, inodes: &HashSet<u64>) -> (u64, u64) {
 
 pub fn socket_inode_target(target: &str) -> Option<u64> {
     parse_scalar(SOCKET_INODE, target)
+}
+
+/// Aggregate host-collected process and network counters through Mojo.
+pub fn aggregate_counters(
+    processes: &[StatusResourceCounterSample],
+    network_queues: &[(u64, u64)],
+) -> Result<StatusResourceAggregate, MojoError> {
+    if processes.len() > 131_072 || network_queues.len() > MAX_NETWORK_SAMPLES {
+        return Err(MojoError::Capacity);
+    }
+    let mut process_values = Vec::with_capacity(
+        processes
+            .len()
+            .checked_mul(PROCESS_COUNTER_WIDTH)
+            .ok_or(MojoError::InvalidInput)?,
+    );
+    for sample in processes {
+        process_values.extend([
+            sample.process_cpu_ticks,
+            sample.resident_bytes,
+            sample.disk_read_bytes,
+            sample.disk_write_bytes,
+        ]);
+    }
+    let mut network_values = Vec::with_capacity(
+        network_queues
+            .len()
+            .checked_mul(NETWORK_SAMPLE_WIDTH)
+            .ok_or(MojoError::InvalidInput)?,
+    );
+    for &(rx, tx) in network_queues {
+        network_values.extend([rx, tx]);
+    }
+    let mut output = [0_u64; AGGREGATE_OUTPUT_WIDTH];
+    status(unsafe {
+        prodex_status_resource_aggregate_v1(
+            ABI_VERSION,
+            pointer_address(process_values.as_ptr()),
+            i64::try_from(processes.len()).map_err(|_| MojoError::InvalidInput)?,
+            pointer_address(network_values.as_ptr()),
+            i64::try_from(network_queues.len()).map_err(|_| MojoError::InvalidInput)?,
+            mutable_pointer_address(output.as_mut_ptr()),
+        )
+    })?;
+    Ok(StatusResourceAggregate {
+        process_cpu_ticks: output[0],
+        resident_bytes: output[1],
+        disk_read_bytes: output[2],
+        disk_write_bytes: output[3],
+        network_rx_queue_bytes: output[4],
+        network_tx_queue_bytes: output[5],
+    })
 }
 
 fn process_rows_call(
@@ -290,6 +374,55 @@ mod tests {
         assert_eq!(socket_inode_target("socket:[42]"), Some(42));
         assert_eq!(socket_inode_target("socket:[42] trailing"), None);
         assert_eq!(socket_inode_target("pipe:[42]"), None);
+    }
+
+    #[test]
+    fn counter_aggregation_saturates_through_compiled_mojo() {
+        let aggregate = aggregate_counters(
+            &[
+                StatusResourceCounterSample {
+                    process_cpu_ticks: 10,
+                    resident_bytes: 20,
+                    disk_read_bytes: u64::MAX,
+                    disk_write_bytes: 40,
+                },
+                StatusResourceCounterSample {
+                    process_cpu_ticks: 5,
+                    resident_bytes: 7,
+                    disk_read_bytes: 1,
+                    disk_write_bytes: 2,
+                },
+            ],
+            &[(3, 4), (u64::MAX, 6)],
+        )
+        .expect("compiled Mojo resource aggregation should succeed");
+        assert_eq!(
+            aggregate,
+            StatusResourceAggregate {
+                process_cpu_ticks: 15,
+                resident_bytes: 27,
+                disk_read_bytes: u64::MAX,
+                disk_write_bytes: 42,
+                network_rx_queue_bytes: u64::MAX,
+                network_tx_queue_bytes: 10,
+            }
+        );
+    }
+
+    #[test]
+    fn counter_aggregation_rejects_abi_mismatch() {
+        let mut output = [0_u64; AGGREGATE_OUTPUT_WIDTH];
+        let status = unsafe {
+            prodex_status_resource_aggregate_v1(
+                ABI_VERSION + 1,
+                0,
+                0,
+                0,
+                0,
+                mutable_pointer_address(output.as_mut_ptr()),
+            )
+        };
+        assert_eq!(status, 1);
     }
 
     #[test]

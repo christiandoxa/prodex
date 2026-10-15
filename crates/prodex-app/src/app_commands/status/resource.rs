@@ -37,35 +37,42 @@ pub(super) fn collect_status_resource_counters(
         ..StatusResourceCounters::default()
     };
     let mut socket_inodes = HashSet::new();
+    let mut process_samples = Vec::new();
 
     for pid in pids {
         let dir = PathBuf::from(format!("/proc/{pid}"));
-        counters.process_cpu_ticks = counters.process_cpu_ticks.saturating_add(
-            fs::read_to_string(dir.join("stat"))
-                .ok()
-                .and_then(|text| prodex_mojo_core::status_resource::parse_process_cpu_ticks(&text))
-                .unwrap_or_default(),
-        );
-        counters.resident_bytes = counters.resident_bytes.saturating_add(
-            fs::read_to_string(dir.join("status"))
-                .ok()
-                .and_then(|text| prodex_mojo_core::status_resource::parse_kib_field(&text, "VmRSS"))
-                .unwrap_or_default(),
-        );
-        if let Ok(io) = fs::read_to_string(dir.join("io")) {
-            counters.disk_read_bytes = counters.disk_read_bytes.saturating_add(
+        let process_cpu_ticks = fs::read_to_string(dir.join("stat"))
+            .ok()
+            .and_then(|text| prodex_mojo_core::status_resource::parse_process_cpu_ticks(&text))
+            .unwrap_or_default();
+        let resident_bytes = fs::read_to_string(dir.join("status"))
+            .ok()
+            .and_then(|text| prodex_mojo_core::status_resource::parse_kib_field(&text, "VmRSS"))
+            .unwrap_or_default();
+        let (disk_read_bytes, disk_write_bytes) = if let Ok(io) = fs::read_to_string(dir.join("io"))
+        {
+            (
                 prodex_mojo_core::status_resource::parse_u64_field(&io, "read_bytes")
                     .unwrap_or_default(),
-            );
-            counters.disk_write_bytes = counters.disk_write_bytes.saturating_add(
                 prodex_mojo_core::status_resource::parse_u64_field(&io, "write_bytes")
                     .unwrap_or_default(),
-            );
-        }
+            )
+        } else {
+            (0, 0)
+        };
+        process_samples.push(
+            prodex_mojo_core::status_resource::StatusResourceCounterSample {
+                process_cpu_ticks,
+                resident_bytes,
+                disk_read_bytes,
+                disk_write_bytes,
+            },
+        );
         collect_socket_inodes(&dir.join("fd"), &mut socket_inodes);
     }
 
     counters.socket_count = socket_inodes.len();
+    let mut network_queues = Vec::new();
     for path in [
         "/proc/net/tcp",
         "/proc/net/tcp6",
@@ -75,10 +82,22 @@ pub(super) fn collect_status_resource_counters(
         let Ok(table) = fs::read_to_string(path) else {
             continue;
         };
-        let (rx, tx) =
-            prodex_mojo_core::status_resource::parse_network_queues(&table, &socket_inodes);
-        counters.network_rx_queue_bytes = counters.network_rx_queue_bytes.saturating_add(rx);
-        counters.network_tx_queue_bytes = counters.network_tx_queue_bytes.saturating_add(tx);
+        network_queues.push(prodex_mojo_core::status_resource::parse_network_queues(
+            &table,
+            &socket_inodes,
+        ));
+    }
+    if let Ok(aggregate) =
+        prodex_mojo_core::status_resource::aggregate_counters(&process_samples, &network_queues)
+    {
+        counters.process_cpu_ticks = aggregate.process_cpu_ticks;
+        counters.resident_bytes = aggregate.resident_bytes;
+        counters.disk_read_bytes = aggregate.disk_read_bytes;
+        counters.disk_write_bytes = aggregate.disk_write_bytes;
+        counters.network_rx_queue_bytes = aggregate.network_rx_queue_bytes;
+        counters.network_tx_queue_bytes = aggregate.network_tx_queue_bytes;
+    } else {
+        counters.available = false;
     }
     counters
 }
