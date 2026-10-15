@@ -475,3 +475,161 @@ def prodex_mojo_runtime_doctor_degraded_routes_v1(
     if status != 0:
         return status
     return 0
+
+def degraded_route_render_literal[
+    literal: StaticString
+](
+    output: Pointer[mut=True, UInt8, _],
+    capacity: Int64,
+    written: Pointer[mut=True, Int64, _],
+) -> Bool:
+    var count = Int64(literal.byte_length())
+    if count > capacity - written[]:
+        return False
+    var chars = literal.unsafe_ptr()
+    for i in range(count):
+        output[unsafe_offset=written[] + i] = chars[unsafe_offset=i]
+    written[] += count
+    return True
+
+
+def degraded_route_render_view(
+    input: ProdexRichStringView,
+    output: Pointer[mut=True, UInt8, _],
+    capacity: Int64,
+    written: Pointer[mut=True, Int64, _],
+) -> Bool:
+    var count = Int64(input.len)
+    if count > capacity - written[]:
+        return False
+    var chars = rich_view_ptr(input)
+    for i in range(count):
+        output[unsafe_offset=written[] + i] = chars[unsafe_offset=i]
+    written[] += count
+    return True
+
+
+def degraded_route_render_i64(
+    value: Int64,
+    output: Pointer[mut=True, UInt8, _],
+    capacity: Int64,
+    written: Pointer[mut=True, Int64, _],
+) -> Bool:
+    if value < 0:
+        if capacity - written[] < 1:
+            return False
+        output[unsafe_offset=written[]] = 45
+        written[] += 1
+    var amount = degraded_route_magnitude(value)
+    var divisor = UInt64(1)
+    while amount // divisor >= 10:
+        divisor *= 10
+    while True:
+        if capacity - written[] < 1:
+            return False
+        output[unsafe_offset=written[]] = UInt8(48) + UInt8(amount // divisor)
+        written[] += 1
+        amount = amount % divisor
+        if divisor == 1:
+            break
+        divisor = divisor // UInt64(10)
+    return True
+
+
+# The route report's kind labels, circuit open/half-open state, fallback
+# route label, number formatting, and delimiters are all Mojo-owned.
+@export("prodex_mojo_runtime_doctor_degraded_route_render_v1")
+def prodex_mojo_runtime_doctor_degraded_route_render_v1(
+    abi_version: Int64,
+    kind: Int64,
+    profile_view_address: UInt,
+    route_view_address: UInt,
+    route_present: Int64,
+    value: Int64,
+    now: Int64,
+    output_address: UInt,
+    output_capacity: Int64,
+    written_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != RUNTIME_DOCTOR_DEGRADED_ROUTES_ABI_VERSION:
+        return 4
+    if (
+        kind < ROUTE_KIND_CIRCUIT or kind > ROUTE_KIND_HEALTH
+        or profile_view_address == 0 or route_view_address == 0
+        or (route_present != 0 and route_present != 1)
+        or (route_present == 0 and kind != ROUTE_KIND_RETRY and kind != ROUTE_KIND_TRANSPORT)
+        or output_address == 0 or written_address == 0 or output_capacity <= 0
+    ):
+        return 1
+    var profile = Pointer[mut=False, ProdexRichStringView, ImmUntrackedOrigin](
+        unsafe_from_address=Int(profile_view_address)
+    )[].copy()
+    var route = Pointer[mut=False, ProdexRichStringView, ImmUntrackedOrigin](
+        unsafe_from_address=Int(route_view_address)
+    )[].copy()
+    if (
+        not rich_view_valid(profile, RUNTIME_DOCTOR_DEGRADED_ROUTES_MAX_KEY_BYTES)
+        or not rich_view_valid(route, RUNTIME_DOCTOR_DEGRADED_ROUTES_MAX_KEY_BYTES)
+    ):
+        return 2
+    var output = Pointer[mut=True, UInt8, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    var written = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(written_address)
+    )
+    written[] = 0
+    if (
+        not degraded_route_render_view(profile, output, output_capacity, written)
+        or not degraded_route_render_literal["/"](output, output_capacity, written)
+    ):
+        return 3
+    if route_present == 1:
+        if not degraded_route_render_view(route, output, output_capacity, written):
+            return 3
+    elif kind == ROUTE_KIND_RETRY:
+        if not degraded_route_render_literal["retry"](output, output_capacity, written):
+            return 3
+    else:
+        if not degraded_route_render_literal["transport"](output, output_capacity, written):
+            return 3
+    if kind == ROUTE_KIND_CIRCUIT:
+        if not degraded_route_render_literal[" circuit="](
+            output, output_capacity, written
+        ):
+            return 3
+        if value > now:
+            if not degraded_route_render_literal["open"](
+                output, output_capacity, written
+            ):
+                return 3
+        elif not degraded_route_render_literal["half-open"](
+            output, output_capacity, written
+        ):
+            return 3
+        if not degraded_route_render_literal[" until="](
+            output, output_capacity, written
+        ):
+            return 3
+    elif kind == ROUTE_KIND_TRANSPORT:
+        if not degraded_route_render_literal[" transport_backoff until="](
+            output, output_capacity, written
+        ):
+            return 3
+    elif kind == ROUTE_KIND_RETRY:
+        if not degraded_route_render_literal[" retry_backoff until="](
+            output, output_capacity, written
+        ):
+            return 3
+    elif kind == ROUTE_KIND_BAD_PAIRING:
+        if not degraded_route_render_literal[" bad_pairing="](
+            output, output_capacity, written
+        ):
+            return 3
+    elif not degraded_route_render_literal[" health="](
+        output, output_capacity, written
+    ):
+        return 3
+    if not degraded_route_render_i64(value, output, output_capacity, written):
+        return 3
+    return 0
