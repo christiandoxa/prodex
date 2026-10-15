@@ -33,10 +33,9 @@ use session_file::{read_session_file_to_string, visit_session_lines};
 use session_selector::{
     codex_session_id_from_path, full_codex_session_id, session_id_matches_selector,
     session_line_is_valid_json, session_line_resume_id_matches,
-    session_line_resume_id_matches_mode, session_line_resume_id_matching_mode,
-    session_line_starts_resume_metadata, session_lines_start_resume_metadata,
-    session_path_id_matches_selector, session_path_id_matching_selector,
-    session_value_starts_resume_metadata,
+    session_line_resume_id_matches_mode, session_line_starts_resume_metadata,
+    session_lines_start_resume_metadata, session_path_id_matches_selector,
+    session_path_id_matching_selector, session_value_starts_resume_metadata,
 };
 use state_db_index::collect_state_db_rollout_paths;
 pub use state_db_index::{
@@ -692,7 +691,8 @@ fn repair_session_file_metadata_prefix(
         return Ok(false);
     }
     let metadata_line = if plan.synthesize_metadata {
-        let Some(line) = session_meta::synthetic_session_metadata_line(path, selector, &lines)
+        let Some(line) =
+            session_meta::synthetic_session_metadata_line(path, selector, &lines, &line_facts)
         else {
             return Ok(false);
         };

@@ -16,7 +16,11 @@ pub use self::session_report::{
     session_report_update_json,
 };
 mod session_repair;
-pub use self::session_repair::{SessionRepairLine, SessionRepairPlan, session_repair_plan};
+pub use self::session_repair::{
+    SessionRepairLine, SessionRepairPlan, SessionSyntheticMetadataPlan,
+    SessionSyntheticSessionIdSource, SessionSyntheticSpan, session_repair_plan,
+    session_synthetic_metadata_json, session_synthetic_metadata_plan,
+};
 mod session_selector;
 pub use self::session_selector::{
     SessionFileNamePlan, SessionStateDbRowMatchKind, SessionStateDbRowMatchPlan,
