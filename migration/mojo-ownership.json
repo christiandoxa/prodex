@@ -2541,9 +2541,7 @@
         "classification": "DETERMINISTIC_DOMAIN",
         "production_reachable": true,
         "role": "semantic",
-        "operations": [
-          "mcp_stdio_first_line_classification"
-        ]
+        "operations": ["mcp_stdio_first_line_classification"]
       },
       {
         "path": "crates/prodex-mojo-core/src/mcp_stdio_policy.rs",
@@ -2551,9 +2549,23 @@
         "classification": "MIXED",
         "production_reachable": true,
         "role": "adapter",
-        "operations": [
-          "mcp_stdio_first_line_classification"
-        ]
+        "operations": ["mcp_stdio_first_line_classification"]
+      },
+      {
+        "path": "mojo/prodex_core/core_file_policy.mojo",
+        "language": "mojo",
+        "classification": "DETERMINISTIC_DOMAIN",
+        "production_reachable": true,
+        "role": "semantic",
+        "operations": ["housekeeping_stale_login_retention"]
+      },
+      {
+        "path": "crates/prodex-mojo-core/src/core_file_policy.rs",
+        "language": "rust",
+        "classification": "MIXED",
+        "production_reachable": true,
+        "role": "adapter",
+        "operations": ["housekeeping_stale_login_retention"]
       }
     ],
     "removed": [
@@ -11316,6 +11328,34 @@
       "duplicate_production_owner": false,
       "platform_fallback": false,
        "rust_adapter_scope": "Serde Value acquisition, existing media/grounding Mojo projections, bounded fact packing, callback/tool item materialization, JSON serialization, and typed batch-plan mapping"
+    },
+    {
+      "name": "housekeeping_stale_login_retention",
+      "domain": "housekeeping/login-retention",
+      "introduced_in": "0.420.0",
+      "baseline_state": "candidate",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_core_file_policy_v1",
+      "mojo_abi_version": 1,
+      "mojo_operation_ids": {
+        "stale_login_retention": 7
+      },
+      "mojo_source": "mojo/prodex_core/core_file_policy.mojo",
+      "consumer": "crates/prodex-core/src/lib.rs",
+      "consumer_marker": "core_file_policy::stale_login_dir_should_remove(",
+      "production_consumers": [
+        "crates/prodex-housekeeping/src/lib.rs",
+        "crates/prodex-core/src/lib.rs"
+      ],
+      "production_reachability_test": "crates/prodex-mojo-core/src/core_file_policy.rs",
+      "caller_regression_test": "crates/prodex-housekeeping/tests/src/lib.rs",
+      "rust_owner_before": "Rust compared login-directory modification time with the retention cutoff after filesystem metadata acquisition.",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "deleted; the compiled Mojo ABI boundary cases and housekeeping caller regression cover stale, equal, and fresh timestamps.",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "Directory enumeration, filesystem metadata and deletion effects, retention input acquisition, cleanup counts, and failure reporting remain Rust-owned."
     }
   ],
   "rust_semantic_reductions": [
@@ -13120,6 +13160,31 @@
       "production_consumer": "crates/prodex-provider-core/src/gemini_bridge/response_state.rs",
       "parity_test": "crates/prodex-mojo-core/tests/gemini_response.rs",
        "cleanup_evidence": "The former Rust part-action and grounding-tail decision loop is collapsed into the compiled Mojo batch plan; the provider caller retains only projection and item materialization."
+    },
+    {
+      "file": "crates/prodex-housekeeping/src/lib.rs",
+      "symbol": "oldest_allowed",
+      "operation": "housekeeping_stale_login_retention",
+      "previous_responsibility": "Rust decided whether an owned login directory was older than the retention cutoff.",
+      "final_state": "adapter-only",
+      "cleanup_loc": 1,
+      "cleanup_source": {
+        "kind": "collapsed-adapter",
+        "baseline_range": {
+          "start": 727,
+          "end": 727
+        },
+        "release_symbol": "if should_remove_stale_login_dir",
+        "release_marker": "should_remove_stale_login_dir("
+      },
+      "rust_before": "crates/prodex-housekeeping/src/lib.rs::cleanup_stale_login_dirs_at_with_counts",
+      "rust_after": "Rust retains filesystem enumeration, metadata, deletion, and count/error effects while Mojo owns the timestamp comparison.",
+      "mojo_owner": "mojo/prodex_core/core_file_policy.mojo::prodex_core_file_policy_v1 operation 7",
+      "mojo_source": "mojo/prodex_core/core_file_policy.mojo",
+      "mojo_entry": "prodex_core_file_policy_v1",
+      "production_consumer": "crates/prodex-housekeeping/src/lib.rs",
+      "parity_test": "crates/prodex-housekeeping/tests/src/lib.rs::stale_login_cleanup_keeps_fresh_owned_directories",
+      "cleanup_evidence": "The direct Rust modified-versus-cutoff comparison is deleted and replaced by the mandatory operation-7 Mojo call; stale deletion and fresh-directory retention remain covered at the housekeeping caller boundary."
     }
   ],
   "deleted_authoritative_operations": [

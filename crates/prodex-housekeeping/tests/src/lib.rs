@@ -59,6 +59,23 @@ fn stale_login_cleanup_can_retry_after_delete_failure() {
 }
 
 #[test]
+fn stale_login_cleanup_keeps_fresh_owned_directories() {
+    let paths = test_paths("stale-login-retention");
+    fs::create_dir_all(&paths.managed_profiles_root).unwrap();
+    let fresh_login = paths.managed_profiles_root.join(".login-fresh");
+    fs::create_dir_all(&fresh_login).unwrap();
+    let now = SystemTime::now();
+
+    let counts = cleanup_stale_login_dirs_at_with_counts(&paths, now, 3_600, |path| {
+        fs::remove_dir_all(path).is_ok()
+    });
+
+    assert_eq!(counts.removed, 0);
+    assert!(fresh_login.exists());
+    fs::remove_dir_all(&paths.root).unwrap();
+}
+
+#[test]
 fn cleanup_reports_scan_failures_without_deleting_ambiguous_paths() {
     let paths = test_paths("cleanup-failure-counts");
     fs::write(&paths.root, "not a directory").unwrap();

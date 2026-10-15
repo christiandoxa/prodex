@@ -6,7 +6,7 @@
 
 use prodex_core::{
     AppPaths, login_temp_dir_name_is_owned, owned_root_temp_file_name, root_temp_file_pid,
-    should_remove_stale_root_temp_file, system_time_to_unix_seconds,
+    should_remove_stale_login_dir, should_remove_stale_root_temp_file, system_time_to_unix_seconds,
 };
 use prodex_state::AppState;
 use std::fs;
@@ -389,7 +389,7 @@ pub fn cleanup_stale_login_dirs_at_with_counts(
             counts.scan_failures += 1;
             continue;
         };
-        if modified < oldest_allowed {
+        if should_remove_stale_login_dir(modified, oldest_allowed) {
             if remove_dir(&path) {
                 counts.removed += 1;
             } else {
