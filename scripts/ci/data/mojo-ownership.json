@@ -1345,7 +1345,8 @@
           "gemini_tool_name_policy",
           "gemini3_model_toolset_policy",
           "gemini_apply_patch_block_normalization",
-          "gemini_edit_patch_assembly"
+          "gemini_edit_patch_assembly",
+          "gemini_rtk_shell_wrapping"
         ]
       },
       {
@@ -2235,6 +2236,16 @@
           "gemini_orphan_tool_response_repair",
           "gemini_content_role_shape",
           "gemini_response_order_json_projection"
+        ]
+      },
+      {
+        "path": "crates/prodex-mojo-core/src/gemini_tooling_policy.rs",
+        "language": "rust",
+        "classification": "MIXED",
+        "production_reachable": true,
+        "role": "adapter",
+        "operations": [
+          "gemini_rtk_shell_wrapping"
         ]
       }
     ],
@@ -9677,6 +9688,29 @@
       "duplicate_production_owner": false,
       "platform_fallback": false,
       "rust_adapter_scope": "Borrowed Serde tree, checked scratch allocation, measured result decoding and same-length output projection into the caller slice"
+    },
+    {
+      "name": "gemini_rtk_shell_wrapping",
+      "domain": "provider/gemini-tooling",
+      "introduced_in": "0.438.0",
+      "baseline_state": "Rust scanned shell segments and words, checked environment assignments and the Gemini noisy-command catalogue, then inserted RTK before the first eligible executable",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_gemini_rtk_shell_command_v1",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/gemini_tooling_policy.mojo",
+      "consumer": "crates/prodex-provider-core/src/translators/gemini/response_tool_calls/rtk.rs",
+      "consumer_marker": "prodex_mojo_core::gemini_tooling_policy::gemini_rtk_shell_command(",
+      "production_consumers": [
+        "crates/prodex-provider-core/src/translators/gemini/response_tool_calls/rtk.rs"
+      ],
+      "production_reachability_test": "crates/prodex-provider-core/src/translators/gemini/response_tool_calls/rtk.rs",
+      "rust_owner_before": "Rust segment scanner, Unicode whitespace handling, environment-name validation, subcommand matching and text insertion plus duplicate catalogue",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "Fixed ABI and JSON-caller regressions plus 30492 generated comparisons against the removed Rust parser; temporary reference removed after execution",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "Serde argument acquisition, selection of the existing eligible JSON key, checked output allocation and String decoding; complete command policy stays in Mojo"
     }
   ],
   "rust_semantic_reductions": [

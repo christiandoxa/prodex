@@ -38,6 +38,15 @@ pub struct GeminiToolNamePolicy {
 }
 
 unsafe extern "C" {
+    fn prodex_gemini_rtk_shell_command_v1(
+        abi_version: i64,
+        input_address: u64,
+        input_length: i64,
+        output_address: u64,
+        output_capacity: i64,
+        written_address: u64,
+    ) -> i64;
+
     fn prodex_gemini_tool_name_policy_v1(
         abi_version: i64,
         input_address: u64,
@@ -425,5 +434,108 @@ mod tests {
         assert!(gemini_model_uses_gemini3_toolset("auto").unwrap());
         assert!(gemini_model_uses_gemini3_toolset("AUTO-GEMINI-3").unwrap());
         assert!(!gemini_model_uses_gemini3_toolset("gemini-2.5-pro").unwrap());
+    }
+}
+
+/// Preserve Gemini-specific raw-shell selection while delegating the complete
+/// command scan and insertion to the compiled tooling policy.
+pub fn gemini_rtk_shell_command(command: &str) -> Result<Option<String>, MojoError> {
+    let capacity = command
+        .len()
+        .checked_add(4)
+        .ok_or(MojoError::InvalidInput)?;
+    let mut output = Vec::new();
+    output
+        .try_reserve_exact(capacity)
+        .map_err(|_| MojoError::Capacity)?;
+    output.resize(capacity, 0_u8);
+    let mut written = -1_i64;
+    status(unsafe {
+        prodex_gemini_rtk_shell_command_v1(
+            ABI_VERSION,
+            command.as_ptr() as u64,
+            signed(command.len())?,
+            output.as_mut_ptr() as u64,
+            signed(output.len())?,
+            (&mut written as *mut i64) as u64,
+        )
+    })?;
+    let written = usize::try_from(written).map_err(|_| MojoError::InvalidOutput)?;
+    if written == 0 {
+        return Ok(None);
+    }
+    if written > output.len() {
+        return Err(MojoError::InvalidOutput);
+    }
+    output.truncate(written);
+    String::from_utf8(output)
+        .map(Some)
+        .map_err(|_| MojoError::InvalidOutput)
+}
+
+#[cfg(test)]
+mod rtk_policy_tests {
+    use super::*;
+
+    #[test]
+    fn gemini_rtk_mojo_preserves_raw_word_policy_and_wrapping() {
+        for (input, expected) in [
+            ("git status", Some("rtk git status")),
+            ("git branch", None),
+            ("echo cargo test", None),
+            ("cd /repo && cargo test", Some("cd /repo && rtk cargo test")),
+            (
+                "X=é　/usr/bin/cargo (test)",
+                Some("X=é　rtk /usr/bin/cargo (test)"),
+            ),
+            (
+                "rtk git status || npm test",
+                Some("rtk git status || rtk npm test"),
+            ),
+            ("X=1 rtk cargo test", None),
+            ("claw-compactor compact", Some("rtk claw-compactor compact")),
+            (
+                "claw-compactor summarize",
+                Some("rtk claw-compactor summarize"),
+            ),
+            (
+                "prodex-claw-compactor-auto",
+                Some("rtk prodex-claw-compactor-auto"),
+            ),
+            ("'cargo' test", None),
+            ("", None),
+        ] {
+            assert_eq!(
+                gemini_rtk_shell_command(input).unwrap().as_deref(),
+                expected,
+                "{input:?}"
+            );
+        }
+        let long = format!("/{}cargo test", "x/".repeat(5000));
+        assert_eq!(
+            gemini_rtk_shell_command(&long).unwrap(),
+            Some(format!("rtk {long}"))
+        );
+    }
+
+    #[test]
+    fn gemini_rtk_mojo_validates_abi_and_capacity_before_emitting_output() {
+        let input = b"cargo test";
+        let mut output = [77_u8; 16];
+        let mut written = 99_i64;
+        let mut call = |abi, capacity| unsafe {
+            prodex_gemini_rtk_shell_command_v1(
+                abi,
+                input.as_ptr() as u64,
+                input.len() as i64,
+                output.as_mut_ptr() as u64,
+                capacity,
+                (&mut written as *mut i64) as u64,
+            )
+        };
+        assert_eq!(call(2, 16), 4);
+        assert_eq!(call(1, 13), 3);
+        assert_eq!(output, [77; 16]);
+        assert_eq!(written, 99);
     }
 }
