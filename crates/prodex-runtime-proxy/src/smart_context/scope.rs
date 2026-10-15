@@ -32,9 +32,9 @@ impl ContextScopeId {
     }
 
     pub fn parse(value: &str) -> Option<Self> {
-        let digest = value.strip_prefix(SMART_CONTEXT_SCOPE_PREFIX)?;
-        (digest.len() == 64 && digest.bytes().all(|byte| byte.is_ascii_hexdigit()))
-            .then(|| Self(value.to_ascii_lowercase()))
+        prodex_mojo_core::rich::smart_context_scope_parse(value)
+            .expect("compiled Mojo ContextScopeId parser returned invalid output")
+            .map(Self)
     }
 
     pub fn as_str(&self) -> &str {
@@ -77,6 +77,13 @@ mod tests {
             Some("session-a"),
         );
         assert_eq!(ContextScopeId::parse(base.as_str()).as_ref(), Some(&base));
+        assert_eq!(
+            ContextScopeId::parse(&base.as_str().replace("ce5890", "CE5890")),
+            Some(base.clone()),
+        );
+        assert!(ContextScopeId::parse(&format!("scscope1:{}", "g".repeat(64))).is_none());
+        assert!(ContextScopeId::parse(&format!("SCSCOPE1:{}", "0".repeat(64))).is_none());
+
         assert_eq!(
             base.as_str(),
             "scscope1:ce5890f9a6d06defd8ee9299ba746f4ae1d6bfa3a5b88bb9955a0f78e1870b8e"
