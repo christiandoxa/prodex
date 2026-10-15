@@ -676,7 +676,8 @@
         "production_reachable": true,
         "role": "semantic",
         "operations": [
-          "status_resource_proc_parser"
+          "status_resource_proc_parser",
+          "status_process_rows_parser"
         ]
       },
       {
@@ -2514,6 +2515,29 @@
       "duplicate_production_owner": false,
       "platform_fallback": false,
       "rust_adapter_scope": "filesystem reads, process/socket enumeration, HashSet preparation, and typed ABI result mapping"
+    },
+    {
+      "name": "status_process_rows_parser",
+      "domain": "app/status-resource",
+      "introduced_in": "0.438.0",
+      "baseline_state": "Rust accepted ps lines, split bounded process tokens, and parsed u32 PIDs before process classification",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_status_process_rows_v1",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/status_resource.mojo",
+      "consumer": "crates/prodex-app/src/reports/info/processes.rs",
+      "consumer_marker": "prodex_mojo_core::status_resource::parse_process_rows(",
+      "production_consumers": [
+        "crates/prodex-app/src/reports/info/processes.rs"
+      ],
+      "production_reachability_test": "crates/prodex-mojo-core/src/status_resource.rs",
+      "rust_owner_before": "Rust split ps output into whitespace tokens, accepted rows with at least a PID and command, and parsed u32 PIDs",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "deleted; compiled Mojo span-table ABI coverage and the info caller regression cover valid, malformed, and oversized ps text",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "bounded ps command execution, caller-owned span validation, UTF-8 slice materialization, and canonical CLI command classification"
     },
     {
       "name": "runtime_precommit_retry_exhaustion",
@@ -11019,6 +11043,31 @@
       "production_consumer": "crates/prodex-app/src/app_commands/status/resource.rs",
       "parity_test": "crates/prodex-app/src/app_commands/status/tests.rs",
       "performance": "one bounded Mojo parser call per proc text or network table"
+    },
+    {
+      "file": "crates/prodex-app/src/reports/info/processes.rs",
+      "symbol": "parse_ps_process_rows",
+      "operation": "status_process_rows_parser",
+      "previous_responsibility": "Rust split ps output lines and whitespace tokens, accepted two-token rows, and parsed process IDs",
+      "final_state": "adapter-only",
+      "cleanup_loc": 26,
+      "cleanup_source": {
+        "kind": "collapsed-adapter",
+        "baseline_range": {
+          "start": 6,
+          "end": 31
+        },
+        "release_symbol": "parse_ps_process_rows",
+        "release_marker": "prodex_mojo_core::status_resource::parse_process_rows("
+      },
+      "rust_before": "crates/prodex-app/src/reports/info/processes.rs::parse_ps_process_rows",
+      "rust_after": "Rust materializes validated Mojo token spans and leaves process discovery and canonical CLI classification at the host boundary",
+      "mojo_owner": "mojo/prodex_core/status_resource.mojo::prodex_status_process_rows_v1",
+      "mojo_source": "mojo/prodex_core/status_resource.mojo",
+      "mojo_entry": "prodex_status_process_rows_v1",
+      "production_consumer": "crates/prodex-app/src/reports/info/processes.rs",
+      "parity_test": "crates/prodex-app/tests/src/reports/info.rs",
+      "performance": "two bounded Mojo passes over one ps snapshot for count and caller-owned span fill"
     },
     {
       "file": "crates/prodex-runtime-proxy/src/smart_context/rewrite_policy/adaptive.rs",

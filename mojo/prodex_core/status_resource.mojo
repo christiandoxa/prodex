@@ -3,6 +3,7 @@ from std.memory import Pointer
 comptime STATUS_RESOURCE_ABI_VERSION: Int64 = 1
 comptime STATUS_RESOURCE_OK: Int64 = 0
 comptime STATUS_RESOURCE_INVALID: Int64 = 1
+comptime STATUS_RESOURCE_CAPACITY: Int64 = 2
 comptime STATUS_RESOURCE_ABI: Int64 = 4
 comptime STATUS_RESOURCE_PROCESS_CPU: Int64 = 0
 comptime STATUS_RESOURCE_SYSTEM_CPU: Int64 = 1
@@ -11,6 +12,9 @@ comptime STATUS_RESOURCE_U64_FIELD: Int64 = 3
 comptime STATUS_RESOURCE_NETWORK_QUEUES: Int64 = 4
 comptime STATUS_RESOURCE_SOCKET_INODE: Int64 = 5
 comptime STATUS_RESOURCE_MAX: Int64 = 9_223_372_036_854_775_807
+comptime STATUS_PROCESS_ROWS_MAX_INPUT: Int64 = 1_048_576
+comptime STATUS_PROCESS_ROWS_MAX_ROWS: Int64 = 131_072
+comptime STATUS_PROCESS_ROWS_MAX_TOKENS: Int64 = 524_288
 
 
 def status_resource_ptr(address: UInt64) -> Pointer[mut=False, UInt8, ImmUntrackedOrigin]:
@@ -290,6 +294,106 @@ def status_resource_socket_inode(
     if length < 10 or source[unsafe_offset=0] != 115 or source[unsafe_offset=1] != 111 or source[unsafe_offset=2] != 99 or source[unsafe_offset=3] != 107 or source[unsafe_offset=4] != 101 or source[unsafe_offset=5] != 116 or source[unsafe_offset=6] != 58 or source[unsafe_offset=7] != 91 or source[unsafe_offset=length - 1] != 93:
         return (False, 0)
     return status_resource_decimal(source, 8, length - 1)
+
+
+def status_process_row(
+    source: Pointer[mut=False, UInt8, ImmUntrackedOrigin],
+    start: Int64,
+    end: Int64,
+    row_output: Pointer[mut=True, Int64, MutUntrackedOrigin],
+    token_output: Pointer[mut=True, Int64, MutUntrackedOrigin],
+    row_index: Int64,
+    token_index: Int64,
+    write: Bool,
+) -> Tuple[Bool, Int64, Int64]:
+    var cursor = start
+    var count: Int64 = 0
+    var pid: Int64 = 0
+    while True:
+        var token = status_resource_token(source, end, cursor)
+        if not token[0]:
+            break
+        if count == 0:
+            var parsed = status_resource_decimal(source, token[1], token[2])
+            if not parsed[0] or parsed[1] > 4_294_967_295:
+                return (False, 0, 0)
+            pid = parsed[1]
+        count += 1
+        cursor = token[3]
+    if count < 2:
+        return (False, 0, 0)
+    if write:
+        row_output[unsafe_offset=row_index * 3] = pid
+        row_output[unsafe_offset=row_index * 3 + 1] = token_index
+        row_output[unsafe_offset=row_index * 3 + 2] = count
+        cursor = start
+        var written: Int64 = 0
+        while True:
+            var token = status_resource_token(source, end, cursor)
+            if not token[0]:
+                break
+            token_output[unsafe_offset=(token_index + written) * 2] = token[1]
+            token_output[unsafe_offset=(token_index + written) * 2 + 1] = token[2]
+            written += 1
+            cursor = token[3]
+    return (True, pid, count)
+
+
+@export("prodex_status_process_rows_v1")
+def prodex_status_process_rows_v1(
+    abi_version: Int64,
+    input_address: UInt64,
+    input_length: Int64,
+    row_output_address: UInt64,
+    row_capacity: Int64,
+    token_output_address: UInt64,
+    token_capacity: Int64,
+    output_address: UInt64,
+) abi("C") -> Int64:
+    if abi_version != STATUS_RESOURCE_ABI_VERSION or input_length < 0 or input_length > STATUS_PROCESS_ROWS_MAX_INPUT or row_capacity < 0 or token_capacity < 0 or output_address == 0:
+        return STATUS_RESOURCE_INVALID
+    if input_length > 0 and input_address == 0:
+        return STATUS_RESOURCE_INVALID
+    var query = row_capacity == 0 and token_capacity == 0
+    if (row_capacity == 0) != (token_capacity == 0):
+        return STATUS_RESOURCE_INVALID
+    if row_capacity > STATUS_PROCESS_ROWS_MAX_ROWS or token_capacity > STATUS_PROCESS_ROWS_MAX_TOKENS:
+        return STATUS_RESOURCE_INVALID
+    if not query and (row_output_address == 0 or token_output_address == 0):
+        return STATUS_RESOURCE_INVALID
+    var output = Pointer[mut=True, Int64, MutUntrackedOrigin](unsafe_from_address=Int(output_address))
+    output[unsafe_offset=0] = 0
+    output[unsafe_offset=1] = 0
+    var source = status_resource_ptr(input_address)
+    var row_output = Pointer[mut=True, Int64, MutUntrackedOrigin](unsafe_from_address=Int(row_output_address))
+    var token_output = Pointer[mut=True, Int64, MutUntrackedOrigin](unsafe_from_address=Int(token_output_address))
+    var line_start: Int64 = 0
+    var row_count: Int64 = 0
+    var token_count: Int64 = 0
+    while line_start < input_length:
+        var line_end = line_start
+        while line_end < input_length and source[unsafe_offset=line_end] != 10:
+            line_end += 1
+        var parsed = status_process_row(source, line_start, line_end, row_output, token_output, row_count, token_count, False)
+        if parsed[0]:
+            if row_count >= STATUS_PROCESS_ROWS_MAX_ROWS or token_count > STATUS_PROCESS_ROWS_MAX_TOKENS - parsed[2]:
+                output[unsafe_offset=0] = row_count
+                output[unsafe_offset=1] = token_count
+                return STATUS_RESOURCE_CAPACITY
+            if not query and (row_count >= row_capacity or token_count > token_capacity - parsed[2]):
+                output[unsafe_offset=0] = row_count
+                output[unsafe_offset=1] = token_count
+                return STATUS_RESOURCE_CAPACITY
+            if not query:
+                _ = status_process_row(source, line_start, line_end, row_output, token_output, row_count, token_count, True)
+            row_count += 1
+            token_count += parsed[2]
+        if line_end >= input_length:
+            break
+        line_start = line_end + 1
+    output[unsafe_offset=0] = row_count
+    output[unsafe_offset=1] = token_count
+    return STATUS_RESOURCE_OK
 
 
 @export("prodex_status_resource_parser_v1")

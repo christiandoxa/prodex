@@ -8,6 +8,20 @@ const KIB_FIELD: i64 = 2;
 const U64_FIELD: i64 = 3;
 const NETWORK_QUEUES: i64 = 4;
 const SOCKET_INODE: i64 = 5;
+const PROCESS_ROWS_MAX_INPUT_BYTES: usize = 1024 * 1024;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ProcessRowSpan {
+    pub pid: u32,
+    pub token_start: usize,
+    pub token_count: usize,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ProcessTokenSpan {
+    pub start: usize,
+    pub end: usize,
+}
 
 unsafe extern "C" {
     fn prodex_status_resource_parser_v1(
@@ -19,15 +33,34 @@ unsafe extern "C" {
         auxiliary_length: i64,
         output_address: u64,
     ) -> i64;
+    fn prodex_status_process_rows_v1(
+        abi_version: i64,
+        input_address: u64,
+        input_length: i64,
+        row_output_address: u64,
+        row_capacity: i64,
+        token_output_address: u64,
+        token_capacity: i64,
+        output_address: u64,
+    ) -> i64;
 }
 
 fn status(value: i64) -> Result<(), MojoError> {
     match value {
         0 => Ok(()),
         1 => Err(MojoError::InvalidInput),
+        2 => Err(MojoError::Capacity),
         4 => Err(MojoError::AbiMismatch),
         _ => Err(MojoError::InvalidOutput),
     }
+}
+
+fn pointer_address<T>(pointer: *const T) -> u64 {
+    pointer as usize as u64
+}
+
+fn mutable_pointer_address<T>(pointer: *mut T) -> u64 {
+    pointer as usize as u64
 }
 
 fn call_with_aux_length(
@@ -117,6 +150,104 @@ pub fn socket_inode_target(target: &str) -> Option<u64> {
     parse_scalar(SOCKET_INODE, target)
 }
 
+fn process_rows_call(
+    text: &[u8],
+    rows: &mut [i64],
+    tokens: &mut [i64],
+    output: &mut [i64; 2],
+) -> Result<(), MojoError> {
+    let row_capacity = rows.len() / 3;
+    let token_capacity = tokens.len() / 2;
+    status(unsafe {
+        prodex_status_process_rows_v1(
+            ABI_VERSION,
+            pointer_address(text.as_ptr()),
+            i64::try_from(text.len()).map_err(|_| MojoError::InvalidInput)?,
+            if rows.is_empty() {
+                0
+            } else {
+                mutable_pointer_address(rows.as_mut_ptr())
+            },
+            i64::try_from(row_capacity).map_err(|_| MojoError::InvalidInput)?,
+            if tokens.is_empty() {
+                0
+            } else {
+                mutable_pointer_address(tokens.as_mut_ptr())
+            },
+            i64::try_from(token_capacity).map_err(|_| MojoError::InvalidInput)?,
+            mutable_pointer_address(output.as_mut_ptr()),
+        )
+    })
+}
+
+/// Parses bounded `ps -Ao pid=,comm=,args=` text into caller-owned byte spans.
+///
+/// Mojo owns line/token acceptance and PID parsing; Rust only validates spans and
+/// materializes `&str` slices for its process-row adapter.
+pub fn parse_process_rows(
+    text: &str,
+) -> Result<(Vec<ProcessRowSpan>, Vec<ProcessTokenSpan>), MojoError> {
+    if text.len() > PROCESS_ROWS_MAX_INPUT_BYTES {
+        return Err(MojoError::Capacity);
+    }
+    let bytes = text.as_bytes();
+    let mut counts = [0_i64; 2];
+    process_rows_call(bytes, &mut [], &mut [], &mut counts)?;
+    let row_count = usize::try_from(counts[0]).map_err(|_| MojoError::InvalidOutput)?;
+    let token_count = usize::try_from(counts[1]).map_err(|_| MojoError::InvalidOutput)?;
+    let mut rows = vec![0_i64; row_count.checked_mul(3).ok_or(MojoError::InvalidOutput)?];
+    let mut tokens = vec![0_i64; token_count.checked_mul(2).ok_or(MojoError::InvalidOutput)?];
+    let mut written = [0_i64; 2];
+    process_rows_call(bytes, &mut rows, &mut tokens, &mut written)?;
+    if written != counts {
+        return Err(MojoError::InvalidOutput);
+    }
+
+    let mut parsed_rows = Vec::with_capacity(row_count);
+    let mut parsed_tokens = Vec::with_capacity(token_count);
+    for chunk in rows.as_chunks::<3>().0 {
+        let pid = u32::try_from(chunk[0]).map_err(|_| MojoError::InvalidOutput)?;
+        let token_start = usize::try_from(chunk[1]).map_err(|_| MojoError::InvalidOutput)?;
+        let token_count = usize::try_from(chunk[2]).map_err(|_| MojoError::InvalidOutput)?;
+        if token_count < 2
+            || token_start > tokens.len() / 2
+            || token_count > tokens.len() / 2 - token_start
+        {
+            return Err(MojoError::InvalidOutput);
+        }
+        parsed_rows.push(ProcessRowSpan {
+            pid,
+            token_start,
+            token_count,
+        });
+    }
+    for chunk in tokens.as_chunks::<2>().0 {
+        let start = usize::try_from(chunk[0]).map_err(|_| MojoError::InvalidOutput)?;
+        let end = usize::try_from(chunk[1]).map_err(|_| MojoError::InvalidOutput)?;
+        if start >= end
+            || end > text.len()
+            || !text.is_char_boundary(start)
+            || !text.is_char_boundary(end)
+        {
+            return Err(MojoError::InvalidOutput);
+        }
+        parsed_tokens.push(ProcessTokenSpan { start, end });
+    }
+    let mut token_cursor = 0;
+    for row in &parsed_rows {
+        if row.token_start != token_cursor
+            || row.token_count > parsed_tokens.len().saturating_sub(token_cursor)
+        {
+            return Err(MojoError::InvalidOutput);
+        }
+        token_cursor += row.token_count;
+    }
+    if token_cursor != parsed_tokens.len() {
+        return Err(MojoError::InvalidOutput);
+    }
+    Ok((parsed_rows, parsed_tokens))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -159,5 +290,22 @@ mod tests {
         assert_eq!(socket_inode_target("socket:[42]"), Some(42));
         assert_eq!(socket_inode_target("socket:[42] trailing"), None);
         assert_eq!(socket_inode_target("pipe:[42]"), None);
+    }
+
+    #[test]
+    fn process_rows_parser_returns_ordered_spans_and_rejects_oversized_input() {
+        let text =
+            "  111 prodex /usr/local/bin/prodex run --profile main\ninvalid\n222 bash bash\n";
+        let (rows, tokens) =
+            parse_process_rows(text).expect("compiled Mojo parser should accept ps text");
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0].pid, 111);
+        assert_eq!(rows[0].token_count, 6);
+        assert_eq!(&text[tokens[1].start..tokens[1].end], "prodex");
+        assert_eq!(&text[tokens[5].start..tokens[5].end], "main");
+        assert!(matches!(
+            parse_process_rows(&"x".repeat(PROCESS_ROWS_MAX_INPUT_BYTES + 1)),
+            Err(MojoError::Capacity)
+        ));
     }
 }
