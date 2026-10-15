@@ -1302,7 +1302,8 @@
         "production_reachable": true,
         "role": "semantic",
         "operations": [
-          "session_report_metadata_policy"
+          "session_report_metadata_policy",
+          "super_expose_rollout_name_policy"
         ]
       },
       {
@@ -6438,6 +6439,32 @@
       "duplicate_production_owner": false,
       "platform_fallback": false,
       "rust_adapter_scope": "base64/Serde decoding, UUID normalization, source checkpoint hashing, path/process identity checks, and typed cursor error mapping"
+    },
+    {
+      "name": "super_expose_rollout_name_policy",
+      "domain": "super-expose/session-prompt-write",
+      "introduced_in": "0.438.0",
+      "baseline_state": "candidate",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_session_prompt_write_rollout_name_v1",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/session_report.mojo",
+      "consumer": "crates/prodex-app/src/super_expose/session_prompt_write/output.rs",
+      "consumer_marker": "prodex_mojo_core::session_cli_policy::prompt_write_rollout_name_plan",
+      "production_consumers": [
+        "crates/prodex-app/src/super_expose/session_prompt_write/queue.rs",
+        "crates/prodex-app/src/super_expose/session_prompt_write/process.rs",
+        "crates/prodex-app/src/super_expose/session_prompt_write/output.rs"
+      ],
+      "production_reachability_test": "crates/prodex-mojo-core/src/session_cli_policy/tests.rs",
+      "caller_regression_test": "crates/prodex-app/src/super_expose/session_prompt_write_tests.rs",
+      "rust_owner_before": "Rust classified rollout filename prefix and suffix policy and scanned hyphen windows for a unique UUID-shaped thread identity",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "deleted; compiled Mojo ABI cases and the Super-expose caller regression cover legacy, compressed, malformed, and duplicate-UUID names",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "Rust retains path and UTF-8 extraction, filesystem metadata, canonicalization, symlink and open-file authority, UUID parsing/normalization, and all process/terminal/filesystem effects"
     },
     {
       "domain": "cli/super-provider-config",

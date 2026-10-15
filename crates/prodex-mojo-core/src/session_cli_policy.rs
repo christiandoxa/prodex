@@ -106,6 +106,13 @@ pub struct SessionPromptWriteOutputLineInput {
     pub limit_reached: bool,
 }
 
+/// Deterministic rollout filename classification and unique legacy thread span.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct SessionPromptWriteRolloutNamePlan {
+    pub is_rollout: bool,
+    pub thread_span: Option<(usize, usize)>,
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum SessionPromptWriteVerification {
     QueueFailed,
@@ -177,6 +184,13 @@ unsafe extern "C" {
         output_address: u64,
         output_capacity: i64,
         written_address: u64,
+    ) -> i64;
+    fn prodex_session_prompt_write_rollout_name_v1(
+        abi_version: i64,
+        name_address: u64,
+        name_length: i64,
+        allow_compressed: i64,
+        output_address: u64,
     ) -> i64;
 }
 
@@ -427,6 +441,47 @@ pub fn prompt_write_gap_text(reason: u8) -> Result<String, MojoError> {
             .to_vec(),
     )
     .map_err(|_| MojoError::InvalidOutput)
+}
+
+/// Classify one rollout filename and locate its unique UUID-shaped thread span.
+pub fn prompt_write_rollout_name_plan(
+    name: &str,
+    allow_compressed: bool,
+) -> Result<SessionPromptWriteRolloutNamePlan, MojoError> {
+    if name.len() > 4_096 {
+        return Err(MojoError::InvalidInput);
+    }
+    let mut output = [-1_i64; 3];
+    valid_status(unsafe {
+        prodex_session_prompt_write_rollout_name_v1(
+            PROMPT_WRITE_POLICY_ABI_VERSION,
+            name.as_ptr() as u64,
+            i64::try_from(name.len()).map_err(|_| MojoError::InvalidInput)?,
+            i64::from(allow_compressed),
+            output.as_mut_ptr() as u64,
+        )
+    })?;
+    let is_rollout = match output[0] {
+        0 => false,
+        1 => true,
+        _ => return Err(MojoError::InvalidOutput),
+    };
+    let thread_span = match (output[1], output[2]) {
+        (-1, -1) => None,
+        (start, end) if start >= 0 && end >= start => {
+            let start = usize::try_from(start).map_err(|_| MojoError::InvalidOutput)?;
+            let end = usize::try_from(end).map_err(|_| MojoError::InvalidOutput)?;
+            if end > name.len() || !name.is_char_boundary(start) || !name.is_char_boundary(end) {
+                return Err(MojoError::InvalidOutput);
+            }
+            Some((start, end))
+        }
+        _ => return Err(MojoError::InvalidOutput),
+    };
+    Ok(SessionPromptWriteRolloutNamePlan {
+        is_rollout,
+        thread_span,
+    })
 }
 
 pub fn prompt_write_verification_plan(

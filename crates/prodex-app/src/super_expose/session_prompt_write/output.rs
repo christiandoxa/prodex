@@ -788,7 +788,8 @@ pub(crate) fn collect_exact_rollouts(
 }
 
 fn is_uncompressed_rollout_file_name(name: &str) -> bool {
-    name.starts_with("rollout-") && name.ends_with(".jsonl")
+    prodex_mojo_core::session_cli_policy::prompt_write_rollout_name_plan(name, false)
+        .is_ok_and(|plan| plan.is_rollout)
 }
 
 pub(crate) fn rollout_path_exists_in_roots(path: &Path, roots: &[PathBuf]) -> bool {

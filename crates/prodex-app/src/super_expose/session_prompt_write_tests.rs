@@ -3,8 +3,8 @@ use super::session_prompt_write::{
     ProcessState, PromptOutputReadRequest, QueueControl, QueueInvocation, QueueRequestOutcome,
     ResolvedTarget, SESSION_PROMPT_WRITE_MAX_MESSAGE_BYTES, SessionPromptWriteError,
     SessionPromptWriteRequest, SessionPromptWriteService, exact_open_database, is_codex_writer,
-    is_descendant_of, is_plain_prodex_session, legacy_thread_id, modern_thread_id,
-    resolve_thread_identity,
+    is_descendant_of, is_plain_prodex_session, is_rollout_file_name, legacy_thread_id,
+    modern_thread_id, resolve_thread_identity,
 };
 use std::collections::{BTreeMap, HashMap, VecDeque};
 use std::io::Write;
@@ -314,6 +314,28 @@ fn modern_lock_is_authoritative_and_legacy_rollout_is_supported() {
         ]),
         Ok(THREAD.to_string())
     );
+}
+
+#[test]
+fn rollout_filename_policy_preserves_compression_and_duplicate_rejection() {
+    let legacy = PathBuf::from(format!("/tmp/rollout-2026-09-03T10-00-00-{THREAD}.jsonl"));
+    let compressed = PathBuf::from(format!("/tmp/rollout-{THREAD}.jsonl.zst"));
+    let duplicate = PathBuf::from(format!("/tmp/rollout-{THREAD}-{THREAD}.jsonl"));
+
+    assert!(is_rollout_file_name(
+        legacy.file_name().unwrap().to_str().unwrap()
+    ));
+    assert_eq!(legacy_thread_id(&legacy).as_deref(), Some(THREAD));
+    assert!(is_rollout_file_name(
+        compressed.file_name().unwrap().to_str().unwrap()
+    ));
+    assert_eq!(legacy_thread_id(&compressed).as_deref(), Some(THREAD));
+    assert!(is_rollout_file_name(
+        duplicate.file_name().unwrap().to_str().unwrap()
+    ));
+    assert_eq!(legacy_thread_id(&duplicate), None);
+    assert!(!is_rollout_file_name("session-rollout.jsonl"));
+    assert!(!is_rollout_file_name("rollout-session.txt"));
 }
 
 #[test]
