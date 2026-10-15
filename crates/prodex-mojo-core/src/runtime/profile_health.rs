@@ -42,6 +42,13 @@ pub const RUNTIME_PROFILE_HEALTH_SCORE_FIELD_COUNT: usize = 14;
 pub const RUNTIME_PROFILE_HEALTH_SCORE_MAX_COUNT: usize = RUNTIME_PROFILE_SCHEDULE_MAX_COUNT;
 
 unsafe extern "C" {
+    fn prodex_runtime_profile_active_backoff_max_v1(
+        abi_version: i64,
+        deadlines: u64,
+        count: i64,
+        now: i64,
+        output: u64,
+    ) -> i64;
     fn prodex_runtime_health_scalar_v1(
         abi_version: i64,
         operation: i64,
@@ -68,6 +75,39 @@ unsafe extern "C" {
         bad_pairing_decay_seconds: i64,
         performance_decay_seconds: i64,
     ) -> i64;
+}
+
+/// Select the latest active backoff cutoff from host-owned deadline values.
+/// Mojo alone owns strict deadline activation and max selection.
+pub fn profile_active_backoff_max(
+    deadlines: &[i64],
+    now: i64,
+) -> Result<Option<i64>, crate::MojoError> {
+    if deadlines.len() > 1_000_000 {
+        return Err(crate::MojoError::Capacity);
+    }
+    let mut output = [-1_i64; 2];
+    let status = unsafe {
+        prodex_runtime_profile_active_backoff_max_v1(
+            1,
+            deadlines.as_ptr() as u64,
+            i64::try_from(deadlines.len()).map_err(|_| crate::MojoError::InvalidInput)?,
+            now,
+            output.as_mut_ptr() as u64,
+        )
+    };
+    if status != 0 {
+        return Err(match status {
+            1 => crate::MojoError::InvalidInput,
+            4 => crate::MojoError::AbiMismatch,
+            _ => crate::MojoError::InvalidOutput,
+        });
+    }
+    match output[0] {
+        0 if output[1] == 0 => Ok(None),
+        1 if output[1] > now => Ok(Some(output[1])),
+        _ => Err(crate::MojoError::InvalidOutput),
+    }
 }
 
 /// Computes route health sort keys for a bounded batch of normalized profiles.
@@ -743,4 +783,65 @@ pub fn profile_health_recovery_plan(
             .then(|| u32::try_from(output[3]).map_err(|_| crate::MojoError::InvalidOutput))
             .transpose()?,
     })
+}
+
+#[cfg(test)]
+mod backoff_deadline_tests {
+    use super::*;
+
+    #[test]
+    fn active_backoff_selection_is_owned_by_mojo() {
+        assert_eq!(profile_active_backoff_max(&[], 10), Ok(None));
+        assert_eq!(profile_active_backoff_max(&[9, 10, 11], 10), Ok(Some(11)));
+        assert_eq!(
+            profile_active_backoff_max(&[i64::MIN, -1, 0, i64::MAX, i64::MAX - 1], 0),
+            Ok(Some(i64::MAX)),
+        );
+        assert_eq!(profile_active_backoff_max(&[i64::MAX], i64::MAX), Ok(None));
+        assert_eq!(profile_active_backoff_max(&[-100, -20], -30), Ok(Some(-20)));
+        assert_eq!(profile_active_backoff_max(&[5, 6, 7], 7), Ok(None));
+        assert_eq!(
+            profile_active_backoff_max(&[11, 11, 10, 9], 10),
+            Ok(Some(11))
+        );
+    }
+
+    #[test]
+    fn active_backoff_abi_rejects_invalid_count_and_version_without_output() {
+        let mut output = [777_i64; 2];
+        let input = [12_i64];
+        unsafe {
+            assert_eq!(
+                prodex_runtime_profile_active_backoff_max_v1(
+                    2,
+                    input.as_ptr() as u64,
+                    1,
+                    10,
+                    output.as_mut_ptr() as u64,
+                ),
+                4
+            );
+            assert_eq!(
+                prodex_runtime_profile_active_backoff_max_v1(
+                    1,
+                    input.as_ptr() as u64,
+                    -1,
+                    10,
+                    output.as_mut_ptr() as u64,
+                ),
+                1
+            );
+            assert_eq!(
+                prodex_runtime_profile_active_backoff_max_v1(
+                    1,
+                    0,
+                    1,
+                    10,
+                    output.as_mut_ptr() as u64,
+                ),
+                1
+            );
+        }
+        assert_eq!(output, [777; 2]);
+    }
 }

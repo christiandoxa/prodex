@@ -214,6 +214,64 @@ fn retry_or_transport_backoff_ignores_expired_entries() {
 }
 
 #[test]
+fn mojo_active_backoff_reduction_respects_route_scope_and_strict_deadline() {
+    let now = 100;
+    let route = RuntimeRouteKind::Responses;
+    let mut transport = BTreeMap::from([
+        ("alpha".to_string(), now + 1),
+        ("beta".to_string(), now + 900),
+    ]);
+    transport.insert(
+        runtime_profile_transport_backoff_key("alpha", route),
+        now + 11,
+    );
+    transport.insert(
+        runtime_profile_transport_backoff_key("alpha", RuntimeRouteKind::Websocket),
+        now + 14,
+    );
+    assert_eq!(
+        runtime_profile_transport_backoff_until_from_map(&transport, "alpha", route, now),
+        Some(now + 11),
+    );
+    assert_eq!(
+        runtime_profile_transport_backoff_max_until(&transport, "alpha", now),
+        Some(now + 14),
+    );
+    assert_eq!(
+        runtime_profile_transport_backoff_until_from_map(&transport, "alpha", route, now + 11),
+        None,
+    );
+    assert_eq!(
+        runtime_profile_transport_backoff_max_until(&transport, "alpha", now + 14),
+        None,
+    );
+    assert_eq!(
+        runtime_profile_transport_backoff_max_until(&transport, "missing", now),
+        None,
+    );
+
+    let retry = BTreeMap::from([("alpha".to_string(), now + 9)]);
+    let circuit = BTreeMap::from([(runtime_profile_route_circuit_key("alpha", route), now + 15)]);
+    assert!(runtime_profile_name_in_retry_or_transport_backoff(
+        "alpha", &retry, &transport, route, now,
+    ));
+    assert!(runtime_profile_name_in_selection_backoff(
+        "alpha", &retry, &transport, &circuit, route, now,
+    ));
+    assert!(!runtime_profile_name_in_selection_backoff(
+        "alpha",
+        &retry,
+        &transport,
+        &circuit,
+        route,
+        now + 15,
+    ));
+    assert!(!runtime_profile_name_in_selection_backoff(
+        "missing", &retry, &transport, &circuit, route, now,
+    ));
+}
+
+#[test]
 fn startup_softening_clamps_future_backoffs() {
     let now = 100;
     let mut backoffs = RuntimeProfileBackoffs::default();
