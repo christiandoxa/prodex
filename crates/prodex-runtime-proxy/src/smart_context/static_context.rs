@@ -238,19 +238,10 @@ fn smart_context_bounded_static_context_id(id: &str) -> String {
 }
 
 fn smart_context_bounded_static_context_text(text: &str) -> String {
-    if text.len() <= SMART_CONTEXT_STATIC_CONTEXT_FINGERPRINT_MAX_ITEM_BYTES {
-        return smart_context_stabilize_static_context_text(text);
-    }
-    let mut end = SMART_CONTEXT_STATIC_CONTEXT_FINGERPRINT_MAX_ITEM_BYTES;
-    while !text.is_char_boundary(end) {
-        end -= 1;
-    }
-    let prefix = smart_context_stabilize_static_context_text(&text[..end]);
-    format!(
-        "{prefix}\npsc static fingerprint item truncated bytes={} hash={}",
-        text.len(),
+    prodex_mojo_core::rich::smart_context_static_bounded_text(text, || {
         smart_context_hash_text(text)
-    )
+    })
+    .expect("compiled Mojo bounded static text returned invalid output")
 }
 
 fn smart_context_hex_digest(digest: [u8; 32]) -> String {
@@ -335,6 +326,24 @@ fn smart_context_fingerprint_delta_mojo(
 #[cfg(test)]
 mod bounded_static_id_tests {
     use super::*;
+
+    #[test]
+    fn long_static_text_is_canonicalized_by_mojo_and_hashes_original_input() {
+        let source = format!("{}🧭tail", "X".repeat(256 * 1024));
+        let expected = format!(
+            "{}\npsc static fingerprint item truncated bytes={} hash={}",
+            "X".repeat(256 * 1024),
+            source.len(),
+            smart_context_hash_text(&source),
+        );
+        assert_eq!(smart_context_bounded_static_context_text(&source), expected);
+        assert_eq!(
+            smart_context_bounded_static_context_text(
+                "Generated at: 2026-10-15\nRule: Keep affinity"
+            ),
+            "Rule: Keep affinity",
+        );
+    }
 
     #[test]
     fn static_id_uses_compiled_mojo_and_hashes_original_long_id() {

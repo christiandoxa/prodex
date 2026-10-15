@@ -947,38 +947,14 @@ def prodex_mojo_smart_context_normalization_v1(
 
 # The complete static-context pipeline is a single compiled Mojo owner.
 # Reuses the same volatile-value kernel as standalone normalization.
-@export("prodex_mojo_smart_context_static_canonicalize_v1")
-def prodex_mojo_smart_context_static_canonicalize_v1(
-    abi_version: Int64,
-    input_address: UInt,
+def smart_context_static_canonicalize_inner(
+    source_view: ProdexRichStringView,
     output_address: UInt,
+    output: Pointer[mut=True, UInt8, _],
     output_capacity: Int64,
-    written_address: UInt,
-) abi("C") -> Int64:
-    if abi_version != PRODEX_RICH_ABI_VERSION:
-        return SMART_CONTEXT_STATUS_ABI
-    if (
-        input_address == 0
-        or output_address == 0
-        or written_address == 0
-        or output_capacity < 1
-        or output_capacity > SMART_CONTEXT_NORMALIZATION_MAX_OUTPUT_BYTES
-    ):
-        return SMART_CONTEXT_STATUS_INVALID
-    var source_view = Pointer[mut=False, ProdexRichStringView, ImmUntrackedOrigin](
-        unsafe_from_address=Int(input_address)
-    )[].copy()
-    if source_view.len > UInt(SMART_CONTEXT_NORMALIZATION_MAX_BYTES):
-        return SMART_CONTEXT_STATUS_INVALID
-    if not rich_view_valid(source_view, SMART_CONTEXT_NORMALIZATION_MAX_BYTES):
-        return SMART_CONTEXT_STATUS_UTF8
+    written: Pointer[mut=True, Int64, _],
+) -> Int64:
     var source = rich_view_ptr(source_view)
-    var output = Pointer[mut=True, UInt8, MutUntrackedOrigin](
-        unsafe_from_address=Int(output_address)
-    )
-    var written = Pointer[mut=True, Int64, MutUntrackedOrigin](
-        unsafe_from_address=Int(written_address)
-    )
     written[] = 0
     var length = Int64(source_view.len)
     var cursor: Int64 = 0
@@ -1049,6 +1025,41 @@ def prodex_mojo_smart_context_static_canonicalize_v1(
     written[] = last_nonblank
     return SMART_CONTEXT_STATUS_OK
 
+
+@export("prodex_mojo_smart_context_static_canonicalize_v1")
+def prodex_mojo_smart_context_static_canonicalize_v1(
+    abi_version: Int64,
+    input_address: UInt,
+    output_address: UInt,
+    output_capacity: Int64,
+    written_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != PRODEX_RICH_ABI_VERSION:
+        return SMART_CONTEXT_STATUS_ABI
+    if (
+        input_address == 0
+        or output_address == 0
+        or written_address == 0
+        or output_capacity < 1
+        or output_capacity > SMART_CONTEXT_NORMALIZATION_MAX_OUTPUT_BYTES
+    ):
+        return SMART_CONTEXT_STATUS_INVALID
+    var source_view = Pointer[mut=False, ProdexRichStringView, ImmUntrackedOrigin](
+        unsafe_from_address=Int(input_address)
+    )[].copy()
+    if source_view.len > UInt(SMART_CONTEXT_NORMALIZATION_MAX_BYTES):
+        return SMART_CONTEXT_STATUS_INVALID
+    if not rich_view_valid(source_view, SMART_CONTEXT_NORMALIZATION_MAX_BYTES):
+        return SMART_CONTEXT_STATUS_UTF8
+    var output = Pointer[mut=True, UInt8, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    var written = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(written_address)
+    )
+    return smart_context_static_canonicalize_inner(
+        source_view, output_address, output, output_capacity, written
+    )
 
 
 def smart_context_static_payload_put_u64(
@@ -1314,4 +1325,83 @@ def prodex_mojo_smart_context_static_bounded_id_v1(
             )
         ):
             return SMART_CONTEXT_STATUS_CAPACITY
+    return SMART_CONTEXT_STATUS_OK
+
+
+# The 256 KiB truncation boundary, Unicode-safe prefix, canonicalization,
+# and diagnostic suffix are an indivisible Mojo semantic operation. Return
+# status 5 only when the host must supply the original-text SHA-256.
+@export("prodex_mojo_smart_context_static_bounded_text_v1")
+def prodex_mojo_smart_context_static_bounded_text_v1(
+    abi_version: Int64,
+    input_view_address: UInt,
+    hash_view_address: UInt,
+    output_address: UInt,
+    output_capacity: Int64,
+    written_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != PRODEX_RICH_ABI_VERSION:
+        return SMART_CONTEXT_STATUS_ABI
+    if (
+        input_view_address == 0
+        or output_address == 0
+        or output_capacity <= 0
+        or written_address == 0
+    ):
+        return SMART_CONTEXT_STATUS_INVALID
+    var input = Pointer[mut=False, ProdexRichStringView, ImmUntrackedOrigin](
+        unsafe_from_address=Int(input_view_address)
+    )[].copy()
+    if input.len > UInt(9_223_372_036_854_775_807):
+        return SMART_CONTEXT_STATUS_INVALID
+    var truncated = input.len > UInt(256 * 1024)
+    var prefix_length = Int64(input.len)
+    var source = rich_view_ptr(input)
+    if truncated:
+        prefix_length = 256 * 1024
+        while prefix_length > 0 and rich_utf8_continuation(
+            source[unsafe_offset=prefix_length]
+        ):
+            prefix_length -= 1
+        if hash_view_address == 0:
+            return 5
+    var prefix = ProdexRichStringView(input.ptr, UInt(prefix_length))
+    if not rich_view_valid(prefix, SMART_CONTEXT_NORMALIZATION_MAX_BYTES):
+        return SMART_CONTEXT_STATUS_UTF8
+    var digest = ProdexRichStringView(0, 0)
+    if truncated:
+        digest = Pointer[
+            mut=False, ProdexRichStringView, ImmUntrackedOrigin
+        ](unsafe_from_address=Int(hash_view_address))[].copy()
+        if not rich_view_valid(digest, 256):
+            return SMART_CONTEXT_STATUS_UTF8
+    var written = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(written_address)
+    )
+    var output = Pointer[mut=True, UInt8, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    var status = smart_context_static_canonicalize_inner(
+        prefix, output_address, output, output_capacity, written
+    )
+    if status != SMART_CONTEXT_STATUS_OK:
+        return status
+    if not truncated:
+        return SMART_CONTEXT_STATUS_OK
+    if (
+        not smart_context_emit_literal["\npsc static fingerprint item truncated bytes="](
+            output, output_capacity, written
+        )
+        or not smart_context_static_payload_put_u64(
+            UInt64(input.len), output, output_capacity, written
+        )
+        or not smart_context_emit_literal[" hash="](
+            output, output_capacity, written
+        )
+        or not smart_context_emit_range(
+            rich_view_ptr(digest), 0, Int64(digest.len),
+            output, output_capacity, written
+        )
+    ):
+        return SMART_CONTEXT_STATUS_CAPACITY
     return SMART_CONTEXT_STATUS_OK
