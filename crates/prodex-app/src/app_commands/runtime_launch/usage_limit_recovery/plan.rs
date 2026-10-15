@@ -2,6 +2,9 @@ use super::{GoalUsageLimitMonitor, RuntimeWorkflowEvidence};
 use crate::AppState;
 use crate::app_state::{AppStateIoExt, ProfileProviderExt};
 use anyhow::Result;
+use prodex_mojo_core::launch::{
+    UsageLimitRecoveryCandidateInput, UsageLimitRecoverySelection, usage_limit_recovery_candidate,
+};
 use std::collections::BTreeSet;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -62,32 +65,43 @@ pub(crate) fn next_runtime_usage_limit_plan(
                     .quota_compatible
         })
     };
-    let profile_name = candidates
-        .into_iter()
-        .filter(|candidate| !options.attempted_profiles.contains(candidate))
-        .find(|candidate| eligible(candidate))
-        .or_else(|| {
-            if !options.allow_failed_profile
-                || options.attempted_profiles.contains(&failed_profile)
-                || !eligible(&failed_profile)
-            {
-                return None;
-            }
-            if !options.skip_quota_check
-                && super::super::find_ready_current_profile_for_model(
-                    state,
-                    &failed_profile,
-                    options.base_url,
-                    options.include_code_review,
-                    options.no_proxy,
-                    options.requested_model,
-                )
-                .is_empty()
-            {
-                return None;
-            }
-            Some(failed_profile.clone())
-        })?;
+    let candidate_eligible = candidates
+        .iter()
+        .map(|candidate| eligible(candidate))
+        .collect::<Vec<_>>();
+    let candidate_attempted = candidates
+        .iter()
+        .map(|candidate| options.attempted_profiles.contains(candidate))
+        .collect::<Vec<_>>();
+    let failed_profile_eligible = eligible(&failed_profile);
+    let failed_profile_attempted = options.attempted_profiles.contains(&failed_profile);
+    let failed_profile_ready = options.skip_quota_check
+        || (!failed_profile_attempted
+            && failed_profile_eligible
+            && !super::super::find_ready_current_profile_for_model(
+                state,
+                &failed_profile,
+                options.base_url,
+                options.include_code_review,
+                options.no_proxy,
+                options.requested_model,
+            )
+            .is_empty());
+    let selection = usage_limit_recovery_candidate(UsageLimitRecoveryCandidateInput {
+        allow_failed_profile: options.allow_failed_profile,
+        skip_quota_check: options.skip_quota_check,
+        failed_profile_eligible,
+        failed_profile_attempted,
+        failed_profile_ready,
+        candidate_eligible: &candidate_eligible,
+        candidate_attempted: &candidate_attempted,
+    })
+    .expect("Mojo usage-limit recovery candidate policy failed");
+    let profile_name = match selection {
+        UsageLimitRecoverySelection::None => return None,
+        UsageLimitRecoverySelection::Candidate(index) => candidates.get(index)?.clone(),
+        UsageLimitRecoverySelection::FailedProfile => failed_profile.clone(),
+    };
     Some(GoalResumeRelaunchPlan {
         session_id: session_id.to_string(),
         failed_profile_name: failed_profile,

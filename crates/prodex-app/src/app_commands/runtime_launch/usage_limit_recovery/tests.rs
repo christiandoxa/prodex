@@ -572,6 +572,24 @@ fn sequential_usage_limit_recovery_moves_from_b_to_c() {
 }
 
 #[test]
+fn usage_limit_recovery_reuses_failed_profile_after_candidates_are_attempted() {
+    let root = fixture_root("failed-fallback");
+    let (_home, _shared) = configured_env(&root);
+    let paths = AppPaths::discover().unwrap();
+    let _session_path = populate_fixture(&root, &paths, &["a", "b", "c"]);
+    let state = AppState::load_and_repair(&paths).unwrap();
+    let attempted = BTreeSet::from(["b".to_string(), "c".to_string()]);
+    let mut options = resume_options(&attempted, false, Some("a"));
+    options.allow_failed_profile = true;
+
+    let plan = next_runtime_usage_limit_plan(&state, SESSION_ID, &options).unwrap();
+
+    assert_eq!(plan.failed_profile_name, "a");
+    assert_eq!(plan.profile_name, "a");
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
 fn no_auto_rotate_keeps_usage_limit_terminal() {
     let root = fixture_root("disabled");
     let (_home, _shared) = configured_env(&root);
