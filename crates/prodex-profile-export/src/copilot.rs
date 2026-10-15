@@ -188,11 +188,51 @@ pub fn parse_copilot_config_file(raw: &str) -> Result<CopilotConfigFile> {
     }
 }
 
-pub fn select_copilot_logged_in_user(config: &CopilotConfigFile) -> Option<CopilotConfigUser> {
-    config
-        .last_logged_in_user
-        .clone()
-        .or_else(|| config.logged_in_users.first().cloned())
+pub fn resolve_copilot_import_candidates(
+    config: &CopilotConfigFile,
+) -> Result<Vec<CopilotConfigUser>> {
+    let last = config.last_logged_in_user.as_ref().map(|user| {
+        prodex_mojo_core::profile_export::CopilotCandidate {
+            host: &user.host,
+            login: &user.login,
+        }
+    });
+    let logged = config
+        .logged_in_users
+        .iter()
+        .map(|user| prodex_mojo_core::profile_export::CopilotCandidate {
+            host: &user.host,
+            login: &user.login,
+        })
+        .collect::<Vec<_>>();
+    let indices = prodex_mojo_core::profile_export::copilot_import_candidate_indices(last, &logged)
+        .map_err(|error| anyhow::anyhow!("Mojo Copilot candidate resolution failed: {error:?}"))?;
+    indices
+        .into_iter()
+        .map(|index| {
+            if index == -1 {
+                return config
+                    .last_logged_in_user
+                    .clone()
+                    .context("Mojo Copilot candidate output lost the last logged-in user");
+            }
+            let index = usize::try_from(index)
+                .map_err(|_| anyhow::anyhow!("invalid Mojo Copilot candidate index {index}"))?;
+            config
+                .logged_in_users
+                .get(index)
+                .cloned()
+                .with_context(|| format!("invalid Mojo Copilot candidate index {index}"))
+        })
+        .collect()
+}
+
+pub fn select_copilot_logged_in_user(
+    config: &CopilotConfigFile,
+) -> Result<Option<CopilotConfigUser>> {
+    Ok(resolve_copilot_import_candidates(config)?
+        .into_iter()
+        .next())
 }
 
 pub fn copilot_account_key(host: &str, login: &str) -> String {

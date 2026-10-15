@@ -138,7 +138,7 @@ fn copilot_import_candidates_try_last_user_then_other_logged_in_users() {
         copilot_tokens: Default::default(),
     };
 
-    let users = copilot_import_candidate_users(&config);
+    let users = resolve_copilot_import_candidates(&config).expect("candidate resolution");
 
     assert_eq!(users.len(), 2);
     assert_eq!(users[0].login, "missing-token");

@@ -537,7 +537,11 @@ fn copilot_config_parser_treats_empty_file_as_logged_out() {
     let config = parse_copilot_config_file(" \n\t")
         .expect("blank config should parse as empty Copilot state");
 
-    assert!(select_copilot_logged_in_user(&config).is_none());
+    assert!(
+        select_copilot_logged_in_user(&config)
+            .expect("empty Copilot state should resolve")
+            .is_none()
+    );
     assert!(config.logged_in_users.is_empty());
     assert!(config.copilot_tokens.is_empty());
 }
@@ -575,7 +579,9 @@ fn copilot_config_parser_accepts_copilot_jsonc_comments() {
     )
     .expect("Copilot JSONC config should parse");
 
-    let user = select_copilot_logged_in_user(&config).expect("user should resolve");
+    let user = select_copilot_logged_in_user(&config)
+        .expect("Copilot JSONC candidate resolution")
+        .expect("user should resolve");
     assert_eq!(user.login, "main");
 }
 
@@ -603,7 +609,9 @@ fn copilot_config_helpers_select_user_and_token() {
     )
     .expect("config should parse");
 
-    let user = select_copilot_logged_in_user(&config).expect("user should resolve");
+    let user = select_copilot_logged_in_user(&config)
+        .expect("Copilot candidate resolution")
+        .expect("user should resolve");
 
     assert_eq!(user.host, "https://ghe.example");
     assert_eq!(user.login, "main");
@@ -614,6 +622,45 @@ fn copilot_config_helpers_select_user_and_token() {
     assert_eq!(
         copilot_account_key(" https://ghe.example ", " main "),
         "https://ghe.example:main"
+    );
+}
+
+#[test]
+fn copilot_import_candidates_are_mojo_deduplicated_in_preferred_order() {
+    let config = CopilotConfigFile {
+        last_logged_in_user: Some(CopilotConfigUser {
+            host: "https://ghe.example".to_string(),
+            login: "main".to_string(),
+        }),
+        logged_in_users: vec![
+            CopilotConfigUser {
+                host: "https://ghe.example".to_string(),
+                login: "main".to_string(),
+            },
+            CopilotConfigUser {
+                host: "https://github.com".to_string(),
+                login: "fallback".to_string(),
+            },
+            CopilotConfigUser {
+                host: "https://github.com".to_string(),
+                login: "fallback".to_string(),
+            },
+        ],
+        copilot_tokens: BTreeMap::new(),
+    };
+
+    assert_eq!(
+        resolve_copilot_import_candidates(&config).expect("candidate resolution"),
+        vec![
+            CopilotConfigUser {
+                host: "https://ghe.example".to_string(),
+                login: "main".to_string(),
+            },
+            CopilotConfigUser {
+                host: "https://github.com".to_string(),
+                login: "fallback".to_string(),
+            },
+        ]
     );
 }
 

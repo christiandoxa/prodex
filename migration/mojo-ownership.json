@@ -1197,6 +1197,7 @@
           "profile_export_copilot_user_api_origin",
           "profile_export_copilot_models_api_url",
           "profile_export_copilot_import_state_planning",
+          "profile_export_copilot_candidate_resolution",
           "profile_import_lifecycle_ordering",
           "profile_import_secret_path_safety",
           "profile_import_secret_file_schema_policy",
@@ -5169,6 +5170,30 @@
       "duplicate_production_owner": false,
       "platform_fallback": false,
       "rust_adapter_scope": "profile-name existence callback execution, lazy default-name generation, String/error materialization, and application of validated Mojo action tags"
+    },
+    {
+      "name": "profile_export_copilot_candidate_resolution",
+      "domain": "profile/export-policy",
+      "introduced_in": "0.420.0",
+      "baseline_state": "Rust placed the last logged-in Copilot user first, appended configured users, and removed exact host/login duplicates while preserving first occurrence",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_profile_export_copilot_candidate_users_v1",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/profile_export_policy.mojo",
+      "consumer": "crates/prodex-profile-export/src/copilot.rs",
+      "consumer_marker": "prodex_mojo_core::profile_export::copilot_import_candidate_indices",
+      "production_consumers": [
+        "crates/prodex-profile-export/src/copilot.rs",
+        "crates/prodex-app/src/profile_commands/copilot.rs"
+      ],
+      "production_reachability_test": "crates/prodex-mojo-core/tests/profile_export_candidates.rs",
+      "rust_owner_before": "Copilot import candidate preference and exact host/login duplicate removal",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "deleted; required-Mojo ABI, adapter, and profile-export caller regressions cover preferred ordering, exact duplicate removal, empty state, invalid ABI, and capacity",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "Config parsing, caller-owned identity reconstruction, bounded index validation, and credential lookup remain Rust"
     },
     {
       "name": "profile_export_copilot_jsonc_normalization",
@@ -12844,6 +12869,29 @@
       "production_consumer": "crates/prodex-terminal-ui/src/panel.rs",
       "parity_test": "crates/prodex-terminal-ui/tests/src/lib.rs::mojo_field_layout_preserves_unicode_label_padding_and_tiny_widths",
       "cleanup_evidence": "The former Rust value-width and label-padding arithmetic is replaced by the mandatory Mojo field-row plan; terminal-ui, quota and info panel callers keep host Unicode measurement and output construction."
+    },
+    {
+      "file": "crates/prodex-app/src/profile_commands/copilot.rs",
+      "symbol": "copilot_import_candidate_users",
+      "operation": "profile_export_copilot_candidate_resolution",
+      "previous_responsibility": "Rust placed the last logged-in Copilot user first and removed exact host/login duplicates from the configured user list",
+      "final_state": "deleted",
+      "cleanup_loc": 17,
+      "cleanup_source": {
+        "kind": "deleted",
+        "baseline_range": {
+          "start": 287,
+          "end": 303
+        }
+      },
+      "rust_before": "crates/prodex-app/src/profile_commands/copilot.rs::copilot_import_candidate_users",
+      "rust_after": "The app keeps config and credential effects in Rust while profile-export delegates candidate ordering and deduplication to Mojo",
+      "mojo_owner": "mojo/prodex_core/profile_export_policy.mojo::prodex_profile_export_copilot_candidate_users_v1",
+      "mojo_source": "mojo/prodex_core/profile_export_policy.mojo",
+      "mojo_entry": "prodex_profile_export_copilot_candidate_users_v1",
+      "production_consumer": "crates/prodex-profile-export/src/copilot.rs",
+      "parity_test": "crates/prodex-mojo-core/tests/profile_export_candidates.rs",
+       "cleanup_evidence": "The app-local candidate loop is deleted; the compiled ABI and profile-export caller tests preserve last-user preference, exact pair deduplication, and stable order."
     }
   ],
   "deleted_authoritative_operations": [

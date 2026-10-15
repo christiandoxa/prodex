@@ -1,5 +1,6 @@
 use super::ProfileImportStringView;
 use crate::{MojoError, rich::ensure_rich_abi};
+use std::collections::BTreeSet;
 
 const ABI_VERSION: i64 = 1;
 
@@ -35,6 +36,18 @@ unsafe extern "C" {
         activate_requested: i64,
         requested_name_exists: i64,
         output_address: u64,
+    ) -> i64;
+    fn prodex_profile_export_copilot_candidate_users_v1(
+        abi_version: i64,
+        last_present: i64,
+        last_host_address: u64,
+        last_login_address: u64,
+        logged_hosts_address: u64,
+        logged_logins_address: u64,
+        logged_count: i64,
+        output_address: u64,
+        output_capacity: i64,
+        written_address: u64,
     ) -> i64;
 }
 
@@ -213,6 +226,91 @@ pub fn copilot_import_state_plan(
     Ok(CopilotImportStatePlan { action, activate })
 }
 
+/// Borrowed Copilot identity pair supplied to the candidate resolver.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CopilotCandidate<'a> {
+    pub host: &'a str,
+    pub login: &'a str,
+}
+
+/// Return the Mojo-selected candidate indices, using `-1` for the last user.
+pub fn copilot_import_candidate_indices(
+    last_logged_in_user: Option<CopilotCandidate<'_>>,
+    logged_in_users: &[CopilotCandidate<'_>],
+) -> Result<Vec<i64>, MojoError> {
+    const MAX_CANDIDATES: usize = 256;
+    let candidate_count = logged_in_users
+        .len()
+        .checked_add(usize::from(last_logged_in_user.is_some()))
+        .ok_or(MojoError::InvalidInput)?;
+    if candidate_count > MAX_CANDIDATES {
+        return Err(MojoError::InvalidInput);
+    }
+    ensure_rich_abi()?;
+    let view = |value: &str| ProfileImportStringView::from((!value.is_empty()).then_some(value));
+    let last_host = ProfileImportStringView::from(
+        last_logged_in_user.and_then(|user| (!user.host.is_empty()).then_some(user.host)),
+    )?;
+    let last_login = ProfileImportStringView::from(
+        last_logged_in_user.and_then(|user| (!user.login.is_empty()).then_some(user.login)),
+    )?;
+    let logged_hosts = logged_in_users
+        .iter()
+        .map(|user| view(user.host))
+        .collect::<Result<Vec<_>, _>>()?;
+    let logged_logins = logged_in_users
+        .iter()
+        .map(|user| view(user.login))
+        .collect::<Result<Vec<_>, _>>()?;
+    let mut output = vec![0_i64; candidate_count.max(1)];
+    let mut written = 0_i64;
+    let status = unsafe {
+        prodex_profile_export_copilot_candidate_users_v1(
+            ABI_VERSION,
+            i64::from(last_logged_in_user.is_some()),
+            (&last_host as *const ProfileImportStringView) as usize as u64,
+            (&last_login as *const ProfileImportStringView) as usize as u64,
+            logged_hosts.as_ptr() as usize as u64,
+            logged_logins.as_ptr() as usize as u64,
+            i64::try_from(logged_in_users.len()).map_err(|_| MojoError::InvalidInput)?,
+            output.as_mut_ptr() as usize as u64,
+            i64::try_from(output.len()).map_err(|_| MojoError::InvalidInput)?,
+            (&mut written as *mut i64) as usize as u64,
+        )
+    };
+    match status {
+        0 => {
+            let written = usize::try_from(written).map_err(|_| MojoError::InvalidOutput)?;
+            if written > output.len() {
+                return Err(MojoError::InvalidOutput);
+            }
+            let mut seen = BTreeSet::new();
+            for &index in &output[..written] {
+                match index {
+                    -1 if last_logged_in_user.is_some() => {}
+                    -1 => return Err(MojoError::InvalidOutput),
+                    value if value >= 0 => {
+                        if usize::try_from(value)
+                            .map_or(true, |value| value >= logged_in_users.len())
+                        {
+                            return Err(MojoError::InvalidOutput);
+                        }
+                    }
+                    _ => return Err(MojoError::InvalidOutput),
+                }
+                if !seen.insert(index) {
+                    return Err(MojoError::InvalidOutput);
+                }
+            }
+            Ok(output[..written].to_vec())
+        }
+        2 => Err(MojoError::Capacity),
+        99 => Err(MojoError::InvalidInput),
+        100 => Err(MojoError::AbiMismatch),
+        _ => Err(MojoError::InvalidOutput),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -286,5 +384,36 @@ mod tests {
         let expected =
             "\n{\"url\":\"https://example.test//inside\", \n\"value\":\"slash//inside\"}\n";
         assert_eq!(strip_copilot_json_line_comments(input).unwrap(), expected);
+    }
+
+    #[test]
+    fn copilot_candidate_indices_preserve_last_and_first_unique_users() {
+        let last = CopilotCandidate {
+            host: "https://ghe.example",
+            login: "main",
+        };
+        let logged = [
+            CopilotCandidate {
+                host: "https://ghe.example",
+                login: "main",
+            },
+            CopilotCandidate {
+                host: "https://github.com",
+                login: "fallback",
+            },
+            CopilotCandidate {
+                host: "https://github.com",
+                login: "fallback",
+            },
+        ];
+
+        assert_eq!(
+            copilot_import_candidate_indices(Some(last), &logged).unwrap(),
+            vec![-1, 1]
+        );
+        assert_eq!(
+            copilot_import_candidate_indices(None, &logged).unwrap(),
+            vec![0, 1]
+        );
     }
 }
