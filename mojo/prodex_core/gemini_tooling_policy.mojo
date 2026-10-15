@@ -7,8 +7,13 @@ from rich_text import (
     rich_trim_bounds,
     rich_view_ptr,
     rich_view_valid,
+    rich_view_matches_literal,
 )
 from rich_types import ProdexRichStringView
+from rtk_noisy import (
+    rtk_noisy_separator_length, rtk_noisy_skip_whitespace, rtk_noisy_token_end,
+    rtk_noisy_raw_env_assignment, rtk_noisy_command_kind, rtk_noisy_subcommand,
+)
 
 comptime GEMINI_TOOLING_ABI_VERSION: Int64 = 1
 comptime GEMINI_TOOLING_OK: Int64 = 0
@@ -1069,4 +1074,114 @@ def prodex_gemini_edit_patch_v1(
         output, output_capacity, written
     ):
         return GEMINI_TOOLING_CAPACITY
+    return GEMINI_TOOLING_OK
+
+
+# Gemini historically scans raw shell words; unlike the generic RTK parser
+# it does not unquote executable names, wraps only the first eligible segment,
+# excludes echo, and includes its automatic compactor helper. Preserve that
+# boundary while sharing whitespace, command catalog and subcommand policy.
+def gemini_rtk_range(view: ProdexRichStringView, start: Int64, end: Int64) -> ProdexRichStringView:
+    return ProdexRichStringView(view.ptr + UInt(start), UInt(end - start))
+
+
+def gemini_rtk_trim_punctuation(byte: UInt8) -> Bool:
+    return byte == 34 or byte == 39 or byte == 40 or byte == 41 or byte == 123 or byte == 125
+
+
+def gemini_rtk_segment_index(view: ProdexRichStringView, start: Int64, end: Int64) -> Int64:
+    var source = rich_view_ptr(view)
+    var cursor = rtk_noisy_skip_whitespace(source, start, end)
+    if cursor >= end:
+        return -1
+    var word_end = rtk_noisy_token_end(source, cursor, end)
+    if rich_view_matches_literal["rtk"](gemini_rtk_range(view, cursor, word_end), False):
+        return -1
+    while rtk_noisy_raw_env_assignment(source, cursor, word_end):
+        cursor = rtk_noisy_skip_whitespace(source, word_end, end)
+        if cursor >= end:
+            return -1
+        word_end = rtk_noisy_token_end(source, cursor, end)
+    var component = cursor
+    for offset in range(cursor, word_end):
+        if source[unsafe_offset=offset] == 47:
+            component = offset + 1
+    var name = gemini_rtk_range(view, component, word_end)
+    if rich_view_matches_literal["prodex-claw-compactor-auto"](name, False):
+        return cursor
+    var kind = rtk_noisy_command_kind(rich_view_ptr(name), Int64(name.len))
+    if kind < 0 or kind == 14:
+        return -1
+    if kind == 6 or kind == 10 or kind == 11 or kind == 12 or kind == 13:
+        return cursor
+    var command_start = cursor
+    cursor = rtk_noisy_skip_whitespace(source, word_end, end)
+    while cursor < end:
+        word_end = rtk_noisy_token_end(source, cursor, end)
+        var begin = cursor
+        var finish = word_end
+        while begin < finish and gemini_rtk_trim_punctuation(source[unsafe_offset=begin]):
+            begin += 1
+        while finish > begin and gemini_rtk_trim_punctuation(source[unsafe_offset=finish - 1]):
+            finish -= 1
+        var candidate = gemini_rtk_range(view, begin, finish)
+        if rtk_noisy_subcommand(kind, rich_view_ptr(candidate), Int64(candidate.len)):
+            return command_start
+        if kind == 15 and (
+            rich_view_matches_literal["compact"](candidate, False)
+            or rich_view_matches_literal["summarize"](candidate, False)
+        ):
+            return command_start
+        cursor = rtk_noisy_skip_whitespace(source, word_end, end)
+    return -1
+
+
+def gemini_rtk_command_index(view: ProdexRichStringView) -> Int64:
+    var source = rich_view_ptr(view)
+    var end = Int64(view.len)
+    var start: Int64 = 0
+    var cursor: Int64 = 0
+    while cursor < end:
+        var separator = rtk_noisy_separator_length(source, cursor, end)
+        if separator > 0:
+            var found = gemini_rtk_segment_index(view, start, cursor)
+            if found >= 0:
+                return found
+            cursor += separator
+            start = cursor
+        else:
+            cursor += rich_codepoint_width(source[unsafe_offset=cursor])
+    return gemini_rtk_segment_index(view, start, end)
+
+
+@export("prodex_gemini_rtk_shell_command_v1")
+def prodex_gemini_rtk_shell_command_v1(
+    abi_version: Int64, input_address: UInt64, input_length: Int64,
+    output_address: UInt64, output_capacity: Int64, written_address: UInt64,
+) abi("C") -> Int64:
+    if abi_version != GEMINI_TOOLING_ABI_VERSION:
+        return GEMINI_TOOLING_ABI
+    if input_length < 0 or input_length > 0x7FFFFFFFFFFFFFFF - 4 or output_address == 0 or written_address == 0 or output_capacity < 0:
+        return GEMINI_TOOLING_INVALID
+    var view = ProdexRichStringView(UInt(input_address), UInt(input_length))
+    if not rich_view_valid(view, 0x7FFFFFFFFFFFFFFF):
+        return GEMINI_TOOLING_INVALID
+    var at = gemini_rtk_command_index(view)
+    var written = Pointer[mut=True, Int64, MutUntrackedOrigin](unsafe_from_address=Int(written_address))
+    if at < 0:
+        written[] = 0
+        return GEMINI_TOOLING_OK
+    if output_capacity < input_length + 4:
+        return GEMINI_TOOLING_CAPACITY
+    var source = rich_view_ptr(view)
+    var output = Pointer[mut=True, UInt8, MutUntrackedOrigin](unsafe_from_address=Int(output_address))
+    for index in range(at):
+        output[unsafe_offset=index] = source[unsafe_offset=index]
+    output[unsafe_offset=at] = 114
+    output[unsafe_offset=at + 1] = 116
+    output[unsafe_offset=at + 2] = 107
+    output[unsafe_offset=at + 3] = 32
+    for index in range(at, input_length):
+        output[unsafe_offset=index + 4] = source[unsafe_offset=index]
+    written[] = input_length + 4
     return GEMINI_TOOLING_OK
