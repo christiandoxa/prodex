@@ -708,7 +708,8 @@
           "smart_context_static_bounded_text",
           "smart_context_legacy_fnv_fingerprint",
           "smart_context_scope_preimage_framing",
-          "smart_context_scope_digest_rendering"
+          "smart_context_scope_digest_rendering",
+          "smart_context_scope_identifier_parse"
         ]
       },
       {
@@ -2778,6 +2779,29 @@
       "duplicate_production_owner": false,
       "platform_fallback": false,
       "rust_adapter_scope": "SHA-256 cryptographic implementation and checked Mojo UTF-8 return DTO"
+    },
+    {
+      "name": "smart_context_scope_identifier_parse",
+      "domain": "smart-context/scope",
+      "introduced_in": "0.438.0",
+      "baseline_state": "Rust validated strict scscope1: prefix and exactly 64 ASCII hexadecimal digest characters then normalized the digest to lowercase",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_mojo_smart_context_scope_parse_v1",
+      "mojo_abi_version": 6,
+      "mojo_source": "mojo/prodex_core/smart_context_normalization.mojo",
+      "consumer": "crates/prodex-runtime-proxy/src/smart_context/scope.rs",
+      "consumer_marker": "prodex_mojo_core::rich::smart_context_scope_parse(",
+      "production_consumers": [
+        "crates/prodex-runtime-proxy/src/smart_context/scope.rs"
+      ],
+      "production_reachability_test": "crates/prodex-runtime-proxy/src/smart_context/scope.rs",
+      "rust_owner_before": "Rust strip_prefix, ASCII digit validation, digest-length policy and to_ascii_lowercase for scope IDs",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "Rust scope parser removed; Mojo direct tests assert strict prefix and digest syntax, uppercase lowering, and invalid ABI; caller tests preserve historical digest and isolation",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "Validated UTF-8 materialization into ContextScopeId; unrelated path_component accessor stays host-side"
     },
     {
       "name": "smart_context_capsule_order",

@@ -35,6 +35,14 @@ const SMART_CONTEXT_NORMALIZATION_CAPACITY_STATUS: i64 = 3;
 const SMART_CONTEXT_CAPSULE_MAX_COUNT: usize = 65_536;
 
 unsafe extern "C" {
+    fn prodex_mojo_smart_context_scope_parse_v1(
+        abi_version: i64,
+        input: u64,
+        output: u64,
+        capacity: i64,
+        written: u64,
+        valid: u64,
+    ) -> i64;
     fn prodex_mojo_smart_context_scope_preimage_v1(
         abi_version: i64,
         fields: u64,
@@ -466,6 +474,35 @@ pub fn smart_context_scope_digest_text(digest: &[u8; 32]) -> Result<String, Mojo
     String::from_utf8(output.to_vec()).map_err(|_| MojoError::InvalidOutput)
 }
 
+/// Parse the historical scscope1: identifier strictly through compiled Mojo.
+pub fn smart_context_scope_parse(value: &str) -> Result<Option<String>, MojoError> {
+    ensure_rich_abi()?;
+    let input = view(value);
+    let mut output = [0u8; 73];
+    let mut written = -1i64;
+    let mut valid = -1i64;
+    let status = unsafe {
+        prodex_mojo_smart_context_scope_parse_v1(
+            RICH_ABI_VERSION,
+            mojo_pointer_address(&input),
+            mojo_mut_pointer_address(output.as_mut_ptr()),
+            output.len() as i64,
+            mojo_mut_pointer_address(&mut written),
+            mojo_mut_pointer_address(&mut valid),
+        )
+    };
+    if status != 0 {
+        return Err(normalization_status_error(status));
+    }
+    match (valid, written) {
+        (0, 0) => Ok(None),
+        (1, 73) => String::from_utf8(output.to_vec())
+            .map(Some)
+            .map_err(|_| MojoError::InvalidOutput),
+        _ => Err(MojoError::InvalidOutput),
+    }
+}
+
 /// Classify one static-context line as volatile metadata.
 pub fn smart_context_static_context_noise_line(line: &str) -> Result<bool, MojoError> {
     ensure_rich_abi()?;
@@ -598,6 +635,59 @@ pub fn plan_smart_context_capsules(
 #[cfg(test)]
 mod static_canonicalization_tests {
     use super::*;
+
+    #[test]
+    fn mojo_scope_parse_preserves_strict_lowercase_normalization_policy() {
+        let valid = format!("scscope1:{}", "abcdef0123456789".repeat(4));
+        let uppercase = format!("scscope1:{}", "ABCDEF0123456789".repeat(4));
+        assert_eq!(
+            smart_context_scope_parse(&valid).unwrap().as_deref(),
+            Some(valid.as_str())
+        );
+        assert_eq!(
+            smart_context_scope_parse(&uppercase).unwrap().as_deref(),
+            Some(valid.as_str())
+        );
+        for invalid in ["", "scscope1:", "SCSCOPE1:", "scscope1:123", "scscope1:🧭"] {
+            assert_eq!(
+                smart_context_scope_parse(invalid).unwrap(),
+                None,
+                "{invalid:?}"
+            );
+        }
+        assert_eq!(
+            smart_context_scope_parse(&format!("scscope1:{}g", "0".repeat(63))).unwrap(),
+            None
+        );
+        assert_eq!(
+            smart_context_scope_parse(&format!("SCSCOPE1:{}", "A".repeat(64))).unwrap(),
+            None
+        );
+    }
+
+    #[test]
+    fn mojo_scope_parse_validated_output_and_invalid_abi() {
+        let input = view("scscope1:abc");
+        let mut output = [39u8; 73];
+        let mut written = 88i64;
+        let mut valid = 99i64;
+        unsafe {
+            assert_eq!(
+                prodex_mojo_smart_context_scope_parse_v1(
+                    RICH_ABI_VERSION + 1,
+                    mojo_pointer_address(&input),
+                    mojo_mut_pointer_address(output.as_mut_ptr()),
+                    output.len() as i64,
+                    mojo_mut_pointer_address(&mut written),
+                    mojo_mut_pointer_address(&mut valid),
+                ),
+                4
+            );
+        }
+        assert_eq!(output, [39; 73]);
+        assert_eq!(written, 88);
+        assert_eq!(valid, 99);
+    }
 
     #[test]
     fn mojo_scope_preimage_preserves_each_field_boundary_and_utf8_bytes() {

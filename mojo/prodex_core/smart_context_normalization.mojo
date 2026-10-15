@@ -1586,3 +1586,66 @@ def prodex_mojo_smart_context_scope_digest_text_v1(
             output[unsafe_offset=written[]] = UInt8(87) + low
         written[] += 1
     return SMART_CONTEXT_STATUS_OK
+
+
+# Parse persisted scscope1: identifiers with the exact legacy security
+# contract: case-sensitive prefix, 64 ASCII hex digits, normalized lowercase.
+@export("prodex_mojo_smart_context_scope_parse_v1")
+def prodex_mojo_smart_context_scope_parse_v1(
+    abi_version: Int64,
+    input_view_address: UInt,
+    output_address: UInt,
+    output_capacity: Int64,
+    written_address: UInt,
+    valid_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != PRODEX_RICH_ABI_VERSION:
+        return SMART_CONTEXT_STATUS_ABI
+    if (
+        input_view_address == 0
+        or output_address == 0
+        or written_address == 0
+        or valid_address == 0
+    ):
+        return SMART_CONTEXT_STATUS_INVALID
+    var input = Pointer[mut=False, ProdexRichStringView, ImmUntrackedOrigin](
+        unsafe_from_address=Int(input_view_address)
+    )[].copy()
+    var written = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(written_address)
+    )
+    var valid = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(valid_address)
+    )
+    valid[] = 0
+    written[] = 0
+    if input.len != 73:
+        return SMART_CONTEXT_STATUS_OK
+    if not rich_view_valid(input, 73):
+        return SMART_CONTEXT_STATUS_UTF8
+    var source = rich_view_ptr(input)
+    var expected = StringSlice("scscope1:").unsafe_ptr()
+    for index in range(9):
+        if source[unsafe_offset=index] != expected[unsafe_offset=index]:
+            return SMART_CONTEXT_STATUS_OK
+    for index in range(9, 73):
+        var byte = source[unsafe_offset=index]
+        if not (
+            byte >= 48 and byte <= 57
+            or byte >= 65 and byte <= 70
+            or byte >= 97 and byte <= 102
+        ):
+            return SMART_CONTEXT_STATUS_OK
+    if output_capacity < 73:
+        return SMART_CONTEXT_STATUS_CAPACITY
+    var output = Pointer[mut=True, UInt8, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    for index in range(73):
+        var byte = source[unsafe_offset=index]
+        if byte >= 65 and byte <= 70:
+            byte += 32
+        output[unsafe_offset=index] = byte
+    written[] = 73
+    valid[] = 1
+    return SMART_CONTEXT_STATUS_OK
