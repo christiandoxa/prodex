@@ -2,56 +2,13 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
-## 0.437.14 - 2026-10-15
+## 0.437.14 - Unreleased
+
+Changes after `0.437.13`.
 
 ### Runtime
 
 - Recover authenticated profiles across quota transitions (`c49981d`)
-# Prodex 0.437.14
-
-## New Features
-
-No new flags or account configuration are required.
-
-## Bug Fixes
-
-### Authenticated recovery across quota transitions
-
-Fix a reproducible local empty-pool loop where quota selection reported a ready
-profile but a persisted authentication penalty continued to exclude it after
-successful quota probes. The quota HTTP adapter now retains the exact identity
-accepted by the successful request. A versioned Mojo policy retires only older
-local authentication failures proven stale by that same identity, and clears
-matching quota quarantines when an authenticated observation confirms usable
-capacity. Newer failures, changed credentials, unknown payloads, unrelated
-rate-limit or transport backoffs, and opaque continuation ownership remain
-protected. State changes use the existing tombstone, notification and persistence
-paths; no Rust semantic fallback or new hot-path network probe was added.
-
-Startup warm-up revalidates inherited authentication failures even when a quota
-snapshot is fresh. New authentication failures invalidate pre-failure probe
-cache entries so selection can await its bounded background refresh. Delayed
-successful probes cannot overwrite a newer quota observation, and workers
-notify waiters after releasing their queue reservation.
-
-Regression coverage reproduces both original failures before the fix and checks
-Responses and compaction after recovery. A three-profile scenario covers all
-profiles ready, weekly and five-hour exhaustion, a surviving Pro Lite weekly-only
-profile, both reset/recovery transitions, and exactly-once upstream dispatch.
-Authentication failure recency, credential identity and quarantine decisions are
-owned by compiled Mojo and tested at its ABI boundary.
-
-## Changelog
-
-Eight new application regressions, 46 existing affinity/compaction/recovery
-checks, and 409 Mojo-core tests passed locally with compiled Mojo required.
-The runtime-proxy library passed 430 tests; Node checks passed 278 with one
-existing skip. App Clippy passed with all targets and warnings denied.
-
-The interrupted Retry-After migration checkpoint is also included: compiled Mojo
-owns header trimming and free-text retry duration parsing with the existing cap.
-
-Full Changelog: [0.437.13...0.437.14](https://github.com/christiandoxa/prodex/compare/0.437.13...0.437.14)
 
 ## 0.437.13 - 2026-10-15
 
@@ -190,3 +147,28 @@ Full Changelog: [0.437.13...0.437.14](https://github.com/christiandoxa/prodex/co
 
 - Reap the session-owned native app-server process tree (`2efed0b`)
 - Prevent admission and quota-state notification deadlock (`370ee38`)
+
+## 0.437.2 - 2026-10-10
+
+### Runtime
+
+- Preserve portable affinity recovery and release validation (`a5b927b`)
+- Keep quota recovery reachable across busy accounts (`57a1ee2`)
+- Move compact continuation policy to Mojo (`5f91526`)
+- Exhaust websocket attempts correctly across recovery sweeps (`d191200`)
+- Map Mojo affinity policy errors at app boundary (`d7cc909`)
+- Migrate runtime proxy body limit policy (`5357e12`)
+
+### CLI
+
+- Preserve turn-state owner facts in quota replay eligibility (`77ffdf0`)
+
+### Docs
+
+- Qualify Codex rust-v0.162.1 (`d59ab48`)
+
+### Misc
+
+- Preserve DeepSeek usage output and metadata edge cases (`f71e135`)
+- Preserve Gemini data URL and media text contracts (`0b84d7a`)
+- Select oldest cookie across bounded ABI chunks without Rust fallback (`fff216f`)
