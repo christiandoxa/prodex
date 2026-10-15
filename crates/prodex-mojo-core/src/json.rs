@@ -481,8 +481,34 @@ pub(crate) fn transform_json(
     flag: bool,
     kernel: JsonKernel,
 ) -> Result<Option<Vec<u8>>, MojoError> {
+    transform_json_with_scratch(nodes, raw, operation, flag, kernel, 1)
+}
+
+// Scratch units are 16-byte, eight-byte-aligned storage owned by the host.
+// Most kernels need one per JSON node; Gemini ordering uses four to host the
+// existing order kernel's typed views, records, ranks and permutations.
+pub(crate) fn transform_json_with_scratch(
+    nodes: &[JsonNode<'_>],
+    raw: &str,
+    operation: i64,
+    flag: bool,
+    kernel: JsonKernel,
+    units_per_node: usize,
+) -> Result<Option<Vec<u8>>, MojoError> {
+    if units_per_node == 0 {
+        return Err(MojoError::InvalidInput);
+    }
     let input = ffi_nodes(nodes, raw)?;
-    let mut scratch = vec![StringView::default(); nodes.len()];
+    let scratch_count = nodes
+        .len()
+        .checked_mul(units_per_node)
+        .ok_or(MojoError::InvalidInput)?;
+    signed(scratch_count)?;
+    let mut scratch = Vec::new();
+    scratch
+        .try_reserve_exact(scratch_count)
+        .map_err(|_| MojoError::Capacity)?;
+    scratch.resize(scratch_count, StringView::default());
     let mut metadata = [-1_i64; 2];
     let mut invoke = |output: Option<&mut [u8]>| -> Result<(bool, usize), MojoError> {
         let (measuring, address, capacity) = match output {

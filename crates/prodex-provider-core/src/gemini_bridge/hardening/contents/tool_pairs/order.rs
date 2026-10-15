@@ -1,53 +1,18 @@
-//! Gemini tool-response ordering repair.
-
-use super::super::parts::{
-    gemini_provider_core_content_role, gemini_provider_core_function_calls_in_content,
-};
-use prodex_mojo_core::provider_constraints::gemini_tool_response_part_order;
-
+//! Gemini response-order projection through the existing compiled policy.
 pub(in crate::gemini_bridge::hardening::contents) fn gemini_provider_core_refine_tool_response_order(
     contents: &mut [serde_json::Value],
 ) {
-    for index in 1..contents.len() {
-        if gemini_provider_core_content_role(&contents[index]) != Some("user")
-            || gemini_provider_core_content_role(&contents[index - 1]) != Some("model")
-        {
-            continue;
-        }
-        let calls = gemini_provider_core_function_calls_in_content(&contents[index - 1]);
-        let call_ids = calls.iter().map(|(id, _)| id.as_str()).collect::<Vec<_>>();
-        let Some(parts) = contents[index]
-            .get_mut("parts")
-            .and_then(serde_json::Value::as_array_mut)
-        else {
-            continue;
-        };
-        let response_ids = parts
-            .iter()
-            .map(|part| {
-                part.get("functionResponse").map(|response| {
-                    response
-                        .get("id")
-                        .and_then(serde_json::Value::as_str)
-                        .unwrap_or_default()
-                })
-            })
-            .collect::<Vec<_>>();
-        let order = gemini_tool_response_part_order(&call_ids, &response_ids)
-            .expect("Mojo Gemini tool-response ordering should accept Rust-owned views");
-        let mut original_parts = std::mem::take(parts)
-            .into_iter()
-            .map(Some)
-            .collect::<Vec<_>>();
-        let mut ordered_parts = Vec::with_capacity(original_parts.len());
-        for part_index in order {
-            ordered_parts.push(
-                original_parts[part_index]
-                    .take()
-                    .expect("Mojo order was validated as a permutation"),
-            );
-        }
-        *parts = ordered_parts;
+    let ordered = super::super::mojo::transform(
+        contents,
+        prodex_mojo_core::json::GeminiContentOperation::OrderResponses,
+    );
+    assert_eq!(
+        ordered.len(),
+        contents.len(),
+        "Mojo ordering must preserve content row count"
+    );
+    for (target, source) in contents.iter_mut().zip(ordered) {
+        *target = source;
     }
 }
 
@@ -116,5 +81,32 @@ mod tests {
                 {"text": "after"}
             ])
         );
+    }
+}
+
+#[cfg(test)]
+mod projection_tests {
+    use super::gemini_provider_core_refine_tool_response_order;
+    use serde_json::json;
+
+    #[test]
+    fn mojo_ordering_preserves_ineligible_rows_and_empty_ids() {
+        let model = json!({"role":"model", "parts":[{"functionCall":null}]});
+        let user = json!({"role":"user", "parts":[{"text":"keep"},{"functionResponse":null}], "metadata":42});
+        let unchanged =
+            json!({"role":"custom", "parts":[{"text":"custom"},{"functionResponse":null}]});
+        let mut contents = vec![model.clone(), user, unchanged.clone()];
+        gemini_provider_core_refine_tool_response_order(&mut contents);
+        assert_eq!(
+            contents,
+            vec![
+                model,
+                json!({"role":"user", "parts":[{"functionResponse":null},{"text":"keep"}], "metadata":42}),
+                unchanged
+            ]
+        );
+        let once = contents.clone();
+        gemini_provider_core_refine_tool_response_order(&mut contents);
+        assert_eq!(contents, once);
     }
 }

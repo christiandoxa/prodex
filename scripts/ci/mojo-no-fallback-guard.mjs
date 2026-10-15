@@ -1058,6 +1058,9 @@ const GEMINI_BUFFERED_RESPONSE_FILE = "crates/prodex-provider-core/src/translato
 const GEMINI_TOOL_RESPONSE_ORDER_FILE = "crates/prodex-provider-core/src/gemini_bridge/hardening/contents/tool_pairs/order.rs";
 const GEMINI_TOOL_RESPONSE_ORDER_ADAPTER_FILE = "crates/prodex-mojo-core/src/provider_constraints/gemini_sse_tool_call_index.rs";
 const GEMINI_TOOL_RESPONSE_ORDER_MOJO_FILE = "mojo/prodex_core/provider_constraints.mojo";
+const GEMINI_CONTENT_JSON_CALLER_FILE = "crates/prodex-provider-core/src/gemini_bridge/hardening/contents/mojo.rs";
+const GEMINI_CONTENT_JSON_ADAPTER_FILE = "crates/prodex-mojo-core/src/json/gemini_contents.rs";
+const GEMINI_CONTENT_JSON_MOJO_FILE = "mojo/prodex_core/gemini_content_hardening.mojo";
 const RESPONSE_FORWARDING_FILE = "crates/prodex-runtime-proxy/src/response_forwarding.rs";
 const QUOTA_POOL_FILE = "crates/prodex-quota/src/render/pool.rs";
 const STATUS_SUMMARY_FILE = "crates/prodex-app/src/app_commands/status.rs";
@@ -3931,7 +3934,8 @@ export function findViolations(files) {
         /\bfn\s+gemini_provider_core_refine_tool_response_order\([^]*?^\}/mu,
       )?.[0] ?? "";
       const violations = [];
-      if (!body.includes("gemini_tool_response_part_order(")) {
+      if (!body.includes("super::super::mojo::transform(") ||
+          !body.includes("GeminiContentOperation::OrderResponses")) {
         violations.push(`${filePath}: Gemini tool-response ordering must use Mojo`);
       }
       if (/\.sort(?:_by_key|_unstable_by_key|_unstable)?\s*\(|\.position\s*\(/u.test(body)) {
@@ -3941,6 +3945,22 @@ export function findViolations(files) {
         violations.push(`${filePath}: Gemini tool-response ordering has a feature-off Rust path`);
       }
       return violations;
+    }
+    if (filePath === GEMINI_CONTENT_JSON_CALLER_FILE) {
+      return contents.includes("prodex_mojo_core::json::gemini_content_hardening(")
+        ? [] : [`${filePath}: Gemini JSON hardening must retain the compiled Mojo adapter`];
+    }
+    if (filePath === GEMINI_CONTENT_JSON_ADAPTER_FILE) {
+      return contents.includes("transform_json_with_scratch(") &&
+        contents.includes("prodex_mojo_gemini_content_hardening_v1,") &&
+        contents.includes("OrderResponses = 4")
+        ? [] : [`${filePath}: Gemini JSON ordering must retain its versioned ABI operation`];
+    }
+    if (filePath === GEMINI_CONTENT_JSON_MOJO_FILE) {
+      return contents.includes('@export("prodex_mojo_gemini_content_hardening_v1")') &&
+        contents.includes("var status = gemini_tool_response_order_plan(") &&
+        contents.includes("gch_order_responses(Pointer(to=sink), tree, scratch_address)")
+        ? [] : [`${filePath}: Gemini JSON ordering must reuse the canonical Mojo permutation owner`];
     }
     if (filePath === GEMINI_TOOL_RESPONSE_ORDER_ADAPTER_FILE &&
         !contents.includes("prodex_provider_constraints_gemini_tool_response_order_v1(")) {
@@ -7029,7 +7049,7 @@ export function findViolations(files) {
 
 async function promotedFiles() {
   const files = await Promise.all(
-    PROMOTED_FILES.map(async (filePath) => [
+    [...PROMOTED_FILES, GEMINI_CONTENT_JSON_CALLER_FILE, GEMINI_CONTENT_JSON_ADAPTER_FILE, GEMINI_CONTENT_JSON_MOJO_FILE].map(async (filePath) => [
       filePath,
       await fs.readFile(path.join(repoRoot, filePath), "utf8"),
     ]),
@@ -8737,7 +8757,17 @@ function selfTest() {
     "fn gemini_provider_core_refine_tool_response_order() {\n  response_parts.sort_by_key(rank);\n}"]]).join("\n"),
   /Gemini tool-response ordering must use Mojo|restored Rust Gemini tool-response ordering policy/u);
   assert.deepEqual(findViolations([[GEMINI_TOOL_RESPONSE_ORDER_FILE,
-    "fn gemini_provider_core_refine_tool_response_order() {\n  gemini_tool_response_part_order(ids, parts);\n}"]]), []);
+    "fn gemini_provider_core_refine_tool_response_order() {\n  super::super::mojo::transform(contents, GeminiContentOperation::OrderResponses);\n}"]]), []);
+  assert.match(findViolations([[GEMINI_CONTENT_JSON_CALLER_FILE, "fn transform() {}"]]).join("\n"),
+    /must retain the compiled Mojo adapter/u);
+  assert.match(findViolations([[GEMINI_CONTENT_JSON_ADAPTER_FILE, "fn transform() {}"]]).join("\n"),
+    /must retain its versioned ABI operation/u);
+  assert.match(findViolations([[GEMINI_CONTENT_JSON_MOJO_FILE, "def unrelated(): pass"]]).join("\n"),
+    /must reuse the canonical Mojo permutation owner/u);
+  const orderCall = "fn gemini_provider_core_refine_tool_response_order() {\n" +
+    "  super::super::mojo::transform(contents, GeminiContentOperation::OrderResponses);\n";
+  assert.match(findViolations([[GEMINI_TOOL_RESPONSE_ORDER_FILE,
+    orderCall + "  parts.sort_by_key(rank);\n}"]]).join("\n"), /restored Rust Gemini tool-response ordering policy/u);
   assert.match(findViolations([[GEMINI_TOOL_RESPONSE_ORDER_ADAPTER_FILE,
     "fn gemini_tool_response_part_order() {}"]]).join("\n"), /must retain the Mojo ABI call/u);
   assert.match(findViolations([[GEMINI_TOOL_RESPONSE_ORDER_MOJO_FILE,

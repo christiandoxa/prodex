@@ -8,6 +8,7 @@ from parsed_json import (
 )
 from json_sink import JsonSink, js_byte, js_literal, js_string, js_raw
 from rich_types import ProdexRichStringView
+from provider_constraints import gemini_tool_response_order_plan
 
 
 def gch_parts(tree: ParsedJson, content: Int64) -> Int64:
@@ -253,6 +254,87 @@ def gch_pair_tools(sink: Pointer[mut=True, JsonSink, _], tree: ParsedJson, orpha
     js_byte(sink, 93)
 
 
+# Host scratch holds 16/24/8/8/8 bytes per node for call views, response
+# records, output order, ranks and source indices. The existing provider
+# constraint kernel remains the only authority for the stable permutation.
+def gch_order_responses(
+    sink: Pointer[mut=True, JsonSink, _], tree: ParsedJson, scratch: UInt64,
+) -> Int64:
+    var n = UInt64(tree.count)
+    var calls = Pointer[mut=True, ProdexRichStringView, MutUntrackedOrigin](unsafe_from_address=Int(scratch))
+    var records_address = scratch + n * 16
+    var order_address = scratch + n * 40
+    var ranks_address = scratch + n * 48
+    var records = Pointer[mut=True, UInt64, MutUntrackedOrigin](unsafe_from_address=Int(records_address))
+    var order = Pointer[mut=True, UInt64, MutUntrackedOrigin](unsafe_from_address=Int(order_address))
+    var indices = Pointer[mut=True, Int64, MutUntrackedOrigin](unsafe_from_address=Int(scratch + n * 56))
+    js_byte(sink, 91)
+    var current = pj_child(tree, 0)
+    var previous: Int64 = -1
+    var emitted = False
+    while current >= 0:
+        var call_count: Int64 = 0
+        var parts = gch_parts(tree, current)
+        if gch_role_is(tree, current, StringSlice("user")) and gch_role_is(tree, previous, StringSlice("model")) and parts >= 0:
+            var part = pj_child(tree, gch_parts(tree, previous))
+            while part >= 0:
+                var function = pj_field(tree, part, StringSlice("functionCall"))
+                if function >= 0:
+                    calls[unsafe_offset=call_count] = gch_function_identity(tree, function, StringSlice("id"))
+                    call_count += 1
+                part = pj_next(tree, part)
+        if emitted:
+            js_byte(sink, 44)
+        if call_count == 0:
+            js_raw(sink, tree, current)
+        else:
+            var part_count: Int64 = 0
+            var part = pj_child(tree, parts)
+            while part >= 0:
+                var response = pj_field(tree, part, StringSlice("functionResponse"))
+                var id = gch_function_identity(tree, response, StringSlice("id"))
+                records[unsafe_offset=part_count * 3] = UInt64(response >= 0)
+                records[unsafe_offset=part_count * 3 + 1] = UInt64(id.ptr)
+                records[unsafe_offset=part_count * 3 + 2] = UInt64(id.len)
+                indices[unsafe_offset=part_count] = part
+                part_count += 1
+                part = pj_next(tree, part)
+            var status = gemini_tool_response_order_plan(
+                1, scratch, call_count, records_address, part_count, order_address, ranks_address
+            )
+            if status != 0:
+                return status
+            js_byte(sink, 123)
+            var field = pj_child(tree, current)
+            var first_field = True
+            while field >= 0:
+                if not first_field:
+                    js_byte(sink, 44)
+                var key = tree.nodes[unsafe_offset=field].key.copy()
+                js_string(sink, key)
+                js_byte(sink, 58)
+                if field == parts:
+                    js_byte(sink, 91)
+                    for index in range(part_count):
+                        if index > 0:
+                            js_byte(sink, 44)
+                        var source = order[unsafe_offset=index]
+                        if source >= UInt64(part_count):
+                            return 1
+                        js_raw(sink, tree, indices[unsafe_offset=Int64(source)])
+                    js_byte(sink, 93)
+                else:
+                    js_raw(sink, tree, field)
+                first_field = False
+                field = pj_next(tree, field)
+            js_byte(sink, 125)
+        previous = current
+        current = pj_next(tree, current)
+        emitted = True
+    js_byte(sink, 93)
+    return 0
+
+
 @export("prodex_mojo_gemini_content_hardening_v1")
 def prodex_mojo_gemini_content_hardening_v1(
     abi: Int64, operation: Int64, flag: Int64,
@@ -265,7 +347,7 @@ def prodex_mojo_gemini_content_hardening_v1(
     if abi != 1:
         return 4
     if (
-        operation < 0 or operation > 3 or flag != 0 or measuring < 0 or measuring > 1
+        operation < 0 or operation > 4 or flag != 0 or measuring < 0 or measuring > 1
         or raw_length < 0 or nodes_address == 0 or metadata_address == 0
         or capacity < 0 or scratch_count < nodes_count or scratch_address == 0
     ):
@@ -282,12 +364,18 @@ def prodex_mojo_gemini_content_hardening_v1(
     )
     if not pj_valid(tree) or pj_kind(tree, 0) != JSON_ARRAY:
         return 1
+    if operation == 4 and scratch_count < nodes_count * 4:
+        return 1
     var sink = JsonSink(
         Pointer[mut=True, UInt8, MutUntrackedOrigin](unsafe_from_address=Int(output_address)),
         capacity, 0, measuring == 1, False,
     )
     if operation == 0 or operation == 3:
         gch_coalesce(Pointer(to=sink), tree, operation == 3)
+    elif operation == 4:
+        var status = gch_order_responses(Pointer(to=sink), tree, scratch_address)
+        if status != 0:
+            return status
     else:
         gch_pair_tools(Pointer(to=sink), tree, operation == 2)
     if sink.failed:

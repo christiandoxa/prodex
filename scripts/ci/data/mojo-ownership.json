@@ -2219,7 +2219,8 @@
           "gemini_content_coalescing",
           "gemini_missing_tool_result_pairing",
           "gemini_orphan_tool_response_repair",
-          "gemini_content_role_shape"
+          "gemini_content_role_shape",
+          "gemini_response_order_json_projection"
         ]
       },
       {
@@ -2232,7 +2233,8 @@
           "gemini_content_coalescing",
           "gemini_missing_tool_result_pairing",
           "gemini_orphan_tool_response_repair",
-          "gemini_content_role_shape"
+          "gemini_content_role_shape",
+          "gemini_response_order_json_projection"
         ]
       }
     ],
@@ -9649,6 +9651,32 @@
       "duplicate_production_owner": false,
       "platform_fallback": false,
       "rust_adapter_scope": "Serde acquisition and complete-array replacement through shared measured JSON adapter"
+    },
+    {
+      "name": "gemini_response_order_json_projection",
+      "domain": "provider/gemini-content-hardening",
+      "introduced_in": "0.438.0",
+      "baseline_state": "Rust selected model/user neighbours, extracted response ids, decoded default identity fields and materialized the existing Mojo permutation",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_mojo_gemini_content_hardening_v1",
+      "mojo_abi_version": 1,
+      "mojo_operation_ids": {
+        "order_responses": 4
+      },
+      "mojo_source": "mojo/prodex_core/gemini_content_hardening.mojo",
+      "consumer": "crates/prodex-provider-core/src/gemini_bridge/hardening/contents/tool_pairs/order.rs",
+      "consumer_marker": "super::super::mojo::transform(",
+      "production_consumers": [
+        "crates/prodex-provider-core/src/gemini_bridge/hardening/contents/tool_pairs/order.rs"
+      ],
+      "production_reachability_test": "crates/prodex-provider-core/src/gemini_bridge/hardening/contents/tool_pairs/order.rs",
+      "rust_owner_before": "Rust neighbourhood eligibility, optional id defaults and ordered JSON assembly; numeric sorting was already Mojo-owned and remains shared",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "Original ordering fixtures retained; 2048 generated full-pipeline cases match the original Rust projection; reference module removed after execution",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "Borrowed Serde tree, checked scratch allocation, measured result decoding and same-length output projection into the caller slice"
     }
   ],
   "rust_semantic_reductions": [

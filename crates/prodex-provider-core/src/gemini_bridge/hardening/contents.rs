@@ -1,7 +1,6 @@
 //! Gemini content sequence hardening.
 
 mod mojo;
-mod parts;
 mod tool_pairs;
 
 use self::tool_pairs::{
