@@ -372,6 +372,44 @@ def prodex_launch_session_marker_update_v1(
     return 1
 
 
+# A cancelled child must not trigger automatic native-session recovery. Rust
+# supplies platform-specific exit/signal facts; Mojo owns the precedence.
+@export("prodex_launch_exit_status_cancelled_v1")
+def prodex_launch_exit_status_cancelled_v1(
+    abi_version: Int64,
+    exit_code: Int64,
+    signal: Int64,
+    interrupt_signal: Int64,
+    control_c_exit_code: Int64,
+    output_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != 1:
+        return -3
+    if (
+        exit_code < -1
+        or signal < -1
+        or interrupt_signal < -1
+        or control_c_exit_code < -1
+        or output_address == 0
+    ):
+        return -2
+    var output = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    output[] = 1 if (
+        exit_code == 130
+        or (
+            interrupt_signal >= 0
+            and signal == interrupt_signal
+        )
+        or (
+            control_c_exit_code >= 0
+            and exit_code == control_c_exit_code
+        )
+    ) else 0
+    return 0
+
+
 # Append-only exit text: the host must not reopen an inline TUI over Codex's
 # existing session/usage footer. Only canonical UUIDs may enter the command.
 def launch_saved_session_literal(

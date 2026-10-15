@@ -2116,7 +2116,8 @@
           "runtime_workflow_recovery_class",
           "runtime_workflow_evidence_policy",
           "native_session_marker_arbitration",
-          "saved_session_exit_guidance"
+          "saved_session_exit_guidance",
+          "runtime_launch_exit_cancellation_policy"
         ]
       },
       {
@@ -11180,6 +11181,29 @@
       "duplicate_production_owner": false,
       "platform_fallback": false,
       "rust_adapter_scope": "Rust retains buffered stdin reads, UTF-8 and JSON parsing, framing budgets, size limits, and writes; the adapter validates the scalar Mojo result"
+    },
+    {
+      "name": "runtime_launch_exit_cancellation_policy",
+      "domain": "runtime/launch-recovery",
+      "introduced_in": "0.437.14",
+      "baseline_state": "Rust classified child exit statuses as explicit cancellation before automatic session recovery.",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_launch_exit_status_cancelled_v1",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/launch_config.mojo",
+      "consumer": "crates/prodex-app/src/app_commands/runtime_launch/usage_limit_recovery/plan.rs",
+      "consumer_marker": "prodex_mojo_core::launch::runtime_exit_status_cancelled(",
+      "production_consumers": [
+        "crates/prodex-app/src/app_commands/runtime_launch/usage_limit_recovery/plan.rs"
+      ],
+      "production_reachability_test": "crates/prodex-app/src/app_commands/runtime_launch/usage_limit_recovery/tests.rs",
+      "rust_owner_before": "Exit-code 130, POSIX SIGINT, and Windows Ctrl-C cancellation precedence.",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "Deleted; required-Mojo ABI and runtime-launch caller regressions cover exit-code, POSIX signal, Windows Ctrl-C, non-cancelled exits, invalid ABI, and invalid facts.",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+       "rust_adapter_scope": "ExitStatus platform fact extraction and typed Mojo result decoding; process supervision and recovery side effects remain in Rust."
     }
   ],
   "rust_semantic_reductions": [

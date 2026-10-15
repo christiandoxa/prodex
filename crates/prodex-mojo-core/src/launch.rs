@@ -21,8 +21,9 @@ mod recovery;
 pub use recovery::{
     InPlaceRecoveryAction, NativeGoalStatus, NativeThreadStatus, RecoveryObservationAction,
     RecoveryObservationKind, WorkflowEvidencePlan, WorkflowObservationKind, WorkflowRecoveryClass,
-    in_place_recovery_action, recovery_observation_action, session_marker_should_update,
-    workflow_evidence_plan, workflow_recovery_class, workflow_recovery_class_with_message,
+    in_place_recovery_action, recovery_observation_action, runtime_exit_status_cancelled,
+    session_marker_should_update, workflow_evidence_plan, workflow_recovery_class,
+    workflow_recovery_class_with_message,
 };
 
 #[path = "launch/saved_session.rs"]

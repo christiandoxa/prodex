@@ -143,18 +143,26 @@ fn next_observed_runtime_recovery_plan_for_session(
 }
 
 pub(crate) fn runtime_exit_status_is_cancelled(status: &std::process::ExitStatus) -> bool {
-    if status.code() == Some(130) {
-        return true;
-    }
+    let exit_code = status.code().map(i64::from).unwrap_or(-1);
     #[cfg(unix)]
-    {
+    let (signal, interrupt_signal) = {
         use std::os::unix::process::ExitStatusExt as _;
-        status.signal() == Some(libc::SIGINT)
-    }
+        (
+            status.signal().map(i64::from).unwrap_or(-1),
+            i64::from(libc::SIGINT),
+        )
+    };
+    #[cfg(not(unix))]
+    let (signal, interrupt_signal) = (-1, -1);
     #[cfg(windows)]
-    {
-        status.code() == Some(windows_sys::Win32::Foundation::CONTROL_C_EXIT)
-    }
-    #[cfg(not(any(unix, windows)))]
-    false
+    let control_c_exit_code = i64::from(windows_sys::Win32::Foundation::CONTROL_C_EXIT);
+    #[cfg(not(windows))]
+    let control_c_exit_code = -1;
+    prodex_mojo_core::launch::runtime_exit_status_cancelled(
+        exit_code,
+        signal,
+        interrupt_signal,
+        control_c_exit_code,
+    )
+    .expect("Mojo runtime launch exit policy failed")
 }
