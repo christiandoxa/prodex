@@ -1154,7 +1154,8 @@
         "role": "semantic",
         "operations": [
           "runtime_state_background_policy",
-          "runtime_state_route_key_policy"
+          "runtime_state_route_key_policy",
+          "runtime_proxy_owned_affinity_lane_admission"
         ]
       },
       {
@@ -4692,6 +4693,31 @@
       "duplicate_production_owner": false,
       "platform_fallback": false,
       "rust_adapter_scope": "RuntimeRouteKind mapping, borrowed UTF-8 slice projection, validated ABI result mapping, and runtime-store caller delegation"
+    },
+    {
+      "name": "runtime_proxy_owned_affinity_lane_admission",
+      "domain": "runtime/admission",
+      "introduced_in": "0.438.0",
+      "baseline_state": "candidate",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_runtime_proxy_admission_affinity_v1",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/runtime_state_background.mojo",
+      "consumer": "crates/prodex-runtime-proxy/src/admission.rs",
+      "consumer_marker": "runtime_proxy_owned_affinity_for_route(",
+      "production_consumers": [
+        "crates/prodex-runtime-proxy/src/admission.rs",
+        "crates/prodex-app/src/runtime_proxy/lifecycle.rs"
+      ],
+      "production_reachability_test": "crates/prodex-mojo-core/tests/runtime_admission_affinity.rs",
+      "caller_regression_test": "crates/prodex-app/tests/support/main_internal/runtime_proxy_selection_and_pressure/admission/guards.rs",
+      "rust_owner_before": "Rust decided whether a Responses or WebSocket continuation binding existed before allowing the lane cap bypass.",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "The former Rust binding-or decision is removed; compiled ABI vectors and runtime admission caller coverage preserve route, binding, and unbound cases.",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "Runtime-lock binding lookup, profile-existence validation, compact lineage policy, and atomic lane admission remain Rust-owned; Mojo receives only bounded route and binding facts."
     },
     {
       "name": "quota_selection_policy",

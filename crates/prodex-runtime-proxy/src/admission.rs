@@ -129,6 +129,20 @@ pub fn runtime_proxy_should_shed_fresh_compact_request(
     .shed_fresh_compact_request
 }
 
+pub fn runtime_proxy_owned_affinity_for_route(
+    route_kind: RuntimeRouteKind,
+    previous_response_binding: bool,
+    turn_state_binding: bool,
+) -> bool {
+    prodex_mojo_core::runtime_state::runtime_proxy_admission_affinity(
+        route_kind as u8,
+        previous_response_binding,
+        turn_state_binding,
+    )
+    .expect("Mojo runtime-proxy admission affinity policy returned invalid output")
+    .owned
+}
+
 fn runtime_proxy_admission_policy(
     route_kind: RuntimeRouteKind,
     local_overload_pressure: bool,
