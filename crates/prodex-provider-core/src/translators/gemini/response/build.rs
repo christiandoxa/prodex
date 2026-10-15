@@ -7,7 +7,7 @@ use super::{
     gemini_media_content_item_from_part, gemini_response_metadata, gemini_responses_usage,
     gemini_text_from_special_part, gemini_web_search_call_from_grounding,
 };
-use crate::{GeminiProviderCoreResponsePartInput, gemini_provider_core_response_part_plan};
+use crate::{GeminiProviderCoreResponsePartInput, gemini_provider_core_response_parts_plan};
 
 use prodex_mojo_core::rich::{
     GeminiBufferedResponseError, GeminiResponseKernelInput, GeminiResponseKernelOperation,
@@ -38,14 +38,18 @@ pub(super) fn gemini_build_response_value(
         .cloned()
         .unwrap_or_default();
     let mut output = Vec::new();
-    let (text, content_items, function_call_flags) = gemini_collect_response_parts(
-        parts,
-        response_id,
-        &mut visible_text_from_part,
-        &mut function_call_item,
-        &mut output,
-    );
-    let citations = gemini_append_grounding_and_citations(&mut output, value, response_id);
+    let grounding_call = gemini_web_search_call_from_grounding(value, response_id);
+    let citations = gemini_citation_text(value);
+    let (text, content_items, function_call_flags, citations_enabled) =
+        gemini_collect_response_parts(
+            parts,
+            response_id,
+            &mut visible_text_from_part,
+            &mut function_call_item,
+            &mut output,
+            grounding_call,
+            citations.is_some(),
+        )?;
     let output = serde_json::to_string(&output).expect("Gemini response output serializes");
     let content =
         serde_json::to_string(&content_items).expect("Gemini response content serializes");
@@ -67,7 +71,7 @@ pub(super) fn gemini_build_response_value(
     input.output = Some(&output);
     input.usage = usage.as_deref();
     input.metadata = metadata.as_deref();
-    input.citations = citations.as_deref();
+    input.citations = citations_enabled.then_some(citations.as_deref()).flatten();
     // BufferedResponse v2 uses these operation-local fields for cross-part text precedence.
     input.response = Some(&function_call_flags);
     input.reason_present = suppress_visible_text_when_tool_calls;
@@ -86,31 +90,24 @@ pub(super) fn gemini_build_response_value(
 }
 
 fn gemini_collect_response_parts(
+    // Mojo batch plan owns action and tail decisions; Rust only materializes records.
     parts: Vec<Value>,
     response_id: &str,
     visible_text_from_part: &mut impl FnMut(&Value) -> Option<String>,
     function_call_item: &mut impl FnMut(&Value, &Value, usize) -> Value,
     output: &mut Vec<Value>,
-) -> (String, Vec<Value>, String) {
-    let mut text = String::new();
-    let mut content_items = Vec::new();
-    let function_call_flags = parts
-        .iter()
-        .map(|part| {
-            if part.get("functionCall").is_some() {
-                '1'
-            } else {
-                '0'
-            }
-        })
-        .collect();
+    grounding_call: Option<Value>,
+    citations_present: bool,
+) -> Result<(String, Vec<Value>, String, bool), GeminiResponseBuildError> {
+    let mut projections = Vec::with_capacity(parts.len());
+    let mut inputs = Vec::with_capacity(parts.len());
     for (index, part) in parts.into_iter().enumerate() {
         let visible_text = visible_text_from_part(&part);
         let special_text = gemini_text_from_special_part(&part);
         let content_item = gemini_media_content_item_from_part(&part);
         let image_generation =
             gemini_image_generation_call_item_from_part(response_id, index, &part);
-        let plan = gemini_provider_core_response_part_plan(GeminiProviderCoreResponsePartInput {
+        inputs.push(GeminiProviderCoreResponsePartInput {
             has_text: part
                 .get("text")
                 .and_then(Value::as_str)
@@ -129,8 +126,39 @@ fn gemini_collect_response_parts(
             forced_output: false,
             internal_instruction_echo: false,
             suppress_visible_text: false,
-        })
-        .expect("Gemini response part planner returned invalid output");
+        });
+        projections.push((
+            part,
+            visible_text,
+            special_text,
+            content_item,
+            image_generation,
+        ));
+    }
+    let batch_plan = gemini_provider_core_response_parts_plan(
+        &inputs,
+        grounding_call.is_some(),
+        citations_present,
+    )
+    .map_err(|error| match error {
+        crate::GeminiProviderCoreResponsePartPlanError::InputTooLarge => {
+            GeminiResponseBuildError::InputTooLarge
+        }
+        crate::GeminiProviderCoreResponsePartPlanError::InvalidInput
+        | crate::GeminiProviderCoreResponsePartPlanError::InvalidOutput
+        | crate::GeminiProviderCoreResponsePartPlanError::AbiMismatch => {
+            GeminiResponseBuildError::Kernel
+        }
+    })?;
+    let append_grounding = batch_plan.append_grounding;
+    let append_citations = batch_plan.append_citations;
+    let actions = batch_plan.actions;
+    let function_call_flags = batch_plan.function_call_flags;
+    let mut text = String::new();
+    let mut content_items = Vec::new();
+    for (index, ((part, visible_text, special_text, content_item, image_generation), plan)) in
+        projections.into_iter().zip(actions).enumerate()
+    {
         if plan.emit_visible_text
             && let Some(part_text) = visible_text
         {
@@ -160,18 +188,10 @@ fn gemini_collect_response_parts(
             output.push(function_call_item(&part, function_call, index));
         }
     }
-    (text, content_items, function_call_flags)
-}
-
-fn gemini_append_grounding_and_citations(
-    output: &mut Vec<Value>,
-    value: &Value,
-    response_id: &str,
-) -> Option<String> {
-    if let Some(grounding_call) = gemini_web_search_call_from_grounding(value, response_id) {
+    if append_grounding && let Some(grounding_call) = grounding_call {
         output.push(grounding_call);
     }
-    gemini_citation_text(value)
+    Ok((text, content_items, function_call_flags, append_citations))
 }
 
 pub(super) fn gemini_function_call_id_with_fallback(

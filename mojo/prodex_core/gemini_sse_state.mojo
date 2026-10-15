@@ -14,6 +14,26 @@ comptime GEMINI_RESPONSE_PART_IMAGE: Int64 = 32
 comptime GEMINI_RESPONSE_PART_FUNCTION: Int64 = 64
 comptime GEMINI_RESPONSE_PART_FLUSH_PENDING: Int64 = 128
 
+# The translator sends one compact fact word per content part.  Keeping the
+# wire bits here makes the batch operation a single semantic authority while
+# Rust remains responsible for acquiring the JSON facts.
+comptime GEMINI_RESPONSE_PART_FLAG_HAS_TEXT: Int64 = 1
+comptime GEMINI_RESPONSE_PART_FLAG_IS_THOUGHT: Int64 = 2
+comptime GEMINI_RESPONSE_PART_FLAG_HAS_VISIBLE_TEXT: Int64 = 4
+comptime GEMINI_RESPONSE_PART_FLAG_HAS_SPECIAL_TEXT: Int64 = 8
+comptime GEMINI_RESPONSE_PART_FLAG_HAS_MEDIA: Int64 = 16
+comptime GEMINI_RESPONSE_PART_FLAG_HAS_VIDEO_METADATA: Int64 = 32
+comptime GEMINI_RESPONSE_PART_FLAG_HAS_IMAGE_GENERATION: Int64 = 64
+comptime GEMINI_RESPONSE_PART_FLAG_HAS_FUNCTION_CALL: Int64 = 128
+comptime GEMINI_RESPONSE_PART_FLAG_COMMAND_OUTPUT_ONLY: Int64 = 256
+comptime GEMINI_RESPONSE_PART_FLAG_FORCED_OUTPUT: Int64 = 512
+comptime GEMINI_RESPONSE_PART_FLAG_INTERNAL_ECHO: Int64 = 1024
+comptime GEMINI_RESPONSE_PART_FLAG_SUPPRESS_VISIBLE_TEXT: Int64 = 2048
+comptime GEMINI_RESPONSE_PART_FLAG_MASK: Int64 = 4095
+comptime GEMINI_RESPONSE_PART_BATCH_MAX: Int64 = 65_536
+comptime GEMINI_RESPONSE_PART_BATCH_TAIL_GROUNDING: Int64 = 1
+comptime GEMINI_RESPONSE_PART_BATCH_TAIL_CITATIONS: Int64 = 2
+
 
 def gemini_response_state_flag_valid(value: Int64) -> Bool:
     return value == 0 or value == 1
@@ -74,6 +94,83 @@ def gemini_response_part_plan(
         actions |= GEMINI_RESPONSE_PART_FUNCTION | GEMINI_RESPONSE_PART_FLUSH_PENDING
 
     output_actions[] = actions
+    return GEMINI_RESPONSE_STATE_STATUS_OK
+
+
+def gemini_response_part_batch_plan(
+    abi_version: Int64,
+    inputs_address: UInt,
+    input_count: Int64,
+    actions_address: UInt,
+    function_flags_address: UInt,
+    grounding_present: Int64,
+    citations_present: Int64,
+    tail_actions_address: UInt,
+) -> Int64:
+    if abi_version != GEMINI_RESPONSE_STATE_ABI_VERSION:
+        return 4
+    if (
+        input_count < 0
+        or input_count > GEMINI_RESPONSE_PART_BATCH_MAX
+        or grounding_present < 0
+        or grounding_present > 1
+        or citations_present < 0
+        or citations_present > 1
+        or tail_actions_address == 0
+        or input_count > 0
+        and (inputs_address == 0 or actions_address == 0 or function_flags_address == 0)
+    ):
+        return GEMINI_RESPONSE_STATE_STATUS_INVALID
+
+    var tail_actions: Int64 = 0
+    if grounding_present == 1:
+        tail_actions |= GEMINI_RESPONSE_PART_BATCH_TAIL_GROUNDING
+    if citations_present == 1:
+        tail_actions |= GEMINI_RESPONSE_PART_BATCH_TAIL_CITATIONS
+
+    if input_count > 0:
+        var inputs = Pointer[mut=False, Int64, ImmUntrackedOrigin](
+            unsafe_from_address=Int(inputs_address)
+        )
+        var actions = Pointer[mut=True, Int64, MutUntrackedOrigin](
+            unsafe_from_address=Int(actions_address)
+        )
+        var function_flags = Pointer[mut=True, UInt8, MutUntrackedOrigin](
+            unsafe_from_address=Int(function_flags_address)
+        )
+        var index: Int64 = 0
+        while index < input_count:
+            var flags = inputs[unsafe_offset=index]
+            if flags < 0 or flags & (~GEMINI_RESPONSE_PART_FLAG_MASK) != 0:
+                return GEMINI_RESPONSE_STATE_STATUS_INVALID
+            var planned_actions: Int64 = 0
+            var status = gemini_response_part_plan(
+                Int64((flags & GEMINI_RESPONSE_PART_FLAG_HAS_TEXT) != 0),
+                Int64((flags & GEMINI_RESPONSE_PART_FLAG_IS_THOUGHT) != 0),
+                Int64((flags & GEMINI_RESPONSE_PART_FLAG_HAS_VISIBLE_TEXT) != 0),
+                Int64((flags & GEMINI_RESPONSE_PART_FLAG_HAS_SPECIAL_TEXT) != 0),
+                Int64((flags & GEMINI_RESPONSE_PART_FLAG_HAS_MEDIA) != 0),
+                Int64((flags & GEMINI_RESPONSE_PART_FLAG_HAS_VIDEO_METADATA) != 0),
+                Int64((flags & GEMINI_RESPONSE_PART_FLAG_HAS_IMAGE_GENERATION) != 0),
+                Int64((flags & GEMINI_RESPONSE_PART_FLAG_HAS_FUNCTION_CALL) != 0),
+                Int64((flags & GEMINI_RESPONSE_PART_FLAG_COMMAND_OUTPUT_ONLY) != 0),
+                Int64((flags & GEMINI_RESPONSE_PART_FLAG_FORCED_OUTPUT) != 0),
+                Int64((flags & GEMINI_RESPONSE_PART_FLAG_INTERNAL_ECHO) != 0),
+                Int64((flags & GEMINI_RESPONSE_PART_FLAG_SUPPRESS_VISIBLE_TEXT) != 0),
+                Pointer(to=planned_actions),
+            )
+            if status != GEMINI_RESPONSE_STATE_STATUS_OK:
+                return status
+            actions[unsafe_offset=index] = planned_actions
+            function_flags[unsafe_offset=index] = (
+                49 if (flags & GEMINI_RESPONSE_PART_FLAG_HAS_FUNCTION_CALL) != 0 else 48
+            )
+            index += 1
+
+    var tail = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(tail_actions_address)
+    )
+    tail[] = tail_actions
     return GEMINI_RESPONSE_STATE_STATUS_OK
 
 

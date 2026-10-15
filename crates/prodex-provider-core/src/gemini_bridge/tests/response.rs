@@ -183,6 +183,21 @@ fn gemini_provider_core_buffered_response_preserves_content_grounding_and_order(
         |_, _| None,
     );
 
+    assert_eq!(
+        value["output"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|item| item["type"].as_str().unwrap())
+            .collect::<Vec<_>>(),
+        vec![
+            "message",
+            "image_generation_call",
+            "function_call",
+            "web_search_call",
+            "message"
+        ]
+    );
     assert_eq!(value["output"][0]["type"], "message");
     assert_eq!(value["output"][0]["content"][0]["type"], "output_text");
     assert!(

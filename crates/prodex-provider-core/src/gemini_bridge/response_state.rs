@@ -37,6 +37,14 @@ pub struct GeminiProviderCoreResponsePartPlan {
     pub flush_pending: bool,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct GeminiProviderCoreResponsePartsPlan {
+    pub actions: Vec<GeminiProviderCoreResponsePartPlan>,
+    pub function_call_flags: String,
+    pub append_grounding: bool,
+    pub append_citations: bool,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum GeminiProviderCoreCompletionGuardrailAction {
     None,
@@ -97,6 +105,7 @@ pub fn gemini_provider_core_completion_guardrail_action(
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum GeminiProviderCoreResponsePartPlanError {
+    InputTooLarge,
     InvalidInput,
     InvalidOutput,
     AbiMismatch,
@@ -105,6 +114,7 @@ pub enum GeminiProviderCoreResponsePartPlanError {
 impl fmt::Display for GeminiProviderCoreResponsePartPlanError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter.write_str(match self {
+            Self::InputTooLarge => "Gemini response part batch is too large",
             Self::InvalidInput => "invalid Gemini response part input",
             Self::InvalidOutput => "invalid Gemini response part plan output",
             Self::AbiMismatch => "Gemini response part planner ABI mismatch",
@@ -146,7 +156,15 @@ pub fn gemini_provider_core_response_part_plan(
             }
         })?;
 
-    Ok(GeminiProviderCoreResponsePartPlan {
+    Ok(gemini_provider_core_response_part_plan_from_actions(
+        actions,
+    ))
+}
+
+fn gemini_provider_core_response_part_plan_from_actions(
+    actions: u8,
+) -> GeminiProviderCoreResponsePartPlan {
+    GeminiProviderCoreResponsePartPlan {
         emit_reasoning: actions & ACTION_REASONING != 0,
         emit_visible_text: actions & ACTION_VISIBLE_TEXT != 0,
         emit_special_text: actions & ACTION_SPECIAL_TEXT != 0,
@@ -155,6 +173,60 @@ pub fn gemini_provider_core_response_part_plan(
         record_image: actions & ACTION_IMAGE != 0,
         emit_function: actions & ACTION_FUNCTION != 0,
         flush_pending: actions & ACTION_FLUSH_PENDING != 0,
+    }
+}
+
+pub fn gemini_provider_core_response_parts_plan(
+    inputs: &[GeminiProviderCoreResponsePartInput],
+    grounding_present: bool,
+    citations_present: bool,
+) -> Result<GeminiProviderCoreResponsePartsPlan, GeminiProviderCoreResponsePartPlanError> {
+    if inputs.len() > prodex_mojo_core::rich::GEMINI_RESPONSE_PART_BATCH_MAX {
+        return Err(GeminiProviderCoreResponsePartPlanError::InputTooLarge);
+    }
+    let plan = prodex_mojo_core::rich::plan_gemini_response_parts(
+        &inputs
+            .iter()
+            .map(|input| prodex_mojo_core::rich::GeminiResponsePartInput {
+                has_text: input.has_text,
+                is_thought: input.is_thought,
+                has_visible_text: input.has_visible_text,
+                has_special_text: input.has_special_text,
+                has_media: input.has_media,
+                has_video_metadata: input.has_video_metadata,
+                has_image_generation: input.has_image_generation,
+                has_function_call: input.has_function_call,
+                command_output_only: input.command_output_only,
+                forced_output: input.forced_output,
+                internal_instruction_echo: input.internal_instruction_echo,
+                suppress_visible_text: input.suppress_visible_text,
+            })
+            .collect::<Vec<_>>(),
+        grounding_present,
+        citations_present,
+    )
+    .map_err(|error| match error {
+        prodex_mojo_core::MojoError::InvalidInput => {
+            GeminiProviderCoreResponsePartPlanError::InvalidInput
+        }
+        prodex_mojo_core::MojoError::AbiMismatch => {
+            GeminiProviderCoreResponsePartPlanError::AbiMismatch
+        }
+        prodex_mojo_core::MojoError::InvalidOutput
+        | prodex_mojo_core::MojoError::Capacity
+        | prodex_mojo_core::MojoError::Structured(_) => {
+            GeminiProviderCoreResponsePartPlanError::InvalidOutput
+        }
+    })?;
+    Ok(GeminiProviderCoreResponsePartsPlan {
+        actions: plan
+            .actions
+            .into_iter()
+            .map(gemini_provider_core_response_part_plan_from_actions)
+            .collect(),
+        function_call_flags: plan.function_call_flags,
+        append_grounding: plan.append_grounding,
+        append_citations: plan.append_citations,
     })
 }
 
