@@ -1,7 +1,6 @@
-use crate::{
-    PRODEX_ANTHROPIC_DEFAULT_MODEL, PRODEX_COPILOT_DEFAULT_MODEL, PRODEX_GEMINI_DEFAULT_MODEL,
-    PRODEX_KIRO_DEFAULT_MODEL, ProviderId,
-};
+use std::sync::OnceLock;
+
+use crate::ProviderId;
 
 pub const PRODEX_LOCAL_PROVIDER_ID: &str = "prodex-local";
 pub const PRODEX_LOCAL_PROVIDER_NAME: &str = "Prodex Local";
@@ -54,89 +53,57 @@ pub struct ProviderRuntimeMetadata {
     pub image_generation_enabled: bool,
 }
 
-pub(crate) const LOCAL_RUNTIME_METADATA: ProviderRuntimeMetadata = ProviderRuntimeMetadata {
-    provider: ProviderId::Local,
-    model_provider_id: PRODEX_LOCAL_PROVIDER_ID,
-    display_name: PRODEX_LOCAL_PROVIDER_NAME,
-    codex_provider_name: PRODEX_LOCAL_PROVIDER_NAME,
-    default_model: PRODEX_LOCAL_DEFAULT_MODEL,
-    default_base_url: None,
-    default_context_window: PRODEX_LOCAL_DEFAULT_CONTEXT_WINDOW,
-    default_auto_compact_token_limit: PRODEX_LOCAL_DEFAULT_AUTO_COMPACT_LIMIT,
-    web_search_mode: "disabled",
-    image_generation_enabled: false,
-};
-
-pub(crate) const DEEPSEEK_RUNTIME_METADATA: ProviderRuntimeMetadata = ProviderRuntimeMetadata {
-    provider: ProviderId::DeepSeek,
-    model_provider_id: PRODEX_DEEPSEEK_PROVIDER_ID,
-    display_name: PRODEX_DEEPSEEK_PROVIDER_NAME,
-    codex_provider_name: PRODEX_DEEPSEEK_PROVIDER_NAME,
-    default_model: PRODEX_DEEPSEEK_DEFAULT_MODEL,
-    default_base_url: Some(PRODEX_DEEPSEEK_DEFAULT_BASE_URL),
-    default_context_window: PRODEX_DEEPSEEK_DEFAULT_CONTEXT_WINDOW,
-    default_auto_compact_token_limit: PRODEX_DEEPSEEK_DEFAULT_AUTO_COMPACT_LIMIT,
-    web_search_mode: "live",
-    image_generation_enabled: false,
-};
-
-pub(crate) const GEMINI_RUNTIME_METADATA: ProviderRuntimeMetadata = ProviderRuntimeMetadata {
-    provider: ProviderId::Gemini,
-    model_provider_id: PRODEX_GEMINI_PROVIDER_ID,
-    display_name: PRODEX_GEMINI_PROVIDER_NAME,
-    codex_provider_name: "Azure",
-    default_model: PRODEX_GEMINI_DEFAULT_MODEL,
-    default_base_url: Some(PRODEX_GEMINI_DEFAULT_BASE_URL),
-    default_context_window: PRODEX_GEMINI_DEFAULT_CONTEXT_WINDOW,
-    default_auto_compact_token_limit: PRODEX_GEMINI_DEFAULT_AUTO_COMPACT_LIMIT,
-    web_search_mode: "live",
-    image_generation_enabled: true,
-};
-
-pub(crate) const ANTHROPIC_RUNTIME_METADATA: ProviderRuntimeMetadata = ProviderRuntimeMetadata {
-    provider: ProviderId::Anthropic,
-    model_provider_id: PRODEX_ANTHROPIC_PROVIDER_ID,
-    display_name: PRODEX_ANTHROPIC_PROVIDER_NAME,
-    codex_provider_name: PRODEX_ANTHROPIC_PROVIDER_NAME,
-    default_model: PRODEX_ANTHROPIC_DEFAULT_MODEL,
-    default_base_url: Some(PRODEX_ANTHROPIC_DEFAULT_BASE_URL),
-    default_context_window: PRODEX_ANTHROPIC_DEFAULT_CONTEXT_WINDOW,
-    default_auto_compact_token_limit: PRODEX_ANTHROPIC_DEFAULT_AUTO_COMPACT_LIMIT,
-    web_search_mode: "live",
-    image_generation_enabled: false,
-};
-
-pub(crate) const COPILOT_RUNTIME_METADATA: ProviderRuntimeMetadata = ProviderRuntimeMetadata {
-    provider: ProviderId::Copilot,
-    model_provider_id: PRODEX_COPILOT_PROVIDER_ID,
-    display_name: PRODEX_COPILOT_PROVIDER_NAME,
-    codex_provider_name: "OpenAI",
-    default_model: PRODEX_COPILOT_DEFAULT_MODEL,
-    default_base_url: Some(PRODEX_COPILOT_DEFAULT_BASE_URL),
-    default_context_window: PRODEX_COPILOT_DEFAULT_CONTEXT_WINDOW,
-    default_auto_compact_token_limit: PRODEX_COPILOT_DEFAULT_AUTO_COMPACT_LIMIT,
-    web_search_mode: "live",
-    image_generation_enabled: false,
-};
-
-pub(crate) const KIRO_RUNTIME_METADATA: ProviderRuntimeMetadata = ProviderRuntimeMetadata {
-    provider: ProviderId::Kiro,
-    model_provider_id: PRODEX_KIRO_PROVIDER_ID,
-    display_name: PRODEX_KIRO_PROVIDER_NAME,
-    codex_provider_name: "Azure",
-    default_model: PRODEX_KIRO_DEFAULT_MODEL,
-    default_base_url: Some(PRODEX_KIRO_DEFAULT_BASE_URL),
-    default_context_window: PRODEX_KIRO_DEFAULT_CONTEXT_WINDOW,
-    default_auto_compact_token_limit: PRODEX_KIRO_DEFAULT_AUTO_COMPACT_LIMIT,
-    web_search_mode: "live",
-    image_generation_enabled: false,
-};
-
-pub const fn provider_runtime_metadata(
-    provider: ProviderId,
-) -> Option<&'static ProviderRuntimeMetadata> {
-    crate::implementation_registry::builtin_provider_runtime_metadata(provider)
+fn leaked(value: String) -> &'static str {
+    Box::leak(value.into_boxed_str())
 }
+
+fn load_runtime_metadata(provider: ProviderId) -> ProviderRuntimeMetadata {
+    let plan = prodex_mojo_core::provider_registry::runtime_metadata(provider as i64)
+        .expect("Mojo provider runtime metadata policy failed");
+    assert_eq!(
+        plan.provider, provider as i64,
+        "Mojo provider runtime metadata returned the wrong provider"
+    );
+    ProviderRuntimeMetadata {
+        provider,
+        model_provider_id: leaked(plan.model_provider_id),
+        display_name: leaked(plan.display_name),
+        codex_provider_name: leaked(plan.codex_provider_name),
+        default_model: leaked(plan.default_model),
+        default_base_url: plan.default_base_url.map(leaked),
+        default_context_window: plan.default_context_window,
+        default_auto_compact_token_limit: plan.default_auto_compact_token_limit,
+        web_search_mode: leaked(plan.web_search_mode),
+        image_generation_enabled: plan.image_generation_enabled,
+    }
+}
+
+fn all_runtime_metadata() -> [Option<ProviderRuntimeMetadata>; 7] {
+    let mut metadata = [None; 7];
+    for provider in [
+        ProviderId::Anthropic,
+        ProviderId::Copilot,
+        ProviderId::DeepSeek,
+        ProviderId::Gemini,
+        ProviderId::Kiro,
+        ProviderId::Local,
+    ] {
+        metadata[provider as usize] = Some(load_runtime_metadata(provider));
+    }
+    metadata
+}
+
+pub fn provider_runtime_metadata(provider: ProviderId) -> Option<&'static ProviderRuntimeMetadata> {
+    if provider == ProviderId::OpenAi {
+        return None;
+    }
+    RUNTIME_METADATA
+        .get_or_init(all_runtime_metadata)
+        .get(provider as usize)
+        .and_then(|metadata| metadata.as_ref())
+}
+
+static RUNTIME_METADATA: OnceLock<[Option<ProviderRuntimeMetadata>; 7]> = OnceLock::new();
 
 pub fn copilot_prompt_token_limit_for_model(model: &str) -> Option<usize> {
     prodex_mojo_core::provider_constraints::provider_copilot_prompt_token_limit(model)

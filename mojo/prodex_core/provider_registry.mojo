@@ -1,6 +1,7 @@
 from std.memory import Pointer
 
 from rich_text import rich_trim_bounds, rich_view_matches_literal, rich_view_valid
+from rich_text import rich_view_ptr
 from rich_types import ProdexRichStringView
 
 comptime PROVIDER_REGISTRY_ABI_VERSION: Int64 = 1
@@ -10,6 +11,15 @@ comptime PROVIDER_REGISTRY_STATUS_UTF8: Int64 = 2
 comptime PROVIDER_REGISTRY_STATUS_ABI: Int64 = 4
 comptime PROVIDER_REGISTRY_PROVIDER_COUNT: Int64 = 7
 comptime PROVIDER_REGISTRY_ENDPOINT_COUNT: Int64 = 11
+
+comptime PROVIDER_RUNTIME_METADATA_ABI_VERSION: Int64 = 1
+comptime PROVIDER_RUNTIME_METADATA_FIELD_COUNT: Int64 = 6
+comptime PROVIDER_RUNTIME_METADATA_MODEL_PROVIDER_ID: Int64 = 0
+comptime PROVIDER_RUNTIME_METADATA_DISPLAY_NAME: Int64 = 1
+comptime PROVIDER_RUNTIME_METADATA_CODEX_PROVIDER_NAME: Int64 = 2
+comptime PROVIDER_RUNTIME_METADATA_DEFAULT_MODEL: Int64 = 3
+comptime PROVIDER_RUNTIME_METADATA_DEFAULT_BASE_URL: Int64 = 4
+comptime PROVIDER_RUNTIME_METADATA_WEB_SEARCH_MODE: Int64 = 5
 
 comptime PROVIDER_OPENAI: Int64 = 0
 comptime PROVIDER_ANTHROPIC: Int64 = 1
@@ -54,6 +64,210 @@ struct ProdexProviderRegistryPlan(Copyable):
     var endpoint_mask: UInt64
     var passthrough_mask: UInt64
     var capability_bits: UInt64
+
+
+@fieldwise_init
+struct ProdexProviderRuntimeMetadataPlan(Copyable):
+    var abi_version: Int64
+    var provider: Int64
+    var default_context_window: Int64
+    var default_auto_compact_token_limit: Int64
+    var image_generation_enabled: Int64
+
+
+def runtime_metadata_plan(provider: Int64) -> ProdexProviderRuntimeMetadataPlan:
+    var context_window: Int64 = 0
+    var auto_compact_limit: Int64 = 0
+    var image_generation: Int64 = 0
+    if provider == PROVIDER_LOCAL:
+        context_window = 16_384
+        auto_compact_limit = 14_000
+    elif provider == PROVIDER_DEEPSEEK:
+        context_window = 1_048_576
+        auto_compact_limit = 900_000
+    elif provider == PROVIDER_GEMINI:
+        context_window = 1_048_576
+        auto_compact_limit = 900_000
+        image_generation = 1
+    elif provider == PROVIDER_ANTHROPIC:
+        context_window = 1_000_000
+        auto_compact_limit = 950_000
+    elif provider == PROVIDER_COPILOT:
+        context_window = 1_050_000
+        auto_compact_limit = 997_500
+    elif provider == PROVIDER_KIRO:
+        context_window = 1_000_000
+        auto_compact_limit = 950_000
+    return ProdexProviderRuntimeMetadataPlan(
+        PROVIDER_RUNTIME_METADATA_ABI_VERSION,
+        provider,
+        context_window,
+        auto_compact_limit,
+        image_generation,
+    )
+
+
+def runtime_metadata_label(
+    provider: Int64, field: Int64
+) -> ProdexRichStringView:
+    var label = StringSlice("")
+    if provider == PROVIDER_LOCAL:
+        if field == PROVIDER_RUNTIME_METADATA_MODEL_PROVIDER_ID:
+            label = StringSlice("prodex-local")
+        elif (
+            field == PROVIDER_RUNTIME_METADATA_DISPLAY_NAME
+            or field == PROVIDER_RUNTIME_METADATA_CODEX_PROVIDER_NAME
+        ):
+            label = StringSlice("Prodex Local")
+        elif field == PROVIDER_RUNTIME_METADATA_DEFAULT_MODEL:
+            label = StringSlice("unsloth/qwen3.5-35b-a3b")
+        elif field == PROVIDER_RUNTIME_METADATA_WEB_SEARCH_MODE:
+            label = StringSlice("disabled")
+    elif provider == PROVIDER_DEEPSEEK:
+        if field == PROVIDER_RUNTIME_METADATA_MODEL_PROVIDER_ID:
+            label = StringSlice("prodex-deepseek")
+        elif (
+            field == PROVIDER_RUNTIME_METADATA_DISPLAY_NAME
+            or field == PROVIDER_RUNTIME_METADATA_CODEX_PROVIDER_NAME
+        ):
+            label = StringSlice("DeepSeek")
+        elif field == PROVIDER_RUNTIME_METADATA_DEFAULT_MODEL:
+            label = StringSlice("deepseek-v4-pro")
+        elif field == PROVIDER_RUNTIME_METADATA_DEFAULT_BASE_URL:
+            label = StringSlice("https://api.deepseek.com")
+        elif field == PROVIDER_RUNTIME_METADATA_WEB_SEARCH_MODE:
+            label = StringSlice("live")
+    elif provider == PROVIDER_GEMINI:
+        if field == PROVIDER_RUNTIME_METADATA_MODEL_PROVIDER_ID:
+            label = StringSlice("prodex-gemini")
+        elif field == PROVIDER_RUNTIME_METADATA_DISPLAY_NAME:
+            label = StringSlice("Google Gemini")
+        elif field == PROVIDER_RUNTIME_METADATA_CODEX_PROVIDER_NAME:
+            label = StringSlice("Azure")
+        elif field == PROVIDER_RUNTIME_METADATA_DEFAULT_MODEL:
+            label = StringSlice("auto")
+        elif field == PROVIDER_RUNTIME_METADATA_DEFAULT_BASE_URL:
+            label = StringSlice(
+                "https://generativelanguage.googleapis.com/v1beta"
+            )
+        elif field == PROVIDER_RUNTIME_METADATA_WEB_SEARCH_MODE:
+            label = StringSlice("live")
+    elif provider == PROVIDER_ANTHROPIC:
+        if field == PROVIDER_RUNTIME_METADATA_MODEL_PROVIDER_ID:
+            label = StringSlice("prodex-anthropic")
+        elif (
+            field == PROVIDER_RUNTIME_METADATA_DISPLAY_NAME
+            or field == PROVIDER_RUNTIME_METADATA_CODEX_PROVIDER_NAME
+        ):
+            label = StringSlice("Anthropic Claude")
+        elif field == PROVIDER_RUNTIME_METADATA_DEFAULT_MODEL:
+            label = StringSlice("claude-sonnet-5-5")
+        elif field == PROVIDER_RUNTIME_METADATA_DEFAULT_BASE_URL:
+            label = StringSlice("https://api.anthropic.com/v1")
+        elif field == PROVIDER_RUNTIME_METADATA_WEB_SEARCH_MODE:
+            label = StringSlice("live")
+    elif provider == PROVIDER_COPILOT:
+        if field == PROVIDER_RUNTIME_METADATA_MODEL_PROVIDER_ID:
+            label = StringSlice("prodex-copilot")
+        elif field == PROVIDER_RUNTIME_METADATA_DISPLAY_NAME:
+            label = StringSlice("GitHub Copilot")
+        elif field == PROVIDER_RUNTIME_METADATA_CODEX_PROVIDER_NAME:
+            label = StringSlice("OpenAI")
+        elif field == PROVIDER_RUNTIME_METADATA_DEFAULT_MODEL:
+            label = StringSlice("gpt-6-astra")
+        elif field == PROVIDER_RUNTIME_METADATA_DEFAULT_BASE_URL:
+            label = StringSlice("https://api.githubcopilot.com")
+        elif field == PROVIDER_RUNTIME_METADATA_WEB_SEARCH_MODE:
+            label = StringSlice("live")
+    elif provider == PROVIDER_KIRO:
+        if field == PROVIDER_RUNTIME_METADATA_MODEL_PROVIDER_ID:
+            label = StringSlice("prodex-kiro")
+        elif field == PROVIDER_RUNTIME_METADATA_DISPLAY_NAME:
+            label = StringSlice("Kiro")
+        elif field == PROVIDER_RUNTIME_METADATA_CODEX_PROVIDER_NAME:
+            label = StringSlice("Azure")
+        elif field == PROVIDER_RUNTIME_METADATA_DEFAULT_MODEL:
+            label = StringSlice("auto")
+        elif field == PROVIDER_RUNTIME_METADATA_DEFAULT_BASE_URL:
+            label = StringSlice("https://kiro.dev")
+        elif field == PROVIDER_RUNTIME_METADATA_WEB_SEARCH_MODE:
+            label = StringSlice("live")
+    return ProdexRichStringView(
+        UInt(Int(label.unsafe_ptr())), UInt(label.byte_length())
+    )
+
+
+def runtime_metadata_copy_label(
+    label: ProdexRichStringView,
+    output_address: UInt,
+    output_capacity: Int64,
+    written_address: UInt,
+) -> Int64:
+    if output_address == 0 or output_capacity < 0 or written_address == 0:
+        return PROVIDER_REGISTRY_STATUS_INVALID
+    var length = Int64(label.len)
+    if length > output_capacity:
+        return 2
+    var output = Pointer[mut=True, UInt8, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    var written = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(written_address)
+    )
+    var source = rich_view_ptr(label)
+    for index in range(length):
+        output[unsafe_offset=index] = source[unsafe_offset=index]
+    written[] = length
+    return PROVIDER_REGISTRY_STATUS_OK
+
+
+@export("prodex_mojo_provider_runtime_metadata_plan_v1")
+def prodex_mojo_provider_runtime_metadata_plan_v1(
+    abi_version: Int64,
+    provider: Int64,
+    output_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != PROVIDER_RUNTIME_METADATA_ABI_VERSION:
+        return PROVIDER_REGISTRY_STATUS_ABI
+    if (
+        provider <= PROVIDER_OPENAI
+        or provider >= PROVIDER_REGISTRY_PROVIDER_COUNT
+        or output_address == 0
+    ):
+        return PROVIDER_REGISTRY_STATUS_INVALID
+    var output = Pointer[
+        mut=True,
+        ProdexProviderRuntimeMetadataPlan,
+        MutUntrackedOrigin,
+    ](unsafe_from_address=Int(output_address))
+    output[] = runtime_metadata_plan(provider)
+    return PROVIDER_REGISTRY_STATUS_OK
+
+
+@export("prodex_mojo_provider_runtime_metadata_label_v1")
+def prodex_mojo_provider_runtime_metadata_label_v1(
+    abi_version: Int64,
+    provider: Int64,
+    field: Int64,
+    output_address: UInt,
+    output_capacity: Int64,
+    written_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != PROVIDER_RUNTIME_METADATA_ABI_VERSION:
+        return PROVIDER_REGISTRY_STATUS_ABI
+    if (
+        provider <= PROVIDER_OPENAI
+        or provider >= PROVIDER_REGISTRY_PROVIDER_COUNT
+        or field < 0
+        or field >= PROVIDER_RUNTIME_METADATA_FIELD_COUNT
+    ):
+        return PROVIDER_REGISTRY_STATUS_INVALID
+    return runtime_metadata_copy_label(
+        runtime_metadata_label(provider, field),
+        output_address,
+        output_capacity,
+        written_address,
+    )
 
 
 def endpoint_bit(index: Int64) -> UInt64:

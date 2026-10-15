@@ -2437,6 +2437,40 @@
         "operations": [
           "runtime_quota_summary_sort_key"
         ]
+      },
+      {
+        "path": "mojo/prodex_core/provider_registry.mojo",
+        "language": "mojo",
+        "classification": "MIXED",
+        "semantic_ranges": [
+          {
+            "start": 19,
+            "end": 26
+          },
+          {
+            "start": 74,
+            "end": 80
+          },
+          {
+            "start": 83,
+            "end": 276
+          }
+        ],
+        "production_reachable": true,
+        "role": "semantic",
+        "operations": [
+          "provider_runtime_metadata"
+        ]
+      },
+      {
+        "path": "crates/prodex-mojo-core/src/provider_registry.rs",
+        "language": "rust",
+        "classification": "MIXED",
+        "production_reachable": true,
+        "role": "adapter",
+        "operations": [
+          "provider_runtime_metadata"
+        ]
       }
     ],
     "removed": [
@@ -7284,6 +7318,34 @@
       "duplicate_production_owner": false,
       "platform_fallback": false,
       "rust_adapter_scope": "typed enum/bool decoding, CLI error text, policy DTO mapping, and Codex config source ownership"
+    },
+    {
+      "name": "provider_runtime_metadata",
+      "domain": "provider/runtime-metadata",
+      "introduced_in": "0.438.0",
+      "baseline_state": "candidate",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_mojo_provider_runtime_metadata_plan_v1",
+      "mojo_abi_version": 1,
+      "mojo_operation_ids": {
+        "numeric_plan": 0,
+        "string_fields": 1
+      },
+      "mojo_source": "mojo/prodex_core/provider_registry.mojo",
+      "consumer": "crates/prodex-provider-core/src/runtime_metadata.rs",
+      "consumer_marker": "prodex_mojo_core::provider_registry::runtime_metadata(",
+      "production_consumers": [
+        "crates/prodex-provider-core/src/runtime_metadata.rs",
+        "crates/prodex-provider-core/src/implementation_registry/mojo.rs"
+      ],
+      "production_reachability_test": "crates/prodex-mojo-core/src/provider_registry.rs",
+      "rust_owner_before": "Rust selected built-in provider runtime metadata tables, including model-provider IDs, display and Codex names, defaults, web-search modes, and image-generation capability",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "deleted; direct compiled-Mojo ABI coverage and provider-core registry/runtime metadata tests preserve every provider field, remote-compaction provider names, optional local URL, and numeric bounds",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "Public launch-default constants remain as compatibility exports; Rust performs bounded ABI calls, UTF-8 materialization, typed validation, and process-lifetime metadata caching"
     },
     {
       "name": "catalog_ascii_casefold_find",
@@ -12687,6 +12749,52 @@
       "production_consumer": "crates/prodex-provider-core/src/translators/deepseek/stream/shaping.rs",
       "parity_test": "crates/prodex-mojo-core/tests/deepseek_stream_error.rs",
       "cleanup_evidence": "The old DeepSeek error branch is absent from the release stream module; the shaping adapter retains only Serde serialization, Mojo invocation, and typed result mapping."
+    },
+    {
+      "file": "crates/prodex-provider-core/src/runtime_metadata.rs",
+      "symbol": "LOCAL_RUNTIME_METADATA",
+      "operation": "provider_runtime_metadata",
+      "previous_responsibility": "Rust materialized six built-in runtime metadata records with provider model IDs, display/Codex names, defaults, web-search modes, and image-generation flags",
+      "final_state": "deleted",
+      "cleanup_loc": 72,
+      "cleanup_source": {
+        "kind": "deleted",
+        "baseline_range": {
+          "start": 57,
+          "end": 133
+        }
+      },
+      "rust_before": "crates/prodex-provider-core/src/runtime_metadata.rs::LOCAL_RUNTIME_METADATA through KIRO_RUNTIME_METADATA",
+      "rust_after": "Rust retains the public default constants for downstream launch configuration and maps validated Mojo records into a cached public metadata structure",
+      "mojo_owner": "mojo/prodex_core/provider_registry.mojo::prodex_mojo_provider_runtime_metadata_plan_v1",
+      "mojo_source": "mojo/prodex_core/provider_registry.mojo",
+      "mojo_entry": "prodex_mojo_provider_runtime_metadata_plan_v1 and prodex_mojo_provider_runtime_metadata_label_v1",
+      "production_consumer": "crates/prodex-provider-core/src/runtime_metadata.rs",
+      "parity_test": "crates/prodex-mojo-core/src/provider_registry.rs",
+      "cleanup_evidence": "All six Rust metadata record constructors are deleted; production metadata fields now arrive only through the versioned Mojo plan and bounded label ABI."
+    },
+    {
+      "file": "crates/prodex-provider-core/src/implementation_registry.rs",
+      "symbol": "builtin_provider_runtime_metadata",
+      "operation": "provider_runtime_metadata",
+      "previous_responsibility": "Rust selected the built-in runtime metadata record for each provider implementation",
+      "final_state": "deleted",
+      "cleanup_loc": 5,
+      "cleanup_source": {
+        "kind": "deleted",
+        "baseline_range": {
+          "start": 526,
+          "end": 530
+        }
+      },
+      "rust_before": "crates/prodex-provider-core/src/implementation_registry.rs::builtin_provider_runtime_metadata",
+      "rust_after": "Provider registration obtains validated runtime metadata from the Mojo-backed runtime metadata adapter",
+      "mojo_owner": "mojo/prodex_core/provider_registry.mojo::prodex_mojo_provider_runtime_metadata_plan_v1",
+      "mojo_source": "mojo/prodex_core/provider_registry.mojo",
+      "mojo_entry": "prodex_mojo_provider_runtime_metadata_plan_v1 and prodex_mojo_provider_runtime_metadata_label_v1",
+      "production_consumer": "crates/prodex-provider-core/src/implementation_registry/mojo.rs",
+      "parity_test": "crates/prodex-provider-core/src/implementation_registry.rs",
+      "cleanup_evidence": "The provider match is deleted; the registry now receives metadata through the mandatory Mojo-backed runtime metadata loader."
     },
     {
       "file": "crates/prodex-app/src/app_commands/log_tui.rs",

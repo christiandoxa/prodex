@@ -57,18 +57,6 @@ fn model_catalog(provider: ProviderId) -> &'static [ProviderModelSpec] {
     builtin_model_catalog(provider)
 }
 
-fn runtime_metadata(provider: ProviderId) -> Option<&'static ProviderRuntimeMetadata> {
-    match provider {
-        ProviderId::OpenAi => None,
-        ProviderId::Anthropic => Some(&ANTHROPIC_RUNTIME_METADATA),
-        ProviderId::Copilot => Some(&COPILOT_RUNTIME_METADATA),
-        ProviderId::DeepSeek => Some(&DEEPSEEK_RUNTIME_METADATA),
-        ProviderId::Gemini => Some(&GEMINI_RUNTIME_METADATA),
-        ProviderId::Kiro => Some(&KIRO_RUNTIME_METADATA),
-        ProviderId::Local => Some(&LOCAL_RUNTIME_METADATA),
-    }
-}
-
 fn selected_endpoints(mask: u64) -> &'static [ProviderEndpoint] {
     let values = ALL_PROVIDER_ENDPOINTS
         .iter()
@@ -111,7 +99,7 @@ fn registration(provider: ProviderId) -> ProviderImplementationRegistration {
         capabilities: capabilities(plan),
         passthrough_endpoints: selected_endpoints(plan.passthrough_mask),
         model_catalog: model_catalog(provider),
-        runtime_metadata: runtime_metadata(provider),
+        runtime_metadata: crate::runtime_metadata::provider_runtime_metadata(provider),
     }
 }
 
