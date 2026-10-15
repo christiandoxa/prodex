@@ -2155,18 +2155,27 @@
         "classification": "DETERMINISTIC_DOMAIN",
         "semantic_ranges": [
           {
-            "start": 19,
-            "end": 19
+            "start": 20,
+            "end": 20
           },
           {
-            "start": 274,
-            "end": 284
+            "start": 72,
+            "end": 103
+          },
+          {
+            "start": 309,
+            "end": 319
+          },
+          {
+            "start": 325,
+            "end": 329
           }
         ],
         "production_reachable": true,
         "role": "semantic",
         "operations": [
-          "shared_attachment_sqlite_header_classification"
+          "shared_attachment_sqlite_header_classification",
+          "shared_codex_dynamic_file_name_classification"
         ]
       },
       {
@@ -2176,7 +2185,8 @@
         "production_reachable": true,
         "role": "adapter",
         "operations": [
-          "shared_attachment_sqlite_header_classification"
+          "shared_attachment_sqlite_header_classification",
+          "shared_codex_dynamic_file_name_classification"
         ]
       },
       {
@@ -9544,6 +9554,32 @@
       "duplicate_production_owner": false,
       "platform_fallback": false,
       "rust_adapter_scope": "filesystem metadata/open/read, fixed-size header acquisition, and typed Mojo result/error propagation"
+    },
+    {
+      "name": "shared_codex_dynamic_file_name_classification",
+      "domain": "shared-codex-fs/file-name",
+      "introduced_in": "0.439.0",
+      "baseline_state": "Rust classified dynamic profile-v2 config names and SQLite sidecar names while scanning shared Codex roots",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_shared_attachment_policy_v1",
+      "mojo_abi_version": 1,
+      "mojo_operation_ids": {
+        "dynamic_file_name": 8
+      },
+      "mojo_source": "mojo/prodex_core/shared_attachment_policy.mojo",
+      "consumer": "crates/prodex-shared-codex-fs/src/prepare.rs",
+      "consumer_marker": "shared_attachment_policy::shared_codex_file_name_is_shared(",
+      "production_consumers": [
+        "crates/prodex-shared-codex-fs/src/prepare.rs"
+      ],
+      "production_reachability_test": "crates/prodex-mojo-core/src/shared_attachment_policy.rs",
+      "rust_owner_before": "Rust decided whether a root filename matched the profile-v2 config grammar or one of the shared SQLite prefixes and suffixes",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "deleted; the compiled Mojo adapter matrix and managed-home config/SQLite migration callers cover accepted and rejected names",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "directory enumeration, lossy filename acquisition, bounded Mojo result validation, set accumulation, and filesystem/symlink effects"
     },
     {
       "name": "info_runtime_quota_runway_estimate",

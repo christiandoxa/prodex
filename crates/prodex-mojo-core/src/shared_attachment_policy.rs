@@ -9,6 +9,7 @@ const PERSISTABLE_NAME: i64 = 4;
 const ROLLOUT_NAME: i64 = 5;
 const GOAL_OBJECTIVE_NAME: i64 = 6;
 const SQLITE_HEADER: i64 = 7;
+const DYNAMIC_FILE_NAME: i64 = 8;
 
 unsafe extern "C" {
     fn prodex_shared_attachment_policy_v1(
@@ -121,6 +122,10 @@ pub fn sqlite_header_is_sqlite(header: &[u8]) -> Result<bool, MojoError> {
     bool_output(call_bytes(SQLITE_HEADER, header, 0)?)
 }
 
+pub fn shared_codex_file_name_is_shared(file_name: &str) -> Result<bool, MojoError> {
+    bool_output(call(DYNAMIC_FILE_NAME, file_name, 0)?)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -191,5 +196,41 @@ mod tests {
         assert!(sqlite_header_is_sqlite(b"SQLite format 3\0").unwrap());
         assert!(!sqlite_header_is_sqlite(&[0xff; 16]).unwrap());
         assert!(!sqlite_header_is_sqlite(b"SQLite format 3").unwrap());
+    }
+
+    #[test]
+    fn shared_codex_file_name_policy_covers_config_and_sqlite_sidecars() {
+        for name in [
+            "local_1-prod.config.toml",
+            "state_1.sqlite",
+            "logs_1.sqlite-shm",
+            "goals_1.sqlite-wal",
+            "memories_1.sqlite",
+        ] {
+            assert!(
+                shared_codex_file_name_is_shared(name).unwrap(),
+                "expected shared Codex filename: {name}"
+            );
+        }
+        for name in [
+            ".config.toml",
+            "team.prod.config.toml",
+            "../prod.config.toml",
+            "queue_1.sqlite",
+            "state_1.sqlite-journal",
+        ] {
+            assert!(
+                !shared_codex_file_name_is_shared(name).unwrap(),
+                "unexpected shared Codex filename: {name}"
+            );
+        }
+    }
+
+    #[test]
+    fn shared_codex_file_name_policy_rejects_invalid_utf8_at_the_abi() {
+        assert_eq!(
+            call_bytes(DYNAMIC_FILE_NAME, &[0xff], 0),
+            Err(MojoError::InvalidInput)
+        );
     }
 }

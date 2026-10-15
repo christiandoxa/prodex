@@ -267,17 +267,17 @@ fn shared_codex_manifest_keeps_cloud_config_bundle_cache_profile_local() {
 }
 
 #[test]
-fn profile_v2_config_names_match_plain_ascii_profile_names() {
-    assert!(is_shared_codex_profile_v2_config_name(
-        "local_1-prod.config.toml"
-    ));
-    assert!(!is_shared_codex_profile_v2_config_name(".config.toml"));
-    assert!(!is_shared_codex_profile_v2_config_name(
-        "team.prod.config.toml"
-    ));
-    assert!(!is_shared_codex_profile_v2_config_name(
-        "../prod.config.toml"
-    ));
+fn shared_codex_dynamic_file_name_caller_uses_mojo_policy() {
+    use prodex_mojo_core::shared_attachment_policy::shared_codex_file_name_is_shared as classify;
+    assert!(classify("local_1-prod.config.toml").unwrap());
+    assert!(classify("state_1.sqlite").unwrap());
+    assert!(classify("logs_1.sqlite-shm").unwrap());
+    assert!(classify("goals_1.sqlite-wal").unwrap());
+    assert!(classify("memories_1.sqlite").unwrap());
+    assert!(!classify(".config.toml").unwrap());
+    assert!(!classify("team.prod.config.toml").unwrap());
+    assert!(!classify("queue_1.sqlite").unwrap());
+    assert!(!classify("state_1.sqlite-journal").unwrap());
 }
 
 #[cfg(unix)]
