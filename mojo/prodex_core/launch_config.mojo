@@ -410,6 +410,67 @@ def prodex_launch_exit_status_cancelled_v1(
     return 0
 
 
+# Usage-limit relaunch planning keeps profile facts in Rust and owns only the
+# bounded candidate/fallback precedence here. Output is the selected index.
+@export("prodex_launch_usage_limit_recovery_candidate_v1")
+def prodex_launch_usage_limit_recovery_candidate_v1(
+    abi_version: Int64,
+    allow_failed_profile: Int64,
+    skip_quota_check: Int64,
+    failed_profile_eligible: Int64,
+    failed_profile_attempted: Int64,
+    failed_profile_ready: Int64,
+    candidate_eligible_address: UInt,
+    candidate_attempted_address: UInt,
+    candidate_count: Int64,
+    output_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != 1:
+        return -3
+    for flag in [
+        allow_failed_profile,
+        skip_quota_check,
+        failed_profile_eligible,
+        failed_profile_attempted,
+        failed_profile_ready,
+    ]:
+        if flag != 0 and flag != 1:
+            return -2
+    if candidate_count < 0 or candidate_count > 256 or output_address == 0:
+        return -2
+    if candidate_count > 0 and (
+        candidate_eligible_address == 0 or candidate_attempted_address == 0
+    ):
+        return -2
+
+    var selected = Int64(-1)
+    var eligible = Pointer[mut=False, Int64, ImmUntrackedOrigin](
+        unsafe_from_address=Int(candidate_eligible_address)
+    )
+    var attempted = Pointer[mut=False, Int64, ImmUntrackedOrigin](
+        unsafe_from_address=Int(candidate_attempted_address)
+    )
+    for index in range(candidate_count):
+        if eligible[unsafe_offset=index] != 0 and eligible[unsafe_offset=index] != 1:
+            return -2
+        if attempted[unsafe_offset=index] != 0 and attempted[unsafe_offset=index] != 1:
+            return -2
+        if selected < 0 and eligible[unsafe_offset=index] == 1 and attempted[unsafe_offset=index] == 0:
+            selected = index
+
+    if selected < 0 and allow_failed_profile == 1 and failed_profile_eligible == 1 and (
+        failed_profile_attempted == 0
+        and (skip_quota_check == 1 or failed_profile_ready == 1)
+    ):
+        selected = candidate_count
+
+    var output = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    output[] = selected
+    return 0
+
+
 # Append-only exit text: the host must not reopen an inline TUI over Codex's
 # existing session/usage footer. Only canonical UUIDs may enter the command.
 def launch_saved_session_literal(

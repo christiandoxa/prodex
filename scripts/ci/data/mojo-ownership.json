@@ -2197,7 +2197,8 @@
           "runtime_workflow_evidence_policy",
           "native_session_marker_arbitration",
           "saved_session_exit_guidance",
-          "runtime_launch_exit_cancellation_policy"
+          "runtime_launch_exit_cancellation_policy",
+          "runtime_usage_limit_recovery_candidate_policy"
         ]
       },
       {
@@ -11447,6 +11448,30 @@
        "rust_adapter_scope": "Serde Value acquisition, existing media/grounding Mojo projections, bounded fact packing, callback/tool item materialization, JSON serialization, and typed batch-plan mapping"
     },
     {
+      "name": "runtime_usage_limit_recovery_candidate_policy",
+      "domain": "runtime/launch-recovery",
+      "introduced_in": "0.438.0",
+      "baseline_state": "Rust selected the first unattempted eligible replacement profile and then applied the failed-profile readiness fallback.",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_launch_usage_limit_recovery_candidate_v1",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/launch_config.mojo",
+      "consumer": "crates/prodex-app/src/app_commands/runtime_launch/usage_limit_recovery/plan.rs",
+      "consumer_marker": "usage_limit_recovery_candidate(",
+      "production_consumers": [
+        "crates/prodex-app/src/app_commands/runtime_launch/usage_limit_recovery/plan.rs"
+      ],
+      "production_reachability_test": "crates/prodex-mojo-core/src/launch/usage_limit.rs",
+      "caller_regression_test": "crates/prodex-app/src/app_commands/runtime_launch/usage_limit_recovery/tests.rs",
+      "rust_owner_before": "First eligible unattempted candidate selection, attempted-profile exclusion, and failed-profile readiness fallback after usage-limit recovery.",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "deleted; compiled Mojo ABI cases and the runtime-launch fallback regression preserve candidate order, bounded input validation, and failed-profile precedence.",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "Profile/state/auth/quota fact acquisition, bounded input marshalling, typed selection reconstruction, and relaunch effects remain in Rust."
+    },
+    {
       "name": "housekeeping_stale_login_retention",
       "domain": "housekeeping/login-retention",
       "introduced_in": "0.420.0",
@@ -13451,6 +13476,32 @@
       "production_consumer": "crates/prodex-app/src/runtime_proxy/websocket/response_tracking/precommit.rs",
       "parity_test": "crates/prodex-app/tests/src/runtime_proxy/websocket/precommit_hold.rs::websocket_precommit_hold_response_created_commits_at_terminal_event",
        "cleanup_evidence": "The old Rust lookahead comparison and promotion precedence are gone; only effectful logging and frame buffering remain in the caller."
+    },
+    {
+      "file": "crates/prodex-app/src/app_commands/runtime_launch/goal_resume.rs",
+      "symbol": "profile_name",
+      "operation": "runtime_usage_limit_recovery_candidate_policy",
+      "previous_responsibility": "Rust selected the first unattempted eligible replacement profile and applied the failed-profile readiness fallback.",
+      "final_state": "adapter-only",
+      "cleanup_loc": 17,
+      "cleanup_source": {
+        "kind": "collapsed-adapter",
+        "path": "crates/prodex-app/src/app_commands/runtime_launch/goal_resume.rs",
+        "baseline_range": {
+          "start": 93,
+          "end": 109
+        },
+        "release_symbol": ") -> Option<GoalResumeRelaunchPlan> {\n        let requested_model",
+        "release_marker": "next_runtime_usage_limit_plan("
+      },
+      "rust_before": "crates/prodex-app/src/app_commands/runtime_launch/goal_resume.rs::next_goal_resume_plan",
+      "rust_after": "Rust retains profile/state/auth/quota acquisition and maps the mandatory Mojo selection into the relaunch plan.",
+      "mojo_owner": "mojo/prodex_core/launch_config.mojo::prodex_launch_usage_limit_recovery_candidate_v1",
+      "mojo_source": "mojo/prodex_core/launch_config.mojo",
+      "mojo_entry": "prodex_launch_usage_limit_recovery_candidate_v1",
+      "production_consumer": "crates/prodex-app/src/app_commands/runtime_launch/usage_limit_recovery/plan.rs",
+      "parity_test": "crates/prodex-mojo-core/src/launch/usage_limit.rs and crates/prodex-app/src/app_commands/runtime_launch/usage_limit_recovery/tests.rs::usage_limit_recovery_reuses_failed_profile_after_candidates_are_attempted",
+      "cleanup_evidence": "The Rust candidate filter/find/fallback branch is removed; the compiled Mojo ABI owns candidate order and final failed-profile precedence while Rust retains host facts and effects."
     }
   ],
   "deleted_authoritative_operations": [
