@@ -234,6 +234,40 @@ fn profile_import_rejects_provider_profile_missing_required_secret_file() {
 }
 
 #[test]
+fn profile_import_rejects_provider_profile_with_unexpected_secret_file() {
+    let sandbox_dir = ProfileCommandsTestDir::new("profile-commands-env");
+    let _env = ProfileCommandsTestEnv::new(&sandbox_dir.path);
+    let target_dir = ProfileCommandsTestDir::new("import-provider-unexpected-secret");
+    let target_paths = profile_commands_test_paths(&target_dir.path);
+    let payload = ProfileExportPayload {
+        exported_at: Local::now().to_rfc3339(),
+        source_prodex_version: env!("CARGO_PKG_VERSION").to_string(),
+        active_profile: Some("main".to_string()),
+        profiles: vec![ExportedProfile {
+            name: "main".to_string(),
+            email: None,
+            source_managed: true,
+            provider: ProfileProvider::Openai,
+            auth_json: String::new(),
+            secret_files: vec![prodex_profile_export::ExportedSecretFile {
+                path: "unexpected.json".to_string(),
+                text: "credential-sentinel".to_string(),
+            }],
+        }],
+    };
+    let mut state = AppState::default();
+
+    let err = import_profile_export_payload(&target_paths, &mut state, &payload)
+        .expect_err("provider import with an unexpected secret file should fail");
+    assert!(
+        err.to_string()
+            .contains("unexpected secret file 'unexpected.json'"),
+        "unexpected error: {err:#}"
+    );
+    assert!(state.profiles.is_empty());
+}
+
+#[test]
 fn profile_import_rejects_same_name_cross_provider_update() {
     let sandbox_dir = ProfileCommandsTestDir::new("profile-commands-env");
     let _env = ProfileCommandsTestEnv::new(&sandbox_dir.path);

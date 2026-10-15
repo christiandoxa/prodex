@@ -180,3 +180,86 @@ fn profile_import_auth_update_plan_is_mojo_owned_and_input_sensitive() {
         profile_import_auth_update_plan("new", &existing, false).unwrap()
     );
 }
+
+#[test]
+fn profile_import_secret_file_schema_is_mojo_owned() {
+    assert_eq!(
+        profile_import_secret_file_policy(
+            "gemini",
+            ProfileImportSecretFilePolicyMode::Item,
+            Some("gemini_oauth.json"),
+            &[],
+        )
+        .unwrap(),
+        ProfileImportSecretFilePolicy::Accepted
+    );
+    assert_eq!(
+        profile_import_secret_file_policy(
+            "gemini",
+            ProfileImportSecretFilePolicyMode::Item,
+            Some("gemini_oauth.json"),
+            &["gemini_oauth.json"],
+        )
+        .unwrap(),
+        ProfileImportSecretFilePolicy::Duplicate
+    );
+    assert_eq!(
+        profile_import_secret_file_policy(
+            "gemini",
+            ProfileImportSecretFilePolicyMode::Item,
+            Some("other.json"),
+            &[],
+        )
+        .unwrap(),
+        ProfileImportSecretFilePolicy::Unexpected
+    );
+    assert_eq!(
+        profile_import_secret_file_policy(
+            "anthropic",
+            ProfileImportSecretFilePolicyMode::Item,
+            Some(".credentials.json"),
+            &[],
+        )
+        .unwrap(),
+        ProfileImportSecretFilePolicy::Accepted
+    );
+    assert_eq!(
+        profile_import_secret_file_policy(
+            "gemini",
+            ProfileImportSecretFilePolicyMode::Required,
+            None,
+            &[],
+        )
+        .unwrap(),
+        ProfileImportSecretFilePolicy::MissingGemini
+    );
+    assert_eq!(
+        profile_import_secret_file_policy(
+            "kiro",
+            ProfileImportSecretFilePolicyMode::Item,
+            Some("kiro_model_catalog.json"),
+            &[],
+        )
+        .unwrap(),
+        ProfileImportSecretFilePolicy::Accepted
+    );
+    assert_eq!(
+        profile_import_secret_file_policy(
+            "openai",
+            ProfileImportSecretFilePolicyMode::Required,
+            None,
+            &[],
+        )
+        .unwrap(),
+        ProfileImportSecretFilePolicy::Accepted
+    );
+    assert_eq!(
+        profile_import_secret_file_policy(
+            "unknown",
+            ProfileImportSecretFilePolicyMode::Item,
+            Some("auth.json"),
+            &[],
+        ),
+        Err(prodex_mojo_core::MojoError::InvalidInput)
+    );
+}

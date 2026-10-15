@@ -5551,3 +5551,10 @@ The existing Mojo profile-login policy is now enforced by the no-fallback guard
 for status, API-key, and Claude login callers. Its transition and candidate
 selection matrices remain the single semantic owner; Rust retains credential,
 browser, filesystem, and persistence effects.
+
+## Imported secret-file schema policy migration
+
+Imported profile bundles now use the compiled Mojo profile-export policy for
+provider-specific allowed filenames, duplicate detection, and required-file
+presence. Rust keeps path safety, secret-content parsing, error text, and all
+filesystem and credential effects, preserving the existing compatibility errors.
