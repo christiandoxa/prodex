@@ -8,7 +8,6 @@ use crate::{
     extract_runtime_turn_state_from_value, runtime_proxy_stale_continuation_message,
     runtime_response_event_type_from_value,
 };
-use prodex_mojo_core::rich::ascii_casefold_equal_exact;
 use prodex_mojo_core::runtime::{WebsocketStaleFrameAction, websocket_stale_frame_plan};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -239,10 +238,11 @@ pub fn inspect_runtime_websocket_text_frame_with_phase_checked(
     let event_type = runtime_response_event_type_from_value(&value);
     let error_policy =
         crate::error_policy::runtime_stream_error_policy_from_value_checked(&value, phase)?;
+    let terminal_frame_plan = runtime_websocket_terminal_frame_plan(&value)?;
     let retry_kind = match crate::runtime_websocket_failure_frame_classification(
         error_policy.class as i64,
         error_policy.action as i64,
-        runtime_websocket_connection_limit_reached(&value),
+        terminal_frame_plan.connection_limit,
         extract_runtime_proxy_previous_response_message_from_value(&value).is_some(),
         matches!(phase, RuntimeHttpErrorPhase::Committed),
     )? {
@@ -260,7 +260,7 @@ pub fn inspect_runtime_websocket_text_frame_with_phase_checked(
     let terminal_event = event_type
         .as_deref()
         .is_some_and(runtime_responses_websocket_terminal_event_kind)
-        || runtime_websocket_wrapped_error_is_terminal(&value);
+        || terminal_frame_plan.terminal;
 
     Ok(RuntimeInspectedWebsocketTextFrame {
         event_type,
@@ -274,37 +274,31 @@ pub fn inspect_runtime_websocket_text_frame_with_phase_checked(
     })
 }
 
-fn runtime_websocket_connection_limit_reached(value: &serde_json::Value) -> bool {
-    const CODE: &str = "websocket_connection_limit_reached";
-    value
-        .get("error")
-        .and_then(|error| error.get("code"))
-        .and_then(serde_json::Value::as_str)
-        .is_some_and(|code| {
-            ascii_casefold_equal_exact(code, CODE)
-                .expect("Mojo websocket error-code comparison failed")
-        })
-        || value
-            .get("code")
-            .and_then(serde_json::Value::as_str)
-            .is_some_and(|code| {
-                ascii_casefold_equal_exact(code, CODE)
-                    .expect("Mojo websocket error-code comparison failed")
-            })
-}
-
-fn runtime_websocket_wrapped_error_is_terminal(value: &serde_json::Value) -> bool {
-    runtime_response_event_type_from_value(value).as_deref() == Some("error")
-        && (runtime_websocket_connection_limit_reached(value)
-            || runtime_websocket_wrapped_error_status(value).is_some_and(|status| status >= 400))
-}
-
-fn runtime_websocket_wrapped_error_status(value: &serde_json::Value) -> Option<u16> {
-    value
+fn runtime_websocket_terminal_frame_plan(
+    value: &serde_json::Value,
+) -> Result<prodex_mojo_core::runtime::WebsocketTerminalFramePlan, prodex_mojo_core::MojoError> {
+    let status = value
         .get("status")
-        .or_else(|| value.get("status_code"))
         .and_then(serde_json::Value::as_u64)
-        .and_then(|status| u16::try_from(status).ok())
+        .and_then(|status| u16::try_from(status).ok());
+    let status_code = if value.get("status").is_some() {
+        None
+    } else {
+        value
+            .get("status_code")
+            .and_then(serde_json::Value::as_u64)
+            .and_then(|status| u16::try_from(status).ok())
+    };
+    prodex_mojo_core::runtime::websocket_terminal_frame_plan(
+        runtime_response_event_type_from_value(value).as_deref(),
+        value
+            .get("error")
+            .and_then(|error| error.get("code"))
+            .and_then(serde_json::Value::as_str),
+        value.get("code").and_then(serde_json::Value::as_str),
+        status,
+        status_code,
+    )
 }
 
 pub fn runtime_proxy_precommit_hold_event_kind(kind: &str) -> bool {
@@ -332,7 +326,9 @@ pub(crate) fn is_runtime_terminal_event(payload: &str) -> bool {
     runtime_response_event_type_from_value(&value)
         .as_deref()
         .is_some_and(runtime_responses_websocket_terminal_event_kind)
-        || runtime_websocket_wrapped_error_is_terminal(&value)
+        || runtime_websocket_terminal_frame_plan(&value)
+            .expect("Mojo websocket terminal-frame plan returned invalid output")
+            .terminal
 }
 
 #[cfg(test)]

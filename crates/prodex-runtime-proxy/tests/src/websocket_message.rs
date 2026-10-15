@@ -438,6 +438,47 @@ fn websocket_text_frame_inspection_classifies_connection_limit() {
 }
 
 #[test]
+fn websocket_terminal_frame_plan_preserves_mojo_code_and_status_precedence() {
+    let casefolded = serde_json::json!({
+        "type": "error",
+        "error": {"code": "WEBSOCKET_CONNECTION_LIMIT_REACHED"},
+    })
+    .to_string();
+    let inspected = inspect_runtime_websocket_text_frame(&casefolded);
+    assert_eq!(
+        inspected.retry_kind,
+        Some(RuntimeWebsocketRetryInspectionKind::ConnectionLimitReached)
+    );
+    assert!(inspected.terminal_event);
+
+    let top_level_code = serde_json::json!({
+        "type": "error",
+        "code": "websocket_connection_limit_reached",
+    })
+    .to_string();
+    assert_eq!(
+        inspect_runtime_websocket_text_frame(&top_level_code).retry_kind,
+        Some(RuntimeWebsocketRetryInspectionKind::ConnectionLimitReached)
+    );
+
+    let status_precedence = serde_json::json!({
+        "type": "error",
+        "status": 399,
+        "status_code": 400,
+    })
+    .to_string();
+    assert!(!inspect_runtime_websocket_text_frame(&status_precedence).terminal_event);
+
+    let invalid_status_precedence = serde_json::json!({
+        "type": "error",
+        "status": "invalid",
+        "status_code": 400,
+    })
+    .to_string();
+    assert!(!inspect_runtime_websocket_text_frame(&invalid_status_precedence).terminal_event);
+}
+
+#[test]
 fn websocket_text_frame_inspection_treats_wrapped_status_error_as_terminal() {
     let payload = serde_json::json!({
         "type": "error",
