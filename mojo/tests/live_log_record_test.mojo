@@ -3,10 +3,12 @@ from std.collections.list import List
 
 from live_log_record import (
     LIVE_LOG_RECORD_CAPACITY,
+    LIVE_LOG_RECORD_INVALID,
     LIVE_LOG_RECORD_OK,
     prodex_live_log_json_plan_v1,
     prodex_live_log_plain_text_truncate_v1,
     prodex_live_log_record_over_limit_v1,
+    prodex_live_log_snapshot_plan_v1,
     prodex_live_log_string_clip_end_v1,
 )
 
@@ -182,8 +184,53 @@ def test_plain_text_truncation_keeps_unicode_character_crossing_prefix_limit() r
     assert written[0] == Int64(prefix_length) + Int64(tail.byte_length())
 
 
+def test_snapshot_plan_pages_after_cursor_and_rejects_unsorted_input() raises:
+    var sequences = List[UInt64]()
+    sequences.append(7)
+    sequences.append(9)
+    sequences.append(11)
+    var output = List[UInt64]()
+    for _ in range(4):
+        output.append(UInt64(0xFFFFFFFFFFFFFFFF))
+    assert (
+        prodex_live_log_snapshot_plan_v1(
+            1,
+            UInt(Int(sequences.unsafe_ptr())),
+            3,
+            7,
+            99,
+            2,
+            20,
+            3,
+            UInt(Int(output.unsafe_ptr())),
+        )
+        == LIVE_LOG_RECORD_OK
+    )
+    assert output[0] == 1
+    assert output[1] == 2
+    assert output[2] == 11
+    assert output[3] == 3
+
+    sequences[1] = 6
+    assert (
+        prodex_live_log_snapshot_plan_v1(
+            1,
+            UInt(Int(sequences.unsafe_ptr())),
+            3,
+            0,
+            1,
+            2,
+            20,
+            3,
+            UInt(Int(output.unsafe_ptr())),
+        )
+        == LIVE_LOG_RECORD_INVALID
+    )
+
+
 def main() raises:
     test_record_limit_and_serialized_json_fallback()
     test_nested_string_clip_keeps_ascii_and_unicode_character_boundaries()
     test_plain_text_truncation_writes_exact_tail_and_checks_capacity()
     test_plain_text_truncation_keeps_unicode_character_crossing_prefix_limit()
+    test_snapshot_plan_pages_after_cursor_and_rejects_unsorted_input()

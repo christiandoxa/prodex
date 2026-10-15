@@ -5566,3 +5566,11 @@ failure and not-found signals, and stale verified bindings over bounded typed
 rows. Rust retains broker-map traversal, status projection, ABI marshalling, and
 metrics DTO reconstruction. Required-Mojo direct ABI and runtime-broker caller
 tests cover valid totals, unknown values, failure precedence, and input bounds.
+
+## Runtime live-log pagination migration
+
+`live_log_record.mojo` now plans cursor filtering, page clamping, and the returned
+cursor for bounded live-log snapshots. Rust retains locked path lookup, sequence
+projection, dropped-count state, and entry materialization; required-Mojo ABI and
+runtime-log caller tests cover cursor boundaries and page clamping, while the ABI
+test rejects malformed ordering.
