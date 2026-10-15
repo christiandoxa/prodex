@@ -53,6 +53,78 @@ comptime WATCH_RESET_CREDITS: Int64 = 2
 comptime WATCH_SNAPSHOT_USE_NEXT: Int64 = 0
 comptime WATCH_SNAPSHOT_KEEP_PREVIOUS: Int64 = 1
 comptime WATCH_SNAPSHOT_MERGE_REPORTS: Int64 = 2
+comptime WATCH_TABLE_COLUMN_COUNT: Int = 6
+
+
+@export("prodex_quota_watch_table_columns_v1")
+def prodex_quota_watch_table_columns_v1(
+    abi_version: Int64,
+    total_width: UInt64,
+    output_address: UInt64,
+) abi("C") -> Int64:
+    if abi_version != QUOTA_WATCH_ABI_VERSION:
+        return 4
+    if output_address == 0:
+        return QUOTA_WATCH_INVALID
+
+    var output = Pointer[mut=True, UInt64, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    var available: UInt64 = 0
+    if total_width > UInt64(WATCH_TABLE_COLUMN_COUNT):
+        available = total_width - UInt64(WATCH_TABLE_COLUMN_COUNT)
+
+    if total_width >= 96:
+        output[unsafe_offset=0] = 24
+        output[unsafe_offset=1] = 3
+        output[unsafe_offset=2] = 7
+        output[unsafe_offset=3] = 24
+        output[unsafe_offset=4] = 8
+        output[unsafe_offset=5] = 15
+    else:
+        output[unsafe_offset=0] = 16
+        output[unsafe_offset=1] = 3
+        output[unsafe_offset=2] = 6
+        output[unsafe_offset=3] = 16
+        output[unsafe_offset=4] = 6
+        output[unsafe_offset=5] = 11
+
+    var remaining_floor: UInt64 = 8
+    if total_width >= 64:
+        remaining_floor = 18
+    elif total_width >= 40:
+        remaining_floor = 12
+    var floor_limit: UInt64 = 1
+    if available > UInt64(WATCH_TABLE_COLUMN_COUNT):
+        floor_limit = available - UInt64(WATCH_TABLE_COLUMN_COUNT)
+    remaining_floor = min(remaining_floor, floor_limit)
+    var fixed_available = available
+    if fixed_available > remaining_floor:
+        fixed_available -= remaining_floor
+    else:
+        fixed_available = 0
+
+    var fixed_width: UInt64 = 0
+    for index in range(WATCH_TABLE_COLUMN_COUNT):
+        fixed_width += output[unsafe_offset=index]
+    while fixed_width > fixed_available:
+        var selected: Int = 0
+        var selected_width = output[unsafe_offset=0]
+        for index in range(1, WATCH_TABLE_COLUMN_COUNT):
+            # Rust's max_by_key keeps the last maximum on a tie.
+            if output[unsafe_offset=index] >= selected_width:
+                selected = index
+                selected_width = output[unsafe_offset=index]
+        if selected_width <= 1:
+            break
+        output[unsafe_offset=selected] -= UInt64(1)
+        fixed_width -= UInt64(1)
+
+    var remaining: UInt64 = 1
+    if available > fixed_width:
+        remaining = available - fixed_width
+    output[unsafe_offset=WATCH_TABLE_COLUMN_COUNT] = remaining
+    return 0
 
 
 def quota_watch_add_positive(base: Int64, delta: Int64) -> Int64:

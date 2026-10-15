@@ -300,38 +300,17 @@ struct QuotaWatchColumns {
 }
 
 fn quota_watch_table_columns(total_width: usize) -> QuotaWatchColumns {
-    let available = total_width.saturating_sub(6);
-    let mut widths = if total_width >= 96 {
-        [24, 3, 7, 24, 8, 15]
-    } else {
-        [16, 3, 6, 16, 6, 11]
-    };
-    let remaining_floor = if total_width >= 64 {
-        18
-    } else if total_width >= 40 {
-        12
-    } else {
-        8
-    }
-    .min(available.saturating_sub(widths.len()).max(1));
-    let fixed_available = available.saturating_sub(remaining_floor);
-    while widths.iter().sum::<usize>() > fixed_available {
-        let Some(index) = (0..widths.len()).max_by_key(|&index| widths[index]) else {
-            break;
-        };
-        if widths[index] == 1 {
-            break;
-        }
-        widths[index] -= 1;
-    }
+    let [profile, current, auth, account, plan, status, remaining] =
+        prodex_mojo_core::quota_watch_policy::table_columns(total_width)
+            .expect("Mojo quota-watch table column policy failed");
     QuotaWatchColumns {
-        profile: widths[0],
-        current: widths[1],
-        auth: widths[2],
-        account: widths[3],
-        plan: widths[4],
-        status: widths[5],
-        remaining: available.saturating_sub(widths.iter().sum()).max(1),
+        profile,
+        current,
+        auth,
+        account,
+        plan,
+        status,
+        remaining,
     }
 }
 
