@@ -25,49 +25,7 @@ pub(super) fn build_session_app_server_companion(
         std::ffi::OsString::from("--listen"),
         std::ffi::OsString::from(format!("unix://{}", socket.display())),
     ]);
-    let mut index = 0;
-    while index < runtime_args.len() {
-        let argument = runtime_args[index].to_string_lossy();
-        let next = runtime_args.get(index + 1).map(|value| value.to_owned());
-        match argument.as_ref() {
-            "-c" | "--config" | "--enable" | "--disable" | "--code-mode-host" => {
-                if let Some(value) = next {
-                    args.extend([runtime_args[index].clone(), value]);
-                    index += 2;
-                    continue;
-                }
-            }
-            "--strict-config" => args.push(runtime_args[index].clone()),
-            "-m" | "--model" => {
-                if let Some(value) = next.and_then(|value| value.into_string().ok()) {
-                    args.extend([
-                        "-c".into(),
-                        format!(
-                            "model={}",
-                            crate::runtime_catalog_config::toml_string_literal(&value)
-                        )
-                        .into(),
-                    ]);
-                    index += 2;
-                    continue;
-                }
-            }
-            value if value.starts_with("--model=") => {
-                args.extend([
-                    "-c".into(),
-                    format!(
-                        "model={}",
-                        crate::runtime_catalog_config::toml_string_literal(
-                            value.trim_start_matches("--model=")
-                        )
-                    )
-                    .into(),
-                ]);
-            }
-            _ => {}
-        }
-        index += 1;
-    }
+    args.extend(super::project_app_server_config_args(runtime_args, false));
     if strategy.args.full_access {
         args.extend([
             "-c".into(),

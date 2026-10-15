@@ -847,6 +847,36 @@
         ]
       },
       {
+        "path": "mojo/prodex_core/runtime_overlay_policy.mojo",
+        "language": "mojo",
+        "classification": "DETERMINISTIC_DOMAIN",
+        "production_reachable": true,
+        "role": "semantic",
+        "operations": [
+          "runtime_app_server_config_projection"
+        ]
+      },
+      {
+        "path": "crates/prodex-mojo-core/src/runtime_overlay_policy.rs",
+        "language": "rust",
+        "classification": "MIXED",
+        "production_reachable": true,
+        "role": "adapter",
+        "operations": [
+          "runtime_app_server_config_projection"
+        ]
+      },
+      {
+        "path": "crates/prodex-app/src/runtime_tools/app_server_args.rs",
+        "language": "rust",
+        "classification": "MIXED",
+        "production_reachable": true,
+        "role": "adapter",
+        "operations": [
+          "runtime_app_server_config_projection"
+        ]
+      },
+      {
         "path": "mojo/prodex_core/provider_error.mojo",
         "language": "mojo",
         "classification": "DETERMINISTIC_DOMAIN",
@@ -4063,6 +4093,31 @@
       "duplicate_production_owner": false,
       "platform_fallback": false,
       "rust_adapter_scope": "Clap values, fixed-width ABI mapping, validated result mapping, numeric TOML rendering, ordered override assembly, and OsString materialization"
+    },
+    {
+      "name": "runtime_app_server_config_projection",
+      "domain": "app/runtime-tools-config",
+      "introduced_in": "0.438.0",
+      "baseline_state": "candidate",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_runtime_overlay_app_server_config_v1",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/runtime_overlay_policy.mojo",
+      "consumer": "crates/prodex-app/src/runtime_tools/app_server_args.rs",
+      "consumer_marker": "prodex_mojo_core::runtime_overlay_policy::app_server_config_plan(",
+      "production_consumers": [
+        "crates/prodex-app/src/runtime_tools/app_server_args.rs",
+        "crates/prodex-app/src/runtime_tools/hook_trust.rs",
+        "crates/prodex-app/src/runtime_tools/session_app_server.rs"
+      ],
+      "production_reachability_test": "crates/prodex-mojo-core/src/runtime_overlay_policy.rs",
+      "rust_owner_before": "Rust duplicated app-server argument filtering for hook-trust preflight and the private session companion, including paired config/feature flags, model conversion, and hook-only inline config forwarding",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "deleted; compiled Mojo adapter cases and the app projection caller tests preserve hook/companion differences, model quoting, and non-UTF-8 model rejection",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "OsString/lossy-UTF-8 acquisition, TOML string quoting, original argument materialization, and process construction"
     },
     {
       "name": "deepseek_simple_request_eligibility",

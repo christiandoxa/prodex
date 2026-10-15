@@ -17,6 +17,10 @@ comptime RUNTIME_OVERLAY_ABI: Int64 = 4
 comptime FRESH_ACTION_KEEP: Int64 = 0
 comptime FRESH_ACTION_CONFIG_ARG: Int64 = 1
 comptime FRESH_ACTION_FEATURE: Int64 = 2
+comptime APP_SERVER_ACTION_KEEP: Int64 = 0
+comptime APP_SERVER_ACTION_KEEP_PAIR: Int64 = 1
+comptime APP_SERVER_ACTION_MODEL_PAIR: Int64 = 2
+comptime APP_SERVER_ACTION_MODEL_INLINE: Int64 = 3
 comptime OVERLAY_OPTIONAL_TOOL_LIMIT: Int64 = 6
 comptime OVERLAY_TOOL_STATUS_INSTALLED: Int64 = 0
 comptime OVERLAY_TOOL_STATUS_INVALID: Int64 = 2
@@ -277,6 +281,120 @@ def prodex_runtime_overlay_transport_flags_v1(
             result[unsafe_offset=0] = 1
         if rich_view_matches_literal["--no-daemon"](view, False):
             result[unsafe_offset=1] = 1
+    return RUNTIME_OVERLAY_OK
+
+
+@export("prodex_runtime_overlay_app_server_config_v1")
+def prodex_runtime_overlay_app_server_config_v1(
+    abi_version: Int64,
+    arguments_address: UInt,
+    count: Int64,
+    include_inline_config: Int64,
+    records_address: UInt,
+    record_capacity: Int64,
+    written_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != RUNTIME_OVERLAY_ABI_VERSION:
+        return RUNTIME_OVERLAY_ABI
+    if (
+        count < 0
+        or include_inline_config < 0
+        or include_inline_config > 1
+        or record_capacity < 0
+        or written_address == 0
+        or (count > 0 and arguments_address == 0)
+        or (record_capacity > 0 and records_address == 0)
+    ):
+        return RUNTIME_OVERLAY_INVALID
+
+    var records = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(records_address)
+    )
+    var written_ptr = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(written_address)
+    )
+    var written: Int64 = 0
+    var index: Int64 = 0
+    while index < count:
+        var arg = runtime_overlay_arg(arguments_address, index)
+        if arg.valid_utf8 == 0:
+            index += 1
+            continue
+        var view = runtime_overlay_view(arg)
+        if not rich_view_valid(view, Int64(arg.length)):
+            return RUNTIME_OVERLAY_INVALID
+
+        if (
+            rich_view_matches_literal["-c"](view, False)
+            or rich_view_matches_literal["--config"](view, False)
+            or rich_view_matches_literal["--enable"](view, False)
+            or rich_view_matches_literal["--disable"](view, False)
+            or rich_view_matches_literal["--code-mode-host"](view, False)
+        ):
+            if index + 1 < count:
+                if written >= record_capacity:
+                    return RUNTIME_OVERLAY_CAPACITY
+                runtime_overlay_put_record(
+                    records, written, APP_SERVER_ACTION_KEEP_PAIR, index, 0
+                )
+                written += 1
+                index += 2
+                continue
+        elif rich_view_matches_literal["--strict-config"](view, False):
+            if written >= record_capacity:
+                return RUNTIME_OVERLAY_CAPACITY
+            runtime_overlay_put_record(
+                records, written, APP_SERVER_ACTION_KEEP, index, 0
+            )
+            written += 1
+        elif (
+            rich_view_matches_literal["-m"](view, False)
+            or rich_view_matches_literal["--model"](view, False)
+        ):
+            if index + 1 < count:
+                var next = runtime_overlay_arg(arguments_address, index + 1)
+                if next.valid_utf8 == 1:
+                    var next_view = runtime_overlay_view(next)
+                    if not rich_view_valid(next_view, Int64(next.length)):
+                        return RUNTIME_OVERLAY_INVALID
+                    if written >= record_capacity:
+                        return RUNTIME_OVERLAY_CAPACITY
+                    runtime_overlay_put_record(
+                        records,
+                        written,
+                        APP_SERVER_ACTION_MODEL_PAIR,
+                        index,
+                        index + 1,
+                    )
+                    written += 1
+                    index += 2
+                    continue
+                index += 1
+                continue
+        elif rich_view_prefix["--model="](view, False):
+            if written >= record_capacity:
+                return RUNTIME_OVERLAY_CAPACITY
+            runtime_overlay_put_record(
+                records, written, APP_SERVER_ACTION_MODEL_INLINE, index, 8
+            )
+            written += 1
+        elif (
+            include_inline_config == 1
+            and (
+                rich_view_prefix["--config="](view, False)
+                or rich_view_prefix["-c="](view, False)
+            )
+        ):
+            if written >= record_capacity:
+                return RUNTIME_OVERLAY_CAPACITY
+            runtime_overlay_put_record(
+                records, written, APP_SERVER_ACTION_KEEP, index, 0
+            )
+            written += 1
+
+        index += 1
+
+    written_ptr[] = written
     return RUNTIME_OVERLAY_OK
 
 
