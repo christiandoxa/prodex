@@ -1405,3 +1405,63 @@ def prodex_mojo_smart_context_static_bounded_text_v1(
     ):
         return SMART_CONTEXT_STATUS_CAPACITY
     return SMART_CONTEXT_STATUS_OK
+
+
+# Legacy Smart Context fingerprints use FNV-1a over bytes. Mojo owns the
+# exact 64-bit wrapping hash and lowercase 16-hex serialization.
+# Mode 0 emits hex only; mode 1 emits the historical "scv:" prefix.
+@export("prodex_mojo_smart_context_fnv_hash_text_v1")
+def prodex_mojo_smart_context_fnv_hash_text_v1(
+    abi_version: Int64,
+    mode: Int64,
+    source_address: UInt,
+    source_length: Int64,
+    output_address: UInt,
+    output_capacity: Int64,
+    written_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != PRODEX_RICH_ABI_VERSION:
+        return SMART_CONTEXT_STATUS_ABI
+    if (
+        mode < 0 or mode > 1
+        or source_length < 0
+        or (source_length > 0 and source_address == 0)
+        or output_address == 0
+        or written_address == 0
+    ):
+        return SMART_CONTEXT_STATUS_INVALID
+    var required: Int64 = 16
+    if mode == 1:
+        required = 20
+    if output_capacity < required:
+        return SMART_CONTEXT_STATUS_CAPACITY
+    var source = Pointer[mut=False, UInt8, ImmUntrackedOrigin](
+        unsafe_from_address=Int(source_address)
+    )
+    var output = Pointer[mut=True, UInt8, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    var written = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(written_address)
+    )
+    var hash = UInt64(14695981039346656037)
+    for index in range(source_length):
+        hash = hash ^ UInt64(source[unsafe_offset=index])
+        hash = hash * UInt64(1099511628211)
+    var cursor: Int64 = 0
+    if mode == 1:
+        output[unsafe_offset=0] = 115
+        output[unsafe_offset=1] = 99
+        output[unsafe_offset=2] = 118
+        output[unsafe_offset=3] = 58
+        cursor = 4
+    var shift: Int64 = 60
+    for index in range(16):
+        var digit = UInt8((hash >> UInt64(shift)) & UInt64(15))
+        if digit < 10:
+            output[unsafe_offset=cursor + Int64(index)] = 48 + digit
+        else:
+            output[unsafe_offset=cursor + Int64(index)] = 87 + digit
+        shift -= 4
+    written[] = required
+    return SMART_CONTEXT_STATUS_OK
