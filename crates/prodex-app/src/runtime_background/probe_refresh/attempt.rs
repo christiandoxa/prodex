@@ -1,6 +1,7 @@
 use super::super::*;
 use super::apply::{
-    apply_runtime_profile_probe_result, apply_runtime_profile_probe_result_with_timeout,
+    RuntimeProbeAuthObservation, apply_runtime_profile_probe_observation,
+    apply_runtime_profile_probe_result_with_timeout,
 };
 use redaction::redaction_redact_secret_like_text;
 
@@ -16,16 +17,22 @@ impl RuntimeProbeExecutionMode<'_> {
         profile_name: &str,
         auth: AuthSummary,
         result: std::result::Result<UsageResponse, String>,
+        observation: Option<RuntimeProbeAuthObservation<'_>>,
     ) -> Result<()> {
         match self {
-            Self::Inline { .. } => {
-                apply_runtime_profile_probe_result(shared, profile_name, auth, result)
-            }
+            Self::Inline { .. } => apply_runtime_profile_probe_observation(
+                shared,
+                profile_name,
+                auth,
+                result,
+                observation,
+            ),
             Self::Queued { apply_timeout } => apply_runtime_profile_probe_result_with_timeout(
                 shared,
                 profile_name,
                 auth,
                 result,
+                observation,
                 *apply_timeout,
             ),
         }
@@ -114,6 +121,8 @@ impl RuntimeProbeExecutionMode<'_> {
 pub(super) struct RuntimeProbeRefreshAttempt {
     auth: AuthSummary,
     result: std::result::Result<UsageResponse, String>,
+    authenticated_identity: Option<UsageAuth>,
+    started_at: i64,
 }
 
 impl RuntimeProbeRefreshAttempt {
@@ -122,14 +131,28 @@ impl RuntimeProbeRefreshAttempt {
         upstream_base_url: &str,
         upstream_no_proxy: bool,
     ) -> Self {
+        let started_at = Local::now().timestamp();
         let auth = read_auth_summary(codex_home);
-        let result = if auth.quota_compatible {
-            fetch_usage_with_proxy_policy(codex_home, Some(upstream_base_url), upstream_no_proxy)
-                .map_err(|err| err.to_string())
+        let fetched = if auth.quota_compatible {
+            crate::fetch_usage_with_authenticated_identity(
+                codex_home,
+                Some(upstream_base_url),
+                upstream_no_proxy,
+            )
+            .map_err(|err| err.to_string())
         } else {
             Err("auth mode is not quota-compatible".to_string())
         };
-        Self { auth, result }
+        let (result, authenticated_identity) = match fetched {
+            Ok((usage, identity)) => (Ok(usage), Some(identity)),
+            Err(error) => (Err(error), None),
+        };
+        Self {
+            auth,
+            result,
+            authenticated_identity,
+            started_at,
+        }
     }
 
     pub(super) fn execute(
@@ -139,7 +162,20 @@ impl RuntimeProbeRefreshAttempt {
         profile_name: &str,
         queued_at: Instant,
     ) {
-        let apply_result = mode.apply(shared, profile_name, self.auth, self.result.clone());
+        let observation =
+            self.authenticated_identity
+                .as_ref()
+                .map(|auth| RuntimeProbeAuthObservation {
+                    auth,
+                    started_at: self.started_at,
+                });
+        let apply_result = mode.apply(
+            shared,
+            profile_name,
+            self.auth,
+            self.result.clone(),
+            observation,
+        );
         mode.log_completion(shared, profile_name, queued_at, &self.result, apply_result);
     }
 }

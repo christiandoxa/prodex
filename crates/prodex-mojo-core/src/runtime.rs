@@ -56,7 +56,8 @@ pub use noncompact_loop::{
 pub use profile_health::{
     ProfileBackoffMergeAction, ProfileBackoffPlan, ProfileBackoffSoftening, ProfileHealthBumpInput,
     ProfileHealthBumpPlan, ProfileHealthRecoveryPlan, ProfileHealthScoreInput,
-    ProfileRecoveryBatchPlan, ProfileRecoveryCandidate, RUNTIME_PROFILE_HEALTH_SCORE_FIELD_COUNT,
+    ProfileProbeRecoveryInput, ProfileProbeRecoveryPlan, ProfileRecoveryBatchPlan,
+    ProfileRecoveryCandidate, RUNTIME_PROFILE_HEALTH_SCORE_FIELD_COUNT,
     RUNTIME_PROFILE_HEALTH_SCORE_MAX_COUNT, profile_backoff_merge_action,
     profile_backoff_should_retain, profile_backoff_sort_key, profile_backoff_update_should_retain,
     profile_bad_pairing_next_score, profile_circuit_half_open_seconds,
@@ -64,11 +65,11 @@ pub use profile_health::{
     profile_health_effective_score, profile_health_performance_score, profile_health_recovery_plan,
     profile_health_score, profile_health_sort_key_batch, profile_inflight_effective_hard_limit,
     profile_inflight_soft_limit, profile_inflight_weight, profile_latency_failure_score,
-    profile_latency_next_score, profile_latency_penalty, profile_recovery_at,
-    profile_recovery_plan_batch, profile_retry_backoff_plan, profile_route_circuit_should_retain,
-    profile_score_should_clear, profile_score_should_replace, profile_score_should_retain,
-    profile_selection_backoff_active, profile_soften_backoff_until, profile_transport_backoff_plan,
-    profile_transport_backoff_until,
+    profile_latency_next_score, profile_latency_penalty, profile_probe_recovery_plan,
+    profile_recovery_at, profile_recovery_plan_batch, profile_retry_backoff_plan,
+    profile_route_circuit_should_retain, profile_score_should_clear, profile_score_should_replace,
+    profile_score_should_retain, profile_selection_backoff_active, profile_soften_backoff_until,
+    profile_transport_backoff_plan, profile_transport_backoff_until,
 };
 pub use profile_rotation::profile_selection_order_batch;
 pub use profile_route_circuit::{

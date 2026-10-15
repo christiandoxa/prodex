@@ -722,7 +722,8 @@
         "operations": [
           "runtime_profile_health_sorting",
           "runtime_profile_health_score_components",
-          "runtime_profile_health_policy"
+          "runtime_profile_health_policy",
+          "runtime_authenticated_probe_recovery"
         ]
       },
       {
@@ -2195,6 +2196,16 @@
         "role": "adapter",
         "operations": [
           "runtime_retry_after_text_policy"
+        ]
+      },
+      {
+        "path": "crates/prodex-mojo-core/src/runtime/profile_health/probe_recovery.rs",
+        "language": "rust",
+        "classification": "MIXED",
+        "production_reachable": true,
+        "role": "adapter",
+        "operations": [
+          "runtime_authenticated_probe_recovery"
         ]
       }
     ],
@@ -9461,6 +9472,29 @@
       "duplicate_production_owner": false,
       "platform_fallback": false,
       "rust_adapter_scope": "Header-name filtering and byte-to-UTF-8 ownership, Mojo ABI marshalling, Duration projection, selecting maximum duration across upstream repeated headers"
+    },
+    {
+      "name": "runtime_authenticated_probe_recovery",
+      "domain": "runtime/authentication-and-quota-recovery",
+      "introduced_in": "0.437.14",
+      "baseline_state": "Successful quota probes did not acknowledge older credential failures or retire matching stale quota quarantines",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_runtime_probe_recovery_v1",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/runtime_health.mojo",
+      "consumer": "crates/prodex-app/src/runtime_background/probe_refresh/apply/recovery.rs",
+      "consumer_marker": "prodex_mojo_core::runtime::profile_probe_recovery_plan(",
+      "production_consumers": [
+        "crates/prodex-app/src/runtime_background/probe_refresh/apply/recovery.rs"
+      ],
+      "production_reachability_test": "crates/prodex-app/src/runtime_background/probe_refresh/apply/recovery.rs",
+      "rust_owner_before": "Host probe result application retained old auth and quota penalties without causal revalidation",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "Real authenticated HTTP probe tests reproduce both original failures and assert restored Responses and compaction; direct ABI tests protect newer failures, credential changes and non-quota backoffs",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "Authenticated HTTP receipt identity, same-profile credential equality, timestamp projection, mutex-protected application, tombstones, notifications and scheduled persistence"
     }
   ],
   "rust_semantic_reductions": [

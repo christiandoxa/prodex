@@ -19,6 +19,8 @@ pub(crate) use queue::{
 };
 #[cfg(test)]
 pub(crate) use queue::{note_runtime_probe_refresh_progress, runtime_probe_refresh_queue_active};
+#[cfg(test)]
+pub(crate) use startup::run_runtime_probe_jobs_inline;
 pub(crate) use startup::schedule_runtime_startup_probe_warmup;
 #[cfg(test)]
 pub(crate) use worker::runtime_probe_refresh_take_next_job;

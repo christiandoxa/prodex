@@ -1,10 +1,29 @@
 use super::super::*;
 
+mod recovery;
+use recovery::recover_confirmed_probe_backoffs;
+
+#[derive(Clone, Copy)]
+pub(super) struct RuntimeProbeAuthObservation<'a> {
+    pub(super) auth: &'a UsageAuth,
+    pub(super) started_at: i64,
+}
+
 pub(crate) fn apply_runtime_profile_probe_result(
     shared: &RuntimeRotationProxyShared,
     profile_name: &str,
     auth: AuthSummary,
     result: std::result::Result<UsageResponse, String>,
+) -> Result<()> {
+    apply_runtime_profile_probe_observation(shared, profile_name, auth, result, None)
+}
+
+pub(super) fn apply_runtime_profile_probe_observation(
+    shared: &RuntimeRotationProxyShared,
+    profile_name: &str,
+    auth: AuthSummary,
+    result: std::result::Result<UsageResponse, String>,
+    observation: Option<RuntimeProbeAuthObservation<'_>>,
 ) -> Result<()> {
     let _progress = RuntimeProbeProgressObserver::new();
     let mut runtime = shared
@@ -17,6 +36,7 @@ pub(crate) fn apply_runtime_profile_probe_result(
         auth,
         result,
         Local::now().timestamp(),
+        observation,
     );
     drop(runtime);
     emit_runtime_profile_probe_result(shared, log_messages, state_save_args);
@@ -29,9 +49,42 @@ fn apply_runtime_profile_probe_result_to_runtime(
     auth: AuthSummary,
     result: std::result::Result<UsageResponse, String>,
     now: i64,
+    observation: Option<RuntimeProbeAuthObservation<'_>>,
 ) -> (Vec<String>, Option<RuntimeStateSaveRequest>) {
     let mut log_messages = Vec::new();
     let mut state_save_args = None;
+    if let Some(observation) = observation {
+        let identity_matches = runtime
+            .profile_usage_auth
+            .get(profile_name)
+            .is_some_and(|entry| entry.auth == *observation.auth);
+        if !identity_matches {
+            log_messages.push(format!(
+                "profile_probe_refresh_stale profile={profile_name} reason=credential_changed"
+            ));
+            return (log_messages, None);
+        }
+    }
+    let authenticated = auth.quota_compatible && result.is_ok();
+    let next_snapshot = result
+        .as_ref()
+        .ok()
+        .map(runtime_profile_usage_snapshot_from_usage);
+    let recovered = if let Some(snapshot) = &next_snapshot {
+        let Some(changed) = recover_confirmed_probe_backoffs(
+            runtime,
+            profile_name,
+            snapshot,
+            observation.filter(|_| authenticated),
+            now,
+            &mut log_messages,
+        ) else {
+            return (log_messages, None);
+        };
+        changed
+    } else {
+        false
+    };
     runtime.profile_probe_cache.insert(
         profile_name.to_string(),
         RuntimeProfileProbeCacheEntry {
@@ -41,8 +94,7 @@ fn apply_runtime_profile_probe_result_to_runtime(
         },
     );
 
-    if let Ok(usage) = result {
-        let snapshot = runtime_profile_usage_snapshot_from_usage(&usage);
+    if let Some(snapshot) = next_snapshot {
         let previous_snapshot = runtime.profile_usage_snapshots.get(profile_name).cloned();
         let previous_retry_backoff = runtime
             .profile_retry_backoff_until
@@ -97,7 +149,10 @@ fn apply_runtime_profile_probe_result_to_runtime(
                 "profile_retry_backoff profile={profile_name} until={until}",
             ));
         }
-        if usage_apply_plan.snapshot_should_persist || usage_apply_plan.retry_backoff_changed {
+        if recovered
+            || usage_apply_plan.snapshot_should_persist
+            || usage_apply_plan.retry_backoff_changed
+        {
             state_save_args = Some(RuntimeStateSaveRequest::from_snapshot(
                 runtime_state_save_snapshot_from_runtime(runtime),
                 RuntimeStateMutation::UsageSnapshot(profile_name.to_string()),
@@ -130,6 +185,7 @@ pub(super) fn apply_runtime_profile_probe_result_with_timeout(
     profile_name: &str,
     auth: AuthSummary,
     result: std::result::Result<UsageResponse, String>,
+    observation: Option<RuntimeProbeAuthObservation<'_>>,
     timeout: Duration,
 ) -> Result<()> {
     let _progress = RuntimeProbeProgressObserver::new();
@@ -144,6 +200,7 @@ pub(super) fn apply_runtime_profile_probe_result_with_timeout(
                     auth,
                     result,
                     now,
+                    observation,
                 );
                 drop(runtime);
                 emit_runtime_profile_probe_result(shared, log_messages, state_save_args);

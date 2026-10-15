@@ -6,6 +6,11 @@ pub use load::{
     profile_latency_failure_score, profile_latency_next_score, profile_latency_penalty,
 };
 
+mod probe_recovery;
+pub use probe_recovery::{
+    ProfileProbeRecoveryInput, ProfileProbeRecoveryPlan, profile_probe_recovery_plan,
+};
+
 mod recovery_batch;
 pub use recovery_batch::{
     ProfileRecoveryBatchPlan, ProfileRecoveryCandidate, profile_recovery_plan_batch,
