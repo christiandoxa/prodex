@@ -76,7 +76,6 @@ pub struct CompactRetryDecisionInput<'a> {
     pub auto_redeemed: bool,
     pub owner_retry_used: bool,
     pub quota_fallback_available: Option<bool>,
-    pub hard_affinity: bool,
     pub committed: bool,
     pub candidate_profile: &'a str,
     pub current_profile: &'a str,
@@ -84,6 +83,8 @@ pub struct CompactRetryDecisionInput<'a> {
     pub previous_response_profile: Option<&'a str>,
     pub session_profile: Option<&'a str>,
 }
+
+const COMPACT_RETRY_DECISION_ABI_VERSION: i64 = 3;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CompactRetryAction {
@@ -150,7 +151,8 @@ unsafe extern "C" {
         session_owner_present: i64,
     ) -> i64;
 
-    fn prodex_runtime_compact_retry_decision_v2(
+    fn prodex_runtime_compact_retry_decision_v3(
+        abi_version: i64,
         profile_views: *const super::RuntimeStringView,
         candidate_profile_present: i64,
         current_profile_present: i64,
@@ -162,7 +164,6 @@ unsafe extern "C" {
         auto_redeemed: i64,
         owner_retry_used: i64,
         quota_fallback_available: i64,
-        hard_affinity: i64,
         committed: i64,
         output: *mut i64,
     ) -> i64;
@@ -235,7 +236,8 @@ pub fn compact_retry_decision(
     });
     let mut output = [i64::MIN; 2];
     let status = unsafe {
-        prodex_runtime_compact_retry_decision_v2(
+        prodex_runtime_compact_retry_decision_v3(
+            COMPACT_RETRY_DECISION_ABI_VERSION,
             profile_views.as_ptr(),
             bool_tag(profiles[0].is_some()),
             bool_tag(profiles[1].is_some()),
@@ -247,13 +249,15 @@ pub fn compact_retry_decision(
             bool_tag(input.auto_redeemed),
             bool_tag(input.owner_retry_used),
             quota_fallback_available,
-            bool_tag(input.hard_affinity),
             bool_tag(input.committed),
             output.as_mut_ptr(),
         )
     };
-    if status != 0 {
-        return Err(MojoError::InvalidInput);
+    match status {
+        0 => {}
+        -4 => return Err(MojoError::AbiMismatch),
+        1 => return Err(MojoError::InvalidInput),
+        _ => return Err(MojoError::InvalidOutput),
     }
     let action = match output[0] {
         1 => CompactRetryAction::TryAutoRedeem,
@@ -488,7 +492,6 @@ mod tests {
             auto_redeemed: false,
             owner_retry_used: false,
             quota_fallback_available: None,
-            hard_affinity: false,
             committed: false,
             candidate_profile: "candidate",
             current_profile: "current",
@@ -533,7 +536,6 @@ mod tests {
             CompactRetryAction::RotateOverload
         );
         input.session_profile = Some(input.candidate_profile);
-        input.hard_affinity = true;
         assert_eq!(
             compact_retry_decision(input).unwrap().action,
             CompactRetryAction::RecoverHardAffinity
@@ -552,7 +554,6 @@ mod tests {
         );
         input.quota_fallback_available = Some(true);
         input.compact_followup_profile = Some(input.candidate_profile);
-        input.hard_affinity = true;
         assert_eq!(
             compact_retry_decision(input).unwrap().action,
             CompactRetryAction::RecoverHardAffinity
@@ -576,7 +577,6 @@ mod tests {
         );
         input.session_profile = None;
         input.compact_followup_profile = None;
-        input.hard_affinity = false;
         assert_eq!(
             compact_retry_decision(input).unwrap().action,
             CompactRetryAction::RotateQuota
@@ -622,7 +622,6 @@ mod tests {
         );
 
         input.stage = CompactRetryStage::AfterBackoff;
-        input.hard_affinity = true;
         assert_eq!(
             compact_retry_decision(input).unwrap().action,
             CompactRetryAction::RecoverHardAffinity
@@ -631,7 +630,6 @@ mod tests {
         input.stage = CompactRetryStage::AfterAffinityRecovery;
         input.session_profile = None;
         input.previous_response_profile = Some(input.candidate_profile);
-        input.hard_affinity = true;
         assert_eq!(
             compact_retry_decision(input).unwrap().action,
             CompactRetryAction::ReturnAffinityFailure
@@ -646,33 +644,11 @@ mod tests {
         input.overload = true;
         assert_eq!(compact_retry_decision(input), Err(MojoError::InvalidInput));
     }
-
-    #[test]
-    fn compact_retry_raw_abi_rejects_out_of_range_stage_without_output() {
-        let profile_views = [super::super::RuntimeStringView { ptr: 0, len: 0 }; 5];
-        let mut output = [i64::MIN; 2];
-        let status = unsafe {
-            prodex_runtime_compact_retry_decision_v2(
-                profile_views.as_ptr(),
-                1,
-                1,
-                0,
-                0,
-                0,
-                6,
-                0,
-                0,
-                0,
-                -1,
-                0,
-                0,
-                output.as_mut_ptr(),
-            )
-        };
-        assert_eq!(status, 1);
-        assert_eq!(output, [i64::MIN; 2]);
-    }
 }
+
+#[cfg(all(test, feature = "mojo-runtime"))]
+#[path = "quota_decisions_affinity_tests.rs"]
+mod affinity_tests;
 
 /// Absolute recovery watchdog budget, independent from per-attempt selection.
 pub fn recovery_watchdog_budget_ms(
