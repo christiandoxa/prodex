@@ -705,7 +705,8 @@
           "smart_context_static_canonicalization",
           "smart_context_static_prompt_payload_format",
           "smart_context_static_bounded_identifier",
-          "smart_context_static_bounded_text"
+          "smart_context_static_bounded_text",
+          "smart_context_legacy_fnv_fingerprint"
         ]
       },
       {
@@ -2706,6 +2707,29 @@
       "duplicate_production_owner": false,
       "platform_fallback": false,
       "rust_adapter_scope": "Conditional host SHA-256 only when requested by compiled Mojo; bounded buffer, checked UTF-8 and fingerprint DTO materialization"
+    },
+    {
+      "name": "smart_context_legacy_fnv_fingerprint",
+      "domain": "smart-context/hash-compatibility",
+      "introduced_in": "0.438.0",
+      "baseline_state": "Rust implemented 64-bit wrapping FNV-1a byte hashing and serialized 16 lowercase hexadecimal digits with an optional scv: prefix",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_mojo_smart_context_fnv_hash_text_v1",
+      "mojo_abi_version": 6,
+      "mojo_source": "mojo/prodex_core/smart_context_normalization.mojo",
+      "consumer": "crates/prodex-runtime-proxy/src/smart_context/normalization/artifacts.rs",
+      "consumer_marker": "prodex_mojo_core::rich::smart_context_legacy_fnv_text(",
+      "production_consumers": [
+        "crates/prodex-runtime-proxy/src/smart_context/normalization/artifacts.rs"
+      ],
+      "production_reachability_test": "crates/prodex-runtime-proxy/src/smart_context/normalization/artifacts.rs",
+      "rust_owner_before": "Rust wrapped FNV-1a multiplication and rendered 16-digit hex with scv: as part of the volatile command-output compatibility hash",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "Removed Rust FNV-1a implementation; strict Mojo direct and runtime-proxy tests verify canonical empty/a/foobar vectors, Unicode inputs, invalid ABI, versioned prefixes and legacy hash compatibility",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "Borrow normalized output bytes into a versioned Mojo ABI, validate written length and owned UTF-8; preserve host-side SHA-256 algorithm for sc2 hashes"
     },
     {
       "name": "smart_context_capsule_order",

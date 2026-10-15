@@ -35,6 +35,15 @@ const SMART_CONTEXT_NORMALIZATION_CAPACITY_STATUS: i64 = 3;
 const SMART_CONTEXT_CAPSULE_MAX_COUNT: usize = 65_536;
 
 unsafe extern "C" {
+    fn prodex_mojo_smart_context_fnv_hash_text_v1(
+        abi_version: i64,
+        mode: i64,
+        source_address: u64,
+        source_length: i64,
+        output_address: u64,
+        output_capacity: i64,
+        written_address: u64,
+    ) -> i64;
     fn prodex_mojo_smart_context_static_bounded_text_v1(
         abi_version: i64,
         input: u64,
@@ -352,6 +361,36 @@ pub fn smart_context_static_bounded_text(
     }
 }
 
+/// Legacy FNV-1a fingerprint serialization is wholly Mojo-owned.
+/// Mode 0 returns 16 lowercase hex digits; mode 1 adds the scv: prefix.
+pub fn smart_context_legacy_fnv_text(
+    input: &[u8],
+    with_volatile_prefix: bool,
+) -> Result<String, MojoError> {
+    ensure_rich_abi()?;
+    let mut buffer = [0u8; 20];
+    let mut written = -1i64;
+    let status = unsafe {
+        prodex_mojo_smart_context_fnv_hash_text_v1(
+            RICH_ABI_VERSION,
+            i64::from(with_volatile_prefix),
+            mojo_pointer_address(input.as_ptr()),
+            i64::try_from(input.len()).map_err(|_| MojoError::InvalidInput)?,
+            mojo_mut_pointer_address(buffer.as_mut_ptr()),
+            buffer.len() as i64,
+            mojo_mut_pointer_address(&mut written),
+        )
+    };
+    if status != 0 {
+        return Err(normalization_status_error(status));
+    }
+    let written = usize::try_from(written).map_err(|_| MojoError::InvalidOutput)?;
+    if written != if with_volatile_prefix { 20 } else { 16 } {
+        return Err(MojoError::InvalidOutput);
+    }
+    String::from_utf8(buffer[..written].to_vec()).map_err(|_| MojoError::InvalidOutput)
+}
+
 /// Classify one static-context line as volatile metadata.
 pub fn smart_context_static_context_noise_line(line: &str) -> Result<bool, MojoError> {
     ensure_rich_abi()?;
@@ -484,6 +523,90 @@ pub fn plan_smart_context_capsules(
 #[cfg(test)]
 mod static_canonicalization_tests {
     use super::*;
+
+    #[test]
+    fn mojo_legacy_fnv_preserves_64_bit_hash_and_text_formats() {
+        for (input, expected) in [
+            (&b""[..], "cbf29ce484222325"),
+            (&b"a"[..], "af63dc4c8601ec8c"),
+            (&b"foobar"[..], "85944171f73967e8"),
+            (&b"\0"[..], "af63bd4c8601b7df"),
+        ] {
+            assert_eq!(
+                smart_context_legacy_fnv_text(input, false).unwrap(),
+                expected
+            );
+            assert_eq!(
+                smart_context_legacy_fnv_text(input, true).unwrap(),
+                format!("scv:{expected}"),
+            );
+        }
+        let input = "東京🧭".as_bytes();
+        let fingerprint = smart_context_legacy_fnv_text(input, false).unwrap();
+        assert_eq!(fingerprint.len(), 16);
+        assert_eq!(
+            smart_context_legacy_fnv_text(input, true).unwrap(),
+            format!("scv:{fingerprint}"),
+        );
+    }
+
+    #[test]
+    fn mojo_legacy_fnv_abi_fails_before_writing_for_invalid_input() {
+        let mut output = [73u8; 20];
+        let mut written = 99i64;
+        unsafe {
+            assert_eq!(
+                prodex_mojo_smart_context_fnv_hash_text_v1(
+                    RICH_ABI_VERSION + 1,
+                    0,
+                    0,
+                    0,
+                    mojo_mut_pointer_address(output.as_mut_ptr()),
+                    20,
+                    mojo_mut_pointer_address(&mut written),
+                ),
+                4,
+            );
+            assert_eq!(
+                prodex_mojo_smart_context_fnv_hash_text_v1(
+                    RICH_ABI_VERSION,
+                    2,
+                    0,
+                    0,
+                    mojo_mut_pointer_address(output.as_mut_ptr()),
+                    20,
+                    mojo_mut_pointer_address(&mut written),
+                ),
+                1,
+            );
+            assert_eq!(
+                prodex_mojo_smart_context_fnv_hash_text_v1(
+                    RICH_ABI_VERSION,
+                    0,
+                    0,
+                    3,
+                    mojo_mut_pointer_address(output.as_mut_ptr()),
+                    20,
+                    mojo_mut_pointer_address(&mut written),
+                ),
+                1,
+            );
+            assert_eq!(
+                prodex_mojo_smart_context_fnv_hash_text_v1(
+                    RICH_ABI_VERSION,
+                    0,
+                    0,
+                    0,
+                    mojo_mut_pointer_address(output.as_mut_ptr()),
+                    15,
+                    mojo_mut_pointer_address(&mut written),
+                ),
+                3,
+            );
+        }
+        assert_eq!(output, [73; 20]);
+        assert_eq!(written, 99);
+    }
 
     #[test]
     fn bounded_static_text_uses_mojo_prefix_normalization_and_lazy_digest() {

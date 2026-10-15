@@ -1,6 +1,27 @@
 use super::*;
 
 #[test]
+fn legacy_fnv_compatibility_and_normalized_hash_use_compiled_mojo() {
+    assert!(smart_context_hash_matches_text("sc:cbf29ce484222325", ""));
+    assert!(smart_context_hash_matches_text(
+        "sc:85944171f73967e8",
+        "foobar"
+    ));
+    assert!(!smart_context_hash_matches_text(
+        "sc:85944171f73967e8",
+        "foobar!"
+    ));
+    assert_eq!(
+        smart_context_normalized_command_output_hash_text("foobar"),
+        "scv:85944171f73967e8",
+    );
+    assert_eq!(
+        smart_context_normalized_command_output_hash_text(""),
+        "scv:cbf29ce484222325",
+    );
+}
+
+#[test]
 fn correctness_hash_uses_a_versioned_sha256_digest() {
     let hash = smart_context_hash_text("correctness-critical artifact");
 

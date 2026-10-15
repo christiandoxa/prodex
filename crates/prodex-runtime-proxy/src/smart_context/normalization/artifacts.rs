@@ -10,25 +10,17 @@ pub fn smart_context_hash_matches_text(hash: &str, text: &str) -> bool {
     if hash.starts_with("sc2:") {
         return hash == smart_context_hash_text(text);
     }
-    hash.strip_prefix("sc:")
-        .is_some_and(|value| value == format!("{:016x}", smart_context_fnv1a64(text.as_bytes())))
+    hash.strip_prefix("sc:").is_some_and(|value| {
+        value
+            == prodex_mojo_core::rich::smart_context_legacy_fnv_text(text.as_bytes(), false)
+                .expect("compiled Mojo legacy Smart Context digest failed")
+    })
 }
 
 pub fn smart_context_normalized_command_output_hash_text(text: &str) -> String {
     let normalized = smart_context_normalize_volatile_command_output(text);
-    format!(
-        "scv:{:016x}",
-        smart_context_fnv1a64(normalized.as_ref().as_bytes())
-    )
-}
-
-pub(in crate::smart_context) fn smart_context_fnv1a64(bytes: &[u8]) -> u64 {
-    let mut hash = 0xcbf29ce484222325u64;
-    for byte in bytes {
-        hash ^= u64::from(*byte);
-        hash = hash.wrapping_mul(0x100000001b3);
-    }
-    hash
+    prodex_mojo_core::rich::smart_context_legacy_fnv_text(normalized.as_ref().as_bytes(), true)
+        .expect("compiled Mojo Smart Context volatile digest failed")
 }
 
 pub(in crate::smart_context) fn smart_context_sha256_digest(bytes: &[u8]) -> [u8; 32] {
