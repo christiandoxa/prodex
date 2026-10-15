@@ -53,17 +53,17 @@ fn apply_runtime_profile_probe_result_to_runtime(
 ) -> (Vec<String>, Option<RuntimeStateSaveRequest>) {
     let mut log_messages = Vec::new();
     let mut state_save_args = None;
-    if let Some(observation) = observation {
-        let identity_matches = runtime
+    let identity_matches = observation.is_none_or(|observation| {
+        runtime
             .profile_usage_auth
             .get(profile_name)
-            .is_some_and(|entry| entry.auth == *observation.auth);
-        if !identity_matches {
-            log_messages.push(format!(
-                "profile_probe_refresh_stale profile={profile_name} reason=credential_changed"
-            ));
-            return (log_messages, None);
-        }
+            .is_some_and(|entry| entry.auth == *observation.auth)
+    });
+    if !identity_matches {
+        log_messages.push(format!(
+            "profile_probe_refresh_stale profile={profile_name} reason=credential_changed"
+        ));
+        return (log_messages, None);
     }
     let authenticated = auth.quota_compatible && result.is_ok();
     let next_snapshot = result
