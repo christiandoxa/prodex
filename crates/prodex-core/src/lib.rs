@@ -373,6 +373,17 @@ pub fn login_temp_dir_name_is_owned(name: &str) -> bool {
         .expect("Mojo login-temp ownership policy returned invalid output")
 }
 
+pub fn should_remove_stale_login_dir(
+    modified_epoch_seconds: i64,
+    oldest_allowed_epoch_seconds: i64,
+) -> bool {
+    prodex_mojo_core::core_file_policy::stale_login_dir_should_remove(
+        modified_epoch_seconds,
+        oldest_allowed_epoch_seconds,
+    )
+    .expect("Mojo stale login-dir retention policy returned invalid output")
+}
+
 pub fn runtime_broker_artifact_key(name: &str, is_dir: bool) -> Option<&str> {
     let (start, end) =
         prodex_mojo_core::core_file_policy::runtime_broker_artifact_key_range(name, is_dir)

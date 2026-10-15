@@ -8,6 +8,7 @@ const RUNTIME_LOG_NAME: i64 = 3;
 const LOGIN_TEMP_NAME: i64 = 4;
 const BROKER_ARTIFACT_KEY: i64 = 5;
 const BROKER_LEASE_PID: i64 = 6;
+const STALE_LOGIN_TEMP: i64 = 7;
 
 unsafe extern "C" {
     fn prodex_core_file_policy_v1(
@@ -111,6 +112,22 @@ pub fn login_temp_dir_name_is_owned(name: &str) -> Result<bool, MojoError> {
     bool_output(call(LOGIN_TEMP_NAME, name, "", false, 0, 0)?[0])
 }
 
+pub fn stale_login_dir_should_remove(
+    modified_epoch_seconds: i64,
+    oldest_allowed_epoch_seconds: i64,
+) -> Result<bool, MojoError> {
+    bool_output(
+        call(
+            STALE_LOGIN_TEMP,
+            "",
+            "",
+            false,
+            modified_epoch_seconds,
+            oldest_allowed_epoch_seconds,
+        )?[0],
+    )
+}
+
 pub fn runtime_broker_artifact_key_range(
     name: &str,
     is_dir: bool,
@@ -173,6 +190,9 @@ mod tests {
             runtime_proxy_log_file_name_is_owned("runtime-proxy-1.log", "runtime-proxy-").unwrap()
         );
         assert!(login_temp_dir_name_is_owned(".login-main").unwrap());
+        assert!(stale_login_dir_should_remove(99, 100).unwrap());
+        assert!(!stale_login_dir_should_remove(100, 100).unwrap());
+        assert!(!stale_login_dir_should_remove(101, 100).unwrap());
         assert_eq!(
             runtime_broker_artifact_key_range("runtime-broker-main.json.last-good", false).unwrap(),
             Some((15, 19))

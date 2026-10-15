@@ -16,6 +16,7 @@ comptime CORE_FILE_POLICY_RUNTIME_LOG_NAME: Int64 = 3
 comptime CORE_FILE_POLICY_LOGIN_TEMP_NAME: Int64 = 4
 comptime CORE_FILE_POLICY_BROKER_ARTIFACT_KEY: Int64 = 5
 comptime CORE_FILE_POLICY_BROKER_LEASE_PID: Int64 = 6
+comptime CORE_FILE_POLICY_STALE_LOGIN_TEMP: Int64 = 7
 
 comptime CORE_FILE_POLICY_U32_MAX: UInt64 = 4_294_967_295
 
@@ -133,7 +134,7 @@ def prodex_core_file_policy_v1(
         return CORE_FILE_POLICY_ABI
     if (
         operation < CORE_FILE_POLICY_OWNED_ROOT_TEMP
-        or operation > CORE_FILE_POLICY_BROKER_LEASE_PID
+        or operation > CORE_FILE_POLICY_STALE_LOGIN_TEMP
         or name_length < 0
         or prefix_length < 0
         or name_length > CORE_FILE_POLICY_MAX_TEXT_BYTES
@@ -191,6 +192,10 @@ def prodex_core_file_policy_v1(
         output[unsafe_offset=0] = UInt64(
             rich_view_prefix[".login-"](name, False)
         )
+        return CORE_FILE_POLICY_OK
+
+    if operation == CORE_FILE_POLICY_STALE_LOGIN_TEMP:
+        output[unsafe_offset=0] = UInt64(signed0 < signed1)
         return CORE_FILE_POLICY_OK
 
     if operation == CORE_FILE_POLICY_BROKER_ARTIFACT_KEY:
