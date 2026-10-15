@@ -1,6 +1,7 @@
 use super::*;
 
-pub(super) const SMART_CONTEXT_MODEL_SCAN_MAX_BYTES: usize = 4 * 1024;
+pub(super) const SMART_CONTEXT_MODEL_SCAN_MAX_BYTES: usize =
+    prodex_mojo_core::smart_context_model_registry::SMART_CONTEXT_MODEL_PREFIX_SCAN_MAX_BYTES;
 
 pub fn smart_context_model_name_from_body(body: &[u8]) -> Option<String> {
     if body.is_empty() {
@@ -32,29 +33,10 @@ pub(super) fn smart_context_model_name_from_value(value: &serde_json::Value) -> 
 }
 
 pub(super) fn smart_context_model_name_from_json_prefix(text: &str) -> Option<String> {
-    let (_, after_key) = text.split_once("\"model\"")?;
-    let after_colon = after_key.trim_start().strip_prefix(':')?.trim_start();
-    let mut chars = after_colon.strip_prefix('"')?.chars();
-    let mut model = String::new();
-    let mut escaped = false;
-    for ch in chars.by_ref() {
-        if escaped {
-            model.push(ch);
-            escaped = false;
-        } else if ch == '\\' {
-            escaped = true;
-        } else if ch == '"' {
-            return smart_context_normalized_model_name(Some(&model));
-        } else if ch.is_control() {
-            return None;
-        } else {
-            model.push(ch);
-        }
-        if model.len() > SMART_CONTEXT_MODEL_SCAN_MAX_BYTES {
-            return None;
-        }
-    }
-    None
+    let model =
+        prodex_mojo_core::smart_context_model_registry::extract_model_name_from_json_prefix(text)
+            .expect("Mojo Smart Context model-prefix scanner returned invalid output");
+    smart_context_normalized_model_name(model.as_deref())
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

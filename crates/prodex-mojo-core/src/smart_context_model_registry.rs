@@ -3,9 +3,18 @@ use crate::MojoError;
 const ABI_VERSION: i64 = 1;
 const MODEL_NAME_NORMALIZE_ABI_VERSION: i64 = 1;
 pub const SMART_CONTEXT_MODEL_NAME_MAX_BYTES: usize = 128;
+pub const SMART_CONTEXT_MODEL_PREFIX_SCAN_MAX_BYTES: usize = 4 * 1024;
 
 unsafe extern "C" {
     fn prodex_smart_context_model_name_normalize_v1(
+        abi_version: i64,
+        address: u64,
+        length: i64,
+        output_address: u64,
+        output_capacity: i64,
+        written_address: u64,
+    ) -> i64;
+    fn prodex_smart_context_model_prefix_scan_v1(
         abi_version: i64,
         address: u64,
         length: i64,
@@ -36,6 +45,41 @@ pub fn context_window_tokens(model: &str) -> Result<Option<u64>, MojoError> {
         value if value > 0 => u64::try_from(value)
             .map(Some)
             .map_err(|_| MojoError::InvalidOutput),
+        _ => Err(MojoError::InvalidOutput),
+    }
+}
+
+/// Extract the first quoted JSON `model` value from a bounded prefix.
+pub fn extract_model_name_from_json_prefix(value: &str) -> Result<Option<String>, MojoError> {
+    let capacity = value
+        .len()
+        .clamp(1, SMART_CONTEXT_MODEL_PREFIX_SCAN_MAX_BYTES);
+    let mut output = vec![0_u8; capacity];
+    let mut written = 0_i64;
+    let status = unsafe {
+        prodex_smart_context_model_prefix_scan_v1(
+            ABI_VERSION,
+            value.as_ptr() as usize as u64,
+            i64::try_from(value.len()).map_err(|_| MojoError::InvalidInput)?,
+            output.as_mut_ptr() as usize as u64,
+            i64::try_from(output.len()).map_err(|_| MojoError::InvalidInput)?,
+            (&mut written as *mut i64) as usize as u64,
+        )
+    };
+    match status {
+        0 => {
+            let written = usize::try_from(written).map_err(|_| MojoError::InvalidOutput)?;
+            if written > output.len() {
+                return Err(MojoError::InvalidOutput);
+            }
+            String::from_utf8(output[..written].to_vec())
+                .map(Some)
+                .map_err(|_| MojoError::InvalidOutput)
+        }
+        1 => Ok(None),
+        -2 => Err(MojoError::InvalidInput),
+        3 => Err(MojoError::Capacity),
+        -4 => Err(MojoError::AbiMismatch),
         _ => Err(MojoError::InvalidOutput),
     }
 }

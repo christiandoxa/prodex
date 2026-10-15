@@ -720,6 +720,16 @@
         ]
       },
       {
+        "path": "mojo/prodex_core/smart_context_model_registry.mojo",
+        "language": "mojo",
+        "classification": "DETERMINISTIC_DOMAIN",
+        "production_reachable": true,
+        "role": "semantic",
+        "operations": [
+          "smart_context_model_prefix_scan"
+        ]
+      },
+      {
         "path": "mojo/prodex_core/smart_context_capsule_order.mojo",
         "language": "mojo",
         "classification": "DETERMINISTIC_DOMAIN",
@@ -2842,6 +2852,29 @@
       "duplicate_production_owner": false,
       "platform_fallback": false,
       "rust_adapter_scope": "count-bounded per-ID pointer and checked-length projection, typed-key projection, validated permutation application, and existing admission batches"
+    },
+    {
+      "name": "smart_context_model_prefix_scan",
+      "domain": "smart-context/model-identification",
+      "introduced_in": "0.438.0",
+      "baseline_state": "candidate",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_smart_context_model_prefix_scan_v1",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/smart_context_model_registry.mojo",
+      "consumer": "crates/prodex-runtime-proxy/src/smart_context/core.rs",
+      "consumer_marker": "prodex_mojo_core::smart_context_model_registry::extract_model_name_from_json_prefix(",
+      "production_consumers": [
+        "crates/prodex-runtime-proxy/src/smart_context/core.rs"
+      ],
+      "production_reachability_test": "crates/prodex-mojo-core/tests/smart_context_model_registry.rs",
+      "rust_owner_before": "Rust scanned a bounded request prefix for the first exact model marker, Unicode whitespace around the colon, quoted values, escapes, controls, and the 4 KiB model bound",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "Removed the Rust prefix scanner; compiled Mojo ABI coverage and the runtime-proxy oversized-body regression preserve the extraction contract",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "serde_json structural parsing for small and full valid bodies, bounded UTF-8 slicing, and normalized model DTO materialization"
     },
     {
       "name": "log_event_classification",
@@ -11498,6 +11531,21 @@
       "production_consumer": "crates/prodex-quota/src/render/windows.rs",
       "parity_test": "crates/prodex-quota/tests/src/render/mojo.rs::quota_window_renderer_routes_full_compact_and_reset_text_to_mojo",
       "performance": "one bounded Mojo text ABI call per pair, status, detail, or reset summary"
+    },
+    {
+      "file": "crates/prodex-runtime-proxy/src/smart_context/core.rs",
+      "symbol": "smart_context_model_name_from_json_prefix",
+      "operation": "smart_context_model_prefix_scan",
+      "previous_responsibility": "Rust scanned the bounded request prefix for the first exact model marker, Unicode whitespace around the colon, quoted values, escapes, controls, and the 4 KiB model bound",
+      "final_state": "adapter-only",
+      "rust_before": "crates/prodex-runtime-proxy/src/smart_context/core.rs::smart_context_model_name_from_json_prefix",
+      "rust_after": "The Rust symbol retains the bounded request and normalization adapter while the production prefix scan is delegated to the mandatory Mojo model registry ABI",
+      "mojo_owner": "mojo/prodex_core/smart_context_model_registry.mojo::model_registry_copy_json_model_prefix",
+      "mojo_source": "mojo/prodex_core/smart_context_model_registry.mojo",
+      "mojo_entry": "prodex_smart_context_model_prefix_scan_v1",
+      "production_consumer": "crates/prodex-runtime-proxy/src/smart_context/core.rs",
+      "parity_test": "crates/prodex-runtime-proxy/tests/src/smart_context/core_artifacts.rs",
+      "performance": "one bounded prefix ABI call for oversized request bodies"
     }
   ],
   "deleted_authoritative_operations": [
