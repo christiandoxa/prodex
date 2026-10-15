@@ -3,20 +3,18 @@ use super::*;
 pub(in crate::smart_context) fn smart_context_static_context_prompt_cache_payload(
     items: &[SmartContextStableStaticContextItem],
 ) -> String {
-    let mut payload = String::from("prodex-smart-context-static-prompt-cache-v1\n");
-    for item in items {
-        payload.push_str("id-bytes:");
-        payload.push_str(&item.id.len().to_string());
-        payload.push('\n');
-        payload.push_str(&item.id);
-        payload.push('\n');
-        payload.push_str("text-bytes:");
-        payload.push_str(&item.byte_len.to_string());
-        payload.push('\n');
-        payload.push_str(&item.canonical_text);
-        payload.push('\n');
-    }
-    payload
+    let sources = items
+        .iter()
+        .map(
+            |item| prodex_mojo_core::rich::SmartContextStaticPayloadItem {
+                id: &item.id,
+                canonical_text: &item.canonical_text,
+                byte_len: item.byte_len,
+            },
+        )
+        .collect::<Vec<_>>();
+    prodex_mojo_core::rich::smart_context_static_prompt_payload(&sources)
+        .expect("Mojo Smart Context cache payload renderer returned invalid output")
 }
 
 #[cfg(test)]

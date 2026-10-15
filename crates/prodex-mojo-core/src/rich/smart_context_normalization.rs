@@ -35,6 +35,16 @@ const SMART_CONTEXT_NORMALIZATION_CAPACITY_STATUS: i64 = 3;
 const SMART_CONTEXT_CAPSULE_MAX_COUNT: usize = 65_536;
 
 unsafe extern "C" {
+    fn prodex_mojo_smart_context_static_prompt_payload_v1(
+        abi_version: i64,
+        ids: u64,
+        texts: u64,
+        sizes: u64,
+        count: i64,
+        output: u64,
+        output_capacity: i64,
+        written: u64,
+    ) -> i64;
     fn prodex_mojo_smart_context_static_canonicalize_v1(
         abi_version: i64,
         input: u64,
@@ -177,6 +187,64 @@ pub fn canonicalize_smart_context_static_text(text: &str) -> Result<String, Mojo
     String::from_utf8(bytes.to_vec()).map_err(|_| MojoError::InvalidOutput)
 }
 
+/// Borrowed static payload pieces. The caller owns normalization, IDs and hashes;
+/// Mojo exclusively owns the serialized prompt-cache byte format.
+#[derive(Debug, Clone, Copy)]
+pub struct SmartContextStaticPayloadItem<'a> {
+    pub id: &'a str,
+    pub canonical_text: &'a str,
+    pub byte_len: usize,
+}
+
+pub fn smart_context_static_prompt_payload(
+    items: &[SmartContextStaticPayloadItem<'_>],
+) -> Result<String, MojoError> {
+    ensure_rich_abi()?;
+    if items.len() > 128 {
+        return Err(MojoError::Capacity);
+    }
+    let capacity = items
+        .iter()
+        .try_fold(48usize, |size, item| {
+            size.checked_add(item.id.len())?
+                .checked_add(item.canonical_text.len())?
+                .checked_add(64)
+        })
+        .ok_or(MojoError::InvalidInput)?;
+    if capacity > 64 * 1024 * 1024 {
+        return Err(MojoError::Capacity);
+    }
+    let ids = items.iter().map(|item| view(item.id)).collect::<Vec<_>>();
+    let texts = items
+        .iter()
+        .map(|item| view(item.canonical_text))
+        .collect::<Vec<_>>();
+    let sizes = items
+        .iter()
+        .map(|item| u64::try_from(item.byte_len).map_err(|_| MojoError::InvalidInput))
+        .collect::<Result<Vec<_>, _>>()?;
+    let mut output = vec![0_u8; capacity];
+    let mut written = -1_i64;
+    let status = unsafe {
+        prodex_mojo_smart_context_static_prompt_payload_v1(
+            RICH_ABI_VERSION,
+            mojo_pointer_address(ids.as_ptr()),
+            mojo_pointer_address(texts.as_ptr()),
+            mojo_pointer_address(sizes.as_ptr()),
+            i64::try_from(items.len()).map_err(|_| MojoError::InvalidInput)?,
+            mojo_mut_pointer_address(output.as_mut_ptr()),
+            i64::try_from(capacity).map_err(|_| MojoError::InvalidInput)?,
+            mojo_mut_pointer_address(&mut written),
+        )
+    };
+    if status != 0 {
+        return Err(normalization_status_error(status));
+    }
+    let length = usize::try_from(written).map_err(|_| MojoError::InvalidOutput)?;
+    let bytes = output.get(..length).ok_or(MojoError::InvalidOutput)?;
+    String::from_utf8(bytes.to_vec()).map_err(|_| MojoError::InvalidOutput)
+}
+
 /// Classify one static-context line as volatile metadata.
 pub fn smart_context_static_context_noise_line(line: &str) -> Result<bool, MojoError> {
     ensure_rich_abi()?;
@@ -309,6 +377,69 @@ pub fn plan_smart_context_capsules(
 #[cfg(test)]
 mod static_canonicalization_tests {
     use super::*;
+
+    #[test]
+    fn static_payload_serialization_is_mojo_owned_and_byte_exact() {
+        assert_eq!(
+            smart_context_static_prompt_payload(&[]).unwrap(),
+            "prodex-smart-context-static-prompt-cache-v1\n",
+        );
+        let entries = [
+            SmartContextStaticPayloadItem {
+                id: "AGENTS.md",
+                canonical_text: "rules\n",
+                byte_len: 6,
+            },
+            SmartContextStaticPayloadItem {
+                id: "🧭",
+                canonical_text: "東京",
+                byte_len: 6,
+            },
+        ];
+        assert_eq!(
+            smart_context_static_prompt_payload(&entries).unwrap(),
+            "prodex-smart-context-static-prompt-cache-v1\n\
+             id-bytes:9\nAGENTS.md\ntext-bytes:6\nrules\n\n\
+             id-bytes:4\n🧭\ntext-bytes:6\n東京\n",
+        );
+    }
+
+    #[test]
+    fn static_payload_rejects_abi_and_count_before_writing_output() {
+        let entry = view("hello");
+        let mut output = [71_u8; 64];
+        let mut written = 88_i64;
+        unsafe {
+            assert_eq!(
+                prodex_mojo_smart_context_static_prompt_payload_v1(
+                    RICH_ABI_VERSION + 1,
+                    mojo_pointer_address(&entry),
+                    mojo_pointer_address(&entry),
+                    0,
+                    1,
+                    mojo_mut_pointer_address(output.as_mut_ptr()),
+                    64,
+                    mojo_mut_pointer_address(&mut written),
+                ),
+                4,
+            );
+            assert_eq!(
+                prodex_mojo_smart_context_static_prompt_payload_v1(
+                    RICH_ABI_VERSION,
+                    0,
+                    0,
+                    0,
+                    1,
+                    mojo_mut_pointer_address(output.as_mut_ptr()),
+                    64,
+                    mojo_mut_pointer_address(&mut written),
+                ),
+                1,
+            );
+        }
+        assert_eq!(output, [71; 64]);
+        assert_eq!(written, 88);
+    }
 
     #[test]
     fn static_pipeline_canonicalizes_newlines_noise_and_unicode_without_rust_fallback() {

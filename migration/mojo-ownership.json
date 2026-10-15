@@ -701,7 +701,8 @@
         "role": "semantic",
         "operations": [
           "smart_context_rehydration_plan",
-          "smart_context_static_canonicalization"
+          "smart_context_static_canonicalization",
+          "smart_context_static_prompt_payload_format"
         ]
       },
       {
@@ -2623,6 +2624,29 @@
       "duplicate_production_owner": false,
       "platform_fallback": false,
       "rust_adapter_scope": "Borrowed UTF-8 view, bounded output allocation, checked String materialization, hashes and fingerprint DTOs"
+    },
+    {
+      "name": "smart_context_static_prompt_payload_format",
+      "domain": "smart-context/static-context",
+      "introduced_in": "0.438.0",
+      "baseline_state": "Rust authored the static prompt-cache framing protocol including header, id-bytes, text-bytes, line delimiters and integer encoding",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_mojo_smart_context_static_prompt_payload_v1",
+      "mojo_abi_version": 6,
+      "mojo_source": "mojo/prodex_core/smart_context_normalization.mojo",
+      "consumer": "crates/prodex-runtime-proxy/src/smart_context/normalization/static_context.rs",
+      "consumer_marker": "prodex_mojo_core::rich::smart_context_static_prompt_payload(",
+      "production_consumers": [
+        "crates/prodex-runtime-proxy/src/smart_context/normalization/static_context.rs"
+      ],
+      "production_reachability_test": "crates/prodex-runtime-proxy/tests/src/smart_context/static_context.rs",
+      "rust_owner_before": "Rust manually appended stable fingerprint prefix, ID/text length digits, newlines and canonical text into a String",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "Deleted the Rust wire format builder; direct ABI, production fingerprint and all 430 runtime-proxy library tests cover byte exact framing",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "Iterate host-owned canonical inputs, bind borrowed views, check output buffer and UTF-8, return Mojo-authored cache serialization"
     },
     {
       "name": "smart_context_capsule_order",
