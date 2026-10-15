@@ -621,7 +621,8 @@
         "operations": [
           "provider_model_fallback_parser",
           "session_usage_limit_marker",
-          "gemini_invalid_stream_retry_delay_policy"
+          "gemini_invalid_stream_retry_delay_policy",
+          "runtime_retry_after_text_policy"
         ]
       }
     },
@@ -639,16 +640,16 @@
           "session_state_db_row_match_policy"
         ]
       },
-    {
-      "path": "mojo/prodex_core/status_resource.mojo",
-      "language": "mojo",
-      "classification": "DETERMINISTIC_DOMAIN",
-      "production_reachable": true,
-      "role": "semantic",
-      "operations": [
-        "status_resource_proc_parser"
-      ]
-    },
+      {
+        "path": "mojo/prodex_core/status_resource.mojo",
+        "language": "mojo",
+        "classification": "DETERMINISTIC_DOMAIN",
+        "production_reachable": true,
+        "role": "semantic",
+        "operations": [
+          "status_resource_proc_parser"
+        ]
+      },
       {
         "path": "crates/prodex-mojo-core/src/json/session_selector.rs",
         "language": "rust",
@@ -2184,6 +2185,16 @@
         "role": "adapter",
         "operations": [
           "ping_status_detail_formatting"
+        ]
+      },
+      {
+        "path": "crates/prodex-mojo-core/src/rich/fallback.rs",
+        "language": "rust",
+        "classification": "MIXED",
+        "production_reachable": true,
+        "role": "adapter",
+        "operations": [
+          "runtime_retry_after_text_policy"
         ]
       }
     ],
@@ -9427,6 +9438,29 @@
       "duplicate_production_owner": false,
       "platform_fallback": false,
       "rust_adapter_scope": "status-tag mapping, bounded output allocation, ABI error mapping, and structured failure text extraction"
+    },
+    {
+      "name": "runtime_retry_after_text_policy",
+      "domain": "runtime-proxy/retry-after",
+      "introduced_in": "0.438.0",
+      "baseline_state": "Rust searched the earliest try-again-in marker, trimmed Unicode whitespace, extracted numeric tokens, classified millisecond/second suffixes and trimmed Retry-After header values",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_mojo_rich_retry_after_text_v1",
+      "mojo_abi_version": 6,
+      "mojo_source": "mojo/prodex_core/rich_fallback.mojo",
+      "consumer": "crates/prodex-runtime-proxy/src/error_policy/retry_after.rs",
+      "consumer_marker": "runtime_retry_after_text_millis(",
+      "production_consumers": [
+        "crates/prodex-runtime-proxy/src/error_policy/retry_after.rs"
+      ],
+      "production_reachability_test": "crates/prodex-runtime-proxy/src/error_policy/retry_after.rs",
+      "rust_owner_before": "Rust ASCII case-insensitive message marker scanning, suffix interpretation, UTF-8 trim and number slicing with silent fallback to None",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "Production parser removed; direct Mojo and caller tests cover header and free-text behavior, first-match priority, cap, invalid inputs, Unicode and native ABI versions",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "Header-name filtering and byte-to-UTF-8 ownership, Mojo ABI marshalling, Duration projection, selecting maximum duration across upstream repeated headers"
     }
   ],
   "rust_semantic_reductions": [

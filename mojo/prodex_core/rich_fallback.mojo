@@ -12,6 +12,9 @@ from json_view import (
     deepseek_json_value_end,
 )
 from rich_text import (
+    rich_codepoint,
+    rich_codepoint_width,
+    rich_unicode_space,
     rich_copy_range,
     rich_hash_slice,
     rich_required_hash_capacity,
@@ -1821,6 +1824,96 @@ def prodex_mojo_rich_retry_after_millis_v1(
     if millis > RUNTIME_RETRY_AFTER_CAP_MILLIS:
         millis = RUNTIME_RETRY_AFTER_CAP_MILLIS
     return Int64(millis)
+
+
+
+# Runtime retry-after text framing has one Mojo authority. The host only
+# supplies a UTF-8 input; neither marker search nor unit parsing falls back
+# to Rust. Mode 0 is a Retry-After header, mode 1 a provider error message.
+comptime RUNTIME_RETRY_AFTER_TEXT_HEADER: Int64 = 0
+comptime RUNTIME_RETRY_AFTER_TEXT_MESSAGE: Int64 = 1
+
+@export("prodex_mojo_rich_retry_after_text_v1")
+def prodex_mojo_rich_retry_after_text_v1(
+    abi_version: Int64,
+    text_mode: Int64,
+    text_address: UInt,
+    text_length: Int64,
+) abi("C") -> Int64:
+    if abi_version != PRODEX_RICH_ABI_VERSION:
+        return -2
+    if (
+        text_mode < RUNTIME_RETRY_AFTER_TEXT_HEADER
+        or text_mode > RUNTIME_RETRY_AFTER_TEXT_MESSAGE
+        or text_length < 0
+        or (text_length > 0 and text_address == 0)
+    ):
+        return -2
+    var full_view = ProdexRichStringView(text_address, UInt(text_length))
+    if not rich_view_valid(full_view, RICH_MAX_FALLBACK_MODEL_BYTES):
+        return -2
+    if text_length == 0:
+        return -1
+    var source = rich_view_ptr(full_view)
+    if text_mode == RUNTIME_RETRY_AFTER_TEXT_HEADER:
+        var bounds = rich_trim_bounds(full_view)
+        if bounds[0] == bounds[1]:
+            return -1
+        return prodex_mojo_rich_retry_after_millis_v1(
+            PRODEX_RICH_ABI_VERSION,
+            RUNTIME_RETRY_AFTER_MODE_HEADER_SECONDS,
+            text_address + UInt(bounds[0]),
+            bounds[1] - bounds[0],
+        )
+
+    var marker = StringSlice("try again in")
+    var marker_length = Int64(marker.byte_length())
+    var after_marker: Int64 = -1
+    for offset in range(text_length - marker_length + 1):
+        if runtime_error_range_matches(
+            source, offset, offset + marker_length, marker, True
+        ):
+            after_marker = offset + marker_length
+            break
+    if after_marker < 0:
+        return -1
+    var rest = ProdexRichStringView(
+        text_address + UInt(after_marker), UInt(text_length - after_marker)
+    )
+    var rest_bounds = rich_trim_bounds(rest)
+    var number_begin = after_marker + rest_bounds[0]
+    var number_end = number_begin
+    while number_end < text_length:
+        var byte = source[unsafe_offset=number_end]
+        if (byte < 48 or byte > 57) and byte != 46:
+            break
+        number_end += 1
+    if number_end == number_begin:
+        return -1
+    var suffix_begin = number_end
+    while suffix_begin < text_length:
+        var width = rich_codepoint_width(source[unsafe_offset=suffix_begin])
+        if not rich_unicode_space(rich_codepoint(source, suffix_begin, width)):
+            break
+        suffix_begin += width
+
+    var mode: Int64 = -1
+    if suffix_begin + 2 <= text_length and runtime_error_range_matches(
+        source, suffix_begin, suffix_begin + 2, StringSlice("ms"), True
+    ):
+        mode = RUNTIME_RETRY_AFTER_MODE_DURATION_MILLIS
+    elif suffix_begin < text_length and runtime_error_range_matches(
+        source, suffix_begin, suffix_begin + 1, StringSlice("s"), True
+    ):
+        mode = RUNTIME_RETRY_AFTER_MODE_DURATION_SECONDS
+    if mode < 0:
+        return -1
+    return prodex_mojo_rich_retry_after_millis_v1(
+        PRODEX_RICH_ABI_VERSION,
+        mode,
+        text_address + UInt(number_begin),
+        number_end - number_begin,
+    )
 
 
 comptime PREVIOUS_RESPONSE_ERROR_MODE_STRUCTURED: Int64 = 0

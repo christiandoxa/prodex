@@ -1,33 +1,19 @@
 use prodex_mojo_core::rich::{
-    ascii_casefold_equal_exact, ascii_casefold_find, ascii_casefold_starts_with,
+    RUNTIME_RETRY_AFTER_TEXT_HEADER, RUNTIME_RETRY_AFTER_TEXT_MESSAGE, ascii_casefold_equal_exact,
+    runtime_retry_after_text_millis,
 };
 use std::time::Duration;
 
-const RUNTIME_RETRY_AFTER_MODE_HEADER_SECONDS: i64 = 0;
-const RUNTIME_RETRY_AFTER_MODE_DURATION_MILLIS: i64 = 1;
-const RUNTIME_RETRY_AFTER_MODE_DURATION_SECONDS: i64 = 2;
-
-const _: () = {
-    assert!(
-        RUNTIME_RETRY_AFTER_MODE_HEADER_SECONDS
-            == prodex_mojo_core::rich::RUNTIME_RETRY_AFTER_MODE_HEADER_SECONDS
-    );
-    assert!(
-        RUNTIME_RETRY_AFTER_MODE_DURATION_MILLIS
-            == prodex_mojo_core::rich::RUNTIME_RETRY_AFTER_MODE_DURATION_MILLIS
-    );
-    assert!(
-        RUNTIME_RETRY_AFTER_MODE_DURATION_SECONDS
-            == prodex_mojo_core::rich::RUNTIME_RETRY_AFTER_MODE_DURATION_SECONDS
-    );
+#[cfg(test)]
+use prodex_mojo_core::rich::{
+    RUNTIME_RETRY_AFTER_MODE_DURATION_MILLIS, RUNTIME_RETRY_AFTER_MODE_DURATION_SECONDS,
+    RUNTIME_RETRY_AFTER_MODE_HEADER_SECONDS,
 };
 
 pub fn runtime_retry_after_from_message(message: &str) -> Option<Duration> {
-    let marker = "try again in";
-    let start = ascii_casefold_find(message, marker)
-        .expect("Mojo retry-after marker search failed")?
-        + marker.len();
-    runtime_retry_after_duration_token(&message[start..])
+    runtime_retry_after_text_millis(RUNTIME_RETRY_AFTER_TEXT_MESSAGE, message)
+        .expect("Mojo retry-after message parser returned an invalid result")
+        .map(Duration::from_millis)
 }
 
 pub fn runtime_retry_after_from_headers<'a>(
@@ -40,50 +26,45 @@ pub fn runtime_retry_after_from_headers<'a>(
                 .expect("Mojo Retry-After header-name comparison failed")
         })
         .filter_map(|(_, value)| std::str::from_utf8(value).ok())
-        .filter_map(runtime_retry_after_header_value)
+        .filter_map(|value| {
+            runtime_retry_after_text_millis(RUNTIME_RETRY_AFTER_TEXT_HEADER, value)
+                .expect("Mojo Retry-After header parser returned an invalid result")
+                .map(Duration::from_millis)
+        })
         .max()
-}
-
-fn runtime_retry_after_header_value(value: &str) -> Option<Duration> {
-    runtime_retry_after_number(value.trim(), RUNTIME_RETRY_AFTER_MODE_HEADER_SECONDS)
-}
-
-fn runtime_retry_after_duration_token(value: &str) -> Option<Duration> {
-    let value = value.trim_start();
-    let number_len = value
-        .bytes()
-        .take_while(|byte| byte.is_ascii_digit() || *byte == b'.')
-        .count();
-    if number_len == 0 {
-        return None;
-    }
-    let number = &value[..number_len];
-    let suffix = value[number_len..].trim_start();
-    let mode = if ascii_casefold_starts_with(suffix, "ms")
-        .expect("Mojo retry-after suffix comparison failed")
-    {
-        RUNTIME_RETRY_AFTER_MODE_DURATION_MILLIS
-    } else if ascii_casefold_starts_with(suffix, "s")
-        .expect("Mojo retry-after suffix comparison failed")
-        || ascii_casefold_starts_with(suffix, "second")
-            .expect("Mojo retry-after suffix comparison failed")
-    {
-        RUNTIME_RETRY_AFTER_MODE_DURATION_SECONDS
-    } else {
-        return None;
-    };
-    runtime_retry_after_number(number, mode)
-}
-
-fn runtime_retry_after_number(number: &str, mode: i64) -> Option<Duration> {
-    prodex_mojo_core::rich::runtime_retry_after_millis(mode, number)
-        .expect("Mojo retry-after parser returned an invalid result")
-        .map(Duration::from_millis)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn mojo_retry_after_text_end_to_end_unicode_and_header_maximum() {
+        assert_eq!(
+            runtime_retry_after_from_message("🧭 Please TRY AGAIN IN\u{2003}1.25MS"),
+            Some(Duration::from_millis(2)),
+        );
+        assert_eq!(
+            runtime_retry_after_from_message("try again in 7s; try again in 20s"),
+            Some(Duration::from_secs(7)),
+        );
+        assert_eq!(
+            runtime_retry_after_from_headers([
+                ("Content-Type", b"12".as_slice()),
+                ("retry-after", b" 2 ".as_slice()),
+                ("Retry-After", b" 301 ".as_slice()),
+                ("RETRY-AFTER", b"invalid".as_slice()),
+            ]),
+            Some(Duration::from_secs(300)),
+        );
+        assert_eq!(
+            runtime_retry_after_from_headers([
+                ("Retry-After", b"0".as_slice()),
+                ("Retry-After", b"1.2".as_slice()),
+            ]),
+            None,
+        );
+    }
 
     #[test]
     fn retry_after_numeric_policy_matches_expected_values() {
@@ -186,7 +167,9 @@ mod tests {
         ];
         for ((number, mode), expected) in cases {
             assert_eq!(
-                runtime_retry_after_number(number, mode),
+                prodex_mojo_core::rich::runtime_retry_after_millis(mode, number)
+                    .unwrap()
+                    .map(Duration::from_millis),
                 expected,
                 "number={number} mode={mode}"
             );

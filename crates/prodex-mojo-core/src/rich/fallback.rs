@@ -18,6 +18,8 @@ pub const RUNTIME_ERROR_MODE_TEXT_WORKSPACE: i64 = 11;
 pub const RUNTIME_ERROR_MODE_SESSION_USAGE_LIMIT: i64 = 15;
 pub const RUNTIME_ERROR_SESSION_USAGE_LIMIT_MAX_BYTES: usize = 67_108_864;
 const RUNTIME_ERROR_CLASS_QUOTA: i64 = 1;
+pub const RUNTIME_RETRY_AFTER_TEXT_HEADER: i64 = 0;
+pub const RUNTIME_RETRY_AFTER_TEXT_MESSAGE: i64 = 1;
 pub const RUNTIME_RETRY_AFTER_MODE_HEADER_SECONDS: i64 = 0;
 pub const RUNTIME_RETRY_AFTER_MODE_DURATION_MILLIS: i64 = 1;
 pub const RUNTIME_RETRY_AFTER_MODE_DURATION_SECONDS: i64 = 2;
@@ -139,6 +141,12 @@ unsafe extern "C" {
         output_capacity: i64,
         result: u64,
     ) -> i64;
+    fn prodex_mojo_rich_retry_after_text_v1(
+        abi_version: i64,
+        mode: i64,
+        input_address: u64,
+        input_length: i64,
+    ) -> i64;
     fn prodex_mojo_rich_retry_after_millis_v1(
         abi_version: i64,
         mode: i64,
@@ -190,6 +198,34 @@ pub fn rate_limit_header_class(value: &str) -> Result<i64, MojoError> {
         | RATE_LIMIT_HEADER_CLASS_RATE
         | RATE_LIMIT_HEADER_CLASS_QUOTA => Ok(result),
         -1 => Err(MojoError::InvalidInput),
+        _ => Err(MojoError::InvalidOutput),
+    }
+}
+
+/// Compiled Mojo selects the Retry-After marker, unit, and duration.
+pub fn runtime_retry_after_text_millis(
+    text_mode: i64,
+    value: &str,
+) -> Result<Option<u64>, MojoError> {
+    ensure_rich_abi()?;
+    if !matches!(
+        text_mode,
+        RUNTIME_RETRY_AFTER_TEXT_HEADER | RUNTIME_RETRY_AFTER_TEXT_MESSAGE
+    ) {
+        return Err(MojoError::InvalidInput);
+    }
+    let result = unsafe {
+        prodex_mojo_rich_retry_after_text_v1(
+            RICH_ABI_VERSION,
+            text_mode,
+            mojo_pointer_address(value.as_ptr()),
+            i64::try_from(value.len()).map_err(|_| MojoError::InvalidInput)?,
+        )
+    };
+    match result {
+        -1 => Ok(None),
+        1..=RUNTIME_RETRY_AFTER_CAP_MILLIS => Ok(Some(result as u64)),
+        -2 => Err(MojoError::InvalidInput),
         _ => Err(MojoError::InvalidOutput),
     }
 }
@@ -718,3 +754,7 @@ mod gemini_code_assist_tests {
 #[cfg(test)]
 #[path = "fallback/session_usage_limit_tests.rs"]
 mod session_usage_limit_tests;
+
+#[cfg(test)]
+#[path = "fallback/retry_after_text_tests.rs"]
+mod retry_after_text_tests;
