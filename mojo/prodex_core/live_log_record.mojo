@@ -9,6 +9,9 @@ comptime LIVE_LOG_RECORD_MAX_BYTES: Int64 = 128 * 1024
 comptime LIVE_LOG_NESTED_STRING_MAX_BYTES: Int64 = 8 * 1024
 comptime LIVE_LOG_RECORD_PREFIX_RESERVE: Int64 = 32
 comptime LIVE_LOG_PAGE_MAX_INPUT: Int64 = 2048
+comptime LIVE_LOG_FOLLOW_MAX_PENDING_BYTES: Int64 = 1024 * 1024
+comptime LIVE_LOG_FOLLOW_MAX_LINE_BYTES: Int64 = 2 * 1024 * 1024
+comptime LIVE_LOG_FOLLOW_MAX_INPUT_LINES: Int64 = 2 * 1024 * 1024
 
 
 def live_log_utf8_prefix_end(
@@ -221,4 +224,49 @@ def prodex_live_log_snapshot_plan_v1(
     output[unsafe_offset=1] = UInt64(selected)
     output[unsafe_offset=2] = cursor
     output[unsafe_offset=3] = dropped
+    return LIVE_LOG_RECORD_OK
+
+
+@export("prodex_live_log_follow_plan_v1")
+def prodex_live_log_follow_plan_v1(
+    abi_version: Int64,
+    line_lengths_address: UInt,
+    line_count: Int64,
+    pending_length: Int64,
+    keep_address: UInt,
+    dropped_address: UInt,
+    pending_gap_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != LIVE_LOG_RECORD_ABI_VERSION:
+        return LIVE_LOG_RECORD_ABI
+    if (
+        line_count < 0
+        or line_count > LIVE_LOG_FOLLOW_MAX_INPUT_LINES
+        or pending_length < 0
+        or dropped_address == 0
+        or pending_gap_address == 0
+        or (line_count > 0 and (line_lengths_address == 0 or keep_address == 0))
+    ):
+        return LIVE_LOG_RECORD_INVALID
+
+    var lengths = Pointer[mut=False, Int64, ImmUntrackedOrigin](
+        unsafe_from_address=Int(line_lengths_address)
+    )
+    var keep = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(keep_address)
+    )
+    var dropped = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(dropped_address)
+    )
+    var pending_gap = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(pending_gap_address)
+    )
+    var dropped_count: Int64 = 0
+    for index in range(line_count):
+        var keep_line = lengths[unsafe_offset=index] <= LIVE_LOG_FOLLOW_MAX_LINE_BYTES
+        keep[unsafe_offset=index] = Int64(keep_line)
+        if not keep_line:
+            dropped_count += 1
+    dropped[] = dropped_count
+    pending_gap[] = Int64(pending_length > LIVE_LOG_FOLLOW_MAX_PENDING_BYTES)
     return LIVE_LOG_RECORD_OK
