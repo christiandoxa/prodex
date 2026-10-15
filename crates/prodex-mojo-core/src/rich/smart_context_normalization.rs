@@ -35,6 +35,13 @@ const SMART_CONTEXT_NORMALIZATION_CAPACITY_STATUS: i64 = 3;
 const SMART_CONTEXT_CAPSULE_MAX_COUNT: usize = 65_536;
 
 unsafe extern "C" {
+    fn prodex_mojo_smart_context_static_canonicalize_v1(
+        abi_version: i64,
+        input: u64,
+        output: u64,
+        output_capacity: i64,
+        written: u64,
+    ) -> i64;
     fn prodex_mojo_smart_context_normalization_v1(
         abi_version: i64,
         input: u64,
@@ -128,6 +135,46 @@ pub fn normalize_smart_context_volatile(
     let written = usize::try_from(written).map_err(|_| MojoError::InvalidOutput)?;
     let output = output.get(..written).ok_or(MojoError::InvalidOutput)?;
     String::from_utf8(output.to_vec()).map_err(|_| MojoError::InvalidOutput)
+}
+
+/// Fully canonicalize static context in the compiled Mojo owner. Rust
+/// validates UTF-8 and output capacity but never re-normalizes lines.
+pub fn canonicalize_smart_context_static_text(text: &str) -> Result<String, MojoError> {
+    ensure_rich_abi()?;
+    let maximum = checked_output_capacity(
+        text.len(),
+        SMART_CONTEXT_NORMALIZATION_MAX_OUTPUT_MULTIPLIER,
+    )?;
+    let mut capacity = checked_output_capacity(
+        text.len(),
+        SMART_CONTEXT_NORMALIZATION_INITIAL_OUTPUT_MULTIPLIER,
+    )?;
+    let input = view(text);
+    let mut output = vec![0_u8; capacity.max(1)];
+    let mut written = 0_i64;
+    let status = loop {
+        let status = unsafe {
+            prodex_mojo_smart_context_static_canonicalize_v1(
+                RICH_ABI_VERSION,
+                mojo_pointer_address(&input),
+                mojo_mut_pointer_address(output.as_mut_ptr()),
+                i64::try_from(capacity).map_err(|_| MojoError::InvalidInput)?,
+                mojo_mut_pointer_address(&mut written),
+            )
+        };
+        if status != SMART_CONTEXT_NORMALIZATION_CAPACITY_STATUS || capacity == maximum {
+            break status;
+        }
+        capacity = maximum;
+        output.resize(capacity.max(1), 0);
+        written = 0;
+    };
+    if status != 0 {
+        return Err(normalization_status_error(status));
+    }
+    let written = usize::try_from(written).map_err(|_| MojoError::InvalidOutput)?;
+    let bytes = output.get(..written).ok_or(MojoError::InvalidOutput)?;
+    String::from_utf8(bytes.to_vec()).map_err(|_| MojoError::InvalidOutput)
 }
 
 /// Classify one static-context line as volatile metadata.
@@ -257,4 +304,84 @@ pub fn plan_smart_context_capsules(
         selected,
         used_tokens: usize::try_from(used_tokens).map_err(|_| MojoError::InvalidOutput)?,
     })
+}
+
+#[cfg(test)]
+mod static_canonicalization_tests {
+    use super::*;
+
+    #[test]
+    fn static_pipeline_canonicalizes_newlines_noise_and_unicode_without_rust_fallback() {
+        let input = "\r\n \t\r\nGenerated at: 2026-10-15T11:00:00Z\r\n \
+                     Rule: Keep profile affinity  \u{2003}\r\n\r\n\
+                     request_id=123e4567-e89b-12d3-a456-426614174000\r\n\
+                     Rule: Keep route identity\n  \n";
+        assert_eq!(
+            canonicalize_smart_context_static_text(input).unwrap(),
+            " Rule: Keep profile affinity\n\nRule: Keep route identity",
+        );
+        for (source, expected) in [
+            ("", ""),
+            ("\n\r\n\r", ""),
+            ("  \u{2003}hello  \u{00a0}\r\n", "  \u{2003}hello"),
+            ("alpha\n\n\n", "alpha"),
+            ("\n\nalpha\n\nbeta\n\n", "alpha\n\nbeta"),
+            ("first\rsecond\r\nthird\n", "first\nsecond\nthird"),
+            ("\u{1f9ed} a\u{2028}b  ", "\u{1f9ed} a\u{2028}b"),
+        ] {
+            assert_eq!(
+                canonicalize_smart_context_static_text(source).unwrap(),
+                expected,
+                "{source:?}",
+            );
+        }
+    }
+
+    #[test]
+    fn static_pipeline_keeps_semantic_text_and_redacts_inline_volatile_ids() {
+        let before = "Trace request_id=123e4567-e89b-12d3-a456-426614174000 \
+                      at 2026-05-04T01:02:03Z\nRule: Keep affinity";
+        let after = "Trace request_id=123e4567-e89b-12d3-a456-426614174999 \
+                     at 2026-05-05T09:08:07Z\nRule: Keep affinity";
+        let expected = "Trace request_id=<id> at <timestamp>\nRule: Keep affinity";
+        assert_eq!(
+            canonicalize_smart_context_static_text(before).unwrap(),
+            expected
+        );
+        assert_eq!(
+            canonicalize_smart_context_static_text(after).unwrap(),
+            expected
+        );
+    }
+
+    #[test]
+    fn static_pipeline_rejects_invalid_abi_before_mutating_output() {
+        let input = view("hi");
+        let mut output = [93_u8; 8];
+        let mut written = 77_i64;
+        unsafe {
+            assert_eq!(
+                prodex_mojo_smart_context_static_canonicalize_v1(
+                    RICH_ABI_VERSION + 1,
+                    mojo_pointer_address(&input),
+                    mojo_mut_pointer_address(output.as_mut_ptr()),
+                    8,
+                    mojo_mut_pointer_address(&mut written),
+                ),
+                4,
+            );
+            assert_eq!(
+                prodex_mojo_smart_context_static_canonicalize_v1(
+                    RICH_ABI_VERSION,
+                    mojo_pointer_address(&input),
+                    mojo_mut_pointer_address(output.as_mut_ptr()),
+                    0,
+                    mojo_mut_pointer_address(&mut written),
+                ),
+                1,
+            );
+        }
+        assert_eq!(output, [93; 8]);
+        assert_eq!(written, 77);
+    }
 }
