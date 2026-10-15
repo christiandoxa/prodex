@@ -551,7 +551,8 @@
           "smart_context_token_usage_summary",
           "smart_context_adaptive_budget_planning",
           "smart_context_calibrated_estimate",
-          "smart_context_text_token_estimate"
+          "smart_context_text_token_estimate",
+          "smart_context_rewrite_telemetry_quality_risk"
         ]
       },
       "mojo/prodex_core/context_text.mojo": {
@@ -9967,6 +9968,29 @@
       "duplicate_production_owner": false,
       "platform_fallback": false,
       "rust_adapter_scope": "Borrowed Serde-tree acquisition, measured output allocation and typed JSON decoding; no fallback calculation"
+    },
+    {
+      "name": "smart_context_rewrite_telemetry_quality_risk",
+      "domain": "smart-context/rewrite-safety",
+      "introduced_in": "0.438.0",
+      "baseline_state": "Rust classified nine upstream rewrite safety signals by a chain of OR comparisons including explicit incomplete task state",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_smart_context_rewrite_quality_risk_v1",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/smart_context.mojo",
+      "consumer": "crates/prodex-runtime-proxy/src/smart_context/rewrite_policy/telemetry.rs",
+      "consumer_marker": "prodex_mojo_core::runtime::smart_context_rewrite_telemetry_quality_risk(",
+      "production_consumers": [
+        "crates/prodex-runtime-proxy/src/smart_context/rewrite_policy/telemetry.rs"
+      ],
+      "production_reachability_test": "crates/prodex-runtime-proxy/src/smart_context/rewrite_policy/telemetry.rs",
+      "rust_owner_before": "Rust evaluated upstream errors, missing previous responses, broken tool continuation, missing artifacts, repeated calls, rereads, corrective user messages, failed builds and task incomplete",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "Deleted the production Rust risk OR chain; direct Mojo and real runtime-proxy regression tests prove all nine signals and absence/positive completion, invalid ABI flags and unchanged planner decisions",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "Typed sample field transfer into a fixed-width ABI, optional completion-state encoding, result validation and telemetry DTO assembly"
     }
   ],
   "rust_semantic_reductions": [

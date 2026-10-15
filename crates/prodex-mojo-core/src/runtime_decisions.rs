@@ -113,6 +113,56 @@ pub struct SmartContextRewriteTelemetryInput {
     pub quality_risk: bool,
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct SmartContextRewriteQualityInput {
+    pub upstream_context_errors: u16,
+    pub previous_response_not_found: bool,
+    pub invalid_tool_call_continuation: bool,
+    pub missing_artifact_requests: u16,
+    pub repeated_tool_call_count: u16,
+    pub model_reread_requests: u16,
+    pub corrective_user_messages: u16,
+    pub test_or_build_failed_after_rewrite: bool,
+    pub task_completed: Option<bool>,
+}
+
+/// Classify upstream rewrite damage through Mojo, without a Rust OR policy.
+pub fn smart_context_rewrite_telemetry_quality_risk(
+    input: SmartContextRewriteQualityInput,
+) -> Result<bool, crate::MojoError> {
+    let values: [i64; 9] = [
+        i64::from(input.upstream_context_errors),
+        i64::from(input.previous_response_not_found),
+        i64::from(input.invalid_tool_call_continuation),
+        i64::from(input.missing_artifact_requests),
+        i64::from(input.repeated_tool_call_count),
+        i64::from(input.model_reread_requests),
+        i64::from(input.corrective_user_messages),
+        i64::from(input.test_or_build_failed_after_rewrite),
+        match input.task_completed {
+            None => 0,
+            Some(false) => 1,
+            Some(true) => 2,
+        },
+    ];
+    let mut result = -1i64;
+    let status = unsafe {
+        prodex_smart_context_rewrite_quality_risk_v1(
+            values.as_ptr() as u64,
+            values.len() as i64,
+            &mut result,
+        )
+    };
+    if status != 0 {
+        return Err(crate::MojoError::InvalidInput);
+    }
+    match result {
+        0 => Ok(false),
+        1 => Ok(true),
+        _ => Err(crate::MojoError::InvalidOutput),
+    }
+}
+
 pub const SMART_CONTEXT_BUDGET_MODE_EXACT: i64 = 0;
 pub const SMART_CONTEXT_BUDGET_MODE_LARGE: i64 = 1;
 pub const SMART_CONTEXT_BUDGET_MODE_CONDENSED: i64 = 2;
@@ -292,6 +342,11 @@ unsafe extern "C" {
         adjusted_inline_bytes: *mut u64,
         adjusted_inline_tool_output_bytes: *mut u64,
         adjusted_rehydrate_tokens: *mut u64,
+    ) -> i64;
+    fn prodex_smart_context_rewrite_quality_risk_v1(
+        metrics_address: u64,
+        metric_count: i64,
+        output: *mut i64,
     ) -> i64;
     fn prodex_smart_context_rewrite_telemetry_decision_v1(
         body_bytes_before_address: u64,
@@ -748,5 +803,111 @@ pub fn optimistic_candidate_reason_include_quota(
         0 => Ok(false),
         1 => Ok(true),
         _ => Err(crate::MojoError::InvalidOutput),
+    }
+}
+
+#[cfg(test)]
+mod rewrite_quality_risk_tests {
+    use super::*;
+
+    #[test]
+    fn mojo_rewrite_quality_risk_covers_each_negative_signal() {
+        let clean = SmartContextRewriteQualityInput::default();
+        assert_eq!(
+            smart_context_rewrite_telemetry_quality_risk(clean),
+            Ok(false)
+        );
+        assert_eq!(
+            smart_context_rewrite_telemetry_quality_risk(SmartContextRewriteQualityInput {
+                task_completed: Some(true),
+                ..clean
+            }),
+            Ok(false),
+        );
+        let risks = [
+            SmartContextRewriteQualityInput {
+                upstream_context_errors: u16::MAX,
+                ..clean
+            },
+            SmartContextRewriteQualityInput {
+                previous_response_not_found: true,
+                ..clean
+            },
+            SmartContextRewriteQualityInput {
+                invalid_tool_call_continuation: true,
+                ..clean
+            },
+            SmartContextRewriteQualityInput {
+                missing_artifact_requests: 1,
+                ..clean
+            },
+            SmartContextRewriteQualityInput {
+                repeated_tool_call_count: 1,
+                ..clean
+            },
+            SmartContextRewriteQualityInput {
+                model_reread_requests: 1,
+                ..clean
+            },
+            SmartContextRewriteQualityInput {
+                corrective_user_messages: 1,
+                ..clean
+            },
+            SmartContextRewriteQualityInput {
+                test_or_build_failed_after_rewrite: true,
+                ..clean
+            },
+            SmartContextRewriteQualityInput {
+                task_completed: Some(false),
+                ..clean
+            },
+        ];
+        for risk in risks {
+            assert_eq!(
+                smart_context_rewrite_telemetry_quality_risk(risk),
+                Ok(true),
+                "{risk:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn mojo_rewrite_quality_risk_rejects_corrupt_ffi_values_without_output() {
+        let mut fields = [0i64; 9];
+        let mut decision = -7i64;
+        unsafe {
+            assert_eq!(
+                prodex_smart_context_rewrite_quality_risk_v1(
+                    fields.as_ptr() as u64,
+                    8,
+                    &mut decision,
+                ),
+                1
+            );
+            assert_eq!(
+                prodex_smart_context_rewrite_quality_risk_v1(0, 9, &mut decision,),
+                1
+            );
+            fields[8] = 3;
+            assert_eq!(
+                prodex_smart_context_rewrite_quality_risk_v1(
+                    fields.as_ptr() as u64,
+                    9,
+                    &mut decision,
+                ),
+                1
+            );
+            fields[8] = 0;
+            fields[1] = 2;
+            assert_eq!(
+                prodex_smart_context_rewrite_quality_risk_v1(
+                    fields.as_ptr() as u64,
+                    9,
+                    &mut decision,
+                ),
+                1
+            );
+        }
+        assert_eq!(decision, -7);
     }
 }

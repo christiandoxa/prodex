@@ -1486,3 +1486,41 @@ def prodex_smart_context_rewrite_telemetry_decision_v1(
         selected_decision = 0
     decision[] = selected_decision
     return 0
+
+
+# A telemetry sample is unsafe when it has any confirmed quality signal.
+# Rust supplies raw counters/flags; Mojo alone determines the quality risk.
+# Input columns: context_errors, missing_previous, invalid_continuation,
+# missing_artifacts, repeated_calls, model_rereads, corrective_messages,
+# failed_build, completion_state (0 unknown, 1 false, 2 true).
+@export("prodex_smart_context_rewrite_quality_risk_v1")
+def prodex_smart_context_rewrite_quality_risk_v1(
+    metrics_address: UInt,
+    metric_count: Int64,
+    output_address: UInt,
+) abi("C") -> Int64:
+    if metrics_address == 0 or metric_count != 9 or output_address == 0:
+        return 1
+    var metrics = Pointer[mut=False, Int64, ImmUntrackedOrigin](
+        unsafe_from_address=Int(metrics_address)
+    )
+    for index in range(9):
+        var value = metrics[unsafe_offset=index]
+        if value < 0:
+            return 1
+        if (index == 1 or index == 2 or index == 7) and value > 1:
+            return 1
+        if index == 8 and value > 2:
+            return 1
+    var risk = False
+    for index in range(8):
+        if metrics[unsafe_offset=index] > 0:
+            risk = True
+            break
+    if metrics[unsafe_offset=8] == 1:
+        risk = True
+    var result = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    result[] = Int64(risk)
+    return 0
