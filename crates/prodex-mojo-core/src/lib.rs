@@ -96,6 +96,8 @@ fn compiled_core_self_test_passes() {
 }
 
 #[cfg(feature = "mojo-runtime")]
+pub mod app_command_policy;
+#[cfg(feature = "mojo-runtime")]
 pub mod audit_log_policy;
 #[cfg(feature = "mojo-runtime")]
 pub mod codex_config;

@@ -374,8 +374,7 @@ fn run_command(command: Commands) -> Result<()> {
 }
 
 fn command_uses_minimal_startup(command: &Commands) -> bool {
-    command_dispatch::command_uses_native_agy(command)
-        || matches!(command, Commands::McpJsonlBridge(_) | Commands::Ping(_))
+    command_dispatch::command_startup_policy(command).minimal_startup
         || matches!(
             command,
             Commands::Doctor(args)

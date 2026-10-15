@@ -40,33 +40,69 @@ pub(crate) fn command_uses_native_agy(command: &Commands) -> bool {
         && args.cli == Some(prodex_cli::SuperCliAgent::Agy)
 }
 
+fn command_startup_policy_input(
+    command: &Commands,
+) -> prodex_mojo_core::app_command_policy::AppCommandStartupInput {
+    use prodex_mojo_core::app_command_policy::{AppCommandClass, AppCommandStartupInput};
+
+    let command_class = match command {
+        Commands::RuntimeBroker(_) => AppCommandClass::RuntimeBroker,
+        Commands::Info(_) => AppCommandClass::Info,
+        Commands::Log(_) => AppCommandClass::Log,
+        Commands::Update(_) => AppCommandClass::Update,
+        Commands::Ping(_) => AppCommandClass::Ping,
+        Commands::SuperExpose(_) => AppCommandClass::SuperExpose,
+        Commands::McpJsonlBridge(_) => AppCommandClass::McpBridge,
+        Commands::SubAgentExec(_) => AppCommandClass::SubAgentExec,
+        Commands::Profile(ProfileCommands::Remove(_)) => AppCommandClass::ProfileRemove,
+        Commands::Doctor(_) => AppCommandClass::Doctor,
+        Commands::Super(_) => AppCommandClass::Super,
+        Commands::Profile(_)
+        | Commands::UseProfile(_)
+        | Commands::Current
+        | Commands::Status(_)
+        | Commands::Session(_)
+        | Commands::Login(_)
+        | Commands::Logout(_)
+        | Commands::Quota(_)
+        | Commands::Redeem(_)
+        | Commands::Run(_)
+        | Commands::Gateway(_) => AppCommandClass::Other,
+    };
+    let (super_direct_dry_run, super_codex_dry_run) = match command {
+        Commands::Super(args) => (args.dry_run, prodex_dry_run_requested(&args.codex_args)),
+        _ => (false, false),
+    };
+    let (super_expose_direct_dry_run, super_expose_codex_dry_run) = match command {
+        Commands::SuperExpose(args) => (
+            args.super_args.dry_run,
+            prodex_dry_run_requested(&args.super_args.codex_args),
+        ),
+        _ => (false, false),
+    };
+    AppCommandStartupInput {
+        command_class,
+        super_direct_dry_run,
+        super_codex_dry_run,
+        super_expose_direct_dry_run,
+        super_expose_codex_dry_run,
+        native_agy: command_uses_native_agy(command),
+    }
+}
+
+pub(crate) fn command_startup_policy(
+    command: &Commands,
+) -> prodex_mojo_core::app_command_policy::AppCommandStartupPlan {
+    prodex_mojo_core::app_command_policy::startup_plan(command_startup_policy_input(command))
+        .expect("Mojo app command startup policy returned invalid output")
+}
+
 pub(crate) fn command_should_show_update_notice(command: &Commands) -> bool {
-    !command_is_super_dry_run(command)
-        && !command_uses_native_agy(command)
-        && !matches!(
-            command,
-            Commands::RuntimeBroker(_)
-                | Commands::Info(_)
-                | Commands::Ping(_)
-                | Commands::Log(_)
-                | Commands::Update(_)
-                | Commands::SuperExpose(_)
-                | Commands::McpJsonlBridge(_)
-                | Commands::SubAgentExec(_)
-        )
+    command_startup_policy(command).show_update_notice
 }
 
 pub(crate) fn command_is_super_dry_run(command: &Commands) -> bool {
-    matches!(
-        command,
-        Commands::Super(args)
-            if args.dry_run || prodex_dry_run_requested(&args.codex_args)
-    ) || matches!(
-        command,
-        Commands::SuperExpose(args)
-            if args.super_args.dry_run
-                || prodex_dry_run_requested(&args.super_args.codex_args)
-    )
+    command_startup_policy(command).super_dry_run
 }
 
 pub(crate) fn execute_command(command: Commands) -> Result<()> {
@@ -101,18 +137,7 @@ pub(crate) fn execute_command(command: Commands) -> Result<()> {
 }
 
 fn command_runs_profile_lifecycle_recovery(command: &Commands) -> bool {
-    !command_is_super_dry_run(command)
-        && !command_uses_native_agy(command)
-        && !matches!(
-            command,
-            Commands::Profile(ProfileCommands::Remove(_))
-                | Commands::Info(_)
-                | Commands::Log(_)
-                | Commands::Doctor(_)
-                | Commands::Ping(_)
-                | Commands::McpJsonlBridge(_)
-                | Commands::SubAgentExec(_)
-        )
+    command_startup_policy(command).run_profile_lifecycle_recovery
 }
 
 fn profile_command_requests_insecure(command: &Commands) -> bool {
@@ -240,5 +265,20 @@ mod tests {
             assert!(!command_should_show_update_notice(command));
             assert!(!crate::housekeeping::command_runs_auto_runtime_housekeeping(command));
         }
+    }
+
+    #[test]
+    fn startup_policy_keeps_profile_remove_and_super_expose_boundaries() {
+        let remove = parse_cli_command_from(["prodex", "profile", "remove", "work"]).unwrap();
+        let remove_plan = super::command_startup_policy(&remove);
+        assert!(remove_plan.show_update_notice);
+        assert!(!remove_plan.run_profile_lifecycle_recovery);
+        assert!(remove_plan.run_auto_housekeeping);
+
+        let expose = parse_cli_command_from(["prodex", "__super-expose"]).unwrap();
+        let expose_plan = super::command_startup_policy(&expose);
+        assert!(!expose_plan.show_update_notice);
+        assert!(expose_plan.run_profile_lifecycle_recovery);
+        assert!(expose_plan.run_auto_housekeeping);
     }
 }
