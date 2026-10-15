@@ -2,6 +2,13 @@
 use prodex_mojo_core::json::GeminiContentOperation;
 
 pub(super) fn apply(contents: &mut Vec<serde_json::Value>, operation: GeminiContentOperation) {
+    *contents = transform(contents, operation);
+}
+
+pub(super) fn transform(
+    contents: &[serde_json::Value],
+    operation: GeminiContentOperation,
+) -> Vec<serde_json::Value> {
     let output = {
         let mut document = crate::mojo_json::Document::default();
         document.array(contents.iter());
@@ -10,6 +17,6 @@ pub(super) fn apply(contents: &mut Vec<serde_json::Value>, operation: GeminiCont
             .expect("compiled Mojo Gemini content hardening failed")
     };
     // Keep original contents intact until a complete valid result is decoded.
-    *contents = serde_json::from_slice(&output)
-        .expect("compiled Mojo Gemini content hardening must emit a JSON array");
+    serde_json::from_slice(&output)
+        .expect("compiled Mojo Gemini content hardening must emit a JSON array")
 }

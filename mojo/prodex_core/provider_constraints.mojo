@@ -1419,8 +1419,7 @@ def gemini_tool_response_order_sift_down(
         parent = child
 
 
-@export("prodex_provider_constraints_gemini_tool_response_order_v1")
-def prodex_provider_constraints_gemini_tool_response_order_v1(
+def gemini_tool_response_order_plan(
     abi_version: Int64,
     call_ids_address: UInt64,
     call_count: Int64,
@@ -1428,7 +1427,7 @@ def prodex_provider_constraints_gemini_tool_response_order_v1(
     part_count: Int64,
     output_order_address: UInt64,
     output_ranks_address: UInt64,
-) abi("C") -> Int64:
+) -> Int64:
     if abi_version != GEMINI_TOOL_RESPONSE_ORDER_ABI_VERSION:
         return ABI_STATUS_MISMATCH
     if call_count < 0 or part_count < 0:
@@ -1498,6 +1497,22 @@ def prodex_provider_constraints_gemini_tool_response_order_v1(
         order[unsafe_offset=end] = selected
         gemini_tool_response_order_sift_down(records, ranks, order, 0, end - 1)
     return 0
+
+
+@export("prodex_provider_constraints_gemini_tool_response_order_v1")
+def prodex_provider_constraints_gemini_tool_response_order_v1(
+    abi_version: Int64,
+    call_ids_address: UInt64,
+    call_count: Int64,
+    records_address: UInt64,
+    part_count: Int64,
+    output_order_address: UInt64,
+    output_ranks_address: UInt64,
+) abi("C") -> Int64:
+    return gemini_tool_response_order_plan(
+        abi_version, call_ids_address, call_count, records_address,
+        part_count, output_order_address, output_ranks_address,
+    )
 
 
 @export("prodex_provider_constraints_gemini_tool_call_index_v1")
