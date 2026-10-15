@@ -4,30 +4,22 @@ use super::{BTreeMap, BTreeSet, Path, PathBuf, ProcessRow, ProdexProcessInfo, Sy
 use prodex_cli::Commands;
 
 pub fn parse_ps_process_rows(text: &str) -> Vec<ProcessRow> {
-    let mut rows = Vec::new();
-    for line in text.lines() {
-        let trimmed = line.trim();
-        if trimmed.is_empty() {
-            continue;
-        }
-        let tokens = trimmed.split_whitespace().collect::<Vec<_>>();
-        if tokens.len() < 2 {
-            continue;
-        }
-        let Ok(pid) = tokens[0].parse::<u32>() else {
-            continue;
-        };
-        rows.push(ProcessRow {
-            pid,
-            command: tokens[1].to_string(),
-            args: tokens
-                .iter()
-                .skip(2)
-                .map(|token| (*token).to_string())
-                .collect(),
-        });
-    }
-    rows
+    let (row_spans, token_spans) = prodex_mojo_core::status_resource::parse_process_rows(text)
+        .expect("Mojo process-row parser returned invalid output");
+    row_spans
+        .into_iter()
+        .map(|row| {
+            let tokens = &token_spans[row.token_start..row.token_start + row.token_count];
+            ProcessRow {
+                pid: row.pid,
+                command: text[tokens[1].start..tokens[1].end].to_string(),
+                args: tokens[2..]
+                    .iter()
+                    .map(|token| text[token.start..token.end].to_string())
+                    .collect(),
+            }
+        })
+        .collect()
 }
 
 pub fn classify_prodex_process_row(

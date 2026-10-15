@@ -141,6 +141,23 @@ fn process_classification_uses_canonical_cli_semantics() {
 }
 
 #[test]
+fn ps_process_parser_skips_malformed_rows_and_preserves_unicode_tokens() {
+    let rows = parse_ps_process_rows(concat!(
+        "not-a-pid prodex ignored\n",
+        "4294967296 prodex ignored\n",
+        "  105 prodex /usr/bin/prodex run --label café  \n",
+    ));
+
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].pid, 105);
+    assert_eq!(rows[0].command, "prodex");
+    assert_eq!(
+        rows[0].args,
+        vec!["/usr/bin/prodex", "run", "--label", "café"]
+    );
+}
+
+#[test]
 fn recent_runtime_log_paths_sort_by_modified_then_path_descending() {
     let base = std::time::UNIX_EPOCH;
     let paths = select_recent_runtime_log_paths(
