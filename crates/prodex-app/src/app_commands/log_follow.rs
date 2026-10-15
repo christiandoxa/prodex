@@ -1,4 +1,6 @@
 use anyhow::{Context, Result};
+#[cfg(test)]
+use prodex_mojo_core::live_log_record::{FOLLOW_MAX_LINE_BYTES, FOLLOW_MAX_PENDING_BYTES};
 use std::collections::BTreeMap;
 use std::fs;
 use std::io::{self, Read, Seek, SeekFrom};
@@ -6,8 +8,10 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 const LOG_FOLLOW_READ_CHUNK_BYTES: usize = 1024 * 1024;
-const LOG_FOLLOW_PENDING_MAX_BYTES: usize = 1024 * 1024;
-const LOG_FOLLOW_MAX_LINE_BYTES: usize = 2 * 1024 * 1024;
+#[cfg(test)]
+const LOG_FOLLOW_PENDING_MAX_BYTES: usize = FOLLOW_MAX_PENDING_BYTES;
+#[cfg(test)]
+const LOG_FOLLOW_MAX_LINE_BYTES: usize = FOLLOW_MAX_LINE_BYTES;
 
 fn log_follow_gap_marker(dropped: usize, reason: &str) -> String {
     format!("[log] runtime_log_gap dropped={dropped} reason={reason}")
@@ -228,7 +232,9 @@ fn drain_followed_log_lines(state: &mut FollowedLog) -> Vec<String> {
         .map(|index| index + 1)
         .unwrap_or_default();
     if complete_len == 0 {
-        if state.pending.len() > LOG_FOLLOW_PENDING_MAX_BYTES {
+        let plan = prodex_mojo_core::live_log_record::follow_line_plan(&[], state.pending.len())
+            .expect("Mojo runtime-log follow plan returned invalid output");
+        if plan.pending_gap {
             state.pending.clear();
             return vec![log_follow_gap_marker(1, "oversized_partial_line")];
         }
@@ -236,19 +242,26 @@ fn drain_followed_log_lines(state: &mut FollowedLog) -> Vec<String> {
     }
     let complete = String::from_utf8_lossy(&state.pending[..complete_len]).into_owned();
     state.pending.drain(..complete_len);
+    let line_lengths = complete
+        .split_inclusive('\n')
+        .map(str::len)
+        .collect::<Vec<_>>();
+    let plan =
+        prodex_mojo_core::live_log_record::follow_line_plan(&line_lengths, state.pending.len())
+            .expect("Mojo runtime-log follow plan returned invalid output");
     let mut lines = Vec::new();
-    let mut dropped = 0;
-    for line in complete.split_inclusive('\n') {
-        if line.len() > LOG_FOLLOW_MAX_LINE_BYTES {
-            dropped += 1;
-        } else {
+    for (line, keep) in complete.split_inclusive('\n').zip(plan.keep_lines) {
+        if keep {
             lines.extend(line.lines().map(str::to_string));
         }
     }
-    if dropped > 0 {
-        lines.insert(0, log_follow_gap_marker(dropped, "oversized_line"));
+    if plan.dropped_lines > 0 {
+        lines.insert(
+            0,
+            log_follow_gap_marker(plan.dropped_lines, "oversized_line"),
+        );
     }
-    if state.pending.len() > LOG_FOLLOW_PENDING_MAX_BYTES {
+    if plan.pending_gap {
         state.pending.clear();
         lines.push(log_follow_gap_marker(1, "oversized_partial_line"));
     }
@@ -332,6 +345,30 @@ mod tests {
         assert!(!lines[0].contains('\u{fffd}'));
         drop(state);
         fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn followed_log_line_bounds_are_planned_by_compiled_mojo() {
+        let mut state = FollowedLog::default();
+        state
+            .pending
+            .extend(std::iter::repeat_n(b'a', LOG_FOLLOW_MAX_LINE_BYTES - 1));
+        state.pending.push(b'\n');
+        state
+            .pending
+            .extend(std::iter::repeat_n(b'b', LOG_FOLLOW_MAX_LINE_BYTES));
+        state.pending.push(b'\n');
+
+        let lines = drain_followed_log_lines(&mut state);
+        assert_eq!(
+            lines.first().map(String::as_str),
+            Some("[log] runtime_log_gap dropped=1 reason=oversized_line")
+        );
+        assert_eq!(
+            lines.get(1).map(String::len),
+            Some(LOG_FOLLOW_MAX_LINE_BYTES - 1)
+        );
+        assert_eq!(lines.len(), 2);
     }
 
     #[test]

@@ -2,6 +2,9 @@ use crate::MojoError;
 
 const ABI_VERSION: i64 = 1;
 const MAX_RECORD_BYTES: usize = 128 * 1024;
+pub const FOLLOW_MAX_PENDING_BYTES: usize = 1024 * 1024;
+pub const FOLLOW_MAX_LINE_BYTES: usize = 2 * 1024 * 1024;
+const FOLLOW_MAX_INPUT_LINES: usize = 2 * 1024 * 1024;
 
 const _: () = assert!(std::mem::size_of::<usize>() == std::mem::size_of::<u64>());
 
@@ -40,6 +43,15 @@ unsafe extern "C" {
         next_sequence: u64,
         dropped: u64,
         output_address: u64,
+    ) -> i64;
+    fn prodex_live_log_follow_plan_v1(
+        abi_version: i64,
+        line_lengths_address: u64,
+        line_count: i64,
+        pending_length: i64,
+        keep_address: u64,
+        dropped_address: u64,
+        pending_gap_address: u64,
     ) -> i64;
 }
 
@@ -182,6 +194,71 @@ pub struct LiveLogSnapshotPlan {
     pub dropped: u64,
 }
 
+/// Mojo's bounded classification for one file-follow read.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LiveLogFollowPlan {
+    /// Whether each complete line can be materialized for the viewer.
+    pub keep_lines: Vec<bool>,
+    /// Number of complete lines dropped for exceeding the line bound.
+    pub dropped_lines: usize,
+    /// Whether the remaining partial line must be discarded as oversized.
+    pub pending_gap: bool,
+}
+
+/// Classifies complete lines and pending-buffer overflow without crossing log text into Mojo.
+pub fn follow_line_plan(
+    line_lengths: &[usize],
+    pending_length: usize,
+) -> Result<LiveLogFollowPlan, MojoError> {
+    if line_lengths.len() > FOLLOW_MAX_INPUT_LINES {
+        return Err(MojoError::InvalidInput);
+    }
+    let line_lengths = line_lengths
+        .iter()
+        .copied()
+        .map(input_length)
+        .collect::<Result<Vec<_>, _>>()?;
+    let line_count = input_length(line_lengths.len())?;
+    let mut keep = vec![0_i64; line_lengths.len()];
+    let mut dropped = [-1_i64];
+    let mut pending_gap = [-1_i64];
+    status(unsafe {
+        prodex_live_log_follow_plan_v1(
+            ABI_VERSION,
+            pointer_address(line_lengths.as_ptr()),
+            line_count,
+            input_length(pending_length)?,
+            mutable_pointer_address(keep.as_mut_ptr()),
+            mutable_pointer_address(dropped.as_mut_ptr()),
+            mutable_pointer_address(pending_gap.as_mut_ptr()),
+        )
+    })?;
+    let keep_lines = keep
+        .into_iter()
+        .map(|value| match value {
+            0 => Ok(false),
+            1 => Ok(true),
+            _ => Err(MojoError::InvalidOutput),
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    let dropped_lines = usize::try_from(dropped[0]).map_err(|_| MojoError::InvalidOutput)?;
+    if dropped_lines > keep_lines.len()
+        || dropped_lines != keep_lines.iter().filter(|keep_line| !**keep_line).count()
+    {
+        return Err(MojoError::InvalidOutput);
+    }
+    let pending_gap = match pending_gap[0] {
+        0 => false,
+        1 => true,
+        _ => return Err(MojoError::InvalidOutput),
+    };
+    Ok(LiveLogFollowPlan {
+        keep_lines,
+        dropped_lines,
+        pending_gap,
+    })
+}
+
 /// Plans a bounded page after a cursor without crossing the ABI with log text.
 pub fn snapshot_plan(
     sequences: &[u64],
@@ -293,6 +370,24 @@ mod tests {
     fn runtime_live_log_mojo_adapter_rejects_unsorted_sequences() {
         assert_eq!(
             snapshot_plan(&[9, 7], 0, 1, 2, 9, 0),
+            Err(MojoError::InvalidInput)
+        );
+    }
+
+    #[test]
+    fn runtime_log_follow_mojo_adapter_classifies_line_and_pending_bounds() {
+        const { assert!(crate::MOJO_REQUIRED) };
+
+        let plan = follow_line_plan(
+            &[FOLLOW_MAX_LINE_BYTES, FOLLOW_MAX_LINE_BYTES + 1],
+            FOLLOW_MAX_PENDING_BYTES + 1,
+        )
+        .unwrap();
+        assert_eq!(plan.keep_lines, [true, false]);
+        assert_eq!(plan.dropped_lines, 1);
+        assert!(plan.pending_gap);
+        assert_eq!(
+            follow_line_plan(&vec![0; 2 * 1024 * 1024 + 1], 0),
             Err(MojoError::InvalidInput)
         );
     }

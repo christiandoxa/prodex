@@ -1622,7 +1622,8 @@
           "runtime_live_log_nested_string_clipping",
           "runtime_live_log_json_fallback",
           "runtime_live_log_plain_text_truncation",
-          "runtime_live_log_snapshot_page_planning"
+          "runtime_live_log_snapshot_page_planning",
+          "runtime_log_follow_line_planning"
         ]
       },
       {
@@ -7934,6 +7935,29 @@
       "duplicate_production_owner": false,
       "platform_fallback": false,
       "rust_adapter_scope": "mutex/path lookup, sequence projection, bounded entry materialization, and typed plan validation"
+    },
+    {
+      "name": "runtime_log_follow_line_planning",
+      "domain": "runtime-log/follow-records",
+      "introduced_in": "0.438.0",
+      "baseline_state": "Rust classified oversized complete lines, counted dropped records, and decided when a partial follow buffer required a gap marker",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_live_log_follow_plan_v1",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/live_log_record.mojo",
+      "consumer": "crates/prodex-app/src/app_commands/log_follow.rs",
+      "consumer_marker": "prodex_mojo_core::live_log_record::follow_line_plan(",
+      "production_consumers": [
+        "crates/prodex-app/src/app_commands/log_follow.rs"
+      ],
+      "production_reachability_test": "crates/prodex-app/src/app_commands/log_follow.rs",
+      "rust_owner_before": "complete-line size classification, dropped-line aggregation, and pending-buffer overflow decision for followed runtime logs",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "deleted; required-Mojo ABI and app caller regressions cover exact and over-limit complete lines plus pending-buffer gaps",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "file reads, UTF-8 materialization, line splitting, bounded output strings, gap-marker text, and follow-state mutation"
     },
     {
       "name": "runtime_operational_histogram_bucket_planning",
