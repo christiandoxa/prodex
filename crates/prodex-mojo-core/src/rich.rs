@@ -97,8 +97,10 @@ pub use catalog::{
 #[path = "rich/gemini_sse_state.rs"]
 mod gemini_sse_state;
 pub use gemini_sse_state::{
-    GEMINI_RESPONSE_STATE_ABI_VERSION, GeminiCompletionGuardrailAction, GeminiResponsePartInput,
+    GEMINI_RESPONSE_PART_BATCH_MAX, GEMINI_RESPONSE_STATE_ABI_VERSION,
+    GeminiCompletionGuardrailAction, GeminiResponsePartInput, GeminiResponsePartsPlan,
     plan_gemini_completion_guardrail, plan_gemini_once_event, plan_gemini_response_part,
+    plan_gemini_response_parts,
 };
 #[path = "rich/gemini_response.rs"]
 mod gemini_response;

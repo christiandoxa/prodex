@@ -106,8 +106,9 @@ pub use self::response::{
 pub use self::response_state::{
     GeminiProviderCoreCompletionGuardrailAction, GeminiProviderCoreResponsePartInput,
     GeminiProviderCoreResponsePartPlan, GeminiProviderCoreResponsePartPlanError,
-    gemini_provider_core_completion_guardrail_action, gemini_provider_core_once_event_should_emit,
-    gemini_provider_core_response_part_plan,
+    GeminiProviderCoreResponsePartsPlan, gemini_provider_core_completion_guardrail_action,
+    gemini_provider_core_once_event_should_emit, gemini_provider_core_response_part_plan,
+    gemini_provider_core_response_parts_plan,
 };
 pub use self::tooling::{
     gemini_provider_core_apply_gemini3_tool_declaration_overrides,

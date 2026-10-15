@@ -3,6 +3,7 @@ from std.sys.info import align_of, size_of
 
 from gemini_sse_state import (
     gemini_completion_guardrail_plan,
+    gemini_response_part_batch_plan,
     gemini_response_once_event_plan,
     gemini_response_part_plan,
 )
@@ -433,6 +434,29 @@ def prodex_mojo_rich_gemini_response_part_plan_v1(
         internal_instruction_echo,
         suppress_visible_text,
         output_actions,
+    )
+
+
+@export("prodex_mojo_rich_gemini_response_parts_plan_v1")
+def prodex_mojo_rich_gemini_response_parts_plan_v1(
+    abi_version: Int64,
+    inputs_address: UInt,
+    input_count: Int64,
+    actions_address: UInt,
+    function_flags_address: UInt,
+    grounding_present: Int64,
+    citations_present: Int64,
+    tail_actions_address: UInt,
+) abi("C") -> Int64:
+    return gemini_response_part_batch_plan(
+        abi_version,
+        inputs_address,
+        input_count,
+        actions_address,
+        function_flags_address,
+        grounding_present,
+        citations_present,
+        tail_actions_address,
     )
 
 @export("prodex_mojo_gemini_grounding_v1")

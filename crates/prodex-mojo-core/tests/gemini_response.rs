@@ -1,8 +1,73 @@
 #![cfg(feature = "mojo-rich")]
 
 use prodex_mojo_core::rich::{
-    gemini_response_conformance_preserves_response_ids, gemini_response_normalize_response_envelope,
+    GEMINI_RESPONSE_PART_BATCH_MAX, GeminiResponsePartInput,
+    gemini_response_conformance_preserves_response_ids,
+    gemini_response_normalize_response_envelope, plan_gemini_response_parts,
 };
+
+fn part_input() -> GeminiResponsePartInput {
+    GeminiResponsePartInput {
+        has_text: false,
+        is_thought: false,
+        has_visible_text: false,
+        has_special_text: false,
+        has_media: false,
+        has_video_metadata: false,
+        has_image_generation: false,
+        has_function_call: false,
+        command_output_only: false,
+        forced_output: false,
+        internal_instruction_echo: false,
+        suppress_visible_text: false,
+    }
+}
+
+#[test]
+fn response_part_batch_plan_is_compiled_mojo_authoritative() {
+    let mut visible = part_input();
+    visible.has_text = true;
+    visible.has_visible_text = true;
+    let mut special = part_input();
+    special.has_special_text = true;
+    let mut image = part_input();
+    image.has_media = true;
+    image.has_image_generation = true;
+    let mut tool = part_input();
+    tool.has_function_call = true;
+
+    let plan = plan_gemini_response_parts(&[visible, special, image, tool], true, true).unwrap();
+    assert_eq!(plan.actions.len(), 4);
+    assert_ne!(plan.actions[0] & 2, 0);
+    assert_ne!(plan.actions[1] & 4, 0);
+    assert_ne!(plan.actions[2] & 8, 0);
+    assert_ne!(plan.actions[2] & 32, 0);
+    assert_ne!(plan.actions[3] & 64, 0);
+    assert_eq!(plan.function_call_flags, "0001");
+    assert!(plan.append_grounding);
+    assert!(plan.append_citations);
+
+    let empty = plan_gemini_response_parts(&[], false, true).unwrap();
+    assert!(empty.actions.is_empty());
+    assert!(empty.function_call_flags.is_empty());
+    assert!(!empty.append_grounding);
+    assert!(empty.append_citations);
+
+    let exact = vec![part_input(); GEMINI_RESPONSE_PART_BATCH_MAX];
+    assert_eq!(
+        plan_gemini_response_parts(&exact, false, false)
+            .unwrap()
+            .actions
+            .len(),
+        GEMINI_RESPONSE_PART_BATCH_MAX
+    );
+}
+
+#[test]
+fn response_part_batch_plan_rejects_oversized_input_before_ffi() {
+    let inputs = vec![part_input(); GEMINI_RESPONSE_PART_BATCH_MAX + 1];
+    assert!(plan_gemini_response_parts(&inputs, false, false).is_err());
+}
 
 #[test]
 fn response_conformance_preserves_required_ids_in_mojo() {

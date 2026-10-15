@@ -914,7 +914,8 @@
           "deepseek_stream_error_classification",
           "gemini_response_media_projection",
           "gemini_response_id_conformance",
-          "gemini_response_envelope_normalization"
+          "gemini_response_envelope_normalization",
+          "gemini_response_parts_aggregation"
         ]
       },
       {
@@ -947,6 +948,36 @@
         "operations": [
           "gemini_response_id_conformance",
           "gemini_response_envelope_normalization"
+        ]
+      },
+      {
+        "path": "mojo/prodex_core/gemini_sse_state.mojo",
+        "language": "mojo",
+        "classification": "DETERMINISTIC_DOMAIN",
+        "semantic_ranges": [
+          {
+            "start": 17,
+            "end": 35
+          },
+          {
+            "start": 100,
+            "end": 175
+          }
+        ],
+        "production_reachable": true,
+        "role": "semantic",
+        "operations": [
+          "gemini_response_parts_aggregation"
+        ]
+      },
+      {
+        "path": "crates/prodex-mojo-core/src/rich/gemini_sse_state.rs",
+        "language": "rust",
+        "classification": "MIXED",
+        "production_reachable": true,
+        "role": "adapter",
+        "operations": [
+          "gemini_response_parts_aggregation"
         ]
       },
       {
@@ -11259,6 +11290,32 @@
       "duplicate_production_owner": false,
       "platform_fallback": false,
        "rust_adapter_scope": "ExitStatus platform fact extraction and typed Mojo result decoding; process supervision and recovery side effects remain in Rust."
+    },
+    {
+      "name": "gemini_response_parts_aggregation",
+      "domain": "provider/gemini",
+      "introduced_in": "0.438.0",
+      "baseline_state": "candidate",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_mojo_rich_gemini_response_parts_plan_v1",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/rich_abi.mojo",
+      "mojo_semantic_source": "mojo/prodex_core/gemini_sse_state.mojo",
+      "consumer": "crates/prodex-provider-core/src/gemini_bridge/response_state.rs",
+      "consumer_marker": "gemini_provider_core_response_parts_plan",
+      "production_consumers": [
+        "crates/prodex-provider-core/src/translators/gemini/response/build.rs",
+        "crates/prodex-provider-core/src/gemini_bridge/response_state.rs"
+      ],
+      "production_reachability_test": "crates/prodex-provider-core/src/gemini_bridge/response_state.rs",
+      "caller_regression_test": "crates/prodex-provider-core/src/gemini_bridge/tests/response.rs",
+      "rust_owner_before": "Rust accumulated visible and special text, media and image-generation items, function-call items, function-presence flags, and grounding/citation tail order across response parts",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "Compiled Mojo batch ABI cases and provider-core response fixtures preserve visible/special/media/image/function ordering, tool-call suppression, grounding/citation order, empty batches, malformed fields, Unicode, and the exact 65,536-part bound",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+       "rust_adapter_scope": "Serde Value acquisition, existing media/grounding Mojo projections, bounded fact packing, callback/tool item materialization, JSON serialization, and typed batch-plan mapping"
     }
   ],
   "rust_semantic_reductions": [
@@ -13037,6 +13094,32 @@
       "production_consumer": "crates/prodex-mcp-stdio/src/lib.rs",
       "parity_test": "crates/prodex-mojo-core/tests/mcp_stdio_policy.rs",
       "cleanup_evidence": "The Rust classifier is deleted; compiled Mojo byte-matrix and MCP caller regressions preserve object and batch JSON limits and bounded framing-header handling for every byte."
+    },
+    {
+      "file": "crates/prodex-provider-core/src/translators/gemini/response/build.rs",
+      "symbol": "gemini_collect_response_parts",
+      "operation": "gemini_response_parts_aggregation",
+      "previous_responsibility": "Rust traversed response parts, selected per-part text/media/image/function actions, accumulated output content, tracked function-call presence, and appended grounding items",
+      "final_state": "adapter-only",
+      "cleanup_loc": 82,
+      "cleanup_source": {
+        "kind": "collapsed-adapter",
+        "path": "crates/prodex-provider-core/src/translators/gemini/response/build.rs",
+        "baseline_range": {
+          "start": 63,
+          "end": 146
+        },
+        "release_symbol": "fn gemini_collect_response_parts(",
+        "release_marker": "Mojo batch plan owns action and tail decisions"
+      },
+      "rust_before": "crates/prodex-provider-core/src/translators/gemini/response/build.rs::gemini_collect_response_parts and gemini_append_grounding_and_citations",
+      "rust_after": "Rust gathers provider JSON facts, invokes the mandatory Mojo batch plan, and materializes the validated ordered items",
+      "mojo_owner": "mojo/prodex_core/gemini_sse_state.mojo::gemini_response_part_batch_plan",
+      "mojo_source": "mojo/prodex_core/gemini_sse_state.mojo",
+      "mojo_entry": "prodex_mojo_rich_gemini_response_parts_plan_v1",
+      "production_consumer": "crates/prodex-provider-core/src/gemini_bridge/response_state.rs",
+      "parity_test": "crates/prodex-mojo-core/tests/gemini_response.rs",
+       "cleanup_evidence": "The former Rust part-action and grounding-tail decision loop is collapsed into the compiled Mojo batch plan; the provider caller retains only projection and item materialization."
     }
   ],
   "deleted_authoritative_operations": [
