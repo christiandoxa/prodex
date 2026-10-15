@@ -1,10 +1,6 @@
 //! Immutable built-in provider implementation registry.
 
 use crate::models::builtin_model_catalog;
-use crate::runtime_metadata::{
-    ANTHROPIC_RUNTIME_METADATA, COPILOT_RUNTIME_METADATA, DEEPSEEK_RUNTIME_METADATA,
-    GEMINI_RUNTIME_METADATA, KIRO_RUNTIME_METADATA, LOCAL_RUNTIME_METADATA,
-};
 use crate::translators::{
     AnthropicTranslator, DeepSeekTranslator, GeminiTranslator, KiroTranslator,
     PassthroughTranslator,
@@ -196,20 +192,6 @@ pub fn provider_implementation_registry() -> &'static ProviderImplementationRegi
     &REGISTRY
 }
 
-pub(crate) const fn builtin_provider_runtime_metadata(
-    provider: ProviderId,
-) -> Option<&'static ProviderRuntimeMetadata> {
-    match provider {
-        ProviderId::OpenAi => None,
-        ProviderId::Anthropic => Some(&ANTHROPIC_RUNTIME_METADATA),
-        ProviderId::Copilot => Some(&COPILOT_RUNTIME_METADATA),
-        ProviderId::DeepSeek => Some(&DEEPSEEK_RUNTIME_METADATA),
-        ProviderId::Gemini => Some(&GEMINI_RUNTIME_METADATA),
-        ProviderId::Kiro => Some(&KIRO_RUNTIME_METADATA),
-        ProviderId::Local => Some(&LOCAL_RUNTIME_METADATA),
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -264,5 +246,12 @@ mod tests {
             Some(Local)
         );
         assert_eq!(registry.resolve_model_provider_id("unknown"), None);
+        let gemini = registry
+            .get(Gemini)
+            .and_then(ProviderImplementationDescriptor::runtime_metadata)
+            .expect("Gemini runtime metadata should come from the Mojo registry");
+        assert_eq!(gemini.display_name, "Google Gemini");
+        assert_eq!(gemini.default_context_window, 1_048_576);
+        assert!(gemini.image_generation_enabled);
     }
 }
