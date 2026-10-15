@@ -41,6 +41,13 @@ pub(crate) fn runtime_waitable_candidate_eligible(
         .map_err(|error| anyhow::anyhow!("Mojo waitable-candidate planning failed: {error:?}"))
 }
 
+pub(crate) fn runtime_last_chance_candidate_eligible(
+    input: prodex_mojo_core::runtime::LastChanceCandidateInput,
+) -> Result<bool> {
+    prodex_mojo_core::runtime::last_chance_candidate_eligible(input)
+        .map_err(|error| anyhow::anyhow!("Mojo last-chance candidate planning failed: {error:?}"))
+}
+
 pub(crate) fn runtime_profile_selection_backoff_active(
     retry_until: Option<i64>,
     transport_until: Option<i64>,

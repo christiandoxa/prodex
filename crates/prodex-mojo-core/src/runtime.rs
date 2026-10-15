@@ -117,6 +117,7 @@ pub use selection_planning::{
     websocket_full_context_signal_eligible, websocket_invalid_previous_response_plan,
     websocket_quota_fallback_plan, websocket_response_plan, websocket_transport_failure_plan,
 };
+pub use selection_planning::{LastChanceCandidateInput, last_chance_candidate_eligible};
 pub use smart_context_pressure::smart_context_pressure_snapshot;
 pub use websocket_failure::{
     WebsocketFailureAction, WebsocketFailureClass, WebsocketFailureDecisionInput,

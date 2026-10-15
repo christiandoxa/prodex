@@ -1592,6 +1592,48 @@ comptime WAITABLE_CANDIDATE_MODE_RELIEVED: Int64 = 2
 comptime WAITABLE_CANDIDATE_MODE_RETRYABLE_POOL: Int64 = 3
 
 
+@export("prodex_runtime_quota_last_chance_candidate_eligible_v1")
+def prodex_runtime_quota_last_chance_candidate_eligible_v1(
+    route_kind: Int64,
+    context_allowed: Int64,
+    supports_runtime: Int64,
+    auth_compatible: Int64,
+    cached_probe_ready: Int64,
+    snapshot_blocks: Int64,
+    auth_failure_active: Int64,
+    backoff_kind: Int64,
+    fallback_skip_present: Int64,
+) abi("C") -> Int64:
+    if route_kind < 0 or route_kind > 3 or backoff_kind < 0:
+        return -1
+    for value in [
+        context_allowed,
+        supports_runtime,
+        auth_compatible,
+        cached_probe_ready,
+        snapshot_blocks,
+        auth_failure_active,
+        fallback_skip_present,
+    ]:
+        if value != 0 and value != 1:
+            return -1
+    return Int64(
+        context_allowed == 1
+        and supports_runtime == 1
+        and auth_compatible == 1
+        and cached_probe_ready == 0
+        and snapshot_blocks == 0
+        and auth_failure_active == 0
+        and fallback_skip_present == 0
+        and (
+            backoff_kind == 0
+            or backoff_kind == 1
+            or backoff_kind == 2
+            or backoff_kind == 4
+        )
+    )
+
+
 @export("prodex_runtime_waitable_candidate_eligible_v1")
 def prodex_runtime_waitable_candidate_eligible_v1(
     mode: Int64,

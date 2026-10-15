@@ -621,7 +621,8 @@
           "runtime_candidate_decision_kernel",
           "runtime_affinity_local_rejection_policy",
           "quota_selection_policy",
-          "runtime_cold_start_candidate_eligibility"
+          "runtime_cold_start_candidate_eligibility",
+          "runtime_last_chance_candidate_eligibility"
         ]
       },
       "mojo/prodex_core/rich_fallback.mojo": {
@@ -3248,6 +3249,29 @@
       "duplicate_production_owner": false,
       "platform_fallback": false,
       "rust_adapter_scope": "catalog field projection plus hard in-flight and route-circuit side-effect checks"
+    },
+    {
+      "name": "runtime_last_chance_candidate_eligibility",
+      "domain": "runtime/selection",
+      "introduced_in": "0.420.0",
+      "baseline_state": "candidate",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_runtime_quota_last_chance_candidate_eligible_v1",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/candidate_decision.mojo",
+      "consumer": "crates/prodex-app/src/runtime_proxy/selection/mojo.rs",
+      "consumer_marker": "runtime_last_chance_candidate_eligible(",
+      "production_consumers": [
+        "crates/prodex-app/src/runtime_proxy/selection/next.rs"
+      ],
+      "production_reachability_test": "crates/prodex-mojo-core/tests/runtime_parity.rs",
+      "rust_owner_before": "Rust applied cached auth, probe, snapshot, auth-failure, fallback-skip, and accepted-backoff gates in the quota last-chance candidate loops",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "deleted; compiled Mojo policy cases and the existing last-chance caller regressions preserve backoff bypass and hard-cap behavior",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "runtime catalog projection, candidate ordering, hard in-flight admission, and route-circuit/transport side effects"
     },
     {
       "name": "quota_route_score_resolution",
@@ -10936,6 +10960,24 @@
         "release_marker": "runtime_waitable_candidate_eligible("
       },
       "cleanup_evidence": "The cold-start eligibility predicate is removed from the candidate loop; Rust now projects cached state into the existing Mojo waitable-candidate ABI while retaining hard in-flight admission and route-circuit reservation."
+    },
+    {
+      "file": "crates/prodex-app/src/runtime_proxy/selection/next.rs",
+      "symbol": "runtime_quota_last_chance_profile_for_route",
+      "operation": "runtime_last_chance_candidate_eligibility",
+      "previous_responsibility": "Rust applied cached auth, probe, snapshot, auth-failure, fallback-skip, and accepted-backoff gates in the quota last-chance candidate loops",
+      "final_state": "adapter-only",
+      "cleanup_loc": 75,
+      "cleanup_source": {
+        "kind": "collapsed-adapter",
+        "baseline_range": {
+          "start": 166,
+          "end": 241
+        },
+        "release_symbol": "let eligible = runtime_last_chance_candidate_eligible(",
+        "release_marker": "runtime_last_chance_candidate_eligible("
+      },
+      "cleanup_evidence": "The last-chance loops retain state projection, ordering, hard in-flight admission, and host side effects while Mojo owns the shared cached-state and backoff eligibility predicate."
     },
     {
       "file": "crates/prodex-runtime-proxy/src/gateway_policy.rs",
