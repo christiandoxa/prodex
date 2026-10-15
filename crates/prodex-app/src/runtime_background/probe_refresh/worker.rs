@@ -37,6 +37,9 @@ pub(super) fn runtime_probe_refresh_worker_loop(queue: Arc<RuntimeProbeRefreshQu
             .unwrap_or_else(|poisoned| poisoned.into_inner())
             .remove(&key);
         queue.active.fetch_sub(1, Ordering::SeqCst);
+        // A waiter awakened by result application may have observed this key
+        // still reserved. Publish completion only after it can be queued again.
+        super::queue::note_runtime_probe_refresh_progress();
         if let Err(panic_payload) = panic_result {
             let panic_message =
                 crate::runtime_panic::runtime_panic_payload_label(panic_payload.as_ref());

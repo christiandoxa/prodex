@@ -48,3 +48,9 @@ mod recovery_watchdog;
 
 #[path = "admission/session_epoch_recovery.rs"]
 mod session_epoch_recovery;
+
+#[path = "admission/probe_recovery_043714.rs"]
+mod probe_recovery_043714;
+
+#[path = "admission/quota_transition_043714.rs"]
+mod quota_transition_043714;

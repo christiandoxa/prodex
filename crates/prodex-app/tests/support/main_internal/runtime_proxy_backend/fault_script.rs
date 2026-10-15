@@ -83,6 +83,12 @@ impl RuntimeProxyBackendFaultStep {
         }
     }
 
+    pub(crate) fn quota_snapshot(account_id: &str, value: serde_json::Value) -> Self {
+        let mut step = Self::success(RuntimeProxyBackendFaultRoute::Usage, account_id);
+        step.body = value.to_string();
+        step
+    }
+
     pub(crate) fn unauthorized(route: RuntimeProxyBackendFaultRoute, account_id: &str) -> Self {
         Self {
             route,

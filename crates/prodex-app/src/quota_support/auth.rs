@@ -1,3 +1,4 @@
+mod authenticated;
 use super::codex_openai_auth::codex_openai_auth_headers_for_home;
 #[cfg(test)]
 use super::codex_openai_auth::{
@@ -258,15 +259,9 @@ impl<'a> UsageFetchFlow<'a> {
         })
     }
 
-    pub(super) fn execute(mut self) -> Result<serde_json::Value> {
-        let (status, body) = self.send_with_unauthorized_retry()?;
-        self.ensure_success(status, &body)?;
-        serde_json::from_slice(&body).with_context(|| {
-            format!(
-                "invalid JSON returned by quota backend for {}",
-                self.codex_home.display()
-            )
-        })
+    pub(super) fn execute(self) -> Result<serde_json::Value> {
+        self.execute_with_authenticated_identity()
+            .map(|(value, _)| value)
     }
 
     fn send_with_unauthorized_retry(&mut self) -> Result<(reqwest::StatusCode, Vec<u8>)> {

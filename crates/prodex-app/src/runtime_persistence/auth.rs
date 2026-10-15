@@ -255,6 +255,10 @@ pub(crate) fn note_runtime_profile_auth_failure(
             updated_at: now,
         },
     );
+    // A pre-failure probe must not suppress the already queued auth refresh.
+    // Removing it also makes selection wait for bounded background progress
+    // rather than immediately emitting a local empty-pool response.
+    runtime.profile_probe_cache.remove(profile_name);
     runtime_proxy_log(
         shared,
         format!(

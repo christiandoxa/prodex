@@ -570,6 +570,19 @@ pub(crate) fn fetch_usage_with_proxy_policy(
     Ok(usage)
 }
 
+// Authenticated probe receipt remains in process memory and is never logged.
+pub(crate) fn fetch_usage_with_authenticated_identity(
+    codex_home: &Path,
+    base_url: Option<&str>,
+    upstream_no_proxy: bool,
+) -> Result<(UsageResponse, UsageAuth)> {
+    let (value, auth) =
+        UsageFetchFlow::new_with_proxy_policy(codex_home, base_url, upstream_no_proxy)?
+            .execute_with_authenticated_identity()?;
+    let usage = serde_json::from_value(value).context("invalid authenticated quota response")?;
+    Ok((usage, auth))
+}
+
 pub(crate) fn fetch_usage_json(
     codex_home: &Path,
     base_url: Option<&str>,

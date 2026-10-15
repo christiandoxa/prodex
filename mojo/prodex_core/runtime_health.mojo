@@ -973,3 +973,48 @@ def prodex_runtime_health_policy_v2(
         return 0
 
     return 1
+
+
+# A successful authenticated observation can retire only older local failures.
+# A quota DTO or an unrelated credential is not authentication evidence. Quota
+# recovery must match the old exhausted window, never a transport/rate backoff.
+@export("prodex_runtime_probe_recovery_v1")
+def prodex_runtime_probe_recovery_v1(
+    abi_version: Int64,
+    fields_address: UInt,
+    field_count: Int64,
+    output_address: UInt,
+    output_count: Int64,
+) abi("C") -> Int64:
+    if abi_version != 1:
+        return 4
+    if fields_address == 0 or output_address == 0 or field_count != 18 or output_count != 3:
+        return 1
+    var facts = Pointer[mut=False, Int64, ImmUntrackedOrigin](unsafe_from_address=Int(fields_address))
+    var output = Pointer[mut=True, Int64, MutUntrackedOrigin](unsafe_from_address=Int(output_address))
+    for index in range(18):
+        if index == 0 or index == 1 or index == 4 or index == 7 or index == 8 or index == 10 or index == 12 or index == 14 or index == 16:
+            if facts[unsafe_offset=index] != 0 and facts[unsafe_offset=index] != 1:
+                return 1
+    if facts[unsafe_offset=5] < 0 or facts[unsafe_offset=5] > UINT32_MAX:
+        return 1
+    var started_at = facts[unsafe_offset=2]
+    var now = facts[unsafe_offset=3]
+    var verified = facts[unsafe_offset=0] == 1 and facts[unsafe_offset=1] == 1 and started_at <= now
+    var no_newer_backoff = facts[unsafe_offset=16] == 0 or facts[unsafe_offset=17] < runtime_health_saturating_mul_nonnegative(started_at, 1000)
+    var accept_observation = verified and (facts[unsafe_offset=8] == 0 or facts[unsafe_offset=9] <= started_at) and (facts[unsafe_offset=14] == 0 or no_newer_backoff)
+    output[unsafe_offset=2] = Int64(accept_observation)
+    output[unsafe_offset=0] = Int64(
+        accept_observation and facts[unsafe_offset=4] == 1 and facts[unsafe_offset=5] > 0
+        and facts[unsafe_offset=6] < started_at
+    )
+    var matches_quota_window = (
+        (facts[unsafe_offset=10] == 1 and facts[unsafe_offset=11] == facts[unsafe_offset=15])
+        or (facts[unsafe_offset=12] == 1 and facts[unsafe_offset=13] == facts[unsafe_offset=15])
+    )
+    output[unsafe_offset=1] = Int64(
+        accept_observation and facts[unsafe_offset=7] == 1 and facts[unsafe_offset=8] == 1
+        and facts[unsafe_offset=9] <= started_at and facts[unsafe_offset=14] == 1
+        and matches_quota_window and no_newer_backoff
+    )
+    return 0

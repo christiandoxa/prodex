@@ -55,6 +55,22 @@ pub(crate) fn run_runtime_probe_jobs_inline(
         )
     });
     for (profile_name, attempt) in probe_reports {
+        // Inline warm-up follows the same cache-generation arbitration as the
+        // queued worker after a quota request refreshes an expired credential.
+        let home = shared.runtime.lock().ok().and_then(|runtime| {
+            runtime
+                .state
+                .profiles
+                .get(&profile_name)
+                .map(|p| p.codex_home.clone())
+        });
+        if let Some(home) = home {
+            apply_runtime_profile_usage_auth_revalidation(
+                shared,
+                &profile_name,
+                load_runtime_profile_usage_auth_cache_entry(&home),
+            );
+        }
         attempt.execute(
             RuntimeProbeExecutionMode::Inline { context },
             shared,
@@ -72,23 +88,41 @@ pub(crate) fn schedule_runtime_startup_probe_warmup(shared: &RuntimeRotationProx
         );
         return;
     }
-    let (state, current_profile, profile_probe_cache, profile_usage_snapshots) =
+    let (state, current_profile, profile_probe_cache, profile_usage_snapshots, profile_health) =
         match shared.runtime.lock() {
             Ok(runtime) => (
                 runtime.state.clone(),
                 runtime.current_profile.clone(),
                 runtime.profile_probe_cache.clone(),
                 runtime.profile_usage_snapshots.clone(),
+                runtime.profile_health.clone(),
             ),
             Err(_) => return,
         };
-    let refresh_profiles = runtime_profiles_needing_startup_probe_refresh(
+    let now = Local::now().timestamp();
+    let ordinary_refreshes = runtime_profiles_needing_startup_probe_refresh(
         &state,
         &current_profile,
         &profile_probe_cache,
         &profile_usage_snapshots,
-        Local::now().timestamp(),
+        now,
     );
+    // Restarted followers can inherit a credential penalty alongside a fresh
+    // quota snapshot. Queue a real authenticated revalidation for those owners
+    // before ordinary warm-up jobs; this never makes a profile eligible itself.
+    let mut refresh_profiles = active_profile_selection_order(&state, &current_profile)
+        .into_iter()
+        .filter(|name| runtime_profile_auth_failure_active_from_map(&profile_health, name, now))
+        .take(RUNTIME_STARTUP_PROBE_WARM_LIMIT)
+        .collect::<Vec<_>>();
+    for name in ordinary_refreshes {
+        if refresh_profiles.len() >= RUNTIME_STARTUP_PROBE_WARM_LIMIT {
+            break;
+        }
+        if !refresh_profiles.contains(&name) {
+            refresh_profiles.push(name);
+        }
+    }
     if refresh_profiles.is_empty() {
         return;
     }
