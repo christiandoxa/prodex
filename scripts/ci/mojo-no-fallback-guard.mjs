@@ -374,6 +374,7 @@ const PROMOTED_FILES = [
   "crates/prodex-quota/src/render/model_capacity.rs",
   "crates/prodex-context/src/critical_signal.rs",
   "crates/prodex-app/src/app_commands/status.rs",
+  "crates/prodex-app/src/app_commands/status/render.rs",
   "crates/prodex-terminal-ui/src/info.rs",
   "crates/prodex-terminal-ui/src/runtime_launch.rs",
   "crates/prodex-mojo-core/src/info_render.rs",
