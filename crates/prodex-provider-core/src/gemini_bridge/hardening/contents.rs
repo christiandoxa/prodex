@@ -1,5 +1,6 @@
 //! Gemini content sequence hardening.
 
+mod mojo;
 mod parts;
 mod tool_pairs;
 
@@ -18,38 +19,10 @@ pub fn gemini_provider_core_harden_contents(contents: &mut Vec<serde_json::Value
 }
 
 fn gemini_provider_core_coalesce_contents(contents: &mut Vec<serde_json::Value>) {
-    let mut coalesced = Vec::new();
-    for mut content in contents.drain(..) {
-        let role = gemini_provider_core_content_role(&content)
-            .unwrap_or("user")
-            .to_string();
-        let Some(parts) = content
-            .get_mut("parts")
-            .and_then(serde_json::Value::as_array_mut)
-        else {
-            continue;
-        };
-        if parts.is_empty() {
-            continue;
-        }
-        content["role"] = serde_json::Value::String(role.clone());
-        if let Some(last) = coalesced.last_mut()
-            && gemini_provider_core_content_role(last) == Some(role.as_str())
-        {
-            if let (Some(last_parts), Some(next_parts)) = (
-                last.get_mut("parts")
-                    .and_then(serde_json::Value::as_array_mut),
-                content
-                    .get_mut("parts")
-                    .and_then(serde_json::Value::as_array_mut),
-            ) {
-                last_parts.append(next_parts);
-            }
-            continue;
-        }
-        coalesced.push(content);
-    }
-    *contents = coalesced;
+    mojo::apply(
+        contents,
+        prodex_mojo_core::json::GeminiContentOperation::Coalesce,
+    );
 }
 
 fn gemini_provider_core_enforce_content_role_shape(contents: &mut Vec<serde_json::Value>) {
@@ -73,3 +46,6 @@ fn gemini_provider_core_enforce_content_role_shape(contents: &mut Vec<serde_json
     }
     gemini_provider_core_coalesce_contents(contents);
 }
+
+#[cfg(test)]
+mod tests;

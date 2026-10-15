@@ -2207,6 +2207,26 @@
         "operations": [
           "runtime_authenticated_probe_recovery"
         ]
+      },
+      {
+        "path": "mojo/prodex_core/gemini_content_hardening.mojo",
+        "language": "mojo",
+        "classification": "DETERMINISTIC_DOMAIN",
+        "production_reachable": true,
+        "role": "semantic",
+        "operations": [
+          "gemini_content_coalescing"
+        ]
+      },
+      {
+        "path": "crates/prodex-mojo-core/src/json/gemini_contents.rs",
+        "language": "rust",
+        "classification": "MIXED",
+        "production_reachable": true,
+        "role": "adapter",
+        "operations": [
+          "gemini_content_coalescing"
+        ]
       }
     ],
     "removed": [
@@ -9495,6 +9515,29 @@
       "duplicate_production_owner": false,
       "platform_fallback": false,
       "rust_adapter_scope": "Authenticated HTTP receipt identity, same-profile credential equality, timestamp projection, mutex-protected application, tombstones, notifications and scheduled persistence"
+    },
+    {
+      "name": "gemini_content_coalescing",
+      "domain": "provider/gemini-content-hardening",
+      "introduced_in": "0.438.0",
+      "baseline_state": "Rust normalized content rows and merged adjacent same-role parts retaining first-row metadata",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_mojo_gemini_content_hardening_v1",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/gemini_content_hardening.mojo",
+      "consumer": "crates/prodex-provider-core/src/gemini_bridge/hardening/contents.rs",
+      "consumer_marker": "mojo::apply(",
+      "production_consumers": [
+        "crates/prodex-provider-core/src/gemini_bridge/hardening/contents.rs"
+      ],
+      "production_reachability_test": "crates/prodex-provider-core/src/gemini_bridge/hardening/contents.rs",
+      "rust_owner_before": "gemini_provider_core_coalesce_contents loop, role default and adjacent grouping",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "Production algorithm removed; explicit caller fixtures preserve Unicode, invalid-row skipping, first metadata, arbitrary parts and complete hardening",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "Serde tree acquisition, measured output allocation, JSON decoding and atomic Vec replacement"
     }
   ],
   "rust_semantic_reductions": [
