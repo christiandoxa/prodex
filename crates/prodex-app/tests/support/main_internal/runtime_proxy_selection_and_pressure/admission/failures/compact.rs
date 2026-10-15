@@ -459,6 +459,12 @@ fn run_previous_response_compact_retryable_replay_case(
             .contains_key("resp-main"),
         "replay signal must release the failed previous-response owner"
     );
+    if reason == "compact_auth_failure" {
+        assert!(
+            !log.contains("profile_auth_backoff_cleared profile=main"),
+            "an inconclusive quota revalidation must keep the failed owner excluded: {log}"
+        );
+    }
     let before_replay = backend.responses_accounts();
     assert!(
         !before_replay.is_empty()
@@ -505,10 +511,21 @@ fn previous_response_affined_compact_overload_requests_full_context_replay() {
 #[test]
 fn previous_response_affined_compact_auth_failure_requests_full_context_replay() {
     run_previous_response_compact_retryable_replay_case(
-        vec![RuntimeProxyBackendFaultStep::unauthorized(
-            RuntimeProxyBackendFaultRoute::Compact,
-            "main-account",
-        )],
+        vec![
+            RuntimeProxyBackendFaultStep::unauthorized(
+                RuntimeProxyBackendFaultRoute::Compact,
+                "main-account",
+            ),
+            // A one-shot compact 401 followed by the default successful quota
+            // response is an authenticated recovery, not a persistently failed
+            // owner. Keep the quota revalidation inconclusive in this rotation
+            // fixture; otherwise crossing a wall-clock second legitimately
+            // makes main eligible again before full-context replay (Windows).
+            RuntimeProxyBackendFaultStep::invalid_request(
+                RuntimeProxyBackendFaultRoute::Usage,
+                "main-account",
+            ),
+        ],
         60,
         "compact_auth_failure",
     );
