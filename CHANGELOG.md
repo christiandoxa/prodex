@@ -2,9 +2,7 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
-## 0.437.13 - Unreleased
-
-Changes after `0.437.12`.
+## 0.437.13 - 2026-10-15
 
 ### Runtime
 
@@ -166,16 +164,3 @@ Changes after `0.437.12`.
 - Preserve DeepSeek usage output and metadata edge cases (`f71e135`)
 - Preserve Gemini data URL and media text contracts (`0b84d7a`)
 - Select oldest cookie across bounded ABI chunks without Rust fallback (`fff216f`)
-
-## 0.437.1 - 2026-10-09
-
-### Runtime
-
-- Preserve previous-response recovery precedence (`50f0004`)
-- Recover headerless and bound-turn upstream capacity (`bcecbb6`)
-- Move summary log formatting to Mojo (`e600780`)
-
-### CLI
-
-- Saturate profile geometry at integer boundaries (`75365cc`)
-- Migrate profile screen geometry policy (`9e04540`)
