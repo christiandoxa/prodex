@@ -1050,6 +1050,99 @@ def prodex_mojo_smart_context_static_canonicalize_v1(
     return SMART_CONTEXT_STATUS_OK
 
 
+
+def smart_context_static_payload_put_u64(
+    value: UInt64,
+    output: Pointer[mut=True, UInt8, _],
+    capacity: Int64,
+    written: Pointer[mut=True, Int64, _],
+) -> Bool:
+    var divisor = UInt64(1)
+    while value // divisor >= 10:
+        divisor *= 10
+    var remaining = value
+    while True:
+        if written[] >= capacity:
+            return False
+        output[unsafe_offset=written[]] = UInt8(48) + UInt8(remaining // divisor)
+        written[] += 1
+        remaining = remaining % divisor
+        if divisor == 1:
+            break
+        divisor = divisor // UInt64(10)
+    return True
+
+
+@export("prodex_mojo_smart_context_static_prompt_payload_v1")
+def prodex_mojo_smart_context_static_prompt_payload_v1(
+    abi_version: Int64,
+    id_views_address: UInt,
+    text_views_address: UInt,
+    byte_lengths_address: UInt,
+    item_count: Int64,
+    output_address: UInt,
+    output_capacity: Int64,
+    written_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != PRODEX_RICH_ABI_VERSION:
+        return SMART_CONTEXT_STATUS_ABI
+    if (
+        item_count < 0
+        or item_count > 128
+        or (item_count > 0 and (
+            id_views_address == 0
+            or text_views_address == 0
+            or byte_lengths_address == 0
+        ))
+        or output_address == 0
+        or written_address == 0
+        or output_capacity <= 0
+    ):
+        return SMART_CONTEXT_STATUS_INVALID
+    var ids = Pointer[mut=False, ProdexRichStringView, ImmUntrackedOrigin](
+        unsafe_from_address=Int(id_views_address)
+    )
+    var texts = Pointer[mut=False, ProdexRichStringView, ImmUntrackedOrigin](
+        unsafe_from_address=Int(text_views_address)
+    )
+    var sizes = Pointer[mut=False, UInt64, ImmUntrackedOrigin](
+        unsafe_from_address=Int(byte_lengths_address)
+    )
+    for index in range(item_count):
+        if (
+            not rich_view_valid(ids[unsafe_offset=index].copy(), SMART_CONTEXT_NORMALIZATION_MAX_BYTES)
+            or not rich_view_valid(texts[unsafe_offset=index].copy(), SMART_CONTEXT_NORMALIZATION_MAX_BYTES)
+        ):
+            return SMART_CONTEXT_STATUS_UTF8
+    var output = Pointer[mut=True, UInt8, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    var written = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(written_address)
+    )
+    written[] = 0
+    if not smart_context_emit_literal["prodex-smart-context-static-prompt-cache-v1\n"](
+        output, output_capacity, written
+    ):
+        return SMART_CONTEXT_STATUS_CAPACITY
+    for index in range(item_count):
+        var id = ids[unsafe_offset=index].copy()
+        var text = texts[unsafe_offset=index].copy()
+        if (
+            not smart_context_emit_literal["id-bytes:"](output, output_capacity, written)
+            or not smart_context_static_payload_put_u64(UInt64(id.len), output, output_capacity, written)
+            or not smart_context_emit_literal["\n"](output, output_capacity, written)
+            or not smart_context_emit_range(rich_view_ptr(id), 0, Int64(id.len), output, output_capacity, written)
+            or not smart_context_emit_literal["\ntext-bytes:"](output, output_capacity, written)
+            or not smart_context_static_payload_put_u64(sizes[unsafe_offset=index], output, output_capacity, written)
+            or not smart_context_emit_literal["\n"](output, output_capacity, written)
+            or not smart_context_emit_range(rich_view_ptr(text), 0, Int64(text.len), output, output_capacity, written)
+            or not smart_context_emit_literal["\n"](output, output_capacity, written)
+        ):
+            return SMART_CONTEXT_STATUS_CAPACITY
+    return SMART_CONTEXT_STATUS_OK
+
+
 @export("prodex_mojo_smart_context_budget_tier_v1")
 def prodex_mojo_smart_context_budget_tier_v1(
     abi_version: Int64, available_tokens: UInt64, tier_address: UInt
