@@ -82,6 +82,146 @@ def gch_coalesce(sink: Pointer[mut=True, JsonSink, _], tree: ParsedJson):
     js_byte(sink, 93)
 
 
+def gch_role_is(tree: ParsedJson, content: Int64, role: StringSlice) -> Bool:
+    var node = pj_field(tree, content, StringSlice("role"))
+    return pj_kind(tree, node) == JSON_STRING and pj_equal(pj_text(tree, node), pj_literal(role))
+
+
+def gch_function_identity(tree: ParsedJson, function: Int64, key: StringSlice) -> ProdexRichStringView:
+    var node = pj_field(tree, function, key)
+    if pj_kind(tree, node) == JSON_STRING:
+        return pj_text(tree, node)
+    return pj_literal(StringSlice("")) if key == StringSlice("id") else pj_literal(StringSlice("unknown"))
+
+
+def gch_pair_present(tree: ParsedJson, function: Int64, other: Int64, key: StringSlice) -> Bool:
+    var part = pj_child(tree, gch_parts(tree, other))
+    while part >= 0:
+        var candidate = pj_field(tree, part, key)
+        if candidate >= 0 and pj_equal(
+            gch_function_identity(tree, function, StringSlice("id")),
+            gch_function_identity(tree, candidate, StringSlice("id")),
+        ) and pj_equal(
+            gch_function_identity(tree, function, StringSlice("name")),
+            gch_function_identity(tree, candidate, StringSlice("name")),
+        ):
+            return True
+        part = pj_next(tree, part)
+    return False
+
+
+def gch_missing_exists(tree: ParsedJson, source: Int64, other: Int64, orphan: Bool) -> Bool:
+    var key = StringSlice("functionResponse") if orphan else StringSlice("functionCall")
+    var counterpart = StringSlice("functionCall") if orphan else StringSlice("functionResponse")
+    var part = pj_child(tree, gch_parts(tree, source))
+    while part >= 0:
+        var function = pj_field(tree, part, key)
+        if function >= 0 and not gch_pair_present(tree, function, other, counterpart):
+            return True
+        part = pj_next(tree, part)
+    return False
+
+
+def gch_append_missing(
+    sink: Pointer[mut=True, JsonSink, _], tree: ParsedJson,
+    source: Int64, other: Int64, orphan: Bool, already_emitted: Bool,
+):
+    var emitted = already_emitted
+    var key = StringSlice("functionResponse") if orphan else StringSlice("functionCall")
+    var counterpart = StringSlice("functionCall") if orphan else StringSlice("functionResponse")
+    var part = pj_child(tree, gch_parts(tree, source))
+    while part >= 0:
+        var function = pj_field(tree, part, key)
+        if function >= 0 and not gch_pair_present(tree, function, other, counterpart):
+            if emitted:
+                js_byte(sink, 44)
+            js_literal(sink, StringSlice('{"functionCall":{"id":') if orphan else StringSlice('{"functionResponse":{"id":'))
+            js_string(sink, gch_function_identity(tree, function, StringSlice("id")))
+            js_literal(sink, StringSlice(',"name":'))
+            js_string(sink, gch_function_identity(tree, function, StringSlice("name")))
+            if orphan:
+                js_literal(sink, StringSlice(',"args":{}},"thoughtSignature":"skip_thought_signature_validator"}'))
+            else:
+                js_literal(sink, StringSlice(',"response":{"error":"The tool execution result was missing from the Codex conversation history. Treat this tool result as unavailable and recover by inspecting current workspace state before continuing."}}}'))
+            emitted = True
+        part = pj_next(tree, part)
+
+
+def gch_write_extended(
+    sink: Pointer[mut=True, JsonSink, _], tree: ParsedJson,
+    content: Int64, source: Int64, orphan: Bool,
+):
+    js_byte(sink, 123)
+    var field = pj_child(tree, content)
+    var first = True
+    while field >= 0:
+        if not first:
+            js_byte(sink, 44)
+        var key = tree.nodes[unsafe_offset=field].key.copy()
+        js_string(sink, key)
+        js_byte(sink, 58)
+        if pj_equal(key, pj_literal(StringSlice("parts"))):
+            js_byte(sink, 91)
+            var part = pj_child(tree, field)
+            var emitted = False
+            while part >= 0:
+                if emitted:
+                    js_byte(sink, 44)
+                js_raw(sink, tree, part)
+                emitted = True
+                part = pj_next(tree, part)
+            gch_append_missing(sink, tree, source, content, orphan, emitted)
+            js_byte(sink, 93)
+        else:
+            js_raw(sink, tree, field)
+        first = False
+        field = pj_next(tree, field)
+    js_byte(sink, 125)
+
+
+def gch_write_synthetic(
+    sink: Pointer[mut=True, JsonSink, _], tree: ParsedJson, source: Int64, orphan: Bool,
+):
+    js_literal(sink, StringSlice('{"role":"model","parts":[') if orphan else StringSlice('{"role":"user","parts":['))
+    gch_append_missing(sink, tree, source, -1, orphan, False)
+    js_literal(sink, StringSlice(']}'))
+
+
+def gch_pair_tools(sink: Pointer[mut=True, JsonSink, _], tree: ParsedJson, orphan: Bool):
+    js_byte(sink, 91)
+    var current = pj_child(tree, 0)
+    var previous: Int64 = -1
+    var emitted = False
+    while current >= 0:
+        var next = pj_next(tree, current)
+        var is_model = gch_role_is(tree, current, StringSlice("model"))
+        var is_user = gch_role_is(tree, current, StringSlice("user"))
+        var previous_model = gch_role_is(tree, previous, StringSlice("model"))
+        var next_user = gch_role_is(tree, next, StringSlice("user"))
+        if emitted:
+            js_byte(sink, 44)
+        if orphan and is_user and not previous_model and gch_missing_exists(tree, current, -1, True):
+            gch_write_synthetic(sink, tree, current, True)
+            js_byte(sink, 44)
+        var source: Int64 = -1
+        if orphan and is_model and next_user:
+            source = next
+        elif not orphan and is_user and previous_model:
+            source = previous
+        if source >= 0 and gch_parts(tree, current) >= 0 and gch_missing_exists(tree, source, current, orphan):
+            gch_write_extended(sink, tree, current, source, orphan)
+        else:
+            js_raw(sink, tree, current)
+        if not orphan and is_model and (not next_user or gch_parts(tree, next) < 0):
+            if gch_missing_exists(tree, current, -1, False):
+                js_byte(sink, 44)
+                gch_write_synthetic(sink, tree, current, False)
+        emitted = True
+        previous = current
+        current = next
+    js_byte(sink, 93)
+
+
 @export("prodex_mojo_gemini_content_hardening_v1")
 def prodex_mojo_gemini_content_hardening_v1(
     abi: Int64, operation: Int64, flag: Int64,
@@ -94,7 +234,7 @@ def prodex_mojo_gemini_content_hardening_v1(
     if abi != 1:
         return 4
     if (
-        operation != 0 or flag != 0 or measuring < 0 or measuring > 1
+        operation < 0 or operation > 2 or flag != 0 or measuring < 0 or measuring > 1
         or raw_length < 0 or nodes_address == 0 or metadata_address == 0
         or capacity < 0 or scratch_count < nodes_count or scratch_address == 0
     ):
@@ -115,7 +255,10 @@ def prodex_mojo_gemini_content_hardening_v1(
         Pointer[mut=True, UInt8, MutUntrackedOrigin](unsafe_from_address=Int(output_address)),
         capacity, 0, measuring == 1, False,
     )
-    gch_coalesce(Pointer(to=sink), tree)
+    if operation == 0:
+        gch_coalesce(Pointer(to=sink), tree)
+    else:
+        gch_pair_tools(Pointer(to=sink), tree, operation == 2)
     if sink.failed:
         return 3
     var metadata = Pointer[mut=True, Int64, MutUntrackedOrigin](

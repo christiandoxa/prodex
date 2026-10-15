@@ -2215,7 +2215,9 @@
         "production_reachable": true,
         "role": "semantic",
         "operations": [
-          "gemini_content_coalescing"
+          "gemini_content_coalescing",
+          "gemini_missing_tool_result_pairing",
+          "gemini_orphan_tool_response_repair"
         ]
       },
       {
@@ -2225,7 +2227,9 @@
         "production_reachable": true,
         "role": "adapter",
         "operations": [
-          "gemini_content_coalescing"
+          "gemini_content_coalescing",
+          "gemini_missing_tool_result_pairing",
+          "gemini_orphan_tool_response_repair"
         ]
       }
     ],
@@ -9537,7 +9541,62 @@
       "production_fallback": false,
       "duplicate_production_owner": false,
       "platform_fallback": false,
-      "rust_adapter_scope": "Serde tree acquisition, measured output allocation, JSON decoding and atomic Vec replacement"
+      "rust_adapter_scope": "Serde tree acquisition, measured output allocation, JSON decoding and atomic Vec replacement",
+      "mojo_operation_ids": {
+        "coalesce": 0
+      }
+    },
+    {
+      "name": "gemini_missing_tool_result_pairing",
+      "domain": "provider/gemini-content-hardening",
+      "introduced_in": "0.438.0",
+      "baseline_state": "Rust matching and JSON synthesis over neighbouring content rows",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_mojo_gemini_content_hardening_v1",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/gemini_content_hardening.mojo",
+      "consumer": "crates/prodex-provider-core/src/gemini_bridge/hardening/contents/tool_pairs.rs",
+      "consumer_marker": "super::mojo::apply(",
+      "production_consumers": [
+        "crates/prodex-provider-core/src/gemini_bridge/hardening/contents/tool_pairs.rs"
+      ],
+      "production_reachability_test": "crates/prodex-provider-core/src/gemini_bridge/hardening/contents/tool_pairs.rs",
+      "rust_owner_before": "Rust PairMissingResults content loop, identity matching and synthetic JSON assembly",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "Production loops removed; fixed caller fixtures and 2048 temporary baseline comparisons validate the complete hardening pipeline",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "Serde tree and wire compatibility via the measured JSON ABI; Mojo emits missing-result sentinel parts for each unmatched id/name pair and appends or inserts user content using the original adjacency rules",
+      "mojo_operation_ids": {
+        "pair_missing_results": 1
+      }
+    },
+    {
+      "name": "gemini_orphan_tool_response_repair",
+      "domain": "provider/gemini-content-hardening",
+      "introduced_in": "0.438.0",
+      "baseline_state": "Rust matching and JSON synthesis over neighbouring content rows",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_mojo_gemini_content_hardening_v1",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/gemini_content_hardening.mojo",
+      "consumer": "crates/prodex-provider-core/src/gemini_bridge/hardening/contents/tool_pairs.rs",
+      "consumer_marker": "super::mojo::apply(",
+      "production_consumers": [
+        "crates/prodex-provider-core/src/gemini_bridge/hardening/contents/tool_pairs.rs"
+      ],
+      "production_reachability_test": "crates/prodex-provider-core/src/gemini_bridge/hardening/contents/tool_pairs.rs",
+      "rust_owner_before": "Rust RepairOrphanResponses content loop, identity matching and synthetic JSON assembly",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "Production loops removed; fixed caller fixtures and 2048 temporary baseline comparisons validate the complete hardening pipeline",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "Serde tree and wire compatibility via the measured JSON ABI; Mojo matches orphan tool responses by id and name and appends or inserts the original explicit synthetic-call representation",
+      "mojo_operation_ids": {
+        "repair_orphan_responses": 2
+      }
     }
   ],
   "rust_semantic_reductions": [
