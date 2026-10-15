@@ -23,9 +23,10 @@ pub use active_profile::{
 #[path = "profile_export/copilot.rs"]
 mod copilot;
 pub use copilot::{
-    CopilotImportStateAction, CopilotImportStatePlan, copilot_import_state_plan,
-    copilot_models_api_url, copilot_platform_label, copilot_user_api_origin,
-    copilot_version_triplet, strip_copilot_json_line_comments,
+    CopilotCandidate, CopilotImportStateAction, CopilotImportStatePlan,
+    copilot_import_candidate_indices, copilot_import_state_plan, copilot_models_api_url,
+    copilot_platform_label, copilot_user_api_origin, copilot_version_triplet,
+    strip_copilot_json_line_comments,
 };
 
 pub use crate::profile_import_lifecycle::*;

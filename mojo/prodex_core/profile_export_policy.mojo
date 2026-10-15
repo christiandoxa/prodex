@@ -1830,6 +1830,8 @@ comptime PROFILE_EXPORT_COPILOT_STATE_ADD_REQUESTED: Int64 = 1
 comptime PROFILE_EXPORT_COPILOT_STATE_ADD_DEFAULT: Int64 = 2
 comptime PROFILE_EXPORT_COPILOT_STATE_ACCOUNT_CONFLICT: Int64 = 3
 comptime PROFILE_EXPORT_COPILOT_STATE_REQUESTED_EXISTS: Int64 = 4
+comptime PROFILE_EXPORT_COPILOT_CANDIDATE_MAX: Int64 = 256
+comptime PROFILE_EXPORT_COPILOT_CANDIDATE_CAPACITY: Int64 = 2
 
 
 @export("prodex_profile_export_copilot_import_state_v1")
@@ -1878,4 +1880,108 @@ def prodex_profile_export_copilot_import_state_v1(
         )
         return PROFILE_EXPORT_POLICY_OK
     output[unsafe_offset=0] = PROFILE_EXPORT_COPILOT_STATE_ADD_DEFAULT
+    return PROFILE_EXPORT_POLICY_OK
+
+
+def profile_export_copilot_candidate_pair_equal(
+    left_host: ProdexRichStringView,
+    left_login: ProdexRichStringView,
+    right_host: ProdexRichStringView,
+    right_login: ProdexRichStringView,
+) -> Bool:
+    return profile_import_views_equal(left_host, right_host) and profile_import_views_equal(
+        left_login, right_login
+    )
+
+
+@export("prodex_profile_export_copilot_candidate_users_v1")
+def prodex_profile_export_copilot_candidate_users_v1(
+    abi_version: Int64,
+    last_present: Int64,
+    last_host_address: UInt,
+    last_login_address: UInt,
+    logged_hosts_address: UInt,
+    logged_logins_address: UInt,
+    logged_count: Int64,
+    output_address: UInt,
+    output_capacity: Int64,
+    written_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != 1:
+        return PROFILE_EXPORT_POLICY_ABI
+    if last_present != 0 and last_present != 1:
+        return PROFILE_EXPORT_POLICY_INVALID
+    if (
+        last_host_address == 0
+        or last_login_address == 0
+        or (logged_count > 0 and logged_hosts_address == 0)
+        or (logged_count > 0 and logged_logins_address == 0)
+        or logged_count < 0
+        or output_address == 0
+        or output_capacity < 0
+        or written_address == 0
+    ):
+        return PROFILE_EXPORT_POLICY_INVALID
+    if logged_count > PROFILE_EXPORT_COPILOT_CANDIDATE_MAX - last_present:
+        return PROFILE_EXPORT_POLICY_INVALID
+    if output_capacity < logged_count + last_present:
+        return PROFILE_EXPORT_COPILOT_CANDIDATE_CAPACITY
+
+    var last_host = Pointer[
+        mut=False, ProdexRichStringView, ImmUntrackedOrigin
+    ](unsafe_from_address=Int(last_host_address))[].copy()
+    var last_login = Pointer[
+        mut=False, ProdexRichStringView, ImmUntrackedOrigin
+    ](unsafe_from_address=Int(last_login_address))[].copy()
+    var logged_hosts = Pointer[
+        mut=False, ProdexRichStringView, ImmUntrackedOrigin
+    ](unsafe_from_address=Int(logged_hosts_address))
+    var logged_logins = Pointer[
+        mut=False, ProdexRichStringView, ImmUntrackedOrigin
+    ](unsafe_from_address=Int(logged_logins_address))
+    if (
+        (last_present == 1
+         and (
+             not profile_import_view_valid(last_host, True)
+             or not profile_import_view_valid(last_login, True)
+         ))
+    ):
+        return PROFILE_EXPORT_POLICY_INVALID
+    for index in range(logged_count):
+        if (
+            not profile_import_view_valid(logged_hosts[unsafe_offset=index].copy(), True)
+            or not profile_import_view_valid(logged_logins[unsafe_offset=index].copy(), True)
+        ):
+            return PROFILE_EXPORT_POLICY_INVALID
+
+    var output = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    var written = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(written_address)
+    )
+    written[] = 0
+    if last_present == 1:
+        output[unsafe_offset=0] = -1
+        written[] = 1
+    for index in range(logged_count):
+        var host = logged_hosts[unsafe_offset=index].copy()
+        var login = logged_logins[unsafe_offset=index].copy()
+        var duplicate = (
+            last_present == 1
+            and profile_export_copilot_candidate_pair_equal(host, login, last_host, last_login)
+        )
+        if not duplicate:
+            for previous in range(index):
+                if profile_export_copilot_candidate_pair_equal(
+                    host,
+                    login,
+                    logged_hosts[unsafe_offset=previous].copy(),
+                    logged_logins[unsafe_offset=previous].copy(),
+                ):
+                    duplicate = True
+                    break
+        if not duplicate:
+            output[unsafe_offset=written[]] = index
+            written[] += 1
     return PROFILE_EXPORT_POLICY_OK

@@ -32,7 +32,7 @@ use prodex_profile_export::{
     copilot_account_key, copilot_profile_import_summary_fields, copilot_token_from_config,
     copilot_user_api_origin, parse_copilot_config_file, parse_copilot_user_info_json_response,
     parse_copilot_user_info_value, plan_copilot_profile_import, plan_copilot_profile_import_state,
-    select_copilot_logged_in_user,
+    resolve_copilot_import_candidates,
 };
 
 const COPILOT_KEYCHAIN_SERVICE: &str = "copilot-cli";
@@ -269,7 +269,7 @@ fn default_copilot_profile_name(paths: &AppPaths, state: &AppState, login: &str)
 
 fn resolve_copilot_import_context() -> Result<CopilotImportContext> {
     let config = read_copilot_config()?;
-    let users = copilot_import_candidate_users(&config);
+    let users = resolve_copilot_import_candidates(&config)?;
     if users.is_empty() {
         bail!("no logged-in Copilot user found in config.json");
     }
@@ -287,24 +287,6 @@ fn resolve_copilot_import_context() -> Result<CopilotImportContext> {
     }
 
     bail!("failed to resolve a stored Copilot token for any logged-in user from config or keychain")
-}
-
-fn copilot_import_candidate_users(
-    config: &CopilotConfigFile,
-) -> Vec<prodex_profile_export::CopilotConfigUser> {
-    let mut users = Vec::new();
-    if let Some(user) = select_copilot_logged_in_user(config) {
-        users.push(user);
-    }
-    for user in &config.logged_in_users {
-        if !users
-            .iter()
-            .any(|existing| existing.host == user.host && existing.login == user.login)
-        {
-            users.push(user.clone());
-        }
-    }
-    users
 }
 
 fn read_copilot_config() -> Result<CopilotConfigFile> {
