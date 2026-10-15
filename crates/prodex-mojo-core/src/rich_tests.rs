@@ -220,6 +220,28 @@ fn rich_ascii_casefold_find_returns_rust_compatible_byte_offsets() {
 }
 
 #[test]
+fn rich_catalog_openai_retirement_classifier_preserves_exact_trimmed_ids() {
+    for model in [
+        "spark",
+        "\u{3000}SpArK\n",
+        "gpt-5.3-codex-spark",
+        " GPT-5.3-CODEX-SPARK\t",
+        "gpt-5.3-spark",
+    ] {
+        assert!(openai_model_is_retired(model).unwrap(), "{model:?}");
+    }
+    for model in [
+        "gpt-5.3-codex",
+        "gpt-5_3-codex-spark",
+        "gpt-5.3 codex-spark",
+        "gpt-5.3-codex-spark-preview",
+        "gpt-5.3-codex-sparκ",
+    ] {
+        assert!(!openai_model_is_retired(model).unwrap(), "{model:?}");
+    }
+}
+
+#[test]
 fn rich_catalog_exact_resolver_preserves_untrimmed_identity() {
     let models = [CatalogModel {
         id: "gpt-main",

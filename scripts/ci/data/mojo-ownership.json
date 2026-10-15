@@ -498,7 +498,8 @@
           "provider_catalog_exact_model_identity",
           "catalog_exact_ascii_casefold_equality",
           "catalog_ascii_casefold_relations",
-          "catalog_ascii_casefold_find"
+          "catalog_ascii_casefold_find",
+          "model_catalog_openai_retirement_filter"
         ]
       },
       "mojo/prodex_core/deepseek.mojo": {
@@ -3708,6 +3709,29 @@
       "production_fallback": false,
       "duplicate_production_owner": false,
       "platform_fallback": false
+    },
+    {
+      "name": "model_catalog_openai_retirement_filter",
+      "domain": "catalog/filtering",
+      "introduced_in": "0.438.0",
+      "baseline_state": "candidate",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_mojo_rich_catalog_openai_retired_v1",
+      "mojo_abi_version": 6,
+      "mojo_source": "mojo/prodex_core/rich_catalog.mojo",
+      "consumer": "crates/prodex-app/src/app_commands/super_main_catalog.rs",
+      "consumer_marker": "mojo_openai_model_is_retired",
+      "production_consumers": [
+        "crates/prodex-app/src/app_commands/super_main_catalog.rs"
+      ],
+      "production_reachability_test": "crates/prodex-mojo-core/src/rich/catalog_provider_tests.rs",
+      "rust_owner_before": "Rust owned Unicode trim, ASCII lowercase normalization, and exact matching for spark, gpt-5.3-codex-spark, and gpt-5.3-spark",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "deleted; compiled Mojo caller and raw ABI regressions plus the OpenAI models-cache picker test preserve exact IDs, Unicode trim, case folding, and near misses",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "borrowed UTF-8 model view, versioned ABI invocation, and validated bool/error mapping; CLI, config, cache IO, and choice materialization remain Rust-owned"
     },
     {
       "name": "runtime_profile_rotation_planning",

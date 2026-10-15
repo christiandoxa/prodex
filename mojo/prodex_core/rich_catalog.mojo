@@ -144,6 +144,48 @@ def catalog_view_find_folded(
         ):
             return start
     return -1
+
+
+def catalog_openai_model_is_retired(model: ProdexRichStringView) -> Bool:
+    var bounds = rich_trim_bounds(model)
+    if bounds[1] <= bounds[0]:
+        return False
+    var trimmed = ProdexRichStringView(
+        model.ptr + UInt(bounds[0]), UInt(bounds[1] - bounds[0])
+    )
+    return (
+        rich_view_matches_literal["spark"](trimmed, True)
+        or rich_view_matches_literal["gpt-5.3-codex-spark"](trimmed, True)
+        or rich_view_matches_literal["gpt-5.3-spark"](trimmed, True)
+    )
+
+
+@export("prodex_mojo_rich_catalog_openai_retired_v1")
+def prodex_mojo_rich_catalog_openai_retired_v1(
+    abi_version: Int64,
+    model_address: UInt,
+    model_length: Int64,
+    output_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != PRODEX_RICH_ABI_VERSION:
+        return RICH_STATUS_ABI
+    if (
+        model_length < 0
+        or model_length > CATALOG_MAX_MERGE_QUERY_BYTES
+        or output_address == 0
+        or (model_length > 0 and model_address == 0)
+    ):
+        return RICH_STATUS_INVALID
+    var model = ProdexRichStringView(model_address, UInt(model_length))
+    if not rich_view_valid(model, CATALOG_MAX_MERGE_QUERY_BYTES):
+        return RICH_STATUS_UTF8
+    var output = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    output[] = Int64(catalog_openai_model_is_retired(model))
+    return RICH_STATUS_OK
+
+
 def catalog_valid_views(
     model_ids: Pointer[mut=False, ProdexRichStringView, _],
     model_count: Int64,

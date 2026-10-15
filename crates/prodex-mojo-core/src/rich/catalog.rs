@@ -125,6 +125,12 @@ unsafe extern "C" {
         needle_length: i64,
         output_offset_address: u64,
     ) -> i64;
+    fn prodex_mojo_rich_catalog_openai_retired_v1(
+        abi_version: i64,
+        model_address: u64,
+        model_length: i64,
+        output_address: u64,
+    ) -> i64;
     fn prodex_mojo_rich_catalog_resolve_v1(
         abi_version: i64,
         model_ids: u64,
@@ -324,6 +330,24 @@ pub fn ascii_casefold_equal_exact(left: &str, right: &str) -> Result<bool, MojoE
             i64::try_from(left.len()).map_err(|_| MojoError::InvalidInput)?,
             right.as_ptr() as usize as u64,
             i64::try_from(right.len()).map_err(|_| MojoError::InvalidInput)?,
+            count_address(&mut output),
+        )
+    })?;
+    match output {
+        0 => Ok(false),
+        1 => Ok(true),
+        _ => Err(MojoError::InvalidOutput),
+    }
+}
+
+pub fn openai_model_is_retired(model: &str) -> Result<bool, MojoError> {
+    ensure_rich_abi()?;
+    let mut output = -1_i64;
+    status(unsafe {
+        prodex_mojo_rich_catalog_openai_retired_v1(
+            RICH_ABI_VERSION,
+            model.as_ptr() as usize as u64,
+            i64::try_from(model.len()).map_err(|_| MojoError::InvalidInput)?,
             count_address(&mut output),
         )
     })?;

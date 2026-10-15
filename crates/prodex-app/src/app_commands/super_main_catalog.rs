@@ -5,7 +5,8 @@ use prodex_cli::SubAgentReasoningEffort;
 const CATALOG_MAX_PRIORITY: u64 = i64::MAX as u64;
 use prodex_mojo_core::rich::{
     CatalogChoicesPlan, CatalogModel, CatalogPlanModel, ascii_casefold_equal_exact,
-    merge_catalog_ids, plan_dynamic_catalog, resolve_catalog_model_exact,
+    merge_catalog_ids, openai_model_is_retired as mojo_openai_model_is_retired,
+    plan_dynamic_catalog, resolve_catalog_model_exact,
 };
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -87,10 +88,8 @@ pub(super) fn main_model_choices(
 }
 
 fn openai_model_is_retired(model: &str) -> bool {
-    matches!(
-        model.trim().to_ascii_lowercase().as_str(),
-        "spark" | "gpt-5.3-codex-spark" | "gpt-5.3-spark"
-    )
+    mojo_openai_model_is_retired(model)
+        .expect("Mojo OpenAI catalog retirement classification failed")
 }
 
 fn main_model_choice_from_provider(
