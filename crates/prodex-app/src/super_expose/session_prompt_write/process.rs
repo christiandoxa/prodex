@@ -328,7 +328,8 @@ pub(crate) fn is_control_socket(path: &Path) -> bool {
 }
 
 pub(crate) fn is_rollout_file_name(name: &str) -> bool {
-    name.starts_with("rollout-") && (name.ends_with(".jsonl") || name.ends_with(".jsonl.zst"))
+    prodex_mojo_core::session_cli_policy::prompt_write_rollout_name_plan(name, true)
+        .is_ok_and(|plan| plan.is_rollout)
 }
 
 pub(crate) fn is_plain_prodex_session(process: &ProcessRecord) -> bool {

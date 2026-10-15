@@ -112,6 +112,84 @@ fn direct_mojo_prompt_write_queue_plan_preserves_retry_and_verification_states()
 }
 
 #[test]
+fn prompt_write_rollout_name_plan_preserves_filename_and_uuid_boundaries() {
+    let thread = "019f3b59-7771-7ea1-a9a1-3cd638f216c4";
+    let legacy = format!("rollout-2026-09-03T10-00-00-{thread}.jsonl");
+    let plan = prompt_write_rollout_name_plan(&legacy, false).unwrap();
+    assert!(plan.is_rollout);
+    assert_eq!(
+        plan.thread_span.map(|(start, end)| &legacy[start..end]),
+        Some(thread)
+    );
+
+    let compressed = format!("rollout-{thread}.jsonl.zst");
+    assert_eq!(
+        prompt_write_rollout_name_plan(&compressed, false).unwrap(),
+        SessionPromptWriteRolloutNamePlan {
+            is_rollout: false,
+            thread_span: None,
+        }
+    );
+    assert!(
+        prompt_write_rollout_name_plan(&compressed, true)
+            .unwrap()
+            .thread_span
+            .is_some()
+    );
+
+    let duplicate = format!("rollout-{thread}-{thread}.jsonl");
+    assert_eq!(
+        prompt_write_rollout_name_plan(&duplicate, false).unwrap(),
+        SessionPromptWriteRolloutNamePlan {
+            is_rollout: true,
+            thread_span: None,
+        }
+    );
+    assert_eq!(
+        prompt_write_rollout_name_plan("rollout-not-a-rollout.jsonl", false).unwrap(),
+        SessionPromptWriteRolloutNamePlan {
+            is_rollout: true,
+            thread_span: None,
+        }
+    );
+}
+
+#[test]
+fn prompt_write_rollout_name_abi_rejects_invalid_mode_and_version() {
+    let name = "rollout-019f3b59-7771-7ea1-a9a1-3cd638f216c4.jsonl";
+    let mut output = [-1_i64; 3];
+    let address = output.as_mut_ptr() as usize as u64;
+    assert_eq!(
+        unsafe {
+            prodex_session_prompt_write_rollout_name_v1(
+                0,
+                name.as_ptr() as u64,
+                name.len() as i64,
+                0,
+                address,
+            )
+        },
+        1
+    );
+    assert_eq!(
+        unsafe {
+            prodex_session_prompt_write_rollout_name_v1(
+                ABI_VERSION,
+                name.as_ptr() as u64,
+                name.len() as i64,
+                2,
+                address,
+            )
+        },
+        1
+    );
+    assert_eq!(
+        unsafe { prodex_session_prompt_write_rollout_name_v1(ABI_VERSION, 0, 1, 0, address,) },
+        1
+    );
+}
+
+#[test]
 fn transcript_output_projection_and_bounds_are_mojo_owned() {
     assert_eq!(
         transcript_output_plan("tool-call:search").unwrap(),

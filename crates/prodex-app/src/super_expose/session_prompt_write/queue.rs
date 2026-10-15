@@ -1,7 +1,6 @@
 use super::{
     OpenProcessFile, ProcessRecord, QUEUE_COMMAND_OUTPUT_LIMIT, QUEUE_COMMAND_TIMEOUT,
     ResolvedTarget, SessionPromptWriteError, first_codex_positional_arg, is_control_socket,
-    is_rollout_file_name,
 };
 use prodex_mojo_core::session_cli_policy;
 use rusqlite::{Connection, OpenFlags, OptionalExtension, params};
@@ -51,24 +50,11 @@ pub(crate) fn modern_thread_id(path: &Path) -> Option<String> {
 
 pub(crate) fn legacy_thread_id(path: &Path) -> Option<String> {
     let name = path.file_name()?.to_str()?;
-    if !is_rollout_file_name(name) {
-        return None;
-    }
-    let name = name
-        .strip_suffix(".jsonl.zst")
-        .or_else(|| name.strip_suffix(".jsonl"))?;
-    let parts = name.split('-').collect::<Vec<_>>();
-    let mut found = None;
-    for window in parts.windows(5) {
-        let candidate = window.join("-");
-        if Uuid::parse_str(&candidate).is_ok() {
-            if found.is_some() {
-                return None;
-            }
-            found = Some(candidate);
-        }
-    }
-    found.and_then(|value| Uuid::parse_str(&value).ok().map(|id| id.to_string()))
+    let plan = session_cli_policy::prompt_write_rollout_name_plan(name, true).ok()?;
+    let (start, end) = plan.thread_span?;
+    Uuid::parse_str(name.get(start..end)?)
+        .ok()
+        .map(|id| id.to_string())
 }
 
 #[derive(Clone, Copy)]

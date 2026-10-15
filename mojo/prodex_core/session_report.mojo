@@ -1355,3 +1355,147 @@ def prodex_session_prompt_write_gap_text_v1(
         cursor += 1
     written[] = cursor
     return SESSION_REPORT_OK
+
+
+comptime SESSION_PROMPT_WRITE_ROLLOUT_MAX_BYTES: Int64 = 4_096
+
+
+def session_prompt_write_rollout_suffix_length(
+    view: ProdexRichStringView,
+    allow_compressed: Bool,
+) -> Int64:
+    var source = rich_view_ptr(view)
+    var length = Int64(view.len)
+    var suffix = StringSlice(".jsonl")
+    if allow_compressed:
+        var compressed = StringSlice(".jsonl.zst")
+        var compressed_length = Int64(compressed.byte_length())
+        if compressed_length <= length:
+            var compressed_start = length - compressed_length
+            var compressed_ptr = compressed.unsafe_ptr()
+            var compressed_matches = True
+            for index in range(compressed_length):
+                if source[unsafe_offset=compressed_start + index] != compressed_ptr[unsafe_offset=index]:
+                    compressed_matches = False
+                    break
+            if compressed_matches:
+                return compressed_length
+    var suffix_length = Int64(suffix.byte_length())
+    if suffix_length > length:
+        return -1
+    var start = length - suffix_length
+    var expected = suffix.unsafe_ptr()
+    for index in range(suffix_length):
+        if source[unsafe_offset=start + index] != expected[unsafe_offset=index]:
+            return -1
+    return suffix_length
+
+
+def session_prompt_write_hex(value: UInt8) -> Bool:
+    return (
+        (value >= 48 and value <= 57)
+        or (value >= 65 and value <= 70)
+        or (value >= 97 and value <= 102)
+    )
+
+
+def session_prompt_write_uuid_shape(
+    source: Pointer[mut=False, UInt8, _],
+    start: Int64,
+    end: Int64,
+) -> Bool:
+    if end - start != 36:
+        return False
+    for index in range(Int64(36)):
+        var value = source[unsafe_offset=start + index]
+        if index == 8 or index == 13 or index == 18 or index == 23:
+            if value != 45:
+                return False
+        elif not session_prompt_write_hex(value):
+            return False
+    return True
+
+
+def session_prompt_write_unique_uuid_span(
+    view: ProdexRichStringView,
+    stem_end: Int64,
+) -> Tuple[Int64, Int64]:
+    var source = rich_view_ptr(view)
+    var start: Int64 = 0
+    var found_start: Int64 = -1
+    var found_end: Int64 = -1
+    while start < stem_end:
+        var cursor = start
+        var separator_count: Int64 = 0
+        var next_start: Int64 = -1
+        while cursor < stem_end:
+            if source[unsafe_offset=cursor] == 45:
+                separator_count += 1
+                if separator_count == 1:
+                    next_start = cursor + 1
+                if separator_count == 4:
+                    break
+            cursor += 1
+        if separator_count < 4:
+            break
+        var candidate_end = cursor + 1
+        while candidate_end < stem_end and source[unsafe_offset=candidate_end] != 45:
+            candidate_end += 1
+        if session_prompt_write_uuid_shape(source, start, candidate_end):
+            if found_start >= 0:
+                return (-1, -1)
+            found_start = start
+            found_end = candidate_end
+        if next_start < 0:
+            break
+        start = next_start
+    return (found_start, found_end)
+
+
+@export("prodex_session_prompt_write_rollout_name_v1")
+def prodex_session_prompt_write_rollout_name_v1(
+    abi_version: Int64,
+    name_address: UInt,
+    name_length: Int64,
+    allow_compressed: Int64,
+    output_address: UInt,
+) abi("C") -> Int64:
+    if (
+        abi_version != SESSION_PROMPT_WRITE_POLICY_ABI_VERSION
+        or name_length < 0
+        or name_length > SESSION_PROMPT_WRITE_ROLLOUT_MAX_BYTES
+        or (allow_compressed != 0 and allow_compressed != 1)
+        or output_address == 0
+        or (name_length > 0 and name_address == 0)
+    ):
+        return SESSION_REPORT_INVALID
+    var name = ProdexRichStringView(name_address, UInt(name_length))
+    if not rich_view_valid(name, SESSION_PROMPT_WRITE_ROLLOUT_MAX_BYTES):
+        return SESSION_REPORT_INVALID
+    var output = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    output[unsafe_offset=0] = 0
+    output[unsafe_offset=1] = -1
+    output[unsafe_offset=2] = -1
+    var source = rich_view_ptr(name)
+    var prefix = StringSlice("rollout-")
+    var prefix_length = Int64(prefix.byte_length())
+    if name_length < prefix_length:
+        return SESSION_REPORT_OK
+    var expected = prefix.unsafe_ptr()
+    for index in range(prefix_length):
+        if source[unsafe_offset=index] != expected[unsafe_offset=index]:
+            return SESSION_REPORT_OK
+    var suffix_length = session_prompt_write_rollout_suffix_length(
+        name, allow_compressed == 1
+    )
+    if suffix_length < 0:
+        return SESSION_REPORT_OK
+    output[unsafe_offset=0] = 1
+    var span = session_prompt_write_unique_uuid_span(
+        name, name_length - suffix_length
+    )
+    output[unsafe_offset=1] = span[0]
+    output[unsafe_offset=2] = span[1]
+    return SESSION_REPORT_OK
