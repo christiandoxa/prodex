@@ -35,6 +35,22 @@ const SMART_CONTEXT_NORMALIZATION_CAPACITY_STATUS: i64 = 3;
 const SMART_CONTEXT_CAPSULE_MAX_COUNT: usize = 65_536;
 
 unsafe extern "C" {
+    fn prodex_mojo_smart_context_scope_preimage_v1(
+        abi_version: i64,
+        fields: u64,
+        field_count: i64,
+        output: u64,
+        capacity: i64,
+        written: u64,
+    ) -> i64;
+    fn prodex_mojo_smart_context_scope_digest_text_v1(
+        abi_version: i64,
+        digest: u64,
+        digest_len: i64,
+        output: u64,
+        capacity: i64,
+        written: u64,
+    ) -> i64;
     fn prodex_mojo_smart_context_fnv_hash_text_v1(
         abi_version: i64,
         mode: i64,
@@ -391,6 +407,65 @@ pub fn smart_context_legacy_fnv_text(
     String::from_utf8(buffer[..written].to_vec()).map_err(|_| MojoError::InvalidOutput)
 }
 
+/// Produce an exact, versioned preimage for the host SHA-256 primitive.
+/// Mojo is the only owner of the field lengths, order and scope separator.
+pub fn smart_context_scope_preimage(fields: [&str; 5]) -> Result<Vec<u8>, MojoError> {
+    ensure_rich_abi()?;
+    let capacity = fields
+        .iter()
+        .try_fold(
+            b"prodex-smart-context-scope-v1\0".len() + 5 * 8,
+            |size, field| size.checked_add(field.len()),
+        )
+        .ok_or(MojoError::InvalidInput)?;
+    let views = fields.map(view);
+    let mut output = vec![0u8; capacity];
+    let mut written = -1i64;
+    let status = unsafe {
+        prodex_mojo_smart_context_scope_preimage_v1(
+            RICH_ABI_VERSION,
+            mojo_pointer_address(views.as_ptr()),
+            views.len() as i64,
+            mojo_mut_pointer_address(output.as_mut_ptr()),
+            i64::try_from(output.len()).map_err(|_| MojoError::InvalidInput)?,
+            mojo_mut_pointer_address(&mut written),
+        )
+    };
+    if status != 0 {
+        return Err(normalization_status_error(status));
+    }
+    let length = usize::try_from(written).map_err(|_| MojoError::InvalidOutput)?;
+    if length != capacity {
+        return Err(MojoError::InvalidOutput);
+    }
+    Ok(output)
+}
+
+/// Encode a cryptographically hashed scope identifier through the Mojo wire
+/// policy. Rust remains responsible only for the 32-byte SHA-256 primitive.
+pub fn smart_context_scope_digest_text(digest: &[u8; 32]) -> Result<String, MojoError> {
+    ensure_rich_abi()?;
+    let mut output = [0u8; 73];
+    let mut written = -1i64;
+    let status = unsafe {
+        prodex_mojo_smart_context_scope_digest_text_v1(
+            RICH_ABI_VERSION,
+            mojo_pointer_address(digest.as_ptr()),
+            digest.len() as i64,
+            mojo_mut_pointer_address(output.as_mut_ptr()),
+            output.len() as i64,
+            mojo_mut_pointer_address(&mut written),
+        )
+    };
+    if status != 0 {
+        return Err(normalization_status_error(status));
+    }
+    if written != output.len() as i64 {
+        return Err(MojoError::InvalidOutput);
+    }
+    String::from_utf8(output.to_vec()).map_err(|_| MojoError::InvalidOutput)
+}
+
 /// Classify one static-context line as volatile metadata.
 pub fn smart_context_static_context_noise_line(line: &str) -> Result<bool, MojoError> {
     ensure_rich_abi()?;
@@ -523,6 +598,93 @@ pub fn plan_smart_context_capsules(
 #[cfg(test)]
 mod static_canonicalization_tests {
     use super::*;
+
+    #[test]
+    fn mojo_scope_preimage_preserves_each_field_boundary_and_utf8_bytes() {
+        let fields = ["tenant", "東京🧭", "openai", "/work/repo", ""];
+        let output = smart_context_scope_preimage(fields).unwrap();
+        let mut expected = b"prodex-smart-context-scope-v1\0".to_vec();
+        for field in fields {
+            expected.extend_from_slice(&(field.len() as u64).to_be_bytes());
+            expected.extend_from_slice(field.as_bytes());
+        }
+        assert_eq!(output, expected);
+        assert_ne!(
+            smart_context_scope_preimage(["a", "bc", "", "", ""]).unwrap(),
+            smart_context_scope_preimage(["ab", "c", "", "", ""]).unwrap(),
+        );
+    }
+
+    #[test]
+    fn mojo_scope_digest_emits_exact_prefixed_lowercase_sha256_hex() {
+        let mut digest = [0u8; 32];
+        digest[0] = 0xab;
+        digest[31] = 0x0f;
+        assert_eq!(
+            smart_context_scope_digest_text(&digest).unwrap(),
+            format!("scscope1:ab{}0f", "00".repeat(30)),
+        );
+        assert_eq!(
+            smart_context_scope_digest_text(&[0u8; 32]).unwrap(),
+            format!("scscope1:{}", "00".repeat(32)),
+        );
+    }
+
+    #[test]
+    fn mojo_scope_abi_rejects_version_and_short_capacity() {
+        let mut output = [77u8; 73];
+        let mut written = 123i64;
+        let digest = [0u8; 32];
+        let views = ["t", "p", "r", "w", "s"].map(view);
+        unsafe {
+            assert_eq!(
+                prodex_mojo_smart_context_scope_preimage_v1(
+                    RICH_ABI_VERSION + 1,
+                    mojo_pointer_address(views.as_ptr()),
+                    5,
+                    mojo_mut_pointer_address(output.as_mut_ptr()),
+                    output.len() as i64,
+                    mojo_mut_pointer_address(&mut written),
+                ),
+                4,
+            );
+            assert_eq!(
+                prodex_mojo_smart_context_scope_preimage_v1(
+                    RICH_ABI_VERSION,
+                    mojo_pointer_address(views.as_ptr()),
+                    4,
+                    mojo_mut_pointer_address(output.as_mut_ptr()),
+                    output.len() as i64,
+                    mojo_mut_pointer_address(&mut written),
+                ),
+                1,
+            );
+            assert_eq!(
+                prodex_mojo_smart_context_scope_digest_text_v1(
+                    RICH_ABI_VERSION,
+                    mojo_pointer_address(digest.as_ptr()),
+                    31,
+                    mojo_mut_pointer_address(output.as_mut_ptr()),
+                    output.len() as i64,
+                    mojo_mut_pointer_address(&mut written),
+                ),
+                1,
+            );
+            assert_eq!(
+                prodex_mojo_smart_context_scope_digest_text_v1(
+                    RICH_ABI_VERSION,
+                    mojo_pointer_address(digest.as_ptr()),
+                    32,
+                    mojo_mut_pointer_address(output.as_mut_ptr()),
+                    72,
+                    mojo_mut_pointer_address(&mut written),
+                ),
+                3,
+            );
+        }
+        assert_eq!(output, [77; 73]);
+        assert_eq!(written, 123);
+    }
 
     #[test]
     fn mojo_legacy_fnv_preserves_64_bit_hash_and_text_formats() {

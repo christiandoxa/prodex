@@ -706,7 +706,9 @@
           "smart_context_static_prompt_payload_format",
           "smart_context_static_bounded_identifier",
           "smart_context_static_bounded_text",
-          "smart_context_legacy_fnv_fingerprint"
+          "smart_context_legacy_fnv_fingerprint",
+          "smart_context_scope_preimage_framing",
+          "smart_context_scope_digest_rendering"
         ]
       },
       {
@@ -2730,6 +2732,52 @@
       "duplicate_production_owner": false,
       "platform_fallback": false,
       "rust_adapter_scope": "Borrow normalized output bytes into a versioned Mojo ABI, validate written length and owned UTF-8; preserve host-side SHA-256 algorithm for sc2 hashes"
+    },
+    {
+      "name": "smart_context_scope_preimage_framing",
+      "domain": "smart-context/scope",
+      "introduced_in": "0.438.0",
+      "baseline_state": "Rust built the versioned SHA-256 domain separator and appended each of five context fields with an eight-byte big-endian length",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_mojo_smart_context_scope_preimage_v1",
+      "mojo_abi_version": 6,
+      "mojo_source": "mojo/prodex_core/smart_context_normalization.mojo",
+      "consumer": "crates/prodex-runtime-proxy/src/smart_context/scope.rs",
+      "consumer_marker": "prodex_mojo_core::rich::smart_context_scope_preimage(",
+      "production_consumers": [
+        "crates/prodex-runtime-proxy/src/smart_context/scope.rs"
+      ],
+      "production_reachability_test": "crates/prodex-runtime-proxy/src/smart_context/scope.rs",
+      "rust_owner_before": "Rust assembled versioned binary SHA-256 preimages and encoded five field byte lengths",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "Removed Rust binary preimage assembler; strict Mojo tests assert five length-delimited UTF-8 byte fields and production scope test matches original SHA-256 golden digest",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "Owned Rust strings, SHA-256 cryptographic digest, bounded Mojo output buffer and final ContextScopeId DTO"
+    },
+    {
+      "name": "smart_context_scope_digest_rendering",
+      "domain": "smart-context/scope",
+      "introduced_in": "0.438.0",
+      "baseline_state": "Rust formatted a 32-byte SHA-256 scope digest as scscope1: followed by 64 lowercase hex digits",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_mojo_smart_context_scope_digest_text_v1",
+      "mojo_abi_version": 6,
+      "mojo_source": "mojo/prodex_core/smart_context_normalization.mojo",
+      "consumer": "crates/prodex-runtime-proxy/src/smart_context/scope.rs",
+      "consumer_marker": "prodex_mojo_core::rich::smart_context_scope_digest_text(",
+      "production_consumers": [
+        "crates/prodex-runtime-proxy/src/smart_context/scope.rs"
+      ],
+      "production_reachability_test": "crates/prodex-runtime-proxy/src/smart_context/scope.rs",
+      "rust_owner_before": "Rust hex_digest algorithm and scscope1: String formatting policy",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "Removed Rust hex_digest; strict Mojo tests verify exact prefix/lowercase encoding and a stable production scope digest across field boundaries",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "SHA-256 cryptographic implementation and checked Mojo UTF-8 return DTO"
     },
     {
       "name": "smart_context_capsule_order",
