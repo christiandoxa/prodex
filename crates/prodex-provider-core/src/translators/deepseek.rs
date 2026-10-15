@@ -129,6 +129,14 @@ mod tests {
             deepseek_provider_core_chat_stream_error(&serde_json::json!({"ok": true})),
             None
         );
+        let large_event = serde_json::json!({
+            "error": {"type": "rate_limit", "message": "retry"},
+            "unrelated": "x".repeat(4 * 1024 * 1024 + 1),
+        });
+        assert_eq!(
+            deepseek_provider_core_chat_stream_error(&large_event),
+            Some(("rate_limit".to_string(), "retry".to_string()))
+        );
     }
 
     #[test]

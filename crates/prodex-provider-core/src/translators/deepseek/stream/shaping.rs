@@ -46,26 +46,24 @@ pub fn deepseek_provider_core_response_created_event(
 }
 
 pub fn deepseek_provider_core_chat_stream_error(value: &Value) -> Option<(String, String)> {
-    let error = value.get("error")?;
-    if let Some(message) = error.as_str() {
-        return Some(("provider_stream_error".to_string(), message.to_string()));
-    }
-    let code = error
-        .get("type")
-        .or_else(|| error.get("code"))
-        .and_then(|code| {
-            code.as_str()
-                .map(str::to_string)
-                .or_else(|| code.as_i64().map(|code| code.to_string()))
-        })
-        .unwrap_or_else(|| "provider_stream_error".to_string());
-    let message = error
-        .get("message")
-        .or_else(|| error.get("detail"))
-        .and_then(Value::as_str)
-        .unwrap_or("Provider stream returned an embedded error")
-        .to_string();
-    Some((code, message))
+    let source = value
+        .get("error")
+        .map(|error| serde_json::to_string(error).expect("DeepSeek stream error serializes"));
+    let mut input = DeepSeekKernelInput::new(DeepSeekKernelOperation::StreamErrorClassification);
+    input.input = source.as_deref();
+    let projected = super::super::deepseek_mojo_value(input);
+    projected.is_object().then(|| {
+        (
+            projected["code"]
+                .as_str()
+                .expect("DeepSeek stream error code is a string")
+                .to_string(),
+            projected["message"]
+                .as_str()
+                .expect("DeepSeek stream error message is a string")
+                .to_string(),
+        )
+    })
 }
 
 pub fn deepseek_provider_core_validate_stream_tool_call_arguments(

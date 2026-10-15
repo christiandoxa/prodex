@@ -511,7 +511,8 @@
           "deepseek_request_metadata_shape_policy",
           "deepseek_json_guidance_policy",
           "deepseek_response_usage_mapping",
-          "deepseek_local_rewrite_route_policy"
+          "deepseek_local_rewrite_route_policy",
+          "deepseek_stream_error_classification"
         ]
       },
       "mojo/prodex_core/gemini_compact_text.mojo": {
@@ -875,6 +876,7 @@
           "deepseek_request_metadata_shape_policy",
           "deepseek_json_guidance_policy",
           "deepseek_response_usage_mapping",
+          "deepseek_stream_error_classification",
           "gemini_response_media_projection",
           "gemini_response_id_conformance",
           "gemini_response_envelope_normalization"
@@ -924,16 +926,20 @@
             "end": 632
           },
           {
-            "start": 1509,
-            "end": 1759
+            "start": 1080,
+            "end": 1174
           },
           {
-            "start": 3893,
-            "end": 4008
+            "start": 1608,
+            "end": 1858
           },
           {
-            "start": 1874,
-            "end": 2095
+            "start": 3992,
+            "end": 4107
+          },
+          {
+            "start": 1973,
+            "end": 2194
           }
         ],
         "operations": [
@@ -945,7 +951,8 @@
           "deepseek_request_metadata_shape_policy",
           "deepseek_json_guidance_policy",
           "deepseek_response_usage_mapping",
-          "deepseek_local_rewrite_route_policy"
+          "deepseek_local_rewrite_route_policy",
+          "deepseek_stream_error_classification"
         ]
       },
       {
@@ -10829,6 +10836,34 @@
       "duplicate_production_owner": false,
       "platform_fallback": false,
       "rust_adapter_scope": "provider catalog acquisition and exact model lookup, route-tag mapping, JSON/error-body materialization, and buffered response construction"
+    },
+    {
+      "name": "deepseek_stream_error_classification",
+      "domain": "provider/deepseek",
+      "introduced_in": "0.438.0",
+      "baseline_state": "candidate",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_mojo_deepseek_kernel_v2",
+      "mojo_abi_version": 6,
+      "mojo_operation_ids": {
+        "stream_error_classification": 50
+      },
+      "mojo_source": "mojo/prodex_core/rich_abi.mojo",
+      "mojo_semantic_source": "mojo/prodex_core/deepseek.mojo",
+      "consumer": "crates/prodex-provider-core/src/translators/deepseek/stream/shaping.rs",
+      "consumer_marker": "DeepSeekKernelOperation::StreamErrorClassification",
+      "production_consumers": [
+        "crates/prodex-provider-core/src/translators/deepseek/stream/shaping.rs",
+        "crates/prodex-app/src/runtime_launch/proxy_startup/deepseek_sse.rs"
+      ],
+      "production_reachability_test": "crates/prodex-mojo-core/tests/deepseek_stream_error.rs",
+      "rust_owner_before": "DeepSeek stream embedded-error code and message precedence, scalar handling, and stable default classification",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "deleted; compiled Mojo ABI cases and the DeepSeek provider caller regression cover string, object, numeric, Unicode, absent, and malformed-field boundaries",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "Serde event acquisition and serialization, bounded Mojo result decoding, and runtime error-event transport"
     }
   ],
   "rust_semantic_reductions": [
@@ -12350,6 +12385,29 @@
       "production_consumer": "crates/prodex-app/src/runtime_launch/proxy_startup/provider_bridge_routing.rs",
       "parity_test": "crates/prodex-mojo-core/tests/runtime_provider_models_response.rs",
       "cleanup_evidence": "The Rust method/status branch tree is replaced by the mandatory Mojo response plan; caller coverage preserves GET case-folding, non-model/no-catalog suppression, catalog-limit 503, list 200, found 200, and missing 404 behavior."
+    },
+    {
+      "file": "crates/prodex-provider-core/src/translators/deepseek/stream.rs",
+      "symbol": "deepseek_provider_core_chat_stream_error",
+      "operation": "deepseek_stream_error_classification",
+      "previous_responsibility": "Rust selected DeepSeek embedded stream-error code and message precedence and stable defaults",
+      "final_state": "deleted",
+      "cleanup_loc": 22,
+      "cleanup_source": {
+        "kind": "deleted",
+        "baseline_range": {
+          "start": 74,
+          "end": 95
+        }
+      },
+      "rust_before": "crates/prodex-provider-core/src/translators/deepseek/stream.rs::deepseek_provider_core_chat_stream_error",
+      "rust_after": "Rust serializes the parsed event and maps the required Mojo result; the stream policy branch is deleted",
+      "mojo_owner": "mojo/prodex_core/deepseek.mojo::deepseek_put_stream_error_classification",
+      "mojo_source": "mojo/prodex_core/deepseek.mojo",
+      "mojo_entry": "prodex_mojo_deepseek_kernel_v2",
+      "production_consumer": "crates/prodex-provider-core/src/translators/deepseek/stream/shaping.rs",
+      "parity_test": "crates/prodex-mojo-core/tests/deepseek_stream_error.rs",
+      "cleanup_evidence": "The old DeepSeek error branch is absent from the release stream module; the shaping adapter retains only Serde serialization, Mojo invocation, and typed result mapping."
     }
   ],
   "deleted_authoritative_operations": [

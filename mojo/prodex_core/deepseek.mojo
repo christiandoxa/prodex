@@ -109,6 +109,7 @@ comptime DEEPSEEK_RESPONSES_CONTENT_TEXT: Int64 = 46
 comptime DEEPSEEK_CHAT_ROLE: Int64 = 47
 comptime DEEPSEEK_INPUT_ITEM_VALIDATION: Int64 = 48
 comptime DEEPSEEK_CHAT_ASSISTANT_MESSAGES: Int64 = 49
+comptime DEEPSEEK_STREAM_ERROR_CLASSIFICATION: Int64 = 50
 comptime DEEPSEEK_JSON_MAX_DEPTH: Int64 = 256
 comptime DEEPSEEK_UINT64_MAX: UInt64 = 18_446_744_073_709_551_615
 
@@ -1074,6 +1075,103 @@ def deepseek_put_stream_response_metadata(
         if not deepseek_put_literal(writer, StringSlice('"system_fingerprint":')) or not deepseek_put_json_string(writer, input.signature):
             return False
     return deepseek_put_literal(writer, StringSlice("}}"))
+
+
+def deepseek_json_signed_integer(
+    view: ProdexRichStringView,
+    bounds: Array[Int64, 2],
+) -> Bool:
+    if not deepseek_raw_present(bounds):
+        return False
+    var index = bounds[0]
+    var negative = False
+    if deepseek_json_byte(view, index) == 45:
+        negative = True
+        index += 1
+    if index >= bounds[1]:
+        return False
+    var digits = bounds[1] - index
+    if digits > 19:
+        return False
+    for offset in range(index, bounds[1]):
+        var value = deepseek_json_byte(view, offset)
+        if value < 48 or value > 57:
+            return False
+    if digits == 19:
+        var limit = StringSlice("9223372036854775807")
+        if negative:
+            limit = StringSlice("9223372036854775808")
+        var expected = limit.unsafe_ptr()
+        for offset in range(19):
+            var value = deepseek_json_byte(view, index + Int64(offset))
+            var maximum = expected[unsafe_offset=offset]
+            if value < maximum:
+                break
+            if value > maximum:
+                return False
+    return True
+
+
+def deepseek_put_stream_error_classification(
+    writer: Pointer[mut=True, DeepSeekResponseWriter, _],
+    input: ProdexDeepSeekKernelInput,
+) -> Bool:
+    if input.input_present != 1:
+        return deepseek_put_literal(writer, StringSlice("null"))
+    if not deepseek_json_fragment_valid(input.input):
+        return False
+    var source = input.input.copy()
+    var error_start = deepseek_json_skip_ws(source, 0, Int64(source.len))
+    var error_end = deepseek_json_value_end(source, error_start, Int64(source.len), 0)
+    if error_start < 0 or error_end != Int64(source.len):
+        return deepseek_put_literal(writer, StringSlice("null"))
+    var error = Array[Int64, 2](fill=-1)
+    error[0] = error_start
+    error[1] = error_end
+    if not deepseek_put_literal(writer, StringSlice('{"code":')):
+        return False
+    var code = StringSlice('"provider_stream_error"')
+    var message = StringSlice('"Provider stream returned an embedded error"')
+    if deepseek_json_byte(source, error[0]) == 34:
+        message = StringSlice("")
+    elif deepseek_json_byte(source, error[0]) == 123:
+        var type = deepseek_json_object_member(source, error[0], error[1], StringSlice("type"))
+        if not deepseek_raw_present(type):
+            type = deepseek_json_object_member(source, error[0], error[1], StringSlice("code"))
+        if deepseek_raw_present(type) and deepseek_json_byte(source, type[0]) == 34:
+            if not deepseek_put_view_range(writer, source, type[0], type[1]):
+                return False
+        elif deepseek_raw_present(type) and deepseek_json_signed_integer(source, type):
+            if (
+                not deepseek_put_byte(writer, 34)
+                or not deepseek_put_view_range(writer, source, type[0], type[1])
+                or not deepseek_put_byte(writer, 34)
+            ):
+                return False
+        else:
+            if not deepseek_put_literal(writer, code):
+                return False
+        if not deepseek_put_literal(writer, StringSlice(',"message":')):
+            return False
+        var detail = deepseek_json_object_member(source, error[0], error[1], StringSlice("message"))
+        if not deepseek_raw_present(detail):
+            detail = deepseek_json_object_member(source, error[0], error[1], StringSlice("detail"))
+        if deepseek_raw_present(detail) and deepseek_json_byte(source, detail[0]) == 34:
+            if not deepseek_put_view_range(writer, source, detail[0], detail[1]):
+                return False
+        else:
+            if not deepseek_put_literal(writer, message):
+                return False
+        return deepseek_put_byte(writer, 125)
+    if not deepseek_put_literal(writer, code) or not deepseek_put_literal(writer, StringSlice(',"message":')):
+        return False
+    if message.byte_length() == 0:
+        if not deepseek_put_view_range(writer, source, error[0], error[1]):
+            return False
+    else:
+        if not deepseek_put_literal(writer, message):
+            return False
+    return deepseek_put_byte(writer, 125)
 
 def deepseek_put_primitive_request_fields(
     writer: Pointer[mut=True, DeepSeekResponseWriter, _],
@@ -3712,6 +3810,8 @@ def deepseek_write_operation(
         return deepseek_put_response_metadata(writer, input)
     if operation == DEEPSEEK_RESPONSE_USAGE:
         return deepseek_put_response_usage(writer, input)
+    if operation == DEEPSEEK_STREAM_ERROR_CLASSIFICATION:
+        return deepseek_put_stream_error_classification(writer, input)
     return False
 
 
@@ -3722,7 +3822,7 @@ def deepseek_flag_valid(value: Int64) -> Bool:
 def deepseek_input_valid(input: ProdexDeepSeekKernelInput) -> Bool:
     return (
         input.operation >= DEEPSEEK_REQUEST_BODY
-        and input.operation <= DEEPSEEK_CHAT_ASSISTANT_MESSAGES
+        and input.operation <= DEEPSEEK_STREAM_ERROR_CLASSIFICATION
         and
         deepseek_flag_valid(input.stream)
         and deepseek_flag_valid(input.response_id_present)
