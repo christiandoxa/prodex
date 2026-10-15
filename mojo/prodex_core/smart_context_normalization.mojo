@@ -1537,6 +1537,29 @@ def prodex_mojo_smart_context_scope_preimage_v1(
 
 # 32-byte SHA-256 digests become the exact stable scscope1: prefixed,
 # lowercase 64-hex scope value without a host formatting fallback.
+def smart_context_static_sha256_hex_append(
+    digest: Pointer[mut=False, UInt8, _],
+    output: Pointer[mut=True, UInt8, _],
+    written: Pointer[mut=True, Int64, _],
+):
+    # Both persistent scope and prompt-cache digest codecs share one
+    # compiled hexadecimal encoder; output capacity is prevalidated.
+    for index in range(32):
+        var byte = digest[unsafe_offset=index]
+        var high = byte >> UInt8(4)
+        var low = byte & UInt8(15)
+        if high < 10:
+            output[unsafe_offset=written[]] = UInt8(48) + high
+        else:
+            output[unsafe_offset=written[]] = UInt8(87) + high
+        written[] += 1
+        if low < 10:
+            output[unsafe_offset=written[]] = UInt8(48) + low
+        else:
+            output[unsafe_offset=written[]] = UInt8(87) + low
+        written[] += 1
+
+
 @export("prodex_mojo_smart_context_scope_digest_text_v1")
 def prodex_mojo_smart_context_scope_digest_text_v1(
     abi_version: Int64,
@@ -1571,20 +1594,7 @@ def prodex_mojo_smart_context_scope_digest_text_v1(
         output, output_capacity, written
     ):
         return SMART_CONTEXT_STATUS_CAPACITY
-    for index in range(32):
-        var byte = digest[unsafe_offset=index]
-        var high = byte >> UInt8(4)
-        var low = byte & UInt8(15)
-        if high < 10:
-            output[unsafe_offset=written[]] = UInt8(48) + high
-        else:
-            output[unsafe_offset=written[]] = UInt8(87) + high
-        written[] += 1
-        if low < 10:
-            output[unsafe_offset=written[]] = UInt8(48) + low
-        else:
-            output[unsafe_offset=written[]] = UInt8(87) + low
-        written[] += 1
+    smart_context_static_sha256_hex_append(digest, output, written)
     return SMART_CONTEXT_STATUS_OK
 
 
@@ -1745,4 +1755,119 @@ def prodex_mojo_smart_context_static_overflow_accumulate_v1(
     for index in range(32):
         var sum = UInt16(aggregate[unsafe_offset=index]) + UInt16(digest[unsafe_offset=index])
         output[unsafe_offset=index] = UInt8(sum & UInt16(255))
+    return SMART_CONTEXT_STATUS_OK
+
+# Mode 0: exactly 64 hex digits for the static overflow checksum.
+# Mode 1: the stable scpc2: prefixed 64-digit SHA-256 fingerprint.
+# Both share the same Mojo SHA-256 hex codec as ContextScopeId.
+@export("prodex_mojo_smart_context_static_digest_text_v1")
+def prodex_mojo_smart_context_static_digest_text_v1(
+    abi_version: Int64,
+    mode: Int64,
+    digest_address: UInt,
+    digest_length: Int64,
+    output_address: UInt,
+    output_capacity: Int64,
+    written_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != PRODEX_RICH_ABI_VERSION:
+        return SMART_CONTEXT_STATUS_ABI
+    if (
+        mode < 0
+        or mode > 1
+        or digest_address == 0
+        or digest_length != 32
+        or output_address == 0
+        or written_address == 0
+    ):
+        return SMART_CONTEXT_STATUS_INVALID
+    var required: Int64 = 64
+    if mode == 1:
+        required = 70
+    if output_capacity < required:
+        return SMART_CONTEXT_STATUS_CAPACITY
+    var digest = Pointer[mut=False, UInt8, ImmUntrackedOrigin](
+        unsafe_from_address=Int(digest_address)
+    )
+    var output = Pointer[mut=True, UInt8, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    var written = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(written_address)
+    )
+    written[] = 0
+    if mode == 1:
+        if not smart_context_emit_literal["scpc2:"](
+            output, output_capacity, written
+        ):
+            return SMART_CONTEXT_STATUS_CAPACITY
+    smart_context_static_sha256_hex_append(digest, output, written)
+    return SMART_CONTEXT_STATUS_OK
+
+
+# Stable truncated-payload metadata remains canonical only if the count,
+# byte-size and overflow digest are rendered by the same Mojo owner.
+@export("prodex_mojo_smart_context_static_truncation_line_v1")
+def prodex_mojo_smart_context_static_truncation_line_v1(
+    abi_version: Int64,
+    item_count: UInt64,
+    total_bytes: UInt64,
+    hash_view_address: UInt,
+    output_address: UInt,
+    output_capacity: Int64,
+    written_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != PRODEX_RICH_ABI_VERSION:
+        return SMART_CONTEXT_STATUS_ABI
+    if (
+        hash_view_address == 0
+        or output_address == 0
+        or written_address == 0
+        or output_capacity <= 0
+    ):
+        return SMART_CONTEXT_STATUS_INVALID
+    var digest = Pointer[mut=False, ProdexRichStringView, ImmUntrackedOrigin](
+        unsafe_from_address=Int(hash_view_address)
+    )[].copy()
+    if not rich_view_valid(digest, 64) or digest.len != 64:
+        return SMART_CONTEXT_STATUS_UTF8
+    var ptr = rich_view_ptr(digest)
+    for index in range(64):
+        var byte = ptr[unsafe_offset=index]
+        if not (
+            byte >= 48 and byte <= 57
+            or byte >= 97 and byte <= 102
+        ):
+            return SMART_CONTEXT_STATUS_UTF8
+    var output = Pointer[mut=True, UInt8, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    var written = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(written_address)
+    )
+    written[] = 0
+    if (
+        not smart_context_emit_literal["psc static fingerprint truncated "](
+            output, output_capacity, written
+        )
+        or not smart_context_static_payload_put_u64(
+            item_count, output, output_capacity, written
+        )
+        or not smart_context_emit_literal[" "](
+            output, output_capacity, written
+        )
+        or not smart_context_static_payload_put_u64(
+            total_bytes, output, output_capacity, written
+        )
+        or not smart_context_emit_literal[" "](
+            output, output_capacity, written
+        )
+        or not smart_context_emit_range(
+            ptr, 0, 64, output, output_capacity, written
+        )
+        or not smart_context_emit_literal["\n"](
+            output, output_capacity, written
+        )
+    ):
+        return SMART_CONTEXT_STATUS_CAPACITY
     return SMART_CONTEXT_STATUS_OK

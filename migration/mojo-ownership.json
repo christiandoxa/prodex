@@ -712,7 +712,9 @@
           "smart_context_scope_digest_rendering",
           "smart_context_scope_identifier_parse",
           "smart_context_static_overflow_preimage",
-          "smart_context_static_overflow_fold"
+          "smart_context_static_overflow_fold",
+          "smart_context_static_digest_text",
+          "smart_context_static_truncation_line"
         ]
       },
       {
@@ -10098,6 +10100,52 @@
       "duplicate_production_owner": false,
       "platform_fallback": false,
       "rust_adapter_scope": "Host SHA-256 and owned accumulator storage; Mojo owns bytewise addition"
+    },
+    {
+      "name": "smart_context_static_digest_text",
+      "domain": "smart-context/static-fingerprint-output",
+      "introduced_in": "0.438.0",
+      "baseline_state": "Rust serialized the 32-byte overflow digest with 64 lowercase hex digits and formatted the final SHA-256 as scpc2: prefixed 64-hex text",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_mojo_smart_context_static_digest_text_v1",
+      "mojo_abi_version": 6,
+      "mojo_source": "mojo/prodex_core/smart_context_normalization.mojo",
+      "consumer": "crates/prodex-runtime-proxy/src/smart_context/static_context.rs",
+      "consumer_marker": "prodex_mojo_core::rich::smart_context_static_digest_text(",
+      "production_consumers": [
+        "crates/prodex-runtime-proxy/src/smart_context/static_context.rs"
+      ],
+      "production_reachability_test": "crates/prodex-runtime-proxy/src/smart_context/static_context.rs",
+      "rust_owner_before": "Rust smart_context_hex_digest loop and content_hash sha256 sc2 prefix replacement to scpc2",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "Rust formatter removed; direct golden Mojo API tests plus runtime-proxy prompt-cache and 129+ item overflow regressions preserve existing fingerprint format",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "Rust supplies the SHA-256 digest bytes and materializes returned UTF-8; Mojo owns hexadecimal casing and final prefix"
+    },
+    {
+      "name": "smart_context_static_truncation_line",
+      "domain": "smart-context/static-fingerprint-output",
+      "introduced_in": "0.438.0",
+      "baseline_state": "Rust manually appended the psc static fingerprint truncated metadata text with decimal item count, canonical byte count, overflow digest and newline",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_mojo_smart_context_static_truncation_line_v1",
+      "mojo_abi_version": 6,
+      "mojo_source": "mojo/prodex_core/smart_context_normalization.mojo",
+      "consumer": "crates/prodex-runtime-proxy/src/smart_context/static_context.rs",
+      "consumer_marker": "prodex_mojo_core::rich::smart_context_static_truncation_line(",
+      "production_consumers": [
+        "crates/prodex-runtime-proxy/src/smart_context/static_context.rs"
+      ],
+      "production_reachability_test": "crates/prodex-runtime-proxy/src/smart_context/static_context.rs",
+      "rust_owner_before": "Rust pushes literal truncation prefix, integer to_string fields and line terminator",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "Rust formatter removed; direct golden Mojo API tests plus runtime-proxy prompt-cache and 129+ item overflow regressions preserve existing fingerprint format",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "Rust supplies measured item count and byte length, Mojo-provided checksum text and final String materialization"
     }
   ],
   "rust_semantic_reductions": [
