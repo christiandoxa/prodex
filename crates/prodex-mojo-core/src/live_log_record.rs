@@ -30,6 +30,17 @@ unsafe extern "C" {
         output_capacity: i64,
         written_address: u64,
     ) -> i64;
+    fn prodex_live_log_snapshot_plan_v1(
+        abi_version: i64,
+        sequences_address: u64,
+        sequence_count: i64,
+        after: u64,
+        limit: i64,
+        max_entries: i64,
+        next_sequence: u64,
+        dropped: u64,
+        output_address: u64,
+    ) -> i64;
 }
 
 fn status(value: i64) -> Result<(), MojoError> {
@@ -158,6 +169,68 @@ pub fn truncate_plain_text(value: &str) -> Result<String, MojoError> {
     String::from_utf8(output.to_vec()).map_err(|_| MojoError::InvalidOutput)
 }
 
+/// The bounded page selected from a live-log sequence list.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct LiveLogSnapshotPlan {
+    /// Index of the first entry whose sequence is greater than the cursor.
+    pub start: usize,
+    /// Number of entries to materialize from `start`.
+    pub count: usize,
+    /// Cursor to return after this page.
+    pub cursor: u64,
+    /// Number of entries dropped from the path's bounded history.
+    pub dropped: u64,
+}
+
+/// Plans a bounded page after a cursor without crossing the ABI with log text.
+pub fn snapshot_plan(
+    sequences: &[u64],
+    after: u64,
+    limit: usize,
+    max_entries: usize,
+    next_sequence: u64,
+    dropped: u64,
+) -> Result<LiveLogSnapshotPlan, MojoError> {
+    let sequence_count = input_length(sequences.len())?;
+    let limit = i64::try_from(limit).unwrap_or(i64::MAX);
+    let max_entries_abi = input_length(max_entries)?;
+    let mut output = [u64::MAX; 4];
+    status(unsafe {
+        prodex_live_log_snapshot_plan_v1(
+            ABI_VERSION,
+            pointer_address(sequences.as_ptr()),
+            sequence_count,
+            after,
+            limit,
+            max_entries_abi,
+            next_sequence,
+            dropped,
+            mutable_pointer_address(output.as_mut_ptr()),
+        )
+    })?;
+    let start = usize::try_from(output[0]).map_err(|_| MojoError::InvalidOutput)?;
+    let count = usize::try_from(output[1]).map_err(|_| MojoError::InvalidOutput)?;
+    if start > sequences.len()
+        || count > sequences.len().saturating_sub(start)
+        || count > max_entries
+    {
+        return Err(MojoError::InvalidOutput);
+    }
+    let expected_cursor = sequences
+        .get(start..start.saturating_add(count))
+        .and_then(|page| page.last().copied())
+        .unwrap_or(next_sequence);
+    if output[2] != expected_cursor || output[3] != dropped {
+        return Err(MojoError::InvalidOutput);
+    }
+    Ok(LiveLogSnapshotPlan {
+        start,
+        count,
+        cursor: output[2],
+        dropped: output[3],
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -192,5 +265,35 @@ mod tests {
         assert_eq!(nested_string_clip_end(&ascii).unwrap(), 8 * 1024);
         let unicode = format!("{}é-tail", "a".repeat(8 * 1024 - 1));
         assert_eq!(nested_string_clip_end(&unicode).unwrap(), 8 * 1024 + 1);
+    }
+
+    #[test]
+    fn runtime_live_log_mojo_adapter_pages_after_cursor_and_clamps_limit() {
+        assert_eq!(
+            snapshot_plan(&[7, 9, 11], 7, usize::MAX, 2, 20, 3).unwrap(),
+            LiveLogSnapshotPlan {
+                start: 1,
+                count: 2,
+                cursor: 11,
+                dropped: 3,
+            }
+        );
+        assert_eq!(
+            snapshot_plan(&[7, 9, 11], 11, 2, 2, 20, 3).unwrap(),
+            LiveLogSnapshotPlan {
+                start: 3,
+                count: 0,
+                cursor: 20,
+                dropped: 3,
+            }
+        );
+    }
+
+    #[test]
+    fn runtime_live_log_mojo_adapter_rejects_unsorted_sequences() {
+        assert_eq!(
+            snapshot_plan(&[9, 7], 0, 1, 2, 9, 0),
+            Err(MojoError::InvalidInput)
+        );
     }
 }

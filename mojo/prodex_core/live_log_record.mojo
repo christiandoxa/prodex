@@ -8,6 +8,7 @@ comptime LIVE_LOG_RECORD_ABI: Int64 = 4
 comptime LIVE_LOG_RECORD_MAX_BYTES: Int64 = 128 * 1024
 comptime LIVE_LOG_NESTED_STRING_MAX_BYTES: Int64 = 8 * 1024
 comptime LIVE_LOG_RECORD_PREFIX_RESERVE: Int64 = 32
+comptime LIVE_LOG_PAGE_MAX_INPUT: Int64 = 2048
 
 
 def live_log_utf8_prefix_end(
@@ -163,4 +164,61 @@ def prodex_live_log_plain_text_truncate_v1(
     for index in range(tail_length):
         output[unsafe_offset=end + index] = tail_pointer[unsafe_offset=index]
     written[unsafe_offset=0] = required
+    return LIVE_LOG_RECORD_OK
+
+
+@export("prodex_live_log_snapshot_plan_v1")
+def prodex_live_log_snapshot_plan_v1(
+    abi_version: Int64,
+    sequences_address: UInt,
+    sequence_count: Int64,
+    after: UInt64,
+    limit: Int64,
+    max_entries: Int64,
+    next_sequence: UInt64,
+    dropped: UInt64,
+    output_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != LIVE_LOG_RECORD_ABI_VERSION:
+        return LIVE_LOG_RECORD_ABI
+    if (
+        sequence_count < 0
+        or sequence_count > LIVE_LOG_PAGE_MAX_INPUT
+        or limit < 0
+        or max_entries < 0
+        or max_entries > LIVE_LOG_PAGE_MAX_INPUT
+        or output_address == 0
+        or (sequence_count > 0 and sequences_address == 0)
+    ):
+        return LIVE_LOG_RECORD_INVALID
+
+    var output = Pointer[mut=True, UInt64, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    var count = sequence_count
+    var sequences = Pointer[mut=False, UInt64, ImmUntrackedOrigin](
+        unsafe_from_address=Int(sequences_address)
+    )
+    var previous: UInt64 = 0
+    for index in range(count):
+        var sequence = sequences[unsafe_offset=index]
+        if index > 0 and sequence < previous:
+            return LIVE_LOG_RECORD_INVALID
+        previous = sequence
+
+    var start: Int64 = 0
+    while start < count and sequences[unsafe_offset=start] <= after:
+        start += 1
+    var requested = limit
+    if requested > max_entries:
+        requested = max_entries
+    var available = count - start
+    var selected = available if available < requested else requested
+    var cursor = next_sequence
+    if selected > 0:
+        cursor = sequences[unsafe_offset=start + selected - 1]
+    output[unsafe_offset=0] = UInt64(start)
+    output[unsafe_offset=1] = UInt64(selected)
+    output[unsafe_offset=2] = cursor
+    output[unsafe_offset=3] = dropped
     return LIVE_LOG_RECORD_OK

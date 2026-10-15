@@ -115,27 +115,39 @@ impl RuntimeLiveLogStore {
             .state
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
-        let Some(bucket) = state.paths.get(path) else {
-            return RuntimeLiveLogSnapshot {
-                cursor: state.next_sequence,
-                dropped: 0,
-                entries: Vec::new(),
-            };
-        };
+        let bucket = state.paths.get(path);
+        let sequences = bucket
+            .map(|bucket| {
+                bucket
+                    .entries
+                    .iter()
+                    .map(|entry| entry.sequence)
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+        let plan = mojo_live_log_record::snapshot_plan(
+            &sequences,
+            after,
+            limit,
+            DEFAULT_RUNTIME_LIVE_LOG_MAX_ENTRIES,
+            state.next_sequence,
+            bucket.map_or(0, |bucket| bucket.dropped),
+        )
+        .expect("Mojo live-log snapshot planner returned invalid output");
         let entries = bucket
-            .entries
-            .iter()
-            .filter(|entry| entry.sequence > after)
-            .take(limit.min(DEFAULT_RUNTIME_LIVE_LOG_MAX_ENTRIES))
-            .cloned()
-            .collect::<Vec<_>>();
-        let cursor = entries
-            .last()
-            .map(|entry| entry.sequence)
-            .unwrap_or(state.next_sequence);
+            .map(|bucket| {
+                bucket
+                    .entries
+                    .iter()
+                    .skip(plan.start)
+                    .take(plan.count)
+                    .cloned()
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
         RuntimeLiveLogSnapshot {
-            cursor,
-            dropped: bucket.dropped,
+            cursor: plan.cursor,
+            dropped: plan.dropped,
             entries,
         }
     }
@@ -324,6 +336,8 @@ mod tests {
 
     #[test]
     fn live_log_snapshot_pages_oldest_unread_entries_without_skipping() {
+        const { assert!(prodex_mojo_core::MOJO_REQUIRED) };
+
         let store = RuntimeLiveLogStore::default();
         let path = Path::new("runtime.log");
         for index in 0..3 {

@@ -1618,7 +1618,8 @@
           "runtime_live_log_record_bound",
           "runtime_live_log_nested_string_clipping",
           "runtime_live_log_json_fallback",
-          "runtime_live_log_plain_text_truncation"
+          "runtime_live_log_plain_text_truncation",
+          "runtime_live_log_snapshot_page_planning"
         ]
       },
       {
@@ -7763,6 +7764,29 @@
       "duplicate_production_owner": false,
       "platform_fallback": false,
       "rust_adapter_scope": "bounded byte buffer allocation and UTF-8 string ownership"
+    },
+    {
+      "name": "runtime_live_log_snapshot_page_planning",
+      "domain": "storage/live-log-pagination",
+      "introduced_in": "0.438.0",
+      "baseline_state": "Rust scanned live-log entries after a cursor, clamped the requested page, and selected the returned cursor",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_live_log_snapshot_plan_v1",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/live_log_record.mojo",
+      "consumer": "crates/prodex-runtime-log/src/live.rs",
+      "consumer_marker": "mojo_live_log_record::snapshot_plan(",
+      "production_consumers": [
+        "crates/prodex-runtime-log/src/live.rs"
+      ],
+      "production_reachability_test": "crates/prodex-runtime-log/src/live.rs",
+      "rust_owner_before": "live-log cursor filtering, bounded page sizing, and returned cursor selection",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "none retained; required-Mojo ABI tests reject malformed ordering, while the runtime-log caller test covers cursor boundaries, page clamping, and dropped counts",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "mutex/path lookup, sequence projection, bounded entry materialization, and typed plan validation"
     },
     {
       "name": "runtime_operational_histogram_bucket_planning",
