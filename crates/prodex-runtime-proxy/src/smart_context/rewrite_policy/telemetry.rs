@@ -1,7 +1,5 @@
 use super::*;
-use crate::smart_context::{
-    SmartContextTokenCountSource, smart_context_rewrite_telemetry_sample_quality_risk,
-};
+use crate::smart_context::SmartContextTokenCountSource;
 
 pub fn smart_context_recent_rewrite_safety_budget_decision(
     safety: &SmartContextRecentRewriteSafety,
@@ -33,7 +31,20 @@ pub fn smart_context_rewrite_telemetry_budget_decision(
                 ),
                 safe: sample.safe,
                 fallback: sample.fallback,
-                quality_risk: smart_context_rewrite_telemetry_sample_quality_risk(sample),
+                quality_risk: prodex_mojo_core::runtime::smart_context_rewrite_telemetry_quality_risk(
+                    prodex_mojo_core::runtime::SmartContextRewriteQualityInput {
+                        upstream_context_errors: sample.upstream_context_errors,
+                        previous_response_not_found: sample.previous_response_not_found,
+                        invalid_tool_call_continuation: sample.invalid_tool_call_continuation,
+                        missing_artifact_requests: sample.missing_artifact_requests,
+                        repeated_tool_call_count: sample.repeated_tool_call_count,
+                        model_reread_requests: sample.model_reread_requests,
+                        corrective_user_messages: sample.corrective_user_messages,
+                        test_or_build_failed_after_rewrite: sample.test_or_build_failed_after_rewrite,
+                        task_completed: sample.task_completed,
+                    },
+                )
+                .expect("Mojo Smart Context rewrite telemetry risk classifier returned invalid output"),
             },
         )
         .collect::<Vec<_>>();

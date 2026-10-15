@@ -53,6 +53,74 @@ fn rewrite_telemetry_budget_decision_tightens_after_quality_risk() {
 }
 
 #[test]
+fn rewrite_telemetry_mojo_quality_risk_blocks_relaxation_for_every_signal() {
+    let baseline = smart_context_test_rewrite_telemetry_sample(10_000, 4_000, 2_500, 1_000);
+    let samples = [
+        SmartContextRewriteTelemetrySample {
+            upstream_context_errors: 1,
+            ..baseline
+        },
+        SmartContextRewriteTelemetrySample {
+            previous_response_not_found: true,
+            ..baseline
+        },
+        SmartContextRewriteTelemetrySample {
+            invalid_tool_call_continuation: true,
+            ..baseline
+        },
+        SmartContextRewriteTelemetrySample {
+            missing_artifact_requests: 1,
+            ..baseline
+        },
+        SmartContextRewriteTelemetrySample {
+            repeated_tool_call_count: 1,
+            ..baseline
+        },
+        SmartContextRewriteTelemetrySample {
+            model_reread_requests: 1,
+            ..baseline
+        },
+        SmartContextRewriteTelemetrySample {
+            corrective_user_messages: 1,
+            ..baseline
+        },
+        SmartContextRewriteTelemetrySample {
+            test_or_build_failed_after_rewrite: true,
+            ..baseline
+        },
+        SmartContextRewriteTelemetrySample {
+            task_completed: Some(false),
+            ..baseline
+        },
+    ];
+    for sample in samples {
+        assert_eq!(
+            smart_context_rewrite_telemetry_budget_decision(
+                SmartContextRewriteTelemetryBudgetInput {
+                    telemetry_samples: vec![sample, baseline],
+                    ..SmartContextRewriteTelemetryBudgetInput::default()
+                }
+            ),
+            SmartContextRewriteBudgetDecision::Tighten,
+            "risk sample: {sample:?}",
+        );
+    }
+    assert_eq!(
+        smart_context_rewrite_telemetry_budget_decision(SmartContextRewriteTelemetryBudgetInput {
+            telemetry_samples: vec![
+                SmartContextRewriteTelemetrySample {
+                    task_completed: Some(true),
+                    ..baseline
+                },
+                baseline,
+            ],
+            ..SmartContextRewriteTelemetryBudgetInput::default()
+        }),
+        SmartContextRewriteBudgetDecision::Relax,
+    );
+}
+
+#[test]
 fn rewrite_telemetry_budget_decision_keeps_neutral_for_moderate_safe_savings() {
     let decision =
         smart_context_rewrite_telemetry_budget_decision(SmartContextRewriteTelemetryBudgetInput {
