@@ -1426,13 +1426,30 @@
           {
             "start": 651,
             "end": 654
+          },
+          {
+            "start": 861,
+            "end": 1000
           }
         ],
         "production_reachable": true,
         "role": "semantic",
         "operations": [
           "runtime_doctor_request_timeline_detail",
-          "runtime_doctor_last_marker_line_truncation"
+          "runtime_doctor_last_marker_line_truncation",
+          "runtime_doctor_marker_scope_render",
+          "runtime_doctor_count_breakdown_render"
+        ]
+      },
+      {
+        "path": "crates/prodex-mojo-core/src/rich/runtime_doctor_render.rs",
+        "language": "rust",
+        "classification": "MIXED",
+        "production_reachable": true,
+        "role": "adapter",
+        "operations": [
+          "runtime_doctor_marker_scope_render",
+          "runtime_doctor_count_breakdown_render"
         ]
       },
       {
@@ -6631,6 +6648,52 @@
       "duplicate_production_owner": false,
       "platform_fallback": false,
       "rust_adapter_scope": "BTreeMap iteration, borrowed profile-name deduplication and known-name lookup, typed row marshalling, validated Mojo index materialization and string-owning diagnostic DTOs"
+    },
+    {
+      "name": "runtime_doctor_marker_scope_render",
+      "domain": "runtime-doctor/render",
+      "introduced_in": "0.438.0",
+      "baseline_state": "Rust matched optional profile/route string values and joined them with / or produced absent scope",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_mojo_runtime_doctor_scope_v1",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/runtime_doctor_render.mojo",
+      "consumer": "crates/prodex-runtime-doctor/src/diagnosis/marker_accessors.rs",
+      "consumer_marker": "prodex_mojo_core::rich::runtime_doctor_marker_scope_text(",
+      "production_consumers": [
+        "crates/prodex-runtime-doctor/src/diagnosis/marker_accessors.rs"
+      ],
+      "production_reachability_test": "crates/prodex-runtime-doctor/src/diagnosis/marker_accessors.rs",
+      "rust_owner_before": "Rust optional profile and route scope selection and separator formatting",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "Compiled Mojo direct ABI cases preserve absent and empty scopes, UTF-8, and separator behavior",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "BTreeMap lookup, borrowed view marshalling and validated Option<String> reconstruction"
+    },
+    {
+      "name": "runtime_doctor_count_breakdown_render",
+      "domain": "runtime-doctor/render",
+      "introduced_in": "0.438.0",
+      "baseline_state": "Rust materialized map keys and counts with format! and joined rows using comma-space delimiters",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_mojo_runtime_doctor_count_breakdown_v1",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/runtime_doctor_render.mojo",
+      "consumer": "crates/prodex-runtime-doctor/src/diagnosis/marker_accessors.rs",
+      "consumer_marker": "prodex_mojo_core::rich::runtime_doctor_count_breakdown_text(",
+      "production_consumers": [
+        "crates/prodex-runtime-doctor/src/diagnosis/marker_accessors.rs"
+      ],
+      "production_reachability_test": "crates/prodex-runtime-doctor/src/diagnosis/marker_accessors.rs",
+      "rust_owner_before": "Rust exact empty breakdown, key=count integer formatting, and comma-space joining",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "Mojo ABI and production caller tests cover ordered Unicode keys, zero, maximum integer and empty map",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "Sorted BTreeMap iteration, checked output allocation, Mojo view and count marshalling, safe String decoding"
     },
     {
       "name": "runtime_doctor_log_metric_plan",

@@ -30,6 +30,24 @@ struct RuntimeDoctorRenderFfiInput {
 const _: () = assert!(std::mem::size_of::<RuntimeDoctorRenderFfiInput>() == 4 * 8);
 
 unsafe extern "C" {
+    fn prodex_mojo_runtime_doctor_scope_v1(
+        abi_version: i64,
+        views: u64,
+        presence_bits: i64,
+        output: u64,
+        output_capacity: i64,
+        written: u64,
+        present: u64,
+    ) -> i64;
+    fn prodex_mojo_runtime_doctor_count_breakdown_v1(
+        abi_version: i64,
+        keys: u64,
+        counts: u64,
+        count: i64,
+        output: u64,
+        output_capacity: i64,
+        written: u64,
+    ) -> i64;
     fn prodex_mojo_runtime_doctor_render_v1(
         abi_version: i64,
         input: u64,
@@ -96,6 +114,105 @@ pub fn runtime_doctor_render(input: RuntimeDoctorRenderInput<'_>) -> Result<Stri
     String::from_utf8(output).map_err(|_| MojoError::InvalidOutput)
 }
 
+/// Materialize a profile/route scope strictly from the compiled Mojo policy.
+pub fn runtime_doctor_marker_scope_text(
+    profile: Option<&str>,
+    route: Option<&str>,
+) -> Result<Option<String>, MojoError> {
+    ensure_rich_abi()?;
+    let views = [view(profile.unwrap_or("")), view(route.unwrap_or(""))];
+    let presence = i64::from(profile.is_some()) | (i64::from(route.is_some()) << 1);
+    let capacity = profile
+        .map_or(0, str::len)
+        .checked_add(route.map_or(0, str::len))
+        .and_then(|length| length.checked_add(1))
+        .ok_or(MojoError::InvalidInput)?;
+    let mut output = vec![0_u8; capacity];
+    let mut written = -1_i64;
+    let mut present = -1_i64;
+    let status = unsafe {
+        prodex_mojo_runtime_doctor_scope_v1(
+            RUNTIME_DOCTOR_RENDER_ABI_VERSION,
+            mojo_pointer_address(views.as_ptr()),
+            presence,
+            mojo_mut_pointer_address(output.as_mut_ptr()),
+            i64::try_from(output.len()).map_err(|_| MojoError::InvalidInput)?,
+            mojo_mut_pointer_address(&mut written),
+            mojo_mut_pointer_address(&mut present),
+        )
+    };
+    if status != 0 {
+        return Err(match status {
+            1 => MojoError::InvalidInput,
+            4 => MojoError::AbiMismatch,
+            _ => MojoError::InvalidOutput,
+        });
+    }
+    let length = usize::try_from(written).map_err(|_| MojoError::InvalidOutput)?;
+    if length > output.len() {
+        return Err(MojoError::InvalidOutput);
+    }
+    match present {
+        0 if length == 0 => Ok(None),
+        1 => {
+            output.truncate(length);
+            String::from_utf8(output)
+                .map(Some)
+                .map_err(|_| MojoError::InvalidOutput)
+        }
+        _ => Err(MojoError::InvalidOutput),
+    }
+}
+
+/// The host supplies BTreeMap-ordered borrowed names and counts; Mojo emits
+/// the exact label=count list including zero and u64::MAX, without a Rust
+/// formatter, alternate separator builder or numeric display fallback.
+pub fn runtime_doctor_count_breakdown_text<'a>(
+    entries: impl IntoIterator<Item = (&'a str, usize)>,
+) -> Result<String, MojoError> {
+    ensure_rich_abi()?;
+    let entries = entries.into_iter().collect::<Vec<_>>();
+    if entries.len() > 65536 {
+        return Err(MojoError::Capacity);
+    }
+    let capacity = entries.iter().try_fold(1usize, |capacity, (key, _)| {
+        capacity.checked_add(key.len().checked_add(23)?)
+    });
+    let capacity = capacity.ok_or(MojoError::InvalidInput)?;
+    let keys = entries.iter().map(|(key, _)| view(key)).collect::<Vec<_>>();
+    let counts = entries
+        .iter()
+        .map(|(_, count)| *count as u64)
+        .collect::<Vec<_>>();
+    let mut output = vec![0_u8; capacity];
+    let mut written = -1_i64;
+    let status = unsafe {
+        prodex_mojo_runtime_doctor_count_breakdown_v1(
+            RUNTIME_DOCTOR_RENDER_ABI_VERSION,
+            mojo_pointer_address(keys.as_ptr()),
+            mojo_pointer_address(counts.as_ptr()),
+            i64::try_from(entries.len()).map_err(|_| MojoError::InvalidInput)?,
+            mojo_mut_pointer_address(output.as_mut_ptr()),
+            i64::try_from(output.len()).map_err(|_| MojoError::InvalidInput)?,
+            mojo_mut_pointer_address(&mut written),
+        )
+    };
+    if status != 0 {
+        return Err(match status {
+            1 => MojoError::InvalidInput,
+            3 => MojoError::Capacity,
+            4 => MojoError::AbiMismatch,
+            _ => MojoError::InvalidOutput,
+        });
+    }
+    let length = usize::try_from(written).map_err(|_| MojoError::InvalidOutput)?;
+    if length > output.len() {
+        return Err(MojoError::InvalidOutput);
+    }
+    output.truncate(length);
+    String::from_utf8(output).map_err(|_| MojoError::InvalidOutput)
+}
+
 /// Render the redaction-safe human status for runtime configuration parsing.
 pub fn runtime_doctor_configuration_status(error: Option<&str>) -> Result<String, MojoError> {
     runtime_doctor_render(RuntimeDoctorRenderInput {
@@ -109,6 +226,71 @@ pub fn runtime_doctor_configuration_status(error: Option<&str>) -> Result<String
 mod tests {
     use super::*;
     use crate::rich::RichStringView;
+
+    #[test]
+    fn mojo_marker_scope_preserves_all_presence_and_utf8_cases() {
+        for (profile, route, expected) in [
+            (None, None, None),
+            (Some(""), None, Some("")),
+            (None, Some(""), Some("")),
+            (Some("🧭"), None, Some("🧭")),
+            (None, Some("responses"), Some("responses")),
+            (Some("東京"), Some("compact"), Some("東京/compact")),
+            (Some(""), Some(""), Some("/")),
+        ] {
+            assert_eq!(
+                runtime_doctor_marker_scope_text(profile, route)
+                    .unwrap()
+                    .as_deref(),
+                expected,
+            );
+        }
+    }
+
+    #[test]
+    fn mojo_count_breakdown_writes_ordered_labels_zero_and_maximum() {
+        assert_eq!(runtime_doctor_count_breakdown_text([]).unwrap(), "-");
+        let entries = [("alpha", 0), ("service 🧭", 12), ("z", usize::MAX)];
+        assert_eq!(
+            runtime_doctor_count_breakdown_text(entries).unwrap(),
+            format!("alpha=0, service 🧭=12, z={}", usize::MAX),
+        );
+    }
+
+    #[test]
+    fn mojo_text_summary_abi_rejects_unknown_presence_and_short_output() {
+        let views = [view("alpha"), view("responses")];
+        let mut output = [55_u8; 8];
+        let mut written = [77_i64; 2];
+        unsafe {
+            assert_eq!(
+                prodex_mojo_runtime_doctor_scope_v1(
+                    2,
+                    mojo_pointer_address(views.as_ptr()),
+                    3,
+                    mojo_mut_pointer_address(output.as_mut_ptr()),
+                    8,
+                    mojo_mut_pointer_address(&mut written[0]),
+                    mojo_mut_pointer_address(&mut written[1]),
+                ),
+                4,
+            );
+            assert_eq!(
+                prodex_mojo_runtime_doctor_scope_v1(
+                    1,
+                    mojo_pointer_address(views.as_ptr()),
+                    4,
+                    mojo_mut_pointer_address(output.as_mut_ptr()),
+                    8,
+                    mojo_mut_pointer_address(&mut written[0]),
+                    mojo_mut_pointer_address(&mut written[1]),
+                ),
+                1,
+            );
+        }
+        assert_eq!(output, [55; 8]);
+        assert_eq!(written, [77; 2]);
+    }
 
     #[test]
     fn renderer_preserves_unicode_and_repeated_values() {

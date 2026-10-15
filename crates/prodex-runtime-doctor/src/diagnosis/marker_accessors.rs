@@ -54,21 +54,43 @@ pub(super) fn runtime_doctor_marker_scope(
     let marker = marker.as_ref();
     let profile = runtime_doctor_marker_last_field(summary, marker, profile_field);
     let route = runtime_doctor_marker_last_field(summary, marker, route_field);
-    match (profile, route) {
-        (Some(profile), Some(route)) => Some(format!("{profile}/{route}")),
-        (Some(profile), None) => Some(profile.to_string()),
-        (None, Some(route)) => Some(route.to_string()),
-        (None, None) => None,
-    }
+    prodex_mojo_core::rich::runtime_doctor_marker_scope_text(profile, route)
+        .expect("Mojo runtime-doctor marker scope returned invalid output")
 }
 
 pub fn runtime_doctor_count_breakdown(counts: &BTreeMap<String, usize>) -> String {
-    if counts.is_empty() {
-        return "-".to_string();
+    prodex_mojo_core::rich::runtime_doctor_count_breakdown_text(
+        counts.iter().map(|(name, count)| (name.as_str(), *count)),
+    )
+    .expect("Mojo runtime-doctor count breakdown returned invalid output")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn marker_scope_and_breakdown_are_mojo_rendered_from_real_summary_maps() {
+        let mut summary = RuntimeDoctorSummary::default();
+        summary.marker_last_fields.insert(
+            "profile_health".to_string(),
+            BTreeMap::from([
+                ("profile".to_string(), "東京".to_string()),
+                ("route".to_string(), "responses".to_string()),
+            ]),
+        );
+        assert_eq!(
+            runtime_doctor_marker_scope(&summary, "profile_health", "profile", "route"),
+            Some("東京/responses".to_string()),
+        );
+        assert_eq!(
+            runtime_doctor_marker_scope(&summary, "missing", "profile", "route"),
+            None,
+        );
+        let counts = BTreeMap::from([("alpha".to_string(), 0), ("🧭".to_string(), usize::MAX)]);
+        assert_eq!(
+            runtime_doctor_count_breakdown(&counts),
+            format!("alpha=0, 🧭={}", usize::MAX),
+        );
     }
-    counts
-        .iter()
-        .map(|(label, count)| format!("{label}={count}"))
-        .collect::<Vec<_>>()
-        .join(", ")
 }
