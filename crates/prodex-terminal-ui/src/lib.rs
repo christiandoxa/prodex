@@ -38,7 +38,8 @@ pub use runtime_launch::{
     format_runtime_provider_direct_launch_message,
 };
 pub use session::{
-    SessionReportDisplay, render_session_reports, render_session_reports_with_width,
+    SessionReportDisplay, SessionReportViewportPlan, render_session_reports,
+    render_session_reports_with_width, session_report_viewport_plan,
 };
 pub use terminal::{
     current_cli_width, terminal_dimensions_from_tty, terminal_height_lines,

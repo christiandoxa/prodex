@@ -2233,6 +2233,7 @@
           "terminal_panel_label_column_planning",
           "terminal_session_report_column_planning",
           "terminal_panel_inline_viewport_planning",
+          "terminal_session_report_viewport_planning",
           "terminal_token_cell_chunk_segmentation",
           "terminal_display_width_prefix_selection",
           "terminal_fit_cell_ellipsis_policy",
@@ -2250,6 +2251,7 @@
           "terminal_panel_label_column_planning",
           "terminal_session_report_column_planning",
           "terminal_panel_inline_viewport_planning",
+          "terminal_session_report_viewport_planning",
           "terminal_token_cell_chunk_segmentation",
           "terminal_display_width_prefix_selection",
           "terminal_fit_cell_ellipsis_policy",
@@ -9955,6 +9957,30 @@
       "duplicate_production_owner": false,
       "platform_fallback": false,
       "rust_adapter_scope": "borrow valid UTF-8 transcript data, allocate bounded caller-owned output, map ABI status, and render the visible log without duplicate escape parser"
+    },
+    {
+      "name": "terminal_session_report_viewport_planning",
+      "domain": "terminal/session-viewport",
+      "introduced_in": "0.438.0",
+      "baseline_state": "candidate",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_terminal_session_report_viewport_v1",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/terminal_layout.mojo",
+      "consumer": "crates/prodex-terminal-ui/src/session.rs",
+      "consumer_marker": "prodex_mojo_core::terminal_layout::session_report_viewport_plan(",
+      "production_consumers": [
+        "crates/prodex-terminal-ui/src/session.rs",
+        "crates/prodex-app/src/app_commands/session.rs"
+      ],
+      "production_reachability_test": "crates/prodex-terminal-ui/tests/src/lib.rs",
+      "rust_owner_before": "Rust multiplied session counts into scroll lines, added fixed panel rows, and clipped the inline viewport to terminal height with saturation",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "deleted; direct ABI cases and terminal-ui/app caller tests cover empty, tiny, normal, large and saturated report counts",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "Rust acquires terminal dimensions, passes report counts, converts validated line/height values, and owns Ratatui drawing"
     },
     {
       "name": "transcript_binary_mojibake_classification",

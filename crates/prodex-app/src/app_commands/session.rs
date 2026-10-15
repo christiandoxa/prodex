@@ -150,9 +150,9 @@ fn print_session_reports(
 
 fn render_session_reports_tui(reports: &[SessionReport], empty_message: &str) -> Result<()> {
     // Try scrollable TUI first (like profile list)
-    let total_lines = session_tui_item_count(reports);
-    let term_h = usize::from(terminal::size().map(|(_, h)| h).unwrap_or(24));
-    let needs_scroll = total_lines.saturating_add(6) > term_h
+    let term_h = terminal::size().map(|(_, h)| h).unwrap_or(24);
+    let viewport = terminal_ui::session_report_viewport_plan(reports.len(), term_h);
+    let needs_scroll = viewport.total_lines.saturating_add(6) > usize::from(term_h)
         && env::var_os("CODEX_CI").is_none()
         && !env::var("CI")
             .map(|value| {
@@ -166,7 +166,7 @@ fn render_session_reports_tui(reports: &[SessionReport], empty_message: &str) ->
     }
 
     // Inline (short list) — identical to before
-    let height = session_report_tui_height(reports);
+    let height = viewport.inline_height;
     let Some(mut terminal) = crate::try_inline_stdout_terminal(height) else {
         let output = render_session_reports_output(reports, false, empty_message)
             .context("failed to render session fallback output")?;
@@ -231,10 +231,6 @@ fn render_session_reports_tui(reports: &[SessionReport], empty_message: &str) ->
         .context("failed to draw session report TUI")?;
     let _ = terminal.show_cursor();
     Ok(())
-}
-
-fn session_tui_item_count(reports: &[SessionReport]) -> usize {
-    reports.len().saturating_mul(4)
 }
 
 fn render_session_reports_tui_scrollable(
@@ -439,14 +435,6 @@ fn session_scroll_lines(reports: &[SessionReport]) -> Vec<Line<'_>> {
         lines.push(Line::raw(""));
     }
     lines
-}
-
-fn session_report_tui_height(reports: &[SessionReport]) -> u16 {
-    let rows = reports.len().saturating_mul(4).saturating_add(5).max(8);
-    let terminal_height = terminal::size()
-        .map(|(_, height)| usize::from(height))
-        .unwrap_or(24);
-    rows.min(terminal_height).max(1) as u16
 }
 
 fn session_report_tui_item(report: &SessionReport) -> ListItem<'_> {

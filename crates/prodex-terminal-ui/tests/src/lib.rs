@@ -162,6 +162,35 @@ fn mojo_session_column_policy_preserves_very_wide_and_tiny_reports() {
 }
 
 #[test]
+fn mojo_session_report_viewport_plan_preserves_bounds_at_the_caller() {
+    for (report_count, terminal_height, expected_lines, expected_height) in [
+        (0, 0, 0, 1),
+        (0, 24, 0, 8),
+        (2, 24, 8, 13),
+        (100, 10, 400, 10),
+    ] {
+        let plan = session_report_viewport_plan(report_count, terminal_height);
+        assert_eq!(plan.total_lines, expected_lines);
+        assert_eq!(plan.inline_height, expected_height);
+    }
+
+    let rendered = render_session_reports_with_width(
+        &[SessionReportDisplay {
+            id: "表🙂",
+            updated_at: Some("2026-10-16"),
+            thread_name: Some("表🙂 thread"),
+            cwd: Some("/home/test-user"),
+            profile: None,
+            path: "/home/test-user/session.jsonl",
+        }],
+        8,
+    );
+    assert!(!rendered.is_empty());
+    assert_eq!(text_width(rendered.lines().next().unwrap_or_default()), 8);
+    assert!(rendered.contains("表🙂"));
+}
+
+#[test]
 fn mojo_terminal_panel_inline_height_keeps_ratatui_viewports_bounded() {
     for (rows, expected) in [(0, 4), (4, 4), (20, 20), (usize::MAX, u16::MAX)] {
         assert_eq!(
