@@ -181,7 +181,9 @@ pub use gemini_bridge::{
     gemini_provider_core_tools_from_requests, gemini_provider_core_tools_from_requests_checked,
     gemini_provider_core_unsupported_tool_fallback_body,
     gemini_provider_core_unverified_success_claim, gemini_provider_core_validate_candidate_count,
-    gemini_provider_core_validate_request_tools, gemini_provider_core_visible_text_from_part,
+    gemini_provider_core_validate_request_tools,
+    gemini_provider_core_validate_request_tools_with_nested_function_paths,
+    gemini_provider_core_visible_text_from_part,
     gemini_provider_core_web_search_call_from_grounding,
 };
 pub use implementation_registry::{

@@ -3,6 +3,7 @@
 use crate::translators::{
     gemini_builtin_tools_from_request, gemini_function_declaration_from_openai_tool,
     gemini_sanitize_function_schema, gemini_validate_openai_tools,
+    gemini_validate_openai_tools_with_nested_function_paths,
 };
 
 use crate::gemini_bridge::gemini_provider_core_apply_gemini3_tool_declaration_overrides;
@@ -114,6 +115,15 @@ pub fn gemini_provider_core_validate_request_tools(
 ) -> Result<(), String> {
     match value.get("tools") {
         Some(tools) => gemini_validate_openai_tools(tools),
+        None => Ok(()),
+    }
+}
+
+pub fn gemini_provider_core_validate_request_tools_with_nested_function_paths(
+    value: &serde_json::Value,
+) -> Result<(), String> {
+    match value.get("tools") {
+        Some(tools) => gemini_validate_openai_tools_with_nested_function_paths(tools),
         None => Ok(()),
     }
 }
@@ -323,5 +333,19 @@ mod tests {
                 gemini_provider_core_validate_request_tools(&json!({"tools": [tool]})).unwrap_err();
             assert!(error.contains(expected), "{error}");
         }
+    }
+
+    #[test]
+    fn runtime_function_tool_validation_preserves_nested_paths_for_flat_tools() {
+        let error =
+            gemini_provider_core_validate_request_tools_with_nested_function_paths(&json!({
+                "tools": [
+                    {"type": "function", "name": "lookup", "parameters": {}},
+                    {"type": "function", "name": "missing_schema"}
+                ]
+            }))
+            .unwrap_err();
+
+        assert!(error.contains("tools[1].function.parameters"), "{error}");
     }
 }

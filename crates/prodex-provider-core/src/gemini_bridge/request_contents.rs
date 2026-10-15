@@ -29,9 +29,17 @@ pub(crate) struct GeminiTranslatorValidationPlan {
 pub(crate) fn gemini_bridge_validate_translator(
     body: &[u8],
 ) -> Result<GeminiTranslatorValidationPlan, String> {
+    gemini_bridge_validate_translator_with_kind(body, 0)
+}
+
+pub(crate) fn gemini_bridge_validate_translator_with_kind(
+    body: &[u8],
+    kind: i64,
+) -> Result<GeminiTranslatorValidationPlan, String> {
     let value = gemini_bridge_request_value(GeminiBridgeRequestKernelInput {
         operation: GeminiBridgeRequestOperation::ValidateTranslatorRequest,
         primary: Some(body),
+        kind,
         ..GeminiBridgeRequestKernelInput::new(
             GeminiBridgeRequestOperation::ValidateTranslatorRequest,
         )

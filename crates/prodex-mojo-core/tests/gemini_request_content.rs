@@ -163,6 +163,26 @@ fn translator_validation_accepts_flat_function_and_preserves_unsupported_tool_ta
 }
 
 #[test]
+fn translator_validation_nested_path_mode_wraps_flat_function_errors() {
+    let mut input = GeminiBridgeRequestKernelInput::new(
+        GeminiBridgeRequestOperation::ValidateTranslatorRequest,
+    );
+    input.primary = Some(
+        br#"{"tools":[{"type":"function","name":"lookup","parameters":{}},{"type":"function","name":"missing_schema"}]}"#,
+    );
+    input.kind = 1;
+
+    let output = String::from_utf8(gemini_bridge_request_kernel(input).unwrap()).unwrap();
+
+    assert!(
+        output.contains(
+            "invalid_tool_declaration: Gemini request field `tools[1].function.parameters` is required"
+        ),
+        "output={output}"
+    );
+}
+
+#[test]
 fn translator_validation_rejects_oversized_json_before_mojo_execution() {
     let oversized = vec![b' '; 4 * 1024 * 1024 + 1];
     assert_eq!(
