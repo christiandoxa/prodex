@@ -131,6 +131,16 @@ fn field_layout_respects_requested_width() {
 }
 
 #[test]
+fn mojo_field_layout_preserves_unicode_label_padding_and_tiny_widths() {
+    let lines = format_field_lines_with_layout("表", "alpha beta", 24, 10);
+    assert_eq!(lines[0], "表:        alpha beta");
+    assert!(lines.iter().all(|line| text_width(line) <= 24));
+
+    let tiny = format_field_lines_with_layout("Label", "value", 0, 0);
+    assert_eq!(tiny, vec!["Label: v", " a", " l", " u", " e"]);
+}
+
+#[test]
 fn panel_label_width_allows_tiny_terminals() {
     assert_eq!(
         panel_label_width(&[("Long Label".to_string(), "value".to_string())], 8),

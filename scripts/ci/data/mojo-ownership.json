@@ -2244,6 +2244,7 @@
         "role": "semantic",
         "operations": [
           "terminal_panel_label_column_planning",
+          "terminal_panel_field_row_layout",
           "terminal_session_report_column_planning",
           "terminal_panel_inline_viewport_planning",
           "terminal_session_report_viewport_planning",
@@ -2263,6 +2264,7 @@
         "role": "adapter",
         "operations": [
           "terminal_panel_label_column_planning",
+          "terminal_panel_field_row_layout",
           "terminal_session_report_column_planning",
           "terminal_panel_inline_viewport_planning",
           "terminal_session_report_viewport_planning",
@@ -10082,6 +10084,31 @@
       "rust_adapter_scope": "Measure Unicode cell widths and field counts on the host, then invoke Mojo for all label width decisions"
     },
     {
+      "name": "terminal_panel_field_row_layout",
+      "domain": "terminal/panel-field-layout",
+      "introduced_in": "0.438.0",
+      "baseline_state": "candidate",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_terminal_field_row_layout_v1",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/terminal_layout.mojo",
+      "consumer": "crates/prodex-terminal-ui/src/panel.rs",
+      "consumer_marker": "prodex_mojo_core::terminal_layout::field_row_layout_plan(",
+      "production_consumers": [
+        "crates/prodex-terminal-ui/src/panel.rs",
+        "crates/prodex-quota/src/render/panels.rs",
+        "crates/prodex-app/src/app_commands/info_handler.rs"
+      ],
+      "production_reachability_test": "crates/prodex-terminal-ui/tests/src/lib.rs",
+      "rust_owner_before": "Rust chose wrapped value width and first/continuation label padding for every panel field row after measuring Unicode label cells",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "deleted; required-Mojo ABI and terminal-ui caller tests cover Unicode labels, tiny widths, continuation padding and bounded output",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "Rust builds labels, measures Unicode cells, wraps values, repeats Mojo-selected spaces, and renders terminal output"
+    },
+    {
       "name": "terminal_session_report_column_planning",
       "domain": "terminal/session-layout",
       "introduced_in": "0.438.0",
@@ -12597,6 +12624,32 @@
       "production_consumer": "crates/prodex-terminal-ui/src/text.rs",
       "parity_test": "crates/prodex-terminal-ui/tests/src/lib.rs::middle_ellipsis_preserves_unicode_zero_width_and_tiny_widths",
       "cleanup_evidence": "The Rust middle-ellipsis loop is deleted from the log TUI; the compiled Mojo plan now selects presentation mode and scalar boundaries, with terminal-ui and log-header caller regressions preserving output."
+    },
+    {
+      "file": "crates/prodex-terminal-ui/src/panel.rs",
+      "symbol": "fn format_field_lines_with_layout",
+      "operation": "terminal_panel_field_row_layout",
+      "previous_responsibility": "Rust selected panel value width and per-line label padding after Unicode cell measurement",
+      "final_state": "adapter-only",
+      "cleanup_loc": 17,
+      "cleanup_source": {
+        "kind": "collapsed-adapter",
+        "path": "crates/prodex-terminal-ui/src/panel.rs",
+        "baseline_range": {
+          "start": 188,
+          "end": 206
+        },
+        "release_symbol": "pub fn format_field_lines_with_layout",
+        "release_marker": "prodex_mojo_core::terminal_layout::field_row_layout_plan("
+      },
+      "rust_before": "crates/prodex-terminal-ui/src/panel.rs::format_field_lines_with_layout",
+      "rust_after": "Rust retains label/value string materialization and wrapping while Mojo plans value width and first/continuation padding",
+      "mojo_owner": "mojo/prodex_core/terminal_layout.mojo::prodex_terminal_field_row_layout_v1",
+      "mojo_source": "mojo/prodex_core/terminal_layout.mojo",
+      "mojo_entry": "prodex_terminal_field_row_layout_v1",
+      "production_consumer": "crates/prodex-terminal-ui/src/panel.rs",
+      "parity_test": "crates/prodex-terminal-ui/tests/src/lib.rs::mojo_field_layout_preserves_unicode_label_padding_and_tiny_widths",
+      "cleanup_evidence": "The former Rust value-width and label-padding arithmetic is replaced by the mandatory Mojo field-row plan; terminal-ui, quota and info panel callers keep host Unicode measurement and output construction."
     }
   ],
   "deleted_authoritative_operations": [

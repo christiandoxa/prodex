@@ -58,6 +58,40 @@ def prodex_terminal_panel_label_width_v1(
     return TERMINAL_LAYOUT_OK
 
 
+@export("prodex_terminal_field_row_layout_v1")
+def prodex_terminal_field_row_layout_v1(
+    abi: Int64,
+    total_width: UInt64,
+    label_width: UInt64,
+    label_cells: UInt64,
+    result_address: UInt,
+    result_capacity: Int64,
+) abi("C") -> Int64:
+    if abi != TERMINAL_LAYOUT_ABI:
+        return TERMINAL_LAYOUT_VERSION
+    if result_address == 0 or result_capacity < 3:
+        return TERMINAL_LAYOUT_INVALID
+
+    var label_and_separator = label_width
+    if label_and_separator < TERMINAL_LAYOUT_UINT64_MAX:
+        label_and_separator += UInt64(1)
+    var value_width: UInt64 = 1
+    if total_width > label_and_separator:
+        value_width = total_width - label_and_separator
+
+    var first_padding: UInt64 = 0
+    if label_width > label_cells:
+        first_padding = label_width - label_cells
+
+    var result = Pointer[mut=True, UInt64, MutUntrackedOrigin](
+        unsafe_from_address=Int(result_address)
+    )
+    result[unsafe_offset=0] = value_width
+    result[unsafe_offset=1] = first_padding
+    result[unsafe_offset=2] = label_width
+    return TERMINAL_LAYOUT_OK
+
+
 @export("prodex_terminal_session_columns_v1")
 def prodex_terminal_session_columns_v1(
     abi: Int64,
