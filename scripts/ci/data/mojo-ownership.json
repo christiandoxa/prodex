@@ -2020,7 +2020,8 @@
         "role": "semantic",
         "operations": [
           "runtime_websocket_failure_state_policy",
-          "runtime_websocket_stale_frame_policy"
+          "runtime_websocket_stale_frame_policy",
+          "runtime_websocket_terminal_frame_policy"
         ]
       },
       {
@@ -2031,7 +2032,8 @@
         "role": "adapter",
         "operations": [
           "runtime_websocket_failure_state_policy",
-          "runtime_websocket_stale_frame_policy"
+          "runtime_websocket_stale_frame_policy",
+          "runtime_websocket_terminal_frame_policy"
         ]
       },
       {
@@ -8995,6 +8997,29 @@
       "duplicate_production_owner": false,
       "platform_fallback": false,
       "rust_adapter_scope": "UTF-8/Serde parsing, previous-response marker extraction, and caller-owned JSON response materialization"
+    },
+    {
+      "name": "runtime_websocket_terminal_frame_policy",
+      "domain": "runtime-proxy/websocket-failure",
+      "introduced_in": "0.438.0",
+      "baseline_state": "Rust classified nested and top-level WebSocket connection-limit codes and selected terminal wrapped-error status precedence",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_runtime_websocket_terminal_frame_plan_v1",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/websocket_failure.mojo",
+      "consumer": "crates/prodex-runtime-proxy/src/websocket_message.rs",
+      "consumer_marker": "prodex_mojo_core::runtime::websocket_terminal_frame_plan(",
+      "production_consumers": [
+        "crates/prodex-runtime-proxy/src/websocket_message.rs"
+      ],
+      "production_reachability_test": "crates/prodex-runtime-proxy/tests/src/websocket_message.rs",
+      "rust_owner_before": "Rust selected case-insensitive nested/top-level connection-limit retries and terminal error frames from event, code, and status fields",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "deleted; direct Mojo ABI cases and runtime-proxy caller regressions cover code precedence, case folding, status/status_code precedence, invalid-field bounds, precommit retry, and committed transparency",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "Serde JSON fact extraction, status-field presence compatibility, Mojo result decoding, retry-state mapping, and upstream frame forwarding"
     },
     {
       "name": "runtime_proxy_dispatch_policy",

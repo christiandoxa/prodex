@@ -13,6 +13,7 @@ const WEBSOCKET_FAILURE_DECISION_FIELD_COUNT: usize = 12;
 
 const WEBSOCKET_FAILURE_PLAN_FIELD_COUNT: usize = 5;
 const WEBSOCKET_STALE_FRAME_ABI_VERSION: i64 = 1;
+const WEBSOCKET_TERMINAL_FRAME_ABI_VERSION: i64 = 1;
 
 /// Failure class whose pre-commit state transition is planned by Mojo.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -154,6 +155,22 @@ unsafe extern "C" {
         response_failed: i64,
         response_object_present: i64,
     ) -> i64;
+    fn prodex_runtime_websocket_terminal_frame_plan_v1(
+        abi_version: i64,
+        event_address: u64,
+        event_length: i64,
+        event_present: i64,
+        nested_code_address: u64,
+        nested_code_length: i64,
+        nested_code_present: i64,
+        top_code_address: u64,
+        top_code_length: i64,
+        top_code_present: i64,
+        status_present: i64,
+        status: i64,
+        status_code_present: i64,
+        status_code: i64,
+    ) -> i64;
 }
 
 /// Whether a quota-blocked turn-state request can safely replay from full history.
@@ -288,6 +305,66 @@ pub fn websocket_failure_frame_classification(
     };
     match result {
         0..=5 => Ok(result),
+        -4 => Err(MojoError::AbiMismatch),
+        -1 => Err(MojoError::InvalidInput),
+        _ => Err(MojoError::InvalidOutput),
+    }
+}
+
+/// Facts needed to decide WebSocket error-frame retry precedence and terminality.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct WebsocketTerminalFramePlan {
+    pub connection_limit: bool,
+    pub terminal: bool,
+}
+
+fn websocket_terminal_text_parts(value: Option<&str>) -> Result<(u64, i64, i64), MojoError> {
+    let Some(value) = value else {
+        return Ok((0, 0, 0));
+    };
+    Ok((
+        value.as_ptr() as usize as u64,
+        i64::try_from(value.len()).map_err(|_| MojoError::InvalidInput)?,
+        1,
+    ))
+}
+
+/// Plans connection-limit retry precedence and wrapped error terminality.
+pub fn websocket_terminal_frame_plan(
+    event_type: Option<&str>,
+    nested_error_code: Option<&str>,
+    top_level_code: Option<&str>,
+    status: Option<u16>,
+    status_code: Option<u16>,
+) -> Result<WebsocketTerminalFramePlan, MojoError> {
+    let (event_address, event_length, event_present) = websocket_terminal_text_parts(event_type)?;
+    let (nested_code_address, nested_code_length, nested_code_present) =
+        websocket_terminal_text_parts(nested_error_code)?;
+    let (top_code_address, top_code_length, top_code_present) =
+        websocket_terminal_text_parts(top_level_code)?;
+    let result = unsafe {
+        prodex_runtime_websocket_terminal_frame_plan_v1(
+            WEBSOCKET_TERMINAL_FRAME_ABI_VERSION,
+            event_address,
+            event_length,
+            event_present,
+            nested_code_address,
+            nested_code_length,
+            nested_code_present,
+            top_code_address,
+            top_code_length,
+            top_code_present,
+            i64::from(status.is_some()),
+            i64::from(status.unwrap_or_default()),
+            i64::from(status_code.is_some()),
+            i64::from(status_code.unwrap_or_default()),
+        )
+    };
+    match result {
+        0..=3 => Ok(WebsocketTerminalFramePlan {
+            connection_limit: result & 1 != 0,
+            terminal: result & 2 != 0,
+        }),
         -4 => Err(MojoError::AbiMismatch),
         -1 => Err(MojoError::InvalidInput),
         _ => Err(MojoError::InvalidOutput),
@@ -634,6 +711,123 @@ mod tests {
                     WEBSOCKET_STALE_FRAME_ABI_VERSION,
                     2,
                     0,
+                    0,
+                    0,
+                )
+            },
+            -1
+        );
+    }
+
+    #[test]
+    fn terminal_frame_plan_preserves_code_precedence_and_status_fallback() {
+        assert_eq!(
+            websocket_terminal_frame_plan(
+                Some("error"),
+                Some("WEBSOCKET_CONNECTION_LIMIT_REACHED"),
+                None,
+                None,
+                None,
+            ),
+            Ok(WebsocketTerminalFramePlan {
+                connection_limit: true,
+                terminal: true,
+            })
+        );
+        assert_eq!(
+            websocket_terminal_frame_plan(Some("error"), None, None, None, Some(400)),
+            Ok(WebsocketTerminalFramePlan {
+                connection_limit: false,
+                terminal: true,
+            })
+        );
+        assert_eq!(
+            websocket_terminal_frame_plan(Some("error"), None, None, Some(399), Some(400)),
+            Ok(WebsocketTerminalFramePlan {
+                connection_limit: false,
+                terminal: false,
+            })
+        );
+        assert_eq!(
+            websocket_terminal_frame_plan(Some("Error"), None, None, Some(400), None),
+            Ok(WebsocketTerminalFramePlan {
+                connection_limit: false,
+                terminal: false,
+            })
+        );
+    }
+
+    #[test]
+    fn terminal_frame_plan_abi_rejects_wrong_version_and_invalid_text() {
+        assert_eq!(
+            unsafe {
+                prodex_runtime_websocket_terminal_frame_plan_v1(
+                    WEBSOCKET_TERMINAL_FRAME_ABI_VERSION + 1,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                )
+            },
+            -4
+        );
+        assert_eq!(
+            websocket_terminal_frame_plan(Some("error"), None, None, None, None),
+            Ok(WebsocketTerminalFramePlan {
+                connection_limit: false,
+                terminal: false,
+            })
+        );
+        assert_eq!(
+            unsafe {
+                prodex_runtime_websocket_terminal_frame_plan_v1(
+                    WEBSOCKET_TERMINAL_FRAME_ABI_VERSION,
+                    0,
+                    0,
+                    2,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                )
+            },
+            -1
+        );
+        let oversized = "x".repeat(262_145);
+        assert_eq!(
+            websocket_terminal_frame_plan(Some(&oversized), None, None, None, None),
+            Err(MojoError::InvalidInput)
+        );
+        assert_eq!(
+            unsafe {
+                prodex_runtime_websocket_terminal_frame_plan_v1(
+                    WEBSOCKET_TERMINAL_FRAME_ABI_VERSION,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    1,
+                    65_536,
                     0,
                     0,
                 )

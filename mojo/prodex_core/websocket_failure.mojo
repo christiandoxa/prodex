@@ -1,3 +1,4 @@
+from rich_text import rich_utf8_valid
 from std.memory import Pointer
 
 comptime WEBSOCKET_FAILURE_ABI_VERSION: Int64 = 2
@@ -34,9 +35,78 @@ comptime WEBSOCKET_STALE_FRAME_GENERIC_ERROR: Int64 = 1
 comptime WEBSOCKET_STALE_FRAME_FAILED_ERROR: Int64 = 2
 comptime WEBSOCKET_STALE_FRAME_FAILED_RESPONSE_ERROR: Int64 = 3
 
+comptime WEBSOCKET_TERMINAL_FRAME_ABI_VERSION: Int64 = 1
+comptime WEBSOCKET_TERMINAL_FRAME_CONNECTION_LIMIT: Int64 = 1
+comptime WEBSOCKET_TERMINAL_FRAME_TERMINAL: Int64 = 2
+comptime WEBSOCKET_TERMINAL_FRAME_MAX_TEXT_BYTES: Int64 = 262_144
+
 
 def websocket_failure_bool(value: Int64) -> Bool:
     return value == 0 or value == 1
+
+
+def websocket_failure_text_ptr(
+    address: UInt,
+) -> Pointer[mut=False, UInt8, ImmUntrackedOrigin]:
+    return Pointer[mut=False, UInt8, ImmUntrackedOrigin](
+        unsafe_from_address=Int(address)
+    )
+
+
+def websocket_failure_ascii_lower(value: UInt8) -> UInt8:
+    if value >= 65 and value <= 90:
+        return value + 32
+    return value
+
+
+def websocket_failure_text_is_valid(
+    address: UInt,
+    length: Int64,
+    present: Int64,
+) -> Bool:
+    if not websocket_failure_bool(present) or length < 0 or length > WEBSOCKET_TERMINAL_FRAME_MAX_TEXT_BYTES:
+        return False
+    if present == 0:
+        return length == 0
+    if length > 0 and address == 0:
+        return False
+    return length == 0 or rich_utf8_valid(websocket_failure_text_ptr(address), length)
+
+
+def websocket_failure_text_equals(
+    address: UInt,
+    length: Int64,
+    literal: StringSlice,
+) -> Bool:
+    var expected = Int64(literal.byte_length())
+    if length != expected:
+        return False
+    if expected == 0:
+        return True
+    var source = websocket_failure_text_ptr(address)
+    var target = literal.unsafe_ptr()
+    for index in range(expected):
+        if source[unsafe_offset=index] != target[unsafe_offset=index]:
+            return False
+    return True
+
+
+def websocket_failure_text_equals_ci(
+    address: UInt,
+    length: Int64,
+    literal: StringSlice,
+) -> Bool:
+    var expected = Int64(literal.byte_length())
+    if length != expected:
+        return False
+    if expected == 0:
+        return True
+    var source = websocket_failure_text_ptr(address)
+    var target = literal.unsafe_ptr()
+    for index in range(expected):
+        if websocket_failure_ascii_lower(source[unsafe_offset=index]) != target[unsafe_offset=index]:
+            return False
+    return True
 
 
 @export("prodex_runtime_websocket_stale_frame_plan_v1")
@@ -63,6 +133,77 @@ def prodex_runtime_websocket_stale_frame_plan_v1(
     if response_object_present == 1:
         return WEBSOCKET_STALE_FRAME_FAILED_RESPONSE_ERROR
     return WEBSOCKET_STALE_FRAME_FAILED_ERROR
+
+
+@export("prodex_runtime_websocket_terminal_frame_plan_v1")
+def prodex_runtime_websocket_terminal_frame_plan_v1(
+    abi_version: Int64,
+    event_address: UInt,
+    event_length: Int64,
+    event_present: Int64,
+    nested_code_address: UInt,
+    nested_code_length: Int64,
+    nested_code_present: Int64,
+    top_code_address: UInt,
+    top_code_length: Int64,
+    top_code_present: Int64,
+    status_present: Int64,
+    status: Int64,
+    status_code_present: Int64,
+    status_code: Int64,
+) abi("C") -> Int64:
+    if abi_version != WEBSOCKET_TERMINAL_FRAME_ABI_VERSION:
+        return -4
+    if (
+        not websocket_failure_text_is_valid(event_address, event_length, event_present)
+        or not websocket_failure_text_is_valid(
+            nested_code_address, nested_code_length, nested_code_present
+        )
+        or not websocket_failure_text_is_valid(
+            top_code_address, top_code_length, top_code_present
+        )
+        or not websocket_failure_bool(status_present)
+        or not websocket_failure_bool(status_code_present)
+        or (status_present == 1 and (status < 0 or status > 65535))
+        or (status_code_present == 1 and (status_code < 0 or status_code > 65535))
+    ):
+        return -1
+
+    var connection_limit = (
+        (
+            nested_code_present == 1
+            and websocket_failure_text_equals_ci(
+                nested_code_address,
+                nested_code_length,
+                StringSlice("websocket_connection_limit_reached"),
+            )
+        )
+        or (
+            top_code_present == 1
+            and websocket_failure_text_equals_ci(
+                top_code_address,
+                top_code_length,
+                StringSlice("websocket_connection_limit_reached"),
+            )
+        )
+    )
+    var selected_status_present = status_present == 1 or status_code_present == 1
+    var selected_status = status
+    if status_present == 0:
+        selected_status = status_code
+    var terminal = (
+        event_present == 1
+        and websocket_failure_text_equals(
+            event_address, event_length, StringSlice("error")
+        )
+        and (
+            connection_limit
+            or (selected_status_present and selected_status >= 400)
+        )
+    )
+    return Int64(connection_limit) * WEBSOCKET_TERMINAL_FRAME_CONNECTION_LIMIT | Int64(
+        terminal
+    ) * WEBSOCKET_TERMINAL_FRAME_TERMINAL
 
 
 @export("prodex_runtime_websocket_turn_state_replay_candidate_v1")
