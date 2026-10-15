@@ -1,5 +1,4 @@
 use super::*;
-use sha2::{Digest as _, Sha256};
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::fmt::Write as _;
@@ -218,18 +217,18 @@ fn smart_context_add_static_context_overflow_digest(
     aggregate: &mut [u8; 32],
     item: &SmartContextStableStaticContextItem,
 ) {
-    let mut item_hasher = Sha256::new();
-    item_hasher.update(item.id.as_bytes());
-    item_hasher.update([0]);
-    item_hasher.update(item.content_hash.as_bytes());
-    item_hasher.update([0]);
-    item_hasher.update(item.byte_len.to_le_bytes());
-    for (slot, byte) in aggregate
-        .iter_mut()
-        .zip(item_hasher.finalize().iter().copied())
-    {
-        *slot = slot.wrapping_add(byte);
-    }
+    // Mojo exclusively owns the platform-width binary frame and rolling
+    // bytewise checksum. Host Rust retains the SHA-256 primitive only.
+    let preimage = prodex_mojo_core::rich::smart_context_static_overflow_preimage(
+        &item.id,
+        &item.content_hash,
+        item.byte_len,
+    )
+    .expect("Mojo Smart Context overflow preimage returned invalid output");
+    let digest = smart_context_sha256_digest(&preimage);
+    *aggregate =
+        prodex_mojo_core::rich::smart_context_static_overflow_accumulate(aggregate, &digest)
+            .expect("Mojo Smart Context overflow aggregation returned invalid output");
 }
 
 fn smart_context_bounded_static_context_id(id: &str) -> String {
