@@ -1,53 +1,46 @@
-//! Chat-compatible token usage mapping helpers.
-
+//! Chat-compatible usage projection through compiled Mojo.
 pub fn provider_core_chat_compatible_responses_usage(
     usage: &serde_json::Value,
     provider_metadata_key: &str,
 ) -> Option<serde_json::Value> {
-    let input_tokens = usage
-        .get("prompt_tokens")
-        .and_then(serde_json::Value::as_u64)
-        .unwrap_or(0);
-    let output_tokens = usage
-        .get("completion_tokens")
-        .and_then(serde_json::Value::as_u64)
-        .unwrap_or(0);
-    let total_tokens = usage
-        .get("total_tokens")
-        .and_then(serde_json::Value::as_u64)
-        .unwrap_or_else(|| input_tokens.saturating_add(output_tokens));
-    let cache_hit_tokens = usage
-        .get("prompt_cache_hit_tokens")
-        .and_then(serde_json::Value::as_u64);
-    let cache_miss_tokens = usage
-        .get("prompt_cache_miss_tokens")
-        .and_then(serde_json::Value::as_u64);
-    let reasoning_tokens = usage
-        .get("completion_tokens_details")
-        .and_then(|details| details.get("reasoning_tokens"))
-        .and_then(serde_json::Value::as_u64);
-    let mut response_usage = serde_json::json!({
-        "input_tokens": input_tokens,
-        "output_tokens": output_tokens,
-        "total_tokens": total_tokens,
-    });
-    if let Some(cache_hit_tokens) = cache_hit_tokens {
-        response_usage["input_tokens_details"] = serde_json::json!({
-            "cached_tokens": cache_hit_tokens,
-        });
+    let key = serde_json::Value::String(provider_metadata_key.to_owned());
+    let mut document = crate::mojo_json::Document::default();
+    document.array([usage, &key]);
+    let raw = std::str::from_utf8(&document.raw).expect("Serde emits UTF-8 JSON");
+    let output = prodex_mojo_core::json::transform_chat_bridge_usage(&document.nodes, raw)
+        .expect("compiled Mojo chat bridge usage mapping failed");
+    Some(serde_json::from_slice(&output).expect("Mojo chat usage must be valid JSON"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn mojo_chat_usage_preserves_saturation_zero_and_invalid_numeric_rules() {
+        let usage = json!({"prompt_tokens":u64::MAX,"completion_tokens":2,
+            "prompt_cache_hit_tokens":0,"prompt_cache_miss_tokens":false,
+            "completion_tokens_details":{"reasoning_tokens":0}});
+        assert_eq!(
+            provider_core_chat_compatible_responses_usage(&usage, "東京").unwrap(),
+            json!({
+                "input_tokens":u64::MAX,"output_tokens":2,"total_tokens":u64::MAX,
+                "input_tokens_details":{"cached_tokens":0},"output_tokens_details":{"reasoning_tokens":0},
+                "metadata":{"東京":{"prompt_cache_hit_tokens":0,"prompt_cache_miss_tokens":0}},
+            })
+        );
+        assert_eq!(
+            provider_core_chat_compatible_responses_usage(&json!(false), "unused").unwrap(),
+            json!({"input_tokens":0,"output_tokens":0,"total_tokens":0})
+        );
+        assert_eq!(
+            provider_core_chat_compatible_responses_usage(
+                &json!({"prompt_tokens":8,"completion_tokens":-2,"total_tokens":0}),
+                "unused"
+            )
+            .unwrap(),
+            json!({"input_tokens":8,"output_tokens":0,"total_tokens":0})
+        );
     }
-    if let Some(reasoning_tokens) = reasoning_tokens {
-        response_usage["output_tokens_details"] = serde_json::json!({
-            "reasoning_tokens": reasoning_tokens,
-        });
-    }
-    if cache_hit_tokens.is_some() || cache_miss_tokens.is_some() {
-        response_usage["metadata"] = serde_json::json!({
-            provider_metadata_key: {
-                "prompt_cache_hit_tokens": cache_hit_tokens.unwrap_or(0),
-                "prompt_cache_miss_tokens": cache_miss_tokens.unwrap_or(0),
-            }
-        });
-    }
-    Some(response_usage)
 }

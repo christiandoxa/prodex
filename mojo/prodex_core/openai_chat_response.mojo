@@ -32,6 +32,7 @@ from openai_compat import (
 )
 from rich_text import rich_view_ptr
 from rich_types import ProdexRichStringView
+from provider_usage import usage_saturating_add
 
 comptime OPENAI_CHAT_RESPONSE_ABI: Int64 = 1
 
@@ -497,6 +498,100 @@ def ocr_response_deepseek_stream_event_write(
     )
 
 
+def ocr_bridge_raw(writer: Pointer[mut=True, OpenAiCompatWriter, _], tree: ParsedJson, node: Int64) -> Bool:
+    var raw = js_raw_view(tree, node)
+    var bytes = rich_view_ptr(raw)
+    for index in range(Int64(raw.len)):
+        if not openai_compat_put_byte(writer, bytes[unsafe_offset=index]):
+            return False
+    return True
+
+
+def ocr_bridge_metadata_write(writer: Pointer[mut=True, OpenAiCompatWriter, _], tree: ParsedJson, response: Int64) -> Bool:
+    var choices = pj_field(tree, response, StringSlice("choices"))
+    var choice = pj_child(tree, choices) if pj_kind(tree, choices) == JSON_ARRAY else -1
+    var message = pj_field(tree, choice, StringSlice("message"))
+    if not openai_compat_put_byte(writer, 123):
+        return False
+    var emitted = False
+    for index in range(6):
+        var key = StringSlice("logprobs")
+        var parent = choice
+        if index == 1:
+            key = StringSlice("reasoning_content")
+            parent = message
+        elif index == 2:
+            key = StringSlice("refusal")
+            parent = message
+        elif index == 3:
+            key = StringSlice("annotations")
+            parent = message
+        elif index == 4:
+            key = StringSlice("finish_reason")
+        elif index == 5:
+            key = StringSlice("system_fingerprint")
+            parent = response
+        var node = pj_field(tree, parent, key)
+        var kind = pj_kind(tree, node)
+        var retain = node >= 0 and kind != JSON_NULL
+        if index == 1 or index == 2 or index == 5:
+            retain = kind == JSON_STRING and pj_text(tree, node).len > 0
+        elif index == 3:
+            retain = kind == JSON_ARRAY and pj_child(tree, node) >= 0
+        elif index == 4:
+            retain = kind == JSON_STRING
+        if not retain:
+            continue
+        if emitted and not openai_compat_put_byte(writer, 44):
+            return False
+        if not openai_compat_put_json_string(writer, pj_literal(key)) or not openai_compat_put_byte(writer, 58) or not ocr_bridge_raw(writer, tree, node):
+            return False
+        emitted = True
+    return openai_compat_put_byte(writer, 125)
+
+
+def ocr_bridge_usage_write(writer: Pointer[mut=True, OpenAiCompatWriter, _], tree: ParsedJson, usage: Int64, key: ProdexRichStringView) -> Bool:
+    var input = ocr_response_u64(tree, pj_field(tree, usage, StringSlice("prompt_tokens")))
+    var output = ocr_response_u64(tree, pj_field(tree, usage, StringSlice("completion_tokens")))
+    var total = ocr_response_u64(tree, pj_field(tree, usage, StringSlice("total_tokens")))
+    var hits = ocr_response_u64(tree, pj_field(tree, usage, StringSlice("prompt_cache_hit_tokens")))
+    var misses = ocr_response_u64(tree, pj_field(tree, usage, StringSlice("prompt_cache_miss_tokens")))
+    var details = pj_field(tree, usage, StringSlice("completion_tokens_details"))
+    var reasoning = ocr_response_u64(tree, pj_field(tree, details, StringSlice("reasoning_tokens")))
+    var sum = total[1] if total[0] else usage_saturating_add(input[1], output[1])
+    if not (
+        openai_compat_put_literal(writer, StringSlice('{"input_tokens":'))
+        and openai_compat_put_u64(writer, input[1])
+        and openai_compat_put_literal(writer, StringSlice(',"output_tokens":'))
+        and openai_compat_put_u64(writer, output[1])
+        and openai_compat_put_literal(writer, StringSlice(',"total_tokens":'))
+        and openai_compat_put_u64(writer, sum)
+    ):
+        return False
+    if hits[0] and not (
+        openai_compat_put_literal(writer, StringSlice(',"input_tokens_details":{"cached_tokens":'))
+        and openai_compat_put_u64(writer, hits[1]) and openai_compat_put_byte(writer, 125)
+    ):
+        return False
+    if reasoning[0] and not (
+        openai_compat_put_literal(writer, StringSlice(',"output_tokens_details":{"reasoning_tokens":'))
+        and openai_compat_put_u64(writer, reasoning[1]) and openai_compat_put_byte(writer, 125)
+    ):
+        return False
+    if hits[0] or misses[0]:
+        if not (
+            openai_compat_put_literal(writer, StringSlice(',"metadata":{'))
+            and openai_compat_put_json_string(writer, key)
+            and openai_compat_put_literal(writer, StringSlice(':{"prompt_cache_hit_tokens":'))
+            and openai_compat_put_u64(writer, hits[1])
+            and openai_compat_put_literal(writer, StringSlice(',"prompt_cache_miss_tokens":'))
+            and openai_compat_put_u64(writer, misses[1])
+            and openai_compat_put_literal(writer, StringSlice('}}'))
+        ):
+            return False
+    return openai_compat_put_byte(writer, 125)
+
+
 @export("prodex_mojo_openai_chat_response_v1")
 def prodex_mojo_openai_chat_response_v1(
     abi: Int64, operation: Int64, flag: Int64,
@@ -508,7 +603,7 @@ def prodex_mojo_openai_chat_response_v1(
 ) abi("C") -> Int64:
     if abi != OPENAI_CHAT_RESPONSE_ABI:
         return 4
-    if operation < 0 or operation > 2 or flag != 0 or measuring < 0 or measuring > 1 or raw_length < 0:
+    if operation < 0 or operation > 4 or flag != 0 or measuring < 0 or measuring > 1 or raw_length < 0:
         return 1
     if (
         capacity < 0
@@ -531,9 +626,22 @@ def prodex_mojo_openai_chat_response_v1(
         nodes_count,
         ProdexRichStringView(UInt(raw_address), UInt(raw_length)),
     )
-    if not pj_valid(tree) or pj_kind(tree, 0) != JSON_OBJECT:
+    if not pj_valid(tree):
         return 1
-    var response = pj_field(tree, 0, StringSlice("response"))
+    var response: Int64 = -1
+    var provider_key = pj_literal(StringSlice(""))
+    if operation == 4:
+        if pj_kind(tree, 0) != JSON_ARRAY:
+            return 1
+        response = pj_child(tree, 0)
+        var key = pj_next(tree, response)
+        if pj_kind(tree, key) != JSON_STRING:
+            return 1
+        provider_key = pj_text(tree, key)
+    else:
+        if pj_kind(tree, 0) != JSON_OBJECT:
+            return 1
+        response = pj_field(tree, 0, StringSlice("response"))
     if response < 0:
         return 1
     var default_created_at: UInt64 = 0
@@ -553,6 +661,10 @@ def prodex_mojo_openai_chat_response_v1(
     var success = True
     if operation == 0:
         success = ocr_response_write(writer_ptr, tree, response, default_created_at)
+    elif operation == 3:
+        success = ocr_bridge_metadata_write(writer_ptr, tree, response)
+    elif operation == 4:
+        success = ocr_bridge_usage_write(writer_ptr, tree, response, provider_key)
     elif operation == 1:
         var event = ocr_response_stream_event_write(writer_ptr, tree, response)
         present = event[0]

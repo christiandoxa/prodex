@@ -600,6 +600,24 @@ pub fn transform_openai_chat_response(
         .ok_or(MojoError::InvalidOutput)
 }
 
+/// Extract the chat-compatibility bridge metadata from its raw response context.
+pub fn transform_chat_bridge_metadata(
+    nodes: &[JsonNode<'_>],
+    raw: &str,
+) -> Result<Vec<u8>, MojoError> {
+    transform_json(nodes, raw, 3, false, prodex_mojo_openai_chat_response_v1)?
+        .ok_or(MojoError::InvalidOutput)
+}
+
+/// Map bridge usage from a borrowed [usage, provider-metadata-key] array.
+pub fn transform_chat_bridge_usage(
+    nodes: &[JsonNode<'_>],
+    raw: &str,
+) -> Result<Vec<u8>, MojoError> {
+    transform_json(nodes, raw, 4, false, prodex_mojo_openai_chat_response_v1)?
+        .ok_or(MojoError::InvalidOutput)
+}
+
 /// Convert one parsed chat completion SSE event to a Responses event.
 pub fn transform_openai_chat_stream_event(
     nodes: &[JsonNode<'_>],

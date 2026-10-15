@@ -757,7 +757,9 @@
         "role": "semantic",
         "operations": [
           "openai_chat_compat_response_translation",
-          "deepseek_chat_stream_event_translation"
+          "deepseek_chat_stream_event_translation",
+          "chat_bridge_metadata_projection",
+          "chat_bridge_usage_projection"
         ]
       },
       {
@@ -9711,6 +9713,58 @@
       "duplicate_production_owner": false,
       "platform_fallback": false,
       "rust_adapter_scope": "Serde argument acquisition, selection of the existing eligible JSON key, checked output allocation and String decoding; complete command policy stays in Mojo"
+    },
+    {
+      "name": "chat_bridge_metadata_projection",
+      "domain": "provider/chat-compatible-bridge",
+      "introduced_in": "0.438.0",
+      "baseline_state": "Rust filtered optional chat metadata fields or computed usage totals, cache and reasoning details and provider metadata",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_mojo_openai_chat_response_v1",
+      "mojo_abi_version": 1,
+      "mojo_operation_ids": {
+        "bridge_metadata": 3
+      },
+      "mojo_source": "mojo/prodex_core/openai_chat_response.mojo",
+      "consumer": "crates/prodex-provider-core/src/bridge/chat_compat/response.rs",
+      "consumer_marker": "prodex_mojo_core::json::transform_chat_bridge_metadata(",
+      "production_consumers": [
+        "crates/prodex-provider-core/src/bridge/chat_compat/response.rs"
+      ],
+      "production_reachability_test": "crates/prodex-provider-core/src/bridge/chat_compat/response.rs",
+      "rust_owner_before": "Chat-compatible bridge bridge_metadata mapping, presence/type policies and JSON synthesis",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "Original Rust mapping removed; direct ABI and caller fixtures preserve empty, wrong-type, zero, Unicode and maximum integer behavior",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "Borrowed Serde-tree acquisition, measured output allocation and typed JSON decoding; no fallback calculation"
+    },
+    {
+      "name": "chat_bridge_usage_projection",
+      "domain": "provider/chat-compatible-bridge",
+      "introduced_in": "0.438.0",
+      "baseline_state": "Rust filtered optional chat metadata fields or computed usage totals, cache and reasoning details and provider metadata",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_mojo_openai_chat_response_v1",
+      "mojo_abi_version": 1,
+      "mojo_operation_ids": {
+        "bridge_usage": 4
+      },
+      "mojo_source": "mojo/prodex_core/openai_chat_response.mojo",
+      "consumer": "crates/prodex-provider-core/src/bridge/chat_compat/usage.rs",
+      "consumer_marker": "prodex_mojo_core::json::transform_chat_bridge_usage(",
+      "production_consumers": [
+        "crates/prodex-provider-core/src/bridge/chat_compat/usage.rs"
+      ],
+      "production_reachability_test": "crates/prodex-provider-core/src/bridge/chat_compat/usage.rs",
+      "rust_owner_before": "Chat-compatible bridge bridge_usage mapping, presence/type policies and JSON synthesis",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "Original Rust mapping removed; direct ABI and caller fixtures preserve empty, wrong-type, zero, Unicode and maximum integer behavior",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "Borrowed Serde-tree acquisition, measured output allocation and typed JSON decoding; no fallback calculation"
     }
   ],
   "rust_semantic_reductions": [
