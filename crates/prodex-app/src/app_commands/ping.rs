@@ -50,55 +50,39 @@ impl PingStatus {
         self != Self::Pass
     }
 
-    fn label(self) -> &'static str {
+    fn mojo_code(self) -> i64 {
         match self {
-            Self::Pass => "OK",
-            Self::AuthFailed => "AUTH_FAILED",
-            Self::DnsFailed => "DNS_FAILED",
-            Self::TlsFailed => "TLS_FAILED",
-            Self::Timeout => "TIMEOUT",
-            Self::RateLimited => "RATE_LIMITED",
-            Self::QuotaExhausted => "EXHAUSTED",
-            Self::UpstreamOverloaded => "UPSTREAM_OVERLOADED",
-            Self::ModelUnavailable => "MODEL_UNAVAILABLE",
-            Self::ProtocolFailed => "PROTOCOL_FAILED",
-            Self::TurnFailed => "TURN_FAILED",
-            Self::ProcessFailed => "PROCESS_FAILED",
-            Self::SpawnFailed => "SPAWN_FAILED",
-            Self::Cancelled => "CANCELLED",
-            Self::UnexpectedResponse => "UNEXPECTED_RESPONSE",
+            Self::Pass => prodex_mojo_core::rich::PING_STATUS_OK,
+            Self::ProtocolFailed => prodex_mojo_core::rich::PING_STATUS_PROTOCOL_FAILED,
+            Self::UnexpectedResponse => prodex_mojo_core::rich::PING_STATUS_UNEXPECTED_RESPONSE,
+            Self::TurnFailed => prodex_mojo_core::rich::PING_STATUS_TURN_FAILED,
+            Self::AuthFailed => prodex_mojo_core::rich::PING_STATUS_AUTH_FAILED,
+            Self::DnsFailed => prodex_mojo_core::rich::PING_STATUS_DNS_FAILED,
+            Self::TlsFailed => prodex_mojo_core::rich::PING_STATUS_TLS_FAILED,
+            Self::Timeout => prodex_mojo_core::rich::PING_STATUS_TIMEOUT,
+            Self::RateLimited => prodex_mojo_core::rich::PING_STATUS_RATE_LIMITED,
+            Self::QuotaExhausted => prodex_mojo_core::rich::PING_STATUS_QUOTA_EXHAUSTED,
+            Self::UpstreamOverloaded => prodex_mojo_core::rich::PING_STATUS_UPSTREAM_OVERLOADED,
+            Self::ModelUnavailable => prodex_mojo_core::rich::PING_STATUS_MODEL_UNAVAILABLE,
+            Self::ProcessFailed => prodex_mojo_core::rich::PING_STATUS_PROCESS_FAILED,
+            Self::SpawnFailed => prodex_mojo_core::rich::PING_STATUS_SPAWN_FAILED,
+            Self::Cancelled => prodex_mojo_core::rich::PING_STATUS_CANCELLED,
         }
     }
 
-    fn json_label(self) -> &'static str {
-        match self {
-            Self::Pass => "ok",
-            Self::AuthFailed => "auth_failed",
-            Self::DnsFailed => "dns_failed",
-            Self::TlsFailed => "tls_failed",
-            Self::Timeout => "timeout",
-            Self::RateLimited => "rate_limited",
-            Self::QuotaExhausted => "exhausted",
-            Self::UpstreamOverloaded => "upstream_overloaded",
-            Self::ModelUnavailable => "model_unavailable",
-            Self::ProtocolFailed => "protocol_failed",
-            Self::TurnFailed => "turn_failed",
-            Self::ProcessFailed => "process_failed",
-            Self::SpawnFailed => "spawn_failed",
-            Self::Cancelled => "cancelled",
-            Self::UnexpectedResponse => "unexpected_response",
-        }
+    fn label(self) -> String {
+        prodex_mojo_core::rich::ping_status_label(self.mojo_code(), false)
+            .expect("Mojo ping status label formatter returned invalid output")
+    }
+
+    fn json_label(self) -> String {
+        prodex_mojo_core::rich::ping_status_label(self.mojo_code(), true)
+            .expect("Mojo ping status JSON label formatter returned invalid output")
     }
 
     fn is_temporary(self) -> bool {
-        matches!(
-            self,
-            Self::DnsFailed
-                | Self::TlsFailed
-                | Self::Timeout
-                | Self::RateLimited
-                | Self::UpstreamOverloaded
-        )
+        prodex_mojo_core::rich::ping_status_is_temporary(self.mojo_code())
+            .expect("Mojo ping temporary-status classifier returned invalid output")
     }
 }
 

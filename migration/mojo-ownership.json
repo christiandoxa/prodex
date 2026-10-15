@@ -2196,7 +2196,8 @@
         "production_reachable": true,
         "role": "semantic",
         "operations": [
-          "ping_status_detail_formatting"
+          "ping_status_detail_formatting",
+          "ping_status_label_and_temporary_classification"
         ]
       },
       {
@@ -2206,7 +2207,8 @@
         "production_reachable": true,
         "role": "adapter",
         "operations": [
-          "ping_status_detail_formatting"
+          "ping_status_detail_formatting",
+          "ping_status_label_and_temporary_classification"
         ]
       },
       {
@@ -9714,6 +9716,30 @@
       "rust_adapter_scope": "status-tag mapping, bounded output allocation, ABI error mapping, and structured failure text extraction"
     },
     {
+      "name": "ping_status_label_and_temporary_classification",
+      "domain": "app/ping-diagnostics",
+      "introduced_in": "0.438.0",
+      "baseline_state": "Rust mapped ping status tags to human and JSON labels and classified temporary failures",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_mojo_ping_status_label_v1",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/ping_protocol.mojo",
+      "consumer": "crates/prodex-app/src/app_commands/ping.rs",
+      "consumer_marker": "prodex_mojo_core::rich::ping_status_label(",
+      "production_consumers": [
+        "crates/prodex-app/src/app_commands/ping.rs",
+        "crates/prodex-app/src/app_commands/ping_output.rs"
+      ],
+      "production_reachability_test": "crates/prodex-mojo-core/src/rich/ping_protocol.rs",
+      "rust_owner_before": "Rust selected uppercase and JSON status labels and classified DNS, TLS, timeout, rate-limit, and overload statuses as temporary",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "direct required-Mojo ABI tests cover all labels, quota exclusion, and temporary failure boundaries",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "typed PingStatus-to-ABI status mapping and validated string/boolean result conversion"
+    },
+    {
       "name": "runtime_retry_after_text_policy",
       "domain": "runtime-proxy/retry-after",
       "introduced_in": "0.438.0",
@@ -10173,6 +10199,32 @@
     }
   ],
   "rust_semantic_reductions": [
+    {
+      "file": "crates/prodex-app/src/app_commands/ping.rs",
+      "symbol": "PingStatus",
+      "operation": "ping_status_label_and_temporary_classification",
+      "previous_responsibility": "Rust selected user-facing status labels and temporary-failure membership for ping summaries",
+      "final_state": "adapter-only",
+      "cleanup_loc": 25,
+      "cleanup_source": {
+        "kind": "collapsed-adapter",
+        "path": "crates/prodex-app/src/app_commands/ping.rs",
+        "baseline_range": {
+          "start": 53,
+          "end": 78
+        },
+        "release_symbol": "fn label(self)",
+        "release_marker": "prodex_mojo_core::rich::ping_status_label("
+      },
+      "rust_before": "crates/prodex-app/src/app_commands/ping.rs::PingStatus::label/json_label/is_temporary",
+      "rust_after": "Rust retains only typed status-to-ABI mapping and validated Mojo result conversion",
+      "mojo_owner": "mojo/prodex_core/ping_protocol.mojo::prodex_mojo_ping_status_label_v1",
+      "mojo_source": "mojo/prodex_core/ping_protocol.mojo",
+      "mojo_entry": "prodex_mojo_ping_status_label_v1",
+      "production_consumer": "crates/prodex-app/src/app_commands/ping.rs",
+      "parity_test": "crates/prodex-mojo-core/src/rich/ping_protocol.rs::status_labels_and_temporary_classification_are_owned_by_mojo",
+      "cleanup_evidence": "Rust label and temporary-status match branches are deleted; compiled Mojo ABI tests cover all label variants and quota/temporary boundaries."
+    },
     {
       "file": "crates/prodex-app/src/runtime_proxy/selection/next/candidates.rs",
       "symbol": "entry.supports_codex_runtime()",
