@@ -113,8 +113,12 @@ def prodex_runtime_precommit_budget_exhausted_v1(
     return 0
 
 
-@export("prodex_runtime_compact_retry_decision_v2")
-def prodex_runtime_compact_retry_decision_v2(
+comptime COMPACT_RETRY_DECISION_ABI_VERSION: Int64 = 3
+
+
+@export("prodex_runtime_compact_retry_decision_v3")
+def prodex_runtime_compact_retry_decision_v3(
+    abi_version: Int64,
     profile_views: Pointer[mut=False, ProdexRichStringView, _],
     candidate_profile_present: Int64,
     current_profile_present: Int64,
@@ -126,10 +130,11 @@ def prodex_runtime_compact_retry_decision_v2(
     auto_redeemed: Int64,
     owner_retry_used: Int64,
     quota_fallback_available: Int64,
-    hard_affinity: Int64,
     committed: Int64,
     output: Pointer[mut=True, Int64, _],
 ) abi("C") -> Int64:
+    if abi_version != COMPACT_RETRY_DECISION_ABI_VERSION:
+        return -4
     for flag in [
         candidate_profile_present,
         current_profile_present,
@@ -150,8 +155,6 @@ def prodex_runtime_compact_retry_decision_v2(
         or owner_retry_used > 1
         or quota_fallback_available < -1
         or quota_fallback_available > 1
-        or hard_affinity < 0
-        or hard_affinity > 1
         or committed < 0
         or committed > 1
         or (stage == 3 and (overload == 1 or quota_fallback_available == -1))
@@ -194,6 +197,11 @@ def prodex_runtime_compact_retry_decision_v2(
         or previous_response_match
         or session_match
     )
+    var hard_affinity = (
+        compact_followup_match
+        or previous_response_match
+        or session_match
+    )
     output[unsafe_offset=1] = overload
     if committed == 1:
         output[unsafe_offset=0] = 11
@@ -206,7 +214,7 @@ def prodex_runtime_compact_retry_decision_v2(
             output[unsafe_offset=0] = 3
     elif stage == 2:
         if overload == 1:
-            if hard_affinity == 1:
+            if hard_affinity:
                 output[unsafe_offset=0] = 6
             else:
                 output[unsafe_offset=0] = 10
@@ -215,18 +223,18 @@ def prodex_runtime_compact_retry_decision_v2(
     elif stage == 3:
         if quota_fallback_available == 0:
             output[unsafe_offset=0] = 5
-        elif hard_affinity == 1:
+        elif hard_affinity:
             output[unsafe_offset=0] = 6
         else:
             output[unsafe_offset=0] = 7
     elif stage == 4:
-        if hard_affinity == 1 and (overload == 1 or previous_response_match):
+        if hard_affinity and (overload == 1 or previous_response_match):
             output[unsafe_offset=0] = 8
         elif overload == 1:
             output[unsafe_offset=0] = 10
         else:
             output[unsafe_offset=0] = 7
-    elif hard_affinity == 1:
+    elif hard_affinity:
         output[unsafe_offset=0] = 8
     else:
         output[unsafe_offset=0] = 9

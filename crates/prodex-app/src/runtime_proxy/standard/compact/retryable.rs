@@ -11,7 +11,6 @@ use super::super::super::{
     runtime_has_route_eligible_quota_fallback_for_model, runtime_proxy_log,
 };
 use super::{
-    affinity::runtime_compact_candidate_has_hard_affinity,
     flow::RuntimeCompactFailureFlow,
     logging::{
         RuntimeCompactFailureKind, RuntimeCompactLastFailure, RuntimeProxyCompactAttemptFailureLog,
@@ -90,14 +89,6 @@ pub(super) fn handle_runtime_proxy_compact_retryable_failure(
     let mut released_compact_lineage = false;
 
     loop {
-        let hard_affinity = runtime_compact_candidate_has_hard_affinity(
-            &profile_name,
-            compact_followup_profile
-                .as_ref()
-                .map(|(profile_name, _)| profile_name.as_str()),
-            previous_response_profile,
-            session_profile.as_deref(),
-        );
         let decision =
             prodex_mojo_core::runtime::compact_retry_decision(CompactRetryDecisionInput {
                 stage,
@@ -105,7 +96,6 @@ pub(super) fn handle_runtime_proxy_compact_retryable_failure(
                 auto_redeemed: auto_redeemed_profiles.contains(&profile_name),
                 owner_retry_used: conservative_overload_retried_profiles.contains(&profile_name),
                 quota_fallback_available,
-                hard_affinity,
                 committed: false,
                 candidate_profile: &profile_name,
                 current_profile,
@@ -513,7 +503,6 @@ pub(crate) fn test_runtime_compact_quota_fallback_exhausted(
             auto_redeemed: false,
             owner_retry_used: false,
             quota_fallback_available: Some(quota_fallback_available),
-            hard_affinity: false,
             committed: false,
             candidate_profile: profile_name,
             current_profile: "",

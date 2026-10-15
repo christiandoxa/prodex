@@ -473,7 +473,8 @@
           "runtime_precommit_retry_exhaustion",
           "runtime_recovery_watchdog_budget",
           "runtime_recovery_cooldown_epoch",
-          "runtime_compact_unpinned_recovery"
+          "runtime_compact_unpinned_recovery",
+          "runtime_compact_retry_affinity_policy"
         ]
       },
       "mojo/prodex_core/runtime_proxy_request.mojo": {
@@ -9078,6 +9079,29 @@
       "rust_adapter_scope": "request metadata acquisition and immutable ownership facts; runtime bindings remain protected"
     },
     {
+      "name": "runtime_compact_retry_affinity_policy",
+      "domain": "runtime-proxy/compact-retry",
+      "introduced_in": "0.438.0",
+      "baseline_state": "candidate",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_runtime_compact_retry_decision_v3",
+      "mojo_abi_version": 3,
+      "mojo_source": "mojo/prodex_core/quota_pressure.mojo",
+      "consumer": "crates/prodex-app/src/runtime_proxy/standard/compact/retryable.rs",
+      "consumer_marker": "prodex_mojo_core::runtime::compact_retry_decision(",
+      "production_consumers": [
+        "crates/prodex-app/src/runtime_proxy/standard/compact/retryable.rs"
+      ],
+      "production_reachability_test": "crates/prodex-mojo-core/src/runtime/quota_decisions.rs",
+      "rust_owner_before": "Rust compared compact candidate names with current, compact-followup, previous-response, and session owners to decide hard-affinity recovery during retryable failures",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "deleted; required-Mojo ABI and compact caller regressions cover missing, current, foreign, Unicode, long-name, committed, and business-failover cases",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "request metadata and profile-binding acquisition, borrowed UTF-8 view marshalling, typed ABI validation, and recovery side effects"
+    },
+    {
       "name": "quota_report_page_planning",
       "domain": "quota/display-window",
       "introduced_in": "0.438.0",
@@ -11597,6 +11621,21 @@
         "release_marker": "session_synthetic_metadata_plan("
       },
       "cleanup_evidence": "The frozen baseline range contains 87 semantic Rust lines for synthetic session metadata selection and serialization; the current production function retains only host effects, validated span decoding, and the mandatory Mojo plan/JSON calls."
+    },
+    {
+      "file": "crates/prodex-app/src/runtime_proxy/standard/compact/retryable.rs",
+      "symbol": "handle_runtime_proxy_compact_retryable_failure",
+      "operation": "runtime_compact_retry_affinity_policy",
+      "previous_responsibility": "Rust computed whether the compact retry candidate matched a strict compact owner, previous-response owner, or session owner before passing the result into retry policy",
+      "final_state": "adapter-only",
+      "rust_before": "crates/prodex-app/src/runtime_proxy/standard/compact/retryable.rs::handle_runtime_proxy_compact_retryable_failure",
+      "rust_after": "Rust retains retry side effects and profile-binding acquisition while the Mojo decision owns affinity matching and action precedence",
+      "mojo_owner": "mojo/prodex_core/quota_pressure.mojo::prodex_runtime_compact_retry_decision_v3",
+      "mojo_source": "mojo/prodex_core/quota_pressure.mojo",
+      "mojo_entry": "prodex_runtime_compact_retry_decision_v3",
+      "production_consumer": "crates/prodex-app/src/runtime_proxy/standard/compact/retryable.rs",
+      "parity_test": "crates/prodex-mojo-core/src/runtime/quota_decisions.rs::compact_retry_hard_affinity_matches_only_bound_profiles",
+      "cleanup_evidence": "The Rust hard-affinity boolean computation and input field were removed from the retryable caller. The caller source is traceable in the frozen baseline but is outside its counted Rust inventory, so this record claims no migration volume."
     }
   ],
   "deleted_authoritative_operations": [
