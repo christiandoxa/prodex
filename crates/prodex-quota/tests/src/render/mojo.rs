@@ -16,6 +16,48 @@ fn quota_panel_first_line_normalization_is_mojo_owned() {
 }
 
 #[test]
+fn quota_window_renderer_routes_full_compact_and_reset_text_to_mojo() {
+    let usage = UsageResponse {
+        email: None,
+        plan_type: Some("plus".to_string()),
+        rate_limit: Some(WindowPair {
+            allowed: None,
+            limit_reached: None,
+            extra: BTreeMap::new(),
+            primary_window: Some(UsageWindow {
+                used_percent: Some(i64::MIN),
+                reset_at: None,
+                limit_window_seconds: Some(18_000),
+            }),
+            secondary_window: Some(UsageWindow {
+                used_percent: None,
+                reset_at: Some(1_700_259_200),
+                limit_window_seconds: Some(604_800),
+            }),
+        }),
+        code_review_rate_limit: None,
+        rate_limit_reset_credits: None,
+        additional_rate_limits: Vec::new(),
+    };
+
+    assert_eq!(format_main_windows_compact(&usage), "5h 100% | weekly ?");
+    assert_eq!(
+        format_main_windows(&usage),
+        format!(
+            "5h: 100% left (-9223372036854775808% used), resets - | weekly: usage unknown, resets {}",
+            format_reset_time(Some(1_700_259_200))
+        )
+    );
+    assert_eq!(
+        format_main_reset_summary(&usage),
+        format!(
+            "5h unknown | weekly {}",
+            format_precise_reset_time(Some(1_700_259_200))
+        )
+    );
+}
+
+#[test]
 fn gemini_renderer_uses_normalized_batch_results() {
     let info = |bucket: GeminiQuotaBucket| GeminiQuotaInfo {
         email: None,

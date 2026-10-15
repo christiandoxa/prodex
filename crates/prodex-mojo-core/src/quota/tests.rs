@@ -208,6 +208,46 @@ fn quota_model_policy_kernel_preserves_expected_contracts() {
 
 #[cfg(all(test, feature = "mojo-quota"))]
 #[test]
+fn quota_window_text_abi_preserves_numeric_unicode_and_missing_boundaries() {
+    assert_eq!(
+        quota_window_status_display(QuotaWindowDisplayInput {
+            label: "週次",
+            used_percent: Some(i64::MIN),
+            reset: Some("🕘"),
+        })
+        .unwrap(),
+        "週次: 100% left (-9223372036854775808% used), resets 🕘"
+    );
+    assert_eq!(
+        quota_window_details_display(Some(i64::MAX), "-").unwrap(),
+        "0% left (9223372036854775807% used), resets -"
+    );
+    assert_eq!(
+        quota_window_pair_display(
+            Some(QuotaWindowDisplayInput {
+                label: "5h",
+                used_percent: None,
+                reset: Some("-"),
+            }),
+            Some(QuotaWindowDisplayInput {
+                label: "weekly",
+                used_percent: Some(20),
+                reset: None,
+            }),
+            true,
+        )
+        .unwrap(),
+        "5h ? | weekly 80%"
+    );
+    assert_eq!(
+        quota_reset_summary_display(Some(QuotaResetWindowDisplayInput { reset: None }), None,)
+            .unwrap(),
+        "5h unknown | weekly unavailable"
+    );
+}
+
+#[cfg(all(test, feature = "mojo-quota"))]
+#[test]
 fn round_f64_matches_rust_float_to_int_semantics() {
     for value in [
         0.0,

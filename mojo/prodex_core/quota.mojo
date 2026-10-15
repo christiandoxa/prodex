@@ -2142,6 +2142,331 @@ def quota_display_put_i64(
     return quota_display_put_u64(writer, magnitude)
 
 
+comptime QUOTA_WINDOW_TEXT_MODE_DETAILS: Int64 = 0
+comptime QUOTA_WINDOW_TEXT_MODE_STATUS: Int64 = 1
+comptime QUOTA_WINDOW_TEXT_MODE_COMPACT: Int64 = 2
+comptime QUOTA_WINDOW_TEXT_MODE_PAIR: Int64 = 3
+comptime QUOTA_WINDOW_TEXT_MODE_PAIR_COMPACT: Int64 = 4
+comptime QUOTA_WINDOW_TEXT_MODE_RESET_SUMMARY: Int64 = 5
+
+
+def quota_window_text_valid_span(address: UInt, length: Int64) -> Bool:
+    return length >= 0 and (length == 0 or address != 0)
+
+
+def quota_window_text_valid_window(
+    present: Int64,
+    label_address: UInt,
+    label_length: Int64,
+    used_present: Int64,
+    reset_present: Int64,
+    reset_address: UInt,
+    reset_length: Int64,
+) -> Bool:
+    if present != 0 and present != 1:
+        return False
+    if present == 0:
+        return (
+            label_length == 0
+            and used_present == 0
+            and reset_present == 0
+            and reset_length == 0
+        )
+    return (
+        quota_window_text_valid_span(label_address, label_length)
+        and (used_present == 0 or used_present == 1)
+        and (reset_present == 0 or reset_present == 1)
+        and quota_window_text_valid_span(reset_address, reset_length)
+    )
+
+
+def quota_window_text_put_span(
+    writer: Pointer[mut=True, QuotaDisplayWriter, _],
+    address: UInt,
+    length: Int64,
+) -> Bool:
+    if not quota_window_text_valid_span(address, length):
+        return False
+    if length == 0:
+        return True
+    var source = Pointer[mut=False, UInt8, ImmUntrackedOrigin](
+        unsafe_from_address=Int(address)
+    )
+    for index in range(length):
+        if not quota_display_put_byte(writer, source[unsafe_offset=index]):
+            return False
+    return True
+
+
+def quota_window_text_put_details(
+    writer: Pointer[mut=True, QuotaDisplayWriter, _],
+    used_present: Int64,
+    used: Int64,
+    reset_present: Int64,
+    reset_address: UInt,
+    reset_length: Int64,
+) -> Bool:
+    if used_present == 1:
+        if (
+            not quota_display_put_i64(
+                writer, prodex_quota_remaining_percent(used, 1)
+            )
+            or not quota_display_put_literal(writer, StringSlice("% left ("))
+            or not quota_display_put_i64(writer, used)
+            or not quota_display_put_literal(writer, StringSlice("% used), resets "))
+        ):
+            return False
+    elif not quota_display_put_literal(
+        writer, StringSlice("usage unknown, resets ")
+    ):
+        return False
+
+    if reset_present == 1:
+        return quota_window_text_put_span(writer, reset_address, reset_length)
+    return quota_display_put_literal(writer, StringSlice("-"))
+
+
+def quota_window_text_put_status(
+    writer: Pointer[mut=True, QuotaDisplayWriter, _],
+    label_address: UInt,
+    label_length: Int64,
+    used_present: Int64,
+    used: Int64,
+    reset_present: Int64,
+    reset_address: UInt,
+    reset_length: Int64,
+) -> Bool:
+    return (
+        quota_window_text_put_span(writer, label_address, label_length)
+        and quota_display_put_literal(writer, StringSlice(": "))
+        and quota_window_text_put_details(
+            writer,
+            used_present,
+            used,
+            reset_present,
+            reset_address,
+            reset_length,
+        )
+    )
+
+
+def quota_window_text_put_compact(
+    writer: Pointer[mut=True, QuotaDisplayWriter, _],
+    label_address: UInt,
+    label_length: Int64,
+    used_present: Int64,
+    used: Int64,
+) -> Bool:
+    if not quota_window_text_put_span(writer, label_address, label_length):
+        return False
+    if not quota_display_put_byte(writer, UInt8(32)):
+        return False
+    if used_present == 1:
+        return (
+            quota_display_put_i64(
+                writer, prodex_quota_remaining_percent(used, 1)
+            )
+            and quota_display_put_byte(writer, UInt8(37))
+        )
+    return quota_display_put_byte(writer, UInt8(63))
+
+
+def quota_window_text_put_reset(
+    writer: Pointer[mut=True, QuotaDisplayWriter, _],
+    label: StringSlice,
+    present: Int64,
+    reset_present: Int64,
+    reset_address: UInt,
+    reset_length: Int64,
+) -> Bool:
+    if not quota_display_put_literal(writer, label):
+        return False
+    if present == 0:
+        return quota_display_put_literal(writer, StringSlice(" unavailable"))
+    if not quota_display_put_byte(writer, UInt8(32)):
+        return False
+    if reset_present == 1:
+        return quota_window_text_put_span(writer, reset_address, reset_length)
+    return quota_display_put_literal(writer, StringSlice("unknown"))
+
+
+@export("prodex_quota_window_text_v1")
+def prodex_quota_window_text_v1(
+    abi_version: Int64,
+    mode: Int64,
+    first_present: Int64,
+    first_label_address: UInt,
+    first_label_length: Int64,
+    first_used_present: Int64,
+    first_used: Int64,
+    first_reset_present: Int64,
+    first_reset_address: UInt,
+    first_reset_length: Int64,
+    second_present: Int64,
+    second_label_address: UInt,
+    second_label_length: Int64,
+    second_used_present: Int64,
+    second_used: Int64,
+    second_reset_present: Int64,
+    second_reset_address: UInt,
+    second_reset_length: Int64,
+    output_address: UInt,
+    output_capacity: Int64,
+    written_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != QUOTA_MODEL_POLICY_ABI_VERSION:
+        return QUOTA_MODEL_POLICY_ABI
+    if (
+        mode < QUOTA_WINDOW_TEXT_MODE_DETAILS
+        or mode > QUOTA_WINDOW_TEXT_MODE_RESET_SUMMARY
+        or output_address == 0
+        or output_capacity < 0
+        or written_address == 0
+        or not quota_window_text_valid_window(
+            first_present,
+            first_label_address,
+            first_label_length,
+            first_used_present,
+            first_reset_present,
+            first_reset_address,
+            first_reset_length,
+        )
+        or not quota_window_text_valid_window(
+            second_present,
+            second_label_address,
+            second_label_length,
+            second_used_present,
+            second_reset_present,
+            second_reset_address,
+            second_reset_length,
+        )
+    ):
+        return QUOTA_MODEL_POLICY_INVALID
+    if mode <= QUOTA_WINDOW_TEXT_MODE_COMPACT and (
+        first_present != 1 or second_present != 0
+    ):
+        return QUOTA_MODEL_POLICY_INVALID
+    if mode == QUOTA_WINDOW_TEXT_MODE_RESET_SUMMARY and (
+        first_label_length != 0
+        or second_label_length != 0
+        or first_used_present != 0
+        or second_used_present != 0
+    ):
+        return QUOTA_MODEL_POLICY_INVALID
+
+    var output = Pointer[mut=True, UInt8, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    var writer = QuotaDisplayWriter(output, output_capacity, 0)
+    var written = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(written_address)
+    )
+    written[] = 0
+
+    var ok = True
+    if mode == QUOTA_WINDOW_TEXT_MODE_DETAILS:
+        ok = quota_window_text_put_details(
+            Pointer(to=writer),
+            first_used_present,
+            first_used,
+            first_reset_present,
+            first_reset_address,
+            first_reset_length,
+        )
+    elif mode == QUOTA_WINDOW_TEXT_MODE_STATUS:
+        ok = quota_window_text_put_status(
+            Pointer(to=writer),
+            first_label_address,
+            first_label_length,
+            first_used_present,
+            first_used,
+            first_reset_present,
+            first_reset_address,
+            first_reset_length,
+        )
+    elif mode == QUOTA_WINDOW_TEXT_MODE_COMPACT:
+        ok = quota_window_text_put_compact(
+            Pointer(to=writer),
+            first_label_address,
+            first_label_length,
+            first_used_present,
+            first_used,
+        )
+    elif mode == QUOTA_WINDOW_TEXT_MODE_PAIR or mode == QUOTA_WINDOW_TEXT_MODE_PAIR_COMPACT:
+        if first_present == 0 and second_present == 0:
+            ok = quota_display_put_literal(Pointer(to=writer), StringSlice("-"))
+        else:
+            if first_present == 1:
+                if mode == QUOTA_WINDOW_TEXT_MODE_PAIR:
+                    ok = quota_window_text_put_status(
+                        Pointer(to=writer),
+                        first_label_address,
+                        first_label_length,
+                        first_used_present,
+                        first_used,
+                        first_reset_present,
+                        first_reset_address,
+                        first_reset_length,
+                    )
+                else:
+                    ok = quota_window_text_put_compact(
+                        Pointer(to=writer),
+                        first_label_address,
+                        first_label_length,
+                        first_used_present,
+                        first_used,
+                    )
+            if ok and second_present == 1:
+                if first_present == 1:
+                    ok = quota_display_put_literal(
+                        Pointer(to=writer), StringSlice(" | ")
+                    )
+                if ok and mode == QUOTA_WINDOW_TEXT_MODE_PAIR:
+                    ok = quota_window_text_put_status(
+                        Pointer(to=writer),
+                        second_label_address,
+                        second_label_length,
+                        second_used_present,
+                        second_used,
+                        second_reset_present,
+                        second_reset_address,
+                        second_reset_length,
+                    )
+                elif ok:
+                    ok = quota_window_text_put_compact(
+                        Pointer(to=writer),
+                        second_label_address,
+                        second_label_length,
+                        second_used_present,
+                        second_used,
+                    )
+    else:
+        ok = quota_window_text_put_reset(
+            Pointer(to=writer),
+            StringSlice("5h"),
+            first_present,
+            first_reset_present,
+            first_reset_address,
+            first_reset_length,
+        )
+        if ok:
+            ok = quota_display_put_literal(Pointer(to=writer), StringSlice(" | "))
+        if ok:
+            ok = quota_window_text_put_reset(
+                Pointer(to=writer),
+                StringSlice("weekly"),
+                second_present,
+                second_reset_present,
+                second_reset_address,
+                second_reset_length,
+            )
+
+    if not ok:
+        return QUOTA_MODEL_POLICY_CAPACITY
+    written[] = writer.written
+    return QUOTA_MODEL_POLICY_OK
+
+
 def quota_copilot_write_feature(
     writer: Pointer[mut=True, QuotaDisplayWriter, _],
     label: StringSlice,
