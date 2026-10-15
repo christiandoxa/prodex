@@ -184,110 +184,111 @@ pub fn earliest_required_main_reset_epoch(usage: &UsageResponse) -> Option<i64> 
 }
 
 pub fn format_main_windows(usage: &UsageResponse) -> String {
-    usage
-        .rate_limit
-        .as_ref()
-        .map(format_window_pair)
-        .unwrap_or_else(|| "-".to_string())
+    format_window_pair_for_display(usage.rate_limit.as_ref(), false)
 }
 
 pub fn format_main_windows_compact(usage: &UsageResponse) -> String {
-    usage
-        .rate_limit
-        .as_ref()
-        .map(format_window_pair_compact)
-        .unwrap_or_else(|| "-".to_string())
+    format_window_pair_for_display(usage.rate_limit.as_ref(), true)
 }
 
 pub fn format_main_reset_summary(usage: &UsageResponse) -> String {
-    usage
+    let five_hour_window = usage
         .rate_limit
         .as_ref()
-        .map(format_main_reset_pair)
-        .unwrap_or_else(|| "5h unavailable | weekly unavailable".to_string())
-}
-
-fn format_main_reset_pair(rate_limit: &WindowPair) -> String {
-    [
-        format_main_reset_window(rate_limit, "5h"),
-        format_main_reset_window(rate_limit, "weekly"),
-    ]
-    .join(" | ")
-}
-
-fn format_main_reset_window(rate_limit: &WindowPair, label: &str) -> String {
-    match find_main_window(rate_limit, label) {
-        Some(window) => {
-            let reset = window
-                .reset_at
-                .map(|epoch| format_precise_reset_time(Some(epoch)))
-                .unwrap_or_else(|| "unknown".to_string());
-            format!("{label} {reset}")
-        }
-        None => format!("{label} unavailable"),
-    }
+        .and_then(|pair| find_main_window(pair, "5h"));
+    let weekly_window = usage
+        .rate_limit
+        .as_ref()
+        .and_then(|pair| find_main_window(pair, "weekly"));
+    let five_hour_reset = five_hour_window.and_then(|window| {
+        window
+            .reset_at
+            .map(|epoch| format_precise_reset_time(Some(epoch)))
+    });
+    let weekly_reset = weekly_window.and_then(|window| {
+        window
+            .reset_at
+            .map(|epoch| format_precise_reset_time(Some(epoch)))
+    });
+    prodex_mojo_core::quota::quota_reset_summary_display(
+        five_hour_window.map(|_| prodex_mojo_core::quota::QuotaResetWindowDisplayInput {
+            reset: five_hour_reset.as_deref(),
+        }),
+        weekly_window.map(|_| prodex_mojo_core::quota::QuotaResetWindowDisplayInput {
+            reset: weekly_reset.as_deref(),
+        }),
+    )
+    .expect("Mojo quota reset summary display returned invalid output")
 }
 
 pub(super) fn format_window_pair(rate_limit: &WindowPair) -> String {
-    let mut parts = Vec::new();
-    if let Some(primary) = rate_limit.primary_window.as_ref() {
-        parts.push(format_window_status(primary));
-    }
-    if let Some(secondary) = rate_limit.secondary_window.as_ref() {
-        parts.push(format_window_status(secondary));
-    }
-
-    if parts.is_empty() {
-        "-".to_string()
-    } else {
-        parts.join(" | ")
-    }
+    format_window_pair_for_display(Some(rate_limit), false)
 }
 
 pub(super) fn format_window_pair_compact(rate_limit: &WindowPair) -> String {
-    let mut parts = Vec::new();
-    if let Some(primary) = rate_limit.primary_window.as_ref() {
-        parts.push(format_window_status_compact(primary));
-    }
-    if let Some(secondary) = rate_limit.secondary_window.as_ref() {
-        parts.push(format_window_status_compact(secondary));
-    }
-
-    if parts.is_empty() {
-        "-".to_string()
-    } else {
-        parts.join(" | ")
-    }
-}
-
-fn format_named_window_status(label: &str, window: &UsageWindow) -> String {
-    format!("{label}: {}", format_window_details(window))
+    format_window_pair_for_display(Some(rate_limit), true)
 }
 
 pub fn format_window_status(window: &UsageWindow) -> String {
-    format_named_window_status(&window_label(window.limit_window_seconds), window)
+    let label = window_label(window.limit_window_seconds);
+    let reset = format_reset_time(window.reset_at);
+    prodex_mojo_core::quota::quota_window_status_display(
+        prodex_mojo_core::quota::QuotaWindowDisplayInput {
+            label: &label,
+            used_percent: window.used_percent,
+            reset: Some(&reset),
+        },
+    )
+    .expect("Mojo quota window status display returned invalid output")
 }
 
 pub fn format_window_status_compact(window: &UsageWindow) -> String {
     let label = window_label(window.limit_window_seconds);
-    match window.used_percent {
-        Some(used) => {
-            let remaining = remaining_percent(Some(used));
-            format!("{label} {remaining}%")
-        }
-        None => format!("{label} ?"),
-    }
+    prodex_mojo_core::quota::quota_window_status_compact_display(&label, window.used_percent)
+        .expect("Mojo compact quota window display returned invalid output")
 }
 
 pub(super) fn format_window_details(window: &UsageWindow) -> String {
     let reset = format_reset_time(window.reset_at);
-    match window.used_percent {
-        Some(used) => {
-            let remaining = remaining_percent(window.used_percent);
-            format!("{remaining}% left ({used}% used), resets {reset}")
+    prodex_mojo_core::quota::quota_window_details_display(window.used_percent, &reset)
+        .expect("Mojo quota window details display returned invalid output")
+}
+
+fn format_window_pair_for_display(pair: Option<&WindowPair>, compact: bool) -> String {
+    let primary = pair
+        .and_then(|pair| pair.primary_window.as_ref())
+        .map(|window| {
+            (
+                window_label(window.limit_window_seconds),
+                window.used_percent,
+                (!compact).then(|| format_reset_time(window.reset_at)),
+            )
+        });
+    let secondary = pair
+        .and_then(|pair| pair.secondary_window.as_ref())
+        .map(|window| {
+            (
+                window_label(window.limit_window_seconds),
+                window.used_percent,
+                (!compact).then(|| format_reset_time(window.reset_at)),
+            )
+        });
+    let primary_input = primary.as_ref().map(|(label, used_percent, reset)| {
+        prodex_mojo_core::quota::QuotaWindowDisplayInput {
+            label,
+            used_percent: *used_percent,
+            reset: reset.as_deref(),
         }
-        None => format!("usage unknown, resets {reset}"),
-    }
+    });
+    let secondary_input = secondary.as_ref().map(|(label, used_percent, reset)| {
+        prodex_mojo_core::quota::QuotaWindowDisplayInput {
+            label,
+            used_percent: *used_percent,
+            reset: reset.as_deref(),
+        }
+    });
+    prodex_mojo_core::quota::quota_window_pair_display(primary_input, secondary_input, compact)
+        .expect("Mojo quota window pair display returned invalid output")
 }
 
 pub fn collect_blocked_limits(

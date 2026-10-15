@@ -45,6 +45,12 @@ pub use usage_response::{
     QuotaUsageResponseInput, QuotaUsageResponsePlan, QuotaUsageStringAliases,
     QuotaUsageTextSelection, QuotaUsageTextSource, quota_usage_response_plan,
 };
+mod window_display;
+pub use window_display::{
+    QuotaResetWindowDisplayInput, QuotaWindowDisplayInput, quota_reset_summary_display,
+    quota_window_details_display, quota_window_pair_display, quota_window_status_compact_display,
+    quota_window_status_display,
+};
 mod display;
 pub use display::{
     CopilotQuotaDisplay, GeminiQuotaDisplay, quota_copilot_display, quota_copilot_feature_key,
