@@ -3046,6 +3046,54 @@ def kiro_raw_text_piece(
         return 0
     return 0
 
+def kiro_raw_strip_external_tool_controls(
+    writer: Pointer[mut=True, KiroResponseWriter, _],
+    view: ProdexRichStringView,
+    sub_agent: Bool,
+) -> Bool:
+    var root = kiro_raw_root(view)
+    if root[0] < 0 or not kiro_put_byte(writer, 123):
+        return False
+    var first: Int64 = 1
+    var first_ptr = Pointer(to=first)
+    var cursor = deepseek_json_skip_ws(view, root[0] + 1, root[1] - 1)
+    while cursor < root[1] - 1:
+        var key_start = cursor
+        var key_end = deepseek_json_string_end(view, key_start, root[1] - 1)
+        if key_end < 0:
+            return False
+        cursor = deepseek_json_skip_ws(view, key_end, root[1] - 1)
+        if cursor >= root[1] - 1 or deepseek_json_byte(view, cursor) != 58:
+            return False
+        var value_start = deepseek_json_skip_ws(view, cursor + 1, root[1] - 1)
+        var value_end = deepseek_json_value_end(view, value_start, root[1] - 1, 0)
+        if value_end < 0:
+            return False
+        var drop = (
+            kiro_raw_key_is(view, key_start, key_end, StringSlice("tools"))
+            or kiro_raw_key_is(view, key_start, key_end, StringSlice("functions"))
+        )
+        if sub_agent:
+            drop = (
+                drop
+                or kiro_raw_key_is(view, key_start, key_end, StringSlice("parallel_tool_calls"))
+                or kiro_raw_key_is(view, key_start, key_end, StringSlice("tool_choice"))
+                or kiro_raw_key_is(view, key_start, key_end, StringSlice("function_call"))
+                or kiro_raw_key_is(view, key_start, key_end, StringSlice("web_search_options"))
+            )
+        if not drop and not kiro_raw_put_member(
+            writer, view, key_start, key_end, value_start, value_end, first_ptr
+        ):
+            return False
+        cursor = deepseek_json_skip_ws(view, value_end, root[1] - 1)
+        if cursor < root[1] - 1 and deepseek_json_byte(view, cursor) == 44:
+            cursor = deepseek_json_skip_ws(view, cursor + 1, root[1] - 1)
+            continue
+        if cursor != root[1] - 1:
+            return False
+        break
+    return kiro_put_byte(writer, 125)
+
 def kiro_raw_put_text_json_string(
     writer: Pointer[mut=True, KiroResponseWriter, _],
     view: ProdexRichStringView,
@@ -3899,6 +3947,48 @@ def kiro_chat_request_rewrite_v1(
     var writer = KiroResponseWriter(output, output_capacity, 0)
     var writer_ptr = Pointer(to=writer)
     if not kiro_raw_rewrite_chat_request(writer_ptr, view, issue):
+        if writer.written >= output_capacity:
+            written[] = writer.written
+            return KIRO_KERNEL_STATUS_CAPACITY
+        return KIRO_KERNEL_STATUS_INVALID
+    written[] = writer.written
+    return KIRO_KERNEL_STATUS_OK
+
+def kiro_external_tool_controls_v1(
+    abi_version: Int64,
+    input_address: UInt,
+    input_length: Int64,
+    sub_agent: Int64,
+    output_address: UInt,
+    output_capacity: Int64,
+    written_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != PRODEX_RICH_ABI_VERSION:
+        return KIRO_KERNEL_STATUS_ABI
+    if (
+        input_length < 0
+        or input_length > KIRO_KERNEL_MAX_BYTES
+        or sub_agent < 0
+        or sub_agent > 1
+        or input_address == 0
+        or output_address == 0
+        or output_capacity <= 0
+        or written_address == 0
+    ):
+        return KIRO_KERNEL_STATUS_INVALID
+    var view = ProdexRichStringView(input_address, UInt(input_length))
+    if not rich_view_valid(view, KIRO_KERNEL_MAX_BYTES):
+        return KIRO_KERNEL_STATUS_UTF8
+    var output = Pointer[mut=True, UInt8, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    var written = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(written_address)
+    )
+    written[] = 0
+    var writer = KiroResponseWriter(output, output_capacity, 0)
+    var writer_ptr = Pointer(to=writer)
+    if not kiro_raw_strip_external_tool_controls(writer_ptr, view, sub_agent == 1):
         if writer.written >= output_capacity:
             written[] = writer.written
             return KIRO_KERNEL_STATUS_CAPACITY

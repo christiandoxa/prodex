@@ -42,6 +42,7 @@ pub use self::request::{
     KiroProviderCoreRequestError, kiro_provider_core_chat_completions_request_body,
     kiro_provider_core_prompt_from_chat_messages,
     kiro_provider_core_responses_items_from_chat_message,
+    kiro_provider_core_strip_external_tool_controls,
     kiro_provider_core_tool_choice_from_legacy_chat_function_call,
     kiro_provider_core_tool_from_legacy_chat_function,
 };
