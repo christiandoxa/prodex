@@ -209,6 +209,12 @@ pub use runtime_doctor_bindings::*;
 #[path = "rich/runtime_doctor_render.rs"]
 mod runtime_doctor_render;
 pub use runtime_doctor_render::*;
+#[path = "rich/runtime_doctor_facet.rs"]
+mod runtime_doctor_facet;
+pub use runtime_doctor_facet::*;
+#[path = "rich/runtime_doctor_report_fields.rs"]
+mod runtime_doctor_report_fields;
+pub use runtime_doctor_report_fields::*;
 #[path = "rich/super_expose.rs"]
 mod super_expose;
 pub use super_expose::*;

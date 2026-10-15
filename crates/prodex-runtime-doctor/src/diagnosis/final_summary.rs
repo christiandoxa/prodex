@@ -9,12 +9,17 @@ mod mojo;
 pub use log_summary::runtime_doctor_finalize_log_summary;
 
 pub fn runtime_doctor_top_facet(summary: &RuntimeDoctorSummary, facet: &str) -> Option<String> {
-    summary.facet_counts.get(facet).and_then(|counts| {
-        counts
-            .iter()
-            .max_by_key(|(value, count)| (**count, value.as_str()))
-            .map(|(value, count)| format!("{value} ({count})"))
-    })
+    let counts = summary.facet_counts.get(facet)?;
+    let selection = prodex_mojo_core::rich::runtime_doctor_top_facet_selection(
+        counts.iter().map(|(value, count)| (value.as_str(), *count)),
+    )
+    .expect("Mojo runtime-doctor facet reducer returned invalid output")?;
+    let (value, count) = counts
+        .iter()
+        .nth(selection.index)
+        .expect("Mojo runtime-doctor facet index is in range");
+    debug_assert_eq!(*count, selection.count);
+    Some(format!("{value} ({count})"))
 }
 
 pub fn runtime_doctor_finalize_summary(summary: &mut RuntimeDoctorSummary) {

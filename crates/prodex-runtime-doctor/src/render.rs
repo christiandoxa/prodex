@@ -136,54 +136,86 @@ pub fn runtime_doctor_fields_for_summary(
 
     let legacy_prev =
         diagnosis::runtime_doctor_marker_count(summary, "previous_response_fresh_fallback");
-    if legacy_prev > 0 {
-        fields.push(("Legacy prev recovery".to_string(), legacy_prev.to_string()));
-    }
-
     let compact_final = diagnosis::runtime_doctor_marker_count(summary, "compact_final_failure");
-    if compact_final > 0 {
-        fields.push(("Compact final".to_string(), compact_final.to_string()));
-        fields.push((
-            "Compact exit".to_string(),
-            marker_field(summary, "compact_final_failure", "exit"),
-        ));
-        fields.push((
-            "Compact reason".to_string(),
-            marker_field(summary, "compact_final_failure", "reason"),
-        ));
-        fields.push((
-            "Compact last fail".to_string(),
-            marker_field(summary, "compact_final_failure", "last_failure"),
-        ));
-    }
-
-    if diagnosis::runtime_doctor_marker_count(summary, "selection_skip_sync_probe") > 0 {
-        let deferred = summary
-            .marker_last_fields
-            .get("selection_skip_sync_probe")
-            .and_then(|fields| {
-                fields
-                    .get("cold_start_jobs")
-                    .map(|count| format!("{count} job(s)"))
-                    .or_else(|| {
-                        fields
-                            .get("cold_start_profiles")
+    let sync_probe = diagnosis::runtime_doctor_marker_count(summary, "selection_skip_sync_probe");
+    let probe_pressure =
+        diagnosis::runtime_doctor_marker_count(summary, "profile_probe_refresh_backpressure");
+    let mut hot_reason = diagnosis::runtime_doctor_top_facet(summary, "reason");
+    let sync_fields = summary.marker_last_fields.get("selection_skip_sync_probe");
+    let report_plan = prodex_mojo_core::rich::runtime_doctor_report_field_plan(
+        legacy_prev > 0,
+        compact_final > 0,
+        sync_probe > 0,
+        probe_pressure > 0,
+        hot_reason.is_some(),
+        sync_fields.is_some_and(|fields| fields.contains_key("cold_start_jobs")),
+        sync_fields.is_some_and(|fields| fields.contains_key("cold_start_profiles")),
+    )
+    .expect("Mojo runtime-doctor report field plan returned invalid output");
+    for field in report_plan.fields[..report_plan.field_count]
+        .iter()
+        .copied()
+    {
+        match field {
+            prodex_mojo_core::rich::RUNTIME_DOCTOR_REPORT_FIELD_LEGACY_PREV => {
+                fields.push(("Legacy prev recovery".to_string(), legacy_prev.to_string()));
+            }
+            prodex_mojo_core::rich::RUNTIME_DOCTOR_REPORT_FIELD_COMPACT_FINAL => {
+                fields.push(("Compact final".to_string(), compact_final.to_string()));
+            }
+            prodex_mojo_core::rich::RUNTIME_DOCTOR_REPORT_FIELD_COMPACT_EXIT => {
+                fields.push((
+                    "Compact exit".to_string(),
+                    marker_field(summary, "compact_final_failure", "exit"),
+                ));
+            }
+            prodex_mojo_core::rich::RUNTIME_DOCTOR_REPORT_FIELD_COMPACT_REASON => {
+                fields.push((
+                    "Compact reason".to_string(),
+                    marker_field(summary, "compact_final_failure", "reason"),
+                ));
+            }
+            prodex_mojo_core::rich::RUNTIME_DOCTOR_REPORT_FIELD_COMPACT_LAST_FAILURE => {
+                fields.push((
+                    "Compact last fail".to_string(),
+                    marker_field(summary, "compact_final_failure", "last_failure"),
+                ));
+            }
+            prodex_mojo_core::rich::RUNTIME_DOCTOR_REPORT_FIELD_SYNC_DEFERRED => {
+                let deferred = match report_plan.sync_source {
+                    prodex_mojo_core::rich::RUNTIME_DOCTOR_REPORT_SYNC_SOURCE_JOBS => sync_fields
+                        .and_then(|fields| fields.get("cold_start_jobs"))
+                        .map(|count| format!("{count} job(s)"))
+                        .unwrap_or_else(|| "-".to_string()),
+                    prodex_mojo_core::rich::RUNTIME_DOCTOR_REPORT_SYNC_SOURCE_PROFILES => {
+                        sync_fields
+                            .and_then(|fields| fields.get("cold_start_profiles"))
                             .map(|count| format!("{count} profile(s)"))
-                    })
-            })
-            .unwrap_or_else(|| "-".to_string());
-        fields.push(("Sync-probe deferred".to_string(), deferred));
-    }
-
-    if diagnosis::runtime_doctor_marker_count(summary, "profile_probe_refresh_backpressure") > 0 {
-        fields.push((
-            "Probe pressure profile".to_string(),
-            marker_field(summary, "profile_probe_refresh_backpressure", "profile"),
-        ));
-    }
-
-    if let Some(reason) = diagnosis::runtime_doctor_top_facet(summary, "reason") {
-        fields.push(("Hot reason".to_string(), reason));
+                            .unwrap_or_else(|| "-".to_string())
+                    }
+                    prodex_mojo_core::rich::RUNTIME_DOCTOR_REPORT_SYNC_SOURCE_NONE => {
+                        "-".to_string()
+                    }
+                    _ => unreachable!("validated Mojo sync-probe detail source"),
+                };
+                fields.push(("Sync-probe deferred".to_string(), deferred));
+            }
+            prodex_mojo_core::rich::RUNTIME_DOCTOR_REPORT_FIELD_PROBE_PRESSURE_PROFILE => {
+                fields.push((
+                    "Probe pressure profile".to_string(),
+                    marker_field(summary, "profile_probe_refresh_backpressure", "profile"),
+                ));
+            }
+            prodex_mojo_core::rich::RUNTIME_DOCTOR_REPORT_FIELD_HOT_REASON => {
+                fields.push((
+                    "Hot reason".to_string(),
+                    hot_reason
+                        .take()
+                        .expect("Mojo report plan selected an absent hot reason"),
+                ));
+            }
+            _ => unreachable!("validated Mojo runtime-doctor report field"),
+        }
     }
 
     fields

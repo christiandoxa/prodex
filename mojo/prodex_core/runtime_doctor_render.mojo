@@ -998,3 +998,95 @@ def prodex_mojo_runtime_doctor_count_breakdown_v1(
             return 3
     written[] = writer.written
     return 0
+
+
+# Mojo owns the optional human-report row order and the cold-start detail
+# precedence. Rust materializes the selected rows around this bounded plan.
+comptime RUNTIME_DOCTOR_REPORT_FIELDS_ABI_VERSION: Int64 = 1
+comptime RUNTIME_DOCTOR_REPORT_FIELDS_MAX: Int64 = 8
+comptime RUNTIME_DOCTOR_REPORT_FIELD_LEGACY_PREV: Int64 = 0
+comptime RUNTIME_DOCTOR_REPORT_FIELD_COMPACT_FINAL: Int64 = 1
+comptime RUNTIME_DOCTOR_REPORT_FIELD_COMPACT_EXIT: Int64 = 2
+comptime RUNTIME_DOCTOR_REPORT_FIELD_COMPACT_REASON: Int64 = 3
+comptime RUNTIME_DOCTOR_REPORT_FIELD_COMPACT_LAST_FAILURE: Int64 = 4
+comptime RUNTIME_DOCTOR_REPORT_FIELD_SYNC_DEFERRED: Int64 = 5
+comptime RUNTIME_DOCTOR_REPORT_FIELD_PROBE_PRESSURE_PROFILE: Int64 = 6
+comptime RUNTIME_DOCTOR_REPORT_FIELD_HOT_REASON: Int64 = 7
+comptime RUNTIME_DOCTOR_REPORT_SYNC_SOURCE_NONE: Int64 = 0
+comptime RUNTIME_DOCTOR_REPORT_SYNC_SOURCE_JOBS: Int64 = 1
+comptime RUNTIME_DOCTOR_REPORT_SYNC_SOURCE_PROFILES: Int64 = 2
+
+
+def runtime_doctor_report_fields_append(
+    fields: Pointer[mut=True, Int64, _], count: Pointer[mut=True, Int64, _], value: Int64
+) -> Bool:
+    if count[] < 0 or count[] >= RUNTIME_DOCTOR_REPORT_FIELDS_MAX:
+        return False
+    fields[unsafe_offset=count[]] = value
+    count[] += 1
+    return True
+
+
+@export("prodex_mojo_runtime_doctor_report_fields_v1")
+def prodex_mojo_runtime_doctor_report_fields_v1(
+    abi_version: Int64,
+    presence_bits: Int64,
+    fields_address: UInt,
+    field_count_address: UInt,
+    sync_source_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != RUNTIME_DOCTOR_REPORT_FIELDS_ABI_VERSION:
+        return 4
+    if (
+        presence_bits < 0
+        or presence_bits > 127
+        or fields_address == 0
+        or field_count_address == 0
+        or sync_source_address == 0
+    ):
+        return 1
+    var fields = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(fields_address)
+    )
+    var field_count = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(field_count_address)
+    )
+    var sync_source = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(sync_source_address)
+    )
+    for index in range(RUNTIME_DOCTOR_REPORT_FIELDS_MAX):
+        fields[unsafe_offset=index] = -1
+    field_count[] = 0
+    sync_source[] = RUNTIME_DOCTOR_REPORT_SYNC_SOURCE_NONE
+    if presence_bits & 1 != 0:
+        if not runtime_doctor_report_fields_append(
+            fields, field_count, RUNTIME_DOCTOR_REPORT_FIELD_LEGACY_PREV
+        ):
+            return 3
+    if presence_bits & 2 != 0:
+        for field in range(
+            RUNTIME_DOCTOR_REPORT_FIELD_COMPACT_FINAL,
+            RUNTIME_DOCTOR_REPORT_FIELD_COMPACT_LAST_FAILURE + 1,
+        ):
+            if not runtime_doctor_report_fields_append(fields, field_count, field):
+                return 3
+    if presence_bits & 4 != 0:
+        if not runtime_doctor_report_fields_append(
+            fields, field_count, RUNTIME_DOCTOR_REPORT_FIELD_SYNC_DEFERRED
+        ):
+            return 3
+        if presence_bits & 32 != 0:
+            sync_source[] = RUNTIME_DOCTOR_REPORT_SYNC_SOURCE_JOBS
+        elif presence_bits & 64 != 0:
+            sync_source[] = RUNTIME_DOCTOR_REPORT_SYNC_SOURCE_PROFILES
+    if presence_bits & 8 != 0:
+        if not runtime_doctor_report_fields_append(
+            fields, field_count, RUNTIME_DOCTOR_REPORT_FIELD_PROBE_PRESSURE_PROFILE
+        ):
+            return 3
+    if presence_bits & 16 != 0:
+        if not runtime_doctor_report_fields_append(
+            fields, field_count, RUNTIME_DOCTOR_REPORT_FIELD_HOT_REASON
+        ):
+            return 3
+    return 0

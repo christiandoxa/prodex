@@ -1451,6 +1451,16 @@
         ]
       },
       {
+        "path": "crates/prodex-mojo-core/src/rich/runtime_doctor_facet.rs",
+        "language": "rust",
+        "classification": "MIXED",
+        "production_reachable": true,
+        "role": "adapter",
+        "operations": [
+          "runtime_doctor_top_facet_selection"
+        ]
+      },
+      {
         "path": "mojo/prodex_core/runtime_doctor_marker_summary.mojo",
         "language": "mojo",
         "classification": "DETERMINISTIC_DOMAIN",
@@ -1462,6 +1472,7 @@
           "runtime_doctor_marker_context_reason_facet_aggregation",
           "runtime_doctor_selection_record_plan",
           "runtime_doctor_marker_context_summary_order",
+          "runtime_doctor_top_facet_selection",
           "runtime_doctor_log_metric_plan",
           "runtime_doctor_unsigned_field"
         ]
@@ -1494,7 +1505,8 @@
           "runtime_doctor_request_timeline_detail",
           "runtime_doctor_last_marker_line_truncation",
           "runtime_doctor_marker_scope_render",
-          "runtime_doctor_count_breakdown_render"
+          "runtime_doctor_count_breakdown_render",
+          "runtime_doctor_report_field_plan"
         ]
       },
       {
@@ -1506,6 +1518,16 @@
         "operations": [
           "runtime_doctor_marker_scope_render",
           "runtime_doctor_count_breakdown_render"
+        ]
+      },
+      {
+        "path": "crates/prodex-mojo-core/src/rich/runtime_doctor_report_fields.rs",
+        "language": "rust",
+        "classification": "MIXED",
+        "production_reachable": true,
+        "role": "adapter",
+        "operations": [
+          "runtime_doctor_report_field_plan"
         ]
       },
       {
@@ -6951,6 +6973,33 @@
       "rust_adapter_scope": "line/JSON recognition, redaction, owned field materialization, bounded batch construction, validated representative projection, and existing DTO/map assembly"
     },
     {
+      "name": "runtime_doctor_top_facet_selection",
+      "domain": "runtime/diagnostics",
+      "introduced_in": "0.439.0",
+      "baseline_state": "Rust selected the highest-count facet value and broke ties by the lexical maximum key",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_mojo_runtime_doctor_top_facet_selection_v1",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/runtime_doctor_marker_summary.mojo",
+      "consumer": "crates/prodex-runtime-doctor/src/diagnosis/final_summary.rs",
+      "consumer_marker": "prodex_mojo_core::rich::runtime_doctor_top_facet_selection(",
+      "production_consumers": [
+        "crates/prodex-runtime-doctor/src/diagnosis/final_summary.rs",
+        "crates/prodex-runtime-doctor/src/diagnosis/final_summary/log_summary.rs",
+        "crates/prodex-runtime-doctor/src/diagnosis/final_summary/mojo.rs",
+        "crates/prodex-runtime-doctor/src/diagnosis/next_steps/mojo_render.rs",
+        "crates/prodex-runtime-doctor/src/render.rs"
+      ],
+      "production_reachability_test": "crates/prodex-runtime-doctor/src/diagnosis/final_summary.rs",
+      "rust_owner_before": "Rust max_by_key reduction over ordered facet maps, including count precedence and lexical tie handling",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "deleted; direct Mojo adapter cases and the runtime-doctor caller regression cover empty maps, count precedence, Unicode lexical ties, and exact value/count materialization",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "BTreeMap lookup and order preservation, borrowed UTF-8 view marshalling, validated selected-index projection, and final report string materialization"
+    },
+    {
       "name": "runtime_doctor_marker_context_summary_order",
       "domain": "runtime/diagnostics",
       "introduced_in": "0.437.12",
@@ -6995,6 +7044,29 @@
       "duplicate_production_owner": false,
       "platform_fallback": false,
       "rust_adapter_scope": "BTreeMap iteration, borrowed profile-name deduplication and known-name lookup, typed row marshalling, validated Mojo index materialization and string-owning diagnostic DTOs"
+    },
+    {
+      "name": "runtime_doctor_report_field_plan",
+      "domain": "runtime-doctor/render",
+      "introduced_in": "0.439.0",
+      "baseline_state": "Rust decided optional runtime-doctor row inclusion and cold-start jobs-over-profiles precedence",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_mojo_runtime_doctor_report_fields_v1",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/runtime_doctor_render.mojo",
+      "consumer": "crates/prodex-runtime-doctor/src/render.rs",
+      "consumer_marker": "prodex_mojo_core::rich::runtime_doctor_report_field_plan(",
+      "production_consumers": [
+        "crates/prodex-runtime-doctor/src/render.rs"
+      ],
+      "production_reachability_test": "crates/prodex-runtime-doctor/src/render.rs",
+      "rust_owner_before": "Rust optional-row branches for legacy recovery, compact final details, deferred sync probes, probe pressure, and hot reason",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "deleted; direct Mojo plan cases and the runtime-doctor caller regression cover fixed optional-row order and cold-start jobs precedence",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "marker-count and field-presence lookup, bounded ABI flags, selected-value formatting, and existing field DTO materialization"
     },
     {
       "name": "runtime_doctor_marker_scope_render",
@@ -11455,6 +11527,36 @@
       "parity_test": "crates/prodex-mojo-core/tests/gemini_response_media.rs",
       "performance": "one bounded parsed-tree Mojo call per response part projection",
       "cleanup_evidence": "The prior Rust MIME, data-URL, special-text, and image-generation shaping branches are deleted; direct Mojo and provider-core caller tests retain fixed expected values."
+    },
+    {
+      "file": "crates/prodex-runtime-doctor/src/diagnosis/final_summary.rs",
+      "symbol": "runtime_doctor_top_facet",
+      "operation": "runtime_doctor_top_facet_selection",
+      "previous_responsibility": "Rust reduced each facet map with count precedence and lexical maximum tie handling",
+      "final_state": "adapter-only",
+      "rust_before": "crates/prodex-runtime-doctor/src/diagnosis/final_summary.rs::runtime_doctor_top_facet",
+      "rust_after": "Rust delegates winner selection to compiled Mojo and materializes the validated BTreeMap entry",
+      "mojo_owner": "mojo/prodex_core/runtime_doctor_marker_summary.mojo::runtime_doctor_top_facet_selection_v1",
+      "mojo_source": "mojo/prodex_core/runtime_doctor_marker_summary.mojo",
+      "mojo_entry": "prodex_mojo_runtime_doctor_top_facet_selection_v1",
+      "production_consumer": "crates/prodex-runtime-doctor/src/diagnosis/final_summary.rs",
+      "parity_test": "crates/prodex-runtime-doctor/tests/src/diagnosis.rs",
+      "cleanup_evidence": "The Rust max_by_key reducer is removed; the shared diagnosis, summary, next-step, and report callers use the versioned Mojo selector without a fallback."
+    },
+    {
+      "file": "crates/prodex-runtime-doctor/src/render.rs",
+      "symbol": "runtime_doctor_fields_for_summary",
+      "operation": "runtime_doctor_report_field_plan",
+      "previous_responsibility": "Rust decided optional report rows and cold-start detail precedence while assembling the runtime-doctor human panel",
+      "final_state": "adapter-only",
+      "rust_before": "crates/prodex-runtime-doctor/src/render.rs::runtime_doctor_fields_for_summary optional-row branches",
+      "rust_after": "Rust supplies bounded presence facts and materializes the Mojo-selected rows",
+      "mojo_owner": "mojo/prodex_core/runtime_doctor_render.mojo::prodex_mojo_runtime_doctor_report_fields_v1",
+      "mojo_source": "mojo/prodex_core/runtime_doctor_render.mojo",
+      "mojo_entry": "prodex_mojo_runtime_doctor_report_fields_v1",
+      "production_consumer": "crates/prodex-runtime-doctor/src/render.rs",
+      "parity_test": "crates/prodex-runtime-doctor/tests/src/diagnosis.rs",
+      "cleanup_evidence": "The Rust optional-row decision tree and jobs-over-profiles precedence are removed; the production report path applies only the validated Mojo field plan."
     },
     {
       "file": "crates/prodex-runtime-doctor/src/parsing.rs",
