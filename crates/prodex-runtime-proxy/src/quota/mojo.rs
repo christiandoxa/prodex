@@ -5,7 +5,7 @@ use crate::{
     RuntimeSelectionQuotaWindowStatus,
 };
 
-pub(super) fn quota_band_from_tag(
+pub(crate) fn quota_band_from_tag(
     band: i64,
 ) -> Result<RuntimeSelectionQuotaPressureBand, prodex_mojo_core::MojoError> {
     match band {

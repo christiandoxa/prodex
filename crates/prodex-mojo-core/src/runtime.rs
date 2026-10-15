@@ -17,6 +17,9 @@ mod profile_route_circuit;
 mod prompt_cache_affinity;
 mod quota_decisions;
 mod quota_route_score;
+pub use quota_route_score::{
+    QuotaSummarySortKey, QuotaSummarySortKeyInput, quota_summary_sort_key,
+};
 mod responses_loop_control;
 mod selection_planning;
 mod smart_context_pressure;

@@ -29,6 +29,38 @@ fn route_pressure_uses_route_specific_reserve_thresholds() {
 }
 
 #[test]
+fn persisted_summary_sort_key_uses_mojo_ordering_and_preserves_reverse_ties() {
+    let summary = RuntimeProxyQuotaSummary {
+        five_hour: RuntimeProxyQuotaWindowSummary {
+            status: RuntimeSelectionQuotaWindowStatus::Critical,
+            remaining_percent: 12,
+            reset_at: 300,
+        },
+        weekly: RuntimeProxyQuotaWindowSummary {
+            status: RuntimeSelectionQuotaWindowStatus::Thin,
+            remaining_percent: 40,
+            reset_at: 400,
+        },
+        route_band: RuntimeSelectionQuotaPressureBand::Critical,
+    };
+
+    assert_eq!(
+        runtime_proxy_quota_pressure_sort_key_for_route_from_summary(summary),
+        (
+            RuntimeSelectionQuotaPressureBand::Critical,
+            2,
+            1,
+            2,
+            std::cmp::Reverse(12),
+            std::cmp::Reverse(40),
+            std::cmp::Reverse(12),
+            400,
+            300,
+        )
+    );
+}
+
+#[test]
 fn weekly_only_quota_is_ready_and_exhaustion_still_wins() {
     let weekly = window(80);
     assert_eq!(

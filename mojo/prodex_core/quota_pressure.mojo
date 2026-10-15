@@ -12,6 +12,61 @@ from runtime_math import (
 )
 
 
+comptime RUNTIME_QUOTA_SUMMARY_SORT_KEY_ABI_VERSION: Int64 = 1
+comptime RUNTIME_QUOTA_SUMMARY_SORT_KEY_FIELDS: Int64 = 9
+
+
+def runtime_quota_summary_sort_tag_is_valid(value: Int64) -> Bool:
+    return value >= 0 and value <= 4
+
+
+# Builds the persisted-summary ordering tuple used before a fresh quota probe.
+# Rust owns summary acquisition; Mojo owns rank and tie-break semantics.
+@export("prodex_runtime_quota_summary_sort_key_v1")
+def prodex_runtime_quota_summary_sort_key_v1(
+    abi_version: Int64,
+    route_band: Int64,
+    weekly_status: Int64,
+    five_hour_status: Int64,
+    weekly_remaining: Int64,
+    five_hour_remaining: Int64,
+    weekly_reset_at: Int64,
+    five_hour_reset_at: Int64,
+    output_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != RUNTIME_QUOTA_SUMMARY_SORT_KEY_ABI_VERSION:
+        return -4
+    if output_address == 0:
+        return -1
+    if (
+        not runtime_quota_summary_sort_tag_is_valid(route_band)
+        or not runtime_quota_summary_sort_tag_is_valid(weekly_status)
+        or not runtime_quota_summary_sort_tag_is_valid(five_hour_status)
+        or weekly_remaining < 0
+        or weekly_remaining > 100
+        or five_hour_remaining < 0
+        or five_hour_remaining > 100
+    ):
+        return -1
+
+    var output = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    var reserve_floor = weekly_remaining
+    if five_hour_remaining < reserve_floor:
+        reserve_floor = five_hour_remaining
+    output[unsafe_offset=0] = route_band
+    output[unsafe_offset=1] = route_band
+    output[unsafe_offset=2] = weekly_status
+    output[unsafe_offset=3] = five_hour_status
+    output[unsafe_offset=4] = reserve_floor
+    output[unsafe_offset=5] = weekly_remaining
+    output[unsafe_offset=6] = five_hour_remaining
+    output[unsafe_offset=7] = weekly_reset_at
+    output[unsafe_offset=8] = five_hour_reset_at
+    return 0
+
+
 @export("prodex_runtime_precommit_budget_plan_v2")
 def prodex_runtime_precommit_budget_plan_v2(
     continuation: Int64,

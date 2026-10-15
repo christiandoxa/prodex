@@ -289,21 +289,29 @@ pub fn runtime_proxy_usage_snapshot_is_usable(
 pub fn runtime_proxy_quota_pressure_sort_key_for_route_from_summary(
     summary: RuntimeProxyQuotaSummary,
 ) -> RuntimeProxyQuotaPressureSortKey {
+    let plan = prodex_mojo_core::runtime::quota_summary_sort_key(
+        prodex_mojo_core::runtime::QuotaSummarySortKeyInput {
+            route_band: summary.route_band as i64,
+            weekly_status: summary.weekly.status as i64,
+            five_hour_status: summary.five_hour.status as i64,
+            weekly_remaining: summary.weekly.remaining_percent,
+            five_hour_remaining: summary.five_hour.remaining_percent,
+            weekly_reset_at: summary.weekly.reset_at,
+            five_hour_reset_at: summary.five_hour.reset_at,
+        },
+    )
+    .expect("Mojo quota summary sort-key planning returned an invalid result");
     (
-        summary.route_band,
-        runtime_proxy_quota_pressure_band_rank(summary.route_band),
-        runtime_proxy_quota_window_status_rank(summary.weekly.status),
-        runtime_proxy_quota_window_status_rank(summary.five_hour.status),
-        Reverse(
-            summary
-                .weekly
-                .remaining_percent
-                .min(summary.five_hour.remaining_percent),
-        ),
-        Reverse(summary.weekly.remaining_percent),
-        Reverse(summary.five_hour.remaining_percent),
-        summary.weekly.reset_at,
-        summary.five_hour.reset_at,
+        mojo::quota_band_from_tag(plan.route_band)
+            .expect("Mojo quota summary sort key returned an invalid pressure band"),
+        plan.route_band_rank,
+        plan.weekly_status_rank,
+        plan.five_hour_status_rank,
+        Reverse(plan.reserve_floor),
+        Reverse(plan.weekly_remaining),
+        Reverse(plan.five_hour_remaining),
+        plan.weekly_reset_at,
+        plan.five_hour_reset_at,
     )
 }
 
@@ -430,26 +438,6 @@ pub fn runtime_proxy_precommit_quota_gate_final_decision(
         }
     } else {
         RuntimeProxyPrecommitQuotaGateFinalDecision::Proceed
-    }
-}
-
-fn runtime_proxy_quota_pressure_band_rank(band: RuntimeSelectionQuotaPressureBand) -> i64 {
-    match band {
-        RuntimeSelectionQuotaPressureBand::Healthy => 0,
-        RuntimeSelectionQuotaPressureBand::Thin => 1,
-        RuntimeSelectionQuotaPressureBand::Critical => 2,
-        RuntimeSelectionQuotaPressureBand::Exhausted => 3,
-        RuntimeSelectionQuotaPressureBand::Unknown => 4,
-    }
-}
-
-fn runtime_proxy_quota_window_status_rank(status: RuntimeSelectionQuotaWindowStatus) -> i64 {
-    match status {
-        RuntimeSelectionQuotaWindowStatus::Ready => 0,
-        RuntimeSelectionQuotaWindowStatus::Thin => 1,
-        RuntimeSelectionQuotaWindowStatus::Critical => 2,
-        RuntimeSelectionQuotaWindowStatus::Exhausted => 3,
-        RuntimeSelectionQuotaWindowStatus::Unknown => 4,
     }
 }
 

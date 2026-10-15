@@ -3,6 +3,106 @@ use super::{
     RUNTIME_QUOTA_SCORE_MAX_COUNT,
 };
 
+const RUNTIME_QUOTA_SUMMARY_SORT_KEY_ABI_VERSION: i64 = 1;
+const RUNTIME_QUOTA_SUMMARY_SORT_KEY_FIELD_COUNT: usize = 9;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct QuotaSummarySortKeyInput {
+    pub route_band: i64,
+    pub weekly_status: i64,
+    pub five_hour_status: i64,
+    pub weekly_remaining: i64,
+    pub five_hour_remaining: i64,
+    pub weekly_reset_at: i64,
+    pub five_hour_reset_at: i64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct QuotaSummarySortKey {
+    pub route_band: i64,
+    pub route_band_rank: i64,
+    pub weekly_status_rank: i64,
+    pub five_hour_status_rank: i64,
+    pub reserve_floor: i64,
+    pub weekly_remaining: i64,
+    pub five_hour_remaining: i64,
+    pub weekly_reset_at: i64,
+    pub five_hour_reset_at: i64,
+}
+
+unsafe extern "C" {
+    fn prodex_runtime_quota_summary_sort_key_v1(
+        abi_version: i64,
+        route_band: i64,
+        weekly_status: i64,
+        five_hour_status: i64,
+        weekly_remaining: i64,
+        five_hour_remaining: i64,
+        weekly_reset_at: i64,
+        five_hour_reset_at: i64,
+        output_address: *mut i64,
+    ) -> i64;
+}
+
+pub fn quota_summary_sort_key(
+    input: QuotaSummarySortKeyInput,
+) -> Result<QuotaSummarySortKey, crate::MojoError> {
+    if !(0..=4).contains(&input.route_band)
+        || !(0..=4).contains(&input.weekly_status)
+        || !(0..=4).contains(&input.five_hour_status)
+        || !(0..=100).contains(&input.weekly_remaining)
+        || !(0..=100).contains(&input.five_hour_remaining)
+    {
+        return Err(crate::MojoError::InvalidInput);
+    }
+    let mut output = [0_i64; RUNTIME_QUOTA_SUMMARY_SORT_KEY_FIELD_COUNT];
+    let status = unsafe {
+        prodex_runtime_quota_summary_sort_key_v1(
+            RUNTIME_QUOTA_SUMMARY_SORT_KEY_ABI_VERSION,
+            input.route_band,
+            input.weekly_status,
+            input.five_hour_status,
+            input.weekly_remaining,
+            input.five_hour_remaining,
+            input.weekly_reset_at,
+            input.five_hour_reset_at,
+            output.as_mut_ptr(),
+        )
+    };
+    if status == -4 {
+        return Err(crate::MojoError::AbiMismatch);
+    }
+    if status == -1 {
+        return Err(crate::MojoError::InvalidInput);
+    }
+    if status != 0 {
+        return Err(crate::MojoError::InvalidOutput);
+    }
+    if output[0] != input.route_band
+        || !(0..=4).contains(&output[1])
+        || !(0..=4).contains(&output[2])
+        || !(0..=4).contains(&output[3])
+        || !(0..=100).contains(&output[4])
+        || output[5] != input.weekly_remaining
+        || output[6] != input.five_hour_remaining
+        || output[7] != input.weekly_reset_at
+        || output[8] != input.five_hour_reset_at
+    {
+        return Err(crate::MojoError::InvalidOutput);
+    }
+    Ok(QuotaSummarySortKey {
+        route_band: output[0],
+        route_band_rank: output[1],
+        weekly_status_rank: output[2],
+        five_hour_status_rank: output[3],
+        reserve_floor: output[4],
+        weekly_remaining: output[5],
+        five_hour_remaining: output[6],
+        weekly_reset_at: output[7],
+        five_hour_reset_at: output[8],
+    })
+}
+
 /// Resolve route-aware profile scores from raw window observations in one
 /// bounded Mojo call. Host code owns usage acquisition and plan selection;
 /// Mojo owns scaling, window completeness, pressure-band, and score rules.
@@ -94,4 +194,118 @@ pub fn quota_route_score_batch(
             five_hour_reset_at: five_hour_reset_at[index],
         })
         .collect())
+}
+
+#[cfg(test)]
+mod summary_sort_tests {
+    use super::*;
+
+    #[test]
+    fn summary_sort_key_preserves_rank_and_remaining_tie_breaks() {
+        let key = quota_summary_sort_key(QuotaSummarySortKeyInput {
+            route_band: 2,
+            weekly_status: 3,
+            five_hour_status: 1,
+            weekly_remaining: 24,
+            five_hour_remaining: 9,
+            weekly_reset_at: 400,
+            five_hour_reset_at: 300,
+        })
+        .expect("compiled Mojo summary sort key should be valid");
+        assert_eq!(
+            key,
+            QuotaSummarySortKey {
+                route_band: 2,
+                route_band_rank: 2,
+                weekly_status_rank: 3,
+                five_hour_status_rank: 1,
+                reserve_floor: 9,
+                weekly_remaining: 24,
+                five_hour_remaining: 9,
+                weekly_reset_at: 400,
+                five_hour_reset_at: 300,
+            }
+        );
+    }
+
+    #[test]
+    fn summary_sort_key_rejects_invalid_tags_and_percentages() {
+        assert_eq!(
+            quota_summary_sort_key(QuotaSummarySortKeyInput {
+                route_band: 5,
+                weekly_status: 0,
+                five_hour_status: 0,
+                weekly_remaining: 0,
+                five_hour_remaining: 0,
+                weekly_reset_at: 0,
+                five_hour_reset_at: 0,
+            }),
+            Err(crate::MojoError::InvalidInput)
+        );
+        assert_eq!(
+            quota_summary_sort_key(QuotaSummarySortKeyInput {
+                route_band: 0,
+                weekly_status: 0,
+                five_hour_status: 0,
+                weekly_remaining: 101,
+                five_hour_remaining: 0,
+                weekly_reset_at: 0,
+                five_hour_reset_at: 0,
+            }),
+            Err(crate::MojoError::InvalidInput)
+        );
+    }
+
+    #[test]
+    fn summary_sort_key_abi_rejects_version_and_pointer_errors() {
+        assert_eq!(
+            unsafe {
+                prodex_runtime_quota_summary_sort_key_v1(
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    std::ptr::null_mut(),
+                )
+            },
+            -4
+        );
+        assert_eq!(
+            unsafe {
+                prodex_runtime_quota_summary_sort_key_v1(
+                    1,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    std::ptr::null_mut(),
+                )
+            },
+            -1
+        );
+        let mut output = [0_i64; RUNTIME_QUOTA_SUMMARY_SORT_KEY_FIELD_COUNT];
+        assert_eq!(
+            unsafe {
+                prodex_runtime_quota_summary_sort_key_v1(
+                    1,
+                    0,
+                    0,
+                    0,
+                    101,
+                    0,
+                    0,
+                    0,
+                    output.as_mut_ptr(),
+                )
+            },
+            -1
+        );
+    }
 }
