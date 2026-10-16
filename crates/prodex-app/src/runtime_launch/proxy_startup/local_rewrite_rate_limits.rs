@@ -1,5 +1,8 @@
 use crate::runtime_launch::proxy_startup::provider_bridge::RuntimeProviderBridgeKind;
 use chrono::{DateTime, Utc};
+use prodex_mojo_core::provider_constraints::{
+    provider_quota_clean_header, provider_quota_model_label,
+};
 use prodex_quota::{GeminiQuotaBucket, GeminiQuotaInfo};
 use reqwest::header::HeaderMap;
 
@@ -13,9 +16,15 @@ pub(super) fn runtime_gemini_quota_codex_headers(
     let mut headers = Vec::new();
     let account = profile_email
         .or(info.email.as_deref())
-        .map(clean_header_value)
+        .map(|value| {
+            provider_quota_clean_header(value)
+                .expect("compiled Mojo quota account label returned invalid output")
+        })
         .filter(|value| !value.is_empty())
-        .unwrap_or_else(|| clean_header_value(profile_name));
+        .unwrap_or_else(|| {
+            provider_quota_clean_header(profile_name)
+                .expect("compiled Mojo quota profile label returned invalid output")
+        });
 
     for (index, bucket) in info
         .buckets
@@ -33,7 +42,10 @@ pub(super) fn runtime_gemini_quota_codex_headers(
             format!("gemini_{}", index + 1)
         };
         let mut label = "Gemini".to_string();
-        if let Some(model) = gemini_bucket_model_label(bucket) {
+        if let Some(model) =
+            provider_quota_model_label(bucket.model_id.as_deref(), bucket.token_type.as_deref())
+                .expect("compiled Mojo quota model label returned invalid output")
+        {
             label.push(' ');
             label.push_str(&model);
         }
@@ -134,24 +146,6 @@ fn gemini_bucket_used_percent(bucket: &GeminiQuotaBucket) -> Option<f64> {
     Some((100.0 - remaining * 100.0).clamp(0.0, 100.0))
 }
 
-fn gemini_bucket_model_label(bucket: &GeminiQuotaBucket) -> Option<String> {
-    bucket
-        .model_id
-        .as_deref()
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map(|value| value.strip_prefix("models/").unwrap_or(value))
-        .or_else(|| {
-            bucket
-                .token_type
-                .as_deref()
-                .map(str::trim)
-                .filter(|value| !value.is_empty())
-        })
-        .map(clean_header_value)
-        .filter(|value| !value.is_empty())
-}
-
 fn push_openai_style_limit_headers(
     output: &mut Vec<(String, String)>,
     headers: &HeaderMap,
@@ -190,7 +184,8 @@ fn push_codex_rate_limit_header(
     let header_limit = sanitize_limit_id(limit_id).replace('_', "-");
     headers.push((
         format!("x-{header_limit}-{suffix}"),
-        clean_header_value(&value),
+        provider_quota_clean_header(&value)
+            .expect("compiled Mojo Codex quota header value returned invalid output"),
     ));
 }
 
@@ -228,15 +223,6 @@ fn format_percent(value: f64) -> String {
     } else {
         format!("{rounded:.1}")
     }
-}
-
-fn clean_header_value(value: &str) -> String {
-    value
-        .chars()
-        .filter(|ch| !matches!(ch, '\r' | '\n'))
-        .collect::<String>()
-        .trim()
-        .to_string()
 }
 
 fn header_f64(headers: &HeaderMap, name: &str) -> Option<f64> {
@@ -353,6 +339,87 @@ mod tests {
         assert!(headers.contains(&(
             "x-gemini-limit-name".to_string(),
             "Gemini gemini-2.5-pro (user@example.com)".to_string()
+        )));
+    }
+
+    #[test]
+    fn quota_header_model_source_and_value_cleaning_are_mojo_owned() {
+        let buckets = vec![
+            GeminiQuotaBucket {
+                remaining_amount: None,
+                remaining_fraction: Some(0.5),
+                reset_time: None,
+                token_type: Some("ignored".to_string()),
+                model_id: Some("  models/東京🌐  ".to_string()),
+            },
+            GeminiQuotaBucket {
+                remaining_amount: None,
+                remaining_fraction: Some(0.0),
+                reset_time: None,
+                token_type: Some("  tok\r\n en  ".to_string()),
+                model_id: Some(" \u{2003} ".to_string()),
+            },
+            GeminiQuotaBucket {
+                remaining_amount: None,
+                remaining_fraction: Some(1.0),
+                reset_time: None,
+                token_type: Some("ignored".to_string()),
+                model_id: Some("models/".to_string()),
+            },
+        ];
+        let info = GeminiQuotaInfo {
+            email: Some(" \r\n\u{2003} ".to_string()),
+            plan: None,
+            project_id: None,
+            buckets,
+        };
+        let headers =
+            runtime_gemini_quota_codex_headers(" \u{2003}profile\r\n-main \u{3000}", None, &info);
+        assert!(headers.contains(&(
+            "x-gemini-limit-name".to_string(),
+            "Gemini 東京🌐 (profile-main)".to_string(),
+        )));
+        assert!(headers.contains(&(
+            "x-gemini-2-limit-name".to_string(),
+            "Gemini tok en (profile-main)".to_string(),
+        )));
+        assert!(headers.contains(&(
+            "x-gemini-3-limit-name".to_string(),
+            "Gemini (profile-main)".to_string(),
+        )));
+        assert!(
+            headers
+                .iter()
+                .all(|(_, value)| !value.contains('\r') && !value.contains('\n'))
+        );
+    }
+
+    #[test]
+    fn quota_header_cleaning_is_used_for_openai_style_provider_labels() {
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            "x-ratelimit-limit-requests",
+            HeaderValue::from_static("100"),
+        );
+        headers.insert(
+            "x-ratelimit-remaining-requests",
+            HeaderValue::from_static("0"),
+        );
+        let projected = runtime_openai_style_codex_rate_limit_headers(
+            &headers,
+            "local",
+            " \r\n\u{2003}Local \n Provider\u{3000}",
+        );
+        assert!(
+            projected.contains(&(
+                "x-local-requests-limit-name".to_string(),
+                "Local  Provider\u{3000} requests".to_string(),
+            )),
+            "{projected:?}"
+        );
+        assert!(projected.contains(&(
+            "x-local-requests-primary-used-percent".to_string(),
+            "100".to_string(),
         )));
     }
 

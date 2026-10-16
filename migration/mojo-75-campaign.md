@@ -5707,3 +5707,12 @@ Unicode trimming owner to skip blank rate-limit headers before choosing the
 first nonblank match. The Rust whitespace selection and silent `unwrap_or(0)`
 classification fallback were removed. Versioned ABI, runtime proxy caller
 and no-fallback guard tests preserve duplicate-header and 429 semantics.
+
+## Provider quota header text normalization migrated to Mojo
+
+The production provider-to-Codex rate-limit adapter now uses compiled Mojo to
+strip CR/LF and Unicode edge whitespace from emitted header values, and to
+choose the model ID or token type used for Gemini quota labels. The old Rust
+model fallback selection and header sanitizer were deleted without a Rust
+semantic fallback. Versioned ABI tests and five real caller tests cover
+preexisting whitespace, source precedence, and header formatting semantics.

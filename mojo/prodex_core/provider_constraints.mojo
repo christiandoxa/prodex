@@ -2,7 +2,7 @@ from std.collections import Array
 
 from std.memory import Pointer
 
-from rich_text import rich_trim_bounds, rich_view_ptr, rich_view_valid, rich_view_matches_literal
+from rich_text import rich_trim_bounds, rich_view_ptr, rich_view_valid, rich_view_matches_literal, rich_codepoint, rich_codepoint_width, rich_unicode_space, rich_view_prefix
 from rich_types import ProdexRichStringView
 
 comptime DECISION_COMPATIBLE: Int64 = 0
@@ -1666,6 +1666,155 @@ comptime GEMINI_REQUEST_CONTENT_CONTINUATION_METADATA: Int64 = 12
 # The function-tool declaration source is a single semantic choice:
 # a present nested field always wins (including null/wrong-type values);
 # only an absent nested field permits a flat type="function" declaration.
+# Provider/Codex quota headers are a transport-neutral wire projection.
+# Mojo owns CR/LF removal, Unicode whitespace trimming, and the precedence
+# of model ID versus token type. Rust reads HTTP/JSON and writes header pairs.
+comptime PROVIDER_QUOTA_HEADER_ABI_VERSION: Int64 = 1
+
+
+def provider_quota_header_clean_kernel(
+    value: ProdexRichStringView,
+    output: Pointer[mut=True, UInt8, _],
+    capacity: Int64,
+    written: Pointer[mut=True, Int64, _],
+) -> Int64:
+    var source = rich_view_ptr(value)
+    var length = Int64(value.len)
+    var first: Int64 = -1
+    var last: Int64 = 0
+    var index: Int64 = 0
+    while index < length:
+        var width = rich_codepoint_width(source[unsafe_offset=index])
+        var scalar = rich_codepoint(source, index, width)
+        if scalar != 13 and scalar != 10 and not rich_unicode_space(scalar):
+            if first < 0:
+                first = index
+            last = index + width
+        index += width
+    written[] = 0
+    if first < 0:
+        return 0
+    if capacity < last - first:
+        return 3
+    index = first
+    while index < last:
+        var width = rich_codepoint_width(source[unsafe_offset=index])
+        var scalar = rich_codepoint(source, index, width)
+        if scalar != 13 and scalar != 10:
+            for offset in range(width):
+                output[unsafe_offset=written[]] = source[unsafe_offset=index + offset]
+                written[] += 1
+        index += width
+    return 0
+
+
+@export("prodex_provider_quota_header_clean_v1")
+def prodex_provider_quota_header_clean_v1(
+    abi_version: Int64,
+    input_address: UInt,
+    input_length: Int64,
+    output_address: UInt,
+    output_capacity: Int64,
+    written_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != PROVIDER_QUOTA_HEADER_ABI_VERSION:
+        return 4
+    if (
+        input_length < 0 or output_capacity < 0 or output_address == 0
+        or written_address == 0 or (input_length > 0 and input_address == 0)
+        or output_capacity < input_length
+    ):
+        return 1
+    var value = ProdexRichStringView(input_address, UInt(input_length))
+    if not rich_view_valid(value, 0x7FFFFFFFFFFFFFFF):
+        return 1
+    return provider_quota_header_clean_kernel(
+        value,
+        Pointer[mut=True, UInt8, MutUntrackedOrigin](
+            unsafe_from_address=Int(output_address)
+        ),
+        output_capacity,
+        Pointer[mut=True, Int64, MutUntrackedOrigin](
+            unsafe_from_address=Int(written_address)
+        ),
+    )
+
+
+@export("prodex_provider_quota_model_label_v1")
+def prodex_provider_quota_model_label_v1(
+    abi_version: Int64,
+    model_address: UInt,
+    model_length: Int64,
+    model_present: Int64,
+    token_address: UInt,
+    token_length: Int64,
+    token_present: Int64,
+    output_address: UInt,
+    output_capacity: Int64,
+    written_address: UInt,
+    present_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != PROVIDER_QUOTA_HEADER_ABI_VERSION:
+        return 4
+    if (
+        model_length < 0 or token_length < 0
+        or (model_present != 0 and model_present != 1)
+        or (token_present != 0 and token_present != 1)
+        or (model_length > 0 and model_address == 0)
+        or (token_length > 0 and token_address == 0)
+        or output_address == 0 or written_address == 0 or present_address == 0
+        or output_capacity < max(model_length, token_length)
+    ):
+        return 1
+    var model = ProdexRichStringView(model_address, UInt(model_length))
+    var token = ProdexRichStringView(token_address, UInt(token_length))
+    if not rich_view_valid(model, 0x7FFFFFFFFFFFFFFF) or not rich_view_valid(token, 0x7FFFFFFFFFFFFFFF):
+        return 1
+
+    var selected = ProdexRichStringView(0, 0)
+    var found = False
+    if model_present == 1:
+        var bounds = rich_trim_bounds(model)
+        if bounds[0] < bounds[1]:
+            selected = ProdexRichStringView(
+                model.ptr + UInt(bounds[0]), UInt(bounds[1] - bounds[0])
+            )
+            if rich_view_prefix["models/"](selected, False):
+                selected = ProdexRichStringView(selected.ptr + UInt(7), selected.len - UInt(7))
+            found = True
+    if not found and token_present == 1:
+        var bounds = rich_trim_bounds(token)
+        if bounds[0] < bounds[1]:
+            selected = ProdexRichStringView(
+                token.ptr + UInt(bounds[0]), UInt(bounds[1] - bounds[0])
+            )
+            found = True
+
+    var present = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(present_address)
+    )
+    var written = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(written_address)
+    )
+    present[] = 0
+    written[] = 0
+    if not found:
+        return 0
+    var status = provider_quota_header_clean_kernel(
+        selected,
+        Pointer[mut=True, UInt8, MutUntrackedOrigin](
+            unsafe_from_address=Int(output_address)
+        ),
+        output_capacity,
+        written,
+    )
+    if status != 0:
+        return status
+    if written[] > 0:
+        present[] = 1
+    return 0
+
+
 comptime GEMINI_FUNCTION_TOOL_SOURCE_ABI_VERSION: Int64 = 1
 comptime GEMINI_FUNCTION_TOOL_SOURCE_NONE: Int64 = 0
 comptime GEMINI_FUNCTION_TOOL_SOURCE_NESTED: Int64 = 1
