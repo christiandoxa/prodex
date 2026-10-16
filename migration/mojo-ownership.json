@@ -2642,7 +2642,8 @@
         "production_reachable": true,
         "role": "semantic",
         "operations": [
-          "runtime_sse_streaming_chunk_line_boundaries"
+          "runtime_sse_streaming_chunk_line_boundaries",
+          "runtime_sse_data_payload_join_and_bom"
         ]
       },
       {
@@ -2652,7 +2653,8 @@
         "production_reachable": true,
         "role": "adapter",
         "operations": [
-          "runtime_sse_streaming_chunk_line_boundaries"
+          "runtime_sse_streaming_chunk_line_boundaries",
+          "runtime_sse_data_payload_join_and_bom"
         ]
       }
     ],
@@ -11686,6 +11688,29 @@
       "duplicate_production_owner": false,
       "platform_fallback": false,
       "rust_adapter_scope": "Typed prodex-mojo-core FFI validates bounded newline offsets and consumed byte count; runtime-proxy owns transport byte append, SSE event callbacks and serde_json parsing"
+    },
+    {
+      "name": "runtime_sse_data_payload_join_and_bom",
+      "domain": "runtime-proxy/sse-payload-assembly",
+      "introduced_in": "0.438.0",
+      "baseline_state": "Rust joined all SSE data: strings with LF separators and removed repeated UTF-8 BOMs at the start before serde_json",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_runtime_sse_payload_join_v1",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/sse_line.mojo",
+      "consumer": "crates/prodex-runtime-proxy/src/payload_detection/sse.rs",
+      "consumer_marker": "prodex_mojo_core::runtime_sse_chunk::payload_text(",
+      "production_consumers": [
+        "crates/prodex-runtime-proxy/src/payload_detection/sse.rs"
+      ],
+      "production_reachability_test": "crates/prodex-runtime-proxy/src/payload_detection/sse.rs",
+      "rust_owner_before": "Rust Vec<String>::join with single LF separators and trim_start_matches(U+FEFF) for SSE JSON payloads",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "Removed host string join/BOM decision. Compiled Mojo ABI golden tests cover repeated BOM, Unicode, empty fields, hundreds of lines, capacity failure; real parser regression covers multi-line Unicode JSON and BOM position and chunk splits.",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "Rust owns SSE data String storage, checked borrowed view marshalling, UTF-8 result validation and serde_json decoding; Mojo alone owns payload framing and leading BOM policy."
     }
   ],
   "rust_semantic_reductions": [

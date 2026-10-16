@@ -429,9 +429,9 @@ pub fn parse_runtime_sse_payload(data_lines: &[String]) -> Option<serde_json::Va
         return None;
     }
 
-    let payload = data_lines.join("\n");
-    let payload = payload.trim_start_matches('\u{feff}');
-    serde_json::from_str::<serde_json::Value>(payload).ok()
+    let payload = prodex_mojo_core::runtime_sse_chunk::payload_text(data_lines)
+        .expect("Mojo SSE payload assembler returned an invalid output");
+    serde_json::from_str::<serde_json::Value>(&payload).ok()
 }
 
 pub fn parse_runtime_sse_event(data_lines: &[String]) -> RuntimeParsedSseEvent {

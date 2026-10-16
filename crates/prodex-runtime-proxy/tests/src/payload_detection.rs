@@ -1,4 +1,7 @@
 use super::*;
+
+#[path = "payload_detection_mojo_sse_payload.rs"]
+mod mojo_sse_payload_tests;
 use crate::{
     RuntimePreviousResponseFreshFallbackShape, RuntimeProxyRequest,
     runtime_request_previous_response_fresh_fallback_shape, runtime_request_session_id,
