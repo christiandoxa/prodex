@@ -124,7 +124,7 @@ const REQUIRED_FILE_CONTAINS = {
     "build_responses_request",
     "client_metadata",
     "prepare_response_items_for_request",
-    "responses_request_properties_match",
+    "responses_request_properties_mismatch",
     "responses_session_id",
     "session_source.is_non_root_agent()",
     "prompt_cache_key(metadata)",
@@ -145,11 +145,16 @@ const REQUIRED_FILE_CONTAINS = {
     "run_remote_compaction_request_v2",
     "RequestEffortUsage::Compaction",
     "CompactionImplementation::ResponsesCompactionV2",
-    "Feature::CompactionImageBudget",
+    "image_budget: RetainedImageBudget",
     "RetainedImageBudget::Enabled",
     "truncate_retained_messages",
     "images::truncate_message_to_token_budget",
     "remaining = 0",
+    "CodexErrorDetails::ResponseIncomplete(incomplete)",
+    "CompactionRequestKind::Background(_)",
+    "sess.record_rollout_budget_usage(usage).await",
+    "sess.record_incomplete_response_usage(",
+    "match event?",
   ],
   "codex-rs/core/src/compact_remote_v2_attempt.rs": [
     "ResponseItem::CompactionTrigger {}",
@@ -397,6 +402,12 @@ const REQUIRED_FILE_CONTAINS = {
     "phase",
     "MessagePhase::PartialAnswer",
     "partial_answer",
+    "\"response.completed\" | \"response.incomplete\"",
+    "if reason == \"content_filter\"",
+    "if reason != \"interrupted\"",
+    "ApiError::ResponseIncomplete(",
+    "response_id,",
+    "token_usage,",
   ],
   "codex-rs/codex-api/src/sse/responses_error.rs": [
     "parse_failed_response",
@@ -473,10 +484,10 @@ const REQUIRED_FILE_CONTAINS = {
   ],
   "codex-rs/core/src/context/world_state/top_level_tools.rs": [
     "pub(crate) struct TopLevelToolsState",
-    "const NAMESPACE_UPDATE_HINT: &str",
+    "self.messages.tool_update_hint.clone()",
     "WorldStateUpdate::prefix_item",
-    "REMOVED_NAMESPACES_HEADER",
-    "REMOVED_TOOLS_HEADER",
+    "self.messages.removed_namespaces_header.as_str()",
+    "self.messages.removed_tools_header.as_str()",
     "Some(self.hashes.clone())",
   ],
   "codex-rs/core/src/tools/spec_plan.rs": [
@@ -540,7 +551,8 @@ const REQUIRED_FILE_CONTAINS = {
     "key: \"instant_interrupt\"",
     "Stage::UnderDevelopment",
     "default_enabled: false",
-    "id: Feature::CliDaybreak,\n        key: \"cli_daybreak\",\n        stage: Stage::UnderDevelopment,\n        default_enabled: false,",
+    "id: Feature::CliDaybreak,\n        key: \"cli_daybreak\",\n        stage: Stage::Stable,\n        default_enabled: true,",
+    "id: Feature::InstantInterrupt,\n        key: \"instant_interrupt\",\n        stage: Stage::UnderDevelopment,\n        default_enabled: true,",
   ],
   "codex-rs/app-server-protocol/src/protocol/v2/mcp.rs": [
     "McpServerEventStreamStartParams",
@@ -887,15 +899,18 @@ const REQUIRED_FILE_CONTAINS = {
     "resume_thread_with_history_with_source",
   ],
   "codex-rs/rmcp-client/src/stdio_server_launcher.rs": [
-    "fn remote_env_policy(remote_env_vars: &[String])",
+    "remote_env_vars: &[String],\n        env: &HashMap<String, String>",
     "crate::utils::DEFAULT_ENV_VARS",
     "remote_env_vars.iter().cloned()",
     "include_only,",
     "env.get(\"REMOTE_TOKEN\")",
     "assert!(!env.contains_key(\"UNREQUESTED_SECRET\"))",
-    ".chain([\"SYSTEMROOT\", \"TEMP\", \"TMP\"].iter())",
+    ".chain([\"SYSTEMROOT\", \"TEMP\", \"TMP\", \"SYSTEMDRIVE\", \"LOCALAPPDATA\"].iter())",
     "env.get(\"SystemRoot\")",
     "env.get(name)",
+    "r#set: env.clone()",
+    "expected.remove(\"SystemDrive\")",
+    "expected.remove(\"LocalAppData\")",
   ],
 
   "codex-rs/core/src/responses_retry.rs": [
@@ -909,6 +924,12 @@ const REQUIRED_FILE_CONTAINS = {
     "retry_after.map(RetryAfter::deadline).unwrap_or(now + delay)",
     "ExhaustedResponseRetry",
     "turn_id: turn_context.sub_id.clone()",
+    "Feature::UnboundedConnectionRetries",
+    "ResponsesStreamRequest::Sampling",
+    "CodexErrorDetails::ConnectionFailed(_)",
+    "Reconnecting... waiting for network",
+    "Duration::from_secs(60)",
+    "tokio::time::sleep(retry_delay).await;",
   ],
   "codex-rs/codex-api/src/common.rs": [
     "pub struct ResponsesApiRequest",
@@ -1191,7 +1212,7 @@ const REQUIRED_SEMANTIC_CHECKS = [
     kind: "feature_gate",
     file: "codex-rs/core/src/compact_remote_v2.rs",
     file_contains_all: [
-      "Feature::CompactionImageBudget",
+      "image_budget: RetainedImageBudget",
       "RetainedImageBudget::Enabled",
       "truncate_retained_messages",
       "images::truncate_message_to_token_budget",
@@ -1868,7 +1889,7 @@ const REQUIRED_SEMANTIC_CHECKS = [
     kind: "remote_mcp_environment",
     file: "codex-rs/rmcp-client/src/stdio_server_launcher.rs",
     file_contains_all: [
-      "fn remote_env_policy(remote_env_vars: &[String])",
+      "remote_env_vars: &[String],\n        env: &HashMap<String, String>",
       "crate::utils::DEFAULT_ENV_VARS",
       "remote_env_vars.iter().cloned()",
       "include_only,",
@@ -2024,7 +2045,7 @@ const REQUIRED_SEMANTIC_CHECKS = [
     file: "codex-rs/rmcp-client/src/stdio_server_launcher.rs",
     file_contains_all: [
       "crate::utils::DEFAULT_ENV_VARS",
-      ".chain([\"SYSTEMROOT\", \"TEMP\", \"TMP\"].iter())",
+      ".chain([\"SYSTEMROOT\", \"TEMP\", \"TMP\", \"SYSTEMDRIVE\", \"LOCALAPPDATA\"].iter())",
       "include_only,",
       "env.get(\"SystemRoot\")",
       "env.get(name)",
@@ -2116,11 +2137,11 @@ const REQUIRED_SEMANTIC_CHECKS = [
     ]
   },
   {
-    "id": "features.cli-daybreak-opt-in",
+    "id": "features.cli-daybreak-default",
     "kind": "feature_gate",
     "file": "codex-rs/features/src/lib.rs",
     "file_contains_all": [
-      "id: Feature::CliDaybreak,\n        key: \"cli_daybreak\",\n        stage: Stage::UnderDevelopment,\n        default_enabled: false,"
+      "id: Feature::CliDaybreak,\n        key: \"cli_daybreak\",\n        stage: Stage::Stable,\n        default_enabled: true,"
     ]
   },
   {
@@ -2134,6 +2155,52 @@ const REQUIRED_SEMANTIC_CHECKS = [
       "Feature::ApiKeyCyberAccessPrograms",
       "if auth.is_chatgpt_auth()",
       "if !auth.is_api_key_auth()"
+    ]
+  },
+  {
+    "id": "responses.incomplete-terminal-error-usage",
+    "kind": "retry_lifecycle",
+    "file": "codex-rs/codex-api/src/sse/responses.rs",
+    "file_contains_all": [
+      "\"response.completed\" | \"response.incomplete\"",
+      "if reason == \"content_filter\"",
+      "if reason != \"interrupted\"",
+      "ApiError::ResponseIncomplete(",
+      "response_id,",
+      "token_usage,"
+    ]
+  },
+  {
+    "id": "compact.v2-incomplete-usage-retained",
+    "kind": "retry_lifecycle",
+    "file": "codex-rs/core/src/compact_remote_v2.rs",
+    "file_contains_all": [
+      "CodexErrorDetails::ResponseIncomplete(incomplete)",
+      "CompactionRequestKind::Background(_)",
+      "sess.record_rollout_budget_usage(usage).await",
+      "sess.record_incomplete_response_usage(",
+      "match event?"
+    ]
+  },
+  {
+    "id": "features.instant-interrupt-default",
+    "kind": "feature_gate",
+    "file": "codex-rs/features/src/lib.rs",
+    "file_contains_all": [
+      "id: Feature::InstantInterrupt,\n        key: \"instant_interrupt\",\n        stage: Stage::UnderDevelopment,\n        default_enabled: true,"
+    ]
+  },
+  {
+    "id": "responses.connection-retry-native-ownership",
+    "kind": "retry_lifecycle",
+    "file": "codex-rs/core/src/responses_retry.rs",
+    "file_contains_all": [
+      "Feature::UnboundedConnectionRetries",
+      "ResponsesStreamRequest::Sampling",
+      "CodexErrorDetails::ConnectionFailed(_)",
+      "Reconnecting... waiting for network",
+      "Duration::from_secs(60)",
+      "tokio::time::sleep(retry_delay).await;"
     ]
   },
 ];
@@ -2858,11 +2925,10 @@ function runSelfTest() {
     mutate: (compat) => {
       const check = semanticCheck(compat, "rmcp.remote-windows-env");
       check.file_contains_all = check.file_contains_all.filter(
-        (value) => value !== '.chain(["SYSTEMROOT", "TEMP", "TMP"].iter())',
+        (value) => value !== ".chain([\"SYSTEMROOT\", \"TEMP\", \"TMP\", \"SYSTEMDRIVE\", \"LOCALAPPDATA\"].iter())",
       );
     },
-    expectedMessage:
-      'codex.compatibility.semantic_checks.rmcp.remote-windows-env.file_contains_all missing ".chain([\\"SYSTEMROOT\\", \\"TEMP\\", \\"TMP\\"].iter())"',
+    expectedMessage: "codex.compatibility.semantic_checks.rmcp.remote-windows-env.file_contains_all missing \".chain([\\\"SYSTEMROOT\\\", \\\"TEMP\\\", \\\"TMP\\\", \\\"SYSTEMDRIVE\\\", \\\"LOCALAPPDATA\\\"].iter())\"",
   });
 
   assertSelfTestError({

@@ -48,7 +48,7 @@
             "X_CODEX_WS_STREAM_REQUEST_START_MS_CLIENT_METADATA_KEY",
             "x-codex-ws-stream-request-start-ms",
             "prepare_response_items_for_request",
-            "responses_request_properties_match",
+            "responses_request_properties_mismatch",
             "auth_owner_generation",
             "take_cached_websocket_session",
             "build_responses_request",
@@ -76,11 +76,16 @@
             "run_remote_compaction_request_v2",
             "RequestEffortUsage::Compaction",
             "CompactionImplementation::ResponsesCompactionV2",
-            "Feature::CompactionImageBudget",
+            "image_budget: RetainedImageBudget",
             "RetainedImageBudget::Enabled",
             "truncate_retained_messages",
             "images::truncate_message_to_token_budget",
-            "remaining = 0"
+            "remaining = 0",
+            "CodexErrorDetails::ResponseIncomplete(incomplete)",
+            "CompactionRequestKind::Background(_)",
+            "sess.record_rollout_budget_usage(usage).await",
+            "sess.record_incomplete_response_usage(",
+            "match event?"
           ]
         },
         {
@@ -370,7 +375,13 @@
             "response.output_item.added",
             "phase",
             "MessagePhase::PartialAnswer",
-            "partial_answer"
+            "partial_answer",
+            "\"response.completed\" | \"response.incomplete\"",
+            "if reason == \"content_filter\"",
+            "if reason != \"interrupted\"",
+            "ApiError::ResponseIncomplete(",
+            "response_id,",
+            "token_usage,"
           ]
         },
         {
@@ -496,7 +507,8 @@
             "key: \"instant_interrupt\"",
             "Stage::UnderDevelopment",
             "default_enabled: false",
-            "id: Feature::CliDaybreak,\n        key: \"cli_daybreak\",\n        stage: Stage::UnderDevelopment,\n        default_enabled: false,"
+            "id: Feature::CliDaybreak,\n        key: \"cli_daybreak\",\n        stage: Stage::Stable,\n        default_enabled: true,",
+            "id: Feature::InstantInterrupt,\n        key: \"instant_interrupt\",\n        stage: Stage::UnderDevelopment,\n        default_enabled: true,"
           ]
         },
         {
@@ -984,15 +996,18 @@
           "path": "codex-rs/rmcp-client/src/stdio_server_launcher.rs",
           "reason": "Guard the exact 0.161 default-plus-explicit remote environment allowlist and rejection of unrelated secrets. This tag lacks the 0.160.1 cross-OS Windows bootstrap preservation; the known upstream limitation is recorded in codex-rust-v0.161.0-audit.md rather than claiming that invariant still holds.",
           "required_contains": [
-            "fn remote_env_policy(remote_env_vars: &[String])",
+            "remote_env_vars: &[String],\n        env: &HashMap<String, String>",
             "crate::utils::DEFAULT_ENV_VARS",
             "remote_env_vars.iter().cloned()",
             "include_only,",
             "env.get(\"REMOTE_TOKEN\")",
             "assert!(!env.contains_key(\"UNREQUESTED_SECRET\"))",
-            ".chain([\"SYSTEMROOT\", \"TEMP\", \"TMP\"].iter())",
+            ".chain([\"SYSTEMROOT\", \"TEMP\", \"TMP\", \"SYSTEMDRIVE\", \"LOCALAPPDATA\"].iter())",
             "env.get(\"SystemRoot\")",
-            "env.get(name)"
+            "env.get(name)",
+            "r#set: env.clone()",
+            "expected.remove(\"SystemDrive\")",
+            "expected.remove(\"LocalAppData\")"
           ]
         },
         {
@@ -1008,7 +1023,13 @@
             "retry_state.retries < max_retries",
             "retry_after.map(RetryAfter::deadline).unwrap_or(now + delay)",
             "ExhaustedResponseRetry",
-            "turn_id: turn_context.sub_id.clone()"
+            "turn_id: turn_context.sub_id.clone()",
+            "Feature::UnboundedConnectionRetries",
+            "ResponsesStreamRequest::Sampling",
+            "CodexErrorDetails::ConnectionFailed(_)",
+            "Reconnecting... waiting for network",
+            "Duration::from_secs(60)",
+            "tokio::time::sleep(retry_delay).await;"
           ]
         },
         {
@@ -1093,10 +1114,10 @@
           "reason": "Owns incremental Responses Lite namespace/tool catalog diffs and removal notices.",
           "required_contains": [
             "pub(crate) struct TopLevelToolsState",
-            "const NAMESPACE_UPDATE_HINT: &str",
+            "self.messages.tool_update_hint.clone()",
             "WorldStateUpdate::prefix_item",
-            "REMOVED_NAMESPACES_HEADER",
-            "REMOVED_TOOLS_HEADER",
+            "self.messages.removed_namespaces_header.as_str()",
+            "self.messages.removed_tools_header.as_str()",
             "Some(self.hashes.clone())"
           ]
         },
@@ -1440,7 +1461,7 @@
           "file": "codex-rs/core/src/compact_remote_v2.rs",
           "reason": "Image-budget calculation and boundary truncation remain implemented by Codex; Prodex only preserves configuration and wire payloads.",
           "file_contains_all": [
-            "Feature::CompactionImageBudget",
+            "image_budget: RetainedImageBudget",
             "RetainedImageBudget::Enabled",
             "truncate_retained_messages",
             "images::truncate_message_to_token_budget",
@@ -2281,9 +2302,9 @@
           "id": "rmcp.remote-stdio-env-allowlist",
           "kind": "remote_mcp_environment",
           "file": "codex-rs/rmcp-client/src/stdio_server_launcher.rs",
-          "reason": "Guard the exact 0.161 default-plus-explicit remote environment allowlist and rejection of unrelated secrets. This tag lacks the 0.160.1 cross-OS Windows bootstrap preservation; the known upstream limitation is recorded in codex-rust-v0.161.0-audit.md rather than claiming that invariant still holds.",
+          "reason": "Remote MCP uses core or explicit remote-variable allowlists and applies configured overrides through the Windows-aware policy merge, without inheriting unrelated secrets.",
           "file_contains_all": [
-            "fn remote_env_policy(remote_env_vars: &[String])",
+            "remote_env_vars: &[String],\n        env: &HashMap<String, String>",
             "crate::utils::DEFAULT_ENV_VARS",
             "remote_env_vars.iter().cloned()",
             "include_only,",
@@ -2368,12 +2389,12 @@
           ]
         },
         {
-          "id": "features.cli-daybreak-opt-in",
+          "id": "features.cli-daybreak-default",
           "kind": "feature_gate",
           "file": "codex-rs/features/src/lib.rs",
-          "reason": "The CLI Daybreak feature is off by default. The default must stay tied to its feature block rather than an unrelated false marker elsewhere in the registry.",
+          "reason": "The native 0.163 CLI Daybreak feature is stable and on by default; Prodex preserves upstream eligibility and does not hardcode a contrary wrapper default.",
           "file_contains_all": [
-            "id: Feature::CliDaybreak,\n        key: \"cli_daybreak\",\n        stage: Stage::UnderDevelopment,\n        default_enabled: false,"
+            "id: Feature::CliDaybreak,\n        key: \"cli_daybreak\",\n        stage: Stage::Stable,\n        default_enabled: true,"
           ]
         },
         {
@@ -2506,11 +2527,14 @@
           "reason": "Explicit remote MCP environment variables must preserve Windows executor bootstrap/temp variables while filtering unrelated secrets.",
           "file_contains_all": [
             "crate::utils::DEFAULT_ENV_VARS",
-            ".chain([\"SYSTEMROOT\", \"TEMP\", \"TMP\"].iter())",
+            ".chain([\"SYSTEMROOT\", \"TEMP\", \"TMP\", \"SYSTEMDRIVE\", \"LOCALAPPDATA\"].iter())",
             "include_only,",
             "env.get(\"SystemRoot\")",
             "env.get(name)",
-            "assert!(!env.contains_key(\"UNREQUESTED_SECRET\"))"
+            "assert!(!env.contains_key(\"UNREQUESTED_SECRET\"))",
+            "r#set: env.clone()",
+            "expected.remove(\"SystemDrive\")",
+            "expected.remove(\"LocalAppData\")"
           ]
         },
         {
@@ -2573,9 +2597,59 @@
             "Started {",
             "Steered {"
           ]
+        },
+        {
+          "id": "responses.incomplete-terminal-error-usage",
+          "kind": "retry_lifecycle",
+          "file": "codex-rs/codex-api/src/sse/responses.rs",
+          "reason": "Non-interrupted response.incomplete events remain native terminal errors and retain response IDs and usage; content_filter and interrupted keep their native distinctions. Prodex forwards the payload unchanged.",
+          "file_contains_all": [
+            "\"response.completed\" | \"response.incomplete\"",
+            "if reason == \"content_filter\"",
+            "if reason != \"interrupted\"",
+            "ApiError::ResponseIncomplete(",
+            "response_id,",
+            "token_usage,"
+          ]
+        },
+        {
+          "id": "compact.v2-incomplete-usage-retained",
+          "kind": "retry_lifecycle",
+          "file": "codex-rs/core/src/compact_remote_v2.rs",
+          "reason": "Foreground and background v2 compaction preserve incomplete-response accounting without replacing the native terminal error.",
+          "file_contains_all": [
+            "CodexErrorDetails::ResponseIncomplete(incomplete)",
+            "CompactionRequestKind::Background(_)",
+            "sess.record_rollout_budget_usage(usage).await",
+            "sess.record_incomplete_response_usage(",
+            "match event?"
+          ]
+        },
+        {
+          "id": "features.instant-interrupt-default",
+          "kind": "feature_gate",
+          "file": "codex-rs/features/src/lib.rs",
+          "reason": "Instant interrupt is native-on by default in 0.163; the wrapper must neither suppress it nor fabricate terminal cancellation/replay.",
+          "file_contains_all": [
+            "id: Feature::InstantInterrupt,\n        key: \"instant_interrupt\",\n        stage: Stage::UnderDevelopment,\n        default_enabled: true,"
+          ]
+        },
+        {
+          "id": "responses.connection-retry-native-ownership",
+          "kind": "retry_lifecycle",
+          "file": "codex-rs/core/src/responses_retry.rs",
+          "reason": "Native sampling connection retries can wait indefinitely while the current turn remains active; repair the owned local listener rather than injecting a second turn or treating a quiet goal as terminal.",
+          "file_contains_all": [
+            "Feature::UnboundedConnectionRetries",
+            "ResponsesStreamRequest::Sampling",
+            "CodexErrorDetails::ConnectionFailed(_)",
+            "Reconnecting... waiting for network",
+            "Duration::from_secs(60)",
+            "tokio::time::sleep(retry_delay).await;"
+          ]
         }
       ],
-      "tested_codex_release": "rust-v0.162.1",
+      "tested_codex_release": "rust-v0.163.0",
       "patch_deltas": [
         {
           "from": "rust-v0.150.0",
@@ -2959,6 +3033,13 @@
           ],
           "prodex_action": "Advance the tested Codex baseline to 0.162.1, preserve Codex-owned multiline question rendering and daemon feature-compatibility behavior, and keep Prodex transport, hard affinity, no-midstream-rotate, and capacity recovery unchanged.",
           "compatibility_evidence": "migration/codex-rust-v0.162.1-audit.md and migration/codex-rust-v0.162.1-source-evidence.json record exact tag/source provenance, archive comparison, critical/semantic marker replay, and focused Prodex capacity recovery validation. Runtime-launch and official binary smoke evidence remain coordinator-owned."
+        },
+        {
+          "from": "rust-v0.162.1",
+          "to": "rust-v0.163.0",
+          "source_commit": "83086188ae0614bd882818ff1aa23f3194962012",
+          "audit_note": "migration/codex-rust-v0.163.0-audit.md",
+          "summary": "Qualifies native default instant interrupt and Daybreak, response.incomplete terminal usage retention, foreground/background v2 compaction, reasoned websocket continuation mismatch, connection-scoped app-server replies, remote MCP Windows overrides and resolved tool message catalogs. Local listener resilience is fixed without overriding native retry/continuation ownership."
         }
       ],
       "app_server_protocol": {
@@ -2981,16 +3062,31 @@
       }
     },
     "latestRelease": {
-      "tag_name": "rust-v0.162.1",
-      "name": "0.162.1",
-      "published_at": "2026-10-09T19:44:51Z",
-      "html_url": "https://github.com/openai/codex/releases/tag/rust-v0.162.1",
+      "tag_name": "rust-v0.163.0",
+      "name": "0.163.0",
+      "published_at": "2026-10-15T21:30:38Z",
+      "html_url": "https://github.com/openai/codex/releases/tag/rust-v0.163.0",
       "body_head": [
-        "## Bug Fixes",
-        "- Fixed a TUI crash when asynchronous questions contain multiple lines, preserving line breaks and complete hyperlink destinations. (#51866)",
-        "- Fixed startup failures caused by differences between a running background server's feature settings and CLI defaults. Compatibility checks now apply only to explicit command-line feature overrides. (#52648)",
+        "## New Features",
         "",
-        "Full Changelog: rust-v0.162.0...rust-v0.162.1"
+        "- Open `/config` to search preferences across categories, change supported settings immediately, and see which changes require a restart. (#52990, #53429)",
+        "- Send a follow-up while Codex is responding to steer it immediately. Interrupting a turn also stops active Code Mode cells and their nested tool calls. (#51812, #51835)",
+        "- Configure a leader key in `/keymap`. The default is `Ctrl+X`, shortcut hints stay open until you choose or cancel, and voice mute moves to `F9`. (#52273)",
+        "- Restart a managed background server from `/daemon`. Codex warns about work the restart could interrupt, then reconnects automatically. (#53173)",
+        "- Codex can run independent read-only tools in parallel, including skill, memory, and conversation-history lookups. (#52245)",
+        "- Daybreak is enabled by default for eligible accounts. `codex exec` can also select it with an OpenAI API key when the server offers access. (#53701, #53717)",
+        "",
+        "## Bug Fixes",
+        "",
+        "- Resuming a saved thread restores its permissions and network approvals, while respecting explicit overrides and current managed policy. (#53150, #53419, #53424)",
+        "- The network proxy now checks permission before a DNS lookup, rejects duplicate `Host` headers, and prevents credential aliases from bypassing inspection hooks. (#51650, #52661, #53506)",
+        "- Return to an existing side conversation with `/side` after switching threads. Answers to pending prompts also go back to the thread that asked. (#52184, #53436)",
+        "- On Windows, `Ctrl+V` and `Shift+Insert` paste text as well as images. On WSL, repeated pastes reuse the clipboard reader, and copy attempts time out instead of hanging. (#53224, #52967, #53453)",
+        "- Local commands finish promptly when a child keeps an output pipe open. Remote commands preserve late-arriving output so the final poll can still collect it. (#52652, #53331, #53622)",
+        "- `codex exec` no longer prints the same file diff again after an unrelated command. (#53444)",
+        "",
+        "## Documentation",
+        ""
       ]
     }
   },

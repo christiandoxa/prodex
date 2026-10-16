@@ -237,6 +237,43 @@ fn runtime_sse_helpers_flush_partial_event_at_finish() {
 }
 
 #[test]
+fn native_response_incomplete_0163_preserves_usage_without_rotation() {
+    for reason in [
+        "max_output_tokens",
+        "context_length_exceeded",
+        "content_filter",
+        "interrupted",
+    ] {
+        let payload = serde_json::json!({
+            "type": "response.incomplete",
+            "response": {
+                "id": "resp-native-incomplete-fixture",
+                "status": "incomplete",
+                "incomplete_details": {"reason": reason},
+                "usage": {"input_tokens": 120, "output_tokens": 7, "total_tokens": 127},
+                "native_future_field": {"keep": true}
+            }
+        });
+        let lines = vec![payload.to_string()];
+        assert_eq!(parse_runtime_sse_payload(&lines), Some(payload));
+        let event = parse_runtime_sse_event(&lines);
+        assert_eq!(event.event_type.as_deref(), Some("response.incomplete"));
+        assert!(!event.quota_blocked && !event.rate_limited && !event.overloaded);
+        assert!(!event.previous_response_not_found && !event.invalid_previous_response_id);
+        let usage = event
+            .token_usage
+            .expect("native incomplete usage must not be dropped");
+        assert_eq!(usage.input_tokens, 120);
+        assert_eq!(usage.output_tokens, 7);
+        let wire = format!("data: {}\n\n", lines[0]);
+        assert!(matches!(
+            inspect_runtime_sse_buffer(wire.as_bytes()),
+            RuntimeSseInspectionProgress::Commit { .. }
+        ));
+    }
+}
+
+#[test]
 fn runtime_sse_event_extracts_response_token_usage() {
     let events = collect_runtime_sse_events(&[concat!(
         "data: {",
