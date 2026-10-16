@@ -453,20 +453,13 @@ pub(super) fn prompt_main_model(
     let models = main_model_choices(provider, current_model);
     let choices = models
         .iter()
-        .map(|choice| choice.label.clone())
+        .map(|choice| super_prompt::super_prompt_model_choice_label(&choice.choice, &choice.label))
         .collect::<Vec<_>>();
-    let selected = current_model
-        .and_then(|model| {
-            models.iter().position(|choice| {
-                matches!(
-                    &choice.choice,
-                    prodex_provider_core::ProviderModelChoice::Model(candidate)
-                        if ascii_casefold_equal_exact(candidate, model)
-                            .expect("Mojo main-model selection comparison failed")
-                )
-            })
-        })
-        .unwrap_or(0);
+    let model_choices = models
+        .iter()
+        .map(|choice| choice.choice.clone())
+        .collect::<Vec<_>>();
+    let selected = super_prompt::super_prompt_model_choice_index(&model_choices, current_model);
     let title = main_model_prompt_title(title, provider, degraded);
     let selected = super_prompt::prompt_super_choice(&title, &choices, selected, false)?;
     Ok(match &models[selected].choice {

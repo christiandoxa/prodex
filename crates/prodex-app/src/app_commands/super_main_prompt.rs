@@ -260,26 +260,9 @@ pub(super) fn prompt_super_model(
     let models = super_sub_agent_model_choices(provider, current_model, &configured_models);
     let choices = models
         .iter()
-        .map(|choice| match choice {
-            prodex_provider_core::ProviderModelChoice::ProviderDefault => {
-                "provider default".to_string()
-            }
-            prodex_provider_core::ProviderModelChoice::Model(model) => model.clone(),
-            prodex_provider_core::ProviderModelChoice::Custom => "custom model...".to_string(),
-        })
+        .map(super_prompt::super_prompt_model_choice_id_label)
         .collect::<Vec<_>>();
-    let selected = current_model
-        .and_then(|model| {
-            models.iter().position(|choice| {
-                matches!(
-                    choice,
-                    prodex_provider_core::ProviderModelChoice::Model(candidate)
-                        if ascii_casefold_equal_exact(candidate, model)
-                            .expect("Mojo sub-agent model selection comparison failed")
-                )
-            })
-        })
-        .unwrap_or(0);
+    let selected = super_prompt::super_prompt_model_choice_index(&models, current_model);
     let selected = super_prompt::prompt_super_choice(title, &choices, selected, false)?;
     Ok(match &models[selected] {
         prodex_provider_core::ProviderModelChoice::ProviderDefault => None,
@@ -336,7 +319,9 @@ pub(super) fn prompt_openai_ping_model_and_effort(
             .collect::<Vec<_>>();
         let choices = models
             .iter()
-            .map(|choice| choice.label.clone())
+            .map(|choice| {
+                super_prompt::super_prompt_model_choice_label(&choice.choice, &choice.label)
+            })
             .collect::<Vec<_>>();
         let selected = super_prompt::prompt_ping_choice("OpenAI ping model", &choices, 0)?;
         match &models[selected].choice {
@@ -365,11 +350,14 @@ pub(super) fn prompt_openai_ping_model_and_effort(
                 })?,
         )
     } else {
-        let mut efforts = vec![("provider default".to_string(), None)];
+        let mut efforts = vec![(super_prompt::super_prompt_effort_label(None), None)];
         efforts.extend(
             main_model_efforts(provider, model.as_deref())
                 .into_iter()
-                .map(|effort| (effort.clone(), Some(effort))),
+                .map(|effort| {
+                    let label = super_prompt::super_prompt_effort_label(Some(&effort));
+                    (label, Some(effort))
+                }),
         );
         let choices = efforts
             .iter()
@@ -388,28 +376,25 @@ fn prompt_main_reasoning_effort(
     model: Option<&str>,
     current: Option<&str>,
 ) -> anyhow::Result<Option<String>> {
-    let mut efforts = vec![("provider default".to_string(), None)];
+    let mut efforts = vec![(super_prompt::super_prompt_effort_label(None), None)];
     efforts.extend(
         main_model_efforts(provider, model)
             .into_iter()
-            .map(|effort| (effort.clone(), Some(effort))),
+            .map(|effort| {
+                let label = super_prompt::super_prompt_effort_label(Some(&effort));
+                (label, Some(effort))
+            }),
     );
     let choices = efforts
         .iter()
         .map(|(label, _)| label.clone())
         .collect::<Vec<_>>();
-    let selected = efforts
+    let selectable_efforts = efforts
         .iter()
-        .position(|(_, effort)| {
-            effort
-                .as_deref()
-                .zip(current)
-                .is_some_and(|(candidate, current)| {
-                    ascii_casefold_equal_exact(candidate, current)
-                        .expect("Mojo reasoning-effort selection comparison failed")
-                })
-        })
-        .unwrap_or(0);
+        .map(|(_, effort)| effort.as_deref())
+        .collect::<Vec<_>>();
+    let selected =
+        super_prompt::super_prompt_effort_choice_index(&selectable_efforts, current, true);
     Ok(
         efforts[super_prompt::prompt_super_choice(title, &choices, selected, false)?]
             .1
@@ -422,20 +407,24 @@ fn prompt_reasoning_effort(
     supported: Vec<SubAgentReasoningEffort>,
     current: Option<SubAgentReasoningEffort>,
 ) -> anyhow::Result<Option<SubAgentReasoningEffort>> {
-    let mut efforts = vec![("provider default".to_string(), None)];
-    efforts.extend(
-        supported
-            .into_iter()
-            .map(|effort| (effort.as_str().to_string(), Some(effort))),
-    );
+    let mut efforts = vec![(super_prompt::super_prompt_effort_label(None), None)];
+    efforts.extend(supported.into_iter().map(|effort| {
+        let label = super_prompt::super_prompt_effort_label(Some(effort.as_str()));
+        (label, Some(effort))
+    }));
     let choices = efforts
         .iter()
         .map(|(label, _)| label.clone())
         .collect::<Vec<_>>();
-    let selected = efforts
+    let selectable_efforts = efforts
         .iter()
-        .position(|(_, effort)| *effort == current)
-        .unwrap_or(0);
+        .map(|(_, effort)| effort.as_ref().map(|effort| effort.as_str()))
+        .collect::<Vec<_>>();
+    let selected = super_prompt::super_prompt_effort_choice_index(
+        &selectable_efforts,
+        current.map(|effort| effort.as_str()),
+        false,
+    );
     Ok(efforts[super_prompt::prompt_super_choice(title, &choices, selected, false)?].1)
 }
 
