@@ -123,6 +123,11 @@ export function preflightSteps(args) {
       args: ["scripts/ci/release-hygiene.mjs"],
     },
     {
+      label: "tiny-http-patch",
+      command: "node",
+      args: ["scripts/ci/tiny-http-patch-guard.mjs"],
+    },
+    {
       label: "size-guard",
       command: "node",
       args: ["scripts/ci/size-guard.mjs"],

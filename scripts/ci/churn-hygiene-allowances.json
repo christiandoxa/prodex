@@ -1,5 +1,18 @@
 [
   {
+    "id": "audited-local-http-listener-pressure-repair-0438",
+    "requiredSubjects": [
+      "fix(runtime): keep local proxy listeners alive under descriptor pressure"
+    ],
+    "caps": {
+      "maxFiles": 35,
+      "maxBehaviorFiles": 8,
+      "maxLines": 4600,
+      "maxFileLines": 574
+    },
+    "reason": "Audited import of official tiny_http 0.12.0 runtime sources from crate SHA-256 389915df6413a2e74fb181895f933386023c71110878cd0825588928e64cdc82. Of 24 original files only the accept loop and accepted-stream duplication change; one bounded retry helper is added. Original licenses and per-file hashes remain pinned and checked by mandatory preflight integrity and tamper tests. Real isolated Linux tests reproduce the old EMFILE socket-clone panic and verify both accept/split recovery on the same listening address, with no HTTP replay or user process-limit changes. The 574-line largest file is unmodified upstream response.rs. This exception covers only the measured transport-repair import; global thresholds and all runtime/security/release gates are unchanged."
+  },
+  {
     "id": "audited-mojo-gemini-request-contents-hard-replacement-20260929",
     "requiredSubjects": [
       "feat(mojo): migrate Gemini request contents"
