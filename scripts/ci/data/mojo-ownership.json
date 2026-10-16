@@ -504,6 +504,7 @@
       },
       "mojo/prodex_core/deepseek.mojo": {
         "operations": [
+          "deepseek_response_tool_call_argument_validation",
           "deepseek_simple_request_eligibility",
           "deepseek_request_metadata_composition",
           "deepseek_strict_schema_normalization",
@@ -910,6 +911,7 @@
         "production_reachable": true,
         "role": "adapter",
         "operations": [
+          "deepseek_response_tool_call_argument_validation",
           "deepseek_simple_request_eligibility",
           "deepseek_request_metadata_composition",
           "deepseek_strict_schema_normalization",
@@ -1025,6 +1027,7 @@
           }
         ],
         "operations": [
+          "deepseek_response_tool_call_argument_validation",
           "deepseek_simple_request_eligibility",
           "deepseek_request_metadata_composition",
           "deepseek_strict_schema_normalization",
@@ -10667,6 +10670,33 @@
       "duplicate_production_owner": false,
       "platform_fallback": false,
       "rust_adapter_scope": "model gate, borrowed body marshalling, envelope decoding, and caller-owned byte replacement"
+    },
+    {
+      "name": "deepseek_response_tool_call_argument_validation",
+      "domain": "provider/deepseek",
+      "introduced_in": "0.438.0",
+      "baseline_state": "Rust response tool-call argument JSON validation and empty tool-search policy",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_mojo_deepseek_kernel_v2",
+      "mojo_abi_version": 6,
+      "mojo_operation_ids": {
+        "response_tool_call_item": 40
+      },
+      "mojo_source": "mojo/prodex_core/rich_abi.mojo",
+      "mojo_semantic_source": "mojo/prodex_core/deepseek.mojo",
+      "consumer": "crates/prodex-provider-core/src/translators/deepseek/tooling/response_tool_calls.rs",
+      "consumer_marker": "DeepSeekKernelOperation::ResponseToolCallItem",
+      "production_consumers": [
+        "crates/prodex-provider-core/src/translators/deepseek/tooling/response_tool_calls.rs"
+      ],
+      "production_reachability_test": "crates/prodex-provider-core/src/translators/deepseek/tooling/response_tool_calls.rs",
+      "rust_owner_before": "Rust parsed response tool-call argument JSON and independently decided malformed and empty tool-search arguments",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "Former validation helper removed; provider-core DeepSeek tool-call fixtures retain malformed, empty, Unicode and bounded argument coverage",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "Serde field extraction, size guards, RTK argument rewrite, and stable provider-facing diagnostic text after the Mojo decision"
     },
     {
       "name": "deepseek_stream_tool_arguments_policy",
