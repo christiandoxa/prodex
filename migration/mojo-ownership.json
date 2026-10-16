@@ -10705,18 +10705,18 @@
       "mojo_abi_version": 1,
       "mojo_source": "mojo/prodex_core/log_semantics.mojo",
       "consumer": "crates/prodex-app/src/app_commands/log_transcript_text.rs",
-      "consumer_marker": "prodex_mojo_core::log::transcript_binary_like(",
+      "consumer_marker": "prodex_mojo_core::log::normalize_transcript_visible_text(",
       "production_consumers": [
         "crates/prodex-app/src/app_commands/log_transcript_text.rs"
       ],
       "production_reachability_test": "crates/prodex-app/src/app_commands/log_tests.rs",
-      "rust_owner_before": "Rust punctuation table, Unicode-scalar suspicious character classification, mojibake heuristics, and binary-output threshold decisions for transcript text and lines",
+      "rust_owner_before": "Rust counted Unicode controls, replacement characters, mojibake and non-alphanumeric thresholds to reject binary-like transcript output",
       "rust_state_after": "adapter-only",
       "rust_test_oracle": "deleted from production; bounded Unicode-facts adapter plus direct Mojo policy/ABI tests and real log caller tests cover ASCII, punctuation, Unicode, replacement, controls, mojibake and threshold boundaries",
       "production_fallback": false,
       "duplicate_production_owner": false,
       "platform_fallback": false,
-      "rust_adapter_scope": "Rust reads Unicode whitespace/alphanumeric/control properties from its standard Unicode tables, packs at most 4096 scalars, validates Mojo boolean output and performs log I/O/visibility transformations; no Rust punctuation table or binary decision rules remain"
+      "rust_adapter_scope": "caller supplies Unicode facts and consumes Mojo-owned visible-text projection; no separate Rust classification remains"
     },
     {
       "name": "terminal_token_cell_chunk_segmentation",

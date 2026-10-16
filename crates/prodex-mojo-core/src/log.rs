@@ -17,7 +17,10 @@ pub use transcript::{
     TranscriptProtocolSource, classify_transcript_event, classify_transcript_item,
     sanitize_transcript_tool_name, transcript_operation_span,
 };
-pub use transcript_ansi::{strip_transcript_ansi_codes, transcript_binary_like};
+pub use transcript_ansi::{
+    join_transcript_user_parts, normalize_transcript_safe_text, normalize_transcript_visible_text,
+    strip_transcript_ansi_codes, transcript_binary_like,
+};
 
 const _: () = assert!(std::mem::size_of::<usize>() == std::mem::size_of::<u64>());
 

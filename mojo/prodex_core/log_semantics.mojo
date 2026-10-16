@@ -1,6 +1,8 @@
 from std.memory import Pointer
 
-from rich_text import rich_codepoint, rich_codepoint_width, rich_trim_bounds, rich_view_matches_literal, rich_view_valid
+from log_transcript_facts import PRODEX_TRANSCRIPT_ABI_VERSION, transcript_fact_view_valid, transcript_fact_whitespace, transcript_fact_control, transcript_fact_codepoint, transcript_fact_trim_bounds
+
+from rich_text import rich_codepoint, rich_codepoint_width, rich_trim_bounds, rich_utf8_continuation, rich_view_matches_literal, rich_view_valid
 from rich_types import ProdexRichStringView, rich_view_ptr
 
 comptime PRODEX_LOG_SNAPSHOT_ABI_VERSION: Int64 = 1
@@ -487,7 +489,6 @@ def prodex_mojo_log_event_name_v1(
     return PRODEX_LOG_EVENT_NAME_STATUS_OK
 
 
-comptime PRODEX_TRANSCRIPT_ABI_VERSION: Int64 = 1
 comptime PRODEX_TRANSCRIPT_TOOL_NAME_CHARS: Int64 = 96
 comptime PRODEX_TRANSCRIPT_OPERATION_CHARS: Int64 = 192
 
@@ -3028,4 +3029,304 @@ def prodex_mojo_transcript_binary_policy_v1(
     Pointer[mut=True, UInt64, MutUntrackedOrigin](
         unsafe_from_address=Int(result_address)
     )[] = UInt64(1) if bad else UInt64(0)
+    return 0
+
+
+# Transcript visibility receives Unicode table facts from Rust so the host
+# and Mojo agree on whitespace, alphanumeric and control classifications.
+comptime TRANSCRIPT_VISIBLE_MODE_MESSAGE: Int64 = 0
+comptime TRANSCRIPT_VISIBLE_MODE_TOOL: Int64 = 1
+
+
+def transcript_binary_range(
+    facts: Pointer[mut=False, UInt64, _],
+    start: Int64,
+    end: Int64,
+    line_mode: Bool,
+) -> Bool:
+    var suspicious: Int64 = 0
+    var replacement: Int64 = 0
+    var control: Int64 = 0
+    var readable_ascii: Int64 = 0
+    var non_ascii: Int64 = 0
+    var whitespace: Int64 = 0
+    var total = end - start
+    for index in range(start, end):
+        var codepoint = UInt64(transcript_fact_codepoint(facts, index))
+        var space = transcript_fact_whitespace(facts, index)
+        var alphanumeric = ((facts[unsafe_offset=index] >> 22) & UInt64(1)) == UInt64(1)
+        var rust_control = transcript_fact_control(facts, index)
+        var ascii = codepoint <= 127
+        var common = transcript_common_punctuation(codepoint)
+        var replaced = codepoint == 0xFFFD
+        var unsafe_control = (
+            rust_control and codepoint != 10 and codepoint != 13
+            and codepoint != 9
+        )
+        var readable = ascii and (alphanumeric or space or common)
+        var strange = replaced or unsafe_control or (
+            not ascii and not alphanumeric and not space and not common
+        )
+        if strange:
+            suspicious += 1
+        if replaced:
+            replacement += 1
+        if unsafe_control:
+            control += 1
+        if readable:
+            readable_ascii += 1
+        if not ascii:
+            non_ascii += 1
+        if space:
+            whitespace += 1
+
+    if total <= 0:
+        return False
+    if line_mode:
+        var mojibake = (
+            total >= 24
+            and non_ascii >= 8
+            and non_ascii * 100 >= total * 20
+            and readable_ascii * 100 <= total * 55
+            and whitespace * 6 <= total
+        )
+        return (
+            replacement > 0
+            or control > 0
+            or mojibake
+            or suspicious * 5 >= total
+            or suspicious >= 6
+        )
+    return (
+        replacement >= 3
+        or control > 0
+        or suspicious * 4 > total
+        or suspicious >= 8
+    )
+
+
+def transcript_bytes_contains(
+    source: Pointer[mut=False, UInt8, _],
+    start: Int64,
+    end: Int64,
+    literal: StringSlice,
+) -> Bool:
+    var needle_length = Int64(literal.byte_length())
+    if needle_length == 0 or needle_length > end - start:
+        return False
+    var expected = literal.unsafe_ptr()
+    for candidate in range(start, end - needle_length + 1):
+        var matched = True
+        for offset in range(needle_length):
+            if source[unsafe_offset=candidate + offset] != expected[unsafe_offset=offset]:
+                matched = False
+                break
+        if matched:
+            return True
+    return False
+
+
+def transcript_visible_put_byte(
+    output: Pointer[mut=True, UInt8, _],
+    capacity: Int64,
+    written: Pointer[mut=True, Int64, _],
+    value: UInt8,
+) -> Bool:
+    if written[] < 0 or written[] >= capacity:
+        return False
+    output[unsafe_offset=written[]] = value
+    written[] += 1
+    return True
+
+
+def transcript_visible_put_range(
+    source: Pointer[mut=False, UInt8, _],
+    start: Int64,
+    end: Int64,
+    output: Pointer[mut=True, UInt8, _],
+    capacity: Int64,
+    written: Pointer[mut=True, Int64, _],
+) -> Bool:
+    if start < 0 or end < start or end - start > capacity - written[]:
+        return False
+    for index in range(start, end):
+        output[unsafe_offset=written[]] = source[unsafe_offset=index]
+        written[] += 1
+    return True
+
+
+def transcript_visible_emit_line(
+    source: Pointer[mut=False, UInt8, _],
+    facts: Pointer[mut=False, UInt64, _],
+    line_start: Int64,
+    line_end: Int64,
+    scalar_start: Int64,
+    scalar_end: Int64,
+    mode: Int64,
+    output: Pointer[mut=True, UInt8, _],
+    capacity: Int64,
+    written: Pointer[mut=True, Int64, _],
+    has_visible: Pointer[mut=True, Int64, _],
+    last_blank: Pointer[mut=True, Int64, _],
+) -> Bool:
+    var trimmed_end = line_end
+    var trimmed_scalar_end = scalar_end
+    while trimmed_scalar_end > scalar_start:
+        if not transcript_fact_whitespace(facts, trimmed_scalar_end - 1):
+            break
+        var probe = trimmed_end - 1
+        while probe > line_start and rich_utf8_continuation(source[unsafe_offset=probe]):
+            probe -= 1
+        trimmed_end = probe
+        trimmed_scalar_end -= 1
+
+    if trimmed_end == line_start:
+        if has_visible[] == 1 and last_blank[] == 0:
+            if not transcript_visible_put_byte(output, capacity, written, 10):
+                return False
+            last_blank[] = 1
+        return True
+    if mode == TRANSCRIPT_VISIBLE_MODE_TOOL and transcript_binary_range(
+        facts, scalar_start, trimmed_scalar_end, True
+    ):
+        return True
+    if (
+        transcript_bytes_contains(
+            source,
+            line_start,
+            trimmed_end,
+            StringSlice("/.prodex/profiles/.prodex-overlay-"),
+        )
+        and transcript_bytes_contains(
+            source, line_start, trimmed_end, StringSlice("/attachments/")
+        )
+    ):
+        if last_blank[] == 1 and written[] > 0 and output[unsafe_offset=written[] - 1] == 10:
+            written[] -= 1
+            last_blank[] = 0
+        return True
+    if has_visible[] == 1 and not transcript_visible_put_byte(output, capacity, written, 10):
+        return False
+    if not transcript_visible_put_range(
+        source, line_start, trimmed_end, output, capacity, written
+    ):
+        return False
+    has_visible[] = 1
+    last_blank[] = 0
+    return True
+
+
+@export("prodex_mojo_transcript_visible_text_v1")
+def prodex_mojo_transcript_visible_text_v1(
+    abi_version: Int64,
+    mode: Int64,
+    input_address: UInt,
+    input_length: Int64,
+    facts_address: UInt,
+    fact_count: Int64,
+    output_address: UInt,
+    output_capacity: Int64,
+    written_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != PRODEX_TRANSCRIPT_ABI_VERSION:
+        return 4
+    if (
+        (mode != TRANSCRIPT_VISIBLE_MODE_MESSAGE and mode != TRANSCRIPT_VISIBLE_MODE_TOOL)
+        or input_length < 0
+        or output_capacity < 0
+        or output_address == 0
+        or written_address == 0
+        or (input_length > 0 and input_address == 0)
+    ):
+        return 1
+    var view = ProdexRichStringView(input_address, UInt(input_length))
+    if not transcript_fact_view_valid(view, facts_address, fact_count):
+        return 2
+    # Output projection never publishes partial text on a capacity failure.
+    if output_capacity < input_length:
+        return 3
+    var source = rich_view_ptr(view)
+    var facts = Pointer[mut=False, UInt64, ImmUntrackedOrigin](
+        unsafe_from_address=Int(facts_address)
+    )
+    var bounds: Tuple[Int64, Int64, Int64, Int64] = (
+        0, input_length, 0, fact_count
+    )
+    if mode == TRANSCRIPT_VISIBLE_MODE_TOOL:
+        bounds = transcript_fact_trim_bounds(source, input_length, facts, fact_count)
+    var start_byte = bounds[0]
+    var end_byte = bounds[1]
+    var start_scalar = bounds[2]
+    var end_scalar = bounds[3]
+    var output = Pointer[mut=True, UInt8, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    var written = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(written_address)
+    )
+    written[] = 0
+    if start_scalar == end_scalar:
+        return 0
+    if (
+        mode == TRANSCRIPT_VISIBLE_MODE_TOOL
+        and end_byte - start_byte > 0
+        and not transcript_bytes_contains(source, start_byte, end_byte, StringSlice("\n"))
+        and transcript_binary_range(facts, start_scalar, end_scalar, False)
+    ):
+        return 0
+
+    var has_visible: Int64 = 0
+    var last_blank: Int64 = 0
+    var cursor = start_byte
+    var scalar = start_scalar
+    var line_start = cursor
+    var line_scalar = scalar
+    while cursor < end_byte:
+        var width = rich_codepoint_width(source[unsafe_offset=cursor])
+        var codepoint = rich_codepoint(source, cursor, width)
+        if codepoint == 10 or codepoint == 13:
+            var line_end = cursor
+            var line_end_scalar = scalar
+            cursor += width
+            scalar += 1
+            if codepoint == 13 and cursor < end_byte and source[unsafe_offset=cursor] == 10:
+                cursor += 1
+                scalar += 1
+            if not transcript_visible_emit_line(
+                source,
+                facts,
+                line_start,
+                line_end,
+                line_scalar,
+                line_end_scalar,
+                mode,
+                output,
+                output_capacity,
+                written,
+                Pointer(to=has_visible),
+                Pointer(to=last_blank),
+            ):
+                return 3
+            line_start = cursor
+            line_scalar = scalar
+        else:
+            cursor += width
+            scalar += 1
+    if line_start < end_byte and not transcript_visible_emit_line(
+        source,
+        facts,
+        line_start,
+        end_byte,
+        line_scalar,
+        end_scalar,
+        mode,
+        output,
+        output_capacity,
+        written,
+        Pointer(to=has_visible),
+        Pointer(to=last_blank),
+    ):
+        return 3
+    while written[] > 0 and output[unsafe_offset=written[] - 1] == 10:
+        written[] -= 1
     return 0
