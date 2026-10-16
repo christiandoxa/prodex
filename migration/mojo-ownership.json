@@ -1309,6 +1309,7 @@
           "runtime_lineage_key_build",
           "runtime_lineage_response_parts",
           "local_rewrite_binding_candidate_policy",
+          "local_rewrite_binding_identity_source",
           "runtime_session_release_epoch",
           "runtime_session_full_history_conflict_recovery"
         ]
@@ -12186,6 +12187,33 @@
       "duplicate_production_owner": false,
       "platform_fallback": false,
       "rust_adapter_scope": "Bounded borrowed Serde tree acquisition, wire-compatible JSON parsing and pretty serialization, checked ABI buffers, record decoding, and Unicode-width terminal wrapping"
+    },
+    {
+      "name": "local_rewrite_binding_identity_source",
+      "domain": "runtime-state/lineage",
+      "introduced_in": "0.438.0",
+      "baseline_state": "Rust selected a validated credential identity first and fell back to a validated profile identity when the credential identity was unavailable",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_runtime_lineage_binding_identity_source_v1",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/runtime_lineage.mojo",
+      "consumer": "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_upstream/binding_identity.rs",
+      "consumer_marker": "prodex_mojo_core::runtime_lineage::binding_identity_source(",
+      "production_consumers": [
+        "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_upstream.rs",
+        "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_anthropic.rs",
+        "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_deepseek_send.rs",
+        "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_gemini_send.rs",
+        "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_kiro.rs"
+      ],
+      "production_reachability_test": "crates/prodex-mojo-core/src/runtime_lineage.rs",
+      "rust_owner_before": "Credential-versus-profile binding identity precedence and invalid-credential fallback in the local rewrite provider adapters",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "Direct Mojo adapter coverage exercises credential precedence, profile fallback, empty selection, and invalid ABI/shape inputs; provider identity constructors retain secret-free hashing and endpoint validation in Rust",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "Rust validates and hashes credential/profile inputs, supplies presence facts, and maps the Mojo source tag to the existing identity value"
     }
   ],
   "rust_semantic_reductions": [

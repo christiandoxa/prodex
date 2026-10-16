@@ -21,6 +21,10 @@ comptime COMPACT_TURN_PREFIX = "__compact_turn_state__:"
 comptime RESPONSE_TURN_PREFIX = "__response_turn_state__:"
 comptime INVALID_SUFFIX = "__invalid__"
 
+comptime BINDING_IDENTITY_SOURCE_NONE: Int64 = 0
+comptime BINDING_IDENTITY_SOURCE_CREDENTIAL: Int64 = 1
+comptime BINDING_IDENTITY_SOURCE_PROFILE: Int64 = 2
+
 def view(address: UInt, length: Int64) -> ProdexRichStringView:
     return ProdexRichStringView(address, UInt(length))
 
@@ -65,6 +69,35 @@ def trimmed_component_present(address: UInt, length: Int64) -> Int64:
         return -1
     var bounds = rich_trim_bounds(input)
     return Int64(bounds[0] < bounds[1])
+
+@export("prodex_runtime_lineage_binding_identity_source_v1")
+def prodex_runtime_lineage_binding_identity_source_v1(
+    abi_version: Int64,
+    credential_present: Int64,
+    credential_valid: Int64,
+    profile_present: Int64,
+    profile_valid: Int64,
+) abi("C") -> Int64:
+    if abi_version != LINEAGE_ABI_VERSION:
+        return -4
+    if (
+        credential_present < 0
+        or credential_present > 1
+        or credential_valid < 0
+        or credential_valid > 1
+        or profile_present < 0
+        or profile_present > 1
+        or profile_valid < 0
+        or profile_valid > 1
+    ):
+        return -1
+    if credential_valid > credential_present or profile_valid > profile_present:
+        return -1
+    if credential_valid == 1:
+        return BINDING_IDENTITY_SOURCE_CREDENTIAL
+    if profile_valid == 1:
+        return BINDING_IDENTITY_SOURCE_PROFILE
+    return BINDING_IDENTITY_SOURCE_NONE
 
 def prefix_matches[address_literal: StaticString](
     address: UInt, length: Int64

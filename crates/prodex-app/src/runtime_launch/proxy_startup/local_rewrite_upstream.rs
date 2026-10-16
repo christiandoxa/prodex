@@ -53,6 +53,10 @@ const RUNTIME_LOCAL_REWRITE_STREAM_CHUNK_BYTES: usize = 64 * 1024;
 mod binding_candidate;
 pub(super) use binding_candidate::runtime_local_rewrite_mojo_binding_identity;
 
+#[path = "local_rewrite_upstream/binding_identity.rs"]
+mod binding_identity;
+pub(super) use binding_identity::runtime_local_rewrite_raw_binding_identity;
+
 pub(super) struct RuntimeLocalRewriteUpstreamResult {
     pub(super) response: RuntimeLocalRewriteUpstreamResponse,
     pub(super) gemini_context: Option<RuntimeGeminiRequestContext>,
@@ -1042,24 +1046,6 @@ pub(super) fn runtime_local_rewrite_binding_context(
         session_id,
         bound,
     })
-}
-
-pub(super) fn runtime_local_rewrite_raw_binding_identity(
-    _shared: &RuntimeLocalRewriteProxyShared,
-    provider: ProviderId,
-    credential: Option<&str>,
-    endpoint: &str,
-    profile: Option<&str>,
-) -> Option<RuntimeProviderBindingIdentity> {
-    credential
-        .and_then(|credential| {
-            RuntimeProviderBindingIdentity::from_raw_key(provider, credential, endpoint, profile)
-        })
-        .or_else(|| {
-            profile.and_then(|profile| {
-                RuntimeProviderBindingIdentity::from_profile(provider, profile, endpoint)
-            })
-        })
 }
 
 pub(super) fn runtime_local_rewrite_request_bound_binding(
