@@ -50,6 +50,27 @@ fn collect_runtime_sse_events(chunks: &[&[u8]]) -> Vec<RuntimeParsedSseEvent> {
     events
 }
 
+#[test]
+fn compiled_mojo_sse_scanning_preserves_events_across_more_than_256_lines() {
+    let mut body = ": keep-alive\r\n".repeat(600);
+    body.push_str(
+        "data: {\"type\":\"response.created\",\"response\":{\"id\":\"resp-bulk\"}}\r\n\r\n",
+    );
+    let whole = collect_runtime_sse_events(&[body.as_bytes()]);
+    assert_eq!(whole.len(), 1, "{whole:?}");
+    assert_eq!(whole[0].event_type.as_deref(), Some("response.created"));
+    assert_eq!(whole[0].response_ids, ["resp-bulk"]);
+    for widths in [vec![0], vec![1; 1_024], (0..701).collect::<Vec<_>>()] {
+        let split = collect_runtime_sse_events_for_chunk_sizes(body.as_bytes(), &widths);
+        assert_eq!(
+            runtime_sse_event_signatures(&split),
+            runtime_sse_event_signatures(&whole),
+            "width count {}",
+            widths.len(),
+        );
+    }
+}
+
 fn collect_runtime_sse_events_for_chunk_sizes(
     body: &[u8],
     chunk_sizes: &[usize],

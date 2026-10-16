@@ -2622,6 +2622,26 @@
         "operations": [
           "smart_context_rollout_bucket_hash_mapping"
         ]
+      },
+      {
+        "path": "mojo/prodex_core/sse_line.mojo",
+        "language": "mojo",
+        "classification": "DETERMINISTIC_DOMAIN",
+        "production_reachable": true,
+        "role": "semantic",
+        "operations": [
+          "runtime_sse_streaming_chunk_line_boundaries"
+        ]
+      },
+      {
+        "path": "crates/prodex-mojo-core/src/runtime_sse_chunk.rs",
+        "language": "rust",
+        "classification": "MIXED",
+        "production_reachable": true,
+        "role": "adapter",
+        "operations": [
+          "runtime_sse_streaming_chunk_line_boundaries"
+        ]
       }
     ],
     "removed": [
@@ -11629,6 +11649,29 @@
       "duplicate_production_owner": false,
       "platform_fallback": false,
       "rust_adapter_scope": "Rust owns ordered request BTreeMap and materializes selected history by checked Mojo index"
+    },
+    {
+      "name": "runtime_sse_streaming_chunk_line_boundaries",
+      "domain": "runtime-proxy/sse-stream-framing",
+      "introduced_in": "0.438.0",
+      "baseline_state": "Two Rust streaming and pre-commit inspection loops scanned every SSE byte for LF and appended each byte separately before finalizing event lines",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_runtime_sse_chunk_line_offsets_v1",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/sse_line.mojo",
+      "consumer": "crates/prodex-runtime-proxy/src/payload_detection/sse.rs",
+      "consumer_marker": "prodex_mojo_core::runtime_sse_chunk::newline_plan(",
+      "production_consumers": [
+        "crates/prodex-runtime-proxy/src/payload_detection/sse.rs"
+      ],
+      "production_reachability_test": "crates/prodex-runtime-proxy/src/payload_detection/sse.rs",
+      "rust_owner_before": "Rust duplicated per-byte newline scanning, detection and line-splitting in regular event consumption and precommit inspection paths",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "Both Rust LF detection loops deleted; Mojo offset ABI tests verify bounded 256-line batches and invalid inputs; caller regression proves identical SSE event parsing across 600+ lines and fragmented CRLF chunks",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "Typed prodex-mojo-core FFI validates bounded newline offsets and consumed byte count; runtime-proxy owns transport byte append, SSE event callbacks and serde_json parsing"
     }
   ],
   "rust_semantic_reductions": [
