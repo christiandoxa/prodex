@@ -147,6 +147,12 @@ unsafe extern "C" {
         repeat_tool_output_refs: u64,
         static_context_deltas: u64,
     ) -> i64;
+    fn prodex_smart_context_rollout_bucket_v1(
+        abi_version: i64,
+        digest: u64,
+        digest_len: i64,
+        bucket: *mut u64,
+    ) -> i64;
     fn prodex_smart_context_rollout_plan_v1(
         enabled: i64,
         explicit_exact_mode: i64,
@@ -272,6 +278,30 @@ pub fn smart_context_affinity_rewrite_allowed(
         1 => Ok(true),
         _ => Err(crate::MojoError::InvalidOutput),
     }
+}
+
+/// Map host-owned SHA-256 to the stable 0..10,000 canary bucket in Mojo.
+pub fn smart_context_rollout_bucket(digest: &[u8; 32]) -> Result<u16, crate::MojoError> {
+    let mut bucket = u64::MAX;
+    let status = unsafe {
+        prodex_smart_context_rollout_bucket_v1(
+            1,
+            digest.as_ptr() as u64,
+            digest.len() as i64,
+            &mut bucket,
+        )
+    };
+    if status != 0 {
+        return Err(match status {
+            1 => crate::MojoError::InvalidInput,
+            4 => crate::MojoError::AbiMismatch,
+            _ => crate::MojoError::InvalidOutput,
+        });
+    }
+    if bucket >= 10_000 {
+        return Err(crate::MojoError::InvalidOutput);
+    }
+    u16::try_from(bucket).map_err(|_| crate::MojoError::InvalidOutput)
 }
 
 pub fn smart_context_rollout_plan(
@@ -556,6 +586,10 @@ pub fn smart_context_policy_self_test() -> bool {
         && smart_context_rollout_plan(true, false, false, 10, 999)
             .is_ok_and(|plan| plan.mode == 0 && plan.reason == 5)
 }
+
+#[cfg(test)]
+#[path = "smart_context_policy/canary_bucket_tests.rs"]
+mod canary_bucket_tests;
 
 #[cfg(test)]
 mod duplicate_text_tests {

@@ -71,8 +71,6 @@ pub fn smart_context_rollout_decision(
 
 pub fn smart_context_rollout_bucket(stable_key: &str) -> u16 {
     let digest = smart_context_sha256_digest(stable_key.as_bytes());
-    let prefix = u64::from_be_bytes([
-        digest[0], digest[1], digest[2], digest[3], digest[4], digest[5], digest[6], digest[7],
-    ]);
-    (prefix % 10_000) as u16
+    prodex_mojo_core::runtime::smart_context_rollout_bucket(&digest)
+        .expect("Mojo Smart Context rollout bucket policy returned invalid output")
 }
