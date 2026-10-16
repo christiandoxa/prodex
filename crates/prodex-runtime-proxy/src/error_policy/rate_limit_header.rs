@@ -22,8 +22,10 @@ pub fn runtime_http_error_policy_with_headers<'a>(
                 .expect("Mojo rate-limit header-name comparison failed")
         })
         .filter_map(|(_, value)| std::str::from_utf8(value).ok())
-        .map(str::trim)
-        .find(|value| !value.is_empty());
+        .find(|value| {
+            prodex_mojo_core::rich::rate_limit_header_nonempty(value)
+                .expect("Mojo rate-limit header value selection failed")
+        });
     let Some(reached_type) = reached_type else {
         return body_policy;
     };
@@ -48,5 +50,6 @@ pub fn runtime_http_error_policy_with_headers<'a>(
 }
 
 fn runtime_rate_limit_reached_type_class(value: &str) -> i64 {
-    prodex_mojo_core::rich::rate_limit_header_class(value).unwrap_or(0)
+    prodex_mojo_core::rich::rate_limit_header_class(value)
+        .expect("Mojo rate-limit header classification failed")
 }

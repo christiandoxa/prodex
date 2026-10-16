@@ -152,3 +152,31 @@ fn observed_upgrade_to_pro_usage_limit_rotates_on_403() {
     assert_eq!(policy.class, RuntimeHttpErrorClass::Quota);
     assert_eq!(policy.action, RuntimeHttpErrorAction::RotateProfile);
 }
+
+#[test]
+fn official_rate_limit_header_duplicate_selection_uses_unicode_mojo_presence_policy() {
+    let header_name = "X-Codex-Rate-Limit-Reached-Type";
+    let blank = "\u{2003}\t\u{3000}".as_bytes();
+    let quota = "\u{2003}workspace_member_credits_depleted\u{3000}".as_bytes();
+    let headers = [(header_name, blank), (header_name, quota)];
+    let policy = runtime_http_error_policy_with_headers(
+        429,
+        br#"{"error":{"message":"Too Many Requests"}}"#,
+        headers,
+        RuntimeHttpErrorPhase::PreCommit,
+    );
+    assert_eq!(policy.class, RuntimeHttpErrorClass::Quota);
+    assert_eq!(policy.action, RuntimeHttpErrorAction::RotateProfile);
+
+    // The first nonblank matching header remains authoritative even if its
+    // value is unknown; later quota evidence must not override it.
+    let first = "future_kind".as_bytes();
+    let policy = runtime_http_error_policy_with_headers(
+        429,
+        br#"{"error":{"message":"Too Many Requests"}}"#,
+        [(header_name, first), (header_name, quota)],
+        RuntimeHttpErrorPhase::PreCommit,
+    );
+    assert_eq!(policy.class, RuntimeHttpErrorClass::RateLimited);
+    assert_eq!(policy.action, RuntimeHttpErrorAction::RetryProfile);
+}

@@ -2298,6 +2298,27 @@ comptime RATE_LIMIT_HEADER_CLASS_RATE: Int64 = 1
 comptime RATE_LIMIT_HEADER_CLASS_QUOTA: Int64 = 2
 
 
+# Preserve the HTTP adapter's first nonblank matching-header precedence.
+# Unicode whitespace selection uses the same compiled trim owner as the
+# header classifier, with no alternative Rust emptiness predicate.
+comptime RATE_LIMIT_HEADER_NONEMPTY_ABI_VERSION: Int64 = 1
+
+
+@export("prodex_mojo_rate_limit_header_nonempty_v1")
+def prodex_mojo_rate_limit_header_nonempty_v1(
+    abi_version: Int64, address: UInt, length: Int64
+) abi("C") -> Int64:
+    if abi_version != RATE_LIMIT_HEADER_NONEMPTY_ABI_VERSION:
+        return -4
+    if length < 0 or (length > 0 and address == 0):
+        return -1
+    var view = ProdexRichStringView(address, UInt(length))
+    if not rich_view_valid(view, 0x7FFFFFFFFFFFFFFF):
+        return -1
+    var bounds = rich_trim_bounds(view)
+    return 1 if bounds[0] < bounds[1] else 0
+
+
 @export("prodex_mojo_rate_limit_header_class_v1")
 def prodex_mojo_rate_limit_header_class_v1(
     address: UInt,

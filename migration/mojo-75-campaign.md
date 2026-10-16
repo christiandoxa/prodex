@@ -5699,3 +5699,11 @@ Debug-quoted OS argument presentation. Rust's duplicate ASCII safe-character
 predicate was removed; Rust retains only UTF-8/OsString output materialization
 and its standard Debug formatter for Mojo-selected quoted cases. Strict ABI,
 caller and no-Rust-fallback checks cover the migration.
+
+## Rate-limit header nonempty selection migrated to Mojo
+
+The runtime proxy now uses the compiled rich-fallback header classifier's
+Unicode trimming owner to skip blank rate-limit headers before choosing the
+first nonblank match. The Rust whitespace selection and silent `unwrap_or(0)`
+classification fallback were removed. Versioned ABI, runtime proxy caller
+and no-fallback guard tests preserve duplicate-header and 429 semantics.
