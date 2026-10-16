@@ -41,7 +41,31 @@ impl LocalInspectionFindingKind {
     }
 }
 
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct DryRunPathView {
+    address: u64,
+    length: u64,
+}
+
 unsafe extern "C" {
+    fn prodex_redaction_dry_run_path_order_v1(
+        abi_version: i64,
+        views: u64,
+        count: i64,
+        ordered_indices: u64,
+        selected_count: u64,
+    ) -> i64;
+    fn prodex_redaction_dry_run_path_replace_v1(
+        abi_version: i64,
+        input: u64,
+        input_length: i64,
+        path: u64,
+        path_length: i64,
+        output: u64,
+        output_capacity: i64,
+        written: u64,
+    ) -> i64;
     fn prodex_redaction_json_field_plan_v1(
         abi_version: i64,
         input_address: u64,
@@ -144,6 +168,88 @@ pub struct JsonFieldPlan {
     pub known_protocol_metadata: bool,
     pub unsupported_modality: bool,
     pub tools_field: bool,
+}
+
+/// Redact a dry-run report using the compiled Mojo path policy.
+///
+/// Mojo sorts nonempty paths by descending byte length, adjacent-deduplicates,
+/// and applies ordered, nonoverlapping substring replacements. The host only
+/// marshals borrowed UTF-8 and allocates the exact required output size.
+pub fn redact_dry_run_paths(value: &str, paths: &[String]) -> Result<String, MojoError> {
+    if paths.len() > 16 {
+        return Err(MojoError::InvalidInput);
+    }
+    let views = paths
+        .iter()
+        .map(|path| {
+            Ok(DryRunPathView {
+                address: path.as_ptr() as u64,
+                length: u64::try_from(path.len()).map_err(|_| MojoError::InvalidInput)?,
+            })
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    let mut indices = [-1_i64; 16];
+    let mut count = -1_i64;
+    let order_status = unsafe {
+        prodex_redaction_dry_run_path_order_v1(
+            REDACTION_ABI_VERSION,
+            views.as_ptr() as u64,
+            i64::try_from(views.len()).map_err(|_| MojoError::InvalidInput)?,
+            indices.as_mut_ptr() as u64,
+            &mut count as *mut i64 as u64,
+        )
+    };
+    status(order_status)?;
+    let count = usize::try_from(count).map_err(|_| MojoError::InvalidOutput)?;
+    if count > paths.len() {
+        return Err(MojoError::InvalidOutput);
+    }
+    let mut current = value.to_owned();
+    for &index in &indices[..count] {
+        let index = usize::try_from(index).map_err(|_| MojoError::InvalidOutput)?;
+        let path = paths.get(index).ok_or(MojoError::InvalidOutput)?;
+        if path.is_empty() {
+            return Err(MojoError::InvalidOutput);
+        }
+        let mut required = -1_i64;
+        let query = unsafe {
+            prodex_redaction_dry_run_path_replace_v1(
+                REDACTION_ABI_VERSION,
+                current.as_ptr() as u64,
+                i64::try_from(current.len()).map_err(|_| MojoError::InvalidInput)?,
+                path.as_ptr() as u64,
+                i64::try_from(path.len()).map_err(|_| MojoError::InvalidInput)?,
+                0,
+                0,
+                &mut required as *mut i64 as u64,
+            )
+        };
+        if query != 2 {
+            return Err(MojoError::InvalidOutput);
+        }
+        let required = usize::try_from(required).map_err(|_| MojoError::InvalidOutput)?;
+        let mut output = vec![0_u8; required];
+        let mut written = -1_i64;
+        let write_status = unsafe {
+            prodex_redaction_dry_run_path_replace_v1(
+                REDACTION_ABI_VERSION,
+                current.as_ptr() as u64,
+                i64::try_from(current.len()).map_err(|_| MojoError::InvalidInput)?,
+                path.as_ptr() as u64,
+                i64::try_from(path.len()).map_err(|_| MojoError::InvalidInput)?,
+                output.as_mut_ptr() as u64,
+                i64::try_from(output.len()).map_err(|_| MojoError::InvalidInput)?,
+                &mut written as *mut i64 as u64,
+            )
+        };
+        status(write_status)?;
+        if usize::try_from(written).map_err(|_| MojoError::InvalidOutput)? != required {
+            return Err(MojoError::InvalidOutput);
+        }
+        current =
+            String::from_utf8(std::mem::take(&mut output)).map_err(|_| MojoError::InvalidOutput)?;
+    }
+    Ok(current)
 }
 
 pub fn json_field_plan(value: &str) -> Result<JsonFieldPlan, MojoError> {
@@ -533,5 +639,114 @@ mod tests {
             local_inspect_and_redact("a@example.test", None, 0),
             Err(MojoError::Capacity)
         );
+    }
+}
+
+#[cfg(test)]
+mod dry_run_path_redaction_tests {
+    use super::*;
+
+    #[test]
+    fn mojo_dry_run_path_replacements_preserve_order_duplicates_and_unicode() {
+        let paths = vec![
+            "/home/user".to_owned(),
+            "/home/user/private".to_owned(),
+            "/home/user/private".to_owned(),
+            "".to_owned(),
+            "/tmp/東京🧭".to_owned(),
+        ];
+        assert_eq!(
+            redact_dry_run_paths(
+                "/home/user/private/file /home/user/other /tmp/東京🧭/state",
+                &paths,
+            ),
+            Ok("<redacted-path>/file <redacted-path>/other <redacted-path>/state".to_owned()),
+        );
+        assert_eq!(
+            redact_dry_run_paths("unchanged", &paths),
+            Ok("unchanged".to_owned()),
+        );
+        assert_eq!(redact_dry_run_paths("", &paths), Ok(String::new()));
+        assert_eq!(
+            redact_dry_run_paths("/".repeat(128).as_str(), &["/".to_owned()]),
+            Ok("<redacted-path>".repeat(128)),
+        );
+        assert_eq!(
+            redact_dry_run_paths(
+                "abc def abc",
+                &["abc".to_owned(), "def".to_owned(), "abc".to_owned(),]
+            ),
+            Ok("<redacted-path> <redacted-path> <redacted-path>".to_owned()),
+        );
+        assert_eq!(
+            redact_dry_run_paths("original", &[]),
+            Ok("original".to_owned()),
+        );
+    }
+
+    #[test]
+    fn mojo_dry_run_path_abi_rejects_bad_views_and_verifies_exact_capacity() {
+        let value = "/private";
+        let path = "/private";
+        let mut count = 77_i64;
+        let mut indices = [99_i64; 16];
+        let mut written = -1_i64;
+        let mut output = [88_u8; 16];
+        let span = DryRunPathView {
+            address: path.as_ptr() as u64,
+            length: path.len() as u64,
+        };
+        unsafe {
+            assert_eq!(
+                prodex_redaction_dry_run_path_order_v1(
+                    REDACTION_ABI_VERSION + 1,
+                    &span as *const _ as u64,
+                    1,
+                    indices.as_mut_ptr() as u64,
+                    &mut count as *mut _ as u64,
+                ),
+                4
+            );
+            assert_eq!(
+                prodex_redaction_dry_run_path_order_v1(
+                    REDACTION_ABI_VERSION,
+                    0,
+                    1,
+                    indices.as_mut_ptr() as u64,
+                    &mut count as *mut _ as u64,
+                ),
+                1
+            );
+            assert_eq!(
+                prodex_redaction_dry_run_path_replace_v1(
+                    REDACTION_ABI_VERSION,
+                    value.as_ptr() as u64,
+                    value.len() as i64,
+                    path.as_ptr() as u64,
+                    path.len() as i64,
+                    output.as_mut_ptr() as u64,
+                    5,
+                    &mut written as *mut _ as u64,
+                ),
+                2
+            );
+            assert_eq!(written, "<redacted-path>".len() as i64);
+            assert_eq!(
+                prodex_redaction_dry_run_path_replace_v1(
+                    REDACTION_ABI_VERSION + 1,
+                    value.as_ptr() as u64,
+                    value.len() as i64,
+                    path.as_ptr() as u64,
+                    path.len() as i64,
+                    output.as_mut_ptr() as u64,
+                    16,
+                    &mut written as *mut _ as u64,
+                ),
+                4
+            );
+        }
+        assert_eq!(indices, [99; 16]);
+        assert_eq!(count, 77);
+        assert_eq!(output, [88; 16]);
     }
 }

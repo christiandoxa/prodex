@@ -1045,3 +1045,174 @@ def prodex_redaction_presidio_transport_policy_v1(
         )
     # coverage denied: input0 fail_closed, input1 coverage_full.
     return Int64(input0 == 1 and input1 == 0)
+
+
+# Dry-run path redaction keeps the precise legacy ordering rule: filter
+# empty entries, stable descending byte length, then adjacent deduplication.
+# Host owns Path::display string conversion; compiled Mojo owns ordering.
+@export("prodex_redaction_dry_run_path_order_v1")
+def prodex_redaction_dry_run_path_order_v1(
+    abi_version: Int64,
+    views_address: UInt,
+    count: Int64,
+    ordered_indices_address: UInt,
+    selected_count_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != REACTION_ABI_VERSION:
+        return REACTION_ABI
+    if (
+        count < 0 or count > 16
+        or (count > 0 and views_address == 0)
+        or ordered_indices_address == 0 or selected_count_address == 0
+    ):
+        return REACTION_INVALID
+    var spans = Pointer[mut=False, UInt64, ImmUntrackedOrigin](
+        unsafe_from_address=Int(views_address)
+    )
+    for index in range(count):
+        var address = spans[unsafe_offset=index * 2]
+        var length = spans[unsafe_offset=index * 2 + 1]
+        if length > UInt64(9223372036854775807):
+            return REACTION_INVALID
+        if length > 0 and address == 0:
+            return REACTION_INVALID
+    var order = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(ordered_indices_address)
+    )
+    var n: Int64 = 0
+    for index in range(count):
+        if spans[unsafe_offset=index * 2 + 1] > 0:
+            order[unsafe_offset=n] = index
+            n += 1
+    # Stable insertion sort by descending number of UTF-8 bytes.
+    var index: Int64 = 1
+    while index < n:
+        var current = index
+        while current > 0:
+            var left = order[unsafe_offset=current - 1]
+            var right = order[unsafe_offset=current]
+            var left_len = spans[unsafe_offset=left * 2 + 1]
+            var right_len = spans[unsafe_offset=right * 2 + 1]
+            if left_len >= right_len:
+                break
+            order[unsafe_offset=current - 1] = right
+            order[unsafe_offset=current] = left
+            current -= 1
+        index += 1
+    var emitted: Int64 = 0
+    for index in range(n):
+        var source_index = order[unsafe_offset=index]
+        var duplicate = False
+        if emitted > 0:
+            var previous_index = order[unsafe_offset=emitted - 1]
+            var size = Int64(spans[unsafe_offset=source_index * 2 + 1])
+            if size == Int64(spans[unsafe_offset=previous_index * 2 + 1]):
+                var left = Pointer[mut=False, UInt8, ImmUntrackedOrigin](
+                    unsafe_from_address=Int(spans[unsafe_offset=source_index * 2])
+                )
+                var right = Pointer[mut=False, UInt8, ImmUntrackedOrigin](
+                    unsafe_from_address=Int(spans[unsafe_offset=previous_index * 2])
+                )
+                duplicate = True
+                for offset in range(size):
+                    if left[unsafe_offset=offset] != right[unsafe_offset=offset]:
+                        duplicate = False
+                        break
+        if not duplicate:
+            order[unsafe_offset=emitted] = source_index
+            emitted += 1
+    var selected = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(selected_count_address)
+    )
+    selected[] = emitted
+    return REACTION_OK
+
+
+# One non-overlapping replacement over UTF-8 bytes. Capacity is queried
+# before copying, avoiding Rust substring replacement or hard size guesses.
+@export("prodex_redaction_dry_run_path_replace_v1")
+def prodex_redaction_dry_run_path_replace_v1(
+    abi_version: Int64,
+    input_address: UInt,
+    input_length: Int64,
+    path_address: UInt,
+    path_length: Int64,
+    output_address: UInt,
+    output_capacity: Int64,
+    written_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != REACTION_ABI_VERSION:
+        return REACTION_ABI
+    if (
+        input_length < 0 or (input_length > 0 and input_address == 0)
+        or path_length <= 0 or path_address == 0
+        or output_capacity < 0 or written_address == 0
+    ):
+        return REACTION_INVALID
+    var source = Pointer[mut=False, UInt8, ImmUntrackedOrigin](
+        unsafe_from_address=Int(input_address)
+    )
+    var needle = Pointer[mut=False, UInt8, ImmUntrackedOrigin](
+        unsafe_from_address=Int(path_address)
+    )
+    var marker = StringSlice("<redacted-path>")
+    var marker_length = Int64(marker.byte_length())
+    var required: Int64 = 0
+    var cursor: Int64 = 0
+    var search_cursor: Int64 = 0
+    while search_cursor + path_length <= input_length:
+        var matched = True
+        for offset in range(path_length):
+            if source[unsafe_offset=search_cursor + offset] != needle[unsafe_offset=offset]:
+                matched = False
+                break
+        if matched:
+            var append_size = search_cursor - cursor
+            if append_size > 9223372036854775807 - required:
+                return REACTION_INVALID
+            required += append_size
+            if marker_length > 9223372036854775807 - required:
+                return REACTION_INVALID
+            required += marker_length
+            cursor = search_cursor + path_length
+            search_cursor = cursor
+        else:
+            search_cursor += 1
+    if input_length - cursor > 9223372036854775807 - required:
+        return REACTION_INVALID
+    required += input_length - cursor
+    var written = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(written_address)
+    )
+    written[] = required
+    if output_address == 0 or output_capacity < required:
+        return REACTION_CAPACITY
+    var output = Pointer[mut=True, UInt8, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    var out_cursor: Int64 = 0
+    cursor = 0
+    search_cursor = 0
+    while search_cursor + path_length <= input_length:
+        var matched = True
+        for offset in range(path_length):
+            if source[unsafe_offset=search_cursor + offset] != needle[unsafe_offset=offset]:
+                matched = False
+                break
+        if matched:
+            for offset in range(cursor, search_cursor):
+                output[unsafe_offset=out_cursor] = source[unsafe_offset=offset]
+                out_cursor += 1
+            var marker_bytes = marker.unsafe_ptr()
+            for offset in range(marker_length):
+                output[unsafe_offset=out_cursor] = marker_bytes[unsafe_offset=offset]
+                out_cursor += 1
+            cursor = search_cursor + path_length
+            search_cursor = cursor
+        else:
+            search_cursor += 1
+    for offset in range(cursor, input_length):
+        output[unsafe_offset=out_cursor] = source[unsafe_offset=offset]
+        out_cursor += 1
+    written[] = out_cursor
+    return REACTION_OK
