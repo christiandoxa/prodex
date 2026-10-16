@@ -1,9 +1,10 @@
 use crate::runtime_launch::proxy_startup::provider_bridge::RuntimeProviderBridgeKind;
 use chrono::{DateTime, Utc};
 use prodex_mojo_core::provider_constraints::{
-    provider_quota_clean_header, provider_quota_model_label,
+    provider_quota_clean_header, provider_quota_gemini_used_percent, provider_quota_model_label,
+    provider_quota_openai_used_percent,
 };
-use prodex_quota::{GeminiQuotaBucket, GeminiQuotaInfo};
+use prodex_quota::GeminiQuotaInfo;
 use reqwest::header::HeaderMap;
 
 const MAX_GEMINI_STATUS_BUCKETS: usize = 8;
@@ -33,7 +34,9 @@ pub(super) fn runtime_gemini_quota_codex_headers(
         .take(MAX_GEMINI_STATUS_BUCKETS)
         .enumerate()
     {
-        let Some(used_percent) = gemini_bucket_used_percent(bucket) else {
+        let Some(used_percent) = provider_quota_gemini_used_percent(bucket.remaining_fraction)
+            .expect("compiled Mojo Gemini quota percentage returned invalid output")
+        else {
             continue;
         };
         let limit_id = if index == 0 {
@@ -60,7 +63,7 @@ pub(super) fn runtime_gemini_quota_codex_headers(
             &mut headers,
             &limit_id,
             "primary-used-percent",
-            format_percent(used_percent),
+            used_percent,
         );
         if let Some(reset_at) = bucket
             .reset_time
@@ -141,11 +144,6 @@ pub(super) fn append_binary_rate_limit_headers(
     );
 }
 
-fn gemini_bucket_used_percent(bucket: &GeminiQuotaBucket) -> Option<f64> {
-    let remaining = bucket.remaining_fraction?;
-    Some((100.0 - remaining * 100.0).clamp(0.0, 100.0))
-}
-
 fn push_openai_style_limit_headers(
     output: &mut Vec<(String, String)>,
     headers: &HeaderMap,
@@ -155,20 +153,15 @@ fn push_openai_style_limit_headers(
     remaining_header: &str,
     reset_header: &str,
 ) {
-    let Some(limit) = header_f64(headers, limit_header).filter(|value| *value > 0.0) else {
+    let Some(used_percent) = provider_quota_openai_used_percent(
+        header_f64(headers, limit_header),
+        header_f64(headers, remaining_header),
+    )
+    .expect("compiled Mojo OpenAI-compatible quota percentage returned invalid output") else {
         return;
     };
-    let Some(remaining) = header_f64(headers, remaining_header) else {
-        return;
-    };
-    let used_percent = ((limit - remaining).max(0.0) / limit * 100.0).clamp(0.0, 100.0);
     push_codex_rate_limit_header(output, limit_id, "limit-name", limit_name.to_string());
-    push_codex_rate_limit_header(
-        output,
-        limit_id,
-        "primary-used-percent",
-        format_percent(used_percent),
-    );
+    push_codex_rate_limit_header(output, limit_id, "primary-used-percent", used_percent);
     if let Some(reset_at) = header_value(headers, reset_header).and_then(parse_reset_epoch_seconds)
     {
         push_codex_rate_limit_header(output, limit_id, "primary-reset-at", reset_at.to_string());
@@ -214,15 +207,6 @@ fn sanitize_limit_id(value: &str) -> String {
         output.push(next);
     }
     output.trim_matches('_').to_string()
-}
-
-fn format_percent(value: f64) -> String {
-    let rounded = (value * 10.0).round() / 10.0;
-    if (rounded.fract()).abs() < f64::EPSILON {
-        format!("{rounded:.0}")
-    } else {
-        format!("{rounded:.1}")
-    }
 }
 
 fn header_f64(headers: &HeaderMap, name: &str) -> Option<f64> {
@@ -309,6 +293,7 @@ fn parse_duration_seconds(value: &str) -> Option<i64> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use prodex_quota::GeminiQuotaBucket;
     use reqwest::header::HeaderValue;
 
     #[test]
@@ -450,6 +435,52 @@ mod tests {
                 .iter()
                 .any(|(name, _)| { name == "x-deepseek-requests-primary-reset-at" })
         );
+    }
+
+    #[test]
+    fn quota_used_percent_rounding_and_saturation_are_mojo_owned() {
+        let info = GeminiQuotaInfo {
+            email: None,
+            plan: None,
+            project_id: None,
+            buckets: vec![
+                GeminiQuotaBucket {
+                    remaining_amount: None,
+                    remaining_fraction: Some(0.333),
+                    reset_time: None,
+                    token_type: Some("first".to_string()),
+                    model_id: None,
+                },
+                GeminiQuotaBucket {
+                    remaining_amount: None,
+                    remaining_fraction: Some(1.5),
+                    reset_time: None,
+                    token_type: Some("second".to_string()),
+                    model_id: None,
+                },
+            ],
+        };
+        let projected = runtime_gemini_quota_codex_headers("profile", None, &info);
+        assert!(projected.contains(&(
+            "x-gemini-primary-used-percent".to_string(),
+            "66.7".to_string(),
+        )));
+        assert!(projected.contains(&(
+            "x-gemini-2-primary-used-percent".to_string(),
+            "0".to_string(),
+        )));
+
+        let mut headers = HeaderMap::new();
+        headers.insert("x-ratelimit-limit-tokens", HeaderValue::from_static("3"));
+        headers.insert(
+            "x-ratelimit-remaining-tokens",
+            HeaderValue::from_static("1"),
+        );
+        let projected = runtime_openai_style_codex_rate_limit_headers(&headers, "edge", "Edge");
+        assert!(projected.contains(&(
+            "x-edge-tokens-primary-used-percent".to_string(),
+            "66.7".to_string(),
+        )));
     }
 
     #[test]

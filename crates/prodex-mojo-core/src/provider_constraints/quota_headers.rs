@@ -6,6 +6,18 @@ use crate::MojoError;
 const ABI_VERSION: i64 = 1;
 
 unsafe extern "C" {
+    fn prodex_provider_quota_percent_v1(
+        abi_version: i64,
+        operation: i64,
+        first_present: i64,
+        first: f64,
+        second_present: i64,
+        second: f64,
+        output_address: u64,
+        output_capacity: i64,
+        written_address: u64,
+        present_address: u64,
+    ) -> i64;
     fn prodex_provider_quota_header_clean_v1(
         abi_version: i64,
         input_address: u64,
@@ -49,6 +61,59 @@ fn result_string(bytes: Vec<u8>, written: i64) -> Result<String, MojoError> {
         return Err(MojoError::InvalidOutput);
     }
     String::from_utf8(bytes[..written].to_vec()).map_err(|_| MojoError::InvalidOutput)
+}
+
+#[repr(i64)]
+#[derive(Clone, Copy)]
+enum QuotaPercentSource {
+    Gemini = 0,
+    OpenAi = 1,
+}
+
+fn quota_percent(
+    source: QuotaPercentSource,
+    first: Option<f64>,
+    second: Option<f64>,
+) -> Result<Option<String>, MojoError> {
+    let mut buffer = [0_u8; 5];
+    let mut written = -1_i64;
+    let mut present = -1_i64;
+    status(unsafe {
+        prodex_provider_quota_percent_v1(
+            ABI_VERSION,
+            source as i64,
+            i64::from(first.is_some()),
+            first.unwrap_or(0.0),
+            i64::from(second.is_some()),
+            second.unwrap_or(0.0),
+            buffer.as_mut_ptr() as usize as u64,
+            i64::try_from(buffer.len()).map_err(|_| MojoError::InvalidInput)?,
+            (&mut written as *mut i64) as usize as u64,
+            (&mut present as *mut i64) as usize as u64,
+        )
+    })?;
+    match (present, written) {
+        (0, 0) => Ok(None),
+        (1, count) if count > 0 => result_string(buffer.to_vec(), count).map(Some),
+        _ => Err(MojoError::InvalidOutput),
+    }
+}
+
+/// Convert Gemini's remaining fraction to a clamped, one-decimal Codex quota
+/// used-percent field, including the historical NaN/infinity behavior.
+pub fn provider_quota_gemini_used_percent(
+    remaining_fraction: Option<f64>,
+) -> Result<Option<String>, MojoError> {
+    quota_percent(QuotaPercentSource::Gemini, remaining_fraction, None)
+}
+
+/// Convert OpenAI-compatible limit and remaining headers to a Codex used
+/// percentage. Missing/invalid limits are skipped in compiled Mojo.
+pub fn provider_quota_openai_used_percent(
+    limit: Option<f64>,
+    remaining: Option<f64>,
+) -> Result<Option<String>, MojoError> {
+    quota_percent(QuotaPercentSource::OpenAi, limit, remaining)
 }
 
 /// Remove CR/LF and Unicode edge whitespace using compiled Mojo.
@@ -159,6 +224,100 @@ mod tests {
                 "{model:?}/{token:?}"
             );
         }
+    }
+
+    #[test]
+    fn used_percent_from_gemini_and_openai_is_compiled_mojo_owned() {
+        for (remaining, expected) in [
+            (None, None),
+            (Some(1.0), Some("0")),
+            (Some(0.0), Some("100")),
+            (Some(0.25), Some("75")),
+            (Some(0.125), Some("87.5")),
+            (Some(0.333), Some("66.7")),
+            (Some(1.1), Some("0")),
+            (Some(-0.15), Some("100")),
+            (Some(f64::NAN), Some("NaN")),
+            (Some(f64::INFINITY), Some("0")),
+            (Some(f64::NEG_INFINITY), Some("100")),
+        ] {
+            assert_eq!(
+                provider_quota_gemini_used_percent(remaining)
+                    .unwrap()
+                    .as_deref(),
+                expected,
+                "remaining={remaining:?}"
+            );
+        }
+        for (limit, remaining, expected) in [
+            (None, Some(2.0), None),
+            (Some(2.0), None, None),
+            (Some(0.0), Some(0.0), None),
+            (Some(-1.0), Some(0.0), None),
+            (Some(100.0), Some(75.0), Some("25")),
+            (Some(100.0), Some(0.0), Some("100")),
+            (Some(100.0), Some(200.0), Some("0")),
+            (Some(3.0), Some(1.0), Some("66.7")),
+            (Some(1.0), Some(-10.0), Some("100")),
+            (Some(f64::INFINITY), Some(1.0), None),
+            (Some(f64::NAN), Some(1.0), None),
+            (Some(1.0), Some(f64::NAN), None),
+        ] {
+            assert_eq!(
+                provider_quota_openai_used_percent(limit, remaining)
+                    .unwrap()
+                    .as_deref(),
+                expected,
+                "{limit:?}/{remaining:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn strict_quota_percent_abi_validates_mode_presence_and_capacity_before_output() {
+        let mut buffer = [88_u8; 8];
+        let mut written = 19_i64;
+        let mut present = 71_i64;
+        let out = buffer.as_mut_ptr() as usize as u64;
+        let w = (&mut written as *mut i64) as usize as u64;
+        let p = (&mut present as *mut i64) as usize as u64;
+        unsafe {
+            assert_eq!(
+                prodex_provider_quota_percent_v1(2, 0, 1, 0.25, 0, 0.0, out, 8, w, p),
+                4
+            );
+            assert_eq!(
+                prodex_provider_quota_percent_v1(1, 7, 1, 0.25, 0, 0.0, out, 8, w, p),
+                1
+            );
+            assert_eq!(
+                prodex_provider_quota_percent_v1(1, 0, 2, 0.25, 0, 0.0, out, 8, w, p),
+                1
+            );
+            assert_eq!(
+                prodex_provider_quota_percent_v1(1, 0, 1, 0.25, 1, 0.0, out, 8, w, p),
+                1
+            );
+            assert_eq!(
+                prodex_provider_quota_percent_v1(1, 0, 1, 0.25, 0, 0.0, out, 4, w, p),
+                1
+            );
+            assert_eq!(
+                prodex_provider_quota_percent_v1(1, 0, 1, 0.25, 0, 0.0, 0, 8, w, p),
+                1
+            );
+            assert_eq!(
+                prodex_provider_quota_percent_v1(1, 0, 1, 0.25, 0, 0.0, out, 8, 0, p),
+                1
+            );
+            assert_eq!(
+                prodex_provider_quota_percent_v1(1, 0, 1, 0.25, 0, 0.0, out, 8, w, 0),
+                1
+            );
+        }
+        assert_eq!(buffer, [88; 8]);
+        assert_eq!(written, 19);
+        assert_eq!(present, 71);
     }
 
     #[test]

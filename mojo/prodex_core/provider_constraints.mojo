@@ -1,6 +1,7 @@
 from std.collections import Array
 
 from std.memory import Pointer
+from std.math import isfinite
 
 from rich_text import rich_trim_bounds, rich_view_ptr, rich_view_valid, rich_view_matches_literal, rich_codepoint, rich_codepoint_width, rich_unicode_space, rich_view_prefix
 from rich_types import ProdexRichStringView
@@ -1670,6 +1671,109 @@ comptime GEMINI_REQUEST_CONTENT_CONTINUATION_METADATA: Int64 = 12
 # Mojo owns CR/LF removal, Unicode whitespace trimming, and the precedence
 # of model ID versus token type. Rust reads HTTP/JSON and writes header pairs.
 comptime PROVIDER_QUOTA_HEADER_ABI_VERSION: Int64 = 1
+comptime PROVIDER_QUOTA_PERCENT_GEMINI: Int64 = 0
+comptime PROVIDER_QUOTA_PERCENT_OPENAI: Int64 = 1
+
+
+def provider_quota_percent_write(
+    amount: Float64,
+    output: Pointer[mut=True, UInt8, _],
+    written: Pointer[mut=True, Int64, _],
+):
+    # Formatting always rounds away from zero for positive tenths, matching
+    # Rust's preexisting f64::round on a bounded [0, 100] percentage.
+    if amount != amount:
+        output[unsafe_offset=0] = 78
+        output[unsafe_offset=1] = 97
+        output[unsafe_offset=2] = 78
+        written[] = 3
+        return
+    var tenths: Int64 = 0
+    if amount >= 100.0:
+        tenths = 1000
+    elif amount > 0.0:
+        tenths = Int64(amount * 10.0 + 0.5)
+    var whole = tenths // 10
+    var fraction = tenths % 10
+    written[] = 0
+    if whole >= 100:
+        output[unsafe_offset=written[]] = 49
+        written[] += 1
+        output[unsafe_offset=written[]] = 48
+        written[] += 1
+    elif whole >= 10:
+        output[unsafe_offset=written[]] = UInt8(48 + whole // 10)
+        written[] += 1
+    output[unsafe_offset=written[]] = UInt8(48 + whole % 10)
+    written[] += 1
+    if fraction != 0:
+        output[unsafe_offset=written[]] = 46
+        written[] += 1
+        output[unsafe_offset=written[]] = UInt8(48 + fraction)
+        written[] += 1
+
+
+@export("prodex_provider_quota_percent_v1")
+def prodex_provider_quota_percent_v1(
+    abi_version: Int64,
+    operation: Int64,
+    first_present: Int64,
+    first: Float64,
+    second_present: Int64,
+    second: Float64,
+    output_address: UInt,
+    output_capacity: Int64,
+    written_address: UInt,
+    present_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != PROVIDER_QUOTA_HEADER_ABI_VERSION:
+        return 4
+    if (
+        operation < PROVIDER_QUOTA_PERCENT_GEMINI
+        or operation > PROVIDER_QUOTA_PERCENT_OPENAI
+        or (operation == PROVIDER_QUOTA_PERCENT_GEMINI and second_present != 0)
+        or (first_present != 0 and first_present != 1)
+        or (second_present != 0 and second_present != 1)
+        or output_address == 0 or written_address == 0 or present_address == 0
+        or output_capacity < 5
+    ):
+        return 1
+    var written = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(written_address)
+    )
+    var present = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(present_address)
+    )
+    written[] = 0
+    present[] = 0
+    if first_present == 0:
+        return 0
+    var amount: Float64 = 0.0
+    if operation == PROVIDER_QUOTA_PERCENT_GEMINI:
+        amount = 100.0 - first * 100.0
+    else:
+        if second_present == 0 or not isfinite(first) or not isfinite(second) or first <= 0.0:
+            return 0
+        amount = (first - second)
+        if amount < 0.0:
+            amount = 0.0
+        amount = amount / first * 100.0
+    if amount == amount:
+        if amount < 0.0:
+            amount = 0.0
+        elif amount > 100.0:
+            amount = 100.0
+    provider_quota_percent_write(
+        amount,
+        Pointer[mut=True, UInt8, MutUntrackedOrigin](
+            unsafe_from_address=Int(output_address)
+        ),
+        written,
+    )
+    present[] = 1
+    return 0
+
+
 
 
 def provider_quota_header_clean_kernel(
