@@ -5604,3 +5604,11 @@ provider-bridge caller tests cover list, limit, found, missing, and no-response 
 defaults. Rust retains Serde event acquisition, result decoding, and runtime error
 transport; compiled ABI and provider caller tests cover Unicode, numeric, absent, and
 malformed-field cases.
+
+## Runtime doctor log marker token matching ownership
+
+The runtime-doctor Smart Context log detector now uses the compiled Mojo marker
+owner for Unicode whitespace tokenization, punctuation trimming, and exact
+marker matching. The former Rust token-matching implementation was deleted;
+compiled ABI and runtime-doctor caller regressions cover exact and malformed
+boundaries without a fallback path.
