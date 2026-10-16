@@ -2,17 +2,8 @@ use std::ffi::{OsStr, OsString};
 
 const REDACTED: &str = "<redacted>";
 pub fn redaction_text_snippet(text: &str, max_chars: usize) -> String {
-    let normalized = text.split_whitespace().collect::<Vec<_>>().join(" ");
-    if normalized.is_empty() {
-        return "-".to_string();
-    }
-
-    let snippet = normalized.chars().take(max_chars).collect::<String>();
-    if normalized.chars().count() > max_chars {
-        format!("{snippet}...")
-    } else {
-        snippet
-    }
+    prodex_mojo_core::redaction::redaction_text_snippet(text, max_chars)
+        .expect("compiled Mojo redaction diagnostic snippet returned invalid output")
 }
 
 pub fn redaction_redacted_body_snippet(body: &[u8], max_chars: usize) -> String {

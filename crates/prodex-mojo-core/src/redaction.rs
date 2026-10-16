@@ -49,6 +49,15 @@ struct DryRunPathView {
 }
 
 unsafe extern "C" {
+    fn prodex_redaction_text_snippet_v1(
+        abi_version: i64,
+        input_address: u64,
+        input_length: i64,
+        max_chars: u64,
+        output_address: u64,
+        output_capacity: i64,
+        written_address: u64,
+    ) -> i64;
     fn prodex_redaction_dry_run_path_order_v1(
         abi_version: i64,
         views: u64,
@@ -127,6 +136,26 @@ fn status(status: i64) -> Result<(), MojoError> {
         4 => Err(MojoError::AbiMismatch),
         _ => Err(MojoError::InvalidOutput),
     }
+}
+
+/// Present already-redacted diagnostic content with Mojo-owned Unicode
+/// whitespace collapse, empty-marker handling and scalar clipping.
+pub fn redaction_text_snippet(value: &str, max_chars: usize) -> Result<String, MojoError> {
+    let capacity = value.len().checked_add(4).ok_or(MojoError::Capacity)?;
+    let mut output = vec![0_u8; capacity];
+    let mut written = -1_i64;
+    status(unsafe {
+        prodex_redaction_text_snippet_v1(
+            REDACTION_ABI_VERSION,
+            value.as_ptr() as usize as u64,
+            i64::try_from(value.len()).map_err(|_| MojoError::InvalidInput)?,
+            u64::try_from(max_chars).map_err(|_| MojoError::InvalidInput)?,
+            output.as_mut_ptr() as usize as u64,
+            i64::try_from(capacity).map_err(|_| MojoError::InvalidInput)?,
+            (&mut written as *mut i64) as usize as u64,
+        )
+    })?;
+    output_string(output, written)
 }
 
 fn buffer_capacity(input_len: usize) -> Result<usize, MojoError> {
@@ -748,5 +777,62 @@ mod dry_run_path_redaction_tests {
         assert_eq!(indices, [99; 16]);
         assert_eq!(count, 77);
         assert_eq!(output, [88; 16]);
+    }
+}
+
+#[cfg(test)]
+mod text_snippet_tests {
+    use super::*;
+
+    #[test]
+    fn redaction_text_snippet_mojo_normalizes_unicode_and_clips_scalars() {
+        for (input, max_chars, expected) in [
+            ("", 0, "-"),
+            (" \t\u{a0}\u{3000}", 0, "-"),
+            (" \u{2003}東京 \t🙂  done\u{3000}", 100, "東京 🙂 done"),
+            ("a   b\nc", 5, "a b c"),
+            ("a   b\nc", 4, "a b ..."),
+            ("a   b\nc", 0, "..."),
+            ("🧭日本", 1, "🧭..."),
+            ("e\u{301}🙂", 1, "e..."),
+            ("e\u{301}🙂", 2, "e\u{301}..."),
+            ("   abc   ", 3, "abc"),
+            ("   abc   ", 2, "ab..."),
+            ("-", 0, "..."),
+        ] {
+            assert_eq!(
+                redaction_text_snippet(input, max_chars).unwrap(),
+                expected,
+                "{input:?}/{max_chars}"
+            );
+        }
+    }
+
+    #[test]
+    fn redaction_text_snippet_mojo_abi_rejects_bad_inputs_without_writing() {
+        let input = b"ok";
+        let mut output = [73_u8; 10];
+        let mut written = 91_i64;
+        let args = |version, input_ptr, input_len, capacity, result_ptr, written_ptr| unsafe {
+            prodex_redaction_text_snippet_v1(
+                version,
+                input_ptr,
+                input_len,
+                1,
+                result_ptr,
+                capacity,
+                written_ptr,
+            )
+        };
+        let source = input.as_ptr() as usize as u64;
+        let target = output.as_mut_ptr() as usize as u64;
+        let count = (&mut written as *mut i64) as usize as u64;
+        assert_eq!(args(2, source, 2, 10, target, count), 4);
+        assert_eq!(args(1, source, 2, 5, target, count), 1);
+        assert_eq!(args(1, 0, 2, 10, target, count), 1);
+        assert_eq!(args(1, source, -1, 10, target, count), 1);
+        assert_eq!(args(1, source, 2, 10, target, 0), 1);
+        assert_eq!(output, [73; 10]);
+        assert_eq!(written, 91);
     }
 }

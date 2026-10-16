@@ -1,6 +1,6 @@
 from std.memory import Pointer
 
-from rich_text import rich_view_valid
+from rich_text import (rich_view_valid, rich_unicode_space, rich_codepoint, rich_codepoint_width)
 from rich_types import ProdexRichStringView, rich_view_ptr
 
 comptime REACTION_ABI_VERSION: Int64 = 1
@@ -89,6 +89,78 @@ def reaction_writer_range(
         output[unsafe_offset=written[]] = source[unsafe_offset=index]
         written[] += 1
     return True
+
+
+# Normalize diagnostic text into one whitespace-separated line and clip by
+# Unicode scalar count. Secret masking has already happened at the caller;
+# this only owns the deterministic, post-redaction snippet presentation.
+@export("prodex_redaction_text_snippet_v1")
+def prodex_redaction_text_snippet_v1(
+    abi_version: Int64,
+    input_address: UInt,
+    input_length: Int64,
+    max_chars: UInt64,
+    output_address: UInt,
+    output_capacity: Int64,
+    written_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != REACTION_ABI_VERSION:
+        return REACTION_ABI
+    if (
+        input_length < 0 or output_capacity < 4 or output_address == 0
+        or written_address == 0 or (input_length > 0 and input_address == 0)
+        or input_length > output_capacity - 4
+    ):
+        return REACTION_INVALID
+    var view = reaction_view(input_address, input_length)
+    if not rich_view_valid(view, 0x7FFFFFFFFFFFFFFF):
+        return REACTION_INVALID
+    var source = rich_view_ptr(view)
+    var output = Pointer[mut=True, UInt8, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    var written = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(written_address)
+    )
+    written[] = 0
+    var index: Int64 = 0
+    var has_token = False
+    while index < input_length:
+        var width = rich_codepoint_width(source[unsafe_offset=index])
+        if rich_unicode_space(rich_codepoint(source, index, width)):
+            index += width
+            continue
+        if has_token:
+            if not reaction_writer_byte(output, output_capacity, written, 32):
+                return REACTION_CAPACITY
+        has_token = True
+        var start = index
+        while index < input_length:
+            width = rich_codepoint_width(source[unsafe_offset=index])
+            if rich_unicode_space(rich_codepoint(source, index, width)):
+                break
+            index += width
+        if not reaction_writer_range(
+            source, start, index, output, output_capacity, written
+        ):
+            return REACTION_CAPACITY
+    if not has_token:
+        if not reaction_writer_byte(output, output_capacity, written, 45):
+            return REACTION_CAPACITY
+        return REACTION_OK
+    var prefix_bytes: Int64 = 0
+    var scalars: UInt64 = 0
+    while prefix_bytes < written[] and scalars < max_chars:
+        var width = rich_codepoint_width(output[unsafe_offset=prefix_bytes])
+        prefix_bytes += width
+        scalars += 1
+    if prefix_bytes < written[]:
+        written[] = prefix_bytes
+        if not reaction_writer_literal(
+            output, output_capacity, written, StringSlice("...")
+        ):
+            return REACTION_CAPACITY
+    return REACTION_OK
 
 
 def reaction_normalized_key_length(
