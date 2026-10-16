@@ -1,5 +1,10 @@
 use super::ConfigError;
-use prodex_mojo_core::super_provider_config::runtime_bool_token;
+use prodex_mojo_core::runtime::{
+    RuntimeConfigScalarInput, RuntimeConfigScalarStatus, runtime_config_scalar_bool,
+    runtime_config_scalar_compat_flag, runtime_config_scalar_compat_u64,
+    runtime_config_scalar_positive_i64, runtime_config_scalar_positive_u64,
+    runtime_config_scalar_unsigned,
+};
 use std::collections::BTreeMap;
 use std::env;
 use std::ffi::OsString;
@@ -140,30 +145,32 @@ impl RuntimeConfigParser {
         }
     }
 
-    fn strict_text(&mut self, key: &'static str) -> Option<String> {
-        let value = self.environment.get(key)?;
-        let Some(value) = value.to_str() else {
-            self.errors.push(ConfigError {
-                key,
-                message: "must be valid Unicode".to_string(),
-            });
-            return None;
+    pub(super) fn scalar_input(&self, key: &'static str) -> RuntimeConfigScalarInput<'_> {
+        match self.environment.get(key) {
+            None => RuntimeConfigScalarInput::absent(),
+            Some(value) => value
+                .to_str()
+                .map(RuntimeConfigScalarInput::utf8)
+                .unwrap_or_else(RuntimeConfigScalarInput::invalid_unicode),
+        }
+    }
+
+    fn record_strict_status(&mut self, key: &'static str, status: RuntimeConfigScalarStatus) {
+        let message = match status {
+            RuntimeConfigScalarStatus::Selected | RuntimeConfigScalarStatus::Missing => return,
+            RuntimeConfigScalarStatus::InvalidUnicode => "must be valid Unicode",
+            RuntimeConfigScalarStatus::Empty => "cannot be empty",
+            RuntimeConfigScalarStatus::Whitespace => "must not contain whitespace",
+            RuntimeConfigScalarStatus::UnsignedInteger => "must be an unsigned integer",
+            RuntimeConfigScalarStatus::NotPositive => "must be greater than zero",
+            RuntimeConfigScalarStatus::PositiveInteger => "must be a positive integer",
+            RuntimeConfigScalarStatus::InvalidBool => "must be one of true,false,1,0,yes,no,on,off",
+            RuntimeConfigScalarStatus::CompatibilityDefault => return,
         };
-        if value.is_empty() {
-            self.errors.push(ConfigError {
-                key,
-                message: "cannot be empty".to_string(),
-            });
-            return None;
-        }
-        if value.chars().any(char::is_whitespace) {
-            self.errors.push(ConfigError {
-                key,
-                message: "must not contain whitespace".to_string(),
-            });
-            return None;
-        }
-        Some(value.to_string())
+        self.errors.push(ConfigError {
+            key,
+            message: message.to_string(),
+        });
     }
 
     pub(super) fn positive_u64(
@@ -172,44 +179,34 @@ impl RuntimeConfigParser {
         policy: Option<u64>,
         default: u64,
     ) -> u64 {
-        let Some(value) = self.strict_text(key) else {
-            return policy.filter(|value| *value > 0).unwrap_or(default);
-        };
-        match value.parse::<u64>() {
-            Ok(value) if value > 0 => value,
-            Ok(_) => {
-                self.errors.push(ConfigError {
-                    key,
-                    message: "must be greater than zero".to_string(),
-                });
-                policy.filter(|value| *value > 0).unwrap_or(default)
-            }
-            Err(_) => {
-                self.errors.push(ConfigError {
-                    key,
-                    message: "must be an unsigned integer".to_string(),
-                });
-                policy.filter(|value| *value > 0).unwrap_or(default)
-            }
-        }
+        self.positive_u64_bounded(key, policy, default, 1, u64::MAX)
+    }
+
+    pub(super) fn positive_u64_bounded(
+        &mut self,
+        key: &'static str,
+        policy: Option<u64>,
+        default: u64,
+        minimum: u64,
+        maximum: u64,
+    ) -> u64 {
+        let (value, status) = runtime_config_scalar_positive_u64(
+            self.scalar_input(key),
+            policy,
+            default,
+            minimum,
+            maximum,
+        )
+        .expect("required Mojo runtime configuration scalar returned an invalid ABI result");
+        self.record_strict_status(key, status);
+        value
     }
 
     pub(super) fn strict_bool(&mut self, key: &'static str, default: bool) -> bool {
-        let Some(value) = self.strict_text(key) else {
-            return default;
-        };
-        match runtime_bool_token(&value)
-            .expect("runtime boolean token classification should accept Rust strings")
-        {
-            Some(value) => value,
-            None => {
-                self.errors.push(ConfigError {
-                    key,
-                    message: "must be one of true,false,1,0,yes,no,on,off".to_string(),
-                });
-                default
-            }
-        }
+        let (value, status) = runtime_config_scalar_bool(self.scalar_input(key), default)
+            .expect("required Mojo runtime configuration boolean returned an invalid ABI result");
+        self.record_strict_status(key, status);
+        value
     }
 
     pub(super) fn positive_usize(
@@ -218,8 +215,24 @@ impl RuntimeConfigParser {
         policy: Option<usize>,
         default: usize,
     ) -> usize {
-        self.positive_u64(key, policy.map(|value| value as u64), default as u64)
-            .min(usize::MAX as u64) as usize
+        self.positive_usize_bounded(key, policy, default, 1, usize::MAX)
+    }
+
+    pub(super) fn positive_usize_bounded(
+        &mut self,
+        key: &'static str,
+        policy: Option<usize>,
+        default: usize,
+        minimum: usize,
+        maximum: usize,
+    ) -> usize {
+        self.positive_u64_bounded(
+            key,
+            policy.map(|value| value as u64),
+            default as u64,
+            minimum as u64,
+            maximum as u64,
+        ) as usize
     }
 
     pub(super) fn usize_allow_zero(
@@ -228,47 +241,37 @@ impl RuntimeConfigParser {
         policy: Option<usize>,
         default: usize,
     ) -> usize {
-        let Some(value) = self.strict_text(key) else {
-            return policy.unwrap_or(default);
-        };
-        match value.parse::<usize>() {
-            Ok(value) => value,
-            Err(_) => {
-                self.errors.push(ConfigError {
-                    key,
-                    message: "must be an unsigned integer".to_string(),
-                });
-                policy.unwrap_or(default)
-            }
-        }
+        let (value, status) = runtime_config_scalar_unsigned(
+            self.scalar_input(key),
+            policy.map(|value| value as u64),
+            default as u64,
+            usize::MAX as u64,
+        )
+        .expect(
+            "required Mojo runtime configuration unsigned scalar returned an invalid ABI result",
+        );
+        self.record_strict_status(key, status);
+        value as usize
     }
 
-    pub(super) fn positive_i64(
+    pub(super) fn positive_i64_bounded(
         &mut self,
         key: &'static str,
         policy: Option<i64>,
         default: i64,
+        minimum: i64,
+        maximum: i64,
     ) -> i64 {
-        let Some(value) = self.strict_text(key) else {
-            return policy.filter(|value| *value > 0).unwrap_or(default);
-        };
-        match value.parse::<i64>() {
-            Ok(value) if value > 0 => value,
-            Ok(_) => {
-                self.errors.push(ConfigError {
-                    key,
-                    message: "must be greater than zero".to_string(),
-                });
-                policy.filter(|value| *value > 0).unwrap_or(default)
-            }
-            Err(_) => {
-                self.errors.push(ConfigError {
-                    key,
-                    message: "must be a positive integer".to_string(),
-                });
-                policy.filter(|value| *value > 0).unwrap_or(default)
-            }
-        }
+        let (value, status) = runtime_config_scalar_positive_i64(
+            self.scalar_input(key),
+            policy,
+            default,
+            minimum,
+            maximum,
+        )
+        .expect("required Mojo runtime configuration signed scalar returned an invalid ABI result");
+        self.record_strict_status(key, status);
+        value
     }
 
     pub(super) fn compatibility_u64(
@@ -279,41 +282,23 @@ impl RuntimeConfigParser {
         allow_zero: bool,
         maximum: u64,
     ) -> u64 {
-        let Some(value) = self.environment.get(key) else {
-            return fallback;
-        };
-        let Some(value) = value.to_str() else {
+        let (value, status) = runtime_config_scalar_compat_u64(
+            self.scalar_input(key),
+            fallback,
+            trim,
+            allow_zero,
+            maximum,
+        )
+        .expect("required Mojo compatibility scalar returned an invalid ABI result");
+        if status == RuntimeConfigScalarStatus::CompatibilityDefault {
             self.compatibility_defaults.push(key);
-            return fallback;
-        };
-        let value = if trim { value.trim() } else { value };
-        match value.parse::<u64>() {
-            Ok(value) if allow_zero || value > 0 => value.min(maximum),
-            _ => {
-                self.compatibility_defaults.push(key);
-                fallback
-            }
         }
+        value
     }
 
     pub(super) fn compatibility_flag(&self, key: &'static str) -> bool {
-        self.environment
-            .get(key)
-            .and_then(|value| value.to_str())
-            .is_some_and(|value| {
-                runtime_bool_token(value.trim())
-                    .expect("runtime boolean token classification should accept Rust strings")
-                    == Some(true)
-            })
-    }
-
-    pub(super) fn compatibility_text(&mut self, key: &'static str) -> Option<String> {
-        let value = self.environment.get(key)?;
-        let Some(value) = value.to_str() else {
-            self.compatibility_defaults.push(key);
-            return None;
-        };
-        Some(value.to_string())
+        runtime_config_scalar_compat_flag(self.scalar_input(key))
+            .expect("required Mojo compatibility flag returned an invalid ABI result")
     }
 
     pub(super) fn compatibility_proxy(&mut self, keys: &[&'static str]) -> Option<reqwest::Url> {
@@ -366,5 +351,55 @@ mod tests {
 
         let parser = parser_with("PRODEX_SMART_CONTEXT_SHADOW", "unknown");
         assert!(!parser.compatibility_flag("PRODEX_SMART_CONTEXT_SHADOW"));
+    }
+
+    #[test]
+    fn scalar_parser_preserves_strict_error_text_and_compatibility_defaults() {
+        let mut parser = parser_with("PRODEX_RUNTIME_PROXY_WORKER_COUNT", " 0 ");
+        assert_eq!(
+            parser.positive_usize("PRODEX_RUNTIME_PROXY_WORKER_COUNT", Some(7), 3),
+            7
+        );
+        assert_eq!(
+            parser.errors,
+            [ConfigError {
+                key: "PRODEX_RUNTIME_PROXY_WORKER_COUNT",
+                message: "must not contain whitespace".to_string(),
+            }]
+        );
+
+        let mut parser = parser_with("PRODEX_RUNTIME_PROXY_WORKER_COUNT", "\u{001c}4");
+        assert_eq!(
+            parser.positive_usize("PRODEX_RUNTIME_PROXY_WORKER_COUNT", Some(7), 3),
+            7
+        );
+        assert_eq!(parser.errors[0].message, "must be an unsigned integer");
+
+        let mut parser = parser_with("PRODEX_SMART_CONTEXT_CANARY_PERCENT", " 101 ");
+        assert_eq!(
+            parser.compatibility_u64("PRODEX_SMART_CONTEXT_CANARY_PERCENT", 3, true, true, 100,),
+            100
+        );
+        assert_eq!(
+            parser.compatibility_defaults,
+            ["PRODEX_SMART_CONTEXT_CANARY_PERCENT"]
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn scalar_parser_redacts_non_utf8_values_and_keeps_fallbacks() {
+        use std::os::unix::ffi::OsStringExt;
+
+        let mut parser = RuntimeConfigParser::new(RuntimeConfigEnvironment::read_with(|key| {
+            (key == "PRODEX_RUNTIME_PROXY_WORKER_COUNT")
+                .then(|| OsString::from_vec(vec![0xff, 0x00]))
+        }));
+        assert_eq!(
+            parser.positive_usize("PRODEX_RUNTIME_PROXY_WORKER_COUNT", Some(7), 3),
+            7
+        );
+        assert_eq!(parser.errors[0].message, "must be valid Unicode");
+        assert!(!format!("{:?}", parser.errors).contains("ff"));
     }
 }

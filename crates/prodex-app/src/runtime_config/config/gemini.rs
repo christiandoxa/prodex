@@ -1,14 +1,16 @@
 use super::super::{RuntimeConfigParser, RuntimeGeminiConfig};
-use prodex_mojo_core::super_provider_config::runtime_bool_token;
+use prodex_mojo_core::runtime::{
+    RuntimeConfigScalarStatus, runtime_config_scalar_compat_bool_default_true,
+};
 
 pub(super) fn parse_gemini(parser: &mut RuntimeConfigParser) -> RuntimeGeminiConfig {
-    let sticky_fresh_oauth = parser
-        .compatibility_text("PRODEX_GEMINI_STICKY_FRESH_OAUTH")
-        .is_none_or(|value| {
-            runtime_bool_token(value.trim())
-                .expect("runtime boolean token classifier should accept Rust strings")
-                != Some(false)
-        });
+    let key = "PRODEX_GEMINI_STICKY_FRESH_OAUTH";
+    let (sticky_fresh_oauth, status) =
+        runtime_config_scalar_compat_bool_default_true(parser.scalar_input(key))
+            .expect("required Mojo Gemini compatibility scalar returned an invalid ABI result");
+    if status == RuntimeConfigScalarStatus::CompatibilityDefault {
+        parser.compatibility_defaults.push(key);
+    }
     RuntimeGeminiConfig { sticky_fresh_oauth }
 }
 

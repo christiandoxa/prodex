@@ -85,16 +85,34 @@ fn runtime_config_reads_each_environment_key_once() {
 }
 
 #[test]
-fn runtime_config_defaults_allow_large_codex_turns_and_positive_quota_drain() {
-    let policy_dir = with_test_policy_dir("version = 1\n");
+fn runtime_config_scalar_plan_preserves_precedence_and_limits() {
+    let policy_dir = with_test_policy_dir("version = 1\n\n[runtime_proxy]\nworker_count = 7\n");
     let paths = test_app_paths(policy_dir.root.clone());
     let environment = RuntimeConfigEnvironment::read_with(|_| None);
 
     let config =
         RuntimeConfig::from_environment(&paths, environment).expect("default config should parse");
 
+    assert_eq!(config.tuning.worker_count, 7);
     assert_eq!(config.max_request_body_bytes, 64 * 1024 * 1024);
     assert_eq!(config.responses_quota_critical_floor_percent, 1);
+
+    let config = RuntimeConfig::from_environment(
+        &paths,
+        RuntimeConfigEnvironment::read_with(|key| match key {
+            "PRODEX_RUNTIME_PROXY_WORKER_COUNT" => Some(OsString::from("999")),
+            "PRODEX_RUNTIME_PROXY_ASYNC_WORKER_COUNT" => Some(OsString::from("1")),
+            "PRODEX_RUNTIME_PROXY_RESPONSES_CRITICAL_FLOOR_PERCENT" => {
+                Some(OsString::from("99"))
+            }
+            _ => None,
+        }),
+    )
+    .expect("bounded runtime config should parse");
+
+    assert_eq!(config.tuning.worker_count, 64);
+    assert_eq!(config.tuning.async_worker_count, 2);
+    assert_eq!(config.responses_quota_critical_floor_percent, 10);
 }
 
 #[test]

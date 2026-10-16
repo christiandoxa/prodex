@@ -83,6 +83,11 @@ const RUNTIME_POLICY_PRESET_CALLER_FILE = "crates/prodex-runtime-policy/src/lib.
 const RUNTIME_POLICY_PRESET_ADAPTER_FILE = "crates/prodex-mojo-core/src/runtime_decisions/preset.rs";
 const RUNTIME_POLICY_PRESET_TEST_FILE = "crates/prodex-mojo-core/tests/runtime_policy_preset.rs";
 const RUNTIME_POLICY_PRESET_MOJO_FILE = "mojo/prodex_core/runtime_tuning.mojo";
+const RUNTIME_CONFIG_CONSUMER_FILE = "crates/prodex-app/src/runtime_config/config.rs";
+const RUNTIME_CONFIG_GEMINI_FILE = "crates/prodex-app/src/runtime_config/config/gemini.rs";
+const RUNTIME_CONFIG_ENVIRONMENT_FILE = "crates/prodex-app/src/runtime_config/environment.rs";
+const RUNTIME_CONFIG_ADAPTER_FILE = "crates/prodex-mojo-core/src/runtime_decisions/runtime_config_scalar.rs";
+const RUNTIME_CONFIG_MOJO_FILE = "mojo/prodex_core/runtime_tuning.mojo";
 const OPERATIONAL_HISTOGRAM_CALLER_FILE = "crates/prodex-app/src/runtime_operational_metrics.rs";
 const OPERATIONAL_HISTOGRAM_ADAPTER_FILE = "crates/prodex-mojo-core/src/operational_metrics.rs";
 const OPERATIONAL_HISTOGRAM_MOJO_FILE = "mojo/prodex_core/operational_metrics.mojo";
@@ -556,6 +561,11 @@ const PROMOTED_FILES = [
   RUNTIME_POLICY_PRESET_ADAPTER_FILE,
   RUNTIME_POLICY_PRESET_TEST_FILE,
   RUNTIME_POLICY_PRESET_MOJO_FILE,
+  RUNTIME_CONFIG_CONSUMER_FILE,
+  RUNTIME_CONFIG_GEMINI_FILE,
+  RUNTIME_CONFIG_ENVIRONMENT_FILE,
+  RUNTIME_CONFIG_ADAPTER_FILE,
+  RUNTIME_CONFIG_MOJO_FILE,
   "crates/prodex-observability/src/lib.rs",
   "crates/prodex-observability/src/metric_label.rs",
   "crates/prodex-observability/src/mojo.rs",
@@ -1736,6 +1746,79 @@ export function findViolations(files) {
           contents.includes("runtime_policy_proxy_from_root(")
         ? []
         : [`${filePath}: runtime-policy caller needs a preset-plan regression test`];
+    }
+    return [];
+  });
+  const runtimeConfigScalarViolations = files.flatMap(([filePath, contents]) => {
+    if (filePath === RUNTIME_CONFIG_CONSUMER_FILE) {
+      const required = [
+        "positive_usize_bounded(",
+        "positive_i64_bounded(",
+      ];
+      const violations = required
+        .filter((marker) => !contents.includes(marker))
+        .map((marker) => filePath + ": runtime configuration bounds must use the Mojo scalar plan (" + marker + ")");
+      if (contents.includes(".clamp(") || contents.includes("runtime_bool_token(")) {
+        violations.push(filePath + ": contains restored Rust runtime configuration scalar decisions");
+      }
+      return violations;
+    }
+    if (filePath === RUNTIME_CONFIG_GEMINI_FILE) {
+      const required = ["runtime_config_scalar_compat_bool_default_true(", "CompatibilityDefault"];
+      return required
+        .filter((marker) => !contents.includes(marker))
+        .map((marker) => filePath + ": Gemini sticky OAuth must use the Mojo compatibility scalar (" + marker + ")");
+    }
+    if (filePath === RUNTIME_CONFIG_ENVIRONMENT_FILE) {
+      const required = [
+        "runtime_config_scalar_positive_u64(",
+        "runtime_config_scalar_unsigned(",
+        "runtime_config_scalar_bool(",
+        "runtime_config_scalar_compat_u64(",
+        "runtime_config_scalar_compat_flag(",
+        "RuntimeConfigScalarInput::invalid_unicode",
+      ];
+      const violations = required
+        .filter((marker) => !contents.includes(marker))
+        .map((marker) => filePath + ": environment scalar parsing must use the Mojo ABI (" + marker + ")");
+      const restoredRust = [
+        "fn strict_text(",
+        "value.parse::<u64>()",
+        "value.parse::<usize>()",
+        "value.parse::<i64>()",
+        "char::is_whitespace",
+        "runtime_bool_token(",
+      ];
+      if (restoredRust.some((marker) => contents.includes(marker))) {
+        violations.push(filePath + ": contains restored Rust runtime configuration parsing");
+      }
+      return violations;
+    }
+    if (filePath === RUNTIME_CONFIG_ADAPTER_FILE) {
+      return [
+        "prodex_runtime_config_scalar_v1(",
+        "RuntimeConfigScalarInput",
+        "RuntimeConfigScalarRecordV1",
+        "RuntimeConfigScalarStatus",
+        "RUNTIME_CONFIG_SCALAR_ABI_VERSION",
+        "size_of::<RuntimeConfigScalarRecordV1>()",
+        "runtime_config_scalar_abi_rejects_invalid_version_without_writes",
+      ]
+        .filter((marker) => !contents.includes(marker))
+        .map((marker) => filePath + ": runtime configuration ABI adapter must retain " + marker);
+    }
+    if (filePath === RUNTIME_CONFIG_MOJO_FILE) {
+      return [
+        '@export("prodex_runtime_config_scalar_v1")',
+        "struct RuntimeConfigScalarRecordV1(Copyable)",
+        "record_size != RUNTIME_CONFIG_SCALAR_RECORD_V1_SIZE",
+        "runtime_config_scalar_parse_unsigned(",
+        "runtime_config_scalar_parse_signed(",
+        "rich_trim_bounds(",
+        "RUNTIME_CONFIG_SCALAR_STATUS_COMPATIBILITY_DEFAULT",
+      ]
+        .filter((marker) => !contents.includes(marker))
+        .map((marker) => filePath + ": runtime configuration semantics must remain Mojo-owned (" + marker + ")");
     }
     return [];
   });
@@ -8037,7 +8120,7 @@ export function findViolations(files) {
     }
     return [];
   });
-  return [...logPayloadProjectionViolations, ...nativeRecoveryOwnershipViolations, ...quotaRecoveryEligibilityViolations, ...runtimeBrokerReuseMojoViolations, ...geminiResponseMediaMojoViolations, ...cookieEvictionMojoViolations, ...websocketBudgetMojoViolations, ...affinityBindingMojoViolations, ...responsesCapacityRecoveryViolations, ...sseTapMojoOwnershipViolations, ...quotaWatchViolations, ...geminiCompactSnippetViolations, ...geminiCompactTextViolations, ...doctorSmartContextDecisionViolations, ...anthropicAttemptCursorViolations, ...geminiUnsupportedToolRetryViolations, ...terminalGeometryViolations, ...quotaHeaderProjectionViolations, ...smartContextCapsuleOrderViolations, ...markerViolations, ...deepseekCatalogPolicyViolations, ...featureOffViolations, ...liveLogRecordViolations, ...runtimePolicyPresetViolations, ...profileHealthCircuitViolations, ...logThroughputViolations, ...operationalDetailSpecViolations, ...transcriptPolicyViolations, ...logLoadPolicyViolations, ...routeReasonViolations, ...runtimeStateQuotaViolations, ...runtimeStateRoutePolicyViolations, ...runtimeProxyRootViolations, ...brokerVersionGuardViolations, ...brokerContinuityViolations, ...brokerLogCacheViolations, ...codexConfigViolations, ...statePolicyViolations, ...quotaSelectionPolicyViolations, ...routeTagMirrorViolations, ...enumTagMirrorViolations, ...appSelectionPolicyMirrorViolations, ...runtimeStateBackgroundViolations, ...redactionViolations, ...rateLimitHeaderSelectionViolations, ...profileIdentityViolations, ...governanceInspectionViolations, ...governanceInspectionOrderingViolations, ...exactnessPlannerViolations,
+  return [...logPayloadProjectionViolations, ...nativeRecoveryOwnershipViolations, ...quotaRecoveryEligibilityViolations, ...runtimeBrokerReuseMojoViolations, ...geminiResponseMediaMojoViolations, ...cookieEvictionMojoViolations, ...websocketBudgetMojoViolations, ...affinityBindingMojoViolations, ...responsesCapacityRecoveryViolations, ...sseTapMojoOwnershipViolations, ...quotaWatchViolations, ...geminiCompactSnippetViolations, ...geminiCompactTextViolations, ...doctorSmartContextDecisionViolations, ...anthropicAttemptCursorViolations, ...geminiUnsupportedToolRetryViolations, ...terminalGeometryViolations, ...quotaHeaderProjectionViolations, ...smartContextCapsuleOrderViolations, ...markerViolations, ...deepseekCatalogPolicyViolations, ...featureOffViolations, ...liveLogRecordViolations, ...runtimePolicyPresetViolations, ...runtimeConfigScalarViolations, ...profileHealthCircuitViolations, ...logThroughputViolations, ...operationalDetailSpecViolations, ...transcriptPolicyViolations, ...logLoadPolicyViolations, ...routeReasonViolations, ...runtimeStateQuotaViolations, ...runtimeStateRoutePolicyViolations, ...runtimeProxyRootViolations, ...brokerVersionGuardViolations, ...brokerContinuityViolations, ...brokerLogCacheViolations, ...codexConfigViolations, ...statePolicyViolations, ...quotaSelectionPolicyViolations, ...routeTagMirrorViolations, ...enumTagMirrorViolations, ...appSelectionPolicyMirrorViolations, ...runtimeStateBackgroundViolations, ...redactionViolations, ...rateLimitHeaderSelectionViolations, ...profileIdentityViolations, ...governanceInspectionViolations, ...governanceInspectionOrderingViolations, ...exactnessPlannerViolations,
     ...adaptiveBudgetViolations,
     ...providerUsageViolations,
     ...auditUsageViolations,
@@ -10014,6 +10097,23 @@ function selfTest() {
   assert.match(findViolations([[RUNTIME_POLICY_PRESET_CONSUMER_FILE,
     presetConsumer.replace("runtime_tuning_proxy_preset_plan(\n);", "apply_non_preset_overrides();")]]).join("\n"),
   /must use the Mojo plan|restored Rust preset precedence or override merging/u);
+  const runtimeConfigEnvironment = [
+    "runtime_config_scalar_positive_u64(",
+    "runtime_config_scalar_unsigned(",
+    "runtime_config_scalar_bool(",
+    "runtime_config_scalar_compat_u64(",
+    "runtime_config_scalar_compat_flag(",
+    "RuntimeConfigScalarInput::invalid_unicode()",
+  ].join("\n");
+  assert.deepEqual(findViolations([[RUNTIME_CONFIG_ENVIRONMENT_FILE, runtimeConfigEnvironment]]), []);
+  assert.match(findViolations([[RUNTIME_CONFIG_ENVIRONMENT_FILE, "value.parse::<u64>()"]]).join("\n"),
+    /restored Rust runtime configuration parsing/u);
+  assert.deepEqual(findViolations([[
+    RUNTIME_CONFIG_MOJO_FILE,
+    '@export("prodex_runtime_proxy_preset_plan_v1")\n@export("prodex_runtime_config_scalar_v1")\nstruct RuntimeConfigScalarRecordV1(Copyable)\nrecord_size != RUNTIME_CONFIG_SCALAR_RECORD_V1_SIZE\nruntime_config_scalar_parse_unsigned(\nruntime_config_scalar_parse_signed(\nrich_trim_bounds(\nRUNTIME_CONFIG_SCALAR_STATUS_COMPATIBILITY_DEFAULT',
+  ]]), []);
+  assert.match(findViolations([[RUNTIME_CONFIG_ADAPTER_FILE, "RuntimeConfigScalarInput"]]).join("\n"),
+    /ABI adapter must retain/u);
   assert.match(findViolations([[PRECOMMIT_BUDGET_FILE,
     "fn runtime_proxy_precommit_budget_for_profile_count_rust() {}"]])[0],
     /Rust semantic oracle or copy/u);
