@@ -2,6 +2,134 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.438.0 - 2026-10-16
+
+### Runtime
+
+- Keep local proxy listeners alive under descriptor pressure (`d28ba19`)
+- Migrate runtime affinity admission (`74a7573`)
+- Migrate websocket precommit hold state (`6dd340e`)
+- Migrate runtime launch exit cancellation (`995625d`)
+- Migrate provider runtime metadata (`a4a02ce`)
+- Migrate runtime profile jitter (`dd15901`)
+- Migrate runtime last-chance candidate policy (`45b8548`)
+- Migrate runtime log follow planning (`6b0529b`)
+- Migrate runtime quota summary ordering (`afa19e6`)
+- Migrate websocket terminal frame policy to Mojo (`271133a`)
+- Migrate broker continuation metrics (`dc5cea9`)
+
+### CLI
+
+- Move profile import identity email policy (`5576854`)
+- Move Super normalization policies to Mojo (`a9281db`)
+- Migrate quota watch table columns (`a7f620f`)
+
+### Claude
+
+- Migrate MCP stdio first-line classification (`ccd6f84`)
+
+### Misc
+
+- Qualify Codex 0.163 native retry and compaction (`6073f85`)
+- Migrate usage-limit recovery selection (`7087fdc`)
+- Migrate super-expose rollout filename policy (`72eb410`)
+- Migrate throughput display policy (`ffaaa6c`)
+- Migrate Kiro tool control shaping (`fcbc88d`)
+- Migrate stale login retention (`b4c19f1`)
+- Batch Gemini response part planning (`0abe987`)
+- Migrate Copilot import candidate resolution (`a3b7b13`)
+- Migrate status resource aggregation (`ab2bd18`)
+- Migrate panel field row layout (`97f448c`)
+- Migrate Gemini tool validation paths (`22c4a25`)
+- Migrate OpenAI catalog retirement filter (`e75ef82`)
+- Migrate ps process row parsing (`f6925a8`)
+- Migrate DeepSeek stream error classification (`a6efc28`)
+- Migrate provider models response policy (`f3ab715`)
+- Migrate app command startup policy (`6340764`)
+- Migrate shared Codex filename policy (`e5c960d`)
+- Migrate imported secret file schema policy (`bb58986`)
+- Migrate chat bridge response projection to Mojo (`0cd8e97`)
+- Move model prefix scan to Mojo (`97deded`)
+# Prodex 0.438.0
+
+## New Features
+
+### Codex 0.163.0 compatibility
+
+The release qualifies the official `rust-v0.163.0` source and released
+Linux executable, including a real isolated app-server initialize and
+thread-list handshake without starting model turns.
+
+- Native `response.incomplete` reasons, response IDs, unknown fields and
+  usage remain intact. The proxy does not invent success or rotate a
+  profile merely because the native model result is incomplete.
+- Foreground and background Responses-v2 compaction keep native usage,
+  retention, image budget, cancellation and error handling.
+- The native default instant-interrupt and eligible Daybreak behavior is
+  preserved rather than overridden by the wrapper.
+- Reasoned WebSocket continuation-property mismatches, model-resolved
+  incremental tool messages and explicit remote MCP Windows environment
+  overrides are covered by the updated source guard.
+- Active native connection retries remain owned by Codex. Local transport
+  repair does not manufacture another turn or override committed output
+  and hard continuation affinity.
+
+The compatibility baseline checks 77 critical files and 90 mandatory
+semantic contracts against the exact tagged source. Source archive and
+file digests are recorded in the migration audit.
+
+## Bug Fixes
+
+### Local proxy recovery under descriptor pressure
+
+The owned local HTTP listener now survives temporary failures in both
+accepting a connection and duplicating an accepted socket. Previously the
+HTTP server dependency could terminate its accept thread, leaving the
+native client retrying an unreachable loopback address instead of reaching
+profile selection. An isolated descriptor-pressure test reproduced the
+socket-clone panic before the patch.
+
+The repair preserves the listening address and queued connection, retries
+with bounded 10–250 ms backoff, limits diagnostic volume and observes the
+server shutdown flag. It does not replay parsed HTTP requests, submitted
+inference, emitted output or completed tool calls. Two real TCP tests
+independently force accept and accepted-stream descriptor exhaustion,
+release the pressure and require the queued request plus a new connection
+to succeed on the same port.
+
+The retained incident logs prove repeated failures to the local proxy,
+not the exact OS event that killed the original listener. Persistent
+resource exhaustion, a killed process, an actual upstream outage or an
+ineligible profile pool are not claimed to be error-free.
+
+## Changelog
+
+### Qualification and maintenance
+
+The tiny_http 0.12.0 transport patch retains the official runtime sources,
+licenses and archive provenance. Exact-file hash verification and tamper
+regressions run in preflight. Original audited vendor lint annotations do
+not increase first-party suppression budgets.
+
+Inherited oversized adapters and tests were extracted into cohesive
+modules without changing their public APIs or dropping assertions.
+Source-size limits remain unchanged. Retry, quota transitions, compaction,
+hard affinity, usage-limit recovery and session recovery remain release
+gates, alongside compiled-Mojo tests and workspace Clippy.
+
+The optional Codebase Memory MCP latest-stable reference is refreshed to
+0.12.0 from its official release. Qualification does not update the user's
+installed shared daemon or rebuild existing indexes.
+
+### Upgrade
+
+Use the normal `prodex update` flow, then verify `prodex --version` reports
+`prodex 0.438.0`. Existing 0.437.x processes are not hot-patched. Resume the
+saved session with `prodex s <session-id>` on the new version; do not use a
+closed temporary `codex --remote` socket or delete persisted session data.
+
+Full Changelog: [0.437.14...0.438.0](https://github.com/christiandoxa/prodex/compare/0.437.14...0.438.0)
+
 ## 0.437.14 - 2026-10-15
 
 ### Runtime
@@ -138,10 +266,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 
 - Reset recovery evidence on native task start (`886bcc5`)
 - Recover native Codex task completion failures (`96cf9ab`)
-
-## 0.437.3 - 2026-10-10
-
-### Runtime
-
-- Reap the session-owned native app-server process tree (`2efed0b`)
-- Prevent admission and quota-state notification deadlock (`370ee38`)
