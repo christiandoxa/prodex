@@ -5637,3 +5637,11 @@ profile-route scopes and parses u32 health scores and signed i64 expiries.
 Rust keeps log storage and typed report projection; duplicate Rust wildcard
 matching and numeric parsers were removed. Strict ABI and doctor caller
 regressions cover Unicode, exact scope, missing values and numeric limits.
+
+## Terminal geometry input parsing in Mojo
+
+The compiled terminal layout owner now parses Unicode-trimmed positive CLI
+overrides and first-two `stty size` values with checked unsigned bounds.
+Rust retains the environment/TTY process boundary and typed output, and its
+former trim/decimal/split pipeline was removed without an alternate parser.
+Strict ABI and terminal-ui caller tests cover the grammar and edge cases.

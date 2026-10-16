@@ -11,10 +11,10 @@ pub fn current_cli_width() -> usize {
 }
 
 pub fn terminal_size_override_usize(env_key: &str) -> Option<usize> {
-    env::var(env_key)
-        .ok()
-        .and_then(|value| value.trim().parse::<usize>().ok())
-        .filter(|value| *value > 0)
+    env::var(env_key).ok().and_then(|value| {
+        prodex_mojo_core::terminal_layout::terminal_positive_size_override(&value)
+            .expect("Mojo terminal environment dimension parser returned invalid output")
+    })
 }
 
 #[cfg(unix)]
@@ -26,10 +26,8 @@ pub fn terminal_dimensions_from_tty() -> Option<(usize, usize)> {
     }
 
     let text = String::from_utf8(output.stdout).ok()?;
-    let mut parts = text.split_whitespace();
-    let rows = parts.next()?.parse::<usize>().ok()?;
-    let cols = parts.next()?.parse::<usize>().ok()?;
-    Some((rows, cols))
+    prodex_mojo_core::terminal_layout::terminal_tty_dimensions(&text)
+        .expect("Mojo stty terminal dimensions parser returned invalid output")
 }
 
 #[cfg(not(unix))]
@@ -58,6 +56,29 @@ pub fn terminal_height_lines() -> Option<usize> {
 #[cfg(test)]
 mod tests {
     use super::terminal_dimensions_from_crossterm_size;
+
+    #[test]
+    fn compiled_mojo_terminal_dimension_fields_match_tty_and_override_contracts() {
+        assert_eq!(
+            prodex_mojo_core::terminal_layout::terminal_positive_size_override(
+                " \u{2003}+24\u{3000}"
+            )
+            .unwrap(),
+            Some(24),
+        );
+        assert_eq!(
+            prodex_mojo_core::terminal_layout::terminal_positive_size_override("0").unwrap(),
+            None,
+        );
+        assert_eq!(
+            prodex_mojo_core::terminal_layout::terminal_tty_dimensions(" 48 132 trailing").unwrap(),
+            Some((48, 132)),
+        );
+        assert_eq!(
+            prodex_mojo_core::terminal_layout::terminal_tty_dimensions("48 malformed").unwrap(),
+            None,
+        );
+    }
 
     #[test]
     fn crossterm_dimensions_preserve_rows_and_columns() {
