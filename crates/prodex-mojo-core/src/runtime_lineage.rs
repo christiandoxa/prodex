@@ -26,6 +26,13 @@ unsafe extern "C" {
         session_address: u64,
         session_length: i64,
     ) -> i64;
+    fn prodex_runtime_lineage_binding_identity_source_v1(
+        abi_version: i64,
+        credential_present: i64,
+        credential_valid: i64,
+        profile_present: i64,
+        profile_valid: i64,
+    ) -> i64;
     fn prodex_runtime_lineage_build_v1(
         abi_version: i64,
         kind: i64,
@@ -134,6 +141,39 @@ pub fn is_compact_session_key(value: &str) -> Result<bool, MojoError> {
 pub enum RuntimeLineageIdentityFallback {
     Empty,
     Invalid,
+}
+
+/// Which validated binding identity source should own a continuation.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RuntimeLineageBindingIdentitySource {
+    None,
+    Credential,
+    Profile,
+}
+
+/// Select a credential identity first, falling back to a validated profile identity.
+pub fn binding_identity_source(
+    credential_present: bool,
+    credential_valid: bool,
+    profile_present: bool,
+    profile_valid: bool,
+) -> Result<RuntimeLineageBindingIdentitySource, MojoError> {
+    match unsafe {
+        prodex_runtime_lineage_binding_identity_source_v1(
+            ABI_VERSION,
+            i64::from(credential_present),
+            i64::from(credential_valid),
+            i64::from(profile_present),
+            i64::from(profile_valid),
+        )
+    } {
+        0 => Ok(RuntimeLineageBindingIdentitySource::None),
+        1 => Ok(RuntimeLineageBindingIdentitySource::Credential),
+        2 => Ok(RuntimeLineageBindingIdentitySource::Profile),
+        -4 => Err(MojoError::AbiMismatch),
+        -1 => Err(MojoError::InvalidInput),
+        _ => Err(MojoError::InvalidOutput),
+    }
 }
 
 fn optional_string_parts(value: Option<&str>) -> Result<(u64, i64), MojoError> {
@@ -527,6 +567,37 @@ mod hard_binding_plan_tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn binding_identity_source_prefers_credential_then_profile_fallback() {
+        use RuntimeLineageBindingIdentitySource::{Credential, None, Profile};
+
+        assert_eq!(
+            binding_identity_source(true, true, true, true),
+            Ok(Credential)
+        );
+        assert_eq!(
+            binding_identity_source(true, false, true, true),
+            Ok(Profile)
+        );
+        assert_eq!(
+            binding_identity_source(false, false, true, true),
+            Ok(Profile)
+        );
+        assert_eq!(binding_identity_source(true, false, true, false), Ok(None));
+        assert_eq!(
+            binding_identity_source(true, true, true, false),
+            Ok(Credential)
+        );
+        assert_eq!(
+            unsafe { prodex_runtime_lineage_binding_identity_source_v1(0, 0, 0, 0, 0) },
+            -4,
+        );
+        assert_eq!(
+            unsafe { prodex_runtime_lineage_binding_identity_source_v1(ABI_VERSION, 0, 1, 0, 0) },
+            -1,
+        );
     }
 
     #[test]
