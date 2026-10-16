@@ -327,6 +327,32 @@ mod tests {
     use super::*;
 
     #[test]
+    fn copilot_candidate_result_validation_rejects_untrusted_indices() {
+        assert_eq!(
+            validate_copilot_candidate_indices(&[-1, 0], 2, true, 1),
+            Ok(vec![-1, 0])
+        );
+        assert_eq!(
+            validate_copilot_candidate_indices(&[], 0, false, 0),
+            Ok(vec![])
+        );
+        for (indices, written, last_present, count) in [
+            (vec![-1], 1, false, 0),
+            (vec![-2], 1, true, 1),
+            (vec![0, 0], 2, false, 1),
+            (vec![1], 1, false, 1),
+            (vec![0], -1, false, 1),
+            (vec![0], 2, false, 1),
+        ] {
+            assert_eq!(
+                validate_copilot_candidate_indices(&indices, written, last_present, count),
+                Err(MojoError::InvalidOutput),
+                "indices={indices:?} written={written} last={last_present} count={count}"
+            );
+        }
+    }
+
+    #[test]
     fn copilot_metadata_and_url_policy_are_mojo_owned() {
         assert_eq!(copilot_version_triplet("1.2.3-beta").unwrap(), (1, 2, 3));
         assert_eq!(copilot_version_triplet("9").unwrap(), (9, 0, 0));
