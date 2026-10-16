@@ -53,17 +53,17 @@
     {
       "id": "codebase-memory-mcp",
       "repository": "https://github.com/DeusData/codebase-memory-mcp",
-      "latest_stable": "0.11.0",
-      "release": "v0.11.0",
-      "commit": "8972ea69c6ad94b1ef1d4ffbf0a92d78d2db1798",
-      "git_tree": "e5a5586de0bd58ddf59b73cbf1baa70ea0427fe8",
+      "latest_stable": "0.12.0",
+      "release": "v0.12.0",
+      "commit": "ec6427c38176efcd37b28682e82f2491afda94be",
+      "git_tree": "97525a6ce84fcca8a790ddebecf036d54f1032bf",
       "assets": {
-        "linux-amd64-portable": "sha256:1f9e8293eb2bc5c05cfa27a7e8fc033da6d729ffad525ccfcdaa3fd606306683",
-        "linux-arm64-portable": "sha256:d62eeb224d5ee3eba3070938ec62cf1033f10b041ec1c4b2fb67f7aef390cc7b",
-        "darwin-amd64": "sha256:dbf1c73bfcbde64e7dde4cd1320da7afc02e2c972ee1789ae039521411f5132e",
-        "darwin-arm64": "sha256:4dee7f38b63740e6751d7a7ed7eb10291c1f2a3ea2415f599dc68370ca0a2d18",
-        "windows-amd64": "sha256:6eb6beaf261b19e419766e78baf93cbc3cf1c6338cff8fb7c0234859f96d1685",
-        "windows-arm64": "sha256:52b29881214fce47d529e098308b1de77c40f6812e20a34d588ee4c25b84fd1a"
+        "linux-amd64-portable": "sha256:7024e585132760f383e3e25237e2b2ac6f5185f7e466f8dc66a085bb25f8d0be",
+        "linux-arm64-portable": "sha256:8e603f32c9c84b5dc5a6b4a0d23516817d5de199e30f8dcc9bdb128c39386cd8",
+        "darwin-amd64": "sha256:af3beeeaca53204faf350402ddacee04780a53d0fa510dc31941fb5c2202ff35",
+        "darwin-arm64": "sha256:1be41a9dd6902e3633eb0b280189117dc3db3be623bdd3dd4c6ea74372b5a50b",
+        "windows-amd64": "sha256:0675af7894d293cb755e85f1f471b4b8dd401988f03ad183b3d3d74788517165",
+        "windows-arm64": "sha256:04098a1a3c06edccb4e5c96b552569ecacd2f48fe073dee8dbcec133bd2fe18f"
       },
       "license": "MIT",
       "runtime": "Portable release binary; shared daemon with lightweight stdio frontends",
@@ -73,7 +73,7 @@
         "windows"
       ],
       "decision": "ADOPT_PACKAGE",
-      "notes": "Daemon-capable 0.9.1-rc.1 minimum remains for backward compatibility."
+      "notes": "Daemon-capable 0.9.1-rc.1 minimum remains for backward compatibility. Latest stable 0.12.0 official release assets and Linux portable version handshake verified in an isolated home. No installed tool or user index was modified; upstream upgrades rebuild old project indexes on their next indexing run."
     },
     {
       "id": "playwright-mcp",
