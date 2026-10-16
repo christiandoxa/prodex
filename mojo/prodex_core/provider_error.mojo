@@ -1,6 +1,6 @@
 
 from std.memory import Pointer
-from json_sink import JsonSink, js_byte, js_literal
+from json_sink import JsonSink, js_byte, js_escaped, js_literal
 from parsed_json import (
     JSON_ARRAY, JSON_NUMBER, JSON_OBJECT, JSON_STRING, ParsedJson, ParsedJsonNode, pj_valid,
 )
@@ -101,6 +101,66 @@ def provider_error_codes_emit(
     return not sink[].failed
 
 
+def provider_error_message_key(key: ProdexRichStringView) -> Int64:
+    if rich_view_matches_literal["message"](key, False):
+        return 0
+    if rich_view_matches_literal["detail"](key, False):
+        return 1
+    if rich_view_matches_literal["error"](key, False):
+        return 2
+    return -1
+
+
+def provider_error_write_message(
+    sink: Pointer[mut=True, JsonSink, _], value: ProdexRichStringView
+) -> Bool:
+    var bounds = rich_trim_bounds(value)
+    if bounds[1] <= bounds[0]:
+        return False
+    js_byte(sink, 34)
+    js_escaped(
+        sink,
+        ProdexRichStringView(
+            value.ptr + UInt(bounds[0]), UInt(bounds[1] - bounds[0])
+        ),
+    )
+    js_byte(sink, 34)
+    return not sink[].failed
+
+
+def provider_error_message_emit(
+    sink: Pointer[mut=True, JsonSink, _], tree: ParsedJson
+) -> Bool:
+    var priority: Int64 = 0
+    while priority < 3:
+        var node: Int64 = 0
+        while node >= 0:
+            var current = tree.nodes[unsafe_offset=node].copy()
+            if current.kind == JSON_OBJECT:
+                var child = current.first_child
+                while child >= 0:
+                    var candidate = tree.nodes[unsafe_offset=child].copy()
+                    if (
+                        candidate.parent == node
+                        and candidate.kind == JSON_STRING
+                        and provider_error_message_key(candidate.key) == priority
+                        and rich_trim_bounds(candidate.text)[1]
+                            > rich_trim_bounds(candidate.text)[0]
+                    ):
+                        return provider_error_write_message(sink, candidate.text)
+                    child = candidate.next_sibling
+            if current.first_child >= 0:
+                node = current.first_child
+                continue
+            while node >= 0 and tree.nodes[unsafe_offset=node].next_sibling < 0:
+                node = tree.nodes[unsafe_offset=node].parent
+            if node >= 0:
+                node = tree.nodes[unsafe_offset=node].next_sibling
+        priority += 1
+    js_literal(sink, StringSlice("null"))
+    return not sink[].failed
+
+
 @export("prodex_mojo_provider_error_codes_v1")
 def prodex_mojo_provider_error_codes_v1(
     abi: Int64,
@@ -119,7 +179,8 @@ def prodex_mojo_provider_error_codes_v1(
 ) abi("C") -> Int64:
     if (
         abi != PROVIDER_ERROR_CODES_ABI_VERSION
-        or operation != 0
+        or operation < 0
+        or operation > 1
         or flag != 0
         or nodes_address == 0
         or nodes_count <= 0
@@ -154,7 +215,11 @@ def prodex_mojo_provider_error_codes_v1(
         measuring == 1,
         False,
     )
-    var success = provider_error_codes_emit(Pointer(to=sink), tree)
+    var success = (
+        provider_error_codes_emit(Pointer(to=sink), tree)
+        if operation == 0
+        else provider_error_message_emit(Pointer(to=sink), tree)
+    )
     var metadata = Pointer[mut=True, Int64, MutUntrackedOrigin](
         unsafe_from_address=Int(metadata_address)
     )
@@ -163,6 +228,39 @@ def prodex_mojo_provider_error_codes_v1(
     if not success or sink.failed:
         return 3 if sink.failed else 1
     return 0
+
+
+@export("prodex_mojo_provider_error_message_v1")
+def prodex_mojo_provider_error_message_v1(
+    abi: Int64,
+    operation: Int64,
+    flag: Int64,
+    nodes_address: UInt64,
+    nodes_count: Int64,
+    raw_address: UInt64,
+    raw_length: Int64,
+    scratch_address: UInt64,
+    scratch_count: Int64,
+    measuring: Int64,
+    output_address: UInt64,
+    output_capacity: Int64,
+    metadata_address: UInt64,
+) abi("C") -> Int64:
+    return prodex_mojo_provider_error_codes_v1(
+        abi,
+        1,
+        flag,
+        nodes_address,
+        nodes_count,
+        raw_address,
+        raw_length,
+        scratch_address,
+        scratch_count,
+        measuring,
+        output_address,
+        output_capacity,
+        metadata_address,
+    )
 
 
 def provider_error_ascii_space(value: UInt8) -> Bool:

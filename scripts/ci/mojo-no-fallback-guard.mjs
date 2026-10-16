@@ -1258,6 +1258,7 @@ const KIRO_RESPONSE_HELPER_OPERATIONS = [
 const DEEPSEEK_STRICT_TOOLS_FILE = "crates/prodex-provider-core/src/deepseek_bridge/request_tools.rs";
 const DEEPSEEK_STRICT_SCHEMA_FILE = "crates/prodex-provider-core/src/deepseek_bridge/request_tools/strict_schema.rs";
 const PROVIDER_ERROR_FILE = "crates/prodex-provider-core/src/errors.rs";
+const GEMINI_ERRORS_FILE = "crates/prodex-provider-core/src/gemini_bridge/errors.rs";
 const PROVIDER_SURFACE_FILE = "crates/prodex-provider-core/src/surface.rs";
 const PROVIDER_CONSTRAINTS_ADAPTER_FILE = "crates/prodex-mojo-core/src/provider_constraints.rs";
 const PROVIDER_CONSTRAINTS_SCALAR_ADAPTER_FILE = "crates/prodex-mojo-core/src/provider_constraints/scalar_policy.rs";
@@ -4979,6 +4980,23 @@ export function findViolations(files) {
       !FEATURE_OFF_RUST_PATH.test(body) && !rustMatcher
       ? [] : [`${filePath}: request-member rejection must use Mojo without a Rust matcher`];
   });
+  const geminiErrorMessageViolations = files.flatMap(([filePath, contents]) => {
+    if (filePath !== GEMINI_ERRORS_FILE) return [];
+    const production = contents.split("#[cfg(test)]", 1)[0];
+    const required = [
+      "use crate::mojo_json::Document;",
+      "prodex_mojo_core::json::provider_error_message_json(",
+    ];
+    const restoredRust = [
+      "let mut stack",
+      "stack.extend",
+      "match value {",
+    ];
+    return required.every((marker) => production.includes(marker)) &&
+      restoredRust.every((marker) => !production.includes(marker))
+      ? []
+      : [`${filePath}: nested Gemini error-message selection must remain Mojo-owned`];
+  });
   const deepseekResponseToolCallViolations = files
     .filter(([filePath, contents]) => filePath === DEEPSEEK_RESPONSE_TOOL_CALLS_FILE &&
       (!contents.includes("DeepSeekKernelOperation::ResponseToolCallItem") ||
@@ -8370,7 +8388,7 @@ export function findViolations(files) {
     ...hardReplacementViolations, ...precommitBudgetOracleViolations,
     ...deepseekRequestViolations, ...deepseekRequestRejectViolations,
     ...deepseekReasoningViolations,
-    ...nativeFirstErrorClassViolations, ...providerBridgeMetadataViolations, ...websocketProxyPolicyViolations, ...transportFailurePolicyViolations, ...providerPrecommitPolicyViolations, ...providerErrorMemberViolations,
+    ...nativeFirstErrorClassViolations, ...providerBridgeMetadataViolations, ...websocketProxyPolicyViolations, ...transportFailurePolicyViolations, ...providerPrecommitPolicyViolations, ...providerErrorMemberViolations, ...geminiErrorMessageViolations,
     ...deepseekResponseToolCallViolations, ...chatToolViolations,
     ...previousResponseOutcomeLabelViolations, ...affinityChainLogRenderViolations, ...previousResponseLogRenderViolations, ...structuredLogPolicyViolations, ...candidateSkipReasonViolations, ...runtimeProxyObservabilityLabelViolations, ...websocketExecutorLabelViolations, ...infoRenderViolations, ...doctorMarkerViolations, ...doctorFailureClassViolations, ...doctorMarkerSummaryCountsViolations, ...doctorCompactExitCountsViolations, ...doctorTimelineDetailViolations, ...doctorLastMarkerLineViolations, ...runtimeDoctorPlanInputViolations, ...cliDefaultRunViolations, ...cliNormalizationViolations, ...responseMetadataViolations, ...doctorMarkerAbiViolations, ...statusSummaryViolations,
     ...geminiBufferedResponseViolations, ...fingerprintDeltaViolations, ...profileExportPolicyViolations, ...sessionReportViolations, ...runtimeLineageViolations, ...smartContextMarkerViolations, ...smartContextSymbolIndexViolations, ...sessionUsageLimitViolations, ...smartContextArtifactRefViolations, ...smartContextDuplicateTextViolations, ...runtimeRepoMapViolations,

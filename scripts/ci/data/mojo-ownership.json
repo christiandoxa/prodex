@@ -899,6 +899,7 @@
         "operations": [
           "provider_error_request_member_rejection",
           "provider_error_code_extraction",
+          "provider_error_message_extraction",
           "provider_native_sse_error_classification"
         ]
       },
@@ -9351,6 +9352,29 @@
       "duplicate_production_owner": false,
       "platform_fallback": false,
       "rust_adapter_scope": "Serde JSON/SSE acquisition, Document tree construction, and bounded Mojo result decoding"
+    },
+    {
+      "name": "provider_error_message_extraction",
+      "domain": "provider/error",
+      "introduced_in": "0.438.0",
+      "baseline_state": "Rust recursively selected the first nonblank message, detail, or error string from a parsed provider error body",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_mojo_provider_error_message_v1",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/provider_error.mojo",
+      "consumer": "crates/prodex-provider-core/src/gemini_bridge/errors.rs",
+      "consumer_marker": "prodex_mojo_core::json::provider_error_message_json",
+      "production_consumers": [
+        "crates/prodex-provider-core/src/gemini_bridge/errors.rs"
+      ],
+      "production_reachability_test": "crates/prodex-provider-core/src/gemini_bridge/errors.rs",
+      "rust_owner_before": "Nested message/detail/error string traversal and blank-value filtering",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "Deleted; provider-core normalized-error regression covers nested message precedence and detail fallback",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "Serde JSON acquisition, Document tree construction, and bounded JSON string decoding"
     },
     {
       "name": "profile_screen_geometry_and_value_color_policy",

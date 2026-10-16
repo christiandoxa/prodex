@@ -15,6 +15,7 @@ pub use self::quota_retry::{
 use self::quota_retry::{
     gemini_provider_core_value_has_rate_limit, gemini_provider_core_value_has_terminal_quota,
 };
+use crate::mojo_json::Document;
 
 pub fn gemini_provider_core_normalized_error_body(status: u16, body: &[u8]) -> Option<Vec<u8>> {
     if status < 400 {
@@ -71,26 +72,12 @@ pub fn gemini_provider_core_normalized_error_body(status: u16, body: &[u8]) -> O
 }
 
 fn gemini_provider_core_error_message(value: &serde_json::Value) -> Option<String> {
-    let mut stack = vec![value];
-    while let Some(value) = stack.pop() {
-        match value {
-            serde_json::Value::Object(object) => {
-                for key in ["message", "detail", "error"] {
-                    if let Some(message) = object
-                        .get(key)
-                        .and_then(serde_json::Value::as_str)
-                        .filter(|message| !message.trim().is_empty())
-                    {
-                        return Some(message.to_string());
-                    }
-                }
-                stack.extend(object.values());
-            }
-            serde_json::Value::Array(values) => stack.extend(values),
-            _ => {}
-        }
-    }
-    None
+    let mut document = Document::default();
+    document.push(value, None, "");
+    let raw = std::str::from_utf8(&document.raw).ok()?;
+    let output = prodex_mojo_core::json::provider_error_message_json(&document.nodes, raw)
+        .expect("Mojo provider error message extraction returned invalid output")?;
+    serde_json::from_slice(&output).ok()
 }
 
 fn gemini_provider_core_openai_error_kind(
@@ -113,5 +100,25 @@ fn gemini_provider_core_openai_error_kind(
         404 => ("invalid_request_error", "not_found"),
         500..=599 => ("server_error", "provider_error"),
         _ => ("api_error", "provider_error"),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::gemini_provider_core_normalized_error_body;
+
+    #[test]
+    fn normalized_error_body_uses_mojo_message_precedence_for_nested_errors() {
+        let body = br#"{"error":{"detail":"nested detail","message":"inner message"},"message":"top message"}"#;
+        let normalized = gemini_provider_core_normalized_error_body(400, body)
+            .expect("structured Gemini errors should normalize");
+        let value: serde_json::Value = serde_json::from_slice(&normalized).unwrap();
+        assert_eq!(value["error"]["message"], "inner message");
+
+        let nested = br#"{"error":{"detail":" nested detail "}}"#;
+        let normalized = gemini_provider_core_normalized_error_body(400, nested)
+            .expect("nested Gemini errors should normalize");
+        let value: serde_json::Value = serde_json::from_slice(&normalized).unwrap();
+        assert_eq!(value["error"]["message"], "nested detail");
     }
 }
