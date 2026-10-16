@@ -53,6 +53,7 @@ members = [
     "crates/prodex-update-notice",
 ]
 resolver = "3"
+exclude = ["vendor/tiny_http"]
 
 [workspace.package]
 version = "0.437.14"
@@ -195,3 +196,7 @@ unimplemented = "deny"
 
 [lints]
 workspace = true
+
+# Audited tiny_http 0.12.0 transport-only patch; see vendor/tiny_http/PRODEX-PATCH.json.
+[patch.crates-io]
+tiny_http = { path = "vendor/tiny_http" }

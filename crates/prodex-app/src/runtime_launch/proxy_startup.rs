@@ -641,3 +641,7 @@ mod url_boundary_tests {
         let _ = std::fs::remove_dir_all(root);
     }
 }
+
+#[cfg(all(test, target_os = "linux"))]
+#[path = "proxy_startup/accept_pressure_tests.rs"]
+mod accept_pressure_tests;
