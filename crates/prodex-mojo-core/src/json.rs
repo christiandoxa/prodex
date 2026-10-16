@@ -9,6 +9,8 @@ pub use self::response_metadata::{
     RuntimeResponseMetadataJsonPlan, runtime_response_event_is_completed,
     runtime_response_metadata_json,
 };
+mod provider_error;
+pub use self::provider_error::provider_error_message_json;
 mod session_report;
 pub use self::session_report::{
     SessionReportOrderKey, SessionReportUpdatePlan, session_report_metadata_json,
