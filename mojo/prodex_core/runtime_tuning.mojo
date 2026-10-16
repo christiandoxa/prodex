@@ -313,9 +313,19 @@ def prodex_runtime_config_scalar_v1(
             return -2
     elif flags != 0:
         return -2
-    if operation != RUNTIME_CONFIG_SCALAR_COMPAT_UNSIGNED and (flags & RUNTIME_CONFIG_SCALAR_FLAG_TRIM) != 0:
+    if (
+        operation != RUNTIME_CONFIG_SCALAR_COMPAT_UNSIGNED
+        and operation != RUNTIME_CONFIG_SCALAR_COMPAT_FLAG
+        and operation != RUNTIME_CONFIG_SCALAR_COMPAT_BOOL_DEFAULT_TRUE
+        and (flags & RUNTIME_CONFIG_SCALAR_FLAG_TRIM) != 0
+    ):
         return -2
-    if operation != RUNTIME_CONFIG_SCALAR_STRICT_POSITIVE_UNSIGNED and operation != RUNTIME_CONFIG_SCALAR_STRICT_UNSIGNED and (flags & RUNTIME_CONFIG_SCALAR_FLAG_CLAMP) != 0:
+    if (
+        operation != RUNTIME_CONFIG_SCALAR_STRICT_POSITIVE_UNSIGNED
+        and operation != RUNTIME_CONFIG_SCALAR_STRICT_UNSIGNED
+        and operation != RUNTIME_CONFIG_SCALAR_COMPAT_UNSIGNED
+        and (flags & RUNTIME_CONFIG_SCALAR_FLAG_CLAMP) != 0
+    ):
         return -2
 
     var output_unsigned = Pointer[mut=True, UInt64, MutUntrackedOrigin](
@@ -390,6 +400,8 @@ def prodex_runtime_config_scalar_v1(
         if parsed_compatibility > maximum_unsigned:
             if clamp:
                 parsed_compatibility = maximum_unsigned
+                output_unsigned[] = parsed_compatibility
+                return RUNTIME_CONFIG_SCALAR_STATUS_COMPATIBILITY_DEFAULT
             else:
                 _ = runtime_config_scalar_choose_unsigned(0, 0, default_unsigned, minimum_unsigned, maximum_unsigned, allow_zero, output_unsigned)
                 return RUNTIME_CONFIG_SCALAR_STATUS_COMPATIBILITY_DEFAULT
