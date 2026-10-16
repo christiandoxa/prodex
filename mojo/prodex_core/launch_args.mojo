@@ -22,6 +22,8 @@ from launch_args_common import (
     launch_view,
 )
 from rich_text import rich_view_ptr, rich_view_valid
+from rich_text import rich_codepoint, rich_codepoint_width
+from rich_types import ProdexRichStringView
 
 comptime LAUNCH_ARGS_ABI_VERSION: Int64 = 1
 comptime LAUNCH_INSPECT: Int64 = 0
@@ -1086,6 +1088,7 @@ def prodex_login_menu_policy_v1(
 comptime SUPER_CHOICE_POLICY_ABI_VERSION: Int64 = 1
 comptime SUPER_CHOICE_POLICY_RANGE: Int64 = 1
 comptime SUPER_CHOICE_POLICY_KEY: Int64 = 2
+comptime SUPER_CHOICE_POLICY_INITIAL: Int64 = 3
 
 comptime SUPER_CHOICE_KEY_UP: Int64 = 0
 comptime SUPER_CHOICE_KEY_DOWN: Int64 = 1
@@ -1116,7 +1119,7 @@ def prodex_super_choice_policy_v1(
     if (
         abi_version != SUPER_CHOICE_POLICY_ABI_VERSION
         or operation < SUPER_CHOICE_POLICY_RANGE
-        or operation > SUPER_CHOICE_POLICY_KEY
+        or operation > SUPER_CHOICE_POLICY_INITIAL
         or output_address == 0
     ):
         return 1
@@ -1150,6 +1153,15 @@ def prodex_super_choice_policy_v1(
             start = max_start
         output[unsafe_offset=0] = start
         output[unsafe_offset=1] = start + visible
+        return 0
+
+    if operation == SUPER_CHOICE_POLICY_INITIAL:
+        if input0 < 0 or input1 <= 0 or input2 != 0 or input3 != 0:
+            return 1
+        var selected = input0
+        if selected >= input1:
+            selected = input1 - 1
+        output[unsafe_offset=0] = selected
         return 0
 
     var key = input0
@@ -1207,3 +1219,464 @@ def prodex_super_choice_policy_v1(
     output[unsafe_offset=1] = action
     output[unsafe_offset=2] = action_index
     return 0
+
+
+comptime SUPER_PROMPT_POLICY_ABI_VERSION: Int64 = 1
+comptime SUPER_PROMPT_POLICY_CHOICE_EVENT: Int64 = 1
+comptime SUPER_PROMPT_POLICY_TEXT_EVENT: Int64 = 2
+comptime SUPER_PROMPT_POLICY_TEXT_PREFIX: Int64 = 3
+comptime SUPER_PROMPT_POLICY_CHOICE_INDEX: Int64 = 4
+comptime SUPER_PROMPT_POLICY_VALUE_INDEX: Int64 = 5
+comptime SUPER_PROMPT_POLICY_LABEL: Int64 = 6
+comptime SUPER_PROMPT_POLICY_MAX_CHOICES: Int64 = 1_024
+comptime SUPER_PROMPT_POLICY_MAX_TEXT_BYTES: Int64 = 65_536
+comptime SUPER_PROMPT_POLICY_MAX_LABEL_BYTES: Int64 = 65_600
+comptime SUPER_PROMPT_MAX_TEXT_CHARS: Int64 = 256
+
+comptime SUPER_PROMPT_KEY_UP: Int64 = 0
+comptime SUPER_PROMPT_KEY_DOWN: Int64 = 1
+comptime SUPER_PROMPT_KEY_PAGE_UP: Int64 = 2
+comptime SUPER_PROMPT_KEY_PAGE_DOWN: Int64 = 3
+comptime SUPER_PROMPT_KEY_HOME: Int64 = 4
+comptime SUPER_PROMPT_KEY_END: Int64 = 5
+comptime SUPER_PROMPT_KEY_ENTER: Int64 = 6
+comptime SUPER_PROMPT_KEY_ESCAPE: Int64 = 7
+comptime SUPER_PROMPT_KEY_CHAR: Int64 = 8
+comptime SUPER_PROMPT_KEY_OTHER: Int64 = 9
+
+comptime SUPER_PROMPT_TEXT_CHAR: Int64 = 0
+comptime SUPER_PROMPT_TEXT_BACKSPACE: Int64 = 1
+comptime SUPER_PROMPT_TEXT_ENTER: Int64 = 2
+comptime SUPER_PROMPT_TEXT_ESCAPE: Int64 = 3
+comptime SUPER_PROMPT_TEXT_OTHER: Int64 = 4
+
+comptime SUPER_PROMPT_TEXT_IGNORE: Int64 = 0
+comptime SUPER_PROMPT_TEXT_APPEND: Int64 = 1
+comptime SUPER_PROMPT_TEXT_BACKSPACE_ACTION: Int64 = 2
+comptime SUPER_PROMPT_TEXT_ACCEPT: Int64 = 3
+comptime SUPER_PROMPT_TEXT_RETURN_NONE: Int64 = 4
+comptime SUPER_PROMPT_TEXT_CANCEL: Int64 = 5
+
+comptime SUPER_PROMPT_LABEL_PROVIDER: Int64 = 0
+comptime SUPER_PROMPT_LABEL_VALUE: Int64 = 1
+comptime SUPER_PROMPT_LABEL_PROVIDER_DEFAULT: Int64 = 2
+comptime SUPER_PROMPT_LABEL_CUSTOM_MODEL: Int64 = 3
+comptime SUPER_PROMPT_LABEL_CUSTOM_CONCURRENCY: Int64 = 4
+comptime SUPER_PROMPT_LABEL_DEFAULT_CONCURRENCY: Int64 = 5
+comptime SUPER_PROMPT_LABEL_PRESET_CONCURRENCY: Int64 = 6
+comptime SUPER_PROMPT_LABEL_CUSTOM_CONCURRENCY_TITLE: Int64 = 7
+
+@fieldwise_init
+struct SuperPromptChoice(Copyable):
+    var kind: Int64
+    var value: ProdexRichStringView
+
+
+def super_prompt_choice_event(
+    key_kind: Int64,
+    character: Int64,
+    control: Int64,
+    selected: Int64,
+    length: Int64,
+    escape_selects_last: Int64,
+    output_address: UInt,
+) -> Int64:
+    if (
+        key_kind < SUPER_PROMPT_KEY_UP
+        or key_kind > SUPER_PROMPT_KEY_OTHER
+        or character < 0
+        or character > 0x10FFFF
+        or character >= 0xD800 and character <= 0xDFFF
+        or control < 0
+        or control > 1
+        or selected < 0
+        or length <= 0
+        or selected >= length
+        or escape_selects_last < 0
+        or escape_selects_last > 1
+    ):
+        return 1
+
+    var key = SUPER_CHOICE_KEY_IGNORE
+    if key_kind == SUPER_PROMPT_KEY_UP or key_kind == SUPER_PROMPT_KEY_CHAR and character == 107:
+        key = SUPER_CHOICE_KEY_UP
+    elif key_kind == SUPER_PROMPT_KEY_DOWN or key_kind == SUPER_PROMPT_KEY_CHAR and character == 106:
+        key = SUPER_CHOICE_KEY_DOWN
+    elif key_kind == SUPER_PROMPT_KEY_PAGE_UP:
+        key = SUPER_CHOICE_KEY_PAGE_UP
+    elif key_kind == SUPER_PROMPT_KEY_PAGE_DOWN:
+        key = SUPER_CHOICE_KEY_PAGE_DOWN
+    elif key_kind == SUPER_PROMPT_KEY_HOME:
+        key = SUPER_CHOICE_KEY_HOME
+    elif key_kind == SUPER_PROMPT_KEY_END:
+        key = SUPER_CHOICE_KEY_END
+    elif key_kind == SUPER_PROMPT_KEY_ENTER:
+        key = SUPER_CHOICE_KEY_ENTER
+    elif key_kind == SUPER_PROMPT_KEY_ESCAPE:
+        key = SUPER_CHOICE_KEY_ESCAPE
+    elif key_kind == SUPER_PROMPT_KEY_CHAR and control == 1 and (character == 99 or character == 122):
+        key = SUPER_CHOICE_KEY_CANCEL
+
+    return prodex_super_choice_policy_v1(
+        SUPER_CHOICE_POLICY_ABI_VERSION,
+        SUPER_CHOICE_POLICY_KEY,
+        key,
+        selected,
+        length,
+        escape_selects_last,
+        output_address,
+    )
+
+
+def super_prompt_text_event(
+    key_kind: Int64,
+    character: Int64,
+    control: Int64,
+    current_characters: Int64,
+    escape_returns_none: Int64,
+    output: Pointer[mut=True, Int64, _],
+) -> Int64:
+    if (
+        key_kind < SUPER_PROMPT_TEXT_CHAR
+        or key_kind > SUPER_PROMPT_TEXT_OTHER
+        or character < 0
+        or character > 0x10FFFF
+        or character >= 0xD800 and character <= 0xDFFF
+        or control < 0
+        or control > 1
+        or current_characters < 0
+        or escape_returns_none < 0
+        or escape_returns_none > 1
+    ):
+        return 1
+
+    var action = SUPER_PROMPT_TEXT_IGNORE
+    var clear_validation: Int64 = 0
+    if key_kind == SUPER_PROMPT_TEXT_ENTER:
+        action = SUPER_PROMPT_TEXT_ACCEPT
+    elif key_kind == SUPER_PROMPT_TEXT_BACKSPACE:
+        action = SUPER_PROMPT_TEXT_BACKSPACE_ACTION
+        clear_validation = 1
+    elif key_kind == SUPER_PROMPT_TEXT_CHAR:
+        if control == 1 and (character == 99 or character == 122):
+            action = SUPER_PROMPT_TEXT_CANCEL
+        elif control == 0 and current_characters < SUPER_PROMPT_MAX_TEXT_CHARS:
+            action = SUPER_PROMPT_TEXT_APPEND
+            clear_validation = 1
+    elif key_kind == SUPER_PROMPT_TEXT_ESCAPE:
+        if escape_returns_none == 1:
+            action = SUPER_PROMPT_TEXT_RETURN_NONE
+        else:
+            action = SUPER_PROMPT_TEXT_CANCEL
+
+    output[unsafe_offset=0] = action
+    output[unsafe_offset=1] = character
+    output[unsafe_offset=2] = clear_validation
+    return 0
+
+
+def super_prompt_text_prefix_length(
+    value: ProdexRichStringView, maximum_characters: Int64
+) -> Int64:
+    if maximum_characters < 0 or not rich_view_valid(value, SUPER_PROMPT_POLICY_MAX_TEXT_BYTES):
+        return -1
+    if maximum_characters == 0 or value.len == 0:
+        return 0
+    var ptr = rich_view_ptr(value)
+    var offset: Int64 = 0
+    var characters: Int64 = 0
+    while offset < Int64(value.len) and characters < maximum_characters:
+        offset += rich_codepoint_width(ptr[unsafe_offset=offset])
+        characters += 1
+    return offset
+
+
+def super_prompt_choice_index(
+    choices_address: UInt,
+    choices_count: Int64,
+    current: ProdexRichStringView,
+    current_present: Int64,
+    case_insensitive: Int64,
+    fallback_index: Int64,
+) -> Int64:
+    if (
+        choices_count <= 0
+        or choices_count > SUPER_PROMPT_POLICY_MAX_CHOICES
+        or choices_address == 0
+        or current_present < 0
+        or current_present > 1
+        or case_insensitive < 0
+        or case_insensitive > 1
+        or fallback_index < 0
+        or fallback_index >= choices_count
+        or (current_present == 1 and not rich_view_valid(current, SUPER_PROMPT_POLICY_MAX_TEXT_BYTES))
+    ):
+        return -1
+    var choices = Pointer[mut=False, SuperPromptChoice, ImmUntrackedOrigin](
+        unsafe_from_address=Int(choices_address)
+    )
+    for index in range(choices_count):
+        var choice = choices[unsafe_offset=index].copy()
+        if choice.kind < 0 or choice.kind > 2:
+            return -1
+        if choice.kind == 1 and not rich_view_valid(choice.value, SUPER_PROMPT_POLICY_MAX_TEXT_BYTES):
+            return -1
+    if current_present == 1:
+        var current_ptr = rich_view_ptr(current)
+        for index in range(choices_count):
+            var choice = choices[unsafe_offset=index].copy()
+            if choice.kind != 1:
+                continue
+            if choice.value.len != current.len:
+                continue
+            var equal = True
+            var choice_ptr = rich_view_ptr(choice.value)
+            for byte_index in range(Int64(current.len)):
+                var left = choice_ptr[unsafe_offset=byte_index]
+                var right = current_ptr[unsafe_offset=byte_index]
+                if case_insensitive == 1:
+                    if left >= 65 and left <= 90:
+                        left += 32
+                    if right >= 65 and right <= 90:
+                        right += 32
+                if left != right:
+                    equal = False
+                    break
+            if equal:
+                return index
+    return fallback_index
+
+
+def super_prompt_value_index(
+    values_address: UInt,
+    values_count: Int64,
+    wanted: Int64,
+    fallback_index: Int64,
+) -> Int64:
+    if (
+        values_count <= 0
+        or values_count > SUPER_PROMPT_POLICY_MAX_CHOICES
+        or values_address == 0
+        or wanted < 0
+        or fallback_index < 0
+        or fallback_index >= values_count
+    ):
+        return -1
+    var values = Pointer[mut=False, Int64, ImmUntrackedOrigin](
+        unsafe_from_address=Int(values_address)
+    )
+    for index in range(values_count):
+        if values[unsafe_offset=index] < 0:
+            return -1
+        if values[unsafe_offset=index] == wanted:
+            return index
+    return fallback_index
+
+
+def super_prompt_put_byte(
+    output: Pointer[mut=True, UInt8, _],
+    capacity: Int64,
+    written: Pointer[mut=True, Int64, _],
+    value: UInt8,
+) -> Bool:
+    if written[] < 0 or written[] >= capacity:
+        return False
+    output[unsafe_offset=written[]] = value
+    written[] += 1
+    return True
+
+
+def super_prompt_put_text(
+    output: Pointer[mut=True, UInt8, _],
+    capacity: Int64,
+    written: Pointer[mut=True, Int64, _],
+    value: StringSlice,
+) -> Bool:
+    var source = value.unsafe_ptr()
+    for index in range(Int64(value.byte_length())):
+        if not super_prompt_put_byte(output, capacity, written, source[unsafe_offset=index]):
+            return False
+    return True
+
+
+def super_prompt_put_view(
+    output: Pointer[mut=True, UInt8, _],
+    capacity: Int64,
+    written: Pointer[mut=True, Int64, _],
+    value: ProdexRichStringView,
+) -> Bool:
+    if value.len == 0:
+        return True
+    var source = rich_view_ptr(value)
+    for index in range(Int64(value.len)):
+        if not super_prompt_put_byte(output, capacity, written, source[unsafe_offset=index]):
+            return False
+    return True
+
+
+def super_prompt_put_decimal(
+    output: Pointer[mut=True, UInt8, _],
+    capacity: Int64,
+    written: Pointer[mut=True, Int64, _],
+    value: Int64,
+) -> Bool:
+    if value < 0 or value > 65_535:
+        return False
+    var started = False
+    var remaining = value
+    for index in range(5):
+        var divisor: Int64 = 1
+        if index == 0:
+            divisor = 10_000
+        elif index == 1:
+            divisor = 1_000
+        elif index == 2:
+            divisor = 100
+        elif index == 3:
+            divisor = 10
+        var digit = remaining // divisor
+        remaining = remaining % divisor
+        if digit > 0 or started or index == 4:
+            started = True
+            if not super_prompt_put_byte(output, capacity, written, UInt8(digit + 48)):
+                return False
+    return True
+
+
+def super_prompt_write_label(
+    label_kind: Int64,
+    value: Int64,
+    text: ProdexRichStringView,
+    flag: Int64,
+    output_address: UInt,
+    output_capacity: Int64,
+    written_address: UInt,
+) -> Int64:
+    if (
+        label_kind < SUPER_PROMPT_LABEL_PROVIDER
+        or label_kind > SUPER_PROMPT_LABEL_CUSTOM_CONCURRENCY_TITLE
+        or value < 0
+        or value > 65_535
+        or flag < 0
+        or flag > 1
+        or output_capacity < 0
+        or output_capacity > SUPER_PROMPT_POLICY_MAX_LABEL_BYTES
+        or written_address == 0
+        or (output_capacity > 0 and output_address == 0)
+    ):
+        return 1
+    if (label_kind == SUPER_PROMPT_LABEL_PROVIDER or label_kind == SUPER_PROMPT_LABEL_VALUE) and not rich_view_valid(text, SUPER_PROMPT_POLICY_MAX_TEXT_BYTES):
+        return 1
+    var output = Pointer[mut=True, UInt8, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    var written = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(written_address)
+    )
+    written[] = 0
+    if label_kind == SUPER_PROMPT_LABEL_PROVIDER or label_kind == SUPER_PROMPT_LABEL_VALUE:
+        if not super_prompt_put_view(output, output_capacity, written, text):
+            return 3
+        if label_kind == SUPER_PROMPT_LABEL_PROVIDER and flag == 1:
+            if not super_prompt_put_text(output, output_capacity, written, StringSlice(" (session affinity)")):
+                return 3
+    elif label_kind == SUPER_PROMPT_LABEL_PROVIDER_DEFAULT:
+        if not super_prompt_put_text(output, output_capacity, written, StringSlice("provider default")):
+            return 3
+    elif label_kind == SUPER_PROMPT_LABEL_CUSTOM_MODEL:
+        if not super_prompt_put_text(output, output_capacity, written, StringSlice("custom model...")):
+            return 3
+    elif label_kind == SUPER_PROMPT_LABEL_CUSTOM_CONCURRENCY:
+        if not super_prompt_put_text(output, output_capacity, written, StringSlice("custom...")):
+            return 3
+    elif label_kind == SUPER_PROMPT_LABEL_DEFAULT_CONCURRENCY:
+        if not super_prompt_put_text(output, output_capacity, written, StringSlice("default (")):
+            return 3
+        if not super_prompt_put_decimal(output, output_capacity, written, value):
+            return 3
+        if not super_prompt_put_byte(output, output_capacity, written, UInt8(41)):
+            return 3
+    elif label_kind == SUPER_PROMPT_LABEL_PRESET_CONCURRENCY:
+        if not super_prompt_put_decimal(output, output_capacity, written, value):
+            return 3
+    elif label_kind == SUPER_PROMPT_LABEL_CUSTOM_CONCURRENCY_TITLE:
+        if not super_prompt_put_text(output, output_capacity, written, StringSlice("Enter maximum active sub-agents (1-")):
+            return 3
+        if not super_prompt_put_decimal(output, output_capacity, written, value):
+            return 3
+        if not super_prompt_put_byte(output, output_capacity, written, UInt8(41)):
+            return 3
+    return 0
+
+
+@export("prodex_super_prompt_policy_v1")
+def prodex_super_prompt_policy_v1(
+    abi_version: Int64,
+    operation: Int64,
+    input0: Int64,
+    input1: Int64,
+    input2: Int64,
+    input3: Int64,
+    input4: Int64,
+    input5: Int64,
+    records_address: UInt,
+    records_count: Int64,
+    text_address: UInt,
+    text_length: Int64,
+    output_address: UInt,
+    output_capacity: Int64,
+    output_count_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != SUPER_PROMPT_POLICY_ABI_VERSION or operation < SUPER_PROMPT_POLICY_CHOICE_EVENT or operation > SUPER_PROMPT_POLICY_LABEL:
+        return 4
+    if operation == SUPER_PROMPT_POLICY_LABEL:
+        return super_prompt_write_label(
+            input0,
+            input1,
+            ProdexRichStringView(text_address, UInt(text_length)),
+            input2,
+            output_address,
+            output_capacity,
+            output_count_address,
+        )
+    if output_address == 0:
+        return 1
+    var output = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    for index in range(4):
+        output[unsafe_offset=index] = -1
+    if operation == SUPER_PROMPT_POLICY_CHOICE_EVENT:
+        return super_prompt_choice_event(input0, input1, input2, input3, input4, input5, output_address)
+    if operation == SUPER_PROMPT_POLICY_TEXT_EVENT:
+        return super_prompt_text_event(input0, input1, input2, input3, input4, output)
+    if operation == SUPER_PROMPT_POLICY_TEXT_PREFIX:
+        if input0 < 0 or input0 > SUPER_PROMPT_MAX_TEXT_CHARS or text_length < 0:
+            return 1
+        var value = ProdexRichStringView(text_address, UInt(text_length))
+        var maximum = SUPER_PROMPT_MAX_TEXT_CHARS
+        if input0 > 0:
+            maximum = input0
+        var length = super_prompt_text_prefix_length(value, maximum)
+        if length < 0:
+            return 1
+        output[unsafe_offset=0] = length
+        return 0
+    if operation == SUPER_PROMPT_POLICY_CHOICE_INDEX:
+        if records_count <= 0 or records_count > SUPER_PROMPT_POLICY_MAX_CHOICES or input0 < 0 or input0 > 1 or input1 < 0 or input2 < 0 or input2 > 1:
+            return 1
+        var current = ProdexRichStringView(text_address, UInt(text_length))
+        var index = super_prompt_choice_index(records_address, records_count, current, input2, input0, input1)
+        if index < 0:
+            return 1
+        output[unsafe_offset=0] = index
+        return 0
+    if operation == SUPER_PROMPT_POLICY_VALUE_INDEX:
+        if records_count <= 0 or records_count > SUPER_PROMPT_POLICY_MAX_CHOICES:
+            return 1
+        var index = super_prompt_value_index(records_address, records_count, input0, input1)
+        if index < 0:
+            return 1
+        output[unsafe_offset=0] = index
+        return 0
+    return 1
