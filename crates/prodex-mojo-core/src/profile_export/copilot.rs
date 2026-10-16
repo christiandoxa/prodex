@@ -279,36 +279,47 @@ pub fn copilot_import_candidate_indices(
         )
     };
     match status {
-        0 => {
-            let written = usize::try_from(written).map_err(|_| MojoError::InvalidOutput)?;
-            if written > output.len() {
-                return Err(MojoError::InvalidOutput);
-            }
-            let mut seen = BTreeSet::new();
-            for &index in &output[..written] {
-                match index {
-                    -1 if last_logged_in_user.is_some() => {}
-                    -1 => return Err(MojoError::InvalidOutput),
-                    value if value >= 0 => {
-                        if usize::try_from(value)
-                            .map_or(true, |value| value >= logged_in_users.len())
-                        {
-                            return Err(MojoError::InvalidOutput);
-                        }
-                    }
-                    _ => return Err(MojoError::InvalidOutput),
-                }
-                if !seen.insert(index) {
-                    return Err(MojoError::InvalidOutput);
-                }
-            }
-            Ok(output[..written].to_vec())
-        }
+        0 => validate_copilot_candidate_indices(
+            &output,
+            written,
+            last_logged_in_user.is_some(),
+            logged_in_users.len(),
+        ),
         2 => Err(MojoError::Capacity),
         99 => Err(MojoError::InvalidInput),
         100 => Err(MojoError::AbiMismatch),
         _ => Err(MojoError::InvalidOutput),
     }
+}
+
+/// Validate the Mojo output separately from FFI input marshalling.
+fn validate_copilot_candidate_indices(
+    output: &[i64],
+    written: i64,
+    last_user_present: bool,
+    logged_count: usize,
+) -> Result<Vec<i64>, MojoError> {
+    let written = usize::try_from(written).map_err(|_| MojoError::InvalidOutput)?;
+    if written > output.len() {
+        return Err(MojoError::InvalidOutput);
+    }
+    let mut seen = BTreeSet::new();
+    for &index in &output[..written] {
+        match index {
+            -1 if last_user_present => {}
+            -1 => return Err(MojoError::InvalidOutput),
+            value if value >= 0 => {
+                if usize::try_from(value).map_or(true, |value| value >= logged_count) {
+                    return Err(MojoError::InvalidOutput);
+                }
+            }
+            _ => return Err(MojoError::InvalidOutput),
+        }
+        if !seen.insert(index) {
+            return Err(MojoError::InvalidOutput);
+        }
+    }
+    Ok(output[..written].to_vec())
 }
 
 #[cfg(test)]
