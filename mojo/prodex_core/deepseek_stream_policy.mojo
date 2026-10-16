@@ -532,3 +532,81 @@ def prodex_deepseek_stream_identifier_v1(
         )
     written[] = cursor
     return DEEPSEEK_STREAM_POLICY_OK
+
+
+# A streamed provider ID may supersede only the original generated
+# fallback response ID. Mojo owns the exact byte prefix decision.
+@export("prodex_deepseek_stream_response_id_fallback_v1")
+def prodex_deepseek_stream_response_id_fallback_v1(
+    abi_version: Int64,
+    provider_address: UInt,
+    provider_length: Int64,
+    current_address: UInt,
+    current_length: Int64,
+) abi("C") -> Int64:
+    if abi_version != DEEPSEEK_STREAM_POLICY_ABI_VERSION:
+        return DEEPSEEK_STREAM_POLICY_ABI
+    if (
+        provider_length < 0
+        or current_length < 0
+        or (provider_length > 0 and provider_address == 0)
+        or (current_length > 0 and current_address == 0)
+    ):
+        return DEEPSEEK_STREAM_POLICY_INVALID
+    var provider = deepseek_stream_policy_ptr(provider_address)
+    var current = deepseek_stream_policy_ptr(current_address)
+    if (
+        (provider_length > 0 and not rich_utf8_valid(provider, provider_length))
+        or (current_length > 0 and not rich_utf8_valid(current, current_length))
+    ):
+        return DEEPSEEK_STREAM_POLICY_INVALID
+    if current_length < 6 or current_length - 6 < provider_length:
+        return 0
+    var prefix = StringSlice("resp_").unsafe_ptr()
+    for index in range(5):
+        if current[unsafe_offset=index] != prefix[unsafe_offset=index]:
+            return 0
+    for index in range(provider_length):
+        if current[unsafe_offset=index + 5] != provider[unsafe_offset=index]:
+            return 0
+    return Int64(current[unsafe_offset=provider_length + 5] == 95)
+
+
+# Mode 0: accept tool-call delta if function object or prior call exists.
+# Mode 1: retain incremental nonempty tool-argument fragment.
+# Mode 2: retain nonempty optional argument delta.
+# Mode 3: retain optional signature only if Unicode trim() is nonempty.
+@export("prodex_deepseek_stream_delta_policy_v1")
+def prodex_deepseek_stream_delta_policy_v1(
+    abi_version: Int64,
+    mode: Int64,
+    text_address: UInt,
+    text_length: Int64,
+    text_present: Int64,
+    existing_tool_call: Int64,
+) abi("C") -> Int64:
+    if abi_version != DEEPSEEK_STREAM_POLICY_ABI_VERSION:
+        return DEEPSEEK_STREAM_POLICY_ABI
+    if (
+        mode < 0 or mode > 3
+        or text_length < 0
+        or (text_length > 0 and text_address == 0)
+        or (text_present != 0 and text_present != 1)
+        or (existing_tool_call != 0 and existing_tool_call != 1)
+    ):
+        return DEEPSEEK_STREAM_POLICY_INVALID
+    if mode == 0:
+        return Int64(text_present == 1 or existing_tool_call == 1)
+    if mode == 1:
+        return Int64(text_length > 0)
+    if text_present == 0:
+        return 0
+    if mode == 2:
+        return Int64(text_length > 0)
+    var text = ProdexRichStringView(text_address, UInt(text_length))
+    if text_length > 0 and not rich_utf8_valid(
+        deepseek_stream_policy_ptr(text_address), text_length
+    ):
+        return DEEPSEEK_STREAM_POLICY_INVALID
+    var bounds = rich_trim_bounds(text)
+    return Int64(bounds[0] < bounds[1])

@@ -96,7 +96,14 @@ pub fn deepseek_provider_core_validate_stream_tool_call_delta(
     existing_tool_call: bool,
     value: &Value,
 ) -> Result<(), String> {
-    if value.get("function").and_then(Value::as_object).is_none() && !existing_tool_call {
+    let function_object_present = value.get("function").and_then(Value::as_object).is_some();
+    let allowed = prodex_mojo_core::deepseek_stream_policy::stream_delta_accepted(
+        prodex_mojo_core::deepseek_stream_policy::DeepSeekStreamDeltaMode::FunctionObject,
+        function_object_present.then_some(""),
+        existing_tool_call,
+    )
+    .expect("Mojo DeepSeek streamed tool delta policy returned invalid output");
+    if !allowed {
         return Err(format!(
             "{provider_label} streamed a tool call without a function object"
         ));
@@ -112,13 +119,24 @@ pub fn deepseek_provider_core_stream_tool_call_delta(
             DeepSeekKernelOperation::StreamToolCallDelta,
             value,
         );
-    if projected.argument_delta.as_deref() == Some("") {
+    use prodex_mojo_core::deepseek_stream_policy::{
+        DeepSeekStreamDeltaMode, stream_delta_accepted,
+    };
+    if !stream_delta_accepted(
+        DeepSeekStreamDeltaMode::OptionalArgumentDelta,
+        projected.argument_delta.as_deref(),
+        false,
+    )
+    .expect("Mojo DeepSeek argument delta policy returned invalid output")
+    {
         projected.argument_delta = None;
     }
-    if projected
-        .thought_signature
-        .as_deref()
-        .is_some_and(|value| value.trim().is_empty())
+    if !stream_delta_accepted(
+        DeepSeekStreamDeltaMode::ThoughtSignature,
+        projected.thought_signature.as_deref(),
+        false,
+    )
+    .expect("Mojo DeepSeek signature delta policy returned invalid output")
     {
         projected.thought_signature = None;
     }
@@ -129,7 +147,13 @@ pub fn deepseek_provider_core_incremental_tool_argument_delta(
     _previous: &str,
     incoming: &str,
 ) -> Option<String> {
-    (!incoming.is_empty()).then(|| incoming.to_string())
+    prodex_mojo_core::deepseek_stream_policy::stream_delta_accepted(
+        prodex_mojo_core::deepseek_stream_policy::DeepSeekStreamDeltaMode::IncrementalArguments,
+        Some(incoming),
+        false,
+    )
+    .expect("Mojo DeepSeek incremental tool argument policy returned invalid output")
+    .then(|| incoming.to_string())
 }
 
 // Public compatibility value; runtime eligibility is delegated to Mojo below.
@@ -191,11 +215,16 @@ pub fn deepseek_provider_core_stream_response_id_from_chunk(
     current_response_id: &str,
     value: &Value,
 ) -> Option<String> {
-    let fallback_response_id_prefix = format!("resp_{provider_label}_");
     value
         .get("id")
         .and_then(Value::as_str)
-        .filter(|_| current_response_id.starts_with(&fallback_response_id_prefix))
+        .filter(|_| {
+            prodex_mojo_core::deepseek_stream_policy::stream_response_id_is_fallback(
+                provider_label,
+                current_response_id,
+            )
+            .expect("Mojo DeepSeek response ID replacement policy returned invalid output")
+        })
         .map(str::to_string)
 }
 

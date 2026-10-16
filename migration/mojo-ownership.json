@@ -2336,7 +2336,9 @@
         "operations": [
           "deepseek_stream_tool_arguments_policy",
           "deepseek_stream_tool_kind_selection",
-          "deepseek_stream_fallback_identifier_encoding"
+          "deepseek_stream_fallback_identifier_encoding",
+          "deepseek_stream_fallback_response_id_eligibility",
+          "deepseek_stream_delta_validation_normalization"
         ]
       },
       {
@@ -2348,7 +2350,9 @@
         "operations": [
           "deepseek_stream_tool_arguments_policy",
           "deepseek_stream_tool_kind_selection",
-          "deepseek_stream_fallback_identifier_encoding"
+          "deepseek_stream_fallback_identifier_encoding",
+          "deepseek_stream_fallback_response_id_eligibility",
+          "deepseek_stream_delta_validation_normalization"
         ]
       },
       {
@@ -11938,6 +11942,52 @@
       "duplicate_production_owner": false,
       "platform_fallback": false,
       "rust_adapter_scope": "Borrowed label views, fixed-capacity output allocation and UTF-8 validation; Mojo owns decimal and prefix framing"
+    },
+    {
+      "name": "deepseek_stream_fallback_response_id_eligibility",
+      "domain": "provider/deepseek-stream-continuation",
+      "introduced_in": "0.438.0",
+      "baseline_state": "Rust generated resp_{provider}_ prefix then applied starts_with to the existing response ID before replacing it with the provider chunk ID",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_deepseek_stream_response_id_fallback_v1",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/deepseek_stream_policy.mojo",
+      "consumer": "crates/prodex-provider-core/src/translators/deepseek/stream/shaping.rs",
+      "consumer_marker": "prodex_mojo_core::deepseek_stream_policy::stream_response_id_is_fallback(",
+      "production_consumers": [
+        "crates/prodex-provider-core/src/translators/deepseek/stream/shaping.rs"
+      ],
+      "production_reachability_test": "crates/prodex-provider-core/src/translators/deepseek/stream/shaping.rs",
+      "rust_owner_before": "Rust format! fallback-prefix construction and starts_with current ID eligibility decision",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "Former Rust policy removed; direct compiled Mojo tests cover exact Unicode fallback ID prefix, invalid ABI, four delta validation modes and Unicode trim; production DeepSeek stream continuation and response-ID golden regressions passed.",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "Host serde_json upstream id presence and String ownership; Mojo exclusively decides whether the existing response ID is replaceable"
+    },
+    {
+      "name": "deepseek_stream_delta_validation_normalization",
+      "domain": "provider/deepseek-stream-continuation",
+      "introduced_in": "0.438.0",
+      "baseline_state": "Rust independently checked function object presence, existing call, incremental fragment emptiness, optional argument delta emptiness, and Unicode-trimmed signature emptiness",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_deepseek_stream_delta_policy_v1",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/deepseek_stream_policy.mojo",
+      "consumer": "crates/prodex-provider-core/src/translators/deepseek/stream/shaping.rs",
+      "consumer_marker": "prodex_mojo_core::deepseek_stream_policy::stream_delta_accepted(",
+      "production_consumers": [
+        "crates/prodex-provider-core/src/translators/deepseek/stream/shaping.rs"
+      ],
+      "production_reachability_test": "crates/prodex-provider-core/src/translators/deepseek/stream/shaping.rs",
+      "rust_owner_before": "Rust function-object eligibility, empty argument-delta detection, incremental text guard and thought-signature trim-emptiness checks",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "Former Rust policy removed; direct compiled Mojo tests cover exact Unicode fallback ID prefix, invalid ABI, four delta validation modes and Unicode trim; production DeepSeek stream continuation and response-ID golden regressions passed.",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "Host typed function-object fact, borrowed text and result materialization; Mojo owns the four streamed-delta eligibility modes"
     }
   ],
   "rust_semantic_reductions": [
