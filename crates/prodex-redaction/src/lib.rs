@@ -31,9 +31,9 @@ pub fn redaction_redacted_cli_args(args: &[OsString]) -> Vec<String> {
         }
 
         let text = arg.to_string_lossy();
-        let sensitive_flag_without_value = redaction_cli_flag_name_looks_sensitive(&text)
-            && !text.contains('=')
-            && text.starts_with('-');
+        let sensitive_flag_without_value =
+            prodex_mojo_core::redaction::redaction_cli_redact_next(&text)
+                .expect("compiled Mojo redaction CLI flag policy returned invalid output");
         if sensitive_flag_without_value {
             redacted.push(redaction_display_os(arg));
             redact_next = true;
@@ -107,15 +107,6 @@ pub fn redaction_redact_secret_like_text(value: &str) -> String {
 
 fn redaction_redact_gateway_text(value: &str) -> String {
     prodex_mojo_core::redaction::redact_gateway_text(value).unwrap_or_else(|_| REDACTED.to_string())
-}
-
-fn redaction_cli_flag_name_looks_sensitive(value: &str) -> bool {
-    let trimmed = value.trim_start_matches('-');
-    let name = trimmed
-        .split_once('=')
-        .map(|(name, _)| name)
-        .unwrap_or(trimmed);
-    redaction_key_looks_sensitive(name)
 }
 
 fn redaction_display_text(value: &str) -> String {

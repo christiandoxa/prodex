@@ -5683,3 +5683,11 @@ The compiled redaction owner now normalizes Unicode whitespace, applies
 empty-body display policy, and clips diagnostic snippets by Unicode scalar
 count. Rust's duplicate split/trim/ellipsis code was deleted. Strict ABI,
 redaction caller tests and a no-Rust-fallback guard cover the boundary.
+
+## CLI sensitive-flag next-argument masking moved to Mojo
+
+The compiled redaction owner now decides when a bare sensitive CLI flag masks
+the next argument, including leading hyphen stripping and inline assignment
+exclusion. The earlier Rust helper and predicate were removed; Rust only
+iterates OsString values and performs the Mojo-selected masking action.
+Required caller, ABI and no-fallback guard coverage is retained.

@@ -3070,6 +3070,7 @@ export function findViolations(files) {
         "prodex_mojo_core::redaction::redact_secret_like_text(",
         "prodex_mojo_core::redaction::redact_gateway_text(",
         "prodex_mojo_core::redaction::redaction_text_snippet(text, max_chars)",
+        "prodex_mojo_core::redaction::redaction_cli_redact_next(&text)",
       ];
       const violations = required
         .filter((call) => !contents.includes(call))
@@ -3077,6 +3078,11 @@ export function findViolations(files) {
       const retired = /\bfn\s+(?:redaction_redact_email_tokens|redaction_redact_long_digit_tokens|redaction_redact_matching_tokens|redaction_redact_sensitive_key_value_text|redaction_process_field_name|redaction_sensitive_field_replacement|redaction_parse_potential_field_name|redaction_redacted_field_value|redaction_redact_authorization_like_values|redaction_try_authorization_value|redaction_redact_prefixed_api_key_tokens|redaction_secret_token_end)\s*\(/u;
       if (retired.test(contents)) {
         violations.push(`${filePath}: contains retired Rust redaction semantics`);
+      }
+      if (contents.includes("fn redaction_cli_flag_name_looks_sensitive(") ||
+          contents.includes("value.trim_start_matches('-')") ||
+          contents.includes("sensitive_flag_without_value = redaction_cli_flag_name_looks_sensitive(")) {
+        violations.push(`${filePath}: restored Rust CLI next-argument sensitive flag policy`);
       }
       const oldSnippet = [
         "text.split_whitespace()",
@@ -3096,6 +3102,10 @@ export function findViolations(files) {
         "pub fn redaction_text_snippet(",
         "redaction_text_snippet_mojo_normalizes_unicode_and_clips_scalars",
         "redaction_text_snippet_mojo_abi_rejects_bad_inputs_without_writing",
+        "prodex_redaction_cli_redact_next_v1(",
+        "pub fn redaction_cli_redact_next(",
+        "redaction_cli_flag_next_argument_policy_is_compiled_mojo",
+        "redaction_cli_flag_mojo_abi_rejects_bad_version_and_utf8",
       ].filter((marker) => !contents.includes(marker))
         .map((marker) => `${filePath}: Mojo snippet adapter or direct coverage missing ${marker}`);
     }
@@ -3106,11 +3116,14 @@ export function findViolations(files) {
         "rich_codepoint_width(",
         "reaction_writer_range(",
         "reaction_writer_literal(",
+        '@export("prodex_redaction_cli_redact_next_v1")',
+        "reaction_key_sensitive_ptr(",
       ].filter((marker) => !contents.includes(marker))
         .map((marker) => `${filePath}: Mojo snippet semantic ownership missing ${marker}`);
     }
     if (filePath === REDACTION_CALLER_TEST_FILE &&
-        !contents.includes("redaction_diagnostic_snippet_uses_compiled_mojo_unicode_normalization")) {
+        (!contents.includes("redaction_diagnostic_snippet_uses_compiled_mojo_unicode_normalization") ||
+         !contents.includes("redaction_cli_mojo_masks_sensitive_following_argument_without_rust_oracle"))) {
       return [`${filePath}: redaction snippet caller coverage must remain`];
     }
     if (filePath !== PRESIDIO_LOCAL_REDACTION_FILE) return [];

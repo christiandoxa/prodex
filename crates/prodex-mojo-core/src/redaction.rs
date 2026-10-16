@@ -49,6 +49,11 @@ struct DryRunPathView {
 }
 
 unsafe extern "C" {
+    fn prodex_redaction_cli_redact_next_v1(
+        abi_version: i64,
+        input_address: u64,
+        input_length: i64,
+    ) -> i64;
     fn prodex_redaction_text_snippet_v1(
         abi_version: i64,
         input_address: u64,
@@ -134,6 +139,24 @@ fn status(status: i64) -> Result<(), MojoError> {
         1 => Err(MojoError::InvalidInput),
         2 => Err(MojoError::Capacity),
         4 => Err(MojoError::AbiMismatch),
+        _ => Err(MojoError::InvalidOutput),
+    }
+}
+
+/// Decide if this bare CLI flag's next OsString argument must be masked.
+pub fn redaction_cli_redact_next(value: &str) -> Result<bool, MojoError> {
+    let result = unsafe {
+        prodex_redaction_cli_redact_next_v1(
+            REDACTION_ABI_VERSION,
+            value.as_ptr() as usize as u64,
+            i64::try_from(value.len()).map_err(|_| MojoError::InvalidInput)?,
+        )
+    };
+    match result {
+        0 => Ok(false),
+        1 => Ok(true),
+        -1 => Err(MojoError::InvalidInput),
+        -4 => Err(MojoError::AbiMismatch),
         _ => Err(MojoError::InvalidOutput),
     }
 }
@@ -783,6 +806,48 @@ mod dry_run_path_redaction_tests {
 #[cfg(test)]
 mod text_snippet_tests {
     use super::*;
+
+    #[test]
+    fn redaction_cli_flag_next_argument_policy_is_compiled_mojo() {
+        for (value, expected) in [
+            ("", false),
+            ("-", false),
+            ("--", false),
+            ("--model", false),
+            ("--api-key", true),
+            ("---authorization", true),
+            ("--access_token", true),
+            ("--secret-東京", true),
+            ("--api-key=value", false),
+            ("--api-key=", false),
+            ("api-key", false),
+            ("-🙂", false),
+            ("---API-KEY", true),
+        ] {
+            assert_eq!(
+                redaction_cli_redact_next(value).unwrap(),
+                expected,
+                "{value:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn redaction_cli_flag_mojo_abi_rejects_bad_version_and_utf8() {
+        let value = b"--api-key";
+        let address = value.as_ptr() as usize as u64;
+        unsafe {
+            assert_eq!(prodex_redaction_cli_redact_next_v1(2, address, 9), -4);
+            assert_eq!(prodex_redaction_cli_redact_next_v1(1, 0, 9), -1);
+            assert_eq!(prodex_redaction_cli_redact_next_v1(1, address, -1), -1);
+            assert_eq!(prodex_redaction_cli_redact_next_v1(1, address, 9), 1);
+        }
+        let invalid = [b'-', b'-', 0xff];
+        assert_eq!(
+            unsafe { prodex_redaction_cli_redact_next_v1(1, invalid.as_ptr() as usize as u64, 3) },
+            -1,
+        );
+    }
 
     #[test]
     fn redaction_text_snippet_mojo_normalizes_unicode_and_clips_scalars() {
