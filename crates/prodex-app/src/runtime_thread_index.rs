@@ -17,7 +17,10 @@ use std::time::Duration;
 
 #[path = "runtime_thread_index_json.rs"]
 mod thread_index_json;
-use thread_index_json::{THREAD_INDEX_MAX_JSON_BYTES, dirty_marker_value, thread_index_json_tree};
+use crate::json_boundary::{
+    APP_JSON_MAX_BYTES as THREAD_INDEX_MAX_JSON_BYTES, app_json_tree as thread_index_json_tree,
+};
+use thread_index_json::dirty_marker_value;
 
 const THREAD_INDEX_TIMEOUT: Duration = Duration::from_secs(60);
 const TARGETED_THREAD_INDEX_TIMEOUT: Duration = Duration::from_secs(3);

@@ -45,6 +45,7 @@ mod codex_binary;
 mod command_dispatch;
 mod core_constants;
 mod housekeeping;
+mod json_boundary;
 mod presidio_runtime;
 mod process_resources;
 mod profile_commands;
