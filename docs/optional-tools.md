@@ -105,9 +105,9 @@ Ponytail uses the same versioned manifest/tree contract, accepts stable 4.9.0 or
 The 5.1.0 qualified reference requires its exact audited commit and complete tree digest. Existing stable 4.10.x checkouts remain accepted through the minimum-version and manifest-digest compatibility rules, including the previously qualified 4.10.0 legacy-manifest rule. Future stable releases are accepted when the plugin version matches the managed manifest and the recomputed tree digest matches that manifest.
 
 RTK requires `0.46.0` or newer; `1.0.1` is the latest stable release-qualified reference for this Prodex release. It remains externally managed and version-compatible rather than latest-only. Codebase Memory MCP
-`0.11.0` is the latest stable release validated for this Prodex release. Both resolve from
+`0.12.0` is the latest stable release validated for this Prodex release. Both resolve from
 managed roots first and then `PATH`.
-The README installs the current stable Codebase Memory MCP `0.11.0`; Prodex
+The README installs the current stable Codebase Memory MCP `0.12.0`; Prodex
 continues to accept `0.9.1-rc.1` or newer (or a development build) and
 expose its native `daemon status` contract. The explicit health check verifies
 this contract; normal optional launch resolution does not synchronously spawn
@@ -159,3 +159,8 @@ RTK 1.0.0 ships an Apache-2.0-only `rtk-oss` edition; its default full binary
 also links a BUSL-1.1 engine. Prodex does not auto-install either edition or
 change the supported minimum; administrators choose their externally managed
 RTK distribution. The `proxy` command remains a compatible alias of `bypass`.
+
+The 0.12.0 reference was refreshed for the 0.438.0 release. Its first later
+indexing run rebuilds an older project index according to upstream upgrade
+notes; release qualification does not trigger that rebuild or replace an
+installed shared daemon.
