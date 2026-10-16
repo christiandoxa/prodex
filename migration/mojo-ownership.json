@@ -1485,7 +1485,8 @@
           "optional_tool_alias_classification",
           "optional_tool_descriptor_policy",
           "optional_tool_manifest_tree_compatibility",
-          "optional_tool_digest_hex_encoding"
+          "optional_tool_digest_hex_encoding",
+          "optional_tool_awareness_rendering"
         ]
       },
       {
@@ -7486,6 +7487,30 @@
       "duplicate_production_owner": false,
       "platform_fallback": false,
       "rust_adapter_scope": "allocate bounded caller-owned output and pass Rust-owned digest bytes across the ABI; file reads and SHA-256 hashing stay in Rust"
+    },
+    {
+      "name": "optional_tool_awareness_rendering",
+      "domain": "optional-tools/super-awareness",
+      "introduced_in": "0.438.0",
+      "baseline_state": "Rust assembled the static Super optional-tool instructions and dynamic availability labels",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_optional_tool_awareness_v1",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/optional_tools_policy.mojo",
+      "consumer": "crates/prodex-optional-tools/src/super_optimizers.rs",
+      "consumer_marker": "render_optional_tool_awareness",
+      "production_consumers": [
+        "crates/prodex-optional-tools/src/super_optimizers.rs"
+      ],
+      "production_reachability_test": "crates/prodex-mojo-core/src/optional_tools_policy.rs",
+      "caller_regression_test": "crates/prodex-optional-tools/src/super_optimizers_tests.rs",
+      "rust_owner_before": "static Super awareness instructions, tool availability labels, and Presidio status formatting",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "deleted; the compiled Mojo renderer and optional-tools caller regression preserve every supported tool label and omit removed tools",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "format host-owned paths into borrowed UTF-8 views, pass presence flags and Presidio state across the bounded ABI, and write the returned document to the overlay"
     },
     {
       "name": "confirmation_token_policy",

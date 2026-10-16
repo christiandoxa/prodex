@@ -79,6 +79,163 @@ def optional_tool_hex_digit(value: UInt8) -> UInt8:
     return value + 87
 
 
+comptime OPTIONAL_TOOL_AWARENESS_ABI_VERSION: Int64 = 1
+comptime OPTIONAL_TOOL_AWARENESS_OK: Int64 = 0
+comptime OPTIONAL_TOOL_AWARENESS_INVALID: Int64 = 1
+comptime OPTIONAL_TOOL_AWARENESS_CAPACITY: Int64 = 3
+comptime OPTIONAL_TOOL_AWARENESS_ABI: Int64 = 4
+comptime OPTIONAL_TOOL_AWARENESS_TEXT_COUNT: Int64 = 4
+
+@fieldwise_init
+struct OptionalToolAwarenessWriter(Copyable):
+    var output: Pointer[mut=True, UInt8, MutUntrackedOrigin]
+    var capacity: Int64
+    var written: Int64
+
+
+def optional_tool_awareness_text(
+    address: UInt, index: Int64
+) -> ProdexRichStringView:
+    var values = Pointer[
+        mut=False, ProdexRichStringView, ImmUntrackedOrigin
+    ](unsafe_from_address=Int(address))
+    return values[unsafe_offset=index].copy()
+
+
+def optional_tool_awareness_put_byte(
+    writer: Pointer[mut=True, OptionalToolAwarenessWriter, _], byte: UInt8
+) -> Bool:
+    if writer[].written < 0 or writer[].written >= writer[].capacity:
+        return False
+    writer[].output[unsafe_offset=writer[].written] = byte
+    writer[].written += 1
+    return True
+
+
+def optional_tool_awareness_put_literal(
+    writer: Pointer[mut=True, OptionalToolAwarenessWriter, _], value: StringSlice
+) -> Bool:
+    var source = value.unsafe_ptr()
+    for index in range(Int64(value.byte_length())):
+        if not optional_tool_awareness_put_byte(
+            writer, source[unsafe_offset=index]
+        ):
+            return False
+    return True
+
+
+def optional_tool_awareness_put_view(
+    writer: Pointer[mut=True, OptionalToolAwarenessWriter, _],
+    value: ProdexRichStringView,
+) -> Bool:
+    var source = rich_view_ptr(value)
+    for index in range(Int64(value.len)):
+        if not optional_tool_awareness_put_byte(
+            writer, source[unsafe_offset=index]
+        ):
+            return False
+    return True
+
+
+def optional_tool_awareness_put_available(
+    writer: Pointer[mut=True, OptionalToolAwarenessWriter, _],
+    availability_mask: Int64,
+    bit: Int64,
+    value: ProdexRichStringView,
+) -> Bool:
+    if availability_mask & bit != 0:
+        return (
+            optional_tool_awareness_put_literal(writer, StringSlice("yes ("))
+            and optional_tool_awareness_put_view(writer, value)
+            and optional_tool_awareness_put_byte(writer, UInt8(41))
+        )
+    return optional_tool_awareness_put_literal(writer, StringSlice("no"))
+
+
+@export("prodex_optional_tool_awareness_v1")
+def prodex_optional_tool_awareness_v1(
+    abi_version: Int64,
+    availability_mask: Int64,
+    presidio_enabled: Int64,
+    text_address: UInt,
+    text_count: Int64,
+    output_address: UInt,
+    output_capacity: Int64,
+    written_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != OPTIONAL_TOOL_AWARENESS_ABI_VERSION:
+        return OPTIONAL_TOOL_AWARENESS_ABI
+    if (
+        availability_mask < 0
+        or availability_mask > 15
+        or (presidio_enabled != 0 and presidio_enabled != 1)
+        or text_count != OPTIONAL_TOOL_AWARENESS_TEXT_COUNT
+        or text_address == 0
+        or output_capacity < 0
+        or (output_capacity > 0 and output_address == 0)
+        or written_address == 0
+    ):
+        return OPTIONAL_TOOL_AWARENESS_INVALID
+    for index in range(text_count):
+        var value = optional_tool_awareness_text(text_address, index)
+        if not rich_view_valid(value, Int64(value.len)):
+            return OPTIONAL_TOOL_AWARENESS_INVALID
+
+    var writer = OptionalToolAwarenessWriter(
+        Pointer[mut=True, UInt8, MutUntrackedOrigin](
+            unsafe_from_address=Int(output_address)
+        ),
+        output_capacity,
+        0,
+    )
+    var rtk = optional_tool_awareness_text(text_address, 0)
+    var codebase_memory = optional_tool_awareness_text(text_address, 1)
+    var playwright = optional_tool_awareness_text(text_address, 2)
+    var ponytail = optional_tool_awareness_text(text_address, 3)
+    var ok = (
+        optional_tool_awareness_put_literal(
+            Pointer(to=writer),
+            StringSlice("# Prodex Optional Tools\n\nProdex resolved optional tools for this temporary launch overlay.\n\n- Use visible `rtk <cmd>` for noisy shell output when RTK is available.\n- When Codebase Memory MCP is available, use it first for architecture, call-chain, impact,\n  and structural code search; run `index_repository` first when the workspace is not indexed.\n- Use Playwright MCP for browser work when available.\n- Follow Ponytail when its plugin is active.\n- Treat Presidio as enabled only when the session status says so.\n\nMissing tools are not active. Do not claim they were used.\n")
+        )
+        and optional_tool_awareness_put_literal(
+            Pointer(to=writer), StringSlice("\n## Available Now\n\n- rtk: ")
+        )
+        and optional_tool_awareness_put_available(
+            Pointer(to=writer), availability_mask, 1, rtk
+        )
+        and optional_tool_awareness_put_literal(
+            Pointer(to=writer), StringSlice("\n- codebase-memory-mcp: ")
+        )
+        and optional_tool_awareness_put_available(
+            Pointer(to=writer), availability_mask, 2, codebase_memory
+        )
+        and optional_tool_awareness_put_literal(
+            Pointer(to=writer), StringSlice("\n- playwright-mcp: ")
+        )
+        and optional_tool_awareness_put_available(
+            Pointer(to=writer), availability_mask, 4, playwright
+        )
+        and optional_tool_awareness_put_literal(
+            Pointer(to=writer), StringSlice("\n- ponytail plugin: ")
+        )
+        and optional_tool_awareness_put_available(
+            Pointer(to=writer), availability_mask, 8, ponytail
+        )
+        and optional_tool_awareness_put_literal(
+            Pointer(to=writer), StringSlice("\n- presidio: ")
+        )
+        and optional_tool_awareness_put_literal(
+            Pointer(to=writer),
+            StringSlice("enabled\n") if presidio_enabled == 1 else StringSlice("disabled\n"),
+        )
+    )
+    var written = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(written_address)
+    )
+    written[] = writer.written
+    return OPTIONAL_TOOL_AWARENESS_OK if ok else OPTIONAL_TOOL_AWARENESS_CAPACITY
+
+
 @export("prodex_optional_tool_class_v1")
 def prodex_optional_tool_class_v1(
     abi_version: Int64,
