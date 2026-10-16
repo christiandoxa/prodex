@@ -1597,6 +1597,10 @@
             "end": 32
           },
           {
+            "start": 35,
+            "end": 35
+          },
+          {
             "start": 538,
             "end": 628
           },
@@ -1605,12 +1609,20 @@
             "end": 654
           },
           {
+            "start": 718,
+            "end": 730
+          },
+          {
+            "start": 857,
+            "end": 857
+          },
+          {
             "start": 861,
             "end": 1000
           },
           {
-            "start": 1094,
-            "end": 1150
+            "start": 1109,
+            "end": 1164
           }
         ],
         "production_reachable": true,
@@ -7931,7 +7943,8 @@
       "final_state": "authoritative",
       "mojo_entry": "prodex_mojo_runtime_doctor_render_v1",
       "mojo_operation_ids": {
-        "request_timeline_detail": 22
+        "request_timeline_detail": 22,
+        "latest_selection_decision": 26
       },
       "mojo_abi_version": 1,
       "mojo_source": "mojo/prodex_core/runtime_doctor_render.mojo",
@@ -7943,13 +7956,14 @@
         "crates/prodex-runtime-doctor/src/parsing/route_profile.rs"
       ],
       "production_reachability_test": "crates/prodex-runtime-doctor/src/parsing/request_timeline.rs",
-      "rust_owner_before": "fixed request-timeline field ordering, first-five selection, Unicode-scalar truncation, and key-value joining",
+      "rust_owner_before": "fixed request-timeline field ordering, first-five selection, Unicode-scalar truncation, and key-value joining; also Rust latest selection decision empty-detail branching and marker/detail formatting",
       "rust_state_after": "adapter-only",
-      "rust_test_oracle": "none retained; direct renderer ABI and runtime-doctor caller tests cover field ordering, five-value cap, Unicode truncation, and boundary lengths",
+      "rust_test_oracle": "none retained; direct renderer ABI and runtime-doctor caller tests cover field ordering, five-value cap, Unicode truncation, and boundary lengths; existing renderer extended to format latest selection decisions, with Unicode and empty-detail direct cases plus real selection summary caller",
       "production_fallback": false,
       "duplicate_production_owner": false,
       "platform_fallback": false,
-      "rust_adapter_scope": "fixed field-slot projection and existing event/summary assembly"
+      "rust_adapter_scope": "fixed field-slot projection and existing event/summary assembly; latest selection caller delegates marker/detail assembly to the same renderer",
+      "expanded_in": "0.438.0"
     },
     {
       "name": "runtime_doctor_last_marker_line_truncation",
