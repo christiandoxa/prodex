@@ -11,7 +11,9 @@ export const ALLOW_ATTRIBUTE_CAPS = Object.freeze({
   "unused_imports": 0,
   "clippy::large_enum_variant": 9,
   "clippy::result_large_err": 2,
-  "clippy::too_many_arguments": 26,
+  // Two fixed-shape Mojo ABI adapters were added after the prior ratchet; keep
+  // their scalar/test-call signatures explicit until their ABI contracts change.
+  "clippy::too_many_arguments": 28,
   "clippy::type_complexity": 1,
 });
 
@@ -58,6 +60,10 @@ export const ALLOW_ATTRIBUTE_LOCATION_KEYS = Object.freeze([
   "clippy::too_many_arguments|crates/prodex-mojo-core/src/runtime/quota_decisions.rs|pub fn precommit_budget_plan(",
   // ponytail: keep the Mojo quota snapshot ABI scalar layout explicit; group it only if another non-ABI caller appears.
   "clippy::too_many_arguments|crates/prodex-mojo-core/src/runtime_state_quota.rs|pub fn probe_usage_snapshot_apply_plan(",
+  // ponytail: preserve the fixed scalar ABI adapter; group inputs only if the ABI changes.
+  "clippy::too_many_arguments|crates/prodex-mojo-core/src/runtime_decisions/runtime_config_scalar.rs|fn runtime_config_scalar_call(",
+  // ponytail: test helper mirrors the raw profile-identity ABI; use a fixture struct only if the ABI changes.
+  "clippy::too_many_arguments|crates/prodex-mojo-core/tests/profile_identity.rs|fn raw_profile_identity_call_with_abi(",
   // ponytail: state merge policy mirrors the fixed Mojo scalar ABI; introduce an input struct only if the policy gains another caller shape.
   "clippy::too_many_arguments|crates/prodex-mojo-core/src/state_policy.rs|pub fn binding_merge_plan(",
   // ponytail: selection policy is one fixed scalar bridge into Mojo; preserve the wire-shaped call until the ABI itself changes.
