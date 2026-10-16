@@ -372,10 +372,85 @@ def runtime_doctor_smart_context_decision_is_fallback(view: ProdexRichStringView
     return True
 
 comptime RUNTIME_DOCTOR_LOG_VALUE_ABI_VERSION: Int64 = 1
+comptime RUNTIME_DOCTOR_MESSAGE_MARKER_ABI_VERSION: Int64 = 1
 comptime RUNTIME_DOCTOR_FALLBACK_REASON_SOURCE_ABI_VERSION: Int64 = 1
 comptime RUNTIME_DOCTOR_FALLBACK_REASON_SOURCE_EVENT_REASONS: Int64 = 1
 comptime RUNTIME_DOCTOR_FALLBACK_REASON_SOURCE_SELF_CHECK: Int64 = 2
 comptime RUNTIME_DOCTOR_FALLBACK_REASON_SOURCE_DECISION: Int64 = 3
+
+
+# Match Rust split_whitespace + trim_matches on the individual log token.
+# The punctuation contract only trims ASCII bytes, while boundaries include
+# every Unicode whitespace character recognized by rich_unicode_space.
+def runtime_doctor_log_marker_punctuation(value: UInt8) -> Bool:
+    return (
+        value == 96 or value == 39 or value == 34
+        or value == 91 or value == 93 or value == 40 or value == 41
+        or value == 123 or value == 125 or value == 44 or value == 46
+        or value == 59 or value == 58
+    )
+
+
+def runtime_doctor_log_message_has_marker(
+    message: ProdexRichStringView, marker: ProdexRichStringView
+) -> Bool:
+    var source = rich_view_ptr(message)
+    var length = Int64(message.len)
+    var needle = rich_view_ptr(marker)
+    var offset: Int64 = 0
+    while offset < length:
+        var width = rich_codepoint_width(source[unsafe_offset=offset])
+        if rich_unicode_space(rich_codepoint(source, offset, width)):
+            offset += width
+            continue
+        var start = offset
+        while offset < length:
+            width = rich_codepoint_width(source[unsafe_offset=offset])
+            if rich_unicode_space(rich_codepoint(source, offset, width)):
+                break
+            offset += width
+        var end = offset
+        while start < end and runtime_doctor_log_marker_punctuation(source[unsafe_offset=start]):
+            start += 1
+        while end > start and runtime_doctor_log_marker_punctuation(source[unsafe_offset=end - 1]):
+            end -= 1
+        if UInt(end - start) != marker.len:
+            continue
+        var equal = True
+        for index in range(end - start):
+            if source[unsafe_offset=start + index] != needle[unsafe_offset=index]:
+                equal = False
+                break
+        if equal:
+            return True
+    return False
+
+
+@export("prodex_mojo_runtime_doctor_log_message_has_marker_v1")
+def prodex_mojo_runtime_doctor_log_message_has_marker_v1(
+    abi_version: Int64,
+    message_address: UInt,
+    marker_address: UInt,
+    result_address: UInt,
+) abi("C") -> Int64:
+    if (
+        abi_version != RUNTIME_DOCTOR_MESSAGE_MARKER_ABI_VERSION
+        or message_address == 0 or marker_address == 0 or result_address == 0
+    ):
+        return 1
+    var message = Pointer[mut=False, ProdexRichStringView, ImmUntrackedOrigin](
+        unsafe_from_address=Int(message_address)
+    )[].copy()
+    var marker = Pointer[mut=False, ProdexRichStringView, ImmUntrackedOrigin](
+        unsafe_from_address=Int(marker_address)
+    )[].copy()
+    if not rich_view_valid(message, 0x7FFFFFFFFFFFFFFF) or not rich_view_valid(marker, 0x7FFFFFFFFFFFFFFF):
+        return 2
+    var result = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(result_address)
+    )
+    result[] = 1 if runtime_doctor_log_message_has_marker(message, marker) else 0
+    return 0
 
 
 def runtime_doctor_log_value_is_ignored(view: ProdexRichStringView) -> Bool:

@@ -6,6 +6,7 @@ use crate::MojoError;
 const RUNTIME_DOCTOR_MARKER_ABI_VERSION: i64 = 1;
 const RUNTIME_DOCTOR_SMART_CONTEXT_DECISION_ABI_VERSION: i64 = 1;
 const RUNTIME_DOCTOR_LOG_VALUE_ABI_VERSION: i64 = 1;
+const RUNTIME_DOCTOR_MESSAGE_MARKER_ABI_VERSION: i64 = 1;
 const RUNTIME_DOCTOR_FALLBACK_REASON_SOURCE_ABI_VERSION: i64 = 1;
 const RUNTIME_DOCTOR_MARKER_SEMANTICS_ABI_VERSION: i64 = 2;
 const RUNTIME_DOCTOR_PROFILE_PROVIDER_KIND_ABI_VERSION: i64 = 1;
@@ -40,6 +41,12 @@ unsafe extern "C" {
         abi_version: i64,
         decision: u64,
         is_fallback: u64,
+    ) -> i64;
+    fn prodex_mojo_runtime_doctor_log_message_has_marker_v1(
+        abi_version: i64,
+        message: u64,
+        marker: u64,
+        result: u64,
     ) -> i64;
     fn prodex_mojo_runtime_doctor_log_value_is_ignored_v1(
         abi_version: i64,
@@ -417,6 +424,31 @@ pub fn runtime_doctor_parse_message_offsets(
     })
 }
 
+/// Match a complete, punctuation-trimmed whitespace-delimited log marker in Mojo.
+pub fn runtime_doctor_log_message_has_marker(
+    message: &str,
+    marker: &str,
+) -> Result<bool, MojoError> {
+    ensure_rich_abi()?;
+    let message = view(message);
+    let marker = view(marker);
+    let mut result = -1_i64;
+    let status = unsafe {
+        prodex_mojo_runtime_doctor_log_message_has_marker_v1(
+            RUNTIME_DOCTOR_MESSAGE_MARKER_ABI_VERSION,
+            mojo_pointer_address(&message),
+            mojo_pointer_address(&marker),
+            mojo_mut_pointer_address(&mut result),
+        )
+    };
+    match (status, result) {
+        (0, 0) => Ok(false),
+        (0, 1) => Ok(true),
+        (1, _) => Err(MojoError::InvalidInput),
+        _ => Err(MojoError::InvalidOutput),
+    }
+}
+
 /// Decide whether a parsed runtime-doctor log value is semantically absent.
 pub fn runtime_doctor_log_value_is_ignored(value: &str) -> Result<bool, MojoError> {
     ensure_rich_abi()?;
@@ -544,6 +576,58 @@ pub fn runtime_doctor_profile_provider_kind(provider: &str) -> Result<i64, MojoE
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn runtime_doctor_log_marker_token_matching_has_strict_compiled_abi() {
+        for (message, marker, expected) in [
+            (
+                "[date] smart_context_autopilot request=3",
+                "smart_context_autopilot",
+                true,
+            ),
+            (
+                "other\u{2003}('smart_context_autopilot'),",
+                "smart_context_autopilot",
+                true,
+            ),
+            (
+                "smart_context_autopilot=3",
+                "smart_context_autopilot",
+                false,
+            ),
+            (
+                "prefix_smart_context_autopilot",
+                "smart_context_autopilot",
+                false,
+            ),
+            ("...", "", true),
+            ("", "", false),
+        ] {
+            assert_eq!(
+                runtime_doctor_log_message_has_marker(message, marker).unwrap(),
+                expected
+            );
+        }
+        let message = view("smart_context_autopilot");
+        let marker = view("smart_context_autopilot");
+        let mut result = -1_i64;
+        let invoke = |version, message_address, result_address| unsafe {
+            prodex_mojo_runtime_doctor_log_message_has_marker_v1(
+                version,
+                message_address,
+                mojo_pointer_address(&marker),
+                result_address,
+            )
+        };
+        let valid = mojo_pointer_address(&message);
+        let output = mojo_mut_pointer_address(&mut result);
+        assert_eq!(invoke(2, valid, output), 1);
+        assert_eq!(invoke(1, 0, output), 1);
+        assert_eq!(invoke(1, valid, 0), 1);
+        assert_eq!(result, -1);
+        assert_eq!(invoke(1, valid, output), 0);
+        assert_eq!(result, 1);
+    }
 
     #[test]
     fn runtime_doctor_log_value_filter_is_mojo_owned() {
