@@ -36,6 +36,17 @@ unsafe extern "C" {
         max_reason_codes: u64,
         output: u64,
     ) -> i64;
+    fn prodex_mojo_governance_record_valid_v1(
+        abi_version: i64,
+        mode: i64,
+        a: u64,
+        b: u64,
+        c: u64,
+        d: u64,
+        e: u64,
+        f: u64,
+        output: u64,
+    ) -> i64;
     fn prodex_mojo_governance_inspection_order_v1(
         abi_version: i64,
         findings: u64,
@@ -333,6 +344,68 @@ fn governance_text_valid(kind: i64, value: &str) -> Result<bool, crate::MojoErro
     }
 }
 
+/// The compiled Mojo governance owner validates record fields and limits.
+/// Rust retains range-constrained DTOs and maps negative decisions to errors.
+fn governance_record_valid(mode: i64, values: [usize; 6]) -> Result<bool, crate::MojoError> {
+    let values =
+        values.map(|value| u64::try_from(value).map_err(|_| crate::MojoError::InvalidInput));
+    let [a, b, c, d, e, f] = values;
+    let mut output = -1_i64;
+    let status = unsafe {
+        prodex_mojo_governance_record_valid_v1(
+            6,
+            mode,
+            a?,
+            b?,
+            c?,
+            d?,
+            e?,
+            f?,
+            &mut output as *mut i64 as u64,
+        )
+    };
+    governance_status(status)?;
+    match output {
+        0 => Ok(false),
+        1 => Ok(true),
+        _ => Err(crate::MojoError::InvalidOutput),
+    }
+}
+
+pub fn governance_content_location_range_valid(
+    start: usize,
+    end: usize,
+) -> Result<bool, crate::MojoError> {
+    governance_record_valid(0, [start, end, 0, 0, 0, 0])
+}
+
+pub fn governance_finding_confidence_valid(
+    confidence_basis_points: u16,
+) -> Result<bool, crate::MojoError> {
+    governance_record_valid(1, [usize::from(confidence_basis_points), 0, 0, 0, 0, 0])
+}
+
+pub fn governance_inspection_result_counts_valid(
+    finding_count: usize,
+    tag_count: usize,
+    reason_count: usize,
+    max_findings: usize,
+    max_tags: usize,
+    max_reasons: usize,
+) -> Result<bool, crate::MojoError> {
+    governance_record_valid(
+        2,
+        [
+            finding_count,
+            tag_count,
+            reason_count,
+            max_findings,
+            max_tags,
+            max_reasons,
+        ],
+    )
+}
+
 pub fn governance_content_location_path_valid(value: &str) -> Result<bool, crate::MojoError> {
     governance_text_valid(0, value)
 }
@@ -404,6 +477,79 @@ pub fn self_test() -> bool {
 #[cfg(test)]
 mod governance_policy_tests {
     use super::*;
+
+    #[test]
+    fn mojo_governance_record_validates_range_confidence_and_result_counts() {
+        assert_eq!(governance_content_location_range_valid(0, 0), Ok(true));
+        assert_eq!(
+            governance_content_location_range_valid(u32::MAX as usize, u32::MAX as usize),
+            Ok(true)
+        );
+        assert_eq!(governance_content_location_range_valid(9, 8), Ok(false));
+        if usize::BITS > 32 {
+            assert_eq!(
+                governance_content_location_range_valid(
+                    u32::MAX as usize + 1,
+                    u32::MAX as usize + 1
+                ),
+                Ok(false)
+            );
+        }
+        assert_eq!(governance_finding_confidence_valid(0), Ok(true));
+        assert_eq!(governance_finding_confidence_valid(10_000), Ok(true));
+        assert_eq!(governance_finding_confidence_valid(10_001), Ok(false));
+        assert_eq!(governance_finding_confidence_valid(u16::MAX), Ok(false));
+        assert_eq!(
+            governance_inspection_result_counts_valid(256, 32, 32, 256, 32, 32),
+            Ok(true)
+        );
+        for (f, t, r) in [(257, 32, 32), (256, 33, 32), (256, 32, 33)] {
+            assert_eq!(
+                governance_inspection_result_counts_valid(f, t, r, 256, 32, 32),
+                Ok(false)
+            );
+        }
+    }
+
+    #[test]
+    fn mojo_governance_record_abi_rejects_untrusted_modes_without_mutating_output() {
+        let mut result = 77_i64;
+        unsafe {
+            assert_eq!(
+                prodex_mojo_governance_record_valid_v1(
+                    2,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    &mut result as *mut i64 as u64,
+                ),
+                4
+            );
+            assert_eq!(
+                prodex_mojo_governance_record_valid_v1(
+                    6,
+                    3,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    &mut result as *mut i64 as u64,
+                ),
+                1
+            );
+            assert_eq!(
+                prodex_mojo_governance_record_valid_v1(6, 0, 0, 0, 0, 0, 0, 0, 0,),
+                1
+            );
+        }
+        assert_eq!(result, 77);
+    }
 
     #[test]
     fn governance_inspection_policy_contracts_are_mojo_owned() {

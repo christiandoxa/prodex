@@ -247,6 +247,19 @@ fn governance_labels_and_validation_boundaries_stay_stable() {
     assert_eq!(InspectionCoverage::Unsupported.as_str(), "unsupported");
 
     assert!(ContentLocation::new("$.input[0].content", 0, 1).is_ok());
+    assert!(ContentLocation::new("$.input", u32::MAX as usize, u32::MAX as usize).is_ok());
+    assert_eq!(
+        ContentLocation::new("$.input", 10, 9),
+        Err(InspectionModelError::InvalidLocation)
+    );
+    if usize::BITS > 32 {
+        let out_of_range = u32::MAX as usize + 1;
+        assert_eq!(
+            ContentLocation::new("$.input", out_of_range, out_of_range),
+            Err(InspectionModelError::InvalidLocation)
+        );
+    }
+
     assert_eq!(
         ContentLocation::new("$.bad value", 0, 1),
         Err(InspectionModelError::InvalidLocation)

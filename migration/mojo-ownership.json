@@ -1098,7 +1098,8 @@
         "role": "semantic",
         "operations": [
           "governance_finding_classification",
-          "governance_inspection_collection_order"
+          "governance_inspection_collection_order",
+          "governance_inspection_record_invariants"
         ]
       },
       {
@@ -2683,6 +2684,16 @@
         "operations": [
           "redaction_dry_run_path_precedence",
           "redaction_dry_run_path_replacement"
+        ]
+      },
+      {
+        "path": "crates/prodex-mojo-core/src/policy.rs",
+        "language": "rust",
+        "classification": "MIXED",
+        "production_reachable": true,
+        "role": "adapter",
+        "operations": [
+          "governance_inspection_record_invariants"
         ]
       }
     ],
@@ -11854,6 +11865,29 @@
       "duplicate_production_owner": false,
       "platform_fallback": false,
       "rust_adapter_scope": "Host Path::display conversion, borrowed path/view FFI marshalling, checked allocation from Mojo-required length, and UTF-8 validation; Mojo exclusively owns private path order and replacement."
+    },
+    {
+      "name": "governance_inspection_record_invariants",
+      "domain": "governance/inspection-record-invariants",
+      "introduced_in": "0.438.0",
+      "baseline_state": "Rust enforced ordered u32 content-location offsets, confidence at most 10000 basis points, and per-result findings/tags/reason-code collection limits",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_mojo_governance_record_valid_v1",
+      "mojo_abi_version": 6,
+      "mojo_source": "mojo/prodex_core/governance_inspection.mojo",
+      "consumer": "crates/prodex-domain/src/governance/inspection.rs",
+      "consumer_marker": "prodex_mojo_core::policy::governance_content_location_range_valid(",
+      "production_consumers": [
+        "crates/prodex-domain/src/governance/inspection.rs"
+      ],
+      "production_reachability_test": "crates/prodex-domain/src/governance/inspection.rs",
+      "rust_owner_before": "Rust bounds on start/end u32 range, confidence basis points, three result collection capacities and Boolean rejection precedence",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "Removed three Rust Boolean policy branches; compiled Mojo tests cover exact location u32 max and inverted intervals, 10000/10001 confidence, all three capacity dimensions and invalid ABI; 29 prodex-domain tests pass.",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "Strongly-typed inspection DTOs, u32 checked conversion, named Rust InspectionModelError translation and semantic result storage. Mojo alone owns validity decisions."
     }
   ],
   "rust_semantic_reductions": [

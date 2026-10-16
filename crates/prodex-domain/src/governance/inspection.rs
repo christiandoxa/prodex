@@ -141,7 +141,9 @@ impl ContentLocation {
         {
             return Err(InspectionModelError::InvalidLocation);
         }
-        if end_byte < start_byte {
+        if !prodex_mojo_core::policy::governance_content_location_range_valid(start_byte, end_byte)
+            .expect("Mojo governance content-location range policy returned invalid output")
+        {
             return Err(InspectionModelError::InvalidLocation);
         }
         let start_byte =
@@ -229,7 +231,9 @@ impl InspectionFinding {
         confidence_basis_points: u16,
         detector_id: DetectorId,
     ) -> Result<Self, InspectionModelError> {
-        if confidence_basis_points > 10_000 {
+        if !prodex_mojo_core::policy::governance_finding_confidence_valid(confidence_basis_points)
+            .expect("Mojo governance confidence limit returned invalid output")
+        {
             return Err(InspectionModelError::InvalidConfidence);
         }
         Ok(Self {
@@ -335,9 +339,15 @@ impl InspectionResult {
         detector_revision: DetectorRevisionId,
         limits: InspectionLimits,
     ) -> Result<Self, InspectionModelError> {
-        if findings.len() > limits.max_findings
-            || tags.len() > limits.max_tags
-            || reason_codes.len() > limits.max_reason_codes
+        if !prodex_mojo_core::policy::governance_inspection_result_counts_valid(
+            findings.len(),
+            tags.len(),
+            reason_codes.len(),
+            limits.max_findings,
+            limits.max_tags,
+            limits.max_reason_codes,
+        )
+        .expect("Mojo governance inspection result limits returned invalid output")
         {
             return Err(InspectionModelError::LimitExceeded);
         }
