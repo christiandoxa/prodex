@@ -583,3 +583,39 @@ def prodex_mojo_governance_inspection_order_v1(
         reason_codes, reason_code_order, reason_codes_count
     )
     return GOVERNANCE_INSPECTION_OK
+
+
+# Governance record validation: range, confidence and per-result collection
+# caps have one compiled Mojo owner. Rust retains strongly typed DTOs.
+@export("prodex_mojo_governance_record_valid_v1")
+def prodex_mojo_governance_record_valid_v1(
+    abi_version: Int64,
+    mode: Int64,
+    a: UInt64,
+    b: UInt64,
+    c: UInt64,
+    d: UInt64,
+    e: UInt64,
+    f: UInt64,
+    output_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != GOVERNANCE_INSPECTION_ABI_VERSION:
+        return GOVERNANCE_INSPECTION_ABI
+    if mode < 0 or mode > 2 or output_address == 0:
+        return GOVERNANCE_INSPECTION_INVALID
+    var valid = False
+    if mode == 0:
+        valid = (
+            a <= UInt64(4294967295)
+            and b <= UInt64(4294967295)
+            and b >= a
+        )
+    elif mode == 1:
+        valid = a <= UInt64(10000)
+    else:
+        valid = a <= d and b <= e and c <= f
+    var output = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    output[] = 1 if valid else 0
+    return GOVERNANCE_INSPECTION_OK
