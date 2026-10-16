@@ -115,6 +115,11 @@ unsafe extern "C" {
         model: u64,
         allowed: u64,
     ) -> i64;
+    fn prodex_mojo_rich_model_session_memory_allowed_v1(
+        abi_version: i64,
+        model: u64,
+        allowed: u64,
+    ) -> i64;
     fn prodex_mojo_rich_model_fallback_plan_v1(
         abi_version: i64,
         provider: u64,
@@ -662,6 +667,27 @@ pub fn gemini_code_assist_model_allowed(model: &str) -> Result<bool, MojoError> 
     }
 }
 
+pub fn model_session_memory_allowed(model: &str) -> Result<bool, MojoError> {
+    ensure_rich_abi()?;
+    let model_view = view(model);
+    let mut allowed = -1_i64;
+    let status = unsafe {
+        prodex_mojo_rich_model_session_memory_allowed_v1(
+            RICH_ABI_VERSION,
+            mojo_pointer_address(&model_view),
+            mojo_mut_pointer_address(&mut allowed),
+        )
+    };
+    if status != 0 {
+        return Err(status_error(status, 4, 0, -1, 0));
+    }
+    match allowed {
+        0 => Ok(false),
+        1 => Ok(true),
+        _ => Err(MojoError::InvalidOutput),
+    }
+}
+
 pub fn model_fallback_plan(provider: &str, models: &[&str]) -> Result<Vec<String>, MojoError> {
     ensure_rich_abi()?;
     if models.len() > 256 {
@@ -728,6 +754,10 @@ pub fn model_fallback_plan(provider: &str, models: &[&str]) -> Result<Vec<String
 #[cfg(test)]
 #[path = "fallback/gemini_code_assist_tests.rs"]
 mod gemini_code_assist_tests;
+
+#[cfg(test)]
+#[path = "fallback/session_memory_tests.rs"]
+mod session_memory_tests;
 
 #[cfg(test)]
 #[path = "fallback/session_usage_limit_tests.rs"]

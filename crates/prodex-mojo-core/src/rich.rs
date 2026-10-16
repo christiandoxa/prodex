@@ -81,9 +81,10 @@ pub use fallback::{
     RUNTIME_RETRY_AFTER_MODE_HEADER_SECONDS, RUNTIME_RETRY_AFTER_TEXT_HEADER,
     RUNTIME_RETRY_AFTER_TEXT_MESSAGE, RuntimeUsageLimitInputFormat,
     gemini_code_assist_model_allowed, model_fallback_chain, model_fallback_head,
-    model_fallback_plan, previous_response_error_class, previous_response_plan,
-    rate_limit_header_class, rate_limit_header_nonempty, runtime_retry_after_millis,
-    runtime_retry_after_text_millis, runtime_session_usage_limit_marker,
+    model_fallback_plan, model_session_memory_allowed, previous_response_error_class,
+    previous_response_plan, rate_limit_header_class, rate_limit_header_nonempty,
+    runtime_retry_after_millis, runtime_retry_after_text_millis,
+    runtime_session_usage_limit_marker,
 };
 mod catalog;
 pub use catalog::{

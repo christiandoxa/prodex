@@ -631,6 +631,7 @@
       "mojo/prodex_core/rich_fallback.mojo": {
         "operations": [
           "provider_model_fallback_parser",
+          "provider_model_session_memory_policy",
           "session_usage_limit_marker",
           "gemini_invalid_stream_retry_delay_policy",
           "runtime_retry_after_text_policy",
@@ -3166,6 +3167,29 @@
       "duplicate_production_owner": false,
       "platform_fallback": false,
       "rust_adapter_scope": "provider adapter and test oracle"
+    },
+    {
+      "name": "provider_model_session_memory_policy",
+      "domain": "provider/model-policy",
+      "introduced_in": "0.438.0",
+      "baseline_state": "candidate",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_mojo_rich_model_session_memory_allowed_v1",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/rich_fallback.mojo",
+      "consumer": "crates/prodex-provider-core/src/fallback/chains.rs",
+      "consumer_marker": "prodex_mojo_core::rich::model_session_memory_allowed",
+      "production_consumers": [
+        "crates/prodex-provider-core/src/fallback/chains.rs"
+      ],
+      "production_reachability_test": "crates/prodex-provider-core/src/fallback/chains.rs",
+      "rust_owner_before": "Rust trimmed the requested model and accepted only empty, auto, or default aliases for session-memory routing",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "deleted; the direct Mojo ABI matrix and provider fallback caller tests preserve alias, Unicode whitespace, and ordinary-model behavior",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "borrowed model view, typed ABI status mapping, and boolean projection"
     },
     {
       "name": "gateway_route_alias_policy",

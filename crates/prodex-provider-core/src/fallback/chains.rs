@@ -4,7 +4,6 @@
 mod gemini;
 
 use crate::ProviderId;
-use prodex_mojo_core::rich::ascii_casefold_equal_exact;
 
 pub fn provider_model_fallback_chain(provider: ProviderId, model: &str) -> Vec<String> {
     prodex_mojo_core::rich::model_fallback_chain(provider.label(), model)
@@ -21,12 +20,8 @@ pub fn provider_canonical_model(provider: ProviderId, model: &str) -> String {
 }
 
 pub fn provider_model_allows_session_memory(model: &str) -> bool {
-    let model = model.trim();
-    model.is_empty()
-        || ascii_casefold_equal_exact(model, "auto")
-            .expect("Mojo session-memory model comparison failed")
-        || ascii_casefold_equal_exact(model, "default")
-            .expect("Mojo session-memory model comparison failed")
+    prodex_mojo_core::rich::model_session_memory_allowed(model)
+        .expect("Mojo session-memory model policy failed")
 }
 
 #[test]
