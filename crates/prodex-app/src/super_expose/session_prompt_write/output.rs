@@ -249,7 +249,7 @@ pub(crate) fn rollout_contains_exact_user_message(
             continue;
         }
 
-        let (found, consumed) = scan_exact_user_message_lines(&complete, expected);
+        let (found, consumed) = scan_exact_user_message_lines(&complete, expected)?;
         if found {
             return Ok(true);
         }
@@ -267,39 +267,66 @@ pub(crate) fn rollout_contains_exact_user_message(
     }
 }
 
-fn scan_exact_user_message_lines(complete: &[u8], expected: &str) -> (bool, u64) {
+fn scan_exact_user_message_lines(
+    complete: &[u8],
+    expected: &str,
+) -> std::result::Result<(bool, u64), SessionPromptWriteError> {
     let mut consumed = 0_u64;
     for line in complete.split_inclusive(|byte| *byte == b'\n') {
-        if exact_user_message_line(line, expected) {
-            return (true, consumed);
+        if exact_user_message_line(line, expected)? {
+            return Ok((true, consumed));
         }
         consumed = consumed.saturating_add(line.len() as u64);
     }
-    (false, consumed)
+    Ok((false, consumed))
 }
 
-fn exact_user_message_line(raw_line: &[u8], expected: &str) -> bool {
+fn exact_user_message_line(
+    raw_line: &[u8],
+    expected: &str,
+) -> std::result::Result<bool, SessionPromptWriteError> {
     if raw_line.len() > OUTPUT_VERIFY_MAX_LINE_BYTES {
-        return false;
+        return Ok(false);
     }
     let line = raw_line.strip_suffix(b"\n").unwrap_or(raw_line);
     let Ok(value) = serde_json::from_slice::<serde_json::Value>(line) else {
-        return false;
+        return Ok(false);
     };
     let Some(payload) = value.get("payload") else {
-        return false;
+        return Ok(false);
     };
-    match value.get("type").and_then(serde_json::Value::as_str) {
-        Some("event_msg") => {
-            payload.get("type").and_then(serde_json::Value::as_str) == Some("user_message")
-                && payload.get("message").and_then(serde_json::Value::as_str) == Some(expected)
-        }
-        Some("response_item") => {
-            crate::app_commands::transcript_exact_visible_user_message(payload)
-                .is_some_and(|message| message == expected)
-        }
-        _ => false,
-    }
+    let (record_type, payload_user_message, role_user, visible, message_matches) =
+        match value.get("type").and_then(serde_json::Value::as_str) {
+            Some("event_msg") => (
+                1,
+                payload.get("type").and_then(serde_json::Value::as_str) == Some("user_message"),
+                false,
+                false,
+                payload
+                    .get("message")
+                    .and_then(serde_json::Value::as_str)
+                    .is_some_and(|message| message == expected),
+            ),
+            Some("response_item") => {
+                let exact = crate::app_commands::transcript_exact_visible_user_message(payload);
+                (
+                    2,
+                    payload.get("type").and_then(serde_json::Value::as_str) == Some("message"),
+                    payload.get("role").and_then(serde_json::Value::as_str) == Some("user"),
+                    exact.is_some(),
+                    exact.is_some_and(|message| message == expected),
+                )
+            }
+            _ => (0, false, false, false, false),
+        };
+    prodex_mojo_core::session_cli_policy::exact_user_message_match(
+        record_type,
+        payload_user_message,
+        role_user,
+        visible,
+        message_matches,
+    )
+    .map_err(|_| SessionPromptWriteError::OutputReadFailed)
 }
 
 fn read_complete_output(
@@ -465,34 +492,44 @@ fn read_output_line(
         let sequence = line_start
             .saturating_mul(65_536)
             .saturating_add(visible_index as u64);
-        let Some(output_event) = output_event_from_transcript(sequence, event)? else {
-            continue;
-        };
-        if visible_index < start_index {
-            visible_index = visible_index.saturating_add(1);
-            continue;
+        let output_event = output_event_from_transcript(sequence, event)?;
+        let action = prodex_mojo_core::session_cli_policy::output_event_plan(
+            prodex_mojo_core::session_cli_policy::SessionPromptWriteOutputEventInput {
+                visible: output_event.is_some(),
+                cursor_index: visible_index,
+                start_index,
+                event_count: events.len(),
+                limit,
+                total_text_bytes: *total_text_bytes,
+                event_text_bytes: output_event
+                    .as_ref()
+                    .map_or(0, |output_event| output_event.text.len()),
+                total_text_limit: OUTPUT_READ_MAX_TOTAL_TEXT_BYTES,
+            },
+        )
+        .map_err(|_| SessionPromptWriteError::OutputReadFailed)?;
+        match action {
+            prodex_mojo_core::session_cli_policy::SessionPromptWriteOutputEventAction::Ignore => {}
+            prodex_mojo_core::session_cli_policy::SessionPromptWriteOutputEventAction::AdvanceCursor => {
+                visible_index = visible_index.saturating_add(1);
+            }
+            prodex_mojo_core::session_cli_policy::SessionPromptWriteOutputEventAction::Include => {
+                let output_event =
+                    output_event.ok_or(SessionPromptWriteError::OutputReadFailed)?;
+                *total_text_bytes = total_text_bytes.saturating_add(output_event.text.len());
+                events.push(output_event);
+                visible_index = visible_index.saturating_add(1);
+            }
+            prodex_mojo_core::session_cli_policy::SessionPromptWriteOutputEventAction::Limit
+            | prodex_mojo_core::session_cli_policy::SessionPromptWriteOutputEventAction::TextLimit => {
+                return Ok(Some(OutputReadBatch {
+                    events: std::mem::take(events),
+                    next_offset: line_start,
+                    next_event_index: visible_index,
+                    has_more: true,
+                }));
+            }
         }
-        if events.len() >= limit {
-            return Ok(Some(OutputReadBatch {
-                events: std::mem::take(events),
-                next_offset: line_start,
-                next_event_index: visible_index,
-                has_more: true,
-            }));
-        }
-        if total_text_bytes.saturating_add(output_event.text.len())
-            > OUTPUT_READ_MAX_TOTAL_TEXT_BYTES
-        {
-            return Ok(Some(OutputReadBatch {
-                events: std::mem::take(events),
-                next_offset: line_start,
-                next_event_index: visible_index,
-                has_more: true,
-            }));
-        }
-        *total_text_bytes = total_text_bytes.saturating_add(output_event.text.len());
-        events.push(output_event);
-        visible_index = visible_index.saturating_add(1);
     }
     if start_index > visible_index {
         return Err(SessionPromptWriteError::OutputSourceChanged);

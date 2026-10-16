@@ -2,6 +2,13 @@
 
 use crate::MojoError;
 
+#[path = "session_cli_policy/output.rs"]
+mod output;
+pub use output::{
+    SessionPromptWriteOutputEventAction, SessionPromptWriteOutputEventInput,
+    exact_user_message_match, output_event_plan,
+};
+
 const ABI_VERSION: i64 = 1;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

@@ -1145,6 +1145,11 @@ comptime SESSION_PROMPT_WRITE_VERIFY_NOT_ADDRESSABLE: Int64 = 1
 comptime SESSION_PROMPT_WRITE_VERIFY_AMBIGUOUS: Int64 = 2
 comptime SESSION_PROMPT_WRITE_VERIFY_PENDING: Int64 = 3
 comptime SESSION_PROMPT_WRITE_VERIFY_ROLLOUT: Int64 = 4
+comptime SESSION_PROMPT_WRITE_OUTPUT_EVENT_IGNORE: Int64 = 0
+comptime SESSION_PROMPT_WRITE_OUTPUT_EVENT_ADVANCE: Int64 = 1
+comptime SESSION_PROMPT_WRITE_OUTPUT_EVENT_INCLUDE: Int64 = 2
+comptime SESSION_PROMPT_WRITE_OUTPUT_EVENT_LIMIT: Int64 = 3
+comptime SESSION_PROMPT_WRITE_OUTPUT_EVENT_TEXT_LIMIT: Int64 = 4
 
 
 def session_prompt_write_valid_bool(value: Int64) -> Bool:
@@ -1304,6 +1309,95 @@ def prodex_session_prompt_write_policy_v1(
     if first < SESSION_PROMPT_WRITE_VERIFY_QUEUE_FAILED or first > SESSION_PROMPT_WRITE_VERIFY_ROLLOUT:
         return SESSION_REPORT_INVALID
     output[unsafe_offset=0] = first
+    return SESSION_REPORT_OK
+
+
+@export("prodex_session_prompt_write_output_event_plan_v1")
+def prodex_session_prompt_write_output_event_plan_v1(
+    abi_version: Int64,
+    visible: Int64,
+    cursor_index: Int64,
+    start_index: Int64,
+    event_count: Int64,
+    limit: Int64,
+    total_text_bytes: Int64,
+    event_text_bytes: Int64,
+    total_text_limit: Int64,
+    output_address: UInt,
+) abi("C") -> Int64:
+    if (
+        abi_version != SESSION_PROMPT_WRITE_POLICY_ABI_VERSION
+        or visible < 0
+        or visible > 1
+        or cursor_index < 0
+        or start_index < 0
+        or event_count < 0
+        or limit < 0
+        or total_text_bytes < 0
+        or event_text_bytes < 0
+        or total_text_limit < 0
+        or output_address == 0
+    ):
+        return SESSION_REPORT_INVALID
+    var output = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    if visible == 0:
+        output[unsafe_offset=0] = SESSION_PROMPT_WRITE_OUTPUT_EVENT_IGNORE
+        return SESSION_REPORT_OK
+    if cursor_index < start_index:
+        output[unsafe_offset=0] = SESSION_PROMPT_WRITE_OUTPUT_EVENT_ADVANCE
+        return SESSION_REPORT_OK
+    if event_count >= limit:
+        output[unsafe_offset=0] = SESSION_PROMPT_WRITE_OUTPUT_EVENT_LIMIT
+        return SESSION_REPORT_OK
+    if (
+        total_text_bytes > total_text_limit
+        or event_text_bytes > total_text_limit - total_text_bytes
+    ):
+        output[unsafe_offset=0] = SESSION_PROMPT_WRITE_OUTPUT_EVENT_TEXT_LIMIT
+        return SESSION_REPORT_OK
+    output[unsafe_offset=0] = SESSION_PROMPT_WRITE_OUTPUT_EVENT_INCLUDE
+    return SESSION_REPORT_OK
+
+
+@export("prodex_session_prompt_write_exact_user_message_match_v1")
+def prodex_session_prompt_write_exact_user_message_match_v1(
+    abi_version: Int64,
+    record_type: Int64,
+    payload_user_message: Int64,
+    role_user: Int64,
+    visible: Int64,
+    message_matches: Int64,
+    output_address: UInt,
+) abi("C") -> Int64:
+    if (
+        abi_version != SESSION_PROMPT_WRITE_POLICY_ABI_VERSION
+        or record_type < 0
+        or record_type > 2
+        or not session_prompt_write_valid_bool(payload_user_message)
+        or not session_prompt_write_valid_bool(role_user)
+        or not session_prompt_write_valid_bool(visible)
+        or not session_prompt_write_valid_bool(message_matches)
+        or output_address == 0
+    ):
+        return SESSION_REPORT_INVALID
+    var output = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    if record_type == 1:
+        output[unsafe_offset=0] = Int64(
+            payload_user_message == 1 and message_matches == 1
+        )
+    elif record_type == 2:
+        output[unsafe_offset=0] = Int64(
+            payload_user_message == 1
+            and role_user == 1
+            and visible == 1
+            and message_matches == 1
+        )
+    else:
+        output[unsafe_offset=0] = 0
     return SESSION_REPORT_OK
 
 

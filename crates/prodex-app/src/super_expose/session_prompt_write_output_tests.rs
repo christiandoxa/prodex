@@ -714,6 +714,8 @@ fn output_read_classifies_empty_and_unicode_records_without_leaking_payload() {
 
 #[test]
 fn output_page_does_not_drop_events_from_one_rollout_line() {
+    const { assert!(prodex_mojo_core::MOJO_ACTIVE) }
+
     let fixture = fixture();
     let first = read_output_events(&fixture.rollout, 0, 0, 1).unwrap();
     assert_eq!((first.events.len(), first.next_event_index), (1, 0));

@@ -17,6 +17,8 @@ fn queue_success_preserves_multiline_message_and_same_thread() {
 
 #[test]
 fn queue_success_verifies_exact_message_whitespace_and_escaping() {
+    const { assert!(prodex_mojo_core::MOJO_ACTIVE) }
+
     let fixture = fixture();
     let before_len = std::fs::metadata(&fixture.rollout).unwrap().len();
     let message = "  leading\nline with \\\\ and \"quotes\"  \n\n";

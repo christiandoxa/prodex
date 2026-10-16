@@ -39,6 +39,11 @@ const SESSION_SELECTOR_MATCH_CALLER_TEST_FILE = "crates/prodex-session-store/tes
 const SESSION_SELECTOR_MATCH_MOJO_TEST_FILE = "mojo/tests/session_selector_policy_test.mojo";
 const SUPER_EXPOSE_OUTPUT_FILE = "crates/prodex-app/src/super_expose/session_prompt_write/output.rs";
 const SUPER_EXPOSE_OUTPUT_MOJO_FILE = "mojo/prodex_core/super_expose.mojo";
+const SUPER_EXPOSE_OUTPUT_POLICY_FILE = "crates/prodex-mojo-core/src/session_cli_policy.rs";
+const SUPER_EXPOSE_OUTPUT_EVENT_ADAPTER_FILE = "crates/prodex-mojo-core/src/session_cli_policy/output.rs";
+const SUPER_EXPOSE_OUTPUT_EVENT_MOJO_FILE = "mojo/prodex_core/session_report.mojo";
+const SUPER_EXPOSE_OUTPUT_CALLER_TEST_FILE = "crates/prodex-app/src/super_expose/session_prompt_write_output_tests.rs";
+const SUPER_EXPOSE_OUTPUT_QUEUE_TEST_FILE = "crates/prodex-app/src/super_expose/session_prompt_write_queue_tests.rs";
 const OPTIONAL_TOOLS_RENDER_FILE = "crates/prodex-optional-tools/src/super_optimizers.rs";
 const OPTIONAL_TOOLS_RENDER_ADAPTER_FILE = "crates/prodex-mojo-core/src/optional_tools_policy.rs";
 const OPTIONAL_TOOLS_RENDER_MOJO_FILE = "mojo/prodex_core/optional_tools_policy.mojo";
@@ -269,6 +274,11 @@ const PROMOTED_FILES = [
   "crates/prodex-mojo-core/src/rich/super_expose.rs",
   SUPER_EXPOSE_OUTPUT_FILE,
   SUPER_EXPOSE_OUTPUT_MOJO_FILE,
+  SUPER_EXPOSE_OUTPUT_POLICY_FILE,
+  SUPER_EXPOSE_OUTPUT_EVENT_ADAPTER_FILE,
+  SUPER_EXPOSE_OUTPUT_EVENT_MOJO_FILE,
+  SUPER_EXPOSE_OUTPUT_CALLER_TEST_FILE,
+  SUPER_EXPOSE_OUTPUT_QUEUE_TEST_FILE,
   "crates/prodex-app/src/super_expose/protocol/tool_contract.rs",
   "crates/prodex-app/src/super_expose/protocol/validation.rs",
   "crates/prodex-mojo-core/src/provider_usage.rs",
@@ -3862,10 +3872,14 @@ export function findViolations(files) {
         .map((call) => filePath + ": Super-expose ABI adapter must retain " + call);
     }
     if (filePath === SUPER_EXPOSE_OUTPUT_FILE) {
-      const required = "prodex_mojo_core::rich::super_expose_output_cursor_valid(";
-      const violations = contents.includes(required)
-        ? []
-        : [filePath + ": output cursor validation must retain Mojo call " + required];
+      const required = [
+        "prodex_mojo_core::rich::super_expose_output_cursor_valid(",
+        "prodex_mojo_core::session_cli_policy::output_event_plan(",
+        "prodex_mojo_core::session_cli_policy::exact_user_message_match(",
+      ];
+      const violations = required
+        .filter((call) => !contents.includes(call))
+        .map((call) => filePath + ": output policy must retain Mojo call " + call);
       for (const retired of [
         "value.is_empty() || value.len() > 16 * 1024",
         "cursor.version == OUTPUT_CURSOR_VERSION",
@@ -3876,7 +3890,54 @@ export function findViolations(files) {
           break;
         }
       }
+      const production = contents.split("#[cfg(test)]", 1)[0];
+      if (/if\s+events\.len\(\)\s*>=\s*limit\s*\{\s*return\s+Ok\(Some\(OutputReadBatch/u.test(production)
+        || /if\s+total_text_bytes\.saturating_add\(output_event\.text\.len\(\)\)\s*>\s*OUTPUT_READ_MAX_TOTAL_TEXT_BYTES/u.test(production)
+        || /payload\.get\("message"\)[\s\S]{0,160}==\s*Some\(expected\)/u.test(production)) {
+        violations.push(filePath + ": contains restored Rust output page or rollout-match semantics");
+      }
       return violations;
+    }
+    if (filePath === SUPER_EXPOSE_OUTPUT_POLICY_FILE) {
+      const required = [
+        "#[path = \"session_cli_policy/output.rs\"]",
+        "SessionPromptWriteOutputEventAction",
+        "exact_user_message_match, output_event_plan",
+      ];
+      return required
+        .filter((marker) => !contents.includes(marker))
+        .map((marker) => filePath + ": session output policy facade must retain " + marker);
+    }
+    if (filePath === SUPER_EXPOSE_OUTPUT_EVENT_ADAPTER_FILE) {
+      const required = [
+        "prodex_session_prompt_write_output_event_plan_v1(",
+        "prodex_session_prompt_write_exact_user_message_match_v1(",
+        "pub fn output_event_plan(",
+        "pub fn exact_user_message_match(",
+        "output_abi_rejects_wrong_version_and_invalid_boolean_facts",
+      ];
+      return required
+        .filter((marker) => !contents.includes(marker))
+        .map((marker) => filePath + ": output ABI adapter must retain " + marker);
+    }
+    if (filePath === SUPER_EXPOSE_OUTPUT_CALLER_TEST_FILE) {
+      const required = [
+        "output_page_does_not_drop_events_from_one_rollout_line",
+        "prodex_mojo_core::MOJO_ACTIVE",
+      ];
+      return required
+        .filter((marker) => !contents.includes(marker))
+        .map((marker) => filePath + ": output caller coverage must retain " + marker);
+    }
+    if (filePath === SUPER_EXPOSE_OUTPUT_QUEUE_TEST_FILE) {
+      const required = [
+        "queue_success_verifies_exact_message_whitespace_and_escaping",
+        "queue_success_verifies_near_limit_escaped_message",
+        "prodex_mojo_core::MOJO_ACTIVE",
+      ];
+      return required
+        .filter((marker) => !contents.includes(marker))
+        .map((marker) => filePath + ": rollout verification coverage must retain " + marker);
     }
     if (filePath === SUPER_EXPOSE_OUTPUT_MOJO_FILE) {
       const required = '@export("prodex_mojo_super_expose_output_cursor_valid_v1")';
@@ -6608,6 +6669,10 @@ export function findViolations(files) {
     if (filePath === "mojo/prodex_core/session_report.mojo") {
       const required = [
         '@export("prodex_session_report_update_json_v2")',
+        '@export("prodex_session_prompt_write_output_event_plan_v1")',
+        '@export("prodex_session_prompt_write_exact_user_message_match_v1")',
+        "SESSION_PROMPT_WRITE_OUTPUT_EVENT_TEXT_LIMIT",
+        "session_prompt_write_valid_bool(message_matches)",
         "def session_report_raw_metadata(",
         "def session_meta_repair_fields(",
         "def session_raw_string_field(",
@@ -8289,6 +8354,48 @@ function selfTest() {
   assert.match(findViolations([[SESSION_SELECTOR_MATCH_MOJO_FILE,
     sessionSelectorMatchMojoCanonical.replace("session_selector_matches(id, selector, True)", "old_match()")]]).join("\n"),
   /exact\/prefix matching must remain in the bounded versioned Mojo plan/u);
+  const outputPolicyConsumer = [
+    "prodex_mojo_core::rich::super_expose_output_cursor_valid(",
+    "prodex_mojo_core::session_cli_policy::output_event_plan(",
+    "prodex_mojo_core::session_cli_policy::exact_user_message_match(",
+    "output_page_does_not_drop_events_from_one_rollout_line",
+  ].join("\n");
+  assert.deepEqual(findViolations([[SUPER_EXPOSE_OUTPUT_FILE, outputPolicyConsumer]]), []);
+  assert.match(findViolations([[SUPER_EXPOSE_OUTPUT_FILE,
+    outputPolicyConsumer.replace("prodex_mojo_core::session_cli_policy::output_event_plan(", "fn rust_page_plan(")]]).join("\n"),
+  /output policy must retain Mojo call/u);
+  const outputPolicyAdapter = [
+    "prodex_session_prompt_write_output_event_plan_v1(",
+    "prodex_session_prompt_write_exact_user_message_match_v1(",
+    "pub fn output_event_plan(",
+    "pub fn exact_user_message_match(",
+    "output_abi_rejects_wrong_version_and_invalid_boolean_facts",
+  ].join("\n");
+  assert.deepEqual(findViolations([[SUPER_EXPOSE_OUTPUT_EVENT_ADAPTER_FILE, outputPolicyAdapter]]), []);
+  assert.match(findViolations([[SUPER_EXPOSE_OUTPUT_EVENT_ADAPTER_FILE,
+    outputPolicyAdapter.replace("pub fn output_event_plan(", "fn old_page_plan(")]]).join("\n"),
+  /output ABI adapter must retain/u);
+  const outputPolicyMojo = [
+    '@export("prodex_session_report_update_json_v2")',
+    '@export("prodex_session_prompt_write_output_event_plan_v1")',
+    '@export("prodex_session_prompt_write_exact_user_message_match_v1")',
+    "SESSION_PROMPT_WRITE_OUTPUT_EVENT_TEXT_LIMIT",
+    "session_prompt_write_valid_bool(message_matches)",
+    "def session_report_raw_metadata(",
+    "def session_meta_repair_fields(",
+    "def session_raw_string_field(",
+    "def session_raw_string_equals_literal(",
+    "def session_raw_numeric_field(",
+  ].join("\n");
+  assert.deepEqual(findViolations([[SUPER_EXPOSE_OUTPUT_EVENT_MOJO_FILE, outputPolicyMojo]]), []);
+  assert.match(findViolations([[SUPER_EXPOSE_OUTPUT_EVENT_MOJO_FILE,
+    outputPolicyMojo.replace("SESSION_PROMPT_WRITE_OUTPUT_EVENT_TEXT_LIMIT", "MISSING")]]).join("\n"),
+  /raw session-report semantics must remain Mojo-owned/u);
+  assert.deepEqual(findViolations([[SUPER_EXPOSE_OUTPUT_CALLER_TEST_FILE,
+    "output_page_does_not_drop_events_from_one_rollout_line\nprodex_mojo_core::MOJO_ACTIVE"]]), []);
+  assert.deepEqual(findViolations([[SUPER_EXPOSE_OUTPUT_QUEUE_TEST_FILE,
+    "queue_success_verifies_exact_message_whitespace_and_escaping\nqueue_success_verifies_near_limit_escaped_message\nprodex_mojo_core::MOJO_ACTIVE"]]), []);
+
   const runtimeStateRouteConsumerCanonical = [
     "prodex_mojo_core::runtime_state::route_kind_label(",
     "prodex_mojo_core::runtime_state::route_kind_from_label(",
