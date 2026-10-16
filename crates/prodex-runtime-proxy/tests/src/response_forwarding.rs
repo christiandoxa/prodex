@@ -147,6 +147,9 @@ fn filters_binary_response_headers_without_utf8_requirement() {
     );
 }
 
+#[path = "response_forwarding_connection_batch.rs"]
+mod connection_batch_tests;
+
 #[test]
 fn filters_connection_named_binary_response_headers() {
     let headers = runtime_forward_binary_response_headers([
