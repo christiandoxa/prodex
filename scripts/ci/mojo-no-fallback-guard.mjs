@@ -7178,6 +7178,45 @@ export function findViolations(files) {
     }
     return [];
   });
+  const geminiUnsupportedToolRetryViolations = files.flatMap(([filePath, contents]) => {
+    if (filePath === GEMINI_BRIDGE_TOOLS_FILE) {
+      const body = contents.match(/pub fn gemini_provider_core_unsupported_tool_fallback_body\([^]*?^\}/mu)?.[0] ?? "";
+      const required = [
+        "gemini_unsupported_tool_retry_choice(",
+        "provider_error_rejects_request_member(",
+        "gemini_provider_core_request_body_without_tool(body, tool_name)",
+      ];
+      const restoredRust = [
+        ".filter(|tool_name|",
+        ".find_map(|tool_name|",
+        'if tool_name == "computerUse"',
+      ];
+      return required.every((marker) => body.includes(marker)) &&
+        restoredRust.every((marker) => !body.includes(marker)) &&
+        contents.includes("unsupported_tool_retry_chooses_next_rejected_available_builtin_via_mojo")
+        ? [] : [`${filePath}: Gemini rejected-builtin retry order must remain Mojo-owned`];
+    }
+    if (filePath === GEMINI_APPLY_PATCH_ADAPTER_FILE) {
+      const required = [
+        "prodex_gemini_unsupported_tool_retry_choice_v1(",
+        "pub fn gemini_unsupported_tool_retry_choice(",
+        "compiled_gemini_builtin_retry_chooses_priority_and_exhausts",
+        "compiled_gemini_builtin_retry_abi_rejects_invalid_masks_without_mutation",
+      ];
+      return required.filter((marker) => !contents.includes(marker))
+        .map((marker) => `${filePath}: compiled Gemini unsupported-tool retry ABI must retain ${marker}`);
+    }
+    if (filePath === GEMINI_APPLY_PATCH_MOJO_FILE) {
+      return [
+        '@export("prodex_gemini_unsupported_tool_retry_choice_v1")',
+        "GEMINI_UNSUPPORTED_TOOL_RETRY_MASK",
+        "(rejected_mask & bit) != 0",
+        "(attempted_mask & bit) == 0",
+      ].filter((marker) => !contents.includes(marker))
+        .map((marker) => `${filePath}: Gemini builtin retry choice must remain compiled Mojo-owned (${marker})`);
+    }
+    return [];
+  });
   const anthropicAttemptCursorViolations = files.flatMap(([filePath, contents]) => {
     if (filePath === ANTHROPIC_ATTEMPT_CURSOR_FILE) {
       const production = contents.split("#[cfg(test)]", 1)[0];
@@ -7280,7 +7319,7 @@ export function findViolations(files) {
     }
     return [];
   });
-  return [...nativeRecoveryOwnershipViolations, ...quotaRecoveryEligibilityViolations, ...runtimeBrokerReuseMojoViolations, ...geminiResponseMediaMojoViolations, ...cookieEvictionMojoViolations, ...websocketBudgetMojoViolations, ...affinityBindingMojoViolations, ...responsesCapacityRecoveryViolations, ...sseTapMojoOwnershipViolations, ...quotaWatchViolations, ...geminiCompactSnippetViolations, ...geminiCompactTextViolations, ...doctorSmartContextDecisionViolations, ...anthropicAttemptCursorViolations, ...terminalGeometryViolations, ...smartContextCapsuleOrderViolations, ...markerViolations, ...deepseekCatalogPolicyViolations, ...featureOffViolations, ...liveLogRecordViolations, ...runtimePolicyPresetViolations, ...profileHealthCircuitViolations, ...logThroughputViolations, ...operationalDetailSpecViolations, ...transcriptPolicyViolations, ...logLoadPolicyViolations, ...routeReasonViolations, ...runtimeStateQuotaViolations, ...runtimeStateRoutePolicyViolations, ...runtimeProxyRootViolations, ...brokerVersionGuardViolations, ...brokerContinuityViolations, ...brokerLogCacheViolations, ...codexConfigViolations, ...statePolicyViolations, ...quotaSelectionPolicyViolations, ...routeTagMirrorViolations, ...enumTagMirrorViolations, ...appSelectionPolicyMirrorViolations, ...runtimeStateBackgroundViolations, ...redactionViolations, ...profileIdentityViolations, ...governanceInspectionViolations, ...governanceInspectionOrderingViolations, ...exactnessPlannerViolations,
+  return [...nativeRecoveryOwnershipViolations, ...quotaRecoveryEligibilityViolations, ...runtimeBrokerReuseMojoViolations, ...geminiResponseMediaMojoViolations, ...cookieEvictionMojoViolations, ...websocketBudgetMojoViolations, ...affinityBindingMojoViolations, ...responsesCapacityRecoveryViolations, ...sseTapMojoOwnershipViolations, ...quotaWatchViolations, ...geminiCompactSnippetViolations, ...geminiCompactTextViolations, ...doctorSmartContextDecisionViolations, ...anthropicAttemptCursorViolations, ...geminiUnsupportedToolRetryViolations, ...terminalGeometryViolations, ...smartContextCapsuleOrderViolations, ...markerViolations, ...deepseekCatalogPolicyViolations, ...featureOffViolations, ...liveLogRecordViolations, ...runtimePolicyPresetViolations, ...profileHealthCircuitViolations, ...logThroughputViolations, ...operationalDetailSpecViolations, ...transcriptPolicyViolations, ...logLoadPolicyViolations, ...routeReasonViolations, ...runtimeStateQuotaViolations, ...runtimeStateRoutePolicyViolations, ...runtimeProxyRootViolations, ...brokerVersionGuardViolations, ...brokerContinuityViolations, ...brokerLogCacheViolations, ...codexConfigViolations, ...statePolicyViolations, ...quotaSelectionPolicyViolations, ...routeTagMirrorViolations, ...enumTagMirrorViolations, ...appSelectionPolicyMirrorViolations, ...runtimeStateBackgroundViolations, ...redactionViolations, ...profileIdentityViolations, ...governanceInspectionViolations, ...governanceInspectionOrderingViolations, ...exactnessPlannerViolations,
     ...adaptiveBudgetViolations,
     ...providerUsageViolations,
     ...auditUsageViolations,
@@ -7917,6 +7956,18 @@ function selfTest() {
   assert.match(findViolations([[TERMINAL_SEPARATOR_CONSUMER_FILE,
     "pub fn tui_connected_separator_line(width: u16) -> String {\nmatch width {}\n}",
   ]]).join("\n"), /connected separator characters must come from compiled Mojo/u);
+  const geminiRetryConsumer = [
+    "gemini_unsupported_tool_retry_choice(",
+    "provider_error_rejects_request_member(",
+    "gemini_provider_core_request_body_without_tool(body, tool_name)",
+  ].join("\n");
+  const geminiRetryTestName = "unsupported_tool_retry_chooses_next_rejected_available_builtin_via_mojo";
+  assert.deepEqual(findViolations([[GEMINI_BRIDGE_TOOLS_FILE,
+    "pub fn gemini_provider_core_unsupported_tool_fallback_body() {\n" + geminiRetryConsumer + "\n}\n" + geminiRetryTestName + "\ngemini_bridge_request_without_tool(",
+  ]]), []);
+  assert.match(findViolations([[GEMINI_BRIDGE_TOOLS_FILE,
+    "pub fn gemini_provider_core_unsupported_tool_fallback_body() {\n" + geminiRetryConsumer + "\n.find_map(|tool_name| {})\n}\n" + geminiRetryTestName + "\ngemini_bridge_request_without_tool(",
+  ]]).join("\n"), /Gemini rejected-builtin retry order must remain Mojo-owned/u);
   const anthropicCursorConsumer = [
     "fn anthropic_attempt_cursor_step(",
     "prodex_mojo_core::provider_constraints::provider_attempt_cursor_plan(",
@@ -9165,12 +9216,27 @@ function selfTest() {
   assert.match(findViolations([[GEMINI_APPLY_PATCH_FILE, "fn normalize(input: &str) {}"]]).join("\n"),
     /apply-patch semantics must retain/u);
   assert.deepEqual(findViolations([[GEMINI_APPLY_PATCH_ADAPTER_FILE,
-    "prodex_gemini_apply_patch_block_v1(\nprodex_gemini_edit_patch_v1("]]), []);
+    [
+      "prodex_gemini_apply_patch_block_v1(",
+      "prodex_gemini_edit_patch_v1(",
+      "prodex_gemini_unsupported_tool_retry_choice_v1(",
+      "pub fn gemini_unsupported_tool_retry_choice(",
+      "compiled_gemini_builtin_retry_chooses_priority_and_exhausts",
+      "compiled_gemini_builtin_retry_abi_rejects_invalid_masks_without_mutation",
+    ].join("\n")]]), []);
   assert.match(findViolations([[GEMINI_APPLY_PATCH_ADAPTER_FILE,
     "fn gemini_apply_patch_block() {}"]]).join("\n"), /must retain the Mojo ABI/u);
   assert.deepEqual(findViolations([[GEMINI_APPLY_PATCH_MOJO_FILE,
-    '@export("prodex_gemini_apply_patch_block_v1")\ntooling_patch_normalize_block(\n' +
-    '@export("prodex_gemini_edit_patch_v1")\ntooling_patch_put_prefixed_lines(']]), []);
+    [
+      '@export("prodex_gemini_apply_patch_block_v1")',
+      "tooling_patch_normalize_block(",
+      '@export("prodex_gemini_edit_patch_v1")',
+      "tooling_patch_put_prefixed_lines(",
+      '@export("prodex_gemini_unsupported_tool_retry_choice_v1")',
+      "GEMINI_UNSUPPORTED_TOOL_RETRY_MASK",
+      "(rejected_mask & bit) != 0",
+      "(attempted_mask & bit) == 0",
+    ].join("\n")]]), []);
   assert.match(findViolations([[GEMINI_APPLY_PATCH_MOJO_FILE,
     "fn unrelated_gemini_policy() {}"]]).join("\n"), /apply-patch block owner must retain/u);
   assert.deepEqual(findViolations([[GEMINI_APPLY_PATCH_TEST_FILE,

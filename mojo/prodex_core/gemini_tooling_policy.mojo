@@ -21,6 +21,40 @@ comptime GEMINI_TOOLING_INVALID: Int64 = 1
 comptime GEMINI_TOOLING_CAPACITY: Int64 = 3
 comptime GEMINI_TOOLING_ABI: Int64 = 4
 
+# Index contract with the Gemini request bridge:
+# 0 computerUse, 1 codeExecution, 2 urlContext, 3 googleSearch.
+# Error classification remains with Mojo's provider-error kernel. This
+# kernel exclusively chooses which rejected, not-yet-attempted builtin wins.
+comptime GEMINI_UNSUPPORTED_TOOL_RETRY_MASK: Int64 = 0xF
+
+
+@export("prodex_gemini_unsupported_tool_retry_choice_v1")
+def prodex_gemini_unsupported_tool_retry_choice_v1(
+    abi_version: Int64,
+    rejected_mask: Int64,
+    attempted_mask: Int64,
+    result_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != GEMINI_TOOLING_ABI_VERSION:
+        return GEMINI_TOOLING_ABI
+    if (
+        result_address == 0 or rejected_mask < 0 or attempted_mask < 0
+        or rejected_mask > GEMINI_UNSUPPORTED_TOOL_RETRY_MASK
+        or attempted_mask > GEMINI_UNSUPPORTED_TOOL_RETRY_MASK
+    ):
+        return GEMINI_TOOLING_INVALID
+    var selected: Int64 = -1
+    for index in range(4):
+        var bit = Int64(1) << Int64(index)
+        if (rejected_mask & bit) != 0 and (attempted_mask & bit) == 0:
+            selected = Int64(index)
+            break
+    Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(result_address)
+    )[] = selected
+    return GEMINI_TOOLING_OK
+
+
 comptime TOOL_ALIAS_EXEC_COMMAND: Int64 = 1 << 0
 comptime TOOL_ALIAS_RUN_SHELL_COMMAND: Int64 = 1 << 1
 comptime TOOL_ALIAS_SHELL: Int64 = 1 << 2
