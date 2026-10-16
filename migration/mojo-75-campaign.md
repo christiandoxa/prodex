@@ -5629,3 +5629,11 @@ compiled Mojo span planner for comma delimiting, Unicode trimming and empty
 or single-dash suppression. Rust retains only log-field acquisition and
 validated UTF-8 copying; the former Rust split/trim/filter pipeline was
 removed, with direct strict ABI and diagnostic caller regressions.
+
+## Runtime-doctor route-health marker field ownership
+
+The compiled runtime-doctor marker owner now matches optional/wildcard
+profile-route scopes and parses u32 health scores and signed i64 expiries.
+Rust keeps log storage and typed report projection; duplicate Rust wildcard
+matching and numeric parsers were removed. Strict ABI and doctor caller
+regressions cover Unicode, exact scope, missing values and numeric limits.

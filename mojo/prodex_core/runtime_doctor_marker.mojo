@@ -1295,6 +1295,155 @@ def runtime_doctor_message_marker_bounds(
     return result^
 
 
+# Route-health marker fields can target a concrete profile or route, or
+# explicitly carry '-' as an all-target placeholder. These are diagnostic
+# matching rules; the Rust report adapter supplies only borrowed log fields.
+comptime RUNTIME_DOCTOR_ROUTE_MARKER_FIELDS_ABI_VERSION: Int64 = 1
+comptime RUNTIME_DOCTOR_ROUTE_MARKER_NUMBER_ABI_VERSION: Int64 = 1
+comptime RUNTIME_DOCTOR_ROUTE_MARKER_U32: Int64 = 0
+comptime RUNTIME_DOCTOR_ROUTE_MARKER_I64: Int64 = 1
+
+
+def runtime_doctor_route_marker_dimension_matches(
+    marker_value: ProdexRichStringView,
+    present: Bool,
+    requested: ProdexRichStringView,
+) -> Bool:
+    return (
+        not present
+        or rich_views_equal(marker_value, requested)
+        or rich_view_matches_literal["-"](marker_value, False)
+    )
+
+
+@export("prodex_mojo_runtime_doctor_route_marker_matches_v1")
+def prodex_mojo_runtime_doctor_route_marker_matches_v1(
+    abi_version: Int64,
+    marker_profile_address: UInt,
+    marker_profile_present: Int64,
+    marker_route_address: UInt,
+    marker_route_present: Int64,
+    requested_profile_address: UInt,
+    requested_route_address: UInt,
+    result_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != RUNTIME_DOCTOR_ROUTE_MARKER_FIELDS_ABI_VERSION:
+        return 4
+    if (
+        marker_profile_address == 0 or marker_route_address == 0
+        or requested_profile_address == 0 or requested_route_address == 0
+        or result_address == 0
+        or (marker_profile_present != 0 and marker_profile_present != 1)
+        or (marker_route_present != 0 and marker_route_present != 1)
+    ):
+        return 1
+    var marker_profile = Pointer[mut=False, ProdexRichStringView, ImmUntrackedOrigin](
+        unsafe_from_address=Int(marker_profile_address)
+    )[].copy()
+    var marker_route = Pointer[mut=False, ProdexRichStringView, ImmUntrackedOrigin](
+        unsafe_from_address=Int(marker_route_address)
+    )[].copy()
+    var requested_profile = Pointer[mut=False, ProdexRichStringView, ImmUntrackedOrigin](
+        unsafe_from_address=Int(requested_profile_address)
+    )[].copy()
+    var requested_route = Pointer[mut=False, ProdexRichStringView, ImmUntrackedOrigin](
+        unsafe_from_address=Int(requested_route_address)
+    )[].copy()
+    if (
+        not rich_view_valid(marker_profile, 0x7FFFFFFFFFFFFFFF)
+        or not rich_view_valid(marker_route, 0x7FFFFFFFFFFFFFFF)
+        or not rich_view_valid(requested_profile, 0x7FFFFFFFFFFFFFFF)
+        or not rich_view_valid(requested_route, 0x7FFFFFFFFFFFFFFF)
+    ):
+        return 2
+    var result = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(result_address)
+    )
+    result[] = 1 if (
+        runtime_doctor_route_marker_dimension_matches(
+            marker_profile, marker_profile_present == 1, requested_profile
+        )
+        and runtime_doctor_route_marker_dimension_matches(
+            marker_route, marker_route_present == 1, requested_route
+        )
+    ) else 0
+    return 0
+
+
+def runtime_doctor_route_marker_parse_number(
+    value: ProdexRichStringView,
+    kind: Int64,
+) -> Tuple[Bool, Int64]:
+    var length = Int64(value.len)
+    if length == 0:
+        return (False, Int64(0))
+    var source = rich_view_ptr(value)
+    var negative = source[unsafe_offset=0] == 45
+    if negative and kind == RUNTIME_DOCTOR_ROUTE_MARKER_U32:
+        return (False, Int64(0))
+    var cursor: Int64 = 0
+    if negative or source[unsafe_offset=0] == 43:
+        cursor = 1
+    if cursor == length:
+        return (False, Int64(0))
+    var maximum = UInt64(4294967295)
+    if kind == RUNTIME_DOCTOR_ROUTE_MARKER_I64:
+        maximum = UInt64(9223372036854775807)
+        if negative:
+            maximum = UInt64(9223372036854775808)
+    var parsed = UInt64(0)
+    while cursor < length:
+        var byte = source[unsafe_offset=cursor]
+        if byte < 48 or byte > 57:
+            return (False, Int64(0))
+        var digit = UInt64(byte - 48)
+        if parsed > (maximum - digit) // UInt64(10):
+            return (False, Int64(0))
+        parsed = parsed * UInt64(10) + digit
+        cursor += 1
+    if negative:
+        if parsed == UInt64(9223372036854775808):
+            return (True, Int64(-9223372036854775807) - 1)
+        return (True, -Int64(parsed))
+    return (True, Int64(parsed))
+
+
+@export("prodex_mojo_runtime_doctor_route_marker_number_v1")
+def prodex_mojo_runtime_doctor_route_marker_number_v1(
+    abi_version: Int64,
+    value_address: UInt,
+    input_present: Int64,
+    kind: Int64,
+    output_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != RUNTIME_DOCTOR_ROUTE_MARKER_NUMBER_ABI_VERSION:
+        return 4
+    if (
+        value_address == 0 or output_address == 0
+        or (input_present != 0 and input_present != 1)
+        or (kind != RUNTIME_DOCTOR_ROUTE_MARKER_U32
+            and kind != RUNTIME_DOCTOR_ROUTE_MARKER_I64)
+    ):
+        return 1
+    var source = Pointer[mut=False, ProdexRichStringView, ImmUntrackedOrigin](
+        unsafe_from_address=Int(value_address)
+    )[].copy()
+    if not rich_view_valid(source, 0x7FFFFFFFFFFFFFFF):
+        return 2
+    var output = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    output[unsafe_offset=0] = 0
+    output[unsafe_offset=1] = 0
+    if input_present == 0:
+        return 0
+    var parsed = runtime_doctor_route_marker_parse_number(source, kind)
+    if parsed[0]:
+        output[unsafe_offset=0] = 1
+        output[unsafe_offset=1] = parsed[1]
+    return 0
+
+
 def runtime_doctor_route_health_compare_text(
     left: ProdexRichStringView, right: ProdexRichStringView
 ) -> Int64:
