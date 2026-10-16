@@ -87,10 +87,12 @@ impl AnthropicAttemptCursor {
         Self {
             auth_count,
             model_count,
-            current: (auth_count > 0 && model_count > 0).then_some(AnthropicAttempt {
-                auth_index: 0,
-                model_index: 0,
-            }),
+            current: anthropic_attempt_cursor_step(
+                prodex_mojo_core::provider_constraints::PROVIDER_ATTEMPT_CURSOR_INITIAL,
+                auth_count,
+                model_count,
+                None,
+            ),
         }
     }
 
@@ -99,21 +101,41 @@ impl AnthropicAttemptCursor {
     }
 
     fn next_model(&mut self) {
-        let Some(mut attempt) = self.current else {
-            return;
-        };
-        attempt.model_index += 1;
-        self.current = (attempt.model_index < self.model_count).then_some(attempt);
+        self.current = anthropic_attempt_cursor_step(
+            prodex_mojo_core::provider_constraints::PROVIDER_ATTEMPT_CURSOR_NEXT_MODEL,
+            self.auth_count,
+            self.model_count,
+            self.current,
+        );
     }
 
     fn next_credential(&mut self) {
-        let Some(mut attempt) = self.current else {
-            return;
-        };
-        attempt.auth_index += 1;
-        attempt.model_index = 0;
-        self.current = (attempt.auth_index < self.auth_count).then_some(attempt);
+        self.current = anthropic_attempt_cursor_step(
+            prodex_mojo_core::provider_constraints::PROVIDER_ATTEMPT_CURSOR_NEXT_CREDENTIAL,
+            self.auth_count,
+            self.model_count,
+            self.current,
+        );
     }
+}
+
+fn anthropic_attempt_cursor_step(
+    operation: i64,
+    auth_count: usize,
+    model_count: usize,
+    current: Option<AnthropicAttempt>,
+) -> Option<AnthropicAttempt> {
+    prodex_mojo_core::provider_constraints::provider_attempt_cursor_plan(
+        operation,
+        model_count,
+        auth_count,
+        current.map(|attempt| (attempt.model_index, attempt.auth_index)),
+    )
+    .expect("compiled Mojo Anthropic retry cursor returned invalid output")
+    .map(|(model_index, auth_index)| AnthropicAttempt {
+        model_index,
+        auth_index,
+    })
 }
 
 enum AnthropicAttemptOutcome {
@@ -748,6 +770,42 @@ mod tests {
                 },
             ]
         );
+    }
+
+    #[test]
+    fn anthropic_attempt_cursor_model_exhaustion_and_auth_rotation_are_mojo_owned() {
+        let mut cursor = AnthropicAttemptCursor::new(3, 2);
+        assert_eq!(
+            cursor.current(),
+            Some(AnthropicAttempt {
+                auth_index: 0,
+                model_index: 0
+            }),
+        );
+        cursor.next_model();
+        assert_eq!(
+            cursor.current(),
+            Some(AnthropicAttempt {
+                auth_index: 0,
+                model_index: 1
+            }),
+        );
+        cursor.next_model();
+        assert_eq!(cursor.current(), None);
+        cursor.next_credential();
+        assert_eq!(cursor.current(), None);
+
+        let mut cursor = AnthropicAttemptCursor::new(2, 2);
+        cursor.next_credential();
+        assert_eq!(
+            cursor.current(),
+            Some(AnthropicAttempt {
+                auth_index: 1,
+                model_index: 0
+            }),
+        );
+        cursor.next_credential();
+        assert_eq!(cursor.current(), None);
     }
 
     #[test]

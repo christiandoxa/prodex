@@ -5652,3 +5652,11 @@ Strict ABI and terminal-ui caller tests cover the grammar and edge cases.
 all u16 widths. Rust's width-specific match, formatting and repeated glyph
 calculation were removed; Rust validates and owns the returned String only.
 Strict ABI, terminal-ui caller and no-fallback guard coverage are retained.
+
+## Anthropic model/credential attempt cursor migrated to Mojo
+
+The production Anthropic retry loop now uses the compiled provider-constraints
+cursor operation to initialize, advance a model, rotate a credential and stop
+at exhaustion. Rust's count-based initialization and index advancement were
+removed, leaving host transport and DTO reconstruction only. Direct strict
+ABI and real retry caller regressions enforce the single semantic owner.

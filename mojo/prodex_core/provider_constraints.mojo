@@ -8970,6 +8970,66 @@ def prodex_provider_retry_plan_v1(
     return PROVIDER_RETRY_STATUS_OK
 
 
+# Model/credential attempt cursor is a deterministic part of the provider retry
+# engine. The Rust transport drives effects, but cannot advance indices itself.
+comptime PROVIDER_ATTEMPT_CURSOR_ABI_VERSION: Int64 = 1
+comptime PROVIDER_ATTEMPT_CURSOR_INITIAL: Int64 = 0
+comptime PROVIDER_ATTEMPT_CURSOR_NEXT_MODEL: Int64 = 1
+comptime PROVIDER_ATTEMPT_CURSOR_NEXT_CREDENTIAL: Int64 = 2
+
+
+@export("prodex_provider_attempt_cursor_v1")
+def prodex_provider_attempt_cursor_v1(
+    abi_version: Int64,
+    operation: Int64,
+    model_count: Int64,
+    auth_count: Int64,
+    model_index: Int64,
+    auth_index: Int64,
+    output_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != PROVIDER_ATTEMPT_CURSOR_ABI_VERSION:
+        return 4
+    if (
+        output_address == 0 or model_count < 0 or auth_count < 0
+        or operation < PROVIDER_ATTEMPT_CURSOR_INITIAL
+        or operation > PROVIDER_ATTEMPT_CURSOR_NEXT_CREDENTIAL
+    ):
+        return 1
+    if operation == PROVIDER_ATTEMPT_CURSOR_INITIAL:
+        if model_index != -1 or auth_index != -1:
+            return 1
+    elif (
+        (model_index == -1 and auth_index != -1)
+        or (model_index != -1 and auth_index == -1)
+        or model_index < -1 or auth_index < -1
+        or (model_index >= 0 and (model_index >= model_count or auth_index >= auth_count))
+    ):
+        return 1
+
+    var selected_model: Int64 = -1
+    var selected_auth: Int64 = -1
+    if operation == PROVIDER_ATTEMPT_CURSOR_INITIAL:
+        if model_count > 0 and auth_count > 0:
+            selected_model = 0
+            selected_auth = 0
+    elif model_index >= 0 and auth_index >= 0:
+        if operation == PROVIDER_ATTEMPT_CURSOR_NEXT_MODEL:
+            if model_index + 1 < model_count:
+                selected_model = model_index + 1
+                selected_auth = auth_index
+        elif auth_index + 1 < auth_count:
+            selected_model = 0
+            selected_auth = auth_index + 1
+
+    var output = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    output[unsafe_offset=0] = selected_model
+    output[unsafe_offset=1] = selected_auth
+    return 0
+
+
 comptime PROVIDER_RETRY_TRANSITION_TERMINAL: Int64 = 0
 comptime PROVIDER_RETRY_TRANSITION_NEXT_MODEL: Int64 = 1
 comptime PROVIDER_RETRY_TRANSITION_ROTATE_CREDENTIAL: Int64 = 2
