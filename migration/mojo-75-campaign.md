@@ -5735,3 +5735,12 @@ deleted. Rust retains only standard-library full Unicode lowercase conversion
 because Mojo does not expose equivalent contextual casing; it never performs
 the header ID classification. Direct ABI, caller, and no-fallback guard tests
 cover separator collapse and Unicode casefold edge cases.
+
+## Provider quota numeric reset timestamp policy moved to Mojo
+
+The provider-to-Codex quota adapter now delegates numeric epoch versus
+relative duration classification, millisecond conversion, 60-second clock
+skew boundary, and saturated time addition to the compiled provider-
+constraints owner. Rust retains HTTP/chrono decoding and the system clock,
+with no Rust recomputation of the migrated numeric policy. Strict ABI and
+real provider-header caller tests cover numeric and relative reset times.

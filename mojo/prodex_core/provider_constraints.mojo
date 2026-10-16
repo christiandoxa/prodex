@@ -1720,6 +1720,58 @@ def prodex_provider_quota_limit_id_v1(
     return 0
 
 
+# The host handles wall-clock acquisition and RFC3339 decoding. Mojo
+# interprets numeric reset headers and computes overflow-safe relative times.
+comptime PROVIDER_QUOTA_RESET_NUMERIC: Int64 = 0
+comptime PROVIDER_QUOTA_RESET_DURATION: Int64 = 1
+comptime PROVIDER_QUOTA_RESET_INT64_MAX: Int64 = 9223372036854775807
+comptime PROVIDER_QUOTA_RESET_INT64_MIN: Int64 = -9223372036854775807 - 1
+
+
+def provider_quota_reset_saturating_add(left: Int64, right: Int64) -> Int64:
+    if right > 0 and left > PROVIDER_QUOTA_RESET_INT64_MAX - right:
+        return PROVIDER_QUOTA_RESET_INT64_MAX
+    if right < 0 and left < PROVIDER_QUOTA_RESET_INT64_MIN - right:
+        return PROVIDER_QUOTA_RESET_INT64_MIN
+    return left + right
+
+
+@export("prodex_provider_quota_reset_epoch_v1")
+def prodex_provider_quota_reset_epoch_v1(
+    abi_version: Int64,
+    operation: Int64,
+    number: Int64,
+    now: Int64,
+    output_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != PROVIDER_QUOTA_HEADER_ABI_VERSION:
+        return 4
+    if (
+        output_address == 0
+        or operation < PROVIDER_QUOTA_RESET_NUMERIC
+        or operation > PROVIDER_QUOTA_RESET_DURATION
+        or (operation == PROVIDER_QUOTA_RESET_DURATION and number < 0)
+    ):
+        return 1
+    var result: Int64 = 0
+    if operation == PROVIDER_QUOTA_RESET_DURATION:
+        result = provider_quota_reset_saturating_add(now, number)
+    elif number > 10_000_000_000:
+        result = number // 1000
+    else:
+        var threshold = PROVIDER_QUOTA_RESET_INT64_MIN
+        if now > PROVIDER_QUOTA_RESET_INT64_MIN + 60:
+            threshold = now - 60
+        if number > threshold:
+            result = number
+        else:
+            result = provider_quota_reset_saturating_add(now, max(number, Int64(0)))
+    Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )[] = result
+    return 0
+
+
 comptime PROVIDER_QUOTA_PERCENT_GEMINI: Int64 = 0
 comptime PROVIDER_QUOTA_PERCENT_OPENAI: Int64 = 1
 

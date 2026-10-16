@@ -1,8 +1,9 @@
 use crate::runtime_launch::proxy_startup::provider_bridge::RuntimeProviderBridgeKind;
 use chrono::{DateTime, Utc};
 use prodex_mojo_core::provider_constraints::{
-    provider_quota_clean_header, provider_quota_gemini_used_percent, provider_quota_limit_id,
-    provider_quota_model_label, provider_quota_openai_used_percent,
+    provider_quota_clean_header, provider_quota_duration_reset_epoch,
+    provider_quota_gemini_used_percent, provider_quota_limit_id, provider_quota_model_label,
+    provider_quota_numeric_reset_epoch, provider_quota_openai_used_percent,
 };
 use prodex_quota::GeminiQuotaInfo;
 use reqwest::header::HeaderMap;
@@ -205,15 +206,15 @@ fn parse_reset_epoch_seconds(value: &str) -> Option<i64> {
     }
     if let Ok(number) = value.parse::<i64>() {
         let now = Utc::now().timestamp();
-        return Some(if number > 10_000_000_000 {
-            number / 1000
-        } else if number > now.saturating_sub(60) {
-            number
-        } else {
-            now.saturating_add(number.max(0))
-        });
+        return Some(
+            provider_quota_numeric_reset_epoch(number, now)
+                .expect("compiled Mojo quota numeric reset decision returned invalid output"),
+        );
     }
-    parse_duration_seconds(value).map(|seconds| Utc::now().timestamp().saturating_add(seconds))
+    parse_duration_seconds(value).map(|seconds| {
+        provider_quota_duration_reset_epoch(seconds, Utc::now().timestamp())
+            .expect("compiled Mojo quota duration reset decision returned invalid output")
+    })
 }
 
 fn parse_rfc3339_epoch_seconds(value: &str) -> Option<i64> {
@@ -409,6 +410,45 @@ mod tests {
                 .iter()
                 .any(|(name, _)| { name == "x-deepseek-requests-primary-reset-at" })
         );
+    }
+
+    #[test]
+    fn quota_reset_headers_observe_compiled_mojo_absolute_and_relative_epochs() {
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            "x-ratelimit-limit-requests",
+            HeaderValue::from_static("100"),
+        );
+        headers.insert(
+            "x-ratelimit-remaining-requests",
+            HeaderValue::from_static("1"),
+        );
+        headers.insert(
+            "x-ratelimit-reset-requests",
+            HeaderValue::from_static("1234567890123"),
+        );
+        let mapped = runtime_openai_style_codex_rate_limit_headers(&headers, "test", "Test");
+        assert!(mapped.contains(&(
+            "x-test-requests-primary-reset-at".to_string(),
+            "1234567890".to_string()
+        )));
+
+        headers.insert(
+            "x-ratelimit-reset-requests",
+            HeaderValue::from_static("60s"),
+        );
+        let before = Utc::now().timestamp();
+        let mapped = runtime_openai_style_codex_rate_limit_headers(&headers, "test", "Test");
+        let after = Utc::now().timestamp();
+        let timestamp: i64 = mapped
+            .iter()
+            .find(|(name, _)| name == "x-test-requests-primary-reset-at")
+            .expect("Mojo-backed duration reset is present")
+            .1
+            .parse()
+            .unwrap();
+        assert!(timestamp >= before.saturating_add(60));
+        assert!(timestamp <= after.saturating_add(60));
     }
 
     #[test]

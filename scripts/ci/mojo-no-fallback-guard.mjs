@@ -7406,6 +7406,9 @@ export function findViolations(files) {
         "quota_used_percent_rounding_and_saturation_are_mojo_owned",
         "provider_quota_limit_id(limit_id)",
         "quota_header_limit_id_unicode_projection_is_compiled_mojo_owned",
+        "provider_quota_numeric_reset_epoch(number, now)",
+        "provider_quota_duration_reset_epoch(seconds, Utc::now().timestamp())",
+        "quota_reset_headers_observe_compiled_mojo_absolute_and_relative_epochs",
       ];
       const retiredRust = [
         "fn gemini_bucket_model_label(",
@@ -7415,6 +7418,10 @@ export function findViolations(files) {
         "fn format_percent(",
         "fn sanitize_limit_id(",
         'sanitize_limit_id(limit_id).replace',
+        "return Some(if number > 10_000_000_000",
+        "now.saturating_sub(60)",
+        "now.saturating_add(number.max(0))",
+        "Utc::now().timestamp().saturating_add(seconds)",
         "((limit - remaining).max(0.0) / limit * 100.0).clamp(",
       ];
       return required.every((marker) => contents.includes(marker)) &&
@@ -7439,6 +7446,11 @@ export function findViolations(files) {
         "pub fn provider_quota_limit_id(",
         "quota_limit_id_mojo_owns_ascii_projection_and_separator_collapse",
         "quota_limit_id_abi_rejects_malformed_and_undersized_buffers",
+        "fn prodex_provider_quota_reset_epoch_v1(",
+        "pub fn provider_quota_numeric_reset_epoch(",
+        "pub fn provider_quota_duration_reset_epoch(",
+        "quota_reset_numeric_epoch_classification_and_saturation_is_compiled_mojo",
+        "quota_reset_epoch_abi_rejects_invalid_modes_without_mutation",
       ];
       return required.filter((marker) => !contents.includes(marker))
         .map((marker) => filePath + ": required strict quota header Mojo ABI test or adapter missing " + marker);
@@ -7456,6 +7468,10 @@ export function findViolations(files) {
         "PROVIDER_QUOTA_PERCENT_OPENAI",
         '@export("prodex_provider_quota_limit_id_v1")',
         "dash_pending",
+        '@export("prodex_provider_quota_reset_epoch_v1")',
+        "PROVIDER_QUOTA_RESET_NUMERIC",
+        "PROVIDER_QUOTA_RESET_DURATION",
+        "provider_quota_reset_saturating_add(",
       ];
       return required.filter((marker) => !contents.includes(marker))
         .map((marker) => filePath + ": compiled provider quota header semantics must retain " + marker);
@@ -8197,6 +8213,9 @@ function selfTest() {
     "quota_used_percent_rounding_and_saturation_are_mojo_owned",
     "provider_quota_limit_id(limit_id)",
     "quota_header_limit_id_unicode_projection_is_compiled_mojo_owned",
+    "provider_quota_numeric_reset_epoch(number, now)",
+    "provider_quota_duration_reset_epoch(seconds, Utc::now().timestamp())",
+    "quota_reset_headers_observe_compiled_mojo_absolute_and_relative_epochs",
   ].join("\n");
   const quotaHeaderFile = "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_rate_limits.rs";
   assert.deepEqual(findViolations([[quotaHeaderFile, quotaHeaderConsumer]]), []);
