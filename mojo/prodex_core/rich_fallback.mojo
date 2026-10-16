@@ -236,7 +236,7 @@ def prodex_mojo_rich_model_session_memory_allowed_v1(
         mut=False, ProdexRichStringView, ImmUntrackedOrigin
     ](unsafe_from_address=Int(model_address))
     var model = model_ptr[].copy()
-    if not rich_view_valid(model, RICH_MAX_IDENTIFIER_BYTES):
+    if not rich_view_valid(model, RICH_MAX_FALLBACK_MODEL_BYTES):
         return RICH_STATUS_UTF8
     var bounds = rich_trim_bounds(model)
     var trimmed_model = ProdexRichStringView(

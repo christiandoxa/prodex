@@ -19,6 +19,7 @@ fn session_memory_policy_accepts_only_empty_auto_or_default_models() {
             "{model:?}"
         );
     }
+    assert!(!model_session_memory_allowed(&"x".repeat(4_097)).unwrap());
 }
 
 #[test]
