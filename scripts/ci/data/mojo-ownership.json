@@ -2643,7 +2643,8 @@
         "role": "semantic",
         "operations": [
           "runtime_sse_streaming_chunk_line_boundaries",
-          "runtime_sse_data_payload_join_and_bom"
+          "runtime_sse_data_payload_join_and_bom",
+          "runtime_sse_failure_retry_rotate_flags"
         ]
       },
       {
@@ -2654,7 +2655,8 @@
         "role": "adapter",
         "operations": [
           "runtime_sse_streaming_chunk_line_boundaries",
-          "runtime_sse_data_payload_join_and_bom"
+          "runtime_sse_data_payload_join_and_bom",
+          "runtime_sse_failure_retry_rotate_flags"
         ]
       }
     ],
@@ -11711,6 +11713,29 @@
       "duplicate_production_owner": false,
       "platform_fallback": false,
       "rust_adapter_scope": "Rust owns SSE data String storage, checked borrowed view marshalling, UTF-8 result validation and serde_json decoding; Mojo alone owns payload framing and leading BOM policy."
+    },
+    {
+      "name": "runtime_sse_failure_retry_rotate_flags",
+      "domain": "runtime-proxy/sse-precommit-retry",
+      "introduced_in": "0.438.0",
+      "baseline_state": "Rust combined HTTP error class and RetryProfile or RotateProfile actions with Boolean AND/OR branches into three terminal SSE failure flags",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_runtime_sse_failure_flags_v1",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/sse_line.mojo",
+      "consumer": "crates/prodex-runtime-proxy/src/payload_detection/sse.rs",
+      "consumer_marker": "prodex_mojo_core::runtime_sse_chunk::failure_flags(",
+      "production_consumers": [
+        "crates/prodex-runtime-proxy/src/payload_detection/sse.rs"
+      ],
+      "production_reachability_test": "crates/prodex-runtime-proxy/src/payload_detection/sse.rs",
+      "rust_owner_before": "Rust computed quota blocked, rate limited, and overloaded from several action/class Boolean expressions in parse_runtime_sse_event",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "Rust expression removed; Mojo matrix tests exercise all 18 class/action combinations and invalid ABI; real SSE response.failed fixtures test quota, rate, overload, workspace unavailable and unclassified error",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "Typed Rust HTTP error enum-to-ABI mapping, validated flag projection and serde_json parsing; the pre-commit retry/rotation decision matrix belongs only to Mojo"
     }
   ],
   "rust_semantic_reductions": [

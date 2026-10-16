@@ -13,6 +13,12 @@ struct SseUtf8Span {
 }
 
 unsafe extern "C" {
+    fn prodex_runtime_sse_failure_flags_v1(
+        abi_version: i64,
+        error_class: i64,
+        error_action: i64,
+        output: u64,
+    ) -> i64;
     fn prodex_runtime_sse_payload_join_v1(
         abi_version: i64,
         views: u64,
@@ -133,9 +139,91 @@ pub fn payload_text(data_lines: &[String]) -> Result<String, MojoError> {
     String::from_utf8(output).map_err(|_| MojoError::InvalidOutput)
 }
 
+/// Flags derived only from compiled Mojo SSE pre-commit error policy.
+/// Caller maps its stable HTTP error classes/actions to ABI tags.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SseFailureFlags {
+    pub quota_blocked: bool,
+    pub rate_limited: bool,
+    pub overloaded: bool,
+}
+
+pub fn failure_flags(class_tag: i64, action_tag: i64) -> Result<SseFailureFlags, MojoError> {
+    let mut output = u64::MAX;
+    let status = unsafe {
+        prodex_runtime_sse_failure_flags_v1(
+            1,
+            class_tag,
+            action_tag,
+            &mut output as *mut u64 as u64,
+        )
+    };
+    if status != 0 {
+        return Err(match status {
+            1 => MojoError::InvalidInput,
+            4 => MojoError::AbiMismatch,
+            _ => MojoError::InvalidOutput,
+        });
+    }
+    if output & !7 != 0 || output.count_ones() > 1 {
+        return Err(MojoError::InvalidOutput);
+    }
+    Ok(SseFailureFlags {
+        quota_blocked: output & 1 != 0,
+        rate_limited: output & 2 != 0,
+        overloaded: output & 4 != 0,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn compiled_sse_failure_flags_cover_all_error_class_action_combinations() {
+        for class_tag in 0..=5 {
+            for action_tag in 0..=2 {
+                let plan = failure_flags(class_tag, action_tag).unwrap();
+                assert_eq!(
+                    plan.quota_blocked,
+                    class_tag == 1 && action_tag == 1,
+                    "{class_tag}/{action_tag}"
+                );
+                assert_eq!(
+                    plan.rate_limited,
+                    class_tag == 2 && action_tag == 2,
+                    "{class_tag}/{action_tag}"
+                );
+                assert_eq!(
+                    plan.overloaded,
+                    action_tag == 2 && matches!(class_tag, 4 | 5)
+                        || class_tag == 3 && action_tag == 1,
+                    "{class_tag}/{action_tag}"
+                );
+            }
+        }
+        for class_tag in [-1, 6] {
+            assert_eq!(failure_flags(class_tag, 1), Err(MojoError::InvalidInput));
+        }
+        assert_eq!(failure_flags(1, 3), Err(MojoError::InvalidInput));
+    }
+
+    #[test]
+    fn compiled_sse_failure_flags_reject_invalid_abi_without_writes() {
+        let mut output = 99_u64;
+        unsafe {
+            assert_eq!(
+                prodex_runtime_sse_failure_flags_v1(2, 1, 1, &mut output as *mut u64 as u64,),
+                4
+            );
+            assert_eq!(prodex_runtime_sse_failure_flags_v1(1, 1, 1, 0), 1);
+            assert_eq!(
+                prodex_runtime_sse_failure_flags_v1(1, 5, -1, &mut output as *mut u64 as u64,),
+                1
+            );
+        }
+        assert_eq!(output, 99);
+    }
 
     #[test]
     fn compiled_sse_data_payload_exact_bom_join_and_unicode_cases() {
