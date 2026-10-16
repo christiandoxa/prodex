@@ -5,6 +5,8 @@ pub use scalar_policy::{
     provider_reasoning_effort_class, provider_reasoning_effort_label,
 };
 
+mod quota_headers;
+pub use quota_headers::{provider_quota_clean_header, provider_quota_model_label};
 mod gemini_bridge_request;
 mod gemini_failure_policy;
 mod gemini_request;

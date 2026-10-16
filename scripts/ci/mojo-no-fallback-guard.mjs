@@ -123,6 +123,8 @@ const PROFILE_ROUTE_CIRCUIT_ADAPTER_FILE = "crates/prodex-mojo-core/src/runtime/
 const PROFILE_ROUTE_CIRCUIT_MOJO_FILE = "mojo/prodex_core/runtime_profile_route_circuit.mojo";
 const PROFILE_ROUTE_CIRCUIT_TEST_FILE = "crates/prodex-mojo-core/tests/runtime_profile_route_circuit.rs";
 const PROMOTED_FILES = [
+  "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_rate_limits.rs",
+  "crates/prodex-mojo-core/src/provider_constraints/quota_headers.rs",
   "crates/prodex-runtime-proxy/tests/src/error_policy/rate_limit_header.rs",
   "crates/prodex-redaction/src/lib.rs",
   "crates/prodex-mojo-core/src/redaction.rs",
@@ -7390,6 +7392,51 @@ export function findViolations(files) {
     }
     return [];
   });
+  const quotaHeaderProjectionViolations = files.flatMap(([filePath, contents]) => {
+    if (filePath === "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_rate_limits.rs") {
+      const required = [
+        "provider_quota_clean_header(value)",
+        "provider_quota_clean_header(profile_name)",
+        "provider_quota_clean_header(&value)",
+        "provider_quota_model_label(bucket.model_id.as_deref(), bucket.token_type.as_deref())",
+        "quota_header_model_source_and_value_cleaning_are_mojo_owned",
+        "quota_header_cleaning_is_used_for_openai_style_provider_labels",
+      ];
+      const retiredRust = [
+        "fn gemini_bucket_model_label(",
+        "fn clean_header_value(",
+        ".map(clean_header_value)",
+      ];
+      return required.every((marker) => contents.includes(marker)) &&
+        retiredRust.every((marker) => !contents.includes(marker))
+        ? [] : [filePath + ": quota header labels and value cleaning must remain compiled Mojo-owned"];
+    }
+    if (filePath === "crates/prodex-mojo-core/src/provider_constraints/quota_headers.rs") {
+      const required = [
+        "fn prodex_provider_quota_header_clean_v1(",
+        "fn prodex_provider_quota_model_label_v1(",
+        "pub fn provider_quota_clean_header(",
+        "pub fn provider_quota_model_label(",
+        "cleaned_provider_headers_remove_crlf_and_unicode_edge_space",
+        "gemini_model_label_owns_source_precedence_prefix_and_unicode",
+        "strict_quota_header_abi_rejects_invalid_buffers_without_writes",
+      ];
+      return required.filter((marker) => !contents.includes(marker))
+        .map((marker) => filePath + ": required strict quota header Mojo ABI test or adapter missing " + marker);
+    }
+    if (filePath === "mojo/prodex_core/provider_constraints.mojo") {
+      const required = [
+        '@export("prodex_provider_quota_header_clean_v1")',
+        '@export("prodex_provider_quota_model_label_v1")',
+        "provider_quota_header_clean_kernel(",
+        "rich_unicode_space(scalar)",
+        'rich_view_prefix["models/"]',
+      ];
+      return required.filter((marker) => !contents.includes(marker))
+        .map((marker) => filePath + ": compiled provider quota header semantics must retain " + marker);
+    }
+    return [];
+  });
   const terminalGeometryViolations = files.flatMap(([filePath, contents]) => {
     if (filePath === TERMINAL_GEOMETRY_CONSUMER_FILE) {
       const required = [
@@ -7447,7 +7494,7 @@ export function findViolations(files) {
     }
     return [];
   });
-  return [...nativeRecoveryOwnershipViolations, ...quotaRecoveryEligibilityViolations, ...runtimeBrokerReuseMojoViolations, ...geminiResponseMediaMojoViolations, ...cookieEvictionMojoViolations, ...websocketBudgetMojoViolations, ...affinityBindingMojoViolations, ...responsesCapacityRecoveryViolations, ...sseTapMojoOwnershipViolations, ...quotaWatchViolations, ...geminiCompactSnippetViolations, ...geminiCompactTextViolations, ...doctorSmartContextDecisionViolations, ...anthropicAttemptCursorViolations, ...geminiUnsupportedToolRetryViolations, ...terminalGeometryViolations, ...smartContextCapsuleOrderViolations, ...markerViolations, ...deepseekCatalogPolicyViolations, ...featureOffViolations, ...liveLogRecordViolations, ...runtimePolicyPresetViolations, ...profileHealthCircuitViolations, ...logThroughputViolations, ...operationalDetailSpecViolations, ...transcriptPolicyViolations, ...logLoadPolicyViolations, ...routeReasonViolations, ...runtimeStateQuotaViolations, ...runtimeStateRoutePolicyViolations, ...runtimeProxyRootViolations, ...brokerVersionGuardViolations, ...brokerContinuityViolations, ...brokerLogCacheViolations, ...codexConfigViolations, ...statePolicyViolations, ...quotaSelectionPolicyViolations, ...routeTagMirrorViolations, ...enumTagMirrorViolations, ...appSelectionPolicyMirrorViolations, ...runtimeStateBackgroundViolations, ...redactionViolations, ...rateLimitHeaderSelectionViolations, ...profileIdentityViolations, ...governanceInspectionViolations, ...governanceInspectionOrderingViolations, ...exactnessPlannerViolations,
+  return [...nativeRecoveryOwnershipViolations, ...quotaRecoveryEligibilityViolations, ...runtimeBrokerReuseMojoViolations, ...geminiResponseMediaMojoViolations, ...cookieEvictionMojoViolations, ...websocketBudgetMojoViolations, ...affinityBindingMojoViolations, ...responsesCapacityRecoveryViolations, ...sseTapMojoOwnershipViolations, ...quotaWatchViolations, ...geminiCompactSnippetViolations, ...geminiCompactTextViolations, ...doctorSmartContextDecisionViolations, ...anthropicAttemptCursorViolations, ...geminiUnsupportedToolRetryViolations, ...terminalGeometryViolations, ...quotaHeaderProjectionViolations, ...smartContextCapsuleOrderViolations, ...markerViolations, ...deepseekCatalogPolicyViolations, ...featureOffViolations, ...liveLogRecordViolations, ...runtimePolicyPresetViolations, ...profileHealthCircuitViolations, ...logThroughputViolations, ...operationalDetailSpecViolations, ...transcriptPolicyViolations, ...logLoadPolicyViolations, ...routeReasonViolations, ...runtimeStateQuotaViolations, ...runtimeStateRoutePolicyViolations, ...runtimeProxyRootViolations, ...brokerVersionGuardViolations, ...brokerContinuityViolations, ...brokerLogCacheViolations, ...codexConfigViolations, ...statePolicyViolations, ...quotaSelectionPolicyViolations, ...routeTagMirrorViolations, ...enumTagMirrorViolations, ...appSelectionPolicyMirrorViolations, ...runtimeStateBackgroundViolations, ...redactionViolations, ...rateLimitHeaderSelectionViolations, ...profileIdentityViolations, ...governanceInspectionViolations, ...governanceInspectionOrderingViolations, ...exactnessPlannerViolations,
     ...adaptiveBudgetViolations,
     ...providerUsageViolations,
     ...auditUsageViolations,
@@ -8113,6 +8160,19 @@ function selfTest() {
   assert.match(findViolations([[ANTHROPIC_ATTEMPT_CURSOR_FILE,
     anthropicCursorConsumer + "\nattempt.model_index += 1",
   ]]).join("\n"), /Anthropic model\/auth cursor transitions must remain Mojo-owned/u);
+  const quotaHeaderConsumer = [
+    "provider_quota_clean_header(value)",
+    "provider_quota_clean_header(profile_name)",
+    "provider_quota_clean_header(&value)",
+    "provider_quota_model_label(bucket.model_id.as_deref(), bucket.token_type.as_deref())",
+    "quota_header_model_source_and_value_cleaning_are_mojo_owned",
+    "quota_header_cleaning_is_used_for_openai_style_provider_labels",
+  ].join("\n");
+  const quotaHeaderFile = "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_rate_limits.rs";
+  assert.deepEqual(findViolations([[quotaHeaderFile, quotaHeaderConsumer]]), []);
+  assert.match(findViolations([[quotaHeaderFile, quotaHeaderConsumer +
+    "\nfn clean_header_value(value: &str) -> String {}",
+  ]]).join("\n"), /quota header labels and value cleaning must remain compiled Mojo-owned/u);
   const terminalGeometryConsumer = [
     "terminal_positive_size_override(&value)",
     "terminal_tty_dimensions(&text)",
