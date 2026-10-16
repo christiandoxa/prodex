@@ -109,6 +109,31 @@ def websocket_failure_text_equals_ci(
     return True
 
 
+# Only an exact invalid previous-response ID without an existing
+# nested error code should be normalized for safe full-context replay.
+# Rust owns JSON mutation; compiled Mojo owns all three policy conditions.
+@export("prodex_runtime_websocket_invalid_id_code_patch_v1")
+def prodex_runtime_websocket_invalid_id_code_patch_v1(
+    abi_version: Int64,
+    exact_invalid_previous_response_id: Int64,
+    error_object_present: Int64,
+    error_code_present: Int64,
+) abi("C") -> Int64:
+    if abi_version != 1:
+        return -4
+    if (
+        not websocket_failure_bool(exact_invalid_previous_response_id)
+        or not websocket_failure_bool(error_object_present)
+        or not websocket_failure_bool(error_code_present)
+    ):
+        return -1
+    return Int64(
+        exact_invalid_previous_response_id == 1
+        and error_object_present == 1
+        and error_code_present == 0
+    )
+
+
 @export("prodex_runtime_websocket_stale_frame_plan_v1")
 def prodex_runtime_websocket_stale_frame_plan_v1(
     abi_version: Int64,

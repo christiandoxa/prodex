@@ -2138,7 +2138,8 @@
         "operations": [
           "runtime_websocket_failure_state_policy",
           "runtime_websocket_stale_frame_policy",
-          "runtime_websocket_terminal_frame_policy"
+          "runtime_websocket_terminal_frame_policy",
+          "runtime_websocket_invalid_previous_id_code_insertion"
         ]
       },
       {
@@ -2150,7 +2151,8 @@
         "operations": [
           "runtime_websocket_failure_state_policy",
           "runtime_websocket_stale_frame_policy",
-          "runtime_websocket_terminal_frame_policy"
+          "runtime_websocket_terminal_frame_policy",
+          "runtime_websocket_invalid_previous_id_code_insertion"
         ]
       },
       {
@@ -11736,6 +11738,29 @@
       "duplicate_production_owner": false,
       "platform_fallback": false,
       "rust_adapter_scope": "Typed Rust HTTP error enum-to-ABI mapping, validated flag projection and serde_json parsing; the pre-commit retry/rotation decision matrix belongs only to Mojo"
+    },
+    {
+      "name": "runtime_websocket_invalid_previous_id_code_insertion",
+      "domain": "runtime-proxy/websocket-continuation-recovery",
+      "introduced_in": "0.438.0",
+      "baseline_state": "Rust rewrote an exact invalid WebSocket previous-response ID error only if JSON had an error object with no code key, using nested conditional gates",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_runtime_websocket_invalid_id_code_patch_v1",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/websocket_failure.mojo",
+      "consumer": "crates/prodex-runtime-proxy/src/websocket_message.rs",
+      "consumer_marker": "prodex_mojo_core::runtime::websocket_invalid_id_code_patch(",
+      "production_consumers": [
+        "crates/prodex-runtime-proxy/src/websocket_message.rs"
+      ],
+      "production_reachability_test": "crates/prodex-runtime-proxy/src/websocket_message.rs",
+      "rust_owner_before": "Rust checked exact invalid response ID, JSON error-object existence, existing code property, and insertion eligibility in separate conditional branches",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "Rust eligibility branches removed; direct Mojo eight-case Boolean matrix and strict invalid-ABI checks plus production regression verify existing vendor codes, exact invalid IDs, malformed JSON, binary frames, and nonmatches",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "Host serde_json parsing and error-object mutation, existing Mojo exact error classifier, typed ABI flags and error mapping; Mojo exclusively decides insertion eligibility"
     }
   ],
   "rust_semantic_reductions": [

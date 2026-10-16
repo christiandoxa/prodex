@@ -130,9 +130,9 @@ pub use websocket_failure::{
     WebsocketFailureDecisionPlan, WebsocketFailureKind, WebsocketFailureStatePlan,
     WebsocketStaleFrameAction, WebsocketTerminalFramePlan, websocket_context_constraint,
     websocket_failure_decision, websocket_failure_frame_classification,
-    websocket_failure_state_plan, websocket_invalid_previous_response_recovery_plan,
-    websocket_stale_frame_plan, websocket_terminal_frame_plan,
-    websocket_turn_state_replay_candidate,
+    websocket_failure_state_plan, websocket_invalid_id_code_patch,
+    websocket_invalid_previous_response_recovery_plan, websocket_stale_frame_plan,
+    websocket_terminal_frame_plan, websocket_turn_state_replay_candidate,
 };
 pub use websocket_loop_control::{
     WebsocketErrorKind, WebsocketPrecommitBudgetInput, WebsocketReadAction, WebsocketReadFrame,

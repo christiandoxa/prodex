@@ -148,6 +148,12 @@ unsafe extern "C" {
         previous_response_not_found: i64,
         stream_committed: i64,
     ) -> i64;
+    fn prodex_runtime_websocket_invalid_id_code_patch_v1(
+        abi_version: i64,
+        exact_invalid: i64,
+        error_object_present: i64,
+        error_code_present: i64,
+    ) -> i64;
     fn prodex_runtime_websocket_stale_frame_plan_v1(
         abi_version: i64,
         previous_response_message_present: i64,
@@ -365,6 +371,30 @@ pub fn websocket_terminal_frame_plan(
             connection_limit: result & 1 != 0,
             terminal: result & 2 != 0,
         }),
+        -4 => Err(MojoError::AbiMismatch),
+        -1 => Err(MojoError::InvalidInput),
+        _ => Err(MojoError::InvalidOutput),
+    }
+}
+
+/// The only WebSocket invalid-ID error-code normalization policy.
+/// Rust remains the serde_json mutation adapter and never recomputes it.
+pub fn websocket_invalid_id_code_patch(
+    exact_invalid: bool,
+    error_object_present: bool,
+    error_code_present: bool,
+) -> Result<bool, MojoError> {
+    let result = unsafe {
+        prodex_runtime_websocket_invalid_id_code_patch_v1(
+            1,
+            i64::from(exact_invalid),
+            i64::from(error_object_present),
+            i64::from(error_code_present),
+        )
+    };
+    match result {
+        0 => Ok(false),
+        1 => Ok(true),
         -4 => Err(MojoError::AbiMismatch),
         -1 => Err(MojoError::InvalidInput),
         _ => Err(MojoError::InvalidOutput),

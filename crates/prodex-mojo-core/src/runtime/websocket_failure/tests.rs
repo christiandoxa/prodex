@@ -522,3 +522,36 @@ fn repeated_failures_keep_terminal_owner_and_releasable_candidates_distinct() {
     assert!(excluded);
     assert_eq!(retryable_failures, 3);
 }
+
+#[test]
+fn websocket_invalid_id_code_patch_mojo_requires_exact_class_missing_code() {
+    for invalid in [false, true] {
+        for error_object in [false, true] {
+            for code in [false, true] {
+                assert_eq!(
+                    websocket_invalid_id_code_patch(invalid, error_object, code),
+                    Ok(invalid && error_object && !code),
+                    "{invalid}/{error_object}/{code}",
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn websocket_invalid_id_code_patch_mojo_rejects_invalid_flags_and_version() {
+    unsafe {
+        assert_eq!(
+            prodex_runtime_websocket_invalid_id_code_patch_v1(2, 1, 1, 0),
+            -4
+        );
+        assert_eq!(
+            prodex_runtime_websocket_invalid_id_code_patch_v1(1, 2, 1, 0),
+            -1
+        );
+        assert_eq!(
+            prodex_runtime_websocket_invalid_id_code_patch_v1(1, 1, 1, -1),
+            -1
+        );
+    }
+}
