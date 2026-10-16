@@ -6,8 +6,6 @@ use crate::app_commands::log_format::local_log_timestamp;
 use prodex_runtime_doctor::read_runtime_log_tail;
 use std::path::Path;
 
-const MAX_TRANSCRIPT_EVENT_TEXT_BYTES: usize = 64 * 1024;
-
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub(crate) struct TranscriptEvent {
     pub(crate) timestamp: String,
@@ -128,35 +126,15 @@ pub(crate) fn transcript_exact_visible_user_message(payload: &serde_json::Value)
         })
         .collect::<Option<Vec<_>>>()?;
     (!parts.is_empty()).then(|| {
-        parts.join(
-            "
-",
-        )
+        prodex_mojo_core::log::join_transcript_user_parts(&parts)
+            .expect("compiled-in Mojo transcript part joiner failed")
     })
 }
 
 fn transcript_safe_text(text: &str) -> String {
     let redacted = redaction::redaction_redact_secret_like_text(text);
-    let redacted = redacted
-        .chars()
-        .map(|character| {
-            if character.is_control() && !matches!(character, '\n' | '\r' | '\t') {
-                ' '
-            } else {
-                character
-            }
-        })
-        .collect::<String>();
-    if redacted.len() <= MAX_TRANSCRIPT_EVENT_TEXT_BYTES {
-        return redacted;
-    }
-    let end = redacted
-        .char_indices()
-        .take_while(|(index, _)| *index < MAX_TRANSCRIPT_EVENT_TEXT_BYTES.saturating_sub(16))
-        .map(|(index, character)| index + character.len_utf8())
-        .last()
-        .unwrap_or(0);
-    format!("{} …[truncated]", &redacted[..end])
+    prodex_mojo_core::log::normalize_transcript_safe_text(&redacted)
+        .expect("compiled-in Mojo transcript safe-text normalizer failed")
 }
 
 fn session_meta_transcript_events(
@@ -482,7 +460,18 @@ fn transcript_user_message_is_visible(payload: &serde_json::Value) -> bool {
     else {
         return true;
     };
-    !kinds.is_empty() && kinds.iter().all(|kind| kind.as_str() == Some("user.text"))
+    let kinds_nonempty = !kinds.is_empty();
+    let kinds_all_user_text =
+        kinds_nonempty && kinds.iter().all(|kind| kind.as_str() == Some("user.text"));
+    prodex_mojo_core::session_cli_policy::prompt_write_user_message_visible(
+        2,
+        payload.get("type").and_then(serde_json::Value::as_str) == Some("message"),
+        payload.get("role").and_then(serde_json::Value::as_str) == Some("user"),
+        true,
+        kinds_nonempty,
+        kinds_all_user_text,
+    )
+    .expect("compiled-in Mojo transcript visibility policy failed")
 }
 
 fn protocol_operation_transcript_event(

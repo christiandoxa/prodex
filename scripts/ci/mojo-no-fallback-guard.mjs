@@ -219,6 +219,11 @@ const PROMOTED_FILES = [
   "crates/prodex-cli/src/runtime_args.rs",
   "crates/prodex-app/src/super_expose/protocol/dispatch.rs",
   "crates/prodex-app/src/app_commands/log_transcript.rs",
+  "crates/prodex-app/src/app_commands/log_transcript_text.rs",
+  "crates/prodex-mojo-core/src/log/transcript_ansi.rs",
+  "mojo/prodex_core/log_semantics.mojo",
+  "mojo/prodex_core/log_transcript_facts.mojo",
+  "mojo/prodex_core/log_transcript_safe.mojo",
   "crates/prodex-mojo-core/src/sub_agent_policy.rs",
   "crates/prodex-mojo-core/src/sub_agent_policy/rendering.rs",
   "crates/prodex-cli/src/sub_agent.rs",
@@ -639,6 +644,8 @@ const UNCONDITIONAL_MOJO_FILES = new Set([
   "crates/prodex-app/src/super_expose/protocol/dispatch.rs",
   "crates/prodex-mojo-core/src/log.rs",
   "crates/prodex-app/src/app_commands/log_transcript.rs",
+  "crates/prodex-app/src/app_commands/log_transcript_text.rs",
+  "crates/prodex-mojo-core/src/log/transcript_ansi.rs",
   "crates/prodex-mojo-core/src/sub_agent_policy.rs",
   "crates/prodex-cli/src/sub_agent.rs",
   "crates/prodex-mojo-core/src/rich/super_expose.rs",
@@ -1084,7 +1091,12 @@ const SUPER_EXPOSE_VALIDATION_FILE = "crates/prodex-app/src/super_expose/protoco
 const SUPER_EXPOSE_TOOL_CONTRACT_FILE = "crates/prodex-app/src/super_expose/protocol/tool_contract.rs";
 const SUPER_EXPOSE_RICH_FILE = "crates/prodex-mojo-core/src/rich/super_expose.rs";
 const LOG_TRANSCRIPT_FILE = "crates/prodex-app/src/app_commands/log_transcript.rs";
+const LOG_TRANSCRIPT_TEXT_FILE = "crates/prodex-app/src/app_commands/log_transcript_text.rs";
 const TRANSCRIPT_POLICY_ADAPTER_FILE = "crates/prodex-mojo-core/src/log/transcript.rs";
+const TRANSCRIPT_ABI_ADAPTER_FILE = "crates/prodex-mojo-core/src/log/transcript_ansi.rs";
+const TRANSCRIPT_MOJO_FILE = "mojo/prodex_core/log_semantics.mojo";
+const TRANSCRIPT_FACTS_MOJO_FILE = "mojo/prodex_core/log_transcript_facts.mojo";
+const TRANSCRIPT_SAFE_MOJO_FILE = "mojo/prodex_core/log_transcript_safe.mojo";
 const LOG_LOAD_APP_FILE = "crates/prodex-app/src/app_commands/log_load.rs";
 const LOG_LOAD_TUI_FILE = "crates/prodex-app/src/app_commands/log_command_tui.rs";
 const LOG_LOAD_ADAPTER_FILE = "crates/prodex-mojo-core/src/log_load.rs";
@@ -6801,6 +6813,9 @@ export function findViolations(files) {
         "prodex_mojo_core::log::classify_transcript_item(",
         "prodex_mojo_core::log::transcript_operation_span(",
         "prodex_mojo_core::log::sanitize_transcript_tool_name(",
+        "prodex_mojo_core::log::join_transcript_user_parts(",
+        "prodex_mojo_core::log::normalize_transcript_safe_text(",
+        "prodex_mojo_core::session_cli_policy::prompt_write_user_message_visible(",
       ];
       const violations = required
         .filter((call) => !contents.includes(call))
@@ -6816,6 +6831,25 @@ export function findViolations(files) {
       }
       return violations;
     }
+    if (filePath === LOG_TRANSCRIPT_TEXT_FILE) {
+      const required = [
+        "prodex_mojo_core::log::join_transcript_user_parts(",
+        "prodex_mojo_core::log::normalize_transcript_visible_text(",
+        "prodex_mojo_core::log::strip_transcript_ansi_codes(",
+      ];
+      const violations = required
+        .filter((call) => !contents.includes(call))
+        .map((call) => filePath + ": transcript text projection must retain Mojo call " + call);
+      if (
+        /for\s+raw_line\s+in\s+(?:text|output)\.lines\(\)/u.test(contents)
+        || contents.includes("let mut visible_lines")
+        || contents.includes("transcript_line_contains_internal_attachment_path")
+        || contents.includes("transcript_text_looks_binary")
+      ) {
+        violations.push(filePath + ": contains restored Rust transcript visibility/normalization semantics");
+      }
+      return violations;
+    }
     if (filePath === TRANSCRIPT_POLICY_ADAPTER_FILE) {
       const required = [
         "prodex_mojo_transcript_event_classify_v1(",
@@ -6826,6 +6860,47 @@ export function findViolations(files) {
       return required
         .filter((call) => !contents.includes(call))
         .map((call) => filePath + ": transcript ABI adapter must retain " + call);
+    }
+    if (filePath === TRANSCRIPT_ABI_ADAPTER_FILE) {
+      const required = [
+        "prodex_mojo_transcript_visible_text_v1(",
+        "prodex_mojo_transcript_safe_text_v1(",
+        "prodex_mojo_transcript_join_user_parts_v1(",
+        "pub fn normalize_transcript_visible_text(",
+        "pub fn normalize_transcript_safe_text(",
+        "pub fn join_transcript_user_parts(",
+        "compiled_mojo_projects_visible_lines_and_exact_user_parts",
+        "compiled_mojo_safe_text_preserves_controls_and_unicode_byte_bound",
+        "transcript_projection_abi_rejects_bad_version_and_fact_shape",
+      ];
+      return required
+        .filter((marker) => !contents.includes(marker))
+        .map((marker) => filePath + ": transcript ABI adapter or direct coverage missing " + marker);
+    }
+    if (filePath === TRANSCRIPT_MOJO_FILE) {
+      const required = [
+        '@export("prodex_mojo_transcript_visible_text_v1")',
+        "from log_transcript_facts import PRODEX_TRANSCRIPT_ABI_VERSION",
+        "transcript_visible_emit_line(",
+        "transcript_binary_range(",
+        "transcript_fact_trim_bounds(",
+      ];
+      return required
+        .filter((marker) => !contents.includes(marker))
+        .map((marker) => filePath + ": transcript visibility/safety semantics must remain Mojo-owned " + marker);
+    }
+    if (filePath === TRANSCRIPT_FACTS_MOJO_FILE || filePath === TRANSCRIPT_SAFE_MOJO_FILE) {
+      const required = filePath === TRANSCRIPT_FACTS_MOJO_FILE ? [
+        "def transcript_fact_view_valid(",
+        "def transcript_fact_trim_bounds(",
+      ] : [
+        '@export("prodex_mojo_transcript_safe_text_v1")',
+        '@export("prodex_mojo_transcript_join_user_parts_v1")',
+        "TRANSCRIPT_SAFE_TEXT_MAX_BYTES",
+      ];
+      return required
+        .filter((marker) => !contents.includes(marker))
+        .map((marker) => `${filePath}: transcript shared/safe-text owner must retain ${marker}`);
     }
     return [];
   });
@@ -9649,6 +9724,49 @@ function selfTest() {
   assert.match(findViolations([[QUOTA_WATCH_MOJO_FILE,
     '@export("prodex_quota_watch_refresh_v1")',
   ]]).join("\n"), /Mojo owner must retain/u);
+  const transcriptConsumerCalls = [
+    "prodex_mojo_core::log::classify_transcript_event(",
+    "prodex_mojo_core::log::classify_transcript_item(",
+    "prodex_mojo_core::log::transcript_operation_span(",
+    "prodex_mojo_core::log::sanitize_transcript_tool_name(",
+    "prodex_mojo_core::log::join_transcript_user_parts(",
+    "prodex_mojo_core::log::normalize_transcript_safe_text(",
+    "prodex_mojo_core::session_cli_policy::prompt_write_user_message_visible(",
+  ].join("\n");
+  assert.deepEqual(findViolations([[LOG_TRANSCRIPT_FILE, transcriptConsumerCalls]]), []);
+  assert.match(findViolations([[LOG_TRANSCRIPT_FILE,
+    `${transcriptConsumerCalls}\nfn event_msg_is_status() {}`,
+  ]]).join("\n"), /restored Rust transcript classification\/bounding semantics/u);
+  const transcriptTextCalls = [
+    "prodex_mojo_core::log::join_transcript_user_parts(",
+    "prodex_mojo_core::log::normalize_transcript_visible_text(",
+    "prodex_mojo_core::log::strip_transcript_ansi_codes(",
+  ].join("\n");
+  assert.deepEqual(findViolations([[LOG_TRANSCRIPT_TEXT_FILE, transcriptTextCalls]]), []);
+  assert.match(findViolations([[LOG_TRANSCRIPT_TEXT_FILE,
+    `${transcriptTextCalls}\nfor raw_line in output.lines() {}`,
+  ]]).join("\n"), /restored Rust transcript visibility\/normalization semantics/u);
+  assert.deepEqual(findViolations([[TRANSCRIPT_ABI_ADAPTER_FILE,
+    [
+      "prodex_mojo_transcript_visible_text_v1(",
+      "prodex_mojo_transcript_safe_text_v1(",
+      "prodex_mojo_transcript_join_user_parts_v1(",
+      "pub fn normalize_transcript_visible_text(",
+      "pub fn normalize_transcript_safe_text(",
+      "pub fn join_transcript_user_parts(",
+      "compiled_mojo_projects_visible_lines_and_exact_user_parts",
+      "compiled_mojo_safe_text_preserves_controls_and_unicode_byte_bound",
+      "transcript_projection_abi_rejects_bad_version_and_fact_shape",
+    ].join("\n")]]), []);
+  assert.deepEqual(findViolations([[TRANSCRIPT_MOJO_FILE,
+    [
+      '@export("prodex_mojo_transcript_visible_text_v1")',
+      "from log_transcript_facts import PRODEX_TRANSCRIPT_ABI_VERSION",
+      "transcript_visible_emit_line(",
+      "transcript_binary_range(",
+      "transcript_fact_trim_bounds(",
+      "TRANSCRIPT_SAFE_TEXT_MAX_BYTES",
+    ].join("\n")]]), []);
 
 }
 
