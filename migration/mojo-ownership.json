@@ -2435,7 +2435,8 @@
         "role": "semantic",
         "operations": [
           "ping_status_detail_formatting",
-          "ping_status_label_and_temporary_classification"
+          "ping_status_label_and_temporary_classification",
+          "ping_summary_bucket_aggregation"
         ]
       },
       {
@@ -2446,7 +2447,8 @@
         "role": "adapter",
         "operations": [
           "ping_status_detail_formatting",
-          "ping_status_label_and_temporary_classification"
+          "ping_status_label_and_temporary_classification",
+          "ping_summary_bucket_aggregation"
         ]
       },
       {
@@ -11086,6 +11088,29 @@
       "duplicate_production_owner": false,
       "platform_fallback": false,
       "rust_adapter_scope": "typed PingStatus-to-ABI status mapping and validated string/boolean result conversion"
+    },
+    {
+      "name": "ping_summary_bucket_aggregation",
+      "domain": "app/ping-diagnostics",
+      "introduced_in": "0.438.0",
+      "baseline_state": "Rust counted healthy, quota, auth, temporary, and other ping results and derived pool usability.",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_mojo_ping_summary_plan_v1",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/ping_protocol.mojo",
+      "consumer": "crates/prodex-app/src/app_commands/ping_output.rs",
+      "consumer_marker": "prodex_mojo_core::rich::ping_summary_plan(&statuses)",
+      "production_consumers": [
+        "crates/prodex-app/src/app_commands/ping_output.rs"
+      ],
+      "production_reachability_test": "crates/prodex-app/src/app_commands/ping_tests.rs",
+      "rust_owner_before": "Rust filtered PingStatus values into summary buckets and computed pool usability.",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "deleted; required-Mojo ABI and app-caller regressions cover bucket precedence, empty pools, and temporary/quota boundaries",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "typed status-to-ABI projection, bounded output validation, and human/JSON field materialization"
     },
     {
       "name": "runtime_retry_after_text_policy",

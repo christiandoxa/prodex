@@ -20,6 +20,7 @@ comptime PING_DETAIL_STATUS_CAPACITY: Int64 = 3
 comptime PING_DETAIL_STATUS_ABI: Int64 = 4
 comptime PING_DETAIL_MAX_BYTES: Int64 = 128
 comptime PING_STATUS_LABEL_MAX_BYTES: Int64 = 32
+comptime PING_SUMMARY_MAX_STATUSES: Int64 = 65_536
 
 comptime PING_STATUS_OK: Int64 = 0
 comptime PING_STATUS_PROTOCOL_FAILED: Int64 = 1
@@ -599,4 +600,52 @@ def prodex_mojo_ping_status_temporary_v1(
         unsafe_from_address=Int(output_address)
     )
     output[] = Int64(ping_status_is_temporary(status))
+    return PING_DETAIL_STATUS_OK
+
+@export("prodex_mojo_ping_summary_plan_v1")
+def prodex_mojo_ping_summary_plan_v1(
+    abi_version: Int64,
+    statuses_address: UInt,
+    status_count: Int64,
+    output_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != PING_PROTOCOL_ABI_VERSION:
+        return PING_DETAIL_STATUS_ABI
+    if (
+        status_count < 0
+        or status_count > PING_SUMMARY_MAX_STATUSES
+        or output_address == 0
+        or (status_count > 0 and statuses_address == 0)
+    ):
+        return PING_DETAIL_STATUS_INVALID
+    var output = Pointer[mut=True, UInt64, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    var healthy: UInt64 = 0
+    var exhausted: UInt64 = 0
+    var auth_failures: UInt64 = 0
+    var temporary_failures: UInt64 = 0
+    var statuses = Pointer[mut=False, Int64, ImmUntrackedOrigin](
+        unsafe_from_address=Int(statuses_address)
+    )
+    for index in range(status_count):
+        var status = statuses[unsafe_offset=index]
+        if status < PING_STATUS_OK or status > PING_STATUS_CANCELLED:
+            return PING_DETAIL_STATUS_INVALID
+        if status == PING_STATUS_OK:
+            healthy += 1
+        elif status == PING_STATUS_QUOTA_EXHAUSTED:
+            exhausted += 1
+        elif status == PING_STATUS_AUTH_FAILED:
+            auth_failures += 1
+        elif ping_status_is_temporary(status):
+            temporary_failures += 1
+    var total = UInt64(status_count)
+    output[unsafe_offset=0] = total
+    output[unsafe_offset=1] = healthy
+    output[unsafe_offset=2] = exhausted
+    output[unsafe_offset=3] = auth_failures
+    output[unsafe_offset=4] = temporary_failures
+    output[unsafe_offset=5] = total - healthy - exhausted - auth_failures - temporary_failures
+    output[unsafe_offset=6] = UInt64(healthy > 0)
     return PING_DETAIL_STATUS_OK

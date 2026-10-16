@@ -1,3 +1,4 @@
+use super::ping_output::ping_summary_plan;
 use super::ping_process::{PING_ERROR_DETAIL_MAX_BYTES, ping_command_args};
 #[cfg(unix)]
 use super::ping_process::{run_ping_child, run_ping_child_in_test_cwd};
@@ -44,6 +45,38 @@ fn output_with_stderr(stdout: &str, stderr: &str, success: bool) -> Output {
         stdout: stdout.as_bytes().to_vec(),
         stderr: stderr.as_bytes().to_vec(),
     }
+}
+
+fn ping_result_with_status(status: PingStatus) -> super::PingResult {
+    super::PingResult {
+        profile: "test".to_string(),
+        model: None,
+        effort: None,
+        effective_model: None,
+        status,
+        detail: String::new(),
+        first_response_latency_ms: None,
+        latency_ms: None,
+    }
+}
+
+#[test]
+fn ping_summary_buckets_are_selected_by_mojo_for_the_app_caller() {
+    let results = [
+        ping_result_with_status(PingStatus::Pass),
+        ping_result_with_status(PingStatus::QuotaExhausted),
+        ping_result_with_status(PingStatus::AuthFailed),
+        ping_result_with_status(PingStatus::Timeout),
+        ping_result_with_status(PingStatus::ProtocolFailed),
+    ];
+    let summary = ping_summary_plan(&results);
+    assert_eq!(summary.total, 5);
+    assert_eq!(summary.healthy, 1);
+    assert_eq!(summary.exhausted, 1);
+    assert_eq!(summary.auth_failures, 1);
+    assert_eq!(summary.temporary_failures, 1);
+    assert_eq!(summary.other_failures, 1);
+    assert!(summary.pool_usable);
 }
 
 #[test]

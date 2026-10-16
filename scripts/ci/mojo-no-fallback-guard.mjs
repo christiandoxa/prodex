@@ -166,6 +166,10 @@ const KIRO_ENVIRONMENT_CALLER_FILE = "crates/prodex-app/src/profile_commands/kir
 const KIRO_ENVIRONMENT_ADAPTER_FILE = "crates/prodex-mojo-core/src/kiro_environment.rs";
 const KIRO_ENVIRONMENT_MOJO_FILE = "mojo/prodex_core/kiro_environment.mojo";
 const KIRO_ENVIRONMENT_ABI_TEST_FILE = "crates/prodex-mojo-core/tests/kiro_environment.rs";
+const PING_SUMMARY_CALLER_FILE = "crates/prodex-app/src/app_commands/ping_output.rs";
+const PING_SUMMARY_CALLER_TEST_FILE = "crates/prodex-app/src/app_commands/ping_tests.rs";
+const PING_SUMMARY_ADAPTER_FILE = "crates/prodex-mojo-core/src/rich/ping_protocol.rs";
+const PING_SUMMARY_MOJO_FILE = "mojo/prodex_core/ping_protocol.mojo";
 const PROMOTED_FILES = [
   SUPER_PROMPT_FILE,
   SUPER_PROMPT_CHOICES_FILE,
@@ -515,6 +519,10 @@ const PROMOTED_FILES = [
   "crates/prodex-app/src/app_commands/log_command_tui.rs",
   "crates/prodex-mojo-core/src/observability.rs",
   "crates/prodex-app/src/app_commands/ping.rs",
+  PING_SUMMARY_CALLER_FILE,
+  PING_SUMMARY_CALLER_TEST_FILE,
+  PING_SUMMARY_ADAPTER_FILE,
+  PING_SUMMARY_MOJO_FILE,
   "crates/prodex-app/src/app_commands/super_main_catalog.rs",
   "crates/prodex-app/src/app_commands/super_main_prompt.rs",
   "crates/prodex-app/src/app_commands/doctor.rs",
@@ -8096,6 +8104,50 @@ export function findViolations(files) {
     }
     return [];
   });
+  const pingSummaryViolations = files.flatMap(([filePath, contents]) => {
+    if (filePath === PING_SUMMARY_CALLER_FILE) {
+      const required = [
+        "ping_summary_plan(results)",
+        "result.status.mojo_code()",
+        "prodex_mojo_core::rich::ping_summary_plan(&statuses)",
+      ];
+      const production = contents.split("#[cfg(test)]", 1)[0];
+      const restoredRust = [
+        ".filter(|result| result.status == PingStatus::Pass)",
+        ".filter(|result| result.status == PingStatus::QuotaExhausted)",
+        ".filter(|result| result.status == PingStatus::AuthFailed)",
+        ".filter(|result| result.status.is_temporary())",
+        "let pool_usable = healthy > 0;",
+      ];
+      return required.every((marker) => production.includes(marker))
+        && restoredRust.every((marker) => !production.includes(marker))
+        ? []
+        : [`${filePath}: ping summary bucket aggregation must remain Mojo-owned`];
+    }
+    if (filePath === PING_SUMMARY_ADAPTER_FILE) {
+      return [
+        "prodex_mojo_ping_summary_plan_v1(",
+        "pub fn ping_summary_plan(",
+        "pub struct PingSummaryPlan",
+        "summary_buckets_preserve_status_precedence",
+      ].filter((marker) => !contents.includes(marker))
+        .map((marker) => `${filePath}: ping summary ABI adapter must retain ${marker}`);
+    }
+    if (filePath === PING_SUMMARY_MOJO_FILE) {
+      return [
+        '@export("prodex_mojo_ping_summary_plan_v1")',
+        "PING_SUMMARY_MAX_STATUSES",
+        "ping_status_is_temporary(status)",
+      ].filter((marker) => !contents.includes(marker))
+        .map((marker) => `${filePath}: ping summary decisions must remain compiled Mojo-owned (${marker})`);
+    }
+    if (filePath === PING_SUMMARY_CALLER_TEST_FILE) {
+      return contents.includes("ping_summary_buckets_are_selected_by_mojo_for_the_app_caller")
+        ? []
+        : [`${filePath}: ping summary migration needs caller-boundary regression coverage`];
+    }
+    return [];
+  });
   const anthropicAttemptCursorViolations = files.flatMap(([filePath, contents]) => {
     if (filePath === ANTHROPIC_ATTEMPT_CURSOR_FILE) {
       const production = contents.split("#[cfg(test)]", 1)[0];
@@ -8324,6 +8376,7 @@ export function findViolations(files) {
     ...geminiBufferedResponseViolations, ...fingerprintDeltaViolations, ...profileExportPolicyViolations, ...sessionReportViolations, ...runtimeLineageViolations, ...smartContextMarkerViolations, ...smartContextSymbolIndexViolations, ...sessionUsageLimitViolations, ...smartContextArtifactRefViolations, ...smartContextDuplicateTextViolations, ...runtimeRepoMapViolations,
     ...modelSpecViolations, ...mainModelCatalogViolations, ...providerCatalogReasoningViolations, ...superPromptPolicyViolations, ...catalogModelViolations,
     ...deepseekShapingViolations,
+    ...pingSummaryViolations,
     ...deepseekStreamFallbackViolations,
     ...quotaWindowViolations, ...quotaResetEpochViolations,
     ...rehydrateViolations, ...budgetTierViolations, ...staticItemViolations, ...replacedClassifierViolations, ...cliDependencyViolations,
@@ -10720,6 +10773,29 @@ function selfTest() {
     "super_prompt_choice_preselection_and_labels_use_real_mojo",
   ].join("\n");
   assert.deepEqual(findViolations([[SUPER_PROMPT_DIRECT_TEST_FILE, superPromptTests]]), []);
+
+  const pingSummaryCaller = [
+    "let summary = ping_summary_plan(results);",
+    "result.status.mojo_code()",
+    "prodex_mojo_core::rich::ping_summary_plan(&statuses)",
+  ].join("\n");
+  assert.deepEqual(findViolations([[PING_SUMMARY_CALLER_FILE, pingSummaryCaller]]), []);
+  assert.match(findViolations([[PING_SUMMARY_CALLER_FILE,
+    `${pingSummaryCaller}\n.filter(|result| result.status == PingStatus::Pass)`,
+  ]]).join("\n"), /ping summary bucket aggregation must remain Mojo-owned/u);
+  assert.deepEqual(findViolations([[PING_SUMMARY_ADAPTER_FILE,
+    [
+      "prodex_mojo_ping_summary_plan_v1(",
+      "pub fn ping_summary_plan(",
+      "pub struct PingSummaryPlan",
+      "summary_buckets_preserve_status_precedence",
+    ].join("\n")]]), []);
+  assert.match(findViolations([[PING_SUMMARY_ADAPTER_FILE,
+    "pub fn ping_summary_plan() {}"]]).join("\n"), /ping summary ABI adapter must retain/u);
+  assert.deepEqual(findViolations([[PING_SUMMARY_MOJO_FILE,
+    '@export("prodex_mojo_ping_summary_plan_v1")\nPING_SUMMARY_MAX_STATUSES\nping_status_is_temporary(status)']]), []);
+  assert.match(findViolations([[PING_SUMMARY_CALLER_TEST_FILE, "fn unrelated_test() {}"]]).join("\n"),
+    /ping summary migration needs caller-boundary regression coverage/u);
 
 }
 

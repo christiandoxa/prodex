@@ -29,26 +29,14 @@ pub(super) fn render_ping_summary(
     elapsed: Duration,
     json: bool,
 ) -> Result<()> {
-    let total = results.len();
-    let healthy = results
-        .iter()
-        .filter(|result| result.status == PingStatus::Pass)
-        .count();
-    let exhausted = results
-        .iter()
-        .filter(|result| result.status == PingStatus::QuotaExhausted)
-        .count();
-    let auth_failures = results
-        .iter()
-        .filter(|result| result.status == PingStatus::AuthFailed)
-        .count();
-    let temporary_failures = results
-        .iter()
-        .filter(|result| result.status.is_temporary())
-        .count();
-    let other_failures =
-        total.saturating_sub(healthy + exhausted + auth_failures + temporary_failures);
-    let pool_usable = healthy > 0;
+    let summary = ping_summary_plan(results);
+    let total = summary.total;
+    let healthy = summary.healthy;
+    let exhausted = summary.exhausted;
+    let auth_failures = summary.auth_failures;
+    let temporary_failures = summary.temporary_failures;
+    let other_failures = summary.other_failures;
+    let pool_usable = summary.pool_usable;
     if json {
         let value = serde_json::json!({
             "provider": "openai",
@@ -102,4 +90,13 @@ pub(super) fn render_ping_summary(
         if pool_usable { "yes" } else { "no" }
     ))?;
     Ok(())
+}
+
+pub(super) fn ping_summary_plan(results: &[PingResult]) -> prodex_mojo_core::rich::PingSummaryPlan {
+    let statuses = results
+        .iter()
+        .map(|result| result.status.mojo_code())
+        .collect::<Vec<_>>();
+    prodex_mojo_core::rich::ping_summary_plan(&statuses)
+        .expect("Mojo ping summary planner returned invalid output")
 }
