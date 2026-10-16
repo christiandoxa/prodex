@@ -6457,7 +6457,7 @@
       "production_consumers": [
         "crates/prodex-app/src/app_commands/log_transcript.rs"
       ],
-      "production_reachability_test": "crates/prodex-mojo-core/src/log.rs",
+      "production_reachability_test": "crates/prodex-mojo-core/src/log/transcript.rs",
       "rust_state_after": "adapter-only",
       "production_fallback": false,
       "duplicate_production_owner": false,
@@ -6480,7 +6480,7 @@
       "production_consumers": [
         "crates/prodex-app/src/app_commands/log_transcript.rs"
       ],
-      "production_reachability_test": "crates/prodex-mojo-core/src/log.rs",
+      "production_reachability_test": "crates/prodex-mojo-core/src/log/transcript.rs",
       "rust_state_after": "adapter-only",
       "production_fallback": false,
       "duplicate_production_owner": false,
@@ -6503,7 +6503,7 @@
       "production_consumers": [
         "crates/prodex-app/src/app_commands/log_transcript.rs"
       ],
-      "production_reachability_test": "crates/prodex-mojo-core/src/log.rs",
+      "production_reachability_test": "crates/prodex-mojo-core/src/log/transcript.rs",
       "rust_state_after": "adapter-only",
       "production_fallback": false,
       "duplicate_production_owner": false,
@@ -6526,7 +6526,7 @@
       "production_consumers": [
         "crates/prodex-app/src/app_commands/log_transcript.rs"
       ],
-      "production_reachability_test": "crates/prodex-mojo-core/src/log.rs",
+      "production_reachability_test": "crates/prodex-mojo-core/src/log/transcript.rs",
       "rust_state_after": "adapter-only",
       "production_fallback": false,
       "duplicate_production_owner": false,

@@ -58,10 +58,5 @@
     "file": "crates/prodex-runtime-state/tests/src/lib.rs",
     "maxLines": 923,
     "reason": "Runtime-state parity coverage is split between the main policy fixtures and profile-inflight sibling; this exact cap ratchets the remaining reviewed suite."
-  },
-  {
-    "file": "crates/prodex-mojo-core/src/log.rs",
-    "maxLines": 959,
-    "reason": "Log Mojo ABI host surface ratcheted to 959 after extracting pointer marshaling helpers into the focused log/pointers module; transcript ANSI semantics moved exclusively to compiled Mojo."
   }
 ]

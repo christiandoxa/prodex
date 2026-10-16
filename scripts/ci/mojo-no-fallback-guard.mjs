@@ -400,6 +400,7 @@ const PROMOTED_FILES = [
   MAIN_MODEL_CATALOG_TEST_FILE,
   "crates/prodex-mojo-core/src/rich/context_plan.rs",
   "crates/prodex-mojo-core/src/log.rs",
+  "crates/prodex-mojo-core/src/log/transcript.rs",
   "crates/prodex-mojo-core/src/log_load.rs",
   "crates/prodex-mojo-core/src/rich/routing.rs",
   "crates/prodex-context/src/critical_signal.rs",
@@ -1083,7 +1084,7 @@ const SUPER_EXPOSE_VALIDATION_FILE = "crates/prodex-app/src/super_expose/protoco
 const SUPER_EXPOSE_TOOL_CONTRACT_FILE = "crates/prodex-app/src/super_expose/protocol/tool_contract.rs";
 const SUPER_EXPOSE_RICH_FILE = "crates/prodex-mojo-core/src/rich/super_expose.rs";
 const LOG_TRANSCRIPT_FILE = "crates/prodex-app/src/app_commands/log_transcript.rs";
-const LOG_ADAPTER_FILE = "crates/prodex-mojo-core/src/log.rs";
+const TRANSCRIPT_POLICY_ADAPTER_FILE = "crates/prodex-mojo-core/src/log/transcript.rs";
 const LOG_LOAD_APP_FILE = "crates/prodex-app/src/app_commands/log_load.rs";
 const LOG_LOAD_TUI_FILE = "crates/prodex-app/src/app_commands/log_command_tui.rs";
 const LOG_LOAD_ADAPTER_FILE = "crates/prodex-mojo-core/src/log_load.rs";
@@ -6815,7 +6816,7 @@ export function findViolations(files) {
       }
       return violations;
     }
-    if (filePath === LOG_ADAPTER_FILE) {
+    if (filePath === TRANSCRIPT_POLICY_ADAPTER_FILE) {
       const required = [
         "prodex_mojo_transcript_event_classify_v1(",
         "prodex_mojo_transcript_item_classify_v1(",
