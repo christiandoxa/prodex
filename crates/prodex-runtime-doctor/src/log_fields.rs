@@ -21,7 +21,9 @@ pub(crate) fn runtime_doctor_parse_usize_field(
     fields: &BTreeMap<String, String>,
     key: &str,
 ) -> Option<usize> {
-    runtime_doctor_string_field(fields, key)?.parse().ok()
+    let value = fields.get(key).map(String::as_str);
+    prodex_mojo_core::rich::runtime_doctor_unsigned_field(value)
+        .expect("Mojo runtime-doctor unsigned log field returned invalid output")
 }
 
 pub(crate) fn runtime_doctor_split_reason_field(

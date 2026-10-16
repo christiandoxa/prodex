@@ -7,6 +7,8 @@ const RUNTIME_DOCTOR_MARKER_ABI_VERSION: i64 = 1;
 const RUNTIME_DOCTOR_SMART_CONTEXT_DECISION_ABI_VERSION: i64 = 1;
 const RUNTIME_DOCTOR_LOG_VALUE_ABI_VERSION: i64 = 1;
 const RUNTIME_DOCTOR_MESSAGE_MARKER_ABI_VERSION: i64 = 1;
+const RUNTIME_DOCTOR_SMART_CONTEXT_BYTES_ABI_VERSION: i64 = 1;
+const RUNTIME_DOCTOR_SMART_CONTEXT_TOTALS_ABI_VERSION: i64 = 1;
 const RUNTIME_DOCTOR_FALLBACK_REASON_SOURCE_ABI_VERSION: i64 = 1;
 const RUNTIME_DOCTOR_MARKER_SEMANTICS_ABI_VERSION: i64 = 2;
 const RUNTIME_DOCTOR_PROFILE_PROVIDER_KIND_ABI_VERSION: i64 = 1;
@@ -41,6 +43,23 @@ unsafe extern "C" {
         abi_version: i64,
         decision: u64,
         is_fallback: u64,
+    ) -> i64;
+    fn prodex_mojo_runtime_doctor_smart_context_bytes_v1(
+        abi_version: i64,
+        present: i64,
+        before: u64,
+        after: u64,
+        supplied_saved: u64,
+        result: u64,
+    ) -> i64;
+    fn prodex_mojo_runtime_doctor_smart_context_totals_v1(
+        abi_version: i64,
+        current: u64,
+        delta: u64,
+        decision: u64,
+        decision_present: i64,
+        result: u64,
+        result_capacity: i64,
     ) -> i64;
     fn prodex_mojo_runtime_doctor_log_message_has_marker_v1(
         abi_version: i64,
@@ -424,6 +443,108 @@ pub fn runtime_doctor_parse_message_offsets(
     })
 }
 
+/// Values for the seven Smart Context diagnostic counters plus event and
+/// decision counts, ordered as event, rewritten, fallback, before, after,
+/// saved, estimated tokens, repeat refs, static deltas, and repo state facts.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RuntimeDoctorSmartContextTotalsPlan {
+    pub counters: [usize; 10],
+    pub decision_kind: u64,
+}
+
+pub const RUNTIME_DOCTOR_SMART_CONTEXT_DECISION_FALLBACK: u64 = 3;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RuntimeDoctorSmartContextBytesPlan {
+    pub saved_bytes: Option<usize>,
+    pub estimated_tokens_saved: Option<usize>,
+}
+
+/// Mojo exclusively decides supplied-vs-derived savings and ceil(bytes / 4).
+pub fn runtime_doctor_smart_context_bytes_plan(
+    before: Option<usize>,
+    after: Option<usize>,
+    supplied_saved: Option<usize>,
+) -> Result<RuntimeDoctorSmartContextBytesPlan, MojoError> {
+    ensure_rich_abi()?;
+    let present = i64::from(before.is_some())
+        | (i64::from(after.is_some()) << 1)
+        | (i64::from(supplied_saved.is_some()) << 2);
+    let mut result = [0_u64; 3];
+    let status = unsafe {
+        prodex_mojo_runtime_doctor_smart_context_bytes_v1(
+            RUNTIME_DOCTOR_SMART_CONTEXT_BYTES_ABI_VERSION,
+            present,
+            before.unwrap_or(0) as u64,
+            after.unwrap_or(0) as u64,
+            supplied_saved.unwrap_or(0) as u64,
+            mojo_mut_pointer_address(result.as_mut_ptr()),
+        )
+    };
+    if status != 0 {
+        return Err(match status {
+            1 => MojoError::InvalidInput,
+            4 => MojoError::AbiMismatch,
+            _ => MojoError::InvalidOutput,
+        });
+    }
+    match result[0] {
+        0 if result[1] == 0 && result[2] == 0 => Ok(RuntimeDoctorSmartContextBytesPlan {
+            saved_bytes: None,
+            estimated_tokens_saved: None,
+        }),
+        1 => Ok(RuntimeDoctorSmartContextBytesPlan {
+            saved_bytes: Some(usize::try_from(result[1]).map_err(|_| MojoError::InvalidOutput)?),
+            estimated_tokens_saved: Some(
+                usize::try_from(result[2]).map_err(|_| MojoError::InvalidOutput)?,
+            ),
+        }),
+        _ => Err(MojoError::InvalidOutput),
+    }
+}
+
+/// Accumulate diagnostic totals and classify rewrite/fallback once in compiled Mojo.
+pub fn runtime_doctor_smart_context_totals_plan(
+    current: [usize; 10],
+    delta: [usize; 7],
+    decision: Option<&str>,
+) -> Result<RuntimeDoctorSmartContextTotalsPlan, MojoError> {
+    ensure_rich_abi()?;
+    let current = current.map(|value| value as u64);
+    let delta = delta.map(|value| value as u64);
+    let decision_view = view(decision.unwrap_or(""));
+    let mut output = [0_u64; 11];
+    let status = unsafe {
+        prodex_mojo_runtime_doctor_smart_context_totals_v1(
+            RUNTIME_DOCTOR_SMART_CONTEXT_TOTALS_ABI_VERSION,
+            mojo_pointer_address(current.as_ptr()),
+            mojo_pointer_address(delta.as_ptr()),
+            mojo_pointer_address(&decision_view),
+            i64::from(decision.is_some()),
+            mojo_mut_pointer_address(output.as_mut_ptr()),
+            output.len() as i64,
+        )
+    };
+    if status != 0 {
+        return Err(match status {
+            1 => MojoError::InvalidInput,
+            4 => MojoError::AbiMismatch,
+            _ => MojoError::InvalidOutput,
+        });
+    }
+    if output[10] > RUNTIME_DOCTOR_SMART_CONTEXT_DECISION_FALLBACK {
+        return Err(MojoError::InvalidOutput);
+    }
+    let mut counters = [0; 10];
+    for (index, counter) in counters.iter_mut().enumerate() {
+        *counter = usize::try_from(output[index]).map_err(|_| MojoError::InvalidOutput)?;
+    }
+    Ok(RuntimeDoctorSmartContextTotalsPlan {
+        counters,
+        decision_kind: output[10],
+    })
+}
+
 /// Match a complete, punctuation-trimmed whitespace-delimited log marker in Mojo.
 pub fn runtime_doctor_log_message_has_marker(
     message: &str,
@@ -576,6 +697,100 @@ pub fn runtime_doctor_profile_provider_kind(provider: &str) -> Result<i64, MojoE
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn runtime_doctor_smart_context_numeric_plans_use_compiled_mojo() {
+        let plan = runtime_doctor_smart_context_bytes_plan(Some(40), Some(15), None).unwrap();
+        assert_eq!(plan.saved_bytes, Some(25));
+        assert_eq!(plan.estimated_tokens_saved, Some(7));
+        assert_eq!(
+            runtime_doctor_smart_context_bytes_plan(Some(2), Some(50), None)
+                .unwrap()
+                .saved_bytes,
+            Some(0),
+        );
+        assert_eq!(
+            runtime_doctor_smart_context_bytes_plan(None, Some(50), None)
+                .unwrap()
+                .saved_bytes,
+            None,
+        );
+        assert_eq!(
+            runtime_doctor_smart_context_bytes_plan(None, None, Some(usize::MAX))
+                .unwrap()
+                .estimated_tokens_saved,
+            Some(4_611_686_018_427_387_904),
+        );
+        assert_eq!(
+            runtime_doctor_smart_context_bytes_plan(Some(40), Some(15), Some(3))
+                .unwrap()
+                .saved_bytes,
+            Some(3),
+        );
+
+        let initial = [0, 0, 0, usize::MAX - 1, 0, 0, 0, 0, 0, 0];
+        let delta = [8, 3, 5, 2, 7, 11, 13];
+        let rewritten =
+            runtime_doctor_smart_context_totals_plan(initial, delta, Some("rewritten")).unwrap();
+        assert_eq!(
+            rewritten.counters,
+            [1, 1, 0, usize::MAX, 3, 5, 2, 7, 11, 13]
+        );
+        assert_eq!(rewritten.decision_kind, 1);
+        let pass = runtime_doctor_smart_context_totals_plan(
+            rewritten.counters,
+            delta,
+            Some("pass_through"),
+        )
+        .unwrap();
+        assert_eq!(pass.counters[1], 1);
+        assert_eq!(pass.counters[2], 0);
+        assert_eq!(pass.decision_kind, 2);
+        let fallback =
+            runtime_doctor_smart_context_totals_plan(pass.counters, delta, Some("require_exact"))
+                .unwrap();
+        assert_eq!(fallback.counters[2], 1);
+        assert_eq!(
+            fallback.decision_kind,
+            RUNTIME_DOCTOR_SMART_CONTEXT_DECISION_FALLBACK
+        );
+        let no_decision =
+            runtime_doctor_smart_context_totals_plan(fallback.counters, delta, None).unwrap();
+        assert_eq!(no_decision.decision_kind, 0);
+        assert_eq!(no_decision.counters[1], 1);
+        assert_eq!(no_decision.counters[2], 1);
+
+        let mut bytes_output = [77_u64; 3];
+        let bytes_out = mojo_mut_pointer_address(bytes_output.as_mut_ptr());
+        assert_eq!(
+            unsafe { prodex_mojo_runtime_doctor_smart_context_bytes_v1(2, 7, 20, 4, 5, bytes_out) },
+            4
+        );
+        assert_eq!(
+            unsafe { prodex_mojo_runtime_doctor_smart_context_bytes_v1(1, 8, 20, 4, 5, bytes_out) },
+            1
+        );
+        assert_eq!(bytes_output, [77; 3]);
+        let current = [0_u64; 10];
+        let delta = [0_u64; 7];
+        let decision = view("rewritten");
+        let mut totals_output = [77_u64; 11];
+        let mut invoke = |version, count, present| unsafe {
+            prodex_mojo_runtime_doctor_smart_context_totals_v1(
+                version,
+                mojo_pointer_address(current.as_ptr()),
+                mojo_pointer_address(delta.as_ptr()),
+                mojo_pointer_address(&decision),
+                present,
+                mojo_mut_pointer_address(totals_output.as_mut_ptr()),
+                count,
+            )
+        };
+        assert_eq!(invoke(2, 11, 1), 4);
+        assert_eq!(invoke(1, 10, 1), 1);
+        assert_eq!(invoke(1, 11, 2), 1);
+        assert_eq!(totals_output, [77; 11]);
+    }
 
     #[test]
     fn runtime_doctor_log_marker_token_matching_has_strict_compiled_abi() {

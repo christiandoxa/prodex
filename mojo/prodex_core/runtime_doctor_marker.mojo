@@ -362,6 +362,115 @@ def runtime_doctor_marker_known(view: ProdexRichStringView) -> Bool:
         return True
     return False
 
+# A single numeric owner computes Smart Context savings and lifetime totals.
+# UInt64 preserves Rust usize boundaries on the supported 64-bit rich ABI.
+comptime RUNTIME_DOCTOR_SMART_CONTEXT_BYTES_ABI_VERSION: Int64 = 1
+comptime RUNTIME_DOCTOR_SMART_CONTEXT_TOTALS_ABI_VERSION: Int64 = 1
+comptime RUNTIME_DOCTOR_SMART_CONTEXT_TOTALS_COUNT: Int64 = 10
+comptime RUNTIME_DOCTOR_SMART_CONTEXT_TOTALS_OUTPUT_COUNT: Int64 = 11
+comptime RUNTIME_DOCTOR_SMART_CONTEXT_DECISION_NONE: UInt64 = 0
+comptime RUNTIME_DOCTOR_SMART_CONTEXT_DECISION_REWRITTEN: UInt64 = 1
+comptime RUNTIME_DOCTOR_SMART_CONTEXT_DECISION_PASS_THROUGH: UInt64 = 2
+comptime RUNTIME_DOCTOR_SMART_CONTEXT_DECISION_FALLBACK: UInt64 = 3
+
+
+@export("prodex_mojo_runtime_doctor_smart_context_bytes_v1")
+def prodex_mojo_runtime_doctor_smart_context_bytes_v1(
+    abi_version: Int64,
+    present: Int64,
+    before: UInt64,
+    after: UInt64,
+    supplied_saved: UInt64,
+    result_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != RUNTIME_DOCTOR_SMART_CONTEXT_BYTES_ABI_VERSION:
+        return 4
+    if result_address == 0 or present < 0 or present > 7:
+        return 1
+    var result = Pointer[mut=True, UInt64, MutUntrackedOrigin](
+        unsafe_from_address=Int(result_address)
+    )
+    result[unsafe_offset=0] = 0
+    result[unsafe_offset=1] = 0
+    result[unsafe_offset=2] = 0
+    var saved: UInt64 = 0
+    if present & 4 != 0:
+        saved = supplied_saved
+    elif present & 3 == 3:
+        if before > after:
+            saved = before - after
+    else:
+        return 0
+    result[unsafe_offset=0] = 1
+    result[unsafe_offset=1] = saved
+    result[unsafe_offset=2] = saved // UInt64(4) + UInt64(1 if saved % UInt64(4) != 0 else 0)
+    return 0
+
+
+def runtime_doctor_smart_context_add_saturating(left: UInt64, right: UInt64) -> UInt64:
+    var maximum = UInt64(18446744073709551615)
+    if left > maximum - right:
+        return maximum
+    return left + right
+
+
+@export("prodex_mojo_runtime_doctor_smart_context_totals_v1")
+def prodex_mojo_runtime_doctor_smart_context_totals_v1(
+    abi_version: Int64,
+    current_address: UInt,
+    delta_address: UInt,
+    decision_address: UInt,
+    decision_present: Int64,
+    result_address: UInt,
+    result_capacity: Int64,
+) abi("C") -> Int64:
+    if abi_version != RUNTIME_DOCTOR_SMART_CONTEXT_TOTALS_ABI_VERSION:
+        return 4
+    if (
+        current_address == 0 or delta_address == 0 or decision_address == 0
+        or result_address == 0 or (decision_present != 0 and decision_present != 1)
+        or result_capacity != RUNTIME_DOCTOR_SMART_CONTEXT_TOTALS_OUTPUT_COUNT
+    ):
+        return 1
+    var decision = Pointer[mut=False, ProdexRichStringView, ImmUntrackedOrigin](
+        unsafe_from_address=Int(decision_address)
+    )[].copy()
+    if not rich_view_valid(decision, 0x7FFFFFFFFFFFFFFF):
+        return 2
+    var current = Pointer[mut=False, UInt64, ImmUntrackedOrigin](
+        unsafe_from_address=Int(current_address)
+    )
+    var delta = Pointer[mut=False, UInt64, ImmUntrackedOrigin](
+        unsafe_from_address=Int(delta_address)
+    )
+    var result = Pointer[mut=True, UInt64, MutUntrackedOrigin](
+        unsafe_from_address=Int(result_address)
+    )
+    var decision_kind = RUNTIME_DOCTOR_SMART_CONTEXT_DECISION_NONE
+    if decision_present == 1:
+        if rich_view_matches_literal["rewritten"](decision, False):
+            decision_kind = RUNTIME_DOCTOR_SMART_CONTEXT_DECISION_REWRITTEN
+        elif runtime_doctor_smart_context_decision_is_fallback(decision):
+            decision_kind = RUNTIME_DOCTOR_SMART_CONTEXT_DECISION_FALLBACK
+        else:
+            decision_kind = RUNTIME_DOCTOR_SMART_CONTEXT_DECISION_PASS_THROUGH
+    for index in range(RUNTIME_DOCTOR_SMART_CONTEXT_TOTALS_COUNT):
+        var increase = UInt64(0)
+        if index == 0:
+            increase = 1
+        elif index == 1 and decision_kind == RUNTIME_DOCTOR_SMART_CONTEXT_DECISION_REWRITTEN:
+            increase = 1
+        elif index == 2 and decision_kind == RUNTIME_DOCTOR_SMART_CONTEXT_DECISION_FALLBACK:
+            increase = 1
+        elif index >= 3:
+            increase = delta[unsafe_offset=index - 3]
+        result[unsafe_offset=index] = runtime_doctor_smart_context_add_saturating(
+            current[unsafe_offset=index], increase
+        )
+    result[unsafe_offset=10] = decision_kind
+    return 0
+
+
 comptime RUNTIME_DOCTOR_SMART_CONTEXT_DECISION_ABI_VERSION: Int64 = 1
 
 def runtime_doctor_smart_context_decision_is_fallback(view: ProdexRichStringView) -> Bool:
