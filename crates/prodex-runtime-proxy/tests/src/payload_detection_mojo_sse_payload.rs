@@ -39,3 +39,24 @@ fn mojo_sse_payload_join_preserves_json_bom_and_multiline_boundaries() {
         );
     }
 }
+
+#[test]
+fn mojo_sse_failure_flags_match_real_retryable_upstream_error_codes() {
+    for (code, expected) in [
+        ("insufficient_quota", (true, false, false)),
+        ("rate_limit_exceeded", (false, true, false)),
+        ("server_is_overloaded", (false, false, true)),
+        ("deactivated_workspace", (false, false, true)),
+        ("unrelated_code", (false, false, false)),
+    ] {
+        let lines = vec![format!(
+            r#"{{"type":"response.failed","response":{{"error":{{"code":"{code}"}}}}}}"#
+        )];
+        let event = parse_runtime_sse_event(&lines);
+        assert_eq!(
+            (event.quota_blocked, event.rate_limited, event.overloaded),
+            expected,
+            "provider code {code}",
+        );
+    }
+}

@@ -441,18 +441,27 @@ pub fn parse_runtime_sse_event(data_lines: &[String]) -> RuntimeParsedSseEvent {
 
     let error_policy =
         runtime_stream_error_policy_from_value(&value, RuntimeHttpErrorPhase::PreCommit);
+    // Rust maps typed error tags into the ABI; Mojo exclusively owns the
+    // rotate/retry-class matrix and its three precommit terminal flags.
+    let class_tag = match error_policy.class {
+        RuntimeHttpErrorClass::Other => 0,
+        RuntimeHttpErrorClass::Quota => 1,
+        RuntimeHttpErrorClass::RateLimited => 2,
+        RuntimeHttpErrorClass::ProfileUnavailable => 3,
+        RuntimeHttpErrorClass::Overload => 4,
+        RuntimeHttpErrorClass::TransientServer => 5,
+    };
+    let action_tag = match error_policy.action {
+        RuntimeHttpErrorAction::PassThrough => 0,
+        RuntimeHttpErrorAction::RotateProfile => 1,
+        RuntimeHttpErrorAction::RetryProfile => 2,
+    };
+    let flags = prodex_mojo_core::runtime_sse_chunk::failure_flags(class_tag, action_tag)
+        .expect("Mojo SSE failure action matrix returned invalid output");
     RuntimeParsedSseEvent {
-        quota_blocked: error_policy.action == RuntimeHttpErrorAction::RotateProfile
-            && error_policy.class == RuntimeHttpErrorClass::Quota,
-        rate_limited: error_policy.action == RuntimeHttpErrorAction::RetryProfile
-            && error_policy.class == RuntimeHttpErrorClass::RateLimited,
-        overloaded: error_policy.action == RuntimeHttpErrorAction::RetryProfile
-            && matches!(
-                error_policy.class,
-                RuntimeHttpErrorClass::Overload | RuntimeHttpErrorClass::TransientServer
-            )
-            || (error_policy.action == RuntimeHttpErrorAction::RotateProfile
-                && error_policy.class == RuntimeHttpErrorClass::ProfileUnavailable),
+        quota_blocked: flags.quota_blocked,
+        rate_limited: flags.rate_limited,
+        overloaded: flags.overloaded,
         previous_response_not_found: extract_runtime_proxy_previous_response_message_from_value(
             &value,
         )

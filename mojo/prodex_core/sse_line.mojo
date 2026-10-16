@@ -214,6 +214,44 @@ comptime SSE_INSPECTION_OVERLOADED: Int64 = 3
 comptime SSE_INSPECTION_PREVIOUS_RESPONSE_NOT_FOUND: Int64 = 4
 
 
+# Interpret an already Mojo-classified upstream error action into the
+# SSE pre-commit retry flags. An action of passthrough, including after
+# local response commitment, must never demand another profile attempt.
+# Class: 0 other, 1 quota, 2 rate-limit, 3 unavailable,
+#        4 overload, 5 transient-server.
+# Action: 0 passthrough, 1 rotate-profile, 2 retry-profile.
+comptime SSE_FAILURE_QUOTA_BLOCKED: UInt64 = 1
+comptime SSE_FAILURE_RATE_LIMITED: UInt64 = 2
+comptime SSE_FAILURE_OVERLOADED: UInt64 = 4
+
+@export("prodex_runtime_sse_failure_flags_v1")
+def prodex_runtime_sse_failure_flags_v1(
+    abi_version: Int64,
+    class_tag: Int64,
+    action_tag: Int64,
+    flags_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != 1:
+        return 4
+    if class_tag < 0 or class_tag > 5 or action_tag < 0 or action_tag > 2 or flags_address == 0:
+        return 1
+    var flags = UInt64(0)
+    if action_tag == 1 and class_tag == 1:
+        flags |= SSE_FAILURE_QUOTA_BLOCKED
+    elif action_tag == 2 and class_tag == 2:
+        flags |= SSE_FAILURE_RATE_LIMITED
+    elif (
+        (action_tag == 2 and (class_tag == 4 or class_tag == 5))
+        or (action_tag == 1 and class_tag == 3)
+    ):
+        flags |= SSE_FAILURE_OVERLOADED
+    var output = Pointer[mut=True, UInt64, MutUntrackedOrigin](
+        unsafe_from_address=Int(flags_address)
+    )
+    output[] = flags
+    return 0
+
+
 @export("prodex_runtime_sse_inspection_step_v1")
 def prodex_runtime_sse_inspection_step_v1(
     committed: Int64,
