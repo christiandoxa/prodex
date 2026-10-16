@@ -139,16 +139,6 @@ fn runtime_response_forwarding_header_is_connection(name: &str) -> bool {
     runtime_response_forwarding_header_action(name, None) == RESPONSE_FORWARDING_HEADER_CONNECTION
 }
 
-fn runtime_response_forwarding_header_is_connection_token(
-    name: &str,
-    connection_values: &[&[u8]],
-) -> bool {
-    connection_values.iter().any(|value| {
-        runtime_response_forwarding_header_action(name, Some(value))
-            == RESPONSE_FORWARDING_HEADER_CONNECTION_TOKEN
-    })
-}
-
 fn runtime_response_content_type_header_is_usable(name: &str, value: &[u8]) -> bool {
     let result = unsafe {
         prodex_runtime_response_forwarding_content_type_v1(
@@ -336,9 +326,13 @@ pub fn runtime_forward_text_response_headers<'a>(
     headers
         .into_iter()
         .filter(|(name, _)| {
-            !runtime_response_forwarding_header_is_connection_token(name, &connection_values)
+            prodex_mojo_core::runtime_response_header_policy::should_forward(
+                name,
+                &connection_values,
+            )
+            .expect("Mojo HTTP response Connection token policy returned invalid output")
         })
-        .filter_map(|(name, value)| runtime_forward_text_response_header(name, value))
+        .map(|(name, value)| (name.to_owned(), value.to_owned()))
         .collect()
 }
 
@@ -354,9 +348,13 @@ pub fn runtime_forward_binary_response_headers<'a>(
     headers
         .into_iter()
         .filter(|(name, _)| {
-            !runtime_response_forwarding_header_is_connection_token(name, &connection_values)
+            prodex_mojo_core::runtime_response_header_policy::should_forward(
+                name,
+                &connection_values,
+            )
+            .expect("Mojo binary HTTP response Connection token policy returned invalid output")
         })
-        .filter_map(|(name, value)| runtime_forward_binary_response_header(name, value))
+        .map(|(name, value)| (name.to_owned(), value.to_vec()))
         .collect()
 }
 

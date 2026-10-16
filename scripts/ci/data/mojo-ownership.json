@@ -2230,7 +2230,8 @@
         "production_reachable": true,
         "role": "semantic",
         "operations": [
-          "runtime_response_forwarding_tap_state_policy"
+          "runtime_response_forwarding_tap_state_policy",
+          "runtime_response_connection_header_batch_policy"
         ]
       },
       {
@@ -2659,6 +2660,16 @@
           "runtime_sse_streaming_chunk_line_boundaries",
           "runtime_sse_data_payload_join_and_bom",
           "runtime_sse_failure_retry_rotate_flags"
+        ]
+      },
+      {
+        "path": "crates/prodex-mojo-core/src/runtime_response_header_policy.rs",
+        "language": "rust",
+        "classification": "MIXED",
+        "production_reachable": true,
+        "role": "adapter",
+        "operations": [
+          "runtime_response_connection_header_batch_policy"
         ]
       }
     ],
@@ -11761,6 +11772,29 @@
       "duplicate_production_owner": false,
       "platform_fallback": false,
       "rust_adapter_scope": "Host serde_json parsing and error-object mutation, existing Mojo exact error classifier, typed ABI flags and error mapping; Mojo exclusively decides insertion eligibility"
+    },
+    {
+      "name": "runtime_response_connection_header_batch_policy",
+      "domain": "runtime-proxy/http-response-headers",
+      "introduced_in": "0.438.0",
+      "baseline_state": "Rust iterated each Connection header value, computed the any-match connection token predicate, then independently repeated the Mojo hop-by-hop header predicate per candidate",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_runtime_response_forwarding_header_batch_v1",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/response_forwarding.mojo",
+      "consumer": "crates/prodex-runtime-proxy/src/response_forwarding.rs",
+      "consumer_marker": "prodex_mojo_core::runtime_response_header_policy::should_forward(",
+      "production_consumers": [
+        "crates/prodex-runtime-proxy/src/response_forwarding.rs"
+      ],
+      "production_reachability_test": "crates/prodex-runtime-proxy/src/response_forwarding.rs",
+      "rust_owner_before": "Rust repeated Connection token any loop and multiple header classifications before forwarding text/binary responses",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "Deleted Rust connection-token any operation and repeated forwarding filters; compiled Mojo ABI unit tests and actual multi-Connection text/binary header integration assert hop-by-hop removal, invalid UTF-8, and preserved turn-state",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "Host HTTP header slices, identification of Connection values through existing Mojo predicate, borrowed FFI view marshalling, and ordered header serialization. Compiled Mojo alone owns batch skip/preserve semantics."
     }
   ],
   "rust_semantic_reductions": [

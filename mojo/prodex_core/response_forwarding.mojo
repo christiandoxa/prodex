@@ -327,6 +327,56 @@ def prodex_runtime_response_forwarding_header_v1(
     return RESPONSE_FORWARDING_HEADER_FORWARD
 
 
+# Authoritative hop-by-hop header decision across all Connection values.
+# The host provides borrowed binary values. Compiled Mojo owns both
+# header-name classification and case-insensitive Connection token matching.
+@export("prodex_runtime_response_forwarding_header_batch_v1")
+def prodex_runtime_response_forwarding_header_batch_v1(
+    abi_version: Int64,
+    name_address: UInt,
+    name_length: Int64,
+    values_address: UInt,
+    value_count: Int64,
+) abi("C") -> Int64:
+    if abi_version != 1:
+        return -4
+    if (
+        name_length < 0
+        or (name_length > 0 and name_address == 0)
+        or value_count < 0
+        or (value_count > 0 and values_address == 0)
+    ):
+        return -1
+    if name_length > 0 and not rich_utf8_valid(
+        response_text_ptr(name_address), name_length
+    ):
+        return -1
+    if response_is_connection_header(name_address, name_length):
+        return RESPONSE_FORWARDING_HEADER_CONNECTION
+    if response_is_hop_header(name_address, name_length):
+        return RESPONSE_FORWARDING_HEADER_SKIP
+
+    var spans = Pointer[mut=False, UInt64, ImmUntrackedOrigin](
+        unsafe_from_address=Int(values_address)
+    )
+    for index in range(value_count):
+        var address = spans[unsafe_offset=index * 2]
+        var length = spans[unsafe_offset=index * 2 + 1]
+        if length > UInt64(9223372036854775807):
+            return -1
+        if length > 0 and address == 0:
+            return -1
+        if length == 0:
+            continue
+        if not rich_utf8_valid(response_text_ptr(UInt(address)), Int64(length)):
+            continue
+        if response_connection_value_matches_name(
+            name_address, name_length, UInt(address), Int64(length)
+        ):
+            return RESPONSE_FORWARDING_HEADER_CONNECTION_TOKEN
+    return RESPONSE_FORWARDING_HEADER_FORWARD
+
+
 @export("prodex_runtime_response_forwarding_content_type_v1")
 def prodex_runtime_response_forwarding_content_type_v1(
     name_address: UInt,
