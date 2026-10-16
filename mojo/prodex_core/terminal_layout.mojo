@@ -136,6 +136,58 @@ def prodex_terminal_tty_dimensions_v1(
     return TERMINAL_LAYOUT_OK
 
 
+# Render the connected Ratatui separator in its exact UTF-8 box-drawing
+# bytes. Unlike a width-only plan, this leaves no Rust Unicode renderer.
+comptime TERMINAL_SEPARATOR_MAX_CELLS: UInt64 = 65535
+
+
+def terminal_separator_write_glyph(
+    output: Pointer[mut=True, UInt8, _],
+    index: Int64,
+    final_byte: UInt8,
+):
+    var start = index * 3
+    output[unsafe_offset=start] = 0xE2
+    output[unsafe_offset=start + 1] = 0x94
+    output[unsafe_offset=start + 2] = final_byte
+
+
+@export("prodex_terminal_connected_separator_line_v1")
+def prodex_terminal_connected_separator_line_v1(
+    abi: Int64,
+    width: UInt64,
+    output_address: UInt,
+    output_capacity: Int64,
+    written_address: UInt,
+) abi("C") -> Int64:
+    if abi != TERMINAL_LAYOUT_ABI:
+        return TERMINAL_LAYOUT_VERSION
+    if (width > TERMINAL_SEPARATOR_MAX_CELLS or written_address == 0
+        or output_capacity < 0 or output_capacity < Int64(width * 3)
+        or (width > 0 and output_address == 0)):
+        return TERMINAL_LAYOUT_INVALID
+    var written = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(written_address)
+    )
+    written[] = 0
+    if width == 0:
+        return TERMINAL_LAYOUT_OK
+    var output = Pointer[mut=True, UInt8, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    if width == 1:
+        terminal_separator_write_glyph(output, 0, 0x80)
+    else:
+        terminal_separator_write_glyph(output, 0, 0x9C)
+        var index: Int64 = 1
+        while index < Int64(width) - 1:
+            terminal_separator_write_glyph(output, index, 0x80)
+            index += 1
+        terminal_separator_write_glyph(output, Int64(width) - 1, 0xA4)
+    written[] = Int64(width * 3)
+    return TERMINAL_LAYOUT_OK
+
+
 def terminal_clamp(value: UInt64, low: UInt64, high: UInt64) -> UInt64:
     if value < low:
         return low

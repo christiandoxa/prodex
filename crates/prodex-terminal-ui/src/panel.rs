@@ -72,12 +72,8 @@ pub fn tui_connected_footer_border_set() -> border::Set<'static> {
 }
 
 pub fn tui_connected_separator_line(width: u16) -> String {
-    match width {
-        0 => String::new(),
-        1 => "─".to_string(),
-        2 => "├┤".to_string(),
-        width => format!("├{}┤", "─".repeat(usize::from(width).saturating_sub(2))),
-    }
+    prodex_mojo_core::terminal_layout::terminal_connected_separator_line(width)
+        .expect("compiled-in Mojo connected terminal separator returned invalid output")
 }
 
 pub fn tui_hint_style() -> Style {

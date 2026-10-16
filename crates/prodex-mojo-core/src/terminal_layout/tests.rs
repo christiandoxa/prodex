@@ -465,3 +465,52 @@ fn terminal_geometry_strict_abi_rejects_bad_shape_before_output() {
         "the caller-provided maximum must bound the value"
     );
 }
+
+#[test]
+fn connected_separator_utf8_is_rendered_entirely_by_compiled_mojo() {
+    for (width, expected) in [
+        (0, ""),
+        (1, "─"),
+        (2, "├┤"),
+        (3, "├─┤"),
+        (5, "├───┤"),
+        (10, "├────────┤"),
+    ] {
+        assert_eq!(terminal_connected_separator_line(width).unwrap(), expected);
+    }
+    let longest = terminal_connected_separator_line(u16::MAX).unwrap();
+    assert_eq!(longest.len(), usize::from(u16::MAX) * 3);
+    assert!(longest.starts_with("├─"));
+    assert!(longest.ends_with("─┤"));
+    assert_eq!(longest.chars().count(), usize::from(u16::MAX));
+}
+
+#[test]
+fn connected_separator_abi_rejects_wrong_capacity_and_version_without_output() {
+    let mut output = [91_u8; 12];
+    let mut written = -5_i64;
+    let buffer = output.as_mut_ptr() as usize as u64;
+    let written_ptr = (&mut written as *mut i64) as usize as u64;
+    assert_eq!(
+        unsafe { prodex_terminal_connected_separator_line_v1(4, 2, buffer, 12, written_ptr) },
+        4
+    );
+    assert_eq!(
+        unsafe { prodex_terminal_connected_separator_line_v1(1, 5, buffer, 12, written_ptr) },
+        1
+    );
+    assert_eq!(
+        unsafe { prodex_terminal_connected_separator_line_v1(1, 65_536, buffer, 12, written_ptr) },
+        1
+    );
+    assert_eq!(
+        unsafe { prodex_terminal_connected_separator_line_v1(1, 2, 0, 12, written_ptr) },
+        1
+    );
+    assert_eq!(
+        unsafe { prodex_terminal_connected_separator_line_v1(1, 2, buffer, 12, 0) },
+        1
+    );
+    assert_eq!(written, -5);
+    assert_eq!(output, [91; 12]);
+}

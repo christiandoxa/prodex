@@ -5645,3 +5645,10 @@ overrides and first-two `stty size` values with checked unsigned bounds.
 Rust retains the environment/TTY process boundary and typed output, and its
 former trim/decimal/split pipeline was removed without an alternate parser.
 Strict ABI and terminal-ui caller tests cover the grammar and edge cases.
+
+## Connected terminal separator bytes migrated to Mojo
+
+`terminal_layout.mojo` now renders the exact UTF-8 panel connector glyphs for
+all u16 widths. Rust's width-specific match, formatting and repeated glyph
+calculation were removed; Rust validates and owns the returned String only.
+Strict ABI, terminal-ui caller and no-fallback guard coverage are retained.
