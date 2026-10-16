@@ -57,6 +57,97 @@ def prodex_runtime_sse_chunk_line_offsets_v1(
     return 0
 
 
+# SSE data payload assembly is a Mojo-owned wire operation: join data:
+# line bodies using LF and remove repeated leading UTF-8 BOM sequences.
+# The host owns String data and serde_json decoding of the resulting bytes.
+@export("prodex_runtime_sse_payload_join_v1")
+def prodex_runtime_sse_payload_join_v1(
+    abi_version: Int64,
+    views_address: UInt,
+    line_count: Int64,
+    output_address: UInt,
+    output_capacity: Int64,
+    written_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != 1:
+        return 4
+    if (
+        line_count < 1
+        or views_address == 0
+        or output_address == 0
+        or written_address == 0
+        or output_capacity < 0
+    ):
+        return 1
+    var views = Pointer[mut=False, UInt64, ImmUntrackedOrigin](
+        unsafe_from_address=Int(views_address)
+    )
+    var first_address = views[unsafe_offset=0]
+    var first_length = views[unsafe_offset=1]
+    if first_length > UInt64(9223372036854775807):
+        return 1
+    if first_length > 0 and first_address == 0:
+        return 1
+    var first_skip: Int64 = 0
+    if first_length >= 3:
+        var first = Pointer[mut=False, UInt8, ImmUntrackedOrigin](
+            unsafe_from_address=Int(first_address)
+        )
+        while first_skip + 3 <= Int64(first_length):
+            if (
+                first[unsafe_offset=first_skip] != 239
+                or first[unsafe_offset=first_skip + 1] != 187
+                or first[unsafe_offset=first_skip + 2] != 191
+            ):
+                break
+            first_skip += 3
+
+    # Check all lengths and required capacity before touching caller output.
+    var required: Int64 = 0
+    for index in range(line_count):
+        var address = views[unsafe_offset=index * 2]
+        var length = views[unsafe_offset=index * 2 + 1]
+        if length > UInt64(9223372036854775807):
+            return 1
+        if length > 0 and address == 0:
+            return 1
+        var portion = Int64(length)
+        if index == 0:
+            portion -= first_skip
+        else:
+            if portion == 9223372036854775807:
+                return 1
+            portion += 1
+        if portion > output_capacity - required:
+            return 3
+        required += portion
+
+    var output = Pointer[mut=True, UInt8, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    var written = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(written_address)
+    )
+    var cursor: Int64 = 0
+    for index in range(line_count):
+        if index > 0:
+            output[unsafe_offset=cursor] = 10
+            cursor += 1
+        var address = views[unsafe_offset=index * 2]
+        var length = Int64(views[unsafe_offset=index * 2 + 1])
+        if length > 0:
+            var source = Pointer[mut=False, UInt8, ImmUntrackedOrigin](
+                unsafe_from_address=Int(address)
+            )
+            var offset: Int64 = first_skip if index == 0 else 0
+            while offset < length:
+                output[unsafe_offset=cursor] = source[unsafe_offset=offset]
+                cursor += 1
+                offset += 1
+    written[] = cursor
+    return 0
+
+
 @export("prodex_runtime_sse_line_plan_v1")
 def prodex_runtime_sse_line_plan_v1(
     address: UInt,

@@ -5,7 +5,22 @@ use crate::MojoError;
 
 const MAX_BOUNDARIES: usize = 256;
 
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct SseUtf8Span {
+    address: u64,
+    len: u64,
+}
+
 unsafe extern "C" {
+    fn prodex_runtime_sse_payload_join_v1(
+        abi_version: i64,
+        views: u64,
+        line_count: i64,
+        output: u64,
+        output_capacity: i64,
+        written: u64,
+    ) -> i64;
     fn prodex_runtime_sse_chunk_line_offsets_v1(
         abi_version: i64,
         input: u64,
@@ -67,9 +82,134 @@ pub fn newline_plan(chunk: &[u8]) -> Result<SseChunkLinePlan, MojoError> {
     Ok(SseChunkLinePlan { newlines, consumed })
 }
 
+/// Join all SSE data bodies and remove repeated leading UTF-8 BOM in Mojo.
+///
+/// Rust owns the individual String allocations and serde_json consumption
+/// but never formats an alternative SSE payload or strips a BOM itself.
+pub fn payload_text(data_lines: &[String]) -> Result<String, MojoError> {
+    if data_lines.is_empty() {
+        return Err(MojoError::InvalidInput);
+    }
+    let capacity = data_lines
+        .iter()
+        .try_fold(0usize, |sum, line| {
+            sum.checked_add(line.len())?.checked_add(1)
+        })
+        .ok_or(MojoError::InvalidInput)?;
+    let views = data_lines
+        .iter()
+        .map(|line| {
+            Ok(SseUtf8Span {
+                address: line.as_ptr() as u64,
+                len: u64::try_from(line.len()).map_err(|_| MojoError::InvalidInput)?,
+            })
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    let mut output = vec![0_u8; capacity];
+    let mut written = -1_i64;
+    let status = unsafe {
+        prodex_runtime_sse_payload_join_v1(
+            1,
+            views.as_ptr() as u64,
+            i64::try_from(views.len()).map_err(|_| MojoError::InvalidInput)?,
+            output.as_mut_ptr() as u64,
+            i64::try_from(output.len()).map_err(|_| MojoError::InvalidInput)?,
+            &mut written as *mut i64 as u64,
+        )
+    };
+    if status != 0 {
+        return Err(match status {
+            1 => MojoError::InvalidInput,
+            3 => MojoError::Capacity,
+            4 => MojoError::AbiMismatch,
+            _ => MojoError::InvalidOutput,
+        });
+    }
+    let written = usize::try_from(written).map_err(|_| MojoError::InvalidOutput)?;
+    if written > output.len() {
+        return Err(MojoError::InvalidOutput);
+    }
+    output.truncate(written);
+    String::from_utf8(output).map_err(|_| MojoError::InvalidOutput)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn compiled_sse_data_payload_exact_bom_join_and_unicode_cases() {
+        for (input, expected) in [
+            (vec!["{}".to_owned()], "{}"),
+            (vec!["".to_owned()], ""),
+            (vec!["\u{feff}\u{feff}{\"x\":1}".to_owned()], "{\"x\":1}"),
+            (vec!["\u{feff}".to_owned(), "next".to_owned()], "\nnext"),
+            (
+                vec!["a".to_owned(), "".to_owned(), "b".to_owned()],
+                "a\n\nb",
+            ),
+            (
+                vec!["".to_owned(), "\u{feff}next".to_owned()],
+                "\n\u{feff}next",
+            ),
+            (
+                vec!["東京🧭".to_owned(), "line2".to_owned()],
+                "東京🧭\nline2",
+            ),
+        ] {
+            assert_eq!(payload_text(&input).unwrap(), expected);
+        }
+        assert_eq!(payload_text(&[]), Err(MojoError::InvalidInput));
+        let lines = vec!["x".to_owned(); 600];
+        assert_eq!(payload_text(&lines).unwrap(), lines.join("\n"));
+    }
+
+    #[test]
+    fn compiled_sse_payload_join_rejects_abi_and_capacity_without_writes() {
+        let first = SseUtf8Span {
+            address: b"abc".as_ptr() as u64,
+            len: 3,
+        };
+        let mut output = [37_u8; 6];
+        let mut written = 88_i64;
+        unsafe {
+            assert_eq!(
+                prodex_runtime_sse_payload_join_v1(
+                    2,
+                    &first as *const _ as u64,
+                    1,
+                    output.as_mut_ptr() as u64,
+                    6,
+                    &mut written as *mut _ as u64
+                ),
+                4,
+            );
+            assert_eq!(
+                prodex_runtime_sse_payload_join_v1(
+                    1,
+                    &first as *const _ as u64,
+                    1,
+                    output.as_mut_ptr() as u64,
+                    2,
+                    &mut written as *mut _ as u64
+                ),
+                3,
+            );
+            assert_eq!(
+                prodex_runtime_sse_payload_join_v1(
+                    1,
+                    0,
+                    1,
+                    output.as_mut_ptr() as u64,
+                    6,
+                    &mut written as *mut _ as u64
+                ),
+                1,
+            );
+        }
+        assert_eq!(output, [37; 6]);
+        assert_eq!(written, 88);
+    }
 
     #[test]
     fn compiled_chunk_scanner_returns_bounded_sorted_offsets_across_batches() {
