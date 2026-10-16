@@ -2,11 +2,14 @@
 #![allow(unsafe_code)]
 
 use prodex_mojo_core::launch::{
-    LaunchArgument, LaunchArgumentOperation, SuperProviderAlias, SuperValidationInput,
+    LaunchArgument, LaunchArgumentOperation, SuperPromptChoiceKey, SuperPromptLabelKind,
+    SuperPromptTextAction, SuperPromptTextKey, SuperProviderAlias, SuperValidationInput,
     SuperValidationScope, SuperValidationViolation, codex_command_server_subcommand,
     default_cli_invocation_to_run, find_super_expose_alias_index, inspect_launch_arguments,
     plan_launch_arguments, plan_super_validation, positioned_super_provider_alias,
-    super_compat_provider_alias, super_literal_boundary,
+    super_choice_initial_index, super_compat_provider_alias, super_literal_boundary,
+    super_prompt_choice_event_plan, super_prompt_choice_index, super_prompt_format_label,
+    super_prompt_text_event_plan, super_prompt_text_prefix_length, super_prompt_value_index,
 };
 
 #[test]
@@ -619,4 +622,135 @@ fn launch_boundary_is_reentrant() {
             });
         }
     });
+}
+
+#[test]
+fn super_prompt_menu_and_text_policies_use_real_mojo() {
+    const { assert!(prodex_mojo_core::MOJO_ACTIVE) }
+
+    assert_eq!(super_choice_initial_index(7, 5).unwrap(), 4);
+    assert_eq!(super_choice_initial_index(2, 5).unwrap(), 2);
+    assert_eq!(
+        super_prompt_choice_event_plan(
+            SuperPromptChoiceKey::Character,
+            Some('k'),
+            false,
+            2,
+            5,
+            false,
+        )
+        .unwrap(),
+        (1, 0, None)
+    );
+    assert_eq!(
+        super_prompt_choice_event_plan(
+            SuperPromptChoiceKey::Character,
+            Some('j'),
+            false,
+            4,
+            5,
+            false,
+        )
+        .unwrap(),
+        (0, 0, None)
+    );
+    assert_eq!(
+        super_prompt_choice_event_plan(
+            SuperPromptChoiceKey::Character,
+            Some('c'),
+            true,
+            1,
+            5,
+            false,
+        )
+        .unwrap(),
+        (1, 2, None)
+    );
+    assert_eq!(
+        super_prompt_choice_event_plan(SuperPromptChoiceKey::Escape, None, false, 1, 5, true,)
+            .unwrap(),
+        (1, 1, Some(4))
+    );
+
+    let long_unicode = "é".repeat(257);
+    assert_eq!(super_prompt_text_prefix_length(&long_unicode).unwrap(), 512);
+    assert_eq!(super_prompt_text_prefix_length("aé").unwrap(), 3);
+    assert_eq!(
+        super_prompt_text_event_plan(SuperPromptTextKey::Character, Some('é'), false, 255, false,)
+            .unwrap(),
+        (SuperPromptTextAction::Append, Some('é'), true)
+    );
+    assert_eq!(
+        super_prompt_text_event_plan(SuperPromptTextKey::Character, Some('x'), false, 256, false,)
+            .unwrap(),
+        (SuperPromptTextAction::Ignore, None, false)
+    );
+    assert_eq!(
+        super_prompt_text_event_plan(SuperPromptTextKey::Backspace, None, false, 0, false,)
+            .unwrap(),
+        (SuperPromptTextAction::Backspace, None, true)
+    );
+    assert_eq!(
+        super_prompt_text_event_plan(SuperPromptTextKey::Escape, None, false, 0, true,)
+            .unwrap()
+            .0,
+        SuperPromptTextAction::ReturnNone
+    );
+    assert_eq!(
+        super_prompt_text_event_plan(SuperPromptTextKey::Escape, None, false, 0, false,)
+            .unwrap()
+            .0,
+        SuperPromptTextAction::Cancel
+    );
+}
+
+#[test]
+fn super_prompt_choice_preselection_and_labels_use_real_mojo() {
+    const { assert!(prodex_mojo_core::MOJO_ACTIVE) }
+
+    assert_eq!(
+        super_prompt_choice_index(
+            &[None, Some("gpt-5.6-sol"), None],
+            Some("GPT-5.6-SOL"),
+            true,
+            0,
+        )
+        .unwrap(),
+        1
+    );
+    assert_eq!(
+        super_prompt_choice_index(&[None, Some("high")], Some("HIGH"), false, 0).unwrap(),
+        0
+    );
+    assert_eq!(
+        super_prompt_choice_index(&[None, Some("high")], None, true, 0).unwrap(),
+        0
+    );
+    assert_eq!(super_prompt_value_index(&[4, 8, 16], 8, 0).unwrap(), 1);
+    assert_eq!(super_prompt_value_index(&[4, 8, 16], 12, 0).unwrap(), 0);
+
+    assert_eq!(
+        super_prompt_format_label(SuperPromptLabelKind::Provider, 0, Some("OpenAI"), true,)
+            .unwrap(),
+        "OpenAI (session affinity)"
+    );
+    assert_eq!(
+        super_prompt_format_label(SuperPromptLabelKind::ProviderDefault, 0, None, false).unwrap(),
+        "provider default"
+    );
+    assert_eq!(
+        super_prompt_format_label(SuperPromptLabelKind::DefaultConcurrency, 4, None, false,)
+            .unwrap(),
+        "default (4)"
+    );
+    assert_eq!(
+        super_prompt_format_label(
+            SuperPromptLabelKind::CustomConcurrencyTitle,
+            64,
+            None,
+            false,
+        )
+        .unwrap(),
+        "Enter maximum active sub-agents (1-64)"
+    );
 }

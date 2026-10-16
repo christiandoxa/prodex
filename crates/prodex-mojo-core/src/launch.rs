@@ -10,10 +10,14 @@ pub use runtime_feature_plan::{
 #[path = "launch/menu_policy.rs"]
 mod menu_policy;
 pub use menu_policy::{
-    LoginArgumentMethod, LoginArgumentPlan, SuperProviderAlias, codex_command_server_subcommand,
+    LoginArgumentMethod, LoginArgumentPlan, SuperPromptChoiceKey, SuperPromptLabelKind,
+    SuperPromptTextAction, SuperPromptTextKey, SuperProviderAlias, codex_command_server_subcommand,
     default_cli_invocation_to_run, login_argument_plan, login_menu_key_plan, login_menu_layout,
-    login_menu_window_offset, positioned_super_provider_alias, super_choice_key_plan,
-    super_choice_visible_range, super_compat_provider_alias, super_literal_boundary,
+    login_menu_window_offset, positioned_super_provider_alias, super_choice_initial_index,
+    super_choice_key_plan, super_choice_visible_range, super_compat_provider_alias,
+    super_literal_boundary, super_prompt_choice_event_plan, super_prompt_choice_index,
+    super_prompt_format_label, super_prompt_text_event_plan, super_prompt_text_prefix_length,
+    super_prompt_value_index,
 };
 
 #[path = "launch/recovery.rs"]
