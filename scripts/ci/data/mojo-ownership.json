@@ -1319,7 +1319,9 @@
         "role": "semantic",
         "operations": [
           "session_report_metadata_policy",
-          "super_expose_rollout_name_policy"
+          "super_expose_rollout_name_policy",
+          "super_expose_output_event_page_policy",
+          "super_expose_exact_user_message_match_policy"
         ]
       },
       {
@@ -6642,6 +6644,54 @@
       "duplicate_production_owner": false,
       "platform_fallback": false,
       "rust_adapter_scope": "Rust retains path and UTF-8 extraction, filesystem metadata, canonicalization, symlink and open-file authority, UUID parsing/normalization, and all process/terminal/filesystem effects"
+    },
+    {
+      "name": "super_expose_output_event_page_policy",
+      "domain": "super-expose/session-prompt-write",
+      "introduced_in": "0.438.0",
+      "baseline_state": "candidate",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_session_prompt_write_output_event_plan_v1",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/session_report.mojo",
+      "consumer": "crates/prodex-app/src/super_expose/session_prompt_write/output.rs",
+      "consumer_marker": "prodex_mojo_core::session_cli_policy::output_event_plan",
+      "production_consumers": [
+        "crates/prodex-app/src/super_expose/session_prompt_write/output.rs"
+      ],
+      "production_reachability_test": "crates/prodex-app/src/super_expose/session_prompt_write_output_tests.rs",
+      "caller_regression_test": "crates/prodex-app/src/super_expose/session_prompt_write_output_tests.rs",
+      "rust_owner_before": "Rust decided visible-event cursor advancement, page limits, and aggregate output text admission while reading parsed transcript events",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "deleted; direct ABI boundary tests and the rollout page caller regression cover hidden events, cursor continuation, event limits, and text limits",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "Rust retains bounded file framing, Serde parsing, transcript event materialization, redaction, UTF-8 and capacity checks, and typed error mapping"
+    },
+    {
+      "name": "super_expose_exact_user_message_match_policy",
+      "domain": "super-expose/session-prompt-write",
+      "introduced_in": "0.438.0",
+      "baseline_state": "candidate",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_session_prompt_write_exact_user_message_match_v1",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/session_report.mojo",
+      "consumer": "crates/prodex-app/src/super_expose/session_prompt_write/output.rs",
+      "consumer_marker": "prodex_mojo_core::session_cli_policy::exact_user_message_match",
+      "production_consumers": [
+        "crates/prodex-app/src/super_expose/session_prompt_write/output.rs"
+      ],
+      "production_reachability_test": "crates/prodex-app/src/super_expose/session_prompt_write_queue_tests.rs",
+      "caller_regression_test": "crates/prodex-app/src/super_expose/session_prompt_write_queue_tests.rs",
+      "rust_owner_before": "Rust accepted event-msg and response-item user records directly during rollout write verification",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "deleted; direct ABI boundary tests and rollout verification caller coverage retain exact acceptance and hidden-response rejection",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "Rust retains bounded file reads, Serde parsing, secret-safe message comparison, transcript payload extraction, and typed I/O error mapping"
     },
     {
       "domain": "cli/super-provider-config",
