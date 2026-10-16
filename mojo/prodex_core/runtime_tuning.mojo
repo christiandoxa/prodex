@@ -1,6 +1,13 @@
 from std.memory import Pointer
 
-from rich_text import rich_trim_bounds, rich_view_ptr, rich_view_valid
+from rich_text import (
+    rich_codepoint,
+    rich_codepoint_width,
+    rich_trim_bounds,
+    rich_unicode_space,
+    rich_view_ptr,
+    rich_view_valid,
+)
 from rich_types import ProdexRichStringView
 
 # Fault-injection budgets are a deterministic transition. Rust owns environment
@@ -44,9 +51,57 @@ comptime RUNTIME_SCALAR_CONFIG_CLOCK_SOURCE: Int64 = 3
 comptime RUNTIME_SCALAR_CONFIG_OPENAI_PROVIDER: Int64 = 4
 comptime RUNTIME_SCALAR_CONFIG_LOG_RECORDING: Int64 = 5
 comptime RUNTIME_SCALAR_CONFIG_MAX_BYTES: Int64 = 9_223_372_036_854_775_807
+comptime RUNTIME_CONFIG_SCALAR_ABI_VERSION: Int64 = 1
+comptime RUNTIME_CONFIG_SCALAR_STRICT_POSITIVE_UNSIGNED: Int64 = 0
+comptime RUNTIME_CONFIG_SCALAR_STRICT_UNSIGNED: Int64 = 1
+comptime RUNTIME_CONFIG_SCALAR_STRICT_POSITIVE_SIGNED: Int64 = 2
+comptime RUNTIME_CONFIG_SCALAR_STRICT_BOOL: Int64 = 3
+comptime RUNTIME_CONFIG_SCALAR_COMPAT_UNSIGNED: Int64 = 4
+comptime RUNTIME_CONFIG_SCALAR_COMPAT_FLAG: Int64 = 5
+comptime RUNTIME_CONFIG_SCALAR_COMPAT_BOOL_DEFAULT_TRUE: Int64 = 6
+comptime RUNTIME_CONFIG_SCALAR_FLAG_TRIM: Int64 = 1
+comptime RUNTIME_CONFIG_SCALAR_FLAG_ALLOW_ZERO: Int64 = 2
+comptime RUNTIME_CONFIG_SCALAR_FLAG_CLAMP: Int64 = 4
+comptime RUNTIME_CONFIG_SCALAR_STATUS_OK: Int64 = 0
+comptime RUNTIME_CONFIG_SCALAR_STATUS_MISSING: Int64 = 1
+comptime RUNTIME_CONFIG_SCALAR_STATUS_INVALID_UNICODE: Int64 = 2
+comptime RUNTIME_CONFIG_SCALAR_STATUS_EMPTY: Int64 = 3
+comptime RUNTIME_CONFIG_SCALAR_STATUS_WHITESPACE: Int64 = 4
+comptime RUNTIME_CONFIG_SCALAR_STATUS_UNSIGNED_INTEGER: Int64 = 5
+comptime RUNTIME_CONFIG_SCALAR_STATUS_NOT_POSITIVE: Int64 = 6
+comptime RUNTIME_CONFIG_SCALAR_STATUS_POSITIVE_INTEGER: Int64 = 7
+comptime RUNTIME_CONFIG_SCALAR_STATUS_INVALID_BOOL: Int64 = 8
+comptime RUNTIME_CONFIG_SCALAR_STATUS_COMPATIBILITY_DEFAULT: Int64 = 9
+comptime RUNTIME_CONFIG_SCALAR_MAX_U64: UInt64 = 18_446_744_073_709_551_615
+comptime RUNTIME_CONFIG_SCALAR_MAX_I64: UInt64 = 9_223_372_036_854_775_807
+comptime RUNTIME_CONFIG_SCALAR_MIN_I64_MAGNITUDE: UInt64 = 9_223_372_036_854_775_808
+comptime RUNTIME_CONFIG_SCALAR_RECORD_V1_SIZE: Int64 = 136
+comptime RUNTIME_CONFIG_SCALAR_OUTPUT_UNSIGNED_OFFSET: Int64 = 120
+comptime RUNTIME_CONFIG_SCALAR_OUTPUT_SIGNED_OFFSET: Int64 = 128
 comptime RUNTIME_PROXY_PRESET_PLAN_ABI_VERSION: Int64 = 1
 comptime RUNTIME_PROXY_PRESET_PLAN_FIELD_COUNT: Int64 = 39
 comptime RUNTIME_PROXY_PRESET_PLAN_VALID_MASK: UInt64 = 549_755_813_887
+
+
+@fieldwise_init
+struct RuntimeConfigScalarRecordV1(Copyable):
+    var operation: Int64
+    var value_address: UInt64
+    var value_length: Int64
+    var value_present: Int64
+    var value_valid_utf8: Int64
+    var policy_present: Int64
+    var policy_unsigned: UInt64
+    var default_unsigned: UInt64
+    var minimum_unsigned: UInt64
+    var maximum_unsigned: UInt64
+    var policy_signed: Int64
+    var default_signed: Int64
+    var minimum_signed: Int64
+    var maximum_signed: Int64
+    var flags: Int64
+    var output_unsigned: UInt64
+    var output_signed: Int64
 
 
 
@@ -70,6 +125,316 @@ def runtime_scalar_range_equals[literal: StaticString](
         ):
             return False
     return True
+
+
+def runtime_config_scalar_has_whitespace(
+    view: ProdexRichStringView, start: Int64, end: Int64
+) -> Bool:
+    var source = rich_view_ptr(view)
+    var index = start
+    while index < end:
+        var width = rich_codepoint_width(source[unsafe_offset=index])
+        var codepoint = rich_codepoint(source, index, width)
+        if rich_unicode_space(codepoint):
+            return True
+        index += width
+    return False
+
+
+def runtime_config_scalar_parse_unsigned(
+    view: ProdexRichStringView,
+    start: Int64,
+    end: Int64,
+    output: Pointer[mut=True, UInt64, _],
+) -> Bool:
+    if start >= end:
+        return False
+    var source = rich_view_ptr(view)
+    var index = start
+    var negative = False
+    if source[unsafe_offset=index] == 43:
+        index += 1
+    elif source[unsafe_offset=index] == 45:
+        negative = True
+        index += 1
+    if negative or index >= end:
+        return False
+    var value: UInt64 = 0
+    while index < end:
+        var byte = source[unsafe_offset=index]
+        if byte < 48 or byte > 57:
+            return False
+        var digit = UInt64(byte - 48)
+        if value > (RUNTIME_CONFIG_SCALAR_MAX_U64 - digit) / 10:
+            return False
+        value = value * 10 + digit
+        index += 1
+    output[] = value
+    return True
+
+
+def runtime_config_scalar_parse_signed(
+    view: ProdexRichStringView,
+    start: Int64,
+    end: Int64,
+    output: Pointer[mut=True, Int64, _],
+) -> Bool:
+    if start >= end:
+        return False
+    var source = rich_view_ptr(view)
+    var index = start
+    var negative = False
+    if source[unsafe_offset=index] == 43:
+        index += 1
+    elif source[unsafe_offset=index] == 45:
+        negative = True
+        index += 1
+    if index >= end:
+        return False
+    var limit = RUNTIME_CONFIG_SCALAR_MAX_I64
+    if negative:
+        limit = RUNTIME_CONFIG_SCALAR_MIN_I64_MAGNITUDE
+    var magnitude: UInt64 = 0
+    while index < end:
+        var byte = source[unsafe_offset=index]
+        if byte < 48 or byte > 57:
+            return False
+        var digit = UInt64(byte - 48)
+        if magnitude > (limit - digit) / 10:
+            return False
+        magnitude = magnitude * 10 + digit
+        index += 1
+    if negative:
+        if magnitude == RUNTIME_CONFIG_SCALAR_MIN_I64_MAGNITUDE:
+            output[] = -9_223_372_036_854_775_808
+        else:
+            output[] = -Int64(magnitude)
+    else:
+        output[] = Int64(magnitude)
+    return True
+
+
+def runtime_config_scalar_choose_unsigned(
+    policy_present: Int64,
+    policy_value: UInt64,
+    default_value: UInt64,
+    minimum: UInt64,
+    maximum: UInt64,
+    allow_zero: Bool,
+    output: Pointer[mut=True, UInt64, _],
+) -> Bool:
+    var value = default_value
+    if policy_present == 1 and (allow_zero or policy_value > 0):
+        value = policy_value
+    if value < minimum:
+        value = minimum
+    if value > maximum:
+        value = maximum
+    output[] = value
+    return True
+
+
+def runtime_config_scalar_choose_signed(
+    policy_present: Int64,
+    policy_value: Int64,
+    default_value: Int64,
+    minimum: Int64,
+    maximum: Int64,
+    output: Pointer[mut=True, Int64, _],
+) -> Bool:
+    var value = default_value
+    if policy_present == 1 and policy_value > 0:
+        value = policy_value
+    if value < minimum:
+        value = minimum
+    if value > maximum:
+        value = maximum
+    output[] = value
+    return True
+
+
+@export("prodex_runtime_config_scalar_v1")
+def prodex_runtime_config_scalar_v1(
+    abi_version: Int64,
+    record_address: UInt,
+    record_size: Int64,
+) abi("C") -> Int64:
+    if abi_version != RUNTIME_CONFIG_SCALAR_ABI_VERSION:
+        return -3
+    if record_address == 0 or record_size != RUNTIME_CONFIG_SCALAR_RECORD_V1_SIZE:
+        return -2
+
+    var record_pointer = Pointer[
+        mut=False, RuntimeConfigScalarRecordV1, ImmUntrackedOrigin
+    ](unsafe_from_address=Int(record_address))
+    var record = record_pointer[].copy()
+    var operation = record.operation
+    var value_address = UInt(record.value_address)
+    var value_length = record.value_length
+    var value_present = record.value_present
+    var value_valid_utf8 = record.value_valid_utf8
+    var policy_present = record.policy_present
+    var policy_unsigned = record.policy_unsigned
+    var default_unsigned = record.default_unsigned
+    var minimum_unsigned = record.minimum_unsigned
+    var maximum_unsigned = record.maximum_unsigned
+    var policy_signed = record.policy_signed
+    var default_signed = record.default_signed
+    var minimum_signed = record.minimum_signed
+    var maximum_signed = record.maximum_signed
+    var flags = record.flags
+
+    if operation < RUNTIME_CONFIG_SCALAR_STRICT_POSITIVE_UNSIGNED or operation > RUNTIME_CONFIG_SCALAR_COMPAT_BOOL_DEFAULT_TRUE:
+        return -2
+    if value_present != 0 and value_present != 1 or value_valid_utf8 != 0 and value_valid_utf8 != 1 or policy_present != 0 and policy_present != 1:
+        return -2
+    if value_length < 0 or value_length > RUNTIME_SCALAR_CONFIG_MAX_BYTES:
+        return -2
+    if value_present == 0 and value_length != 0:
+        return -2
+    if value_present == 0 and value_valid_utf8 != 1:
+        return -2
+    if value_valid_utf8 == 0 and value_present == 1 and (value_address != 0 or value_length != 0):
+        return -2
+    if value_present == 1 and value_valid_utf8 == 1 and value_length > 0 and value_address == 0:
+        return -2
+    if value_present == 1 and value_valid_utf8 == 1:
+        var input_view = ProdexRichStringView(value_address, UInt(value_length))
+        if not rich_view_valid(input_view, RUNTIME_SCALAR_CONFIG_MAX_BYTES):
+            return -2
+    if minimum_unsigned > maximum_unsigned or minimum_signed > maximum_signed:
+        return -2
+
+    if operation == RUNTIME_CONFIG_SCALAR_STRICT_POSITIVE_UNSIGNED or operation == RUNTIME_CONFIG_SCALAR_STRICT_UNSIGNED or operation == RUNTIME_CONFIG_SCALAR_COMPAT_UNSIGNED:
+        if flags < 0 or flags > RUNTIME_CONFIG_SCALAR_FLAG_TRIM + RUNTIME_CONFIG_SCALAR_FLAG_ALLOW_ZERO + RUNTIME_CONFIG_SCALAR_FLAG_CLAMP:
+            return -2
+    elif operation == RUNTIME_CONFIG_SCALAR_COMPAT_FLAG or operation == RUNTIME_CONFIG_SCALAR_COMPAT_BOOL_DEFAULT_TRUE:
+        if flags != 0 and flags != RUNTIME_CONFIG_SCALAR_FLAG_TRIM:
+            return -2
+    elif flags != 0:
+        return -2
+    if operation != RUNTIME_CONFIG_SCALAR_COMPAT_UNSIGNED and (flags & RUNTIME_CONFIG_SCALAR_FLAG_TRIM) != 0:
+        return -2
+    if operation != RUNTIME_CONFIG_SCALAR_STRICT_POSITIVE_UNSIGNED and operation != RUNTIME_CONFIG_SCALAR_STRICT_UNSIGNED and (flags & RUNTIME_CONFIG_SCALAR_FLAG_CLAMP) != 0:
+        return -2
+
+    var output_unsigned = Pointer[mut=True, UInt64, MutUntrackedOrigin](
+        unsafe_from_address=Int(record_address + UInt(RUNTIME_CONFIG_SCALAR_OUTPUT_UNSIGNED_OFFSET))
+    )
+    var output_signed = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(record_address + UInt(RUNTIME_CONFIG_SCALAR_OUTPUT_SIGNED_OFFSET))
+    )
+    var allow_zero = (flags & RUNTIME_CONFIG_SCALAR_FLAG_ALLOW_ZERO) != 0
+    var clamp = (flags & RUNTIME_CONFIG_SCALAR_FLAG_CLAMP) != 0
+
+    if operation == RUNTIME_CONFIG_SCALAR_COMPAT_FLAG or operation == RUNTIME_CONFIG_SCALAR_COMPAT_BOOL_DEFAULT_TRUE:
+        var default_bool = operation == RUNTIME_CONFIG_SCALAR_COMPAT_BOOL_DEFAULT_TRUE
+        if value_present == 0:
+            output_unsigned[] = UInt64(default_bool)
+            return RUNTIME_CONFIG_SCALAR_STATUS_MISSING
+        if value_valid_utf8 == 0:
+            output_unsigned[] = UInt64(default_bool)
+            if default_bool:
+                return RUNTIME_CONFIG_SCALAR_STATUS_COMPATIBILITY_DEFAULT
+            return RUNTIME_CONFIG_SCALAR_STATUS_OK
+        var bool_view = ProdexRichStringView(value_address, UInt(value_length))
+        var bool_bounds = rich_trim_bounds(bool_view)
+        var enabled = runtime_scalar_range_equals["1"](bool_view, bool_bounds[0], bool_bounds[1]) or runtime_scalar_range_equals["true"](bool_view, bool_bounds[0], bool_bounds[1]) or runtime_scalar_range_equals["yes"](bool_view, bool_bounds[0], bool_bounds[1]) or runtime_scalar_range_equals["on"](bool_view, bool_bounds[0], bool_bounds[1])
+        var disabled = runtime_scalar_range_equals["0"](bool_view, bool_bounds[0], bool_bounds[1]) or runtime_scalar_range_equals["false"](bool_view, bool_bounds[0], bool_bounds[1]) or runtime_scalar_range_equals["no"](bool_view, bool_bounds[0], bool_bounds[1]) or runtime_scalar_range_equals["off"](bool_view, bool_bounds[0], bool_bounds[1])
+        if default_bool:
+            output_unsigned[] = UInt64(not disabled)
+        else:
+            output_unsigned[] = UInt64(enabled)
+        return RUNTIME_CONFIG_SCALAR_STATUS_OK
+
+    if operation == RUNTIME_CONFIG_SCALAR_STRICT_POSITIVE_SIGNED:
+        _ = runtime_config_scalar_choose_signed(policy_present, policy_signed, default_signed, minimum_signed, maximum_signed, output_signed)
+        if value_present == 0:
+            return RUNTIME_CONFIG_SCALAR_STATUS_MISSING
+        if value_valid_utf8 == 0:
+            return RUNTIME_CONFIG_SCALAR_STATUS_INVALID_UNICODE
+        var signed_view = ProdexRichStringView(value_address, UInt(value_length))
+        if value_length == 0:
+            return RUNTIME_CONFIG_SCALAR_STATUS_EMPTY
+        if runtime_config_scalar_has_whitespace(signed_view, 0, value_length):
+            return RUNTIME_CONFIG_SCALAR_STATUS_WHITESPACE
+        if not runtime_config_scalar_parse_signed(signed_view, 0, value_length, output_signed):
+            return RUNTIME_CONFIG_SCALAR_STATUS_POSITIVE_INTEGER
+        var parsed_signed = output_signed[]
+        if parsed_signed <= 0:
+            _ = runtime_config_scalar_choose_signed(policy_present, policy_signed, default_signed, minimum_signed, maximum_signed, output_signed)
+            return RUNTIME_CONFIG_SCALAR_STATUS_NOT_POSITIVE
+        if parsed_signed < minimum_signed:
+            parsed_signed = minimum_signed
+        elif parsed_signed > maximum_signed:
+            parsed_signed = maximum_signed
+        output_signed[] = parsed_signed
+        return RUNTIME_CONFIG_SCALAR_STATUS_OK
+
+    _ = runtime_config_scalar_choose_unsigned(policy_present, policy_unsigned, default_unsigned, minimum_unsigned, maximum_unsigned, allow_zero, output_unsigned)
+    if operation == RUNTIME_CONFIG_SCALAR_COMPAT_UNSIGNED:
+        if value_present == 0:
+            return RUNTIME_CONFIG_SCALAR_STATUS_MISSING
+        if value_valid_utf8 == 0:
+            return RUNTIME_CONFIG_SCALAR_STATUS_COMPATIBILITY_DEFAULT
+        var compatibility_view = ProdexRichStringView(value_address, UInt(value_length))
+        var compatibility_bounds = (Int64(0), value_length)
+        if (flags & RUNTIME_CONFIG_SCALAR_FLAG_TRIM) != 0:
+            compatibility_bounds = rich_trim_bounds(compatibility_view)
+        if not runtime_config_scalar_parse_unsigned(compatibility_view, compatibility_bounds[0], compatibility_bounds[1], output_unsigned):
+            return RUNTIME_CONFIG_SCALAR_STATUS_COMPATIBILITY_DEFAULT
+        var parsed_compatibility = output_unsigned[]
+        if not allow_zero and parsed_compatibility == 0:
+            _ = runtime_config_scalar_choose_unsigned(0, 0, default_unsigned, minimum_unsigned, maximum_unsigned, allow_zero, output_unsigned)
+            return RUNTIME_CONFIG_SCALAR_STATUS_COMPATIBILITY_DEFAULT
+        if parsed_compatibility > maximum_unsigned:
+            if clamp:
+                parsed_compatibility = maximum_unsigned
+            else:
+                _ = runtime_config_scalar_choose_unsigned(0, 0, default_unsigned, minimum_unsigned, maximum_unsigned, allow_zero, output_unsigned)
+                return RUNTIME_CONFIG_SCALAR_STATUS_COMPATIBILITY_DEFAULT
+        if parsed_compatibility < minimum_unsigned:
+            parsed_compatibility = minimum_unsigned
+        output_unsigned[] = parsed_compatibility
+        return RUNTIME_CONFIG_SCALAR_STATUS_OK
+
+    if value_present == 0:
+        return RUNTIME_CONFIG_SCALAR_STATUS_MISSING
+    if value_valid_utf8 == 0:
+        if operation == RUNTIME_CONFIG_SCALAR_STRICT_BOOL:
+            return RUNTIME_CONFIG_SCALAR_STATUS_INVALID_UNICODE
+        return RUNTIME_CONFIG_SCALAR_STATUS_INVALID_UNICODE
+    var strict_view = ProdexRichStringView(value_address, UInt(value_length))
+    if value_length == 0:
+        return RUNTIME_CONFIG_SCALAR_STATUS_EMPTY
+    if runtime_config_scalar_has_whitespace(strict_view, 0, value_length):
+        if operation == RUNTIME_CONFIG_SCALAR_STRICT_BOOL:
+            return RUNTIME_CONFIG_SCALAR_STATUS_WHITESPACE
+        return RUNTIME_CONFIG_SCALAR_STATUS_WHITESPACE
+    if operation == RUNTIME_CONFIG_SCALAR_STRICT_BOOL:
+        var strict_enabled = runtime_scalar_range_equals["true"](strict_view, 0, value_length) or runtime_scalar_range_equals["1"](strict_view, 0, value_length) or runtime_scalar_range_equals["yes"](strict_view, 0, value_length) or runtime_scalar_range_equals["on"](strict_view, 0, value_length)
+        var strict_disabled = runtime_scalar_range_equals["false"](strict_view, 0, value_length) or runtime_scalar_range_equals["0"](strict_view, 0, value_length) or runtime_scalar_range_equals["no"](strict_view, 0, value_length) or runtime_scalar_range_equals["off"](strict_view, 0, value_length)
+        if not strict_enabled and not strict_disabled:
+            output_unsigned[] = default_unsigned
+            return RUNTIME_CONFIG_SCALAR_STATUS_INVALID_BOOL
+        output_unsigned[] = UInt64(strict_enabled)
+        return RUNTIME_CONFIG_SCALAR_STATUS_OK
+    if not runtime_config_scalar_parse_unsigned(strict_view, 0, value_length, output_unsigned):
+        return RUNTIME_CONFIG_SCALAR_STATUS_UNSIGNED_INTEGER
+    var parsed_unsigned = output_unsigned[]
+    if operation == RUNTIME_CONFIG_SCALAR_STRICT_POSITIVE_UNSIGNED and parsed_unsigned == 0:
+        _ = runtime_config_scalar_choose_unsigned(policy_present, policy_unsigned, default_unsigned, minimum_unsigned, maximum_unsigned, allow_zero, output_unsigned)
+        return RUNTIME_CONFIG_SCALAR_STATUS_NOT_POSITIVE
+    if parsed_unsigned < minimum_unsigned:
+        parsed_unsigned = minimum_unsigned
+    elif parsed_unsigned > maximum_unsigned:
+        if clamp:
+            parsed_unsigned = maximum_unsigned
+        else:
+            _ = runtime_config_scalar_choose_unsigned(policy_present, policy_unsigned, default_unsigned, minimum_unsigned, maximum_unsigned, allow_zero, output_unsigned)
+            return RUNTIME_CONFIG_SCALAR_STATUS_UNSIGNED_INTEGER
+    output_unsigned[] = parsed_unsigned
+    return RUNTIME_CONFIG_SCALAR_STATUS_OK
 
 
 @export("prodex_runtime_scalar_config_policy_v1")
