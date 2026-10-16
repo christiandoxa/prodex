@@ -79,7 +79,21 @@ struct GeminiRequestContentFfiInput {
 const _: () = assert!(std::mem::size_of::<GeminiRequestContentStringView>() == 16);
 const _: () = assert!(std::mem::size_of::<GeminiRequestContentFfiInput>() == 112);
 
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub enum GeminiFunctionToolSource {
+    None,
+    Nested,
+    Flat,
+}
+
 unsafe extern "C" {
+    fn prodex_gemini_function_tool_source_v1(
+        abi_version: i64,
+        nested_present: i64,
+        type_address: u64,
+        type_length: i64,
+        type_present: i64,
+    ) -> i64;
     fn prodex_gemini_request_content_kernel_v1(
         abi_version: i64,
         input: u64,
@@ -87,6 +101,39 @@ unsafe extern "C" {
         output_capacity: i64,
         written: u64,
     ) -> i64;
+}
+
+/// Mojo decides whether a nested OpenAI function object, a flat
+/// type="function" declaration, or no function field is authoritative.
+pub fn gemini_function_tool_source(
+    nested_present: bool,
+    tool_type: Option<&str>,
+) -> Result<GeminiFunctionToolSource, MojoError> {
+    let (address, length, present) = match tool_type {
+        Some(value) => (
+            value.as_ptr() as usize as u64,
+            i64::try_from(value.len()).map_err(|_| MojoError::InvalidInput)?,
+            1,
+        ),
+        None => (0, 0, 0),
+    };
+    let result = unsafe {
+        prodex_gemini_function_tool_source_v1(
+            1,
+            i64::from(nested_present),
+            address,
+            length,
+            present,
+        )
+    };
+    match result {
+        0 => Ok(GeminiFunctionToolSource::None),
+        1 => Ok(GeminiFunctionToolSource::Nested),
+        2 => Ok(GeminiFunctionToolSource::Flat),
+        -1 => Err(MojoError::InvalidInput),
+        -4 => Err(MojoError::AbiMismatch),
+        _ => Err(MojoError::InvalidOutput),
+    }
 }
 
 fn pointer_address<T>(pointer: *const T) -> u64 {
@@ -175,6 +222,51 @@ pub fn gemini_request_content_kernel(
     }
     output.truncate(written);
     Ok(output)
+}
+
+#[cfg(test)]
+mod function_tool_source_tests {
+    use super::*;
+
+    #[test]
+    fn mojo_function_declaration_source_preserves_nested_field_precedence() {
+        for (nested, tool_type, expected) in [
+            (false, None, GeminiFunctionToolSource::None),
+            (false, Some(""), GeminiFunctionToolSource::None),
+            (false, Some("function"), GeminiFunctionToolSource::Flat),
+            (false, Some("Function"), GeminiFunctionToolSource::None),
+            (false, Some(" function"), GeminiFunctionToolSource::None),
+            (
+                false,
+                Some("function\u{2003}"),
+                GeminiFunctionToolSource::None,
+            ),
+            (false, Some("computer_use"), GeminiFunctionToolSource::None),
+            (true, None, GeminiFunctionToolSource::Nested),
+            (true, Some("function"), GeminiFunctionToolSource::Nested),
+            (true, Some("text"), GeminiFunctionToolSource::Nested),
+        ] {
+            assert_eq!(
+                gemini_function_tool_source(nested, tool_type).unwrap(),
+                expected
+            );
+        }
+    }
+
+    #[test]
+    fn mojo_function_declaration_source_rejects_malformed_abi_values() {
+        let content = b"function";
+        let ptr = pointer_address(content.as_ptr());
+        unsafe {
+            assert_eq!(prodex_gemini_function_tool_source_v1(2, 0, ptr, 8, 1), -4);
+            assert_eq!(prodex_gemini_function_tool_source_v1(1, 2, ptr, 8, 1), -1);
+            assert_eq!(prodex_gemini_function_tool_source_v1(1, 0, ptr, 8, 2), -1);
+            assert_eq!(prodex_gemini_function_tool_source_v1(1, 0, 0, 8, 1), -1);
+            assert_eq!(prodex_gemini_function_tool_source_v1(1, 0, 0, -1, 0), -1);
+            assert_eq!(prodex_gemini_function_tool_source_v1(1, 0, ptr, 8, 0), -1);
+            assert_eq!(prodex_gemini_function_tool_source_v1(1, 0, ptr, 8, 1), 2);
+        }
+    }
 }
 
 #[cfg(all(test, feature = "mojo-provider-constraints"))]

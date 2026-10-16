@@ -20,27 +20,6 @@ pub fn gemini_provider_core_tool_config_from_request(
     super::request_contents::gemini_bridge_request_tool_config(value)
 }
 
-fn gemini_provider_core_function_declaration_from_openai_tool(
-    tool: &serde_json::Value,
-) -> Option<serde_json::Value> {
-    if tool.get("function").is_some() {
-        return gemini_function_declaration_from_openai_tool(tool);
-    }
-    if tool.get("type").and_then(serde_json::Value::as_str) != Some("function") {
-        return None;
-    }
-    let object = tool.as_object()?;
-    let mut function = serde_json::Map::new();
-    for field in ["name", "description", "parameters"] {
-        if let Some(value) = object.get(field) {
-            function.insert(field.to_string(), value.clone());
-        }
-    }
-    let mut normalized = object.clone();
-    normalized.insert("function".to_string(), serde_json::Value::Object(function));
-    gemini_function_declaration_from_openai_tool(&serde_json::Value::Object(normalized))
-}
-
 pub fn gemini_provider_core_function_tools_from_chat(
     chat: &serde_json::Value,
     model: &str,
@@ -55,7 +34,7 @@ pub fn gemini_provider_core_function_tools_from_chat(
         if !gemini_builtin_tools_from_request(std::slice::from_ref(tool)).is_empty() {
             continue;
         }
-        let declaration = gemini_provider_core_function_declaration_from_openai_tool(tool)
+        let declaration = gemini_function_declaration_from_openai_tool(tool)
             .ok_or_else(|| {
                 format!(
                     "invalid_tool_declaration: Gemini request field `tools[{index}]` could not be translated"
@@ -172,6 +151,40 @@ pub fn gemini_provider_core_unsupported_tool_fallback_body(
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn flattened_function_tool_mojo_source_does_not_override_nested_presence() {
+        let request = json!({
+            "tools": [
+                {"type": "function", "name": "flat-東京", "description": "flat", "parameters": {"type": "object"}},
+                {"type": "function", "function": {"name": "nested", "parameters": {"type": "object"}},
+                    "name": "ignored-flat"},
+            ]
+        });
+        let result =
+            gemini_provider_core_function_tools_from_chat(&request, "gemini-2.5-flash", |_| {})
+                .unwrap()
+                .unwrap();
+        assert_eq!(result[0]["functionDeclarations"][0]["name"], "flat-東京");
+        assert_eq!(result[0]["functionDeclarations"][1]["name"], "nested");
+        assert_eq!(result[0]["functionDeclarations"][0]["description"], "flat");
+        assert_eq!(
+            result[0]["functionDeclarations"][1].get("description"),
+            None
+        );
+
+        let invalid_nested = json!({
+            "tools": [{"type": "function", "function": null, "name": "flat-ignored"}]
+        });
+        assert!(
+            gemini_provider_core_function_tools_from_chat(
+                &invalid_nested,
+                "gemini-2.5-flash",
+                |_| {},
+            )
+            .is_err()
+        );
+    }
 
     #[test]
     fn function_declaration_uses_the_mojo_union_contract() {

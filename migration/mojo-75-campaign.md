@@ -5668,3 +5668,11 @@ rejected builtin-tool retry candidates and attempts already made. Rust only
 collects Mojo-owned rejection facts and performs request JSON projection;
 the prior Rust filter/find_map priority selector was deleted. Strict ABI and
 Gemini provider-caller regressions verify candidate ordering and exhaustion.
+
+## Gemini function-tool source shape migrated to Mojo
+
+The compiled Gemini request-content owner now chooses nested versus flat
+function declaration authority. This deletes Rust flat-to-nested JSON map
+construction and preserves nested-field precedence, including explicit null.
+The original compiled ToolDeclaration renderer is reused, with direct ABI and
+Gemini caller tests plus a no-fallback source guard.
