@@ -18,6 +18,14 @@ unsafe extern "C" {
         written_address: u64,
         present_address: u64,
     ) -> i64;
+    fn prodex_provider_quota_limit_id_v1(
+        abi_version: i64,
+        lowered_address: u64,
+        lowered_length: i64,
+        output_address: u64,
+        output_capacity: i64,
+        written_address: u64,
+    ) -> i64;
     fn prodex_provider_quota_header_clean_v1(
         abi_version: i64,
         input_address: u64,
@@ -114,6 +122,26 @@ pub fn provider_quota_openai_used_percent(
     remaining: Option<f64>,
 ) -> Result<Option<String>, MojoError> {
     quota_percent(QuotaPercentSource::OpenAi, limit, remaining)
+}
+
+/// Preserve Rust's Unicode contextual lowercase service while giving the
+/// compiled Mojo owner exclusive authority over allowed ASCII characters,
+/// separator collapsing and the final hyphenated Codex quota header ID.
+pub fn provider_quota_limit_id(value: &str) -> Result<String, MojoError> {
+    let lowered = value.trim().to_lowercase();
+    let mut buffer = vec![0_u8; lowered.len().max(1)];
+    let mut written = -1_i64;
+    status(unsafe {
+        prodex_provider_quota_limit_id_v1(
+            ABI_VERSION,
+            lowered.as_ptr() as usize as u64,
+            len(&lowered)?,
+            buffer.as_mut_ptr() as usize as u64,
+            i64::try_from(buffer.len()).map_err(|_| MojoError::InvalidInput)?,
+            (&mut written as *mut i64) as usize as u64,
+        )
+    })?;
+    result_string(buffer, written)
 }
 
 /// Remove CR/LF and Unicode edge whitespace using compiled Mojo.
@@ -224,6 +252,52 @@ mod tests {
                 "{model:?}/{token:?}"
             );
         }
+    }
+
+    #[test]
+    fn quota_limit_id_mojo_owns_ascii_projection_and_separator_collapse() {
+        for (input, expected) in [
+            ("", ""),
+            ("_---_", ""),
+            (" Gemini_Responses  ", "gemini-responses"),
+            ("GEMINI____TOKEN", "gemini-token"),
+            ("A--b__c", "a-b-c"),
+            ("a 🧭__b", "a-b"),
+            ("  --a--b--  ", "a-b"),
+            ("K-İ-ABC", "k-i-abc"),
+            ("Σ", ""),
+            ("-1-2--", "1-2"),
+            ("aé_b", "a-b"),
+            ("a\nb", "ab"),
+        ] {
+            assert_eq!(
+                provider_quota_limit_id(input).unwrap(),
+                expected,
+                "{input:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn quota_limit_id_abi_rejects_malformed_and_undersized_buffers() {
+        let value = b"abc";
+        let input = value.as_ptr() as usize as u64;
+        let mut output = [99_u8; 8];
+        let mut written = 17_i64;
+        let out = output.as_mut_ptr() as usize as u64;
+        let w = (&mut written as *mut i64) as usize as u64;
+        unsafe {
+            assert_eq!(prodex_provider_quota_limit_id_v1(2, input, 3, out, 8, w), 4);
+            assert_eq!(prodex_provider_quota_limit_id_v1(1, 0, 3, out, 8, w), 1);
+            assert_eq!(
+                prodex_provider_quota_limit_id_v1(1, input, -1, out, 8, w),
+                1
+            );
+            assert_eq!(prodex_provider_quota_limit_id_v1(1, input, 3, out, 2, w), 1);
+            assert_eq!(prodex_provider_quota_limit_id_v1(1, input, 3, out, 8, 0), 1);
+        }
+        assert_eq!(output, [99; 8]);
+        assert_eq!(written, 17);
     }
 
     #[test]

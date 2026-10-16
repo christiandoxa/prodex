@@ -1671,6 +1671,55 @@ comptime GEMINI_REQUEST_CONTENT_CONTINUATION_METADATA: Int64 = 12
 # Mojo owns CR/LF removal, Unicode whitespace trimming, and the precedence
 # of model ID versus token type. Rust reads HTTP/JSON and writes header pairs.
 comptime PROVIDER_QUOTA_HEADER_ABI_VERSION: Int64 = 1
+# The Rust bridge performs Unicode contextual lowercasing (its host library
+# knows the locale-independent special cases). The compiled owner alone
+# validates, deduplicates and emits the ASCII Codex quota-header ID.
+@export("prodex_provider_quota_limit_id_v1")
+def prodex_provider_quota_limit_id_v1(
+    abi_version: Int64,
+    lowered_address: UInt,
+    lowered_length: Int64,
+    output_address: UInt,
+    output_capacity: Int64,
+    written_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != PROVIDER_QUOTA_HEADER_ABI_VERSION:
+        return 4
+    if (
+        lowered_length < 0 or (lowered_length > 0 and lowered_address == 0)
+        or output_address == 0 or written_address == 0
+        or output_capacity < lowered_length
+    ):
+        return 1
+    var lowered = ProdexRichStringView(lowered_address, UInt(lowered_length))
+    if not rich_view_valid(lowered, 0x7FFFFFFFFFFFFFFF):
+        return 1
+    var ptr = rich_view_ptr(lowered)
+    var output = Pointer[mut=True, UInt8, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    var written = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(written_address)
+    )
+    written[] = 0
+    var dash_pending = False
+    for index in range(lowered_length):
+        var byte = ptr[unsafe_offset=index]
+        if (
+            byte >= 97 and byte <= 122
+            or byte >= 48 and byte <= 57
+        ):
+            if dash_pending and written[] > 0:
+                output[unsafe_offset=written[]] = 45
+                written[] += 1
+            output[unsafe_offset=written[]] = byte
+            written[] += 1
+            dash_pending = False
+        elif byte == 45 or byte == 95:
+            dash_pending = written[] > 0
+    return 0
+
+
 comptime PROVIDER_QUOTA_PERCENT_GEMINI: Int64 = 0
 comptime PROVIDER_QUOTA_PERCENT_OPENAI: Int64 = 1
 
