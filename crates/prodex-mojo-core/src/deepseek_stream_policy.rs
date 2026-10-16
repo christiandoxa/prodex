@@ -5,6 +5,21 @@ use crate::MojoError;
 const ABI_VERSION: i64 = 1;
 
 unsafe extern "C" {
+    fn prodex_deepseek_stream_response_id_fallback_v1(
+        abi_version: i64,
+        provider: u64,
+        provider_len: i64,
+        current: u64,
+        current_len: i64,
+    ) -> i64;
+    fn prodex_deepseek_stream_delta_policy_v1(
+        abi_version: i64,
+        mode: i64,
+        text: u64,
+        text_len: i64,
+        text_present: i64,
+        existing_tool_call: i64,
+    ) -> i64;
     fn prodex_deepseek_stream_tool_kind_v1(
         abi_version: i64,
         name_address: u64,
@@ -103,6 +118,63 @@ pub fn stream_fallback_identifier(
         -1 => Err(MojoError::InvalidInput),
         -4 => Err(MojoError::AbiMismatch),
         3 => Err(MojoError::Capacity),
+        _ => Err(MojoError::InvalidOutput),
+    }
+}
+
+/// Exact historical generated-response ID ownership check in compiled Mojo.
+/// Rust may read the JSON ID but never reconstructs the fallback prefix.
+pub fn stream_response_id_is_fallback(provider: &str, current: &str) -> Result<bool, MojoError> {
+    let result = unsafe {
+        prodex_deepseek_stream_response_id_fallback_v1(
+            ABI_VERSION,
+            provider.as_ptr() as u64,
+            i64::try_from(provider.len()).map_err(|_| MojoError::InvalidInput)?,
+            current.as_ptr() as u64,
+            i64::try_from(current.len()).map_err(|_| MojoError::InvalidInput)?,
+        )
+    };
+    match result {
+        0 => Ok(false),
+        1 => Ok(true),
+        -1 => Err(MojoError::InvalidInput),
+        -4 => Err(MojoError::AbiMismatch),
+        _ => Err(MojoError::InvalidOutput),
+    }
+}
+
+/// Mojo-owned eligibility of streamed tool-call fragments, function objects,
+/// optional delta text and optional Unicode-trimmed signatures.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(i64)]
+pub enum DeepSeekStreamDeltaMode {
+    FunctionObject = 0,
+    IncrementalArguments = 1,
+    OptionalArgumentDelta = 2,
+    ThoughtSignature = 3,
+}
+
+pub fn stream_delta_accepted(
+    mode: DeepSeekStreamDeltaMode,
+    value: Option<&str>,
+    existing_tool_call: bool,
+) -> Result<bool, MojoError> {
+    let text = value.unwrap_or_default();
+    let result = unsafe {
+        prodex_deepseek_stream_delta_policy_v1(
+            ABI_VERSION,
+            mode as i64,
+            text.as_ptr() as u64,
+            i64::try_from(text.len()).map_err(|_| MojoError::InvalidInput)?,
+            i64::from(value.is_some()),
+            i64::from(existing_tool_call),
+        )
+    };
+    match result {
+        0 => Ok(false),
+        1 => Ok(true),
+        -1 => Err(MojoError::InvalidInput),
+        -4 => Err(MojoError::AbiMismatch),
         _ => Err(MojoError::InvalidOutput),
     }
 }
@@ -276,5 +348,119 @@ mod stream_item_semantics_tests {
         }
         assert_eq!(output, [22; 32]);
         assert!(written > 2);
+    }
+}
+
+#[cfg(test)]
+mod stream_delta_semantics_tests {
+    use super::*;
+
+    #[test]
+    fn compiled_response_id_fallback_only_accepts_exact_provider_prefix() {
+        for (provider, current, expected) in [
+            ("deepseek", "resp_deepseek_7", true),
+            ("deepseek", "resp_deepseek_", true),
+            ("deepseek", "resp_deepseek", false),
+            ("deepseek", "resp_deepseek2_7", false),
+            ("deepseek", "chatcmpl_1", false),
+            ("東京", "resp_東京_42", true),
+            ("東京", "resp_東京42", false),
+            ("", "resp__1", true),
+        ] {
+            assert_eq!(
+                stream_response_id_is_fallback(provider, current),
+                Ok(expected)
+            );
+        }
+    }
+
+    #[test]
+    fn compiled_deepseek_delta_policy_keeps_only_safe_segments() {
+        use DeepSeekStreamDeltaMode::*;
+        assert_eq!(
+            stream_delta_accepted(FunctionObject, Some(""), false),
+            Ok(true)
+        );
+        assert_eq!(
+            stream_delta_accepted(FunctionObject, None, false),
+            Ok(false)
+        );
+        assert_eq!(stream_delta_accepted(FunctionObject, None, true), Ok(true));
+        assert_eq!(
+            stream_delta_accepted(IncrementalArguments, Some(""), false),
+            Ok(false)
+        );
+        assert_eq!(
+            stream_delta_accepted(IncrementalArguments, Some("{}"), false),
+            Ok(true)
+        );
+        assert_eq!(
+            stream_delta_accepted(OptionalArgumentDelta, None, false),
+            Ok(false)
+        );
+        assert_eq!(
+            stream_delta_accepted(OptionalArgumentDelta, Some(""), false),
+            Ok(false)
+        );
+        assert_eq!(
+            stream_delta_accepted(OptionalArgumentDelta, Some("🧭"), false),
+            Ok(true)
+        );
+        assert_eq!(
+            stream_delta_accepted(ThoughtSignature, Some("  \u{3000}"), false),
+            Ok(false)
+        );
+        assert_eq!(
+            stream_delta_accepted(ThoughtSignature, Some(" sig_🧭 "), false),
+            Ok(true)
+        );
+        assert_eq!(
+            stream_delta_accepted(ThoughtSignature, None, false),
+            Ok(false)
+        );
+    }
+
+    #[test]
+    fn compiled_deepseek_delta_policy_rejects_invalid_abi_and_mode() {
+        let data = "🧭".as_bytes();
+        unsafe {
+            assert_eq!(
+                prodex_deepseek_stream_delta_policy_v1(
+                    ABI_VERSION + 1,
+                    3,
+                    data.as_ptr() as u64,
+                    data.len() as i64,
+                    1,
+                    0,
+                ),
+                -4,
+            );
+            assert_eq!(
+                prodex_deepseek_stream_delta_policy_v1(
+                    ABI_VERSION,
+                    5,
+                    data.as_ptr() as u64,
+                    data.len() as i64,
+                    1,
+                    0,
+                ),
+                -1,
+            );
+            assert_eq!(
+                prodex_deepseek_stream_delta_policy_v1(
+                    ABI_VERSION,
+                    3,
+                    data.as_ptr() as u64,
+                    data.len() as i64,
+                    2,
+                    0,
+                ),
+                -1,
+            );
+            assert_eq!(
+                prodex_deepseek_stream_response_id_fallback_v1(ABI_VERSION + 1, 0, 0, 0, 0),
+                -4,
+            );
+        }
     }
 }

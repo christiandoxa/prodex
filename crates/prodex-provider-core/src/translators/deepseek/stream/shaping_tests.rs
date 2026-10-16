@@ -201,3 +201,50 @@ fn deepseek_stream_ids_use_compiled_mojo_exact_legacy_protocol() {
     }
     assert!(deepseek_provider_core_stream_tool_call_added_item("call-1", "tool_search").is_none());
 }
+
+#[test]
+fn deepseek_stream_response_and_tool_delta_mojo_guards_match_legacy() {
+    for (provider, current, expected) in [
+        ("deepseek", "resp_deepseek_7", Some("chatcmpl_🧭")),
+        ("deepseek", "resp_deepseek_", Some("chatcmpl_🧭")),
+        ("deepseek", "resp_deepseek2_7", None),
+        ("deepseek", "chatcmpl_7", None),
+        ("東京", "resp_東京_12", Some("chatcmpl_🧭")),
+        ("東京", "resp_東京12", None),
+    ] {
+        assert_eq!(
+            deepseek_provider_core_stream_response_id_from_chunk(
+                provider,
+                current,
+                &serde_json::json!({"id":"chatcmpl_🧭"})
+            )
+            .as_deref(),
+            expected,
+        );
+    }
+    let no_function = serde_json::json!({"id":"call_1"});
+    assert!(
+        deepseek_provider_core_validate_stream_tool_call_delta("deepseek", false, &no_function,)
+            .is_err()
+    );
+    assert!(
+        deepseek_provider_core_validate_stream_tool_call_delta("deepseek", true, &no_function,)
+            .is_ok()
+    );
+    assert!(
+        deepseek_provider_core_validate_stream_tool_call_delta(
+            "deepseek",
+            false,
+            &serde_json::json!({"function":{}}),
+        )
+        .is_ok()
+    );
+    assert_eq!(
+        deepseek_provider_core_incremental_tool_argument_delta("previous", ""),
+        None
+    );
+    assert_eq!(
+        deepseek_provider_core_incremental_tool_argument_delta("previous", " 東京"),
+        Some(" 東京".to_owned()),
+    );
+}
