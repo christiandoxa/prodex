@@ -177,17 +177,13 @@ fn dry_run_redact_paths<'a>(
     value: &str,
     paths: impl IntoIterator<Item = Option<&'a Path>>,
 ) -> String {
-    let mut paths = paths
+    let display_paths = paths
         .into_iter()
         .flatten()
         .map(|path| path.display().to_string())
-        .filter(|path| !path.is_empty())
         .collect::<Vec<_>>();
-    paths.sort_by_key(|path| std::cmp::Reverse(path.len()));
-    paths.dedup();
-    paths.into_iter().fold(value.to_string(), |value, path| {
-        value.replace(&path, "<redacted-path>")
-    })
+    prodex_mojo_core::redaction::redact_dry_run_paths(value, &display_paths)
+        .expect("Mojo dry-run path redaction policy returned invalid output")
 }
 
 fn dry_run_config_value(

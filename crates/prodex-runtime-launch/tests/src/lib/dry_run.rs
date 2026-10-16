@@ -89,6 +89,7 @@ fn runtime_launch_dry_run_report_redacts_private_paths() {
     assert!(report.contains("Binary: codex"));
     assert!(report.contains("CODEX_HOME: <CODEX_HOME>"));
     assert!(report.contains("<redacted-path>"));
+    assert!(report.contains("PRODEX_VISIBLE_PATH=\"<redacted-path>/runtime\""));
     assert!(!report.contains("/home/test-user"));
     assert!(!report.contains("private@example.com"));
 }

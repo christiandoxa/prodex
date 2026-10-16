@@ -1143,7 +1143,9 @@
         "operations": [
           "redaction_sensitive_key_classification",
           "redaction_secret_text",
-          "redaction_gateway_privacy"
+          "redaction_gateway_privacy",
+          "redaction_dry_run_path_precedence",
+          "redaction_dry_run_path_replacement"
         ]
       },
       {
@@ -2670,6 +2672,17 @@
         "role": "adapter",
         "operations": [
           "runtime_response_connection_header_batch_policy"
+        ]
+      },
+      {
+        "path": "crates/prodex-mojo-core/src/redaction.rs",
+        "language": "rust",
+        "classification": "MIXED",
+        "production_reachable": true,
+        "role": "adapter",
+        "operations": [
+          "redaction_dry_run_path_precedence",
+          "redaction_dry_run_path_replacement"
         ]
       }
     ],
@@ -11795,6 +11808,52 @@
       "duplicate_production_owner": false,
       "platform_fallback": false,
       "rust_adapter_scope": "Host HTTP header slices, identification of Connection values through existing Mojo predicate, borrowed FFI view marshalling, and ordered header serialization. Compiled Mojo alone owns batch skip/preserve semantics."
+    },
+    {
+      "name": "redaction_dry_run_path_precedence",
+      "domain": "privacy/dry-run-path-redaction",
+      "introduced_in": "0.438.0",
+      "baseline_state": "Rust filtered empty Path display strings, sorted by decreasing UTF-8 byte length with stable ties and deduplicated adjacent identical paths",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_redaction_dry_run_path_order_v1",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/redaction.mojo",
+      "consumer": "crates/prodex-runtime-launch/src/dry_run.rs",
+      "consumer_marker": "prodex_mojo_core::redaction::redact_dry_run_paths(",
+      "production_consumers": [
+        "crates/prodex-runtime-launch/src/dry_run.rs"
+      ],
+      "production_reachability_test": "crates/prodex-runtime-launch/src/dry_run.rs",
+      "rust_owner_before": "Rust Vec sorting by Reverse byte length, empty filtering and adjacent deduplication",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "Old Rust private path policy removed. Compiled Mojo and real dry-run report regressions preserve longest-path precedence, adjacent deduplication, Unicode, exact output buffer query, expanded substrings and private environment-value masking.",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "Host Path::display conversion, borrowed path/view FFI marshalling, checked allocation from Mojo-required length, and UTF-8 validation; Mojo exclusively owns private path order and replacement."
+    },
+    {
+      "name": "redaction_dry_run_path_replacement",
+      "domain": "privacy/dry-run-path-redaction",
+      "introduced_in": "0.438.0",
+      "baseline_state": "Rust iteratively replaced each ordered private path with the literal redacted-path marker using a sequence of str.replace calls",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_redaction_dry_run_path_replace_v1",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/redaction.mojo",
+      "consumer": "crates/prodex-runtime-launch/src/dry_run.rs",
+      "consumer_marker": "prodex_mojo_core::redaction::redact_dry_run_paths(",
+      "production_consumers": [
+        "crates/prodex-runtime-launch/src/dry_run.rs"
+      ],
+      "production_reachability_test": "crates/prodex-runtime-launch/src/dry_run.rs",
+      "rust_owner_before": "Rust string substring matcher, nonoverlapping replacement and placeholder formatting",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "Old Rust private path policy removed. Compiled Mojo and real dry-run report regressions preserve longest-path precedence, adjacent deduplication, Unicode, exact output buffer query, expanded substrings and private environment-value masking.",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "Host Path::display conversion, borrowed path/view FFI marshalling, checked allocation from Mojo-required length, and UTF-8 validation; Mojo exclusively owns private path order and replacement."
     }
   ],
   "rust_semantic_reductions": [
