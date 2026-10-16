@@ -726,55 +726,8 @@ pub fn model_fallback_plan(provider: &str, models: &[&str]) -> Result<Vec<String
 }
 
 #[cfg(test)]
-mod gemini_code_assist_tests {
-    use super::{
-        gemini_code_assist_model_allowed, prodex_mojo_rich_gemini_code_assist_model_allowed_v1,
-    };
-    use crate::rich::{
-        RICH_ABI_VERSION, RICH_STATUS_UTF8, RichStringView, mojo_mut_pointer_address,
-        mojo_pointer_address,
-    };
-
-    #[test]
-    fn gemini_code_assist_filter_preserves_trim_case_and_unbounded_input_behavior() {
-        for (model, expected) in [
-            ("gemini-3.1-pro-preview-customtools", false),
-            ("\u{3000}gemini-3.5-flash\u{2003}", false),
-            ("gemini-3-flash", false),
-            ("customTools", true),
-            (" GEMINI-3.5-FLASH ", true),
-            ("", true),
-            ("\u{3000}", true),
-        ] {
-            assert_eq!(
-                gemini_code_assist_model_allowed(model),
-                Ok(expected),
-                "{model:?}"
-            );
-        }
-        assert!(gemini_code_assist_model_allowed(&"x".repeat(4_097)).unwrap());
-    }
-
-    #[test]
-    fn gemini_code_assist_filter_rejects_malformed_utf8_at_the_abi() {
-        let invalid = [0xff_u8];
-        let model = RichStringView {
-            ptr: mojo_pointer_address(invalid.as_ptr()),
-            len: invalid.len() as u64,
-        };
-        let mut allowed = -1_i64;
-        let status = unsafe {
-            prodex_mojo_rich_gemini_code_assist_model_allowed_v1(
-                RICH_ABI_VERSION,
-                mojo_pointer_address(&model),
-                mojo_mut_pointer_address(&mut allowed),
-            )
-        };
-
-        assert_eq!(status, RICH_STATUS_UTF8);
-        assert_eq!(allowed, -1);
-    }
-}
+#[path = "fallback/gemini_code_assist_tests.rs"]
+mod gemini_code_assist_tests;
 
 #[cfg(test)]
 #[path = "fallback/session_usage_limit_tests.rs"]
@@ -785,54 +738,5 @@ mod session_usage_limit_tests;
 mod retry_after_text_tests;
 
 #[cfg(test)]
-mod rate_limit_header_presence_tests {
-    use super::*;
-
-    #[test]
-    fn mojo_rate_limit_header_nonempty_matches_unicode_whitespace_contract() {
-        for (value, expected) in [
-            ("", false),
-            (" \t\n", false),
-            ("\u{2003}\u{3000}\u{a0}", false),
-            ("rate_limit_reached", true),
-            (" \u{2003}workspace_member_credits_depleted\u{3000}", true),
-            ("-", true),
-            ("🧭", true),
-        ] {
-            assert_eq!(
-                rate_limit_header_nonempty(value).unwrap(),
-                expected,
-                "{value:?}"
-            );
-        }
-        assert_eq!(
-            rate_limit_header_class(" rate_limit_reached "),
-            Ok(RATE_LIMIT_HEADER_CLASS_RATE)
-        );
-        assert_eq!(
-            rate_limit_header_class("\u{2003}workspace_member_credits_depleted\u{3000}"),
-            Ok(RATE_LIMIT_HEADER_CLASS_QUOTA)
-        );
-    }
-
-    #[test]
-    fn mojo_rate_limit_header_nonempty_strict_abi_rejects_malformed_shapes() {
-        let valid = b"quota";
-        let address = valid.as_ptr() as usize as u64;
-        let invalid = [0xff_u8];
-        unsafe {
-            assert_eq!(prodex_mojo_rate_limit_header_nonempty_v1(2, address, 5), -4);
-            assert_eq!(prodex_mojo_rate_limit_header_nonempty_v1(1, 0, 5), -1);
-            assert_eq!(
-                prodex_mojo_rate_limit_header_nonempty_v1(1, address, -1),
-                -1
-            );
-            assert_eq!(
-                prodex_mojo_rate_limit_header_nonempty_v1(1, invalid.as_ptr() as usize as u64, 1),
-                -1
-            );
-            assert_eq!(prodex_mojo_rate_limit_header_nonempty_v1(1, address, 5), 1);
-            assert_eq!(prodex_mojo_rate_limit_header_nonempty_v1(1, 0, 0), 0);
-        }
-    }
-}
+#[path = "fallback/rate_limit_header_presence_tests.rs"]
+mod rate_limit_header_presence_tests;
