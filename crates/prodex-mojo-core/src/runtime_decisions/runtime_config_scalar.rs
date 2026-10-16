@@ -157,6 +157,8 @@ unsafe extern "C" {
     ) -> i64;
 }
 
+// ABI projection keeps scalar policy fields explicit at the Mojo boundary.
+#[allow(clippy::too_many_arguments)]
 fn runtime_config_scalar_call(
     kind: RuntimeConfigScalarKind,
     input: RuntimeConfigScalarInput<'_>,
@@ -206,9 +208,9 @@ fn runtime_config_scalar_call(
 }
 
 fn runtime_config_scalar_flags(trim: bool, allow_zero: bool, clamp: bool) -> i64 {
-    i64::from(trim) * RUNTIME_CONFIG_SCALAR_FLAG_TRIM
-        | i64::from(allow_zero) * RUNTIME_CONFIG_SCALAR_FLAG_ALLOW_ZERO
-        | i64::from(clamp) * RUNTIME_CONFIG_SCALAR_FLAG_CLAMP
+    (i64::from(trim) * RUNTIME_CONFIG_SCALAR_FLAG_TRIM)
+        | (i64::from(allow_zero) * RUNTIME_CONFIG_SCALAR_FLAG_ALLOW_ZERO)
+        | (i64::from(clamp) * RUNTIME_CONFIG_SCALAR_FLAG_CLAMP)
 }
 
 /// Parse and bound a strict positive unsigned runtime setting in Mojo.
