@@ -7607,11 +7607,36 @@ export function findViolations(files) {
     ...defaultFeatureViolations, ...operationalHistogramViolations];
 }
 
+const RELOCATED_TEST_FILES = new Set([
+  "crates/prodex-mojo-core/src/provider_constraints/attempt_cursor_tests.rs",
+  "crates/prodex-mojo-core/src/provider_constraints/scalar_policy_tests.rs",
+  "crates/prodex-mojo-core/src/redaction/tests.rs",
+  "crates/prodex-mojo-core/src/redaction/dry_run_path_tests.rs",
+  "crates/prodex-mojo-core/src/redaction/text_snippet_tests.rs",
+  "crates/prodex-mojo-core/src/rich/runtime_doctor_marker_tests.rs",
+  "crates/prodex-mojo-core/src/observability/tests.rs",
+  "crates/prodex-mojo-core/src/rich/fallback/gemini_code_assist_tests.rs",
+  "crates/prodex-mojo-core/src/rich/fallback/rate_limit_header_presence_tests.rs",
+]);
+
+function relocatedTestPaths(filePath, contents) {
+  return [...contents.matchAll(/#\[cfg\(test\)\]\s*#\[path = "([^"]+)"\]\s*mod \w+;/gu)]
+    .map((match) => path.posix.join(path.posix.dirname(filePath), match[1]))
+    .filter((testPath) => RELOCATED_TEST_FILES.has(testPath));
+}
+
+async function promotedSource(filePath) {
+  const contents = await fs.readFile(path.join(repoRoot, filePath), "utf8");
+  const tests = await Promise.all(relocatedTestPaths(filePath, contents)
+    .map((testPath) => fs.readFile(path.join(repoRoot, testPath), "utf8")));
+  return [contents, ...tests].join("\n");
+}
+
 async function promotedFiles() {
   const files = await Promise.all(
     [...PROMOTED_FILES, GEMINI_CONTENT_JSON_CALLER_FILE, GEMINI_CONTENT_JSON_ADAPTER_FILE, GEMINI_CONTENT_JSON_MOJO_FILE].map(async (filePath) => [
       filePath,
-      await fs.readFile(path.join(repoRoot, filePath), "utf8"),
+      await promotedSource(filePath),
     ]),
   );
   for (const filePath of REMOVED_ORACLE_FILES) {
@@ -7634,6 +7659,13 @@ async function promotedFiles() {
 }
 
 function selfTest() {
+  const testWiring = '#[cfg(test)]\n#[path = "redaction/tests.rs"]\nmod tests;';
+  assert.deepEqual(relocatedTestPaths("crates/prodex-mojo-core/src/redaction.rs", testWiring),
+    ["crates/prodex-mojo-core/src/redaction/tests.rs"]);
+  assert.deepEqual(relocatedTestPaths("crates/prodex-mojo-core/src/redaction.rs",
+    testWiring.replace("cfg(test)", "cfg(not(test))")), []);
+  assert.deepEqual(relocatedTestPaths("crates/prodex-mojo-core/src/redaction.rs",
+    testWiring.replace("mod tests;", "")), []);
   const payloadCaller = "prodex_mojo_core::json::log_payload_projection(";
   assert.deepEqual(findViolations([[LOG_PAYLOAD_CALLER_FILE, payloadCaller]]), []);
   assert.match(findViolations([[LOG_PAYLOAD_CALLER_FILE, payloadCaller + "\nfn append_payload_summary() {}"]]).join("\n"), /restored Rust log payload projection/u);
