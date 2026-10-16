@@ -122,7 +122,13 @@ const MAIN_MODEL_CATALOG_TEST_FILE = "crates/prodex-mojo-core/src/rich_tests.rs"
 const PROFILE_ROUTE_CIRCUIT_ADAPTER_FILE = "crates/prodex-mojo-core/src/runtime/profile_route_circuit.rs";
 const PROFILE_ROUTE_CIRCUIT_MOJO_FILE = "mojo/prodex_core/runtime_profile_route_circuit.mojo";
 const PROFILE_ROUTE_CIRCUIT_TEST_FILE = "crates/prodex-mojo-core/tests/runtime_profile_route_circuit.rs";
+const LOG_PAYLOAD_CALLER_FILE = "crates/prodex-app/src/app_commands/log_upstream_payload.rs";
+const LOG_PAYLOAD_ADAPTER_FILE = "crates/prodex-mojo-core/src/json/log_payload.rs";
+const LOG_PAYLOAD_MOJO_FILE = "mojo/prodex_core/log_payload.mojo";
 const PROMOTED_FILES = [
+  LOG_PAYLOAD_CALLER_FILE,
+  LOG_PAYLOAD_ADAPTER_FILE,
+  LOG_PAYLOAD_MOJO_FILE,
   "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_rate_limits.rs",
   "crates/prodex-mojo-core/src/provider_constraints/quota_headers.rs",
   "crates/prodex-runtime-proxy/tests/src/error_policy/rate_limit_header.rs",
@@ -1250,6 +1256,26 @@ const FORBIDDEN_MARKERS = [
 ];
 
 export function findViolations(files) {
+  const logPayloadProjectionViolations = files.flatMap(([filePath, contents]) => {
+    const production = contents.split("#[cfg(test)]", 1)[0];
+    if (filePath === LOG_PAYLOAD_CALLER_FILE) {
+      const violations = production.includes("prodex_mojo_core::json::log_payload_projection(")
+        ? [] : [`${filePath}: payload display projection must remain Mojo-owned`];
+      if (/fn (?:render_upstream_payload_object|append_payload_summary|append_payload_metadata|input_item_contains_type|short_identifier|render_input_value|render_input_item|readable_content_text|readable_json_string_or_value|short_json_value|tool_name)\b/u.test(production)) {
+        violations.push(`${filePath}: restored Rust log payload projection`);
+      }
+      return violations;
+    }
+    if (filePath === LOG_PAYLOAD_ADAPTER_FILE) {
+      return production.includes("prodex_mojo_log_payload_projection_v1(")
+        ? [] : [`${filePath}: payload projection ABI must remain active`];
+    }
+    if (filePath === LOG_PAYLOAD_MOJO_FILE) {
+      return ['@export("prodex_mojo_log_payload_projection_v1")', "payload_summary(", "payload_metadata(", "payload_content(", "payload_item("].filter((marker) => !contents.includes(marker))
+        .map((marker) => `${filePath}: Mojo payload projection must retain ${marker}`);
+    }
+    return [];
+  });
   const nativeRecoveryOwnershipViolations = files.flatMap(([filePath, contents]) => {
     if (filePath === "crates/prodex-app/src/runtime_launch.rs") {
       const body = contents.match(/fn runtime_launch_openai_model_context_codex_args\([^]*?^\}/mu)?.[0];
@@ -7535,7 +7561,7 @@ export function findViolations(files) {
     }
     return [];
   });
-  return [...nativeRecoveryOwnershipViolations, ...quotaRecoveryEligibilityViolations, ...runtimeBrokerReuseMojoViolations, ...geminiResponseMediaMojoViolations, ...cookieEvictionMojoViolations, ...websocketBudgetMojoViolations, ...affinityBindingMojoViolations, ...responsesCapacityRecoveryViolations, ...sseTapMojoOwnershipViolations, ...quotaWatchViolations, ...geminiCompactSnippetViolations, ...geminiCompactTextViolations, ...doctorSmartContextDecisionViolations, ...anthropicAttemptCursorViolations, ...geminiUnsupportedToolRetryViolations, ...terminalGeometryViolations, ...quotaHeaderProjectionViolations, ...smartContextCapsuleOrderViolations, ...markerViolations, ...deepseekCatalogPolicyViolations, ...featureOffViolations, ...liveLogRecordViolations, ...runtimePolicyPresetViolations, ...profileHealthCircuitViolations, ...logThroughputViolations, ...operationalDetailSpecViolations, ...transcriptPolicyViolations, ...logLoadPolicyViolations, ...routeReasonViolations, ...runtimeStateQuotaViolations, ...runtimeStateRoutePolicyViolations, ...runtimeProxyRootViolations, ...brokerVersionGuardViolations, ...brokerContinuityViolations, ...brokerLogCacheViolations, ...codexConfigViolations, ...statePolicyViolations, ...quotaSelectionPolicyViolations, ...routeTagMirrorViolations, ...enumTagMirrorViolations, ...appSelectionPolicyMirrorViolations, ...runtimeStateBackgroundViolations, ...redactionViolations, ...rateLimitHeaderSelectionViolations, ...profileIdentityViolations, ...governanceInspectionViolations, ...governanceInspectionOrderingViolations, ...exactnessPlannerViolations,
+  return [...logPayloadProjectionViolations, ...nativeRecoveryOwnershipViolations, ...quotaRecoveryEligibilityViolations, ...runtimeBrokerReuseMojoViolations, ...geminiResponseMediaMojoViolations, ...cookieEvictionMojoViolations, ...websocketBudgetMojoViolations, ...affinityBindingMojoViolations, ...responsesCapacityRecoveryViolations, ...sseTapMojoOwnershipViolations, ...quotaWatchViolations, ...geminiCompactSnippetViolations, ...geminiCompactTextViolations, ...doctorSmartContextDecisionViolations, ...anthropicAttemptCursorViolations, ...geminiUnsupportedToolRetryViolations, ...terminalGeometryViolations, ...quotaHeaderProjectionViolations, ...smartContextCapsuleOrderViolations, ...markerViolations, ...deepseekCatalogPolicyViolations, ...featureOffViolations, ...liveLogRecordViolations, ...runtimePolicyPresetViolations, ...profileHealthCircuitViolations, ...logThroughputViolations, ...operationalDetailSpecViolations, ...transcriptPolicyViolations, ...logLoadPolicyViolations, ...routeReasonViolations, ...runtimeStateQuotaViolations, ...runtimeStateRoutePolicyViolations, ...runtimeProxyRootViolations, ...brokerVersionGuardViolations, ...brokerContinuityViolations, ...brokerLogCacheViolations, ...codexConfigViolations, ...statePolicyViolations, ...quotaSelectionPolicyViolations, ...routeTagMirrorViolations, ...enumTagMirrorViolations, ...appSelectionPolicyMirrorViolations, ...runtimeStateBackgroundViolations, ...redactionViolations, ...rateLimitHeaderSelectionViolations, ...profileIdentityViolations, ...governanceInspectionViolations, ...governanceInspectionOrderingViolations, ...exactnessPlannerViolations,
     ...adaptiveBudgetViolations,
     ...providerUsageViolations,
     ...auditUsageViolations,
@@ -7608,6 +7634,12 @@ async function promotedFiles() {
 }
 
 function selfTest() {
+  const payloadCaller = "prodex_mojo_core::json::log_payload_projection(";
+  assert.deepEqual(findViolations([[LOG_PAYLOAD_CALLER_FILE, payloadCaller]]), []);
+  assert.match(findViolations([[LOG_PAYLOAD_CALLER_FILE, payloadCaller + "\nfn append_payload_summary() {}"]]).join("\n"), /restored Rust log payload projection/u);
+  assert.match(findViolations([[LOG_PAYLOAD_CALLER_FILE, "fn legacy_projection() {}"]]).join("\n"), /must remain Mojo-owned/u);
+  assert.match(findViolations([[LOG_PAYLOAD_ADAPTER_FILE, "fn legacy_projection() {}"]]).join("\n"), /ABI must remain active/u);
+  assert.match(findViolations([[LOG_PAYLOAD_MOJO_FILE, ""]]).join("\n"), /Mojo payload projection must retain/u);
   const nativeLaunch = "crates/prodex-app/src/runtime_launch.rs";
   assert.deepEqual(findViolations([[nativeLaunch,
     "fn runtime_launch_openai_model_context_codex_args() {\n    Ok(args.to_vec())\n}"

@@ -34,6 +34,8 @@ mod kiro_catalog;
 pub use self::kiro_catalog::{
     KiroModelCatalogModel, KiroModelCatalogPlan, kiro_model_catalog_plan,
 };
+mod log_payload;
+pub use log_payload::{LogPayloadJsonPresentation, log_payload_projection};
 
 use crate::MojoError;
 
@@ -513,6 +515,17 @@ pub(crate) fn transform_json_with_scratch(
         .try_reserve_exact(scratch_count)
         .map_err(|_| MojoError::Capacity)?;
     scratch.resize(scratch_count, StringView::default());
+    transform_json_with_views(&input, raw, operation, flag, kernel, &mut scratch)
+}
+
+fn transform_json_with_views(
+    input: &[NodeFfi],
+    raw: &str,
+    operation: i64,
+    flag: bool,
+    kernel: JsonKernel,
+    scratch: &mut [StringView],
+) -> Result<Option<Vec<u8>>, MojoError> {
     let mut metadata = [-1_i64; 2];
     let mut invoke = |output: Option<&mut [u8]>| -> Result<(bool, usize), MojoError> {
         let (measuring, address, capacity) = match output {

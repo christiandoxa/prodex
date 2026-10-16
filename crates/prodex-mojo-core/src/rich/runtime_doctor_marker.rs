@@ -502,7 +502,7 @@ pub fn runtime_doctor_split_reason_field(value: &str) -> Result<Vec<String>, Moj
     }
     let mut reasons = Vec::with_capacity(count);
     let mut previous_end = 0;
-    for span in spans.chunks_exact(2) {
+    for span in spans.as_chunks::<2>().0 {
         let start = usize::try_from(span[0]).map_err(|_| MojoError::InvalidOutput)?;
         let end = usize::try_from(span[1]).map_err(|_| MojoError::InvalidOutput)?;
         if start < previous_end || end <= start {

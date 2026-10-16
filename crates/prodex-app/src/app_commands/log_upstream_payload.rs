@@ -1,6 +1,7 @@
 use super::log_format::{local_log_timestamp, render_text_body};
 use base64::Engine;
 pub(super) use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
+use prodex_mojo_core::json::LogPayloadJsonPresentation;
 use serde_json::Value;
 use std::collections::BTreeMap;
 
@@ -118,315 +119,56 @@ pub(crate) fn render_upstream_payload_lines(payload: &str, width: usize) -> Vec<
     let Ok(value) = serde_json::from_str::<Value>(payload) else {
         return render_text_body(payload, width);
     };
-
-    let lines = value
-        .as_object()
-        .map(|object| render_upstream_payload_object(object, width))
-        .unwrap_or_default();
-
-    if lines.is_empty() {
-        serde_json::to_string_pretty(&value)
-            .map(|pretty| render_text_body(&pretty, width))
-            .unwrap_or_else(|_| render_text_body(payload, width))
-    } else {
-        lines
-    }
-}
-
-fn render_upstream_payload_object(
-    object: &serde_json::Map<String, Value>,
-    width: usize,
-) -> Vec<String> {
+    let tree = crate::json_boundary::app_json_tree(&value)
+        .expect("log payload exceeded the JSON ABI boundary");
+    let mut serialized = Vec::with_capacity(tree.nodes.len());
+    serialize_payload_values(&value, &mut serialized);
+    let raw = std::str::from_utf8(&tree.raw).expect("Serde emits UTF-8 JSON");
+    let projected = prodex_mojo_core::json::log_payload_projection(&tree.nodes, raw, &serialized)
+        .expect("Mojo log payload projection returned invalid output");
+    let records: Vec<(u8, String)> = serde_json::from_slice(&projected)
+        .expect("Mojo log payload projection returned invalid records");
     let mut lines = Vec::new();
-    append_payload_summary(&mut lines, object, width);
-    append_payload_metadata(&mut lines, object, width);
-    if let Some(instructions) = object.get("instructions").and_then(Value::as_str) {
-        push_text_block(&mut lines, "instructions", instructions, width);
-    }
-    if let Some(input) = object.get("input") {
-        render_input_value(&mut lines, input, width);
-    }
-    if let Some(tools) = object.get("tools").and_then(Value::as_array) {
-        let names = tools.iter().filter_map(tool_name).collect::<Vec<_>>();
-        let summary = if names.is_empty() {
-            format!("tools: {}", tools.len())
-        } else {
-            format!("tools: {} {}", tools.len(), names.join(", "))
-        };
-        push_wrapped_line(&mut lines, &summary, width);
+    for (kind, text) in records {
+        match kind {
+            0 => lines.extend(render_text_body(&text, width)),
+            1 => lines.push(text),
+            2 => lines.extend(
+                render_text_body(&text, width)
+                    .into_iter()
+                    .map(|line| format!("  {line}")),
+            ),
+            _ => panic!("Mojo log payload projection returned an invalid line kind"),
+        }
     }
     lines
 }
 
-fn append_payload_summary(
-    lines: &mut Vec<String>,
-    object: &serde_json::Map<String, Value>,
-    width: usize,
-) {
-    let mut summary = [
-        "model",
-        "stream",
-        "store",
-        "tool_choice",
-        "parallel_tool_calls",
-        "prompt_cache_key",
-    ]
-    .into_iter()
-    .filter_map(|key| {
-        object
-            .get(key)
-            .and_then(short_json_value)
-            .map(|value| format!("{key}={value}"))
-    })
-    .collect::<Vec<_>>();
-    if let Some(effort) = object
-        .get("reasoning")
-        .and_then(Value::as_object)
-        .and_then(|reasoning| reasoning.get("effort"))
-        .and_then(Value::as_str)
-    {
-        summary.push(format!("effort={effort}"));
-    }
-    if let Some(input) = object.get("input").and_then(Value::as_array) {
-        let images = input
-            .iter()
-            .filter(|item| input_item_contains_type(item, "input_image"))
-            .count();
-        let audio = input
-            .iter()
-            .filter(|item| input_item_contains_type(item, "input_audio"))
-            .count();
-        summary.push(format!("input_items={}", input.len()));
-        if images > 0 {
-            summary.push(format!("images={images}"));
-        }
-        if audio > 0 {
-            summary.push(format!("audio={audio}"));
-        }
-    }
-    if let Some(tools) = object.get("tools").and_then(Value::as_array) {
-        summary.push(format!("tools={}", tools.len()));
-    }
-    if object.get("previous_response_id").is_some() {
-        summary.push("continuation=previous_response".to_string());
-    }
-    if object.get("compaction").is_some()
-        || object
-            .get("input")
-            .and_then(Value::as_array)
-            .is_some_and(|items| {
-                items.iter().any(|item| {
-                    item.get("type")
-                        .and_then(Value::as_str)
-                        .is_some_and(|item_type| item_type == "compaction")
-                })
-            })
-    {
-        summary.push("compaction=yes".to_string());
-    }
-    if !summary.is_empty() {
-        push_wrapped_line(lines, &summary.join(" "), width);
-    }
-}
-
-fn input_item_contains_type(value: &Value, expected: &str) -> bool {
-    value
-        .get("type")
-        .and_then(Value::as_str)
-        .is_some_and(|item_type| item_type == expected)
-        || value
-            .get("content")
-            .and_then(Value::as_array)
-            .is_some_and(|content| {
-                content.iter().any(|item| {
-                    item.get("type")
-                        .and_then(Value::as_str)
-                        .is_some_and(|item_type| item_type == expected)
-                })
-            })
-}
-
-fn append_payload_metadata(
-    lines: &mut Vec<String>,
-    object: &serde_json::Map<String, Value>,
-    width: usize,
-) {
-    let Some(metadata) = object.get("client_metadata").and_then(Value::as_object) else {
-        return;
-    };
-    let fields = [
-        "session_id",
-        "thread_id",
-        "turn_id",
-        "context_window_id",
-        "x-codex-window-id",
-        "x-codex-installation-id",
-    ]
-    .into_iter()
-    .filter_map(|key| {
-        metadata.get(key).and_then(Value::as_str).map(|value| {
-            if key == "context_window_id" {
-                format!("ctx={}", short_identifier(value))
-            } else {
-                format!("{key}={value}")
-            }
-        })
-    })
-    .collect::<Vec<_>>();
-    if !fields.is_empty() {
-        push_wrapped_line(
-            lines,
-            &format!("client_metadata: {}", fields.join(" ")),
-            width,
-        );
-    }
-}
-
-fn short_identifier(value: &str) -> &str {
-    value.get(..4).unwrap_or(value)
-}
-
-fn render_input_value(lines: &mut Vec<String>, input: &Value, width: usize) {
-    match input {
+// Serde owns JSON parsing and pretty serialization, including JSON in strings.
+// Preorder matches the shared borrowed JSON tree; Mojo chooses all display fields.
+fn serialize_payload_values(value: &Value, output: &mut Vec<LogPayloadJsonPresentation>) {
+    let pretty = serde_json::to_string_pretty(value).expect("in-memory JSON serialization");
+    let parsed = value
+        .as_str()
+        .and_then(|text| serde_json::from_str::<Value>(text).ok())
+        .map(|value| serde_json::to_string_pretty(&value).expect("in-memory JSON serialization"));
+    output.push(LogPayloadJsonPresentation {
+        pretty,
+        parsed_string_json: parsed,
+    });
+    match value {
         Value::Array(items) => {
-            for (index, item) in items.iter().enumerate() {
-                render_input_item(lines, index, item, width);
+            for item in items {
+                serialize_payload_values(item, output);
             }
         }
-        Value::String(text) => push_text_block(lines, "input", text, width),
-        _ => push_text_block(
-            lines,
-            "input",
-            &serde_json::to_string_pretty(input).unwrap_or_else(|_| input.to_string()),
-            width,
-        ),
-    }
-}
-
-fn render_input_item(lines: &mut Vec<String>, index: usize, item: &Value, width: usize) {
-    let Some(object) = item.as_object() else {
-        push_text_block(
-            lines,
-            &format!("input[{index}]"),
-            &readable_json_value(item),
-            width,
-        );
-        return;
-    };
-
-    let item_type = object
-        .get("type")
-        .and_then(Value::as_str)
-        .unwrap_or("message");
-    let role = object
-        .get("role")
-        .and_then(Value::as_str)
-        .unwrap_or(item_type);
-    match item_type {
-        "function_call" => {
-            let name = object.get("name").and_then(Value::as_str).unwrap_or("tool");
-            let text = object
-                .get("arguments")
-                .map(readable_json_string_or_value)
-                .unwrap_or_default();
-            push_text_block(
-                lines,
-                &format!("input[{index}] tool-call:{name}"),
-                &text,
-                width,
-            );
+        Value::Object(fields) => {
+            for item in fields.values() {
+                serialize_payload_values(item, output);
+            }
         }
-        "function_call_output" => {
-            let text = object
-                .get("output")
-                .map(readable_json_string_or_value)
-                .unwrap_or_default();
-            push_text_block(lines, &format!("input[{index}] tool-output"), &text, width);
-        }
-        _ => {
-            let text = object
-                .get("content")
-                .map(readable_content_text)
-                .filter(|text| !text.trim().is_empty())
-                .or_else(|| {
-                    object
-                        .get("text")
-                        .and_then(Value::as_str)
-                        .map(str::to_string)
-                })
-                .unwrap_or_else(|| readable_json_value(item));
-            push_text_block(lines, &format!("input[{index}] {role}"), &text, width);
-        }
+        _ => {}
     }
-}
-
-fn readable_content_text(value: &Value) -> String {
-    match value {
-        Value::String(text) => text.clone(),
-        Value::Array(items) => items
-            .iter()
-            .map(readable_content_text)
-            .filter(|text| !text.trim().is_empty())
-            .collect::<Vec<_>>()
-            .join("\n"),
-        Value::Object(object) => object
-            .get("text")
-            .or_else(|| object.get("content"))
-            .or_else(|| object.get("input_text"))
-            .or_else(|| object.get("output_text"))
-            .map(readable_content_text)
-            .unwrap_or_else(|| readable_json_value(value)),
-        _ => readable_json_value(value),
-    }
-}
-
-fn readable_json_string_or_value(value: &Value) -> String {
-    if let Some(text) = value.as_str() {
-        return serde_json::from_str::<Value>(text)
-            .ok()
-            .and_then(|value| serde_json::to_string_pretty(&value).ok())
-            .unwrap_or_else(|| text.to_string());
-    }
-    readable_json_value(value)
-}
-
-fn readable_json_value(value: &Value) -> String {
-    serde_json::to_string_pretty(value).unwrap_or_else(|_| value.to_string())
-}
-
-fn short_json_value(value: &Value) -> Option<String> {
-    match value {
-        Value::String(value) if value.len() <= 80 => Some(value.clone()),
-        Value::String(value) => Some(format!("{}...", value.chars().take(77).collect::<String>())),
-        Value::Bool(value) => Some(value.to_string()),
-        Value::Number(value) => Some(value.to_string()),
-        _ => None,
-    }
-}
-
-fn tool_name(value: &Value) -> Option<String> {
-    let object = value.as_object()?;
-    object
-        .get("name")
-        .and_then(Value::as_str)
-        .or_else(|| {
-            object
-                .get("function")
-                .and_then(|function| function.get("name"))
-                .and_then(Value::as_str)
-        })
-        .map(str::to_string)
-}
-
-fn push_text_block(lines: &mut Vec<String>, label: &str, text: &str, width: usize) {
-    lines.push(format!("{label}:"));
-    for line in render_text_body(text, width) {
-        lines.push(format!("  {line}"));
-    }
-}
-
-fn push_wrapped_line(lines: &mut Vec<String>, text: &str, width: usize) {
-    lines.extend(render_text_body(text, width));
 }
 
 pub(super) struct ParsedRuntimeLogLine {
