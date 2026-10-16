@@ -166,6 +166,11 @@ unsafe extern "C" {
         message_length: i64,
     ) -> i64;
     fn prodex_mojo_rate_limit_header_class_v1(address: u64, length: i64) -> i64;
+    fn prodex_mojo_rate_limit_header_nonempty_v1(
+        abi_version: i64,
+        address: u64,
+        length: i64,
+    ) -> i64;
     fn prodex_runtime_previous_response_plan_v1(
         route: i64,
         previous_response_present: i64,
@@ -184,6 +189,26 @@ unsafe extern "C" {
 pub const RATE_LIMIT_HEADER_CLASS_NONE: i64 = 0;
 pub const RATE_LIMIT_HEADER_CLASS_RATE: i64 = 1;
 pub const RATE_LIMIT_HEADER_CLASS_QUOTA: i64 = 2;
+
+/// Select the first nonblank rate-limit header value in compiled Mojo,
+/// using the same Unicode whitespace contract as its classifier.
+pub fn rate_limit_header_nonempty(value: &str) -> Result<bool, MojoError> {
+    ensure_rich_abi()?;
+    let result = unsafe {
+        prodex_mojo_rate_limit_header_nonempty_v1(
+            1,
+            mojo_pointer_address(value.as_ptr()),
+            i64::try_from(value.len()).map_err(|_| MojoError::InvalidInput)?,
+        )
+    };
+    match result {
+        0 => Ok(false),
+        1 => Ok(true),
+        -1 => Err(MojoError::InvalidInput),
+        -4 => Err(MojoError::AbiMismatch),
+        _ => Err(MojoError::InvalidOutput),
+    }
+}
 
 pub fn rate_limit_header_class(value: &str) -> Result<i64, MojoError> {
     ensure_rich_abi()?;
@@ -758,3 +783,56 @@ mod session_usage_limit_tests;
 #[cfg(test)]
 #[path = "fallback/retry_after_text_tests.rs"]
 mod retry_after_text_tests;
+
+#[cfg(test)]
+mod rate_limit_header_presence_tests {
+    use super::*;
+
+    #[test]
+    fn mojo_rate_limit_header_nonempty_matches_unicode_whitespace_contract() {
+        for (value, expected) in [
+            ("", false),
+            (" \t\n", false),
+            ("\u{2003}\u{3000}\u{a0}", false),
+            ("rate_limit_reached", true),
+            (" \u{2003}workspace_member_credits_depleted\u{3000}", true),
+            ("-", true),
+            ("🧭", true),
+        ] {
+            assert_eq!(
+                rate_limit_header_nonempty(value).unwrap(),
+                expected,
+                "{value:?}"
+            );
+        }
+        assert_eq!(
+            rate_limit_header_class(" rate_limit_reached "),
+            Ok(RATE_LIMIT_HEADER_CLASS_RATE)
+        );
+        assert_eq!(
+            rate_limit_header_class("\u{2003}workspace_member_credits_depleted\u{3000}"),
+            Ok(RATE_LIMIT_HEADER_CLASS_QUOTA)
+        );
+    }
+
+    #[test]
+    fn mojo_rate_limit_header_nonempty_strict_abi_rejects_malformed_shapes() {
+        let valid = b"quota";
+        let address = valid.as_ptr() as usize as u64;
+        let invalid = [0xff_u8];
+        unsafe {
+            assert_eq!(prodex_mojo_rate_limit_header_nonempty_v1(2, address, 5), -4);
+            assert_eq!(prodex_mojo_rate_limit_header_nonempty_v1(1, 0, 5), -1);
+            assert_eq!(
+                prodex_mojo_rate_limit_header_nonempty_v1(1, address, -1),
+                -1
+            );
+            assert_eq!(
+                prodex_mojo_rate_limit_header_nonempty_v1(1, invalid.as_ptr() as usize as u64, 1),
+                -1
+            );
+            assert_eq!(prodex_mojo_rate_limit_header_nonempty_v1(1, address, 5), 1);
+            assert_eq!(prodex_mojo_rate_limit_header_nonempty_v1(1, 0, 0), 0);
+        }
+    }
+}

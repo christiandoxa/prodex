@@ -123,6 +123,7 @@ const PROFILE_ROUTE_CIRCUIT_ADAPTER_FILE = "crates/prodex-mojo-core/src/runtime/
 const PROFILE_ROUTE_CIRCUIT_MOJO_FILE = "mojo/prodex_core/runtime_profile_route_circuit.mojo";
 const PROFILE_ROUTE_CIRCUIT_TEST_FILE = "crates/prodex-mojo-core/tests/runtime_profile_route_circuit.rs";
 const PROMOTED_FILES = [
+  "crates/prodex-runtime-proxy/tests/src/error_policy/rate_limit_header.rs",
   "crates/prodex-redaction/src/lib.rs",
   "crates/prodex-mojo-core/src/redaction.rs",
   "mojo/prodex_core/redaction.mojo",
@@ -1026,6 +1027,8 @@ const CODEX_CONFIG_FILE = "crates/prodex-codex-config/src/lib.rs";
 const STATE_FILE = "crates/prodex-state/src/lib.rs";
 const STATE_PROVIDER_FILE = "crates/prodex-state/src/provider_capabilities.rs";
 const STATE_REMEMBER_FILE = "crates/prodex-app/src/runtime_proxy/lineage/remember.rs";
+const RATE_LIMIT_HEADER_CONSUMER_FILE = "crates/prodex-runtime-proxy/src/error_policy/rate_limit_header.rs";
+const RATE_LIMIT_HEADER_CALLER_TEST_FILE = "crates/prodex-runtime-proxy/tests/src/error_policy/rate_limit_header.rs";
 const REDACTION_FILE = "crates/prodex-redaction/src/lib.rs";
 const REDACTION_ABI_FILE = "crates/prodex-mojo-core/src/redaction.rs";
 const REDACTION_MOJO_FILE = "mojo/prodex_core/redaction.mojo";
@@ -3062,6 +3065,45 @@ export function findViolations(files) {
       violations.push(`${filePath}: contains restored Rust state merge/retention semantics`);
     }
     return violations;
+  });
+  const rateLimitHeaderSelectionViolations = files.flatMap(([filePath, contents]) => {
+    if (filePath === RATE_LIMIT_HEADER_CONSUMER_FILE) {
+      const required = [
+        "prodex_mojo_core::rich::rate_limit_header_nonempty(value)",
+        "prodex_mojo_core::rich::rate_limit_header_class(value)",
+        '.expect("Mojo rate-limit header classification failed")',
+      ];
+      const retiredRust = [
+        ".map(str::trim)",
+        ".find(|value| !value.is_empty())",
+        "rate_limit_header_class(value).unwrap_or(0)",
+      ];
+      return required.every((marker) => contents.includes(marker)) &&
+        retiredRust.every((marker) => !contents.includes(marker))
+        ? [] : [`${filePath}: rate-limit header nonempty selection and class must fail closed through Mojo`];
+    }
+    if (filePath === SESSION_USAGE_LIMIT_ADAPTER_FILE) {
+      return [
+        "fn prodex_mojo_rate_limit_header_nonempty_v1(",
+        "pub fn rate_limit_header_nonempty(",
+        "mojo_rate_limit_header_nonempty_matches_unicode_whitespace_contract",
+        "mojo_rate_limit_header_nonempty_strict_abi_rejects_malformed_shapes",
+      ].filter((marker) => !contents.includes(marker))
+        .map((marker) => `${filePath}: rate-limit nonempty ABI and tests must retain ${marker}`);
+    }
+    if (filePath === SESSION_USAGE_LIMIT_MOJO_FILE) {
+      return [
+        '@export("prodex_mojo_rate_limit_header_nonempty_v1")',
+        "RATE_LIMIT_HEADER_NONEMPTY_ABI_VERSION",
+        "rich_trim_bounds(view)",
+      ].filter((marker) => !contents.includes(marker))
+        .map((marker) => `${filePath}: rate-limit presence must remain Mojo-owned (${marker})`);
+    }
+    if (filePath === RATE_LIMIT_HEADER_CALLER_TEST_FILE &&
+        !contents.includes("official_rate_limit_header_duplicate_selection_uses_unicode_mojo_presence_policy")) {
+      return [`${filePath}: real rate-limit header precedence caller test is required`];
+    }
+    return [];
   });
   const redactionViolations = files.flatMap(([filePath, contents]) => {
     if (filePath === REDACTION_FILE) {
@@ -7405,7 +7447,7 @@ export function findViolations(files) {
     }
     return [];
   });
-  return [...nativeRecoveryOwnershipViolations, ...quotaRecoveryEligibilityViolations, ...runtimeBrokerReuseMojoViolations, ...geminiResponseMediaMojoViolations, ...cookieEvictionMojoViolations, ...websocketBudgetMojoViolations, ...affinityBindingMojoViolations, ...responsesCapacityRecoveryViolations, ...sseTapMojoOwnershipViolations, ...quotaWatchViolations, ...geminiCompactSnippetViolations, ...geminiCompactTextViolations, ...doctorSmartContextDecisionViolations, ...anthropicAttemptCursorViolations, ...geminiUnsupportedToolRetryViolations, ...terminalGeometryViolations, ...smartContextCapsuleOrderViolations, ...markerViolations, ...deepseekCatalogPolicyViolations, ...featureOffViolations, ...liveLogRecordViolations, ...runtimePolicyPresetViolations, ...profileHealthCircuitViolations, ...logThroughputViolations, ...operationalDetailSpecViolations, ...transcriptPolicyViolations, ...logLoadPolicyViolations, ...routeReasonViolations, ...runtimeStateQuotaViolations, ...runtimeStateRoutePolicyViolations, ...runtimeProxyRootViolations, ...brokerVersionGuardViolations, ...brokerContinuityViolations, ...brokerLogCacheViolations, ...codexConfigViolations, ...statePolicyViolations, ...quotaSelectionPolicyViolations, ...routeTagMirrorViolations, ...enumTagMirrorViolations, ...appSelectionPolicyMirrorViolations, ...runtimeStateBackgroundViolations, ...redactionViolations, ...profileIdentityViolations, ...governanceInspectionViolations, ...governanceInspectionOrderingViolations, ...exactnessPlannerViolations,
+  return [...nativeRecoveryOwnershipViolations, ...quotaRecoveryEligibilityViolations, ...runtimeBrokerReuseMojoViolations, ...geminiResponseMediaMojoViolations, ...cookieEvictionMojoViolations, ...websocketBudgetMojoViolations, ...affinityBindingMojoViolations, ...responsesCapacityRecoveryViolations, ...sseTapMojoOwnershipViolations, ...quotaWatchViolations, ...geminiCompactSnippetViolations, ...geminiCompactTextViolations, ...doctorSmartContextDecisionViolations, ...anthropicAttemptCursorViolations, ...geminiUnsupportedToolRetryViolations, ...terminalGeometryViolations, ...smartContextCapsuleOrderViolations, ...markerViolations, ...deepseekCatalogPolicyViolations, ...featureOffViolations, ...liveLogRecordViolations, ...runtimePolicyPresetViolations, ...profileHealthCircuitViolations, ...logThroughputViolations, ...operationalDetailSpecViolations, ...transcriptPolicyViolations, ...logLoadPolicyViolations, ...routeReasonViolations, ...runtimeStateQuotaViolations, ...runtimeStateRoutePolicyViolations, ...runtimeProxyRootViolations, ...brokerVersionGuardViolations, ...brokerContinuityViolations, ...brokerLogCacheViolations, ...codexConfigViolations, ...statePolicyViolations, ...quotaSelectionPolicyViolations, ...routeTagMirrorViolations, ...enumTagMirrorViolations, ...appSelectionPolicyMirrorViolations, ...runtimeStateBackgroundViolations, ...redactionViolations, ...rateLimitHeaderSelectionViolations, ...profileIdentityViolations, ...governanceInspectionViolations, ...governanceInspectionOrderingViolations, ...exactnessPlannerViolations,
     ...adaptiveBudgetViolations,
     ...providerUsageViolations,
     ...auditUsageViolations,
@@ -8248,10 +8290,10 @@ function selfTest() {
   assert.deepEqual(findViolations([
     [SESSION_USAGE_LIMIT_CONSUMER_FILE, sessionUsageConsumer],
     [SESSION_USAGE_LIMIT_ADAPTER_FILE,
-      "RUNTIME_ERROR_MODE_SESSION_USAGE_LIMIT: i64 = 15\npub fn runtime_session_usage_limit_marker(\nRuntimeUsageLimitInputFormat::Json\nRUNTIME_ERROR_SESSION_USAGE_LIMIT_MAX_BYTES"],
+      "RUNTIME_ERROR_MODE_SESSION_USAGE_LIMIT: i64 = 15\npub fn runtime_session_usage_limit_marker(\nRuntimeUsageLimitInputFormat::Json\nRUNTIME_ERROR_SESSION_USAGE_LIMIT_MAX_BYTES\nfn prodex_mojo_rate_limit_header_nonempty_v1(\npub fn rate_limit_header_nonempty(\nmojo_rate_limit_header_nonempty_matches_unicode_whitespace_contract\nmojo_rate_limit_header_nonempty_strict_abi_rejects_malformed_shapes"],
     [SESSION_USAGE_LIMIT_FACADE_FILE, "runtime_session_usage_limit_marker"],
     [SESSION_USAGE_LIMIT_MOJO_FILE,
-      "comptime RUNTIME_ERROR_MODE_SESSION_USAGE_LIMIT: Int64 = 15\nRUNTIME_ERROR_SESSION_USAGE_LIMIT_MAX_NODES: Int64 = 2_048\ndef runtime_error_session_usage_limit_marker(\ndef runtime_error_session_usage_json_matches(\ndef runtime_error_session_usage_queue_children("],
+      "comptime RUNTIME_ERROR_MODE_SESSION_USAGE_LIMIT: Int64 = 15\nRUNTIME_ERROR_SESSION_USAGE_LIMIT_MAX_NODES: Int64 = 2_048\ndef runtime_error_session_usage_limit_marker(\ndef runtime_error_session_usage_json_matches(\ndef runtime_error_session_usage_queue_children(\n@export(\"prodex_mojo_rate_limit_header_nonempty_v1\")\nRATE_LIMIT_HEADER_NONEMPTY_ABI_VERSION\nrich_trim_bounds(view)"],
   ]), []);
   assert.match(findViolations([[SESSION_USAGE_LIMIT_CONSUMER_FILE,
     sessionUsageConsumer + "\nfn goal_resume_structured_usage_limit() {}"]]).join("\n"),
