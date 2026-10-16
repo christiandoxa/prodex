@@ -5,10 +5,13 @@ use crate::{
     resolve_super_launch_target, resolve_super_sub_agent_config, sub_agent_recursion_policy,
 };
 use anyhow::{Result, bail};
-use crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
+use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use prodex_cli::{
     DEFAULT_SUB_AGENT_MAX_CONCURRENCY, HARD_MAX_SUB_AGENT_CONCURRENCY, SubAgentConcurrencySource,
     SubAgentConfig, SubAgentMaxConcurrency, SubAgentPreference, SuperArgs,
+};
+use prodex_mojo_core::launch::{
+    SuperPromptChoiceKey, SuperPromptLabelKind, SuperPromptTextAction, SuperPromptTextKey,
 };
 use ratatui::layout::{Constraint, Direction, Layout};
 use ratatui::style::Modifier;
@@ -21,7 +24,14 @@ use terminal_ui::{
     tui_title_style,
 };
 
-const SUPER_PROMPT_MAX_TEXT_CHARS: usize = 256;
+#[path = "super_prompt/choices.rs"]
+mod choices;
+pub(super) use choices::{
+    prompt_super_choice, super_prompt_effort_choice_index, super_prompt_effort_label,
+    super_prompt_model_choice_id_label, super_prompt_model_choice_index,
+    super_prompt_model_choice_label, super_prompt_provider_choice_index,
+    super_prompt_provider_choice_label,
+};
 
 pub(super) fn prompt_super_main_agent_configuration(
     args: &SuperArgs,
@@ -57,22 +67,9 @@ fn prompt_super_main_agent_configuration_with_options(
     );
     let choices = providers
         .iter()
-        .map(|provider| {
-            let label = provider_display_name(*provider);
-            if locked_provider.is_some() {
-                format!("{label} (session affinity)")
-            } else {
-                label.to_string()
-            }
-        })
+        .map(|provider| super_prompt_provider_choice_label(*provider, locked_provider.is_some()))
         .collect::<Vec<_>>();
-    let selected_provider = locked_provider
-        .and_then(|provider| {
-            providers
-                .iter()
-                .position(|candidate| *candidate == provider)
-        })
-        .unwrap_or(0);
+    let selected_provider = super_prompt_provider_choice_index(&providers, locked_provider);
     let provider =
         providers[prompt_super_choice("Main-agent provider", &choices, selected_provider, false)?];
     let local_url = if provider == prodex_provider_core::ProviderId::Local {
@@ -230,12 +227,10 @@ fn prompt_super_sub_agent_config(
                     let providers = canonical_sub_agent_providers();
                     let choices = providers
                         .iter()
-                        .map(|provider| provider_display_name(*provider).to_string())
+                        .map(|provider| super_prompt_provider_choice_label(*provider, false))
                         .collect::<Vec<_>>();
-                    let selected = providers
-                        .iter()
-                        .position(|provider| *provider == config.provider)
-                        .unwrap_or(0);
+                    let selected =
+                        super_prompt_provider_choice_index(providers, Some(config.provider));
                     config.provider = providers
                         [prompt_super_choice("Sub-agent provider", &choices, selected, false)?];
                 }
@@ -348,36 +343,48 @@ pub(super) fn super_sub_agent_concurrency_choices() -> Vec<String> {
     .into_iter()
     .map(|choice| match choice {
         prodex_mojo_core::rich::SuperExposeConcurrencyChoice::Default => {
-            format!("default ({DEFAULT_SUB_AGENT_MAX_CONCURRENCY})")
+            prodex_mojo_core::launch::super_prompt_format_label(
+                SuperPromptLabelKind::DefaultConcurrency,
+                DEFAULT_SUB_AGENT_MAX_CONCURRENCY,
+                None,
+                false,
+            )
+            .expect("Mojo Super concurrency label formatter returned invalid output")
         }
-        prodex_mojo_core::rich::SuperExposeConcurrencyChoice::Preset(value) => value.to_string(),
-        prodex_mojo_core::rich::SuperExposeConcurrencyChoice::Custom => "custom...".to_string(),
+        prodex_mojo_core::rich::SuperExposeConcurrencyChoice::Preset(value) => {
+            prodex_mojo_core::launch::super_prompt_format_label(
+                SuperPromptLabelKind::PresetConcurrency,
+                value,
+                None,
+                false,
+            )
+            .expect("Mojo Super concurrency label formatter returned invalid output")
+        }
+        prodex_mojo_core::rich::SuperExposeConcurrencyChoice::Custom => {
+            prodex_mojo_core::launch::super_prompt_format_label(
+                SuperPromptLabelKind::CustomConcurrency,
+                0,
+                None,
+                false,
+            )
+            .expect("Mojo Super concurrency label formatter returned invalid output")
+        }
     })
     .collect()
 }
 
 fn prompt_super_sub_agent_custom_concurrency() -> Result<Option<SubAgentMaxConcurrency>> {
     prompt_super_text_input(
-        &format!("Enter maximum active sub-agents (1-{HARD_MAX_SUB_AGENT_CONCURRENCY})"),
+        &prodex_mojo_core::launch::super_prompt_format_label(
+            SuperPromptLabelKind::CustomConcurrencyTitle,
+            HARD_MAX_SUB_AGENT_CONCURRENCY,
+            None,
+            false,
+        )
+        .expect("Mojo Super concurrency prompt-title formatter returned invalid output"),
         "",
         true,
         |value| value.parse::<SubAgentMaxConcurrency>(),
-    )
-}
-
-pub(super) fn prompt_super_choice(
-    title: &str,
-    choices: &[String],
-    selected: usize,
-    escape_selects_last: bool,
-) -> Result<usize> {
-    prompt_choice(
-        "Prodex Super",
-        "Super sub-agent prompt TUI",
-        title,
-        choices,
-        selected,
-        escape_selects_last,
     )
 }
 
@@ -408,7 +415,9 @@ fn prompt_choice(
         bail!("prompt has no choices");
     }
     let mut tui = terminal_ui::AlternateScreenTerminal::stderr(terminal_context)?;
-    let mut selected = selected.min(choices.len().saturating_sub(1));
+    let mut selected =
+        prodex_mojo_core::launch::super_choice_initial_index(selected, choices.len())
+            .expect("Mojo Super choice initial selection policy returned invalid output");
     loop {
         tui.terminal.draw(|frame| {
             let chunks = Layout::default()
@@ -498,24 +507,22 @@ fn update_super_choice_selection(
     len: usize,
     escape_selects_last: bool,
 ) -> Result<Option<usize>> {
-    let key_tag = match key.code {
-        KeyCode::Up | KeyCode::Char('k') => 0,
-        KeyCode::Down | KeyCode::Char('j') => 1,
-        KeyCode::PageUp => 2,
-        KeyCode::PageDown => 3,
-        KeyCode::Home => 4,
-        KeyCode::End => 5,
-        KeyCode::Enter => 6,
-        KeyCode::Esc => 7,
-        KeyCode::Char('c') | KeyCode::Char('z')
-            if key.modifiers.contains(KeyModifiers::CONTROL) =>
-        {
-            8
-        }
-        _ => 9,
+    let (key_kind, character) = match key.code {
+        KeyCode::Up => (SuperPromptChoiceKey::Up, None),
+        KeyCode::Down => (SuperPromptChoiceKey::Down, None),
+        KeyCode::PageUp => (SuperPromptChoiceKey::PageUp, None),
+        KeyCode::PageDown => (SuperPromptChoiceKey::PageDown, None),
+        KeyCode::Home => (SuperPromptChoiceKey::Home, None),
+        KeyCode::End => (SuperPromptChoiceKey::End, None),
+        KeyCode::Enter => (SuperPromptChoiceKey::Enter, None),
+        KeyCode::Esc => (SuperPromptChoiceKey::Escape, None),
+        KeyCode::Char(character) => (SuperPromptChoiceKey::Character, Some(character)),
+        _ => (SuperPromptChoiceKey::Other, None),
     };
-    let (next_selected, action, choice) = prodex_mojo_core::launch::super_choice_key_plan(
-        key_tag,
+    let (next_selected, action, choice) = prodex_mojo_core::launch::super_prompt_choice_event_plan(
+        key_kind,
+        character,
+        key.modifiers.contains(KeyModifiers::CONTROL),
         *selected,
         len,
         escape_selects_last,
@@ -552,6 +559,28 @@ pub(super) fn prompt_super_text(title: &str, initial: &str) -> Result<String> {
     .ok_or_else(|| anyhow::anyhow!("Prodex Super prompt cancelled"))
 }
 
+fn super_prompt_text_edit_plan(
+    key: KeyEvent,
+    current_characters: usize,
+    escape_returns_none: bool,
+) -> Result<(SuperPromptTextAction, Option<char>, bool)> {
+    let (key_kind, character) = match key.code {
+        KeyCode::Char(character) => (SuperPromptTextKey::Character, Some(character)),
+        KeyCode::Backspace => (SuperPromptTextKey::Backspace, None),
+        KeyCode::Enter => (SuperPromptTextKey::Enter, None),
+        KeyCode::Esc => (SuperPromptTextKey::Escape, None),
+        _ => (SuperPromptTextKey::Other, None),
+    };
+    Ok(prodex_mojo_core::launch::super_prompt_text_event_plan(
+        key_kind,
+        character,
+        key.modifiers.contains(KeyModifiers::CONTROL),
+        current_characters,
+        escape_returns_none,
+    )
+    .expect("Mojo Super text-edit policy returned invalid output"))
+}
+
 fn prompt_super_text_input<T>(
     title: &str,
     initial: &str,
@@ -559,10 +588,12 @@ fn prompt_super_text_input<T>(
     parse: impl Fn(&str) -> std::result::Result<T, String>,
 ) -> Result<Option<T>> {
     let mut tui = terminal_ui::AlternateScreenTerminal::stderr("Super sub-agent text prompt TUI")?;
+    let initial_prefix = prodex_mojo_core::launch::super_prompt_text_prefix_length(initial)
+        .expect("Mojo Super text-prefix policy returned invalid output");
     let mut value = initial
-        .chars()
-        .take(SUPER_PROMPT_MAX_TEXT_CHARS)
-        .collect::<String>();
+        .get(..initial_prefix)
+        .expect("Mojo Super text-prefix policy returned a non-UTF-8 boundary")
+        .to_string();
     let mut validation_error = None::<String>;
     loop {
         tui.terminal.draw(|frame| {
@@ -616,30 +647,28 @@ fn prompt_super_text_input<T>(
         if let Event::Key(key) = event::read()?
             && key.kind == KeyEventKind::Press
         {
-            match key.code {
-                KeyCode::Enter => match parse(&value) {
+            let (action, character, clear_validation) =
+                super_prompt_text_edit_plan(key, value.chars().count(), escape_returns_none)?;
+            match action {
+                SuperPromptTextAction::Accept => match parse(&value) {
                     Ok(parsed) => return Ok(Some(parsed)),
                     Err(error) => validation_error = Some(error),
                 },
-                KeyCode::Backspace => {
+                SuperPromptTextAction::Backspace => {
                     value.pop();
-                    validation_error = None;
+                    if clear_validation {
+                        validation_error = None;
+                    }
                 }
-                KeyCode::Char(character)
-                    if !key.modifiers.contains(KeyModifiers::CONTROL)
-                        && value.chars().count() < SUPER_PROMPT_MAX_TEXT_CHARS =>
-                {
-                    value.push(character);
-                    validation_error = None;
+                SuperPromptTextAction::Append => {
+                    value.push(character.expect("Mojo append action must contain a character"));
+                    if clear_validation {
+                        validation_error = None;
+                    }
                 }
-                KeyCode::Esc if escape_returns_none => return Ok(None),
-                KeyCode::Esc => bail!("Prodex Super prompt cancelled"),
-                KeyCode::Char('c') | KeyCode::Char('z')
-                    if key.modifiers.contains(KeyModifiers::CONTROL) =>
-                {
-                    bail!("Prodex Super prompt cancelled")
-                }
-                _ => {}
+                SuperPromptTextAction::ReturnNone => return Ok(None),
+                SuperPromptTextAction::Cancel => bail!("Prodex Super prompt cancelled"),
+                SuperPromptTextAction::Ignore => {}
             }
         }
     }
@@ -721,78 +750,5 @@ pub(crate) fn prompt_super_presidio_opt_in() -> Result<bool> {
 }
 
 #[cfg(test)]
-mod super_choice_policy_tests {
-    use super::*;
-    use crossterm::event::KeyEvent;
-
-    fn key(code: KeyCode) -> KeyEvent {
-        KeyEvent::new(code, KeyModifiers::NONE)
-    }
-
-    #[test]
-    fn super_choice_navigation_policy_is_mojo_backed() {
-        assert_eq!(visible_choice_range(5, 10, 3), 4..7);
-        assert_eq!(visible_choice_range(0, 10, 0), 0..1);
-
-        let mut selected = 0;
-        assert_eq!(
-            update_super_choice_selection(key(KeyCode::Up), &mut selected, 5, false).unwrap(),
-            None
-        );
-        assert_eq!(selected, 4);
-        assert_eq!(
-            update_super_choice_selection(key(KeyCode::Down), &mut selected, 5, false).unwrap(),
-            None
-        );
-        assert_eq!(selected, 0);
-        assert_eq!(
-            update_super_choice_selection(key(KeyCode::PageDown), &mut selected, 5, false).unwrap(),
-            None
-        );
-        assert_eq!(selected, 4);
-        assert_eq!(
-            update_super_choice_selection(key(KeyCode::Enter), &mut selected, 5, false).unwrap(),
-            Some(4)
-        );
-
-        let mut escaped = 1;
-        assert_eq!(
-            update_super_choice_selection(key(KeyCode::Esc), &mut escaped, 5, true).unwrap(),
-            Some(4)
-        );
-        assert!(update_super_choice_selection(key(KeyCode::Esc), &mut escaped, 5, false).is_err());
-    }
-
-    #[test]
-    fn concurrency_picker_uses_mojo_menu_and_selection_plan() {
-        assert_eq!(
-            super_sub_agent_concurrency_choices(),
-            ["default (4)", "4", "8", "16", "32", "custom..."]
-        );
-
-        let default = prompt_super_sub_agent_max_concurrency_with(
-            |choices| {
-                assert_eq!(choices[0], "default (4)");
-                Ok(0)
-            },
-            || panic!("default selection must skip custom input"),
-        )
-        .unwrap();
-        assert_eq!(default, SubAgentMaxConcurrency::default());
-
-        let preset = prompt_super_sub_agent_max_concurrency_with(
-            |_| Ok(2),
-            || panic!("preset selection must skip custom input"),
-        )
-        .unwrap();
-        assert_eq!(preset.get(), 8);
-        assert_eq!(preset.source(), SubAgentConcurrencySource::Preset);
-
-        let custom = prompt_super_sub_agent_max_concurrency_with(
-            |_| Ok(5),
-            || Ok(Some("23".parse().unwrap())),
-        )
-        .unwrap();
-        assert_eq!(custom.get(), 23);
-    }
-}
+#[path = "super_prompt/tests.rs"]
+mod super_choice_policy_tests;

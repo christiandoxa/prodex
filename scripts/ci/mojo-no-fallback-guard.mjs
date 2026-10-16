@@ -123,6 +123,14 @@ const MAIN_MODEL_CATALOG_FILE = "crates/prodex-app/src/app_commands/super_main_c
 const MAIN_MODEL_CATALOG_ADAPTER_FILE = "crates/prodex-mojo-core/src/rich/catalog_planner.rs";
 const MAIN_MODEL_CATALOG_MOJO_FILE = "mojo/prodex_core/rich_catalog.mojo";
 const MAIN_MODEL_CATALOG_TEST_FILE = "crates/prodex-mojo-core/src/rich_tests.rs";
+const SUPER_PROMPT_FILE = "crates/prodex-app/src/app_commands/super_prompt.rs";
+const SUPER_PROMPT_CHOICES_FILE = "crates/prodex-app/src/app_commands/super_prompt/choices.rs";
+const SUPER_PROMPT_TEST_FILE = "crates/prodex-app/src/app_commands/super_prompt/tests.rs";
+const SUPER_MAIN_PROMPT_FILE = "crates/prodex-app/src/app_commands/super_main_prompt.rs";
+const SUPER_PROMPT_ADAPTER_FILE = "crates/prodex-mojo-core/src/launch/menu_policy.rs";
+const SUPER_PROMPT_LAUNCH_FILE = "crates/prodex-mojo-core/src/launch.rs";
+const SUPER_PROMPT_MOJO_FILE = "mojo/prodex_core/launch_args.mojo";
+const SUPER_PROMPT_DIRECT_TEST_FILE = "crates/prodex-mojo-core/tests/launch_args.rs";
 const PROVIDER_CATALOG_FILE = "crates/prodex-provider-core/src/catalog.rs";
 const PROVIDER_CATALOG_REASONING_FILE = "crates/prodex-provider-core/src/catalog/reasoning.rs";
 const PROVIDER_CATALOG_ADAPTER_FILE = "crates/prodex-mojo-core/src/rich/catalog.rs";
@@ -135,6 +143,12 @@ const LOG_PAYLOAD_CALLER_FILE = "crates/prodex-app/src/app_commands/log_upstream
 const LOG_PAYLOAD_ADAPTER_FILE = "crates/prodex-mojo-core/src/json/log_payload.rs";
 const LOG_PAYLOAD_MOJO_FILE = "mojo/prodex_core/log_payload.mojo";
 const PROMOTED_FILES = [
+  SUPER_PROMPT_FILE,
+  SUPER_PROMPT_CHOICES_FILE,
+  SUPER_PROMPT_TEST_FILE,
+  SUPER_MAIN_PROMPT_FILE,
+  SUPER_PROMPT_LAUNCH_FILE,
+  SUPER_PROMPT_DIRECT_TEST_FILE,
   OPTIONAL_TOOLS_RENDER_FILE,
   OPTIONAL_TOOLS_RENDER_ADAPTER_FILE,
   OPTIONAL_TOOLS_RENDER_MOJO_FILE,
@@ -5685,6 +5699,138 @@ export function findViolations(files) {
     }
     return [];
   });
+  const superPromptPolicyViolations = files.flatMap(([filePath, contents]) => {
+    if (filePath === SUPER_PROMPT_FILE || filePath === SUPER_PROMPT_CHOICES_FILE) {
+      const production = contents.split("#[cfg(test)]", 1)[0];
+      const requiredProduction = filePath === SUPER_PROMPT_CHOICES_FILE ? [
+        "super_prompt_format_label(",
+        "super_prompt_choice_index(",
+        "super_prompt_value_index(",
+      ] : [
+        "super_prompt_choice_event_plan(",
+        "super_prompt_text_event_plan(",
+        "super_prompt_text_prefix_length(",
+        "super_choice_initial_index(",
+        "super_prompt_format_label(",
+        "super_expose_concurrency_plan(",
+        "sub_agent_policy::prompt_step_plan(",
+      ];
+      const violations = requiredProduction
+        .filter((marker) => !production.includes(marker))
+        .map((marker) => `${filePath}: Super prompt policy must retain ${marker}`);
+      const retired = [
+        "chars().take(SUPER_PROMPT_MAX_TEXT_CHARS)",
+        "let key_tag = match key.code",
+        "KeyCode::Char('k')",
+        "KeyCode::Char('j')",
+        "selected.min(choices.len().saturating_sub(1))",
+        "format!(\"default ({DEFAULT_SUB_AGENT_MAX_CONCURRENCY})\")",
+        "format!(\"Enter maximum active sub-agents (1-{HARD_MAX_SUB_AGENT_CONCURRENCY})\")",
+      ];
+      if (retired.some((marker) => production.includes(marker))) {
+        violations.push(`${filePath}: contains restored Rust Super prompt/menu semantics`);
+      }
+      if (FEATURE_OFF_RUST_PATH.test(production)) {
+        violations.push(`${filePath}: Super prompt must not keep a feature-off Rust fallback`);
+      }
+      return violations;
+    }
+    if (filePath === SUPER_PROMPT_TEST_FILE) {
+      const requiredTests = [
+        "text_edit_caller_preserves_unicode_optional_escape_and_control_cancel",
+        "provider_model_and_effort_prompt_choices_use_mojo_plans",
+      ];
+      return requiredTests
+        .filter((marker) => !contents.includes(marker))
+        .map((marker) => `${filePath}: Super prompt caller coverage must retain ${marker}`);
+    }
+    if (filePath === SUPER_MAIN_PROMPT_FILE) {
+      const production = contents.split("\n#[cfg(test)]\nmod tests", 1)[0];
+      const requiredProduction = [
+        "super_prompt::super_prompt_model_choice_label(",
+        "super_prompt::super_prompt_model_choice_index(",
+        "super_prompt::super_prompt_effort_label(",
+        "super_prompt::super_prompt_effort_choice_index(",
+      ];
+      const requiredTests = [
+        "main_and_sub_agent_catalogs_remain_independent",
+        "remembered_effort_is_not_reused_after_model_fallback_or_change",
+      ];
+      const violations = requiredProduction
+        .filter((marker) => !production.includes(marker))
+        .map((marker) => `${filePath}: Super model/effort prompt must retain ${marker}`)
+        .concat(requiredTests
+          .filter((marker) => !contents.includes(marker))
+          .map((marker) => `${filePath}: Super model/effort caller coverage must retain ${marker}`));
+      if (/\.position\s*\(/u.test(production)) {
+        violations.push(`${filePath}: model/effort preselection must use the Mojo prompt planner`);
+      }
+      if (FEATURE_OFF_RUST_PATH.test(production)) {
+        violations.push(`${filePath}: Super model/effort prompts must not keep a feature-off Rust fallback`);
+      }
+      return violations;
+    }
+    if (filePath === MAIN_MODEL_CATALOG_FILE && contents.includes("pub(super) fn prompt_main_model")) {
+      const body = contents.match(/pub\(super\) fn prompt_main_model\([^]*?^\}/mu)?.[0] ?? "";
+      return body.includes("super_prompt::super_prompt_model_choice_label(") &&
+        body.includes("super_prompt::super_prompt_model_choice_index(") &&
+        !/\.position\s*\(/u.test(body)
+        ? [] : [`${filePath}: main model prompt labels and preselection must use the Mojo prompt owner`];
+    }
+    if (filePath === SUPER_PROMPT_ADAPTER_FILE) {
+      const required = [
+        "fn prodex_super_prompt_policy_v1(",
+        "pub fn super_prompt_choice_event_plan(",
+        "pub fn super_prompt_text_event_plan(",
+        "pub fn super_prompt_text_prefix_length(",
+        "pub fn super_prompt_choice_index(",
+        "pub fn super_prompt_value_index(",
+        "pub fn super_prompt_format_label(",
+        "super_prompt_abi_rejects_bad_version_utf8_and_output_capacity",
+      ];
+      return required
+        .filter((marker) => !contents.includes(marker))
+        .map((marker) => `${filePath}: Super prompt ABI adapter must retain ${marker}`);
+    }
+    if (filePath === SUPER_PROMPT_LAUNCH_FILE) {
+      const required = [
+        "super_prompt_choice_event_plan",
+        "super_prompt_text_event_plan",
+        "super_prompt_choice_index",
+        "super_prompt_format_label",
+        "super_prompt_value_index",
+      ];
+      return required
+        .filter((marker) => !contents.includes(marker))
+        .map((marker) => `${filePath}: Super prompt adapter must export ${marker}`);
+    }
+    if (filePath === SUPER_PROMPT_MOJO_FILE &&
+        contents.includes('@export("prodex_super_prompt_policy_v1")')) {
+      const required = [
+        '@export("prodex_super_prompt_policy_v1")',
+        "super_prompt_choice_event(",
+        "super_prompt_text_event(",
+        "super_prompt_text_prefix_length(",
+        "super_prompt_choice_index(",
+        "super_prompt_value_index(",
+        "super_prompt_write_label(",
+        "rich_codepoint_width(",
+      ];
+      return required
+        .filter((marker) => !contents.includes(marker))
+        .map((marker) => `${filePath}: Super prompt decisions must remain in compiled Mojo (${marker})`);
+    }
+    if (filePath === SUPER_PROMPT_DIRECT_TEST_FILE) {
+      const required = [
+        "super_prompt_menu_and_text_policies_use_real_mojo",
+        "super_prompt_choice_preselection_and_labels_use_real_mojo",
+      ];
+      return required
+        .filter((marker) => !contents.includes(marker))
+        .map((marker) => `${filePath}: Super prompt ABI coverage must retain ${marker}`);
+    }
+    return [];
+  });
   const catalogModelViolations = files.flatMap(([filePath, contents]) => {
     if (filePath !== "crates/prodex-app/src/runtime_external_provider_config/catalog_model.rs") return [];
     const body = contents.match(/\bpub\(super\) fn external_catalog_model_indices\([^]*?^\}/mu)?.[0];
@@ -7815,7 +7961,7 @@ export function findViolations(files) {
     ...deepseekResponseToolCallViolations, ...chatToolViolations,
     ...previousResponseOutcomeLabelViolations, ...affinityChainLogRenderViolations, ...previousResponseLogRenderViolations, ...structuredLogPolicyViolations, ...candidateSkipReasonViolations, ...runtimeProxyObservabilityLabelViolations, ...websocketExecutorLabelViolations, ...infoRenderViolations, ...doctorMarkerViolations, ...doctorFailureClassViolations, ...doctorMarkerSummaryCountsViolations, ...doctorCompactExitCountsViolations, ...doctorTimelineDetailViolations, ...doctorLastMarkerLineViolations, ...runtimeDoctorPlanInputViolations, ...cliDefaultRunViolations, ...cliNormalizationViolations, ...responseMetadataViolations, ...doctorMarkerAbiViolations, ...statusSummaryViolations,
     ...geminiBufferedResponseViolations, ...fingerprintDeltaViolations, ...profileExportPolicyViolations, ...sessionReportViolations, ...runtimeLineageViolations, ...smartContextMarkerViolations, ...smartContextSymbolIndexViolations, ...sessionUsageLimitViolations, ...smartContextArtifactRefViolations, ...smartContextDuplicateTextViolations, ...runtimeRepoMapViolations,
-    ...modelSpecViolations, ...mainModelCatalogViolations, ...providerCatalogReasoningViolations, ...catalogModelViolations,
+    ...modelSpecViolations, ...mainModelCatalogViolations, ...providerCatalogReasoningViolations, ...superPromptPolicyViolations, ...catalogModelViolations,
     ...deepseekShapingViolations,
     ...deepseekStreamFallbackViolations,
     ...quotaWindowViolations, ...quotaResetEpochViolations,
@@ -10007,6 +10153,132 @@ function selfTest() {
       "transcript_fact_trim_bounds(",
       "TRANSCRIPT_SAFE_TEXT_MAX_BYTES",
     ].join("\n")]]), []);
+
+  const superPromptConsumer = [
+    "super_prompt_choice_event_plan(",
+    "super_prompt_text_event_plan(",
+    "super_prompt_text_prefix_length(",
+    "super_choice_initial_index(",
+    "super_prompt_format_label(",
+    "super_prompt_choice_index(",
+    "super_prompt_value_index(",
+    "super_expose_concurrency_plan(",
+    "sub_agent_policy::prompt_step_plan(",
+    "text_edit_caller_preserves_unicode_optional_escape_and_control_cancel",
+    "provider_model_and_effort_prompt_choices_use_mojo_plans",
+  ].join("\n");
+  const transcriptPolicyAdapter = [
+    "prodex_mojo_transcript_event_classify_v1(",
+    "prodex_mojo_transcript_item_classify_v1(",
+    "prodex_mojo_transcript_operation_span_v1(",
+    "prodex_mojo_transcript_tool_name_v1(",
+  ].join("\n");
+  assert.deepEqual(findViolations([[TRANSCRIPT_POLICY_ADAPTER_FILE, transcriptPolicyAdapter]]), []);
+  assert.match(findViolations([[TRANSCRIPT_POLICY_ADAPTER_FILE,
+    transcriptPolicyAdapter.replace("prodex_mojo_transcript_event_classify_v1(", "rust_event_classify("),
+  ]]).join("\n"), /transcript ABI adapter must retain/u);
+  assert.deepEqual(findViolations([[SUPER_PROMPT_FILE, superPromptConsumer]]), []);
+  assert.deepEqual(findViolations([[SUPER_PROMPT_CHOICES_FILE, superPromptConsumer]]), []);
+  assert.deepEqual(findViolations([[SUPER_PROMPT_TEST_FILE, superPromptConsumer]]), []);
+  assert.match(findViolations([[SUPER_PROMPT_CHOICES_FILE,
+    superPromptConsumer.replace("super_prompt_choice_index(", "rust_choice_index("),
+  ]]).join("\n"), /must retain super_prompt_choice_index/u);
+  assert.match(findViolations([[SUPER_PROMPT_TEST_FILE, ""]]).join("\n"), /caller coverage/u);
+  assert.match(findViolations([[SUPER_PROMPT_FILE,
+    superPromptConsumer + "\nKeyCode::Char('k')",
+  ]]).join("\n"), /restored Rust Super prompt\/menu semantics/u);
+  assert.match(findViolations([[SUPER_PROMPT_FILE,
+    superPromptConsumer + "\n#[cfg(not(feature = \"mojo-core\"))]",
+  ]]).join("\n"), /must not keep a feature-off Rust fallback/u);
+
+  const superMainPrompt = [
+    "super_prompt::super_prompt_model_choice_label(",
+    "super_prompt::super_prompt_model_choice_index(",
+    "super_prompt::super_prompt_effort_label(",
+    "super_prompt::super_prompt_effort_choice_index(",
+    "main_and_sub_agent_catalogs_remain_independent",
+    "remembered_effort_is_not_reused_after_model_fallback_or_change",
+  ].join("\n");
+  assert.deepEqual(findViolations([[SUPER_MAIN_PROMPT_FILE, superMainPrompt]]), []);
+  assert.match(findViolations([[SUPER_MAIN_PROMPT_FILE,
+    superMainPrompt + "\nmodels.iter().position(|choice| true)",
+  ]]).join("\n"), /preselection must use the Mojo prompt planner/u);
+
+  const superMainCatalog = [
+    "plan_dynamic_catalog(",
+    "source.aliases.clone()",
+    "default_effort: model.default_effort",
+    "pub(super) fn prompt_main_model(title: &str) {",
+    "super_prompt::super_prompt_model_choice_label(",
+    "super_prompt::super_prompt_model_choice_index(",
+    "}",
+  ].join("\n");
+  assert.deepEqual(findViolations([[MAIN_MODEL_CATALOG_FILE, superMainCatalog]]), []);
+  assert.match(findViolations([[MAIN_MODEL_CATALOG_FILE,
+    superMainCatalog.replace("super_prompt::super_prompt_model_choice_index(", "models.iter().position("),
+  ]]).join("\n"), /main model prompt labels and preselection/u);
+
+  const superPromptAdapter = [
+    "pub fn default_cli_invocation_to_run(",
+    "CLI_DEFAULT_RUN,",
+    "prodex_mojo_launch_args_v1(",
+    "SUPER_COMPAT_ALIAS",
+    "SUPER_LITERAL_BOUNDARY",
+    "SUPER_POSITIONED_ALIAS",
+    "CODEX_COMMAND_SERVER",
+    "fn launch_scalar_policy(",
+    "fn decode_super_provider_alias(",
+    "fn prodex_super_prompt_policy_v1(",
+    "pub fn super_prompt_choice_event_plan(",
+    "pub fn super_prompt_text_event_plan(",
+    "pub fn super_prompt_text_prefix_length(",
+    "pub fn super_prompt_choice_index(",
+    "pub fn super_prompt_value_index(",
+    "pub fn super_prompt_format_label(",
+    "super_prompt_abi_rejects_bad_version_utf8_and_output_capacity",
+  ].join("\n");
+  assert.deepEqual(findViolations([[SUPER_PROMPT_ADAPTER_FILE, superPromptAdapter]]), []);
+  assert.match(findViolations([[SUPER_PROMPT_ADAPTER_FILE,
+    superPromptAdapter.replace("pub fn super_prompt_text_event_plan(", "fn rust_text_editor("),
+  ]]).join("\n"), /ABI adapter must retain/u);
+
+  const superPromptMojo = [
+    "LAUNCH_CLI_DEFAULT_RUN: Int64 = 13",
+    "def launch_cli_default_run_policy(",
+    "launch_cli_default_run_policy(arguments, count, metadata)",
+    "LAUNCH_SUPER_COMPAT_ALIAS: Int64 = 16",
+    "LAUNCH_SUPER_LITERAL_BOUNDARY: Int64 = 17",
+    "LAUNCH_SUPER_POSITIONED_ALIAS: Int64 = 18",
+    "LAUNCH_CODEX_COMMAND_SERVER: Int64 = 19",
+    "def launch_super_compat_alias_policy(",
+    "def launch_super_literal_boundary_policy(",
+    "def launch_super_positioned_alias_policy(",
+    "def launch_codex_command_server_policy(",
+    "operation == LAUNCH_SUPER_COMPAT_ALIAS",
+    "operation == LAUNCH_SUPER_LITERAL_BOUNDARY",
+    "operation == LAUNCH_SUPER_POSITIONED_ALIAS",
+    "operation == LAUNCH_CODEX_COMMAND_SERVER",
+    '@export("prodex_super_prompt_policy_v1")',
+    "super_prompt_choice_event(",
+    "super_prompt_text_event(",
+    "super_prompt_text_prefix_length(",
+    "super_prompt_choice_index(",
+    "super_prompt_value_index(",
+    "super_prompt_write_label(",
+    "rich_codepoint_width(",
+  ].join("\n");
+  assert.deepEqual(findViolations([[SUPER_PROMPT_MOJO_FILE, superPromptMojo]]), []);
+  assert.match(findViolations([[SUPER_PROMPT_MOJO_FILE,
+    superPromptMojo.replace("super_prompt_choice_event(", "rust_choice_event("),
+  ]]).join("\n"), /decisions must remain in compiled Mojo/u);
+
+  const superPromptTests = [
+    "default_cli_invocation_policy_uses_real_mojo_classification",
+    "super_cli_normalization_policy_uses_real_mojo_classification",
+    "super_prompt_menu_and_text_policies_use_real_mojo",
+    "super_prompt_choice_preselection_and_labels_use_real_mojo",
+  ].join("\n");
+  assert.deepEqual(findViolations([[SUPER_PROMPT_DIRECT_TEST_FILE, superPromptTests]]), []);
 
 }
 
