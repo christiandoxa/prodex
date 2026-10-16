@@ -82,53 +82,53 @@ impl runtime_config::RuntimeConfig {
             .map(|count| count.get())
             .unwrap_or(4);
         let tuning_defaults = runtime_config::runtime_tuning_defaults(parallelism);
-        let worker_count = parser
-            .positive_usize(
-                "PRODEX_RUNTIME_PROXY_WORKER_COUNT",
-                policy.worker_count,
-                tuning_defaults.worker_count,
-            )
-            .clamp(1, 64);
-        let long_lived_worker_count = parser
-            .positive_usize(
-                "PRODEX_RUNTIME_PROXY_LONG_LIVED_WORKER_COUNT",
-                policy.long_lived_worker_count,
-                tuning_defaults.long_lived_worker_count,
-            )
-            .clamp(1, 256);
-        let async_worker_count = parser
-            .positive_usize(
-                "PRODEX_RUNTIME_PROXY_ASYNC_WORKER_COUNT",
-                policy.async_worker_count,
-                tuning_defaults.async_worker_count,
-            )
-            .clamp(2, 8);
-        let probe_refresh_worker_count = parser
-            .positive_usize(
-                "PRODEX_RUNTIME_PROBE_REFRESH_WORKER_COUNT",
-                policy.probe_refresh_worker_count,
-                tuning_defaults.probe_refresh_worker_count,
-            )
-            .clamp(1, 8);
-        let long_lived_queue_capacity = parser
-            .positive_usize(
-                "PRODEX_RUNTIME_PROXY_LONG_LIVED_QUEUE_CAPACITY",
-                policy.long_lived_queue_capacity,
-                runtime_config::runtime_proxy_long_lived_queue_capacity_default(
-                    long_lived_worker_count,
-                ),
-            )
-            .max(1);
-        let active_request_limit = parser
-            .positive_usize(
-                "PRODEX_RUNTIME_PROXY_ACTIVE_REQUEST_LIMIT",
-                policy.active_request_limit,
-                runtime_config::runtime_proxy_active_request_limit_default(
-                    worker_count,
-                    long_lived_worker_count,
-                ),
-            )
-            .max(1);
+        let worker_count = parser.positive_usize_bounded(
+            "PRODEX_RUNTIME_PROXY_WORKER_COUNT",
+            policy.worker_count,
+            tuning_defaults.worker_count,
+            1,
+            64,
+        );
+        let long_lived_worker_count = parser.positive_usize_bounded(
+            "PRODEX_RUNTIME_PROXY_LONG_LIVED_WORKER_COUNT",
+            policy.long_lived_worker_count,
+            tuning_defaults.long_lived_worker_count,
+            1,
+            256,
+        );
+        let async_worker_count = parser.positive_usize_bounded(
+            "PRODEX_RUNTIME_PROXY_ASYNC_WORKER_COUNT",
+            policy.async_worker_count,
+            tuning_defaults.async_worker_count,
+            2,
+            8,
+        );
+        let probe_refresh_worker_count = parser.positive_usize_bounded(
+            "PRODEX_RUNTIME_PROBE_REFRESH_WORKER_COUNT",
+            policy.probe_refresh_worker_count,
+            tuning_defaults.probe_refresh_worker_count,
+            1,
+            8,
+        );
+        let long_lived_queue_capacity = parser.positive_usize_bounded(
+            "PRODEX_RUNTIME_PROXY_LONG_LIVED_QUEUE_CAPACITY",
+            policy.long_lived_queue_capacity,
+            runtime_config::runtime_proxy_long_lived_queue_capacity_default(
+                long_lived_worker_count,
+            ),
+            1,
+            usize::MAX,
+        );
+        let active_request_limit = parser.positive_usize_bounded(
+            "PRODEX_RUNTIME_PROXY_ACTIVE_REQUEST_LIMIT",
+            policy.active_request_limit,
+            runtime_config::runtime_proxy_active_request_limit_default(
+                worker_count,
+                long_lived_worker_count,
+            ),
+            1,
+            usize::MAX,
+        );
         let lane_limits = Self::parse_lane_limits(
             parser,
             policy,
@@ -324,40 +324,36 @@ impl runtime_config::RuntimeConfig {
         policy: &prodex_runtime_policy::RuntimePolicyProxySettings,
         tuning_defaults: &runtime_config::RuntimeTuningDefaults,
     ) -> ParsedWebsocketTuning {
-        let connect_worker_count = parser
-            .positive_usize(
-                "PRODEX_RUNTIME_WEBSOCKET_CONNECT_WORKER_COUNT",
-                policy.websocket_connect_worker_count,
-                tuning_defaults.websocket_connect_worker_count,
-            )
-            .max(1);
-        let connect_queue_capacity = parser
-            .positive_usize(
-                "PRODEX_RUNTIME_WEBSOCKET_CONNECT_QUEUE_CAPACITY",
-                policy.websocket_connect_queue_capacity,
-                runtime_config::runtime_websocket_tcp_connect_queue_capacity_default(
-                    connect_worker_count,
-                ),
-            )
-            .max(connect_worker_count)
-            .max(1);
-        let dns_worker_count = parser
-            .positive_usize(
-                "PRODEX_RUNTIME_WEBSOCKET_DNS_WORKER_COUNT",
-                policy.websocket_dns_worker_count,
-                tuning_defaults.websocket_dns_worker_count,
-            )
-            .max(1);
-        let dns_queue_capacity = parser
-            .positive_usize(
-                "PRODEX_RUNTIME_WEBSOCKET_DNS_QUEUE_CAPACITY",
-                policy.websocket_dns_queue_capacity,
-                runtime_config::runtime_websocket_dns_resolve_queue_capacity_default(
-                    dns_worker_count,
-                ),
-            )
-            .max(dns_worker_count)
-            .max(1);
+        let connect_worker_count = parser.positive_usize_bounded(
+            "PRODEX_RUNTIME_WEBSOCKET_CONNECT_WORKER_COUNT",
+            policy.websocket_connect_worker_count,
+            tuning_defaults.websocket_connect_worker_count,
+            1,
+            usize::MAX,
+        );
+        let connect_queue_capacity = parser.positive_usize_bounded(
+            "PRODEX_RUNTIME_WEBSOCKET_CONNECT_QUEUE_CAPACITY",
+            policy.websocket_connect_queue_capacity,
+            runtime_config::runtime_websocket_tcp_connect_queue_capacity_default(
+                connect_worker_count,
+            ),
+            connect_worker_count,
+            usize::MAX,
+        );
+        let dns_worker_count = parser.positive_usize_bounded(
+            "PRODEX_RUNTIME_WEBSOCKET_DNS_WORKER_COUNT",
+            policy.websocket_dns_worker_count,
+            tuning_defaults.websocket_dns_worker_count,
+            1,
+            usize::MAX,
+        );
+        let dns_queue_capacity = parser.positive_usize_bounded(
+            "PRODEX_RUNTIME_WEBSOCKET_DNS_QUEUE_CAPACITY",
+            policy.websocket_dns_queue_capacity,
+            runtime_config::runtime_websocket_dns_resolve_queue_capacity_default(dns_worker_count),
+            dns_worker_count,
+            usize::MAX,
+        );
         ParsedWebsocketTuning {
             connect_timeout_ms: parser.positive_u64(
                 "PRODEX_RUNTIME_PROXY_WEBSOCKET_CONNECT_TIMEOUT_MS",
@@ -481,20 +477,20 @@ impl runtime_config::RuntimeConfig {
                 policy.sync_probe_pressure_pause_ms,
                 core_constants::RUNTIME_PROXY_SYNC_PROBE_PRESSURE_PAUSE_MS,
             ),
-            responses_quota_critical_floor_percent: parser
-                .positive_i64(
-                    "PRODEX_RUNTIME_PROXY_RESPONSES_CRITICAL_FLOOR_PERCENT",
-                    policy.responses_critical_floor_percent,
-                    1,
-                )
-                .clamp(1, 10),
-            startup_sync_probe_warm_limit: parser
-                .positive_usize(
-                    "PRODEX_RUNTIME_STARTUP_SYNC_PROBE_WARM_LIMIT",
-                    policy.startup_sync_probe_warm_limit,
-                    core_constants::RUNTIME_STARTUP_SYNC_PROBE_WARM_LIMIT,
-                )
-                .min(core_constants::RUNTIME_STARTUP_PROBE_WARM_LIMIT),
+            responses_quota_critical_floor_percent: parser.positive_i64_bounded(
+                "PRODEX_RUNTIME_PROXY_RESPONSES_CRITICAL_FLOOR_PERCENT",
+                policy.responses_critical_floor_percent,
+                1,
+                1,
+                10,
+            ),
+            startup_sync_probe_warm_limit: parser.positive_usize_bounded(
+                "PRODEX_RUNTIME_STARTUP_SYNC_PROBE_WARM_LIMIT",
+                policy.startup_sync_probe_warm_limit,
+                core_constants::RUNTIME_STARTUP_SYNC_PROBE_WARM_LIMIT,
+                1,
+                core_constants::RUNTIME_STARTUP_PROBE_WARM_LIMIT,
+            ),
             broker_ready_timeout_ms: parser.positive_u64(
                 "PRODEX_RUNTIME_BROKER_READY_TIMEOUT_MS",
                 policy.broker_ready_timeout_ms,

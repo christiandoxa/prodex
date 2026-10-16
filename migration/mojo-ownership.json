@@ -547,6 +547,7 @@
           "runtime_tuning_capacity_defaults",
           "runtime_policy_proxy_preset_resolution",
           "runtime_scalar_config_policy",
+          "runtime_config_scalar_policy",
           "runtime_fault_budget_transition"
         ]
       },
@@ -9835,6 +9836,40 @@
       "duplicate_production_owner": false,
       "platform_fallback": false,
       "rust_adapter_scope": "environment acquisition, mutex-protected key/value storage, and typed action application"
+    },
+    {
+      "name": "runtime_config_scalar_policy",
+      "domain": "runtime/config",
+      "introduced_in": "0.438.0",
+      "baseline_state": "Rust runtime configuration parsing, policy/default precedence, compatibility fallback, and bounded scalar decisions",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_runtime_config_scalar_v1",
+      "mojo_abi_version": 1,
+      "mojo_operation_ids": {
+        "strict_positive_unsigned": 0,
+        "strict_unsigned": 1,
+        "strict_positive_signed": 2,
+        "strict_bool": 3,
+        "compatibility_unsigned": 4,
+        "compatibility_flag": 5,
+        "compatibility_bool_default_true": 6
+      },
+      "mojo_source": "mojo/prodex_core/runtime_tuning.mojo",
+      "consumer": "crates/prodex-app/src/runtime_config/environment.rs",
+      "consumer_marker": "runtime_config_scalar_positive_u64(",
+      "production_consumers": [
+        "crates/prodex-app/src/runtime_config/config.rs",
+        "crates/prodex-app/src/runtime_config/config/gemini.rs",
+        "crates/prodex-app/src/runtime_config/environment.rs"
+      ],
+      "production_reachability_test": "crates/prodex-app/src/runtime_config/environment.rs",
+      "rust_owner_before": "Strict and compatibility environment scalar parsing, policy/default precedence, numeric clamping, and stable error/status selection for runtime tuning configuration",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "deleted; required-Mojo ABI and app parser regressions preserve precedence, bounds, exact error ordering, compatibility defaults, Gemini sticky OAuth behavior, and invalid Unicode handling",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "environment and policy acquisition, URL/filesystem/path handling, typed status-to-error mapping, compatibility marker recording, and RuntimeConfig construction"
     },
     {
       "name": "profile_export_envelope_schema_validation",
