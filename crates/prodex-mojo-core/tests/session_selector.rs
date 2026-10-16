@@ -1,3 +1,5 @@
+#![cfg(any(feature = "mojo-rich", feature = "mojo-runtime"))]
+
 #[repr(C)]
 #[derive(Clone, Copy)]
 struct View {

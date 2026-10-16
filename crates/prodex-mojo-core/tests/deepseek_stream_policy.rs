@@ -1,3 +1,5 @@
+#![cfg(feature = "mojo-rich")]
+
 use prodex_mojo_core::deepseek_stream_policy::{
     DeepSeekStreamToolArgumentsPlan, stream_tool_arguments_policy,
 };

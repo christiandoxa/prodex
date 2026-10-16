@@ -1,3 +1,5 @@
+#![cfg(any(feature = "mojo-rich", feature = "mojo-runtime"))]
+
 use prodex_mojo_core::json::session_report_update_json;
 
 #[test]

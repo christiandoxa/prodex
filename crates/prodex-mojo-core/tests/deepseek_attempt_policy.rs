@@ -1,3 +1,5 @@
+#![cfg(feature = "mojo-provider-constraints")]
+
 use prodex_mojo_core::deepseek_attempt_policy::{
     DeepSeekAttemptAction, DeepSeekAttemptInput, DeepSeekAttemptKind, attempt_action,
     first_event_retry_allowed,

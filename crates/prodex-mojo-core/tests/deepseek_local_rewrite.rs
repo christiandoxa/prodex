@@ -1,3 +1,5 @@
+#![cfg(feature = "mojo-rich")]
+
 use prodex_mojo_core::deepseek_local_rewrite::{
     DeepSeekLocalRewriteRoute, DeepSeekTranslationStatus, route,
 };
