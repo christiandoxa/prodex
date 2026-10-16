@@ -21,7 +21,8 @@ pub use gemini_request::{
     gemini_request_field_plan,
 };
 pub use gemini_request_content::{
-    GeminiRequestContentKernelInput, GeminiRequestContentOperation, gemini_request_content_kernel,
+    GeminiFunctionToolSource, GeminiRequestContentKernelInput, GeminiRequestContentOperation,
+    gemini_function_tool_source, gemini_request_content_kernel,
 };
 pub use gemini_signature_choice::{GeminiSignatureCandidate, gemini_signature_choice};
 pub use gemini_sse_tool_call_index::{

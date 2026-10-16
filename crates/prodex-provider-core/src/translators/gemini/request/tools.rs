@@ -76,7 +76,18 @@ fn gemini_relabel_tool_validation_reason(reason: &str, index: Option<usize>) -> 
 }
 
 pub(crate) fn gemini_function_declaration_from_openai_tool(tool: &Value) -> Option<Value> {
-    let function = tool.get("function")?;
+    let source = prodex_mojo_core::provider_constraints::gemini_function_tool_source(
+        tool.get("function").is_some(),
+        tool.get("type").and_then(Value::as_str),
+    )
+    .expect("compiled Mojo Gemini function-tool source returned invalid output");
+    let function = match source {
+        prodex_mojo_core::provider_constraints::GeminiFunctionToolSource::None => return None,
+        prodex_mojo_core::provider_constraints::GeminiFunctionToolSource::Nested => {
+            tool.get("function")?
+        }
+        prodex_mojo_core::provider_constraints::GeminiFunctionToolSource::Flat => tool,
+    };
     let name = function.get("name").and_then(Value::as_str)?;
     let default_parameters = json!({"type": "object"});
     let parameters = function.get("parameters").unwrap_or(&default_parameters);

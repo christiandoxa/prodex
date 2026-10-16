@@ -2,7 +2,7 @@ from std.collections import Array
 
 from std.memory import Pointer
 
-from rich_text import rich_trim_bounds, rich_view_ptr, rich_view_valid
+from rich_text import rich_trim_bounds, rich_view_ptr, rich_view_valid, rich_view_matches_literal
 from rich_types import ProdexRichStringView
 
 comptime DECISION_COMPATIBLE: Int64 = 0
@@ -1661,6 +1661,43 @@ comptime GEMINI_REQUEST_CONTENT_TOOL_CONFIG: Int64 = 9
 comptime GEMINI_REQUEST_CONTENT_BUILTIN_TOOL: Int64 = 10
 comptime GEMINI_REQUEST_CONTENT_SYSTEM_INSTRUCTION_FROM_REQUEST: Int64 = 11
 comptime GEMINI_REQUEST_CONTENT_CONTINUATION_METADATA: Int64 = 12
+
+
+# The function-tool declaration source is a single semantic choice:
+# a present nested field always wins (including null/wrong-type values);
+# only an absent nested field permits a flat type="function" declaration.
+comptime GEMINI_FUNCTION_TOOL_SOURCE_ABI_VERSION: Int64 = 1
+comptime GEMINI_FUNCTION_TOOL_SOURCE_NONE: Int64 = 0
+comptime GEMINI_FUNCTION_TOOL_SOURCE_NESTED: Int64 = 1
+comptime GEMINI_FUNCTION_TOOL_SOURCE_FLAT: Int64 = 2
+
+
+@export("prodex_gemini_function_tool_source_v1")
+def prodex_gemini_function_tool_source_v1(
+    abi_version: Int64,
+    nested_present: Int64,
+    type_address: UInt,
+    type_length: Int64,
+    type_present: Int64,
+) abi("C") -> Int64:
+    if abi_version != GEMINI_FUNCTION_TOOL_SOURCE_ABI_VERSION:
+        return -4
+    if (
+        (nested_present != 0 and nested_present != 1)
+        or (type_present != 0 and type_present != 1)
+        or type_length < 0
+        or (type_present == 0 and (type_address != 0 or type_length != 0))
+        or (type_present == 1 and type_length > 0 and type_address == 0)
+    ):
+        return -1
+    var tool_type = ProdexRichStringView(type_address, UInt(type_length))
+    if type_present == 1 and not rich_view_valid(tool_type, 0x7FFFFFFFFFFFFFFF):
+        return -1
+    if nested_present == 1:
+        return GEMINI_FUNCTION_TOOL_SOURCE_NESTED
+    if type_present == 1 and rich_view_matches_literal["function"](tool_type, False):
+        return GEMINI_FUNCTION_TOOL_SOURCE_FLAT
+    return GEMINI_FUNCTION_TOOL_SOURCE_NONE
 
 
 # Seven ABI fields in protocol-priority order. Rust marshals JSON tree

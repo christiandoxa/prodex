@@ -7179,6 +7179,21 @@ export function findViolations(files) {
     return [];
   });
   const geminiUnsupportedToolRetryViolations = files.flatMap(([filePath, contents]) => {
+    if (filePath === GEMINI_TOOLS_FILE) {
+      const production = contents.split("#[cfg(test)]", 1)[0];
+      const required = [
+        "prodex_mojo_core::provider_constraints::gemini_function_tool_source(",
+        "GeminiFunctionToolSource::Nested",
+        "GeminiFunctionToolSource::Flat",
+      ];
+      const rustCopy = [
+        'let function = tool.get("function")?;',
+        'tool.get("type").and_then(Value::as_str) == Some("function")',
+      ];
+      return required.every((marker) => production.includes(marker)) &&
+        rustCopy.every((marker) => !production.includes(marker))
+        ? [] : [`${filePath}: Gemini tool source selection must remain Mojo-owned`];
+    }
     if (filePath === GEMINI_BRIDGE_TOOLS_FILE) {
       const body = contents.match(/pub fn gemini_provider_core_unsupported_tool_fallback_body\([^]*?^\}/mu)?.[0] ?? "";
       const required = [
@@ -7193,8 +7208,12 @@ export function findViolations(files) {
       ];
       return required.every((marker) => body.includes(marker)) &&
         restoredRust.every((marker) => !body.includes(marker)) &&
-        contents.includes("unsupported_tool_retry_chooses_next_rejected_available_builtin_via_mojo")
-        ? [] : [`${filePath}: Gemini rejected-builtin retry order must remain Mojo-owned`];
+        contents.includes("unsupported_tool_retry_chooses_next_rejected_available_builtin_via_mojo") &&
+        body.includes("gemini_function_declaration_from_openai_tool(tool)") === false &&
+        contents.includes("gemini_function_declaration_from_openai_tool(tool)") &&
+        !contents.includes("fn gemini_provider_core_function_declaration_from_openai_tool(") &&
+        !contents.includes("let mut normalized = object.clone()")
+        ? [] : [`${filePath}: Gemini retry order and function-source shape must remain Mojo-owned`];
     }
     if (filePath === GEMINI_APPLY_PATCH_ADAPTER_FILE) {
       const required = [
@@ -7963,11 +7982,17 @@ function selfTest() {
   ].join("\n");
   const geminiRetryTestName = "unsupported_tool_retry_chooses_next_rejected_available_builtin_via_mojo";
   assert.deepEqual(findViolations([[GEMINI_BRIDGE_TOOLS_FILE,
-    "pub fn gemini_provider_core_unsupported_tool_fallback_body() {\n" + geminiRetryConsumer + "\n}\n" + geminiRetryTestName + "\ngemini_bridge_request_without_tool(",
+    "pub fn gemini_provider_core_unsupported_tool_fallback_body() {\n" + geminiRetryConsumer + "\n}\n" + geminiRetryTestName + "\ngemini_bridge_request_without_tool(" + "\ngemini_function_declaration_from_openai_tool(tool)",
   ]]), []);
   assert.match(findViolations([[GEMINI_BRIDGE_TOOLS_FILE,
-    "pub fn gemini_provider_core_unsupported_tool_fallback_body() {\n" + geminiRetryConsumer + "\n.find_map(|tool_name| {})\n}\n" + geminiRetryTestName + "\ngemini_bridge_request_without_tool(",
-  ]]).join("\n"), /Gemini rejected-builtin retry order must remain Mojo-owned/u);
+    "pub fn gemini_provider_core_unsupported_tool_fallback_body() {\n" + geminiRetryConsumer + "\n.find_map(|tool_name| {})\n}\n" + geminiRetryTestName + "\ngemini_bridge_request_without_tool(" + "\ngemini_function_declaration_from_openai_tool(tool)",
+  ]]).join("\n"), /Gemini retry order and function-source shape must remain Mojo-owned/u);
+  assert.match(findViolations([[GEMINI_BRIDGE_TOOLS_FILE,
+    "pub fn gemini_provider_core_unsupported_tool_fallback_body() {\n" + geminiRetryConsumer +
+    "\n}\n" + geminiRetryTestName +
+    "\ngemini_bridge_request_without_tool(\ngemini_function_declaration_from_openai_tool(tool)" +
+    "\nlet mut normalized = object.clone()",
+  ]]).join("\n"), /Gemini retry order and function-source shape must remain Mojo-owned/u);
   const anthropicCursorConsumer = [
     "fn anthropic_attempt_cursor_step(",
     "prodex_mojo_core::provider_constraints::provider_attempt_cursor_plan(",
