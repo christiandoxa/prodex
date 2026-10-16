@@ -25,11 +25,6 @@
     "reason": "Profile export regression fixtures include bounded v1/v2 migration and resource-exhaustion cases; capped until provider-specific scenarios split from shared helpers."
   },
   {
-    "file": "crates/prodex-app/tests/support/profile_commands_body/import.rs",
-    "maxLines": 1041,
-    "reason": "Profile import regression fixtures cover cross-provider identity handling and transactional rollback; lifecycle and committed-journal recovery cases moved to a focused sibling module."
-  },
-  {
     "file": "crates/prodex-provider-core/src/deepseek_bridge/tests.rs",
     "maxLines": 1134,
     "reason": "DeepSeek input-item fixtures moved to a focused sibling module; remaining request, response, stream, tool-call, usage, and error conformance regressions stay colocated until split by fixture family."
