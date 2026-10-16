@@ -6,6 +6,7 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 
 ### Runtime
 
+- Accept signed Windows exit status in Mojo recovery (`a31ef6f`)
 - Keep local proxy listeners alive under descriptor pressure (`d28ba19`)
 - Migrate runtime affinity admission (`74a7573`)
 - Migrate websocket precommit hold state (`6dd340e`)
@@ -102,6 +103,16 @@ The retained incident logs prove repeated failures to the local proxy,
 not the exact OS event that killed the original listener. Persistent
 resource exhaustion, a killed process, an actual upstream outage or an
 ineligible profile pool are not claimed to be error-free.
+
+### Windows exit and cancellation recovery
+
+The compiled Mojo launch policy now accepts the signed 32-bit process exit
+codes supplied by Windows, including the negative `CONTROL_C_EXIT` status.
+Ordinary exits and recoverable failures no longer panic while checking for
+cancellation. Ctrl+C still prevents automatic relaunch; absent Unix status
+fields, malformed ABI inputs and interrupted sessions retain their original
+safety behavior. Portable signed-status tests and a native Windows caller
+regression exercise the same production policy.
 
 ## Changelog
 
