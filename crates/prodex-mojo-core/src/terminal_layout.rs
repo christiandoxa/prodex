@@ -5,6 +5,21 @@ use crate::MojoError;
 const ABI_VERSION: i64 = 1;
 
 unsafe extern "C" {
+    fn prodex_terminal_positive_size_override_v1(
+        abi: i64,
+        text_address: u64,
+        text_length: i64,
+        maximum: u64,
+        result_address: u64,
+    ) -> i64;
+    fn prodex_terminal_tty_dimensions_v1(
+        abi: i64,
+        text_address: u64,
+        text_length: i64,
+        maximum: u64,
+        result_address: u64,
+        result_capacity: i64,
+    ) -> i64;
     fn prodex_terminal_panel_label_width_v1(
         abi: i64,
         longest: u64,
@@ -99,6 +114,52 @@ fn check_status(status: i64) -> Result<(), MojoError> {
 
 fn from_usize(value: usize) -> Result<u64, MojoError> {
     u64::try_from(value).map_err(|_| MojoError::InvalidInput)
+}
+
+/// Parse terminal override text using Mojo Unicode trimming, checked decimal
+/// grammar and the host usize limit. None means missing/malformed/zero input.
+pub fn terminal_positive_size_override(value: &str) -> Result<Option<usize>, MojoError> {
+    let mut result = u64::MAX;
+    check_status(unsafe {
+        prodex_terminal_positive_size_override_v1(
+            ABI_VERSION,
+            value.as_ptr() as usize as u64,
+            i64::try_from(value.len()).map_err(|_| MojoError::InvalidInput)?,
+            usize::MAX as u64,
+            (&mut result as *mut u64) as usize as u64,
+        )
+    })?;
+    if result == 0 {
+        Ok(None)
+    } else {
+        usize::try_from(result)
+            .map(Some)
+            .map_err(|_| MojoError::InvalidOutput)
+    }
+}
+
+/// Decode the first two stty dimensions in Mojo. Rust only executes stty and
+/// converts UTF-8; extra trailing tokens retain the existing ignored behavior.
+pub fn terminal_tty_dimensions(value: &str) -> Result<Option<(usize, usize)>, MojoError> {
+    let mut result = [u64::MAX; 3];
+    check_status(unsafe {
+        prodex_terminal_tty_dimensions_v1(
+            ABI_VERSION,
+            value.as_ptr() as usize as u64,
+            i64::try_from(value.len()).map_err(|_| MojoError::InvalidInput)?,
+            usize::MAX as u64,
+            result.as_mut_ptr() as usize as u64,
+            3,
+        )
+    })?;
+    match result {
+        [0, 0, 0] => Ok(None),
+        [1, rows, columns] => Ok(Some((
+            usize::try_from(rows).map_err(|_| MojoError::InvalidOutput)?,
+            usize::try_from(columns).map_err(|_| MojoError::InvalidOutput)?,
+        ))),
+        _ => Err(MojoError::InvalidOutput),
+    }
 }
 
 /// The host materializes strings only; the width and truncation decisions

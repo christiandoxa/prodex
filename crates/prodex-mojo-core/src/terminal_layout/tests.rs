@@ -372,3 +372,96 @@ fn session_report_viewport_abi_rejects_version_pointer_and_capacity() {
     );
     assert_eq!(result, [u64::MAX, u64::from(u16::MAX)]);
 }
+
+#[test]
+fn terminal_geometry_env_and_tty_parsing_is_mojo_authoritative() {
+    for (value, expected) in [
+        ("", None),
+        ("   ", None),
+        ("0", None),
+        ("-0", None),
+        ("+", None),
+        ("+00017", Some(17)),
+        (" \u{2003}+120\u{3000}", Some(120)),
+        ("65535", Some(65_535)),
+        ("1 2", None),
+        ("🧭", None),
+        ("-5", None),
+        ("18446744073709551616", None),
+        ("18446744073709551615", Some(usize::MAX)),
+    ] {
+        assert_eq!(
+            terminal_positive_size_override(value).unwrap(),
+            expected,
+            "{value:?}"
+        );
+    }
+    for (value, expected) in [
+        ("", None),
+        ("120", None),
+        ("24 80\n", Some((24, 80))),
+        ("0 0", Some((0, 0))),
+        ("+00017 +0080 trailing ignored", Some((17, 80))),
+        ("\u{2003}42\u{3000}120\u{2009}", Some((42, 120))),
+        ("24 80 extra", Some((24, 80))),
+        ("24 -80", None),
+        ("80 +", None),
+        ("1 18446744073709551616", None),
+        ("🧭 80", None),
+    ] {
+        assert_eq!(
+            terminal_tty_dimensions(value).unwrap(),
+            expected,
+            "{value:?}"
+        );
+    }
+}
+
+#[test]
+fn terminal_geometry_strict_abi_rejects_bad_shape_before_output() {
+    let source = b"24 80";
+    let ptr = source.as_ptr() as usize as u64;
+    let mut output = [77_u64; 3];
+    let destination = output.as_mut_ptr() as usize as u64;
+    assert_eq!(
+        unsafe { prodex_terminal_tty_dimensions_v1(2, ptr, 5, 100, destination, 3) },
+        4
+    );
+    assert_eq!(
+        unsafe { prodex_terminal_tty_dimensions_v1(1, 0, 5, 100, destination, 3) },
+        1
+    );
+    assert_eq!(
+        unsafe { prodex_terminal_tty_dimensions_v1(1, ptr, -1, 100, destination, 3) },
+        1
+    );
+    assert_eq!(
+        unsafe { prodex_terminal_tty_dimensions_v1(1, ptr, 5, 100, destination, 2) },
+        1
+    );
+    assert_eq!(
+        unsafe { prodex_terminal_positive_size_override_v1(2, ptr, 5, 100, destination) },
+        4
+    );
+    assert_eq!(
+        unsafe { prodex_terminal_positive_size_override_v1(1, ptr, -1, 100, destination) },
+        1
+    );
+    assert_eq!(
+        unsafe { prodex_terminal_positive_size_override_v1(1, ptr, 5, 0, destination) },
+        1
+    );
+    assert_eq!(output, [77; 3]);
+    let mut parsed = 77_u64;
+    let out = (&mut parsed as *mut u64) as usize as u64;
+    assert_eq!(
+        unsafe {
+            prodex_terminal_positive_size_override_v1(1, b"7".as_ptr() as usize as u64, 1, 1, out)
+        },
+        0
+    );
+    assert_eq!(
+        parsed, 0,
+        "the caller-provided maximum must bound the value"
+    );
+}

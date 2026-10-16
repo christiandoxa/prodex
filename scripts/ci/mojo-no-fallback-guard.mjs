@@ -90,6 +90,10 @@ const DOCTOR_SMART_CONTEXT_DECISION_CONSUMER_FILE = "crates/prodex-runtime-docto
 const DOCTOR_SMART_CONTEXT_DECISION_ADAPTER_FILE = DOCTOR_MARKER_ABI_ADAPTER_FILE;
 const DOCTOR_SMART_CONTEXT_DECISION_MOJO_FILE = DOCTOR_MARKER_ABI_MOJO_FILE;
 const DOCTOR_LOG_FIELDS_CONSUMER_FILE = "crates/prodex-runtime-doctor/src/log_fields.rs";
+const TERMINAL_GEOMETRY_CONSUMER_FILE = "crates/prodex-terminal-ui/src/terminal.rs";
+const TERMINAL_GEOMETRY_ADAPTER_FILE = "crates/prodex-mojo-core/src/terminal_layout.rs";
+const TERMINAL_GEOMETRY_MOJO_FILE = "mojo/prodex_core/terminal_layout.mojo";
+const TERMINAL_GEOMETRY_TEST_FILE = "crates/prodex-mojo-core/src/terminal_layout/tests.rs";
 const DOCTOR_ROUTE_HEALTH_CONSUMER_FILE = "crates/prodex-runtime-doctor/src/diagnosis/route_health.rs";
 const DOCTOR_ROUTE_HEALTH_ADAPTER_FILE = "crates/prodex-mojo-core/src/rich/runtime_doctor_route_health.rs";
 const DOCTOR_SMART_CONTEXT_CALLER_TEST_FILE = "crates/prodex-runtime-doctor/tests/src/smart_context_autopilot.rs";
@@ -174,6 +178,10 @@ const PROMOTED_FILES = [
   OPERATIONAL_HISTOGRAM_ABI_TEST_FILE,
   DOCTOR_SMART_CONTEXT_DECISION_CONSUMER_FILE,
   DOCTOR_LOG_FIELDS_CONSUMER_FILE,
+  TERMINAL_GEOMETRY_CONSUMER_FILE,
+  TERMINAL_GEOMETRY_ADAPTER_FILE,
+  TERMINAL_GEOMETRY_MOJO_FILE,
+  TERMINAL_GEOMETRY_TEST_FILE,
   DOCTOR_ROUTE_HEALTH_CONSUMER_FILE,
   DOCTOR_ROUTE_HEALTH_ADAPTER_FILE,
   DOCTOR_SMART_CONTEXT_CALLER_TEST_FILE,
@@ -7166,7 +7174,52 @@ export function findViolations(files) {
     }
     return [];
   });
-  return [...nativeRecoveryOwnershipViolations, ...quotaRecoveryEligibilityViolations, ...runtimeBrokerReuseMojoViolations, ...geminiResponseMediaMojoViolations, ...cookieEvictionMojoViolations, ...websocketBudgetMojoViolations, ...affinityBindingMojoViolations, ...responsesCapacityRecoveryViolations, ...sseTapMojoOwnershipViolations, ...quotaWatchViolations, ...geminiCompactSnippetViolations, ...geminiCompactTextViolations, ...doctorSmartContextDecisionViolations, ...smartContextCapsuleOrderViolations, ...markerViolations, ...deepseekCatalogPolicyViolations, ...featureOffViolations, ...liveLogRecordViolations, ...runtimePolicyPresetViolations, ...profileHealthCircuitViolations, ...logThroughputViolations, ...operationalDetailSpecViolations, ...transcriptPolicyViolations, ...logLoadPolicyViolations, ...routeReasonViolations, ...runtimeStateQuotaViolations, ...runtimeStateRoutePolicyViolations, ...runtimeProxyRootViolations, ...brokerVersionGuardViolations, ...brokerContinuityViolations, ...brokerLogCacheViolations, ...codexConfigViolations, ...statePolicyViolations, ...quotaSelectionPolicyViolations, ...routeTagMirrorViolations, ...enumTagMirrorViolations, ...appSelectionPolicyMirrorViolations, ...runtimeStateBackgroundViolations, ...redactionViolations, ...profileIdentityViolations, ...governanceInspectionViolations, ...governanceInspectionOrderingViolations, ...exactnessPlannerViolations,
+  const terminalGeometryViolations = files.flatMap(([filePath, contents]) => {
+    if (filePath === TERMINAL_GEOMETRY_CONSUMER_FILE) {
+      const required = [
+        "terminal_positive_size_override(&value)",
+        "terminal_tty_dimensions(&text)",
+      ];
+      const restoredRust = [
+        "value.trim().parse::<usize>().ok()",
+        "text.split_whitespace()",
+        "parts.next()?.parse::<usize>().ok()?",
+      ];
+      return required.every((name) => contents.includes(name)) &&
+        restoredRust.every((name) => !contents.includes(name))
+        ? [] : [`${filePath}: terminal numeric and stty parsing must remain Mojo-owned`];
+    }
+    if (filePath === TERMINAL_GEOMETRY_ADAPTER_FILE) {
+      const required = [
+        "prodex_terminal_positive_size_override_v1(",
+        "prodex_terminal_tty_dimensions_v1(",
+        "pub fn terminal_positive_size_override(",
+        "pub fn terminal_tty_dimensions(",
+      ];
+      return required.filter((name) => !contents.includes(name))
+        .map((name) => `${filePath}: terminal geometry ABI adapter must retain ${name}`);
+    }
+    if (filePath === TERMINAL_GEOMETRY_MOJO_FILE) {
+      const required = [
+        '@export("prodex_terminal_positive_size_override_v1")',
+        '@export("prodex_terminal_tty_dimensions_v1")',
+        "terminal_geometry_unsigned(",
+        "rich_trim_bounds(text)",
+        "rich_unicode_space(",
+      ];
+      return required.filter((name) => !contents.includes(name))
+        .map((name) => `${filePath}: terminal geometry decision must stay Mojo-owned (${name})`);
+    }
+    if (filePath === TERMINAL_GEOMETRY_TEST_FILE) {
+      return [
+        "terminal_geometry_env_and_tty_parsing_is_mojo_authoritative",
+        "terminal_geometry_strict_abi_rejects_bad_shape_before_output",
+      ].filter((name) => !contents.includes(name))
+        .map((name) => `${filePath}: terminal geometry strict coverage must retain ${name}`);
+    }
+    return [];
+  });
+  return [...nativeRecoveryOwnershipViolations, ...quotaRecoveryEligibilityViolations, ...runtimeBrokerReuseMojoViolations, ...geminiResponseMediaMojoViolations, ...cookieEvictionMojoViolations, ...websocketBudgetMojoViolations, ...affinityBindingMojoViolations, ...responsesCapacityRecoveryViolations, ...sseTapMojoOwnershipViolations, ...quotaWatchViolations, ...geminiCompactSnippetViolations, ...geminiCompactTextViolations, ...doctorSmartContextDecisionViolations, ...terminalGeometryViolations, ...smartContextCapsuleOrderViolations, ...markerViolations, ...deepseekCatalogPolicyViolations, ...featureOffViolations, ...liveLogRecordViolations, ...runtimePolicyPresetViolations, ...profileHealthCircuitViolations, ...logThroughputViolations, ...operationalDetailSpecViolations, ...transcriptPolicyViolations, ...logLoadPolicyViolations, ...routeReasonViolations, ...runtimeStateQuotaViolations, ...runtimeStateRoutePolicyViolations, ...runtimeProxyRootViolations, ...brokerVersionGuardViolations, ...brokerContinuityViolations, ...brokerLogCacheViolations, ...codexConfigViolations, ...statePolicyViolations, ...quotaSelectionPolicyViolations, ...routeTagMirrorViolations, ...enumTagMirrorViolations, ...appSelectionPolicyMirrorViolations, ...runtimeStateBackgroundViolations, ...redactionViolations, ...profileIdentityViolations, ...governanceInspectionViolations, ...governanceInspectionOrderingViolations, ...exactnessPlannerViolations,
     ...adaptiveBudgetViolations,
     ...providerUsageViolations,
     ...auditUsageViolations,
@@ -7796,6 +7849,16 @@ function selfTest() {
   assert.match(findViolations([[OPERATIONAL_HISTOGRAM_CALLER_FILE,
     operationalHistogramCaller + "\nhistogram.count = histogram.count.saturating_add(1);",
   ]]).join("\n"), /histogram bucket planning and observation must use Mojo/u);
+  const terminalGeometryConsumer = [
+    "terminal_positive_size_override(&value)",
+    "terminal_tty_dimensions(&text)",
+  ].join("\n");
+  assert.deepEqual(findViolations([
+    [TERMINAL_GEOMETRY_CONSUMER_FILE, terminalGeometryConsumer],
+  ]), []);
+  assert.match(findViolations([[TERMINAL_GEOMETRY_CONSUMER_FILE,
+    terminalGeometryConsumer + "\ntext.split_whitespace()",
+  ]]).join("\n"), /terminal numeric and stty parsing must remain Mojo-owned/u);
   const doctorSmartContextConsumer = [
     "prodex_mojo_core::rich::runtime_doctor_smart_context_bytes_plan(",
     "prodex_mojo_core::rich::runtime_doctor_smart_context_totals_plan(",

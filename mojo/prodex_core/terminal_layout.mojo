@@ -1,5 +1,14 @@
 from std.memory import Pointer
 
+from rich_types import ProdexRichStringView, rich_view_ptr
+from rich_text import (
+    rich_codepoint,
+    rich_codepoint_width,
+    rich_trim_bounds,
+    rich_unicode_space,
+    rich_view_valid,
+)
+
 # Deterministic terminal layout policies. Rust measures true terminal cell
 # widths (including Unicode) and owns styling, strings and the terminal host.
 # Mojo exclusively decides label, session-column and viewport dimensions.
@@ -8,6 +17,123 @@ comptime TERMINAL_LAYOUT_OK: Int64 = 0
 comptime TERMINAL_LAYOUT_INVALID: Int64 = 1
 comptime TERMINAL_LAYOUT_VERSION: Int64 = 4
 comptime TERMINAL_LAYOUT_UINT64_MAX: UInt64 = 18_446_744_073_709_551_615
+
+
+# The terminal host owns environment/TTY reads. Mojo owns input tokenization,
+# Unicode whitespace handling, positive override limits and decimal parsing.
+
+
+def terminal_geometry_unsigned(
+    text: ProdexRichStringView,
+    start: Int64,
+    end: Int64,
+    maximum: UInt64,
+) -> Tuple[Bool, UInt64]:
+    var cursor = start
+    if cursor >= end:
+        return (False, UInt64(0))
+    var source = rich_view_ptr(text)
+    if source[unsafe_offset=cursor] == 43:
+        cursor += 1
+    if cursor >= end:
+        return (False, UInt64(0))
+    var parsed = UInt64(0)
+    while cursor < end:
+        var byte = source[unsafe_offset=cursor]
+        if byte < 48 or byte > 57:
+            return (False, UInt64(0))
+        var digit = UInt64(byte - 48)
+        if digit > maximum or parsed > (maximum - digit) // UInt64(10):
+            return (False, UInt64(0))
+        parsed = parsed * UInt64(10) + digit
+        cursor += 1
+    return (True, parsed)
+
+
+def terminal_geometry_skip_whitespace(text: ProdexRichStringView, index: Int64) -> Int64:
+    var source = rich_view_ptr(text)
+    var cursor = index
+    while cursor < Int64(text.len):
+        var width = rich_codepoint_width(source[unsafe_offset=cursor])
+        if not rich_unicode_space(rich_codepoint(source, cursor, width)):
+            break
+        cursor += width
+    return cursor
+
+
+def terminal_geometry_token_end(text: ProdexRichStringView, index: Int64) -> Int64:
+    var source = rich_view_ptr(text)
+    var cursor = index
+    while cursor < Int64(text.len):
+        var width = rich_codepoint_width(source[unsafe_offset=cursor])
+        if rich_unicode_space(rich_codepoint(source, cursor, width)):
+            break
+        cursor += width
+    return cursor
+
+
+@export("prodex_terminal_positive_size_override_v1")
+def prodex_terminal_positive_size_override_v1(
+    abi: Int64,
+    text_address: UInt,
+    text_length: Int64,
+    maximum: UInt64,
+    output_address: UInt,
+) abi("C") -> Int64:
+    if abi != TERMINAL_LAYOUT_ABI:
+        return TERMINAL_LAYOUT_VERSION
+    if (text_length < 0 or (text_address == 0 and text_length != 0)
+        or output_address == 0 or maximum == 0):
+        return TERMINAL_LAYOUT_INVALID
+    var text = ProdexRichStringView(text_address, UInt(text_length))
+    if not rich_view_valid(text, 0x7FFFFFFFFFFFFFFF):
+        return 2
+    var bounds = rich_trim_bounds(text)
+    var parsed = terminal_geometry_unsigned(text, bounds[0], bounds[1], maximum)
+    var output = Pointer[mut=True, UInt64, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    output[] = parsed[1] if parsed[0] and parsed[1] > 0 else UInt64(0)
+    return TERMINAL_LAYOUT_OK
+
+
+@export("prodex_terminal_tty_dimensions_v1")
+def prodex_terminal_tty_dimensions_v1(
+    abi: Int64,
+    text_address: UInt,
+    text_length: Int64,
+    maximum: UInt64,
+    output_address: UInt,
+    result_capacity: Int64,
+) abi("C") -> Int64:
+    if abi != TERMINAL_LAYOUT_ABI:
+        return TERMINAL_LAYOUT_VERSION
+    if (text_length < 0 or (text_address == 0 and text_length != 0)
+        or output_address == 0 or result_capacity < 3 or maximum == 0):
+        return TERMINAL_LAYOUT_INVALID
+    var text = ProdexRichStringView(text_address, UInt(text_length))
+    if not rich_view_valid(text, 0x7FFFFFFFFFFFFFFF):
+        return 2
+    var output = Pointer[mut=True, UInt64, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    output[unsafe_offset=0] = 0
+    output[unsafe_offset=1] = 0
+    output[unsafe_offset=2] = 0
+    var start = terminal_geometry_skip_whitespace(text, 0)
+    var end = terminal_geometry_token_end(text, start)
+    var rows = terminal_geometry_unsigned(text, start, end, maximum)
+    if not rows[0]:
+        return TERMINAL_LAYOUT_OK
+    start = terminal_geometry_skip_whitespace(text, end)
+    end = terminal_geometry_token_end(text, start)
+    var columns = terminal_geometry_unsigned(text, start, end, maximum)
+    if not columns[0]:
+        return TERMINAL_LAYOUT_OK
+    output[unsafe_offset=0] = 1
+    output[unsafe_offset=1] = rows[1]
+    output[unsafe_offset=2] = columns[1]
+    return TERMINAL_LAYOUT_OK
 
 
 def terminal_clamp(value: UInt64, low: UInt64, high: UInt64) -> UInt64:
