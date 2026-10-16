@@ -174,3 +174,35 @@ fn runtime_doctor_smart_context_fallback_reason_source_is_mojo_owned_at_summary_
     assert!(!summary.fallback_reason_counts.contains_key("require_exact"));
     assert!(!summary.self_check_counts.contains_key("-"));
 }
+
+#[test]
+fn runtime_doctor_smart_context_savings_and_numeric_log_fields_use_mojo() {
+    let cases = [
+        ("body_bytes_before=10 body_bytes_after=99", Some(0), Some(0)),
+        ("body_bytes_before=10", None, None),
+        (
+            "body_bytes_before=10 body_bytes_after=3 body_bytes_saved=5",
+            Some(5),
+            Some(2),
+        ),
+        (
+            "body_bytes_before=+00017 body_bytes_after=13",
+            Some(4),
+            Some(1),
+        ),
+        ("body_bytes_before=-1 body_bytes_after=13", None, None),
+    ];
+    for (fields, expected_saved, expected_tokens) in cases {
+        let line = format!("smart_context_autopilot decision=rewritten {fields}");
+        let event = runtime_doctor_parse_smart_context_autopilot_line(&line).unwrap();
+        assert_eq!(event.body_bytes_saved, expected_saved, "{fields}");
+        assert_eq!(event.estimated_tokens_saved, expected_tokens, "{fields}");
+    }
+    assert_eq!(runtime_doctor_estimate_smart_context_tokens_saved(0), 0);
+    assert_eq!(runtime_doctor_estimate_smart_context_tokens_saved(1), 1);
+    assert_eq!(runtime_doctor_estimate_smart_context_tokens_saved(5), 2);
+    assert_eq!(
+        runtime_doctor_estimate_smart_context_tokens_saved(usize::MAX),
+        4_611_686_018_427_387_904,
+    );
+}

@@ -64,7 +64,10 @@ pub struct RuntimeDoctorSmartContextAutopilotSummary {
 }
 
 pub fn runtime_doctor_estimate_smart_context_tokens_saved(saved_bytes: usize) -> usize {
-    saved_bytes / 4 + usize::from(!saved_bytes.is_multiple_of(4))
+    prodex_mojo_core::rich::runtime_doctor_smart_context_bytes_plan(None, None, Some(saved_bytes))
+        .expect("Mojo Smart Context token estimate returned invalid output")
+        .estimated_tokens_saved
+        .expect("supplied saved bytes must produce a token estimate")
 }
 
 pub fn runtime_doctor_parse_smart_context_autopilot_line(
@@ -98,10 +101,14 @@ pub fn runtime_doctor_parse_smart_context_autopilot_line(
 
     let body_bytes_before = runtime_doctor_parse_usize_field(&fields, "body_bytes_before");
     let body_bytes_after = runtime_doctor_parse_usize_field(&fields, "body_bytes_after");
-    let body_bytes_saved = runtime_doctor_parse_usize_field(&fields, "body_bytes_saved")
-        .or_else(|| Some(body_bytes_before?.saturating_sub(body_bytes_after?)));
-    let estimated_tokens_saved =
-        body_bytes_saved.map(runtime_doctor_estimate_smart_context_tokens_saved);
+    let savings = prodex_mojo_core::rich::runtime_doctor_smart_context_bytes_plan(
+        body_bytes_before,
+        body_bytes_after,
+        runtime_doctor_parse_usize_field(&fields, "body_bytes_saved"),
+    )
+    .expect("Mojo Smart Context savings plan returned invalid output");
+    let body_bytes_saved = savings.saved_bytes;
+    let estimated_tokens_saved = savings.estimated_tokens_saved;
 
     Some(RuntimeDoctorSmartContextAutopilotEvent {
         request: runtime_doctor_string_field(&fields, "request"),
@@ -165,39 +172,48 @@ fn runtime_doctor_add_smart_context_autopilot_event(
     summary: &mut RuntimeDoctorSmartContextAutopilotSummary,
     event: RuntimeDoctorSmartContextAutopilotEvent,
 ) {
-    summary.event_count += 1;
-    summary.total_body_bytes_before = summary
-        .total_body_bytes_before
-        .saturating_add(event.body_bytes_before.unwrap_or(0));
-    summary.total_body_bytes_after = summary
-        .total_body_bytes_after
-        .saturating_add(event.body_bytes_after.unwrap_or(0));
-    summary.total_body_bytes_saved = summary
-        .total_body_bytes_saved
-        .saturating_add(event.body_bytes_saved.unwrap_or(0));
-    summary.estimated_tokens_saved = summary
-        .estimated_tokens_saved
-        .saturating_add(event.estimated_tokens_saved.unwrap_or(0));
-    summary.total_repeat_tool_output_refs = summary
-        .total_repeat_tool_output_refs
-        .saturating_add(event.repeat_tool_output_refs.unwrap_or(0));
-    summary.total_static_context_deltas = summary
-        .total_static_context_deltas
-        .saturating_add(event.static_context_deltas.unwrap_or(0));
-    summary.total_repo_state_facts = summary
-        .total_repo_state_facts
-        .saturating_add(event.repo_state_facts.unwrap_or(0));
-
+    let plan = prodex_mojo_core::rich::runtime_doctor_smart_context_totals_plan(
+        [
+            summary.event_count,
+            summary.rewrite_count,
+            summary.fallback_count,
+            summary.total_body_bytes_before,
+            summary.total_body_bytes_after,
+            summary.total_body_bytes_saved,
+            summary.estimated_tokens_saved,
+            summary.total_repeat_tool_output_refs,
+            summary.total_static_context_deltas,
+            summary.total_repo_state_facts,
+        ],
+        [
+            event.body_bytes_before.unwrap_or(0),
+            event.body_bytes_after.unwrap_or(0),
+            event.body_bytes_saved.unwrap_or(0),
+            event.estimated_tokens_saved.unwrap_or(0),
+            event.repeat_tool_output_refs.unwrap_or(0),
+            event.static_context_deltas.unwrap_or(0),
+            event.repo_state_facts.unwrap_or(0),
+        ],
+        event.decision.as_deref(),
+    )
+    .expect("Mojo Smart Context diagnostic counters returned invalid output");
+    [
+        summary.event_count,
+        summary.rewrite_count,
+        summary.fallback_count,
+        summary.total_body_bytes_before,
+        summary.total_body_bytes_after,
+        summary.total_body_bytes_saved,
+        summary.estimated_tokens_saved,
+        summary.total_repeat_tool_output_refs,
+        summary.total_static_context_deltas,
+        summary.total_repo_state_facts,
+    ] = plan.counters;
     if let Some(decision) = event.decision.as_deref() {
         runtime_doctor_increment_string_count(&mut summary.decision_counts, decision);
-        if decision == "rewritten" {
-            summary.rewrite_count += 1;
-        } else if prodex_mojo_core::rich::runtime_doctor_smart_context_decision_is_fallback(
-            decision,
-        )
-        .expect("Smart Context decision classification must remain Mojo-owned")
+        if plan.decision_kind
+            == prodex_mojo_core::rich::RUNTIME_DOCTOR_SMART_CONTEXT_DECISION_FALLBACK
         {
-            summary.fallback_count += 1;
             runtime_doctor_count_smart_context_fallback_reasons(summary, decision, &event);
         }
     }

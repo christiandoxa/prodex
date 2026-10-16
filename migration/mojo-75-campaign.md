@@ -5612,3 +5612,12 @@ owner for Unicode whitespace tokenization, punctuation trimming, and exact
 marker matching. The former Rust token-matching implementation was deleted;
 compiled ABI and runtime-doctor caller regressions cover exact and malformed
 boundaries without a fallback path.
+
+## Smart Context numeric and counter authority migration
+
+Runtime-doctor Smart Context byte-savings precedence, ceil-byte token estimates,
+diagnostic counters and rewritten/fallback classifications now execute solely
+through versioned compiled Mojo ABIs. Its unsigned log fields now use the
+existing Mojo parser. The former Rust token, saturating subtraction, counter,
+category and decimal algorithms were removed. Strict ABI and real caller
+regressions cover missing fields, maximum values and saturation.
