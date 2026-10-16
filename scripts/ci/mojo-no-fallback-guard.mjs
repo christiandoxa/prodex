@@ -3071,6 +3071,7 @@ export function findViolations(files) {
         "prodex_mojo_core::redaction::redact_gateway_text(",
         "prodex_mojo_core::redaction::redaction_text_snippet(text, max_chars)",
         "prodex_mojo_core::redaction::redaction_cli_redact_next(&text)",
+        "prodex_mojo_core::redaction::redaction_display_text_mode(value)",
       ];
       const violations = required
         .filter((call) => !contents.includes(call))
@@ -3083,6 +3084,10 @@ export function findViolations(files) {
           contents.includes("value.trim_start_matches('-')") ||
           contents.includes("sensitive_flag_without_value = redaction_cli_flag_name_looks_sensitive(")) {
         violations.push(`${filePath}: restored Rust CLI next-argument sensitive flag policy`);
+      }
+      if (contents.includes("value.chars().all(|ch|") ||
+          contents.includes("ch.is_ascii_alphanumeric() || matches!(ch,")) {
+        violations.push(`${filePath}: restored Rust redaction CLI display-mode classifier`);
       }
       const oldSnippet = [
         "text.split_whitespace()",
@@ -3106,6 +3111,10 @@ export function findViolations(files) {
         "pub fn redaction_cli_redact_next(",
         "redaction_cli_flag_next_argument_policy_is_compiled_mojo",
         "redaction_cli_flag_mojo_abi_rejects_bad_version_and_utf8",
+        "prodex_redaction_display_text_mode_v1(",
+        "pub fn redaction_display_text_mode(",
+        "redaction_cli_display_policy_selects_host_escaping_via_mojo",
+        "redaction_cli_display_policy_strict_abi_rejects_bad_unicode_and_version",
       ].filter((marker) => !contents.includes(marker))
         .map((marker) => `${filePath}: Mojo snippet adapter or direct coverage missing ${marker}`);
     }
@@ -3118,12 +3127,16 @@ export function findViolations(files) {
         "reaction_writer_literal(",
         '@export("prodex_redaction_cli_redact_next_v1")',
         "reaction_key_sensitive_ptr(",
+        '@export("prodex_redaction_display_text_mode_v1")',
+        "REACTION_DISPLAY_UNQUOTED",
+        "REACTION_DISPLAY_DEBUG_QUOTED",
       ].filter((marker) => !contents.includes(marker))
         .map((marker) => `${filePath}: Mojo snippet semantic ownership missing ${marker}`);
     }
     if (filePath === REDACTION_CALLER_TEST_FILE &&
         (!contents.includes("redaction_diagnostic_snippet_uses_compiled_mojo_unicode_normalization") ||
-         !contents.includes("redaction_cli_mojo_masks_sensitive_following_argument_without_rust_oracle"))) {
+         !contents.includes("redaction_cli_mojo_masks_sensitive_following_argument_without_rust_oracle") ||
+         !contents.includes("redaction_cli_display_os_uses_mojo_display_modes"))) {
       return [`${filePath}: redaction snippet caller coverage must remain`];
     }
     if (filePath !== PRESIDIO_LOCAL_REDACTION_FILE) return [];

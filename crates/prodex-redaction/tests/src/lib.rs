@@ -292,3 +292,22 @@ fn redaction_cli_mojo_masks_sensitive_following_argument_without_rust_oracle() {
     // credential content is handled by the existing compiled redactor.
     assert_ne!(redacted[4], "--api-key");
 }
+
+#[test]
+fn redaction_cli_display_os_uses_mojo_display_modes() {
+    use std::ffi::OsStr;
+    for (value, expected) in [
+        ("", "''"),
+        ("a-Z_012.//:=<>", "a-Z_012.//:=<>"),
+        ("word spaces", "\"word spaces\""),
+        ("Tokyo 東京", "\"Tokyo 東京\""),
+        ("line\nnext", "\"line\\nnext\""),
+        ("a@b", "\"a@b\""),
+    ] {
+        assert_eq!(
+            redaction_display_os(OsStr::new(value)),
+            expected,
+            "{value:?}"
+        );
+    }
+}

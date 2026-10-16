@@ -110,15 +110,13 @@ fn redaction_redact_gateway_text(value: &str) -> String {
 }
 
 fn redaction_display_text(value: &str) -> String {
-    if value.is_empty() {
-        return "''".to_string();
+    match prodex_mojo_core::redaction::redaction_display_text_mode(value)
+        .expect("compiled Mojo redaction CLI display policy returned invalid output")
+    {
+        prodex_mojo_core::redaction::RedactionDisplayTextMode::Empty => "''".to_string(),
+        prodex_mojo_core::redaction::RedactionDisplayTextMode::Unquoted => value.to_string(),
+        prodex_mojo_core::redaction::RedactionDisplayTextMode::DebugQuoted => format!("{value:?}"),
     }
-    if value.chars().all(|ch| {
-        ch.is_ascii_alphanumeric() || matches!(ch, '_' | '-' | '.' | '/' | ':' | '=' | '<' | '>')
-    }) {
-        return value.to_string();
-    }
-    format!("{value:?}")
 }
 
 #[cfg(test)]

@@ -343,6 +343,38 @@ def prodex_redaction_cli_redact_next_v1(
     )
 
 
+# Display-format policy for already redacted OsString values. Rust's Debug
+# formatter owns escaping of the host string; Mojo chooses when to invoke it.
+comptime REACTION_DISPLAY_EMPTY: Int64 = 0
+comptime REACTION_DISPLAY_UNQUOTED: Int64 = 1
+comptime REACTION_DISPLAY_DEBUG_QUOTED: Int64 = 2
+
+
+@export("prodex_redaction_display_text_mode_v1")
+def prodex_redaction_display_text_mode_v1(
+    abi_version: Int64, input_address: UInt, input_length: Int64
+) abi("C") -> Int64:
+    if abi_version != REACTION_ABI_VERSION:
+        return -4
+    if input_length < 0 or (input_length > 0 and input_address == 0):
+        return -1
+    var input = reaction_view(input_address, input_length)
+    if not rich_view_valid(input, 0x7FFFFFFFFFFFFFFF):
+        return -1
+    if input_length == 0:
+        return REACTION_DISPLAY_EMPTY
+    var source = rich_view_ptr(input)
+    for index in range(input_length):
+        var byte = source[unsafe_offset=index]
+        if not (
+            reaction_ascii_alphanumeric(byte)
+            or byte == 95 or byte == 45 or byte == 46 or byte == 47
+            or byte == 58 or byte == 61 or byte == 60 or byte == 62
+        ):
+            return REACTION_DISPLAY_DEBUG_QUOTED
+    return REACTION_DISPLAY_UNQUOTED
+
+
 def reaction_starts_with_ignore_ascii_case(
     source: Pointer[mut=False, UInt8, _],
     length: Int64,
