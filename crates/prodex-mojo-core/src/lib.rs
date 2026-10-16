@@ -212,6 +212,8 @@ pub mod runtime_responses_quota;
 #[cfg(feature = "mojo-runtime")]
 pub mod runtime_route_reason;
 #[cfg(feature = "mojo-runtime")]
+pub mod runtime_sse_chunk;
+#[cfg(feature = "mojo-runtime")]
 pub mod runtime_state;
 #[cfg(feature = "mojo-runtime")]
 pub mod runtime_state_quota;

@@ -233,6 +233,31 @@ fn runtime_sse_finish_line<F>(
     }
     line.clear();
 }
+fn runtime_sse_consume_chunk_with_parser<F>(
+    line: &mut Vec<u8>,
+    data_lines: &mut Vec<String>,
+    chunk: &[u8],
+    parser: RuntimeSseEventParser,
+    on_event: &mut F,
+) where
+    F: FnMut(RuntimeParsedSseEvent),
+{
+    let mut cursor = 0;
+    while cursor < chunk.len() {
+        let plan = prodex_mojo_core::runtime_sse_chunk::newline_plan(&chunk[cursor..])
+            .expect("Mojo SSE chunk boundary scanner returned invalid output");
+        let consumed = plan.consumed;
+        let mut start = 0;
+        for end in plan.newlines {
+            line.extend_from_slice(&chunk[cursor + start..cursor + end + 1]);
+            runtime_sse_finish_line(line, data_lines, parser, on_event);
+            start = end + 1;
+        }
+        line.extend_from_slice(&chunk[cursor + start..cursor + consumed]);
+        cursor += consumed;
+    }
+}
+
 pub fn runtime_sse_consume_chunk<F>(
     line: &mut Vec<u8>,
     data_lines: &mut Vec<String>,
@@ -241,12 +266,13 @@ pub fn runtime_sse_consume_chunk<F>(
 ) where
     F: FnMut(RuntimeParsedSseEvent),
 {
-    for byte in chunk {
-        line.push(*byte);
-        if *byte == b'\n' {
-            runtime_sse_finish_line(line, data_lines, parse_runtime_sse_event, &mut on_event);
-        }
-    }
+    runtime_sse_consume_chunk_with_parser(
+        line,
+        data_lines,
+        chunk,
+        parse_runtime_sse_event,
+        &mut on_event,
+    );
 }
 
 pub fn runtime_sse_finish_pending<F>(
@@ -286,17 +312,13 @@ fn runtime_sse_consume_inspection_buffer<F>(
 ) where
     F: FnMut(RuntimeParsedSseEvent),
 {
-    for byte in chunk {
-        line.push(*byte);
-        if *byte == b'\n' {
-            runtime_sse_finish_line(
-                line,
-                data_lines,
-                runtime_sse_inspection_event,
-                &mut on_event,
-            );
-        }
-    }
+    runtime_sse_consume_chunk_with_parser(
+        line,
+        data_lines,
+        chunk,
+        runtime_sse_inspection_event,
+        &mut on_event,
+    );
 }
 
 pub fn inspect_runtime_sse_buffer(buffered: &[u8]) -> RuntimeSseInspectionProgress {

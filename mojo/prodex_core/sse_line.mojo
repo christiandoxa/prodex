@@ -7,6 +7,56 @@ comptime SSE_LINE_DATA: Int64 = 2
 comptime SSE_UINT64_MAX: UInt64 = 18_446_744_073_709_551_615
 
 
+# Identify newline boundaries in a bounded chunk of streaming SSE bytes.
+# Rust owns transport I/O and buffered line data, but no longer scans bytes
+# for LF or duplicates its chunk framing in separate inspection paths.
+comptime SSE_CHUNK_MAX_BOUNDARIES: Int64 = 256
+
+@export("prodex_runtime_sse_chunk_line_offsets_v1")
+def prodex_runtime_sse_chunk_line_offsets_v1(
+    abi_version: Int64,
+    input_address: UInt,
+    input_length: Int64,
+    offsets_address: UInt,
+    offsets_capacity: Int64,
+    result_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != 1:
+        return 4
+    if (
+        input_length < 0
+        or (input_length > 0 and input_address == 0)
+        or offsets_address == 0
+        or result_address == 0
+        or offsets_capacity < 1
+        or offsets_capacity > SSE_CHUNK_MAX_BOUNDARIES
+    ):
+        return 1
+    var source = Pointer[mut=False, UInt8, ImmUntrackedOrigin](
+        unsafe_from_address=Int(input_address)
+    )
+    var offsets = Pointer[mut=True, UInt64, MutUntrackedOrigin](
+        unsafe_from_address=Int(offsets_address)
+    )
+    var result = Pointer[mut=True, UInt64, MutUntrackedOrigin](
+        unsafe_from_address=Int(result_address)
+    )
+    var cursor: Int64 = 0
+    var count: Int64 = 0
+    while cursor < input_length:
+        if source[unsafe_offset=cursor] == 10:
+            offsets[unsafe_offset=count] = UInt64(cursor)
+            count += 1
+            cursor += 1
+            if count == offsets_capacity:
+                break
+        else:
+            cursor += 1
+    result[unsafe_offset=0] = UInt64(cursor)
+    result[unsafe_offset=1] = UInt64(count)
+    return 0
+
+
 @export("prodex_runtime_sse_line_plan_v1")
 def prodex_runtime_sse_line_plan_v1(
     address: UInt,
