@@ -4,6 +4,7 @@ import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { git } from "./guard-common.mjs";
 import { repoRoot } from "../npm/common.mjs";
+import { verifyTinyHttpPatch } from "./tiny-http-patch-guard.mjs";
 
 export const ALLOW_ATTRIBUTE_CAPS = Object.freeze({
   dead_code: 0,
@@ -294,8 +295,14 @@ export function scanRustFileEntries(entries, policyOverrides = {}) {
 }
 
 export async function scan() {
+  // Original third-party lint attributes are not first-party suppressions.
+  // Exempt only bytes verified against the immutable official-source/patch
+  // manifest. Unknown vendor files still enter the ordinary strict policy;
+  // modified known files fail the provenance guard before this scan starts.
+  const audited = new Set((await verifyTinyHttpPatch()).verifiedPaths);
   const entries = [];
   for (const filePath of await rustFiles()) {
+    if (audited.has(filePath)) continue;
     let contents;
     try {
       contents = await fs.readFile(path.join(repoRoot, filePath), "utf8");
