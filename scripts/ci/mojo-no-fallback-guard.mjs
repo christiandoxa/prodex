@@ -7404,6 +7404,8 @@ export function findViolations(files) {
         "provider_quota_gemini_used_percent(bucket.remaining_fraction)",
         "provider_quota_openai_used_percent(",
         "quota_used_percent_rounding_and_saturation_are_mojo_owned",
+        "provider_quota_limit_id(limit_id)",
+        "quota_header_limit_id_unicode_projection_is_compiled_mojo_owned",
       ];
       const retiredRust = [
         "fn gemini_bucket_model_label(",
@@ -7411,6 +7413,8 @@ export function findViolations(files) {
         ".map(clean_header_value)",
         "fn gemini_bucket_used_percent(",
         "fn format_percent(",
+        "fn sanitize_limit_id(",
+        'sanitize_limit_id(limit_id).replace',
         "((limit - remaining).max(0.0) / limit * 100.0).clamp(",
       ];
       return required.every((marker) => contents.includes(marker)) &&
@@ -7431,6 +7435,10 @@ export function findViolations(files) {
         "pub fn provider_quota_openai_used_percent(",
         "used_percent_from_gemini_and_openai_is_compiled_mojo_owned",
         "strict_quota_percent_abi_validates_mode_presence_and_capacity_before_output",
+        "fn prodex_provider_quota_limit_id_v1(",
+        "pub fn provider_quota_limit_id(",
+        "quota_limit_id_mojo_owns_ascii_projection_and_separator_collapse",
+        "quota_limit_id_abi_rejects_malformed_and_undersized_buffers",
       ];
       return required.filter((marker) => !contents.includes(marker))
         .map((marker) => filePath + ": required strict quota header Mojo ABI test or adapter missing " + marker);
@@ -7446,6 +7454,8 @@ export function findViolations(files) {
         "provider_quota_percent_write(",
         "PROVIDER_QUOTA_PERCENT_GEMINI",
         "PROVIDER_QUOTA_PERCENT_OPENAI",
+        '@export("prodex_provider_quota_limit_id_v1")',
+        "dash_pending",
       ];
       return required.filter((marker) => !contents.includes(marker))
         .map((marker) => filePath + ": compiled provider quota header semantics must retain " + marker);
@@ -8185,6 +8195,8 @@ function selfTest() {
     "provider_quota_gemini_used_percent(bucket.remaining_fraction)",
     "provider_quota_openai_used_percent(",
     "quota_used_percent_rounding_and_saturation_are_mojo_owned",
+    "provider_quota_limit_id(limit_id)",
+    "quota_header_limit_id_unicode_projection_is_compiled_mojo_owned",
   ].join("\n");
   const quotaHeaderFile = "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_rate_limits.rs";
   assert.deepEqual(findViolations([[quotaHeaderFile, quotaHeaderConsumer]]), []);

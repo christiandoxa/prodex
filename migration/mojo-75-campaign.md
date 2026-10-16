@@ -5725,3 +5725,13 @@ rounds to one decimal and emits the Codex-compatible value. Rust keeps HTTP
 and f64 decoding plus header storage; its duplicate percent calculations,
 valid-limit gate, and decimal formatter were removed without fallback.
 Strict ABI and live caller regressions cover edge inputs and wire text.
+
+## Codex-compatible provider quota header identifiers migrated to Mojo
+
+The compiled provider-constraints owner now projects provider quota IDs to
+their ASCII header-safe representation and performs dash deduplication and
+edge trimming. The previous Rust sanitizer and replacement operation were
+deleted. Rust retains only standard-library full Unicode lowercase conversion
+because Mojo does not expose equivalent contextual casing; it never performs
+the header ID classification. Direct ABI, caller, and no-fallback guard tests
+cover separator collapse and Unicode casefold edge cases.

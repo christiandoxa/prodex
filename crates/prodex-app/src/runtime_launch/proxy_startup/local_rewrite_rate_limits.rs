@@ -1,8 +1,8 @@
 use crate::runtime_launch::proxy_startup::provider_bridge::RuntimeProviderBridgeKind;
 use chrono::{DateTime, Utc};
 use prodex_mojo_core::provider_constraints::{
-    provider_quota_clean_header, provider_quota_gemini_used_percent, provider_quota_model_label,
-    provider_quota_openai_used_percent,
+    provider_quota_clean_header, provider_quota_gemini_used_percent, provider_quota_limit_id,
+    provider_quota_model_label, provider_quota_openai_used_percent,
 };
 use prodex_quota::GeminiQuotaInfo;
 use reqwest::header::HeaderMap;
@@ -174,39 +174,13 @@ fn push_codex_rate_limit_header(
     suffix: &str,
     value: String,
 ) {
-    let header_limit = sanitize_limit_id(limit_id).replace('_', "-");
+    let header_limit = provider_quota_limit_id(limit_id)
+        .expect("compiled Mojo Codex quota header ID returned invalid output");
     headers.push((
         format!("x-{header_limit}-{suffix}"),
         provider_quota_clean_header(&value)
             .expect("compiled Mojo Codex quota header value returned invalid output"),
     ));
-}
-
-fn sanitize_limit_id(value: &str) -> String {
-    let mut output = String::new();
-    let mut previous_dash = false;
-    for ch in value.trim().chars().flat_map(char::to_lowercase) {
-        let next = if ch.is_ascii_alphanumeric() {
-            Some(ch)
-        } else if matches!(ch, '-' | '_') {
-            Some('_')
-        } else {
-            None
-        };
-        let Some(next) = next else {
-            continue;
-        };
-        if next == '_' {
-            if previous_dash {
-                continue;
-            }
-            previous_dash = true;
-        } else {
-            previous_dash = false;
-        }
-        output.push(next);
-    }
-    output.trim_matches('_').to_string()
 }
 
 fn header_f64(headers: &HeaderMap, name: &str) -> Option<f64> {
@@ -435,6 +409,32 @@ mod tests {
                 .iter()
                 .any(|(name, _)| { name == "x-deepseek-requests-primary-reset-at" })
         );
+    }
+
+    #[test]
+    fn quota_header_limit_id_unicode_projection_is_compiled_mojo_owned() {
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            "x-ratelimit-limit-requests",
+            HeaderValue::from_static("100"),
+        );
+        headers.insert(
+            "x-ratelimit-remaining-requests",
+            HeaderValue::from_static("25"),
+        );
+        let result =
+            runtime_openai_style_codex_rate_limit_headers(&headers, " K___İ _API__ 🧭", "Provider");
+        assert!(
+            result.contains(&(
+                "x-k-i-api-requests-limit-name".to_string(),
+                "Provider requests".to_string(),
+            )),
+            "{result:?}"
+        );
+        assert!(result.contains(&(
+            "x-k-i-api-requests-primary-used-percent".to_string(),
+            "75".to_string(),
+        )));
     }
 
     #[test]
