@@ -5716,3 +5716,12 @@ choose the model ID or token type used for Gemini quota labels. The old Rust
 model fallback selection and header sanitizer were deleted without a Rust
 semantic fallback. Versioned ABI tests and five real caller tests cover
 preexisting whitespace, source precedence, and header formatting semantics.
+
+## Provider quota percentage calculations and formatting in Mojo
+
+The compiled provider-constraints owner now calculates Gemini and OpenAI-style
+used quota percentages, enforces limit applicability and clamps/bounds,
+rounds to one decimal and emits the Codex-compatible value. Rust keeps HTTP
+and f64 decoding plus header storage; its duplicate percent calculations,
+valid-limit gate, and decimal formatter were removed without fallback.
+Strict ABI and live caller regressions cover edge inputs and wire text.

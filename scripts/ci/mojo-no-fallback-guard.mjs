@@ -7401,11 +7401,17 @@ export function findViolations(files) {
         "provider_quota_model_label(bucket.model_id.as_deref(), bucket.token_type.as_deref())",
         "quota_header_model_source_and_value_cleaning_are_mojo_owned",
         "quota_header_cleaning_is_used_for_openai_style_provider_labels",
+        "provider_quota_gemini_used_percent(bucket.remaining_fraction)",
+        "provider_quota_openai_used_percent(",
+        "quota_used_percent_rounding_and_saturation_are_mojo_owned",
       ];
       const retiredRust = [
         "fn gemini_bucket_model_label(",
         "fn clean_header_value(",
         ".map(clean_header_value)",
+        "fn gemini_bucket_used_percent(",
+        "fn format_percent(",
+        "((limit - remaining).max(0.0) / limit * 100.0).clamp(",
       ];
       return required.every((marker) => contents.includes(marker)) &&
         retiredRust.every((marker) => !contents.includes(marker))
@@ -7420,6 +7426,11 @@ export function findViolations(files) {
         "cleaned_provider_headers_remove_crlf_and_unicode_edge_space",
         "gemini_model_label_owns_source_precedence_prefix_and_unicode",
         "strict_quota_header_abi_rejects_invalid_buffers_without_writes",
+        "fn prodex_provider_quota_percent_v1(",
+        "pub fn provider_quota_gemini_used_percent(",
+        "pub fn provider_quota_openai_used_percent(",
+        "used_percent_from_gemini_and_openai_is_compiled_mojo_owned",
+        "strict_quota_percent_abi_validates_mode_presence_and_capacity_before_output",
       ];
       return required.filter((marker) => !contents.includes(marker))
         .map((marker) => filePath + ": required strict quota header Mojo ABI test or adapter missing " + marker);
@@ -7431,6 +7442,10 @@ export function findViolations(files) {
         "provider_quota_header_clean_kernel(",
         "rich_unicode_space(scalar)",
         'rich_view_prefix["models/"]',
+        '@export("prodex_provider_quota_percent_v1")',
+        "provider_quota_percent_write(",
+        "PROVIDER_QUOTA_PERCENT_GEMINI",
+        "PROVIDER_QUOTA_PERCENT_OPENAI",
       ];
       return required.filter((marker) => !contents.includes(marker))
         .map((marker) => filePath + ": compiled provider quota header semantics must retain " + marker);
@@ -8167,6 +8182,9 @@ function selfTest() {
     "provider_quota_model_label(bucket.model_id.as_deref(), bucket.token_type.as_deref())",
     "quota_header_model_source_and_value_cleaning_are_mojo_owned",
     "quota_header_cleaning_is_used_for_openai_style_provider_labels",
+    "provider_quota_gemini_used_percent(bucket.remaining_fraction)",
+    "provider_quota_openai_used_percent(",
+    "quota_used_percent_rounding_and_saturation_are_mojo_owned",
   ].join("\n");
   const quotaHeaderFile = "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_rate_limits.rs";
   assert.deepEqual(findViolations([[quotaHeaderFile, quotaHeaderConsumer]]), []);
