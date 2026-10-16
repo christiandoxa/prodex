@@ -20,18 +20,13 @@ const _: () = assert!(std::mem::size_of::<KiroMcpServerFacts>() == 32);
 
 /// Shape of the `disabledTools` member before the compatibility action is applied.
 #[repr(i64)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum KiroMcpDisabledToolsState {
+    #[default]
     Missing = 0,
     Null = 1,
     Array = 2,
     Invalid = 3,
-}
-
-impl Default for KiroMcpDisabledToolsState {
-    fn default() -> Self {
-        Self::Missing
-    }
 }
 
 /// Compatibility action for one MCP server entry.
