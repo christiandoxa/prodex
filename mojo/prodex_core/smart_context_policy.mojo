@@ -357,6 +357,32 @@ def prodex_smart_context_affinity_rewrite_allowed_v1(
         and safety_blocks == 0
     )
 
+# SHA-256 is computed by the host. The stable eight-byte big-endian
+# prefix and its 10,000-basis-point canary projection belong only to Mojo.
+@export("prodex_smart_context_rollout_bucket_v1")
+def prodex_smart_context_rollout_bucket_v1(
+    abi_version: Int64,
+    digest_address: UInt,
+    digest_length: Int64,
+    bucket_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != 1:
+        return 4
+    if digest_address == 0 or digest_length != 32 or bucket_address == 0:
+        return 1
+    var digest = Pointer[mut=False, UInt8, ImmUntrackedOrigin](
+        unsafe_from_address=Int(digest_address)
+    )
+    var prefix = UInt64(0)
+    for index in range(8):
+        prefix = (prefix << UInt64(8)) | UInt64(digest[unsafe_offset=index])
+    var bucket = Pointer[mut=True, UInt64, MutUntrackedOrigin](
+        unsafe_from_address=Int(bucket_address)
+    )
+    bucket[] = prefix % UInt64(10_000)
+    return 0
+
+
 @export("prodex_smart_context_rollout_plan_v1")
 def prodex_smart_context_rollout_plan_v1(
     enabled: Int64,

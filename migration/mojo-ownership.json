@@ -2561,7 +2561,9 @@
         "classification": "DETERMINISTIC_DOMAIN",
         "production_reachable": true,
         "role": "semantic",
-        "operations": ["mcp_stdio_first_line_classification"]
+        "operations": [
+          "mcp_stdio_first_line_classification"
+        ]
       },
       {
         "path": "crates/prodex-mojo-core/src/mcp_stdio_policy.rs",
@@ -2569,7 +2571,9 @@
         "classification": "MIXED",
         "production_reachable": true,
         "role": "adapter",
-        "operations": ["mcp_stdio_first_line_classification"]
+        "operations": [
+          "mcp_stdio_first_line_classification"
+        ]
       },
       {
         "path": "mojo/prodex_core/core_file_policy.mojo",
@@ -2577,7 +2581,9 @@
         "classification": "DETERMINISTIC_DOMAIN",
         "production_reachable": true,
         "role": "semantic",
-        "operations": ["housekeeping_stale_login_retention"]
+        "operations": [
+          "housekeeping_stale_login_retention"
+        ]
       },
       {
         "path": "crates/prodex-mojo-core/src/core_file_policy.rs",
@@ -2585,7 +2591,29 @@
         "classification": "MIXED",
         "production_reachable": true,
         "role": "adapter",
-        "operations": ["housekeeping_stale_login_retention"]
+        "operations": [
+          "housekeeping_stale_login_retention"
+        ]
+      },
+      {
+        "path": "mojo/prodex_core/smart_context_policy.mojo",
+        "language": "mojo",
+        "classification": "DETERMINISTIC_DOMAIN",
+        "production_reachable": true,
+        "role": "semantic",
+        "operations": [
+          "smart_context_rollout_bucket_hash_mapping"
+        ]
+      },
+      {
+        "path": "crates/prodex-mojo-core/src/runtime_decisions/smart_context_policy.rs",
+        "language": "rust",
+        "classification": "MIXED",
+        "production_reachable": true,
+        "role": "adapter",
+        "operations": [
+          "smart_context_rollout_bucket_hash_mapping"
+        ]
       }
     ],
     "removed": [
@@ -11419,7 +11447,7 @@
       "production_fallback": false,
       "duplicate_production_owner": false,
       "platform_fallback": false,
-       "rust_adapter_scope": "ExitStatus platform fact extraction and typed Mojo result decoding; process supervision and recovery side effects remain in Rust."
+      "rust_adapter_scope": "ExitStatus platform fact extraction and typed Mojo result decoding; process supervision and recovery side effects remain in Rust."
     },
     {
       "name": "gemini_response_parts_aggregation",
@@ -11445,7 +11473,7 @@
       "production_fallback": false,
       "duplicate_production_owner": false,
       "platform_fallback": false,
-       "rust_adapter_scope": "Serde Value acquisition, existing media/grounding Mojo projections, bounded fact packing, callback/tool item materialization, JSON serialization, and typed batch-plan mapping"
+      "rust_adapter_scope": "Serde Value acquisition, existing media/grounding Mojo projections, bounded fact packing, callback/tool item materialization, JSON serialization, and typed batch-plan mapping"
     },
     {
       "name": "runtime_usage_limit_recovery_candidate_policy",
@@ -11524,6 +11552,29 @@
       "duplicate_production_owner": false,
       "platform_fallback": false,
       "rust_adapter_scope": "Serde JSON parsing and canonicalization, bounded Mojo ABI invocation, output validation, and request error mapping remain in Rust."
+    },
+    {
+      "name": "smart_context_rollout_bucket_hash_mapping",
+      "domain": "smart-context/rollout",
+      "introduced_in": "0.438.0",
+      "baseline_state": "Rust interpreted first eight bytes of SHA-256 as big-endian u64 and projected to 10,000 canary basis points",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_smart_context_rollout_bucket_v1",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/smart_context_policy.mojo",
+      "consumer": "crates/prodex-runtime-proxy/src/smart_context/rollout.rs",
+      "consumer_marker": "prodex_mojo_core::runtime::smart_context_rollout_bucket(",
+      "production_consumers": [
+        "crates/prodex-runtime-proxy/src/smart_context/rollout.rs"
+      ],
+      "production_reachability_test": "crates/prodex-runtime-proxy/src/smart_context/rollout.rs",
+      "rust_owner_before": "Rust u64::from_be_bytes on eight SHA-256 bytes and modulus 10_000 with u16 cast",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "Rust bucket function delegates to compiled Mojo. ABI tests validate big-endian and invalid fields; production tests preserve five golden stable-key assignments and canary distribution across 20,000 samples",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "SHA-256 cryptographic digest stays host-owned; Rust checks returned bucket and maps it into existing rollout DTO"
     }
   ],
   "rust_semantic_reductions": [
@@ -13036,7 +13087,7 @@
           "start": 43,
           "end": 117
         }
-       }
+      }
     },
     {
       "file": "crates/prodex-app/src/profile_commands/import_export/secrets.rs",
@@ -13278,7 +13329,7 @@
       "mojo_entry": "prodex_profile_export_copilot_candidate_users_v1",
       "production_consumer": "crates/prodex-profile-export/src/copilot.rs",
       "parity_test": "crates/prodex-mojo-core/tests/profile_export_candidates.rs",
-       "cleanup_evidence": "The app-local candidate loop is deleted; the compiled ABI and profile-export caller tests preserve last-user preference, exact pair deduplication, and stable order."
+      "cleanup_evidence": "The app-local candidate loop is deleted; the compiled ABI and profile-export caller tests preserve last-user preference, exact pair deduplication, and stable order."
     },
     {
       "file": "crates/prodex-mcp-stdio/src/lib.rs",
@@ -13327,7 +13378,7 @@
       "mojo_entry": "prodex_mojo_rich_gemini_response_parts_plan_v1",
       "production_consumer": "crates/prodex-provider-core/src/gemini_bridge/response_state.rs",
       "parity_test": "crates/prodex-mojo-core/tests/gemini_response.rs",
-       "cleanup_evidence": "The former Rust part-action and grounding-tail decision loop is collapsed into the compiled Mojo batch plan; the provider caller retains only projection and item materialization."
+      "cleanup_evidence": "The former Rust part-action and grounding-tail decision loop is collapsed into the compiled Mojo batch plan; the provider caller retains only projection and item materialization."
     },
     {
       "file": "crates/prodex-housekeeping/src/lib.rs",
@@ -13475,7 +13526,7 @@
       "mojo_entry": "prodex_websocket_precommit_hold_plan_v1",
       "production_consumer": "crates/prodex-app/src/runtime_proxy/websocket/response_tracking/precommit.rs",
       "parity_test": "crates/prodex-app/tests/src/runtime_proxy/websocket/precommit_hold.rs::websocket_precommit_hold_response_created_commits_at_terminal_event",
-       "cleanup_evidence": "The old Rust lookahead comparison and promotion precedence are gone; only effectful logging and frame buffering remain in the caller."
+      "cleanup_evidence": "The old Rust lookahead comparison and promotion precedence are gone; only effectful logging and frame buffering remain in the caller."
     },
     {
       "file": "crates/prodex-app/src/app_commands/runtime_launch/goal_resume.rs",

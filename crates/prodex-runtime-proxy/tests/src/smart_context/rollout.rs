@@ -64,6 +64,19 @@ fn rollout_decision_canary_is_stable_and_bounds_percent() {
 }
 
 #[test]
+fn rollout_bucket_keeps_historical_sha256_assignments() {
+    for (key, bucket) in [
+        ("", 1652),
+        ("scope-0", 8881),
+        ("profile:alpha:request:42", 2069),
+        ("🧭東京", 8695),
+        ("tenant/profile/route", 9400),
+    ] {
+        assert_eq!(smart_context_rollout_bucket(key), bucket, "{key:?}");
+    }
+}
+
+#[test]
 fn rollout_bucket_uses_the_full_basis_point_range() {
     let buckets = (0..1_000)
         .map(|index| smart_context_rollout_bucket(&format!("scope-{index}")))
