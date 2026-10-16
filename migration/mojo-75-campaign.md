@@ -5621,3 +5621,11 @@ through versioned compiled Mojo ABIs. Its unsigned log fields now use the
 existing Mojo parser. The former Rust token, saturating subtraction, counter,
 category and decimal algorithms were removed. Strict ABI and real caller
 regressions cover missing fields, maximum values and saturation.
+
+## Runtime-doctor Unicode reason tokenizer ownership
+
+The Smart Context reason and policy-reason lists now use a strict two-pass
+compiled Mojo span planner for comma delimiting, Unicode trimming and empty
+or single-dash suppression. Rust retains only log-field acquisition and
+validated UTF-8 copying; the former Rust split/trim/filter pipeline was
+removed, with direct strict ABI and diagnostic caller regressions.

@@ -206,3 +206,12 @@ fn runtime_doctor_smart_context_savings_and_numeric_log_fields_use_mojo() {
         4_611_686_018_427_387_904,
     );
 }
+
+#[test]
+fn runtime_doctor_smart_context_reason_lists_trim_unicode_through_mojo() {
+    let event = runtime_doctor_parse_smart_context_autopilot_line(
+        r#"{"message":"smart_context_autopilot decision=require_exact","fields":{"reasons":"one,　two, -,東京","policy_reasons":"first,　second,,-"}}"#,
+    ).expect("valid unicode reason list");
+    assert_eq!(event.reasons, ["one", "two", "東京"]);
+    assert_eq!(event.policy_reasons, ["first", "second"]);
+}

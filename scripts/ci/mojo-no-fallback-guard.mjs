@@ -7052,8 +7052,10 @@ export function findViolations(files) {
       const production = contents.split("#[cfg(test)]", 1)[0];
       return production.includes("prodex_mojo_core::rich::runtime_doctor_log_value_is_ignored(value)") &&
         production.includes("prodex_mojo_core::rich::runtime_doctor_unsigned_field(value)") &&
+        production.includes("prodex_mojo_core::rich::runtime_doctor_split_reason_field(value)") &&
         !production.includes('value.is_empty() || value == "-"') &&
-        !production.includes('runtime_doctor_string_field(fields, key)?.parse().ok()')
+        !production.includes('runtime_doctor_string_field(fields, key)?.parse().ok()') &&
+        !production.includes(".split(',')")
         ? []
         : [`${filePath}: ignored runtime-doctor log-value policy must remain Mojo-owned`];
     }
@@ -7073,6 +7075,9 @@ export function findViolations(files) {
         "prodex_mojo_runtime_doctor_smart_context_totals_v1(",
         "runtime_doctor_smart_context_totals_plan(",
         "runtime_doctor_smart_context_numeric_plans_use_compiled_mojo",
+        "prodex_mojo_runtime_doctor_reason_spans_v1(",
+        "runtime_doctor_split_reason_field(",
+        "runtime_doctor_reason_spans_are_mojo_owned_with_strict_abi",
       ];
       return required.filter((marker) => !contents.includes(marker))
         .map((marker) => `${filePath}: Smart Context diagnostic adapter must retain ${marker}`);
@@ -7090,6 +7095,8 @@ export function findViolations(files) {
         '@export("prodex_mojo_runtime_doctor_smart_context_bytes_v1")',
         '@export("prodex_mojo_runtime_doctor_smart_context_totals_v1")',
         "runtime_doctor_smart_context_add_saturating(",
+        '@export("prodex_mojo_runtime_doctor_reason_spans_v1")',
+        "rich_trim_bounds(segment)",
       ];
       return required.filter((marker) => !contents.includes(marker))
         .map((marker) => `${filePath}: Smart Context diagnostic policy must remain Mojo-owned (${marker})`);
@@ -7764,6 +7771,7 @@ function selfTest() {
   const doctorLogFieldsConsumer = [
     "prodex_mojo_core::rich::runtime_doctor_log_value_is_ignored(value)",
     "prodex_mojo_core::rich::runtime_doctor_unsigned_field(value)",
+    "prodex_mojo_core::rich::runtime_doctor_split_reason_field(value)",
   ].join("\n");
   assert.deepEqual(findViolations([
     [DOCTOR_SMART_CONTEXT_DECISION_CONSUMER_FILE, doctorSmartContextConsumer],
