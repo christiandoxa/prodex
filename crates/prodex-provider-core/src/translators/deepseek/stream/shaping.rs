@@ -151,21 +151,39 @@ pub fn deepseek_provider_core_stream_fallback_tool_call_id(
     request_id: u64,
     index: usize,
 ) -> String {
-    format!("call_{provider_label}_{request_id}_{index}")
+    prodex_mojo_core::deepseek_stream_policy::stream_fallback_identifier(
+        prodex_mojo_core::deepseek_stream_policy::DeepSeekStreamIdKind::ToolCall,
+        provider_label,
+        request_id,
+        index,
+    )
+    .expect("Mojo DeepSeek tool-call fallback ID policy returned invalid output")
 }
 
 pub fn deepseek_provider_core_stream_output_text_item_id(
     provider_label: &str,
     request_id: u64,
 ) -> String {
-    format!("msg_{provider_label}_{request_id}")
+    prodex_mojo_core::deepseek_stream_policy::stream_fallback_identifier(
+        prodex_mojo_core::deepseek_stream_policy::DeepSeekStreamIdKind::OutputText,
+        provider_label,
+        request_id,
+        0,
+    )
+    .expect("Mojo DeepSeek output item ID policy returned invalid output")
 }
 
 pub fn deepseek_provider_core_stream_fallback_response_id(
     provider_label: &str,
     request_id: u64,
 ) -> String {
-    format!("resp_{provider_label}_{request_id}")
+    prodex_mojo_core::deepseek_stream_policy::stream_fallback_identifier(
+        prodex_mojo_core::deepseek_stream_policy::DeepSeekStreamIdKind::Response,
+        provider_label,
+        request_id,
+        0,
+    )
+    .expect("Mojo DeepSeek response ID policy returned invalid output")
 }
 
 pub fn deepseek_provider_core_stream_response_id_from_chunk(
@@ -270,22 +288,29 @@ pub fn deepseek_provider_core_stream_tool_call_added_item(
     call_id: &str,
     flat_name: &str,
 ) -> Option<Value> {
-    if flat_name == "tool_search" {
-        return None;
+    use prodex_mojo_core::deepseek_stream_policy::DeepSeekStreamToolKind;
+    let kind = prodex_mojo_core::deepseek_stream_policy::stream_tool_kind(flat_name)
+        .expect("Mojo DeepSeek streamed tool classifier returned invalid output");
+    match kind {
+        DeepSeekStreamToolKind::ToolSearch => None,
+        DeepSeekStreamToolKind::ApplyPatch => {
+            let mut input = DeepSeekKernelInput::new(DeepSeekKernelOperation::CustomToolCallItem);
+            input.call_id = Some(call_id);
+            input.name = Some(flat_name);
+            input.input = Some("");
+            Some(super::super::deepseek_mojo_value(input))
+        }
+        DeepSeekStreamToolKind::FunctionCall => {
+            let (namespace, name) =
+                crate::bridge::provider_core_split_flat_namespace_tool_name(flat_name);
+            let mut input =
+                DeepSeekKernelInput::new(DeepSeekKernelOperation::AddedFunctionCallItem);
+            input.call_id = Some(call_id);
+            input.name = Some(&name);
+            input.namespace = namespace.as_deref();
+            Some(super::super::deepseek_mojo_value(input))
+        }
     }
-    if flat_name == "apply_patch" {
-        let mut input = DeepSeekKernelInput::new(DeepSeekKernelOperation::CustomToolCallItem);
-        input.call_id = Some(call_id);
-        input.name = Some(flat_name);
-        input.input = Some("");
-        return Some(super::super::deepseek_mojo_value(input));
-    }
-    let (namespace, name) = crate::bridge::provider_core_split_flat_namespace_tool_name(flat_name);
-    let mut input = DeepSeekKernelInput::new(DeepSeekKernelOperation::AddedFunctionCallItem);
-    input.call_id = Some(call_id);
-    input.name = Some(&name);
-    input.namespace = namespace.as_deref();
-    Some(super::super::deepseek_mojo_value(input))
 }
 
 pub fn deepseek_provider_core_stream_tool_call_item(
@@ -294,33 +319,43 @@ pub fn deepseek_provider_core_stream_tool_call_item(
     arguments: &str,
     thought_signature: Option<&str>,
 ) -> Value {
-    if flat_name == "tool_search" {
-        let arguments =
-            serde_json::from_str::<Value>(arguments).unwrap_or_else(|_| serde_json::json!({}));
-        let arguments =
-            serde_json::to_string(&arguments).expect("DeepSeek tool arguments serialize");
-        let mut input = DeepSeekKernelInput::new(DeepSeekKernelOperation::ToolSearchItem);
-        input.call_id = Some(call_id);
-        input.arguments = Some(&arguments);
-        return super::super::deepseek_mojo_value(input);
+    use prodex_mojo_core::deepseek_stream_policy::DeepSeekStreamToolKind;
+    let kind = prodex_mojo_core::deepseek_stream_policy::stream_tool_kind(flat_name)
+        .expect("Mojo DeepSeek streamed tool classifier returned invalid output");
+    match kind {
+        DeepSeekStreamToolKind::ToolSearch => {
+            let arguments =
+                serde_json::from_str::<Value>(arguments).unwrap_or_else(|_| serde_json::json!({}));
+            let arguments =
+                serde_json::to_string(&arguments).expect("DeepSeek tool arguments serialize");
+            let mut input = DeepSeekKernelInput::new(DeepSeekKernelOperation::ToolSearchItem);
+            input.call_id = Some(call_id);
+            input.arguments = Some(&arguments);
+            super::super::deepseek_mojo_value(input)
+        }
+        DeepSeekStreamToolKind::ApplyPatch => {
+            let input_value =
+                crate::gemini_bridge::gemini_provider_core_custom_tool_input_from_arguments(
+                    arguments,
+                );
+            let mut input = DeepSeekKernelInput::new(DeepSeekKernelOperation::CustomToolCallItem);
+            input.call_id = Some(call_id);
+            input.name = Some(flat_name);
+            input.input = Some(&input_value);
+            super::super::deepseek_mojo_value(input)
+        }
+        DeepSeekStreamToolKind::FunctionCall => {
+            let (namespace, name) =
+                crate::bridge::provider_core_split_flat_namespace_tool_name(flat_name);
+            let mut input = DeepSeekKernelInput::new(DeepSeekKernelOperation::FunctionCallItem);
+            input.call_id = Some(call_id);
+            input.name = Some(&name);
+            input.arguments = Some(arguments);
+            input.namespace = namespace.as_deref();
+            input.signature = thought_signature;
+            super::super::deepseek_mojo_value(input)
+        }
     }
-    if flat_name == "apply_patch" {
-        let input_value =
-            crate::gemini_bridge::gemini_provider_core_custom_tool_input_from_arguments(arguments);
-        let mut input = DeepSeekKernelInput::new(DeepSeekKernelOperation::CustomToolCallItem);
-        input.call_id = Some(call_id);
-        input.name = Some(flat_name);
-        input.input = Some(&input_value);
-        return super::super::deepseek_mojo_value(input);
-    }
-    let (namespace, name) = crate::bridge::provider_core_split_flat_namespace_tool_name(flat_name);
-    let mut input = DeepSeekKernelInput::new(DeepSeekKernelOperation::FunctionCallItem);
-    input.call_id = Some(call_id);
-    input.name = Some(&name);
-    input.arguments = Some(arguments);
-    input.namespace = namespace.as_deref();
-    input.signature = thought_signature;
-    super::super::deepseek_mojo_value(input)
 }
 
 pub fn deepseek_provider_core_stream_function_call_arguments_delta_source(
