@@ -48,6 +48,17 @@ unsafe extern "C" {
         output_capacity: i64,
         written: u64,
     ) -> i64;
+    fn prodex_mojo_runtime_doctor_timeline_append_v1(
+        abi_version: i64,
+        existing_count: u64,
+        evict_oldest: u64,
+    ) -> i64;
+    fn prodex_mojo_runtime_doctor_timeline_latest_v1(
+        abi_version: i64,
+        indices: u64,
+        count: i64,
+        selected: u64,
+    ) -> i64;
     fn prodex_mojo_runtime_doctor_render_v1(
         abi_version: i64,
         input: u64,
@@ -55,6 +66,68 @@ unsafe extern "C" {
         output_capacity: i64,
         written: u64,
     ) -> i64;
+}
+
+/// Plan whether adding one request event removes the oldest stored event.
+pub fn runtime_doctor_timeline_evict_oldest(existing_events: usize) -> Result<bool, MojoError> {
+    ensure_rich_abi()?;
+    let mut evict = -1_i64;
+    let status = unsafe {
+        prodex_mojo_runtime_doctor_timeline_append_v1(
+            RUNTIME_DOCTOR_RENDER_ABI_VERSION,
+            u64::try_from(existing_events).map_err(|_| MojoError::InvalidInput)?,
+            mojo_mut_pointer_address(&mut evict),
+        )
+    };
+    if status != 0 {
+        return Err(match status {
+            1 => MojoError::InvalidInput,
+            4 => MojoError::AbiMismatch,
+            _ => MojoError::InvalidOutput,
+        });
+    }
+    match evict {
+        0 => Ok(false),
+        1 => Ok(true),
+        _ => Err(MojoError::InvalidOutput),
+    }
+}
+
+/// Choose the latest request in caller-provided BTreeMap order. For equal
+/// last-log-line indices, the lexically greatest request ID wins.
+pub fn runtime_doctor_latest_timeline_index(
+    last_indices: &[usize],
+) -> Result<Option<usize>, MojoError> {
+    ensure_rich_abi()?;
+    let indices = last_indices
+        .iter()
+        .map(|index| u64::try_from(*index).map_err(|_| MojoError::InvalidInput))
+        .collect::<Result<Vec<_>, _>>()?;
+    let mut selected = -2_i64;
+    let status = unsafe {
+        prodex_mojo_runtime_doctor_timeline_latest_v1(
+            RUNTIME_DOCTOR_RENDER_ABI_VERSION,
+            mojo_pointer_address(indices.as_ptr()),
+            i64::try_from(indices.len()).map_err(|_| MojoError::InvalidInput)?,
+            mojo_mut_pointer_address(&mut selected),
+        )
+    };
+    if status != 0 {
+        return Err(match status {
+            1 => MojoError::InvalidInput,
+            4 => MojoError::AbiMismatch,
+            _ => MojoError::InvalidOutput,
+        });
+    }
+    match selected {
+        -1 if indices.is_empty() => Ok(None),
+        value if value >= 0 => usize::try_from(value)
+            .ok()
+            .filter(|index| *index < indices.len())
+            .map(Some)
+            .ok_or(MojoError::InvalidOutput),
+        _ => Err(MojoError::InvalidOutput),
+    }
 }
 
 pub fn runtime_doctor_render(input: RuntimeDoctorRenderInput<'_>) -> Result<String, MojoError> {
@@ -220,6 +293,78 @@ pub fn runtime_doctor_configuration_status(error: Option<&str>) -> Result<String
         detail: 0,
         values: &[error],
     })
+}
+
+#[cfg(test)]
+mod timeline_policy_tests {
+    use super::*;
+
+    #[test]
+    fn compiled_timeline_retention_and_latest_index_keep_oldest_and_last_tie() {
+        for (existing, evict) in [(0, false), (11, false), (12, true), (13, true)] {
+            assert_eq!(runtime_doctor_timeline_evict_oldest(existing), Ok(evict));
+        }
+        assert_eq!(runtime_doctor_timeline_evict_oldest(usize::MAX), Ok(true));
+        assert_eq!(runtime_doctor_latest_timeline_index(&[]), Ok(None));
+        assert_eq!(runtime_doctor_latest_timeline_index(&[0]), Ok(Some(0)));
+        assert_eq!(
+            runtime_doctor_latest_timeline_index(&[7, 9, 8]),
+            Ok(Some(1))
+        );
+        assert_eq!(
+            runtime_doctor_latest_timeline_index(&[9, 9, 7, 9]),
+            Ok(Some(3))
+        );
+        assert_eq!(
+            runtime_doctor_latest_timeline_index(&[usize::MAX, 0, usize::MAX]),
+            Ok(Some(2))
+        );
+    }
+
+    #[test]
+    fn compiled_timeline_rejects_invalid_abi_without_writing() {
+        let mut out = 77_i64;
+        let values = [4_u64, 12];
+        unsafe {
+            assert_eq!(
+                prodex_mojo_runtime_doctor_timeline_append_v1(
+                    2,
+                    12,
+                    mojo_mut_pointer_address(&mut out)
+                ),
+                4
+            );
+            assert_eq!(prodex_mojo_runtime_doctor_timeline_append_v1(1, 12, 0), 1);
+            assert_eq!(
+                prodex_mojo_runtime_doctor_timeline_latest_v1(
+                    2,
+                    mojo_pointer_address(values.as_ptr()),
+                    2,
+                    mojo_mut_pointer_address(&mut out),
+                ),
+                4
+            );
+            assert_eq!(
+                prodex_mojo_runtime_doctor_timeline_latest_v1(
+                    1,
+                    0,
+                    2,
+                    mojo_mut_pointer_address(&mut out)
+                ),
+                1
+            );
+            assert_eq!(
+                prodex_mojo_runtime_doctor_timeline_latest_v1(
+                    1,
+                    mojo_pointer_address(values.as_ptr()),
+                    -1,
+                    mojo_mut_pointer_address(&mut out)
+                ),
+                1
+            );
+        }
+        assert_eq!(out, 77);
+    }
 }
 
 #[cfg(test)]

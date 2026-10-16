@@ -5,7 +5,6 @@ use prodex_mojo_core::rich::{
     RUNTIME_DOCTOR_RENDER_REQUEST_TIMELINE_DETAIL, RuntimeDoctorRenderInput,
 };
 
-const RUNTIME_DOCTOR_REQUEST_TIMELINE_MAX_EVENTS: usize = 12;
 // ABI slots stay aligned with the field labels owned by the Mojo renderer.
 const RUNTIME_DOCTOR_REQUEST_TIMELINE_DETAIL_FIELDS: [&str; 16] = [
     "profile",
@@ -80,13 +79,16 @@ pub(super) fn runtime_doctor_record_request_timeline_event(
     };
     let builder = request_timelines.entry(request_id).or_default();
     builder.last_index = line_index;
+    let evict_oldest =
+        prodex_mojo_core::rich::runtime_doctor_timeline_evict_oldest(builder.events.len())
+            .expect("Mojo timeline event retention plan returned invalid output");
     builder.events.push(RuntimeDoctorRequestTimelineEvent {
         timestamp: timestamp.map(ToString::to_string),
         phase: phase.to_string(),
         marker: marker.to_string(),
         detail: runtime_doctor_request_timeline_detail(fields),
     });
-    if builder.events.len() > RUNTIME_DOCTOR_REQUEST_TIMELINE_MAX_EVENTS {
+    if evict_oldest {
         builder.events.remove(0);
     }
 }
@@ -95,12 +97,20 @@ pub(super) fn runtime_doctor_set_latest_request_timeline(
     summary: &mut RuntimeDoctorSummary,
     request_timelines: BTreeMap<String, RuntimeDoctorRequestTimelineBuilder>,
 ) {
-    let Some((request_id, builder)) = request_timelines
-        .into_iter()
-        .max_by_key(|(_, builder)| builder.last_index)
+    let ordered = request_timelines.into_iter().collect::<Vec<_>>();
+    let last_indices = ordered
+        .iter()
+        .map(|(_, builder)| builder.last_index)
+        .collect::<Vec<_>>();
+    let Some(index) = prodex_mojo_core::rich::runtime_doctor_latest_timeline_index(&last_indices)
+        .expect("Mojo latest request timeline plan returned invalid output")
     else {
         return;
     };
+    let (request_id, builder) = ordered
+        .into_iter()
+        .nth(index)
+        .expect("Mojo latest request timeline index is bounded");
     summary.latest_request_id = Some(request_id);
     summary.latest_request_timeline = builder.events;
 }
@@ -258,5 +268,59 @@ mod timeline_detail_tests {
                 "🧭".repeat(45)
             )
         );
+    }
+}
+
+#[cfg(all(test, feature = "runtime-log-mojo"))]
+mod timeline_retention_tests {
+    use super::*;
+
+    #[test]
+    fn compiled_mojo_preserves_twelve_events_and_latest_lexical_tie() {
+        let mut timelines = BTreeMap::new();
+        for index in 0..15 {
+            let fields = BTreeMap::from([
+                ("request_id".to_owned(), "z-request".to_owned()),
+                ("profile".to_owned(), format!("p{index:02}")),
+            ]);
+            runtime_doctor_record_request_timeline_event(
+                &mut timelines,
+                index,
+                Some("2026-10-16T09:00Z"),
+                "selection_pick",
+                &fields,
+            );
+        }
+        let z_events = &timelines["z-request"].events;
+        assert_eq!(z_events.len(), 12);
+        assert!(z_events[0].detail.contains("p03"), "{z_events:?}");
+        assert!(z_events[11].detail.contains("p14"), "{z_events:?}");
+
+        let a_fields = BTreeMap::from([
+            ("request".to_owned(), "a-request".to_owned()),
+            ("profile".to_owned(), "other".to_owned()),
+        ]);
+        runtime_doctor_record_request_timeline_event(
+            &mut timelines,
+            14,
+            None,
+            "selection_pick",
+            &a_fields,
+        );
+        let mut summary = RuntimeDoctorSummary::default();
+        runtime_doctor_set_latest_request_timeline(&mut summary, timelines.clone());
+        assert_eq!(summary.latest_request_id.as_deref(), Some("z-request"));
+        assert_eq!(summary.latest_request_timeline.len(), 12);
+
+        runtime_doctor_record_request_timeline_event(
+            &mut timelines,
+            15,
+            None,
+            "selection_pick",
+            &a_fields,
+        );
+        runtime_doctor_set_latest_request_timeline(&mut summary, timelines);
+        assert_eq!(summary.latest_request_id.as_deref(), Some("a-request"));
+        assert_eq!(summary.latest_request_timeline.len(), 2);
     }
 }
