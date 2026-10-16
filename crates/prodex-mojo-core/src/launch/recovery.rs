@@ -127,6 +127,8 @@ pub fn session_marker_should_update(
 
 /// Decide whether a child exit is explicit cancellation before recovery.
 /// Platform status extraction stays in the host; Mojo owns precedence.
+/// Exit codes are sign-extended i32 values (including Windows NTSTATUS);
+/// -1 in `control_c_exit_code` means the host has no Windows status code.
 pub fn runtime_exit_status_cancelled(
     exit_code: i64,
     signal: i64,
@@ -712,3 +714,7 @@ mod websocket_timeout_tests {
         );
     }
 }
+
+#[cfg(test)]
+#[path = "recovery_exit_status_tests.rs"]
+mod recovery_exit_status_tests;

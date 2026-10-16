@@ -735,3 +735,22 @@ mod observer_resource_tests;
 
 #[path = "websocket_timeout_tests.rs"]
 mod websocket_timeout_tests;
+
+#[cfg(windows)]
+#[test]
+fn windows_signed_exit_status_uses_mojo_without_panicking() {
+    let control_c_exit = windows_sys::Win32::Foundation::CONTROL_C_EXIT;
+    for (code, cancelled) in [
+        (0, false),
+        (1, false),
+        (130, true),
+        (control_c_exit, true),
+        (0xc000_0005_u32 as i32, false),
+        (-1, false),
+    ] {
+        assert_eq!(
+            runtime_exit_status_is_cancelled(&exit_status(code)),
+            cancelled
+        );
+    }
+}

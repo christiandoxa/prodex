@@ -385,11 +385,18 @@ def prodex_launch_exit_status_cancelled_v1(
 ) abi("C") -> Int64:
     if abi_version != 1:
         return -3
+    # Windows ExitStatus::code() and CONTROL_C_EXIT are signed i32
+    # values. A negative NTSTATUS is a real exit, not an invalid ABI tag.
+    # Only -1 in control_c_exit_code means the host has no Windows status.
+    var windows_status = control_c_exit_code != -1
     if (
-        exit_code < -1
+        exit_code < -2_147_483_648
+        or exit_code > 2_147_483_647
+        or (not windows_status and exit_code < -1)
         or signal < -1
         or interrupt_signal < -1
-        or control_c_exit_code < -1
+        or control_c_exit_code < -2_147_483_648
+        or control_c_exit_code > 2_147_483_647
         or output_address == 0
     ):
         return -2
@@ -403,7 +410,7 @@ def prodex_launch_exit_status_cancelled_v1(
             and signal == interrupt_signal
         )
         or (
-            control_c_exit_code >= 0
+            windows_status
             and exit_code == control_c_exit_code
         )
     ) else 0
