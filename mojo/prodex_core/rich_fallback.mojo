@@ -222,6 +222,37 @@ def prodex_mojo_rich_gemini_code_assist_model_allowed_v1(
     return RICH_STATUS_OK
 
 
+@export("prodex_mojo_rich_model_session_memory_allowed_v1")
+def prodex_mojo_rich_model_session_memory_allowed_v1(
+    abi_version: Int64,
+    model_address: UInt,
+    allowed_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != PRODEX_RICH_ABI_VERSION:
+        return RICH_STATUS_ABI
+    if model_address == 0 or allowed_address == 0:
+        return RICH_STATUS_INVALID
+    var model_ptr = Pointer[
+        mut=False, ProdexRichStringView, ImmUntrackedOrigin
+    ](unsafe_from_address=Int(model_address))
+    var model = model_ptr[].copy()
+    if not rich_view_valid(model, RICH_MAX_IDENTIFIER_BYTES):
+        return RICH_STATUS_UTF8
+    var bounds = rich_trim_bounds(model)
+    var trimmed_model = ProdexRichStringView(
+        model.ptr + UInt(bounds[0]), UInt(bounds[1] - bounds[0])
+    )
+    var allowed = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(allowed_address)
+    )
+    allowed[] = Int64(
+        bounds[0] == bounds[1]
+        or rich_view_matches_literal["auto"](trimmed_model, True)
+        or rich_view_matches_literal["default"](trimmed_model, True)
+    )
+    return RICH_STATUS_OK
+
+
 def fallback_add_chain(
     provider: ProdexRichStringView,
     model: ProdexRichStringView,
