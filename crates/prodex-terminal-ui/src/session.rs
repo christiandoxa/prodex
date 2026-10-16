@@ -43,13 +43,27 @@ pub fn render_session_reports_with_width(
     total_width: usize,
 ) -> String {
     let widths = session_report_column_widths(total_width);
+    let id_cells = reports
+        .iter()
+        .map(|report| u64::try_from(text_width(report.id)).expect("Unicode cell width"))
+        .collect::<Vec<_>>();
+    let profile_present = reports
+        .iter()
+        .map(|report| report.profile.is_some())
+        .collect::<Vec<_>>();
+    let detail_plan = prodex_mojo_core::terminal_layout::session_report_detail_plan(
+        &id_cells,
+        &profile_present,
+        widths.id,
+    )
+    .expect("compiled-in Mojo session report detail policy failed");
     let mut lines = vec![section_header_with_width("Sessions", total_width)];
     lines.push(format_session_report_row(
         "ID", "UPDATED", "THREAD", "CWD", "PATH", widths,
     ));
     lines.push("-".repeat(text_width(lines.last().map(String::as_str).unwrap_or(""))));
 
-    for report in reports {
+    for (report, (show_full_id, show_profile)) in reports.iter().zip(detail_plan) {
         lines.push(format_session_report_row(
             report.id,
             report.updated_at.unwrap_or("-"),
@@ -58,10 +72,10 @@ pub fn render_session_reports_with_width(
             report.path,
             widths,
         ));
-        if text_width(report.id) > widths.id {
+        if show_full_id {
             lines.push(format!("  id: {}", report.id));
         }
-        if let Some(profile) = report.profile {
+        if show_profile && let Some(profile) = report.profile {
             lines.push(format!("  profile: {profile}"));
         }
     }
