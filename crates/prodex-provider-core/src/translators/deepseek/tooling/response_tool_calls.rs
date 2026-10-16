@@ -29,7 +29,6 @@ pub(crate) fn deepseek_responses_tool_call_item(
     if arguments.len() > DEEPSEEK_LARGE_RESPONSE_KERNEL_MAX_BYTES {
         return Err("DeepSeek returned JSON arguments exceeding the supported size".to_string());
     }
-    deepseek_validate_tool_call_arguments(name, arguments)?;
     let arguments = deepseek_rtk_wrapped_tool_arguments(name, arguments);
     let mut input = DeepSeekKernelInput::new(DeepSeekKernelOperation::ResponseToolCallItem);
     input.call_id = tool_call.get("id").and_then(Value::as_str);
@@ -40,20 +39,19 @@ pub(crate) fn deepseek_responses_tool_call_item(
         .and_then(|value| value.get("google"))
         .and_then(|value| value.get("thought_signature"))
         .and_then(Value::as_str);
-    let body = deepseek_kernel(input)
-        .map_err(|_| "DeepSeek response tool call exceeds the bounded Mojo kernel limit")?;
+    let body = deepseek_kernel(input).map_err(|_| {
+        // Mojo owns the JSON validity decision; Rust only preserves the established
+        // serde diagnostic after the authoritative kernel rejects the fragment.
+        match serde_json::from_str::<Value>(&arguments) {
+            Ok(_) => {
+                "DeepSeek response tool call exceeds the bounded Mojo kernel limit".to_string()
+            }
+            Err(error) => deepseek_tool_call_arguments_error(name, error),
+        }
+    })?;
     serde_json::from_slice(&body)
         .map(Some)
         .map_err(|error| format!("DeepSeek Mojo returned invalid response tool-call JSON: {error}"))
-}
-
-fn deepseek_validate_tool_call_arguments(name: &str, arguments: &str) -> Result<(), String> {
-    if arguments.trim().is_empty() && name != "tool_search" {
-        return Ok(());
-    }
-    serde_json::from_str::<Value>(arguments)
-        .map(|_| ())
-        .map_err(|error| deepseek_tool_call_arguments_error(name, error))
 }
 
 fn deepseek_tool_call_arguments_error(name: &str, error: serde_json::Error) -> String {
