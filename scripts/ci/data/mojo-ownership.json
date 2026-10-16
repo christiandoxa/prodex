@@ -2709,6 +2709,16 @@
         "operations": [
           "governance_inspection_record_invariants"
         ]
+      },
+      {
+        "path": "mojo/prodex_core/log_payload.mojo",
+        "language": "mojo",
+        "classification": "DETERMINISTIC_DOMAIN",
+        "production_reachable": true,
+        "role": "semantic",
+        "operations": [
+          "runtime_log_payload_display_projection"
+        ]
       }
     ],
     "removed": [
@@ -8634,22 +8644,22 @@
       "introduced_in": "0.436.0",
       "baseline_state": "Rust classified every Smart Context autopilot decision except rewritten and pass_through as fallback",
       "final_state": "authoritative",
-      "mojo_entry": "prodex_mojo_runtime_doctor_smart_context_decision_is_fallback_v1",
+      "mojo_entry": "prodex_mojo_runtime_doctor_smart_context_totals_v1",
       "mojo_abi_version": 1,
       "mojo_source": "mojo/prodex_core/runtime_doctor_marker.mojo",
       "consumer": "crates/prodex-runtime-doctor/src/smart_context.rs",
-      "consumer_marker": "prodex_mojo_core::rich::runtime_doctor_smart_context_decision_is_fallback",
+      "consumer_marker": "prodex_mojo_core::rich::runtime_doctor_smart_context_totals_plan",
       "production_consumers": [
         "crates/prodex-runtime-doctor/src/smart_context.rs"
       ],
-      "production_reachability_test": "crates/prodex-mojo-core/tests/runtime_doctor_markers.rs",
+      "production_reachability_test": "crates/prodex-mojo-core/src/rich/runtime_doctor_marker_tests.rs",
       "rust_owner_before": "Exact decision-label fallback classification implemented as !matches!(decision, \"rewritten\" | \"pass_through\")",
       "rust_state_after": "adapter-only",
       "rust_test_oracle": "deleted; direct required-Mojo adapter coverage and runtime-doctor summary regression cover rewritten, pass-through, and fallback decisions",
       "production_fallback": false,
       "duplicate_production_owner": false,
       "platform_fallback": false,
-      "rust_adapter_scope": "borrowed UTF-8 view construction, ABI status mapping, and diagnostic aggregation; Mojo failures do not trigger Rust semantic recomputation"
+      "rust_adapter_scope": "borrowed UTF-8 views, bounded counter records, validated ABI output, and diagnostic DTO materialization; Mojo totals reuses its sole decision classifier"
     },
     {
       "name": "runtime_doctor_log_value_absence_policy",
@@ -12017,6 +12027,29 @@
       "duplicate_production_owner": false,
       "platform_fallback": false,
       "rust_adapter_scope": "Host marker-action semantics lookup through existing Mojo, optional strings and Vec data, and application of validated Mojo accept/evict decisions"
+    },
+    {
+      "name": "runtime_log_payload_display_projection",
+      "domain": "runtime/log-display",
+      "introduced_in": "0.438.0",
+      "baseline_state": "Rust selected payload summary fields, metadata, message content, media counts, tool labels, Unicode abbreviations, and JSON display fallback",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_mojo_log_payload_projection_v1",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/log_payload.mojo",
+      "consumer": "crates/prodex-app/src/app_commands/log_upstream_payload.rs",
+      "consumer_marker": "prodex_mojo_core::json::log_payload_projection(",
+      "production_consumers": [
+        "crates/prodex-app/src/app_commands/log_upstream_payload.rs"
+      ],
+      "production_reachability_test": "crates/prodex-mojo-core/src/json/log_payload.rs",
+      "rust_owner_before": "Payload display field precedence, short scalar formatting, recursive content projection, item/media/tool counts, and fallback selection",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "Deleted after 1938 temporary differential output comparisons; permanent ABI and application regressions cover Unicode byte and scalar limits, JSON shapes, precedence, empty values, wrapping, and invalid ABI inputs",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "Bounded borrowed Serde tree acquisition, wire-compatible JSON parsing and pretty serialization, checked ABI buffers, record decoding, and Unicode-width terminal wrapping"
     }
   ],
   "rust_semantic_reductions": [
