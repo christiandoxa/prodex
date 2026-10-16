@@ -1163,3 +1163,34 @@ def prodex_mojo_runtime_doctor_timeline_latest_v1(
         index += 1
     selected[] = choice
     return 0
+
+# A route/profile diagnostic row is recorded only for a recognized marker
+# with at least one nonempty route or profile. At most 20 rows are retained.
+# Mojo owns the accept/evict policy; Rust owns event String and Vec storage.
+@export("prodex_mojo_runtime_doctor_route_event_retention_v1")
+def prodex_mojo_runtime_doctor_route_event_retention_v1(
+    abi_version: Int64,
+    action_present: Int64,
+    profile_present: Int64,
+    route_present: Int64,
+    existing_events: UInt64,
+    decision_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != RUNTIME_DOCTOR_RENDER_ABI_VERSION:
+        return 4
+    if (
+        (action_present != 0 and action_present != 1)
+        or (profile_present != 0 and profile_present != 1)
+        or (route_present != 0 and route_present != 1)
+        or decision_address == 0
+    ):
+        return 1
+    var decision = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(decision_address)
+    )
+    var accepted = action_present == 1 and (
+        profile_present == 1 or route_present == 1
+    )
+    decision[unsafe_offset=0] = Int64(accepted)
+    decision[unsafe_offset=1] = Int64(accepted and existing_events >= UInt64(20))
+    return 0
