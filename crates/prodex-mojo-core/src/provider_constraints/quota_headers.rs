@@ -6,6 +6,13 @@ use crate::MojoError;
 const ABI_VERSION: i64 = 1;
 
 unsafe extern "C" {
+    fn prodex_provider_quota_reset_epoch_v1(
+        abi_version: i64,
+        operation: i64,
+        number: i64,
+        now: i64,
+        output_address: u64,
+    ) -> i64;
     fn prodex_provider_quota_percent_v1(
         abi_version: i64,
         operation: i64,
@@ -69,6 +76,39 @@ fn result_string(bytes: Vec<u8>, written: i64) -> Result<String, MojoError> {
         return Err(MojoError::InvalidOutput);
     }
     String::from_utf8(bytes[..written].to_vec()).map_err(|_| MojoError::InvalidOutput)
+}
+
+#[repr(i64)]
+#[derive(Clone, Copy)]
+enum QuotaResetSource {
+    Numeric = 0,
+    Duration = 1,
+}
+
+fn reset_epoch(source: QuotaResetSource, number: i64, now: i64) -> Result<i64, MojoError> {
+    let mut result = i64::MIN;
+    status(unsafe {
+        prodex_provider_quota_reset_epoch_v1(
+            ABI_VERSION,
+            source as i64,
+            number,
+            now,
+            (&mut result as *mut i64) as usize as u64,
+        )
+    })?;
+    Ok(result)
+}
+
+/// Mojo owns numeric quota reset classification between milliseconds,
+/// absolute seconds and nonnegative relative seconds.
+pub fn provider_quota_numeric_reset_epoch(number: i64, now: i64) -> Result<i64, MojoError> {
+    reset_epoch(QuotaResetSource::Numeric, number, now)
+}
+
+/// Mojo applies the existing saturated relative duration after Rust parses
+/// the provider duration grammar and acquires the wall clock.
+pub fn provider_quota_duration_reset_epoch(seconds: i64, now: i64) -> Result<i64, MojoError> {
+    reset_epoch(QuotaResetSource::Duration, seconds, now)
 }
 
 #[repr(i64)]
@@ -252,6 +292,67 @@ mod tests {
                 "{model:?}/{token:?}"
             );
         }
+    }
+
+    #[test]
+    fn quota_reset_numeric_epoch_classification_and_saturation_is_compiled_mojo() {
+        for (number, now, expected) in [
+            (50, 1000, 1050),
+            (940, 1000, 1940),
+            (941, 1000, 941),
+            (0, 1000, 1000),
+            (-99, 1000, 1000),
+            (10_000_000_000, 1000, 10_000_000_000),
+            (10_000_000_001, 1000, 10_000_000),
+            (i64::MAX, 1000, i64::MAX / 1000),
+            (i64::MIN, i64::MIN, i64::MIN),
+            (-1, i64::MIN, -1),
+        ] {
+            assert_eq!(
+                provider_quota_numeric_reset_epoch(number, now).unwrap(),
+                expected,
+                "{number}/{now}"
+            );
+        }
+        for (duration, now, expected) in [
+            (0, 100, 100),
+            (12, 100, 112),
+            (15, i64::MAX - 5, i64::MAX),
+            (i64::MAX, 100, i64::MAX),
+            (1, i64::MIN, i64::MIN + 1),
+        ] {
+            assert_eq!(
+                provider_quota_duration_reset_epoch(duration, now).unwrap(),
+                expected,
+                "{duration}/{now}"
+            );
+        }
+    }
+
+    #[test]
+    fn quota_reset_epoch_abi_rejects_invalid_modes_without_mutation() {
+        let mut output = 123_i64;
+        let destination = (&mut output as *mut i64) as usize as u64;
+        unsafe {
+            assert_eq!(
+                prodex_provider_quota_reset_epoch_v1(2, 0, 30, 100, destination),
+                4
+            );
+            assert_eq!(
+                prodex_provider_quota_reset_epoch_v1(1, 2, 30, 100, destination),
+                1
+            );
+            assert_eq!(
+                prodex_provider_quota_reset_epoch_v1(1, -1, 30, 100, destination),
+                1
+            );
+            assert_eq!(
+                prodex_provider_quota_reset_epoch_v1(1, 1, -1, 100, destination),
+                1
+            );
+            assert_eq!(prodex_provider_quota_reset_epoch_v1(1, 1, 30, 100, 0), 1);
+        }
+        assert_eq!(output, 123);
     }
 
     #[test]

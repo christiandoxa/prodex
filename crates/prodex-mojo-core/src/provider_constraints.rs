@@ -7,8 +7,9 @@ pub use scalar_policy::{
 
 mod quota_headers;
 pub use quota_headers::{
-    provider_quota_clean_header, provider_quota_gemini_used_percent, provider_quota_limit_id,
-    provider_quota_model_label, provider_quota_openai_used_percent,
+    provider_quota_clean_header, provider_quota_duration_reset_epoch,
+    provider_quota_gemini_used_percent, provider_quota_limit_id, provider_quota_model_label,
+    provider_quota_numeric_reset_epoch, provider_quota_openai_used_percent,
 };
 mod gemini_bridge_request;
 mod gemini_failure_policy;
