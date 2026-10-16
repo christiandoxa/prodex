@@ -7,6 +7,8 @@ const RUNTIME_DOCTOR_MARKER_ABI_VERSION: i64 = 1;
 const RUNTIME_DOCTOR_SMART_CONTEXT_DECISION_ABI_VERSION: i64 = 1;
 const RUNTIME_DOCTOR_LOG_VALUE_ABI_VERSION: i64 = 1;
 const RUNTIME_DOCTOR_MESSAGE_MARKER_ABI_VERSION: i64 = 1;
+const RUNTIME_DOCTOR_REASON_SPLIT_ABI_VERSION: i64 = 1;
+const RUNTIME_DOCTOR_REASON_SPLIT_MAX_ROWS: usize = 65_536;
 const RUNTIME_DOCTOR_SMART_CONTEXT_BYTES_ABI_VERSION: i64 = 1;
 const RUNTIME_DOCTOR_SMART_CONTEXT_TOTALS_ABI_VERSION: i64 = 1;
 const RUNTIME_DOCTOR_FALLBACK_REASON_SOURCE_ABI_VERSION: i64 = 1;
@@ -43,6 +45,13 @@ unsafe extern "C" {
         abi_version: i64,
         decision: u64,
         is_fallback: u64,
+    ) -> i64;
+    fn prodex_mojo_runtime_doctor_reason_spans_v1(
+        abi_version: i64,
+        input: u64,
+        output: u64,
+        capacity: i64,
+        count: u64,
     ) -> i64;
     fn prodex_mojo_runtime_doctor_smart_context_bytes_v1(
         abi_version: i64,
@@ -443,6 +452,69 @@ pub fn runtime_doctor_parse_message_offsets(
     })
 }
 
+/// Return trimmed, non-placeholder diagnostic reason fields using Mojo UTF-8
+/// spans. Rust only copies validated borrowed slices into owned report strings.
+pub fn runtime_doctor_split_reason_field(value: &str) -> Result<Vec<String>, MojoError> {
+    ensure_rich_abi()?;
+    let source = view(value);
+    let mut count = -1_i64;
+    let status = unsafe {
+        prodex_mojo_runtime_doctor_reason_spans_v1(
+            RUNTIME_DOCTOR_REASON_SPLIT_ABI_VERSION,
+            mojo_pointer_address(&source),
+            0,
+            0,
+            mojo_mut_pointer_address(&mut count),
+        )
+    };
+    if status != 0 {
+        return Err(match status {
+            1 => MojoError::InvalidInput,
+            3 => MojoError::Capacity,
+            4 => MojoError::AbiMismatch,
+            _ => MojoError::InvalidOutput,
+        });
+    }
+    let count = usize::try_from(count).map_err(|_| MojoError::InvalidOutput)?;
+    if count > RUNTIME_DOCTOR_REASON_SPLIT_MAX_ROWS {
+        return Err(MojoError::InvalidOutput);
+    }
+    if count == 0 {
+        return Ok(Vec::new());
+    }
+    let mut spans = vec![0_u64; count * 2];
+    let mut written = -1_i64;
+    let status = unsafe {
+        prodex_mojo_runtime_doctor_reason_spans_v1(
+            RUNTIME_DOCTOR_REASON_SPLIT_ABI_VERSION,
+            mojo_pointer_address(&source),
+            mojo_mut_pointer_address(spans.as_mut_ptr()),
+            count as i64,
+            mojo_mut_pointer_address(&mut written),
+        )
+    };
+    if status != 0 || written != count as i64 {
+        return Err(if status == 3 {
+            MojoError::Capacity
+        } else {
+            MojoError::InvalidOutput
+        });
+    }
+    let mut reasons = Vec::with_capacity(count);
+    let mut previous_end = 0;
+    for span in spans.chunks_exact(2) {
+        let start = usize::try_from(span[0]).map_err(|_| MojoError::InvalidOutput)?;
+        let end = usize::try_from(span[1]).map_err(|_| MojoError::InvalidOutput)?;
+        if start < previous_end || end <= start {
+            return Err(MojoError::InvalidOutput);
+        }
+        let slice = value.get(start..end).ok_or(MojoError::InvalidOutput)?;
+        reasons.push(slice.to_string());
+        previous_end = end;
+    }
+    Ok(reasons)
+}
+
 /// Values for the seven Smart Context diagnostic counters plus event and
 /// decision counts, ordered as event, rewritten, fallback, before, after,
 /// saved, estimated tokens, repeat refs, static deltas, and repo state facts.
@@ -697,6 +769,44 @@ pub fn runtime_doctor_profile_provider_kind(provider: &str) -> Result<i64, MojoE
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn runtime_doctor_reason_spans_are_mojo_owned_with_strict_abi() {
+        for (value, expected) in [
+            ("", vec![]),
+            ("-", vec![]),
+            (",,,", vec![]),
+            ("one", vec!["one"]),
+            (
+                "  first, \u{2003}- , second , , 東京\u{a0}",
+                vec!["first", "second", "東京"],
+            ),
+            ("-ish, --, -", vec!["-ish", "--"]),
+        ] {
+            assert_eq!(
+                runtime_doctor_split_reason_field(value).unwrap(),
+                expected,
+                "{value}"
+            );
+        }
+        let source = view(" one, two ");
+        let mut count = -1_i64;
+        let result = mojo_mut_pointer_address(&mut count);
+        let input = mojo_pointer_address(&source);
+        let call = |version, output, capacity| unsafe {
+            prodex_mojo_runtime_doctor_reason_spans_v1(version, input, output, capacity, result)
+        };
+        assert_eq!(call(2, 0, 0), 4);
+        assert_eq!(call(1, 0, 3), 1);
+        assert_eq!(count, -1);
+        assert_eq!(call(1, 0, 0), 0);
+        assert_eq!(count, 2);
+        let mut spans = [0_u64; 4];
+        let output = mojo_mut_pointer_address(spans.as_mut_ptr());
+        assert_eq!(call(1, output, 1), 3);
+        assert_eq!(call(1, output, 2), 0);
+        assert_eq!(spans, [1, 4, 6, 9]);
+    }
 
     #[test]
     fn runtime_doctor_smart_context_numeric_plans_use_compiled_mojo() {

@@ -3,6 +3,7 @@ from std.memory import Pointer
 from rich_text import (
     rich_codepoint,
     rich_codepoint_width,
+    rich_trim_bounds,
     rich_unicode_space,
     rich_view_matches_literal,
     rich_view_ptr,
@@ -482,6 +483,8 @@ def runtime_doctor_smart_context_decision_is_fallback(view: ProdexRichStringView
 
 comptime RUNTIME_DOCTOR_LOG_VALUE_ABI_VERSION: Int64 = 1
 comptime RUNTIME_DOCTOR_MESSAGE_MARKER_ABI_VERSION: Int64 = 1
+comptime RUNTIME_DOCTOR_REASON_SPLIT_ABI_VERSION: Int64 = 1
+comptime RUNTIME_DOCTOR_REASON_SPLIT_MAX_ROWS: Int64 = 65536
 comptime RUNTIME_DOCTOR_FALLBACK_REASON_SOURCE_ABI_VERSION: Int64 = 1
 comptime RUNTIME_DOCTOR_FALLBACK_REASON_SOURCE_EVENT_REASONS: Int64 = 1
 comptime RUNTIME_DOCTOR_FALLBACK_REASON_SOURCE_SELF_CHECK: Int64 = 2
@@ -559,6 +562,67 @@ def prodex_mojo_runtime_doctor_log_message_has_marker_v1(
         unsafe_from_address=Int(result_address)
     )
     result[] = 1 if runtime_doctor_log_message_has_marker(message, marker) else 0
+    return 0
+
+
+# Return the UTF-8 byte spans of trimmed comma-separated reasons. Mojo alone
+# owns separator detection, Unicode trimming and ignored '-' entries. A zero
+# output capacity performs a first pass to size the caller-owned buffer.
+@export("prodex_mojo_runtime_doctor_reason_spans_v1")
+def prodex_mojo_runtime_doctor_reason_spans_v1(
+    abi_version: Int64,
+    input_address: UInt,
+    output_address: UInt,
+    output_capacity: Int64,
+    count_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != RUNTIME_DOCTOR_REASON_SPLIT_ABI_VERSION:
+        return 4
+    if (
+        input_address == 0 or count_address == 0 or output_capacity < 0
+        or output_capacity > RUNTIME_DOCTOR_REASON_SPLIT_MAX_ROWS
+        or (output_capacity != 0 and output_address == 0)
+    ):
+        return 1
+    var input = Pointer[mut=False, ProdexRichStringView, ImmUntrackedOrigin](
+        unsafe_from_address=Int(input_address)
+    )[].copy()
+    if not rich_view_valid(input, 0x7FFFFFFFFFFFFFFF):
+        return 2
+    var count = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(count_address)
+    )
+    count[] = 0
+    var output = Pointer[mut=True, UInt64, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    var source = rich_view_ptr(input)
+    var length = Int64(input.len)
+    var segment_start: Int64 = 0
+    var offset: Int64 = 0
+    var included: Int64 = 0
+    while offset <= length:
+        if offset == length or source[unsafe_offset=offset] == 44:
+            var segment = ProdexRichStringView(
+                input.ptr + UInt(segment_start), UInt(offset - segment_start)
+            )
+            var bounds = rich_trim_bounds(segment)
+            var start = segment_start + bounds[0]
+            var end = segment_start + bounds[1]
+            if start < end and not (end - start == 1 and source[unsafe_offset=start] == 45):
+                if included == RUNTIME_DOCTOR_REASON_SPLIT_MAX_ROWS:
+                    return 3
+                if output_capacity != 0:
+                    if included >= output_capacity:
+                        return 3
+                    output[unsafe_offset=2 * included] = UInt64(start)
+                    output[unsafe_offset=2 * included + 1] = UInt64(end)
+                included += 1
+            segment_start = offset + 1
+        if offset == length:
+            break
+        offset += 1
+    count[] = included
     return 0
 
 

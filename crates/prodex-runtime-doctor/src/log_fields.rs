@@ -33,12 +33,8 @@ pub(crate) fn runtime_doctor_split_reason_field(
     fields
         .get(key)
         .map(|value| {
-            value
-                .split(',')
-                .map(str::trim)
-                .filter(|value| !runtime_doctor_ignored_log_value(value))
-                .map(ToString::to_string)
-                .collect()
+            prodex_mojo_core::rich::runtime_doctor_split_reason_field(value)
+                .expect("Mojo runtime-doctor reason parser returned invalid output")
         })
         .unwrap_or_default()
 }
