@@ -5,7 +5,6 @@ from log_transcript_facts import PRODEX_TRANSCRIPT_ABI_VERSION, transcript_fact_
 
 comptime TRANSCRIPT_SAFE_TEXT_MAX_BYTES: Int64 = 65_536
 comptime TRANSCRIPT_SAFE_TEXT_MARKER = StringSlice(" …[truncated]")
-comptime TRANSCRIPT_JOIN_MAX_PARTS: Int64 = 65_536
 
 
 def transcript_safe_copy_literal(
@@ -118,7 +117,6 @@ def prodex_mojo_transcript_join_user_parts_v1(
     if (
         abi_version != PRODEX_TRANSCRIPT_ABI_VERSION
         or part_count < 0
-        or part_count > TRANSCRIPT_JOIN_MAX_PARTS
         or output_capacity < 0
         or output_address == 0
         or written_address == 0
