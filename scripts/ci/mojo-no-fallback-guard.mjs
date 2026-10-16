@@ -5137,6 +5137,7 @@ export function findViolations(files) {
     }
     if (filePath === DOCTOR_RENDER_MOJO_FILE &&
         (!contents.includes("RENDER_LAST_MARKER_LINE_TRUNCATION: Int64 = 23") ||
+          !contents.includes("RENDER_SELECTION_LATEST_DECISION: Int64 = 26") ||
           !contents.includes("RENDER_CHAIN_EVENT_SUMMARY: Int64 = 24") ||
           !contents.includes("def runtime_doctor_render_chain_event_summary(") ||
           !contents.includes("def runtime_doctor_render_put_bounded_value(") ||
@@ -5144,7 +5145,7 @@ export function findViolations(files) {
           !contents.includes("runtime_doctor_render_put_bounded_value(writer, runtime_doctor_render_input_value(input, index), 48, StringSlice(\"...\"), 3)") ||
           !contents.includes("runtime_doctor_render_put_bounded_value(\n        writer,\n        runtime_doctor_render_input_value(input, 0),\n        160,") ||
           !contents.includes("runtime_doctor_render_last_marker_line(writer, input)") ||
-          !contents.includes("input.operation > RENDER_CONFIGURATION_STATUS"))) {
+          !contents.includes("input.operation > RENDER_SELECTION_LATEST_DECISION"))) {
       return [`${filePath}: bounded Unicode truncation for timeline details and last-marker lines must stay in the production Mojo renderer`];
     }
     return [];

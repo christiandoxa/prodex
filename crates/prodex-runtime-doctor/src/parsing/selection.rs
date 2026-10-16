@@ -68,11 +68,16 @@ pub(super) fn runtime_doctor_record_selection_summary(
     }
 
     let detail = runtime_doctor_request_timeline_detail(fields);
-    summary.selection_summary.latest_decision = Some(if detail.is_empty() {
-        marker.to_string()
-    } else {
-        format!("{marker} {detail}")
-    });
+    summary.selection_summary.latest_decision = Some(
+        prodex_mojo_core::rich::runtime_doctor_render(
+            prodex_mojo_core::rich::RuntimeDoctorRenderInput {
+                operation: prodex_mojo_core::rich::RUNTIME_DOCTOR_RENDER_SELECTION_LATEST_DECISION,
+                detail: 0,
+                values: &[Some(marker), Some(&detail)],
+            },
+        )
+        .expect("Mojo runtime-doctor latest selection formatter returned invalid output"),
+    );
 }
 
 #[cfg(all(test, feature = "runtime-log-mojo"))]
@@ -173,6 +178,10 @@ mod expected_marker_buckets {
         }
         assert_eq!(summary.selection_summary.rejection_reasons.len(), 5);
         assert_eq!(summary.selection_summary.latest_decision, previous_latest);
+        assert_eq!(
+            previous_latest.as_deref(),
+            Some("compact_candidate_exhausted")
+        );
     }
 
     #[test]

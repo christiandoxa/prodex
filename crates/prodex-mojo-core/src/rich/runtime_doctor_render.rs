@@ -11,6 +11,8 @@ pub const RUNTIME_DOCTOR_RENDER_LAST_MARKER_LINE_TRUNCATION: i64 = 23;
 pub const RUNTIME_DOCTOR_RENDER_CHAIN_EVENT_SUMMARY: i64 = 24;
 /// Mojo renderer operation for doctor configuration status.
 pub const RUNTIME_DOCTOR_RENDER_CONFIGURATION_STATUS: i64 = 25;
+/// Mojo renderer operation for the latest human-readable selection decision.
+pub const RUNTIME_DOCTOR_RENDER_SELECTION_LATEST_DECISION: i64 = 26;
 const RUNTIME_DOCTOR_RENDER_VALUE_COUNT: usize = 16;
 
 pub struct RuntimeDoctorRenderInput<'a> {
@@ -132,7 +134,7 @@ pub fn runtime_doctor_latest_timeline_index(
 
 pub fn runtime_doctor_render(input: RuntimeDoctorRenderInput<'_>) -> Result<String, MojoError> {
     ensure_rich_abi()?;
-    if !(0..=RUNTIME_DOCTOR_RENDER_CONFIGURATION_STATUS).contains(&input.operation)
+    if !(0..=RUNTIME_DOCTOR_RENDER_SELECTION_LATEST_DECISION).contains(&input.operation)
         || !(0..=799).contains(&input.detail)
         || input.values.len() > RUNTIME_DOCTOR_RENDER_VALUE_COUNT
         || input
@@ -293,6 +295,29 @@ pub fn runtime_doctor_configuration_status(error: Option<&str>) -> Result<String
         detail: 0,
         values: &[error],
     })
+}
+
+#[cfg(test)]
+mod selection_latest_render_tests {
+    use super::*;
+
+    #[test]
+    fn mojo_selection_latest_decision_renders_marker_and_optional_details() {
+        let render = |marker: &str, detail: Option<&str>| {
+            runtime_doctor_render(RuntimeDoctorRenderInput {
+                operation: RUNTIME_DOCTOR_RENDER_SELECTION_LATEST_DECISION,
+                detail: 0,
+                values: &[Some(marker), detail],
+            })
+            .unwrap()
+        };
+        assert_eq!(render("selection_pick", None), "selection_pick");
+        assert_eq!(render("selection_pick", Some("")), "selection_pick");
+        assert_eq!(
+            render("selection_skip_affinity", Some("profile=東京 reason=🧭")),
+            "selection_skip_affinity profile=東京 reason=🧭"
+        );
+    }
 }
 
 #[cfg(test)]
