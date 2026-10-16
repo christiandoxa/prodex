@@ -123,6 +123,10 @@ const PROFILE_ROUTE_CIRCUIT_ADAPTER_FILE = "crates/prodex-mojo-core/src/runtime/
 const PROFILE_ROUTE_CIRCUIT_MOJO_FILE = "mojo/prodex_core/runtime_profile_route_circuit.mojo";
 const PROFILE_ROUTE_CIRCUIT_TEST_FILE = "crates/prodex-mojo-core/tests/runtime_profile_route_circuit.rs";
 const PROMOTED_FILES = [
+  "crates/prodex-redaction/src/lib.rs",
+  "crates/prodex-mojo-core/src/redaction.rs",
+  "mojo/prodex_core/redaction.mojo",
+  "crates/prodex-redaction/tests/src/lib.rs",
   "crates/prodex-app/src/runtime_proxy/quota/gate.rs",
   "crates/prodex-app/src/runtime_proxy/websocket_message/failure_handling/retry_recovery.rs",
   "crates/prodex-mojo-core/src/rich/runtime_doctor_plan/tests.rs",
@@ -1023,6 +1027,9 @@ const STATE_FILE = "crates/prodex-state/src/lib.rs";
 const STATE_PROVIDER_FILE = "crates/prodex-state/src/provider_capabilities.rs";
 const STATE_REMEMBER_FILE = "crates/prodex-app/src/runtime_proxy/lineage/remember.rs";
 const REDACTION_FILE = "crates/prodex-redaction/src/lib.rs";
+const REDACTION_ABI_FILE = "crates/prodex-mojo-core/src/redaction.rs";
+const REDACTION_MOJO_FILE = "mojo/prodex_core/redaction.mojo";
+const REDACTION_CALLER_TEST_FILE = "crates/prodex-redaction/tests/src/lib.rs";
 const PROFILE_IDENTITY_FILE = "crates/prodex-profile-identity/src/lib.rs";
 const SUPER_PROVIDER_CONFIG_FILE = "crates/prodex-cli/src/runtime_args.rs";
 const SUPER_PROVIDER_CONFIG_ADAPTER_FILE = "crates/prodex-mojo-core/src/super_provider_config.rs";
@@ -3062,6 +3069,7 @@ export function findViolations(files) {
         "prodex_mojo_core::redaction::key_looks_sensitive(",
         "prodex_mojo_core::redaction::redact_secret_like_text(",
         "prodex_mojo_core::redaction::redact_gateway_text(",
+        "prodex_mojo_core::redaction::redaction_text_snippet(text, max_chars)",
       ];
       const violations = required
         .filter((call) => !contents.includes(call))
@@ -3070,7 +3078,40 @@ export function findViolations(files) {
       if (retired.test(contents)) {
         violations.push(`${filePath}: contains retired Rust redaction semantics`);
       }
+      const oldSnippet = [
+        "text.split_whitespace()",
+        "normalized.chars().take(max_chars)",
+        "normalized.chars().count() > max_chars",
+      ];
+      for (const marker of oldSnippet) {
+        if (contents.includes(marker)) {
+          violations.push(`${filePath}: restored Rust redaction snippet formatter (${marker})`);
+        }
+      }
       return violations;
+    }
+    if (filePath === REDACTION_ABI_FILE) {
+      return [
+        "prodex_redaction_text_snippet_v1(",
+        "pub fn redaction_text_snippet(",
+        "redaction_text_snippet_mojo_normalizes_unicode_and_clips_scalars",
+        "redaction_text_snippet_mojo_abi_rejects_bad_inputs_without_writing",
+      ].filter((marker) => !contents.includes(marker))
+        .map((marker) => `${filePath}: Mojo snippet adapter or direct coverage missing ${marker}`);
+    }
+    if (filePath === REDACTION_MOJO_FILE) {
+      return [
+        '@export("prodex_redaction_text_snippet_v1")',
+        "rich_unicode_space(",
+        "rich_codepoint_width(",
+        "reaction_writer_range(",
+        "reaction_writer_literal(",
+      ].filter((marker) => !contents.includes(marker))
+        .map((marker) => `${filePath}: Mojo snippet semantic ownership missing ${marker}`);
+    }
+    if (filePath === REDACTION_CALLER_TEST_FILE &&
+        !contents.includes("redaction_diagnostic_snippet_uses_compiled_mojo_unicode_normalization")) {
+      return [`${filePath}: redaction snippet caller coverage must remain`];
     }
     if (filePath !== PRESIDIO_LOCAL_REDACTION_FILE) return [];
     const production = contents.split("#[cfg(test)]\nmod tests", 1)[0];

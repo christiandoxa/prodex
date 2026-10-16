@@ -247,3 +247,24 @@ fn redaction_mojo_boundary_matrix_preserves_exact_fail_closed_contracts() {
         assert_eq!(value, serde_json::Value::String(expected));
     }
 }
+
+#[test]
+fn redaction_diagnostic_snippet_uses_compiled_mojo_unicode_normalization() {
+    for (input, limit, expected) in [
+        ("", 0, "-"),
+        ("\u{a0}\u{2003}", 0, "-"),
+        ("  東京  🙂  live  ", 9, "東京 🙂 live"),
+        ("  東京  🙂  live  ", 4, "東京 🙂..."),
+        ("e\u{301} 🙂", 1, "e..."),
+        (" alpha\tbeta ", 0, "..."),
+    ] {
+        assert_eq!(
+            redaction_text_snippet(input, limit),
+            expected,
+            "{input:?}/{limit}"
+        );
+    }
+    // Exercise the real diagnostic body path after Serde and secret masking.
+    let snippet = redaction_redacted_body_snippet(br#"{"message":"hello   world"}"#, 8);
+    assert_eq!(snippet, "{\"messag...");
+}

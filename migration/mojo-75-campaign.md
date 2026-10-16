@@ -5676,3 +5676,10 @@ function declaration authority. This deletes Rust flat-to-nested JSON map
 construction and preserves nested-field precedence, including explicit null.
 The original compiled ToolDeclaration renderer is reused, with direct ABI and
 Gemini caller tests plus a no-fallback source guard.
+
+## Diagnostic snippet normalization and scalar clipping migrated to Mojo
+
+The compiled redaction owner now normalizes Unicode whitespace, applies
+empty-body display policy, and clips diagnostic snippets by Unicode scalar
+count. Rust's duplicate split/trim/ellipsis code was deleted. Strict ABI,
+redaction caller tests and a no-Rust-fallback guard cover the boundary.
