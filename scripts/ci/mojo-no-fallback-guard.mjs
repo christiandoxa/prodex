@@ -119,6 +119,11 @@ const PROFILE_LOGIN_CLAUDE_FILE = "crates/prodex-app/src/profile_commands/login/
 const PROFILE_LOGIN_ADAPTER_FILE = "crates/prodex-mojo-core/src/profile_login_policy.rs";
 const PROFILE_LOGIN_MOJO_FILE = "mojo/prodex_core/profile_login_policy.mojo";
 const PROFILE_LOGIN_TEST_FILE = "crates/prodex-mojo-core/tests/profile_login_policy.rs";
+const PROFILE_IDENTITY_FILE = "crates/prodex-profile-identity/src/lib.rs";
+const PROFILE_IDENTITY_PROFILE_NAMES_FILE = "crates/prodex-app/src/profile_commands/login/profile_names.rs";
+const PROFILE_IDENTITY_ADAPTER_FILE = "crates/prodex-mojo-core/src/profile_identity.rs";
+const PROFILE_IDENTITY_MOJO_FILE = "mojo/prodex_core/profile_identity.mojo";
+const PROFILE_IDENTITY_ABI_TEST_FILE = "crates/prodex-mojo-core/tests/profile_identity.rs";
 const MAIN_MODEL_CATALOG_FILE = "crates/prodex-app/src/app_commands/super_main_catalog.rs";
 const MAIN_MODEL_CATALOG_ADAPTER_FILE = "crates/prodex-mojo-core/src/rich/catalog_planner.rs";
 const MAIN_MODEL_CATALOG_MOJO_FILE = "mojo/prodex_core/rich_catalog.mojo";
@@ -389,8 +394,11 @@ const PROMOTED_FILES = [
   "crates/prodex-quota/tests/src/render/quota_reset_message.rs",
   "crates/prodex-mojo-core/tests/quota_reset_epoch.rs",
   "mojo/prodex_core/quota.mojo",
-  "crates/prodex-profile-identity/src/lib.rs",
-  "crates/prodex-mojo-core/src/profile_identity.rs",
+  PROFILE_IDENTITY_FILE,
+  PROFILE_IDENTITY_PROFILE_NAMES_FILE,
+  PROFILE_IDENTITY_ADAPTER_FILE,
+  PROFILE_IDENTITY_MOJO_FILE,
+  PROFILE_IDENTITY_ABI_TEST_FILE,
   "crates/prodex-domain/src/governance/inspection.rs",
   "crates/prodex-mojo-core/build.rs",
   "crates/prodex-mojo-core/src/lib.rs",
@@ -1079,7 +1087,6 @@ const REDACTION_FILE = "crates/prodex-redaction/src/lib.rs";
 const REDACTION_ABI_FILE = "crates/prodex-mojo-core/src/redaction.rs";
 const REDACTION_MOJO_FILE = "mojo/prodex_core/redaction.mojo";
 const REDACTION_CALLER_TEST_FILE = "crates/prodex-redaction/tests/src/lib.rs";
-const PROFILE_IDENTITY_FILE = "crates/prodex-profile-identity/src/lib.rs";
 const SUPER_PROVIDER_CONFIG_FILE = "crates/prodex-cli/src/runtime_args.rs";
 const SUPER_PROVIDER_CONFIG_ADAPTER_FILE = "crates/prodex-mojo-core/src/super_provider_config.rs";
 const EXTERNAL_PROVIDER_CONFIG_FILE = "crates/prodex-app/src/runtime_external_provider_config.rs";
@@ -3349,6 +3356,47 @@ export function findViolations(files) {
         violations.push(filePath + ": contains restored Rust secret rotation bounds policy");
       }
       return violations;
+    }
+    if (filePath === PROFILE_IDENTITY_PROFILE_NAMES_FILE) {
+      const production = contents.split("#[cfg(test)]", 1)[0];
+      const violations = [];
+      if (!production.includes(
+        "prodex_mojo_core::profile_identity::default_api_key_profile_name(",
+      )) {
+        violations.push(`${filePath}: default API-key profile naming must retain the Mojo planner`);
+      }
+      if (/format!\(\s*"api_key_|sanitize_profile_slug\(\s*&format!|"api_key"\.to_string\(\)/u.test(production)) {
+        violations.push(`${filePath}: contains restored Rust default API-key profile-name semantics`);
+      }
+      if (!contents.includes("default_api_key_profile_name_uses_mojo_for_host_and_fallback")) {
+        violations.push(`${filePath}: default API-key profile naming needs a caller regression test`);
+      }
+      return violations;
+    }
+    if (filePath === PROFILE_IDENTITY_ADAPTER_FILE) {
+      const required = [
+        "DefaultApiKeyName = 22",
+        "pub fn default_api_key_profile_name(",
+        "ProfileIdentityOperation::DefaultApiKeyName",
+      ];
+      return required
+        .filter((marker) => !contents.includes(marker))
+        .map((marker) => `${filePath}: profile identity adapter must retain ${marker}`);
+    }
+    if (filePath === PROFILE_IDENTITY_MOJO_FILE) {
+      const required = [
+        "PROFILE_IDENTITY_DEFAULT_API_KEY_NAME: Int64 = 22",
+        "def profile_sanitize_slug_with_prefix(",
+        "def profile_default_api_key_name(",
+        "if operation == PROFILE_IDENTITY_DEFAULT_API_KEY_NAME:",
+      ];
+      return required
+        .filter((marker) => !contents.includes(marker))
+        .map((marker) => `${filePath}: default API-key profile naming must remain Mojo-owned (${marker})`);
+    }
+    if (filePath === PROFILE_IDENTITY_ABI_TEST_FILE &&
+        !contents.includes("default_api_key_profile_name_abi_owns_prefix_fallback_and_validation")) {
+      return [`${filePath}: default API-key profile naming needs invalid-ABI and capacity coverage`];
     }
     if (filePath !== PROFILE_IDENTITY_FILE) return [];
     const functions = [

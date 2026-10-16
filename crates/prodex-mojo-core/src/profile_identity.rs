@@ -32,6 +32,7 @@ enum ProfileIdentityOperation {
     NameCandidate = 19,
     TrimmedNonempty = 20,
     ImportEmail = 21,
+    DefaultApiKeyName = 22,
 }
 
 #[repr(C)]
@@ -319,6 +320,26 @@ pub fn sanitize_profile_slug(value: &str) -> Result<String, MojoError> {
         value,
         "api_key".len(),
     )
+}
+
+pub fn default_api_key_profile_name(host: Option<&str>) -> Result<String, MojoError> {
+    let host_value = host.unwrap_or_default();
+    let capacity = host_value
+        .len()
+        .checked_add("api_key_".len())
+        .ok_or(MojoError::InvalidInput)?
+        .max("api_key".len());
+    let result = call_kernel(
+        ProfileIdentityOperation::DefaultApiKeyName,
+        host_value,
+        "",
+        optional_flag(host, PROFILE_PRIMARY_PRESENT),
+        0,
+        0,
+        capacity,
+    )?;
+    String::from_utf8(result.output[..result.written].to_vec())
+        .map_err(|_| MojoError::InvalidOutput)
 }
 
 pub fn canonical_profile_identity_key(
