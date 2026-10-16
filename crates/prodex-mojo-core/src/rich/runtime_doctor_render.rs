@@ -50,6 +50,14 @@ unsafe extern "C" {
         output_capacity: i64,
         written: u64,
     ) -> i64;
+    fn prodex_mojo_runtime_doctor_route_event_retention_v1(
+        abi_version: i64,
+        action_present: i64,
+        profile_present: i64,
+        route_present: i64,
+        existing_events: u64,
+        decision: u64,
+    ) -> i64;
     fn prodex_mojo_runtime_doctor_timeline_append_v1(
         abi_version: i64,
         existing_count: u64,
@@ -68,6 +76,56 @@ unsafe extern "C" {
         output_capacity: i64,
         written: u64,
     ) -> i64;
+}
+
+/// Mojo-owned route/profile diagnostic event retention plan. Rust may
+/// materialize the event only when the compiled policy accepts it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RuntimeDoctorRouteEventPlan {
+    pub accept: bool,
+    pub evict_oldest: bool,
+}
+
+pub fn runtime_doctor_route_event_plan(
+    action_present: bool,
+    profile_present: bool,
+    route_present: bool,
+    existing_events: usize,
+) -> Result<RuntimeDoctorRouteEventPlan, MojoError> {
+    ensure_rich_abi()?;
+    let mut result = [-1_i64; 2];
+    let status = unsafe {
+        prodex_mojo_runtime_doctor_route_event_retention_v1(
+            RUNTIME_DOCTOR_RENDER_ABI_VERSION,
+            i64::from(action_present),
+            i64::from(profile_present),
+            i64::from(route_present),
+            u64::try_from(existing_events).map_err(|_| MojoError::InvalidInput)?,
+            mojo_mut_pointer_address(result.as_mut_ptr()),
+        )
+    };
+    if status != 0 {
+        return Err(match status {
+            1 => MojoError::InvalidInput,
+            4 => MojoError::AbiMismatch,
+            _ => MojoError::InvalidOutput,
+        });
+    }
+    match result {
+        [0, 0] => Ok(RuntimeDoctorRouteEventPlan {
+            accept: false,
+            evict_oldest: false,
+        }),
+        [1, 0] => Ok(RuntimeDoctorRouteEventPlan {
+            accept: true,
+            evict_oldest: false,
+        }),
+        [1, 1] => Ok(RuntimeDoctorRouteEventPlan {
+            accept: true,
+            evict_oldest: true,
+        }),
+        _ => Err(MojoError::InvalidOutput),
+    }
 }
 
 /// Plan whether adding one request event removes the oldest stored event.
@@ -317,6 +375,69 @@ mod selection_latest_render_tests {
             render("selection_skip_affinity", Some("profile=東京 reason=🧭")),
             "selection_skip_affinity profile=東京 reason=🧭"
         );
+    }
+}
+
+#[cfg(test)]
+mod route_event_policy_tests {
+    use super::*;
+
+    #[test]
+    fn mojo_route_profile_event_plan_validates_presence_and_exact_cap() {
+        for action in [false, true] {
+            for profile in [false, true] {
+                for route in [false, true] {
+                    for count in [0, 19, 20, 21] {
+                        let plan =
+                            runtime_doctor_route_event_plan(action, profile, route, count).unwrap();
+                        let accepted = action && (profile || route);
+                        assert_eq!(plan.accept, accepted);
+                        assert_eq!(plan.evict_oldest, accepted && count >= 20);
+                    }
+                }
+            }
+        }
+        assert_eq!(
+            runtime_doctor_route_event_plan(true, true, true, usize::MAX),
+            Ok(RuntimeDoctorRouteEventPlan {
+                accept: true,
+                evict_oldest: true
+            }),
+        );
+    }
+
+    #[test]
+    fn mojo_route_profile_event_abi_rejects_flags_before_writing() {
+        let mut result = [77_i64; 2];
+        unsafe {
+            assert_eq!(
+                prodex_mojo_runtime_doctor_route_event_retention_v1(
+                    2,
+                    1,
+                    1,
+                    0,
+                    20,
+                    mojo_mut_pointer_address(result.as_mut_ptr()),
+                ),
+                4
+            );
+            assert_eq!(
+                prodex_mojo_runtime_doctor_route_event_retention_v1(
+                    1,
+                    1,
+                    2,
+                    0,
+                    20,
+                    mojo_mut_pointer_address(result.as_mut_ptr()),
+                ),
+                1
+            );
+            assert_eq!(
+                prodex_mojo_runtime_doctor_route_event_retention_v1(1, 1, 1, 0, 20, 0,),
+                1
+            );
+        }
+        assert_eq!(result, [77, 77]);
     }
 }
 

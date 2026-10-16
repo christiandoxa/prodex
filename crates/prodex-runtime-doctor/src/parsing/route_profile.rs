@@ -4,8 +4,6 @@ use crate::{RuntimeDoctorRouteProfileEvent, RuntimeDoctorSummary};
 
 use super::request_timeline::runtime_doctor_request_timeline_detail;
 
-const RUNTIME_DOCTOR_ROUTE_PROFILE_MAX_EVENTS: usize = 20;
-
 fn runtime_doctor_route_profile_action(marker: &str) -> Option<&'static str> {
     let semantics = prodex_mojo_core::rich::runtime_doctor_marker_semantics(marker)
         .expect("Mojo runtime-doctor marker semantics returned invalid output");
@@ -34,9 +32,7 @@ pub(super) fn runtime_doctor_record_route_profile_event(
     marker: &str,
     fields: &BTreeMap<String, String>,
 ) {
-    let Some(action) = runtime_doctor_route_profile_action(marker) else {
-        return;
-    };
+    let action = runtime_doctor_route_profile_action(marker);
     let profile = fields
         .get("profile")
         .filter(|value| !value.is_empty())
@@ -45,9 +41,17 @@ pub(super) fn runtime_doctor_record_route_profile_event(
         .get("route")
         .filter(|value| !value.is_empty())
         .cloned();
-    if profile.is_none() && route.is_none() {
+    let plan = prodex_mojo_core::rich::runtime_doctor_route_event_plan(
+        action.is_some(),
+        profile.is_some(),
+        route.is_some(),
+        summary.route_profile_events.len(),
+    )
+    .expect("compiled Mojo route-profile event retention plan returned invalid output");
+    if !plan.accept {
         return;
     }
+    let action = action.expect("Mojo accepted only known marker actions");
     summary
         .route_profile_events
         .push(RuntimeDoctorRouteProfileEvent {
@@ -58,8 +62,82 @@ pub(super) fn runtime_doctor_record_route_profile_event(
             route,
             detail: runtime_doctor_request_timeline_detail(fields),
         });
-    if summary.route_profile_events.len() > RUNTIME_DOCTOR_ROUTE_PROFILE_MAX_EVENTS {
+    if plan.evict_oldest {
         summary.route_profile_events.remove(0);
+    }
+}
+
+#[cfg(all(test, feature = "runtime-log-mojo"))]
+mod event_retention_tests {
+    use super::*;
+
+    #[test]
+    fn mojo_route_profile_retains_twenty_newest_rows_and_skips_empty_events() {
+        let mut summary = RuntimeDoctorSummary::default();
+        let empty = BTreeMap::<String, String>::new();
+        runtime_doctor_record_route_profile_event(&mut summary, None, "selection_pick", &empty);
+        runtime_doctor_record_route_profile_event(
+            &mut summary,
+            None,
+            "unknown_marker",
+            &BTreeMap::from([("profile".to_owned(), "alpha".to_owned())]),
+        );
+        assert!(summary.route_profile_events.is_empty());
+
+        for index in 0..25 {
+            let fields = BTreeMap::from([
+                ("profile".to_owned(), format!("profile-東京-{index:02}")),
+                ("route".to_owned(), "responses".to_owned()),
+            ]);
+            runtime_doctor_record_route_profile_event(
+                &mut summary,
+                None,
+                "selection_pick",
+                &fields,
+            );
+        }
+        assert_eq!(summary.route_profile_events.len(), 20);
+        assert_eq!(
+            summary
+                .route_profile_events
+                .first()
+                .unwrap()
+                .profile
+                .as_deref(),
+            Some("profile-東京-05"),
+        );
+        assert_eq!(
+            summary
+                .route_profile_events
+                .last()
+                .unwrap()
+                .profile
+                .as_deref(),
+            Some("profile-東京-24"),
+        );
+
+        // A valid action plus only a route is still a retained event.
+        runtime_doctor_record_route_profile_event(
+            &mut summary,
+            Some("2026-10-16T12:00Z"),
+            "profile_health",
+            &BTreeMap::from([("route".to_owned(), "websocket".to_owned())]),
+        );
+        assert_eq!(summary.route_profile_events.len(), 20);
+        assert_eq!(
+            summary.route_profile_events[0].profile.as_deref(),
+            Some("profile-東京-06")
+        );
+        assert_eq!(summary.route_profile_events.last().unwrap().profile, None);
+        assert_eq!(
+            summary
+                .route_profile_events
+                .last()
+                .unwrap()
+                .route
+                .as_deref(),
+            Some("websocket")
+        );
     }
 }
 

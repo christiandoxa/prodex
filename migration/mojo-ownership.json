@@ -1626,6 +1626,10 @@
           {
             "start": 1109,
             "end": 1164
+          },
+          {
+            "start": 1166,
+            "end": 1197
           }
         ],
         "production_reachable": true,
@@ -1637,7 +1641,8 @@
           "runtime_doctor_count_breakdown_render",
           "runtime_doctor_report_field_plan",
           "runtime_doctor_timeline_event_retention",
-          "runtime_doctor_latest_request_timeline"
+          "runtime_doctor_latest_request_timeline",
+          "runtime_doctor_route_profile_event_retention"
         ]
       },
       {
@@ -1650,7 +1655,8 @@
           "runtime_doctor_marker_scope_render",
           "runtime_doctor_count_breakdown_render",
           "runtime_doctor_timeline_event_retention",
-          "runtime_doctor_latest_request_timeline"
+          "runtime_doctor_latest_request_timeline",
+          "runtime_doctor_route_profile_event_retention"
         ]
       },
       {
@@ -11988,6 +11994,29 @@
       "duplicate_production_owner": false,
       "platform_fallback": false,
       "rust_adapter_scope": "Host typed function-object fact, borrowed text and result materialization; Mojo owns the four streamed-delta eligibility modes"
+    },
+    {
+      "name": "runtime_doctor_route_profile_event_retention",
+      "domain": "runtime-doctor/route-profile-event-retention",
+      "introduced_in": "0.438.0",
+      "baseline_state": "Rust accepted a route/profile event only for a known marker with any nonempty owner field, then removed the oldest when appending past twenty",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_mojo_runtime_doctor_route_event_retention_v1",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/runtime_doctor_render.mojo",
+      "consumer": "crates/prodex-runtime-doctor/src/parsing/route_profile.rs",
+      "consumer_marker": "prodex_mojo_core::rich::runtime_doctor_route_event_plan(",
+      "production_consumers": [
+        "crates/prodex-runtime-doctor/src/parsing/route_profile.rs"
+      ],
+      "production_reachability_test": "crates/prodex-runtime-doctor/src/parsing/route_profile.rs",
+      "rust_owner_before": "Rust route/profile event skip condition and MAX_EVENTS=20 cap/eviction branch",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "Deleted Rust event skip/evict thresholds; direct Mojo 32-case matrix and ABI rejection plus real 25-row profile/route event test preserve FIFO and unknown markers",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "Host marker-action semantics lookup through existing Mojo, optional strings and Vec data, and application of validated Mojo accept/evict decisions"
     }
   ],
   "rust_semantic_reductions": [
