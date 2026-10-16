@@ -268,3 +268,27 @@ fn redaction_diagnostic_snippet_uses_compiled_mojo_unicode_normalization() {
     let snippet = redaction_redacted_body_snippet(br#"{"message":"hello   world"}"#, 8);
     assert_eq!(snippet, "{\"messag...");
 }
+
+#[test]
+fn redaction_cli_mojo_masks_sensitive_following_argument_without_rust_oracle() {
+    let values = [
+        "--api-key",
+        "opaque-credential",
+        "--model",
+        "gpt-5.4",
+        "--api-key=inline-value",
+        "---authorization",
+        "next-secret-value",
+        "--secret-東京",
+        "other-sensitive-value",
+    ];
+    let redacted =
+        redaction_redacted_cli_args(&values.into_iter().map(OsString::from).collect::<Vec<_>>());
+    assert_eq!(redacted[1], "<redacted>");
+    assert_eq!(redacted[3], "gpt-5.4");
+    assert_eq!(redacted[6], "<redacted>");
+    assert_eq!(redacted[8], "<redacted>");
+    // Inline arguments are not followed by another masked value; inline
+    // credential content is handled by the existing compiled redactor.
+    assert_ne!(redacted[4], "--api-key");
+}

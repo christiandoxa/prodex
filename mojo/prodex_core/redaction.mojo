@@ -309,6 +309,40 @@ def prodex_redaction_key_sensitive_v1(
     return Int64(reaction_key_sensitive_ptr(rich_view_ptr(input), input_length))
 
 
+# CLI argument masking is a pure policy over one already-decoded OsString.
+# The host handles argument iteration; Mojo alone decides when a sensitive
+# bare flag consumes and masks the following argument.
+@export("prodex_redaction_cli_redact_next_v1")
+def prodex_redaction_cli_redact_next_v1(
+    abi_version: Int64, input_address: UInt, input_length: Int64
+) abi("C") -> Int64:
+    if abi_version != REACTION_ABI_VERSION:
+        return -4
+    if input_length < 0 or (input_length > 0 and input_address == 0):
+        return -1
+    var input = reaction_view(input_address, input_length)
+    if not rich_view_valid(input, 0x7FFFFFFFFFFFFFFF):
+        return -1
+    if input_length == 0:
+        return 0
+    var source = rich_view_ptr(input)
+    if source[unsafe_offset=0] != 45:
+        return 0
+    var start: Int64 = 0
+    while start < input_length and source[unsafe_offset=start] == 45:
+        start += 1
+    for index in range(start, input_length):
+        if source[unsafe_offset=index] == 61:
+            return 0
+    return Int64(
+        reaction_key_sensitive_ptr(
+            Pointer[mut=False, UInt8, ImmUntrackedOrigin](
+                unsafe_from_address=Int(input_address) + Int(start)
+            ), input_length - start
+        )
+    )
+
+
 def reaction_starts_with_ignore_ascii_case(
     source: Pointer[mut=False, UInt8, _],
     length: Int64,
