@@ -5660,3 +5660,11 @@ cursor operation to initialize, advance a model, rotate a credential and stop
 at exhaustion. Rust's count-based initialization and index advancement were
 removed, leaving host transport and DTO reconstruction only. Direct strict
 ABI and real retry caller regressions enforce the single semantic owner.
+
+## Gemini rejected builtin retry priority migrated to Mojo
+
+The compiled Gemini tooling-policy module now arbitrates the four explicitly
+rejected builtin-tool retry candidates and attempts already made. Rust only
+collects Mojo-owned rejection facts and performs request JSON projection;
+the prior Rust filter/find_map priority selector was deleted. Strict ABI and
+Gemini provider-caller regressions verify candidate ordering and exhaustion.

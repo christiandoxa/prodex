@@ -142,13 +142,30 @@ pub fn gemini_provider_core_unsupported_tool_fallback_body(
     body: &[u8],
     error_body: &[u8],
 ) -> Option<(&'static str, Vec<u8>)> {
-    ["computerUse", "codeExecution", "urlContext", "googleSearch"]
-        .into_iter()
-        .filter(|tool_name| crate::provider_error_rejects_request_member(error_body, tool_name))
-        .find_map(|tool_name| {
-            gemini_provider_core_request_body_without_tool(body, tool_name)
-                .map(|body| (tool_name, body))
-        })
+    // Fixed ABI labels only. Mojo determines retry priority and exhaustion.
+    const TOOL_NAMES: [&str; 4] = ["computerUse", "codeExecution", "urlContext", "googleSearch"];
+    let rejected = TOOL_NAMES
+        .iter()
+        .enumerate()
+        .fold(0_u8, |mask, (index, tool)| {
+            mask | (u8::from(crate::provider_error_rejects_request_member(
+                error_body, tool,
+            )) << index)
+        });
+    let mut attempted = 0_u8;
+    while let Some(index) =
+        prodex_mojo_core::gemini_tooling_policy::gemini_unsupported_tool_retry_choice(
+            rejected, attempted,
+        )
+        .expect("Mojo Gemini unsupported-tool retry choice returned invalid output")
+    {
+        attempted |= 1 << index;
+        let tool_name = TOOL_NAMES[index];
+        if let Some(rewritten) = gemini_provider_core_request_body_without_tool(body, tool_name) {
+            return Some((tool_name, rewritten));
+        }
+    }
+    None
 }
 
 #[cfg(test)]
@@ -298,6 +315,33 @@ mod tests {
                 br#"{"error":{"message":"request failed for googleSearch"}}"#,
             ),
             None
+        );
+    }
+
+    #[test]
+    fn unsupported_tool_retry_chooses_next_rejected_available_builtin_via_mojo() {
+        let request = br#"{"request":{"tools":[{"googleSearch":{}},{"keep":true}]}}"#;
+        let both_rejected = br#"{"error":{"status":"INVALID_ARGUMENT","message":["Unknown name computerUse","Unknown name googleSearch"]}}"#;
+        assert_eq!(
+            gemini_provider_core_unsupported_tool_fallback_body(request, both_rejected),
+            Some((
+                "googleSearch",
+                br#"{"request":{"tools":[{"keep":true}]}}"#.to_vec()
+            )),
+        );
+
+        let with_both = br#"{"request":{"tools":[{"computerUse":{}},{"googleSearch":{}}]}}"#;
+        assert_eq!(
+            gemini_provider_core_unsupported_tool_fallback_body(with_both, both_rejected),
+            Some((
+                "computerUse",
+                br#"{"request":{"tools":[{"googleSearch":{}}]}}"#.to_vec()
+            )),
+        );
+        let no_rejection = br#"{"error":{"message":"unsupported tool error"}}"#;
+        assert_eq!(
+            gemini_provider_core_unsupported_tool_fallback_body(with_both, no_rejection),
+            None,
         );
     }
 
