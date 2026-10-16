@@ -5,6 +5,13 @@ use crate::MojoError;
 const ABI_VERSION: i64 = 1;
 
 unsafe extern "C" {
+    fn prodex_terminal_connected_separator_line_v1(
+        abi: i64,
+        width: u64,
+        output_address: u64,
+        output_capacity: i64,
+        written_address: u64,
+    ) -> i64;
     fn prodex_terminal_positive_size_override_v1(
         abi: i64,
         text_address: u64,
@@ -114,6 +121,29 @@ fn check_status(status: i64) -> Result<(), MojoError> {
 
 fn from_usize(value: usize) -> Result<u64, MojoError> {
     u64::try_from(value).map_err(|_| MojoError::InvalidInput)
+}
+
+/// Return the exact UTF-8 connected panel separator rendered by compiled
+/// Mojo. The host validates byte count and UTF-8; it does not render fallback
+/// box-drawing characters.
+pub fn terminal_connected_separator_line(width: u16) -> Result<String, MojoError> {
+    let capacity = usize::from(width) * 3;
+    let mut output = vec![0_u8; capacity];
+    let mut written = -1_i64;
+    check_status(unsafe {
+        prodex_terminal_connected_separator_line_v1(
+            ABI_VERSION,
+            u64::from(width),
+            output.as_mut_ptr() as usize as u64,
+            i64::try_from(output.len()).map_err(|_| MojoError::InvalidInput)?,
+            (&mut written as *mut i64) as usize as u64,
+        )
+    })?;
+    let written = usize::try_from(written).map_err(|_| MojoError::InvalidOutput)?;
+    if written != capacity {
+        return Err(MojoError::InvalidOutput);
+    }
+    String::from_utf8(output).map_err(|_| MojoError::InvalidOutput)
 }
 
 /// Parse terminal override text using Mojo Unicode trimming, checked decimal

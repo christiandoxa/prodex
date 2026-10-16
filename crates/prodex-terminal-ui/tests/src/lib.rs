@@ -279,6 +279,10 @@ fn connected_tui_border_helpers_use_junctions() {
     assert_eq!(tui_connected_separator_line(1), "─");
     assert_eq!(tui_connected_separator_line(2), "├┤");
     assert_eq!(tui_connected_separator_line(5), "├───┤");
+    assert_eq!(tui_connected_separator_line(3), "├─┤");
+    let maximal = tui_connected_separator_line(u16::MAX);
+    assert_eq!(maximal.len(), usize::from(u16::MAX) * 3);
+    assert_eq!(maximal.chars().count(), usize::from(u16::MAX));
 }
 
 #[test]

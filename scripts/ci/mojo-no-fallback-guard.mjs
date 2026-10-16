@@ -91,6 +91,7 @@ const DOCTOR_SMART_CONTEXT_DECISION_ADAPTER_FILE = DOCTOR_MARKER_ABI_ADAPTER_FIL
 const DOCTOR_SMART_CONTEXT_DECISION_MOJO_FILE = DOCTOR_MARKER_ABI_MOJO_FILE;
 const DOCTOR_LOG_FIELDS_CONSUMER_FILE = "crates/prodex-runtime-doctor/src/log_fields.rs";
 const TERMINAL_GEOMETRY_CONSUMER_FILE = "crates/prodex-terminal-ui/src/terminal.rs";
+const TERMINAL_SEPARATOR_CONSUMER_FILE = "crates/prodex-terminal-ui/src/panel.rs";
 const TERMINAL_GEOMETRY_ADAPTER_FILE = "crates/prodex-mojo-core/src/terminal_layout.rs";
 const TERMINAL_GEOMETRY_MOJO_FILE = "mojo/prodex_core/terminal_layout.mojo";
 const TERMINAL_GEOMETRY_TEST_FILE = "crates/prodex-mojo-core/src/terminal_layout/tests.rs";
@@ -179,6 +180,7 @@ const PROMOTED_FILES = [
   DOCTOR_SMART_CONTEXT_DECISION_CONSUMER_FILE,
   DOCTOR_LOG_FIELDS_CONSUMER_FILE,
   TERMINAL_GEOMETRY_CONSUMER_FILE,
+  TERMINAL_SEPARATOR_CONSUMER_FILE,
   TERMINAL_GEOMETRY_ADAPTER_FILE,
   TERMINAL_GEOMETRY_MOJO_FILE,
   TERMINAL_GEOMETRY_TEST_FILE,
@@ -7189,12 +7191,20 @@ export function findViolations(files) {
         restoredRust.every((name) => !contents.includes(name))
         ? [] : [`${filePath}: terminal numeric and stty parsing must remain Mojo-owned`];
     }
+    if (filePath === TERMINAL_SEPARATOR_CONSUMER_FILE) {
+      const body = contents.match(/pub fn tui_connected_separator_line\([^]*?^\}/mu)?.[0] ?? "";
+      return body.includes("prodex_mojo_core::terminal_layout::terminal_connected_separator_line(width)") &&
+        !body.includes("match width") && !body.includes('"─".repeat(')
+        ? [] : [`${filePath}: connected separator characters must come from compiled Mojo`];
+    }
     if (filePath === TERMINAL_GEOMETRY_ADAPTER_FILE) {
       const required = [
         "prodex_terminal_positive_size_override_v1(",
         "prodex_terminal_tty_dimensions_v1(",
         "pub fn terminal_positive_size_override(",
         "pub fn terminal_tty_dimensions(",
+        "prodex_terminal_connected_separator_line_v1(",
+        "pub fn terminal_connected_separator_line(",
       ];
       return required.filter((name) => !contents.includes(name))
         .map((name) => `${filePath}: terminal geometry ABI adapter must retain ${name}`);
@@ -7206,6 +7216,8 @@ export function findViolations(files) {
         "terminal_geometry_unsigned(",
         "rich_trim_bounds(text)",
         "rich_unicode_space(",
+        '@export("prodex_terminal_connected_separator_line_v1")',
+        "terminal_separator_write_glyph(",
       ];
       return required.filter((name) => !contents.includes(name))
         .map((name) => `${filePath}: terminal geometry decision must stay Mojo-owned (${name})`);
@@ -7214,6 +7226,8 @@ export function findViolations(files) {
       return [
         "terminal_geometry_env_and_tty_parsing_is_mojo_authoritative",
         "terminal_geometry_strict_abi_rejects_bad_shape_before_output",
+        "connected_separator_utf8_is_rendered_entirely_by_compiled_mojo",
+        "connected_separator_abi_rejects_wrong_capacity_and_version_without_output",
       ].filter((name) => !contents.includes(name))
         .map((name) => `${filePath}: terminal geometry strict coverage must retain ${name}`);
     }
@@ -7849,6 +7863,13 @@ function selfTest() {
   assert.match(findViolations([[OPERATIONAL_HISTOGRAM_CALLER_FILE,
     operationalHistogramCaller + "\nhistogram.count = histogram.count.saturating_add(1);",
   ]]).join("\n"), /histogram bucket planning and observation must use Mojo/u);
+  const terminalSeparatorConsumer = "prodex_mojo_core::terminal_layout::terminal_connected_separator_line(width)";
+  assert.deepEqual(findViolations([[TERMINAL_SEPARATOR_CONSUMER_FILE,
+    "pub fn tui_connected_separator_line(width: u16) -> String {\n" + terminalSeparatorConsumer + "\n}",
+  ]]), []);
+  assert.match(findViolations([[TERMINAL_SEPARATOR_CONSUMER_FILE,
+    "pub fn tui_connected_separator_line(width: u16) -> String {\nmatch width {}\n}",
+  ]]).join("\n"), /connected separator characters must come from compiled Mojo/u);
   const terminalGeometryConsumer = [
     "terminal_positive_size_override(&value)",
     "terminal_tty_dimensions(&text)",
