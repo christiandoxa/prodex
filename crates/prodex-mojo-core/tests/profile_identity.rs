@@ -46,6 +46,7 @@ fn raw_profile_identity_call(
     )
 }
 
+#[allow(clippy::too_many_arguments)]
 fn raw_profile_identity_call_with_abi(
     abi_version: i64,
     operation: i64,
