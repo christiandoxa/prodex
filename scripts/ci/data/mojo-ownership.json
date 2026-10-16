@@ -2334,7 +2334,9 @@
         "production_reachable": true,
         "role": "semantic",
         "operations": [
-          "deepseek_stream_tool_arguments_policy"
+          "deepseek_stream_tool_arguments_policy",
+          "deepseek_stream_tool_kind_selection",
+          "deepseek_stream_fallback_identifier_encoding"
         ]
       },
       {
@@ -2344,7 +2346,9 @@
         "production_reachable": true,
         "role": "adapter",
         "operations": [
-          "deepseek_stream_tool_arguments_policy"
+          "deepseek_stream_tool_arguments_policy",
+          "deepseek_stream_tool_kind_selection",
+          "deepseek_stream_fallback_identifier_encoding"
         ]
       },
       {
@@ -11888,6 +11892,52 @@
       "duplicate_production_owner": false,
       "platform_fallback": false,
       "rust_adapter_scope": "Strongly-typed inspection DTOs, u32 checked conversion, named Rust InspectionModelError translation and semantic result storage. Mojo alone owns validity decisions."
+    },
+    {
+      "name": "deepseek_stream_tool_kind_selection",
+      "domain": "provider/deepseek-stream-output",
+      "introduced_in": "0.438.0",
+      "baseline_state": "Rust selected tool_search, apply_patch, or generic function-call JSON shaping based on exact streamed flat function name in two separate call paths",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_deepseek_stream_tool_kind_v1",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/deepseek_stream_policy.mojo",
+      "consumer": "crates/prodex-provider-core/src/translators/deepseek/stream/shaping.rs",
+      "consumer_marker": "prodex_mojo_core::deepseek_stream_policy::stream_tool_kind(",
+      "production_consumers": [
+        "crates/prodex-provider-core/src/translators/deepseek/stream/shaping.rs"
+      ],
+      "production_reachability_test": "crates/prodex-provider-core/src/translators/deepseek/stream/shaping.rs",
+      "rust_owner_before": "Rust repeated string comparisons for tool_search and apply_patch in tool-call added and completed item planning",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "Removed Rust tool-kind comparisons and three fallback ID formatters; compiled Mojo ABI tests cover exact-name/UTF8, Unicode labels, u64/usize maxima, invalid modes/versions/capacity; real provider-core DeepSeek stream regression keeps event JSON and ID bytes identical.",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "Typed action enum projection from Mojo; Rust only materializes previously Mojo-owned DeepSeek JSON event models"
+    },
+    {
+      "name": "deepseek_stream_fallback_identifier_encoding",
+      "domain": "provider/deepseek-stream-output",
+      "introduced_in": "0.438.0",
+      "baseline_state": "Rust built call/provider/request/index, message/provider/request, and response/provider/request fallback identifiers with separate format! calls",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_deepseek_stream_identifier_v1",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/deepseek_stream_policy.mojo",
+      "consumer": "crates/prodex-provider-core/src/translators/deepseek/stream/shaping.rs",
+      "consumer_marker": "prodex_mojo_core::deepseek_stream_policy::stream_fallback_identifier(",
+      "production_consumers": [
+        "crates/prodex-provider-core/src/translators/deepseek/stream/shaping.rs"
+      ],
+      "production_reachability_test": "crates/prodex-provider-core/src/translators/deepseek/stream/shaping.rs",
+      "rust_owner_before": "Rust three fallback ID formatters containing deterministic prefixes, separators, decimal conversion, and text assembly",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "Removed Rust tool-kind comparisons and three fallback ID formatters; compiled Mojo ABI tests cover exact-name/UTF8, Unicode labels, u64/usize maxima, invalid modes/versions/capacity; real provider-core DeepSeek stream regression keeps event JSON and ID bytes identical.",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "Borrowed label views, fixed-capacity output allocation and UTF-8 validation; Mojo owns decimal and prefix framing"
     }
   ],
   "rust_semantic_reductions": [

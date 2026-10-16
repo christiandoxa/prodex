@@ -398,3 +398,137 @@ def prodex_deepseek_stream_tool_arguments_policy_v1(
     if not deepseek_stream_policy_valid_json(arguments_address, arguments_length):
         return DEEPSEEK_STREAM_POLICY_INVALID_ARGUMENTS
     return DEEPSEEK_STREAM_POLICY_OK
+
+
+# The streamed item kind is selected once by Mojo. Rust retains JSON
+# materialization through existing compiled DeepSeek event kernels.
+@export("prodex_deepseek_stream_tool_kind_v1")
+def prodex_deepseek_stream_tool_kind_v1(
+    abi_version: Int64,
+    name_address: UInt,
+    name_length: Int64,
+) abi("C") -> Int64:
+    if abi_version != DEEPSEEK_STREAM_POLICY_ABI_VERSION:
+        return DEEPSEEK_STREAM_POLICY_ABI
+    if name_length < 0 or (name_length > 0 and name_address == 0):
+        return DEEPSEEK_STREAM_POLICY_INVALID
+    var name = deepseek_stream_policy_ptr(name_address)
+    if name_length > 0 and not rich_utf8_valid(name, name_length):
+        return DEEPSEEK_STREAM_POLICY_INVALID
+    if name_length == 11:
+        var search = StringSlice("tool_search").unsafe_ptr()
+        var match_search = True
+        for index in range(11):
+            if name[unsafe_offset=index] != search[unsafe_offset=index]:
+                match_search = False
+                break
+        if match_search:
+            return 0
+    if name_length == 11:
+        var patch = StringSlice("apply_patch").unsafe_ptr()
+        var match_patch = True
+        for index in range(11):
+            if name[unsafe_offset=index] != patch[unsafe_offset=index]:
+                match_patch = False
+                break
+        if match_patch:
+            return 1
+    return 2
+
+
+def deepseek_stream_identifier_digits(value: UInt64) -> Int64:
+    var digits: Int64 = 1
+    var rest = value
+    while rest >= UInt64(10):
+        rest = rest // UInt64(10)
+        digits += 1
+    return digits
+
+
+def deepseek_stream_identifier_emit_decimal(
+    number: UInt64,
+    output: Pointer[mut=True, UInt8, _],
+    cursor: Pointer[mut=True, Int64, _],
+):
+    var divisor = UInt64(1)
+    while number // divisor >= UInt64(10):
+        divisor *= UInt64(10)
+    var remaining = number
+    while True:
+        output[unsafe_offset=cursor[]] = UInt8(48) + UInt8(remaining // divisor)
+        cursor[] += 1
+        remaining = remaining % divisor
+        if divisor == UInt64(1):
+            break
+        divisor = divisor // UInt64(10)
+
+
+# Mode 0: call_{provider}_{request}_{index}
+# Mode 1: msg_{provider}_{request}
+# Mode 2: resp_{provider}_{request}
+@export("prodex_deepseek_stream_identifier_v1")
+def prodex_deepseek_stream_identifier_v1(
+    abi_version: Int64,
+    mode: Int64,
+    provider_address: UInt,
+    provider_length: Int64,
+    request_id: UInt64,
+    index: UInt64,
+    output_address: UInt,
+    output_capacity: Int64,
+    written_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != DEEPSEEK_STREAM_POLICY_ABI_VERSION:
+        return DEEPSEEK_STREAM_POLICY_ABI
+    if (
+        mode < 0 or mode > 2
+        or provider_length < 0
+        or (provider_length > 0 and provider_address == 0)
+        or written_address == 0
+        or output_capacity < 0
+    ):
+        return DEEPSEEK_STREAM_POLICY_INVALID
+    if provider_length > 0 and not rich_utf8_valid(
+        deepseek_stream_policy_ptr(provider_address), provider_length
+    ):
+        return DEEPSEEK_STREAM_POLICY_INVALID
+    var prefix = StringSlice("call_")
+    if mode == 1:
+        prefix = StringSlice("msg_")
+    elif mode == 2:
+        prefix = StringSlice("resp_")
+    var required = Int64(prefix.byte_length()) + provider_length + 1
+    required += deepseek_stream_identifier_digits(request_id)
+    if mode == 0:
+        required += 1 + deepseek_stream_identifier_digits(index)
+    var written = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(written_address)
+    )
+    written[] = required
+    if output_address == 0 or output_capacity < required:
+        return 3
+    var output = Pointer[mut=True, UInt8, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    var cursor: Int64 = 0
+    var prefix_bytes = prefix.unsafe_ptr()
+    for j in range(Int64(prefix.byte_length())):
+        output[unsafe_offset=cursor] = prefix_bytes[unsafe_offset=j]
+        cursor += 1
+    var provider = deepseek_stream_policy_ptr(provider_address)
+    for j in range(provider_length):
+        output[unsafe_offset=cursor] = provider[unsafe_offset=j]
+        cursor += 1
+    output[unsafe_offset=cursor] = 95
+    cursor += 1
+    deepseek_stream_identifier_emit_decimal(
+        request_id, output, Pointer(to=cursor)
+    )
+    if mode == 0:
+        output[unsafe_offset=cursor] = 95
+        cursor += 1
+        deepseek_stream_identifier_emit_decimal(
+            index, output, Pointer(to=cursor)
+        )
+    written[] = cursor
+    return DEEPSEEK_STREAM_POLICY_OK

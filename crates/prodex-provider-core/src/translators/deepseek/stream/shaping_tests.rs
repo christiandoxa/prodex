@@ -181,3 +181,23 @@ fn deepseek_tool_call_item_builders_keep_tool_kinds_and_namespaces() {
         })
     );
 }
+
+#[test]
+fn deepseek_stream_ids_use_compiled_mojo_exact_legacy_protocol() {
+    assert_eq!(
+        deepseek_provider_core_stream_fallback_tool_call_id("provider-東京", u64::MAX, usize::MAX),
+        format!("call_provider-東京_{}_{}", u64::MAX, usize::MAX),
+    );
+    assert_eq!(
+        deepseek_provider_core_stream_output_text_item_id("provider-東京", 0),
+        "msg_provider-東京_0",
+    );
+    assert_eq!(
+        deepseek_provider_core_stream_fallback_response_id("provider-東京", 42),
+        "resp_provider-東京_42",
+    );
+    for name in ["tool_search ", "Apply_Patch", "🧭"] {
+        assert!(deepseek_provider_core_stream_tool_call_added_item("call-1", name).is_some());
+    }
+    assert!(deepseek_provider_core_stream_tool_call_added_item("call-1", "tool_search").is_none());
+}
