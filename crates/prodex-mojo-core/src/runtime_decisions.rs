@@ -26,9 +26,13 @@ pub use preset::{
 };
 pub use smart_context_policy::*;
 pub use tuning::{
-    RuntimeClockSourceClass, RuntimeFaultBudgetAction, RuntimeLogFormatClass,
-    RuntimeProxyPresetClass, RuntimeTuningCapacityDefaults, RuntimeTuningDefaults,
-    RuntimeWebSearchModeClass, runtime_clock_source_class, runtime_fault_budget_step,
+    RuntimeClockSourceClass, RuntimeConfigScalarInput, RuntimeConfigScalarStatus,
+    RuntimeFaultBudgetAction, RuntimeLogFormatClass, RuntimeProxyPresetClass,
+    RuntimeTuningCapacityDefaults, RuntimeTuningDefaults, RuntimeWebSearchModeClass,
+    runtime_clock_source_class, runtime_config_scalar_bool,
+    runtime_config_scalar_compat_bool_default_true, runtime_config_scalar_compat_flag,
+    runtime_config_scalar_compat_u64, runtime_config_scalar_positive_i64,
+    runtime_config_scalar_positive_u64, runtime_config_scalar_unsigned, runtime_fault_budget_step,
     runtime_log_format_class, runtime_log_recording_enabled_value,
     runtime_model_provider_is_openai, runtime_proxy_preset_class, runtime_tuning_capacity_default,
     runtime_tuning_capacity_defaults, runtime_tuning_defaults, runtime_web_search_mode_class,

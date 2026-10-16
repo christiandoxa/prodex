@@ -6,6 +6,15 @@ const RUNTIME_SCALAR_CONFIG_CLOCK_SOURCE: i64 = 3;
 const RUNTIME_SCALAR_CONFIG_OPENAI_PROVIDER: i64 = 4;
 const RUNTIME_SCALAR_CONFIG_LOG_RECORDING: i64 = 5;
 
+#[path = "runtime_config_scalar.rs"]
+mod runtime_config_scalar;
+pub use self::runtime_config_scalar::{
+    RuntimeConfigScalarInput, RuntimeConfigScalarStatus, runtime_config_scalar_bool,
+    runtime_config_scalar_compat_bool_default_true, runtime_config_scalar_compat_flag,
+    runtime_config_scalar_compat_u64, runtime_config_scalar_positive_i64,
+    runtime_config_scalar_positive_u64, runtime_config_scalar_unsigned,
+};
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RuntimeFaultBudgetAction {
     Clear,
