@@ -297,6 +297,7 @@ const PROMOTED_FILES = [
   "crates/prodex-profile-export/src/data_model.rs",
   "crates/prodex-profile-export/src/selection.rs",
   "crates/prodex-profile-export/tests/src/lib.rs",
+  "crates/prodex-profile-export/tests/src/copilot.rs",
   "crates/prodex-app/src/profile_commands/import_export/import/lifecycle_support.rs",
   "crates/prodex-app/src/profile_commands/import_export/secrets.rs",
   "crates/prodex-app/tests/support/profile_commands_body/import/lifecycle.rs",
@@ -337,9 +338,12 @@ const PROMOTED_FILES = [
   "crates/prodex-mojo-core/src/quota/reset_epoch.rs",
   "crates/prodex-mojo-core/src/routing.rs",
   "crates/prodex-mojo-core/src/runtime.rs",
+  "crates/prodex-mojo-core/src/runtime/profile_schedule.rs",
   "crates/prodex-mojo-core/src/runtime/candidate_plan.rs",
   "crates/prodex-mojo-core/src/runtime/auto_redeem.rs",
   "crates/prodex-mojo-core/src/runtime_decisions.rs",
+  "crates/prodex-mojo-core/src/runtime_decisions/rewrite_safety.rs",
+  "crates/prodex-mojo-core/src/runtime_decisions/optimistic_candidate.rs",
   "crates/prodex-mojo-core/tests/profile_health.rs",
   "crates/prodex-runtime-doctor/src/diagnosis/final_summary/log_summary.rs",
   "crates/prodex-mojo-core/src/provider_constraints.rs",
@@ -5940,14 +5944,21 @@ export function findViolations(files) {
     }
     if (filePath === "crates/prodex-profile-export/tests/src/lib.rs") {
       const required = [
+        "mod copilot;",
         "requested_profile_names_default_to_available_names",
         "requested_profile_names_deduplicate_and_preserve_request_order",
         "requested_profile_names_reject_missing_profiles",
         "imported_active_profile_uses_existing_active_profile_first",
         "export_active_profile_only_survives_when_selected",
+        "queued_auth_update_uses_mojo_selected_first_matching_target",
+      ];
+      return required.filter((marker) => !contents.includes(marker))
+        .map((marker) => `${filePath}: profile-export selection caller coverage must retain ${marker}`);
+    }
+    if (filePath === "crates/prodex-profile-export/tests/src/copilot.rs") {
+      const required = [
         "copilot_config_parser_accepts_copilot_jsonc_comments",
         "copilot_url_helpers_match_import_expectations",
-        "queued_auth_update_uses_mojo_selected_first_matching_target",
       ];
       return required.filter((marker) => !contents.includes(marker))
         .map((marker) => `${filePath}: profile-export selection caller coverage must retain ${marker}`);
