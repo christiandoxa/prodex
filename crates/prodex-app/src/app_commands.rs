@@ -13,6 +13,8 @@ mod log_throughput_state;
 mod log_tui;
 mod log_upstream;
 mod log_upstream_payload;
+#[cfg(test)]
+mod log_upstream_payload_tests;
 mod mcp_jsonl_bridge;
 #[cfg(test)]
 mod native_cli_tests;
