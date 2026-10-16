@@ -2,9 +2,29 @@
 use super::{MojoError, ensure_rich_abi, mojo_mut_pointer_address, mojo_pointer_address, view};
 
 const RUNTIME_DOCTOR_ROUTE_HEALTH_GROUPS_ABI_VERSION: i64 = 1;
+const RUNTIME_DOCTOR_ROUTE_MARKER_FIELDS_ABI_VERSION: i64 = 1;
+pub const RUNTIME_DOCTOR_ROUTE_MARKER_U32: i64 = 0;
+pub const RUNTIME_DOCTOR_ROUTE_MARKER_I64: i64 = 1;
 pub const RUNTIME_DOCTOR_ROUTE_HEALTH_GROUPS_MAX_ROWS: usize = 65_536;
 
 unsafe extern "C" {
+    fn prodex_mojo_runtime_doctor_route_marker_matches_v1(
+        abi_version: i64,
+        marker_profile: u64,
+        marker_profile_present: i64,
+        marker_route: u64,
+        marker_route_present: i64,
+        requested_profile: u64,
+        requested_route: u64,
+        result: u64,
+    ) -> i64;
+    fn prodex_mojo_runtime_doctor_route_marker_number_v1(
+        abi_version: i64,
+        value: u64,
+        present: i64,
+        kind: i64,
+        output: u64,
+    ) -> i64;
     fn prodex_mojo_runtime_doctor_route_health_groups_v1(
         abi_version: i64,
         profiles: u64,
@@ -28,6 +48,80 @@ unsafe extern "C" {
         requested_route: u64,
         output: u64,
     ) -> i64;
+}
+
+/// Check a marker's profile/route scope, including absent keys and the '-'
+/// wildcard, exclusively through the compiled route-health owner.
+pub fn runtime_doctor_route_marker_matches(
+    marker_profile: Option<&str>,
+    marker_route: Option<&str>,
+    requested_profile: &str,
+    requested_route: &str,
+) -> Result<bool, MojoError> {
+    ensure_rich_abi()?;
+    let marker_profile_view = view(marker_profile.unwrap_or(""));
+    let marker_route_view = view(marker_route.unwrap_or(""));
+    let requested_profile_view = view(requested_profile);
+    let requested_route_view = view(requested_route);
+    let mut result = -1_i64;
+    let status = unsafe {
+        prodex_mojo_runtime_doctor_route_marker_matches_v1(
+            RUNTIME_DOCTOR_ROUTE_MARKER_FIELDS_ABI_VERSION,
+            mojo_pointer_address(&marker_profile_view),
+            i64::from(marker_profile.is_some()),
+            mojo_pointer_address(&marker_route_view),
+            i64::from(marker_route.is_some()),
+            mojo_pointer_address(&requested_profile_view),
+            mojo_pointer_address(&requested_route_view),
+            mojo_mut_pointer_address(&mut result),
+        )
+    };
+    match (status, result) {
+        (0, 0) => Ok(false),
+        (0, 1) => Ok(true),
+        (1, _) => Err(MojoError::InvalidInput),
+        (4, _) => Err(MojoError::AbiMismatch),
+        _ => Err(MojoError::InvalidOutput),
+    }
+}
+
+/// Parse the score/u32 and expiry/i64 diagnostic field grammars in Mojo.
+/// Rust supplies the requested numeric type and receives optional typed data.
+pub fn runtime_doctor_route_marker_number(
+    value: Option<&str>,
+    kind: i64,
+) -> Result<Option<i64>, MojoError> {
+    ensure_rich_abi()?;
+    if kind != RUNTIME_DOCTOR_ROUTE_MARKER_U32 && kind != RUNTIME_DOCTOR_ROUTE_MARKER_I64 {
+        return Err(MojoError::InvalidInput);
+    }
+    let value_view = view(value.unwrap_or(""));
+    let mut output = [-1_i64; 2];
+    let status = unsafe {
+        prodex_mojo_runtime_doctor_route_marker_number_v1(
+            RUNTIME_DOCTOR_ROUTE_MARKER_FIELDS_ABI_VERSION,
+            mojo_pointer_address(&value_view),
+            i64::from(value.is_some()),
+            kind,
+            mojo_mut_pointer_address(output.as_mut_ptr()),
+        )
+    };
+    if status != 0 {
+        return Err(match status {
+            1 => MojoError::InvalidInput,
+            4 => MojoError::AbiMismatch,
+            _ => MojoError::InvalidOutput,
+        });
+    }
+    match output[0] {
+        0 if output[1] == 0 => Ok(None),
+        1 if kind == RUNTIME_DOCTOR_ROUTE_MARKER_I64
+            || (0..=i64::from(u32::MAX)).contains(&output[1]) =>
+        {
+            Ok(Some(output[1]))
+        }
+        _ => Err(MojoError::InvalidOutput),
+    }
 }
 
 /// One grouped route-health row returned by the Mojo reducer.
@@ -210,3 +304,144 @@ fn route_health_source_index(
 #[cfg(test)]
 #[path = "runtime_doctor_route_reason_tests.rs"]
 mod route_reason_tests;
+
+#[cfg(test)]
+mod route_marker_fields_tests {
+    use super::*;
+
+    #[test]
+    fn route_marker_scope_and_decimal_grammars_are_mojo_owned() {
+        for (profile, route, target_profile, target_route, expected) in [
+            (None, None, "東京", "responses", true),
+            (Some("-"), Some("-"), "東京", "responses", true),
+            (Some("東京"), Some("responses"), "東京", "responses", true),
+            (Some("東京"), Some("websocket"), "東京", "responses", false),
+            (Some("beta"), Some("responses"), "東京", "responses", false),
+            (Some(""), Some(""), "", "", true),
+            (Some(""), Some(""), "東京", "responses", false),
+            (Some(" - "), Some("responses"), "東京", "responses", false),
+        ] {
+            assert_eq!(
+                runtime_doctor_route_marker_matches(profile, route, target_profile, target_route)
+                    .unwrap(),
+                expected,
+                "{profile:?}/{route:?}",
+            );
+        }
+        for (text, expected) in [
+            (None, None),
+            (Some(""), None),
+            (Some("+"), None),
+            (Some("-0"), None),
+            (Some("-1"), None),
+            (Some("+0000000"), Some(0)),
+            (Some("4294967295"), Some(u32::MAX as i64)),
+            (Some("4294967296"), None),
+            (Some("00000000000000000000042"), Some(42)),
+            (Some(" 42"), None),
+            (Some("４２"), None),
+        ] {
+            assert_eq!(
+                runtime_doctor_route_marker_number(text, RUNTIME_DOCTOR_ROUTE_MARKER_U32).unwrap(),
+                expected,
+                "{text:?}"
+            );
+        }
+        for (text, expected) in [
+            (None, None),
+            (Some("+0"), Some(0)),
+            (Some("-0"), Some(0)),
+            (Some("+00017"), Some(17)),
+            (Some("-00017"), Some(-17)),
+            (Some("9223372036854775807"), Some(i64::MAX)),
+            (Some("-9223372036854775808"), Some(i64::MIN)),
+            (Some("9223372036854775808"), None),
+            (Some("-9223372036854775809"), None),
+            (Some(""), None),
+            (Some("--1"), None),
+            (Some("- 1"), None),
+            (Some("١"), None),
+        ] {
+            assert_eq!(
+                runtime_doctor_route_marker_number(text, RUNTIME_DOCTOR_ROUTE_MARKER_I64).unwrap(),
+                expected,
+                "{text:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn route_marker_abis_reject_invalid_shapes_without_writing_outputs() {
+        let text = view("東京");
+        let route = view("responses");
+        let mut matched = -1_i64;
+        let target = mojo_pointer_address(&text);
+        let route_ptr = mojo_pointer_address(&route);
+        let matched_ptr = mojo_mut_pointer_address(&mut matched);
+        unsafe {
+            assert_eq!(
+                prodex_mojo_runtime_doctor_route_marker_matches_v1(
+                    2,
+                    target,
+                    1,
+                    route_ptr,
+                    1,
+                    target,
+                    route_ptr,
+                    matched_ptr
+                ),
+                4
+            );
+            assert_eq!(
+                prodex_mojo_runtime_doctor_route_marker_matches_v1(
+                    1,
+                    target,
+                    2,
+                    route_ptr,
+                    1,
+                    target,
+                    route_ptr,
+                    matched_ptr
+                ),
+                1
+            );
+            assert_eq!(
+                prodex_mojo_runtime_doctor_route_marker_matches_v1(
+                    1,
+                    0,
+                    1,
+                    route_ptr,
+                    1,
+                    target,
+                    route_ptr,
+                    matched_ptr
+                ),
+                1
+            );
+        }
+        assert_eq!(matched, -1);
+        let number = view("42");
+        let value_ptr = mojo_pointer_address(&number);
+        let mut output = [-7_i64; 2];
+        let output_ptr = mojo_mut_pointer_address(output.as_mut_ptr());
+        unsafe {
+            assert_eq!(
+                prodex_mojo_runtime_doctor_route_marker_number_v1(2, value_ptr, 1, 0, output_ptr),
+                4
+            );
+            assert_eq!(
+                prodex_mojo_runtime_doctor_route_marker_number_v1(1, value_ptr, 2, 0, output_ptr),
+                1
+            );
+            assert_eq!(
+                prodex_mojo_runtime_doctor_route_marker_number_v1(1, value_ptr, 1, 2, output_ptr),
+                1
+            );
+            assert_eq!(
+                prodex_mojo_runtime_doctor_route_marker_number_v1(1, value_ptr, 1, 1, 0),
+                1
+            );
+        }
+        assert_eq!(output, [-7, -7]);
+    }
+}

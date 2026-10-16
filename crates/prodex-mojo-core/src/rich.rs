@@ -8,9 +8,10 @@
 #[path = "rich/runtime_doctor_route_health.rs"]
 mod runtime_doctor_route_health;
 pub use runtime_doctor_route_health::{
-    RUNTIME_DOCTOR_ROUTE_HEALTH_GROUPS_MAX_ROWS, RuntimeDoctorRouteHealthGroup,
-    RuntimeDoctorRouteReasonEvent, runtime_doctor_route_health_groups,
-    runtime_doctor_route_latest_reason,
+    RUNTIME_DOCTOR_ROUTE_HEALTH_GROUPS_MAX_ROWS, RUNTIME_DOCTOR_ROUTE_MARKER_I64,
+    RUNTIME_DOCTOR_ROUTE_MARKER_U32, RuntimeDoctorRouteHealthGroup, RuntimeDoctorRouteReasonEvent,
+    runtime_doctor_route_health_groups, runtime_doctor_route_latest_reason,
+    runtime_doctor_route_marker_matches, runtime_doctor_route_marker_number,
 };
 #[path = "rich/runtime_doctor_degraded_routes.rs"]
 mod runtime_doctor_degraded_routes;

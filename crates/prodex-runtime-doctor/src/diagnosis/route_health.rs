@@ -8,21 +8,31 @@ fn runtime_doctor_route_marker_fields<'a>(
     route: &str,
 ) -> Option<&'a BTreeMap<String, String>> {
     summary.marker_last_fields.get(marker).filter(|fields| {
-        fields
-            .get("profile")
-            .is_none_or(|value| value == profile || value == "-")
-            && fields
-                .get("route")
-                .is_none_or(|value| value == route || value == "-")
+        prodex_mojo_core::rich::runtime_doctor_route_marker_matches(
+            fields.get("profile").map(String::as_str),
+            fields.get("route").map(String::as_str),
+            profile,
+            route,
+        )
+        .expect("Mojo route-health marker scope returned invalid output")
     })
 }
 
 fn runtime_doctor_parse_u32_field(fields: &BTreeMap<String, String>, key: &str) -> Option<u32> {
-    fields.get(key)?.parse().ok()
+    prodex_mojo_core::rich::runtime_doctor_route_marker_number(
+        fields.get(key).map(String::as_str),
+        prodex_mojo_core::rich::RUNTIME_DOCTOR_ROUTE_MARKER_U32,
+    )
+    .expect("Mojo route-health u32 marker returned invalid output")
+    .map(|score| u32::try_from(score).expect("validated Mojo score fits u32"))
 }
 
 fn runtime_doctor_parse_i64_field(fields: &BTreeMap<String, String>, key: &str) -> Option<i64> {
-    fields.get(key)?.parse().ok()
+    prodex_mojo_core::rich::runtime_doctor_route_marker_number(
+        fields.get(key).map(String::as_str),
+        prodex_mojo_core::rich::RUNTIME_DOCTOR_ROUTE_MARKER_I64,
+    )
+    .expect("Mojo route-health i64 marker returned invalid output")
 }
 
 fn runtime_doctor_apply_route_marker_fields(
@@ -173,4 +183,61 @@ pub(super) fn runtime_doctor_route_health(
         routes.push(entry);
     }
     routes
+}
+
+#[cfg(test)]
+mod mojo_marker_field_tests {
+    use super::*;
+
+    #[test]
+    fn route_marker_fields_honor_wildcards_and_checked_integer_boundaries() {
+        let mut summary = RuntimeDoctorSummary::default();
+        summary.marker_last_fields.insert(
+            "profile_health".into(),
+            BTreeMap::from([
+                ("profile".into(), "-".into()),
+                ("route".into(), "-".into()),
+                ("score".into(), "+4294967295".into()),
+                ("reason".into(), "📈".into()),
+            ]),
+        );
+        summary.marker_last_fields.insert(
+            "profile_circuit_open".into(),
+            BTreeMap::from([
+                ("profile".into(), "東京".into()),
+                ("route".into(), "responses".into()),
+                ("until".into(), i64::MIN.to_string()),
+            ]),
+        );
+        summary.marker_last_fields.insert(
+            "profile_transport_backoff".into(),
+            BTreeMap::from([
+                ("profile".into(), "beta".into()),
+                ("until".into(), "9223372036854775808".into()),
+            ]),
+        );
+        let mut entry = RuntimeDoctorRouteHealthSummary {
+            profile: "東京".into(),
+            route: "responses".into(),
+            health_score: Some(7),
+            transport_backoff_until: Some(15),
+            ..RuntimeDoctorRouteHealthSummary::default()
+        };
+        runtime_doctor_apply_route_marker_fields(&summary, &mut entry);
+        assert_eq!(entry.health_score, Some(u32::MAX));
+        assert_eq!(entry.health_reason.as_deref(), Some("📈"));
+        assert_eq!(entry.circuit_state.as_deref(), Some("open"));
+        assert_eq!(entry.circuit_until, Some(i64::MIN));
+        assert_eq!(entry.transport_backoff_until, Some(15));
+
+        let mut unmatched = RuntimeDoctorRouteHealthSummary {
+            profile: "alpha".into(),
+            route: "websocket".into(),
+            health_score: Some(2),
+            ..RuntimeDoctorRouteHealthSummary::default()
+        };
+        runtime_doctor_apply_route_marker_fields(&summary, &mut unmatched);
+        assert_eq!(unmatched.health_score, Some(u32::MAX));
+        assert_eq!(unmatched.circuit_state, None);
+    }
 }

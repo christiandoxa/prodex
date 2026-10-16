@@ -90,6 +90,8 @@ const DOCTOR_SMART_CONTEXT_DECISION_CONSUMER_FILE = "crates/prodex-runtime-docto
 const DOCTOR_SMART_CONTEXT_DECISION_ADAPTER_FILE = DOCTOR_MARKER_ABI_ADAPTER_FILE;
 const DOCTOR_SMART_CONTEXT_DECISION_MOJO_FILE = DOCTOR_MARKER_ABI_MOJO_FILE;
 const DOCTOR_LOG_FIELDS_CONSUMER_FILE = "crates/prodex-runtime-doctor/src/log_fields.rs";
+const DOCTOR_ROUTE_HEALTH_CONSUMER_FILE = "crates/prodex-runtime-doctor/src/diagnosis/route_health.rs";
+const DOCTOR_ROUTE_HEALTH_ADAPTER_FILE = "crates/prodex-mojo-core/src/rich/runtime_doctor_route_health.rs";
 const DOCTOR_SMART_CONTEXT_CALLER_TEST_FILE = "crates/prodex-runtime-doctor/tests/src/smart_context_autopilot.rs";
 const GEMINI_COMPACT_SNIPPET_CONSUMER_FILE = "crates/prodex-provider-core/src/gemini_bridge/compact/local/snippet.rs";
 const GEMINI_COMPACT_TEXT_CONSUMER_FILE = "crates/prodex-provider-core/src/gemini_bridge/compact/local/text.rs";
@@ -172,6 +174,8 @@ const PROMOTED_FILES = [
   OPERATIONAL_HISTOGRAM_ABI_TEST_FILE,
   DOCTOR_SMART_CONTEXT_DECISION_CONSUMER_FILE,
   DOCTOR_LOG_FIELDS_CONSUMER_FILE,
+  DOCTOR_ROUTE_HEALTH_CONSUMER_FILE,
+  DOCTOR_ROUTE_HEALTH_ADAPTER_FILE,
   DOCTOR_SMART_CONTEXT_CALLER_TEST_FILE,
   LIVE_LOG_RECORD_FILE,
   LIVE_LOG_RECORD_ADAPTER_FILE,
@@ -7048,6 +7052,36 @@ export function findViolations(files) {
         ? []
         : [`${filePath}: Smart Context fallback decision and reason-source policy must use Mojo without a Rust policy copy`];
     }
+    if (filePath === DOCTOR_ROUTE_HEALTH_CONSUMER_FILE) {
+      const production = contents.split("#[cfg(test)]", 1)[0];
+      const required = [
+        "prodex_mojo_core::rich::runtime_doctor_route_marker_matches(",
+        "prodex_mojo_core::rich::runtime_doctor_route_marker_number(",
+        "prodex_mojo_core::rich::RUNTIME_DOCTOR_ROUTE_MARKER_U32",
+        "prodex_mojo_core::rich::RUNTIME_DOCTOR_ROUTE_MARKER_I64",
+      ];
+      const rustCopy = [
+        'value == profile || value == "-"',
+        'value == route || value == "-"',
+        "fields.get(key)?.parse().ok()",
+      ];
+      return required.every((marker) => production.includes(marker)) &&
+        rustCopy.every((marker) => !production.includes(marker))
+        ? []
+        : [`${filePath}: route-health marker scope and numeric parsing must remain Mojo-owned`];
+    }
+    if (filePath === DOCTOR_ROUTE_HEALTH_ADAPTER_FILE) {
+      const required = [
+        "prodex_mojo_runtime_doctor_route_marker_matches_v1(",
+        "prodex_mojo_runtime_doctor_route_marker_number_v1(",
+        "runtime_doctor_route_marker_matches(",
+        "runtime_doctor_route_marker_number(",
+        "route_marker_scope_and_decimal_grammars_are_mojo_owned",
+        "route_marker_abis_reject_invalid_shapes_without_writing_outputs",
+      ];
+      return required.filter((marker) => !contents.includes(marker))
+        .map((marker) => `${filePath}: route-health ABI and direct coverage must retain ${marker}`);
+    }
     if (filePath === DOCTOR_LOG_FIELDS_CONSUMER_FILE) {
       const production = contents.split("#[cfg(test)]", 1)[0];
       return production.includes("prodex_mojo_core::rich::runtime_doctor_log_value_is_ignored(value)") &&
@@ -7768,6 +7802,12 @@ function selfTest() {
     "prodex_mojo_core::rich::runtime_doctor_smart_context_fallback_reason_source(",
     "RUNTIME_DOCTOR_SMART_CONTEXT_DECISION_FALLBACK",
   ].join("\n");
+  const doctorRouteHealthConsumer = [
+    "prodex_mojo_core::rich::runtime_doctor_route_marker_matches(",
+    "prodex_mojo_core::rich::runtime_doctor_route_marker_number(",
+    "prodex_mojo_core::rich::RUNTIME_DOCTOR_ROUTE_MARKER_U32",
+    "prodex_mojo_core::rich::RUNTIME_DOCTOR_ROUTE_MARKER_I64",
+  ].join("\n");
   const doctorLogFieldsConsumer = [
     "prodex_mojo_core::rich::runtime_doctor_log_value_is_ignored(value)",
     "prodex_mojo_core::rich::runtime_doctor_unsigned_field(value)",
@@ -7776,10 +7816,14 @@ function selfTest() {
   assert.deepEqual(findViolations([
     [DOCTOR_SMART_CONTEXT_DECISION_CONSUMER_FILE, doctorSmartContextConsumer],
     [DOCTOR_LOG_FIELDS_CONSUMER_FILE, doctorLogFieldsConsumer],
+    [DOCTOR_ROUTE_HEALTH_CONSUMER_FILE, doctorRouteHealthConsumer],
   ]), []);
   assert.match(findViolations([[DOCTOR_SMART_CONTEXT_DECISION_CONSUMER_FILE,
     doctorSmartContextConsumer + "\nif !event.reasons.is_empty() {}",
   ]]).join("\n"), /fallback decision and reason-source policy must use Mojo/u);
+  assert.match(findViolations([[DOCTOR_ROUTE_HEALTH_CONSUMER_FILE,
+    doctorRouteHealthConsumer + '\nfields.get(key)?.parse().ok()',
+  ]]).join("\n"), /route-health marker scope and numeric parsing must remain Mojo-owned/u);
   assert.match(findViolations([[DOCTOR_LOG_FIELDS_CONSUMER_FILE,
     doctorLogFieldsConsumer + '\nvalue.is_empty() || value == "-"',
   ]]).join("\n"), /ignored runtime-doctor log-value policy must remain Mojo-owned/u);
