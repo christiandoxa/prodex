@@ -102,6 +102,38 @@ unsafe extern "C" {
         total_cells: u64,
         result_address: u64,
     ) -> i64;
+    fn prodex_terminal_wrap_text_plan_v1(
+        abi: i64,
+        text_address: u64,
+        text_length: i64,
+        widths_address: u64,
+        scalar_count: i64,
+        maximum_cells: u64,
+        token_starts_address: u64,
+        token_ends_address: u64,
+        token_capacity: i64,
+        line_starts_address: u64,
+        line_ends_address: u64,
+        line_capacity: i64,
+        counts_address: u64,
+        counts_capacity: i64,
+    ) -> i64;
+    fn prodex_terminal_section_header_plan_v1(
+        abi: i64,
+        prefix_cells: u64,
+        total_width: u64,
+        result_address: u64,
+        result_capacity: i64,
+    ) -> i64;
+    fn prodex_terminal_session_report_detail_plan_v1(
+        abi: i64,
+        id_cells_address: u64,
+        profile_present_address: u64,
+        report_count: i64,
+        id_width: u64,
+        result_address: u64,
+        result_capacity: i64,
+    ) -> i64;
     fn prodex_terminal_pad_cell_spaces_v1(
         abi: i64,
         visible_cells: u64,
@@ -114,6 +146,7 @@ fn check_status(status: i64) -> Result<(), MojoError> {
     match status {
         0 => Ok(()),
         1 => Err(MojoError::InvalidInput),
+        3 => Err(MojoError::Capacity),
         4 => Err(MojoError::AbiMismatch),
         _ => Err(MojoError::InvalidOutput),
     }
@@ -377,6 +410,174 @@ pub fn wrap_piece_action(
         2 => Ok(WrapPieceAction::Flush),
         _ => Err(MojoError::InvalidOutput),
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TerminalScalarRange {
+    pub start: usize,
+    pub end: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WrapTextPlan {
+    pub token_ranges: Vec<TerminalScalarRange>,
+    pub line_token_ranges: Vec<TerminalScalarRange>,
+}
+
+/// Plan complete paragraph wrapping from caller-supplied Unicode cell widths.
+/// Mojo owns whitespace, paragraph, chunk and line-break semantics; Rust only
+/// slices the original UTF-8 and inserts the public single-space separator.
+pub fn wrap_text_plan(
+    input: &str,
+    scalar_cells: &[u64],
+    maximum_cells: usize,
+) -> Result<WrapTextPlan, MojoError> {
+    let scalar_count = i64::try_from(scalar_cells.len()).map_err(|_| MojoError::InvalidInput)?;
+    let capacity = scalar_cells.len().max(1);
+    let mut token_starts = vec![u64::MAX; capacity];
+    let mut token_ends = vec![u64::MAX; capacity];
+    let mut line_starts = vec![u64::MAX; capacity];
+    let mut line_ends = vec![u64::MAX; capacity];
+    let mut counts = [-1_i64; 2];
+    check_status(unsafe {
+        prodex_terminal_wrap_text_plan_v1(
+            ABI_VERSION,
+            input.as_ptr() as usize as u64,
+            i64::try_from(input.len()).map_err(|_| MojoError::InvalidInput)?,
+            scalar_cells.as_ptr() as usize as u64,
+            scalar_count,
+            from_usize(maximum_cells)?,
+            token_starts.as_mut_ptr() as usize as u64,
+            token_ends.as_mut_ptr() as usize as u64,
+            i64::try_from(capacity).map_err(|_| MojoError::InvalidInput)?,
+            line_starts.as_mut_ptr() as usize as u64,
+            line_ends.as_mut_ptr() as usize as u64,
+            i64::try_from(capacity).map_err(|_| MojoError::InvalidInput)?,
+            counts.as_mut_ptr() as usize as u64,
+            2,
+        )
+    })?;
+    let token_count = usize::try_from(counts[0]).map_err(|_| MojoError::InvalidOutput)?;
+    let line_count = usize::try_from(counts[1]).map_err(|_| MojoError::InvalidOutput)?;
+    if token_count > capacity || line_count > capacity {
+        return Err(MojoError::InvalidOutput);
+    }
+
+    let token_ranges = token_starts[..token_count]
+        .iter()
+        .zip(&token_ends[..token_count])
+        .map(|(&start, &end)| {
+            Ok(TerminalScalarRange {
+                start: usize::try_from(start).map_err(|_| MojoError::InvalidOutput)?,
+                end: usize::try_from(end).map_err(|_| MojoError::InvalidOutput)?,
+            })
+        })
+        .collect::<Result<Vec<_>, MojoError>>()?;
+    let line_token_ranges = line_starts[..line_count]
+        .iter()
+        .zip(&line_ends[..line_count])
+        .map(|(&start, &end)| {
+            Ok(TerminalScalarRange {
+                start: usize::try_from(start).map_err(|_| MojoError::InvalidOutput)?,
+                end: usize::try_from(end).map_err(|_| MojoError::InvalidOutput)?,
+            })
+        })
+        .collect::<Result<Vec<_>, MojoError>>()?;
+    if token_ranges
+        .iter()
+        .any(|range| range.start >= range.end || range.end > scalar_cells.len())
+        || token_ranges
+            .windows(2)
+            .any(|pair| pair[0].end > pair[1].start)
+        || line_token_ranges
+            .iter()
+            .any(|range| range.start > range.end || range.end > token_ranges.len())
+        || line_token_ranges
+            .windows(2)
+            .any(|pair| pair[0].end > pair[1].start)
+    {
+        return Err(MojoError::InvalidOutput);
+    }
+    Ok(WrapTextPlan {
+        token_ranges,
+        line_token_ranges,
+    })
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SectionHeaderPlan {
+    Fit,
+    Keep { separator_cells: usize },
+}
+
+pub fn section_header_plan(
+    prefix_cells: usize,
+    total_width: usize,
+) -> Result<SectionHeaderPlan, MojoError> {
+    let mut result = [u64::MAX; 2];
+    check_status(unsafe {
+        prodex_terminal_section_header_plan_v1(
+            ABI_VERSION,
+            from_usize(prefix_cells)?,
+            from_usize(total_width)?,
+            result.as_mut_ptr() as usize as u64,
+            2,
+        )
+    })?;
+    match result {
+        [0, 0] => Ok(SectionHeaderPlan::Fit),
+        [1, separator_cells] => Ok(SectionHeaderPlan::Keep {
+            separator_cells: usize::try_from(separator_cells)
+                .map_err(|_| MojoError::InvalidOutput)?,
+        }),
+        _ => Err(MojoError::InvalidOutput),
+    }
+}
+
+/// Return one Mojo decision per session report: retain the full ID detail and
+/// the optional profile detail line after the fixed-width row is rendered.
+pub fn session_report_detail_plan(
+    id_cells: &[u64],
+    profile_present: &[bool],
+    id_width: usize,
+) -> Result<Vec<(bool, bool)>, MojoError> {
+    if id_cells.len() != profile_present.len() {
+        return Err(MojoError::InvalidInput);
+    }
+    let report_count = i64::try_from(id_cells.len()).map_err(|_| MojoError::InvalidInput)?;
+    let profiles = profile_present
+        .iter()
+        .map(|present| u64::from(*present))
+        .collect::<Vec<_>>();
+    let capacity = id_cells.len().max(1);
+    let decision_capacity = capacity.checked_mul(2).ok_or(MojoError::InvalidInput)?;
+    let mut decisions = vec![u64::MAX; decision_capacity];
+    check_status(unsafe {
+        prodex_terminal_session_report_detail_plan_v1(
+            ABI_VERSION,
+            id_cells.as_ptr() as usize as u64,
+            profiles.as_ptr() as usize as u64,
+            report_count,
+            from_usize(id_width)?,
+            decisions.as_mut_ptr() as usize as u64,
+            i64::try_from(decisions.len()).map_err(|_| MojoError::InvalidInput)?,
+        )
+    })?;
+    let decision_count = id_cells
+        .len()
+        .checked_mul(2)
+        .ok_or(MojoError::InvalidInput)?;
+    decisions[..decision_count]
+        .as_chunks::<2>()
+        .0
+        .iter()
+        .map(|decision| match decision {
+            [show_id, show_profile] if *show_id <= 1 && *show_profile <= 1 => {
+                Ok((*show_id == 1, *show_profile == 1))
+            }
+            _ => Err(MojoError::InvalidOutput),
+        })
+        .collect()
 }
 
 /// Mojo-authoritative count of spaces for the host terminal cell.

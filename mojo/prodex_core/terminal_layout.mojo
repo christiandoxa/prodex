@@ -602,6 +602,370 @@ def prodex_terminal_wrap_piece_action_v1(
     return TERMINAL_LAYOUT_OK
 
 
+@fieldwise_init
+struct TerminalWrapState(Copyable):
+    var status: Int64
+    var tokens_written: Int64
+    var lines_written: Int64
+    var current_line_start: Int64
+    var current_line_cells: UInt64
+    var current_line_count: Int64
+
+
+def terminal_wrap_emit_piece(
+    piece_start: Int64,
+    piece_end: Int64,
+    piece_cells: UInt64,
+    maximum_cells: UInt64,
+    token_starts: Pointer[mut=True, UInt64, _],
+    token_ends: Pointer[mut=True, UInt64, _],
+    line_starts: Pointer[mut=True, UInt64, _],
+    line_ends: Pointer[mut=True, UInt64, _],
+    state: TerminalWrapState,
+) -> TerminalWrapState:
+    if state.status != TERMINAL_LAYOUT_OK:
+        return state.copy()
+    var token_index = state.tokens_written
+    token_starts[unsafe_offset=token_index] = UInt64(piece_start)
+    token_ends[unsafe_offset=token_index] = UInt64(piece_end)
+    var next = state.copy()
+    next.tokens_written = token_index + 1
+    if state.current_line_count == 0:
+        next.current_line_start = token_index
+        next.current_line_cells = piece_cells
+        next.current_line_count = 1
+    elif (
+        state.current_line_cells < maximum_cells
+        and piece_cells <= maximum_cells - state.current_line_cells - UInt64(1)
+    ):
+        next.current_line_cells = state.current_line_cells + UInt64(1) + piece_cells
+        next.current_line_count = state.current_line_count + 1
+    else:
+        var line_index = state.lines_written
+        line_starts[unsafe_offset=line_index] = UInt64(state.current_line_start)
+        line_ends[unsafe_offset=line_index] = UInt64(token_index)
+        next.lines_written = line_index + 1
+        next.current_line_start = token_index
+        next.current_line_cells = piece_cells
+        next.current_line_count = 1
+    return next.copy()
+
+
+def terminal_wrap_emit_word(
+    word_start: Int64,
+    word_end: Int64,
+    widths: Pointer[mut=False, UInt64, _],
+    maximum_cells: UInt64,
+    token_starts: Pointer[mut=True, UInt64, _],
+    token_ends: Pointer[mut=True, UInt64, _],
+    line_starts: Pointer[mut=True, UInt64, _],
+    line_ends: Pointer[mut=True, UInt64, _],
+    state: TerminalWrapState,
+) -> TerminalWrapState:
+    var next = state.copy()
+    var chunk_start = word_start
+    var chunk_cells: UInt64 = 0
+    var chunk_count: Int64 = 0
+    for index in range(word_start, word_end):
+        var cells = widths[unsafe_offset=index]
+        if cells > 2:
+            next.status = TERMINAL_LAYOUT_INVALID
+            return next.copy()
+        if (
+            chunk_count > 0
+            and chunk_cells > 0
+            and (chunk_cells > maximum_cells
+                 or cells > maximum_cells - chunk_cells)
+        ):
+            next = terminal_wrap_emit_piece(
+                chunk_start,
+                index,
+                chunk_cells,
+                maximum_cells,
+                token_starts,
+                token_ends,
+                line_starts,
+                line_ends,
+                next,
+            )
+            chunk_start = index
+            chunk_cells = 0
+            chunk_count = 0
+        chunk_cells += cells
+        chunk_count += 1
+        if chunk_cells >= maximum_cells:
+            next = terminal_wrap_emit_piece(
+                chunk_start,
+                index + 1,
+                chunk_cells,
+                maximum_cells,
+                token_starts,
+                token_ends,
+                line_starts,
+                line_ends,
+                next,
+            )
+            chunk_start = index + 1
+            chunk_cells = 0
+            chunk_count = 0
+    if chunk_count > 0:
+        next = terminal_wrap_emit_piece(
+            chunk_start,
+            word_end,
+            chunk_cells,
+            maximum_cells,
+            token_starts,
+            token_ends,
+            line_starts,
+            line_ends,
+            next,
+        )
+    return next.copy()
+
+
+def terminal_wrap_flush_paragraph(
+    paragraph_token_start: Int64,
+    line_starts: Pointer[mut=True, UInt64, _],
+    line_ends: Pointer[mut=True, UInt64, _],
+    state: TerminalWrapState,
+) -> TerminalWrapState:
+    var next = state.copy()
+    var line_index = state.lines_written
+    if state.current_line_count > 0:
+        line_starts[unsafe_offset=line_index] = UInt64(state.current_line_start)
+        line_ends[unsafe_offset=line_index] = UInt64(state.tokens_written)
+        next.lines_written = line_index + 1
+    elif state.tokens_written == paragraph_token_start:
+        line_starts[unsafe_offset=line_index] = UInt64(state.tokens_written)
+        line_ends[unsafe_offset=line_index] = UInt64(state.tokens_written)
+        next.lines_written = line_index + 1
+    next.current_line_count = 0
+    next.current_line_cells = 0
+    return next.copy()
+
+
+# Mojo owns whitespace normalization, LF paragraph boundaries and all line
+# grouping. Rust supplies only the original UTF-8 view and Unicode cell widths.
+@export("prodex_terminal_wrap_text_plan_v1")
+def prodex_terminal_wrap_text_plan_v1(
+    abi: Int64,
+    text_address: UInt,
+    text_length: Int64,
+    widths_address: UInt,
+    scalar_count: Int64,
+    maximum_cells: UInt64,
+    token_starts_address: UInt,
+    token_ends_address: UInt,
+    token_capacity: Int64,
+    line_starts_address: UInt,
+    line_ends_address: UInt,
+    line_capacity: Int64,
+    counts_address: UInt,
+    counts_capacity: Int64,
+) abi("C") -> Int64:
+    if abi != TERMINAL_LAYOUT_ABI:
+        return TERMINAL_LAYOUT_VERSION
+    if (
+        text_length < 0
+        or (text_length > 0 and text_address == 0)
+        or scalar_count < 0
+        or (scalar_count > 0 and widths_address == 0)
+        or token_starts_address == 0
+        or token_ends_address == 0
+        or line_starts_address == 0
+        or line_ends_address == 0
+        or counts_address == 0
+        or token_capacity < max(Int64(1), scalar_count)
+        or line_capacity < max(Int64(1), scalar_count)
+        or counts_capacity < 2
+    ):
+        return TERMINAL_LAYOUT_INVALID
+    var text = ProdexRichStringView(text_address, UInt(text_length))
+    if not rich_view_valid(text, 0x7FFFFFFFFFFFFFFF):
+        return 2
+    var widths = Pointer[mut=False, UInt64, ImmUntrackedOrigin](
+        unsafe_from_address=Int(widths_address)
+    )
+    var source = rich_view_ptr(text)
+    var cursor: Int64 = 0
+    var index: Int64 = 0
+    while cursor < text_length:
+        var width = rich_codepoint_width(source[unsafe_offset=cursor])
+        if index >= scalar_count or widths[unsafe_offset=index] > 2:
+            return TERMINAL_LAYOUT_INVALID
+        cursor += width
+        index += 1
+    if index != scalar_count:
+        return TERMINAL_LAYOUT_INVALID
+
+    var token_starts = Pointer[mut=True, UInt64, MutUntrackedOrigin](
+        unsafe_from_address=Int(token_starts_address)
+    )
+    var token_ends = Pointer[mut=True, UInt64, MutUntrackedOrigin](
+        unsafe_from_address=Int(token_ends_address)
+    )
+    var line_starts = Pointer[mut=True, UInt64, MutUntrackedOrigin](
+        unsafe_from_address=Int(line_starts_address)
+    )
+    var line_ends = Pointer[mut=True, UInt64, MutUntrackedOrigin](
+        unsafe_from_address=Int(line_ends_address)
+    )
+    var state = TerminalWrapState(0, 0, 0, 0, 0, 0)
+    if maximum_cells == 0:
+        line_starts[unsafe_offset=0] = 0
+        line_ends[unsafe_offset=0] = 0
+        state.lines_written = 1
+        var zero_counts = Pointer[mut=True, Int64, MutUntrackedOrigin](
+            unsafe_from_address=Int(counts_address)
+        )
+        zero_counts[unsafe_offset=0] = 0
+        zero_counts[unsafe_offset=1] = 1
+        return TERMINAL_LAYOUT_OK
+
+    var paragraph_token_start: Int64 = 0
+    var word_start: Int64 = -1
+    var last_was_lf = False
+    cursor = 0
+    index = 0
+    while cursor < text_length:
+        var width = rich_codepoint_width(source[unsafe_offset=cursor])
+        var codepoint = rich_codepoint(source, cursor, width)
+        if codepoint == 10:
+            if word_start >= 0:
+                state = terminal_wrap_emit_word(
+                    word_start,
+                    index,
+                    widths,
+                    maximum_cells,
+                    token_starts,
+                    token_ends,
+                    line_starts,
+                    line_ends,
+                    state,
+                )
+                if state.status != TERMINAL_LAYOUT_OK:
+                    return state.status
+                word_start = -1
+            state = terminal_wrap_flush_paragraph(
+                paragraph_token_start,
+                line_starts,
+                line_ends,
+                state,
+            )
+            paragraph_token_start = state.tokens_written
+            last_was_lf = True
+        elif rich_unicode_space(codepoint):
+            if word_start >= 0:
+                state = terminal_wrap_emit_word(
+                    word_start,
+                    index,
+                    widths,
+                    maximum_cells,
+                    token_starts,
+                    token_ends,
+                    line_starts,
+                    line_ends,
+                    state,
+                )
+                if state.status != TERMINAL_LAYOUT_OK:
+                    return state.status
+                word_start = -1
+            last_was_lf = False
+        else:
+            if word_start < 0:
+                word_start = index
+            last_was_lf = False
+        cursor += width
+        index += 1
+    if word_start >= 0:
+        state = terminal_wrap_emit_word(
+            word_start,
+            index,
+            widths,
+            maximum_cells,
+            token_starts,
+            token_ends,
+            line_starts,
+            line_ends,
+            state,
+        )
+        if state.status != TERMINAL_LAYOUT_OK:
+            return state.status
+    if text_length == 0 or not last_was_lf:
+        state = terminal_wrap_flush_paragraph(
+            paragraph_token_start,
+            line_starts,
+            line_ends,
+            state,
+        )
+    var counts = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(counts_address)
+    )
+    counts[unsafe_offset=0] = state.tokens_written
+    counts[unsafe_offset=1] = state.lines_written
+    return TERMINAL_LAYOUT_OK
+
+
+@export("prodex_terminal_section_header_plan_v1")
+def prodex_terminal_section_header_plan_v1(
+    abi: Int64,
+    prefix_cells: UInt64,
+    total_width: UInt64,
+    result_address: UInt,
+    result_capacity: Int64,
+) abi("C") -> Int64:
+    if abi != TERMINAL_LAYOUT_ABI:
+        return TERMINAL_LAYOUT_VERSION
+    if result_address == 0 or result_capacity < 2:
+        return TERMINAL_LAYOUT_INVALID
+    var result = Pointer[mut=True, UInt64, MutUntrackedOrigin](
+        unsafe_from_address=Int(result_address)
+    )
+    if prefix_cells >= total_width:
+        result[unsafe_offset=0] = 0
+        result[unsafe_offset=1] = 0
+    else:
+        result[unsafe_offset=0] = 1
+        result[unsafe_offset=1] = total_width - prefix_cells
+    return TERMINAL_LAYOUT_OK
+
+
+@export("prodex_terminal_session_report_detail_plan_v1")
+def prodex_terminal_session_report_detail_plan_v1(
+    abi: Int64,
+    id_cells_address: UInt,
+    profile_present_address: UInt,
+    report_count: Int64,
+    id_width: UInt64,
+    result_address: UInt,
+    result_capacity: Int64,
+) abi("C") -> Int64:
+    if abi != TERMINAL_LAYOUT_ABI:
+        return TERMINAL_LAYOUT_VERSION
+    if (
+        report_count < 0
+        or (report_count > 0 and (id_cells_address == 0 or profile_present_address == 0))
+        or result_address == 0
+        or result_capacity < report_count * 2
+    ):
+        return TERMINAL_LAYOUT_INVALID
+    var ids = Pointer[mut=False, UInt64, ImmUntrackedOrigin](
+        unsafe_from_address=Int(id_cells_address)
+    )
+    var profiles = Pointer[mut=False, UInt64, ImmUntrackedOrigin](
+        unsafe_from_address=Int(profile_present_address)
+    )
+    var result = Pointer[mut=True, UInt64, MutUntrackedOrigin](
+        unsafe_from_address=Int(result_address)
+    )
+    for index in range(report_count):
+        if profiles[unsafe_offset=index] > 1:
+            return TERMINAL_LAYOUT_INVALID
+        result[unsafe_offset=index * 2] = UInt64(ids[unsafe_offset=index] > id_width)
+        result[unsafe_offset=index * 2 + 1] = profiles[unsafe_offset=index]
+    return TERMINAL_LAYOUT_OK
+
+
 # Determine the requested padding under the visible terminal cell budget.
 @export("prodex_terminal_pad_cell_spaces_v1")
 def prodex_terminal_pad_cell_spaces_v1(

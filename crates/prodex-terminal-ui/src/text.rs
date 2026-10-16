@@ -95,58 +95,26 @@ fn take_display_width(value: &str, width: usize) -> String {
 }
 
 pub fn wrap_text(input: &str, width: usize) -> Vec<String> {
-    if width == 0 {
-        return vec![String::new()];
+    let mut scalar_cells = Vec::new();
+    let mut byte_ends = vec![0usize];
+    for (byte_index, ch) in input.char_indices() {
+        scalar_cells.push(u64::try_from(ch.width().unwrap_or(0)).expect("Unicode cell width"));
+        byte_ends.push(byte_index + ch.len_utf8());
     }
-
-    let mut lines = Vec::new();
-    for paragraph in input.lines() {
-        wrap_paragraph(paragraph, width, &mut lines);
-    }
-
-    if lines.is_empty() {
-        lines.push(String::new());
-    }
-
-    lines
-}
-
-fn wrap_paragraph(paragraph: &str, width: usize, lines: &mut Vec<String>) {
-    if paragraph.trim().is_empty() {
-        lines.push(String::new());
-        return;
-    }
-
-    let mut current = String::new();
-    for word in paragraph.split_whitespace() {
-        for piece in chunk_token(word, width) {
-            append_wrapped_piece(&mut current, lines, &piece, width);
-        }
-    }
-    if !current.is_empty() {
-        lines.push(current);
-    }
-}
-
-fn append_wrapped_piece(current: &mut String, lines: &mut Vec<String>, piece: &str, width: usize) {
-    use prodex_mojo_core::terminal_layout::WrapPieceAction;
-
-    match prodex_mojo_core::terminal_layout::wrap_piece_action(
-        current.is_empty(),
-        text_width(current),
-        text_width(piece),
-        width,
-    )
-    .expect("compiled-in Mojo text-wrap decision failed")
-    {
-        WrapPieceAction::Start => current.push_str(piece),
-        WrapPieceAction::Join => {
-            current.push(' ');
-            current.push_str(piece);
-        }
-        WrapPieceAction::Flush => {
-            lines.push(std::mem::take(current));
-            current.push_str(piece);
-        }
-    }
+    let plan = prodex_mojo_core::terminal_layout::wrap_text_plan(input, &scalar_cells, width)
+        .expect("compiled-in Mojo text-wrap plan failed");
+    plan.line_token_ranges
+        .into_iter()
+        .map(|line| {
+            let mut output = String::new();
+            for token_index in line.start..line.end {
+                if token_index > line.start {
+                    output.push(' ');
+                }
+                let token = plan.token_ranges[token_index];
+                output.push_str(&input[byte_ends[token.start]..byte_ends[token.end]]);
+            }
+            output
+        })
+        .collect()
 }

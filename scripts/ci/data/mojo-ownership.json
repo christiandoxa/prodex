@@ -2376,7 +2376,7 @@
           "terminal_token_cell_chunk_segmentation",
           "terminal_display_width_prefix_selection",
           "terminal_fit_cell_ellipsis_policy",
-          "terminal_wrap_piece_line_break_decision",
+          "terminal_text_wrap_plan",
           "terminal_cell_padding_policy",
           "terminal_middle_ellipsis_policy"
         ]
@@ -10788,27 +10788,27 @@
       "rust_adapter_scope": "Rust measures UnicodeWidthStr and constructs dots/ellipsis from mandatory Mojo mode and budget"
     },
     {
-      "name": "terminal_wrap_piece_line_break_decision",
+      "name": "terminal_text_wrap_plan",
       "domain": "terminal/text-wrap",
       "introduced_in": "0.438.0",
       "baseline_state": "Rust decided start/join/flush of visible words based on Unicode display width, available columns and required separating space",
       "final_state": "authoritative",
-      "mojo_entry": "prodex_terminal_wrap_piece_action_v1",
+      "mojo_entry": "prodex_terminal_wrap_text_plan_v1",
       "mojo_abi_version": 1,
       "mojo_source": "mojo/prodex_core/terminal_layout.mojo",
       "consumer": "crates/prodex-terminal-ui/src/text.rs",
-      "consumer_marker": "prodex_mojo_core::terminal_layout::wrap_piece_action(",
+      "consumer_marker": "prodex_mojo_core::terminal_layout::wrap_text_plan(",
       "production_consumers": [
         "crates/prodex-terminal-ui/src/text.rs"
       ],
       "production_reachability_test": "crates/prodex-terminal-ui/tests/src/lib.rs",
-      "rust_owner_before": "Rust decided start/join/flush of visible words based on Unicode display width, available columns and required separating space",
+      "rust_owner_before": "Rust normalized whitespace, split oversized tokens, joined pieces into lines, and selected paragraph boundaries",
       "rust_state_after": "adapter-only",
-      "rust_test_oracle": "deleted from production; exact equivalence with earlier committed Rust was verified using an isolated test-only oracle",
+      "rust_test_oracle": "deleted; required-Mojo ABI and terminal-ui caller tests cover paragraphs, Unicode whitespace, combining marks, oversized words, narrow widths, and invalid output ranges",
       "production_fallback": false,
       "duplicate_production_owner": false,
       "platform_fallback": false,
-      "rust_adapter_scope": "Unicode widths of current and pending piece measured by Rust; Mojo decides whether Rust appends, inserts a space or flushes a visible line"
+      "rust_adapter_scope": "Rust measures Unicode cell widths and slices caller-owned UTF-8 ranges; Mojo owns tokenization, paragraph boundaries, chunking, and line grouping"
     },
     {
       "name": "terminal_cell_padding_policy",

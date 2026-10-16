@@ -103,11 +103,14 @@ pub fn tui_tool_style() -> Style {
 pub fn section_header_with_width(title: &str, total_width: usize) -> String {
     let prefix = format!("[ {title} ] ");
     let width = text_width(&prefix);
-    if width >= total_width {
-        return fit_cell(&prefix, total_width);
+    match prodex_mojo_core::terminal_layout::section_header_plan(width, total_width)
+        .expect("compiled-in Mojo section-header layout policy failed")
+    {
+        prodex_mojo_core::terminal_layout::SectionHeaderPlan::Fit => fit_cell(&prefix, total_width),
+        prodex_mojo_core::terminal_layout::SectionHeaderPlan::Keep { separator_cells } => {
+            format!("{prefix}{}", "=".repeat(separator_cells))
+        }
     }
-
-    format!("{prefix}{}", "=".repeat(total_width - width))
 }
 
 pub struct FieldRowsBuilder {

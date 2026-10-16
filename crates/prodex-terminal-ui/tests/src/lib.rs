@@ -29,6 +29,17 @@ fn wrapping_counts_terminal_display_width() {
 }
 
 #[test]
+fn mojo_wrap_text_preserves_unicode_paragraph_and_narrow_width_output() {
+    assert_eq!(
+        wrap_text("alpha\t表🙂 beta\n\n  combining\u{3000}marks", 8),
+        ["alpha", "表🙂", "beta", "", "combinin", "g marks"]
+    );
+    assert_eq!(wrap_text("表🙂\n", 0), [""]);
+    assert_eq!(wrap_text("\n\n", 2), ["", ""]);
+    assert_eq!(wrap_text("a\u{200d}🙂 b", 2), ["a\u{200d}", "🙂", "b"]);
+}
+
+#[test]
 fn middle_ellipsis_preserves_unicode_zero_width_and_tiny_widths() {
     for (value, width, expected) in [
         ("abcdefghijkl", 8, "ab...jkl"),
@@ -245,6 +256,12 @@ fn text_panel_renderer_adds_panel_header() {
     assert!(rendered.contains("[ Audit ]"));
     assert!(rendered.contains("line one"));
     assert!(rendered.contains("line two"));
+}
+
+#[test]
+fn mojo_section_header_plan_preserves_fit_and_separator_output() {
+    assert_eq!(section_header_with_width("A", 10), "[ A ] ====");
+    assert_eq!(section_header_with_width("表🙂", 4), "[...");
 }
 
 #[test]

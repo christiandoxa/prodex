@@ -324,6 +324,95 @@ fn wrap_and_pad_abi_reject_null_output_and_invalid_selector() {
 }
 
 #[test]
+fn mojo_wrap_text_plan_preserves_paragraphs_unicode_spaces_and_narrow_widths() {
+    let input = "alpha\t表🙂 beta\n\n  combining\u{3000}marks";
+    let widths = input
+        .chars()
+        .map(|ch| {
+            u64::from(if ch == '表' || ch == '🙂' {
+                2_u8
+            } else {
+                1_u8
+            })
+        })
+        .collect::<Vec<_>>();
+    let plan = wrap_text_plan(input, &widths, 8).unwrap();
+    let scalar_ends = std::iter::once(0)
+        .chain(
+            input
+                .char_indices()
+                .map(|(index, ch)| index + ch.len_utf8()),
+        )
+        .collect::<Vec<_>>();
+    let lines = plan
+        .line_token_ranges
+        .iter()
+        .map(|line| {
+            (line.start..line.end)
+                .map(|token_index| {
+                    let token = plan.token_ranges[token_index];
+                    &input[scalar_ends[token.start]..scalar_ends[token.end]]
+                })
+                .collect::<Vec<_>>()
+                .join(" ")
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(lines, ["alpha", "表🙂", "beta", "", "combinin", "g marks"]);
+
+    let zero = wrap_text_plan("表🙂", &widths[..2], 0).unwrap();
+    assert!(zero.token_ranges.is_empty());
+    assert_eq!(zero.line_token_ranges.len(), 1);
+    assert_eq!(
+        zero.line_token_ranges[0],
+        TerminalScalarRange { start: 0, end: 0 }
+    );
+}
+
+#[test]
+fn terminal_render_plans_reject_bad_abi_without_mutating_outputs() {
+    let mut section = [77_u64; 2];
+    assert_eq!(
+        unsafe {
+            prodex_terminal_section_header_plan_v1(99, 4, 10, section.as_mut_ptr() as u64, 2)
+        },
+        4
+    );
+    assert_eq!(section, [77; 2]);
+
+    let ids = [4_u64];
+    let profiles = [1_u64];
+    let mut details = [77_u64; 2];
+    assert_eq!(
+        unsafe {
+            prodex_terminal_session_report_detail_plan_v1(
+                99,
+                ids.as_ptr() as u64,
+                profiles.as_ptr() as u64,
+                1,
+                3,
+                details.as_mut_ptr() as u64,
+                2,
+            )
+        },
+        4
+    );
+    assert_eq!(details, [77; 2]);
+}
+
+#[test]
+fn terminal_section_and_session_detail_plans_preserve_caller_decisions() {
+    assert_eq!(section_header_plan(8, 8).unwrap(), SectionHeaderPlan::Fit);
+    assert_eq!(
+        section_header_plan(8, 12).unwrap(),
+        SectionHeaderPlan::Keep { separator_cells: 4 }
+    );
+    assert_eq!(
+        session_report_detail_plan(&[1, 30, 4], &[false, true, true], 4).unwrap(),
+        [(false, false), (true, true), (false, true)]
+    );
+}
+
+#[test]
 fn abi_rejects_invalid_version_pointer_and_capacity() {
     let mut result = 9876u64;
     let address = (&mut result as *mut u64) as usize as u64;
