@@ -2,6 +2,17 @@ use super::{QUOTA_DISPLAY_LABEL_SORT, load_quota_display_label};
 use super::{QUOTA_MODEL_POLICY_ABI_VERSION, prodex_quota_report_compare_v1};
 
 unsafe extern "C" {
+    fn prodex_quota_report_sort_projection_v1(
+        abi_version: i64,
+        provider_kind: i64,
+        ready: i64,
+        available: i64,
+        first_reset_present: i64,
+        first_reset: i64,
+        second_reset_present: i64,
+        second_reset: i64,
+        output: *mut i64,
+    ) -> i64;
     fn prodex_quota_report_sort_next_v1(abi_version: i64, sort: i64) -> i64;
     fn prodex_quota_report_page_plan_v1(
         abi_version: i64,
@@ -14,6 +25,58 @@ unsafe extern "C" {
         limit_present: i64,
         output: *mut u64,
     ) -> i64;
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct QuotaReportSortProjection {
+    pub status_rank: i64,
+    pub reset_epoch: Option<i64>,
+}
+
+/// Projects normalized provider facts into report ordering fields.
+/// Provider parsing and timezone conversion remain host responsibilities.
+pub fn quota_report_sort_projection(
+    provider_kind: i64,
+    ready: bool,
+    available: bool,
+    first_reset: Option<i64>,
+    second_reset: Option<i64>,
+) -> Result<QuotaReportSortProjection, crate::MojoError> {
+    if !(super::QUOTA_REPORT_PROJECTION_OPENAI..=super::QUOTA_REPORT_PROJECTION_ERROR)
+        .contains(&provider_kind)
+    {
+        return Err(crate::MojoError::InvalidInput);
+    }
+    let mut output = [i64::MAX; 3];
+    let status = unsafe {
+        prodex_quota_report_sort_projection_v1(
+            1,
+            provider_kind,
+            i64::from(ready),
+            i64::from(available),
+            i64::from(first_reset.is_some()),
+            first_reset.unwrap_or_default(),
+            i64::from(second_reset.is_some()),
+            second_reset.unwrap_or_default(),
+            output.as_mut_ptr(),
+        )
+    };
+    match status {
+        0 => {}
+        1 => return Err(crate::MojoError::InvalidInput),
+        4 => return Err(crate::MojoError::AbiMismatch),
+        _ => return Err(crate::MojoError::InvalidOutput),
+    }
+    if !(0..=2).contains(&output[0]) || !matches!(output[2], 0 | 1) {
+        return Err(crate::MojoError::InvalidOutput);
+    }
+    if output[2] == 0 && output[1] != i64::MAX {
+        return Err(crate::MojoError::InvalidOutput);
+    }
+    Ok(QuotaReportSortProjection {
+        status_rank: output[0],
+        reset_epoch: (output[2] == 1).then_some(output[1]),
+    })
 }
 
 #[allow(clippy::too_many_arguments)]

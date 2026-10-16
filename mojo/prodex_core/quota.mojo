@@ -3383,6 +3383,68 @@ def quota_report_compare_i64(left: Int64, right: Int64) -> Int64:
     return 0
 
 
+comptime QUOTA_REPORT_PROJECTION_OPENAI: Int64 = 0
+comptime QUOTA_REPORT_PROJECTION_COPILOT: Int64 = 1
+comptime QUOTA_REPORT_PROJECTION_GEMINI: Int64 = 2
+comptime QUOTA_REPORT_PROJECTION_EXTERNAL: Int64 = 3
+comptime QUOTA_REPORT_PROJECTION_ERROR: Int64 = 4
+comptime QUOTA_REPORT_PROJECTION_ABI_VERSION: Int64 = 1
+
+
+# Projects provider facts into the deterministic fields consumed by report
+# ordering. Rust retains provider parsing and timestamp conversion; Mojo owns
+# readiness ranking and reset-candidate precedence.
+@export("prodex_quota_report_sort_projection_v1")
+def prodex_quota_report_sort_projection_v1(
+    abi_version: Int64,
+    provider_kind: Int64,
+    ready: Int64,
+    available: Int64,
+    first_reset_present: Int64,
+    first_reset: Int64,
+    second_reset_present: Int64,
+    second_reset: Int64,
+    output_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != QUOTA_REPORT_PROJECTION_ABI_VERSION:
+        return 4
+    if (
+        provider_kind < QUOTA_REPORT_PROJECTION_OPENAI
+        or provider_kind > QUOTA_REPORT_PROJECTION_ERROR
+        or (ready != 0 and ready != 1)
+        or (available != 0 and available != 1)
+        or (first_reset_present != 0 and first_reset_present != 1)
+        or (second_reset_present != 0 and second_reset_present != 1)
+        or output_address == 0
+    ):
+        return 1
+
+    var status_rank: Int64 = 1
+    if provider_kind == QUOTA_REPORT_PROJECTION_ERROR:
+        status_rank = 2
+    elif provider_kind == QUOTA_REPORT_PROJECTION_EXTERNAL:
+        status_rank = 0 if available == 1 else 1
+    else:
+        status_rank = 0 if ready == 1 else 1
+
+    var reset_present: Int64 = 0
+    var reset_epoch = INT64_MAX
+    if first_reset_present == 1:
+        reset_present = 1
+        reset_epoch = first_reset
+    if second_reset_present == 1 and (reset_present == 0 or second_reset < reset_epoch):
+        reset_present = 1
+        reset_epoch = second_reset
+
+    var output = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    output[unsafe_offset=0] = status_rank
+    output[unsafe_offset=1] = reset_epoch
+    output[unsafe_offset=2] = reset_present
+    return 0
+
+
 @export("prodex_quota_report_compare_v1")
 def prodex_quota_report_compare_v1(
     abi_version: Int64,

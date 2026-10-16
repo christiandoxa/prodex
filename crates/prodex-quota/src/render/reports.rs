@@ -9,7 +9,6 @@ struct QuotaReportViewData {
     status: String,
     resets: Option<String>,
 }
-
 pub fn render_quota_reports(reports: &[QuotaReport], detail: bool) -> String {
     render_quota_reports_with_layout(reports, detail, None, current_cli_width())
 }
@@ -356,10 +355,61 @@ struct QuotaReportSortRecord {
 
 fn quota_report_sort_record(report: &QuotaReport) -> QuotaReportSortRecord {
     let view = quota_report_view_data(report);
+    let (provider_kind, ready, available, first_reset, second_reset) = match report.result.as_ref()
+    {
+        Ok(ProviderQuotaSnapshot::OpenAi(usage)) => {
+            let pair = usage.rate_limit.as_ref();
+            (
+                prodex_mojo_core::quota::QUOTA_REPORT_PROJECTION_OPENAI,
+                openai_quota_has_ready_limit(usage),
+                false,
+                pair.and_then(|pair| find_main_window(pair, "5h"))
+                    .and_then(|window| window.reset_at),
+                pair.and_then(|pair| find_main_window(pair, "weekly"))
+                    .and_then(|window| window.reset_at),
+            )
+        }
+        Ok(ProviderQuotaSnapshot::Copilot(info)) => (
+            prodex_mojo_core::quota::QUOTA_REPORT_PROJECTION_COPILOT,
+            copilot_quota_is_ready(info),
+            false,
+            copilot_reset_epoch(info),
+            None,
+        ),
+        Ok(ProviderQuotaSnapshot::Gemini(info)) => (
+            prodex_mojo_core::quota::QUOTA_REPORT_PROJECTION_GEMINI,
+            gemini_quota_is_ready(info),
+            false,
+            gemini_reset_epoch(info),
+            None,
+        ),
+        Ok(ProviderQuotaSnapshot::External(info)) => (
+            prodex_mojo_core::quota::QUOTA_REPORT_PROJECTION_EXTERNAL,
+            false,
+            info.available.unwrap_or(false),
+            None,
+            None,
+        ),
+        Err(_) => (
+            prodex_mojo_core::quota::QUOTA_REPORT_PROJECTION_ERROR,
+            false,
+            false,
+            None,
+            None,
+        ),
+    };
+    let projection = prodex_mojo_core::quota::quota_report_sort_projection(
+        provider_kind,
+        ready,
+        available,
+        first_reset,
+        second_reset,
+    )
+    .expect("Mojo quota report sort projection returned invalid output");
     QuotaReportSortRecord {
         active: report.active,
-        status_rank: i64::try_from(quota_status_rank(report)).expect("quota rank fits i64"),
-        reset_epoch: quota_reset_epoch(report),
+        status_rank: projection.status_rank,
+        reset_epoch: projection.reset_epoch.unwrap_or(i64::MAX),
         profile: report.name.clone(),
         auth: report.auth.label.clone(),
         account: view.account,
@@ -395,28 +445,5 @@ fn compare_quota_report_sort_records(
         0 => Ordering::Equal,
         1 => Ordering::Greater,
         _ => unreachable!("validated Mojo quota report ordering"),
-    }
-}
-
-fn quota_status_rank(report: &QuotaReport) -> usize {
-    match report.result.as_ref() {
-        Ok(ProviderQuotaSnapshot::OpenAi(usage)) => {
-            usize::from(!openai_quota_has_ready_limit(usage))
-        }
-        Ok(ProviderQuotaSnapshot::Copilot(info)) => usize::from(!copilot_quota_is_ready(info)),
-        Ok(ProviderQuotaSnapshot::Gemini(info)) => usize::from(!gemini_quota_is_ready(info)),
-        Ok(ProviderQuotaSnapshot::External(info)) => usize::from(info.available != Some(true)),
-        Err(_) => 2,
-    }
-}
-
-fn quota_reset_epoch(report: &QuotaReport) -> i64 {
-    match report.result.as_ref().ok() {
-        Some(ProviderQuotaSnapshot::OpenAi(usage)) => {
-            earliest_required_main_reset_epoch(usage).unwrap_or(i64::MAX)
-        }
-        Some(ProviderQuotaSnapshot::Copilot(info)) => copilot_reset_epoch(info).unwrap_or(i64::MAX),
-        Some(ProviderQuotaSnapshot::Gemini(info)) => gemini_reset_epoch(info).unwrap_or(i64::MAX),
-        _ => i64::MAX,
     }
 }

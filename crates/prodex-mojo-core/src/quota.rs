@@ -35,8 +35,8 @@ pub use retry_time::{QuotaRetryTimeCandidate, quota_retry_time_candidate};
 mod error_label;
 pub use error_label::{quota_error_summary_kind, quota_error_summary_label};
 pub use report_sort::{
-    QuotaReportPagePlan, quota_report_compare, quota_report_page_plan, quota_report_sort_label,
-    quota_report_sort_next,
+    QuotaReportPagePlan, QuotaReportSortProjection, quota_report_compare, quota_report_page_plan,
+    quota_report_sort_label, quota_report_sort_next, quota_report_sort_projection,
 };
 mod usage_response;
 pub use usage_response::{
@@ -77,6 +77,12 @@ pub const QUOTA_MODEL_PAIR_REGULAR: i64 = 1;
 pub const QUOTA_MODEL_PAIR_RESERVE: i64 = 2;
 pub const QUOTA_MODEL_PAIR_DEFAULT: i64 = 3;
 pub const QUOTA_MODEL_CAPACITY_OBSERVATION_ABI_VERSION: i64 = 1;
+
+pub const QUOTA_REPORT_PROJECTION_OPENAI: i64 = 0;
+pub const QUOTA_REPORT_PROJECTION_COPILOT: i64 = 1;
+pub const QUOTA_REPORT_PROJECTION_GEMINI: i64 = 2;
+pub const QUOTA_REPORT_PROJECTION_EXTERNAL: i64 = 3;
+pub const QUOTA_REPORT_PROJECTION_ERROR: i64 = 4;
 
 pub const QUOTA_ERROR_KIND_UNKNOWN: i64 = 0;
 pub const QUOTA_ERROR_KIND_UNAVAILABLE: i64 = 1;
