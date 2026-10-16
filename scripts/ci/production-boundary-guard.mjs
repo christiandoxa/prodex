@@ -11,7 +11,7 @@ const FILES = Object.freeze({
   dispatch: "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_pipeline_dispatch.rs",
   admission:
     "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_application_data_plane.rs",
-  request: "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_request.rs",
+  request: "mojo/prodex_core/runtime_request_target.mojo",
   appManifest: "crates/prodex-app/Cargo.toml",
 });
 
@@ -76,7 +76,7 @@ export function validateProductionBoundary(sources) {
       root,
       [
         "RuntimeLocalRewriteRequest::tiny(request)",
-        "runtime_local_rewrite_request_target_valid(request.url())",
+        "prodex_mojo_core::runtime_request_target::is_valid(request.url())",
         "request.respond(build_runtime_proxy_json_error_response(",
         "run_runtime_local_rewrite_pipeline(request, target, shared)",
       ],
@@ -116,17 +116,29 @@ export function validateProductionBoundary(sources) {
   requireText(
     errors,
     sources.request,
-    "runtime_local_rewrite_request_target_valid",
+    '@export("prodex_runtime_request_target_valid_v1")',
     `${FILES.request}: bounded canonical request-target validation is required`,
   );
   for (const rule of [
-    "raw.len() > 8 * 1024",
-    "!raw.is_ascii()",
-    "raw.contains('#')",
-    "path.contains('\\\\')",
-    "path.contains(\"//\")",
-    "matches!(s, \".\" | \"..\")",
-    "matches!(decoded, b'/' | b'\\\\' | b'%' | b'?' | b'#' | b'.')",
+    "length > RUNTIME_REQUEST_TARGET_MAX_BYTES",
+    "source[unsafe_offset=0] != 47",
+    "source[unsafe_offset=1] == 47",
+    "value > 127",
+    "value == 35",
+    "value == 92",
+    "segment_length == 1",
+    "segment_length == 2",
+    "source[unsafe_offset=segment_start] == 46",
+    "source[unsafe_offset=segment_start + 1] == 46",
+    "source[unsafe_offset=index - 1] == 47",
+    "index + 2 >= length",
+    "high < 0 or low < 0",
+    "decoded == 47",
+    "decoded == 92",
+    "decoded == 37",
+    "decoded == 63",
+    "decoded == 35",
+    "decoded == 46",
   ]) {
     requireText(
       errors,
@@ -166,11 +178,11 @@ function assertSelfTest(condition, message) {
 
 function runSelfTest() {
   const valid = {
-    root: `fn handle_runtime_local_rewrite_proxy_request() { RuntimeLocalRewriteRequest::tiny(request); runtime_local_rewrite_request_target_valid(request.url()); request.respond(build_runtime_proxy_json_error_response(400)); run_runtime_local_rewrite_pipeline(request, target, shared); }`,
+    root: `fn handle_runtime_local_rewrite_proxy_request() { RuntimeLocalRewriteRequest::tiny(request); prodex_mojo_core::runtime_request_target::is_valid(request.url()); request.respond(build_runtime_proxy_json_error_response(400)); run_runtime_local_rewrite_pipeline(request, target, shared); }`,
     pipeline: `fn try_run_runtime_local_rewrite_pipeline() { runtime_local_rewrite_request_state(request, target, shared); runtime_local_rewrite_bounded_admission(state, shared); runtime_local_rewrite_capture_body(state, shared); RuntimeGatewayApplicationAdmission::from_request(&captured.captured, shared); runtime_local_rewrite_dispatch_websocket(ready, shared); runtime_local_rewrite_dispatch_compact(ready, shared); runtime_local_rewrite_dispatch_builtin_models(ready, shared); runtime_local_rewrite_dispatch_provider(ready, shared); }`,
     dispatch: `fn dispatch() { send_runtime_local_rewrite_upstream_request(); }`,
     admission: `fn admission() { provider_adapter(shared.provider.bridge_kind().provider_id()).capability_status(endpoint); }`,
-    request: `fn runtime_local_rewrite_request_target_valid() { raw.len() > 8 * 1024; !raw.is_ascii(); raw.contains('#'); path.contains('\\\\'); path.contains("//"); matches!(s, "." | ".."); matches!(decoded, b'/' | b'\\\\' | b'%' | b'?' | b'#' | b'.'); }`,
+    request: `@export("prodex_runtime_request_target_valid_v1") length > RUNTIME_REQUEST_TARGET_MAX_BYTES source[unsafe_offset=0] != 47 source[unsafe_offset=1] == 47 value > 127 value == 35 value == 92 segment_length == 1 segment_length == 2 source[unsafe_offset=segment_start] == 46 source[unsafe_offset=segment_start + 1] == 46 source[unsafe_offset=index - 1] == 47 index + 2 >= length high < 0 or low < 0 decoded == 47 decoded == 92 decoded == 37 decoded == 63 decoded == 35 decoded == 46`,
     appManifest: `[dependencies]\nprodex_provider_core = { workspace = true }`,
   };
   assertSelfTest(validateProductionBoundary(valid).length === 0, "valid core data plane rejected");

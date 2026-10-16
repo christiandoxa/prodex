@@ -412,7 +412,9 @@ fn handle_runtime_local_rewrite_proxy_request(
     shared: &RuntimeLocalRewriteProxyShared,
 ) {
     let request = RuntimeLocalRewriteRequest::tiny(request);
-    if !super::local_rewrite_request::runtime_local_rewrite_request_target_valid(request.url()) {
+    if !prodex_mojo_core::runtime_request_target::is_valid(request.url())
+        .expect("Mojo runtime request-target validation failed")
+    {
         let _ = request.respond(build_runtime_proxy_json_error_response(
             400,
             "invalid_request_target",

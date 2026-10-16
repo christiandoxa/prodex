@@ -206,6 +206,8 @@ pub mod runtime_proxy_dispatch;
 #[cfg(feature = "mojo-runtime")]
 pub mod runtime_repo_map;
 #[cfg(feature = "mojo-runtime")]
+pub mod runtime_request_target;
+#[cfg(feature = "mojo-runtime")]
 pub mod runtime_response_forwarding;
 #[cfg(feature = "mojo-runtime")]
 pub mod runtime_response_header_policy;
