@@ -304,7 +304,7 @@ mod tests {
                 false,
             )
             .unwrap(),
-            Some("please compare\nthen summarize".to_string()),
+            Some("please compare\n\nthen summarize".to_string()),
         );
         assert_eq!(
             normalize_transcript_visible_text("\u{fffd}\u{fffd}\u{fffd}\u{0}bad", true).unwrap(),
@@ -326,6 +326,37 @@ mod tests {
         assert!(text.ends_with(" …[truncated]"));
         assert!(text.len() <= 64 * 1024);
         assert!(text.is_char_boundary(text.len()));
+    }
+
+    #[test]
+    fn compiled_mojo_visibility_preserves_the_binary_scalar_sample_boundary() {
+        for prefix in ["a".repeat(4096), format!("表{}", "a".repeat(4095))] {
+            let text = format!("{prefix}\u{0}tail");
+            assert!(!transcript_binary_like(&text, true).unwrap());
+            assert_eq!(
+                normalize_transcript_visible_text(&text, true).unwrap(),
+                Some(text),
+            );
+        }
+        let text = format!("{}\u{0}tail", "a".repeat(4095));
+        assert!(transcript_binary_like(&text, true).unwrap());
+        assert_eq!(
+            normalize_transcript_visible_text(&text, true).unwrap(),
+            None
+        );
+    }
+
+    #[test]
+    fn compiled_mojo_accepts_large_parts_and_sources_before_output_truncation() {
+        let parts = vec!["x"; 65_537];
+        assert_eq!(
+            join_transcript_user_parts(&parts).unwrap(),
+            parts.join("\n")
+        );
+        assert_eq!(
+            normalize_transcript_safe_text(&"x".repeat(4_000_001)).unwrap(),
+            format!("{} …[truncated]", "x".repeat(64 * 1024 - 16)),
+        );
     }
 
     #[test]

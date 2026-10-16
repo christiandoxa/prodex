@@ -3,7 +3,6 @@ from rich_text import rich_codepoint, rich_codepoint_width, rich_utf8_continuati
 from rich_types import ProdexRichStringView, rich_view_ptr
 
 comptime PRODEX_TRANSCRIPT_ABI_VERSION: Int64 = 1
-comptime TRANSCRIPT_VISIBLE_MAX_FACTS: Int64 = 4_000_000
 
 
 def transcript_fact_view_valid(
@@ -13,7 +12,6 @@ def transcript_fact_view_valid(
 ) -> Bool:
     if (
         fact_count < 0
-        or fact_count > TRANSCRIPT_VISIBLE_MAX_FACTS
         or (fact_count > 0 and facts_address == 0)
         or not rich_view_valid(view, 0x7FFF_FFFF_FFFF_FFFF)
     ):

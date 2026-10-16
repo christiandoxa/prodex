@@ -2959,13 +2959,6 @@ def prodex_mojo_transcript_binary_policy_v1(
     var source = Pointer[mut=False, UInt64, ImmUntrackedOrigin](
         unsafe_from_address=Int(records_address)
     )
-    var suspicious: Int64 = 0
-    var replacement: Int64 = 0
-    var control: Int64 = 0
-    var readable_ascii: Int64 = 0
-    var non_ascii: Int64 = 0
-    var whitespace: Int64 = 0
-
     for index in range(record_count):
         var packed = source[unsafe_offset=index]
         var codepoint = packed & UInt64(0x1F_FFFF)
@@ -2975,57 +2968,7 @@ def prodex_mojo_transcript_binary_policy_v1(
             or (codepoint >= 0xD800 and codepoint <= 0xDFFF)
         ):
             return 1
-        var space = ((packed >> 21) & UInt64(1)) == UInt64(1)
-        var alphanumeric = ((packed >> 22) & UInt64(1)) == UInt64(1)
-        var rust_control = ((packed >> 23) & UInt64(1)) == UInt64(1)
-        var ascii = codepoint <= 127
-        var common = transcript_common_punctuation(codepoint)
-        var replaced = codepoint == 0xFFFD
-        var unsafe_control = (
-            rust_control and codepoint != 10 and codepoint != 13
-            and codepoint != 9
-        )
-        var readable = ascii and (alphanumeric or space or common)
-        var strange = replaced or unsafe_control or (
-            not ascii and not alphanumeric and not space and not common
-        )
-        if strange:
-            suspicious += 1
-        if replaced:
-            replacement += 1
-        if unsafe_control:
-            control += 1
-        if readable:
-            readable_ascii += 1
-        if not ascii:
-            non_ascii += 1
-        if space:
-            whitespace += 1
-
-    var bad = False
-    if record_count > 0:
-        if mode == 1:
-            var mojibake = (
-                record_count >= 24
-                and non_ascii >= 8
-                and non_ascii * 100 >= record_count * 20
-                and readable_ascii * 100 <= record_count * 55
-                and whitespace * 6 <= record_count
-            )
-            bad = (
-                replacement > 0
-                or control > 0
-                or mojibake
-                or suspicious * 5 >= record_count
-                or suspicious >= 6
-            )
-        else:
-            bad = (
-                replacement >= 3
-                or control > 0
-                or suspicious * 4 > record_count
-                or suspicious >= 8
-            )
+    var bad = transcript_binary_range(source, 0, record_count, mode == 1)
     Pointer[mut=True, UInt64, MutUntrackedOrigin](
         unsafe_from_address=Int(result_address)
     )[] = UInt64(1) if bad else UInt64(0)
@@ -3050,8 +2993,8 @@ def transcript_binary_range(
     var readable_ascii: Int64 = 0
     var non_ascii: Int64 = 0
     var whitespace: Int64 = 0
-    var total = end - start
-    for index in range(start, end):
+    var total = min(end - start, TRANSCRIPT_BINARY_MAX_SCALARS)
+    for index in range(start, start + total):
         var codepoint = UInt64(transcript_fact_codepoint(facts, index))
         var space = transcript_fact_whitespace(facts, index)
         var alphanumeric = ((facts[unsafe_offset=index] >> 22) & UInt64(1)) == UInt64(1)
@@ -3191,7 +3134,8 @@ def transcript_visible_emit_line(
     ):
         return True
     if (
-        transcript_bytes_contains(
+        mode == TRANSCRIPT_VISIBLE_MODE_MESSAGE
+        and transcript_bytes_contains(
             source,
             line_start,
             trimmed_end,
@@ -3201,9 +3145,6 @@ def transcript_visible_emit_line(
             source, line_start, trimmed_end, StringSlice("/attachments/")
         )
     ):
-        if last_blank[] == 1 and written[] > 0 and output[unsafe_offset=written[] - 1] == 10:
-            written[] -= 1
-            last_blank[] = 0
         return True
     if has_visible[] == 1 and not transcript_visible_put_byte(output, capacity, written, 10):
         return False
@@ -3284,14 +3225,11 @@ def prodex_mojo_transcript_visible_text_v1(
     while cursor < end_byte:
         var width = rich_codepoint_width(source[unsafe_offset=cursor])
         var codepoint = rich_codepoint(source, cursor, width)
-        if codepoint == 10 or codepoint == 13:
+        if codepoint == 10:
             var line_end = cursor
             var line_end_scalar = scalar
             cursor += width
             scalar += 1
-            if codepoint == 13 and cursor < end_byte and source[unsafe_offset=cursor] == 10:
-                cursor += 1
-                scalar += 1
             if not transcript_visible_emit_line(
                 source,
                 facts,
