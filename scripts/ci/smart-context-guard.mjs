@@ -6,6 +6,8 @@ import { repoRoot } from "../npm/common.mjs";
 
 const paths = {
   rollout: "crates/prodex-runtime-proxy/src/smart_context/rollout.rs",
+  rolloutAbi: "crates/prodex-mojo-core/src/runtime_decisions/smart_context_policy.rs",
+  rolloutMojo: "mojo/prodex_core/smart_context_policy.mojo",
   hash: "crates/prodex-runtime-proxy/src/smart_context/normalization/artifacts.rs",
   adapter: "crates/prodex-app/src/runtime_proxy/smart_context.rs",
   sticky: "crates/prodex-app/src/runtime_proxy/smart_context/rollout.rs",
@@ -27,11 +29,25 @@ export function validateSmartContext(sources) {
   const errors = [];
   const rollout = sources[paths.rollout] ?? "";
   const bucket = section(rollout, "pub fn smart_context_rollout_bucket", "}");
-  if (!bucket.includes("smart_context_sha256_digest") || !bucket.includes("% 10_000")) {
-    errors.push("rollout bucket must use binary SHA-256 bytes and basis-point buckets");
+  if (!bucket.includes("smart_context_sha256_digest(stable_key.as_bytes())") ||
+      !bucket.includes("prodex_mojo_core::runtime::smart_context_rollout_bucket(&digest)")) {
+    errors.push("rollout bucket must pass binary SHA-256 bytes to Mojo");
   }
-  for (const forbidden of ["parse::<", "unwrap_or(0)"]) {
+  for (const forbidden of ["parse::<", "unwrap_or(0)", "from_be_bytes", "% 10_000"]) {
     if (bucket.includes(forbidden)) errors.push(`rollout bucket contains ${forbidden}`);
+  }
+  const bucketAbi = section(sources[paths.rolloutAbi] ?? "",
+    "pub fn smart_context_rollout_bucket", "\npub fn smart_context_rollout_plan");
+  if (!bucketAbi.includes("prodex_smart_context_rollout_bucket_v1(") ||
+      !bucketAbi.includes("if bucket >= 10_000")) {
+    errors.push("rollout bucket ABI must call Mojo and validate the returned range");
+  }
+  const bucketMojo = section(sources[paths.rolloutMojo] ?? "",
+    '@export("prodex_smart_context_rollout_bucket_v1")', '@export("prodex_smart_context_rollout_plan_v1")');
+  if (!["digest_length != 32", "for index in range(8):",
+    "prefix = (prefix << UInt64(8)) | UInt64(digest[unsafe_offset=index])",
+    "bucket[] = prefix % UInt64(10_000)"].every((marker) => bucketMojo.includes(marker))) {
+    errors.push("Mojo rollout bucket must preserve the eight-byte big-endian prefix and basis-point range");
   }
 
   const sticky = section(
@@ -129,6 +145,17 @@ function selfTest() {
   assert.deepEqual(validateSmartContext(valid), []);
   const broken = { ...valid, [paths.rollout]: "pub fn smart_context_rollout_bucket(_: &str) -> u16 { \"sc:x\".parse::<u16>().unwrap_or(0) }" };
   assert(validateSmartContext(broken).some((error) => error.includes("rollout bucket")));
+  for (const [file, marker, replacement] of [
+    [paths.rollout, "smart_context_rollout_bucket(&digest)", "legacy_bucket(&digest)"],
+    [paths.rolloutAbi, "prodex_smart_context_rollout_bucket_v1(", "legacy_bucket("],
+    [paths.rolloutAbi, "if bucket >= 10_000", "if false"],
+    [paths.rolloutMojo, "range(8)", "range(7)"],
+    [paths.rolloutMojo, "% UInt64(10_000)", "% UInt64(100)"],
+  ]) {
+    assert(valid[file].includes(marker));
+    assert(validateSmartContext({ ...valid, [file]: valid[file].replaceAll(marker, replacement) })
+      .some((error) => error.includes("rollout bucket")));
+  }
   assert(
     validateSmartContext({ ...valid, [paths.manifest]: 'json!({"role": "user"})' }).some((error) =>
       error.includes("synthesize a user"),
