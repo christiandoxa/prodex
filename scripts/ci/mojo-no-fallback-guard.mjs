@@ -5,6 +5,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { repoRoot } from "../npm/common.mjs";
 
+const ANTHROPIC_ATTEMPT_CURSOR_FILE = "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_anthropic.rs";
 const PRECOMMIT_BUDGET_FILE = "crates/prodex-runtime-proxy/src/failure_response.rs";
 const PRECOMMIT_BUDGET_TEST_FILE = "crates/prodex-runtime-proxy/tests/src/failure_response.rs";
 const RESPONSE_METADATA_FILE = "crates/prodex-runtime-proxy/src/payload_detection/response_metadata.rs";
@@ -361,6 +362,7 @@ const PROMOTED_FILES = [
   "crates/prodex-mojo-core/tests/profile_health.rs",
   "crates/prodex-runtime-doctor/src/diagnosis/final_summary/log_summary.rs",
   "crates/prodex-mojo-core/src/provider_constraints.rs",
+  ANTHROPIC_ATTEMPT_CURSOR_FILE,
   "crates/prodex-mojo-core/src/provider_constraints/gemini_sse_tool_call_index.rs",
   "crates/prodex-provider-core/src/gemini_bridge/hardening/contents/tool_pairs/order.rs",
   "mojo/prodex_core/provider_constraints.mojo",
@@ -7176,6 +7178,51 @@ export function findViolations(files) {
     }
     return [];
   });
+  const anthropicAttemptCursorViolations = files.flatMap(([filePath, contents]) => {
+    if (filePath === ANTHROPIC_ATTEMPT_CURSOR_FILE) {
+      const production = contents.split("#[cfg(test)]", 1)[0];
+      const required = [
+        "fn anthropic_attempt_cursor_step(",
+        "prodex_mojo_core::provider_constraints::provider_attempt_cursor_plan(",
+        "PROVIDER_ATTEMPT_CURSOR_INITIAL",
+        "PROVIDER_ATTEMPT_CURSOR_NEXT_MODEL",
+        "PROVIDER_ATTEMPT_CURSOR_NEXT_CREDENTIAL",
+      ];
+      const duplicateRust = [
+        "attempt.model_index += 1",
+        "attempt.auth_index += 1",
+        "attempt.model_index = 0",
+        "auth_count > 0 && model_count > 0",
+        "attempt.model_index < self.model_count",
+        "attempt.auth_index < self.auth_count",
+      ];
+      return required.every((marker) => production.includes(marker)) &&
+        duplicateRust.every((marker) => !production.includes(marker))
+        ? [] : [`${filePath}: Anthropic model/auth cursor transitions must remain Mojo-owned`];
+    }
+    if (filePath === PROVIDER_CONSTRAINTS_ADAPTER_FILE) {
+      const required = [
+        "fn prodex_provider_attempt_cursor_v1(",
+        "pub fn provider_attempt_cursor_plan(",
+        "provider_retry_cursor_mojo_exhaustion_and_credential_reset",
+        "provider_retry_cursor_abi_rejects_bad_version_and_indices_before_writing",
+      ];
+      return required.filter((marker) => !contents.includes(marker))
+        .map((marker) => `${filePath}: Mojo provider cursor ABI must retain ${marker}`);
+    }
+    if (filePath === "mojo/prodex_core/provider_constraints.mojo") {
+      const required = [
+        '@export("prodex_provider_attempt_cursor_v1")',
+        "PROVIDER_ATTEMPT_CURSOR_NEXT_MODEL",
+        "PROVIDER_ATTEMPT_CURSOR_NEXT_CREDENTIAL",
+        "selected_model = model_index + 1",
+        "selected_auth = auth_index + 1",
+      ];
+      return required.filter((marker) => !contents.includes(marker))
+        .map((marker) => `${filePath}: compiled retry cursor authority must retain ${marker}`);
+    }
+    return [];
+  });
   const terminalGeometryViolations = files.flatMap(([filePath, contents]) => {
     if (filePath === TERMINAL_GEOMETRY_CONSUMER_FILE) {
       const required = [
@@ -7233,7 +7280,7 @@ export function findViolations(files) {
     }
     return [];
   });
-  return [...nativeRecoveryOwnershipViolations, ...quotaRecoveryEligibilityViolations, ...runtimeBrokerReuseMojoViolations, ...geminiResponseMediaMojoViolations, ...cookieEvictionMojoViolations, ...websocketBudgetMojoViolations, ...affinityBindingMojoViolations, ...responsesCapacityRecoveryViolations, ...sseTapMojoOwnershipViolations, ...quotaWatchViolations, ...geminiCompactSnippetViolations, ...geminiCompactTextViolations, ...doctorSmartContextDecisionViolations, ...terminalGeometryViolations, ...smartContextCapsuleOrderViolations, ...markerViolations, ...deepseekCatalogPolicyViolations, ...featureOffViolations, ...liveLogRecordViolations, ...runtimePolicyPresetViolations, ...profileHealthCircuitViolations, ...logThroughputViolations, ...operationalDetailSpecViolations, ...transcriptPolicyViolations, ...logLoadPolicyViolations, ...routeReasonViolations, ...runtimeStateQuotaViolations, ...runtimeStateRoutePolicyViolations, ...runtimeProxyRootViolations, ...brokerVersionGuardViolations, ...brokerContinuityViolations, ...brokerLogCacheViolations, ...codexConfigViolations, ...statePolicyViolations, ...quotaSelectionPolicyViolations, ...routeTagMirrorViolations, ...enumTagMirrorViolations, ...appSelectionPolicyMirrorViolations, ...runtimeStateBackgroundViolations, ...redactionViolations, ...profileIdentityViolations, ...governanceInspectionViolations, ...governanceInspectionOrderingViolations, ...exactnessPlannerViolations,
+  return [...nativeRecoveryOwnershipViolations, ...quotaRecoveryEligibilityViolations, ...runtimeBrokerReuseMojoViolations, ...geminiResponseMediaMojoViolations, ...cookieEvictionMojoViolations, ...websocketBudgetMojoViolations, ...affinityBindingMojoViolations, ...responsesCapacityRecoveryViolations, ...sseTapMojoOwnershipViolations, ...quotaWatchViolations, ...geminiCompactSnippetViolations, ...geminiCompactTextViolations, ...doctorSmartContextDecisionViolations, ...anthropicAttemptCursorViolations, ...terminalGeometryViolations, ...smartContextCapsuleOrderViolations, ...markerViolations, ...deepseekCatalogPolicyViolations, ...featureOffViolations, ...liveLogRecordViolations, ...runtimePolicyPresetViolations, ...profileHealthCircuitViolations, ...logThroughputViolations, ...operationalDetailSpecViolations, ...transcriptPolicyViolations, ...logLoadPolicyViolations, ...routeReasonViolations, ...runtimeStateQuotaViolations, ...runtimeStateRoutePolicyViolations, ...runtimeProxyRootViolations, ...brokerVersionGuardViolations, ...brokerContinuityViolations, ...brokerLogCacheViolations, ...codexConfigViolations, ...statePolicyViolations, ...quotaSelectionPolicyViolations, ...routeTagMirrorViolations, ...enumTagMirrorViolations, ...appSelectionPolicyMirrorViolations, ...runtimeStateBackgroundViolations, ...redactionViolations, ...profileIdentityViolations, ...governanceInspectionViolations, ...governanceInspectionOrderingViolations, ...exactnessPlannerViolations,
     ...adaptiveBudgetViolations,
     ...providerUsageViolations,
     ...auditUsageViolations,
@@ -7870,6 +7917,17 @@ function selfTest() {
   assert.match(findViolations([[TERMINAL_SEPARATOR_CONSUMER_FILE,
     "pub fn tui_connected_separator_line(width: u16) -> String {\nmatch width {}\n}",
   ]]).join("\n"), /connected separator characters must come from compiled Mojo/u);
+  const anthropicCursorConsumer = [
+    "fn anthropic_attempt_cursor_step(",
+    "prodex_mojo_core::provider_constraints::provider_attempt_cursor_plan(",
+    "PROVIDER_ATTEMPT_CURSOR_INITIAL",
+    "PROVIDER_ATTEMPT_CURSOR_NEXT_MODEL",
+    "PROVIDER_ATTEMPT_CURSOR_NEXT_CREDENTIAL",
+  ].join("\n");
+  assert.deepEqual(findViolations([[ANTHROPIC_ATTEMPT_CURSOR_FILE, anthropicCursorConsumer]]), []);
+  assert.match(findViolations([[ANTHROPIC_ATTEMPT_CURSOR_FILE,
+    anthropicCursorConsumer + "\nattempt.model_index += 1",
+  ]]).join("\n"), /Anthropic model\/auth cursor transitions must remain Mojo-owned/u);
   const terminalGeometryConsumer = [
     "terminal_positive_size_override(&value)",
     "terminal_tty_dimensions(&text)",

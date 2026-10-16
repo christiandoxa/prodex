@@ -42,6 +42,115 @@ pub fn self_test() -> bool {
 }
 
 #[cfg(test)]
+mod attempt_cursor_tests {
+    use super::*;
+
+    #[test]
+    fn provider_retry_cursor_mojo_exhaustion_and_credential_reset() {
+        assert_eq!(
+            provider_attempt_cursor_plan(PROVIDER_ATTEMPT_CURSOR_INITIAL, 0, 2, None).unwrap(),
+            None,
+        );
+        assert_eq!(
+            provider_attempt_cursor_plan(PROVIDER_ATTEMPT_CURSOR_INITIAL, 2, 0, None).unwrap(),
+            None,
+        );
+        let mut cursor =
+            provider_attempt_cursor_plan(PROVIDER_ATTEMPT_CURSOR_INITIAL, 3, 2, None).unwrap();
+        let mut sequence = Vec::new();
+        while let Some(indices) = cursor {
+            sequence.push(indices);
+            cursor = if indices.0 + 1 < 3 {
+                provider_attempt_cursor_plan(PROVIDER_ATTEMPT_CURSOR_NEXT_MODEL, 3, 2, cursor)
+                    .unwrap()
+            } else {
+                provider_attempt_cursor_plan(PROVIDER_ATTEMPT_CURSOR_NEXT_CREDENTIAL, 3, 2, cursor)
+                    .unwrap()
+            };
+        }
+        assert_eq!(
+            sequence,
+            vec![(0, 0), (1, 0), (2, 0), (0, 1), (1, 1), (2, 1)],
+        );
+        assert_eq!(
+            provider_attempt_cursor_plan(PROVIDER_ATTEMPT_CURSOR_NEXT_MODEL, 3, 2, None).unwrap(),
+            None,
+        );
+        assert_eq!(
+            provider_attempt_cursor_plan(PROVIDER_ATTEMPT_CURSOR_NEXT_CREDENTIAL, 3, 2, None)
+                .unwrap(),
+            None,
+        );
+        assert_eq!(
+            provider_attempt_cursor_plan(PROVIDER_ATTEMPT_CURSOR_NEXT_MODEL, 3, 2, Some((2, 0)))
+                .unwrap(),
+            None,
+        );
+        assert_eq!(
+            provider_attempt_cursor_plan(
+                PROVIDER_ATTEMPT_CURSOR_NEXT_CREDENTIAL,
+                3,
+                2,
+                Some((2, 0))
+            )
+            .unwrap(),
+            Some((0, 1)),
+        );
+    }
+
+    #[test]
+    fn provider_retry_cursor_abi_rejects_bad_version_and_indices_before_writing() {
+        let mut output = [123_i64; 2];
+        let result = output.as_mut_ptr() as usize as u64;
+        unsafe {
+            assert_eq!(
+                prodex_provider_attempt_cursor_v1(2, 0, 2, 2, -1, -1, result),
+                4
+            );
+            assert_eq!(
+                prodex_provider_attempt_cursor_v1(1, 3, 2, 2, -1, -1, result),
+                1
+            );
+            assert_eq!(
+                prodex_provider_attempt_cursor_v1(1, 0, 2, 2, 0, 0, result),
+                1
+            );
+            assert_eq!(
+                prodex_provider_attempt_cursor_v1(1, 1, 2, 2, -1, 0, result),
+                1
+            );
+            assert_eq!(
+                prodex_provider_attempt_cursor_v1(1, 1, 2, 2, 2, 0, result),
+                1
+            );
+            assert_eq!(
+                prodex_provider_attempt_cursor_v1(1, 1, 2, 2, 0, 2, result),
+                1
+            );
+            assert_eq!(
+                prodex_provider_attempt_cursor_v1(1, 0, -1, 2, -1, -1, result),
+                1
+            );
+            assert_eq!(prodex_provider_attempt_cursor_v1(1, 0, 2, 2, -1, -1, 0), 1);
+        }
+        assert_eq!(output, [123, 123]);
+        assert!(matches!(
+            provider_attempt_cursor_plan(PROVIDER_ATTEMPT_CURSOR_INITIAL, 1, 1, Some((0, 0))),
+            Err(crate::MojoError::InvalidInput)
+        ));
+        assert!(matches!(
+            provider_attempt_cursor_plan(
+                PROVIDER_ATTEMPT_CURSOR_NEXT_CREDENTIAL,
+                1,
+                1,
+                Some((0, 1))
+            ),
+            Err(crate::MojoError::InvalidInput)
+        ));
+    }
+}
+
+#[cfg(test)]
 mod scalar_policy_tests {
     use super::*;
 
@@ -256,6 +365,15 @@ unsafe extern "C" {
         provider: i64,
         route_kind: i64,
         capability_status: i64,
+    ) -> i64;
+    fn prodex_provider_attempt_cursor_v1(
+        abi_version: i64,
+        operation: i64,
+        model_count: i64,
+        auth_count: i64,
+        model_index: i64,
+        auth_index: i64,
+        output_address: u64,
     ) -> i64;
     fn prodex_provider_retry_transition_v1(
         abi_version: i64,
@@ -478,6 +596,58 @@ pub fn provider_bridge_native_passthrough(
         -1 => Err(crate::MojoError::InvalidInput),
         0 => Ok(false),
         1 => Ok(true),
+        _ => Err(crate::MojoError::InvalidOutput),
+    }
+}
+
+pub const PROVIDER_ATTEMPT_CURSOR_INITIAL: i64 = 0;
+pub const PROVIDER_ATTEMPT_CURSOR_NEXT_MODEL: i64 = 1;
+pub const PROVIDER_ATTEMPT_CURSOR_NEXT_CREDENTIAL: i64 = 2;
+
+/// Compile-time enumerated retry cursor operation; Mojo is the sole owner of
+/// initialization, next-model stepping, credential rotation and exhaustion.
+pub fn provider_attempt_cursor_plan(
+    operation: i64,
+    model_count: usize,
+    auth_count: usize,
+    current: Option<(usize, usize)>,
+) -> Result<Option<(usize, usize)>, crate::MojoError> {
+    let (model_index, auth_index) = match current {
+        Some((model, auth)) => (
+            i64::try_from(model).map_err(|_| crate::MojoError::InvalidInput)?,
+            i64::try_from(auth).map_err(|_| crate::MojoError::InvalidInput)?,
+        ),
+        None => (-1, -1),
+    };
+    let model_count = i64::try_from(model_count).map_err(|_| crate::MojoError::InvalidInput)?;
+    let auth_count = i64::try_from(auth_count).map_err(|_| crate::MojoError::InvalidInput)?;
+    let mut output = [-2_i64; 2];
+    let status = unsafe {
+        prodex_provider_attempt_cursor_v1(
+            1,
+            operation,
+            model_count,
+            auth_count,
+            model_index,
+            auth_index,
+            output.as_mut_ptr() as usize as u64,
+        )
+    };
+    if status != 0 {
+        return Err(match status {
+            1 => crate::MojoError::InvalidInput,
+            4 => crate::MojoError::AbiMismatch,
+            _ => crate::MojoError::InvalidOutput,
+        });
+    }
+    match output {
+        [-1, -1] => Ok(None),
+        [model, auth] if model >= 0 && auth >= 0 && model < model_count && auth < auth_count => {
+            Ok(Some((
+                usize::try_from(model).map_err(|_| crate::MojoError::InvalidOutput)?,
+                usize::try_from(auth).map_err(|_| crate::MojoError::InvalidOutput)?,
+            )))
+        }
         _ => Err(crate::MojoError::InvalidOutput),
     }
 }
