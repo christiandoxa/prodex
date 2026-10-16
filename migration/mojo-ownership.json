@@ -2980,14 +2980,16 @@
         "first_present_source": 17,
         "removed_active_choice": 18,
         "name_candidate": 19,
-        "trimmed_nonempty": 20
+        "trimmed_nonempty": 20,
+        "default_api_key_name": 22
       },
       "mojo_abi_version": 2,
       "mojo_source": "mojo/prodex_core/profile_identity.mojo",
       "consumer": "crates/prodex-profile-identity/src/lib.rs",
       "consumer_marker": "mojo_profile_identity::is_trimmed_nonempty",
       "production_consumers": [
-        "crates/prodex-profile-identity/src/lib.rs"
+        "crates/prodex-profile-identity/src/lib.rs",
+        "crates/prodex-app/src/profile_commands/login/profile_names.rs"
       ],
       "production_reachability_test": "crates/prodex-mojo-core/src/profile_identity.rs",
       "rust_owner_before": "profile identity matching, normalization, trimmed identity-presence checks, canonical-key shaping, profile-name derivation and validation, add/remove source policy, activation and profile-home deletion decisions",

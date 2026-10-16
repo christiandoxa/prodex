@@ -41,10 +41,25 @@ fn raw_profile_identity_call(
     written: &mut i64,
     result: &mut i64,
 ) -> i64 {
+    raw_profile_identity_call_with_abi(
+        2, operation, primary, secondary, flags, output, written, result,
+    )
+}
+
+fn raw_profile_identity_call_with_abi(
+    abi_version: i64,
+    operation: i64,
+    primary: &[u8],
+    secondary: &[u8],
+    flags: i64,
+    output: &mut [u8],
+    written: &mut i64,
+    result: &mut i64,
+) -> i64 {
     // SAFETY: test slices stay alive for the call and the declared lengths match their storage.
     unsafe {
         prodex_mojo_profile_identity_v2(
-            2,
+            abi_version,
             operation,
             primary.as_ptr() as usize as u64,
             primary.len() as i64,
@@ -59,6 +74,71 @@ fn raw_profile_identity_call(
             result as *mut i64 as usize as u64,
         )
     }
+}
+
+#[test]
+fn default_api_key_profile_name_abi_owns_prefix_fallback_and_validation() {
+    const { assert!(prodex_mojo_core::MOJO_REQUIRED) }
+
+    let host = b"API.OPENAI.COM";
+    let mut output = [0_u8; 64];
+    let mut written = -1_i64;
+    let mut result = -1_i64;
+    assert_eq!(
+        raw_profile_identity_call(22, host, &[], 1, &mut output, &mut written, &mut result,),
+        0
+    );
+    assert_eq!(&output[..written as usize], b"api_key_api.openai.com");
+    assert_eq!(result, 0);
+
+    let mut output = [0_u8; 16];
+    written = -1;
+    result = -1;
+    assert_eq!(
+        raw_profile_identity_call(22, &[], &[], 0, &mut output, &mut written, &mut result,),
+        0
+    );
+    assert_eq!(&output[..written as usize], b"api_key");
+
+    let mut output = [91_u8; 3];
+    written = 92;
+    result = 93;
+    assert_eq!(
+        raw_profile_identity_call(22, host, &[], 1, &mut output, &mut written, &mut result,),
+        2
+    );
+    assert_eq!(output, [91; 3]);
+    assert_eq!(written, 0);
+    assert_eq!(result, 0);
+
+    let mut output = [91_u8; 64];
+    written = 92;
+    result = 93;
+    assert_eq!(
+        raw_profile_identity_call(22, host, &[], 2, &mut output, &mut written, &mut result,),
+        1
+    );
+    assert_eq!(output, [91; 64]);
+    assert_eq!(written, 0);
+    assert_eq!(result, 0);
+
+    written = 92;
+    result = 93;
+    assert_eq!(
+        raw_profile_identity_call_with_abi(
+            1,
+            22,
+            host,
+            &[],
+            1,
+            &mut output,
+            &mut written,
+            &mut result,
+        ),
+        4
+    );
+    assert_eq!(written, 92);
+    assert_eq!(result, 93);
 }
 
 #[test]

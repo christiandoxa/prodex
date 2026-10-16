@@ -31,6 +31,7 @@ comptime PROFILE_IDENTITY_REMOVED_ACTIVE_CHOICE: Int64 = 18
 comptime PROFILE_IDENTITY_NAME_CANDIDATE: Int64 = 19
 comptime PROFILE_IDENTITY_TRIMMED_NONEMPTY: Int64 = 20
 comptime PROFILE_IDENTITY_IMPORT_EMAIL: Int64 = 21
+comptime PROFILE_IDENTITY_DEFAULT_API_KEY_NAME: Int64 = 22
 
 comptime PROFILE_MANAGEMENT_STATUS_ABI_VERSION: Int64 = 1
 comptime PROFILE_MANAGEMENT_STATUS_OK: Int64 = 0
@@ -188,16 +189,19 @@ def profile_normalized_equal(
     return True
 
 
-def profile_sanitize_slug(
+def profile_sanitize_slug_with_prefix(
     view: ProdexRichStringView,
     output: Pointer[mut=True, UInt8, _],
     capacity: Int64,
     written: Pointer[mut=True, Int64, _],
+    prefix: StringSlice,
     fallback: StringSlice,
 ) -> Bool:
     var bounds = rich_trim_bounds(view)
     var source = rich_view_ptr(view)
     var output_start = written[]
+    if not profile_write_literal(output, capacity, written, prefix):
+        return False
     var index = bounds[0]
     while index < bounds[1]:
         var width = rich_codepoint_width(source[unsafe_offset=index])
@@ -240,6 +244,44 @@ def profile_sanitize_slug(
         output[unsafe_offset=output_start + offset] = output[unsafe_offset=lower + offset]
     written[] = output_start + length
     return True
+
+
+def profile_sanitize_slug(
+    view: ProdexRichStringView,
+    output: Pointer[mut=True, UInt8, _],
+    capacity: Int64,
+    written: Pointer[mut=True, Int64, _],
+    fallback: StringSlice,
+) -> Bool:
+    return profile_sanitize_slug_with_prefix(
+        view,
+        output,
+        capacity,
+        written,
+        StringSlice(""),
+        fallback,
+    )
+
+
+def profile_default_api_key_name(
+    view: ProdexRichStringView,
+    has_host: Bool,
+    output: Pointer[mut=True, UInt8, _],
+    capacity: Int64,
+    written: Pointer[mut=True, Int64, _],
+) -> Bool:
+    if not has_host:
+        return profile_write_literal(
+            output, capacity, written, StringSlice("api_key")
+        )
+    return profile_sanitize_slug_with_prefix(
+        view,
+        output,
+        capacity,
+        written,
+        StringSlice("api_key_"),
+        StringSlice("api_key"),
+    )
 
 
 def profile_name_from_email(
@@ -680,7 +722,7 @@ def prodex_mojo_profile_identity_v2(
         return PROFILE_IDENTITY_ABI
     if (
         operation < 0
-        or operation > PROFILE_IDENTITY_IMPORT_EMAIL
+        or operation > PROFILE_IDENTITY_DEFAULT_API_KEY_NAME
         or primary_length < 0
         or secondary_length < 0
         or record_count < 0
@@ -868,6 +910,19 @@ def prodex_mojo_profile_identity_v2(
             output_capacity,
             written,
             StringSlice("api_key"),
+        ):
+            return PROFILE_IDENTITY_CAPACITY
+        return PROFILE_IDENTITY_OK
+
+    if operation == PROFILE_IDENTITY_DEFAULT_API_KEY_NAME:
+        if flags < 0 or flags > 1:
+            return PROFILE_IDENTITY_INVALID
+        if not profile_default_api_key_name(
+            primary,
+            flags == 1,
+            output,
+            output_capacity,
+            written,
         ):
             return PROFILE_IDENTITY_CAPACITY
         return PROFILE_IDENTITY_OK

@@ -1,10 +1,9 @@
 pub(super) fn default_api_key_profile_name(openai_base_url: Option<&str>) -> String {
-    openai_base_url
+    let host = openai_base_url
         .and_then(|base_url| reqwest::Url::parse(base_url).ok())
-        .and_then(|url| url.host_str().map(ToOwned::to_owned))
-        .map(|host| sanitize_profile_slug(&format!("api_key_{host}")))
-        .filter(|name| !name.is_empty())
-        .unwrap_or_else(|| "api_key".to_string())
+        .and_then(|url| url.host_str().map(ToOwned::to_owned));
+    prodex_mojo_core::profile_identity::default_api_key_profile_name(host.as_deref())
+        .expect("Mojo default API-key profile-name planner should accept URL hosts")
 }
 
 pub(super) fn unique_profile_name_for_slug(
@@ -45,5 +44,23 @@ mod tests {
 
         assert_eq!(name, "a-b-3");
         assert_eq!(checked, ["a-b", "a-b-2", "a-b-3"]);
+    }
+
+    #[test]
+    fn default_api_key_profile_name_uses_mojo_for_host_and_fallback() {
+        assert_eq!(
+            default_api_key_profile_name(Some("https://api.openai.com:8443/v1")),
+            "api_key_api.openai.com"
+        );
+        assert_eq!(
+            default_api_key_profile_name(Some("https://API.OPENAI.COM/v1")),
+            "api_key_api.openai.com"
+        );
+        assert_eq!(default_api_key_profile_name(None), "api_key");
+        assert_eq!(
+            default_api_key_profile_name(Some("file:///tmp/codex")),
+            "api_key"
+        );
+        assert_eq!(default_api_key_profile_name(Some("not a URL")), "api_key");
     }
 }
