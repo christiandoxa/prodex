@@ -120,5 +120,12 @@ mod tests {
             .expect("nested Gemini errors should normalize");
         let value: serde_json::Value = serde_json::from_slice(&normalized).unwrap();
         assert_eq!(value["error"]["message"], "nested detail");
+
+        let direct =
+            br#"{"error":{"detail":"direct detail","nested":{"message":"nested message"}}}"#;
+        let normalized = gemini_provider_core_normalized_error_body(400, direct)
+            .expect("direct nested Gemini errors should normalize");
+        let value: serde_json::Value = serde_json::from_slice(&normalized).unwrap();
+        assert_eq!(value["error"]["message"], "direct detail");
     }
 }

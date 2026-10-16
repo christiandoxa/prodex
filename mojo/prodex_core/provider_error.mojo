@@ -131,12 +131,12 @@ def provider_error_write_message(
 def provider_error_message_emit(
     sink: Pointer[mut=True, JsonSink, _], tree: ParsedJson
 ) -> Bool:
-    var priority: Int64 = 0
-    while priority < 3:
-        var node: Int64 = 0
-        while node >= 0:
-            var current = tree.nodes[unsafe_offset=node].copy()
-            if current.kind == JSON_OBJECT:
+    var node: Int64 = 0
+    while node >= 0:
+        var current = tree.nodes[unsafe_offset=node].copy()
+        if current.kind == JSON_OBJECT:
+            var priority: Int64 = 0
+            while priority < 3:
                 var child = current.first_child
                 while child >= 0:
                     var candidate = tree.nodes[unsafe_offset=child].copy()
@@ -149,14 +149,14 @@ def provider_error_message_emit(
                     ):
                         return provider_error_write_message(sink, candidate.text)
                     child = candidate.next_sibling
-            if current.first_child >= 0:
-                node = current.first_child
-                continue
-            while node >= 0 and tree.nodes[unsafe_offset=node].next_sibling < 0:
-                node = tree.nodes[unsafe_offset=node].parent
-            if node >= 0:
-                node = tree.nodes[unsafe_offset=node].next_sibling
-        priority += 1
+                priority += 1
+        if current.first_child >= 0:
+            node = current.first_child
+            continue
+        while node >= 0 and tree.nodes[unsafe_offset=node].next_sibling < 0:
+            node = tree.nodes[unsafe_offset=node].parent
+        if node >= 0:
+            node = tree.nodes[unsafe_offset=node].next_sibling
     js_literal(sink, StringSlice("null"))
     return not sink[].failed
 
