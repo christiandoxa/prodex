@@ -368,6 +368,8 @@ const PROMOTED_FILES = [
   "crates/prodex-mojo-core/build.rs",
   "crates/prodex-mojo-core/src/lib.rs",
   "crates/prodex-mojo-core/src/quota.rs",
+  "crates/prodex-mojo-core/src/quota/report_sort.rs",
+  "crates/prodex-mojo-core/src/quota/tests.rs",
   "crates/prodex-mojo-core/src/quota/reset_epoch.rs",
   "crates/prodex-mojo-core/src/routing.rs",
   "crates/prodex-mojo-core/src/runtime.rs",
@@ -411,6 +413,7 @@ const PROMOTED_FILES = [
   "crates/prodex-context/src/critical_signal.rs",
   "crates/prodex-quota/src/render/gemini.rs",
   "crates/prodex-quota/src/render/reports.rs",
+  "crates/prodex-quota/tests/src/render.rs",
   "crates/prodex-quota/src/capacity.rs",
   "crates/prodex-quota/src/render/windows.rs",
   "crates/prodex-quota/src/render/model_capacity.rs",
@@ -1072,6 +1075,10 @@ const QUOTA_TIME_FILE = "crates/prodex-quota/src/render/time.rs";
 const QUOTA_COPILOT_FILE = "crates/prodex-quota/src/render/copilot.rs";
 const QUOTA_GEMINI_DISPLAY_FILE = "crates/prodex-quota/src/render/gemini.rs";
 const QUOTA_REPORTS_FILE = "crates/prodex-quota/src/render/reports.rs";
+const QUOTA_REPORT_SORT_ADAPTER_FILE = "crates/prodex-mojo-core/src/quota/report_sort.rs";
+const QUOTA_REPORT_SORT_MOJO_FILE = "mojo/prodex_core/quota.mojo";
+const QUOTA_REPORT_SORT_ABI_TEST_FILE = "crates/prodex-mojo-core/src/quota/tests.rs";
+const QUOTA_REPORT_SORT_CALLER_TEST_FILE = "crates/prodex-quota/tests/src/render.rs";
 const QUOTA_ADAPTER_FILE = "crates/prodex-mojo-core/src/quota.rs";
 const QUOTA_WINDOWS_FILE = "crates/prodex-quota/src/render/windows.rs";
 const QUOTA_WATCH_CALLER_FILE = "crates/prodex-app/src/quota_support/adaptive_refresh.rs";
@@ -5709,6 +5716,9 @@ export function findViolations(files) {
       const violations = body?.includes("prodex_mojo_core::quota::quota_report_compare(")
         ? []
         : [filePath + ": quota report sorting must retain Mojo comparator"];
+      if (!contents.includes("prodex_mojo_core::quota::quota_report_sort_projection(")) {
+        violations.push(filePath + ": quota report status/reset projection must retain Mojo policy");
+      }
       if (!contents.includes("prodex_mojo_core::quota::quota_workspace_label(")) {
         violations.push(filePath + ": quota workspace labels must retain Mojo policy");
       }
@@ -5719,10 +5729,42 @@ export function findViolations(files) {
         || body?.includes("to_ascii_lowercase()")
         || production.includes("fn short_workspace_id(")
         || production.includes(".chars().collect::<Vec<_>>()")
+        || /\bfn\s+quota_(?:status_rank|reset_epoch)\s*\(/u.test(production)
       ) {
         violations.push(filePath + ": contains restored Rust quota report comparator semantics");
       }
       return violations;
+    }
+    if (filePath === QUOTA_REPORT_SORT_ADAPTER_FILE) {
+      const required = [
+        "prodex_quota_report_sort_projection_v1(",
+        "pub fn quota_report_sort_projection(",
+        "QuotaReportSortProjection",
+      ];
+      return required
+        .filter((marker) => !contents.includes(marker))
+        .map((marker) => filePath + ": quota report projection adapter must retain " + marker);
+    }
+    if (filePath === QUOTA_REPORT_SORT_MOJO_FILE) {
+      const required = [
+        '@export("prodex_quota_report_sort_projection_v1")',
+        "QUOTA_REPORT_PROJECTION_ERROR",
+        "status_rank = 2",
+        "second_reset < reset_epoch",
+      ];
+      return required
+        .filter((marker) => !contents.includes(marker))
+        .map((marker) => filePath + ": quota report projection must remain Mojo-owned (" + marker + ")");
+    }
+    if (filePath === QUOTA_REPORT_SORT_ABI_TEST_FILE) {
+      return contents.includes("quota_report_sort_projection_is_mojo_authoritative")
+        ? []
+        : [filePath + ": direct quota report projection ABI coverage is required"];
+    }
+    if (filePath === QUOTA_REPORT_SORT_CALLER_TEST_FILE) {
+      return contents.includes("quota_report_sort_projects_provider_status_and_reset_facts_through_mojo")
+        ? []
+        : [filePath + ": quota report projection needs caller-boundary regression coverage"];
     }
     if (filePath === QUOTA_POOL_FILE) {
       const required = [
@@ -9027,6 +9069,10 @@ function selfTest() {
   const quotaResetEpochMojo = [
     '@export("prodex_quota_reset_epoch_v1")',
     '@export("prodex_quota_reset_json_epoch_v1")',
+    '@export("prodex_quota_report_sort_projection_v1")',
+    "QUOTA_REPORT_PROJECTION_ERROR",
+    "status_rank = 2",
+    "second_reset < reset_epoch",
     "quota_reset_epoch_plan(",
     "quota_json_object_member_casefold_first(",
     "quota_json_i64(",
@@ -9054,6 +9100,46 @@ function selfTest() {
     [QUOTA_RESET_EPOCH_TEST_FILE, quotaResetEpochMojoTest],
     [QUOTA_RESET_EPOCH_CALLER_TEST_FILE, quotaResetEpochCallerTest],
   ]), []);
+  const quotaReportProjectionConsumer = [
+    "prodex_mojo_core::quota::quota_report_sort_projection(",
+    "status_rank: projection.status_rank",
+    "reset_epoch: projection.reset_epoch.unwrap_or(i64::MAX)",
+  ].join("\n");
+  const quotaReportProjectionAdapter = [
+    "pub struct QuotaReportSortProjection",
+    "pub fn quota_report_sort_projection(",
+    "prodex_quota_report_sort_projection_v1(",
+  ].join("\n");
+  const quotaReportProjectionMojo = [
+    '@export("prodex_quota_report_sort_projection_v1")',
+    "QUOTA_REPORT_PROJECTION_ERROR",
+    "status_rank = 2",
+    "second_reset < reset_epoch",
+    '@export("prodex_quota_reset_epoch_v1")',
+    '@export("prodex_quota_reset_json_epoch_v1")',
+    "quota_reset_epoch_plan(",
+    "quota_json_object_member_casefold_first(",
+    "quota_json_i64(",
+    "primary_used >= 100",
+    "secondary_used >= 100",
+    "fields[9] == 1",
+    "fields[11] == 1",
+  ].join("\n");
+  assert.deepEqual(findViolations([
+    [QUOTA_REPORTS_FILE, quotaReportProjectionConsumer + "\nfn compare_quota_report_sort_records(left: &Record, right: &Record) -> Ordering {\n" +
+      "prodex_mojo_core::quota::quota_report_compare(\nprodex_mojo_core::quota::quota_workspace_label(\n}"],
+    [QUOTA_REPORT_SORT_ADAPTER_FILE, quotaReportProjectionAdapter],
+    [QUOTA_REPORT_SORT_MOJO_FILE, quotaReportProjectionMojo],
+    [QUOTA_REPORT_SORT_ABI_TEST_FILE, "quota_report_sort_projection_is_mojo_authoritative"],
+    [QUOTA_REPORT_SORT_CALLER_TEST_FILE, "quota_report_sort_projects_provider_status_and_reset_facts_through_mojo"],
+  ]), []);
+  assert.match(findViolations([[QUOTA_REPORTS_FILE,
+    quotaReportProjectionConsumer + "\nfn compare_quota_report_sort_records(left: &Record, right: &Record) -> Ordering {\n" +
+      "prodex_mojo_core::quota::quota_report_compare(\nprodex_mojo_core::quota::quota_workspace_label(\nfn quota_status_rank() {}\n}" ]]).join("\n"),
+  /contains restored Rust quota report comparator semantics/u);
+  assert.match(findViolations([[QUOTA_REPORT_SORT_MOJO_FILE,
+    quotaReportProjectionMojo.replace("second_reset < reset_epoch", "second_reset <= reset_epoch")]]).join("\n"),
+  /quota report projection must remain Mojo-owned/u);
   assert.match(findViolations([[QUOTA_WINDOWS_FILE,
     quotaResetEpochConsumer + "\nprodex_mojo_core::quota::quota_blocked_status_label(0);\nfn quota_json_reset() {}"]]).join("\n"),
   /contains restored Rust reset JSON extraction or precedence policy/u);

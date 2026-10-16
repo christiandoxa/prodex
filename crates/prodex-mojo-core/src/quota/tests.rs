@@ -208,6 +208,42 @@ fn quota_model_policy_kernel_preserves_expected_contracts() {
 
 #[cfg(all(test, feature = "mojo-quota"))]
 #[test]
+fn quota_report_sort_projection_is_mojo_authoritative() {
+    const { assert!(crate::MOJO_REQUIRED) };
+    assert_eq!(
+        quota_report_sort_projection(
+            QUOTA_REPORT_PROJECTION_OPENAI,
+            true,
+            false,
+            Some(40),
+            Some(20),
+        ),
+        Ok(QuotaReportSortProjection {
+            status_rank: 0,
+            reset_epoch: Some(20),
+        })
+    );
+    assert_eq!(
+        quota_report_sort_projection(QUOTA_REPORT_PROJECTION_EXTERNAL, false, true, None, None,),
+        Ok(QuotaReportSortProjection {
+            status_rank: 0,
+            reset_epoch: None,
+        })
+    );
+    assert_eq!(
+        quota_report_sort_projection(QUOTA_REPORT_PROJECTION_ERROR, true, true, None, None,)
+            .unwrap()
+            .status_rank,
+        2
+    );
+    assert_eq!(
+        quota_report_sort_projection(99, false, false, None, None),
+        Err(crate::MojoError::InvalidInput)
+    );
+}
+
+#[cfg(all(test, feature = "mojo-quota"))]
+#[test]
 fn quota_window_text_abi_preserves_numeric_unicode_and_missing_boundaries() {
     assert_eq!(
         quota_window_status_display(QuotaWindowDisplayInput {

@@ -447,6 +447,53 @@ fn quota_report_sort_modes_order_by_selected_columns() {
 
 #[cfg(feature = "mojo")]
 #[test]
+fn quota_report_sort_projects_provider_status_and_reset_facts_through_mojo() {
+    let external = |name: &str, available: Option<bool>| QuotaReport {
+        name: name.to_string(),
+        active: false,
+        auth: AuthSummary {
+            label: "external".to_string(),
+            quota_compatible: false,
+        },
+        workspace_id: None,
+        workspace_name: None,
+        result: Ok(ProviderQuotaSnapshot::External(ExternalQuotaInfo {
+            provider: "test".to_string(),
+            account: None,
+            plan: None,
+            status: "ready".to_string(),
+            main: "quota".to_string(),
+            reset: None,
+            available,
+            details: Vec::new(),
+        })),
+        fetched_at: 1_700_000_000,
+    };
+    let reports = vec![
+        external("blocked", Some(false)),
+        external("ready", Some(true)),
+        QuotaReport {
+            name: "failed".to_string(),
+            active: false,
+            auth: AuthSummary {
+                label: "external".to_string(),
+                quota_compatible: false,
+            },
+            workspace_id: None,
+            workspace_name: None,
+            result: Err("unavailable".to_string()),
+            fetched_at: 1_700_000_000,
+        },
+    ];
+
+    assert_eq!(
+        sorted_names_by(&reports, QuotaReportSort::Current),
+        vec!["ready", "blocked", "failed"]
+    );
+}
+
+#[cfg(feature = "mojo")]
+#[test]
 fn current_sort_places_blocked_weekly_below_blocked_five_hour() {
     let reports = vec![
         openai_report("ready", main_windows(80, 1_700_000_300, 70, 1_700_000_400)),
