@@ -49,6 +49,11 @@ struct DryRunPathView {
 }
 
 unsafe extern "C" {
+    fn prodex_redaction_display_text_mode_v1(
+        abi_version: i64,
+        input_address: u64,
+        input_length: i64,
+    ) -> i64;
     fn prodex_redaction_cli_redact_next_v1(
         abi_version: i64,
         input_address: u64,
@@ -139,6 +144,32 @@ fn status(status: i64) -> Result<(), MojoError> {
         1 => Err(MojoError::InvalidInput),
         2 => Err(MojoError::Capacity),
         4 => Err(MojoError::AbiMismatch),
+        _ => Err(MojoError::InvalidOutput),
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RedactionDisplayTextMode {
+    Empty,
+    Unquoted,
+    DebugQuoted,
+}
+
+/// Mojo selects the display mode; Rust exclusively owns its Debug formatter.
+pub fn redaction_display_text_mode(value: &str) -> Result<RedactionDisplayTextMode, MojoError> {
+    let result = unsafe {
+        prodex_redaction_display_text_mode_v1(
+            REDACTION_ABI_VERSION,
+            value.as_ptr() as usize as u64,
+            i64::try_from(value.len()).map_err(|_| MojoError::InvalidInput)?,
+        )
+    };
+    match result {
+        0 => Ok(RedactionDisplayTextMode::Empty),
+        1 => Ok(RedactionDisplayTextMode::Unquoted),
+        2 => Ok(RedactionDisplayTextMode::DebugQuoted),
+        -1 => Err(MojoError::InvalidInput),
+        -4 => Err(MojoError::AbiMismatch),
         _ => Err(MojoError::InvalidOutput),
     }
 }
@@ -806,6 +837,48 @@ mod dry_run_path_redaction_tests {
 #[cfg(test)]
 mod text_snippet_tests {
     use super::*;
+
+    #[test]
+    fn redaction_cli_display_policy_selects_host_escaping_via_mojo() {
+        for (value, expected) in [
+            ("", RedactionDisplayTextMode::Empty),
+            ("alpha_012-./:=<>", RedactionDisplayTextMode::Unquoted),
+            ("A-Z", RedactionDisplayTextMode::Unquoted),
+            ("a b", RedactionDisplayTextMode::DebugQuoted),
+            ("a\tb", RedactionDisplayTextMode::DebugQuoted),
+            ("'secret'", RedactionDisplayTextMode::DebugQuoted),
+            ("\"x\"", RedactionDisplayTextMode::DebugQuoted),
+            ("a@example.test", RedactionDisplayTextMode::DebugQuoted),
+            ("東京", RedactionDisplayTextMode::DebugQuoted),
+            ("🧭", RedactionDisplayTextMode::DebugQuoted),
+        ] {
+            assert_eq!(
+                redaction_display_text_mode(value).unwrap(),
+                expected,
+                "{value:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn redaction_cli_display_policy_strict_abi_rejects_bad_unicode_and_version() {
+        let input = b"safe";
+        let pointer = input.as_ptr() as usize as u64;
+        unsafe {
+            assert_eq!(prodex_redaction_display_text_mode_v1(2, pointer, 4), -4);
+            assert_eq!(prodex_redaction_display_text_mode_v1(1, 0, 4), -1);
+            assert_eq!(prodex_redaction_display_text_mode_v1(1, pointer, -1), -1);
+            assert_eq!(prodex_redaction_display_text_mode_v1(1, pointer, 4), 1);
+            assert_eq!(prodex_redaction_display_text_mode_v1(1, pointer, 0), 0);
+        }
+        let invalid = [0xff_u8];
+        assert_eq!(
+            unsafe {
+                prodex_redaction_display_text_mode_v1(1, invalid.as_ptr() as usize as u64, 1)
+            },
+            -1
+        );
+    }
 
     #[test]
     fn redaction_cli_flag_next_argument_policy_is_compiled_mojo() {

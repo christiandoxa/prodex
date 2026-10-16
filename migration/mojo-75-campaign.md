@@ -5691,3 +5691,11 @@ the next argument, including leading hyphen stripping and inline assignment
 exclusion. The earlier Rust helper and predicate were removed; Rust only
 iterates OsString values and performs the Mojo-selected masking action.
 Required caller, ABI and no-fallback guard coverage is retained.
+
+## CLI redaction display mode migrated to Mojo
+
+The existing compiled redaction owner now chooses empty, unquoted or host
+Debug-quoted OS argument presentation. Rust's duplicate ASCII safe-character
+predicate was removed; Rust retains only UTF-8/OsString output materialization
+and its standard Debug formatter for Mojo-selected quoted cases. Strict ABI,
+caller and no-Rust-fallback checks cover the migration.
