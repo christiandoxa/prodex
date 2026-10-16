@@ -30,6 +30,7 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 
 ### Misc
 
+- Clarify source digests and isolate Copilot validation (`c2e82b5`)
 - Qualify Codex 0.163 native retry and compaction (`6073f85`)
 - Migrate usage-limit recovery selection (`7087fdc`)
 - Migrate super-expose rollout filename policy (`72eb410`)
