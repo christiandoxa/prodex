@@ -146,6 +146,38 @@ fn websocket_invalid_id_normalization_does_not_rewrite_near_matches() {
 }
 
 #[test]
+fn websocket_invalid_id_code_normalization_preserves_existing_codes_and_raw_payloads() {
+    let with_code = RuntimeWebsocketErrorPayload::Text(
+        serde_json::json!({
+            "type":"error",
+            "status":400,
+            "error":{
+                "type":"invalid_request_error",
+                "code":"existing_vendor_code",
+                "message":"Invalid \u{60}previous_response_id\u{60}."
+            }
+        })
+        .to_string(),
+    );
+    assert_eq!(
+        runtime_translate_invalid_previous_response_websocket_error(with_code.clone()),
+        with_code
+    );
+
+    let malformed = RuntimeWebsocketErrorPayload::Text(r#"{"error":{"message":"bad"}"#.to_owned());
+    assert_eq!(
+        runtime_translate_invalid_previous_response_websocket_error(malformed.clone()),
+        malformed
+    );
+
+    let binary = RuntimeWebsocketErrorPayload::Binary(vec![0xff, 0xfe]);
+    assert_eq!(
+        runtime_translate_invalid_previous_response_websocket_error(binary.clone()),
+        binary
+    );
+}
+
+#[test]
 fn inspect_sse_buffer_commits_before_later_retryable_failure() {
     let body = concat!(
         "event: response.output_text.delta\r\n",

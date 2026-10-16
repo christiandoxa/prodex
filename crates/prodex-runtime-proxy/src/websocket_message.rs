@@ -132,18 +132,21 @@ pub fn runtime_translate_invalid_previous_response_websocket_error(
     let Ok(mut value) = serde_json::from_str::<serde_json::Value>(&text) else {
         return RuntimeWebsocketErrorPayload::Text(text);
     };
-    if !crate::runtime_proxy_value_is_invalid_previous_response_id(&value) {
+    let exact_invalid_id = crate::runtime_proxy_value_is_invalid_previous_response_id(&value);
+    let error = value.get("error").and_then(serde_json::Value::as_object);
+    let patch = prodex_mojo_core::runtime::websocket_invalid_id_code_patch(
+        exact_invalid_id,
+        error.is_some(),
+        error.is_some_and(|error| error.contains_key("code")),
+    )
+    .expect("Mojo WebSocket invalid previous-response code plan returned invalid output");
+    if !patch {
         return RuntimeWebsocketErrorPayload::Text(text);
     }
-    let Some(error) = value
+    let error = value
         .get_mut("error")
         .and_then(serde_json::Value::as_object_mut)
-    else {
-        return RuntimeWebsocketErrorPayload::Text(text);
-    };
-    if error.contains_key("code") {
-        return RuntimeWebsocketErrorPayload::Text(text);
-    }
+        .expect("Mojo validated nested JSON error object for code insertion");
     error.insert(
         "code".to_string(),
         serde_json::Value::String("previous_response_not_found".to_string()),
