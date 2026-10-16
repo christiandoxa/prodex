@@ -2727,6 +2727,26 @@
         "operations": [
           "runtime_log_payload_display_projection"
         ]
+      },
+      {
+        "path": "mojo/prodex_core/runtime_request_target.mojo",
+        "language": "mojo",
+        "classification": "DETERMINISTIC_DOMAIN",
+        "production_reachable": true,
+        "role": "semantic",
+        "operations": [
+          "runtime_request_target_validation"
+        ]
+      },
+      {
+        "path": "crates/prodex-mojo-core/src/runtime_request_target.rs",
+        "language": "rust",
+        "classification": "MIXED",
+        "production_reachable": true,
+        "role": "adapter",
+        "operations": [
+          "runtime_request_target_validation"
+        ]
       }
     ],
     "removed": [
@@ -12239,6 +12259,29 @@
       "duplicate_production_owner": false,
       "platform_fallback": false,
       "rust_adapter_scope": "Rust validates and hashes credential/profile inputs, supplies presence facts, and maps the Mojo source tag to the existing identity value"
+    },
+    {
+      "name": "runtime_request_target_validation",
+      "domain": "runtime-proxy/request-target",
+      "introduced_in": "0.438.0",
+      "baseline_state": "Rust rejected local rewrite request targets using bounded ASCII, path, dot-segment, fragment, and percent-escape checks",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_runtime_request_target_valid_v1",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/runtime_request_target.mojo",
+      "consumer": "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite.rs",
+      "consumer_marker": "prodex_mojo_core::runtime_request_target::is_valid(",
+      "production_consumers": [
+        "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite.rs"
+      ],
+      "production_reachability_test": "crates/prodex-mojo-core/tests/runtime_request_target.rs",
+      "rust_owner_before": "Local rewrite request-target size, ASCII, control, path, dot-segment, fragment, and percent-escape validation",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "deleted; required-Mojo ABI and caller tests cover valid queries, encoded segments, malformed escapes, traversal, fragments, Unicode, controls, and size limits",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "Rust owns HTTP request extraction, borrowed string projection, ABI status mapping, and local error response handling; Mojo owns the request-target validity decision"
     }
   ],
   "rust_semantic_reductions": [

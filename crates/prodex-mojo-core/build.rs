@@ -491,6 +491,7 @@ fn selected_sources() -> Vec<&'static str> {
         sources.push("../../mojo/prodex_core/runtime_broker_continuity.mojo");
         sources.push("../../mojo/prodex_core/runtime_broker_admin.mojo");
         sources.push("../../mojo/prodex_core/runtime_proxy_request.mojo");
+        sources.push("../../mojo/prodex_core/runtime_request_target.mojo");
         sources.push("../../mojo/prodex_core/runtime_proxy_body_limit.mojo");
         sources.push("../../mojo/prodex_core/runtime_proxy_dispatch.mojo");
         sources.push("../../mojo/prodex_core/runtime_responses_quota.mojo");
