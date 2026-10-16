@@ -1607,6 +1607,10 @@
           {
             "start": 861,
             "end": 1000
+          },
+          {
+            "start": 1094,
+            "end": 1150
           }
         ],
         "production_reachable": true,
@@ -1616,7 +1620,9 @@
           "runtime_doctor_last_marker_line_truncation",
           "runtime_doctor_marker_scope_render",
           "runtime_doctor_count_breakdown_render",
-          "runtime_doctor_report_field_plan"
+          "runtime_doctor_report_field_plan",
+          "runtime_doctor_timeline_event_retention",
+          "runtime_doctor_latest_request_timeline"
         ]
       },
       {
@@ -1627,7 +1633,9 @@
         "role": "adapter",
         "operations": [
           "runtime_doctor_marker_scope_render",
-          "runtime_doctor_count_breakdown_render"
+          "runtime_doctor_count_breakdown_render",
+          "runtime_doctor_timeline_event_retention",
+          "runtime_doctor_latest_request_timeline"
         ]
       },
       {
@@ -11575,6 +11583,52 @@
       "duplicate_production_owner": false,
       "platform_fallback": false,
       "rust_adapter_scope": "SHA-256 cryptographic digest stays host-owned; Rust checks returned bucket and maps it into existing rollout DTO"
+    },
+    {
+      "name": "runtime_doctor_timeline_event_retention",
+      "domain": "runtime-doctor/request-timeline",
+      "introduced_in": "0.438.0",
+      "baseline_state": "Rust discarded the oldest event when a request timeline grew past 12 recorded entries",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_mojo_runtime_doctor_timeline_append_v1",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/runtime_doctor_render.mojo",
+      "consumer": "crates/prodex-runtime-doctor/src/parsing/request_timeline.rs",
+      "consumer_marker": "prodex_mojo_core::rich::runtime_doctor_timeline_evict_oldest(",
+      "production_consumers": [
+        "crates/prodex-runtime-doctor/src/parsing/request_timeline.rs"
+      ],
+      "production_reachability_test": "crates/prodex-runtime-doctor/src/parsing/request_timeline.rs",
+      "rust_owner_before": "Rust constant MAX_EVENTS and events.len()>MAX_EVENTS comparison determined eviction",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "Removed Rust timeline bound and max tie policy; Mojo unit tests and runtime-doctor regression assert twelve-event retention, lexical-tie precedence and invalid ABI",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "Retains Rust Vec storage and applies Mojo eviction decision"
+    },
+    {
+      "name": "runtime_doctor_latest_request_timeline",
+      "domain": "runtime-doctor/request-timeline",
+      "introduced_in": "0.438.0",
+      "baseline_state": "Rust chose the latest request by maximal last line index with lexicographically greatest key winning an equal-index tie",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_mojo_runtime_doctor_timeline_latest_v1",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/runtime_doctor_render.mojo",
+      "consumer": "crates/prodex-runtime-doctor/src/parsing/request_timeline.rs",
+      "consumer_marker": "prodex_mojo_core::rich::runtime_doctor_latest_timeline_index(",
+      "production_consumers": [
+        "crates/prodex-runtime-doctor/src/parsing/request_timeline.rs"
+      ],
+      "production_reachability_test": "crates/prodex-runtime-doctor/src/parsing/request_timeline.rs",
+      "rust_owner_before": "Rust BTreeMap::into_iter().max_by_key performed latest request selection",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "Removed Rust timeline bound and max tie policy; Mojo unit tests and runtime-doctor regression assert twelve-event retention, lexical-tie precedence and invalid ABI",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "Rust owns ordered request BTreeMap and materializes selected history by checked Mojo index"
     }
   ],
   "rust_semantic_reductions": [

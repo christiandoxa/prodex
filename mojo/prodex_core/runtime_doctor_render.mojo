@@ -1090,3 +1090,61 @@ def prodex_mojo_runtime_doctor_report_fields_v1(
         ):
             return 3
     return 0
+
+# The last twelve events per request are retained in arrival order.
+# Rust owns event storage and removal; Mojo alone chooses eviction.
+@export("prodex_mojo_runtime_doctor_timeline_append_v1")
+def prodex_mojo_runtime_doctor_timeline_append_v1(
+    abi_version: Int64,
+    existing_event_count: UInt64,
+    evict_oldest_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != RUNTIME_DOCTOR_RENDER_ABI_VERSION:
+        return 4
+    if evict_oldest_address == 0:
+        return 1
+    var result = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(evict_oldest_address)
+    )
+    result[] = 1 if existing_event_count >= 12 else 0
+    return 0
+
+
+# BTreeMap input is in ascending request-ID order. For equal last-line
+# indices Rust Iterator::max_by_key returns the *last* tied request.
+# That deterministic persisted reporting choice is now Mojo-owned.
+@export("prodex_mojo_runtime_doctor_timeline_latest_v1")
+def prodex_mojo_runtime_doctor_timeline_latest_v1(
+    abi_version: Int64,
+    indices_address: UInt,
+    index_count: Int64,
+    selected_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != RUNTIME_DOCTOR_RENDER_ABI_VERSION:
+        return 4
+    if (
+        selected_address == 0
+        or index_count < 0
+        or (index_count > 0 and indices_address == 0)
+    ):
+        return 1
+    var selected = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(selected_address)
+    )
+    selected[] = -1
+    if index_count == 0:
+        return 0
+    var indices = Pointer[mut=False, UInt64, ImmUntrackedOrigin](
+        unsafe_from_address=Int(indices_address)
+    )
+    var highest = indices[unsafe_offset=0]
+    var choice: Int64 = 0
+    var index: Int64 = 1
+    while index < index_count:
+        var candidate = indices[unsafe_offset=index]
+        if candidate >= highest:
+            highest = candidate
+            choice = index
+        index += 1
+    selected[] = choice
+    return 0
