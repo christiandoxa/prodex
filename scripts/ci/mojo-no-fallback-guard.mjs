@@ -39,6 +39,10 @@ const SESSION_SELECTOR_MATCH_CALLER_TEST_FILE = "crates/prodex-session-store/tes
 const SESSION_SELECTOR_MATCH_MOJO_TEST_FILE = "mojo/tests/session_selector_policy_test.mojo";
 const SUPER_EXPOSE_OUTPUT_FILE = "crates/prodex-app/src/super_expose/session_prompt_write/output.rs";
 const SUPER_EXPOSE_OUTPUT_MOJO_FILE = "mojo/prodex_core/super_expose.mojo";
+const OPTIONAL_TOOLS_RENDER_FILE = "crates/prodex-optional-tools/src/super_optimizers.rs";
+const OPTIONAL_TOOLS_RENDER_ADAPTER_FILE = "crates/prodex-mojo-core/src/optional_tools_policy.rs";
+const OPTIONAL_TOOLS_RENDER_MOJO_FILE = "mojo/prodex_core/optional_tools_policy.mojo";
+const OPTIONAL_TOOLS_RENDER_CALLER_TEST_FILE = "crates/prodex-optional-tools/src/super_optimizers_tests.rs";
 const RUNTIME_DOCTOR_PLAN_ADAPTER_FILE = "crates/prodex-mojo-core/src/rich/runtime_doctor_plan.rs";
 const RUNTIME_DOCTOR_PLAN_MOJO_FILE = "mojo/prodex_core/runtime_doctor_plan.mojo";
 const GOVERNANCE_INSPECTION_CONSUMER_FILE = "crates/prodex-domain/src/governance/inspection.rs";
@@ -131,6 +135,10 @@ const LOG_PAYLOAD_CALLER_FILE = "crates/prodex-app/src/app_commands/log_upstream
 const LOG_PAYLOAD_ADAPTER_FILE = "crates/prodex-mojo-core/src/json/log_payload.rs";
 const LOG_PAYLOAD_MOJO_FILE = "mojo/prodex_core/log_payload.mojo";
 const PROMOTED_FILES = [
+  OPTIONAL_TOOLS_RENDER_FILE,
+  OPTIONAL_TOOLS_RENDER_ADAPTER_FILE,
+  OPTIONAL_TOOLS_RENDER_MOJO_FILE,
+  OPTIONAL_TOOLS_RENDER_CALLER_TEST_FILE,
   LOG_PAYLOAD_CALLER_FILE,
   LOG_PAYLOAD_ADAPTER_FILE,
   LOG_PAYLOAD_MOJO_FILE,
@@ -3821,6 +3829,46 @@ export function findViolations(files) {
       (!contents.includes("prodex_mojo_core::launch::find_super_expose_alias_index") ||
         /\bfn\s+(?:rewrite_super_expose_alias|super_option_takes_value)\s*\(/u.test(contents)))
     .map(([filePath]) => `${filePath}: Super expose alias scan must use Mojo`);
+  const optionalToolsRenderViolations = files.flatMap(([filePath, contents]) => {
+    if (filePath === OPTIONAL_TOOLS_RENDER_FILE) {
+      const required = "prodex_mojo_core::optional_tools_policy::render_optional_tool_awareness(";
+      const violations = contents.includes(required)
+        ? []
+        : [filePath + ": Super optional-tool awareness must retain the Mojo renderer"];
+      for (const retired of [
+        "PRODEX_SUPER_OPTIMIZER_AWARENESS",
+        "fn availability_label(",
+        "push_str(\"\\n## Available Now\\n\\n\")",
+      ]) {
+        if (contents.includes(retired)) {
+          violations.push(filePath + ": contains restored Rust optional-tool awareness formatting");
+          break;
+        }
+      }
+      return violations;
+    }
+    if (filePath === OPTIONAL_TOOLS_RENDER_ADAPTER_FILE) {
+      return [
+        "prodex_optional_tool_awareness_v1(",
+        "pub fn render_optional_tool_awareness(",
+      ].filter((marker) => !contents.includes(marker))
+        .map((marker) => filePath + ": optional-tool awareness adapter must retain " + marker);
+    }
+    if (filePath === OPTIONAL_TOOLS_RENDER_MOJO_FILE) {
+      return [
+        '@export("prodex_optional_tool_awareness_v1")',
+        "optional_tool_awareness_put_available(",
+        "Missing tools are not active.",
+      ].filter((marker) => !contents.includes(marker))
+        .map((marker) => filePath + ": optional-tool awareness must remain Mojo-owned (" + marker + ")");
+    }
+    if (filePath === OPTIONAL_TOOLS_RENDER_CALLER_TEST_FILE) {
+      return contents.includes("awareness_contains_only_the_minimal_stack")
+        ? []
+        : [filePath + ": optional-tool awareness caller regression is missing"];
+    }
+    return [];
+  });
   const geminiFallbackViolations = files
     .filter(([filePath, contents]) =>
       filePath === "crates/prodex-provider-core/src/fallback/chains/gemini.rs" &&
@@ -7773,6 +7821,7 @@ export function findViolations(files) {
     ...quotaWindowViolations, ...quotaResetEpochViolations,
     ...rehydrateViolations, ...budgetTierViolations, ...staticItemViolations, ...replacedClassifierViolations, ...cliDependencyViolations,
     ...doctorDependencyViolations, ...proxyDependencyViolations, ...runtimeTuningViolations,
+    ...optionalToolsRenderViolations,
     ...defaultFeatureViolations, ...operationalHistogramViolations];
 }
 
@@ -9227,6 +9276,29 @@ function selfTest() {
     'prodex_mojo_core::launch::super_literal_boundary(\n' +
     'prodex_mojo_core::launch::positioned_super_provider_alias(\n' +
     'prodex_mojo_core::launch::codex_command_server_subcommand(']]), []);
+  const optionalToolsRenderConsumer =
+    "prodex_mojo_core::optional_tools_policy::render_optional_tool_awareness(";
+  const optionalToolsRenderAdapter = [
+    "prodex_optional_tool_awareness_v1(",
+    "pub fn render_optional_tool_awareness(",
+  ].join("\n");
+  const optionalToolsRenderMojo = [
+    '@export("prodex_optional_tool_awareness_v1")',
+    "optional_tool_awareness_put_available(",
+    "Missing tools are not active.",
+  ].join("\n");
+  assert.deepEqual(findViolations([
+    [OPTIONAL_TOOLS_RENDER_FILE, optionalToolsRenderConsumer],
+    [OPTIONAL_TOOLS_RENDER_ADAPTER_FILE, optionalToolsRenderAdapter],
+    [OPTIONAL_TOOLS_RENDER_MOJO_FILE, optionalToolsRenderMojo],
+    [OPTIONAL_TOOLS_RENDER_CALLER_TEST_FILE, "awareness_contains_only_the_minimal_stack"],
+  ]), []);
+  assert.match(findViolations([[OPTIONAL_TOOLS_RENDER_FILE,
+    optionalToolsRenderConsumer + "\nPRODEX_SUPER_OPTIMIZER_AWARENESS"]]).join("\n"),
+    /restored Rust optional-tool awareness formatting/u);
+  assert.match(findViolations([[OPTIONAL_TOOLS_RENDER_MOJO_FILE,
+    optionalToolsRenderMojo.replace("optional_tool_awareness_put_available(", "old_availability(")]]).join("\n"),
+    /optional-tool awareness must remain Mojo-owned/u);
   assert.match(findViolations([[GEMINI_SCHEMA_FILE, "fn sanitized_required() {}"]]).join("\n"),
     /replaced Rust semantic implementation/u);
   assert.match(findViolations([[GEMINI_TOOLS_FILE, "fn gemini_tool_config_from_request_oracle() {}"]]).join("\n"),

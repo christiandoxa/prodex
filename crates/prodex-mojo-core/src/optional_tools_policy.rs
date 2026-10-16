@@ -1,6 +1,7 @@
 use crate::MojoError;
 
 const ABI_VERSION: i64 = 1;
+const AWARENESS_TEXT_COUNT: usize = 4;
 
 pub const CAP_CODEX: u64 = 1;
 pub const CAP_CLAUDE: u64 = 2;
@@ -36,6 +37,13 @@ pub struct OptionalToolDescriptorPolicy {
     pub super_default: bool,
 }
 
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct OptionalToolStringView {
+    ptr: u64,
+    len: u64,
+}
+
 unsafe extern "C" {
     fn prodex_optional_tool_class_v1(abi_version: i64, address: u64, length: i64) -> i64;
     fn prodex_optional_tool_descriptor_policy_v1(abi_version: i64, tool_id: i64) -> i64;
@@ -54,6 +62,16 @@ unsafe extern "C" {
         input_length: i64,
         output_address: u64,
         output_capacity: i64,
+    ) -> i64;
+    fn prodex_optional_tool_awareness_v1(
+        abi_version: i64,
+        availability_mask: i64,
+        presidio_enabled: i64,
+        text_address: u64,
+        text_count: i64,
+        output_address: u64,
+        output_capacity: i64,
+        written_address: u64,
     ) -> i64;
 }
 
@@ -160,6 +178,64 @@ pub fn optional_tool_hex_encode(input: &[u8], output: &mut [u8]) -> Result<usize
     }
 }
 
+/// Render the Super optional-tool awareness document through the compiled Mojo owner.
+pub fn render_optional_tool_awareness(
+    paths: [Option<&str>; AWARENESS_TEXT_COUNT],
+    presidio_enabled: bool,
+) -> Result<String, MojoError> {
+    let availability_mask = paths.iter().enumerate().fold(0_i64, |mask, (index, path)| {
+        mask | (i64::from(path.is_some()) << index)
+    });
+    let views = paths
+        .into_iter()
+        .map(|value| {
+            value.map_or(Ok(OptionalToolStringView { ptr: 0, len: 0 }), |value| {
+                Ok(OptionalToolStringView {
+                    ptr: value.as_ptr() as usize as u64,
+                    len: u64::try_from(value.len()).map_err(|_| MojoError::InvalidInput)?,
+                })
+            })
+        })
+        .collect::<Result<Vec<_>, MojoError>>()?;
+    let path_bytes = views.iter().try_fold(0_usize, |total, view| {
+        total
+            .checked_add(usize::try_from(view.len).map_err(|_| MojoError::InvalidInput)?)
+            .ok_or(MojoError::InvalidInput)
+    })?;
+    let capacity = path_bytes
+        .checked_add(4096)
+        .ok_or(MojoError::InvalidInput)?;
+    let mut output = vec![0_u8; capacity];
+    let mut written = -1_i64;
+    let status = unsafe {
+        prodex_optional_tool_awareness_v1(
+            ABI_VERSION,
+            availability_mask,
+            i64::from(presidio_enabled),
+            views.as_ptr() as usize as u64,
+            AWARENESS_TEXT_COUNT as i64,
+            output.as_mut_ptr() as usize as u64,
+            i64::try_from(output.len()).map_err(|_| MojoError::InvalidInput)?,
+            (&mut written as *mut i64) as usize as u64,
+        )
+    };
+    match status {
+        0 => {}
+        1 => return Err(MojoError::InvalidInput),
+        3 => return Err(MojoError::Capacity),
+        4 => return Err(MojoError::AbiMismatch),
+        _ => return Err(MojoError::InvalidOutput),
+    }
+    let written = usize::try_from(written).map_err(|_| MojoError::InvalidOutput)?;
+    String::from_utf8(
+        output
+            .get(..written)
+            .ok_or(MojoError::InvalidOutput)?
+            .to_vec(),
+    )
+    .map_err(|_| MojoError::InvalidOutput)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -208,5 +284,25 @@ mod tests {
         assert!(optional_tool_manifest_tree_supported("current", "current", "legacy").unwrap());
         assert!(optional_tool_manifest_tree_supported("legacy", "current", "legacy").unwrap());
         assert!(!optional_tool_manifest_tree_supported("CURRENT", "current", "legacy").unwrap());
+    }
+
+    #[test]
+    fn optional_tool_awareness_render_preserves_paths_and_presence_labels() {
+        let rendered = render_optional_tool_awareness(
+            [
+                Some("/bin/rtk"),
+                None,
+                Some("/bin/npx"),
+                Some("/tmp/ponytail"),
+            ],
+            true,
+        )
+        .unwrap();
+        assert!(rendered.contains("- rtk: yes (/bin/rtk)"));
+        assert!(rendered.contains("- codebase-memory-mcp: no"));
+        assert!(rendered.contains("- playwright-mcp: yes (/bin/npx)"));
+        assert!(rendered.contains("- ponytail plugin: yes (/tmp/ponytail)"));
+        assert!(rendered.contains("- presidio: enabled"));
+        assert!(!rendered.contains("prodex-memory"));
     }
 }

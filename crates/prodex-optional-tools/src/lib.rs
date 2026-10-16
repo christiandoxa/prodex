@@ -104,19 +104,6 @@ RTK is a token-optimized CLI proxy for shell commands.
 Use visible `rtk <cmd>` for noisy terminal work when RTK is installed. If it is unavailable,
 report that accurately and run the underlying command normally.
 "#;
-pub(crate) const PRODEX_SUPER_OPTIMIZER_AWARENESS: &str = r#"# Prodex Optional Tools
-
-Prodex resolved optional tools for this temporary launch overlay.
-
-- Use visible `rtk <cmd>` for noisy shell output when RTK is available.
-- When Codebase Memory MCP is available, use it first for architecture, call-chain, impact,
-  and structural code search; run `index_repository` first when the workspace is not indexed.
-- Use Playwright MCP for browser work when available.
-- Follow Ponytail when its plugin is active.
-- Treat Presidio as enabled only when the session status says so.
-
-Missing tools are not active. Do not claim they were used.
-"#;
 
 #[cfg(test)]
 #[path = "../tests/src/lib.rs"]

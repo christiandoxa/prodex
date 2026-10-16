@@ -2,6 +2,7 @@ use anyhow::{Context, Result, bail};
 use std::env;
 use std::path::{Path, PathBuf};
 
+use crate::SUPER_OPTIMIZERS_MD;
 use crate::fs_ops::{read_text_file_limited, write_text_file};
 use crate::localization::ensure_agents_reference;
 use crate::toml_helpers::ensure_child_table;
@@ -9,7 +10,6 @@ use crate::{
     OptionalToolId, OptionalToolSet, PLAYWRIGHT_MCP_PACKAGE, ToolActivation, ToolActivationPlan,
     resolve_optional_tools,
 };
-use crate::{PRODEX_SUPER_OPTIMIZER_AWARENESS, SUPER_OPTIMIZERS_MD};
 
 mod ponytail;
 
@@ -340,35 +340,23 @@ fn render_super_optimizer_awareness(
     ponytail_checkout: Option<&Path>,
     presidio_enabled: bool,
 ) -> String {
-    let mut awareness = PRODEX_SUPER_OPTIMIZER_AWARENESS.to_string();
-    awareness.push_str("\n## Available Now\n\n");
-    awareness.push_str(&format!("- rtk: {}\n", availability_label(rtk_command)));
-    awareness.push_str(&format!(
-        "- codebase-memory-mcp: {}\n",
-        availability_label(codebase_memory_command)
-    ));
-    awareness.push_str(&format!(
-        "- playwright-mcp: {}\n",
-        availability_label(npx_command)
-    ));
-    awareness.push_str(&format!(
-        "- ponytail plugin: {}\n",
-        availability_label(ponytail_checkout)
-    ));
-    awareness.push_str(&format!(
-        "- presidio: {}\n",
-        if presidio_enabled {
-            "enabled"
-        } else {
-            "disabled"
-        }
-    ));
-    awareness
-}
-
-fn availability_label(path: Option<&Path>) -> String {
-    path.map(|path| format!("yes ({})", path.display()))
-        .unwrap_or_else(|| "no".to_string())
+    let paths = [
+        rtk_command,
+        codebase_memory_command,
+        npx_command,
+        ponytail_checkout,
+    ]
+    .map(|path| path.map(|path| path.display().to_string()));
+    prodex_mojo_core::optional_tools_policy::render_optional_tool_awareness(
+        [
+            paths[0].as_deref(),
+            paths[1].as_deref(),
+            paths[2].as_deref(),
+            paths[3].as_deref(),
+        ],
+        presidio_enabled,
+    )
+    .expect("Mojo optional-tool awareness renderer failed")
 }
 
 fn configure_super_mcp_servers(
