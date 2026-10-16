@@ -46,3 +46,8 @@ Update Prodex normally and launch or resume using the saved session ID.
 Existing processes are not hot-patched. Do not reconnect to an already
 closed temporary `codex --remote` socket or delete persisted conversation
 state in an attempt to repair a transport failure.
+
+Original upstream lint annotations are accounted for by exact-file provenance,
+not by increasing first-party allow-attribute budgets. The allow scanner first
+verifies the pinned vendor bytes; modified or unknown files are never silently
+exempted.

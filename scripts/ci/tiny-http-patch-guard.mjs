@@ -31,7 +31,7 @@ export async function verifyTinyHttpPatch(root = repoRoot) {
   const stream = await fs.readFile(path.join(directory, "src/util/refined_tcp_stream.rs"), "utf8");
   assert.ok(!stream.includes("tcp_stream.try_clone().unwrap()"));
   assert.ok(stream.includes('until_shutdown("split accepted stream"'));
-  return { sourceFilesVerified: Object.keys(expected).length, patchedFiles: manifest.patched_files.length };
+  return { sourceFilesVerified: Object.keys(expected).length, patchedFiles: manifest.patched_files.length, verifiedPaths: Object.keys(expected).map((name) => `vendor/tiny_http/${name}`) };
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

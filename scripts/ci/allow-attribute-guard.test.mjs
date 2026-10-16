@@ -135,3 +135,10 @@ test("fails when test-only dead_code allowlist entry becomes stale", () => {
   assert.equal(report.violations.length, 1);
   assert.equal(report.violations[0].type, "stale-test-only-dead-code-allow");
 });
+
+test("vendor paths have no blanket exemption from the first-party policy", () => {
+  const report = scanFixture({
+    "vendor/unreviewed/src/lib.rs": "#[allow(dead_code)]\nfn hidden() {}\n",
+  });
+  assert.ok(report.violations.some((entry) => entry.type === "unlisted-allow-location"));
+});

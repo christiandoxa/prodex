@@ -458,7 +458,8 @@ fn mojo_static_digest_and_truncation_text_preserves_checksum_protocol() {
 #[test]
 fn mojo_static_digest_and_truncation_abi_rejects_untrusted_fields() {
     let digest = [0_u8; 32];
-    let bad_hash = view(&"gg".repeat(32));
+    let bad_hash_storage = "gg".repeat(32);
+    let bad_hash = view(&bad_hash_storage);
     let mut output = [89_u8; 160];
     let mut written = 71_i64;
     unsafe {
