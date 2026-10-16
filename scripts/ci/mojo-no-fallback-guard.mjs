@@ -162,6 +162,10 @@ const PROFILE_ROUTE_CIRCUIT_TEST_FILE = "crates/prodex-mojo-core/tests/runtime_p
 const LOG_PAYLOAD_CALLER_FILE = "crates/prodex-app/src/app_commands/log_upstream_payload.rs";
 const LOG_PAYLOAD_ADAPTER_FILE = "crates/prodex-mojo-core/src/json/log_payload.rs";
 const LOG_PAYLOAD_MOJO_FILE = "mojo/prodex_core/log_payload.mojo";
+const KIRO_ENVIRONMENT_CALLER_FILE = "crates/prodex-app/src/profile_commands/kiro_environment.rs";
+const KIRO_ENVIRONMENT_ADAPTER_FILE = "crates/prodex-mojo-core/src/kiro_environment.rs";
+const KIRO_ENVIRONMENT_MOJO_FILE = "mojo/prodex_core/kiro_environment.mojo";
+const KIRO_ENVIRONMENT_ABI_TEST_FILE = "crates/prodex-mojo-core/tests/kiro_environment.rs";
 const PROMOTED_FILES = [
   SUPER_PROMPT_FILE,
   SUPER_PROMPT_CHOICES_FILE,
@@ -176,6 +180,10 @@ const PROMOTED_FILES = [
   LOG_PAYLOAD_CALLER_FILE,
   LOG_PAYLOAD_ADAPTER_FILE,
   LOG_PAYLOAD_MOJO_FILE,
+  KIRO_ENVIRONMENT_CALLER_FILE,
+  KIRO_ENVIRONMENT_ADAPTER_FILE,
+  KIRO_ENVIRONMENT_MOJO_FILE,
+  KIRO_ENVIRONMENT_ABI_TEST_FILE,
   "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_rate_limits.rs",
   "crates/prodex-mojo-core/src/provider_constraints/quota_headers.rs",
   "crates/prodex-runtime-proxy/tests/src/error_policy/rate_limit_header.rs",
@@ -2520,6 +2528,69 @@ export function findViolations(files) {
       return required
         .filter((marker) => !contents.includes(marker))
         .map((marker) => `${filePath}: required-Mojo Kiro catalog test must retain ${marker}`);
+    }
+    return [];
+  });
+  const kiroEnvironmentViolations = files.flatMap(([filePath, contents]) => {
+    if (filePath === KIRO_ENVIRONMENT_CALLER_FILE) {
+      const production = contents.split("#[cfg(test)]", 1)[0];
+      const required = [
+        "KiroMcpServerFacts",
+        "plan_mcp_normalization(",
+        "KiroMcpNormalizationAction::InitializeDisabledTools",
+        "KiroMcpNormalizationAction::AppendIncompatibleTool",
+      ];
+      const violations = required
+        .filter((marker) => !production.includes(marker))
+        .map((marker) => `${filePath}: Kiro MCP normalization must retain the Mojo plan (${marker})`);
+      if (
+        production.includes("command_is_codebase_memory")
+        || /if\s+!?(?:server_name_matches|command_name_matches)\s*\{/u.test(production)
+      ) {
+        violations.push(`${filePath}: contains restored Rust Kiro MCP target-selection semantics`);
+      }
+      if (FEATURE_OFF_RUST_PATH.test(production)) {
+        violations.push(`${filePath}: Kiro MCP normalization has a feature-off Rust path`);
+      }
+      return violations;
+    }
+    if (filePath === KIRO_ENVIRONMENT_ADAPTER_FILE) {
+      const required = [
+        "prodex_kiro_mcp_normalization_plan_v1(",
+        "KiroMcpServerFacts",
+        "KiroMcpDisabledToolsState",
+        "KiroMcpNormalizationAction",
+        "size_of::<KiroMcpServerFacts>() == 32",
+      ];
+      return required
+        .filter((marker) => !contents.includes(marker))
+        .map((marker) => `${filePath}: Kiro MCP ABI adapter must retain ${marker}`);
+    }
+    if (filePath === KIRO_ENVIRONMENT_MOJO_FILE) {
+      const required = [
+        '@export("prodex_kiro_mcp_normalization_plan_v1")',
+        "KIRO_ENVIRONMENT_ABI_VERSION: Int64 = 1",
+        "KIRO_ENVIRONMENT_MAX_SERVERS",
+        "KIRO_MCP_ACTION_INITIALIZE",
+        "KIRO_MCP_ACTION_APPEND",
+        "KIRO_MCP_ACTION_INVALID_DISABLED_TOOLS",
+        "facts_address == 0",
+        "output_capacity < fact_count",
+      ];
+      return required
+        .filter((marker) => !contents.includes(marker))
+        .map((marker) => `${filePath}: Kiro MCP normalization must remain checked Mojo-owned (${marker})`);
+    }
+    if (filePath === KIRO_ENVIRONMENT_ABI_TEST_FILE) {
+      const required = [
+        "kiro_environment_required_mojo_matrix_plans_targeted_and_untargeted_servers",
+        "kiro_environment_required_mojo_abi_rejects_invalid_fact_and_capacity",
+        "MOJO_ACTIVE",
+        "KiroMcpNormalizationAction::AppendIncompatibleTool",
+      ];
+      return required
+        .filter((marker) => !contents.includes(marker))
+        .map((marker) => `${filePath}: Kiro MCP ABI tests must retain ${marker}`);
     }
     return [];
   });
@@ -8235,6 +8306,7 @@ export function findViolations(files) {
     ...kiroAcpViolations,
     ...kiroMessageShapeViolations,
     ...kiroCatalogViolations,
+    ...kiroEnvironmentViolations,
     ...deepseekStrictSchemaViolations,
     ...quotaModelPolicyViolations, ...quotaDisplayPolicyViolations, ...quotaPlannerViolations,
     ...anthropicResponseViolations,
@@ -9572,6 +9644,27 @@ function selfTest() {
     "KIRO_CATALOG_ABI_VERSION: Int64 = 1\ndef kiro_model_catalog_normalize_v1("]]), []);
   assert.deepEqual(findViolations([[KIRO_CATALOG_ABI_TEST_FILE,
     "kiro_model_catalog_plan_uses_alias_precedence_unicode_trim_and_stable_source_order\nkiro_catalog_plan_returns_typed_missing_empty_and_limit_issues"]]), []);
+  const kiroEnvironmentCaller = `
+    let facts: Vec<KiroMcpServerFacts> = collect_facts();
+    let actions = plan_mcp_normalization(&facts)?;
+    match action {
+      KiroMcpNormalizationAction::InitializeDisabledTools => {}
+      KiroMcpNormalizationAction::AppendIncompatibleTool => {}
+    }
+  `;
+  assert.deepEqual(findViolations([[KIRO_ENVIRONMENT_CALLER_FILE, kiroEnvironmentCaller]]), []);
+  assert.match(findViolations([[KIRO_ENVIRONMENT_CALLER_FILE,
+    kiroEnvironmentCaller + "fn command_is_codebase_memory() {}"]]).join("\n"),
+  /restored Rust Kiro MCP target-selection semantics/u);
+  assert.match(findViolations([[KIRO_ENVIRONMENT_CALLER_FILE,
+    kiroEnvironmentCaller + '#[cfg(not(feature = "mojo"))] fn old_path() {}']]).join("\n"),
+  /feature-off Rust path/u);
+  assert.deepEqual(findViolations([[KIRO_ENVIRONMENT_ADAPTER_FILE,
+    "prodex_kiro_mcp_normalization_plan_v1(\nKiroMcpServerFacts\nKiroMcpDisabledToolsState\nKiroMcpNormalizationAction\nsize_of::<KiroMcpServerFacts>() == 32"]]), []);
+  assert.deepEqual(findViolations([[KIRO_ENVIRONMENT_MOJO_FILE,
+    '@export("prodex_kiro_mcp_normalization_plan_v1")\nKIRO_ENVIRONMENT_ABI_VERSION: Int64 = 1\nKIRO_ENVIRONMENT_MAX_SERVERS\nKIRO_MCP_ACTION_INITIALIZE\nKIRO_MCP_ACTION_APPEND\nKIRO_MCP_ACTION_INVALID_DISABLED_TOOLS\nfacts_address == 0\noutput_capacity < fact_count']]), []);
+  assert.deepEqual(findViolations([[KIRO_ENVIRONMENT_ABI_TEST_FILE,
+    "kiro_environment_required_mojo_matrix_plans_targeted_and_untargeted_servers\nkiro_environment_required_mojo_abi_rejects_invalid_fact_and_capacity\nMOJO_ACTIVE\nKiroMcpNormalizationAction::AppendIncompatibleTool"]]), []);
   assert.match(findViolations([[DEEPSEEK_STRICT_TOOLS_FILE, "fn strict_schema() {}"]]).join("\n"),
     /strict schema normalization must use Mojo/u);
   assert.match(findViolations([[DEEPSEEK_STRICT_SCHEMA_FILE,
