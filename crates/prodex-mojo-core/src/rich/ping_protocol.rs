@@ -5,6 +5,7 @@ const PING_PROTOCOL_ABI_VERSION: i64 = 1;
 const PING_PROTOCOL_MAX_BYTES: usize = 4 * 1024 * 1024;
 const PING_STATUS_DETAIL_MAX_BYTES: usize = 128;
 const PING_STATUS_LABEL_MAX_BYTES: usize = 32;
+const PING_SUMMARY_MAX_STATUSES: usize = 65_536;
 
 pub const PING_STATUS_OK: i64 = 0;
 pub const PING_STATUS_PROTOCOL_FAILED: i64 = 1;
@@ -53,6 +54,12 @@ unsafe extern "C" {
     fn prodex_mojo_ping_status_temporary_v1(
         abi_version: i64,
         status: i64,
+        output_address: u64,
+    ) -> i64;
+    fn prodex_mojo_ping_summary_plan_v1(
+        abi_version: i64,
+        statuses_address: u64,
+        status_count: i64,
         output_address: u64,
     ) -> i64;
 }
@@ -158,6 +165,74 @@ pub fn ping_status_is_temporary(status: i64) -> Result<bool, MojoError> {
         4 => Err(MojoError::AbiMismatch),
         _ => Err(MojoError::InvalidOutput),
     }
+}
+
+/// Mojo-owned aggregate buckets used by the multi-profile ping summary.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PingSummaryPlan {
+    pub total: u64,
+    pub healthy: u64,
+    pub exhausted: u64,
+    pub auth_failures: u64,
+    pub temporary_failures: u64,
+    pub other_failures: u64,
+    pub pool_usable: bool,
+}
+
+/// Aggregate ping status codes without reimplementing the failure taxonomy in Rust.
+pub fn ping_summary_plan(statuses: &[i64]) -> Result<PingSummaryPlan, MojoError> {
+    ensure_rich_abi()?;
+    if statuses.len() > PING_SUMMARY_MAX_STATUSES {
+        return Err(MojoError::InvalidInput);
+    }
+    let mut output = [u64::MAX; 7];
+    let code = unsafe {
+        prodex_mojo_ping_summary_plan_v1(
+            PING_PROTOCOL_ABI_VERSION,
+            if statuses.is_empty() {
+                0
+            } else {
+                statuses.as_ptr() as usize as u64
+            },
+            i64::try_from(statuses.len()).map_err(|_| MojoError::InvalidInput)?,
+            output.as_mut_ptr() as usize as u64,
+        )
+    };
+    match code {
+        0 => {}
+        1 => return Err(MojoError::InvalidInput),
+        2 => return Err(MojoError::Capacity),
+        4 => return Err(MojoError::AbiMismatch),
+        _ => return Err(MojoError::InvalidOutput),
+    }
+    let expected_total = u64::try_from(statuses.len()).map_err(|_| MojoError::InvalidOutput)?;
+    if output[0] != expected_total
+        || output[1]
+            .saturating_add(output[2])
+            .saturating_add(output[3])
+            .saturating_add(output[4])
+            .saturating_add(output[5])
+            != output[0]
+    {
+        return Err(MojoError::InvalidOutput);
+    }
+    let pool_usable = match output[6] {
+        0 => false,
+        1 => true,
+        _ => return Err(MojoError::InvalidOutput),
+    };
+    if pool_usable != (output[1] > 0) {
+        return Err(MojoError::InvalidOutput);
+    }
+    Ok(PingSummaryPlan {
+        total: output[0],
+        healthy: output[1],
+        exhausted: output[2],
+        auth_failures: output[3],
+        temporary_failures: output[4],
+        other_failures: output[5],
+        pool_usable,
+    })
 }
 
 #[cfg(test)]
@@ -276,5 +351,37 @@ mod tests {
         );
         assert!(ping_status_is_temporary(PING_STATUS_TIMEOUT).unwrap());
         assert!(!ping_status_is_temporary(PING_STATUS_QUOTA_EXHAUSTED).unwrap());
+    }
+
+    #[test]
+    fn summary_buckets_preserve_status_precedence() {
+        let plan = ping_summary_plan(&[
+            PING_STATUS_OK,
+            PING_STATUS_QUOTA_EXHAUSTED,
+            PING_STATUS_AUTH_FAILED,
+            PING_STATUS_TIMEOUT,
+            PING_STATUS_PROTOCOL_FAILED,
+            PING_STATUS_OK,
+        ])
+        .unwrap();
+        assert_eq!(
+            plan,
+            PingSummaryPlan {
+                total: 6,
+                healthy: 2,
+                exhausted: 1,
+                auth_failures: 1,
+                temporary_failures: 1,
+                other_failures: 1,
+                pool_usable: true,
+            }
+        );
+        assert!(!ping_summary_plan(&[]).unwrap().pool_usable);
+        assert_eq!(
+            ping_summary_plan(&[PING_STATUS_CANCELLED, PING_STATUS_TURN_FAILED])
+                .unwrap()
+                .other_failures,
+            2
+        );
     }
 }

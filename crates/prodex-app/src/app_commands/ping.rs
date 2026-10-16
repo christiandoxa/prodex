@@ -79,11 +79,6 @@ impl PingStatus {
         prodex_mojo_core::rich::ping_status_label(self.mojo_code(), true)
             .expect("Mojo ping status JSON label formatter returned invalid output")
     }
-
-    fn is_temporary(self) -> bool {
-        prodex_mojo_core::rich::ping_status_is_temporary(self.mojo_code())
-            .expect("Mojo ping temporary-status classifier returned invalid output")
-    }
 }
 
 #[derive(Debug, Clone)]
