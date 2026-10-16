@@ -280,13 +280,13 @@ fn rich_catalog_reasoning_resolves_model_defaults_and_efforts() {
         CatalogReasoningModel {
             id: "gpt-5.6-luna",
             aliases: &["luna"],
-            efforts: &["none", "low", "medium", "max"],
+            efforts: Some(&["none", "low", "medium", "max"]),
             default_effort: Some("medium"),
         },
         CatalogReasoningModel {
             id: "gpt-5.6-sol",
             aliases: &["sol"],
-            efforts: &["low", "high", "ultra"],
+            efforts: Some(&["low", "high", "ultra"]),
             default_effort: Some("low"),
         },
     ];
@@ -297,6 +297,37 @@ fn rich_catalog_reasoning_resolves_model_defaults_and_efforts() {
     assert_eq!(plan.selected_effort.as_deref(), Some("max"));
     let unsupported = resolve_catalog_reasoning(&models, Some("luna"), None, Some("ultra"));
     assert!(matches!(unsupported, Err(MojoError::Structured(issue)) if issue.kind == 5));
+}
+
+#[test]
+fn rich_catalog_reasoning_expands_only_omitted_effort_metadata() {
+    let omitted = [CatalogReasoningModel {
+        id: "model-omitted",
+        aliases: &[],
+        efforts: None,
+        default_effort: None,
+    }];
+    let plan =
+        resolve_catalog_reasoning(&omitted, Some("model-omitted"), None, Some("ULTRA")).unwrap();
+    assert_eq!(
+        plan.supported_efforts,
+        [
+            "none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra"
+        ]
+    );
+    assert_eq!(plan.selected_effort.as_deref(), Some("ultra"));
+    assert_eq!(plan.default_effort.as_deref(), Some("none"));
+
+    let explicit_empty = [CatalogReasoningModel {
+        id: "model-empty",
+        aliases: &[],
+        efforts: Some(&[]),
+        default_effort: None,
+    }];
+    assert!(matches!(
+        resolve_catalog_reasoning(&explicit_empty, Some("model-empty"), None, Some("low")),
+        Err(MojoError::Structured(issue)) if issue.kind == 5
+    ));
 }
 
 #[test]

@@ -90,10 +90,10 @@ pub use catalog::{
     CatalogChoice, CatalogChoicesPlan, CatalogConfigurationInput, CatalogConfigurationPlan,
     CatalogModel, CatalogPlanModel, CatalogPlanRole, CatalogPlannedModel, CatalogReasoningModel,
     CatalogReasoningPlan, ascii_casefold_contains, ascii_casefold_ends_with,
-    ascii_casefold_equal_exact, ascii_casefold_find, ascii_casefold_starts_with, merge_catalog_ids,
-    openai_model_is_retired, plan_catalog_choices, plan_catalog_configuration,
-    plan_dynamic_catalog, resolve_catalog_model, resolve_catalog_model_exact,
-    resolve_catalog_reasoning,
+    ascii_casefold_equal_exact, ascii_casefold_find, ascii_casefold_starts_with,
+    catalog_context_window_is_positive, merge_catalog_ids, openai_model_is_retired,
+    plan_catalog_choices, plan_catalog_configuration, plan_dynamic_catalog, resolve_catalog_model,
+    resolve_catalog_model_exact, resolve_catalog_reasoning,
 };
 #[path = "rich/gemini_sse_state.rs"]
 mod gemini_sse_state;
@@ -757,7 +757,7 @@ pub fn rich_self_test() -> bool {
     let reasoning_models = [CatalogReasoningModel {
         id: "gpt-5.6-luna",
         aliases: &["luna"],
-        efforts: &["none", "low", "medium", "max"],
+        efforts: Some(&["none", "low", "medium", "max"]),
         default_effort: Some("medium"),
     }];
     let reasoning = resolve_catalog_reasoning(&reasoning_models, Some("luna"), None, None)

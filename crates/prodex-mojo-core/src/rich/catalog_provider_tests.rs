@@ -99,3 +99,19 @@ fn openai_retired_catalog_abi_enforces_version_and_boundaries() {
         RICH_STATUS_INVALID
     );
 }
+
+#[test]
+fn catalog_context_window_abi_owns_positive_validation() {
+    assert!(catalog_context_window_is_positive(1).unwrap());
+    assert!(!catalog_context_window_is_positive(0).unwrap());
+
+    let mut output = -1_i64;
+    assert_eq!(
+        unsafe { prodex_mojo_rich_catalog_context_window_v1(0, 1, count_address(&mut output),) },
+        RICH_STATUS_ABI
+    );
+    assert_eq!(
+        unsafe { prodex_mojo_rich_catalog_context_window_v1(RICH_ABI_VERSION, 0, 0,) },
+        RICH_STATUS_INVALID
+    );
+}

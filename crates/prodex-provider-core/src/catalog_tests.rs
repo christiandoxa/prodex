@@ -140,3 +140,19 @@ fn reasoning_resolves_long_unicode_model_ids_and_rejects_unicode_effort() {
         Err(ProviderModelReasoningError::UnsupportedEffort)
     );
 }
+
+#[test]
+fn omitted_reasoning_metadata_uses_mojo_default_effort_policy() {
+    let resolution =
+        provider_model_reasoning_resolution(ProviderId::OpenAi, Some("gpt-5.4"), Some("ultra"))
+            .unwrap();
+    assert_eq!(
+        resolution.selected_reasoning_effort,
+        Some(ProviderReasoningEffort::Ultra)
+    );
+    assert_eq!(
+        resolution.default_reasoning_effort,
+        Some(ProviderReasoningEffort::None)
+    );
+    assert_eq!(resolution.supported_reasoning_efforts.len(), 8);
+}

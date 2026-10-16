@@ -10,6 +10,9 @@ pub use catalog_planner::{
 const CATALOG_MAX_MODELS: usize = 1_024;
 const CATALOG_MAX_INPUT_MODELS: usize = 65_536;
 const CATALOG_MAX_IDENTIFIER_BYTES: usize = 4_096;
+const CATALOG_DEFAULT_REASONING_EFFORT_COUNT: usize = 8;
+// Mojo's canonical omitted-metadata labels require this much output storage.
+const CATALOG_DEFAULT_REASONING_EFFORT_BYTES: usize = 37;
 const CATALOG_CHOICE_PROVIDER_DEFAULT: i64 = 0;
 const CATALOG_CHOICE_CATALOG: i64 = 1;
 const CATALOG_CHOICE_CONFIGURED: i64 = 2;
@@ -74,7 +77,10 @@ impl CatalogModel<'_> {
 pub struct CatalogReasoningModel<'a> {
     pub id: &'a str,
     pub aliases: &'a [&'a str],
-    pub efforts: &'a [&'a str],
+    /// `None` means the catalog omitted effort metadata and Mojo must apply
+    /// the provider-wide default effort set. `Some(&[])` remains explicitly
+    /// empty and must not be expanded.
+    pub efforts: Option<&'a [&'a str]>,
     pub default_effort: Option<&'a str>,
 }
 
@@ -189,7 +195,7 @@ unsafe extern "C" {
         output_capacity: i64,
         output_count: u64,
     ) -> i64;
-    fn prodex_mojo_rich_catalog_reasoning_v1(
+    fn prodex_mojo_rich_catalog_reasoning_v2(
         abi_version: i64,
         model_ids: u64,
         model_count: i64,
@@ -198,6 +204,7 @@ unsafe extern "C" {
         alias_count: i64,
         efforts: u64,
         effort_models: u64,
+        effort_presence: u64,
         effort_count: i64,
         defaults: u64,
         requested_model: u64,
@@ -212,6 +219,11 @@ unsafe extern "C" {
         output_capacity: i64,
         result: u64,
     ) -> i64;
+    fn prodex_mojo_rich_catalog_context_window_v1(
+        abi_version: i64,
+        tokens: u64,
+        output: u64,
+    ) -> i64;
 }
 
 struct CatalogViews {
@@ -223,6 +235,7 @@ struct CatalogViews {
 type ReasoningViews = (
     CatalogViews,
     Vec<RichStringView>,
+    Vec<i64>,
     Vec<i64>,
     Vec<RichStringView>,
 );
@@ -298,7 +311,7 @@ fn reasoning_views(models: &[CatalogReasoningModel<'_>]) -> Result<ReasoningView
     let effort_count = models
         .iter()
         .try_fold(0_usize, |count, model| {
-            count.checked_add(model.efforts.len())
+            count.checked_add(model.efforts.map_or(0, |efforts| efforts.len()))
         })
         .ok_or(MojoError::InvalidInput)?;
     if effort_count > CATALOG_MAX_INPUT_MODELS {
@@ -306,10 +319,14 @@ fn reasoning_views(models: &[CatalogReasoningModel<'_>]) -> Result<ReasoningView
     }
     let mut efforts = Vec::with_capacity(effort_count);
     let mut effort_models = Vec::with_capacity(effort_count);
+    let effort_presence = models
+        .iter()
+        .map(|model| i64::from(model.efforts.is_some()))
+        .collect::<Vec<_>>();
     let mut defaults = Vec::with_capacity(models.len());
     for (model_index, model) in models.iter().enumerate() {
         defaults.push(model.default_effort.map(view).unwrap_or_default());
-        for effort in model.efforts {
+        for effort in model.efforts.unwrap_or(&[]) {
             if effort.len() > CATALOG_MAX_IDENTIFIER_BYTES {
                 return Err(MojoError::InvalidInput);
             }
@@ -317,7 +334,7 @@ fn reasoning_views(models: &[CatalogReasoningModel<'_>]) -> Result<ReasoningView
             effort_models.push(i64::try_from(model_index).map_err(|_| MojoError::InvalidInput)?);
         }
     }
-    Ok((catalog, efforts, effort_models, defaults))
+    Ok((catalog, efforts, effort_models, effort_presence, defaults))
 }
 
 pub fn ascii_casefold_equal_exact(left: &str, right: &str) -> Result<bool, MojoError> {
@@ -348,6 +365,24 @@ pub fn openai_model_is_retired(model: &str) -> Result<bool, MojoError> {
             RICH_ABI_VERSION,
             model.as_ptr() as usize as u64,
             i64::try_from(model.len()).map_err(|_| MojoError::InvalidInput)?,
+            count_address(&mut output),
+        )
+    })?;
+    match output {
+        0 => Ok(false),
+        1 => Ok(true),
+        _ => Err(MojoError::InvalidOutput),
+    }
+}
+
+/// Validates the catalog's positive optional context-window rule in Mojo.
+pub fn catalog_context_window_is_positive(tokens: u64) -> Result<bool, MojoError> {
+    ensure_rich_abi()?;
+    let mut output = -1_i64;
+    status(unsafe {
+        prodex_mojo_rich_catalog_context_window_v1(
+            RICH_ABI_VERSION,
+            tokens,
             count_address(&mut output),
         )
     })?;
@@ -608,17 +643,38 @@ pub fn resolve_catalog_reasoning(
     requested_effort: Option<&str>,
 ) -> Result<CatalogReasoningPlan, MojoError> {
     ensure_rich_abi()?;
-    let (views, efforts, effort_models, defaults) = reasoning_views(models)?;
-    let output_capacity = effort_models.len().max(1);
+    let (views, efforts, effort_models, effort_presence, defaults) = reasoning_views(models)?;
+    let output_capacity = models
+        .iter()
+        .try_fold(0_usize, |capacity, model| {
+            capacity.checked_add(
+                model
+                    .efforts
+                    .map_or(CATALOG_DEFAULT_REASONING_EFFORT_COUNT, |efforts| {
+                        efforts.len()
+                    }),
+            )
+        })
+        .ok_or(MojoError::InvalidInput)?
+        .max(1);
     let output_bytes = models
         .iter()
-        .filter_map(|model| model.default_effort)
-        .chain(
-            models
-                .iter()
-                .flat_map(|model| model.efforts.iter().copied()),
-        )
-        .try_fold(0_usize, |total, effort| total.checked_add(effort.len()))
+        .try_fold(0_usize, |total, model| {
+            let total = total
+                .checked_add(model.default_effort.map_or(0, str::len))?
+                .checked_add(
+                    model
+                        .efforts
+                        .unwrap_or(&[])
+                        .iter()
+                        .try_fold(0_usize, |bytes, effort| bytes.checked_add(effort.len()))?,
+                )?;
+            if model.efforts.is_none() {
+                total.checked_add(CATALOG_DEFAULT_REASONING_EFFORT_BYTES)
+            } else {
+                Some(total)
+            }
+        })
         .ok_or(MojoError::InvalidInput)?
         .max(1);
     let requested_model = requested_model.map(view);
@@ -628,7 +684,7 @@ pub fn resolve_catalog_reasoning(
     let mut output = vec![0_u8; output_bytes];
     let mut result = RichCatalogReasoningResult::default();
     let status = unsafe {
-        prodex_mojo_rich_catalog_reasoning_v1(
+        prodex_mojo_rich_catalog_reasoning_v2(
             RICH_ABI_VERSION,
             address(&views.model_ids),
             i64::try_from(views.model_ids.len()).map_err(|_| MojoError::InvalidInput)?,
@@ -637,6 +693,7 @@ pub fn resolve_catalog_reasoning(
             i64::try_from(views.aliases.len()).map_err(|_| MojoError::InvalidInput)?,
             address(&efforts),
             address(&effort_models),
+            address(&effort_presence),
             i64::try_from(efforts.len()).map_err(|_| MojoError::InvalidInput)?,
             address(&defaults),
             requested_model

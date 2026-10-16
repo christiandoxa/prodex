@@ -2,10 +2,6 @@ use super::{ProviderCatalogEntry, provider_catalog_entries_for};
 use crate::{ProviderId, ProviderReasoningEffort, provider_runtime_metadata};
 use std::fmt;
 
-const ALL_REASONING_EFFORT_LABELS: [&str; 8] = [
-    "none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra",
-];
-
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ProviderModelReasoningResolution {
     pub model_index: Option<usize>,
@@ -43,28 +39,24 @@ pub(crate) fn reasoning_effort_label(effort: ProviderReasoningEffort) -> Option<
     effort.label()
 }
 
-pub(crate) fn reasoning_catalog_data(
-    provider: ProviderId,
-) -> (
+type ReasoningCatalogData = (
     Vec<&'static ProviderCatalogEntry>,
+    Vec<Option<Vec<&'static str>>>,
     Vec<Vec<&'static str>>,
-    Vec<Vec<&'static str>>,
-) {
+);
+
+pub(crate) fn reasoning_catalog_data(provider: ProviderId) -> ReasoningCatalogData {
     let entries = provider_catalog_entries_for(provider);
     let efforts = entries
         .iter()
         .map(|entry| {
-            entry
-                .supported_reasoning_efforts
-                .as_deref()
-                .map(|values| {
-                    values
-                        .iter()
-                        .copied()
-                        .filter_map(reasoning_effort_label)
-                        .collect()
-                })
-                .unwrap_or_else(|| ALL_REASONING_EFFORT_LABELS.to_vec())
+            entry.supported_reasoning_efforts.as_deref().map(|values| {
+                values
+                    .iter()
+                    .copied()
+                    .filter_map(reasoning_effort_label)
+                    .collect()
+            })
         })
         .collect::<Vec<_>>();
     let aliases = entries
@@ -91,7 +83,7 @@ pub fn provider_model_reasoning_resolution(
                 |((entry, aliases), efforts)| prodex_mojo_core::rich::CatalogReasoningModel {
                     id: entry.id.as_str(),
                     aliases,
-                    efforts,
+                    efforts: efforts.as_deref(),
                     default_effort: entry
                         .default_reasoning_effort
                         .and_then(reasoning_effort_label),
