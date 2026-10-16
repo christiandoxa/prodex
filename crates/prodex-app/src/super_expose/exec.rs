@@ -12,14 +12,10 @@ use std::time::{Duration, Instant};
 
 pub(super) const EXEC_DEFAULT_TIMEOUT_MS: u64 = 30_000;
 pub(super) const EXEC_MAX_TIMEOUT_MS: u64 = 120_000;
-pub(super) const EXEC_MAX_PROGRAM_BYTES: usize = 4 * 1024;
 pub(super) const EXEC_MAX_ARGUMENTS: usize = 256;
-pub(super) const EXEC_MAX_ARGUMENT_BYTES: usize = 16 * 1024;
 pub(super) const EXEC_MAX_ARGUMENTS_BYTES: usize = 256 * 1024;
 pub(super) const EXEC_MAX_CWD_BYTES: usize = 4 * 1024;
 pub(super) const EXEC_MAX_ENV_ENTRIES: usize = 128;
-pub(super) const EXEC_MAX_ENV_KEY_BYTES: usize = 256;
-pub(super) const EXEC_MAX_ENV_VALUE_BYTES: usize = 16 * 1024;
 pub(super) const EXEC_MAX_STDIN_BYTES: usize = 256 * 1024;
 pub(super) const EXEC_MAX_OUTPUT_BYTES: usize = 128 * 1024;
 const EXEC_LOG_COMMAND_MAX_BYTES: usize = 2 * 1024;
@@ -191,34 +187,8 @@ fn exec_log_command_preview(request: &ExecRequest) -> String {
 }
 
 fn exec_log_secret_flag(value: &str) -> bool {
-    let compact = value
-        .split_once('=')
-        .map_or(value, |(key, _)| key)
-        .trim_start_matches('-')
-        .chars()
-        .filter(|character| character.is_ascii_alphanumeric())
-        .flat_map(char::to_lowercase)
-        .collect::<String>();
-    matches!(
-        compact.as_str(),
-        "apikey"
-            | "authtoken"
-            | "authorization"
-            | "clientsecret"
-            | "password"
-            | "secret"
-            | "token"
-            | "header"
-            | "cookie"
-            | "proxyuser"
-            | "h"
-            | "b"
-            | "u"
-            | "p"
-    ) || compact.ends_with("token")
-        || compact.ends_with("secret")
-        || compact.ends_with("password")
-        || compact.ends_with("apikey")
+    prodex_mojo_core::redaction::redaction_cli_flag_sensitive(value)
+        .expect("compiled Mojo expose command flag policy returned invalid output")
 }
 
 fn exec_log_argument(value: &str, quote: bool) -> String {
@@ -264,7 +234,13 @@ fn parse_request(
         .get("program")
         .and_then(Value::as_str)
         .ok_or_else(|| "program is required".to_string())?;
-    validate_path_text(program, "program", EXEC_MAX_PROGRAM_BYTES, false)?;
+    ensure_exec_validation(
+        prodex_mojo_core::rich::super_expose_exec_validate_text(
+            program,
+            prodex_mojo_core::rich::SuperExposeExecTextKind::Program,
+        ),
+        "program is empty, contains control characters, or is too large",
+    )?;
     let resolved = optional_tools.resolve_exec(program, parse_args(object.get("args"))?)?;
 
     Ok(ExecRequest {
@@ -280,31 +256,41 @@ fn parse_request(
 }
 
 fn parse_args(value: Option<&Value>) -> std::result::Result<Vec<OsString>, String> {
-    let mut args = Vec::new();
-    let mut args_bytes: usize = 0;
     let Some(value) = value.filter(|value| !value.is_null()) else {
-        return Ok(args);
+        return Ok(Vec::new());
     };
     let Some(values) = value.as_array() else {
         return Err("args must be an array".to_string());
     };
-    if values.len() > EXEC_MAX_ARGUMENTS {
-        return Err(format!(
-            "args must contain at most {EXEC_MAX_ARGUMENTS} items"
-        ));
-    }
+    ensure_exec_validation(
+        prodex_mojo_core::rich::super_expose_exec_validate_count(
+            values.len(),
+            prodex_mojo_core::rich::SuperExposeExecCountKind::Arguments,
+        ),
+        format!("args must contain at most {EXEC_MAX_ARGUMENTS} items"),
+    )?;
+    let mut args = Vec::with_capacity(values.len());
+    let mut args_bytes = 0;
     for value in values {
         let Some(value) = value.as_str() else {
             return Err("args must contain only strings".to_string());
         };
-        if value.len() > EXEC_MAX_ARGUMENT_BYTES || value.as_bytes().contains(&0) {
-            return Err("argument contains NUL or is too large".to_string());
-        }
-        args_bytes = args_bytes.saturating_add(value.len());
-        if args_bytes > EXEC_MAX_ARGUMENTS_BYTES {
-            return Err(format!(
-                "total argument bytes must be at most {EXEC_MAX_ARGUMENTS_BYTES}"
-            ));
+        let (validation, next_bytes) =
+            prodex_mojo_core::rich::super_expose_exec_validate_argument(value, args_bytes)
+                .map_err(exec_validation_error)?;
+        match validation {
+            prodex_mojo_core::rich::SuperExposeExecValidation::Valid => {
+                args_bytes = next_bytes;
+            }
+            prodex_mojo_core::rich::SuperExposeExecValidation::ArgumentLimit => {
+                return Err("argument contains NUL or is too large".to_string());
+            }
+            prodex_mojo_core::rich::SuperExposeExecValidation::TotalArgumentLimit => {
+                return Err(format!(
+                    "total argument bytes must be at most {EXEC_MAX_ARGUMENTS_BYTES}"
+                ));
+            }
+            _ => return Err(exec_validation_error_code(validation)),
         }
         args.push(OsString::from(value));
     }
@@ -318,7 +304,13 @@ fn parse_cwd(value: Option<&Value>, default_cwd: &Path) -> std::result::Result<P
             let Some(value) = value.as_str() else {
                 return Err("cwd must be a string".to_string());
             };
-            validate_path_text(value, "cwd", EXEC_MAX_CWD_BYTES, false)?;
+            ensure_exec_validation(
+                prodex_mojo_core::rich::super_expose_exec_validate_text(
+                    value,
+                    prodex_mojo_core::rich::SuperExposeExecTextKind::Cwd,
+                ),
+                "cwd is empty, contains control characters, or is too large",
+            )?;
             PathBuf::from(value)
         }
     })
@@ -332,18 +324,41 @@ fn parse_env(value: Option<&Value>) -> std::result::Result<Vec<(OsString, OsStri
     let Some(values) = value.as_object() else {
         return Err("env must be an object".to_string());
     };
-    if values.len() > EXEC_MAX_ENV_ENTRIES {
-        return Err(format!(
-            "env must contain at most {EXEC_MAX_ENV_ENTRIES} entries"
-        ));
-    }
+    ensure_exec_validation(
+        prodex_mojo_core::rich::super_expose_exec_validate_count(
+            values.len(),
+            prodex_mojo_core::rich::SuperExposeExecCountKind::Environment,
+        ),
+        format!("env must contain at most {EXEC_MAX_ENV_ENTRIES} entries"),
+    )?;
     for (key, value) in values {
-        validate_env_key(key)?;
+        let key_validation = prodex_mojo_core::rich::super_expose_exec_validate_env_entry(key, "")
+            .map_err(exec_validation_error)?;
+        if !matches!(
+            key_validation,
+            prodex_mojo_core::rich::SuperExposeExecValidation::Valid
+        ) {
+            return Err(
+                "env key is empty, contains '=', control characters, or is too large".to_string(),
+            );
+        }
         let Some(value) = value.as_str() else {
             return Err("env values must be strings".to_string());
         };
-        if value.len() > EXEC_MAX_ENV_VALUE_BYTES || value.as_bytes().contains(&0) {
-            return Err(format!("env value for {key} is too large or contains NUL"));
+        let validation = prodex_mojo_core::rich::super_expose_exec_validate_env_entry(key, value)
+            .map_err(exec_validation_error)?;
+        match validation {
+            prodex_mojo_core::rich::SuperExposeExecValidation::Valid => {}
+            prodex_mojo_core::rich::SuperExposeExecValidation::EnvironmentKey => {
+                return Err(
+                    "env key is empty, contains '=', control characters, or is too large"
+                        .to_string(),
+                );
+            }
+            prodex_mojo_core::rich::SuperExposeExecValidation::EnvironmentValue => {
+                return Err(format!("env value for {key} is too large or contains NUL"));
+            }
+            _ => return Err(exec_validation_error_code(validation)),
         }
         env.push((OsString::from(key), OsString::from(value)));
     }
@@ -357,11 +372,10 @@ fn parse_stdin(value: Option<&Value>) -> std::result::Result<Vec<u8>, String> {
             let Some(value) = value.as_str() else {
                 return Err("stdin must be a string".to_string());
             };
-            if value.len() > EXEC_MAX_STDIN_BYTES {
-                return Err(format!(
-                    "stdin must be at most {EXEC_MAX_STDIN_BYTES} bytes"
-                ));
-            }
+            ensure_exec_validation(
+                prodex_mojo_core::rich::super_expose_exec_validate_stdin(value.len()),
+                format!("stdin must be at most {EXEC_MAX_STDIN_BYTES} bytes"),
+            )?;
             value.as_bytes().to_vec()
         }
     })
@@ -374,44 +388,34 @@ fn parse_timeout(value: Option<&Value>) -> std::result::Result<Duration, String>
             .as_u64()
             .ok_or_else(|| "timeout_ms must be a nonnegative integer".to_string())?,
     };
-    if !(1..=EXEC_MAX_TIMEOUT_MS).contains(&timeout_ms) {
-        return Err(format!(
-            "timeout_ms must be between 1 and {EXEC_MAX_TIMEOUT_MS}"
-        ));
-    }
+    ensure_exec_validation(
+        prodex_mojo_core::rich::super_expose_exec_validate_timeout(timeout_ms),
+        format!("timeout_ms must be between 1 and {EXEC_MAX_TIMEOUT_MS}"),
+    )?;
     Ok(Duration::from_millis(timeout_ms))
 }
 
-fn validate_path_text(
-    value: &str,
-    name: &str,
-    max_bytes: usize,
-    allow_empty: bool,
+fn ensure_exec_validation(
+    validation: Result<
+        prodex_mojo_core::rich::SuperExposeExecValidation,
+        prodex_mojo_core::MojoError,
+    >,
+    invalid_message: impl Into<String>,
 ) -> std::result::Result<(), String> {
-    if (!allow_empty && value.is_empty())
-        || value.len() > max_bytes
-        || value.as_bytes().contains(&0)
-        || value.chars().any(char::is_control)
-    {
-        return Err(format!(
-            "{name} is empty, contains control characters, or is too large"
-        ));
+    match validation.map_err(exec_validation_error)? {
+        prodex_mojo_core::rich::SuperExposeExecValidation::Valid => Ok(()),
+        _ => Err(invalid_message.into()),
     }
-    Ok(())
 }
 
-fn validate_env_key(key: &str) -> std::result::Result<(), String> {
-    if key.is_empty()
-        || key.len() > EXEC_MAX_ENV_KEY_BYTES
-        || key.contains('=')
-        || key.as_bytes().contains(&0)
-        || key.chars().any(char::is_control)
-    {
-        return Err(
-            "env key is empty, contains '=', control characters, or is too large".to_string(),
-        );
-    }
-    Ok(())
+fn exec_validation_error(error: prodex_mojo_core::MojoError) -> String {
+    format!("exec request validation failed: {error:?}")
+}
+
+fn exec_validation_error_code(
+    validation: prodex_mojo_core::rich::SuperExposeExecValidation,
+) -> String {
+    format!("exec request validation returned unexpected result: {validation:?}")
 }
 
 fn run(

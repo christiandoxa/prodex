@@ -59,6 +59,11 @@ unsafe extern "C" {
         input_address: u64,
         input_length: i64,
     ) -> i64;
+    fn prodex_redaction_cli_flag_sensitive_v1(
+        abi_version: i64,
+        input_address: u64,
+        input_length: i64,
+    ) -> i64;
     fn prodex_redaction_text_snippet_v1(
         abi_version: i64,
         input_address: u64,
@@ -178,6 +183,24 @@ pub fn redaction_display_text_mode(value: &str) -> Result<RedactionDisplayTextMo
 pub fn redaction_cli_redact_next(value: &str) -> Result<bool, MojoError> {
     let result = unsafe {
         prodex_redaction_cli_redact_next_v1(
+            REDACTION_ABI_VERSION,
+            value.as_ptr() as usize as u64,
+            i64::try_from(value.len()).map_err(|_| MojoError::InvalidInput)?,
+        )
+    };
+    match result {
+        0 => Ok(false),
+        1 => Ok(true),
+        -1 => Err(MojoError::InvalidInput),
+        -4 => Err(MojoError::AbiMismatch),
+        _ => Err(MojoError::InvalidOutput),
+    }
+}
+
+/// Decide if an expose command-preview flag carries a sensitive value.
+pub fn redaction_cli_flag_sensitive(value: &str) -> Result<bool, MojoError> {
+    let result = unsafe {
+        prodex_redaction_cli_flag_sensitive_v1(
             REDACTION_ABI_VERSION,
             value.as_ptr() as usize as u64,
             i64::try_from(value.len()).map_err(|_| MojoError::InvalidInput)?,

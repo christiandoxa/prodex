@@ -83,6 +83,37 @@ fn redaction_cli_flag_mojo_abi_rejects_bad_version_and_utf8() {
 }
 
 #[test]
+fn redaction_expose_flag_policy_preserves_inline_and_short_alias_rules() {
+    for (value, expected) in [
+        ("--api-key", true),
+        ("--token=inline-secret", true),
+        ("--client-secret", true),
+        ("-H", true),
+        ("--model", false),
+        ("--api-key=", true),
+        ("api-key", true),
+    ] {
+        assert_eq!(
+            redaction_cli_flag_sensitive(value).unwrap(),
+            expected,
+            "{value:?}"
+        );
+    }
+}
+
+#[test]
+fn redaction_expose_flag_policy_rejects_bad_abi_inputs() {
+    let value = b"--api-key";
+    let address = value.as_ptr() as usize as u64;
+    unsafe {
+        assert_eq!(prodex_redaction_cli_flag_sensitive_v1(2, address, 9), -4);
+        assert_eq!(prodex_redaction_cli_flag_sensitive_v1(1, 0, 9), -1);
+        assert_eq!(prodex_redaction_cli_flag_sensitive_v1(1, address, -1), -1);
+        assert_eq!(prodex_redaction_cli_flag_sensitive_v1(1, address, 9), 1);
+    }
+}
+
+#[test]
 fn redaction_text_snippet_mojo_normalizes_unicode_and_clips_scalars() {
     for (input, max_chars, expected) in [
         ("", 0, "-"),

@@ -575,6 +575,7 @@ fn selected_sources() -> Vec<&'static str> {
         sources.push("../../mojo/prodex_core/runtime_doctor_degraded_routes.mojo");
         sources.push("../../mojo/prodex_core/runtime_doctor_render.mojo");
         sources.push("../../mojo/prodex_core/super_expose.mojo");
+        sources.push("../../mojo/prodex_core/super_expose_exec.mojo");
         sources.push("../../mojo/prodex_core/ping_protocol.mojo");
     }
     if env::var_os("CARGO_FEATURE_MOJO_ROUTING").is_some()

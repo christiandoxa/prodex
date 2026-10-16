@@ -343,6 +343,65 @@ def prodex_redaction_cli_redact_next_v1(
     )
 
 
+# Expose command previews also mask inline `--flag=value` credentials and
+# the short HTTP-style aliases used by direct execution tools.
+def reaction_exec_flag_sensitive(
+    source: Pointer[mut=False, UInt8, _], length: Int64, address: UInt
+) -> Bool:
+    if length == 0:
+        return False
+    var start: Int64 = 0
+    while start < length and source[unsafe_offset=start] == 45:
+        start += 1
+    var end = length
+    for index in range(start, length):
+        if source[unsafe_offset=index] == 61:
+            end = index
+            break
+    if end <= start:
+        return False
+    var key = Pointer[mut=False, UInt8, ImmUntrackedOrigin](
+        unsafe_from_address=Int(address) + Int(start)
+    )
+    var key_length = end - start
+    return (
+        reaction_normalized_key_matches(key, key_length, StringSlice("apikey"))
+        or reaction_normalized_key_matches(key, key_length, StringSlice("authtoken"))
+        or reaction_normalized_key_matches(key, key_length, StringSlice("authorization"))
+        or reaction_normalized_key_matches(key, key_length, StringSlice("clientsecret"))
+        or reaction_normalized_key_matches(key, key_length, StringSlice("password"))
+        or reaction_normalized_key_matches(key, key_length, StringSlice("secret"))
+        or reaction_normalized_key_matches(key, key_length, StringSlice("token"))
+        or reaction_normalized_key_matches(key, key_length, StringSlice("header"))
+        or reaction_normalized_key_matches(key, key_length, StringSlice("cookie"))
+        or reaction_normalized_key_matches(key, key_length, StringSlice("proxyuser"))
+        or reaction_normalized_key_matches(key, key_length, StringSlice("h"))
+        or reaction_normalized_key_matches(key, key_length, StringSlice("b"))
+        or reaction_normalized_key_matches(key, key_length, StringSlice("u"))
+        or reaction_normalized_key_matches(key, key_length, StringSlice("p"))
+        or reaction_normalized_key_suffix(key, key_length, StringSlice("token"))
+        or reaction_normalized_key_suffix(key, key_length, StringSlice("secret"))
+        or reaction_normalized_key_suffix(key, key_length, StringSlice("password"))
+        or reaction_normalized_key_suffix(key, key_length, StringSlice("apikey"))
+    )
+
+
+@export("prodex_redaction_cli_flag_sensitive_v1")
+def prodex_redaction_cli_flag_sensitive_v1(
+    abi_version: Int64, input_address: UInt, input_length: Int64
+) abi("C") -> Int64:
+    if abi_version != REACTION_ABI_VERSION:
+        return -4
+    if input_length < 0 or (input_length > 0 and input_address == 0):
+        return -1
+    var input = reaction_view(input_address, input_length)
+    if not rich_view_valid(input, 0x7FFFFFFFFFFFFFFF):
+        return -1
+    return Int64(
+        reaction_exec_flag_sensitive(rich_view_ptr(input), input_length, input_address)
+    )
+
+
 # Display-format policy for already redacted OsString values. Rust's Debug
 # formatter owns escaping of the host string; Mojo chooses when to invoke it.
 comptime REACTION_DISPLAY_EMPTY: Int64 = 0

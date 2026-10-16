@@ -4,6 +4,14 @@ use crate::MojoError;
 #[path = "super_expose/tunnel.rs"]
 mod tunnel;
 pub use tunnel::{super_expose_tunnel_client_version_output_valid, super_expose_tunnel_id_valid};
+#[path = "super_expose/exec.rs"]
+mod exec;
+pub use exec::{
+    SuperExposeExecCountKind, SuperExposeExecTextKind, SuperExposeExecValidation,
+    super_expose_exec_validate_argument, super_expose_exec_validate_count,
+    super_expose_exec_validate_env_entry, super_expose_exec_validate_stdin,
+    super_expose_exec_validate_text, super_expose_exec_validate_timeout,
+};
 
 const SUPER_EXPOSE_ABI_VERSION: i64 = 1;
 const SUPER_EXPOSE_MAX_NAME_BYTES: usize = 128;
@@ -13,7 +21,6 @@ const SUPER_EXPOSE_OUTPUT_CURSOR_ABI_VERSION: i64 = 1;
 #[cfg(test)]
 #[path = "super_expose/tests.rs"]
 mod concurrency_tests;
-
 #[repr(i64)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SuperExposeMethod {

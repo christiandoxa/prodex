@@ -44,6 +44,11 @@ const SUPER_EXPOSE_OUTPUT_EVENT_ADAPTER_FILE = "crates/prodex-mojo-core/src/sess
 const SUPER_EXPOSE_OUTPUT_EVENT_MOJO_FILE = "mojo/prodex_core/session_report.mojo";
 const SUPER_EXPOSE_OUTPUT_CALLER_TEST_FILE = "crates/prodex-app/src/super_expose/session_prompt_write_output_tests.rs";
 const SUPER_EXPOSE_OUTPUT_QUEUE_TEST_FILE = "crates/prodex-app/src/super_expose/session_prompt_write_queue_tests.rs";
+const SUPER_EXPOSE_EXEC_FILE = "crates/prodex-app/src/super_expose/exec.rs";
+const SUPER_EXPOSE_EXEC_TEST_FILE = "crates/prodex-app/src/super_expose/exec_tests.rs";
+const SUPER_EXPOSE_EXEC_ADAPTER_FILE = "crates/prodex-mojo-core/src/rich/super_expose/exec.rs";
+const SUPER_EXPOSE_EXEC_ADAPTER_TEST_FILE = "crates/prodex-mojo-core/src/rich/super_expose/exec_tests.rs";
+const SUPER_EXPOSE_EXEC_MOJO_FILE = "mojo/prodex_core/super_expose_exec.mojo";
 const OPTIONAL_TOOLS_RENDER_FILE = "crates/prodex-optional-tools/src/super_optimizers.rs";
 const OPTIONAL_TOOLS_RENDER_ADAPTER_FILE = "crates/prodex-mojo-core/src/optional_tools_policy.rs";
 const OPTIONAL_TOOLS_RENDER_MOJO_FILE = "mojo/prodex_core/optional_tools_policy.mojo";
@@ -277,6 +282,11 @@ const PROMOTED_FILES = [
   "crates/prodex-mojo-core/src/runtime_overlay_policy.rs",
   "crates/prodex-app/src/runtime_tools/overlay.rs",
   "crates/prodex-mojo-core/src/rich/super_expose.rs",
+  SUPER_EXPOSE_EXEC_FILE,
+  SUPER_EXPOSE_EXEC_TEST_FILE,
+  SUPER_EXPOSE_EXEC_ADAPTER_FILE,
+  SUPER_EXPOSE_EXEC_ADAPTER_TEST_FILE,
+  SUPER_EXPOSE_EXEC_MOJO_FILE,
   SUPER_EXPOSE_OUTPUT_FILE,
   SUPER_EXPOSE_OUTPUT_MOJO_FILE,
   SUPER_EXPOSE_OUTPUT_POLICY_FILE,
@@ -700,6 +710,8 @@ const UNCONDITIONAL_MOJO_FILES = new Set([
   "crates/prodex-mojo-core/src/super_provider_config.rs",
   "crates/prodex-cli/src/runtime_args.rs",
   "crates/prodex-app/src/super_expose/protocol/dispatch.rs",
+  SUPER_EXPOSE_EXEC_FILE,
+  SUPER_EXPOSE_EXEC_ADAPTER_FILE,
   "crates/prodex-mojo-core/src/log.rs",
   "crates/prodex-app/src/app_commands/log_transcript.rs",
   "crates/prodex-app/src/app_commands/log_transcript_text.rs",
@@ -3326,6 +3338,10 @@ export function findViolations(files) {
         "redaction_text_snippet_mojo_abi_rejects_bad_inputs_without_writing",
         "prodex_redaction_cli_redact_next_v1(",
         "pub fn redaction_cli_redact_next(",
+        "prodex_redaction_cli_flag_sensitive_v1(",
+        "pub fn redaction_cli_flag_sensitive(",
+        "redaction_expose_flag_policy_preserves_inline_and_short_alias_rules",
+        "redaction_expose_flag_policy_rejects_bad_abi_inputs",
         "redaction_cli_flag_next_argument_policy_is_compiled_mojo",
         "redaction_cli_flag_mojo_abi_rejects_bad_version_and_utf8",
         "prodex_redaction_display_text_mode_v1(",
@@ -3344,6 +3360,8 @@ export function findViolations(files) {
         "reaction_writer_literal(",
         '@export("prodex_redaction_cli_redact_next_v1")',
         "reaction_key_sensitive_ptr(",
+        '@export("prodex_redaction_cli_flag_sensitive_v1")',
+        "reaction_exec_flag_sensitive(",
         '@export("prodex_redaction_display_text_mode_v1")',
         "REACTION_DISPLAY_UNQUOTED",
         "REACTION_DISPLAY_DEBUG_QUOTED",
@@ -4027,6 +4045,81 @@ export function findViolations(files) {
       return contents.includes(required)
         ? []
         : [filePath + ": output cursor validation must remain Mojo-owned via " + required];
+    }
+    return [];
+  });
+  const superExposeExecViolations = files.flatMap(([filePath, contents]) => {
+    if (filePath === SUPER_EXPOSE_EXEC_FILE) {
+      const required = [
+        "prodex_mojo_core::rich::super_expose_exec_validate_text(",
+        "prodex_mojo_core::rich::super_expose_exec_validate_count(",
+        "prodex_mojo_core::rich::super_expose_exec_validate_argument(",
+        "prodex_mojo_core::rich::super_expose_exec_validate_env_entry(",
+        "prodex_mojo_core::rich::super_expose_exec_validate_stdin(",
+        "prodex_mojo_core::rich::super_expose_exec_validate_timeout(",
+        "prodex_mojo_core::redaction::redaction_cli_flag_sensitive(",
+      ];
+      const violations = required
+        .filter((marker) => !contents.includes(marker))
+        .map((marker) => `${filePath}: expose exec validation or preview must retain Mojo call ${marker}`);
+      for (const retired of [
+        "fn validate_path_text(",
+        "fn validate_env_key(",
+        ".chars().any(char::is_control)",
+        "args_bytes = args_bytes.saturating_add(",
+        "value.len() > EXEC_MAX_ARGUMENT_BYTES",
+        "value.as_bytes().contains(&0)",
+      ]) {
+        if (contents.includes(retired)) {
+          violations.push(`${filePath}: contains restored Rust expose exec validation or flag-redaction semantics`);
+          break;
+        }
+      }
+      return violations;
+    }
+    if (filePath === SUPER_EXPOSE_EXEC_ADAPTER_FILE) {
+      const required = [
+        "prodex_mojo_super_expose_exec_validation_v1(",
+        "pub fn super_expose_exec_validate_text(",
+        "pub fn super_expose_exec_validate_count(",
+        "pub fn super_expose_exec_validate_argument(",
+        "pub fn super_expose_exec_validate_env_entry(",
+        "pub fn super_expose_exec_validate_stdin(",
+        "pub fn super_expose_exec_validate_timeout(",
+      ];
+      return required
+        .filter((marker) => !contents.includes(marker))
+        .map((marker) => `${filePath}: expose exec ABI adapter must retain ${marker}`);
+    }
+    if (filePath === SUPER_EXPOSE_EXEC_MOJO_FILE) {
+      const required = [
+        '@export("prodex_mojo_super_expose_exec_validation_v1")',
+        "super_expose_exec_path_valid(",
+        "super_expose_exec_argument_valid(",
+        "super_expose_exec_env_key_valid(",
+        "super_expose_exec_env_value_valid(",
+        "SUPER_EXPOSE_EXEC_MAX_ARGUMENTS_BYTES",
+        "SUPER_EXPOSE_EXEC_MAX_TIMEOUT_MS",
+      ];
+      return required
+        .filter((marker) => !contents.includes(marker))
+        .map((marker) => `${filePath}: expose exec validation must remain Mojo-owned (${marker})`);
+    }
+    if (filePath === SUPER_EXPOSE_EXEC_TEST_FILE) {
+      return [
+        "exec_request_validation_preserves_bounds_and_error_order",
+        "exec_log_preview_shows_command_without_secret_flag_values",
+      ].filter((marker) => !contents.includes(marker))
+        .map((marker) => `${filePath}: production expose exec caller coverage must retain ${marker}`);
+    }
+    if (filePath === SUPER_EXPOSE_EXEC_ADAPTER_TEST_FILE) {
+      return [
+        "exec_validation_preserves_text_and_boundaries",
+        "exec_validation_preserves_argument_and_environment_error_kinds",
+        "exec_validation_preserves_stdin_and_timeout_limits",
+        "exec_validation_abi_rejects_bad_version_shape_without_output",
+      ].filter((marker) => !contents.includes(marker))
+        .map((marker) => `${filePath}: expose exec ABI coverage must retain ${marker}`);
     }
     return [];
   });
@@ -8147,7 +8240,7 @@ export function findViolations(files) {
     ...anthropicResponseViolations,
     ...anthropicEnvelopeViolations, ...anthropicRequestViolations,
     ...anthropicWebSearchViolations, ...superProviderConfigViolations, ...externalProviderCatalogViolations, ...subAgentPolicyViolations, ...runtimeOverlayPolicyViolations, ...cliRuntimeFeatureViolations,
-    ...superExposeProtocolViolations, ...superExposeViolations,
+    ...superExposeProtocolViolations, ...superExposeExecViolations, ...superExposeViolations,
     ...geminiFallbackViolations, ...geminiGenerationViolations, ...geminiTranslatorHardReplacementViolations, ...geminiBridgeFallbackViolations, ...geminiSignatureViolations, ...geminiResponseConformanceViolations,
     ...geminiToolResponseOrderViolations, ...geminiApplyPatchViolations,
     ...hardReplacementViolations, ...precommitBudgetOracleViolations,

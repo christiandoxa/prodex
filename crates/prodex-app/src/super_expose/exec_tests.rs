@@ -1,6 +1,6 @@
 use super::{
-    EXEC_MAX_OUTPUT_BYTES, exec_log_command_preview, execute_tool,
-    execute_tool_with_optional_tools, parse_request,
+    EXEC_MAX_OUTPUT_BYTES, EXEC_MAX_STDIN_BYTES, EXEC_MAX_TIMEOUT_MS, exec_log_command_preview,
+    execute_tool, execute_tool_with_optional_tools, parse_request,
 };
 use crate::super_expose::optional_tools::ExposeOptionalTools;
 use serde_json::{Value, json};
@@ -229,4 +229,88 @@ fn exec_log_preview_shows_command_without_secret_flag_values() {
     assert!(preview.contains("--token=<redacted>"));
     assert!(!preview.contains("secret-value"));
     assert!(!preview.contains("another-secret"));
+}
+
+#[test]
+fn exec_request_validation_preserves_bounds_and_error_order() {
+    let optional_tools = ExposeOptionalTools::empty_for_tests();
+    let parse_error =
+        |arguments: Value| match parse_request(&arguments, Path::new("."), &optional_tools) {
+            Ok(_) => panic!("request should be rejected"),
+            Err(error) => error,
+        };
+
+    assert_eq!(
+        parse_error(json!({"program": ""})),
+        "program is empty, contains control characters, or is too large"
+    );
+    assert_eq!(
+        parse_error(json!({"program": "bad\u{0085}program"})),
+        "program is empty, contains control characters, or is too large"
+    );
+    assert_eq!(
+        parse_error(json!({"program": "sh", "args": [42]})),
+        "args must contain only strings"
+    );
+    assert_eq!(
+        parse_error(json!({
+            "program": "sh",
+            "args": std::iter::repeat_n("x", 257).collect::<Vec<_>>()
+        })),
+        "args must contain at most 256 items"
+    );
+    assert_eq!(
+        parse_error(json!({
+            "program": "sh",
+            "args": ["x".repeat(16 * 1024 + 1)]
+        })),
+        "argument contains NUL or is too large"
+    );
+    let mut oversized_total_args =
+        std::iter::repeat_n("x".repeat(16 * 1024), 16).collect::<Vec<_>>();
+    oversized_total_args.push("x".to_string());
+    assert_eq!(
+        parse_error(json!({
+            "program": "sh",
+            "args": oversized_total_args
+        })),
+        "total argument bytes must be at most 262144"
+    );
+    assert_eq!(
+        parse_error(json!({"program": "sh", "cwd": ""})),
+        "cwd is empty, contains control characters, or is too large"
+    );
+    assert_eq!(
+        parse_error(json!({
+            "program": "sh",
+            "env": {"BAD=KEY": 42}
+        })),
+        "env key is empty, contains '=', control characters, or is too large"
+    );
+    assert_eq!(
+        parse_error(json!({
+            "program": "sh",
+            "env": {"GOOD": 42}
+        })),
+        "env values must be strings"
+    );
+    assert_eq!(
+        parse_error(json!({
+            "program": "sh",
+            "env": {"GOOD": "bad\0value"}
+        })),
+        "env value for GOOD is too large or contains NUL"
+    );
+    assert_eq!(
+        parse_error(json!({"program": "sh", "stdin": "x".repeat(EXEC_MAX_STDIN_BYTES + 1)})),
+        "stdin must be at most 262144 bytes"
+    );
+    assert_eq!(
+        parse_error(json!({"program": "sh", "timeout_ms": 0})),
+        "timeout_ms must be between 1 and 120000"
+    );
+    assert_eq!(
+        parse_error(json!({"program": "sh", "timeout_ms": EXEC_MAX_TIMEOUT_MS + 1})),
+        "timeout_ms must be between 1 and 120000"
+    );
 }
