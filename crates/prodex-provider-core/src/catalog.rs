@@ -13,7 +13,12 @@ where
     D: Deserializer<'de>,
 {
     match Option::<u64>::deserialize(deserializer)? {
-        Some(tokens) if tokens > 0 => Ok(Some(tokens)),
+        Some(tokens)
+            if prodex_mojo_core::rich::catalog_context_window_is_positive(tokens)
+                .expect("Mojo catalog context-window validation failed") =>
+        {
+            Ok(Some(tokens))
+        }
         Some(_) => Err(serde::de::Error::custom(
             "context_window_tokens must be positive",
         )),
@@ -304,6 +309,7 @@ mod tests {
             "pricing_known": false
         });
 
+        assert!(serde_json::from_value::<ProviderCatalogEntry>(value.clone()).is_ok());
         for tokens in [0, -1] {
             value["context_window_tokens"] = serde_json::json!(tokens);
             assert!(serde_json::from_value::<ProviderCatalogEntry>(value.clone()).is_err());

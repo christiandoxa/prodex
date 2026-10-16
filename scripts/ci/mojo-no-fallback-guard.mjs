@@ -119,6 +119,11 @@ const MAIN_MODEL_CATALOG_FILE = "crates/prodex-app/src/app_commands/super_main_c
 const MAIN_MODEL_CATALOG_ADAPTER_FILE = "crates/prodex-mojo-core/src/rich/catalog_planner.rs";
 const MAIN_MODEL_CATALOG_MOJO_FILE = "mojo/prodex_core/rich_catalog.mojo";
 const MAIN_MODEL_CATALOG_TEST_FILE = "crates/prodex-mojo-core/src/rich_tests.rs";
+const PROVIDER_CATALOG_FILE = "crates/prodex-provider-core/src/catalog.rs";
+const PROVIDER_CATALOG_REASONING_FILE = "crates/prodex-provider-core/src/catalog/reasoning.rs";
+const PROVIDER_CATALOG_ADAPTER_FILE = "crates/prodex-mojo-core/src/rich/catalog.rs";
+const PROVIDER_CATALOG_MOJO_FILE = "mojo/prodex_core/rich_catalog.mojo";
+const PROVIDER_CATALOG_TEST_FILE = "crates/prodex-provider-core/src/catalog_tests.rs";
 const PROFILE_ROUTE_CIRCUIT_ADAPTER_FILE = "crates/prodex-mojo-core/src/runtime/profile_route_circuit.rs";
 const PROFILE_ROUTE_CIRCUIT_MOJO_FILE = "mojo/prodex_core/runtime_profile_route_circuit.mojo";
 const PROFILE_ROUTE_CIRCUIT_TEST_FILE = "crates/prodex-mojo-core/tests/runtime_profile_route_circuit.rs";
@@ -5586,6 +5591,52 @@ export function findViolations(files) {
     }
     return [];
   });
+  const providerCatalogReasoningViolations = files.flatMap(([filePath, contents]) => {
+    if (filePath === PROVIDER_CATALOG_FILE) {
+      return contents.includes("catalog_context_window_is_positive(")
+        ? []
+        : [`${filePath}: context-window positivity must use the Mojo catalog validator`];
+    }
+    if (filePath === PROVIDER_CATALOG_REASONING_FILE) {
+      const required = ["efforts: efforts.as_deref()", "resolve_catalog_reasoning("];
+      const violations = required
+        .filter((marker) => !contents.includes(marker))
+        .map((marker) => `${filePath}: reasoning resolution must retain ${marker}`);
+      if (contents.includes("ALL_REASONING_EFFORT_LABELS") ||
+          /unwrap_or_else\(\|\|/u.test(contents)) {
+        violations.push(`${filePath}: omitted-effort expansion must remain Mojo-owned`);
+      }
+      return violations;
+    }
+    if (filePath === PROVIDER_CATALOG_ADAPTER_FILE) {
+      const required = [
+        "CatalogReasoningModel",
+        "effort_presence",
+        "prodex_mojo_rich_catalog_reasoning_v2(",
+        "catalog_context_window_is_positive",
+      ];
+      return required
+        .filter((marker) => !contents.includes(marker))
+        .map((marker) => `${filePath}: catalog ABI adapter must retain ${marker}`);
+    }
+    if (filePath === PROVIDER_CATALOG_MOJO_FILE) {
+      const required = [
+        '@export("prodex_mojo_rich_catalog_reasoning_v2")',
+        "effort_presence_address",
+        'catalog_reasoning_emit_static_effort["none"]',
+        '@export("prodex_mojo_rich_catalog_context_window_v1")',
+      ];
+      return required
+        .filter((marker) => !contents.includes(marker))
+        .map((marker) => `${filePath}: provider catalog policy must retain ${marker}`);
+    }
+    if (filePath === PROVIDER_CATALOG_TEST_FILE) {
+      return contents.includes("omitted_reasoning_metadata_uses_mojo_default_effort_policy")
+        ? []
+        : [`${filePath}: provider catalog caller test must cover omitted-effort policy`];
+    }
+    return [];
+  });
   const catalogModelViolations = files.flatMap(([filePath, contents]) => {
     if (filePath !== "crates/prodex-app/src/runtime_external_provider_config/catalog_model.rs") return [];
     const body = contents.match(/\bpub\(super\) fn external_catalog_model_indices\([^]*?^\}/mu)?.[0];
@@ -7716,7 +7767,7 @@ export function findViolations(files) {
     ...deepseekResponseToolCallViolations, ...chatToolViolations,
     ...previousResponseOutcomeLabelViolations, ...affinityChainLogRenderViolations, ...previousResponseLogRenderViolations, ...structuredLogPolicyViolations, ...candidateSkipReasonViolations, ...runtimeProxyObservabilityLabelViolations, ...websocketExecutorLabelViolations, ...infoRenderViolations, ...doctorMarkerViolations, ...doctorFailureClassViolations, ...doctorMarkerSummaryCountsViolations, ...doctorCompactExitCountsViolations, ...doctorTimelineDetailViolations, ...doctorLastMarkerLineViolations, ...runtimeDoctorPlanInputViolations, ...cliDefaultRunViolations, ...cliNormalizationViolations, ...responseMetadataViolations, ...doctorMarkerAbiViolations, ...statusSummaryViolations,
     ...geminiBufferedResponseViolations, ...fingerprintDeltaViolations, ...profileExportPolicyViolations, ...sessionReportViolations, ...runtimeLineageViolations, ...smartContextMarkerViolations, ...smartContextSymbolIndexViolations, ...sessionUsageLimitViolations, ...smartContextArtifactRefViolations, ...smartContextDuplicateTextViolations, ...runtimeRepoMapViolations,
-    ...modelSpecViolations, ...mainModelCatalogViolations, ...catalogModelViolations,
+    ...modelSpecViolations, ...mainModelCatalogViolations, ...providerCatalogReasoningViolations, ...catalogModelViolations,
     ...deepseekShapingViolations,
     ...deepseekStreamFallbackViolations,
     ...quotaWindowViolations, ...quotaResetEpochViolations,
@@ -9481,9 +9532,40 @@ function selfTest() {
   assert.deepEqual(findViolations([[MAIN_MODEL_CATALOG_ADAPTER_FILE,
     "fn plan_catalog_defaults() { prodex_mojo_rich_catalog_defaults_v1(); source_index: 0; }"]]), []);
   assert.deepEqual(findViolations([[MAIN_MODEL_CATALOG_MOJO_FILE,
-    '@export("prodex_mojo_rich_catalog_defaults_v1") def catalog_plan_copy_validated_default(): pass']]), []);
+    '@export("prodex_mojo_rich_catalog_defaults_v1") def catalog_plan_copy_validated_default(): pass\n' +
+      '@export("prodex_mojo_rich_catalog_reasoning_v2") def f(): pass\n' +
+      'effort_presence_address\n' +
+      'catalog_reasoning_emit_static_effort["none"]\n' +
+      '@export("prodex_mojo_rich_catalog_context_window_v1") def g(): pass']]), []);
   assert.deepEqual(findViolations([[MAIN_MODEL_CATALOG_TEST_FILE,
     "fn rich_catalog_dynamic_defaults_are_trimmed_and_validated_by_mojo() {}"]]), []);
+  assert.deepEqual(findViolations([[PROVIDER_CATALOG_FILE,
+    "fn deserialize_positive_context_window_tokens() { catalog_context_window_is_positive(tokens); }"]]), []);
+  assert.match(findViolations([[PROVIDER_CATALOG_FILE,
+    "fn deserialize_positive_context_window_tokens() { tokens > 0; }"]]).join("\n"),
+    /context-window positivity must use the Mojo catalog validator/u);
+  assert.deepEqual(findViolations([[PROVIDER_CATALOG_REASONING_FILE,
+    "fn resolve() { efforts: efforts.as_deref(); resolve_catalog_reasoning(&models, None, None, None); }"]]), []);
+  assert.match(findViolations([[PROVIDER_CATALOG_REASONING_FILE,
+    "const ALL_REASONING_EFFORT_LABELS: [&str; 8] = []; fn resolve() { resolve_catalog_reasoning(&models, None, None, None); }"]]).join("\n"),
+    /omitted-effort expansion must remain Mojo-owned/u);
+  assert.deepEqual(findViolations([[PROVIDER_CATALOG_ADAPTER_FILE,
+    "struct CatalogReasoningModel; let effort_presence = []; prodex_mojo_rich_catalog_reasoning_v2(); catalog_context_window_is_positive();"]]), []);
+  assert.match(findViolations([[PROVIDER_CATALOG_ADAPTER_FILE,
+    "fn resolve() { prodex_mojo_rich_catalog_reasoning_v1(); }"]]).join("\n"),
+    /catalog ABI adapter must retain/u);
+  assert.deepEqual(findViolations([[PROVIDER_CATALOG_MOJO_FILE,
+    '@export("prodex_mojo_rich_catalog_defaults_v1") fn d() { catalog_plan_copy_validated_default(); }\n' +
+      '@export("prodex_mojo_rich_catalog_reasoning_v2") fn f() { effort_presence_address; catalog_reasoning_emit_static_effort["none"]; }\n' +
+      '@export("prodex_mojo_rich_catalog_context_window_v1") fn g() {}']]), []);
+  assert.match(findViolations([[PROVIDER_CATALOG_MOJO_FILE,
+    '@export("prodex_mojo_rich_catalog_reasoning_v1") fn f() {}']]).join("\n"),
+    /provider catalog policy must retain/u);
+  assert.deepEqual(findViolations([[PROVIDER_CATALOG_TEST_FILE,
+    "fn omitted_reasoning_metadata_uses_mojo_default_effort_policy() {}"]]), []);
+  assert.match(findViolations([[PROVIDER_CATALOG_TEST_FILE,
+    "fn reasoning_regression() {}"]]).join("\n"),
+    /provider catalog caller test must cover omitted-effort policy/u);
   assert.match(findViolations([[
     "crates/prodex-app/src/runtime_external_provider_config/catalog_model.rs",
     "let static_models = provider.models();\nfn external_catalog_model_indices_rust() {}",

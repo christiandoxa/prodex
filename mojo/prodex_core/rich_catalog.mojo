@@ -186,6 +186,21 @@ def prodex_mojo_rich_catalog_openai_retired_v1(
     return RICH_STATUS_OK
 
 
+@export("prodex_mojo_rich_catalog_context_window_v1")
+def prodex_mojo_rich_catalog_context_window_v1(
+    abi_version: Int64,
+    tokens: UInt64,
+    output_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != PRODEX_RICH_ABI_VERSION or output_address == 0:
+        return RICH_STATUS_ABI if abi_version != PRODEX_RICH_ABI_VERSION else RICH_STATUS_INVALID
+    var output = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    output[] = Int64(tokens > UInt64(0))
+    return RICH_STATUS_OK
+
+
 def catalog_valid_views(
     model_ids: Pointer[mut=False, ProdexRichStringView, _],
     model_count: Int64,
@@ -392,8 +407,53 @@ def catalog_effort_output_equal(
     return True
 
 
-@export("prodex_mojo_rich_catalog_reasoning_v1")
-def prodex_mojo_rich_catalog_reasoning_v1(
+def catalog_reasoning_emit_static_effort[literal: StaticString](
+    output_efforts: Pointer[mut=True, ProdexRichSlice, _],
+    effort_capacity: Int64,
+    output: Pointer[mut=True, UInt8, _],
+    output_capacity: Int64,
+    written: Pointer[mut=True, Int64, _],
+    result_ptr: Pointer[mut=True, ProdexRichCatalogReasoningResult, _],
+    requested_effort: ProdexRichStringView,
+    effort_present: Int64,
+) -> Bool:
+    if result_ptr[].efforts_written >= effort_capacity:
+        return False
+    var copied = rich_copy_range(
+        literal.unsafe_ptr(),
+        0,
+        Int64(literal.byte_length()),
+        output,
+        output_capacity,
+        written,
+        False,
+    )
+    if copied.len < 0:
+        return False
+    output_efforts[unsafe_offset=result_ptr[].efforts_written] = copied.copy()
+    result_ptr[].efforts_written += 1
+    result_ptr[].output_written = written[]
+    if result_ptr[].default_effort.offset < 0:
+        result_ptr[].default_effort = copied.copy()
+    if effort_present == 1:
+        var requested_bounds = rich_trim_bounds(requested_effort)
+        var candidate = ProdexRichStringView(
+            UInt(Int(literal.unsafe_ptr())), UInt(literal.byte_length())
+        )
+        if catalog_effort_equal(
+            requested_effort,
+            requested_bounds[0],
+            requested_bounds[1],
+            candidate,
+            0,
+            Int64(candidate.len),
+        ):
+            result_ptr[].selected_effort = copied.copy()
+    return True
+
+
+@export("prodex_mojo_rich_catalog_reasoning_v2")
+def prodex_mojo_rich_catalog_reasoning_v2(
     abi_version: Int64,
     model_ids_address: UInt,
     model_count: Int64,
@@ -402,6 +462,7 @@ def prodex_mojo_rich_catalog_reasoning_v1(
     alias_count: Int64,
     efforts_address: UInt,
     effort_models_address: UInt,
+    effort_presence_address: UInt,
     effort_count: Int64,
     defaults_address: UInt,
     requested_model_address: UInt,
@@ -454,7 +515,7 @@ def prodex_mojo_rich_catalog_reasoning_v1(
         )
     ):
         return RICH_STATUS_INVALID
-    if model_count > 0 and defaults_address == 0:
+    if model_count > 0 and (defaults_address == 0 or effort_presence_address == 0):
         return RICH_STATUS_INVALID
     if effort_count > 0 and (efforts_address == 0 or effort_models_address == 0):
         return RICH_STATUS_INVALID
@@ -494,6 +555,12 @@ def prodex_mojo_rich_catalog_reasoning_v1(
     var effort_models = Pointer[mut=False, Int64, ImmUntrackedOrigin](
         unsafe_from_address=Int(effort_models_address)
     )
+    var effort_presence = Pointer[mut=False, Int64, ImmUntrackedOrigin](
+        unsafe_from_address=Int(effort_presence_address)
+    )
+    for index in range(model_count):
+        if effort_presence[unsafe_offset=index] < 0 or effort_presence[unsafe_offset=index] > 1:
+            return RICH_STATUS_INVALID
     for index in range(effort_count):
         if not rich_view_valid(
             efforts[unsafe_offset=index], CATALOG_MAX_QUERY_BYTES
@@ -539,7 +606,6 @@ def prodex_mojo_rich_catalog_reasoning_v1(
     var output = Pointer[mut=True, UInt8, MutUntrackedOrigin](
         unsafe_from_address=Int(output_address)
     )
-    var first_effort = ProdexRichSlice(-1, 0)
     var written: Int64 = result_ptr[].output_written
     var default_effort = defaults[unsafe_offset=selected_index].copy()
     var default_bounds = rich_trim_bounds(default_effort)
@@ -593,8 +659,6 @@ def prodex_mojo_rich_catalog_reasoning_v1(
         result_ptr[].output_written = written
         output_efforts[unsafe_offset=result_ptr[].efforts_written] = copied.copy()
         result_ptr[].efforts_written += 1
-        if first_effort.offset < 0:
-            first_effort = copied.copy()
         if effort_present == 1:
             var requested_bounds = rich_trim_bounds(requested_effort)
             if catalog_effort_equal(
@@ -606,14 +670,39 @@ def prodex_mojo_rich_catalog_reasoning_v1(
                 bounds[1],
             ):
                 result_ptr[].selected_effort = copied.copy()
+    if effort_presence[unsafe_offset=selected_index] == 0:
+        if not catalog_reasoning_emit_static_effort["none"](
+            output_efforts, effort_capacity, output, output_capacity,
+            Pointer(to=written), result_ptr, requested_effort, effort_present,
+        ) or not catalog_reasoning_emit_static_effort["minimal"](
+            output_efforts, effort_capacity, output, output_capacity,
+            Pointer(to=written), result_ptr, requested_effort, effort_present,
+        ) or not catalog_reasoning_emit_static_effort["low"](
+            output_efforts, effort_capacity, output, output_capacity,
+            Pointer(to=written), result_ptr, requested_effort, effort_present,
+        ) or not catalog_reasoning_emit_static_effort["medium"](
+            output_efforts, effort_capacity, output, output_capacity,
+            Pointer(to=written), result_ptr, requested_effort, effort_present,
+        ) or not catalog_reasoning_emit_static_effort["high"](
+            output_efforts, effort_capacity, output, output_capacity,
+            Pointer(to=written), result_ptr, requested_effort, effort_present,
+        ) or not catalog_reasoning_emit_static_effort["xhigh"](
+            output_efforts, effort_capacity, output, output_capacity,
+            Pointer(to=written), result_ptr, requested_effort, effort_present,
+        ) or not catalog_reasoning_emit_static_effort["max"](
+            output_efforts, effort_capacity, output, output_capacity,
+            Pointer(to=written), result_ptr, requested_effort, effort_present,
+        ) or not catalog_reasoning_emit_static_effort["ultra"](
+            output_efforts, effort_capacity, output, output_capacity,
+            Pointer(to=written), result_ptr, requested_effort, effort_present,
+        ):
+            return RICH_STATUS_CAPACITY
     if effort_present == 1 and result_ptr[].selected_effort.offset < 0:
         var requested_bounds = rich_trim_bounds(requested_effort)
         result_ptr[].issue_kind = RICH_ISSUE_EFFORT
         result_ptr[].issue_offset = requested_bounds[0]
         result_ptr[].issue_length = requested_bounds[1] - requested_bounds[0]
         return RICH_STATUS_OK
-    if result_ptr[].default_effort.offset < 0:
-        result_ptr[].default_effort = first_effort.copy()
     if effort_present == 0:
         result_ptr[].selected_effort = result_ptr[].default_effort.copy()
     return RICH_STATUS_OK
