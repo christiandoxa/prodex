@@ -559,6 +559,8 @@ const PROMOTED_FILES = [
   "crates/prodex-runtime-proxy/src/websocket_message.rs",
   "crates/prodex-runtime-proxy/src/websocket_response_tracking.rs",
   "crates/prodex-runtime-proxy/src/compatibility_surface.rs",
+  "crates/prodex-mojo-core/src/runtime/compatibility_surface.rs",
+  "mojo/prodex_core/compatibility_surface.mojo",
   "crates/prodex-runtime-proxy/src/error_policy.rs",
   "crates/prodex-runtime-proxy/src/error_policy/rate_limit_header.rs",
   "crates/prodex-runtime-proxy/src/error_policy/retry_after.rs",
@@ -8248,6 +8250,52 @@ export function findViolations(files) {
     }
     return [];
   });
+  const compatibilityDiagnosticsMojoViolations = files.flatMap(([filePath, contents]) => {
+    if (filePath === "crates/prodex-runtime-proxy/src/compatibility_surface.rs") {
+      const required = [
+        "prodex_mojo_core::runtime::compatibility_tool_surface(plan[3])",
+        "prodex_mojo_core::runtime::compatibility_continuation_surface(plan[4])",
+        "prodex_mojo_core::runtime::compatibility_user_agent_display(user_agent)",
+        "prodex_mojo_core::runtime::compatibility_log_safe_value(value)",
+        "compatibility_diagnostics_use_compiled_mojo_sanitization",
+      ];
+      const retired = [
+        "fn compatibility_flag_string(",
+        "let mut sanitized = String::with_capacity(value.len())",
+        'matches!(ch, ',
+        ".map(str::trim)",
+        '.unwrap_or("-").to_string()',
+      ];
+      return required.every((call) => contents.includes(call)) &&
+        retired.every((code) => !contents.includes(code))
+          ? []
+          : [filePath + ": restored Rust compatibility diagnostic text ownership"];
+    }
+    if (filePath === "crates/prodex-mojo-core/src/runtime/compatibility_surface.rs") {
+      return [
+        "fn prodex_runtime_compatibility_text_v1(",
+        "pub fn compatibility_tool_surface(",
+        "pub fn compatibility_continuation_surface(",
+        "pub fn compatibility_log_safe_value(",
+        "pub fn compatibility_user_agent_display(",
+        "compiled_compatibility_field_rendering_preserves_order_and_unicode",
+        "compiled_compatibility_text_abi_rejects_malformed_values_before_writes",
+        "compiled_compatibility_text_abi_bounded_output_fails_explicitly",
+      ].filter((call) => !contents.includes(call))
+        .map((call) => filePath + ": compiled compatibility text adapter and ABI test missing " + call);
+    }
+    if (filePath === "mojo/prodex_core/compatibility_surface.mojo") {
+      return [
+        '@export("prodex_runtime_compatibility_text_v1")',
+        "compat_text_label(",
+        "rich_codepoint_width(byte)",
+        "rich_trim_bounds(view)",
+        "COMPAT_TEXT_USER_AGENT",
+      ].filter((call) => !contents.includes(call))
+        .map((call) => filePath + ": Mojo compatibility diagnostic ownership missing " + call);
+    }
+    return [];
+  });
   const quotaHeaderProjectionViolations = files.flatMap(([filePath, contents]) => {
     if (filePath === "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_rate_limits.rs") {
       const required = [
@@ -8391,7 +8439,7 @@ export function findViolations(files) {
     }
     return [];
   });
-  return [...logPayloadProjectionViolations, ...nativeRecoveryOwnershipViolations, ...quotaRecoveryEligibilityViolations, ...runtimeBrokerReuseMojoViolations, ...geminiResponseMediaMojoViolations, ...cookieEvictionMojoViolations, ...websocketBudgetMojoViolations, ...affinityBindingMojoViolations, ...responsesCapacityRecoveryViolations, ...sseTapMojoOwnershipViolations, ...quotaWatchViolations, ...geminiCompactSnippetViolations, ...geminiCompactTextViolations, ...doctorSmartContextDecisionViolations, ...anthropicAttemptCursorViolations, ...geminiUnsupportedToolRetryViolations, ...terminalGeometryViolations, ...quotaHeaderProjectionViolations, ...smartContextCapsuleOrderViolations, ...markerViolations, ...deepseekCatalogPolicyViolations, ...featureOffViolations, ...liveLogRecordViolations, ...runtimePolicyPresetViolations, ...runtimeConfigScalarViolations, ...profileHealthCircuitViolations, ...logThroughputViolations, ...operationalDetailSpecViolations, ...transcriptPolicyViolations, ...logLoadPolicyViolations, ...routeReasonViolations, ...runtimeStateQuotaViolations, ...runtimeStateRoutePolicyViolations, ...runtimeProxyRootViolations, ...runtimeRecoveryDeadlineViolations, ...brokerVersionGuardViolations, ...brokerContinuityViolations, ...brokerLogCacheViolations, ...codexConfigViolations, ...statePolicyViolations, ...quotaSelectionPolicyViolations, ...routeTagMirrorViolations, ...enumTagMirrorViolations, ...appSelectionPolicyMirrorViolations, ...runtimeStateBackgroundViolations, ...redactionViolations, ...rateLimitHeaderSelectionViolations, ...profileIdentityViolations, ...governanceInspectionViolations, ...governanceInspectionOrderingViolations, ...exactnessPlannerViolations,
+  return [...logPayloadProjectionViolations, ...nativeRecoveryOwnershipViolations, ...quotaRecoveryEligibilityViolations, ...runtimeBrokerReuseMojoViolations, ...geminiResponseMediaMojoViolations, ...cookieEvictionMojoViolations, ...websocketBudgetMojoViolations, ...affinityBindingMojoViolations, ...responsesCapacityRecoveryViolations, ...sseTapMojoOwnershipViolations, ...quotaWatchViolations, ...geminiCompactSnippetViolations, ...geminiCompactTextViolations, ...doctorSmartContextDecisionViolations, ...anthropicAttemptCursorViolations, ...geminiUnsupportedToolRetryViolations, ...terminalGeometryViolations, ...compatibilityDiagnosticsMojoViolations, ...quotaHeaderProjectionViolations, ...smartContextCapsuleOrderViolations, ...markerViolations, ...deepseekCatalogPolicyViolations, ...featureOffViolations, ...liveLogRecordViolations, ...runtimePolicyPresetViolations, ...runtimeConfigScalarViolations, ...profileHealthCircuitViolations, ...logThroughputViolations, ...operationalDetailSpecViolations, ...transcriptPolicyViolations, ...logLoadPolicyViolations, ...routeReasonViolations, ...runtimeStateQuotaViolations, ...runtimeStateRoutePolicyViolations, ...runtimeProxyRootViolations, ...runtimeRecoveryDeadlineViolations, ...brokerVersionGuardViolations, ...brokerContinuityViolations, ...brokerLogCacheViolations, ...codexConfigViolations, ...statePolicyViolations, ...quotaSelectionPolicyViolations, ...routeTagMirrorViolations, ...enumTagMirrorViolations, ...appSelectionPolicyMirrorViolations, ...runtimeStateBackgroundViolations, ...redactionViolations, ...rateLimitHeaderSelectionViolations, ...profileIdentityViolations, ...governanceInspectionViolations, ...governanceInspectionOrderingViolations, ...exactnessPlannerViolations,
     ...adaptiveBudgetViolations,
     ...providerUsageViolations,
     ...auditUsageViolations,
@@ -9157,6 +9205,18 @@ function selfTest() {
   assert.match(findViolations([[ANTHROPIC_ATTEMPT_CURSOR_FILE,
     anthropicCursorConsumer + "\nattempt.model_index += 1",
   ]]).join("\n"), /Anthropic model\/auth cursor transitions must remain Mojo-owned/u);
+  const compatibilityDiagnosticsConsumer = [
+    "prodex_mojo_core::runtime::compatibility_tool_surface(plan[3])",
+    "prodex_mojo_core::runtime::compatibility_continuation_surface(plan[4])",
+    "prodex_mojo_core::runtime::compatibility_user_agent_display(user_agent)",
+    "prodex_mojo_core::runtime::compatibility_log_safe_value(value)",
+    "compatibility_diagnostics_use_compiled_mojo_sanitization",
+  ].join("\n");
+  const compatibilityDiagnosticsFile = "crates/prodex-runtime-proxy/src/compatibility_surface.rs";
+  assert.deepEqual(findViolations([[compatibilityDiagnosticsFile, compatibilityDiagnosticsConsumer]]), []);
+  assert.match(findViolations([[compatibilityDiagnosticsFile,
+    compatibilityDiagnosticsConsumer + "\nfn compatibility_flag_string() {}",
+  ]]).join("\n"), /restored Rust compatibility diagnostic text ownership/u);
   const quotaHeaderConsumer = [
     "provider_quota_clean_header(value)",
     "provider_quota_clean_header(profile_name)",

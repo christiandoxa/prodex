@@ -35,7 +35,10 @@ pub use auto_redeem::{
     AutoRedeemCandidateInput, RUNTIME_AUTO_REDEEM_PLAN_MAX_COUNT, auto_redeem_plan_batch,
     auto_redeem_plan_self_test,
 };
-pub use compatibility_surface::compatibility_surface_plan;
+pub use compatibility_surface::{
+    compatibility_continuation_surface, compatibility_log_safe_value, compatibility_surface_plan,
+    compatibility_tool_surface, compatibility_user_agent_display,
+};
 pub use continuation_followup::{
     RuntimeContinuationFollowupAction, RuntimeContinuationFollowupInput,
     RuntimeContinuationFollowupPlan, runtime_continuation_compact_followup_plan,
