@@ -171,6 +171,9 @@ const PING_SUMMARY_CALLER_TEST_FILE = "crates/prodex-app/src/app_commands/ping_t
 const PING_SUMMARY_ADAPTER_FILE = "crates/prodex-mojo-core/src/rich/ping_protocol.rs";
 const PING_SUMMARY_MOJO_FILE = "mojo/prodex_core/ping_protocol.mojo";
 const PROMOTED_FILES = [
+  "crates/prodex-runtime-proxy/src/previous_response_orchestration.rs",
+  "crates/prodex-mojo-core/src/runtime/previous_response_orchestration.rs",
+  "mojo/prodex_core/runtime_responses_attempt.mojo",
   "crates/prodex-mojo-core/src/rich/deepseek.rs",
   "mojo/prodex_core/deepseek.mojo",
   "crates/prodex-app/src/runtime_proxy/smart_context/rewrite_telemetry.rs",
@@ -8293,6 +8296,47 @@ export function findViolations(files) {
     }
     return [];
   });
+  const previousResponseRecoveryTransitionViolations = files.flatMap(([filePath, contents]) => {
+    if (filePath === "crates/prodex-runtime-proxy/src/previous_response_orchestration.rs") {
+      const required = [
+        "prodex_mojo_core::runtime::previous_response_recovery_transition(",
+        "PreviousResponseRecoveryInput",
+        "PreviousResponseRecoveryAction::RetryOwner",
+        "PreviousResponseRecoveryAction::StaleContinuation",
+        "PreviousResponseRecoveryAction::Rotate",
+      ];
+      const retired = [
+        "if decision.retry_delay.is_some() {",
+        "if input.policy.fail_stale_continuation && decision.stale_continuation",
+        "next_retry_index: input.retry_index + 1",
+        "clear_trusted_affinity: input.policy.clear_trusted_affinity_on_rotate",
+      ];
+      return required.every((marker) => contents.includes(marker)) &&
+        retired.every((marker) => !contents.includes(marker))
+        ? [] : [filePath + ": restored Rust previous-response retry/stale/rotate transition"];
+    }
+    if (filePath === "crates/prodex-mojo-core/src/runtime/previous_response_orchestration.rs") {
+      return [
+        "fn prodex_runtime_previous_response_recovery_transition_v1(",
+        "pub fn previous_response_recovery_transition(",
+        "mojo_precedence_retries_owner_without_releasing_affinity",
+        "mojo_stale_continuation_rejects_without_rebinding",
+        "mojo_rotation_only_releases_affinity_after_stale_policy_gate",
+        "recovery_transition_abi_rejects_bad_version_flags_and_overflow",
+      ].filter((marker) => !contents.includes(marker))
+        .map((marker) => filePath + ": strict previous-response Mojo transition adapter or coverage missing " + marker);
+    }
+    if (filePath === "mojo/prodex_core/runtime_responses_attempt.mojo") {
+      return [
+        '@export("prodex_runtime_previous_response_recovery_transition_v1")',
+        "PREVIOUS_RESPONSE_RECOVERY_RETRY_OWNER",
+        "PREVIOUS_RESPONSE_RECOVERY_STALE",
+        "PREVIOUS_RESPONSE_RECOVERY_ROTATE",
+      ].filter((marker) => !contents.includes(marker))
+        .map((marker) => filePath + ": previous-response transition must remain compiled Mojo-owned (" + marker + ")");
+    }
+    return [];
+  });
   const smartContextTelemetrySampleViolations = files.flatMap(([filePath, contents]) => {
     if (filePath === "crates/prodex-app/src/runtime_proxy/smart_context/rewrite_telemetry.rs") {
       const required = [
@@ -8530,7 +8574,7 @@ export function findViolations(files) {
     }
     return [];
   });
-  return [...logPayloadProjectionViolations, ...nativeRecoveryOwnershipViolations, ...quotaRecoveryEligibilityViolations, ...runtimeBrokerReuseMojoViolations, ...geminiResponseMediaMojoViolations, ...cookieEvictionMojoViolations, ...websocketBudgetMojoViolations, ...affinityBindingMojoViolations, ...responsesCapacityRecoveryViolations, ...sseTapMojoOwnershipViolations, ...quotaWatchViolations, ...geminiCompactSnippetViolations, ...geminiCompactTextViolations, ...doctorSmartContextDecisionViolations, ...anthropicAttemptCursorViolations, ...geminiUnsupportedToolRetryViolations, ...terminalGeometryViolations, ...deepseekRequestIssueMessageViolations, ...smartContextTelemetrySampleViolations, ...compatibilityDiagnosticsMojoViolations, ...quotaHeaderProjectionViolations, ...smartContextCapsuleOrderViolations, ...markerViolations, ...deepseekCatalogPolicyViolations, ...featureOffViolations, ...liveLogRecordViolations, ...runtimePolicyPresetViolations, ...runtimeConfigScalarViolations, ...profileHealthCircuitViolations, ...logThroughputViolations, ...operationalDetailSpecViolations, ...transcriptPolicyViolations, ...logLoadPolicyViolations, ...routeReasonViolations, ...runtimeStateQuotaViolations, ...runtimeStateRoutePolicyViolations, ...runtimeProxyRootViolations, ...runtimeRecoveryDeadlineViolations, ...brokerVersionGuardViolations, ...brokerContinuityViolations, ...brokerLogCacheViolations, ...codexConfigViolations, ...statePolicyViolations, ...quotaSelectionPolicyViolations, ...routeTagMirrorViolations, ...enumTagMirrorViolations, ...appSelectionPolicyMirrorViolations, ...runtimeStateBackgroundViolations, ...redactionViolations, ...rateLimitHeaderSelectionViolations, ...profileIdentityViolations, ...governanceInspectionViolations, ...governanceInspectionOrderingViolations, ...exactnessPlannerViolations,
+  return [...logPayloadProjectionViolations, ...nativeRecoveryOwnershipViolations, ...quotaRecoveryEligibilityViolations, ...runtimeBrokerReuseMojoViolations, ...geminiResponseMediaMojoViolations, ...cookieEvictionMojoViolations, ...websocketBudgetMojoViolations, ...affinityBindingMojoViolations, ...responsesCapacityRecoveryViolations, ...sseTapMojoOwnershipViolations, ...quotaWatchViolations, ...geminiCompactSnippetViolations, ...geminiCompactTextViolations, ...doctorSmartContextDecisionViolations, ...anthropicAttemptCursorViolations, ...geminiUnsupportedToolRetryViolations, ...terminalGeometryViolations, ...previousResponseRecoveryTransitionViolations, ...deepseekRequestIssueMessageViolations, ...smartContextTelemetrySampleViolations, ...compatibilityDiagnosticsMojoViolations, ...quotaHeaderProjectionViolations, ...smartContextCapsuleOrderViolations, ...markerViolations, ...deepseekCatalogPolicyViolations, ...featureOffViolations, ...liveLogRecordViolations, ...runtimePolicyPresetViolations, ...runtimeConfigScalarViolations, ...profileHealthCircuitViolations, ...logThroughputViolations, ...operationalDetailSpecViolations, ...transcriptPolicyViolations, ...logLoadPolicyViolations, ...routeReasonViolations, ...runtimeStateQuotaViolations, ...runtimeStateRoutePolicyViolations, ...runtimeProxyRootViolations, ...runtimeRecoveryDeadlineViolations, ...brokerVersionGuardViolations, ...brokerContinuityViolations, ...brokerLogCacheViolations, ...codexConfigViolations, ...statePolicyViolations, ...quotaSelectionPolicyViolations, ...routeTagMirrorViolations, ...enumTagMirrorViolations, ...appSelectionPolicyMirrorViolations, ...runtimeStateBackgroundViolations, ...redactionViolations, ...rateLimitHeaderSelectionViolations, ...profileIdentityViolations, ...governanceInspectionViolations, ...governanceInspectionOrderingViolations, ...exactnessPlannerViolations,
     ...adaptiveBudgetViolations,
     ...providerUsageViolations,
     ...auditUsageViolations,
@@ -9305,6 +9349,18 @@ function selfTest() {
   assert.match(findViolations([[DEEPSEEK_REQUEST_FILE,
     deepseekIssueMessageConsumer + "\nmatch issue {",
   ]]).join("\n"), /restored Rust DeepSeek request issue-to-message mapping/u);
+  const previousResponseRecoveryConsumer = [
+    "prodex_mojo_core::runtime::previous_response_recovery_transition(",
+    "PreviousResponseRecoveryInput",
+    "PreviousResponseRecoveryAction::RetryOwner",
+    "PreviousResponseRecoveryAction::StaleContinuation",
+    "PreviousResponseRecoveryAction::Rotate",
+  ].join("\n");
+  const previousResponseRecoveryConsumerFile = "crates/prodex-runtime-proxy/src/previous_response_orchestration.rs";
+  assert.deepEqual(findViolations([[previousResponseRecoveryConsumerFile, previousResponseRecoveryConsumer]]), []);
+  assert.match(findViolations([[previousResponseRecoveryConsumerFile,
+    previousResponseRecoveryConsumer + "\nif decision.retry_delay.is_some() {",
+  ]]).join("\n"), /restored Rust previous-response retry\/stale\/rotate transition/u);
   const smartTelemetrySampleConsumer = [
     "smart_context_rewrite_sample_policy(",
     "SmartContextRewriteSamplePolicyInput",

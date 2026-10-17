@@ -12,6 +12,11 @@ mod candidate_plan;
 pub use candidate_plan::runtime_candidate_plan_batch;
 mod compatibility_surface;
 mod continuation_followup;
+mod previous_response_orchestration;
+pub use previous_response_orchestration::{
+    PreviousResponseRecoveryAction, PreviousResponseRecoveryInput,
+    PreviousResponseRecoveryTransition, previous_response_recovery_transition,
+};
 mod continuation_replay;
 mod continuation_status;
 mod noncompact_loop;

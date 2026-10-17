@@ -5768,3 +5768,12 @@ stable user-facing wording, including dynamic response-format and reasoning
 details. The Rust issue-to-message match table was removed with no fallback.
 Versioned ABI, provider caller regressions and no-fallback guard coverage
 preserve diagnostics and malformed-input behavior.
+
+## Previous-response recovery transitions moved to Mojo
+
+The existing compiled Responses attempt owner now selects owner retry,
+strict stale-continuation rejection and final rotation state/affinity actions.
+The Rust recovery orchestration branches were removed without a fallback,
+while Rust retains session state application. Typed ABI, direct validation,
+all runtime-proxy tests, WebSocket consumer tests and source guards protect
+retry precedence and cross-profile response ownership.

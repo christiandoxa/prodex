@@ -1,3 +1,5 @@
+from std.memory import Pointer
+
 # Pre-commit Responses recovery policy.
 
 comptime RESPONSES_ATTEMPT_RECOVERY_ABI_VERSION: Int64 = 1
@@ -76,3 +78,71 @@ def prodex_runtime_responses_attempt_retry_signal_v1(
     ):
         return RESPONSES_ATTEMPT_RECOVERY_FULL_HISTORY
     return RESPONSES_ATTEMPT_RECOVERY_SKIP
+
+# Previous-response recovery combines the already-Mojo retry signal with
+# route-level stale-continuation and affinity-release policy. Rust owns the
+# prior parsed decision and applies host bindings, not the state transition.
+comptime PREVIOUS_RESPONSE_RECOVERY_TRANSITION_ABI_VERSION: Int64 = 1
+comptime PREVIOUS_RESPONSE_RECOVERY_RETRY_OWNER: UInt64 = 0
+comptime PREVIOUS_RESPONSE_RECOVERY_STALE: UInt64 = 1
+comptime PREVIOUS_RESPONSE_RECOVERY_ROTATE: UInt64 = 2
+comptime PREVIOUS_RESPONSE_RECOVERY_MAX_COUNT: UInt64 = 18446744073709551615
+
+
+@export("prodex_runtime_previous_response_recovery_transition_v1")
+def prodex_runtime_previous_response_recovery_transition_v1(
+    abi_version: Int64,
+    retry_delay_present: Int64,
+    stale_continuation: Int64,
+    fresh_fallback_blocked: Int64,
+    policy_fail_stale: Int64,
+    policy_log_fresh_fallback_blocked: Int64,
+    policy_clear_trusted_affinity: Int64,
+    retry_index: UInt64,
+    output_address: UInt,
+    output_capacity: Int64,
+) abi("C") -> Int64:
+    if abi_version != PREVIOUS_RESPONSE_RECOVERY_TRANSITION_ABI_VERSION:
+        return 4
+    if output_address == 0 or output_capacity < 7:
+        return 1
+    for flag in [
+        retry_delay_present,
+        stale_continuation,
+        fresh_fallback_blocked,
+        policy_fail_stale,
+        policy_log_fresh_fallback_blocked,
+        policy_clear_trusted_affinity,
+    ]:
+        if flag != 0 and flag != 1:
+            return 1
+    if retry_delay_present == 1 and retry_index == PREVIOUS_RESPONSE_RECOVERY_MAX_COUNT:
+        return 1
+    var output = Pointer[mut=True, UInt64, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    # Slots: action, next retry index, reset state, log blocked, release
+    # affinity, clear response binding, clear trusted affinity.
+    if retry_delay_present == 1:
+        output[unsafe_offset=0] = PREVIOUS_RESPONSE_RECOVERY_RETRY_OWNER
+        output[unsafe_offset=1] = retry_index + 1
+        for offset in range(2, 7):
+            output[unsafe_offset=offset] = 0
+    elif policy_fail_stale == 1 and stale_continuation == 1:
+        output[unsafe_offset=0] = PREVIOUS_RESPONSE_RECOVERY_STALE
+        output[unsafe_offset=1] = 0
+        output[unsafe_offset=2] = 1
+        for offset in range(3, 7):
+            output[unsafe_offset=offset] = 0
+    else:
+        output[unsafe_offset=0] = PREVIOUS_RESPONSE_RECOVERY_ROTATE
+        output[unsafe_offset=1] = 0
+        output[unsafe_offset=2] = 1
+        output[unsafe_offset=3] = UInt64(
+            policy_log_fresh_fallback_blocked == 1
+            and fresh_fallback_blocked == 1
+        )
+        output[unsafe_offset=4] = 1
+        output[unsafe_offset=5] = 1
+        output[unsafe_offset=6] = UInt64(policy_clear_trusted_affinity == 1)
+    return 0

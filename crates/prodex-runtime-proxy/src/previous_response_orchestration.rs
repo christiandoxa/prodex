@@ -86,42 +86,38 @@ pub fn runtime_previous_response_not_found_plan(
         },
     );
 
-    if decision.retry_delay.is_some() {
-        return RuntimePreviousResponseNotFoundPlan {
-            action: RuntimePreviousResponseNotFoundAction::RetryOwner,
-            decision,
-            next_retry_index: input.retry_index + 1,
-            reset_retry_state: false,
-            log_fresh_fallback_blocked: false,
-            release_affinity: false,
-            clear_response_profile_affinity: false,
-            clear_trusted_affinity: false,
-        };
-    }
-
-    if input.policy.fail_stale_continuation && decision.stale_continuation {
-        return RuntimePreviousResponseNotFoundPlan {
-            action: RuntimePreviousResponseNotFoundAction::StaleContinuation,
-            decision,
-            next_retry_index: 0,
-            reset_retry_state: true,
-            log_fresh_fallback_blocked: false,
-            release_affinity: false,
-            clear_response_profile_affinity: false,
-            clear_trusted_affinity: false,
-        };
-    }
-
+    let transition = prodex_mojo_core::runtime::previous_response_recovery_transition(
+        prodex_mojo_core::runtime::PreviousResponseRecoveryInput {
+            retry_delay_present: decision.retry_delay.is_some(),
+            stale_continuation: decision.stale_continuation,
+            fresh_fallback_blocked: decision.fresh_fallback_blocked_without_affinity,
+            fail_stale_continuation: input.policy.fail_stale_continuation,
+            log_fresh_fallback_blocked: input.policy.log_fresh_fallback_blocked,
+            clear_trusted_affinity_on_rotate: input.policy.clear_trusted_affinity_on_rotate,
+            retry_index: input.retry_index,
+        },
+    )
+    .expect("compiled Mojo previous-response recovery transition returned an invalid result");
+    let action = match transition.action {
+        prodex_mojo_core::runtime::PreviousResponseRecoveryAction::RetryOwner => {
+            RuntimePreviousResponseNotFoundAction::RetryOwner
+        }
+        prodex_mojo_core::runtime::PreviousResponseRecoveryAction::StaleContinuation => {
+            RuntimePreviousResponseNotFoundAction::StaleContinuation
+        }
+        prodex_mojo_core::runtime::PreviousResponseRecoveryAction::Rotate => {
+            RuntimePreviousResponseNotFoundAction::Rotate
+        }
+    };
     RuntimePreviousResponseNotFoundPlan {
-        action: RuntimePreviousResponseNotFoundAction::Rotate,
+        action,
         decision,
-        next_retry_index: 0,
-        reset_retry_state: true,
-        log_fresh_fallback_blocked: input.policy.log_fresh_fallback_blocked
-            && decision.fresh_fallback_blocked_without_affinity,
-        release_affinity: true,
-        clear_response_profile_affinity: true,
-        clear_trusted_affinity: input.policy.clear_trusted_affinity_on_rotate,
+        next_retry_index: transition.next_retry_index,
+        reset_retry_state: transition.reset_retry_state,
+        log_fresh_fallback_blocked: transition.log_fresh_fallback_blocked,
+        release_affinity: transition.release_affinity,
+        clear_response_profile_affinity: transition.clear_response_profile_affinity,
+        clear_trusted_affinity: transition.clear_trusted_affinity,
     }
 }
 
