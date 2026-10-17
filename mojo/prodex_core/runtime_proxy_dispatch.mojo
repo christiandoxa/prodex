@@ -145,3 +145,21 @@ def prodex_runtime_proxy_dispatch_policy_v1(
     else:
         output[unsafe_offset=0] = RESPONSE_REWRITE_FAILED
     return RUNTIME_PROXY_DISPATCH_OK
+
+
+@export("prodex_runtime_precommit_wait_slice_v1")
+def prodex_runtime_precommit_wait_slice_v1(
+    abi_version: Int64,
+    requested_nanos: UInt64,
+    remaining_nanos: UInt64,
+    output_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != RUNTIME_PROXY_DISPATCH_ABI_VERSION:
+        return RUNTIME_PROXY_DISPATCH_ABI
+    if output_address == 0:
+        return RUNTIME_PROXY_DISPATCH_INVALID
+    var output = Pointer[mut=True, UInt64, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    output[] = requested_nanos if requested_nanos < remaining_nanos else remaining_nanos
+    return RUNTIME_PROXY_DISPATCH_OK

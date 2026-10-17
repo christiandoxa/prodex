@@ -32,6 +32,12 @@ unsafe extern "C" {
         input_length: i64,
         output_address: u64,
     ) -> i64;
+    fn prodex_runtime_precommit_wait_slice_v1(
+        abi_version: i64,
+        requested_nanos: u64,
+        remaining_nanos: u64,
+        output_address: u64,
+    ) -> i64;
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -53,6 +59,30 @@ pub enum RuntimeProxyErrorResponse {
     CaptureFailed,
     TransportFailed,
     RewriteFailed,
+}
+
+/// Selects the smaller host wait and request-deadline remainder in Mojo.
+pub fn precommit_wait_slice(
+    requested: std::time::Duration,
+    remaining: std::time::Duration,
+) -> Result<std::time::Duration, MojoError> {
+    let requested_nanos = u64::try_from(requested.as_nanos()).unwrap_or(u64::MAX);
+    let remaining_nanos = u64::try_from(remaining.as_nanos()).unwrap_or(u64::MAX);
+    let mut output = u64::MAX;
+    let status = unsafe {
+        prodex_runtime_precommit_wait_slice_v1(
+            ABI_VERSION,
+            requested_nanos,
+            remaining_nanos,
+            (&mut output as *mut u64) as usize as u64,
+        )
+    };
+    match status {
+        0 => Ok(std::time::Duration::from_nanos(output)),
+        4 => Err(MojoError::AbiMismatch),
+        1 => Err(MojoError::InvalidInput),
+        _ => Err(MojoError::InvalidOutput),
+    }
 }
 
 fn call(
@@ -197,6 +227,41 @@ mod tests {
                 "value={value:?}"
             );
         }
+    }
+
+    #[test]
+    fn precommit_wait_slice_uses_the_smallest_deadline_bound() {
+        assert_eq!(
+            precommit_wait_slice(
+                std::time::Duration::from_secs(5),
+                std::time::Duration::from_secs(2),
+            ),
+            Ok(std::time::Duration::from_secs(2)),
+        );
+        assert_eq!(
+            precommit_wait_slice(
+                std::time::Duration::from_millis(2),
+                std::time::Duration::from_secs(5),
+            ),
+            Ok(std::time::Duration::from_millis(2)),
+        );
+    }
+
+    #[test]
+    fn precommit_wait_slice_abi_rejects_bad_version_without_writing() {
+        let mut output = 77_u64;
+        assert_eq!(
+            unsafe {
+                prodex_runtime_precommit_wait_slice_v1(
+                    ABI_VERSION + 1,
+                    1,
+                    2,
+                    (&mut output as *mut u64) as usize as u64,
+                )
+            },
+            4
+        );
+        assert_eq!(output, 77);
     }
 
     #[test]

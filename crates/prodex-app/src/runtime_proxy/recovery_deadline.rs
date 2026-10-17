@@ -48,9 +48,14 @@ impl RuntimeRotationProxyShared {
 
     pub(crate) fn precommit_wait_slice(&self, requested: Duration) -> Result<Duration> {
         self.check_precommit_deadline()?;
-        Ok(self.precommit_deadline.map_or(requested, |deadline| {
-            requested.min(deadline.saturating_duration_since(Instant::now()))
-        }))
+        let Some(deadline) = self.precommit_deadline else {
+            return Ok(requested);
+        };
+        prodex_mojo_core::runtime_proxy_dispatch::precommit_wait_slice(
+            requested,
+            deadline.saturating_duration_since(Instant::now()),
+        )
+        .map_err(|error| anyhow::anyhow!("Mojo precommit wait-slice policy failed: {error:?}"))
     }
 }
 

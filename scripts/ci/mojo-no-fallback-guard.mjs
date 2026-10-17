@@ -1122,6 +1122,9 @@ const RUNTIME_LOG_RETENTION_FILE = "crates/prodex-runtime-log/src/retention.rs";
 const RUNTIME_LOG_RETENTION_SELECTION_FILE = "crates/prodex-runtime-log/src/retention_selection.rs";
 const RUNTIME_STATE_QUOTA_FILE = "crates/prodex-runtime-state/src/quota.rs";
 const RUNTIME_PROXY_ROOT_FILE = "crates/prodex-runtime-proxy/src/lib.rs";
+const RUNTIME_PROXY_RECOVERY_DEADLINE_FILE = "crates/prodex-app/src/runtime_proxy/recovery_deadline.rs";
+const RUNTIME_PROXY_DISPATCH_ADAPTER_FILE = "crates/prodex-mojo-core/src/runtime_proxy_dispatch.rs";
+const RUNTIME_PROXY_DISPATCH_MOJO_FILE = "mojo/prodex_core/runtime_proxy_dispatch.mojo";
 const BROKER_CONTINUITY_FILE = "crates/prodex-runtime-broker/src/continuity.rs";
 const BROKER_LOG_CACHE_FILE = "crates/prodex-runtime-broker-log/src/lib.rs";
 const BROKER_VERSION_GUARD_FILE = "crates/prodex-runtime-broker/src/version_guard.rs";
@@ -2742,6 +2745,9 @@ export function findViolations(files) {
     "crates/prodex-runtime-proxy/src/selection_policy/mojo.rs",
     "crates/prodex-runtime-proxy/src/quota/mojo.rs",
     "crates/prodex-runtime-proxy/src/mojo.rs",
+  RUNTIME_PROXY_RECOVERY_DEADLINE_FILE,
+  RUNTIME_PROXY_DISPATCH_ADAPTER_FILE,
+  RUNTIME_PROXY_DISPATCH_MOJO_FILE,
     "crates/prodex-runtime-proxy/src/selection_plan.rs",
     "crates/prodex-runtime-proxy/src/health/inflight.rs",
     "crates/prodex-runtime-proxy/src/health/latency.rs",
@@ -3080,6 +3086,30 @@ export function findViolations(files) {
       violations.push(filePath + ": contains restored Rust previous-response request-shape semantics");
     }
     return violations;
+  });
+  const runtimeRecoveryDeadlineViolations = files.flatMap(([filePath, contents]) => {
+    if (filePath === RUNTIME_PROXY_RECOVERY_DEADLINE_FILE) {
+      const production = contents.split("#[cfg(test)]", 1)[0];
+      const violations = production.includes(
+        "prodex_mojo_core::runtime_proxy_dispatch::precommit_wait_slice(",
+      ) ? [] : [`${filePath}: precommit wait slicing must remain Mojo-owned`];
+      if (production.includes("requested.min(deadline.saturating_duration_since")) {
+        violations.push(`${filePath}: contains restored Rust precommit wait-slice policy`);
+      }
+      return violations;
+    }
+    if (filePath === RUNTIME_PROXY_DISPATCH_ADAPTER_FILE) {
+      return contents.includes("prodex_runtime_precommit_wait_slice_v1(") &&
+        contents.includes("pub fn precommit_wait_slice(")
+        ? []
+        : [`${filePath}: precommit wait-slice adapter must retain the versioned Mojo ABI`];
+    }
+    if (filePath === RUNTIME_PROXY_DISPATCH_MOJO_FILE) {
+      return contents.includes('@export("prodex_runtime_precommit_wait_slice_v1")')
+        ? []
+        : [`${filePath}: precommit wait-slice policy must remain Mojo-owned`];
+    }
+    return [];
   });
   const logThroughputViolations = files.flatMap(([filePath, contents]) => {
     if (filePath === RUNTIME_LOG_RETENTION_FILE) {
@@ -8361,7 +8391,7 @@ export function findViolations(files) {
     }
     return [];
   });
-  return [...logPayloadProjectionViolations, ...nativeRecoveryOwnershipViolations, ...quotaRecoveryEligibilityViolations, ...runtimeBrokerReuseMojoViolations, ...geminiResponseMediaMojoViolations, ...cookieEvictionMojoViolations, ...websocketBudgetMojoViolations, ...affinityBindingMojoViolations, ...responsesCapacityRecoveryViolations, ...sseTapMojoOwnershipViolations, ...quotaWatchViolations, ...geminiCompactSnippetViolations, ...geminiCompactTextViolations, ...doctorSmartContextDecisionViolations, ...anthropicAttemptCursorViolations, ...geminiUnsupportedToolRetryViolations, ...terminalGeometryViolations, ...quotaHeaderProjectionViolations, ...smartContextCapsuleOrderViolations, ...markerViolations, ...deepseekCatalogPolicyViolations, ...featureOffViolations, ...liveLogRecordViolations, ...runtimePolicyPresetViolations, ...runtimeConfigScalarViolations, ...profileHealthCircuitViolations, ...logThroughputViolations, ...operationalDetailSpecViolations, ...transcriptPolicyViolations, ...logLoadPolicyViolations, ...routeReasonViolations, ...runtimeStateQuotaViolations, ...runtimeStateRoutePolicyViolations, ...runtimeProxyRootViolations, ...brokerVersionGuardViolations, ...brokerContinuityViolations, ...brokerLogCacheViolations, ...codexConfigViolations, ...statePolicyViolations, ...quotaSelectionPolicyViolations, ...routeTagMirrorViolations, ...enumTagMirrorViolations, ...appSelectionPolicyMirrorViolations, ...runtimeStateBackgroundViolations, ...redactionViolations, ...rateLimitHeaderSelectionViolations, ...profileIdentityViolations, ...governanceInspectionViolations, ...governanceInspectionOrderingViolations, ...exactnessPlannerViolations,
+  return [...logPayloadProjectionViolations, ...nativeRecoveryOwnershipViolations, ...quotaRecoveryEligibilityViolations, ...runtimeBrokerReuseMojoViolations, ...geminiResponseMediaMojoViolations, ...cookieEvictionMojoViolations, ...websocketBudgetMojoViolations, ...affinityBindingMojoViolations, ...responsesCapacityRecoveryViolations, ...sseTapMojoOwnershipViolations, ...quotaWatchViolations, ...geminiCompactSnippetViolations, ...geminiCompactTextViolations, ...doctorSmartContextDecisionViolations, ...anthropicAttemptCursorViolations, ...geminiUnsupportedToolRetryViolations, ...terminalGeometryViolations, ...quotaHeaderProjectionViolations, ...smartContextCapsuleOrderViolations, ...markerViolations, ...deepseekCatalogPolicyViolations, ...featureOffViolations, ...liveLogRecordViolations, ...runtimePolicyPresetViolations, ...runtimeConfigScalarViolations, ...profileHealthCircuitViolations, ...logThroughputViolations, ...operationalDetailSpecViolations, ...transcriptPolicyViolations, ...logLoadPolicyViolations, ...routeReasonViolations, ...runtimeStateQuotaViolations, ...runtimeStateRoutePolicyViolations, ...runtimeProxyRootViolations, ...runtimeRecoveryDeadlineViolations, ...brokerVersionGuardViolations, ...brokerContinuityViolations, ...brokerLogCacheViolations, ...codexConfigViolations, ...statePolicyViolations, ...quotaSelectionPolicyViolations, ...routeTagMirrorViolations, ...enumTagMirrorViolations, ...appSelectionPolicyMirrorViolations, ...runtimeStateBackgroundViolations, ...redactionViolations, ...rateLimitHeaderSelectionViolations, ...profileIdentityViolations, ...governanceInspectionViolations, ...governanceInspectionOrderingViolations, ...exactnessPlannerViolations,
     ...adaptiveBudgetViolations,
     ...providerUsageViolations,
     ...auditUsageViolations,
@@ -8836,6 +8866,21 @@ function selfTest() {
   assert.deepEqual(findViolations([[replaySource, replayRequired]]), []);
   assert.match(findViolations([[replaySource, "fn old_rust_replay() {}"]]).join("\n"),
     /turn-state ownership and replay eligibility must remain Mojo-owned/u);
+  const recoveryDeadlineCanonical =
+    "prodex_mojo_core::runtime_proxy_dispatch::precommit_wait_slice(\n";
+  assert.deepEqual(findViolations([[RUNTIME_PROXY_RECOVERY_DEADLINE_FILE, recoveryDeadlineCanonical]]), []);
+  assert.match(
+    findViolations([[RUNTIME_PROXY_RECOVERY_DEADLINE_FILE,
+      `${recoveryDeadlineCanonical}requested.min(deadline.saturating_duration_since(Instant::now()))`,
+    ]]).join("\n"),
+    /restored Rust precommit wait-slice policy/u,
+  );
+  assert.deepEqual(findViolations([[RUNTIME_PROXY_DISPATCH_ADAPTER_FILE,
+    "prodex_runtime_precommit_wait_slice_v1(\npub fn precommit_wait_slice(",
+  ]]), []);
+  assert.deepEqual(findViolations([[RUNTIME_PROXY_DISPATCH_MOJO_FILE,
+    '@export("prodex_runtime_precommit_wait_slice_v1")',
+  ]]), []);
   assert.match(findViolations([["crates/prodex-app/src/runtime_proxy/response_forwarding.rs",
     "let is_sse = runtime_response_content_type_is_sse(response_content_type);"]]).join("\n"),
     /missing-header Responses framing/u);
