@@ -99,6 +99,8 @@ fn compiled_core_self_test_passes() {
 pub mod app_command_policy;
 #[cfg(feature = "mojo-runtime")]
 pub mod audit_log_policy;
+#[cfg(feature = "mojo-rich")]
+pub mod chat_tool_name_policy;
 #[cfg(feature = "mojo-runtime")]
 pub mod codex_config;
 #[cfg(feature = "mojo-runtime")]

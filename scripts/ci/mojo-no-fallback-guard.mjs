@@ -171,6 +171,11 @@ const PING_SUMMARY_CALLER_TEST_FILE = "crates/prodex-app/src/app_commands/ping_t
 const PING_SUMMARY_ADAPTER_FILE = "crates/prodex-mojo-core/src/rich/ping_protocol.rs";
 const PING_SUMMARY_MOJO_FILE = "mojo/prodex_core/ping_protocol.mojo";
 const PROMOTED_FILES = [
+  "crates/prodex-provider-core/src/bridge/chat_compat/tool_calls.rs",
+  "crates/prodex-provider-core/src/bridge/tests.rs",
+  "crates/prodex-mojo-core/src/chat_tool_name_policy.rs",
+  "mojo/prodex_core/chat_tool_names.mojo",
+  "mojo/prodex_core/chat_tools.mojo",
   "crates/prodex-provider-core/src/deepseek_bridge/input_items/validation.rs",
   "crates/prodex-provider-core/src/deepseek_bridge/tests/input_items.rs",
   "crates/prodex-mojo-core/src/rich/deepseek/input_item_issue.rs",
@@ -8263,6 +8268,53 @@ export function findViolations(files) {
     }
     return [];
   });
+  const chatNamespaceSplitMojoViolations = files.flatMap(([filePath, contents]) => {
+    if (filePath === "crates/prodex-provider-core/src/bridge/chat_compat/tool_calls.rs") {
+      const required = [
+        "prodex_mojo_core::chat_tool_name_policy::split_flat_namespace_tool_name(name)",
+        "Some((namespace, tool))",
+      ];
+      const retired = [
+        '.rsplit_once("--")',
+        '.strip_prefix("mcp__")',
+        '.rfind("__")',
+      ];
+      return required.every((marker) => contents.includes(marker)) &&
+        retired.every((marker) => !contents.includes(marker))
+        ? [] : [filePath + ": restored Rust chat namespace splitting instead of compiled Mojo"];
+    }
+    if (filePath === "crates/prodex-mojo-core/src/chat_tool_name_policy.rs") {
+      return [
+        "fn prodex_chat_tool_namespace_split_v1(",
+        "pub fn split_flat_namespace_tool_name(",
+        "compiled_chat_namespace_decoder_preserves_delimiter_precedence_and_unicode",
+        "compiled_chat_namespace_abi_rejects_invalid_utf8_and_shape_before_writes",
+      ].filter((marker) => !contents.includes(marker))
+        .map((marker) => filePath + ": compiled chat name ABI/coverage missing " + marker);
+    }
+    if (filePath === "crates/prodex-provider-core/src/bridge/tests.rs") {
+      return contents.includes("compiled_namespace_split_preserves_deepseek_anthropic_and_mcp_shapes")
+        ? [] : [filePath + ": reachable provider tool-call namespace regression missing"];
+    }
+    if (filePath === "mojo/prodex_core/chat_tool_names.mojo") {
+      return [
+        "def tool_name_split_namespace_bounds(",
+        "rich_trim_bounds(namespace)",
+        "rich_trim_bounds(tool)",
+        'rich_view_prefix["mcp__"](value, False)',
+      ].filter((marker) => !contents.includes(marker))
+        .map((marker) => filePath + ": compiled namespace delimiter precedence missing " + marker);
+    }
+    if (filePath === "mojo/prodex_core/chat_tools.mojo") {
+      return [
+        '@export("prodex_chat_tool_namespace_split_v1")',
+        "tool_name_split_namespace_bounds(view)",
+        "rich_view_valid(view,",
+      ].filter((marker) => !contents.includes(marker))
+        .map((marker) => filePath + ": compiled chat namespace source binding missing " + marker);
+    }
+    return [];
+  });
   const deepseekInputItemIssueMessageViolations = files.flatMap(([filePath, contents]) => {
     if (filePath === "crates/prodex-provider-core/src/deepseek_bridge/input_items/validation.rs") {
       const required = [
@@ -8618,7 +8670,7 @@ export function findViolations(files) {
     }
     return [];
   });
-  return [...logPayloadProjectionViolations, ...nativeRecoveryOwnershipViolations, ...quotaRecoveryEligibilityViolations, ...runtimeBrokerReuseMojoViolations, ...geminiResponseMediaMojoViolations, ...cookieEvictionMojoViolations, ...websocketBudgetMojoViolations, ...affinityBindingMojoViolations, ...responsesCapacityRecoveryViolations, ...sseTapMojoOwnershipViolations, ...quotaWatchViolations, ...geminiCompactSnippetViolations, ...geminiCompactTextViolations, ...doctorSmartContextDecisionViolations, ...anthropicAttemptCursorViolations, ...geminiUnsupportedToolRetryViolations, ...terminalGeometryViolations, ...previousResponseRecoveryTransitionViolations, ...deepseekInputItemIssueMessageViolations, ...deepseekRequestIssueMessageViolations, ...smartContextTelemetrySampleViolations, ...compatibilityDiagnosticsMojoViolations, ...quotaHeaderProjectionViolations, ...smartContextCapsuleOrderViolations, ...markerViolations, ...deepseekCatalogPolicyViolations, ...featureOffViolations, ...liveLogRecordViolations, ...runtimePolicyPresetViolations, ...runtimeConfigScalarViolations, ...profileHealthCircuitViolations, ...logThroughputViolations, ...operationalDetailSpecViolations, ...transcriptPolicyViolations, ...logLoadPolicyViolations, ...routeReasonViolations, ...runtimeStateQuotaViolations, ...runtimeStateRoutePolicyViolations, ...runtimeProxyRootViolations, ...runtimeRecoveryDeadlineViolations, ...brokerVersionGuardViolations, ...brokerContinuityViolations, ...brokerLogCacheViolations, ...codexConfigViolations, ...statePolicyViolations, ...quotaSelectionPolicyViolations, ...routeTagMirrorViolations, ...enumTagMirrorViolations, ...appSelectionPolicyMirrorViolations, ...runtimeStateBackgroundViolations, ...redactionViolations, ...rateLimitHeaderSelectionViolations, ...profileIdentityViolations, ...governanceInspectionViolations, ...governanceInspectionOrderingViolations, ...exactnessPlannerViolations,
+  return [...logPayloadProjectionViolations, ...nativeRecoveryOwnershipViolations, ...quotaRecoveryEligibilityViolations, ...runtimeBrokerReuseMojoViolations, ...geminiResponseMediaMojoViolations, ...cookieEvictionMojoViolations, ...websocketBudgetMojoViolations, ...affinityBindingMojoViolations, ...responsesCapacityRecoveryViolations, ...sseTapMojoOwnershipViolations, ...quotaWatchViolations, ...geminiCompactSnippetViolations, ...geminiCompactTextViolations, ...doctorSmartContextDecisionViolations, ...anthropicAttemptCursorViolations, ...geminiUnsupportedToolRetryViolations, ...terminalGeometryViolations, ...previousResponseRecoveryTransitionViolations, ...chatNamespaceSplitMojoViolations, ...deepseekInputItemIssueMessageViolations, ...deepseekRequestIssueMessageViolations, ...smartContextTelemetrySampleViolations, ...compatibilityDiagnosticsMojoViolations, ...quotaHeaderProjectionViolations, ...smartContextCapsuleOrderViolations, ...markerViolations, ...deepseekCatalogPolicyViolations, ...featureOffViolations, ...liveLogRecordViolations, ...runtimePolicyPresetViolations, ...runtimeConfigScalarViolations, ...profileHealthCircuitViolations, ...logThroughputViolations, ...operationalDetailSpecViolations, ...transcriptPolicyViolations, ...logLoadPolicyViolations, ...routeReasonViolations, ...runtimeStateQuotaViolations, ...runtimeStateRoutePolicyViolations, ...runtimeProxyRootViolations, ...runtimeRecoveryDeadlineViolations, ...brokerVersionGuardViolations, ...brokerContinuityViolations, ...brokerLogCacheViolations, ...codexConfigViolations, ...statePolicyViolations, ...quotaSelectionPolicyViolations, ...routeTagMirrorViolations, ...enumTagMirrorViolations, ...appSelectionPolicyMirrorViolations, ...runtimeStateBackgroundViolations, ...redactionViolations, ...rateLimitHeaderSelectionViolations, ...profileIdentityViolations, ...governanceInspectionViolations, ...governanceInspectionOrderingViolations, ...exactnessPlannerViolations,
     ...adaptiveBudgetViolations,
     ...providerUsageViolations,
     ...auditUsageViolations,
@@ -9384,6 +9436,15 @@ function selfTest() {
   assert.match(findViolations([[ANTHROPIC_ATTEMPT_CURSOR_FILE,
     anthropicCursorConsumer + "\nattempt.model_index += 1",
   ]]).join("\n"), /Anthropic model\/auth cursor transitions must remain Mojo-owned/u);
+  const namespaceSplitConsumer = [
+    "prodex_mojo_core::chat_tool_name_policy::split_flat_namespace_tool_name(name)",
+    "Some((namespace, tool))",
+  ].join("\n");
+  const namespaceSplitCallerFile = "crates/prodex-provider-core/src/bridge/chat_compat/tool_calls.rs";
+  assert.deepEqual(findViolations([[namespaceSplitCallerFile, namespaceSplitConsumer]]), []);
+  assert.match(findViolations([[namespaceSplitCallerFile,
+    namespaceSplitConsumer + "\nname.rsplit_once(\"--\")",
+  ]]).join("\n"), /restored Rust chat namespace splitting instead of compiled Mojo/u);
   const deepseekInputIssueConsumer = [
     "DeepSeekKernelOperation::InputItemValidation",
     "deepseek_provider_core_input_item_plan(",

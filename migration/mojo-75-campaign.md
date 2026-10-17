@@ -5786,3 +5786,11 @@ historical error-tag aliases. The Rust tag-to-string match was deleted, while
 serde request acquisition and typed output materialization remain Rust host
 responsibilities. Direct strict ABI and provider caller tests plus an explicit
 no-Rust-fallback guard preserve behavior.
+
+## Chat tool namespace delimiter and reverse mapping moved to Mojo
+
+The compiled chat-tool name owner now decodes explicit double-hyphen and
+canonical MCP double-underscore namespace names, preserving Unicode and
+original bytes. The previous Rust string parser was removed with no fallback.
+Production Anthropic/DeepSeek tool mapping and application provider-tool
+callers use the new typed ABI; strict ABI and caller tests cover the boundary.
