@@ -607,6 +607,10 @@ export const RUNTIME_CI_TEST_CASES = [
     tags: SERIALIZED_TAGS,
   },
   {
+    name: "responses_hard_affinity_auth_revalidated_before_replay_can_reuse_owner_04381",
+    tags: SERIALIZED_TAGS,
+  },
+  {
     name: "ready_profile_notification_interrupts_long_recovery_sleep_04381",
     tags: SERIALIZED_TAGS,
   },
