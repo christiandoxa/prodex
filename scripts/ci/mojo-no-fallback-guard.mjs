@@ -171,6 +171,8 @@ const PING_SUMMARY_CALLER_TEST_FILE = "crates/prodex-app/src/app_commands/ping_t
 const PING_SUMMARY_ADAPTER_FILE = "crates/prodex-mojo-core/src/rich/ping_protocol.rs";
 const PING_SUMMARY_MOJO_FILE = "mojo/prodex_core/ping_protocol.mojo";
 const PROMOTED_FILES = [
+  "crates/prodex-mojo-core/src/rich/deepseek/replay_item.rs",
+  "crates/prodex-provider-core/src/deepseek_bridge/tests.rs",
   "crates/prodex-provider-core/src/bridge/chat_compat/tool_calls.rs",
   "crates/prodex-provider-core/src/bridge/tests.rs",
   "crates/prodex-mojo-core/src/chat_tool_name_policy.rs",
@@ -8268,6 +8270,56 @@ export function findViolations(files) {
     }
     return [];
   });
+  const deepseekReplayItemPolicyMojoViolations = files.flatMap(([filePath, contents]) => {
+    if (filePath === "crates/prodex-provider-core/src/deepseek_bridge/input_items.rs") {
+      const required = [
+        "prodex_mojo_core::rich::deepseek_replay_item_kind(item_type)",
+        "prodex_mojo_core::rich::deepseek_replay_item_action(",
+        "DeepSeekReplayItemKind::Text",
+        "DeepSeekReplayItemFacts",
+        "input.stream = action.stream;",
+        "input.sequence_number = u64::from(action.emit_output);",
+      ];
+      const retired = [
+        'let is_mcp = item_type == Some("mcp_call");',
+        "let is_call = matches!(",
+        "let is_output = matches!(",
+        "let emit_call = !is_call",
+        "let emit_output = is_mcp",
+        "if (is_call && !emit_call && !emit_output)",
+        "input.stream = if is_output",
+      ];
+      return required.every((marker) => contents.includes(marker)) &&
+        retired.every((marker) => !contents.includes(marker))
+        ? [] : [filePath + ": restored Rust DeepSeek replay item classification/emission policy"];
+    }
+    if (filePath === "crates/prodex-mojo-core/src/rich/deepseek/replay_item.rs") {
+      return [
+        "fn prodex_deepseek_replay_item_kind_v1(",
+        "fn prodex_deepseek_replay_item_action_v1(",
+        "pub fn deepseek_replay_item_kind(",
+        "pub fn deepseek_replay_item_action(",
+        "compiled_replay_item_classifies_call_output_and_text_exactly",
+        "compiled_replay_item_actions_preserve_mcp_output_and_deduplication",
+        "compiled_replay_item_abi_rejects_invalid_flags_without_writing",
+      ].filter((marker) => !contents.includes(marker))
+        .map((marker) => filePath + ": compiled replay item adapter/ABI tests missing " + marker);
+    }
+    if (filePath === "crates/prodex-provider-core/src/deepseek_bridge/tests.rs") {
+      return contents.includes("compiled_deepseek_replay_emission_suppresses_duplicate_calls_and_recovers_only_new_mcp_output")
+        ? [] : [filePath + ": real replayed MCP output caller test is required"];
+    }
+    if (filePath === "mojo/prodex_core/deepseek.mojo") {
+      return [
+        '@export("prodex_deepseek_replay_item_kind_v1")',
+        '@export("prodex_deepseek_replay_item_action_v1")',
+        "DEEPSEEK_REPLAY_ITEM_MCP_CALL",
+        "output_field_mask != 0",
+      ].filter((marker) => !contents.includes(marker))
+        .map((marker) => filePath + ": compiled replay classification/emission missing " + marker);
+    }
+    return [];
+  });
   const chatNamespaceSplitMojoViolations = files.flatMap(([filePath, contents]) => {
     if (filePath === "crates/prodex-provider-core/src/bridge/chat_compat/tool_calls.rs") {
       const required = [
@@ -8670,7 +8722,7 @@ export function findViolations(files) {
     }
     return [];
   });
-  return [...logPayloadProjectionViolations, ...nativeRecoveryOwnershipViolations, ...quotaRecoveryEligibilityViolations, ...runtimeBrokerReuseMojoViolations, ...geminiResponseMediaMojoViolations, ...cookieEvictionMojoViolations, ...websocketBudgetMojoViolations, ...affinityBindingMojoViolations, ...responsesCapacityRecoveryViolations, ...sseTapMojoOwnershipViolations, ...quotaWatchViolations, ...geminiCompactSnippetViolations, ...geminiCompactTextViolations, ...doctorSmartContextDecisionViolations, ...anthropicAttemptCursorViolations, ...geminiUnsupportedToolRetryViolations, ...terminalGeometryViolations, ...previousResponseRecoveryTransitionViolations, ...chatNamespaceSplitMojoViolations, ...deepseekInputItemIssueMessageViolations, ...deepseekRequestIssueMessageViolations, ...smartContextTelemetrySampleViolations, ...compatibilityDiagnosticsMojoViolations, ...quotaHeaderProjectionViolations, ...smartContextCapsuleOrderViolations, ...markerViolations, ...deepseekCatalogPolicyViolations, ...featureOffViolations, ...liveLogRecordViolations, ...runtimePolicyPresetViolations, ...runtimeConfigScalarViolations, ...profileHealthCircuitViolations, ...logThroughputViolations, ...operationalDetailSpecViolations, ...transcriptPolicyViolations, ...logLoadPolicyViolations, ...routeReasonViolations, ...runtimeStateQuotaViolations, ...runtimeStateRoutePolicyViolations, ...runtimeProxyRootViolations, ...runtimeRecoveryDeadlineViolations, ...brokerVersionGuardViolations, ...brokerContinuityViolations, ...brokerLogCacheViolations, ...codexConfigViolations, ...statePolicyViolations, ...quotaSelectionPolicyViolations, ...routeTagMirrorViolations, ...enumTagMirrorViolations, ...appSelectionPolicyMirrorViolations, ...runtimeStateBackgroundViolations, ...redactionViolations, ...rateLimitHeaderSelectionViolations, ...profileIdentityViolations, ...governanceInspectionViolations, ...governanceInspectionOrderingViolations, ...exactnessPlannerViolations,
+  return [...logPayloadProjectionViolations, ...nativeRecoveryOwnershipViolations, ...quotaRecoveryEligibilityViolations, ...runtimeBrokerReuseMojoViolations, ...geminiResponseMediaMojoViolations, ...cookieEvictionMojoViolations, ...websocketBudgetMojoViolations, ...affinityBindingMojoViolations, ...responsesCapacityRecoveryViolations, ...sseTapMojoOwnershipViolations, ...quotaWatchViolations, ...geminiCompactSnippetViolations, ...geminiCompactTextViolations, ...doctorSmartContextDecisionViolations, ...anthropicAttemptCursorViolations, ...geminiUnsupportedToolRetryViolations, ...terminalGeometryViolations, ...previousResponseRecoveryTransitionViolations, ...deepseekReplayItemPolicyMojoViolations, ...chatNamespaceSplitMojoViolations, ...deepseekInputItemIssueMessageViolations, ...deepseekRequestIssueMessageViolations, ...smartContextTelemetrySampleViolations, ...compatibilityDiagnosticsMojoViolations, ...quotaHeaderProjectionViolations, ...smartContextCapsuleOrderViolations, ...markerViolations, ...deepseekCatalogPolicyViolations, ...featureOffViolations, ...liveLogRecordViolations, ...runtimePolicyPresetViolations, ...runtimeConfigScalarViolations, ...profileHealthCircuitViolations, ...logThroughputViolations, ...operationalDetailSpecViolations, ...transcriptPolicyViolations, ...logLoadPolicyViolations, ...routeReasonViolations, ...runtimeStateQuotaViolations, ...runtimeStateRoutePolicyViolations, ...runtimeProxyRootViolations, ...runtimeRecoveryDeadlineViolations, ...brokerVersionGuardViolations, ...brokerContinuityViolations, ...brokerLogCacheViolations, ...codexConfigViolations, ...statePolicyViolations, ...quotaSelectionPolicyViolations, ...routeTagMirrorViolations, ...enumTagMirrorViolations, ...appSelectionPolicyMirrorViolations, ...runtimeStateBackgroundViolations, ...redactionViolations, ...rateLimitHeaderSelectionViolations, ...profileIdentityViolations, ...governanceInspectionViolations, ...governanceInspectionOrderingViolations, ...exactnessPlannerViolations,
     ...adaptiveBudgetViolations,
     ...providerUsageViolations,
     ...auditUsageViolations,
@@ -9436,6 +9488,19 @@ function selfTest() {
   assert.match(findViolations([[ANTHROPIC_ATTEMPT_CURSOR_FILE,
     anthropicCursorConsumer + "\nattempt.model_index += 1",
   ]]).join("\n"), /Anthropic model\/auth cursor transitions must remain Mojo-owned/u);
+  const deepseekReplayItemConsumer = [
+    "prodex_mojo_core::rich::deepseek_replay_item_kind(item_type)",
+    "prodex_mojo_core::rich::deepseek_replay_item_action(",
+    "DeepSeekReplayItemKind::Text",
+    "DeepSeekReplayItemFacts",
+    "input.stream = action.stream;",
+    "input.sequence_number = u64::from(action.emit_output);",
+  ].join("\n");
+  const deepseekReplayItemFile = "crates/prodex-provider-core/src/deepseek_bridge/input_items.rs";
+  assert.deepEqual(findViolations([[deepseekReplayItemFile, deepseekReplayItemConsumer]]), []);
+  assert.match(findViolations([[deepseekReplayItemFile,
+    deepseekReplayItemConsumer + "\nlet is_call = matches!(",
+  ]]).join("\n"), /restored Rust DeepSeek replay item classification\/emission policy/u);
   const namespaceSplitConsumer = [
     "prodex_mojo_core::chat_tool_name_policy::split_flat_namespace_tool_name(name)",
     "Some((namespace, tool))",
