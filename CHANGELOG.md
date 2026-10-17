@@ -15,12 +15,18 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 
 - Allow ABI test argument shape (`139f674`)
 
+### Docs
+
+- Record verified Kiro native client qualification (`bbe0d02`)
+
 ### Deps
 
+- Qualify pinned Kiro CLI 2.32.0 (`ce43fad`)
 - Refresh audited optional-tool release references (`1808e48`)
 
 ### Misc
 
+- Separate Kiro source qualification from release metadata (`78827db`)
 - Preserve portable paths and isolate host prompt adapters (`2adc881`)
 - Preserve nested error message precedence (`7dad781`)
 - Preserve long model names in Mojo (`969cbe8`)
@@ -105,6 +111,12 @@ must acknowledge the still-held lease after three TTLs before its result is
 published, then consume the identical committed result. The separate cold-start
 election retains exactly one owner and seven followers using the normal lease
 TTL. Production timing, fencing, and file-security rules are unchanged.
+
+The native-client release smoke now pins Kiro CLI 2.32.0, matching the
+official stable manifest. Its Linux archive was checksum-verified before
+isolated version, chat-model help, and KIRO_DATA_DIR contract checks. The
+Kiro, Copilot, and Claude installer hashes remain unchanged; no installer,
+login, or credential-bearing provider request was run during qualification.
 
 ### Upgrade
 
