@@ -5836,3 +5836,13 @@ decision from host-parsed URL facts, raw Host/Origin strings, Unicode trim and
 ASCII casefold matching. The Rust loopback/HTTPS and URL constraint decision
 tree was deleted. Versioned ABI, 99 real app Super Expose tests, 16 compiled
 Mojo-core tests and no-fallback guards protect the admission boundary.
+
+## Gemini OAuth model fallback selection moved to Mojo
+
+The compiled Gemini Code Assist policy owner now gates models against cached
+profile and endpoint cooldown deadlines and reorders model chains using the
+most recent valid successful preference. The old Rust eligibility predicate,
+any-model test and stable preference reordering were removed, while Rust still
+stores profile state and applies the typed compiled output. Strict ABI,
+real Gemini OAuth caller and no-fallback guard tests preserve rotation and
+model selection semantics.

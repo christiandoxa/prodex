@@ -388,6 +388,43 @@ fn gemini_oauth_pool_model_unavailable_cache_is_endpoint_scoped() {
 }
 
 #[test]
+fn gemini_oauth_pool_compiled_mojo_filters_cooldowns_endpoint_blocks_and_duplicate_preferences() {
+    let pool = gemini_pool(&["alpha"]);
+    let endpoint = gemini_code_assist_endpoint();
+    let other_endpoint = "https://generativelanguage.googleapis.com/v1beta";
+    let until = runtime_gemini_now_ms().saturating_add(60_000);
+    {
+        let mut state = pool.state.lock().unwrap();
+        state.remember_model_cooldown_until("alpha", "gemini-3-pro", until);
+        state.remember_model_unavailable_until("alpha", &endpoint, "gemini-2.5-flash", until);
+        state.remember_model_unavailable_until("alpha", other_endpoint, "gemini-3.1-pro", until);
+        state.remember_model_preference_until(
+            "session:123",
+            "alpha",
+            "auto",
+            "gemini-2.5-flash",
+            until,
+        );
+    }
+    let models = vec![
+        "gemini-3-pro".to_string(),
+        "gemini-2.5-flash".to_string(),
+        "gemini-3.1-pro".to_string(),
+        "gemini-2.5-flash".to_string(),
+    ];
+    let ordered =
+        pool.preferred_model_chain_for_profile(Some("session:123"), "alpha", "auto", &models);
+    assert_eq!(
+        ordered,
+        ["gemini-2.5-flash", "gemini-3-pro", "gemini-3.1-pro"],
+    );
+    let available = pool.available_model_chain_for_profile("alpha", &endpoint, &models);
+    assert_eq!(available, ["gemini-3.1-pro"]);
+    let available_other = pool.available_model_chain_for_profile("alpha", other_endpoint, &models);
+    assert_eq!(available_other, ["gemini-2.5-flash", "gemini-2.5-flash"],);
+}
+
+#[test]
 fn gemini_oauth_pool_prefers_recent_successful_fallback_model() {
     let pool = gemini_pool(&["alpha"]);
     pool.state.lock().unwrap().remember_model_preference_until(
