@@ -52,10 +52,11 @@ fn prepare_runtime_websocket_session_admission(
     hard_affinity: bool,
     reuse_existing_session: bool,
 ) -> Result<Option<RuntimeProfileInFlightGuard>> {
-    if reuse_existing_session {
-        return Ok(None);
+    if !reuse_existing_session {
+        websocket_session.close();
     }
-    websocket_session.close();
+    // Admission belongs to this response, not the cached socket. On saturation
+    // preserve the reusable transport and its lineage while the caller waits.
     try_acquire_runtime_profile_inflight_guard(
         shared,
         profile_name,
@@ -148,7 +149,7 @@ pub(super) fn start_runtime_websocket_upstream_session(
         hard_affinity,
         reuse_existing_session,
     )?;
-    if !reuse_existing_session && inflight_guard.is_none() {
+    if inflight_guard.is_none() {
         return Ok(RuntimeWebsocketSessionStartDecision::Attempt(
             RuntimeWebsocketAttempt::LocalSelectionBlocked {
                 profile_name: profile_name.to_string(),
@@ -199,7 +200,11 @@ pub(super) fn start_runtime_websocket_upstream_session(
                 },
             ));
         };
-        (socket, websocket_session.turn_state.clone(), None)
+        (
+            socket,
+            websocket_session.turn_state.clone(),
+            inflight_guard.take(),
+        )
     } else {
         runtime_proxy_log(
             shared,

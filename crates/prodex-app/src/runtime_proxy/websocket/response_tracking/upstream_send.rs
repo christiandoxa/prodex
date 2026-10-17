@@ -71,11 +71,13 @@ pub(super) fn send_runtime_websocket_upstream_request(
         profile_name,
         upstream_request_text.as_bytes(),
     );
+    super::bound_runtime_websocket_precommit_io(upstream_socket, shared)?;
     if let Err(err) =
         upstream_socket.send(WsMessage::Text(upstream_request_text.into_owned().into()))
     {
-        let _ = upstream_socket.close(None);
         websocket_session.reset();
+        shared.check_precommit_deadline()?;
+        let _ = upstream_socket.close(None);
         let transport_error =
             anyhow::anyhow!("failed to send runtime websocket request upstream: {err}");
         note_runtime_profile_transport_failure(

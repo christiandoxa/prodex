@@ -70,3 +70,49 @@ fn runtime_proxy_two_sessions_with_sixteen_workers_complete_through_capacity_pre
     assert!(log.contains("inflight_wait_started"), "fanout must exercise actual profile backpressure: {log}");
     assert!(!log.contains("precommit_budget_exhausted"), "local queue time must not exhaust upstream budget: {log}");
 }
+
+
+#[test]
+fn runtime_proxy_idle_websockets_leave_capacity_for_compaction_on_the_only_ready_profile() {
+    let _test_guard = crate::acquire_test_runtime_lock();
+    let (_connect_timeout_guard, _progress_timeout_guard) =
+        ci_runtime_proxy_websocket_timeout_guards();
+    // This backend deliberately holds committed output for 1,050ms, longer
+    // than the 250ms unit idle timeout. Use the production stream budget.
+    let _idle_timeout = TestEnvVarGuard::set("PRODEX_RUNTIME_PROXY_STREAM_IDLE_TIMEOUT_MS", "300000");
+    let fixture = start_runtime_continuation_fixture(
+        RuntimeProxyBackend::start_websocket_capacity_pressure(),
+        "second", &["second"], &[], Vec::new(),
+    );
+    let mut idle_sockets = Vec::new();
+    for index in 0..4 {
+        let metadata = [runtime_continuation_header(
+            "x-codex-turn-metadata", codex_0155_compaction_turn_metadata(),
+        )];
+        let mut socket = if index == 3 {
+            fixture.connect_websocket_with_headers("backend-api/prodex/responses", &metadata)
+        } else {
+            fixture.connect_websocket("backend-api/prodex/responses")
+        };
+        set_test_websocket_io_timeout(&mut socket, Duration::from_secs(10));
+        let session = format!("idle-capacity-{index}");
+        send_runtime_websocket_json(&mut socket, serde_json::json!({
+            "session_id": session,
+            "input": [{"type":"message", "role":"user", "content":format!("work for {session}")}],
+        }));
+        let (frames, terminal) = read_runtime_websocket_until(&mut socket, |text| {
+            let event: serde_json::Value = serde_json::from_str(text).unwrap();
+            matches!(event["type"].as_str(), Some("response.completed" | "error" | "response.failed"))
+        });
+        let event: serde_json::Value = serde_json::from_str(&terminal).unwrap();
+        assert_eq!(event["type"], "response.completed", "{session}: {event}");
+        assert_eq!(event["response"]["id"], format!("resp-capacity-{session}"));
+        assert_eq!(frames.iter().filter(|text| text.contains("response.output_text.delta")).count(), 1);
+        // Unlike the old fan-out fixture, keep every completed client open.
+        // Native parent, side-agent and compaction sessions cache their sockets.
+        idle_sockets.push(socket);
+    }
+    assert_eq!(fixture.backend.websocket_requests().len(), 4,
+        "idle clients must not cause duplicate upstream replay or starve compaction");
+    for socket in &mut idle_sockets { let _ = socket.close(None); }
+}

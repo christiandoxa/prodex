@@ -99,6 +99,18 @@ impl RuntimeWebsocketSessionState {
         }
     }
 
+    /// Keep connection/response lineage between Responses turns, but not a
+    /// generation permit. Realtime duplex keeps using `store` for its live turn.
+    pub(in crate::runtime_proxy) fn store_completed_response(
+        &mut self,
+        socket: RuntimeUpstreamWebSocket,
+        profile_name: &str,
+        turn_state: Option<String>,
+    ) {
+        self.store(socket, profile_name, turn_state, None);
+        self.inflight_guard = None;
+    }
+
     pub(in crate::runtime_proxy) fn reset(&mut self) {
         self.upstream_socket = None;
         self.profile_name = None;
