@@ -560,6 +560,7 @@ fn selected_sources() -> Vec<&'static str> {
         sources.push("../../mojo/prodex_core/gemini_internal_instruction.mojo");
         sources.push("../../mojo/prodex_core/gemini_internal_instruction_catalog.mojo");
         sources.push("../../mojo/prodex_core/gemini_code_assist_policy.mojo");
+        sources.push("../../mojo/prodex_core/gemini_quota_body.mojo");
         sources.push("../../mojo/prodex_core/gemini_tooling_policy.mojo");
         sources.push("../../mojo/prodex_core/gemini_content_hardening.mojo");
         sources.push("../../mojo/prodex_core/gemini_compact_text.mojo");

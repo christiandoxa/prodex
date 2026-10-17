@@ -9,6 +9,8 @@ pub use self::response_metadata::{
     RuntimeResponseMetadataJsonPlan, runtime_response_event_is_completed,
     runtime_response_metadata_json,
 };
+mod gemini_quota;
+pub use gemini_quota::{GeminiQuotaBodyPlan, gemini_quota_body_plan};
 mod provider_error;
 pub use self::provider_error::provider_error_message_json;
 mod session_report;
