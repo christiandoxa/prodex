@@ -1,6 +1,6 @@
 from std.memory import Pointer
 from rich_types import ProdexRichStringView
-from rich_text import rich_view_prefix, rich_view_valid
+from rich_text import rich_trim_bounds, rich_view_matches_literal, rich_view_prefix, rich_view_valid
 from parsed_json import (
     ParsedJson, ParsedJsonNode, JSON_STRING, JSON_ARRAY, JSON_OBJECT,
     pj_kind, pj_child, pj_next, pj_text, pj_field, pj_string_field, pj_is,
@@ -213,4 +213,55 @@ def prodex_chat_tool_namespace_split_v1(
     out[unsafe_offset=0] = Int64(bounds[0])
     out[unsafe_offset=1] = bounds[1]
     out[unsafe_offset=2] = bounds[2]
+    return 0
+
+
+# The production chat-compatible tool bridge delegates function/name validity
+# and special tool-call classification to this compiled owner. JSON parsing
+# and transformed message construction stay at the host boundary.
+comptime CHAT_COMPAT_TOOL_CALL_ABI_VERSION: Int64 = 1
+comptime CHAT_COMPAT_TOOL_CALL_INVALID_FUNCTION: Int64 = 0
+comptime CHAT_COMPAT_TOOL_CALL_INVALID_NAME: Int64 = 1
+comptime CHAT_COMPAT_TOOL_CALL_SEARCH: Int64 = 2
+comptime CHAT_COMPAT_TOOL_CALL_PATCH: Int64 = 3
+comptime CHAT_COMPAT_TOOL_CALL_FUNCTION: Int64 = 4
+
+
+@export("prodex_chat_compatible_tool_call_kind_v1")
+def prodex_chat_compatible_tool_call_kind_v1(
+    abi_version: Int64,
+    function_present: Int64,
+    name_present: Int64,
+    name_address: UInt,
+    name_length: Int64,
+    output_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != CHAT_COMPAT_TOOL_CALL_ABI_VERSION:
+        return 4
+    if (
+        (function_present != 0 and function_present != 1)
+        or (name_present != 0 and name_present != 1)
+        or name_length < 0
+        or (name_length > 0 and name_address == 0)
+        or output_address == 0
+    ):
+        return 1
+    var view = ProdexRichStringView(name_address, UInt(name_length))
+    if not rich_view_valid(view, 0x7FFFFFFFFFFFFFFF):
+        return 1
+
+    var kind = CHAT_COMPAT_TOOL_CALL_INVALID_FUNCTION
+    if function_present == 1:
+        kind = CHAT_COMPAT_TOOL_CALL_INVALID_NAME
+        if name_present == 1:
+            var bounds = rich_trim_bounds(view)
+            if bounds[1] > bounds[0]:
+                kind = CHAT_COMPAT_TOOL_CALL_FUNCTION
+                if rich_view_matches_literal["tool_search"](view, False):
+                    kind = CHAT_COMPAT_TOOL_CALL_SEARCH
+                elif rich_view_matches_literal["apply_patch"](view, False):
+                    kind = CHAT_COMPAT_TOOL_CALL_PATCH
+    Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )[] = kind
     return 0

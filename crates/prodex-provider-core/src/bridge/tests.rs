@@ -277,6 +277,49 @@ fn provider_core_chat_compatible_response_mojo_preserves_special_tools_and_unico
 }
 
 #[test]
+fn compiled_chat_tool_call_classifier_preserves_special_names_and_rejects_blank_unicode() {
+    let response = serde_json::json!({
+        "id": "chat-functions",
+        "model": "model",
+        "created": 7,
+        "choices": [{"message": {"tool_calls": [
+            {"id":"plain", "function":{"name":"tool_search ", "arguments":"{}"}},
+            {"id":"search", "function":{"name":"tool_search", "arguments":"{}"}},
+            {"id":"patch", "function":{"name":"apply_patch", "arguments":"{\"input\":\"patch\"}"}},
+            {"id":"unicode", "function":{"name":"mcp__repo__東京🔥", "arguments":"{}"}}
+        ]}}]
+    });
+    let mapped = provider_core_chat_compatible_responses_value_from_chat_value(
+        &response, 7, "deepseek", "DeepSeek", "model", "resp",
+    );
+    let output = mapped["output"].as_array().unwrap();
+    assert_eq!(output.len(), 4);
+    assert_eq!(output[0]["type"], "function_call");
+    assert_eq!(output[0]["name"], "tool_search ");
+    assert_eq!(output[1]["type"], "tool_search_call");
+    assert_eq!(output[2]["type"], "custom_tool_call");
+    assert_eq!(output[2]["input"], "patch");
+    assert_eq!(output[3]["name"], "東京🔥");
+    assert_eq!(output[3]["namespace"], "mcp__repo");
+
+    let invalid = serde_json::json!({
+        "id": "chat-invalid", "choices": [{"message": {"tool_calls": [
+            {"id":"bad", "function":{"name":"\u{2003}\t", "arguments":"{}"}}
+        ]}}]
+    });
+    let failed = provider_core_chat_compatible_responses_value_from_chat_value(
+        &invalid, 7, "deepseek", "DeepSeek", "model", "resp",
+    );
+    assert_eq!(failed["status"], "failed");
+    assert!(
+        failed["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("without a function name")
+    );
+}
+
+#[test]
 fn provider_core_chat_compatible_response_mojo_keeps_partial_output_on_tool_error() {
     let response = serde_json::json!({
         "id": "chat-error",

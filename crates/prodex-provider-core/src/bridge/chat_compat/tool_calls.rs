@@ -38,23 +38,35 @@ pub(super) fn provider_core_chat_compatible_responses_tool_call_plan(
         .and_then(serde_json::Value::as_str)
         .map(str::to_string)
         .unwrap_or_else(fallback_call_id);
-    let Some(function) = tool_call
+    let function = tool_call
         .get("function")
-        .and_then(serde_json::Value::as_object)
-    else {
-        return Err(format!(
-            "{provider_adapter_label} returned a tool call without a function object"
-        ));
-    };
-    let Some(name) = function
-        .get("name")
-        .and_then(serde_json::Value::as_str)
-        .filter(|name| !name.trim().is_empty())
-    else {
-        return Err(format!(
-            "{provider_adapter_label} returned a tool call without a function name"
-        ));
-    };
+        .and_then(serde_json::Value::as_object);
+    let name = function
+        .and_then(|value| value.get("name"))
+        .and_then(serde_json::Value::as_str);
+    let kind = prodex_mojo_core::chat_tool_name_policy::chat_compatible_tool_call_kind(
+        function.is_some(),
+        name,
+    )
+    .expect("compiled Mojo chat tool-call classification returned invalid output");
+    use prodex_mojo_core::chat_tool_name_policy::ChatCompatibleToolCallKind;
+    match kind {
+        ChatCompatibleToolCallKind::InvalidFunction => {
+            return Err(format!(
+                "{provider_adapter_label} returned a tool call without a function object"
+            ));
+        }
+        ChatCompatibleToolCallKind::InvalidName => {
+            return Err(format!(
+                "{provider_adapter_label} returned a tool call without a function name"
+            ));
+        }
+        ChatCompatibleToolCallKind::ToolSearch
+        | ChatCompatibleToolCallKind::ApplyPatch
+        | ChatCompatibleToolCallKind::Function => {}
+    }
+    let name = name.expect("compiled Mojo validated chat tool-call function name");
+    let function = function.expect("compiled Mojo validated chat tool-call function object");
     let arguments = function
         .get("arguments")
         .and_then(serde_json::Value::as_str)
@@ -64,7 +76,7 @@ pub(super) fn provider_core_chat_compatible_responses_tool_call_plan(
         arguments,
         provider_adapter_label,
     )?;
-    if name == "tool_search" {
+    if kind == ChatCompatibleToolCallKind::ToolSearch {
         serde_json::from_str::<serde_json::Value>(arguments).map_err(|error| {
             provider_core_chat_compatible_tool_call_arguments_error(
                 name,
@@ -78,7 +90,7 @@ pub(super) fn provider_core_chat_compatible_responses_tool_call_plan(
             "arguments": arguments,
         })));
     }
-    if name == "apply_patch" {
+    if kind == ChatCompatibleToolCallKind::ApplyPatch {
         return Ok(Some(serde_json::json!({
             "kind": "apply_patch",
             "call_id": call_id,
