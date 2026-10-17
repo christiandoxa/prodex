@@ -938,7 +938,7 @@
           "gemini_response_id_conformance",
           "gemini_response_envelope_normalization",
           "gemini_response_parts_aggregation",
-          "deepseek_supported_parameter_report"
+          "provider_supported_parameter_report"
         ]
       },
       {
@@ -10677,10 +10677,10 @@
       "rust_adapter_scope": "model gate, borrowed body marshalling, envelope decoding, and caller-owned byte replacement"
     },
     {
-      "name": "deepseek_supported_parameter_report",
-      "domain": "provider/deepseek",
+      "name": "provider_supported_parameter_report",
+      "domain": "provider/shared-chat-compat",
       "introduced_in": "0.438.0",
-      "baseline_state": "Rust assembled the DeepSeek translator supported-parameter report and provider-specific reason strings",
+      "baseline_state": "Rust assembled provider-specific supported-parameter reports and stable reason strings",
       "final_state": "authoritative",
       "mojo_entry": "prodex_mojo_openai_compat_kernel_v1",
       "mojo_abi_version": 6,
@@ -10692,12 +10692,13 @@
       "consumer": "crates/prodex-provider-core/src/translators/deepseek/supported_params.rs",
       "consumer_marker": "openai_compat_supported_params",
       "production_consumers": [
-        "crates/prodex-provider-core/src/translators/deepseek/supported_params.rs"
+        "crates/prodex-provider-core/src/translators/deepseek/supported_params.rs",
+        "crates/prodex-provider-core/src/translators/gemini.rs"
       ],
       "production_reachability_test": "crates/prodex-provider-core/src/translators/deepseek/supported_params.rs",
-      "rust_owner_before": "Rust selected the five DeepSeek unsupported fields and assembled stable provider-specific reason strings",
+      "rust_owner_before": "Rust selected provider-specific unsupported fields and assembled stable DeepSeek and Gemini capability reason strings",
       "rust_state_after": "adapter-only",
-      "rust_test_oracle": "Former Rust unsupported-parameter list removed; focused caller expectations preserve field order and exact reasons",
+      "rust_test_oracle": "Provider-specific Rust capability literals removed; focused DeepSeek and Gemini caller expectations preserve field order and exact reasons",
       "production_fallback": false,
       "duplicate_production_owner": false,
       "platform_fallback": false,

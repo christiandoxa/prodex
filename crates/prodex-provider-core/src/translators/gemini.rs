@@ -105,16 +105,19 @@ impl ProviderTranslator for GeminiTranslator {
                 | ProviderEndpoint::Messages
                 | ProviderEndpoint::Embeddings
         ) {
+            let unsupported = prodex_mojo_core::rich::openai_compat_supported_params("Gemini")
+                .unwrap_or_else(|error| {
+                    panic!("Mojo Gemini supported-parameter report failed: {error:?}")
+                })
+                .into_iter()
+                .map(|parameter| ProviderUnsupportedReason {
+                    field: parameter.field,
+                    reason: parameter.reason,
+                })
+                .collect();
             return ProviderParamSupport {
-                        supported: true,
-                        unsupported: vec![
-                    ProviderUnsupportedReason {
-                        field: "response_format.type".to_string(),
-                        reason:
-                            "Gemini v1 translator supports only text, json_object, and json_schema response formats"
-                                .to_string(),
-                    },
-                ],
+                supported: true,
+                unsupported,
             };
         }
         let mut support = ProviderParamSupport::full();

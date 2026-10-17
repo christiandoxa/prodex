@@ -1,6 +1,26 @@
 use super::*;
 use serde_json::json;
 
+#[test]
+fn gemini_supported_parameter_report_comes_from_mojo() {
+    let mojo_report = prodex_mojo_core::rich::openai_compat_supported_params("Gemini")
+        .expect("Mojo Gemini supported-parameter report");
+    let report = GeminiTranslator.supported_params(ProviderEndpoint::Responses, "gemini-2.5-pro");
+    assert!(report.supported);
+    assert_eq!(mojo_report.len(), report.unsupported.len());
+    assert_eq!(
+        report
+            .unsupported
+            .iter()
+            .map(|parameter| (parameter.field.as_str(), parameter.reason.as_str()))
+            .collect::<Vec<_>>(),
+        vec![(
+            "response_format.type",
+            "Gemini v1 translator supports only text, json_object, and json_schema response formats",
+        ),]
+    );
+}
+
 #[cfg(feature = "mojo")]
 #[test]
 fn gemini_provider_core_mojo_kernel_preserves_escaped_values() {

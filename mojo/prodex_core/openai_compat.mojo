@@ -270,6 +270,22 @@ def openai_compat_provider_is_deepseek(provider: ProdexRichStringView) -> Bool:
     return rich_view_matches_literal['DeepSeek'](provider, False)
 
 
+def openai_compat_provider_is_gemini(provider: ProdexRichStringView) -> Bool:
+    return rich_view_matches_literal['Gemini'](provider, False)
+
+
+def openai_compat_write_gemini_parameters(
+    writer: Pointer[mut=True, OpenAiCompatWriter, _],
+    provider: ProdexRichStringView,
+) -> Bool:
+    return openai_compat_put_parameter(
+        writer,
+        provider,
+        StringSlice('response_format.type'),
+        StringSlice(' v1 translator supports only text, json_object, and json_schema response formats'),
+    )
+
+
 def openai_compat_write_deepseek_parameters(
     writer: Pointer[mut=True, OpenAiCompatWriter, _],
     provider: ProdexRichStringView,
@@ -326,6 +342,8 @@ def openai_compat_write_parameters(
 ) -> Bool:
     if openai_compat_provider_is_deepseek(provider):
         return openai_compat_write_deepseek_parameters(writer, provider)
+    if openai_compat_provider_is_gemini(provider):
+        return openai_compat_write_gemini_parameters(writer, provider)
     return (
         openai_compat_put_parameter(writer, provider, StringSlice('input[*].content[type!=text]'), StringSlice(' Responses chat-compat currently translates only text input content'))
         and openai_compat_put_parameter(writer, provider, StringSlice('response_format.type'), StringSlice(' Responses chat-compat does not translate response_format controls'))
