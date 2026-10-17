@@ -2,6 +2,7 @@
 from std.memory import Pointer
 
 from rich_types import ProdexRichStringView, rich_view_ptr
+from rich_text import rich_codepoint_width, rich_trim_bounds, rich_view_valid
 
 
 comptime COMPATIBILITY_SURFACE_ABI_VERSION: Int64 = 1
@@ -214,4 +215,137 @@ def prodex_runtime_compatibility_surface_plan_v1(
     output[unsafe_offset=6] = (
         COMPAT_ORIGIN_INTERNAL if internal_origin == 1 else COMPAT_ORIGIN_EXTERNAL
     )
+    return 0
+
+
+# Render compatibility diagnostics using one deterministic, versioned owner.
+# Rust retains JSON/header acquisition and log transport, not field formatting.
+comptime COMPAT_TEXT_TOOLS: Int64 = 0
+comptime COMPAT_TEXT_CONTINUATION: Int64 = 1
+comptime COMPAT_TEXT_LOG_SAFE: Int64 = 2
+comptime COMPAT_TEXT_USER_AGENT: Int64 = 3
+
+
+def compat_text_write_literal(
+    output: Pointer[mut=True, UInt8, _],
+    capacity: Int64,
+    written: Pointer[mut=True, Int64, _],
+    literal: StringSlice,
+) -> Bool:
+    var length = Int64(literal.byte_length())
+    if length > capacity - written[]:
+        return False
+    var bytes = literal.unsafe_ptr()
+    for index in range(length):
+        output[unsafe_offset=written[]] = bytes[unsafe_offset=index]
+        written[] += 1
+    return True
+
+
+def compat_text_label(
+    output: Pointer[mut=True, UInt8, _],
+    capacity: Int64,
+    written: Pointer[mut=True, Int64, _],
+    bit: Int64,
+    flags: Int64,
+    label: StringSlice,
+) -> Bool:
+    if flags & bit == 0:
+        return True
+    if written[] > 0:
+        if not compat_text_write_literal(output, capacity, written, StringSlice("+")):
+            return False
+    return compat_text_write_literal(output, capacity, written, label)
+
+
+@export("prodex_runtime_compatibility_text_v1")
+def prodex_runtime_compatibility_text_v1(
+    abi_version: Int64,
+    operation: Int64,
+    flags: Int64,
+    input_address: UInt,
+    input_length: Int64,
+    output_address: UInt,
+    output_capacity: Int64,
+    written_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != COMPATIBILITY_SURFACE_ABI_VERSION:
+        return 4
+    if (
+        operation < COMPAT_TEXT_TOOLS or operation > COMPAT_TEXT_USER_AGENT
+        or flags < 0 or input_length < 0
+        or (operation == COMPAT_TEXT_TOOLS and flags > 63)
+        or (operation == COMPAT_TEXT_CONTINUATION and flags > 7)
+        or (operation >= COMPAT_TEXT_LOG_SAFE and flags != 0)
+        or (input_length > 0 and input_address == 0)
+        or output_address == 0 or written_address == 0
+        or output_capacity < 0
+    ):
+        return 1
+    var view = ProdexRichStringView(input_address, UInt(input_length))
+    if not rich_view_valid(view, 0x7FFFFFFFFFFFFFFF):
+        return 1
+    var output = Pointer[mut=True, UInt8, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    var written = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(written_address)
+    )
+    written[] = 0
+    if operation == COMPAT_TEXT_TOOLS:
+        if not compat_text_label(output, output_capacity, written, 32, flags, StringSlice("approval")):
+            return 3
+        if not compat_text_label(output, output_capacity, written, 8, flags, StringSlice("computer")):
+            return 3
+        if not compat_text_label(output, output_capacity, written, 4, flags, StringSlice("mcp")):
+            return 3
+        if not compat_text_label(output, output_capacity, written, 16, flags, StringSlice("shell")):
+            return 3
+        if not compat_text_label(output, output_capacity, written, 1, flags, StringSlice("tools")):
+            return 3
+        if not compat_text_label(output, output_capacity, written, 2, flags, StringSlice("web")):
+            return 3
+    elif operation == COMPAT_TEXT_CONTINUATION:
+        if not compat_text_label(output, output_capacity, written, 1, flags, StringSlice("previous_response")):
+            return 3
+        if not compat_text_label(output, output_capacity, written, 4, flags, StringSlice("session")):
+            return 3
+        if not compat_text_label(output, output_capacity, written, 2, flags, StringSlice("turn_state")):
+            return 3
+    elif operation == COMPAT_TEXT_LOG_SAFE:
+        var source = rich_view_ptr(view)
+        var index: Int64 = 0
+        while index < input_length:
+            var byte = source[unsafe_offset=index]
+            var width = rich_codepoint_width(byte)
+            if written[] >= output_capacity:
+                return 3
+            if width == 1 and (
+                (byte >= 48 and byte <= 57)
+                or (byte >= 65 and byte <= 90)
+                or (byte >= 97 and byte <= 122)
+                or byte == 46 or byte == 95 or byte == 45
+                or byte == 47 or byte == 58
+            ):
+                output[unsafe_offset=written[]] = byte
+            else:
+                # One underscore per Unicode scalar, not per UTF-8 byte.
+                output[unsafe_offset=written[]] = 95
+            written[] += 1
+            index += width
+    else:
+        var bounds = rich_trim_bounds(view)
+        if bounds[0] < bounds[1]:
+            var source = rich_view_ptr(view)
+            if bounds[1] - bounds[0] > output_capacity:
+                return 3
+            for index in range(bounds[0], bounds[1]):
+                output[unsafe_offset=written[]] = source[unsafe_offset=index]
+                written[] += 1
+    if written[] == 0:
+        if operation >= COMPAT_TEXT_LOG_SAFE:
+            if not compat_text_write_literal(output, output_capacity, written, StringSlice("-")):
+                return 3
+        elif not compat_text_write_literal(output, output_capacity, written, StringSlice("none")):
+            return 3
     return 0

@@ -109,30 +109,14 @@ pub fn runtime_detect_request_compatibility_surface(
         route,
         transport,
         stream: compatibility_tag_label(&["unary", "streaming"], plan[2]),
-        tool_surface: compatibility_flag_string(
-            plan[3],
-            &[
-                (32, "approval"),
-                (8, "computer"),
-                (4, "mcp"),
-                (16, "shell"),
-                (1, "tools"),
-                (2, "web"),
-            ],
-            "none",
-        ),
-        continuation: compatibility_flag_string(
-            plan[4],
-            &[(1, "previous_response"), (4, "session"), (2, "turn_state")],
-            "none",
-        ),
+        tool_surface: prodex_mojo_core::runtime::compatibility_tool_surface(plan[3])
+            .expect("Mojo compatibility tool surface returned invalid output"),
+        continuation: prodex_mojo_core::runtime::compatibility_continuation_surface(plan[4])
+            .expect("Mojo compatibility continuation surface returned invalid output"),
         request_origin: compatibility_tag_label(&["external", "internal"], plan[6]),
         approval: plan[3] & 32 != 0,
-        user_agent: user_agent
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-            .unwrap_or("-")
-            .to_string(),
+        user_agent: prodex_mojo_core::runtime::compatibility_user_agent_display(user_agent)
+            .expect("Mojo compatibility user-agent display returned invalid output"),
         warnings: compatibility_flag_labels(
             plan[5],
             &[
@@ -161,19 +145,6 @@ fn compatibility_flag_labels(
         .collect()
 }
 
-fn compatibility_flag_string(
-    flags: i64,
-    labels: &'static [(i64, &'static str)],
-    empty: &'static str,
-) -> String {
-    let labels = compatibility_flag_labels(flags, labels);
-    if labels.is_empty() {
-        empty.to_string()
-    } else {
-        labels.join("+")
-    }
-}
-
 fn route_label(request: &RuntimeProxyRequest) -> &'static str {
     if is_runtime_compact_path(&request.path_and_query) {
         "compact"
@@ -200,24 +171,50 @@ pub fn runtime_detect_websocket_message_compatibility_surface(
 }
 
 pub fn runtime_capability_log_safe_value(value: &str) -> String {
-    let mut sanitized = String::with_capacity(value.len());
-    for ch in value.chars() {
-        if ch.is_ascii_alphanumeric() || matches!(ch, '.' | '_' | '-' | '/' | ':') {
-            sanitized.push(ch);
-        } else {
-            sanitized.push('_');
-        }
-    }
-    if sanitized.is_empty() {
-        "-".to_string()
-    } else {
-        sanitized
-    }
+    prodex_mojo_core::runtime::compatibility_log_safe_value(value)
+        .expect("compiled Mojo capability-log sanitization returned invalid output")
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn compatibility_diagnostics_use_compiled_mojo_sanitization() {
+        for (text, expected) in [
+            ("", "-"),
+            ("openai-cli/0.15.3", "openai-cli/0.15.3"),
+            ("Codex Client", "Codex_Client"),
+            ("test\r\nnext", "test__next"),
+            ("日本語🧭", "____"),
+            ("e\u{301}", "e_"),
+            (" x\u{2003}y ", "_x_y_"),
+        ] {
+            assert_eq!(
+                runtime_capability_log_safe_value(text),
+                expected,
+                "{text:?}"
+            );
+        }
+
+        let surface = runtime_detect_request_compatibility_surface(
+            &RuntimeProxyRequest {
+                method: "POST".to_string(),
+                path_and_query: "/backend-api/codex/responses".to_string(),
+                headers: vec![
+                    ("user-agent".to_string(), "\u{2003}Codex CLI\u{3000}".to_string()),
+                    ("x-codex-turn-state".to_string(), "turn-123".to_string()),
+                    ("session-id".to_string(), "session-123".to_string()),
+                ],
+                body: br#"{"previous_response_id":"resp-1","tools":[{"type":"web_search"},{"type":"shell_tool"},{"type":"approval_tool"}]}"#.to_vec(),
+            },
+            "request",
+            "websocket",
+        );
+        assert_eq!(surface.tool_surface, "approval+shell+tools+web");
+        assert_eq!(surface.continuation, "previous_response+session+turn_state");
+        assert_eq!(surface.user_agent, "Codex CLI");
+    }
 
     #[test]
     fn compact_request_is_unary_and_tracks_session() {

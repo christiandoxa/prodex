@@ -5744,3 +5744,11 @@ skew boundary, and saturated time addition to the compiled provider-
 constraints owner. Rust retains HTTP/chrono decoding and the system clock,
 with no Rust recomputation of the migrated numeric policy. Strict ABI and
 real provider-header caller tests cover numeric and relative reset times.
+
+## Runtime compatibility diagnostics moved into compiled Mojo
+
+The runtime compatibility surface now renders ordered tool and continuation
+flag text, Unicode-trimmed User-Agent display, and ASCII-safe log value text
+through the compiled Mojo owner. Duplicate Rust joining and Unicode scalar
+sanitization were deleted without a fallback. Versioned ABI, runtime proxy
+caller, and explicit no-fallback guard coverage preserve the output contract.
