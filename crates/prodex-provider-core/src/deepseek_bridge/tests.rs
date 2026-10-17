@@ -1103,6 +1103,78 @@ fn deepseek_provider_core_pushes_messages_from_response_items() {
 }
 
 #[test]
+fn compiled_deepseek_replay_emission_suppresses_duplicate_calls_and_recovers_only_new_mcp_output() {
+    let item = serde_json::json!({
+        "type": "mcp_call",
+        "call_id": "call_mcp",
+        "name": "mcp_lookup",
+        "result": {"result": "東京🧭"},
+    });
+    let calls = BTreeSet::from(["call_mcp".to_string()]);
+    let outputs = BTreeSet::new();
+    let signatures = BTreeSet::from([("user".to_string(), "already".to_string())]);
+    let mut messages = Vec::new();
+
+    // Existing tool call cannot replay; a new MCP result may still be added.
+    deepseek_provider_core_push_message_from_responses_item(
+        &item,
+        &mut messages,
+        &calls,
+        &outputs,
+        &signatures,
+    );
+    assert_eq!(messages.len(), 1);
+    assert_eq!(messages[0]["role"], "tool");
+    assert_eq!(messages[0]["tool_call_id"], "call_mcp");
+    assert!(!messages[0].to_string().contains("\"tool_calls\""));
+
+    // Once both identities are in history, neither call nor result can emit.
+    let outputs = BTreeSet::from(["call_mcp".to_string()]);
+    deepseek_provider_core_push_message_from_responses_item(
+        &item,
+        &mut messages,
+        &calls,
+        &outputs,
+        &signatures,
+    );
+    assert_eq!(messages.len(), 1);
+
+    // A replayed call without result fields also cannot emit.
+    deepseek_provider_core_push_message_from_responses_item(
+        &serde_json::json!({"type":"mcp_call","call_id":"call_mcp","name":"mcp_lookup"}),
+        &mut messages,
+        &calls,
+        &BTreeSet::new(),
+        &signatures,
+    );
+    assert_eq!(messages.len(), 1);
+
+    for item in [
+        serde_json::json!({"type":"message","role":"user","content":"already"}),
+        serde_json::json!({"type":"message","role":"user","content":" \u{2003} "}),
+    ] {
+        deepseek_provider_core_push_message_from_responses_item(
+            &item,
+            &mut messages,
+            &calls,
+            &outputs,
+            &signatures,
+        );
+        assert_eq!(messages.len(), 1);
+    }
+
+    deepseek_provider_core_push_message_from_responses_item(
+        &serde_json::json!({"type":"message","role":"user","content":"fresh 東京🧭"}),
+        &mut messages,
+        &calls,
+        &outputs,
+        &signatures,
+    );
+    assert_eq!(messages.len(), 2);
+    assert_eq!(messages[1]["content"], "fresh 東京🧭");
+}
+
+#[test]
 fn deepseek_provider_core_skips_replayed_response_items() {
     let mut messages = Vec::new();
     let replayed_tool_call_ids = BTreeSet::from(["call_1".to_string()]);

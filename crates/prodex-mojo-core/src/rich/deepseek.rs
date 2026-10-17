@@ -1,6 +1,12 @@
 #[path = "deepseek/input_item_issue.rs"]
 mod input_item_issue;
 pub use input_item_issue::deepseek_input_item_issue_message;
+#[path = "deepseek/replay_item.rs"]
+mod replay_item;
+pub use replay_item::{
+    DeepSeekReplayItemAction, DeepSeekReplayItemFacts, DeepSeekReplayItemKind,
+    deepseek_replay_item_action, deepseek_replay_item_kind,
+};
 
 use super::{
     MojoError, MojoIssue, RICH_ABI_VERSION, RichStringView, ensure_rich_abi,

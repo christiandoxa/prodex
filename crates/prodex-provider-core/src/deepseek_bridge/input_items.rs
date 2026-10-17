@@ -55,53 +55,54 @@ pub fn deepseek_provider_core_push_message_from_responses_item(
         .or_else(|| object.get("id"))
         .and_then(serde_json::Value::as_str)
         .unwrap_or("call_0");
-    let is_mcp = item_type == Some("mcp_call");
-    let is_call = matches!(
-        item_type,
-        Some("function_call" | "custom_tool_call" | "local_shell_call" | "mcp_call")
-    );
-    let is_output = matches!(
-        item_type,
-        Some(
-            "function_call_output"
-                | "custom_tool_call_output"
-                | "mcp_tool_result"
-                | "mcp_call_output"
-        )
-    );
-    if !is_call && !is_output {
-        let role = deepseek_provider_core_chat_role(
-            object
-                .get("role")
-                .and_then(serde_json::Value::as_str)
-                .unwrap_or("user"),
-        );
-        let text = deepseek_provider_core_responses_content_text(object.get("content"));
-        if text.trim().is_empty() || replayed_message_signatures.contains(&(role.to_string(), text))
-        {
-            return;
-        }
-    }
-
-    let emit_call = !is_call || !replayed_tool_call_ids.contains(call_id);
-    let emit_output = is_mcp
-        && ["output", "content", "result", "error"]
-            .iter()
-            .any(|key| object.contains_key(*key))
-        && !replayed_tool_output_call_ids.contains(call_id);
-    if (is_call && !emit_call && !emit_output)
-        || (is_output && replayed_tool_output_call_ids.contains(call_id))
-    {
+    let kind = prodex_mojo_core::rich::deepseek_replay_item_kind(item_type)
+        .expect("compiled Mojo DeepSeek replay item classification failed");
+    // The host resolves role/content text and history-key membership; the
+    // compiled planner owns which messages may be re-emitted on a continuation.
+    let (text_blank, text_duplicate) =
+        if kind == prodex_mojo_core::rich::DeepSeekReplayItemKind::Text {
+            let role = deepseek_provider_core_chat_role(
+                object
+                    .get("role")
+                    .and_then(serde_json::Value::as_str)
+                    .unwrap_or("user"),
+            );
+            let text = deepseek_provider_core_responses_content_text(object.get("content"));
+            (
+                text.trim().is_empty(),
+                replayed_message_signatures.contains(&(role.to_string(), text)),
+            )
+        } else {
+            (false, false)
+        };
+    let output_field_mask = ["output", "content", "result", "error"]
+        .iter()
+        .enumerate()
+        .fold(0_u8, |mask, (index, key)| {
+            mask | (u8::from(object.contains_key(*key)) << index)
+        });
+    let action = prodex_mojo_core::rich::deepseek_replay_item_action(
+        kind,
+        prodex_mojo_core::rich::DeepSeekReplayItemFacts {
+            replayed_call: replayed_tool_call_ids.contains(call_id),
+            replayed_output: replayed_tool_output_call_ids.contains(call_id),
+            output_field_mask,
+            text_blank,
+            text_duplicate,
+        },
+    )
+    .expect("compiled Mojo DeepSeek replay item emission decision failed");
+    let Some(action) = action else {
         return;
-    }
+    };
 
     let source = serde_json::to_string(item).expect("DeepSeek input item serializes");
     let mut input = prodex_mojo_core::rich::DeepSeekKernelInput::new(
         prodex_mojo_core::rich::DeepSeekKernelOperation::RawBridgeInputItem,
     );
     input.item = Some(&source);
-    input.stream = if is_output { true } else { emit_call };
-    input.sequence_number = u64::from(emit_output);
+    input.stream = action.stream;
+    input.sequence_number = u64::from(action.emit_output);
     let body = prodex_mojo_core::rich::deepseek_kernel(input)
         .unwrap_or_else(|error| panic!("Mojo DeepSeek input-item shaping failed: {error:?}"));
     let mapped: Vec<serde_json::Value> = serde_json::from_slice(&body).unwrap_or_else(|error| {

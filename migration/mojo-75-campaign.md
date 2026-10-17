@@ -5794,3 +5794,12 @@ canonical MCP double-underscore namespace names, preserving Unicode and
 original bytes. The previous Rust string parser was removed with no fallback.
 Production Anthropic/DeepSeek tool mapping and application provider-tool
 callers use the new typed ABI; strict ABI and caller tests cover the boundary.
+
+## DeepSeek history replay item emission moved to Mojo
+
+The compiled DeepSeek owner now classifies Responses input replay items and
+selects skip, call emission and MCP output emission after the host supplies
+history membership and JSON-field facts. The old Rust type matching and
+replay branch logic were deleted without fallback, preserving the existing
+single-call and no-duplicate-output invariants. Strict ABI and live provider
+caller regressions cover history replay and Unicode text preservation.

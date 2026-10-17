@@ -6918,3 +6918,96 @@ def prodex_deepseek_input_item_issue_message_v1(
     if not deepseek_request_issue_append_literal(output, output_capacity, written, suffix):
         return 3
     return 0
+
+# DeepSeek replay/history reconstruction: classification and emission are
+# compiled policies. Rust collects history membership and JSON field presence
+# without deciding which tool call/output may be replayed.
+comptime DEEPSEEK_REPLAY_ITEM_ABI_VERSION: Int64 = 1
+comptime DEEPSEEK_REPLAY_ITEM_TEXT: Int64 = 0
+comptime DEEPSEEK_REPLAY_ITEM_CALL: Int64 = 1
+comptime DEEPSEEK_REPLAY_ITEM_OUTPUT: Int64 = 2
+comptime DEEPSEEK_REPLAY_ITEM_MCP_CALL: Int64 = 3
+
+
+@export("prodex_deepseek_replay_item_kind_v1")
+def prodex_deepseek_replay_item_kind_v1(
+    abi_version: Int64,
+    item_type_address: UInt,
+    item_type_length: Int64,
+    result_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != DEEPSEEK_REPLAY_ITEM_ABI_VERSION:
+        return 4
+    if (
+        item_type_length < 0
+        or (item_type_length > 0 and item_type_address == 0)
+        or result_address == 0
+    ):
+        return 1
+    var view = ProdexRichStringView(item_type_address, UInt(item_type_length))
+    if not rich_view_valid(view, 0x7FFFFFFFFFFFFFFF):
+        return 1
+    var kind = DEEPSEEK_REPLAY_ITEM_TEXT
+    if rich_view_matches_literal["mcp_call"](view, False):
+        kind = DEEPSEEK_REPLAY_ITEM_MCP_CALL
+    elif (
+        rich_view_matches_literal["function_call"](view, False)
+        or rich_view_matches_literal["custom_tool_call"](view, False)
+        or rich_view_matches_literal["local_shell_call"](view, False)
+    ):
+        kind = DEEPSEEK_REPLAY_ITEM_CALL
+    elif (
+        rich_view_matches_literal["function_call_output"](view, False)
+        or rich_view_matches_literal["custom_tool_call_output"](view, False)
+        or rich_view_matches_literal["mcp_tool_result"](view, False)
+        or rich_view_matches_literal["mcp_call_output"](view, False)
+    ):
+        kind = DEEPSEEK_REPLAY_ITEM_OUTPUT
+    Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(result_address)
+    )[] = kind
+    return 0
+
+
+@export("prodex_deepseek_replay_item_action_v1")
+def prodex_deepseek_replay_item_action_v1(
+    abi_version: Int64,
+    kind: Int64,
+    replayed_call: Int64,
+    replayed_output: Int64,
+    output_field_mask: Int64,
+    text_blank: Int64,
+    text_duplicate: Int64,
+    result_address: UInt,
+    result_capacity: Int64,
+) abi("C") -> Int64:
+    if abi_version != DEEPSEEK_REPLAY_ITEM_ABI_VERSION:
+        return 4
+    if (
+        kind < DEEPSEEK_REPLAY_ITEM_TEXT or kind > DEEPSEEK_REPLAY_ITEM_MCP_CALL
+        or (replayed_call != 0 and replayed_call != 1)
+        or (replayed_output != 0 and replayed_output != 1)
+        or output_field_mask < 0 or output_field_mask > 15
+        or (text_blank != 0 and text_blank != 1)
+        or (text_duplicate != 0 and text_duplicate != 1)
+        or result_address == 0 or result_capacity < 3
+    ):
+        return 1
+    var is_call = kind == DEEPSEEK_REPLAY_ITEM_CALL or kind == DEEPSEEK_REPLAY_ITEM_MCP_CALL
+    var emit_call = not is_call or replayed_call == 0
+    var emit_output = (
+        kind == DEEPSEEK_REPLAY_ITEM_MCP_CALL
+        and output_field_mask != 0 and replayed_output == 0
+    )
+    var skip = (
+        (kind == DEEPSEEK_REPLAY_ITEM_TEXT and (text_blank == 1 or text_duplicate == 1))
+        or (is_call and not emit_call and not emit_output)
+        or (kind == DEEPSEEK_REPLAY_ITEM_OUTPUT and replayed_output == 1)
+    )
+    var result = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(result_address)
+    )
+    result[unsafe_offset=0] = Int64(not skip)
+    result[unsafe_offset=1] = Int64(kind == DEEPSEEK_REPLAY_ITEM_OUTPUT or emit_call)
+    result[unsafe_offset=2] = Int64(emit_output)
+    return 0
