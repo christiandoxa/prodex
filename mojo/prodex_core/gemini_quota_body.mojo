@@ -172,3 +172,117 @@ def prodex_gemini_quota_body_plan_v1(
     result[unsafe_offset=1] = Int64(rate)
     result[unsafe_offset=2] = message_index
     return 0
+
+
+# The same compiled Gemini quota owner also extracts nested retry-delay
+# fields and imposes rate/minute quota minimum delays. Float64 token parsing
+# remains with Rust's standard f64 parser to retain exact accepted grammar
+# and rounding, then Mojo selects the final maximum across all SSE frames.
+def gemini_quota_has_minute_limit(tree: ParsedJson, node: Int64) -> Bool:
+    var quota = pj_field(tree, node, StringSlice("quotaId"))
+    if quota < 0:
+        quota = pj_field(tree, node, StringSlice("quota_limit"))
+    if quota < 0:
+        quota = pj_field(tree, node, StringSlice("quotaLimit"))
+    return (
+        pj_kind(tree, quota) == JSON_STRING
+        and gemini_quota_contains(pj_text(tree, quota), StringSlice("PerMinute"))
+    )
+
+
+@export("prodex_gemini_retry_candidates_v1")
+def prodex_gemini_retry_candidates_v1(
+    abi_version: Int64,
+    nodes_address: UInt,
+    nodes_count: Int64,
+    raw_address: UInt,
+    raw_length: Int64,
+    candidate_address: UInt,
+    candidate_capacity: Int64,
+    written_address: UInt,
+    floor_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != GEMINI_QUOTA_BODY_ABI:
+        return 4
+    if (
+        nodes_address == 0 or nodes_count <= 0
+        or nodes_count > 0x7FFFFFFFFFFFFFFF // 80
+        or raw_address == 0 or raw_length < 0
+        or candidate_address == 0 or candidate_capacity < nodes_count * 2
+        or written_address == 0 or floor_address == 0
+    ):
+        return 1
+    var tree = ParsedJson(
+        Pointer[mut=False, ParsedJsonNode, ImmUntrackedOrigin](
+            unsafe_from_address=Int(nodes_address)
+        ),
+        nodes_count,
+        ProdexRichStringView(raw_address, UInt(raw_length)),
+    )
+    if not pj_valid(tree):
+        return 1
+    var candidates = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(candidate_address)
+    )
+    var written: Int64 = 0
+    var floor_ms: UInt64 = 0
+    for index in range(nodes_count):
+        var node = tree.nodes[unsafe_offset=index].copy()
+        if node.kind == JSON_OBJECT:
+            for key in [StringSlice("status"), StringSlice("code"), StringSlice("reason")]:
+                var code = pj_string_field(tree, index, key)
+                if code >= 0 and gemini_quota_rate_code(pj_text(tree, code)):
+                    floor_ms = max(floor_ms, UInt64(10000))
+            if gemini_quota_has_minute_limit(tree, index):
+                floor_ms = max(floor_ms, UInt64(60000))
+        if (
+            node.kind == JSON_STRING
+            and node.parent >= 0
+            and pj_kind(tree, node.parent) == JSON_OBJECT
+        ):
+            var kind: Int64 = -1
+            if rich_view_matches_literal["retryDelay"](node.key, False):
+                kind = 0
+            elif (
+                rich_view_matches_literal["message"](node.key, False)
+                or rich_view_matches_literal["detail"](node.key, False)
+                or rich_view_matches_literal["error"](node.key, False)
+            ):
+                kind = 1
+            if kind >= 0:
+                candidates[unsafe_offset=written * 2] = index
+                candidates[unsafe_offset=written * 2 + 1] = kind
+                written += 1
+    Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(written_address)
+    )[] = written
+    Pointer[mut=True, UInt64, MutUntrackedOrigin](
+        unsafe_from_address=Int(floor_address)
+    )[] = floor_ms
+    return 0
+
+
+@export("prodex_gemini_retry_delay_max_v1")
+def prodex_gemini_retry_delay_max_v1(
+    abi_version: Int64,
+    candidates_address: UInt,
+    candidate_count: Int64,
+    result_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != GEMINI_QUOTA_BODY_ABI:
+        return 4
+    if (
+        candidate_count < 0 or (candidate_count > 0 and candidates_address == 0)
+        or result_address == 0
+    ):
+        return 1
+    var values = Pointer[mut=False, UInt64, ImmUntrackedOrigin](
+        unsafe_from_address=Int(candidates_address)
+    )
+    var result: UInt64 = 0
+    for index in range(candidate_count):
+        result = max(result, values[unsafe_offset=index])
+    Pointer[mut=True, UInt64, MutUntrackedOrigin](
+        unsafe_from_address=Int(result_address)
+    )[] = result
+    return 0

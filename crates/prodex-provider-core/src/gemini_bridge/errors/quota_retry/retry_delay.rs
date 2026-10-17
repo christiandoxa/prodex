@@ -4,8 +4,6 @@ use prodex_mojo_core::provider_constraints::{
     gemini_invalid_stream_retry_delay_ms, gemini_retry_delay_ms, gemini_retry_inline_threshold_ms,
     gemini_should_inline_retry,
 };
-use prodex_mojo_core::rich::ascii_casefold_equal_exact;
-
 #[path = "retry_delay/duration.rs"]
 mod duration;
 
@@ -14,12 +12,39 @@ use self::duration::{
     gemini_provider_core_retry_delay_ms_from_message,
 };
 use super::gemini_provider_core_values_from_body;
+use crate::mojo_json::Document;
+use prodex_mojo_core::json::{
+    GeminiRetryCandidateKind, gemini_retry_candidates, gemini_retry_delay_max,
+};
 
 pub fn gemini_provider_core_retry_delay_ms_from_body(body: &[u8]) -> Option<u64> {
-    gemini_provider_core_values_from_body(body)
-        .iter()
-        .filter_map(gemini_provider_core_retry_delay_ms_from_value)
-        .max()
+    let mut delays_ms = Vec::new();
+    for value in gemini_provider_core_values_from_body(body) {
+        let mut document = Document::default();
+        document.push(&value, None, "");
+        let raw =
+            std::str::from_utf8(&document.raw).expect("Serde Gemini retry body must remain UTF-8");
+        let plan = gemini_retry_candidates(&document.nodes, raw)
+            .expect("compiled Mojo Gemini nested retry candidate scan failed");
+        if plan.floor_ms > 0 {
+            delays_ms.push(plan.floor_ms);
+        }
+        for field in plan.fields {
+            let candidate = match field.kind {
+                GeminiRetryCandidateKind::ExplicitDuration => {
+                    gemini_provider_core_duration_ms(field.text)
+                }
+                GeminiRetryCandidateKind::MessageText => {
+                    gemini_provider_core_retry_delay_ms_from_message(field.text)
+                }
+            };
+            if let Some(candidate) = candidate {
+                delays_ms.push(candidate);
+            }
+        }
+    }
+    gemini_retry_delay_max(&delays_ms)
+        .expect("compiled Mojo Gemini retry-delay maximum policy returned invalid output")
 }
 
 pub fn gemini_provider_core_retry_delay_ms(
@@ -48,89 +73,4 @@ pub fn gemini_provider_core_invalid_stream_retry_delay_ms(retry_index: usize) ->
 pub fn gemini_provider_core_inline_retry_threshold_ms() -> u64 {
     gemini_retry_inline_threshold_ms()
         .expect("Mojo Gemini inline-retry threshold policy returned invalid output")
-}
-
-fn gemini_provider_core_retry_delay_ms_from_value(value: &serde_json::Value) -> Option<u64> {
-    let mut best = None;
-    let mut stack = vec![value];
-    while let Some(value) = stack.pop() {
-        gemini_provider_core_record_retry_value(value, &mut best, &mut stack);
-    }
-    best
-}
-
-fn gemini_provider_core_record_retry_value<'a>(
-    value: &'a serde_json::Value,
-    best: &mut Option<u64>,
-    stack: &mut Vec<&'a serde_json::Value>,
-) {
-    match value {
-        serde_json::Value::Object(object) => {
-            if let Some(delay_ms) = object
-                .get("retryDelay")
-                .and_then(serde_json::Value::as_str)
-                .and_then(gemini_provider_core_duration_ms)
-            {
-                gemini_provider_core_update_max_ms(best, delay_ms);
-            }
-            for key in ["message", "detail", "error"] {
-                if let Some(delay_ms) = object
-                    .get(key)
-                    .and_then(serde_json::Value::as_str)
-                    .and_then(gemini_provider_core_retry_delay_ms_from_message)
-                {
-                    gemini_provider_core_update_max_ms(best, delay_ms);
-                }
-            }
-            if ["status", "code", "reason"].into_iter().any(|key| {
-                object
-                    .get(key)
-                    .and_then(serde_json::Value::as_str)
-                    .is_some_and(gemini_provider_core_google_rate_limit_code)
-            }) {
-                gemini_provider_core_update_max_ms(best, 10_000);
-            }
-            if gemini_provider_core_object_mentions_quota_limit(object, "PerMinute") {
-                gemini_provider_core_update_max_ms(best, 60_000);
-            }
-            stack.extend(object.values());
-        }
-        serde_json::Value::Array(values) => stack.extend(values),
-        _ => {}
-    }
-}
-
-fn gemini_provider_core_update_max_ms(best: &mut Option<u64>, candidate: u64) {
-    if candidate == 0 {
-        return;
-    }
-    *best = Some(best.map_or(candidate, |current| current.max(candidate)));
-}
-
-pub(super) fn gemini_provider_core_object_mentions_quota_limit(
-    object: &serde_json::Map<String, serde_json::Value>,
-    needle: &str,
-) -> bool {
-    object
-        .get("quotaId")
-        .or_else(|| object.get("quota_limit"))
-        .or_else(|| object.get("quotaLimit"))
-        .and_then(serde_json::Value::as_str)
-        .is_some_and(|quota| quota.contains(needle))
-        || object
-            .get("metadata")
-            .and_then(serde_json::Value::as_object)
-            .is_some_and(|metadata| {
-                gemini_provider_core_object_mentions_quota_limit(metadata, needle)
-            })
-}
-
-pub(super) fn gemini_provider_core_google_rate_limit_code(code: &str) -> bool {
-    let code = code.trim();
-    ["rate_limit_exceeded", "rate_limit_exceeded_error"]
-        .into_iter()
-        .any(|candidate| {
-            ascii_casefold_equal_exact(code, candidate)
-                .expect("Mojo Gemini rate-limit code comparison failed")
-        })
 }

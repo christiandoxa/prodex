@@ -171,6 +171,7 @@ const PING_SUMMARY_CALLER_TEST_FILE = "crates/prodex-app/src/app_commands/ping_t
 const PING_SUMMARY_ADAPTER_FILE = "crates/prodex-mojo-core/src/rich/ping_protocol.rs";
 const PING_SUMMARY_MOJO_FILE = "mojo/prodex_core/ping_protocol.mojo";
 const PROMOTED_FILES = [
+  "crates/prodex-provider-core/src/gemini_bridge/errors/quota_retry/retry_delay.rs",
   "crates/prodex-provider-core/src/gemini_bridge/errors/quota_retry.rs",
   "crates/prodex-provider-core/src/gemini_bridge/errors/quota_retry/body.rs",
   "crates/prodex-mojo-core/src/json/gemini_quota.rs",
@@ -8437,6 +8438,7 @@ export function findViolations(files) {
         ".rate_limit",
         ".quota_message",
         "compiled_gemini_quota_tree_preserves_nested_precedence_daily_limits_and_sse_frames",
+        "compiled_gemini_retry_candidates_keep_duration_grammar_rate_minimum_and_sse_maximum",
       ];
       const retired = [
         "let mut stack = vec![value]",
@@ -8447,6 +8449,27 @@ export function findViolations(files) {
       return required.every((marker) => contents.includes(marker)) &&
         retired.every((marker) => !contents.includes(marker))
         ? [] : [filePath + ": restored Rust Gemini quota traversal or classification"];
+    }
+    if (filePath === "crates/prodex-provider-core/src/gemini_bridge/errors/quota_retry/retry_delay.rs") {
+      const required = [
+        "gemini_retry_candidates(&document.nodes, raw)",
+        "gemini_retry_delay_max(&delays_ms)",
+        "GeminiRetryCandidateKind::ExplicitDuration",
+        "GeminiRetryCandidateKind::MessageText",
+        "gemini_provider_core_duration_ms(field.text)",
+        "gemini_provider_core_retry_delay_ms_from_message(field.text)",
+      ];
+      const retired = [
+        "let mut stack = vec![value]",
+        "fn gemini_provider_core_record_retry_value(",
+        "fn gemini_provider_core_object_mentions_quota_limit(",
+        "fn gemini_provider_core_google_rate_limit_code(",
+        ".filter_map(gemini_provider_core_retry_delay_ms_from_value)",
+        ".max()",
+      ];
+      return required.every((marker) => contents.includes(marker)) &&
+        retired.every((marker) => !contents.includes(marker))
+        ? [] : [filePath + ": restored Rust Gemini retry-delay JSON traversal or maximum policy"];
     }
     if (filePath === "crates/prodex-provider-core/src/gemini_bridge/errors/quota_retry/body.rs") {
       const retired = [
@@ -8462,6 +8485,12 @@ export function findViolations(files) {
         "pub fn gemini_quota_body_plan(",
         "mojo_quota_body_classifies_nested_terminal_rate_and_message",
         "mojo_quota_body_abi_rejects_bad_views_and_buffers_without_output",
+        "fn prodex_gemini_retry_candidates_v1(",
+        "fn prodex_gemini_retry_delay_max_v1(",
+        "pub fn gemini_retry_candidates<",
+        "pub fn gemini_retry_delay_max(",
+        "mojo_retry_candidates_extract_nested_message_and_rate_floor",
+        "mojo_retry_candidate_and_max_abis_reject_invalid_shapes_before_writes",
       ].filter((marker) => !contents.includes(marker))
         .map((marker) => filePath + ": Mojo Gemini quota body typed ABI or tests missing " + marker);
     }
@@ -8473,6 +8502,9 @@ export function findViolations(files) {
         "gemini_quota_has_daily_limit(",
         "gemini_quota_message_field(",
         "previous[unsafe_offset=child] = prior",
+        '@export("prodex_gemini_retry_candidates_v1")',
+        '@export("prodex_gemini_retry_delay_max_v1")',
+        "gemini_quota_has_minute_limit(",
       ].filter((marker) => !contents.includes(marker))
         .map((marker) => filePath + ": compiled Gemini quota traversal ownership missing " + marker);
     }
@@ -9856,12 +9888,26 @@ function selfTest() {
     "prodex_mojo_core::json::gemini_quota_body_plan(&document.nodes, raw)",
     ".terminal_quota", ".rate_limit", ".quota_message",
     "compiled_gemini_quota_tree_preserves_nested_precedence_daily_limits_and_sse_frames",
+    "compiled_gemini_retry_candidates_keep_duration_grammar_rate_minimum_and_sse_maximum",
   ].join("\n");
   const geminiQuotaBodyFile = "crates/prodex-provider-core/src/gemini_bridge/errors/quota_retry.rs";
   assert.deepEqual(findViolations([[geminiQuotaBodyFile, geminiQuotaBodyConsumer]]), []);
   assert.match(findViolations([[geminiQuotaBodyFile,
     geminiQuotaBodyConsumer + "\nlet mut stack = vec![value]",
   ]]).join("\n"), /restored Rust Gemini quota traversal or classification/u);
+  const geminiRetryDelayCaller = [
+    "gemini_retry_candidates(&document.nodes, raw)",
+    "gemini_retry_delay_max(&delays_ms)",
+    "GeminiRetryCandidateKind::ExplicitDuration",
+    "GeminiRetryCandidateKind::MessageText",
+    "gemini_provider_core_duration_ms(field.text)",
+    "gemini_provider_core_retry_delay_ms_from_message(field.text)",
+  ].join("\n");
+  const geminiRetryDelayFile = "crates/prodex-provider-core/src/gemini_bridge/errors/quota_retry/retry_delay.rs";
+  assert.deepEqual(findViolations([[geminiRetryDelayFile, geminiRetryDelayCaller]]), []);
+  assert.match(findViolations([[geminiRetryDelayFile,
+    geminiRetryDelayCaller + "\nlet mut stack = vec![value]",
+  ]]).join("\n"), /restored Rust Gemini retry-delay JSON traversal or maximum policy/u);
   const geminiOAuthRotationCaller = [
     "gemini_oauth_profile_rotation_plan(",
     "state.next_index = rotation.next_index;",

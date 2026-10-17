@@ -5883,3 +5883,13 @@ quota markers and prioritized quota messages. The Rust recursive stack
 classifiers and duplicate nested message search were removed, with no Rust
 fallback. SSE frame decoding remains a host boundary. Versioned ABI,
 provider-core regressions and no-fallback guards preserve nested precedence.
+
+## Gemini nested retry candidate selection and maximum moved to Mojo
+
+The Gemini quota response owner now emits the nested retry-delay string
+candidates and the compiled rate/per-minute heuristic floor, then computes
+the final maximum across parsed SSE frames. The Rust recursive retry scan,
+quota marker matcher and delay maximum policy were removed. Host parsing of
+floating-point duration tokens remains intentionally Rust-owned until the
+exact accepted `f64` grammar is separately qualified in Mojo. Direct ABI,
+provider regressions and source guards preserve the existing retry contract.

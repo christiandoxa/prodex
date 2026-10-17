@@ -168,6 +168,84 @@ data: [DONE]\n";
     }
 
     #[test]
+    fn compiled_gemini_retry_candidates_keep_duration_grammar_rate_minimum_and_sse_maximum() {
+        for (json, expected) in [
+            (serde_json::json!({"retryDelay":"1.5s"}), Some(1500)),
+            (
+                serde_json::json!({"error":{"retryDelay":"9e1s"}}),
+                Some(90_000),
+            ),
+            (
+                serde_json::json!({"error":{"retryDelay":"250ms"}}),
+                Some(250),
+            ),
+            (
+                serde_json::json!({"message":"PLEASE RETRY IN 2.75S"}),
+                Some(2750),
+            ),
+            (
+                serde_json::json!({"detail":"SUGGESTED RETRY AFTER 250MS"}),
+                Some(250),
+            ),
+            (
+                serde_json::json!({"error":{"reason":"RATE_LIMIT_EXCEEDED_ERROR"}}),
+                Some(10_000),
+            ),
+            (
+                serde_json::json!({"metadata":{"quotaId":"RequestsPerMinute"}}),
+                Some(60_000),
+            ),
+            (
+                serde_json::json!({"metadata":{"quota_limit":"RequestsPerMinute"}}),
+                Some(60_000),
+            ),
+            (
+                serde_json::json!({"error":{"retryDelay":"70s","code":"RATE_LIMIT_EXCEEDED"}}),
+                Some(70_000),
+            ),
+            (
+                serde_json::json!({"metadata":{"quotaId":"RequestsPerMinute"},"retryDelay":"61s"}),
+                Some(61_000),
+            ),
+            (
+                serde_json::json!({"metadata":{"quotaId":"RequestsPerDay"}}),
+                None,
+            ),
+            (
+                serde_json::json!({"retryDelay":"0ms","message":"retry later"}),
+                None,
+            ),
+            (serde_json::json!({"retryDelay":null,"status":429}), None),
+            (
+                serde_json::json!({"unrelated":{"retryDelay":"0.01s"}}),
+                Some(10),
+            ),
+        ] {
+            let body = serde_json::to_vec(&json).unwrap();
+            assert_eq!(
+                gemini_provider_core_retry_delay_ms_from_body(&body),
+                expected,
+                "{json:?}",
+            );
+        }
+        let frames = b"data: {\"error\":{\"retryDelay\":\"1.5s\"}}\n\
+data: not-json\n\
+data: {\"error\":{\"message\":\"SUGGESTED RETRY AFTER 90S\"}}\n\
+data: {\"metadata\":{\"quotaId\":\"QueriesPerMinute\"}}\n\
+data: [DONE]\n";
+        assert_eq!(
+            gemini_provider_core_retry_delay_ms_from_body(frames),
+            Some(90_000)
+        );
+        let frames = b"data: {\"error\":{\"retryDelay\":\"1.5s\"}}\n\
+data: {\"metadata\":{\"quotaId\":\"QueriesPerMinute\"}}\n";
+        assert_eq!(
+            gemini_provider_core_retry_delay_ms_from_body(frames),
+            Some(60_000)
+        );
+    }
+
+    #[test]
     fn gemini_quota_code_casefold_preserves_trimmed_contract() {
         let terminal = br#"{"error":{"status":" RESOURCE_EXHAUSTED "}}"#;
         assert!(gemini_provider_core_body_has_terminal_quota(terminal));
