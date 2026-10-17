@@ -5874,3 +5874,12 @@ Rust's two duplicate previous-response/first-tool selection branches were
 removed. Rust still parses JSON, stores maps and materializes the Mojo-
 selected bound identity. Direct ABI, competing-binding caller regressions,
 all Gemini rewrite tests and no-fallback guards preserve session affinity.
+
+## Gemini quota JSON classification moved into compiled Mojo
+
+The Gemini quota error and retry pipeline now traverses nested Serde-decoded
+JSON through the compiled Mojo owner, including quota/rate-limit codes, daily
+quota markers and prioritized quota messages. The Rust recursive stack
+classifiers and duplicate nested message search were removed, with no Rust
+fallback. SSE frame decoding remains a host boundary. Versioned ABI,
+provider-core regressions and no-fallback guards preserve nested precedence.

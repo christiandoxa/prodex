@@ -134,19 +134,3 @@ pub(super) fn gemini_provider_core_google_rate_limit_code(code: &str) -> bool {
                 .expect("Mojo Gemini rate-limit code comparison failed")
         })
 }
-
-pub(super) fn gemini_provider_core_google_terminal_quota_code(code: &str) -> bool {
-    let code = code.trim();
-    [
-        "quota_exhausted",
-        "quota_exceeded",
-        "resource_exhausted",
-        "insufficient_g1_credits_balance",
-        "insufficient_quota",
-    ]
-    .into_iter()
-    .any(|candidate| {
-        ascii_casefold_equal_exact(code, candidate)
-            .expect("Mojo Gemini terminal-quota code comparison failed")
-    })
-}
