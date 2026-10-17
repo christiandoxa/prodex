@@ -1,4 +1,4 @@
-use super::{StringView, status};
+use super::{StringView, signed, status};
 use crate::MojoError;
 
 unsafe extern "C" {
@@ -61,6 +61,16 @@ unsafe extern "C" {
         selector_length: i64,
         output_address: u64,
     ) -> i64;
+    fn prodex_session_recent_workspace_plan_v1(
+        abi_version: i64,
+        candidates_address: u64,
+        candidates_count: i64,
+        max_workspaces: i64,
+        output_address: u64,
+        output_capacity: i64,
+        scratch_address: u64,
+        scratch_capacity: i64,
+    ) -> i64;
 }
 
 const SESSION_SELECTOR_ABI_VERSION: i64 = 1;
@@ -72,9 +82,19 @@ struct SessionSelectorIdFfi {
     id: StringView,
 }
 
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct SessionRecentWorkspaceCandidateFfi {
+    modified_epoch: i64,
+    absolute: i64,
+    workspace: StringView,
+}
+
 const _: () = {
     assert!(std::mem::size_of::<SessionSelectorIdFfi>() == 16);
     assert!(std::mem::align_of::<SessionSelectorIdFfi>() == 8);
+    assert!(std::mem::size_of::<SessionRecentWorkspaceCandidateFfi>() == 32);
+    assert!(std::mem::align_of::<SessionRecentWorkspaceCandidateFfi>() == 8);
 };
 
 fn view(value: &str) -> StringView {
@@ -197,6 +217,18 @@ pub struct SessionStateDbRowMatchPlan {
     pub session_id_source: SessionStateDbRowSessionIdSource,
 }
 
+/// Filesystem facts for one recent-session workspace candidate.
+///
+/// The session-store caller owns path discovery and JSONL reads. Mojo owns the
+/// deterministic newest-first, exact-deduplication, relative-path filtering,
+/// and limit plan over these facts.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SessionRecentWorkspaceCandidate<'a> {
+    pub modified_epoch: i64,
+    pub absolute: bool,
+    pub workspace: &'a str,
+}
+
 pub fn session_file_name_plan(name: &str) -> Result<SessionFileNamePlan, MojoError> {
     let mut output = [-1_i64; 2];
     status(unsafe {
@@ -264,6 +296,55 @@ pub fn session_state_db_row_match_plan(
         match_kind,
         session_id_source,
     })
+}
+
+/// Plans recent workspace candidates without filesystem or session-store access.
+pub fn session_recent_workspace_plan(
+    candidates: &[SessionRecentWorkspaceCandidate<'_>],
+    max_workspaces: usize,
+) -> Result<Vec<usize>, MojoError> {
+    let candidate_count = signed(candidates.len())?;
+    let selected_limit = max_workspaces.min(candidates.len());
+    let selected_limit = signed(selected_limit)?;
+    let output_capacity = selected_limit
+        .checked_add(1)
+        .ok_or(MojoError::InvalidInput)?;
+    let ffi_candidates = candidates
+        .iter()
+        .map(|candidate| SessionRecentWorkspaceCandidateFfi {
+            modified_epoch: candidate.modified_epoch,
+            absolute: i64::from(candidate.absolute),
+            workspace: view(candidate.workspace),
+        })
+        .collect::<Vec<_>>();
+    let mut output =
+        vec![-1_i64; usize::try_from(output_capacity).map_err(|_| MojoError::InvalidInput)?];
+    let mut scratch = vec![-1_i64; candidates.len()];
+    status(unsafe {
+        prodex_session_recent_workspace_plan_v1(
+            SESSION_SELECTOR_ABI_VERSION,
+            ffi_candidates.as_ptr() as u64,
+            candidate_count,
+            selected_limit,
+            output.as_mut_ptr() as u64,
+            output_capacity,
+            scratch.as_mut_ptr() as u64,
+            candidate_count,
+        )
+    })?;
+    let selected_count = usize::try_from(output[0]).map_err(|_| MojoError::InvalidOutput)?;
+    if selected_count > selected_limit as usize {
+        return Err(MojoError::InvalidOutput);
+    }
+    let mut selected = Vec::with_capacity(selected_count);
+    for value in output.iter().skip(1).take(selected_count) {
+        let index = usize::try_from(*value).map_err(|_| MojoError::InvalidOutput)?;
+        if index >= candidates.len() || selected.contains(&index) {
+            return Err(MojoError::InvalidOutput);
+        }
+        selected.push(index);
+    }
+    Ok(selected)
 }
 
 /// Match a query against the six normalized fields shown by `prodex session list`.

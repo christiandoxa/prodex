@@ -687,7 +687,8 @@
           "session_selector_resolution_policy",
           "session_report_query_matching_policy",
           "session_file_name_policy",
-          "session_state_db_row_match_policy"
+          "session_state_db_row_match_policy",
+          "session_recent_workspace_selection_policy"
         ]
       },
       {
@@ -712,7 +713,8 @@
           "session_selector_resolution_policy",
           "session_report_query_matching_policy",
           "session_file_name_policy",
-          "session_state_db_row_match_policy"
+          "session_state_db_row_match_policy",
+          "session_recent_workspace_selection_policy"
         ]
       },
       {
@@ -5909,6 +5911,31 @@
       "duplicate_production_owner": false,
       "platform_fallback": false,
       "rust_adapter_scope": "Rust executes SQLite queries, extracts the UTF-8 path stem, validates containment and metadata files, materializes the selected session ID, and maps the typed plan to existing repair candidates"
+    },
+    {
+      "name": "session_recent_workspace_selection_policy",
+      "domain": "session-store/recent-workspaces",
+      "introduced_in": "0.438.0",
+      "baseline_state": "Rust sorted session files by modification time, discarded relative CWDs, deduplicated exact workspace paths, and stopped at the requested limit",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_session_recent_workspace_plan_v1",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/session_selector.mojo",
+      "consumer": "crates/prodex-session-store/src/recent_workspaces.rs",
+      "consumer_marker": "prodex_mojo_core::json::session_recent_workspace_plan",
+      "production_consumers": [
+        "crates/prodex-session-store/src/recent_workspaces.rs",
+        "crates/prodex-session-store/src/lib.rs"
+      ],
+      "production_reachability_test": "crates/prodex-session-store/tests/src/lib.rs",
+      "caller_regression_test": "crates/prodex-mojo-core/tests/session_selector.rs",
+      "rust_owner_before": "Rust owned newest-first session candidate ordering, absolute-CWD admission, exact workspace deduplication, and the maximum-workspace limit",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "deleted; compiled Mojo ABI vectors and session-store caller regressions cover newest ordering, stable ties, relative paths, duplicate workspaces, zero limits, and bounded output",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "Rust retains session-path traversal, JSONL metadata reads, filesystem modification times, platform PathBuf facts, and selected-path materialization; Mojo owns the bounded deterministic candidate plan"
     },
     {
       "name": "smart_context_artifact_reference_policy",
