@@ -5856,3 +5856,12 @@ heuristics exclude everyone. Rust's duplicate modulo/round-robin ordering and
 fallback loop were removed; Rust still owns affinity, profile state and
 application of the validated indices. Direct ABI, real Gemini OAuth caller
 and no-fallback tests protect rotation and retry fairness.
+
+## Chat-compatible tool call classification moved to Mojo
+
+The compiled chat-tools owner now recognizes missing functions, empty or
+Unicode-blank names, exact tool_search/apply_patch names and ordinary
+functions. Rust's special tool kind comparisons and name-blank classifier
+were deleted without fallback. The existing compiled response builder still
+renders tool items; versioned ABI, direct and production caller regression
+coverage and the no-fallback guard protect the contract.

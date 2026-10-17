@@ -8381,6 +8381,48 @@ export function findViolations(files) {
     }
     return [];
   });
+  const chatCompatibleToolCallKindViolations = files.flatMap(([filePath, contents]) => {
+    if (filePath === "crates/prodex-provider-core/src/bridge/chat_compat/tool_calls.rs") {
+      const required = [
+        "chat_compatible_tool_call_kind(",
+        "ChatCompatibleToolCallKind::ToolSearch",
+        "ChatCompatibleToolCallKind::ApplyPatch",
+        "ChatCompatibleToolCallKind::InvalidFunction",
+        "ChatCompatibleToolCallKind::InvalidName",
+      ];
+      const retired = [
+        'if name == "tool_search" {',
+        'if name == "apply_patch" {',
+        ".filter(|name| !name.trim().is_empty())",
+      ];
+      return required.every((marker) => contents.includes(marker)) &&
+        retired.every((marker) => !contents.includes(marker))
+        ? [] : [filePath + ": restored Rust chat-compatible tool-call classification"];
+    }
+    if (filePath === "crates/prodex-mojo-core/src/chat_tool_name_policy.rs") {
+      return [
+        "fn prodex_chat_compatible_tool_call_kind_v1(",
+        "pub fn chat_compatible_tool_call_kind(",
+        "compiled_chat_compatible_tool_call_kind_preserves_special_names_and_unicode_validation",
+        "compiled_chat_compatible_tool_call_kind_abi_rejects_invalid_flags_utf8_and_pointers",
+      ].filter((marker) => !contents.includes(marker))
+        .map((marker) => filePath + ": Mojo chat-compatible tool-call ABI or coverage missing " + marker);
+    }
+    if (filePath === "mojo/prodex_core/chat_tools.mojo") {
+      return [
+        '@export("prodex_chat_compatible_tool_call_kind_v1")',
+        "rich_trim_bounds(view)",
+        'rich_view_matches_literal["tool_search"]',
+        'rich_view_matches_literal["apply_patch"]',
+      ].filter((marker) => !contents.includes(marker))
+        .map((marker) => filePath + ": compiled chat-compatible tool-call classification missing " + marker);
+    }
+    if (filePath === "crates/prodex-provider-core/src/bridge/tests.rs") {
+      return contents.includes("compiled_chat_tool_call_classifier_preserves_special_names_and_rejects_blank_unicode")
+        ? [] : [filePath + ": real chat-compatible tool-call classifier regression missing"];
+    }
+    return [];
+  });
   const geminiOAuthRotationMojoViolations = files.flatMap(([filePath, contents]) => {
     if (filePath === "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_gemini_oauth_pool.rs") {
       const required = [
@@ -8973,7 +9015,7 @@ export function findViolations(files) {
     }
     return [];
   });
-  return [...logPayloadProjectionViolations, ...nativeRecoveryOwnershipViolations, ...quotaRecoveryEligibilityViolations, ...runtimeBrokerReuseMojoViolations, ...geminiResponseMediaMojoViolations, ...cookieEvictionMojoViolations, ...websocketBudgetMojoViolations, ...affinityBindingMojoViolations, ...responsesCapacityRecoveryViolations, ...sseTapMojoOwnershipViolations, ...quotaWatchViolations, ...geminiCompactSnippetViolations, ...geminiCompactTextViolations, ...doctorSmartContextDecisionViolations, ...anthropicAttemptCursorViolations, ...geminiUnsupportedToolRetryViolations, ...terminalGeometryViolations, ...previousResponseRecoveryTransitionViolations, ...geminiOAuthRotationMojoViolations, ...geminiOAuthModelMojoViolations, ...superExposeOriginMojoViolations, ...kiroAcpToolLedgerMojoViolations, ...quotaPoolSummarySectionsMojoViolations, ...deepseekToolShapeIssueMojoViolations, ...deepseekReplayItemPolicyMojoViolations, ...chatNamespaceSplitMojoViolations, ...deepseekInputItemIssueMessageViolations, ...deepseekRequestIssueMessageViolations, ...smartContextTelemetrySampleViolations, ...compatibilityDiagnosticsMojoViolations, ...quotaHeaderProjectionViolations, ...smartContextCapsuleOrderViolations, ...markerViolations, ...deepseekCatalogPolicyViolations, ...featureOffViolations, ...liveLogRecordViolations, ...runtimePolicyPresetViolations, ...runtimeConfigScalarViolations, ...profileHealthCircuitViolations, ...logThroughputViolations, ...operationalDetailSpecViolations, ...transcriptPolicyViolations, ...logLoadPolicyViolations, ...routeReasonViolations, ...runtimeStateQuotaViolations, ...runtimeStateRoutePolicyViolations, ...runtimeProxyRootViolations, ...runtimeRecoveryDeadlineViolations, ...brokerVersionGuardViolations, ...brokerContinuityViolations, ...brokerLogCacheViolations, ...codexConfigViolations, ...statePolicyViolations, ...quotaSelectionPolicyViolations, ...routeTagMirrorViolations, ...enumTagMirrorViolations, ...appSelectionPolicyMirrorViolations, ...runtimeStateBackgroundViolations, ...redactionViolations, ...rateLimitHeaderSelectionViolations, ...profileIdentityViolations, ...governanceInspectionViolations, ...governanceInspectionOrderingViolations, ...exactnessPlannerViolations,
+  return [...logPayloadProjectionViolations, ...nativeRecoveryOwnershipViolations, ...quotaRecoveryEligibilityViolations, ...runtimeBrokerReuseMojoViolations, ...geminiResponseMediaMojoViolations, ...cookieEvictionMojoViolations, ...websocketBudgetMojoViolations, ...affinityBindingMojoViolations, ...responsesCapacityRecoveryViolations, ...sseTapMojoOwnershipViolations, ...quotaWatchViolations, ...geminiCompactSnippetViolations, ...geminiCompactTextViolations, ...doctorSmartContextDecisionViolations, ...anthropicAttemptCursorViolations, ...geminiUnsupportedToolRetryViolations, ...terminalGeometryViolations, ...previousResponseRecoveryTransitionViolations, ...chatCompatibleToolCallKindViolations, ...geminiOAuthRotationMojoViolations, ...geminiOAuthModelMojoViolations, ...superExposeOriginMojoViolations, ...kiroAcpToolLedgerMojoViolations, ...quotaPoolSummarySectionsMojoViolations, ...deepseekToolShapeIssueMojoViolations, ...deepseekReplayItemPolicyMojoViolations, ...chatNamespaceSplitMojoViolations, ...deepseekInputItemIssueMessageViolations, ...deepseekRequestIssueMessageViolations, ...smartContextTelemetrySampleViolations, ...compatibilityDiagnosticsMojoViolations, ...quotaHeaderProjectionViolations, ...smartContextCapsuleOrderViolations, ...markerViolations, ...deepseekCatalogPolicyViolations, ...featureOffViolations, ...liveLogRecordViolations, ...runtimePolicyPresetViolations, ...runtimeConfigScalarViolations, ...profileHealthCircuitViolations, ...logThroughputViolations, ...operationalDetailSpecViolations, ...transcriptPolicyViolations, ...logLoadPolicyViolations, ...routeReasonViolations, ...runtimeStateQuotaViolations, ...runtimeStateRoutePolicyViolations, ...runtimeProxyRootViolations, ...runtimeRecoveryDeadlineViolations, ...brokerVersionGuardViolations, ...brokerContinuityViolations, ...brokerLogCacheViolations, ...codexConfigViolations, ...statePolicyViolations, ...quotaSelectionPolicyViolations, ...routeTagMirrorViolations, ...enumTagMirrorViolations, ...appSelectionPolicyMirrorViolations, ...runtimeStateBackgroundViolations, ...redactionViolations, ...rateLimitHeaderSelectionViolations, ...profileIdentityViolations, ...governanceInspectionViolations, ...governanceInspectionOrderingViolations, ...exactnessPlannerViolations,
     ...adaptiveBudgetViolations,
     ...providerUsageViolations,
     ...auditUsageViolations,
@@ -9819,9 +9861,21 @@ function selfTest() {
   assert.match(findViolations([[deepseekReplayItemFile,
     deepseekReplayItemConsumer + "\nlet is_call = matches!(",
   ]]).join("\n"), /restored Rust DeepSeek replay item classification\/emission policy/u);
+  const chatCompatibleKindConsumer = [
+    "chat_compatible_tool_call_kind(",
+    "ChatCompatibleToolCallKind::ToolSearch",
+    "ChatCompatibleToolCallKind::ApplyPatch",
+    "ChatCompatibleToolCallKind::InvalidFunction",
+    "ChatCompatibleToolCallKind::InvalidName",
+  ].join("\n");
+  const chatCompatibleKindCaller = "crates/prodex-provider-core/src/bridge/chat_compat/tool_calls.rs";
+  assert.match(findViolations([[chatCompatibleKindCaller,
+    chatCompatibleKindConsumer + "\nif name == \"tool_search\" {",
+  ]]).join("\n"), /restored Rust chat-compatible tool-call classification/u);
   const namespaceSplitConsumer = [
     "prodex_mojo_core::chat_tool_name_policy::split_flat_namespace_tool_name(name)",
     "Some((namespace, tool))",
+    ...chatCompatibleKindConsumer.split("\n"),
   ].join("\n");
   const namespaceSplitCallerFile = "crates/prodex-provider-core/src/bridge/chat_compat/tool_calls.rs";
   assert.deepEqual(findViolations([[namespaceSplitCallerFile, namespaceSplitConsumer]]), []);
