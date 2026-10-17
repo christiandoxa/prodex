@@ -353,6 +353,9 @@ fn websocket_request_timeout_is_delivered_and_next_request_uses_same_local_socke
         stream
             .set_read_timeout(Some(Duration::from_secs(10)))
             .unwrap();
+        // Winsock accepted sockets can inherit the listener's nonblocking
+        // mode. This synchronous mock needs bounded blocking reads on every OS.
+        stream.set_nonblocking(false).unwrap();
         let mut second = tungstenite::accept(stream).unwrap();
         second.read().unwrap();
         second
