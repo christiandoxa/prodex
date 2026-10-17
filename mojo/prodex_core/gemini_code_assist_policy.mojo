@@ -273,3 +273,129 @@ def prodex_gemini_code_assist_tier_label_v1(
             return GEMINI_CODE_ASSIST_POLICY_CAPACITY
         present[] = 1
     return GEMINI_CODE_ASSIST_POLICY_OK
+
+# Gemini OAuth fallback model selection: the host supplies cached timestamp
+# facts and borrowed model names; Mojo owns TTL gating and stable preference
+# reordering. The host never recomputes availability or selection policy.
+comptime GEMINI_OAUTH_MODEL_ABI_VERSION: Int64 = 1
+
+
+@export("prodex_gemini_oauth_model_availability_v1")
+def prodex_gemini_oauth_model_availability_v1(
+    abi_version: Int64,
+    now_ms: UInt64,
+    cooldown_until_address: UInt,
+    count: Int64,
+    mask_address: UInt,
+    mask_capacity: Int64,
+    any_available_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != GEMINI_OAUTH_MODEL_ABI_VERSION:
+        return 4
+    if (
+        count < 0 or (count > 0 and cooldown_until_address == 0)
+        or mask_address == 0 or mask_capacity < count or any_available_address == 0
+    ):
+        return 1
+    var deadlines = Pointer[mut=False, UInt64, ImmUntrackedOrigin](
+        unsafe_from_address=Int(cooldown_until_address)
+    )
+    var mask = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(mask_address)
+    )
+    var available = False
+    for index in range(count):
+        var cooldown = deadlines[unsafe_offset=index * 2]
+        var unavailable = deadlines[unsafe_offset=index * 2 + 1]
+        var eligible = cooldown <= now_ms and unavailable <= now_ms
+        mask[unsafe_offset=index] = Int64(eligible)
+        if eligible:
+            available = True
+    Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(any_available_address)
+    )[] = Int64(available)
+    return 0
+
+
+def gemini_oauth_model_name_eq(
+    first: ProdexRichStringView,
+    second: ProdexRichStringView,
+) -> Bool:
+    if first.len != second.len:
+        return False
+    var first_ptr = rich_view_ptr(first)
+    var second_ptr = rich_view_ptr(second)
+    for index in range(Int64(first.len)):
+        if first_ptr[unsafe_offset=index] != second_ptr[unsafe_offset=index]:
+            return False
+    return True
+
+
+@export("prodex_gemini_oauth_model_preference_v1")
+def prodex_gemini_oauth_model_preference_v1(
+    abi_version: Int64,
+    name_views_address: UInt,
+    model_count: Int64,
+    preference_address: UInt,
+    preference_length: Int64,
+    preference_present: Int64,
+    indices_address: UInt,
+    index_capacity: Int64,
+    written_count_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != GEMINI_OAUTH_MODEL_ABI_VERSION:
+        return 4
+    if (
+        model_count < 0 or (model_count > 0 and name_views_address == 0)
+        or preference_length < 0
+        or (preference_length > 0 and preference_address == 0)
+        or (preference_present != 0 and preference_present != 1)
+        or indices_address == 0 or index_capacity < model_count
+        or written_count_address == 0
+    ):
+        return 1
+    var names = Pointer[mut=False, UInt64, ImmUntrackedOrigin](
+        unsafe_from_address=Int(name_views_address)
+    )
+    var preference = ProdexRichStringView(preference_address, UInt(preference_length))
+    if not rich_view_valid(preference, 0x7FFFFFFFFFFFFFFF):
+        return 1
+    # Validate every model before touching caller-owned output.
+    var preferred_index: Int64 = -1
+    for index in range(model_count):
+        var address = UInt(names[unsafe_offset=index * 2])
+        var length = UInt(names[unsafe_offset=index * 2 + 1])
+        if length > 0x7FFFFFFFFFFFFFFF or (length > 0 and address == 0):
+            return 1
+        var model = ProdexRichStringView(address, length)
+        if not rich_view_valid(model, 0x7FFFFFFFFFFFFFFF):
+            return 1
+        if (
+            preference_present == 1
+            and preferred_index < 0
+            and gemini_oauth_model_name_eq(model, preference)
+        ):
+            preferred_index = index
+
+    var indices = Pointer[mut=True, UInt64, MutUntrackedOrigin](
+        unsafe_from_address=Int(indices_address)
+    )
+    var written = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(written_count_address)
+    )
+    var out: Int64 = 0
+    if preferred_index >= 0:
+        indices[unsafe_offset=out] = UInt64(preferred_index)
+        out += 1
+    for index in range(model_count):
+        if preferred_index >= 0:
+            var model = ProdexRichStringView(
+                UInt(names[unsafe_offset=index * 2]),
+                UInt(names[unsafe_offset=index * 2 + 1]),
+            )
+            if gemini_oauth_model_name_eq(model, preference):
+                continue
+        indices[unsafe_offset=out] = UInt64(index)
+        out += 1
+    written[] = out
+    return 0

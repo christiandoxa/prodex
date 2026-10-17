@@ -2,6 +2,10 @@
 
 use super::super::super::gemini_rewrite::RuntimeGeminiOAuthProfileAuth;
 use super::{RuntimeGeminiModelPreference, RuntimeGeminiOAuthPoolState, runtime_gemini_now_ms};
+use prodex_mojo_core::gemini_code_assist_policy::{
+    GeminiOAuthModelAvailability, GeminiOAuthModelDeadline, gemini_oauth_model_availability,
+    gemini_oauth_preferred_model_chain,
+};
 use prodex_provider_core::gemini_provider_core_tool_output_call_ids_from_request;
 use std::collections::BTreeMap;
 
@@ -181,28 +185,16 @@ impl RuntimeGeminiOAuthPoolState {
     ) -> Vec<String> {
         self.model_preferences
             .retain(|_, preference| preference.until_ms > now_ms);
-        let Some(preference) = self
+        let preference = self
             .model_preferences
             .get(&runtime_gemini_model_preference_key(
                 model_scope,
                 profile_name,
                 requested_model,
             ))
-        else {
-            return models.to_vec();
-        };
-        if !models.iter().any(|model| model == &preference.model) {
-            return models.to_vec();
-        }
-        let mut preferred = Vec::with_capacity(models.len());
-        preferred.push(preference.model.clone());
-        preferred.extend(
-            models
-                .iter()
-                .filter(|model| *model != &preference.model)
-                .cloned(),
-        );
-        preferred
+            .map(|entry| entry.model.as_str());
+        gemini_oauth_preferred_model_chain(models, preference)
+            .expect("compiled Mojo Gemini OAuth model preference plan returned invalid output")
     }
 
     pub(super) fn available_model_chain_for_profile(
@@ -212,10 +204,11 @@ impl RuntimeGeminiOAuthPoolState {
         models: &[String],
         now_ms: u64,
     ) -> Vec<String> {
+        let plan = self.model_availability_plan(profile_name, endpoint, models, now_ms);
         models
             .iter()
-            .filter(|model| self.model_is_available(profile_name, endpoint, model, now_ms))
-            .cloned()
+            .zip(plan.eligible)
+            .filter_map(|(model, available)| available.then_some(model.clone()))
             .collect()
     }
 
@@ -226,31 +219,38 @@ impl RuntimeGeminiOAuthPoolState {
         models: &[String],
         now_ms: u64,
     ) -> bool {
-        models
-            .iter()
-            .any(|model| self.model_is_available(profile_name, endpoint, model, now_ms))
+        self.model_availability_plan(profile_name, endpoint, models, now_ms)
+            .any_available
     }
 
-    fn model_is_available(
+    fn model_availability_plan(
         &self,
         profile_name: &str,
         endpoint: &str,
-        model: &str,
+        models: &[String],
         now_ms: u64,
-    ) -> bool {
-        let cooldown_available = self
-            .model_cooldowns_until
-            .get(&runtime_gemini_model_cooldown_key(profile_name, model))
-            .is_none_or(|cooldown_until| *cooldown_until <= now_ms);
-        let endpoint_available = self
-            .model_unavailable_until
-            .get(&runtime_gemini_model_unavailable_key(
-                profile_name,
-                endpoint,
-                model,
-            ))
-            .is_none_or(|unavailable_until| *unavailable_until <= now_ms);
-        cooldown_available && endpoint_available
+    ) -> GeminiOAuthModelAvailability {
+        let deadlines = models
+            .iter()
+            .map(|model| GeminiOAuthModelDeadline {
+                cooldown_until_ms: self
+                    .model_cooldowns_until
+                    .get(&runtime_gemini_model_cooldown_key(profile_name, model))
+                    .copied()
+                    .unwrap_or(0),
+                unavailable_until_ms: self
+                    .model_unavailable_until
+                    .get(&runtime_gemini_model_unavailable_key(
+                        profile_name,
+                        endpoint,
+                        model,
+                    ))
+                    .copied()
+                    .unwrap_or(0),
+            })
+            .collect::<Vec<_>>();
+        gemini_oauth_model_availability(&deadlines, now_ms)
+            .expect("compiled Mojo Gemini OAuth availability decision returned invalid output")
     }
 }
 
