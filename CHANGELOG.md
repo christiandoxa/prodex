@@ -2,6 +2,67 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.438.2 - 2026-10-17
+
+### Runtime
+
+- Release idle WebSocket capacity and enforce recovery deadlines (`1f8d26c`)
+
+### Docs
+
+- Structure 0.438.2 notes for the release renderer (`96a86ca`)
+# Prodex 0.438.2
+
+This patch fixes WebSocket capacity starvation and closes a precommit recovery
+watchdog gap that could turn a stalled request into repeated native idle
+reconnects, especially when only one account remains ready for model traffic.
+
+## New Features
+
+This is a maintenance release. It adds no new user-facing flags.
+
+## Bug Fixes
+
+### WebSocket admission and recovery
+
+Completed Responses WebSockets now release their weighted profile execution
+permit while retaining the upstream connection, response identity, and turn
+state for reuse. An idle parent or side-agent socket no longer monopolizes the
+last ready profile and prevents another session or compaction request from
+running. Reused connections reacquire a permit for each active response;
+saturation preserves their cached transport while the existing admission
+policy waits. Realtime duplex sessions retain their permit until they close.
+
+Precommit sends and response reads now cap their existing socket timeouts by
+the original request deadline. Hidden prelude frames no longer renew that
+budget. The response loop checks expiry before another read and before
+accepting a late frame, so local deadline exhaustion becomes a typed
+`504 request_timeout` rather than a retryable profile transport failure.
+The local client socket remains usable for the next request.
+
+Committed responses keep their normal stream idle timeout and are not
+cancelled or replayed by the precommit watchdog. Profile selection, actual
+quota enforcement, hard affinity, and response replay restrictions are
+unchanged; transport trouble is not reclassified as account quota exhaustion.
+
+## Changelog
+
+### Qualification
+
+New tests cover idle connection permit release, permit reacquisition on reuse,
+backpressure without losing the cached socket, a silent hidden prelude,
+repeated hidden metadata, delivery of a typed timeout followed by a successful
+request on the same local socket, committed streaming past the precommit
+deadline, and realtime permit lifetime. A real local broker test retains
+several completed clients while another compaction request completes on the
+only ready profile, with exactly one output delivery per request.
+
+No credentials, saved conversations, or paused goals are modified. An account
+with no weekly quota remains blocked even when its five-hour window has quota;
+the fix does not create capacity that the upstream service has exhausted.
+
+Full Changelog: [0.438.1...0.438.2](https://github.com/christiandoxa/prodex/compare/0.438.1...0.438.2)
+
 ## 0.438.1 - 2026-10-17
 
 ### Runtime
@@ -32,108 +93,6 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 - Preserve long model names in Mojo (`969cbe8`)
 - Derive Kiro default state (`f8172a5`)
 - Preserve transcript projection parity (`8a747b6`)
-# Prodex 0.438.1
-
-## New Features
-
-This is a maintenance release. It adds no new user-facing feature flags;
-its changes repair existing queue, rotation, retry and recovery behavior.
-
-## Bug Fixes
-
-### Wake rotation when a profile becomes ready
-
-Profile-recovery waits now observe selection and inflight-release revisions
-instead of sleeping through the entire previously projected cooldown. A quota
-refresh, circuit clearance or released slot can wake a waiting request promptly.
-The normal compiled Mojo eligibility and ownership checks still decide whether
-the recovered profile may be used; a notification does not clear failed-profile
-exclusions by itself or bypass an authoritative quota block.
-
-A controlled regression reproduced the old behavior: the profile became ready
-and sent a notification, but the request timed out while the old cooldown sleep
-was still running. The repaired path recovers that same request before expiry.
-
-### Bound the complete local queue and retry lifecycle
-
-The existing request-local watchdog now covers admission, listener queueing,
-standard HTTP requests and no-sleep recovery paths. Queued requests carry their
-original deadline to the worker; dequeueing and reselecting a ready profile do
-not grant a new retry budget. Expired work cannot acquire a released permit,
-enter the upstream queue or start another recovery sweep.
-
-An admission or dequeued-request expiry returns a local HTTP 504 with the
-`request_timeout` code. A queue that cannot accept work returns the unsent
-request to its existing bounded rejection path. Neither condition is evidence
-that a provider quota bucket is empty. Committed streams remain readable and
-are never replayed. WebSocket upgrades detach the handshake watchdog so that
-each later model turn gets its own existing request-local deadline.
-
-The available incident records showed repeated timeouts to the local Prodex
-proxy, including pre-sampling compaction, while the quota view still listed
-ready profiles. They do not establish the exact historical blocked stack or
-prove that every upstream or operating-system failure has been eliminated.
-The fixed deadline and notification defects were independently reproduced.
-
-## Changelog
-
-### Qualification
-
-Regression coverage exercises expiry during queueing and admission, fast
-reselection after expiry, a real HTTP 504 without an upstream send, a fresh
-request after timeout, and a readiness notification interrupting cooldown.
-The compiled Mojo dispatch policy rejects expired admission without applying
-a global overload or account penalty. Existing rotation, mixed quota windows,
-hard-affinity, compaction, committed-stream and lock-order checks are retained.
-
-Inherited qualification issues were also repaired without weakening gates:
-Windows dry-run path assertions follow native separators, the compact-capacity
-fixture starts with ready snapshots rather than depending on background probes,
-and existing prompt/config adapters have shallower host-side control flow.
-
-The auth-replay qualification now uses consistent failed-auth Responses and
-Usage fixtures, and waits for actual probe completion before asserting rotation.
-A separate controlled test verifies that a genuinely newer authenticated probe
-may rehabilitate the original owner for a full-history replay. This removes a
-Windows scheduling race without disabling valid recovery, weakening request
-counts, or allowing a stale previous-response ID to cross accounts.
-
-Optional-tool publication references were refreshed after the release-cut
-freshness gate detected newer upstream versions: Codebase Memory MCP 0.12.1
-and Ponytail 5.3.2. Their official archives/source trees, identity metadata,
-and existing integration contracts were verified without replacing installed
-tools, running plugin hooks, or modifying user indexes and sessions. Supported
-minimums remain unchanged.
-
-Windows refresh-lease qualification separates eight-way initial ownership
-selection from an established owner's short-TTL heartbeat check. Every follower
-must acknowledge the still-held lease after three TTLs before its result is
-published, then consume the identical committed result. The separate cold-start
-election retains exactly one owner and seven followers using the normal lease
-TTL. Production timing, fencing, and file-security rules are unchanged.
-
-The native-client release smoke now pins Kiro CLI 2.32.0, matching the
-official stable manifest. Its Linux archive was checksum-verified before
-isolated version, chat-model help, and KIRO_DATA_DIR contract checks. The
-Kiro, Copilot, and Claude installer hashes remain unchanged; no installer,
-login, or credential-bearing provider request was run during qualification.
-
-Compact-capacity qualification now releases a held permit only after observing
-two complete wait epochs for that request. A controlled delayed-dispatch case
-failed with the previous fixed sleep and passed with causal release, preserving
-exactly one request to the relieved profile and no local saturation error.
-Production timeout and capacity policies are unchanged.
-
-### Upgrade
-
-Use `prodex update`, then verify `prodex --version` reports `prodex 0.438.1`.
-Existing processes are not hot-patched. Resume saved work with
-`prodex s <session-id>` in the original project directory. A closed temporary
-`codex --remote` Unix socket must not be reused. A deliberately paused goal
-remains paused until the user resumes it; upgrading does not erase sessions,
-reset quota, or silently create a replacement turn.
-
-Full Changelog: [0.438.0...0.438.1](https://github.com/christiandoxa/prodex/compare/0.438.0...0.438.1)
 
 ## 0.438.0 - 2026-10-16
 
