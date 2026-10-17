@@ -78,6 +78,60 @@ pub(crate) fn ensure_kiro_codebase_memory_compatibility() -> Result<()> {
     Ok(())
 }
 
+fn kiro_mcp_server_facts(name: &str, server: &Value) -> Result<KiroMcpServerFacts> {
+    let Some(server) = server.as_object() else {
+        return Ok(KiroMcpServerFacts::default());
+    };
+    let server_name_matches = ascii_casefold_equal_exact(name, "codebase-memory-mcp")
+        .map_err(|error| anyhow::anyhow!("Mojo Kiro MCP name comparison failed: {error:?}"))?;
+    let disabled_tools_state = match server.get("disabledTools") {
+        None => KiroMcpDisabledToolsState::Missing,
+        Some(Value::Null) => KiroMcpDisabledToolsState::Null,
+        Some(Value::Array(_)) => KiroMcpDisabledToolsState::Array,
+        Some(_) => KiroMcpDisabledToolsState::Invalid,
+    };
+    let incompatible_tool_present = server
+        .get("disabledTools")
+        .and_then(Value::as_array)
+        .is_some_and(|disabled| {
+            disabled
+                .iter()
+                .any(|tool| tool.as_str() == Some(KIRO_CODEBASE_MEMORY_INCOMPATIBLE_TOOL))
+        });
+    let command_name_matches = server
+        .get("command")
+        .and_then(Value::as_str)
+        .and_then(|command| Path::new(command).file_name())
+        .and_then(|name| name.to_str())
+        .map(|name| {
+            ascii_casefold_equal_exact(name, "codebase-memory-mcp")
+                .map_err(|error| {
+                    anyhow::anyhow!("Mojo Kiro MCP executable comparison failed: {error:?}")
+                })
+                .and_then(|matches| {
+                    if matches {
+                        Ok(true)
+                    } else {
+                        ascii_casefold_equal_exact(name, "codebase-memory-mcp.exe").map_err(
+                            |error| {
+                                anyhow::anyhow!(
+                                    "Mojo Kiro MCP executable comparison failed: {error:?}"
+                                )
+                            },
+                        )
+                    }
+                })
+        })
+        .transpose()?
+        .unwrap_or(false);
+    Ok(KiroMcpServerFacts {
+        server_name_matches: i64::from(server_name_matches),
+        command_name_matches: i64::from(command_name_matches),
+        disabled_tools_state,
+        incompatible_tool_present: i64::from(incompatible_tool_present),
+    })
+}
+
 fn normalize_kiro_codebase_memory_config(path: &Path) -> Result<bool> {
     let metadata = match fs::metadata(path) {
         Ok(metadata) => metadata,
@@ -98,61 +152,7 @@ fn normalize_kiro_codebase_memory_config(path: &Path) -> Result<bool> {
     };
     let facts = servers
         .iter()
-        .map(|(name, server)| {
-            let Some(server) = server.as_object() else {
-                return Ok(KiroMcpServerFacts::default());
-            };
-            let server_name_matches = ascii_casefold_equal_exact(name, "codebase-memory-mcp")
-                .map_err(|error| {
-                    anyhow::anyhow!("Mojo Kiro MCP name comparison failed: {error:?}")
-                })?;
-            let disabled_tools_state = match server.get("disabledTools") {
-                None => KiroMcpDisabledToolsState::Missing,
-                Some(Value::Null) => KiroMcpDisabledToolsState::Null,
-                Some(Value::Array(_)) => KiroMcpDisabledToolsState::Array,
-                Some(_) => KiroMcpDisabledToolsState::Invalid,
-            };
-            let incompatible_tool_present = server
-                .get("disabledTools")
-                .and_then(Value::as_array)
-                .is_some_and(|disabled| {
-                    disabled
-                        .iter()
-                        .any(|tool| tool.as_str() == Some(KIRO_CODEBASE_MEMORY_INCOMPATIBLE_TOOL))
-                });
-            let command_name_matches = server
-                .get("command")
-                .and_then(Value::as_str)
-                .and_then(|command| Path::new(command).file_name())
-                .and_then(|name| name.to_str())
-                .map(|name| {
-                    ascii_casefold_equal_exact(name, "codebase-memory-mcp")
-                        .map_err(|error| {
-                            anyhow::anyhow!("Mojo Kiro MCP executable comparison failed: {error:?}")
-                        })
-                        .and_then(|matches| {
-                            if matches {
-                                Ok(true)
-                            } else {
-                                ascii_casefold_equal_exact(name, "codebase-memory-mcp.exe").map_err(
-                                    |error| {
-                                        anyhow::anyhow!(
-                                            "Mojo Kiro MCP executable comparison failed: {error:?}"
-                                        )
-                                    },
-                                )
-                            }
-                        })
-                })
-                .transpose()?
-                .unwrap_or(false);
-            Ok(KiroMcpServerFacts {
-                server_name_matches: i64::from(server_name_matches),
-                command_name_matches: i64::from(command_name_matches),
-                disabled_tools_state,
-                incompatible_tool_present: i64::from(incompatible_tool_present),
-            })
-        })
+        .map(|(name, server)| kiro_mcp_server_facts(name, server))
         .collect::<Result<Vec<_>>>()?;
     let actions = plan_mcp_normalization(&facts)
         .map_err(|error| anyhow::anyhow!("Mojo Kiro MCP normalization failed: {error:?}"))?;

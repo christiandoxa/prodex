@@ -89,7 +89,9 @@ fn runtime_launch_dry_run_report_redacts_private_paths() {
     assert!(report.contains("Binary: codex"));
     assert!(report.contains("CODEX_HOME: <CODEX_HOME>"));
     assert!(report.contains("<redacted-path>"));
-    assert!(report.contains("PRODEX_VISIBLE_PATH=\"<redacted-path>/runtime\""));
+    let visible_path = PathBuf::from("<redacted-path>").join("runtime");
+    let expected_env = format!("PRODEX_VISIBLE_PATH={:?}", visible_path.to_string_lossy());
+    assert!(report.contains(&expected_env), "{report}");
     assert!(!report.contains("/home/test-user"));
     assert!(!report.contains("private@example.com"));
 }

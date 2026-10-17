@@ -1,3 +1,6 @@
+mod text_view;
+use text_view::render_super_text_prompt;
+
 use super::ResolvedMainAgentConfig;
 use crate::{
     ResolvedSuperSubAgent, SUB_AGENT_RECURSION_MARKER, SubAgentRecursionPolicy,
@@ -597,79 +600,42 @@ fn prompt_super_text_input<T>(
     let mut validation_error = None::<String>;
     loop {
         tui.terminal.draw(|frame| {
-            let chunks = Layout::default()
-                .direction(Direction::Vertical)
-                .constraints([
-                    Constraint::Length(3),
-                    Constraint::Min(1),
-                    Constraint::Length(3),
-                ])
-                .split(frame.area());
-            let header = Paragraph::new(Line::from(vec![
-                Span::styled("Prodex Super", tui_title_style()),
-                Span::raw("  "),
-                Span::styled(title, tui_detail_style()),
-            ]))
-            .block(tui_connected_header_block(tui_border_style()));
-            frame.render_widget(header, chunks[0]);
-            let value_display = bounded_tui_text(&value, frame.area().width.saturating_sub(4));
-            let mut lines = vec![Line::from(vec![
-                Span::styled(value_display, tui_primary_style()),
-                Span::styled("▌", tui_success_style()),
-            ])];
-            if let Some(error) = validation_error.as_deref() {
-                lines.push(Line::from(Span::styled(
-                    bounded_tui_text(error, frame.area().width.saturating_sub(4)),
-                    tui_hint_style(),
-                )));
-            }
-            let body = Paragraph::new(lines)
-                .block(
-                    Block::default()
-                        .borders(Borders::LEFT | Borders::RIGHT)
-                        .border_style(tui_border_style()),
-                )
-                .wrap(Wrap { trim: true });
-            frame.render_widget(body, chunks[1]);
-            let footer = Paragraph::new(Line::from(vec![
-                Span::styled("enter", tui_success_style()),
-                Span::raw(" accept  "),
-                Span::styled("esc", tui_hint_style()),
-                Span::raw(if escape_returns_none {
-                    " back"
-                } else {
-                    " cancel"
-                }),
-            ]))
-            .block(tui_connected_footer_block(tui_border_style()));
-            frame.render_widget(footer, chunks[2]);
+            render_super_text_prompt(
+                frame,
+                title,
+                &value,
+                validation_error.as_deref(),
+                escape_returns_none,
+            )
         })?;
-        if let Event::Key(key) = event::read()?
-            && key.kind == KeyEventKind::Press
-        {
-            let (action, character, clear_validation) =
-                super_prompt_text_edit_plan(key, value.chars().count(), escape_returns_none)?;
-            match action {
-                SuperPromptTextAction::Accept => match parse(&value) {
-                    Ok(parsed) => return Ok(Some(parsed)),
-                    Err(error) => validation_error = Some(error),
-                },
-                SuperPromptTextAction::Backspace => {
-                    value.pop();
-                    if clear_validation {
-                        validation_error = None;
-                    }
+        let Event::Key(key) = event::read()? else {
+            continue;
+        };
+        if key.kind != KeyEventKind::Press {
+            continue;
+        }
+        let (action, character, clear_validation) =
+            super_prompt_text_edit_plan(key, value.chars().count(), escape_returns_none)?;
+        match action {
+            SuperPromptTextAction::Accept => match parse(&value) {
+                Ok(parsed) => return Ok(Some(parsed)),
+                Err(error) => validation_error = Some(error),
+            },
+            SuperPromptTextAction::Backspace => {
+                value.pop();
+                if clear_validation {
+                    validation_error = None;
                 }
-                SuperPromptTextAction::Append => {
-                    value.push(character.expect("Mojo append action must contain a character"));
-                    if clear_validation {
-                        validation_error = None;
-                    }
-                }
-                SuperPromptTextAction::ReturnNone => return Ok(None),
-                SuperPromptTextAction::Cancel => bail!("Prodex Super prompt cancelled"),
-                SuperPromptTextAction::Ignore => {}
             }
+            SuperPromptTextAction::Append => {
+                value.push(character.expect("Mojo append action must contain a character"));
+                if clear_validation {
+                    validation_error = None;
+                }
+            }
+            SuperPromptTextAction::ReturnNone => return Ok(None),
+            SuperPromptTextAction::Cancel => bail!("Prodex Super prompt cancelled"),
+            SuperPromptTextAction::Ignore => {}
         }
     }
 }
