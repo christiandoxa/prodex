@@ -473,6 +473,10 @@ pub enum RuntimeDueJobs<K, J> {
     Wait(Duration),
 }
 
+fn scheduled_job_ready_offset(now: Instant, ready_at: Instant) -> i64 {
+    i64::try_from(ready_at.saturating_duration_since(now).as_nanos()).unwrap_or(i64::MAX)
+}
+
 pub fn runtime_take_due_scheduled_jobs<K, J>(
     pending: &mut BTreeMap<K, J>,
     now: Instant,
@@ -485,23 +489,26 @@ where
         return RuntimeDueJobs::Due(BTreeMap::new());
     }
 
-    let Some(next_ready_at) = pending
+    let keys = pending.keys().cloned().collect::<Vec<_>>();
+    let ready_offsets = pending
         .values()
-        .map(RuntimeScheduledSaveJob::ready_at)
-        .min()
-    else {
-        return RuntimeDueJobs::Due(BTreeMap::new());
-    };
-    if next_ready_at > now {
-        return RuntimeDueJobs::Wait(next_ready_at.saturating_duration_since(now));
+        .map(|job| scheduled_job_ready_offset(now, job.ready_at()))
+        .collect::<Vec<_>>();
+    let plan = prodex_mojo_core::runtime_state::due_jobs_plan(&ready_offsets)
+        .expect("Mojo scheduled-job deadline planner returned invalid output");
+    if plan.due_indices.is_empty() {
+        let wait_nanos = plan
+            .wait_nanos
+            .expect("future scheduled jobs must have a wait duration");
+        return RuntimeDueJobs::Wait(Duration::from_nanos(wait_nanos));
     }
 
-    let due_keys = pending
-        .iter()
-        .filter_map(|(key, job)| (job.ready_at() <= now).then_some(key.clone()))
-        .collect::<Vec<_>>();
     let mut due = BTreeMap::new();
-    for key in due_keys {
+    for index in plan.due_indices {
+        let key = keys
+            .get(index)
+            .expect("Mojo scheduled-job planner returned an invalid index")
+            .clone();
         if let Some(job) = pending.remove(&key) {
             due.insert(key, job);
         }

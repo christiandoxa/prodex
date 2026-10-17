@@ -3,7 +3,10 @@ from std.memory import Pointer
 comptime RUNTIME_STATE_BACKGROUND_ABI_VERSION: Int64 = 1
 comptime RUNTIME_STATE_BACKGROUND_OK: Int64 = 0
 comptime RUNTIME_STATE_BACKGROUND_INVALID: Int64 = 1
+comptime RUNTIME_STATE_BACKGROUND_CAPACITY: Int64 = 3
 comptime RUNTIME_STATE_BACKGROUND_ABI: Int64 = 4
+comptime RUNTIME_STATE_DUE_JOBS_ABI_VERSION: Int64 = 1
+comptime RUNTIME_STATE_DUE_JOBS_MAX: Int64 = 65_536
 
 comptime RUNTIME_PROXY_ADMISSION_ABI_VERSION: Int64 = 1
 comptime RUNTIME_PROXY_ADMISSION_OK: Int64 = 0
@@ -976,4 +979,53 @@ def prodex_runtime_state_background_policy_v1(
     )
     output[unsafe_offset=0] = backlog
     output[unsafe_offset=1] = runtime_state_flag(backlog >= threshold)
+    return RUNTIME_STATE_BACKGROUND_OK
+
+
+# Rust retains the monotonic clock and map removal. Mojo owns the bounded
+# ready/deadline scan so due selection has one semantic implementation.
+@export("prodex_runtime_state_due_jobs_v1")
+def prodex_runtime_state_due_jobs_v1(
+    abi_version: Int64,
+    ready_offsets_address: UInt,
+    ready_count: Int64,
+    output_address: UInt,
+    output_capacity: Int64,
+    wait_nanos_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != RUNTIME_STATE_DUE_JOBS_ABI_VERSION:
+        return RUNTIME_STATE_BACKGROUND_ABI
+    if (
+        ready_count < 0
+        or ready_count > RUNTIME_STATE_DUE_JOBS_MAX
+        or output_capacity < 0
+        or wait_nanos_address == 0
+        or (ready_count > 0 and (ready_offsets_address == 0 or output_address == 0))
+    ):
+        return RUNTIME_STATE_BACKGROUND_INVALID
+    if output_capacity < ready_count:
+        return RUNTIME_STATE_BACKGROUND_CAPACITY
+
+    var ready_offsets = Pointer[mut=False, Int64, ImmUntrackedOrigin](
+        unsafe_from_address=Int(ready_offsets_address)
+    )
+    var output = Pointer[mut=True, UInt8, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    var wait_nanos = Pointer[mut=True, UInt64, MutUntrackedOrigin](
+        unsafe_from_address=Int(wait_nanos_address)
+    )
+    var has_due = False
+    var earliest: UInt64 = UINT64_MAX
+    for index in range(ready_count):
+        var offset = ready_offsets[unsafe_offset=index]
+        if offset <= 0:
+            output[unsafe_offset=index] = UInt8(1)
+            has_due = True
+        else:
+            output[unsafe_offset=index] = UInt8(0)
+            var candidate = UInt64(offset)
+            if candidate < earliest:
+                earliest = candidate
+    wait_nanos[] = UInt64(0) if has_due else earliest
     return RUNTIME_STATE_BACKGROUND_OK

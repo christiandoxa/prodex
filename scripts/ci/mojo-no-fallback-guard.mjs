@@ -2886,6 +2886,7 @@ export function findViolations(files) {
         "prodex_mojo_core::runtime_state::queue_threshold(",
         "prodex_mojo_core::runtime_state::queue_enqueue_plan(",
         "prodex_mojo_core::runtime_state::sections_union(",
+        "prodex_mojo_core::runtime_state::due_jobs_plan(",
         "fn runtime_state_mutation_input(",
       ];
       const violations = required
@@ -2905,7 +2906,9 @@ export function findViolations(files) {
       if (/\bfn\s+(?:runtime_state_mutation_kind|runtime_state_save_sections_rust|runtime_state_save_requires_continuation_journal_rust|runtime_hot_continuation_state_mutation_rust|runtime_background_queue_enqueue_plan_rust)\s*\(/u.test(contents) ||
           contents.includes('with_value("') ||
           contents.includes('"full_state".to_string()') ||
-          contents.includes('"profile_auth_backoff_cleared"')) {
+          contents.includes('"profile_auth_backoff_cleared"') ||
+          contents.includes(".map(RuntimeScheduledSaveJob::ready_at)") ||
+          contents.includes("let due_keys = pending")) {
         violations.push(`${filePath}: contains restored Rust runtime-state mutation labels or policy semantics`);
       }
       return violations;
@@ -2916,7 +2919,9 @@ export function findViolations(files) {
           contents.includes("prodex_runtime_proxy_admission_policy_v1(") &&
           contents.includes("pub fn runtime_proxy_admission_policy(") &&
           contents.includes("pub fn sections_union(") &&
-          contents.includes("pub fn mutation_reason(")
+          contents.includes("pub fn mutation_reason(") &&
+          contents.includes("prodex_runtime_state_due_jobs_v1(") &&
+          contents.includes("pub fn due_jobs_plan(")
         ? [] : [`${filePath}: runtime-state policy adapters must retain their versioned Mojo ABIs`];
     }
     if (filePath === RUNTIME_STATE_BACKGROUND_MOJO_FILE) {
@@ -2924,6 +2929,8 @@ export function findViolations(files) {
           contents.includes('@export("prodex_runtime_state_mutation_reason_v1")') &&
           contents.includes('@export("prodex_runtime_proxy_admission_policy_v1")') &&
           contents.includes("def runtime_state_sections_union(") &&
+          contents.includes('@export("prodex_runtime_state_due_jobs_v1")') &&
+          contents.includes("RUNTIME_STATE_DUE_JOBS_ABI_VERSION") &&
           contents.includes("def runtime_state_put_mutation_label(") &&
           contents.includes('StringSlice("profile_auth_backoff_cleared")')
         ? [] : [`${filePath}: runtime-state mutation labels must remain Mojo-owned`];
@@ -8759,6 +8766,8 @@ function selfTest() {
     '@export("prodex_runtime_state_mutation_reason_v1")',
     '@export("prodex_runtime_proxy_admission_policy_v1")',
     "def runtime_state_sections_union(",
+    '@export("prodex_runtime_state_due_jobs_v1")',
+    "RUNTIME_STATE_DUE_JOBS_ABI_VERSION",
     "def runtime_state_put_mutation_label(",
     'StringSlice("profile_auth_backoff_cleared")',
     '@export("prodex_runtime_state_route_policy_v1")',
