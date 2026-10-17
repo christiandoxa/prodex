@@ -171,6 +171,7 @@ const PING_SUMMARY_CALLER_TEST_FILE = "crates/prodex-app/src/app_commands/ping_t
 const PING_SUMMARY_ADAPTER_FILE = "crates/prodex-mojo-core/src/rich/ping_protocol.rs";
 const PING_SUMMARY_MOJO_FILE = "mojo/prodex_core/ping_protocol.mojo";
 const PROMOTED_FILES = [
+  "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_gemini_oauth_pool.rs",
   "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_gemini_oauth_pool/state.rs",
   "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_gemini_tests.rs",
   "crates/prodex-mojo-core/src/gemini_code_assist_policy.rs",
@@ -8380,6 +8381,25 @@ export function findViolations(files) {
     }
     return [];
   });
+  const geminiOAuthRotationMojoViolations = files.flatMap(([filePath, contents]) => {
+    if (filePath === "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_gemini_oauth_pool.rs") {
+      const required = [
+        "gemini_oauth_profile_rotation_plan(",
+        "state.next_index = rotation.next_index;",
+        ".map(|index| runtime_gemini_oauth_attempt_from_profile(&profiles[index]))",
+        "state.profile_has_available_model(",
+      ];
+      const retired = [
+        "let start = state.next_index.min(",
+        "state.next_index = (start + 1) % profiles.len()",
+        "profiles[(start + offset) % profiles.len()]",
+      ];
+      return required.every((marker) => contents.includes(marker)) &&
+        retired.every((marker) => !contents.includes(marker))
+          ? [] : [filePath + ": restored Rust Gemini OAuth round-robin and last-chance fallback selection"];
+    }
+    return [];
+  });
   const geminiOAuthModelMojoViolations = files.flatMap(([filePath, contents]) => {
     if (filePath === "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_gemini_oauth_pool/state.rs") {
       const required = [
@@ -8408,6 +8428,10 @@ export function findViolations(files) {
         "gemini_oauth_compiled_availability_enforces_both_deadlines_and_clock_boundaries",
         "gemini_oauth_compiled_preference_moves_existing_model_once_preserving_stable_order",
         "gemini_oauth_compiled_model_policy_abi_rejects_invalid_inputs_without_mutation",
+        "fn prodex_gemini_oauth_profile_rotation_v1(",
+        "pub fn gemini_oauth_profile_rotation_plan(",
+        "gemini_oauth_compiled_profile_rotation_preserves_fairness_filter_and_last_chance",
+        "gemini_oauth_compiled_profile_rotation_abi_rejects_invalid_mask_before_writes",
       ].filter((marker) => !contents.includes(marker))
         .map((marker) => filePath + ": Mojo Gemini OAuth model selector strict ABI coverage missing " + marker);
     }
@@ -8418,12 +8442,19 @@ export function findViolations(files) {
         "gemini_oauth_model_name_eq(",
         "cooldown <= now_ms and unavailable <= now_ms",
         "preferred_index < 0",
+        '@export("prodex_gemini_oauth_profile_rotation_v1")',
+        "if not any_eligible or eligible[unsafe_offset=index] == 1",
+        "var start = profile_count - 1",
       ].filter((marker) => !contents.includes(marker))
         .map((marker) => filePath + ": Gemini OAuth model selection must remain compiled Mojo-owned " + marker);
     }
     if (filePath === "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_gemini_tests.rs") {
-      return contents.includes("gemini_oauth_pool_compiled_mojo_filters_cooldowns_endpoint_blocks_and_duplicate_preferences")
-        ? [] : [filePath + ": Gemini OAuth production selection regression missing"];
+      return [
+        "gemini_oauth_pool_compiled_mojo_filters_cooldowns_endpoint_blocks_and_duplicate_preferences",
+        "gemini_oauth_compiled_profile_rotation_skips_only_blocked_profiles_and_advances_cursor",
+        "gemini_oauth_compiled_profile_rotation_retains_last_chance_when_all_locally_blocked",
+      ].every((marker) => contents.includes(marker))
+        ? [] : [filePath + ": Gemini OAuth production rotation/cooldown regressions missing"];
     }
     return [];
   });
@@ -8942,7 +8973,7 @@ export function findViolations(files) {
     }
     return [];
   });
-  return [...logPayloadProjectionViolations, ...nativeRecoveryOwnershipViolations, ...quotaRecoveryEligibilityViolations, ...runtimeBrokerReuseMojoViolations, ...geminiResponseMediaMojoViolations, ...cookieEvictionMojoViolations, ...websocketBudgetMojoViolations, ...affinityBindingMojoViolations, ...responsesCapacityRecoveryViolations, ...sseTapMojoOwnershipViolations, ...quotaWatchViolations, ...geminiCompactSnippetViolations, ...geminiCompactTextViolations, ...doctorSmartContextDecisionViolations, ...anthropicAttemptCursorViolations, ...geminiUnsupportedToolRetryViolations, ...terminalGeometryViolations, ...previousResponseRecoveryTransitionViolations, ...geminiOAuthModelMojoViolations, ...superExposeOriginMojoViolations, ...kiroAcpToolLedgerMojoViolations, ...quotaPoolSummarySectionsMojoViolations, ...deepseekToolShapeIssueMojoViolations, ...deepseekReplayItemPolicyMojoViolations, ...chatNamespaceSplitMojoViolations, ...deepseekInputItemIssueMessageViolations, ...deepseekRequestIssueMessageViolations, ...smartContextTelemetrySampleViolations, ...compatibilityDiagnosticsMojoViolations, ...quotaHeaderProjectionViolations, ...smartContextCapsuleOrderViolations, ...markerViolations, ...deepseekCatalogPolicyViolations, ...featureOffViolations, ...liveLogRecordViolations, ...runtimePolicyPresetViolations, ...runtimeConfigScalarViolations, ...profileHealthCircuitViolations, ...logThroughputViolations, ...operationalDetailSpecViolations, ...transcriptPolicyViolations, ...logLoadPolicyViolations, ...routeReasonViolations, ...runtimeStateQuotaViolations, ...runtimeStateRoutePolicyViolations, ...runtimeProxyRootViolations, ...runtimeRecoveryDeadlineViolations, ...brokerVersionGuardViolations, ...brokerContinuityViolations, ...brokerLogCacheViolations, ...codexConfigViolations, ...statePolicyViolations, ...quotaSelectionPolicyViolations, ...routeTagMirrorViolations, ...enumTagMirrorViolations, ...appSelectionPolicyMirrorViolations, ...runtimeStateBackgroundViolations, ...redactionViolations, ...rateLimitHeaderSelectionViolations, ...profileIdentityViolations, ...governanceInspectionViolations, ...governanceInspectionOrderingViolations, ...exactnessPlannerViolations,
+  return [...logPayloadProjectionViolations, ...nativeRecoveryOwnershipViolations, ...quotaRecoveryEligibilityViolations, ...runtimeBrokerReuseMojoViolations, ...geminiResponseMediaMojoViolations, ...cookieEvictionMojoViolations, ...websocketBudgetMojoViolations, ...affinityBindingMojoViolations, ...responsesCapacityRecoveryViolations, ...sseTapMojoOwnershipViolations, ...quotaWatchViolations, ...geminiCompactSnippetViolations, ...geminiCompactTextViolations, ...doctorSmartContextDecisionViolations, ...anthropicAttemptCursorViolations, ...geminiUnsupportedToolRetryViolations, ...terminalGeometryViolations, ...previousResponseRecoveryTransitionViolations, ...geminiOAuthRotationMojoViolations, ...geminiOAuthModelMojoViolations, ...superExposeOriginMojoViolations, ...kiroAcpToolLedgerMojoViolations, ...quotaPoolSummarySectionsMojoViolations, ...deepseekToolShapeIssueMojoViolations, ...deepseekReplayItemPolicyMojoViolations, ...chatNamespaceSplitMojoViolations, ...deepseekInputItemIssueMessageViolations, ...deepseekRequestIssueMessageViolations, ...smartContextTelemetrySampleViolations, ...compatibilityDiagnosticsMojoViolations, ...quotaHeaderProjectionViolations, ...smartContextCapsuleOrderViolations, ...markerViolations, ...deepseekCatalogPolicyViolations, ...featureOffViolations, ...liveLogRecordViolations, ...runtimePolicyPresetViolations, ...runtimeConfigScalarViolations, ...profileHealthCircuitViolations, ...logThroughputViolations, ...operationalDetailSpecViolations, ...transcriptPolicyViolations, ...logLoadPolicyViolations, ...routeReasonViolations, ...runtimeStateQuotaViolations, ...runtimeStateRoutePolicyViolations, ...runtimeProxyRootViolations, ...runtimeRecoveryDeadlineViolations, ...brokerVersionGuardViolations, ...brokerContinuityViolations, ...brokerLogCacheViolations, ...codexConfigViolations, ...statePolicyViolations, ...quotaSelectionPolicyViolations, ...routeTagMirrorViolations, ...enumTagMirrorViolations, ...appSelectionPolicyMirrorViolations, ...runtimeStateBackgroundViolations, ...redactionViolations, ...rateLimitHeaderSelectionViolations, ...profileIdentityViolations, ...governanceInspectionViolations, ...governanceInspectionOrderingViolations, ...exactnessPlannerViolations,
     ...adaptiveBudgetViolations,
     ...providerUsageViolations,
     ...auditUsageViolations,
@@ -9708,6 +9739,17 @@ function selfTest() {
   assert.match(findViolations([[ANTHROPIC_ATTEMPT_CURSOR_FILE,
     anthropicCursorConsumer + "\nattempt.model_index += 1",
   ]]).join("\n"), /Anthropic model\/auth cursor transitions must remain Mojo-owned/u);
+  const geminiOAuthRotationCaller = [
+    "gemini_oauth_profile_rotation_plan(",
+    "state.next_index = rotation.next_index;",
+    ".map(|index| runtime_gemini_oauth_attempt_from_profile(&profiles[index]))",
+    "state.profile_has_available_model(",
+  ].join("\n");
+  const geminiOAuthRotationFile = "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_gemini_oauth_pool.rs";
+  assert.deepEqual(findViolations([[geminiOAuthRotationFile, geminiOAuthRotationCaller]]), []);
+  assert.match(findViolations([[geminiOAuthRotationFile,
+    geminiOAuthRotationCaller + "\nlet start = state.next_index.min(",
+  ]]).join("\n"), /restored Rust Gemini OAuth round-robin and last-chance fallback selection/u);
   const geminiOAuthModelCaller = [
     "gemini_oauth_model_availability(&deadlines, now_ms)",
     "gemini_oauth_preferred_model_chain(models, preference)",

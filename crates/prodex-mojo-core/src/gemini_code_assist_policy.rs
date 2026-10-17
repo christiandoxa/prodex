@@ -3,6 +3,16 @@ use crate::MojoError;
 const ABI_VERSION: i64 = 1;
 
 unsafe extern "C" {
+    fn prodex_gemini_oauth_profile_rotation_v1(
+        abi_version: i64,
+        next_index: u64,
+        eligible_address: u64,
+        profile_count: i64,
+        indices_address: u64,
+        index_capacity: i64,
+        written_address: u64,
+        next_index_address: u64,
+    ) -> i64;
     fn prodex_gemini_oauth_model_availability_v1(
         abi_version: i64,
         now_ms: u64,
@@ -131,6 +141,63 @@ pub fn gemini_code_assist_tier_label(
     decode_optional_string(output, written, present)
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GeminiOAuthProfileRotationPlan {
+    pub indices: Vec<usize>,
+    pub next_index: usize,
+}
+
+/// Compiled Mojo alone chooses round-robin start, eligible profile order,
+/// last-chance all-profile fallback and next cursor. Affinity is resolved
+/// separately before invoking this fresh-request rotation plan.
+pub fn gemini_oauth_profile_rotation_plan(
+    next_index: usize,
+    eligible: &[bool],
+) -> Result<GeminiOAuthProfileRotationPlan, MojoError> {
+    if eligible.is_empty() {
+        return Err(MojoError::InvalidInput);
+    }
+    let input = eligible
+        .iter()
+        .map(|flag| i64::from(*flag))
+        .collect::<Vec<_>>();
+    let mut indices = vec![u64::MAX; eligible.len()];
+    let mut written = -1_i64;
+    let mut next = u64::MAX;
+    status(unsafe {
+        prodex_gemini_oauth_profile_rotation_v1(
+            ABI_VERSION,
+            u64::try_from(next_index).map_err(|_| MojoError::InvalidInput)?,
+            input.as_ptr() as usize as u64,
+            signed(input.len())?,
+            indices.as_mut_ptr() as usize as u64,
+            signed(indices.len())?,
+            (&mut written as *mut i64) as usize as u64,
+            (&mut next as *mut u64) as usize as u64,
+        )
+    })?;
+    let written = usize::try_from(written).map_err(|_| MojoError::InvalidOutput)?;
+    let next_index = usize::try_from(next).map_err(|_| MojoError::InvalidOutput)?;
+    if written == 0 || written > eligible.len() || next_index >= eligible.len() {
+        return Err(MojoError::InvalidOutput);
+    }
+    let mut seen = vec![false; eligible.len()];
+    let mut selected = Vec::with_capacity(written);
+    for &index in &indices[..written] {
+        let index = usize::try_from(index).map_err(|_| MojoError::InvalidOutput)?;
+        let entry = seen.get_mut(index).ok_or(MojoError::InvalidOutput)?;
+        if *entry {
+            return Err(MojoError::InvalidOutput);
+        }
+        *entry = true;
+        selected.push(index);
+    }
+    Ok(GeminiOAuthProfileRotationPlan {
+        indices: selected,
+        next_index,
+    })
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct GeminiOAuthModelDeadline {
     pub cooldown_until_ms: u64,
@@ -237,6 +304,69 @@ pub fn gemini_oauth_preferred_model_chain(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn gemini_oauth_compiled_profile_rotation_preserves_fairness_filter_and_last_chance() {
+        for (next, eligible, expected, expected_next) in [
+            (0, vec![true, true, true], vec![0, 1, 2], 1),
+            (1, vec![true, true, true], vec![1, 2, 0], 2),
+            (2, vec![true, true, true], vec![2, 0, 1], 0),
+            (50, vec![true, true, true], vec![2, 0, 1], 0),
+            (2, vec![false, true, false], vec![1], 0),
+            (0, vec![false, true, true], vec![1, 2], 1),
+            (1, vec![false, false, false], vec![1, 2, 0], 2),
+            (0, vec![false], vec![0], 0),
+            (0, vec![true], vec![0], 0),
+        ] {
+            assert_eq!(
+                gemini_oauth_profile_rotation_plan(next, &eligible).unwrap(),
+                GeminiOAuthProfileRotationPlan {
+                    indices: expected,
+                    next_index: expected_next,
+                },
+                "next={next} eligible={eligible:?}",
+            );
+        }
+        assert_eq!(
+            gemini_oauth_profile_rotation_plan(0, &[]),
+            Err(MojoError::InvalidInput),
+        );
+    }
+
+    #[test]
+    fn gemini_oauth_compiled_profile_rotation_abi_rejects_invalid_mask_before_writes() {
+        let eligible = [1_i64, 0, 2];
+        let input = eligible.as_ptr() as usize as u64;
+        let mut indices = [91_u64; 3];
+        let mut written = 89_i64;
+        let mut next = 73_u64;
+        let out = indices.as_mut_ptr() as usize as u64;
+        let count_ptr = (&mut written as *mut i64) as usize as u64;
+        let next_ptr = (&mut next as *mut u64) as usize as u64;
+        let call = |version, data, count, output, cap, written_ptr, next_ptr| unsafe {
+            prodex_gemini_oauth_profile_rotation_v1(
+                version,
+                1,
+                data,
+                count,
+                output,
+                cap,
+                written_ptr,
+                next_ptr,
+            )
+        };
+        assert_eq!(call(2, input, 3, out, 3, count_ptr, next_ptr), 4);
+        assert_eq!(call(1, input, 0, out, 3, count_ptr, next_ptr), 1);
+        assert_eq!(call(1, 0, 3, out, 3, count_ptr, next_ptr), 1);
+        assert_eq!(call(1, input, 3, 0, 3, count_ptr, next_ptr), 1);
+        assert_eq!(call(1, input, 3, out, 2, count_ptr, next_ptr), 1);
+        assert_eq!(call(1, input, 3, out, 3, 0, next_ptr), 1);
+        assert_eq!(call(1, input, 3, out, 3, count_ptr, 0), 1);
+        assert_eq!(call(1, input, 3, out, 3, count_ptr, next_ptr), 1);
+        assert_eq!(indices, [91; 3]);
+        assert_eq!(written, 89);
+        assert_eq!(next, 73);
+    }
 
     #[test]
     fn gemini_oauth_compiled_availability_enforces_both_deadlines_and_clock_boundaries() {

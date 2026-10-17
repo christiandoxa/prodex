@@ -45,6 +45,92 @@ fn gemini_pool(profile_names: &[&str]) -> RuntimeGeminiOAuthPool {
 }
 
 #[test]
+fn gemini_oauth_compiled_profile_rotation_skips_only_blocked_profiles_and_advances_cursor() {
+    let pool = gemini_pool(&["alpha", "beta", "gamma"]);
+    let body =
+        serde_json::to_vec(&serde_json::json!({"model":"gemini-2.5-pro","input":"hi"})).unwrap();
+    let models = super::super::provider_bridge::runtime_provider_model_fallback_chain(
+        super::super::provider_bridge::RuntimeProviderBridgeKind::Gemini,
+        "gemini-2.5-pro",
+    );
+    assert!(!models.is_empty());
+    let endpoint = gemini_code_assist_endpoint();
+    {
+        let mut state = pool.state.lock().unwrap();
+        state.next_index = 2;
+        for model in &models {
+            state.remember_model_unavailable_until(
+                "alpha",
+                &endpoint,
+                model,
+                runtime_gemini_now_ms().saturating_add(60_000),
+            );
+        }
+    }
+    let first = pool.select_attempts(&body, &[], None).unwrap();
+    assert_eq!(
+        first
+            .iter()
+            .map(|item| item.profile_name.as_str())
+            .collect::<Vec<_>>(),
+        ["gamma", "beta"]
+    );
+    let second = pool.select_attempts(&body, &[], None).unwrap();
+    assert_eq!(
+        second
+            .iter()
+            .map(|item| item.profile_name.as_str())
+            .collect::<Vec<_>>(),
+        ["beta", "gamma"]
+    );
+    assert_eq!(pool.state.lock().unwrap().next_index, 1);
+}
+
+#[test]
+fn gemini_oauth_compiled_profile_rotation_retains_last_chance_when_all_locally_blocked() {
+    let pool = gemini_pool(&["alpha", "beta", "gamma"]);
+    let body =
+        serde_json::to_vec(&serde_json::json!({"model":"gemini-2.5-pro","input":"hi"})).unwrap();
+    let models = super::super::provider_bridge::runtime_provider_model_fallback_chain(
+        super::super::provider_bridge::RuntimeProviderBridgeKind::Gemini,
+        "gemini-2.5-pro",
+    );
+    assert!(!models.is_empty());
+    let endpoint = gemini_code_assist_endpoint();
+    {
+        let mut state = pool.state.lock().unwrap();
+        state.next_index = usize::MAX;
+        for profile in ["alpha", "beta", "gamma"] {
+            for model in &models {
+                state.remember_model_unavailable_until(
+                    profile,
+                    &endpoint,
+                    model,
+                    runtime_gemini_now_ms().saturating_add(60_000),
+                );
+            }
+        }
+    }
+    let first = pool.select_attempts(&body, &[], None).unwrap();
+    assert_eq!(
+        first
+            .iter()
+            .map(|item| item.profile_name.as_str())
+            .collect::<Vec<_>>(),
+        ["gamma", "alpha", "beta"]
+    );
+    assert_eq!(pool.state.lock().unwrap().next_index, 0);
+    let second = pool.select_attempts(&body, &[], None).unwrap();
+    assert_eq!(
+        second
+            .iter()
+            .map(|item| item.profile_name.as_str())
+            .collect::<Vec<_>>(),
+        ["alpha", "beta", "gamma"]
+    );
+}
+
+#[test]
 fn gemini_oauth_pool_rotates_fresh_requests() {
     let pool = gemini_pool(&["alpha", "beta"]);
     let body = serde_json::to_vec(&serde_json::json!({"input": "hi"})).unwrap();

@@ -383,33 +383,29 @@ impl RuntimeGeminiOAuthPool {
         );
         let endpoint = gemini_code_assist_endpoint();
         let now_ms = runtime_gemini_now_ms();
-        let start = state.next_index.min(profiles.len().saturating_sub(1));
-        state.next_index = (start + 1) % profiles.len();
-        let mut attempts = (0..profiles.len())
-            .map(|offset| {
-                runtime_gemini_oauth_attempt_from_profile(
-                    &profiles[(start + offset) % profiles.len()],
-                )
-            })
-            .filter(|selected| {
+        let eligible = profiles
+            .iter()
+            .map(|profile| {
                 state.profile_has_available_model(
-                    &selected.profile_name,
+                    &profile.profile_name,
                     &endpoint,
                     &model_chain,
                     now_ms,
                 )
             })
             .collect::<Vec<_>>();
-        if attempts.is_empty() {
-            attempts = (0..profiles.len())
-                .map(|offset| {
-                    runtime_gemini_oauth_attempt_from_profile(
-                        &profiles[(start + offset) % profiles.len()],
-                    )
-                })
-                .collect();
-        }
-        Ok(attempts)
+        let rotation =
+            prodex_mojo_core::gemini_code_assist_policy::gemini_oauth_profile_rotation_plan(
+                state.next_index,
+                &eligible,
+            )
+            .expect("compiled Mojo Gemini OAuth profile rotation returned invalid output");
+        state.next_index = rotation.next_index;
+        Ok(rotation
+            .indices
+            .into_iter()
+            .map(|index| runtime_gemini_oauth_attempt_from_profile(&profiles[index]))
+            .collect())
     }
 }
 

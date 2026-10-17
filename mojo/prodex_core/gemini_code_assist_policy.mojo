@@ -399,3 +399,63 @@ def prodex_gemini_oauth_model_preference_v1(
         out += 1
     written[] = out
     return 0
+
+
+# After hard/session affinity is handled by the host, choose the next OAuth
+# profile attempt order. The compiled owner preserves round-robin fairness,
+# skips quota-blocked profiles, and uses a bounded final all-profile fallback
+# only when every candidate is blocked by local heuristics.
+@export("prodex_gemini_oauth_profile_rotation_v1")
+def prodex_gemini_oauth_profile_rotation_v1(
+    abi_version: Int64,
+    next_index: UInt64,
+    eligible_address: UInt,
+    profile_count: Int64,
+    indices_address: UInt,
+    index_capacity: Int64,
+    written_address: UInt,
+    next_index_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != GEMINI_OAUTH_MODEL_ABI_VERSION:
+        return 4
+    if (
+        profile_count <= 0 or eligible_address == 0
+        or indices_address == 0 or index_capacity < profile_count
+        or written_address == 0 or next_index_address == 0
+    ):
+        return 1
+    var eligible = Pointer[mut=False, Int64, ImmUntrackedOrigin](
+        unsafe_from_address=Int(eligible_address)
+    )
+    var any_eligible = False
+    for index in range(profile_count):
+        var value = eligible[unsafe_offset=index]
+        if value != 0 and value != 1:
+            return 1
+        if value == 1:
+            any_eligible = True
+    var start = profile_count - 1
+    if next_index < UInt64(profile_count):
+        start = Int64(next_index)
+    var next = start + 1
+    if next == profile_count:
+        next = 0
+    var output = Pointer[mut=True, UInt64, MutUntrackedOrigin](
+        unsafe_from_address=Int(indices_address)
+    )
+    var count: Int64 = 0
+    var index = start
+    for _ in range(profile_count):
+        if not any_eligible or eligible[unsafe_offset=index] == 1:
+            output[unsafe_offset=count] = UInt64(index)
+            count += 1
+        index += 1
+        if index == profile_count:
+            index = 0
+    Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(written_address)
+    )[] = count
+    Pointer[mut=True, UInt64, MutUntrackedOrigin](
+        unsafe_from_address=Int(next_index_address)
+    )[] = UInt64(next)
+    return 0
