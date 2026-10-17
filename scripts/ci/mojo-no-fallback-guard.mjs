@@ -171,6 +171,7 @@ const PING_SUMMARY_CALLER_TEST_FILE = "crates/prodex-app/src/app_commands/ping_t
 const PING_SUMMARY_ADAPTER_FILE = "crates/prodex-mojo-core/src/rich/ping_protocol.rs";
 const PING_SUMMARY_MOJO_FILE = "mojo/prodex_core/ping_protocol.mojo";
 const PROMOTED_FILES = [
+  "crates/prodex-mojo-core/src/rich/super_expose/origin.rs",
   "crates/prodex-app/src/runtime_kiro_acp/turn_state.rs",
   "crates/prodex-mojo-core/src/rich/kiro/acp_activity_ledger.rs",
   "mojo/prodex_core/kiro_acp_tool_activity_policy.mojo",
@@ -8375,6 +8376,47 @@ export function findViolations(files) {
     }
     return [];
   });
+  const superExposeOriginMojoViolations = files.flatMap(([filePath, contents]) => {
+    if (filePath === SUPER_EXPOSE_VALIDATION_FILE) {
+      const required = [
+        "url::Url::parse(value).ok()",
+        "SuperExposeParsedOriginUrl",
+        "prodex_mojo_core::rich::super_expose_origin_allowed(host, origin, url_facts)",
+        "mcp_origin_policy_rejects_credential_ports_paths_queries_and_unicode_padding",
+      ];
+      const retired = [
+        "let local_http = host.starts_with(",
+        'origin == format!("http://{host}")',
+        "let trusted_https = parsed.scheme()",
+        "ascii_casefold_equal_exact(",
+        "parsed.username().is_empty()",
+        "parsed.query().is_none()",
+      ];
+      return required.every((marker) => contents.includes(marker)) &&
+        retired.every((marker) => !contents.includes(marker))
+        ? [] : [filePath + ": Super Expose Origin admission must be decided in compiled Mojo"];
+    }
+    if (filePath === "crates/prodex-mojo-core/src/rich/super_expose/origin.rs") {
+      return [
+        "fn prodex_mojo_super_expose_origin_allowed_v1(",
+        "pub fn super_expose_origin_allowed(",
+        "compiled_super_expose_origin_policy_checks_trusted_hosts_and_url_constraints",
+        "compiled_super_expose_origin_abi_rejects_invalid_inputs_before_mutation",
+      ].filter((marker) => !contents.includes(marker))
+        .map((marker) => filePath + ": compiled Super Expose Origin ABI or strict tests missing " + marker);
+    }
+    if (filePath === SUPER_EXPOSE_OUTPUT_MOJO_FILE) {
+      return [
+        '@export("prodex_mojo_super_expose_origin_allowed_v1")',
+        "super_expose_origin_host_equal_folded(",
+        "super_expose_origin_exact_local_http(",
+        "rich_trim_bounds(origin)",
+        "SUPER_EXPOSE_ORIGIN_NO_FRAGMENT",
+      ].filter((marker) => !contents.includes(marker))
+        .map((marker) => filePath + ": compiled MCP Origin allowlist and URL flags must remain Mojo-owned (" + marker + ")");
+    }
+    return [];
+  });
   const kiroAcpToolLedgerMojoViolations = files.flatMap(([filePath, contents]) => {
     if (filePath === "crates/prodex-app/src/runtime_kiro_acp/turn_state.rs") {
       const production = contents.split("#[cfg(test)]", 1)[0];
@@ -8849,7 +8891,7 @@ export function findViolations(files) {
     }
     return [];
   });
-  return [...logPayloadProjectionViolations, ...nativeRecoveryOwnershipViolations, ...quotaRecoveryEligibilityViolations, ...runtimeBrokerReuseMojoViolations, ...geminiResponseMediaMojoViolations, ...cookieEvictionMojoViolations, ...websocketBudgetMojoViolations, ...affinityBindingMojoViolations, ...responsesCapacityRecoveryViolations, ...sseTapMojoOwnershipViolations, ...quotaWatchViolations, ...geminiCompactSnippetViolations, ...geminiCompactTextViolations, ...doctorSmartContextDecisionViolations, ...anthropicAttemptCursorViolations, ...geminiUnsupportedToolRetryViolations, ...terminalGeometryViolations, ...previousResponseRecoveryTransitionViolations, ...kiroAcpToolLedgerMojoViolations, ...quotaPoolSummarySectionsMojoViolations, ...deepseekToolShapeIssueMojoViolations, ...deepseekReplayItemPolicyMojoViolations, ...chatNamespaceSplitMojoViolations, ...deepseekInputItemIssueMessageViolations, ...deepseekRequestIssueMessageViolations, ...smartContextTelemetrySampleViolations, ...compatibilityDiagnosticsMojoViolations, ...quotaHeaderProjectionViolations, ...smartContextCapsuleOrderViolations, ...markerViolations, ...deepseekCatalogPolicyViolations, ...featureOffViolations, ...liveLogRecordViolations, ...runtimePolicyPresetViolations, ...runtimeConfigScalarViolations, ...profileHealthCircuitViolations, ...logThroughputViolations, ...operationalDetailSpecViolations, ...transcriptPolicyViolations, ...logLoadPolicyViolations, ...routeReasonViolations, ...runtimeStateQuotaViolations, ...runtimeStateRoutePolicyViolations, ...runtimeProxyRootViolations, ...runtimeRecoveryDeadlineViolations, ...brokerVersionGuardViolations, ...brokerContinuityViolations, ...brokerLogCacheViolations, ...codexConfigViolations, ...statePolicyViolations, ...quotaSelectionPolicyViolations, ...routeTagMirrorViolations, ...enumTagMirrorViolations, ...appSelectionPolicyMirrorViolations, ...runtimeStateBackgroundViolations, ...redactionViolations, ...rateLimitHeaderSelectionViolations, ...profileIdentityViolations, ...governanceInspectionViolations, ...governanceInspectionOrderingViolations, ...exactnessPlannerViolations,
+  return [...logPayloadProjectionViolations, ...nativeRecoveryOwnershipViolations, ...quotaRecoveryEligibilityViolations, ...runtimeBrokerReuseMojoViolations, ...geminiResponseMediaMojoViolations, ...cookieEvictionMojoViolations, ...websocketBudgetMojoViolations, ...affinityBindingMojoViolations, ...responsesCapacityRecoveryViolations, ...sseTapMojoOwnershipViolations, ...quotaWatchViolations, ...geminiCompactSnippetViolations, ...geminiCompactTextViolations, ...doctorSmartContextDecisionViolations, ...anthropicAttemptCursorViolations, ...geminiUnsupportedToolRetryViolations, ...terminalGeometryViolations, ...previousResponseRecoveryTransitionViolations, ...superExposeOriginMojoViolations, ...kiroAcpToolLedgerMojoViolations, ...quotaPoolSummarySectionsMojoViolations, ...deepseekToolShapeIssueMojoViolations, ...deepseekReplayItemPolicyMojoViolations, ...chatNamespaceSplitMojoViolations, ...deepseekInputItemIssueMessageViolations, ...deepseekRequestIssueMessageViolations, ...smartContextTelemetrySampleViolations, ...compatibilityDiagnosticsMojoViolations, ...quotaHeaderProjectionViolations, ...smartContextCapsuleOrderViolations, ...markerViolations, ...deepseekCatalogPolicyViolations, ...featureOffViolations, ...liveLogRecordViolations, ...runtimePolicyPresetViolations, ...runtimeConfigScalarViolations, ...profileHealthCircuitViolations, ...logThroughputViolations, ...operationalDetailSpecViolations, ...transcriptPolicyViolations, ...logLoadPolicyViolations, ...routeReasonViolations, ...runtimeStateQuotaViolations, ...runtimeStateRoutePolicyViolations, ...runtimeProxyRootViolations, ...runtimeRecoveryDeadlineViolations, ...brokerVersionGuardViolations, ...brokerContinuityViolations, ...brokerLogCacheViolations, ...codexConfigViolations, ...statePolicyViolations, ...quotaSelectionPolicyViolations, ...routeTagMirrorViolations, ...enumTagMirrorViolations, ...appSelectionPolicyMirrorViolations, ...runtimeStateBackgroundViolations, ...redactionViolations, ...rateLimitHeaderSelectionViolations, ...profileIdentityViolations, ...governanceInspectionViolations, ...governanceInspectionOrderingViolations, ...exactnessPlannerViolations,
     ...adaptiveBudgetViolations,
     ...providerUsageViolations,
     ...auditUsageViolations,
@@ -9615,6 +9657,21 @@ function selfTest() {
   assert.match(findViolations([[ANTHROPIC_ATTEMPT_CURSOR_FILE,
     anthropicCursorConsumer + "\nattempt.model_index += 1",
   ]]).join("\n"), /Anthropic model\/auth cursor transitions must remain Mojo-owned/u);
+  const superExposeOriginCaller = [
+    "url::Url::parse(value).ok()",
+    "SuperExposeParsedOriginUrl",
+    "prodex_mojo_core::rich::super_expose_origin_allowed(host, origin, url_facts)",
+    "mcp_origin_policy_rejects_credential_ports_paths_queries_and_unicode_padding",
+  ].join("\n");
+  assert.deepEqual(findViolations([[SUPER_EXPOSE_VALIDATION_FILE, superExposeOriginCaller +
+    "\nprodex_mojo_core::rich::super_expose_protocol_metadata(" +
+    "\nprodex_mojo_core::rich::super_expose_content_type_allowed(" +
+    "\nprodex_mojo_core::rich::super_expose_accept_allowed(" +
+    "\nprodex_mojo_core::rich::super_expose_json_nesting_within_limit("
+  ]]), []);
+  assert.match(findViolations([[SUPER_EXPOSE_VALIDATION_FILE,
+    superExposeOriginCaller + "\nlet local_http = host.starts_with(",
+  ]]).join("\n"), /Super Expose Origin admission must be decided in compiled Mojo/u);
   const kiroAcpLedgerConsumer = [
     "prodex_mojo_core::rich::kiro_acp_tool_activity_plan(",
     "KiroAcpToolActivityFacts",

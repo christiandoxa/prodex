@@ -1,5 +1,5 @@
 use super::*;
-use prodex_mojo_core::rich::ascii_casefold_equal_exact;
+use prodex_mojo_core::rich::SuperExposeParsedOriginUrl;
 
 pub(super) fn validate_mcp_request_headers(
     message: &serde_json::Map<String, Value>,
@@ -82,32 +82,19 @@ fn header_mismatch(
 }
 
 pub(crate) fn mcp_origin_allowed(host: &str, origin: Option<&str>) -> bool {
-    let Some(origin) = origin else {
-        return true;
-    };
-    if origin != origin.trim() {
-        return false;
-    }
-    let Ok(parsed) = url::Url::parse(origin) else {
-        return false;
-    };
-    let local_http = host.starts_with("127.0.0.1:") && origin == format!("http://{host}");
-    let trusted_https = parsed.scheme() == "https"
-        && parsed.host_str().is_some_and(|origin_host| {
-            ascii_casefold_equal_exact(origin_host, host)
-                .expect("Mojo MCP origin host comparison failed")
-                || ascii_casefold_equal_exact(origin_host, "chatgpt.com")
-                    .expect("Mojo MCP trusted-origin comparison failed")
-                || ascii_casefold_equal_exact(origin_host, "chat.openai.com")
-                    .expect("Mojo MCP trusted-origin comparison failed")
-        })
-        && parsed.port().is_none();
-    (local_http || trusted_https)
-        && parsed.username().is_empty()
-        && parsed.password().is_none()
-        && (parsed.path().is_empty() || parsed.path() == "/")
-        && parsed.query().is_none()
-        && parsed.fragment().is_none()
+    let parsed = origin.and_then(|value| url::Url::parse(value).ok());
+    let url_facts = parsed.as_ref().map(|url| SuperExposeParsedOriginUrl {
+        scheme: url.scheme(),
+        host: url.host_str(),
+        username_empty: url.username().is_empty(),
+        password_absent: url.password().is_none(),
+        explicit_port_absent: url.port().is_none(),
+        root_path: url.path().is_empty() || url.path() == "/",
+        query_absent: url.query().is_none(),
+        fragment_absent: url.fragment().is_none(),
+    });
+    prodex_mojo_core::rich::super_expose_origin_allowed(host, origin, url_facts)
+        .expect("compiled Mojo MCP Origin trust policy returned invalid output")
 }
 
 pub(crate) fn mcp_content_type_allowed(value: Option<&str>) -> bool {
@@ -157,6 +144,39 @@ fn mcp_json_error(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn mcp_origin_policy_rejects_credential_ports_paths_queries_and_unicode_padding() {
+        for (host, origin, allowed) in [
+            ("example.com", "https://EXAMPLE.COM/", true),
+            ("example.com", "https://example.com", true),
+            ("localhost", "https://CHATGPT.COM/", true),
+            ("localhost", "https://chat.openai.com/", true),
+            ("localhost", "https://chatgpt.com.attacker/", false),
+            ("example.com", "http://example.com/", false),
+            ("example.com", "https://example.com:9443/", false),
+            ("example.com", "https://user@example.com/", false),
+            ("example.com", "https://user:pass@example.com/", false),
+            ("example.com", "https://example.com/path", false),
+            ("example.com", "https://example.com/?q=1", false),
+            ("example.com", "https://example.com/#token", false),
+            ("example.com", "\u{2003}https://example.com/", false),
+            ("example.com", "https://example.com/\u{3000}", false),
+            ("127.0.0.1:9876", "http://127.0.0.1:9876", true),
+            ("127.0.0.1:9876", "http://127.0.0.1:9876/", false),
+            ("127.0.0.1:9876", "http://127.0.0.1:9877", false),
+            ("127.0.0.1:9876", "http://localhost:9876", false),
+            ("localhost:9876", "http://localhost:9876", false),
+            ("localhost", "not-an-origin", false),
+        ] {
+            assert_eq!(
+                mcp_origin_allowed(host, Some(origin)),
+                allowed,
+                "{host:?}/{origin:?}",
+            );
+        }
+        assert!(mcp_origin_allowed("localhost", None));
+    }
 
     #[test]
     fn origin_policy_uses_exact_mojo_casefold() {
