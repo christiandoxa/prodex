@@ -1,3 +1,7 @@
+#[path = "deepseek/input_item_issue.rs"]
+mod input_item_issue;
+pub use input_item_issue::deepseek_input_item_issue_message;
+
 use super::{
     MojoError, MojoIssue, RICH_ABI_VERSION, RichStringView, ensure_rich_abi,
     mojo_mut_pointer_address, mojo_pointer_address, view,

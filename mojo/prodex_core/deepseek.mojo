@@ -6804,3 +6804,117 @@ def prodex_deepseek_request_issue_message_v1(
     if not deepseek_request_issue_append_literal(output, output_capacity, written, literal):
         return 3
     return 0
+
+
+# The existing compiled input-item classifier is the sole source of the issue
+# tag. This kernel also owns the exact DeepSeek/Kiro provider-facing message,
+# with no Rust issue-to-error translation or default fallback.
+comptime DEEPSEEK_INPUT_ITEM_ISSUE_ABI_VERSION: Int64 = 1
+
+
+@export("prodex_deepseek_input_item_issue_message_v1")
+def prodex_deepseek_input_item_issue_message_v1(
+    abi_version: Int64,
+    issue: UInt64,
+    provider_address: UInt,
+    provider_length: Int64,
+    detail_address: UInt,
+    detail_length: Int64,
+    output_address: UInt,
+    output_capacity: Int64,
+    written_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != DEEPSEEK_INPUT_ITEM_ISSUE_ABI_VERSION:
+        return 4
+    if (
+        issue == 0 or provider_length < 0 or detail_length < 0
+        or (provider_length > 0 and provider_address == 0)
+        or (detail_length > 0 and detail_address == 0)
+        or output_address == 0 or written_address == 0
+        or output_capacity < 0
+    ):
+        return 1
+    var provider = ProdexRichStringView(provider_address, UInt(provider_length))
+    var detail = ProdexRichStringView(detail_address, UInt(detail_length))
+    if not rich_view_valid(provider, 0x7FFFFFFFFFFFFFFF) or not rich_view_valid(detail, 0x7FFFFFFFFFFFFFFF):
+        return 1
+
+    var prefix = StringSlice("")
+    var suffix = StringSlice("")
+    var with_detail = False
+    if issue == 1:
+        prefix = StringSlice(" input items must be objects")
+    elif issue == 2:
+        prefix = StringSlice(" chat prefix completion requires the beta chat endpoint, which is outside this Responses adapter")
+    elif issue == 3:
+        prefix = StringSlice(" message role must be a string")
+    elif issue == 4:
+        prefix = StringSlice(" message role `")
+        suffix = StringSlice("` is not supported by this Responses adapter")
+        with_detail = True
+    elif issue == 5:
+        prefix = StringSlice(" message content must be a string, object, or array")
+    elif issue == 6:
+        prefix = StringSlice(" per-message cache_control is not supported by this Responses adapter because DeepSeek context caching is automatic")
+    elif issue == 7:
+        prefix = StringSlice(" text-only adapter does not support object message content parts without text or type")
+    elif issue == 8:
+        prefix = StringSlice(" text-only adapter does not support message content part type `")
+        suffix = StringSlice("`")
+        with_detail = True
+    elif issue == 10:
+        prefix = StringSlice(" input tool items require a call_id")
+    elif issue == 11:
+        prefix = StringSlice(" input tool call items require a function name")
+    elif issue == 12:
+        prefix = StringSlice(" input tool output items require output content")
+    elif issue == 13:
+        prefix = StringSlice(" local_shell_call action.command must be an array of strings")
+    elif issue == 14:
+        prefix = StringSlice(" local_shell_call requires a command")
+    elif issue == 15:
+        prefix = StringSlice(" input item type `")
+        suffix = StringSlice("` is not supported by this Responses adapter")
+        with_detail = True
+    elif issue == 16 or issue == 21:
+        prefix = StringSlice(" text content parts require a text field")
+    elif issue == 17 or issue == 19:
+        prefix = StringSlice(" input_text content parts require a text field")
+    elif issue == 18 or issue == 20:
+        prefix = StringSlice(" output_text content parts require a text field")
+    else:
+        prefix = StringSlice(" input item validation returned an unknown result")
+
+    var prefix_length = Int64(prefix.byte_length())
+    var suffix_length = Int64(suffix.byte_length())
+    var dynamic_length = detail_length if with_detail else Int64(0)
+    # Check the whole output before writing, including untrusted provider
+    # labels and dynamic details. The ABI never partially writes on capacity.
+    if (
+        provider_length > output_capacity
+        or prefix_length > output_capacity - provider_length
+        or dynamic_length > output_capacity - provider_length - prefix_length
+        or suffix_length > output_capacity - provider_length - prefix_length - dynamic_length
+    ):
+        return 3
+    var output = Pointer[mut=True, UInt8, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    var written = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(written_address)
+    )
+    written[] = 0
+    var provider_ptr = rich_view_ptr(provider)
+    for index in range(provider_length):
+        output[unsafe_offset=written[]] = provider_ptr[unsafe_offset=index]
+        written[] += 1
+    if not deepseek_request_issue_append_literal(output, output_capacity, written, prefix):
+        return 3
+    if with_detail:
+        var detail_ptr = rich_view_ptr(detail)
+        for index in range(detail_length):
+            output[unsafe_offset=written[]] = detail_ptr[unsafe_offset=index]
+            written[] += 1
+    if not deepseek_request_issue_append_literal(output, output_capacity, written, suffix):
+        return 3
+    return 0

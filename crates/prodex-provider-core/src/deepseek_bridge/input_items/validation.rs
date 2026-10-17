@@ -1,7 +1,7 @@
 //! DeepSeek Responses input-item validation.
 //!
-//! Mojo classifies the item and returns only a stable issue tag/detail. Rust
-//! keeps JSON acquisition and the provider-facing error text.
+//! Mojo owns both the issue classification and the exact provider-facing
+//! diagnostic. Rust only acquires JSON and forwards the typed result.
 
 fn deepseek_provider_core_input_item_plan(
     object: &serde_json::Map<String, serde_json::Value>,
@@ -37,61 +37,20 @@ pub(super) fn deepseek_provider_core_validate_supported_input_item(
     provider_label: &str,
 ) -> Result<(), String> {
     let Some(object) = item.as_object() else {
-        return Err(format!("{provider_label} input items must be objects"));
+        let diagnostic =
+            prodex_mojo_core::rich::deepseek_input_item_issue_message(1, provider_label, "")
+                .map_err(|error| format!("DeepSeek input item diagnostic ABI failed: {error:?}"))?;
+        return Err(diagnostic);
     };
     let (tag, detail) = deepseek_provider_core_input_item_plan(object, gemini_compat)?;
-    let detail = detail.unwrap_or_default();
-    match tag {
-        0 => Ok(()),
-        1 => Err(format!("{provider_label} input items must be objects")),
-        2 => Err(format!(
-            "{provider_label} chat prefix completion requires the beta chat endpoint, which is outside this Responses adapter"
-        )),
-        3 => Err(format!("{provider_label} message role must be a string")),
-        4 => Err(format!(
-            "{provider_label} message role `{detail}` is not supported by this Responses adapter"
-        )),
-        5 => Err(format!(
-            "{provider_label} message content must be a string, object, or array"
-        )),
-        6 => Err(format!(
-            "{provider_label} per-message cache_control is not supported by this Responses adapter because DeepSeek context caching is automatic"
-        )),
-        7 => Err(format!(
-            "{provider_label} text-only adapter does not support object message content parts without text or type"
-        )),
-        8 => Err(format!(
-            "{provider_label} text-only adapter does not support message content part type `{detail}`"
-        )),
-        10 => Err(format!(
-            "{provider_label} input tool items require a call_id"
-        )),
-        11 => Err(format!(
-            "{provider_label} input tool call items require a function name"
-        )),
-        12 => Err(format!(
-            "{provider_label} input tool output items require output content"
-        )),
-        13 => Err(format!(
-            "{provider_label} local_shell_call action.command must be an array of strings"
-        )),
-        14 => Err(format!(
-            "{provider_label} local_shell_call requires a command"
-        )),
-        15 => Err(format!(
-            "{provider_label} input item type `{detail}` is not supported by this Responses adapter"
-        )),
-        16 | 21 => Err(format!(
-            "{provider_label} text content parts require a text field"
-        )),
-        17 | 19 => Err(format!(
-            "{provider_label} input_text content parts require a text field"
-        )),
-        18 | 20 => Err(format!(
-            "{provider_label} output_text content parts require a text field"
-        )),
-        _ => Err(format!(
-            "{provider_label} input item validation returned an unknown result"
-        )),
+    if tag == 0 {
+        return Ok(());
     }
+    let diagnostic = prodex_mojo_core::rich::deepseek_input_item_issue_message(
+        tag,
+        provider_label,
+        detail.as_deref().unwrap_or_default(),
+    )
+    .map_err(|error| format!("DeepSeek input item diagnostic ABI failed: {error:?}"))?;
+    Err(diagnostic)
 }

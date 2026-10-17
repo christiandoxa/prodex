@@ -171,6 +171,9 @@ const PING_SUMMARY_CALLER_TEST_FILE = "crates/prodex-app/src/app_commands/ping_t
 const PING_SUMMARY_ADAPTER_FILE = "crates/prodex-mojo-core/src/rich/ping_protocol.rs";
 const PING_SUMMARY_MOJO_FILE = "mojo/prodex_core/ping_protocol.mojo";
 const PROMOTED_FILES = [
+  "crates/prodex-provider-core/src/deepseek_bridge/input_items/validation.rs",
+  "crates/prodex-provider-core/src/deepseek_bridge/tests/input_items.rs",
+  "crates/prodex-mojo-core/src/rich/deepseek/input_item_issue.rs",
   "crates/prodex-runtime-proxy/src/previous_response_orchestration.rs",
   "crates/prodex-mojo-core/src/runtime/previous_response_orchestration.rs",
   "mojo/prodex_core/runtime_responses_attempt.mojo",
@@ -8260,6 +8263,47 @@ export function findViolations(files) {
     }
     return [];
   });
+  const deepseekInputItemIssueMessageViolations = files.flatMap(([filePath, contents]) => {
+    if (filePath === "crates/prodex-provider-core/src/deepseek_bridge/input_items/validation.rs") {
+      const required = [
+        "DeepSeekKernelOperation::InputItemValidation",
+        "deepseek_provider_core_input_item_plan(",
+        "prodex_mojo_core::rich::deepseek_input_item_issue_message(",
+      ];
+      const retired = [
+        "match tag {",
+        "16 | 21 => Err(format!(",
+        "text content parts require a text field",
+        "input item validation returned an unknown result",
+      ];
+      return required.every((marker) => contents.includes(marker)) &&
+        retired.every((marker) => !contents.includes(marker))
+        ? [] : [filePath + ": input-item issue diagnostics must remain Mojo-owned without Rust mapping"];
+    }
+    if (filePath === "crates/prodex-mojo-core/src/rich/deepseek/input_item_issue.rs") {
+      return [
+        "fn prodex_deepseek_input_item_issue_message_v1(",
+        "pub fn deepseek_input_item_issue_message(",
+        "input_item_issue_messages_match_every_existing_provider_contract",
+        "input_item_issue_abi_rejects_invalid_inputs_before_writing",
+      ].filter((marker) => !contents.includes(marker))
+        .map((marker) => filePath + ": strict input-item ABI test or adapter missing " + marker);
+    }
+    if (filePath === "crates/prodex-provider-core/src/deepseek_bridge/tests/input_items.rs") {
+      return contents.includes("deepseek_and_kiro_input_item_errors_use_one_compiled_mojo_message_owner")
+        ? [] : [filePath + ": real DeepSeek/Kiro input item rejection regression missing"];
+    }
+    if (filePath === "mojo/prodex_core/deepseek.mojo") {
+      return [
+        '@export("prodex_deepseek_input_item_issue_message_v1")',
+        "DEEPSEEK_INPUT_ITEM_ISSUE_ABI_VERSION",
+        "deepseek_request_issue_append_literal(",
+        "rich_view_valid(provider",
+      ].filter((marker) => !contents.includes(marker))
+        .map((marker) => filePath + ": Mojo input-item diagnostic semantics missing " + marker);
+    }
+    return [];
+  });
   const deepseekRequestIssueMessageViolations = files.flatMap(([filePath, contents]) => {
     if (filePath === DEEPSEEK_REQUEST_FILE) {
       const required = [
@@ -8574,7 +8618,7 @@ export function findViolations(files) {
     }
     return [];
   });
-  return [...logPayloadProjectionViolations, ...nativeRecoveryOwnershipViolations, ...quotaRecoveryEligibilityViolations, ...runtimeBrokerReuseMojoViolations, ...geminiResponseMediaMojoViolations, ...cookieEvictionMojoViolations, ...websocketBudgetMojoViolations, ...affinityBindingMojoViolations, ...responsesCapacityRecoveryViolations, ...sseTapMojoOwnershipViolations, ...quotaWatchViolations, ...geminiCompactSnippetViolations, ...geminiCompactTextViolations, ...doctorSmartContextDecisionViolations, ...anthropicAttemptCursorViolations, ...geminiUnsupportedToolRetryViolations, ...terminalGeometryViolations, ...previousResponseRecoveryTransitionViolations, ...deepseekRequestIssueMessageViolations, ...smartContextTelemetrySampleViolations, ...compatibilityDiagnosticsMojoViolations, ...quotaHeaderProjectionViolations, ...smartContextCapsuleOrderViolations, ...markerViolations, ...deepseekCatalogPolicyViolations, ...featureOffViolations, ...liveLogRecordViolations, ...runtimePolicyPresetViolations, ...runtimeConfigScalarViolations, ...profileHealthCircuitViolations, ...logThroughputViolations, ...operationalDetailSpecViolations, ...transcriptPolicyViolations, ...logLoadPolicyViolations, ...routeReasonViolations, ...runtimeStateQuotaViolations, ...runtimeStateRoutePolicyViolations, ...runtimeProxyRootViolations, ...runtimeRecoveryDeadlineViolations, ...brokerVersionGuardViolations, ...brokerContinuityViolations, ...brokerLogCacheViolations, ...codexConfigViolations, ...statePolicyViolations, ...quotaSelectionPolicyViolations, ...routeTagMirrorViolations, ...enumTagMirrorViolations, ...appSelectionPolicyMirrorViolations, ...runtimeStateBackgroundViolations, ...redactionViolations, ...rateLimitHeaderSelectionViolations, ...profileIdentityViolations, ...governanceInspectionViolations, ...governanceInspectionOrderingViolations, ...exactnessPlannerViolations,
+  return [...logPayloadProjectionViolations, ...nativeRecoveryOwnershipViolations, ...quotaRecoveryEligibilityViolations, ...runtimeBrokerReuseMojoViolations, ...geminiResponseMediaMojoViolations, ...cookieEvictionMojoViolations, ...websocketBudgetMojoViolations, ...affinityBindingMojoViolations, ...responsesCapacityRecoveryViolations, ...sseTapMojoOwnershipViolations, ...quotaWatchViolations, ...geminiCompactSnippetViolations, ...geminiCompactTextViolations, ...doctorSmartContextDecisionViolations, ...anthropicAttemptCursorViolations, ...geminiUnsupportedToolRetryViolations, ...terminalGeometryViolations, ...previousResponseRecoveryTransitionViolations, ...deepseekInputItemIssueMessageViolations, ...deepseekRequestIssueMessageViolations, ...smartContextTelemetrySampleViolations, ...compatibilityDiagnosticsMojoViolations, ...quotaHeaderProjectionViolations, ...smartContextCapsuleOrderViolations, ...markerViolations, ...deepseekCatalogPolicyViolations, ...featureOffViolations, ...liveLogRecordViolations, ...runtimePolicyPresetViolations, ...runtimeConfigScalarViolations, ...profileHealthCircuitViolations, ...logThroughputViolations, ...operationalDetailSpecViolations, ...transcriptPolicyViolations, ...logLoadPolicyViolations, ...routeReasonViolations, ...runtimeStateQuotaViolations, ...runtimeStateRoutePolicyViolations, ...runtimeProxyRootViolations, ...runtimeRecoveryDeadlineViolations, ...brokerVersionGuardViolations, ...brokerContinuityViolations, ...brokerLogCacheViolations, ...codexConfigViolations, ...statePolicyViolations, ...quotaSelectionPolicyViolations, ...routeTagMirrorViolations, ...enumTagMirrorViolations, ...appSelectionPolicyMirrorViolations, ...runtimeStateBackgroundViolations, ...redactionViolations, ...rateLimitHeaderSelectionViolations, ...profileIdentityViolations, ...governanceInspectionViolations, ...governanceInspectionOrderingViolations, ...exactnessPlannerViolations,
     ...adaptiveBudgetViolations,
     ...providerUsageViolations,
     ...auditUsageViolations,
@@ -9340,6 +9384,16 @@ function selfTest() {
   assert.match(findViolations([[ANTHROPIC_ATTEMPT_CURSOR_FILE,
     anthropicCursorConsumer + "\nattempt.model_index += 1",
   ]]).join("\n"), /Anthropic model\/auth cursor transitions must remain Mojo-owned/u);
+  const deepseekInputIssueConsumer = [
+    "DeepSeekKernelOperation::InputItemValidation",
+    "deepseek_provider_core_input_item_plan(",
+    "prodex_mojo_core::rich::deepseek_input_item_issue_message(",
+  ].join("\n");
+  const deepseekInputIssueCallerFile = "crates/prodex-provider-core/src/deepseek_bridge/input_items/validation.rs";
+  assert.deepEqual(findViolations([[deepseekInputIssueCallerFile, deepseekInputIssueConsumer]]), []);
+  assert.match(findViolations([[deepseekInputIssueCallerFile,
+    deepseekInputIssueConsumer + "\nmatch tag {",
+  ]]).join("\n"), /input-item issue diagnostics must remain Mojo-owned/u);
   const deepseekIssueMessageConsumer = [
     "deepseek_responses_request_transform(",
     "deepseek_request_issue_message(issue as i64, detail)",

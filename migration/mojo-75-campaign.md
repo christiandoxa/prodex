@@ -5777,3 +5777,12 @@ The Rust recovery orchestration branches were removed without a fallback,
 while Rust retains session state application. Typed ABI, direct validation,
 all runtime-proxy tests, WebSocket consumer tests and source guards protect
 retry precedence and cross-profile response ownership.
+
+## DeepSeek/Kiro input-item issue diagnostics migrated to Mojo
+
+The compiled DeepSeek validation owner now renders the complete provider-
+prefixed input-item rejection message, including Unicode details and all
+historical error-tag aliases. The Rust tag-to-string match was deleted, while
+serde request acquisition and typed output materialization remain Rust host
+responsibilities. Direct strict ABI and provider caller tests plus an explicit
+no-Rust-fallback guard preserve behavior.

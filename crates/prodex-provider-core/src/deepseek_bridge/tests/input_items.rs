@@ -237,3 +237,43 @@ fn deepseek_mojo_plans_history_key_and_matches_stored_tool_calls() {
         assert_eq!(serde_json::from_slice::<bool>(&output).unwrap(), expected);
     }
 }
+
+#[test]
+fn deepseek_and_kiro_input_item_errors_use_one_compiled_mojo_message_owner() {
+    let cases = [
+        (serde_json::json!(false), " input items must be objects"),
+        (
+            serde_json::json!({"type":"message","role":"critic","content":"text"}),
+            " message role `critic` is not supported by this Responses adapter",
+        ),
+        (
+            serde_json::json!({"type":"message","content":[{"type":"image_東京🧭"}]}),
+            " text-only adapter does not support message content part type `image_東京🧭`",
+        ),
+        (
+            serde_json::json!({"type":"function_call"}),
+            " input tool items require a call_id",
+        ),
+        (
+            serde_json::json!({"type":"function_call","call_id":"call_1"}),
+            " input tool call items require a function name",
+        ),
+        (
+            serde_json::json!({"type":"function_call_output","call_id":"call_1"}),
+            " input tool output items require output content",
+        ),
+        (
+            serde_json::json!({"type":"future_🧭"}),
+            " input item type `future_🧭` is not supported by this Responses adapter",
+        ),
+    ];
+    for provider in ["DeepSeek", "Kiro"] {
+        for (item, message) in &cases {
+            assert_eq!(
+                deepseek_provider_core_validate_supported_input_item(item, false, provider),
+                Err(format!("{provider}{message}")),
+                "{provider}: {item}",
+            );
+        }
+    }
+}
