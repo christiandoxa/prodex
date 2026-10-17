@@ -3,7 +3,8 @@
 use super::super::super::gemini_rewrite::RuntimeGeminiOAuthProfileAuth;
 use super::{RuntimeGeminiModelPreference, RuntimeGeminiOAuthPoolState, runtime_gemini_now_ms};
 use prodex_mojo_core::gemini_code_assist_policy::{
-    GeminiOAuthModelAvailability, GeminiOAuthModelDeadline, gemini_oauth_model_availability,
+    GeminiOAuthBindingChoice, GeminiOAuthModelAvailability, GeminiOAuthModelDeadline,
+    gemini_oauth_binding_priority, gemini_oauth_model_availability,
     gemini_oauth_preferred_model_chain,
 };
 use prodex_provider_core::gemini_provider_core_tool_output_call_ids_from_request;
@@ -22,32 +23,48 @@ impl RuntimeGeminiOAuthPoolState {
             .cloned()
     }
 
-    pub(super) fn affinity_profile_for_body(&self, body: &[u8]) -> Option<String> {
-        let value = serde_json::from_slice::<serde_json::Value>(body).ok()?;
-        if let Some(previous_response_id) = value
-            .get("previous_response_id")
-            .and_then(serde_json::Value::as_str)
-            && let Some(profile_name) = self.response_profile_bindings.get(previous_response_id)
-        {
-            return Some(profile_name.clone());
-        }
-        gemini_provider_core_tool_output_call_ids_from_request(&value)
-            .into_iter()
-            .find_map(|call_id| self.tool_call_profile_bindings.get(&call_id).cloned())
+    pub(in super::super) fn affinity_profile_for_body(&self, body: &[u8]) -> Option<String> {
+        self.bound_value_for_body(
+            body,
+            &self.response_profile_bindings,
+            &self.tool_call_profile_bindings,
+        )
     }
 
-    pub(super) fn model_scope_for_body(&self, body: &[u8]) -> Option<String> {
+    pub(in super::super) fn model_scope_for_body(&self, body: &[u8]) -> Option<String> {
+        self.bound_value_for_body(
+            body,
+            &self.response_model_scope_bindings,
+            &self.tool_call_model_scope_bindings,
+        )
+    }
+
+    fn bound_value_for_body(
+        &self,
+        body: &[u8],
+        response_bindings: &BTreeMap<String, String>,
+        tool_bindings: &BTreeMap<String, String>,
+    ) -> Option<String> {
         let value = serde_json::from_slice::<serde_json::Value>(body).ok()?;
-        if let Some(previous_response_id) = value
+        let previous = value
             .get("previous_response_id")
             .and_then(serde_json::Value::as_str)
-            && let Some(scope) = self.response_model_scope_bindings.get(previous_response_id)
-        {
-            return Some(scope.clone());
+            .and_then(|id| response_bindings.get(id));
+        let tool_ids = gemini_provider_core_tool_output_call_ids_from_request(&value);
+        let tool_values = tool_ids
+            .iter()
+            .map(|call_id| tool_bindings.get(call_id))
+            .collect::<Vec<_>>();
+        let bound_flags = tool_values.iter().map(Option::is_some).collect::<Vec<_>>();
+        let choice = gemini_oauth_binding_priority(previous.is_some(), &bound_flags)
+            .expect("compiled Mojo Gemini OAuth binding priority returned invalid output");
+        match choice {
+            Some(GeminiOAuthBindingChoice::PreviousResponse) => previous.cloned(),
+            Some(GeminiOAuthBindingChoice::ToolOutput(index)) => {
+                tool_values.get(index).and_then(|value| *value).cloned()
+            }
+            None => None,
         }
-        gemini_provider_core_tool_output_call_ids_from_request(&value)
-            .into_iter()
-            .find_map(|call_id| self.tool_call_model_scope_bindings.get(&call_id).cloned())
     }
 
     pub(in super::super) fn remember_bindings(

@@ -228,6 +228,71 @@ fn gemini_oauth_pool_state_debug_output_redacts_sensitive_fields() {
 }
 
 #[test]
+fn gemini_oauth_compiled_binding_priority_preserves_response_owner_and_first_bound_tool() {
+    let pool = gemini_pool(&["alpha", "beta", "gamma"]);
+    {
+        let mut state = pool.state.lock().unwrap();
+        state.remember_bindings(
+            "alpha",
+            Some("session:alpha"),
+            "resp_alpha",
+            &["call_alpha".to_string()],
+        );
+        state.remember_bindings(
+            "beta",
+            Some("session:beta"),
+            "resp_beta",
+            &["call_beta".to_string()],
+        );
+        let mixed = serde_json::to_vec(&serde_json::json!({
+            "previous_response_id": "resp_alpha",
+            "input": [
+                {"type":"function_call_output","call_id":"unbound","output":"skip"},
+                {"type":"function_call_output","call_id":"call_beta","output":"first"},
+                {"type":"function_call_output","call_id":"call_alpha","output":"later"}
+            ]
+        }))
+        .unwrap();
+        assert_eq!(
+            state.affinity_profile_for_body(&mixed).as_deref(),
+            Some("alpha")
+        );
+        assert_eq!(
+            state.model_scope_for_body(&mixed).as_deref(),
+            Some("session:alpha")
+        );
+
+        let only_tools = serde_json::to_vec(&serde_json::json!({
+            "previous_response_id": "missing_previous",
+            "input": [
+                {"type":"function_call_output","call_id":"unbound","output":"skip"},
+                {"type":"function_call_output","call_id":"call_beta","output":"first"},
+                {"type":"function_call_output","call_id":"call_alpha","output":"later"}
+            ]
+        }))
+        .unwrap();
+        assert_eq!(
+            state.affinity_profile_for_body(&only_tools).as_deref(),
+            Some("beta")
+        );
+        assert_eq!(
+            state.model_scope_for_body(&only_tools).as_deref(),
+            Some("session:beta")
+        );
+
+        let no_binding = serde_json::to_vec(&serde_json::json!({
+            "input": [
+                {"type":"function_call_output","call_id":"unbound","output":"skip"}
+            ]
+        }))
+        .unwrap();
+        assert!(state.affinity_profile_for_body(&no_binding).is_none());
+        assert!(state.model_scope_for_body(&no_binding).is_none());
+        assert!(state.affinity_profile_for_body(b"not-json").is_none());
+    }
+}
+
+#[test]
 fn gemini_oauth_pool_preserves_previous_response_affinity() {
     let pool = gemini_pool(&["alpha", "beta"]);
     pool.state
