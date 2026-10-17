@@ -8449,6 +8449,10 @@ export function findViolations(files) {
         "gemini_oauth_preferred_model_chain(models, preference)",
         "GeminiOAuthModelDeadline",
         "model_availability_plan(",
+        "gemini_oauth_binding_priority(previous.is_some(), &bound_flags)",
+        "GeminiOAuthBindingChoice::PreviousResponse",
+        "GeminiOAuthBindingChoice::ToolOutput(index)",
+        "fn bound_value_for_body(",
       ];
       const retired = [
         "fn model_is_available(",
@@ -8456,6 +8460,8 @@ export function findViolations(files) {
         "let endpoint_available = self",
         "let mut preferred = Vec::with_capacity(models.len())",
         "models.iter().any(|model| model == &preference.model)",
+        ".find_map(|call_id| self.tool_call_profile_bindings.get(",
+        ".find_map(|call_id| self.tool_call_model_scope_bindings.get(",
       ];
       return required.every((marker) => contents.includes(marker)) &&
         retired.every((marker) => !contents.includes(marker))
@@ -8474,6 +8480,10 @@ export function findViolations(files) {
         "pub fn gemini_oauth_profile_rotation_plan(",
         "gemini_oauth_compiled_profile_rotation_preserves_fairness_filter_and_last_chance",
         "gemini_oauth_compiled_profile_rotation_abi_rejects_invalid_mask_before_writes",
+        "fn prodex_gemini_oauth_binding_priority_v1(",
+        "pub fn gemini_oauth_binding_priority(",
+        "gemini_oauth_compiled_binding_priority_preserves_response_then_first_tool",
+        "gemini_oauth_compiled_binding_priority_abi_rejects_bad_shape_without_writes",
       ].filter((marker) => !contents.includes(marker))
         .map((marker) => filePath + ": Mojo Gemini OAuth model selector strict ABI coverage missing " + marker);
     }
@@ -8487,6 +8497,9 @@ export function findViolations(files) {
         '@export("prodex_gemini_oauth_profile_rotation_v1")',
         "if not any_eligible or eligible[unsafe_offset=index] == 1",
         "var start = profile_count - 1",
+        '@export("prodex_gemini_oauth_binding_priority_v1")',
+        "if previous_bound == 1:",
+        "if first == -2 and value == 1:",
       ].filter((marker) => !contents.includes(marker))
         .map((marker) => filePath + ": Gemini OAuth model selection must remain compiled Mojo-owned " + marker);
     }
@@ -8495,6 +8508,7 @@ export function findViolations(files) {
         "gemini_oauth_pool_compiled_mojo_filters_cooldowns_endpoint_blocks_and_duplicate_preferences",
         "gemini_oauth_compiled_profile_rotation_skips_only_blocked_profiles_and_advances_cursor",
         "gemini_oauth_compiled_profile_rotation_retains_last_chance_when_all_locally_blocked",
+        "gemini_oauth_compiled_binding_priority_preserves_response_owner_and_first_bound_tool",
       ].every((marker) => contents.includes(marker))
         ? [] : [filePath + ": Gemini OAuth production rotation/cooldown regressions missing"];
     }
@@ -9797,6 +9811,10 @@ function selfTest() {
     "gemini_oauth_preferred_model_chain(models, preference)",
     "GeminiOAuthModelDeadline",
     "model_availability_plan(",
+    "gemini_oauth_binding_priority(previous.is_some(), &bound_flags)",
+    "GeminiOAuthBindingChoice::PreviousResponse",
+    "GeminiOAuthBindingChoice::ToolOutput(index)",
+    "fn bound_value_for_body(",
   ].join("\n");
   const geminiOAuthModelFile = "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_gemini_oauth_pool/state.rs";
   assert.deepEqual(findViolations([[geminiOAuthModelFile, geminiOAuthModelCaller]]), []);

@@ -459,3 +459,41 @@ def prodex_gemini_oauth_profile_rotation_v1(
         unsafe_from_address=Int(next_index_address)
     )[] = UInt64(next)
     return 0
+
+# Profile and model-scope affinity use the same compiled priority plan:
+# an existing response binding always wins over any tool output binding,
+# otherwise use the first bound tool-output call in its original order.
+@export("prodex_gemini_oauth_binding_priority_v1")
+def prodex_gemini_oauth_binding_priority_v1(
+    abi_version: Int64,
+    previous_bound: Int64,
+    tool_bound_address: UInt,
+    tool_count: Int64,
+    selected_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != GEMINI_OAUTH_MODEL_ABI_VERSION:
+        return 4
+    if (
+        (previous_bound != 0 and previous_bound != 1)
+        or tool_count < 0
+        or (tool_count > 0 and tool_bound_address == 0)
+        or selected_address == 0
+    ):
+        return 1
+    var bound = Pointer[mut=False, Int64, ImmUntrackedOrigin](
+        unsafe_from_address=Int(tool_bound_address)
+    )
+    var first: Int64 = -2
+    for index in range(tool_count):
+        var value = bound[unsafe_offset=index]
+        if value != 0 and value != 1:
+            return 1
+        if first == -2 and value == 1:
+            first = index
+    var selected: Int64 = first
+    if previous_bound == 1:
+        selected = -1
+    Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(selected_address)
+    )[] = selected
+    return 0

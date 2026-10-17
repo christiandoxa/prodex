@@ -5865,3 +5865,12 @@ functions. Rust's special tool kind comparisons and name-blank classifier
 were deleted without fallback. The existing compiled response builder still
 renders tool items; versioned ABI, direct and production caller regression
 coverage and the no-fallback guard protect the contract.
+
+## Gemini OAuth continuation affinity precedence moved to Mojo
+
+A single compiled Gemini binding-priority owner now chooses a bound
+previous-response profile/scope before the first matching tool-output binding.
+Rust's two duplicate previous-response/first-tool selection branches were
+removed. Rust still parses JSON, stores maps and materializes the Mojo-
+selected bound identity. Direct ABI, competing-binding caller regressions,
+all Gemini rewrite tests and no-fallback guards preserve session affinity.

@@ -3,6 +3,13 @@ use crate::MojoError;
 const ABI_VERSION: i64 = 1;
 
 unsafe extern "C" {
+    fn prodex_gemini_oauth_binding_priority_v1(
+        abi_version: i64,
+        previous_bound: i64,
+        tool_bound_address: u64,
+        tool_count: i64,
+        selected_address: u64,
+    ) -> i64;
     fn prodex_gemini_oauth_profile_rotation_v1(
         abi_version: i64,
         next_index: u64,
@@ -139,6 +146,47 @@ pub fn gemini_code_assist_tier_label(
         )
     })?;
     decode_optional_string(output, written, present)
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GeminiOAuthBindingChoice {
+    PreviousResponse,
+    ToolOutput(usize),
+}
+
+/// The Mojo owner prioritizes a bound previous_response_id before the first
+/// bound tool-output call, identically for profile and model-scope affinity.
+pub fn gemini_oauth_binding_priority(
+    previous_bound: bool,
+    tool_bound: &[bool],
+) -> Result<Option<GeminiOAuthBindingChoice>, MojoError> {
+    let bits = tool_bound
+        .iter()
+        .map(|value| i64::from(*value))
+        .collect::<Vec<_>>();
+    let mut selected = i64::MIN;
+    status(unsafe {
+        prodex_gemini_oauth_binding_priority_v1(
+            ABI_VERSION,
+            i64::from(previous_bound),
+            bits.as_ptr() as usize as u64,
+            signed(bits.len())?,
+            (&mut selected as *mut i64) as usize as u64,
+        )
+    })?;
+    match selected {
+        -2 => Ok(None),
+        -1 if previous_bound => Ok(Some(GeminiOAuthBindingChoice::PreviousResponse)),
+        -1 => Err(MojoError::InvalidOutput),
+        index if index >= 0 => {
+            let index = usize::try_from(index).map_err(|_| MojoError::InvalidOutput)?;
+            match tool_bound.get(index) {
+                Some(true) => Ok(Some(GeminiOAuthBindingChoice::ToolOutput(index))),
+                _ => Err(MojoError::InvalidOutput),
+            }
+        }
+        _ => Err(MojoError::InvalidOutput),
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -304,6 +352,45 @@ pub fn gemini_oauth_preferred_model_chain(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn gemini_oauth_compiled_binding_priority_preserves_response_then_first_tool() {
+        use GeminiOAuthBindingChoice::*;
+        for (previous, tools, expected) in [
+            (false, vec![], None),
+            (true, vec![], Some(PreviousResponse)),
+            (false, vec![false], None),
+            (true, vec![false], Some(PreviousResponse)),
+            (false, vec![false, true, true], Some(ToolOutput(1))),
+            (false, vec![true, false, true], Some(ToolOutput(0))),
+            (true, vec![false, true, true], Some(PreviousResponse)),
+            (false, vec![false, false, true], Some(ToolOutput(2))),
+        ] {
+            assert_eq!(
+                gemini_oauth_binding_priority(previous, &tools).unwrap(),
+                expected,
+                "previous={previous} tool={tools:?}",
+            );
+        }
+    }
+
+    #[test]
+    fn gemini_oauth_compiled_binding_priority_abi_rejects_bad_shape_without_writes() {
+        let bits = [0_i64, 2_i64];
+        let bits_ptr = bits.as_ptr() as usize as u64;
+        let mut output = 37_i64;
+        let dst = (&mut output as *mut i64) as usize as u64;
+        let call = |version, previous, address, count, out| unsafe {
+            prodex_gemini_oauth_binding_priority_v1(version, previous, address, count, out)
+        };
+        assert_eq!(call(2, 1, bits_ptr, 2, dst), 4);
+        assert_eq!(call(1, 2, bits_ptr, 2, dst), 1);
+        assert_eq!(call(1, 1, bits_ptr, -1, dst), 1);
+        assert_eq!(call(1, 1, 0, 2, dst), 1);
+        assert_eq!(call(1, 1, bits_ptr, 2, 0), 1);
+        assert_eq!(call(1, 1, bits_ptr, 2, dst), 1);
+        assert_eq!(output, 37);
+    }
 
     #[test]
     fn gemini_oauth_compiled_profile_rotation_preserves_fairness_filter_and_last_chance() {
