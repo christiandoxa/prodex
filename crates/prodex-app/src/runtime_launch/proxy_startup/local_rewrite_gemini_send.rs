@@ -69,9 +69,9 @@ use local_rewrite_gemini_send_short_circuit::{
 };
 use prodex_provider_core::PRODEX_GEMINI_DEFAULT_MODEL as GEMINI_DEFAULT_MODEL;
 use prodex_provider_core::{
-    GEMINI_PROVIDER_CORE_MAX_INLINE_RATE_LIMIT_RETRY_DELAY_MS as RUNTIME_GEMINI_MAX_INLINE_RATE_LIMIT_RETRY_DELAY_MS,
     ProviderEndpoint, ProviderId, RuntimeProviderBindingIdentity,
     gemini_provider_core_body_has_terminal_quota as runtime_gemini_body_has_terminal_quota,
+    gemini_provider_core_inline_retry_threshold_ms as runtime_gemini_inline_retry_threshold_ms,
     gemini_provider_core_invalid_stream_retry_delay_ms as runtime_gemini_invalid_stream_retry_delay_ms,
     gemini_provider_core_request_body,
     gemini_provider_core_response_retryable_quota as runtime_gemini_response_retryable_quota,
@@ -86,7 +86,6 @@ use retry::{
     runtime_gemini_peek_stream_attempt,
 };
 
-const RUNTIME_GEMINI_LOCAL_RETRY_LIMIT: usize = 9;
 const RUNTIME_GEMINI_INVALID_STREAM_RETRY_LIMIT: usize = 3;
 
 struct RuntimeGeminiAttemptContext<'a> {

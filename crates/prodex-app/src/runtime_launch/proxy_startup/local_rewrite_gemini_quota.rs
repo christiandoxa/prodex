@@ -4,7 +4,10 @@ use super::provider_bridge::{
 use crate::RuntimeHeapTrimmedBufferedResponseParts;
 use prodex_mojo_core::rich::ascii_casefold_equal_exact;
 #[cfg(test)]
-use prodex_provider_core::gemini_provider_core_body_has_terminal_quota;
+use prodex_provider_core::{
+    gemini_provider_core_body_has_terminal_quota,
+    gemini_provider_core_invalid_stream_retry_delay_ms, gemini_provider_core_retry_delay_ms,
+};
 use prodex_provider_core::{
     gemini_provider_core_google_quota_message, gemini_provider_core_normalized_error_body,
     gemini_provider_core_response_retryable_quota,
@@ -148,6 +151,19 @@ mod tests {
         assert_eq!(
             prodex_provider_core::gemini_provider_core_retry_delay_ms(None, b"", 9),
             None
+        );
+        assert_eq!(
+            prodex_provider_core::gemini_provider_core_retry_delay_ms(None, b"", usize::MAX),
+            None
+        );
+        let overflowing_header = u64::MAX.to_string();
+        assert_eq!(
+            gemini_provider_core_retry_delay_ms(Some(&overflowing_header), b"", 0),
+            Some(300_000)
+        );
+        assert_eq!(
+            gemini_provider_core_invalid_stream_retry_delay_ms(usize::MAX),
+            256_000
         );
     }
 

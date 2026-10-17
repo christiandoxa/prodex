@@ -1,5 +1,9 @@
 //! Gemini retry-delay parsing.
 
+use prodex_mojo_core::provider_constraints::{
+    gemini_invalid_stream_retry_delay_ms, gemini_retry_delay_ms, gemini_retry_inline_threshold_ms,
+    gemini_should_inline_retry,
+};
 use prodex_mojo_core::rich::ascii_casefold_equal_exact;
 
 #[path = "retry_delay/duration.rs"]
@@ -10,12 +14,6 @@ use self::duration::{
     gemini_provider_core_retry_delay_ms_from_message,
 };
 use super::gemini_provider_core_values_from_body;
-
-const GEMINI_PROVIDER_CORE_RETRY_AFTER_CAP_MS: u64 = 300_000;
-const GEMINI_PROVIDER_CORE_RATE_LIMIT_RETRY_DELAYS_MS: &[u64] = &[
-    5_000, 10_000, 20_000, 30_000, 30_000, 30_000, 30_000, 30_000, 30_000,
-];
-pub const GEMINI_PROVIDER_CORE_MAX_INLINE_RATE_LIMIT_RETRY_DELAY_MS: u64 = 30_000;
 
 pub fn gemini_provider_core_retry_delay_ms_from_body(body: &[u8]) -> Option<u64> {
     gemini_provider_core_values_from_body(body)
@@ -29,29 +27,27 @@ pub fn gemini_provider_core_retry_delay_ms(
     body: &[u8],
     retry_index: usize,
 ) -> Option<u64> {
-    let default_ms = *GEMINI_PROVIDER_CORE_RATE_LIMIT_RETRY_DELAYS_MS.get(retry_index)?;
-    let server_ms = [
+    gemini_retry_delay_ms(
         retry_after.and_then(gemini_provider_core_retry_after_header_ms),
         gemini_provider_core_retry_delay_ms_from_body(body),
-    ]
-    .into_iter()
-    .flatten()
-    .max();
-    Some(
-        server_ms
-            .map(|delay_ms| delay_ms.max(default_ms))
-            .unwrap_or(default_ms)
-            .min(GEMINI_PROVIDER_CORE_RETRY_AFTER_CAP_MS),
+        retry_index,
     )
+    .expect("Mojo Gemini retry-delay policy returned invalid output")
 }
 
 pub fn gemini_provider_core_should_inline_rate_limit_retry(delay_ms: u64) -> bool {
-    delay_ms > 0 && delay_ms <= GEMINI_PROVIDER_CORE_MAX_INLINE_RATE_LIMIT_RETRY_DELAY_MS
+    gemini_should_inline_retry(delay_ms)
+        .expect("Mojo Gemini inline-retry policy returned invalid output")
 }
 
 pub fn gemini_provider_core_invalid_stream_retry_delay_ms(retry_index: usize) -> u64 {
-    prodex_mojo_core::rich::gemini_invalid_stream_retry_delay_ms(retry_index)
+    gemini_invalid_stream_retry_delay_ms(retry_index)
         .expect("Mojo Gemini invalid-stream retry policy returned invalid output")
+}
+
+pub fn gemini_provider_core_inline_retry_threshold_ms() -> u64 {
+    gemini_retry_inline_threshold_ms()
+        .expect("Mojo Gemini inline-retry threshold policy returned invalid output")
 }
 
 fn gemini_provider_core_retry_delay_ms_from_value(value: &serde_json::Value) -> Option<u64> {

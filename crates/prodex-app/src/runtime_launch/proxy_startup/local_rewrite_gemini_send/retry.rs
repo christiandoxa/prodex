@@ -1,21 +1,21 @@
 use super::{
     ProviderRetryCause, RUNTIME_GEMINI_INVALID_STREAM_RETRY_LIMIT,
-    RUNTIME_GEMINI_LOCAL_RETRY_LIMIT, RUNTIME_GEMINI_MAX_INLINE_RATE_LIMIT_RETRY_DELAY_MS,
     RuntimeGeminiModelAttemptContext, RuntimeGeminiPrecommitPeek,
     RuntimeHeapTrimmedBufferedResponseParts, RuntimeLocalRewriteAsyncResponse,
     RuntimeProviderBridgeKind, RuntimeProviderErrorClass,
     gemini_provider_core_unsupported_tool_fallback_body,
     runtime_gateway_application_provider_retry_precommit, runtime_gemini_429_is_structured,
     runtime_gemini_body_has_terminal_quota, runtime_gemini_buffered_parts_are_quota_blocked,
-    runtime_gemini_error_log_value, runtime_gemini_invalid_stream_retry_delay_ms,
-    runtime_gemini_log_builtin_tool_fallback, runtime_gemini_log_invalid_stream_model_fallback,
-    runtime_gemini_log_invalid_stream_retry, runtime_gemini_log_model_unavailable,
-    runtime_gemini_log_provider_auth_failure, runtime_gemini_log_provider_auth_refresh,
-    runtime_gemini_log_provider_auth_refresh_failed, runtime_gemini_log_provider_model_fallback,
-    runtime_gemini_log_quota_rotate, runtime_gemini_log_rate_limit_retry,
-    runtime_gemini_log_rate_limit_retry_fail_fast, runtime_gemini_normalized_error_parts,
-    runtime_gemini_peek_stream_for_retry, runtime_gemini_response_retryable_quota,
-    runtime_gemini_retry_delay_ms, runtime_gemini_should_inline_rate_limit_retry,
+    runtime_gemini_error_log_value, runtime_gemini_inline_retry_threshold_ms,
+    runtime_gemini_invalid_stream_retry_delay_ms, runtime_gemini_log_builtin_tool_fallback,
+    runtime_gemini_log_invalid_stream_model_fallback, runtime_gemini_log_invalid_stream_retry,
+    runtime_gemini_log_model_unavailable, runtime_gemini_log_provider_auth_failure,
+    runtime_gemini_log_provider_auth_refresh, runtime_gemini_log_provider_auth_refresh_failed,
+    runtime_gemini_log_provider_model_fallback, runtime_gemini_log_quota_rotate,
+    runtime_gemini_log_rate_limit_retry, runtime_gemini_log_rate_limit_retry_fail_fast,
+    runtime_gemini_normalized_error_parts, runtime_gemini_peek_stream_for_retry,
+    runtime_gemini_response_retryable_quota, runtime_gemini_retry_delay_ms,
+    runtime_gemini_should_inline_rate_limit_retry,
     runtime_local_rewrite_buffered_response_from_response, runtime_provider_error_class,
     runtime_provider_error_cooldown_ms,
 };
@@ -77,16 +77,12 @@ pub(super) fn runtime_gemini_handle_error(
     let class =
         runtime_provider_error_class(RuntimeProviderBridgeKind::Gemini, status, &parts.body);
     let quota_blocked = runtime_gemini_buffered_parts_are_quota_blocked(status, &parts);
-    let delay_ms =
-        runtime_gemini_retry_delay_ms(retry_after.as_deref(), &parts.body, *rate_limit_retry_index)
-            .unwrap_or_else(|| {
-                runtime_provider_error_cooldown_ms(
-                    RuntimeProviderBridgeKind::Gemini,
-                    status,
-                    &parts.body,
-                )
-            });
-    runtime_gemini_record_error_state(context, status, class, delay_ms);
+    let retry_delay_ms =
+        runtime_gemini_retry_delay_ms(retry_after.as_deref(), &parts.body, *rate_limit_retry_index);
+    let cooldown_ms = retry_delay_ms.unwrap_or_else(|| {
+        runtime_provider_error_cooldown_ms(RuntimeProviderBridgeKind::Gemini, status, &parts.body)
+    });
+    runtime_gemini_record_error_state(context, status, class, cooldown_ms);
     if runtime_gemini_apply_tool_fallback(context, status, &parts) {
         return Ok(RuntimeGeminiErrorAction::RetryRequest);
     }
@@ -104,7 +100,7 @@ pub(super) fn runtime_gemini_handle_error(
         context,
         status,
         &parts.body,
-        delay_ms,
+        retry_delay_ms,
         rate_limit_retry_index,
     ) {
         return Ok(RuntimeGeminiErrorAction::RetryRequest);
@@ -314,14 +310,15 @@ fn runtime_gemini_rate_limit_retry(
     context: &RuntimeGeminiModelAttemptContext<'_, '_>,
     status: u16,
     body: &[u8],
-    delay_ms: u64,
+    delay_ms: Option<u64>,
     retry_index: &mut usize,
 ) -> bool {
+    let Some(delay_ms) = delay_ms else {
+        return false;
+    };
     if status != 429
         || !runtime_gemini_429_is_structured(body)
         || runtime_gemini_body_has_terminal_quota(body)
-        || delay_ms == 0
-        || *retry_index >= RUNTIME_GEMINI_LOCAL_RETRY_LIMIT
     {
         return false;
     }
@@ -345,7 +342,7 @@ fn runtime_gemini_rate_limit_retry(
         status,
         *retry_index,
         delay_ms,
-        RUNTIME_GEMINI_MAX_INLINE_RATE_LIMIT_RETRY_DELAY_MS,
+        runtime_gemini_inline_retry_threshold_ms(),
     );
     false
 }

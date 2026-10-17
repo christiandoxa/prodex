@@ -15,6 +15,7 @@ mod gemini_bridge_request;
 mod gemini_failure_policy;
 mod gemini_request;
 mod gemini_request_content;
+mod gemini_retry_policy;
 mod gemini_signature_choice;
 mod gemini_sse_tool_call_index;
 
@@ -29,6 +30,11 @@ pub use gemini_request::{
 pub use gemini_request_content::{
     GeminiFunctionToolSource, GeminiRequestContentKernelInput, GeminiRequestContentOperation,
     gemini_function_tool_source, gemini_request_content_kernel,
+};
+pub use gemini_retry_policy::{
+    inline_threshold_ms as gemini_retry_inline_threshold_ms,
+    invalid_stream_retry_delay_ms as gemini_invalid_stream_retry_delay_ms,
+    retry_delay_ms as gemini_retry_delay_ms, should_inline as gemini_should_inline_retry,
 };
 pub use gemini_signature_choice::{GeminiSignatureCandidate, gemini_signature_choice};
 pub use gemini_sse_tool_call_index::{
