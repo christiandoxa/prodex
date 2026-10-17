@@ -32,7 +32,9 @@ pub(super) fn finish_runtime_websocket_terminal_event(
         committed_previous_response_not_found,
         mut upstream_socket,
         upstream_turn_state,
-        inflight_guard,
+        // Release this response's permit on every terminal path, including a
+        // reusable connection. Idle sockets are not active model executions.
+        inflight_guard: _inflight_guard,
     } = request;
 
     runtime_proxy_log(
@@ -46,11 +48,10 @@ pub(super) fn finish_runtime_websocket_terminal_event(
         let _ = upstream_socket.close(None);
         websocket_session.reset();
     } else {
-        websocket_session.store(
+        websocket_session.store_completed_response(
             upstream_socket,
             profile_name,
             upstream_turn_state,
-            inflight_guard,
         );
     }
     RuntimeWebsocketAttempt::Delivered

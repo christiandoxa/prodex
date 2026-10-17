@@ -232,33 +232,6 @@ enum RuntimeWebsocketTextResult {
     Attempt(RuntimeWebsocketAttempt),
 }
 
-fn run_runtime_websocket_response_loop(
-    mut flow: RuntimeWebsocketResponseLoop<'_>,
-) -> Result<RuntimeWebsocketAttempt> {
-    loop {
-        match flow.upstream_socket.read() {
-            Ok(WsMessage::Text(text)) => match flow.handle_text(text.to_string())? {
-                RuntimeWebsocketTextResult::Continue => {}
-                RuntimeWebsocketTextResult::Terminal(terminal) => {
-                    return Ok(flow.finish_terminal(terminal));
-                }
-                RuntimeWebsocketTextResult::Attempt(attempt) => return Ok(attempt),
-            },
-            Ok(WsMessage::Binary(payload)) => flow.handle_binary(payload)?,
-            Ok(WsMessage::Ping(payload)) => flow.handle_ping(payload)?,
-            Ok(WsMessage::Pong(_)) | Ok(WsMessage::Frame(_)) => flow.handle_keepalive()?,
-            Ok(WsMessage::Close(frame)) => {
-                let _ = frame;
-                return flow.handle_close();
-            }
-            Err(WsError::ConnectionClosed) | Err(WsError::AlreadyClosed) => {
-                return flow.handle_connection_closed();
-            }
-            Err(err) => return flow.handle_read_error(err),
-        }
-    }
-}
-
 impl RuntimeWebsocketResponseLoop<'_> {
     fn handle_text(&mut self, text: String) -> Result<RuntimeWebsocketTextResult> {
         self.mark_text_progress()?;
