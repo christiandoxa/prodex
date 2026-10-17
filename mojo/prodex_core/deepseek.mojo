@@ -7011,3 +7011,141 @@ def prodex_deepseek_replay_item_action_v1(
     result[unsafe_offset=1] = Int64(kind == DEEPSEEK_REPLAY_ITEM_OUTPUT or emit_call)
     result[unsafe_offset=2] = Int64(emit_output)
     return 0
+
+
+# Render the existing compiled ToolsShape request-policy result. The caller
+# retains the provider label and JSON transport; this Mojo kernel alone maps
+# tag/detail to the user-facing diagnostic used by DeepSeek and Kiro.
+comptime DEEPSEEK_TOOL_SHAPE_ISSUE_ABI_VERSION: Int64 = 1
+
+
+@export("prodex_deepseek_tool_shape_issue_message_v1")
+def prodex_deepseek_tool_shape_issue_message_v1(
+    abi_version: Int64,
+    issue: Int64,
+    provider_address: UInt,
+    provider_length: Int64,
+    detail_address: UInt,
+    detail_length: Int64,
+    output_address: UInt,
+    output_capacity: Int64,
+    written_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != DEEPSEEK_TOOL_SHAPE_ISSUE_ABI_VERSION:
+        return 4
+    if (
+        issue <= 0 or provider_length < 0 or detail_length < 0
+        or (provider_length > 0 and provider_address == 0)
+        or (detail_length > 0 and detail_address == 0)
+        or output_address == 0 or written_address == 0
+        or output_capacity < 0
+    ):
+        return 1
+    var provider = ProdexRichStringView(provider_address, UInt(provider_length))
+    var detail = ProdexRichStringView(detail_address, UInt(detail_length))
+    if not rich_view_valid(provider, 0x7FFFFFFFFFFFFFFF) or not rich_view_valid(detail, 0x7FFFFFFFFFFFFFFF):
+        return 1
+
+    var prefix = StringSlice("")
+    var suffix = StringSlice("")
+    var with_detail = False
+    if issue == 1:
+        prefix = StringSlice(" tools must be an array")
+    elif issue == 2:
+        prefix = StringSlice(" tools entries must be objects")
+    elif issue == 3:
+        prefix = StringSlice(" tool type `")
+        suffix = StringSlice("` is not supported")
+        with_detail = True
+    elif issue == 4:
+        prefix = StringSlice(" tool description must be a string")
+    elif issue == 5:
+        prefix = StringSlice(" function description must be a string")
+    elif issue == 6:
+        prefix = StringSlice(" function strict must be a boolean")
+    elif issue == 7:
+        prefix = StringSlice(" tool strict must be a boolean")
+    elif issue == 8:
+        prefix = StringSlice(" ")
+        suffix = StringSlice(" tools require a name")
+        with_detail = True
+    elif issue == 9:
+        prefix = StringSlice(" custom tools cannot preserve strict=true through the function wrapper")
+    elif issue == 10:
+        prefix = StringSlice(" custom tool format must be an object")
+    elif issue == 11:
+        prefix = StringSlice(" custom tool format.type must be a string")
+    elif issue == 12:
+        prefix = StringSlice(" namespace tools require a name")
+    elif issue == 13:
+        prefix = StringSlice(" namespace tool `")
+        suffix = StringSlice("` requires a tools array")
+        with_detail = True
+    elif issue == 14:
+        prefix = StringSlice(" namespace tool `")
+        suffix = StringSlice("` requires at least one tool")
+        with_detail = True
+    elif issue == 15:
+        prefix = StringSlice(" namespace tool `")
+        suffix = StringSlice("` entries must be objects")
+        with_detail = True
+    elif issue == 16:
+        prefix = StringSlice(" namespace function description must be a string")
+    elif issue == 17:
+        prefix = StringSlice(" namespace function strict must be a boolean")
+    elif issue == 18:
+        prefix = StringSlice(" namespace tool `")
+        suffix = StringSlice("` entries must be function tools")
+        with_detail = True
+    elif issue == 19:
+        prefix = StringSlice(" namespace tool `")
+        suffix = StringSlice("` function entries require a name")
+        with_detail = True
+    elif issue == 20:
+        prefix = StringSlice(" MCP function tools require a name")
+    elif issue == 21:
+        prefix = StringSlice(" MCP function tool `")
+        suffix = StringSlice("` requires a schema")
+        with_detail = True
+    elif issue == 22:
+        prefix = StringSlice(" MCP toolsets require a server name")
+    elif issue == 23:
+        prefix = StringSlice(" MCP toolset `")
+        suffix = StringSlice("` requires allowed_tools or enabled configs")
+        with_detail = True
+    else:
+        prefix = StringSlice(" tools shape validation returned an unknown result")
+
+    var prefix_len = Int64(prefix.byte_length())
+    var suffix_len = Int64(suffix.byte_length())
+    var dynamic_len = detail_length if with_detail else Int64(0)
+    # Validate whole output buffer before mutating, with signed overflow-safe
+    # subtraction and no dependency on the detail if tag has no detail.
+    if (
+        provider_length > output_capacity
+        or prefix_len > output_capacity - provider_length
+        or dynamic_len > output_capacity - provider_length - prefix_len
+        or suffix_len > output_capacity - provider_length - prefix_len - dynamic_len
+    ):
+        return 3
+    var output = Pointer[mut=True, UInt8, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    var written = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(written_address)
+    )
+    written[] = 0
+    var provider_ptr = rich_view_ptr(provider)
+    for index in range(provider_length):
+        output[unsafe_offset=written[]] = provider_ptr[unsafe_offset=index]
+        written[] += 1
+    if not deepseek_request_issue_append_literal(output, output_capacity, written, prefix):
+        return 3
+    if with_detail:
+        var detail_ptr = rich_view_ptr(detail)
+        for index in range(detail_length):
+            output[unsafe_offset=written[]] = detail_ptr[unsafe_offset=index]
+            written[] += 1
+    if not deepseek_request_issue_append_literal(output, output_capacity, written, suffix):
+        return 3
+    return 0

@@ -1,6 +1,9 @@
 #[path = "deepseek/input_item_issue.rs"]
 mod input_item_issue;
 pub use input_item_issue::deepseek_input_item_issue_message;
+#[path = "deepseek/tool_shape_issue.rs"]
+mod tool_shape_issue;
+pub use tool_shape_issue::deepseek_tool_shape_issue_message;
 #[path = "deepseek/replay_item.rs"]
 mod replay_item;
 pub use replay_item::{
