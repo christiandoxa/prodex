@@ -1,3 +1,10 @@
+#[path = "kiro/acp_activity_ledger.rs"]
+mod acp_activity_ledger;
+pub use acp_activity_ledger::{
+    KiroAcpToolActivityAction, KiroAcpToolActivityFacts, KiroAcpToolActivityPlan,
+    kiro_acp_tool_activity_plan,
+};
+
 #[path = "kiro/response_codecs.rs"]
 mod response_codecs;
 pub use response_codecs::{

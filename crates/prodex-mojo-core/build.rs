@@ -538,6 +538,7 @@ fn selected_sources() -> Vec<&'static str> {
         sources.push("../../mojo/prodex_core/gemini_chat_response.mojo");
         sources.push("../../mojo/prodex_core/gemini_response_media.mojo");
         sources.push("../../mojo/prodex_core/kiro_model_catalog.mojo");
+        sources.push("../../mojo/prodex_core/kiro_acp_tool_activity_policy.mojo");
         sources.push("../../mojo/prodex_core/runtime_cookie_policy.mojo");
         sources.push("../../mojo/prodex_core/chat_tools.mojo");
         sources.push("../../mojo/prodex_core/openai_chat_request.mojo");

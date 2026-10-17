@@ -5819,3 +5819,12 @@ sections for OpenAI, Gemini/Copilot and unavailable pools. Rust's conditional
 row selection was deleted; Rust retains value and timestamp display using
 existing compiled quota formatters. Strict ABI, real quota UI and no-fallback
 regressions cover the section precedence and large profile counts.
+
+## Kiro ACP activity ledger policy migrated to compiled Mojo
+
+The production Kiro turn-state collector now receives a compiled Mojo plan
+for activity truncation, bounded tool-call ID caching and previous title/kind
+inheritance. Rust retains host map/vector updates, with the old policy
+branches and missing-name fallback removed. The standalone Mojo ABI is linked
+in the production static archive, with direct ABI and 30 real Kiro ACP app
+tests plus a source-level no-fallback guard.

@@ -171,6 +171,9 @@ const PING_SUMMARY_CALLER_TEST_FILE = "crates/prodex-app/src/app_commands/ping_t
 const PING_SUMMARY_ADAPTER_FILE = "crates/prodex-mojo-core/src/rich/ping_protocol.rs";
 const PING_SUMMARY_MOJO_FILE = "mojo/prodex_core/ping_protocol.mojo";
 const PROMOTED_FILES = [
+  "crates/prodex-app/src/runtime_kiro_acp/turn_state.rs",
+  "crates/prodex-mojo-core/src/rich/kiro/acp_activity_ledger.rs",
+  "mojo/prodex_core/kiro_acp_tool_activity_policy.mojo",
   "crates/prodex-mojo-core/src/quota_pool.rs",
   "mojo/prodex_core/quota_pool.mojo",
   "crates/prodex-quota/tests/src/render/quota_pool.rs",
@@ -8372,6 +8375,53 @@ export function findViolations(files) {
     }
     return [];
   });
+  const kiroAcpToolLedgerMojoViolations = files.flatMap(([filePath, contents]) => {
+    if (filePath === "crates/prodex-app/src/runtime_kiro_acp/turn_state.rs") {
+      const production = contents.split("#[cfg(test)]", 1)[0];
+      const required = [
+        "prodex_mojo_core::rich::kiro_acp_tool_activity_plan(",
+        "KiroAcpToolActivityFacts",
+        "KiroAcpToolActivityAction::AppendTruncated",
+        "compiled Mojo Kiro tool activity omitted name",
+      ];
+      const retired = [
+        "if self.tool_activities_truncated {",
+        "let bounded_id = (tool_call_id.len()",
+        "self.tool_activities.len() < prodex_provider_core::KIRO_PROVIDER_CORE_MAX_TOOL_ACTIVITY_EVENTS",
+        "self.tool_activity_labels.contains_key(tool_call_id)",
+        '.unwrap_or("Kiro internal activity")',
+      ];
+      return required.every((marker) => production.includes(marker)) &&
+        retired.every((marker) => !production.includes(marker))
+        ? [] : [filePath + ": restored Rust Kiro ACP activity cap/label inheritance policy"];
+    }
+    if (filePath === "crates/prodex-mojo-core/src/rich/kiro/acp_activity_ledger.rs") {
+      return [
+        "fn prodex_kiro_acp_tool_activity_ledger_v1(",
+        "pub fn kiro_acp_tool_activity_plan(",
+        "mojo_acp_tool_activity_ledger_caps_events_and_preserves_previous_labels",
+        "mojo_acp_tool_activity_ledger_bounds_identifier_bytes_not_scalars",
+        "mojo_acp_tool_activity_ledger_abi_rejects_invalid_values_before_output",
+      ].filter((marker) => !contents.includes(marker))
+        .map((marker) => filePath + ": compiled Kiro ACP ledger ABI or regression missing " + marker);
+    }
+    if (filePath === "mojo/prodex_core/kiro_acp_tool_activity_policy.mojo") {
+      return [
+        '@export("prodex_kiro_acp_tool_activity_ledger_v1")',
+        "KIRO_ACP_MAX_ACTIVITY_EVENTS",
+        "KIRO_ACP_MAX_TOOL_ID_BYTES",
+        "rich_view_valid(id,",
+        "use_previous_title = Int64(",
+        "record_label = Int64(",
+      ].filter((marker) => !contents.includes(marker))
+        .map((marker) => filePath + ": compiled Kiro ACP ledger ownership missing " + marker);
+    }
+    if (filePath === "crates/prodex-mojo-core/build.rs") {
+      return contents.includes('sources.push("../../mojo/prodex_core/kiro_acp_tool_activity_policy.mojo")')
+        ? [] : [filePath + ": standalone Kiro ACP policy must be linked into production Mojo archive"];
+    }
+    return [];
+  });
   const quotaPoolSummarySectionsMojoViolations = files.flatMap(([filePath, contents]) => {
     if (filePath === QUOTA_POOL_FILE) {
       const source = contents.split("#[cfg(test)]", 1)[0];
@@ -8799,7 +8849,7 @@ export function findViolations(files) {
     }
     return [];
   });
-  return [...logPayloadProjectionViolations, ...nativeRecoveryOwnershipViolations, ...quotaRecoveryEligibilityViolations, ...runtimeBrokerReuseMojoViolations, ...geminiResponseMediaMojoViolations, ...cookieEvictionMojoViolations, ...websocketBudgetMojoViolations, ...affinityBindingMojoViolations, ...responsesCapacityRecoveryViolations, ...sseTapMojoOwnershipViolations, ...quotaWatchViolations, ...geminiCompactSnippetViolations, ...geminiCompactTextViolations, ...doctorSmartContextDecisionViolations, ...anthropicAttemptCursorViolations, ...geminiUnsupportedToolRetryViolations, ...terminalGeometryViolations, ...previousResponseRecoveryTransitionViolations, ...quotaPoolSummarySectionsMojoViolations, ...deepseekToolShapeIssueMojoViolations, ...deepseekReplayItemPolicyMojoViolations, ...chatNamespaceSplitMojoViolations, ...deepseekInputItemIssueMessageViolations, ...deepseekRequestIssueMessageViolations, ...smartContextTelemetrySampleViolations, ...compatibilityDiagnosticsMojoViolations, ...quotaHeaderProjectionViolations, ...smartContextCapsuleOrderViolations, ...markerViolations, ...deepseekCatalogPolicyViolations, ...featureOffViolations, ...liveLogRecordViolations, ...runtimePolicyPresetViolations, ...runtimeConfigScalarViolations, ...profileHealthCircuitViolations, ...logThroughputViolations, ...operationalDetailSpecViolations, ...transcriptPolicyViolations, ...logLoadPolicyViolations, ...routeReasonViolations, ...runtimeStateQuotaViolations, ...runtimeStateRoutePolicyViolations, ...runtimeProxyRootViolations, ...runtimeRecoveryDeadlineViolations, ...brokerVersionGuardViolations, ...brokerContinuityViolations, ...brokerLogCacheViolations, ...codexConfigViolations, ...statePolicyViolations, ...quotaSelectionPolicyViolations, ...routeTagMirrorViolations, ...enumTagMirrorViolations, ...appSelectionPolicyMirrorViolations, ...runtimeStateBackgroundViolations, ...redactionViolations, ...rateLimitHeaderSelectionViolations, ...profileIdentityViolations, ...governanceInspectionViolations, ...governanceInspectionOrderingViolations, ...exactnessPlannerViolations,
+  return [...logPayloadProjectionViolations, ...nativeRecoveryOwnershipViolations, ...quotaRecoveryEligibilityViolations, ...runtimeBrokerReuseMojoViolations, ...geminiResponseMediaMojoViolations, ...cookieEvictionMojoViolations, ...websocketBudgetMojoViolations, ...affinityBindingMojoViolations, ...responsesCapacityRecoveryViolations, ...sseTapMojoOwnershipViolations, ...quotaWatchViolations, ...geminiCompactSnippetViolations, ...geminiCompactTextViolations, ...doctorSmartContextDecisionViolations, ...anthropicAttemptCursorViolations, ...geminiUnsupportedToolRetryViolations, ...terminalGeometryViolations, ...previousResponseRecoveryTransitionViolations, ...kiroAcpToolLedgerMojoViolations, ...quotaPoolSummarySectionsMojoViolations, ...deepseekToolShapeIssueMojoViolations, ...deepseekReplayItemPolicyMojoViolations, ...chatNamespaceSplitMojoViolations, ...deepseekInputItemIssueMessageViolations, ...deepseekRequestIssueMessageViolations, ...smartContextTelemetrySampleViolations, ...compatibilityDiagnosticsMojoViolations, ...quotaHeaderProjectionViolations, ...smartContextCapsuleOrderViolations, ...markerViolations, ...deepseekCatalogPolicyViolations, ...featureOffViolations, ...liveLogRecordViolations, ...runtimePolicyPresetViolations, ...runtimeConfigScalarViolations, ...profileHealthCircuitViolations, ...logThroughputViolations, ...operationalDetailSpecViolations, ...transcriptPolicyViolations, ...logLoadPolicyViolations, ...routeReasonViolations, ...runtimeStateQuotaViolations, ...runtimeStateRoutePolicyViolations, ...runtimeProxyRootViolations, ...runtimeRecoveryDeadlineViolations, ...brokerVersionGuardViolations, ...brokerContinuityViolations, ...brokerLogCacheViolations, ...codexConfigViolations, ...statePolicyViolations, ...quotaSelectionPolicyViolations, ...routeTagMirrorViolations, ...enumTagMirrorViolations, ...appSelectionPolicyMirrorViolations, ...runtimeStateBackgroundViolations, ...redactionViolations, ...rateLimitHeaderSelectionViolations, ...profileIdentityViolations, ...governanceInspectionViolations, ...governanceInspectionOrderingViolations, ...exactnessPlannerViolations,
     ...adaptiveBudgetViolations,
     ...providerUsageViolations,
     ...auditUsageViolations,
@@ -9565,6 +9615,17 @@ function selfTest() {
   assert.match(findViolations([[ANTHROPIC_ATTEMPT_CURSOR_FILE,
     anthropicCursorConsumer + "\nattempt.model_index += 1",
   ]]).join("\n"), /Anthropic model\/auth cursor transitions must remain Mojo-owned/u);
+  const kiroAcpLedgerConsumer = [
+    "prodex_mojo_core::rich::kiro_acp_tool_activity_plan(",
+    "KiroAcpToolActivityFacts",
+    "KiroAcpToolActivityAction::AppendTruncated",
+    "compiled Mojo Kiro tool activity omitted name",
+  ].join("\n");
+  const kiroAcpLedgerCaller = "crates/prodex-app/src/runtime_kiro_acp/turn_state.rs";
+  assert.deepEqual(findViolations([[kiroAcpLedgerCaller, kiroAcpLedgerConsumer]]), []);
+  assert.match(findViolations([[kiroAcpLedgerCaller,
+    kiroAcpLedgerConsumer + "\nif self.tool_activities_truncated {",
+  ]]).join("\n"), /restored Rust Kiro ACP activity cap\/label inheritance policy/u);
   const quotaPoolLayoutConsumer = [
     "prodex_mojo_core::quota::quota_ready_pool_remaining(",
     "prodex_mojo_core::quota::quota_info_pool_remaining(",
@@ -9734,7 +9795,7 @@ function selfTest() {
     [SMART_CONTEXT_SYMBOLS_MOJO_FILE,
       '@export("prodex_smart_context_symbol_index_v1")\ncomptime SYMBOL_ABI_VERSION: Int64 = 1\ncomptime SYMBOL_MAX_INPUT_BYTES: Int64 = 64 * 1024 * 1024\ndef symbol_parse_declaration(): pass\ndef symbol_brace_end(): pass\ndef symbol_python_end(): pass'],
     ["crates/prodex-mojo-core/src/lib.rs", "pub mod smart_context_symbols;"],
-    ["crates/prodex-mojo-core/build.rs", "../../mojo/prodex_core/smart_context_symbols.mojo"],
+    ["crates/prodex-mojo-core/build.rs", '../../mojo/prodex_core/smart_context_symbols.mojo\nsources.push("../../mojo/prodex_core/kiro_acp_tool_activity_policy.mojo")'],
     [SMART_CONTEXT_SYMBOLS_TEST_FILE,
       "source_symbol_ranges_cover_rust_python_and_javascript source_symbol_ranges_preserve_function_type_and_fallback_names symbol_index_reports_capacity_and_excerpt_truncation symbol_index_accepts_large_multi_line_artifacts_with_bounded_lines index(text, 16, 16 * 1024)"],
     [SMART_CONTEXT_SYMBOLS_CALLER_TEST_FILE,

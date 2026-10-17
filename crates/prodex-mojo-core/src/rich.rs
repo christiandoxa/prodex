@@ -163,13 +163,15 @@ pub use openai_compat::{
 #[path = "rich/kiro.rs"]
 mod kiro;
 pub use kiro::{
-    KIRO_RESPONSE_MAX_BYTES, KiroChatResponseInputPlan, KiroChatRewrite, KiroChatRewriteIssue,
+    KIRO_RESPONSE_MAX_BYTES, KiroAcpToolActivityAction, KiroAcpToolActivityFacts,
+    KiroAcpToolActivityPlan, KiroChatResponseInputPlan, KiroChatRewrite, KiroChatRewriteIssue,
     KiroKernelInput, KiroKernelOperation, KiroRequestValidationInput, KiroRequestValidationMode,
-    KiroRequestValidationPlan, kiro_anthropic_sse_body, kiro_chat_response_input_plan, kiro_kernel,
-    kiro_rewrite_anthropic_response_json, kiro_rewrite_chat_request_json,
-    kiro_rewrite_chat_response_json, kiro_semantic_compact_instructions,
-    kiro_semantic_compact_request_json, kiro_semantic_compact_summary_json,
-    kiro_strip_external_tool_controls_json, kiro_validate_request, kiro_validate_request_json,
+    KiroRequestValidationPlan, kiro_acp_tool_activity_plan, kiro_anthropic_sse_body,
+    kiro_chat_response_input_plan, kiro_kernel, kiro_rewrite_anthropic_response_json,
+    kiro_rewrite_chat_request_json, kiro_rewrite_chat_response_json,
+    kiro_semantic_compact_instructions, kiro_semantic_compact_request_json,
+    kiro_semantic_compact_summary_json, kiro_strip_external_tool_controls_json,
+    kiro_validate_request, kiro_validate_request_json,
 };
 #[path = "rich/smart_context_normalization.rs"]
 mod smart_context_normalization;
