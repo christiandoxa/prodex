@@ -96,18 +96,18 @@ Claude plugin hooks can use Caveman's documented `caveman telemetry off` or
 
 ## Ponytail
 
-Ponytail uses the same versioned manifest/tree contract, accepts stable 4.9.0 or newer, and selects the newest compatible managed directory. The current release-qualified reference is `<managed-root>/ponytail/5.1.0/` with metadata:
+Ponytail uses the same versioned manifest/tree contract, accepts stable 4.9.0 or newer, and selects the newest compatible managed directory. The current release-qualified reference is `<managed-root>/ponytail/5.3.2/` with metadata:
 
 - source: `https://github.com/DietrichGebert/ponytail`
-- commit: `9cc65d03aa2da1db7121b912d03596409ee340b8`
-- tree SHA-256: `40281142115c85272f3a3cf6fb4fbd357aea38d6a5be434fee5fe40fad22240c`
+- commit: `16352ac229eb08a9598dcae48fe9f2b342567d86`
+- tree SHA-256: `8609325761024ea38a22f782fa49feae2c068ede9b31b42f03c224fd990f640e`
 
-The 5.1.0 qualified reference requires its exact audited commit and complete tree digest. Existing stable 4.10.x checkouts remain accepted through the minimum-version and manifest-digest compatibility rules, including the previously qualified 4.10.0 legacy-manifest rule. Future stable releases are accepted when the plugin version matches the managed manifest and the recomputed tree digest matches that manifest.
+The 5.3.2 qualified reference requires its exact audited commit and complete tree digest. Existing stable 4.10.x checkouts remain accepted through the minimum-version and manifest-digest compatibility rules, including the previously qualified 4.10.0 legacy-manifest rule. Future stable releases are accepted when the plugin version matches the managed manifest and the recomputed tree digest matches that manifest.
 
 RTK requires `0.46.0` or newer; `1.0.1` is the latest stable release-qualified reference for this Prodex release. It remains externally managed and version-compatible rather than latest-only. Codebase Memory MCP
-`0.12.0` is the latest stable release validated for this Prodex release. Both resolve from
+`0.12.1` is the latest stable release validated for this Prodex release. Both resolve from
 managed roots first and then `PATH`.
-The README installs the current stable Codebase Memory MCP `0.12.0`; Prodex
+The README installs the current stable Codebase Memory MCP `0.12.1`; Prodex
 continues to accept `0.9.1-rc.1` or newer (or a development build) and
 expose its native `daemon status` contract. The explicit health check verifies
 this contract; normal optional launch resolution does not synchronously spawn
@@ -164,3 +164,11 @@ The 0.12.0 reference was refreshed for the 0.438.0 release. Its first later
 indexing run rebuilds an older project index according to upstream upgrade
 notes; release qualification does not trigger that rebuild or replace an
 installed shared daemon.
+
+The 0.438.1 freshness qualification updates Codebase Memory MCP to 0.12.1 and
+Ponytail to 5.3.2. All six Codebase Memory platform archives were downloaded
+and matched against upstream checksums and GitHub asset digests. Ponytail's
+complete source tree matched the official Git blobs and the bounded Prodex
+tree digest. The read-only daemon health probe can see an existing per-account
+daemon even with an isolated HOME; qualification did not restart that daemon,
+rebuild user indexes, run Ponytail hooks, or import past sessions.
