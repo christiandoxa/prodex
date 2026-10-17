@@ -406,10 +406,22 @@ fn run_retryable_hard_affinity_replay_case_after_delay(
     marker: &str,
     client_replay_delay: std::time::Duration,
 ) {
-    const { assert!(prodex_mojo_core::MOJO_ACTIVE) }
+    run_retryable_hard_affinity_replay_script(
+        RuntimeProxyBackendFaultScript::new([fault]),
+        marker,
+        |_, _| std::thread::sleep(client_replay_delay),
+        &["main-account", "second-account"],
+    );
+}
 
-    let backend =
-        RuntimeProxyBackend::start_with_fault_script(RuntimeProxyBackendFaultScript::new([fault]));
+fn run_retryable_hard_affinity_replay_script(
+    script: RuntimeProxyBackendFaultScript,
+    marker: &str,
+    before_replay: impl FnOnce(&RuntimeProxyProfileHarness, &RuntimeProxyBackend),
+    expected_accounts: &[&str],
+) {
+    const { assert!(prodex_mojo_core::MOJO_ACTIVE) }
+    let backend = RuntimeProxyBackend::start_with_fault_script(script);
     let ready = runtime_usage_snapshot(
         quota_window_ready(80, 3_600),
         quota_window_ready(80, 86_400),
@@ -445,7 +457,7 @@ fn run_retryable_hard_affinity_replay_case_after_delay(
         ["main-account"],
         "the failed hard-affinity request must signal replay before trying another profile: {log}",
     );
-    std::thread::sleep(client_replay_delay);
+    before_replay(&harness, &backend);
 
     let response =
         proxy_runtime_responses_request(102, &full_context_replay_request(), harness.shared())
@@ -455,10 +467,12 @@ fn run_retryable_hard_affinity_replay_case_after_delay(
         RuntimeResponsesReply::Streaming(response) => response.status,
     };
     assert_eq!(status, 200);
-    assert_eq!(
-        backend.responses_accounts(),
-        vec!["main-account".to_string(), "second-account".to_string()]
-    );
+    let log = read_runtime_proxy_test_log(&harness.shared().log_path);
+    assert_eq!(backend.responses_accounts(), expected_accounts, "{log}");
+    let bodies = backend.responses_bodies();
+    let replay: serde_json::Value = serde_json::from_str(bodies.last().unwrap()).unwrap();
+    assert!(replay.get("previous_response_id").is_none(), "{replay}");
+    assert_eq!(replay["input"].as_array().unwrap().len(), 3, "{replay}");
 }
 
 #[test]
@@ -474,12 +488,66 @@ fn responses_hard_affinity_overload_requests_full_context_replay_then_rotates() 
 
 #[test]
 fn responses_hard_affinity_auth_failure_requests_full_context_replay_then_rotates() {
-    run_retryable_hard_affinity_replay_case(
-        RuntimeProxyBackendFaultStep::unauthorized(
-            RuntimeProxyBackendFaultRoute::Responses,
-            "main-account",
-        ),
+    // Keep the fixture's authentication failure consistent across Responses
+    // and Usage. A successful newer quota probe may legitimately rehabilitate
+    // the same credentials before a slow client's full-history replay arrives.
+    let faults = [
+        RuntimeProxyBackendFaultStep::unauthorized(RuntimeProxyBackendFaultRoute::Responses, "main-account"),
+        // At most one pre-send and one post-failure background probe.
+        RuntimeProxyBackendFaultStep::unauthorized(RuntimeProxyBackendFaultRoute::Usage, "main-account"),
+        RuntimeProxyBackendFaultStep::unauthorized(RuntimeProxyBackendFaultRoute::Usage, "main-account"),
+    ];
+    run_retryable_hard_affinity_replay_script(
+        RuntimeProxyBackendFaultScript::new(faults),
         "auth_failed_full_context_retry_signal",
+        |harness, backend| {
+            let deadline = Instant::now() + Duration::from_secs(10);
+            loop {
+                let log = read_runtime_proxy_test_log(&harness.shared().log_path);
+                if log.contains("profile_probe_refresh_error profile=main") {
+                    break;
+                }
+                assert!(Instant::now() < deadline, "auth probe did not complete: {log}");
+                thread::sleep(Duration::from_millis(5));
+            }
+            assert!(backend.usage_accounts().iter().any(|account| account == "main-account"));
+            let runtime = harness.shared().runtime.lock().unwrap();
+            assert!(runtime_profile_auth_failure_active(&runtime, "main", Local::now().timestamp()));
+        },
+        &["main-account", "second-account"],
+    );
+}
+
+#[test]
+fn responses_hard_affinity_auth_revalidated_before_replay_can_reuse_owner_04381() {
+    let faults = [
+        RuntimeProxyBackendFaultStep::unauthorized(RuntimeProxyBackendFaultRoute::Responses, "main-account"),
+        RuntimeProxyBackendFaultStep::success(RuntimeProxyBackendFaultRoute::Responses, "main-account"),
+    ];
+    run_retryable_hard_affinity_replay_script(
+        RuntimeProxyBackendFaultScript::new(faults),
+        "auth_failed_full_context_retry_signal",
+        |harness, backend| {
+            let (failed_at, home) = {
+                let runtime = harness.shared().runtime.lock().unwrap();
+                (runtime.profile_health[&runtime_profile_auth_failure_key("main")].updated_at,
+                 runtime.state.profiles["main"].codex_home.clone())
+            };
+            // Receipt timestamps are whole seconds: force the causal ordering,
+            // not an arbitrary sleep that races with the background worker.
+            let deadline = Instant::now() + Duration::from_secs(5);
+            while Local::now().timestamp() <= failed_at {
+                assert!(Instant::now() < deadline, "clock must advance for a newer receipt");
+                thread::sleep(Duration::from_millis(5));
+            }
+            crate::run_runtime_probe_jobs_inline(
+                harness.shared(), vec![("main".into(), home)], "replay_auth_revalidation",
+            );
+            let log = read_runtime_proxy_test_log(&harness.shared().log_path);
+            assert!(log.contains("profile_auth_backoff_cleared profile=main reason=authenticated_probe"), "{log}");
+            assert!(backend.usage_accounts().iter().any(|account| account == "main-account"));
+        },
+        &["main-account", "main-account"],
     );
 }
 
