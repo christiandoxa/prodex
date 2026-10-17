@@ -218,3 +218,50 @@ def prodex_quota_status_summary_v1(
     output_fields[unsafe_offset=8] = earliest_weekly
     output_fields[unsafe_offset=9] = has_earliest_weekly
     return 0
+
+# Choose which quota windows and availability summaries are published to the
+# terminal. The host only formats wall-clock timestamps and stored totals.
+comptime QUOTA_POOL_SUMMARY_SECTION_ABI_VERSION: Int64 = 1
+comptime QUOTA_POOL_SECTION_READY: Int64 = 1
+comptime QUOTA_POOL_SECTION_FIVE_HOUR: Int64 = 2
+comptime QUOTA_POOL_SECTION_WEEKLY: Int64 = 3
+comptime QUOTA_POOL_SECTION_MAIN: Int64 = 4
+comptime QUOTA_POOL_SECTION_EMPTY_FIVE_HOUR: Int64 = 5
+comptime QUOTA_POOL_SECTION_EMPTY_WEEKLY: Int64 = 6
+
+
+@export("prodex_quota_pool_summary_sections_v1")
+def prodex_quota_pool_summary_sections_v1(
+    abi_version: Int64,
+    openai_profiles: Int64,
+    main_profiles: Int64,
+    output_address: UInt,
+    output_capacity: Int64,
+) abi("C") -> Int64:
+    if abi_version != QUOTA_POOL_SUMMARY_SECTION_ABI_VERSION:
+        return 4
+    if (
+        openai_profiles < 0 or main_profiles < 0
+        or output_address == 0 or output_capacity < 4
+    ):
+        return 1
+    var output = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    output[unsafe_offset=0] = 0
+    output[unsafe_offset=1] = 0
+    output[unsafe_offset=2] = 0
+    output[unsafe_offset=3] = 0
+    if openai_profiles > 0:
+        output[unsafe_offset=0] = 3
+        output[unsafe_offset=1] = QUOTA_POOL_SECTION_READY
+        output[unsafe_offset=2] = QUOTA_POOL_SECTION_FIVE_HOUR
+        output[unsafe_offset=3] = QUOTA_POOL_SECTION_WEEKLY
+    elif main_profiles > 0:
+        output[unsafe_offset=0] = 1
+        output[unsafe_offset=1] = QUOTA_POOL_SECTION_MAIN
+    else:
+        output[unsafe_offset=0] = 2
+        output[unsafe_offset=1] = QUOTA_POOL_SECTION_EMPTY_FIVE_HOUR
+        output[unsafe_offset=2] = QUOTA_POOL_SECTION_EMPTY_WEEKLY
+    return 0

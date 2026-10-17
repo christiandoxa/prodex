@@ -5811,3 +5811,11 @@ provider-prefixed tool validation errors, including dynamic MCP/namespace
 details. Rust's 23-code tag-to-error match was removed without a semantic
 fallback. Strict ABI, DeepSeek/Kiro caller tests and no-fallback guard checks
 cover the byte-compatible diagnostics.
+
+## Quota pool overview sections selected in compiled Mojo
+
+The compiled quota-pool aggregator now also selects the ordered overview
+sections for OpenAI, Gemini/Copilot and unavailable pools. Rust's conditional
+row selection was deleted; Rust retains value and timestamp display using
+existing compiled quota formatters. Strict ABI, real quota UI and no-fallback
+regressions cover the section precedence and large profile counts.

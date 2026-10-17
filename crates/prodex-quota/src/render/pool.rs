@@ -139,63 +139,66 @@ fn quota_pool_summary_fields_for_aggregate(
             format_quota_snapshot_time(aggregate.last_updated_at),
         ),
     ];
-    if aggregate.profiles_with_data > 0 {
-        fields.push((
-            "Usable now".to_string(),
-            format_ready_pool_remaining(
-                aggregate.ready_five_hour_pool_remaining,
-                aggregate.ready_weekly_pool_remaining,
-                aggregate.ready_profiles_with_data,
-                aggregate.ready_five_hour_profiles_with_data,
-                aggregate.ready_weekly_profiles_with_data,
+    for section in prodex_mojo_core::quota_pool::quota_pool_summary_sections(
+        aggregate.profiles_with_data,
+        aggregate.main_profiles_with_data,
+    )
+    .expect("compiled Mojo quota-pool summary section planner failed")
+    {
+        use prodex_mojo_core::quota_pool::QuotaPoolSummarySection;
+        let (label, value) = match section {
+            QuotaPoolSummarySection::UsableNow => (
+                "Usable now",
+                format_ready_pool_remaining(
+                    aggregate.ready_five_hour_pool_remaining,
+                    aggregate.ready_weekly_pool_remaining,
+                    aggregate.ready_profiles_with_data,
+                    aggregate.ready_five_hour_profiles_with_data,
+                    aggregate.ready_weekly_profiles_with_data,
+                ),
             ),
-        ));
-        fields.extend([
-            (
-                "5h remaining pool".to_string(),
+            QuotaPoolSummarySection::FiveHour => (
+                "5h remaining pool",
                 format_info_pool_remaining(
                     aggregate.five_hour_pool_remaining,
                     aggregate.five_hour_profiles_with_data,
                     aggregate.earliest_five_hour_reset_at,
                 ),
             ),
-            (
-                "Weekly remaining pool".to_string(),
+            QuotaPoolSummarySection::Weekly => (
+                "Weekly remaining pool",
                 format_info_pool_remaining(
                     aggregate.weekly_pool_remaining,
                     aggregate.weekly_profiles_with_data,
                     aggregate.earliest_weekly_reset_at,
                 ),
             ),
-        ]);
-    } else if aggregate.main_profiles_with_data > 0 {
-        fields.push((
-            "Remaining pool".to_string(),
-            format_info_pool_remaining(
-                aggregate.main_pool_remaining,
-                aggregate.main_profiles_with_data,
-                aggregate.earliest_main_reset_at,
+            QuotaPoolSummarySection::Main => (
+                "Remaining pool",
+                format_info_pool_remaining(
+                    aggregate.main_pool_remaining,
+                    aggregate.main_profiles_with_data,
+                    aggregate.earliest_main_reset_at,
+                ),
             ),
-        ));
-    } else {
-        fields.extend([
-            (
-                "5h remaining pool".to_string(),
+            QuotaPoolSummarySection::NoDataFiveHour => (
+                "5h remaining pool",
                 format_info_pool_remaining(
                     aggregate.five_hour_pool_remaining,
                     aggregate.profiles_with_data,
                     aggregate.earliest_five_hour_reset_at,
                 ),
             ),
-            (
-                "Weekly remaining pool".to_string(),
+            QuotaPoolSummarySection::NoDataWeekly => (
+                "Weekly remaining pool",
                 format_info_pool_remaining(
                     aggregate.weekly_pool_remaining,
                     aggregate.profiles_with_data,
                     aggregate.earliest_weekly_reset_at,
                 ),
             ),
-        ]);
+        };
+        fields.push((label.to_owned(), value));
     }
     fields
 }

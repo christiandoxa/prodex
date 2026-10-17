@@ -2,6 +2,27 @@ use super::*;
 
 #[cfg(feature = "mojo")]
 #[test]
+fn compiled_mojo_pool_summary_selects_explicit_no_data_sections() {
+    let fields = quota_pool_summary_fields(&[]);
+    assert_eq!(
+        fields
+            .iter()
+            .map(|(label, _)| label.as_str())
+            .collect::<Vec<_>>(),
+        [
+            "Available",
+            "Last Updated",
+            "5h remaining pool",
+            "Weekly remaining pool"
+        ],
+    );
+    assert_eq!(fields[0].1, "0/0 profile");
+    assert!(!fields.iter().any(|(label, _)| label == "Usable now"));
+    assert!(!fields.iter().any(|(label, _)| label == "Remaining pool"));
+}
+
+#[cfg(feature = "mojo")]
+#[test]
 fn quota_pool_available_count_excludes_blocked_profiles() {
     let reports = vec![
         openai_report("ready", main_windows(80, 1_700_001_800, 95, 1_700_259_200)),
