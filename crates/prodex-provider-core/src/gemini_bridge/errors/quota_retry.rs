@@ -4,7 +4,7 @@ mod body;
 mod retry_delay;
 
 pub use self::retry_delay::{
-    GEMINI_PROVIDER_CORE_MAX_INLINE_RATE_LIMIT_RETRY_DELAY_MS,
+    gemini_provider_core_inline_retry_threshold_ms,
     gemini_provider_core_invalid_stream_retry_delay_ms, gemini_provider_core_retry_delay_ms,
     gemini_provider_core_retry_delay_ms_from_body,
     gemini_provider_core_should_inline_rate_limit_retry,

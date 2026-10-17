@@ -9475,3 +9475,88 @@ def prodex_provider_retry_transition_v1(
     ):
         return PROVIDER_RETRY_TRANSITION_ROTATE_CREDENTIAL
     return PROVIDER_RETRY_TRANSITION_TERMINAL
+
+
+# Mojo-owned Gemini retry timing.  Rust supplies already-acquired server delay
+# values; this kernel owns the schedule, cap, inline threshold, and backoff.
+comptime GEMINI_RETRY_POLICY_ABI_VERSION: Int64 = 1
+comptime GEMINI_RETRY_POLICY_OK: Int64 = 0
+comptime GEMINI_RETRY_POLICY_INVALID: Int64 = 1
+comptime GEMINI_RETRY_POLICY_NONE: Int64 = 2
+comptime GEMINI_RETRY_POLICY_ABI: Int64 = 4
+
+comptime GEMINI_RETRY_POLICY_DELAY: Int64 = 0
+comptime GEMINI_RETRY_POLICY_INLINE: Int64 = 1
+comptime GEMINI_RETRY_POLICY_INVALID_STREAM: Int64 = 2
+comptime GEMINI_RETRY_POLICY_INLINE_THRESHOLD: Int64 = 3
+
+comptime GEMINI_RETRY_POLICY_CAP_MS: UInt64 = 300_000
+comptime GEMINI_RETRY_POLICY_INLINE_MAX_MS: UInt64 = 30_000
+comptime GEMINI_RETRY_POLICY_INVALID_STREAM_BASE_MS: UInt64 = 1_000
+
+
+def gemini_retry_policy_default_ms(index: Int64) -> UInt64:
+    if index == 0:
+        return UInt64(5_000)
+    if index == 1:
+        return UInt64(10_000)
+    if index == 2:
+        return UInt64(20_000)
+    return UInt64(30_000)
+
+
+@export("prodex_gemini_retry_policy_v1")
+def prodex_gemini_retry_policy_v1(
+    abi_version: Int64,
+    operation: Int64,
+    retry_index: Int64,
+    header_present: Int64,
+    header_ms: UInt64,
+    body_present: Int64,
+    body_ms: UInt64,
+    delay_ms: UInt64,
+    output_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != GEMINI_RETRY_POLICY_ABI_VERSION:
+        return GEMINI_RETRY_POLICY_ABI
+    if (
+        operation < GEMINI_RETRY_POLICY_DELAY
+        or operation > GEMINI_RETRY_POLICY_INLINE_THRESHOLD
+        or retry_index < 0
+        or header_present < 0
+        or header_present > 1
+        or body_present < 0
+        or body_present > 1
+        or output_address == 0
+    ):
+        return GEMINI_RETRY_POLICY_INVALID
+
+    var output = Pointer[mut=True, UInt64, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    if operation == GEMINI_RETRY_POLICY_DELAY:
+        if retry_index > 8:
+            return GEMINI_RETRY_POLICY_NONE
+        var selected = gemini_retry_policy_default_ms(retry_index)
+        if header_present == 1 and header_ms > selected:
+            selected = header_ms
+        if body_present == 1 and body_ms > selected:
+            selected = body_ms
+        output[] = selected if selected <= GEMINI_RETRY_POLICY_CAP_MS else GEMINI_RETRY_POLICY_CAP_MS
+        return GEMINI_RETRY_POLICY_OK
+
+    if operation == GEMINI_RETRY_POLICY_INLINE:
+        output[] = UInt64(1) if (
+            delay_ms > 0 and delay_ms <= GEMINI_RETRY_POLICY_INLINE_MAX_MS
+        ) else UInt64(0)
+        return GEMINI_RETRY_POLICY_OK
+
+    if operation == GEMINI_RETRY_POLICY_INLINE_THRESHOLD:
+        output[] = GEMINI_RETRY_POLICY_INLINE_MAX_MS
+        return GEMINI_RETRY_POLICY_OK
+
+    var exponent = retry_index
+    if exponent > 8:
+        exponent = 8
+    output[] = GEMINI_RETRY_POLICY_INVALID_STREAM_BASE_MS * (UInt64(1) << UInt64(exponent))
+    return GEMINI_RETRY_POLICY_OK

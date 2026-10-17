@@ -30,8 +30,8 @@ pub use self::compact::{
     gemini_provider_core_semantic_compact_summary,
 };
 pub use self::errors::{
-    GEMINI_PROVIDER_CORE_MAX_INLINE_RATE_LIMIT_RETRY_DELAY_MS,
     gemini_provider_core_body_has_terminal_quota, gemini_provider_core_google_quota_message,
+    gemini_provider_core_inline_retry_threshold_ms,
     gemini_provider_core_invalid_stream_retry_delay_ms, gemini_provider_core_normalized_error_body,
     gemini_provider_core_response_retryable_quota, gemini_provider_core_retry_delay_ms,
     gemini_provider_core_retry_delay_ms_from_body,
