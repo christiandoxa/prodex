@@ -15,6 +15,10 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 
 - Allow ABI test argument shape (`139f674`)
 
+### Deps
+
+- Refresh audited optional-tool release references (`1808e48`)
+
 ### Misc
 
 - Preserve portable paths and isolate host prompt adapters (`2adc881`)
@@ -87,6 +91,20 @@ A separate controlled test verifies that a genuinely newer authenticated probe
 may rehabilitate the original owner for a full-history replay. This removes a
 Windows scheduling race without disabling valid recovery, weakening request
 counts, or allowing a stale previous-response ID to cross accounts.
+
+Optional-tool publication references were refreshed after the release-cut
+freshness gate detected newer upstream versions: Codebase Memory MCP 0.12.1
+and Ponytail 5.3.2. Their official archives/source trees, identity metadata,
+and existing integration contracts were verified without replacing installed
+tools, running plugin hooks, or modifying user indexes and sessions. Supported
+minimums remain unchanged.
+
+Windows refresh-lease qualification separates eight-way initial ownership
+selection from an established owner's short-TTL heartbeat check. Every follower
+must acknowledge the still-held lease after three TTLs before its result is
+published, then consume the identical committed result. The separate cold-start
+election retains exactly one owner and seven followers using the normal lease
+TTL. Production timing, fencing, and file-security rules are unchanged.
 
 ### Upgrade
 
