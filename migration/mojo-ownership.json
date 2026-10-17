@@ -103,6 +103,10 @@
       "production_reachability_test": "crates/prodex-mojo-core/tests/runtime_policy_preset.rs",
       "rust_owner_before": "runtime-proxy preset defaults, environment-over-config precedence, and explicit override merging",
       "rust_adapter_scope": "encode typed preset and optional-field inputs, then map the Mojo plan into runtime settings"
+    },
+    "runtime_recovery_cooldown_epoch": {
+      "mojo_entry": "prodex_runtime_recovery_epoch_pending_v2",
+      "mojo_abi_version": 2
     }
   },
   "classification_legend": {

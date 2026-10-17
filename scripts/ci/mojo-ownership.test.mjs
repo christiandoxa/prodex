@@ -156,6 +156,11 @@ test("release operation overrides evolve an entry without rewriting the frozen b
   assert.equal(baseline.baseline_authoritative_operation_count, 22);
   assert.equal(release.baseline_authoritative_operation_count, 22);
   assert.equal(
+    release.authoritative_operations.find((operation) => operation.name === "runtime_recovery_cooldown_epoch")
+      .mojo_entry,
+    "prodex_runtime_recovery_epoch_pending_v2",
+  );
+  assert.equal(
     release.authoritative_operations.find((operation) => operation.name === "quota_route_score_resolution")
       .mojo_entry,
     "prodex_runtime_quota_route_score_resolution_batch",
