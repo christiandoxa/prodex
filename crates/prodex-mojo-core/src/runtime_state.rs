@@ -18,6 +18,8 @@ const MODE_ADMISSION_RELEASE: i64 = 10;
 
 const RUNTIME_PROXY_ADMISSION_ABI_VERSION: i64 = 1;
 const RUNTIME_PROXY_ADMISSION_AFFINITY_ABI_VERSION: i64 = 1;
+const RUNTIME_STATE_DUE_JOBS_ABI_VERSION: i64 = 1;
+const RUNTIME_STATE_DUE_JOBS_MAX: usize = 65_536;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct RuntimeStateMutationPolicy {
@@ -93,6 +95,12 @@ pub struct RuntimeProxyAdmissionAffinity {
     pub owned: bool,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RuntimeDueJobsPlan {
+    pub due_indices: Vec<usize>,
+    pub wait_nanos: Option<u64>,
+}
+
 unsafe extern "C" {
     fn prodex_runtime_state_background_policy_v1(
         abi_version: i64,
@@ -131,6 +139,14 @@ unsafe extern "C" {
         previous_response_binding: i64,
         turn_state_binding: i64,
         output_address: u64,
+    ) -> i64;
+    fn prodex_runtime_state_due_jobs_v1(
+        abi_version: i64,
+        ready_offsets_address: u64,
+        ready_count: i64,
+        output_address: u64,
+        output_capacity: i64,
+        wait_nanos_address: u64,
     ) -> i64;
 }
 
@@ -469,6 +485,60 @@ pub fn runtime_proxy_admission_affinity(
     }
 }
 
+/// Plans which scheduled jobs are ready, or the shortest wait for future jobs.
+/// Rust retains monotonic-clock acquisition and removes selected map entries.
+pub fn due_jobs_plan(ready_offsets: &[i64]) -> Result<RuntimeDueJobsPlan, MojoError> {
+    if ready_offsets.len() > RUNTIME_STATE_DUE_JOBS_MAX {
+        return Err(MojoError::InvalidInput);
+    }
+    let mut selected = vec![0_u8; ready_offsets.len().max(1)];
+    let mut wait_nanos = u64::MAX;
+    let status = unsafe {
+        prodex_runtime_state_due_jobs_v1(
+            RUNTIME_STATE_DUE_JOBS_ABI_VERSION,
+            ready_offsets.as_ptr() as usize as u64,
+            i64::try_from(ready_offsets.len()).map_err(|_| MojoError::InvalidInput)?,
+            selected.as_mut_ptr() as usize as u64,
+            i64::try_from(ready_offsets.len()).map_err(|_| MojoError::InvalidInput)?,
+            (&mut wait_nanos as *mut u64) as usize as u64,
+        )
+    };
+    match status {
+        0 => {}
+        1 => return Err(MojoError::InvalidInput),
+        3 => return Err(MojoError::Capacity),
+        4 => return Err(MojoError::AbiMismatch),
+        _ => return Err(MojoError::InvalidOutput),
+    }
+    let mut due_indices = Vec::new();
+    for (index, selected) in selected
+        .iter()
+        .copied()
+        .take(ready_offsets.len())
+        .enumerate()
+    {
+        match selected {
+            0 => {}
+            1 => due_indices.push(index),
+            _ => return Err(MojoError::InvalidOutput),
+        }
+    }
+    if !due_indices.is_empty() && wait_nanos != 0 {
+        return Err(MojoError::InvalidOutput);
+    }
+    if due_indices.is_empty() && !ready_offsets.is_empty() && wait_nanos == 0 {
+        return Err(MojoError::InvalidOutput);
+    }
+    Ok(RuntimeDueJobsPlan {
+        due_indices,
+        wait_nanos: if wait_nanos == u64::MAX {
+            None
+        } else {
+            Some(wait_nanos)
+        },
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -603,5 +673,63 @@ mod tests {
                 .unwrap()
                 .pressure_mode
         );
+    }
+
+    #[test]
+    fn due_jobs_plan_selects_all_ready_and_shortest_future_wait() {
+        assert_eq!(
+            due_jobs_plan(&[-1, 0, 5, 2]).unwrap(),
+            RuntimeDueJobsPlan {
+                due_indices: vec![0, 1],
+                wait_nanos: Some(0),
+            }
+        );
+        assert_eq!(
+            due_jobs_plan(&[5, 2, 9]).unwrap(),
+            RuntimeDueJobsPlan {
+                due_indices: Vec::new(),
+                wait_nanos: Some(2),
+            }
+        );
+        assert_eq!(
+            due_jobs_plan(&[]).unwrap(),
+            RuntimeDueJobsPlan {
+                due_indices: Vec::new(),
+                wait_nanos: None,
+            }
+        );
+    }
+
+    #[test]
+    fn due_jobs_abi_rejects_bad_version_and_capacity_without_selection() {
+        let offsets = [0_i64];
+        let mut selected = [9_u8];
+        let mut wait_nanos = u64::MAX;
+        let status = unsafe {
+            prodex_runtime_state_due_jobs_v1(
+                RUNTIME_STATE_DUE_JOBS_ABI_VERSION + 1,
+                offsets.as_ptr() as usize as u64,
+                1,
+                selected.as_mut_ptr() as usize as u64,
+                1,
+                (&mut wait_nanos as *mut u64) as usize as u64,
+            )
+        };
+        assert_eq!(status, 4);
+        assert_eq!(selected, [9]);
+
+        let status = unsafe {
+            prodex_runtime_state_due_jobs_v1(
+                RUNTIME_STATE_DUE_JOBS_ABI_VERSION,
+                offsets.as_ptr() as usize as u64,
+                1,
+                selected.as_mut_ptr() as usize as u64,
+                0,
+                (&mut wait_nanos as *mut u64) as usize as u64,
+            )
+        };
+        assert_eq!(status, 3);
+        assert_eq!(selected, [9]);
+        assert_eq!(wait_nanos, u64::MAX);
     }
 }
