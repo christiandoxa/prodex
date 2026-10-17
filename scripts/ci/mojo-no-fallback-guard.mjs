@@ -171,6 +171,9 @@ const PING_SUMMARY_CALLER_TEST_FILE = "crates/prodex-app/src/app_commands/ping_t
 const PING_SUMMARY_ADAPTER_FILE = "crates/prodex-mojo-core/src/rich/ping_protocol.rs";
 const PING_SUMMARY_MOJO_FILE = "mojo/prodex_core/ping_protocol.mojo";
 const PROMOTED_FILES = [
+  "crates/prodex-mojo-core/src/quota_pool.rs",
+  "mojo/prodex_core/quota_pool.mojo",
+  "crates/prodex-quota/tests/src/render/quota_pool.rs",
   "crates/prodex-mojo-core/src/rich/deepseek/tool_shape_issue.rs",
   "crates/prodex-mojo-core/src/rich/deepseek/replay_item.rs",
   "crates/prodex-provider-core/src/deepseek_bridge/tests.rs",
@@ -6457,6 +6460,7 @@ export function findViolations(files) {
       const required = [
         "prodex_mojo_core::quota::quota_ready_pool_remaining(",
         "prodex_mojo_core::quota::quota_info_pool_remaining(",
+        "prodex_mojo_core::quota_pool::quota_pool_summary_sections(",
         "copilot_main_remaining_percent(",
       ];
       const violations = required
@@ -8368,6 +8372,41 @@ export function findViolations(files) {
     }
     return [];
   });
+  const quotaPoolSummarySectionsMojoViolations = files.flatMap(([filePath, contents]) => {
+    if (filePath === QUOTA_POOL_FILE) {
+      const source = contents.split("#[cfg(test)]", 1)[0];
+      const retired = [
+        "if aggregate.profiles_with_data > 0 {",
+        "else if aggregate.main_profiles_with_data > 0 {",
+      ];
+      return retired.every((marker) => !source.includes(marker))
+        ? [] : [filePath + ": restored Rust quota summary row-selection branches"];
+    }
+    if (filePath === "crates/prodex-mojo-core/src/quota_pool.rs") {
+      return [
+        "fn prodex_quota_pool_summary_sections_v1(",
+        "pub fn quota_pool_summary_sections(",
+        "mojo_quota_pool_summary_selects_openai_main_or_missing_data_layout",
+        "mojo_quota_pool_summary_section_abi_rejects_invalid_inputs_without_writes",
+      ].filter((marker) => !contents.includes(marker))
+        .map((marker) => filePath + ": compiled quota-pool summary layout ABI/coverage missing " + marker);
+    }
+    if (filePath === "mojo/prodex_core/quota_pool.mojo") {
+      return [
+        '@export("prodex_quota_pool_summary_sections_v1")',
+        "QUOTA_POOL_SUMMARY_SECTION_ABI_VERSION",
+        "QUOTA_POOL_SECTION_READY",
+        "QUOTA_POOL_SECTION_MAIN",
+        "QUOTA_POOL_SECTION_EMPTY_WEEKLY",
+      ].filter((marker) => !contents.includes(marker))
+        .map((marker) => filePath + ": compiled quota-pool section precedence missing " + marker);
+    }
+    if (filePath === "crates/prodex-quota/tests/src/render/quota_pool.rs") {
+      return contents.includes("compiled_mojo_pool_summary_selects_explicit_no_data_sections")
+        ? [] : [filePath + ": real quota summary empty-pool caller regression required"];
+    }
+    return [];
+  });
   const deepseekToolShapeIssueMojoViolations = files.flatMap(([filePath, contents]) => {
     if (filePath === "crates/prodex-provider-core/src/deepseek_bridge/request_tools/tool_shape.rs") {
       const production = contents.split("#[cfg(test)]", 1)[0];
@@ -8760,7 +8799,7 @@ export function findViolations(files) {
     }
     return [];
   });
-  return [...logPayloadProjectionViolations, ...nativeRecoveryOwnershipViolations, ...quotaRecoveryEligibilityViolations, ...runtimeBrokerReuseMojoViolations, ...geminiResponseMediaMojoViolations, ...cookieEvictionMojoViolations, ...websocketBudgetMojoViolations, ...affinityBindingMojoViolations, ...responsesCapacityRecoveryViolations, ...sseTapMojoOwnershipViolations, ...quotaWatchViolations, ...geminiCompactSnippetViolations, ...geminiCompactTextViolations, ...doctorSmartContextDecisionViolations, ...anthropicAttemptCursorViolations, ...geminiUnsupportedToolRetryViolations, ...terminalGeometryViolations, ...previousResponseRecoveryTransitionViolations, ...deepseekToolShapeIssueMojoViolations, ...deepseekReplayItemPolicyMojoViolations, ...chatNamespaceSplitMojoViolations, ...deepseekInputItemIssueMessageViolations, ...deepseekRequestIssueMessageViolations, ...smartContextTelemetrySampleViolations, ...compatibilityDiagnosticsMojoViolations, ...quotaHeaderProjectionViolations, ...smartContextCapsuleOrderViolations, ...markerViolations, ...deepseekCatalogPolicyViolations, ...featureOffViolations, ...liveLogRecordViolations, ...runtimePolicyPresetViolations, ...runtimeConfigScalarViolations, ...profileHealthCircuitViolations, ...logThroughputViolations, ...operationalDetailSpecViolations, ...transcriptPolicyViolations, ...logLoadPolicyViolations, ...routeReasonViolations, ...runtimeStateQuotaViolations, ...runtimeStateRoutePolicyViolations, ...runtimeProxyRootViolations, ...runtimeRecoveryDeadlineViolations, ...brokerVersionGuardViolations, ...brokerContinuityViolations, ...brokerLogCacheViolations, ...codexConfigViolations, ...statePolicyViolations, ...quotaSelectionPolicyViolations, ...routeTagMirrorViolations, ...enumTagMirrorViolations, ...appSelectionPolicyMirrorViolations, ...runtimeStateBackgroundViolations, ...redactionViolations, ...rateLimitHeaderSelectionViolations, ...profileIdentityViolations, ...governanceInspectionViolations, ...governanceInspectionOrderingViolations, ...exactnessPlannerViolations,
+  return [...logPayloadProjectionViolations, ...nativeRecoveryOwnershipViolations, ...quotaRecoveryEligibilityViolations, ...runtimeBrokerReuseMojoViolations, ...geminiResponseMediaMojoViolations, ...cookieEvictionMojoViolations, ...websocketBudgetMojoViolations, ...affinityBindingMojoViolations, ...responsesCapacityRecoveryViolations, ...sseTapMojoOwnershipViolations, ...quotaWatchViolations, ...geminiCompactSnippetViolations, ...geminiCompactTextViolations, ...doctorSmartContextDecisionViolations, ...anthropicAttemptCursorViolations, ...geminiUnsupportedToolRetryViolations, ...terminalGeometryViolations, ...previousResponseRecoveryTransitionViolations, ...quotaPoolSummarySectionsMojoViolations, ...deepseekToolShapeIssueMojoViolations, ...deepseekReplayItemPolicyMojoViolations, ...chatNamespaceSplitMojoViolations, ...deepseekInputItemIssueMessageViolations, ...deepseekRequestIssueMessageViolations, ...smartContextTelemetrySampleViolations, ...compatibilityDiagnosticsMojoViolations, ...quotaHeaderProjectionViolations, ...smartContextCapsuleOrderViolations, ...markerViolations, ...deepseekCatalogPolicyViolations, ...featureOffViolations, ...liveLogRecordViolations, ...runtimePolicyPresetViolations, ...runtimeConfigScalarViolations, ...profileHealthCircuitViolations, ...logThroughputViolations, ...operationalDetailSpecViolations, ...transcriptPolicyViolations, ...logLoadPolicyViolations, ...routeReasonViolations, ...runtimeStateQuotaViolations, ...runtimeStateRoutePolicyViolations, ...runtimeProxyRootViolations, ...runtimeRecoveryDeadlineViolations, ...brokerVersionGuardViolations, ...brokerContinuityViolations, ...brokerLogCacheViolations, ...codexConfigViolations, ...statePolicyViolations, ...quotaSelectionPolicyViolations, ...routeTagMirrorViolations, ...enumTagMirrorViolations, ...appSelectionPolicyMirrorViolations, ...runtimeStateBackgroundViolations, ...redactionViolations, ...rateLimitHeaderSelectionViolations, ...profileIdentityViolations, ...governanceInspectionViolations, ...governanceInspectionOrderingViolations, ...exactnessPlannerViolations,
     ...adaptiveBudgetViolations,
     ...providerUsageViolations,
     ...auditUsageViolations,
@@ -9526,6 +9565,16 @@ function selfTest() {
   assert.match(findViolations([[ANTHROPIC_ATTEMPT_CURSOR_FILE,
     anthropicCursorConsumer + "\nattempt.model_index += 1",
   ]]).join("\n"), /Anthropic model\/auth cursor transitions must remain Mojo-owned/u);
+  const quotaPoolLayoutConsumer = [
+    "prodex_mojo_core::quota::quota_ready_pool_remaining(",
+    "prodex_mojo_core::quota::quota_info_pool_remaining(",
+    "prodex_mojo_core::quota_pool::quota_pool_summary_sections(",
+    "copilot_main_remaining_percent(",
+  ].join("\n");
+  assert.deepEqual(findViolations([[QUOTA_POOL_FILE, quotaPoolLayoutConsumer]]), []);
+  assert.match(findViolations([[QUOTA_POOL_FILE,
+    quotaPoolLayoutConsumer + "\nif aggregate.profiles_with_data > 0 {",
+  ]]).join("\n"), /restored Rust quota summary row-selection branches/u);
   const deepseekToolShapeConsumer = [
     "DeepSeekRequestPolicyOperation::ToolsShape",
     "prodex_mojo_core::rich::deepseek_tool_shape_issue_message(",

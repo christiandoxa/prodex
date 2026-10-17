@@ -71,6 +71,13 @@ pub struct StatusQuotaSummary {
 }
 
 unsafe extern "C" {
+    fn prodex_quota_pool_summary_sections_v1(
+        abi_version: i64,
+        openai_profiles: i64,
+        main_profiles: i64,
+        output_address: u64,
+        output_capacity: i64,
+    ) -> i64;
     fn prodex_quota_openai_pool_aggregate_v1(
         input_fields: *const i64,
         output_fields: *mut i64,
@@ -82,6 +89,94 @@ unsafe extern "C" {
         output_fields: *mut i64,
         count: i64,
     ) -> i64;
+}
+
+/// Which summary section the compiled quota owner requires the CLI to
+/// render, after consuming aggregated OpenAI and Gemini/Copilot pool counts.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum QuotaPoolSummarySection {
+    UsableNow,
+    FiveHour,
+    Weekly,
+    Main,
+    NoDataFiveHour,
+    NoDataWeekly,
+}
+
+pub fn quota_pool_summary_sections(
+    openai_profiles: usize,
+    main_profiles: usize,
+) -> Result<Vec<QuotaPoolSummarySection>, MojoError> {
+    let mut output = [-1_i64; 4];
+    let status = unsafe {
+        prodex_quota_pool_summary_sections_v1(
+            1,
+            i64::try_from(openai_profiles).map_err(|_| MojoError::InvalidInput)?,
+            i64::try_from(main_profiles).map_err(|_| MojoError::InvalidInput)?,
+            output.as_mut_ptr() as usize as u64,
+            i64::try_from(output.len()).map_err(|_| MojoError::InvalidInput)?,
+        )
+    };
+    match status {
+        0 => {}
+        1 => return Err(MojoError::InvalidInput),
+        4 => return Err(MojoError::AbiMismatch),
+        _ => return Err(MojoError::InvalidOutput),
+    }
+    // All section orders are fixed by the Mojo ABI; reject partial/unknown
+    // responses rather than silently choosing a Rust-side fallback layout.
+    match output {
+        [3, 1, 2, 3] => Ok(vec![
+            QuotaPoolSummarySection::UsableNow,
+            QuotaPoolSummarySection::FiveHour,
+            QuotaPoolSummarySection::Weekly,
+        ]),
+        [1, 4, 0, 0] => Ok(vec![QuotaPoolSummarySection::Main]),
+        [2, 5, 6, 0] => Ok(vec![
+            QuotaPoolSummarySection::NoDataFiveHour,
+            QuotaPoolSummarySection::NoDataWeekly,
+        ]),
+        _ => Err(MojoError::InvalidOutput),
+    }
+}
+
+#[cfg(test)]
+mod summary_section_tests {
+    use super::*;
+
+    #[test]
+    fn mojo_quota_pool_summary_selects_openai_main_or_missing_data_layout() {
+        use QuotaPoolSummarySection::*;
+        for (openai, main, expected) in [
+            (0, 0, vec![NoDataFiveHour, NoDataWeekly]),
+            (0, 5, vec![Main]),
+            (1, 0, vec![UsableNow, FiveHour, Weekly]),
+            (1, 5, vec![UsableNow, FiveHour, Weekly]),
+            (1025, 0, vec![UsableNow, FiveHour, Weekly]),
+            (0, 1025, vec![Main]),
+        ] {
+            assert_eq!(
+                quota_pool_summary_sections(openai, main).unwrap(),
+                expected,
+                "openai={openai} main={main}",
+            );
+        }
+    }
+
+    #[test]
+    fn mojo_quota_pool_summary_section_abi_rejects_invalid_inputs_without_writes() {
+        let mut output = [71_i64; 4];
+        let dest = output.as_mut_ptr() as usize as u64;
+        let call = |version, openai, main, out, capacity| unsafe {
+            prodex_quota_pool_summary_sections_v1(version, openai, main, out, capacity)
+        };
+        assert_eq!(call(2, 1, 0, dest, 4), 4);
+        assert_eq!(call(1, -1, 0, dest, 4), 1);
+        assert_eq!(call(1, 1, -1, dest, 4), 1);
+        assert_eq!(call(1, 1, 0, 0, 4), 1);
+        assert_eq!(call(1, 1, 0, dest, 3), 1);
+        assert_eq!(output, [71; 4]);
+    }
 }
 
 /// Aggregate normalized windows without imposing a profile-count cap.
