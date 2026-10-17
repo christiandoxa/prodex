@@ -171,6 +171,8 @@ const PING_SUMMARY_CALLER_TEST_FILE = "crates/prodex-app/src/app_commands/ping_t
 const PING_SUMMARY_ADAPTER_FILE = "crates/prodex-mojo-core/src/rich/ping_protocol.rs";
 const PING_SUMMARY_MOJO_FILE = "mojo/prodex_core/ping_protocol.mojo";
 const PROMOTED_FILES = [
+  "crates/prodex-mojo-core/src/rich/deepseek.rs",
+  "mojo/prodex_core/deepseek.mojo",
   "crates/prodex-app/src/runtime_proxy/smart_context/rewrite_telemetry.rs",
   "crates/prodex-app/tests/src/runtime_proxy/smart_context/static_context_extra/telemetry.rs",
   "crates/prodex-mojo-core/src/runtime_decisions/rewrite_safety.rs",
@@ -8255,6 +8257,42 @@ export function findViolations(files) {
     }
     return [];
   });
+  const deepseekRequestIssueMessageViolations = files.flatMap(([filePath, contents]) => {
+    if (filePath === DEEPSEEK_REQUEST_FILE) {
+      const required = [
+        "deepseek_request_issue_message(issue as i64, detail)",
+        "if !(1..=21).contains(&issue)",
+      ];
+      const retired = [
+        "match issue {",
+        "DeepSeek top_logprobs must be an integer",
+        "DeepSeek reasoning.effort must be a string",
+        "DeepSeek stop sequences must be strings",
+      ];
+      return required.every((marker) => contents.includes(marker)) &&
+        retired.every((marker) => !contents.includes(marker))
+        ? [] : [filePath + ": restored Rust DeepSeek request issue-to-message mapping"];
+    }
+    if (filePath === "crates/prodex-mojo-core/src/rich/deepseek.rs") {
+      return [
+        "fn prodex_deepseek_request_issue_message_v1(",
+        "pub fn deepseek_request_issue_message(",
+        "all_deepseek_request_rejection_reasons_are_compiled_mojo_owned",
+        "deepseek_issue_message_abi_rejects_invalid_modes_and_buffers_before_output",
+      ].filter((marker) => !contents.includes(marker))
+        .map((marker) => filePath + ": strict DeepSeek issue-message adapter or tests missing " + marker);
+    }
+    if (filePath === "mojo/prodex_core/deepseek.mojo") {
+      return [
+        '@export("prodex_deepseek_request_issue_message_v1")',
+        "DEEPSEEK_REQUEST_ISSUE_ABI_VERSION",
+        "deepseek_request_issue_append_literal(",
+        "rich_view_valid(detail,",
+      ].filter((marker) => !contents.includes(marker))
+        .map((marker) => filePath + ": compiled DeepSeek issue message owner missing " + marker);
+    }
+    return [];
+  });
   const smartContextTelemetrySampleViolations = files.flatMap(([filePath, contents]) => {
     if (filePath === "crates/prodex-app/src/runtime_proxy/smart_context/rewrite_telemetry.rs") {
       const required = [
@@ -8492,7 +8530,7 @@ export function findViolations(files) {
     }
     return [];
   });
-  return [...logPayloadProjectionViolations, ...nativeRecoveryOwnershipViolations, ...quotaRecoveryEligibilityViolations, ...runtimeBrokerReuseMojoViolations, ...geminiResponseMediaMojoViolations, ...cookieEvictionMojoViolations, ...websocketBudgetMojoViolations, ...affinityBindingMojoViolations, ...responsesCapacityRecoveryViolations, ...sseTapMojoOwnershipViolations, ...quotaWatchViolations, ...geminiCompactSnippetViolations, ...geminiCompactTextViolations, ...doctorSmartContextDecisionViolations, ...anthropicAttemptCursorViolations, ...geminiUnsupportedToolRetryViolations, ...terminalGeometryViolations, ...smartContextTelemetrySampleViolations, ...compatibilityDiagnosticsMojoViolations, ...quotaHeaderProjectionViolations, ...smartContextCapsuleOrderViolations, ...markerViolations, ...deepseekCatalogPolicyViolations, ...featureOffViolations, ...liveLogRecordViolations, ...runtimePolicyPresetViolations, ...runtimeConfigScalarViolations, ...profileHealthCircuitViolations, ...logThroughputViolations, ...operationalDetailSpecViolations, ...transcriptPolicyViolations, ...logLoadPolicyViolations, ...routeReasonViolations, ...runtimeStateQuotaViolations, ...runtimeStateRoutePolicyViolations, ...runtimeProxyRootViolations, ...runtimeRecoveryDeadlineViolations, ...brokerVersionGuardViolations, ...brokerContinuityViolations, ...brokerLogCacheViolations, ...codexConfigViolations, ...statePolicyViolations, ...quotaSelectionPolicyViolations, ...routeTagMirrorViolations, ...enumTagMirrorViolations, ...appSelectionPolicyMirrorViolations, ...runtimeStateBackgroundViolations, ...redactionViolations, ...rateLimitHeaderSelectionViolations, ...profileIdentityViolations, ...governanceInspectionViolations, ...governanceInspectionOrderingViolations, ...exactnessPlannerViolations,
+  return [...logPayloadProjectionViolations, ...nativeRecoveryOwnershipViolations, ...quotaRecoveryEligibilityViolations, ...runtimeBrokerReuseMojoViolations, ...geminiResponseMediaMojoViolations, ...cookieEvictionMojoViolations, ...websocketBudgetMojoViolations, ...affinityBindingMojoViolations, ...responsesCapacityRecoveryViolations, ...sseTapMojoOwnershipViolations, ...quotaWatchViolations, ...geminiCompactSnippetViolations, ...geminiCompactTextViolations, ...doctorSmartContextDecisionViolations, ...anthropicAttemptCursorViolations, ...geminiUnsupportedToolRetryViolations, ...terminalGeometryViolations, ...deepseekRequestIssueMessageViolations, ...smartContextTelemetrySampleViolations, ...compatibilityDiagnosticsMojoViolations, ...quotaHeaderProjectionViolations, ...smartContextCapsuleOrderViolations, ...markerViolations, ...deepseekCatalogPolicyViolations, ...featureOffViolations, ...liveLogRecordViolations, ...runtimePolicyPresetViolations, ...runtimeConfigScalarViolations, ...profileHealthCircuitViolations, ...logThroughputViolations, ...operationalDetailSpecViolations, ...transcriptPolicyViolations, ...logLoadPolicyViolations, ...routeReasonViolations, ...runtimeStateQuotaViolations, ...runtimeStateRoutePolicyViolations, ...runtimeProxyRootViolations, ...runtimeRecoveryDeadlineViolations, ...brokerVersionGuardViolations, ...brokerContinuityViolations, ...brokerLogCacheViolations, ...codexConfigViolations, ...statePolicyViolations, ...quotaSelectionPolicyViolations, ...routeTagMirrorViolations, ...enumTagMirrorViolations, ...appSelectionPolicyMirrorViolations, ...runtimeStateBackgroundViolations, ...redactionViolations, ...rateLimitHeaderSelectionViolations, ...profileIdentityViolations, ...governanceInspectionViolations, ...governanceInspectionOrderingViolations, ...exactnessPlannerViolations,
     ...adaptiveBudgetViolations,
     ...providerUsageViolations,
     ...auditUsageViolations,
@@ -9258,6 +9296,15 @@ function selfTest() {
   assert.match(findViolations([[ANTHROPIC_ATTEMPT_CURSOR_FILE,
     anthropicCursorConsumer + "\nattempt.model_index += 1",
   ]]).join("\n"), /Anthropic model\/auth cursor transitions must remain Mojo-owned/u);
+  const deepseekIssueMessageConsumer = [
+    "deepseek_responses_request_transform(",
+    "deepseek_request_issue_message(issue as i64, detail)",
+    "if !(1..=21).contains(&issue)",
+  ].join("\n");
+  assert.deepEqual(findViolations([[DEEPSEEK_REQUEST_FILE, deepseekIssueMessageConsumer]]), []);
+  assert.match(findViolations([[DEEPSEEK_REQUEST_FILE,
+    deepseekIssueMessageConsumer + "\nmatch issue {",
+  ]]).join("\n"), /restored Rust DeepSeek request issue-to-message mapping/u);
   const smartTelemetrySampleConsumer = [
     "smart_context_rewrite_sample_policy(",
     "SmartContextRewriteSamplePolicyInput",
@@ -10387,7 +10434,7 @@ function selfTest() {
     "fn transform() { DeepSeekKernelOperation::RawCommonRequest; }"]]).join("\n"),
     /must use the parsed-tree Mojo request kernel/u);
   assert.deepEqual(findViolations([[DEEPSEEK_REQUEST_FILE,
-    "fn transform() { deepseek_responses_request_transform(nodes, source); }\n#[cfg(test)] mod tests { DeepSeekKernelOperation::RawCommonRequest; }"]]), []);
+    "fn transform() { deepseek_responses_request_transform(nodes, source); deepseek_request_issue_message(issue as i64, detail); if !(1..=21).contains(&issue) {} }\n#[cfg(test)] mod tests { DeepSeekKernelOperation::RawCommonRequest; }"]]), []);
   assert.match(findViolations([["crates/prodex-provider-core/src/deepseek_bridge/request_params.rs",
     '#[cfg(not(feature = "mojo"))] fn validate_primitive_request_fields_rust() {}']]).join("\n"),
     /feature-off Rust path/u);

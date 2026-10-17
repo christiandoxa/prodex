@@ -5760,3 +5760,11 @@ a sample is eligible and whether it is safe. Reuse of the existing Mojo
 nine-signal quality-risk kernel removes the duplicated Rust quality OR logic
 and the Rust rewrite status/savings classifier. Versioned ABI, direct unit and
 real Smart Context caller tests guard exactly the same quality contract.
+
+## DeepSeek request issue diagnostics migrated to Mojo
+
+The compiled DeepSeek request owner now renders all 21 rejection reasons with
+stable user-facing wording, including dynamic response-format and reasoning
+details. The Rust issue-to-message match table was removed with no fallback.
+Versioned ABI, provider caller regressions and no-fallback guard coverage
+preserve diagnostics and malformed-input behavior.

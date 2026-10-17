@@ -6,7 +6,9 @@ use super::deepseek_passthrough_endpoint;
 use crate::mojo_json::Document;
 use crate::translator::{ProviderTransformInput, ProviderTransformResult};
 use crate::{ProviderEndpoint, ProviderId, ProviderWireFormat};
-use prodex_mojo_core::rich::deepseek_responses_request_transform;
+use prodex_mojo_core::rich::{
+    deepseek_request_issue_message, deepseek_responses_request_transform,
+};
 use serde_json::Value;
 
 struct DeepSeekRequestPlan {
@@ -55,62 +57,20 @@ fn deepseek_request_plan_from_responses(
         .get("issue")
         .and_then(Value::as_u64)
         .ok_or_else(|| "DeepSeek request plan omitted issue code".to_string())?;
-    match issue {
-        0 => {}
-        1 => {
-            return Err(
-                "DeepSeek does not expose a compatible parallel_tool_calls=false control"
-                    .to_string(),
-            );
-        }
-        2 => {
-            let detail = plan
-                .get("detail")
-                .and_then(Value::as_str)
-                .unwrap_or_default();
+    if issue != 0 {
+        // The compiled transform owns issue selection and its compiled message
+        // owner owns the diagnostic. Rust only checks unknown ABI tags.
+        if !(1..=21).contains(&issue) {
             return Err(format!(
-                "DeepSeek response_format type `{detail}` is not supported"
+                "DeepSeek request plan returned unknown issue code {issue}"
             ));
         }
-        3 => return Err("DeepSeek user_id must be a string".to_string()),
-        4 => {
-            return Err(
-                "DeepSeek user_id must use only letters, numbers, underscores, or dashes and be at most 512 bytes"
-                    .to_string(),
-            );
-        }
-        5 => return Err("DeepSeek reasoning must be an object".to_string()),
-        6 => {
-            let detail = plan
-                .get("detail")
-                .and_then(Value::as_str)
-                .unwrap_or_default();
-            return Err(format!(
-                "DeepSeek reasoning.{detail} is not supported by this Responses adapter"
-            ));
-        }
-        7 => return Err("DeepSeek reasoning.effort must be a string".to_string()),
-        8 => return Err("DeepSeek reasoning_effort must be a string".to_string()),
-        9 => return Err("DeepSeek reasoning effort is not supported".to_string()),
-        10 => return Err("DeepSeek temperature must be a number".to_string()),
-        11 => return Err("DeepSeek top_p must be a number".to_string()),
-        12 => return Err("DeepSeek max_output_tokens must be a positive integer".to_string()),
-        13 => return Err("DeepSeek max_tokens must be a positive integer".to_string()),
-        14 => {
-            return Err("DeepSeek max_completion_tokens must be a positive integer".to_string());
-        }
-        15 => return Err("DeepSeek logprobs must be a boolean".to_string()),
-        16 => return Err("DeepSeek top_logprobs must be an integer".to_string()),
-        17 => return Err("DeepSeek top_logprobs must be <= 20".to_string()),
-        18 => return Err("DeepSeek top_logprobs requires logprobs=true".to_string()),
-        19 => return Err("DeepSeek stop must be a string or array of strings".to_string()),
-        20 => return Err("DeepSeek supports at most 16 stop sequences".to_string()),
-        21 => return Err("DeepSeek stop sequences must be strings".to_string()),
-        other => {
-            return Err(format!(
-                "DeepSeek request plan returned unknown issue code {other}"
-            ));
-        }
+        let detail = plan
+            .get("detail")
+            .and_then(Value::as_str)
+            .unwrap_or_default();
+        return Err(deepseek_request_issue_message(issue as i64, detail)
+            .map_err(|error| format!("DeepSeek request issue rendering failed: {error:?}"))?);
     }
     let body = plan
         .get("body")

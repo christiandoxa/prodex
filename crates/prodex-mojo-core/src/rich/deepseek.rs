@@ -218,6 +218,15 @@ struct DeepSeekKernelFfiInput {
 const _: () = assert!(std::mem::size_of::<DeepSeekKernelFfiInput>() == 608);
 
 unsafe extern "C" {
+    fn prodex_deepseek_request_issue_message_v1(
+        abi_version: i64,
+        issue: i64,
+        detail_address: u64,
+        detail_length: i64,
+        output_address: u64,
+        output_capacity: i64,
+        written_address: u64,
+    ) -> i64;
     fn prodex_mojo_deepseek_kernel_v2(
         abi_version: i64,
         input: u64,
@@ -472,6 +481,37 @@ pub fn deepseek_responses_request_transform(
     .ok_or(MojoError::InvalidOutput)
 }
 
+/// Render the stable DeepSeek request rejection returned by its compiled
+/// issue classifier. Rust does not duplicate any issue-to-reason mapping.
+pub fn deepseek_request_issue_message(issue: i64, detail: &str) -> Result<String, MojoError> {
+    let capacity = detail.len().checked_add(256).ok_or(MojoError::Capacity)?;
+    let mut output = vec![0_u8; capacity];
+    let mut written = -1_i64;
+    let status = unsafe {
+        prodex_deepseek_request_issue_message_v1(
+            1,
+            issue,
+            detail.as_ptr() as usize as u64,
+            i64::try_from(detail.len()).map_err(|_| MojoError::InvalidInput)?,
+            output.as_mut_ptr() as usize as u64,
+            i64::try_from(capacity).map_err(|_| MojoError::InvalidInput)?,
+            (&mut written as *mut i64) as usize as u64,
+        )
+    };
+    match status {
+        0 => {}
+        1 => return Err(MojoError::InvalidInput),
+        3 => return Err(MojoError::Capacity),
+        4 => return Err(MojoError::AbiMismatch),
+        _ => return Err(MojoError::InvalidOutput),
+    }
+    let written = usize::try_from(written).map_err(|_| MojoError::InvalidOutput)?;
+    if written > output.len() {
+        return Err(MojoError::InvalidOutput);
+    }
+    String::from_utf8(output[..written].to_vec()).map_err(|_| MojoError::InvalidOutput)
+}
+
 /// Runs one bounded DeepSeek request, response, or stream JSON builder in Mojo.
 pub fn deepseek_kernel(input: DeepSeekKernelInput<'_>) -> Result<Vec<u8>, MojoError> {
     ensure_rich_abi()?;
@@ -597,6 +637,119 @@ mod tests {
         assert_eq!(
             kernel_output_capacity(DeepSeekKernelOperation::UserId, DEEPSEEK_KERNEL_MAX_BYTES),
             Ok(514)
+        );
+    }
+}
+
+#[cfg(test)]
+mod request_issue_message_tests {
+    use super::*;
+
+    #[test]
+    fn all_deepseek_request_rejection_reasons_are_compiled_mojo_owned() {
+        let fixtures = [
+            (
+                1,
+                "DeepSeek does not expose a compatible parallel_tool_calls=false control",
+            ),
+            (2, "DeepSeek response_format type `` is not supported"),
+            (3, "DeepSeek user_id must be a string"),
+            (
+                4,
+                "DeepSeek user_id must use only letters, numbers, underscores, or dashes and be at most 512 bytes",
+            ),
+            (5, "DeepSeek reasoning must be an object"),
+            (
+                6,
+                "DeepSeek reasoning. is not supported by this Responses adapter",
+            ),
+            (7, "DeepSeek reasoning.effort must be a string"),
+            (8, "DeepSeek reasoning_effort must be a string"),
+            (9, "DeepSeek reasoning effort is not supported"),
+            (10, "DeepSeek temperature must be a number"),
+            (11, "DeepSeek top_p must be a number"),
+            (12, "DeepSeek max_output_tokens must be a positive integer"),
+            (13, "DeepSeek max_tokens must be a positive integer"),
+            (
+                14,
+                "DeepSeek max_completion_tokens must be a positive integer",
+            ),
+            (15, "DeepSeek logprobs must be a boolean"),
+            (16, "DeepSeek top_logprobs must be an integer"),
+            (17, "DeepSeek top_logprobs must be <= 20"),
+            (18, "DeepSeek top_logprobs requires logprobs=true"),
+            (19, "DeepSeek stop must be a string or array of strings"),
+            (20, "DeepSeek supports at most 16 stop sequences"),
+            (21, "DeepSeek stop sequences must be strings"),
+        ];
+        for (code, expected) in fixtures {
+            assert_eq!(
+                deepseek_request_issue_message(code, "").unwrap(),
+                expected,
+                "{code}"
+            );
+        }
+        assert_eq!(
+            deepseek_request_issue_message(2, "json_schema").unwrap(),
+            "DeepSeek response_format type `json_schema` is not supported",
+        );
+        assert_eq!(
+            deepseek_request_issue_message(6, "foo.東京🧭").unwrap(),
+            "DeepSeek reasoning.foo.東京🧭 is not supported by this Responses adapter",
+        );
+    }
+
+    #[test]
+    fn deepseek_issue_message_abi_rejects_invalid_modes_and_buffers_before_output() {
+        let detail = b"json_schema";
+        let source = detail.as_ptr() as usize as u64;
+        let mut output = [81_u8; 128];
+        let mut written = 91_i64;
+        let target = output.as_mut_ptr() as usize as u64;
+        let count = (&mut written as *mut i64) as usize as u64;
+        let call = |version, issue, source_ptr, length, out, capacity, count_ptr| unsafe {
+            prodex_deepseek_request_issue_message_v1(
+                version, issue, source_ptr, length, out, capacity, count_ptr,
+            )
+        };
+        assert_eq!(call(2, 1, source, 11, target, 128, count), 4);
+        assert_eq!(call(1, 0, source, 11, target, 128, count), 1);
+        assert_eq!(call(1, 22, source, 11, target, 128, count), 1);
+        assert_eq!(call(1, 2, 0, 11, target, 128, count), 1);
+        assert_eq!(call(1, 2, source, -1, target, 128, count), 1);
+        assert_eq!(call(1, 2, source, 11, 0, 128, count), 1);
+        assert_eq!(call(1, 2, source, 11, target, 128, 0), 1);
+        let invalid = [0xff_u8];
+        assert_eq!(
+            call(
+                1,
+                2,
+                invalid.as_ptr() as usize as u64,
+                1,
+                target,
+                128,
+                count
+            ),
+            1
+        );
+        assert_eq!(output, [81; 128]);
+        assert_eq!(written, 91);
+        assert_eq!(
+            deepseek_request_issue_message(0, ""),
+            Err(MojoError::InvalidInput)
+        );
+        let mut tiny = [0_u8; 1];
+        assert_eq!(
+            call(
+                1,
+                1,
+                source,
+                11,
+                tiny.as_mut_ptr() as usize as u64,
+                1,
+                count
+            ),
+            3
         );
     }
 }

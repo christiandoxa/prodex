@@ -6692,3 +6692,115 @@ def deepseek_responses_history_contains_call_id(
         else:
             return False
     return deepseek_put_literal(writer, StringSlice("false"))
+# The Responses request planner owns the issue code; this compiled owner also
+# provides its exact stable user-facing rejection text. Rust only carries the
+# diagnostic, never mirrors the issue-to-message policy.
+comptime DEEPSEEK_REQUEST_ISSUE_ABI_VERSION: Int64 = 1
+
+
+def deepseek_request_issue_append_literal(
+    output: Pointer[mut=True, UInt8, _],
+    capacity: Int64,
+    written: Pointer[mut=True, Int64, _],
+    literal: StringSlice,
+) -> Bool:
+    var length = Int64(literal.byte_length())
+    if length > capacity - written[]:
+        return False
+    var ptr = literal.unsafe_ptr()
+    for index in range(length):
+        output[unsafe_offset=written[]] = ptr[unsafe_offset=index]
+        written[] += 1
+    return True
+
+
+@export("prodex_deepseek_request_issue_message_v1")
+def prodex_deepseek_request_issue_message_v1(
+    abi_version: Int64,
+    issue: Int64,
+    detail_address: UInt,
+    detail_length: Int64,
+    output_address: UInt,
+    output_capacity: Int64,
+    written_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != DEEPSEEK_REQUEST_ISSUE_ABI_VERSION:
+        return 4
+    if (
+        issue < 1 or issue > 21 or detail_length < 0
+        or (detail_length > 0 and detail_address == 0)
+        or output_address == 0 or written_address == 0
+        or output_capacity < 0
+    ):
+        return 1
+    var detail = ProdexRichStringView(detail_address, UInt(detail_length))
+    if not rich_view_valid(detail, 0x7FFFFFFFFFFFFFFF):
+        return 1
+    var literal = StringSlice("")
+    var prefix = StringSlice("")
+    var suffix = StringSlice("")
+    if issue == 1:
+        literal = StringSlice("DeepSeek does not expose a compatible parallel_tool_calls=false control")
+    elif issue == 2:
+        prefix = StringSlice("DeepSeek response_format type `")
+        suffix = StringSlice("` is not supported")
+    elif issue == 3:
+        literal = StringSlice("DeepSeek user_id must be a string")
+    elif issue == 4:
+        literal = StringSlice("DeepSeek user_id must use only letters, numbers, underscores, or dashes and be at most 512 bytes")
+    elif issue == 5:
+        literal = StringSlice("DeepSeek reasoning must be an object")
+    elif issue == 6:
+        prefix = StringSlice("DeepSeek reasoning.")
+        suffix = StringSlice(" is not supported by this Responses adapter")
+    elif issue == 7:
+        literal = StringSlice("DeepSeek reasoning.effort must be a string")
+    elif issue == 8:
+        literal = StringSlice("DeepSeek reasoning_effort must be a string")
+    elif issue == 9:
+        literal = StringSlice("DeepSeek reasoning effort is not supported")
+    elif issue == 10:
+        literal = StringSlice("DeepSeek temperature must be a number")
+    elif issue == 11:
+        literal = StringSlice("DeepSeek top_p must be a number")
+    elif issue == 12:
+        literal = StringSlice("DeepSeek max_output_tokens must be a positive integer")
+    elif issue == 13:
+        literal = StringSlice("DeepSeek max_tokens must be a positive integer")
+    elif issue == 14:
+        literal = StringSlice("DeepSeek max_completion_tokens must be a positive integer")
+    elif issue == 15:
+        literal = StringSlice("DeepSeek logprobs must be a boolean")
+    elif issue == 16:
+        literal = StringSlice("DeepSeek top_logprobs must be an integer")
+    elif issue == 17:
+        literal = StringSlice("DeepSeek top_logprobs must be <= 20")
+    elif issue == 18:
+        literal = StringSlice("DeepSeek top_logprobs requires logprobs=true")
+    elif issue == 19:
+        literal = StringSlice("DeepSeek stop must be a string or array of strings")
+    elif issue == 20:
+        literal = StringSlice("DeepSeek supports at most 16 stop sequences")
+    else:
+        literal = StringSlice("DeepSeek stop sequences must be strings")
+    var output = Pointer[mut=True, UInt8, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    var written = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(written_address)
+    )
+    written[] = 0
+    if not deepseek_request_issue_append_literal(output, output_capacity, written, prefix):
+        return 3
+    if issue == 2 or issue == 6:
+        if detail_length > output_capacity - written[]:
+            return 3
+        var source = rich_view_ptr(detail)
+        for index in range(detail_length):
+            output[unsafe_offset=written[]] = source[unsafe_offset=index]
+            written[] += 1
+    if not deepseek_request_issue_append_literal(output, output_capacity, written, suffix):
+        return 3
+    if not deepseek_request_issue_append_literal(output, output_capacity, written, literal):
+        return 3
+    return 0
