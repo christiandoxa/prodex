@@ -737,11 +737,28 @@ fn compact_capacity_saturation_retries_across_epoch_until_profile_relieves() {
     let released_guard = second_guards
         .pop()
         .expect("one compact permit should be releasable");
+    let log_path = harness.shared().log_path.clone();
     let release = thread::spawn(move || {
-        // Test builds use a 1.5s capacity epoch. Crossing two historical epochs proves
-        // local saturation is backpressure rather than a terminal deadline.
-        thread::sleep(Duration::from_millis(3_200));
+        // Slow Windows setup can consume a fixed sleep before capacity waiting
+        // even begins. Release only after this request crosses two real epochs.
+        let deadline = Instant::now() + Duration::from_secs(20);
+        let observed_epochs = loop {
+            let log = read_runtime_proxy_test_log(&log_path);
+            if log
+                .matches("local_capacity_wait_continued route=compact request=44 ")
+                .count()
+                >= 2
+            {
+                break true;
+            }
+            if Instant::now() >= deadline {
+                break false;
+            }
+            thread::sleep(Duration::from_millis(10));
+        };
+        // Rescue a broken waiter before asserting, so failures leave no thread.
         drop(released_guard);
+        observed_epochs
     });
     let request = RuntimeProxyRequest {
         method: "POST".to_string(),
@@ -750,7 +767,9 @@ fn compact_capacity_saturation_retries_across_epoch_until_profile_relieves() {
         body: br#"{"input":[],"instructions":"compact"}"#.to_vec(),
     };
 
-    let response = proxy_runtime_standard_request(44, &request, harness.shared())
+    let response = proxy_runtime_standard_request(44, &request, harness.shared());
+    let observed_epochs = release.join().expect("compact permit release should finish");
+    let response = response
         .expect("quota-positive compact request should survive local capacity epochs");
     let (status, body) = tiny_http_response_status_and_body(response);
     let log = read_runtime_proxy_test_log(&harness.shared().log_path);
@@ -765,8 +784,11 @@ fn compact_capacity_saturation_retries_across_epoch_until_profile_relieves() {
         "the relieved profile should serve the compact request"
     );
     assert!(
-        log.contains("local_capacity_wait_continued")
-            && log.contains("route=compact")
+        observed_epochs
+            && log
+                .matches("local_capacity_wait_continued route=compact request=44 ")
+                .count()
+                >= 2
             && log.contains("mode=backpressure"),
         "the request must keep waiting across old bounded capacity epochs: {log}"
     );
@@ -777,9 +799,6 @@ fn compact_capacity_saturation_retries_across_epoch_until_profile_relieves() {
         "local capacity saturation must not leak while a profile still has quota: {body}"
     );
 
-    release
-        .join()
-        .expect("compact permit release should finish");
     drop(main_guards);
     drop(second_guards);
 }
