@@ -5752,3 +5752,11 @@ flag text, Unicode-trimmed User-Agent display, and ASCII-safe log value text
 through the compiled Mojo owner. Duplicate Rust joining and Unicode scalar
 sanitization were deleted without a fallback. Versioned ABI, runtime proxy
 caller, and explicit no-fallback guard coverage preserve the output contract.
+
+## Smart Context rewrite telemetry sample selection moved to Mojo
+
+The production rewrite telemetry consumer now uses compiled Mojo for whether
+a sample is eligible and whether it is safe. Reuse of the existing Mojo
+nine-signal quality-risk kernel removes the duplicated Rust quality OR logic
+and the Rust rewrite status/savings classifier. Versioned ABI, direct unit and
+real Smart Context caller tests guard exactly the same quality contract.

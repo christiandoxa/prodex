@@ -88,3 +88,140 @@ fn mojo_rewrite_quality_risk_rejects_corrupt_ffi_values_without_output() {
     }
     assert_eq!(decision, -7);
 }
+
+#[test]
+fn compiled_rewrite_sample_policy_owns_inclusion_safety_and_quality() {
+    let clean = SmartContextRewriteQualityInput::default();
+    let input = |rewrite_kind, status, fallback, tokens_before, tokens_after, quality| {
+        SmartContextRewriteSamplePolicyInput {
+            rewrite_kind,
+            status,
+            fallback,
+            tokens_before,
+            tokens_after,
+            quality,
+        }
+    };
+    for (kind, status, fallback, before, after, expected) in [
+        ("untouched", "unknown", false, 100, 50, None),
+        ("untouched", "unknown", true, 100, 50, Some(false)),
+        ("rewritten", "ok_saved", false, 100, 50, Some(true)),
+        ("minified", "ok_minified", false, 100, 50, Some(true)),
+        (
+            "rewritten",
+            "ok_surgical_rehydrate",
+            false,
+            100,
+            50,
+            Some(true),
+        ),
+        ("rewritten", "failed", false, 100, 50, Some(false)),
+        ("untouched", "ok_saved", false, 100, 50, Some(false)),
+        ("rewritten", "ok_saved", false, 100, 100, Some(false)),
+        ("rewritten", "ok_saved", false, 100, 120, Some(false)),
+        ("rewritten", "ok_saved", true, 100, 50, Some(false)),
+        ("rewritten ", "ok_saved", false, 100, 50, Some(false)),
+        ("rewritten", " ok_saved", false, 100, 50, Some(false)),
+        ("rewrite-🧭", "fail", false, 100, 50, None),
+    ] {
+        assert_eq!(
+            smart_context_rewrite_sample_policy(input(
+                kind, status, fallback, before, after, clean
+            )),
+            Ok(expected),
+            "{kind:?}/{status:?}/{fallback}/{before}/{after}",
+        );
+    }
+    for quality in [
+        SmartContextRewriteQualityInput {
+            upstream_context_errors: 1,
+            ..clean
+        },
+        SmartContextRewriteQualityInput {
+            invalid_tool_call_continuation: true,
+            ..clean
+        },
+        SmartContextRewriteQualityInput {
+            model_reread_requests: 1,
+            ..clean
+        },
+        SmartContextRewriteQualityInput {
+            task_completed: Some(false),
+            ..clean
+        },
+    ] {
+        assert_eq!(
+            smart_context_rewrite_sample_policy(input(
+                "rewritten",
+                "ok_saved",
+                false,
+                100,
+                50,
+                quality
+            )),
+            Ok(Some(false)),
+            "{quality:?}",
+        );
+    }
+}
+
+#[test]
+fn compiled_rewrite_sample_policy_strict_abi_rejects_invalid_inputs_without_writes() {
+    let kind = b"rewritten";
+    let status = b"ok_saved";
+    let metrics = [0_i64; 9];
+    let mut output = [88_i64; 3];
+    let k = kind.as_ptr() as usize as u64;
+    let v = status.as_ptr() as usize as u64;
+    let m = metrics.as_ptr() as usize as u64;
+    let o = output.as_mut_ptr() as usize as u64;
+    let call = |version,
+                kind_addr,
+                kind_len,
+                status_len,
+                fallback,
+                metrics_addr,
+                metrics_count,
+                out,
+                capacity| unsafe {
+        prodex_smart_context_rewrite_sample_policy_v1(
+            version,
+            kind_addr,
+            kind_len,
+            v,
+            status_len,
+            fallback,
+            100,
+            50,
+            metrics_addr,
+            metrics_count,
+            out,
+            capacity,
+        )
+    };
+    assert_eq!(call(2, k, 9, 8, 0, m, 9, o, 3), 4);
+    assert_eq!(call(1, 0, 9, 8, 0, m, 9, o, 3), 1);
+    assert_eq!(call(1, k, -1, 8, 0, m, 9, o, 3), 1);
+    assert_eq!(call(1, k, 9, -1, 0, m, 9, o, 3), 1);
+    assert_eq!(call(1, k, 9, 8, 2, m, 9, o, 3), 1);
+    assert_eq!(call(1, k, 9, 8, 0, 0, 9, o, 3), 1);
+    assert_eq!(call(1, k, 9, 8, 0, m, 8, o, 3), 1);
+    assert_eq!(call(1, k, 9, 8, 0, m, 9, o, 2), 1);
+    assert_eq!(call(1, k, 9, 8, 0, m, 9, 0, 3), 1);
+    let invalid_utf8 = [0xff_u8];
+    assert_eq!(
+        call(
+            1,
+            invalid_utf8.as_ptr() as usize as u64,
+            1,
+            8,
+            0,
+            m,
+            9,
+            o,
+            3
+        ),
+        1
+    );
+    assert_eq!(output, [88; 3]);
+}

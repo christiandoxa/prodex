@@ -50,21 +50,34 @@ fn runtime_smart_context_rewrite_telemetry_sample(
     record: &RuntimeSmartContextRewriteTelemetryRecord,
 ) -> Option<runtime_proxy_crate::SmartContextRewriteTelemetrySample> {
     let fallback = record.fallback_reason.is_some();
-    let potentially_rewritten = matches!(record.rewrite_kind.as_str(), "rewritten" | "minified")
-        || matches!(
-            record.status.as_str(),
-            "ok_saved" | "ok_surgical_rehydrate" | "ok_minified"
-        );
-    if !fallback && !potentially_rewritten {
-        return None;
-    }
+    let safe = prodex_mojo_core::runtime_decisions::smart_context_rewrite_sample_policy(
+        prodex_mojo_core::runtime_decisions::SmartContextRewriteSamplePolicyInput {
+            rewrite_kind: &record.rewrite_kind,
+            status: &record.status,
+            fallback,
+            tokens_before: record.tokens_before,
+            tokens_after: record.tokens_after,
+            quality: prodex_mojo_core::runtime_decisions::SmartContextRewriteQualityInput {
+                upstream_context_errors: record.upstream_context_errors,
+                previous_response_not_found: record.previous_response_not_found,
+                invalid_tool_call_continuation: record.invalid_tool_call_continuation,
+                missing_artifact_requests: record.missing_artifact_requests,
+                repeated_tool_call_count: record.repeated_tool_call_count,
+                model_reread_requests: record.model_reread_requests,
+                corrective_user_messages: record.corrective_user_messages,
+                test_or_build_failed_after_rewrite: record.test_or_build_failed_after_rewrite,
+                task_completed: record.task_completed,
+            },
+        },
+    )
+    .expect("compiled Mojo Smart Context rewrite telemetry policy failed")?;
     Some(runtime_proxy_crate::SmartContextRewriteTelemetrySample {
         body_bytes_before: record.body_bytes_before,
         body_bytes_after: record.body_bytes_after,
         tokens_before: record.tokens_before,
         tokens_after: record.tokens_after,
         token_count_source: record.token_count_source,
-        safe: runtime_smart_context_rewrite_telemetry_record_safe_saved(record),
+        safe,
         fallback,
         upstream_context_errors: record.upstream_context_errors,
         previous_response_not_found: record.previous_response_not_found,
@@ -78,33 +91,6 @@ fn runtime_smart_context_rewrite_telemetry_sample(
         additional_turns_before_task_completion: record.additional_turns_before_task_completion,
         final_total_input_tokens: record.final_total_input_tokens,
     })
-}
-
-fn runtime_smart_context_rewrite_telemetry_record_safe_saved(
-    record: &RuntimeSmartContextRewriteTelemetryRecord,
-) -> bool {
-    record.fallback_reason.is_none()
-        && !runtime_smart_context_rewrite_telemetry_record_quality_risk(record)
-        && matches!(record.rewrite_kind.as_str(), "rewritten" | "minified")
-        && matches!(
-            record.status.as_str(),
-            "ok_saved" | "ok_surgical_rehydrate" | "ok_minified"
-        )
-        && record.tokens_after < record.tokens_before
-}
-
-fn runtime_smart_context_rewrite_telemetry_record_quality_risk(
-    record: &RuntimeSmartContextRewriteTelemetryRecord,
-) -> bool {
-    record.upstream_context_errors > 0
-        || record.previous_response_not_found
-        || record.invalid_tool_call_continuation
-        || record.missing_artifact_requests > 0
-        || record.repeated_tool_call_count > 0
-        || record.model_reread_requests > 0
-        || record.corrective_user_messages > 0
-        || record.test_or_build_failed_after_rewrite
-        || record.task_completed == Some(false)
 }
 
 pub(super) struct RuntimeSmartContextLogInput<'a> {

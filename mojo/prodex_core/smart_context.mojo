@@ -1493,6 +1493,29 @@ def prodex_smart_context_rewrite_telemetry_decision_v1(
 # Input columns: context_errors, missing_previous, invalid_continuation,
 # missing_artifacts, repeated_calls, model_rereads, corrective_messages,
 # failed_build, completion_state (0 unknown, 1 false, 2 true).
+def smart_context_rewrite_quality_metrics_valid(
+    metrics: Pointer[mut=False, Int64, _],
+) -> Bool:
+    for index in range(9):
+        var value = metrics[unsafe_offset=index]
+        if value < 0:
+            return False
+        if (index == 1 or index == 2 or index == 7) and value > 1:
+            return False
+        if index == 8 and value > 2:
+            return False
+    return True
+
+
+def smart_context_rewrite_quality_metrics_risky(
+    metrics: Pointer[mut=False, Int64, _],
+) -> Bool:
+    for index in range(8):
+        if metrics[unsafe_offset=index] > 0:
+            return True
+    return metrics[unsafe_offset=8] == 1
+
+
 @export("prodex_smart_context_rewrite_quality_risk_v1")
 def prodex_smart_context_rewrite_quality_risk_v1(
     metrics_address: UInt,
@@ -1504,26 +1527,76 @@ def prodex_smart_context_rewrite_quality_risk_v1(
     var metrics = Pointer[mut=False, Int64, ImmUntrackedOrigin](
         unsafe_from_address=Int(metrics_address)
     )
-    for index in range(9):
-        var value = metrics[unsafe_offset=index]
-        if value < 0:
-            return 1
-        if (index == 1 or index == 2 or index == 7) and value > 1:
-            return 1
-        if index == 8 and value > 2:
-            return 1
-    var risk = False
-    for index in range(8):
-        if metrics[unsafe_offset=index] > 0:
-            risk = True
-            break
-    if metrics[unsafe_offset=8] == 1:
-        risk = True
+    if not smart_context_rewrite_quality_metrics_valid(metrics):
+        return 1
     var result = Pointer[mut=True, Int64, MutUntrackedOrigin](
         unsafe_from_address=Int(output_address)
     )
-    result[] = Int64(risk)
+    result[] = Int64(smart_context_rewrite_quality_metrics_risky(metrics))
     return 0
+
+
+# The live telemetry caller passes facts; Mojo alone decides whether a sample
+# is relevant and whether it was a verified, risk-free token-saving rewrite.
+# The same nine-field quality metric contract is used by the budget owner.
+@export("prodex_smart_context_rewrite_sample_policy_v1")
+def prodex_smart_context_rewrite_sample_policy_v1(
+    abi_version: Int64,
+    kind_address: UInt,
+    kind_length: Int64,
+    status_address: UInt,
+    status_length: Int64,
+    fallback: Int64,
+    tokens_before: UInt64,
+    tokens_after: UInt64,
+    metrics_address: UInt,
+    metric_count: Int64,
+    output_address: UInt,
+    output_capacity: Int64,
+) abi("C") -> Int64:
+    if abi_version != 1:
+        return 4
+    if (
+        kind_length < 0 or status_length < 0
+        or (kind_length > 0 and kind_address == 0)
+        or (status_length > 0 and status_address == 0)
+        or (fallback != 0 and fallback != 1)
+        or metrics_address == 0 or metric_count != 9
+        or output_address == 0 or output_capacity < 3
+    ):
+        return 1
+    var kind = ProdexRichStringView(kind_address, UInt(kind_length))
+    var status = ProdexRichStringView(status_address, UInt(status_length))
+    if not rich_view_valid(kind, 0x7FFFFFFFFFFFFFFF) or not rich_view_valid(status, 0x7FFFFFFFFFFFFFFF):
+        return 1
+    var metrics = Pointer[mut=False, Int64, ImmUntrackedOrigin](
+        unsafe_from_address=Int(metrics_address)
+    )
+    if not smart_context_rewrite_quality_metrics_valid(metrics):
+        return 1
+    var rewritten = (
+        rich_view_matches_literal["rewritten"](kind, False)
+        or rich_view_matches_literal["minified"](kind, False)
+    )
+    var success = (
+        rich_view_matches_literal["ok_saved"](status, False)
+        or rich_view_matches_literal["ok_surgical_rehydrate"](status, False)
+        or rich_view_matches_literal["ok_minified"](status, False)
+    )
+    var include_sample = fallback == 1 or rewritten or success
+    var quality_risk = smart_context_rewrite_quality_metrics_risky(metrics)
+    var safe = (
+        include_sample and fallback == 0 and not quality_risk
+        and rewritten and success and tokens_after < tokens_before
+    )
+    var output = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    output[unsafe_offset=0] = Int64(include_sample)
+    output[unsafe_offset=1] = Int64(safe)
+    output[unsafe_offset=2] = Int64(quality_risk)
+    return 0
+
 
 # Enforce Smart Context's structural JSON safety contract in Mojo.
 # The host enumerates serde-owned nodes in the original LIFO traversal
