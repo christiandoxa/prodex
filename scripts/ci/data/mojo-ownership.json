@@ -937,7 +937,8 @@
           "gemini_response_media_projection",
           "gemini_response_id_conformance",
           "gemini_response_envelope_normalization",
-          "gemini_response_parts_aggregation"
+          "gemini_response_parts_aggregation",
+          "deepseek_supported_parameter_report"
         ]
       },
       {
@@ -10674,6 +10675,33 @@
       "duplicate_production_owner": false,
       "platform_fallback": false,
       "rust_adapter_scope": "model gate, borrowed body marshalling, envelope decoding, and caller-owned byte replacement"
+    },
+    {
+      "name": "deepseek_supported_parameter_report",
+      "domain": "provider/deepseek",
+      "introduced_in": "0.438.0",
+      "baseline_state": "Rust assembled the DeepSeek translator supported-parameter report and provider-specific reason strings",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_mojo_openai_compat_kernel_v1",
+      "mojo_abi_version": 6,
+      "mojo_operation_ids": {
+        "parameter_support": 2
+      },
+      "mojo_source": "mojo/prodex_core/rich_abi.mojo",
+      "mojo_semantic_source": "mojo/prodex_core/openai_compat.mojo",
+      "consumer": "crates/prodex-provider-core/src/translators/deepseek/supported_params.rs",
+      "consumer_marker": "openai_compat_supported_params",
+      "production_consumers": [
+        "crates/prodex-provider-core/src/translators/deepseek/supported_params.rs"
+      ],
+      "production_reachability_test": "crates/prodex-provider-core/src/translators/deepseek/supported_params.rs",
+      "rust_owner_before": "Rust selected the five DeepSeek unsupported fields and assembled stable provider-specific reason strings",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "Former Rust unsupported-parameter list removed; focused caller expectations preserve field order and exact reasons",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "endpoint capability gating, typed Mojo report decoding, and stable ProviderParamSupport mapping"
     },
     {
       "name": "deepseek_response_tool_call_argument_validation",

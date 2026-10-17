@@ -266,6 +266,48 @@ def openai_compat_put_parameter(
     )
 
 
+def openai_compat_provider_is_deepseek(provider: ProdexRichStringView) -> Bool:
+    return rich_view_matches_literal['DeepSeek'](provider, False)
+
+
+def openai_compat_write_deepseek_parameters(
+    writer: Pointer[mut=True, OpenAiCompatWriter, _],
+    provider: ProdexRichStringView,
+) -> Bool:
+    return (
+        openai_compat_put_parameter(
+            writer,
+            provider,
+            StringSlice('parallel_tool_calls=false'),
+            StringSlice(' does not expose a compatible parallel tool disable control'),
+        )
+        and openai_compat_put_parameter(
+            writer,
+            provider,
+            StringSlice('web_search_options'),
+            StringSlice(' v1 translator does not map Responses web search options'),
+        )
+        and openai_compat_put_parameter(
+            writer,
+            provider,
+            StringSlice('safety_identifier'),
+            StringSlice(' v1 translator does not forward Responses safety_identifier'),
+        )
+        and openai_compat_put_parameter(
+            writer,
+            provider,
+            StringSlice('tools[type!=function]'),
+            StringSlice(' v1 translator only forwards plain function tools on Responses'),
+        )
+        and openai_compat_put_parameter(
+            writer,
+            provider,
+            StringSlice('input[*].content[type!=text]'),
+            StringSlice(' v1 translator does not translate multimodal Responses input'),
+        )
+    )
+
+
 def openai_compat_reject(
     writer: Pointer[mut=True, OpenAiCompatWriter, _],
     input: ProdexOpenAiCompatKernelInput,
@@ -282,6 +324,8 @@ def openai_compat_write_parameters(
     writer: Pointer[mut=True, OpenAiCompatWriter, _],
     provider: ProdexRichStringView,
 ) -> Bool:
+    if openai_compat_provider_is_deepseek(provider):
+        return openai_compat_write_deepseek_parameters(writer, provider)
     return (
         openai_compat_put_parameter(writer, provider, StringSlice('input[*].content[type!=text]'), StringSlice(' Responses chat-compat currently translates only text input content'))
         and openai_compat_put_parameter(writer, provider, StringSlice('response_format.type'), StringSlice(' Responses chat-compat does not translate response_format controls'))
