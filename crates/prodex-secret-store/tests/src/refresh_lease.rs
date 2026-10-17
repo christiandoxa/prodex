@@ -314,18 +314,90 @@ fn refresh_lease_heartbeat_keeps_long_running_owner_live() {
 
 #[test]
 fn concurrent_refresh_leases_keep_single_owner_past_ttl() {
+    use std::sync::{Arc, Barrier, mpsc};
+
+    let _heartbeat_test_lock = lock_heartbeat_test_state();
+    const FOLLOWERS: usize = 7;
+    let lease_ttl = Duration::from_millis(200);
+    let root = temp_dir("refresh-lease-live-concurrency");
+    let coordinator = Arc::new(
+        RefreshLeaseCoordinator::new(&root)
+            .with_lease_ttl(lease_ttl)
+            .with_wait_timeout(Duration::from_secs(10))
+            .with_poll_interval(Duration::from_millis(10)),
+    );
+    let sensitive_key = "concurrent-heartbeat-refresh-token";
+    let owner = match coordinator.acquire(sensitive_key).unwrap() {
+        RefreshLeaseDecision::Owner(owner) => owner,
+        other => panic!("expected established owner, got {other:?}"),
+    };
+    let barrier = Arc::new(Barrier::new(FOLLOWERS + 1));
+    let (observed, receipts) = mpsc::channel();
+
+    let roles = std::thread::scope(|scope| {
+        let handles = (0..FOLLOWERS)
+            .map(|_| {
+                let coordinator = Arc::clone(&coordinator);
+                let barrier = Arc::clone(&barrier);
+                let observed = observed.clone();
+                scope.spawn(move || {
+                    barrier.wait();
+                    // Every contender must observe the live owner after its
+                    // original TTL, before the result is allowed to publish.
+                    let probe = (*coordinator).clone().with_wait_timeout(Duration::ZERO);
+                    assert!(matches!(
+                        probe.acquire(sensitive_key).unwrap(),
+                        RefreshLeaseDecision::Bypass {
+                            reason: RefreshLeaseBypassReason::WaitTimeout
+                        }
+                    ));
+                    observed.send(()).unwrap();
+                    match coordinator.acquire(sensitive_key).unwrap() {
+                        RefreshLeaseDecision::Follower { result_json } => {
+                            assert_eq!(
+                                result_json.as_str(),
+                                "{\"access_token\":\"shared-result\"}"
+                            );
+                            RefreshLeaseRole::Follower
+                        }
+                        other => panic!("live lease must yield its committed result: {other:?}"),
+                    }
+                })
+            })
+            .collect::<Vec<_>>();
+        std::thread::sleep(lease_ttl * 3);
+        barrier.wait();
+        for _ in 0..FOLLOWERS {
+            receipts
+                .recv_timeout(Duration::from_secs(10))
+                .expect("each contender must acknowledge the existing live owner");
+        }
+        owner
+            .commit_result("{\"access_token\":\"shared-result\"}")
+            .unwrap();
+        handles
+            .into_iter()
+            .map(|worker| worker.join().expect("lease follower should finish"))
+            .collect::<Vec<_>>()
+    });
+    assert_eq!(roles, vec![RefreshLeaseRole::Follower; FOLLOWERS]);
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn concurrent_refresh_lease_initial_election_has_one_owner_and_followers() {
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::{Arc, Barrier};
 
     let _heartbeat_test_lock = lock_heartbeat_test_state();
     const WORKERS: usize = 8;
-    let lease_ttl = Duration::from_millis(200);
-    let root = temp_dir("refresh-lease-concurrency");
+    let root = temp_dir("refresh-lease-initial-election");
+    // Initial election uses the normal lease TTL: filesystem hardening and
+    // durable record creation are not the active-owner heartbeat scenario.
     let coordinator = Arc::new(
         RefreshLeaseCoordinator::new(&root)
-            .with_lease_ttl(lease_ttl)
-            .with_wait_timeout(Duration::from_secs(2))
-            .with_poll_interval(Duration::from_millis(1)),
+            .with_wait_timeout(Duration::from_secs(10))
+            .with_poll_interval(Duration::from_millis(10)),
     );
     let barrier = Arc::new(Barrier::new(WORKERS));
     let owners = Arc::new(AtomicUsize::new(0));
@@ -342,7 +414,7 @@ fn concurrent_refresh_leases_keep_single_owner_past_ttl() {
                     match coordinator.acquire(sensitive_key).unwrap() {
                         RefreshLeaseDecision::Owner(owner) => {
                             owners.fetch_add(1, Ordering::SeqCst);
-                            std::thread::sleep(lease_ttl * 3);
+                            std::thread::sleep(Duration::from_millis(50));
                             owner
                                 .commit_result("{\"access_token\":\"shared-result\"}")
                                 .unwrap();
