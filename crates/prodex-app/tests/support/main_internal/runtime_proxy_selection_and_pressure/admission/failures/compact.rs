@@ -161,6 +161,10 @@ fn compact_candidate_wait_without_selection_does_not_consume_an_attempt() {
         .active_profile("main")
         .current_profile("main")
         .upstream_base_url(backend.base_url())
+        .profile_usage_snapshot("main", runtime_usage_snapshot(
+            quota_window_ready(80, 3600), quota_window_ready(80, 86400)))
+        .profile_usage_snapshot("second", runtime_usage_snapshot(
+            quota_window_ready(80, 3600), quota_window_ready(80, 86400)))
         .build();
     let shared = harness.shared();
     let hard_limit = shared.runtime_config.tuning.profile_inflight_hard_limit;

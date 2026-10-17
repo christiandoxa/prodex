@@ -6,7 +6,9 @@ const MODE_ADMISSION: i64 = 1;
 const MODE_ERROR_RESPONSE: i64 = 2;
 
 const REJECTION_NONE: u8 = 0;
+#[cfg(test)]
 const REJECTION_LANE: u8 = 2;
+const REJECTION_DEADLINE: u8 = 3;
 
 const ADMISSION_ALLOW: u64 = 0;
 const ADMISSION_REJECT: u64 = 1;
@@ -114,7 +116,7 @@ pub fn admission_plan(
     websocket: bool,
     capture_attempted: bool,
 ) -> Result<RuntimeProxyAdmissionPlan, MojoError> {
-    if rejection_kind > REJECTION_LANE || lane_kind > 3 {
+    if rejection_kind > REJECTION_DEADLINE || lane_kind > 3 {
         return Err(MojoError::InvalidInput);
     }
     let output = call(
@@ -236,6 +238,27 @@ mod tests {
                 .unwrap()
                 .action,
             RuntimeProxyAdmissionAction::Allow
+        );
+    }
+
+    #[test]
+    fn dispatch_expired_admission_is_terminal_without_account_penalty_04381() {
+        for lane in 0..=3 {
+            for websocket in [false, true] {
+                for captured in [false, true] {
+                    assert_eq!(
+                        admission_plan(REJECTION_DEADLINE, lane, websocket, captured).unwrap(),
+                        RuntimeProxyAdmissionPlan {
+                            action: RuntimeProxyAdmissionAction::Reject,
+                            marks_global_overload: false
+                        }
+                    );
+                }
+            }
+        }
+        assert_eq!(
+            admission_plan(4, 0, false, false),
+            Err(MojoError::InvalidInput)
         );
     }
 

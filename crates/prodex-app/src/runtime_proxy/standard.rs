@@ -11,9 +11,13 @@ pub(crate) fn proxy_runtime_standard_request(
     request: &RuntimeProxyRequest,
     shared: &RuntimeRotationProxyShared,
 ) -> Result<tiny_http::ResponseBox> {
+    // Metadata/unary retries also occupy listener workers; do not leave them
+    // outside the watchdog that already protects Responses and compact.
+    let scoped_shared = shared.for_precommit_request();
+    let shared = &scoped_shared;
+    shared.check_precommit_deadline()?;
     if is_runtime_compact_path(&request.path_and_query) {
-        let scoped_shared = shared.for_precommit_request();
-        compact::proxy_runtime_compact_request(request_id, request, &scoped_shared)
+        compact::proxy_runtime_compact_request(request_id, request, shared)
     } else if let Some(response) =
         runtime_startup_metadata_pressure_response(request_id, request, shared)
     {

@@ -16,6 +16,7 @@ comptime MODE_ERROR_RESPONSE: Int64 = 2
 comptime REJECTION_NONE: Int64 = 0
 comptime REJECTION_GLOBAL: Int64 = 1
 comptime REJECTION_LANE: Int64 = 2
+comptime REJECTION_DEADLINE: Int64 = 3
 
 comptime LANE_RESPONSES: Int64 = 0
 comptime LANE_COMPACT: Int64 = 1
@@ -90,7 +91,7 @@ def prodex_runtime_proxy_dispatch_policy_v1(
         return RUNTIME_PROXY_DISPATCH_INVALID
     if (
         rejection_kind < REJECTION_NONE
-        or rejection_kind > REJECTION_LANE
+        or rejection_kind > REJECTION_DEADLINE
         or lane_kind < LANE_RESPONSES
         or lane_kind > LANE_STANDARD
         or websocket < 0

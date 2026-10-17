@@ -1,9 +1,10 @@
 use super::{
     RuntimeRotationProxyShared, RuntimeRouteKind, await_runtime_proxy_async_task,
-    clear_runtime_recovered_profiles, runtime_profile_recovery_wait_for_route, runtime_proxy_log,
-    runtime_proxy_log_field, runtime_proxy_precommit_budget_exhausted_for_route,
-    runtime_proxy_structured_log_message, runtime_route_has_retryable_profile,
-    runtime_route_kind_label,
+    clear_runtime_recovered_profiles, runtime_profile_inflight_release_revision,
+    runtime_profile_inflight_wait_outcome_since_with_selection_revision,
+    runtime_profile_recovery_wait_for_route, runtime_proxy_log, runtime_proxy_log_field,
+    runtime_proxy_precommit_budget_exhausted_for_route, runtime_proxy_structured_log_message,
+    runtime_route_has_retryable_profile, runtime_route_kind_label,
 };
 use anyhow::Result;
 use std::collections::BTreeSet;
@@ -53,6 +54,7 @@ impl<F> RuntimePrecommitLoopState<F> {
         continuation: bool,
         pressure_mode: bool,
     ) -> Result<bool> {
+        shared.check_precommit_deadline()?;
         let normal_budget_exhausted = runtime_proxy_precommit_budget_exhausted_for_route(
             shared,
             self.selection_started_at,
@@ -141,6 +143,11 @@ impl<F> RuntimePrecommitLoopState<F> {
         shared: &RuntimeRotationProxyShared,
         route_kind: RuntimeRouteKind,
     ) -> Result<bool> {
+        // Ready-again candidates can skip every sleep/async await. They still
+        // must not reopen exclusions after the original request has expired.
+        shared.check_precommit_deadline()?;
+        let release_revision = runtime_profile_inflight_release_revision(shared);
+        let selection_revision = shared.lane_admission.selection_change_revision();
         if !runtime_route_has_retryable_profile(shared, route_kind)? {
             return Ok(false);
         }
@@ -226,10 +233,15 @@ impl<F> RuntimePrecommitLoopState<F> {
                 ],
             ),
         );
-        await_runtime_proxy_async_task(shared, "profile_recovery_wait", async move {
-            tokio::time::sleep(wait).await;
-            Ok(())
-        })?;
+        // A refresh or released slot can make the profile eligible well before
+        // its originally projected cooldown. Never sleep through that change.
+        runtime_profile_inflight_wait_outcome_since_with_selection_revision(
+            shared,
+            shared.precommit_wait_slice(wait)?,
+            release_revision,
+            selection_revision,
+        );
+        shared.check_precommit_deadline()?;
         let recovered = clear_runtime_recovered_profiles(
             shared,
             &mut self.excluded_profiles,
@@ -254,6 +266,7 @@ impl<F> RuntimePrecommitLoopState<F> {
             runtime_route_has_retryable_profile(shared, route_kind)?,
             shared.precommit_deadline.is_some(),
             !self.saw_transient_failure(),
+            route_kind as u8,
         )
         .map_err(|error| anyhow::anyhow!("Mojo recovery epoch policy failed: {error:?}"))
     }

@@ -53,3 +53,19 @@ impl RuntimeRotationProxyShared {
         }))
     }
 }
+
+pub(crate) fn reject_runtime_proxy_recovery_timeout(
+    request: tiny_http::Request,
+    shared: &RuntimeRotationProxyShared,
+    stage: &str,
+) {
+    runtime_proxy_log(
+        shared,
+        format!("request_recovery_timeout stage={stage} stream_committed=false"),
+    );
+    let _ = request.respond(super::build_runtime_proxy_json_error_response(
+        504,
+        "request_timeout",
+        &RuntimeProxyRecoveryTimeout.to_string(),
+    ));
+}

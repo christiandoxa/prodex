@@ -81,6 +81,7 @@ fn runtime_proxy_dispatch_admission_plan(
             },
         ),
         RuntimeProxyAdmissionRejection::LaneLimit(lane) => (2, lane),
+        RuntimeProxyAdmissionRejection::DeadlineExceeded => (3, RuntimeRouteKind::Standard),
     };
     prodex_mojo_core::runtime_proxy_dispatch::admission_plan(
         rejection_kind,
@@ -147,6 +148,9 @@ pub(crate) fn handle_runtime_rotation_proxy_request(
         return;
     }
 
+    // Queue time, admission, capture and all retry clones share this deadline.
+    let scoped_shared = shared.for_precommit_request();
+    let shared = &scoped_shared;
     let request_path = request.url().to_string();
     let websocket = is_tiny_http_websocket_upgrade(&request);
     let websocket_request = websocket.then(|| capture_runtime_proxy_websocket_request(&request));
@@ -186,7 +190,9 @@ pub(crate) fn handle_runtime_rotation_proxy_request(
                 ],
             ),
         );
-        proxy_runtime_responses_websocket_request(request_id, request, shared);
+        let mut session_shared = shared.clone();
+        session_shared.precommit_deadline = None;
+        proxy_runtime_responses_websocket_request(request_id, request, &session_shared);
         return;
     }
 
@@ -266,6 +272,9 @@ fn reject_runtime_proxy_admission_rejection(
         prodex_mojo_core::runtime_proxy_dispatch::RuntimeProxyAdmissionAction::Reject
     ));
     match rejection {
+        RuntimeProxyAdmissionRejection::DeadlineExceeded => {
+            reject_runtime_proxy_recovery_timeout(request, shared, "admission");
+        }
         RuntimeProxyAdmissionRejection::GlobalLimit => {
             if plan.marks_global_overload {
                 mark_runtime_proxy_local_overload(shared, "active_request_limit");
