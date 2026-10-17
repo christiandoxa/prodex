@@ -422,13 +422,6 @@ where
                     elapsed,
                     &mut wait_metric,
                 );
-                let (mutex, condvar) = shared.lane_admission.wait();
-                let wait_guard = mutex
-                    .lock()
-                    .unwrap_or_else(|poisoned| poisoned.into_inner());
-                if shared.check_precommit_deadline().is_err() {
-                    return Err((RuntimeProxyQueueRejection::Full, item));
-                }
                 match runtime_proxy_queue_enqueue_after_wait(
                     item,
                     &mut try_enqueue,
@@ -436,26 +429,12 @@ where
                     transport,
                     path,
                     started_at,
+                    budget,
                 ) {
-                    Ok(()) => return Ok(()),
-                    Err((RuntimeProxyQueueRejection::Full, returned_item)) => {
-                        item = returned_item;
-                    }
-                    Err(err) => return Err(err),
+                    Ok(None) => return Ok(()),
+                    Ok(Some(returned_item)) => item = returned_item,
+                    Err(error) => return Err(error),
                 }
-                let wait_for = if budget.is_zero() {
-                    Duration::from_millis(1)
-                } else {
-                    budget
-                };
-                let wait_for = match shared.precommit_wait_slice(wait_for) {
-                    Ok(wait_for) => wait_for,
-                    Err(_) => return Err((RuntimeProxyQueueRejection::Full, item)),
-                };
-                let _ = condvar
-                    .wait_timeout(wait_guard, wait_for)
-                    .unwrap_or_else(|poisoned| poisoned.into_inner());
-                continue;
             }
             Err((RuntimeProxyQueueRejection::Disconnected, returned_item)) => {
                 log_runtime_proxy_queue_disconnected(shared, transport, path, started_at);
@@ -527,6 +506,8 @@ fn runtime_proxy_queue_wait_is_exhausted_or_started(
     }
 }
 
+// One queue retry and its notification wait form a single lock-order-safe
+// host operation. Return the still-owned item only when another poll is needed.
 fn runtime_proxy_queue_enqueue_after_wait<T, F>(
     item: T,
     try_enqueue: &mut F,
@@ -534,20 +515,39 @@ fn runtime_proxy_queue_enqueue_after_wait<T, F>(
     transport: &str,
     path: &str,
     started_at: Instant,
-) -> Result<(), (RuntimeProxyQueueRejection, T)>
+    budget: Duration,
+) -> Result<Option<T>, (RuntimeProxyQueueRejection, T)>
 where
     F: FnMut(T) -> Result<(), (RuntimeProxyQueueRejection, T)>,
 {
-    match try_enqueue(item) {
-        Ok(()) => Ok(()),
-        Err((RuntimeProxyQueueRejection::Full, returned_item)) => {
-            Err((RuntimeProxyQueueRejection::Full, returned_item))
-        }
+    let (mutex, condvar) = shared.lane_admission.wait();
+    let wait_guard = mutex
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    if shared.check_precommit_deadline().is_err() {
+        return Err((RuntimeProxyQueueRejection::Full, item));
+    }
+    let item = match try_enqueue(item) {
+        Ok(()) => return Ok(None),
+        Err((RuntimeProxyQueueRejection::Full, returned_item)) => returned_item,
         Err((RuntimeProxyQueueRejection::Disconnected, returned_item)) => {
             log_runtime_proxy_queue_disconnected(shared, transport, path, started_at);
-            Err((RuntimeProxyQueueRejection::Disconnected, returned_item))
+            return Err((RuntimeProxyQueueRejection::Disconnected, returned_item));
         }
-    }
+    };
+    let requested = if budget.is_zero() {
+        Duration::from_millis(1)
+    } else {
+        budget
+    };
+    let wait_for = match shared.precommit_wait_slice(requested) {
+        Ok(wait_for) => wait_for,
+        Err(_) => return Err((RuntimeProxyQueueRejection::Full, item)),
+    };
+    let _ = condvar
+        .wait_timeout(wait_guard, wait_for)
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    Ok(Some(item))
 }
 
 fn log_runtime_proxy_queue_disconnected(
