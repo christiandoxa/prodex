@@ -5803,3 +5803,11 @@ history membership and JSON-field facts. The old Rust type matching and
 replay branch logic were deleted without fallback, preserving the existing
 single-call and no-duplicate-output invariants. Strict ABI and live provider
 caller regressions cover history replay and Unicode text preservation.
+
+## DeepSeek/Kiro tools-shape validation messages now Mojo-owned
+
+The compiled DeepSeek ToolsShape request-policy owner now formats all
+provider-prefixed tool validation errors, including dynamic MCP/namespace
+details. Rust's 23-code tag-to-error match was removed without a semantic
+fallback. Strict ABI, DeepSeek/Kiro caller tests and no-fallback guard checks
+cover the byte-compatible diagnostics.

@@ -17,83 +17,16 @@ pub fn deepseek_provider_core_validate_tools_shape(
         gemini_compat,
         provider_label,
     )?;
-    let detail = || detail(&source, plan).unwrap_or_default();
-    match plan.tag {
-        0 => Ok(()),
-        1 => Err(format!("{provider_label} tools must be an array")),
-        2 => Err(format!("{provider_label} tools entries must be objects")),
-        3 => Err(format!(
-            "{provider_label} tool type `{}` is not supported",
-            detail()
-        )),
-        4 => Err(format!(
-            "{provider_label} tool description must be a string"
-        )),
-        5 => Err(format!(
-            "{provider_label} function description must be a string"
-        )),
-        6 => Err(format!(
-            "{provider_label} function strict must be a boolean"
-        )),
-        7 => Err(format!("{provider_label} tool strict must be a boolean")),
-        8 => Err(format!(
-            "{provider_label} {} tools require a name",
-            detail()
-        )),
-        9 => Err(format!(
-            "{provider_label} custom tools cannot preserve strict=true through the function wrapper"
-        )),
-        10 => Err(format!(
-            "{provider_label} custom tool format must be an object"
-        )),
-        11 => Err(format!(
-            "{provider_label} custom tool format.type must be a string"
-        )),
-        12 => Err(format!("{provider_label} namespace tools require a name")),
-        13 => Err(format!(
-            "{provider_label} namespace tool `{}` requires a tools array",
-            detail()
-        )),
-        14 => Err(format!(
-            "{provider_label} namespace tool `{}` requires at least one tool",
-            detail()
-        )),
-        15 => Err(format!(
-            "{provider_label} namespace tool `{}` entries must be objects",
-            detail()
-        )),
-        16 => Err(format!(
-            "{provider_label} namespace function description must be a string"
-        )),
-        17 => Err(format!(
-            "{provider_label} namespace function strict must be a boolean"
-        )),
-        18 => Err(format!(
-            "{provider_label} namespace tool `{}` entries must be function tools",
-            detail()
-        )),
-        19 => Err(format!(
-            "{provider_label} namespace tool `{}` function entries require a name",
-            detail()
-        )),
-        20 => Err(format!(
-            "{provider_label} MCP function tools require a name"
-        )),
-        21 => Err(format!(
-            "{provider_label} MCP function tool `{}` requires a schema",
-            detail()
-        )),
-        22 => Err(format!(
-            "{provider_label} MCP toolsets require a server name"
-        )),
-        23 => Err(format!(
-            "{provider_label} MCP toolset `{}` requires allowed_tools or enabled configs",
-            detail()
-        )),
-        _ => Err(format!(
-            "{provider_label} tools shape validation returned an unknown result"
-        )),
+    if plan.tag == 0 {
+        return Ok(());
     }
+    let reason = prodex_mojo_core::rich::deepseek_tool_shape_issue_message(
+        plan.tag,
+        provider_label,
+        &detail(&source, plan).unwrap_or_default(),
+    )
+    .map_err(|error| format!("DeepSeek tools shape message ABI failed: {error:?}"))?;
+    Err(reason)
 }
 
 #[cfg(test)]
@@ -138,6 +71,36 @@ mod tests {
             error,
             "DeepSeek MCP toolset `server` requires allowed_tools or enabled configs"
         );
+    }
+
+    #[test]
+    fn mojo_tool_shape_diagnostics_preserve_deepseek_and_kiro_provider_labels() {
+        for provider in ["DeepSeek", "Kiro"] {
+            for (request, expected_suffix) in [
+                (
+                    serde_json::json!({"tools": "bad"}),
+                    " tools must be an array",
+                ),
+                (
+                    serde_json::json!({"tools": [{"type": "file_search"}]}),
+                    " tool type `file_search` is not supported",
+                ),
+                (
+                    serde_json::json!({"tools": [{
+                        "type": "mcp_toolset",
+                        "server_name": "東京🧭",
+                        "allowed_tools": ["\u{2003}"],
+                    }]}),
+                    " MCP toolset `東京🧭` requires allowed_tools or enabled configs",
+                ),
+            ] {
+                assert_eq!(
+                    deepseek_provider_core_validate_tools_shape(&request, false, provider),
+                    Err(format!("{provider}{expected_suffix}")),
+                    "provider={provider:?} request={request}",
+                );
+            }
+        }
     }
 
     #[test]

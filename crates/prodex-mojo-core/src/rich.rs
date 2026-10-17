@@ -148,7 +148,7 @@ pub use deepseek::{
     DeepSeekReplayItemKind, DeepSeekRequestPolicyOperation, DeepSeekRequestPolicyPlan,
     deepseek_input_item_issue_message, deepseek_kernel, deepseek_replay_item_action,
     deepseek_replay_item_kind, deepseek_request_issue_message, deepseek_request_policy,
-    deepseek_responses_request_transform,
+    deepseek_responses_request_transform, deepseek_tool_shape_issue_message,
 };
 #[path = "rich/openai_compat.rs"]
 mod openai_compat;

@@ -171,6 +171,7 @@ const PING_SUMMARY_CALLER_TEST_FILE = "crates/prodex-app/src/app_commands/ping_t
 const PING_SUMMARY_ADAPTER_FILE = "crates/prodex-mojo-core/src/rich/ping_protocol.rs";
 const PING_SUMMARY_MOJO_FILE = "mojo/prodex_core/ping_protocol.mojo";
 const PROMOTED_FILES = [
+  "crates/prodex-mojo-core/src/rich/deepseek/tool_shape_issue.rs",
   "crates/prodex-mojo-core/src/rich/deepseek/replay_item.rs",
   "crates/prodex-provider-core/src/deepseek_bridge/tests.rs",
   "crates/prodex-provider-core/src/bridge/chat_compat/tool_calls.rs",
@@ -8367,6 +8368,43 @@ export function findViolations(files) {
     }
     return [];
   });
+  const deepseekToolShapeIssueMojoViolations = files.flatMap(([filePath, contents]) => {
+    if (filePath === "crates/prodex-provider-core/src/deepseek_bridge/request_tools/tool_shape.rs") {
+      const production = contents.split("#[cfg(test)]", 1)[0];
+      const required = [
+        "DeepSeekRequestPolicyOperation::ToolsShape",
+        "prodex_mojo_core::rich::deepseek_tool_shape_issue_message(",
+      ];
+      const retired = [
+        "match plan.tag {",
+        "tools entries must be objects",
+        "namespace tool",
+        "custom tools cannot preserve strict=true",
+      ];
+      return required.every((marker) => production.includes(marker)) &&
+        retired.every((marker) => !production.includes(marker))
+          ? [] : [filePath + ": restored Rust DeepSeek/Kiro tools shape error mapping"];
+    }
+    if (filePath === "crates/prodex-mojo-core/src/rich/deepseek/tool_shape_issue.rs") {
+      return [
+        "fn prodex_deepseek_tool_shape_issue_message_v1(",
+        "pub fn deepseek_tool_shape_issue_message(",
+        "compiled_tool_shape_messages_cover_all_issue_codes_and_provider_labels",
+        "compiled_tool_shape_message_abi_rejects_malformed_inputs_without_writes",
+      ].filter((marker) => !contents.includes(marker))
+        .map((marker) => filePath + ": strict Mojo tools-shape diagnostic ABI or coverage missing " + marker);
+    }
+    if (filePath === "mojo/prodex_core/deepseek.mojo") {
+      return [
+        '@export("prodex_deepseek_tool_shape_issue_message_v1")',
+        "DEEPSEEK_TOOL_SHAPE_ISSUE_ABI_VERSION",
+        "deepseek_request_issue_append_literal(",
+        "rich_view_valid(provider",
+      ].filter((marker) => !contents.includes(marker))
+        .map((marker) => filePath + ": tools-shape error diagnostics must remain Mojo-owned (" + marker + ")");
+    }
+    return [];
+  });
   const deepseekInputItemIssueMessageViolations = files.flatMap(([filePath, contents]) => {
     if (filePath === "crates/prodex-provider-core/src/deepseek_bridge/input_items/validation.rs") {
       const required = [
@@ -8722,7 +8760,7 @@ export function findViolations(files) {
     }
     return [];
   });
-  return [...logPayloadProjectionViolations, ...nativeRecoveryOwnershipViolations, ...quotaRecoveryEligibilityViolations, ...runtimeBrokerReuseMojoViolations, ...geminiResponseMediaMojoViolations, ...cookieEvictionMojoViolations, ...websocketBudgetMojoViolations, ...affinityBindingMojoViolations, ...responsesCapacityRecoveryViolations, ...sseTapMojoOwnershipViolations, ...quotaWatchViolations, ...geminiCompactSnippetViolations, ...geminiCompactTextViolations, ...doctorSmartContextDecisionViolations, ...anthropicAttemptCursorViolations, ...geminiUnsupportedToolRetryViolations, ...terminalGeometryViolations, ...previousResponseRecoveryTransitionViolations, ...deepseekReplayItemPolicyMojoViolations, ...chatNamespaceSplitMojoViolations, ...deepseekInputItemIssueMessageViolations, ...deepseekRequestIssueMessageViolations, ...smartContextTelemetrySampleViolations, ...compatibilityDiagnosticsMojoViolations, ...quotaHeaderProjectionViolations, ...smartContextCapsuleOrderViolations, ...markerViolations, ...deepseekCatalogPolicyViolations, ...featureOffViolations, ...liveLogRecordViolations, ...runtimePolicyPresetViolations, ...runtimeConfigScalarViolations, ...profileHealthCircuitViolations, ...logThroughputViolations, ...operationalDetailSpecViolations, ...transcriptPolicyViolations, ...logLoadPolicyViolations, ...routeReasonViolations, ...runtimeStateQuotaViolations, ...runtimeStateRoutePolicyViolations, ...runtimeProxyRootViolations, ...runtimeRecoveryDeadlineViolations, ...brokerVersionGuardViolations, ...brokerContinuityViolations, ...brokerLogCacheViolations, ...codexConfigViolations, ...statePolicyViolations, ...quotaSelectionPolicyViolations, ...routeTagMirrorViolations, ...enumTagMirrorViolations, ...appSelectionPolicyMirrorViolations, ...runtimeStateBackgroundViolations, ...redactionViolations, ...rateLimitHeaderSelectionViolations, ...profileIdentityViolations, ...governanceInspectionViolations, ...governanceInspectionOrderingViolations, ...exactnessPlannerViolations,
+  return [...logPayloadProjectionViolations, ...nativeRecoveryOwnershipViolations, ...quotaRecoveryEligibilityViolations, ...runtimeBrokerReuseMojoViolations, ...geminiResponseMediaMojoViolations, ...cookieEvictionMojoViolations, ...websocketBudgetMojoViolations, ...affinityBindingMojoViolations, ...responsesCapacityRecoveryViolations, ...sseTapMojoOwnershipViolations, ...quotaWatchViolations, ...geminiCompactSnippetViolations, ...geminiCompactTextViolations, ...doctorSmartContextDecisionViolations, ...anthropicAttemptCursorViolations, ...geminiUnsupportedToolRetryViolations, ...terminalGeometryViolations, ...previousResponseRecoveryTransitionViolations, ...deepseekToolShapeIssueMojoViolations, ...deepseekReplayItemPolicyMojoViolations, ...chatNamespaceSplitMojoViolations, ...deepseekInputItemIssueMessageViolations, ...deepseekRequestIssueMessageViolations, ...smartContextTelemetrySampleViolations, ...compatibilityDiagnosticsMojoViolations, ...quotaHeaderProjectionViolations, ...smartContextCapsuleOrderViolations, ...markerViolations, ...deepseekCatalogPolicyViolations, ...featureOffViolations, ...liveLogRecordViolations, ...runtimePolicyPresetViolations, ...runtimeConfigScalarViolations, ...profileHealthCircuitViolations, ...logThroughputViolations, ...operationalDetailSpecViolations, ...transcriptPolicyViolations, ...logLoadPolicyViolations, ...routeReasonViolations, ...runtimeStateQuotaViolations, ...runtimeStateRoutePolicyViolations, ...runtimeProxyRootViolations, ...runtimeRecoveryDeadlineViolations, ...brokerVersionGuardViolations, ...brokerContinuityViolations, ...brokerLogCacheViolations, ...codexConfigViolations, ...statePolicyViolations, ...quotaSelectionPolicyViolations, ...routeTagMirrorViolations, ...enumTagMirrorViolations, ...appSelectionPolicyMirrorViolations, ...runtimeStateBackgroundViolations, ...redactionViolations, ...rateLimitHeaderSelectionViolations, ...profileIdentityViolations, ...governanceInspectionViolations, ...governanceInspectionOrderingViolations, ...exactnessPlannerViolations,
     ...adaptiveBudgetViolations,
     ...providerUsageViolations,
     ...auditUsageViolations,
@@ -9488,6 +9526,15 @@ function selfTest() {
   assert.match(findViolations([[ANTHROPIC_ATTEMPT_CURSOR_FILE,
     anthropicCursorConsumer + "\nattempt.model_index += 1",
   ]]).join("\n"), /Anthropic model\/auth cursor transitions must remain Mojo-owned/u);
+  const deepseekToolShapeConsumer = [
+    "DeepSeekRequestPolicyOperation::ToolsShape",
+    "prodex_mojo_core::rich::deepseek_tool_shape_issue_message(",
+  ].join("\n");
+  const deepseekToolShapeCaller = "crates/prodex-provider-core/src/deepseek_bridge/request_tools/tool_shape.rs";
+  assert.deepEqual(findViolations([[deepseekToolShapeCaller, deepseekToolShapeConsumer]]), []);
+  assert.match(findViolations([[deepseekToolShapeCaller,
+    deepseekToolShapeConsumer + "\nmatch plan.tag {",
+  ]]).join("\n"), /restored Rust DeepSeek\/Kiro tools shape error mapping/u);
   const deepseekReplayItemConsumer = [
     "prodex_mojo_core::rich::deepseek_replay_item_kind(item_type)",
     "prodex_mojo_core::rich::deepseek_replay_item_action(",
