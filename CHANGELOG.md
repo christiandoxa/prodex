@@ -118,6 +118,12 @@ isolated version, chat-model help, and KIRO_DATA_DIR contract checks. The
 Kiro, Copilot, and Claude installer hashes remain unchanged; no installer,
 login, or credential-bearing provider request was run during qualification.
 
+Compact-capacity qualification now releases a held permit only after observing
+two complete wait epochs for that request. A controlled delayed-dispatch case
+failed with the previous fixed sleep and passed with causal release, preserving
+exactly one request to the relieved profile and no local saturation error.
+Production timeout and capacity policies are unchanged.
+
 ### Upgrade
 
 Use `prodex update`, then verify `prodex --version` reports `prodex 0.438.1`.
