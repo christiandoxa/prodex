@@ -181,6 +181,9 @@ fn runtime_local_rewrite_bounded_admission(
         &state.path,
     ) {
         Ok(guard) => Some(guard),
+        Err(RuntimeProxyAdmissionRejection::DeadlineExceeded) => {
+            return Err(state.reject(runtime_local_rewrite_request_timeout_response()));
+        }
         Err(RuntimeProxyAdmissionRejection::GlobalLimit) => {
             crate::runtime_operational_metrics::record_runtime_api_admission_metric(
                 metric_route,

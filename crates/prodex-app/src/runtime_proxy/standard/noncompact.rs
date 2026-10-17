@@ -196,6 +196,7 @@ fn runtime_noncompact_budget_action(
     pressure_mode: bool,
     loop_state: &mut RuntimePrecommitLoopState<tiny_http::ResponseBox>,
 ) -> Result<RuntimeNoncompactBudgetAction> {
+    shared.check_precommit_deadline()?;
     let normal_budget_exhausted = runtime_proxy_precommit_budget_exhausted_for_route(
         shared,
         loop_state.selection_started_at,

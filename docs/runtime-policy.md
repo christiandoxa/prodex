@@ -646,6 +646,11 @@ shared-state integration around those operations.
 - Healthy local capacity contention waits for a permit instead of consuming an upstream retry.
   The retry clock starts with the first upstream dispatch and pauses during capacity waits;
   waiting never clears failed-profile exclusions or replenishes the actual attempt limit.
+  A separate request-local wall-clock watchdog includes ingress queueing, admission,
+  standard HTTP and pre-commit recovery. It is carried with queued work and never
+  replenished on dequeue or retry. Expired work releases its local capacity without
+  marking an account's quota exhausted. The watchdog is detached after WebSocket
+  upgrade; each subsequent model message owns a new request-local deadline.
   Exhaustion policy is canonical in Mojo. Selection carries the observed release revision
   into its waiter, and readiness is rechecked even after a missed notification, so a newly
   available profile cannot be mistaken for an exhausted pool.
@@ -653,9 +658,10 @@ shared-state integration around those operations.
   distinct from provider overload. Generic 429 responses pass through unless their structured
   payload proves a retry or quota class; 503 remains overload/service availability, never proof
   that an account bucket is empty. Hard-affinity and post-commit responses are not replayed.
-- Fresh requests that exhaust a sweep on retryable upstream overload wait asynchronously for
-  endpoint backoff to expire, then perform at most two recovery sweeps within the bounded
-  recovery budget. Pre-commit transport failures still rotate through the ready pool without
+- Fresh requests that exhaust a sweep on retryable upstream overload wait for endpoint
+  backoff or an observed profile-readiness/inflight-release notification, then recheck
+  eligibility under the bounded recovery budget. A projected cooldown is not an
+  unconditional sleep: a newly ready profile must wake recovery before the deadline. Pre-commit transport failures still rotate through the ready pool without
   being converted into quota exhaustion; an exhausted transport pool keeps its bounded local
   failure behavior. A terminal Codex retry-exhaustion event can then hand off to the exact-session
   supervisor described above; the per-request proxy budget is not treated as profile-pool

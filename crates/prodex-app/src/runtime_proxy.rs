@@ -60,7 +60,9 @@ pub(crate) use self::previous_response_orchestration::*;
 pub(super) use self::profile_state::*;
 pub(super) use self::quota::*;
 pub(crate) use self::realtime_sidecar::*;
-pub(crate) use self::recovery_deadline::RuntimeProxyRecoveryTimeout;
+pub(crate) use self::recovery_deadline::{
+    RuntimeProxyRecoveryTimeout, reject_runtime_proxy_recovery_timeout,
+};
 pub(crate) use self::response_forwarding::*;
 pub(crate) use self::responses::proxy_runtime_responses_request;
 #[cfg(test)]

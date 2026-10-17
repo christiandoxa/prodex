@@ -607,6 +607,30 @@ export const RUNTIME_CI_TEST_CASES = [
     tags: SERIALIZED_TAGS,
   },
   {
+    name: "ready_profile_notification_interrupts_long_recovery_sleep_04381",
+    tags: SERIALIZED_TAGS,
+  },
+  {
+    name: "expired_recovery_watchdog_does_not_reopen_a_ready_profile_sweep_04381",
+    tags: SERIALIZED_TAGS,
+  },
+  {
+    name: "expired_recovery_watchdog_does_not_enter_admission_after_capacity_returns_04381",
+    tags: SERIALIZED_TAGS,
+  },
+  {
+    name: "expired_recovery_watchdog_does_not_enqueue_after_capacity_returns_04381",
+    tags: SERIALIZED_TAGS,
+  },
+  {
+    name: "queued_request_keeps_ingress_deadline_and_returns_504_before_upstream_04381",
+    tags: SERIALIZED_TAGS,
+  },
+  {
+    name: "standard_retry_scope_stops_expired_work_without_penalizing_ready_profile_04381",
+    tags: SERIALIZED_TAGS,
+  },
+  {
     name: "recovery_watchdog_is_request_local_and_not_reset_by_retry_clones",
     tags: SERIALIZED_TAGS,
   },

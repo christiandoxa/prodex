@@ -115,24 +115,28 @@ def prodex_runtime_recovery_watchdog_budget_v1(
     return max(stream_idle_ms, recovery_epoch_ms)
 
 
-@export("prodex_runtime_recovery_epoch_pending_v1")
-def prodex_runtime_recovery_epoch_pending_v1(
+@export("prodex_runtime_recovery_epoch_pending_v2")
+def prodex_runtime_recovery_epoch_pending_v2(
     abi_version: Int64,
     recovered_profiles: UInt64,
     eligible_profile_present: Int64,
     request_watchdog_active: Int64,
     force_reselection: Int64,
+    route_kind: Int64,
 ) abi("C") -> Int64:
-    if abi_version != 1:
+    if abi_version != 2:
         return -3
+    if route_kind < 0 or route_kind > 3:
+        return -2
     for value in [eligible_profile_present, request_watchdog_active, force_reselection]:
         if value != 0 and value != 1:
             return -2
     # Only bounded interactive request scopes can extend transient wait epochs.
-    # Ordinary metadata/unary calls retain their prior finite retry behavior.
+    # Ordinary metadata/unary calls now also carry a watchdog. A clock alone
+    # must not broaden their finite retry behavior into interactive recovery.
     return Int64(
         recovered_profiles > 0 or force_reselection == 1
-        or (request_watchdog_active == 1 and eligible_profile_present == 1)
+        or (request_watchdog_active == 1 and eligible_profile_present == 1 and route_kind != 3)
     )
 
 

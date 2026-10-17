@@ -1,6 +1,7 @@
 //! Worker spawning for the runtime rotation proxy listener.
 
 use super::*;
+use crate::runtime_proxy::{RuntimeProxyQueuedRequest, reject_runtime_proxy_recovery_timeout};
 
 pub(super) fn spawn_runtime_rotation_proxy_workers(
     server: &Arc<TinyServer>,
@@ -12,7 +13,7 @@ pub(super) fn spawn_runtime_rotation_proxy_workers(
 ) -> Result<Vec<thread::JoinHandle<()>>> {
     let mut worker_threads = Vec::new();
     let (long_lived_sender, long_lived_receiver) =
-        mpsc::sync_channel::<tiny_http::Request>(long_lived_queue_capacity);
+        mpsc::sync_channel::<RuntimeProxyQueuedRequest>(long_lived_queue_capacity);
     let long_lived_receiver = Arc::new(Mutex::new(long_lived_receiver));
     let mut startup_guard = RuntimeRotationWorkerStartupGuard::new(server, shutdown, worker_count);
 
@@ -59,7 +60,7 @@ pub(super) fn spawn_runtime_rotation_proxy_workers(
 }
 
 fn runtime_rotation_long_lived_worker_loop(
-    receiver: Arc<Mutex<mpsc::Receiver<tiny_http::Request>>>,
+    receiver: Arc<Mutex<mpsc::Receiver<RuntimeProxyQueuedRequest>>>,
     shared: RuntimeRotationProxyShared,
     shutdown: Arc<AtomicBool>,
 ) {
@@ -71,7 +72,9 @@ fn runtime_rotation_long_lived_worker_loop(
         let Ok(request) = request else {
             break;
         };
-        runtime_rotation_handle_long_lived_request(request, &shared);
+        let mut scoped = shared.clone();
+        scoped.precommit_deadline = request.deadline;
+        runtime_rotation_handle_long_lived_request(request.request, &scoped);
         if shutdown.load(Ordering::SeqCst) {
             break;
         }
@@ -88,12 +91,16 @@ fn runtime_rotation_handle_long_lived_request(
         .unwrap_or_else(|poisoned| poisoned.into_inner());
     condvar.notify_all();
     drop(guard);
+    if shared.check_precommit_deadline().is_err() {
+        reject_runtime_proxy_recovery_timeout(request, shared, "long_lived_queue");
+        return;
+    }
     runtime_rotation_handle_request_with_panic_log(request, shared, "long_lived");
 }
 
 fn runtime_rotation_accept_worker_loop(
     server: Arc<TinyServer>,
-    long_lived_sender: mpsc::SyncSender<tiny_http::Request>,
+    long_lived_sender: mpsc::SyncSender<RuntimeProxyQueuedRequest>,
     shared: RuntimeRotationProxyShared,
     shutdown: Arc<AtomicBool>,
 ) {
@@ -110,7 +117,7 @@ fn runtime_rotation_accept_worker_loop(
 
 fn runtime_rotation_dispatch_received_request(
     request: tiny_http::Request,
-    long_lived_sender: &mpsc::SyncSender<tiny_http::Request>,
+    long_lived_sender: &mpsc::SyncSender<RuntimeProxyQueuedRequest>,
     shared: &RuntimeRotationProxyShared,
 ) {
     let websocket = is_tiny_http_websocket_upgrade(&request);

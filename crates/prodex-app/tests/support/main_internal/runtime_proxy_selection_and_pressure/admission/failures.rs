@@ -161,12 +161,17 @@ fn fresh_noncompact_transport_failure_rotates_through_ready_profiles() {
         body: Vec::new(),
     };
 
-    let response = proxy_runtime_standard_request(54, &request, harness.shared())
-        .expect("fresh transport failures should remain inside the rotation loop");
-    let (status, _) = tiny_http_response_status_and_body(response);
+    let mut scoped = harness.shared().clone();
+    scoped.precommit_deadline = Some(Instant::now() + Duration::from_secs(10));
+    let response = proxy_runtime_standard_request(54, &request, &scoped);
+    // Preserve bounded pool failure; the newly enforced wall-clock watchdog
+    // can terminate a longer cooldown first, as a local timeout, not quota.
+    match response {
+        Ok(response) => assert_eq!(tiny_http_response_status_and_body(response).0, 503),
+        Err(error) => assert!(error.is::<crate::runtime_proxy::RuntimeProxyRecoveryTimeout>(), "{error:#}"),
+    }
     let log = read_runtime_proxy_test_log(&harness.shared().log_path);
-
-    assert_eq!(status, 503, "{log}");
+    assert!(!log.contains("quota_quarantine"), "transport failure is not quota evidence: {log}");
     assert!(
         log.contains("standard_transport_failure profile=main")
             && log.contains("standard_transport_failure profile=second"),

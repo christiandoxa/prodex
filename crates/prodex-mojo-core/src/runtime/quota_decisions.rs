@@ -130,12 +130,13 @@ pub struct CompactRetryDecision {
 }
 
 unsafe extern "C" {
-    fn prodex_runtime_recovery_epoch_pending_v1(
+    fn prodex_runtime_recovery_epoch_pending_v2(
         abi_version: i64,
         recovered_profiles: u64,
         eligible_profile_present: i64,
         request_watchdog_active: i64,
         force_reselection: i64,
+        route_kind: i64,
     ) -> i64;
 
     fn prodex_runtime_recovery_watchdog_budget_v1(
@@ -445,11 +446,30 @@ mod tests {
     use super::*;
     #[test]
     fn recovery_watchdog_and_compact_ownership_are_mojo_owned() {
-        assert_eq!(recovery_epoch_pending(0, true, true, false), Ok(true));
-        assert_eq!(recovery_epoch_pending(0, true, false, false), Ok(false));
-        assert_eq!(recovery_epoch_pending(0, false, false, true), Ok(true));
-        assert_eq!(recovery_epoch_pending(1, false, false, false), Ok(true));
-        assert_eq!(recovery_epoch_pending(0, false, true, false), Ok(false));
+        assert_eq!(recovery_epoch_pending(0, true, true, false, 0), Ok(true));
+        assert_eq!(recovery_epoch_pending(0, true, false, false, 0), Ok(false));
+        assert_eq!(recovery_epoch_pending(0, false, false, true, 0), Ok(true));
+        assert_eq!(recovery_epoch_pending(1, false, false, false, 0), Ok(true));
+        assert_eq!(recovery_epoch_pending(0, false, true, false, 0), Ok(false));
+        for route in 0..=3 {
+            assert_eq!(
+                recovery_epoch_pending(0, true, true, false, route),
+                Ok(route != 3)
+            );
+            assert_eq!(
+                recovery_epoch_pending(1, true, true, false, route),
+                Ok(true)
+            );
+        }
+        assert_eq!(
+            recovery_epoch_pending(0, true, true, false, 4),
+            Err(MojoError::InvalidInput)
+        );
+        assert_eq!(
+            unsafe { prodex_runtime_recovery_epoch_pending_v2(1, 0, 1, 1, 0, 0) },
+            -3
+        );
+
         assert_eq!(recovery_watchdog_budget_ms(300_000, 30_000), Ok(300_000));
         assert_eq!(recovery_watchdog_budget_ms(250, 5_000), Ok(5_000));
         assert_eq!(
@@ -691,18 +711,22 @@ pub fn recovery_epoch_pending(
     eligible_profile_present: bool,
     request_watchdog_active: bool,
     force_reselection: bool,
+    route_kind: u8,
 ) -> Result<bool, MojoError> {
     match unsafe {
-        prodex_runtime_recovery_epoch_pending_v1(
-            1,
+        prodex_runtime_recovery_epoch_pending_v2(
+            2,
             u64::try_from(recovered_profiles).unwrap_or(u64::MAX),
             eligible_profile_present.into(),
             request_watchdog_active.into(),
             force_reselection.into(),
+            i64::from(route_kind),
         )
     } {
         0 => Ok(false),
         1 => Ok(true),
+        -2 => Err(MojoError::InvalidInput),
+        -3 => Err(MojoError::AbiMismatch),
         _ => Err(MojoError::InvalidOutput),
     }
 }

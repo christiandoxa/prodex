@@ -226,12 +226,14 @@ fn record_runtime_proxy_admission_rejection(
     rejection: RuntimeProxyAdmissionRejection,
 ) {
     let lane = match rejection {
+        RuntimeProxyAdmissionRejection::DeadlineExceeded => return,
         RuntimeProxyAdmissionRejection::GlobalLimit => {
             runtime_proxy_request_lane(path, transport == "websocket")
         }
         RuntimeProxyAdmissionRejection::LaneLimit(lane) => lane,
     };
     match rejection {
+        RuntimeProxyAdmissionRejection::DeadlineExceeded => return,
         RuntimeProxyAdmissionRejection::GlobalLimit => shared
             .lane_admission
             .global_limit_rejections_total_counter(lane)
@@ -287,6 +289,8 @@ pub(crate) fn acquire_runtime_proxy_active_request_slot_with_wait_for_request(
     path: &str,
     request: Option<&RuntimeProxyRequest>,
 ) -> Result<RuntimeProxyActiveRequestGuard, RuntimeProxyAdmissionRejection> {
+    let scoped_shared = shared.for_precommit_request();
+    let shared = &scoped_shared;
     let started_at = Instant::now();
     let pressure_mode =
         runtime_proxy_pressure_mode_active_for_request_path(shared, path, transport == "websocket");
@@ -303,10 +307,16 @@ pub(crate) fn acquire_runtime_proxy_active_request_slot_with_wait_for_request(
         budget
     };
     loop {
+        let wait_for = shared
+            .precommit_wait_slice(wait_for)
+            .map_err(|_| RuntimeProxyAdmissionRejection::DeadlineExceeded)?;
         // Refresh ownership after every wake, but never with the notification
         // mutex held. The second probe below reuses these facts to avoid the
         // lost-wakeup race without reversing state -> notification lock order.
         let facts = runtime_proxy_admission_request_facts(shared, transport, path, request);
+        shared
+            .check_precommit_deadline()
+            .map_err(|_| RuntimeProxyAdmissionRejection::DeadlineExceeded)?;
         match probe_runtime_proxy_active_request_slot(shared, transport, path, facts) {
             Ok(guard) => {
                 if wait_metric.started() {
@@ -342,6 +352,9 @@ pub(crate) fn acquire_runtime_proxy_active_request_slot_with_wait_for_request(
                     drop(wait_guard);
                     continue;
                 }
+                let wait_for = shared
+                    .precommit_wait_slice(wait_for)
+                    .map_err(|_| RuntimeProxyAdmissionRejection::DeadlineExceeded)?;
                 if let Ok(guard) =
                     probe_runtime_proxy_active_request_slot(shared, transport, path, facts)
                 {
@@ -365,6 +378,8 @@ pub(crate) fn wait_for_runtime_proxy_queue_capacity<T, F>(
 where
     F: FnMut(T) -> Result<(), (RuntimeProxyQueueRejection, T)>,
 {
+    let scoped_shared = shared.for_precommit_request();
+    let shared = &scoped_shared;
     let started_at = Instant::now();
     let pressure_mode =
         runtime_proxy_pressure_mode_active_for_request_path(shared, path, transport == "websocket");
@@ -379,6 +394,9 @@ where
             .long_lived_queue_wait_metric_counters(),
     );
     loop {
+        if shared.check_precommit_deadline().is_err() {
+            return Err((RuntimeProxyQueueRejection::Full, item));
+        }
         match try_enqueue(item) {
             Ok(()) => {
                 if wait_metric.started() {
@@ -408,6 +426,9 @@ where
                 let wait_guard = mutex
                     .lock()
                     .unwrap_or_else(|poisoned| poisoned.into_inner());
+                if shared.check_precommit_deadline().is_err() {
+                    return Err((RuntimeProxyQueueRejection::Full, item));
+                }
                 match runtime_proxy_queue_enqueue_after_wait(
                     item,
                     &mut try_enqueue,
@@ -426,6 +447,10 @@ where
                     Duration::from_millis(1)
                 } else {
                     budget
+                };
+                let wait_for = match shared.precommit_wait_slice(wait_for) {
+                    Ok(wait_for) => wait_for,
+                    Err(_) => return Err((RuntimeProxyQueueRejection::Full, item)),
                 };
                 let _ = condvar
                     .wait_timeout(wait_guard, wait_for)
@@ -474,6 +499,7 @@ fn runtime_proxy_admission_rejection_reason(
     rejection: RuntimeProxyAdmissionRejection,
 ) -> &'static str {
     match rejection {
+        RuntimeProxyAdmissionRejection::DeadlineExceeded => "precommit_recovery_deadline",
         RuntimeProxyAdmissionRejection::GlobalLimit => "active_request_limit",
         RuntimeProxyAdmissionRejection::LaneLimit(lane) => runtime_route_kind_label(lane),
     }
@@ -544,9 +570,16 @@ fn log_runtime_proxy_queue_disconnected(
     );
 }
 
+// Keep the ingress watchdog with queued work. A new worker must not grant
+// an already-expired request another full retry budget after dequeueing it.
+pub(crate) struct RuntimeProxyQueuedRequest {
+    pub(crate) request: tiny_http::Request,
+    pub(crate) deadline: Option<Instant>,
+}
+
 #[allow(clippy::result_large_err)]
 pub(crate) fn enqueue_runtime_proxy_long_lived_request_with_wait(
-    sender: &mpsc::SyncSender<tiny_http::Request>,
+    sender: &mpsc::SyncSender<RuntimeProxyQueuedRequest>,
     request: tiny_http::Request,
     shared: &RuntimeRotationProxyShared,
 ) -> Result<(), (RuntimeProxyQueueRejection, tiny_http::Request)> {
@@ -556,15 +589,19 @@ pub(crate) fn enqueue_runtime_proxy_long_lived_request_with_wait(
     } else {
         "http"
     };
-    wait_for_runtime_proxy_queue_capacity(request, shared, transport, &path, |request| match sender
-        .try_send(request)
-    {
-        Ok(()) => Ok(()),
-        Err(TrySendError::Full(returned_request)) => {
-            Err((RuntimeProxyQueueRejection::Full, returned_request))
-        }
-        Err(TrySendError::Disconnected(returned_request)) => {
-            Err((RuntimeProxyQueueRejection::Disconnected, returned_request))
+    let scoped_shared = shared.for_precommit_request();
+    let queued = RuntimeProxyQueuedRequest {
+        request,
+        deadline: scoped_shared.precommit_deadline,
+    };
+    wait_for_runtime_proxy_queue_capacity(queued, &scoped_shared, transport, &path, |queued| {
+        match sender.try_send(queued) {
+            Ok(()) => Ok(()),
+            Err(TrySendError::Full(returned)) => Err((RuntimeProxyQueueRejection::Full, returned)),
+            Err(TrySendError::Disconnected(returned)) => {
+                Err((RuntimeProxyQueueRejection::Disconnected, returned))
+            }
         }
     })
+    .map_err(|(reason, queued)| (reason, queued.request))
 }

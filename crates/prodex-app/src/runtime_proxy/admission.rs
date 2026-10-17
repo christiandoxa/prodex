@@ -8,6 +8,7 @@ pub(crate) use runtime_proxy_crate::{
 pub(crate) enum RuntimeProxyAdmissionRejection {
     GlobalLimit,
     LaneLimit(RuntimeRouteKind),
+    DeadlineExceeded,
 }
 
 pub(crate) fn reject_runtime_proxy_overloaded_request(

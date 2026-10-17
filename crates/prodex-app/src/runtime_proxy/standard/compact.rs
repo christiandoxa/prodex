@@ -1,9 +1,8 @@
 use super::super::{
     RuntimeInflightReliefWait, RuntimeInflightReliefWaitResult, RuntimeResponseCandidateSelection,
-    await_runtime_proxy_async_task, clear_runtime_recovered_profiles,
-    mark_runtime_profile_retry_backoff, mark_runtime_profile_retry_backoff_for_delay,
-    runtime_compact_route_followup_bound_profile, runtime_profile_recovery_wait_for_route,
-    runtime_proxy_current_profile, runtime_proxy_log,
+    clear_runtime_recovered_profiles, mark_runtime_profile_retry_backoff,
+    mark_runtime_profile_retry_backoff_for_delay, runtime_compact_route_followup_bound_profile,
+    runtime_profile_recovery_wait_for_route, runtime_proxy_current_profile, runtime_proxy_log,
     runtime_proxy_maybe_wait_for_interactive_inflight_relief,
     runtime_proxy_precommit_budget_exhausted_for_route,
     runtime_proxy_pressure_mode_active_for_route, runtime_proxy_probe_refresh_pause,
