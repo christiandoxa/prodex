@@ -5846,3 +5846,13 @@ any-model test and stable preference reordering were removed, while Rust still
 stores profile state and applies the typed compiled output. Strict ABI,
 real Gemini OAuth caller and no-fallback guard tests preserve rotation and
 model selection semantics.
+
+## Gemini OAuth round-robin account rotation moved to Mojo
+
+The compiled Gemini Code Assist owner now orders fresh-request OAuth profile
+attempts, advances the cursor, filters candidates with model availability
+from Mojo, and preserves the last-chance all-profile option when local model
+heuristics exclude everyone. Rust's duplicate modulo/round-robin ordering and
+fallback loop were removed; Rust still owns affinity, profile state and
+application of the validated indices. Direct ABI, real Gemini OAuth caller
+and no-fallback tests protect rotation and retry fairness.
