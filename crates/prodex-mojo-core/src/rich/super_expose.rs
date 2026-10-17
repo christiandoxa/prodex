@@ -1,6 +1,10 @@
 use super::{ensure_rich_abi, mojo_mut_pointer_address};
 use crate::MojoError;
 
+#[path = "super_expose/origin.rs"]
+mod origin;
+pub use origin::{SuperExposeParsedOriginUrl, super_expose_origin_allowed};
+
 #[path = "super_expose/tunnel.rs"]
 mod tunnel;
 pub use tunnel::{super_expose_tunnel_client_version_output_valid, super_expose_tunnel_id_valid};

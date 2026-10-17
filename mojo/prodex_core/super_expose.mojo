@@ -7,6 +7,7 @@ from rich_text import (
     rich_codepoint_width,
     rich_trim_bounds,
     rich_view_matches_literal,
+    rich_view_prefix,
     rich_view_ptr,
     rich_view_valid,
 )
@@ -1206,4 +1207,126 @@ def prodex_mojo_super_expose_output_cursor_valid_v1(
         and checkpoint_id_present == 1
         and event_index <= SUPER_EXPOSE_OUTPUT_CURSOR_MAX_EVENT_INDEX
     )
+    return 0
+
+
+# HTTP URL parsing stays at the Rust host boundary. The compiled Super Expose
+# owner exclusively decides whether the parsed, normalized Origin is allowed.
+comptime SUPER_EXPOSE_ORIGIN_ABI_VERSION: Int64 = 1
+comptime SUPER_EXPOSE_ORIGIN_VALID_URL: Int64 = 1
+comptime SUPER_EXPOSE_ORIGIN_USERNAME_EMPTY: Int64 = 2
+comptime SUPER_EXPOSE_ORIGIN_NO_PASSWORD: Int64 = 4
+comptime SUPER_EXPOSE_ORIGIN_NO_PORT: Int64 = 8
+comptime SUPER_EXPOSE_ORIGIN_ROOT_PATH: Int64 = 16
+comptime SUPER_EXPOSE_ORIGIN_NO_QUERY: Int64 = 32
+comptime SUPER_EXPOSE_ORIGIN_NO_FRAGMENT: Int64 = 64
+comptime SUPER_EXPOSE_ORIGIN_MAX_FLAGS: Int64 = 127
+
+
+def super_expose_origin_host_equal_folded(
+    actual: ProdexRichStringView,
+    expected: ProdexRichStringView,
+) -> Bool:
+    if actual.len != expected.len:
+        return False
+    var actual_ptr = rich_view_ptr(actual)
+    var expected_ptr = rich_view_ptr(expected)
+    for index in range(Int64(actual.len)):
+        var left = actual_ptr[unsafe_offset=index]
+        var right = expected_ptr[unsafe_offset=index]
+        if left >= 65 and left <= 90:
+            left += 32
+        if right >= 65 and right <= 90:
+            right += 32
+        if left != right:
+            return False
+    return True
+
+
+def super_expose_origin_exact_local_http(
+    host: ProdexRichStringView,
+    origin: ProdexRichStringView,
+) -> Bool:
+    if (
+        not rich_view_prefix["127.0.0.1:"](host, False)
+        or origin.len != host.len + UInt(7)
+        or not rich_view_prefix["http://"](origin, False)
+    ):
+        return False
+    var origin_ptr = rich_view_ptr(origin)
+    var host_ptr = rich_view_ptr(host)
+    for index in range(Int64(host.len)):
+        if origin_ptr[unsafe_offset=index + 7] != host_ptr[unsafe_offset=index]:
+            return False
+    return True
+
+
+@export("prodex_mojo_super_expose_origin_allowed_v1")
+def prodex_mojo_super_expose_origin_allowed_v1(
+    abi_version: Int64,
+    host_address: UInt,
+    host_length: Int64,
+    origin_present: Int64,
+    origin_address: UInt,
+    origin_length: Int64,
+    scheme_address: UInt,
+    scheme_length: Int64,
+    parsed_host_address: UInt,
+    parsed_host_length: Int64,
+    parsed_flags: Int64,
+    output_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != SUPER_EXPOSE_ORIGIN_ABI_VERSION:
+        return 4
+    if (
+        host_length < 0 or origin_length < 0 or scheme_length < 0
+        or parsed_host_length < 0 or (origin_present != 0 and origin_present != 1)
+        or parsed_flags < 0 or parsed_flags > SUPER_EXPOSE_ORIGIN_MAX_FLAGS
+        or (host_length > 0 and host_address == 0)
+        or (origin_length > 0 and origin_address == 0)
+        or (scheme_length > 0 and scheme_address == 0)
+        or (parsed_host_length > 0 and parsed_host_address == 0)
+        or output_address == 0
+    ):
+        return 1
+    var host = ProdexRichStringView(host_address, UInt(host_length))
+    var origin = ProdexRichStringView(origin_address, UInt(origin_length))
+    var scheme = ProdexRichStringView(scheme_address, UInt(scheme_length))
+    var parsed_host = ProdexRichStringView(parsed_host_address, UInt(parsed_host_length))
+    if (
+        not rich_view_valid(host, 0x7FFFFFFFFFFFFFFF)
+        or not rich_view_valid(origin, 0x7FFFFFFFFFFFFFFF)
+        or not rich_view_valid(scheme, 0x7FFFFFFFFFFFFFFF)
+        or not rich_view_valid(parsed_host, 0x7FFFFFFFFFFFFFFF)
+    ):
+        return 1
+    var allowed = origin_present == 0
+    if origin_present == 1:
+        var trim = rich_trim_bounds(origin)
+        if (
+            trim[0] == 0 and trim[1] == origin_length
+            and (parsed_flags & SUPER_EXPOSE_ORIGIN_VALID_URL) != 0
+        ):
+            var local_http = super_expose_origin_exact_local_http(host, origin)
+            var trusted_https = (
+                rich_view_matches_literal["https"](scheme, False)
+                and parsed_host.len > 0
+                and (parsed_flags & SUPER_EXPOSE_ORIGIN_NO_PORT) != 0
+                and (
+                    super_expose_origin_host_equal_folded(parsed_host, host)
+                    or rich_view_matches_literal["chatgpt.com"](parsed_host, True)
+                    or rich_view_matches_literal["chat.openai.com"](parsed_host, True)
+                )
+            )
+            allowed = (
+                (local_http or trusted_https)
+                and (parsed_flags & SUPER_EXPOSE_ORIGIN_USERNAME_EMPTY) != 0
+                and (parsed_flags & SUPER_EXPOSE_ORIGIN_NO_PASSWORD) != 0
+                and (parsed_flags & SUPER_EXPOSE_ORIGIN_ROOT_PATH) != 0
+                and (parsed_flags & SUPER_EXPOSE_ORIGIN_NO_QUERY) != 0
+                and (parsed_flags & SUPER_EXPOSE_ORIGIN_NO_FRAGMENT) != 0
+            )
+    Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )[] = Int64(allowed)
     return 0

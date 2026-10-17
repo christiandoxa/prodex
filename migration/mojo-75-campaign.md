@@ -5828,3 +5828,11 @@ inheritance. Rust retains host map/vector updates, with the old policy
 branches and missing-name fallback removed. The standalone Mojo ABI is linked
 in the production static archive, with direct ABI and 30 real Kiro ACP app
 tests plus a source-level no-fallback guard.
+
+## Super Expose MCP Origin trust policy moved to Mojo
+
+The compiled Super Expose owner now makes the complete MCP Origin allow/deny
+decision from host-parsed URL facts, raw Host/Origin strings, Unicode trim and
+ASCII casefold matching. The Rust loopback/HTTPS and URL constraint decision
+tree was deleted. Versioned ABI, 99 real app Super Expose tests, 16 compiled
+Mojo-core tests and no-fallback guards protect the admission boundary.
