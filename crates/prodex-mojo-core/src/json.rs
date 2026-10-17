@@ -10,7 +10,10 @@ pub use self::response_metadata::{
     runtime_response_metadata_json,
 };
 mod gemini_quota;
-pub use gemini_quota::{GeminiQuotaBodyPlan, gemini_quota_body_plan};
+pub use gemini_quota::{
+    GeminiQuotaBodyPlan, GeminiRetryCandidate, GeminiRetryCandidateKind, GeminiRetryCandidates,
+    gemini_quota_body_plan, gemini_retry_candidates, gemini_retry_delay_max,
+};
 mod provider_error;
 pub use self::provider_error::provider_error_message_json;
 mod session_report;
