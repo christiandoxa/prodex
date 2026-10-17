@@ -171,6 +171,11 @@ const PING_SUMMARY_CALLER_TEST_FILE = "crates/prodex-app/src/app_commands/ping_t
 const PING_SUMMARY_ADAPTER_FILE = "crates/prodex-mojo-core/src/rich/ping_protocol.rs";
 const PING_SUMMARY_MOJO_FILE = "mojo/prodex_core/ping_protocol.mojo";
 const PROMOTED_FILES = [
+  "crates/prodex-app/src/runtime_proxy/smart_context/rewrite_telemetry.rs",
+  "crates/prodex-app/tests/src/runtime_proxy/smart_context/static_context_extra/telemetry.rs",
+  "crates/prodex-mojo-core/src/runtime_decisions/rewrite_safety.rs",
+  "crates/prodex-mojo-core/src/runtime_decisions/rewrite_quality_risk_tests.rs",
+  "mojo/prodex_core/smart_context.mojo",
   SUPER_PROMPT_FILE,
   SUPER_PROMPT_CHOICES_FILE,
   SUPER_PROMPT_TEST_FILE,
@@ -8250,6 +8255,54 @@ export function findViolations(files) {
     }
     return [];
   });
+  const smartContextTelemetrySampleViolations = files.flatMap(([filePath, contents]) => {
+    if (filePath === "crates/prodex-app/src/runtime_proxy/smart_context/rewrite_telemetry.rs") {
+      const required = [
+        "smart_context_rewrite_sample_policy(",
+        "SmartContextRewriteSamplePolicyInput",
+        "SmartContextRewriteQualityInput",
+      ];
+      const retired = [
+        "fn runtime_smart_context_rewrite_telemetry_record_safe_saved(",
+        "fn runtime_smart_context_rewrite_telemetry_record_quality_risk(",
+        "let potentially_rewritten = matches!(",
+        "record.upstream_context_errors > 0",
+        "record.tokens_after < record.tokens_before",
+      ];
+      return required.every((marker) => contents.includes(marker)) &&
+        retired.every((marker) => !contents.includes(marker))
+          ? [] : [filePath + ": restored Rust Smart Context rewrite telemetry selection/quality policy"];
+    }
+    if (filePath === "crates/prodex-mojo-core/src/runtime_decisions/rewrite_safety.rs") {
+      return [
+        "fn rewrite_quality_metrics(",
+        "pub fn smart_context_rewrite_sample_policy(",
+        "prodex_smart_context_rewrite_sample_policy_v1(",
+      ].filter((marker) => !contents.includes(marker))
+        .map((marker) => filePath + ": compiled rewrite telemetry typed adapter must retain " + marker);
+    }
+    if (filePath === "crates/prodex-mojo-core/src/runtime_decisions/rewrite_quality_risk_tests.rs") {
+      return [
+        "compiled_rewrite_sample_policy_owns_inclusion_safety_and_quality",
+        "compiled_rewrite_sample_policy_strict_abi_rejects_invalid_inputs_without_writes",
+      ].filter((marker) => !contents.includes(marker))
+        .map((marker) => filePath + ": compiled sample policy ABI test missing " + marker);
+    }
+    if (filePath === "crates/prodex-app/tests/src/runtime_proxy/smart_context/static_context_extra/telemetry.rs") {
+      return contents.includes("smart_context_production_telemetry_samples_use_compiled_mojo_inclusion_and_safety")
+        ? [] : [filePath + ": required live Smart Context telemetry selection coverage missing"];
+    }
+    if (filePath === "mojo/prodex_core/smart_context.mojo") {
+      return [
+        '@export("prodex_smart_context_rewrite_sample_policy_v1")',
+        "smart_context_rewrite_quality_metrics_valid(",
+        "smart_context_rewrite_quality_metrics_risky(",
+        "rich_view_matches_literal[\"ok_surgical_rehydrate\"]",
+      ].filter((marker) => !contents.includes(marker))
+        .map((marker) => filePath + ": compiled Smart Context telemetry policy missing " + marker);
+    }
+    return [];
+  });
   const compatibilityDiagnosticsMojoViolations = files.flatMap(([filePath, contents]) => {
     if (filePath === "crates/prodex-runtime-proxy/src/compatibility_surface.rs") {
       const required = [
@@ -8439,7 +8492,7 @@ export function findViolations(files) {
     }
     return [];
   });
-  return [...logPayloadProjectionViolations, ...nativeRecoveryOwnershipViolations, ...quotaRecoveryEligibilityViolations, ...runtimeBrokerReuseMojoViolations, ...geminiResponseMediaMojoViolations, ...cookieEvictionMojoViolations, ...websocketBudgetMojoViolations, ...affinityBindingMojoViolations, ...responsesCapacityRecoveryViolations, ...sseTapMojoOwnershipViolations, ...quotaWatchViolations, ...geminiCompactSnippetViolations, ...geminiCompactTextViolations, ...doctorSmartContextDecisionViolations, ...anthropicAttemptCursorViolations, ...geminiUnsupportedToolRetryViolations, ...terminalGeometryViolations, ...compatibilityDiagnosticsMojoViolations, ...quotaHeaderProjectionViolations, ...smartContextCapsuleOrderViolations, ...markerViolations, ...deepseekCatalogPolicyViolations, ...featureOffViolations, ...liveLogRecordViolations, ...runtimePolicyPresetViolations, ...runtimeConfigScalarViolations, ...profileHealthCircuitViolations, ...logThroughputViolations, ...operationalDetailSpecViolations, ...transcriptPolicyViolations, ...logLoadPolicyViolations, ...routeReasonViolations, ...runtimeStateQuotaViolations, ...runtimeStateRoutePolicyViolations, ...runtimeProxyRootViolations, ...runtimeRecoveryDeadlineViolations, ...brokerVersionGuardViolations, ...brokerContinuityViolations, ...brokerLogCacheViolations, ...codexConfigViolations, ...statePolicyViolations, ...quotaSelectionPolicyViolations, ...routeTagMirrorViolations, ...enumTagMirrorViolations, ...appSelectionPolicyMirrorViolations, ...runtimeStateBackgroundViolations, ...redactionViolations, ...rateLimitHeaderSelectionViolations, ...profileIdentityViolations, ...governanceInspectionViolations, ...governanceInspectionOrderingViolations, ...exactnessPlannerViolations,
+  return [...logPayloadProjectionViolations, ...nativeRecoveryOwnershipViolations, ...quotaRecoveryEligibilityViolations, ...runtimeBrokerReuseMojoViolations, ...geminiResponseMediaMojoViolations, ...cookieEvictionMojoViolations, ...websocketBudgetMojoViolations, ...affinityBindingMojoViolations, ...responsesCapacityRecoveryViolations, ...sseTapMojoOwnershipViolations, ...quotaWatchViolations, ...geminiCompactSnippetViolations, ...geminiCompactTextViolations, ...doctorSmartContextDecisionViolations, ...anthropicAttemptCursorViolations, ...geminiUnsupportedToolRetryViolations, ...terminalGeometryViolations, ...smartContextTelemetrySampleViolations, ...compatibilityDiagnosticsMojoViolations, ...quotaHeaderProjectionViolations, ...smartContextCapsuleOrderViolations, ...markerViolations, ...deepseekCatalogPolicyViolations, ...featureOffViolations, ...liveLogRecordViolations, ...runtimePolicyPresetViolations, ...runtimeConfigScalarViolations, ...profileHealthCircuitViolations, ...logThroughputViolations, ...operationalDetailSpecViolations, ...transcriptPolicyViolations, ...logLoadPolicyViolations, ...routeReasonViolations, ...runtimeStateQuotaViolations, ...runtimeStateRoutePolicyViolations, ...runtimeProxyRootViolations, ...runtimeRecoveryDeadlineViolations, ...brokerVersionGuardViolations, ...brokerContinuityViolations, ...brokerLogCacheViolations, ...codexConfigViolations, ...statePolicyViolations, ...quotaSelectionPolicyViolations, ...routeTagMirrorViolations, ...enumTagMirrorViolations, ...appSelectionPolicyMirrorViolations, ...runtimeStateBackgroundViolations, ...redactionViolations, ...rateLimitHeaderSelectionViolations, ...profileIdentityViolations, ...governanceInspectionViolations, ...governanceInspectionOrderingViolations, ...exactnessPlannerViolations,
     ...adaptiveBudgetViolations,
     ...providerUsageViolations,
     ...auditUsageViolations,
@@ -9205,6 +9258,16 @@ function selfTest() {
   assert.match(findViolations([[ANTHROPIC_ATTEMPT_CURSOR_FILE,
     anthropicCursorConsumer + "\nattempt.model_index += 1",
   ]]).join("\n"), /Anthropic model\/auth cursor transitions must remain Mojo-owned/u);
+  const smartTelemetrySampleConsumer = [
+    "smart_context_rewrite_sample_policy(",
+    "SmartContextRewriteSamplePolicyInput",
+    "SmartContextRewriteQualityInput",
+  ].join("\n");
+  const smartTelemetrySampleFile = "crates/prodex-app/src/runtime_proxy/smart_context/rewrite_telemetry.rs";
+  assert.deepEqual(findViolations([[smartTelemetrySampleFile, smartTelemetrySampleConsumer]]), []);
+  assert.match(findViolations([[smartTelemetrySampleFile,
+    smartTelemetrySampleConsumer + "\nfn runtime_smart_context_rewrite_telemetry_record_quality_risk() {}",
+  ]]).join("\n"), /restored Rust Smart Context rewrite telemetry selection\/quality policy/u);
   const compatibilityDiagnosticsConsumer = [
     "prodex_mojo_core::runtime::compatibility_tool_surface(plan[3])",
     "prodex_mojo_core::runtime::compatibility_continuation_surface(plan[4])",
@@ -9696,7 +9759,8 @@ function selfTest() {
   assert.deepEqual(findViolations([[SMART_CONTEXT_DUPLICATE_ADAPTER_FILE,
     "fn prodex_smart_context_duplicate_text_plan_v1() {}; fn prodex_smart_context_rewrite_validation_reason_v1() {}"]]), []);
   assert.deepEqual(findViolations([[SMART_CONTEXT_DUPLICATE_MOJO_FILE,
-    '@export("prodex_smart_context_duplicate_text_plan_v1") def smart_context_duplicate_text_plan_kernel() {}']]), []);
+    '@export("prodex_smart_context_duplicate_text_plan_v1") def smart_context_duplicate_text_plan_kernel() {}\n' +
+    '@export("prodex_smart_context_rewrite_sample_policy_v1") smart_context_rewrite_quality_metrics_valid( smart_context_rewrite_quality_metrics_risky( rich_view_matches_literal["ok_surgical_rehydrate"]']]), []);
   assert.match(findViolations([[SMART_CONTEXT_DUPLICATE_MOJO_FILE,
     "def smart_context_duplicate_text_plan_kernel() {}"]]).join("\n"),
   /duplicate-text decision must remain Mojo-owned/u);

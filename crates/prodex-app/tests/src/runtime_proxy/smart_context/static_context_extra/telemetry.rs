@@ -215,3 +215,42 @@ fn smart_context_auto_rehydrate_plan_defers_over_budget_refs() {
             .contains("prodex-artifact:")
     );
 }
+
+
+#[test]
+fn smart_context_production_telemetry_samples_use_compiled_mojo_inclusion_and_safety() {
+    let base = RuntimeSmartContextRewriteTelemetryRecord {
+        body_bytes_before: 900,
+        body_bytes_after: 300,
+        tokens_before: 300,
+        tokens_after: 100,
+        token_count_source: runtime_proxy_crate::SmartContextTokenCountSource::TokenizerCounted,
+        rewrite_kind: "rewritten".to_string(),
+        status: "ok_saved".to_string(),
+        ..RuntimeSmartContextRewriteTelemetryRecord::default()
+    };
+    let mut ignored = base.clone();
+    ignored.rewrite_kind = "skipped".to_string();
+    ignored.status = "no_change".to_string();
+
+    let mut safe_minified = base.clone();
+    safe_minified.rewrite_kind = "minified".to_string();
+    safe_minified.status = "ok_minified".to_string();
+
+    let mut bad_quality = base.clone();
+    bad_quality.invalid_tool_call_continuation = true;
+
+    let mut fallback = ignored.clone();
+    fallback.fallback_reason = Some("critical_signal_loss".to_string());
+
+    let mut no_token_savings = base.clone();
+    no_token_savings.tokens_after = base.tokens_before;
+
+    let samples = runtime_smart_context_rewrite_telemetry_samples(&[
+        ignored, base, safe_minified, bad_quality, fallback, no_token_savings,
+    ]);
+    assert_eq!(samples.len(), 5);
+    assert_eq!(samples.iter().map(|sample| sample.safe).collect::<Vec<_>>(),
+        [true, true, false, false, false]);
+    assert_eq!(samples.iter().filter(|sample| sample.fallback).count(), 1);
+}

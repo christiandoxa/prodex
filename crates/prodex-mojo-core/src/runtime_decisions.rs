@@ -7,8 +7,9 @@ pub use optimistic_candidate::{
 #[path = "runtime_decisions/rewrite_safety.rs"]
 mod rewrite_safety;
 pub use rewrite_safety::{
-    SmartContextJsonShapeViolation, SmartContextRewriteQualityInput, smart_context_json_shape_scan,
-    smart_context_rewrite_telemetry_quality_risk,
+    SmartContextJsonShapeViolation, SmartContextRewriteQualityInput,
+    SmartContextRewriteSamplePolicyInput, smart_context_json_shape_scan,
+    smart_context_rewrite_sample_policy, smart_context_rewrite_telemetry_quality_risk,
 };
 
 mod rehydrate;
@@ -316,6 +317,20 @@ unsafe extern "C" {
         count: i64,
         previous_nodes: u64,
         violation: *mut i64,
+    ) -> i64;
+    fn prodex_smart_context_rewrite_sample_policy_v1(
+        abi_version: i64,
+        kind_address: u64,
+        kind_length: i64,
+        status_address: u64,
+        status_length: i64,
+        fallback: i64,
+        tokens_before: u64,
+        tokens_after: u64,
+        metrics_address: u64,
+        metric_count: i64,
+        output_address: u64,
+        output_capacity: i64,
     ) -> i64;
     fn prodex_smart_context_rewrite_quality_risk_v1(
         metrics_address: u64,
