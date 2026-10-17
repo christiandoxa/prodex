@@ -1,6 +1,6 @@
 from std.memory import Pointer
 from rich_types import ProdexRichStringView
-from rich_text import rich_view_prefix
+from rich_text import rich_view_prefix, rich_view_valid
 from parsed_json import (
     ParsedJson, ParsedJsonNode, JSON_STRING, JSON_ARRAY, JSON_OBJECT,
     pj_kind, pj_child, pj_next, pj_text, pj_field, pj_string_field, pj_is,
@@ -8,7 +8,7 @@ from parsed_json import (
 )
 from json_sink import JsonSink, js_byte, js_string, js_raw, js_literal
 from chat_tool_shapes import tool_function, tool_namespace, tool_search, tool_mcp
-from chat_tool_names import tool_namespaced_string
+from chat_tool_names import tool_namespaced_string, tool_name_split_namespace_bounds
 
 
 def chat_web_search_tool(tree: ParsedJson, node: Int64) -> Bool:
@@ -184,4 +184,33 @@ def prodex_mojo_chat_tools_v1(
     var meta = Pointer[mut=True, Int64, MutUntrackedOrigin](unsafe_from_address=Int(metadata_address))
     meta[unsafe_offset=0] = Int64(present)
     meta[unsafe_offset=1] = sink.written
+    return 0
+
+
+@export("prodex_chat_tool_namespace_split_v1")
+def prodex_chat_tool_namespace_split_v1(
+    abi_version: Int64,
+    name_address: UInt,
+    name_length: Int64,
+    output_address: UInt,
+    output_capacity: Int64,
+) abi("C") -> Int64:
+    if abi_version != 1:
+        return 4
+    if (
+        name_length < 0
+        or (name_length > 0 and name_address == 0)
+        or output_address == 0 or output_capacity < 3
+    ):
+        return 1
+    var view = ProdexRichStringView(name_address, UInt(name_length))
+    if not rich_view_valid(view, 0x7FFFFFFFFFFFFFFF):
+        return 1
+    var bounds = tool_name_split_namespace_bounds(view)
+    var out = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    out[unsafe_offset=0] = Int64(bounds[0])
+    out[unsafe_offset=1] = bounds[1]
+    out[unsafe_offset=2] = bounds[2]
     return 0

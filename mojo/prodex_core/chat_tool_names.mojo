@@ -1,6 +1,6 @@
 from std.memory import Pointer
 from rich_types import ProdexRichStringView
-from rich_text import rich_view_ptr, rich_view_prefix, rich_codepoint_width
+from rich_text import rich_view_ptr, rich_view_prefix, rich_codepoint_width, rich_trim_bounds
 from parsed_json import pj_trim, pj_less
 from json_sink import JsonSink, js_byte, js_literal, js_escaped
 
@@ -93,3 +93,41 @@ def tool_name_sort(values: Pointer[mut=True, ProdexRichStringView, _], count: In
         end -= 1
         tool_name_swap(values, 0, end)
         tool_name_sift(values, 0, end)
+
+
+# Companion decoder of tool_namespaced_string: prefer the last explicit
+# double-hyphen separator when both sides are nonblank; otherwise recover
+# the final double-underscore delimiter of the exact mcp__ name.
+def tool_name_split_namespace_bounds(
+    value: ProdexRichStringView,
+) -> Tuple[Bool, Int64, Int64]:
+    var length = Int64(value.len)
+    var bytes = rich_view_ptr(value)
+    var last_double_hyphen: Int64 = -1
+    for index in range(max(length - 1, 0)):
+        if bytes[unsafe_offset=index] == 45 and bytes[unsafe_offset=index + 1] == 45:
+            last_double_hyphen = index
+    if last_double_hyphen >= 0:
+        var namespace = ProdexRichStringView(value.ptr, UInt(last_double_hyphen))
+        var tool = ProdexRichStringView(
+            value.ptr + UInt(last_double_hyphen + 2),
+            UInt(length - last_double_hyphen - 2),
+        )
+        var ns = rich_trim_bounds(namespace)
+        var name = rich_trim_bounds(tool)
+        if ns[0] < ns[1] and name[0] < name[1]:
+            return (True, last_double_hyphen, last_double_hyphen + 2)
+    if rich_view_prefix["mcp__"](value, False):
+        var last_pair: Int64 = -1
+        for index in range(Int64(5), max(length - 1, Int64(5))):
+            if bytes[unsafe_offset=index] == 95 and bytes[unsafe_offset=index + 1] == 95:
+                last_pair = index
+        if last_pair >= 0:
+            var tool = ProdexRichStringView(
+                value.ptr + UInt(last_pair + 2),
+                UInt(length - last_pair - 2),
+            )
+            var name = rich_trim_bounds(tool)
+            if name[0] < name[1]:
+                return (True, last_pair, last_pair + 2)
+    return (False, Int64(0), Int64(0))

@@ -156,6 +156,27 @@ fn provider_core_split_flat_namespace_tool_name_handles_app_shapes() {
 }
 
 #[test]
+fn compiled_namespace_split_preserves_deepseek_anthropic_and_mcp_shapes() {
+    for (input, namespace, name) in [
+        ("functions__lookup", None, "functions__lookup"),
+        ("mcp__repo__東京🧭", Some("mcp__repo"), "東京🧭"),
+        ("mcp____tool", Some("mcp__"), "tool"),
+        ("mcp__repo__tool--exec", Some("mcp__repo__tool"), "exec"),
+        ("mcp__repo__tool--", Some("mcp__repo"), "tool--"),
+        ("mcp__repo__\u{2003}", None, "mcp__repo__\u{2003}"),
+        ("namespace--sub--tool", Some("namespace--sub"), "tool"),
+        ("日本語--🔥", Some("日本語"), "🔥"),
+        ("--empty_ns", None, "--empty_ns"),
+        ("namespace--\u{3000}", None, "namespace--\u{3000}"),
+        ("shell", None, "shell"),
+    ] {
+        let (actual_namespace, actual_name) = provider_core_split_flat_namespace_tool_name(input);
+        assert_eq!(actual_namespace.as_deref(), namespace, "{input:?}");
+        assert_eq!(actual_name, name, "{input:?}");
+    }
+}
+
+#[test]
 fn provider_core_chat_compatible_response_maps_tools_usage_and_metadata() {
     let response = serde_json::json!({
         "id": "chatcmpl_1",

@@ -20,24 +20,12 @@ pub fn provider_core_chat_compatible_tool_call_thought_signature(
 }
 
 pub fn provider_core_split_flat_namespace_tool_name(name: &str) -> (Option<String>, String) {
-    if let Some((namespace, tool_name)) = name.rsplit_once("--")
-        && !namespace.trim().is_empty()
-        && !tool_name.trim().is_empty()
+    match prodex_mojo_core::chat_tool_name_policy::split_flat_namespace_tool_name(name)
+        .expect("compiled Mojo chat tool namespace decoder returned invalid output")
     {
-        return (Some(namespace.to_string()), tool_name.to_string());
+        Some((namespace, tool)) => (Some(namespace.to_string()), tool.to_string()),
+        None => (None, name.to_string()),
     }
-    let Some(rest) = name.strip_prefix("mcp__") else {
-        return (None, name.to_string());
-    };
-    let Some(index) = rest.rfind("__") else {
-        return (None, name.to_string());
-    };
-    let namespace = format!("mcp__{}", &rest[..index]);
-    let tool_name = rest[index + 2..].to_string();
-    if tool_name.trim().is_empty() {
-        return (None, name.to_string());
-    }
-    (Some(namespace), tool_name)
 }
 
 pub(super) fn provider_core_chat_compatible_responses_tool_call_plan(
