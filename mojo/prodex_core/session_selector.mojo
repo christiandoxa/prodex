@@ -1,6 +1,6 @@
 from std.memory import Pointer
 
-from rich_text import rich_view_ptr, rich_view_valid
+from rich_text import rich_view_ptr, rich_view_valid, rich_views_equal
 from rich_types import ProdexRichStringView
 
 comptime SESSION_SELECTOR_ABI_VERSION: Int64 = 1
@@ -14,6 +14,13 @@ comptime SESSION_STATE_DB_SOURCE_NONE: Int64 = 0
 comptime SESSION_STATE_DB_SOURCE_NORMALIZED_THREAD_ID: Int64 = 1
 comptime SESSION_STATE_DB_SOURCE_THREAD_ID: Int64 = 2
 comptime SESSION_STATE_DB_SOURCE_PATH_STEM: Int64 = 3
+
+
+@fieldwise_init
+struct SessionRecentWorkspaceCandidate(Copyable):
+    var modified_epoch: Int64
+    var absolute: Int64
+    var workspace: ProdexRichStringView
 
 
 def session_file_name_suffix_length(
@@ -168,6 +175,22 @@ def session_report_query_contains(
         if matched:
             return True
         start += 1
+    return False
+
+
+def session_recent_workspace_seen(
+    candidates: Pointer[mut=False, SessionRecentWorkspaceCandidate, _],
+    output: Pointer[mut=False, Int64, _],
+    selected_count: Int64,
+    candidate_index: Int64,
+) -> Bool:
+    var workspace = candidates[unsafe_offset=candidate_index].workspace.copy()
+    for selected in range(selected_count):
+        var selected_index = output[unsafe_offset=selected + 1]
+        if rich_views_equal(
+            workspace, candidates[unsafe_offset=selected_index].workspace
+        ):
+            return True
     return False
 
 
@@ -342,6 +365,78 @@ def prodex_session_state_db_row_match_plan_v1(
 
     output[unsafe_offset=0] = match_kind
     output[unsafe_offset=1] = session_id_source
+    return SESSION_SELECTOR_OK
+
+
+@export("prodex_session_recent_workspace_plan_v1")
+def prodex_session_recent_workspace_plan_v1(
+    abi_version: Int64,
+    candidates_address: UInt,
+    candidates_count: Int64,
+    max_workspaces: Int64,
+    output_address: UInt,
+    output_capacity: Int64,
+    scratch_address: UInt,
+    scratch_capacity: Int64,
+) abi("C") -> Int64:
+    if (
+        abi_version != SESSION_SELECTOR_ABI_VERSION
+        or candidates_count < 0
+        or max_workspaces < 0
+        or output_address == 0
+        or output_capacity < 1
+        or scratch_capacity < candidates_count
+        or candidates_count > 0 and candidates_address == 0
+        or candidates_count > 0 and scratch_address == 0
+    ):
+        return SESSION_SELECTOR_INVALID
+    var selected_limit = max_workspaces
+    if selected_limit > candidates_count:
+        selected_limit = candidates_count
+    if output_capacity < selected_limit + 1:
+        return SESSION_SELECTOR_INVALID
+
+    var candidates = Pointer[
+        mut=False, SessionRecentWorkspaceCandidate, ImmUntrackedOrigin
+    ](unsafe_from_address=Int(candidates_address))
+    var output = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    var scratch = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(scratch_address)
+    )
+    for index in range(candidates_count):
+        var candidate = candidates[unsafe_offset=index].copy()
+        if (
+            (candidate.absolute != 0 and candidate.absolute != 1)
+            or not rich_view_valid(candidate.workspace, 0x7FFFFFFFFFFFFFFF)
+        ):
+            return SESSION_SELECTOR_INVALID
+        scratch[unsafe_offset=index] = 0
+    output[unsafe_offset=0] = 0
+
+    var selected_count: Int64 = 0
+    while selected_count < selected_limit:
+        var best_index: Int64 = -1
+        for index in range(candidates_count):
+            if scratch[unsafe_offset=index] == 1:
+                continue
+            if best_index < 0 or candidates[unsafe_offset=index].modified_epoch > candidates[
+                unsafe_offset=best_index
+            ].modified_epoch:
+                best_index = index
+        if best_index < 0:
+            break
+        scratch[unsafe_offset=best_index] = 1
+        if candidates[unsafe_offset=best_index].absolute != 1:
+            continue
+        if session_recent_workspace_seen(
+            candidates, output, selected_count, best_index
+        ):
+            continue
+        output[unsafe_offset=selected_count + 1] = best_index
+        selected_count += 1
+    output[unsafe_offset=0] = selected_count
     return SESSION_SELECTOR_OK
 
 

@@ -115,6 +115,12 @@ fn recent_session_workspaces_skip_invalid_and_relative_cwds() {
         collect_recent_session_workspaces(&root, 16).expect("workspace scan should succeed");
     workspaces.sort();
     assert_eq!(workspaces, vec![workspace_a, workspace_b]);
+    assert_eq!(
+        collect_recent_session_workspaces(&root, 1)
+            .expect("limited workspace scan should succeed")
+            .len(),
+        1
+    );
     assert!(
         collect_recent_session_workspaces(&root, 0)
             .expect("zero-limit scan should succeed")

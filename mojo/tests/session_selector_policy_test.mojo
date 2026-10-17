@@ -3,7 +3,9 @@ from std.collections.list import List
 
 from rich_types import ProdexRichStringView
 from session_selector import (
+    SessionRecentWorkspaceCandidate,
     prodex_session_report_query_matches_v1,
+    prodex_session_recent_workspace_plan_v1,
     prodex_session_state_db_row_match_plan_v1,
     prodex_session_selector_match_plan_v1,
     prodex_session_selector_path_span_v1,
@@ -66,6 +68,24 @@ def call_state_db_row_plan(
         UInt(Int(selector.unsafe_ptr())),
         Int64(selector.byte_length()),
         UInt(Int(output.unsafe_ptr())),
+    )
+
+
+def call_recent_workspace_plan(
+    candidates: List[SessionRecentWorkspaceCandidate],
+    max_workspaces: Int64,
+    output: List[Int64],
+    scratch: List[Int64],
+) -> Int64:
+    return prodex_session_recent_workspace_plan_v1(
+        1,
+        UInt(Int(candidates.unsafe_ptr())),
+        Int64(len(candidates)),
+        max_workspaces,
+        UInt(Int(output.unsafe_ptr())),
+        Int64(len(output)),
+        UInt(Int(scratch.unsafe_ptr())),
+        Int64(len(scratch)),
     )
 
 
@@ -212,8 +232,40 @@ def test_state_db_row_plan_preserves_affinity_precedence() raises:
     assert output[1] == 0
 
 
+def test_recent_workspace_plan_orders_deduplicates_and_limits() raises:
+    var workspace_a = String("/home/test-user/workspace-a")
+    var workspace_b = String("/home/test-user/workspace-b")
+    var relative = String("relative/workspace")
+    var workspace_c = String("/home/test-user/workspace-c")
+    var candidates = List[SessionRecentWorkspaceCandidate]()
+    candidates.append(SessionRecentWorkspaceCandidate(10, 1, view(workspace_a)))
+    candidates.append(SessionRecentWorkspaceCandidate(30, 1, view(workspace_b)))
+    candidates.append(SessionRecentWorkspaceCandidate(20, 1, view(workspace_a)))
+    candidates.append(SessionRecentWorkspaceCandidate(40, 0, view(relative)))
+    candidates.append(SessionRecentWorkspaceCandidate(20, 1, view(workspace_c)))
+    var output = List[Int64]()
+    for _ in range(4):
+        output.append(-1)
+    var scratch = List[Int64]()
+    for _ in range(5):
+        scratch.append(-1)
+    assert call_recent_workspace_plan(candidates, 3, output, scratch) == 0
+    assert output[0] == 3
+    assert output[1] == 1
+    assert output[2] == 2
+    assert output[3] == 4
+    assert call_recent_workspace_plan(candidates, 2, output, scratch) == 0
+    assert output[0] == 2
+    assert output[1] == 1
+    assert output[2] == 2
+    var short_output = List[Int64]()
+    short_output.append(-1)
+    assert call_recent_workspace_plan(candidates, 3, short_output, scratch) == 1
+
+
 def main() raises:
     test_exact_prefix_and_mutation_sensitivity()
     test_report_query_matches_fixed_fields()
     test_path_span_preserves_stem_and_window_contract()
     test_state_db_row_plan_preserves_affinity_precedence()
+    test_recent_workspace_plan_orders_deduplicates_and_limits()
