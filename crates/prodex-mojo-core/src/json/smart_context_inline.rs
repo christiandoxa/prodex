@@ -121,22 +121,7 @@ pub fn smart_context_inline_plan(
     };
     let mut metadata = [-9_i64; 3];
     call(true, &mut [], &mut metadata)?;
-    let written = usize::try_from(metadata[0]).map_err(|_| MojoError::InvalidOutput)?;
-    let valid = metadata[1] >= 0;
-    if !matches!(metadata[2], 0 | 1)
-        || metadata[1] < -1
-        || (!valid && (written != 0 || !matches!(operation, SmartContextInlineOperation::Expand)))
-    {
-        return Err(MojoError::InvalidOutput);
-    }
-    let shape_valid = match operation {
-        SmartContextInlineOperation::Probe => valid && written == 0,
-        SmartContextInlineOperation::Rewrite => valid && (written > 0) == (metadata[1] > 0),
-        SmartContextInlineOperation::Expand => metadata[2] == 0 && valid == (written > 0),
-    };
-    if !shape_valid {
-        return Err(MojoError::InvalidOutput);
-    }
+    let (written, valid) = validate_inline_metadata(metadata, operation)?;
     let body = if written == 0 {
         None
     } else {
@@ -162,6 +147,29 @@ pub fn smart_context_inline_plan(
         candidate_limit_exceeded: metadata[2] == 1,
         valid,
     })
+}
+
+fn validate_inline_metadata(
+    metadata: [i64; 3],
+    operation: SmartContextInlineOperation,
+) -> Result<(usize, bool), MojoError> {
+    let written = usize::try_from(metadata[0]).map_err(|_| MojoError::InvalidOutput)?;
+    let valid = metadata[1] >= 0;
+    if !matches!(metadata[2], 0 | 1)
+        || metadata[1] < -1
+        || (!valid && (written != 0 || !matches!(operation, SmartContextInlineOperation::Expand)))
+    {
+        return Err(MojoError::InvalidOutput);
+    }
+    let shape_valid = match operation {
+        SmartContextInlineOperation::Probe => valid && written == 0,
+        SmartContextInlineOperation::Rewrite => valid && (written > 0) == (metadata[1] > 0),
+        SmartContextInlineOperation::Expand => metadata[2] == 0 && valid == (written > 0),
+    };
+    if !shape_valid {
+        return Err(MojoError::InvalidOutput);
+    }
+    Ok((written, valid))
 }
 
 #[cfg(test)]
