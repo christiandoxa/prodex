@@ -1,5 +1,5 @@
 use super::frame_data::{
-    build_all_quota_watch_tui_row, quota_human_tui_compact_label, quota_watch_profile_fields,
+    build_all_quota_watch_tui_row, quota_human_tui_has_compact_label, quota_watch_profile_fields,
 };
 use super::*;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
@@ -23,6 +23,7 @@ pub(crate) struct AllQuotaWatchTuiTable {
     pub(crate) rows: Vec<AllQuotaWatchTuiRow>,
 }
 
+#[derive(serde::Deserialize)]
 pub(crate) struct AllQuotaWatchTuiRow {
     pub(crate) profile: Vec<String>,
     pub(crate) current: Vec<String>,
@@ -450,7 +451,7 @@ fn quota_human_tui_header_spans(line: &str) -> Option<Vec<Span<'_>>> {
     {
         return Some(vec![Span::styled(line, tui_title_style())]);
     }
-    if quota_human_tui_compact_label(line).is_some() {
+    if quota_human_tui_has_compact_label(line) {
         let Some((label, value)) = line.split_once(':') else {
             return Some(vec![Span::raw(line)]);
         };

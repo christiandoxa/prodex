@@ -701,17 +701,10 @@ def prodex_quota_watch_action_v1(
     return 0
 
 
-@export("prodex_quota_watch_reset_kind_v1")
-def prodex_quota_watch_reset_kind_v1(
-    abi_version: Int64,
+def quota_watch_reset_kind(
     address: UInt64,
     length: Int64,
-    result_address: UInt64,
-) abi("C") -> Int64:
-    if abi_version != QUOTA_WATCH_ABI_VERSION:
-        return 4
-    if length < 0 or (length > 0 and address == 0) or result_address == 0:
-        return QUOTA_WATCH_INVALID
+) -> Int64:
     var start: Int64 = 0
     var source = Pointer[mut=False, UInt8, ImmUntrackedOrigin](
         unsafe_from_address=Int(address)
@@ -730,7 +723,21 @@ def prodex_quota_watch_reset_kind_v1(
         address, length, StringSlice("; reset credits:")
     ):
         kind = WATCH_RESET_CREDITS
-    quota_watch_write_i64(result_address, 0, kind)
+    return kind
+
+
+@export("prodex_quota_watch_reset_kind_v1")
+def prodex_quota_watch_reset_kind_v1(
+    abi_version: Int64,
+    address: UInt64,
+    length: Int64,
+    result_address: UInt64,
+) abi("C") -> Int64:
+    if abi_version != QUOTA_WATCH_ABI_VERSION:
+        return 4
+    if length < 0 or (length > 0 and address == 0) or result_address == 0:
+        return QUOTA_WATCH_INVALID
+    quota_watch_write_i64(result_address, 0, quota_watch_reset_kind(address, length))
     return 0
 
 
