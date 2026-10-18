@@ -2,7 +2,7 @@
 
 use std::collections::BTreeSet;
 
-use crate::deepseek_bridge::request_policy::{detail, try_plan_value};
+use crate::deepseek_bridge::request_policy::{try_plan_value, validate_plan};
 use prodex_mojo_core::rich::DeepSeekRequestPolicyOperation;
 
 use super::{
@@ -50,26 +50,12 @@ pub fn deepseek_provider_core_validate_tool_choice_shape(
         false,
         provider_label,
     )?;
-    match plan.tag {
-        0 => Ok(()),
-        1 => Err(format!(
-            "{provider_label} tool_choice string `{}` is not supported",
-            detail(&source, plan).unwrap_or_default()
-        )),
-        2 => Err(format!(
-            "{provider_label} tool_choice must be a string or object"
-        )),
-        3 => Err(format!(
-            "{provider_label} named tool_choice requires a function name"
-        )),
-        4 => Err(format!(
-            "{provider_label} tool_choice type `{}` is not supported",
-            detail(&source, plan).unwrap_or_default()
-        )),
-        _ => Err(format!(
-            "{provider_label} tool_choice validation returned an unknown result"
-        )),
-    }
+    validate_plan(
+        DeepSeekRequestPolicyOperation::ToolChoice,
+        &source,
+        plan,
+        provider_label,
+    )
 }
 
 pub fn deepseek_provider_core_validate_tool_choice_target(

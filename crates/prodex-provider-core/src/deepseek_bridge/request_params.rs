@@ -6,7 +6,7 @@ mod metadata;
 mod reasoning;
 mod reject;
 
-use super::request_policy::plan_value;
+use super::request_policy::{try_plan_value, validate_plan};
 use prodex_mojo_core::rich::{
     DeepSeekKernelInput, DeepSeekKernelOperation, DeepSeekRequestPolicyOperation,
 };
@@ -41,17 +41,18 @@ pub fn deepseek_provider_core_stop_from_responses_request(
     value: &serde_json::Value,
     provider_label: &str,
 ) -> Result<Option<serde_json::Value>, String> {
-    let (_, plan) = plan_value(value, DeepSeekRequestPolicyOperation::Stop, false);
-    let error = match plan.tag {
-        0 => None,
-        1 => Some("stop must be a string or array of strings"),
-        2 => Some("supports at most 16 stop sequences"),
-        3 => Some("stop sequences must be strings"),
-        _ => Some("stop validation returned an unknown result"),
-    };
-    if let Some(error) = error {
-        return Err(format!("{provider_label} {error}"));
-    }
+    let (source, plan) = try_plan_value(
+        value,
+        DeepSeekRequestPolicyOperation::Stop,
+        false,
+        provider_label,
+    )?;
+    validate_plan(
+        DeepSeekRequestPolicyOperation::Stop,
+        &source,
+        plan,
+        provider_label,
+    )?;
     Ok(value
         .get("stop")
         .or_else(|| value.get("stop_sequences"))
@@ -72,21 +73,18 @@ fn validate_primitive_request_fields_mojo(
     value: &serde_json::Value,
     provider_label: &str,
 ) -> Result<(), String> {
-    let (_, plan) = plan_value(value, DeepSeekRequestPolicyOperation::PrimitiveCore, false);
-    let error = match plan.tag {
-        0 => None,
-        1 => Some("temperature must be a number"),
-        2 => Some("top_p must be a number"),
-        3 => Some("max_output_tokens must be a positive integer"),
-        4 => Some("max_tokens must be a positive integer"),
-        5 => Some("max_completion_tokens must be a positive integer"),
-        6 => Some("logprobs must be a boolean"),
-        _ => Some("request validation returned an unknown result"),
-    };
-    match error {
-        Some(error) => Err(format!("{provider_label} {error}")),
-        None => Ok(()),
-    }
+    let (source, plan) = try_plan_value(
+        value,
+        DeepSeekRequestPolicyOperation::PrimitiveCore,
+        false,
+        provider_label,
+    )?;
+    validate_plan(
+        DeepSeekRequestPolicyOperation::PrimitiveCore,
+        &source,
+        plan,
+        provider_label,
+    )
 }
 
 fn insert_primitive_request_fields_mojo(
@@ -118,17 +116,18 @@ pub fn deepseek_provider_core_top_logprobs_from_responses_request(
     value: &serde_json::Value,
     provider_label: &str,
 ) -> Result<Option<serde_json::Value>, String> {
-    let (_, plan) = plan_value(value, DeepSeekRequestPolicyOperation::TopLogprobs, false);
-    let error = match plan.tag {
-        0 => None,
-        1 => Some("top_logprobs must be an integer"),
-        2 => Some("top_logprobs must be <= 20"),
-        3 => Some("top_logprobs requires logprobs=true"),
-        _ => Some("top_logprobs validation returned an unknown result"),
-    };
-    if let Some(error) = error {
-        return Err(format!("{provider_label} {error}"));
-    }
+    let (source, plan) = try_plan_value(
+        value,
+        DeepSeekRequestPolicyOperation::TopLogprobs,
+        false,
+        provider_label,
+    )?;
+    validate_plan(
+        DeepSeekRequestPolicyOperation::TopLogprobs,
+        &source,
+        plan,
+        provider_label,
+    )?;
     Ok(value.get("top_logprobs").cloned())
 }
 

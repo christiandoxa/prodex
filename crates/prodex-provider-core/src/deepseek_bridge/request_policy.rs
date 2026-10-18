@@ -39,6 +39,23 @@ pub(super) fn detail(source: &str, plan: DeepSeekRequestPolicyPlan) -> Option<St
     serde_json::from_str::<String>(&source[start..end]).ok()
 }
 
+pub(super) fn validate_plan(
+    operation: DeepSeekRequestPolicyOperation,
+    source: &str,
+    plan: DeepSeekRequestPolicyPlan,
+    provider_label: &str,
+) -> Result<(), String> {
+    let detail = detail(source, plan);
+    prodex_mojo_core::rich::deepseek_request_diagnostic(
+        operation,
+        plan.tag,
+        provider_label,
+        detail.as_deref().unwrap_or_default(),
+    )
+    .map_err(|error| format!("{provider_label} request diagnostic failed: {error:?}"))?
+    .map_or(Ok(()), Err)
+}
+
 fn bool_policy(
     operation: DeepSeekRequestPolicyOperation,
     input: &str,

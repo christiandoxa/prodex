@@ -150,6 +150,9 @@ pub use deepseek::{
     deepseek_replay_item_kind, deepseek_request_issue_message, deepseek_request_policy,
     deepseek_responses_request_transform, deepseek_tool_shape_issue_message,
 };
+#[path = "rich/deepseek/request_diagnostic.rs"]
+mod deepseek_request_diagnostic;
+pub use deepseek_request_diagnostic::deepseek_request_diagnostic;
 #[path = "rich/openai_compat.rs"]
 mod openai_compat;
 pub use openai_compat::{
