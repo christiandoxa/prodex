@@ -171,6 +171,12 @@ const PING_SUMMARY_CALLER_TEST_FILE = "crates/prodex-app/src/app_commands/ping_t
 const PING_SUMMARY_ADAPTER_FILE = "crates/prodex-mojo-core/src/rich/ping_protocol.rs";
 const PING_SUMMARY_MOJO_FILE = "mojo/prodex_core/ping_protocol.mojo";
 const PROMOTED_FILES = [
+  "crates/prodex-app/src/runtime_proxy/smart_context.rs",
+  "crates/prodex-app/src/runtime_proxy/smart_context/runtime_rehydrate/basic.rs",
+  "crates/prodex-app/src/runtime_proxy/smart_context/runtime_rehydrate/text_tests.rs",
+  "crates/prodex-mojo-core/src/smart_context_artifact_ref/text.rs",
+  "crates/prodex-mojo-core/src/smart_context_artifact_ref/text_tests.rs",
+  "mojo/prodex_core/smart_context_artifact_text.mojo",
   "crates/prodex-app/src/runtime_proxy/smart_context/artifact_refs_tests.rs",
   "crates/prodex-mojo-core/src/json/smart_context_artifact_projection.rs",
   "crates/prodex-mojo-core/src/json/smart_context_artifact_projection_tests.rs",
@@ -7462,6 +7468,33 @@ export function findViolations(files) {
     return [];
   });
   const smartContextArtifactRefViolations = files.flatMap(([filePath, contents]) => {
+    if (filePath === "crates/prodex-app/src/runtime_proxy/smart_context.rs") {
+      return /#\[cfg\(test\)\]\s*mod artifact_manifest;/u.test(contents) &&
+        /#\[cfg\(test\)\]\s*use artifact_manifest::\*;/u.test(contents)
+          ? [] : [filePath + ": artifact marker fixture helpers must not compile in production"];
+    }
+    if (filePath === "crates/prodex-app/src/runtime_proxy/smart_context/runtime_rehydrate/basic.rs") {
+      const required = ["replace_artifact_reference(", "rehydrate_artifact_lines(", "artifact_line_byte_len("];
+      const retired = ["fn runtime_smart_context_reference_replacement(", "fn runtime_smart_context_text_is_artifact_marker_summary(", "fn runtime_smart_context_rehydrated_artifact_text(", ".replace(&reference.marker"];
+      return required.every((marker) => contents.includes(marker)) && retired.every((marker) => !contents.includes(marker))
+        ? [] : [filePath + ": restored Rust artifact text selection or replacement"];
+    }
+    if (filePath === "crates/prodex-mojo-core/src/smart_context_artifact_ref/text.rs") {
+      return ["fn prodex_smart_context_artifact_text_v1(", "pub fn rehydrate_artifact_lines<'a>(", "pub fn artifact_line_byte_len(", "pub fn replace_artifact_reference(", "match metadata[3]"].filter((marker) => !contents.includes(marker))
+        .map((marker) => filePath + ": compiled artifact text ABI missing " + marker);
+    }
+    if (filePath === "crates/prodex-mojo-core/src/smart_context_artifact_ref/text_tests.rs") {
+      return ["compiled_artifact_lines_preserve_endings_ranges_and_legacy_precedence", "compiled_artifact_replacement_preserves_summary_and_marker_precedence", "compiled_artifact_text_abi_rejects_invalid_input_and_capacity_without_output_writes", "compiled_artifact_replacement_handles_long_repeated_prefixes_without_shared_state", "compiled_utf8_validation_preserves_multibyte_and_invalid_sequences_at_ascii_block_edges", "compiled_artifact_identity_plans_name_the_exact_existing_source"].filter((marker) => !contents.includes(marker))
+        .map((marker) => filePath + ": artifact text ABI coverage missing " + marker);
+    }
+    if (filePath === "mojo/prodex_core/smart_context_artifact_text.mojo") {
+      return ['@export("prodex_smart_context_artifact_text_v1")', "at_prefix_table(", "at_line_spans(", "at_summary(", "rich_view_valid(text"].filter((marker) => !contents.includes(marker))
+        .map((marker) => filePath + ": compiled artifact text owner missing " + marker);
+    }
+    if (filePath === "crates/prodex-app/src/runtime_proxy/smart_context/runtime_rehydrate/text_tests.rs") {
+      return ["compiled_artifact_text_rehydrates_multiple_ranges_with_original_line_endings", "compiled_artifact_text_preserves_ordered_cascading_replacements"].filter((marker) => !contents.includes(marker))
+        .map((marker) => filePath + ": production artifact text caller regression missing " + marker);
+    }
     const requirements = new Map([
       ["crates/prodex-mojo-core/src/json/smart_context_artifact_projection.rs", ["fn prodex_smart_context_artifact_projection_v1(", "fn prodex_smart_context_artifact_alias_count_v1(", "transform_json_with_views("]],
       ["crates/prodex-mojo-core/src/json/smart_context_artifact_projection_tests.rs", ["compiled_artifact_projection_reuses_the_canonical_token_and_range_parser", "compiled_artifact_projection_abi_rejects_invalid_inputs_before_output_writes"]],
@@ -7501,8 +7534,9 @@ export function findViolations(files) {
       return violations;
     }
     if (filePath === "crates/prodex-app/src/runtime_proxy/smart_context/artifact_manifest.rs") {
-      return !contents.includes("fn runtime_smart_context_artifact_id_valid(")
-        ? [] : [filePath + ": retired inline-reference ID wrapper must not return"];
+      return contents.includes("#![cfg(test)]") &&
+        !contents.includes("fn runtime_smart_context_artifact_id_valid(") && !contents.includes(".strip_prefix(")
+          ? [] : [filePath + ": artifact marker fixtures must stay test-only without retired wrappers"];
     }
     if (filePath === "crates/prodex-mojo-core/src/smart_context_artifact_ref.rs") {
       const required = [
@@ -11393,6 +11427,11 @@ function selfTest() {
     /restored Rust smart-context artifact-ref semantics/u);
   assert.match(findViolations([["mojo/prodex_core/smart_context_artifact_projection.mojo", "def unused(): pass"]]).join("\n"),
     /compiled artifact projection ownership missing/u);
+  assert.match(findViolations([["crates/prodex-app/src/runtime_proxy/smart_context/runtime_rehydrate/basic.rs",
+    "replace_artifact_reference(); rehydrate_artifact_lines(); fn runtime_smart_context_text_is_artifact_marker_summary() {}"]]).join("\n"),
+    /restored Rust artifact text selection or replacement/u);
+  assert.match(findViolations([["crates/prodex-app/src/runtime_proxy/smart_context.rs",
+    "mod artifact_manifest; use artifact_manifest::*;"]]).join("\n"), /fixture helpers must not compile in production/u);
   assert.match(findViolations([[DEEPSEEK_REQUEST_REJECT_FILE,
     'fn request_policy_error() { "deprecated and is not forwarded by Prodex" }']]).join("\n"),
     /restored Rust request diagnostic catalog/u);

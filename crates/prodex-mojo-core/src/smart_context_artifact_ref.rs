@@ -1,5 +1,11 @@
 use crate::MojoError;
 
+mod text;
+pub use text::{
+    ArtifactReplacement, ArtifactReplacementInput, artifact_line_byte_len,
+    rehydrate_artifact_lines, replace_artifact_reference,
+};
+
 const ABI_VERSION: i64 = 1;
 const MAX_CANONICAL_ID_BYTES: usize = 68;
 const MAX_BODY_MARKER_SCAN_BYTES: usize = 4 * 1024 * 1024;

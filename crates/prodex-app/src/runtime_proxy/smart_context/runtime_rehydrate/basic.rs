@@ -1,7 +1,7 @@
 use super::super::{
     RuntimeProxyRequest, RuntimeSmartContextArtifactReference, RuntimeSmartContextArtifactStore,
     RuntimeSmartContextLineRange, RuntimeSmartContextTransformStats,
-    runtime_smart_context_artifact_ref, runtime_smart_context_artifact_ref_occurrences_from_text,
+    runtime_smart_context_artifact_ref_occurrences_from_text,
     runtime_smart_context_collect_artifact_aliases,
     runtime_smart_context_collect_rehydratable_artifact_refs,
     runtime_smart_context_static_prompt_field_key,
@@ -72,9 +72,14 @@ pub(in crate::runtime_proxy::smart_context) fn runtime_smart_context_rehydrate_r
     store: &RuntimeSmartContextArtifactStore,
 ) -> Option<usize> {
     let artifact_text = store.get_text(&reference.id)?;
-    let rehydrated =
-        runtime_smart_context_rehydrated_artifact_reference_text(&artifact_text, reference)?;
-    runtime_proxy_crate::smart_context_estimate_tokens_from_body_bytes(rehydrated.len())
+    let (ranges, legacy) = artifact_line_ranges(reference);
+    let bytes = prodex_mojo_core::smart_context_artifact_ref::artifact_line_byte_len(
+        &artifact_text,
+        &ranges,
+        legacy,
+    )
+    .expect("compiled artifact line measurement returned invalid output")?;
+    runtime_proxy_crate::smart_context_estimate_tokens_from_body_bytes(bytes)
         .try_into()
         .ok()
 }
@@ -205,10 +210,22 @@ fn runtime_smart_context_rehydrate_text(
         else {
             continue;
         };
-        let Some((replacement, stop)) =
-            runtime_smart_context_reference_replacement(&next, &reference, rehydrated_text)
-        else {
+        use prodex_mojo_core::smart_context_artifact_ref::{
+            ArtifactReplacement, ArtifactReplacementInput, replace_artifact_reference,
+        };
+        let Some(replacement) = replace_artifact_reference(ArtifactReplacementInput {
+            text: &next,
+            id: &reference.id,
+            marker: &reference.marker,
+            replacement: &rehydrated_text,
+            has_line_range: reference.line_range.is_some(),
+        })
+        .expect("compiled artifact replacement returned invalid output") else {
             continue;
+        };
+        let (replacement, stop) = match replacement {
+            ArtifactReplacement::Continue(text) => (text, false),
+            ArtifactReplacement::Complete(text) => (text, true),
         };
         next = replacement;
         stats.rehydrated_refs = stats.rehydrated_refs.saturating_add(1);
@@ -220,82 +237,42 @@ fn runtime_smart_context_rehydrate_text(
     *text = next;
 }
 
-fn runtime_smart_context_reference_replacement(
-    current: &str,
+pub(in crate::runtime_proxy::smart_context) fn runtime_smart_context_rehydrated_artifact_reference_text<
+    'a,
+>(
+    artifact_text: &'a str,
     reference: &RuntimeSmartContextArtifactReference,
-    rehydrated_text: String,
-) -> Option<(String, bool)> {
-    let legacy_marker = format!("prodex-artifact:{}", reference.id);
-    let short_marker = runtime_smart_context_artifact_ref(&reference.id);
-    if reference.line_range.is_none()
-        && runtime_smart_context_text_is_artifact_marker_summary(current, &reference.id)
-    {
-        return Some((rehydrated_text, true));
-    }
-    if current.contains(&reference.marker) {
-        return Some((current.replace(&reference.marker, &rehydrated_text), false));
-    }
-    if current.contains(&legacy_marker) {
-        return Some((current.replace(&legacy_marker, &rehydrated_text), false));
-    }
-    if current.contains(&short_marker) {
-        return Some((current.replace(&short_marker, &rehydrated_text), false));
-    }
-    current
-        .trim()
-        .eq(reference.id.as_str())
-        .then_some((rehydrated_text, false))
+) -> Option<std::borrow::Cow<'a, str>> {
+    let (ranges, legacy) = artifact_line_ranges(reference);
+    prodex_mojo_core::smart_context_artifact_ref::rehydrate_artifact_lines(
+        artifact_text,
+        &ranges,
+        legacy,
+    )
+    .expect("compiled artifact line selection returned invalid output")
 }
 
-pub(in crate::runtime_proxy::smart_context) fn runtime_smart_context_text_is_artifact_marker_summary(
-    text: &str,
-    id: &str,
-) -> bool {
-    let Some(first_line) = text.trim_start().lines().next() else {
-        return false;
-    };
-    let legacy = (first_line.starts_with("prodex-sc artifact ")
-        || first_line.starts_with("prodex-sc repeat "))
-        && first_line.contains(&format!("prodex-artifact:{id}"));
-    let short = (first_line.starts_with("psc art ")
-        || first_line.starts_with("psc rep ")
-        || first_line.starts_with("psc repeat ")
-        || first_line.starts_with("psc co ")
-        || first_line.starts_with("psc cmdout ")
-        || first_line.starts_with("prodex-sc artifact ")
-        || first_line.starts_with("prodex-sc repeat "))
-        && first_line.contains(&runtime_smart_context_artifact_ref(id));
-    legacy || short
-}
-
-pub(in crate::runtime_proxy::smart_context) fn runtime_smart_context_rehydrated_artifact_text(
-    artifact_text: &str,
-    line_range: Option<RuntimeSmartContextLineRange>,
-) -> Option<String> {
-    let Some(line_range) = line_range else {
-        return Some(artifact_text.to_string());
-    };
-    let lines = artifact_text.lines().collect::<Vec<_>>();
-    if line_range.start > lines.len() {
-        return None;
-    }
-    let end = line_range.end.min(lines.len());
-    Some(lines[line_range.start - 1..end].join("\n"))
-}
-
-pub(in crate::runtime_proxy::smart_context) fn runtime_smart_context_rehydrated_artifact_reference_text(
-    artifact_text: &str,
+fn artifact_line_ranges(
     reference: &RuntimeSmartContextArtifactReference,
-) -> Option<String> {
-    if reference.line_ranges.is_empty() {
-        return runtime_smart_context_rehydrated_artifact_text(artifact_text, reference.line_range);
-    }
-    let mut parts = Vec::new();
-    for range in &reference.line_ranges {
-        parts.push(runtime_smart_context_rehydrated_artifact_text(
-            artifact_text,
-            Some(*range),
-        )?);
-    }
-    Some(parts.join("\n"))
+) -> (
+    Vec<prodex_mojo_core::smart_context_artifact_ref::ArtifactLineRange>,
+    Option<prodex_mojo_core::smart_context_artifact_ref::ArtifactLineRange>,
+) {
+    let range = |range: RuntimeSmartContextLineRange| {
+        prodex_mojo_core::smart_context_artifact_ref::ArtifactLineRange {
+            start: range.start,
+            end: range.end,
+        }
+    };
+    let ranges = reference
+        .line_ranges
+        .iter()
+        .copied()
+        .map(range)
+        .collect::<Vec<_>>();
+    (ranges, reference.line_range.map(range))
 }
+
+#[cfg(test)]
+#[path = "text_tests.rs"]
+mod text_tests;

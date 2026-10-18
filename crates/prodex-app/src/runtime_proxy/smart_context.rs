@@ -1,5 +1,6 @@
 use super::*;
 use prodex_mojo_core::rich::ascii_casefold_starts_with;
+#[cfg(test)]
 mod artifact_manifest;
 mod artifact_refs;
 mod body;
@@ -17,6 +18,7 @@ mod static_context;
 mod token_calibration;
 mod types;
 
+#[cfg(test)]
 use artifact_manifest::*;
 use artifact_refs::*;
 use body::*;

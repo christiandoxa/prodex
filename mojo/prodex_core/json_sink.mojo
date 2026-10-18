@@ -1,6 +1,6 @@
 # A capacity-measured writer: the first call counts bytes without a heap or
 # output access; the second call writes into the exact Rust-owned allocation.
-from std.memory import Pointer
+from std.memory import Pointer, unsafe_memcpy
 from rich_types import ProdexRichStringView
 from rich_text import rich_view_ptr
 from parsed_json import ParsedJson
@@ -40,11 +40,9 @@ def js_view(sink: Pointer[mut=True, JsonSink, _], view: ProdexRichStringView):
         if length > sink[].capacity - start:
             sink[].failed = True
             return
-        var source = rich_view_ptr(view)
-        # One capacity check for the entire validated, non-overlapping span.
-        # Keeping accounting outside this loop permits the compiler's bulk copy.
-        for index in range(length):
-            sink[].output[unsafe_offset=start + index] = source[unsafe_offset=index]
+        # All callers supply distinct input and output allocations.
+        if length > 0:
+            unsafe_memcpy(dest=sink[].output.unsafe_offset(Int(start)), src=rich_view_ptr(view), count=Int(length))
     sink[].written += length
 
 

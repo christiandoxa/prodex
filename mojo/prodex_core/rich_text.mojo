@@ -13,6 +13,17 @@ def rich_utf8_continuation(value: UInt8) -> Bool:
 
 def rich_utf8_valid(ptr: Pointer[mut=False, UInt8, _], length: Int64) -> Bool:
     var index: Int64 = 0
+    # Skip complete ASCII prefixes with byte-aligned loads on every target.
+    while length - index >= 64:
+        var non_ascii = ptr.unsafe_offset(Int(index)).unsafe_load[width=64, alignment=1]().gt(0x7F)
+        if non_ascii.reduce_or():
+            break
+        index += 64
+    while length - index >= 16:
+        var non_ascii = ptr.unsafe_offset(Int(index)).unsafe_load[width=16, alignment=1]().gt(0x7F)
+        if non_ascii.reduce_or():
+            break
+        index += 16
     while index < length:
         var lead = ptr[unsafe_offset=index]
         if lead <= 0x7F:
