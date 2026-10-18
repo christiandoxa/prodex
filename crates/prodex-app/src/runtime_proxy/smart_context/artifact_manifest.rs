@@ -19,8 +19,3 @@ pub(super) fn runtime_smart_context_artifact_ref(id: &str) -> String {
         )
     }
 }
-
-pub(super) fn runtime_smart_context_artifact_id_valid(id: &str) -> bool {
-    prodex_mojo_core::smart_context_artifact_ref::artifact_id_valid(id)
-        .expect("Mojo smart-context artifact id validator returned invalid output")
-}

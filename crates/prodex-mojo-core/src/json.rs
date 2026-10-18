@@ -10,6 +10,13 @@ pub use self::response_metadata::{
     runtime_response_metadata_json,
 };
 mod gemini_quota;
+#[cfg(feature = "mojo-runtime")]
+mod smart_context_inline;
+#[cfg(feature = "mojo-runtime")]
+pub use self::smart_context_inline::{
+    SmartContextInlineDocument, SmartContextInlineOperation, SmartContextInlinePlan,
+    smart_context_inline_plan,
+};
 pub use gemini_quota::{
     GeminiQuotaBodyPlan, GeminiQuotaHttpErrorKind, GeminiRetryCandidate, GeminiRetryCandidateKind,
     GeminiRetryCandidates, gemini_quota_body_plan, gemini_quota_http_error_kind,
