@@ -79,52 +79,73 @@ fn append_json_node<'a>(
         raw_start: start,
         raw_length: 0,
     });
-    let mut previous = None;
-    match value {
-        serde_json::Value::Array(values) => {
-            if wire == JsonWire::Encode {
-                tree.raw.push(b'[');
-            }
-            for value in values {
-                if wire == JsonWire::Encode && previous.is_some() {
-                    tree.raw.push(b',');
-                }
-                let child = append_json_node(value, "", Some(index), tree, wire)?;
-                link_json_node(&mut tree.nodes, index, &mut previous, child);
-            }
-            if wire == JsonWire::Encode {
-                tree.raw.push(b']');
-            }
-        }
-        serde_json::Value::Object(values) => {
-            if wire == JsonWire::Encode {
-                tree.raw.push(b'{');
-            }
-            for (key, value) in values {
-                if wire == JsonWire::Encode && previous.is_some() {
-                    tree.raw.push(b',');
-                }
-                if wire == JsonWire::Encode {
-                    serde_json::to_writer(&mut tree.raw, key)
-                        .context("failed to encode application JSON key")?;
-                    tree.raw.push(b':');
-                }
-                let child = append_json_node(value, key, Some(index), tree, wire)?;
-                link_json_node(&mut tree.nodes, index, &mut previous, child);
-            }
-            if wire == JsonWire::Encode {
-                tree.raw.push(b'}');
-            }
-        }
-        _ => {
-            if wire == JsonWire::Encode {
-                serde_json::to_writer(&mut tree.raw, value)
-                    .context("failed to encode application JSON value")?;
-            }
-        }
-    }
+    append_json_contents(value, index, tree, wire)?;
     tree.nodes[index].raw_length = tree.raw.len() - start;
     Ok(index)
+}
+
+fn append_json_contents<'a>(
+    value: &'a serde_json::Value,
+    index: usize,
+    tree: &mut AppJsonTree<'a>,
+    wire: JsonWire,
+) -> Result<()> {
+    match value {
+        serde_json::Value::Array(values) => append_json_array(values, index, tree, wire),
+        serde_json::Value::Object(values) => append_json_object(values, index, tree, wire),
+        _ if wire == JsonWire::Encode => serde_json::to_writer(&mut tree.raw, value)
+            .context("failed to encode application JSON value"),
+        _ => Ok(()),
+    }
+}
+
+fn write_json_token(tree: &mut AppJsonTree<'_>, wire: JsonWire, token: u8) {
+    if wire == JsonWire::Encode {
+        tree.raw.push(token);
+    }
+}
+
+fn append_json_array<'a>(
+    values: &'a [serde_json::Value],
+    index: usize,
+    tree: &mut AppJsonTree<'a>,
+    wire: JsonWire,
+) -> Result<()> {
+    write_json_token(tree, wire, b'[');
+    let mut previous = None;
+    for value in values {
+        if previous.is_some() {
+            write_json_token(tree, wire, b',');
+        }
+        let child = append_json_node(value, "", Some(index), tree, wire)?;
+        link_json_node(&mut tree.nodes, index, &mut previous, child);
+    }
+    write_json_token(tree, wire, b']');
+    Ok(())
+}
+
+fn append_json_object<'a>(
+    values: &'a serde_json::Map<String, serde_json::Value>,
+    index: usize,
+    tree: &mut AppJsonTree<'a>,
+    wire: JsonWire,
+) -> Result<()> {
+    write_json_token(tree, wire, b'{');
+    let mut previous = None;
+    for (key, value) in values {
+        if previous.is_some() {
+            write_json_token(tree, wire, b',');
+        }
+        if wire == JsonWire::Encode {
+            serde_json::to_writer(&mut tree.raw, key)
+                .context("failed to encode application JSON key")?;
+            tree.raw.push(b':');
+        }
+        let child = append_json_node(value, key, Some(index), tree, wire)?;
+        link_json_node(&mut tree.nodes, index, &mut previous, child);
+    }
+    write_json_token(tree, wire, b'}');
+    Ok(())
 }
 
 fn link_json_node(
@@ -137,5 +158,31 @@ fn link_json_node(
         nodes[previous].next_sibling = Some(child);
     } else {
         nodes[parent].first_child = Some(child);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn acquisition_modes_preserve_topology_and_exact_wire_encoding() {
+        let source = serde_json::json!({
+            "opaque": [{"text": "東京\nquoted\"", "null": null}, false, 2.5],
+            "empty": [], "object": {}, "flag": true,
+        });
+        let encoded = app_json_tree(&source).unwrap();
+        let omitted = app_json_tree_without_wire(&source).unwrap();
+        assert_eq!(encoded.raw, serde_json::to_vec(&source).unwrap());
+        assert!(omitted.raw.is_empty());
+        assert_eq!(encoded.nodes.len(), omitted.nodes.len());
+        for (a, b) in encoded.nodes.iter().zip(&omitted.nodes) {
+            assert_eq!(
+                (a.first_child, a.next_sibling, a.parent, a.key, a.text),
+                (b.first_child, b.next_sibling, b.parent, b.key, b.text)
+            );
+            assert_eq!(b.raw_length, 0);
+            assert_eq!(b.raw_start, 0);
+        }
     }
 }
