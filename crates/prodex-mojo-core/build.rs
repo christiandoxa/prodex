@@ -536,6 +536,7 @@ fn selected_sources() -> Vec<&'static str> {
         sources.push("../../mojo/prodex_core/smart_context_normalization.mojo");
         sources.push("../../mojo/prodex_core/smart_context_artifact_ref.mojo");
         sources.push("../../mojo/prodex_core/smart_context_artifact_projection.mojo");
+        sources.push("../../mojo/prodex_core/smart_context_artifact_text.mojo");
         sources.push("../../mojo/prodex_core/smart_context_markers.mojo");
         sources.push("../../mojo/prodex_core/smart_context_symbols.mojo");
         sources.push("../../mojo/prodex_core/rich_abi.mojo");

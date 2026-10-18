@@ -1,6 +1,6 @@
-use super::*;
+//! Canonical artifact labels for Smart Context test fixtures.
+#![cfg(test)]
 
-#[cfg(test)]
 pub(super) fn runtime_smart_context_artifact_line_ref(
     id: &str,
     start: usize,
@@ -10,12 +10,5 @@ pub(super) fn runtime_smart_context_artifact_line_ref(
 }
 
 pub(super) fn runtime_smart_context_artifact_ref(id: &str) -> String {
-    if let Some(hash) = id.strip_prefix("sc2:") {
-        format!("psc2:{hash}")
-    } else {
-        format!(
-            "{SMART_CONTEXT_SHORT_ARTIFACT_REF_PREFIX}{}",
-            id.strip_prefix("sc:").unwrap_or(id)
-        )
-    }
+    format!("p{id}")
 }

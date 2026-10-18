@@ -18,4 +18,3 @@ pub(super) const SMART_CONTEXT_WEBSOCKET_REWRITE_MAX_BYTES: usize = 96 * 1024;
 pub(super) const SMART_CONTEXT_REWRITE_DEADLINE_MS: u64 = 100;
 #[cfg(debug_assertions)]
 pub(super) const SMART_CONTEXT_REWRITE_DEADLINE_MS: u64 = 5_000;
-pub(super) const SMART_CONTEXT_SHORT_ARTIFACT_REF_PREFIX: &str = "psc:";
