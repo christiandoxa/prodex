@@ -1,3 +1,4 @@
+use super::readiness::read_response_frame;
 use super::{RuntimeWebsocketAttempt, RuntimeWebsocketResponseLoop, RuntimeWebsocketTextResult};
 use tungstenite::{Error as WsError, Message as WsMessage};
 
@@ -53,18 +54,21 @@ pub(super) fn run_runtime_websocket_response_loop(
     let mut last_upstream_frame = Instant::now();
     let mut last_client_heartbeat = Instant::now();
     loop {
-        if let Some(attempt) =
-            prepare_response_read(&mut flow, last_upstream_frame, &mut last_client_heartbeat)?
-        {
-            return Ok(attempt);
-        }
-        let frame = flow.upstream_socket.read();
+        let wait = match prepare_response_read(
+            &mut flow,
+            last_upstream_frame,
+            &mut last_client_heartbeat,
+        )? {
+            ResponseReadPreparation::Wait(wait) => wait,
+            ResponseReadPreparation::Attempt(attempt) => return Ok(attempt),
+        };
+        let frame = read_response_frame(&mut flow.upstream_socket, wait);
         check_response_deadline(&mut flow)?;
-        // A poll timeout is not an upstream failure until its independent
-        // progress/idle clock expires. Keep partial TLS/WebSocket reads intact.
-        if matches!(&frame, Err(error) if crate::runtime_websocket_timeout_error(error)) {
-            continue;
-        }
+        let frame = match frame {
+            Ok(None) => continue,
+            Ok(Some(frame)) => Ok(frame),
+            Err(error) => Err(error),
+        };
         if frame.is_ok() {
             last_upstream_frame = Instant::now();
         }
@@ -102,11 +106,16 @@ fn check_response_deadline(flow: &mut RuntimeWebsocketResponseLoop<'_>) -> Resul
     Ok(())
 }
 
+enum ResponseReadPreparation {
+    Wait(Duration),
+    Attempt(RuntimeWebsocketAttempt),
+}
+
 fn prepare_response_read(
     flow: &mut RuntimeWebsocketResponseLoop<'_>,
     last_upstream_frame: Instant,
     last_client_heartbeat: &mut Instant,
-) -> Result<Option<RuntimeWebsocketAttempt>> {
+) -> Result<ResponseReadPreparation> {
     check_response_deadline(flow)?;
     let timeout_ms = if flow.first_upstream_text_seen {
         flow.shared.runtime_config.tuning.stream_idle_timeout_ms
@@ -128,7 +137,7 @@ fn prepare_response_read(
                 std::io::ErrorKind::TimedOut,
                 "upstream WebSocket progress deadline expired",
             )))
-            .map(Some);
+            .map(ResponseReadPreparation::Attempt);
     }
     if plan.heartbeat {
         // Protocol control frames are visible to the client idle clock but
@@ -138,10 +147,6 @@ fn prepare_response_read(
             .context("failed to send runtime WebSocket liveness heartbeat")?;
         *last_client_heartbeat = Instant::now();
     }
-    crate::runtime_set_upstream_websocket_read_timeout(
-        &mut flow.upstream_socket,
-        Some(Duration::from_millis(plan.wait_ms)),
-    )?;
     if !flow.committed
         && let Err(error) =
             bound_runtime_websocket_precommit_io(&mut flow.upstream_socket, flow.shared)
@@ -149,5 +154,11 @@ fn prepare_response_read(
         flow.websocket_session.reset();
         return Err(error);
     }
-    Ok(None)
+    let wait = Duration::from_millis(plan.wait_ms);
+    let wait = if flow.committed {
+        wait
+    } else {
+        flow.shared.precommit_wait_slice(wait)?
+    };
+    Ok(ResponseReadPreparation::Wait(wait))
 }

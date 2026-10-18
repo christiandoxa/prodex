@@ -810,3 +810,15 @@ an established different root. Repeated hooks for the same root preserve the unr
 rollout cursor instead of seeking past a terminal error. A genuine new SessionStart
 can switch roots; the existing app-server still verifies identity, workspace,
 persistence, quiescence and goal policy before any in-place continuation RPC.
+
+
+### WebSocket readiness and transport liveness
+
+The Responses read loop consumes buffered TLS/WebSocket bytes with a
+nonblocking read, then waits for OS readability only when the library reports
+`WouldBlock`. A bounded readiness poll, not a blocking receive timeout, wakes
+the Mojo liveness/deadline planner. This distinction is required on Windows:
+Microsoft documents a blocking `SO_RCVTIMEO` expiry as leaving the connection
+in an indeterminate state. Real I/O timeouts still reach transport recovery;
+they are not swallowed as successful polls. Normal blocking mode is restored
+before host writes, frame dispatch, and cached upstream reuse.
