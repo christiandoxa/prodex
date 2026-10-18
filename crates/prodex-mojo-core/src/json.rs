@@ -17,9 +17,15 @@ pub use self::quota_watch_presentation::{QuotaWatchPresentation, quota_watch_pre
 #[cfg(feature = "mojo-runtime")]
 mod smart_context_inline;
 #[cfg(feature = "mojo-runtime")]
+mod smart_context_static_request;
+#[cfg(feature = "mojo-runtime")]
 pub use self::smart_context_inline::{
     SmartContextInlineDocument, SmartContextInlineOperation, SmartContextInlinePlan,
     smart_context_inline_plan,
+};
+#[cfg(feature = "mojo-runtime")]
+pub use self::smart_context_static_request::{
+    smart_context_static_prompt_key, smart_context_static_prompt_role, smart_context_static_request,
 };
 pub use gemini_quota::{
     GeminiQuotaBodyPlan, GeminiQuotaHttpErrorKind, GeminiRetryCandidate, GeminiRetryCandidateKind,
@@ -514,6 +520,7 @@ pub(crate) fn transform_json(
 // Scratch units are 16-byte, eight-byte-aligned storage owned by the host.
 // Most kernels need one per JSON node; Gemini ordering uses four to host the
 // existing order kernel's typed views, records, ranks and permutations.
+// Static-prompt acquisition uses seven for text spans, IDs and ordering scratch.
 pub(crate) fn transform_json_with_scratch(
     nodes: &[JsonNode<'_>],
     raw: &str,
@@ -723,47 +730,5 @@ pub fn transform_anthropic_chat_request(
 }
 
 #[cfg(test)]
-mod provider_error_tests {
-    use super::{JsonKind, JsonNode, provider_error_rejects_member};
-
-    #[test]
-    fn provider_error_member_kernel_matches_expected_object_fields() {
-        let nodes = [
-            JsonNode {
-                kind: JsonKind::Object,
-                first_child: Some(1),
-                next_sibling: None,
-                parent: None,
-                key: "",
-                text: "",
-                raw_start: 0,
-                raw_length: 2,
-            },
-            JsonNode {
-                kind: JsonKind::String,
-                first_child: None,
-                next_sibling: Some(2),
-                parent: Some(0),
-                key: "code",
-                text: "UNKNOWN_PARAMETER",
-                raw_start: 0,
-                raw_length: 0,
-            },
-            JsonNode {
-                kind: JsonKind::String,
-                first_child: None,
-                next_sibling: None,
-                parent: Some(0),
-                key: "param",
-                text: "WEB_search-options",
-                raw_start: 0,
-                raw_length: 0,
-            },
-        ];
-
-        assert_eq!(
-            provider_error_rejects_member(&nodes, "{}", "webSearchOptions"),
-            Ok(true)
-        );
-    }
-}
+#[path = "json/provider_error_tests.rs"]
+mod provider_error_tests;

@@ -350,3 +350,80 @@ def rich_required_hash_capacity(count: Int64) -> Int64:
     while capacity < target:
         capacity *= 2
     return capacity
+
+
+def rich_view_compare(
+    left: ProdexRichStringView,
+    right: ProdexRichStringView,
+) -> Int64:
+    var left_bytes = rich_view_ptr(left)
+    var right_bytes = rich_view_ptr(right)
+    var common = Int64(left.len)
+    if right.len < left.len:
+        common = Int64(right.len)
+    for index in range(common):
+        if left_bytes[unsafe_offset=index] < right_bytes[unsafe_offset=index]:
+            return -1
+        if left_bytes[unsafe_offset=index] > right_bytes[unsafe_offset=index]:
+            return 1
+    if left.len < right.len:
+        return -1
+    if left.len > right.len:
+        return 1
+    return 0
+
+def rich_view_order_swap(
+    indices: Pointer[mut=True, Int64, MutUntrackedOrigin],
+    left: Int64,
+    right: Int64,
+) -> None:
+    var value = indices[unsafe_offset=left]
+    indices[unsafe_offset=left] = indices[unsafe_offset=right]
+    indices[unsafe_offset=right] = value
+
+def rich_view_order_sift_down(
+    values: Pointer[mut=False, ProdexRichStringView, ImmUntrackedOrigin],
+    indices: Pointer[mut=True, Int64, MutUntrackedOrigin],
+    root_index: Int64,
+    end: Int64,
+) -> None:
+    var root = root_index
+    while True:
+        var child = root * 2 + 1
+        if child > end:
+            break
+        if (
+            child + 1 <= end
+            and rich_view_compare(
+                values[unsafe_offset=indices[unsafe_offset=child]],
+                values[unsafe_offset=indices[unsafe_offset=child + 1]],
+            )
+            < 0
+        ):
+            child += 1
+        if (
+            rich_view_compare(
+                values[unsafe_offset=indices[unsafe_offset=root]],
+                values[unsafe_offset=indices[unsafe_offset=child]],
+            )
+            >= 0
+        ):
+            break
+        rich_view_order_swap(indices, root, child)
+        root = child
+
+
+def rich_view_order_sort(
+    values: Pointer[mut=False, ProdexRichStringView, ImmUntrackedOrigin],
+    indices: Pointer[mut=True, Int64, MutUntrackedOrigin],
+    count: Int64,
+) -> None:
+    var start = count // 2
+    while start > 0:
+        start -= 1
+        rich_view_order_sift_down(values, indices, start, count - 1)
+    var end = count
+    while end > 1:
+        end -= 1
+        rich_view_order_swap(indices, 0, end)
+        rich_view_order_sift_down(values, indices, 0, end - 1)
