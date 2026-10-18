@@ -1,6 +1,10 @@
 use crate::{
     SecretBackend, SecretError, SecretLocation, SecretRevision, SecretRevisionBackend, SecretValue,
 };
+use keyring_core as keyring;
+
+mod platform;
+
 use std::fmt;
 use std::io;
 use zeroize::Zeroizing;
@@ -79,7 +83,7 @@ impl SecretRevisionBackend for KeyringSecretBackend {
 impl KeyringSecretBackend {
     fn entry(&self, location: &SecretLocation) -> Result<keyring::Entry, SecretError> {
         let account = validate_keyring_location(location, &self.service)?;
-        keyring::Entry::new(&self.service, account).map_err(keyring_error)
+        platform::entry(&self.service, account).map_err(keyring_error)
     }
 }
 
