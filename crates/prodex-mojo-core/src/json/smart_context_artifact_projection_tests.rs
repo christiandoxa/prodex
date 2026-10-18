@@ -26,6 +26,10 @@ fn compiled_artifact_projection_reuses_the_canonical_token_and_range_parser() {
             .unwrap(),
         br#"{"aliases":{"@1":"sc:0123456789abcdef"},"references":[]}"#
     );
+    assert_eq!(
+        smart_context_artifact_projection(&[node], &raw, SmartContextArtifactProjection::RehydrationValues).unwrap(),
+        br#"{"values":[{"pointer":"","references":[{"id":"sc:0123456789abcdef","marker":"@1#L2-L3,1","line_ranges":[{"start":2,"end":3},{"start":1,"end":1}],"line_range":{"start":2,"end":3}}]}]}"#,
+    );
 }
 
 #[test]
@@ -33,7 +37,7 @@ fn compiled_artifact_projection_abi_rejects_invalid_inputs_before_output_writes(
     let text = "@1=psc:0123456789abcdef @1";
     let raw = format!("\"{text}\"");
     let input = ffi_nodes(&[string_node(text)], &raw).unwrap();
-    let mut scratch = [StringView::default(); 9];
+    let mut scratch = [StringView::default(); 10];
     let mut output = [57_u8; 512];
     let mut metadata = [89_i64; 2];
     let valid = [
@@ -70,7 +74,7 @@ fn compiled_artifact_projection_abi_rejects_invalid_inputs_before_output_writes(
     };
     for (index, value, expected) in [
         (0, 2, 4),
-        (1, 3, 1),
+        (1, 4, 1),
         (2, 1, 1),
         (3, 0, 1),
         (4, 0, 1),
@@ -93,6 +97,15 @@ fn compiled_artifact_projection_abi_rejects_invalid_inputs_before_output_writes(
         assert_eq!(output, [57; 512]);
         assert_eq!(metadata, [89; 2]);
     }
+    for (scratch_count, capacity, expected) in [(2, 512, 1), (9, 512, 3), (10, 1, 3)] {
+        let mut grouped = valid;
+        grouped[1] = 3;
+        grouped[8] = scratch_count;
+        grouped[11] = capacity;
+        assert_eq!(call(grouped), expected);
+        assert_eq!(output, [57; 512]);
+        assert_eq!(metadata, [89; 2]);
+    }
     let mut required = 89_i64;
     let result = (&mut required as *mut i64) as usize as u64;
     let input_address = input.as_ptr() as usize as u64;
@@ -109,7 +122,7 @@ fn compiled_artifact_projection_abi_rejects_invalid_inputs_before_output_writes(
         )
     };
     assert_eq!(probe(2, 0, input_address, 1, result), 4);
-    assert_eq!(probe(1, 3, input_address, 1, result), 1);
+    assert_eq!(probe(1, 4, input_address, 1, result), 1);
     assert_eq!(probe(1, 0, 0, 1, result), 1);
     assert_eq!(probe(1, 0, input_address, 0, result), 1);
     assert_eq!(probe(1, 0, input_address, 1, 0), 1);
@@ -146,10 +159,13 @@ fn compiled_artifact_alias_storage_is_isolated_across_parallel_calls() {
     std::thread::scope(|scope| {
         for worker in 0..8 {
             scope.spawn(move || {
-                let text = format!("@{worker}=psc:0123456789abcdef @{worker}=psc:fedcba9876543210");
+                let text = format!("@{worker}=psc:0123456789abcdef @{worker}=psc:fedcba9876543210 @{worker}");
                 let raw = format!("\"{text}\"");
                 let expected = format!(
                     r#"{{"aliases":{{"@{worker}":"sc:0123456789abcdef"}},"references":[]}}"#
+                );
+                let grouped = format!(
+                    r#"{{"values":[{{"pointer":"","references":[{{"id":"sc:0123456789abcdef","marker":"@{worker}","line_ranges":[],"line_range":null}}]}}]}}"#
                 );
                 for _ in 0..32 {
                     assert_eq!(
@@ -160,6 +176,15 @@ fn compiled_artifact_alias_storage_is_isolated_across_parallel_calls() {
                         )
                         .unwrap(),
                         expected.as_bytes(),
+                    );
+                    assert_eq!(
+                        smart_context_artifact_projection(
+                            &[string_node(&text)],
+                            &raw,
+                            SmartContextArtifactProjection::RehydrationValues
+                        )
+                        .unwrap(),
+                        grouped.as_bytes(),
                     );
                 }
             });

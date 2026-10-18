@@ -174,6 +174,7 @@ const PROMOTED_FILES = [
   "crates/prodex-app/src/runtime_proxy/smart_context.rs",
   "crates/prodex-app/src/runtime_proxy/smart_context/runtime_rehydrate/basic.rs",
   "crates/prodex-app/src/runtime_proxy/smart_context/runtime_rehydrate/text_tests.rs",
+  "crates/prodex-app/src/runtime_proxy/smart_context/runtime_rehydrate/grouped_tests.rs",
   "crates/prodex-mojo-core/src/smart_context_artifact_ref/text.rs",
   "crates/prodex-mojo-core/src/smart_context_artifact_ref/text_tests.rs",
   "mojo/prodex_core/smart_context_artifact_text.mojo",
@@ -7474,8 +7475,8 @@ export function findViolations(files) {
           ? [] : [filePath + ": artifact marker fixture helpers must not compile in production"];
     }
     if (filePath === "crates/prodex-app/src/runtime_proxy/smart_context/runtime_rehydrate/basic.rs") {
-      const required = ["replace_artifact_reference(", "rehydrate_artifact_lines(", "artifact_line_byte_len("];
-      const retired = ["fn runtime_smart_context_reference_replacement(", "fn runtime_smart_context_text_is_artifact_marker_summary(", "fn runtime_smart_context_rehydrated_artifact_text(", ".replace(&reference.marker"];
+      const required = ["replace_artifact_reference(", "rehydrate_artifact_lines(", "artifact_line_byte_len(", "runtime_smart_context_rehydration_values(value)", ".pointer_mut(&value_plan.pointer)"];
+      const retired = ["fn runtime_smart_context_reference_replacement(", "fn runtime_smart_context_text_is_artifact_marker_summary(", "fn runtime_smart_context_rehydrated_artifact_text(", ".replace(&reference.marker", "fn runtime_smart_context_rehydrate_value_for_ids(", "fn runtime_smart_context_rehydrate_text("];
       return required.every((marker) => contents.includes(marker)) && retired.every((marker) => !contents.includes(marker))
         ? [] : [filePath + ": restored Rust artifact text selection or replacement"];
     }
@@ -7495,11 +7496,15 @@ export function findViolations(files) {
       return ["compiled_artifact_text_rehydrates_multiple_ranges_with_original_line_endings", "compiled_artifact_text_preserves_ordered_cascading_replacements"].filter((marker) => !contents.includes(marker))
         .map((marker) => filePath + ": production artifact text caller regression missing " + marker);
     }
+    if (filePath === "crates/prodex-app/src/runtime_proxy/smart_context/runtime_rehydrate/grouped_tests.rs") {
+      return contents.includes("compiled_grouped_rehydration_applies_escaped_paths_and_preserves_static_fields")
+        ? [] : [filePath + ": grouped rehydration caller regression missing"];
+    }
     const requirements = new Map([
-      ["crates/prodex-mojo-core/src/json/smart_context_artifact_projection.rs", ["fn prodex_smart_context_artifact_projection_v1(", "fn prodex_smart_context_artifact_alias_count_v1(", "transform_json_with_views("]],
+      ["crates/prodex-mojo-core/src/json/smart_context_artifact_projection.rs", ["fn prodex_smart_context_artifact_projection_v1(", "fn prodex_smart_context_artifact_alias_count_v1(", "transform_json_with_views(", "RehydrationValues,"]],
       ["crates/prodex-mojo-core/src/json/smart_context_artifact_projection_tests.rs", ["compiled_artifact_projection_reuses_the_canonical_token_and_range_parser", "compiled_artifact_projection_abi_rejects_invalid_inputs_before_output_writes"]],
-      ["mojo/prodex_core/smart_context_artifact_projection.mojo", ['@export("prodex_smart_context_artifact_projection_v1")', "alias_declaration_bounds(", "range_item(", "rich_view_order_sort(", "ssr_static_item("]],
-      ["crates/prodex-app/src/runtime_proxy/smart_context/artifact_refs_tests.rs", ["compiled_artifact_projection_keeps_first_alias_and_protects_static_context", "compiled_artifact_projection_resolves_punctuation_unicode_and_multiple_ranges", "compiled_alias_ordering_keeps_first_of_many_repeated_declarations"]],
+      ["mojo/prodex_core/smart_context_artifact_projection.mojo", ['@export("prodex_smart_context_artifact_projection_v1")', "alias_declaration_bounds(", "range_item(", "rich_view_order_sort(", "ssr_static_item(", "def ap_pointer(", "struct ArtifactTraversal(", "js_escaped("]],
+      ["crates/prodex-app/src/runtime_proxy/smart_context/artifact_refs_tests.rs", ["compiled_artifact_projection_keeps_first_alias_and_protects_static_context", "compiled_artifact_projection_resolves_punctuation_unicode_and_multiple_ranges", "compiled_alias_ordering_keeps_first_of_many_repeated_declarations", "compiled_rehydration_projection_preserves_json_pointer_escapes_and_array_indexes"]],
     ]);
     if (requirements.has(filePath)) {
       return requirements.get(filePath).filter((marker) => !contents.includes(marker))
@@ -7509,6 +7514,7 @@ export function findViolations(files) {
       const required = [
         "prodex_mojo_core::json::smart_context_artifact_projection(",
         "crate::json_boundary::app_json_tree_without_wire(",
+        "pub(super) fn runtime_smart_context_rehydration_values(",
       ];
       const violations = required
         .filter((call) => !contents.includes(call))
@@ -7556,13 +7562,13 @@ export function findViolations(files) {
     if (filePath === "crates/prodex-app/src/runtime_proxy/smart_context/static_context.rs") {
       const required = [
         "prodex_mojo_core::json::smart_context_static_request(",
-        "prodex_mojo_core::json::smart_context_static_prompt_key(",
-        "prodex_mojo_core::json::smart_context_static_prompt_role(",
       ];
       const retired = ["fn collect_static_text_parts(",
         "fn runtime_smart_context_static_message_text(",
         "fn runtime_smart_context_legacy_static_delta_hash(",
         "fn runtime_smart_context_static_role_is_prompt_prefix(",
+        "fn runtime_smart_context_static_prompt_field_key(",
+        "fn runtime_smart_context_value_is_static_context_item(",
         ".sort_by(",
       ];
       return required.every((marker) => contents.includes(marker)) &&
@@ -10790,10 +10796,7 @@ function selfTest() {
     "smart_context_rewrite_validation_reason(",
   ].join("; ");
   const staticPromptFile = "crates/prodex-app/src/runtime_proxy/smart_context/static_context.rs";
-  const staticPromptCalls = ["prodex_mojo_core::json::smart_context_static_request(",
-    "prodex_mojo_core::json::smart_context_static_prompt_key(",
-    "prodex_mojo_core::json::smart_context_static_prompt_role(",
-  ].join("\n");
+  const staticPromptCalls = "prodex_mojo_core::json::smart_context_static_request(";
   assert.deepEqual(findViolations([[staticPromptFile, staticPromptCalls]]), []);
   assert.match(findViolations([[staticPromptFile,
     staticPromptCalls + "\nfn collect_static_text_parts() {}",

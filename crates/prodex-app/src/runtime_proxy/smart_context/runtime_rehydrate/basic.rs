@@ -1,11 +1,8 @@
 use super::super::{
     RuntimeProxyRequest, RuntimeSmartContextArtifactReference, RuntimeSmartContextArtifactStore,
     RuntimeSmartContextLineRange, RuntimeSmartContextTransformStats,
-    runtime_smart_context_artifact_ref_occurrences_from_text,
-    runtime_smart_context_collect_artifact_aliases,
     runtime_smart_context_collect_rehydratable_artifact_refs,
-    runtime_smart_context_static_prompt_field_key,
-    runtime_smart_context_value_is_static_context_item,
+    runtime_smart_context_rehydration_values,
 };
 use prodex_mojo_core::rich::ascii_casefold_equal_exact;
 use runtime_proxy_crate::runtime_proxy_request_header_value;
@@ -133,7 +130,6 @@ pub(in crate::runtime_proxy::smart_context) fn runtime_smart_context_rehydrate_v
     stats.rehydration_token_cost = stats
         .rehydration_token_cost
         .saturating_add(plan.used_tokens);
-    let aliases = runtime_smart_context_collect_artifact_aliases(value);
     let rehydrate_ids = plan
         .actions
         .iter()
@@ -144,97 +140,58 @@ pub(in crate::runtime_proxy::smart_context) fn runtime_smart_context_rehydrate_v
             runtime_proxy_crate::SmartContextRehydrateAction::Defer { .. } => None,
         })
         .collect::<BTreeSet<_>>();
-    runtime_smart_context_rehydrate_value_for_ids(value, store, &rehydrate_ids, &aliases, stats);
-}
-
-pub(in crate::runtime_proxy::smart_context) fn runtime_smart_context_rehydrate_value_for_ids(
-    value: &mut serde_json::Value,
-    store: &RuntimeSmartContextArtifactStore,
-    rehydrate_ids: &BTreeSet<String>,
-    aliases: &BTreeMap<String, String>,
-    stats: &mut RuntimeSmartContextTransformStats,
-) {
-    if runtime_smart_context_value_is_static_context_item(value) {
-        return;
-    }
-    match value {
-        serde_json::Value::String(text) => {
-            runtime_smart_context_rehydrate_text(text, store, rehydrate_ids, aliases, stats);
-        }
-        serde_json::Value::Array(items) => {
-            for item in items {
-                runtime_smart_context_rehydrate_value_for_ids(
-                    item,
-                    store,
-                    rehydrate_ids,
-                    aliases,
-                    stats,
-                );
+    use prodex_mojo_core::smart_context_artifact_ref::{
+        ArtifactReplacement, ArtifactReplacementInput, replace_artifact_reference,
+    };
+    for value_plan in runtime_smart_context_rehydration_values(value) {
+        let target = value
+            .pointer_mut(&value_plan.pointer)
+            .expect("compiled artifact projection must resolve its original JSON pointer");
+        let mut next = target
+            .as_str()
+            .expect("compiled artifact projection must select a string")
+            .to_string();
+        for reference in value_plan.references {
+            if !rehydrate_ids.contains(&reference.id) {
+                continue;
             }
-        }
-        serde_json::Value::Object(object) => {
-            for (key, item) in object {
-                if runtime_smart_context_static_prompt_field_key(key) {
-                    continue;
+            let Some(artifact_text) = store.get_text(&reference.id) else {
+                continue;
+            };
+            let Some(rehydrated_text) = runtime_smart_context_rehydrated_artifact_reference_text(
+                &artifact_text,
+                &reference,
+            ) else {
+                continue;
+            };
+            let Some(replacement) = replace_artifact_reference(ArtifactReplacementInput {
+                text: &next,
+                id: &reference.id,
+                marker: &reference.marker,
+                replacement: &rehydrated_text,
+                has_line_range: reference.line_range.is_some(),
+            })
+            .expect("compiled artifact replacement returned invalid output") else {
+                continue;
+            };
+            let complete = match replacement {
+                ArtifactReplacement::Continue(text) => {
+                    next = text;
+                    false
                 }
-                runtime_smart_context_rehydrate_value_for_ids(
-                    item,
-                    store,
-                    rehydrate_ids,
-                    aliases,
-                    stats,
-                );
+                ArtifactReplacement::Complete(text) => {
+                    next = text;
+                    true
+                }
+            };
+            stats.rehydrated_refs = stats.rehydrated_refs.saturating_add(1);
+            stats.rehydration_performed = stats.rehydration_performed.saturating_add(1);
+            if complete {
+                break;
             }
         }
-        _ => {}
+        *target = serde_json::Value::String(next);
     }
-}
-
-fn runtime_smart_context_rehydrate_text(
-    text: &mut String,
-    store: &RuntimeSmartContextArtifactStore,
-    rehydrate_ids: &BTreeSet<String>,
-    aliases: &BTreeMap<String, String>,
-    stats: &mut RuntimeSmartContextTransformStats,
-) {
-    let mut next = text.clone();
-    for reference in runtime_smart_context_artifact_ref_occurrences_from_text(text, aliases) {
-        if !rehydrate_ids.contains(&reference.id) {
-            continue;
-        }
-        let Some(artifact_text) = store.get_text(&reference.id) else {
-            continue;
-        };
-        let Some(rehydrated_text) =
-            runtime_smart_context_rehydrated_artifact_reference_text(&artifact_text, &reference)
-        else {
-            continue;
-        };
-        use prodex_mojo_core::smart_context_artifact_ref::{
-            ArtifactReplacement, ArtifactReplacementInput, replace_artifact_reference,
-        };
-        let Some(replacement) = replace_artifact_reference(ArtifactReplacementInput {
-            text: &next,
-            id: &reference.id,
-            marker: &reference.marker,
-            replacement: &rehydrated_text,
-            has_line_range: reference.line_range.is_some(),
-        })
-        .expect("compiled artifact replacement returned invalid output") else {
-            continue;
-        };
-        let (replacement, stop) = match replacement {
-            ArtifactReplacement::Continue(text) => (text, false),
-            ArtifactReplacement::Complete(text) => (text, true),
-        };
-        next = replacement;
-        stats.rehydrated_refs = stats.rehydrated_refs.saturating_add(1);
-        stats.rehydration_performed = stats.rehydration_performed.saturating_add(1);
-        if stop {
-            break;
-        }
-    }
-    *text = next;
 }
 
 pub(in crate::runtime_proxy::smart_context) fn runtime_smart_context_rehydrated_artifact_reference_text<
@@ -276,3 +233,7 @@ fn artifact_line_ranges(
 #[cfg(test)]
 #[path = "text_tests.rs"]
 mod text_tests;
+
+#[cfg(test)]
+#[path = "grouped_tests.rs"]
+mod grouped_tests;

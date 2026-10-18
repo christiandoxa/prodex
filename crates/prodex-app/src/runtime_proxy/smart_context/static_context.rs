@@ -111,22 +111,6 @@ pub(super) fn runtime_smart_context_static_context_items(
     runtime_smart_context_static_request_projection(value).0
 }
 
-pub(super) fn runtime_smart_context_static_prompt_field_key(key: &str) -> bool {
-    prodex_mojo_core::json::smart_context_static_prompt_key(key)
-        .expect("compiled Mojo static-prompt field classifier returned invalid output")
-}
-
-pub(super) fn runtime_smart_context_value_is_static_context_item(
-    value: &serde_json::Value,
-) -> bool {
-    let role = value
-        .get("role")
-        .and_then(serde_json::Value::as_str)
-        .unwrap_or_default();
-    prodex_mojo_core::json::smart_context_static_prompt_role(role)
-        .expect("compiled Mojo static-prompt role classifier returned invalid output")
-}
-
 #[cfg(test)]
 #[path = "static_context_projection_tests.rs"]
 mod tests;

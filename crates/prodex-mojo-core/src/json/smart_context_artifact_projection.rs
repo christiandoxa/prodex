@@ -2,13 +2,14 @@
 use super::{JsonNode, StringView, ffi_nodes, signed, status, transform_json_with_views};
 use crate::MojoError;
 
-/// Selects request references, alias declarations, or text references with supplied aliases.
+/// Selects references, aliases, or JSON-pointer plans for applying rehydration.
 #[derive(Debug, Clone, Copy)]
 #[repr(i64)]
 pub enum SmartContextArtifactProjection {
     Request,
     Aliases,
     Text,
+    RehydrationValues,
 }
 
 unsafe extern "C" {
@@ -57,10 +58,20 @@ pub fn smart_context_artifact_projection(
             (&mut alias_count as *mut i64) as usize as u64,
         )
     })?;
+    let node_units = nodes
+        .len()
+        .checked_mul(
+            if matches!(operation, SmartContextArtifactProjection::RehydrationValues) {
+                2
+            } else {
+                1
+            },
+        )
+        .ok_or(MojoError::Capacity)?;
     let scratch_count = usize::try_from(alias_count)
         .ok()
         .and_then(|count| count.checked_mul(7))
-        .and_then(|count| count.checked_add(nodes.len()))
+        .and_then(|count| count.checked_add(node_units))
         .and_then(|count| count.checked_add(1))
         .ok_or(MojoError::InvalidOutput)?;
     signed(scratch_count)?;
