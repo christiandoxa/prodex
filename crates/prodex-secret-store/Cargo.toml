@@ -14,7 +14,6 @@ path = "src/lib.rs"
 prodex_mojo_core = { workspace = true, features = ["mojo-rich"] }
 aes-gcm-siv = { workspace = true }
 getrandom = { workspace = true }
-keyring = { workspace = true }
 keyring-core = { workspace = true }
 libc = { workspace = true }
 prodex_domain = { workspace = true }
