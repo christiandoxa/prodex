@@ -39,6 +39,13 @@ pub(super) fn read_response_frame(
     }
 }
 
+pub(super) fn wait_response_readiness(
+    socket: &RuntimeUpstreamWebSocket,
+    wait: Duration,
+) -> io::Result<()> {
+    wait_readable(transport(socket)?, wait)
+}
+
 fn wait_readable(stream: &TcpStream, wait: Duration) -> io::Result<()> {
     let milliseconds = i32::try_from(wait.as_millis()).unwrap_or(i32::MAX);
     #[cfg(unix)]

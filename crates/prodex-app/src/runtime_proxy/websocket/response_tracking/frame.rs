@@ -1,4 +1,4 @@
-use super::readiness::read_response_frame;
+use super::readiness::{read_response_frame, wait_response_readiness};
 use super::{RuntimeWebsocketAttempt, RuntimeWebsocketResponseLoop, RuntimeWebsocketTextResult};
 use tungstenite::{Error as WsError, Message as WsMessage};
 
@@ -54,6 +54,16 @@ pub(super) fn run_runtime_websocket_response_loop(
     let mut last_upstream_frame = Instant::now();
     let mut last_client_heartbeat = Instant::now();
     loop {
+        check_response_deadline(&mut flow)?;
+        // Drain an already-buffered frame before declaring upstream idle.
+        // Host commit/persistence or downstream writes may take longer than
+        // the idle budget while the terminal frame is already waiting. The
+        // absolute precommit watchdog still wins before and after this read.
+        let frame = read_response_frame(&mut flow.upstream_socket, Duration::ZERO);
+        check_response_deadline(&mut flow)?;
+        if matches!(&frame, Ok(Some(_))) {
+            last_upstream_frame = Instant::now();
+        }
         let wait = match prepare_response_read(
             &mut flow,
             last_upstream_frame,
@@ -62,16 +72,16 @@ pub(super) fn run_runtime_websocket_response_loop(
             ResponseReadPreparation::Wait(wait) => wait,
             ResponseReadPreparation::Attempt(attempt) => return Ok(attempt),
         };
-        let frame = read_response_frame(&mut flow.upstream_socket, wait);
-        check_response_deadline(&mut flow)?;
         let frame = match frame {
-            Ok(None) => continue,
+            Ok(None) => {
+                if let Err(error) = wait_response_readiness(&flow.upstream_socket, wait) {
+                    return flow.handle_read_error(WsError::Io(error));
+                }
+                continue;
+            }
             Ok(Some(frame)) => Ok(frame),
             Err(error) => Err(error),
         };
-        if frame.is_ok() {
-            last_upstream_frame = Instant::now();
-        }
         match frame {
             Ok(WsMessage::Text(text)) => match flow.handle_text(text.to_string())? {
                 RuntimeWebsocketTextResult::Continue => {}

@@ -822,3 +822,9 @@ Microsoft documents a blocking `SO_RCVTIMEO` expiry as leaving the connection
 in an indeterminate state. Real I/O timeouts still reach transport recovery;
 they are not swallowed as successful polls. Normal blocking mode is restored
 before host writes, frame dispatch, and cached upstream reuse.
+
+Buffered response frames are consumed before checking the upstream idle
+clock: time spent applying a previous frame or persisting state must not
+cause an already-available terminal frame to be discarded as an idle timeout.
+This does not weaken the absolute precommit watchdog, which is checked before
+and after every nonblocking read, and does not extend idle time on empty polls.
