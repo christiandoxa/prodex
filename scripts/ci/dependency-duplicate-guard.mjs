@@ -41,11 +41,6 @@ export const DEFAULT_DUPLICATE_BUDGET = Object.freeze([
     reason: "tungstenite/sha1 and export crypto use different digest major lines.",
   },
   {
-    name: "getrandom",
-    maxVersions: 2,
-    reason: "legacy crypto and current rand/tempfile resolve getrandom 0.2 and 0.4.",
-  },
-  {
     name: "hashbrown",
     maxVersions: 2,
     reason: "ratatui-core/kasuari and rusqlite/hashlink currently resolve separate hashbrown minor lines.",
