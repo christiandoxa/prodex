@@ -3,7 +3,8 @@ use super::*;
 #[test]
 fn compiled_static_prompt_projection_preserves_nested_priority_and_unicode_exactly() {
     let value = serde_json::json!({
-        "developer": " dev\0\"🧭 ", "instructions": " \u{2003} ", "system": 3,
+        "developer": " dev\0\"🧭 ", " developer": "ignored sibling",
+        "instructions": " \u{2003} ", "system": 3,
         "input": [
             {"role":"user", "content":"ignored"},
             {"role":"system", "content":" ", "input_text":"ignored fallback"},
@@ -12,6 +13,7 @@ fn compiled_static_prompt_projection_preserves_nested_priority_and_unicode_exact
             {"role":"system", "content":["ignored content"], "input_text":""},
             {"role":"system", "input_text":"exact 🧭\n"},
             {"role":"developer", "content":null},
+            {"role":1, "content":"ignored role"},
         ]
     });
     let (items, legacy) = runtime_smart_context_static_request_projection(&value);
@@ -30,14 +32,6 @@ fn compiled_static_prompt_projection_preserves_nested_priority_and_unicode_exact
         ]
     );
     assert_eq!(legacy, None);
-    assert!(runtime_smart_context_static_prompt_field_key("developer"));
-    assert!(!runtime_smart_context_static_prompt_field_key(" developer"));
-    assert!(runtime_smart_context_value_is_static_context_item(
-        &serde_json::json!({"role":"system"})
-    ));
-    assert!(!runtime_smart_context_value_is_static_context_item(
-        &serde_json::json!({"role":1})
-    ));
 }
 
 #[test]

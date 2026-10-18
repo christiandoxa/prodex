@@ -16,7 +16,11 @@ fn compiled_artifact_projection_keeps_first_alias_and_protects_static_context() 
         "instructions": "@2 psc:fedcba9876543210",
     });
     assert_eq!(
-        runtime_smart_context_collect_artifact_aliases(&value),
+        runtime_smart_context_artifact_projection::<ArtifactProjection>(
+            &value,
+            prodex_mojo_core::json::SmartContextArtifactProjection::Aliases
+        )
+        .aliases,
         BTreeMap::from([
             ("@2".to_string(), first.to_string()),
             ("@3".to_string(), second.to_string()),
@@ -56,12 +60,13 @@ fn compiled_artifact_projection_keeps_first_alias_and_protects_static_context() 
 fn compiled_artifact_projection_resolves_punctuation_unicode_and_multiple_ranges() {
     let id = format!("sc2:{}", "b".repeat(64));
     let aliases = BTreeMap::from([("@12".to_string(), id.clone())]);
-    let references = runtime_smart_context_artifact_ref_occurrences_from_text(
-        &format!(
-            "\u{2003}[@12#L9-L10,2-L4,0-2,8-7,999999999999999999999999] \"{id}\" @99 @12=psc:0123456789abcdef"
-        ),
-        &aliases,
-    );
+    let references = runtime_smart_context_artifact_projection::<ArtifactProjection>(
+        &serde_json::json!({
+            "text": format!("\u{2003}[@12#L9-L10,2-L4,0-2,8-7,999999999999999999999999] \"{id}\" @99 @12=psc:0123456789abcdef"),
+            "aliases": aliases,
+        }),
+        prodex_mojo_core::json::SmartContextArtifactProjection::Text,
+    ).references;
     assert_eq!(references.len(), 2);
     assert_eq!(references[0].id, id);
     assert_eq!(
@@ -84,7 +89,11 @@ fn compiled_alias_ordering_keeps_first_of_many_repeated_declarations() {
         .collect::<Vec<_>>()
         .join(" ");
     let value = serde_json::json!({"input": [declarations, "@12 @1 @7"]});
-    let aliases = runtime_smart_context_collect_artifact_aliases(&value);
+    let aliases = runtime_smart_context_artifact_projection::<ArtifactProjection>(
+        &value,
+        prodex_mojo_core::json::SmartContextArtifactProjection::Aliases,
+    )
+    .aliases;
     assert_eq!(aliases.len(), 13);
     assert!(aliases.values().all(|id| id == first));
     let references = runtime_smart_context_collect_rehydratable_artifact_refs(&value);
@@ -120,5 +129,22 @@ fn borrowed_artifact_acquisition_preserves_projection_without_serializing_text()
             SmartContextArtifactProjection::Request
         )
         .unwrap(),
+    );
+}
+
+#[test]
+fn compiled_rehydration_projection_preserves_json_pointer_escapes_and_array_indexes() {
+    let value = serde_json::json!({
+        "a/b~c": [null, {"雪\n\"key": "sc:0123456789abcdef"}],
+        "input": [{"role": "developer", "content": "psc:0123456789abcdef"}],
+        "instructions": "psc:0123456789abcdef",
+    });
+    let values = runtime_smart_context_rehydration_values(&value);
+    assert_eq!(values.len(), 1);
+    assert_eq!(values[0].pointer, "/a~1b~0c/1/雪\n\"key");
+    assert_eq!(values[0].references[0].id, "sc:0123456789abcdef");
+    assert_eq!(
+        value.pointer(&values[0].pointer).unwrap(),
+        "sc:0123456789abcdef"
     );
 }

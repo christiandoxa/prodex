@@ -1,4 +1,6 @@
-use std::collections::{BTreeMap, BTreeSet};
+#[cfg(test)]
+use std::collections::BTreeMap;
+use std::collections::BTreeSet;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, serde::Deserialize)]
 pub(super) struct RuntimeSmartContextLineRange {
@@ -16,14 +18,26 @@ pub(super) struct RuntimeSmartContextArtifactReference {
 
 #[derive(serde::Deserialize)]
 struct ArtifactProjection {
+    #[cfg(test)]
     aliases: BTreeMap<String, String>,
     references: Vec<RuntimeSmartContextArtifactReference>,
 }
 
-fn runtime_smart_context_artifact_projection(
+#[derive(serde::Deserialize)]
+pub(super) struct RuntimeSmartContextRehydrationValue {
+    pub(super) pointer: String,
+    pub(super) references: Vec<RuntimeSmartContextArtifactReference>,
+}
+
+#[derive(serde::Deserialize)]
+struct RehydrationProjection {
+    values: Vec<RuntimeSmartContextRehydrationValue>,
+}
+
+fn runtime_smart_context_artifact_projection<T: serde::de::DeserializeOwned>(
     value: &serde_json::Value,
     operation: prodex_mojo_core::json::SmartContextArtifactProjection,
-) -> ArtifactProjection {
+) -> T {
     let tree = crate::json_boundary::app_json_tree_without_wire(value)
         .expect("bounded Smart Context artifact JSON must fit its host ABI");
     let raw = std::str::from_utf8(&tree.raw).expect("Serde JSON remains UTF-8");
@@ -47,32 +61,21 @@ pub(super) fn runtime_smart_context_collect_rehydratable_artifact_ref_ids(
 pub(super) fn runtime_smart_context_collect_rehydratable_artifact_refs(
     value: &serde_json::Value,
 ) -> Vec<RuntimeSmartContextArtifactReference> {
-    runtime_smart_context_artifact_projection(
+    runtime_smart_context_artifact_projection::<ArtifactProjection>(
         value,
         prodex_mojo_core::json::SmartContextArtifactProjection::Request,
     )
     .references
 }
 
-pub(super) fn runtime_smart_context_collect_artifact_aliases(
+pub(super) fn runtime_smart_context_rehydration_values(
     value: &serde_json::Value,
-) -> BTreeMap<String, String> {
-    runtime_smart_context_artifact_projection(
+) -> Vec<RuntimeSmartContextRehydrationValue> {
+    runtime_smart_context_artifact_projection::<RehydrationProjection>(
         value,
-        prodex_mojo_core::json::SmartContextArtifactProjection::Aliases,
+        prodex_mojo_core::json::SmartContextArtifactProjection::RehydrationValues,
     )
-    .aliases
-}
-
-pub(super) fn runtime_smart_context_artifact_ref_occurrences_from_text(
-    text: &str,
-    aliases: &BTreeMap<String, String>,
-) -> Vec<RuntimeSmartContextArtifactReference> {
-    runtime_smart_context_artifact_projection(
-        &serde_json::json!({"text": text, "aliases": aliases}),
-        prodex_mojo_core::json::SmartContextArtifactProjection::Text,
-    )
-    .references
+    .values
 }
 
 #[cfg(test)]

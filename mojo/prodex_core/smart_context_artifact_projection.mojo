@@ -12,7 +12,7 @@ from smart_context_artifact_ref import (
     canonical_reference_bounds, write_canonical_id, range_payload_start, range_item,
     MAX_TOKEN_BYTES, body_marker_present,
 )
-from json_sink import JsonSink, js_byte, js_literal, js_string, js_u64
+from json_sink import JsonSink, js_byte, js_literal, js_string, js_u64, js_escaped
 
 
 def ap_slice(view: ProdexRichStringView, start: Int64, end: Int64) -> ProdexRichStringView:
@@ -135,7 +135,7 @@ def ap_tree(nodes: UInt64, count: Int64, raw: UInt64, length: Int64) -> ParsedJs
 
 
 def ap_input_valid(operation: Int64, nodes: UInt64, count: Int64, raw: UInt64, length: Int64) -> Bool:
-    return operation >= 0 and operation <= 2 and nodes != 0 and count > 0 and count <= 1048576 and raw != 0 and length >= 0 and length <= 67108864
+    return operation >= 0 and operation <= 3 and nodes != 0 and count > 0 and count <= 1048576 and raw != 0 and length >= 0 and length <= 67108864
 
 
 def ap_tree_valid(tree: ParsedJson, operation: Int64) -> Bool:
@@ -251,27 +251,89 @@ def ap_references(sink: Pointer[mut=True, JsonSink, _], text: ProdexRichStringVi
     return count
 
 
-def ap_render(sink: Pointer[mut=True, JsonSink, _], tree: ParsedJson, operation: Int64, aliases: ArtifactAliases, blocked: Pointer[mut=True, Int64, _]) -> Bool:
-    js_literal(sink, StringSlice('{"aliases":{'))
-    for position in range(aliases.count):
-        if position > 0:
-            js_byte(sink, 44)
-        var index = aliases.order[unsafe_offset=position]
-        js_string(sink, aliases.keys[unsafe_offset=index])
-        js_byte(sink, 58)
-        js_string(sink, aliases.ids[unsafe_offset=index])
-    js_literal(sink, StringSlice('},"references":['))
+@fieldwise_init
+struct ArtifactTraversal(Copyable):
+    var blocked: Pointer[mut=True, Int64, MutUntrackedOrigin]
+    var ranks: Pointer[mut=True, Int64, MutUntrackedOrigin]
+    var counters: Pointer[mut=True, Int64, MutUntrackedOrigin]
+    var stack: Pointer[mut=True, Int64, MutUntrackedOrigin]
+
+
+def ap_pointer(sink: Pointer[mut=True, JsonSink, _], tree: ParsedJson, index: Int64, state: ArtifactTraversal):
+    var cursor = index
+    var depth: Int64 = 0
+    while tree.nodes[unsafe_offset=cursor].parent >= 0:
+        state.stack[unsafe_offset=depth] = cursor
+        depth += 1
+        cursor = tree.nodes[unsafe_offset=cursor].parent
+    js_byte(sink, 34)
+    while depth > 0:
+        depth -= 1
+        var node_index = state.stack[unsafe_offset=depth]
+        var node = tree.nodes[unsafe_offset=node_index].copy()
+        js_byte(sink, 47)
+        if pj_kind(tree, node.parent) == JSON_OBJECT:
+            var first: Int64 = 0
+            for position in range(Int64(node.key.len)):
+                var byte = byte_at(node.key.ptr, position)
+                if byte == 47 or byte == 126:
+                    js_escaped(sink, ap_slice(node.key, first, position))
+                    js_literal(sink, StringSlice("~1") if byte == 47 else StringSlice("~0"))
+                    first = position + 1
+            js_escaped(sink, ap_slice(node.key, first, Int64(node.key.len)))
+        else:
+            js_u64(sink, UInt64(state.ranks[unsafe_offset=node_index]))
+    js_byte(sink, 34)
+
+
+def ap_render(sink: Pointer[mut=True, JsonSink, _], tree: ParsedJson, operation: Int64, aliases: ArtifactAliases, state: ArtifactTraversal) -> Bool:
+    if operation == 3:
+        js_literal(sink, StringSlice('{"values":['))
+    else:
+        js_literal(sink, StringSlice('{"aliases":{'))
+        for position in range(aliases.count):
+            if position > 0:
+                js_byte(sink, 44)
+            var index = aliases.order[unsafe_offset=position]
+            js_string(sink, aliases.keys[unsafe_offset=index])
+            js_byte(sink, 58)
+            js_string(sink, aliases.ids[unsafe_offset=index])
+        js_literal(sink, StringSlice('},"references":['))
     var count: Int64 = 0
     if operation == 2:
         count = ap_references(sink, pj_text(tree, pj_field(tree, 0, StringSlice("text"))), aliases, count)
-    elif operation == 0:
+    elif operation == 0 or operation == 3:
         for index in range(tree.count):
             var node = tree.nodes[unsafe_offset=index].copy()
-            blocked[unsafe_offset=index] = Int64(
-                node.parent >= 0 and blocked[unsafe_offset=node.parent] != 0
+            state.blocked[unsafe_offset=index] = Int64(
+                node.parent >= 0 and state.blocked[unsafe_offset=node.parent] != 0
                 or ssr_static_item(tree, index) or ssr_field(node.key),
             )
-            if node.kind == JSON_STRING and blocked[unsafe_offset=index] == 0 and ap_reference_text(node.text):
+            if operation == 3:
+                state.counters[unsafe_offset=index] = 0
+                state.ranks[unsafe_offset=index] = 0
+                if node.parent >= 0:
+                    state.ranks[unsafe_offset=index] = state.counters[unsafe_offset=node.parent]
+                    state.counters[unsafe_offset=node.parent] += 1
+            if node.kind != JSON_STRING or state.blocked[unsafe_offset=index] != 0:
+                continue
+            if operation == 3:
+                var probe = JsonSink(sink[].output, 0, 0, True, False)
+                var references = ap_references(Pointer(to=probe), node.text, aliases, 0)
+                if references < 0:
+                    return False
+                if references == 0:
+                    continue
+                if count > 0:
+                    js_byte(sink, 44)
+                js_literal(sink, StringSlice('{"pointer":'))
+                ap_pointer(sink, tree, index, state)
+                js_literal(sink, StringSlice(',"references":['))
+                if ap_references(sink, node.text, aliases, 0) < 0:
+                    return False
+                js_literal(sink, StringSlice("]}"))
+                count += 1
+            elif ap_reference_text(node.text):
                 count = ap_references(sink, node.text, aliases, count)
                 if count < 0:
                     return False
@@ -293,10 +355,11 @@ def prodex_smart_context_artifact_projection_v1(
     var tree = ap_tree(nodes, count, raw, length)
     if not ap_tree_valid(tree, operation):
         return 1
-    if scratch_count < count + 1 or scratch_count > count + 1 + 67108864 * 7:
+    var node_units = count * 2 if operation == 3 else count
+    if scratch_count < node_units + 1 or scratch_count > node_units + 1 + 67108864 * 7:
         return 1
-    var alias_capacity = (scratch_count - count - 1) // 7
-    var base = scratch + UInt64(count * 16)
+    var alias_capacity = (scratch_count - node_units - 1) // 7
+    var base = scratch + UInt64(node_units * 16)
     var aliases = ArtifactAliases(
         Pointer[mut=True, ProdexRichStringView, MutUntrackedOrigin](unsafe_from_address=Int(base)),
         Pointer[mut=True, ProdexRichStringView, MutUntrackedOrigin](unsafe_from_address=Int(base + UInt64(alias_capacity * 16))),
@@ -319,16 +382,21 @@ def prodex_smart_context_artifact_projection_v1(
         else:
             aliases.order[unsafe_offset=aliases.count] = index
             aliases.count += 1
-    var blocked = Pointer[mut=True, Int64, MutUntrackedOrigin](unsafe_from_address=Int(scratch))
+    var state = ArtifactTraversal(
+        Pointer[mut=True, Int64, MutUntrackedOrigin](unsafe_from_address=Int(scratch)),
+        Pointer[mut=True, Int64, MutUntrackedOrigin](unsafe_from_address=Int(scratch + UInt64(count * 8))),
+        Pointer[mut=True, Int64, MutUntrackedOrigin](unsafe_from_address=Int(scratch + UInt64(count * 16))),
+        Pointer[mut=True, Int64, MutUntrackedOrigin](unsafe_from_address=Int(scratch + UInt64(count * 24))),
+    )
     var sink = JsonSink(Pointer[mut=True, UInt8, MutUntrackedOrigin](unsafe_from_address=Int(output)), capacity, 0, True, False)
-    if not ap_render(Pointer(to=sink), tree, operation, aliases, blocked):
+    if not ap_render(Pointer(to=sink), tree, operation, aliases, state):
         return 1
     if sink.failed or measuring == 0 and sink.written > capacity:
         return 3
     if measuring == 0:
         sink.written = 0
         sink.measuring = False
-        if not ap_render(Pointer(to=sink), tree, operation, aliases, blocked):
+        if not ap_render(Pointer(to=sink), tree, operation, aliases, state):
             return 1
     var meta = Pointer[mut=True, Int64, MutUntrackedOrigin](unsafe_from_address=Int(metadata))
     meta[unsafe_offset=0] = 1
