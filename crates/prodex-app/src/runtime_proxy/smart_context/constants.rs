@@ -19,8 +19,3 @@ pub(super) const SMART_CONTEXT_REWRITE_DEADLINE_MS: u64 = 100;
 #[cfg(debug_assertions)]
 pub(super) const SMART_CONTEXT_REWRITE_DEADLINE_MS: u64 = 5_000;
 pub(super) const SMART_CONTEXT_SHORT_ARTIFACT_REF_PREFIX: &str = "psc:";
-pub(super) const SMART_CONTEXT_STATIC_CONTEXT_DELTA_MARKER_PREFIX: &str = "psc static ";
-pub(super) const SMART_CONTEXT_STATIC_CONTEXT_DELTA_MARKER_PREFIX_LEGACY: &str =
-    "prodex static context unchanged ";
-pub(super) const RUNTIME_SMART_CONTEXT_STATIC_PROMPT_FIELDS: [&str; 3] =
-    ["instructions", "system", "developer"];

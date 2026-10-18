@@ -4,11 +4,11 @@ pub(super) fn runtime_smart_context_static_prompt_cache_key_from_body(
     body: &[u8],
 ) -> Option<String> {
     let value = serde_json::from_slice::<serde_json::Value>(body).ok()?;
-    let items = runtime_smart_context_static_context_items(&value);
+    let (items, legacy_hash) = runtime_smart_context_static_request_projection(&value);
     if items.is_empty() {
         return None;
     }
-    if let Some(hash) = runtime_smart_context_legacy_static_delta_hash(&items) {
+    if let Some(hash) = legacy_hash {
         return Some(hash);
     }
     Some(
@@ -77,109 +77,56 @@ pub(super) fn runtime_smart_context_static_context_observation(
     }
 }
 
-fn runtime_smart_context_legacy_static_delta_hash(
-    items: &[runtime_proxy_crate::SmartContextStaticContextItem],
-) -> Option<String> {
-    let hashes = items
-        .iter()
-        .map(|item| {
-            let text = item.text.trim();
-            text.strip_prefix(SMART_CONTEXT_STATIC_CONTEXT_DELTA_MARKER_PREFIX)
-                .or_else(|| {
-                    text.strip_prefix(SMART_CONTEXT_STATIC_CONTEXT_DELTA_MARKER_PREFIX_LEGACY)
-                })
-                .filter(|hash| {
-                    (hash.starts_with("scpc2:") || hash.starts_with("scpc:"))
-                        && !hash.chars().any(char::is_whitespace)
-                })
-        })
-        .collect::<Option<Vec<_>>>()?;
-    let first = hashes.first()?;
-    hashes
-        .iter()
-        .all(|hash| hash == first)
-        .then(|| (*first).to_string())
+fn runtime_smart_context_static_request_projection(
+    value: &serde_json::Value,
+) -> (
+    Vec<runtime_proxy_crate::SmartContextStaticContextItem>,
+    Option<String>,
+) {
+    #[derive(serde::Deserialize)]
+    struct Projection {
+        items: Vec<(String, String)>,
+        legacy_hash: Option<String>,
+    }
+    let tree = crate::json_boundary::app_json_tree(value)
+        .expect("bounded static-prompt request must fit its JSON ABI");
+    let raw = std::str::from_utf8(&tree.raw).expect("Serde static-prompt JSON remains UTF-8");
+    let output = prodex_mojo_core::json::smart_context_static_request(&tree.nodes, raw)
+        .expect("compiled Mojo static-prompt projection returned invalid output");
+    let projection: Projection = serde_json::from_slice(&output)
+        .expect("Mojo static-prompt projection matches its caller schema");
+    (
+        projection
+            .items
+            .into_iter()
+            .map(|(id, text)| runtime_proxy_crate::SmartContextStaticContextItem { id, text })
+            .collect(),
+        projection.legacy_hash,
+    )
 }
 
 pub(super) fn runtime_smart_context_static_context_items(
     value: &serde_json::Value,
 ) -> Vec<runtime_proxy_crate::SmartContextStaticContextItem> {
-    let mut items = RUNTIME_SMART_CONTEXT_STATIC_PROMPT_FIELDS
-        .iter()
-        .filter_map(|key| {
-            let text = value.get(key)?.as_str()?;
-            (!text.trim().is_empty()).then(|| runtime_proxy_crate::SmartContextStaticContextItem {
-                id: (*key).to_string(),
-                text: text.to_string(),
-            })
-        })
-        .collect::<Vec<_>>();
-
-    if let Some(input) = value.get("input").and_then(serde_json::Value::as_array) {
-        for (index, item) in input.iter().enumerate() {
-            let Some(role) = item.get("role").and_then(serde_json::Value::as_str) else {
-                continue;
-            };
-            if !runtime_smart_context_static_role_is_prompt_prefix(role) {
-                continue;
-            }
-            if let Some(text) = runtime_smart_context_static_message_text(item) {
-                items.push(runtime_proxy_crate::SmartContextStaticContextItem {
-                    id: format!("input[{index}].{role}"),
-                    text,
-                });
-            }
-        }
-    }
-    items.sort_by(|left, right| left.id.cmp(&right.id));
-    items
+    runtime_smart_context_static_request_projection(value).0
 }
 
 pub(super) fn runtime_smart_context_static_prompt_field_key(key: &str) -> bool {
-    RUNTIME_SMART_CONTEXT_STATIC_PROMPT_FIELDS.contains(&key)
-}
-
-fn runtime_smart_context_static_role_is_prompt_prefix(role: &str) -> bool {
-    matches!(role, "system" | "developer")
+    prodex_mojo_core::json::smart_context_static_prompt_key(key)
+        .expect("compiled Mojo static-prompt field classifier returned invalid output")
 }
 
 pub(super) fn runtime_smart_context_value_is_static_context_item(
     value: &serde_json::Value,
 ) -> bool {
-    value
+    let role = value
         .get("role")
         .and_then(serde_json::Value::as_str)
-        .is_some_and(runtime_smart_context_static_role_is_prompt_prefix)
+        .unwrap_or_default();
+    prodex_mojo_core::json::smart_context_static_prompt_role(role)
+        .expect("compiled Mojo static-prompt role classifier returned invalid output")
 }
 
-fn runtime_smart_context_static_message_text(value: &serde_json::Value) -> Option<String> {
-    let object = value.as_object()?;
-    if let Some(text) = object.get("content").and_then(serde_json::Value::as_str) {
-        return (!text.trim().is_empty()).then(|| text.to_string());
-    }
-    if let Some(text) = object.get("input_text").and_then(serde_json::Value::as_str) {
-        return (!text.trim().is_empty()).then(|| text.to_string());
-    }
-    let mut parts = Vec::new();
-    collect_static_text_parts(object.get("content")?, &mut parts);
-    (!parts.is_empty()).then(|| parts.join("\n"))
-}
-
-fn collect_static_text_parts(value: &serde_json::Value, parts: &mut Vec<String>) {
-    match value {
-        serde_json::Value::String(text) if !text.trim().is_empty() => parts.push(text.clone()),
-        serde_json::Value::Array(items) => {
-            for item in items {
-                collect_static_text_parts(item, parts);
-            }
-        }
-        serde_json::Value::Object(object) => {
-            for key in ["text", "input_text", "content"] {
-                if let Some(item) = object.get(key) {
-                    collect_static_text_parts(item, parts);
-                }
-            }
-        }
-        _ => {}
-    }
-}
+#[cfg(test)]
+#[path = "static_context_projection_tests.rs"]
+mod tests;

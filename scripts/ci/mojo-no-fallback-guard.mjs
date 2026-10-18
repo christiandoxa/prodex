@@ -171,6 +171,10 @@ const PING_SUMMARY_CALLER_TEST_FILE = "crates/prodex-app/src/app_commands/ping_t
 const PING_SUMMARY_ADAPTER_FILE = "crates/prodex-mojo-core/src/rich/ping_protocol.rs";
 const PING_SUMMARY_MOJO_FILE = "mojo/prodex_core/ping_protocol.mojo";
 const PROMOTED_FILES = [
+  "crates/prodex-app/src/runtime_proxy/smart_context/static_context.rs",
+  "crates/prodex-app/src/runtime_proxy/smart_context/static_context_projection_tests.rs",
+  "crates/prodex-mojo-core/src/json/smart_context_static_request.rs",
+  "mojo/prodex_core/smart_context_static_request.mojo",
   "crates/prodex-app/src/quota_support/watch_tui/frame_data.rs",
   "crates/prodex-app/src/quota_support/watch_tui/frame_data_tests.rs",
   "crates/prodex-mojo-core/src/json/quota_watch_presentation.rs",
@@ -7494,6 +7498,44 @@ export function findViolations(files) {
     return [];
   });
   const smartContextDuplicateTextViolations = files.flatMap(([filePath, contents]) => {
+    if (filePath === "crates/prodex-app/src/runtime_proxy/smart_context/static_context.rs") {
+      const required = [
+        "prodex_mojo_core::json::smart_context_static_request(",
+        "prodex_mojo_core::json::smart_context_static_prompt_key(",
+        "prodex_mojo_core::json::smart_context_static_prompt_role(",
+      ];
+      const retired = ["fn collect_static_text_parts(",
+        "fn runtime_smart_context_static_message_text(",
+        "fn runtime_smart_context_legacy_static_delta_hash(",
+        "fn runtime_smart_context_static_role_is_prompt_prefix(",
+        ".sort_by(",
+      ];
+      return required.every((marker) => contents.includes(marker)) &&
+        retired.every((marker) => !contents.includes(marker))
+        ? [] : [filePath + ": static-prompt extraction, ordering and legacy cache recovery must remain Mojo-owned"];
+    }
+    if (filePath === "crates/prodex-app/src/runtime_proxy/smart_context/static_context_projection_tests.rs") {
+      return ["compiled_static_prompt_projection_preserves_nested_priority_and_unicode_exactly",
+        "compiled_static_prompt_projection_keeps_lexical_input_ids_and_legacy_consensus",
+      ].filter((marker) => !contents.includes(marker))
+        .map((marker) => filePath + ": static-prompt caller coverage missing " + marker);
+    }
+    if (filePath === "crates/prodex-mojo-core/src/json/smart_context_static_request.rs") {
+      return ["fn prodex_smart_context_static_request_v1(",
+        "fn prodex_smart_context_static_boundary_v1(", "transform_json_with_scratch(",
+        "mojo_static_request_empty_projection_and_exact_boundary_contract",
+        "mojo_static_request_abi_rejects_invalid_views_and_short_buffers_before_writes",
+        "mojo_static_boundary_abi_rejects_invalid_utf8_and_flags_without_writes",
+      ].filter((marker) => !contents.includes(marker))
+        .map((marker) => filePath + ": static-prompt ABI or coverage missing " + marker);
+    }
+    if (filePath === "mojo/prodex_core/smart_context_static_request.mojo") {
+      return ['@export("prodex_smart_context_static_request_v1")',
+        '@export("prodex_smart_context_static_boundary_v1")', "def ssr_collect_parts(",
+        "def ssr_legacy_hash(", "rich_view_order_sort(",
+      ].filter((marker) => !contents.includes(marker))
+        .map((marker) => filePath + ": compiled static-prompt ownership missing " + marker);
+    }
     if (filePath === SMART_CONTEXT_DUPLICATE_VALIDATION_FILE) {
       const production = contents.split("#[cfg(test)]", 1)[0];
       const required = [
@@ -10672,6 +10714,18 @@ function selfTest() {
     "SmartContextInlineOperation::Expand",
     "smart_context_rewrite_validation_reason(",
   ].join("; ");
+  const staticPromptFile = "crates/prodex-app/src/runtime_proxy/smart_context/static_context.rs";
+  const staticPromptCalls = ["prodex_mojo_core::json::smart_context_static_request(",
+    "prodex_mojo_core::json::smart_context_static_prompt_key(",
+    "prodex_mojo_core::json::smart_context_static_prompt_role(",
+  ].join("\n");
+  assert.deepEqual(findViolations([[staticPromptFile, staticPromptCalls]]), []);
+  assert.match(findViolations([[staticPromptFile,
+    staticPromptCalls + "\nfn collect_static_text_parts() {}",
+  ]]).join("\n"), /static-prompt extraction, ordering and legacy cache recovery must remain Mojo-owned/u);
+  assert.match(findViolations([[staticPromptFile,
+    staticPromptCalls.replace("smart_context_static_request(", "rust_static_request("),
+  ]]).join("\n"), /static-prompt extraction, ordering and legacy cache recovery must remain Mojo-owned/u);
   assert.deepEqual(findViolations([[SMART_CONTEXT_DUPLICATE_VALIDATION_FILE,
     duplicateTextPlannerCalls]]), []);
   assert.match(findViolations([[SMART_CONTEXT_DUPLICATE_VALIDATION_FILE,
