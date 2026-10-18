@@ -2,7 +2,7 @@
 
 use prodex_mojo_core::rich::{DeepSeekRequestPolicyOperation, deepseek_request_policy};
 
-use super::super::request_policy::{detail, plan_value};
+use super::super::request_policy::{detail, plan_value, validate_plan};
 
 struct MojoMetadataRequest<'a> {
     existing: serde_json::Map<String, serde_json::Value>,
@@ -89,6 +89,12 @@ pub fn deepseek_provider_core_response_format_from_responses_request(
         DeepSeekRequestPolicyOperation::ResponseFormatShape,
         false,
     );
+    validate_plan(
+        DeepSeekRequestPolicyOperation::ResponseFormatShape,
+        &source,
+        plan,
+        provider_label,
+    )?;
     match plan.tag {
         0 | 2 => Ok(None),
         1 => {
@@ -104,15 +110,6 @@ pub fn deepseek_provider_core_response_format_from_responses_request(
                     format!("{provider_label} response_format could not be normalized: {error}")
                 })
         }
-        3 => Err(format!(
-            "{provider_label} response_format must include a type"
-        )),
-        4 => {
-            let format_type = detail(&source, plan).unwrap_or_default();
-            Err(format!(
-                "{provider_label} response_format type \x60{format_type}\x60 is not supported"
-            ))
-        }
         _ => Err(format!(
             "{provider_label} response_format classification returned invalid output"
         )),
@@ -126,16 +123,18 @@ pub fn deepseek_provider_core_response_metadata_from_responses_request(
 ) -> Result<Option<serde_json::Value>, String> {
     let (source, plan) = plan_value(value, DeepSeekRequestPolicyOperation::MetadataShape, false);
     if plan.tag == 1 {
-        return Err(format!(
-            "{provider_label} request metadata must be an object"
-        ));
+        validate_plan(
+            DeepSeekRequestPolicyOperation::MetadataShape,
+            &source,
+            plan,
+            provider_label,
+        )?;
     }
 
     let metadata = match value.get("metadata") {
-        Some(metadata) => metadata
-            .as_object()
-            .cloned()
-            .ok_or_else(|| format!("{provider_label} request metadata must be an object"))?,
+        Some(metadata) => metadata.as_object().cloned().ok_or_else(|| {
+            format!("{provider_label} metadata acquisition returned a non-object")
+        })?,
         None => serde_json::Map::new(),
     };
     if metadata
@@ -147,29 +146,12 @@ pub fn deepseek_provider_core_response_metadata_from_responses_request(
         ));
     }
 
-    match plan.tag {
-        0 | 256 => {}
-        2 => {
-            return Err(format!(
-                "{provider_label} client_metadata must be an object"
-            ));
-        }
-        3 => {
-            return Err(format!(
-                "{provider_label} prompt_cache_key must be a string"
-            ));
-        }
-        4 => {
-            return Err(format!(
-                "{provider_label} prompt_cache_retention must be a string"
-            ));
-        }
-        _ => {
-            return Err(format!(
-                "{provider_label} request metadata classification returned invalid output"
-            ));
-        }
-    }
+    validate_plan(
+        DeepSeekRequestPolicyOperation::MetadataShape,
+        &source,
+        plan,
+        provider_label,
+    )?;
 
     let client_metadata = value.get("client_metadata");
     let prompt_cache_key = value

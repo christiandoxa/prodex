@@ -12,6 +12,9 @@ use crate::{
 mod input_items;
 mod json;
 mod messages;
+#[cfg(test)]
+#[path = "deepseek_bridge/tests/request_diagnostics.rs"]
+mod request_diagnostics_tests;
 mod request_messages;
 mod request_params;
 mod request_policy;

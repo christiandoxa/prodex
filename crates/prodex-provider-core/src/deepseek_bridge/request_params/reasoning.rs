@@ -22,24 +22,13 @@ fn reasoning_effort_from_responses_request(
         false,
         provider_label,
     )?;
-    match plan.tag {
-        0 => Ok(None),
-        1 => Err(format!("{provider_label} reasoning must be an object")),
-        2 => Err(format!(
-            "{provider_label} reasoning.{} is not supported by this Responses adapter",
-            super::super::request_policy::detail(&source, plan).unwrap_or_default()
-        )),
-        3 => Err(format!(
-            "{provider_label} reasoning.effort must be a string"
-        )),
-        4 => Err(format!(
-            "{provider_label} reasoning_effort must be a string"
-        )),
-        10 => Ok(super::super::request_policy::detail(&source, plan)),
-        tag => Err(format!(
-            "{provider_label} reasoning validation returned unknown result {tag}"
-        )),
-    }
+    super::super::request_policy::validate_plan(
+        prodex_mojo_core::rich::DeepSeekRequestPolicyOperation::ReasoningShape,
+        &source,
+        plan,
+        provider_label,
+    )?;
+    Ok(super::super::request_policy::detail(&source, plan))
 }
 
 pub fn deepseek_provider_core_apply_reasoning_from_responses_request(

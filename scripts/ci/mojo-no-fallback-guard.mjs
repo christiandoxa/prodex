@@ -171,6 +171,11 @@ const PING_SUMMARY_CALLER_TEST_FILE = "crates/prodex-app/src/app_commands/ping_t
 const PING_SUMMARY_ADAPTER_FILE = "crates/prodex-mojo-core/src/rich/ping_protocol.rs";
 const PING_SUMMARY_MOJO_FILE = "mojo/prodex_core/ping_protocol.mojo";
 const PROMOTED_FILES = [
+  "crates/prodex-provider-core/src/deepseek_bridge/request_policy.rs",
+  "crates/prodex-provider-core/src/deepseek_bridge/tests/request_diagnostics.rs",
+  "crates/prodex-mojo-core/src/rich/deepseek/request_diagnostic.rs",
+  "crates/prodex-mojo-core/src/rich/deepseek/request_diagnostic_tests.rs",
+  "mojo/prodex_core/deepseek_request_diagnostics.mojo",
   "crates/prodex-app/src/runtime_proxy/smart_context/static_context.rs",
   "crates/prodex-app/src/runtime_proxy/smart_context/static_context_projection_tests.rs",
   "crates/prodex-mojo-core/src/json/smart_context_static_request.rs",
@@ -8880,6 +8885,26 @@ export function findViolations(files) {
     }
     return [];
   });
+  const deepseekRequestDiagnosticViolations = files.flatMap(([filePath, contents]) => {
+    const bridge = "crates/prodex-provider-core/src/deepseek_bridge/";
+    const callers = ["request_params.rs", "request_params/reject.rs", "request_params/reasoning.rs", "request_params/metadata.rs", "request_tools/tool_choice.rs"];
+    if (callers.some((file) => filePath === bridge + file)) {
+      const production = contents.split("#[cfg(test)]", 1)[0];
+      const restored = /request_policy_error|deprecated and is not forwarded by Prodex|supports at most 16 stop sequences|temperature must be a number|top_logprobs must be|reasoning must be an object|tool_choice string `|response_format must include a type|client_metadata must be an object/u;
+      return restored.test(production)
+        ? [filePath + ": restored Rust request diagnostic catalog"] : [];
+    }
+    const requirements = new Map([
+      [bridge + "request_policy.rs", ["prodex_mojo_core::rich::deepseek_request_diagnostic("]],
+      [bridge + "tests/request_diagnostics.rs", ["compiled_request_diagnostics_reach_all_provider_validation_callers"]],
+      ["crates/prodex-mojo-core/src/rich/deepseek/request_diagnostic.rs", ["fn prodex_deepseek_request_diagnostic_v1(", "pub fn deepseek_request_diagnostic(", "MojoError::InvalidOutput"]],
+      ["crates/prodex-mojo-core/src/rich/deepseek/request_diagnostic_tests.rs", ["compiled_request_diagnostics_cover_every_rejection_and_success_tag", "compiled_request_diagnostic_abi_is_atomic_on_malformed_inputs_and_short_buffers"]],
+      ["mojo/prodex_core/deepseek_request_diagnostics.mojo", ['@export("prodex_deepseek_request_diagnostic_v1")', "rich_view_valid(provider", "sink.measuring = False"]],
+      ["crates/prodex-mojo-core/build.rs", ['sources.push("../../mojo/prodex_core/deepseek_request_diagnostics.mojo")']],
+    ]);
+    return (requirements.get(filePath) ?? []).filter((marker) => !contents.includes(marker))
+      .map((marker) => filePath + ": compiled request diagnostic ownership missing " + marker);
+  });
   const deepseekToolShapeIssueMojoViolations = files.flatMap(([filePath, contents]) => {
     if (filePath === "crates/prodex-provider-core/src/deepseek_bridge/request_tools/tool_shape.rs") {
       const production = contents.split("#[cfg(test)]", 1)[0];
@@ -9272,7 +9297,7 @@ export function findViolations(files) {
     }
     return [];
   });
-  return [...logPayloadProjectionViolations, ...nativeRecoveryOwnershipViolations, ...quotaRecoveryEligibilityViolations, ...runtimeBrokerReuseMojoViolations, ...geminiResponseMediaMojoViolations, ...cookieEvictionMojoViolations, ...websocketBudgetMojoViolations, ...affinityBindingMojoViolations, ...responsesCapacityRecoveryViolations, ...sseTapMojoOwnershipViolations, ...quotaWatchViolations, ...geminiCompactSnippetViolations, ...geminiCompactTextViolations, ...doctorSmartContextDecisionViolations, ...anthropicAttemptCursorViolations, ...geminiUnsupportedToolRetryViolations, ...terminalGeometryViolations, ...previousResponseRecoveryTransitionViolations, ...chatCompatibleToolCallKindViolations, ...geminiQuotaBodyMojoViolations, ...geminiOAuthRotationMojoViolations, ...geminiOAuthModelMojoViolations, ...superExposeOriginMojoViolations, ...kiroAcpToolLedgerMojoViolations, ...quotaPoolSummarySectionsMojoViolations, ...deepseekToolShapeIssueMojoViolations, ...deepseekReplayItemPolicyMojoViolations, ...chatNamespaceSplitMojoViolations, ...deepseekInputItemIssueMessageViolations, ...deepseekRequestIssueMessageViolations, ...smartContextTelemetrySampleViolations, ...compatibilityDiagnosticsMojoViolations, ...quotaHeaderProjectionViolations, ...smartContextCapsuleOrderViolations, ...markerViolations, ...deepseekCatalogPolicyViolations, ...featureOffViolations, ...liveLogRecordViolations, ...runtimePolicyPresetViolations, ...runtimeConfigScalarViolations, ...profileHealthCircuitViolations, ...logThroughputViolations, ...operationalDetailSpecViolations, ...transcriptPolicyViolations, ...logLoadPolicyViolations, ...routeReasonViolations, ...runtimeStateQuotaViolations, ...runtimeStateRoutePolicyViolations, ...runtimeProxyRootViolations, ...runtimeRecoveryDeadlineViolations, ...brokerVersionGuardViolations, ...brokerContinuityViolations, ...brokerLogCacheViolations, ...codexConfigViolations, ...statePolicyViolations, ...quotaSelectionPolicyViolations, ...routeTagMirrorViolations, ...enumTagMirrorViolations, ...appSelectionPolicyMirrorViolations, ...runtimeStateBackgroundViolations, ...redactionViolations, ...rateLimitHeaderSelectionViolations, ...profileIdentityViolations, ...governanceInspectionViolations, ...governanceInspectionOrderingViolations, ...exactnessPlannerViolations,
+  return [...logPayloadProjectionViolations, ...nativeRecoveryOwnershipViolations, ...quotaRecoveryEligibilityViolations, ...runtimeBrokerReuseMojoViolations, ...geminiResponseMediaMojoViolations, ...cookieEvictionMojoViolations, ...websocketBudgetMojoViolations, ...affinityBindingMojoViolations, ...responsesCapacityRecoveryViolations, ...sseTapMojoOwnershipViolations, ...quotaWatchViolations, ...geminiCompactSnippetViolations, ...geminiCompactTextViolations, ...doctorSmartContextDecisionViolations, ...anthropicAttemptCursorViolations, ...geminiUnsupportedToolRetryViolations, ...terminalGeometryViolations, ...previousResponseRecoveryTransitionViolations, ...chatCompatibleToolCallKindViolations, ...geminiQuotaBodyMojoViolations, ...geminiOAuthRotationMojoViolations, ...geminiOAuthModelMojoViolations, ...superExposeOriginMojoViolations, ...kiroAcpToolLedgerMojoViolations, ...quotaPoolSummarySectionsMojoViolations, ...deepseekRequestDiagnosticViolations, ...deepseekToolShapeIssueMojoViolations, ...deepseekReplayItemPolicyMojoViolations, ...chatNamespaceSplitMojoViolations, ...deepseekInputItemIssueMessageViolations, ...deepseekRequestIssueMessageViolations, ...smartContextTelemetrySampleViolations, ...compatibilityDiagnosticsMojoViolations, ...quotaHeaderProjectionViolations, ...smartContextCapsuleOrderViolations, ...markerViolations, ...deepseekCatalogPolicyViolations, ...featureOffViolations, ...liveLogRecordViolations, ...runtimePolicyPresetViolations, ...runtimeConfigScalarViolations, ...profileHealthCircuitViolations, ...logThroughputViolations, ...operationalDetailSpecViolations, ...transcriptPolicyViolations, ...logLoadPolicyViolations, ...routeReasonViolations, ...runtimeStateQuotaViolations, ...runtimeStateRoutePolicyViolations, ...runtimeProxyRootViolations, ...runtimeRecoveryDeadlineViolations, ...brokerVersionGuardViolations, ...brokerContinuityViolations, ...brokerLogCacheViolations, ...codexConfigViolations, ...statePolicyViolations, ...quotaSelectionPolicyViolations, ...routeTagMirrorViolations, ...enumTagMirrorViolations, ...appSelectionPolicyMirrorViolations, ...runtimeStateBackgroundViolations, ...redactionViolations, ...rateLimitHeaderSelectionViolations, ...profileIdentityViolations, ...governanceInspectionViolations, ...governanceInspectionOrderingViolations, ...exactnessPlannerViolations,
     ...adaptiveBudgetViolations,
     ...providerUsageViolations,
     ...auditUsageViolations,
@@ -10321,7 +10346,7 @@ function selfTest() {
     [SMART_CONTEXT_SYMBOLS_MOJO_FILE,
       '@export("prodex_smart_context_symbol_index_v1")\ncomptime SYMBOL_ABI_VERSION: Int64 = 1\ncomptime SYMBOL_MAX_INPUT_BYTES: Int64 = 64 * 1024 * 1024\ndef symbol_parse_declaration(): pass\ndef symbol_brace_end(): pass\ndef symbol_python_end(): pass'],
     ["crates/prodex-mojo-core/src/lib.rs", "pub mod smart_context_symbols;"],
-    ["crates/prodex-mojo-core/build.rs", '../../mojo/prodex_core/smart_context_symbols.mojo\nsources.push("../../mojo/prodex_core/kiro_acp_tool_activity_policy.mojo")'],
+    ["crates/prodex-mojo-core/build.rs", '../../mojo/prodex_core/smart_context_symbols.mojo\nsources.push("../../mojo/prodex_core/kiro_acp_tool_activity_policy.mojo")\nsources.push("../../mojo/prodex_core/deepseek_request_diagnostics.mojo")'],
     [SMART_CONTEXT_SYMBOLS_TEST_FILE,
       "source_symbol_ranges_cover_rust_python_and_javascript source_symbol_ranges_preserve_function_type_and_fallback_names symbol_index_reports_capacity_and_excerpt_truncation symbol_index_accepts_large_multi_line_artifacts_with_bounded_lines index(text, 16, 16 * 1024)"],
     [SMART_CONTEXT_SYMBOLS_CALLER_TEST_FILE,
@@ -11347,6 +11372,11 @@ function selfTest() {
   assert.match(findViolations([[DEEPSEEK_REQUEST_FILE,
     "fn deepseek_request_body_from_responses_rust() {}"]]).join("\n"),
     /Rust semantic oracle or copy/u);
+  assert.match(findViolations([[DEEPSEEK_REQUEST_REJECT_FILE,
+    'fn request_policy_error() { "deprecated and is not forwarded by Prodex" }']]).join("\n"),
+    /restored Rust request diagnostic catalog/u);
+  assert.match(findViolations([["crates/prodex-provider-core/src/deepseek_bridge/request_policy.rs",
+    "fn validate_plan() { Ok(()) }"]]).join("\n"), /compiled request diagnostic ownership missing/u);
   assert.match(findViolations([[DEEPSEEK_REQUEST_REJECT_FILE,
     "fn deepseek_provider_core_validate_modalities(value: &Value) {}"]]).join("\n"),
     /without Rust copies or cfg routing/u);
