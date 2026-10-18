@@ -334,7 +334,15 @@ fn runtime_proxy_websocket_previous_response_not_found_after_commit_passes_throu
                 .send(WsMessage::Pong(payload))
                 .expect("websocket pong should send"),
             WsMessage::Pong(_) | WsMessage::Frame(_) => {}
-            other => panic!("unexpected websocket response: {other:?}"),
+            other => {
+                let diagnostic = fs::read_to_string(&proxy.log_path).unwrap_or_default();
+                let tail = diagnostic.lines().rev().take(60).collect::<Vec<_>>()
+                    .into_iter().rev().collect::<Vec<_>>().join("\n");
+                panic!(
+                    "unexpected websocket response: {other:?}; frames={frames:?}; accounts={:?}; backend_requests={:?}; runtime_tail={tail}",
+                    backend.responses_accounts(), backend.websocket_requests(),
+                );
+            }
         }
     };
     let _ = socket.close(None);

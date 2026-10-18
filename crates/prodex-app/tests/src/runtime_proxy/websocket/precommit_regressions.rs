@@ -8,10 +8,14 @@ fn websocket_rate_limits_keeps_reused_session_alive_past_progress_timeout() {
     let upstream_addr = listener
         .local_addr()
         .expect("upstream websocket listener should expose address");
+    let (release_upstream, completed) = std::sync::mpsc::channel();
     let upstream = thread::spawn(move || {
         let (stream, _) = listener
             .accept()
             .expect("upstream websocket should accept connection");
+        stream
+            .set_read_timeout(Some(Duration::from_secs(10)))
+            .unwrap();
         let mut socket = tungstenite::accept(stream).expect("upstream websocket handshake");
         let _first_request = socket
             .read()
@@ -49,6 +53,15 @@ fn websocket_rate_limits_keeps_reused_session_alive_past_progress_timeout() {
                     .into(),
             ))
             .expect("upstream should send reused response.completed");
+        // The production reader acknowledges Ping with Pong. Do not drop a
+        // TCP socket with that unread reply: Windows may reset queued output.
+        assert!(matches!(
+            socket.read().expect("upstream should drain its Ping acknowledgement"),
+            WsMessage::Pong(payload) if payload.as_ref() == b"upstream-ping"
+        ));
+        completed
+            .recv_timeout(Duration::from_secs(10))
+            .expect("consumer must observe completion before mock teardown");
     });
 
     let shared = websocket_test_shared_with_main_profile("precommit-hold-reuse", upstream_addr);
@@ -103,12 +116,19 @@ fn websocket_rate_limits_keeps_reused_session_alive_past_progress_timeout() {
             promote_committed_profile: true,
         })
     });
-    let reused_rate_limits = client_socket
-        .read()
-        .expect("client should receive reused codex.rate_limits");
-    let reused_completed = client_socket
-        .read()
-        .expect("client should receive reused response.completed");
+    let mut texts = Vec::new();
+    while texts.len() < 2 {
+        match client_socket
+            .read()
+            .expect("client should receive reused response frames")
+        {
+            WsMessage::Text(text) => texts.push(text.to_string()),
+            WsMessage::Ping(payload) => client_socket.send(WsMessage::Pong(payload)).unwrap(),
+            WsMessage::Pong(_) => {}
+            other => panic!("unexpected reused response frame: {other:?}"),
+        }
+    }
+    let [reused_rate_limits, reused_completed]: [String; 2] = texts.try_into().unwrap();
     let reused_attempt = reused_attempt
         .join()
         .expect("reused websocket attempt thread should finish")
@@ -116,6 +136,9 @@ fn websocket_rate_limits_keeps_reused_session_alive_past_progress_timeout() {
     assert!(matches!(reused_attempt, RuntimeWebsocketAttempt::Delivered));
     assert!(reused_rate_limits.to_string().contains("codex.rate_limits"));
     assert!(reused_completed.to_string().contains("response.completed"));
+    release_upstream
+        .send(())
+        .expect("mock must remain alive through completion");
     upstream
         .join()
         .expect("upstream websocket thread should finish");
