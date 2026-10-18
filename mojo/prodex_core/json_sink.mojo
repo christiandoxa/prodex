@@ -52,6 +52,20 @@ def js_literal(sink: Pointer[mut=True, JsonSink, _], text: StringSlice):
     js_view(sink, ProdexRichStringView(UInt(Int(text.unsafe_ptr())), UInt(text.byte_length())))
 
 
+def js_u64(sink: Pointer[mut=True, JsonSink, _], value: UInt64):
+    if value == 0:
+        js_byte(sink, 48)
+        return
+    var divisor: UInt64 = 1
+    while value / divisor >= 10:
+        divisor *= 10
+    var remaining = value
+    while divisor > 0:
+        js_byte(sink, UInt8(remaining / divisor) + 48)
+        remaining %= divisor
+        divisor /= 10
+
+
 def js_escaped(sink: Pointer[mut=True, JsonSink, _], view: ProdexRichStringView):
     var ptr = rich_view_ptr(view)
     var run_start: Int64 = 0
