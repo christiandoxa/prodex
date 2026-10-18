@@ -1,6 +1,7 @@
 from std.memory import Pointer
 
 from json_sink import JsonSink, js_byte, js_escaped, js_literal, js_raw, js_raw_view, js_string, js_view
+from json_sink import js_u64 as gemini_chat_put_u64
 from parsed_json import (
     JSON_ARRAY,
     JSON_NULL,
@@ -298,20 +299,6 @@ def gemini_chat_put_native_parts(
             js_byte(writer, 44)
         js_raw(writer, tree, native_indices[unsafe_offset=index])
     js_byte(writer, 93)
-
-
-def gemini_chat_put_u64(writer: Pointer[mut=True, JsonSink, _], value: UInt64):
-    if value == 0:
-        js_byte(writer, 48)
-        return
-    var divisor: UInt64 = 1
-    while value / divisor >= 10:
-        divisor *= 10
-    var remaining = value
-    while divisor > 0:
-        js_byte(writer, UInt8(remaining / divisor) + 48)
-        remaining %= divisor
-        divisor /= 10
 
 
 def gemini_chat_put_tool_calls(

@@ -1,6 +1,7 @@
 from std.memory import Pointer
 
 from json_sink import JsonSink, js_byte, js_escaped, js_literal, js_raw_view, js_string
+from json_sink import js_u64 as media_put_u64
 from parsed_json import (
     JSON_OBJECT,
     JSON_STRING,
@@ -147,20 +148,6 @@ def prodex_mojo_gemini_media_classification_v1(
     if operation == 0:
         return media_mime_kind(view)
     return Int64(media_mime_text_allowed(view))
-
-
-def media_put_u64(sink: Pointer[mut=True, JsonSink, _], value: UInt64):
-    if value == 0:
-        js_byte(sink, 48)
-        return
-    var divisor: UInt64 = 1
-    while value / divisor >= 10:
-        divisor *= 10
-    var remaining = value
-    while divisor > 0:
-        js_byte(sink, UInt8(remaining / divisor) + 48)
-        remaining %= divisor
-        divisor /= 10
 
 
 def media_put_inline_text(
