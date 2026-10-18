@@ -267,7 +267,9 @@ pub(super) fn start_runtime_websocket_upstream_session(
                     },
                 ));
             }
-            Err(_err) if precommit_transport_retry_allowed => {
+            Err(_err) => {
+                shared.check_precommit_deadline()?;
+                // Affinity-aware recovery lives above the connection layer.
                 return Ok(RuntimeWebsocketSessionStartDecision::Attempt(
                     RuntimeWebsocketAttempt::TransportFailed {
                         profile_name: profile_name.to_string(),
@@ -275,7 +277,6 @@ pub(super) fn start_runtime_websocket_upstream_session(
                     },
                 ));
             }
-            Err(err) => return Err(err),
         }
     };
     let transport_generation = if reuse_existing_session {

@@ -32,6 +32,14 @@ export const RUNTIME_TEST_TAGS = TAGS;
 
 export const RUNTIME_SMOKE_TESTS = [
   {
+    label: "websocket-precommit-transport-recovery",
+    filter: "runtime_proxy::websocket::response_tracking::tests::transport_recovery::",
+  },
+  {
+    label: "websocket-ready-profile-full-context-recovery",
+    filter: "websocket_transport_full_history_moves_to_ready_profile_despite_other_quota_blocks",
+  },
+  {
     label: "log-json",
     filter: "runtime_proxy_log_to_path_preserves_valid_json_format",
   },
@@ -796,6 +804,10 @@ export const RUNTIME_CI_TEST_CASES = [
   },
   {
     name: "runtime_proxy_websocket_post_compaction_turn_state_quota_replays_without_user_error",
+    tags: SERIALIZED_TAGS,
+  },
+  {
+    name: "runtime_proxy_websocket_post_compaction_transport_close_recovers_on_ready_profile",
     tags: SERIALIZED_TAGS,
   },
   {

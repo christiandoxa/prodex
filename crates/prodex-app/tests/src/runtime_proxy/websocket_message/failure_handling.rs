@@ -692,3 +692,6 @@ fn candidate_overloaded_hard_affinity_without_fallback_remains_terminal() {
     );
     assert_eq!(flow.bound_profile.as_deref(), Some("alpha"));
 }
+
+#[path = "failure_handling/transport_affinity.rs"]
+mod transport_affinity;

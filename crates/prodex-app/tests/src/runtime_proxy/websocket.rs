@@ -19,6 +19,8 @@ mod precommit_hold;
 mod precommit_regressions;
 #[path = "websocket/recovery_lifecycle.rs"]
 mod recovery_lifecycle;
+#[path = "websocket/transport_recovery.rs"]
+mod transport_recovery;
 
 pub(super) fn websocket_test_log_path(name: &str) -> PathBuf {
     static NEXT_LOG_ID: AtomicU64 = AtomicU64::new(1);

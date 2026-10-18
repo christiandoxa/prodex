@@ -108,7 +108,7 @@ pub(crate) fn attempt_runtime_websocket_request_with_hard_affinity(
                 && request_previous_response_id.is_none()
                 && request_session_id.is_none()
                 && request_turn_state.is_none(),
-            precommit_transport_retry_allowed,
+            response_committed: false,
             upstream_socket: &mut upstream_socket,
         })?
     {

@@ -228,6 +228,10 @@ impl<'a> RuntimeWebsocketTextMessageFlow<'a> {
                 self.request_id, self.session_id, profile_name, stage, via_suffix
             ),
         );
+        if self.try_rotate_transport_turn_state_full_context(&profile_name)? {
+            self.saw_transport_failure = true;
+            return Ok(RuntimeWebsocketMessageLoopAction::Continue);
+        }
         let affinity_releasable = !self.candidate_has_hard_affinity(&profile_name);
         let full_context_retry_available = if affinity_releasable {
             false

@@ -124,7 +124,10 @@ pub(super) fn handle_runtime_websocket_upstream_close(
                 event: "upstream_close_before_commit",
             })
         }
-        runtime_proxy_crate::RuntimeWebsocketFailureAction::RetryTransport => {
+        // The lower transport layer must not execute rotation. Return its
+        // precommit failure to the caller that owns affinity and replay safety.
+        runtime_proxy_crate::RuntimeWebsocketFailureAction::RetryTransport
+        | runtime_proxy_crate::RuntimeWebsocketFailureAction::Rotate => {
             Ok(RuntimeWebsocketAttempt::TransportFailed {
                 profile_name: profile_name.to_string(),
                 stage: "upstream_close_before_commit",
@@ -201,7 +204,10 @@ pub(super) fn handle_runtime_websocket_connection_closed(
                 event: "connection_closed_before_commit",
             })
         }
-        runtime_proxy_crate::RuntimeWebsocketFailureAction::RetryTransport => {
+        // The lower transport layer must not execute rotation. Return its
+        // precommit failure to the caller that owns affinity and replay safety.
+        runtime_proxy_crate::RuntimeWebsocketFailureAction::RetryTransport
+        | runtime_proxy_crate::RuntimeWebsocketFailureAction::Rotate => {
             Ok(RuntimeWebsocketAttempt::TransportFailed {
                 profile_name: profile_name.to_string(),
                 stage: "connection_closed_before_commit",
@@ -315,7 +321,10 @@ pub(super) fn handle_runtime_websocket_read_error(
                     event: "no_first_upstream_frame_before_deadline",
                 });
             }
-            runtime_proxy_crate::RuntimeWebsocketFailureAction::RetryTransport => {
+            // The lower transport layer must not execute rotation. Return its
+            // precommit failure to the caller that owns affinity and replay safety.
+            runtime_proxy_crate::RuntimeWebsocketFailureAction::RetryTransport
+            | runtime_proxy_crate::RuntimeWebsocketFailureAction::Rotate => {
                 return Ok(RuntimeWebsocketAttempt::TransportFailed {
                     profile_name: profile_name.to_string(),
                     stage: "first_frame_timeout",
@@ -384,7 +393,10 @@ pub(super) fn handle_runtime_websocket_read_error(
                 event: "upstream_read_error",
             })
         }
-        runtime_proxy_crate::RuntimeWebsocketFailureAction::RetryTransport => {
+        // The lower transport layer must not execute rotation. Return its
+        // precommit failure to the caller that owns affinity and replay safety.
+        runtime_proxy_crate::RuntimeWebsocketFailureAction::RetryTransport
+        | runtime_proxy_crate::RuntimeWebsocketFailureAction::Rotate => {
             Ok(RuntimeWebsocketAttempt::TransportFailed {
                 profile_name: profile_name.to_string(),
                 stage: "read_error",

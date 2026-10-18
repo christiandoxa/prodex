@@ -3,7 +3,7 @@ use tungstenite::{Error as WsError, Message as WsMessage};
 
 use crate::{RuntimeUpstreamWebSocket, runtime_set_upstream_websocket_io_timeout};
 use anyhow::{Context, Result};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 pub(super) fn mark_runtime_websocket_upstream_frame_seen(
     upstream_socket: &mut RuntimeUpstreamWebSocket,
@@ -50,7 +50,47 @@ pub(super) fn bound_runtime_websocket_precommit_io(
 pub(super) fn run_runtime_websocket_response_loop(
     mut flow: RuntimeWebsocketResponseLoop<'_>,
 ) -> Result<RuntimeWebsocketAttempt> {
+    let mut last_upstream_frame = Instant::now();
+    let mut last_client_heartbeat = Instant::now();
     loop {
+        if !flow.committed
+            && let Err(error) = flow.shared.check_precommit_deadline()
+        {
+            flow.websocket_session.reset();
+            return Err(error);
+        }
+        let timeout_ms = if flow.first_upstream_text_seen {
+            flow.shared.runtime_config.tuning.stream_idle_timeout_ms
+        } else {
+            flow.shared
+                .runtime_config
+                .tuning
+                .websocket_precommit_progress_timeout_ms
+        };
+        let plan = prodex_mojo_core::websocket_response_tracking::response_wait_plan(
+            u64::try_from(last_upstream_frame.elapsed().as_millis()).unwrap_or(u64::MAX),
+            timeout_ms,
+            u64::try_from(last_client_heartbeat.elapsed().as_millis()).unwrap_or(u64::MAX),
+        )
+        .map_err(|error| anyhow::anyhow!("Mojo WebSocket liveness plan failed: {error:?}"))?;
+        if plan.expired {
+            return flow.handle_read_error(WsError::Io(std::io::Error::new(
+                std::io::ErrorKind::TimedOut,
+                "upstream WebSocket progress deadline expired",
+            )));
+        }
+        if plan.heartbeat {
+            // Protocol control frames are visible to the client idle clock but
+            // never commit output, change affinity, or renew upstream progress.
+            flow.local_socket
+                .send(WsMessage::Ping(Default::default()))
+                .context("failed to send runtime WebSocket liveness heartbeat")?;
+            last_client_heartbeat = Instant::now();
+        }
+        crate::runtime_set_upstream_websocket_read_timeout(
+            &mut flow.upstream_socket,
+            Some(Duration::from_millis(plan.wait_ms)),
+        )?;
         if !flow.committed
             && let Err(error) =
                 bound_runtime_websocket_precommit_io(&mut flow.upstream_socket, flow.shared)
@@ -66,6 +106,14 @@ pub(super) fn run_runtime_websocket_response_loop(
             // as a retryable transport error. Drop this attempt's socket.
             flow.websocket_session.reset();
             return Err(error);
+        }
+        // A poll timeout is not an upstream failure until its independent
+        // progress/idle clock expires. Keep partial TLS/WebSocket reads intact.
+        if matches!(&frame, Err(error) if crate::runtime_websocket_timeout_error(error)) {
+            continue;
+        }
+        if frame.is_ok() {
+            last_upstream_frame = Instant::now();
         }
         match frame {
             Ok(WsMessage::Text(text)) => match flow.handle_text(text.to_string())? {

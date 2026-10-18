@@ -20,7 +20,7 @@ pub(super) struct RuntimeWebsocketUpstreamSendRequest<'a, 'socket> {
     pub(super) profile_name: &'a str,
     pub(super) reuse_existing_session: bool,
     pub(super) reserve_rewrite_allowed: bool,
-    pub(super) precommit_transport_retry_allowed: bool,
+    pub(super) response_committed: bool,
     pub(super) upstream_socket: &'socket mut RuntimeUpstreamWebSocket,
 }
 
@@ -36,7 +36,7 @@ pub(super) fn send_runtime_websocket_upstream_request(
         profile_name,
         reuse_existing_session,
         reserve_rewrite_allowed,
-        precommit_transport_retry_allowed,
+        response_committed,
         upstream_socket,
     } = request;
 
@@ -102,19 +102,21 @@ pub(super) fn send_runtime_websocket_upstream_request(
                 ],
             ),
         );
+        if response_committed {
+            return Err(transport_error);
+        }
         if reuse_existing_session {
             return Ok(Some(RuntimeWebsocketAttempt::ReuseWatchdogTripped {
                 profile_name: profile_name.to_string(),
                 event: "upstream_send_error",
             }));
         }
-        if precommit_transport_retry_allowed {
-            return Ok(Some(RuntimeWebsocketAttempt::TransportFailed {
-                profile_name: profile_name.to_string(),
-                stage: "send",
-            }));
-        }
-        return Err(transport_error);
+        // An attempt outcome is not permission to replay: the outer handler
+        // owns hard affinity, alternate readiness and full-context recovery.
+        return Ok(Some(RuntimeWebsocketAttempt::TransportFailed {
+            profile_name: profile_name.to_string(),
+            stage: "send",
+        }));
     }
 
     Ok(None)

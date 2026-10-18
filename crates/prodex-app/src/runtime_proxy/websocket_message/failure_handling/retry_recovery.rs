@@ -1,5 +1,10 @@
 use super::*;
 
+enum FullHistoryFailure {
+    Quota,
+    Transport,
+}
+
 impl<'a> RuntimeWebsocketTextMessageFlow<'a> {
     pub(super) fn full_context_retry_available(&mut self, profile_name: &str) -> Result<bool> {
         if !runtime_proxy_crate::runtime_full_context_retry_signal_eligible(
@@ -18,6 +23,35 @@ impl<'a> RuntimeWebsocketTextMessageFlow<'a> {
         profile_name: &str,
         payload: RuntimeWebsocketErrorPayload,
     ) -> Result<bool> {
+        self.try_rotate_turn_state_full_context(profile_name, payload, FullHistoryFailure::Quota)
+    }
+
+    pub(super) fn try_rotate_transport_turn_state_full_context(
+        &mut self,
+        profile_name: &str,
+    ) -> Result<bool> {
+        let payload =
+            RuntimeWebsocketErrorPayload::Text(runtime_proxy_websocket_error_payload_text(
+                503,
+                "service_unavailable",
+                "The selected profile's upstream websocket transport failed.",
+            ));
+        self.try_rotate_turn_state_full_context(
+            profile_name,
+            payload,
+            FullHistoryFailure::Transport,
+        )
+    }
+
+    fn try_rotate_turn_state_full_context(
+        &mut self,
+        profile_name: &str,
+        payload: RuntimeWebsocketErrorPayload,
+        failure: FullHistoryFailure,
+    ) -> Result<bool> {
+        // Share the existing Mojo full-history proof with quota recovery. This
+        // never permits delta-only input, previous-response replay or compact
+        // followup bindings to cross accounts.
         let replayable = runtime_proxy_crate::runtime_websocket_turn_state_replay_candidate(
             self.previous_response_id.is_some(),
             self.request_turn_state.is_some(),
@@ -32,7 +66,23 @@ impl<'a> RuntimeWebsocketTextMessageFlow<'a> {
             return Ok(false);
         }
 
-        let released_affinity = self.release_quota_blocked_affinity(profile_name)?;
+        let (event, released_affinity) = match failure {
+            FullHistoryFailure::Quota => (
+                "quota_blocked_turn_state_full_context_replay",
+                self.release_quota_blocked_affinity(profile_name)?,
+            ),
+            FullHistoryFailure::Transport => (
+                "transport_failure_turn_state_full_context_replay",
+                release_runtime_retryable_failure_affinity(
+                    self.shared,
+                    profile_name,
+                    self.previous_response_id.as_deref(),
+                    self.request_turn_state.as_deref(),
+                    self.request_session_id.as_deref(),
+                    "transport_full_context_retry",
+                )?,
+            ),
+        };
         self.clear_profile_affinity(profile_name, true);
         self.handshake_request =
             runtime_proxy_crate::runtime_request_without_turn_state(&self.handshake_request);
@@ -47,7 +97,7 @@ impl<'a> RuntimeWebsocketTextMessageFlow<'a> {
         runtime_proxy_log(
             self.shared,
             format!(
-                "request={} websocket_session={} quota_blocked_turn_state_full_context_replay profile={} affinity_released={released_affinity}",
+                "request={} websocket_session={} {event} profile={} affinity_released={released_affinity}",
                 self.request_id, self.session_id, profile_name
             ),
         );

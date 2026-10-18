@@ -1,5 +1,8 @@
 use crate::MojoError;
 
+mod wait;
+pub use wait::{WebsocketResponseWaitPlan, response_wait_plan};
+
 const ABI_VERSION: i64 = 1;
 const FIELD_COUNT: usize = 10;
 const OUTPUT_COUNT: usize = 8;

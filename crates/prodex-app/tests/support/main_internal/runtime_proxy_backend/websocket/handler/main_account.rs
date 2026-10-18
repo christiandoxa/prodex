@@ -5,6 +5,12 @@ pub(super) fn handle_main_account(
     mode: RuntimeProxyBackendMode,
     request_count: usize,
 ) -> BackendWebsocketAction {
+    if matches!(mode, RuntimeProxyBackendMode::WebsocketPrecommitTransportClose) {
+        events::send_response_created(websocket, "resp-uncommitted-close");
+        websocket.close(None).expect("synthetic upstream close should send");
+        return BackendWebsocketAction::Break;
+    }
+
     if matches!(
         mode,
         RuntimeProxyBackendMode::WebsocketDelayedQuotaAfterPrelude

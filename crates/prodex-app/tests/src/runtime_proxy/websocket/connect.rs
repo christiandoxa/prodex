@@ -174,7 +174,7 @@ fn websocket_unbound_session_id_does_not_bypass_profile_inflight_hard_limit() {
 }
 
 #[test]
-fn websocket_hard_affinity_connect_failure_does_not_return_retryable_transport_attempt() {
+fn websocket_hard_affinity_connect_failure_delegates_to_affinity_aware_recovery() {
     let _guard = acquire_test_runtime_lock();
     let _env_lock = TestEnvVarGuard::lock();
     let _http_proxy = TestEnvVarGuard::unset("HTTP_PROXY");
@@ -197,7 +197,7 @@ fn websocket_hard_affinity_connect_failure_does_not_return_retryable_transport_a
         body: Vec::new(),
     };
 
-    let err = attempt_runtime_websocket_request(RuntimeWebsocketAttemptRequest {
+    let attempt = attempt_runtime_websocket_request(RuntimeWebsocketAttemptRequest {
         request_id: 38,
         local_socket: &mut local_socket,
         handshake_request: &handshake_request,
@@ -212,13 +212,13 @@ fn websocket_hard_affinity_connect_failure_does_not_return_retryable_transport_a
         turn_state_override: None,
         promote_committed_profile: false,
     })
-    .expect_err("hard-affinity connect failure should not be retryable");
+    .expect("precommit failure must reach the affinity-aware caller, not close its socket");
 
-    assert!(
-        err.to_string()
-            .contains("failed to connect runtime websocket upstream"),
-        "unexpected hard-affinity connect error: {err:?}"
-    );
+    assert!(matches!(attempt, RuntimeWebsocketAttempt::TransportFailed {
+        stage: "connect", ref profile_name,
+    } if profile_name == "main"));
+    assert_eq!(shared.lane_admission.profile_inflight_count("main"), 0);
+    assert!(!websocket_session.has_socket());
     let _ = std::fs::remove_file(&shared.log_path);
 }
 

@@ -245,13 +245,17 @@ fn websocket_committed_response_keeps_streaming_after_precommit_deadline() {
         );
         assert_eq!(shared.lane_admission.profile_inflight_count("main"), 2);
         complete.send(()).unwrap();
-        assert!(
-            client
-                .read()
-                .unwrap()
-                .to_string()
-                .contains("response.completed")
-        );
+        // Control heartbeats must neither complete nor duplicate the response.
+        loop {
+            match client.read().unwrap() {
+                WsMessage::Ping(_) | WsMessage::Pong(_) => continue,
+                WsMessage::Text(text) => {
+                    assert!(text.contains("response.completed"), "{text}");
+                    break;
+                }
+                other => panic!("unexpected post-commit frame: {other:?}"),
+            }
+        }
         assert!(matches!(
             pending.join().unwrap().unwrap(),
             RuntimeWebsocketAttempt::Delivered
