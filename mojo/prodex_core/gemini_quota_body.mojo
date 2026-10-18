@@ -120,6 +120,7 @@ def prodex_gemini_quota_body_plan_v1(
     )
     for index in range(nodes_count):
         previous[unsafe_offset=index] = -1
+    for index in range(nodes_count):
         var child = pj_child(tree, index)
         var prior: Int64 = -1
         while child >= 0:
@@ -285,4 +286,141 @@ def prodex_gemini_retry_delay_max_v1(
     Pointer[mut=True, UInt64, MutUntrackedOrigin](
         unsafe_from_address=Int(result_address)
     )[] = result
+    return 0
+
+# Gemini normalized HTTP error compatibility is a single compiled decision:
+# choose the error type/code, reject ambiguous 429 payloads and make retry/
+# rotate decisions before the Rust host constructs any HTTP response.
+comptime GEMINI_QUOTA_HTTP_ABI: Int64 = 1
+
+
+def gemini_quota_retryable_http_status(status: Int64) -> Bool:
+    return status == 403 or status == 429
+
+
+def gemini_quota_copy_label(
+    data: StringSlice,
+    dest: Pointer[mut=True, UInt8, _],
+    offset: Int64,
+) -> Int64:
+    var length = Int64(data.byte_length())
+    var source = data.unsafe_ptr()
+    for index in range(length):
+        dest[unsafe_offset=offset + index] = source[unsafe_offset=index]
+    return length
+
+
+@export("prodex_gemini_quota_error_kind_v1")
+def prodex_gemini_quota_error_kind_v1(
+    abi_version: Int64,
+    http_status: Int64,
+    body_terminal: Int64,
+    value_terminal: Int64,
+    value_rate: Int64,
+    output_address: UInt,
+    output_capacity: Int64,
+    metadata_address: UInt,
+    metadata_capacity: Int64,
+) abi("C") -> Int64:
+    if abi_version != GEMINI_QUOTA_HTTP_ABI:
+        return 4
+    if (
+        http_status < 0 or http_status > 65535
+        or (body_terminal != 0 and body_terminal != 1)
+        or (value_terminal != 0 and value_terminal != 1)
+        or (value_rate != 0 and value_rate != 1)
+        or output_address == 0 or output_capacity < 0
+        or metadata_address == 0 or metadata_capacity < 3
+    ):
+        return 1
+    var terminal = body_terminal == 1 or value_terminal == 1
+    var rate = value_rate == 1
+    var admit = http_status >= 400 and (
+        http_status != 429 or terminal or rate
+    )
+    var error_type = StringSlice("api_error")
+    var error_code = StringSlice("provider_error")
+    if terminal:
+        error_type = StringSlice("insufficient_quota")
+        error_code = StringSlice("insufficient_quota")
+    elif rate:
+        error_type = StringSlice("rate_limit_error")
+        error_code = StringSlice("rate_limit_exceeded")
+    elif http_status == 400:
+        error_type = StringSlice("invalid_request_error")
+        error_code = StringSlice("bad_request")
+    elif http_status == 401:
+        error_type = StringSlice("authentication_error")
+        error_code = StringSlice("invalid_authentication")
+    elif http_status == 403:
+        error_type = StringSlice("permission_error")
+        error_code = StringSlice("permission_denied")
+    elif http_status == 404:
+        error_type = StringSlice("invalid_request_error")
+        error_code = StringSlice("not_found")
+    elif http_status >= 500 and http_status <= 599:
+        error_type = StringSlice("server_error")
+        error_code = StringSlice("provider_error")
+
+    var type_len = Int64(error_type.byte_length())
+    var code_len = Int64(error_code.byte_length())
+    if type_len > output_capacity or code_len > output_capacity - type_len:
+        return 3
+    var output = Pointer[mut=True, UInt8, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    var meta = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(metadata_address)
+    )
+    _ = gemini_quota_copy_label(error_type, output, 0)
+    _ = gemini_quota_copy_label(error_code, output, type_len)
+    meta[unsafe_offset=0] = Int64(admit)
+    meta[unsafe_offset=1] = type_len
+    meta[unsafe_offset=2] = code_len
+    return 0
+
+
+@export("prodex_gemini_quota_retryable_http_v1")
+def prodex_gemini_quota_retryable_http_v1(
+    abi_version: Int64, http_status: Int64, result_address: UInt
+) abi("C") -> Int64:
+    if abi_version != GEMINI_QUOTA_HTTP_ABI:
+        return 4
+    if http_status < 0 or http_status > 65535 or result_address == 0:
+        return 1
+    Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(result_address)
+    )[] = Int64(gemini_quota_retryable_http_status(http_status))
+    return 0
+
+
+@export("prodex_gemini_quota_rotate_v1")
+def prodex_gemini_quota_rotate_v1(
+    abi_version: Int64,
+    http_status: Int64,
+    quota_blocked: Int64,
+    hard_affinity: Int64,
+    attempt_index: UInt64,
+    attempt_count: UInt64,
+    result_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != GEMINI_QUOTA_HTTP_ABI:
+        return 4
+    if (
+        http_status < 0 or http_status > 65535
+        or (quota_blocked != 0 and quota_blocked != 1)
+        or (hard_affinity != 0 and hard_affinity != 1)
+        or result_address == 0
+    ):
+        return 1
+    var rotate = (
+        quota_blocked == 1
+        and gemini_quota_retryable_http_status(http_status)
+        and hard_affinity == 0
+        and attempt_count > 0
+        and attempt_index < attempt_count - 1
+    )
+    Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(result_address)
+    )[] = Int64(rotate)
     return 0

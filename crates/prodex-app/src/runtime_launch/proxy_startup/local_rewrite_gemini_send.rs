@@ -74,7 +74,6 @@ use prodex_provider_core::{
     gemini_provider_core_inline_retry_threshold_ms as runtime_gemini_inline_retry_threshold_ms,
     gemini_provider_core_invalid_stream_retry_delay_ms as runtime_gemini_invalid_stream_retry_delay_ms,
     gemini_provider_core_request_body,
-    gemini_provider_core_response_retryable_quota as runtime_gemini_response_retryable_quota,
     gemini_provider_core_retry_delay_ms as runtime_gemini_retry_delay_ms,
     gemini_provider_core_should_inline_rate_limit_retry as runtime_gemini_should_inline_rate_limit_retry,
     gemini_provider_core_simple_request, gemini_provider_core_unsupported_tool_fallback_body,

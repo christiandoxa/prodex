@@ -1,5 +1,4 @@
 use super::{
-    deepseek_provider_core_apply_reasoning_from_responses_request,
     deepseek_provider_core_apply_strict_function_schema,
     deepseek_provider_core_chat_assistant_messages_from_response_value,
     deepseek_provider_core_chat_role, deepseek_provider_core_dedup_and_validate_function_tools,
@@ -24,13 +23,12 @@ use super::{
     deepseek_provider_core_responses_content_text_value,
     deepseek_provider_core_rtk_wrapped_tool_arguments, deepseek_provider_core_simple_request,
     deepseek_provider_core_stop_from_responses_request, deepseek_provider_core_system_message,
-    deepseek_provider_core_thinking_enabled, deepseek_provider_core_tool_call_ids,
-    deepseek_provider_core_tool_name_from_tool_object, deepseek_provider_core_tool_output_call_ids,
+    deepseek_provider_core_tool_call_ids, deepseek_provider_core_tool_name_from_tool_object,
+    deepseek_provider_core_tool_output_call_ids,
     deepseek_provider_core_top_logprobs_from_responses_request,
     deepseek_provider_core_user_id_from_responses_request, deepseek_provider_core_user_message,
     deepseek_provider_core_validate_function_name,
     deepseek_provider_core_validate_function_parameters,
-    deepseek_provider_core_validate_reasoning_shape,
     deepseek_provider_core_validate_supported_input_item,
     deepseek_provider_core_validate_tool_choice_name,
     deepseek_provider_core_validate_tool_choice_shape,
@@ -335,87 +333,6 @@ fn deepseek_provider_core_repairs_tool_call_adjacency() {
     assert_eq!(messages[0]["tool_calls"].as_array().unwrap().len(), 1);
     assert_eq!(messages[1]["role"], "tool");
     assert_eq!(messages[2]["role"], "user");
-}
-
-#[test]
-fn deepseek_provider_core_maps_reasoning_effort() {
-    let value = serde_json::json!({"reasoning": {"effort": "xhigh"}});
-    let mut request = serde_json::Map::new();
-
-    deepseek_provider_core_apply_reasoning_from_responses_request(
-        &value,
-        &mut request,
-        "DeepSeek",
-        false,
-    )
-    .unwrap();
-
-    assert_eq!(request["thinking"], serde_json::json!({"type": "enabled"}));
-    assert_eq!(request["reasoning_effort"], "max");
-    assert!(deepseek_provider_core_thinking_enabled(&value));
-
-    request.clear();
-    deepseek_provider_core_apply_reasoning_from_responses_request(
-        &serde_json::json!({"reasoning_effort": "minimal"}),
-        &mut request,
-        "DeepSeek",
-        false,
-    )
-    .unwrap();
-    assert_eq!(request["thinking"], serde_json::json!({"type": "disabled"}));
-    assert!(request.get("reasoning_effort").is_none());
-}
-
-#[test]
-fn deepseek_provider_core_maps_gemini_reasoning_effort() {
-    let mut request = serde_json::Map::new();
-    deepseek_provider_core_apply_reasoning_from_responses_request(
-        &serde_json::json!({"reasoning": {"effort": "xhigh"}}),
-        &mut request,
-        "Gemini OpenAI-compatible",
-        true,
-    )
-    .unwrap();
-
-    assert_eq!(request["reasoning_effort"], "high");
-    assert!(
-        deepseek_provider_core_apply_reasoning_from_responses_request(
-            &serde_json::json!({"reasoning": {"effort": "weird"}}),
-            &mut request,
-            "Gemini OpenAI-compatible",
-            true,
-        )
-        .unwrap_err()
-        .contains("Gemini OpenAI-compatible reasoning effort is not supported")
-    );
-}
-
-#[test]
-fn deepseek_provider_core_validates_reasoning_shape() {
-    assert!(
-        deepseek_provider_core_validate_reasoning_shape(
-            &serde_json::json!({"reasoning": true}),
-            "DeepSeek",
-        )
-        .unwrap_err()
-        .contains("DeepSeek reasoning must be an object")
-    );
-    assert!(
-        deepseek_provider_core_validate_reasoning_shape(
-            &serde_json::json!({"reasoning": {"summary": "auto"}}),
-            "DeepSeek",
-        )
-        .unwrap_err()
-        .contains("DeepSeek reasoning.summary is not supported")
-    );
-    assert!(
-        deepseek_provider_core_validate_reasoning_shape(
-            &serde_json::json!({"reasoning_effort": 1}),
-            "DeepSeek",
-        )
-        .unwrap_err()
-        .contains("DeepSeek reasoning_effort must be a string")
-    );
 }
 
 #[test]

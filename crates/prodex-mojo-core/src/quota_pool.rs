@@ -140,45 +140,6 @@ pub fn quota_pool_summary_sections(
     }
 }
 
-#[cfg(test)]
-mod summary_section_tests {
-    use super::*;
-
-    #[test]
-    fn mojo_quota_pool_summary_selects_openai_main_or_missing_data_layout() {
-        use QuotaPoolSummarySection::*;
-        for (openai, main, expected) in [
-            (0, 0, vec![NoDataFiveHour, NoDataWeekly]),
-            (0, 5, vec![Main]),
-            (1, 0, vec![UsableNow, FiveHour, Weekly]),
-            (1, 5, vec![UsableNow, FiveHour, Weekly]),
-            (1025, 0, vec![UsableNow, FiveHour, Weekly]),
-            (0, 1025, vec![Main]),
-        ] {
-            assert_eq!(
-                quota_pool_summary_sections(openai, main).unwrap(),
-                expected,
-                "openai={openai} main={main}",
-            );
-        }
-    }
-
-    #[test]
-    fn mojo_quota_pool_summary_section_abi_rejects_invalid_inputs_without_writes() {
-        let mut output = [71_i64; 4];
-        let dest = output.as_mut_ptr() as usize as u64;
-        let call = |version, openai, main, out, capacity| unsafe {
-            prodex_quota_pool_summary_sections_v1(version, openai, main, out, capacity)
-        };
-        assert_eq!(call(2, 1, 0, dest, 4), 4);
-        assert_eq!(call(1, -1, 0, dest, 4), 1);
-        assert_eq!(call(1, 1, -1, dest, 4), 1);
-        assert_eq!(call(1, 1, 0, 0, 4), 1);
-        assert_eq!(call(1, 1, 0, dest, 3), 1);
-        assert_eq!(output, [71; 4]);
-    }
-}
-
 /// Aggregate normalized windows without imposing a profile-count cap.
 pub fn openai_quota_pool_aggregate(
     inputs: &[OpenAiQuotaPoolInput],
@@ -330,4 +291,43 @@ pub fn status_quota_summary_batch(
             earliest_reset_at: (output[9] == 1).then_some(output[8]),
         },
     })
+}
+
+#[cfg(test)]
+mod summary_section_tests {
+    use super::*;
+
+    #[test]
+    fn mojo_quota_pool_summary_selects_openai_main_or_missing_data_layout() {
+        use QuotaPoolSummarySection::*;
+        for (openai, main, expected) in [
+            (0, 0, vec![NoDataFiveHour, NoDataWeekly]),
+            (0, 5, vec![Main]),
+            (1, 0, vec![UsableNow, FiveHour, Weekly]),
+            (1, 5, vec![UsableNow, FiveHour, Weekly]),
+            (1025, 0, vec![UsableNow, FiveHour, Weekly]),
+            (0, 1025, vec![Main]),
+        ] {
+            assert_eq!(
+                quota_pool_summary_sections(openai, main).unwrap(),
+                expected,
+                "openai={openai} main={main}",
+            );
+        }
+    }
+
+    #[test]
+    fn mojo_quota_pool_summary_section_abi_rejects_invalid_inputs_without_writes() {
+        let mut output = [71_i64; 4];
+        let dest = output.as_mut_ptr() as usize as u64;
+        let call = |version, openai, main, out, capacity| unsafe {
+            prodex_quota_pool_summary_sections_v1(version, openai, main, out, capacity)
+        };
+        assert_eq!(call(2, 1, 0, dest, 4), 4);
+        assert_eq!(call(1, -1, 0, dest, 4), 1);
+        assert_eq!(call(1, 1, -1, dest, 4), 1);
+        assert_eq!(call(1, 1, 0, 0, 4), 1);
+        assert_eq!(call(1, 1, 0, dest, 3), 1);
+        assert_eq!(output, [71; 4]);
+    }
 }
