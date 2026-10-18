@@ -53,12 +53,6 @@ digest v0.10.7 (*)
 
 digest v0.11.3 (*)
 
-getrandom v0.2.17
-    legacy-crypto v0.1.0
-
-getrandom v0.4.3
-    tempfile v3.27.0
-
 hashbrown v0.16.1
     kasuari v0.4.12
 
@@ -112,7 +106,6 @@ test("default budget accepts current duplicate families", () => {
       ["cpufeatures", 2],
       ["crypto-common", 2],
       ["digest", 2],
-      ["getrandom", 2],
       ["hashbrown", 2],
       ["hmac", 2],
       ["inout", 2],
@@ -122,6 +115,15 @@ test("default budget accepts current duplicate families", () => {
     ],
   );
   assert.equal(summary.duplicateFamilyBudget, DEFAULT_DUPLICATE_BUDGET.length);
+});
+
+test("removed getrandom family cannot return without review", () => {
+  const duplicateFamilies = parseCargoTreeDuplicates(
+    `${CURRENT_TREE_OUTPUT}\ngetrandom v0.2.17\n\ngetrandom v0.4.3\n`,
+  );
+  const summary = evaluateDuplicateBudget(duplicateFamilies);
+  assert.equal(summary.status, "failed");
+  assert.deepEqual(summary.unallowlistedFamilies.map((entry) => entry.name), ["getrandom"]);
 });
 
 test("unallowlisted duplicate family fails", () => {
