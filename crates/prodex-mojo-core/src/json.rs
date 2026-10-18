@@ -15,6 +15,10 @@ pub use self::response_metadata::{
     RuntimeResponseMetadataJsonPlan, runtime_response_event_is_completed,
     runtime_response_metadata_json,
 };
+#[cfg(feature = "mojo-runtime")]
+mod external_quota;
+#[cfg(feature = "mojo-runtime")]
+pub use self::external_quota::{ExternalQuotaProjection, external_quota_projection};
 mod gemini_quota;
 #[cfg(feature = "mojo-runtime")]
 mod quota_watch_presentation;

@@ -88,122 +88,50 @@ pub(super) fn fetch_kiro_quota_info(codex_home: &Path) -> Result<ExternalQuotaIn
     })
 }
 
+#[derive(serde::Deserialize)]
+struct ExternalQuotaAmount {
+    pointer: String,
+    suffix: String,
+}
+
+#[derive(serde::Deserialize)]
+struct AgyQuotaProjection {
+    info: ExternalQuotaInfo,
+    amount: Option<ExternalQuotaAmount>,
+}
+
+fn project_external_quota<T: serde::de::DeserializeOwned>(
+    value: &serde_json::Value,
+    operation: prodex_mojo_core::json::ExternalQuotaProjection,
+) -> Result<Option<T>> {
+    let tree = crate::json_boundary::app_json_tree(value)?;
+    let raw = std::str::from_utf8(&tree.raw).context("external quota wire was not UTF-8")?;
+    prodex_mojo_core::json::external_quota_projection(&tree.nodes, raw, operation)
+        .map_err(|error| anyhow::anyhow!("compiled external quota projection failed: {error:?}"))?
+        .map(|output| {
+            serde_json::from_slice(&output).context("invalid compiled external quota projection")
+        })
+        .transpose()
+}
+
 fn parse_agy_quota_json(
     value: serde_json::Value,
     preferred_account: Option<&str>,
 ) -> Result<ExternalQuotaInfo> {
-    let accounts = agy_accounts(value);
-    let data = agy_selected_account(&accounts, preferred_account)?;
-    let (account, plan, status) = agy_identity(data);
-    let main = agy_main(data);
-    let details = agy_details(data);
-
-    Ok(ExternalQuotaInfo {
-        provider: "Anti-Gravity".to_string(),
-        account,
-        plan,
-        status,
-        main,
-        reset: None,
-        available: Some(true),
-        details,
-    })
-}
-
-fn agy_accounts(value: serde_json::Value) -> Vec<serde_json::Value> {
-    value.as_array().cloned().unwrap_or_else(|| vec![value])
-}
-
-fn agy_selected_account<'a>(
-    accounts: &'a [serde_json::Value],
-    preferred_account: Option<&str>,
-) -> Result<&'a serde_json::Value> {
-    preferred_account
-        .and_then(|preferred| {
-            accounts.iter().find(|account| {
-                account.get("account").and_then(|value| value.as_str()) == Some(preferred)
-                    || account.get("email").and_then(|value| value.as_str()) == Some(preferred)
-            })
-        })
-        .or_else(|| accounts.first())
-        .context("no account found in agy output")
-}
-
-fn agy_identity(data: &serde_json::Value) -> (Option<String>, Option<String>, String) {
-    let account = data
-        .get("account")
-        .or_else(|| data.get("email"))
-        .and_then(|value| value.as_str())
-        .map(str::to_string);
-    let plan = data
-        .get("plan")
-        .and_then(|value| value.as_str())
-        .map(str::to_string);
-    let status = data
-        .get("status")
-        .and_then(|value| value.as_str())
-        .unwrap_or("Ready")
-        .to_string();
-    (account, plan, status)
-}
-
-fn agy_main(data: &serde_json::Value) -> String {
-    data.get("credits")
-        .and_then(|value| value.as_f64())
-        .map(|credits| format!("{credits:.2} credits available"))
-        .or_else(|| {
-            data.get("usage")
-                .and_then(|value| value.as_f64())
-                .map(|usage| format!("{usage:.2} usage"))
-        })
-        .unwrap_or_else(|| "quota information available".to_string())
-}
-
-fn agy_details(data: &serde_json::Value) -> Vec<ExternalQuotaDetail> {
-    data.as_object()
-        .into_iter()
-        .flat_map(|object| object.iter())
-        .filter_map(|(key, value)| agy_detail_entries(key, value))
-        .flatten()
-        .collect()
-}
-
-fn agy_detail_entries(key: &str, value: &serde_json::Value) -> Option<Vec<ExternalQuotaDetail>> {
-    if matches!(key, "details" | "models" | "quotas") {
-        return Some(
-            value
-                .as_object()
-                .into_iter()
-                .flat_map(|object| {
-                    object
-                        .iter()
-                        .map(|(inner_key, inner_value)| ExternalQuotaDetail {
-                            label: format!("{key}:{inner_key}"),
-                            value: quota_json_scalar(inner_value),
-                        })
-                })
-                .chain(value.as_array().into_iter().flat_map(|array| {
-                    array
-                        .iter()
-                        .enumerate()
-                        .map(|(index, inner_value)| ExternalQuotaDetail {
-                            label: format!("{key}[{index}]"),
-                            value: quota_json_scalar(inner_value),
-                        })
-                }))
-                .collect(),
-        );
+    let mut input = serde_json::json!({"preferred": preferred_account});
+    input["value"] = value;
+    let mut projection: AgyQuotaProjection =
+        project_external_quota(&input, prodex_mojo_core::json::ExternalQuotaProjection::Agy)?
+            .context("no account found in agy output")?;
+    if let Some(amount) = projection.amount {
+        let number = input["value"]
+            .pointer(&amount.pointer)
+            .and_then(serde_json::Value::as_f64)
+            .context("compiled quota amount did not resolve a number")?;
+        // Mojo 1.1 float formatting imports the unsupported KGEN runtime ABI.
+        projection.info.main = format!("{number:.2}{}", amount.suffix);
     }
-    if matches!(
-        key,
-        "account" | "email" | "plan" | "status" | "credits" | "usage"
-    ) {
-        return None;
-    }
-    Some(vec![ExternalQuotaDetail {
-        label: key.to_string(),
-        value: quota_json_scalar(value),
-    }])
+    Ok(projection.info)
 }
 
 pub(super) fn custom_model_provider_quota_info(
@@ -285,7 +213,7 @@ pub(super) fn fetch_anthropic_quota_info(
     if let Some(admin_key) = anthropic_admin_api_key_from_env() {
         match fetch_anthropic_rate_limits_json(&admin_key) {
             Ok(value) => {
-                let (main, mut rate_details) = anthropic_rate_limits_summary(&value);
+                let (main, mut rate_details) = anthropic_rate_limits_summary(&value)?;
                 details.append(&mut rate_details);
                 return Ok(ExternalQuotaInfo {
                     provider: "Anthropic Claude".to_string(),
@@ -381,77 +309,22 @@ fn fetch_anthropic_rate_limits_json(api_key: &str) -> Result<serde_json::Value> 
     serde_json::from_slice(&body).context("failed to parse Anthropic rate limit response")
 }
 
-fn anthropic_rate_limits_summary(value: &serde_json::Value) -> (String, Vec<ExternalQuotaDetail>) {
-    let data = value
-        .get("data")
-        .and_then(serde_json::Value::as_array)
-        .cloned()
-        .unwrap_or_default();
-    let total_groups = data.len();
-    let model_groups = data
-        .iter()
-        .filter(|entry| {
-            entry.get("group_type").and_then(serde_json::Value::as_str) == Some("model_group")
-        })
-        .count();
-    let mut details = vec![
-        ExternalQuotaDetail {
-            label: "Rate groups".to_string(),
-            value: total_groups.to_string(),
-        },
-        ExternalQuotaDetail {
-            label: "Model groups".to_string(),
-            value: model_groups.to_string(),
-        },
-    ];
-    for entry in data.iter().take(3) {
-        if let Some(detail) = anthropic_rate_limit_group_detail(entry) {
-            details.push(detail);
-        }
+fn anthropic_rate_limits_summary(
+    value: &serde_json::Value,
+) -> Result<(String, Vec<ExternalQuotaDetail>)> {
+    #[derive(serde::Deserialize)]
+    struct Projection {
+        main: String,
+        details: Vec<ExternalQuotaDetail>,
     }
-    let main = if model_groups > 0 {
-        format!("{model_groups} model rate group(s)")
-    } else {
-        format!("{total_groups} rate group(s)")
-    };
-    (main, details)
+    let projection: Projection = project_external_quota(
+        value,
+        prodex_mojo_core::json::ExternalQuotaProjection::Anthropic,
+    )?
+    .context("compiled Anthropic quota projection was absent")?;
+    Ok((projection.main, projection.details))
 }
 
-fn anthropic_rate_limit_group_detail(entry: &serde_json::Value) -> Option<ExternalQuotaDetail> {
-    let group = entry
-        .get("group_type")
-        .and_then(serde_json::Value::as_str)
-        .unwrap_or("rate_limit");
-    let label = if group == "model_group" {
-        entry
-            .get("models")
-            .and_then(serde_json::Value::as_array)
-            .and_then(|models| models.first())
-            .and_then(serde_json::Value::as_str)
-            .unwrap_or(group)
-    } else {
-        group
-    };
-    let limits = entry
-        .get("limits")
-        .and_then(serde_json::Value::as_array)?
-        .iter()
-        .filter_map(|limit| {
-            let kind = limit.get("type")?.as_str()?;
-            let value = limit.get("value")?;
-            Some(format!("{kind}={}", quota_json_scalar(value)))
-        })
-        .collect::<Vec<_>>()
-        .join(", ");
-    Some(ExternalQuotaDetail {
-        label: label.to_string(),
-        value: limits,
-    })
-}
-
-fn quota_json_scalar(value: &serde_json::Value) -> String {
-    value
-        .as_str()
-        .map(str::to_string)
-        .unwrap_or_else(|| value.to_string())
-}
+#[cfg(test)]
+#[path = "external_provider_tests.rs"]
+mod tests;

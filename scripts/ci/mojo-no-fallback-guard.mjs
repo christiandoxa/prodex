@@ -171,6 +171,11 @@ const PING_SUMMARY_CALLER_TEST_FILE = "crates/prodex-app/src/app_commands/ping_t
 const PING_SUMMARY_ADAPTER_FILE = "crates/prodex-mojo-core/src/rich/ping_protocol.rs";
 const PING_SUMMARY_MOJO_FILE = "mojo/prodex_core/ping_protocol.mojo";
 const PROMOTED_FILES = [
+  "crates/prodex-app/src/quota_support/external_provider.rs",
+  "crates/prodex-app/src/quota_support/external_provider_tests.rs",
+  "crates/prodex-mojo-core/src/json/external_quota.rs",
+  "crates/prodex-mojo-core/src/json/external_quota_tests.rs",
+  "mojo/prodex_core/external_quota.mojo",
   "crates/prodex-app/src/runtime_proxy/smart_context.rs",
   "crates/prodex-app/src/runtime_proxy/smart_context/runtime_rehydrate/basic.rs",
   "crates/prodex-app/src/runtime_proxy/smart_context/runtime_rehydrate/text_tests.rs",
@@ -1655,6 +1660,25 @@ export function findViolations(files) {
     return [];
   });
   const quotaWatchViolations = files.flatMap(([filePath, contents]) => {
+    if (filePath === "crates/prodex-app/src/quota_support/external_provider.rs") {
+      const required = ["prodex_mojo_core::json::external_quota_projection(",
+        "ExternalQuotaProjection::Agy", "ExternalQuotaProjection::Anthropic", ".pointer(&amount.pointer)"];
+      const retired = ["fn agy_accounts(", "fn agy_selected_account", "fn agy_identity(",
+        "fn agy_main(", "fn agy_details(", "fn agy_detail_entries(",
+        "fn anthropic_rate_limit_group_detail(", "fn quota_json_scalar("];
+      return required.every((marker) => contents.includes(marker)) && retired.every((marker) => !contents.includes(marker))
+        ? [] : [filePath + ": external quota selection and detail assembly must remain Mojo-owned"];
+    }
+    const externalQuotaRequirements = new Map([
+      ["crates/prodex-mojo-core/src/json/external_quota.rs", ["fn prodex_external_quota_projection_v1(", "transform_json(", "pub enum ExternalQuotaProjection"]],
+      ["mojo/prodex_core/external_quota.mojo", ['@export("prodex_external_quota_projection_v1")', "def eq_agy_account(", "def eq_agy_details(", "def eq_anthropic(", "pj_valid(tree)"]],
+      ["crates/prodex-mojo-core/src/json/external_quota_tests.rs", ["compiled_external_quota_projects_empty_rate_limits_and_absent_agy_accounts", "compiled_external_quota_abi_rejects_invalid_input_before_output_or_metadata_writes"]],
+      ["crates/prodex-app/src/quota_support/external_provider_tests.rs", ["compiled_agy_projection_preserves_account_precedence_and_nested_details", "compiled_agy_projection_preserves_empty_arrays_and_non_object_account_shapes", "compiled_agy_amount_plan_preserves_original_float_bits_and_fixed_precision", "compiled_anthropic_projection_preserves_counts_first_three_and_scalar_details"]],
+    ]);
+    if (externalQuotaRequirements.has(filePath)) {
+      return externalQuotaRequirements.get(filePath).filter((marker) => !contents.includes(marker))
+        .map((marker) => filePath + ": compiled external quota ownership missing " + marker);
+    }
     if (filePath === "crates/prodex-app/src/quota_support/watch_tui/frame_data.rs") {
       const required = [
         "prodex_mojo_core::json::quota_watch_presentation(",
@@ -11851,6 +11875,15 @@ function selfTest() {
     "quota_watch_policy::cache_remaining_seconds(",
     "quota_watch_policy::cache_is_live(",
   ].join("\n");
+  const externalQuotaFile = "crates/prodex-app/src/quota_support/external_provider.rs";
+  const externalQuotaCalls = ["prodex_mojo_core::json::external_quota_projection(",
+    "ExternalQuotaProjection::Agy", "ExternalQuotaProjection::Anthropic", ".pointer(&amount.pointer)",
+  ].join("\n");
+  assert.deepEqual(findViolations([[externalQuotaFile, externalQuotaCalls]]), []);
+  assert.match(findViolations([[externalQuotaFile, externalQuotaCalls + "\nfn agy_details() {}"]]).join("\n"),
+    /external quota selection and detail assembly must remain Mojo-owned/u);
+  assert.match(findViolations([[externalQuotaFile, externalQuotaCalls.replace("::Agy", "::RustAgy")]]).join("\n"),
+    /external quota selection and detail assembly must remain Mojo-owned/u);
   const quotaPresentationFile = "crates/prodex-app/src/quota_support/watch_tui/frame_data.rs";
   const quotaPresentationCaller = [
     "prodex_mojo_core::json::quota_watch_presentation(", "QuotaWatchPresentation::Row",
