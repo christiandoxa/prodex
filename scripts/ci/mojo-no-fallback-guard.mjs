@@ -171,6 +171,9 @@ const PING_SUMMARY_CALLER_TEST_FILE = "crates/prodex-app/src/app_commands/ping_t
 const PING_SUMMARY_ADAPTER_FILE = "crates/prodex-mojo-core/src/rich/ping_protocol.rs";
 const PING_SUMMARY_MOJO_FILE = "mojo/prodex_core/ping_protocol.mojo";
 const PROMOTED_FILES = [
+  "crates/prodex-mojo-core/src/json/smart_context_inline.rs",
+  "crates/prodex-mojo-core/src/json/smart_context_inline_tests.rs",
+  "mojo/prodex_core/smart_context_inline.mojo",
   "crates/prodex-provider-core/src/gemini_bridge/errors.rs",
   "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_gemini_send/retry.rs",
   "crates/prodex-provider-core/src/gemini_bridge/errors/quota_retry/retry_delay.rs",
@@ -7435,8 +7438,8 @@ export function findViolations(files) {
       return violations;
     }
     if (filePath === "crates/prodex-app/src/runtime_proxy/smart_context/artifact_manifest.rs") {
-      return contents.includes("prodex_mojo_core::smart_context_artifact_ref::artifact_id_valid(")
-        ? [] : [filePath + ": artifact ID validation must remain Mojo-authoritative"];
+      return !contents.includes("fn runtime_smart_context_artifact_id_valid(")
+        ? [] : [filePath + ": retired inline-reference ID wrapper must not return"];
     }
     if (filePath === "crates/prodex-mojo-core/src/smart_context_artifact_ref.rs") {
       const required = [
@@ -7456,8 +7459,10 @@ export function findViolations(files) {
     if (filePath === SMART_CONTEXT_DUPLICATE_VALIDATION_FILE) {
       const production = contents.split("#[cfg(test)]", 1)[0];
       const required = [
-        "smart_context_duplicate_text_plan(&candidates, SmartContextDuplicateTextMode::Rewrite)",
-        "smart_context_duplicate_text_plan(&candidates, SmartContextDuplicateTextMode::Probe)",
+        "prodex_mojo_core::json::smart_context_inline_plan(",
+        "SmartContextInlineOperation::Rewrite",
+        "SmartContextInlineOperation::Probe",
+        "SmartContextInlineOperation::Expand",
         "smart_context_rewrite_validation_reason(",
       ];
       const violations = required
@@ -7471,6 +7476,11 @@ export function findViolations(files) {
         "seen.entry(&hash)",
         "fn runtime_smart_context_rewrite_is_rehydrate_only",
         "fn runtime_smart_context_regression_reason_label",
+        "fn runtime_smart_context_collect_duplicate_text_candidates",
+        "fn runtime_smart_context_apply_duplicate_text_plan",
+        "fn runtime_smart_context_parse_inline_reference",
+        "fn runtime_smart_context_find_inline_reference_text",
+        "fn runtime_smart_context_expand_inline_references_in_value",
       ]) {
         if (production.includes(restored)) {
           violations.push(filePath + ": contains restored Rust duplicate-text decision logic " + restored);
@@ -7478,6 +7488,36 @@ export function findViolations(files) {
         }
       }
       return violations;
+    }
+    if (filePath === "crates/prodex-mojo-core/src/json/smart_context_inline.rs") {
+      return [
+        "fn prodex_smart_context_inline_v1(",
+        "pub fn smart_context_inline_plan(",
+        "ffi_nodes(source.nodes, source.raw)",
+        "metadata != expected",
+      ].filter((marker) => !contents.includes(marker))
+        .map((marker) => filePath + ": inline-reference typed ABI missing " + marker);
+    }
+    if (filePath === "crates/prodex-mojo-core/src/json/smart_context_inline_tests.rs") {
+      return [
+        "mojo_inline_reference_kernel_probes_rewrites_and_restores_unicode",
+        "mojo_inline_reference_kernel_retains_legacy_hashes_and_usize_parse_grammar",
+        "mojo_inline_reference_kernel_rejects_tampering_overflow_and_unknown_versions",
+        "mojo_inline_reference_abi_rejects_invalid_input_and_capacity_before_writes",
+        "mojo_inline_reference_kernel_is_stateless_across_parallel_calls",
+      ].filter((marker) => !contents.includes(marker))
+        .map((marker) => filePath + ": inline-reference ABI coverage missing " + marker);
+    }
+    if (filePath === "mojo/prodex_core/smart_context_inline.mojo") {
+      return [
+        '@export("prodex_smart_context_inline_v1")',
+        "smart_context_duplicate_text_plan_kernel(",
+        "def inline_reference_source(",
+        "canonical_reference_bounds(",
+        "smart_context_duplicate_text_bucket(original)",
+        "def inline_write(",
+      ].filter((marker) => !contents.includes(marker))
+        .map((marker) => filePath + ": compiled inline-reference ownership missing " + marker);
     }
     if (filePath === SMART_CONTEXT_DUPLICATE_ADAPTER_FILE) {
       return [
@@ -10588,8 +10628,10 @@ function selfTest() {
   assert.deepEqual(findViolations([[ADAPTIVE_BUDGET_FILE,
     "prodex_mojo_core::runtime::smart_context_adaptive_budget_plan()"]]), []);
   const duplicateTextPlannerCalls = [
-    "smart_context_duplicate_text_plan(&candidates, SmartContextDuplicateTextMode::Rewrite)",
-    "smart_context_duplicate_text_plan(&candidates, SmartContextDuplicateTextMode::Probe)",
+    "prodex_mojo_core::json::smart_context_inline_plan(",
+    "SmartContextInlineOperation::Rewrite",
+    "SmartContextInlineOperation::Probe",
+    "SmartContextInlineOperation::Expand",
     "smart_context_rewrite_validation_reason(",
   ].join("; ");
   assert.deepEqual(findViolations([[SMART_CONTEXT_DUPLICATE_VALIDATION_FILE,
@@ -10598,8 +10640,11 @@ function selfTest() {
     duplicateTextPlannerCalls + "; fn runtime_smart_context_value_has_duplicate_text() {}"]]).join("\n"),
   /restored Rust duplicate-text decision logic/u);
   assert.match(findViolations([[SMART_CONTEXT_DUPLICATE_VALIDATION_FILE,
-    duplicateTextPlannerCalls.replace("SmartContextDuplicateTextMode::Probe", "RustProbe")]]).join("\n"),
+    duplicateTextPlannerCalls.replace("SmartContextInlineOperation::Probe", "RustProbe")]]).join("\n"),
   /duplicate-text path must use Mojo planner/u);
+  assert.match(findViolations([[SMART_CONTEXT_DUPLICATE_VALIDATION_FILE,
+    duplicateTextPlannerCalls + "; fn runtime_smart_context_parse_inline_reference() {}"]]).join("\n"),
+    /restored Rust duplicate-text decision logic/u);
   assert.match(findViolations([[SMART_CONTEXT_DUPLICATE_ADAPTER_FILE,
     "fn adapter() {}"]]).join("\n"), /Smart Context adapter must retain/u);
   assert.deepEqual(findViolations([[SMART_CONTEXT_DUPLICATE_ADAPTER_FILE,
