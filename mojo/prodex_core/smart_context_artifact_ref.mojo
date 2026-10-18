@@ -163,6 +163,60 @@ def parse_uint(address: UInt, start: Int64, end: Int64) -> Int64:
         value = value * 10 + digit
     return value
 
+def alias_declaration_bounds(address: UInt, length: Int64) -> Tuple[Int64, Int64, Int64, Int64, Int64]:
+    var bounds = trim_bounds(address, length)
+    var start = bounds[0]
+    var end = bounds[1]
+    var equals: Int64 = -1
+    for i in range(start, end):
+        if byte_at(address, i) == 61:
+            equals = i
+            break
+    if equals < 0 or alias_end(address, start, equals) != equals:
+        return (-1, -1, -1, -1, -1)
+    var ref_start = equals + 1
+    var ref_end = end
+    while ref_start < ref_end and trim_punctuation_byte(byte_at(address, ref_start)):
+        ref_start += 1
+    while ref_end > ref_start and trim_punctuation_byte(byte_at(address, ref_end - 1)):
+        ref_end -= 1
+    var reference = canonical_reference_bounds(address, ref_start, ref_end)
+    if reference[0] < 0:
+        return (-1, -1, -1, -1, -1)
+    return (start, equals, reference[0], reference[1], reference[2])
+
+
+def range_payload_start(address: UInt, start: Int64, end: Int64) -> Int64:
+    if start >= end:
+        return end
+    var lead = byte_at(address, start)
+    if lead != 35 and lead != 58 and lead != 63:
+        return end
+    var cursor = start + 1
+    if literal_at["lines="](address, cursor, end):
+        cursor += 6
+    return cursor
+
+
+def range_item(address: UInt, cursor: Int64, end: Int64) -> Tuple[Int64, Int64, Int64]:
+    var segment_end = cursor
+    while segment_end < end and byte_at(address, segment_end) != 44:
+        segment_end += 1
+    var first = cursor
+    if first < segment_end and (byte_at(address, first) == 76 or byte_at(address, first) == 108):
+        first += 1
+    var dash: Int64 = -1
+    for i in range(first, segment_end):
+        if byte_at(address, i) == 45:
+            dash = i
+            break
+    var left_end = dash if dash >= 0 else segment_end
+    var right_start = dash + 1 if dash >= 0 else first
+    if right_start < segment_end and (byte_at(address, right_start) == 76 or byte_at(address, right_start) == 108):
+        right_start += 1
+    return (parse_uint(address, first, left_end), parse_uint(address, right_start, segment_end), segment_end + 1)
+
+
 def parse_ranges(
     address: UInt,
     start: Int64,
@@ -172,46 +226,18 @@ def parse_ranges(
     range_count: Pointer[mut=True, Int64, _],
 ) -> Int64:
     range_count[] = 0
-    if start >= end:
-        return ARTIFACT_REF_OK
-    var cursor = start
-    var lead = byte_at(address, cursor)
-    if lead != 35 and lead != 58 and lead != 63:
-        return ARTIFACT_REF_OK
-    cursor += 1
-    if literal_at["lines="](address, cursor, end):
-        cursor += 6
-
+    var cursor = range_payload_start(address, start, end)
     while cursor < end:
-        var segment_end = cursor
-        while segment_end < end and byte_at(address, segment_end) != 44:
-            segment_end += 1
-        var first = cursor
-        if first < segment_end and (
-            byte_at(address, first) == 76 or byte_at(address, first) == 108
-        ):
-            first += 1
-        var dash: Int64 = -1
-        for i in range(first, segment_end):
-            if byte_at(address, i) == 45:
-                dash = i
-                break
-        var left_end = dash if dash >= 0 else segment_end
-        var right_start = dash + 1 if dash >= 0 else first
-        if right_start < segment_end and (
-            byte_at(address, right_start) == 76 or byte_at(address, right_start) == 108
-        ):
-            right_start += 1
-        var line_start = parse_uint(address, first, left_end)
-        var line_end = parse_uint(address, right_start, segment_end)
-        if line_start > 0 and line_end >= line_start:
+        var item = range_item(address, cursor, end)
+        if item[0] > 0 and item[1] >= item[0]:
             if range_count[] >= range_capacity:
                 return ARTIFACT_REF_CAPACITY
-            ranges[unsafe_offset=range_count[] * 2] = line_start
-            ranges[unsafe_offset=range_count[] * 2 + 1] = line_end
+            ranges[unsafe_offset=range_count[] * 2] = item[0]
+            ranges[unsafe_offset=range_count[] * 2 + 1] = item[1]
             range_count[] += 1
-        cursor = segment_end + 1
+        cursor = item[2]
     return ARTIFACT_REF_OK
+
 
 @export("prodex_smart_context_artifact_ref_v1")
 def prodex_smart_context_artifact_ref_v1(
@@ -266,25 +292,12 @@ def prodex_smart_context_artifact_ref_v1(
         return ARTIFACT_REF_OK
 
     if operation == OP_ALIAS_DECLARATION:
-        var equals: Int64 = -1
-        for i in range(start, end):
-            if byte_at(address, i) == 61:
-                equals = i
-                break
-        if equals < 0:
+        var declaration = alias_declaration_bounds(address, length)
+        if declaration[0] < 0:
             return ARTIFACT_REF_OK
-        var alias = alias_end(address, start, equals)
-        if alias != equals:
-            return ARTIFACT_REF_OK
-        var ref_start = equals + 1
-        var ref_end = end
-        while ref_start < ref_end and trim_punctuation_byte(byte_at(address, ref_start)):
-            ref_start += 1
-        while ref_end > ref_start and trim_punctuation_byte(byte_at(address, ref_end - 1)):
-            ref_end -= 1
-        var ref_bounds = canonical_reference_bounds(address, ref_start, ref_end)
-        if ref_bounds[0] < 0:
-            return ARTIFACT_REF_OK
+        start = declaration[0]
+        var equals = declaration[1]
+        var ref_bounds = (declaration[2], declaration[3], declaration[4])
         if output_address == 0 or written_address == 0:
             return ARTIFACT_REF_INVALID
         var output = Pointer[mut=True, UInt8, MutUntrackedOrigin](

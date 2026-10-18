@@ -171,6 +171,10 @@ const PING_SUMMARY_CALLER_TEST_FILE = "crates/prodex-app/src/app_commands/ping_t
 const PING_SUMMARY_ADAPTER_FILE = "crates/prodex-mojo-core/src/rich/ping_protocol.rs";
 const PING_SUMMARY_MOJO_FILE = "mojo/prodex_core/ping_protocol.mojo";
 const PROMOTED_FILES = [
+  "crates/prodex-app/src/runtime_proxy/smart_context/artifact_refs_tests.rs",
+  "crates/prodex-mojo-core/src/json/smart_context_artifact_projection.rs",
+  "crates/prodex-mojo-core/src/json/smart_context_artifact_projection_tests.rs",
+  "mojo/prodex_core/smart_context_artifact_projection.mojo",
   "crates/prodex-provider-core/src/deepseek_bridge/request_policy.rs",
   "crates/prodex-provider-core/src/deepseek_bridge/tests/request_diagnostics.rs",
   "crates/prodex-mojo-core/src/rich/deepseek/request_diagnostic.rs",
@@ -7458,16 +7462,28 @@ export function findViolations(files) {
     return [];
   });
   const smartContextArtifactRefViolations = files.flatMap(([filePath, contents]) => {
+    const requirements = new Map([
+      ["crates/prodex-mojo-core/src/json/smart_context_artifact_projection.rs", ["fn prodex_smart_context_artifact_projection_v1(", "fn prodex_smart_context_artifact_alias_count_v1(", "transform_json_with_views("]],
+      ["crates/prodex-mojo-core/src/json/smart_context_artifact_projection_tests.rs", ["compiled_artifact_projection_reuses_the_canonical_token_and_range_parser", "compiled_artifact_projection_abi_rejects_invalid_inputs_before_output_writes"]],
+      ["mojo/prodex_core/smart_context_artifact_projection.mojo", ['@export("prodex_smart_context_artifact_projection_v1")', "alias_declaration_bounds(", "range_item(", "rich_view_order_sort(", "ssr_static_item("]],
+      ["crates/prodex-app/src/runtime_proxy/smart_context/artifact_refs_tests.rs", ["compiled_artifact_projection_keeps_first_alias_and_protects_static_context", "compiled_artifact_projection_resolves_punctuation_unicode_and_multiple_ranges", "compiled_alias_ordering_keeps_first_of_many_repeated_declarations"]],
+    ]);
+    if (requirements.has(filePath)) {
+      return requirements.get(filePath).filter((marker) => !contents.includes(marker))
+        .map((marker) => filePath + ": compiled artifact projection ownership missing " + marker);
+    }
     if (filePath === "crates/prodex-app/src/runtime_proxy/smart_context/artifact_refs.rs") {
       const required = [
-        "prodex_mojo_core::smart_context_artifact_ref::parse_alias_declaration(",
-        "prodex_mojo_core::smart_context_artifact_ref::parse_alias_reference(",
-        "prodex_mojo_core::smart_context_artifact_ref::parse_reference(",
+        "prodex_mojo_core::json::smart_context_artifact_projection(",
+        "crate::json_boundary::app_json_tree_without_wire(",
       ];
       const violations = required
         .filter((call) => !contents.includes(call))
         .map((call) => filePath + ": artifact-ref migration must retain Mojo call " + call);
       for (const restored of [
+        "fn runtime_smart_context_collect_rehydratable_artifact_refs_from_value",
+        "fn runtime_smart_context_collect_artifact_aliases_from_value",
+        "fn runtime_smart_context_artifact_ref_tokens",
         "fn runtime_smart_context_split_artifact_alias_ref",
         "fn runtime_smart_context_trim_artifact_ref_token",
         "fn runtime_smart_context_normalize_artifact_ref",
@@ -11372,6 +11388,11 @@ function selfTest() {
   assert.match(findViolations([[DEEPSEEK_REQUEST_FILE,
     "fn deepseek_request_body_from_responses_rust() {}"]]).join("\n"),
     /Rust semantic oracle or copy/u);
+  assert.match(findViolations([["crates/prodex-app/src/runtime_proxy/smart_context/artifact_refs.rs",
+    "prodex_mojo_core::json::smart_context_artifact_projection(); crate::json_boundary::app_json_tree_without_wire(); fn runtime_smart_context_artifact_ref_tokens() {}"]]).join("\n"),
+    /restored Rust smart-context artifact-ref semantics/u);
+  assert.match(findViolations([["mojo/prodex_core/smart_context_artifact_projection.mojo", "def unused(): pass"]]).join("\n"),
+    /compiled artifact projection ownership missing/u);
   assert.match(findViolations([[DEEPSEEK_REQUEST_REJECT_FILE,
     'fn request_policy_error() { "deprecated and is not forwarded by Prodex" }']]).join("\n"),
     /restored Rust request diagnostic catalog/u);

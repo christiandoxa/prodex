@@ -8,14 +8,31 @@ pub(crate) const APP_JSON_MAX_NODES: usize = 1_048_576;
 pub(crate) struct AppJsonTree<'a> {
     pub(crate) nodes: Vec<JsonNode<'a>>,
     pub(crate) raw: Vec<u8>,
+    acquired_bytes: usize,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum JsonWire {
+    Encode,
+    Omit,
 }
 
 pub(crate) fn app_json_tree(value: &serde_json::Value) -> Result<AppJsonTree<'_>> {
+    acquire_json_tree(value, JsonWire::Encode)
+}
+
+/// Acquires decoded fields for kernels that never read JSON wire spans.
+pub(crate) fn app_json_tree_without_wire(value: &serde_json::Value) -> Result<AppJsonTree<'_>> {
+    acquire_json_tree(value, JsonWire::Omit)
+}
+
+fn acquire_json_tree(value: &serde_json::Value, wire: JsonWire) -> Result<AppJsonTree<'_>> {
     let mut tree = AppJsonTree {
         nodes: Vec::new(),
         raw: Vec::new(),
+        acquired_bytes: 0,
     };
-    append_json_node(value, "", None, &mut tree)?;
+    append_json_node(value, "", None, &mut tree, wire)?;
     if tree.raw.len() > APP_JSON_MAX_BYTES {
         bail!("Mojo application normalized JSON exceeded its ABI bound");
     }
@@ -27,10 +44,17 @@ fn append_json_node<'a>(
     key: &'a str,
     parent: Option<usize>,
     tree: &mut AppJsonTree<'a>,
+    wire: JsonWire,
 ) -> Result<usize> {
     if tree.nodes.len() >= APP_JSON_MAX_NODES {
         bail!("Mojo application JSON tree exceeded its ABI bound");
     }
+    tree.acquired_bytes = tree
+        .acquired_bytes
+        .checked_add(key.len())
+        .and_then(|count| count.checked_add(value.as_str().map_or(0, str::len)))
+        .filter(|count| *count <= APP_JSON_MAX_BYTES)
+        .ok_or_else(|| anyhow::anyhow!("Mojo application decoded JSON exceeded its ABI bound"))?;
     tree.nodes
         .try_reserve(1)
         .map_err(|_| anyhow::anyhow!("failed to allocate application JSON nodes"))?;
@@ -58,32 +82,46 @@ fn append_json_node<'a>(
     let mut previous = None;
     match value {
         serde_json::Value::Array(values) => {
-            tree.raw.push(b'[');
+            if wire == JsonWire::Encode {
+                tree.raw.push(b'[');
+            }
             for value in values {
-                if previous.is_some() {
+                if wire == JsonWire::Encode && previous.is_some() {
                     tree.raw.push(b',');
                 }
-                let child = append_json_node(value, "", Some(index), tree)?;
+                let child = append_json_node(value, "", Some(index), tree, wire)?;
                 link_json_node(&mut tree.nodes, index, &mut previous, child);
             }
-            tree.raw.push(b']');
+            if wire == JsonWire::Encode {
+                tree.raw.push(b']');
+            }
         }
         serde_json::Value::Object(values) => {
-            tree.raw.push(b'{');
+            if wire == JsonWire::Encode {
+                tree.raw.push(b'{');
+            }
             for (key, value) in values {
-                if previous.is_some() {
+                if wire == JsonWire::Encode && previous.is_some() {
                     tree.raw.push(b',');
                 }
-                serde_json::to_writer(&mut tree.raw, key)
-                    .context("failed to encode application JSON key")?;
-                tree.raw.push(b':');
-                let child = append_json_node(value, key, Some(index), tree)?;
+                if wire == JsonWire::Encode {
+                    serde_json::to_writer(&mut tree.raw, key)
+                        .context("failed to encode application JSON key")?;
+                    tree.raw.push(b':');
+                }
+                let child = append_json_node(value, key, Some(index), tree, wire)?;
                 link_json_node(&mut tree.nodes, index, &mut previous, child);
             }
-            tree.raw.push(b'}');
+            if wire == JsonWire::Encode {
+                tree.raw.push(b'}');
+            }
         }
-        _ => serde_json::to_writer(&mut tree.raw, value)
-            .context("failed to encode application JSON value")?,
+        _ => {
+            if wire == JsonWire::Encode {
+                serde_json::to_writer(&mut tree.raw, value)
+                    .context("failed to encode application JSON value")?;
+            }
+        }
     }
     tree.nodes[index].raw_length = tree.raw.len() - start;
     Ok(index)

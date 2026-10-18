@@ -1,5 +1,11 @@
 //! Typed, borrowed JSON-tree ABI for complete semantic transforms. JSON wire
 //! parsing and compatibility serialization remain outside the Mojo bridge.
+#[cfg(feature = "mojo-runtime")]
+mod smart_context_artifact_projection;
+#[cfg(feature = "mojo-runtime")]
+pub use self::smart_context_artifact_projection::{
+    SmartContextArtifactProjection, smart_context_artifact_projection,
+};
 #[cfg(feature = "mojo-rich")]
 mod retry_headers;
 #[cfg(feature = "mojo-rich")]

@@ -9,6 +9,16 @@
   "minimum_percent": 20,
   "target_percent": 23,
   "release_operation_overrides": {
+    "smart_context_artifact_reference_policy": {
+      "mojo_entry": "prodex_smart_context_artifact_projection_v1",
+      "mojo_source": "mojo/prodex_core/smart_context_artifact_projection.mojo",
+      "consumer_marker": "prodex_mojo_core::json::smart_context_artifact_projection",
+      "production_reachability_test": "crates/prodex-mojo-core/src/json/smart_context_artifact_projection_tests.rs",
+      "production_consumers": [
+        "crates/prodex-app/src/runtime_proxy/smart_context/artifact_refs.rs"
+      ],
+      "rust_adapter_scope": "bounded borrowed Serde acquisition, caller-owned scratch, and DTO materialization; recursive traversal, tokenization, alias ownership and reference parsing use the compiled request projection and shared Mojo token parser"
+    },
     "smart_context_rehydration_plan": {
       "mojo_entry": "prodex_smart_context_rehydrate_plan_batch",
       "mojo_source": "mojo/prodex_core/smart_context_rehydrate.mojo",
@@ -1340,6 +1350,16 @@
       },
       {
         "path": "mojo/prodex_core/smart_context_artifact_ref.mojo",
+        "language": "mojo",
+        "classification": "DETERMINISTIC_DOMAIN",
+        "production_reachable": true,
+        "role": "semantic",
+        "operations": [
+          "smart_context_artifact_reference_policy"
+        ]
+      },
+      {
+        "path": "mojo/prodex_core/smart_context_artifact_projection.mojo",
         "language": "mojo",
         "classification": "DETERMINISTIC_DOMAIN",
         "production_reachable": true,
