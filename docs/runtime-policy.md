@@ -189,6 +189,27 @@ When `[gateway.request_constraints] enabled = true`, Prodex resolves aliases to 
 
 Hard continuation ownership remains authoritative. `previous_response_id`, turn-state, and session-scoped unary ownership are validated only against their owner; constraint failure does not turn a continuation into a fresh request or select a larger alternate. Rotation and output adjustment occur only before commitment. After unary or streaming commitment, Prodex preserves the natural upstream/transport failure and never replays against another provider.
 
+Responses WebSocket transport recovery keeps three clocks separate: upstream
+progress/idle time, the original precommit request deadline, and downstream
+transport liveness. A compiled Mojo wait plan schedules one-second Ping
+control frames while waiting for upstream frames. These heartbeats do not
+commit buffered response metadata, generate output, renew upstream progress,
+extend the request deadline, reserve extra profile capacity, or change quota
+or affinity. Realtime duplex traffic keeps its existing lifecycle.
+
+Before response commitment, connect/send/read/close failures become typed
+attempt outcomes for the outer affinity-aware recovery owner, rather than
+closing the native client's socket in the transport layer. A turn-state-bound
+request with complete reconstructable history and a recoverable Ready
+alternative may clear the failed transport binding and retry that full request
+on the alternative. This uses the same compiled full-history safety proof as
+quota recovery. Delta-only input, a previous-response dependency, and strict
+compact-followup ownership cannot cross profiles through this path. A bound
+previous response instead uses the existing native full-context retry signal
+when eligible. After output commitment, transport failure remains terminal:
+no profile rotation, duplicated output, or invented response completion.
+
+
 Authenticated `admin` and read-only `viewer` principals can `POST /v1/prodex/gateway/routes/explain` or use **Route Workbench** in `/v1/prodex/gateway/admin`. The bounded JSON response uses the same pure planner as live routing and includes alias resolution, requirements, candidate decisions, adjustments, warnings, and trace truncation. The optional global current-load snapshot is available only to unscoped principals; the dashboard uses the side-effect-free catalog-only view. Explain authenticates and authorizes through the normal admin control-plane boundary and writes only redacted audit metadata. It does not call upstreams, refresh credentials, reserve billing/quota, increment request/model/inflight counters, mutate affinity/round-robin/circuit/prompt-cache state, or persist runtime state. Submitted request JSON is neither logged nor stored by the dashboard. Historical trace storage is not provided; explain results are on-demand and non-durable.
 
 For production multi-replica accounting, set `gateway.state.backend =

@@ -2,13 +2,26 @@ use super::*;
 
 #[test]
 fn runtime_proxy_websocket_post_compaction_turn_state_quota_replays_without_user_error() {
+    post_compaction_recovers(false);
+}
+
+#[test]
+fn runtime_proxy_websocket_post_compaction_transport_close_recovers_on_ready_profile() {
+    post_compaction_recovers(true);
+}
+
+fn post_compaction_recovers(transport_failure: bool) {
     let _test_guard = crate::acquire_test_runtime_lock();
     let (_connect_timeout_guard, _progress_timeout_guard) =
         ci_runtime_proxy_websocket_timeout_guards();
     let now = Local::now().timestamp();
     let turn_state = "turn-post-compact-quota";
     let fixture = start_runtime_continuation_fixture(
-        RuntimeProxyBackend::start_websocket(),
+        if transport_failure {
+            RuntimeProxyBackend::start_websocket_precommit_transport_close()
+        } else {
+            RuntimeProxyBackend::start_websocket()
+        },
         "main",
         &["main", "second"],
         &[],
@@ -49,12 +62,13 @@ fn runtime_proxy_websocket_post_compaction_turn_state_quota_replays_without_user
             || text.contains("usage_limit_reached")
             || text.contains("usage limit")
             || text.contains("previous_response_not_found")
+            || text.contains("service_unavailable")
     });
     let _ = socket.close(None);
 
     assert!(
         completed.contains(r#""response":{"id":"resp-second"}"#),
-        "post-compaction quota should rotate to the ready profile without a user-visible retry error: {frames:?}"
+        "post-compaction failure should rotate to the ready profile without a user-visible retry error: {frames:?}"
     );
     assert!(
         frames.iter().all(|frame| {
@@ -62,13 +76,14 @@ fn runtime_proxy_websocket_post_compaction_turn_state_quota_replays_without_user
                 && !frame.contains("usage_limit_reached")
                 && !frame.contains("usage limit")
                 && !frame.contains("previous_response_not_found")
+                && !frame.contains("service_unavailable")
         }),
         "quota and replay-control errors must stay behind the proxy when full context is replayable: {frames:?}"
     );
     assert_eq!(
         fixture.backend.responses_accounts(),
         vec!["main-account".to_string(), "second-account".to_string()],
-        "quota owner should be attempted once, followed by the ready profile"
+        "failed owner should be attempted once, followed by the ready profile"
     );
 
     let upstream_headers = fixture.backend.responses_headers();
@@ -89,12 +104,17 @@ fn runtime_proxy_websocket_post_compaction_turn_state_quota_replays_without_user
         "dead turn-state must also be removed from response.create client_metadata"
     );
 
+    let recovery_event = if transport_failure {
+        "transport_failure_turn_state_full_context_replay"
+    } else {
+        "quota_blocked_turn_state_full_context_replay"
+    };
     let log = fixture.wait_for_log(|log| {
-        log.contains("quota_blocked_turn_state_full_context_replay")
+        log.contains(recovery_event)
             && log.contains("committed profile=second")
     });
     assert!(
-        log.contains("quota_blocked_turn_state_full_context_replay"),
+        log.contains(recovery_event),
         "{log}"
     );
     assert!(

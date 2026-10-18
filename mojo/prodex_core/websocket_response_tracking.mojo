@@ -261,3 +261,39 @@ def prodex_websocket_response_frame_plan_v1(
         committed and retry_kind == RETRY_PREVIOUS_RESPONSE_NOT_FOUND
     )
     return 0
+
+
+# Transport-only liveness must not commit buffered output, renew upstream
+# progress or extend the logical request deadline. The host supplies elapsed
+# monotonic time; this owner selects a bounded read slice and heartbeat tick.
+comptime WEBSOCKET_RESPONSE_HEARTBEAT_MS: UInt64 = 1000
+
+
+@export("prodex_websocket_response_wait_plan_v1")
+def prodex_websocket_response_wait_plan_v1(
+    abi_version: Int64,
+    upstream_elapsed_ms: UInt64,
+    upstream_timeout_ms: UInt64,
+    heartbeat_elapsed_ms: UInt64,
+    output_address: UInt,
+    output_count: Int64,
+) abi("C") -> Int64:
+    if abi_version != WEBSOCKET_RESPONSE_TRACKING_ABI_VERSION:
+        return 4
+    if upstream_timeout_ms == 0 or output_address == 0 or output_count != 3:
+        return 1
+    var output = Pointer[mut=True, UInt64, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    var expired = upstream_elapsed_ms >= upstream_timeout_ms
+    var heartbeat = not expired and heartbeat_elapsed_ms >= WEBSOCKET_RESPONSE_HEARTBEAT_MS
+    var wait_ms: UInt64 = 0
+    if not expired:
+        var heartbeat_wait = WEBSOCKET_RESPONSE_HEARTBEAT_MS
+        if not heartbeat:
+            heartbeat_wait -= heartbeat_elapsed_ms
+        wait_ms = min(upstream_timeout_ms - upstream_elapsed_ms, heartbeat_wait)
+    output[unsafe_offset=0] = UInt64(expired)
+    output[unsafe_offset=1] = UInt64(heartbeat)
+    output[unsafe_offset=2] = wait_ms
+    return 0

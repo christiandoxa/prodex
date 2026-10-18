@@ -97,6 +97,7 @@ pub(super) enum RuntimeProxyBackendMode {
     WebsocketPreviousResponseMissingWithoutTurnState,
     WebsocketOwnedToolOutputNeedsSessionReplay,
     WebsocketCloseMidTurn,
+    WebsocketPrecommitTransportClose,
     WebsocketPreviousResponseNeedsTurnState,
     WebsocketStaleReuseNeedsTurnState,
     WebsocketTopLevelResponseId,
@@ -293,6 +294,10 @@ impl RuntimeProxyBackend {
         Self::start_with_mode(RuntimeProxyBackendMode::WebsocketCloseMidTurn)
     }
 
+    pub(super) fn start_websocket_precommit_transport_close() -> Self {
+        Self::start_with_mode(RuntimeProxyBackendMode::WebsocketPrecommitTransportClose)
+    }
+
     pub(super) fn start_websocket_previous_response_needs_turn_state() -> Self {
         Self::start_with_mode(RuntimeProxyBackendMode::WebsocketPreviousResponseNeedsTurnState)
     }
@@ -398,6 +403,7 @@ impl RuntimeProxyBackend {
                                 | RuntimeProxyBackendMode::WebsocketPreviousResponseMissingWithoutTurnState
                                 | RuntimeProxyBackendMode::WebsocketOwnedToolOutputNeedsSessionReplay
                                 | RuntimeProxyBackendMode::WebsocketCloseMidTurn
+                                | RuntimeProxyBackendMode::WebsocketPrecommitTransportClose
                                 | RuntimeProxyBackendMode::WebsocketPreviousResponseNeedsTurnState
                                 | RuntimeProxyBackendMode::WebsocketStaleReuseNeedsTurnState
                                 | RuntimeProxyBackendMode::WebsocketTopLevelResponseId
