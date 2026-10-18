@@ -1,8 +1,7 @@
-use super::external_provider::fetch_agy_quota_info;
+use super::external_provider::{fetch_agy_quota_info, project_external_quota};
 use super::{
-    AuthSummary, ExternalQuotaDetail, ExternalQuotaInfo, ProviderQuotaSnapshot,
-    QuotaProviderFilter, QuotaReport, build_upstream_blocking_http_client, format_response_body,
-    quota_error_message,
+    AuthSummary, ExternalQuotaInfo, ProviderQuotaSnapshot, QuotaProviderFilter, QuotaReport,
+    build_upstream_blocking_http_client, format_response_body, quota_error_message,
 };
 use crate::{RUNTIME_PROXY_BUFFERED_RESPONSE_MAX_BYTES, read_blocking_response_body_with_limit};
 use anyhow::{Context, Result, bail};
@@ -130,54 +129,11 @@ fn provider_api_keys_from_list(value: &str) -> Option<Vec<String>> {
 
 fn fetch_deepseek_quota_info(api_key: &str, base_url: Option<&str>) -> Result<ExternalQuotaInfo> {
     let value = fetch_deepseek_balance_json(api_key, base_url)?;
-    let available = value
-        .get("is_available")
-        .and_then(serde_json::Value::as_bool)
-        .unwrap_or(false);
-    let balances = value
-        .get("balance_infos")
-        .and_then(serde_json::Value::as_array)
-        .cloned()
-        .unwrap_or_default();
-    let mut details = Vec::new();
-    let mut parts = Vec::new();
-    for balance in balances {
-        let currency = balance
-            .get("currency")
-            .and_then(serde_json::Value::as_str)
-            .unwrap_or("balance");
-        let total = balance
-            .get("total_balance")
-            .and_then(serde_json::Value::as_str)
-            .unwrap_or("-");
-        parts.push(format!("{currency} {total}"));
-        let granted = balance
-            .get("granted_balance")
-            .and_then(serde_json::Value::as_str)
-            .unwrap_or("-");
-        let topped_up = balance
-            .get("topped_up_balance")
-            .and_then(serde_json::Value::as_str)
-            .unwrap_or("-");
-        details.push(ExternalQuotaDetail {
-            label: format!("{currency} balance"),
-            value: format!("total {total}; granted {granted}; topped up {topped_up}"),
-        });
-    }
-    Ok(ExternalQuotaInfo {
-        provider: "DeepSeek".to_string(),
-        account: None,
-        plan: Some("api-key".to_string()),
-        status: if available { "Ready" } else { "Blocked" }.to_string(),
-        main: if parts.is_empty() {
-            "balance unavailable".to_string()
-        } else {
-            parts.join(" | ")
-        },
-        reset: None,
-        available: Some(available),
-        details,
-    })
+    project_external_quota(
+        &value,
+        prodex_mojo_core::json::ExternalQuotaProjection::DeepSeekBalance,
+    )?
+    .context("compiled DeepSeek quota projection was absent")
 }
 
 fn fetch_deepseek_balance_json(api_key: &str, base_url: Option<&str>) -> Result<serde_json::Value> {
@@ -242,26 +198,13 @@ fn fetch_local_openai_compatible_quota_info(base_url: &str) -> Result<ExternalQu
     }
     let value: serde_json::Value =
         serde_json::from_slice(&body).context("failed to parse local models response")?;
-    let model_count = value
-        .get("data")
-        .and_then(serde_json::Value::as_array)
-        .map(Vec::len);
-    Ok(ExternalQuotaInfo {
-        provider: "Local OpenAI-compatible".to_string(),
-        account: Some(base_url.trim().to_string()),
-        plan: Some("local".to_string()),
-        status: "Reachable".to_string(),
-        main: model_count.map_or_else(
-            || "models endpoint reachable".to_string(),
-            |count| format!("{count} model(s)"),
-        ),
-        reset: None,
-        available: Some(true),
-        details: vec![ExternalQuotaDetail {
-            label: "Models URL".to_string(),
-            value: url,
-        }],
-    })
+    let mut input = serde_json::json!({"account": base_url.trim(), "models_url": url});
+    input["value"] = value;
+    project_external_quota(
+        &input,
+        prodex_mojo_core::json::ExternalQuotaProjection::LocalModels,
+    )?
+    .context("compiled local models quota projection was absent")
 }
 
 fn openai_compatible_models_url(base_url: &str) -> Result<String> {
@@ -286,3 +229,7 @@ fn local_openai_compatible_api_key_from_env() -> Option<String> {
                 .filter(|value| !value.is_empty())
         })
 }
+
+#[cfg(test)]
+#[path = "virtual_provider_tests.rs"]
+mod tests;

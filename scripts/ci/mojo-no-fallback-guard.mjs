@@ -173,6 +173,8 @@ const PING_SUMMARY_MOJO_FILE = "mojo/prodex_core/ping_protocol.mojo";
 const PROMOTED_FILES = [
   "crates/prodex-app/src/quota_support/external_provider.rs",
   "crates/prodex-app/src/quota_support/external_provider_tests.rs",
+  "crates/prodex-app/src/quota_support/virtual_provider.rs",
+  "crates/prodex-app/src/quota_support/virtual_provider_tests.rs",
   "crates/prodex-mojo-core/src/json/external_quota.rs",
   "crates/prodex-mojo-core/src/json/external_quota_tests.rs",
   "mojo/prodex_core/external_quota.mojo",
@@ -1660,6 +1662,12 @@ export function findViolations(files) {
     return [];
   });
   const quotaWatchViolations = files.flatMap(([filePath, contents]) => {
+    if (filePath === "crates/prodex-app/src/quota_support/virtual_provider.rs") {
+      const required = ["project_external_quota(", "ExternalQuotaProjection::DeepSeekBalance", "ExternalQuotaProjection::LocalModels"];
+      const retired = ['.get("is_available")', '.get("balance_infos")', '.get("total_balance")', '.get("data")'];
+      return required.every((marker) => contents.includes(marker)) && retired.every((marker) => !contents.includes(marker))
+        ? [] : [filePath + ": virtual quota summaries must remain Mojo-owned"];
+    }
     if (filePath === "crates/prodex-app/src/quota_support/external_provider.rs") {
       const required = ["prodex_mojo_core::json::external_quota_projection(",
         "ExternalQuotaProjection::Agy", "ExternalQuotaProjection::Anthropic", ".pointer(&amount.pointer)"];
@@ -1671,9 +1679,10 @@ export function findViolations(files) {
     }
     const externalQuotaRequirements = new Map([
       ["crates/prodex-mojo-core/src/json/external_quota.rs", ["fn prodex_external_quota_projection_v1(", "transform_json(", "pub enum ExternalQuotaProjection"]],
-      ["mojo/prodex_core/external_quota.mojo", ['@export("prodex_external_quota_projection_v1")', "def eq_agy_account(", "def eq_agy_details(", "def eq_anthropic(", "pj_valid(tree)"]],
-      ["crates/prodex-mojo-core/src/json/external_quota_tests.rs", ["compiled_external_quota_projects_empty_rate_limits_and_absent_agy_accounts", "compiled_external_quota_abi_rejects_invalid_input_before_output_or_metadata_writes"]],
+      ["mojo/prodex_core/external_quota.mojo", ['@export("prodex_external_quota_projection_v1")', "def eq_agy_account(", "def eq_agy_details(", "def eq_anthropic(", "def eq_deepseek(", "def eq_local_models(", "def eq_render(", "pj_valid(tree)"]],
+      ["crates/prodex-mojo-core/src/json/external_quota_tests.rs", ["compiled_external_quota_projects_empty_rate_limits_and_absent_agy_accounts", "compiled_external_quota_abi_rejects_invalid_input_before_output_or_metadata_writes", "compiled_virtual_quota_abi_preserves_blocked_balance_and_rejects_missing_model_context"]],
       ["crates/prodex-app/src/quota_support/external_provider_tests.rs", ["compiled_agy_projection_preserves_account_precedence_and_nested_details", "compiled_agy_projection_preserves_empty_arrays_and_non_object_account_shapes", "compiled_agy_amount_plan_preserves_original_float_bits_and_fixed_precision", "compiled_anthropic_projection_preserves_counts_first_three_and_scalar_details"]],
+      ["crates/prodex-app/src/quota_support/virtual_provider_tests.rs", ["compiled_deepseek_quota_preserves_ordered_balances_and_string_defaults", "compiled_local_models_quota_preserves_count_presence_and_host_metadata", "compiled_virtual_quota_projections_are_isolated_between_threads"]],
     ]);
     if (externalQuotaRequirements.has(filePath)) {
       return externalQuotaRequirements.get(filePath).filter((marker) => !contents.includes(marker))
@@ -11876,6 +11885,13 @@ function selfTest() {
     "quota_watch_policy::cache_is_live(",
   ].join("\n");
   const externalQuotaFile = "crates/prodex-app/src/quota_support/external_provider.rs";
+  const virtualQuotaFile = "crates/prodex-app/src/quota_support/virtual_provider.rs";
+  const virtualQuotaCalls = ["project_external_quota(", "ExternalQuotaProjection::DeepSeekBalance", "ExternalQuotaProjection::LocalModels"].join("\n");
+  assert.deepEqual(findViolations([[virtualQuotaFile, virtualQuotaCalls]]), []);
+  assert.match(findViolations([[virtualQuotaFile, virtualQuotaCalls + '\nvalue.get("balance_infos")']]).join("\n"),
+    /virtual quota summaries must remain Mojo-owned/u);
+  assert.match(findViolations([[virtualQuotaFile, virtualQuotaCalls.replace("::LocalModels", "::RustModels")]]).join("\n"),
+    /virtual quota summaries must remain Mojo-owned/u);
   const externalQuotaCalls = ["prodex_mojo_core::json::external_quota_projection(",
     "ExternalQuotaProjection::Agy", "ExternalQuotaProjection::Anthropic", ".pointer(&amount.pointer)",
   ].join("\n");

@@ -2,12 +2,14 @@
 use super::{JsonNode, transform_json};
 use crate::MojoError;
 
-/// AGY accepts a `{value, preferred}` envelope; Anthropic accepts its response body.
+/// Chooses one provider's bounded quota presentation contract.
 #[derive(Clone, Copy, Debug)]
 #[repr(i64)]
 pub enum ExternalQuotaProjection {
     Agy = 0,
     Anthropic = 1,
+    DeepSeekBalance = 2,
+    LocalModels = 3,
 }
 
 unsafe extern "C" {
@@ -30,6 +32,8 @@ unsafe extern "C" {
 
 /// AGY returns `{info, amount}`; `amount` names an original numeric JSON pointer
 /// and suffix for the host's fixed-decimal formatter. Anthropic returns `{main, details}`.
+/// DeepSeek accepts its balance body. Local models accepts `{value, account, models_url}`.
+/// These two operations return the complete external quota record.
 /// Returns `None` only when AGY's account array is empty.
 pub fn external_quota_projection(
     nodes: &[JsonNode<'_>],
