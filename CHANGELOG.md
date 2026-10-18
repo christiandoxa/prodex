@@ -2,6 +2,124 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.438.3 - 2026-10-18
+
+### Runtime
+
+- Consume buffered terminal frames before idle expiry (`528c90a`)
+- Poll readiness without expiring blocking receive state (`21c8463`)
+- Recover quiet and broken WebSocket continuations before commit (`167546f`)
+# Prodex 0.438.3
+
+This patch repairs WebSocket recovery paths that could interrupt a Responses
+or compaction request while another profile still had available quota.
+
+## New Features
+
+This maintenance release adds no new user-facing flags.
+
+## Bug Fixes
+
+### Keep transport failures inside affinity-aware recovery
+
+Precommit connection, send, read, and close failures now return typed attempt
+outcomes to the outer recovery owner. A lower-level transport action that
+previously became an invalid-action error can no longer close the local
+client socket before safe recovery is evaluated. The transport layer does not
+itself grant permission to rotate or replay a continuation.
+
+Full-history requests bound only to a failed turn-state transport can use the
+same compiled safety proof as quota recovery to move to a Ready alternative.
+The failed binding is removed from both headers and request metadata. A
+previous-response dependency still uses native full-context recovery when
+eligible; delta-only requests and strict compact-followup bindings are not
+replayed across accounts.
+
+### Keep quiet Responses connections alive without hiding deadlines
+
+A compiled Mojo wait plan schedules transport-only Ping frames during quiet
+upstream waits, including waits where response metadata remains buffered.
+Client idle time no longer expires merely because the proxy is safely holding
+precommit metadata. These control frames never commit output, extend the
+logical request deadline, reset the upstream idle clock, or change quota.
+A genuinely stalled upstream still fails within its configured timeout.
+
+Committed output is never replayed and no synthetic response completion is
+emitted. Existing idle-socket permit release and per-request reacquisition
+remain intact. Realtime duplex handling retains its committed-session rules.
+
+### Keep readiness polling safe on native Windows sockets
+
+Quiet-stream liveness now performs a nonblocking read before a bounded OS
+readiness wait (`poll` on Unix, `WSAPoll` on Windows), preserving buffered TLS
+and partial WebSocket frames. It no longer repeatedly expires a blocking
+socket receive timeout to wake the heartbeat loop: Winsock documents the
+connection state after that timeout as indeterminate. Blocking write and
+cached-session contracts are restored before dispatching each frame.
+
+A causal local fixture pauses before any data, splits a WebSocket text frame
+inside its payload, then sends a second terminal/error frame. Both frames
+must be received exactly, without changing the socket's configured receive
+timeout. Existing live frame/Pong and post-commit continuation pass-through
+regressions remain mandatory on Windows rather than weakening their assertions.
+
+### Drain queued terminal frames before declaring upstream idle
+
+Windows qualification exposed an independent ordering defect: synchronous
+commit/state persistence could exceed the short test idle budget while a
+`response.completed` or `response.failed` frame was already buffered. The
+loop checked elapsed idle time before attempting to consume that queued
+frame, inventing an upstream timeout and closing the client after output.
+
+The loop now tries a nonblocking read before the idle decision. An actual
+frame refreshes upstream progress; a poll or heartbeat does not. The absolute
+precommit deadline is still checked before and after every read. A causal
+local test pauses downstream dispatch for 200 ms with a 100 ms upstream idle
+budget and queues both success/error terminal cases. It fails before this
+ordering fix and passes afterward without changing the budget or assertions.
+
+### Keep the release dependency graph maintained
+
+The OS keyring adapter now selects maintained native stores explicitly. On
+Linux it uses encrypted Secret Service transport through the maintained D-Bus
+backend, removing retired standalone zvariant dependencies that blocked the
+supply-chain gate. macOS Keychain and Windows Credential Manager remain the
+platform stores. Service/user lookup attributes and the binary secret envelope
+are unchanged; publication does not enumerate, migrate, or rewrite credentials.
+
+### Maintain the native credential-store dependency chain
+
+Linux/Unix Secret Service access now uses an explicit maintained D-Bus store
+with Rust cryptography and a bundled libdbus instead of the retired standalone
+zvariant dependency chain. macOS Keychain and Windows Credential Manager stay
+on their native stores. The service/username lookup attributes, default
+collection and binary secret envelope are unchanged. An isolated old/new
+backend interoperability test verified cross-reading, updating and deleting
+the same synthetic entry; no user keyring was accessed during qualification.
+No advisory ignore or security gate exemption was added.
+
+## Changelog
+
+### Qualification
+
+Regression tests reproduce the precommit invalid-action failure and the quiet
+client timeout before the patch. A separate test reproduces a full-history
+transport failure with one five-hour-blocked profile, one weekly-blocked
+profile and one Ready profile. Controls verify that delta-only input remains
+bound, previous-response recovery is explicit, heartbeats cannot postpone a
+real upstream timeout, and a committed response cannot become a retryable
+attempt. A real local broker test closes the owner's upstream connection
+before output, then completes the same full-history request exactly once on
+the alternate profile without leaking the failed turn-state binding.
+
+Available quota is not a guarantee that every upstream connection or model is
+healthy. This patch repairs the reproduced proxy recovery defects; it does
+not bypass quota limits, mask exhausted request deadlines, or claim that
+external network failures are impossible. Saved conversations, credentials,
+and paused goals are not modified by release publication.
+
+Full Changelog: [0.438.2...0.438.3](https://github.com/christiandoxa/prodex/compare/0.438.2...0.438.3)
+
 ## 0.438.2 - 2026-10-17
 
 ### Runtime
@@ -11,57 +129,6 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 ### Docs
 
 - Structure 0.438.2 notes for the release renderer (`96a86ca`)
-# Prodex 0.438.2
-
-This patch fixes WebSocket capacity starvation and closes a precommit recovery
-watchdog gap that could turn a stalled request into repeated native idle
-reconnects, especially when only one account remains ready for model traffic.
-
-## New Features
-
-This is a maintenance release. It adds no new user-facing flags.
-
-## Bug Fixes
-
-### WebSocket admission and recovery
-
-Completed Responses WebSockets now release their weighted profile execution
-permit while retaining the upstream connection, response identity, and turn
-state for reuse. An idle parent or side-agent socket no longer monopolizes the
-last ready profile and prevents another session or compaction request from
-running. Reused connections reacquire a permit for each active response;
-saturation preserves their cached transport while the existing admission
-policy waits. Realtime duplex sessions retain their permit until they close.
-
-Precommit sends and response reads now cap their existing socket timeouts by
-the original request deadline. Hidden prelude frames no longer renew that
-budget. The response loop checks expiry before another read and before
-accepting a late frame, so local deadline exhaustion becomes a typed
-`504 request_timeout` rather than a retryable profile transport failure.
-The local client socket remains usable for the next request.
-
-Committed responses keep their normal stream idle timeout and are not
-cancelled or replayed by the precommit watchdog. Profile selection, actual
-quota enforcement, hard affinity, and response replay restrictions are
-unchanged; transport trouble is not reclassified as account quota exhaustion.
-
-## Changelog
-
-### Qualification
-
-New tests cover idle connection permit release, permit reacquisition on reuse,
-backpressure without losing the cached socket, a silent hidden prelude,
-repeated hidden metadata, delivery of a typed timeout followed by a successful
-request on the same local socket, committed streaming past the precommit
-deadline, and realtime permit lifetime. A real local broker test retains
-several completed clients while another compaction request completes on the
-only ready profile, with exactly one output delivery per request.
-
-No credentials, saved conversations, or paused goals are modified. An account
-with no weekly quota remains blocked even when its five-hour window has quota;
-the fix does not create capacity that the upstream service has exhausted.
-
-Full Changelog: [0.438.1...0.438.2](https://github.com/christiandoxa/prodex/compare/0.438.1...0.438.2)
 
 ## 0.438.1 - 2026-10-17
 
@@ -110,45 +177,6 @@ Full Changelog: [0.438.1...0.438.2](https://github.com/christiandoxa/prodex/comp
 - Migrate runtime quota summary ordering (`afa19e6`)
 - Migrate websocket terminal frame policy to Mojo (`271133a`)
 - Migrate broker continuation metrics (`dc5cea9`)
-
-### CLI
-
-- Move profile import identity email policy (`5576854`)
-- Move Super normalization policies to Mojo (`a9281db`)
-- Migrate quota watch table columns (`a7f620f`)
-
-### Claude
-
-- Migrate MCP stdio first-line classification (`ccd6f84`)
-
-### Misc
-
-- Clarify source digests and isolate Copilot validation (`c2e82b5`)
-- Qualify Codex 0.163 native retry and compaction (`6073f85`)
-- Migrate usage-limit recovery selection (`7087fdc`)
-- Migrate super-expose rollout filename policy (`72eb410`)
-- Migrate throughput display policy (`ffaaa6c`)
-- Migrate Kiro tool control shaping (`fcbc88d`)
-- Migrate stale login retention (`b4c19f1`)
-- Batch Gemini response part planning (`0abe987`)
-- Migrate Copilot import candidate resolution (`a3b7b13`)
-- Migrate status resource aggregation (`ab2bd18`)
-- Migrate panel field row layout (`97f448c`)
-- Migrate Gemini tool validation paths (`22c4a25`)
-- Migrate OpenAI catalog retirement filter (`e75ef82`)
-- Migrate ps process row parsing (`f6925a8`)
-- Migrate DeepSeek stream error classification (`a6efc28`)
-- Migrate provider models response policy (`f3ab715`)
-- Migrate app command startup policy (`6340764`)
-- Migrate shared Codex filename policy (`e5c960d`)
-- Migrate imported secret file schema policy (`bb58986`)
-- Migrate chat bridge response projection to Mojo (`0cd8e97`)
-- Move model prefix scan to Mojo (`97deded`)
-
-## 0.437.14 - 2026-10-15
-
-### Runtime
-
 - Recover authenticated profiles across quota transitions (`c49981d`)
 - Preserve terminal output and recover observer pressure (`bf2cc2b`)
 - Persist session release fences across resume and rotation (`da0fabc`)
@@ -403,6 +431,9 @@ Full Changelog: [0.438.1...0.438.2](https://github.com/christiandoxa/prodex/comp
 
 ### CLI
 
+- Move profile import identity email policy (`5576854`)
+- Move Super normalization policies to Mojo (`a9281db`)
+- Migrate quota watch table columns (`a7f620f`)
 - Move panel error line normalization to Mojo (`2affd22`)
 - Preserve long activation profile names (`386db91`)
 - Preserve turn-state owner facts in quota replay eligibility (`77ffdf0`)
@@ -543,6 +574,7 @@ Full Changelog: [0.438.1...0.438.2](https://github.com/christiandoxa/prodex/comp
 
 ### Claude
 
+- Migrate MCP stdio first-line classification (`ccd6f84`)
 - Migrate Anthropic retry transition (`3f7b187`)
 - Migrate Kiro Anthropic response (`2bb110c`)
 - Move Anthropic response defaults into Mojo (`598b5f3`)
@@ -706,6 +738,27 @@ Full Changelog: [0.438.1...0.438.2](https://github.com/christiandoxa/prodex/comp
 
 ### Misc
 
+- Clarify source digests and isolate Copilot validation (`c2e82b5`)
+- Qualify Codex 0.163 native retry and compaction (`6073f85`)
+- Migrate usage-limit recovery selection (`7087fdc`)
+- Migrate super-expose rollout filename policy (`72eb410`)
+- Migrate throughput display policy (`ffaaa6c`)
+- Migrate Kiro tool control shaping (`fcbc88d`)
+- Migrate stale login retention (`b4c19f1`)
+- Batch Gemini response part planning (`0abe987`)
+- Migrate Copilot import candidate resolution (`a3b7b13`)
+- Migrate status resource aggregation (`ab2bd18`)
+- Migrate panel field row layout (`97f448c`)
+- Migrate Gemini tool validation paths (`22c4a25`)
+- Migrate OpenAI catalog retirement filter (`e75ef82`)
+- Migrate ps process row parsing (`f6925a8`)
+- Migrate DeepSeek stream error classification (`a6efc28`)
+- Migrate provider models response policy (`f3ab715`)
+- Migrate app command startup policy (`6340764`)
+- Migrate shared Codex filename policy (`e5c960d`)
+- Migrate imported secret file schema policy (`bb58986`)
+- Migrate chat bridge response projection to Mojo (`0cd8e97`)
+- Move model prefix scan to Mojo (`97deded`)
 - Audit RTK 1.0.1 release reference (`35f5b76`)
 - Migrate broker continuity metrics reducer (`229ec56`)
 - Align stream JSON validation with serde (`54235b5`)
