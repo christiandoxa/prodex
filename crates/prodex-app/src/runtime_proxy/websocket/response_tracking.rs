@@ -8,6 +8,7 @@ mod frame;
 mod precommit;
 mod previous_response;
 mod quota_gate;
+mod readiness;
 mod session;
 mod stream_payload;
 mod terminal;
