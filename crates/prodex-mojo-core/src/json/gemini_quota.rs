@@ -4,6 +4,31 @@ use super::{JsonKind, JsonNode, ffi_nodes, signed, status};
 use crate::MojoError;
 
 unsafe extern "C" {
+    fn prodex_gemini_quota_error_kind_v1(
+        abi_version: i64,
+        http_status: i64,
+        body_terminal: i64,
+        value_terminal: i64,
+        value_rate: i64,
+        output_address: u64,
+        output_capacity: i64,
+        metadata_address: u64,
+        metadata_capacity: i64,
+    ) -> i64;
+    fn prodex_gemini_quota_retryable_http_v1(
+        abi_version: i64,
+        http_status: i64,
+        result_address: u64,
+    ) -> i64;
+    fn prodex_gemini_quota_rotate_v1(
+        abi_version: i64,
+        http_status: i64,
+        quota_blocked: i64,
+        hard_affinity: i64,
+        attempt_index: u64,
+        attempt_count: u64,
+        result_address: u64,
+    ) -> i64;
     fn prodex_gemini_retry_candidates_v1(
         abi_version: i64,
         nodes_address: u64,
@@ -133,7 +158,7 @@ pub fn gemini_retry_candidates<'a>(
         return Err(MojoError::InvalidOutput);
     }
     let mut result = Vec::with_capacity(count);
-    for chunk in fields[..count * 2].chunks_exact(2) {
+    for chunk in fields[..count * 2].as_chunks::<2>().0 {
         let index = usize::try_from(chunk[0]).map_err(|_| MojoError::InvalidOutput)?;
         let node = nodes.get(index).ok_or(MojoError::InvalidOutput)?;
         if !matches!(node.kind, JsonKind::String) {
@@ -170,6 +195,103 @@ pub fn gemini_retry_delay_max(candidates_ms: &[u64]) -> Result<Option<u64>, Mojo
         )
     })?;
     Ok((best > 0).then_some(best))
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GeminiQuotaHttpErrorKind {
+    pub admissible: bool,
+    pub error_type: String,
+    pub error_code: String,
+}
+
+fn quota_http_boolean(value: i64) -> Result<bool, MojoError> {
+    match value {
+        0 => Ok(false),
+        1 => Ok(true),
+        _ => Err(MojoError::InvalidOutput),
+    }
+}
+
+/// HTTP error-kind and unknown-429 admission are exclusively Mojo policies.
+/// Rust handles only HTTP response transport and JSON representation.
+pub fn gemini_quota_http_error_kind(
+    status_code: u16,
+    body_terminal: bool,
+    value_terminal: bool,
+    value_rate: bool,
+) -> Result<GeminiQuotaHttpErrorKind, MojoError> {
+    let mut body = [0_u8; 128];
+    let mut metadata = [-1_i64; 3];
+    status(unsafe {
+        prodex_gemini_quota_error_kind_v1(
+            1,
+            i64::from(status_code),
+            i64::from(body_terminal),
+            i64::from(value_terminal),
+            i64::from(value_rate),
+            body.as_mut_ptr() as usize as u64,
+            signed(body.len())?,
+            metadata.as_mut_ptr() as usize as u64,
+            signed(metadata.len())?,
+        )
+    })?;
+    let allowed = quota_http_boolean(metadata[0])?;
+    let type_len = usize::try_from(metadata[1]).map_err(|_| MojoError::InvalidOutput)?;
+    let code_len = usize::try_from(metadata[2]).map_err(|_| MojoError::InvalidOutput)?;
+    let total = type_len
+        .checked_add(code_len)
+        .ok_or(MojoError::InvalidOutput)?;
+    if type_len == 0 || code_len == 0 || total > body.len() {
+        return Err(MojoError::InvalidOutput);
+    }
+    let error_type = std::str::from_utf8(&body[..type_len])
+        .map_err(|_| MojoError::InvalidOutput)?
+        .to_owned();
+    let error_code = std::str::from_utf8(&body[type_len..total])
+        .map_err(|_| MojoError::InvalidOutput)?
+        .to_owned();
+    Ok(GeminiQuotaHttpErrorKind {
+        admissible: allowed,
+        error_type,
+        error_code,
+    })
+}
+
+/// HTTP 403/429 quota-retry status ownership belongs to compiled Mojo.
+pub fn gemini_quota_retryable_http_status(status_code: u16) -> Result<bool, MojoError> {
+    let mut allowed = -1_i64;
+    status(unsafe {
+        prodex_gemini_quota_retryable_http_v1(
+            1,
+            i64::from(status_code),
+            (&mut allowed as *mut i64) as usize as u64,
+        )
+    })?;
+    quota_http_boolean(allowed)
+}
+
+/// The compiled owner decides precommit quota-response profile rotation.
+/// A final attempt and hard-affinity owner never rotate, including at u64 max.
+pub fn gemini_quota_should_rotate(
+    status_code: u16,
+    blocked: bool,
+    hard_affinity: bool,
+    attempt_index: usize,
+    attempt_count: usize,
+) -> Result<bool, MojoError> {
+    let mut rotate = -1_i64;
+    status(unsafe {
+        prodex_gemini_quota_rotate_v1(
+            1,
+            i64::from(status_code),
+            i64::from(blocked),
+            i64::from(hard_affinity),
+            u64::try_from(attempt_index).map_err(|_| MojoError::InvalidInput)?,
+            u64::try_from(attempt_count).map_err(|_| MojoError::InvalidInput)?,
+            (&mut rotate as *mut i64) as usize as u64,
+        )
+    })?;
+    quota_http_boolean(rotate)
 }
 
 #[cfg(test)]
@@ -220,6 +342,35 @@ mod tests {
                 raw_length: 2,
             },
         ]
+    }
+
+    #[test]
+    fn mojo_quota_body_visits_earlier_subtrees_after_neutral_last_siblings() {
+        for (code, terminal, rate) in [
+            ("QUOTA_EXHAUSTED", true, false),
+            ("RATE_LIMIT_EXCEEDED", false, true),
+        ] {
+            let mut nodes = tree(code, "earlier quota detail", "reason");
+            nodes[1].next_sibling = Some(4);
+            nodes.push(JsonNode {
+                kind: JsonKind::String,
+                first_child: None,
+                next_sibling: None,
+                parent: Some(0),
+                key: "z",
+                text: "neutral last sibling",
+                raw_start: 0,
+                raw_length: 2,
+            });
+            assert_eq!(
+                gemini_quota_body_plan(&nodes, "{}"),
+                Ok(GeminiQuotaBodyPlan {
+                    terminal_quota: terminal,
+                    rate_limit: rate,
+                    quota_message: Some("earlier quota detail".to_string()),
+                }),
+            );
+        }
     }
 
     #[test]
@@ -355,5 +506,180 @@ mod tests {
         assert_eq!(maximum(1, 0, 2, max_ptr), 1);
         assert_eq!(maximum(1, data, 2, 0), 1);
         assert_eq!(max, 111);
+    }
+
+    #[test]
+    fn mojo_quota_http_error_kind_preserves_error_priority_and_unqualified_429_rejection() {
+        for (status_code, terminal, rate, admitted, error_type, code) in [
+            (200, false, false, false, "api_error", "provider_error"),
+            (
+                400,
+                false,
+                false,
+                true,
+                "invalid_request_error",
+                "bad_request",
+            ),
+            (
+                401,
+                false,
+                false,
+                true,
+                "authentication_error",
+                "invalid_authentication",
+            ),
+            (
+                403,
+                false,
+                false,
+                true,
+                "permission_error",
+                "permission_denied",
+            ),
+            (
+                404,
+                false,
+                false,
+                true,
+                "invalid_request_error",
+                "not_found",
+            ),
+            (429, false, false, false, "api_error", "provider_error"),
+            (
+                429,
+                false,
+                true,
+                true,
+                "rate_limit_error",
+                "rate_limit_exceeded",
+            ),
+            (
+                429,
+                true,
+                false,
+                true,
+                "insufficient_quota",
+                "insufficient_quota",
+            ),
+            (
+                429,
+                true,
+                true,
+                true,
+                "insufficient_quota",
+                "insufficient_quota",
+            ),
+            (500, false, false, true, "server_error", "provider_error"),
+            (599, false, false, true, "server_error", "provider_error"),
+            (600, false, false, true, "api_error", "provider_error"),
+            (
+                403,
+                true,
+                false,
+                true,
+                "insufficient_quota",
+                "insufficient_quota",
+            ),
+        ] {
+            let plan = gemini_quota_http_error_kind(status_code, terminal, false, rate).unwrap();
+            assert_eq!(plan.admissible, admitted, "{status_code}/{terminal}/{rate}");
+            assert_eq!(plan.error_type, error_type);
+            assert_eq!(plan.error_code, code);
+        }
+        assert_eq!(
+            gemini_quota_http_error_kind(403, false, true, true)
+                .unwrap()
+                .error_code,
+            "insufficient_quota",
+        );
+    }
+
+    #[test]
+    fn mojo_quota_http_retry_rotate_never_breaks_hard_affinity_or_last_attempt() {
+        for (status_code, retryable) in [
+            (200, false),
+            (400, false),
+            (401, false),
+            (403, true),
+            (404, false),
+            (429, true),
+            (500, false),
+        ] {
+            assert_eq!(
+                gemini_quota_retryable_http_status(status_code),
+                Ok(retryable),
+                "{status_code}",
+            );
+            assert_eq!(
+                gemini_quota_should_rotate(status_code, true, false, 0, 2),
+                Ok(retryable),
+            );
+            assert_eq!(
+                gemini_quota_should_rotate(status_code, false, false, 0, 2),
+                Ok(false),
+            );
+            assert_eq!(
+                gemini_quota_should_rotate(status_code, true, true, 0, 2),
+                Ok(false),
+            );
+            assert_eq!(
+                gemini_quota_should_rotate(status_code, true, false, 1, 2),
+                Ok(false),
+            );
+        }
+        assert_eq!(
+            gemini_quota_should_rotate(429, true, false, usize::MAX, usize::MAX),
+            Ok(false)
+        );
+        assert_eq!(
+            gemini_quota_should_rotate(429, true, false, 0, 0),
+            Ok(false)
+        );
+        assert_eq!(
+            gemini_quota_should_rotate(429, true, false, 0, 1),
+            Ok(false)
+        );
+    }
+
+    #[test]
+    fn mojo_quota_http_abis_reject_bad_flags_and_short_buffer_without_mutation() {
+        let mut output = [61_u8; 128];
+        let mut meta = [71_i64; 3];
+        let buf = output.as_mut_ptr() as usize as u64;
+        let metadata = meta.as_mut_ptr() as usize as u64;
+        let call = |version, http, terminal, rate, out, cap, meta, meta_cap| unsafe {
+            prodex_gemini_quota_error_kind_v1(
+                version, http, terminal, 0, rate, out, cap, meta, meta_cap,
+            )
+        };
+        assert_eq!(call(2, 429, 1, 0, buf, 128, metadata, 3), 4);
+        assert_eq!(call(1, -1, 1, 0, buf, 128, metadata, 3), 1);
+        assert_eq!(call(1, 65536, 1, 0, buf, 128, metadata, 3), 1);
+        assert_eq!(call(1, 429, 2, 0, buf, 128, metadata, 3), 1);
+        assert_eq!(call(1, 429, 1, -1, buf, 128, metadata, 3), 1);
+        assert_eq!(call(1, 429, 1, 0, 0, 128, metadata, 3), 1);
+        assert_eq!(call(1, 429, 1, 0, buf, 128, 0, 3), 1);
+        assert_eq!(call(1, 429, 1, 0, buf, 128, metadata, 2), 1);
+        assert_eq!(call(1, 429, 1, 0, buf, 1, metadata, 3), 3);
+        assert_eq!(output, [61; 128]);
+        assert_eq!(meta, [71; 3]);
+
+        let mut result = 83_i64;
+        let dest = (&mut result as *mut i64) as usize as u64;
+        let retry = |version, code, out| unsafe {
+            prodex_gemini_quota_retryable_http_v1(version, code, out)
+        };
+        assert_eq!(retry(2, 429, dest), 4);
+        assert_eq!(retry(1, -1, dest), 1);
+        assert_eq!(retry(1, 429, 0), 1);
+        let rotate = |version, status, blocked, hard, out| unsafe {
+            prodex_gemini_quota_rotate_v1(version, status, blocked, hard, 0, 2, out)
+        };
+        assert_eq!(rotate(2, 429, 1, 0, dest), 4);
+        assert_eq!(rotate(1, -1, 1, 0, dest), 1);
+        assert_eq!(rotate(1, 429, 2, 0, dest), 1);
+        assert_eq!(rotate(1, 429, 1, 2, dest), 1);
+        assert_eq!(rotate(1, 429, 1, 0, 0), 1);
+        assert_eq!(result, 83);
     }
 }

@@ -26,8 +26,8 @@
   },
   {
     "file": "crates/prodex-provider-core/src/deepseek_bridge/tests.rs",
-    "maxLines": 1134,
-    "reason": "DeepSeek input-item fixtures moved to a focused sibling module; remaining request, response, stream, tool-call, usage, and error conformance regressions stay colocated until split by fixture family."
+    "maxLines": 1123,
+    "reason": "DeepSeek input-item and reasoning fixtures moved to focused sibling modules; remaining request, response, stream, tool-call, usage, and error conformance regressions stay colocated until split by fixture family."
   },
   {
     "file": "crates/prodex-shared-codex-fs/tests/src/prepare.rs",

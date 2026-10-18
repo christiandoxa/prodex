@@ -14,13 +14,13 @@ use super::{
     runtime_gemini_log_provider_model_fallback, runtime_gemini_log_quota_rotate,
     runtime_gemini_log_rate_limit_retry, runtime_gemini_log_rate_limit_retry_fail_fast,
     runtime_gemini_normalized_error_parts, runtime_gemini_peek_stream_for_retry,
-    runtime_gemini_response_retryable_quota, runtime_gemini_retry_delay_ms,
-    runtime_gemini_should_inline_rate_limit_retry,
+    runtime_gemini_retry_delay_ms, runtime_gemini_should_inline_rate_limit_retry,
     runtime_local_rewrite_buffered_response_from_response, runtime_provider_error_class,
     runtime_provider_error_cooldown_ms,
 };
 use crate::build_runtime_proxy_text_response_parts;
 use anyhow::Result;
+use prodex_provider_core::gemini_provider_core_should_rotate_after_quota_response;
 use runtime_proxy_crate::runtime_forward_binary_response_headers;
 use std::thread;
 use std::time::Duration;
@@ -116,16 +116,19 @@ fn runtime_gemini_quota_retry(
     class: RuntimeProviderErrorClass,
     quota_blocked: bool,
 ) -> Option<RuntimeGeminiErrorAction> {
-    if !quota_blocked
-        || !runtime_gemini_response_retryable_quota(status)
-        || context.selected.hard_affinity
-        || !runtime_gateway_application_provider_retry_precommit(
-            ProviderRetryCause::RotateCredential,
-            class,
-            context.attempt.attempt_index,
-            context.attempt.attempt_count,
-        )
-    {
+    if !gemini_provider_core_should_rotate_after_quota_response(
+        status,
+        quota_blocked,
+        context.selected.hard_affinity,
+        context.selected.quota_fallback_allowed,
+        context.attempt.attempt_index,
+        context.attempt.attempt_count,
+    ) || !runtime_gateway_application_provider_retry_precommit(
+        ProviderRetryCause::RotateCredential,
+        class,
+        context.attempt.attempt_index,
+        context.attempt.attempt_count,
+    ) {
         return None;
     }
     runtime_gemini_log_quota_rotate(

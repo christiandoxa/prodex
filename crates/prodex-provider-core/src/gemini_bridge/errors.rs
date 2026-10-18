@@ -23,9 +23,7 @@ pub fn gemini_provider_core_normalized_error_body(status: u16, body: &[u8]) -> O
     }
     if status == 429 {
         let value = serde_json::from_slice::<serde_json::Value>(body).ok()?;
-        if !gemini_provider_core_value_has_terminal_quota(&value)
-            && !gemini_provider_core_value_has_rate_limit(&value)
-        {
+        if !gemini_provider_core_openai_error_kind_plan(status, &value, body).admissible {
             return None;
         }
     }
@@ -80,27 +78,27 @@ fn gemini_provider_core_error_message(value: &serde_json::Value) -> Option<Strin
     serde_json::from_slice(&output).ok()
 }
 
+fn gemini_provider_core_openai_error_kind_plan(
+    status: u16,
+    value: &serde_json::Value,
+    body: &[u8],
+) -> prodex_mojo_core::json::GeminiQuotaHttpErrorKind {
+    prodex_mojo_core::json::gemini_quota_http_error_kind(
+        status,
+        gemini_provider_core_body_has_terminal_quota(body),
+        gemini_provider_core_value_has_terminal_quota(value),
+        gemini_provider_core_value_has_rate_limit(value),
+    )
+    .expect("compiled Mojo Gemini error kind mapping returned invalid output")
+}
+
 fn gemini_provider_core_openai_error_kind(
     status: u16,
     value: &serde_json::Value,
     body: &[u8],
-) -> (&'static str, &'static str) {
-    if gemini_provider_core_body_has_terminal_quota(body)
-        || gemini_provider_core_value_has_terminal_quota(value)
-    {
-        return ("insufficient_quota", "insufficient_quota");
-    }
-    if gemini_provider_core_value_has_rate_limit(value) {
-        return ("rate_limit_error", "rate_limit_exceeded");
-    }
-    match status {
-        400 => ("invalid_request_error", "bad_request"),
-        401 => ("authentication_error", "invalid_authentication"),
-        403 => ("permission_error", "permission_denied"),
-        404 => ("invalid_request_error", "not_found"),
-        500..=599 => ("server_error", "provider_error"),
-        _ => ("api_error", "provider_error"),
-    }
+) -> (String, String) {
+    let plan = gemini_provider_core_openai_error_kind_plan(status, value, body);
+    (plan.error_type, plan.error_code)
 }
 
 #[cfg(test)]
@@ -127,5 +125,68 @@ mod tests {
             .expect("direct nested Gemini errors should normalize");
         let value: serde_json::Value = serde_json::from_slice(&normalized).unwrap();
         assert_eq!(value["error"]["message"], "direct detail");
+    }
+
+    #[test]
+    fn compiled_gemini_http_error_mapping_preserves_quota_priority_and_generic_passthrough() {
+        for (status, body, error_type, code) in [
+            (
+                400,
+                "{\"error\":{\"message\":\"bad 🧭\"}}",
+                "invalid_request_error",
+                "bad_request",
+            ),
+            (
+                401,
+                "authentication failed",
+                "authentication_error",
+                "invalid_authentication",
+            ),
+            (
+                403,
+                "permission denied",
+                "permission_error",
+                "permission_denied",
+            ),
+            (404, "not found", "invalid_request_error", "not_found"),
+            (500, "server failure", "server_error", "provider_error"),
+            (599, "server failure", "server_error", "provider_error"),
+            (600, "other failure", "api_error", "provider_error"),
+            (
+                429,
+                "{\"error\":{\"code\":\"RATE_LIMIT_EXCEEDED\",\"message\":\"wait\"}}",
+                "rate_limit_error",
+                "rate_limit_exceeded",
+            ),
+            (
+                403,
+                "{\"error\":{\"status\":\"RESOURCE_EXHAUSTED\"}}",
+                "insufficient_quota",
+                "insufficient_quota",
+            ),
+            (
+                429,
+                "{\"error\":{\"status\":\"RESOURCE_EXHAUSTED\",\"code\":\"RATE_LIMIT_EXCEEDED\"}}",
+                "insufficient_quota",
+                "insufficient_quota",
+            ),
+        ] {
+            let bytes =
+                gemini_provider_core_normalized_error_body(status, body.as_bytes()).unwrap();
+            let value: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+            assert_eq!(value["error"]["type"], error_type, "{status}/{body}");
+            assert_eq!(value["error"]["code"], code, "{status}/{body}");
+        }
+        for body in [
+            b"Too Many Requests".as_slice(),
+            br#"{"error":{"message":"Too Many Requests"}}"#,
+            br#"{"error":{"code":429}}"#,
+            br#"{"error":{"status":"RESOURCE_EXHAUSTED"}"#,
+            b"data: {\"error\":{\"status\":\"RESOURCE_EXHAUSTED\"}}\n",
+            &[0xff, 0x00],
+        ] {
+            assert_eq!(gemini_provider_core_normalized_error_body(429, body), None);
+        }
+        assert_eq!(gemini_provider_core_normalized_error_body(200, b"{}"), None);
     }
 }

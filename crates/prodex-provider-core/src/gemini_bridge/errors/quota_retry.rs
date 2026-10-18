@@ -14,7 +14,8 @@ use self::body::gemini_provider_core_values_from_body;
 use crate::mojo_json::Document;
 
 pub fn gemini_provider_core_response_retryable_quota(status: u16) -> bool {
-    matches!(status, 403 | 429)
+    prodex_mojo_core::json::gemini_quota_retryable_http_status(status)
+        .expect("compiled Mojo Gemini quota retryable status returned invalid output")
 }
 
 pub fn gemini_provider_core_body_has_terminal_quota(body: &[u8]) -> bool {
@@ -37,10 +38,14 @@ pub fn gemini_provider_core_should_rotate_after_quota_response(
     attempt_index: usize,
     attempt_count: usize,
 ) -> bool {
-    quota_blocked
-        && gemini_provider_core_response_retryable_quota(status)
-        && !hard_affinity
-        && attempt_index + 1 < attempt_count
+    prodex_mojo_core::json::gemini_quota_should_rotate(
+        status,
+        quota_blocked,
+        hard_affinity,
+        attempt_index,
+        attempt_count,
+    )
+    .expect("compiled Mojo Gemini quota rotation decision returned invalid output")
 }
 
 pub(super) fn gemini_provider_core_quota_body_plan(
@@ -67,8 +72,45 @@ mod tests {
     use super::*;
 
     #[test]
+    fn compiled_quota_rotation_preserves_affinity_status_and_attempt_budget() {
+        for status in [200, 400, 401, 403, 404, 429, 500] {
+            let eligible = matches!(status, 403 | 429);
+            assert_eq!(
+                gemini_provider_core_response_retryable_quota(status),
+                eligible
+            );
+            for fallback in [false, true] {
+                assert_eq!(
+                    gemini_provider_core_should_rotate_after_quota_response(
+                        status, true, false, fallback, 0, 2
+                    ),
+                    eligible,
+                );
+                for (blocked, hard, index, count) in [
+                    (false, false, 0, 2),
+                    (true, true, 0, 2),
+                    (true, false, 1, 2),
+                    (true, false, 0, 0),
+                    (true, false, usize::MAX, usize::MAX),
+                ] {
+                    assert!(!gemini_provider_core_should_rotate_after_quota_response(
+                        status, blocked, hard, fallback, index, count,
+                    ));
+                }
+            }
+        }
+    }
+
+    #[test]
     fn compiled_gemini_quota_tree_preserves_nested_precedence_daily_limits_and_sse_frames() {
         for (value, terminal, rate, message) in [
+            (
+                serde_json::json!({"error":{"code":429,"message":"Quota exhausted.",
+                    "details":[{"reason":"QUOTA_EXHAUSTED"}]}}),
+                true,
+                false,
+                Some("Gemini account quota was exhausted."),
+            ),
             (
                 serde_json::json!({"error":{"status":" RESOURCE_EXHAUSTED ","message":"limit 🧭"}}),
                 true,
