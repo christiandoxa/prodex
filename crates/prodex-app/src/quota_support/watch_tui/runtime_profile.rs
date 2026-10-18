@@ -180,6 +180,7 @@ fn start_profile_quota_watch_refresh(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::UsageResponse;
 
     #[test]
     fn profile_quota_watch_keeps_previous_success_on_transient_refresh_error() {

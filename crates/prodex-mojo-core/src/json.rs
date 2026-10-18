@@ -11,6 +11,10 @@ pub use self::response_metadata::{
 };
 mod gemini_quota;
 #[cfg(feature = "mojo-runtime")]
+mod quota_watch_presentation;
+#[cfg(feature = "mojo-runtime")]
+pub use self::quota_watch_presentation::{QuotaWatchPresentation, quota_watch_presentation};
+#[cfg(feature = "mojo-runtime")]
 mod smart_context_inline;
 #[cfg(feature = "mojo-runtime")]
 pub use self::smart_context_inline::{

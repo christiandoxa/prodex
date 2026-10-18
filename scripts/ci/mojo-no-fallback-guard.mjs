@@ -171,6 +171,10 @@ const PING_SUMMARY_CALLER_TEST_FILE = "crates/prodex-app/src/app_commands/ping_t
 const PING_SUMMARY_ADAPTER_FILE = "crates/prodex-mojo-core/src/rich/ping_protocol.rs";
 const PING_SUMMARY_MOJO_FILE = "mojo/prodex_core/ping_protocol.mojo";
 const PROMOTED_FILES = [
+  "crates/prodex-app/src/quota_support/watch_tui/frame_data.rs",
+  "crates/prodex-app/src/quota_support/watch_tui/frame_data_tests.rs",
+  "crates/prodex-mojo-core/src/json/quota_watch_presentation.rs",
+  "mojo/prodex_core/quota_watch_presentation.mojo",
   "crates/prodex-mojo-core/src/json/smart_context_inline.rs",
   "crates/prodex-mojo-core/src/json/smart_context_inline_tests.rs",
   "mojo/prodex_core/smart_context_inline.mojo",
@@ -1631,6 +1635,40 @@ export function findViolations(files) {
     return [];
   });
   const quotaWatchViolations = files.flatMap(([filePath, contents]) => {
+    if (filePath === "crates/prodex-app/src/quota_support/watch_tui/frame_data.rs") {
+      const required = [
+        "prodex_mojo_core::json::quota_watch_presentation(",
+        "QuotaWatchPresentation::Row", "QuotaWatchPresentation::ProfileFields",
+        "QuotaWatchPresentation::CompactLabel",
+      ];
+      const retired = [
+        "fn quota_watch_reset_detail(", "fn quota_watch_should_show_workspace(",
+        "fn quota_watch_workspace_label(", "fn quota_watch_optional(",
+        "fn quota_watch_report_view(", 'const LABELS:', 'detail_line.join(" | ")',
+      ];
+      return required.every((marker) => contents.includes(marker)) &&
+        retired.every((marker) => !contents.includes(marker))
+        ? [] : [filePath + ": quota view assembly must remain Mojo-owned without Rust render decisions"];
+    }
+    if (filePath === "crates/prodex-mojo-core/src/json/quota_watch_presentation.rs") {
+      return ["fn prodex_quota_watch_presentation_v1(", "transform_json_with_scratch(",
+        "mojo_quota_compact_labels_preserve_unicode_leading_space_and_exact_prefixes",
+        "mojo_quota_presentation_abi_rejects_invalid_contracts_before_output_writes",
+      ].filter((marker) => !contents.includes(marker))
+        .map((marker) => filePath + ": quota presentation ABI or coverage missing " + marker);
+    }
+    if (filePath === "crates/prodex-app/src/quota_support/watch_tui/frame_data_tests.rs") {
+      return ["compiled_quota_row_assembly_preserves_workspace_credits_and_provider_order",
+        "compiled_quota_rows_preserve_empty_present_plan_and_error_passthrough",
+      ].filter((marker) => !contents.includes(marker))
+        .map((marker) => filePath + ": quota presentation caller coverage missing " + marker);
+    }
+    if (filePath === "mojo/prodex_core/quota_watch_presentation.mojo") {
+      return ['@export("prodex_quota_watch_presentation_v1")', "def qwp_render(",
+        "def qwp_compact_label(", "def qwp_reset(", "quota_watch_reset_kind(",
+      ].filter((marker) => !contents.includes(marker))
+        .map((marker) => filePath + ": compiled quota presentation ownership missing " + marker);
+    }
     if (filePath === QUOTA_WATCH_CALLER_FILE) {
       const production = contents.split("#[cfg(test)]", 1)[0];
       const required = [
@@ -11666,6 +11704,18 @@ function selfTest() {
     "quota_watch_policy::cache_remaining_seconds(",
     "quota_watch_policy::cache_is_live(",
   ].join("\n");
+  const quotaPresentationFile = "crates/prodex-app/src/quota_support/watch_tui/frame_data.rs";
+  const quotaPresentationCaller = [
+    "prodex_mojo_core::json::quota_watch_presentation(", "QuotaWatchPresentation::Row",
+    "QuotaWatchPresentation::ProfileFields", "QuotaWatchPresentation::CompactLabel",
+  ].join("\n");
+  assert.deepEqual(findViolations([[quotaPresentationFile, quotaPresentationCaller]]), []);
+  assert.match(findViolations([[quotaPresentationFile,
+    quotaPresentationCaller + "\nfn quota_watch_reset_detail() {}",
+  ]]).join("\n"), /quota view assembly must remain Mojo-owned/u);
+  assert.match(findViolations([[quotaPresentationFile,
+    quotaPresentationCaller.replace("QuotaWatchPresentation::Row", "RustRow"),
+  ]]).join("\n"), /quota view assembly must remain Mojo-owned/u);
   assert.deepEqual(findViolations([[QUOTA_WATCH_CALLER_FILE, quotaWatchProduction]]), []);
   assert.match(findViolations([[QUOTA_WATCH_CALLER_FILE,
     quotaWatchProduction + "\nconst ALL_QUOTA_WATCH_FAST_INTERVAL_SECONDS: u64 = 10;",
