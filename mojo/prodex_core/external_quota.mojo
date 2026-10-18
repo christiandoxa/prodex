@@ -2,7 +2,7 @@
 from std.memory import Pointer
 from rich_types import ProdexRichStringView
 from parsed_json import (
-    ParsedJson, ParsedJsonNode, JSON_ARRAY, JSON_OBJECT, JSON_STRING, JSON_NUMBER, JSON_NULL,
+    ParsedJson, ParsedJsonNode, JSON_ARRAY, JSON_OBJECT, JSON_STRING, JSON_NUMBER, JSON_NULL, JSON_TRUE,
     pj_kind, pj_child, pj_next, pj_field, pj_text, pj_equal, pj_is, pj_valid,
 )
 from json_sink import (
@@ -194,6 +194,84 @@ def eq_anthropic(sink: Pointer[mut=True, JsonSink, _], tree: ParsedJson):
     js_literal(sink, StringSlice("]}"))
 
 
+def eq_balance_field(sink: Pointer[mut=True, JsonSink, _], tree: ParsedJson, balance: Int64, key: StringSlice, fallback: StringSlice):
+    var field = pj_field(tree, balance, key)
+    if pj_kind(tree, field) == JSON_STRING:
+        js_escaped(sink, pj_text(tree, field))
+    else:
+        js_literal(sink, fallback)
+
+
+def eq_deepseek(sink: Pointer[mut=True, JsonSink, _], tree: ParsedJson):
+    var available = pj_kind(tree, pj_field(tree, 0, StringSlice("is_available"))) == JSON_TRUE
+    var balances = pj_field(tree, 0, StringSlice("balance_infos"))
+    var first = pj_child(tree, balances) if pj_kind(tree, balances) == JSON_ARRAY else -1
+    js_literal(sink, StringSlice('{"provider":"DeepSeek","account":null,"plan":"api-key","status":'))
+    js_literal(sink, StringSlice('"Ready"') if available else StringSlice('"Blocked"'))
+    js_literal(sink, StringSlice(',"main":"'))
+    if first < 0:
+        js_literal(sink, StringSlice("balance unavailable"))
+    var balance = first
+    while balance >= 0:
+        if balance != first:
+            js_literal(sink, StringSlice(" | "))
+        eq_balance_field(sink, tree, balance, StringSlice("currency"), StringSlice("balance"))
+        js_byte(sink, 32)
+        eq_balance_field(sink, tree, balance, StringSlice("total_balance"), StringSlice("-"))
+        balance = pj_next(tree, balance)
+    js_literal(sink, StringSlice('","reset":null,"available":'))
+    js_literal(sink, StringSlice("true") if available else StringSlice("false"))
+    js_literal(sink, StringSlice(',"details":['))
+    balance = first
+    while balance >= 0:
+        if balance != first:
+            js_byte(sink, 44)
+        js_literal(sink, StringSlice('{"label":"'))
+        eq_balance_field(sink, tree, balance, StringSlice("currency"), StringSlice("balance"))
+        js_literal(sink, StringSlice(' balance","value":"total '))
+        eq_balance_field(sink, tree, balance, StringSlice("total_balance"), StringSlice("-"))
+        js_literal(sink, StringSlice("; granted "))
+        eq_balance_field(sink, tree, balance, StringSlice("granted_balance"), StringSlice("-"))
+        js_literal(sink, StringSlice("; topped up "))
+        eq_balance_field(sink, tree, balance, StringSlice("topped_up_balance"), StringSlice("-"))
+        js_literal(sink, StringSlice('"}'))
+        balance = pj_next(tree, balance)
+    js_literal(sink, StringSlice("]}"))
+
+
+def eq_local_models(sink: Pointer[mut=True, JsonSink, _], tree: ParsedJson):
+    var body = pj_field(tree, 0, StringSlice("value"))
+    var data = pj_field(tree, body, StringSlice("data"))
+    var count: UInt64 = 0
+    var child = pj_child(tree, data) if pj_kind(tree, data) == JSON_ARRAY else -1
+    while child >= 0:
+        count += 1
+        child = pj_next(tree, child)
+    js_literal(sink, StringSlice('{"provider":"Local OpenAI-compatible","account":'))
+    js_string(sink, pj_text(tree, pj_field(tree, 0, StringSlice("account"))))
+    js_literal(sink, StringSlice(',"plan":"local","status":"Reachable","main":"'))
+    if pj_kind(tree, data) == JSON_ARRAY:
+        js_u64(sink, count)
+        js_literal(sink, StringSlice(" model(s)"))
+    else:
+        js_literal(sink, StringSlice("models endpoint reachable"))
+    js_literal(sink, StringSlice('","reset":null,"available":true,"details":[{"label":"Models URL","value":'))
+    js_string(sink, pj_text(tree, pj_field(tree, 0, StringSlice("models_url"))))
+    js_literal(sink, StringSlice("}]}"))
+
+
+def eq_render(sink: Pointer[mut=True, JsonSink, _], tree: ParsedJson, operation: Int64) -> Bool:
+    if operation == 0:
+        return eq_agy(sink, tree)
+    if operation == 1:
+        eq_anthropic(sink, tree)
+    elif operation == 2:
+        eq_deepseek(sink, tree)
+    else:
+        eq_local_models(sink, tree)
+    return True
+
+
 @export("prodex_external_quota_projection_v1")
 def prodex_external_quota_projection_v1(
     abi: Int64, operation: Int64, flag: Int64,
@@ -203,7 +281,7 @@ def prodex_external_quota_projection_v1(
 ) abi("C") -> Int64:
     if abi != 1:
         return 4
-    if operation < 0 or operation > 1 or flag != 0 or nodes == 0 or count <= 0 or count > 1048576 or raw == 0 or length <= 0 or length > 67108864 or scratch == 0 or scratch_count != count or metadata == 0 or capacity < 0 or measuring < 0 or measuring > 1 or measuring == 1 and (output != 0 or capacity != 0) or measuring == 0 and output == 0:
+    if operation < 0 or operation > 3 or flag != 0 or nodes == 0 or count <= 0 or count > 1048576 or raw == 0 or length <= 0 or length > 67108864 or scratch == 0 or scratch_count != count or metadata == 0 or capacity < 0 or measuring < 0 or measuring > 1 or measuring == 1 and (output != 0 or capacity != 0) or measuring == 0 and output == 0:
         return 1
     var tree = ParsedJson(Pointer[mut=False, ParsedJsonNode, ImmUntrackedOrigin](unsafe_from_address=Int(nodes)), count, ProdexRichStringView(UInt(raw), UInt(length)))
     var decoded: UInt64 = 0
@@ -214,27 +292,24 @@ def prodex_external_quota_projection_v1(
         decoded += UInt64(node.key.len) + UInt64(node.text.len)
         if decoded > 67108864:
             return 1
-    if not pj_valid(tree) or operation == 0 and pj_field(tree, 0, StringSlice("value")) < 0:
+    if not pj_valid(tree) or (operation == 0 or operation == 3) and pj_field(tree, 0, StringSlice("value")) < 0:
         return 1
     if operation == 0:
         var preferred = pj_kind(tree, pj_field(tree, 0, StringSlice("preferred")))
         if preferred != -1 and preferred != JSON_NULL and preferred != JSON_STRING:
             return 1
+    if operation == 3:
+        for key in [StringSlice("account"), StringSlice("models_url")]:
+            if pj_kind(tree, pj_field(tree, 0, key)) != JSON_STRING:
+                return 1
     var sink = JsonSink(Pointer[mut=True, UInt8, MutUntrackedOrigin](unsafe_from_address=Int(output)), capacity, 0, True, False)
-    var present = True
-    if operation == 0:
-        present = eq_agy(Pointer(to=sink), tree)
-    else:
-        eq_anthropic(Pointer(to=sink), tree)
+    var present = eq_render(Pointer(to=sink), tree, operation)
     if sink.failed or measuring == 0 and sink.written > capacity:
         return 3
     if measuring == 0 and present:
         sink.written = 0
         sink.measuring = False
-        if operation == 0:
-            _ = eq_agy(Pointer(to=sink), tree)
-        else:
-            eq_anthropic(Pointer(to=sink), tree)
+        _ = eq_render(Pointer(to=sink), tree, operation)
     var meta = Pointer[mut=True, Int64, MutUntrackedOrigin](unsafe_from_address=Int(metadata))
     meta[unsafe_offset=0] = Int64(present)
     meta[unsafe_offset=1] = sink.written

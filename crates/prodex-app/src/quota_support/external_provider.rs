@@ -100,7 +100,7 @@ struct AgyQuotaProjection {
     amount: Option<ExternalQuotaAmount>,
 }
 
-fn project_external_quota<T: serde::de::DeserializeOwned>(
+pub(super) fn project_external_quota<T: serde::de::DeserializeOwned>(
     value: &serde_json::Value,
     operation: prodex_mojo_core::json::ExternalQuotaProjection,
 ) -> Result<Option<T>> {

@@ -67,6 +67,19 @@ fn compiled_external_quota_projects_empty_rate_limits_and_absent_agy_accounts() 
 }
 
 #[test]
+fn compiled_virtual_quota_abi_preserves_blocked_balance_and_rejects_missing_model_context() {
+    assert_eq!(
+        external_quota_projection(&[empty()], "{}", ExternalQuotaProjection::DeepSeekBalance)
+            .unwrap().unwrap(),
+        br#"{"provider":"DeepSeek","account":null,"plan":"api-key","status":"Blocked","main":"balance unavailable","reset":null,"available":false,"details":[]}"#
+    );
+    assert_eq!(
+        external_quota_projection(&[empty()], "{}", ExternalQuotaProjection::LocalModels),
+        Err(MojoError::InvalidInput)
+    );
+}
+
+#[test]
 fn compiled_external_quota_abi_rejects_invalid_input_before_output_or_metadata_writes() {
     let raw = "{}";
     let input = ffi_nodes(&[empty()], raw).unwrap();
@@ -107,7 +120,7 @@ fn compiled_external_quota_abi_rejects_invalid_input_before_output_or_metadata_w
     };
     for (index, value, expected) in [
         (0, 2, 4),
-        (1, 2, 1),
+        (1, 4, 1),
         (2, 1, 1),
         (3, 0, 1),
         (4, 0, 1),
