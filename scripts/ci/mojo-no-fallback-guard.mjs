@@ -188,7 +188,15 @@ const DEEPSEEK_FUNCTION_TOOLS_MOJO = "mojo/prodex_core/deepseek_function_tools.m
 const GEMINI_TOOL_DESCRIPTIONS_CALLER = "crates/prodex-provider-core/src/gemini_bridge/tooling/gemini3.rs";
 const GEMINI_TOOL_DESCRIPTIONS_ADAPTER = "crates/prodex-mojo-core/src/json/gemini_tool_descriptions.rs";
 const GEMINI_TOOL_DESCRIPTIONS_MOJO = "mojo/prodex_core/gemini_tool_descriptions.mojo";
+const SUPER_EXPOSE_TOOL_CATALOG_CALLER = "crates/prodex-app/src/super_expose/protocol/tool_contract.rs";
+const SUPER_EXPOSE_TOOL_CATALOG_ADAPTER = "crates/prodex-mojo-core/src/json/super_expose_tools.rs";
+const SUPER_EXPOSE_TOOL_CATALOG_MOJO = "mojo/prodex_core/super_expose_tools.mojo";
+const SUPER_EXPOSE_OPTIONAL_TOOLS_CALLER = "crates/prodex-app/src/super_expose/optional_tools.rs";
 const PROMOTED_FILES = [
+  SUPER_EXPOSE_TOOL_CATALOG_CALLER,
+  SUPER_EXPOSE_TOOL_CATALOG_ADAPTER,
+  SUPER_EXPOSE_TOOL_CATALOG_MOJO,
+  SUPER_EXPOSE_OPTIONAL_TOOLS_CALLER,
   GEMINI_TOOL_DESCRIPTIONS_CALLER,
   GEMINI_TOOL_DESCRIPTIONS_ADAPTER,
   GEMINI_TOOL_DESCRIPTIONS_MOJO,
@@ -4731,6 +4739,36 @@ export function findViolations(files) {
     if (filePath === "crates/prodex-app/src/app_commands/log_tui_render.rs") {
       return contents.includes("compiled_log_search_filters_ascii_case_without_folding_unicode")
         ? [] : [filePath + ": real log TUI search caller regression missing"];
+    }
+    return [];
+  });
+  const superExposeToolCatalogViolations = files.flatMap(([filePath, contents]) => {
+    if (filePath === SUPER_EXPOSE_TOOL_CATALOG_CALLER) {
+      const production = contents.split("\n#[cfg(test)]", 1)[0];
+      const required = ["prodex_mojo_core::json::super_expose_tool_catalog(",
+        "let available_ids = json!(optional_tools.available_ids());", ".get_mut(catalog.exec_index)",
+        "compiled_mcp_catalog_preserves_complete_schemas_order_descriptions_and_annotations",
+        "compiled_mcp_exec_catalog_uses_playwright_aliases_and_keeps_endpoint_metadata_in_rust"];
+      const restored = ["fn tool_definition(", "fn status_schema(", "fn run_id_schema(",
+        "let exec_description = format!("];
+      return required.every((marker) => contents.includes(marker)) &&
+        restored.every((marker) => !production.includes(marker))
+        ? [] : [filePath + ": MCP catalog rendering must remain compiled Mojo-owned"];
+    }
+    if (filePath === SUPER_EXPOSE_OPTIONAL_TOOLS_CALLER && contents.includes("fn tool_description_suffix(")) {
+      return [filePath + ": MCP alias-description formatting must remain compiled Mojo-owned"];
+    }
+    if (filePath === SUPER_EXPOSE_TOOL_CATALOG_ADAPTER) {
+      return ["fn prodex_mojo_super_expose_tool_catalog_v1(", "pub fn super_expose_tool_catalog(",
+        "compiled_tool_catalog_abi_checks_version_mode_limit_and_capacity"]
+        .filter((marker) => !contents.includes(marker))
+        .map((marker) => filePath + ": compiled MCP catalog ABI missing " + marker);
+    }
+    if (filePath === SUPER_EXPOSE_TOOL_CATALOG_MOJO) {
+      return ['@export("prodex_mojo_super_expose_tool_catalog_v1")', "def write_alias_description(",
+        "super_expose_tool_is_allowed(mode, kind)", "def tool_definition(", "def write_tool("]
+        .filter((marker) => !contents.includes(marker))
+        .map((marker) => filePath + ": compiled MCP catalog semantics missing " + marker);
     }
     return [];
   });
@@ -10274,12 +10312,14 @@ export function findViolations(files) {
     ...presidioFindingLocalizationViolations,
     ...deepseekFunctionToolPolicyViolations,
     ...geminiToolDescriptionViolations,
+    ...superExposeToolCatalogViolations,
     ...rtkAutoWrapperManifestViolations,
     ...optionalToolsRenderViolations,
     ...defaultFeatureViolations, ...operationalHistogramViolations];
 }
 
 const RELOCATED_TEST_FILES = new Set([
+  "crates/prodex-app/src/super_expose/protocol/tool_catalog_tests.rs",
   "crates/prodex-provider-core/src/gemini_bridge/tooling/gemini3_tests.rs",
   "crates/prodex-provider-core/src/deepseek_bridge/request_tools_tests.rs",
   "crates/prodex-app/src/runtime_proxy/presidio/analyzer_tests.rs",
@@ -12124,6 +12164,22 @@ function selfTest() {
   assert.match(findViolations([[deepseekSseToolEventsFile,
     deepseekSseToolEventsCaller + '\nif tool_call.done {',
   ]]).join("\n"), /restored Rust DeepSeek SSE tool-event selection or done gate/u);
+  const mcpCatalogConsumer = [
+    "prodex_mojo_core::rich::super_expose_tool_argument_allowed(",
+    "prodex_mojo_core::rich::super_expose_run_id_valid(",
+    "prodex_mojo_core::rich::super_expose_string_valid(",
+    "prodex_mojo_core::json::super_expose_tool_catalog(",
+    "let available_ids = json!(optional_tools.available_ids());", ".get_mut(catalog.exec_index)",
+    "compiled_mcp_catalog_preserves_complete_schemas_order_descriptions_and_annotations",
+    "compiled_mcp_exec_catalog_uses_playwright_aliases_and_keeps_endpoint_metadata_in_rust",
+  ].join("\n");
+  assert.deepEqual(findViolations([[SUPER_EXPOSE_TOOL_CATALOG_CALLER, mcpCatalogConsumer]]), []);
+  assert.match(findViolations([[SUPER_EXPOSE_TOOL_CATALOG_CALLER,
+    mcpCatalogConsumer + "\nfn tool_definition() {}",
+  ]]).join("\n"), /MCP catalog rendering must remain compiled Mojo-owned/u);
+  assert.match(findViolations([[SUPER_EXPOSE_OPTIONAL_TOOLS_CALLER,
+    "fn tool_description_suffix() {}",
+  ]]).join("\n"), /MCP alias-description formatting must remain compiled Mojo-owned/u);
   const geminiDescriptionConsumer = [
     "GeminiToolDescriptionOperation::ApplyOverrides", "GeminiToolDescriptionOperation::DescriptionIndex",
     "GeminiToolDescriptionOperation::Catalog",

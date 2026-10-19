@@ -423,8 +423,15 @@ mod tests {
             .find(|tool| tool["name"] == "prodex_super_events")
             .expect("events tool");
         assert_eq!(events["inputSchema"]["properties"]["limit"]["maximum"], 64);
-        assert_eq!(run_id_schema()["properties"]["run_id"]["minLength"], 1);
-        assert_eq!(run_id_schema()["additionalProperties"], false);
+        let status = tools
+            .iter()
+            .find(|tool| tool["name"] == "prodex_super_status")
+            .unwrap();
+        assert_eq!(
+            status["inputSchema"]["properties"]["run_id"]["minLength"],
+            1
+        );
+        assert_eq!(status["inputSchema"]["additionalProperties"], false);
     }
 
     #[test]

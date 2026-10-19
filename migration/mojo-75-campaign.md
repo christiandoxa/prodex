@@ -6204,3 +6204,29 @@ and 12 ABI tests via `PRODEX_MOJO_REQUIRED=1 CARGO_BUILD_JOBS=6 cargo test --loc
 `npm run test:changed`, `npm run docs`, formatting, staged churn, no-fallback
 self-test/source guard, authority, boundary, hot-path and runtime-manifest guards,
 and offline baseline/replay all pass. The 75% target remains outstanding.
+
+## Compiled MCP expose tool catalog (2026-10-19)
+
+Gemini description checkpoint `2c1d2db7e` is pushed to main. Mojo now renders
+the ten MCP tool schemas, titles, descriptions and annotations, selects the
+endpoint mode through the existing shared allow policy, and formats optional
+aliases including Playwright's extra alias. Rust supplies fixed available-tool
+IDs and the existing page limit, then attaches endpoint metadata at the compiled
+exec index. Operational paths and invocation data do not enter this ABI.
+The Rust tool-definition/schema builders, list filter and alias-description
+formatter are deleted; tests inspect the production catalog directly.
+
+The complete old Rust output matches the compiled output in both endpoint
+modes. That temporary oracle is removed; its synthetic catalog becomes a
+whole-object regression fixture. Direct Mojo assertions, 17 expose ABI tests
+and all 11 protocol caller tests pass, including the full catalog and optional
+metadata boundary. The official share rises from 35.36931225177636% to
+35.41420875720678% (127,273 Mojo / 232,111 Rust production lines).
+The 75% target remains outstanding by 39.58579124279322 percentage points.
+
+Validation commands `PRODEX_MOJO_REQUIRED=1 CARGO_BUILD_JOBS=6 cargo test --locked -q -p prodex-app --lib super_expose::protocol:: -- --test-threads=1`,
+`PRODEX_MOJO_REQUIRED=1 CARGO_BUILD_JOBS=6 cargo test --locked -q -p prodex-mojo-core --features mojo-core --lib super_expose`,
+and `mojo run -D ASSERT=all -I mojo/prodex_core mojo/tests/super_expose_tools_test.mojo`
+pass. Workspace all-target/all-feature Clippy with warnings denied, `npm run docs`,
+`npm run test:changed`, formatting, staged churn, no-fallback self-test/source
+guard, authority and crate-boundary self-test/source guard also pass.

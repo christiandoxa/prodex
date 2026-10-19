@@ -73,6 +73,10 @@ mod gemini_tool_descriptions;
 pub use gemini_tool_descriptions::{
     GeminiToolDescriptionOperation, gemini_tool_description_policy,
 };
+#[cfg(feature = "mojo-rich")]
+mod super_expose_tools;
+#[cfg(feature = "mojo-rich")]
+pub use super_expose_tools::super_expose_tool_catalog;
 mod gemini_contents;
 pub use self::gemini_contents::{GeminiContentOperation, gemini_content_hardening};
 #[cfg(feature = "mojo-rich")]

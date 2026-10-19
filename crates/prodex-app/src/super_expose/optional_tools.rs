@@ -305,29 +305,6 @@ impl ExposeOptionalTools {
         }
     }
 
-    pub(super) fn tool_description_suffix(&self) -> String {
-        let aliases = self
-            .tools
-            .iter()
-            .filter(|tool| tool.usable)
-            .flat_map(|tool| {
-                let mut values = vec![format!("{OPTIONAL_ALIAS_PREFIX}{}", tool.id.as_str())];
-                if tool.id == OptionalToolId::PlaywrightMcp {
-                    values.push("optional:playwright".to_string());
-                }
-                values
-            })
-            .collect::<Vec<_>>();
-        if aliases.is_empty() {
-            " No validated Prodex optional-tool aliases are active for this endpoint.".to_string()
-        } else {
-            format!(
-                " Validated optional-tool aliases available at endpoint start: {}. Prefer these aliases over guessing PATH locations.",
-                aliases.join(", ")
-            )
-        }
-    }
-
     pub(super) fn instructions(&self) -> String {
         let mut lines = vec![
             "Optional tools are validated once when this expose endpoint starts. Use only entries marked available; unavailable or incompatible tools are not active.".to_string(),
