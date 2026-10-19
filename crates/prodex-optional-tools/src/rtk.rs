@@ -42,87 +42,28 @@ fn configure_rtk_wrapper(codex_home: &Path, rtk: Option<&Path>) -> Result<()> {
 }
 
 fn configure_rtk_command_wrappers(bin_dir: &Path, rtk: &Path) -> Result<()> {
-    for wrapper in rtk_command_wrappers() {
-        let Some(command) = find_path_command(wrapper.command) else {
+    for wrapper in prodex_mojo_core::rtk_noisy::rtk_auto_wrapper_manifest().map_err(|error| {
+        anyhow::anyhow!("compiled Mojo RTK command wrapper policy failed: {error:?}")
+    })? {
+        let Some(command) = find_path_command(&wrapper.command) else {
             continue;
         };
         if command.parent() == Some(bin_dir) {
             continue;
         }
+        let subcommands = wrapper
+            .subcommands
+            .iter()
+            .map(String::as_str)
+            .collect::<Vec<_>>();
         write_rtk_command_wrapper(
-            &wrapper_path(bin_dir, wrapper.command),
+            &wrapper_path(bin_dir, &wrapper.command),
             rtk,
             &command,
-            wrapper.subcommands,
+            &subcommands,
         )?;
     }
     Ok(())
-}
-
-struct RtkCommandWrapper {
-    command: &'static str,
-    subcommands: &'static [&'static str],
-}
-
-fn rtk_command_wrappers() -> &'static [RtkCommandWrapper] {
-    &[
-        RtkCommandWrapper {
-            command: "git",
-            subcommands: &["diff", "show", "log", "status", "grep", "blame"],
-        },
-        RtkCommandWrapper {
-            command: "cargo",
-            subcommands: &["test", "build", "check", "clippy", "bench", "run"],
-        },
-        RtkCommandWrapper {
-            command: "npm",
-            subcommands: &["test", "run", "build", "install", "ci", "update", "audit"],
-        },
-        RtkCommandWrapper {
-            command: "yarn",
-            subcommands: &["test", "run", "build", "install", "add", "upgrade"],
-        },
-        RtkCommandWrapper {
-            command: "pnpm",
-            subcommands: &["test", "run", "build", "install", "add", "update"],
-        },
-        RtkCommandWrapper {
-            command: "bun",
-            subcommands: &["test", "run", "build", "install", "add"],
-        },
-        RtkCommandWrapper {
-            command: "pytest",
-            subcommands: &[],
-        },
-        RtkCommandWrapper {
-            command: "go",
-            subcommands: &["test", "build", "vet"],
-        },
-        RtkCommandWrapper {
-            command: "docker",
-            subcommands: &["build", "compose", "logs", "pull", "push", "run"],
-        },
-        RtkCommandWrapper {
-            command: "kubectl",
-            subcommands: &["logs", "describe", "get", "events", "top"],
-        },
-        RtkCommandWrapper {
-            command: "rg",
-            subcommands: &[],
-        },
-        RtkCommandWrapper {
-            command: "find",
-            subcommands: &[],
-        },
-        RtkCommandWrapper {
-            command: "ls",
-            subcommands: &[],
-        },
-        RtkCommandWrapper {
-            command: "tree",
-            subcommands: &[],
-        },
-    ]
 }
 
 fn find_path_command(command: &str) -> Option<PathBuf> {
@@ -364,6 +305,42 @@ mod tests {
             "prodex-rtk-wrapper-{name}-{}-{stamp}",
             std::process::id()
         ))
+    }
+
+    #[test]
+    fn rtk_auto_wrapper_creation_uses_compiled_manifest_not_host_command_table() {
+        let dir = temp_dir("compiled-rtk-wrapper-manifest");
+        let wrappers = prodex_mojo_core::rtk_noisy::rtk_auto_wrapper_manifest()
+            .expect("compiled Mojo wrapper manifest");
+        let cargo = wrappers
+            .iter()
+            .find(|wrapper| wrapper.command == "cargo")
+            .unwrap();
+        let subcommands = cargo
+            .subcommands
+            .iter()
+            .map(String::as_str)
+            .collect::<Vec<_>>();
+        let script_path = dir.join("cargo");
+        write_rtk_command_wrapper(
+            &script_path,
+            Path::new("/opt/rtk/bin/rtk"),
+            Path::new("/usr/bin/cargo"),
+            &subcommands,
+        )
+        .expect("compiled RTK policy should render a wrapper");
+        let script = fs::read_to_string(&script_path).unwrap();
+        #[cfg(not(windows))]
+        {
+            assert!(script.contains("test|build|check|clippy|bench|run"));
+            assert!(script.contains("exec '/usr/bin/cargo'"));
+        }
+        #[cfg(windows)]
+        {
+            assert!(script.contains("if /I \"%~1\"==\"test\" goto prodex_rtk_wrap"));
+            assert!(script.contains("if /I \"%~1\"==\"clippy\" goto prodex_rtk_wrap"));
+        }
+        let _ = fs::remove_file(&script_path);
     }
 
     #[test]

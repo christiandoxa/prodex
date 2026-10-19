@@ -171,6 +171,9 @@ const PING_SUMMARY_CALLER_TEST_FILE = "crates/prodex-app/src/app_commands/ping_t
 const PING_SUMMARY_ADAPTER_FILE = "crates/prodex-mojo-core/src/rich/ping_protocol.rs";
 const PING_SUMMARY_MOJO_FILE = "mojo/prodex_core/ping_protocol.mojo";
 const PROMOTED_FILES = [
+  "crates/prodex-optional-tools/src/rtk.rs",
+  "crates/prodex-mojo-core/src/rtk_noisy.rs",
+  "mojo/prodex_core/rtk_noisy.mojo",
   "crates/prodex-app/src/runtime_launch/proxy_startup/provider_sse_reader.rs",
   "crates/prodex-mojo-core/src/runtime_sse_chunk.rs",
   "mojo/prodex_core/sse_line.mojo",
@@ -4527,6 +4530,46 @@ export function findViolations(files) {
       (!contents.includes("prodex_mojo_core::launch::find_super_expose_alias_index") ||
         /\bfn\s+(?:rewrite_super_expose_alias|super_option_takes_value)\s*\(/u.test(contents)))
     .map(([filePath]) => `${filePath}: Super expose alias scan must use Mojo`);
+  const rtkAutoWrapperManifestViolations = files.flatMap(([filePath, contents]) => {
+    if (filePath === "crates/prodex-optional-tools/src/rtk.rs") {
+      const production = contents.split("#[cfg(test)]", 1)[0];
+      const required = [
+        "prodex_mojo_core::rtk_noisy::rtk_auto_wrapper_manifest()",
+        "let subcommands = wrapper",
+        ".map(String::as_str)",
+      ];
+      const retired = [
+        "fn rtk_command_wrappers(",
+        "struct RtkCommandWrapper {",
+        'command: "cargo",',
+        'command: "npm",',
+        "subcommands: &[\"test\", \"build\"",
+      ];
+      return required.every((marker) => production.includes(marker)) &&
+        retired.every((marker) => !production.includes(marker))
+        ? [] : [filePath + ": restored Rust RTK wrapper command/subcommand policy"];
+    }
+    if (filePath === "crates/prodex-mojo-core/src/rtk_noisy.rs") {
+      return [
+        "fn prodex_mojo_rtk_wrapper_manifest_v1(",
+        "pub fn rtk_auto_wrapper_manifest(",
+        "compiled_rtk_wrapper_manifest_preserves_command_order_and_exact_subcommands",
+        "compiled_rtk_wrapper_manifest_abi_validates_capacity_version_and_null_without_writes",
+      ].filter((marker) => !contents.includes(marker))
+        .map((marker) => filePath + ": compiled RTK wrapper ABI or strict tests missing " + marker);
+    }
+    if (filePath === "mojo/prodex_core/rtk_noisy.mojo") {
+      return [
+        '@export("prodex_mojo_rtk_wrapper_manifest_v1")',
+        "RTK_WRAPPER_MANIFEST",
+        "git|diff,show,log,status,grep,blame",
+        "cargo|test,build,check,clippy,bench,run",
+        "kubectl|logs,describe,get,events,top",
+      ].filter((marker) => !contents.includes(marker))
+        .map((marker) => filePath + ": compiled RTK auto wrapper manifest missing " + marker);
+    }
+    return [];
+  });
   const optionalToolsRenderViolations = files.flatMap(([filePath, contents]) => {
     if (filePath === OPTIONAL_TOOLS_RENDER_FILE) {
       const required = [
@@ -9604,6 +9647,7 @@ export function findViolations(files) {
     ...quotaWindowViolations, ...quotaResetEpochViolations,
     ...rehydrateViolations, ...budgetTierViolations, ...staticItemViolations, ...replacedClassifierViolations, ...cliDependencyViolations,
     ...doctorDependencyViolations, ...proxyDependencyViolations, ...runtimeTuningViolations,
+    ...rtkAutoWrapperManifestViolations,
     ...optionalToolsRenderViolations,
     ...defaultFeatureViolations, ...operationalHistogramViolations];
 }
@@ -11362,6 +11406,16 @@ function selfTest() {
     'prodex_mojo_core::launch::super_literal_boundary(\n' +
     'prodex_mojo_core::launch::positioned_super_provider_alias(\n' +
     'prodex_mojo_core::launch::codex_command_server_subcommand(']]), []);
+  const rtkWrapperConsumer = [
+    "prodex_mojo_core::rtk_noisy::rtk_auto_wrapper_manifest()",
+    "let subcommands = wrapper",
+    ".map(String::as_str)",
+  ].join("\n");
+  const rtkWrapperCaller = "crates/prodex-optional-tools/src/rtk.rs";
+  assert.deepEqual(findViolations([[rtkWrapperCaller, rtkWrapperConsumer]]), []);
+  assert.match(findViolations([[rtkWrapperCaller,
+    rtkWrapperConsumer + "\nfn rtk_command_wrappers() {}",
+  ]]).join("\n"), /restored Rust RTK wrapper command\/subcommand policy/u);
   const optionalToolsRenderConsumer = [
     "prodex_mojo_core::optional_tools_policy::render_optional_tool_awareness(",
     "optional_tool_config_shape_preflight(selected_mask, shapes)",

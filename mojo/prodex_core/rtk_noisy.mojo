@@ -504,3 +504,50 @@ def prodex_mojo_rtk_noisy_shell_command_v1(
     if not rtk_noisy_write_range(input, insert_at, input_length, output, output_capacity, written):
         return RTK_NOISY_STATUS_CAPACITY
     return RTK_NOISY_STATUS_OK
+
+# The live Codex-home command wrapper manifest lives beside the compiled
+# RTK noisy-shell classifier. Only these explicitly opted-in commands get
+# automatic wrappers; other supported noisy commands remain on-demand.
+comptime RTK_WRAPPER_MANIFEST = (
+    "git|diff,show,log,status,grep,blame\n"
+    "cargo|test,build,check,clippy,bench,run\n"
+    "npm|test,run,build,install,ci,update,audit\n"
+    "yarn|test,run,build,install,add,upgrade\n"
+    "pnpm|test,run,build,install,add,update\n"
+    "bun|test,run,build,install,add\n"
+    "pytest|\n"
+    "go|test,build,vet\n"
+    "docker|build,compose,logs,pull,push,run\n"
+    "kubectl|logs,describe,get,events,top\n"
+    "rg|\n"
+    "find|\n"
+    "ls|\n"
+    "tree|\n"
+)
+
+
+@export("prodex_mojo_rtk_wrapper_manifest_v1")
+def prodex_mojo_rtk_wrapper_manifest_v1(
+    abi_version: Int64,
+    output_address: UInt,
+    output_capacity: Int64,
+    written_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != RTK_NOISY_ABI_VERSION:
+        return RTK_NOISY_STATUS_ABI
+    if output_address == 0 or output_capacity < 0 or written_address == 0:
+        return RTK_NOISY_STATUS_INVALID
+    var source = StringSlice(RTK_WRAPPER_MANIFEST)
+    var length = Int64(source.byte_length())
+    if length > output_capacity:
+        return RTK_NOISY_STATUS_CAPACITY
+    var result = Pointer[mut=True, UInt8, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    var ptr = source.unsafe_ptr()
+    for index in range(length):
+        result[unsafe_offset=index] = ptr[unsafe_offset=index]
+    Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(written_address)
+    )[] = length
+    return RTK_NOISY_STATUS_OK
