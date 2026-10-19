@@ -7444,3 +7444,71 @@ supplies 512-test evidence. Final docs/format/size/churn/privacy/diff checks
 pass. Temporary oracle/debug code is absent from final source. Full CI, live-provider and native
 macOS/Windows checks are not run. Campaign-owned build cache remains available
 for these consumers and the next migration stage.
+
+
+## Gemini payload traversal and verification history (2026-10-20)
+
+Checkpoint `e1fb75071` was pushed directly to `origin/main` after terminal-frame
+validation. This stage moves recursive payload traversal and recent-tool
+verification history into `gemini_guardrail_conversation.mojo`. Rust retains
+Serde acquisition, caller-owned scratch sizing, typed decoding and the existing
+Mojo success-claim acquisition gate, so ordinary assistant output does not
+serialize the conversation. The private Rust text collector/history algorithm
+is deleted; no Rust semantic fallback is added.
+
+The iterative Mojo walk preserves output/content/text presence precedence,
+array order, initial output prefixes and empty-string newline behavior. The
+history plan preserves the latest-user boundary, the existing no-user offset,
+nonblank-tool filtering, last-tool failure precedence and the last two tools'
+exit/verification rules. Existing Mojo text classifiers remain the sole
+matching authority; the process-exited-zero helper is shared with its prior
+scalar ABI. Live SSE fixtures now exercise nested output and ignored content.
+
+The version-1 JSON ABI reuses the shared marshaler and 16-byte scratch units.
+Rust owns allocation; Mojo validates versions, modes, tree relationships,
+UTF-8, aligned buffers and sufficient scratch before output writes. Decoder
+failures omit provider payloads. A flat 10,000-level ABI tree and a payload
+above 1 MiB pass without a recursive collector. Native symbol inspection
+finds only the intended new export. The owned temporary object and oracle
+were removed after harvesting evidence and checking process references.
+
+All 32,768 payload/history comparisons with the committed Rust functions pass.
+Direct assertions pass via
+`mojo run -D ASSERT=all -I mojo/prodex_core mojo/tests/gemini_guardrail_conversation_test.mojo`.
+Strict core tests pass (1,028) via
+`PRODEX_MOJO_REQUIRED=1 CARGO_BUILD_JOBS=6 rtk cargo test --locked -q -p prodex-mojo-core --features mojo-core -- --test-threads=1`.
+Strict provider tests pass (515) via
+`PRODEX_MOJO_REQUIRED=1 CARGO_BUILD_JOBS=6 rtk cargo test --locked -q -p prodex-provider-core --features mojo -- --test-threads=1`.
+Live SSE tests pass (54) via
+`PRODEX_MOJO_REQUIRED=1 CARGO_BUILD_JOBS=6 rtk cargo test --locked -q -p prodex-app --lib gemini_sse -- --test-threads=1`.
+
+The unchanged official metric rises from 35.669716162327% to
+35.695920371657785% (129,392 Mojo / 233,092 Rust / 362,484 total production
+lines). The gap to 75% is 39.304079628342215 percentage points. Release-floor
+and audited reachable-source non-regression checks pass; the project target
+remains unmet. No counting, baseline or target changes compensate for ABI cost.
+
+No-fallback self-test/source, authority, crate/provider/secret boundaries and
+runtime hot-path self-test/source checks pass. Offline baseline and all five
+replay fixtures pass. All 459 serialized proxy tests pass via
+`PRODEX_MOJO_REQUIRED=1 CARGO_BUILD_JOBS=6 rtk cargo test --locked -q -p prodex-app --lib main_internal_tests::runtime_proxy_ -- --test-threads=1`.
+Runtime manifest validation also passes via
+`PRODEX_MOJO_REQUIRED=1 CARGO_BUILD_JOBS=6 rtk proxy node scripts/ci/runtime-test-manifest-guard.mjs`.
+The final failure-precedence fixture passes via
+`PRODEX_MOJO_REQUIRED=1 CARGO_BUILD_JOBS=6 rtk cargo test --locked -q -p prodex-provider-core --features mojo mojo_verification_history_keeps_user_boundary_nonblank_window_and_exit_precedence -- --test-threads=1`.
+All nine runtime smoke steps pass via
+`PRODEX_MOJO_REQUIRED=1 CARGO_BUILD_JOBS=6 rtk proxy node scripts/ci/test-serial.mjs --suite runtime-smoke`,
+with existing vendor/dead-code warnings only. Workspace Clippy passes via
+`PRODEX_MOJO_REQUIRED=1 CARGO_BUILD_JOBS=6 rtk cargo clippy --locked --workspace --all-targets --all-features -- -D warnings`,
+with existing vendor/build warnings only. Canonical
+`RUST_TEST_THREADS=1 CARGO_BUILD_JOBS=6 rtk npm run test:changed` also passes,
+including featureless core checks and 514 default-feature provider tests.
+The explicit-feature suite above supplies the 515-test evidence. Final
+docs/format/size/churn/privacy/diff checks pass. Full CI, live-provider and native
+macOS/Windows checks were not run. Cargo metadata confirmed the workspace-owned
+target; no active builds, executable/cwd/fd/map references or release output
+remained before cleanup. `rtk cargo clean` removed 30,061 files / 12.3 GiB.
+Trash was inspected empty before `trash-empty -f`. Source, checkpoints and
+validation evidence remain preserved. The next audit can extend this existing
+conversation ABI to the remaining exact-output user/tool/command selection
+in `tooling/guardrails/exact_output.rs` and its command-matching module.

@@ -1,57 +1,28 @@
-//! Tool-output text extraction for Gemini guardrails.
+//! Serde acquisition for Mojo-owned Gemini conversation guardrails.
+use crate::mojo_json::Document;
+use prodex_mojo_core::gemini_guardrails::{GeminiGuardrailJsonOperation, gemini_guardrail_json};
+use serde::de::DeserializeOwned;
 
-pub(super) fn gemini_provider_core_tool_texts_since_latest_user(
-    messages: &[serde_json::Value],
-) -> Vec<String> {
-    let latest_user = messages
-        .iter()
-        .rposition(|message| {
-            message.get("role").and_then(serde_json::Value::as_str) == Some("user")
-        })
-        .unwrap_or(0);
-    messages
-        .iter()
-        .skip(latest_user + 1)
-        .filter(|message| message.get("role").and_then(serde_json::Value::as_str) == Some("tool"))
-        .map(|message| {
-            let mut text = String::new();
-            gemini_provider_core_collect_payload_text(
-                message.get("output").or_else(|| message.get("content")),
-                &mut text,
-            );
-            text
-        })
-        .filter(|text| !text.trim().is_empty())
-        .collect()
+pub(super) fn gemini_provider_core_guardrail_projection<T: DeserializeOwned>(
+    context: &serde_json::Value,
+    operation: GeminiGuardrailJsonOperation,
+) -> T {
+    let mut document = Document::default();
+    document.root(context);
+    let raw = std::str::from_utf8(&document.raw).expect("Serde emits UTF-8 JSON");
+    let bytes = gemini_guardrail_json(&document.nodes, raw, operation)
+        .expect("Mojo Gemini conversation guardrail returned invalid output");
+    // Decoder failures must not include provider payloads.
+    serde_json::from_slice(&bytes)
+        .unwrap_or_else(|_| panic!("Mojo Gemini guardrail output violates its typed contract"))
 }
 
 pub(super) fn gemini_provider_core_collect_payload_text(
     value: Option<&serde_json::Value>,
     output: &mut String,
 ) {
-    let Some(value) = value else {
-        return;
-    };
-    match value {
-        serde_json::Value::String(text) => {
-            if !output.is_empty() {
-                output.push('\n');
-            }
-            output.push_str(text);
-        }
-        serde_json::Value::Array(values) => {
-            for value in values {
-                gemini_provider_core_collect_payload_text(Some(value), output);
-            }
-        }
-        serde_json::Value::Object(object) => {
-            for key in ["output", "content", "text"] {
-                if let Some(value) = object.get(key) {
-                    gemini_provider_core_collect_payload_text(Some(value), output);
-                    break;
-                }
-            }
-        }
-        _ => {}
-    }
+    *output = gemini_provider_core_guardrail_projection(
+        &serde_json::json!({"value": value, "prefix": output.as_str()}),
+        GeminiGuardrailJsonOperation::PayloadText,
+    );
 }

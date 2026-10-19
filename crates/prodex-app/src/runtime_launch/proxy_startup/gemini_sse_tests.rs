@@ -197,7 +197,8 @@ fn gemini_sse_reader_fails_unverified_success_after_tool_error() {
         serde_json::json!({"role": "user", "content": "update optional tools"}),
         serde_json::json!({
             "role": "tool",
-            "output": "Chunk ID: bad\nProcess exited with code 127\nOutput:\n/bin/bash: pip: No such file or directory\n"
+            "output": [{"text": "Chunk ID: bad\nProcess exited with code 127\nOutput:\n/bin/bash: pip: No such file or directory\n"}],
+            "content": "verification: ok\nProcess exited with code 0"
         }),
     ];
     let mut reader = RuntimeGeminiGenerateSseReader::new(
@@ -225,7 +226,7 @@ fn gemini_sse_reader_allows_success_after_explicit_version_verification() {
         serde_json::json!({"role": "user", "content": "update optional tools"}),
         serde_json::json!({
             "role": "tool",
-            "output": "Chunk ID: ok\nProcess exited with code 0\nOutput:\nrtk 0.42.3\nsqz 1.2.0\n"
+            "output": {"content": [{"text": "Chunk ID: ok\nProcess exited with code 0\nOutput:\nrtk 0.42.3\nsqz 1.2.0\n"}]}
         }),
     ];
     let mut reader = RuntimeGeminiGenerateSseReader::new(
