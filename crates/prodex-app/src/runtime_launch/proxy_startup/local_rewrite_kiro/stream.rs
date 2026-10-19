@@ -88,78 +88,6 @@ impl RuntimeKiroStreamingActivityState {
     }
 }
 
-#[cfg(test)]
-mod compiled_kiro_stream_activity_tests {
-    use super::*;
-
-    #[test]
-    fn compiled_kiro_stream_activity_ledger_inherits_labels_and_caps_at_128() {
-        let mut state = RuntimeKiroStreamingActivityState::default();
-        let first = state
-            .next(
-                "call_🧭",
-                Some("Read file"),
-                Some("in_progress"),
-                Some("read"),
-                true,
-                true,
-            )
-            .unwrap();
-        let updated = state
-            .next("call_🧭", None, Some("completed"), None, false, true)
-            .unwrap();
-        assert_eq!(first["name"], "Read file");
-        assert_eq!(first["kind"], "read");
-        assert_eq!(updated["name"], "Read file");
-        assert_eq!(updated["kind"], "read");
-        assert_eq!(updated["phase"], "completed");
-        assert_eq!(state.labels.len(), 1);
-
-        let mut regular = 0;
-        let mut truncated = 0;
-        for i in 0..170 {
-            if let Some(activity) =
-                state.next(&format!("tool_{i}"), Some("Tool"), None, None, true, false)
-            {
-                if activity["name"] == "Additional Kiro activities omitted" {
-                    truncated += 1;
-                } else {
-                    regular += 1;
-                }
-            }
-        }
-        assert_eq!(regular, 125);
-        assert_eq!(truncated, 1);
-        assert_eq!(state.events, 128);
-        assert!(state.truncated);
-        assert!(
-            state
-                .next("another", None, None, None, false, false)
-                .is_none()
-        );
-        assert_eq!(state.labels.len(), 126);
-    }
-
-    #[test]
-    fn compiled_kiro_stream_activity_ledger_rejects_oversized_unicode_id_caching() {
-        let mut state = RuntimeKiroStreamingActivityState::default();
-        for (id, caches) in [("東".repeat(85), true), ("東".repeat(86), false)] {
-            let first = state
-                .next(&id, Some("Private label"), None, Some("read"), true, true)
-                .expect("initial activity");
-            let second = state
-                .next(&id, None, Some("completed"), None, false, true)
-                .expect("follow-up activity");
-            assert_eq!(first["name"], "Private label");
-            assert_eq!(second["name"] == "Private label", caches);
-            assert_eq!(second["kind"] == "read", caches);
-            assert_eq!(state.labels.contains_key(&id), caches);
-        }
-        assert_eq!(state.events, 4);
-        assert_eq!(state.labels.len(), 1);
-    }
-}
-
 pub(super) fn runtime_kiro_finish_stream(
     sender: SyncSender<RuntimeKiroStreamingChunk>,
     context: RuntimeKiroStreamingContext<'_>,
@@ -501,4 +429,76 @@ fn runtime_kiro_stream_text(
         .into_bytes(),
     ))?;
     Ok(())
+}
+
+#[cfg(test)]
+mod compiled_kiro_stream_activity_tests {
+    use super::*;
+
+    #[test]
+    fn compiled_kiro_stream_activity_ledger_inherits_labels_and_caps_at_128() {
+        let mut state = RuntimeKiroStreamingActivityState::default();
+        let first = state
+            .next(
+                "call_🧭",
+                Some("Read file"),
+                Some("in_progress"),
+                Some("read"),
+                true,
+                true,
+            )
+            .unwrap();
+        let updated = state
+            .next("call_🧭", None, Some("completed"), None, false, true)
+            .unwrap();
+        assert_eq!(first["name"], "Read file");
+        assert_eq!(first["kind"], "read");
+        assert_eq!(updated["name"], "Read file");
+        assert_eq!(updated["kind"], "read");
+        assert_eq!(updated["phase"], "completed");
+        assert_eq!(state.labels.len(), 1);
+
+        let mut regular = 0;
+        let mut truncated = 0;
+        for i in 0..170 {
+            if let Some(activity) =
+                state.next(&format!("tool_{i}"), Some("Tool"), None, None, true, false)
+            {
+                if activity["name"] == "Additional Kiro activities omitted" {
+                    truncated += 1;
+                } else {
+                    regular += 1;
+                }
+            }
+        }
+        assert_eq!(regular, 125);
+        assert_eq!(truncated, 1);
+        assert_eq!(state.events, 128);
+        assert!(state.truncated);
+        assert!(
+            state
+                .next("another", None, None, None, false, false)
+                .is_none()
+        );
+        assert_eq!(state.labels.len(), 126);
+    }
+
+    #[test]
+    fn compiled_kiro_stream_activity_ledger_rejects_oversized_unicode_id_caching() {
+        let mut state = RuntimeKiroStreamingActivityState::default();
+        for (id, caches) in [("東".repeat(85), true), ("東".repeat(86), false)] {
+            let first = state
+                .next(&id, Some("Private label"), None, Some("read"), true, true)
+                .expect("initial activity");
+            let second = state
+                .next(&id, None, Some("completed"), None, false, true)
+                .expect("follow-up activity");
+            assert_eq!(first["name"], "Private label");
+            assert_eq!(second["name"] == "Private label", caches);
+            assert_eq!(second["kind"] == "read", caches);
+            assert_eq!(state.labels.contains_key(&id), caches);
+        }
+        assert_eq!(state.events, 4);
+        assert_eq!(state.labels.len(), 1);
+    }
 }

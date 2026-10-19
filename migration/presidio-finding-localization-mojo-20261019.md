@@ -34,6 +34,8 @@ Validation from the repository root:
 - PASS (38 tests): `PRODEX_MOJO_REQUIRED=1 CARGO_BUILD_JOBS=6 cargo test --locked -q -p prodex-app --lib runtime_proxy::presidio:: -- --test-threads=1`.
 - PASS: no-fallback self-test/source guard, authority guard, hot-path self-test/source guard, crate-boundary self-test/source guard, offline baseline and five replay fixtures, official production-share and diff checks.
 
-Broad proxy, smoke, manifest and workspace Clippy checks are being finalized.
-Existing size and Clippy failures are recorded in the preceding checkpoints.
-Full CI and native macOS/Windows execution were not run.
+The broad proxy check passes all 459 tests; the runtime manifest guard also
+passes. Subsequent mechanical cleanup restores the unchanged size guard and
+workspace all-target/all-feature Clippy with warnings denied. Runtime smoke
+and changed-tests checks also pass. Full CI and native macOS/Windows execution
+were not run.

@@ -6131,3 +6131,31 @@ Rust's independent range construction, Unicode offset helper, confidence
 arithmetic and entity string classifier are deleted. Five direct ABI tests,
 30,000 half-step rounding comparisons and all 38 Presidio tests pass.
 The official share is 35.252231806801646%; the 75% target remains outstanding.
+
+## Restore size and lint validation after migration checkpoints (2026-10-19)
+
+Finding-localization checkpoint `9c718de10` is pushed to main; all 459 broad
+proxy tests also pass. Mechanical cleanup moves five SSE metadata/error tests
+into a sibling test module, places Gemini and Kiro test modules after their
+production items, uses as_chunks for a fixed-size ABI record slice and
+collapses the existing DeepSeek added-state condition. No decision or error
+handling changes. The size guard now passes at its unchanged 32/32 near-limit
+budget, and workspace all-target/all-feature Clippy with warnings denied
+passes. Focused verification passes 19 SSE, four Gemini ABI and two Kiro tests.
+The official production share is unchanged at 35.252231806801646%.
+
+Validation commands: `cargo fmt --all --check`, `npm run docs`,
+`npm run test:changed`, `node scripts/ci/size-guard.mjs`,
+`PRODEX_MOJO_REQUIRED=1 CARGO_BUILD_JOBS=6 cargo clippy --locked --workspace --all-targets --all-features -- -D warnings`,
+`PRODEX_MOJO_REQUIRED=1 CARGO_BUILD_JOBS=6 cargo test --locked -q -p prodex-app --lib deepseek_sse_reader_ -- --test-threads=1`,
+`PRODEX_MOJO_REQUIRED=1 CARGO_BUILD_JOBS=6 cargo test --locked -q -p prodex-mojo-core --features mojo-core --lib provider_constraints::gemini_bridge_request::gemini_builtin_batch_tests`,
+and `PRODEX_MOJO_REQUIRED=1 CARGO_BUILD_JOBS=6 cargo test --locked -q -p prodex-app --lib compiled_kiro_stream_activity_ledger -- --test-threads=1`
+all pass. `node scripts/ci/test-serial.mjs --suite runtime-smoke` and the
+runtime test manifest guard also pass. The initial SSE module filter selected zero tests; the corrected
+reader-name filter executes 19 cases, including all five moved tests.
+
+Next substantive candidate: prodex-provider-core's deepseek_bridge/request_tools
+still owns Rust function-name/parameter checks and duplicate/generic selection.
+The live caller is prodex-app's chat_compatible_request via the DeepSeek
+request-validation adapter. Strict schema normalization is already Mojo-owned;
+reuse that owner and preserve duplicate ordering, provider limits and diagnostics.
