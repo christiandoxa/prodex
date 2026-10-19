@@ -406,6 +406,8 @@ const PROMOTED_FILES = [
   "crates/prodex-provider-core/src/translators/gemini/response_media.rs",
   "crates/prodex-mojo-core/src/rich/gemini_response_media.rs",
   "mojo/prodex_core/gemini_response_media.mojo",
+  "crates/prodex-provider-core/src/gemini_bridge/media/mime.rs",
+  "crates/prodex-provider-core/src/gemini_bridge/media/mime/data_url_tests.rs",
   "crates/prodex-provider-core/src/gemini_bridge/response.rs",
   "crates/prodex-provider-core/src/gemini_bridge/tests/response.rs",
   "crates/prodex-mojo-core/src/rich/gemini_response.rs",
@@ -1932,6 +1934,18 @@ export function findViolations(files) {
     return [];
   });
   const geminiResponseMediaMojoViolations = files.flatMap(([filePath, contents]) => {
+    if (filePath === "crates/prodex-provider-core/src/gemini_bridge/media/mime.rs") {
+      const production = contents.split("#[cfg(test)]", 1)[0];
+      return production.includes("prodex_mojo_core::rich::gemini_media_data_url_parts(image_url)")
+        && !production.includes('strip_prefix("data:")') && !production.includes(".split(';')")
+        ? [] : [`${filePath}: Gemini data-URL grammar must remain Mojo-owned`];
+    }
+    if (filePath === "crates/prodex-provider-core/src/gemini_bridge/media/mime/data_url_tests.rs") {
+      return ["gemini_data_url_grammar_reaches_real_media_callers_without_changing_json",
+        "gemini_data_url_callers_keep_outer_trimming_and_opaque_nonbase64_data"]
+        .filter((marker) => !contents.includes(marker))
+        .map((marker) => `${filePath}: Gemini data-URL caller coverage must retain ${marker}`);
+    }
     if (filePath === "crates/prodex-provider-core/src/translators/gemini/response_media.rs") {
       const production = contents.split("#[cfg(test)]", 1)[0];
       const required = [
@@ -1947,13 +1961,15 @@ export function findViolations(files) {
       return missing.map((marker) => `${filePath}: Gemini response-media semantics must be Mojo-owned (${marker})`);
     }
     if (filePath === "crates/prodex-mojo-core/src/rich/gemini_response_media.rs") {
-      return ["prodex_mojo_gemini_response_media_v1(", "transform_json("].filter(
+      return ["prodex_mojo_gemini_response_media_v1(", "transform_json(",
+        "prodex_mojo_gemini_data_url_parts_v1(", "pub fn gemini_media_data_url_parts("].filter(
         (marker) => !contents.includes(marker),
       ).map((marker) => `${filePath}: Gemini media adapter must retain Mojo ABI (${marker})`);
     }
     if (filePath === "mojo/prodex_core/gemini_response_media.mojo") {
       return ["def gemini_response_media_kernel_v1(", "def media_put_content(",
-        "def media_put_image_generation(", "def media_put_special_text("].filter(
+        "def media_put_image_generation(", "def media_put_special_text(",
+        "def media_data_url_parts(", '@export("prodex_mojo_gemini_data_url_parts_v1")'].filter(
         (marker) => !contents.includes(marker),
       ).map((marker) => `${filePath}: Gemini media projection must remain Mojo-owned (${marker})`);
     }
@@ -10912,6 +10928,14 @@ async function promotedFiles() {
 }
 
 function selfTest() {
+  const geminiDataUrlCaller = "prodex_mojo_core::rich::gemini_media_data_url_parts(image_url)";
+  const geminiDataUrlCallerFile = "crates/prodex-provider-core/src/gemini_bridge/media/mime.rs";
+  assert.deepEqual(findViolations([[geminiDataUrlCallerFile, geminiDataUrlCaller]]), []);
+  assert.match(findViolations([[geminiDataUrlCallerFile,
+    `${geminiDataUrlCaller}\nimage_url.strip_prefix("data:")`,
+  ]]).join("\n"), /Gemini data-URL grammar must remain Mojo-owned/u);
+  assert.match(findViolations([["crates/prodex-provider-core/src/gemini_bridge/media/mime/data_url_tests.rs", ""]])
+    .join("\n"), /Gemini data-URL caller coverage/u);
   assert.match(findViolations([[INFO_RUNWAY_DECIMAL, ""]]).join("\n"), /compiled runway rendering/u);
   assert.match(findViolations([["crates/prodex-terminal-ui/src/info.rs", "pub fn format_info_runway_display() {\nformat!(\"Rust\")\n}"]]).join("\n"), /info runway decisions and decimal rendering/u);
   assert.match(findViolations([[GEMINI_NORMALIZED_ADAPTER, ""]]).join("\n"), /compiled Gemini normalization/u);

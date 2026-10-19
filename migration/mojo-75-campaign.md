@@ -7278,3 +7278,57 @@ The reusable build cache is retained for the next migration.
 Canonical `RUST_TEST_THREADS=1 CARGO_BUILD_JOBS=6 npm run test:changed` passes.
 Staged privacy/diff checks pass, and churn remains within 1,200 total lines
 and 500 per file.
+
+
+## Compiled Gemini data-URL grammar (2026-10-20)
+
+Structured-ping checkpoint `be16eee3c` is pushed to main. Gemini's shared media
+owner now parses data-URL prefixes, comma/semicolon boundaries, exact ASCII
+case-insensitive base64 markers, MIME fallback and borrowed payload spans.
+The provider's Rust strip/split/filter grammar is removed. Its public borrowed
+string API remains compatible; Rust validates returned span boundaries and
+decodes the existing default-MIME ABI label without recomputing grammar.
+Both raw-data and URI media-part callers use the compiled parser.
+
+The parser preserves the exact lowercase prefix, untrimmed MIME/data bytes,
+base64-as-first-segment behavior, empty data, Unicode/NUL and non-base64
+opaque-input behavior. The media callers retain their existing outer trim
+and complete JSON shape. No base64 payload validator or new text/segment cap
+is added. Version-1 fixed output fields use caller-owned storage, and invalid
+ABI versions, lengths, alignment and UTF-8 leave it untouched. Initial range
+argument type errors were corrected before validation; native symbol
+inspection finds no unresolved dependencies. Existing media warnings remain.
+
+All 32,768 comparisons with the committed Rust parser pass. Native cases
+cover a payload above 4 MiB and 65,537 metadata segments; returned payload
+pointers still reference the original input. The owned temporary oracle and
+object were removed after use. Direct assertions pass via
+`mojo run -D ASSERT=all -I mojo/prodex_core mojo/tests/gemini_data_url_test.mojo`.
+All 1,021 strict core tests pass via
+`PRODEX_MOJO_REQUIRED=1 CARGO_BUILD_JOBS=6 cargo test --locked -q -p prodex-mojo-core --features mojo-core -- --test-threads=1`.
+All 507 real provider tests pass via
+`PRODEX_MOJO_REQUIRED=1 CARGO_BUILD_JOBS=6 cargo test --locked -q -p prodex-provider-core --features mojo -- --test-threads=1`.
+
+The unchanged official metric rises from 35.64642196260392% to
+35.65354008935129% (129,125 Mojo / 233,041 Rust production lines), leaving
+39.34645991064871 percentage points to 75%. Release-floor and audited
+reachable-source non-regression checks pass; the project target remains unmet.
+Offline baseline and all five replay fixtures pass via
+`node scripts/compat/check-upstream-baseline.mjs` and
+`node scripts/compat/capture-replay-fixture-tests.mjs`.
+
+Workspace Clippy passes via
+`PRODEX_MOJO_REQUIRED=1 CARGO_BUILD_JOBS=6 cargo clippy --locked --workspace --all-targets --all-features -- -D warnings`,
+with existing vendor warnings only. No-fallback/authority/crate-boundary
+self-test/source, provider-SPI boundary, secret-boundary, size, docs,
+formatting and diff checks pass. Full CI, live-provider and native
+macOS/Windows checks were not run.
+
+Canonical `RUST_TEST_THREADS=1 CARGO_BUILD_JOBS=6 npm run test:changed` passes,
+including 506 provider tests with its default features; the explicit-feature
+suite above supplies the 507-test evidence. Staged privacy/diff checks pass,
+and churn remains within 1,200 total lines and 500 per file. Cargo metadata
+confirms the workspace-owned target. No executable/cwd/fd/map references,
+active builds, release output or Trash entries remained before cleanup;
+`trash-empty -f` completed. Source and validation evidence remain preserved.
+`cargo clean` removed 11.1 GiB of reproducible build output.

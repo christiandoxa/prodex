@@ -1,22 +1,8 @@
 //! Gemini media MIME and data-URL helpers.
 
-use prodex_mojo_core::rich::ascii_casefold_equal_exact;
-
 pub fn gemini_provider_core_data_url_parts(image_url: &str) -> Option<(&str, &str)> {
-    let rest = image_url.strip_prefix("data:")?;
-    let (metadata, data) = rest.split_once(',')?;
-    if !metadata.split(';').any(|segment| {
-        ascii_casefold_equal_exact(segment, "base64")
-            .expect("Mojo Gemini data-URL encoding comparison failed")
-    }) {
-        return None;
-    }
-    let mime_type = metadata
-        .split(';')
-        .next()
-        .filter(|mime_type| !mime_type.trim().is_empty())
-        .unwrap_or("application/octet-stream");
-    Some((mime_type, data))
+    prodex_mojo_core::rich::gemini_media_data_url_parts(image_url)
+        .expect("Mojo Gemini data-URL parser returned invalid output")
 }
 
 pub fn gemini_provider_core_mime_type_for_uri(uri: &str) -> &'static str {
@@ -28,6 +14,9 @@ pub fn gemini_provider_core_mime_type_is_text(mime_type: &str) -> bool {
     prodex_mojo_core::rich::gemini_response_media_mime_is_text(mime_type)
         .expect("Mojo Gemini media MIME text classification failed")
 }
+
+#[cfg(test)]
+mod data_url_tests;
 
 #[cfg(test)]
 mod tests {
