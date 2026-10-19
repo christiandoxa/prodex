@@ -33,6 +33,9 @@ const INFO_PROVIDER_MOJO_FILE = "mojo/prodex_core/info_provider.mojo";
 const INFO_TOKEN_NUMBERS_ADAPTER = "crates/prodex-mojo-core/src/log_throughput_policy/token_usage.rs";
 const INFO_TOKEN_NUMBERS_MOJO = "mojo/prodex_core/info_token_usage.mojo";
 const LOG_NUMBERS_MOJO = "mojo/prodex_core/log_number.mojo";
+const INFO_LOAD_CALLER = "crates/prodex-app/src/reports/info/runtime_load.rs";
+const INFO_LOAD_ADAPTER = "crates/prodex-mojo-core/src/info_render/runtime_load.rs";
+const INFO_LOAD_MOJO = "mojo/prodex_core/info_runtime_load.mojo";
 const PROVIDER_BINDING_IDENTITY_CONSUMER_FILE = "crates/prodex-provider-core/src/binding_identity.rs";
 const PROVIDER_BINDING_IDENTITY_ADAPTER_FILE = "crates/prodex-mojo-core/src/rich/provider_binding_identity.rs";
 const PROVIDER_BINDING_IDENTITY_MOJO_FILE = "mojo/prodex_core/provider_binding_identity.mojo";
@@ -658,6 +661,9 @@ const PROMOTED_FILES = [
   INFO_TOKEN_NUMBERS_ADAPTER,
   INFO_TOKEN_NUMBERS_MOJO,
   LOG_NUMBERS_MOJO,
+  INFO_LOAD_CALLER,
+  INFO_LOAD_ADAPTER,
+  INFO_LOAD_MOJO,
   PROVIDER_BINDING_IDENTITY_CONSUMER_FILE,
   PROVIDER_BINDING_IDENTITY_ADAPTER_FILE,
   PROVIDER_BINDING_IDENTITY_MOJO_FILE,
@@ -6332,6 +6338,24 @@ export function findViolations(files) {
         .filter((marker) => !contents.includes(marker))
         .map((marker) => filePath + ": status policy adapter must retain Mojo call " + marker);
     }
+    if (filePath === INFO_LOAD_CALLER || filePath === INFO_LOAD_ADAPTER) {
+      const production = contents.split("#[cfg(test)]", 1)[0];
+      const required = filePath === INFO_LOAD_CALLER
+        ? ["prodex_mojo_core::info_render::info_runtime_load_plan("]
+        : ["prodex_info_runtime_load_plan_v1(", "size_of::<LoadRow>() == 40"];
+      const violations = required.filter((marker) => !production.includes(marker))
+        .map((marker) => `${filePath}: runtime-load summary must retain Mojo delegation ${marker}`);
+      if (/latest_inflight_counts|recent_cutoff|lookback_cutoff|\.sort_by/u.test(production)) {
+        violations.push(`${filePath}: contains restored Rust runtime-load aggregation`);
+      }
+      return violations;
+    }
+    if (filePath === INFO_LOAD_MOJO) {
+      return ["def info_runtime_load_plan(", "info_runway_saturating_sub(", "info_load_sort(",
+        "rich_view_compare(", "return left < right", "active_units += row.units"]
+        .filter((marker) => !contents.includes(marker))
+        .map((marker) => `${filePath}: runtime-load policy must remain Mojo-owned (${marker})`);
+    }
     if (filePath === INFO_PROVIDER_CALLER_FILE || filePath === INFO_PROVIDER_ADAPTER_FILE) {
       const production = contents.split("#[cfg(test)]", 1)[0];
       const required = filePath === INFO_PROVIDER_CALLER_FILE ? [
@@ -6544,6 +6568,8 @@ export function findViolations(files) {
         "INFO_RENDER_PROVIDER_SUMMARY",
         "INFO_RENDER_PROVIDER_CAPABILITIES",
         "info_provider_render(",
+        '@export("prodex_info_runtime_load_plan_v1")',
+        "info_runtime_load_plan(",
       ];
       return required
         .filter((marker) => !contents.includes(marker))
@@ -10539,6 +10565,15 @@ function selfTest() {
       doctorPresentationAdapterCanonical.replace("render(DOCTOR_VIEWPORT", "fn viewport_rust(")]]).join("\n"),
     /doctor presentation adapter must retain render\(DOCTOR_VIEWPORT/u,
   );
+  const infoLoadCaller = "prodex_mojo_core::info_render::info_runtime_load_plan(";
+  assert.deepEqual(findViolations([[INFO_LOAD_CALLER, infoLoadCaller]]), []);
+  assert.match(findViolations([[INFO_LOAD_CALLER, infoLoadCaller + "\nlet recent_cutoff = now;"]]).join("\n"), /restored Rust runtime-load aggregation/u);
+  const infoLoadAdapter = "prodex_info_runtime_load_plan_v1( size_of::<LoadRow>() == 40";
+  assert.deepEqual(findViolations([[INFO_LOAD_ADAPTER, infoLoadAdapter]]), []);
+  assert.match(findViolations([[INFO_LOAD_ADAPTER, ""]]).join("\n"), /runtime-load summary must retain Mojo delegation/u);
+  const infoLoadMojo = "def info_runtime_load_plan( info_runway_saturating_sub( info_load_sort( rich_view_compare( return left < right active_units += row.units";
+  assert.deepEqual(findViolations([[INFO_LOAD_MOJO, infoLoadMojo]]), []);
+  assert.match(findViolations([[INFO_LOAD_MOJO, infoLoadMojo.replace("return left < right", "return False")]]).join("\n"), /runtime-load policy must remain Mojo-owned/u);
   const infoProviderCanonical = [
     "prodex_mojo_core::info_render::format_provider_summary(",
     "prodex_mojo_core::info_render::format_provider_capabilities_summary(",
@@ -10591,6 +10626,8 @@ function selfTest() {
     "INFO_RENDER_PROVIDER_SUMMARY",
     "INFO_RENDER_PROVIDER_CAPABILITIES",
     "info_provider_render(",
+    '@export("prodex_info_runtime_load_plan_v1")',
+    "info_runtime_load_plan(",
   ].join("\n");
   assert.deepEqual(findViolations([[DOCTOR_PRESENTATION_MOJO_FILE, doctorPresentationMojoCanonical]]), []);
   assert.match(

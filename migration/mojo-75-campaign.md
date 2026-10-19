@@ -6358,3 +6358,50 @@ including the display-latency fixture. Formatting, `npm run docs`,
 `npm run test:changed` and workspace all-target/all-feature Clippy with warnings
 denied also pass (existing vendor warnings only). Completed probe/baseline
 scratch was removed; inspected Trash was empty and `trash-empty -f` completed.
+
+## Compiled runtime-load summaries (2026-10-20)
+
+Numeric-policy checkpoint `cf4cc49d7` is pushed to main. Completed build output
+was cleaned after reference checks (11.1 GiB). Mojo now owns runtime-load
+window cutoff saturation, observation selection, recent count/min/max, latest
+per-profile in-flight counts within each source log, combined totals and stable
+chronological/profile ordering. The existing runway cutoff helper is reused.
+A focused helper is imported by the production Info renderer, with a typed
+version-1 40-byte-record ABI and caller-owned sorting scratch. Cargo watches the
+helper; no standalone build source or metric rule is added.
+
+Rust retains log acquisition/decoding and materializes the original quota
+observations using Mojo's selected indices. The previous per-log grouping map,
+cutoff branches, aggregate merge logic and stable sort are deleted. Reports
+preserve timestamp/profile order and source order for ties.
+Clippy exposed the now-unused internal single-log helper; it and the unnecessary
+new input-order option were removed, and legacy fixtures now use the production
+combined collector. Recent statistics remain independent of the lookback
+selection, and the caller-supplied log count remains unchanged. ABI failures are
+explicit without Rust recomputation.
+
+All 3,070 temporary differential comparisons pass (2,046 individual logs plus
+1,024 combined cases). The Rust oracle is removed. Direct Mojo assertions pass.
+Permanent caller/ABI tests cover duplicates, multiple logs, Unicode profiles,
+independent windows, empty input, signed timestamp saturation, malformed records
+rejected before writes, and 4,096 reverse-ordered observations.
+The official share rises from 35.47031821364662% to 35.48310057456103%
+(127,775 Mojo / 232,326 Rust production lines), using unchanged metric rules.
+The 75% target remains outstanding by 39.51689942543897 percentage points.
+
+Four runtime-load ABI tests and all 969 strict Mojo-core tests pass via
+`PRODEX_MOJO_REQUIRED=1 CARGO_BUILD_JOBS=6 cargo test --locked -q -p prodex-mojo-core --features mojo-core -- --test-threads=1`.
+Eighteen Info caller tests pass via
+`PRODEX_MOJO_REQUIRED=1 CARGO_BUILD_JOBS=6 cargo test --locked -q -p prodex-app --lib reports::info:: -- --test-threads=1`.
+A historical caller-name filter selected zero tests; the `runtime_load_` filter
+executes all three new caller cases, also included in the final Info run.
+`PRODEX_MOJO_REQUIRED=1 CARGO_BUILD_JOBS=6 cargo clippy --locked --workspace --all-targets --all-features -- -D warnings`
+passes after removing the unused helper and a redundant test struct update.
+Formatting, docs, the runtime-test manifest guard, staged churn and diff checks
+pass. An invocation of changed-tests with `PRODEX_MOJO_REQUIRED=1` correctly
+rejected its featureless Mojo-core selection; strict Mojo validation above uses
+explicit features. The canonical `npm run test:changed` rerun passes. Existing
+vendor warnings remain unchanged.
+No-fallback self-test/source, authority, size and crate-boundary self-test/source
+guards pass. Direct verification uses
+`mojo run -D ASSERT=all -I mojo/prodex_core mojo/tests/info_runtime_load_test.mojo`.

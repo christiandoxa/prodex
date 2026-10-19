@@ -60,6 +60,7 @@ fn emit_source_rerun_directives(sources: &[&str], manifest_dir: &Path) {
         "runtime_local_rewrite_transport.mojo",
         "status_resource.mojo",
         "info_provider.mojo",
+        "info_runtime_load.mojo",
         "info_token_usage.mojo",
         "log_number.mojo",
     ] {
