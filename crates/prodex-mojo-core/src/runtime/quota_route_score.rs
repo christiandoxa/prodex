@@ -3,6 +3,9 @@ use super::{
     RUNTIME_QUOTA_SCORE_MAX_COUNT,
 };
 
+mod probe_order;
+pub use probe_order::{QuotaProbeOrderInput, QuotaProbeOrderPlan, quota_probe_order};
+
 const RUNTIME_QUOTA_SUMMARY_SORT_KEY_ABI_VERSION: i64 = 1;
 const RUNTIME_QUOTA_SUMMARY_SORT_KEY_FIELD_COUNT: usize = 9;
 

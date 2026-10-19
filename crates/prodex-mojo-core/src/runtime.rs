@@ -28,7 +28,8 @@ mod prompt_cache_affinity;
 mod quota_decisions;
 mod quota_route_score;
 pub use quota_route_score::{
-    QuotaSummarySortKey, QuotaSummarySortKeyInput, quota_summary_sort_key,
+    QuotaProbeOrderInput, QuotaProbeOrderPlan, QuotaSummarySortKey, QuotaSummarySortKeyInput,
+    quota_probe_order, quota_summary_sort_key,
 };
 mod responses_loop_control;
 mod selection_planning;

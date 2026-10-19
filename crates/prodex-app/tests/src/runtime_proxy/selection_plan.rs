@@ -42,6 +42,75 @@ fn probe_plan_queues_cold_profiles_for_background_refresh() {
 }
 
 #[test]
+fn probe_plan_orders_usable_quota_before_missing_facts_and_preserves_source_ties() {
+    let now = 1_000;
+    for (current, remaining, expected) in [
+        (
+            "alpha",
+            [None, Some(70), Some(90)],
+            ["gamma", "beta", "alpha"],
+        ),
+        (
+            "gamma",
+            [Some(50), Some(50), Some(50)],
+            ["gamma", "alpha", "beta"],
+        ),
+    ] {
+        let entries = ["alpha", "beta", "gamma"]
+            .into_iter()
+            .zip(remaining)
+            .map(|(name, remaining)| {
+                selection_entry(
+                    name,
+                    SelectionEntryFixture {
+                        cached_usage_snapshot: remaining.map(|remaining| {
+                            RuntimeProfileUsageSnapshot {
+                                checked_at: now,
+                                plan_type: None,
+                                five_hour_status: RuntimeQuotaWindowStatus::Ready,
+                                five_hour_remaining_percent: remaining,
+                                five_hour_reset_at: now + 300,
+                                weekly_status: RuntimeQuotaWindowStatus::Ready,
+                                weekly_remaining_percent: remaining,
+                                weekly_reset_at: now + 86_400,
+                            }
+                        }),
+                        ..SelectionEntryFixture::default()
+                    },
+                )
+            })
+            .collect();
+        let state = RuntimeRouteSelectionCatalog {
+            current_profile: current.to_string(),
+            include_code_review: false,
+            upstream_base_url: "https://example.com/backend-api".to_string(),
+            entries,
+        };
+        let plan = build_runtime_response_probe_plan(
+            &state,
+            &BTreeSet::new(),
+            RuntimeRouteKind::Responses,
+            None,
+            now,
+        );
+        assert_eq!(
+            plan.cold_start_probe_jobs
+                .iter()
+                .map(|job| job.name.as_str())
+                .collect::<Vec<_>>(),
+            expected
+        );
+        assert_eq!(
+            plan.reports
+                .iter()
+                .map(|report| report.order_index)
+                .collect::<Vec<_>>(),
+            [0, 1, 2]
+        );
+    }
+}
+
+#[test]
 fn probe_plan_does_not_refresh_authoritatively_exhausted_responses_snapshot() {
     let now = Local::now().timestamp();
     let state = RuntimeRouteSelectionCatalog {

@@ -6835,3 +6835,60 @@ secret-boundary, offline compatibility baseline/replay and diff checks pass.
 Staged churn stays within the 1,200-line/500-per-file limits. Full CI, live
 provider and native macOS/Windows checks were not run. No owned comparison or
 probe remains; the build cache is retained for the next checkpoint.
+
+
+## Compiled cold-start quota probe ordering (2026-10-20)
+
+Retry-duration checkpoint `07601811e` is pushed to main. The live response
+selection path now submits lazy numeric quota facts to a version-1 Mojo batch
+ordering plan. Each usable persisted summary is acquired once; Mojo reuses the
+existing nine-field summary-key owner and shared allocation-free index heap.
+Missing-summary defaults, descending reserve/remaining fields, signed reset
+times, full unsigned source order and stable ties are Mojo-owned. Rust checks
+row counts and the output permutation, then moves existing jobs without cloning
+provider or native path values. No profile identifier enters the new ABI.
+
+The previous Rust `sort_by_key` and missing-summary construction are deleted.
+The report sort was redundant: reports are pushed in the outer enumeration's
+strictly increasing order, including when entries are skipped. It is removed
+while caller regressions verify report ordinals and cold-probe ordering.
+Zero/one-job plans keep the original vector and do not acquire quota facts.
+There is no Rust ordering fallback or new pool-size cap.
+
+All 4,096 generated pool-order comparisons match the former stable Rust sort.
+The temporary oracle is removed. Focused tests cover missing summaries,
+unsigned maximum ordinals, equal keys, signed timestamp extremes, late invalid
+rows before writes, lazy trivial pools and 65,537 profiles. Initial direct
+compilation required explicit Int64 loop bounds; fixed before validation.
+Direct assertions pass via
+`mojo run -D ASSERT=all -I mojo/prodex_core mojo/tests/quota_probe_order_test.mojo`.
+All 997 strict Mojo-core tests and five real selection-plan caller tests pass via
+`PRODEX_MOJO_REQUIRED=1 CARGO_BUILD_JOBS=6 cargo test --locked -q -p prodex-mojo-core --features mojo-core -- --test-threads=1`
+and `PRODEX_MOJO_REQUIRED=1 CARGO_BUILD_JOBS=6 cargo test --locked -q -p prodex-app --lib runtime_proxy::selection_plan::tests:: -- --test-threads=1`.
+
+The unchanged official metric rises from 35.520937188434694% to
+35.52348948702902% (128,335 Mojo / 232,933 Rust production lines), leaving
+39.47651051297098 percentage points to 75%. Release-floor and audited reachable
+source non-regression checks pass; the project target remains unmet.
+
+All 459 serialized proxy regressions pass with the established strict
+`cargo test --locked -q -p prodex-app --lib main_internal_tests::runtime_proxy_ -- --test-threads=1`
+command. Workspace all-target/all-feature Clippy initially found the obsolete
+quota-key import; removing it makes the strict rerun pass with existing vendor
+warnings only. The strict production binary build passes. A bounded real-proxy
+load smoke against a local mock passes all 32 requests at concurrency four,
+with p95 first-token latency 97.35 ms and no admission-pressure events. Its
+isolated homes, logs and mock state were removed after process checks.
+
+Canonical `RUST_TEST_THREADS=1 CARGO_BUILD_JOBS=6 npm run test:changed`,
+`PRODEX_MOJO_REQUIRED=1 CARGO_BUILD_JOBS=6 node scripts/ci/test-serial.mjs --suite runtime-smoke`,
+runtime-test-manifest, docs, formatting and diff checks pass. No-fallback
+self-test/source, authority, size, crate-boundary self-test/source,
+runtime-hotpath self-test/source, secret-boundary and offline compatibility
+baseline/replay checks pass, including all five replay fixtures. Staged churn
+remains within 1,200 total lines and 500 lines per file. Full CI, live provider
+and native macOS/Windows checks were not run.
+
+After confirming no active build/test process and no release output,
+`cargo clean` removed 13.2 GiB. Trash contained only empty standard directories;
+`trash-empty -f` completed. Source WIP and campaign evidence remain preserved.
