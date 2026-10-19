@@ -25,6 +25,9 @@ pub use runtime_doctor_degraded_routes::{
 
 use crate::{MojoError, MojoIssue};
 
+mod provider_sse_data;
+pub use provider_sse_data::provider_sse_data_lines;
+
 // v6 uses fixed-width UInt64 addresses for every pointer crossing the rich C
 // ABI, including all by-value record inputs.
 pub const RICH_ABI_VERSION: i64 = 6;

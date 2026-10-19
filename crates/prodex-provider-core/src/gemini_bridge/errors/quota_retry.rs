@@ -72,6 +72,27 @@ mod tests {
     use super::*;
 
     #[test]
+    fn buffered_sse_quota_and_retry_callers_share_ordered_unicode_payloads() {
+        let body = "data:{\"retryDelay\":\"0.25s\"}\nDATA:{\"error\":{\"status\":\"INSUFFICIENT_QUOTA\"}}\n\u{2003}data:\u{3000}{\"error\":{\"status\":\"RESOURCE_EXHAUSTED\",\"message\":\"daily\"}}\r\ndata:[DONE]\ndata:{bad}";
+        assert!(gemini_provider_core_body_has_terminal_quota(
+            body.as_bytes()
+        ));
+        assert_eq!(
+            gemini_provider_core_google_quota_message(body.as_bytes()),
+            Some("daily".to_string())
+        );
+        assert_eq!(
+            gemini_provider_core_retry_delay_ms_from_body(body.as_bytes()),
+            Some(250)
+        );
+        assert!(!gemini_provider_core_body_has_terminal_quota(b"data:\xff"));
+        assert_eq!(
+            gemini_provider_core_retry_delay_ms_from_body(b"data:\xff"),
+            None
+        );
+    }
+
+    #[test]
     fn compiled_quota_rotation_preserves_affinity_status_and_attempt_budget() {
         for status in [200, 400, 401, 403, 404, 429, 500] {
             let eligible = matches!(status, 403 | 429);

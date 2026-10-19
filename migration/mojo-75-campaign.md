@@ -6735,3 +6735,52 @@ After checking that no build/test process referenced target outputs and no
 release artifact was present, `cargo clean` removed 12.8 GiB. Inspected Trash
 was empty; `trash-empty -f` completed. The next migration's owned SSE prototype
 is retained outside the source tree until it is integrated and harvested.
+
+
+## Shared compiled buffered-provider SSE framing (2026-10-20)
+
+Prompt-cache checkpoint `ebc1d0aa4` is pushed to main. Generic provider error
+codes and Gemini quota/retry bodies now share Serde acquisition and a version-1
+Mojo payload-span ABI. Mojo owns LF framing, Unicode trimming, exact `data:`
+prefix recognition and ordered payload bounds. Rust retains UTF-8/Serde
+acquisition and checked borrowed slices. Both former Rust line scanners are
+removed; ABI errors fail explicitly without Rust recomputation.
+
+Buffered error readers accept Unicode whitespace before `data:` and parse each
+payload separately. Their contract differs from streaming SSE's strict fields,
+multiline assembly and BOM handling, so the new focused owner reuses the rich
+text kernels while preserving the existing streaming transport contract.
+Empty and `[DONE]` payloads yield no JSON values. Valid whole-body
+JSON still takes precedence, malformed events are skipped, and duplicate codes
+and first-message ordering remain intact. No new body or line-count cap is
+introduced. No provider-core runtime-feature dependency is added.
+
+All 8,192 generated comparisons match the former framing iterator, including
+Unicode whitespace, CRLF, bare CR, BOM, NUL and malformed fragments. The
+temporary oracle is removed. The owned prototype and its probe directory have
+been integrated and deleted. ABI regressions cover malformed pointers/counts,
+UTF-8, version mismatch, probe counts and capacity failure without partial rows.
+Direct assertions pass via
+`mojo run -D ASSERT=all -I mojo/prodex_core mojo/tests/provider_sse_data_test.mojo`.
+Caller regressions exercise generic error codes and Gemini terminal-quota,
+message and retry-delay behavior through their real entrypoints.
+
+All 990 strict core tests and 503 provider tests pass via
+`PRODEX_MOJO_REQUIRED=1 CARGO_BUILD_JOBS=6 cargo test --locked -q -p prodex-mojo-core --features mojo-core -- --test-threads=1`
+and `PRODEX_MOJO_REQUIRED=1 CARGO_BUILD_JOBS=6 cargo test --locked -q -p prodex-provider-core --features mojo -- --test-threads=1`.
+The unchanged official metric rises from 35.50173202161563% to
+35.50485531036585% (128,153 Mojo / 232,792 Rust production lines), leaving
+39.49514468963415 percentage points to 75%. The release floor and audited
+reachable-source non-regression checks pass; the project target remains unmet.
+
+
+Workspace Clippy passes via
+`PRODEX_MOJO_REQUIRED=1 CARGO_BUILD_JOBS=6 cargo clippy --locked --workspace --all-targets --all-features -- -D warnings`,
+with existing vendor warnings only. Canonical
+`CARGO_BUILD_JOBS=6 npm run test:changed`, docs, formatting, no-fallback
+self-test/source, authority, size, crate/provider-SPI boundary self-test/source,
+secret-boundary, offline compatibility baseline/replay and diff checks pass.
+The canonical feature selection runs 502 provider tests; the explicit-feature
+suite above supplies the 503-test evidence. Staged churn is within the
+1,200-line/500-per-file limits. Full CI, live provider and native macOS/Windows
+checks were not run. The recently cleaned build cache is retained for reuse.
