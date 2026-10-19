@@ -6022,3 +6022,15 @@ comparison, then materializes the Mojo-selected positions without
 an alternative policy. Direct ABI, test-only historical oracles,
 full Smart Context regressions and no-fallback guard protect the
 original merge semantics. The 75% target is still outstanding.
+
+
+## Gemini builtin tool array batch selection moved to Mojo
+
+The Gemini request adapter now classifies a whole normalized tool array
+with one compiled provider-constraints call. The previous Rust
+per-item synthetic SimpleRequest predicate and repeated classification
+from function declaration construction were deleted. Rust applies the
+Mojo-selected positions to canonical output without a fallback
+classifier. Direct ABI, mixed builtin/function provider regressions
+and no-fallback guards retain aliases and ordering. The distinct
+75% Mojo project source-share target remains outstanding.

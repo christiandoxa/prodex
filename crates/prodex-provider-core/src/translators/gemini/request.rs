@@ -14,7 +14,7 @@ pub use self::generation_config::gemini_provider_core_model_uses_thinking_level;
 pub(crate) use self::schema::sanitize_function_schema;
 pub(crate) use self::tool_signatures::gemini_preserve_tool_call_signatures;
 pub(crate) use self::tools::{
-    gemini_builtin_tools_from_request, gemini_function_declaration_from_openai_tool,
-    gemini_tool_config_from_request, gemini_validate_openai_tools,
-    gemini_validate_openai_tools_with_nested_function_paths,
+    gemini_builtin_tool_indices, gemini_builtin_tools_from_request,
+    gemini_function_declaration_from_openai_tool, gemini_tool_config_from_request,
+    gemini_validate_openai_tools, gemini_validate_openai_tools_with_nested_function_paths,
 };

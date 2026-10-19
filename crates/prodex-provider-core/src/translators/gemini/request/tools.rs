@@ -3,7 +3,7 @@
 #[path = "tools/builtin.rs"]
 mod builtin;
 
-pub(crate) use self::builtin::gemini_builtin_tools_from_request;
+pub(crate) use self::builtin::{gemini_builtin_tool_indices, gemini_builtin_tools_from_request};
 use serde_json::{Value, json};
 
 use super::schema::sanitize_function_schema;

@@ -1,9 +1,9 @@
 //! Gemini request tool-shape bridge helpers.
 
 use crate::translators::{
-    gemini_builtin_tools_from_request, gemini_function_declaration_from_openai_tool,
-    gemini_sanitize_function_schema, gemini_validate_openai_tools,
-    gemini_validate_openai_tools_with_nested_function_paths,
+    gemini_builtin_tool_indices, gemini_builtin_tools_from_request,
+    gemini_function_declaration_from_openai_tool, gemini_sanitize_function_schema,
+    gemini_validate_openai_tools, gemini_validate_openai_tools_with_nested_function_paths,
 };
 
 use crate::gemini_bridge::gemini_provider_core_apply_gemini3_tool_declaration_overrides;
@@ -30,8 +30,9 @@ pub fn gemini_provider_core_function_tools_from_chat(
         return Ok(None);
     };
     let mut declarations = Vec::new();
+    let builtin_indexes = gemini_builtin_tool_indices(tools);
     for (index, tool) in tools.iter().enumerate() {
-        if !gemini_builtin_tools_from_request(std::slice::from_ref(tool)).is_empty() {
+        if builtin_indexes.binary_search(&index).is_ok() {
             continue;
         }
         let declaration = gemini_function_declaration_from_openai_tool(tool)
@@ -229,6 +230,55 @@ mod tests {
                 }]
             }]))
         );
+    }
+
+    #[test]
+    fn compiled_gemini_builtin_batch_keeps_mixed_builtin_groups_and_functions_in_order() {
+        let request = json!({
+            "tools": [
+                {"type":"url_context"},
+                {"type":"function", "function":{"name":"lookup_東京", "parameters":{"type":"object"}}},
+                {"type":"code_interpreter"},
+                {"type":"function", "function":{"name":"search_one", "parameters":{"type":"object"}}},
+                {"type":"web_search_preview_2099"},
+                {"type":"function", "function":{"name":"search_two", "parameters":{"type":"object"}}},
+                {"type":"computer_use", "computerUse":{"environment":"ENVIRONMENT_BROWSER"}},
+                {"type":"function", "function":{"name":"lookup_🧭", "parameters":{"type":"object"}}},
+            ]
+        });
+        let tools = request["tools"].as_array().unwrap();
+        assert_eq!(gemini_builtin_tool_indices(tools), [0, 2, 4, 6]);
+
+        let expected_declarations = json!([{
+            "functionDeclarations": [
+                {"name":"lookup_東京", "parameters":{"type":"object"}},
+                {"name":"search_one", "parameters":{"type":"object"}},
+                {"name":"search_two", "parameters":{"type":"object"}},
+                {"name":"lookup_🧭", "parameters":{"type":"object"}}
+            ]
+        }]);
+        assert_eq!(
+            gemini_provider_core_function_tools_from_chat(&request, "gemini-2.5-flash", |_| {}),
+            Ok(Some(expected_declarations.clone())),
+        );
+        let tools_value = gemini_provider_core_tools_from_requests(
+            &request,
+            &request,
+            "gemini-2.5-flash",
+            |_| {},
+        )
+        .unwrap()
+        .unwrap();
+        let normalized = tools_value.as_array().unwrap();
+        assert_eq!(normalized.len(), 5);
+        assert_eq!(
+            normalized[0],
+            json!({"computerUse":{"environment":"ENVIRONMENT_BROWSER"}})
+        );
+        assert_eq!(normalized[1], json!({"codeExecution":{}}));
+        assert_eq!(normalized[2], json!({"googleSearch":{}}));
+        assert_eq!(normalized[3], json!({"urlContext":{}}));
+        assert_eq!(normalized[4], expected_declarations[0]);
     }
 
     #[test]

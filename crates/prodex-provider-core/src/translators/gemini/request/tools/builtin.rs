@@ -2,18 +2,22 @@
 
 use serde_json::{Value, json};
 
-fn gemini_tool_is_supported_builtin(tool: &Value) -> bool {
-    let body = serde_json::to_vec(&json!({"input":"","tools":[tool]}))
-        .expect("Gemini built-in tool serializes");
-    crate::gemini_bridge::gemini_provider_core_simple_request(&body)
+/// Classify one full tool array in compiled Mojo rather than issuing a
+/// separate SimpleRequest kernel call for each source item.
+pub(crate) fn gemini_builtin_tool_indices(tools: &[Value]) -> Vec<usize> {
+    if tools.is_empty() {
+        return Vec::new();
+    }
+    let body = serde_json::to_vec(&json!({"tools": tools})).expect("Gemini tool array serializes");
+    prodex_mojo_core::provider_constraints::gemini_builtin_tool_positions(&body, tools.len())
+        .expect("compiled Mojo Gemini built-in tool batch planner returned invalid output")
 }
 
 pub(crate) fn gemini_builtin_tools_from_request(tools: &[Value]) -> Vec<Value> {
-    let tools: Vec<_> = tools
-        .iter()
-        .filter(|tool| gemini_tool_is_supported_builtin(tool))
-        .map(|tool| {
-            let mut tool = (*tool).clone();
+    let tools: Vec<_> = gemini_builtin_tool_indices(tools)
+        .into_iter()
+        .map(|index| {
+            let mut tool = tools[index].clone();
             if let Some(object) = tool.as_object_mut() {
                 object.remove("function");
             }

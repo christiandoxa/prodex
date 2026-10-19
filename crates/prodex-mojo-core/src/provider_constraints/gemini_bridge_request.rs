@@ -98,6 +98,14 @@ const _: () = assert!(std::mem::size_of::<GeminiBridgeRequestStringView>() == 16
 const _: () = assert!(std::mem::size_of::<GeminiBridgeRequestFfiInput>() == 208);
 
 unsafe extern "C" {
+    fn prodex_gemini_builtin_tool_batch_v1(
+        abi_version: i64,
+        request_address: u64,
+        request_length: i64,
+        output_address: u64,
+        output_capacity: i64,
+        written_address: u64,
+    ) -> i64;
     fn prodex_gemini_bridge_request_kernel_v1(
         abi_version: i64,
         input: u64,
@@ -160,6 +168,139 @@ fn output_capacity(input: &GeminiBridgeRequestKernelInput<'_>) -> Result<usize, 
             .and_then(|value| value.checked_add(4096))
             .ok_or(MojoError::InvalidInput)
     })
+}
+
+/// Compiled batch classifier for raw Gemini builtin tool entries.
+/// The input is a Serde-normalized JSON object containing a tools array.
+/// The caller only applies selected positions; Rust has no per-item
+/// supported-tool predicate or SimpleRequest-based fallback.
+pub fn gemini_builtin_tool_positions(
+    request: &[u8],
+    expected_count: usize,
+) -> Result<Vec<usize>, MojoError> {
+    let mut flags = vec![-1_i64; expected_count];
+    let mut written = -1_i64;
+    let status = unsafe {
+        prodex_gemini_builtin_tool_batch_v1(
+            GEMINI_BRIDGE_REQUEST_ABI_VERSION,
+            pointer_address(request.as_ptr()),
+            i64::try_from(request.len()).map_err(|_| MojoError::InvalidInput)?,
+            mutable_pointer_address(flags.as_mut_ptr()),
+            i64::try_from(flags.len()).map_err(|_| MojoError::InvalidInput)?,
+            mutable_pointer_address(&mut written),
+        )
+    };
+    match status {
+        0 => {}
+        1 => return Err(MojoError::InvalidInput),
+        3 => return Err(MojoError::Capacity),
+        4 => return Err(MojoError::AbiMismatch),
+        _ => return Err(MojoError::InvalidOutput),
+    }
+    let count = usize::try_from(written).map_err(|_| MojoError::InvalidOutput)?;
+    if count != expected_count {
+        return Err(MojoError::InvalidOutput);
+    }
+    flags
+        .iter()
+        .enumerate()
+        .filter_map(|(index, &selected)| match selected {
+            0 => None,
+            1 => Some(Ok(index)),
+            _ => Some(Err(MojoError::InvalidOutput)),
+        })
+        .collect()
+}
+
+#[cfg(test)]
+mod gemini_builtin_batch_tests {
+    use super::*;
+
+    #[test]
+    fn compiled_gemini_builtin_batch_recognizes_aliases_and_sanitized_tool_set_in_one_call() {
+        let body = br#"{"tools":[
+            {"type":"web_search"},
+            {"type":"function","function":{"name":"lookup"}},
+            {"type":"computerUse","function":{"name":"ignored"}},
+            {"type":"url_context"},
+            {"type":"my_unknown_tool"},
+            {"type":"web_search_preview_2099"},
+            {"computerUse":{}},
+            {"type":"web_fetch_preview_new"},
+            {"type":"function","name":"x"},
+            {"type":"code_interpreter"},
+            {"type":"codeExecution"}
+        ]}"#;
+        assert_eq!(
+            gemini_builtin_tool_positions(body, 11),
+            Ok(vec![0, 2, 3, 5, 6, 7, 9, 10]),
+        );
+        assert_eq!(
+            gemini_builtin_tool_positions(br#"{"tools":[]}"#, 0),
+            Ok(vec![]),
+        );
+        assert_eq!(
+            gemini_builtin_tool_positions(body, 10),
+            Err(MojoError::Capacity),
+        );
+        assert_eq!(
+            gemini_builtin_tool_positions(body, 12),
+            Err(MojoError::InvalidOutput),
+        );
+        assert_eq!(
+            gemini_builtin_tool_positions(
+                br#"{"tools":[{"type":"function"},{"type":"function"}]}"#,
+                2
+            ),
+            Ok(vec![]),
+        );
+    }
+
+    #[test]
+    fn compiled_gemini_builtin_batch_abi_rejects_bad_request_and_capacity_without_writes() {
+        let request = br#"{"tools":[{"type":"web_search"}]}"#;
+        let input = request.as_ptr() as usize as u64;
+        let mut output = [71_i64; 2];
+        let mut written = 83_i64;
+        let dest = output.as_mut_ptr() as usize as u64;
+        let count = (&mut written as *mut i64) as usize as u64;
+        let call = |version, ptr, len, output, cap, count| unsafe {
+            prodex_gemini_builtin_tool_batch_v1(version, ptr, len, output, cap, count)
+        };
+        assert_eq!(call(2, input, request.len() as i64, dest, 2, count), 4);
+        assert_eq!(call(1, 0, request.len() as i64, dest, 2, count), 1);
+        assert_eq!(call(1, input, -1, dest, 2, count), 1);
+        assert_eq!(call(1, input, request.len() as i64, 0, 2, count), 1);
+        assert_eq!(call(1, input, request.len() as i64, dest, -1, count), 1);
+        assert_eq!(call(1, input, request.len() as i64, dest, 0, count), 3);
+        assert_eq!(call(1, input, request.len() as i64, dest, 2, 0), 1);
+        let invalid = br#"{"tools":["#;
+        assert_eq!(
+            call(
+                1,
+                invalid.as_ptr() as usize as u64,
+                invalid.len() as i64,
+                dest,
+                2,
+                count
+            ),
+            1
+        );
+        let malformed = br#"{"tools":"not an array"}"#;
+        assert_eq!(
+            call(
+                1,
+                malformed.as_ptr() as usize as u64,
+                malformed.len() as i64,
+                dest,
+                2,
+                count
+            ),
+            1
+        );
+        assert_eq!(output, [71; 2]);
+        assert_eq!(written, 83);
+    }
 }
 
 /// Runs one bounded, caller-owned Gemini bridge request operation in Mojo.
