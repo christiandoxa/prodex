@@ -4,6 +4,7 @@ from std.math import isfinite
 from rich_text import rich_view_ptr, rich_view_valid
 from rich_types import ProdexRichStringView
 from runtime_math import INT64_MAX, INT64_MIN, UINT64_MAX
+from info_provider import info_provider_render
 
 comptime INFO_RENDER_ABI_VERSION: Int64 = 1
 comptime INFO_RENDER_OK: Int64 = 0
@@ -41,6 +42,8 @@ comptime INFO_RENDER_STATUS_RESOURCE_HISTORY: Int64 = 26
 comptime INFO_RENDER_STATUS_QUOTA_GAUGE: Int64 = 27
 comptime INFO_RENDER_DOCTOR_VALUE_COLOR: Int64 = 28
 comptime INFO_RENDER_DOCTOR_VIEWPORT: Int64 = 29
+comptime INFO_RENDER_PROVIDER_SUMMARY: Int64 = 30
+comptime INFO_RENDER_PROVIDER_CAPABILITIES: Int64 = 31
 comptime INFO_STATUS_HISTORY_LIMIT: Int64 = 64
 comptime INFO_STATUS_FIELD_COUNT: Int64 = 14
 
@@ -1569,7 +1572,7 @@ def prodex_terminal_info_render_v1(
     if (
         abi_version != INFO_RENDER_ABI_VERSION
         or operation < INFO_RENDER_RELATIVE_DURATION
-        or operation > INFO_RENDER_DOCTOR_VIEWPORT
+        or operation > INFO_RENDER_PROVIDER_CAPABILITIES
         or signed_count < 0
         or unsigned_count < 0
         or text_count < 0
@@ -1585,6 +1588,18 @@ def prodex_terminal_info_render_v1(
     var required_signed: Int64 = 0
     var required_unsigned: Int64 = 0
     var required_text: Int64 = 0
+    if operation == INFO_RENDER_PROVIDER_SUMMARY or operation == INFO_RENDER_PROVIDER_CAPABILITIES:
+        if signed_count != 0 or presence != 0 or text_count > INT64_MAX // 48:
+            return INFO_RENDER_INVALID
+        var expected_unsigned: Int64 = 0
+        if operation == INFO_RENDER_PROVIDER_CAPABILITIES:
+            expected_unsigned = text_count * 2
+        if unsigned_count != expected_unsigned:
+            return INFO_RENDER_INVALID
+        return info_provider_render(
+            operation == INFO_RENDER_PROVIDER_CAPABILITIES, unsigned_address, text_address, text_count,
+            output_address, output_capacity, written_address,
+        )
     if operation == INFO_RENDER_DOCTOR_VALUE_COLOR:
         if signed_count != 0 or unsigned_count != 0 or text_count != 2 or presence != 0:
             return INFO_RENDER_INVALID

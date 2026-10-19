@@ -27,6 +27,9 @@ const DOCTOR_RENDER_MOJO_FILE = "mojo/prodex_core/runtime_doctor_render.mojo";
 const DOCTOR_PRESENTATION_CONSUMER_FILE = "crates/prodex-app/src/app_commands/doctor/render.rs";
 const DOCTOR_PRESENTATION_ADAPTER_FILE = "crates/prodex-mojo-core/src/info_render/doctor.rs";
 const DOCTOR_PRESENTATION_MOJO_FILE = "mojo/prodex_core/info_render.mojo";
+const INFO_PROVIDER_CALLER_FILE = "crates/prodex-app/src/app_commands/info.rs";
+const INFO_PROVIDER_ADAPTER_FILE = "crates/prodex-mojo-core/src/info_render/provider.rs";
+const INFO_PROVIDER_MOJO_FILE = "mojo/prodex_core/info_provider.mojo";
 const PROVIDER_BINDING_IDENTITY_CONSUMER_FILE = "crates/prodex-provider-core/src/binding_identity.rs";
 const PROVIDER_BINDING_IDENTITY_ADAPTER_FILE = "crates/prodex-mojo-core/src/rich/provider_binding_identity.rs";
 const PROVIDER_BINDING_IDENTITY_MOJO_FILE = "mojo/prodex_core/provider_binding_identity.mojo";
@@ -646,6 +649,9 @@ const PROMOTED_FILES = [
   DOCTOR_PRESENTATION_CONSUMER_FILE,
   DOCTOR_PRESENTATION_ADAPTER_FILE,
   DOCTOR_PRESENTATION_MOJO_FILE,
+  INFO_PROVIDER_CALLER_FILE,
+  INFO_PROVIDER_ADAPTER_FILE,
+  INFO_PROVIDER_MOJO_FILE,
   PROVIDER_BINDING_IDENTITY_CONSUMER_FILE,
   PROVIDER_BINDING_IDENTITY_ADAPTER_FILE,
   PROVIDER_BINDING_IDENTITY_MOJO_FILE,
@@ -6311,6 +6317,39 @@ export function findViolations(files) {
         .filter((marker) => !contents.includes(marker))
         .map((marker) => filePath + ": status policy adapter must retain Mojo call " + marker);
     }
+    if (filePath === INFO_PROVIDER_CALLER_FILE || filePath === INFO_PROVIDER_ADAPTER_FILE) {
+      const production = contents.split("#[cfg(test)]", 1)[0];
+      const required = filePath === INFO_PROVIDER_CALLER_FILE ? [
+        "prodex_mojo_core::info_render::format_provider_summary(",
+        "prodex_mojo_core::info_render::format_provider_capabilities_summary(",
+      ] : [
+        "const PROVIDER_SUMMARY: i64 = 30",
+        "const PROVIDER_CAPABILITIES: i64 = 31",
+        "render(PROVIDER_SUMMARY",
+        "render(PROVIDER_CAPABILITIES",
+      ];
+      const violations = required.filter((marker) => !production.includes(marker))
+        .map((marker) => `${filePath}: Info provider policy must retain Mojo delegation ${marker}`);
+      if (/\b(?:quota_shapes|openai_format|counts\.entry|sort_by|sort_unstable)\b/u.test(production)) {
+        violations.push(`${filePath}: contains restored Rust Info provider aggregation`);
+      }
+      const tests = filePath === INFO_PROVIDER_CALLER_FILE ? [
+        "info_provider_summaries_keep_empty_output",
+        "info_provider_summaries_group_all_provider_kinds_and_duplicate_labels",
+      ] : [
+        "compiled_provider_summaries_group_unicode_and_all_capability_categories",
+        "compiled_provider_summary_abi_rejects_fact_shapes_before_output",
+      ];
+      violations.push(...tests.filter((marker) => !contents.includes(marker))
+        .map((marker) => `${filePath}: Info provider regression must retain ${marker}`));
+      return violations;
+    }
+    if (filePath === INFO_PROVIDER_MOJO_FILE) {
+      return ["def info_provider_render(", "rich_view_order_sort(", "rich_view_compare(",
+        "routes native=", "openai-format=", "scratch_bytes = count * 24"]
+        .filter((marker) => !contents.includes(marker))
+        .map((marker) => `${filePath}: Info provider semantics must remain Mojo-owned (${marker})`);
+    }
     if (filePath === DOCTOR_PRESENTATION_CONSUMER_FILE) {
       const production = contents.split("#[cfg(test)]", 1)[0];
       const required = [
@@ -6487,6 +6526,9 @@ export function findViolations(files) {
         "info_render_doctor_viewport(",
         "if operation == INFO_RENDER_DOCTOR_VALUE_COLOR:",
         "elif operation == INFO_RENDER_DOCTOR_VIEWPORT:",
+        "INFO_RENDER_PROVIDER_SUMMARY",
+        "INFO_RENDER_PROVIDER_CAPABILITIES",
+        "info_provider_render(",
       ];
       return required
         .filter((marker) => !contents.includes(marker))
@@ -10353,6 +10395,7 @@ export function findViolations(files) {
 }
 
 const RELOCATED_TEST_FILES = new Set([
+  "crates/prodex-app/src/app_commands/info_provider_tests.rs",
   "crates/prodex-app/src/super_expose/optional_alias_tests.rs",
   "crates/prodex-app/src/super_expose/optional_tools_presentation_tests.rs",
   "crates/prodex-app/src/super_expose/protocol/tool_catalog_tests.rs",
@@ -10481,6 +10524,30 @@ function selfTest() {
       doctorPresentationAdapterCanonical.replace("render(DOCTOR_VIEWPORT", "fn viewport_rust(")]]).join("\n"),
     /doctor presentation adapter must retain render\(DOCTOR_VIEWPORT/u,
   );
+  const infoProviderCanonical = [
+    "prodex_mojo_core::info_render::format_provider_summary(",
+    "prodex_mojo_core::info_render::format_provider_capabilities_summary(",
+    "info_provider_summaries_keep_empty_output",
+    "info_provider_summaries_group_all_provider_kinds_and_duplicate_labels",
+  ].join("\n");
+  assert.deepEqual(findViolations([[INFO_PROVIDER_CALLER_FILE, infoProviderCanonical]]), []);
+  assert.match(findViolations([[INFO_PROVIDER_CALLER_FILE,
+    infoProviderCanonical + "\nlet mut quota_shapes = BTreeMap::new();"]]).join("\n"),
+  /restored Rust Info provider aggregation/u);
+  const infoProviderAdapter = ["const PROVIDER_SUMMARY: i64 = 30",
+    "const PROVIDER_CAPABILITIES: i64 = 31", "render(PROVIDER_SUMMARY", "render(PROVIDER_CAPABILITIES",
+    "compiled_provider_summaries_group_unicode_and_all_capability_categories",
+    "compiled_provider_summary_abi_rejects_fact_shapes_before_output"].join("\n");
+  assert.deepEqual(findViolations([[INFO_PROVIDER_ADAPTER_FILE, infoProviderAdapter]]), []);
+  assert.match(findViolations([[INFO_PROVIDER_ADAPTER_FILE,
+    infoProviderAdapter.replace("render(PROVIDER_SUMMARY", "old_summary(")]]).join("\n"),
+  /Info provider policy must retain Mojo delegation/u);
+  const infoProviderMojo = ["def info_provider_render(", "rich_view_order_sort(", "rich_view_compare(",
+    "routes native=", "openai-format=", "scratch_bytes = count * 24"].join("\n");
+  assert.deepEqual(findViolations([[INFO_PROVIDER_MOJO_FILE, infoProviderMojo]]), []);
+  assert.match(findViolations([[INFO_PROVIDER_MOJO_FILE,
+    infoProviderMojo.replace("rich_view_order_sort(", "old_sort(")]]).join("\n"),
+  /Info provider semantics must remain Mojo-owned/u);
   const doctorPresentationMojoCanonical = [
     "INFO_RENDER_HUMAN_BYTES",
     "INFO_RENDER_HUMAN_COUNT",
@@ -10506,6 +10573,9 @@ function selfTest() {
     "info_render_doctor_viewport(",
     "if operation == INFO_RENDER_DOCTOR_VALUE_COLOR:",
     "elif operation == INFO_RENDER_DOCTOR_VIEWPORT:",
+    "INFO_RENDER_PROVIDER_SUMMARY",
+    "INFO_RENDER_PROVIDER_CAPABILITIES",
+    "info_provider_render(",
   ].join("\n");
   assert.deepEqual(findViolations([[DOCTOR_PRESENTATION_MOJO_FILE, doctorPresentationMojoCanonical]]), []);
   assert.match(

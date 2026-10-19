@@ -1,9 +1,14 @@
 use crate::MojoError;
 
 mod doctor;
+mod provider;
 mod runway;
 mod status;
 pub use doctor::{InfoDoctorViewportPlan, doctor_value_color, doctor_viewport_plan};
+pub use provider::{
+    InfoProviderCapability, InfoProviderRoutePolicy, format_provider_capabilities_summary,
+    format_provider_summary,
+};
 pub use runway::{InfoRunwayEstimate, InfoRunwayObservation, estimate_info_runway};
 pub use status::{
     InfoStatusFields, InfoStatusProfileChoice, InfoStatusQuotaGauge, InfoStatusReset,
@@ -114,6 +119,9 @@ fn render_bytes(
             .ok_or(MojoError::InvalidInput)
     })?;
     let output_extra = match operation {
+        provider::PROVIDER_SUMMARY | provider::PROVIDER_CAPABILITIES => {
+            texts.len().checked_mul(48).ok_or(MojoError::InvalidInput)?
+        }
         status::STATUS_PROFILE_FILTER => unsigned
             .len()
             .checked_mul(21)
