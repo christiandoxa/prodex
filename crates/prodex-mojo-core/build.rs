@@ -608,6 +608,7 @@ fn selected_sources() -> Vec<&'static str> {
         sources.push("../../mojo/prodex_core/deepseek_attempt_policy.mojo");
         sources.push("../../mojo/prodex_core/rtk_noisy.mojo");
         sources.push("../../mojo/prodex_core/provider_constraints.mojo");
+        sources.push("../../mojo/prodex_core/gemini_sse_completion.mojo");
         sources.push("../../mojo/prodex_core/provider_registry.mojo");
         sources.push("../../mojo/prodex_core/provider_usage.mojo");
     }

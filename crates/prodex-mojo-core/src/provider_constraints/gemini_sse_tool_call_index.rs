@@ -61,6 +61,14 @@ pub struct GeminiToolCallIndexBinding<'a> {
 }
 
 unsafe extern "C" {
+    fn prodex_gemini_sse_pending_tool_positions_v1(
+        abi_version: i64,
+        done_address: u64,
+        tool_count: i64,
+        indices_address: u64,
+        indices_capacity: i64,
+        written_address: u64,
+    ) -> i64;
     fn prodex_provider_constraints_gemini_tool_call_index_v1(
         abi_version: i64,
         part_index: u64,
@@ -211,9 +219,100 @@ pub fn gemini_tool_response_part_order(
         .collect()
 }
 
+/// Only the compiled kernel decides which Gemini SSE tool-call positions
+/// remain eligible for terminal events. Rust owns the mutable map and JSON.
+pub fn gemini_sse_pending_tool_positions(done: &[bool]) -> Result<Vec<usize>, crate::MojoError> {
+    let flags = done.iter().map(|done| i64::from(*done)).collect::<Vec<_>>();
+    let mut output = vec![u64::MAX; flags.len()];
+    let mut written = -1_i64;
+    let status = unsafe {
+        prodex_gemini_sse_pending_tool_positions_v1(
+            1,
+            flags.as_ptr() as usize as u64,
+            i64::try_from(flags.len()).map_err(|_| crate::MojoError::InvalidInput)?,
+            output.as_mut_ptr() as usize as u64,
+            i64::try_from(output.len()).map_err(|_| crate::MojoError::InvalidInput)?,
+            (&mut written as *mut i64) as usize as u64,
+        )
+    };
+    match status {
+        0 => {}
+        1 => return Err(crate::MojoError::InvalidInput),
+        4 => return Err(crate::MojoError::AbiMismatch),
+        _ => return Err(crate::MojoError::InvalidOutput),
+    }
+    let count = usize::try_from(written).map_err(|_| crate::MojoError::InvalidOutput)?;
+    if count > done.len() {
+        return Err(crate::MojoError::InvalidOutput);
+    }
+    let mut previous = None;
+    output[..count]
+        .iter()
+        .map(|index| {
+            let index = usize::try_from(*index).map_err(|_| crate::MojoError::InvalidOutput)?;
+            if done.get(index) != Some(&false) || previous.is_some_and(|last| index <= last) {
+                return Err(crate::MojoError::InvalidOutput);
+            }
+            previous = Some(index);
+            Ok(index)
+        })
+        .collect()
+}
+
 #[cfg(all(test, feature = "mojo-provider-constraints"))]
 mod tests {
-    use super::gemini_tool_response_part_order;
+    use super::{
+        gemini_sse_pending_tool_positions, gemini_tool_response_part_order,
+        prodex_gemini_sse_pending_tool_positions_v1,
+    };
+
+    #[test]
+    fn compiled_gemini_sse_completion_selects_only_pending_calls_in_stable_order() {
+        assert_eq!(gemini_sse_pending_tool_positions(&[]), Ok(vec![]));
+        assert_eq!(gemini_sse_pending_tool_positions(&[false]), Ok(vec![0]));
+        assert_eq!(gemini_sse_pending_tool_positions(&[true]), Ok(vec![]));
+        assert_eq!(
+            gemini_sse_pending_tool_positions(&[true, false, false, true, false]),
+            Ok(vec![1, 2, 4]),
+        );
+        assert_eq!(
+            gemini_sse_pending_tool_positions(&[true, true, true, true]),
+            Ok(vec![]),
+        );
+    }
+
+    #[test]
+    fn compiled_gemini_sse_completion_abi_rejects_bad_input_before_output_writes() {
+        let flags = [0_i64, 2_i64];
+        let valid = [0_i64, 1_i64];
+        let mut output = [59_u64; 2];
+        let mut count = 63_i64;
+        let output_ptr = output.as_mut_ptr() as usize as u64;
+        let written = (&mut count as *mut i64) as usize as u64;
+        let invoke = |version, input, len, result, capacity, written_ptr| unsafe {
+            prodex_gemini_sse_pending_tool_positions_v1(
+                version,
+                input,
+                len,
+                result,
+                capacity,
+                written_ptr,
+            )
+        };
+        let valid_ptr = valid.as_ptr() as usize as u64;
+        assert_eq!(invoke(2, valid_ptr, 2, output_ptr, 2, written), 4);
+        assert_eq!(invoke(1, 0, 2, output_ptr, 2, written), 1);
+        assert_eq!(invoke(1, valid_ptr, -1, output_ptr, 2, written), 1);
+        assert_eq!(invoke(1, valid_ptr, 2, 0, 2, written), 1);
+        assert_eq!(invoke(1, valid_ptr, 2, output_ptr, 1, written), 1);
+        assert_eq!(invoke(1, valid_ptr, 2, output_ptr, 2, 0), 1);
+        assert_eq!(
+            invoke(1, flags.as_ptr() as usize as u64, 2, output_ptr, 2, written),
+            1
+        );
+        assert_eq!(output, [59; 2]);
+        assert_eq!(count, 63);
+    }
 
     #[test]
     fn real_mojo_orders_duplicate_and_unmatched_ids_stably() {

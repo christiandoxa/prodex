@@ -38,8 +38,8 @@ pub use gemini_retry_policy::{
 };
 pub use gemini_signature_choice::{GeminiSignatureCandidate, gemini_signature_choice};
 pub use gemini_sse_tool_call_index::{
-    GeminiToolCallIndexBinding, GeminiToolCallIndexRecord, gemini_tool_call_index,
-    gemini_tool_response_part_order,
+    GeminiToolCallIndexBinding, GeminiToolCallIndexRecord, gemini_sse_pending_tool_positions,
+    gemini_tool_call_index, gemini_tool_response_part_order,
 };
 
 pub fn self_test() -> bool {

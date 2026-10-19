@@ -5,7 +5,8 @@ use super::RuntimeGeminiSseState;
 use super::runtime_gemini_blocked_tool_call_message_with_config;
 use prodex_domain::CallId;
 use prodex_mojo_core::provider_constraints::{
-    GeminiToolCallIndexBinding, GeminiToolCallIndexRecord, gemini_tool_call_index,
+    GeminiToolCallIndexBinding, GeminiToolCallIndexRecord, gemini_sse_pending_tool_positions,
+    gemini_tool_call_index,
 };
 use prodex_provider_core::{
     gemini_provider_core_canonical_output_tool_name,
@@ -156,17 +157,35 @@ impl RuntimeGeminiSseState {
     }
 
     pub(super) fn complete_tool_call_events(&mut self) -> Vec<String> {
-        let pending = self
+        let indexed = self
             .tool_calls
-            .iter_mut()
-            .filter_map(|(index, tool_call)| {
-                if tool_call.done {
-                    return None;
-                }
+            .iter()
+            .map(|(index, call)| (*index, call.done))
+            .collect::<Vec<_>>();
+        let pending_flags = indexed.iter().map(|(_, done)| *done).collect::<Vec<_>>();
+        let planned_positions = match gemini_sse_pending_tool_positions(&pending_flags) {
+            Ok(positions) => positions,
+            Err(_) => {
+                return self
+                    .failed_event(
+                        "gemini_stream_state_plan",
+                        "Compiled Mojo Gemini tool-call completion planning failed",
+                    )
+                    .into_iter()
+                    .collect();
+            }
+        };
+        let pending = planned_positions
+            .into_iter()
+            .filter_map(|position| {
+                // The compiled adapter has already validated each chosen
+                // position and unfinished-state precondition.
+                let (index, _) = *indexed.get(position)?;
+                let tool_call = self.tool_calls.get_mut(&index)?;
                 tool_call.done = true;
                 let stream_tool_call = gemini_provider_core_stream_tool_call(
                     self.request_id,
-                    *index,
+                    index,
                     tool_call.call_id.as_deref(),
                     tool_call.name.as_deref(),
                     &tool_call.arguments,

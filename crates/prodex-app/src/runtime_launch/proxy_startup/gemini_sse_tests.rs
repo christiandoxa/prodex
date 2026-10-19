@@ -648,6 +648,45 @@ fn gemini_sse_reader_maps_tool_search_function_to_tool_search_call() {
 }
 
 #[test]
+fn gemini_sse_compiled_completion_emits_each_pending_tool_once_in_index_order() {
+    let stream = concat!(
+        "data: {\"responseId\":\"resp_pending\",\"candidates\":[{\"content\":{\"parts\":[{\"functionCall\":{\"id\":\"call_a\",\"name\":\"shell\",\"args\":{\"cmd\":\"pwd\"}}},{\"functionCall\":{\"id\":\"call_b\",\"name\":\"shell\",\"args\":{\"cmd\":\"ls\"}}}]}}]}\n\n",
+        "data: {\"responseId\":\"resp_pending\",\"candidates\":[{\"content\":{\"parts\":[{\"functionCall\":{\"id\":\"call_b\",\"name\":\"shell\",\"args\":{\"cmd\":\"ls\"}}}]},\"finishReason\":\"STOP\"}]}\n\n",
+        "data: [DONE]\n\n",
+    );
+    let mut reader = RuntimeGeminiGenerateSseReader::new(
+        std::io::Cursor::new(stream.as_bytes()),
+        9,
+        Vec::new(),
+        conversation_store(),
+        None,
+    );
+    let mut output = String::new();
+    reader.read_to_string(&mut output).unwrap();
+    let events = output
+        .lines()
+        .filter_map(|line| line.strip_prefix("data: "))
+        .filter_map(|line| serde_json::from_str::<serde_json::Value>(line).ok())
+        .collect::<Vec<_>>();
+    let completed = events
+        .iter()
+        .filter(|event| {
+            event["type"] == "response.output_item.done" && event["item"]["type"] == "function_call"
+        })
+        .filter_map(|event| event["item"]["call_id"].as_str())
+        .collect::<Vec<_>>();
+    assert_eq!(completed, ["call_a", "call_b"], "{output}");
+    assert_eq!(
+        events
+            .iter()
+            .filter(|event| event["type"] == "response.completed")
+            .count(),
+        1
+    );
+    assert!(!output.contains("response.failed"), "{output}");
+}
+
+#[test]
 fn gemini_sse_reader_records_response_and_tool_call_bindings() {
     let captured = Arc::new(Mutex::new(None::<(String, Vec<String>)>));
     let captured_for_recorder = Arc::clone(&captured);

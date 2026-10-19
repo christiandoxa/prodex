@@ -5912,3 +5912,12 @@ result matching, duplicate completion suppression and sorted pending search
 completion. Rust keeps JSON/store effects, not the old search/dedup selection
 algorithm. Compiled ABI, real caller regressions and anti-fallback guard
 protect the contract. The separate 75% target remains outstanding.
+
+
+## Gemini SSE tool-call completion eligibility moved to Mojo
+
+The GenerateContent SSE adapter now uses a compiled Mojo policy to choose
+which tool-call indexes may complete. The old Rust done-state selection
+predicate was removed; Rust keeps the streaming state map and output I/O.
+Direct ABI and real stream regressions plus a no-fallback guard preserve
+exactly-once tool completion. The 75% project target remains outstanding.
