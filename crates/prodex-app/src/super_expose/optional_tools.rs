@@ -305,49 +305,12 @@ impl ExposeOptionalTools {
         }
     }
 
-    pub(super) fn instructions(&self) -> String {
-        let mut lines = vec![
-            "Optional tools are validated once when this expose endpoint starts. Use only entries marked available; unavailable or incompatible tools are not active.".to_string(),
-            "Use program optional:<name> for validated aliases. Normal program names and paths keep their existing behavior.".to_string(),
-        ];
-        for tool in &self.tools {
-            if !tool.usable {
-                lines.push(format!("- {}: unavailable.", tool.id));
-                continue;
-            }
-            let version = tool
-                .version
-                .as_deref()
-                .map(|version| format!(" ({version})"))
-                .unwrap_or_default();
-            let invocation = match tool.id {
-                OptionalToolId::Rtk => "program optional:rtk; use it for noisy shell output",
-                OptionalToolId::CodebaseMemoryMcp => {
-                    "program optional:codebase-memory-mcp; one-shot structural navigation is available with args cli --json <tool> ..."
-                }
-                OptionalToolId::PlaywrightMcp => {
-                    "program optional:playwright-mcp starts the validated MCP package via npx; program optional:playwright launches noninteractive Prodex Super with Playwright enabled"
-                }
-                OptionalToolId::Caveman => {
-                    "program optional:caveman launches noninteractive Prodex Super with the validated Caveman plugin enabled"
-                }
-                OptionalToolId::Ponytail => {
-                    "program optional:ponytail launches noninteractive Prodex Super with the validated Ponytail plugin enabled"
-                }
-                OptionalToolId::Presidio => {
-                    "program optional:presidio launches noninteractive Prodex Super with Presidio enabled; this alias exists only while Analyzer and Anonymizer are healthy"
-                }
-            };
-            lines.push(format!(
-                "- {}{} [{:?}]: {}.",
-                tool.id, version, tool.kind, invocation
-            ));
-        }
-        lines.join("\n")
-    }
-
-    pub(super) fn public_manifest(&self) -> Value {
-        Value::Array(
+    fn presentation<T: serde::de::DeserializeOwned>(
+        &self,
+        operation: prodex_mojo_core::json::SuperExposeOptionalToolOperation,
+    ) -> T {
+        // Rust supplies the existing enum Debug label as boundary data.
+        let facts = Value::Array(
             self.tools
                 .iter()
                 .map(|tool| {
@@ -356,11 +319,28 @@ impl ExposeOptionalTools {
                         "kind": format!("{:?}", tool.kind),
                         "available": tool.usable,
                         "version": tool.version.as_deref(),
-                        "alias": format!("{OPTIONAL_ALIAS_PREFIX}{}", tool.id.as_str()),
                     })
                 })
                 .collect(),
+        );
+        let source = crate::json_boundary::app_json_tree(&facts)
+            .expect("non-secret optional-tool observations fit the JSON ABI");
+        let body = prodex_mojo_core::json::super_expose_optional_tool_presentation(
+            &source.nodes,
+            std::str::from_utf8(&source.raw).expect("Serde emits UTF-8 JSON"),
+            operation,
         )
+        .expect("compiled Mojo optional-tool presentation failed");
+        serde_json::from_slice(&body)
+            .expect("compiled Mojo optional-tool presentation returned an invalid value")
+    }
+
+    pub(super) fn instructions(&self) -> String {
+        self.presentation(prodex_mojo_core::json::SuperExposeOptionalToolOperation::Instructions)
+    }
+
+    pub(super) fn public_manifest(&self) -> Value {
+        self.presentation(prodex_mojo_core::json::SuperExposeOptionalToolOperation::Manifest)
     }
 }
 
@@ -439,3 +419,7 @@ mod tests {
         assert!(error.contains("optional tool rtk is unavailable"));
     }
 }
+
+#[cfg(test)]
+#[path = "optional_tools_presentation_tests.rs"]
+mod presentation_tests;

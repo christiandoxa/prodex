@@ -6230,3 +6230,28 @@ and `mojo run -D ASSERT=all -I mojo/prodex_core mojo/tests/super_expose_tools_te
 pass. Workspace all-target/all-feature Clippy with warnings denied, `npm run docs`,
 `npm run test:changed`, formatting, staged churn, no-fallback self-test/source
 guard, authority and crate-boundary self-test/source guard also pass.
+
+## Compiled optional-tool instructions and manifest (2026-10-19)
+
+Catalog checkpoint `eb7d9f937` is pushed to main. The same compiled expose
+presentation owner now selects per-tool invocation text and renders availability,
+nullable versions, kind labels and manifest aliases. The shared optional-tool
+classifier is reused by the old alias ABI and the new presentation ABI. Rust
+acquires non-secret ID/type/availability/version facts through Serde; its previous
+invocation match, line construction and manifest alias formatting are deleted.
+Process paths, health details and command execution stay at the Rust boundary.
+
+All 256 comparisons against the previous Rust renderer pass across every
+availability mask and null/empty/escaped/Unicode/nul-bearing version strings.
+The temporary Rust oracle is removed. A whole-object fixture and malformed-fact
+rejections remain as caller regressions; all 100 expose tests and direct Mojo
+assertions pass. The official share rises from 35.41420875720678% to
+35.43162966136112% (127,376 Mojo / 232,122 Rust production lines), with no
+counting-rule changes. The 75% target remains outstanding.
+
+Final commands `PRODEX_MOJO_REQUIRED=1 CARGO_BUILD_JOBS=6 cargo test --locked -q -p prodex-app --lib super_expose:: -- --test-threads=1`
+and `PRODEX_MOJO_REQUIRED=1 CARGO_BUILD_JOBS=6 cargo test --locked -q -p prodex-mojo-core --features mojo-core -- --test-threads=1`
+pass 100 and 957 tests respectively. Workspace all-target/all-feature Clippy
+with warnings denied, `npm run docs`, `npm run test:changed`, formatting,
+staged churn, authority, no-fallback self-test/source guard and crate-boundary
+self-test/source guard also pass.

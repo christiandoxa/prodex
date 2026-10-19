@@ -2,7 +2,30 @@
 use super::{JsonNode, signed, transform_json};
 use crate::MojoError;
 
+/// Presentation operations over non-secret optional-tool observations.
+#[derive(Debug, Clone, Copy)]
+#[repr(i64)]
+pub enum SuperExposeOptionalToolOperation {
+    Instructions = 0,
+    Manifest = 1,
+}
+
 unsafe extern "C" {
+    fn prodex_mojo_super_expose_optional_presentation_v1(
+        abi: i64,
+        operation: i64,
+        flag: i64,
+        nodes: u64,
+        count: i64,
+        raw: u64,
+        length: i64,
+        scratch: u64,
+        scratch_count: i64,
+        measuring: i64,
+        output: u64,
+        capacity: i64,
+        metadata: u64,
+    ) -> i64;
     fn prodex_mojo_super_expose_tool_catalog_v1(
         abi: i64,
         max_event_page: i64,
@@ -34,6 +57,22 @@ pub fn super_expose_tool_catalog(
         signed(max_event_page)?,
         exec_only,
         prodex_mojo_super_expose_tool_catalog_v1,
+    )?
+    .ok_or(MojoError::InvalidOutput)
+}
+
+/// Renders instructions or a manifest from IDs, type labels, availability and versions.
+pub fn super_expose_optional_tool_presentation(
+    nodes: &[JsonNode<'_>],
+    raw: &str,
+    operation: SuperExposeOptionalToolOperation,
+) -> Result<Vec<u8>, MojoError> {
+    transform_json(
+        nodes,
+        raw,
+        operation as i64,
+        false,
+        prodex_mojo_super_expose_optional_presentation_v1,
     )?
     .ok_or(MojoError::InvalidOutput)
 }
@@ -94,6 +133,72 @@ mod tests {
                         scratch.as_mut_ptr() as u64,
                         1,
                         measuring,
+                        output.as_mut_ptr() as u64,
+                        capacity,
+                        metadata.as_mut_ptr() as u64,
+                    )
+                },
+                expected
+            );
+            assert_eq!(metadata, [71; 2]);
+            assert_eq!(output, [83; 16]);
+        }
+    }
+
+    #[test]
+    fn compiled_optional_presentation_abi_checks_operation_flags_and_fact_shape() {
+        let raw = "[]";
+        let root = JsonNode {
+            kind: JsonKind::Array,
+            first_child: None,
+            next_sibling: None,
+            parent: None,
+            key: "",
+            text: "",
+            raw_start: 0,
+            raw_length: 2,
+        };
+        assert_eq!(
+            super_expose_optional_tool_presentation(
+                &[root],
+                raw,
+                SuperExposeOptionalToolOperation::Manifest
+            ),
+            Ok(b"[]".to_vec())
+        );
+        let mut object = root;
+        object.kind = JsonKind::Object;
+        assert_eq!(
+            super_expose_optional_tool_presentation(
+                &[object],
+                "{}",
+                SuperExposeOptionalToolOperation::Instructions
+            ),
+            Err(MojoError::InvalidInput)
+        );
+        let input = ffi_nodes(&[root], raw).unwrap();
+        let mut scratch = [StringView::default(); 1];
+        let mut output = [83_u8; 16];
+        let mut metadata = [71_i64; 2];
+        for (abi, operation, flag, capacity, expected) in [
+            (2, 0, 0, 16, 4),
+            (1, 2, 0, 16, 1),
+            (1, 0, 1, 16, 1),
+            (1, 0, 0, 0, 3),
+        ] {
+            assert_eq!(
+                unsafe {
+                    prodex_mojo_super_expose_optional_presentation_v1(
+                        abi,
+                        operation,
+                        flag,
+                        input.as_ptr() as u64,
+                        input.len() as i64,
+                        raw.as_ptr() as u64,
+                        raw.len() as i64,
+                        scratch.as_mut_ptr() as u64,
+                        1,
+                        0,
                         output.as_mut_ptr() as u64,
                         capacity,
                         metadata.as_mut_ptr() as u64,
