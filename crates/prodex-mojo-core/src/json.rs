@@ -39,9 +39,9 @@ pub use self::smart_context_static_request::{
 };
 pub use gemini_quota::{
     GeminiQuotaBodyPlan, GeminiQuotaHttpErrorKind, GeminiRetryCandidate, GeminiRetryCandidateKind,
-    GeminiRetryCandidates, gemini_quota_body_plan, gemini_quota_http_error_kind,
-    gemini_quota_retryable_http_status, gemini_quota_should_rotate, gemini_retry_candidates,
-    gemini_retry_delay_max,
+    GeminiRetryCandidates, GeminiRetryTextKind, gemini_quota_body_plan,
+    gemini_quota_http_error_kind, gemini_quota_retryable_http_status, gemini_quota_should_rotate,
+    gemini_retry_candidates, gemini_retry_delay_max, gemini_retry_text_delay_ms,
 };
 mod provider_error;
 pub use self::provider_error::provider_error_message_json;

@@ -54,6 +54,9 @@ const BUFFERED_SSE_GEMINI = "crates/prodex-provider-core/src/gemini_bridge/error
 const BUFFERED_SSE_ACQUISITION = "crates/prodex-provider-core/src/mojo_json.rs";
 const BUFFERED_SSE_ADAPTER = "crates/prodex-mojo-core/src/rich/provider_sse_data.rs";
 const BUFFERED_SSE_MOJO = "mojo/prodex_core/provider_sse_data.mojo";
+const RETRY_TEXT_CALLER = "crates/prodex-provider-core/src/gemini_bridge/errors/quota_retry/retry_delay/duration.rs";
+const RETRY_TEXT_ADAPTER = "crates/prodex-mojo-core/src/json/gemini_quota/retry_duration.rs";
+const RETRY_TEXT_MOJO = "mojo/prodex_core/gemini_quota_body.mojo";
 const QUOTA_LOG_PROFILE_CALLER = "crates/prodex-app/src/quota_support.rs";
 const INFO_LOAD_ADAPTER = "crates/prodex-mojo-core/src/info_render/runtime_load.rs";
 const INFO_LOAD_MOJO = "mojo/prodex_core/info_runtime_load.mojo";
@@ -703,6 +706,8 @@ const PROMOTED_FILES = [
   BUFFERED_SSE_ERRORS,
   BUFFERED_SSE_ADAPTER,
   BUFFERED_SSE_MOJO,
+  RETRY_TEXT_CALLER,
+  RETRY_TEXT_ADAPTER,
   QUOTA_LOG_PROFILE_CALLER,
   INFO_LOAD_ADAPTER,
   INFO_LOAD_MOJO,
@@ -1574,6 +1579,22 @@ const FORBIDDEN_MARKERS = [
 ];
 
 export function findViolations(files) {
+  const retryTextViolations = files.flatMap(([filePath, contents]) => {
+    const production = contents.split("#[cfg(test)]", 1)[0];
+    const required = filePath === RETRY_TEXT_CALLER
+      ? ["gemini_retry_text_delay_ms(", "GeminiRetryTextKind::Duration", "GeminiRetryTextKind::Message", "GeminiRetryTextKind::HeaderSeconds"]
+      : filePath === RETRY_TEXT_ADAPTER
+        ? ["prodex_gemini_retry_text_plan_v1(", "prodex_gemini_retry_text_finish_v1(", "number.parse::<f64>()"]
+        : filePath === RETRY_TEXT_MOJO
+          ? ["def prodex_gemini_retry_text_plan_v1(", "def prodex_gemini_retry_text_finish_v1(", "log_parse_u64_text(", "catalog_view_find_folded(view, needle)", "ceil(value * Float64(multiplier))"] : [];
+    const violations = required.filter((marker) => !production.includes(marker))
+      .map((marker) => `${filePath}: Gemini retry text must retain Mojo policy ${marker}`);
+    if ((filePath === RETRY_TEXT_CALLER || filePath === RETRY_TEXT_ADAPTER)
+      && /\.trim(?:_start)?\(|\.ceil\(|\.is_finite\(|\.strip_suffix\(|\.saturating_mul\(|parse::<u64>|fn gemini_provider_core_duration_token_ms/u.test(production)) {
+      violations.push(`${filePath}: restored Rust Gemini retry duration semantics`);
+    }
+    return violations;
+  });
   const bufferedSseViolations = files.flatMap(([filePath, contents]) => {
     const production = contents.split("#[cfg(test)]", 1)[0];
     const required = filePath === BUFFERED_SSE_ERRORS || filePath === BUFFERED_SSE_GEMINI
@@ -10574,6 +10595,7 @@ export function findViolations(files) {
     return [];
   });
   return [...geminiSimpleResponseViolations, ...logPayloadProjectionViolations, ...nativeRecoveryOwnershipViolations, ...quotaRecoveryEligibilityViolations, ...runtimeBrokerReuseMojoViolations, ...geminiResponseMediaMojoViolations, ...cookieEvictionMojoViolations, ...websocketBudgetMojoViolations, ...affinityBindingMojoViolations, ...responsesCapacityRecoveryViolations, ...sseTapMojoOwnershipViolations, ...quotaWatchViolations, ...geminiCompactSnippetViolations, ...geminiCompactTextViolations, ...doctorSmartContextDecisionViolations, ...providerSseJsonFrameMojoViolations, ...geminiSseCompletionOwnershipViolations, ...anthropicNativeStreamDecisionViolations, ...anthropicAttemptCursorViolations, ...geminiUnsupportedToolRetryViolations, ...terminalGeometryViolations, ...previousResponseRecoveryTransitionViolations, ...chatCompatibleToolCallKindViolations, ...geminiQuotaBodyMojoViolations, ...geminiOAuthRotationMojoViolations, ...geminiBuiltinBatchMojoViolations, ...geminiToolArrayValidationMojoViolations, ...geminiOAuthModelMojoViolations, ...superExposeOriginMojoViolations, ...kiroAcpToolLedgerMojoViolations, ...quotaPoolSummarySectionsMojoViolations, ...deepseekRequestDiagnosticViolations, ...deepseekToolShapeIssueMojoViolations, ...deepseekReplayItemPolicyMojoViolations, ...chatNamespaceSplitMojoViolations, ...deepseekInputItemIssueMessageViolations, ...deepseekRequestIssueMessageViolations, ...smartContextTelemetrySampleViolations, ...compatibilityDiagnosticsMojoViolations, ...quotaHeaderProjectionViolations, ...smartContextCapsuleOrderViolations, ...markerViolations, ...deepseekCatalogPolicyViolations, ...featureOffViolations, ...liveLogRecordViolations, ...runtimePolicyPresetViolations, ...runtimeConfigScalarViolations, ...profileHealthCircuitViolations, ...logThroughputViolations, ...operationalDetailSpecViolations, ...transcriptPolicyViolations, ...logLoadPolicyViolations, ...routeReasonViolations, ...runtimeStateQuotaViolations, ...runtimeStateRoutePolicyViolations, ...runtimeProxyRootViolations, ...runtimeRecoveryDeadlineViolations, ...brokerVersionGuardViolations, ...brokerContinuityViolations, ...brokerLogCacheViolations, ...codexConfigViolations, ...statePolicyViolations, ...quotaSelectionPolicyViolations, ...routeTagMirrorViolations, ...enumTagMirrorViolations, ...appSelectionPolicyMirrorViolations, ...runtimeStateBackgroundViolations, ...redactionViolations, ...rateLimitHeaderSelectionViolations, ...profileIdentityViolations, ...governanceInspectionViolations, ...governanceInspectionOrderingViolations, ...exactnessPlannerViolations,
+    ...retryTextViolations,
     ...bufferedSseViolations,
     ...promptCacheViolations,
     ...bindingPruneViolations,
@@ -10697,6 +10719,11 @@ async function promotedFiles() {
 }
 
 function selfTest() {
+  const retryText = "gemini_retry_text_delay_ms( GeminiRetryTextKind::Duration GeminiRetryTextKind::Message GeminiRetryTextKind::HeaderSeconds";
+  assert.deepEqual(findViolations([[RETRY_TEXT_CALLER, retryText]]), []);
+  assert.match(findViolations([[RETRY_TEXT_CALLER, retryText + "\nvalue.ceil()"]]).join("\n"), /restored Rust Gemini retry duration semantics/u);
+  assert.match(findViolations([[RETRY_TEXT_CALLER, ""]]).join("\n"), /must retain Mojo policy/u);
+  assert.match(findViolations([[RETRY_TEXT_ADAPTER, ""]]).join("\n"), /must retain Mojo policy/u);
   for (const path of [BUFFERED_SSE_ERRORS, BUFFERED_SSE_GEMINI]) {
     assert.deepEqual(findViolations([[path, "values_from_json_or_sse"]]), []);
     assert.match(findViolations([[path, "values_from_json_or_sse\ntext.lines()"]]).join("\n"), /restored Rust buffered SSE framing/u);

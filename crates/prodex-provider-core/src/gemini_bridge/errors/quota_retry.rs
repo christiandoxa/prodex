@@ -234,6 +234,13 @@ data: [DONE]\n";
     fn compiled_gemini_retry_candidates_keep_duration_grammar_rate_minimum_and_sse_maximum() {
         for (json, expected) in [
             (serde_json::json!({"retryDelay":"1.5s"}), Some(1500)),
+            (serde_json::json!({"retryDelay":"5e-324ms"}), Some(1)),
+            (serde_json::json!({"retryDelay":"1e308s"}), Some(u64::MAX)),
+            (serde_json::json!({"retryDelay":"NaNs"}), None),
+            (
+                serde_json::json!({"message":"please retry in .s; suggested retry after 250ms"}),
+                Some(250),
+            ),
             (
                 serde_json::json!({"error":{"retryDelay":"9e1s"}}),
                 Some(90_000),

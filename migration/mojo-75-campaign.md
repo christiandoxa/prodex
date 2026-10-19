@@ -6784,3 +6784,54 @@ The canonical feature selection runs 502 provider tests; the explicit-feature
 suite above supplies the 503-test evidence. Staged churn is within the
 1,200-line/500-per-file limits. Full CI, live provider and native macOS/Windows
 checks were not run. The recently cleaned build cache is retained for reuse.
+
+
+## Compiled Gemini retry-duration text policy (2026-10-20)
+
+Buffered-SSE checkpoint `a8434c401` is pushed to main. The existing Gemini quota
+owner now plans explicit duration grammar, case-insensitive message marker
+priority, first-occurrence behavior, Unicode trimming, header parsing,
+positivity/finite checks, ceiling and unsigned saturation. Rust's former
+normalizer, suffix/token scan, marker loop, integer header parse and scaling
+policy are deleted. Existing Mojo checked-number and folded-search helpers are
+reused; a symbol probe confirms importing the latter adds no duplicate exports.
+Version-1 plan/finish ABIs return checked numeric spans and final delay values,
+without formatted intermediate token strings or a Rust semantic fallback.
+
+The narrow Rust float acquisition is a concrete compiler/runtime exception.
+On Mojo 1.1.0, dynamic `Float64(StringSlice)` compiles but its object requires
+`KGEN_CompilerRT_AlignedAlloc`, `KGEN_CompilerRT_AlignedFree`,
+`KGEN_CompilerRT_GetStackTrace` and `KGEN_CompilerRT_fprintf`. A native C-ABI
+link probe fails with these unresolved symbols. The adapter therefore performs
+only standard `str::parse::<f64>()` acquisition; Mojo alone decides validity,
+priority, scaling, rounding and saturation. Integer headers are fully Mojo-owned.
+No runtime shim or dependency is added. All owned float/catalog probe files
+and the temporary comparison oracle are removed after harvesting their results.
+
+All 49,152 generated comparisons match the former explicit-duration, message
+and header implementations, including random IEEE floating-point values,
+subnormals, exponent forms, overflow boundaries, Unicode and marker precedence.
+Three focused ABI tests and six provider caller tests pass. Direct assertions
+pass via
+`mojo run -D ASSERT=all -I mojo/prodex_core mojo/tests/gemini_retry_text_test.mojo`.
+All 993 strict Mojo-core and 503 provider tests pass via
+`PRODEX_MOJO_REQUIRED=1 CARGO_BUILD_JOBS=6 cargo test --locked -q -p prodex-mojo-core --features mojo-core -- --test-threads=1`
+and `PRODEX_MOJO_REQUIRED=1 CARGO_BUILD_JOBS=6 cargo test --locked -q -p prodex-provider-core --features mojo -- --test-threads=1`.
+Caller regression cases also cover the JSON-to-duration path for subnormals,
+finite overflow, NaN rejection and recovery through the second message marker.
+
+The unchanged official metric rises from 35.50485531036585% to
+35.520937188434694% (128,259 Mojo / 232,821 Rust production lines), leaving
+39.479062811565306 percentage points to 75%. Release-floor and reachable-source
+non-regression checks pass; the project target remains unmet.
+
+
+Workspace all-target/all-feature Clippy passes via
+`PRODEX_MOJO_REQUIRED=1 CARGO_BUILD_JOBS=6 cargo clippy --locked --workspace --all-targets --all-features -- -D warnings`,
+with existing vendor warnings only. Canonical
+`CARGO_BUILD_JOBS=6 npm run test:changed`, docs, formatting, no-fallback
+self-test/source, authority, size, crate/provider-SPI boundary self-test/source,
+secret-boundary, offline compatibility baseline/replay and diff checks pass.
+Staged churn stays within the 1,200-line/500-per-file limits. Full CI, live
+provider and native macOS/Windows checks were not run. No owned comparison or
+probe remains; the build cache is retained for the next checkpoint.
