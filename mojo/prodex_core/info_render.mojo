@@ -6,6 +6,7 @@ from rich_types import ProdexRichStringView
 from runtime_math import INT64_MAX, INT64_MIN, UINT64_MAX
 from info_provider import info_provider_render
 from info_runtime_load import info_runtime_load_plan
+from info_token_summary import info_token_usage_summary
 
 comptime INFO_RENDER_ABI_VERSION: Int64 = 1
 comptime INFO_RENDER_OK: Int64 = 0
@@ -1915,3 +1916,13 @@ def prodex_info_runtime_load_plan_v1(
         return 4
     return info_runtime_load_plan(observations_address, observation_count,
         inflight_address, inflight_count, now, recent_seconds, lookback_seconds, output_address, output_words)
+
+
+@export("prodex_info_token_usage_summary_v1")
+def prodex_info_token_usage_summary_v1(
+    abi_version: Int64, profiles_address: UInt, counts_address: UInt, count: Int64,
+    output_address: UInt, output_words: Int64,
+) abi("C") -> Int64:
+    if abi_version != 1:
+        return 4
+    return info_token_usage_summary(profiles_address, counts_address, count, output_address, output_words)

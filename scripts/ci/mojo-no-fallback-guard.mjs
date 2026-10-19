@@ -36,6 +36,8 @@ const LOG_NUMBERS_MOJO = "mojo/prodex_core/log_number.mojo";
 const INFO_LOAD_CALLER = "crates/prodex-app/src/reports/info/runtime_load.rs";
 const INFO_LOAD_ADAPTER = "crates/prodex-mojo-core/src/info_render/runtime_load.rs";
 const INFO_LOAD_MOJO = "mojo/prodex_core/info_runtime_load.mojo";
+const INFO_TOKEN_SUMMARY_ADAPTER = "crates/prodex-mojo-core/src/info_render/token_usage.rs";
+const INFO_TOKEN_SUMMARY_MOJO = "mojo/prodex_core/info_token_summary.mojo";
 const PROVIDER_BINDING_IDENTITY_CONSUMER_FILE = "crates/prodex-provider-core/src/binding_identity.rs";
 const PROVIDER_BINDING_IDENTITY_ADAPTER_FILE = "crates/prodex-mojo-core/src/rich/provider_binding_identity.rs";
 const PROVIDER_BINDING_IDENTITY_MOJO_FILE = "mojo/prodex_core/provider_binding_identity.mojo";
@@ -664,6 +666,8 @@ const PROMOTED_FILES = [
   INFO_LOAD_CALLER,
   INFO_LOAD_ADAPTER,
   INFO_LOAD_MOJO,
+  INFO_TOKEN_SUMMARY_ADAPTER,
+  INFO_TOKEN_SUMMARY_MOJO,
   PROVIDER_BINDING_IDENTITY_CONSUMER_FILE,
   PROVIDER_BINDING_IDENTITY_ADAPTER_FILE,
   PROVIDER_BINDING_IDENTITY_MOJO_FILE,
@@ -3559,10 +3563,12 @@ export function findViolations(files) {
       const production = contents.split("#[cfg(test)]", 1)[0];
       const required = filePath === INFO_TOKEN_NUMBERS_ADAPTER
         ? ["prodex_info_token_usage_numbers_v1(", "InfoTokenUsageFields", "rate_output("]
-        : ["prodex_mojo_core::log_throughput_policy::info_token_usage_numbers("];
+        : ["prodex_mojo_core::log_throughput_policy::info_token_usage_numbers(",
+          "prodex_mojo_core::info_render::aggregate_info_token_usage("];
       const violations = required.filter((call) => !production.includes(call))
         .map((call) => `${filePath}: info token-usage rate migration must retain Mojo call ${call}`);
       if (/\.parse(?:::<(?:u64|f64)>)?\(\)/u.test(production) ||
+          /\.saturating_add\(|\.by_profile\.entry\(|impl InfoTokenUsageSummary/u.test(production) ||
           /output_tokens as f64 \* 1_000\.0 \/ duration as f64/u.test(production)) {
         violations.push(`${filePath}: contains restored Rust log-throughput rate semantics or numeric parser`);
       }
@@ -6338,6 +6344,22 @@ export function findViolations(files) {
         .filter((marker) => !contents.includes(marker))
         .map((marker) => filePath + ": status policy adapter must retain Mojo call " + marker);
     }
+    if (filePath === INFO_TOKEN_SUMMARY_ADAPTER) {
+      const production = contents.split("#[cfg(test)]", 1)[0];
+      const required = ["prodex_info_token_usage_summary_v1(", "size_of::<TokenUsageCounts>() == 32"];
+      const violations = required.filter((marker) => !production.includes(marker))
+        .map((marker) => `${filePath}: token aggregation must retain Mojo delegation ${marker}`);
+      if (/\.saturating_add\(|\.sort_by|\.entry\(/u.test(production)) {
+        violations.push(`${filePath}: contains restored Rust token aggregation`);
+      }
+      return violations;
+    }
+    if (filePath === INFO_TOKEN_SUMMARY_MOJO) {
+      return ["def info_token_usage_summary(", "rich_view_order_sort(", "usage_saturating_add(",
+        "output[unsafe_offset=1] = UInt64(count)"]
+        .filter((marker) => !contents.includes(marker))
+        .map((marker) => `${filePath}: token aggregation must remain Mojo-owned (${marker})`);
+    }
     if (filePath === INFO_LOAD_CALLER || filePath === INFO_LOAD_ADAPTER) {
       const production = contents.split("#[cfg(test)]", 1)[0];
       const required = filePath === INFO_LOAD_CALLER
@@ -6570,6 +6592,8 @@ export function findViolations(files) {
         "info_provider_render(",
         '@export("prodex_info_runtime_load_plan_v1")',
         "info_runtime_load_plan(",
+        '@export("prodex_info_token_usage_summary_v1")',
+        "info_token_usage_summary(",
       ];
       return required
         .filter((marker) => !contents.includes(marker))
@@ -10565,6 +10589,12 @@ function selfTest() {
       doctorPresentationAdapterCanonical.replace("render(DOCTOR_VIEWPORT", "fn viewport_rust(")]]).join("\n"),
     /doctor presentation adapter must retain render\(DOCTOR_VIEWPORT/u,
   );
+  const tokenSummaryAdapter = "prodex_info_token_usage_summary_v1( size_of::<TokenUsageCounts>() == 32";
+  assert.deepEqual(findViolations([[INFO_TOKEN_SUMMARY_ADAPTER, tokenSummaryAdapter]]), []);
+  assert.match(findViolations([[INFO_TOKEN_SUMMARY_ADAPTER, tokenSummaryAdapter + "\nx.saturating_add(y)"]]).join("\n"), /restored Rust token aggregation/u);
+  const tokenSummaryMojo = "def info_token_usage_summary( rich_view_order_sort( usage_saturating_add( output[unsafe_offset=1] = UInt64(count)";
+  assert.deepEqual(findViolations([[INFO_TOKEN_SUMMARY_MOJO, tokenSummaryMojo]]), []);
+  assert.match(findViolations([[INFO_TOKEN_SUMMARY_MOJO, ""]]).join("\n"), /token aggregation must remain Mojo-owned/u);
   const infoLoadCaller = "prodex_mojo_core::info_render::info_runtime_load_plan(";
   assert.deepEqual(findViolations([[INFO_LOAD_CALLER, infoLoadCaller]]), []);
   assert.match(findViolations([[INFO_LOAD_CALLER, infoLoadCaller + "\nlet recent_cutoff = now;"]]).join("\n"), /restored Rust runtime-load aggregation/u);
@@ -10628,6 +10658,8 @@ function selfTest() {
     "info_provider_render(",
     '@export("prodex_info_runtime_load_plan_v1")',
     "info_runtime_load_plan(",
+    '@export("prodex_info_token_usage_summary_v1")',
+    "info_token_usage_summary(",
   ].join("\n");
   assert.deepEqual(findViolations([[DOCTOR_PRESENTATION_MOJO_FILE, doctorPresentationMojoCanonical]]), []);
   assert.match(
@@ -11727,7 +11759,8 @@ function selfTest() {
   const logNumbersMojo = "def log_parse_u64_text( def log_positive_finite_decimal( def log_completed_rate(";
   assert.deepEqual(findViolations([[LOG_NUMBERS_MOJO, logNumbersMojo]]), []);
   assert.match(findViolations([[LOG_NUMBERS_MOJO, ""]]).join("\n"), /log number policy must retain Mojo owner/u);
-  const tokenUsageRateCall = "prodex_mojo_core::log_throughput_policy::info_token_usage_numbers(";
+  const tokenUsageRateCall = "prodex_mojo_core::log_throughput_policy::info_token_usage_numbers(\n" +
+    "prodex_mojo_core::info_render::aggregate_info_token_usage(";
   assert.deepEqual(findViolations([[
     "crates/prodex-app/src/reports/info/token_usage_render.rs",
     tokenUsageRateCall,

@@ -4,21 +4,6 @@ use super::{
     InfoTokenUsageCounts, InfoTokenUsageEvent, InfoTokenUsageSummary, info_runtime_parse_fields,
 };
 
-pub fn collect_info_token_usage_summary_from_text(text: &str) -> InfoTokenUsageSummary {
-    let mut summary = InfoTokenUsageSummary::default();
-    for line in text.lines() {
-        let Some((profile, usage)) = info_token_usage_from_line(line) else {
-            continue;
-        };
-        summary.event_count += 1;
-        summary.total.add(usage);
-        let profile = summary.by_profile.entry(profile).or_default();
-        profile.event_count += 1;
-        profile.total.add(usage);
-    }
-    summary
-}
-
 pub fn collect_info_token_usage_summary_from_texts<I, S>(
     log_count: usize,
     texts: I,
@@ -27,36 +12,41 @@ where
     I: IntoIterator<Item = S>,
     S: AsRef<str>,
 {
-    let mut summary = InfoTokenUsageSummary {
-        log_count,
-        ..InfoTokenUsageSummary::default()
-    };
+    let mut records = Vec::new();
     for text in texts {
-        summary.merge(collect_info_token_usage_summary_from_text(text.as_ref()));
+        records.extend(text.as_ref().lines().filter_map(info_token_usage_from_line));
     }
-    summary
-}
-
-impl InfoTokenUsageSummary {
-    pub fn merge(&mut self, other: InfoTokenUsageSummary) {
-        self.event_count += other.event_count;
-        self.total.add(other.total);
-        for (name, other_profile) in other.by_profile {
-            let profile = self.by_profile.entry(name).or_default();
-            profile.event_count += other_profile.event_count;
-            profile.total.add(other_profile.total);
-        }
-    }
-}
-
-impl InfoTokenUsageCounts {
-    fn add(&mut self, other: InfoTokenUsageCounts) {
-        self.input_tokens = self.input_tokens.saturating_add(other.input_tokens);
-        self.cached_input_tokens = self
-            .cached_input_tokens
-            .saturating_add(other.cached_input_tokens);
-        self.output_tokens = self.output_tokens.saturating_add(other.output_tokens);
-        self.reasoning_tokens = self.reasoning_tokens.saturating_add(other.reasoning_tokens);
+    let facts = records
+        .iter()
+        .map(
+            |(profile, total)| prodex_mojo_core::info_render::InfoTokenUsageProfile {
+                profile,
+                input_tokens: total.input_tokens,
+                cached_input_tokens: total.cached_input_tokens,
+                output_tokens: total.output_tokens,
+                reasoning_tokens: total.reasoning_tokens,
+            },
+        )
+        .collect::<Vec<_>>();
+    let plan = prodex_mojo_core::info_render::aggregate_info_token_usage(&facts)
+        .expect("Mojo info token-usage aggregation returned invalid output");
+    InfoTokenUsageSummary {
+        log_count,
+        event_count: plan.event_count,
+        total: plan.total,
+        by_profile: plan
+            .profiles
+            .into_iter()
+            .map(|profile| {
+                (
+                    profile.profile.to_string(),
+                    super::InfoTokenUsageProfile {
+                        event_count: profile.event_count,
+                        total: profile.total,
+                    },
+                )
+            })
+            .collect(),
     }
 }
 
@@ -160,26 +150,21 @@ pub fn format_info_token_usage_summary(summary: &InfoTokenUsageSummary) -> Strin
             .iter()
             .map(|(profile, data)| terminal_ui::TokenUsageProfileDisplay {
                 profile,
-                total: token_usage_counts(data.total),
+                total: data.total,
             });
 
     terminal_ui::format_info_token_usage_summary_display(
         summary.event_count,
         summary.log_count,
-        token_usage_counts(summary.total),
+        summary.total,
         by_profile,
     )
-}
-
-fn token_usage_counts(usage: InfoTokenUsageCounts) -> terminal_ui::TokenUsageCounts {
-    terminal_ui::TokenUsageCounts {
-        input_tokens: usage.input_tokens,
-        cached_input_tokens: usage.cached_input_tokens,
-        output_tokens: usage.output_tokens,
-        reasoning_tokens: usage.reasoning_tokens,
-    }
 }
 
 #[cfg(test)]
 #[path = "token_usage_number_tests.rs"]
 mod number_tests;
+
+#[cfg(test)]
+#[path = "token_usage_aggregate_tests.rs"]
+mod aggregate_tests;

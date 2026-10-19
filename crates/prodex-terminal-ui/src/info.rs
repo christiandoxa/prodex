@@ -13,13 +13,7 @@ pub struct InfoLoadSummaryDisplay {
     pub recent_last_timestamp: Option<i64>,
 }
 
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub struct TokenUsageCounts {
-    pub input_tokens: u64,
-    pub cached_input_tokens: u64,
-    pub output_tokens: u64,
-    pub reasoning_tokens: u64,
-}
+pub use prodex_mojo_core::info_render::TokenUsageCounts;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct TokenUsageProfileDisplay<'a> {

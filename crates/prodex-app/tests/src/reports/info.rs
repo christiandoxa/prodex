@@ -4,10 +4,13 @@ use super::*;
 
 #[test]
 fn token_usage_summary_parses_text_runtime_log_markers() {
-    let summary = collect_info_token_usage_summary_from_text(concat!(
-        "[2026-04-29 10:00:00.000 +07:00] token_usage request=1 transport=http profile=main source=responses_unary input_tokens=100 cached_input_tokens=25 output_tokens=40 reasoning_tokens=8\n",
-        "[2026-04-29 10:00:01.000 +07:00] token_usage request=2 transport=http profile=backup source=responses_sse input_tokens=10 cached_input_tokens=0 output_tokens=4 reasoning_tokens=1\n",
-    ));
+    let summary = collect_info_token_usage_summary_from_texts(
+        0,
+        [concat!(
+            "[2026-04-29 10:00:00.000 +07:00] token_usage request=1 transport=http profile=main source=responses_unary input_tokens=100 cached_input_tokens=25 output_tokens=40 reasoning_tokens=8\n",
+            "[2026-04-29 10:00:01.000 +07:00] token_usage request=2 transport=http profile=backup source=responses_sse input_tokens=10 cached_input_tokens=0 output_tokens=4 reasoning_tokens=1\n",
+        )],
+    );
 
     assert_eq!(summary.event_count, 2);
     assert_eq!(summary.total.input_tokens, 110);
@@ -19,8 +22,11 @@ fn token_usage_summary_parses_text_runtime_log_markers() {
 
 #[test]
 fn token_usage_summary_parses_json_runtime_log_markers() {
-    let summary = collect_info_token_usage_summary_from_text(
-        r#"{"timestamp":"2026-04-29 10:00:00.000 +07:00","message":"token_usage request=1 transport=http profile=main source=responses_unary input_tokens=100 cached_input_tokens=25 output_tokens=40 reasoning_tokens=8","event":"token_usage","fields":{"request":"1","transport":"http","profile":"main","source":"responses_unary","input_tokens":"100","cached_input_tokens":"25","output_tokens":"40","reasoning_tokens":"8"}}"#,
+    let summary = collect_info_token_usage_summary_from_texts(
+        0,
+        [
+            r#"{"timestamp":"2026-04-29 10:00:00.000 +07:00","message":"token_usage request=1 transport=http profile=main source=responses_unary input_tokens=100 cached_input_tokens=25 output_tokens=40 reasoning_tokens=8","event":"token_usage","fields":{"request":"1","transport":"http","profile":"main","source":"responses_unary","input_tokens":"100","cached_input_tokens":"25","output_tokens":"40","reasoning_tokens":"8"}}"#,
+        ],
     );
 
     assert_eq!(summary.event_count, 1);

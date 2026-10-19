@@ -6405,3 +6405,40 @@ vendor warnings remain unchanged.
 No-fallback self-test/source, authority, size and crate-boundary self-test/source
 guards pass. Direct verification uses
 `mojo run -D ASSERT=all -I mojo/prodex_core mojo/tests/info_runtime_load_test.mojo`.
+
+## Compiled token-usage aggregation (2026-10-20)
+
+Runtime-load checkpoint `58d1c7075` is pushed to main. Mojo now groups completed
+usage events, counts them and computes all four saturating global/per-profile
+totals. The existing label sorter and usage saturation helper are reused. A
+version-1 ABI uses the existing profile-facts type and a shared 32-byte counter
+record. The identical counter models move to the existing adapter and are
+re-exported under their app/terminal names; no dependency or wire-field change
+is needed. Rust acquires events and materializes the compiled groups. Its old
+counter arithmetic, grouping updates, per-log merge implementation, obsolete
+internal single-log collector and counter conversion helper are removed.
+
+All 2,048 temporary differential comparisons pass with multiple logs, Unicode
+and empty profile names, filtered progress events, and `u64::MAX` saturation.
+The Rust oracle is removed. Permanent caller and ABI tests cover whole summary
+values, all four saturated counters, empty input, unchanged supplied log counts,
+invalid spans rejected before writes, and 2,048 distinct profiles. Direct Mojo
+assertions pass; an initial direct-test compilation caught an Int/Int64 loop
+index mismatch, corrected before Cargo verification.
+
+The unchanged official metric rises from 35.48310057456103% to
+35.48445303152699% (127,826 Mojo / 232,405 Rust production lines).
+The 75% target remains outstanding by 39.51554696847301 percentage points.
+No-fallback self-test/source, authority, size and crate-boundary self-test/source
+guards pass. All 21 Info caller tests and 973 strict Mojo-core tests pass via
+`PRODEX_MOJO_REQUIRED=1 CARGO_BUILD_JOBS=6 cargo test --locked -q -p prodex-app --lib reports::info:: -- --test-threads=1`
+and `PRODEX_MOJO_REQUIRED=1 CARGO_BUILD_JOBS=6 cargo test --locked -q -p prodex-mojo-core --features mojo-core -- --test-threads=1`.
+All 36 terminal tests pass via
+`PRODEX_MOJO_REQUIRED=1 CARGO_BUILD_JOBS=6 cargo test --locked -q -p prodex-terminal-ui -- --test-threads=1`.
+Workspace all-target/all-feature Clippy with warnings denied passes after adopting
+its typed-array chunk recommendation; the final four focused ABI cases also pass.
+`npm run docs`, canonical `npm run test:changed`, formatting, application/crate
+boundary self-test/source guards and diff checks pass. Existing vendor warnings
+are unchanged. Staged churn, diff and secret-scan checks pass. Direct
+verification uses
+`mojo run -D ASSERT=all -I mojo/prodex_core mojo/tests/info_token_summary_test.mojo`.
