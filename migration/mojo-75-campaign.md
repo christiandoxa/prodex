@@ -7176,3 +7176,60 @@ and 500 per file. After validation, executable/cwd/fd/map inspection found
 no target users or active builds; no release output was present. Trash was
 empty before `trash-empty -f` completed. Source and checkpoint evidence are
 preserved; `cargo clean` removed 9.8 GiB of reproducible build output.
+
+
+## Compiled transcript protocol/status assembly (2026-10-20)
+
+Context checkpoint `c46c476d7` is pushed to main. The same version-1 transcript
+ABI now handles protocol aliases, explicit/inferred subagent status, scalar
+status fields, stderr/stdout/output ordering and event-name fallback. A focused
+Mojo operation module owns field selection, labels, joins and source text.
+The old Rust protocol/status formatters are removed with no fallback.
+Rust retains Serde's scalar/container spelling, existing per-value secret
+redaction/sanitization and typed classifier-to-ABI enum conversion. Only root
+member presentations are acquired, avoiding repeated overlapping subtree
+copies; Mojo selects which members are displayed.
+
+The existing 192-scalar operation limit, rejection of control-bearing string
+values, container JSON spelling, final 65,536-byte sanitizer and source tags
+remain compatible. A fixture initially expected a NUL-bearing operation
+string to display; source inspection and committed-oracle comparisons prove
+that the existing sanitizer rejects it, so the expectation was corrected.
+Initial compiler parameter/type errors were corrected before native tests;
+the compiled object has no unresolved symbols. Native ABI tests reject
+malformed presentation counts, invalid UTF-8 and short output capacity before
+writes. The direct assertion fixture also covers an empty subagent suffix.
+
+All 24,576 comparisons with committed Rust protocol/status formatters pass,
+including alias fallthrough, null/bool/number/container fields, redaction,
+Unicode/NUL, mixed output and large container payloads. The owned temporary
+oracle and object were removed after use. Direct assertions pass via
+`mojo run -D ASSERT=all -I mojo/prodex_core mojo/tests/log_transcript_context_test.mojo`.
+All 1,016 strict core tests pass via
+`PRODEX_MOJO_REQUIRED=1 CARGO_BUILD_JOBS=6 cargo test --locked -q -p prodex-mojo-core --features mojo-core -- --test-threads=1`.
+
+An import audit identified a cross-feature dependency on the optional log
+module; moving the typed enum conversion into that module removes it.
+`PRODEX_MOJO_REQUIRED=1 CARGO_BUILD_JOBS=6 cargo check --locked -q -p prodex-mojo-core --no-default-features --features mojo-runtime`
+passes. Expanding the JSON facade initially crossed its near-limit ratchet;
+re-exporting the private module's deliberately public contracts together
+restores the existing 32-file budget without changing any guard limit.
+
+All 125 log caller tests pass via
+`PRODEX_MOJO_REQUIRED=1 CARGO_BUILD_JOBS=6 cargo test --locked -q -p prodex-app --lib app_commands::log -- --test-threads=1`,
+including the existing display-latency fixture. The unchanged official metric
+rises from 35.61095713255389% to 35.63204419889503%
+(128,988 Mojo / 233,012 Rust production lines), leaving 39.36795580110497
+percentage points to 75%. Release-floor and audited reachable-source
+non-regression checks pass; the project target remains unmet.
+
+Workspace Clippy passes via
+`PRODEX_MOJO_REQUIRED=1 CARGO_BUILD_JOBS=6 cargo clippy --locked --workspace --all-targets --all-features -- -D warnings`,
+with existing vendor warnings only. No-fallback/authority/crate-boundary
+self-test/source, secret-boundary, size, docs, formatting and diff checks
+pass. Full CI, live-provider and native macOS/Windows checks were not run.
+The reusable build cache is retained for the next migration.
+
+Canonical `RUST_TEST_THREADS=1 CARGO_BUILD_JOBS=6 npm run test:changed` passes.
+Staged privacy/diff checks pass, and churn remains within 1,200 total lines
+and 500 per file.

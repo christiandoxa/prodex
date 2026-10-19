@@ -65,6 +65,7 @@ fn emit_source_rerun_directives(sources: &[&str], manifest_dir: &Path) {
         "info_token_summary.mojo",
         "info_decimal.mojo",
         "log_number.mojo",
+        "log_transcript_operation.mojo",
         "index_order.mojo",
     ] {
         println!(

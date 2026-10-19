@@ -1,6 +1,8 @@
 # Session/turn context and reasoning text from the shared borrowed JSON tree.
 from std.memory import Pointer
 from rich_types import ProdexRichStringView
+from rich_text import rich_view_valid
+from log_transcript_operation import transcript_operation_render
 from parsed_json import (
     ParsedJson, ParsedJsonNode, JSON_STRING, JSON_OBJECT, JSON_ARRAY,
     pj_valid, pj_kind, pj_field, pj_string_field, pj_text, pj_trim,
@@ -118,9 +120,9 @@ def prodex_mojo_log_transcript_context_v1(
 ) abi("C") -> Int64:
     if abi != 1:
         return 4
-    if (operation < 0 or operation > 2 or flag != 0 or nodes_count <= 0
+    if (operation < 0 or operation > 7 or flag != 0 or nodes_count <= 0 or nodes_count > 0x7FFFFFFFFFFFFFFF // 80
         or nodes_address == 0 or nodes_address % 8 != 0 or raw_length < 0
-        or scratch_count != nodes_count or scratch_address == 0 or scratch_address % 8 != 0
+        or scratch_count != nodes_count * Int64(2 if operation >= 3 else 1) or scratch_address == 0 or scratch_address % 8 != 0
         or capacity < 0 or metadata_address == 0 or metadata_address % 8 != 0
         or (measuring != 0 and measuring != 1)
         or (measuring == 1 and (output_address != 0 or capacity != 0))
@@ -132,13 +134,26 @@ def prodex_mojo_log_transcript_context_v1(
     )
     if not pj_valid(tree):
         return 1
+    var values = Pointer[mut=False, ProdexRichStringView, ImmUntrackedOrigin](unsafe_from_address=Int(scratch_address))
+    if operation >= 3:
+        for index in range(scratch_count):
+            if not rich_view_valid(values[unsafe_offset=index], 0x7FFFFFFFFFFFFFFF):
+                return 1
     var output = Pointer[mut=True, UInt8, MutUntrackedOrigin](unsafe_from_address=Int(output_address))
     var probe = JsonSink(output, 0, 0, True, False)
-    transcript_context_render(Pointer(to=probe), tree, operation)
+    if operation <= 2:
+        transcript_context_render(Pointer(to=probe), tree, operation)
+    else:
+        transcript_operation_render(Pointer(to=probe), tree, operation, values)
     if probe.failed or (measuring == 0 and capacity < probe.written):
         return 3
-    var sink = JsonSink(output, capacity, 0, measuring == 1, False)
-    transcript_context_render(Pointer(to=sink), tree, operation)
+    var sink = probe.copy()
+    if measuring == 0:
+        sink = JsonSink(output, capacity, 0, False, False)
+        if operation <= 2:
+            transcript_context_render(Pointer(to=sink), tree, operation)
+        else:
+            transcript_operation_render(Pointer(to=sink), tree, operation, values)
     if sink.failed:
         return 3
     var metadata = Pointer[mut=True, Int64, MutUntrackedOrigin](unsafe_from_address=Int(metadata_address))

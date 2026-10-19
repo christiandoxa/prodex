@@ -22,6 +22,16 @@ pub enum TranscriptProtocolSource {
     Agent,
 }
 
+impl From<TranscriptProtocolSource> for crate::json::TranscriptOperationKind {
+    fn from(source: TranscriptProtocolSource) -> Self {
+        match source {
+            TranscriptProtocolSource::Tool => Self::ToolProtocol,
+            TranscriptProtocolSource::Mcp => Self::McpProtocol,
+            TranscriptProtocolSource::Agent => Self::AgentProtocol,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct TranscriptEventPlan {
     pub kind: TranscriptEventKind,

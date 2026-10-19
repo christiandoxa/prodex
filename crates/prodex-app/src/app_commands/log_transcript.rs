@@ -3,7 +3,9 @@ use super::log_transcript_text::{
 };
 use super::*;
 use crate::app_commands::log_format::local_log_timestamp;
-use prodex_mojo_core::json::TranscriptContextKind;
+use prodex_mojo_core::json::{
+    TranscriptContextKind, TranscriptOperationKind, TranscriptOperationValue,
+};
 use prodex_runtime_doctor::read_runtime_log_tail;
 use std::path::Path;
 
@@ -149,8 +151,51 @@ fn context_transcript_events(
         .expect("transcript context exceeded the JSON ABI boundary");
     let projected = prodex_mojo_core::json::log_transcript_context(&tree.nodes, kind)
         .expect("Mojo transcript context projection returned invalid output");
-    let records: Vec<(String, String)> = serde_json::from_slice(&projected)
-        .expect("Mojo transcript context projection returned invalid records");
+    projected_transcript_events(timestamp, &projected)
+}
+
+fn operation_transcript_event(
+    timestamp: String,
+    payload: &serde_json::Value,
+    kind: TranscriptOperationKind,
+) -> Option<TranscriptEvent> {
+    use prodex_mojo_core::json::JsonKind;
+    let tree = crate::json_boundary::app_json_tree(payload)
+        .expect("transcript operation exceeded the JSON ABI boundary");
+    let raw = std::str::from_utf8(&tree.raw).expect("Serde emits UTF-8 JSON");
+    let values = tree
+        .nodes
+        .iter()
+        .map(|node| {
+            // The ABI consumes root members; avoid copying overlapping subtree presentations.
+            if node.parent != Some(0) {
+                return TranscriptOperationValue::default();
+            }
+            // Serde owns number/container spelling; decoded strings use the existing sanitizer.
+            let scalar = match node.kind {
+                JsonKind::String => transcript_safe_operation_value(node.text).unwrap_or_default(),
+                JsonKind::Null
+                | JsonKind::False
+                | JsonKind::True
+                | JsonKind::Number
+                | JsonKind::Array
+                | JsonKind::Object => {
+                    raw[node.raw_start..node.raw_start + node.raw_length].to_string()
+                }
+            };
+            let output = transcript_safe_text(&scalar);
+            TranscriptOperationValue { scalar, output }
+        })
+        .collect::<Vec<_>>();
+    let projected =
+        prodex_mojo_core::json::log_transcript_operation(&tree.nodes, raw, &values, kind)
+            .expect("Mojo transcript operation projection returned invalid output");
+    projected_transcript_events(timestamp, &projected).pop()
+}
+
+fn projected_transcript_events(timestamp: String, projected: &[u8]) -> Vec<TranscriptEvent> {
+    let records: Vec<(String, String)> = serde_json::from_slice(projected)
+        .expect("Mojo transcript projection returned invalid records");
     records
         .into_iter()
         .map(|(source, text)| TranscriptEvent {
@@ -172,17 +217,14 @@ fn event_msg_transcript_event(
     let plan = prodex_mojo_core::log::classify_transcript_event(event_type, status)
         .expect("Mojo transcript event classifier returned invalid output");
     match plan.kind {
-        TranscriptEventKind::Protocol => protocol_operation_transcript_event(
-            timestamp,
-            payload,
-            event_type,
-            plan.protocol_source,
-        ),
+        TranscriptEventKind::Protocol => {
+            operation_transcript_event(timestamp, payload, plan.protocol_source.into())
+        }
         TranscriptEventKind::StatusTerminal => {
-            status_transcript_event(timestamp, payload, event_type, "terminal")
+            operation_transcript_event(timestamp, payload, TranscriptOperationKind::TerminalStatus)
         }
         TranscriptEventKind::StatusError => {
-            status_transcript_event(timestamp, payload, event_type, "error")
+            operation_transcript_event(timestamp, payload, TranscriptOperationKind::ErrorStatus)
         }
         TranscriptEventKind::User
         | TranscriptEventKind::Assistant
@@ -205,46 +247,6 @@ fn event_msg_transcript_event(
         }
         TranscriptEventKind::Unknown => None,
     }
-}
-
-fn status_transcript_event(
-    timestamp: String,
-    payload: &serde_json::Value,
-    event_type: &str,
-    source: &'static str,
-) -> Option<TranscriptEvent> {
-    let mut details = Vec::new();
-    for key in [
-        "status",
-        "exit_code",
-        "exit_status",
-        "reason",
-        "duration_ms",
-        "message",
-    ] {
-        if let Some(value) = payload.get(key).and_then(transcript_json_scalar) {
-            details.push(format!("{key}={value}"));
-        }
-    }
-    for key in ["stdout", "stderr", "output"] {
-        if let Some(value) = payload
-            .get(key)
-            .and_then(transcript_json_text)
-            .filter(|value| !value.trim().is_empty())
-        {
-            details.push(format!("{key}:\n{}", transcript_safe_text(&value)));
-        }
-    }
-    let text = if details.is_empty() {
-        event_type.replace('_', " ")
-    } else {
-        details.join(" ")
-    };
-    Some(TranscriptEvent {
-        timestamp,
-        source: source.to_string(),
-        text,
-    })
 }
 
 fn transcript_json_scalar(value: &serde_json::Value) -> Option<String> {
@@ -342,7 +344,7 @@ fn response_item_transcript_event(
             context_transcript_events(timestamp, payload, TranscriptContextKind::Reasoning).pop()
         }
         TranscriptItemKind::Protocol => {
-            protocol_operation_transcript_event(timestamp, payload, item_type, plan.protocol_source)
+            operation_transcript_event(timestamp, payload, plan.protocol_source.into())
         }
         TranscriptItemKind::Unknown => None,
     }
@@ -414,53 +416,6 @@ fn transcript_user_message_is_visible(payload: &serde_json::Value) -> bool {
         kinds_all_user_text,
     )
     .expect("compiled-in Mojo transcript visibility policy failed")
-}
-
-fn protocol_operation_transcript_event(
-    timestamp: String,
-    payload: &serde_json::Value,
-    event_type: &str,
-    source_kind: prodex_mojo_core::log::TranscriptProtocolSource,
-) -> Option<TranscriptEvent> {
-    let source = match source_kind {
-        prodex_mojo_core::log::TranscriptProtocolSource::Mcp => "mcp",
-        prodex_mojo_core::log::TranscriptProtocolSource::Agent => "agent",
-        prodex_mojo_core::log::TranscriptProtocolSource::Tool => "tool",
-    };
-    let mut details = Vec::new();
-    for (keys, label) in [
-        (&["server", "server_label", "server_name"][..], "server"),
-        (&["tool", "tool_name"][..], "tool"),
-        (&["name"][..], "name"),
-        (&["status"][..], "status"),
-        (&["phase"][..], "phase"),
-    ] {
-        if let Some(value) = keys.iter().find_map(|key| {
-            payload
-                .get(*key)
-                .and_then(serde_json::Value::as_str)
-                .and_then(transcript_safe_operation_value)
-        }) {
-            details.push(format!("{label}={value}"));
-        }
-    }
-    if !details.iter().any(|detail| detail.starts_with("status="))
-        && let Some(status) = event_type
-            .strip_prefix("subagent_")
-            .or_else(|| event_type.strip_prefix("sub_agent_"))
-    {
-        details.push(format!("status={status}"));
-    }
-    let text = if details.is_empty() {
-        event_type.replace('_', " ")
-    } else {
-        details.join(" ")
-    };
-    Some(TranscriptEvent {
-        timestamp,
-        source: source.to_string(),
-        text,
-    })
 }
 
 fn transcript_safe_operation_value(value: &str) -> Option<String> {

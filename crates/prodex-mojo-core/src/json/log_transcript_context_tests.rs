@@ -99,7 +99,7 @@ fn compiled_transcript_context_abi_rejects_fields_topology_utf8_and_capacity_bef
     let meta = metadata.as_mut_ptr() as u64;
     assert_eq!(call(2, 0, 0, nodes, 1, 1, 0, dest, 64, meta), 4);
     for (op, flag, count, scratch_count, measuring, buffer, capacity, result) in [
-        (3, 0, 1, 1, 0, dest, 64, 1),
+        (8, 0, 1, 1, 0, dest, 64, 1),
         (0, 1, 1, 1, 0, dest, 64, 1),
         (0, 0, 0, 1, 0, dest, 64, 1),
         (0, 0, 1, 0, 0, dest, 64, 1),
