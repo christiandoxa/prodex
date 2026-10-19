@@ -4,6 +4,7 @@ use super::{
 
 const STATUS_RUNTIME_PROFILE: i64 = 22;
 const STATUS_RUNWAY: i64 = 23;
+const INFO_RUNWAY: i64 = 34;
 const STATUS_FIELDS: i64 = 24;
 const STATUS_RESOURCE_METRICS: i64 = 25;
 const STATUS_RESOURCE_HISTORY: i64 = 26;
@@ -46,14 +47,14 @@ pub enum InfoStatusProfileChoice {
     Runtime(usize),
 }
 
-/// Precise reset timestamp and host-formatted reset label for status runway output.
+/// Precise reset timestamp and host-formatted label for quota runway output.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct InfoStatusReset<'a> {
     pub timestamp: i64,
     pub text: &'a str,
 }
 
-/// Status runway estimate supplied after host log and clock acquisition.
+/// Quota runway estimate supplied after host log and clock acquisition.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct InfoStatusRunwayEstimate<'a> {
     pub burn_per_hour: f64,
@@ -63,7 +64,7 @@ pub struct InfoStatusRunwayEstimate<'a> {
     pub exhaust_text: &'a str,
 }
 
-/// Typed inputs for the `prodex status` runway formatter.
+/// Shared inputs for the info and status quota runway formatters.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct InfoStatusRunway<'a> {
     pub profiles_with_data: usize,
@@ -373,6 +374,15 @@ pub fn status_profile_choice(
 
 /// Format the quota runway text shown by the status command.
 pub fn format_status_runway(input: InfoStatusRunway<'_>) -> Result<String, MojoError> {
+    render_runway(STATUS_RUNWAY, input)
+}
+
+/// Render info's runway with its full IEEE fixed-one-decimal compatibility.
+pub fn format_info_runway(input: InfoStatusRunway<'_>) -> Result<String, MojoError> {
+    render_runway(INFO_RUNWAY, input)
+}
+
+fn render_runway(operation: i64, input: InfoStatusRunway<'_>) -> Result<String, MojoError> {
     let (reset_at, reset_text) = input
         .earliest_reset
         .map_or((0, ""), |reset| (reset.timestamp, reset.text));
@@ -392,7 +402,7 @@ pub fn format_status_runway(input: InfoStatusRunway<'_>) -> Result<String, MojoE
         burn.to_bits(),
     ];
     render(
-        STATUS_RUNWAY,
+        operation,
         &[
             input.current_remaining,
             reset_at,

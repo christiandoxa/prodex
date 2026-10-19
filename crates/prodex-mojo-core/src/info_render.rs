@@ -24,9 +24,9 @@ pub use status::{
     InfoStatusFields, InfoStatusProfileChoice, InfoStatusQuotaGauge, InfoStatusReset,
     InfoStatusResourceCounters, InfoStatusResourceMetrics, InfoStatusResources,
     InfoStatusRuntimeCandidate, InfoStatusRunway, InfoStatusRunwayEstimate, InfoStatusTokenEvent,
-    InfoStatusTokenPlan, format_status_fields, format_status_quota_gauge, format_status_runway,
-    status_profile_choice, status_profile_indices, status_resource_history_values,
-    status_resource_metrics, status_token_plan,
+    InfoStatusTokenPlan, format_info_runway, format_status_fields, format_status_quota_gauge,
+    format_status_runway, status_profile_choice, status_profile_indices,
+    status_resource_history_values, status_resource_metrics, status_token_plan,
 };
 pub use token_usage::{
     InfoTokenUsageAggregate, InfoTokenUsageProfileSummary, TokenUsageCounts,

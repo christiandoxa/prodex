@@ -7,6 +7,7 @@ from runtime_math import INT64_MAX, INT64_MIN, UINT64_MAX
 from info_provider import info_provider_render
 from info_runtime_load import info_runtime_load_plan
 from info_token_summary import info_token_usage_summary
+from info_decimal import info_decimal_one
 
 comptime INFO_RENDER_ABI_VERSION: Int64 = 1
 comptime INFO_RENDER_OK: Int64 = 0
@@ -48,6 +49,7 @@ comptime INFO_RENDER_PROVIDER_SUMMARY: Int64 = 30
 comptime INFO_RENDER_PROVIDER_CAPABILITIES: Int64 = 31
 comptime INFO_RENDER_LAUNCH_NO_READY: Int64 = 32
 comptime INFO_RENDER_LAUNCH_BLOCKED: Int64 = 33
+comptime INFO_RENDER_INFO_RUNWAY: Int64 = 34
 comptime INFO_STATUS_HISTORY_LIMIT: Int64 = 64
 comptime INFO_STATUS_FIELD_COUNT: Int64 = 14
 
@@ -1149,7 +1151,7 @@ def info_status_saturating_sub(left: Int64, right: Int64) -> Int64:
     return left - right
 
 
-def info_render_status_runway(
+def info_render_status_runway[full_precision: Bool](
     writer: Pointer[mut=True, InfoRenderWriter, _],
     signed_address: UInt,
     unsigned_address: UInt,
@@ -1176,14 +1178,16 @@ def info_render_status_runway(
         mut=False, Float64, ImmUntrackedOrigin
     ](unsafe_from_address=Int(unsigned_address + UInt(16)))
     var burn_per_hour = estimate_values[unsafe_offset=0]
-    if not isfinite(burn_per_hour) or burn_per_hour < 0.0:
+    if not full_precision and (not isfinite(burn_per_hour) or burn_per_hour < 0.0):
         return False
     var exhaust_at = info_signed(signed_address, 5, 2)
     var now = info_signed(signed_address, 5, 4)
     var exhaust_in = info_status_saturating_sub(exhaust_at, now)
     var observed = info_signed(signed_address, 5, 3)
     var observed_profiles = info_unsigned(unsigned_address, 3, 1)
-    var burn_tenths = info_round_nonnegative_tenths(burn_per_hour)
+    var burn_tenths: UInt64 = 0
+    if not full_precision:
+        burn_tenths = info_round_nonnegative_tenths(burn_per_hour)
     if has_reset and info_signed(signed_address, 5, 1) <= exhaust_at:
         return (
             info_put_literal(writer, StringSlice("Earliest reset "))
@@ -1194,7 +1198,7 @@ def info_render_status_runway(
             )
             and info_render_relative_duration_value(writer, exhaust_in)
             and info_put_literal(writer, StringSlice(" at "))
-            and info_put_one_decimal(writer, burn_tenths)
+            and info_put_runway_burn[full_precision](writer, unsigned_address, burn_tenths)
             and info_put_literal(
                 writer,
                 StringSlice(" aggregated-%/h, "),
@@ -1210,13 +1214,26 @@ def info_render_status_runway(
         and info_put_literal(writer, StringSlice(" (~"))
         and info_render_relative_duration_value(writer, exhaust_in)
         and info_put_literal(writer, StringSlice(") at "))
-        and info_put_one_decimal(writer, burn_tenths)
+        and info_put_runway_burn[full_precision](writer, unsigned_address, burn_tenths)
         and info_put_literal(writer, StringSlice(" aggregated-%/h from "))
         and info_put_u64(writer, observed_profiles)
         and info_put_literal(writer, StringSlice(" profile(s), observed over "))
         and info_render_relative_duration_value(writer, observed)
         and info_put_literal(writer, StringSlice(", no-reset estimate"))
     )
+
+
+def info_put_runway_burn[full_precision: Bool](
+    writer: Pointer[mut=True, InfoRenderWriter, _], unsigned_address: UInt, tenths: UInt64,
+) -> Bool:
+    if not full_precision:
+        return info_put_one_decimal(writer, tenths)
+    var text = info_decimal_one(info_unsigned(unsigned_address, 3, 2))
+    var bytes = text.bytes.unsafe_ptr()
+    for index in range(text.length):
+        if not info_put_byte(writer, bytes[unsafe_offset=index]):
+            return False
+    return True
 
 
 def info_render_status_profile_filter(
@@ -1661,7 +1678,7 @@ def prodex_terminal_info_render_v1(
     if (
         abi_version != INFO_RENDER_ABI_VERSION
         or operation < INFO_RENDER_RELATIVE_DURATION
-        or operation > INFO_RENDER_LAUNCH_BLOCKED
+        or operation > INFO_RENDER_INFO_RUNWAY
         or signed_count < 0
         or unsigned_count < 0
         or text_count < 0
@@ -1738,6 +1755,12 @@ def prodex_terminal_info_render_v1(
             or presence > 1
             or info_unsigned(unsigned_address, unsigned_count, 0) > 1
         ):
+            return INFO_RENDER_INVALID
+    elif operation == INFO_RENDER_INFO_RUNWAY:
+        required_signed = 5
+        required_unsigned = 3
+        required_text = 2
+        if signed_count != 5 or unsigned_count != 3 or text_count != 2 or presence > 3:
             return INFO_RENDER_INVALID
     elif operation == INFO_RENDER_STATUS_RUNWAY:
         required_signed = 5
@@ -1976,7 +1999,11 @@ def prodex_terminal_info_render_v1(
             presence,
         )
     elif operation == INFO_RENDER_STATUS_RUNWAY:
-        ok = info_render_status_runway(
+        ok = info_render_status_runway[False](
+            Pointer(to=writer), signed_address, unsigned_address, text_address, presence
+        )
+    elif operation == INFO_RENDER_INFO_RUNWAY:
+        ok = info_render_status_runway[True](
             Pointer(to=writer), signed_address, unsigned_address, text_address, presence
         )
     elif operation == INFO_RENDER_STATUS_FIELDS:
