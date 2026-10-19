@@ -1,12 +1,16 @@
 # MCP tool catalog, annotations, mode selection and optional-alias descriptions.
 from std.memory import Pointer
 from parsed_json import (
-    ParsedJson, ParsedJsonNode, JSON_ARRAY, JSON_STRING,
-    pj_valid, pj_kind, pj_child, pj_next, pj_text, pj_literal, pj_equal,
+    ParsedJson, ParsedJsonNode, JSON_ARRAY, JSON_STRING, JSON_NULL, JSON_TRUE, JSON_FALSE,
+    pj_valid, pj_kind, pj_child, pj_next, pj_field, pj_text, pj_literal, pj_equal,
 )
 from rich_types import ProdexRichStringView
 from rich_text import rich_view_ptr
-from json_sink import JsonSink, js_byte, js_literal, js_string, js_view, js_escaped, js_u64
+from json_sink import JsonSink, js_byte, js_literal, js_string, js_view, js_escaped, js_u64, js_raw
+from optional_tools_policy import (
+    optional_tool_class, OPTIONAL_TOOL_RTK, OPTIONAL_TOOL_CODEBASE_MEMORY,
+    OPTIONAL_TOOL_PLAYWRIGHT, OPTIONAL_TOOL_CAVEMAN, OPTIONAL_TOOL_PONYTAIL,
+)
 from super_expose import (
     super_expose_tool, super_expose_tool_is_allowed, SUPER_EXPOSE_TOOL_EXEC,
     SUPER_EXPOSE_MODE_FULL, SUPER_EXPOSE_MODE_EXEC,
@@ -206,6 +210,116 @@ def prodex_mojo_super_expose_tool_catalog_v1(
     js_literal(Pointer(to=sink), StringSlice('],"exec_index":'))
     js_u64(Pointer(to=sink), UInt64(exec_index))
     js_byte(Pointer(to=sink), 125)
+    if sink.failed:
+        return 3
+    var metadata = Pointer[mut=True, Int64, MutUntrackedOrigin](unsafe_from_address=Int(metadata_address))
+    metadata[unsafe_offset=0] = 1
+    metadata[unsafe_offset=1] = sink.written
+    return 0
+
+
+def optional_invocation(kind: Int64) -> ProdexRichStringView:
+    if kind == OPTIONAL_TOOL_RTK:
+        return pj_literal(StringSlice("program optional:rtk; use it for noisy shell output"))
+    if kind == OPTIONAL_TOOL_CODEBASE_MEMORY:
+        return pj_literal(StringSlice("program optional:codebase-memory-mcp; one-shot structural navigation is available with args cli --json <tool> ..."))
+    if kind == OPTIONAL_TOOL_PLAYWRIGHT:
+        return pj_literal(StringSlice("program optional:playwright-mcp starts the validated MCP package via npx; program optional:playwright launches noninteractive Prodex Super with Playwright enabled"))
+    if kind == OPTIONAL_TOOL_CAVEMAN:
+        return pj_literal(StringSlice("program optional:caveman launches noninteractive Prodex Super with the validated Caveman plugin enabled"))
+    if kind == OPTIONAL_TOOL_PONYTAIL:
+        return pj_literal(StringSlice("program optional:ponytail launches noninteractive Prodex Super with the validated Ponytail plugin enabled"))
+    return pj_literal(StringSlice("program optional:presidio launches noninteractive Prodex Super with Presidio enabled; this alias exists only while Analyzer and Anonymizer are healthy"))
+
+
+def optional_facts_valid(tree: ParsedJson) -> Bool:
+    if not pj_valid(tree) or pj_kind(tree, 0) != JSON_ARRAY:
+        return False
+    var item = pj_child(tree, 0)
+    while item >= 0:
+        var id = pj_field(tree, item, StringSlice("id"))
+        var kind = pj_field(tree, item, StringSlice("kind"))
+        var available = pj_field(tree, item, StringSlice("available"))
+        var version = pj_field(tree, item, StringSlice("version"))
+        if pj_kind(tree, id) != JSON_STRING or optional_tool_class(pj_text(tree, id)) < 0 or pj_kind(tree, kind) != JSON_STRING:
+            return False
+        if pj_kind(tree, available) != JSON_TRUE and pj_kind(tree, available) != JSON_FALSE:
+            return False
+        if pj_kind(tree, version) != JSON_NULL and pj_kind(tree, version) != JSON_STRING:
+            return False
+        item = pj_next(tree, item)
+    return True
+
+
+def write_optional_instructions(sink: Pointer[mut=True, JsonSink, _], tree: ParsedJson):
+    js_literal(sink, StringSlice('"Optional tools are validated once when this expose endpoint starts. Use only entries marked available; unavailable or incompatible tools are not active.\\nUse program optional:<name> for validated aliases. Normal program names and paths keep their existing behavior.'))
+    var item = pj_child(tree, 0)
+    while item >= 0:
+        var id = pj_text(tree, pj_field(tree, item, StringSlice("id")))
+        js_literal(sink, StringSlice("\\n- "))
+        js_escaped(sink, id)
+        if pj_kind(tree, pj_field(tree, item, StringSlice("available"))) == JSON_FALSE:
+            js_literal(sink, StringSlice(": unavailable."))
+        else:
+            var version = pj_field(tree, item, StringSlice("version"))
+            if pj_kind(tree, version) == JSON_STRING:
+                js_literal(sink, StringSlice(" ("))
+                js_escaped(sink, pj_text(tree, version))
+                js_byte(sink, 41)
+            js_literal(sink, StringSlice(" ["))
+            js_escaped(sink, pj_text(tree, pj_field(tree, item, StringSlice("kind"))))
+            js_literal(sink, StringSlice("]: "))
+            js_escaped(sink, optional_invocation(optional_tool_class(id)))
+            js_byte(sink, 46)
+        item = pj_next(tree, item)
+    js_byte(sink, 34)
+
+
+def write_optional_manifest(sink: Pointer[mut=True, JsonSink, _], tree: ParsedJson):
+    js_byte(sink, 91)
+    var item = pj_child(tree, 0)
+    var emitted = False
+    while item >= 0:
+        if emitted:
+            js_byte(sink, 44)
+        var id = pj_text(tree, pj_field(tree, item, StringSlice("id")))
+        js_literal(sink, StringSlice('{"id":'))
+        js_string(sink, id)
+        js_literal(sink, StringSlice(',"kind":'))
+        js_raw(sink, tree, pj_field(tree, item, StringSlice("kind")))
+        js_literal(sink, StringSlice(',"available":'))
+        js_raw(sink, tree, pj_field(tree, item, StringSlice("available")))
+        js_literal(sink, StringSlice(',"version":'))
+        js_raw(sink, tree, pj_field(tree, item, StringSlice("version")))
+        js_literal(sink, StringSlice(',"alias":"optional:'))
+        js_escaped(sink, id)
+        js_literal(sink, StringSlice('"}'))
+        emitted = True
+        item = pj_next(tree, item)
+    js_byte(sink, 93)
+
+
+@export("prodex_mojo_super_expose_optional_presentation_v1")
+def prodex_mojo_super_expose_optional_presentation_v1(
+    abi: Int64, operation: Int64, flag: Int64,
+    nodes_address: UInt64, count: Int64, raw_address: UInt64, raw_length: Int64,
+    scratch_address: UInt64, scratch_count: Int64,
+    measuring: Int64, output_address: UInt64, capacity: Int64, metadata_address: UInt64,
+) abi("C") -> Int64:
+    if abi != 1:
+        return 4
+    if operation < 0 or operation > 1 or flag != 0 or count <= 0 or nodes_address == 0 or raw_length < 0 or scratch_count < count or scratch_address == 0 or metadata_address == 0 or capacity < 0 or measuring < 0 or measuring > 1:
+        return 1
+    if measuring == 1 and (output_address != 0 or capacity != 0) or measuring == 0 and output_address == 0:
+        return 1
+    var tree = ParsedJson(Pointer[mut=False, ParsedJsonNode, ImmUntrackedOrigin](unsafe_from_address=Int(nodes_address)), count, ProdexRichStringView(UInt(raw_address), UInt(raw_length)))
+    if not optional_facts_valid(tree):
+        return 1
+    var sink = JsonSink(Pointer[mut=True, UInt8, MutUntrackedOrigin](unsafe_from_address=Int(output_address)), capacity, 0, measuring == 1, False)
+    if operation == 0:
+        write_optional_instructions(Pointer(to=sink), tree)
+    else:
+        write_optional_manifest(Pointer(to=sink), tree)
     if sink.failed:
         return 3
     var metadata = Pointer[mut=True, Int64, MutUntrackedOrigin](unsafe_from_address=Int(metadata_address))

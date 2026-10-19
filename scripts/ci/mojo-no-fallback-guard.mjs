@@ -4755,18 +4755,36 @@ export function findViolations(files) {
         restored.every((marker) => !production.includes(marker))
         ? [] : [filePath + ": MCP catalog rendering must remain compiled Mojo-owned"];
     }
-    if (filePath === SUPER_EXPOSE_OPTIONAL_TOOLS_CALLER && contents.includes("fn tool_description_suffix(")) {
-      return [filePath + ": MCP alias-description formatting must remain compiled Mojo-owned"];
+    if (filePath === SUPER_EXPOSE_OPTIONAL_TOOLS_CALLER) {
+      const production = contents.split("\n#[cfg(test)]", 1)[0];
+      const violations = contents.includes("fn tool_description_suffix(")
+        ? [filePath + ": MCP alias-description formatting must remain compiled Mojo-owned"] : [];
+      const required = ["SuperExposeOptionalToolOperation::Instructions",
+        "SuperExposeOptionalToolOperation::Manifest", "super_expose_optional_tool_presentation(",
+        "compiled_optional_presentation_preserves_every_invocation_kind_and_version_shape",
+        "compiled_optional_presentation_rejects_malformed_observations"];
+      const restored = ["let invocation = match tool.id", "lines.join(\"\\n\")",
+        "Optional tools are validated once when this expose endpoint starts."];
+      if (!required.every((marker) => contents.includes(marker)) ||
+          !restored.every((marker) => !production.includes(marker))) {
+        violations.push(filePath + ": optional-tool presentation must remain compiled Mojo-owned");
+      }
+      return violations;
     }
     if (filePath === SUPER_EXPOSE_TOOL_CATALOG_ADAPTER) {
       return ["fn prodex_mojo_super_expose_tool_catalog_v1(", "pub fn super_expose_tool_catalog(",
-        "compiled_tool_catalog_abi_checks_version_mode_limit_and_capacity"]
+        "compiled_tool_catalog_abi_checks_version_mode_limit_and_capacity",
+        "fn prodex_mojo_super_expose_optional_presentation_v1(",
+        "pub fn super_expose_optional_tool_presentation(",
+        "compiled_optional_presentation_abi_checks_operation_flags_and_fact_shape"]
         .filter((marker) => !contents.includes(marker))
         .map((marker) => filePath + ": compiled MCP catalog ABI missing " + marker);
     }
     if (filePath === SUPER_EXPOSE_TOOL_CATALOG_MOJO) {
       return ['@export("prodex_mojo_super_expose_tool_catalog_v1")', "def write_alias_description(",
-        "super_expose_tool_is_allowed(mode, kind)", "def tool_definition(", "def write_tool("]
+        "super_expose_tool_is_allowed(mode, kind)", "def tool_definition(", "def write_tool(",
+        '@export("prodex_mojo_super_expose_optional_presentation_v1")',
+        "def write_optional_instructions(", "def write_optional_manifest(", "optional_tool_class(id)"]
         .filter((marker) => !contents.includes(marker))
         .map((marker) => filePath + ": compiled MCP catalog semantics missing " + marker);
     }
@@ -10319,6 +10337,7 @@ export function findViolations(files) {
 }
 
 const RELOCATED_TEST_FILES = new Set([
+  "crates/prodex-app/src/super_expose/optional_tools_presentation_tests.rs",
   "crates/prodex-app/src/super_expose/protocol/tool_catalog_tests.rs",
   "crates/prodex-provider-core/src/gemini_bridge/tooling/gemini3_tests.rs",
   "crates/prodex-provider-core/src/deepseek_bridge/request_tools_tests.rs",
@@ -12180,6 +12199,16 @@ function selfTest() {
   assert.match(findViolations([[SUPER_EXPOSE_OPTIONAL_TOOLS_CALLER,
     "fn tool_description_suffix() {}",
   ]]).join("\n"), /MCP alias-description formatting must remain compiled Mojo-owned/u);
+  const optionalPresentationConsumer = [
+    "SuperExposeOptionalToolOperation::Instructions", "SuperExposeOptionalToolOperation::Manifest",
+    "super_expose_optional_tool_presentation(",
+    "compiled_optional_presentation_preserves_every_invocation_kind_and_version_shape",
+    "compiled_optional_presentation_rejects_malformed_observations",
+  ].join("\n");
+  assert.deepEqual(findViolations([[SUPER_EXPOSE_OPTIONAL_TOOLS_CALLER, optionalPresentationConsumer]]), []);
+  assert.match(findViolations([[SUPER_EXPOSE_OPTIONAL_TOOLS_CALLER,
+    optionalPresentationConsumer + "\nlet invocation = match tool.id {}",
+  ]]).join("\n"), /optional-tool presentation must remain compiled Mojo-owned/u);
   const geminiDescriptionConsumer = [
     "GeminiToolDescriptionOperation::ApplyOverrides", "GeminiToolDescriptionOperation::DescriptionIndex",
     "GeminiToolDescriptionOperation::Catalog",

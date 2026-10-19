@@ -236,17 +236,7 @@ def prodex_optional_tool_awareness_v1(
     return OPTIONAL_TOOL_AWARENESS_OK if ok else OPTIONAL_TOOL_AWARENESS_CAPACITY
 
 
-@export("prodex_optional_tool_class_v1")
-def prodex_optional_tool_class_v1(
-    abi_version: Int64,
-    address: UInt,
-    length: Int64,
-) abi("C") -> Int64:
-    if abi_version != OPTIONAL_TOOLS_POLICY_ABI_VERSION:
-        return -2
-    if not optional_tool_valid(address, length):
-        return -2
-    var value = optional_tool_view(address, length)
+def optional_tool_class(value: ProdexRichStringView) -> Int64:
     var bounds = rich_trim_bounds(value)
     if optional_tool_range_equals["caveman"](value, bounds[0], bounds[1]):
         return OPTIONAL_TOOL_CAVEMAN
@@ -268,6 +258,19 @@ def prodex_optional_tool_class_v1(
     if optional_tool_range_equals["presidio"](value, bounds[0], bounds[1]):
         return OPTIONAL_TOOL_PRESIDIO
     return -1
+
+
+@export("prodex_optional_tool_class_v1")
+def prodex_optional_tool_class_v1(
+    abi_version: Int64,
+    address: UInt,
+    length: Int64,
+) abi("C") -> Int64:
+    if abi_version != OPTIONAL_TOOLS_POLICY_ABI_VERSION:
+        return -2
+    if not optional_tool_valid(address, length):
+        return -2
+    return optional_tool_class(optional_tool_view(address, length))
 
 
 @export("prodex_optional_tool_descriptor_policy_v1")
