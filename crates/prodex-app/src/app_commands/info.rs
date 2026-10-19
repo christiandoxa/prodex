@@ -45,60 +45,44 @@ pub(crate) fn collect_info_quota_aggregate(
 }
 
 pub(crate) fn format_info_provider_summary(profiles: &BTreeMap<String, ProfileEntry>) -> String {
-    if profiles.is_empty() {
-        return "none".to_string();
-    }
-
-    let mut counts = BTreeMap::<&'static str, usize>::new();
-    for profile in profiles.values() {
-        *counts.entry(profile.provider.label()).or_default() += 1;
-    }
-
-    counts
-        .into_iter()
-        .map(|(provider, count)| format!("{provider}={count}"))
-        .collect::<Vec<_>>()
-        .join(", ")
+    let labels = profiles
+        .values()
+        .map(|profile| profile.provider.label())
+        .collect::<Vec<_>>();
+    prodex_mojo_core::info_render::format_provider_summary(&labels)
+        .expect("compiled Mojo provider summary failed")
 }
 
 pub(crate) fn format_info_provider_capabilities_summary(
     profiles: &BTreeMap<String, ProfileEntry>,
 ) -> String {
-    if profiles.is_empty() {
-        return "none".to_string();
-    }
-
-    let mut native = 0;
-    let mut adapter = 0;
-    let mut external_cli = 0;
-    let mut unsupported = 0;
-    let mut openai_format = 0;
-    let mut quota_shapes = BTreeMap::<&'static str, usize>::new();
-
-    for profile in profiles.values() {
-        let capabilities = profile.provider.capabilities();
-        if capabilities.uses_openai_client_format {
-            openai_format += 1;
-        }
-        match capabilities.runtime_route_policy {
-            prodex_state::RuntimeRoutePolicy::NativeCodex => native += 1,
-            prodex_state::RuntimeRoutePolicy::ResponsesAdapter => adapter += 1,
-            prodex_state::RuntimeRoutePolicy::ExternalCli => external_cli += 1,
-            prodex_state::RuntimeRoutePolicy::Unsupported => unsupported += 1,
-        }
-        *quota_shapes
-            .entry(capabilities.quota_shape.label())
-            .or_default() += 1;
-    }
-
-    let quota_shapes = quota_shapes
-        .into_iter()
-        .map(|(shape, count)| format!("{shape}={count}"))
-        .collect::<Vec<_>>()
-        .join(", ");
-    format!(
-        "routes native={native}, adapter={adapter}, external-cli={external_cli}, unsupported={unsupported}; openai-format={openai_format}; quota {quota_shapes}"
-    )
+    use prodex_mojo_core::info_render::{InfoProviderCapability, InfoProviderRoutePolicy};
+    let facts = profiles
+        .values()
+        .map(|profile| {
+            let capabilities = profile.provider.capabilities();
+            InfoProviderCapability {
+                route_policy: match capabilities.runtime_route_policy {
+                    prodex_state::RuntimeRoutePolicy::NativeCodex => {
+                        InfoProviderRoutePolicy::NativeCodex
+                    }
+                    prodex_state::RuntimeRoutePolicy::ResponsesAdapter => {
+                        InfoProviderRoutePolicy::ResponsesAdapter
+                    }
+                    prodex_state::RuntimeRoutePolicy::ExternalCli => {
+                        InfoProviderRoutePolicy::ExternalCli
+                    }
+                    prodex_state::RuntimeRoutePolicy::Unsupported => {
+                        InfoProviderRoutePolicy::Unsupported
+                    }
+                },
+                uses_openai_client_format: capabilities.uses_openai_client_format,
+                quota_shape: capabilities.quota_shape.label(),
+            }
+        })
+        .collect::<Vec<_>>();
+    prodex_mojo_core::info_render::format_provider_capabilities_summary(&facts)
+        .expect("compiled Mojo provider capability summary failed")
 }
 
 pub(crate) fn build_info_quota_aggregate(
@@ -380,3 +364,7 @@ mod parity_tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 }
+
+#[cfg(test)]
+#[path = "info_provider_tests.rs"]
+mod provider_tests;

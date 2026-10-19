@@ -6282,3 +6282,37 @@ formatting, staged churn, authority, no-fallback self-test/source guard and
 crate-boundary self-test/source guard pass. Direct Mojo verification uses
 `mojo run -D ASSERT=all -I mojo/prodex_core mojo/tests/super_expose_alias_test.mojo`.
 `npm run docs` and `npm run test:changed` also pass.
+
+## Compiled Info provider summaries (2026-10-19)
+
+Exec-alias checkpoint `9951ff022` is pushed to main. The existing version-1
+Info render ABI now owns provider and quota-shape grouping, lexical ordering,
+counts, route/client-format totals and exact summary text. Operations 30 and 31
+import the focused Info provider helper into the existing production owner;
+operations 0 through 29 remain compatible. Rust acquires non-secret labels and
+capability facts from the existing state policy and encodes typed categories.
+The previous Rust grouping maps, counters and format construction are deleted;
+ABI failures remain explicit without Rust recomputation. No profile paths,
+identities or credential fields cross this boundary.
+
+All 2,048 temporary differential comparisons pass through the real caller. The
+Rust oracle is removed; permanent tests cover empty maps, all six provider kinds
+and duplicate groups. Direct Mojo assertions and seven focused Info ABI tests
+pass, including Unicode/nul labels, 2,048 unique labels, all four route classes
+and malformed facts rejected before output. The direct Mojo test initially used
+unsafe temporary container pointers; explicit test allocations fixed its crash.
+An initial caller fixture had incorrect route totals; corrected expectations
+match the existing state policy and the differential oracle.
+
+The official measurement rises from 35.44130243734217% to
+35.45282169051207% (127,516 Mojo / 232,162 Rust production lines), with unchanged
+counting rules. The 75% target remains outstanding by 39.54717830948793
+percentage points. Validation commands include
+`PRODEX_MOJO_REQUIRED=1 CARGO_BUILD_JOBS=6 cargo test --locked -q -p prodex-app --lib info_provider_summaries_ -- --test-threads=1`
+(two tests), `PRODEX_MOJO_REQUIRED=1 CARGO_BUILD_JOBS=6 cargo test --locked -q -p prodex-mojo-core --features mojo-core --lib info_render`
+(seven tests), and
+`mojo run -D ASSERT=all -I mojo/prodex_core mojo/tests/info_provider_test.mojo`.
+Formatting, docs, changed-tests, size, authority, no-fallback self-test/source
+guard and crate-boundary self-test/source guard pass.
+`PRODEX_MOJO_REQUIRED=1 CARGO_BUILD_JOBS=6 cargo clippy --locked --workspace --all-targets --all-features -- -D warnings`
+also passes with existing vendor warnings only.
