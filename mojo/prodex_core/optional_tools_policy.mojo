@@ -429,3 +429,81 @@ def prodex_optional_tool_config_shape_v1(
         unsafe_from_address=Int(issue_address)
     )[] = issue
     return 0
+
+
+# Required MCP config equality is a security gate, not an overwrite policy:
+# inherited command and argument vectors must exactly match the managed
+# command plan, with enabled absent/true only. Rust supplies TOML facts.
+@export("prodex_optional_tool_required_mcp_contract_v1")
+def prodex_optional_tool_required_mcp_contract_v1(
+    abi_version: Int64,
+    enabled_tag: Int64,
+    actual_command_address: UInt,
+    actual_command_length: Int64,
+    expected_command_address: UInt,
+    expected_command_length: Int64,
+    actual_args_address: UInt,
+    actual_args_count: Int64,
+    expected_args_address: UInt,
+    expected_args_count: Int64,
+    output_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != OPTIONAL_TOOLS_POLICY_ABI_VERSION:
+        return 4
+    if (
+        enabled_tag < 0 or enabled_tag > 3
+        or actual_command_length < -1 or expected_command_length < 0
+        or actual_args_count < -1 or expected_args_count < 0
+        or (actual_command_length > 0 and actual_command_address == 0)
+        or (expected_command_length > 0 and expected_command_address == 0)
+        or (actual_args_count > 0 and actual_args_address == 0)
+        or (expected_args_count > 0 and expected_args_address == 0)
+        or output_address == 0
+    ):
+        return 1
+    var actual_command = optional_tool_view(
+        actual_command_address,
+        max(actual_command_length, Int64(0)),
+    )
+    var expected_command = optional_tool_view(
+        expected_command_address,
+        expected_command_length,
+    )
+    if (
+        not rich_view_valid(actual_command, 0x7FFFFFFFFFFFFFFF)
+        or not rich_view_valid(expected_command, 0x7FFFFFFFFFFFFFFF)
+    ):
+        return 1
+    var actual_args = Pointer[
+        mut=False, ProdexRichStringView, ImmUntrackedOrigin
+    ](unsafe_from_address=Int(actual_args_address))
+    var expected_args = Pointer[
+        mut=False, ProdexRichStringView, ImmUntrackedOrigin
+    ](unsafe_from_address=Int(expected_args_address))
+    for index in range(actual_args_count):
+        if not rich_view_valid(actual_args[unsafe_offset=index], 0x7FFFFFFFFFFFFFFF):
+            return 1
+    for index in range(expected_args_count):
+        if not rich_view_valid(expected_args[unsafe_offset=index], 0x7FFFFFFFFFFFFFFF):
+            return 1
+    var issue: Int64 = 0
+    if enabled_tag == 2:
+        issue = 1
+    elif enabled_tag == 3:
+        issue = 2
+    elif actual_command_length < 0 or actual_args_count != expected_args_count:
+        issue = 3
+    elif not optional_tool_views_equal(actual_command, expected_command):
+        issue = 3
+    else:
+        for index in range(actual_args_count):
+            if not optional_tool_views_equal(
+                actual_args[unsafe_offset=index],
+                expected_args[unsafe_offset=index],
+            ):
+                issue = 3
+                break
+    Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )[] = issue
+    return 0

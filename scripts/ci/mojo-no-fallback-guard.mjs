@@ -4534,6 +4534,9 @@ export function findViolations(files) {
         "optional_tool_config_shape_preflight(selected_mask, shapes)",
         "OptionalToolConfigShapeIssue::Features",
         "OptionalToolConfigShapeIssue::Playwright",
+        "optional_tool_required_mcp_contract(",
+        "RequiredMcpConfigIssue::Disabled",
+        "RequiredMcpConfigIssue::CommandOrArgsMismatch",
       ];
       const violations = required.every((marker) => contents.includes(marker))
         ? []
@@ -4544,6 +4547,9 @@ export function findViolations(files) {
         "push_str(\"\\n## Available Now\\n\\n\")",
         "fn validate_ponytail_config_shapes(",
         "fn validate_selected_mcp_server_shapes(",
+        "fn validate_required_mcp_server_enabled(",
+        "fn validate_required_mcp_server_command(",
+        "server.get(\"args\") != Some(&expected_args)",
       ]) {
         if (contents.includes(retired)) {
           violations.push(filePath + ": contains restored Rust optional-tool awareness formatting");
@@ -4560,6 +4566,10 @@ export function findViolations(files) {
         "pub fn optional_tool_config_shape_preflight(",
         "compiled_optional_tool_config_shape_scopes_selection_and_error_precedence",
         "compiled_optional_tool_config_shape_abi_rejects_bad_flags_and_shapes_before_writes",
+        "fn prodex_optional_tool_required_mcp_contract_v1(",
+        "pub fn optional_tool_required_mcp_contract(",
+        "compiled_required_mcp_contract_preserves_enabled_precedence_and_exact_command_args",
+        "compiled_required_mcp_contract_abi_rejects_invalid_inputs_before_writes",
       ].filter((marker) => !contents.includes(marker))
         .map((marker) => filePath + ": optional-tool awareness adapter must retain " + marker);
     }
@@ -4571,6 +4581,9 @@ export function findViolations(files) {
         '@export("prodex_optional_tool_config_shape_v1")',
         "OPTIONAL_TOOL_CONFIG_SHAPE_FIELD_COUNT",
         "selected_mask & OPTIONAL_TOOL_CONFIG_PONYTAIL",
+        '@export("prodex_optional_tool_required_mcp_contract_v1")',
+        "optional_tool_views_equal(actual_command, expected_command)",
+        "optional_tool_views_equal(",
       ].filter((marker) => !contents.includes(marker))
         .map((marker) => filePath + ": optional-tool awareness must remain Mojo-owned (" + marker + ")");
     }
@@ -11354,6 +11367,9 @@ function selfTest() {
     "optional_tool_config_shape_preflight(selected_mask, shapes)",
     "OptionalToolConfigShapeIssue::Features",
     "OptionalToolConfigShapeIssue::Playwright",
+    "optional_tool_required_mcp_contract(",
+    "RequiredMcpConfigIssue::Disabled",
+    "RequiredMcpConfigIssue::CommandOrArgsMismatch",
   ].join("\n");
   const optionalToolsRenderAdapter = [
     "prodex_optional_tool_awareness_v1(",
@@ -11362,6 +11378,10 @@ function selfTest() {
     "pub fn optional_tool_config_shape_preflight(",
     "compiled_optional_tool_config_shape_scopes_selection_and_error_precedence",
     "compiled_optional_tool_config_shape_abi_rejects_bad_flags_and_shapes_before_writes",
+    "fn prodex_optional_tool_required_mcp_contract_v1(",
+    "pub fn optional_tool_required_mcp_contract(",
+    "compiled_required_mcp_contract_preserves_enabled_precedence_and_exact_command_args",
+    "compiled_required_mcp_contract_abi_rejects_invalid_inputs_before_writes",
   ].join("\n");
   const optionalToolsRenderMojo = [
     '@export("prodex_optional_tool_awareness_v1")',
@@ -11370,6 +11390,9 @@ function selfTest() {
     '@export("prodex_optional_tool_config_shape_v1")',
     "OPTIONAL_TOOL_CONFIG_SHAPE_FIELD_COUNT",
     "selected_mask & OPTIONAL_TOOL_CONFIG_PONYTAIL",
+    '@export("prodex_optional_tool_required_mcp_contract_v1")',
+    "optional_tool_views_equal(actual_command, expected_command)",
+    "optional_tool_views_equal(",
   ].join("\n");
   assert.deepEqual(findViolations([
     [OPTIONAL_TOOLS_RENDER_FILE, optionalToolsRenderConsumer],
@@ -11382,6 +11405,9 @@ function selfTest() {
     /restored Rust optional-tool awareness formatting/u);
   assert.match(findViolations([[OPTIONAL_TOOLS_RENDER_FILE,
     optionalToolsRenderConsumer + "\nfn validate_ponytail_config_shapes() {}"]]).join("\n"),
+    /restored Rust optional-tool awareness formatting/u);
+  assert.match(findViolations([[OPTIONAL_TOOLS_RENDER_FILE,
+    optionalToolsRenderConsumer + "\nfn validate_required_mcp_server_command() {}"]]).join("\n"),
     /restored Rust optional-tool awareness formatting/u);
   assert.match(findViolations([[OPTIONAL_TOOLS_RENDER_MOJO_FILE,
     optionalToolsRenderMojo.replace("optional_tool_awareness_put_available(", "old_availability(")]]).join("\n"),
