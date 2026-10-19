@@ -4529,14 +4529,21 @@ export function findViolations(files) {
     .map(([filePath]) => `${filePath}: Super expose alias scan must use Mojo`);
   const optionalToolsRenderViolations = files.flatMap(([filePath, contents]) => {
     if (filePath === OPTIONAL_TOOLS_RENDER_FILE) {
-      const required = "prodex_mojo_core::optional_tools_policy::render_optional_tool_awareness(";
-      const violations = contents.includes(required)
+      const required = [
+        "prodex_mojo_core::optional_tools_policy::render_optional_tool_awareness(",
+        "optional_tool_config_shape_preflight(selected_mask, shapes)",
+        "OptionalToolConfigShapeIssue::Features",
+        "OptionalToolConfigShapeIssue::Playwright",
+      ];
+      const violations = required.every((marker) => contents.includes(marker))
         ? []
-        : [filePath + ": Super optional-tool awareness must retain the Mojo renderer"];
+        : [filePath + ": Super optional-tool awareness and TOML preflight must retain Mojo ownership"];
       for (const retired of [
         "PRODEX_SUPER_OPTIMIZER_AWARENESS",
         "fn availability_label(",
         "push_str(\"\\n## Available Now\\n\\n\")",
+        "fn validate_ponytail_config_shapes(",
+        "fn validate_selected_mcp_server_shapes(",
       ]) {
         if (contents.includes(retired)) {
           violations.push(filePath + ": contains restored Rust optional-tool awareness formatting");
@@ -4549,6 +4556,10 @@ export function findViolations(files) {
       return [
         "prodex_optional_tool_awareness_v1(",
         "pub fn render_optional_tool_awareness(",
+        "fn prodex_optional_tool_config_shape_v1(",
+        "pub fn optional_tool_config_shape_preflight(",
+        "compiled_optional_tool_config_shape_scopes_selection_and_error_precedence",
+        "compiled_optional_tool_config_shape_abi_rejects_bad_flags_and_shapes_before_writes",
       ].filter((marker) => !contents.includes(marker))
         .map((marker) => filePath + ": optional-tool awareness adapter must retain " + marker);
     }
@@ -4557,6 +4568,9 @@ export function findViolations(files) {
         '@export("prodex_optional_tool_awareness_v1")',
         "optional_tool_awareness_put_available(",
         "Missing tools are not active.",
+        '@export("prodex_optional_tool_config_shape_v1")',
+        "OPTIONAL_TOOL_CONFIG_SHAPE_FIELD_COUNT",
+        "selected_mask & OPTIONAL_TOOL_CONFIG_PONYTAIL",
       ].filter((marker) => !contents.includes(marker))
         .map((marker) => filePath + ": optional-tool awareness must remain Mojo-owned (" + marker + ")");
     }
@@ -11335,16 +11349,27 @@ function selfTest() {
     'prodex_mojo_core::launch::super_literal_boundary(\n' +
     'prodex_mojo_core::launch::positioned_super_provider_alias(\n' +
     'prodex_mojo_core::launch::codex_command_server_subcommand(']]), []);
-  const optionalToolsRenderConsumer =
-    "prodex_mojo_core::optional_tools_policy::render_optional_tool_awareness(";
+  const optionalToolsRenderConsumer = [
+    "prodex_mojo_core::optional_tools_policy::render_optional_tool_awareness(",
+    "optional_tool_config_shape_preflight(selected_mask, shapes)",
+    "OptionalToolConfigShapeIssue::Features",
+    "OptionalToolConfigShapeIssue::Playwright",
+  ].join("\n");
   const optionalToolsRenderAdapter = [
     "prodex_optional_tool_awareness_v1(",
     "pub fn render_optional_tool_awareness(",
+    "fn prodex_optional_tool_config_shape_v1(",
+    "pub fn optional_tool_config_shape_preflight(",
+    "compiled_optional_tool_config_shape_scopes_selection_and_error_precedence",
+    "compiled_optional_tool_config_shape_abi_rejects_bad_flags_and_shapes_before_writes",
   ].join("\n");
   const optionalToolsRenderMojo = [
     '@export("prodex_optional_tool_awareness_v1")',
     "optional_tool_awareness_put_available(",
     "Missing tools are not active.",
+    '@export("prodex_optional_tool_config_shape_v1")',
+    "OPTIONAL_TOOL_CONFIG_SHAPE_FIELD_COUNT",
+    "selected_mask & OPTIONAL_TOOL_CONFIG_PONYTAIL",
   ].join("\n");
   assert.deepEqual(findViolations([
     [OPTIONAL_TOOLS_RENDER_FILE, optionalToolsRenderConsumer],
@@ -11354,6 +11379,9 @@ function selfTest() {
   ]), []);
   assert.match(findViolations([[OPTIONAL_TOOLS_RENDER_FILE,
     optionalToolsRenderConsumer + "\nPRODEX_SUPER_OPTIMIZER_AWARENESS"]]).join("\n"),
+    /restored Rust optional-tool awareness formatting/u);
+  assert.match(findViolations([[OPTIONAL_TOOLS_RENDER_FILE,
+    optionalToolsRenderConsumer + "\nfn validate_ponytail_config_shapes() {}"]]).join("\n"),
     /restored Rust optional-tool awareness formatting/u);
   assert.match(findViolations([[OPTIONAL_TOOLS_RENDER_MOJO_FILE,
     optionalToolsRenderMojo.replace("optional_tool_awareness_put_available(", "old_availability(")]]).join("\n"),

@@ -45,6 +45,13 @@ struct OptionalToolStringView {
 }
 
 unsafe extern "C" {
+    fn prodex_optional_tool_config_shape_v1(
+        abi_version: i64,
+        selected_mask: i64,
+        shape_address: u64,
+        shape_count: i64,
+        issue_address: u64,
+    ) -> i64;
     fn prodex_optional_tool_class_v1(abi_version: i64, address: u64, length: i64) -> i64;
     fn prodex_optional_tool_descriptor_policy_v1(abi_version: i64, tool_id: i64) -> i64;
     fn prodex_optional_tool_manifest_tree_supported_v1(
@@ -73,6 +80,58 @@ unsafe extern "C" {
         output_capacity: i64,
         written_address: u64,
     ) -> i64;
+}
+
+/// TOML type facts are acquired by Rust, but the selected-section shape
+/// policy, precedence, and error identity belong exclusively to Mojo.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OptionalToolConfigShapeIssue {
+    Features,
+    Marketplaces,
+    Plugins,
+    PonytailMarketplace,
+    PonytailPlugin,
+    McpServers,
+    CodebaseMemoryMcp,
+    Playwright,
+}
+
+/// Fields: features, marketplaces, plugins, marketplaces.ponytail,
+/// plugins.ponytail@ponytail, mcp_servers, codebase-memory-mcp, playwright.
+/// Shapes: 0 absent, 1 table, 2 present non-table.
+/// Mask: bit 0 Ponytail, 1 Codebase Memory MCP, 2 Playwright MCP.
+pub fn optional_tool_config_shape_preflight(
+    selected_mask: u8,
+    shapes: [i64; 8],
+) -> Result<Option<OptionalToolConfigShapeIssue>, MojoError> {
+    let mut issue = -1_i64;
+    let status = unsafe {
+        prodex_optional_tool_config_shape_v1(
+            ABI_VERSION,
+            i64::from(selected_mask),
+            shapes.as_ptr() as usize as u64,
+            shapes.len() as i64,
+            (&mut issue as *mut i64) as usize as u64,
+        )
+    };
+    match status {
+        0 => {}
+        1 => return Err(MojoError::InvalidInput),
+        4 => return Err(MojoError::AbiMismatch),
+        _ => return Err(MojoError::InvalidOutput),
+    }
+    Ok(match issue {
+        0 => None,
+        1 => Some(OptionalToolConfigShapeIssue::Features),
+        2 => Some(OptionalToolConfigShapeIssue::Marketplaces),
+        3 => Some(OptionalToolConfigShapeIssue::Plugins),
+        4 => Some(OptionalToolConfigShapeIssue::PonytailMarketplace),
+        5 => Some(OptionalToolConfigShapeIssue::PonytailPlugin),
+        6 => Some(OptionalToolConfigShapeIssue::McpServers),
+        7 => Some(OptionalToolConfigShapeIssue::CodebaseMemoryMcp),
+        8 => Some(OptionalToolConfigShapeIssue::Playwright),
+        _ => return Err(MojoError::InvalidOutput),
+    })
 }
 
 fn signed_len(value: &str) -> Result<i64, MojoError> {
@@ -239,6 +298,86 @@ pub fn render_optional_tool_awareness(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn compiled_optional_tool_config_shape_scopes_selection_and_error_precedence() {
+        use OptionalToolConfigShapeIssue::*;
+        let empty = [0_i64; 8];
+        assert_eq!(optional_tool_config_shape_preflight(0, empty), Ok(None));
+        assert_eq!(optional_tool_config_shape_preflight(7, empty), Ok(None));
+        for (index, issue) in [
+            (0, Features),
+            (1, Marketplaces),
+            (2, Plugins),
+            (3, PonytailMarketplace),
+            (4, PonytailPlugin),
+        ] {
+            let mut shapes = empty;
+            shapes[index] = 2;
+            assert_eq!(
+                optional_tool_config_shape_preflight(1, shapes),
+                Ok(Some(issue)),
+                "Ponytail field index={index}",
+            );
+            assert_eq!(optional_tool_config_shape_preflight(6, shapes), Ok(None));
+        }
+        let mut all_invalid = [2_i64; 8];
+        assert_eq!(
+            optional_tool_config_shape_preflight(7, all_invalid),
+            Ok(Some(Features))
+        );
+        all_invalid[0] = 1;
+        assert_eq!(
+            optional_tool_config_shape_preflight(7, all_invalid),
+            Ok(Some(Marketplaces))
+        );
+        let mut mcp = empty;
+        mcp[5] = 2;
+        assert_eq!(optional_tool_config_shape_preflight(0, mcp), Ok(None));
+        assert_eq!(optional_tool_config_shape_preflight(1, mcp), Ok(None));
+        assert_eq!(
+            optional_tool_config_shape_preflight(6, mcp),
+            Ok(Some(McpServers))
+        );
+        mcp[5] = 1;
+        mcp[6] = 2;
+        mcp[7] = 2;
+        assert_eq!(
+            optional_tool_config_shape_preflight(2, mcp),
+            Ok(Some(CodebaseMemoryMcp))
+        );
+        assert_eq!(
+            optional_tool_config_shape_preflight(4, mcp),
+            Ok(Some(Playwright))
+        );
+        assert_eq!(
+            optional_tool_config_shape_preflight(6, mcp),
+            Ok(Some(CodebaseMemoryMcp))
+        );
+        mcp[5] = 0;
+        assert_eq!(optional_tool_config_shape_preflight(6, mcp), Ok(None));
+    }
+
+    #[test]
+    fn compiled_optional_tool_config_shape_abi_rejects_bad_flags_and_shapes_before_writes() {
+        let shapes = [0_i64; 8];
+        let mut invalid = shapes;
+        invalid[7] = 3;
+        let src = shapes.as_ptr() as usize as u64;
+        let mut issue = 91_i64;
+        let out = (&mut issue as *mut i64) as usize as u64;
+        let call = |version, mask, ptr, count, dst| unsafe {
+            prodex_optional_tool_config_shape_v1(version, mask, ptr, count, dst)
+        };
+        assert_eq!(call(2, 7, src, 8, out), 4);
+        assert_eq!(call(1, -1, src, 8, out), 1);
+        assert_eq!(call(1, 8, src, 8, out), 1);
+        assert_eq!(call(1, 7, 0, 8, out), 1);
+        assert_eq!(call(1, 7, src, 7, out), 1);
+        assert_eq!(call(1, 7, src, 8, 0), 1);
+        assert_eq!(call(1, 0, invalid.as_ptr() as usize as u64, 8, out), 1);
+        assert_eq!(issue, 91);
+    }
 
     #[test]
     fn optional_tool_hex_encode_enforces_capacity_and_does_not_overwrite_canaries() {

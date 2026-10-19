@@ -436,6 +436,67 @@ fn optimizer_preflight_rejects_wrong_shapes_before_mutation() -> Result<()> {
 }
 
 #[test]
+fn optimizer_preflight_compiled_mojo_prioritizes_ponytail_root_then_mcp_children() -> Result<()> {
+    let home = temp_dir("optimizer-preflight-precedence");
+    fs::create_dir_all(&home)?;
+    let cases = [
+        (
+            "features = \"wrong\"\nmcp_servers = \"wrong\"\n",
+            true,
+            true,
+            true,
+            "features",
+        ),
+        (
+            "[features]\n[marketplaces]\nponytail = \"wrong\"\n[mcp_servers]\ncodebase-memory-mcp = \"wrong\"\n",
+            true,
+            true,
+            true,
+            "ponytail",
+        ),
+        (
+            "[mcp_servers]\ncodebase-memory-mcp = \"wrong\"\nplaywright = \"wrong\"\n",
+            false,
+            true,
+            true,
+            "codebase-memory-mcp",
+        ),
+        (
+            "[mcp_servers]\ncodebase-memory-mcp = \"wrong\"\nplaywright = \"wrong\"\n",
+            false,
+            false,
+            true,
+            "playwright",
+        ),
+        (
+            "features = \"unselected\"\n[mcp_servers]\ncodebase-memory-mcp = {}\n",
+            false,
+            true,
+            false,
+            "",
+        ),
+    ];
+    for (index, (contents, ponytail, memory, playwright, error_fragment)) in
+        cases.iter().enumerate()
+    {
+        fs::write(home.join("config.toml"), contents)?;
+        let response = validate_optimizer_config_shapes(&home, *memory, *playwright, *ponytail);
+        if error_fragment.is_empty() {
+            assert!(response.is_ok(), "case {index}: {response:?}");
+        } else {
+            let err = response.expect_err("invalid selected field must be rejected");
+            assert!(
+                err.to_string().contains(error_fragment),
+                "case {index}: {err:#}"
+            );
+        }
+        assert_eq!(fs::read_to_string(home.join("config.toml"))?, *contents);
+    }
+    fs::remove_dir_all(home)?;
+    Ok(())
+}
+
+#[test]
 fn optimizer_preflight_ignores_unselected_config_sections() -> Result<()> {
     let home = temp_dir("optimizer-preflight-unselected");
     fs::create_dir_all(&home)?;

@@ -364,3 +364,68 @@ def prodex_optional_tool_hex_encode_v1(
         output[unsafe_offset=index * 2] = optional_tool_hex_digit(value >> 4)
         output[unsafe_offset=index * 2 + 1] = optional_tool_hex_digit(value & UInt8(15))
     return output_length
+
+
+# Deterministic optional-tool config-shape preflight before any host mutation.
+# Rust extracts TOML section kinds; only this owner decides selected section
+# precedence and which wrong shape is a user-visible configuration error.
+comptime OPTIONAL_TOOL_CONFIG_SHAPE_ABI_VERSION: Int64 = 1
+comptime OPTIONAL_TOOL_CONFIG_SHAPE_FIELD_COUNT: Int64 = 8
+comptime OPTIONAL_TOOL_CONFIG_PONYTAIL: Int64 = 1
+comptime OPTIONAL_TOOL_CONFIG_MEMORY: Int64 = 2
+comptime OPTIONAL_TOOL_CONFIG_PLAYWRIGHT: Int64 = 4
+
+
+@export("prodex_optional_tool_config_shape_v1")
+def prodex_optional_tool_config_shape_v1(
+    abi_version: Int64,
+    selected_mask: Int64,
+    shape_address: UInt,
+    shape_count: Int64,
+    issue_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != OPTIONAL_TOOL_CONFIG_SHAPE_ABI_VERSION:
+        return 4
+    if (
+        selected_mask < 0 or selected_mask > 7
+        or shape_address == 0
+        or shape_count != OPTIONAL_TOOL_CONFIG_SHAPE_FIELD_COUNT
+        or issue_address == 0
+    ):
+        return 1
+    var shape = Pointer[mut=False, Int64, ImmUntrackedOrigin](
+        unsafe_from_address=Int(shape_address)
+    )
+    # Zero is absent, one is a table, two is a present non-table. Validate
+    # all bits prior to emitting any output, even when a section is unselected.
+    for index in range(OPTIONAL_TOOL_CONFIG_SHAPE_FIELD_COUNT):
+        var value = shape[unsafe_offset=index]
+        if value < 0 or value > 2:
+            return 1
+    var issue: Int64 = 0
+    if (selected_mask & OPTIONAL_TOOL_CONFIG_PONYTAIL) != 0:
+        for index in range(5):
+            if shape[unsafe_offset=index] == 2:
+                issue = Int64(index + 1)
+                break
+    if (
+        issue == 0
+        and (selected_mask & (OPTIONAL_TOOL_CONFIG_MEMORY | OPTIONAL_TOOL_CONFIG_PLAYWRIGHT)) != 0
+    ):
+        if shape[unsafe_offset=5] == 2:
+            issue = 6
+        elif shape[unsafe_offset=5] == 1:
+            if (
+                (selected_mask & OPTIONAL_TOOL_CONFIG_MEMORY) != 0
+                and shape[unsafe_offset=6] == 2
+            ):
+                issue = 7
+            elif (
+                (selected_mask & OPTIONAL_TOOL_CONFIG_PLAYWRIGHT) != 0
+                and shape[unsafe_offset=7] == 2
+            ):
+                issue = 8
+    Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(issue_address)
+    )[] = issue
+    return 0
