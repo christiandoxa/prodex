@@ -7072,3 +7072,49 @@ no target references or active builds, and no release output was present.
 `cargo clean` removed 12.4 GiB. Trash contained only empty standard directories;
 `trash-empty -f` completed. Source WIP and all committed validation evidence
 remain preserved.
+
+
+## Compiled ping process diagnostics (2026-10-20)
+
+Info-runway checkpoint `b51538e69` is pushed to main. The real ping process
+caller now delegates error-detail selection, CR/LF normalization, Unicode
+edge trimming, UTF-8-safe 4,096-byte truncation, duplicate-label suppression,
+exit-code formatting and stderr composition to the existing Mojo ping owner.
+Version-1 diagnostic operations distinguish bounded text, process errors and
+native output. The shared status-detail owner supplies classifier labels.
+Rust retains anyhow-chain acquisition, native process status, lossy stderr
+acquisition and existing secret redaction. Raw errors are classification-only;
+rendered diagnostics receive redacted text. No Rust semantic fallback remains.
+
+The existing 4 MiB classifier boundary remains explicit. Bounded acquisition
+and output labels gain no size cap. ABI validation rejects invalid operations,
+exit-code fields, UTF-8 and insufficient capacity before writes. An initial
+child-module lookup error was corrected with an explicit relative path; both
+formatting and native compilation pass afterward. Native object inspection
+finds no unresolved symbols.
+
+All 24,576 comparisons with the committed Rust functions pass, covering
+classifier combinations, marker casing, native error chains, redaction,
+Unicode/NUL, truncation boundaries, invalid stderr UTF-8 and output status.
+The owned temporary oracle and native object were removed after use.
+Direct assertions pass via
+`mojo run -D ASSERT=all -I mojo/prodex_core mojo/tests/ping_diagnostic_test.mojo`.
+All 1,012 strict core tests pass via
+`PRODEX_MOJO_REQUIRED=1 CARGO_BUILD_JOBS=6 cargo test --locked -q -p prodex-mojo-core --features mojo-core -- --test-threads=1`.
+All 20 real ping caller tests pass via
+`PRODEX_MOJO_REQUIRED=1 CARGO_BUILD_JOBS=6 cargo test --locked -q -p prodex-app --lib app_commands::ping::tests:: -- --test-threads=1`.
+
+The unchanged official metric rises from 35.57290831365479% to
+35.584202365388705% (128,744 Mojo / 233,057 Rust production lines), leaving
+39.415797634611295 percentage points to 75%. Release-floor and audited
+reachable-source non-regression checks pass; the project target remains unmet.
+
+Workspace Clippy passes via
+`PRODEX_MOJO_REQUIRED=1 CARGO_BUILD_JOBS=6 cargo clippy --locked --workspace --all-targets --all-features -- -D warnings`,
+with existing vendor warnings only. Canonical
+`RUST_TEST_THREADS=1 CARGO_BUILD_JOBS=6 npm run test:changed` passes.
+No-fallback/authority/crate-boundary self-test/source, secret-boundary, size,
+`npm run docs`, `cargo fmt --check`, diff and staged privacy checks pass.
+Staged churn remains within 1,200 total lines and 500 per file. The reusable
+build cache is retained. Full CI, live-provider and native macOS/Windows
+checks were not run for this diagnostic-only migration.
