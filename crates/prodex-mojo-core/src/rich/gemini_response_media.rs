@@ -13,6 +13,12 @@ pub enum GeminiResponseMediaOperation {
 const GEMINI_RESPONSE_MEDIA_MAX_INPUT_BYTES: usize = 64 * 1024 * 1024;
 
 unsafe extern "C" {
+    fn prodex_mojo_gemini_data_url_parts_v1(
+        abi: i64,
+        address: u64,
+        length: i64,
+        output: u64,
+    ) -> i64;
     fn prodex_mojo_gemini_media_classification_v1(
         abi_version: i64,
         operation: i64,
@@ -71,6 +77,55 @@ fn gemini_media_classification(operation: i64, value: &str) -> Result<i64, MojoE
 }
 
 const GEMINI_RESPONSE_MEDIA_ABI_VERSION: i64 = 1;
+
+fn data_url_span(text: &str, start: i64, end: i64) -> Result<&str, MojoError> {
+    let start = usize::try_from(start).map_err(|_| MojoError::InvalidOutput)?;
+    let end = usize::try_from(end).map_err(|_| MojoError::InvalidOutput)?;
+    text.get(start..end).ok_or(MojoError::InvalidOutput)
+}
+
+/// Borrow original MIME/data spans selected by Mojo; raw input is not trimmed.
+pub fn gemini_media_data_url_parts(text: &str) -> Result<Option<(&str, &str)>, MojoError> {
+    ensure_rich_abi()?;
+    let mut fields = [-1_i64; 6];
+    match unsafe {
+        prodex_mojo_gemini_data_url_parts_v1(
+            1,
+            text.as_ptr() as usize as u64,
+            i64::try_from(text.len()).map_err(|_| MojoError::InvalidInput)?,
+            fields.as_mut_ptr() as usize as u64,
+        )
+    } {
+        0 => {}
+        1 | 2 => return Err(MojoError::InvalidInput),
+        4 => return Err(MojoError::AbiMismatch),
+        _ => return Err(MojoError::InvalidOutput),
+    }
+    let [
+        present,
+        default_mime,
+        mime_start,
+        mime_end,
+        data_start,
+        data_end,
+    ] = fields;
+    if present == 0 && fields == [0; 6] {
+        return Ok(None);
+    }
+    if present != 1 {
+        return Err(MojoError::InvalidOutput);
+    }
+    let mime = match default_mime {
+        0 => data_url_span(text, mime_start, mime_end)?,
+        1 if mime_start == 0 && mime_end == 0 => "application/octet-stream",
+        _ => return Err(MojoError::InvalidOutput),
+    };
+    Ok(Some((mime, data_url_span(text, data_start, data_end)?)))
+}
+
+#[cfg(test)]
+#[path = "gemini_media_data_url_tests.rs"]
+mod data_url_tests;
 
 pub fn gemini_response_media_mime_for_uri(uri: &str) -> Result<&'static str, MojoError> {
     Ok(match gemini_media_classification(0, uri)? {

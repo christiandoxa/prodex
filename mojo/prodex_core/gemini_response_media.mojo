@@ -13,7 +13,7 @@ from parsed_json import (
     pj_text,
     pj_valid,
 )
-from rich_text import rich_trim_bounds, rich_view_prefix, rich_view_ptr
+from rich_text import rich_trim_bounds, rich_view_prefix, rich_view_ptr, rich_view_valid, rich_view_matches_literal
 from rich_types import ProdexRichStringView
 
 comptime GEMINI_RESPONSE_MEDIA_ABI_VERSION: Int64 = 1
@@ -21,6 +21,74 @@ comptime GEMINI_RESPONSE_MEDIA_MAX_BYTES: Int64 = 67_108_864
 comptime GEMINI_RESPONSE_MEDIA_CONTENT: Int64 = 0
 comptime GEMINI_RESPONSE_MEDIA_SPECIAL_TEXT: Int64 = 1
 comptime GEMINI_RESPONSE_MEDIA_IMAGE_GENERATION: Int64 = 2
+
+
+@fieldwise_init
+struct GeminiDataUrlParts(Copyable):
+    var present: Int64
+    var default_mime: Int64
+    var mime_start: Int64
+    var mime_end: Int64
+    var data_start: Int64
+    var data_end: Int64
+
+
+def media_data_url_parts(view: ProdexRichStringView) -> GeminiDataUrlParts:
+    var result = GeminiDataUrlParts(0, 0, 0, 0, 0, 0)
+    if not rich_view_prefix["data:"](view, False):
+        return result.copy()
+    var source = rich_view_ptr(view)
+    var comma: Int64 = -1
+    for index in range(Int64(5), Int64(view.len)):
+        if source[unsafe_offset=index] == 44:
+            comma = index
+            break
+    if comma < 0:
+        return result.copy()
+    var mime_end = comma
+    var start: Int64 = 5
+    var encoded = False
+    for index in range(Int64(5), comma + 1):
+        if index == comma or source[unsafe_offset=index] == 59:
+            var segment = ProdexRichStringView(view.ptr + UInt(start), UInt(index - start))
+            encoded = encoded or rich_view_matches_literal["base64"](segment, True)
+            if start == 5:
+                mime_end = index
+            start = index + 1
+    if not encoded:
+        return result.copy()
+    var mime = ProdexRichStringView(view.ptr + 5, UInt(mime_end - 5))
+    var bounds = rich_trim_bounds(mime)
+    result.present = 1
+    result.default_mime = Int64(bounds[0] == bounds[1])
+    if result.default_mime == 0:
+        result.mime_start = 5
+        result.mime_end = mime_end
+    result.data_start = comma + 1
+    result.data_end = Int64(view.len)
+    return result.copy()
+
+
+@export("prodex_mojo_gemini_data_url_parts_v1")
+def prodex_mojo_gemini_data_url_parts_v1(
+    abi: Int64, address: UInt, length: Int64, output_address: UInt,
+) abi("C") -> Int64:
+    if abi != GEMINI_RESPONSE_MEDIA_ABI_VERSION:
+        return 4
+    if length < 0 or output_address == 0 or output_address % 8 != 0:
+        return 1
+    var view = ProdexRichStringView(address, UInt(length))
+    if not rich_view_valid(view, length):
+        return 2
+    var result = media_data_url_parts(view)
+    var output = Pointer[mut=True, Int64, MutUntrackedOrigin](unsafe_from_address=Int(output_address))
+    output[unsafe_offset=0] = result.present
+    output[unsafe_offset=1] = result.default_mime
+    output[unsafe_offset=2] = result.mime_start
+    output[unsafe_offset=3] = result.mime_end
+    output[unsafe_offset=4] = result.data_start
+    output[unsafe_offset=5] = result.data_end
+    return 0
 
 
 def media_field(
