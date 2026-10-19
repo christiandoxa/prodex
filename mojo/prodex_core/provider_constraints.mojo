@@ -9560,3 +9560,94 @@ def prodex_gemini_retry_policy_v1(
         exponent = 8
     output[] = GEMINI_RETRY_POLICY_INVALID_STREAM_BASE_MS * (UInt64(1) << UInt64(exponent))
     return GEMINI_RETRY_POLICY_OK
+
+
+# Batch Gemini builtin-tool planning uses the same compiled per-item
+# predicate already used by the SimpleRequest kernel. Rust no longer
+# materializes a synthetic request and runs the Mojo classifier once
+# per tool. This preserves exact tool aliases and property overrides.
+comptime GEMINI_BUILTIN_BATCH_ABI_VERSION: Int64 = 1
+
+
+@export("prodex_gemini_builtin_tool_batch_v1")
+def prodex_gemini_builtin_tool_batch_v1(
+    abi_version: Int64,
+    request_address: UInt,
+    request_length: Int64,
+    output_address: UInt,
+    output_capacity: Int64,
+    written_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != GEMINI_BUILTIN_BATCH_ABI_VERSION:
+        return 4
+    if (
+        request_length <= 0 or request_address == 0
+        or output_address == 0 or output_capacity < 0
+        or written_address == 0
+    ):
+        return 1
+    var request = GeminiRequestContentStringView(
+        UInt64(request_address), UInt64(request_length)
+    )
+    if not gemini_request_content_fragment_valid(request):
+        return 1
+    var root = gemini_bridge_request_value_bounds(request)
+    if not gemini_bridge_request_is_object(request, root[0], root[1]):
+        return 1
+    var tools = gemini_bridge_request_object_member(
+        request, root[0], root[1], StringSlice("tools")
+    )
+    if not gemini_bridge_request_is_array(request, tools[0], tools[1]):
+        return 1
+
+    # Two passes: validate shape/count/output capacity before writing any
+    # caller-owned slots; then emit one validated mask flag per source tool.
+    var count: Int64 = 0
+    var current = gemini_request_content_skip_ws(
+        request, tools[0] + 1, tools[1] - 1
+    )
+    while current < tools[1] - 1:
+        var value_end = gemini_request_content_value_end(
+            request, current, tools[1] - 1, 0
+        )
+        if value_end < 0:
+            return 1
+        count += 1
+        current = gemini_request_content_skip_ws(
+            request, value_end, tools[1] - 1
+        )
+        if current < tools[1] - 1:
+            if gemini_request_content_byte(request, current) != 44:
+                return 1
+            current = gemini_request_content_skip_ws(
+                request, current + 1, tools[1] - 1
+            )
+    if count > output_capacity:
+        return 3
+
+    var output = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    current = gemini_request_content_skip_ws(
+        request, tools[0] + 1, tools[1] - 1
+    )
+    var index: Int64 = 0
+    while current < tools[1] - 1:
+        var value_end = gemini_request_content_value_end(
+            request, current, tools[1] - 1, 0
+        )
+        output[unsafe_offset=index] = Int64(
+            gemini_bridge_request_builtin_tool(request, current, value_end)
+        )
+        index += 1
+        current = gemini_request_content_skip_ws(
+            request, value_end, tools[1] - 1
+        )
+        if current < tools[1] - 1:
+            current = gemini_request_content_skip_ws(
+                request, current + 1, tools[1] - 1
+            )
+    Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(written_address)
+    )[] = count
+    return 0

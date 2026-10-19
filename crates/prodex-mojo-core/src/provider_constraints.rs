@@ -21,6 +21,7 @@ mod gemini_sse_tool_call_index;
 
 pub use gemini_bridge_request::{
     GeminiBridgeRequestKernelInput, GeminiBridgeRequestOperation, gemini_bridge_request_kernel,
+    gemini_builtin_tool_positions,
 };
 pub use gemini_failure_policy::{GeminiFailureOperation, gemini_failure_policy};
 pub use gemini_request::{
