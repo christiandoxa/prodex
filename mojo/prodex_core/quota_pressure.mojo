@@ -1,4 +1,5 @@
 from std.memory import Pointer
+from index_order import index_order_sort
 from rich_text import rich_view_valid, rich_views_equal
 from rich_types import ProdexRichStringView
 
@@ -878,4 +879,87 @@ def prodex_runtime_quota_route_score_resolution_batch(
             runtime_quota_route_score_field(fields, index, 8),
             route_kind,
         )
+    return 0
+
+
+# Compare the existing nine-column quota tuple, then unsigned original order.
+def runtime_quota_probe_compare(data: UInt, width: Int64, left: Int64, right: Int64) -> Int64:
+    var fields = Pointer[mut=False, Int64, ImmUntrackedOrigin](unsafe_from_address=Int(data))
+    for column in range(Int64(9)):
+        var a = fields[unsafe_offset=left * width + column]
+        var b = fields[unsafe_offset=right * width + column]
+        if a == b:
+            continue
+        if column >= 4 and column <= 6:
+            return Int64(-1 if a > b else 1)
+        return Int64(-1 if a < b else 1)
+    var unsigned = Pointer[mut=False, UInt64, ImmUntrackedOrigin](unsafe_from_address=Int(data))
+    var a = unsigned[unsafe_offset=left * width + 9]
+    var b = unsigned[unsafe_offset=right * width + 9]
+    if a != b:
+        return Int64(-1 if a < b else 1)
+    return Int64(-1 if left < right else 1 if left > right else 0)
+
+
+@export("prodex_runtime_quota_probe_order_v1")
+def prodex_runtime_quota_probe_order_v1(
+    version: Int64, rows_address: UInt, count: Int64, scratch_address: UInt,
+    scratch_words: Int64, output_address: UInt, output_words: Int64,
+) abi("C") -> Int64:
+    if version != 1:
+        return -4
+    if count < 0 or count > INT64_MAX // 80 or scratch_words < 0 or output_words < 0:
+        return -1
+    if count <= 1:
+        return 0
+    # The host first probes without evaluating its lazy quota facts.
+    if rows_address == 0:
+        return 5
+    if rows_address % 8 != 0 or scratch_address == 0 or scratch_address % 8 != 0 or output_address == 0 or output_address % 8 != 0:
+        return -1
+    if scratch_words < count * 10 or output_words < count:
+        return -3
+    var rows = Pointer[mut=False, Int64, ImmUntrackedOrigin](unsafe_from_address=Int(rows_address))
+    for index in range(count):
+        var offset = index * 9
+        var present = rows[unsafe_offset=offset + 1]
+        if present < 0 or present > 1:
+            return -1
+        if present == 1:
+            for column in range(Int64(2), Int64(5)):
+                if not runtime_quota_summary_sort_tag_is_valid(rows[unsafe_offset=offset + column]):
+                    return -1
+            for column in range(Int64(5), Int64(7)):
+                var remaining = rows[unsafe_offset=offset + column]
+                if remaining < 0 or remaining > 100:
+                    return -1
+    var unsigned_rows = Pointer[mut=False, UInt64, ImmUntrackedOrigin](unsafe_from_address=Int(rows_address))
+    var ranks = Pointer[mut=True, Int64, MutUntrackedOrigin](unsafe_from_address=Int(scratch_address))
+    var unsigned_ranks = Pointer[mut=True, UInt64, MutUntrackedOrigin](unsafe_from_address=Int(scratch_address))
+    var indices = Pointer[mut=True, Int64, MutUntrackedOrigin](unsafe_from_address=Int(output_address))
+    for index in range(count):
+        var offset = index * 9
+        var band: Int64 = 4
+        var weekly: Int64 = 4
+        var five_hour: Int64 = 4
+        var weekly_remaining: Int64 = 0
+        var five_hour_remaining: Int64 = 0
+        var weekly_reset: Int64 = INT64_MAX
+        var five_hour_reset: Int64 = INT64_MAX
+        if rows[unsafe_offset=offset + 1] == 1:
+            band = rows[unsafe_offset=offset + 2]
+            weekly = rows[unsafe_offset=offset + 3]
+            five_hour = rows[unsafe_offset=offset + 4]
+            weekly_remaining = rows[unsafe_offset=offset + 5]
+            five_hour_remaining = rows[unsafe_offset=offset + 6]
+            weekly_reset = rows[unsafe_offset=offset + 7]
+            five_hour_reset = rows[unsafe_offset=offset + 8]
+        var status = prodex_runtime_quota_summary_sort_key_v1(1, band, weekly, five_hour,
+            weekly_remaining, five_hour_remaining, weekly_reset, five_hour_reset,
+            UInt(Int(ranks.unsafe_offset(index * 10))))
+        if status != 0:
+            return status
+        unsigned_ranks[unsafe_offset=index * 10 + 9] = unsigned_rows[unsafe_offset=offset]
+        indices[unsafe_offset=index] = index
+    index_order_sort[runtime_quota_probe_compare](scratch_address, 10, indices, count)
     return 0

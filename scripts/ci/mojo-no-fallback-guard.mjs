@@ -57,6 +57,9 @@ const BUFFERED_SSE_MOJO = "mojo/prodex_core/provider_sse_data.mojo";
 const RETRY_TEXT_CALLER = "crates/prodex-provider-core/src/gemini_bridge/errors/quota_retry/retry_delay/duration.rs";
 const RETRY_TEXT_ADAPTER = "crates/prodex-mojo-core/src/json/gemini_quota/retry_duration.rs";
 const RETRY_TEXT_MOJO = "mojo/prodex_core/gemini_quota_body.mojo";
+const QUOTA_PROBE_CALLER = "crates/prodex-app/src/runtime_proxy/selection_plan.rs";
+const QUOTA_PROBE_ADAPTER = "crates/prodex-mojo-core/src/runtime/quota_route_score/probe_order.rs";
+const QUOTA_PROBE_MOJO = "mojo/prodex_core/quota_pressure.mojo";
 const QUOTA_LOG_PROFILE_CALLER = "crates/prodex-app/src/quota_support.rs";
 const INFO_LOAD_ADAPTER = "crates/prodex-mojo-core/src/info_render/runtime_load.rs";
 const INFO_LOAD_MOJO = "mojo/prodex_core/info_runtime_load.mojo";
@@ -708,6 +711,9 @@ const PROMOTED_FILES = [
   BUFFERED_SSE_MOJO,
   RETRY_TEXT_CALLER,
   RETRY_TEXT_ADAPTER,
+  QUOTA_PROBE_ADAPTER,
+  QUOTA_PROBE_CALLER,
+  QUOTA_PROBE_MOJO,
   QUOTA_LOG_PROFILE_CALLER,
   INFO_LOAD_ADAPTER,
   INFO_LOAD_MOJO,
@@ -1579,6 +1585,24 @@ const FORBIDDEN_MARKERS = [
 ];
 
 export function findViolations(files) {
+  const quotaProbeViolations = files.flatMap(([filePath, contents]) => {
+    if (filePath === QUOTA_PROBE_CALLER) {
+      const body = contents.match(/pub\(crate\) fn build_runtime_response_probe_plan\([^]*?^\}/mu)?.[0] ?? "";
+      return body.includes("prodex_mojo_core::runtime::quota_probe_order(")
+        && !/\.sort(?:_by(?:_key)?)?\(|unwrap_or\(RuntimeQuotaSummary/u.test(body)
+        ? [] : [`${filePath}: cold-start probe ordering and missing-summary defaults must remain Mojo-owned`];
+    }
+    const required = filePath === QUOTA_PROBE_ADAPTER
+      ? ["prodex_runtime_quota_probe_order_v1(", "QuotaProbeOrderPlan::KeepInput", "std::mem::replace(&mut seen[index], true)"]
+      : filePath === QUOTA_PROBE_MOJO
+        ? ["def prodex_runtime_quota_probe_order_v1(", "index_order_sort[runtime_quota_probe_compare]", "prodex_runtime_quota_summary_sort_key_v1(1, band"] : [];
+    const violations = required.filter((marker) => !contents.includes(marker))
+      .map((marker) => `${filePath}: compiled quota probe ordering must retain ${marker}`);
+    if (filePath === QUOTA_PROBE_ADAPTER && /\.sort(?:_by(?:_key)?)?\(/u.test(contents.split("#[cfg(test)]", 1)[0])) {
+      violations.push(`${filePath}: restored Rust quota probe ordering`);
+    }
+    return violations;
+  });
   const retryTextViolations = files.flatMap(([filePath, contents]) => {
     const production = contents.split("#[cfg(test)]", 1)[0];
     const required = filePath === RETRY_TEXT_CALLER
@@ -10595,6 +10619,7 @@ export function findViolations(files) {
     return [];
   });
   return [...geminiSimpleResponseViolations, ...logPayloadProjectionViolations, ...nativeRecoveryOwnershipViolations, ...quotaRecoveryEligibilityViolations, ...runtimeBrokerReuseMojoViolations, ...geminiResponseMediaMojoViolations, ...cookieEvictionMojoViolations, ...websocketBudgetMojoViolations, ...affinityBindingMojoViolations, ...responsesCapacityRecoveryViolations, ...sseTapMojoOwnershipViolations, ...quotaWatchViolations, ...geminiCompactSnippetViolations, ...geminiCompactTextViolations, ...doctorSmartContextDecisionViolations, ...providerSseJsonFrameMojoViolations, ...geminiSseCompletionOwnershipViolations, ...anthropicNativeStreamDecisionViolations, ...anthropicAttemptCursorViolations, ...geminiUnsupportedToolRetryViolations, ...terminalGeometryViolations, ...previousResponseRecoveryTransitionViolations, ...chatCompatibleToolCallKindViolations, ...geminiQuotaBodyMojoViolations, ...geminiOAuthRotationMojoViolations, ...geminiBuiltinBatchMojoViolations, ...geminiToolArrayValidationMojoViolations, ...geminiOAuthModelMojoViolations, ...superExposeOriginMojoViolations, ...kiroAcpToolLedgerMojoViolations, ...quotaPoolSummarySectionsMojoViolations, ...deepseekRequestDiagnosticViolations, ...deepseekToolShapeIssueMojoViolations, ...deepseekReplayItemPolicyMojoViolations, ...chatNamespaceSplitMojoViolations, ...deepseekInputItemIssueMessageViolations, ...deepseekRequestIssueMessageViolations, ...smartContextTelemetrySampleViolations, ...compatibilityDiagnosticsMojoViolations, ...quotaHeaderProjectionViolations, ...smartContextCapsuleOrderViolations, ...markerViolations, ...deepseekCatalogPolicyViolations, ...featureOffViolations, ...liveLogRecordViolations, ...runtimePolicyPresetViolations, ...runtimeConfigScalarViolations, ...profileHealthCircuitViolations, ...logThroughputViolations, ...operationalDetailSpecViolations, ...transcriptPolicyViolations, ...logLoadPolicyViolations, ...routeReasonViolations, ...runtimeStateQuotaViolations, ...runtimeStateRoutePolicyViolations, ...runtimeProxyRootViolations, ...runtimeRecoveryDeadlineViolations, ...brokerVersionGuardViolations, ...brokerContinuityViolations, ...brokerLogCacheViolations, ...codexConfigViolations, ...statePolicyViolations, ...quotaSelectionPolicyViolations, ...routeTagMirrorViolations, ...enumTagMirrorViolations, ...appSelectionPolicyMirrorViolations, ...runtimeStateBackgroundViolations, ...redactionViolations, ...rateLimitHeaderSelectionViolations, ...profileIdentityViolations, ...governanceInspectionViolations, ...governanceInspectionOrderingViolations, ...exactnessPlannerViolations,
+    ...quotaProbeViolations,
     ...retryTextViolations,
     ...bufferedSseViolations,
     ...promptCacheViolations,
@@ -10719,6 +10744,11 @@ async function promotedFiles() {
 }
 
 function selfTest() {
+  const quotaProbe = "pub(crate) fn build_runtime_response_probe_plan() {\n prodex_mojo_core::runtime::quota_probe_order(\n}";
+  assert(!findViolations([[QUOTA_PROBE_CALLER, quotaProbe]]).some((message) => message.includes("cold-start probe ordering")));
+  assert.match(findViolations([[QUOTA_PROBE_CALLER, quotaProbe.replace("quota_probe_order(", "rust_sort(")]]).join("\n"), /cold-start probe ordering/u);
+  assert.match(findViolations([[QUOTA_PROBE_CALLER, quotaProbe.replace("\n}", "\n jobs.sort_by_key(\n}")]]).join("\n"), /cold-start probe ordering/u);
+  assert.match(findViolations([[QUOTA_PROBE_ADAPTER, ""]]).join("\n"), /compiled quota probe ordering/u);
   const retryText = "gemini_retry_text_delay_ms( GeminiRetryTextKind::Duration GeminiRetryTextKind::Message GeminiRetryTextKind::HeaderSeconds";
   assert.deepEqual(findViolations([[RETRY_TEXT_CALLER, retryText]]), []);
   assert.match(findViolations([[RETRY_TEXT_CALLER, retryText + "\nvalue.ceil()"]]).join("\n"), /restored Rust Gemini retry duration semantics/u);

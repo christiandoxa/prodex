@@ -88,31 +88,48 @@ pub(crate) fn build_runtime_response_probe_plan(
 
     let cached_usage_snapshots = selection_state.persisted_usage_snapshots();
 
-    cold_start_probe_jobs.sort_by_key(|job| {
-        let quota_summary = cached_usage_snapshots
-            .get(&job.name)
-            .filter(|snapshot| runtime_usage_snapshot_is_usable(snapshot, now))
-            .map(|snapshot| runtime_quota_summary_from_usage_snapshot_at(snapshot, route_kind, now))
-            .unwrap_or(RuntimeQuotaSummary {
-                five_hour: RuntimeQuotaWindowSummary {
-                    status: RuntimeQuotaWindowStatus::Unknown,
-                    remaining_percent: 0,
-                    reset_at: i64::MAX,
-                },
-                weekly: RuntimeQuotaWindowSummary {
-                    status: RuntimeQuotaWindowStatus::Unknown,
-                    remaining_percent: 0,
-                    reset_at: i64::MAX,
-                },
-                route_band: RuntimeQuotaPressureBand::Unknown,
-            });
-        (
-            runtime_quota_pressure_sort_key_for_route_from_summary(quota_summary),
-            job.order_index,
-        )
-    });
+    let probe_order =
+        prodex_mojo_core::runtime::quota_probe_order(cold_start_probe_jobs.iter().map(|job| {
+            let quota_summary = cached_usage_snapshots
+                .get(&job.name)
+                .filter(|snapshot| runtime_usage_snapshot_is_usable(snapshot, now))
+                .map(|snapshot| {
+                    runtime_quota_summary_from_usage_snapshot_at(snapshot, route_kind, now)
+                });
+            let summary = quota_summary
+                .map(prodex_runtime_quota::runtime_quota_summary_to_proxy)
+                .map(
+                    |summary| prodex_mojo_core::runtime::QuotaSummarySortKeyInput {
+                        route_band: summary.route_band as i64,
+                        weekly_status: summary.weekly.status as i64,
+                        five_hour_status: summary.five_hour.status as i64,
+                        weekly_remaining: summary.weekly.remaining_percent,
+                        five_hour_remaining: summary.five_hour.remaining_percent,
+                        weekly_reset_at: summary.weekly.reset_at,
+                        five_hour_reset_at: summary.five_hour.reset_at,
+                    },
+                );
+            prodex_mojo_core::runtime::QuotaProbeOrderInput {
+                original_order: job.order_index,
+                summary,
+            }
+        }))
+        .expect("Mojo cold-start probe ordering failed");
+    if let prodex_mojo_core::runtime::QuotaProbeOrderPlan::Reorder(order) = probe_order {
+        let mut jobs = cold_start_probe_jobs
+            .into_iter()
+            .map(Some)
+            .collect::<Vec<_>>();
+        cold_start_probe_jobs = order
+            .into_iter()
+            .map(|index| {
+                jobs[index]
+                    .take()
+                    .expect("validated unique Mojo probe index")
+            })
+            .collect();
+    }
 
-    reports.sort_by_key(|report| report.order_index);
     let ready_candidates = runtime_response_ready_candidates(
         selection_state,
         &reports,
