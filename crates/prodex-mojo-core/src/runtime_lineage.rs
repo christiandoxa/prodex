@@ -1,5 +1,11 @@
 use crate::MojoError;
 
+mod prompt_cache;
+pub use prompt_cache::{
+    PromptCacheBindingFacts, PromptCacheEvent, PromptCacheKey, PromptCacheOwnerUpdate,
+    PromptCacheUpdatePlan, plan_prompt_cache_update, prepare_prompt_cache_key,
+};
+
 const ABI_VERSION: i64 = 1;
 const KEY_MAX_BYTES: usize = 4_096;
 const CLASS_COMPONENT: i64 = 0;
