@@ -12,98 +12,123 @@ pub use self::quota_retry::{
     gemini_provider_core_should_rotate_after_quota_response,
 };
 
-use self::quota_retry::{
-    gemini_provider_core_value_has_rate_limit, gemini_provider_core_value_has_terminal_quota,
-};
+use self::quota_retry::gemini_provider_core_quota_body_plan;
 use crate::mojo_json::Document;
 
 pub fn gemini_provider_core_normalized_error_body(status: u16, body: &[u8]) -> Option<Vec<u8>> {
-    if status < 400 {
+    if !prodex_mojo_core::json::gemini_error_normalization_needs_body(status)
+        .expect("Mojo Gemini normalization eligibility returned invalid output")
+    {
         return None;
     }
-    if status == 429 {
-        let value = serde_json::from_slice::<serde_json::Value>(body).ok()?;
-        if !gemini_provider_core_openai_error_kind_plan(status, &value, body).admissible {
-            return None;
-        }
-    }
-    if let Ok(value) = serde_json::from_slice::<serde_json::Value>(body) {
-        let error = value.get("error").unwrap_or(&value);
-        if error.is_object() {
-            let message = gemini_provider_core_error_message(error)
-                .unwrap_or_else(|| format!("Gemini upstream returned HTTP {status}."));
-            let (error_type, code) = gemini_provider_core_openai_error_kind(status, &value, body);
-            let normalized = serde_json::json!({
-                "error": {
-                    "message": message,
-                    "type": error_type,
-                    "param": serde_json::Value::Null,
-                    "code": code,
-                    "gemini_error": error,
-                }
-            });
-            return serde_json::to_vec(&normalized).ok();
-        }
-    }
-
-    let message = std::str::from_utf8(body)
-        .ok()
-        .map(str::trim)
-        .filter(|message| !message.is_empty())
-        .map(str::to_string)
-        .unwrap_or_else(|| format!("Gemini upstream returned HTTP {status}."));
-    let gemini_error = serde_json::json!({
-        "message": message.clone(),
-        "status": status,
+    let value = serde_json::from_slice::<serde_json::Value>(body).ok();
+    let quota = value.as_ref().map(gemini_provider_core_quota_body_plan);
+    let body_terminal = quota.as_ref().map_or_else(
+        || gemini_provider_core_body_has_terminal_quota(body),
+        |plan| plan.terminal_quota,
+    );
+    let context = serde_json::json!({
+        "parsed": value.is_some(),
+        "value": value,
+        "source": std::str::from_utf8(body).ok(),
+        "terminal": quota.as_ref().is_some_and(|plan| plan.terminal_quota),
+        "rate": quota.as_ref().is_some_and(|plan| plan.rate_limit),
     });
-    let (error_type, code) = gemini_provider_core_openai_error_kind(status, &gemini_error, body);
-    let normalized = serde_json::json!({
-        "error": {
-            "message": message,
-            "type": error_type,
-            "param": serde_json::Value::Null,
-            "code": code,
-            "gemini_error": gemini_error,
-        }
-    });
-    serde_json::to_vec(&normalized).ok()
-}
-
-fn gemini_provider_core_error_message(value: &serde_json::Value) -> Option<String> {
     let mut document = Document::default();
-    document.push(value, None, "");
-    let raw = std::str::from_utf8(&document.raw).ok()?;
-    let output = prodex_mojo_core::json::provider_error_message_json(&document.nodes, raw)
-        .expect("Mojo provider error message extraction returned invalid output")?;
-    serde_json::from_slice(&output).ok()
-}
-
-fn gemini_provider_core_openai_error_kind_plan(
-    status: u16,
-    value: &serde_json::Value,
-    body: &[u8],
-) -> prodex_mojo_core::json::GeminiQuotaHttpErrorKind {
-    prodex_mojo_core::json::gemini_quota_http_error_kind(
+    document.push(&context, None, "");
+    let raw = std::str::from_utf8(&document.raw).expect("Serde error context must remain UTF-8");
+    prodex_mojo_core::json::gemini_normalized_error_json(
         status,
-        gemini_provider_core_body_has_terminal_quota(body),
-        gemini_provider_core_value_has_terminal_quota(value),
-        gemini_provider_core_value_has_rate_limit(value),
+        body_terminal,
+        &document.nodes,
+        raw,
     )
-    .expect("compiled Mojo Gemini error kind mapping returned invalid output")
-}
-
-fn gemini_provider_core_openai_error_kind(
-    status: u16,
-    value: &serde_json::Value,
-    body: &[u8],
-) -> (String, String) {
-    let plan = gemini_provider_core_openai_error_kind_plan(status, value, body);
-    (plan.error_type, plan.error_code)
+    .expect("Mojo Gemini normalized error returned invalid output")
 }
 
 #[cfg(test)]
 mod tests {
     use super::gemini_provider_core_normalized_error_body;
+
+    #[test]
+    fn compiled_normalization_preserves_complete_wire_bytes_and_error_subtree_boundaries() {
+        use serde_json::json;
+        for (status, body, message, original, code, kind) in [
+            (
+                400,
+                r#"{"error":{},"message":"outside the selected error"}"#,
+                "Gemini upstream returned HTTP 400.",
+                json!({}),
+                "bad_request",
+                "invalid_request_error",
+            ),
+            (
+                500,
+                r#"{"error":{"nested":{"message":"  inner 🧭  "}},"message":"outside"}"#,
+                "inner 🧭",
+                json!({"nested":{"message":"  inner 🧭  "}}),
+                "provider_error",
+                "server_error",
+            ),
+            (
+                400,
+                r#"{"error":null,"message":"outer"}"#,
+                r#"{"error":null,"message":"outer"}"#,
+                json!({"message":r#"{"error":null,"message":"outer"}"#, "status":400}),
+                "bad_request",
+                "invalid_request_error",
+            ),
+            (
+                429,
+                r#"[{"code":"rate_limit_exceeded"}]"#,
+                r#"[{"code":"rate_limit_exceeded"}]"#,
+                json!({"message":r#"[{"code":"rate_limit_exceeded"}]"#, "status":429}),
+                "provider_error",
+                "api_error",
+            ),
+            (
+                500,
+                "\u{2003}plain\0failure\u{3000}",
+                "plain\0failure",
+                json!({"message":"plain\0failure", "status":500}),
+                "provider_error",
+                "server_error",
+            ),
+            (
+                500,
+                " \r\n ",
+                "Gemini upstream returned HTTP 500.",
+                json!({"message":"Gemini upstream returned HTTP 500.", "status":500}),
+                "provider_error",
+                "server_error",
+            ),
+        ] {
+            let expected = json!({"error":{"code":code, "gemini_error":original, "message":message, "param":null, "type":kind}});
+            assert_eq!(
+                gemini_provider_core_normalized_error_body(status, body.as_bytes()),
+                Some(serde_json::to_vec(&expected).unwrap()),
+                "{status}/{body:?}"
+            );
+        }
+        let actual = gemini_provider_core_normalized_error_body(500, &[0xff, 0]).unwrap();
+        let actual: serde_json::Value = serde_json::from_slice(&actual).unwrap();
+        assert_eq!(
+            actual,
+            json!({"error":{"code":"provider_error", "gemini_error":{"message":"Gemini upstream returned HTTP 500.","status":500}, "message":"Gemini upstream returned HTTP 500.", "param":null, "type":"server_error"}})
+        );
+    }
+
+    #[test]
+    fn compiled_normalization_preserves_large_unicode_messages_without_a_new_body_cap() {
+        let message = "x".repeat(65_537) + "🧭\0";
+        let original = serde_json::json!({"message":format!(" \u{2003}{message}\u{3000}")});
+        let body = serde_json::to_vec(&serde_json::json!({"error":original})).unwrap();
+        let expected = serde_json::json!({"error":{"code":"provider_error","gemini_error":original,"message":message,"param":null,"type":"server_error"}});
+        assert_eq!(
+            gemini_provider_core_normalized_error_body(500, &body),
+            Some(serde_json::to_vec(&expected).unwrap())
+        );
+    }
 
     #[test]
     fn normalized_error_body_uses_mojo_message_precedence_for_nested_errors() {

@@ -63,6 +63,7 @@ const QUOTA_PROBE_MOJO = "mojo/prodex_core/quota_pressure.mojo";
 const QUOTA_DURATION_CALLER = "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_rate_limits.rs";
 const QUOTA_DURATION_ADAPTER = "crates/prodex-mojo-core/src/provider_constraints/quota_headers/duration.rs";
 const QUOTA_DURATION_MOJO = "mojo/prodex_core/provider_quota_duration.mojo";
+const GEMINI_NORMALIZED_ADAPTER = "crates/prodex-mojo-core/src/json/gemini_quota/normalized_error.rs";
 const QUOTA_LOG_PROFILE_CALLER = "crates/prodex-app/src/quota_support.rs";
 const INFO_LOAD_ADAPTER = "crates/prodex-mojo-core/src/info_render/runtime_load.rs";
 const INFO_LOAD_MOJO = "mojo/prodex_core/info_runtime_load.mojo";
@@ -719,6 +720,7 @@ const PROMOTED_FILES = [
   QUOTA_PROBE_MOJO,
   QUOTA_DURATION_ADAPTER,
   QUOTA_DURATION_MOJO,
+  GEMINI_NORMALIZED_ADAPTER,
   QUOTA_LOG_PROFILE_CALLER,
   INFO_LOAD_ADAPTER,
   INFO_LOAD_MOJO,
@@ -1590,6 +1592,19 @@ const FORBIDDEN_MARKERS = [
 ];
 
 export function findViolations(files) {
+  const geminiNormalizedViolations = files.flatMap(([filePath, contents]) => {
+    const production = contents.split("#[cfg(test)]", 1)[0];
+    const required = filePath === GEMINI_NORMALIZED_ADAPTER
+      ? ["prodex_gemini_normalized_error_v1(", "[2, 0] => Ok(true)", "transform_json("]
+      : filePath === RETRY_TEXT_MOJO
+        ? ["def prodex_gemini_normalized_error_v1(", "provider_error_message_node(tree, error)", "gemini_quota_error_labels(http_status,", "js_raw(dest, tree, error)"] : [];
+    const violations = required.filter((marker) => !production.includes(marker))
+      .map((marker) => `${filePath}: compiled Gemini normalization must retain ${marker}`);
+    if (filePath === GEMINI_ERRORS_FILE && /status\s*(?:<|==)|\.is_object\(|\.get\("error"\)|str::trim/u.test(production)) {
+      violations.push(`${filePath}: restored Rust Gemini normalization policy`);
+    }
+    return violations;
+  });
   const quotaDurationViolations = files.flatMap(([filePath, contents]) => {
     const production = contents.split("#[cfg(test)]", 1)[0];
     const required = filePath === QUOTA_DURATION_CALLER ? ["provider_quota_duration_seconds(value)"]
@@ -6152,7 +6167,7 @@ export function findViolations(files) {
     const production = contents.split("#[cfg(test)]", 1)[0];
     const required = [
       "use crate::mojo_json::Document;",
-      "prodex_mojo_core::json::provider_error_message_json(",
+      "prodex_mojo_core::json::gemini_normalized_error_json(",
     ];
     const restoredRust = [
       "let mut stack",
@@ -9781,8 +9796,8 @@ export function findViolations(files) {
   const geminiQuotaBodyMojoViolations = files.flatMap(([filePath, contents]) => {
     if (filePath === "crates/prodex-provider-core/src/gemini_bridge/errors.rs") {
       const required = [
-        "prodex_mojo_core::json::gemini_quota_http_error_kind(",
-        ".admissible",
+        "prodex_mojo_core::json::gemini_normalized_error_json(",
+        "prodex_mojo_core::json::gemini_error_normalization_needs_body(status)",
         "compiled_gemini_http_error_mapping_preserves_quota_priority_and_generic_passthrough",
       ];
       const retired = [
@@ -10637,6 +10652,7 @@ export function findViolations(files) {
     return [];
   });
   return [...geminiSimpleResponseViolations, ...logPayloadProjectionViolations, ...nativeRecoveryOwnershipViolations, ...quotaRecoveryEligibilityViolations, ...runtimeBrokerReuseMojoViolations, ...geminiResponseMediaMojoViolations, ...cookieEvictionMojoViolations, ...websocketBudgetMojoViolations, ...affinityBindingMojoViolations, ...responsesCapacityRecoveryViolations, ...sseTapMojoOwnershipViolations, ...quotaWatchViolations, ...geminiCompactSnippetViolations, ...geminiCompactTextViolations, ...doctorSmartContextDecisionViolations, ...providerSseJsonFrameMojoViolations, ...geminiSseCompletionOwnershipViolations, ...anthropicNativeStreamDecisionViolations, ...anthropicAttemptCursorViolations, ...geminiUnsupportedToolRetryViolations, ...terminalGeometryViolations, ...previousResponseRecoveryTransitionViolations, ...chatCompatibleToolCallKindViolations, ...geminiQuotaBodyMojoViolations, ...geminiOAuthRotationMojoViolations, ...geminiBuiltinBatchMojoViolations, ...geminiToolArrayValidationMojoViolations, ...geminiOAuthModelMojoViolations, ...superExposeOriginMojoViolations, ...kiroAcpToolLedgerMojoViolations, ...quotaPoolSummarySectionsMojoViolations, ...deepseekRequestDiagnosticViolations, ...deepseekToolShapeIssueMojoViolations, ...deepseekReplayItemPolicyMojoViolations, ...chatNamespaceSplitMojoViolations, ...deepseekInputItemIssueMessageViolations, ...deepseekRequestIssueMessageViolations, ...smartContextTelemetrySampleViolations, ...compatibilityDiagnosticsMojoViolations, ...quotaHeaderProjectionViolations, ...smartContextCapsuleOrderViolations, ...markerViolations, ...deepseekCatalogPolicyViolations, ...featureOffViolations, ...liveLogRecordViolations, ...runtimePolicyPresetViolations, ...runtimeConfigScalarViolations, ...profileHealthCircuitViolations, ...logThroughputViolations, ...operationalDetailSpecViolations, ...transcriptPolicyViolations, ...logLoadPolicyViolations, ...routeReasonViolations, ...runtimeStateQuotaViolations, ...runtimeStateRoutePolicyViolations, ...runtimeProxyRootViolations, ...runtimeRecoveryDeadlineViolations, ...brokerVersionGuardViolations, ...brokerContinuityViolations, ...brokerLogCacheViolations, ...codexConfigViolations, ...statePolicyViolations, ...quotaSelectionPolicyViolations, ...routeTagMirrorViolations, ...enumTagMirrorViolations, ...appSelectionPolicyMirrorViolations, ...runtimeStateBackgroundViolations, ...redactionViolations, ...rateLimitHeaderSelectionViolations, ...profileIdentityViolations, ...governanceInspectionViolations, ...governanceInspectionOrderingViolations, ...exactnessPlannerViolations,
+    ...geminiNormalizedViolations,
     ...quotaDurationViolations,
     ...quotaProbeViolations,
     ...retryTextViolations,
@@ -10763,6 +10779,8 @@ async function promotedFiles() {
 }
 
 function selfTest() {
+  assert.match(findViolations([[GEMINI_NORMALIZED_ADAPTER, ""]]).join("\n"), /compiled Gemini normalization/u);
+  assert.match(findViolations([[GEMINI_ERRORS_FILE, "if status == 429 { value.is_object() }"]]).join("\n"), /restored Rust Gemini normalization policy/u);
   const quotaDuration = "provider_quota_duration_seconds(value)";
   assert(!findViolations([[QUOTA_DURATION_CALLER, quotaDuration]]).some((message) => message.includes("quota duration")));
   assert.match(findViolations([[QUOTA_DURATION_CALLER, "fn parse_duration_seconds() { value.chars().peekable() }"]]).join("\n"), /restored Rust quota duration grammar/u);
@@ -11557,9 +11575,8 @@ function selfTest() {
   const geminiHttpErrorFile = "crates/prodex-provider-core/src/gemini_bridge/errors.rs";
   const geminiHttpErrorCaller = [
     "use crate::mojo_json::Document;",
-    "prodex_mojo_core::json::provider_error_message_json(",
-    "prodex_mojo_core::json::gemini_quota_http_error_kind(",
-    ".admissible",
+    "prodex_mojo_core::json::gemini_normalized_error_json(",
+    "prodex_mojo_core::json::gemini_error_normalization_needs_body(status)",
     "compiled_gemini_http_error_mapping_preserves_quota_priority_and_generic_passthrough",
   ].join("\n");
   assert.deepEqual(findViolations([[geminiHttpErrorFile, geminiHttpErrorCaller]]), []);

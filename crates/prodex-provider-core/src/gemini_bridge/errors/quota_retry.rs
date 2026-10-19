@@ -59,14 +59,6 @@ pub(super) fn gemini_provider_core_quota_body_plan(
         .expect("compiled Mojo Gemini quota classifier returned invalid output")
 }
 
-pub(super) fn gemini_provider_core_value_has_terminal_quota(value: &serde_json::Value) -> bool {
-    gemini_provider_core_quota_body_plan(value).terminal_quota
-}
-
-pub(super) fn gemini_provider_core_value_has_rate_limit(value: &serde_json::Value) -> bool {
-    gemini_provider_core_quota_body_plan(value).rate_limit
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -326,15 +318,17 @@ data: {\"metadata\":{\"quotaId\":\"QueriesPerMinute\"}}\n";
             .as_deref(),
             Some("limit reached")
         );
-        assert!(gemini_provider_core_value_has_rate_limit(
-            &serde_json::json!({
+        assert!(
+            gemini_provider_core_quota_body_plan(&serde_json::json!({
                 "error": {"code": " RATE_LIMIT_EXCEEDED_ERROR "}
-            })
-        ));
-        assert!(!gemini_provider_core_value_has_rate_limit(
-            &serde_json::json!({
+            }))
+            .rate_limit
+        );
+        assert!(
+            !gemini_provider_core_quota_body_plan(&serde_json::json!({
                 "error": {"code": "rate limit exceeded"}
-            })
-        ));
+            }))
+            .rate_limit
+        );
     }
 }

@@ -2,11 +2,13 @@
 # JSON tree. The host handles JSON and SSE decoding, never duplicate policy.
 from std.memory import Pointer
 from std.math import ceil, isfinite
+from json_sink import JsonSink, js_byte, js_literal, js_raw, js_string, js_u64, js_view
+from provider_error import provider_error_message_node
 from log_number import log_parse_u64_text
 from rich_catalog import catalog_view_find_folded
 from parsed_json import (
-    ParsedJson, ParsedJsonNode, JSON_OBJECT, JSON_STRING, pj_valid,
-    pj_field, pj_string_field, pj_kind, pj_text, pj_child, pj_next,
+    ParsedJson, ParsedJsonNode, JSON_OBJECT, JSON_STRING, JSON_NULL, JSON_FALSE, JSON_TRUE, pj_valid,
+    pj_field, pj_string_field, pj_kind, pj_text, pj_child, pj_next, pj_literal,
 )
 from rich_types import ProdexRichStringView
 from rich_text import rich_trim_bounds, rich_view_ptr, rich_view_matches_literal, rich_view_prefix, rich_view_valid
@@ -302,15 +304,50 @@ def gemini_quota_retryable_http_status(status: Int64) -> Bool:
 
 
 def gemini_quota_copy_label(
-    data: StringSlice,
+    data: ProdexRichStringView,
     dest: Pointer[mut=True, UInt8, _],
     offset: Int64,
 ) -> Int64:
-    var length = Int64(data.byte_length())
-    var source = data.unsafe_ptr()
+    var length = Int64(data.len)
+    var source = rich_view_ptr(data)
     for index in range(length):
         dest[unsafe_offset=offset + index] = source[unsafe_offset=index]
     return length
+
+
+def gemini_error_status_needs_body(http_status: Int64) -> Bool:
+    return http_status >= 400
+
+
+def gemini_quota_http_admissible(http_status: Int64, terminal: Bool, rate: Bool) -> Bool:
+    return gemini_error_status_needs_body(http_status) and (http_status != 429 or terminal or rate)
+
+
+def gemini_quota_error_labels(http_status: Int64, terminal: Bool, rate: Bool) -> Tuple[ProdexRichStringView, ProdexRichStringView]:
+    var error_type = StringSlice("api_error")
+    var error_code = StringSlice("provider_error")
+    if terminal:
+        error_type = StringSlice("insufficient_quota")
+        error_code = StringSlice("insufficient_quota")
+    elif rate:
+        error_type = StringSlice("rate_limit_error")
+        error_code = StringSlice("rate_limit_exceeded")
+    elif http_status == 400:
+        error_type = StringSlice("invalid_request_error")
+        error_code = StringSlice("bad_request")
+    elif http_status == 401:
+        error_type = StringSlice("authentication_error")
+        error_code = StringSlice("invalid_authentication")
+    elif http_status == 403:
+        error_type = StringSlice("permission_error")
+        error_code = StringSlice("permission_denied")
+    elif http_status == 404:
+        error_type = StringSlice("invalid_request_error")
+        error_code = StringSlice("not_found")
+    elif http_status >= 500 and http_status <= 599:
+        error_type = StringSlice("server_error")
+        error_code = StringSlice("provider_error")
+    return (pj_literal(error_type), pj_literal(error_code))
 
 
 @export("prodex_gemini_quota_error_kind_v1")
@@ -338,35 +375,13 @@ def prodex_gemini_quota_error_kind_v1(
         return 1
     var terminal = body_terminal == 1 or value_terminal == 1
     var rate = value_rate == 1
-    var admit = http_status >= 400 and (
-        http_status != 429 or terminal or rate
-    )
-    var error_type = StringSlice("api_error")
-    var error_code = StringSlice("provider_error")
-    if terminal:
-        error_type = StringSlice("insufficient_quota")
-        error_code = StringSlice("insufficient_quota")
-    elif rate:
-        error_type = StringSlice("rate_limit_error")
-        error_code = StringSlice("rate_limit_exceeded")
-    elif http_status == 400:
-        error_type = StringSlice("invalid_request_error")
-        error_code = StringSlice("bad_request")
-    elif http_status == 401:
-        error_type = StringSlice("authentication_error")
-        error_code = StringSlice("invalid_authentication")
-    elif http_status == 403:
-        error_type = StringSlice("permission_error")
-        error_code = StringSlice("permission_denied")
-    elif http_status == 404:
-        error_type = StringSlice("invalid_request_error")
-        error_code = StringSlice("not_found")
-    elif http_status >= 500 and http_status <= 599:
-        error_type = StringSlice("server_error")
-        error_code = StringSlice("provider_error")
+    var admit = gemini_quota_http_admissible(http_status, terminal, rate)
+    var labels = gemini_quota_error_labels(http_status, terminal, rate)
+    var error_type = labels[0].copy()
+    var error_code = labels[1].copy()
 
-    var type_len = Int64(error_type.byte_length())
-    var code_len = Int64(error_code.byte_length())
+    var type_len = Int64(error_type.len)
+    var code_len = Int64(error_code.len)
     if type_len > output_capacity or code_len > output_capacity - type_len:
         return 3
     var output = Pointer[mut=True, UInt8, MutUntrackedOrigin](
@@ -542,4 +557,97 @@ def prodex_gemini_retry_text_finish_v1(
         output[unsafe_offset=0] = 1
         output[unsafe_offset=1] = delay
         break
+    return 0
+
+
+def gemini_normalized_message(sink: Pointer[mut=True, JsonSink, _], message: ProdexRichStringView, http_status: Int64):
+    if message.len > 0:
+        js_string(sink, message)
+    else:
+        js_literal(sink, StringSlice('"Gemini upstream returned HTTP '))
+        js_u64(sink, UInt64(http_status))
+        js_literal(sink, StringSlice('."'))
+
+
+@export("prodex_gemini_normalized_error_v1")
+def prodex_gemini_normalized_error_v1(
+    version: Int64, http_status: Int64, body_terminal: Int64,
+    nodes_address: UInt64, nodes_count: Int64, raw_address: UInt64, raw_length: Int64,
+    scratch_address: UInt64, scratch_count: Int64, measuring: Int64,
+    output_address: UInt64, output_capacity: Int64, metadata_address: UInt64,
+) abi("C") -> Int64:
+    if version != 1:
+        return 4
+    if http_status < 0 or http_status > 65535 or body_terminal < 0 or body_terminal > 1 or metadata_address == 0 or metadata_address % 8 != 0:
+        return 1
+    var metadata = Pointer[mut=True, Int64, MutUntrackedOrigin](unsafe_from_address=Int(metadata_address))
+    # A fact-free probe preserves the successful-status fast path.
+    if nodes_count == 0:
+        if nodes_address != 0 or raw_address != 0 or raw_length != 0 or scratch_address != 0 or scratch_count != 0 or measuring != 1 or output_address != 0 or output_capacity != 0:
+            return 1
+        metadata[unsafe_offset=0] = 2 if gemini_error_status_needs_body(http_status) else 0
+        metadata[unsafe_offset=1] = 0
+        return 0
+    if nodes_count < 0 or nodes_count > 9223372036854775807 // 80 or nodes_address == 0 or nodes_address % 8 != 0 or raw_address == 0 or raw_length <= 0 or scratch_address == 0 or scratch_address % 8 != 0 or scratch_count < nodes_count or measuring < 0 or measuring > 1 or output_capacity < 0:
+        return 1
+    if measuring == 1:
+        if output_address != 0 or output_capacity != 0:
+            return 1
+    elif output_address == 0:
+        return 1
+    var tree = ParsedJson(Pointer[mut=False, ParsedJsonNode, ImmUntrackedOrigin](unsafe_from_address=Int(nodes_address)), nodes_count, ProdexRichStringView(UInt(raw_address), UInt(raw_length)))
+    if not pj_valid(tree) or pj_kind(tree, 0) != JSON_OBJECT:
+        return 1
+    for name in [StringSlice("parsed"), StringSlice("terminal"), StringSlice("rate")]:
+        var kind = pj_kind(tree, pj_field(tree, 0, name))
+        if kind != JSON_FALSE and kind != JSON_TRUE:
+            return 1
+    var parsed = pj_kind(tree, pj_field(tree, 0, StringSlice("parsed"))) == JSON_TRUE
+    var value = pj_field(tree, 0, StringSlice("value"))
+    var source = pj_field(tree, 0, StringSlice("source"))
+    if value < 0 or (not parsed and pj_kind(tree, value) != JSON_NULL) or (pj_kind(tree, source) != JSON_NULL and pj_kind(tree, source) != JSON_STRING):
+        return 1
+    var terminal = pj_kind(tree, pj_field(tree, 0, StringSlice("terminal"))) == JSON_TRUE
+    var rate = pj_kind(tree, pj_field(tree, 0, StringSlice("rate"))) == JSON_TRUE
+    if not gemini_error_status_needs_body(http_status) or (http_status == 429 and (not parsed or not gemini_quota_http_admissible(http_status, body_terminal == 1 or terminal, rate))):
+        metadata[unsafe_offset=0] = 0
+        metadata[unsafe_offset=1] = 0
+        return 0
+    var error: Int64 = -1
+    if parsed:
+        error = pj_field(tree, value, StringSlice("error"))
+        if error < 0:
+            error = value
+    var structured = pj_kind(tree, error) == JSON_OBJECT
+    var message = ProdexRichStringView(0, 0)
+    if structured:
+        var selected = provider_error_message_node(tree, error)
+        if selected >= 0:
+            message = gemini_quota_trimmed(pj_text(tree, selected))
+    else:
+        message = gemini_quota_trimmed(pj_text(tree, source))
+    var labels = gemini_quota_error_labels(http_status, body_terminal == 1 or (structured and terminal), structured and rate)
+    var sink = JsonSink(Pointer[mut=True, UInt8, MutUntrackedOrigin](unsafe_from_address=Int(output_address)), output_capacity, 0, measuring == 1, False)
+    var dest = Pointer(to=sink)
+    # Keep Serde's existing key order and raw structured error representation.
+    js_literal(dest, StringSlice('{"error":{"code":"'))
+    js_view(dest, labels[1])
+    js_literal(dest, StringSlice('","gemini_error":'))
+    if structured:
+        js_raw(dest, tree, error)
+    else:
+        js_literal(dest, StringSlice('{"message":'))
+        gemini_normalized_message(dest, message, http_status)
+        js_literal(dest, StringSlice(',"status":'))
+        js_u64(dest, UInt64(http_status))
+        js_byte(dest, 125)
+    js_literal(dest, StringSlice(',"message":'))
+    gemini_normalized_message(dest, message, http_status)
+    js_literal(dest, StringSlice(',"param":null,"type":"'))
+    js_view(dest, labels[0])
+    js_literal(dest, StringSlice('"}}'))
+    if sink.failed:
+        return 3
+    metadata[unsafe_offset=0] = 1
+    metadata[unsafe_offset=1] = sink.written
     return 0
