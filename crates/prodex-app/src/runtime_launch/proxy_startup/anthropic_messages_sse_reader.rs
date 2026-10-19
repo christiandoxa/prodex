@@ -2,6 +2,10 @@ use super::deepseek_rewrite::RuntimeDeepSeekConversationStore;
 use super::deepseek_sse::RuntimeDeepSeekSseState;
 use super::provider_bridge::RuntimeProviderBridgeKind;
 use super::provider_sse_reader::{RuntimeProviderSseJsonReader, RuntimeProviderSseJsonState};
+use prodex_mojo_core::anthropic_stream_policy::{
+    AnthropicStreamAction, AnthropicStreamFacts, anthropic_stream_action,
+    anthropic_stream_finish_reason,
+};
 use serde_json::{Value, json};
 use std::collections::{BTreeMap, BTreeSet};
 use std::io::{self, Read};
@@ -90,8 +94,32 @@ impl RuntimeProviderSseJsonState for RuntimeAnthropicMessagesSseState {
     }
 
     fn observe_value(&mut self, value: &Value) -> Vec<String> {
-        match value.get("type").and_then(Value::as_str) {
-            Some("message_start") => {
+        use AnthropicStreamAction::*;
+        let block = value.get("content_block");
+        let index = value.get("index").and_then(Value::as_u64).unwrap_or(0);
+        let action = match anthropic_stream_action(AnthropicStreamFacts {
+            event_type: value.get("type").and_then(Value::as_str),
+            block_present: block.is_some(),
+            block_type: block
+                .and_then(|value| value.get("type"))
+                .and_then(Value::as_str),
+            block_name: block
+                .and_then(|value| value.get("name"))
+                .and_then(Value::as_str),
+            delta_type: value.pointer("/delta/type").and_then(Value::as_str),
+            ignored_block: self.ignored_blocks.contains(&index),
+            active_web_search: self.web_searches.contains_key(&index),
+        }) {
+            Ok(action) => action,
+            Err(_) => {
+                return self.failed(
+                    "invalid_anthropic_stream",
+                    "Compiled Mojo Anthropic stream event policy failed",
+                );
+            }
+        };
+        match action {
+            MessageStart => {
                 let usage = self.observe_usage(value.pointer("/message/usage"));
                 self.inner.observe_chat_chunk(&json!({
                     "id": value.pointer("/message/id"),
@@ -100,102 +128,89 @@ impl RuntimeProviderSseJsonState for RuntimeAnthropicMessagesSseState {
                     "usage": usage,
                 }))
             }
-            Some("content_block_start") => {
-                let Some(block) = value.get("content_block") else {
-                    return self.failed("invalid_anthropic_stream", "content block is missing");
+            MissingBlock => self.failed("invalid_anthropic_stream", "content block is missing"),
+            MissingBlockType => {
+                self.failed("invalid_anthropic_stream", "content block type is missing")
+            }
+            StartToolUse => self.inner.observe_chat_chunk(&json!({
+                "choices": [{
+                    "delta": {"tool_calls": [{
+                        "index": index,
+                        "id": block.and_then(|value| value.get("id")),
+                        "type": "function",
+                        "function": {
+                            "name": block.and_then(|value| value.get("name")),
+                            "arguments": "",
+                        },
+                    }]},
+                    "finish_reason": null,
+                }]
+            })),
+            StartWebSearch => {
+                self.start_web_search(index, block.expect("Mojo-validated Anthropic block"))
+            }
+            WebSearchResult => {
+                self.ignored_blocks.insert(index);
+                self.finish_web_search_result(block.expect("Mojo-validated Anthropic block"))
+            }
+            DeltaText => self.inner.observe_chat_chunk(&json!({
+                "choices": [{
+                    "delta": {"content": value.pointer("/delta/text")},
+                    "finish_reason": null,
+                }]
+            })),
+            DeltaArguments => self.inner.observe_chat_chunk(&json!({
+                "choices": [{
+                    "delta": {"tool_calls": [{
+                        "index": index,
+                        "function": {"arguments": value.pointer("/delta/partial_json")},
+                    }]},
+                    "finish_reason": null,
+                }]
+            })),
+            DeltaThinking => self.inner.observe_reasoning_delta(
+                value,
+                value
+                    .pointer("/delta/thinking")
+                    .and_then(Value::as_str)
+                    .unwrap_or(""),
+            ),
+            DeltaSearchInput => {
+                if let Some(text) = value.pointer("/delta/partial_json").and_then(Value::as_str)
+                    && let Some(search) = self.web_searches.get_mut(&index)
+                {
+                    search.input_json.push_str(text);
+                }
+                Vec::new()
+            }
+            MissingDeltaType => {
+                self.failed("invalid_anthropic_stream", "content delta type is missing")
+            }
+            MessageDelta => {
+                let reason = match anthropic_stream_finish_reason(
+                    value.pointer("/delta/stop_reason").and_then(Value::as_str),
+                ) {
+                    Ok(reason) => reason,
+                    Err(_) => {
+                        return self.failed(
+                            "invalid_anthropic_stream",
+                            "Compiled Mojo Anthropic stop reason policy failed",
+                        );
+                    }
                 };
-                let index = value.get("index").and_then(Value::as_u64).unwrap_or(0);
-                match block.get("type").and_then(Value::as_str) {
-                    Some("text") | Some("thinking") => Vec::new(),
-                    Some("tool_use") => self.inner.observe_chat_chunk(&json!({
-                        "choices": [{
-                            "delta": {"tool_calls": [{
-                                "index": value.get("index").and_then(Value::as_u64).unwrap_or(0),
-                                "id": block.get("id"),
-                                "type": "function",
-                                "function": {"name": block.get("name"), "arguments": ""},
-                            }]},
-                            "finish_reason": null,
-                        }]
-                    })),
-                    Some("server_tool_use")
-                        if block.get("name").and_then(Value::as_str) == Some("web_search") =>
-                    {
-                        self.start_web_search(index, block)
-                    }
-                    Some("web_search_tool_result") => {
-                        self.ignored_blocks.insert(index);
-                        self.finish_web_search_result(block)
-                    }
-                    Some(_) => Vec::new(),
-                    None => {
-                        self.failed("invalid_anthropic_stream", "content block type is missing")
-                    }
-                }
-            }
-            Some("content_block_delta") => {
-                let index = value.get("index").and_then(Value::as_u64).unwrap_or(0);
-                if self.ignored_blocks.contains(&index) {
-                    return Vec::new();
-                }
-                if let Some(search) = self.web_searches.get_mut(&index) {
-                    if value.pointer("/delta/type").and_then(Value::as_str)
-                        == Some("input_json_delta")
-                        && let Some(delta) =
-                            value.pointer("/delta/partial_json").and_then(Value::as_str)
-                    {
-                        search.input_json.push_str(delta);
-                    }
-                    return Vec::new();
-                }
-                match value.pointer("/delta/type").and_then(Value::as_str) {
-                    Some("text_delta") => self.inner.observe_chat_chunk(&json!({
-                        "choices": [{
-                            "delta": {"content": value.pointer("/delta/text")},
-                            "finish_reason": null,
-                        }]
-                    })),
-                    Some("input_json_delta") => self.inner.observe_chat_chunk(&json!({
-                        "choices": [{
-                            "delta": {"tool_calls": [{
-                                "index": index,
-                                "function": {"arguments": value.pointer("/delta/partial_json")},
-                            }]},
-                            "finish_reason": null,
-                        }]
-                    })),
-                    Some("thinking_delta") => self.inner.observe_reasoning_delta(
-                        value,
-                        value
-                            .pointer("/delta/thinking")
-                            .and_then(Value::as_str)
-                            .unwrap_or(""),
-                    ),
-                    Some("signature_delta") | Some(_) => Vec::new(),
-                    None => {
-                        self.failed("invalid_anthropic_stream", "content delta type is missing")
-                    }
-                }
-            }
-            Some("message_delta") => {
                 let usage = self.observe_usage(value.get("usage"));
                 self.inner.observe_chat_chunk(&json!({
-                    "choices": [{
-                        "delta": {},
-                        "finish_reason": anthropic_finish_reason(
-                            value.pointer("/delta/stop_reason").and_then(Value::as_str)
-                        ),
-                    }],
+                    "choices": [{"delta": {}, "finish_reason": reason}],
                     "usage": usage,
                 }))
             }
-            Some("message_stop") => {
+            MessageStop => {
                 self.inner.eof = true;
                 let mut events = self.complete_web_searches();
                 events.extend(self.inner.complete_event());
                 events
             }
-            Some("error") => {
+            Error => {
                 self.inner.eof = true;
                 self.failed(
                     value
@@ -208,14 +223,13 @@ impl RuntimeProviderSseJsonState for RuntimeAnthropicMessagesSseState {
                         .unwrap_or("Anthropic stream failed"),
                 )
             }
-            // Anthropic permits ping and future event types; transport stays open.
-            Some("content_block_stop") => {
+            BlockStop => {
                 if let Some(index) = value.get("index").and_then(Value::as_u64) {
                     self.ignored_blocks.remove(&index);
                 }
                 Vec::new()
             }
-            Some("ping") | Some(_) | None => Vec::new(),
+            Ignore => Vec::new(),
         }
     }
 
@@ -353,14 +367,6 @@ fn anthropic_web_search_stream_item(
     )
 }
 
-fn anthropic_finish_reason(reason: Option<&str>) -> Option<&'static str> {
-    reason.map(|reason| match reason {
-        "tool_use" => "tool_calls",
-        "max_tokens" => "length",
-        _ => "stop",
-    })
-}
-
 fn anthropic_chat_usage(input: u64, output: u64) -> Value {
     json!({
         "prompt_tokens": input,
@@ -392,6 +398,87 @@ mod tests {
             .filter_map(|line| line.strip_prefix("data: "))
             .filter_map(|data| serde_json::from_str(data).ok())
             .collect()
+    }
+
+    #[test]
+    fn compiled_anthropic_stream_policy_preserves_unknown_and_malformed_events() {
+        let fixture = concat!(
+            "data: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_extra\"}}\n\n",
+            "data: {\"type\":\"ping\"}\n\n",
+            "data: {\"type\":\"next_protocol_event\",\"payload\":\"opaque\"}\n\n",
+            "data: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"future_tool\"}}\n\n",
+            "data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"signature_delta\"}}\n\n",
+            "data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"hello\"}}\n\n",
+            "data: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"}}\n\n",
+            "data: {\"type\":\"message_stop\"}\n\n",
+        );
+        let output = render(fixture);
+        let events = data_values(&output);
+        assert!(
+            events.iter().any(|value| {
+                value["type"] == "response.output_text.delta" && value["delta"] == "hello"
+            }),
+            "{output}"
+        );
+        assert_eq!(
+            events
+                .iter()
+                .filter(|value| value["type"] == "response.completed")
+                .count(),
+            1
+        );
+        assert!(!output.contains("response.failed"), "{output}");
+
+        for (fragment, reason) in [
+            (
+                r#"{"type":"content_block_start","index":0}"#,
+                "content block is missing",
+            ),
+            (
+                r#"{"type":"content_block_start","index":0,"content_block":{}}"#,
+                "content block type is missing",
+            ),
+            (
+                r#"{"type":"content_block_delta","index":0,"delta":{}}"#,
+                "content delta type is missing",
+            ),
+        ] {
+            let output = render(&format!("data: {fragment}\n\n"));
+            assert!(output.contains("response.failed"), "{output}");
+            assert!(output.contains(reason), "{output}");
+        }
+    }
+
+    #[test]
+    fn compiled_anthropic_stream_policy_keeps_search_deltas_private_and_clears_ignored_index() {
+        let output = render(concat!(
+            "data: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_search_delta\"}}\n\n",
+            "data: {\"type\":\"content_block_start\",\"index\":3,\"content_block\":{\"type\":\"server_tool_use\",\"name\":\"web_search\",\"id\":\"srv_search\",\"input\":{}}}\n\n",
+            "data: {\"type\":\"content_block_delta\",\"index\":3,\"delta\":{\"type\":\"input_json_delta\",\"partial_json\":\"{\\\"query\\\":\\\"distributed\\\"}\"}}\n\n",
+            "data: {\"type\":\"content_block_delta\",\"index\":3,\"delta\":{\"type\":\"text_delta\",\"text\":\"invisible\"}}\n\n",
+            "data: {\"type\":\"content_block_start\",\"index\":5,\"content_block\":{\"type\":\"web_search_tool_result\",\"tool_use_id\":\"srv_search\",\"content\":[]}}\n\n",
+            "data: {\"type\":\"content_block_delta\",\"index\":5,\"delta\":{}}\n\n",
+            "data: {\"type\":\"content_block_stop\",\"index\":5}\n\n",
+            "data: {\"type\":\"content_block_delta\",\"index\":5,\"delta\":{\"type\":\"text_delta\",\"text\":\"visible after stop\"}}\n\n",
+            "data: {\"type\":\"message_stop\"}\n\n",
+        ));
+        let events = data_values(&output);
+        assert!(!output.contains("invisible"), "{output}");
+        assert!(output.contains("visible after stop"), "{output}");
+        assert!(
+            events.iter().any(|item| {
+                item["type"] == "response.output_item.done"
+                    && item["item"]["action"]["queries"][0] == "distributed"
+            }),
+            "{output}"
+        );
+        assert_eq!(
+            events
+                .iter()
+                .filter(|item| item["type"] == "response.completed")
+                .count(),
+            1
+        );
     }
 
     #[test]
