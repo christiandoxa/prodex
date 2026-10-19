@@ -255,40 +255,26 @@ pub fn format_info_runway_display(
     estimate: Option<InfoRunwayEstimateDisplay<'_>>,
     now: i64,
 ) -> String {
-    if profiles_with_data == 0 {
-        return "Unavailable".to_string();
-    }
-    if current_remaining <= 0 {
-        return "Exhausted".to_string();
-    }
-
-    let Some(estimate) = estimate else {
-        return "Unavailable (no recent quota decay observed in active runtime logs)".to_string();
+    use prodex_mojo_core::info_render::{
+        InfoStatusReset, InfoStatusRunway, InfoStatusRunwayEstimate,
     };
-
-    let observed = format_relative_duration(estimate.observed_span_seconds);
-    let burn = format!("{:.1}", estimate.burn_per_hour);
-    if let Some(reset) = earliest_reset
-        && reset.reset_at <= estimate.exhaust_at
-    {
-        return format!(
-            "Earliest reset {} arrives before the no-reset runway (~{} at {} aggregated-%/h, {} profile(s), observed over {})",
-            reset.reset_text,
-            format_relative_duration(estimate.exhaust_at.saturating_sub(now)),
-            burn,
-            estimate.observed_profiles,
-            observed
-        );
-    }
-
-    format!(
-        "{} (~{}) at {} aggregated-%/h from {} profile(s), observed over {}, no-reset estimate",
-        estimate.exhaust_text,
-        format_relative_duration(estimate.exhaust_at.saturating_sub(now)),
-        burn,
-        estimate.observed_profiles,
-        observed
-    )
+    prodex_mojo_core::info_render::format_info_runway(InfoStatusRunway {
+        profiles_with_data,
+        current_remaining,
+        earliest_reset: earliest_reset.map(|reset| InfoStatusReset {
+            timestamp: reset.reset_at,
+            text: reset.reset_text,
+        }),
+        estimate: estimate.map(|estimate| InfoStatusRunwayEstimate {
+            burn_per_hour: estimate.burn_per_hour,
+            observed_profiles: estimate.observed_profiles,
+            observed_span_seconds: estimate.observed_span_seconds,
+            exhaust_at: estimate.exhaust_at,
+            exhaust_text: estimate.exhaust_text,
+        }),
+        now,
+    })
+    .expect("Mojo info runway renderer returned invalid output")
 }
 
 pub fn format_relative_duration(seconds: i64) -> String {

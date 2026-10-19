@@ -1,5 +1,7 @@
 use super::*;
 
+mod info_runway;
+
 #[test]
 fn section_headers_expand_to_requested_width() {
     assert_eq!(text_width(&section_header_with_width("Doctor", 72)), 72);

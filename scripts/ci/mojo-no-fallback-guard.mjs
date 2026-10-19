@@ -64,6 +64,7 @@ const QUOTA_DURATION_CALLER = "crates/prodex-app/src/runtime_launch/proxy_startu
 const QUOTA_DURATION_ADAPTER = "crates/prodex-mojo-core/src/provider_constraints/quota_headers/duration.rs";
 const QUOTA_DURATION_MOJO = "mojo/prodex_core/provider_quota_duration.mojo";
 const GEMINI_NORMALIZED_ADAPTER = "crates/prodex-mojo-core/src/json/gemini_quota/normalized_error.rs";
+const INFO_RUNWAY_DECIMAL = "mojo/prodex_core/info_decimal.mojo";
 const QUOTA_LOG_PROFILE_CALLER = "crates/prodex-app/src/quota_support.rs";
 const INFO_LOAD_ADAPTER = "crates/prodex-mojo-core/src/info_render/runtime_load.rs";
 const INFO_LOAD_MOJO = "mojo/prodex_core/info_runtime_load.mojo";
@@ -721,6 +722,7 @@ const PROMOTED_FILES = [
   QUOTA_DURATION_ADAPTER,
   QUOTA_DURATION_MOJO,
   GEMINI_NORMALIZED_ADAPTER,
+  INFO_RUNWAY_DECIMAL,
   QUOTA_LOG_PROFILE_CALLER,
   INFO_LOAD_ADAPTER,
   INFO_LOAD_MOJO,
@@ -1592,6 +1594,16 @@ const FORBIDDEN_MARKERS = [
 ];
 
 export function findViolations(files) {
+  const infoRunwayViolations = files.flatMap(([filePath, contents]) => {
+    if (filePath === "crates/prodex-terminal-ui/src/info.rs") {
+      const body = contents.match(/pub fn format_info_runway_display\([^]*?^\}/mu)?.[0] ?? "";
+      return body.includes("prodex_mojo_core::info_render::format_info_runway(") && !/format!|saturating_sub|profiles_with_data ==|current_remaining <=/u.test(body)
+        ? [] : [`${filePath}: info runway decisions and decimal rendering must remain Mojo-owned`];
+    }
+    const required = filePath === INFO_RUNWAY_DECIMAL ? ["def info_decimal_one(", "remainder == half", "scaled & UInt64(1)"]
+      : filePath === "mojo/prodex_core/info_render.mojo" ? ["info_render_status_runway[False](", "info_render_status_runway[True](", "info_decimal_one(info_unsigned(unsigned_address, 3, 2))"] : [];
+    return required.filter((marker) => !contents.includes(marker)).map((marker) => `${filePath}: compiled runway rendering must retain ${marker}`);
+  });
   const geminiNormalizedViolations = files.flatMap(([filePath, contents]) => {
     const production = contents.split("#[cfg(test)]", 1)[0];
     const required = filePath === GEMINI_NORMALIZED_ADAPTER
@@ -6812,7 +6824,7 @@ export function findViolations(files) {
         "info_render_status_profile_filter(",
         "info_render_status_token_plan(",
         "info_render_status_runtime_profile(",
-        "info_render_status_runway(",
+        "info_render_status_runway[",
         "info_render_status_fields(",
         "info_render_status_resource_metrics(",
         "info_render_status_resource_history(",
@@ -10652,6 +10664,7 @@ export function findViolations(files) {
     return [];
   });
   return [...geminiSimpleResponseViolations, ...logPayloadProjectionViolations, ...nativeRecoveryOwnershipViolations, ...quotaRecoveryEligibilityViolations, ...runtimeBrokerReuseMojoViolations, ...geminiResponseMediaMojoViolations, ...cookieEvictionMojoViolations, ...websocketBudgetMojoViolations, ...affinityBindingMojoViolations, ...responsesCapacityRecoveryViolations, ...sseTapMojoOwnershipViolations, ...quotaWatchViolations, ...geminiCompactSnippetViolations, ...geminiCompactTextViolations, ...doctorSmartContextDecisionViolations, ...providerSseJsonFrameMojoViolations, ...geminiSseCompletionOwnershipViolations, ...anthropicNativeStreamDecisionViolations, ...anthropicAttemptCursorViolations, ...geminiUnsupportedToolRetryViolations, ...terminalGeometryViolations, ...previousResponseRecoveryTransitionViolations, ...chatCompatibleToolCallKindViolations, ...geminiQuotaBodyMojoViolations, ...geminiOAuthRotationMojoViolations, ...geminiBuiltinBatchMojoViolations, ...geminiToolArrayValidationMojoViolations, ...geminiOAuthModelMojoViolations, ...superExposeOriginMojoViolations, ...kiroAcpToolLedgerMojoViolations, ...quotaPoolSummarySectionsMojoViolations, ...deepseekRequestDiagnosticViolations, ...deepseekToolShapeIssueMojoViolations, ...deepseekReplayItemPolicyMojoViolations, ...chatNamespaceSplitMojoViolations, ...deepseekInputItemIssueMessageViolations, ...deepseekRequestIssueMessageViolations, ...smartContextTelemetrySampleViolations, ...compatibilityDiagnosticsMojoViolations, ...quotaHeaderProjectionViolations, ...smartContextCapsuleOrderViolations, ...markerViolations, ...deepseekCatalogPolicyViolations, ...featureOffViolations, ...liveLogRecordViolations, ...runtimePolicyPresetViolations, ...runtimeConfigScalarViolations, ...profileHealthCircuitViolations, ...logThroughputViolations, ...operationalDetailSpecViolations, ...transcriptPolicyViolations, ...logLoadPolicyViolations, ...routeReasonViolations, ...runtimeStateQuotaViolations, ...runtimeStateRoutePolicyViolations, ...runtimeProxyRootViolations, ...runtimeRecoveryDeadlineViolations, ...brokerVersionGuardViolations, ...brokerContinuityViolations, ...brokerLogCacheViolations, ...codexConfigViolations, ...statePolicyViolations, ...quotaSelectionPolicyViolations, ...routeTagMirrorViolations, ...enumTagMirrorViolations, ...appSelectionPolicyMirrorViolations, ...runtimeStateBackgroundViolations, ...redactionViolations, ...rateLimitHeaderSelectionViolations, ...profileIdentityViolations, ...governanceInspectionViolations, ...governanceInspectionOrderingViolations, ...exactnessPlannerViolations,
+    ...infoRunwayViolations,
     ...geminiNormalizedViolations,
     ...quotaDurationViolations,
     ...quotaProbeViolations,
@@ -10779,6 +10792,8 @@ async function promotedFiles() {
 }
 
 function selfTest() {
+  assert.match(findViolations([[INFO_RUNWAY_DECIMAL, ""]]).join("\n"), /compiled runway rendering/u);
+  assert.match(findViolations([["crates/prodex-terminal-ui/src/info.rs", "pub fn format_info_runway_display() {\nformat!(\"Rust\")\n}"]]).join("\n"), /info runway decisions and decimal rendering/u);
   assert.match(findViolations([[GEMINI_NORMALIZED_ADAPTER, ""]]).join("\n"), /compiled Gemini normalization/u);
   assert.match(findViolations([[GEMINI_ERRORS_FILE, "if status == 429 { value.is_object() }"]]).join("\n"), /restored Rust Gemini normalization policy/u);
   const quotaDuration = "provider_quota_duration_seconds(value)";
@@ -10946,6 +10961,9 @@ function selfTest() {
     infoProviderMojo.replace("rich_view_order_sort(", "old_sort(")]]).join("\n"),
   /Info provider semantics must remain Mojo-owned/u);
   const doctorPresentationMojoCanonical = [
+    "info_render_status_runway[False](",
+    "info_render_status_runway[True](",
+    "info_decimal_one(info_unsigned(unsigned_address, 3, 2))",
     "INFO_RENDER_HUMAN_BYTES",
     "INFO_RENDER_HUMAN_COUNT",
     "INFO_RENDER_TOKEN_EFFICIENCY",
@@ -10959,7 +10977,7 @@ function selfTest() {
     "info_render_status_profile_filter(",
     "info_render_status_token_plan(",
     "info_render_status_runtime_profile(",
-    "info_render_status_runway(",
+    "info_render_status_runway[",
     "info_render_status_fields(",
     "info_render_status_resource_metrics(",
     "info_render_status_resource_history(",

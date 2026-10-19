@@ -7005,3 +7005,70 @@ fixtures pass. Staged churn stays within 1,200 total lines and 500 per file.
 The build cache is retained for reuse. Full CI, live provider and native
 macOS/Windows checks were not run.
 `node scripts/ci/runtime-test-manifest-guard.mjs` also passes.
+
+
+## Compiled info quota-runway rendering (2026-10-20)
+
+Normalized-error checkpoint `0b9b3c4b3` is pushed to main. The terminal info
+runway now uses the existing Mojo runway renderer through version-1 operation
+34. The shared owner handles availability, exhausted/no-estimate precedence,
+reset precedence, saturated timestamp subtraction, durations and final text.
+Rust's independent branches, message templates and float formatting are
+removed; the public terminal display structs and host timestamp labels stay
+compatible.
+
+Info and status historically use different decimal rounding. The shared
+renderer preserves status's existing positive-finite policy and formatting,
+while info uses a focused reachable IEEE-754 fixed-decimal owner. Integer
+scaling, exact ties-to-even and bounded decimal digit expansion retain Rust's
+one-decimal behavior across signed zero, finite extremes, subnormals,
+infinities and NaN. The 310-digit scratch and 312-byte result bounds follow
+from the finite f64 domain; no text or input-size cap is added.
+
+Initial checked Array indexing linked an unavailable
+`KGEN_CompilerRT_fprintf` assertion path. Pointer access within the proven
+fixed-size storage removes that runtime dependency. Native symbol inspection
+and the corrected caller-boundary link pass; no Rust rendering fallback or
+runtime shim is added. Existing info-render compiler warnings remain unchanged.
+
+All 12,288 standard-formatter comparisons across every IEEE exponent, both
+signs and boundary significands pass as permanent caller-boundary coverage.
+All 8,192 generated comparisons with the former complete terminal renderer
+also pass; the owned oracle and native object were removed after harvesting
+their results. Direct assertions pass via
+`mojo run -D ASSERT=all -I mojo/prodex_core mojo/tests/info_decimal_test.mojo`.
+All 1,008 strict core tests pass via
+`PRODEX_MOJO_REQUIRED=1 CARGO_BUILD_JOBS=6 cargo test --locked -q -p prodex-mojo-core --features mojo-core -- --test-threads=1`.
+Native ABI checks cover malformed row counts/presence without writes, and
+terminal caller cases cover reset ties, early returns and labels over 65,537
+bytes with Unicode/NUL.
+
+All 38 terminal UI tests pass via
+`PRODEX_MOJO_REQUIRED=1 CARGO_BUILD_JOBS=6 cargo test --locked -q -p prodex-terminal-ui -- --test-threads=1`.
+The live info handler's five-hour and weekly runway fields both reach the
+compiled owner through the existing report and terminal facades. Workspace
+Clippy passes via
+`PRODEX_MOJO_REQUIRED=1 CARGO_BUILD_JOBS=6 cargo clippy --locked --workspace --all-targets --all-features -- -D warnings`,
+with existing vendor warnings only.
+
+The unchanged official metric rises from 35.55582598786927% to
+35.57290831365479% (128,648 Mojo / 232,998 Rust production lines), leaving
+39.42709168634521 percentage points to 75%. Release-floor and audited reachable
+source non-regression checks pass; the project target remains unmet.
+
+An attempted optional `node scripts/ci/no-placeholder-guard.mjs` command fails
+because that script does not exist; it is not counted as validation. The
+repository's actual no-fallback and authority self-test/source guards pass.
+
+Canonical `RUST_TEST_THREADS=1 CARGO_BUILD_JOBS=6 npm run test:changed` passes,
+including all 38 terminal tests under the default feature selection. Docs,
+formatting, size, crate-boundary self-test/source, secret-boundary, diff and
+staged privacy checks pass. Staged churn stays within 1,200 total lines and
+500 per file. Full CI, live provider and native macOS/Windows checks were not
+run for this display-only migration.
+
+After all consumers finished, process executable/cwd/fd/map inspection found
+no target references or active builds, and no release output was present.
+`cargo clean` removed 12.4 GiB. Trash contained only empty standard directories;
+`trash-empty -f` completed. Source WIP and all committed validation evidence
+remain preserved.
