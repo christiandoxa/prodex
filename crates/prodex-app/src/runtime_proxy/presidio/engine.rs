@@ -248,7 +248,7 @@ async fn runtime_presidio_redact_text(
                     r
                 }));
             }
-            all_analyzer_results = merge_presidio_analyzer_results(all_analyzer_results);
+            all_analyzer_results = merge_presidio_analyzer_results(all_analyzer_results)?;
         }
     }
 

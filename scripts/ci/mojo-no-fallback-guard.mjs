@@ -170,10 +170,16 @@ const PING_SUMMARY_CALLER_FILE = "crates/prodex-app/src/app_commands/ping_output
 const PING_SUMMARY_CALLER_TEST_FILE = "crates/prodex-app/src/app_commands/ping_tests.rs";
 const PING_SUMMARY_ADAPTER_FILE = "crates/prodex-mojo-core/src/rich/ping_protocol.rs";
 const PING_SUMMARY_MOJO_FILE = "mojo/prodex_core/ping_protocol.mojo";
+const PRESIDIO_ANALYZER_CALLER_FILE = "crates/prodex-app/src/runtime_proxy/presidio/analyzer.rs";
+const PRESIDIO_ANALYZER_ADAPTER_FILE = "crates/prodex-mojo-core/src/redaction/analyzer.rs";
+const PRESIDIO_ANALYZER_MOJO_FILE = "mojo/prodex_core/redaction_analyzer.mojo";
 const PRESIDIO_JSON_CALLER_FILE = "crates/prodex-app/src/runtime_proxy/presidio/json_body.rs";
 const PRESIDIO_JSON_ADAPTER_FILE = "crates/prodex-mojo-core/src/json/redaction_content.rs";
 const PRESIDIO_JSON_MOJO_FILE = "mojo/prodex_core/redaction_json.mojo";
 const PROMOTED_FILES = [
+  PRESIDIO_ANALYZER_CALLER_FILE,
+  PRESIDIO_ANALYZER_ADAPTER_FILE,
+  PRESIDIO_ANALYZER_MOJO_FILE,
   PRESIDIO_JSON_CALLER_FILE,
   PRESIDIO_JSON_ADAPTER_FILE,
   PRESIDIO_JSON_MOJO_FILE,
@@ -4701,6 +4707,31 @@ export function findViolations(files) {
     if (filePath === "crates/prodex-app/src/app_commands/log_tui_render.rs") {
       return contents.includes("compiled_log_search_filters_ascii_case_without_folding_unicode")
         ? [] : [filePath + ": real log TUI search caller regression missing"];
+    }
+    return [];
+  });
+  const presidioAnalyzerMergeViolations = files.flatMap(([filePath, contents]) => {
+    if (filePath === PRESIDIO_ANALYZER_CALLER_FILE) {
+      const required = ["prodex_mojo_core::redaction::analyzer_merge_plan(&facts)",
+        "compiled_analyzer_merge_preserves_duplicate_score_entity_and_language_order",
+        "compiled_analyzer_merge_preserves_adjacent_overlap_and_containment_contract"];
+      const restored = ["results.sort_by(", "fn merge_presidio_analyzer_result(",
+        "fn replace_presidio_analyzer_result_if_stronger("];
+      return required.every((marker) => contents.includes(marker)) &&
+        restored.every((marker) => !contents.includes(marker))
+        ? [] : [filePath + ": Presidio analyzer merge must remain compiled Mojo-owned"];
+    }
+    if (filePath === PRESIDIO_ANALYZER_ADAPTER_FILE) {
+      return ["pub fn analyzer_merge_plan(", "prodex_redaction_analyzer_merge_v1",
+        "compiled_analyzer_merge_rejects_malformed_ranges_and_abi"]
+        .filter((marker) => !contents.includes(marker))
+        .map((marker) => filePath + ": compiled Presidio analyzer ABI missing " + marker);
+    }
+    if (filePath === PRESIDIO_ANALYZER_MOJO_FILE) {
+      return ['@export("prodex_redaction_analyzer_merge_v1")',
+        "def analyzer_before(", "def analyzer_sift_down(", "var contained = ("]
+        .filter((marker) => !contents.includes(marker))
+        .map((marker) => filePath + ": compiled Presidio analyzer merge missing " + marker);
     }
     return [];
   });
@@ -10101,12 +10132,14 @@ export function findViolations(files) {
     ...logAsciiSearchMojoViolations,
     ...logTuiLayoutViolations,
     ...presidioJsonSelectionViolations,
+    ...presidioAnalyzerMergeViolations,
     ...rtkAutoWrapperManifestViolations,
     ...optionalToolsRenderViolations,
     ...defaultFeatureViolations, ...operationalHistogramViolations];
 }
 
 const RELOCATED_TEST_FILES = new Set([
+  "crates/prodex-app/src/runtime_proxy/presidio/analyzer_tests.rs",
   "crates/prodex-mojo-core/src/provider_constraints/attempt_cursor_tests.rs",
   "crates/prodex-mojo-core/src/provider_constraints/scalar_policy_tests.rs",
   "crates/prodex-mojo-core/src/redaction/tests.rs",
@@ -11948,6 +11981,15 @@ function selfTest() {
   assert.match(findViolations([[deepseekSseToolEventsFile,
     deepseekSseToolEventsCaller + '\nif tool_call.done {',
   ]]).join("\n"), /restored Rust DeepSeek SSE tool-event selection or done gate/u);
+  const presidioAnalyzerConsumer = [
+    "prodex_mojo_core::redaction::analyzer_merge_plan(&facts)",
+    "compiled_analyzer_merge_preserves_duplicate_score_entity_and_language_order",
+    "compiled_analyzer_merge_preserves_adjacent_overlap_and_containment_contract",
+  ].join("\n");
+  assert.deepEqual(findViolations([[PRESIDIO_ANALYZER_CALLER_FILE, presidioAnalyzerConsumer]]), []);
+  assert.match(findViolations([[PRESIDIO_ANALYZER_CALLER_FILE,
+    presidioAnalyzerConsumer + "\nresults.sort_by(|a, b| a.start.cmp(&b.start));",
+  ]]).join("\n"), /Presidio analyzer merge must remain compiled Mojo-owned/u);
   const presidioJsonConsumer = [
     "redaction_json_content_plan(&tree.nodes)",
     "content.slots.iter().copied().zip(replacements)",
