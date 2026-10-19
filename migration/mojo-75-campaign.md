@@ -6681,3 +6681,57 @@ runtime-test-manifest, secret-boundary and diff checks pass. The offline
 pass all five replay fixtures. Final staged churn is within the
 1,200-line/500-per-file limits. No live provider, full CI or native macOS/Windows
 checks were run. The build cache is retained for the next migration.
+
+
+## Compiled prompt-cache affinity (2026-10-20)
+
+Binding-pruning checkpoint `1b5b8327c` is pushed to main. A focused reachable
+`runtime_prompt_cache.mojo` owner now normalizes keys and plans owner,
+timestamp and unsigned cached-token transitions. Two version-1 scalar ABIs
+exchange bounded key views and checked three-word results. Rust retains map
+lookup/mutation, identifier equality facts, locking and existing log emission.
+The shared state-retention and numeric-pruning kernels replace local timestamp
+and stable-sort decisions. No Rust semantic fallback remains.
+
+Remember and hit callers now share one host update path. Zero-token hits still
+precede key acquisition and pruning; empty keys leave state untouched. Equal
+cached-token strengths preserve the owner. Same-owner updates retain the
+maximum timestamp and token count; owner changes retain the original backwards
+clock behavior. Key normalization preserves embedded NUL and Unicode, without
+adding an input-size cap or allocating a normalized String on every lookup.
+
+All 32,768 generated transition comparisons and 48 key-normalization cases
+match the former Rust behavior. The temporary oracle is removed. All 988
+strict Mojo-core tests pass with the existing explicit-feature command.
+`mojo run -D ASSERT=all -I mojo/prodex_core mojo/tests/runtime_prompt_cache_test.mojo`
+passes, including signed timestamps and `u64::MAX` token values. Initial
+positional-pointer deprecation warnings were corrected. One caller fixture
+advanced beyond the test-only 60-second retention window; corrected timestamps
+make all 12 prompt-cache caller tests pass via
+`PRODEX_MOJO_REQUIRED=1 CARGO_BUILD_JOBS=6 cargo test --locked -q -p prodex-app --lib prompt_cache -- --test-threads=1`.
+
+The unchanged official metric moves from 35.50298483046218% to
+35.50173202161563% (128,108 Mojo / 232,742 Rust production lines), leaving
+39.49826797838437 percentage points to 75%. As with the preceding step, ABI
+validation adds more Rust source than the removed host semantics; no metric,
+target or baseline changes. The release floor and reachable-source
+non-regression checks pass; 75% remains unmet.
+
+
+All 459 proxy regressions pass via
+`PRODEX_MOJO_REQUIRED=1 CARGO_BUILD_JOBS=6 cargo test --locked -q -p prodex-app --lib main_internal_tests::runtime_proxy_ -- --test-threads=1`.
+Workspace Clippy with the all-target/all-feature command and warnings denied
+passes with existing vendor warnings only.
+`RUST_TEST_THREADS=1 CARGO_BUILD_JOBS=6 npm run test:changed` and
+`PRODEX_MOJO_REQUIRED=1 CARGO_BUILD_JOBS=6 node scripts/ci/test-serial.mjs --suite runtime-smoke`
+pass. No-fallback self-test/source, authority, size, crate-boundary
+self-test/source, runtime-hotpath self-test/source, runtime-test-manifest,
+secret-boundary, formatting, docs and diff checks pass. The offline baseline
+and all five capture/replay fixtures pass. Staged churn is within the
+1,200-line/500-per-file limits. Full CI, live provider and native macOS/Windows
+checks were not run.
+
+After checking that no build/test process referenced target outputs and no
+release artifact was present, `cargo clean` removed 12.8 GiB. Inspected Trash
+was empty; `trash-empty -f` completed. The next migration's owned SSE prototype
+is retained outside the source tree until it is integrated and harvested.

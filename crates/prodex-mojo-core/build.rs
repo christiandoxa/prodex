@@ -495,6 +495,7 @@ fn selected_sources() -> Vec<&'static str> {
         sources.push("../../mojo/prodex_core/runtime_thread_index.mojo");
         sources.push("../../mojo/prodex_core/runtime_repo_map.mojo");
         sources.push("../../mojo/prodex_core/runtime_lineage.mojo");
+        sources.push("../../mojo/prodex_core/runtime_prompt_cache.mojo");
         sources.push("../../mojo/prodex_core/runtime_route_reason.mojo");
         sources.push("../../mojo/prodex_core/session_selector.mojo");
         sources.push("../../mojo/prodex_core/session_report.mojo");

@@ -46,6 +46,9 @@ const GEMINI_SIMPLE_ABI_TESTS = "crates/prodex-mojo-core/src/rich/gemini_simple_
 const BINDING_PRUNE_ADAPTER = "crates/prodex-mojo-core/src/state_policy/binding_prune.rs";
 const BINDING_PRUNE_MOJO = "mojo/prodex_core/state_policy.mojo";
 const BINDING_PRUNE_STORE = "crates/prodex-runtime-store/src/continuations/compaction.rs";
+const PROMPT_CACHE_CALLER = "crates/prodex-app/src/runtime_proxy/affinity/prompt_cache.rs";
+const PROMPT_CACHE_ADAPTER = "crates/prodex-mojo-core/src/runtime_lineage/prompt_cache.rs";
+const PROMPT_CACHE_MOJO = "mojo/prodex_core/runtime_prompt_cache.mojo";
 const QUOTA_LOG_PROFILE_CALLER = "crates/prodex-app/src/quota_support.rs";
 const INFO_LOAD_ADAPTER = "crates/prodex-mojo-core/src/info_render/runtime_load.rs";
 const INFO_LOAD_MOJO = "mojo/prodex_core/info_runtime_load.mojo";
@@ -689,6 +692,9 @@ const PROMOTED_FILES = [
   BINDING_PRUNE_ADAPTER,
   BINDING_PRUNE_MOJO,
   BINDING_PRUNE_STORE,
+  PROMPT_CACHE_CALLER,
+  PROMPT_CACHE_ADAPTER,
+  PROMPT_CACHE_MOJO,
   QUOTA_LOG_PROFILE_CALLER,
   INFO_LOAD_ADAPTER,
   INFO_LOAD_MOJO,
@@ -1560,6 +1566,21 @@ const FORBIDDEN_MARKERS = [
 ];
 
 export function findViolations(files) {
+  const promptCacheViolations = files.flatMap(([filePath, contents]) => {
+    const production = contents.split("#[cfg(test)]", 1)[0];
+    const required = filePath === PROMPT_CACHE_CALLER
+      ? ["prepare_prompt_cache_key(", "plan_prompt_cache_update(", "state_policy::last_run_selection_keep(", "state_policy::binding_prune_indices("]
+      : filePath === PROMPT_CACHE_ADAPTER
+        ? ["prodex_prompt_cache_key_v1(", "prodex_prompt_cache_update_v1(", "key.get(start..end)"]
+        : filePath === PROMPT_CACHE_MOJO
+          ? ["def prodex_prompt_cache_key_v1(", "rich_trim_bounds(key)", "def prodex_prompt_cache_update_v1(", "tokens <= previous_tokens"] : [];
+    const violations = required.filter((marker) => !production.includes(marker))
+      .map((marker) => `${filePath}: prompt-cache affinity must retain Mojo ownership ${marker}`);
+    if (filePath === PROMPT_CACHE_CALLER && /\.trim\(|\.sort(?:_by(?:_key)?)?\(|\.saturating_sub\(|cached_input_tokens\s*(?:==\s*0|[<>])/u.test(production)) {
+      violations.push(`${filePath}: restored Rust prompt-cache decisions`);
+    }
+    return violations;
+  });
   const bindingPruneViolations = files.flatMap(([filePath, contents]) => {
     const functions = filePath === STATE_FILE ? ["prune_profile_bindings"]
       : filePath === BINDING_PRUNE_STORE
@@ -10525,6 +10546,7 @@ export function findViolations(files) {
     return [];
   });
   return [...geminiSimpleResponseViolations, ...logPayloadProjectionViolations, ...nativeRecoveryOwnershipViolations, ...quotaRecoveryEligibilityViolations, ...runtimeBrokerReuseMojoViolations, ...geminiResponseMediaMojoViolations, ...cookieEvictionMojoViolations, ...websocketBudgetMojoViolations, ...affinityBindingMojoViolations, ...responsesCapacityRecoveryViolations, ...sseTapMojoOwnershipViolations, ...quotaWatchViolations, ...geminiCompactSnippetViolations, ...geminiCompactTextViolations, ...doctorSmartContextDecisionViolations, ...providerSseJsonFrameMojoViolations, ...geminiSseCompletionOwnershipViolations, ...anthropicNativeStreamDecisionViolations, ...anthropicAttemptCursorViolations, ...geminiUnsupportedToolRetryViolations, ...terminalGeometryViolations, ...previousResponseRecoveryTransitionViolations, ...chatCompatibleToolCallKindViolations, ...geminiQuotaBodyMojoViolations, ...geminiOAuthRotationMojoViolations, ...geminiBuiltinBatchMojoViolations, ...geminiToolArrayValidationMojoViolations, ...geminiOAuthModelMojoViolations, ...superExposeOriginMojoViolations, ...kiroAcpToolLedgerMojoViolations, ...quotaPoolSummarySectionsMojoViolations, ...deepseekRequestDiagnosticViolations, ...deepseekToolShapeIssueMojoViolations, ...deepseekReplayItemPolicyMojoViolations, ...chatNamespaceSplitMojoViolations, ...deepseekInputItemIssueMessageViolations, ...deepseekRequestIssueMessageViolations, ...smartContextTelemetrySampleViolations, ...compatibilityDiagnosticsMojoViolations, ...quotaHeaderProjectionViolations, ...smartContextCapsuleOrderViolations, ...markerViolations, ...deepseekCatalogPolicyViolations, ...featureOffViolations, ...liveLogRecordViolations, ...runtimePolicyPresetViolations, ...runtimeConfigScalarViolations, ...profileHealthCircuitViolations, ...logThroughputViolations, ...operationalDetailSpecViolations, ...transcriptPolicyViolations, ...logLoadPolicyViolations, ...routeReasonViolations, ...runtimeStateQuotaViolations, ...runtimeStateRoutePolicyViolations, ...runtimeProxyRootViolations, ...runtimeRecoveryDeadlineViolations, ...brokerVersionGuardViolations, ...brokerContinuityViolations, ...brokerLogCacheViolations, ...codexConfigViolations, ...statePolicyViolations, ...quotaSelectionPolicyViolations, ...routeTagMirrorViolations, ...enumTagMirrorViolations, ...appSelectionPolicyMirrorViolations, ...runtimeStateBackgroundViolations, ...redactionViolations, ...rateLimitHeaderSelectionViolations, ...profileIdentityViolations, ...governanceInspectionViolations, ...governanceInspectionOrderingViolations, ...exactnessPlannerViolations,
+    ...promptCacheViolations,
     ...bindingPruneViolations,
     ...adaptiveBudgetViolations,
     ...providerUsageViolations,
@@ -10646,6 +10668,11 @@ async function promotedFiles() {
 }
 
 function selfTest() {
+  const promptCache = "prepare_prompt_cache_key( plan_prompt_cache_update( state_policy::last_run_selection_keep( state_policy::binding_prune_indices(";
+  assert.deepEqual(findViolations([[PROMPT_CACHE_CALLER, promptCache]]), []);
+  assert.match(findViolations([[PROMPT_CACHE_CALLER, promptCache + "\nkey.trim()"]]).join("\n"), /restored Rust prompt-cache decisions/u);
+  assert.match(findViolations([[PROMPT_CACHE_CALLER, promptCache.replace("plan_prompt_cache_update(", "rust_update(")]]).join("\n"), /must retain Mojo ownership/u);
+  assert.match(findViolations([[PROMPT_CACHE_ADAPTER, ""]]).join("\n"), /must retain Mojo ownership/u);
   const pruning = "prodex_mojo_core::state_policy::binding_prune_indices(";
   const scopedPruning = `pub fn prune_profile_bindings() {\n ${pruning}\n}`;
   assert(!findViolations([[STATE_FILE, scopedPruning]]).some((message) => message.includes("must retain Mojo pruning")));

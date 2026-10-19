@@ -1,6 +1,10 @@
 //! Prompt-cache profile affinity state.
 
 use super::*;
+use prodex_mojo_core::runtime_lineage::{
+    PromptCacheBindingFacts, PromptCacheEvent, PromptCacheKey, PromptCacheOwnerUpdate,
+    plan_prompt_cache_update, prepare_prompt_cache_key,
+};
 
 #[derive(Clone, Debug)]
 pub(super) struct RuntimePromptCacheProfileBinding {
@@ -45,30 +49,34 @@ pub(super) fn runtime_prompt_cache_profile_bindings()
     RUNTIME_PROMPT_CACHE_PROFILE_BINDINGS.get_or_init(|| Mutex::new(BTreeMap::new()))
 }
 
-fn runtime_normalized_prompt_cache_key(prompt_cache_key: Option<&str>) -> Option<String> {
-    prompt_cache_key
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map(str::to_string)
-}
-
 fn prune_runtime_prompt_cache_profile_bindings(
     bindings: &mut BTreeMap<String, RuntimePromptCacheProfileBinding>,
     now: i64,
 ) {
-    let oldest_allowed = now.saturating_sub(RUNTIME_PROMPT_CACHE_AFFINITY_RETENTION_SECONDS);
-    bindings.retain(|_, binding| binding.bound_at >= oldest_allowed);
-    if bindings.len() <= RUNTIME_PROMPT_CACHE_AFFINITY_LIMIT {
+    bindings.retain(|_, binding| {
+        prodex_mojo_core::state_policy::last_run_selection_keep(
+            true,
+            binding.bound_at,
+            now,
+            RUNTIME_PROMPT_CACHE_AFFINITY_RETENTION_SECONDS,
+        )
+        .expect("Mojo prompt-cache retention failed")
+    });
+    let ranks = bindings.values().map(|binding| [0, binding.bound_at]);
+    let indices = prodex_mojo_core::state_policy::binding_prune_indices(
+        ranks,
+        RUNTIME_PROMPT_CACHE_AFFINITY_LIMIT,
+    )
+    .expect("Mojo prompt-cache pruning failed");
+    if indices.is_empty() {
         return;
     }
-
-    let excess = bindings.len() - RUNTIME_PROMPT_CACHE_AFFINITY_LIMIT;
-    let mut coldest = bindings
-        .iter()
-        .map(|(key, binding)| (key.clone(), binding.bound_at))
+    let keys = bindings.keys().collect::<Vec<_>>();
+    let removed = indices
+        .into_iter()
+        .map(|index| keys[index].clone())
         .collect::<Vec<_>>();
-    coldest.sort_by_key(|(_, bound_at)| *bound_at);
-    for (key, _) in coldest.into_iter().take(excess) {
+    for key in removed {
         bindings.remove(&key);
     }
 }
@@ -78,45 +86,13 @@ pub(super) fn remember_runtime_prompt_cache_profile_at(
     prompt_cache_key: Option<&str>,
     now: i64,
 ) -> bool {
-    let Some(prompt_cache_key) = runtime_normalized_prompt_cache_key(prompt_cache_key) else {
-        return false;
-    };
-    let mut bindings = runtime_prompt_cache_profile_bindings()
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
-    prune_runtime_prompt_cache_profile_bindings(&mut bindings, now);
-    let changed = match bindings.get_mut(&prompt_cache_key) {
-        Some(binding) if binding.profile_name == profile_name => {
-            if binding.bound_at < now {
-                binding.bound_at = now;
-            }
-            false
-        }
-        Some(binding) if binding.cached_input_tokens > 0 => {
-            if binding.bound_at < now {
-                binding.bound_at = now;
-            }
-            false
-        }
-        Some(binding) => {
-            binding.profile_name = profile_name.to_string();
-            binding.bound_at = now;
-            true
-        }
-        None => {
-            bindings.insert(
-                prompt_cache_key,
-                RuntimePromptCacheProfileBinding {
-                    profile_name: profile_name.to_string(),
-                    bound_at: now,
-                    cached_input_tokens: 0,
-                },
-            );
-            true
-        }
-    };
-    prune_runtime_prompt_cache_profile_bindings(&mut bindings, now);
-    changed
+    update_runtime_prompt_cache_profile_at(
+        profile_name,
+        prompt_cache_key,
+        PromptCacheEvent::Remember,
+        now,
+    )
+    .changed_owner()
 }
 
 pub(super) fn observe_runtime_prompt_cache_profile_hit_at(
@@ -125,52 +101,68 @@ pub(super) fn observe_runtime_prompt_cache_profile_hit_at(
     cached_input_tokens: u64,
     now: i64,
 ) -> RuntimePromptCacheProfileObservation {
-    if cached_input_tokens == 0 {
-        return RuntimePromptCacheProfileObservation::NoCachedTokens;
-    }
-    let Some(prompt_cache_key) = runtime_normalized_prompt_cache_key(prompt_cache_key) else {
-        return RuntimePromptCacheProfileObservation::NoKey;
+    update_runtime_prompt_cache_profile_at(
+        profile_name,
+        prompt_cache_key,
+        PromptCacheEvent::Hit(cached_input_tokens),
+        now,
+    )
+}
+
+fn update_runtime_prompt_cache_profile_at(
+    profile_name: &str,
+    prompt_cache_key: Option<&str>,
+    event: PromptCacheEvent,
+    now: i64,
+) -> RuntimePromptCacheProfileObservation {
+    let key = match prepare_prompt_cache_key(prompt_cache_key, event)
+        .expect("Mojo prompt-cache key plan failed")
+    {
+        PromptCacheKey::NoKey => return RuntimePromptCacheProfileObservation::NoKey,
+        PromptCacheKey::NoCachedTokens => {
+            return RuntimePromptCacheProfileObservation::NoCachedTokens;
+        }
+        PromptCacheKey::Value(key) => key,
     };
     let mut bindings = runtime_prompt_cache_profile_bindings()
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
     prune_runtime_prompt_cache_profile_bindings(&mut bindings, now);
-    let observation = match bindings.get_mut(&prompt_cache_key) {
-        Some(binding) if binding.profile_name == profile_name => {
-            if binding.bound_at < now {
-                binding.bound_at = now;
-            }
-            if binding.cached_input_tokens < cached_input_tokens {
-                binding.cached_input_tokens = cached_input_tokens;
-            }
-            RuntimePromptCacheProfileObservation::OwnerUnchanged
-        }
-        Some(binding) if cached_input_tokens > binding.cached_input_tokens => {
-            binding.profile_name = profile_name.to_string();
-            binding.bound_at = now;
-            binding.cached_input_tokens = cached_input_tokens;
-            RuntimePromptCacheProfileObservation::OwnerChanged
-        }
-        Some(binding) => {
-            if binding.bound_at < now {
-                binding.bound_at = now;
-            }
-            RuntimePromptCacheProfileObservation::ExistingOwnerPreserved
-        }
-        None => {
+    let existing = bindings.get(key).map(|binding| PromptCacheBindingFacts {
+        same_owner: binding.profile_name == profile_name,
+        bound_at: binding.bound_at,
+        cached_input_tokens: binding.cached_input_tokens,
+    });
+    let plan = plan_prompt_cache_update(event, existing, now)
+        .expect("Mojo prompt-cache owner plan failed");
+    match plan.owner {
+        PromptCacheOwnerUpdate::Inserted | PromptCacheOwnerUpdate::Changed => {
             bindings.insert(
-                prompt_cache_key,
+                key.to_string(),
                 RuntimePromptCacheProfileBinding {
                     profile_name: profile_name.to_string(),
-                    bound_at: now,
-                    cached_input_tokens,
+                    bound_at: plan.bound_at,
+                    cached_input_tokens: plan.cached_input_tokens,
                 },
             );
-            RuntimePromptCacheProfileObservation::OwnerInserted
         }
-    };
+        PromptCacheOwnerUpdate::Unchanged | PromptCacheOwnerUpdate::Preserved => {
+            let binding = bindings
+                .get_mut(key)
+                .expect("validated existing prompt-cache owner");
+            binding.bound_at = plan.bound_at;
+            binding.cached_input_tokens = plan.cached_input_tokens;
+        }
+    }
     prune_runtime_prompt_cache_profile_bindings(&mut bindings, now);
-    observation
+    match plan.owner {
+        PromptCacheOwnerUpdate::Inserted => RuntimePromptCacheProfileObservation::OwnerInserted,
+        PromptCacheOwnerUpdate::Changed => RuntimePromptCacheProfileObservation::OwnerChanged,
+        PromptCacheOwnerUpdate::Unchanged => RuntimePromptCacheProfileObservation::OwnerUnchanged,
+        PromptCacheOwnerUpdate::Preserved => {
+            RuntimePromptCacheProfileObservation::ExistingOwnerPreserved
+        }
+    }
 }
 
 pub(crate) fn observe_runtime_prompt_cache_profile_hit(
@@ -231,13 +223,18 @@ pub(super) fn runtime_prompt_cache_bound_profile_at(
     prompt_cache_key: Option<&str>,
     now: i64,
 ) -> Option<String> {
-    let prompt_cache_key = runtime_normalized_prompt_cache_key(prompt_cache_key)?;
+    let PromptCacheKey::Value(prompt_cache_key) =
+        prepare_prompt_cache_key(prompt_cache_key, PromptCacheEvent::Remember)
+            .expect("Mojo prompt-cache key plan failed")
+    else {
+        return None;
+    };
     let mut bindings = runtime_prompt_cache_profile_bindings()
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
     prune_runtime_prompt_cache_profile_bindings(&mut bindings, now);
     bindings
-        .get(&prompt_cache_key)
+        .get(prompt_cache_key)
         .map(|binding| binding.profile_name.clone())
 }
 
@@ -252,3 +249,7 @@ pub(crate) fn clear_runtime_prompt_cache_profile_bindings() {
         .unwrap_or_else(|poisoned| poisoned.into_inner())
         .clear();
 }
+
+#[cfg(test)]
+#[path = "../../../tests/src/runtime_proxy/prompt_cache.rs"]
+mod tests;
