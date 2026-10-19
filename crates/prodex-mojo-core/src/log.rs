@@ -10,6 +10,7 @@ mod runtime_line;
 mod snapshot;
 mod transcript;
 mod transcript_ansi;
+mod tui;
 pub use event_name::render_log_event_name;
 pub use level::classify_log_level;
 pub use runtime_line::{RUNTIME_LOG_FORMAT_JSON, RUNTIME_LOG_FORMAT_TEXT, render_runtime_log_line};
@@ -23,6 +24,7 @@ pub use transcript_ansi::{
     join_transcript_user_parts, normalize_transcript_safe_text, normalize_transcript_visible_text,
     strip_transcript_ansi_codes, transcript_binary_like,
 };
+pub use tui::{LogTuiSourceTone, log_tui_snapshot_height, log_tui_source_tone, log_tui_window};
 
 const _: () = assert!(std::mem::size_of::<usize>() == std::mem::size_of::<u64>());
 

@@ -8,6 +8,7 @@ use crate::app_commands::log_upstream_payload::{
 };
 use crate::app_commands::{LogStreamItem, TranscriptEvent, is_routine_load_event, log_event_label};
 use crate::reports::InfoTokenUsageEvent;
+use prodex_mojo_core::log::{LogTuiSourceTone, log_tui_snapshot_height, log_tui_source_tone};
 use ratatui::layout::{Constraint, Direction, Layout};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span, Text};
@@ -23,26 +24,12 @@ pub(super) fn log_snapshot_tui_height(
     upstream_payload: Option<&UpstreamPayloadEvent>,
     token_usage: Option<&InfoTokenUsageEvent>,
 ) -> u16 {
-    let body_rows = if transcript.is_none() && upstream_payload.is_none() && token_usage.is_none() {
-        1
-    } else {
-        let transcript_rows = transcript
-            .map(|event| render_text_body(&event.text, 100).len().saturating_add(2))
-            .unwrap_or(0);
-        let upstream_rows = upstream_payload
-            .map(|event| {
-                render_upstream_payload_lines(&event.payload, 100)
-                    .len()
-                    .saturating_add(3)
-            })
-            .unwrap_or(0);
-        let usage_rows = token_usage.map(|_| 3).unwrap_or(0);
-        transcript_rows
-            .saturating_add(upstream_rows)
-            .saturating_add(usage_rows)
-            .saturating_add(1)
-    };
-    body_rows.saturating_add(4).clamp(8, 28) as u16
+    log_tui_snapshot_height(
+        transcript.map(|event| render_text_body(&event.text, 100).len()),
+        upstream_payload.map(|event| render_upstream_payload_lines(&event.payload, 100).len()),
+        token_usage.is_some(),
+    )
+    .expect("compiled Mojo log snapshot height returned invalid output")
 }
 
 pub(super) fn render_log_snapshot_tui(
@@ -357,24 +344,19 @@ fn push_transcript_lines(
 }
 
 fn log_stream_source_color(source: &str) -> Color {
-    match source {
-        "user" => Color::Green,
-        "assistant" => Color::Cyan,
-        "reasoning" => Color::Yellow,
-        "turn-context" | "session-context" => Color::Blue,
-        "prompt-engineering" => Color::LightBlue,
-        "request" | "route" | "model" => Color::Blue,
-        "quota" => Color::LightYellow,
-        "retry" | "backoff" => Color::Yellow,
-        "health" => Color::LightMagenta,
-        "upstream" | "response" => Color::Cyan,
-        "smart" => Color::LightBlue,
-        "compact" => Color::LightYellow,
-        "agent" | "mcp" | "tool" => Color::Magenta,
-        "load" | "terminal" | "error" => Color::Red,
-        "tool-output" => Color::Magenta,
-        source if source.starts_with("tool-call:") => Color::Magenta,
-        _ => Color::Reset,
+    match log_tui_source_tone(source)
+        .expect("compiled Mojo log source color policy returned invalid output")
+    {
+        LogTuiSourceTone::Reset => Color::Reset,
+        LogTuiSourceTone::Green => Color::Green,
+        LogTuiSourceTone::Cyan => Color::Cyan,
+        LogTuiSourceTone::Yellow => Color::Yellow,
+        LogTuiSourceTone::Blue => Color::Blue,
+        LogTuiSourceTone::LightBlue => Color::LightBlue,
+        LogTuiSourceTone::LightYellow => Color::LightYellow,
+        LogTuiSourceTone::LightMagenta => Color::LightMagenta,
+        LogTuiSourceTone::Magenta => Color::Magenta,
+        LogTuiSourceTone::Red => Color::Red,
     }
 }
 
@@ -393,6 +375,29 @@ mod tests {
             })
             .collect::<Vec<_>>()
             .join("\n")
+    }
+
+    #[test]
+    fn compiled_log_snapshot_height_and_source_palette_reach_real_render_callers() {
+        assert_eq!(log_snapshot_tui_height(None, None, None), 8);
+        let short = TranscriptEvent {
+            timestamp: "2026-10-19 12:00:00".to_string(),
+            source: "user".to_string(),
+            text: "hello".to_string(),
+        };
+        let large = TranscriptEvent {
+            text: (0..80)
+                .map(|_| "a very long line")
+                .collect::<Vec<_>>()
+                .join("\n"),
+            ..short.clone()
+        };
+        assert_eq!(log_snapshot_tui_height(Some(&short), None, None), 8);
+        assert_eq!(log_snapshot_tui_height(Some(&large), None, None), 28);
+        assert_eq!(log_stream_source_color("user"), Color::Green);
+        assert_eq!(log_stream_source_color("tool-call:🧭"), Color::Magenta);
+        assert_eq!(log_stream_source_color("TOOL-CALL:🧭"), Color::Reset);
+        assert_eq!(log_stream_source_color("健康"), Color::Reset);
     }
 
     #[test]
