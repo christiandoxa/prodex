@@ -396,6 +396,51 @@ mod tests {
     }
 
     #[test]
+    fn compiled_log_search_filters_ascii_case_without_folding_unicode() {
+        let items = VecDeque::from([
+            LogStreamItem::Transcript(TranscriptEvent {
+                timestamp: "2026-10-19 12:00:00".to_string(),
+                source: "quota".to_string(),
+                text: "Weekly BLOCKED while another profile READY 🚀".to_string(),
+            }),
+            LogStreamItem::Transcript(TranscriptEvent {
+                timestamp: "2026-10-19 12:00:01".to_string(),
+                source: "response".to_string(),
+                text: "正常に復旧".to_string(),
+            }),
+        ]);
+        let ready = rendered(log_stream_tui_text_for_view(
+            &items,
+            20,
+            120,
+            Some("profile ready 🚀"),
+            0,
+        ));
+        assert!(ready.contains("Weekly BLOCKED"), "{ready}");
+        assert!(!ready.contains("正常に復旧"), "{ready}");
+        let unicode = rendered(log_stream_tui_text_for_view(
+            &items,
+            20,
+            120,
+            Some("正常に復旧"),
+            0,
+        ));
+        assert!(unicode.contains("正常に復旧"), "{unicode}");
+        assert!(!unicode.contains("Weekly BLOCKED"), "{unicode}");
+        let different = rendered(log_stream_tui_text_for_view(
+            &items,
+            20,
+            120,
+            Some("正常に复旧"),
+            0,
+        ));
+        assert!(
+            different.contains("No log events match search."),
+            "{different}"
+        );
+    }
+
+    #[test]
     fn stream_text_can_filter_and_scroll() {
         let items = VecDeque::from([
             LogStreamItem::Transcript(TranscriptEvent {

@@ -5963,3 +5963,14 @@ effects based on the Mojo manifest, without a Rust fallback table.
 Direct ABI, overlay caller and no-fallback guard tests retain all
 fourteen commands and the exact existing per-command behavior.
 The separate 75% target remains outstanding.
+
+
+## Live log TUI ASCII casefold matching moved to compiled Mojo
+
+Log TUI, upstream payload search and load-run summaries now use the
+compiled log semantic owner for ASCII-insensitive substring matching.
+The Rust lowercase-copy search algorithm was deleted. The Mojo kernel
+uses a linear-time KMP prefix function over UTF-8 bytes and retains
+ASCII-only casefolding; Unicode bytes remain exact. Direct ABI,
+production caller regressions and anti-fallback guards protect the
+previous search contract. The 75% target remains outstanding.
