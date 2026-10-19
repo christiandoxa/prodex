@@ -203,6 +203,8 @@ fn status_quota_summary_matches_expected_source_selection_and_aggregation() {
     let expected = StatusQuotaSummary {
         compatible_profiles: 4,
         unavailable_profiles: 2,
+        live_profiles: 1,
+        snapshot_profiles: 1,
         five_hour: StatusQuotaWindowAggregation {
             profiles: 2,
             total_remaining: 120,

@@ -2,7 +2,7 @@ from std.memory import Pointer
 from runtime_math import INT64_MAX, runtime_quota_saturating_add
 
 comptime QUOTA_POOL_INPUT_FIELD_COUNT: Int64 = 7
-comptime STATUS_QUOTA_SUMMARY_ABI_VERSION: Int64 = 1
+comptime STATUS_QUOTA_SUMMARY_ABI_VERSION: Int64 = 2
 comptime STATUS_QUOTA_SUMMARY_INPUT_FIELD_COUNT: Int64 = 15
 
 
@@ -111,20 +111,36 @@ def prodex_quota_openai_pool_aggregate_v1(
     return 0
 
 
-@export("prodex_quota_status_summary_v1")
-def prodex_quota_status_summary_v1(
+@export("prodex_quota_status_summary_v2")
+def prodex_quota_status_summary_v2(
     abi_version: Int64,
-    input_fields: Pointer[mut=False, Int64, _],
-    output_fields: Pointer[mut=True, Int64, _],
+    input_address: UInt,
+    output_address: UInt,
     count: Int64,
+    output_capacity: Int64,
 ) abi("C") -> Int64:
     if abi_version != STATUS_QUOTA_SUMMARY_ABI_VERSION:
+        return 4
+    if (
+        count < 0
+        or count > INT64_MAX // STATUS_QUOTA_SUMMARY_INPUT_FIELD_COUNT
+        or (count > 0 and input_address == 0)
+        or output_address == 0
+    ):
         return 1
-    if count < 0:
-        return 2
+    if output_capacity < 12:
+        return 3
+    var input_fields = Pointer[mut=False, Int64, ImmUntrackedOrigin](
+        unsafe_from_address=Int(input_address)
+    )
+    var output_fields = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
 
     var compatible_profiles: Int64 = 0
     var unavailable_profiles: Int64 = 0
+    var live_profiles: Int64 = 0
+    var snapshot_profiles: Int64 = 0
     var five_hour_profiles: Int64 = 0
     var five_hour_remaining: Int64 = 0
     var earliest_five_hour: Int64 = 0
@@ -141,7 +157,7 @@ def prodex_quota_status_summary_v1(
         if (compatible != 0 and compatible != 1) or (
             report_succeeded != 0 and report_succeeded != 1
         ) or (snapshot_usable != 0 and snapshot_usable != 1):
-            return 3
+            return 1
 
         var report_five_present = quota_status_summary_input_field(input_fields, row, 4)
         var report_weekly_present = quota_status_summary_input_field(input_fields, row, 7)
@@ -152,13 +168,13 @@ def prodex_quota_status_summary_v1(
         ) or (cached_five_present != 0 and cached_five_present != 1) or (
             cached_weekly_present != 0 and cached_weekly_present != 1
         ):
-            return 3
+            return 1
         if (report_five_present == 1 and quota_status_summary_input_field(input_fields, row, 3) < 0) or (
             report_weekly_present == 1 and quota_status_summary_input_field(input_fields, row, 6) < 0
         ) or (cached_five_present == 1 and quota_status_summary_input_field(input_fields, row, 9) < 0) or (
             cached_weekly_present == 1 and quota_status_summary_input_field(input_fields, row, 12) < 0
         ):
-            return 3
+            return 1
 
         if compatible == 0:
             continue
@@ -178,6 +194,11 @@ def prodex_quota_status_summary_v1(
         if five_present == 0 and weekly_present == 0:
             unavailable_profiles += 1
             continue
+
+        if report_succeeded == 1:
+            live_profiles += 1
+        else:
+            snapshot_profiles += 1
 
         if five_present == 1:
             var remaining = quota_status_summary_input_field(input_fields, row, window_offset)
@@ -217,6 +238,8 @@ def prodex_quota_status_summary_v1(
     output_fields[unsafe_offset=7] = weekly_remaining
     output_fields[unsafe_offset=8] = earliest_weekly
     output_fields[unsafe_offset=9] = has_earliest_weekly
+    output_fields[unsafe_offset=10] = live_profiles
+    output_fields[unsafe_offset=11] = snapshot_profiles
     return 0
 
 # Choose which quota windows and availability summaries are published to the

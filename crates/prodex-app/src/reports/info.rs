@@ -5,9 +5,8 @@ pub use prodex_runtime_quota::{
 };
 use prodex_runtime_tuning::RuntimeTuningSnapshot;
 use prodex_shared_types::{
-    InfoQuotaAggregate, InfoQuotaSource, InfoQuotaWindow, InfoRuntimeLoadSummary,
-    InfoRuntimeQuotaObservation, InfoRunwayEstimate, ProcessRow, ProdexProcessInfo,
-    RunProfileProbeReport,
+    InfoQuotaAggregate, InfoQuotaWindow, InfoRuntimeLoadSummary, InfoRuntimeQuotaObservation,
+    InfoRunwayEstimate, ProcessRow, ProdexProcessInfo, RunProfileProbeReport,
 };
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};

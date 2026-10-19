@@ -6477,3 +6477,48 @@ authority, size, crate/application-boundary self-test/source, secret-boundary,
 runtime-test-manifest, churn and diff checks pass. Existing vendor warnings
 are unchanged. The build cache remains owned by this campaign for the next
 checkpoint; no active runtime state is deleted.
+
+## Shared compiled Info/status quota summaries (2026-10-20)
+
+Envelope checkpoint `4e8df4a29` is pushed to main. Info now uses the existing
+Mojo status-quota reducer for compatible-profile counts, live/cached precedence,
+missing-window handling, source counts, window totals and earliest known resets.
+The internal quota-summary ABI advances to version 2 with twelve output slots,
+null/count/capacity checks and source-count validation. Its original ten slots
+retain their meanings. The unused version-1 entrypoint is removed.
+
+Status and Info share one Rust projection of dependency-owned usage types;
+status's former projection moves into the existing report module. Info's old
+incremental reducer, source-selection branches and duplicate arithmetic are
+deleted. Mojo remains the sole semantic owner, including existing saturating
+window sums. Public Info fields and user-visible status output are unchanged.
+
+All 2,048 generated comparisons against the original Info reducer pass; the
+temporary Rust oracle is removed. Permanent regressions reuse the actual status
+fixture to check full Info values, Unicode names, live precedence over cached
+data, successful empty reports, stale-cache rejection, zero grace and empty input.
+ABI tests reject malformed late records before output writes, and direct Mojo
+assertions cover source counts and precedence. An initial compile rejected an
+unsupported pointer method; the corrected boundary uses the repository's
+integer-address convention and compiles successfully.
+
+The unchanged official metric rises from 35.48455153651834% to
+35.49262929957525% (127,848 Mojo / 232,362 Rust production lines), leaving
+39.50737070042475 percentage points to the 75% target. All 974 strict Mojo-core
+tests, 18 status caller tests and 22 final Info tests pass via
+`PRODEX_MOJO_REQUIRED=1 CARGO_BUILD_JOBS=6 cargo test --locked -q -p prodex-mojo-core --features mojo-core -- --test-threads=1`,
+`PRODEX_MOJO_REQUIRED=1 CARGO_BUILD_JOBS=6 cargo test --locked -q -p prodex-app --lib app_commands::status:: -- --test-threads=1`,
+and `PRODEX_MOJO_REQUIRED=1 CARGO_BUILD_JOBS=6 cargo test --locked -q -p prodex-app --lib reports::info:: -- --test-threads=1`.
+Direct verification uses
+`mojo run -D ASSERT=all -I mojo/prodex_core mojo/tests/quota_source_summary_test.mojo`.
+
+All 98 quota tests pass via
+`PRODEX_MOJO_REQUIRED=1 CARGO_BUILD_JOBS=6 cargo test --locked -q -p prodex-quota --features mojo -- --test-threads=1`.
+`PRODEX_MOJO_REQUIRED=1 CARGO_BUILD_JOBS=6 cargo clippy --locked --workspace --all-targets --all-features -- -D warnings`
+passes with existing vendor warnings only. Formatting, docs, no-fallback
+self-test/source, authority, size, crate/application-boundary self-test/source,
+secret-boundary and diff checks pass. Temporary comparison/object files are
+removed. Inspected Trash was empty and `trash-empty -f` completed.
+Canonical `CARGO_BUILD_JOBS=6 npm run test:changed` and final docs/churn checks
+pass; its featureless core/shared-type selections run no tests, while the strict
+Mojo and real caller suites above provide compiled execution coverage.

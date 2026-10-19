@@ -4,9 +4,9 @@ use crate::MojoError;
 
 const INPUT_FIELD_COUNT: usize = 7;
 const OUTPUT_FIELD_COUNT: usize = 14;
-const STATUS_QUOTA_SUMMARY_ABI_VERSION: i64 = 1;
+const STATUS_QUOTA_SUMMARY_ABI_VERSION: i64 = 2;
 const STATUS_QUOTA_SUMMARY_INPUT_FIELD_COUNT: usize = 15;
-const STATUS_QUOTA_SUMMARY_OUTPUT_FIELD_COUNT: usize = 10;
+const STATUS_QUOTA_SUMMARY_OUTPUT_FIELD_COUNT: usize = 12;
 
 /// One already-classified quota window supplied to pool aggregation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -61,11 +61,13 @@ pub struct StatusQuotaWindowAggregation {
     pub earliest_reset_at: Option<i64>,
 }
 
-/// Aggregated quota data shown by `prodex status`.
+/// Aggregated quota windows and source counts for Info and status reports.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct StatusQuotaSummary {
     pub compatible_profiles: usize,
     pub unavailable_profiles: usize,
+    pub live_profiles: usize,
+    pub snapshot_profiles: usize,
     pub five_hour: StatusQuotaWindowAggregation,
     pub weekly: StatusQuotaWindowAggregation,
 }
@@ -83,11 +85,12 @@ unsafe extern "C" {
         output_fields: *mut i64,
         count: i64,
     ) -> i64;
-    fn prodex_quota_status_summary_v1(
+    fn prodex_quota_status_summary_v2(
         abi_version: i64,
-        input_fields: *const i64,
-        output_fields: *mut i64,
+        input_address: u64,
+        output_address: u64,
         count: i64,
+        output_capacity: i64,
     ) -> i64;
 }
 
@@ -253,21 +256,36 @@ pub fn status_quota_summary_batch(
 
     let mut output = [0_i64; STATUS_QUOTA_SUMMARY_OUTPUT_FIELD_COUNT];
     let status = unsafe {
-        prodex_quota_status_summary_v1(
+        prodex_quota_status_summary_v2(
             STATUS_QUOTA_SUMMARY_ABI_VERSION,
-            fields.as_ptr(),
-            output.as_mut_ptr(),
+            fields.as_ptr() as usize as u64,
+            output.as_mut_ptr() as usize as u64,
             count,
+            STATUS_QUOTA_SUMMARY_OUTPUT_FIELD_COUNT as i64,
         )
     };
+    match status {
+        0 => {}
+        1 => return Err(MojoError::InvalidInput),
+        3 => return Err(MojoError::Capacity),
+        4 => return Err(MojoError::AbiMismatch),
+        _ => return Err(MojoError::InvalidOutput),
+    }
     let count_limit = count;
-    if status != 0
-        || [output[0], output[1], output[2], output[6]]
-            .into_iter()
-            .any(|value| value < 0 || value > count_limit)
+    if [
+        output[0], output[1], output[2], output[6], output[10], output[11],
+    ]
+    .into_iter()
+    .any(|value| value < 0 || value > count_limit)
+        || output[10]
+            .checked_add(output[11])
+            .and_then(|n| n.checked_add(output[1]))
+            != Some(output[0])
         || output[1] > output[0]
         || output[2] > output[0]
         || output[6] > output[0]
+        || output[3] < 0
+        || output[7] < 0
         || !matches!(output[5], 0 | 1)
         || !matches!(output[9], 0 | 1)
         || (output[5] == 0 && output[4] != 0)
@@ -280,6 +298,8 @@ pub fn status_quota_summary_batch(
     Ok(StatusQuotaSummary {
         compatible_profiles: usize::try_from(output[0]).map_err(|_| MojoError::InvalidOutput)?,
         unavailable_profiles: usize::try_from(output[1]).map_err(|_| MojoError::InvalidOutput)?,
+        live_profiles: usize::try_from(output[10]).map_err(|_| MojoError::InvalidOutput)?,
+        snapshot_profiles: usize::try_from(output[11]).map_err(|_| MojoError::InvalidOutput)?,
         five_hour: StatusQuotaWindowAggregation {
             profiles: usize::try_from(output[2]).map_err(|_| MojoError::InvalidOutput)?,
             total_remaining: output[3],
@@ -296,6 +316,45 @@ pub fn status_quota_summary_batch(
 #[cfg(test)]
 mod summary_section_tests {
     use super::*;
+
+    #[test]
+    fn quota_source_summary_abi_rejects_bad_shapes_and_late_records_before_writes() {
+        let mut output = [71_i64; 12];
+        let destination = output.as_mut_ptr();
+        let call = |version, input: *const i64, count, out: *mut i64, capacity| unsafe {
+            prodex_quota_status_summary_v2(
+                version,
+                input as usize as u64,
+                out as usize as u64,
+                count,
+                capacity,
+            )
+        };
+        let mut fields = [0_i64; 30];
+        fields[0] = 1;
+        let source = fields.as_ptr();
+        assert_eq!(call(1, source, 2, destination, 12), 4);
+        assert_eq!(call(2, source, -1, destination, 12), 1);
+        assert_eq!(call(2, source, i64::MAX, destination, 12), 1);
+        assert_eq!(call(2, std::ptr::null(), 1, destination, 12), 1);
+        assert_eq!(call(2, source, 2, std::ptr::null_mut(), 12), 1);
+        assert_eq!(call(2, source, 2, destination, 11), 3);
+        for index in [0, 1, 2, 4, 7, 10, 13] {
+            fields[15 + index] = 2;
+            assert_eq!(call(2, source, 2, destination, 12), 1);
+            fields[15 + index] = 0;
+        }
+        for index in [3, 6, 9, 12] {
+            fields[15 + index] = -1;
+            fields[16 + index] = 1;
+            assert_eq!(call(2, source, 2, destination, 12), 1);
+            fields[15 + index] = 0;
+            fields[16 + index] = 0;
+        }
+        assert_eq!(output, [71; 12]);
+        assert_eq!(call(2, std::ptr::null(), 0, destination, 12), 0);
+        assert_eq!(output, [0; 12]);
+    }
 
     #[test]
     fn mojo_quota_pool_summary_selects_openai_main_or_missing_data_layout() {

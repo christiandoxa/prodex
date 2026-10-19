@@ -34,6 +34,7 @@ const INFO_TOKEN_NUMBERS_ADAPTER = "crates/prodex-mojo-core/src/log_throughput_p
 const INFO_TOKEN_NUMBERS_MOJO = "mojo/prodex_core/info_token_usage.mojo";
 const LOG_NUMBERS_MOJO = "mojo/prodex_core/log_number.mojo";
 const INFO_LOAD_CALLER = "crates/prodex-app/src/reports/info/runtime_load.rs";
+const INFO_QUOTA_CALLER = "crates/prodex-app/src/reports/info/quota.rs";
 const QUOTA_LOG_PROFILE_CALLER = "crates/prodex-app/src/quota_support.rs";
 const INFO_LOAD_ADAPTER = "crates/prodex-mojo-core/src/info_render/runtime_load.rs";
 const INFO_LOAD_MOJO = "mojo/prodex_core/info_runtime_load.mojo";
@@ -665,6 +666,7 @@ const PROMOTED_FILES = [
   INFO_TOKEN_NUMBERS_MOJO,
   LOG_NUMBERS_MOJO,
   INFO_LOAD_CALLER,
+  INFO_QUOTA_CALLER,
   QUOTA_LOG_PROFILE_CALLER,
   INFO_LOAD_ADAPTER,
   INFO_LOAD_MOJO,
@@ -7004,8 +7006,20 @@ export function findViolations(files) {
   });
   const statusSummaryViolations = files
     .filter(([filePath, contents]) => filePath === STATUS_SUMMARY_FILE &&
-      !contents.includes("status_quota_summary_batch(&inputs)"))
+      !contents.includes("crate::reports::quota_report_summary("))
     .map(([filePath]) => `${filePath}: status quota summary must use the Mojo kernel`);
+  statusSummaryViolations.push(...files.flatMap(([filePath, contents]) => {
+    if (filePath !== INFO_QUOTA_CALLER) return [];
+    const production = contents.split("#[cfg(test)]", 1)[0];
+    const violations = ["quota_report_summary(", "status_quota_summary_batch(&inputs)",
+      "live_profiles: summary.live_profiles", "snapshot_profiles: summary.snapshot_profiles"]
+      .filter((marker) => !production.includes(marker))
+      .map((marker) => `${filePath}: Info quota must retain compiled summary delegation ${marker}`);
+    if (/update_info_quota_aggregate|aggregate\.[a-z_]+\s*\+=|\.count\(\)/u.test(production)) {
+      violations.push(`${filePath}: contains restored Rust Info quota aggregation`);
+    }
+    return violations;
+  }));
   const geminiBufferedResponseViolations = files
     .filter(([filePath, contents]) => filePath === GEMINI_BUFFERED_RESPONSE_FILE &&
       (!contents.includes("gemini_buffered_response_kernel(input)") ||
@@ -9979,6 +9993,9 @@ export function findViolations(files) {
         "pub fn quota_pool_summary_sections(",
         "mojo_quota_pool_summary_selects_openai_main_or_missing_data_layout",
         "mojo_quota_pool_summary_section_abi_rejects_invalid_inputs_without_writes",
+        "fn prodex_quota_status_summary_v2(",
+        "const STATUS_QUOTA_SUMMARY_ABI_VERSION: i64 = 2",
+        "quota_source_summary_abi_rejects_bad_shapes_and_late_records_before_writes",
       ].filter((marker) => !contents.includes(marker))
         .map((marker) => filePath + ": compiled quota-pool summary layout ABI/coverage missing " + marker);
     }
@@ -9989,6 +10006,9 @@ export function findViolations(files) {
         "QUOTA_POOL_SECTION_READY",
         "QUOTA_POOL_SECTION_MAIN",
         "QUOTA_POOL_SECTION_EMPTY_WEEKLY",
+        '@export("prodex_quota_status_summary_v2")',
+        "output_fields[unsafe_offset=10] = live_profiles",
+        "output_fields[unsafe_offset=11] = snapshot_profiles",
       ].filter((marker) => !contents.includes(marker))
         .map((marker) => filePath + ": compiled quota-pool section precedence missing " + marker);
     }
@@ -12571,6 +12591,10 @@ function selfTest() {
     /replaced Rust semantic implementation/u);
   assert.match(findViolations([[STATUS_SUMMARY_FILE, "fn status_quota_from_reports() {}"]]).join("\n"),
     /status quota summary must use the Mojo kernel/u);
+  const infoQuotaCaller = "quota_report_summary( status_quota_summary_batch(&inputs) live_profiles: summary.live_profiles snapshot_profiles: summary.snapshot_profiles";
+  assert.deepEqual(findViolations([[INFO_QUOTA_CALLER, infoQuotaCaller]]), []);
+  assert.match(findViolations([[INFO_QUOTA_CALLER, infoQuotaCaller + "\naggregate.live_profiles += 1;"]]).join("\n"), /restored Rust Info quota aggregation/u);
+  assert.match(findViolations([[INFO_QUOTA_CALLER, "fn rust_summary() {}"]]).join("\n"), /Info quota must retain compiled summary delegation/u);
   assert.match(findViolations([["crates/prodex-provider-core/src/translators/gemini/stream.rs",
     '#[cfg(not(feature = "mojo"))] fn old_stream() {}']])[0], /feature-off Rust path/u);
   assert.match(findViolations([["crates/prodex-provider-core/src/translators/gemini/response/status.rs",

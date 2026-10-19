@@ -1,16 +1,11 @@
 use super::log_tui::LogTuiTerminal;
 use crate::reports::{
     InfoTokenUsageEvent, InfoTokenUsageSummary, collect_info_token_usage_summary_from_texts,
-    info_token_usage_event_from_line, runtime_usage_snapshot_is_usable,
-    usage_from_runtime_usage_snapshot,
+    info_token_usage_event_from_line,
 };
 use anyhow::{Context, Result};
 use chrono::Local;
 use crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
-use prodex_quota::{
-    QuotaPoolWindowInput, StatusQuotaProfileInput, required_main_window_snapshot_at,
-    status_quota_summary_batch,
-};
 use prodex_runtime_doctor::read_runtime_log_tail;
 use std::collections::{BTreeMap, VecDeque};
 use std::io::{self, IsTerminal};
@@ -423,42 +418,13 @@ fn status_quota_from_reports(
     snapshots: &BTreeMap<String, crate::RuntimeProfileUsageSnapshot>,
     now: i64,
 ) -> Result<StatusQuotaSummary> {
-    let mut inputs = Vec::with_capacity(reports.len());
-    for report in reports {
-        let report_succeeded = report.result.is_ok();
-        let report_windows = report
-            .result
-            .as_ref()
-            .ok()
-            .map(|usage| status_quota_windows(usage, now))
-            .unwrap_or_default();
-        let cached_usage = snapshots.get(&report.name).filter(|snapshot| {
-            runtime_usage_snapshot_is_usable(
-                snapshot,
-                now,
-                RUNTIME_PROFILE_USAGE_CACHE_STALE_GRACE_SECONDS,
-            )
-        });
-        let cached_snapshot_usable = cached_usage.is_some();
-        let cached_windows = cached_usage
-            .map(|snapshot| {
-                let usage = usage_from_runtime_usage_snapshot(snapshot);
-                status_quota_windows(&usage, now)
-            })
-            .unwrap_or_default();
-        inputs.push(StatusQuotaProfileInput {
-            quota_compatible: report.auth.quota_compatible,
-            report_succeeded,
-            cached_snapshot_usable,
-            report_five_hour: report_windows.0,
-            report_weekly: report_windows.1,
-            cached_five_hour: cached_windows.0,
-            cached_weekly: cached_windows.1,
-        });
-    }
-
-    status_quota_summary_batch(&inputs)
-        .map_err(|error| anyhow::anyhow!("Mojo status quota summary failed: {error:?}"))
+    crate::reports::quota_report_summary(
+        reports,
+        snapshots,
+        now,
+        RUNTIME_PROFILE_USAGE_CACHE_STALE_GRACE_SECONDS,
+    )
+    .map_err(|error| anyhow::anyhow!("Mojo status quota summary failed: {error:?}"))
 }
 
 fn status_profile_indices(eligible: &[bool]) -> Result<Vec<usize>> {
@@ -493,19 +459,6 @@ fn status_runtime_profile(
                 .context("Mojo status profile selection returned an invalid runtime index")
         }
     }
-}
-
-fn status_quota_windows(
-    usage: &prodex_quota::UsageResponse,
-    now: i64,
-) -> (Option<QuotaPoolWindowInput>, Option<QuotaPoolWindowInput>) {
-    let window = |label| {
-        required_main_window_snapshot_at(usage, label, now).map(|snapshot| QuotaPoolWindowInput {
-            remaining_percent: snapshot.remaining_percent,
-            reset_at: snapshot.reset_at,
-        })
-    };
-    (window("5h"), window("weekly"))
 }
 
 struct StatusTokenData {
