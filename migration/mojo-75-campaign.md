@@ -6255,3 +6255,30 @@ pass 100 and 957 tests respectively. Workspace all-target/all-feature Clippy
 with warnings denied, `npm run docs`, `npm run test:changed`, formatting,
 staged churn, authority, no-fallback self-test/source guard and crate-boundary
 self-test/source guard also pass.
+
+## Compiled optional exec-alias planning (2026-10-19)
+
+Presentation checkpoint `0ad3a37b8` is pushed to main. Completed build output
+was cleaned (10.5 GiB) after active-reference checks; inspected Trash was empty.
+The existing compiled exec owner now selects canonical optional-tool IDs,
+native/npx/Prodex executable sources, prefix arguments and missing-path
+diagnostics. The existing classifier is reused, including the exact lowercase
+Playwright spelling required for integrated mode. Rust retains OS path parsing,
+availability checks and lossless OsString argument materialization. The previous
+Rust alias special case, nested tool match and unreachable arm are deleted;
+ABI/decoding errors return explicit failures without recomputation.
+
+Direct Mojo assertions and all 2,560 comparisons with the old resolver pass.
+The temporary Rust resolver is removed. Four permanent caller regressions cover
+all tool kinds, spelling, error precedence, plain paths and non-UTF-8 arguments;
+all 104 expose tests pass. The official share rises from 35.43162966136112% to
+35.44130243734217% (127,437 Mojo / 232,135 Rust production lines).
+The distinct 75% target remains outstanding.
+
+Final validation passes `PRODEX_MOJO_REQUIRED=1 CARGO_BUILD_JOBS=6 cargo test --locked -q -p prodex-app --lib super_expose:: -- --test-threads=1`
+(104 tests) and `PRODEX_MOJO_REQUIRED=1 CARGO_BUILD_JOBS=6 cargo test --locked -q -p prodex-mojo-core --features mojo-core --lib super_expose`
+(20 tests). Workspace all-target/all-feature Clippy with warnings denied,
+formatting, staged churn, authority, no-fallback self-test/source guard and
+crate-boundary self-test/source guard pass. Direct Mojo verification uses
+`mojo run -D ASSERT=all -I mojo/prodex_core mojo/tests/super_expose_alias_test.mojo`.
+`npm run docs` and `npm run test:changed` also pass.

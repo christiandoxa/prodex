@@ -15,6 +15,7 @@ pub use exec::{
     super_expose_exec_validate_argument, super_expose_exec_validate_count,
     super_expose_exec_validate_env_entry, super_expose_exec_validate_stdin,
     super_expose_exec_validate_text, super_expose_exec_validate_timeout,
+    super_expose_optional_alias_plan,
 };
 
 const SUPER_EXPOSE_ABI_VERSION: i64 = 1;
