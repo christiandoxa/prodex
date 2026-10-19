@@ -97,7 +97,7 @@ fn runtime_local_inspect_and_mask_text(text: &str) -> Result<RuntimeLocalInspect
             });
         }
         let mut masked_values = masked_values.iter().map(String::as_str);
-        replace_json_string_values(&mut json, false, &mut masked_values);
+        replace_json_string_values(&mut json, &content, &mut masked_values)?;
         return Ok(RuntimeLocalInspectionResult {
             body: Some(
                 serde_json::to_vec(&json).context("failed to serialize masked JSON request")?,
@@ -245,6 +245,26 @@ mod tests {
                 .iter()
                 .any(|finding| finding.kind() == FindingKind::EmailAddress)
         );
+    }
+
+    #[test]
+    fn compiled_local_masking_applies_the_inspected_slot_after_opaque_tools() {
+        let request = serde_json::json!({
+            "a": {"tools": {"content": "schema metadata"}},
+            "input": "user@example.com",
+        });
+        let inspected =
+            runtime_local_inspect_and_mask(serde_json::to_vec(&request).unwrap()).unwrap();
+        let masked: serde_json::Value = serde_json::from_slice(&inspected.body).unwrap();
+        assert_eq!(
+            masked,
+            serde_json::json!({
+                "a": {"tools": {"content": "schema metadata"}},
+                "input": "<redacted>",
+            })
+        );
+        assert!(inspected.changed);
+        assert_eq!(inspected.coverage, InspectionCoverage::Partial);
     }
 
     #[test]

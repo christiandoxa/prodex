@@ -1,14 +1,14 @@
-//! Bounded schema-aware JSON content walking for Presidio inspection.
+//! Shared compiled selection for bounded Presidio JSON inspection and masking.
 
 use prodex_domain::{FindingKind, InspectionCoverage};
-use prodex_mojo_core::redaction::{
-    JsonFieldPlan, JsonInspectionMode as PresidioJsonInspectMode, JsonSensitiveKind,
-    json_field_plan,
-};
+use prodex_mojo_core::json::{JsonKind, redaction_json_content_plan};
+use serde::Deserialize;
 use std::error::Error;
 use std::fmt;
 
+#[cfg(test)]
 pub(super) const MAX_PRESIDIO_JSON_DEPTH: usize = 32;
+#[cfg(test)]
 pub(super) const MAX_PRESIDIO_JSON_VALUES: usize = 256;
 pub(super) const MAX_PRESIDIO_JSON_TEXT_BYTES: usize = 1024 * 1024;
 
@@ -23,6 +23,7 @@ pub(super) struct PresidioJsonString {
 pub(super) struct PresidioJsonContent {
     pub values: Vec<PresidioJsonString>,
     pub coverage: InspectionCoverage,
+    slots: Vec<usize>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -30,309 +31,121 @@ pub(super) enum PresidioJsonContentError {
     TooDeep,
     TooManyValues,
     TextBudgetExhausted,
+    InvalidPlan,
+    ReplacementMismatch,
 }
 
 impl fmt::Display for PresidioJsonContentError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "request content exceeds inspection limits")
+        f.write_str(match self {
+            Self::TooDeep | Self::TooManyValues | Self::TextBudgetExhausted => {
+                "request content exceeds inspection limits"
+            }
+            Self::InvalidPlan => "compiled Mojo JSON inspection returned an invalid plan",
+            Self::ReplacementMismatch => "JSON inspection replacement count or target changed",
+        })
     }
 }
 
 impl Error for PresidioJsonContentError {}
 
+#[derive(Deserialize)]
+struct JsonContentSlot {
+    node: usize,
+    path: String,
+    sensitive_kind: Option<FindingKind>,
+}
+
+#[derive(Deserialize)]
+struct JsonContentPlan {
+    error: u8,
+    coverage: InspectionCoverage,
+    slots: Vec<JsonContentSlot>,
+}
+
 pub(super) fn collect_json_content(
     value: &serde_json::Value,
 ) -> Result<PresidioJsonContent, PresidioJsonContentError> {
-    let mut state = PresidioJsonWalkState::default();
-    collect_json_content_at(
-        value,
-        PresidioJsonInspectMode::SchemaOnly,
-        None,
-        "$",
-        0,
-        &mut state,
-    )?;
-    let coverage = if state.values.is_empty() {
-        InspectionCoverage::Unsupported
-    } else if state.unsupported_modality || state.opaque_content {
-        InspectionCoverage::Partial
-    } else {
-        InspectionCoverage::Full
-    };
+    let invalid = PresidioJsonContentError::InvalidPlan;
+    let tree = crate::json_boundary::app_json_tree_without_wire(value).map_err(|_| invalid)?;
+    let output = redaction_json_content_plan(&tree.nodes).map_err(|_| invalid)?;
+    let plan: JsonContentPlan = serde_json::from_slice(&output).map_err(|_| invalid)?;
+    match plan.error {
+        0 => {}
+        1 => return Err(PresidioJsonContentError::TooDeep),
+        2 => return Err(PresidioJsonContentError::TooManyValues),
+        3 => return Err(PresidioJsonContentError::TextBudgetExhausted),
+        _ => return Err(invalid),
+    }
+    let mut slots = Vec::with_capacity(plan.slots.len());
+    let mut values = Vec::with_capacity(plan.slots.len());
+    for slot in plan.slots {
+        let node = tree.nodes.get(slot.node).ok_or(invalid)?;
+        if !matches!(node.kind, JsonKind::String)
+            || slots.last().is_some_and(|last| *last >= slot.node)
+        {
+            return Err(invalid);
+        }
+        slots.push(slot.node);
+        values.push(PresidioJsonString {
+            path: slot.path,
+            text: node.text.to_string(),
+            sensitive_kind: slot.sensitive_kind,
+        });
+    }
     Ok(PresidioJsonContent {
-        values: state.values,
-        coverage,
+        values,
+        coverage: plan.coverage,
+        slots,
     })
-}
-
-#[derive(Default)]
-struct PresidioJsonWalkState {
-    values: Vec<PresidioJsonString>,
-    total_text_bytes: usize,
-    unsupported_modality: bool,
-    opaque_content: bool,
-}
-
-fn collect_json_content_at(
-    value: &serde_json::Value,
-    inspect_mode: PresidioJsonInspectMode,
-    sensitive_kind: Option<FindingKind>,
-    path: &str,
-    depth: usize,
-    state: &mut PresidioJsonWalkState,
-) -> Result<(), PresidioJsonContentError> {
-    if depth > MAX_PRESIDIO_JSON_DEPTH {
-        return Err(PresidioJsonContentError::TooDeep);
-    }
-    match value {
-        serde_json::Value::String(text) => {
-            collect_json_string_content(text, inspect_mode, sensitive_kind, path, state)?
-        }
-        serde_json::Value::Array(items) => {
-            collect_json_array_content(items, inspect_mode, sensitive_kind, path, depth, state)?
-        }
-        serde_json::Value::Object(fields) => {
-            collect_json_object_content(fields, inspect_mode, sensitive_kind, path, depth, state)?
-        }
-        _ => {}
-    }
-    Ok(())
-}
-
-fn collect_json_string_content(
-    text: &str,
-    inspect_mode: PresidioJsonInspectMode,
-    sensitive_kind: Option<FindingKind>,
-    path: &str,
-    state: &mut PresidioJsonWalkState,
-) -> Result<(), PresidioJsonContentError> {
-    if inspect_mode == PresidioJsonInspectMode::SchemaOnly {
-        return Ok(());
-    }
-    if state.values.len() >= MAX_PRESIDIO_JSON_VALUES {
-        return Err(PresidioJsonContentError::TooManyValues);
-    }
-    state.total_text_bytes = state
-        .total_text_bytes
-        .checked_add(text.len())
-        .ok_or(PresidioJsonContentError::TextBudgetExhausted)?;
-    if state.total_text_bytes > MAX_PRESIDIO_JSON_TEXT_BYTES {
-        return Err(PresidioJsonContentError::TextBudgetExhausted);
-    }
-    state.values.push(PresidioJsonString {
-        path: path.to_string(),
-        text: text.to_string(),
-        sensitive_kind,
-    });
-    Ok(())
-}
-
-fn collect_json_array_content(
-    items: &[serde_json::Value],
-    inspect_mode: PresidioJsonInspectMode,
-    sensitive_kind: Option<FindingKind>,
-    path: &str,
-    depth: usize,
-    state: &mut PresidioJsonWalkState,
-) -> Result<(), PresidioJsonContentError> {
-    for (index, item) in items.iter().enumerate() {
-        collect_json_content_at(
-            item,
-            inspect_mode,
-            sensitive_kind,
-            &format!("{path}[{index}]"),
-            depth + 1,
-            state,
-        )?;
-    }
-    Ok(())
-}
-
-fn collect_json_object_content(
-    fields: &serde_json::Map<String, serde_json::Value>,
-    inspect_mode: PresidioJsonInspectMode,
-    sensitive_kind: Option<FindingKind>,
-    path: &str,
-    depth: usize,
-    state: &mut PresidioJsonWalkState,
-) -> Result<(), PresidioJsonContentError> {
-    let skip_tools = path == "$" || json_object_declares_tools(fields);
-    let inspect_all_strings = inspect_mode == PresidioJsonInspectMode::AllStrings;
-    for (key, value) in fields {
-        let field_plan =
-            json_field_plan(key).expect("Mojo Presidio JSON field policy returned invalid output");
-        if skip_tools && field_plan.tools_field {
-            continue;
-        }
-        if field_plan.unsupported_modality && !value.is_null() {
-            state.unsupported_modality = true;
-            continue;
-        }
-        collect_json_object_field(
-            value,
-            sensitive_kind,
-            path,
-            depth,
-            PresidioJsonFieldContext {
-                key,
-                inspect_all_strings,
-                plan: field_plan,
-            },
-            state,
-        )?;
-    }
-    Ok(())
-}
-
-struct PresidioJsonFieldContext<'a> {
-    key: &'a str,
-    inspect_all_strings: bool,
-    plan: JsonFieldPlan,
-}
-
-fn collect_json_object_field(
-    value: &serde_json::Value,
-    sensitive_kind: Option<FindingKind>,
-    path: &str,
-    depth: usize,
-    field: PresidioJsonFieldContext<'_>,
-    state: &mut PresidioJsonWalkState,
-) -> Result<(), PresidioJsonContentError> {
-    if !field.inspect_all_strings
-        && field.plan.inspection_mode == PresidioJsonInspectMode::SchemaOnly
-        && !value.is_null()
-        && !field.plan.known_protocol_metadata
-    {
-        state.opaque_content = true;
-    }
-    let child_mode = if field.inspect_all_strings {
-        PresidioJsonInspectMode::AllStrings
-    } else {
-        field.plan.inspection_mode
-    };
-    let child_sensitive_kind = presidio_finding_kind(field.plan.sensitive_kind).or(sensitive_kind);
-    let child_path = json_content_child_path(
-        path,
-        field.key,
-        field.plan.inspection_mode,
-        field.inspect_all_strings,
-    );
-    collect_json_content_at(
-        value,
-        child_mode,
-        child_sensitive_kind,
-        &child_path,
-        depth + 1,
-        state,
-    )
-}
-
-fn json_content_child_path(
-    path: &str,
-    key: &str,
-    field_mode: PresidioJsonInspectMode,
-    inspect_all_strings: bool,
-) -> String {
-    if field_mode != PresidioJsonInspectMode::SchemaOnly {
-        format!("{path}.{key}")
-    } else if inspect_all_strings {
-        format!("{path}.*")
-    } else {
-        path.to_string()
-    }
-}
-
-fn presidio_finding_kind(kind: JsonSensitiveKind) -> Option<FindingKind> {
-    match kind {
-        JsonSensitiveKind::None => None,
-        JsonSensitiveKind::PrivateKey => Some(FindingKind::PrivateKey),
-        JsonSensitiveKind::ApiKey => Some(FindingKind::ApiKey),
-        JsonSensitiveKind::AccessToken => Some(FindingKind::AccessToken),
-        JsonSensitiveKind::Password => Some(FindingKind::Password),
-    }
-}
-
-fn json_object_declares_tools(fields: &serde_json::Map<String, serde_json::Value>) -> bool {
-    fields.get("role").and_then(serde_json::Value::as_str) == Some("developer")
 }
 
 pub(super) fn replace_json_string_values<'a>(
     value: &mut serde_json::Value,
-    inspect_strings: bool,
+    content: &PresidioJsonContent,
     values: &mut impl Iterator<Item = &'a str>,
-) {
-    replace_json_string_values_at(
-        value,
-        if inspect_strings {
-            PresidioJsonInspectMode::AllStrings
-        } else {
-            PresidioJsonInspectMode::SchemaOnly
-        },
-        values,
-        true,
-    );
+) -> Result<(), PresidioJsonContentError> {
+    let replacements = values.take(content.slots.len() + 1).collect::<Vec<_>>();
+    if replacements.len() != content.slots.len() {
+        return Err(PresidioJsonContentError::ReplacementMismatch);
+    }
+    let mut slots = content.slots.iter().copied().zip(replacements).peekable();
+    apply_json_string_slots(value, &mut 0, &mut slots)?;
+    if slots.next().is_some() {
+        return Err(PresidioJsonContentError::ReplacementMismatch);
+    }
+    Ok(())
 }
 
-fn replace_json_string_values_at<'a>(
+// Serde owns mutable JSON storage; this walk only applies Mojo's node indices.
+fn apply_json_string_slots<'a>(
     value: &mut serde_json::Value,
-    inspect_mode: PresidioJsonInspectMode,
-    values: &mut impl Iterator<Item = &'a str>,
-    root: bool,
-) {
+    index: &mut usize,
+    slots: &mut std::iter::Peekable<impl Iterator<Item = (usize, &'a str)>>,
+) -> Result<(), PresidioJsonContentError> {
+    if slots.peek().is_some_and(|(slot, _)| slot == index) {
+        let serde_json::Value::String(text) = value else {
+            return Err(PresidioJsonContentError::ReplacementMismatch);
+        };
+        if let Some((_, replacement)) = slots.next() {
+            *text = replacement.to_string();
+        }
+    }
+    *index += 1;
     match value {
-        serde_json::Value::String(text) => replace_json_string(text, inspect_mode, values),
         serde_json::Value::Array(items) => {
             for item in items {
-                replace_json_string_values_at(item, inspect_mode, values, false);
+                apply_json_string_slots(item, index, slots)?;
             }
         }
         serde_json::Value::Object(fields) => {
-            replace_json_object_strings(fields, inspect_mode, values, root)
+            for item in fields.values_mut() {
+                apply_json_string_slots(item, index, slots)?;
+            }
         }
         _ => {}
     }
-}
-
-fn replace_json_string<'a>(
-    text: &mut String,
-    inspect_mode: PresidioJsonInspectMode,
-    values: &mut impl Iterator<Item = &'a str>,
-) {
-    if inspect_mode != PresidioJsonInspectMode::SchemaOnly
-        && let Some(redacted) = values.next()
-    {
-        *text = redacted.to_string();
-    }
-}
-
-fn replace_json_object_strings<'a>(
-    fields: &mut serde_json::Map<String, serde_json::Value>,
-    inspect_mode: PresidioJsonInspectMode,
-    values: &mut impl Iterator<Item = &'a str>,
-    root: bool,
-) {
-    let skip_tools = root || json_object_declares_tools(fields);
-    let inspect_all_strings = inspect_mode == PresidioJsonInspectMode::AllStrings;
-    for (key, value) in fields {
-        let field_plan =
-            json_field_plan(key).expect("Mojo Presidio JSON field policy returned invalid output");
-        if skip_tools && field_plan.tools_field {
-            continue;
-        }
-        if field_plan.unsupported_modality {
-            continue;
-        }
-        replace_json_string_values_at(
-            value,
-            if inspect_all_strings {
-                PresidioJsonInspectMode::AllStrings
-            } else {
-                field_plan.inspection_mode
-            },
-            values,
-            false,
-        );
-    }
+    Ok(())
 }
 
 pub(super) fn presidio_json_value_separator(values: &[PresidioJsonString]) -> String {
@@ -346,6 +159,65 @@ pub(super) fn presidio_json_value_separator(values: &[PresidioJsonString]) -> St
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn compiled_inspection_accepts_exact_depth_value_and_text_limits() {
+        let mut deep = serde_json::json!("bounded");
+        for _ in 0..MAX_PRESIDIO_JSON_DEPTH {
+            deep = serde_json::json!({"input": deep});
+        }
+        assert_eq!(collect_json_content(&deep).unwrap().values.len(), 1);
+        let many = serde_json::json!({"input": vec!["bounded"; MAX_PRESIDIO_JSON_VALUES]});
+        assert_eq!(
+            collect_json_content(&many).unwrap().values.len(),
+            MAX_PRESIDIO_JSON_VALUES
+        );
+        let text = serde_json::json!({"input": "x".repeat(MAX_PRESIDIO_JSON_TEXT_BYTES)});
+        assert_eq!(
+            collect_json_content(&text).unwrap().values[0].text.len(),
+            MAX_PRESIDIO_JSON_TEXT_BYTES
+        );
+    }
+
+    #[test]
+    fn compiled_replacement_rejects_count_changes_before_mutation() {
+        let original = serde_json::json!({"input": ["first", "second"]});
+        let content = collect_json_content(&original).unwrap();
+        for replacements in [vec!["masked"], vec!["masked", "masked", "extra"]] {
+            let mut request = original.clone();
+            assert_eq!(
+                replace_json_string_values(&mut request, &content, &mut replacements.into_iter()),
+                Err(PresidioJsonContentError::ReplacementMismatch)
+            );
+            assert_eq!(request, original);
+        }
+    }
+
+    #[test]
+    fn replacement_targets_match_collected_slots_through_opaque_root_objects() {
+        let mut request = serde_json::json!({
+            "a": {"tools": {"content": "not inspected"}},
+            "input": "user@example.com",
+        });
+        let content = collect_json_content(&request).unwrap();
+        assert_eq!(
+            content
+                .values
+                .iter()
+                .map(|value| value.text.as_str())
+                .collect::<Vec<_>>(),
+            ["user@example.com"]
+        );
+        replace_json_string_values(&mut request, &content, &mut ["<redacted>"].into_iter())
+            .unwrap();
+        assert_eq!(
+            request,
+            serde_json::json!({
+                "a": {"tools": {"content": "not inspected"}},
+                "input": "<redacted>",
+            })
+        );
+    }
 
     #[test]
     fn walker_inspects_supported_nested_fields_without_retaining_argument_keys() {
@@ -442,7 +314,8 @@ mod tests {
             ["user@example.com"]
         );
 
-        replace_json_string_values(&mut request, false, &mut ["<redacted>"].into_iter());
+        replace_json_string_values(&mut request, &content, &mut ["<redacted>"].into_iter())
+            .unwrap();
         assert_eq!(request["input"][0]["type"], "message");
         assert_eq!(request["input"][0]["role"], "user");
         assert_eq!(request["input"][0]["content"][0]["type"], "input_text");
@@ -508,7 +381,7 @@ mod tests {
                 }
             })
             .collect::<Vec<_>>();
-        replace_json_string_values(&mut request, false, &mut redacted.into_iter());
+        replace_json_string_values(&mut request, &content, &mut redacted.into_iter()).unwrap();
         assert_eq!(
             request["input"][1]["content"]["tools"]["content"],
             "<redacted>"

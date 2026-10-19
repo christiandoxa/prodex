@@ -73,6 +73,10 @@ pub use self::kiro_catalog::{
 };
 mod log_payload;
 pub use log_payload::{LogPayloadJsonPresentation, log_payload_projection};
+#[cfg(feature = "mojo-runtime")]
+mod redaction_content;
+#[cfg(feature = "mojo-runtime")]
+pub use redaction_content::redaction_json_content_plan;
 
 use crate::MojoError;
 

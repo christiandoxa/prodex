@@ -6085,3 +6085,15 @@ Unicode terminal widths and materializes the selected UI segments. The
 old Rust header/quota arithmetic was deleted. Both ABI and live caller
 tests, strict invalid-input checks and the updated no-fallback guard
 protect the boundary. The 75% target remains outstanding.
+
+## Shared compiled Presidio JSON inspection selection (2026-10-19)
+
+After header checkpoint `12c23df4d`, the compiled redaction JSON owner now
+selects inspection slots, sanitized locations, inherited sensitive kinds,
+coverage and depth/count/text limits. Local and remote masking consume the
+same validated node indices instead of repeating the Rust schema walker.
+This fixes the preserved WIP regression where an opaque root wrapper caused
+masking to replace an uninspected tool field and leave the input unmasked.
+The caller-owned bounded path buffer avoids Mojo heap-runtime dependencies.
+The measured share rises from 35.172814243880104% to 35.215954263254275%;
+the distinct 75% production-share target remains outstanding.
