@@ -171,6 +171,9 @@ const PING_SUMMARY_CALLER_TEST_FILE = "crates/prodex-app/src/app_commands/ping_t
 const PING_SUMMARY_ADAPTER_FILE = "crates/prodex-mojo-core/src/rich/ping_protocol.rs";
 const PING_SUMMARY_MOJO_FILE = "mojo/prodex_core/ping_protocol.mojo";
 const PROMOTED_FILES = [
+  "crates/prodex-app/src/runtime_proxy/smart_context/token_calibration.rs",
+  "crates/prodex-mojo-core/src/smart_context_rewrite_history.rs",
+  "mojo/prodex_core/smart_context_rewrite_history.mojo",
   "crates/prodex-app/src/runtime_launch/proxy_startup/deepseek_sse/tool_calls.rs",
   "crates/prodex-app/src/runtime_launch/proxy_startup/deepseek_sse/completion.rs",
   "crates/prodex-app/src/runtime_launch/proxy_startup/deepseek_sse.rs",
@@ -4543,6 +4546,51 @@ export function findViolations(files) {
       (!contents.includes("prodex_mojo_core::launch::find_super_expose_alias_index") ||
         /\bfn\s+(?:rewrite_super_expose_alias|super_option_takes_value)\s*\(/u.test(contents)))
     .map(([filePath]) => `${filePath}: Super expose alias scan must use Mojo`);
+  const smartContextRewriteHistoryMojoViolations = files.flatMap(([filePath, contents]) => {
+    if (filePath === "crates/prodex-app/src/runtime_proxy/smart_context/token_calibration.rs") {
+      const production = contents.split("#[cfg(test)]", 1)[0];
+      const required = [
+        "smart_context_rewrite_history_positions(",
+        "SMART_CONTEXT_REWRITE_SAFETY_TTL_SECS",
+        "SMART_CONTEXT_REWRITE_SAFETY_HISTORY_LIMIT",
+        "compiled_smart_context_rewrite_history_merge_preserves_freshness_stable_ties_and_other_histories",
+        "compiled_smart_context_rewrite_history_merge_keeps_last_four_on_equal_timestamps",
+      ];
+      const retired = [
+        "existing.rewrite_safety_history.retain(",
+        ".sort_by_key(|record| record.observed_at_unix_secs)",
+        "runtime_smart_context_truncate_vec_tail(\n        &mut existing.rewrite_safety_history",
+      ];
+      return required.every((marker) => contents.includes(marker)) &&
+        retired.every((marker) => !production.includes(marker))
+        ? [] : [filePath + ": restored Rust rewrite-safety history expiration/sort/tail selection"];
+    }
+    if (filePath === "crates/prodex-mojo-core/src/smart_context_rewrite_history.rs") {
+      return [
+        "fn prodex_smart_context_rewrite_history_select_v1(",
+        "pub fn smart_context_rewrite_history_positions(",
+        "compiled_rewrite_history_selection_keeps_newest_k_in_stable_timestamp_order",
+        "compiled_rewrite_history_plan_matches_test_only_stable_sort_oracle",
+        "compiled_rewrite_history_abi_rejects_invalid_shapes_before_output",
+      ].filter((marker) => !contents.includes(marker))
+        .map((marker) => filePath + ": Smart Context history ABI/strict regression coverage missing " + marker);
+    }
+    if (filePath === "mojo/prodex_core/smart_context_rewrite_history.mojo") {
+      return [
+        '@export("prodex_smart_context_rewrite_history_select_v1")',
+        "now_secs - timestamp > ttl_secs",
+        "if count < history_limit:",
+        "elif pos > 0:",
+        "output[unsafe_offset=pos - 1] = UInt64(index)",
+      ].filter((marker) => !contents.includes(marker))
+        .map((marker) => filePath + ": compiled Smart Context history top-K/TTL owner missing " + marker);
+    }
+    if (filePath === "crates/prodex-mojo-core/build.rs") {
+      return contents.includes('sources.push("../../mojo/prodex_core/smart_context_rewrite_history.mojo")')
+        ? [] : [filePath + ": Smart Context rewrite history Mojo source must remain linked"];
+    }
+    return [];
+  });
   const kiroAcpUpdateDispatchMojoViolations = files.flatMap(([filePath, contents]) => {
     if (filePath === "crates/prodex-app/src/runtime_kiro_acp/protocol.rs") {
       const production = contents.split("#[cfg(test)]\nmod mojo_session_update_tests", 1)[0];
@@ -9359,7 +9407,7 @@ export function findViolations(files) {
       ["crates/prodex-mojo-core/src/rich/deepseek/request_diagnostic.rs", ["fn prodex_deepseek_request_diagnostic_v1(", "pub fn deepseek_request_diagnostic(", "MojoError::InvalidOutput"]],
       ["crates/prodex-mojo-core/src/rich/deepseek/request_diagnostic_tests.rs", ["compiled_request_diagnostics_cover_every_rejection_and_success_tag", "compiled_request_diagnostic_abi_is_atomic_on_malformed_inputs_and_short_buffers"]],
       ["mojo/prodex_core/deepseek_request_diagnostics.mojo", ['@export("prodex_deepseek_request_diagnostic_v1")', "rich_view_valid(provider", "sink.measuring = False"]],
-      ["crates/prodex-mojo-core/build.rs", ['sources.push("../../mojo/prodex_core/deepseek_request_diagnostics.mojo")', 'sources.push("../../mojo/prodex_core/anthropic_stream_policy.mojo")', 'sources.push("../../mojo/prodex_core/kiro_acp_update_policy.mojo")']],
+      ["crates/prodex-mojo-core/build.rs", ['sources.push("../../mojo/prodex_core/deepseek_request_diagnostics.mojo")', 'sources.push("../../mojo/prodex_core/anthropic_stream_policy.mojo")', 'sources.push("../../mojo/prodex_core/kiro_acp_update_policy.mojo")', 'sources.push("../../mojo/prodex_core/smart_context_rewrite_history.mojo")']],
     ]);
     return (requirements.get(filePath) ?? []).filter((marker) => !contents.includes(marker))
       .map((marker) => filePath + ": compiled request diagnostic ownership missing " + marker);
@@ -9802,6 +9850,7 @@ export function findViolations(files) {
     ...quotaWindowViolations, ...quotaResetEpochViolations,
     ...rehydrateViolations, ...budgetTierViolations, ...staticItemViolations, ...replacedClassifierViolations, ...cliDependencyViolations,
     ...doctorDependencyViolations, ...proxyDependencyViolations, ...runtimeTuningViolations,
+    ...smartContextRewriteHistoryMojoViolations,
     ...kiroAcpUpdateDispatchMojoViolations,
     ...logAsciiSearchMojoViolations,
     ...rtkAutoWrapperManifestViolations,
@@ -10809,7 +10858,7 @@ function selfTest() {
     [SMART_CONTEXT_SYMBOLS_MOJO_FILE,
       '@export("prodex_smart_context_symbol_index_v1")\ncomptime SYMBOL_ABI_VERSION: Int64 = 1\ncomptime SYMBOL_MAX_INPUT_BYTES: Int64 = 64 * 1024 * 1024\ndef symbol_parse_declaration(): pass\ndef symbol_brace_end(): pass\ndef symbol_python_end(): pass'],
     ["crates/prodex-mojo-core/src/lib.rs", "pub mod smart_context_symbols;"],
-    ["crates/prodex-mojo-core/build.rs", '../../mojo/prodex_core/smart_context_symbols.mojo\nsources.push("../../mojo/prodex_core/kiro_acp_tool_activity_policy.mojo")\nsources.push("../../mojo/prodex_core/deepseek_request_diagnostics.mojo")\nsources.push("../../mojo/prodex_core/anthropic_stream_policy.mojo")\nsources.push("../../mojo/prodex_core/kiro_acp_update_policy.mojo")'],
+    ["crates/prodex-mojo-core/build.rs", '../../mojo/prodex_core/smart_context_symbols.mojo\nsources.push("../../mojo/prodex_core/kiro_acp_tool_activity_policy.mojo")\nsources.push("../../mojo/prodex_core/deepseek_request_diagnostics.mojo")\nsources.push("../../mojo/prodex_core/anthropic_stream_policy.mojo")\nsources.push("../../mojo/prodex_core/kiro_acp_update_policy.mojo")\nsources.push("../../mojo/prodex_core/smart_context_rewrite_history.mojo")'],
     [SMART_CONTEXT_SYMBOLS_TEST_FILE,
       "source_symbol_ranges_cover_rust_python_and_javascript source_symbol_ranges_preserve_function_type_and_fallback_names symbol_index_reports_capacity_and_excerpt_truncation symbol_index_accepts_large_multi_line_artifacts_with_bounded_lines index(text, 16, 16 * 1024)"],
     [SMART_CONTEXT_SYMBOLS_CALLER_TEST_FILE,
@@ -11563,6 +11612,18 @@ function selfTest() {
     'prodex_mojo_core::launch::super_literal_boundary(\n' +
     'prodex_mojo_core::launch::positioned_super_provider_alias(\n' +
     'prodex_mojo_core::launch::codex_command_server_subcommand(']]), []);
+  const smartContextHistoryCaller = [
+    "smart_context_rewrite_history_positions(",
+    "SMART_CONTEXT_REWRITE_SAFETY_TTL_SECS",
+    "SMART_CONTEXT_REWRITE_SAFETY_HISTORY_LIMIT",
+    "compiled_smart_context_rewrite_history_merge_preserves_freshness_stable_ties_and_other_histories",
+    "compiled_smart_context_rewrite_history_merge_keeps_last_four_on_equal_timestamps",
+  ].join("\n");
+  const smartContextHistoryFile = "crates/prodex-app/src/runtime_proxy/smart_context/token_calibration.rs";
+  assert.deepEqual(findViolations([[smartContextHistoryFile, smartContextHistoryCaller]]), []);
+  assert.match(findViolations([[smartContextHistoryFile,
+    smartContextHistoryCaller + "\nexisting.rewrite_safety_history.retain(",
+  ]]).join("\n"), /restored Rust rewrite-safety history expiration\/sort\/tail selection/u);
   const kiroUpdateConsumer = [
     "kiro_acp_session_update_plan(",
     "KiroAcpUpdateFieldFacts",

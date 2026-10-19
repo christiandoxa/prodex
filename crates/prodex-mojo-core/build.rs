@@ -452,6 +452,7 @@ fn selected_sources() -> Vec<&'static str> {
         sources.push("../../mojo/prodex_core/runtime_noncompact_loop.mojo");
         sources.push("../../mojo/prodex_core/confirmation_policy.mojo");
         sources.push("../../mojo/prodex_core/smart_context_rehydrate.mojo");
+        sources.push("../../mojo/prodex_core/smart_context_rewrite_history.mojo");
         sources.push("../../mojo/prodex_core/runtime_tuning.mojo");
         sources.push("../../mojo/prodex_core/audit_log_policy.mojo");
         sources.push("../../mojo/prodex_core/app_command_policy.mojo");
