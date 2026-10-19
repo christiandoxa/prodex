@@ -28,6 +28,16 @@ unsafe extern "C" {
         source_length: i64,
         output_address: u64,
     ) -> i64;
+    fn prodex_mojo_log_tui_key_plan_v1(
+        version: i64,
+        key_kind: i64,
+        scalar: i64,
+        control: i64,
+        editing_search: i64,
+        scroll_from_bottom: u64,
+        max_scroll: u64,
+        output_address: u64,
+    ) -> i64;
 }
 
 fn status(value: i64) -> Result<(), MojoError> {
@@ -128,9 +138,182 @@ pub fn log_tui_source_tone(source: &str) -> Result<LogTuiSourceTone, MojoError> 
     }
 }
 
+/// Terminal-decoded key shape, without crossterm or input-policy semantics.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LogTuiKey {
+    Char(char),
+    Enter,
+    Esc,
+    Backspace,
+    Up,
+    Down,
+    PageUp,
+    PageDown,
+    Home,
+    End,
+    Other,
+}
+
+/// The only mutations that a compiled input plan may request from its Rust host.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LogTuiSearchAction {
+    Unchanged,
+    Clear,
+    Pop,
+    Push,
+}
+
+/// Mojo-owned state transition; Rust only applies this validated plan.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct LogTuiKeyPlan {
+    pub quit: bool,
+    pub editing_search: bool,
+    pub search_action: LogTuiSearchAction,
+    pub scroll_from_bottom: usize,
+}
+
+pub fn log_tui_key_plan(
+    key: LogTuiKey,
+    control: bool,
+    editing_search: bool,
+    scroll_from_bottom: usize,
+) -> Result<LogTuiKeyPlan, MojoError> {
+    let (kind, scalar) = match key {
+        LogTuiKey::Char(ch) => (0, i64::from(u32::from(ch))),
+        LogTuiKey::Enter => (1, 0),
+        LogTuiKey::Esc => (2, 0),
+        LogTuiKey::Backspace => (3, 0),
+        LogTuiKey::Up => (4, 0),
+        LogTuiKey::Down => (5, 0),
+        LogTuiKey::PageUp => (6, 0),
+        LogTuiKey::PageDown => (7, 0),
+        LogTuiKey::Home => (8, 0),
+        LogTuiKey::End => (9, 0),
+        LogTuiKey::Other => (10, 0),
+    };
+    let mut output = [u64::MAX; 4];
+    status(unsafe {
+        prodex_mojo_log_tui_key_plan_v1(
+            ABI_VERSION,
+            kind,
+            scalar,
+            i64::from(control),
+            i64::from(editing_search),
+            u64::try_from(scroll_from_bottom).map_err(|_| MojoError::InvalidInput)?,
+            u64::try_from(usize::MAX).map_err(|_| MojoError::InvalidInput)?,
+            output.as_mut_ptr() as usize as u64,
+        )
+    })?;
+    let boolean = |value| match value {
+        0 => Ok(false),
+        1 => Ok(true),
+        _ => Err(MojoError::InvalidOutput),
+    };
+    let search_action = match output[2] {
+        0 => LogTuiSearchAction::Unchanged,
+        1 => LogTuiSearchAction::Clear,
+        2 => LogTuiSearchAction::Pop,
+        3 if matches!(key, LogTuiKey::Char(_)) => LogTuiSearchAction::Push,
+        _ => return Err(MojoError::InvalidOutput),
+    };
+    Ok(LogTuiKeyPlan {
+        quit: boolean(output[0])?,
+        editing_search: boolean(output[1])?,
+        search_action,
+        scroll_from_bottom: usize::try_from(output[3]).map_err(|_| MojoError::InvalidOutput)?,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn compiled_log_tui_key_state_machine_preserves_control_and_unicode() {
+        use LogTuiKey::*;
+        use LogTuiSearchAction::*;
+        for (key, control, editing, scroll, quit, next_editing, action, next_scroll) in [
+            (Up, false, false, 0, false, false, Unchanged, 1),
+            (Char('k'), true, false, 2, false, false, Unchanged, 3),
+            (Down, false, false, 0, false, false, Unchanged, 0),
+            (
+                PageUp,
+                false,
+                false,
+                usize::MAX - 5,
+                false,
+                false,
+                Unchanged,
+                usize::MAX,
+            ),
+            (PageDown, false, false, 8, false, false, Unchanged, 0),
+            (Home, false, false, 9, false, false, Unchanged, usize::MAX),
+            (End, false, false, 9, false, false, Unchanged, 0),
+            (Char('/'), false, false, 8, false, true, Clear, 0),
+            (Char('c'), false, false, 8, false, false, Clear, 0),
+            (Char('c'), true, false, 8, true, false, Unchanged, 8),
+            (Char('z'), true, true, 8, true, true, Unchanged, 8),
+            (Char('q'), false, false, 8, true, false, Unchanged, 8),
+            (Char('q'), true, true, 8, false, true, Unchanged, 8),
+            (Char('🚀'), false, true, 8, false, true, Push, 0),
+            (Char('界'), false, true, 8, false, true, Push, 0),
+            (Backspace, false, true, 8, false, true, Pop, 0),
+            (Char('u'), true, true, 8, false, true, Clear, 0),
+            (Enter, false, true, 8, false, false, Unchanged, 8),
+            (Esc, false, true, 8, false, false, Unchanged, 8),
+            (Esc, false, false, 8, true, false, Unchanged, 8),
+            (Other, false, false, 8, false, false, Unchanged, 8),
+            (Char('x'), true, true, 8, false, true, Unchanged, 8),
+        ] {
+            assert_eq!(
+                log_tui_key_plan(key, control, editing, scroll),
+                Ok(LogTuiKeyPlan {
+                    quit,
+                    editing_search: next_editing,
+                    search_action: action,
+                    scroll_from_bottom: next_scroll,
+                }),
+                "{key:?}, control={control}, editing={editing}, scroll={scroll}",
+            );
+        }
+    }
+
+    #[test]
+    fn compiled_log_tui_key_abi_rejects_invalid_inputs_before_writing() {
+        let mut output = [91_u64; 4];
+        for (version, kind, scalar, control, editing, scroll, max, expected) in [
+            (99, 0, 97, 0, 0, 0, u64::MAX, 4),
+            (1, -1, 0, 0, 0, 0, u64::MAX, 1),
+            (1, 11, 0, 0, 0, 0, u64::MAX, 1),
+            (1, 0, 0x11_0000, 0, 0, 0, u64::MAX, 1),
+            (1, 0, 0xD800, 0, 0, 0, u64::MAX, 1),
+            (1, 3, 1, 0, 0, 0, u64::MAX, 1),
+            (1, 0, 97, 2, 0, 0, u64::MAX, 1),
+            (1, 0, 97, 0, -1, 0, u64::MAX, 1),
+            (1, 0, 97, 0, 0, 5, 4, 1),
+        ] {
+            assert_eq!(
+                unsafe {
+                    prodex_mojo_log_tui_key_plan_v1(
+                        version,
+                        kind,
+                        scalar,
+                        control,
+                        editing,
+                        scroll,
+                        max,
+                        output.as_mut_ptr() as usize as u64,
+                    )
+                },
+                expected
+            );
+            assert_eq!(output, [91_u64; 4]);
+        }
+        assert_eq!(
+            unsafe { prodex_mojo_log_tui_key_plan_v1(1, 0, 97, 0, 0, 0, u64::MAX, 0) },
+            1
+        );
+    }
 
     #[test]
     fn compiled_log_tui_window_handles_edges_and_maximum_scroll() {

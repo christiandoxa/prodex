@@ -24,7 +24,10 @@ pub use transcript_ansi::{
     join_transcript_user_parts, normalize_transcript_safe_text, normalize_transcript_visible_text,
     strip_transcript_ansi_codes, transcript_binary_like,
 };
-pub use tui::{LogTuiSourceTone, log_tui_snapshot_height, log_tui_source_tone, log_tui_window};
+pub use tui::{
+    LogTuiKey, LogTuiKeyPlan, LogTuiSearchAction, LogTuiSourceTone, log_tui_key_plan,
+    log_tui_snapshot_height, log_tui_source_tone, log_tui_window,
+};
 
 const _: () = assert!(std::mem::size_of::<usize>() == std::mem::size_of::<u64>());
 
