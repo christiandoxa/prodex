@@ -13,7 +13,7 @@ pub use self::exact_output::{
 pub use self::native_project::gemini_provider_core_native_request_body_with_project;
 pub(crate) use self::request_contents::{
     GeminiTranslatorValidationPlan, gemini_bridge_raw_translator_request,
-    gemini_bridge_validate_translator, gemini_bridge_validate_translator_with_kind,
+    gemini_bridge_validate_tool_array_with_kind, gemini_bridge_validate_translator,
 };
 pub use self::simple::gemini_provider_core_simple_request;
 pub use self::tools::{

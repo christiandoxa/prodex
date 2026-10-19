@@ -6034,3 +6034,16 @@ Mojo-selected positions to canonical output without a fallback
 classifier. Direct ABI, mixed builtin/function provider regressions
 and no-fallback guards retain aliases and ordering. The distinct
 75% Mojo project source-share target remains outstanding.
+
+
+## Gemini full-array translator tool validation moved to Mojo
+
+Gemini request tool validation now calls one compiled full-array scanner
+instead of looping over individual synthetic tool requests in Rust.
+Mojo owns the first failing source position, local-media exceptions,
+declaration checks and the bounded verified-index mask for previously
+translated Responses tool shapes. Rust's individual-item validator
+and error index relabel helper were deleted; host JSON/compiled bridge
+materialization remain unchanged. Direct ABI, mixed tool-array, provider,
+Gemini app and no-fallback regressions protect the full-array contract.
+The separate 75% production source target is still outstanding.

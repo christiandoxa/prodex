@@ -24,6 +24,7 @@ pub enum GeminiBridgeRequestOperation {
     ValidateTranslatorRequest = 11,
     PreserveToolCallSignatures = 12,
     HardenToolCallThoughtSignatures = 13,
+    ValidateToolArray = 14,
 }
 
 impl GeminiBridgeRequestOperation {
@@ -215,6 +216,87 @@ pub fn gemini_builtin_tool_positions(
 #[cfg(test)]
 mod gemini_builtin_batch_tests {
     use super::*;
+
+    #[test]
+    fn compiled_gemini_tool_array_validator_preserves_first_error_index_and_local_media() {
+        let request = br#"{"tools":[
+            {"type":"web_search"},
+            {"type":"function","function":{"name":"","parameters":{}}},
+            {"type":"function","function":{"name":"valid","parameters":{}}}
+        ]}"#;
+        let plan = gemini_bridge_request_kernel(GeminiBridgeRequestKernelInput {
+            operation: GeminiBridgeRequestOperation::ValidateToolArray,
+            primary: Some(request),
+            ..GeminiBridgeRequestKernelInput::new(GeminiBridgeRequestOperation::ValidateToolArray)
+        })
+        .unwrap();
+        let text = std::str::from_utf8(&plan).unwrap();
+        assert!(text.contains(r#""index":1"#), "{text}");
+        assert!(text.contains(r#"tools[1].function.name"#), "{text}");
+
+        let mixed_media = br#"{"tools":[
+            {"type":"function","function":null,
+             "attachment":{"type":"image_url","file_path":"/tmp/example.png"}},
+            {"type":"function","function":{"name":"fine","parameters":{}}}
+        ]}"#;
+        let valid = gemini_bridge_request_kernel(GeminiBridgeRequestKernelInput {
+            operation: GeminiBridgeRequestOperation::ValidateToolArray,
+            primary: Some(mixed_media),
+            ..GeminiBridgeRequestKernelInput::new(GeminiBridgeRequestOperation::ValidateToolArray)
+        })
+        .unwrap();
+        assert!(std::str::from_utf8(&valid).unwrap().contains(r#""tag":0"#));
+        assert_eq!(
+            gemini_bridge_request_kernel(GeminiBridgeRequestKernelInput {
+                operation: GeminiBridgeRequestOperation::ValidateToolArray,
+                primary: Some(request),
+                kind: 2,
+                ..GeminiBridgeRequestKernelInput::new(
+                    GeminiBridgeRequestOperation::ValidateToolArray
+                )
+            }),
+            Err(MojoError::InvalidInput),
+        );
+    }
+
+    #[test]
+    fn compiled_gemini_tool_array_validator_skips_only_verified_bridge_positions() {
+        let request = br#"{"tools":[
+            {"type":"tool_search","parameters":{"type":"object"}},
+            {"type":"function","function":{"name":"","parameters":{}}},
+            {"type":"web_search"}
+        ]}"#;
+        let operation = GeminiBridgeRequestOperation::ValidateToolArray;
+        let plan = |verified: Option<&[u8]>| {
+            gemini_bridge_request_kernel(GeminiBridgeRequestKernelInput {
+                operation,
+                primary: Some(request),
+                secondary: verified,
+                ..GeminiBridgeRequestKernelInput::new(operation)
+            })
+        };
+        let initial = String::from_utf8(plan(None).unwrap()).unwrap();
+        assert!(initial.contains(r#""tag":16"#), "{initial}");
+        assert!(initial.contains(r#""index":0"#), "{initial}");
+
+        let after_bridge = String::from_utf8(plan(Some(br#""100""#)).unwrap()).unwrap();
+        assert!(after_bridge.contains(r#""index":1"#), "{after_bridge}");
+        assert!(
+            after_bridge.contains("tools[1].function.name"),
+            "{after_bridge}"
+        );
+
+        let skipped_all = String::from_utf8(plan(Some(br#""110""#)).unwrap()).unwrap();
+        assert!(skipped_all.contains(r#""tag":0"#), "{skipped_all}");
+        for malformed in [
+            br#""10""#.as_slice(),
+            br#""1000""#.as_slice(),
+            br#""10X""#.as_slice(),
+            b"true".as_slice(),
+        ] {
+            assert_eq!(plan(Some(malformed)), Err(MojoError::InvalidInput));
+        }
+    }
 
     #[test]
     fn compiled_gemini_builtin_batch_recognizes_aliases_and_sanitized_tool_set_in_one_call() {

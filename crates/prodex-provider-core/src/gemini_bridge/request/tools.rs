@@ -233,6 +233,116 @@ mod tests {
     }
 
     #[test]
+    fn compiled_gemini_tool_array_validation_continues_after_translated_responses_tools() {
+        let bridge = json!({
+            "type":"tool_search",
+            "parameters":{"type":"object"},
+        });
+        let invalid = json!({
+            "type":"function",
+            "function":{"name":"","parameters":{}}
+        });
+        for tools in [
+            vec![bridge.clone(), invalid.clone()],
+            vec![bridge.clone(), bridge.clone(), invalid.clone()],
+        ] {
+            let invalid_index = tools.len() - 1;
+            let request = json!({"tools":tools});
+            assert_eq!(
+                gemini_provider_core_validate_request_tools(&request),
+                Err(format!(
+                    "invalid_tool_declaration: Gemini request field `tools[{invalid_index}].function.name` must be a non-empty string"
+                )),
+            );
+        }
+
+        let good = json!({
+            "tools":[bridge.clone(), bridge, {
+                "type":"function",
+                "function":{"name":"lookup","parameters":{"type":"object"}}
+            }],
+        });
+        assert_eq!(gemini_provider_core_validate_request_tools(&good), Ok(()));
+        let invalid_after_media = json!({
+            "tools":[
+                {"type":"function", "function":null,
+                    "attachment":{"type":"image_url","file_path":"/tmp/local"}},
+                {"type":"tool_search","parameters":{"type":"object"}},
+                {"type":"function","function":null},
+            ],
+        });
+        assert_eq!(
+            gemini_provider_core_validate_request_tools(&invalid_after_media),
+            Err(
+                "invalid_tool_declaration: Gemini request field `tools[2].function` must be an object"
+                    .to_string()
+            ),
+        );
+    }
+
+    #[test]
+    fn compiled_gemini_tool_array_validation_preserves_first_error_and_local_media_exemption() {
+        let bad_first = json!({
+            "tools": [
+                {"type":"function", "function":{"name":"first","parameters":{}}},
+                {"type":"function", "function":{"name":"", "parameters":{}}},
+                {"type":"function", "function":{"name":"missing", "parameters":{}}}
+            ]
+        });
+        let error = gemini_provider_core_validate_request_tools(&bad_first)
+            .expect_err("second tool name is blank");
+        assert_eq!(
+            error,
+            "invalid_tool_declaration: Gemini request field `tools[1].function.name` must be a non-empty string"
+        );
+
+        let invalid_object = json!({
+            "tools":[{"type":"web_search"}, true, {"type":"function","function":{"name":"ok","parameters":{}}}]
+        });
+        let error = gemini_provider_core_validate_request_tools(&invalid_object)
+            .expect_err("first nonobject tool must be rejected");
+        assert_eq!(
+            error,
+            "invalid_tool_declaration: Gemini request field `tools[1]` must be an object"
+        );
+
+        let media_first = json!({
+            "tools": [
+                {"type":"function","function":null,
+                    "attachment":{"type":"image_url","file_path":"/tmp/fixture-image.png"}},
+                {"type":"function", "function":{"name":"fine", "parameters":{}}}
+            ]
+        });
+        assert_eq!(
+            gemini_provider_core_validate_request_tools(&media_first),
+            Ok(())
+        );
+
+        let later_media = json!({
+            "tools": [
+                {"type":"function","function":null},
+                {"type":"function","function":null,
+                    "attachment":{"type":"image_url","file_path":"/tmp/fixture-image.png"}}
+            ]
+        });
+        let error = gemini_provider_core_validate_request_tools(&later_media)
+            .expect_err("local media in a later tool must not hide an earlier bad tool");
+        assert_eq!(
+            error,
+            "invalid_tool_declaration: Gemini request field `tools[0].function` must be an object"
+        );
+
+        let wrong_array = json!({"tools":"not-array"});
+        assert_eq!(
+            gemini_provider_core_validate_request_tools(&wrong_array),
+            Err(
+                "invalid_tool_declaration: Gemini request field `tools` must be an array"
+                    .to_string()
+            )
+        );
+    }
+
+    #[test]
     fn compiled_gemini_builtin_batch_keeps_mixed_builtin_groups_and_functions_in_order() {
         let request = json!({
             "tools": [

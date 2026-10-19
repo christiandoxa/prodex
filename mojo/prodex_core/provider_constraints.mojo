@@ -3603,6 +3603,7 @@ comptime GEMINI_BRIDGE_REQUEST_RAW_TRANSLATOR: Int64 = 10
 comptime GEMINI_BRIDGE_REQUEST_VALIDATE_TRANSLATOR: Int64 = 11
 comptime GEMINI_BRIDGE_REQUEST_PRESERVE_TOOL_CALL_SIGNATURES: Int64 = 12
 comptime GEMINI_BRIDGE_REQUEST_HARDEN_TOOL_CALL_THOUGHT_SIGNATURES: Int64 = 13
+comptime GEMINI_BRIDGE_REQUEST_VALIDATE_TOOL_ARRAY: Int64 = 14
 
 @fieldwise_init
 struct GeminiBridgeRequestInput(Copyable):
@@ -3631,7 +3632,7 @@ def gemini_bridge_request_input_flag_valid(value: Int64) -> Bool:
 
 
 def gemini_bridge_request_input_valid(input: GeminiBridgeRequestInput) -> Bool:
-    if input.operation < GEMINI_BRIDGE_REQUEST_GENERATE_CONTENT_REQUEST or input.operation > GEMINI_BRIDGE_REQUEST_HARDEN_TOOL_CALL_THOUGHT_SIGNATURES:
+    if input.operation < GEMINI_BRIDGE_REQUEST_GENERATE_CONTENT_REQUEST or input.operation > GEMINI_BRIDGE_REQUEST_VALIDATE_TOOL_ARRAY:
         return False
     if not gemini_bridge_request_input_flag_valid(input.primary_present) or not gemini_bridge_request_input_flag_valid(input.secondary_present) or not gemini_bridge_request_input_flag_valid(input.tertiary_present) or not gemini_bridge_request_input_flag_valid(input.quaternary_present) or not gemini_bridge_request_input_flag_valid(input.quinary_present) or not gemini_bridge_request_input_flag_valid(input.senary_present) or not gemini_bridge_request_input_flag_valid(input.septenary_present) or not gemini_bridge_request_input_flag_valid(input.octonary_present):
         return False
@@ -3677,6 +3678,12 @@ def gemini_bridge_request_input_valid(input: GeminiBridgeRequestInput) -> Bool:
     ):
         return False
     if input.operation == GEMINI_BRIDGE_REQUEST_VALIDATE_TRANSLATOR and (
+        input.primary_present == 0
+        or input.kind < GEMINI_TRANSLATOR_VALIDATION_DEFAULT_PATHS
+        or input.kind > GEMINI_TRANSLATOR_VALIDATION_NESTED_FUNCTION_PATHS
+    ):
+        return False
+    if input.operation == GEMINI_BRIDGE_REQUEST_VALIDATE_TOOL_ARRAY and (
         input.primary_present == 0
         or input.kind < GEMINI_TRANSLATOR_VALIDATION_DEFAULT_PATHS
         or input.kind > GEMINI_TRANSLATOR_VALIDATION_NESTED_FUNCTION_PATHS
@@ -7792,6 +7799,19 @@ def gemini_bridge_request_validate_translator(
                 format_type[1],
             )
 
+    return gemini_bridge_validate_tool_entries(input, writer, root, False)
+
+
+# Tool declaration validation shares one compiled scanner between the
+# normal translator and the isolated raw-tool-array validation operation.
+# In isolated mode, emulate the historical per-tool media exemption
+# without incorrectly exempting unrelated array elements.
+def gemini_bridge_validate_tool_entries(
+    input: GeminiBridgeRequestInput,
+    writer: Pointer[mut=True, GeminiRequestContentWriter, _],
+    root: Array[Int64, 2],
+    isolated_tool_validation: Bool,
+) -> Bool:
     var tools = gemini_bridge_request_object_member(
         input.primary, root[0], root[1], StringSlice("tools")
     )
@@ -7807,6 +7827,44 @@ def gemini_bridge_request_validate_translator(
             input.primary,
             GEMINI_TRANSLATOR_VALIDATION_TOOLS_ARRAY,
         )
+
+    var skip_view = input.secondary.copy()
+    if isolated_tool_validation and input.secondary_present == 1:
+        if (
+            not gemini_request_content_fragment_valid(skip_view)
+            or skip_view.len < 2
+            or gemini_request_content_byte(skip_view, 0) != 34
+            or gemini_request_content_byte(skip_view, Int64(skip_view.len) - 1) != 34
+        ):
+            return False
+        for offset in range(Int64(1), Int64(skip_view.len) - 1):
+            var bit = gemini_request_content_byte(skip_view, offset)
+            if bit != 48 and bit != 49:
+                return False
+        # Verify every skip slot before the validator may return an early
+        # first-invalid-tool result; malformed masks never bypass later tools.
+        var scan = gemini_request_content_skip_ws(
+            input.primary, tools[0] + 1, tools[1] - 1
+        )
+        var total: Int64 = 0
+        while scan < tools[1] - 1:
+            var next = gemini_request_content_value_end(
+                input.primary, scan, tools[1] - 1, 0
+            )
+            if next < 0:
+                return False
+            total += 1
+            scan = gemini_request_content_skip_ws(
+                input.primary, next, tools[1] - 1
+            )
+            if scan < tools[1] - 1:
+                if gemini_request_content_byte(input.primary, scan) != 44:
+                    return False
+                scan = gemini_request_content_skip_ws(
+                    input.primary, scan + 1, tools[1] - 1
+                )
+        if total != Int64(skip_view.len) - 2:
+            return False
 
     var item_index: Int64 = 0
     var cursor = gemini_request_content_skip_ws(
@@ -7828,42 +7886,56 @@ def gemini_bridge_request_validate_translator(
                 item_index,
             )
 
-        var function = gemini_bridge_request_object_member(
-            input.primary, cursor, item_end, StringSlice("function")
-        )
-        var tool_type = gemini_bridge_request_object_member(
-            input.primary, cursor, item_end, StringSlice("type")
-        )
-        var is_function = function[0] >= 0 or (
-            tool_type[0] >= 0
-            and gemini_request_content_string_equals(
-                input.primary,
-                tool_type[0],
-                tool_type[1],
-                StringSlice("function"),
-                False,
+        var already_validated = False
+        if isolated_tool_validation and input.secondary_present == 1:
+            if item_index >= Int64(skip_view.len) - 2:
+                return False
+            already_validated = (
+                gemini_request_content_byte(skip_view, item_index + 1) == 49
+            )
+        var local_media_exempt = (
+            isolated_tool_validation
+            and gemini_bridge_validation_has_local_media(
+                input.primary, cursor, item_end, 0
             )
         )
-        if is_function:
-            var result = gemini_bridge_validation_function_tool(
-                input.primary,
-                cursor,
-                item_end,
-                item_index,
-                input.kind == GEMINI_TRANSLATOR_VALIDATION_NESTED_FUNCTION_PATHS,
-                writer,
+        if not local_media_exempt and not already_validated:
+            var function = gemini_bridge_request_object_member(
+                input.primary, cursor, item_end, StringSlice("function")
             )
-            if result != 0:
-                return result > 0
-        elif not gemini_bridge_request_builtin_tool(
-            input.primary, cursor, item_end
-        ):
-            return gemini_bridge_validation_put_plan(
-                writer,
-                input.primary,
-                GEMINI_TRANSLATOR_VALIDATION_RUST_TOOL_BRIDGE,
-                item_index,
+            var tool_type = gemini_bridge_request_object_member(
+                input.primary, cursor, item_end, StringSlice("type")
             )
+            var is_function = function[0] >= 0 or (
+                tool_type[0] >= 0
+                and gemini_request_content_string_equals(
+                    input.primary,
+                    tool_type[0],
+                    tool_type[1],
+                    StringSlice("function"),
+                    False,
+                )
+            )
+            if is_function:
+                var result = gemini_bridge_validation_function_tool(
+                    input.primary,
+                    cursor,
+                    item_end,
+                    item_index,
+                    input.kind == GEMINI_TRANSLATOR_VALIDATION_NESTED_FUNCTION_PATHS,
+                    writer,
+                )
+                if result != 0:
+                    return result > 0
+            elif not gemini_bridge_request_builtin_tool(
+                input.primary, cursor, item_end
+            ):
+                return gemini_bridge_validation_put_plan(
+                    writer,
+                    input.primary,
+                    GEMINI_TRANSLATOR_VALIDATION_RUST_TOOL_BRIDGE,
+                    item_index,
+                )
 
         item_index += 1
         cursor = gemini_request_content_skip_ws(
@@ -7881,9 +7953,30 @@ def gemini_bridge_request_validate_translator(
             return False
         break
 
+    if (
+        isolated_tool_validation
+        and input.secondary_present == 1
+        and item_index != Int64(skip_view.len) - 2
+    ):
+        return False
     return gemini_bridge_validation_put_plan(
         writer, input.primary, GEMINI_TRANSLATOR_VALIDATION_OK
     )
+
+# Validate the exact tools array in one Mojo operation. Unlike the
+# full-request translator, local-media exemptions apply per tool instead
+# of allowing a later media-bearing tool to hide an earlier invalid tool.
+def gemini_bridge_request_validate_tool_array(
+    input: GeminiBridgeRequestInput,
+    writer: Pointer[mut=True, GeminiRequestContentWriter, _],
+) -> Bool:
+    if not gemini_request_content_fragment_valid(input.primary):
+        return False
+    var root = gemini_bridge_request_value_bounds(input.primary)
+    if not gemini_bridge_request_is_object(input.primary, root[0], root[1]):
+        return False
+    return gemini_bridge_validate_tool_entries(input, writer, root, True)
+
 
 def gemini_translator_response_format_kind(
     source: GeminiRequestContentStringView,
@@ -8691,6 +8784,8 @@ def prodex_gemini_bridge_request_kernel_v1(
         ok = gemini_bridge_request_write_text_contents(input, writer_ptr)
     elif input.operation == GEMINI_BRIDGE_REQUEST_VALIDATE_TRANSLATOR:
         ok = gemini_bridge_request_validate_translator(input, writer_ptr)
+    elif input.operation == GEMINI_BRIDGE_REQUEST_VALIDATE_TOOL_ARRAY:
+        ok = gemini_bridge_request_validate_tool_array(input, writer_ptr)
     elif input.operation == GEMINI_BRIDGE_REQUEST_RAW_TRANSLATOR:
         ok = gemini_bridge_request_write_raw_translator(input, writer_ptr)
     elif input.operation == GEMINI_BRIDGE_REQUEST_PRESERVE_TOOL_CALL_SIGNATURES:
