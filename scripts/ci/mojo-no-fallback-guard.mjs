@@ -2822,12 +2822,17 @@ export function findViolations(files) {
         "DeltaSearchInput =>",
         "MissingBlockType =>",
         "MissingDeltaType =>",
+        "anthropic_web_search_completion_plan(&entries, target)",
+        "fn planned_web_search_completions(",
+        "if emit {",
       ];
       const retired = [
         'match value.get("type").and_then(Value::as_str)',
         'match block.get("type").and_then(Value::as_str)',
         'match value.pointer("/delta/type").and_then(Value::as_str)',
         "fn anthropic_finish_reason(",
+        ".find_map(|(index, search)| (search.id == tool_use_id).then_some(*index))",
+        "if search.done {",
       ];
       return required.every((marker) => production.includes(marker)) &&
         retired.every((marker) => !production.includes(marker))
@@ -2842,6 +2847,10 @@ export function findViolations(files) {
         "compiled_anthropic_sse_dispatch_preserves_block_and_delta_precedence",
         "compiled_anthropic_sse_finish_reason_preserves_unknown_and_absent",
         "compiled_anthropic_sse_policy_rejects_invalid_abi_without_mutating_output",
+        "fn prodex_anthropic_web_search_completion_v1(",
+        "pub fn anthropic_web_search_completion_plan(",
+        "compiled_anthropic_web_search_selection_matches_first_id_and_pending_index_order",
+        "compiled_anthropic_web_search_abi_rejects_invalid_flags_without_writes",
       ].filter((marker) => !contents.includes(marker))
         .map((marker) => filePath + ": compiled Anthropic SSE ABI or regression missing " + marker);
     }
@@ -2853,6 +2862,8 @@ export function findViolations(files) {
         "active_web_search == 1",
         "ACTION_WEB_SEARCH_RESULT",
         "ACTION_DELTA_SEARCH_INPUT",
+        '@export("prodex_anthropic_web_search_completion_v1")',
+        "anthropic_stream_same_id(",
       ].filter((marker) => !contents.includes(marker))
         .map((marker) => filePath + ": compiled Anthropic SSE semantics missing " + marker);
     }
@@ -11742,6 +11753,8 @@ function selfTest() {
     "anthropic_stream_finish_reason(",
     "StartWebSearch =>", "WebSearchResult =>", "DeltaSearchInput =>",
     "MissingBlockType =>", "MissingDeltaType =>",
+    "anthropic_web_search_completion_plan(&entries, target)",
+    "fn planned_web_search_completions(", "if emit {",
   ].join("\n");
   assert(!findViolations([[ANTHROPIC_SSE_FILE,
     nativeAnthropicStreamFixture + "\nprodex_provider_core::anthropic_web_search_stream_item",
