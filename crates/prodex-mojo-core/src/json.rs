@@ -65,8 +65,12 @@ pub use self::session_selector::{
     session_selector_match_plan, session_selector_matches, session_selector_path_span,
     session_state_db_row_match_plan,
 };
+#[cfg(feature = "mojo-rich")]
+mod deepseek_function_tools;
 mod gemini_contents;
 pub use self::gemini_contents::{GeminiContentOperation, gemini_content_hardening};
+#[cfg(feature = "mojo-rich")]
+pub use deepseek_function_tools::{DeepSeekFunctionToolOperation, deepseek_function_tool_policy};
 mod kiro_catalog;
 pub use self::kiro_catalog::{
     KiroModelCatalogModel, KiroModelCatalogPlan, kiro_model_catalog_plan,

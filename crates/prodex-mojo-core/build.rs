@@ -561,6 +561,7 @@ fn selected_sources() -> Vec<&'static str> {
         sources.push("../../mojo/prodex_core/anthropic_stream_policy.mojo");
         sources.push("../../mojo/prodex_core/provider_binding_identity.mojo");
         sources.push("../../mojo/prodex_core/deepseek.mojo");
+        sources.push("../../mojo/prodex_core/deepseek_function_tools.mojo");
         sources.push("../../mojo/prodex_core/deepseek_request_diagnostics.mojo");
         sources.push("../../mojo/prodex_core/deepseek_stream_policy.mojo");
         sources.push("../../mojo/prodex_core/deepseek_messages.mojo");

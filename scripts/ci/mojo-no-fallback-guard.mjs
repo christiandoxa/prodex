@@ -181,7 +181,15 @@ const PRESIDIO_ANALYZER_MOJO_FILE = "mojo/prodex_core/redaction_analyzer.mojo";
 const PRESIDIO_JSON_CALLER_FILE = "crates/prodex-app/src/runtime_proxy/presidio/json_body.rs";
 const PRESIDIO_JSON_ADAPTER_FILE = "crates/prodex-mojo-core/src/json/redaction_content.rs";
 const PRESIDIO_JSON_MOJO_FILE = "mojo/prodex_core/redaction_json.mojo";
+const DEEPSEEK_FUNCTION_TOOLS_CALLER = "crates/prodex-provider-core/src/deepseek_bridge/request_tools.rs";
+const DEEPSEEK_FUNCTION_TOOLS_FUNCTIONS = "crates/prodex-provider-core/src/deepseek_bridge/request_tools/function_tools.rs";
+const DEEPSEEK_FUNCTION_TOOLS_ADAPTER = "crates/prodex-mojo-core/src/json/deepseek_function_tools.rs";
+const DEEPSEEK_FUNCTION_TOOLS_MOJO = "mojo/prodex_core/deepseek_function_tools.mojo";
 const PROMOTED_FILES = [
+  DEEPSEEK_FUNCTION_TOOLS_CALLER,
+  DEEPSEEK_FUNCTION_TOOLS_FUNCTIONS,
+  DEEPSEEK_FUNCTION_TOOLS_ADAPTER,
+  DEEPSEEK_FUNCTION_TOOLS_MOJO,
   PRESIDIO_FINDINGS_CALLER_FILE,
   PRESIDIO_FINDINGS_ADAPTER_FILE,
   PRESIDIO_FINDINGS_MOJO_FILE,
@@ -2796,7 +2804,7 @@ export function findViolations(files) {
   });
   const deepseekStrictSchemaViolations = files.flatMap(([filePath, contents]) => {
     if (filePath === DEEPSEEK_STRICT_TOOLS_FILE) {
-      const violations = contents.includes("DeepSeekKernelOperation::StrictFunctionSchema")
+      const violations = contents.includes("DeepSeekFunctionToolOperation::StrictSchema")
         ? [] : [`${filePath}: strict schema normalization must use Mojo`];
       if (/\bdeepseek_provider_core_(?:validate_strict_schema|reject_strict_schema_keywords)\b/u.test(contents)) {
         violations.push(`${filePath}: contains a Rust strict-schema validator`);
@@ -4717,6 +4725,41 @@ export function findViolations(files) {
     if (filePath === "crates/prodex-app/src/app_commands/log_tui_render.rs") {
       return contents.includes("compiled_log_search_filters_ascii_case_without_folding_unicode")
         ? [] : [filePath + ": real log TUI search caller regression missing"];
+    }
+    return [];
+  });
+  const deepseekFunctionToolPolicyViolations = files.flatMap(([filePath, contents]) => {
+    if (filePath === DEEPSEEK_FUNCTION_TOOLS_CALLER) {
+      const production = contents.split("\n#[cfg(test)]", 1)[0];
+      const required = ["DeepSeekFunctionToolOperation::ValidateAndDeduplicate",
+        "deepseek_function_tool_policy(&document.nodes, raw, operation, strict)",
+        "compiled_function_tools_preserve_replacement_position_passthrough_and_error_precedence",
+        "compiled_function_tools_compare_normalized_schema_and_canonical_numeric_values"];
+      const restored = ["BTreeMap", "fn deepseek_provider_core_process_function_tool(",
+        "fn deepseek_provider_core_handle_duplicate_function_tool(", "previous == tool"];
+      return required.every((marker) => contents.includes(marker)) &&
+        restored.every((marker) => !production.includes(marker))
+        ? [] : [filePath + ": function-tool validation and deduplication must remain compiled Mojo-owned"];
+    }
+    if (filePath === DEEPSEEK_FUNCTION_TOOLS_FUNCTIONS) {
+      const required = ["DeepSeekFunctionToolOperation::ValidateName", "DeepSeekFunctionToolOperation::IsGeneric",
+        "DeepSeekFunctionToolOperation::ValidateParameters", "DeepSeekFunctionToolOperation::ObjectName"];
+      return required.every((marker) => contents.includes(marker)) &&
+        !contents.includes("byte.is_ascii_alphanumeric()") && !contents.includes('.get("additionalProperties")')
+        ? [] : [filePath + ": function-tool scalar helpers must remain compiled Mojo-owned"];
+    }
+    if (filePath === DEEPSEEK_FUNCTION_TOOLS_ADAPTER) {
+      return ["prodex_mojo_deepseek_function_tools_scratch_v1", "pub fn deepseek_function_tool_policy(",
+        "compiled_function_tool_abi_checks_scratch_capacity_flags_and_output_metadata"]
+        .filter((marker) => !contents.includes(marker))
+        .map((marker) => filePath + ": compiled function-tool ABI missing " + marker);
+    }
+    if (filePath === DEEPSEEK_FUNCTION_TOOLS_MOJO) {
+      return ['@export("prodex_mojo_deepseek_function_tools_v1")',
+        '@export("prodex_mojo_deepseek_function_tools_scratch_v1")', "deepseek_schema_write(",
+        "rich_view_order_sort(names, order, count)", "def canonical_tools_equal("]
+        .filter((marker) => !contents.includes(marker))
+        .map((marker) => filePath + ": compiled function-tool semantics missing " + marker);
     }
     return [];
   });
@@ -10195,12 +10238,14 @@ export function findViolations(files) {
     ...presidioAnalyzerMergeViolations,
     ...presidioLanguageSelectionViolations,
     ...presidioFindingLocalizationViolations,
+    ...deepseekFunctionToolPolicyViolations,
     ...rtkAutoWrapperManifestViolations,
     ...optionalToolsRenderViolations,
     ...defaultFeatureViolations, ...operationalHistogramViolations];
 }
 
 const RELOCATED_TEST_FILES = new Set([
+  "crates/prodex-provider-core/src/deepseek_bridge/request_tools_tests.rs",
   "crates/prodex-app/src/runtime_proxy/presidio/analyzer_tests.rs",
   "crates/prodex-mojo-core/src/provider_constraints/attempt_cursor_tests.rs",
   "crates/prodex-mojo-core/src/provider_constraints/scalar_policy_tests.rs",
@@ -11823,7 +11868,7 @@ function selfTest() {
     "fn deepseek_provider_core_validate_strict_schema() {}"]]).join("\n"),
   /replaced Rust strict-schema behavior/u);
   assert.match(findViolations([[DEEPSEEK_STRICT_TOOLS_FILE,
-    "DeepSeekKernelOperation::StrictFunctionSchema; deepseek_provider_core_validate_strict_schema()"]]).join("\n"),
+    "DeepSeekFunctionToolOperation::StrictSchema; deepseek_provider_core_validate_strict_schema()"]]).join("\n"),
   /contains a Rust strict-schema validator/u);
   assert.match(findViolations([[DEEPSEEK_SIMPLE_REQUEST_FILE,
     "fn deepseek_provider_core_function_tools() {}"]]).join("\n"),
@@ -12043,6 +12088,17 @@ function selfTest() {
   assert.match(findViolations([[deepseekSseToolEventsFile,
     deepseekSseToolEventsCaller + '\nif tool_call.done {',
   ]]).join("\n"), /restored Rust DeepSeek SSE tool-event selection or done gate/u);
+  const functionToolsConsumer = [
+    "DeepSeekFunctionToolOperation::ValidateAndDeduplicate",
+    "DeepSeekFunctionToolOperation::StrictSchema",
+    "deepseek_function_tool_policy(&document.nodes, raw, operation, strict)",
+    "compiled_function_tools_preserve_replacement_position_passthrough_and_error_precedence",
+    "compiled_function_tools_compare_normalized_schema_and_canonical_numeric_values",
+  ].join("\n");
+  assert.deepEqual(findViolations([[DEEPSEEK_FUNCTION_TOOLS_CALLER, functionToolsConsumer]]), []);
+  assert.match(findViolations([[DEEPSEEK_FUNCTION_TOOLS_CALLER,
+    functionToolsConsumer + "\nfn deepseek_provider_core_process_function_tool() {}",
+  ]]).join("\n"), /function-tool validation and deduplication must remain compiled Mojo-owned/u);
   const presidioFindingsConsumer = [
     "prodex_mojo_core::redaction::finding_localization_plan(&facts, &text, separator, mode)",
     "FindingLocalizationMode::RetainWithinValues", "FindingKind::ALL[location.kind as usize]",
