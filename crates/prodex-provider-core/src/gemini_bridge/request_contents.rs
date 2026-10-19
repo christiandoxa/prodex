@@ -23,36 +23,62 @@ fn gemini_bridge_request_value(input: GeminiBridgeRequestKernelInput<'_>) -> Res
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct GeminiTranslatorValidationPlan {
     pub tag: i64,
+    pub index: i64,
     pub reason: Option<String>,
 }
 
 pub(crate) fn gemini_bridge_validate_translator(
     body: &[u8],
 ) -> Result<GeminiTranslatorValidationPlan, String> {
-    gemini_bridge_validate_translator_with_kind(body, 0)
+    gemini_bridge_validate_with_operation(
+        body,
+        0,
+        GeminiBridgeRequestOperation::ValidateTranslatorRequest,
+        None,
+    )
 }
 
-pub(crate) fn gemini_bridge_validate_translator_with_kind(
+/// Mojo scans the full tool array once with per-tool local media handling
+/// and reports the original offending array index in its versioned plan.
+pub(crate) fn gemini_bridge_validate_tool_array_with_kind(
     body: &[u8],
     kind: i64,
+    already_validated: Option<&[u8]>,
+) -> Result<GeminiTranslatorValidationPlan, String> {
+    gemini_bridge_validate_with_operation(
+        body,
+        kind,
+        GeminiBridgeRequestOperation::ValidateToolArray,
+        already_validated,
+    )
+}
+
+fn gemini_bridge_validate_with_operation(
+    body: &[u8],
+    kind: i64,
+    operation: GeminiBridgeRequestOperation,
+    already_validated: Option<&[u8]>,
 ) -> Result<GeminiTranslatorValidationPlan, String> {
     let value = gemini_bridge_request_value(GeminiBridgeRequestKernelInput {
-        operation: GeminiBridgeRequestOperation::ValidateTranslatorRequest,
+        operation,
         primary: Some(body),
+        secondary: already_validated,
         kind,
-        ..GeminiBridgeRequestKernelInput::new(
-            GeminiBridgeRequestOperation::ValidateTranslatorRequest,
-        )
+        ..GeminiBridgeRequestKernelInput::new(operation)
     })?;
     let tag = value
         .get("tag")
         .and_then(Value::as_i64)
         .ok_or_else(|| "Mojo Gemini translator validation returned an invalid tag".to_string())?;
+    let index = value
+        .get("index")
+        .and_then(Value::as_i64)
+        .ok_or_else(|| "Mojo Gemini translator validation returned an invalid index".to_string())?;
     let reason = value
         .get("reason")
         .and_then(Value::as_str)
         .map(str::to_string);
-    Ok(GeminiTranslatorValidationPlan { tag, reason })
+    Ok(GeminiTranslatorValidationPlan { tag, index, reason })
 }
 
 pub(crate) fn gemini_bridge_raw_translator_request(

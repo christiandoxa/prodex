@@ -9211,6 +9211,48 @@ export function findViolations(files) {
     }
     return [];
   });
+  const geminiToolArrayValidationMojoViolations = files.flatMap(([filePath, contents]) => {
+    if (filePath === "crates/prodex-provider-core/src/translators/gemini/request/tools.rs") {
+      const required = [
+        "gemini_bridge_validate_tool_array_with_kind(",
+        "let mut verified = value.as_array()",
+        "mask.as_deref()",
+        "verified[index] = b'1';",
+        "if plan.tag == 0 {",
+      ];
+      const retired = [
+        "fn gemini_validate_tool_value_with_mojo(",
+        "fn gemini_relabel_tool_validation_reason(",
+        "for (index, tool) in tools.iter().enumerate() {",
+      ];
+      return required.every((marker) => contents.includes(marker)) &&
+        retired.every((marker) => !contents.includes(marker))
+        ? [] : [filePath + ": restored Rust per-tool Gemini validation loop instead of compiled batch scanner"];
+    }
+    if (filePath === GEMINI_BRIDGE_REQUEST_CONTENTS_FILE) {
+      return [
+        "GeminiBridgeRequestOperation::ValidateToolArray",
+        "gemini_bridge_validate_tool_array_with_kind(",
+        "secondary: already_validated",
+        "let index = value",
+      ].filter((marker) => !contents.includes(marker))
+        .map((marker) => filePath + ": compiled Gemini array-scanner host bridge missing " + marker);
+    }
+    if (filePath === GEMINI_BRIDGE_TOOLS_FILE) {
+      return contents.includes("compiled_gemini_tool_array_validation_continues_after_translated_responses_tools") &&
+        contents.includes("compiled_gemini_tool_array_validation_preserves_first_error_and_local_media_exemption")
+        ? [] : [filePath + ": Gemini array scanner real mixed-tool regressions missing"];
+    }
+    if (filePath === GEMINI_SIGNATURE_ADAPTER_FILE) {
+      return [
+        "ValidateToolArray = 14",
+        "compiled_gemini_tool_array_validator_preserves_first_error_index_and_local_media",
+        "compiled_gemini_tool_array_validator_skips_only_verified_bridge_positions",
+      ].filter((marker) => !contents.includes(marker))
+        .map((marker) => filePath + ": compiled Gemini tool-array validation ABI/coverage missing " + marker);
+    }
+    return [];
+  });
   const geminiBuiltinBatchMojoViolations = files.flatMap(([filePath, contents]) => {
     if (filePath === "crates/prodex-provider-core/src/translators/gemini/request/tools/builtin.rs") {
       const required = [
@@ -9863,7 +9905,7 @@ export function findViolations(files) {
     }
     return [];
   });
-  return [...logPayloadProjectionViolations, ...nativeRecoveryOwnershipViolations, ...quotaRecoveryEligibilityViolations, ...runtimeBrokerReuseMojoViolations, ...geminiResponseMediaMojoViolations, ...cookieEvictionMojoViolations, ...websocketBudgetMojoViolations, ...affinityBindingMojoViolations, ...responsesCapacityRecoveryViolations, ...sseTapMojoOwnershipViolations, ...quotaWatchViolations, ...geminiCompactSnippetViolations, ...geminiCompactTextViolations, ...doctorSmartContextDecisionViolations, ...providerSseJsonFrameMojoViolations, ...geminiSseCompletionOwnershipViolations, ...anthropicNativeStreamDecisionViolations, ...anthropicAttemptCursorViolations, ...geminiUnsupportedToolRetryViolations, ...terminalGeometryViolations, ...previousResponseRecoveryTransitionViolations, ...chatCompatibleToolCallKindViolations, ...geminiQuotaBodyMojoViolations, ...geminiOAuthRotationMojoViolations, ...geminiBuiltinBatchMojoViolations, ...geminiOAuthModelMojoViolations, ...superExposeOriginMojoViolations, ...kiroAcpToolLedgerMojoViolations, ...quotaPoolSummarySectionsMojoViolations, ...deepseekRequestDiagnosticViolations, ...deepseekToolShapeIssueMojoViolations, ...deepseekReplayItemPolicyMojoViolations, ...chatNamespaceSplitMojoViolations, ...deepseekInputItemIssueMessageViolations, ...deepseekRequestIssueMessageViolations, ...smartContextTelemetrySampleViolations, ...compatibilityDiagnosticsMojoViolations, ...quotaHeaderProjectionViolations, ...smartContextCapsuleOrderViolations, ...markerViolations, ...deepseekCatalogPolicyViolations, ...featureOffViolations, ...liveLogRecordViolations, ...runtimePolicyPresetViolations, ...runtimeConfigScalarViolations, ...profileHealthCircuitViolations, ...logThroughputViolations, ...operationalDetailSpecViolations, ...transcriptPolicyViolations, ...logLoadPolicyViolations, ...routeReasonViolations, ...runtimeStateQuotaViolations, ...runtimeStateRoutePolicyViolations, ...runtimeProxyRootViolations, ...runtimeRecoveryDeadlineViolations, ...brokerVersionGuardViolations, ...brokerContinuityViolations, ...brokerLogCacheViolations, ...codexConfigViolations, ...statePolicyViolations, ...quotaSelectionPolicyViolations, ...routeTagMirrorViolations, ...enumTagMirrorViolations, ...appSelectionPolicyMirrorViolations, ...runtimeStateBackgroundViolations, ...redactionViolations, ...rateLimitHeaderSelectionViolations, ...profileIdentityViolations, ...governanceInspectionViolations, ...governanceInspectionOrderingViolations, ...exactnessPlannerViolations,
+  return [...logPayloadProjectionViolations, ...nativeRecoveryOwnershipViolations, ...quotaRecoveryEligibilityViolations, ...runtimeBrokerReuseMojoViolations, ...geminiResponseMediaMojoViolations, ...cookieEvictionMojoViolations, ...websocketBudgetMojoViolations, ...affinityBindingMojoViolations, ...responsesCapacityRecoveryViolations, ...sseTapMojoOwnershipViolations, ...quotaWatchViolations, ...geminiCompactSnippetViolations, ...geminiCompactTextViolations, ...doctorSmartContextDecisionViolations, ...providerSseJsonFrameMojoViolations, ...geminiSseCompletionOwnershipViolations, ...anthropicNativeStreamDecisionViolations, ...anthropicAttemptCursorViolations, ...geminiUnsupportedToolRetryViolations, ...terminalGeometryViolations, ...previousResponseRecoveryTransitionViolations, ...chatCompatibleToolCallKindViolations, ...geminiQuotaBodyMojoViolations, ...geminiOAuthRotationMojoViolations, ...geminiBuiltinBatchMojoViolations, ...geminiToolArrayValidationMojoViolations, ...geminiOAuthModelMojoViolations, ...superExposeOriginMojoViolations, ...kiroAcpToolLedgerMojoViolations, ...quotaPoolSummarySectionsMojoViolations, ...deepseekRequestDiagnosticViolations, ...deepseekToolShapeIssueMojoViolations, ...deepseekReplayItemPolicyMojoViolations, ...chatNamespaceSplitMojoViolations, ...deepseekInputItemIssueMessageViolations, ...deepseekRequestIssueMessageViolations, ...smartContextTelemetrySampleViolations, ...compatibilityDiagnosticsMojoViolations, ...quotaHeaderProjectionViolations, ...smartContextCapsuleOrderViolations, ...markerViolations, ...deepseekCatalogPolicyViolations, ...featureOffViolations, ...liveLogRecordViolations, ...runtimePolicyPresetViolations, ...runtimeConfigScalarViolations, ...profileHealthCircuitViolations, ...logThroughputViolations, ...operationalDetailSpecViolations, ...transcriptPolicyViolations, ...logLoadPolicyViolations, ...routeReasonViolations, ...runtimeStateQuotaViolations, ...runtimeStateRoutePolicyViolations, ...runtimeProxyRootViolations, ...runtimeRecoveryDeadlineViolations, ...brokerVersionGuardViolations, ...brokerContinuityViolations, ...brokerLogCacheViolations, ...codexConfigViolations, ...statePolicyViolations, ...quotaSelectionPolicyViolations, ...routeTagMirrorViolations, ...enumTagMirrorViolations, ...appSelectionPolicyMirrorViolations, ...runtimeStateBackgroundViolations, ...redactionViolations, ...rateLimitHeaderSelectionViolations, ...profileIdentityViolations, ...governanceInspectionViolations, ...governanceInspectionOrderingViolations, ...exactnessPlannerViolations,
     ...adaptiveBudgetViolations,
     ...providerUsageViolations,
     ...auditUsageViolations,
@@ -10615,6 +10657,8 @@ function selfTest() {
     "let builtin_indexes = gemini_builtin_tool_indices(tools);",
     "builtin_indexes.binary_search(&index).is_ok()",
     "compiled_gemini_builtin_batch_keeps_mixed_builtin_groups_and_functions_in_order",
+    "compiled_gemini_tool_array_validation_continues_after_translated_responses_tools",
+    "compiled_gemini_tool_array_validation_preserves_first_error_and_local_media_exemption",
   ].join("\n");
   assert.deepEqual(findViolations([[GEMINI_BRIDGE_TOOLS_FILE,
     "pub fn gemini_provider_core_unsupported_tool_fallback_body() {\n" + geminiRetryConsumer + "\n}\n" + geminiRetryTestName + "\ngemini_bridge_request_without_tool(" + "\ngemini_function_declaration_from_openai_tool(tool)" + "\n" + geminiBuiltinBatchRequired,
@@ -10710,6 +10754,21 @@ function selfTest() {
   assert.match(findViolations([[geminiBuiltinBatchFile,
     geminiBuiltinBatchCaller + "\nfn gemini_tool_is_supported_builtin() {}",
   ]]).join("\n"), /restored per-tool Rust Gemini built-in classifier loop/u);
+  const geminiArrayValidationCaller = [
+    "prodex_mojo_core::provider_constraints::gemini_function_tool_source(",
+    "GeminiFunctionToolSource::Nested",
+    "GeminiFunctionToolSource::Flat",
+    "gemini_bridge_validate_tool_array_with_kind(",
+    "let mut verified = value.as_array()",
+    "mask.as_deref()",
+    "verified[index] = b'1';",
+    "if plan.tag == 0 {",
+  ].join("\n");
+  const geminiArrayValidationFile = "crates/prodex-provider-core/src/translators/gemini/request/tools.rs";
+  assert.deepEqual(findViolations([[geminiArrayValidationFile, geminiArrayValidationCaller]]), []);
+  assert.match(findViolations([[geminiArrayValidationFile,
+    geminiArrayValidationCaller + "\nfn gemini_validate_tool_value_with_mojo() {}",
+  ]]).join("\n"), /restored Rust per-tool Gemini validation loop/u);
   const geminiOAuthModelCaller = [
     "gemini_oauth_model_availability(&deadlines, now_ms)",
     "gemini_oauth_preferred_model_chain(models, preference)",
@@ -12332,6 +12391,9 @@ function selfTest() {
     "pub fn gemini_builtin_tool_positions(",
     "compiled_gemini_builtin_batch_recognizes_aliases_and_sanitized_tool_set_in_one_call",
     "compiled_gemini_builtin_batch_abi_rejects_bad_request_and_capacity_without_writes",
+    "ValidateToolArray = 14",
+    "compiled_gemini_tool_array_validator_preserves_first_error_index_and_local_media",
+    "compiled_gemini_tool_array_validator_skips_only_verified_bridge_positions",
   ].join("\n");
   assert.deepEqual(findViolations([[GEMINI_SIGNATURE_ADAPTER_FILE,
     'PreserveToolCallSignatures = 12; GEMINI_SIGNATURE_PRESERVATION_MAX_BYTES' + geminiBatchAdapterFixture]]), []);

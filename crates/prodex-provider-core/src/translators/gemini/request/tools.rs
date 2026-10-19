@@ -19,60 +19,69 @@ pub(crate) fn gemini_validate_openai_tools_with_nested_function_paths(
 }
 
 fn gemini_validate_openai_tools_with_kind(value: &Value, kind: i64) -> Result<(), String> {
-    let Some(tools) = value.as_array() else {
-        return gemini_validate_tool_value_with_mojo(value, None, kind);
-    };
-    for (index, tool) in tools.iter().enumerate() {
-        gemini_validate_tool_value_with_mojo(tool, Some(index), kind)?;
-    }
-    Ok(())
-}
-
-fn gemini_validate_tool_value_with_mojo(
-    tool: &Value,
-    index: Option<usize>,
-    kind: i64,
-) -> Result<(), String> {
-    let request = match index {
-        Some(_) => json!({"tools": [tool]}),
-        None => json!({"tools": tool}),
-    };
-    let body = serde_json::to_vec(&request)
+    // One compiled full-array scan preserves the original invalid-tool index.
+    // For an unsupported Responses tool, validate its Mojo-translated
+    // declarations and mark only that original index as processed. Mojo must
+    // still check all later tools, never silently accept their bad shapes.
+    let body = serde_json::to_vec(&json!({"tools": value}))
         .map_err(|error| format!("failed to serialize Gemini tool validation: {error}"))?;
-    let plan = crate::gemini_bridge::gemini_bridge_validate_translator_with_kind(&body, kind)?;
-    if let Some(reason) = plan.reason {
-        return Err(gemini_relabel_tool_validation_reason(&reason, index));
-    }
-    if plan.tag != 16 {
-        return Ok(());
-    }
-
-    let Some(index) = index else {
-        return Err(
-            "invalid_tool_declaration: Gemini request field `tools` is not a supported tool declaration"
-                .to_string(),
-        );
-    };
-    let translated = crate::chat_tools_bridge::provider_core_chat_tools_from_responses_request(
-        &request,
-    )
-    .ok_or_else(|| {
-        format!(
-            "invalid_tool_declaration: Gemini request field `tools[{index}]` is not a supported tool declaration"
+    let mut verified = value.as_array().map(|items| vec![b'0'; items.len()]);
+    loop {
+        let mask = verified.as_ref().map(|bits| {
+            serde_json::to_vec(std::str::from_utf8(bits).expect("ASCII verification mask"))
+                .expect("Gemini tool verification mask serializes")
+        });
+        let plan = crate::gemini_bridge::gemini_bridge_validate_tool_array_with_kind(
+            &body,
+            kind,
+            mask.as_deref(),
+        )?;
+        if let Some(reason) = plan.reason {
+            return Err(reason);
+        }
+        if plan.tag == 0 {
+            return Ok(());
+        }
+        if plan.tag != 16 {
+            return Err(format!(
+                "Mojo Gemini tool validation returned unexpected tag {}",
+                plan.tag
+            ));
+        }
+        let Some(tools) = value.as_array() else {
+            return Err(
+                "invalid_tool_declaration: Gemini request field `tools` is not a supported tool declaration"
+                    .to_string(),
+            );
+        };
+        let index = usize::try_from(plan.index).map_err(|_| {
+            "Mojo Gemini tool validation returned an invalid array index".to_string()
+        })?;
+        let tool = tools.get(index).ok_or_else(|| {
+            "Mojo Gemini tool validation returned an out-of-range index".to_string()
+        })?;
+        let verified = verified.as_mut().ok_or_else(|| {
+            "Mojo Gemini tool validation returned a missing verification mask".to_string()
+        })?;
+        if verified[index] != b'0' {
+            return Err("Mojo Gemini tool validation returned a repeated bridge index".to_string());
+        }
+        let request = json!({"tools": [tool]});
+        let converted = crate::chat_tools_bridge::provider_core_chat_tools_from_responses_request(
+            &request,
         )
-    })?;
-    gemini_validate_openai_tools_with_kind(&Value::Array(translated), kind).map_err(|reason| {
-        format!(
-            "invalid_tool_declaration: Gemini request field `tools[{index}]` translates to an invalid declaration: {reason}"
-        )
-    })
-}
-
-fn gemini_relabel_tool_validation_reason(reason: &str, index: Option<usize>) -> String {
-    let Some(index) = index else {
-        return reason.to_string();
-    };
-    reason.replace("tools[0]", &format!("tools[{index}]"))
+        .ok_or_else(|| {
+            format!(
+                "invalid_tool_declaration: Gemini request field `tools[{index}]` is not a supported tool declaration"
+            )
+        })?;
+        gemini_validate_openai_tools_with_kind(&Value::Array(converted), kind).map_err(|reason| {
+            format!(
+                "invalid_tool_declaration: Gemini request field `tools[{index}]` translates to an invalid declaration: {reason}"
+            )
+        })?;
+        verified[index] = b'1';
+    }
 }
 
 pub(crate) fn gemini_function_declaration_from_openai_tool(tool: &Value) -> Option<Value> {
