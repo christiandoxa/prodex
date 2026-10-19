@@ -211,7 +211,7 @@ pub fn anthropic_web_search_completion_plan(
     }
     let mut seen = vec![false; count];
     let mut plan = Vec::with_capacity(selected);
-    for pair in output[..selected * 2].chunks_exact(2) {
+    for pair in output[..selected * 2].as_chunks::<2>().0 {
         let position = usize::try_from(pair[0]).map_err(|_| MojoError::InvalidOutput)?;
         let flag = pair[1];
         let entry = entries.get(position).ok_or(MojoError::InvalidOutput)?;

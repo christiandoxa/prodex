@@ -68,10 +68,10 @@ impl RuntimeDeepSeekSseState {
                 .unwrap_or_else(|| "tool_call".to_string());
             let planned =
                 deepseek_sse_tool_event_plan(tool_call.added, &name, argument_delta.is_some());
-            if let Ok(plan) = planned {
-                if plan.add_item {
-                    tool_call.added = true;
-                }
+            if let Ok(plan) = planned
+                && plan.add_item
+            {
+                tool_call.added = true;
             }
             (call_id, name, planned, argument_delta)
         };

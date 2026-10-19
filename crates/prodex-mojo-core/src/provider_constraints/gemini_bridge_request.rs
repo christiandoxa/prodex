@@ -213,6 +213,57 @@ pub fn gemini_builtin_tool_positions(
         .collect()
 }
 
+/// Runs one bounded, caller-owned Gemini bridge request operation in Mojo.
+pub fn gemini_bridge_request_kernel(
+    input: GeminiBridgeRequestKernelInput<'_>,
+) -> Result<Vec<u8>, MojoError> {
+    let capacity = output_capacity(&input)?;
+    let mut output = vec![0_u8; capacity];
+    let ffi_input = GeminiBridgeRequestFfiInput {
+        operation: input.operation.code(),
+        primary: view(input.primary),
+        secondary: view(input.secondary),
+        tertiary: view(input.tertiary),
+        quaternary: view(input.quaternary),
+        quinary: view(input.quinary),
+        senary: view(input.senary),
+        septenary: view(input.septenary),
+        octonary: view(input.octonary),
+        primary_present: i64::from(input.primary.is_some()),
+        secondary_present: i64::from(input.secondary.is_some()),
+        tertiary_present: i64::from(input.tertiary.is_some()),
+        quaternary_present: i64::from(input.quaternary.is_some()),
+        quinary_present: i64::from(input.quinary.is_some()),
+        senary_present: i64::from(input.senary.is_some()),
+        septenary_present: i64::from(input.septenary.is_some()),
+        octonary_present: i64::from(input.octonary.is_some()),
+        kind: input.kind,
+    };
+    let mut written = 0_i64;
+    let status = unsafe {
+        prodex_gemini_bridge_request_kernel_v1(
+            GEMINI_BRIDGE_REQUEST_ABI_VERSION,
+            pointer_address(&ffi_input),
+            mutable_pointer_address(output.as_mut_ptr()),
+            i64::try_from(output.len()).map_err(|_| MojoError::InvalidInput)?,
+            mutable_pointer_address(&mut written),
+        )
+    };
+    match status {
+        0 => {}
+        GEMINI_BRIDGE_REQUEST_STATUS_INVALID => return Err(MojoError::InvalidInput),
+        GEMINI_BRIDGE_REQUEST_STATUS_CAPACITY => return Err(MojoError::Capacity),
+        GEMINI_BRIDGE_REQUEST_STATUS_ABI_MISMATCH => return Err(MojoError::AbiMismatch),
+        _ => return Err(MojoError::InvalidOutput),
+    }
+    let written = usize::try_from(written).map_err(|_| MojoError::InvalidOutput)?;
+    if written > output.len() {
+        return Err(MojoError::InvalidOutput);
+    }
+    output.truncate(written);
+    Ok(output)
+}
+
 #[cfg(test)]
 mod gemini_builtin_batch_tests {
     use super::*;
@@ -383,55 +434,4 @@ mod gemini_builtin_batch_tests {
         assert_eq!(output, [71; 2]);
         assert_eq!(written, 83);
     }
-}
-
-/// Runs one bounded, caller-owned Gemini bridge request operation in Mojo.
-pub fn gemini_bridge_request_kernel(
-    input: GeminiBridgeRequestKernelInput<'_>,
-) -> Result<Vec<u8>, MojoError> {
-    let capacity = output_capacity(&input)?;
-    let mut output = vec![0_u8; capacity];
-    let ffi_input = GeminiBridgeRequestFfiInput {
-        operation: input.operation.code(),
-        primary: view(input.primary),
-        secondary: view(input.secondary),
-        tertiary: view(input.tertiary),
-        quaternary: view(input.quaternary),
-        quinary: view(input.quinary),
-        senary: view(input.senary),
-        septenary: view(input.septenary),
-        octonary: view(input.octonary),
-        primary_present: i64::from(input.primary.is_some()),
-        secondary_present: i64::from(input.secondary.is_some()),
-        tertiary_present: i64::from(input.tertiary.is_some()),
-        quaternary_present: i64::from(input.quaternary.is_some()),
-        quinary_present: i64::from(input.quinary.is_some()),
-        senary_present: i64::from(input.senary.is_some()),
-        septenary_present: i64::from(input.septenary.is_some()),
-        octonary_present: i64::from(input.octonary.is_some()),
-        kind: input.kind,
-    };
-    let mut written = 0_i64;
-    let status = unsafe {
-        prodex_gemini_bridge_request_kernel_v1(
-            GEMINI_BRIDGE_REQUEST_ABI_VERSION,
-            pointer_address(&ffi_input),
-            mutable_pointer_address(output.as_mut_ptr()),
-            i64::try_from(output.len()).map_err(|_| MojoError::InvalidInput)?,
-            mutable_pointer_address(&mut written),
-        )
-    };
-    match status {
-        0 => {}
-        GEMINI_BRIDGE_REQUEST_STATUS_INVALID => return Err(MojoError::InvalidInput),
-        GEMINI_BRIDGE_REQUEST_STATUS_CAPACITY => return Err(MojoError::Capacity),
-        GEMINI_BRIDGE_REQUEST_STATUS_ABI_MISMATCH => return Err(MojoError::AbiMismatch),
-        _ => return Err(MojoError::InvalidOutput),
-    }
-    let written = usize::try_from(written).map_err(|_| MojoError::InvalidOutput)?;
-    if written > output.len() {
-        return Err(MojoError::InvalidOutput);
-    }
-    output.truncate(written);
-    Ok(output)
 }
