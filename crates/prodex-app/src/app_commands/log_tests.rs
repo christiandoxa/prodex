@@ -4,6 +4,9 @@ use super::*;
 #[path = "log_transcript_context_tests.rs"]
 mod context;
 
+#[path = "log_transcript_operation_tests.rs"]
+mod operation;
+
 #[test]
 fn follows_only_complete_token_usage_lines() {
     let root = env::temp_dir().join(format!(

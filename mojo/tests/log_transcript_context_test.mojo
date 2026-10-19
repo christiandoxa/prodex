@@ -8,7 +8,7 @@ from log_transcript_context import prodex_mojo_log_transcript_context_v1
 def main() raises:
     var nodes_storage = alloc(Layout[ParsedJsonNode](count=2))
     var output_storage = alloc(Layout[UInt8](count=64))
-    var scratch_storage = alloc(Layout[UInt64](count=4))
+    var scratch_storage = alloc(Layout[ProdexRichStringView](count=4))
     var metadata_storage = alloc(Layout[Int64](count=2))
     var nodes = nodes_storage.unsafe_ptr()
     var output = output_storage.unsafe_ptr()
@@ -33,6 +33,18 @@ def main() raises:
     metadata[unsafe_offset=0] = 71
     assert prodex_mojo_log_transcript_context_v1(1, 1, 0, source, 2, 0, 0, scratch, 2, 0, destination, 1, meta) == 3
     assert output[unsafe_offset=0] == 61 and metadata[unsafe_offset=0] == 71
+    var event_key = StringSlice("type")
+    var event_type = StringSlice("sub_agent_")
+    nodes[unsafe_offset=1].key = ProdexRichStringView(UInt(Int(event_key.unsafe_ptr())), UInt(event_key.byte_length()))
+    nodes[unsafe_offset=1].text = ProdexRichStringView(UInt(Int(event_type.unsafe_ptr())), UInt(event_type.byte_length()))
+    var values = scratch_storage.unsafe_ptr()
+    for index in range(4):
+        values[unsafe_offset=index] = empty.copy()
+    assert prodex_mojo_log_transcript_context_v1(1, 5, 0, source, 2, 0, 0, scratch, 4, 0, destination, 64, meta) == 0
+    expected = StringSlice("[[\"agent\",\"status=\"]]")
+    assert metadata[unsafe_offset=1] == Int64(expected.byte_length())
+    for index in range(Int64(expected.byte_length())):
+        assert output[unsafe_offset=index] == expected.unsafe_ptr()[unsafe_offset=index]
     dealloc(nodes_storage^)
     dealloc(output_storage^)
     dealloc(scratch_storage^)
