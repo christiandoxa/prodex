@@ -13,6 +13,15 @@ struct SseUtf8Span {
 }
 
 unsafe extern "C" {
+    fn prodex_runtime_sse_json_frame_plan_v1(
+        abi_version: i64,
+        joined_json_valid: i64,
+        separate_json_valid: i64,
+        accumulated_bytes: u64,
+        fragment_bytes: u64,
+        accumulated_max_bytes: u64,
+        result_address: u64,
+    ) -> i64;
     fn prodex_runtime_sse_failure_flags_v1(
         abi_version: i64,
         error_class: i64,
@@ -139,6 +148,50 @@ pub fn payload_text(data_lines: &[String]) -> Result<String, MojoError> {
     String::from_utf8(output).map_err(|_| MojoError::InvalidOutput)
 }
 
+/// Shared provider SSE JSON frame strategy, selected by the compiled
+/// framing kernel after Serde has classified joined and separate JSON input.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SseJsonFrameDecision {
+    Joined,
+    Separate,
+    Accumulate,
+    LimitExceeded,
+}
+
+pub fn sse_json_frame_decision(
+    joined_valid: bool,
+    separate_valid: bool,
+    accumulated_bytes: usize,
+    fragment_bytes: usize,
+    max_bytes: usize,
+) -> Result<SseJsonFrameDecision, MojoError> {
+    let mut tag = -1_i64;
+    let status = unsafe {
+        prodex_runtime_sse_json_frame_plan_v1(
+            1,
+            i64::from(joined_valid),
+            i64::from(separate_valid),
+            u64::try_from(accumulated_bytes).map_err(|_| MojoError::InvalidInput)?,
+            u64::try_from(fragment_bytes).map_err(|_| MojoError::InvalidInput)?,
+            u64::try_from(max_bytes).map_err(|_| MojoError::InvalidInput)?,
+            (&mut tag as *mut i64) as usize as u64,
+        )
+    };
+    match status {
+        0 => {}
+        1 => return Err(MojoError::InvalidInput),
+        4 => return Err(MojoError::AbiMismatch),
+        _ => return Err(MojoError::InvalidOutput),
+    }
+    match tag {
+        0 => Ok(SseJsonFrameDecision::Joined),
+        1 => Ok(SseJsonFrameDecision::Separate),
+        2 => Ok(SseJsonFrameDecision::Accumulate),
+        3 => Ok(SseJsonFrameDecision::LimitExceeded),
+        _ => Err(MojoError::InvalidOutput),
+    }
+}
+
 /// Flags derived only from compiled Mojo SSE pre-commit error policy.
 /// Caller maps its stable HTTP error classes/actions to ABI tags.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -178,6 +231,41 @@ pub fn failure_flags(class_tag: i64, action_tag: i64) -> Result<SseFailureFlags,
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn compiled_sse_json_frame_plan_preserves_joined_separate_and_partial_precedence() {
+        use SseJsonFrameDecision::*;
+        for (joined, separate, accumulated, fragment, max, expected) in [
+            (true, true, 10, 400, 12, Joined),
+            (true, false, 10, 400, 12, Joined),
+            (false, true, 10, 400, 12, Separate),
+            (false, false, 0, 11, 12, Accumulate),
+            (false, false, 1, 11, 12, Accumulate),
+            (false, false, 2, 11, 12, LimitExceeded),
+            (false, false, usize::MAX, 1, usize::MAX, LimitExceeded),
+            (false, false, 0, 0, 0, Accumulate),
+        ] {
+            assert_eq!(
+                sse_json_frame_decision(joined, separate, accumulated, fragment, max),
+                Ok(expected),
+                "{joined}/{separate}/{accumulated}/{fragment}/{max}",
+            );
+        }
+    }
+
+    #[test]
+    fn compiled_sse_json_frame_abi_rejects_invalid_shapes_without_writing() {
+        let mut result = 77_i64;
+        let pointer = (&mut result as *mut i64) as usize as u64;
+        let call = |version, joined, separate, output| unsafe {
+            prodex_runtime_sse_json_frame_plan_v1(version, joined, separate, 2, 3, 9, output)
+        };
+        assert_eq!(call(2, 0, 0, pointer), 4);
+        assert_eq!(call(1, 2, 0, pointer), 1);
+        assert_eq!(call(1, 0, -1, pointer), 1);
+        assert_eq!(call(1, 0, 0, 0), 1);
+        assert_eq!(result, 77);
+    }
 
     #[test]
     fn compiled_sse_failure_flags_cover_all_error_class_action_combinations() {

@@ -2,6 +2,7 @@ use std::io::{self, BufRead, Read};
 use std::sync::Arc;
 
 use crate::RUNTIME_PROXY_BUFFERED_RESPONSE_MAX_BYTES;
+use prodex_mojo_core::runtime_sse_chunk::{SseJsonFrameDecision, sse_json_frame_decision};
 
 const RUNTIME_PROVIDER_SSE_LINE_MAX_BYTES: usize = RUNTIME_PROXY_BUFFERED_RESPONSE_MAX_BYTES;
 const RUNTIME_PROVIDER_SSE_EVENT_MAX_BYTES: usize = RUNTIME_PROXY_BUFFERED_RESPONSE_MAX_BYTES;
@@ -168,68 +169,69 @@ impl<R: Read, S: RuntimeProviderSseJsonState> RuntimeProviderSseJsonReader<R, S>
 
     fn observe_sse_data_lines(&mut self, data_lines: &[String]) -> io::Result<Vec<String>> {
         let joined = data_lines.join("\n");
-        if let Some(events) = self.observe_json_text(&joined) {
-            return Ok(events);
-        }
-
-        if let Some(events) = self.observe_separate_json_values(data_lines) {
-            return Ok(events);
-        }
-
-        let joined = joined.trim();
-        if self.accumulated_json.len().saturating_add(joined.len())
-            > self.accumulated_json_max_bytes
-        {
-            return Err(runtime_provider_sse_limit_error(
+        let trimmed = joined.trim();
+        // Serde is the JSON syntax authority; Mojo owns the precedence
+        // of the resulting complete/partial frame decisions.
+        let joined_json = serde_json::from_str::<serde_json::Value>(trimmed).ok();
+        let joined_valid = trimmed.is_empty() || joined_json.is_some();
+        let separate_json = if joined_valid {
+            None
+        } else {
+            Self::parse_separate_json_values(data_lines)
+        };
+        let plan = sse_json_frame_decision(
+            joined_valid,
+            separate_json.is_some(),
+            self.accumulated_json.len(),
+            trimmed.len(),
+            self.accumulated_json_max_bytes,
+        )
+        .map_err(|error| {
+            io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("compiled Mojo provider SSE frame planner failed: {error:?}"),
+            )
+        })?;
+        match plan {
+            SseJsonFrameDecision::Joined => Ok(joined_json
+                .map(|value| self.observe_parsed_value(&value))
+                .unwrap_or_default()),
+            SseJsonFrameDecision::Separate => Ok(separate_json
+                .expect("compiled Mojo SSE frame planner requires parsed separate JSON")
+                .iter()
+                .flat_map(|value| self.observe_parsed_value(value))
+                .collect()),
+            SseJsonFrameDecision::LimitExceeded => Err(runtime_provider_sse_limit_error(
                 "accumulated JSON",
                 self.accumulated_json_max_bytes,
-            ));
+            )),
+            SseJsonFrameDecision::Accumulate => {
+                self.accumulated_json.push_str(trimmed);
+                Ok(self
+                    .flush_accumulated_json()
+                    .map(|events| vec![events])
+                    .unwrap_or_default())
+            }
         }
-        self.accumulated_json.push_str(joined);
-        Ok(self
-            .flush_accumulated_json()
-            .map(|events| vec![events])
-            .unwrap_or_default())
     }
 
-    fn observe_separate_json_values(&mut self, data_lines: &[String]) -> Option<Vec<String>> {
+    fn parse_separate_json_values(data_lines: &[String]) -> Option<Vec<serde_json::Value>> {
         let mut values = Vec::new();
         for line in data_lines {
             let line = line.trim();
             if line.is_empty() {
                 continue;
             }
-            let Ok(value) = serde_json::from_str::<serde_json::Value>(line) else {
-                return None;
-            };
-            values.push(value);
+            values.push(serde_json::from_str::<serde_json::Value>(line).ok()?);
         }
-        if values.is_empty() {
-            return None;
-        }
-        let mut events = Vec::new();
-        for value in values {
-            if let Some(observer) = &self.observer {
-                observer(&value);
-            }
-            events.extend(self.state.observe_value(&value));
-        }
-        Some(events)
+        (!values.is_empty()).then_some(values)
     }
 
-    fn observe_json_text(&mut self, data: &str) -> Option<Vec<String>> {
-        let data = data.trim();
-        if data.is_empty() {
-            return Some(Vec::new());
+    fn observe_parsed_value(&mut self, value: &serde_json::Value) -> Vec<String> {
+        if let Some(observer) = &self.observer {
+            observer(value);
         }
-        serde_json::from_str::<serde_json::Value>(data)
-            .ok()
-            .map(|value| {
-                if let Some(observer) = &self.observer {
-                    observer(&value);
-                }
-                self.state.observe_value(&value)
-            })
+        self.state.observe_value(value)
     }
 
     fn flush_accumulated_json(&mut self) -> Option<String> {
@@ -239,10 +241,7 @@ impl<R: Read, S: RuntimeProviderSseJsonState> RuntimeProviderSseJsonReader<R, S>
         }
         let value = serde_json::from_str::<serde_json::Value>(&self.accumulated_json).ok()?;
         self.accumulated_json.clear();
-        if let Some(observer) = &self.observer {
-            observer(&value);
-        }
-        let events = self.state.observe_value(&value);
+        let events = self.observe_parsed_value(&value);
         (!events.is_empty()).then(|| events.join(""))
     }
 }
@@ -361,6 +360,71 @@ mod tests {
         fn failed_event(&mut self, code: &str, message: &str) -> Option<String> {
             Some(format!("{code}:{message}"))
         }
+    }
+
+    #[derive(Default)]
+    struct EchoState {
+        eof: bool,
+    }
+
+    impl RuntimeProviderSseJsonState for EchoState {
+        fn eof(&self) -> bool {
+            self.eof
+        }
+
+        fn set_eof(&mut self, eof: bool) {
+            self.eof = eof;
+        }
+
+        fn observe_value(&mut self, value: &serde_json::Value) -> Vec<String> {
+            vec![format!("value:{};", value["n"])]
+        }
+
+        fn complete_event(&mut self) -> Option<String> {
+            Some("completed;".to_string())
+        }
+
+        fn failed_event(&mut self, code: &str, message: &str) -> Option<String> {
+            Some(format!("failed:{code}:{message};"))
+        }
+    }
+
+    fn read_echo(input: &str, accumulated_max: usize) -> String {
+        let mut reader = RuntimeProviderSseJsonReader::new_with_limits(
+            Cursor::new(input.as_bytes()),
+            EchoState::default(),
+            None,
+            1_024,
+            1_024,
+            accumulated_max,
+        );
+        let mut output = String::new();
+        reader.read_to_string(&mut output).unwrap();
+        output
+    }
+
+    #[test]
+    fn compiled_provider_sse_frame_plan_handles_joined_separate_and_partial_json() {
+        let joined = concat!("data: {\"n\":\n", "data: 1}\n\n", "data: [DONE]\n\n",);
+        assert_eq!(read_echo(joined, 3), "value:1;completed;");
+        let separate = concat!(
+            "data: {\"n\":2}\n",
+            "data: {\"n\":3}\n\n",
+            "data: [DONE]\n\n",
+        );
+        assert_eq!(read_echo(separate, 3), "value:2;value:3;completed;");
+        let partial = concat!("data: {\"n\":\n\n", "data: 4}\n\n", "data: [DONE]\n\n",);
+        assert_eq!(read_echo(partial, 64), "value:4;completed;");
+        assert_eq!(read_echo("data:    \n\ndata: [DONE]\n\n", 0), "completed;");
+    }
+
+    #[test]
+    fn compiled_provider_sse_frame_plan_rejects_oversize_incomplete_fragment() {
+        let partial = concat!("data: {\"n\":\n\n", "data: 123456}\n\n", "data: [DONE]\n\n",);
+        let output = read_echo(partial, 8);
+        assert!(output.contains("failed:provider_stream_error:provider SSE accumulated JSON"));
+        assert!(!output.contains("completed;"));
+        assert!(!output.contains("value:"));
     }
 
     #[test]

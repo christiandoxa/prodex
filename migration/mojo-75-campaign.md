@@ -5921,3 +5921,13 @@ which tool-call indexes may complete. The old Rust done-state selection
 predicate was removed; Rust keeps the streaming state map and output I/O.
 Direct ABI and real stream regressions plus a no-fallback guard preserve
 exactly-once tool completion. The 75% project target remains outstanding.
+
+
+## Shared provider SSE JSON framing now Mojo-owned
+
+A compiled SSE kernel now selects joined-JSON, separate complete JSON
+values, bounded cross-event accumulation, or a size-limit rejection.
+Rust's alternative precedence tree was deleted while Serde and transport
+remain host responsibilities. Direct ABI and Anthropic/Gemini production
+caller suites protect partial frames and exactly-once event observation.
+The 75% target remains outstanding.
