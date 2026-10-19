@@ -5893,3 +5893,13 @@ quota marker matcher and delay maximum policy were removed. Host parsing of
 floating-point duration tokens remains intentionally Rust-owned until the
 exact accepted `f64` grammar is separately qualified in Mojo. Direct ABI,
 provider regressions and source guards preserve the existing retry contract.
+
+
+## Anthropic native SSE event dispatch moved to compiled Mojo
+
+The native Messages streaming adapter now delegates event/block/delta
+routing, web-search precedence and finish-reason normalization to the
+compiled Mojo stream policy owner. Rust still acquires SSE/JSON and
+materializes the selected output. Previous Rust decision trees were
+deleted, and the ABI/production caller are protected by strict tests
+and a no-fallback guard. The separate 75% project target is ongoing.

@@ -95,6 +95,8 @@ fn compiled_core_self_test_passes() {
     assert!(self_test());
 }
 
+#[cfg(feature = "mojo-rich")]
+pub mod anthropic_stream_policy;
 #[cfg(feature = "mojo-runtime")]
 pub mod app_command_policy;
 #[cfg(feature = "mojo-runtime")]
