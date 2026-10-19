@@ -1,11 +1,19 @@
 # Run with `mojo run -D ASSERT=all -I mojo/prodex_core mojo/tests/gemini_precommit_test.mojo`.
 from std.memory.alloc import alloc, dealloc, Layout
-from gemini_precommit import prodex_mojo_gemini_precommit_v1
+from gemini_precommit import prodex_mojo_gemini_precommit_v1, prodex_mojo_gemini_precommit_frame_v1
 from parsed_json import ParsedJsonNode, JSON_OBJECT, JSON_ARRAY, JSON_STRING, pj_literal
 from rich_types import ProdexRichStringView
 
 
 def main() raises:
+    var done = StringSlice("\u2003[DONE]\r\n")
+    var data_address = UInt(Int(done.unsafe_ptr()))
+    var data_length = Int64(done.byte_length())
+    assert prodex_mojo_gemini_precommit_frame_v1(1, data_address, data_length, 0, 0, 0) == 2
+    assert prodex_mojo_gemini_precommit_frame_v1(1, data_address, data_length, 0, 0, 1) == 1
+    assert prodex_mojo_gemini_precommit_frame_v1(1, 0, 0, 1, 0, 0) == 0
+    assert prodex_mojo_gemini_precommit_frame_v1(1, 0, 0, 0, 0, 0) == 1
+    assert prodex_mojo_gemini_precommit_frame_v1(2, 0, 0, 0, 0, 0) == -4
     var storage = alloc(Layout[ParsedJsonNode](count=4))
     var nodes = storage.unsafe_ptr()
     var empty = ProdexRichStringView(0, 0)

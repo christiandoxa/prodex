@@ -408,6 +408,7 @@ const PROMOTED_FILES = [
   "mojo/prodex_core/gemini_response_media.mojo",
   "crates/prodex-provider-core/src/gemini_bridge/precommit.rs",
   "crates/prodex-provider-core/src/gemini_bridge/precommit/tests.rs",
+  "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_gemini_precommit_tests.rs",
   "crates/prodex-mojo-core/src/rich/gemini_precommit.rs",
   "crates/prodex-mojo-core/src/rich/gemini_precommit_tests.rs",
   "mojo/prodex_core/gemini_precommit.mojo",
@@ -1943,29 +1944,39 @@ export function findViolations(files) {
     if (filePath === "crates/prodex-provider-core/src/gemini_bridge/precommit.rs") {
       const production = contents.split("#[cfg(test)]", 1)[0];
       return production.includes("prodex_mojo_core::rich::gemini_precommit_plan(")
+        && production.includes("prodex_mojo_core::rich::gemini_precommit_frame_decision(")
+        && !production.includes('== "[DONE]"') && !/if\s+parsed_any\b/u.test(production)
         && !/gemini_provider_core_precommit_(?:apply_parts|has_grounding)\s*\(/u.test(production)
         && !production.includes("mod output;") && !production.includes("gemini_provider_core_finish_reason(")
         && !production.includes('get("candidates")') && !production.includes('get("error")')
         ? [] : [`${filePath}: Gemini pre-commit candidate decisions must remain Mojo-owned`];
     }
     const precommitMarkers = new Map([
+      ["crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_gemini_precommit_tests.rs", [
+        "gemini_precommit_terminal_frames_keep_reasoning_and_malformed_transport",
+      ]],
       ["crates/prodex-provider-core/src/gemini_bridge/precommit/tests.rs", [
         "mojo_precommit_preserves_candidate_order_flags_and_early_returns",
         "mojo_precommit_reuses_media_and_instruction_classifiers",
         "mojo_precommit_keeps_sse_acquisition_and_terminal_behavior",
         "mojo_precommit_preserves_rejection_of_nonobject_parts",
+        "mojo_precommit_terminal_frames_preserve_probe_and_case_sensitive_markers",
       ]],
       ["crates/prodex-mojo-core/src/rich/gemini_precommit.rs", [
         "prodex_mojo_gemini_precommit_v1(", "ffi_nodes(", "pub fn gemini_precommit_plan",
+        "prodex_mojo_gemini_precommit_frame_v1(", "pub fn gemini_precommit_frame_decision(",
       ]],
       ["crates/prodex-mojo-core/src/rich/gemini_precommit_tests.rs", [
         "compiled_precommit_preserves_flags_and_finish_reason_bytes",
         "compiled_precommit_rejects_invalid_tree_and_abi_without_output_writes",
+        "compiled_precommit_frame_decisions_preserve_terminal_and_acquisition_precedence",
+        "compiled_precommit_frame_abi_rejects_invalid_utf8_flags_and_versions",
       ]],
       ["mojo/prodex_core/gemini_precommit.mojo", [
         '@export("prodex_mojo_gemini_precommit_v1")', "def gemini_precommit_candidate_plan(",
         "media_put_content(", "media_put_special_text(", "gemini_instruction_sanitize(",
         "gemini_instruction_text_echoes(", "gemini_failure_retryable_reason(", "pj_valid(tree)",
+        '@export("prodex_mojo_gemini_precommit_frame_v1")', 'rich_view_matches_literal["[DONE]"]',
       ]],
       ["mojo/tests/gemini_precommit_test.mojo", ["prodex_mojo_gemini_precommit_v1(2,", "== 71"]],
     ]);
@@ -10968,10 +10979,11 @@ async function promotedFiles() {
 
 function selfTest() {
   const precommitFile = "crates/prodex-provider-core/src/gemini_bridge/precommit.rs";
-  const precommitCall = "prodex_mojo_core::rich::gemini_precommit_plan(";
+  const precommitCall = "prodex_mojo_core::rich::gemini_precommit_plan(\nprodex_mojo_core::rich::gemini_precommit_frame_decision(";
   assert.deepEqual(findViolations([[precommitFile, precommitCall]]), []);
   for (const restored of ["", `${precommitCall}\nvalue.get("candidates")`,
-    `${precommitCall}\nfn gemini_provider_core_precommit_apply_parts(`]) {
+    `${precommitCall}\nfn gemini_provider_core_precommit_apply_parts(`,
+    `${precommitCall}\nif parsed_any {`, `${precommitCall}\ntrimmed == "[DONE]"`]) {
     assert.match(findViolations([[precommitFile, restored]]).join("\n"), /Gemini pre-commit candidate decisions/u);
   }
   assert.match(findViolations([["mojo/prodex_core/gemini_precommit.mojo", ""]]).join("\n"), /Gemini pre-commit ownership/u);

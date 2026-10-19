@@ -8,7 +8,7 @@ from gemini_response_media import media_put_content, media_put_special_text
 from json_sink import JsonSink
 from parsed_json import (
     JSON_ARRAY, JSON_OBJECT, JSON_TRUE, ParsedJson, ParsedJsonNode, pj_child, pj_field,
-    pj_kind, pj_next, pj_nonblank, pj_string_field, pj_text, pj_valid,
+    pj_kind, pj_next, pj_nonblank, pj_string_field, pj_text, pj_trim, pj_valid,
 )
 from provider_constraints import gemini_failure_retryable_reason
 from rich_text import rich_view_matches_literal, rich_view_valid
@@ -21,6 +21,27 @@ struct GeminiPrecommitPlan(Copyable):
     var visible: Bool
     var reasoning: Bool
     var reason: Int64
+
+
+@export("prodex_mojo_gemini_precommit_frame_v1")
+def prodex_mojo_gemini_precommit_frame_v1(
+    abi: Int64, address: UInt, length: Int64,
+    parsed_any: Int64, visible: Int64, reasoning: Int64,
+) abi("C") -> Int64:
+    if abi != 1:
+        return -4
+    if (
+        length < 0 or (length > 0 and address == 0)
+        or parsed_any < 0 or parsed_any > 1
+        or visible < 0 or visible > 1 or reasoning < 0 or reasoning > 1
+    ):
+        return -1
+    var text = ProdexRichStringView(address, UInt(length))
+    if not rich_view_valid(text, length):
+        return -1
+    if rich_view_matches_literal["[DONE]"](pj_trim(text), False):
+        return 1 if visible == 1 or reasoning == 1 else 2
+    return 0 if parsed_any == 1 else 1
 
 
 def gemini_precommit_candidate_plan(

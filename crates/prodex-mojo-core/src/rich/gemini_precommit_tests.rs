@@ -185,3 +185,61 @@ fn compiled_precommit_rejects_invalid_tree_and_abi_without_output_writes() {
         Err(MojoError::InvalidInput)
     );
 }
+
+#[test]
+fn compiled_precommit_frame_decisions_preserve_terminal_and_acquisition_precedence() {
+    use GeminiPrecommitDecision::{Commit, Continue, RetryableInvalid};
+    let done = [
+        RetryableInvalid("gemini_empty_response"),
+        Commit,
+        Commit,
+        Commit,
+    ];
+    let unparsed = [Commit, Commit, Commit, Commit];
+    let continuing = [Continue, Continue, Continue, Continue];
+    for (data, parsed_any, expected) in [
+        ("[DONE]", false, &done),
+        ("\u{2003}\t[DONE]\r\n\u{a0}", false, &done),
+        ("[DONE]", true, &done),
+        ("[done]", false, &unparsed),
+        ("prefix[DONE]", false, &unparsed),
+        ("broken", false, &unparsed),
+        ("broken\n{}", true, &continuing),
+        ("", false, &unparsed),
+    ] {
+        for (flags, expected) in expected.iter().enumerate() {
+            let state = GeminiPrecommitState {
+                visible_output: flags & 1 != 0,
+                reasoning_output: flags & 2 != 0,
+            };
+            assert_eq!(
+                gemini_precommit_frame_decision(GeminiPrecommitFrame { data, parsed_any }, state)
+                    .as_ref(),
+                Ok(expected)
+            );
+        }
+    }
+}
+
+#[test]
+fn compiled_precommit_frame_abi_rejects_invalid_utf8_flags_and_versions() {
+    let invalid = [0xff_u8];
+    for (abi, address, length, parsed_any, visible, reasoning, expected) in [
+        (2, 0, 0, 0, 0, 0, -4),
+        (1, 0, -1, 0, 0, 0, -1),
+        (1, 0, 1, 0, 0, 0, -1),
+        (1, invalid.as_ptr() as u64, 1, 0, 0, 0, -1),
+        (1, 0, 0, 2, 0, 0, -1),
+        (1, 0, 0, 0, -1, 0, -1),
+        (1, 0, 0, 0, 0, 2, -1),
+    ] {
+        assert_eq!(
+            unsafe {
+                prodex_mojo_gemini_precommit_frame_v1(
+                    abi, address, length, parsed_any, visible, reasoning,
+                )
+            },
+            expected
+        );
+    }
+}

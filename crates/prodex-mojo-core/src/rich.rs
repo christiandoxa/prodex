@@ -103,7 +103,8 @@ pub use catalog::{
 mod gemini_precommit;
 mod gemini_simple_response;
 pub use gemini_precommit::{
-    GeminiPrecommitDecision, GeminiPrecommitPlan, GeminiPrecommitState, gemini_precommit_plan,
+    GeminiPrecommitDecision, GeminiPrecommitFrame, GeminiPrecommitPlan, GeminiPrecommitState,
+    gemini_precommit_frame_decision, gemini_precommit_plan,
 };
 #[path = "rich/gemini_sse_state.rs"]
 mod gemini_sse_state;

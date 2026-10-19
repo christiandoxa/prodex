@@ -247,3 +247,30 @@ fn gemini_precommit_retries_verbatim_system_instruction_echo_before_commit() {
         RuntimeGeminiPrecommitDecision::RetryableInvalid("gemini_empty_response".to_string())
     );
 }
+
+#[test]
+fn gemini_precommit_terminal_frames_keep_reasoning_and_malformed_transport() {
+    let done = vec!["\u{2003}[DONE]\r\n".to_string()];
+    let mut probe = RuntimeGeminiPrecommitProbe::default();
+    assert_eq!(
+        runtime_gemini_precommit_decision_for_data_lines(&done, &mut probe),
+        RuntimeGeminiPrecommitDecision::RetryableInvalid("gemini_empty_response".to_string())
+    );
+    probe.reasoning_output = true;
+    assert_eq!(
+        runtime_gemini_precommit_decision_for_data_lines(&done, &mut probe),
+        RuntimeGeminiPrecommitDecision::Commit
+    );
+    assert_eq!(
+        runtime_gemini_precommit_decision_for_data_lines(&["malformed".to_string()], &mut probe),
+        RuntimeGeminiPrecommitDecision::Commit
+    );
+    assert_eq!(
+        runtime_gemini_precommit_decision_for_data_lines(
+            &["{}".to_string(), "[DONE]".to_string()],
+            &mut probe,
+        ),
+        RuntimeGeminiPrecommitDecision::Continue
+    );
+    assert!(!probe.visible_output && probe.reasoning_output);
+}
