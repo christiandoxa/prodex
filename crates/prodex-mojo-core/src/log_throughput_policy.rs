@@ -2,6 +2,10 @@ use crate::MojoError;
 
 const ABI_VERSION: i64 = 1;
 
+mod token_usage;
+pub use token_usage::{
+    InfoTokenUsageFields, InfoTokenUsageKind, InfoTokenUsageNumbers, info_token_usage_numbers,
+};
 mod state;
 pub use state::{
     ThroughputBoundedState, ThroughputCandidateMode, ThroughputObservationPlan,

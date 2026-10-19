@@ -89,41 +89,27 @@ fn info_token_usage_event_from_line_with_event(
         return None;
     }
     let fields = info_runtime_parse_fields(line);
-    let input_tokens = match event_name {
-        "token_usage_progress" => fields
-            .get("input_tokens")
-            .and_then(|value| value.parse::<u64>().ok())
-            .unwrap_or_default(),
-        _ => fields.get("input_tokens")?.parse::<u64>().ok()?,
+    use prodex_mojo_core::log_throughput_policy::{InfoTokenUsageFields, InfoTokenUsageKind};
+    let kind = match event_name {
+        "token_usage_progress" => InfoTokenUsageKind::Progress,
+        _ => InfoTokenUsageKind::Completed,
     };
-    let output_tokens = match fields.get("output_tokens") {
-        Some(value) => value.parse::<u64>().ok()?,
-        None if event_name == "token_usage_progress" => return None,
-        None => 0,
-    };
-    let generation_ms = fields
-        .get("generation_ms")
-        .and_then(|value| value.parse::<u64>().ok())
-        .filter(|value| *value > 0);
-    let reported_rate_is_valid = fields.get("output_tokens_per_second").is_none_or(|value| {
-        value
-            .parse::<f64>()
-            .ok()
-            .is_some_and(|rate| rate.is_finite() && rate > 0.0)
-    });
-    let generation_ms = reported_rate_is_valid.then_some(generation_ms).flatten();
-    let output_tokens_per_second = reported_rate_is_valid
-        .then(|| {
-            prodex_mojo_core::log_throughput_policy::completed_rate(
-                output_tokens,
-                generation_ms.unwrap_or_default(),
-            )
-            .expect("Mojo log-throughput completed-rate policy returned invalid output")
-        })
-        .flatten();
+    let numbers = prodex_mojo_core::log_throughput_policy::info_token_usage_numbers(
+        kind,
+        InfoTokenUsageFields {
+            input_tokens: fields.get("input_tokens").map(String::as_str),
+            cached_input_tokens: fields.get("cached_input_tokens").map(String::as_str),
+            output_tokens: fields.get("output_tokens").map(String::as_str),
+            reasoning_tokens: fields.get("reasoning_tokens").map(String::as_str),
+            request: fields.get("request").map(String::as_str),
+            generation_ms: fields.get("generation_ms").map(String::as_str),
+            output_tokens_per_second: fields.get("output_tokens_per_second").map(String::as_str),
+        },
+    )
+    .expect("Mojo info token-usage number policy returned invalid output")?;
     Some(InfoTokenUsageEvent {
         timestamp: info_token_usage_timestamp(line),
-        request: fields.get("request").and_then(|value| value.parse().ok()),
+        request: numbers.request,
         profile: fields
             .get("profile")
             .cloned()
@@ -136,18 +122,12 @@ fn info_token_usage_event_from_line_with_event(
             .get("source")
             .cloned()
             .unwrap_or_else(|| "unknown".to_string()),
-        input_tokens,
-        cached_input_tokens: fields
-            .get("cached_input_tokens")
-            .and_then(|value| value.parse::<u64>().ok())
-            .unwrap_or_default(),
-        output_tokens,
-        reasoning_tokens: fields
-            .get("reasoning_tokens")
-            .and_then(|value| value.parse::<u64>().ok())
-            .unwrap_or_default(),
-        generation_ms,
-        output_tokens_per_second,
+        input_tokens: numbers.input_tokens,
+        cached_input_tokens: numbers.cached_input_tokens,
+        output_tokens: numbers.output_tokens,
+        reasoning_tokens: numbers.reasoning_tokens,
+        generation_ms: numbers.generation_ms,
+        output_tokens_per_second: numbers.output_tokens_per_second,
     })
 }
 
@@ -199,3 +179,7 @@ fn token_usage_counts(usage: InfoTokenUsageCounts) -> terminal_ui::TokenUsageCou
         reasoning_tokens: usage.reasoning_tokens,
     }
 }
+
+#[cfg(test)]
+#[path = "token_usage_number_tests.rs"]
+mod number_tests;
