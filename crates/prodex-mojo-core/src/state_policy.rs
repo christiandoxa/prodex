@@ -1,6 +1,8 @@
 use crate::MojoError;
 
 const ABI_VERSION: i64 = 1;
+mod binding_prune;
+pub use binding_prune::binding_prune_indices;
 
 #[repr(i64)]
 #[derive(Clone, Copy)]

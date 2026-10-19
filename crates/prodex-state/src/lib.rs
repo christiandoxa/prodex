@@ -373,25 +373,24 @@ pub fn prune_profile_bindings(
     bindings: &mut BTreeMap<String, ResponseProfileBinding>,
     max_entries: usize,
 ) {
-    if bindings.len() <= max_entries {
+    let ranks = bindings.values().map(|binding| {
+        [
+            i64::from(is_hard_binding_conflict_profile(&binding.profile_name)),
+            binding.bound_at,
+        ]
+    });
+    let indices = prodex_mojo_core::state_policy::binding_prune_indices(ranks, max_entries)
+        .expect("Mojo profile-binding pruning failed");
+    if indices.is_empty() {
         return;
     }
-
-    let excess = bindings.len() - max_entries;
-    let mut oldest = bindings
-        .iter()
-        .map(|(response_id, binding)| {
-            (
-                response_id.clone(),
-                is_hard_binding_conflict_profile(&binding.profile_name),
-                binding.bound_at,
-            )
-        })
+    let keys = bindings.keys().collect::<Vec<_>>();
+    let removed = indices
+        .into_iter()
+        .map(|index| keys[index].clone())
         .collect::<Vec<_>>();
-    oldest.sort_by_key(|(_, conflict, bound_at)| (*conflict, *bound_at));
-
-    for (response_id, _, _) in oldest.into_iter().take(excess) {
-        bindings.remove(&response_id);
+    for key in removed {
+        bindings.remove(&key);
     }
 }
 

@@ -6,23 +6,43 @@ pub fn prune_runtime_continuation_status_map(
     max_entries: usize,
     policy: RuntimeContinuationCompactionPolicy,
 ) {
-    if statuses.len() <= max_entries {
+    let ranks = statuses.iter().map(|(key, status)| {
+        let (
+            bound,
+            lifecycle,
+            confidence,
+            successes,
+            streak,
+            route,
+            touched,
+            verified,
+            failed,
+            bound_at,
+        ) = runtime_continuation_status_retention_sort_key(key, status, bindings, policy);
+        [
+            i64::from(bound),
+            i64::from(lifecycle),
+            i64::from(confidence),
+            i64::from(successes),
+            i64::from(streak),
+            i64::from(route),
+            touched,
+            verified,
+            failed,
+            bound_at,
+        ]
+    });
+    let indices = prodex_mojo_core::state_policy::binding_prune_indices(ranks, max_entries)
+        .expect("Mojo continuation-status pruning failed");
+    if indices.is_empty() {
         return;
     }
-
-    let excess = statuses.len() - max_entries;
-    let mut coldest = statuses
-        .iter()
-        .map(|(key, status)| {
-            (
-                key.clone(),
-                runtime_continuation_status_retention_sort_key(key, status, bindings, policy),
-            )
-        })
+    let keys = statuses.keys().collect::<Vec<_>>();
+    let removed = indices
+        .into_iter()
+        .map(|index| keys[index].clone())
         .collect::<Vec<_>>();
-    coldest.sort_by_key(|(_, retention)| *retention);
-
-    for (key, _) in coldest.into_iter().take(excess) {
+    for key in removed {
         statuses.remove(&key);
     }
 }
@@ -33,28 +53,37 @@ pub fn prune_runtime_continuation_response_bindings(
     max_entries: usize,
     policy: RuntimeContinuationCompactionPolicy,
 ) {
-    if bindings.len() <= max_entries {
+    let ranks = bindings.iter().map(|(response_id, binding)| {
+        let (lifecycle, confidence, successes, streak, route, touched, verified, failed, bound_at) =
+            runtime_continuation_binding_retention_sort_key(
+                binding,
+                statuses.get(response_id),
+                policy,
+            );
+        [
+            i64::from(lifecycle),
+            i64::from(confidence),
+            i64::from(successes),
+            i64::from(streak),
+            i64::from(route),
+            touched,
+            verified,
+            failed,
+            bound_at,
+        ]
+    });
+    let indices = prodex_mojo_core::state_policy::binding_prune_indices(ranks, max_entries)
+        .expect("Mojo continuation-binding pruning failed");
+    if indices.is_empty() {
         return;
     }
-
-    let excess = bindings.len() - max_entries;
-    let mut coldest = bindings
-        .iter()
-        .map(|(response_id, binding)| {
-            (
-                response_id.clone(),
-                runtime_continuation_binding_retention_sort_key(
-                    binding,
-                    statuses.get(response_id),
-                    policy,
-                ),
-            )
-        })
+    let keys = bindings.keys().collect::<Vec<_>>();
+    let removed = indices
+        .into_iter()
+        .map(|index| keys[index].clone())
         .collect::<Vec<_>>();
-    coldest.sort_by_key(|(_, retention)| *retention);
-
-    for (response_id, _) in coldest.into_iter().take(excess) {
-        bindings.remove(&response_id);
+    for key in removed {
+        bindings.remove(&key);
     }
 }
 

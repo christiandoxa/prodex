@@ -486,3 +486,62 @@ fn binding(profile_name: &str, bound_at: i64) -> ResponseProfileBinding {
         bound_at,
     }
 }
+
+#[test]
+fn continuation_pruning_protects_conflicts_and_bound_statuses_with_lexical_ties() {
+    let policy = RuntimeContinuationCompactionPolicy::default();
+    let mut bindings = BTreeMap::from([
+        (
+            "conflict".to_string(),
+            binding(prodex_state::HARD_BINDING_CONFLICT_PROFILE, i64::MIN),
+        ),
+        ("tie-a".to_string(), binding("alpha", 10)),
+        ("tie-b".to_string(), binding("alpha", 10)),
+    ]);
+    let original = bindings.clone();
+    prune_runtime_continuation_response_bindings(
+        &mut bindings,
+        &BTreeMap::new(),
+        usize::MAX,
+        policy,
+    );
+    assert_eq!(bindings, original);
+    prune_runtime_continuation_response_bindings(&mut bindings, &BTreeMap::new(), 2, policy);
+    assert_eq!(
+        bindings,
+        BTreeMap::from([
+            (
+                "conflict".to_string(),
+                binding(prodex_state::HARD_BINDING_CONFLICT_PROFILE, i64::MIN)
+            ),
+            ("tie-b".to_string(), binding("alpha", 10)),
+        ])
+    );
+
+    let mut statuses = ["conflict", "tie-a", "tie-b"]
+        .map(|key| (key.to_string(), RuntimeContinuationBindingStatus::default()))
+        .into_iter()
+        .collect::<BTreeMap<_, _>>();
+    let original = statuses.clone();
+    prune_runtime_continuation_status_map(&mut statuses, &bindings, usize::MAX, policy);
+    assert_eq!(statuses, original);
+    let bound = BTreeMap::from([("conflict".to_string(), bindings["conflict"].clone())]);
+    prune_runtime_continuation_status_map(&mut statuses, &bound, 2, policy);
+    assert_eq!(
+        statuses,
+        BTreeMap::from([
+            (
+                "conflict".to_string(),
+                RuntimeContinuationBindingStatus::default()
+            ),
+            (
+                "tie-b".to_string(),
+                RuntimeContinuationBindingStatus::default()
+            ),
+        ])
+    );
+    prune_runtime_continuation_status_map(&mut statuses, &bound, 0, policy);
+    assert_eq!(statuses, BTreeMap::new());
+    prune_runtime_continuation_response_bindings(&mut bindings, &statuses, 0, policy);
+    assert_eq!(bindings, BTreeMap::new());
+}

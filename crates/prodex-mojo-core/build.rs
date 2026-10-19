@@ -64,6 +64,7 @@ fn emit_source_rerun_directives(sources: &[&str], manifest_dir: &Path) {
         "info_token_usage.mojo",
         "info_token_summary.mojo",
         "log_number.mojo",
+        "index_order.mojo",
     ] {
         println!(
             "cargo:rerun-if-changed={}",

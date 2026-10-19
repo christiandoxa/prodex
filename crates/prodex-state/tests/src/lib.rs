@@ -63,6 +63,35 @@ fn binding(profile_name: &str, bound_at: i64) -> ResponseProfileBinding {
 }
 
 #[test]
+fn binding_pruning_preserves_conflicts_signed_times_and_lexical_ties() {
+    let original = BTreeMap::from([
+        (
+            "conflict".to_string(),
+            binding(HARD_BINDING_CONFLICT_PROFILE, i64::MIN),
+        ),
+        ("negative".to_string(), binding("alpha", -1)),
+        ("tie-a".to_string(), binding("alpha", i64::MAX)),
+        ("tie-b".to_string(), binding("alpha", i64::MAX)),
+    ]);
+    let mut bindings = original.clone();
+    prune_profile_bindings(&mut bindings, usize::MAX);
+    assert_eq!(bindings, original);
+    prune_profile_bindings(&mut bindings, 2);
+    assert_eq!(
+        bindings,
+        BTreeMap::from([
+            (
+                "conflict".to_string(),
+                binding(HARD_BINDING_CONFLICT_PROFILE, i64::MIN)
+            ),
+            ("tie-b".to_string(), binding("alpha", i64::MAX)),
+        ])
+    );
+    prune_profile_bindings(&mut bindings, 0);
+    assert_eq!(bindings, BTreeMap::new());
+}
+
+#[test]
 fn provider_capabilities_define_route_policy_and_quota_shape() {
     let openai = ProfileProvider::Openai.capabilities();
     assert_eq!(openai.runtime_route_policy, RuntimeRoutePolicy::NativeCodex);

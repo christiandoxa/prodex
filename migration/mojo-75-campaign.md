@@ -6630,3 +6630,54 @@ secret-boundary, churn and diff checks pass. Its default provider selection has
 499 tests; the explicit-feature suite supplies the final 501-test evidence.
 Existing vendor warnings are unchanged. The campaign retains the owned build
 cache for the next checkpoint; no comparison source remains.
+
+
+## Compiled binding-pruning plans (2026-10-20)
+
+Gemini checkpoint `e7668a5c7` is pushed to main. Profile bindings, continuation
+response bindings and continuation statuses now delegate pruning order and
+excess-count decisions to a version-1 numeric Mojo ABI. Binding identifiers
+and map mutation stay in Rust. Equal numeric ranks preserve the BTreeMap's
+lexical order; conflict priority, signed timestamps and every continuation
+retention-key field are unchanged. A probe preserves lazy rank acquisition
+when no entries need removal, including unlimited `usize` limits. Rust checks
+iterator length, output counts, index bounds and uniqueness, with no semantic
+fallback or Rust sort.
+
+The existing allocation-free text index heapsort is extracted and reused.
+A standard-library sort probe required unsupported `KGEN_CompilerRT_AlignedAlloc`
+and `KGEN_CompilerRT_AlignedFree` symbols, so it is not used. All 24,576 generated
+numeric cases match the prior stable Rust sort across widths 2, 9 and 10.
+All 8,192 generated text cases match the exact old heap-sort index sequence,
+including duplicate keys. The temporary oracles and owned probe directory are
+removed. Direct Mojo verification passes via
+`mojo run -D ASSERT=all -I mojo/prodex_core mojo/tests/state_binding_prune_test.mojo`.
+The comparison harness initially needed explicit untracked pointer projections;
+those harness-only compile errors were corrected before comparison.
+
+All 985 strict Mojo-core tests pass via
+`PRODEX_MOJO_REQUIRED=1 CARGO_BUILD_JOBS=6 cargo test --locked -q -p prodex-mojo-core --features mojo-core -- --test-threads=1`.
+All 13 state and 36 runtime-store tests pass via
+`PRODEX_MOJO_REQUIRED=1 CARGO_BUILD_JOBS=6 cargo test --locked -q -p prodex-state -p prodex-runtime-store -- --test-threads=1`.
+Caller regressions cover conflict protection, lexical ties, signed timestamp
+extremes and zero/unlimited limits. Workspace Clippy passes via
+`PRODEX_MOJO_REQUIRED=1 CARGO_BUILD_JOBS=6 cargo clippy --locked --workspace --all-targets --all-features -- -D warnings`,
+with existing vendor warnings only.
+
+The unchanged official metric moves from 35.51019502439539% to
+35.50298483046218% (128,044 Mojo / 232,613 Rust production lines), leaving
+39.49701516953782 percentage points to 75%. The small decrease reflects the
+checked Rust ABI adapter and reuse of existing Mojo sorting code; no counting
+rule or baseline changes. The release floor and reachable-source non-regression
+checks pass; the project target remains unmet.
+
+
+Canonical `CARGO_BUILD_JOBS=6 npm run test:changed` and
+`PRODEX_MOJO_REQUIRED=1 CARGO_BUILD_JOBS=6 node scripts/ci/test-serial.mjs --suite runtime-smoke`
+pass. Formatting, docs, no-fallback self-test/source, authority, size,
+crate-boundary self-test/source, runtime-hotpath self-test/source,
+runtime-test-manifest, secret-boundary and diff checks pass. The offline
+`check-upstream-baseline.mjs` and `capture-replay-fixture-tests.mjs` commands
+pass all five replay fixtures. Final staged churn is within the
+1,200-line/500-per-file limits. No live provider, full CI or native macOS/Windows
+checks were run. The build cache is retained for the next migration.
