@@ -221,6 +221,10 @@ const PING_SUMMARY_MOJO_FILE = "mojo/prodex_core/ping_protocol.mojo";
 const PING_DIAGNOSTIC_CALLER_FILE = "crates/prodex-app/src/app_commands/ping_process.rs";
 const PING_DIAGNOSTIC_ADAPTER_FILE = "crates/prodex-mojo-core/src/rich/ping_protocol/diagnostic.rs";
 const PING_DIAGNOSTIC_TEST_FILE = "crates/prodex-app/src/app_commands/ping_diagnostic_tests.rs";
+const PING_FAILURE_CALLER_FILE = "crates/prodex-app/src/app_commands/ping.rs";
+const PING_FAILURE_ADAPTER_FILE = "crates/prodex-mojo-core/src/rich/ping_protocol/failure_detail.rs";
+const PING_FAILURE_MOJO_FILE = "mojo/prodex_core/ping_failure_detail.mojo";
+const PING_FAILURE_TEST_FILE = "crates/prodex-app/src/app_commands/ping_failure_detail_tests.rs";
 const PRESIDIO_FINDINGS_CALLER_FILE = "crates/prodex-app/src/runtime_proxy/presidio/findings.rs";
 const PRESIDIO_FINDINGS_ADAPTER_FILE = "crates/prodex-mojo-core/src/redaction/findings.rs";
 const PRESIDIO_FINDINGS_MOJO_FILE = "mojo/prodex_core/redaction_findings.mojo";
@@ -768,6 +772,9 @@ const PROMOTED_FILES = [
   PING_DIAGNOSTIC_CALLER_FILE,
   PING_DIAGNOSTIC_ADAPTER_FILE,
   PING_DIAGNOSTIC_TEST_FILE,
+  PING_FAILURE_ADAPTER_FILE,
+  PING_FAILURE_MOJO_FILE,
+  PING_FAILURE_TEST_FILE,
   "crates/prodex-app/src/app_commands/super_main_catalog.rs",
   "crates/prodex-app/src/app_commands/super_main_prompt.rs",
   "crates/prodex-app/src/app_commands/doctor.rs",
@@ -9636,6 +9643,33 @@ export function findViolations(files) {
     return [];
   });
   const pingSummaryViolations = files.flatMap(([filePath, contents]) => {
+    if (filePath === PING_FAILURE_CALLER_FILE) {
+      const required = ["app_json_tree_without_wire(&events)",
+        "prodex_mojo_core::rich::ping_structured_failure_detail(&tree.nodes)",
+        "ping_process::bounded_ping_detail(&detail)"];
+      return required.every((marker) => contents.includes(marker))
+        && !contents.includes("fn ping_event_failure_text(")
+        && !contents.includes('matches!(event_type, "turn.failed" | "error")')
+        ? [] : [`${filePath}: structured ping error selection and joins must remain Mojo-owned`];
+    }
+    if (filePath === PING_FAILURE_ADAPTER_FILE) {
+      return ["prodex_mojo_ping_failure_detail_v1(", "transform_json(", "pub fn ping_structured_failure_detail("]
+        .filter((marker) => !contents.includes(marker))
+        .map((marker) => `${filePath}: structured ping error ABI must retain ${marker}`);
+    }
+    if (filePath === PING_FAILURE_MOJO_FILE) {
+      return ['@export("prodex_mojo_ping_failure_detail_v1")', "ping_failure_event(tree)",
+        "ping_failure_text(", 'pj_is["turn.failed"]', "pj_trim(text).len == 0"]
+        .filter((marker) => !contents.includes(marker))
+        .map((marker) => `${filePath}: structured ping error semantics must remain compiled Mojo-owned (${marker})`);
+    }
+    if (filePath === PING_FAILURE_TEST_FILE) {
+      return ["structured_ping_failure_uses_first_error_and_preserves_field_order",
+        "structured_ping_failure_keeps_fallback_shape_and_serde_escape_rules",
+        "structured_ping_failure_redacts_joined_fields_before_normalization_and_byte_limits"]
+        .filter((marker) => !contents.includes(marker))
+        .map((marker) => `${filePath}: structured ping error caller coverage must retain ${marker}`);
+    }
     if (filePath === PING_DIAGNOSTIC_CALLER_FILE) {
       const required = [
         "redaction_redact_secret_like_text(&message)",
@@ -13979,6 +14013,16 @@ function selfTest() {
   ]]).join("\n"), /ping process diagnostics must remain Mojo-owned/u);
   assert.match(findViolations([[PING_DIAGNOSTIC_ADAPTER_FILE, ""]]).join("\n"), /ping diagnostic ABI must retain/u);
   assert.match(findViolations([[PING_DIAGNOSTIC_TEST_FILE, ""]]).join("\n"), /ping diagnostic caller coverage/u);
+  const pingFailureCaller = ["app_json_tree_without_wire(&events)",
+    "prodex_mojo_core::rich::ping_structured_failure_detail(&tree.nodes)",
+    "ping_process::bounded_ping_detail(&detail)"].join("\n");
+  assert.deepEqual(findViolations([[PING_FAILURE_CALLER_FILE, pingFailureCaller]]), []);
+  assert.match(findViolations([[PING_FAILURE_CALLER_FILE,
+    `${pingFailureCaller}\nfn ping_event_failure_text() {}`,
+  ]]).join("\n"), /structured ping error selection and joins/u);
+  assert.match(findViolations([[PING_FAILURE_ADAPTER_FILE, ""]]).join("\n"), /structured ping error ABI/u);
+  assert.match(findViolations([[PING_FAILURE_MOJO_FILE, ""]]).join("\n"), /compiled Mojo-owned/u);
+  assert.match(findViolations([[PING_FAILURE_TEST_FILE, ""]]).join("\n"), /structured ping error caller coverage/u);
   assert.match(findViolations([[PING_SUMMARY_CALLER_TEST_FILE, "fn unrelated_test() {}"]]).join("\n"),
     /ping summary migration needs caller-boundary regression coverage/u);
 

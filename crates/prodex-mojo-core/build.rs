@@ -609,6 +609,7 @@ fn selected_sources() -> Vec<&'static str> {
         sources.push("../../mojo/prodex_core/super_expose_tools.mojo");
         sources.push("../../mojo/prodex_core/super_expose_exec.mojo");
         sources.push("../../mojo/prodex_core/ping_protocol.mojo");
+        sources.push("../../mojo/prodex_core/ping_failure_detail.mojo");
     }
     if env::var_os("CARGO_FEATURE_MOJO_ROUTING").is_some()
         || env::var_os("CARGO_FEATURE_MOJO_CORE").is_some()

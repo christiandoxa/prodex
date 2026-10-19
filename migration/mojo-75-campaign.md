@@ -7233,3 +7233,48 @@ The reusable build cache is retained for the next migration.
 Canonical `RUST_TEST_THREADS=1 CARGO_BUILD_JOBS=6 npm run test:changed` passes.
 Staged privacy/diff checks pass, and churn remains within 1,200 total lines
 and 500 per file.
+
+
+## Compiled structured ping failure selection (2026-10-20)
+
+Transcript-operation checkpoint `91b37f15a` is pushed to main. Structured ping
+diagnostics now use a focused Mojo owner for first-error selection, ordered
+message/code/error field joins, whitespace filtering and fallback text. The
+Rust field-selector implementation is removed. Serde retains JSONL parsing
+and escape compatibility; the existing native redactor and compiled bounded
+diagnostic formatter still run after the complete field join. Secrets split
+across fields therefore retain the same redaction behavior.
+
+Version-1 uses the existing borrowed JSON tree and measure/write transport.
+Malformed topology, wrong roots, invalid UTF-8/flags/version and short
+capacity fail before output writes. The native object has no unresolved
+symbols. Direct assertions pass via
+`mojo run -D ASSERT=all -I mojo/prodex_core mojo/tests/ping_failure_detail_test.mojo`.
+The existing application acquisition boundary covers the already-bounded
+ping output; the kernel adds no short field-text cap. Missing errors return
+absence, and present errors with unusable fields retain their exact labels.
+
+All 8,192 comparisons with the committed Rust selector pass, including
+multiple/ignored/malformed records, escaped event tags, all scalar/container
+field shapes, nested errors, Unicode/NUL, fields over 65,537 bytes and final
+redaction/4,096-byte truncation. The owned temporary oracle and native object
+were removed after use. All 1,018 strict core tests pass via
+`PRODEX_MOJO_REQUIRED=1 CARGO_BUILD_JOBS=6 cargo test --locked -q -p prodex-mojo-core --features mojo-core -- --test-threads=1`.
+
+The unchanged official metric rises from 35.63204419889503% to
+35.64642196260392% (129,065 Mojo / 233,005 Rust production lines), leaving
+39.35357803739608 percentage points to 75%. Release-floor and audited
+reachable-source non-regression checks pass; the project target remains unmet.
+
+All 23 real ping caller tests pass via
+`PRODEX_MOJO_REQUIRED=1 CARGO_BUILD_JOBS=6 cargo test --locked -q -p prodex-app --lib app_commands::ping::tests:: -- --test-threads=1`.
+Workspace Clippy passes via
+`PRODEX_MOJO_REQUIRED=1 CARGO_BUILD_JOBS=6 cargo clippy --locked --workspace --all-targets --all-features -- -D warnings`,
+with existing vendor warnings only. No-fallback/authority/crate-boundary
+self-test/source, secret-boundary, size, docs, formatting and diff checks
+pass. Full CI, live-provider and native macOS/Windows checks were not run.
+The reusable build cache is retained for the next migration.
+
+Canonical `RUST_TEST_THREADS=1 CARGO_BUILD_JOBS=6 npm run test:changed` passes.
+Staged privacy/diff checks pass, and churn remains within 1,200 total lines
+and 500 per file.

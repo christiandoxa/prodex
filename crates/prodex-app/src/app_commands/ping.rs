@@ -372,47 +372,17 @@ fn validate_ping_output(output: &Output) -> std::result::Result<(), PingValidati
 }
 
 fn ping_structured_failure_detail(text: &str) -> Option<String> {
-    text.lines().find_map(|line| {
-        let event: Value = serde_json::from_str(line).ok()?;
-        let event_type = event.get("type").and_then(Value::as_str)?;
-        matches!(event_type, "turn.failed" | "error").then(|| {
-            ping_process::bounded_ping_detail(&ping_event_failure_text(
-                &event,
-                if event_type == "turn.failed" {
-                    "turn failed"
-                } else {
-                    "Codex error"
-                },
-            ))
-        })
-    })
-}
-
-fn ping_event_failure_text(event: &Value, fallback: &str) -> String {
-    let values = [
-        event.get("message").and_then(Value::as_str),
-        event.get("code").and_then(Value::as_str),
-        event.get("error").and_then(Value::as_str),
-        event
-            .get("error")
-            .and_then(|error| error.get("message"))
-            .and_then(Value::as_str),
-        event
-            .get("error")
-            .and_then(|error| error.get("code"))
-            .and_then(Value::as_str),
-    ];
-    let text = values
-        .into_iter()
-        .flatten()
-        .filter(|value| !value.trim().is_empty())
-        .collect::<Vec<_>>()
-        .join(" ");
-    if text.is_empty() {
-        fallback.to_string()
-    } else {
-        text
-    }
+    // Serde retains JSONL syntax compatibility; Mojo owns event and field selection.
+    let events = Value::Array(
+        text.lines()
+            .filter_map(|line| serde_json::from_str(line).ok())
+            .collect(),
+    );
+    let tree = crate::json_boundary::app_json_tree_without_wire(&events)
+        .expect("ping diagnostic records exceeded the JSON ABI boundary");
+    prodex_mojo_core::rich::ping_structured_failure_detail(&tree.nodes)
+        .expect("Mojo ping structured failure projection returned invalid output")
+        .map(|detail| ping_process::bounded_ping_detail(&detail))
 }
 
 fn classify_failure(output: &Output) -> (PingStatus, String) {
