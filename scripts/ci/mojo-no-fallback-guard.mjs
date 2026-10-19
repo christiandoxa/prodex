@@ -9412,6 +9412,29 @@ export function findViolations(files) {
     return [];
   });
   const kiroAcpToolLedgerMojoViolations = files.flatMap(([filePath, contents]) => {
+    if (filePath === KIRO_FINAL_STREAM_FILE) {
+      const production = contents.split("#[cfg(test)]", 1)[0];
+      const required = [
+        "kiro_acp_tool_activity_plan(",
+        "KiroAcpToolActivityFacts",
+        "KiroAcpToolActivityAction::AppendTruncated",
+        "compiled Mojo Kiro streaming activity omitted name",
+      ];
+      const tests = [
+        "compiled_kiro_stream_activity_ledger_inherits_labels_and_caps_at_128",
+        "compiled_kiro_stream_activity_ledger_rejects_oversized_unicode_id_caching",
+      ];
+      const retired = [
+        "if self.truncated {",
+        "let bounded_id = (tool_call_id.len()",
+        "prodex_provider_core::KIRO_PROVIDER_CORE_MAX_TOOL_ACTIVITY_EVENTS.saturating_sub(1)",
+        '.unwrap_or("Kiro internal activity")',
+      ];
+      return required.every((marker) => production.includes(marker)) &&
+        tests.every((marker) => contents.includes(marker)) &&
+        retired.every((marker) => !production.includes(marker))
+        ? [] : [filePath + ": restored Rust Kiro SSE tool ledger cap/label/fallback policy"];
+    }
     if (filePath === "crates/prodex-app/src/runtime_kiro_acp/turn_state.rs") {
       const production = contents.split("#[cfg(test)]", 1)[0];
       const required = [
@@ -11459,7 +11482,18 @@ function selfTest() {
   assert.match(findViolations([[KIRO_MESSAGES_STREAM_FILE,
     "fn runtime_kiro_anthropic_sse_body() { fn push_event() {} }"
   ]]).join("\n"), /Kiro Anthropic SSE rendering must use Mojo without a Rust copy/u);
-  const kiroFinalStreamViolations = (contents) => findViolations([[KIRO_FINAL_STREAM_FILE, contents]]);
+  const kiroFinalStreamLedgerFixture = [
+    "kiro_acp_tool_activity_plan(",
+    "KiroAcpToolActivityFacts",
+    "KiroAcpToolActivityAction::AppendTruncated",
+    "compiled Mojo Kiro streaming activity omitted name",
+    "compiled_kiro_stream_activity_ledger_inherits_labels_and_caps_at_128",
+    "compiled_kiro_stream_activity_ledger_rejects_oversized_unicode_id_caching",
+  ].join("\n");
+  const kiroFinalStreamViolations = (contents) =>
+    findViolations([[KIRO_FINAL_STREAM_FILE, kiroFinalStreamLedgerFixture + "\n" + contents]]);
+  assert.match(kiroFinalStreamViolations("if self.truncated {").join("\n"),
+    /restored Rust Kiro SSE tool ledger cap\/label\/fallback policy/u);
   assert.deepEqual(kiroFinalStreamViolations(`
     pub(super) fn runtime_kiro_send_final_stream() {
       prodex_provider_core::kiro_provider_core_response_final_event();

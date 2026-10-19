@@ -11,6 +11,9 @@ use super::{
     runtime_provider_sse_output_text_item_done_event,
 };
 use crate::runtime_kiro_acp::{RuntimeKiroAcpSessionNotification, RuntimeKiroAcpSessionUpdate};
+use prodex_mojo_core::rich::{
+    KiroAcpToolActivityAction, KiroAcpToolActivityFacts, kiro_acp_tool_activity_plan,
+};
 use std::collections::BTreeMap;
 
 #[derive(Default)]
@@ -30,49 +33,130 @@ impl RuntimeKiroStreamingActivityState {
         initial: bool,
         details_omitted: bool,
     ) -> Option<Value> {
-        if self.truncated {
-            return None;
+        let previous = self.labels.get(tool_call_id).cloned();
+        let plan = kiro_acp_tool_activity_plan(KiroAcpToolActivityFacts {
+            tool_call_id,
+            already_truncated: self.truncated,
+            activity_count: self.events,
+            label_count: self.labels.len(),
+            previous_present: previous.is_some(),
+            title_present: title.is_some(),
+            kind_present: kind.is_some(),
+        })
+        .expect("compiled Mojo Kiro streaming activity ledger returned invalid output");
+        match plan.action {
+            KiroAcpToolActivityAction::Ignore => None,
+            KiroAcpToolActivityAction::AppendTruncated => {
+                self.truncated = true;
+                self.events += 1;
+                Some(prodex_provider_core::kiro_provider_core_truncated_tool_activity_item())
+            }
+            KiroAcpToolActivityAction::Append => {
+                let title = if plan.use_previous_title {
+                    previous.as_ref().map(|(name, _)| name.clone())
+                } else {
+                    title.map(str::to_string)
+                };
+                let kind = if plan.use_previous_kind {
+                    previous.as_ref().and_then(|(_, kind)| kind.clone())
+                } else {
+                    kind.map(str::to_string)
+                };
+                let activity = prodex_provider_core::kiro_provider_core_tool_activity_item(
+                    title.as_deref(),
+                    status,
+                    kind.as_deref(),
+                    initial,
+                    details_omitted,
+                );
+                self.events += 1;
+                if plan.record_label {
+                    self.labels.insert(
+                        tool_call_id.to_string(),
+                        (
+                            activity["name"]
+                                .as_str()
+                                .expect("compiled Mojo Kiro streaming activity omitted name")
+                                .to_string(),
+                            activity["kind"].as_str().map(str::to_string),
+                        ),
+                    );
+                }
+                Some(activity)
+            }
         }
-        if self.events
-            >= prodex_provider_core::KIRO_PROVIDER_CORE_MAX_TOOL_ACTIVITY_EVENTS.saturating_sub(1)
-        {
-            self.truncated = true;
-            self.events += 1;
-            return Some(prodex_provider_core::kiro_provider_core_truncated_tool_activity_item());
+    }
+}
+
+#[cfg(test)]
+mod compiled_kiro_stream_activity_tests {
+    use super::*;
+
+    #[test]
+    fn compiled_kiro_stream_activity_ledger_inherits_labels_and_caps_at_128() {
+        let mut state = RuntimeKiroStreamingActivityState::default();
+        let first = state
+            .next(
+                "call_🧭",
+                Some("Read file"),
+                Some("in_progress"),
+                Some("read"),
+                true,
+                true,
+            )
+            .unwrap();
+        let updated = state
+            .next("call_🧭", None, Some("completed"), None, false, true)
+            .unwrap();
+        assert_eq!(first["name"], "Read file");
+        assert_eq!(first["kind"], "read");
+        assert_eq!(updated["name"], "Read file");
+        assert_eq!(updated["kind"], "read");
+        assert_eq!(updated["phase"], "completed");
+        assert_eq!(state.labels.len(), 1);
+
+        let mut regular = 0;
+        let mut truncated = 0;
+        for i in 0..170 {
+            if let Some(activity) =
+                state.next(&format!("tool_{i}"), Some("Tool"), None, None, true, false)
+            {
+                if activity["name"] == "Additional Kiro activities omitted" {
+                    truncated += 1;
+                } else {
+                    regular += 1;
+                }
+            }
         }
-        let bounded_id = (tool_call_id.len()
-            <= prodex_provider_core::KIRO_PROVIDER_CORE_MAX_TOOL_ACTIVITY_ID_BYTES)
-            .then_some(tool_call_id);
-        let previous = bounded_id
-            .and_then(|tool_call_id| self.labels.get(tool_call_id))
-            .cloned();
-        let title = title
-            .map(str::to_string)
-            .or_else(|| previous.as_ref().map(|(name, _)| name.clone()));
-        let kind = kind
-            .map(str::to_string)
-            .or_else(|| previous.and_then(|(_, kind)| kind));
-        let activity = prodex_provider_core::kiro_provider_core_tool_activity_item(
-            title.as_deref(),
-            status,
-            kind.as_deref(),
-            initial,
-            details_omitted,
+        assert_eq!(regular, 125);
+        assert_eq!(truncated, 1);
+        assert_eq!(state.events, 128);
+        assert!(state.truncated);
+        assert!(
+            state
+                .next("another", None, None, None, false, false)
+                .is_none()
         );
-        self.events += 1;
-        if let Some(tool_call_id) = bounded_id {
-            self.labels.insert(
-                tool_call_id.to_string(),
-                (
-                    activity["name"]
-                        .as_str()
-                        .unwrap_or("Kiro internal activity")
-                        .to_string(),
-                    activity["kind"].as_str().map(str::to_string),
-                ),
-            );
+        assert_eq!(state.labels.len(), 126);
+    }
+
+    #[test]
+    fn compiled_kiro_stream_activity_ledger_rejects_oversized_unicode_id_caching() {
+        let mut state = RuntimeKiroStreamingActivityState::default();
+        for (id, caches) in [("東".repeat(85), true), ("東".repeat(86), false)] {
+            let first = state
+                .next(&id, Some("Private label"), None, Some("read"), true, true)
+                .expect("initial activity");
+            let second = state
+                .next(&id, None, Some("completed"), None, false, true)
+                .expect("follow-up activity");
+            assert_eq!(first["name"], "Private label");
+            assert_eq!(second["name"] == "Private label", caches);
+            assert_eq!(second["kind"] == "read", caches);
+            assert_eq!(state.labels.contains_key(&id), caches);
         }
-        Some(activity)
+        assert_eq!(state.events, 4);
+        assert_eq!(state.labels.len(), 1);
     }
 }
 

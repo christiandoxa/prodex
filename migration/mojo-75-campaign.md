@@ -6047,3 +6047,14 @@ and error index relabel helper were deleted; host JSON/compiled bridge
 materialization remain unchanged. Direct ABI, mixed tool-array, provider,
 Gemini app and no-fallback regressions protect the full-array contract.
 The separate 75% production source target is still outstanding.
+
+
+## Kiro ACP streaming activity ledger unified under Mojo
+
+The live Kiro streaming adapter now uses the existing compiled ACP
+tool-activity ledger owner, matching the buffered ACP turn-state
+collector. The independent Rust streaming cap, oversized-ID check,
+previous title/kind selection, label recording and default-name
+fallback were deleted. Live caller regressions, direct ABI tests and
+the strict no-fallback guard protect both paths and the single
+truncation marker. The 75% project goal remains outstanding.
