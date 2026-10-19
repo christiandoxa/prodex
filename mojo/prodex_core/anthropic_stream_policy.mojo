@@ -146,3 +146,94 @@ def prodex_anthropic_stream_finish_reason_v1(
         unsafe_from_address=Int(result_address)
     )[] = result
     return 0
+
+
+# Web search lifecycle: result IDs select the first matching indexed tool,
+# even when already completed (the host still parses repeated result content).
+# End-of-message completion includes all unfinished tools in BTreeMap order.
+def anthropic_stream_same_id(
+    left: ProdexRichStringView, right: ProdexRichStringView
+) -> Bool:
+    if left.len != right.len:
+        return False
+    var a = Pointer[mut=False, UInt8, ImmUntrackedOrigin](
+        unsafe_from_address=Int(left.ptr)
+    )
+    var b = Pointer[mut=False, UInt8, ImmUntrackedOrigin](
+        unsafe_from_address=Int(right.ptr)
+    )
+    for index in range(Int64(left.len)):
+        if a[unsafe_offset=index] != b[unsafe_offset=index]:
+            return False
+    return True
+
+
+@export("prodex_anthropic_web_search_completion_v1")
+def prodex_anthropic_web_search_completion_v1(
+    abi_version: Int64,
+    id_views_address: UInt,
+    state_address: UInt,
+    candidate_count: Int64,
+    target_present: Int64,
+    target_address: UInt,
+    target_length: Int64,
+    output_address: UInt,
+    output_capacity: Int64,
+    written_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != ANTHROPIC_STREAM_POLICY_ABI:
+        return 4
+    if (
+        candidate_count < 0 or candidate_count > 0x7FFFFFFFFFFFFFFF // 2
+        or (candidate_count > 0 and (id_views_address == 0 or state_address == 0))
+        or (target_present != 0 and target_present != 1)
+        or target_length < 0 or (target_length > 0 and target_address == 0)
+        or output_address == 0 or output_capacity < candidate_count * 2
+        or written_address == 0
+    ):
+        return 1
+    var views = Pointer[mut=False, UInt64, ImmUntrackedOrigin](
+        unsafe_from_address=Int(id_views_address)
+    )
+    var states = Pointer[mut=False, Int64, ImmUntrackedOrigin](
+        unsafe_from_address=Int(state_address)
+    )
+    var target = ProdexRichStringView(target_address, UInt(target_length))
+    if not rich_view_valid(target, 0x7FFFFFFFFFFFFFFF):
+        return 1
+    # Validate all strings and state bits before any caller-owned output.
+    for i in range(candidate_count):
+        var address = UInt(views[unsafe_offset=2 * i])
+        var length = UInt(views[unsafe_offset=2 * i + 1])
+        if length > 0x7FFFFFFFFFFFFFFF or (length > 0 and address == 0):
+            return 1
+        var id = ProdexRichStringView(address, length)
+        if not rich_view_valid(id, 0x7FFFFFFFFFFFFFFF):
+            return 1
+        var state = states[unsafe_offset=i]
+        if state != 0 and state != 1:
+            return 1
+    var output = Pointer[mut=True, UInt64, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    var written = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(written_address)
+    )
+    var count: Int64 = 0
+    for i in range(candidate_count):
+        var id = ProdexRichStringView(
+            UInt(views[unsafe_offset=2 * i]),
+            UInt(views[unsafe_offset=2 * i + 1]),
+        )
+        if target_present == 1:
+            if anthropic_stream_same_id(id, target):
+                output[unsafe_offset=0] = UInt64(i)
+                output[unsafe_offset=1] = UInt64(states[unsafe_offset=i] == 0)
+                count = 1
+                break
+        elif states[unsafe_offset=i] == 0:
+            output[unsafe_offset=2 * count] = UInt64(i)
+            output[unsafe_offset=2 * count + 1] = 1
+            count += 1
+    written[] = count
+    return 0

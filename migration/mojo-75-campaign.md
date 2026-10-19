@@ -5903,3 +5903,12 @@ compiled Mojo stream policy owner. Rust still acquires SSE/JSON and
 materializes the selected output. Previous Rust decision trees were
 deleted, and the ABI/production caller are protected by strict tests
 and a no-fallback guard. The separate 75% project target is ongoing.
+
+
+## Anthropic web-search lifecycle selection moved to Mojo
+
+The native Anthropic SSE adapter now uses the compiled owner for first-ID
+result matching, duplicate completion suppression and sorted pending search
+completion. Rust keeps JSON/store effects, not the old search/dedup selection
+algorithm. Compiled ABI, real caller regressions and anti-fallback guard
+protect the contract. The separate 75% target remains outstanding.

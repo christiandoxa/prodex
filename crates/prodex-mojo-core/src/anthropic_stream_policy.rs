@@ -21,6 +21,18 @@ unsafe extern "C" {
         active_web_search: i64,
         result_address: u64,
     ) -> i64;
+    fn prodex_anthropic_web_search_completion_v1(
+        version: i64,
+        id_views_address: u64,
+        state_address: u64,
+        candidate_count: i64,
+        target_present: i64,
+        target_address: u64,
+        target_length: i64,
+        output_address: u64,
+        output_capacity: i64,
+        written_address: u64,
+    ) -> i64;
     fn prodex_anthropic_stream_finish_reason_v1(
         version: i64,
         present: i64,
@@ -145,6 +157,80 @@ pub fn anthropic_stream_finish_reason(
     }
 }
 
+/// Ordered, borrowed web-search facts from the host's BTreeMap.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AnthropicWebSearchEntry<'a> {
+    pub id: &'a str,
+    pub done: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AnthropicWebSearchChoice {
+    /// Position into the original ordered entry slice, not a tool output index.
+    pub position: usize,
+    /// Whether to emit the terminal item. Completed search IDs still match
+    /// a repeated result so the host can validate/store that result as before.
+    pub emit: bool,
+}
+
+/// The compiled planner owns first-match ID precedence and end-of-message
+/// unfinished-search selection. Rust retains BTreeMap storage and JSON events.
+pub fn anthropic_web_search_completion_plan(
+    entries: &[AnthropicWebSearchEntry<'_>],
+    target: Option<&str>,
+) -> Result<Vec<AnthropicWebSearchChoice>, MojoError> {
+    let count = entries.len();
+    let count_twice = count.checked_mul(2).ok_or(MojoError::Capacity)?;
+    let mut views = Vec::with_capacity(count_twice);
+    let mut states = Vec::with_capacity(count);
+    for entry in entries {
+        views.push(entry.id.as_ptr() as usize as u64);
+        views.push(u64::try_from(entry.id.len()).map_err(|_| MojoError::InvalidInput)?);
+        states.push(i64::from(entry.done));
+    }
+    let target_text = target.unwrap_or("");
+    let mut output = vec![u64::MAX; count_twice];
+    let mut written = -1_i64;
+    check_status(unsafe {
+        prodex_anthropic_web_search_completion_v1(
+            1,
+            views.as_ptr() as usize as u64,
+            states.as_ptr() as usize as u64,
+            i64::try_from(count).map_err(|_| MojoError::InvalidInput)?,
+            i64::from(target.is_some()),
+            target_text.as_ptr() as usize as u64,
+            i64::try_from(target_text.len()).map_err(|_| MojoError::InvalidInput)?,
+            output.as_mut_ptr() as usize as u64,
+            i64::try_from(output.len()).map_err(|_| MojoError::InvalidInput)?,
+            (&mut written as *mut i64) as usize as u64,
+        )
+    })?;
+    let selected = usize::try_from(written).map_err(|_| MojoError::InvalidOutput)?;
+    if selected > count || (target.is_some() && selected > 1) {
+        return Err(MojoError::InvalidOutput);
+    }
+    let mut seen = vec![false; count];
+    let mut plan = Vec::with_capacity(selected);
+    for pair in output[..selected * 2].chunks_exact(2) {
+        let position = usize::try_from(pair[0]).map_err(|_| MojoError::InvalidOutput)?;
+        let flag = pair[1];
+        let entry = entries.get(position).ok_or(MojoError::InvalidOutput)?;
+        if seen[position]
+            || flag > 1
+            || (flag == 1 && entry.done)
+            || (target.is_none() && flag == 0)
+        {
+            return Err(MojoError::InvalidOutput);
+        }
+        seen[position] = true;
+        plan.push(AnthropicWebSearchChoice {
+            position,
+            emit: flag == 1,
+        });
+    }
+    Ok(plan)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -160,6 +246,130 @@ mod tests {
             ignored_block: false,
             active_web_search: false,
         }
+    }
+
+    #[test]
+    fn compiled_anthropic_web_search_selection_matches_first_id_and_pending_index_order() {
+        let entries = [
+            AnthropicWebSearchEntry {
+                id: "a",
+                done: true,
+            },
+            AnthropicWebSearchEntry {
+                id: "b",
+                done: false,
+            },
+            AnthropicWebSearchEntry {
+                id: "a",
+                done: false,
+            },
+            AnthropicWebSearchEntry {
+                id: "東京🔥",
+                done: false,
+            },
+        ];
+        assert_eq!(
+            anthropic_web_search_completion_plan(&entries, Some("a")),
+            Ok(vec![AnthropicWebSearchChoice {
+                position: 0,
+                emit: false
+            }]),
+        );
+        assert_eq!(
+            anthropic_web_search_completion_plan(&entries, Some("b")),
+            Ok(vec![AnthropicWebSearchChoice {
+                position: 1,
+                emit: true
+            }]),
+        );
+        assert_eq!(
+            anthropic_web_search_completion_plan(&entries, Some("東京🔥")),
+            Ok(vec![AnthropicWebSearchChoice {
+                position: 3,
+                emit: true
+            }]),
+        );
+        assert_eq!(
+            anthropic_web_search_completion_plan(&entries, Some("A")),
+            Ok(vec![])
+        );
+        assert_eq!(
+            anthropic_web_search_completion_plan(&entries, None),
+            Ok(vec![
+                AnthropicWebSearchChoice {
+                    position: 1,
+                    emit: true
+                },
+                AnthropicWebSearchChoice {
+                    position: 2,
+                    emit: true
+                },
+                AnthropicWebSearchChoice {
+                    position: 3,
+                    emit: true
+                },
+            ])
+        );
+        assert_eq!(anthropic_web_search_completion_plan(&[], None), Ok(vec![]));
+        assert_eq!(
+            anthropic_web_search_completion_plan(&[], Some("a")),
+            Ok(vec![])
+        );
+    }
+
+    #[test]
+    fn compiled_anthropic_web_search_abi_rejects_invalid_flags_without_writes() {
+        let id = b"search";
+        let views = [id.as_ptr() as usize as u64, 6_u64];
+        let invalid = [0xff_u8];
+        let invalid_views = [invalid.as_ptr() as usize as u64, 1_u64];
+        let valid_state = [0_i64];
+        let bad_state = [2_i64];
+        let mut output = [71_u64; 2];
+        let mut written = 83_i64;
+        let ptr = views.as_ptr() as usize as u64;
+        let state = valid_state.as_ptr() as usize as u64;
+        let out = output.as_mut_ptr() as usize as u64;
+        let wrote = (&mut written as *mut i64) as usize as u64;
+        let call = |version, views, state, count, present, capacity, result| unsafe {
+            prodex_anthropic_web_search_completion_v1(
+                version,
+                views,
+                state,
+                count,
+                present,
+                id.as_ptr() as usize as u64,
+                6,
+                out,
+                capacity,
+                result,
+            )
+        };
+        assert_eq!(call(2, ptr, state, 1, 1, 2, wrote), 4);
+        assert_eq!(call(1, 0, state, 1, 1, 2, wrote), 1);
+        assert_eq!(call(1, ptr, 0, 1, 1, 2, wrote), 1);
+        assert_eq!(call(1, ptr, state, -1, 1, 2, wrote), 1);
+        assert_eq!(call(1, ptr, state, 1, 2, 2, wrote), 1);
+        assert_eq!(call(1, ptr, state, 1, 1, 1, wrote), 1);
+        assert_eq!(call(1, ptr, state, 1, 1, 2, 0), 1);
+        assert_eq!(
+            call(1, ptr, bad_state.as_ptr() as usize as u64, 1, 1, 2, wrote),
+            1
+        );
+        assert_eq!(
+            call(
+                1,
+                invalid_views.as_ptr() as usize as u64,
+                state,
+                1,
+                1,
+                2,
+                wrote
+            ),
+            1
+        );
+        assert_eq!(output, [71; 2]);
+        assert_eq!(written, 83);
     }
 
     #[test]

@@ -3,8 +3,8 @@ use super::deepseek_sse::RuntimeDeepSeekSseState;
 use super::provider_bridge::RuntimeProviderBridgeKind;
 use super::provider_sse_reader::{RuntimeProviderSseJsonReader, RuntimeProviderSseJsonState};
 use prodex_mojo_core::anthropic_stream_policy::{
-    AnthropicStreamAction, AnthropicStreamFacts, anthropic_stream_action,
-    anthropic_stream_finish_reason,
+    AnthropicStreamAction, AnthropicStreamFacts, AnthropicWebSearchEntry, anthropic_stream_action,
+    anthropic_stream_finish_reason, anthropic_web_search_completion_plan,
 };
 use serde_json::{Value, json};
 use std::collections::{BTreeMap, BTreeSet};
@@ -277,15 +277,44 @@ impl RuntimeAnthropicMessagesSseState {
         )]
     }
 
+    fn planned_web_search_completions(
+        &self,
+        target: Option<&str>,
+    ) -> Result<Vec<(u64, bool)>, prodex_mojo_core::MojoError> {
+        let indexed = self.web_searches.iter().collect::<Vec<_>>();
+        let entries = indexed
+            .iter()
+            .map(|(_, search)| AnthropicWebSearchEntry {
+                id: search.id.as_str(),
+                done: search.done,
+            })
+            .collect::<Vec<_>>();
+        let chosen = anthropic_web_search_completion_plan(&entries, target)?;
+        chosen
+            .into_iter()
+            .map(|choice| {
+                indexed
+                    .get(choice.position)
+                    .map(|(index, _)| (**index, choice.emit))
+                    .ok_or(prodex_mojo_core::MojoError::InvalidOutput)
+            })
+            .collect()
+    }
+
     fn finish_web_search_result(&mut self, block: &Value) -> Vec<String> {
         let Some(tool_use_id) = block.get("tool_use_id").and_then(Value::as_str) else {
             return Vec::new();
         };
-        let Some(index) = self
-            .web_searches
-            .iter()
-            .find_map(|(index, search)| (search.id == tool_use_id).then_some(*index))
-        else {
+        let plan = match self.planned_web_search_completions(Some(tool_use_id)) {
+            Ok(plan) => plan,
+            Err(_) => {
+                return self.failed(
+                    "invalid_anthropic_stream",
+                    "Compiled Mojo web-search result selection failed",
+                );
+            }
+        };
+        let Some((index, emit)) = plan.into_iter().next() else {
             return Vec::new();
         };
         let sources = match prodex_provider_core::anthropic_web_search_result_sources(block) {
@@ -295,23 +324,34 @@ impl RuntimeAnthropicMessagesSseState {
         if let Some(search) = self.web_searches.get_mut(&index) {
             search.sources = sources;
         }
-        self.complete_web_search(index).into_iter().collect()
+        if emit {
+            self.complete_web_search(index).into_iter().collect()
+        } else {
+            Vec::new()
+        }
     }
 
     fn complete_web_searches(&mut self) -> Vec<String> {
-        let indexes = self.web_searches.keys().copied().collect::<Vec<_>>();
-        indexes
+        let planned = match self.planned_web_search_completions(None) {
+            Ok(plan) => plan,
+            Err(_) => {
+                return self.failed(
+                    "invalid_anthropic_stream",
+                    "Compiled Mojo web-search completion planning failed",
+                );
+            }
+        };
+        planned
             .into_iter()
-            .filter_map(|index| self.complete_web_search(index))
+            .filter_map(|(index, _)| self.complete_web_search(index))
             .collect()
     }
 
     fn complete_web_search(&mut self, index: u64) -> Option<String> {
         let item = {
             let search = self.web_searches.get_mut(&index)?;
-            if search.done {
-                return None;
-            }
+            // The compiled plan excludes already-completed search indexes;
+            // no Rust fallback or duplicate completion state gate is needed.
             search.done = true;
             match anthropic_web_search_stream_item(search, false) {
                 Ok(item) => item,
@@ -558,6 +598,52 @@ mod tests {
             output.contains("\"arguments\":\"{\\\"text\\\":\\\"é\\\"}\""),
             "{output}"
         );
+    }
+
+    #[test]
+    fn compiled_anthropic_web_search_completion_keeps_first_index_and_never_emits_twice() {
+        let output = render(concat!(
+            "data: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_order\"}}\n\n",
+            "data: {\"type\":\"content_block_start\",\"index\":5,\"content_block\":{\"type\":\"server_tool_use\",\"name\":\"web_search\",\"id\":\"duplicate\",\"input\":{}}}\n\n",
+            "data: {\"type\":\"content_block_start\",\"index\":2,\"content_block\":{\"type\":\"server_tool_use\",\"name\":\"web_search\",\"id\":\"duplicate\",\"input\":{}}}\n\n",
+            "data: {\"type\":\"content_block_start\",\"index\":7,\"content_block\":{\"type\":\"web_search_tool_result\",\"tool_use_id\":\"unmatched\",\"content\":[]}}\n\n",
+            "data: {\"type\":\"content_block_start\",\"index\":8,\"content_block\":{\"type\":\"web_search_tool_result\",\"tool_use_id\":\"duplicate\",\"content\":[]}}\n\n",
+            "data: {\"type\":\"content_block_start\",\"index\":9,\"content_block\":{\"type\":\"web_search_tool_result\",\"tool_use_id\":\"duplicate\",\"content\":[]}}\n\n",
+            "data: {\"type\":\"message_stop\"}\n\n",
+        ));
+        let items = data_values(&output)
+            .into_iter()
+            .filter(|event| {
+                event["type"] == "response.output_item.done"
+                    && event["item"]["type"] == "web_search_call"
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(items.len(), 2, "{output}");
+        assert_eq!(items[0]["output_index"], 2, "{output}");
+        assert_eq!(items[1]["output_index"], 5, "{output}");
+        assert!(items.iter().all(|event| event["item"]["id"] == "duplicate"));
+        assert!(!output.contains("response.failed"), "{output}");
+    }
+
+    #[test]
+    fn compiled_anthropic_web_search_completion_finalizes_unanswered_searches_in_index_order() {
+        let output = render(concat!(
+            "data: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_pending\"}}\n\n",
+            "data: {\"type\":\"content_block_start\",\"index\":9,\"content_block\":{\"type\":\"server_tool_use\",\"name\":\"web_search\",\"id\":\"later\",\"input\":{}}}\n\n",
+            "data: {\"type\":\"content_block_start\",\"index\":3,\"content_block\":{\"type\":\"server_tool_use\",\"name\":\"web_search\",\"id\":\"earlier\",\"input\":{}}}\n\n",
+            "data: {\"type\":\"message_stop\"}\n\n",
+        ));
+        let items = data_values(&output)
+            .into_iter()
+            .filter(|event| {
+                event["type"] == "response.output_item.done"
+                    && event["item"]["type"] == "web_search_call"
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(items.len(), 2, "{output}");
+        assert_eq!(items[0]["output_index"], 3);
+        assert_eq!(items[1]["output_index"], 9);
+        assert!(!output.contains("response.failed"), "{output}");
     }
 
     #[test]
