@@ -195,6 +195,58 @@ def tooling_view_contains_folded[literal: StaticString](
     return False
 
 
+@fieldwise_init
+struct ToolingNamePlan(Copyable):
+    var status: Int64
+    var written: Int64
+    var suffix_start: Int64
+    var alias_mask: Int64
+    var flags: Int64
+
+
+def tooling_name_policy(
+    view: ProdexRichStringView, output: Pointer[mut=True, UInt8, _], capacity: Int64,
+) -> ToolingNamePlan:
+    var plan = ToolingNamePlan(GEMINI_TOOLING_OK, 0, 0, 0, 0)
+    var bounds = rich_trim_bounds(view)
+    var source = rich_view_ptr(view)
+    var start = bounds[0]
+    var cursor = bounds[1]
+    while cursor > bounds[0]:
+        cursor -= 1
+        if source[unsafe_offset=cursor] == 46:
+            start = cursor + 1
+            break
+
+    var required = bounds[1] - start
+    if required > capacity:
+        plan.status = GEMINI_TOOLING_CAPACITY
+        return plan^
+    for index in range(start, bounds[1]):
+        var value = tooling_ascii_lower(source[unsafe_offset=index])
+        if value == 45:
+            value = 95
+        output[unsafe_offset=plan.written] = value
+        plan.written += 1
+
+    if plan.written >= 2:
+        for index in range(plan.written - 1):
+            if output[unsafe_offset=index] == 95 and output[unsafe_offset=index + 1] == 95:
+                plan.suffix_start = index + 2
+
+    plan.alias_mask = tooling_alias_mask(output, plan.written)
+    var mutating = tooling_range_is_mutating(output, 0, plan.written)
+    if plan.suffix_start > 0:
+        mutating = mutating or tooling_range_is_mutating(
+            output, plan.suffix_start, plan.written
+        )
+    if mutating:
+        plan.flags |= TOOL_FLAG_MUTATING
+    if tooling_output_equals["run_shell_command"](output, plan.written):
+        plan.flags |= TOOL_FLAG_CANONICAL_EXEC
+    return plan^
+
+
 @export("prodex_gemini_tool_name_policy_v1")
 def prodex_gemini_tool_name_policy_v1(
     abi_version: Int64,
@@ -240,47 +292,20 @@ def prodex_gemini_tool_name_policy_v1(
     var flags = Pointer[mut=True, Int64, MutUntrackedOrigin](
         unsafe_from_address=Int(flags_address)
     )
-    written[] = 0
-    suffix_start[] = 0
-    alias_mask[] = 0
-    flags[] = 0
+    var plan = tooling_name_policy(view, output, output_capacity)
+    written[] = plan.written
+    suffix_start[] = plan.suffix_start
+    alias_mask[] = plan.alias_mask
+    flags[] = plan.flags
+    return plan.status
 
-    var bounds = rich_trim_bounds(view)
-    var source = rich_view_ptr(view)
-    var start = bounds[0]
-    var cursor = bounds[1]
-    while cursor > bounds[0]:
-        cursor -= 1
-        if source[unsafe_offset=cursor] == 46:
-            start = cursor + 1
-            break
 
-    var required = bounds[1] - start
-    if required > output_capacity:
-        return GEMINI_TOOLING_CAPACITY
-    for index in range(start, bounds[1]):
-        var value = tooling_ascii_lower(source[unsafe_offset=index])
-        if value == 45:
-            value = 95
-        output[unsafe_offset=written[]] = value
-        written[] += 1
-
-    if written[] >= 2:
-        for index in range(written[] - 1):
-            if output[unsafe_offset=index] == 95 and output[unsafe_offset=index + 1] == 95:
-                suffix_start[] = index + 2
-
-    alias_mask[] = tooling_alias_mask(output, written[])
-    var mutating = tooling_range_is_mutating(output, 0, written[])
-    if suffix_start[] > 0:
-        mutating = mutating or tooling_range_is_mutating(
-            output, suffix_start[], written[]
-        )
-    if mutating:
-        flags[] |= TOOL_FLAG_MUTATING
-    if tooling_output_equals["run_shell_command"](output, written[]):
-        flags[] |= TOOL_FLAG_CANONICAL_EXEC
-    return GEMINI_TOOLING_OK
+def tooling_model_uses_gemini3(view: ProdexRichStringView) -> Bool:
+    return (
+        tooling_view_contains_folded["gemini-3"](view)
+        or tooling_view_range_equals_folded["auto"](view, 0, Int64(view.len))
+        or tooling_view_contains_folded["auto-gemini-3"](view)
+    )
 
 
 @export("prodex_gemini_tooling_model_policy_v1")
@@ -296,13 +321,7 @@ def prodex_gemini_tooling_model_policy_v1(
     var view = ProdexRichStringView(input_address, UInt(input_length))
     if not rich_view_valid(view, input_length):
         return -2
-    if tooling_view_contains_folded["gemini-3"](view):
-        return 1
-    if tooling_view_range_equals_folded["auto"](view, 0, input_length):
-        return 1
-    if tooling_view_contains_folded["auto-gemini-3"](view):
-        return 1
-    return 0
+    return Int64(tooling_model_uses_gemini3(view))
 
 
 comptime GEMINI_PATCH_MAX_INPUT_BYTES: Int64 = 4_194_304

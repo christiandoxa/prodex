@@ -6177,3 +6177,30 @@ and `mojo run -D ASSERT=all -I mojo/prodex_core mojo/tests/deepseek_function_too
 The unchanged official measurement rises from 35.252231806801646% to
 35.323964999637965% (126,842 Mojo / 232,240 Rust production lines).
 The 75% target remains outstanding by 39.676035000362035 percentage points.
+
+## Compiled Gemini 3 tool-description overrides (2026-10-19)
+
+Function-tool checkpoint `a44d277d2` is pushed to main. The versioned Gemini
+description ABI now owns description selection, template text and complete
+parameter edits. The existing name/model policy shares typed internal kernels
+with both ABIs. Rust retains Serde conversion and cached string lifetimes;
+its alias branches, description templates and schema mutation rules are deleted.
+Namespace suffix behavior, existing parameter descriptions and patch null-path
+creation remain compatible. Invalid schemas and ABI errors fail explicitly.
+
+Direct Mojo assertions and 4,000 temporary comparisons with the previous Rust
+implementation pass. The full provider run passes 497 tests including those
+comparisons; the temporary oracle is removed before delivery. Four permanent
+regressions include the production declaration builder and a 1,024-item batch.
+The official share rises from 35.323964999637965% to 35.36931225177636%
+(127,083 Mojo / 232,220 Rust production lines), with unchanged counting rules.
+Completed build output was cleaned (9.0 GiB), Trash inspected and emptied, and
+the owned function-tool scratch object removed after its final consumer.
+
+Final validation passes 496 provider tests without the oracle, 189 application
+tests via `PRODEX_MOJO_REQUIRED=1 CARGO_BUILD_JOBS=6 cargo test --locked -q -p prodex-app --lib gemini_ -- --test-threads=1`,
+and 12 ABI tests via `PRODEX_MOJO_REQUIRED=1 CARGO_BUILD_JOBS=6 cargo test --locked -q -p prodex-mojo-core --features mojo-core --lib gemini_tool`.
+`PRODEX_MOJO_REQUIRED=1 CARGO_BUILD_JOBS=6 cargo clippy --locked --workspace --all-targets --all-features -- -D warnings`,
+`npm run test:changed`, `npm run docs`, formatting, staged churn, no-fallback
+self-test/source guard, authority, boundary, hot-path and runtime-manifest guards,
+and offline baseline/replay all pass. The 75% target remains outstanding.

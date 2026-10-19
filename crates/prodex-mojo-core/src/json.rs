@@ -67,6 +67,12 @@ pub use self::session_selector::{
 };
 #[cfg(feature = "mojo-rich")]
 mod deepseek_function_tools;
+#[cfg(feature = "mojo-rich")]
+mod gemini_tool_descriptions;
+#[cfg(feature = "mojo-rich")]
+pub use gemini_tool_descriptions::{
+    GeminiToolDescriptionOperation, gemini_tool_description_policy,
+};
 mod gemini_contents;
 pub use self::gemini_contents::{GeminiContentOperation, gemini_content_hardening};
 #[cfg(feature = "mojo-rich")]
