@@ -1,6 +1,9 @@
 use super::log_stream::read_new_token_usage_events;
 use super::*;
 
+#[path = "log_transcript_context_tests.rs"]
+mod context;
+
 #[test]
 fn follows_only_complete_token_usage_lines() {
     let root = env::temp_dir().join(format!(

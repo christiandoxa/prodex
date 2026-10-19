@@ -3,6 +3,7 @@ use super::log_transcript_text::{
 };
 use super::*;
 use crate::app_commands::log_format::local_log_timestamp;
+use prodex_mojo_core::json::TranscriptContextKind;
 use prodex_runtime_doctor::read_runtime_log_tail;
 use std::path::Path;
 
@@ -86,10 +87,12 @@ pub(crate) fn transcript_events_from_session_line(line: &str) -> Vec<TranscriptE
         "event_msg" => event_msg_transcript_event(timestamp, payload)
             .into_iter()
             .collect(),
-        "session_meta" => session_meta_transcript_events(timestamp, payload),
-        "turn_context" => turn_context_transcript_event(timestamp, payload)
-            .into_iter()
-            .collect(),
+        "session_meta" => {
+            context_transcript_events(timestamp, payload, TranscriptContextKind::SessionMetadata)
+        }
+        "turn_context" => {
+            context_transcript_events(timestamp, payload, TranscriptContextKind::TurnContext)
+        }
         "response_item" => response_item_transcript_event(timestamp, payload)
             .into_iter()
             .collect(),
@@ -137,52 +140,25 @@ fn transcript_safe_text(text: &str) -> String {
         .expect("compiled-in Mojo transcript safe-text normalizer failed")
 }
 
-fn session_meta_transcript_events(
+fn context_transcript_events(
     timestamp: String,
     payload: &serde_json::Value,
+    kind: TranscriptContextKind,
 ) -> Vec<TranscriptEvent> {
-    let mut events = Vec::new();
-    if let Some(text) = payload
-        .get("base_instructions")
-        .and_then(|base| base.get("text"))
-        .and_then(serde_json::Value::as_str)
-        .filter(|text| !text.trim().is_empty())
-    {
-        events.push(TranscriptEvent {
+    let tree = crate::json_boundary::app_json_tree_without_wire(payload)
+        .expect("transcript context exceeded the JSON ABI boundary");
+    let projected = prodex_mojo_core::json::log_transcript_context(&tree.nodes, kind)
+        .expect("Mojo transcript context projection returned invalid output");
+    let records: Vec<(String, String)> = serde_json::from_slice(&projected)
+        .expect("Mojo transcript context projection returned invalid records");
+    records
+        .into_iter()
+        .map(|(source, text)| TranscriptEvent {
             timestamp: timestamp.clone(),
-            source: "prompt-engineering".to_string(),
-            text: text.to_string(),
-        });
-    }
-
-    let mut fields = Vec::new();
-    if let Some(provider) = payload
-        .get("model_provider")
-        .or_else(|| payload.get("provider"))
-        .and_then(serde_json::Value::as_str)
-    {
-        fields.push(format!("provider={provider}"));
-    }
-    if let Some(source) = payload.get("source").and_then(serde_json::Value::as_str) {
-        fields.push(format!("source={source}"));
-    }
-    if let Some(originator) = payload
-        .get("originator")
-        .and_then(serde_json::Value::as_str)
-    {
-        fields.push(format!("originator={originator}"));
-    }
-    if let Some(cwd) = payload.get("cwd").and_then(serde_json::Value::as_str) {
-        fields.push(format!("cwd={cwd}"));
-    }
-    if !fields.is_empty() {
-        events.push(TranscriptEvent {
-            timestamp,
-            source: "session-context".to_string(),
-            text: fields.join(" "),
-        });
-    }
-    events
+            source,
+            text,
+        })
+        .collect()
 }
 
 fn event_msg_transcript_event(
@@ -292,36 +268,6 @@ fn transcript_json_text(value: &serde_json::Value) -> Option<String> {
     })
 }
 
-fn turn_context_transcript_event(
-    timestamp: String,
-    payload: &serde_json::Value,
-) -> Option<TranscriptEvent> {
-    let mut fields = Vec::new();
-    if let Some(model) = payload.get("model").and_then(serde_json::Value::as_str) {
-        fields.push(format!("model={model}"));
-    }
-    if let Some(effort) = payload.get("effort").and_then(serde_json::Value::as_str) {
-        fields.push(format!("effort={effort}"));
-    }
-    if let Some(summary) = payload.get("summary").and_then(serde_json::Value::as_str) {
-        fields.push(format!("summary={summary}"));
-    }
-    if let Some(approval) = payload
-        .get("approval_policy")
-        .and_then(serde_json::Value::as_str)
-    {
-        fields.push(format!("approval={approval}"));
-    }
-    if let Some(cwd) = payload.get("cwd").and_then(serde_json::Value::as_str) {
-        fields.push(format!("cwd={cwd}"));
-    }
-    (!fields.is_empty()).then(|| TranscriptEvent {
-        timestamp,
-        source: "turn-context".to_string(),
-        text: fields.join(" "),
-    })
-}
-
 fn response_item_transcript_event(
     timestamp: String,
     payload: &serde_json::Value,
@@ -393,11 +339,7 @@ fn response_item_transcript_event(
         TranscriptItemKind::ShellCall => shell_call_transcript_event(timestamp, payload),
         TranscriptItemKind::ShellOutput => shell_output_transcript_event(timestamp, payload),
         TranscriptItemKind::Reasoning => {
-            transcript_text_from_reasoning(payload).map(|text| TranscriptEvent {
-                timestamp,
-                source: "reasoning".to_string(),
-                text,
-            })
+            context_transcript_events(timestamp, payload, TranscriptContextKind::Reasoning).pop()
         }
         TranscriptItemKind::Protocol => {
             protocol_operation_transcript_event(timestamp, payload, item_type, plan.protocol_source)
@@ -530,29 +472,4 @@ fn transcript_safe_operation_value(value: &str) -> Option<String> {
         result.push('…');
     }
     Some(result)
-}
-
-fn transcript_text_from_reasoning(payload: &serde_json::Value) -> Option<String> {
-    let summary = payload.get("summary")?;
-    let parts = match summary {
-        serde_json::Value::Array(items) => items
-            .iter()
-            .filter_map(reasoning_summary_text)
-            .collect::<Vec<_>>(),
-        _ => reasoning_summary_text(summary).into_iter().collect(),
-    };
-    (!parts.is_empty()).then(|| parts.join("\n"))
-}
-
-fn reasoning_summary_text(value: &serde_json::Value) -> Option<String> {
-    match value {
-        serde_json::Value::String(text) if !text.trim().is_empty() => Some(text.to_string()),
-        serde_json::Value::Object(_) => value
-            .get("text")
-            .or_else(|| value.get("summary_text"))
-            .and_then(serde_json::Value::as_str)
-            .filter(|text| !text.trim().is_empty())
-            .map(str::to_string),
-        _ => None,
-    }
 }
