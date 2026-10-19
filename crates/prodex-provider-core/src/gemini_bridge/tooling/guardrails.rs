@@ -9,10 +9,10 @@ pub use self::exact_output::{
     gemini_provider_core_forced_command_output,
 };
 pub use self::intent::gemini_provider_core_tool_intent_without_call;
-use self::tool_text::gemini_provider_core_tool_texts_since_latest_user;
+use self::tool_text::gemini_provider_core_guardrail_projection;
 use prodex_mojo_core::gemini_guardrails::{
-    GeminiWaitOrPollReason, gemini_process_exited_zero, gemini_success_claim,
-    gemini_tool_text_has_failure, gemini_verification_marker, gemini_wait_or_poll_reason,
+    GeminiGuardrailJsonOperation, GeminiWaitOrPollReason, gemini_success_claim,
+    gemini_wait_or_poll_reason,
 };
 
 pub fn gemini_provider_core_non_actionable_wait_or_poll_text(text: &str) -> Option<&'static str> {
@@ -35,34 +35,16 @@ pub fn gemini_provider_core_unverified_success_claim(
     text: &str,
     conversation_messages: &[serde_json::Value],
 ) -> bool {
+    // Ordinary output avoids acquiring the conversation JSON after this Mojo gate.
     if !gemini_success_claim(text)
         .expect("Mojo Gemini success-claim guardrail should accept Rust strings")
     {
         return false;
     }
-    let tool_texts = gemini_provider_core_tool_texts_since_latest_user(conversation_messages);
-    if tool_texts.is_empty() {
-        return true;
-    }
-    let last_tool = tool_texts.last().map(|text| text.as_str()).unwrap_or("");
-    if gemini_tool_text_has_failure(last_tool)
-        .expect("Mojo Gemini tool-failure guardrail should accept Rust strings")
-    {
-        return true;
-    }
-    let has_verification_marker = gemini_verification_marker(last_tool)
-        .expect("Mojo Gemini verification guardrail should accept Rust strings");
-    let clean_final_verification = has_verification_marker
-        && !tool_texts
-            .iter()
-            .skip(tool_texts.len().saturating_sub(2))
-            .any(|tool| {
-                gemini_tool_text_has_failure(tool)
-                    .expect("Mojo Gemini tool-failure guardrail should accept Rust strings")
-                    && !gemini_process_exited_zero(tool)
-                        .expect("Mojo Gemini process-exit guardrail should accept Rust strings")
-            });
-    !clean_final_verification
+    gemini_provider_core_guardrail_projection(
+        &serde_json::json!({"text": text, "messages": conversation_messages}),
+        GeminiGuardrailJsonOperation::UnverifiedSuccessClaim,
+    )
 }
 
 pub fn gemini_provider_core_blocked_tool_call_item(message: &str) -> serde_json::Value {
@@ -75,3 +57,6 @@ pub fn gemini_provider_core_blocked_tool_call_item(message: &str) -> serde_json:
         }],
     })
 }
+
+#[cfg(test)]
+mod tests;

@@ -1,6 +1,38 @@
 use crate::MojoError;
+use crate::json::{JsonNode, transform_json_with_scratch};
 
 const GEMINI_GUARDRAIL_ABI_VERSION: i64 = 1;
+
+/// Conversation projection requested by the Gemini guardrail caller.
+#[derive(Clone, Copy)]
+#[repr(i64)]
+pub enum GeminiGuardrailJsonOperation {
+    PayloadText,
+    UnverifiedSuccessClaim,
+}
+
+/// Project payload text or verification evidence from a caller-acquired JSON tree.
+pub fn gemini_guardrail_json(
+    nodes: &[JsonNode<'_>],
+    raw: &str,
+    operation: GeminiGuardrailJsonOperation,
+) -> Result<Vec<u8>, MojoError> {
+    let bytes = nodes.iter().try_fold(nodes.len(), |bytes, node| {
+        bytes
+            .checked_add(node.text.len())
+            .ok_or(MojoError::InvalidInput)
+    })?;
+    let units = bytes.div_ceil(nodes.len().max(1)).div_ceil(16).max(1);
+    transform_json_with_scratch(
+        nodes,
+        raw,
+        operation as i64,
+        false,
+        prodex_mojo_gemini_guardrail_conversation_v1,
+        units,
+    )?
+    .ok_or(MojoError::InvalidOutput)
+}
 
 #[repr(i64)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -43,6 +75,21 @@ pub enum GeminiToolIntent {
 }
 
 unsafe extern "C" {
+    fn prodex_mojo_gemini_guardrail_conversation_v1(
+        abi: i64,
+        operation: i64,
+        flag: i64,
+        nodes: u64,
+        count: i64,
+        raw: u64,
+        raw_length: i64,
+        scratch: u64,
+        scratch_count: i64,
+        measuring: i64,
+        output: u64,
+        capacity: i64,
+        metadata: u64,
+    ) -> i64;
     fn prodex_mojo_gemini_guardrail_slice_v1(
         abi_version: i64,
         operation: i64,
@@ -83,6 +130,10 @@ unsafe extern "C" {
         input_length: i64,
     ) -> i64;
 }
+
+#[cfg(test)]
+#[path = "gemini_guardrails/conversation_tests.rs"]
+mod conversation_tests;
 
 fn signed_len(value: &str) -> Result<i64, MojoError> {
     i64::try_from(value.len()).map_err(|_| MojoError::InvalidInput)

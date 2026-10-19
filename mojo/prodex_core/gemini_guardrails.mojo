@@ -261,6 +261,12 @@ def guard_tool_failure(view: ProdexRichStringView) -> Bool:
     return False
 
 
+def guard_process_exited_zero(view: ProdexRichStringView) -> Bool:
+    return guard_range_contains(
+        view, 0, Int64(view.len), StringSlice("process exited with code 0")
+    )
+
+
 def guard_version_lines(view: ProdexRichStringView) -> Bool:
     var length = Int64(view.len)
     var line_start: Int64 = 0
@@ -927,12 +933,5 @@ def prodex_mojo_gemini_guardrail_text_v1(
     if operation == GEMINI_GUARDRAIL_VERIFICATION_MARKER:
         return Int64(guard_verification_marker(view))
     if operation == GEMINI_GUARDRAIL_PROCESS_EXITED_ZERO:
-        return Int64(
-            guard_range_contains(
-                view,
-                0,
-                Int64(view.len),
-                StringSlice("process exited with code 0"),
-            )
-        )
+        return Int64(guard_process_exited_zero(view))
     return Int64(guard_command_output_only(view))

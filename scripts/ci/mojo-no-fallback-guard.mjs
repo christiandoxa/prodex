@@ -412,6 +412,14 @@ const PROMOTED_FILES = [
   "crates/prodex-mojo-core/src/rich/gemini_precommit.rs",
   "crates/prodex-mojo-core/src/rich/gemini_precommit_tests.rs",
   "mojo/prodex_core/gemini_precommit.mojo",
+  "crates/prodex-provider-core/src/gemini_bridge/tooling/guardrails.rs",
+  "crates/prodex-provider-core/src/gemini_bridge/tooling/guardrails/tool_text.rs",
+  "crates/prodex-provider-core/src/gemini_bridge/tooling/guardrails/tests.rs",
+  "crates/prodex-mojo-core/src/gemini_guardrails.rs",
+  "crates/prodex-mojo-core/src/gemini_guardrails/conversation_tests.rs",
+  "mojo/prodex_core/gemini_guardrail_conversation.mojo",
+  "mojo/prodex_core/gemini_guardrails.mojo",
+  "mojo/tests/gemini_guardrail_conversation_test.mojo",
   "mojo/tests/gemini_precommit_test.mojo",
   "crates/prodex-provider-core/src/gemini_bridge/media/mime.rs",
   "crates/prodex-provider-core/src/gemini_bridge/media/mime/data_url_tests.rs",
@@ -1941,6 +1949,45 @@ export function findViolations(files) {
     return [];
   });
   const geminiResponseMediaMojoViolations = files.flatMap(([filePath, contents]) => {
+    if (filePath === "crates/prodex-provider-core/src/gemini_bridge/tooling/guardrails.rs") {
+      const production = contents.split("#[cfg(test)]", 1)[0];
+      return production.includes("GeminiGuardrailJsonOperation::UnverifiedSuccessClaim")
+        && !production.includes("tool_texts_since_latest_user") && !production.includes("clean_final_verification")
+        ? [] : [`${filePath}: Gemini conversation verification must remain Mojo-owned`];
+    }
+    if (filePath === "crates/prodex-provider-core/src/gemini_bridge/tooling/guardrails/tool_text.rs") {
+      return contents.includes("gemini_guardrail_json(")
+        && contents.includes("GeminiGuardrailJsonOperation::PayloadText")
+        && !contents.includes("match value") && !contents.includes(".rposition(")
+        ? [] : [`${filePath}: Gemini payload traversal must remain Mojo-owned`];
+    }
+    const conversationMarkers = new Map([
+      ["crates/prodex-app/src/runtime_launch/proxy_startup/gemini_sse_tests.rs", [
+        "gemini_sse_reader_fails_unverified_success_after_tool_error",
+        "gemini_sse_reader_allows_success_after_explicit_version_verification",
+      ]],
+      ["crates/prodex-provider-core/src/gemini_bridge/tooling/guardrails/tests.rs", [
+        "mojo_payload_collection_preserves_prefix_empty_strings_and_first_present_field",
+        "mojo_verification_history_keeps_user_boundary_nonblank_window_and_exit_precedence",
+        "mojo_payload_selection_reaches_exact_command_output_callers",
+      ]],
+      ["crates/prodex-mojo-core/src/gemini_guardrails.rs", ["prodex_mojo_gemini_guardrail_conversation_v1(", "transform_json_with_scratch("]],
+      ["crates/prodex-mojo-core/src/gemini_guardrails/conversation_tests.rs", [
+        "compiled_guardrail_payload_preserves_presence_priority_empty_leaves_and_prefix",
+        "compiled_guardrail_payload_handles_large_strings_and_deep_flat_abi_trees",
+        "compiled_guardrail_json_rejects_invalid_abi_and_scratch_before_output_writes",
+      ]],
+      ["mojo/prodex_core/gemini_guardrail_conversation.mojo", [
+        '@export("prodex_mojo_gemini_guardrail_conversation_v1")', "def guard_collect_payload(",
+        "def guard_unverified_claim(", "guard_tool_failure(", "guard_verification_marker(", "guard_process_exited_zero(",
+      ]],
+      ["mojo/prodex_core/gemini_guardrails.mojo", ["def guard_process_exited_zero(", "return Int64(guard_process_exited_zero(view))"]],
+      ["mojo/tests/gemini_guardrail_conversation_test.mojo", ["== 71", "prodex_mojo_gemini_guardrail_conversation_v1(2,"]],
+    ]);
+    if (conversationMarkers.has(filePath)) {
+      return conversationMarkers.get(filePath).filter((marker) => !contents.includes(marker))
+        .map((marker) => `${filePath}: Gemini conversation guardrail ownership must retain ${marker}`);
+    }
     if (filePath === "crates/prodex-provider-core/src/gemini_bridge/precommit.rs") {
       const production = contents.split("#[cfg(test)]", 1)[0];
       return production.includes("prodex_mojo_core::rich::gemini_precommit_plan(")
@@ -10978,6 +11025,13 @@ async function promotedFiles() {
 }
 
 function selfTest() {
+  const conversationFile = "crates/prodex-provider-core/src/gemini_bridge/tooling/guardrails/tool_text.rs";
+  const conversationCalls = "gemini_guardrail_json( GeminiGuardrailJsonOperation::PayloadText";
+  assert.deepEqual(findViolations([[conversationFile, conversationCalls]]), []);
+  for (const restored of ["", `${conversationCalls}\nmatch value`, `${conversationCalls}\nmessages.rposition(`]) {
+    assert.match(findViolations([[conversationFile, restored]]).join("\n"), /Gemini payload traversal/u);
+  }
+  assert.match(findViolations([["crates/prodex-provider-core/src/gemini_bridge/tooling/guardrails.rs", ""]]).join("\n"), /Gemini conversation verification/u);
   const precommitFile = "crates/prodex-provider-core/src/gemini_bridge/precommit.rs";
   const precommitCall = "prodex_mojo_core::rich::gemini_precommit_plan(\nprodex_mojo_core::rich::gemini_precommit_frame_decision(";
   assert.deepEqual(findViolations([[precommitFile, precommitCall]]), []);
