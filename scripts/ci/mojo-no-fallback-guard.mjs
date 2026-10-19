@@ -184,6 +184,7 @@ const PROMOTED_FILES = [
   "crates/prodex-mojo-core/src/kiro_acp_update_policy.rs",
   "mojo/prodex_core/kiro_acp_update_policy.mojo",
   "crates/prodex-app/src/app_commands/log_tui.rs",
+  "crates/prodex-app/src/app_commands/log_tui_header_tests.rs",
   "crates/prodex-app/src/app_commands/log_tui_render.rs",
   "crates/prodex-mojo-core/src/log/search.rs",
   "crates/prodex-mojo-core/src/log/tui.rs",
@@ -4699,12 +4700,15 @@ export function findViolations(files) {
   });
   const logTuiLayoutViolations = files.flatMap(([filePath, contents]) => {
     if (filePath === "crates/prodex-app/src/app_commands/log_tui.rs") {
-      const production = contents.split("\\n#[cfg(test)]\\nmod tests", 1)[0];
+      const production = contents.split("\n#[cfg(test)]\nmod tests", 1)[0];
       const required = [
         "prodex_mojo_core::log::log_tui_window(",
         "let plan = log_tui_key_plan(",
         "LogTuiSearchAction::Push",
         "compiled_log_tui_keyboard_caller_keeps_edit_mode_search_and_control_precedence",
+        "log_tui_header_layout(",
+        "log_tui_quota_layout(",
+        "log_tui_header_gap(",
       ];
       const restored = [
         "let hidden = lines.len().saturating_sub(max_lines)",
@@ -4712,11 +4716,18 @@ export function findViolations(files) {
         "self.scroll_from_bottom.saturating_add(",
         "self.scroll_from_bottom.saturating_sub(",
         "KeyCode::Char('q') | KeyCode::Esc => LogTuiInput::Quit",
-        "if self.editing_search {\\n            match key.code {",
+        "let inner_width = width.saturating_sub(2);",
+        "if profile_width + suffix_width <= width",
+        "let gap = inner_width.saturating_sub(",
+        "if self.editing_search {\n            match key.code {",
       ];
       return required.every((marker) => contents.includes(marker)) &&
         restored.every((marker) => !production.includes(marker))
         ? [] : [filePath + ": log viewport and keyboard state policy must remain compiled Mojo-owned"];
+    }
+    if (filePath === "crates/prodex-app/src/app_commands/log_tui_header_tests.rs") {
+      return contents.includes("compiled_log_tui_header_layout_reaches_live_unicode_and_atomic_quota_consumer")
+        ? [] : [filePath + ": compiled header/quota production caller regression missing"];
     }
     if (filePath === "crates/prodex-app/src/app_commands/log_tui_render.rs") {
       const production = contents.split("\n#[cfg(test)]\nmod tests", 1)[0];
@@ -4739,6 +4750,12 @@ export function findViolations(files) {
         "pub fn log_tui_key_plan(",
         "compiled_log_tui_key_state_machine_preserves_control_and_unicode",
         "compiled_log_tui_key_abi_rejects_invalid_inputs_before_writing",
+        "fn prodex_mojo_log_tui_header_layout_v1(",
+        "pub fn log_tui_header_layout(",
+        "pub fn log_tui_quota_layout(",
+        "pub fn log_tui_header_gap(",
+        "compiled_log_tui_header_and_quota_layout_preserve_atomic_segments",
+        "compiled_log_tui_header_layout_abi_rejects_invalid_inputs_before_writing",
         "compiled_log_tui_window_handles_edges_and_maximum_scroll",
         "compiled_log_tui_snapshot_height_clamps_measured_content",
         "compiled_source_tone_preserves_exact_case_and_tool_prefix",
@@ -4751,6 +4768,9 @@ export function findViolations(files) {
         '@export("prodex_mojo_log_tui_snapshot_height_v1")',
         '@export("prodex_mojo_log_tui_source_tone_v1")',
         '@export("prodex_mojo_log_tui_key_plan_v1")',
+        '@export("prodex_mojo_log_tui_header_layout_v1")',
+        "operation == LOG_TUI_HEADER_OP_QUOTA",
+        "width0 = inner - second_width - first_width",
         "scroll_from_bottom > max_scroll",
         "search_action = LOG_TUI_SEARCH_PUSH",
         'log_view_starts_literal(source, StringSlice("tool-call:"))',
@@ -11897,6 +11917,9 @@ function selfTest() {
     "let plan = log_tui_key_plan(",
     "LogTuiSearchAction::Push",
     "compiled_log_tui_keyboard_caller_keeps_edit_mode_search_and_control_precedence",
+    "log_tui_header_layout(",
+    "log_tui_quota_layout(",
+    "log_tui_header_gap(",
   ].join("\n");
   const logAsciiSearchCaller = "crates/prodex-app/src/app_commands/log_tui.rs";
   assert.deepEqual(findViolations([[logAsciiSearchCaller, logAsciiSearchConsumer]]), []);
@@ -12791,6 +12814,9 @@ function selfTest() {
       '@export("prodex_mojo_log_tui_snapshot_height_v1")',
       '@export("prodex_mojo_log_tui_source_tone_v1")',
       '@export("prodex_mojo_log_tui_key_plan_v1")',
+      '@export("prodex_mojo_log_tui_header_layout_v1")',
+      "operation == LOG_TUI_HEADER_OP_QUOTA",
+      "width0 = inner - second_width - first_width",
       "scroll_from_bottom > max_scroll",
       "search_action = LOG_TUI_SEARCH_PUSH",
       'log_view_starts_literal(source, StringSlice("tool-call:"))',

@@ -8,7 +8,10 @@ use crate::{
 };
 use chrono::{Local, TimeZone};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-use prodex_mojo_core::log::{LogTuiKey, LogTuiSearchAction, log_tui_key_plan};
+use prodex_mojo_core::log::{
+    LogTuiHeaderMode, LogTuiKey, LogTuiQuotaMode, LogTuiSearchAction, log_tui_header_gap,
+    log_tui_header_layout, log_tui_key_plan, log_tui_quota_layout,
+};
 use prodex_quota::RuntimeQuotaWindowStatus;
 use prodex_runtime_doctor::read_runtime_log_tail;
 use ratatui::text::{Line, Text};
@@ -68,7 +71,6 @@ pub(super) fn render_log_header_with_display(
     throughput_display: Option<OutputThroughputDisplay>,
     width: usize,
 ) -> String {
-    let inner_width = width.saturating_sub(2);
     let throughput = match throughput_display {
         Some(OutputThroughputDisplay::Active(rate)) => format_output_tokens_per_second(Some(rate)),
         Some(OutputThroughputDisplay::Last(rate)) => {
@@ -77,23 +79,28 @@ pub(super) fn render_log_header_with_display(
         None => format_output_tokens_per_second(None),
     };
     let throughput_width = terminal_ui::text_width(&throughput);
-    if inner_width <= throughput_width {
-        return terminal_ui::fit_cell(&throughput, inner_width);
-    }
-
-    let left_width = inner_width.saturating_sub(throughput_width + 2);
-    let prefix = title.to_string();
-    let left = if terminal_ui::text_width(&prefix) <= left_width {
-        let detail_width = left_width.saturating_sub(terminal_ui::text_width(&prefix) + 2);
-        if let Some(detail) = detail.filter(|_| detail_width > 0) {
-            format!("{prefix}  {}", detail.render(detail_width))
-        } else {
-            prefix
+    let layout = log_tui_header_layout(
+        width,
+        terminal_ui::text_width(title),
+        throughput_width,
+        detail.is_some(),
+    )
+    .expect("compiled Mojo log TUI header layout returned invalid output");
+    let left = match layout.mode {
+        LogTuiHeaderMode::ThroughputOnly => {
+            return terminal_ui::fit_cell(&throughput, layout.inner_width);
         }
-    } else {
-        terminal_ui::fit_cell(title, left_width)
+        LogTuiHeaderMode::TitleOnly => title.to_string(),
+        LogTuiHeaderMode::TitleAndDetail => format!(
+            "{title}  {}",
+            detail
+                .expect("compiled Mojo requested an absent log header detail")
+                .render(layout.detail_width)
+        ),
+        LogTuiHeaderMode::ClippedTitle => terminal_ui::fit_cell(title, layout.left_width),
     };
-    let gap = inner_width.saturating_sub(terminal_ui::text_width(&left) + throughput_width);
+    let gap = log_tui_header_gap(width, terminal_ui::text_width(&left), throughput_width)
+        .expect("compiled Mojo log TUI header gap returned invalid output");
     format!("{left}{}{}", " ".repeat(gap), throughput)
 }
 
@@ -144,31 +151,30 @@ impl LogTuiHeaderDetail {
     }
 
     pub(super) fn render(&self, width: usize) -> String {
-        if width == 0 {
-            return String::new();
+        let suffix = self
+            .quota
+            .as_ref()
+            .map(|quota| format!("  {}  {}", quota.five_hour, quota.weekly));
+        let layout = log_tui_quota_layout(
+            width,
+            terminal_ui::text_width(&self.profile),
+            suffix.as_deref().map(terminal_ui::text_width),
+        )
+        .expect("compiled Mojo log TUI quota segment layout returned invalid output");
+        match layout.mode {
+            LogTuiQuotaMode::Empty => String::new(),
+            LogTuiQuotaMode::ProfileOnly => terminal_ui::middle_ellipsize(&self.profile, width),
+            LogTuiQuotaMode::Full => format!(
+                "{}{}",
+                self.profile,
+                suffix.expect("compiled Mojo selected absent full log quota suffix")
+            ),
+            LogTuiQuotaMode::Shortened => format!(
+                "{}{}",
+                terminal_ui::middle_ellipsize(&self.profile, layout.profile_width),
+                suffix.expect("compiled Mojo selected absent short log quota suffix")
+            ),
         }
-        let Some(quota) = self.quota.as_ref() else {
-            return terminal_ui::middle_ellipsize(&self.profile, width);
-        };
-        let suffix = format!("  {}  {}", quota.five_hour, quota.weekly);
-        let profile_width = terminal_ui::text_width(&self.profile);
-        let suffix_width = terminal_ui::text_width(&suffix);
-        if profile_width + suffix_width <= width {
-            return format!("{}{suffix}", self.profile);
-        }
-        // Header details are semantic segments.  Keep the quota segment atomic and only
-        // shorten the profile identity to make room for it.  If even an ellipsis cannot fit,
-        // omit the complete quota segment instead of clipping its words into a fake field.
-        if suffix_width + 3 <= width {
-            return format!(
-                "{}{suffix}",
-                terminal_ui::middle_ellipsize(&self.profile, width - suffix_width)
-            );
-        }
-        if profile_width <= width {
-            return self.profile.clone();
-        }
-        terminal_ui::middle_ellipsize(&self.profile, width)
     }
 }
 
@@ -452,11 +458,6 @@ mod tests {
                 "{haystack:?}/{query:?}",
             );
         }
-    }
-
-    #[test]
-    fn human_log_modes_share_the_compact_title() {
-        assert_eq!(LOG_TUI_TITLE, "Prodex Log");
     }
 
     #[test]
@@ -760,3 +761,7 @@ mod tests {
         );
     }
 }
+
+#[cfg(test)]
+#[path = "log_tui_header_tests.rs"]
+mod header_tests;

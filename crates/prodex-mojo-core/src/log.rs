@@ -25,8 +25,10 @@ pub use transcript_ansi::{
     strip_transcript_ansi_codes, transcript_binary_like,
 };
 pub use tui::{
-    LogTuiKey, LogTuiKeyPlan, LogTuiSearchAction, LogTuiSourceTone, log_tui_key_plan,
-    log_tui_snapshot_height, log_tui_source_tone, log_tui_window,
+    LogTuiHeaderLayout, LogTuiHeaderMode, LogTuiKey, LogTuiKeyPlan, LogTuiQuotaLayout,
+    LogTuiQuotaMode, LogTuiSearchAction, LogTuiSourceTone, log_tui_header_gap,
+    log_tui_header_layout, log_tui_key_plan, log_tui_quota_layout, log_tui_snapshot_height,
+    log_tui_source_tone, log_tui_window,
 };
 
 const _: () = assert!(std::mem::size_of::<usize>() == std::mem::size_of::<u64>());
