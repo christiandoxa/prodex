@@ -38,6 +38,15 @@ unsafe extern "C" {
         max_scroll: u64,
         output_address: u64,
     ) -> i64;
+    fn prodex_mojo_log_tui_header_layout_v1(
+        version: i64,
+        operation: i64,
+        width: u64,
+        first_width: u64,
+        second_width: u64,
+        present: i64,
+        output_address: u64,
+    ) -> i64;
 }
 
 fn status(value: i64) -> Result<(), MojoError> {
@@ -224,9 +233,239 @@ pub fn log_tui_key_plan(
     })
 }
 
+const HEADER_LAYOUT_OP_OUTER: i64 = 0;
+const HEADER_LAYOUT_OP_QUOTA: i64 = 1;
+const HEADER_LAYOUT_OP_GAP: i64 = 2;
+
+fn header_layout_call(
+    operation: i64,
+    width: usize,
+    first_width: usize,
+    second_width: usize,
+    present: bool,
+) -> Result<[u64; 4], MojoError> {
+    let mut output = [u64::MAX; 4];
+    status(unsafe {
+        prodex_mojo_log_tui_header_layout_v1(
+            ABI_VERSION,
+            operation,
+            u64::try_from(width).map_err(|_| MojoError::InvalidInput)?,
+            u64::try_from(first_width).map_err(|_| MojoError::InvalidInput)?,
+            u64::try_from(second_width).map_err(|_| MojoError::InvalidInput)?,
+            i64::from(present),
+            output.as_mut_ptr() as usize as u64,
+        )
+    })?;
+    Ok(output)
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LogTuiHeaderMode {
+    ThroughputOnly,
+    TitleOnly,
+    TitleAndDetail,
+    ClippedTitle,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct LogTuiHeaderLayout {
+    pub mode: LogTuiHeaderMode,
+    pub inner_width: usize,
+    pub left_width: usize,
+    pub detail_width: usize,
+}
+
+/// Header segmentation, truncation and quota-space precedence are compiled.
+pub fn log_tui_header_layout(
+    width: usize,
+    title_width: usize,
+    throughput_width: usize,
+    detail_present: bool,
+) -> Result<LogTuiHeaderLayout, MojoError> {
+    let values = header_layout_call(
+        HEADER_LAYOUT_OP_OUTER,
+        width,
+        title_width,
+        throughput_width,
+        detail_present,
+    )?;
+    let mode = match values[0] {
+        0 => LogTuiHeaderMode::ThroughputOnly,
+        1 => LogTuiHeaderMode::TitleOnly,
+        2 => LogTuiHeaderMode::TitleAndDetail,
+        3 => LogTuiHeaderMode::ClippedTitle,
+        _ => return Err(MojoError::InvalidOutput),
+    };
+    let inner_width = usize::try_from(values[1]).map_err(|_| MojoError::InvalidOutput)?;
+    let left_width = usize::try_from(values[2]).map_err(|_| MojoError::InvalidOutput)?;
+    let detail_width = usize::try_from(values[3]).map_err(|_| MojoError::InvalidOutput)?;
+    if inner_width > width || left_width > inner_width || detail_width > left_width {
+        return Err(MojoError::InvalidOutput);
+    }
+    Ok(LogTuiHeaderLayout {
+        mode,
+        inner_width,
+        left_width,
+        detail_width,
+    })
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LogTuiQuotaMode {
+    Empty,
+    ProfileOnly,
+    Full,
+    Shortened,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct LogTuiQuotaLayout {
+    pub mode: LogTuiQuotaMode,
+    pub profile_width: usize,
+}
+
+/// Choose an atomic profile/quota segment layout from host-measured display widths.
+pub fn log_tui_quota_layout(
+    width: usize,
+    profile_width: usize,
+    suffix_width: Option<usize>,
+) -> Result<LogTuiQuotaLayout, MojoError> {
+    let values = header_layout_call(
+        HEADER_LAYOUT_OP_QUOTA,
+        width,
+        profile_width,
+        suffix_width.unwrap_or(0),
+        suffix_width.is_some(),
+    )?;
+    let mode = match values[0] {
+        0 => LogTuiQuotaMode::Empty,
+        1 => LogTuiQuotaMode::ProfileOnly,
+        2 if suffix_width.is_some() => LogTuiQuotaMode::Full,
+        3 if suffix_width.is_some() => LogTuiQuotaMode::Shortened,
+        _ => return Err(MojoError::InvalidOutput),
+    };
+    let profile_width = usize::try_from(values[1]).map_err(|_| MojoError::InvalidOutput)?;
+    if profile_width > width || (mode == LogTuiQuotaMode::Shortened && profile_width == 0) {
+        return Err(MojoError::InvalidOutput);
+    }
+    Ok(LogTuiQuotaLayout {
+        mode,
+        profile_width,
+    })
+}
+
+/// Right-align throughput after the host renders Unicode-aware left text.
+pub fn log_tui_header_gap(
+    width: usize,
+    left_rendered_width: usize,
+    throughput_width: usize,
+) -> Result<usize, MojoError> {
+    let values = header_layout_call(
+        HEADER_LAYOUT_OP_GAP,
+        width,
+        left_rendered_width,
+        throughput_width,
+        false,
+    )?;
+    if values[0] != 0 || values[2] != 0 || values[3] != 0 {
+        return Err(MojoError::InvalidOutput);
+    }
+    let gap = usize::try_from(values[1]).map_err(|_| MojoError::InvalidOutput)?;
+    if gap > width {
+        return Err(MojoError::InvalidOutput);
+    }
+    Ok(gap)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn compiled_log_tui_header_and_quota_layout_preserve_atomic_segments() {
+        use LogTuiHeaderMode::*;
+        for (width, title, throughput, detail, mode, inner, left, detail_width) in [
+            (0, 10, 0, false, ThroughputOnly, 0, 0, 0),
+            (2, 10, 0, true, ThroughputOnly, 0, 0, 0),
+            (11, 10, 9, true, ThroughputOnly, 9, 0, 0),
+            (16, 12, 1, true, ClippedTitle, 14, 11, 0),
+            (17, 12, 1, true, TitleOnly, 15, 12, 0),
+            (20, 12, 1, true, TitleAndDetail, 18, 15, 1),
+            (80, 10, 9, false, TitleOnly, 78, 67, 55),
+            (80, 10, 9, true, TitleAndDetail, 78, 67, 55),
+        ] {
+            assert_eq!(
+                log_tui_header_layout(width, title, throughput, detail),
+                Ok(LogTuiHeaderLayout {
+                    mode,
+                    inner_width: inner,
+                    left_width: left,
+                    detail_width,
+                })
+            );
+        }
+        use LogTuiQuotaMode::*;
+        for (width, profile, suffix, mode, profile_width) in [
+            (0, 99, None, Empty, 0),
+            (3, 99, None, ProfileOnly, 0),
+            (80, 10, Some(20), Full, 0),
+            (25, 10, Some(20), Shortened, 5),
+            (21, 10, Some(20), ProfileOnly, 0),
+            (10, 9, Some(21), ProfileOnly, 0),
+            (usize::MAX, 0, Some(usize::MAX), Full, 0),
+        ] {
+            assert_eq!(
+                log_tui_quota_layout(width, profile, suffix),
+                Ok(LogTuiQuotaLayout {
+                    mode,
+                    profile_width
+                }),
+            );
+        }
+        for (width, left, throughput, expected) in [
+            (80, 40, 8, 30),
+            (20, 18, 10, 0),
+            (0, 0, 0, 0),
+            (10, 1, 2, 5),
+            (usize::MAX, usize::MAX, 0, 0),
+        ] {
+            assert_eq!(log_tui_header_gap(width, left, throughput), Ok(expected));
+        }
+    }
+
+    #[test]
+    fn compiled_log_tui_header_layout_abi_rejects_invalid_inputs_before_writing() {
+        let mut output = [71_u64; 4];
+        for (version, operation, present, first, second, expected) in [
+            (2, 0, 0, 0, 0, 4),
+            (1, -1, 0, 0, 0, 1),
+            (1, 3, 0, 0, 0, 1),
+            (1, 0, -1, 0, 0, 1),
+            (1, 1, 2, 0, 0, 1),
+            (1, 1, 0, 0, 8, 1),
+            (1, 2, 1, 0, 0, 1),
+        ] {
+            assert_eq!(
+                unsafe {
+                    prodex_mojo_log_tui_header_layout_v1(
+                        version,
+                        operation,
+                        80,
+                        first,
+                        second,
+                        present,
+                        output.as_mut_ptr() as usize as u64,
+                    )
+                },
+                expected
+            );
+            assert_eq!(output, [71_u64; 4]);
+        }
+        assert_eq!(
+            unsafe { prodex_mojo_log_tui_header_layout_v1(1, 0, 80, 10, 5, 0, 0) },
+            1
+        );
+    }
 
     #[test]
     fn compiled_log_tui_key_state_machine_preserves_control_and_unicode() {

@@ -3614,3 +3614,86 @@ def prodex_mojo_log_tui_key_plan_v1(
     output[unsafe_offset=2] = search_action
     output[unsafe_offset=3] = scroll
     return 0
+
+
+# Terminal width measurements originate in the Rust rendering host. The
+# compiled owner decides which header/quota segments fit and how much
+# remaining width can be used, including saturating right-alignment gaps.
+comptime LOG_TUI_HEADER_OP_OUTER: Int64 = 0
+comptime LOG_TUI_HEADER_OP_QUOTA: Int64 = 1
+comptime LOG_TUI_HEADER_OP_GAP: Int64 = 2
+
+
+@export("prodex_mojo_log_tui_header_layout_v1")
+def prodex_mojo_log_tui_header_layout_v1(
+    abi_version: Int64,
+    operation: Int64,
+    width: UInt64,
+    first_width: UInt64,
+    second_width: UInt64,
+    present: Int64,
+    output_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != LOG_TUI_ABI_VERSION:
+        return 4
+    if (
+        output_address == 0
+        or operation < LOG_TUI_HEADER_OP_OUTER
+        or operation > LOG_TUI_HEADER_OP_GAP
+        or not log_snapshot_flag_valid(present)
+        or (operation == LOG_TUI_HEADER_OP_GAP and present != 0)
+        or (operation == LOG_TUI_HEADER_OP_QUOTA and present == 0 and second_width != 0)
+    ):
+        return 1
+    var output = Pointer[mut=True, UInt64, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    var mode: UInt64 = 0
+    var width0: UInt64 = 0
+    var width1: UInt64 = 0
+    var width2: UInt64 = 0
+    if operation == LOG_TUI_HEADER_OP_OUTER:
+        var inner: UInt64 = 0
+        if width > 2:
+            inner = width - 2
+        width0 = inner
+        if inner <= second_width:
+            mode = 0 # render a clipped throughput cell
+        else:
+            var remaining = inner - second_width
+            var left_width: UInt64 = 0
+            if remaining > 2:
+                left_width = remaining - 2
+            width1 = left_width
+            if first_width > left_width:
+                mode = 3 # clip title to the left width
+            else:
+                mode = 1 # full title, no profile detail
+                if left_width > first_width and left_width - first_width > 2:
+                    width2 = left_width - first_width - 2
+                    if present == 1:
+                        mode = 2 # full title and fitting detail
+    elif operation == LOG_TUI_HEADER_OP_QUOTA:
+        if width == 0:
+            mode = 0 # empty cell
+        elif present == 0:
+            mode = 1 # middle-ellipsize the profile alone
+        elif second_width <= width and first_width <= width - second_width:
+            mode = 2 # full profile and quota suffix
+        elif second_width <= width and width - second_width >= 3:
+            mode = 3 # middle-ellipsize profile to the spare width
+            width0 = width - second_width
+        else:
+            mode = 1 # suffix does not fit atomically
+    else:
+        var inner: UInt64 = 0
+        if width > 2:
+            inner = width - 2
+        if second_width <= inner and first_width <= inner - second_width:
+            width0 = inner - second_width - first_width
+        # mode=0, width0=required separating whitespace
+    output[unsafe_offset=0] = mode
+    output[unsafe_offset=1] = width0
+    output[unsafe_offset=2] = width1
+    output[unsafe_offset=3] = width2
+    return 0

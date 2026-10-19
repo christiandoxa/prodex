@@ -6076,3 +6076,12 @@ while control-shortcut priority, Unicode search-edit handling, scroll
 saturation, and quit/search/page semantics no longer have a Rust owner.
 Direct ABI and real-caller regressions plus the no-fallback guard cover
 this transition; the 75% goal remains outstanding.
+
+## Compiled log TUI header and quota geometry (2026-10-19)
+
+Header segmentation, suffix fit/ellipsizing selection and post-render
+right-alignment gaps are now compiled Mojo decisions; Rust only measures
+Unicode terminal widths and materializes the selected UI segments. The
+old Rust header/quota arithmetic was deleted. Both ABI and live caller
+tests, strict invalid-input checks and the updated no-fallback guard
+protect the boundary. The 75% target remains outstanding.
