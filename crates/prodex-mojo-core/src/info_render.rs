@@ -1,6 +1,7 @@
 use crate::MojoError;
 
 mod doctor;
+mod launch_quota;
 mod provider;
 mod runtime_load;
 mod runway;
@@ -10,6 +11,10 @@ pub use runtime_load::{
 mod status;
 mod token_usage;
 pub use doctor::{InfoDoctorViewportPlan, doctor_value_color, doctor_viewport_plan};
+pub use launch_quota::{
+    RuntimeLaunchBlockedSelectedProfilePlan, RuntimeLaunchNoReadyProfilesPlan,
+    blocked_selected_runtime_profile_plan, no_ready_runtime_profiles_plan,
+};
 pub use provider::{
     InfoProviderCapability, InfoProviderRoutePolicy, format_provider_capabilities_summary,
     format_provider_summary,
@@ -128,6 +133,9 @@ fn render_bytes(
             .ok_or(MojoError::InvalidInput)
     })?;
     let output_extra = match operation {
+        launch_quota::LAUNCH_NO_READY | launch_quota::LAUNCH_BLOCKED => {
+            text_bytes.checked_mul(2).ok_or(MojoError::InvalidInput)?
+        }
         provider::PROVIDER_SUMMARY | provider::PROVIDER_CAPABILITIES => {
             texts.len().checked_mul(48).ok_or(MojoError::InvalidInput)?
         }

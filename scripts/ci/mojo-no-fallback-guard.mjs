@@ -35,6 +35,9 @@ const INFO_TOKEN_NUMBERS_MOJO = "mojo/prodex_core/info_token_usage.mojo";
 const LOG_NUMBERS_MOJO = "mojo/prodex_core/log_number.mojo";
 const INFO_LOAD_CALLER = "crates/prodex-app/src/reports/info/runtime_load.rs";
 const INFO_QUOTA_CALLER = "crates/prodex-app/src/reports/info/quota.rs";
+const LAUNCH_QUOTA_CALLER = "crates/prodex-runtime-launch/src/quota_plan.rs";
+const LAUNCH_QUOTA_ADAPTER = "crates/prodex-mojo-core/src/info_render/launch_quota.rs";
+const LAUNCH_QUOTA_TESTS = "crates/prodex-mojo-core/src/info_render/launch_quota_tests.rs";
 const QUOTA_LOG_PROFILE_CALLER = "crates/prodex-app/src/quota_support.rs";
 const INFO_LOAD_ADAPTER = "crates/prodex-mojo-core/src/info_render/runtime_load.rs";
 const INFO_LOAD_MOJO = "mojo/prodex_core/info_runtime_load.mojo";
@@ -667,6 +670,9 @@ const PROMOTED_FILES = [
   LOG_NUMBERS_MOJO,
   INFO_LOAD_CALLER,
   INFO_QUOTA_CALLER,
+  LAUNCH_QUOTA_CALLER,
+  LAUNCH_QUOTA_ADAPTER,
+  LAUNCH_QUOTA_TESTS,
   QUOTA_LOG_PROFILE_CALLER,
   INFO_LOAD_ADAPTER,
   INFO_LOAD_MOJO,
@@ -1540,6 +1546,30 @@ const FORBIDDEN_MARKERS = [
 export function findViolations(files) {
   const logPayloadProjectionViolations = files.flatMap(([filePath, contents]) => {
     const production = contents.split("#[cfg(test)]", 1)[0];
+    if (filePath === LAUNCH_QUOTA_CALLER) {
+      const violations = ["prodex_mojo_core::info_render::no_ready_runtime_profiles_plan(",
+        "prodex_mojo_core::info_render::blocked_selected_runtime_profile_plan("]
+        .filter((marker) => !production.includes(marker))
+        .map((marker) => `${filePath}: launch quota plans must retain Mojo delegation ${marker}`);
+      if (/alternatives\.first\(|alternatives\.join\(|No other ready profile was found|quota preflight blocked profile/u.test(production)) {
+        violations.push(`${filePath}: contains restored Rust launch quota decisions or messages`);
+      }
+      return violations;
+    }
+    if (filePath === LAUNCH_QUOTA_ADAPTER) {
+      return ["const LAUNCH_NO_READY: i64 = 32", "const LAUNCH_BLOCKED: i64 = 33",
+        "render_bytes(", "read_status_length("]
+        .filter((marker) => !production.includes(marker))
+        .map((marker) => `${filePath}: launch quota ABI adapter must retain ${marker}`);
+    }
+    if (filePath === LAUNCH_QUOTA_TESTS) {
+      return ["compiled_preflight_plans_preserve_all_rotation_and_stop_messages",
+        "compiled_preflight_frames_preserve_long_unicode_nul_and_delimiters",
+        "preflight_frame_decoder_rejects_bad_width_overflow_truncation_and_utf8",
+        "compiled_preflight_abi_rejects_invalid_shapes_before_writes"]
+        .filter((marker) => !contents.includes(marker))
+        .map((marker) => `${filePath}: launch quota boundary regression must retain ${marker}`);
+    }
     if (filePath === QUOTA_LOG_PROFILE_CALLER) {
       const body = contents.match(/fn quota_runtime_profile_from_line\([^]*?^\}/mu)?.[0] ?? "";
       return body.includes("parse_plain_log_envelope(line)") && !body.includes('split_once("] ")')
@@ -10559,6 +10589,13 @@ function selfTest() {
   assert.deepEqual(relocatedTestPaths("crates/prodex-mojo-core/src/redaction.rs",
     testWiring.replace("mod tests;", "")), []);
   const payloadCaller = "prodex_mojo_core::json::log_payload_projection( parse_plain_log_envelope(line)";
+  const launchQuotaCaller = "prodex_mojo_core::info_render::no_ready_runtime_profiles_plan( prodex_mojo_core::info_render::blocked_selected_runtime_profile_plan(";
+  assert.deepEqual(findViolations([[LAUNCH_QUOTA_CALLER, launchQuotaCaller]]), []);
+  assert.match(findViolations([[LAUNCH_QUOTA_CALLER, launchQuotaCaller + "\nalternatives.first()"]]).join("\n"), /restored Rust launch quota decisions/u);
+  assert.match(findViolations([[LAUNCH_QUOTA_CALLER, "fn rust_plan() {}"]]).join("\n"), /launch quota plans must retain Mojo delegation/u);
+  const launchQuotaAdapter = "const LAUNCH_NO_READY: i64 = 32 const LAUNCH_BLOCKED: i64 = 33 render_bytes( read_status_length(";
+  assert.deepEqual(findViolations([[LAUNCH_QUOTA_ADAPTER, launchQuotaAdapter]]), []);
+  assert.match(findViolations([[LAUNCH_QUOTA_ADAPTER, launchQuotaAdapter.replace("render_bytes(", "render_rust(")]]).join("\n"), /launch quota ABI adapter must retain/u);
   assert.deepEqual(findViolations([[LOG_PAYLOAD_CALLER_FILE, payloadCaller]]), []);
   assert.match(findViolations([[LOG_PAYLOAD_CALLER_FILE, payloadCaller + "\nfn append_payload_summary() {}"]]).join("\n"), /restored Rust log payload projection/u);
   assert.match(findViolations([[LOG_PAYLOAD_CALLER_FILE, "fn legacy_projection() {}"]]).join("\n"), /must remain Mojo-owned/u);

@@ -6522,3 +6522,52 @@ removed. Inspected Trash was empty and `trash-empty -f` completed.
 Canonical `CARGO_BUILD_JOBS=6 npm run test:changed` and final docs/churn checks
 pass; its featureless core/shared-type selections run no tests, while the strict
 Mojo and real caller suites above provide compiled execution coverage.
+
+## Compiled launch preflight plans (2026-10-20)
+
+Quota-summary checkpoint `84dc82da3` is pushed to main. The existing Info
+renderer now owns no-ready and blocked-selected-profile plans through ABI
+operations 32/33: rotation eligibility, first-alternative selection, stop-message
+order and all plan text. It reuses the existing warning, inspect-hint and
+length-framing writers. Rust retains usage acquisition/projection and checked
+decoding of at most five UTF-8 frames. Existing public plan types move to the
+adapter and are re-exported under their original runtime-launch names.
+The previous Rust branches and message templates are removed without a fallback.
+Preflight decisions still occur before launching Codex; no proxy affinity,
+transport or mid-stream rotation behavior changes.
+
+Permanent ABI regressions cover every rotate/stop branch, message order, empty
+alternatives, long Unicode text, embedded nul/delimiters, invalid input shapes,
+truncated/overflowing lengths, invalid UTF-8 and bounded output. Direct Mojo
+assertions pass. The first compile found an Int/Int64 range mismatch, corrected
+before final validation. A boundary assertion was corrected to retain the
+existing zero-capacity contract: the payload is untouched and written length
+is reported as zero.
+
+All 4,096 temporary differential comparisons pass across 2,048 generated pools
+for both plans; the Rust oracle is removed. The unchanged official metric rises
+from 35.49262929957525% to 35.50320652460463%
+(127,939 Mojo / 232,420 Rust production lines), leaving 39.49679347539537
+percentage points to 75%. All 978 strict Mojo-core tests and all 75 final launch
+tests pass via
+`PRODEX_MOJO_REQUIRED=1 CARGO_BUILD_JOBS=6 cargo test --locked -q -p prodex-mojo-core --features mojo-core -- --test-threads=1`
+and `PRODEX_MOJO_REQUIRED=1 CARGO_BUILD_JOBS=6 cargo test --locked -q -p prodex-runtime-launch -- --test-threads=1`.
+Direct verification uses
+`mojo run -D ASSERT=all -I mojo/prodex_core mojo/tests/launch_quota_plan_test.mojo`.
+
+All 36 terminal tests and 8 process-level auto-rotation fixtures pass via
+`PRODEX_MOJO_REQUIRED=1 CARGO_BUILD_JOBS=6 cargo test --locked -q -p prodex-terminal-ui -- --test-threads=1`
+and `PRODEX_MOJO_REQUIRED=1 CARGO_BUILD_JOBS=6 cargo test --locked -q --test auto_rotate run:: -- --test-threads=1`.
+Canonical `CARGO_BUILD_JOBS=6 npm run test:changed` passes, including all 75
+launch tests. Docs, formatting, no-fallback self-test/source, authority, size,
+crate/application-boundary self-test/source, secret-boundary and diff checks
+pass. The direct test emits only pre-existing Info-renderer initialization
+warnings; new initialization warnings were removed. No remote CI or live
+provider traffic is used as a gate.
+
+`PRODEX_MOJO_REQUIRED=1 CARGO_BUILD_JOBS=6 cargo clippy --locked --workspace --all-targets --all-features -- -D warnings`
+passes with existing vendor warnings only. Final staged churn is within the
+1,200-line/500-per-file limits. After all build/test processes finished and
+reference checks found no target consumers, `cargo clean` removed 14.8 GiB.
+Inspected Trash was empty and `trash-empty -f` completed. No comparison oracle,
+scratch object or active test process remains.
