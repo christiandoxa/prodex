@@ -3,6 +3,9 @@
 
 use crate::MojoError;
 
+mod duration;
+pub use duration::provider_quota_duration_seconds;
+
 const ABI_VERSION: i64 = 1;
 
 unsafe extern "C" {
@@ -105,8 +108,7 @@ pub fn provider_quota_numeric_reset_epoch(number: i64, now: i64) -> Result<i64, 
     reset_epoch(QuotaResetSource::Numeric, number, now)
 }
 
-/// Mojo applies the existing saturated relative duration after Rust parses
-/// the provider duration grammar and acquires the wall clock.
+/// Mojo applies the saturated relative duration after wall-clock acquisition.
 pub fn provider_quota_duration_reset_epoch(seconds: i64, now: i64) -> Result<i64, MojoError> {
     reset_epoch(QuotaResetSource::Duration, seconds, now)
 }

@@ -60,6 +60,9 @@ const RETRY_TEXT_MOJO = "mojo/prodex_core/gemini_quota_body.mojo";
 const QUOTA_PROBE_CALLER = "crates/prodex-app/src/runtime_proxy/selection_plan.rs";
 const QUOTA_PROBE_ADAPTER = "crates/prodex-mojo-core/src/runtime/quota_route_score/probe_order.rs";
 const QUOTA_PROBE_MOJO = "mojo/prodex_core/quota_pressure.mojo";
+const QUOTA_DURATION_CALLER = "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_rate_limits.rs";
+const QUOTA_DURATION_ADAPTER = "crates/prodex-mojo-core/src/provider_constraints/quota_headers/duration.rs";
+const QUOTA_DURATION_MOJO = "mojo/prodex_core/provider_quota_duration.mojo";
 const QUOTA_LOG_PROFILE_CALLER = "crates/prodex-app/src/quota_support.rs";
 const INFO_LOAD_ADAPTER = "crates/prodex-mojo-core/src/info_render/runtime_load.rs";
 const INFO_LOAD_MOJO = "mojo/prodex_core/info_runtime_load.mojo";
@@ -373,7 +376,7 @@ const PROMOTED_FILES = [
   KIRO_ENVIRONMENT_ADAPTER_FILE,
   KIRO_ENVIRONMENT_MOJO_FILE,
   KIRO_ENVIRONMENT_ABI_TEST_FILE,
-  "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_rate_limits.rs",
+  QUOTA_DURATION_CALLER,
   "crates/prodex-mojo-core/src/provider_constraints/quota_headers.rs",
   "crates/prodex-runtime-proxy/tests/src/error_policy/rate_limit_header.rs",
   "crates/prodex-redaction/src/lib.rs",
@@ -714,6 +717,8 @@ const PROMOTED_FILES = [
   QUOTA_PROBE_ADAPTER,
   QUOTA_PROBE_CALLER,
   QUOTA_PROBE_MOJO,
+  QUOTA_DURATION_ADAPTER,
+  QUOTA_DURATION_MOJO,
   QUOTA_LOG_PROFILE_CALLER,
   INFO_LOAD_ADAPTER,
   INFO_LOAD_MOJO,
@@ -1585,6 +1590,19 @@ const FORBIDDEN_MARKERS = [
 ];
 
 export function findViolations(files) {
+  const quotaDurationViolations = files.flatMap(([filePath, contents]) => {
+    const production = contents.split("#[cfg(test)]", 1)[0];
+    const required = filePath === QUOTA_DURATION_CALLER ? ["provider_quota_duration_seconds(value)"]
+      : filePath === QUOTA_DURATION_ADAPTER ? ["prodex_provider_quota_duration_plan_v1(", "prodex_provider_quota_duration_finish_v1(", "text.parse::<f64>()"]
+        : filePath === QUOTA_DURATION_MOJO ? ["def quota_duration_scan[emit: Bool]", "def prodex_provider_quota_duration_plan_v1(", "def prodex_provider_quota_duration_finish_v1(", "total += contribution", "ceil(total)"] : [];
+    const violations = required.filter((marker) => !production.includes(marker))
+      .map((marker) => `${filePath}: compiled quota duration ownership must retain ${marker}`);
+    if (filePath === QUOTA_DURATION_CALLER && /fn parse_duration_seconds\(|chars\(\)\.peekable\(\)/u.test(production)
+      || filePath === QUOTA_DURATION_ADAPTER && /\.ceil\(|\.round\(|86_?400\.0|3_?600\.0|amount\s*[*/]/u.test(production)) {
+      violations.push(`${filePath}: restored Rust quota duration grammar or arithmetic`);
+    }
+    return violations;
+  });
   const quotaProbeViolations = files.flatMap(([filePath, contents]) => {
     if (filePath === QUOTA_PROBE_CALLER) {
       const body = contents.match(/pub\(crate\) fn build_runtime_response_probe_plan\([^]*?^\}/mu)?.[0] ?? "";
@@ -10619,6 +10637,7 @@ export function findViolations(files) {
     return [];
   });
   return [...geminiSimpleResponseViolations, ...logPayloadProjectionViolations, ...nativeRecoveryOwnershipViolations, ...quotaRecoveryEligibilityViolations, ...runtimeBrokerReuseMojoViolations, ...geminiResponseMediaMojoViolations, ...cookieEvictionMojoViolations, ...websocketBudgetMojoViolations, ...affinityBindingMojoViolations, ...responsesCapacityRecoveryViolations, ...sseTapMojoOwnershipViolations, ...quotaWatchViolations, ...geminiCompactSnippetViolations, ...geminiCompactTextViolations, ...doctorSmartContextDecisionViolations, ...providerSseJsonFrameMojoViolations, ...geminiSseCompletionOwnershipViolations, ...anthropicNativeStreamDecisionViolations, ...anthropicAttemptCursorViolations, ...geminiUnsupportedToolRetryViolations, ...terminalGeometryViolations, ...previousResponseRecoveryTransitionViolations, ...chatCompatibleToolCallKindViolations, ...geminiQuotaBodyMojoViolations, ...geminiOAuthRotationMojoViolations, ...geminiBuiltinBatchMojoViolations, ...geminiToolArrayValidationMojoViolations, ...geminiOAuthModelMojoViolations, ...superExposeOriginMojoViolations, ...kiroAcpToolLedgerMojoViolations, ...quotaPoolSummarySectionsMojoViolations, ...deepseekRequestDiagnosticViolations, ...deepseekToolShapeIssueMojoViolations, ...deepseekReplayItemPolicyMojoViolations, ...chatNamespaceSplitMojoViolations, ...deepseekInputItemIssueMessageViolations, ...deepseekRequestIssueMessageViolations, ...smartContextTelemetrySampleViolations, ...compatibilityDiagnosticsMojoViolations, ...quotaHeaderProjectionViolations, ...smartContextCapsuleOrderViolations, ...markerViolations, ...deepseekCatalogPolicyViolations, ...featureOffViolations, ...liveLogRecordViolations, ...runtimePolicyPresetViolations, ...runtimeConfigScalarViolations, ...profileHealthCircuitViolations, ...logThroughputViolations, ...operationalDetailSpecViolations, ...transcriptPolicyViolations, ...logLoadPolicyViolations, ...routeReasonViolations, ...runtimeStateQuotaViolations, ...runtimeStateRoutePolicyViolations, ...runtimeProxyRootViolations, ...runtimeRecoveryDeadlineViolations, ...brokerVersionGuardViolations, ...brokerContinuityViolations, ...brokerLogCacheViolations, ...codexConfigViolations, ...statePolicyViolations, ...quotaSelectionPolicyViolations, ...routeTagMirrorViolations, ...enumTagMirrorViolations, ...appSelectionPolicyMirrorViolations, ...runtimeStateBackgroundViolations, ...redactionViolations, ...rateLimitHeaderSelectionViolations, ...profileIdentityViolations, ...governanceInspectionViolations, ...governanceInspectionOrderingViolations, ...exactnessPlannerViolations,
+    ...quotaDurationViolations,
     ...quotaProbeViolations,
     ...retryTextViolations,
     ...bufferedSseViolations,
@@ -10744,6 +10763,11 @@ async function promotedFiles() {
 }
 
 function selfTest() {
+  const quotaDuration = "provider_quota_duration_seconds(value)";
+  assert(!findViolations([[QUOTA_DURATION_CALLER, quotaDuration]]).some((message) => message.includes("quota duration")));
+  assert.match(findViolations([[QUOTA_DURATION_CALLER, "fn parse_duration_seconds() { value.chars().peekable() }"]]).join("\n"), /restored Rust quota duration grammar/u);
+  assert.match(findViolations([[QUOTA_DURATION_ADAPTER, "amount * 60.0"]]).join("\n"), /restored Rust quota duration grammar or arithmetic/u);
+  assert.match(findViolations([[QUOTA_DURATION_MOJO, ""]]).join("\n"), /compiled quota duration ownership/u);
   const quotaProbe = "pub(crate) fn build_runtime_response_probe_plan() {\n prodex_mojo_core::runtime::quota_probe_order(\n}";
   assert(!findViolations([[QUOTA_PROBE_CALLER, quotaProbe]]).some((message) => message.includes("cold-start probe ordering")));
   assert.match(findViolations([[QUOTA_PROBE_CALLER, quotaProbe.replace("quota_probe_order(", "rust_sort(")]]).join("\n"), /cold-start probe ordering/u);
@@ -11745,6 +11769,7 @@ function selfTest() {
     compatibilityDiagnosticsConsumer + "\nfn compatibility_flag_string() {}",
   ]]).join("\n"), /restored Rust compatibility diagnostic text ownership/u);
   const quotaHeaderConsumer = [
+    "provider_quota_duration_seconds(value)",
     "provider_quota_clean_header(value)",
     "provider_quota_clean_header(profile_name)",
     "provider_quota_clean_header(&value)",

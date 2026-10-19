@@ -2,8 +2,9 @@ use crate::runtime_launch::proxy_startup::provider_bridge::RuntimeProviderBridge
 use chrono::{DateTime, Utc};
 use prodex_mojo_core::provider_constraints::{
     provider_quota_clean_header, provider_quota_duration_reset_epoch,
-    provider_quota_gemini_used_percent, provider_quota_limit_id, provider_quota_model_label,
-    provider_quota_numeric_reset_epoch, provider_quota_openai_used_percent,
+    provider_quota_duration_seconds, provider_quota_gemini_used_percent, provider_quota_limit_id,
+    provider_quota_model_label, provider_quota_numeric_reset_epoch,
+    provider_quota_openai_used_percent,
 };
 use prodex_quota::GeminiQuotaInfo;
 use reqwest::header::HeaderMap;
@@ -211,58 +212,18 @@ fn parse_reset_epoch_seconds(value: &str) -> Option<i64> {
                 .expect("compiled Mojo quota numeric reset decision returned invalid output"),
         );
     }
-    parse_duration_seconds(value).map(|seconds| {
-        provider_quota_duration_reset_epoch(seconds, Utc::now().timestamp())
-            .expect("compiled Mojo quota duration reset decision returned invalid output")
-    })
+    provider_quota_duration_seconds(value)
+        .expect("compiled Mojo quota duration parsing returned invalid output")
+        .map(|seconds| {
+            provider_quota_duration_reset_epoch(seconds, Utc::now().timestamp())
+                .expect("compiled Mojo quota duration reset decision returned invalid output")
+        })
 }
 
 fn parse_rfc3339_epoch_seconds(value: &str) -> Option<i64> {
     DateTime::parse_from_rfc3339(value.trim())
         .ok()
         .map(|value| value.timestamp())
-}
-
-fn parse_duration_seconds(value: &str) -> Option<i64> {
-    let mut total = 0.0_f64;
-    let mut number = String::new();
-    let mut saw_unit = false;
-    let mut chars = value.trim().chars().peekable();
-    while let Some(ch) = chars.next() {
-        if ch.is_ascii_digit() || ch == '.' {
-            number.push(ch);
-            continue;
-        }
-        if ch.is_ascii_whitespace() {
-            continue;
-        }
-        if number.is_empty() {
-            return None;
-        }
-        let amount = number.parse::<f64>().ok()?;
-        number.clear();
-        let seconds = match ch {
-            'd' => amount * 86_400.0,
-            'h' => amount * 3_600.0,
-            'm' => {
-                if chars.peek().is_some_and(|next| *next == 's') {
-                    let _ = chars.next();
-                    amount / 1_000.0
-                } else {
-                    amount * 60.0
-                }
-            }
-            's' => amount,
-            _ => return None,
-        };
-        total += seconds;
-        saw_unit = true;
-    }
-    if !number.is_empty() {
-        total += number.parse::<f64>().ok()?;
-        saw_unit = true;
-    }
-    saw_unit.then(|| total.ceil().max(0.0) as i64)
 }
 
 #[cfg(test)]
@@ -449,6 +410,53 @@ mod tests {
             .unwrap();
         assert!(timestamp >= before.saturating_add(60));
         assert!(timestamp <= after.saturating_add(60));
+    }
+
+    #[test]
+    fn quota_reset_headers_preserve_compound_duration_grammar_through_the_mojo_caller() {
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            "x-ratelimit-limit-requests",
+            HeaderValue::from_static("100"),
+        );
+        headers.insert(
+            "x-ratelimit-remaining-requests",
+            HeaderValue::from_static("25"),
+        );
+        for (text, seconds) in [
+            ("1h30m", Some(5400)),
+            ("500ms501ms", Some(2)),
+            ("1 2 . 5s", Some(13)),
+            ("0ms", Some(0)),
+            ("1m s", None),
+            ("1e3s", None),
+            ("1s..s", None),
+        ] {
+            headers.insert(
+                "x-ratelimit-reset-requests",
+                HeaderValue::from_str(text).unwrap(),
+            );
+            let before = Utc::now().timestamp();
+            let projected = runtime_openai_style_codex_rate_limit_headers(&headers, "test", "Test");
+            let after = Utc::now().timestamp();
+            let reset = projected
+                .iter()
+                .find(|(name, _)| name == "x-test-requests-primary-reset-at");
+            match seconds {
+                Some(seconds) => {
+                    let actual = reset
+                        .expect("compiled duration reset header")
+                        .1
+                        .parse::<i64>()
+                        .unwrap();
+                    assert!(
+                        actual >= before + seconds && actual <= after + seconds,
+                        "{text}: {actual}"
+                    );
+                }
+                None => assert!(reset.is_none(), "{text}: {reset:?}"),
+            }
+        }
     }
 
     #[test]
