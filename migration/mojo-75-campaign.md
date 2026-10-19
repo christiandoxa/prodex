@@ -6154,8 +6154,26 @@ all pass. `node scripts/ci/test-serial.mjs --suite runtime-smoke` and the
 runtime test manifest guard also pass. The initial SSE module filter selected zero tests; the corrected
 reader-name filter executes 19 cases, including all five moved tests.
 
-Next substantive candidate: prodex-provider-core's deepseek_bridge/request_tools
-still owns Rust function-name/parameter checks and duplicate/generic selection.
-The live caller is prodex-app's chat_compatible_request via the DeepSeek
-request-validation adapter. Strict schema normalization is already Mojo-owned;
-reuse that owner and preserve duplicate ordering, provider limits and diagnostics.
+## Shared compiled provider function-tool policy (2026-10-19)
+
+Regression checkpoint `01bc94487` is pushed to main. The shared DeepSeek,
+Gemini and Kiro tool policy now uses the versioned function-tools scratch and
+transform ABIs. Mojo owns name/parameter validation, strict opt-in, normalized
+equality, generic replacement and stable duplicate selection. Existing Mojo
+schema normalization is reused. Rust retains Serde acquisition/materialization;
+the previous Rust validators, duplicate map and generic classifier are deleted.
+ABI errors fail explicitly without recomputation, including infallible public
+helpers whose signatures remain compatible.
+
+All 492 provider tests, 210 application DeepSeek tests, 954 strict Mojo-core
+tests, direct Mojo assertions and 6,000 temporary differential cases pass; the Rust
+oracle was removed. Workspace all-target/all-feature Clippy with warnings
+denied, formatting, docs, no-fallback self-test/source guard, authority,
+crate/provider boundaries, hot-path guard and offline baseline/replay pass.
+Commands include `PRODEX_MOJO_REQUIRED=1 CARGO_BUILD_JOBS=6 cargo test --locked -q -p prodex-provider-core -- --test-threads=1`,
+`cargo test --locked -q -p prodex-app --lib deepseek_ -- --test-threads=1`,
+`cargo test --locked -q -p prodex-mojo-core --features mojo-core --lib json::deepseek_function_tools::tests`,
+and `mojo run -D ASSERT=all -I mojo/prodex_core mojo/tests/deepseek_function_tools_test.mojo`.
+The unchanged official measurement rises from 35.252231806801646% to
+35.323964999637965% (126,842 Mojo / 232,240 Rust production lines).
+The 75% target remains outstanding by 39.676035000362035 percentage points.

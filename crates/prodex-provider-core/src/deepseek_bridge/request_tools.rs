@@ -2,9 +2,7 @@
 //!
 //! Pure provider capability checks only; routing, transport, and retry policy stay outside provider-core.
 
-use std::collections::BTreeMap;
-
-use prodex_mojo_core::rich::{DeepSeekKernelInput, DeepSeekKernelOperation};
+use prodex_mojo_core::json::{DeepSeekFunctionToolOperation, deepseek_function_tool_policy};
 
 mod function_tools;
 mod tool_choice;
@@ -30,43 +28,56 @@ pub use self::web_search::{
     deepseek_provider_core_validate_web_search_tool_context_size,
 };
 
+#[derive(serde::Deserialize)]
+struct FunctionToolResult {
+    #[serde(default)]
+    value: serde_json::Value,
+    error: Option<String>,
+}
+
+fn function_tool_policy<T: serde::de::DeserializeOwned>(
+    operation: DeepSeekFunctionToolOperation,
+    input: &serde_json::Value,
+    strict: bool,
+    provider_label: &str,
+    max_name_bytes: usize,
+    name: &str,
+) -> Result<T, String> {
+    let context = serde_json::json!({
+        "input": input,
+        "provider_label": provider_label,
+        "max_name_bytes": max_name_bytes,
+        "name": name,
+    });
+    let mut document = crate::mojo_json::Document::default();
+    document.root(&context);
+    let raw = std::str::from_utf8(&document.raw).expect("Serde emits UTF-8 JSON");
+    let output = deepseek_function_tool_policy(&document.nodes, raw, operation, strict)
+        .map_err(|error| format!("{provider_label} function-tool Mojo policy failed: {error:?}"))?;
+    let output: FunctionToolResult = serde_json::from_slice(&output).map_err(|error| {
+        format!("{provider_label} function-tool Mojo policy returned invalid JSON: {error}")
+    })?;
+    if let Some(error) = output.error {
+        return Err(error);
+    }
+    serde_json::from_value(output.value).map_err(|error| {
+        format!("{provider_label} function-tool Mojo policy returned an invalid value: {error}")
+    })
+}
+
 pub fn deepseek_provider_core_apply_strict_function_schema(
     tool: &mut serde_json::Value,
     provider_label: &str,
 ) -> Result<(), String> {
-    let Some(function) = tool
-        .get_mut("function")
-        .and_then(serde_json::Value::as_object_mut)
-    else {
-        return Ok(());
-    };
-    let name = function
-        .get("name")
-        .and_then(serde_json::Value::as_str)
-        .unwrap_or("function")
-        .to_string();
-    let parameters = function
-        .entry("parameters".to_string())
-        .or_insert_with(|| serde_json::json!({"type": "object"}));
-    let schema = serde_json::to_string(parameters).map_err(|error| {
-        format!("{provider_label} strict tool schema serialization failed: {error}")
-    })?;
-    let mut input = DeepSeekKernelInput::new(DeepSeekKernelOperation::StrictFunctionSchema);
-    input.input = Some(&schema);
-    *parameters = deepseek_provider_core_mojo_value(input).map_err(|_| {
-        format!("{provider_label} strict tool schema `{name}` could not be normalized")
-    })?;
-    function.insert("strict".to_string(), serde_json::Value::Bool(true));
+    *tool = function_tool_policy(
+        DeepSeekFunctionToolOperation::StrictSchema,
+        tool,
+        true,
+        provider_label,
+        64,
+        "",
+    )?;
     Ok(())
-}
-
-fn deepseek_provider_core_mojo_value(
-    input: DeepSeekKernelInput<'_>,
-) -> Result<serde_json::Value, String> {
-    let body = prodex_mojo_core::rich::deepseek_kernel(input)
-        .map_err(|error| format!("DeepSeek Mojo kernel failed: {error:?}"))?;
-    serde_json::from_slice(&body)
-        .map_err(|error| format!("DeepSeek Mojo kernel returned invalid JSON: {error}"))
 }
 
 pub fn deepseek_provider_core_dedup_and_validate_function_tools(
@@ -88,93 +99,14 @@ pub fn deepseek_provider_core_dedup_and_validate_function_tools_with_max_bytes(
     provider_label: &str,
     max_name_bytes: usize,
 ) -> Result<Vec<serde_json::Value>, String> {
-    let mut seen_tools = BTreeMap::<String, serde_json::Value>::new();
-    let mut deduped = Vec::new();
-    for tool in tools {
-        deepseek_provider_core_process_function_tool(
-            tool,
-            strict_tools,
-            provider_label,
-            max_name_bytes,
-            &mut seen_tools,
-            &mut deduped,
-        )?;
-    }
-    Ok(deduped)
-}
-
-fn deepseek_provider_core_process_function_tool(
-    mut tool: serde_json::Value,
-    strict_tools: bool,
-    provider_label: &str,
-    max_name_bytes: usize,
-    seen_tools: &mut BTreeMap<String, serde_json::Value>,
-    deduped: &mut Vec<serde_json::Value>,
-) -> Result<(), String> {
-    let Some(name) = deepseek_provider_core_function_tool_name(&tool) else {
-        deduped.push(tool);
-        return Ok(());
-    };
-    deepseek_provider_core_validate_function_name_with_max_bytes(
-        &name,
+    function_tool_policy(
+        DeepSeekFunctionToolOperation::ValidateAndDeduplicate,
+        &serde_json::Value::Array(tools),
+        strict_tools,
         provider_label,
         max_name_bytes,
-    )?;
-    deepseek_provider_core_validate_function_parameters(&tool, &name, provider_label)?;
-    if !strict_tools
-        && tool
-            .get("function")
-            .and_then(|function| function.get("strict"))
-            .and_then(serde_json::Value::as_bool)
-            == Some(true)
-    {
-        return Err(format!(
-            "{provider_label} strict function tool `{name}` requires deepseek.strict_tools=true"
-        ));
-    }
-    if strict_tools {
-        deepseek_provider_core_apply_strict_function_schema(&mut tool, provider_label)?;
-    }
-    if let Some(previous) = seen_tools.get(&name)
-        && deepseek_provider_core_handle_duplicate_function_tool(
-            &name,
-            &tool,
-            previous,
-            provider_label,
-            deduped,
-        )?
-    {
-        return Ok(());
-    }
-    seen_tools.insert(name, tool.clone());
-    deduped.push(tool);
-    Ok(())
-}
-
-fn deepseek_provider_core_handle_duplicate_function_tool(
-    name: &str,
-    tool: &serde_json::Value,
-    previous: &serde_json::Value,
-    provider_label: &str,
-    deduped: &mut Vec<serde_json::Value>,
-) -> Result<bool, String> {
-    if previous == tool {
-        return Ok(true);
-    }
-    let previous_generic = deepseek_provider_core_is_generic_function_tool(previous);
-    let current_generic = deepseek_provider_core_is_generic_function_tool(tool);
-    if previous_generic && !current_generic {
-        deduped.retain(|deduped_tool: &serde_json::Value| {
-            deepseek_provider_core_function_tool_name(deduped_tool).as_deref() != Some(name)
-        });
-        return Ok(false);
-    }
-    if current_generic {
-        return Ok(true);
-    }
-    Err(format!(
-        "{provider_label} function tool name `{name}` is duplicated after translation"
-    ))
+        "",
+    )
 }
 
 #[cfg(test)]

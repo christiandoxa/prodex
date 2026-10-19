@@ -1,40 +1,42 @@
-//! DeepSeek function-tool name and parameter validation.
-
-use crate::deepseek_provider_core_json_string;
+//! Host acquisition for the shared compiled function-tool policy.
+use super::{DeepSeekFunctionToolOperation, function_tool_policy};
 
 pub fn deepseek_provider_core_function_tool_name(tool: &serde_json::Value) -> Option<String> {
-    tool.get("function")
-        .and_then(|function| function.get("name"))
-        .and_then(serde_json::Value::as_str)
-        .map(str::to_string)
+    function_tool_policy(
+        DeepSeekFunctionToolOperation::Name,
+        tool,
+        false,
+        "DeepSeek",
+        64,
+        "",
+    )
+    .expect("compiled Mojo function tool name policy failed")
 }
 
 pub fn deepseek_provider_core_tool_name_from_tool_object(
     object: &serde_json::Map<String, serde_json::Value>,
 ) -> Option<String> {
-    deepseek_provider_core_json_string(object, &["name"])
-        .or_else(|| {
-            object
-                .get("function")
-                .and_then(serde_json::Value::as_object)
-                .and_then(|function| deepseek_provider_core_json_string(function, &["name"]))
-        })
-        .filter(|name| !name.trim().is_empty())
+    function_tool_policy(
+        DeepSeekFunctionToolOperation::ObjectName,
+        &serde_json::Value::Object(object.clone()),
+        false,
+        "DeepSeek",
+        64,
+        "",
+    )
+    .expect("compiled Mojo tool object name policy failed")
 }
 
 pub fn deepseek_provider_core_is_generic_function_tool(tool: &serde_json::Value) -> bool {
-    let Some(parameters) = tool
-        .get("function")
-        .and_then(|function| function.get("parameters"))
-    else {
-        return false;
-    };
-    parameters
-        .get("additionalProperties")
-        .and_then(serde_json::Value::as_bool)
-        == Some(true)
-        && parameters.get("properties").is_none()
-        && parameters.get("required").is_none()
+    function_tool_policy(
+        DeepSeekFunctionToolOperation::IsGeneric,
+        tool,
+        false,
+        "DeepSeek",
+        64,
+        "",
+    )
+    .expect("compiled Mojo generic function tool policy failed")
 }
 
 pub fn deepseek_provider_core_validate_function_name(
@@ -49,17 +51,14 @@ pub fn deepseek_provider_core_validate_function_name_with_max_bytes(
     provider_label: &str,
     max_name_bytes: usize,
 ) -> Result<(), String> {
-    if name.is_empty()
-        || name.len() > max_name_bytes
-        || !name
-            .bytes()
-            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-'))
-    {
-        return Err(format!(
-            "{provider_label} function tool names must use only letters, numbers, underscores, or dashes and be at most {max_name_bytes} bytes"
-        ));
-    }
-    Ok(())
+    function_tool_policy(
+        DeepSeekFunctionToolOperation::ValidateName,
+        &serde_json::Value::String(name.to_string()),
+        false,
+        provider_label,
+        max_name_bytes,
+        "",
+    )
 }
 
 pub fn deepseek_provider_core_validate_function_parameters(
@@ -67,14 +66,12 @@ pub fn deepseek_provider_core_validate_function_parameters(
     name: &str,
     provider_label: &str,
 ) -> Result<(), String> {
-    if let Some(parameters) = tool
-        .get("function")
-        .and_then(|function| function.get("parameters"))
-        && !parameters.is_object()
-    {
-        return Err(format!(
-            "{provider_label} function tool `{name}` parameters must be an object"
-        ));
-    }
-    Ok(())
+    function_tool_policy(
+        DeepSeekFunctionToolOperation::ValidateParameters,
+        tool,
+        false,
+        provider_label,
+        64,
+        name,
+    )
 }
