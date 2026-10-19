@@ -33,6 +33,20 @@ pub(super) struct ResolvedExecProgram {
     pub(super) optional_tool: Option<OptionalToolId>,
 }
 
+#[derive(serde::Deserialize)]
+struct OptionalExecAliasPlan {
+    tool: String,
+    program: OptionalExecProgramPlan,
+    prefix: Vec<String>,
+}
+
+#[derive(serde::Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+enum OptionalExecProgramPlan {
+    ToolPath { missing_path_message: String },
+    Prodex,
+}
+
 impl ExposeOptionalTools {
     pub(super) fn discover() -> Self {
         let prodex_program = std::env::current_exe()
@@ -166,6 +180,7 @@ impl ExposeOptionalTools {
         requested_program: &str,
         args: Vec<OsString>,
     ) -> Result<ResolvedExecProgram, String> {
+        // Keep OS program paths outside the alias-planning text ABI.
         let Some(alias) = requested_program.strip_prefix(OPTIONAL_ALIAS_PREFIX) else {
             return Ok(ResolvedExecProgram {
                 program: PathBuf::from(requested_program),
@@ -174,15 +189,13 @@ impl ExposeOptionalTools {
             });
         };
 
-        let (id, integrated_playwright) = if alias == "playwright" {
-            (OptionalToolId::PlaywrightMcp, true)
-        } else {
-            (
-                OptionalToolId::from_str(alias)
-                    .map_err(|_| format!("unknown optional-tool exec alias: {alias}"))?,
-                false,
-            )
-        };
+        let body = prodex_mojo_core::rich::super_expose_optional_alias_plan(alias)
+            .map_err(|error| format!("optional-tool Mojo alias planning failed: {error:?}"))?;
+        let plan: Option<OptionalExecAliasPlan> = serde_json::from_slice(&body)
+            .map_err(|error| format!("optional-tool Mojo alias plan was invalid: {error}"))?;
+        let plan = plan.ok_or_else(|| format!("unknown optional-tool exec alias: {alias}"))?;
+        let id = OptionalToolId::from_str(&plan.tool)
+            .map_err(|_| "optional-tool Mojo alias plan returned an unknown tool".to_string())?;
         let tool = self
             .tool(id)
             .ok_or_else(|| format!("optional tool {id} is not known"))?;
@@ -193,46 +206,17 @@ impl ExposeOptionalTools {
             ));
         }
 
-        let (program, mut prefix) = match id {
-            OptionalToolId::Rtk | OptionalToolId::CodebaseMemoryMcp => (
-                tool.path.clone().ok_or_else(|| {
-                    format!("validated optional tool {id} has no executable path")
-                })?,
-                Vec::new(),
-            ),
-            OptionalToolId::PlaywrightMcp if !integrated_playwright => (
-                tool.path.clone().ok_or_else(|| {
-                    "validated Playwright MCP has no npx executable path".to_string()
-                })?,
-                vec![
-                    OsString::from("--no-install"),
-                    OsString::from("@playwright/mcp"),
-                ],
-            ),
-            OptionalToolId::Caveman | OptionalToolId::Ponytail | OptionalToolId::PlaywrightMcp => (
-                self.prodex_program.clone(),
-                vec![
-                    OsString::from("super"),
-                    OsString::from("--no-sub-agent"),
-                    OsString::from("--no-presidio"),
-                    OsString::from("--tool"),
-                    OsString::from(match id {
-                        OptionalToolId::Caveman => "caveman",
-                        OptionalToolId::Ponytail => "ponytail",
-                        OptionalToolId::PlaywrightMcp => "playwright",
-                        _ => unreachable!(),
-                    }),
-                ],
-            ),
-            OptionalToolId::Presidio => (
-                self.prodex_program.clone(),
-                vec![
-                    OsString::from("super"),
-                    OsString::from("--no-sub-agent"),
-                    OsString::from("--presidio"),
-                ],
-            ),
+        let program = match plan.program {
+            OptionalExecProgramPlan::ToolPath {
+                missing_path_message,
+            } => tool.path.clone().ok_or(missing_path_message)?,
+            OptionalExecProgramPlan::Prodex => self.prodex_program.clone(),
         };
+        let mut prefix = plan
+            .prefix
+            .into_iter()
+            .map(OsString::from)
+            .collect::<Vec<_>>();
         prefix.extend(args);
         Ok(ResolvedExecProgram {
             program,
@@ -423,3 +407,7 @@ mod tests {
 #[cfg(test)]
 #[path = "optional_tools_presentation_tests.rs"]
 mod presentation_tests;
+
+#[cfg(test)]
+#[path = "optional_alias_tests.rs"]
+mod alias_tests;

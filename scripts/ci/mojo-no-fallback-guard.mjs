@@ -4551,6 +4551,9 @@ export function findViolations(files) {
         "pub fn super_expose_exec_validate_env_entry(",
         "pub fn super_expose_exec_validate_stdin(",
         "pub fn super_expose_exec_validate_timeout(",
+        "prodex_mojo_super_expose_optional_alias_plan_v1(",
+        "pub fn super_expose_optional_alias_plan(",
+        "compiled_optional_alias_abi_rejects_capacity_utf8_and_null_input_without_mutation",
       ];
       return required
         .filter((marker) => !contents.includes(marker))
@@ -4565,6 +4568,9 @@ export function findViolations(files) {
         "super_expose_exec_env_value_valid(",
         "SUPER_EXPOSE_EXEC_MAX_ARGUMENTS_BYTES",
         "SUPER_EXPOSE_EXEC_MAX_TIMEOUT_MS",
+        '@export("prodex_mojo_super_expose_optional_alias_plan_v1")',
+        "super_expose_write_optional_alias_plan(",
+        "optional_tool_class(alias)",
       ];
       return required
         .filter((marker) => !contents.includes(marker))
@@ -4768,6 +4774,16 @@ export function findViolations(files) {
       if (!required.every((marker) => contents.includes(marker)) ||
           !restored.every((marker) => !production.includes(marker))) {
         violations.push(filePath + ": optional-tool presentation must remain compiled Mojo-owned");
+      }
+      const aliasRequired = ["super_expose_optional_alias_plan(alias)", "OptionalExecProgramPlan::ToolPath",
+        "OptionalToolId::from_str(&plan.tool)",
+        "compiled_optional_alias_plans_preserve_executables_prefixes_and_playwright_spelling",
+        "compiled_optional_alias_boundary_preserves_plain_os_programs"];
+      const aliasRestored = ["let (id, integrated_playwright)", "let (program, mut prefix) = match id",
+        'OsString::from("@playwright/mcp")'];
+      if (!aliasRequired.every((marker) => contents.includes(marker)) ||
+          !aliasRestored.every((marker) => !production.includes(marker))) {
+        violations.push(filePath + ": optional-tool alias planning must remain compiled Mojo-owned");
       }
       return violations;
     }
@@ -10337,6 +10353,7 @@ export function findViolations(files) {
 }
 
 const RELOCATED_TEST_FILES = new Set([
+  "crates/prodex-app/src/super_expose/optional_alias_tests.rs",
   "crates/prodex-app/src/super_expose/optional_tools_presentation_tests.rs",
   "crates/prodex-app/src/super_expose/protocol/tool_catalog_tests.rs",
   "crates/prodex-provider-core/src/gemini_bridge/tooling/gemini3_tests.rs",
@@ -12204,11 +12221,18 @@ function selfTest() {
     "super_expose_optional_tool_presentation(",
     "compiled_optional_presentation_preserves_every_invocation_kind_and_version_shape",
     "compiled_optional_presentation_rejects_malformed_observations",
+    "super_expose_optional_alias_plan(alias)", "OptionalExecProgramPlan::ToolPath",
+    "OptionalToolId::from_str(&plan.tool)",
+    "compiled_optional_alias_plans_preserve_executables_prefixes_and_playwright_spelling",
+    "compiled_optional_alias_boundary_preserves_plain_os_programs",
   ].join("\n");
   assert.deepEqual(findViolations([[SUPER_EXPOSE_OPTIONAL_TOOLS_CALLER, optionalPresentationConsumer]]), []);
   assert.match(findViolations([[SUPER_EXPOSE_OPTIONAL_TOOLS_CALLER,
     optionalPresentationConsumer + "\nlet invocation = match tool.id {}",
   ]]).join("\n"), /optional-tool presentation must remain compiled Mojo-owned/u);
+  assert.match(findViolations([[SUPER_EXPOSE_OPTIONAL_TOOLS_CALLER,
+    optionalPresentationConsumer + "\nlet (program, mut prefix) = match id {}",
+  ]]).join("\n"), /optional-tool alias planning must remain compiled Mojo-owned/u);
   const geminiDescriptionConsumer = [
     "GeminiToolDescriptionOperation::ApplyOverrides", "GeminiToolDescriptionOperation::DescriptionIndex",
     "GeminiToolDescriptionOperation::Catalog",

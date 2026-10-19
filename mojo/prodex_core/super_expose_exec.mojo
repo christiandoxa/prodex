@@ -1,7 +1,13 @@
 from std.memory import Pointer
 
-from rich_text import rich_codepoint, rich_codepoint_width, rich_view_ptr, rich_view_valid
+from rich_text import rich_codepoint, rich_codepoint_width, rich_view_ptr, rich_view_valid, rich_view_matches_literal
 from rich_types import ProdexRichStringView
+from parsed_json import pj_literal
+from json_sink import JsonSink, js_literal, js_escaped, js_string
+from optional_tools_policy import (
+    optional_tool_class, OPTIONAL_TOOL_RTK, OPTIONAL_TOOL_CODEBASE_MEMORY,
+    OPTIONAL_TOOL_PLAYWRIGHT, OPTIONAL_TOOL_CAVEMAN, OPTIONAL_TOOL_PONYTAIL, OPTIONAL_TOOL_PRESIDIO,
+)
 
 comptime SUPER_EXPOSE_EXEC_ABI_VERSION: Int64 = 1
 comptime SUPER_EXPOSE_EXEC_PROGRAM: Int64 = 0
@@ -200,4 +206,67 @@ def prodex_mojo_super_expose_exec_validation_v1(
         if numeric_value >= 1 and numeric_value <= SUPER_EXPOSE_EXEC_MAX_TIMEOUT_MS
         else SUPER_EXPOSE_EXEC_TIMEOUT_LIMIT
     )
+    return 0
+
+
+def super_expose_write_optional_alias_plan(
+    sink: Pointer[mut=True, JsonSink, _], alias: ProdexRichStringView,
+):
+    var kind = optional_tool_class(alias)
+    if kind < 0:
+        js_literal(sink, StringSlice("null"))
+        return
+    if kind == OPTIONAL_TOOL_RTK or kind == OPTIONAL_TOOL_CODEBASE_MEMORY:
+        var name = pj_literal(StringSlice("rtk")) if kind == OPTIONAL_TOOL_RTK else pj_literal(StringSlice("codebase-memory-mcp"))
+        js_literal(sink, StringSlice('{"tool":'))
+        js_string(sink, name)
+        js_literal(sink, StringSlice(',"program":{"kind":"tool_path","missing_path_message":"validated optional tool '))
+        js_escaped(sink, name)
+        js_literal(sink, StringSlice(' has no executable path"},"prefix":[]}'))
+        return
+    if kind == OPTIONAL_TOOL_PLAYWRIGHT and not rich_view_matches_literal["playwright"](alias, False):
+        js_literal(sink, StringSlice('{"tool":"playwright-mcp","program":{"kind":"tool_path","missing_path_message":"validated Playwright MCP has no npx executable path"},"prefix":["--no-install","@playwright/mcp"]}'))
+        return
+    if kind == OPTIONAL_TOOL_PRESIDIO:
+        js_literal(sink, StringSlice('{"tool":"presidio","program":{"kind":"prodex"},"prefix":["super","--no-sub-agent","--presidio"]}'))
+        return
+    if kind != OPTIONAL_TOOL_CAVEMAN and kind != OPTIONAL_TOOL_PONYTAIL and kind != OPTIONAL_TOOL_PLAYWRIGHT:
+        js_literal(sink, StringSlice("null"))
+        return
+    var name = pj_literal(StringSlice("caveman"))
+    var activation = name.copy()
+    if kind == OPTIONAL_TOOL_PONYTAIL:
+        name = pj_literal(StringSlice("ponytail"))
+        activation = name.copy()
+    elif kind == OPTIONAL_TOOL_PLAYWRIGHT:
+        name = pj_literal(StringSlice("playwright-mcp"))
+        activation = pj_literal(StringSlice("playwright"))
+    js_literal(sink, StringSlice('{"tool":'))
+    js_string(sink, name)
+    js_literal(sink, StringSlice(',"program":{"kind":"prodex"},"prefix":["super","--no-sub-agent","--no-presidio","--tool",'))
+    js_string(sink, activation)
+    js_literal(sink, StringSlice("]}"))
+
+
+@export("prodex_mojo_super_expose_optional_alias_plan_v1")
+def prodex_mojo_super_expose_optional_alias_plan_v1(
+    abi_version: Int64, alias_address: UInt64, alias_length: Int64,
+    output_address: UInt64, capacity: Int64, written_address: UInt64,
+) abi("C") -> Int64:
+    if abi_version != SUPER_EXPOSE_EXEC_ABI_VERSION:
+        return 4
+    if alias_length < 0 or capacity < 0 or output_address == 0 or written_address == 0 or (alias_length > 0 and alias_address == 0):
+        return 1
+    var alias = ProdexRichStringView(UInt(alias_address), UInt(alias_length))
+    if not rich_view_valid(alias, alias_length):
+        return 1
+    var measure = JsonSink(Pointer[mut=True, UInt8, MutUntrackedOrigin](unsafe_from_address=Int(output_address)), 0, 0, True, False)
+    super_expose_write_optional_alias_plan(Pointer(to=measure), alias)
+    if measure.failed or measure.written > capacity:
+        return 2
+    var sink = JsonSink(Pointer[mut=True, UInt8, MutUntrackedOrigin](unsafe_from_address=Int(output_address)), capacity, 0, False, False)
+    super_expose_write_optional_alias_plan(Pointer(to=sink), alias)
+    if sink.failed or sink.written != measure.written:
+        return 2
+    Pointer[mut=True, Int64, MutUntrackedOrigin](unsafe_from_address=Int(written_address))[] = sink.written
     return 0
