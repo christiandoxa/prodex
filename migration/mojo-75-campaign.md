@@ -5985,3 +5985,15 @@ were removed. Serde and typed enum output remain host responsibilities.
 Strict ABI, real Kiro protocol/runtime tests and anti-fallback guards
 preserve all known variants and future unknown passthrough behavior.
 The 75% share goal remains outstanding.
+
+
+## DeepSeek SSE tool lifecycle decisions moved to Mojo
+
+The compiled DeepSeek stream owner now chooses output item-added and
+argument-delta eligibility from the already compiled tool-name-kind
+policy, and selects unfinished tool-call indexes on stream completion.
+The previous Rust added/done gates and special-name comparisons were
+removed. Direct ABI, real SSE caller tests and source guards preserve
+exactly-once output and no replay after response completion. Rust
+keeps transport, tool-call state and JSON materialization. The separate
+75% Mojo production source target remains outstanding.

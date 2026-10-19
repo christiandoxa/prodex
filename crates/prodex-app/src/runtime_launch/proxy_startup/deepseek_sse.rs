@@ -317,7 +317,18 @@ impl RuntimeDeepSeekSseState {
                 .into_iter()
                 .collect();
         }
-        let events = self.complete_tool_call_events();
+        let events = match self.complete_tool_call_events() {
+            Ok(events) => events,
+            Err(error) => {
+                return self
+                    .failed_event(
+                        "invalid_tool_call_arguments",
+                        &format!("compiled Mojo DeepSeek SSE completion planner failed: {error:?}"),
+                    )
+                    .into_iter()
+                    .collect();
+            }
+        };
         if !self.tool_calls.is_empty() {
             self.store_conversation_snapshot();
         }

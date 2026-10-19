@@ -4,6 +4,9 @@ use super::super::provider_bridge::{
     runtime_provider_label, runtime_provider_stream_function_call_arguments_delta_event,
 };
 use super::RuntimeDeepSeekSseState;
+use prodex_mojo_core::deepseek_stream_policy::{
+    deepseek_sse_pending_tool_positions, deepseek_sse_tool_event_plan,
+};
 use prodex_provider_core::{
     deepseek_provider_core_function_call_arguments_delta_event,
     deepseek_provider_core_incremental_tool_argument_delta,
@@ -33,7 +36,7 @@ impl RuntimeDeepSeekSseState {
             }
             return events;
         }
-        let (call_id, name, should_add, argument_delta) = {
+        let (call_id, name, planned, argument_delta) = {
             let tool_call = self.tool_calls.entry(index).or_default();
             if let Some(id) = delta.call_id {
                 tool_call.call_id = Some(id);
@@ -63,13 +66,28 @@ impl RuntimeDeepSeekSseState {
                 .name
                 .clone()
                 .unwrap_or_else(|| "tool_call".to_string());
-            let should_add = !tool_call.added;
-            if should_add {
-                tool_call.added = true;
+            let planned =
+                deepseek_sse_tool_event_plan(tool_call.added, &name, argument_delta.is_some());
+            if let Ok(plan) = planned {
+                if plan.add_item {
+                    tool_call.added = true;
+                }
             }
-            (call_id, name, should_add, argument_delta)
+            (call_id, name, planned, argument_delta)
         };
-        if should_add
+        let plan = match planned {
+            Ok(plan) => plan,
+            Err(error) => {
+                if let Some(event) = self.failed_event(
+                    "invalid_tool_call_arguments",
+                    &format!("compiled Mojo DeepSeek tool event policy failed: {error:?}"),
+                ) {
+                    events.push(event);
+                }
+                return events;
+            }
+        };
+        if plan.add_item
             && let Some(item) = deepseek_provider_core_stream_tool_call_added_item(&call_id, &name)
         {
             let sequence_number = self.next_sequence_number();
@@ -77,7 +95,7 @@ impl RuntimeDeepSeekSseState {
             data["output_index"] = serde_json::Value::from(index);
             events.push(self.event("response.output_item.added", data));
         }
-        if name == "tool_search" || name == "apply_patch" {
+        if !plan.emit_argument_delta {
             return events;
         }
         let Some(arguments) = argument_delta else {
@@ -108,21 +126,33 @@ impl RuntimeDeepSeekSseState {
         events
     }
 
-    pub(super) fn complete_tool_call_events(&mut self) -> Vec<String> {
+    pub(super) fn complete_tool_call_events(
+        &mut self,
+    ) -> Result<Vec<String>, prodex_mojo_core::MojoError> {
         let mut events = Vec::new();
-        let pending = self
+        let indexed = self
             .tool_calls
-            .iter_mut()
-            .filter_map(|(index, tool_call)| {
-                if tool_call.done {
-                    return None;
-                }
+            .iter()
+            .map(|(index, tool)| (*index, tool.done))
+            .collect::<Vec<_>>();
+        let flags = indexed.iter().map(|(_, done)| *done).collect::<Vec<_>>();
+        let planned = deepseek_sse_pending_tool_positions(&flags)?;
+        let pending = planned
+            .into_iter()
+            .map(|position| {
+                // Mojo planned only unfinished entries; adapter validated
+                // the original positions, bounds and duplicate/order.
+                let (index, _) = indexed[position];
+                let tool_call = self
+                    .tool_calls
+                    .get_mut(&index)
+                    .expect("compiled Mojo selected a known DeepSeek SSE tool");
                 tool_call.done = true;
                 let call_id = tool_call.call_id.clone().unwrap_or_else(|| {
                     deepseek_provider_core_stream_fallback_tool_call_id(
                         runtime_provider_label(self.provider_kind),
                         self.request_id,
-                        *index,
+                        index,
                     )
                 });
                 let name = tool_call
@@ -132,13 +162,13 @@ impl RuntimeDeepSeekSseState {
                 let arguments =
                     deepseek_provider_core_rtk_wrapped_tool_arguments(&name, &tool_call.arguments);
                 tool_call.arguments = arguments.clone();
-                Some((
-                    *index,
+                (
+                    index,
                     call_id,
                     name,
                     arguments,
                     tool_call.thought_signature.clone(),
-                ))
+                )
             })
             .collect::<Vec<_>>();
         for (index, call_id, name, arguments, thought_signature) in pending {
@@ -153,7 +183,7 @@ impl RuntimeDeepSeekSseState {
             data["output_index"] = serde_json::Value::from(index);
             events.push(self.event("response.output_item.done", data));
         }
-        events
+        Ok(events)
     }
 
     pub(super) fn validate_tool_call_arguments(&self) -> Result<(), String> {

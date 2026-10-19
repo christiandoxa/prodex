@@ -610,3 +610,80 @@ def prodex_deepseek_stream_delta_policy_v1(
         return DEEPSEEK_STREAM_POLICY_INVALID
     var bounds = rich_trim_bounds(text)
     return Int64(bounds[0] < bounds[1])
+
+
+# DeepSeek SSE tool delta items are decided by the already compiled tool-kind
+# owner. This prevents an independent Rust list of special names from
+# suppressing function argument deltas.
+@export("prodex_deepseek_sse_tool_event_plan_v1")
+def prodex_deepseek_sse_tool_event_plan_v1(
+    abi_version: Int64,
+    already_added: Int64,
+    arguments_present: Int64,
+    name_address: UInt,
+    name_length: Int64,
+    output_address: UInt,
+    output_capacity: Int64,
+) abi("C") -> Int64:
+    if abi_version != DEEPSEEK_STREAM_POLICY_ABI_VERSION:
+        return DEEPSEEK_STREAM_POLICY_ABI
+    if (
+        (already_added != 0 and already_added != 1)
+        or (arguments_present != 0 and arguments_present != 1)
+        or name_length < 0
+        or (name_length > 0 and name_address == 0)
+        or output_address == 0 or output_capacity < 2
+    ):
+        return DEEPSEEK_STREAM_POLICY_INVALID
+    var kind = prodex_deepseek_stream_tool_kind_v1(
+        abi_version, name_address, name_length
+    )
+    if kind < 0:
+        return kind
+    var output = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    output[unsafe_offset=0] = Int64(already_added == 0)
+    output[unsafe_offset=1] = Int64(arguments_present == 1 and kind == 2)
+    return 0
+
+
+# Exactly-once finishing of streamed tool-call indexes. Rust passes the
+# ordered BTreeMap completion facts and applies the compiled position list.
+@export("prodex_deepseek_sse_pending_tools_v1")
+def prodex_deepseek_sse_pending_tools_v1(
+    abi_version: Int64,
+    completed_address: UInt,
+    tool_count: Int64,
+    output_address: UInt,
+    output_capacity: Int64,
+    written_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != DEEPSEEK_STREAM_POLICY_ABI_VERSION:
+        return DEEPSEEK_STREAM_POLICY_ABI
+    if (
+        tool_count < 0
+        or (tool_count > 0 and completed_address == 0)
+        or output_address == 0 or output_capacity < tool_count
+        or written_address == 0
+    ):
+        return DEEPSEEK_STREAM_POLICY_INVALID
+    var completed = Pointer[mut=False, Int64, ImmUntrackedOrigin](
+        unsafe_from_address=Int(completed_address)
+    )
+    for index in range(tool_count):
+        var value = completed[unsafe_offset=index]
+        if value != 0 and value != 1:
+            return DEEPSEEK_STREAM_POLICY_INVALID
+    var positions = Pointer[mut=True, UInt64, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    var count: Int64 = 0
+    for index in range(tool_count):
+        if completed[unsafe_offset=index] == 0:
+            positions[unsafe_offset=count] = UInt64(index)
+            count += 1
+    Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(written_address)
+    )[] = count
+    return 0
