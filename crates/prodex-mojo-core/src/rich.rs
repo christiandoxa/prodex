@@ -96,8 +96,13 @@ pub use catalog::{
     plan_catalog_choices, plan_catalog_configuration, plan_dynamic_catalog, resolve_catalog_model,
     resolve_catalog_model_exact, resolve_catalog_reasoning,
 };
+mod gemini_simple_response;
 #[path = "rich/gemini_sse_state.rs"]
 mod gemini_sse_state;
+pub use gemini_simple_response::{
+    GeminiSimplePartAction, GeminiSimplePartInput, GeminiSimpleResponsePlan,
+    plan_gemini_simple_response,
+};
 pub use gemini_sse_state::{
     GEMINI_RESPONSE_PART_BATCH_MAX, GEMINI_RESPONSE_STATE_ABI_VERSION,
     GeminiCompletionGuardrailAction, GeminiResponsePartInput, GeminiResponsePartsPlan,

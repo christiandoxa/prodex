@@ -2,6 +2,7 @@ from std.memory import Pointer
 from std.sys.info import align_of, size_of
 
 from gemini_sse_state import (
+    gemini_simple_response_plan,
     gemini_completion_guardrail_plan,
     gemini_response_part_batch_plan,
     gemini_response_once_event_plan,
@@ -459,6 +460,13 @@ def prodex_mojo_rich_gemini_response_parts_plan_v1(
         citations_present,
         tail_actions_address,
     )
+
+
+@export("prodex_mojo_gemini_simple_response_plan_v1")
+def prodex_mojo_gemini_simple_response_plan_v1(
+    version: Int64, parts_address: UInt, count: Int64, output_address: UInt, output_words: Int64,
+) abi("C") -> Int64:
+    return gemini_simple_response_plan(version, parts_address, count, output_address, output_words)
 
 @export("prodex_mojo_gemini_grounding_v1")
 def prodex_mojo_gemini_grounding_v1(
