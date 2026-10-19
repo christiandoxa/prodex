@@ -576,6 +576,7 @@ fn selected_sources() -> Vec<&'static str> {
         sources.push("../../mojo/prodex_core/rich_route.mojo");
         sources.push("../../mojo/prodex_core/rich_fallback.mojo");
         sources.push("../../mojo/prodex_core/provider_error.mojo");
+        sources.push("../../mojo/prodex_core/provider_sse_data.mojo");
         sources.push("../../mojo/prodex_core/rich_plan.mojo");
         sources.push("../../mojo/prodex_core/rich_catalog.mojo");
         sources.push("../../mojo/prodex_core/gemini_guardrails.mojo");

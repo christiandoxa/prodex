@@ -3,6 +3,21 @@
 use prodex_mojo_core::json::{JsonKind, JsonNode};
 use serde_json::Value;
 
+/// Acquires JSON values using the compiled buffered-SSE framing contract.
+pub(crate) fn values_from_json_or_sse(body: &[u8]) -> Vec<Value> {
+    if let Ok(value) = serde_json::from_slice(body) {
+        return vec![value];
+    }
+    let Ok(text) = std::str::from_utf8(body) else {
+        return Vec::new();
+    };
+    prodex_mojo_core::rich::provider_sse_data_lines(text)
+        .expect("Mojo buffered provider SSE framing failed")
+        .into_iter()
+        .filter_map(|payload| serde_json::from_str(payload).ok())
+        .collect()
+}
+
 #[derive(Default)]
 pub(crate) struct Document<'a> {
     pub(crate) nodes: Vec<JsonNode<'a>>,

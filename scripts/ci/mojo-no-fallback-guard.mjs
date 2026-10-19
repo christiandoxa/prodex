@@ -49,6 +49,11 @@ const BINDING_PRUNE_STORE = "crates/prodex-runtime-store/src/continuations/compa
 const PROMPT_CACHE_CALLER = "crates/prodex-app/src/runtime_proxy/affinity/prompt_cache.rs";
 const PROMPT_CACHE_ADAPTER = "crates/prodex-mojo-core/src/runtime_lineage/prompt_cache.rs";
 const PROMPT_CACHE_MOJO = "mojo/prodex_core/runtime_prompt_cache.mojo";
+const BUFFERED_SSE_ERRORS = "crates/prodex-provider-core/src/errors/body.rs";
+const BUFFERED_SSE_GEMINI = "crates/prodex-provider-core/src/gemini_bridge/errors/quota_retry/body.rs";
+const BUFFERED_SSE_ACQUISITION = "crates/prodex-provider-core/src/mojo_json.rs";
+const BUFFERED_SSE_ADAPTER = "crates/prodex-mojo-core/src/rich/provider_sse_data.rs";
+const BUFFERED_SSE_MOJO = "mojo/prodex_core/provider_sse_data.mojo";
 const QUOTA_LOG_PROFILE_CALLER = "crates/prodex-app/src/quota_support.rs";
 const INFO_LOAD_ADAPTER = "crates/prodex-mojo-core/src/info_render/runtime_load.rs";
 const INFO_LOAD_MOJO = "mojo/prodex_core/info_runtime_load.mojo";
@@ -695,6 +700,9 @@ const PROMOTED_FILES = [
   PROMPT_CACHE_CALLER,
   PROMPT_CACHE_ADAPTER,
   PROMPT_CACHE_MOJO,
+  BUFFERED_SSE_ERRORS,
+  BUFFERED_SSE_ADAPTER,
+  BUFFERED_SSE_MOJO,
   QUOTA_LOG_PROFILE_CALLER,
   INFO_LOAD_ADAPTER,
   INFO_LOAD_MOJO,
@@ -1566,6 +1574,26 @@ const FORBIDDEN_MARKERS = [
 ];
 
 export function findViolations(files) {
+  const bufferedSseViolations = files.flatMap(([filePath, contents]) => {
+    const production = contents.split("#[cfg(test)]", 1)[0];
+    const required = filePath === BUFFERED_SSE_ERRORS || filePath === BUFFERED_SSE_GEMINI
+      ? ["values_from_json_or_sse"]
+      : filePath === BUFFERED_SSE_ACQUISITION
+        ? ["prodex_mojo_core::rich::provider_sse_data_lines(text)"]
+        : filePath === BUFFERED_SSE_ADAPTER
+          ? ["prodex_sse_buffered_data_spans_v1(", "text.get(start..end)"]
+          : filePath === BUFFERED_SSE_MOJO
+            ? ["def prodex_sse_buffered_data_spans_v1(", "rich_trim_bounds(line)", 'rich_view_prefix["data:"]'] : [];
+    const violations = required.filter((marker) => !production.includes(marker))
+      .map((marker) => `${filePath}: buffered provider SSE framing must retain Mojo delegation ${marker}`);
+    const body = filePath === BUFFERED_SSE_ACQUISITION
+      ? production.match(/pub\(crate\) fn values_from_json_or_sse\([^]*?^\}/mu)?.[0] ?? ""
+      : filePath === BUFFERED_SSE_ERRORS || filePath === BUFFERED_SSE_GEMINI || filePath === BUFFERED_SSE_ADAPTER ? production : "";
+    if (/\.lines\(|\.trim\(|strip_prefix\("data:"\)/u.test(body)) {
+      violations.push(`${filePath}: restored Rust buffered SSE framing`);
+    }
+    return violations;
+  });
   const promptCacheViolations = files.flatMap(([filePath, contents]) => {
     const production = contents.split("#[cfg(test)]", 1)[0];
     const required = filePath === PROMPT_CACHE_CALLER
@@ -10546,6 +10574,7 @@ export function findViolations(files) {
     return [];
   });
   return [...geminiSimpleResponseViolations, ...logPayloadProjectionViolations, ...nativeRecoveryOwnershipViolations, ...quotaRecoveryEligibilityViolations, ...runtimeBrokerReuseMojoViolations, ...geminiResponseMediaMojoViolations, ...cookieEvictionMojoViolations, ...websocketBudgetMojoViolations, ...affinityBindingMojoViolations, ...responsesCapacityRecoveryViolations, ...sseTapMojoOwnershipViolations, ...quotaWatchViolations, ...geminiCompactSnippetViolations, ...geminiCompactTextViolations, ...doctorSmartContextDecisionViolations, ...providerSseJsonFrameMojoViolations, ...geminiSseCompletionOwnershipViolations, ...anthropicNativeStreamDecisionViolations, ...anthropicAttemptCursorViolations, ...geminiUnsupportedToolRetryViolations, ...terminalGeometryViolations, ...previousResponseRecoveryTransitionViolations, ...chatCompatibleToolCallKindViolations, ...geminiQuotaBodyMojoViolations, ...geminiOAuthRotationMojoViolations, ...geminiBuiltinBatchMojoViolations, ...geminiToolArrayValidationMojoViolations, ...geminiOAuthModelMojoViolations, ...superExposeOriginMojoViolations, ...kiroAcpToolLedgerMojoViolations, ...quotaPoolSummarySectionsMojoViolations, ...deepseekRequestDiagnosticViolations, ...deepseekToolShapeIssueMojoViolations, ...deepseekReplayItemPolicyMojoViolations, ...chatNamespaceSplitMojoViolations, ...deepseekInputItemIssueMessageViolations, ...deepseekRequestIssueMessageViolations, ...smartContextTelemetrySampleViolations, ...compatibilityDiagnosticsMojoViolations, ...quotaHeaderProjectionViolations, ...smartContextCapsuleOrderViolations, ...markerViolations, ...deepseekCatalogPolicyViolations, ...featureOffViolations, ...liveLogRecordViolations, ...runtimePolicyPresetViolations, ...runtimeConfigScalarViolations, ...profileHealthCircuitViolations, ...logThroughputViolations, ...operationalDetailSpecViolations, ...transcriptPolicyViolations, ...logLoadPolicyViolations, ...routeReasonViolations, ...runtimeStateQuotaViolations, ...runtimeStateRoutePolicyViolations, ...runtimeProxyRootViolations, ...runtimeRecoveryDeadlineViolations, ...brokerVersionGuardViolations, ...brokerContinuityViolations, ...brokerLogCacheViolations, ...codexConfigViolations, ...statePolicyViolations, ...quotaSelectionPolicyViolations, ...routeTagMirrorViolations, ...enumTagMirrorViolations, ...appSelectionPolicyMirrorViolations, ...runtimeStateBackgroundViolations, ...redactionViolations, ...rateLimitHeaderSelectionViolations, ...profileIdentityViolations, ...governanceInspectionViolations, ...governanceInspectionOrderingViolations, ...exactnessPlannerViolations,
+    ...bufferedSseViolations,
     ...promptCacheViolations,
     ...bindingPruneViolations,
     ...adaptiveBudgetViolations,
@@ -10668,6 +10697,13 @@ async function promotedFiles() {
 }
 
 function selfTest() {
+  for (const path of [BUFFERED_SSE_ERRORS, BUFFERED_SSE_GEMINI]) {
+    assert.deepEqual(findViolations([[path, "values_from_json_or_sse"]]), []);
+    assert.match(findViolations([[path, "values_from_json_or_sse\ntext.lines()"]]).join("\n"), /restored Rust buffered SSE framing/u);
+    assert.match(findViolations([[path, ""]]).join("\n"), /must retain Mojo delegation/u);
+  }
+  assert.match(findViolations([[BUFFERED_SSE_ADAPTER, ""]]).join("\n"), /must retain Mojo delegation/u);
+  assert.match(findViolations([[BUFFERED_SSE_MOJO, ""]]).join("\n"), /must retain Mojo delegation/u);
   const promptCache = "prepare_prompt_cache_key( plan_prompt_cache_update( state_policy::last_run_selection_keep( state_policy::binding_prune_indices(";
   assert.deepEqual(findViolations([[PROMPT_CACHE_CALLER, promptCache]]), []);
   assert.match(findViolations([[PROMPT_CACHE_CALLER, promptCache + "\nkey.trim()"]]).join("\n"), /restored Rust prompt-cache decisions/u);

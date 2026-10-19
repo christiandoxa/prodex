@@ -4,16 +4,9 @@ use crate::mojo_json::Document;
 use serde_json::Value;
 
 pub(super) fn provider_error_codes(body: &[u8]) -> Vec<String> {
-    if let Ok(value) = serde_json::from_slice::<Value>(body) {
-        return provider_error_codes_from_value(&value);
-    }
-    std::str::from_utf8(body)
-        .ok()
-        .into_iter()
-        .flat_map(|text| text.lines())
-        .filter_map(|line| line.trim().strip_prefix("data:").map(str::trim))
-        .filter_map(|payload| serde_json::from_str::<Value>(payload).ok())
-        .flat_map(|value| provider_error_codes_from_value(&value))
+    crate::mojo_json::values_from_json_or_sse(body)
+        .iter()
+        .flat_map(provider_error_codes_from_value)
         .collect()
 }
 
@@ -54,6 +47,20 @@ mod tests {
     fn provider_error_codes_mojo_preserves_sse_framing_and_skips_malformed_events() {
         let body = b"event: error\r\ndata: {\"code\":\"BUSY\"}\r\n\r\ndata: {bad json}\n\ndata: {\"status\":429}\n\n";
         assert_eq!(provider_error_codes(body), ["busy", "429"]);
+    }
+
+    #[test]
+    fn buffered_sse_error_codes_share_unicode_framing_without_joining_data_lines() {
+        let body = "\u{2003}data:\u{3000}{\"code\":\"BUSY\"}\r\ndata: [DONE]\ndata:\nDATA: {\"code\":\"ignored\"}\ndata: {\"code\":\ndata: \"split-is-not-a-value\"}\ndata:{\"status\":429}\ndata:{\"code\":\"BUSY\"}";
+        assert_eq!(
+            provider_error_codes(body.as_bytes()),
+            ["busy", "429", "busy"]
+        );
+        assert_eq!(provider_error_codes(b"data:\xff"), Vec::<String>::new());
+        assert_eq!(
+            provider_error_codes(br#""data: {\"code\":\"ignored\"}""#),
+            Vec::<String>::new()
+        );
     }
 
     #[test]
