@@ -1,5 +1,7 @@
 from std.memory import Pointer
 from std.math import isfinite
+from log_number import log_parse_u64_text as log_retention_parse_u64_text, log_completed_rate
+from info_token_usage import info_token_usage_numbers
 
 comptime LOG_THROUGHPUT_ABI_VERSION: Int64 = 1
 comptime LOG_THROUGHPUT_STATE_ABI_VERSION: Int64 = 1
@@ -403,10 +405,8 @@ def prodex_log_throughput_completed_rate_v1(
 ) abi("C") -> Int64:
     if abi_version != LOG_THROUGHPUT_ABI_VERSION:
         return LOG_THROUGHPUT_ABI
-    if output_tokens == 0 or generation_ms == 0:
-        return throughput_write_rate(False, 0.0, valid_address, rate_address)
-    var rate = Float64(output_tokens) * 1000.0 / Float64(generation_ms)
-    return throughput_write_rate(True, rate, valid_address, rate_address)
+    var result = log_completed_rate(output_tokens, generation_ms)
+    return throughput_write_rate(result[0], result[1], valid_address, rate_address)
 
 
 @export("prodex_log_throughput_stream_rate_v1")
@@ -481,33 +481,6 @@ comptime LOG_RETENTION_CANDIDATES_EXPIRED: Int64 = 6
 comptime LOG_RETENTION_CANDIDATES_OVER_BUDGET: Int64 = 7
 comptime LOG_RETENTION_CANDIDATE_STRIDE: Int = 5
 comptime LOG_RETENTION_UINT64_MAX: UInt64 = 18_446_744_073_709_551_615
-
-
-def log_retention_parse_u64_text(
-    address: UInt64,
-    length: UInt64,
-) -> Tuple[Bool, UInt64]:
-    if length == 0 or length > UInt64(0x7FFF_FFFF_FFFF_FFFF) or address == 0:
-        return (False, UInt64(0))
-    var source = Pointer[mut=False, UInt8, ImmUntrackedOrigin](
-        unsafe_from_address=Int(address)
-    )
-    var index: UInt64 = 0
-    if source[unsafe_offset=0] == 43:
-        index = 1
-        if index == length:
-            return (False, UInt64(0))
-    var value: UInt64 = 0
-    while index < length:
-        var byte = source[unsafe_offset=Int(index)]
-        if byte < 48 or byte > 57:
-            return (False, UInt64(0))
-        var digit = UInt64(byte - 48)
-        if value > (LOG_RETENTION_UINT64_MAX - digit) // 10:
-            return (False, UInt64(0))
-        value = value * 10 + digit
-        index += 1
-    return (True, value)
 
 
 @export("prodex_log_retention_policy_v1")
@@ -775,3 +748,13 @@ def prodex_log_retention_candidates_v1(
     for position in range(selected_count, count):
         output[unsafe_offset=position] = LOG_RETENTION_UINT64_MAX
     return LOG_THROUGHPUT_OK
+
+
+@export("prodex_info_token_usage_numbers_v1")
+def prodex_info_token_usage_numbers_v1(
+    abi_version: Int64, kind: Int64, text_address: UInt, text_count: Int64,
+    presence: UInt64, output_address: UInt, output_words: Int64,
+) abi("C") -> Int64:
+    if abi_version != LOG_THROUGHPUT_ABI_VERSION:
+        return LOG_THROUGHPUT_ABI
+    return info_token_usage_numbers(kind, text_address, text_count, presence, output_address, output_words)

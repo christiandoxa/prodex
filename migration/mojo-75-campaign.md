@@ -6316,3 +6316,45 @@ Formatting, docs, changed-tests, size, authority, no-fallback self-test/source
 guard and crate-boundary self-test/source guard pass.
 `PRODEX_MOJO_REQUIRED=1 CARGO_BUILD_JOBS=6 cargo clippy --locked --workspace --all-targets --all-features -- -D warnings`
 also passes with existing vendor warnings only.
+
+## Compiled token-usage numeric policy (2026-10-19)
+
+Info provider checkpoint `ca0065ea4` is pushed to main. The version-1 log ABI
+now delegates completed/progress usage requirements, checked integer parsing,
+optional numeric defaults, timing suppression and completed-rate selection to
+Mojo. The existing retention integer parser and completed-rate calculation are
+shared through a focused log-number owner. Rust retains Serde/quoted-field wire
+decoding, event/text acquisition and typed result materialization. Its previous
+usage-field numeric parsers, required-field branches and reported-rate decisions
+are deleted without semantic recomputation on errors.
+
+Mojo's allocating float parser initially failed the freestanding production link
+(`KGEN_CompilerRT_AlignedAlloc`); it was removed. Decimal validation now compares
+exact IEEE-754 zero/overflow rounding bounds without allocations or compiler
+runtime dependencies. A dynamic Array check also introduced a compiler stdio
+reference; using the existing caller-owned output record removed it. Cargo now
+watches all three new Info/log helper sources for subsequent rebuilds. A direct
+retention test failure reproduced unchanged against HEAD; explicit test
+allocations repair its integer-address input lifetimes.
+
+All 26,384 temporary differential comparisons pass (16,384 event-field cases and
+10,000 decimal-rate cases). The Rust oracle is removed. Fifteen Info caller tests
+and all 965 strict Mojo-core tests pass, including exact rounding ties, exponent
+cancellation, malformed-fact rejection without writes and existing retention
+contracts. Direct token-number and retention Mojo tests also pass. The official
+share rises from 35.45282169051207% to 35.47031821364662%
+(127,652 Mojo / 232,232 Rust production lines), with unchanged metric rules.
+The 75% target remains outstanding by 39.52968178635338 percentage points.
+
+Commands passing so far include
+`PRODEX_MOJO_REQUIRED=1 CARGO_BUILD_JOBS=6 cargo test --locked -q -p prodex-app --lib reports::info:: -- --test-threads=1`,
+`PRODEX_MOJO_REQUIRED=1 CARGO_BUILD_JOBS=6 cargo test --locked -q -p prodex-mojo-core --features mojo-core -- --test-threads=1`,
+`mojo run -D ASSERT=all -I mojo/prodex_core mojo/tests/info_token_usage_test.mojo`,
+and `mojo run -D ASSERT=all -I mojo -I mojo/prodex_core mojo/tests/log_throughput_policy_test.mojo`.
+No-fallback self-test/source, authority, size and crate-boundary self-test/source
+guards pass. All 116 log/TUI tests pass via
+`PRODEX_MOJO_REQUIRED=1 CARGO_BUILD_JOBS=6 cargo test --locked -q -p prodex-app --lib app_commands::log -- --test-threads=1`,
+including the display-latency fixture. Formatting, `npm run docs`,
+`npm run test:changed` and workspace all-target/all-feature Clippy with warnings
+denied also pass (existing vendor warnings only). Completed probe/baseline
+scratch was removed; inspected Trash was empty and `trash-empty -f` completed.

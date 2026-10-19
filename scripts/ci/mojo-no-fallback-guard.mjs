@@ -30,6 +30,9 @@ const DOCTOR_PRESENTATION_MOJO_FILE = "mojo/prodex_core/info_render.mojo";
 const INFO_PROVIDER_CALLER_FILE = "crates/prodex-app/src/app_commands/info.rs";
 const INFO_PROVIDER_ADAPTER_FILE = "crates/prodex-mojo-core/src/info_render/provider.rs";
 const INFO_PROVIDER_MOJO_FILE = "mojo/prodex_core/info_provider.mojo";
+const INFO_TOKEN_NUMBERS_ADAPTER = "crates/prodex-mojo-core/src/log_throughput_policy/token_usage.rs";
+const INFO_TOKEN_NUMBERS_MOJO = "mojo/prodex_core/info_token_usage.mojo";
+const LOG_NUMBERS_MOJO = "mojo/prodex_core/log_number.mojo";
 const PROVIDER_BINDING_IDENTITY_CONSUMER_FILE = "crates/prodex-provider-core/src/binding_identity.rs";
 const PROVIDER_BINDING_IDENTITY_ADAPTER_FILE = "crates/prodex-mojo-core/src/rich/provider_binding_identity.rs";
 const PROVIDER_BINDING_IDENTITY_MOJO_FILE = "mojo/prodex_core/provider_binding_identity.mojo";
@@ -652,6 +655,9 @@ const PROMOTED_FILES = [
   INFO_PROVIDER_CALLER_FILE,
   INFO_PROVIDER_ADAPTER_FILE,
   INFO_PROVIDER_MOJO_FILE,
+  INFO_TOKEN_NUMBERS_ADAPTER,
+  INFO_TOKEN_NUMBERS_MOJO,
+  LOG_NUMBERS_MOJO,
   PROVIDER_BINDING_IDENTITY_CONSUMER_FILE,
   PROVIDER_BINDING_IDENTITY_ADAPTER_FILE,
   PROVIDER_BINDING_IDENTITY_MOJO_FILE,
@@ -3542,17 +3548,26 @@ export function findViolations(files) {
       }
       return violations;
     }
-    if (filePath === "crates/prodex-app/src/reports/info/token_usage_render.rs") {
-      const required = [
-        "prodex_mojo_core::log_throughput_policy::completed_rate(",
-      ];
-      const violations = required
-        .filter((call) => !contents.includes(call))
-        .map((call) => filePath + ": info token-usage rate migration must retain Mojo call " + call);
-      if (/output_tokens as f64 \* 1_000\.0 \/ duration as f64/u.test(contents)) {
-        violations.push(filePath + ": contains restored Rust log-throughput rate semantics");
+    if (filePath === INFO_TOKEN_NUMBERS_ADAPTER ||
+        filePath === "crates/prodex-app/src/reports/info/token_usage_render.rs") {
+      const production = contents.split("#[cfg(test)]", 1)[0];
+      const required = filePath === INFO_TOKEN_NUMBERS_ADAPTER
+        ? ["prodex_info_token_usage_numbers_v1(", "InfoTokenUsageFields", "rate_output("]
+        : ["prodex_mojo_core::log_throughput_policy::info_token_usage_numbers("];
+      const violations = required.filter((call) => !production.includes(call))
+        .map((call) => `${filePath}: info token-usage rate migration must retain Mojo call ${call}`);
+      if (/\.parse(?:::<(?:u64|f64)>)?\(\)/u.test(production) ||
+          /output_tokens as f64 \* 1_000\.0 \/ duration as f64/u.test(production)) {
+        violations.push(`${filePath}: contains restored Rust log-throughput rate semantics or numeric parser`);
       }
       return violations;
+    }
+    if (filePath === INFO_TOKEN_NUMBERS_MOJO || filePath === LOG_NUMBERS_MOJO) {
+      const required = filePath === INFO_TOKEN_NUMBERS_MOJO
+        ? ["def info_token_usage_numbers(", "log_parse_u64_text(", "log_positive_finite_decimal(", "log_completed_rate("]
+        : ["def log_parse_u64_text(", "def log_positive_finite_decimal(", "def log_completed_rate("];
+      return required.filter((marker) => !contents.includes(marker))
+        .map((marker) => `${filePath}: log number policy must retain Mojo owner ${marker}`);
     }
     if (filePath === "crates/prodex-mojo-core/src/log_throughput_policy.rs") {
       const required = [
@@ -11664,7 +11679,18 @@ function selfTest() {
     [RUNTIME_LOG_RETENTION_SELECTION_FILE, runtimeLogSelectionCalls],
     ["crates/prodex-mojo-core/src/log_throughput_policy.rs", runtimeLogAdapterCalls],
   ]), []);
-  const tokenUsageRateCall = "prodex_mojo_core::log_throughput_policy::completed_rate(";
+  const tokenNumbersAdapter = "prodex_info_token_usage_numbers_v1( InfoTokenUsageFields rate_output(";
+  assert.deepEqual(findViolations([[INFO_TOKEN_NUMBERS_ADAPTER, tokenNumbersAdapter]]), []);
+  assert.match(findViolations([[INFO_TOKEN_NUMBERS_ADAPTER,
+    tokenNumbersAdapter + "\nvalue.parse::<u64>()"]]).join("\n"), /restored Rust log-throughput/u);
+  const tokenNumbersMojo = "def info_token_usage_numbers( log_parse_u64_text( log_positive_finite_decimal( log_completed_rate(";
+  assert.deepEqual(findViolations([[INFO_TOKEN_NUMBERS_MOJO, tokenNumbersMojo]]), []);
+  assert.match(findViolations([[INFO_TOKEN_NUMBERS_MOJO,
+    tokenNumbersMojo.replace("log_completed_rate(", "old_rate(")]]).join("\n"), /log number policy must retain Mojo owner/u);
+  const logNumbersMojo = "def log_parse_u64_text( def log_positive_finite_decimal( def log_completed_rate(";
+  assert.deepEqual(findViolations([[LOG_NUMBERS_MOJO, logNumbersMojo]]), []);
+  assert.match(findViolations([[LOG_NUMBERS_MOJO, ""]]).join("\n"), /log number policy must retain Mojo owner/u);
+  const tokenUsageRateCall = "prodex_mojo_core::log_throughput_policy::info_token_usage_numbers(";
   assert.deepEqual(findViolations([[
     "crates/prodex-app/src/reports/info/token_usage_render.rs",
     tokenUsageRateCall,

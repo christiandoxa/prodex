@@ -59,6 +59,9 @@ fn emit_source_rerun_directives(sources: &[&str], manifest_dir: &Path) {
         "provider_upstream.mojo",
         "runtime_local_rewrite_transport.mojo",
         "status_resource.mojo",
+        "info_provider.mojo",
+        "info_token_usage.mojo",
+        "log_number.mojo",
     ] {
         println!(
             "cargo:rerun-if-changed={}",
