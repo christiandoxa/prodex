@@ -24,7 +24,21 @@ pub struct GeminiPrecommitPlan<'a> {
     pub state: GeminiPrecommitState,
 }
 
+/// Joined SSE data and whether Serde acquired any continuing response values.
+pub struct GeminiPrecommitFrame<'a> {
+    pub data: &'a str,
+    pub parsed_any: bool,
+}
+
 unsafe extern "C" {
+    fn prodex_mojo_gemini_precommit_frame_v1(
+        abi: i64,
+        address: u64,
+        length: i64,
+        parsed_any: i64,
+        visible: i64,
+        reasoning: i64,
+    ) -> i64;
     fn prodex_mojo_gemini_precommit_v1(
         abi: i64,
         nodes: u64,
@@ -39,6 +53,31 @@ unsafe extern "C" {
         scratch_length: i64,
         output: u64,
     ) -> i64;
+}
+
+/// Classifies terminal markers and malformed frames after native JSON acquisition.
+pub fn gemini_precommit_frame_decision(
+    frame: GeminiPrecommitFrame<'_>,
+    state: GeminiPrecommitState,
+) -> Result<GeminiPrecommitDecision<'static>, MojoError> {
+    ensure_rich_abi()?;
+    // SAFETY: the UTF-8 data is borrowed for this synchronous scalar-return ABI.
+    let tag = unsafe {
+        prodex_mojo_gemini_precommit_frame_v1(
+            1,
+            frame.data.as_ptr() as u64,
+            signed(frame.data.len())?,
+            i64::from(frame.parsed_any),
+            i64::from(state.visible_output),
+            i64::from(state.reasoning_output),
+        )
+    };
+    match tag {
+        -1 => Err(MojoError::InvalidInput),
+        -4 => Err(MojoError::AbiMismatch),
+        0..=2 => decode_decision(&[], tag, -1),
+        _ => Err(MojoError::InvalidOutput),
+    }
 }
 
 /// Classifies a normalized response using caller-owned JSON and sanitizer scratch.
@@ -80,7 +119,21 @@ pub fn gemini_precommit_plan<'a>(
         1 => Ok(true),
         _ => Err(MojoError::InvalidOutput),
     };
-    let decision = match (output[0], output[3]) {
+    Ok(GeminiPrecommitPlan {
+        decision: decode_decision(nodes, output[0], output[3])?,
+        state: GeminiPrecommitState {
+            visible_output: boolean(output[1])?,
+            reasoning_output: boolean(output[2])?,
+        },
+    })
+}
+
+fn decode_decision<'a>(
+    nodes: &[JsonNode<'a>],
+    tag: i64,
+    reason: i64,
+) -> Result<GeminiPrecommitDecision<'a>, MojoError> {
+    Ok(match (tag, reason) {
         (0, -1) => GeminiPrecommitDecision::Continue,
         (1, -1) => GeminiPrecommitDecision::Commit,
         (2, -1) => GeminiPrecommitDecision::RetryableInvalid("gemini_empty_response"),
@@ -93,13 +146,6 @@ pub fn gemini_precommit_plan<'a>(
             GeminiPrecommitDecision::RetryableInvalid(node.text)
         }
         _ => return Err(MojoError::InvalidOutput),
-    };
-    Ok(GeminiPrecommitPlan {
-        decision,
-        state: GeminiPrecommitState {
-            visible_output: boolean(output[1])?,
-            reasoning_output: boolean(output[2])?,
-        },
     })
 }
 

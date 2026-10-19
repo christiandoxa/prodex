@@ -2,7 +2,7 @@
 
 use super::gemini_provider_core_normalized_response_value;
 use crate::mojo_json::Document;
-use prodex_mojo_core::rich::{GeminiPrecommitDecision, GeminiPrecommitState};
+use prodex_mojo_core::rich::{GeminiPrecommitDecision, GeminiPrecommitFrame, GeminiPrecommitState};
 
 #[derive(Default)]
 pub struct GeminiProviderCorePrecommitProbe {
@@ -24,15 +24,6 @@ pub fn gemini_provider_core_precommit_decision_for_data_lines(
 ) -> GeminiProviderCorePrecommitDecision {
     let data = data_lines.join("\n");
     let trimmed = data.trim();
-    if trimmed == "[DONE]" {
-        return if probe.visible_output || probe.reasoning_output {
-            GeminiProviderCorePrecommitDecision::Commit
-        } else {
-            GeminiProviderCorePrecommitDecision::RetryableInvalid(
-                "gemini_empty_response".to_string(),
-            )
-        };
-    }
     if let Ok(value) = serde_json::from_str::<serde_json::Value>(trimmed) {
         return gemini_provider_core_precommit_decision_for_value(&value, probe);
     }
@@ -51,11 +42,18 @@ pub fn gemini_provider_core_precommit_decision_for_data_lines(
             decision => return decision,
         }
     }
-    if parsed_any {
-        GeminiProviderCorePrecommitDecision::Continue
-    } else {
-        GeminiProviderCorePrecommitDecision::Commit
-    }
+    let decision = prodex_mojo_core::rich::gemini_precommit_frame_decision(
+        GeminiPrecommitFrame {
+            data: &data,
+            parsed_any,
+        },
+        GeminiPrecommitState {
+            visible_output: probe.visible_output,
+            reasoning_output: probe.reasoning_output,
+        },
+    )
+    .expect("Mojo Gemini pre-commit frame policy returned invalid output");
+    gemini_provider_core_precommit_decision(decision)
 }
 
 fn gemini_provider_core_precommit_decision_for_value(
@@ -78,7 +76,13 @@ fn gemini_provider_core_precommit_decision_for_value(
     .expect("Mojo Gemini pre-commit policy returned invalid output");
     probe.visible_output = plan.state.visible_output;
     probe.reasoning_output = plan.state.reasoning_output;
-    match plan.decision {
+    gemini_provider_core_precommit_decision(plan.decision)
+}
+
+fn gemini_provider_core_precommit_decision(
+    decision: GeminiPrecommitDecision<'_>,
+) -> GeminiProviderCorePrecommitDecision {
+    match decision {
         GeminiPrecommitDecision::Continue => GeminiProviderCorePrecommitDecision::Continue,
         GeminiPrecommitDecision::Commit => GeminiProviderCorePrecommitDecision::Commit,
         GeminiPrecommitDecision::RetryableInvalid(reason) => {

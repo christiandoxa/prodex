@@ -7392,3 +7392,55 @@ The explicit-feature suite above supplies the 511-test evidence. Docs,
 formatting, size, staged churn/privacy and diff checks pass. Trash was inspected
 empty before `trash-empty -f`; source and validation evidence remain preserved.
 Full CI, live-provider and native macOS/Windows checks were not run.
+
+
+## Gemini terminal-frame decisions (2026-10-20)
+
+Checkpoint `6755d418c` was pushed directly to `origin/main` after the previous
+candidate-policy stage. This follow-up moves `[DONE]` recognition and final
+parsed/unparsed-frame decisions into the same Mojo owner. Rust retains joined
+SSE strings, Serde acquisition and typed result application. The public
+provider API and app EOF/transport orchestration remain unchanged.
+
+The additive version-1 scalar ABI validates UTF-8, flag ranges, lengths and
+version before classifying a frame. Unicode trim, case-sensitive terminal
+markers, reasoning/visibility, malformed transport commit and mixed-frame
+continue behavior preserve the committed implementation. Candidate and frame
+ABIs share one checked Rust decision decoder. The existing no-fallback guard
+rejects restored Rust terminal/parsed-frame branches and requires core,
+provider and live-app regressions.
+
+All 16,384 temporary differential comparisons pass. The owned test-only
+oracle was removed after harvesting its result. Direct assertions pass via
+`mojo run -D ASSERT=all -I mojo/prodex_core mojo/tests/gemini_precommit_test.mojo`.
+Strict core tests pass (1,025) via
+`PRODEX_MOJO_REQUIRED=1 CARGO_BUILD_JOBS=6 rtk cargo test --locked -q -p prodex-mojo-core --features mojo-core -- --test-threads=1`.
+Strict provider tests pass (512) via
+`PRODEX_MOJO_REQUIRED=1 CARGO_BUILD_JOBS=6 rtk cargo test --locked -q -p prodex-provider-core --features mojo -- --test-threads=1`.
+Live app pre-commit tests pass (12) via
+`PRODEX_MOJO_REQUIRED=1 CARGO_BUILD_JOBS=6 rtk cargo test --locked -q -p prodex-app --lib gemini_precommit -- --test-threads=1`.
+
+The unchanged official metric is 35.669716162327%
+(129,251 Mojo / 233,104 Rust / 362,355 total production lines), compared with
+35.670753586865914% before this stage. Typed ABI overhead outweighs this small
+policy's source reduction, a decrease of 0.001037424538914 percentage points;
+this is recorded rather than compensated with filler or counting changes.
+The gap to 75% is 39.330283837673 percentage points. Release-floor and audited
+reachable-source non-regression checks pass; the project target remains unmet.
+
+No-fallback self-test/source, authority, crate/provider/secret boundaries and
+runtime hot-path checks pass. The offline baseline and all five replay fixtures
+also pass. All 459 serialized proxy regressions pass via
+`PRODEX_MOJO_REQUIRED=1 CARGO_BUILD_JOBS=6 rtk cargo test --locked -q -p prodex-app --lib main_internal_tests::runtime_proxy_ -- --test-threads=1`.
+Runtime manifest validation and all nine runtime smoke steps pass via
+`PRODEX_MOJO_REQUIRED=1 CARGO_BUILD_JOBS=6 rtk proxy node scripts/ci/runtime-test-manifest-guard.mjs` and
+`PRODEX_MOJO_REQUIRED=1 CARGO_BUILD_JOBS=6 rtk proxy node scripts/ci/test-serial.mjs --suite runtime-smoke`.
+Workspace Clippy passes via
+`PRODEX_MOJO_REQUIRED=1 CARGO_BUILD_JOBS=6 rtk cargo clippy --locked --workspace --all-targets --all-features -- -D warnings`,
+with existing vendor/build warnings only. Canonical
+`RUST_TEST_THREADS=1 CARGO_BUILD_JOBS=6 rtk npm run test:changed` passes,
+including 511 default-feature provider tests; the explicit-feature suite above
+supplies 512-test evidence. Final docs/format/size/churn/privacy/diff checks
+pass. Temporary oracle/debug code is absent from final source. Full CI, live-provider and native
+macOS/Windows checks are not run. Campaign-owned build cache remains available
+for these consumers and the next migration stage.

@@ -147,3 +147,53 @@ fn mojo_precommit_preserves_rejection_of_nonobject_parts() {
         &mut GeminiProviderCorePrecommitProbe::default(),
     );
 }
+
+#[test]
+fn mojo_precommit_terminal_frames_preserve_probe_and_case_sensitive_markers() {
+    use GeminiProviderCorePrecommitDecision::{Commit, Continue, RetryableInvalid};
+    let done = [
+        RetryableInvalid("gemini_empty_response".to_string()),
+        Commit,
+        Commit,
+        Commit,
+    ];
+    let unparsed = [Commit, Commit, Commit, Commit];
+    for (lines, expected) in [
+        (vec!["\u{2003}[DONE]\r\n\u{a0}".to_string()], &done),
+        (
+            vec!["\t".to_string(), "[DONE]".to_string(), " ".to_string()],
+            &done,
+        ),
+        (vec!["[done]".to_string()], &unparsed),
+        (vec!["broken".to_string()], &unparsed),
+        (vec![], &unparsed),
+    ] {
+        for (flags, expected) in expected.iter().enumerate() {
+            let mut probe = GeminiProviderCorePrecommitProbe {
+                visible_output: flags & 1 != 0,
+                reasoning_output: flags & 2 != 0,
+                internal_instruction_corpus: "synthetic corpus".to_string(),
+            };
+            assert_eq!(
+                &gemini_provider_core_precommit_decision_for_data_lines(&lines, &mut probe),
+                expected
+            );
+            assert_eq!(
+                (
+                    probe.visible_output,
+                    probe.reasoning_output,
+                    probe.internal_instruction_corpus.as_str()
+                ),
+                (flags & 1 != 0, flags & 2 != 0, "synthetic corpus")
+            );
+        }
+    }
+    let mut probe = GeminiProviderCorePrecommitProbe::default();
+    assert_eq!(
+        gemini_provider_core_precommit_decision_for_data_lines(
+            &["{\"response\": null}".to_string(), "[DONE]".to_string()],
+            &mut probe
+        ),
+        Continue
+    );
+}
