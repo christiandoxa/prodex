@@ -171,6 +171,9 @@ const PING_SUMMARY_CALLER_TEST_FILE = "crates/prodex-app/src/app_commands/ping_t
 const PING_SUMMARY_ADAPTER_FILE = "crates/prodex-mojo-core/src/rich/ping_protocol.rs";
 const PING_SUMMARY_MOJO_FILE = "mojo/prodex_core/ping_protocol.mojo";
 const PROMOTED_FILES = [
+  "crates/prodex-app/src/runtime_kiro_acp/protocol.rs",
+  "crates/prodex-mojo-core/src/kiro_acp_update_policy.rs",
+  "mojo/prodex_core/kiro_acp_update_policy.mojo",
   "crates/prodex-app/src/app_commands/log_tui.rs",
   "crates/prodex-app/src/app_commands/log_tui_render.rs",
   "crates/prodex-mojo-core/src/log/search.rs",
@@ -4534,6 +4537,54 @@ export function findViolations(files) {
       (!contents.includes("prodex_mojo_core::launch::find_super_expose_alias_index") ||
         /\bfn\s+(?:rewrite_super_expose_alias|super_option_takes_value)\s*\(/u.test(contents)))
     .map(([filePath]) => `${filePath}: Super expose alias scan must use Mojo`);
+  const kiroAcpUpdateDispatchMojoViolations = files.flatMap(([filePath, contents]) => {
+    if (filePath === "crates/prodex-app/src/runtime_kiro_acp/protocol.rs") {
+      const production = contents.split("#[cfg(test)]\nmod mojo_session_update_tests", 1)[0];
+      const required = [
+        "kiro_acp_session_update_plan(",
+        "KiroAcpUpdateFieldFacts",
+        "match plan.kind {",
+        "KiroAcpSessionUpdateKind::ToolCall",
+        "KiroAcpSessionUpdateKind::UsageUpdate",
+        "KiroAcpSessionUpdateKind::Unknown",
+        "compiled_kiro_acp_session_update_caller_preserves_protocol_shapes_and_unicode",
+        "compiled_kiro_acp_session_update_caller_preserves_required_field_failure_precedence",
+      ];
+      const retired = [
+        "match session_update.as_str() {",
+        ".context(\"tool_call is missing toolCallId\")",
+        ".context(\"usage_update is missing used\")",
+      ];
+      return required.every((marker) => contents.includes(marker)) &&
+        retired.every((marker) => !production.includes(marker))
+        ? [] : [filePath + ": restored Rust Kiro ACP update classifier or required-field gating"];
+    }
+    if (filePath === "crates/prodex-mojo-core/src/kiro_acp_update_policy.rs") {
+      return [
+        "fn prodex_kiro_acp_session_update_plan_v1(",
+        "pub fn kiro_acp_session_update_plan(",
+        "compiled_kiro_acp_update_kind_distinguishes_all_variants_and_unknown_extensions",
+        "compiled_kiro_acp_update_required_field_checks_preserve_original_error_order",
+        "compiled_kiro_acp_update_abi_rejects_invalid_inputs_before_writing",
+      ].filter((marker) => !contents.includes(marker))
+        .map((marker) => filePath + ": compiled Kiro ACP update ABI or direct coverage missing " + marker);
+    }
+    if (filePath === "mojo/prodex_core/kiro_acp_update_policy.mojo") {
+      return [
+        '@export("prodex_kiro_acp_session_update_plan_v1")',
+        'rich_view_matches_literal["tool_call"](label, False)',
+        'rich_view_matches_literal["usage_update"](label, False)',
+        "KIRO_ACP_UPDATE_FIELD_TOOL_CALL_ID",
+        "KIRO_ACP_UPDATE_FIELD_SIZE",
+      ].filter((marker) => !contents.includes(marker))
+        .map((marker) => filePath + ": Mojo Kiro ACP update classification semantics missing " + marker);
+    }
+    if (filePath === "crates/prodex-mojo-core/build.rs") {
+      return contents.includes('sources.push("../../mojo/prodex_core/kiro_acp_update_policy.mojo")')
+        ? [] : [filePath + ": compiled Kiro ACP update module must be linked into production archive"];
+    }
+    return [];
+  });
   const logAsciiSearchMojoViolations = files.flatMap(([filePath, contents]) => {
     if (filePath === "crates/prodex-app/src/app_commands/log_tui.rs") {
       const required = [
@@ -9251,7 +9302,7 @@ export function findViolations(files) {
       ["crates/prodex-mojo-core/src/rich/deepseek/request_diagnostic.rs", ["fn prodex_deepseek_request_diagnostic_v1(", "pub fn deepseek_request_diagnostic(", "MojoError::InvalidOutput"]],
       ["crates/prodex-mojo-core/src/rich/deepseek/request_diagnostic_tests.rs", ["compiled_request_diagnostics_cover_every_rejection_and_success_tag", "compiled_request_diagnostic_abi_is_atomic_on_malformed_inputs_and_short_buffers"]],
       ["mojo/prodex_core/deepseek_request_diagnostics.mojo", ['@export("prodex_deepseek_request_diagnostic_v1")', "rich_view_valid(provider", "sink.measuring = False"]],
-      ["crates/prodex-mojo-core/build.rs", ['sources.push("../../mojo/prodex_core/deepseek_request_diagnostics.mojo")', 'sources.push("../../mojo/prodex_core/anthropic_stream_policy.mojo")']],
+      ["crates/prodex-mojo-core/build.rs", ['sources.push("../../mojo/prodex_core/deepseek_request_diagnostics.mojo")', 'sources.push("../../mojo/prodex_core/anthropic_stream_policy.mojo")', 'sources.push("../../mojo/prodex_core/kiro_acp_update_policy.mojo")']],
     ]);
     return (requirements.get(filePath) ?? []).filter((marker) => !contents.includes(marker))
       .map((marker) => filePath + ": compiled request diagnostic ownership missing " + marker);
@@ -9693,6 +9744,7 @@ export function findViolations(files) {
     ...quotaWindowViolations, ...quotaResetEpochViolations,
     ...rehydrateViolations, ...budgetTierViolations, ...staticItemViolations, ...replacedClassifierViolations, ...cliDependencyViolations,
     ...doctorDependencyViolations, ...proxyDependencyViolations, ...runtimeTuningViolations,
+    ...kiroAcpUpdateDispatchMojoViolations,
     ...logAsciiSearchMojoViolations,
     ...rtkAutoWrapperManifestViolations,
     ...optionalToolsRenderViolations,
@@ -10699,7 +10751,7 @@ function selfTest() {
     [SMART_CONTEXT_SYMBOLS_MOJO_FILE,
       '@export("prodex_smart_context_symbol_index_v1")\ncomptime SYMBOL_ABI_VERSION: Int64 = 1\ncomptime SYMBOL_MAX_INPUT_BYTES: Int64 = 64 * 1024 * 1024\ndef symbol_parse_declaration(): pass\ndef symbol_brace_end(): pass\ndef symbol_python_end(): pass'],
     ["crates/prodex-mojo-core/src/lib.rs", "pub mod smart_context_symbols;"],
-    ["crates/prodex-mojo-core/build.rs", '../../mojo/prodex_core/smart_context_symbols.mojo\nsources.push("../../mojo/prodex_core/kiro_acp_tool_activity_policy.mojo")\nsources.push("../../mojo/prodex_core/deepseek_request_diagnostics.mojo")\nsources.push("../../mojo/prodex_core/anthropic_stream_policy.mojo")'],
+    ["crates/prodex-mojo-core/build.rs", '../../mojo/prodex_core/smart_context_symbols.mojo\nsources.push("../../mojo/prodex_core/kiro_acp_tool_activity_policy.mojo")\nsources.push("../../mojo/prodex_core/deepseek_request_diagnostics.mojo")\nsources.push("../../mojo/prodex_core/anthropic_stream_policy.mojo")\nsources.push("../../mojo/prodex_core/kiro_acp_update_policy.mojo")'],
     [SMART_CONTEXT_SYMBOLS_TEST_FILE,
       "source_symbol_ranges_cover_rust_python_and_javascript source_symbol_ranges_preserve_function_type_and_fallback_names symbol_index_reports_capacity_and_excerpt_truncation symbol_index_accepts_large_multi_line_artifacts_with_bounded_lines index(text, 16, 16 * 1024)"],
     [SMART_CONTEXT_SYMBOLS_CALLER_TEST_FILE,
@@ -11453,6 +11505,21 @@ function selfTest() {
     'prodex_mojo_core::launch::super_literal_boundary(\n' +
     'prodex_mojo_core::launch::positioned_super_provider_alias(\n' +
     'prodex_mojo_core::launch::codex_command_server_subcommand(']]), []);
+  const kiroUpdateConsumer = [
+    "kiro_acp_session_update_plan(",
+    "KiroAcpUpdateFieldFacts",
+    "match plan.kind {",
+    "KiroAcpSessionUpdateKind::ToolCall",
+    "KiroAcpSessionUpdateKind::UsageUpdate",
+    "KiroAcpSessionUpdateKind::Unknown",
+    "compiled_kiro_acp_session_update_caller_preserves_protocol_shapes_and_unicode",
+    "compiled_kiro_acp_session_update_caller_preserves_required_field_failure_precedence",
+  ].join("\n");
+  const kiroUpdateFile = "crates/prodex-app/src/runtime_kiro_acp/protocol.rs";
+  assert.deepEqual(findViolations([[kiroUpdateFile, kiroUpdateConsumer]]), []);
+  assert.match(findViolations([[kiroUpdateFile,
+    kiroUpdateConsumer + "\nmatch session_update.as_str() {",
+  ]]).join("\n"), /restored Rust Kiro ACP update classifier or required-field gating/u);
   const logAsciiSearchConsumer = [
     "pub(super) fn contains_ignore_ascii_case(",
     "prodex_mojo_core::log::log_contains_ignore_ascii_case(haystack, needle)",
