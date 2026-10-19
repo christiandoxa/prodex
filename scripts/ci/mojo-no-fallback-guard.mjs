@@ -4555,11 +4555,16 @@ export function findViolations(files) {
         "SMART_CONTEXT_REWRITE_SAFETY_HISTORY_LIMIT",
         "compiled_smart_context_rewrite_history_merge_preserves_freshness_stable_ties_and_other_histories",
         "compiled_smart_context_rewrite_history_merge_keeps_last_four_on_equal_timestamps",
+        "smart_context_unique_tail_positions(",
+        "fn runtime_smart_context_unique_history_tail<",
+        "compiled_smart_context_token_history_merge_preserves_existing_duplicates_and_unicode_buckets",
       ];
       const retired = [
         "existing.rewrite_safety_history.retain(",
         ".sort_by_key(|record| record.observed_at_unix_secs)",
         "runtime_smart_context_truncate_vec_tail(\n        &mut existing.rewrite_safety_history",
+        "fn runtime_smart_context_truncate_vec_tail<",
+        "fn runtime_smart_context_extend_unique_tail<",
       ];
       return required.every((marker) => contents.includes(marker)) &&
         retired.every((marker) => !production.includes(marker))
@@ -4572,6 +4577,11 @@ export function findViolations(files) {
         "compiled_rewrite_history_selection_keeps_newest_k_in_stable_timestamp_order",
         "compiled_rewrite_history_plan_matches_test_only_stable_sort_oracle",
         "compiled_rewrite_history_abi_rejects_invalid_shapes_before_output",
+        "fn prodex_smart_context_unique_tail_select_v1(",
+        "pub fn smart_context_unique_tail_positions(",
+        "compiled_smart_context_unique_tail_preserves_existing_duplicates_and_tail_order",
+        "compiled_smart_context_unique_tail_matches_test_only_rust_equality_oracle",
+        "compiled_smart_context_unique_tail_abi_rejects_invalid_source_before_output",
       ].filter((marker) => !contents.includes(marker))
         .map((marker) => filePath + ": Smart Context history ABI/strict regression coverage missing " + marker);
     }
@@ -4582,6 +4592,10 @@ export function findViolations(files) {
         "if count < history_limit:",
         "elif pos > 0:",
         "output[unsafe_offset=pos - 1] = UInt64(index)",
+        '@export("prodex_smart_context_unique_tail_select_v1")',
+        "smart_context_history_same_json(",
+        "if not duplicate:",
+        "skipped = accepted_count - keep",
       ].filter((marker) => !contents.includes(marker))
         .map((marker) => filePath + ": compiled Smart Context history top-K/TTL owner missing " + marker);
     }
@@ -11618,11 +11632,17 @@ function selfTest() {
     "SMART_CONTEXT_REWRITE_SAFETY_HISTORY_LIMIT",
     "compiled_smart_context_rewrite_history_merge_preserves_freshness_stable_ties_and_other_histories",
     "compiled_smart_context_rewrite_history_merge_keeps_last_four_on_equal_timestamps",
+    "smart_context_unique_tail_positions(",
+    "fn runtime_smart_context_unique_history_tail<",
+    "compiled_smart_context_token_history_merge_preserves_existing_duplicates_and_unicode_buckets",
   ].join("\n");
   const smartContextHistoryFile = "crates/prodex-app/src/runtime_proxy/smart_context/token_calibration.rs";
   assert.deepEqual(findViolations([[smartContextHistoryFile, smartContextHistoryCaller]]), []);
   assert.match(findViolations([[smartContextHistoryFile,
     smartContextHistoryCaller + "\nexisting.rewrite_safety_history.retain(",
+  ]]).join("\n"), /restored Rust rewrite-safety history expiration\/sort\/tail selection/u);
+  assert.match(findViolations([[smartContextHistoryFile,
+    smartContextHistoryCaller + "\nfn runtime_smart_context_extend_unique_tail<T>() {}",
   ]]).join("\n"), /restored Rust rewrite-safety history expiration\/sort\/tail selection/u);
   const kiroUpdateConsumer = [
     "kiro_acp_session_update_plan(",
