@@ -1,6 +1,7 @@
 //! Runtime-load parsing and summaries.
 
 use prodex_mojo_core::info_render::InfoRuntimeLoadConfig;
+use prodex_mojo_core::rich::parse_plain_log_envelope;
 
 use super::{
     BTreeMap, InfoQuotaWindow, InfoRuntimeLoadSummary, InfoRuntimeQuotaObservation,
@@ -118,10 +119,10 @@ pub fn info_runtime_line_timestamp(line: &str) -> Option<String> {
             .and_then(serde_json::Value::as_str)
             .map(str::to_string);
     }
-    let end = line.find("] ")?;
-    line.strip_prefix('[')
-        .and_then(|trimmed| trimmed.get(..end.saturating_sub(1)))
-        .map(ToString::to_string)
+    parse_plain_log_envelope(line)
+        .expect("compiled Mojo log envelope failed")
+        .timestamp
+        .map(str::to_string)
 }
 
 pub fn info_runtime_parse_fields(line: &str) -> BTreeMap<String, String> {
@@ -139,9 +140,9 @@ pub fn info_runtime_parse_fields(line: &str) -> BTreeMap<String, String> {
 }
 
 pub(crate) fn info_runtime_log_message(line: &str) -> &str {
-    line.split_once("] ")
-        .map(|(_, message)| message)
-        .unwrap_or(line)
+    parse_plain_log_envelope(line)
+        .expect("compiled Mojo log envelope failed")
+        .message
         .trim()
 }
 

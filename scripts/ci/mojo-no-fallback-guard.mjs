@@ -34,6 +34,7 @@ const INFO_TOKEN_NUMBERS_ADAPTER = "crates/prodex-mojo-core/src/log_throughput_p
 const INFO_TOKEN_NUMBERS_MOJO = "mojo/prodex_core/info_token_usage.mojo";
 const LOG_NUMBERS_MOJO = "mojo/prodex_core/log_number.mojo";
 const INFO_LOAD_CALLER = "crates/prodex-app/src/reports/info/runtime_load.rs";
+const QUOTA_LOG_PROFILE_CALLER = "crates/prodex-app/src/quota_support.rs";
 const INFO_LOAD_ADAPTER = "crates/prodex-mojo-core/src/info_render/runtime_load.rs";
 const INFO_LOAD_MOJO = "mojo/prodex_core/info_runtime_load.mojo";
 const INFO_TOKEN_SUMMARY_ADAPTER = "crates/prodex-mojo-core/src/info_render/token_usage.rs";
@@ -664,6 +665,7 @@ const PROMOTED_FILES = [
   INFO_TOKEN_NUMBERS_MOJO,
   LOG_NUMBERS_MOJO,
   INFO_LOAD_CALLER,
+  QUOTA_LOG_PROFILE_CALLER,
   INFO_LOAD_ADAPTER,
   INFO_LOAD_MOJO,
   INFO_TOKEN_SUMMARY_ADAPTER,
@@ -1536,9 +1538,17 @@ const FORBIDDEN_MARKERS = [
 export function findViolations(files) {
   const logPayloadProjectionViolations = files.flatMap(([filePath, contents]) => {
     const production = contents.split("#[cfg(test)]", 1)[0];
+    if (filePath === QUOTA_LOG_PROFILE_CALLER) {
+      const body = contents.match(/fn quota_runtime_profile_from_line\([^]*?^\}/mu)?.[0] ?? "";
+      return body.includes("parse_plain_log_envelope(line)") && !body.includes('split_once("] ")')
+        ? [] : [`${filePath}: quota profile envelope parsing must remain Mojo-owned`];
+    }
     if (filePath === LOG_PAYLOAD_CALLER_FILE) {
       const violations = production.includes("prodex_mojo_core::json::log_payload_projection(")
         ? [] : [`${filePath}: payload display projection must remain Mojo-owned`];
+      if (!production.includes("parse_plain_log_envelope(line)") || production.includes('split_once("] ")')) {
+        violations.push(`${filePath}: payload log envelope parsing must remain Mojo-owned`);
+      }
       if (/fn (?:render_upstream_payload_object|append_payload_summary|append_payload_metadata|input_item_contains_type|short_identifier|render_input_value|render_input_item|readable_content_text|readable_json_string_or_value|short_json_value|tool_name)\b/u.test(production)) {
         violations.push(`${filePath}: restored Rust log payload projection`);
       }
@@ -6363,12 +6373,15 @@ export function findViolations(files) {
     if (filePath === INFO_LOAD_CALLER || filePath === INFO_LOAD_ADAPTER) {
       const production = contents.split("#[cfg(test)]", 1)[0];
       const required = filePath === INFO_LOAD_CALLER
-        ? ["prodex_mojo_core::info_render::info_runtime_load_plan("]
+        ? ["prodex_mojo_core::info_render::info_runtime_load_plan(", "parse_plain_log_envelope(line)"]
         : ["prodex_info_runtime_load_plan_v1(", "size_of::<LoadRow>() == 40"];
       const violations = required.filter((marker) => !production.includes(marker))
         .map((marker) => `${filePath}: runtime-load summary must retain Mojo delegation ${marker}`);
       if (/latest_inflight_counts|recent_cutoff|lookback_cutoff|\.sort_by/u.test(production)) {
         violations.push(`${filePath}: contains restored Rust runtime-load aggregation`);
+      }
+      if (filePath === INFO_LOAD_CALLER && /(?:split_once|find)\("\] "\)/u.test(production)) {
+        violations.push(`${filePath}: contains restored Rust log envelope parsing`);
       }
       return violations;
     }
@@ -10525,10 +10538,14 @@ function selfTest() {
     testWiring.replace("cfg(test)", "cfg(not(test))")), []);
   assert.deepEqual(relocatedTestPaths("crates/prodex-mojo-core/src/redaction.rs",
     testWiring.replace("mod tests;", "")), []);
-  const payloadCaller = "prodex_mojo_core::json::log_payload_projection(";
+  const payloadCaller = "prodex_mojo_core::json::log_payload_projection( parse_plain_log_envelope(line)";
   assert.deepEqual(findViolations([[LOG_PAYLOAD_CALLER_FILE, payloadCaller]]), []);
   assert.match(findViolations([[LOG_PAYLOAD_CALLER_FILE, payloadCaller + "\nfn append_payload_summary() {}"]]).join("\n"), /restored Rust log payload projection/u);
   assert.match(findViolations([[LOG_PAYLOAD_CALLER_FILE, "fn legacy_projection() {}"]]).join("\n"), /must remain Mojo-owned/u);
+  assert.match(findViolations([[LOG_PAYLOAD_CALLER_FILE, payloadCaller + '\nsplit_once("] ")']]).join("\n"), /envelope parsing must remain Mojo-owned/u);
+  const quotaEnvelopeCaller = "fn quota_runtime_profile_from_line(line: &str) {\n    parse_plain_log_envelope(line)\n}";
+  assert.deepEqual(findViolations([[QUOTA_LOG_PROFILE_CALLER, quotaEnvelopeCaller + '\nfn auth_backoff() { split_once("] ") }']]), []);
+  assert.match(findViolations([[QUOTA_LOG_PROFILE_CALLER, quotaEnvelopeCaller.replace("parse_plain_log_envelope(line)", 'line.split_once("] ")')]]).join("\n"), /envelope parsing must remain Mojo-owned/u);
   assert.match(findViolations([[LOG_PAYLOAD_ADAPTER_FILE, "fn legacy_projection() {}"]]).join("\n"), /ABI must remain active/u);
   assert.match(findViolations([[LOG_PAYLOAD_MOJO_FILE, ""]]).join("\n"), /Mojo payload projection must retain/u);
   const nativeLaunch = "crates/prodex-app/src/runtime_launch.rs";
@@ -10595,9 +10612,10 @@ function selfTest() {
   const tokenSummaryMojo = "def info_token_usage_summary( rich_view_order_sort( usage_saturating_add( output[unsafe_offset=1] = UInt64(count)";
   assert.deepEqual(findViolations([[INFO_TOKEN_SUMMARY_MOJO, tokenSummaryMojo]]), []);
   assert.match(findViolations([[INFO_TOKEN_SUMMARY_MOJO, ""]]).join("\n"), /token aggregation must remain Mojo-owned/u);
-  const infoLoadCaller = "prodex_mojo_core::info_render::info_runtime_load_plan(";
+  const infoLoadCaller = "prodex_mojo_core::info_render::info_runtime_load_plan( parse_plain_log_envelope(line)";
   assert.deepEqual(findViolations([[INFO_LOAD_CALLER, infoLoadCaller]]), []);
   assert.match(findViolations([[INFO_LOAD_CALLER, infoLoadCaller + "\nlet recent_cutoff = now;"]]).join("\n"), /restored Rust runtime-load aggregation/u);
+  assert.match(findViolations([[INFO_LOAD_CALLER, infoLoadCaller + '\nline.find("] ")']]).join("\n"), /restored Rust log envelope parsing/u);
   const infoLoadAdapter = "prodex_info_runtime_load_plan_v1( size_of::<LoadRow>() == 40";
   assert.deepEqual(findViolations([[INFO_LOAD_ADAPTER, infoLoadAdapter]]), []);
   assert.match(findViolations([[INFO_LOAD_ADAPTER, ""]]).join("\n"), /runtime-load summary must retain Mojo delegation/u);

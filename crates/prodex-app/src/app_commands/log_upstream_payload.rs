@@ -2,6 +2,7 @@ use super::log_format::{local_log_timestamp, render_text_body};
 use base64::Engine;
 pub(super) use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
 use prodex_mojo_core::json::LogPayloadJsonPresentation;
+use prodex_mojo_core::rich::parse_plain_log_envelope;
 use serde_json::Value;
 use std::collections::BTreeMap;
 
@@ -208,8 +209,9 @@ pub(super) fn parse_runtime_log_line(line: &str) -> Option<ParsedRuntimeLogLine>
         });
     }
 
-    let rest = line.strip_prefix('[')?;
-    let (timestamp, message) = rest.split_once("] ")?;
+    let envelope = parse_plain_log_envelope(line).expect("compiled Mojo log envelope failed");
+    let timestamp = envelope.timestamp?;
+    let message = envelope.message;
     let event = runtime_proxy_crate::runtime_proxy_log_event(message).map(str::to_string);
     let fields = runtime_proxy_crate::runtime_proxy_log_fields(message);
     Some(ParsedRuntimeLogLine {
@@ -237,6 +239,33 @@ mod tests {
         upstream_payload_event_from_runtime_line,
     };
     use base64::Engine;
+
+    #[test]
+    fn runtime_log_envelopes_require_brackets_and_keep_the_first_delimiter() {
+        for line in [
+            "event profile=alpha",
+            "prefix] event profile=alpha",
+            "[unterminated",
+            "[x]event",
+        ] {
+            assert!(super::parse_runtime_log_line(line).is_none(), "{line:?}");
+        }
+        let parsed =
+            super::parse_runtime_log_line("[β]  event profile=alpha] later=value ").unwrap();
+        assert_eq!(parsed.timestamp, "β");
+        assert_eq!(parsed.event.as_deref(), Some("event"));
+        assert_eq!(
+            parsed.fields,
+            std::collections::BTreeMap::from([
+                ("profile".to_string(), "alpha]".to_string()),
+                ("later".to_string(), "value".to_string()),
+            ])
+        );
+        let empty = super::parse_runtime_log_line("[] ").unwrap();
+        assert_eq!(empty.timestamp, "");
+        assert_eq!(empty.event, None);
+        assert!(empty.fields.is_empty());
+    }
 
     #[test]
     fn parses_upstream_payload_events() {

@@ -6442,3 +6442,38 @@ boundary self-test/source guards and diff checks pass. Existing vendor warnings
 are unchanged. Staged churn, diff and secret-scan checks pass. Direct
 verification uses
 `mojo run -D ASSERT=all -I mojo/prodex_core mojo/tests/info_token_summary_test.mojo`.
+
+## Shared compiled plain-log envelopes (2026-10-20)
+
+Aggregation checkpoint `08b0b08bf` is pushed to main. Info runtime-load parsing,
+upstream payload parsing and quota's current-profile reader now reuse the
+existing `prodex_mojo_log_plain_envelope_v1` owner. Their Rust delimiter scans
+are deleted. Info still trims Unicode message whitespace and accepts the first
+delimiter without brackets; payload parsing still requires a bracketed header;
+quota still accepts bare events and rejects unbracketed prefixes. JSON precedence
+is unchanged. The auth-backoff reader and token timestamp extractor retain their
+different contracts outside this checkpoint. No new Mojo source is needed.
+
+Caller regressions cover first delimiters, Unicode, empty/malformed headers,
+bare events, JSON precedence and original event/field tokenization. The guard
+protects each migrated caller, with quota scoped to the current-profile function.
+Its self-test includes an allowed delimiter scan in the separate backoff reader.
+The official metric changes from 35.48445303152699% to 35.48455153651834%
+(127,826 Mojo / 232,404 Rust production lines), using unchanged rules. The 75%
+target remains outstanding by 39.51544846348166 percentage points.
+
+All 3 compiled envelope tests, 22 Info caller tests, 117 log/TUI tests and the
+quota-envelope regression pass via
+`PRODEX_MOJO_REQUIRED=1 CARGO_BUILD_JOBS=6 cargo test --locked -q -p prodex-mojo-core --features mojo-core --lib rich::log_parser`,
+`PRODEX_MOJO_REQUIRED=1 CARGO_BUILD_JOBS=6 cargo test --locked -q -p prodex-app --lib reports::info:: -- --test-threads=1`,
+`PRODEX_MOJO_REQUIRED=1 CARGO_BUILD_JOBS=6 cargo test --locked -q -p prodex-app --lib app_commands::log -- --test-threads=1`,
+and `PRODEX_MOJO_REQUIRED=1 CARGO_BUILD_JOBS=6 cargo test --locked -q -p prodex-app --lib quota_support::tests::quota_runtime_profile_envelopes -- --test-threads=1`.
+The first Info run exposed a test expectation error: `[] ` is valid JSON and
+therefore has no timestamp; `[] event` covers the plain empty header instead.
+The corrected suite passes without a production change.
+Workspace all-target/all-feature Clippy with warnings denied, canonical
+`npm run test:changed`, `npm run docs`, formatting, no-fallback self-test/source,
+authority, size, crate/application-boundary self-test/source, secret-boundary,
+runtime-test-manifest, churn and diff checks pass. Existing vendor warnings
+are unchanged. The build cache remains owned by this campaign for the next
+checkpoint; no active runtime state is deleted.

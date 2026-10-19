@@ -1,6 +1,39 @@
 use super::*;
 
 #[test]
+fn runtime_log_envelopes_preserve_caller_header_and_unicode_whitespace_rules() {
+    for (line, timestamp, message) in [
+        (
+            "[β] \u{2003}event profile=alpha] later\u{2003}",
+            Some("β"),
+            "event profile=alpha] later",
+        ),
+        ("prefix] event profile=alpha", None, "event profile=alpha"),
+        ("[] ", None, ""),
+        ("[] event", Some(""), "event"),
+        ("[unterminated", None, "[unterminated"),
+        ("[x]event", None, "[x]event"),
+        ("\u{2003}event\u{2003}", None, "event"),
+    ] {
+        assert_eq!(
+            info_runtime_line_timestamp(line).as_deref(),
+            timestamp,
+            "{line:?}"
+        );
+        assert_eq!(info_runtime_log_message(line), message, "{line:?}");
+    }
+    assert_eq!(
+        info_runtime_line_timestamp(r#"{"timestamp":"json] time","message":"[raw] event"}"#)
+            .as_deref(),
+        Some("json] time")
+    );
+    assert_eq!(
+        info_runtime_line_timestamp(r#"{"timestamp":42,"message":"[raw] event"}"#),
+        None
+    );
+}
+
+#[test]
 fn runtime_load_preserves_per_log_counts_and_stable_combined_order() {
     let now = runtime_log_timestamp_epoch("[2026-06-01 00:10:00 +00:00] fixture").unwrap();
     let text = concat!(

@@ -5,6 +5,29 @@ use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 use std::{env, fs};
 
+#[test]
+fn quota_runtime_profile_envelopes_keep_bracket_and_bare_event_contracts() {
+    for (line, expected) in [
+        ("[β] token_usage profile=alpha] next=value", Some("alpha]")),
+        ("[] profile_commit profile=βeta", Some("βeta")),
+        ("token_usage profile=alpha", Some("alpha")),
+        ("prefix] token_usage profile=alpha", None),
+        ("[unterminated token_usage profile=alpha", None),
+        ("[x]token_usage profile=alpha", None),
+        ("[x] selection_pick profile=alpha", None),
+        (
+            r#"{"event":"profile_commit","fields":{"profile":"json] profile"}}"#,
+            Some("json] profile"),
+        ),
+    ] {
+        assert_eq!(
+            quota_runtime_profile_from_line(line).as_deref(),
+            expected,
+            "{line:?}"
+        );
+    }
+}
+
 fn profile(path: &str) -> ProfileEntry {
     ProfileEntry {
         codex_home: PathBuf::from(path),

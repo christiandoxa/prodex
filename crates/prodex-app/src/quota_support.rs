@@ -1,4 +1,5 @@
 use super::*;
+use prodex_mojo_core::rich::parse_plain_log_envelope;
 use prodex_mojo_core::super_provider_config::{
     RuntimeModelProviderClass, runtime_model_provider_class,
 };
@@ -415,10 +416,8 @@ fn quota_runtime_profile_from_line(line: &str) -> Option<String> {
             .map(str::to_string);
     }
 
-    let message = line
-        .strip_prefix('[')
-        .and_then(|rest| rest.split_once("] ").map(|(_, message)| message))
-        .unwrap_or(line);
+    let envelope = parse_plain_log_envelope(line).expect("compiled Mojo log envelope failed");
+    let message = envelope.timestamp.map(|_| envelope.message).unwrap_or(line);
     let event = runtime_proxy_crate::runtime_proxy_log_event(message)?;
     if !QUOTA_RUNTIME_PROFILE_EVENTS.contains(&event) {
         return None;
