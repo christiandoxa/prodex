@@ -5941,3 +5941,14 @@ Rust section-validation loops were deleted. Rust retains TOML acquisition
 and presentation of the Mojo-selected first error. Strict ABI, complete
 optional-tools regression tests and a no-fallback guard protect behavior.
 The separate 75% project target remains outstanding.
+
+
+## Required inherited MCP verification moved to Mojo
+
+The compiled optional-tools policy now owns the enabled-state, command
+exactness and argument-order security gate for required inherited
+Codebase Memory and Playwright MCP servers. The Rust validation functions
+were deleted while command discovery and TOML acquisition remain host
+responsibilities. Two-phase preflight retains disabled-config precedence.
+Direct ABI, complete optional-tools tests and the no-fallback guard
+protect the contract. The separate project target remains outstanding.

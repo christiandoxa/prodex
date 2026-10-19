@@ -45,6 +45,19 @@ struct OptionalToolStringView {
 }
 
 unsafe extern "C" {
+    fn prodex_optional_tool_required_mcp_contract_v1(
+        abi_version: i64,
+        enabled_tag: i64,
+        actual_command_address: u64,
+        actual_command_length: i64,
+        expected_command_address: u64,
+        expected_command_length: i64,
+        actual_args_address: u64,
+        actual_args_count: i64,
+        expected_args_address: u64,
+        expected_args_count: i64,
+        output_address: u64,
+    ) -> i64;
     fn prodex_optional_tool_config_shape_v1(
         abi_version: i64,
         selected_mask: i64,
@@ -132,6 +145,85 @@ pub fn optional_tool_config_shape_preflight(
         8 => Some(OptionalToolConfigShapeIssue::Playwright),
         _ => return Err(MojoError::InvalidOutput),
     })
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RequiredMcpEnabled {
+    Absent,
+    True,
+    False,
+    Invalid,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RequiredMcpConfigIssue {
+    Disabled,
+    EnabledNotBoolean,
+    CommandOrArgsMismatch,
+}
+
+/// Validate the exact inherited command, args vector and enabled flag through
+/// compiled Mojo. None indicates an absent or non-string command/args field;
+/// the host has no alternative command-matching implementation.
+pub fn optional_tool_required_mcp_contract(
+    enabled: RequiredMcpEnabled,
+    actual_command: Option<&str>,
+    actual_args: Option<&[&str]>,
+    expected_command: &str,
+    expected_args: &[String],
+) -> Result<Option<RequiredMcpConfigIssue>, MojoError> {
+    let actual_views = actual_args
+        .unwrap_or(&[])
+        .iter()
+        .map(|value| OptionalToolStringView {
+            ptr: value.as_ptr() as usize as u64,
+            len: value.len() as u64,
+        })
+        .collect::<Vec<_>>();
+    let expected_views = expected_args
+        .iter()
+        .map(|value| OptionalToolStringView {
+            ptr: value.as_ptr() as usize as u64,
+            len: value.len() as u64,
+        })
+        .collect::<Vec<_>>();
+    let tag = match enabled {
+        RequiredMcpEnabled::Absent => 0,
+        RequiredMcpEnabled::True => 1,
+        RequiredMcpEnabled::False => 2,
+        RequiredMcpEnabled::Invalid => 3,
+    };
+    let mut result = -1_i64;
+    let status = unsafe {
+        prodex_optional_tool_required_mcp_contract_v1(
+            ABI_VERSION,
+            tag,
+            actual_command.map_or(0, |value| value.as_ptr() as usize as u64),
+            actual_command.map_or(Ok(-1), signed_len)?,
+            expected_command.as_ptr() as usize as u64,
+            signed_len(expected_command)?,
+            actual_views.as_ptr() as usize as u64,
+            actual_args.map_or(Ok(-1), |items| {
+                i64::try_from(items.len()).map_err(|_| MojoError::InvalidInput)
+            })?,
+            expected_views.as_ptr() as usize as u64,
+            i64::try_from(expected_views.len()).map_err(|_| MojoError::InvalidInput)?,
+            (&mut result as *mut i64) as usize as u64,
+        )
+    };
+    match status {
+        0 => {}
+        1 => return Err(MojoError::InvalidInput),
+        4 => return Err(MojoError::AbiMismatch),
+        _ => return Err(MojoError::InvalidOutput),
+    }
+    match result {
+        0 => Ok(None),
+        1 => Ok(Some(RequiredMcpConfigIssue::Disabled)),
+        2 => Ok(Some(RequiredMcpConfigIssue::EnabledNotBoolean)),
+        3 => Ok(Some(RequiredMcpConfigIssue::CommandOrArgsMismatch)),
+        _ => Err(MojoError::InvalidOutput),
+    }
 }
 
 fn signed_len(value: &str) -> Result<i64, MojoError> {
@@ -298,6 +390,103 @@ pub fn render_optional_tool_awareness(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn compiled_required_mcp_contract_preserves_enabled_precedence_and_exact_command_args() {
+        use RequiredMcpConfigIssue::*;
+        use RequiredMcpEnabled::*;
+        let expected_args = vec!["--headless".to_owned(), "--isolated".to_owned()];
+        let valid_args = ["--headless", "--isolated"];
+        for (enabled, command, args, expected) in [
+            (Absent, Some("/bin/npx"), Some(valid_args.as_slice()), None),
+            (True, Some("/bin/npx"), Some(valid_args.as_slice()), None),
+            (
+                False,
+                Some("/bin/npx"),
+                Some(valid_args.as_slice()),
+                Some(Disabled),
+            ),
+            (
+                Invalid,
+                Some("/bin/npx"),
+                Some(valid_args.as_slice()),
+                Some(EnabledNotBoolean),
+            ),
+            (
+                True,
+                None,
+                Some(valid_args.as_slice()),
+                Some(CommandOrArgsMismatch),
+            ),
+            (
+                True,
+                Some("/bin/npx "),
+                Some(valid_args.as_slice()),
+                Some(CommandOrArgsMismatch),
+            ),
+            (True, Some("/bin/npx"), None, Some(CommandOrArgsMismatch)),
+            (
+                True,
+                Some("/bin/npx"),
+                Some(["--headless"].as_slice()),
+                Some(CommandOrArgsMismatch),
+            ),
+            (
+                True,
+                Some("/bin/npx"),
+                Some(["--isolated", "--headless"].as_slice()),
+                Some(CommandOrArgsMismatch),
+            ),
+        ] {
+            assert_eq!(
+                optional_tool_required_mcp_contract(
+                    enabled,
+                    command,
+                    args,
+                    "/bin/npx",
+                    &expected_args,
+                ),
+                Ok(expected),
+                "{enabled:?}/{command:?}/{args:?}",
+            );
+        }
+        assert_eq!(
+            optional_tool_required_mcp_contract(
+                True,
+                Some("/bin/東京🔥"),
+                Some(&["🧭"]),
+                "/bin/東京🔥",
+                &["🧭".to_string()],
+            ),
+            Ok(None),
+        );
+    }
+
+    #[test]
+    fn compiled_required_mcp_contract_abi_rejects_invalid_inputs_before_writes() {
+        let command = b"npx";
+        let ptr = command.as_ptr() as usize as u64;
+        let mut output = 77_i64;
+        let out = (&mut output as *mut i64) as usize as u64;
+        let call = |version, enabled, cmd, cmd_len, exp, exp_len, arg_count, dest| unsafe {
+            prodex_optional_tool_required_mcp_contract_v1(
+                version, enabled, cmd, cmd_len, exp, exp_len, 0, arg_count, 0, 0, dest,
+            )
+        };
+        assert_eq!(call(2, 1, ptr, 3, ptr, 3, 0, out), 4);
+        assert_eq!(call(1, 4, ptr, 3, ptr, 3, 0, out), 1);
+        assert_eq!(call(1, 1, 0, 3, ptr, 3, 0, out), 1);
+        assert_eq!(call(1, 1, ptr, -2, ptr, 3, 0, out), 1);
+        assert_eq!(call(1, 1, ptr, 3, 0, 3, 0, out), 1);
+        assert_eq!(call(1, 1, ptr, 3, ptr, 3, 1, out), 1);
+        assert_eq!(call(1, 1, ptr, 3, ptr, 3, 0, 0), 1);
+        let invalid = [0xff_u8];
+        assert_eq!(
+            call(1, 1, invalid.as_ptr() as usize as u64, 1, ptr, 3, 0, out),
+            1
+        );
+        assert_eq!(output, 77);
+    }
 
     #[test]
     fn compiled_optional_tool_config_shape_scopes_selection_and_error_precedence() {

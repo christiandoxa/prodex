@@ -294,6 +294,53 @@ enabled = true
 }
 
 #[test]
+fn compiled_required_playwright_contract_rejects_unsafe_inherited_mcp_config() {
+    let package = PLAYWRIGHT_MCP_PACKAGE;
+    let baseline_args =
+        format!("[\"--no-install\", \"{package}\", \"--headless\", \"--isolated\"]");
+    let cases = [
+        (
+            format!("enabled = false\ncommand = \"/bin/npx\"\nargs = {baseline_args}"),
+            "disabled",
+        ),
+        (
+            format!("enabled = 123\ncommand = \"/bin/npx\"\nargs = {baseline_args}"),
+            "must be a boolean",
+        ),
+        (
+            "enabled = true\ncommand = \"/bin/npx\"\nargs = [\"--isolated\", \"--headless\"]"
+                .to_string(),
+            "custom or incomplete",
+        ),
+        (
+            "enabled = true\ncommand = \"/bin/npx\"\nargs = \"not-an-array\"".to_string(),
+            "custom or incomplete",
+        ),
+        (
+            format!("enabled = true\ncommand = \"/bin/not-npx\"\nargs = {baseline_args}"),
+            "custom or incomplete",
+        ),
+    ];
+    for (index, (config, expected)) in cases.into_iter().enumerate() {
+        let table = toml::from_str::<toml::Table>(&format!("[mcp_servers.playwright]\n{config}\n"))
+            .expect("test fixture TOML must be well formed");
+        let error = validate_required_mcp_servers(
+            Some(&table),
+            false,
+            true,
+            None,
+            Some(Path::new("/bin/npx")),
+            true,
+        )
+        .expect_err("unsafe inherited MCP config must be rejected");
+        assert!(
+            error.to_string().contains(expected),
+            "case {index}: {error:#}",
+        );
+    }
+}
+
+#[test]
 fn required_playwright_accepts_managed_inherited_config() -> Result<()> {
     let home = temp_dir("required-playwright-managed");
     fs::create_dir_all(&home)?;

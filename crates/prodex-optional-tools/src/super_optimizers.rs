@@ -11,7 +11,8 @@ use crate::{
     resolve_optional_tools,
 };
 use prodex_mojo_core::optional_tools_policy::{
-    OptionalToolConfigShapeIssue, optional_tool_config_shape_preflight,
+    OptionalToolConfigShapeIssue, RequiredMcpConfigIssue, RequiredMcpEnabled,
+    optional_tool_config_shape_preflight, optional_tool_required_mcp_contract,
 };
 
 mod ponytail;
@@ -238,37 +239,62 @@ fn validate_required_mcp_server(
     let Some(server) = value.as_table() else {
         bail!("mcp_servers.{name} must be a TOML table");
     };
-    validate_required_mcp_server_enabled(name, server)?;
-    let (command, args) = expected_command()?;
-    validate_required_mcp_server_command(name, server, &command, &args)
-}
-
-fn validate_required_mcp_server_enabled(name: &str, server: &toml::Table) -> Result<()> {
-    match server.get("enabled") {
-        Some(toml::Value::Boolean(false)) => bail!(
-            "required MCP server `mcp_servers.{name}` is disabled (`enabled = false`); refusing to override user configuration"
-        ),
-        Some(toml::Value::Boolean(true)) | None => Ok(()),
-        Some(_) => bail!(
-            "required MCP server `mcp_servers.{name}` cannot be safely verified: `enabled` must be a boolean"
-        ),
-    }
-}
-
-fn validate_required_mcp_server_command(
-    name: &str,
-    server: &toml::Table,
-    command: &Path,
-    args: &[String],
-) -> Result<()> {
-    let expected_command = command.display().to_string();
-    let expected_args = toml::Value::Array(args.iter().cloned().map(toml::Value::String).collect());
-    if server.get("command").and_then(toml::Value::as_str) != Some(expected_command.as_str())
-        || server.get("args") != Some(&expected_args)
+    let enabled = match server.get("enabled") {
+        None => RequiredMcpEnabled::Absent,
+        Some(toml::Value::Boolean(true)) => RequiredMcpEnabled::True,
+        Some(toml::Value::Boolean(false)) => RequiredMcpEnabled::False,
+        Some(_) => RequiredMcpEnabled::Invalid,
+    };
+    let emit_issue = |issue: RequiredMcpConfigIssue| -> Result<()> {
+        match issue {
+            RequiredMcpConfigIssue::Disabled => bail!(
+                "required MCP server `mcp_servers.{name}` is disabled (`enabled = false`); refusing to override user configuration"
+            ),
+            RequiredMcpConfigIssue::EnabledNotBoolean => bail!(
+                "required MCP server `mcp_servers.{name}` cannot be safely verified: `enabled` must be a boolean"
+            ),
+            RequiredMcpConfigIssue::CommandOrArgsMismatch => bail!(
+                "required MCP server `mcp_servers.{name}` cannot be safely verified: inherited configuration is custom or incomplete; refusing to replace user configuration"
+            ),
+        }
+    };
+    // Preserve enabled=false/nonboolean precedence before obtaining the
+    // required command, which can itself fail to resolve on the host.
+    let initial =
+        optional_tool_required_mcp_contract(enabled, None, None, "", &[]).map_err(|error| {
+            anyhow::anyhow!("compiled Mojo required MCP preflight failed: {error:?}")
+        })?;
+    if let Some(
+        issue @ (RequiredMcpConfigIssue::Disabled | RequiredMcpConfigIssue::EnabledNotBoolean),
+    ) = initial
     {
-        bail!(
-            "required MCP server `mcp_servers.{name}` cannot be safely verified: inherited configuration is custom or incomplete; refusing to replace user configuration"
-        );
+        return emit_issue(issue);
+    }
+
+    let (command, args) = expected_command()?;
+    let expected_command = command.display().to_string();
+    let actual_command = server.get("command").and_then(toml::Value::as_str);
+    let actual_args = server
+        .get("args")
+        .and_then(toml::Value::as_array)
+        .and_then(|values| {
+            values
+                .iter()
+                .map(toml::Value::as_str)
+                .collect::<Option<Vec<_>>>()
+        });
+    let issue = optional_tool_required_mcp_contract(
+        enabled,
+        actual_command,
+        actual_args.as_deref(),
+        &expected_command,
+        &args,
+    )
+    .map_err(|error| {
+        anyhow::anyhow!("compiled Mojo required MCP verification failed: {error:?}")
+    })?;
+    if let Some(issue) = issue {
+        return emit_issue(issue);
     }
     Ok(())
 }
