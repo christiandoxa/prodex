@@ -176,3 +176,7 @@ fn deepseek_provider_core_handle_duplicate_function_tool(
         "{provider_label} function tool name `{name}` is duplicated after translation"
     ))
 }
+
+#[cfg(test)]
+#[path = "request_tools_tests.rs"]
+mod tests;
