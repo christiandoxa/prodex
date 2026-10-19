@@ -129,6 +129,8 @@ pub mod gemini_internal_instruction;
 pub mod gemini_tooling_policy;
 #[cfg(feature = "mojo-runtime")]
 pub mod info_render;
+#[cfg(feature = "mojo-rich")]
+pub mod kiro_acp_update_policy;
 #[cfg(feature = "mojo-runtime")]
 pub mod kiro_environment;
 #[cfg(feature = "mojo-runtime")]

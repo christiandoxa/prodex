@@ -5974,3 +5974,14 @@ uses a linear-time KMP prefix function over UTF-8 bytes and retains
 ASCII-only casefolding; Unicode bytes remain exact. Direct ABI,
 production caller regressions and anti-fallback guards protect the
 previous search contract. The 75% target remains outstanding.
+
+
+## Kiro ACP session/update discriminant and required fields moved to Mojo
+
+The live Kiro ACP protocol parser now delegates update-kind classification
+and first missing-required-field precedence to a versioned compiled Mojo
+owner. Rust's duplicate string switch and presence-error decision branches
+were removed. Serde and typed enum output remain host responsibilities.
+Strict ABI, real Kiro protocol/runtime tests and anti-fallback guards
+preserve all known variants and future unknown passthrough behavior.
+The 75% share goal remains outstanding.
