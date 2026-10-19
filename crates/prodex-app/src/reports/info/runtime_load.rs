@@ -1,53 +1,11 @@
 //! Runtime-load parsing and summaries.
 
+use prodex_mojo_core::info_render::InfoRuntimeLoadConfig;
+
 use super::{
     BTreeMap, InfoQuotaWindow, InfoRuntimeLoadSummary, InfoRuntimeQuotaObservation,
     InfoRunwayEstimate,
 };
-
-pub fn collect_info_runtime_load_summary_from_text(
-    text: &str,
-    now: i64,
-    recent_window_seconds: i64,
-    lookback_seconds: i64,
-) -> InfoRuntimeLoadSummary {
-    let recent_cutoff = now.saturating_sub(recent_window_seconds);
-    let lookback_cutoff = now.saturating_sub(lookback_seconds);
-    let mut summary = InfoRuntimeLoadSummary::default();
-    let mut latest_inflight_counts = BTreeMap::new();
-
-    for line in text.lines() {
-        if let Some((profile, count)) = info_runtime_inflight_from_line(line) {
-            latest_inflight_counts.insert(profile, count);
-        }
-        let Some(observation) = info_runtime_selection_observation_from_line(line) else {
-            continue;
-        };
-        if observation.timestamp >= lookback_cutoff {
-            summary.observations.push(observation.clone());
-        }
-        if observation.timestamp >= recent_cutoff {
-            summary.recent_selection_events += 1;
-            summary.recent_first_timestamp = Some(
-                summary
-                    .recent_first_timestamp
-                    .map_or(observation.timestamp, |current| {
-                        current.min(observation.timestamp)
-                    }),
-            );
-            summary.recent_last_timestamp = Some(
-                summary
-                    .recent_last_timestamp
-                    .map_or(observation.timestamp, |current| {
-                        current.max(observation.timestamp)
-                    }),
-            );
-        }
-    }
-
-    summary.active_inflight_units = latest_inflight_counts.values().sum();
-    summary
-}
 
 pub fn collect_info_runtime_load_summary_from_texts<I, S>(
     log_count: usize,
@@ -60,41 +18,58 @@ where
     I: IntoIterator<Item = S>,
     S: AsRef<str>,
 {
-    let mut summary = InfoRuntimeLoadSummary {
-        log_count,
-        ..InfoRuntimeLoadSummary::default()
-    };
-
-    for text in texts {
-        let log_summary = collect_info_runtime_load_summary_from_text(
-            text.as_ref(),
+    use prodex_mojo_core::info_render::{InfoRuntimeInflight, InfoRunwayObservation};
+    let mut observations = Vec::new();
+    let mut inflight_rows = Vec::new();
+    for (log, text) in texts.into_iter().enumerate() {
+        for line in text.as_ref().lines() {
+            if let Some((profile, units)) = info_runtime_inflight_from_line(line) {
+                inflight_rows.push((log, profile, units));
+            }
+            if let Some(observation) = info_runtime_selection_observation_from_line(line) {
+                observations.push(observation);
+            }
+        }
+    }
+    let observation_facts = observations
+        .iter()
+        .map(|row| InfoRunwayObservation {
+            timestamp: row.timestamp,
+            profile: &row.profile,
+            five_hour_remaining: row.five_hour_remaining,
+            weekly_remaining: row.weekly_remaining,
+        })
+        .collect::<Vec<_>>();
+    let inflight_facts = inflight_rows
+        .iter()
+        .map(|(log, profile, units)| InfoRuntimeInflight {
+            log: *log,
+            profile,
+            units: *units,
+        })
+        .collect::<Vec<_>>();
+    let plan = prodex_mojo_core::info_render::info_runtime_load_plan(
+        &observation_facts,
+        &inflight_facts,
+        InfoRuntimeLoadConfig {
             now,
             recent_window_seconds,
             lookback_seconds,
-        );
-        summary.observations.extend(log_summary.observations);
-        summary.active_inflight_units += log_summary.active_inflight_units;
-        summary.recent_selection_events += log_summary.recent_selection_events;
-        summary.recent_first_timestamp = match (
-            summary.recent_first_timestamp,
-            log_summary.recent_first_timestamp,
-        ) {
-            (Some(current), Some(candidate)) => Some(current.min(candidate)),
-            (current, candidate) => current.or(candidate),
-        };
-        summary.recent_last_timestamp = match (
-            summary.recent_last_timestamp,
-            log_summary.recent_last_timestamp,
-        ) {
-            (Some(current), Some(candidate)) => Some(current.max(candidate)),
-            (current, candidate) => current.or(candidate),
-        };
+        },
+    )
+    .expect("Mojo runtime-load summary policy returned invalid output");
+    InfoRuntimeLoadSummary {
+        log_count,
+        observations: plan
+            .observation_indices
+            .into_iter()
+            .map(|index| observations[index].clone())
+            .collect(),
+        active_inflight_units: plan.active_inflight_units,
+        recent_selection_events: plan.recent_selection_events,
+        recent_first_timestamp: plan.recent_first_timestamp,
+        recent_last_timestamp: plan.recent_last_timestamp,
     }
-
-    summary
-        .observations
-        .sort_by_key(|observation| (observation.timestamp, observation.profile.clone()));
-    summary
 }
 
 pub fn info_runtime_selection_observation_from_line(
@@ -216,3 +191,7 @@ pub fn estimate_info_runway(
         exhaust_at: estimate.exhaust_at,
     })
 }
+
+#[cfg(test)]
+#[path = "runtime_load_plan_tests.rs"]
+mod plan_tests;

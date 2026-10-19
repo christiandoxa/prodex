@@ -2,7 +2,11 @@ use crate::MojoError;
 
 mod doctor;
 mod provider;
+mod runtime_load;
 mod runway;
+pub use runtime_load::{
+    InfoRuntimeInflight, InfoRuntimeLoadConfig, InfoRuntimeLoadPlan, info_runtime_load_plan,
+};
 mod status;
 pub use doctor::{InfoDoctorViewportPlan, doctor_value_color, doctor_viewport_plan};
 pub use provider::{

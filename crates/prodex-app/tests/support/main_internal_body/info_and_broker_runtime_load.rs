@@ -12,7 +12,7 @@ fn collect_info_runtime_load_summary_from_text_parses_recent_activity() {
 [2026-03-30 12:06:00.000 +07:00] profile_inflight profile=main count=1 weight=1 context=standard_http event=release
 "#;
 
-    let summary = collect_info_runtime_load_summary_from_text(text, now, 30 * 60, 3 * 60 * 60);
+    let summary = collect_info_runtime_load_summary_from_texts(1, [text], now, 30 * 60, 3 * 60 * 60);
 
     assert_eq!(summary.recent_selection_events, 2);
     assert_eq!(summary.active_inflight_units, 1);
