@@ -171,6 +171,8 @@ const PING_SUMMARY_CALLER_TEST_FILE = "crates/prodex-app/src/app_commands/ping_t
 const PING_SUMMARY_ADAPTER_FILE = "crates/prodex-mojo-core/src/rich/ping_protocol.rs";
 const PING_SUMMARY_MOJO_FILE = "mojo/prodex_core/ping_protocol.mojo";
 const PROMOTED_FILES = [
+  "mojo/prodex_core/gemini_sse_completion.mojo",
+  "crates/prodex-app/src/runtime_launch/proxy_startup/gemini_sse_tests.rs",
   "crates/prodex-app/src/runtime_launch/proxy_startup/anthropic_messages_sse_reader.rs",
   "crates/prodex-mojo-core/src/anthropic_stream_policy.rs",
   "mojo/prodex_core/anthropic_stream_policy.mojo",
@@ -2808,6 +2810,39 @@ export function findViolations(files) {
     if (filePath === ANTHROPIC_WEB_SEARCH_FILE &&
       /\bfn\s+(?:anthropic_web_search_tool|validate_anthropic_web_search_options)\s*\(/u.test(contents)) {
       return [`${filePath}: contains Rust Anthropic request web-search semantics`];
+    }
+    return [];
+  });
+  const geminiSseCompletionOwnershipViolations = files.flatMap(([filePath, contents]) => {
+    if (filePath === "crates/prodex-app/src/runtime_launch/proxy_startup/gemini_sse_tool_calls.rs") {
+      const source = contents.split("#[cfg(test)]", 1)[0];
+      return [
+        "gemini_sse_pending_tool_positions(&pending_flags)",
+        "planned_positions",
+        "tool_call.done = true",
+      ].every((marker) => source.includes(marker)) && !source.includes("if tool_call.done {")
+        ? [] : [filePath + ": Gemini SSE completion eligibility must stay Mojo-owned"];
+    }
+    if (filePath === "crates/prodex-mojo-core/src/provider_constraints/gemini_sse_tool_call_index.rs") {
+      return [
+        "fn prodex_gemini_sse_pending_tool_positions_v1(",
+        "pub fn gemini_sse_pending_tool_positions(",
+        "compiled_gemini_sse_completion_selects_only_pending_calls_in_stable_order",
+        "compiled_gemini_sse_completion_abi_rejects_bad_input_before_output_writes",
+      ].filter((marker) => !contents.includes(marker))
+        .map((marker) => filePath + ": Gemini SSE completion ABI or strict tests missing " + marker);
+    }
+    if (filePath === "mojo/prodex_core/gemini_sse_completion.mojo") {
+      return [
+        '@export("prodex_gemini_sse_pending_tool_positions_v1")',
+        "if done[unsafe_offset=index] == 0:",
+        "indices[unsafe_offset=count] = UInt64(index)",
+      ].filter((marker) => !contents.includes(marker))
+        .map((marker) => filePath + ": compiled Gemini SSE pending policy missing " + marker);
+    }
+    if (filePath === "crates/prodex-app/src/runtime_launch/proxy_startup/gemini_sse_tests.rs") {
+      return contents.includes("gemini_sse_compiled_completion_emits_each_pending_tool_once_in_index_order")
+        ? [] : [filePath + ": real Gemini SSE completion regression missing"];
     }
     return [];
   });
@@ -9451,7 +9486,7 @@ export function findViolations(files) {
     }
     return [];
   });
-  return [...logPayloadProjectionViolations, ...nativeRecoveryOwnershipViolations, ...quotaRecoveryEligibilityViolations, ...runtimeBrokerReuseMojoViolations, ...geminiResponseMediaMojoViolations, ...cookieEvictionMojoViolations, ...websocketBudgetMojoViolations, ...affinityBindingMojoViolations, ...responsesCapacityRecoveryViolations, ...sseTapMojoOwnershipViolations, ...quotaWatchViolations, ...geminiCompactSnippetViolations, ...geminiCompactTextViolations, ...doctorSmartContextDecisionViolations, ...anthropicNativeStreamDecisionViolations, ...anthropicAttemptCursorViolations, ...geminiUnsupportedToolRetryViolations, ...terminalGeometryViolations, ...previousResponseRecoveryTransitionViolations, ...chatCompatibleToolCallKindViolations, ...geminiQuotaBodyMojoViolations, ...geminiOAuthRotationMojoViolations, ...geminiOAuthModelMojoViolations, ...superExposeOriginMojoViolations, ...kiroAcpToolLedgerMojoViolations, ...quotaPoolSummarySectionsMojoViolations, ...deepseekRequestDiagnosticViolations, ...deepseekToolShapeIssueMojoViolations, ...deepseekReplayItemPolicyMojoViolations, ...chatNamespaceSplitMojoViolations, ...deepseekInputItemIssueMessageViolations, ...deepseekRequestIssueMessageViolations, ...smartContextTelemetrySampleViolations, ...compatibilityDiagnosticsMojoViolations, ...quotaHeaderProjectionViolations, ...smartContextCapsuleOrderViolations, ...markerViolations, ...deepseekCatalogPolicyViolations, ...featureOffViolations, ...liveLogRecordViolations, ...runtimePolicyPresetViolations, ...runtimeConfigScalarViolations, ...profileHealthCircuitViolations, ...logThroughputViolations, ...operationalDetailSpecViolations, ...transcriptPolicyViolations, ...logLoadPolicyViolations, ...routeReasonViolations, ...runtimeStateQuotaViolations, ...runtimeStateRoutePolicyViolations, ...runtimeProxyRootViolations, ...runtimeRecoveryDeadlineViolations, ...brokerVersionGuardViolations, ...brokerContinuityViolations, ...brokerLogCacheViolations, ...codexConfigViolations, ...statePolicyViolations, ...quotaSelectionPolicyViolations, ...routeTagMirrorViolations, ...enumTagMirrorViolations, ...appSelectionPolicyMirrorViolations, ...runtimeStateBackgroundViolations, ...redactionViolations, ...rateLimitHeaderSelectionViolations, ...profileIdentityViolations, ...governanceInspectionViolations, ...governanceInspectionOrderingViolations, ...exactnessPlannerViolations,
+  return [...logPayloadProjectionViolations, ...nativeRecoveryOwnershipViolations, ...quotaRecoveryEligibilityViolations, ...runtimeBrokerReuseMojoViolations, ...geminiResponseMediaMojoViolations, ...cookieEvictionMojoViolations, ...websocketBudgetMojoViolations, ...affinityBindingMojoViolations, ...responsesCapacityRecoveryViolations, ...sseTapMojoOwnershipViolations, ...quotaWatchViolations, ...geminiCompactSnippetViolations, ...geminiCompactTextViolations, ...doctorSmartContextDecisionViolations, ...geminiSseCompletionOwnershipViolations, ...anthropicNativeStreamDecisionViolations, ...anthropicAttemptCursorViolations, ...geminiUnsupportedToolRetryViolations, ...terminalGeometryViolations, ...previousResponseRecoveryTransitionViolations, ...chatCompatibleToolCallKindViolations, ...geminiQuotaBodyMojoViolations, ...geminiOAuthRotationMojoViolations, ...geminiOAuthModelMojoViolations, ...superExposeOriginMojoViolations, ...kiroAcpToolLedgerMojoViolations, ...quotaPoolSummarySectionsMojoViolations, ...deepseekRequestDiagnosticViolations, ...deepseekToolShapeIssueMojoViolations, ...deepseekReplayItemPolicyMojoViolations, ...chatNamespaceSplitMojoViolations, ...deepseekInputItemIssueMessageViolations, ...deepseekRequestIssueMessageViolations, ...smartContextTelemetrySampleViolations, ...compatibilityDiagnosticsMojoViolations, ...quotaHeaderProjectionViolations, ...smartContextCapsuleOrderViolations, ...markerViolations, ...deepseekCatalogPolicyViolations, ...featureOffViolations, ...liveLogRecordViolations, ...runtimePolicyPresetViolations, ...runtimeConfigScalarViolations, ...profileHealthCircuitViolations, ...logThroughputViolations, ...operationalDetailSpecViolations, ...transcriptPolicyViolations, ...logLoadPolicyViolations, ...routeReasonViolations, ...runtimeStateQuotaViolations, ...runtimeStateRoutePolicyViolations, ...runtimeProxyRootViolations, ...runtimeRecoveryDeadlineViolations, ...brokerVersionGuardViolations, ...brokerContinuityViolations, ...brokerLogCacheViolations, ...codexConfigViolations, ...statePolicyViolations, ...quotaSelectionPolicyViolations, ...routeTagMirrorViolations, ...enumTagMirrorViolations, ...appSelectionPolicyMirrorViolations, ...runtimeStateBackgroundViolations, ...redactionViolations, ...rateLimitHeaderSelectionViolations, ...profileIdentityViolations, ...governanceInspectionViolations, ...governanceInspectionOrderingViolations, ...exactnessPlannerViolations,
     ...adaptiveBudgetViolations,
     ...providerUsageViolations,
     ...auditUsageViolations,
@@ -11748,6 +11783,16 @@ function selfTest() {
     "fn anthropic_web_search_tool() {}"]])[0], /Rust Anthropic request web-search semantics/u);
   assert.match(findViolations([[ANTHROPIC_SSE_FILE,
     "fn anthropic_web_search_stream_sources() {}"]]).join("\n"), /web-search shaping must use Mojo/u);
+  const geminiCompletionFixture = [
+    "gemini_sse_pending_tool_positions(&pending_flags)",
+    "planned_positions",
+    "tool_call.done = true",
+  ].join("\n");
+  const geminiCompletionCaller = "crates/prodex-app/src/runtime_launch/proxy_startup/gemini_sse_tool_calls.rs";
+  assert.deepEqual(findViolations([[geminiCompletionCaller, geminiCompletionFixture]]), []);
+  assert.match(findViolations([[geminiCompletionCaller,
+    geminiCompletionFixture + "\nif tool_call.done {",
+  ]]).join("\n"), /Gemini SSE completion eligibility must stay Mojo-owned/u);
   const nativeAnthropicStreamFixture = [
     "anthropic_stream_action(AnthropicStreamFacts {",
     "anthropic_stream_finish_reason(",
