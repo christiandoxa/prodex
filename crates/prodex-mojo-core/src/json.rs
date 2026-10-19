@@ -154,7 +154,7 @@ impl From<&str> for StringView {
     }
 }
 #[repr(C)]
-struct NodeFfi {
+pub(crate) struct NodeFfi {
     kind: i64,
     first_child: i64,
     next_sibling: i64,
@@ -289,7 +289,7 @@ unsafe extern "C" {
     ) -> i64;
 }
 
-fn signed(value: usize) -> Result<i64, MojoError> {
+pub(crate) fn signed(value: usize) -> Result<i64, MojoError> {
     i64::try_from(value).map_err(|_| MojoError::InvalidInput)
 }
 fn optional_index(value: Option<usize>, count: usize) -> Result<i64, MojoError> {
@@ -299,7 +299,7 @@ fn optional_index(value: Option<usize>, count: usize) -> Result<i64, MojoError> 
         _ => Err(MojoError::InvalidInput),
     }
 }
-fn status(code: i64) -> Result<(), MojoError> {
+pub(crate) fn status(code: i64) -> Result<(), MojoError> {
     match code {
         0 => Ok(()),
         1 | 2 => Err(MojoError::InvalidInput),
@@ -355,7 +355,7 @@ fn ffi_nodes_with_text(
         .collect()
 }
 
-fn ffi_nodes(nodes: &[JsonNode<'_>], raw: &str) -> Result<Vec<NodeFfi>, MojoError> {
+pub(crate) fn ffi_nodes(nodes: &[JsonNode<'_>], raw: &str) -> Result<Vec<NodeFfi>, MojoError> {
     ffi_nodes_with_text(nodes, raw, None)
 }
 

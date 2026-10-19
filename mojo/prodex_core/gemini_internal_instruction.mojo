@@ -171,7 +171,7 @@ def gemini_instruction_append_range(
     start: Int64,
     end: Int64,
     output: Pointer[mut=True, UInt8, MutUntrackedOrigin],
-    output_length: Pointer[mut=True, Int64, MutUntrackedOrigin],
+    output_length: Pointer[mut=True, Int64, _],
 ):
     var source = rich_view_ptr(view)
     var destination = output_length[]
@@ -185,7 +185,7 @@ def gemini_instruction_append_range(
 def gemini_instruction_append_literal(
     value: StringSlice,
     output: Pointer[mut=True, UInt8, MutUntrackedOrigin],
-    output_length: Pointer[mut=True, Int64, MutUntrackedOrigin],
+    output_length: Pointer[mut=True, Int64, _],
 ):
     var source = value.unsafe_ptr()
     var destination = output_length[]
@@ -198,7 +198,7 @@ def gemini_instruction_append_literal(
 def gemini_instruction_sanitize(
     view: ProdexRichStringView,
     output: Pointer[mut=True, UInt8, MutUntrackedOrigin],
-    output_length: Pointer[mut=True, Int64, MutUntrackedOrigin],
+    output_length: Pointer[mut=True, Int64, _],
 ) -> Int64:
     var input_length = Int64(view.len)
     if not gemini_instruction_text_is_leak(view, 0, input_length):

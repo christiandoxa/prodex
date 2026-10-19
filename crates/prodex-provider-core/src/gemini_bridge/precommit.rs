@@ -1,14 +1,8 @@
 //! Gemini pre-commit stream classification helpers.
 
-mod output;
-
-use self::output::{
-    gemini_provider_core_precommit_apply_parts, gemini_provider_core_precommit_has_grounding,
-};
-use super::{
-    gemini_provider_core_finish_reason, gemini_provider_core_finish_reason_retryable_invalid,
-    gemini_provider_core_normalized_response_value, gemini_provider_core_prompt_feedback_failure,
-};
+use super::gemini_provider_core_normalized_response_value;
+use crate::mojo_json::Document;
+use prodex_mojo_core::rich::{GeminiPrecommitDecision, GeminiPrecommitState};
 
 #[derive(Default)]
 pub struct GeminiProviderCorePrecommitProbe {
@@ -69,29 +63,29 @@ fn gemini_provider_core_precommit_decision_for_value(
     probe: &mut GeminiProviderCorePrecommitProbe,
 ) -> GeminiProviderCorePrecommitDecision {
     let value = gemini_provider_core_normalized_response_value(value);
-    let value = value.as_ref();
-    if value.get("error").is_some() || gemini_provider_core_prompt_feedback_failure(value).is_some()
-    {
-        return GeminiProviderCorePrecommitDecision::Commit;
-    }
-    if gemini_provider_core_precommit_has_grounding(value) {
-        probe.visible_output = true;
-        return GeminiProviderCorePrecommitDecision::Commit;
-    }
-    gemini_provider_core_precommit_apply_parts(value, probe);
-    if probe.visible_output {
-        return GeminiProviderCorePrecommitDecision::Commit;
-    }
-    let Some(reason) = gemini_provider_core_finish_reason(value) else {
-        return GeminiProviderCorePrecommitDecision::Continue;
-    };
-    if gemini_provider_core_finish_reason_retryable_invalid(&reason) {
-        return GeminiProviderCorePrecommitDecision::RetryableInvalid(reason);
-    }
-    match reason.as_str() {
-        "STOP" if !probe.reasoning_output => GeminiProviderCorePrecommitDecision::RetryableInvalid(
-            "gemini_empty_response".to_string(),
-        ),
-        _ => GeminiProviderCorePrecommitDecision::Commit,
+    let mut document = Document::default();
+    document.root(value.as_ref());
+    let raw = std::str::from_utf8(&document.raw).expect("Serde emits UTF-8 JSON");
+    let plan = prodex_mojo_core::rich::gemini_precommit_plan(
+        &document.nodes,
+        raw,
+        &probe.internal_instruction_corpus,
+        GeminiPrecommitState {
+            visible_output: probe.visible_output,
+            reasoning_output: probe.reasoning_output,
+        },
+    )
+    .expect("Mojo Gemini pre-commit policy returned invalid output");
+    probe.visible_output = plan.state.visible_output;
+    probe.reasoning_output = plan.state.reasoning_output;
+    match plan.decision {
+        GeminiPrecommitDecision::Continue => GeminiProviderCorePrecommitDecision::Continue,
+        GeminiPrecommitDecision::Commit => GeminiProviderCorePrecommitDecision::Commit,
+        GeminiPrecommitDecision::RetryableInvalid(reason) => {
+            GeminiProviderCorePrecommitDecision::RetryableInvalid(reason.to_string())
+        }
     }
 }
+
+#[cfg(test)]
+mod tests;

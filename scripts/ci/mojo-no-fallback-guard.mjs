@@ -406,6 +406,12 @@ const PROMOTED_FILES = [
   "crates/prodex-provider-core/src/translators/gemini/response_media.rs",
   "crates/prodex-mojo-core/src/rich/gemini_response_media.rs",
   "mojo/prodex_core/gemini_response_media.mojo",
+  "crates/prodex-provider-core/src/gemini_bridge/precommit.rs",
+  "crates/prodex-provider-core/src/gemini_bridge/precommit/tests.rs",
+  "crates/prodex-mojo-core/src/rich/gemini_precommit.rs",
+  "crates/prodex-mojo-core/src/rich/gemini_precommit_tests.rs",
+  "mojo/prodex_core/gemini_precommit.mojo",
+  "mojo/tests/gemini_precommit_test.mojo",
   "crates/prodex-provider-core/src/gemini_bridge/media/mime.rs",
   "crates/prodex-provider-core/src/gemini_bridge/media/mime/data_url_tests.rs",
   "crates/prodex-provider-core/src/gemini_bridge/response.rs",
@@ -1934,6 +1940,39 @@ export function findViolations(files) {
     return [];
   });
   const geminiResponseMediaMojoViolations = files.flatMap(([filePath, contents]) => {
+    if (filePath === "crates/prodex-provider-core/src/gemini_bridge/precommit.rs") {
+      const production = contents.split("#[cfg(test)]", 1)[0];
+      return production.includes("prodex_mojo_core::rich::gemini_precommit_plan(")
+        && !/gemini_provider_core_precommit_(?:apply_parts|has_grounding)\s*\(/u.test(production)
+        && !production.includes("mod output;") && !production.includes("gemini_provider_core_finish_reason(")
+        && !production.includes('get("candidates")') && !production.includes('get("error")')
+        ? [] : [`${filePath}: Gemini pre-commit candidate decisions must remain Mojo-owned`];
+    }
+    const precommitMarkers = new Map([
+      ["crates/prodex-provider-core/src/gemini_bridge/precommit/tests.rs", [
+        "mojo_precommit_preserves_candidate_order_flags_and_early_returns",
+        "mojo_precommit_reuses_media_and_instruction_classifiers",
+        "mojo_precommit_keeps_sse_acquisition_and_terminal_behavior",
+        "mojo_precommit_preserves_rejection_of_nonobject_parts",
+      ]],
+      ["crates/prodex-mojo-core/src/rich/gemini_precommit.rs", [
+        "prodex_mojo_gemini_precommit_v1(", "ffi_nodes(", "pub fn gemini_precommit_plan",
+      ]],
+      ["crates/prodex-mojo-core/src/rich/gemini_precommit_tests.rs", [
+        "compiled_precommit_preserves_flags_and_finish_reason_bytes",
+        "compiled_precommit_rejects_invalid_tree_and_abi_without_output_writes",
+      ]],
+      ["mojo/prodex_core/gemini_precommit.mojo", [
+        '@export("prodex_mojo_gemini_precommit_v1")', "def gemini_precommit_candidate_plan(",
+        "media_put_content(", "media_put_special_text(", "gemini_instruction_sanitize(",
+        "gemini_instruction_text_echoes(", "gemini_failure_retryable_reason(", "pj_valid(tree)",
+      ]],
+      ["mojo/tests/gemini_precommit_test.mojo", ["prodex_mojo_gemini_precommit_v1(2,", "== 71"]],
+    ]);
+    if (precommitMarkers.has(filePath)) {
+      return precommitMarkers.get(filePath).filter((marker) => !contents.includes(marker))
+        .map((marker) => `${filePath}: Gemini pre-commit ownership must retain ${marker}`);
+    }
     if (filePath === "crates/prodex-provider-core/src/gemini_bridge/media/mime.rs") {
       const production = contents.split("#[cfg(test)]", 1)[0];
       return production.includes("prodex_mojo_core::rich::gemini_media_data_url_parts(image_url)")
@@ -10928,6 +10967,14 @@ async function promotedFiles() {
 }
 
 function selfTest() {
+  const precommitFile = "crates/prodex-provider-core/src/gemini_bridge/precommit.rs";
+  const precommitCall = "prodex_mojo_core::rich::gemini_precommit_plan(";
+  assert.deepEqual(findViolations([[precommitFile, precommitCall]]), []);
+  for (const restored of ["", `${precommitCall}\nvalue.get("candidates")`,
+    `${precommitCall}\nfn gemini_provider_core_precommit_apply_parts(`]) {
+    assert.match(findViolations([[precommitFile, restored]]).join("\n"), /Gemini pre-commit candidate decisions/u);
+  }
+  assert.match(findViolations([["mojo/prodex_core/gemini_precommit.mojo", ""]]).join("\n"), /Gemini pre-commit ownership/u);
   const geminiDataUrlCaller = "prodex_mojo_core::rich::gemini_media_data_url_parts(image_url)";
   const geminiDataUrlCallerFile = "crates/prodex-provider-core/src/gemini_bridge/media/mime.rs";
   assert.deepEqual(findViolations([[geminiDataUrlCallerFile, geminiDataUrlCaller]]), []);
