@@ -170,6 +170,9 @@ const PING_SUMMARY_CALLER_FILE = "crates/prodex-app/src/app_commands/ping_output
 const PING_SUMMARY_CALLER_TEST_FILE = "crates/prodex-app/src/app_commands/ping_tests.rs";
 const PING_SUMMARY_ADAPTER_FILE = "crates/prodex-mojo-core/src/rich/ping_protocol.rs";
 const PING_SUMMARY_MOJO_FILE = "mojo/prodex_core/ping_protocol.mojo";
+const PRESIDIO_FINDINGS_CALLER_FILE = "crates/prodex-app/src/runtime_proxy/presidio/findings.rs";
+const PRESIDIO_FINDINGS_ADAPTER_FILE = "crates/prodex-mojo-core/src/redaction/findings.rs";
+const PRESIDIO_FINDINGS_MOJO_FILE = "mojo/prodex_core/redaction_findings.mojo";
 const PRESIDIO_LANGUAGE_ADAPTER_FILE = "crates/prodex-mojo-core/src/redaction/language.rs";
 const PRESIDIO_LANGUAGE_MOJO_FILE = "mojo/prodex_core/redaction_language.mojo";
 const PRESIDIO_ANALYZER_CALLER_FILE = "crates/prodex-app/src/runtime_proxy/presidio/analyzer.rs";
@@ -179,6 +182,9 @@ const PRESIDIO_JSON_CALLER_FILE = "crates/prodex-app/src/runtime_proxy/presidio/
 const PRESIDIO_JSON_ADAPTER_FILE = "crates/prodex-mojo-core/src/json/redaction_content.rs";
 const PRESIDIO_JSON_MOJO_FILE = "mojo/prodex_core/redaction_json.mojo";
 const PROMOTED_FILES = [
+  PRESIDIO_FINDINGS_CALLER_FILE,
+  PRESIDIO_FINDINGS_ADAPTER_FILE,
+  PRESIDIO_FINDINGS_MOJO_FILE,
   PRESIDIO_LANGUAGE_ADAPTER_FILE,
   PRESIDIO_LANGUAGE_MOJO_FILE,
   PRESIDIO_ANALYZER_CALLER_FILE,
@@ -4711,6 +4717,32 @@ export function findViolations(files) {
     if (filePath === "crates/prodex-app/src/app_commands/log_tui_render.rs") {
       return contents.includes("compiled_log_search_filters_ascii_case_without_folding_unicode")
         ? [] : [filePath + ": real log TUI search caller regression missing"];
+    }
+    return [];
+  });
+  const presidioFindingLocalizationViolations = files.flatMap(([filePath, contents]) => {
+    if (filePath === PRESIDIO_FINDINGS_CALLER_FILE) {
+      const production = contents.split("\n#[cfg(test)]", 1)[0];
+      const required = ["prodex_mojo_core::redaction::finding_localization_plan(&facts, &text, separator, mode)",
+        "FindingLocalizationMode::RetainWithinValues", "FindingKind::ALL[location.kind as usize]",
+        "compiled_presidio_finding_localization_preserves_all_entity_kinds_and_rounding"];
+      const restored = ["fn unicode_scalar_offset_to_byte(", "fn presidio_confidence_basis_points(",
+        "fn presidio_finding_kind(", "score * 10_000.0", "separator.chars().count()"];
+      return required.every((marker) => contents.includes(marker)) &&
+        restored.every((marker) => !production.includes(marker))
+        ? [] : [filePath + ": Presidio finding localization must remain compiled Mojo-owned"];
+    }
+    if (filePath === PRESIDIO_FINDINGS_ADAPTER_FILE) {
+      return ["pub fn finding_localization_plan(", "prodex_redaction_findings_plan_v1",
+        "compiled_finding_localization_rejects_invalid_abi_and_shape_before_publication"]
+        .filter((marker) => !contents.includes(marker))
+        .map((marker) => filePath + ": compiled Presidio localization ABI missing " + marker);
+    }
+    if (filePath === PRESIDIO_FINDINGS_MOJO_FILE) {
+      return ['@export("prodex_redaction_findings_plan_v1")', "def finding_confidence(",
+        "def finding_byte_offset(", "def finding_entity_kind(", "scaled - Float64(whole) >= 0.5"]
+        .filter((marker) => !contents.includes(marker))
+        .map((marker) => filePath + ": compiled Presidio localization missing " + marker);
     }
     return [];
   });
@@ -10162,6 +10194,7 @@ export function findViolations(files) {
     ...presidioJsonSelectionViolations,
     ...presidioAnalyzerMergeViolations,
     ...presidioLanguageSelectionViolations,
+    ...presidioFindingLocalizationViolations,
     ...rtkAutoWrapperManifestViolations,
     ...optionalToolsRenderViolations,
     ...defaultFeatureViolations, ...operationalHistogramViolations];
@@ -12010,6 +12043,15 @@ function selfTest() {
   assert.match(findViolations([[deepseekSseToolEventsFile,
     deepseekSseToolEventsCaller + '\nif tool_call.done {',
   ]]).join("\n"), /restored Rust DeepSeek SSE tool-event selection or done gate/u);
+  const presidioFindingsConsumer = [
+    "prodex_mojo_core::redaction::finding_localization_plan(&facts, &text, separator, mode)",
+    "FindingLocalizationMode::RetainWithinValues", "FindingKind::ALL[location.kind as usize]",
+    "compiled_presidio_finding_localization_preserves_all_entity_kinds_and_rounding",
+  ].join("\n");
+  assert.deepEqual(findViolations([[PRESIDIO_FINDINGS_CALLER_FILE, presidioFindingsConsumer]]), []);
+  assert.match(findViolations([[PRESIDIO_FINDINGS_CALLER_FILE,
+    presidioFindingsConsumer + "\nfn unicode_scalar_offset_to_byte() {}",
+  ]]).join("\n"), /Presidio finding localization must remain compiled Mojo-owned/u);
   const presidioAnalyzerConsumer = [
     "prodex_mojo_core::redaction::analyzer_merge_plan(&facts)",
     "prodex_mojo_core::redaction::presidio_language_plan(text, candidates)",

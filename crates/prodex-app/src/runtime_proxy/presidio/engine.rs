@@ -3,7 +3,8 @@
 use super::analyzer::{detect_presidio_language, merge_presidio_analyzer_results};
 use super::findings::ApplicationInspectionSource;
 use super::findings::{
-    PresidioAnalyzerResult, runtime_presidio_findings, runtime_presidio_inspection_source,
+    PresidioAnalyzerResult, retain_findings_within_json_values, runtime_presidio_findings,
+    runtime_presidio_inspection_source,
 };
 use super::json_body::{
     PresidioJsonString, collect_json_content, presidio_json_value_separator,
@@ -253,7 +254,7 @@ async fn runtime_presidio_redact_text(
     }
 
     if let Some((values, separator)) = json_content {
-        retain_findings_within_json_values(&mut all_analyzer_results, values, separator);
+        retain_findings_within_json_values(&mut all_analyzer_results, values, separator)?;
     }
     if all_analyzer_results.is_empty() {
         return Ok(RuntimePresidioTextRedaction {
@@ -291,29 +292,6 @@ async fn runtime_presidio_redact_text(
         text: anonymized.text,
         findings: all_analyzer_results,
     })
-}
-
-fn retain_findings_within_json_values(
-    findings: &mut Vec<PresidioAnalyzerResult>,
-    values: &[PresidioJsonString],
-    separator: &str,
-) {
-    let separator_chars = separator.chars().count();
-    let mut cursor = 0usize;
-    let ranges = values
-        .iter()
-        .map(|value| {
-            let start = cursor;
-            let end = start.saturating_add(value.text.chars().count());
-            cursor = end.saturating_add(separator_chars);
-            (start, end)
-        })
-        .collect::<Vec<_>>();
-    findings.retain(|finding| {
-        ranges
-            .iter()
-            .any(|(start, end)| finding.start >= *start && finding.end <= *end)
-    });
 }
 
 async fn presidio_analyze_async(
@@ -391,7 +369,7 @@ mod tests {
             },
         ];
 
-        retain_findings_within_json_values(&mut findings, &values, &separator);
+        retain_findings_within_json_values(&mut findings, &values, &separator).unwrap();
 
         assert_eq!(findings.len(), 1);
         assert_eq!(findings[0].entity_type, "EMAIL_ADDRESS");

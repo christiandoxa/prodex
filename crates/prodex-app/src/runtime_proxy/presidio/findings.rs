@@ -8,6 +8,9 @@ use prodex_domain::{
 };
 
 use super::json_body::PresidioJsonString;
+use prodex_mojo_core::redaction::{
+    AnalyzerFinding, FindingLocalizationError, FindingLocalizationMode, FindingLocation,
+};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) struct ApplicationInspectionSource {
@@ -157,82 +160,126 @@ pub(super) fn runtime_presidio_findings(
     separator: &str,
     findings: &[PresidioAnalyzerResult],
 ) -> Result<Vec<InspectionFinding>> {
-    let separator_chars = separator.chars().count();
-    let mut ranges = Vec::with_capacity(values.len());
-    let mut cursor = 0usize;
-    for value in values {
-        let end = cursor
-            .checked_add(value.text.chars().count())
-            .context("Presidio content offset overflow")?;
-        ranges.push((cursor, end));
-        cursor = end
-            .checked_add(separator_chars)
-            .context("Presidio content offset overflow")?;
-    }
+    runtime_presidio_localization(
+        values,
+        separator,
+        findings,
+        FindingLocalizationMode::Localize,
+    )?
+    .into_iter()
+    .map(|location| {
+        let value = &values[location.value_index as usize];
+        InspectionFinding::new(
+            FindingKind::ALL[location.kind as usize],
+            ContentLocation::new(
+                &value.path,
+                location.start_byte as usize,
+                location.end_byte as usize,
+            )?,
+            location.confidence as u16,
+            DetectorId::new("presidio")?,
+        )
+        .map_err(anyhow::Error::from)
+    })
+    .collect()
+}
 
-    findings
+pub(super) fn retain_findings_within_json_values(
+    findings: &mut Vec<PresidioAnalyzerResult>,
+    values: &[PresidioJsonString],
+    separator: &str,
+) -> Result<()> {
+    let plan = runtime_presidio_localization(
+        values,
+        separator,
+        findings,
+        FindingLocalizationMode::RetainWithinValues,
+    )?;
+    *findings = plan
+        .into_iter()
+        .map(|item| findings[item.source as usize].clone())
+        .collect();
+    Ok(())
+}
+
+fn runtime_presidio_localization(
+    values: &[PresidioJsonString],
+    separator: &str,
+    findings: &[PresidioAnalyzerResult],
+    mode: FindingLocalizationMode,
+) -> Result<Vec<FindingLocation>> {
+    let text = values
         .iter()
-        .map(|finding| {
-            let (value_index, (value_start, _)) = ranges
-                .iter()
-                .copied()
-                .enumerate()
-                .find(|(_, (start, end))| finding.start >= *start && finding.end <= *end)
-                .context("Presidio finding crossed a content-field boundary")?;
-            let value = &values[value_index];
-            let start_char = finding.start - value_start;
-            let end_char = finding.end - value_start;
-            let start_byte = unicode_scalar_offset_to_byte(&value.text, start_char)
-                .context("Presidio finding start offset was invalid")?;
-            let end_byte = unicode_scalar_offset_to_byte(&value.text, end_char)
-                .context("Presidio finding end offset was invalid")?;
-            let confidence = presidio_confidence_basis_points(finding.score)?;
-            InspectionFinding::new(
-                presidio_finding_kind(&finding.entity_type),
-                ContentLocation::new(&value.path, start_byte, end_byte)?,
-                confidence,
-                DetectorId::new("presidio")?,
-            )
-            .map_err(anyhow::Error::from)
+        .map(|value| value.text.as_str())
+        .collect::<Vec<_>>();
+    let facts = findings
+        .iter()
+        .map(|finding| AnalyzerFinding {
+            start: finding.start,
+            end: finding.end,
+            score: finding.score,
+            entity: &finding.entity_type,
         })
-        .collect()
-}
-
-pub(super) fn unicode_scalar_offset_to_byte(value: &str, offset: usize) -> Option<usize> {
-    if offset == value.chars().count() {
-        return Some(value.len());
-    }
-    value.char_indices().nth(offset).map(|(index, _)| index)
-}
-
-pub(super) fn presidio_confidence_basis_points(score: f64) -> Result<u16> {
-    if !score.is_finite() || !(0.0..=1.0).contains(&score) {
-        anyhow::bail!("Presidio returned an invalid confidence score");
-    }
-    Ok((score * 10_000.0).round() as u16)
-}
-
-pub(super) fn presidio_finding_kind(entity_type: &str) -> FindingKind {
-    match entity_type {
-        "EMAIL_ADDRESS" => FindingKind::EmailAddress,
-        "PHONE_NUMBER" => FindingKind::PhoneNumber,
-        "PERSON" => FindingKind::PersonName,
-        "LOCATION" => FindingKind::PhysicalAddress,
-        "CREDIT_CARD" => FindingKind::PaymentCard,
-        "IBAN_CODE" | "CRYPTO" => FindingKind::FinancialAccount,
-        "API_KEY" => FindingKind::ApiKey,
-        "ACCESS_TOKEN" => FindingKind::AccessToken,
-        "PRIVATE_KEY" => FindingKind::PrivateKey,
-        "PASSWORD" => FindingKind::Password,
-        value if value.ends_with("_ID") || value.ends_with("_SSN") => FindingKind::GovernmentId,
-        _ => FindingKind::TenantSensitive,
-    }
+        .collect::<Vec<_>>();
+    prodex_mojo_core::redaction::finding_localization_plan(&facts, &text, separator, mode).map_err(
+        |error| match error {
+            FindingLocalizationError::CrossFieldBoundary => {
+                anyhow::anyhow!("Presidio finding crossed a content-field boundary")
+            }
+            FindingLocalizationError::InvalidConfidence => {
+                anyhow::anyhow!("Presidio returned an invalid confidence score")
+            }
+            FindingLocalizationError::OffsetOverflow => {
+                anyhow::anyhow!("Presidio content offset overflow")
+            }
+            FindingLocalizationError::Abi(error) => {
+                anyhow::anyhow!("compiled Mojo Presidio finding localization failed: {error:?}")
+            }
+        },
+    )
 }
 
 #[cfg(test)]
 mod tests {
     use super::super::json_body::PresidioJsonString;
     use super::*;
+
+    #[test]
+    fn compiled_presidio_finding_localization_preserves_all_entity_kinds_and_rounding() {
+        let value = PresidioJsonString {
+            path: "$.input".to_string(),
+            text: "🧭".to_string(),
+            sensitive_kind: None,
+        };
+        for (entity, kind) in [
+            ("EMAIL_ADDRESS", FindingKind::EmailAddress),
+            ("PHONE_NUMBER", FindingKind::PhoneNumber),
+            ("PERSON", FindingKind::PersonName),
+            ("LOCATION", FindingKind::PhysicalAddress),
+            ("CREDIT_CARD", FindingKind::PaymentCard),
+            ("IBAN_CODE", FindingKind::FinancialAccount),
+            ("CRYPTO", FindingKind::FinancialAccount),
+            ("API_KEY", FindingKind::ApiKey),
+            ("ACCESS_TOKEN", FindingKind::AccessToken),
+            ("PRIVATE_KEY", FindingKind::PrivateKey),
+            ("PASSWORD", FindingKind::Password),
+            ("NATIONAL_ID", FindingKind::GovernmentId),
+            ("CUSTOM_SSN", FindingKind::GovernmentId),
+            ("custom_ssn", FindingKind::TenantSensitive),
+        ] {
+            let finding = PresidioAnalyzerResult {
+                start: 0,
+                end: 1,
+                score: 0.00005_f64.next_down(),
+                entity_type: entity.to_string(),
+                language: "en".to_string(),
+            };
+            let result =
+                runtime_presidio_findings(std::slice::from_ref(&value), "", &[finding]).unwrap();
+            assert_eq!(result[0].kind(), kind, "{entity}");
+            assert_eq!(result[0].location().byte_range(), 0..4);
+        }
+    }
 
     #[test]
     fn presidio_rejects_malformed_finding_metadata() {
