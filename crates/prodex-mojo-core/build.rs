@@ -594,6 +594,7 @@ fn selected_sources() -> Vec<&'static str> {
         sources.push("../../mojo/prodex_core/log_semantics.mojo");
         sources.push("../../mojo/prodex_core/log_transcript_safe.mojo");
         sources.push("../../mojo/prodex_core/log_payload.mojo");
+        sources.push("../../mojo/prodex_core/log_transcript_context.mojo");
         sources.push("../../mojo/prodex_core/log_throughput_policy.mojo");
         sources.push("../../mojo/prodex_core/live_log_record.mojo");
         sources.push("../../mojo/prodex_core/log_parser.mojo");

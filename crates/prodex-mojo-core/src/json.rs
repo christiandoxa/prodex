@@ -91,6 +91,8 @@ pub use self::kiro_catalog::{
 };
 mod log_payload;
 pub use log_payload::{LogPayloadJsonPresentation, log_payload_projection};
+mod log_transcript_context;
+pub use log_transcript_context::{TranscriptContextKind, log_transcript_context};
 #[cfg(feature = "mojo-runtime")]
 mod redaction_content;
 #[cfg(feature = "mojo-runtime")]

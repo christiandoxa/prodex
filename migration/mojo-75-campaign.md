@@ -7118,3 +7118,61 @@ No-fallback/authority/crate-boundary self-test/source, secret-boundary, size,
 Staged churn remains within 1,200 total lines and 500 per file. The reusable
 build cache is retained. Full CI, live-provider and native macOS/Windows
 checks were not run for this diagnostic-only migration.
+
+
+## Compiled transcript context projections (2026-10-20)
+
+Ping-diagnostic checkpoint `2f602bf67` is pushed to main. Session metadata,
+turn context and response-item reasoning summaries now project through a
+focused Mojo owner and the existing borrowed-JSON/measure-write ABI. Rust
+retains Serde acquisition, timestamp formatting, final secret redaction and
+event delivery. The old field templates, ordering, provider fallback,
+summary selection and newline joins are removed from production Rust.
+
+The projection preserves presence-before-type fallback: a present null or
+non-string primary provider/text field blocks its alternate. Empty context
+strings still produce labeled fields; whitespace-only instructions and
+summary parts remain omitted. Valid summary parts preserve their original
+whitespace and array order. JSON escaping preserves Unicode, controls and
+NUL before the existing final sanitizer. The existing application JSON
+acquisition boundary covers production callers already bounded by the
+follow/snapshot/output readers; output is measured without a new short text
+cap. ABI tests reject malformed topology, UTF-8, fields and short capacity
+before writes. Native symbol inspection finds no unresolved dependencies.
+
+Initial Mojo borrowed-argument/copy and assertion pointer-type compilation
+errors were corrected before validation. An initial test expected a NUL
+inside a synthetic bearer token to survive redaction; the existing redactor
+consumes it, and the fixture was corrected without changing production code.
+All 24,576 comparisons with the committed Rust context functions pass,
+including malformed fields, blocking primary values, mixed summary arrays,
+large Unicode/NUL text and final redaction/bounding. The owned temporary
+oracle and object were removed after use.
+
+Direct assertions pass via
+`mojo run -D ASSERT=all -I mojo/prodex_core mojo/tests/log_transcript_context_test.mojo`.
+All 1,014 strict core tests pass via
+`PRODEX_MOJO_REQUIRED=1 CARGO_BUILD_JOBS=6 cargo test --locked -q -p prodex-mojo-core --features mojo-core -- --test-threads=1`.
+All 121 log caller tests pass via
+`PRODEX_MOJO_REQUIRED=1 CARGO_BUILD_JOBS=6 cargo test --locked -q -p prodex-app --lib app_commands::log -- --test-threads=1`,
+including the existing 128-sample display-latency fixture below its 250 ms p95
+limit. No provider traffic is used.
+
+The unchanged official metric rises from 35.584202365388705% to
+35.61095713255389% (128,870 Mojo / 233,013 Rust production lines), leaving
+39.38904286744611 percentage points to 75%. Release-floor and audited
+reachable-source non-regression checks pass; the project target remains unmet.
+
+Workspace Clippy passes via
+`PRODEX_MOJO_REQUIRED=1 CARGO_BUILD_JOBS=6 cargo clippy --locked --workspace --all-targets --all-features -- -D warnings`,
+with existing vendor warnings only. No-fallback/authority/crate-boundary
+self-test/source, secret-boundary, size, `npm run docs`, formatting and diff
+checks pass. Full CI, live-provider and native macOS/Windows checks were not
+run for this log projection migration.
+
+Canonical `RUST_TEST_THREADS=1 CARGO_BUILD_JOBS=6 npm run test:changed` passes.
+Staged privacy/diff checks pass, and churn remains within 1,200 total lines
+and 500 per file. After validation, executable/cwd/fd/map inspection found
+no target users or active builds; no release output was present. Trash was
+empty before `trash-empty -f` completed. Source and checkpoint evidence are
+preserved; `cargo clean` removed 9.8 GiB of reproducible build output.

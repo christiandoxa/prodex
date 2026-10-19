@@ -205,6 +205,9 @@ const PROFILE_ROUTE_CIRCUIT_TEST_FILE = "crates/prodex-mojo-core/tests/runtime_p
 const LOG_PAYLOAD_CALLER_FILE = "crates/prodex-app/src/app_commands/log_upstream_payload.rs";
 const LOG_PAYLOAD_ADAPTER_FILE = "crates/prodex-mojo-core/src/json/log_payload.rs";
 const LOG_PAYLOAD_MOJO_FILE = "mojo/prodex_core/log_payload.mojo";
+const TRANSCRIPT_CONTEXT_ADAPTER_FILE = "crates/prodex-mojo-core/src/json/log_transcript_context.rs";
+const TRANSCRIPT_CONTEXT_MOJO_FILE = "mojo/prodex_core/log_transcript_context.mojo";
+const TRANSCRIPT_CONTEXT_CALLER_TEST_FILE = "crates/prodex-app/src/app_commands/log_transcript_context_tests.rs";
 const KIRO_ENVIRONMENT_CALLER_FILE = "crates/prodex-app/src/profile_commands/kiro_environment.rs";
 const KIRO_ENVIRONMENT_ADAPTER_FILE = "crates/prodex-mojo-core/src/kiro_environment.rs";
 const KIRO_ENVIRONMENT_MOJO_FILE = "mojo/prodex_core/kiro_environment.mojo";
@@ -471,6 +474,9 @@ const PROMOTED_FILES = [
   "crates/prodex-cli/src/runtime_args.rs",
   "crates/prodex-app/src/super_expose/protocol/dispatch.rs",
   "crates/prodex-app/src/app_commands/log_transcript.rs",
+  TRANSCRIPT_CONTEXT_ADAPTER_FILE,
+  TRANSCRIPT_CONTEXT_MOJO_FILE,
+  TRANSCRIPT_CONTEXT_CALLER_TEST_FILE,
   "crates/prodex-app/src/app_commands/log_transcript_text.rs",
   "crates/prodex-mojo-core/src/log/transcript_ansi.rs",
   "mojo/prodex_core/log_semantics.mojo",
@@ -8941,6 +8947,25 @@ export function findViolations(files) {
     return [];
   });
   const transcriptPolicyViolations = files.flatMap(([filePath, contents]) => {
+    if (filePath === TRANSCRIPT_CONTEXT_ADAPTER_FILE) {
+      return ["prodex_mojo_log_transcript_context_v1(", "transform_json(", "TranscriptContextKind"]
+        .filter((marker) => !contents.includes(marker))
+        .map((marker) => `${filePath}: transcript context ABI must retain ${marker}`);
+    }
+    if (filePath === TRANSCRIPT_CONTEXT_MOJO_FILE) {
+      return ['@export("prodex_mojo_log_transcript_context_v1")', "if provider < 0:",
+        "transcript_context_fields(", "transcript_reasoning_part(", "transcript_reasoning_text("]
+        .filter((marker) => !contents.includes(marker))
+        .map((marker) => `${filePath}: transcript context semantics must remain compiled Mojo-owned (${marker})`);
+    }
+    if (filePath === TRANSCRIPT_CONTEXT_CALLER_TEST_FILE) {
+      return ["context_projection_preserves_provider_presence_type_and_empty_string_rules",
+        "context_projection_preserves_field_order_raw_whitespace_and_final_redaction",
+        "reasoning_projection_preserves_fallback_precedence_shape_and_part_order",
+        "context_projection_reaches_existing_final_text_bound_after_large_unicode_inputs"]
+        .filter((marker) => !contents.includes(marker))
+        .map((marker) => `${filePath}: transcript context caller coverage must retain ${marker}`);
+    }
     if (filePath === LOG_TRANSCRIPT_FILE) {
       const required = [
         "prodex_mojo_core::log::classify_transcript_event(",
@@ -8950,11 +8975,16 @@ export function findViolations(files) {
         "prodex_mojo_core::log::join_transcript_user_parts(",
         "prodex_mojo_core::log::normalize_transcript_safe_text(",
         "prodex_mojo_core::session_cli_policy::prompt_write_user_message_visible(",
+        "prodex_mojo_core::json::log_transcript_context(",
+        "app_json_tree_without_wire(payload)",
       ];
       const violations = required
         .filter((call) => !contents.includes(call))
         .map((call) => filePath + ": transcript migration must retain Mojo call " + call);
       const production = contents.split("#[cfg(test)]", 1)[0];
+      if (/\bfn\s+(?:session_meta_transcript_events|turn_context_transcript_event|reasoning_summary_text|transcript_text_from_reasoning)\s*\(/u.test(contents)) {
+        violations.push(filePath + ": contains restored Rust transcript context semantics");
+      }
       if (
         /\bfn\s+event_msg_is_status\s*\(/u.test(production)
         || /\bmatch\s+payload\.get\("type"\).*function_call/su.test(production)
@@ -13689,8 +13719,16 @@ function selfTest() {
     "prodex_mojo_core::log::join_transcript_user_parts(",
     "prodex_mojo_core::log::normalize_transcript_safe_text(",
     "prodex_mojo_core::session_cli_policy::prompt_write_user_message_visible(",
+    "prodex_mojo_core::json::log_transcript_context(",
+    "app_json_tree_without_wire(payload)",
   ].join("\n");
   assert.deepEqual(findViolations([[LOG_TRANSCRIPT_FILE, transcriptConsumerCalls]]), []);
+  assert.match(findViolations([[LOG_TRANSCRIPT_FILE,
+    `${transcriptConsumerCalls}\nfn reasoning_summary_text() {}`,
+  ]]).join("\n"), /restored Rust transcript context semantics/u);
+  assert.match(findViolations([[TRANSCRIPT_CONTEXT_ADAPTER_FILE, ""]]).join("\n"), /transcript context ABI/u);
+  assert.match(findViolations([[TRANSCRIPT_CONTEXT_MOJO_FILE, ""]]).join("\n"), /compiled Mojo-owned/u);
+  assert.match(findViolations([[TRANSCRIPT_CONTEXT_CALLER_TEST_FILE, ""]]).join("\n"), /transcript context caller coverage/u);
   assert.match(findViolations([[LOG_TRANSCRIPT_FILE,
     `${transcriptConsumerCalls}\nfn event_msg_is_status() {}`,
   ]]).join("\n"), /restored Rust transcript classification\/bounding semantics/u);
