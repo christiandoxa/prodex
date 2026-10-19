@@ -501,7 +501,7 @@ fn parse_status_fields(output: &[u8]) -> Result<Vec<(String, String)>, MojoError
     Ok(fields)
 }
 
-fn read_status_length(
+pub(super) fn read_status_length(
     bytes: &[u8],
     cursor: &mut usize,
     fixed_width: Option<usize>,

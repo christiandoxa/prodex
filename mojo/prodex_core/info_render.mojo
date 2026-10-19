@@ -46,6 +46,8 @@ comptime INFO_RENDER_DOCTOR_VALUE_COLOR: Int64 = 28
 comptime INFO_RENDER_DOCTOR_VIEWPORT: Int64 = 29
 comptime INFO_RENDER_PROVIDER_SUMMARY: Int64 = 30
 comptime INFO_RENDER_PROVIDER_CAPABILITIES: Int64 = 31
+comptime INFO_RENDER_LAUNCH_NO_READY: Int64 = 32
+comptime INFO_RENDER_LAUNCH_BLOCKED: Int64 = 33
 comptime INFO_STATUS_HISTORY_LIMIT: Int64 = 64
 comptime INFO_STATUS_FIELD_COUNT: Int64 = 14
 
@@ -700,6 +702,91 @@ def info_render_runtime_launch_warning(
             and info_put_literal(writer, StringSlice("': "))
             and info_put_view(writer, info_text(text_address, 4, 3))
         )
+    return True
+
+
+def info_launch_quota_error(
+    writer: Pointer[mut=True, InfoRenderWriter, _], text_address: UInt, ending: StringSlice,
+) -> Bool:
+    return (
+        info_put_literal(writer, StringSlice("quota preflight blocked profile '"))
+        and info_put_view(writer, info_text(text_address, 4, 0))
+        and info_put_literal(writer, StringSlice("' "))
+        and info_put_literal(writer, ending)
+    )
+
+
+def info_render_launch_no_ready(
+    writer: Pointer[mut=True, InfoRenderWriter, _], text_address: UInt, failed: Bool,
+) -> Bool:
+    if not info_put_byte(writer, UInt8(49 if failed else 48)):
+        return False
+    for field in range(2 if failed else 4):
+        var prefix = info_status_begin_field_value(writer)
+        if prefix < 0:
+            return False
+        var ok: Bool
+        if field == 0:
+            ok = info_render_runtime_launch_warning(
+                writer, text_address,
+                INFO_RUNTIME_LAUNCH_STATUS_PROBE_FAILED if failed else INFO_RUNTIME_LAUNCH_STATUS_BLOCKED,
+            )
+        elif field == 1:
+            ok = info_put_literal(writer, StringSlice("Continuing without quota gate.") if failed else StringSlice("No ready profile was found."))
+        elif field == 2:
+            ok = info_render_runtime_quota_hint(writer, text_address)
+        else:
+            ok = info_launch_quota_error(writer, text_address, StringSlice("and no ready profile was found"))
+        if not ok or not info_status_finish_field_value(writer, prefix):
+            return False
+    return True
+
+
+def info_render_launch_blocked(
+    writer: Pointer[mut=True, InfoRenderWriter, _], text_address: UInt,
+    text_count: Int64, allow_auto_rotate: Bool,
+) -> Bool:
+    var has_alternatives = text_count > 4
+    var rotate = allow_auto_rotate and has_alternatives
+    if not info_put_byte(writer, UInt8(48 if rotate else 49)):
+        return False
+    var fields = 3 if rotate or (not allow_auto_rotate and not has_alternatives) else 4 if allow_auto_rotate else 5
+    for field in range(fields):
+        var prefix = info_status_begin_field_value(writer)
+        if prefix < 0:
+            return False
+        var ok: Bool
+        if field == 0:
+            ok = info_render_runtime_launch_warning(writer, text_address, INFO_RUNTIME_LAUNCH_STATUS_BLOCKED)
+        elif rotate:
+            var next_profile = info_text(text_address, text_count, 4)
+            if field == 1:
+                ok = info_put_view(writer, next_profile)
+            else:
+                ok = (
+                    info_put_literal(writer, StringSlice("Auto-rotating to profile '"))
+                    and info_put_view(writer, next_profile)
+                    and info_put_literal(writer, StringSlice("'."))
+                )
+        elif field == 1:
+            ok = info_launch_quota_error(
+                writer, text_address,
+                StringSlice("and no other ready profile was found") if allow_auto_rotate else StringSlice("with auto-rotate disabled"),
+            )
+        elif field == 2 and allow_auto_rotate:
+            ok = info_put_literal(writer, StringSlice("No other ready profile was found."))
+        elif field == 2 and has_alternatives:
+            ok = info_put_literal(writer, StringSlice("Other profiles that look ready: "))
+            for index in range(Int64(4), text_count):
+                if index > 4:
+                    ok = ok and info_put_literal(writer, StringSlice(", "))
+                ok = ok and info_put_view(writer, info_text(text_address, text_count, index))
+        elif field == 3 and not allow_auto_rotate:
+            ok = info_put_literal(writer, StringSlice("Rerun without `--no-auto-rotate` to allow fallback."))
+        else:
+            ok = info_render_runtime_quota_hint(writer, text_address)
+        if not ok or not info_status_finish_field_value(writer, prefix):
+            return False
     return True
 
 
@@ -1574,7 +1661,7 @@ def prodex_terminal_info_render_v1(
     if (
         abi_version != INFO_RENDER_ABI_VERSION
         or operation < INFO_RENDER_RELATIVE_DURATION
-        or operation > INFO_RENDER_PROVIDER_CAPABILITIES
+        or operation > INFO_RENDER_LAUNCH_BLOCKED
         or signed_count < 0
         or unsigned_count < 0
         or text_count < 0
@@ -1602,7 +1689,13 @@ def prodex_terminal_info_render_v1(
             operation == INFO_RENDER_PROVIDER_CAPABILITIES, unsigned_address, text_address, text_count,
             output_address, output_capacity, written_address,
         )
-    if operation == INFO_RENDER_DOCTOR_VALUE_COLOR:
+    if operation == INFO_RENDER_LAUNCH_NO_READY or operation == INFO_RENDER_LAUNCH_BLOCKED:
+        required_text = 4
+        if signed_count != 0 or unsigned_count != 0 or presence > 1 or text_count < 4:
+            return INFO_RENDER_INVALID
+        if operation == INFO_RENDER_LAUNCH_NO_READY and text_count != 4:
+            return INFO_RENDER_INVALID
+    elif operation == INFO_RENDER_DOCTOR_VALUE_COLOR:
         if signed_count != 0 or unsigned_count != 0 or text_count != 2 or presence != 0:
             return INFO_RENDER_INVALID
         required_text = 2
@@ -1839,6 +1932,10 @@ def prodex_terminal_info_render_v1(
         ok = info_render_runtime_launch_warning(
             Pointer(to=writer), text_address, presence
         )
+    elif operation == INFO_RENDER_LAUNCH_NO_READY:
+        ok = info_render_launch_no_ready(Pointer(to=writer), text_address, presence == 1)
+    elif operation == INFO_RENDER_LAUNCH_BLOCKED:
+        ok = info_render_launch_blocked(Pointer(to=writer), text_address, text_count, presence == 1)
     elif operation == INFO_RENDER_RUNTIME_PROVIDER_DIRECT:
         ok = info_render_runtime_provider_direct(Pointer(to=writer), text_address)
     elif operation == INFO_RENDER_RUNTIME_QUOTA_HINT:
