@@ -170,6 +170,8 @@ const PING_SUMMARY_CALLER_FILE = "crates/prodex-app/src/app_commands/ping_output
 const PING_SUMMARY_CALLER_TEST_FILE = "crates/prodex-app/src/app_commands/ping_tests.rs";
 const PING_SUMMARY_ADAPTER_FILE = "crates/prodex-mojo-core/src/rich/ping_protocol.rs";
 const PING_SUMMARY_MOJO_FILE = "mojo/prodex_core/ping_protocol.mojo";
+const PRESIDIO_LANGUAGE_ADAPTER_FILE = "crates/prodex-mojo-core/src/redaction/language.rs";
+const PRESIDIO_LANGUAGE_MOJO_FILE = "mojo/prodex_core/redaction_language.mojo";
 const PRESIDIO_ANALYZER_CALLER_FILE = "crates/prodex-app/src/runtime_proxy/presidio/analyzer.rs";
 const PRESIDIO_ANALYZER_ADAPTER_FILE = "crates/prodex-mojo-core/src/redaction/analyzer.rs";
 const PRESIDIO_ANALYZER_MOJO_FILE = "mojo/prodex_core/redaction_analyzer.mojo";
@@ -177,6 +179,8 @@ const PRESIDIO_JSON_CALLER_FILE = "crates/prodex-app/src/runtime_proxy/presidio/
 const PRESIDIO_JSON_ADAPTER_FILE = "crates/prodex-mojo-core/src/json/redaction_content.rs";
 const PRESIDIO_JSON_MOJO_FILE = "mojo/prodex_core/redaction_json.mojo";
 const PROMOTED_FILES = [
+  PRESIDIO_LANGUAGE_ADAPTER_FILE,
+  PRESIDIO_LANGUAGE_MOJO_FILE,
   PRESIDIO_ANALYZER_CALLER_FILE,
   PRESIDIO_ANALYZER_ADAPTER_FILE,
   PRESIDIO_ANALYZER_MOJO_FILE,
@@ -4707,6 +4711,30 @@ export function findViolations(files) {
     if (filePath === "crates/prodex-app/src/app_commands/log_tui_render.rs") {
       return contents.includes("compiled_log_search_filters_ascii_case_without_folding_unicode")
         ? [] : [filePath + ": real log TUI search caller regression missing"];
+    }
+    return [];
+  });
+  const presidioLanguageSelectionViolations = files.flatMap(([filePath, contents]) => {
+    if (filePath === PRESIDIO_ANALYZER_CALLER_FILE) {
+      const production = contents.split("\n#[cfg(test)]", 1)[0];
+      return contents.includes("prodex_mojo_core::redaction::presidio_language_plan(text, candidates)") &&
+        contents.includes("compiled_presidio_language_caller_preserves_substrings_ties_and_candidate_priority") &&
+        !production.includes("let id_keywords") && !production.includes("text.to_lowercase()")
+        ? [] : [filePath + ": Presidio language selection must remain compiled Mojo-owned"];
+    }
+    if (filePath === PRESIDIO_LANGUAGE_ADAPTER_FILE) {
+      return ["pub fn presidio_language_plan(", "prodex_redaction_language_plan_v1",
+        "compiled_presidio_language_matches_rust_unicode_ascii_lowercase_expansions",
+        "compiled_presidio_language_rejects_abi_and_bad_views_before_writing"]
+        .filter((marker) => !contents.includes(marker))
+        .map((marker) => filePath + ": compiled Presidio language ABI missing " + marker);
+    }
+    if (filePath === PRESIDIO_LANGUAGE_MOJO_FILE) {
+      return ['@export("prodex_redaction_language_plan_v1")',
+        "def language_lowercase_match(", "scalar == 0x0130", "scalar == 0x212A",
+        "id_score > en_score and indonesian >= 0"]
+        .filter((marker) => !contents.includes(marker))
+        .map((marker) => filePath + ": compiled Presidio language selection missing " + marker);
     }
     return [];
   });
@@ -10133,6 +10161,7 @@ export function findViolations(files) {
     ...logTuiLayoutViolations,
     ...presidioJsonSelectionViolations,
     ...presidioAnalyzerMergeViolations,
+    ...presidioLanguageSelectionViolations,
     ...rtkAutoWrapperManifestViolations,
     ...optionalToolsRenderViolations,
     ...defaultFeatureViolations, ...operationalHistogramViolations];
@@ -11983,6 +12012,8 @@ function selfTest() {
   ]]).join("\n"), /restored Rust DeepSeek SSE tool-event selection or done gate/u);
   const presidioAnalyzerConsumer = [
     "prodex_mojo_core::redaction::analyzer_merge_plan(&facts)",
+    "prodex_mojo_core::redaction::presidio_language_plan(text, candidates)",
+    "compiled_presidio_language_caller_preserves_substrings_ties_and_candidate_priority",
     "compiled_analyzer_merge_preserves_duplicate_score_entity_and_language_order",
     "compiled_analyzer_merge_preserves_adjacent_overlap_and_containment_contract",
   ].join("\n");
@@ -11990,6 +12021,9 @@ function selfTest() {
   assert.match(findViolations([[PRESIDIO_ANALYZER_CALLER_FILE,
     presidioAnalyzerConsumer + "\nresults.sort_by(|a, b| a.start.cmp(&b.start));",
   ]]).join("\n"), /Presidio analyzer merge must remain compiled Mojo-owned/u);
+  assert.match(findViolations([[PRESIDIO_ANALYZER_CALLER_FILE,
+    presidioAnalyzerConsumer + "\nlet id_keywords = [];",
+  ]]).join("\n"), /Presidio language selection must remain compiled Mojo-owned/u);
   const presidioJsonConsumer = [
     "redaction_json_content_plan(&tree.nodes)",
     "content.slots.iter().copied().zip(replacements)",

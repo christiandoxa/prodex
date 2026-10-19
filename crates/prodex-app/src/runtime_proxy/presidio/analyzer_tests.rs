@@ -121,3 +121,33 @@ fn compiled_analyzer_merge_handles_large_reverse_order_without_reordering_ties()
         .collect();
     assert_findings(merge_presidio_analyzer_results(input).unwrap(), expected);
 }
+
+#[test]
+fn compiled_presidio_language_caller_preserves_substrings_ties_and_candidate_priority() {
+    for (text, candidates, expected) in [
+        ("NAMA DAN ALAMAT SAYA", vec!["en", "id"], Some("id")),
+        ("my name and phone address", vec!["id", "en"], Some("en")),
+        ("dan and", vec!["en", "id"], Some("en")),
+        ("dan and", vec!["id", "en"], Some("id")),
+        ("dan dan dan and the", vec!["id", "en"], Some("en")),
+        ("dan", vec!["fr", "en"], Some("fr")),
+        ("Dİ", vec!["en", "id"], Some("id")),
+        ("KE", vec!["en", "id"], Some("id")),
+        ("İD", vec!["en", "id"], Some("en")),
+        ("🧭東京", vec!["id", "en"], Some("id")),
+        ("phone", vec!["fr"], Some("fr")),
+        ("phone", vec![], None),
+    ] {
+        let candidates = candidates
+            .into_iter()
+            .map(str::to_string)
+            .collect::<Vec<_>>();
+        assert_eq!(
+            detect_presidio_language(text, &candidates)
+                .unwrap()
+                .as_deref(),
+            expected,
+            "{text}"
+        );
+    }
+}
