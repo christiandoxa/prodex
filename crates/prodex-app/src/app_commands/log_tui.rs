@@ -286,9 +286,8 @@ pub(super) fn visible_text(
 }
 
 pub(super) fn contains_ignore_ascii_case(haystack: &str, needle: &str) -> bool {
-    haystack
-        .to_ascii_lowercase()
-        .contains(&needle.to_ascii_lowercase())
+    prodex_mojo_core::log::log_contains_ignore_ascii_case(haystack, needle)
+        .expect("compiled Mojo log search policy returned invalid output")
 }
 
 pub(super) fn log_tui_header_detail(preferred_profile: Option<&str>) -> Option<LogTuiHeaderDetail> {
@@ -459,6 +458,28 @@ mod tests {
 
     fn key(code: KeyCode) -> KeyEvent {
         KeyEvent::new(code, KeyModifiers::NONE)
+    }
+
+    #[test]
+    fn compiled_log_tui_ascii_folded_search_preserves_real_query_semantics() {
+        for (haystack, query, expected) in [
+            ("", "", true),
+            ("blocked Weekly; READY 5h", "ready 5H", true),
+            ("ERROR from upstream 🚀", "error FROM", true),
+            ("tool-call:Git status", "TOOL-CALL:GIT", true),
+            ("Credential 🔐東京", "🔐東京", true),
+            ("Credential 🔐東京", "🔐东京", false),
+            ("Straße", "STRASSE", false),
+            ("éÉ", "éé", false),
+            ("QUOTA", "quota blocked", false),
+            ("an unknown error", "", true),
+        ] {
+            assert_eq!(
+                contains_ignore_ascii_case(haystack, query),
+                expected,
+                "{haystack:?}/{query:?}",
+            );
+        }
     }
 
     #[test]

@@ -3268,3 +3268,85 @@ def prodex_mojo_transcript_visible_text_v1(
     while written[] > 0 and output[unsafe_offset=written[] - 1] == 10:
         written[] -= 1
     return 0
+
+
+# Linear-time UTF-8 byte-preserving ASCII case-insensitive substring search.
+# The host provides O(needle length) prefix-function scratch space; unlike
+# Rust's old to_ascii_lowercase copies, the entire haystack is never copied.
+comptime LOG_ASCII_SEARCH_ABI_VERSION: Int64 = 1
+
+
+def log_ascii_fold_byte(value: UInt8) -> UInt8:
+    if value >= 65 and value <= 90:
+        return value + UInt8(32)
+    return value
+
+
+@export("prodex_mojo_log_ascii_casefold_contains_v1")
+def prodex_mojo_log_ascii_casefold_contains_v1(
+    abi_version: Int64,
+    haystack_address: UInt,
+    haystack_length: Int64,
+    needle_address: UInt,
+    needle_length: Int64,
+    scratch_address: UInt,
+    scratch_capacity: Int64,
+    result_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != LOG_ASCII_SEARCH_ABI_VERSION:
+        return 4
+    if (
+        haystack_length < 0 or needle_length < 0
+        or (haystack_length > 0 and haystack_address == 0)
+        or (needle_length > 0 and needle_address == 0)
+        or scratch_capacity < needle_length
+        or (needle_length > 0 and scratch_address == 0)
+        or result_address == 0
+    ):
+        return 1
+    var haystack = ProdexRichStringView(haystack_address, UInt(haystack_length))
+    var needle = ProdexRichStringView(needle_address, UInt(needle_length))
+    if (
+        not rich_view_valid(haystack, 0x7FFFFFFFFFFFFFFF)
+        or not rich_view_valid(needle, 0x7FFFFFFFFFFFFFFF)
+    ):
+        return 1
+
+    var found = needle_length == 0
+    if needle_length > 0 and haystack_length >= needle_length:
+        var text = rich_view_ptr(haystack)
+        var pattern = rich_view_ptr(needle)
+        var prefix = Pointer[mut=True, Int64, MutUntrackedOrigin](
+            unsafe_from_address=Int(scratch_address)
+        )
+        prefix[unsafe_offset=0] = 0
+        var matching: Int64 = 0
+        for index in range(Int64(1), needle_length):
+            var next_value = log_ascii_fold_byte(pattern[unsafe_offset=index])
+            while (
+                matching > 0
+                and next_value != log_ascii_fold_byte(pattern[unsafe_offset=matching])
+            ):
+                matching = prefix[unsafe_offset=matching - 1]
+            if next_value == log_ascii_fold_byte(pattern[unsafe_offset=matching]):
+                matching += 1
+            prefix[unsafe_offset=index] = matching
+
+        matching = 0
+        for index in range(haystack_length):
+            var current = log_ascii_fold_byte(text[unsafe_offset=index])
+            while (
+                matching > 0
+                and current != log_ascii_fold_byte(pattern[unsafe_offset=matching])
+            ):
+                matching = prefix[unsafe_offset=matching - 1]
+            if current == log_ascii_fold_byte(pattern[unsafe_offset=matching]):
+                matching += 1
+            if matching == needle_length:
+                found = True
+                break
+
+    Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(result_address)
+    )[] = Int64(found)
+    return 0

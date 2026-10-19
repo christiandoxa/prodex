@@ -4,6 +4,8 @@ mod event_name;
 mod level;
 mod pointers;
 use pointers::{mutable_pointer_address, pointer_address};
+mod search;
+pub use search::log_contains_ignore_ascii_case;
 mod runtime_line;
 mod snapshot;
 mod transcript;

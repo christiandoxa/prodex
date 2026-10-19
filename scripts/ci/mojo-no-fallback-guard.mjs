@@ -171,6 +171,10 @@ const PING_SUMMARY_CALLER_TEST_FILE = "crates/prodex-app/src/app_commands/ping_t
 const PING_SUMMARY_ADAPTER_FILE = "crates/prodex-mojo-core/src/rich/ping_protocol.rs";
 const PING_SUMMARY_MOJO_FILE = "mojo/prodex_core/ping_protocol.mojo";
 const PROMOTED_FILES = [
+  "crates/prodex-app/src/app_commands/log_tui.rs",
+  "crates/prodex-app/src/app_commands/log_tui_render.rs",
+  "crates/prodex-mojo-core/src/log/search.rs",
+  "mojo/prodex_core/log_semantics.mojo",
   "crates/prodex-optional-tools/src/rtk.rs",
   "crates/prodex-mojo-core/src/rtk_noisy.rs",
   "mojo/prodex_core/rtk_noisy.mojo",
@@ -4530,6 +4534,48 @@ export function findViolations(files) {
       (!contents.includes("prodex_mojo_core::launch::find_super_expose_alias_index") ||
         /\bfn\s+(?:rewrite_super_expose_alias|super_option_takes_value)\s*\(/u.test(contents)))
     .map(([filePath]) => `${filePath}: Super expose alias scan must use Mojo`);
+  const logAsciiSearchMojoViolations = files.flatMap(([filePath, contents]) => {
+    if (filePath === "crates/prodex-app/src/app_commands/log_tui.rs") {
+      const required = [
+        "pub(super) fn contains_ignore_ascii_case(",
+        "prodex_mojo_core::log::log_contains_ignore_ascii_case(haystack, needle)",
+        "compiled_log_tui_ascii_folded_search_preserves_real_query_semantics",
+      ];
+      const retired = [
+        "haystack.to_ascii_lowercase()",
+        "needle.to_ascii_lowercase()",
+        ".contains(&needle.to_ascii_lowercase())",
+      ];
+      return required.every((marker) => contents.includes(marker)) &&
+        retired.every((marker) => !contents.includes(marker))
+        ? [] : [filePath + ": log TUI search must remain compiled Mojo-owned"];
+    }
+    if (filePath === "crates/prodex-mojo-core/src/log/search.rs") {
+      return [
+        "fn prodex_mojo_log_ascii_casefold_contains_v1(",
+        "pub fn log_contains_ignore_ascii_case(",
+        "compiled_log_ascii_casefold_search_preserves_unicode_and_empty_needle",
+        "compiled_log_ascii_search_matches_test_only_rust_oracle",
+        "compiled_log_ascii_search_abi_rejects_malformed_shapes_before_writing",
+      ].filter((marker) => !contents.includes(marker))
+        .map((marker) => filePath + ": compiled log search KMP ABI or strict tests missing " + marker);
+    }
+    if (filePath === "mojo/prodex_core/log_semantics.mojo") {
+      return [
+        '@export("prodex_mojo_log_ascii_casefold_contains_v1")',
+        "def log_ascii_fold_byte(",
+        "prefix[unsafe_offset=index] = matching",
+        "matching = prefix[unsafe_offset=matching - 1]",
+        "not rich_view_valid(haystack",
+      ].filter((marker) => !contents.includes(marker))
+        .map((marker) => filePath + ": compiled linear-time log search semantics missing " + marker);
+    }
+    if (filePath === "crates/prodex-app/src/app_commands/log_tui_render.rs") {
+      return contents.includes("compiled_log_search_filters_ascii_case_without_folding_unicode")
+        ? [] : [filePath + ": real log TUI search caller regression missing"];
+    }
+    return [];
+  });
   const rtkAutoWrapperManifestViolations = files.flatMap(([filePath, contents]) => {
     if (filePath === "crates/prodex-optional-tools/src/rtk.rs") {
       const production = contents.split("#[cfg(test)]", 1)[0];
@@ -9647,6 +9693,7 @@ export function findViolations(files) {
     ...quotaWindowViolations, ...quotaResetEpochViolations,
     ...rehydrateViolations, ...budgetTierViolations, ...staticItemViolations, ...replacedClassifierViolations, ...cliDependencyViolations,
     ...doctorDependencyViolations, ...proxyDependencyViolations, ...runtimeTuningViolations,
+    ...logAsciiSearchMojoViolations,
     ...rtkAutoWrapperManifestViolations,
     ...optionalToolsRenderViolations,
     ...defaultFeatureViolations, ...operationalHistogramViolations];
@@ -11406,6 +11453,16 @@ function selfTest() {
     'prodex_mojo_core::launch::super_literal_boundary(\n' +
     'prodex_mojo_core::launch::positioned_super_provider_alias(\n' +
     'prodex_mojo_core::launch::codex_command_server_subcommand(']]), []);
+  const logAsciiSearchConsumer = [
+    "pub(super) fn contains_ignore_ascii_case(",
+    "prodex_mojo_core::log::log_contains_ignore_ascii_case(haystack, needle)",
+    "compiled_log_tui_ascii_folded_search_preserves_real_query_semantics",
+  ].join("\n");
+  const logAsciiSearchCaller = "crates/prodex-app/src/app_commands/log_tui.rs";
+  assert.deepEqual(findViolations([[logAsciiSearchCaller, logAsciiSearchConsumer]]), []);
+  assert.match(findViolations([[logAsciiSearchCaller,
+    logAsciiSearchConsumer + "\nhaystack.to_ascii_lowercase()",
+  ]]).join("\n"), /log TUI search must remain compiled Mojo-owned/u);
   const rtkWrapperConsumer = [
     "prodex_mojo_core::rtk_noisy::rtk_auto_wrapper_manifest()",
     "let subcommands = wrapper",
@@ -12270,6 +12327,11 @@ function selfTest() {
       "transcript_binary_range(",
       "transcript_fact_trim_bounds(",
       "TRANSCRIPT_SAFE_TEXT_MAX_BYTES",
+      '@export("prodex_mojo_log_ascii_casefold_contains_v1")',
+      "def log_ascii_fold_byte(",
+      "prefix[unsafe_offset=index] = matching",
+      "matching = prefix[unsafe_offset=matching - 1]",
+      "not rich_view_valid(haystack",
     ].join("\n")]]), []);
 
   const superPromptConsumer = [
