@@ -25,7 +25,15 @@ impl RuntimeDeepSeekSseState {
         if let Err(message) = self.validate_tool_call_arguments() {
             return self.failed_event("invalid_tool_call_arguments", &message);
         }
-        let mut events = self.complete_tool_call_events();
+        let mut events = match self.complete_tool_call_events() {
+            Ok(events) => events,
+            Err(error) => {
+                return self.failed_event(
+                    "invalid_tool_call_arguments",
+                    &format!("compiled Mojo DeepSeek SSE completion planner failed: {error:?}"),
+                );
+            }
+        };
         events.extend(self.complete_reasoning_events());
         events.extend(self.complete_output_text_item_events());
         let response = deepseek_provider_core_stream_response_value(

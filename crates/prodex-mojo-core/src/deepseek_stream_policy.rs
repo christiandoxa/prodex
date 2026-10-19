@@ -5,6 +5,23 @@ use crate::MojoError;
 const ABI_VERSION: i64 = 1;
 
 unsafe extern "C" {
+    fn prodex_deepseek_sse_tool_event_plan_v1(
+        abi_version: i64,
+        already_added: i64,
+        arguments_present: i64,
+        name_address: u64,
+        name_length: i64,
+        output_address: u64,
+        output_capacity: i64,
+    ) -> i64;
+    fn prodex_deepseek_sse_pending_tools_v1(
+        abi_version: i64,
+        completed_address: u64,
+        tool_count: i64,
+        output_address: u64,
+        output_capacity: i64,
+        written_address: u64,
+    ) -> i64;
     fn prodex_deepseek_stream_response_id_fallback_v1(
         abi_version: i64,
         provider: u64,
@@ -44,6 +61,95 @@ unsafe extern "C" {
         arguments_address: u64,
         arguments_length: i64,
     ) -> i64;
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DeepSeekSseToolEventPlan {
+    pub add_item: bool,
+    pub emit_argument_delta: bool,
+}
+
+/// Mojo exclusively decides whether an item is newly added and whether
+/// the streamed name is a function that can emit argument-delta events.
+pub fn deepseek_sse_tool_event_plan(
+    already_added: bool,
+    name: &str,
+    argument_delta_present: bool,
+) -> Result<DeepSeekSseToolEventPlan, MojoError> {
+    let mut output = [-1_i64; 2];
+    let status = unsafe {
+        prodex_deepseek_sse_tool_event_plan_v1(
+            ABI_VERSION,
+            i64::from(already_added),
+            i64::from(argument_delta_present),
+            name.as_ptr() as usize as u64,
+            i64::try_from(name.len()).map_err(|_| MojoError::InvalidInput)?,
+            output.as_mut_ptr() as usize as u64,
+            i64::try_from(output.len()).map_err(|_| MojoError::InvalidInput)?,
+        )
+    };
+    match status {
+        0 => {}
+        -1 => return Err(MojoError::InvalidInput),
+        -4 => return Err(MojoError::AbiMismatch),
+        _ => return Err(MojoError::InvalidOutput),
+    }
+    let decode = |value| match value {
+        0 => Ok(false),
+        1 => Ok(true),
+        _ => Err(MojoError::InvalidOutput),
+    };
+    let add_item = decode(output[0])?;
+    let emit_argument_delta = decode(output[1])?;
+    if add_item == already_added || (emit_argument_delta && !argument_delta_present) {
+        return Err(MojoError::InvalidOutput);
+    }
+    Ok(DeepSeekSseToolEventPlan {
+        add_item,
+        emit_argument_delta,
+    })
+}
+
+/// Exactly-once completion positions come from the compiled DeepSeek owner.
+/// Rust retains BTreeMap updates and event construction, not a done filter.
+pub fn deepseek_sse_pending_tool_positions(done: &[bool]) -> Result<Vec<usize>, MojoError> {
+    let flags = done
+        .iter()
+        .map(|value| i64::from(*value))
+        .collect::<Vec<_>>();
+    let mut positions = vec![u64::MAX; done.len()];
+    let mut written = -1_i64;
+    let status = unsafe {
+        prodex_deepseek_sse_pending_tools_v1(
+            ABI_VERSION,
+            flags.as_ptr() as usize as u64,
+            i64::try_from(flags.len()).map_err(|_| MojoError::InvalidInput)?,
+            positions.as_mut_ptr() as usize as u64,
+            i64::try_from(positions.len()).map_err(|_| MojoError::InvalidInput)?,
+            (&mut written as *mut i64) as usize as u64,
+        )
+    };
+    match status {
+        0 => {}
+        -1 => return Err(MojoError::InvalidInput),
+        -4 => return Err(MojoError::AbiMismatch),
+        _ => return Err(MojoError::InvalidOutput),
+    }
+    let count = usize::try_from(written).map_err(|_| MojoError::InvalidOutput)?;
+    if count > done.len() {
+        return Err(MojoError::InvalidOutput);
+    }
+    let mut previous = None;
+    let mut result = Vec::with_capacity(count);
+    for raw in &positions[..count] {
+        let index = usize::try_from(*raw).map_err(|_| MojoError::InvalidOutput)?;
+        if done.get(index) != Some(&false) || previous.is_some_and(|prior| index <= prior) {
+            return Err(MojoError::InvalidOutput);
+        }
+        previous = Some(index);
+        result.push(index);
+    }
+    Ok(result)
 }
 
 /// Compiled Mojo exclusively selects the DeepSeek streamed tool kind.
@@ -257,6 +363,78 @@ mod tests {
 #[cfg(test)]
 mod stream_item_semantics_tests {
     use super::*;
+
+    #[test]
+    fn compiled_deepseek_sse_event_planner_avoids_special_argument_streams_and_repeats() {
+        for (name, added, fragment, add, emit) in [
+            ("shell", false, true, true, true),
+            ("shell", true, true, false, true),
+            ("shell", false, false, true, false),
+            ("tool_search", false, true, true, false),
+            ("apply_patch", true, true, false, false),
+            ("tool_search ", false, true, true, true),
+            ("mcp__repo__東京🧭", false, true, true, true),
+        ] {
+            assert_eq!(
+                deepseek_sse_tool_event_plan(added, name, fragment),
+                Ok(DeepSeekSseToolEventPlan {
+                    add_item: add,
+                    emit_argument_delta: emit,
+                }),
+                "{name:?}/{added}/{fragment}",
+            );
+        }
+    }
+
+    #[test]
+    fn compiled_deepseek_sse_completion_planner_retains_pending_order_and_no_duplicates() {
+        for (flags, expected) in [
+            (vec![], vec![]),
+            (vec![true], vec![]),
+            (vec![false], vec![0]),
+            (vec![true, false, true, false], vec![1, 3]),
+            (vec![false, false, false], vec![0, 1, 2]),
+        ] {
+            assert_eq!(deepseek_sse_pending_tool_positions(&flags), Ok(expected));
+        }
+    }
+
+    #[test]
+    fn compiled_deepseek_sse_planning_abi_rejects_corrupt_flags_without_output_writes() {
+        let name = b"shell";
+        let mut output = [97_i64; 2];
+        let name_ptr = name.as_ptr() as usize as u64;
+        let out = output.as_mut_ptr() as usize as u64;
+        let event = |version, added, fragment, name, size, out, cap| unsafe {
+            prodex_deepseek_sse_tool_event_plan_v1(version, added, fragment, name, size, out, cap)
+        };
+        assert_eq!(event(2, 0, 1, name_ptr, 5, out, 2), -4);
+        assert_eq!(event(1, 2, 1, name_ptr, 5, out, 2), -1);
+        assert_eq!(event(1, 0, -1, name_ptr, 5, out, 2), -1);
+        assert_eq!(event(1, 0, 1, 0, 5, out, 2), -1);
+        assert_eq!(event(1, 0, 1, name_ptr, 5, out, 1), -1);
+        assert_eq!(event(1, 0, 1, name_ptr, 5, 0, 2), -1);
+        let bad = [0xff_u8];
+        assert_eq!(event(1, 0, 1, bad.as_ptr() as usize as u64, 1, out, 2), -1);
+        assert_eq!(output, [97; 2]);
+        let flags = [0_i64, 2_i64];
+        let mut indices = [71_u64; 2];
+        let mut count = 83_i64;
+        let ptr = flags.as_ptr() as usize as u64;
+        let dst = indices.as_mut_ptr() as usize as u64;
+        let written = (&mut count as *mut i64) as usize as u64;
+        let pending = |version, src, size, dst, cap, count| unsafe {
+            prodex_deepseek_sse_pending_tools_v1(version, src, size, dst, cap, count)
+        };
+        assert_eq!(pending(2, ptr, 2, dst, 2, written), -4);
+        assert_eq!(pending(1, 0, 2, dst, 2, written), -1);
+        assert_eq!(pending(1, ptr, -1, dst, 2, written), -1);
+        assert_eq!(pending(1, ptr, 2, dst, 1, written), -1);
+        assert_eq!(pending(1, ptr, 2, dst, 2, 0), -1);
+        assert_eq!(pending(1, ptr, 2, dst, 2, written), -1);
+        assert_eq!(indices, [71; 2]);
+        assert_eq!(count, 83);
+    }
 
     #[test]
     fn compiled_tool_kind_discriminates_exact_names_only() {

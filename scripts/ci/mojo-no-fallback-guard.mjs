@@ -171,6 +171,12 @@ const PING_SUMMARY_CALLER_TEST_FILE = "crates/prodex-app/src/app_commands/ping_t
 const PING_SUMMARY_ADAPTER_FILE = "crates/prodex-mojo-core/src/rich/ping_protocol.rs";
 const PING_SUMMARY_MOJO_FILE = "mojo/prodex_core/ping_protocol.mojo";
 const PROMOTED_FILES = [
+  "crates/prodex-app/src/runtime_launch/proxy_startup/deepseek_sse/tool_calls.rs",
+  "crates/prodex-app/src/runtime_launch/proxy_startup/deepseek_sse/completion.rs",
+  "crates/prodex-app/src/runtime_launch/proxy_startup/deepseek_sse.rs",
+  "crates/prodex-app/src/runtime_launch/proxy_startup/deepseek_sse_tests.rs",
+  "crates/prodex-mojo-core/src/deepseek_stream_policy.rs",
+  "mojo/prodex_core/deepseek_stream_policy.mojo",
   "crates/prodex-app/src/runtime_kiro_acp/protocol.rs",
   "crates/prodex-mojo-core/src/kiro_acp_update_policy.rs",
   "mojo/prodex_core/kiro_acp_update_policy.mojo",
@@ -6722,6 +6728,57 @@ export function findViolations(files) {
     return [...completedViolations,
       `${filePath}: stream choice empty-text filtering must stay in Mojo`];
   });
+  const deepseekSseToolEventsMojoViolations = files.flatMap(([filePath, contents]) => {
+    if (filePath === "crates/prodex-app/src/runtime_launch/proxy_startup/deepseek_sse/tool_calls.rs") {
+      const required = [
+        "deepseek_sse_tool_event_plan(",
+        "deepseek_sse_pending_tool_positions(&flags)",
+        "plan.emit_argument_delta",
+        "plan.add_item",
+        "tool_call.done = true;",
+      ];
+      const retired = [
+        'name == "tool_search" || name == "apply_patch"',
+        "let should_add = !tool_call.added;",
+        "if tool_call.done {",
+      ];
+      return required.every((marker) => contents.includes(marker)) &&
+        retired.every((marker) => !contents.includes(marker))
+        ? [] : [filePath + ": restored Rust DeepSeek SSE tool-event selection or done gate"];
+    }
+    if (filePath === "crates/prodex-mojo-core/src/deepseek_stream_policy.rs") {
+      return [
+        "fn prodex_deepseek_sse_tool_event_plan_v1(",
+        "fn prodex_deepseek_sse_pending_tools_v1(",
+        "pub fn deepseek_sse_tool_event_plan(",
+        "pub fn deepseek_sse_pending_tool_positions(",
+        "compiled_deepseek_sse_event_planner_avoids_special_argument_streams_and_repeats",
+        "compiled_deepseek_sse_completion_planner_retains_pending_order_and_no_duplicates",
+        "compiled_deepseek_sse_planning_abi_rejects_corrupt_flags_without_output_writes",
+      ].filter((marker) => !contents.includes(marker))
+        .map((marker) => filePath + ": DeepSeek SSE Mojo ABI or strict tests missing " + marker);
+    }
+    if (filePath === "mojo/prodex_core/deepseek_stream_policy.mojo") {
+      return [
+        '@export("prodex_deepseek_sse_tool_event_plan_v1")',
+        '@export("prodex_deepseek_sse_pending_tools_v1")',
+        "prodex_deepseek_stream_tool_kind_v1(",
+        "arguments_present == 1 and kind == 2",
+        "if completed[unsafe_offset=index] == 0:",
+      ].filter((marker) => !contents.includes(marker))
+        .map((marker) => filePath + ": DeepSeek SSE compiled event/finish owner missing " + marker);
+    }
+    if (filePath === "crates/prodex-app/src/runtime_launch/proxy_startup/deepseek_sse_tests.rs") {
+      return contents.includes("compiled_deepseek_sse_tool_event_planner_finishes_calls_once_across_repeated_finish_chunks")
+        ? [] : [filePath + ": real DeepSeek SSE exactly-once completion regression missing"];
+    }
+    if (filePath === "crates/prodex-app/src/runtime_launch/proxy_startup/deepseek_sse.rs" ||
+        filePath === "crates/prodex-app/src/runtime_launch/proxy_startup/deepseek_sse/completion.rs") {
+      return contents.includes("compiled Mojo DeepSeek SSE completion planner failed")
+        ? [] : [filePath + ": DeepSeek SSE must fail closed on invalid Mojo completion output"];
+    }
+    return [];
+  });
   const deepseekStreamFallbackViolations = files.flatMap(([filePath, contents]) => {
     if (filePath === DEEPSEEK_SHAPING_FILE) {
       const production = contents.split("#[cfg(test)]", 1)[0];
@@ -9740,6 +9797,7 @@ export function findViolations(files) {
     ...modelSpecViolations, ...mainModelCatalogViolations, ...providerCatalogReasoningViolations, ...superPromptPolicyViolations, ...catalogModelViolations,
     ...deepseekShapingViolations,
     ...pingSummaryViolations,
+    ...deepseekSseToolEventsMojoViolations,
     ...deepseekStreamFallbackViolations,
     ...quotaWindowViolations, ...quotaResetEpochViolations,
     ...rehydrateViolations, ...budgetTierViolations, ...staticItemViolations, ...replacedClassifierViolations, ...cliDependencyViolations,
@@ -11520,6 +11578,18 @@ function selfTest() {
   assert.match(findViolations([[kiroUpdateFile,
     kiroUpdateConsumer + "\nmatch session_update.as_str() {",
   ]]).join("\n"), /restored Rust Kiro ACP update classifier or required-field gating/u);
+  const deepseekSseToolEventsCaller = [
+    "deepseek_sse_tool_event_plan(",
+    "deepseek_sse_pending_tool_positions(&flags)",
+    "plan.emit_argument_delta",
+    "plan.add_item",
+    "tool_call.done = true;",
+  ].join("\n");
+  const deepseekSseToolEventsFile = "crates/prodex-app/src/runtime_launch/proxy_startup/deepseek_sse/tool_calls.rs";
+  assert.deepEqual(findViolations([[deepseekSseToolEventsFile, deepseekSseToolEventsCaller]]), []);
+  assert.match(findViolations([[deepseekSseToolEventsFile,
+    deepseekSseToolEventsCaller + '\nif tool_call.done {',
+  ]]).join("\n"), /restored Rust DeepSeek SSE tool-event selection or done gate/u);
   const logAsciiSearchConsumer = [
     "pub(super) fn contains_ignore_ascii_case(",
     "prodex_mojo_core::log::log_contains_ignore_ascii_case(haystack, needle)",

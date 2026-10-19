@@ -359,6 +359,68 @@ fn deepseek_sse_missing_tool_call_id_fallback_uses_call_id_uuidv7() {
 }
 
 #[test]
+fn compiled_deepseek_sse_tool_event_planner_finishes_calls_once_across_repeated_finish_chunks() {
+    let mut state = RuntimeDeepSeekSseState::new(42, Vec::new(), None, conversation_store());
+    let tool_chunk = serde_json::json!({
+        "id": "chatcmpl_finished",
+        "choices": [{
+            "delta": {
+                "tool_calls": [
+                    {"index": 0, "id": "call_shell", "function":{
+                        "name": "shell", "arguments": r#"{"cmd":"pwd"}"#
+                    }},
+                    {"index": 1, "id": "call_search", "function":{
+                        "name": "tool_search", "arguments": r#"{"query":"index"}"#
+                    }}
+                ]
+            }
+        }]
+    });
+    let first = state.observe_chat_chunk(&tool_chunk).concat();
+    let finish = serde_json::json!({
+        "id": "chatcmpl_finished",
+        "choices": [{"delta": {}, "finish_reason": "tool_calls"}]
+    });
+    let finished = state.observe_chat_chunk(&finish).concat();
+    let again = state.observe_chat_chunk(&finish).concat();
+    let final_event = state.complete_event().expect("final DeepSeek SSE event");
+    let values = sse_values(&format!("{first}{finished}{again}{final_event}"));
+    let done = values
+        .iter()
+        .filter(|value| value["type"] == "response.output_item.done")
+        .collect::<Vec<_>>();
+    assert_eq!(done.len(), 2);
+    assert_eq!(done[0]["output_index"], 0);
+    assert_eq!(done[1]["output_index"], 1);
+    assert_eq!(
+        values
+            .iter()
+            .filter(|value| value["type"] == "response.function_call_arguments.delta")
+            .count(),
+        1,
+        "compiled Mojo must emit normal shell arguments but not special tool_search arguments",
+    );
+    assert_eq!(
+        values
+            .iter()
+            .filter(|value| value["type"] == "response.completed")
+            .count(),
+        1,
+    );
+    assert_eq!(
+        values
+            .iter()
+            .filter(|value| value["type"] == "response.failed")
+            .count(),
+        0,
+    );
+    assert!(
+        state.complete_event().is_none(),
+        "committed stream must never replay"
+    );
+}
+
+#[test]
 fn deepseek_sse_reader_emits_each_interleaved_tool_fragment_once() {
     let fragments = [
         (0, Some("call_a"), Some("emit"), "{"),
