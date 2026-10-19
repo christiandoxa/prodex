@@ -1,6 +1,6 @@
 pub use crate::probe::RuntimeQuotaSource as InfoQuotaSource;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct InfoQuotaAggregate {
     pub quota_compatible_profiles: usize,
     pub live_profiles: usize,

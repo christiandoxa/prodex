@@ -317,6 +317,8 @@ fn status_fields_keep_quota_token_and_resource_output_contract() {
         quota: StatusQuotaSummary {
             compatible_profiles: 2,
             unavailable_profiles: 1,
+            live_profiles: 1,
+            snapshot_profiles: 0,
             five_hour: StatusQuotaWindow {
                 profiles: 2,
                 total_remaining: 90,
@@ -448,6 +450,8 @@ fn quota_summary_keeps_cache_precedence_and_window_semantics() {
     let expected = StatusQuotaSummary {
         compatible_profiles: 7,
         unavailable_profiles: 4,
+        live_profiles: 2,
+        snapshot_profiles: 1,
         five_hour: StatusQuotaWindow {
             profiles: 2,
             total_remaining: 130,
@@ -468,6 +472,68 @@ fn quota_summary_keeps_cache_precedence_and_window_semantics() {
     assert_eq!(
         status_quota_from_reports(&reversed, &snapshots, now).unwrap(),
         expected
+    );
+}
+
+#[test]
+fn info_quota_summary_shares_source_precedence_and_window_reduction_with_status() {
+    let now = 1_000;
+    let (reports, snapshots) = status_quota_fixture(now);
+    let expected = crate::InfoQuotaAggregate {
+        quota_compatible_profiles: 7,
+        live_profiles: 2,
+        snapshot_profiles: 1,
+        unavailable_profiles: 4,
+        five_hour_profiles_with_data: 2,
+        weekly_profiles_with_data: 2,
+        five_hour_pool_remaining: 130,
+        weekly_pool_remaining: 70,
+        earliest_five_hour_reset_at: Some(1_200),
+        earliest_weekly_reset_at: Some(1_800),
+    };
+    assert_eq!(
+        crate::reports::build_info_quota_aggregate(
+            &reports,
+            &snapshots,
+            now,
+            RUNTIME_PROFILE_USAGE_CACHE_STALE_GRACE_SECONDS,
+        ),
+        expected,
+    );
+    let mut reversed = reports;
+    reversed.reverse();
+    assert_eq!(
+        crate::reports::build_info_quota_aggregate(
+            &reversed,
+            &snapshots,
+            now,
+            RUNTIME_PROFILE_USAGE_CACHE_STALE_GRACE_SECONDS,
+        ),
+        expected,
+    );
+    let zero_grace = crate::reports::build_info_quota_aggregate(&reversed, &snapshots, now, 0);
+    assert_eq!(
+        (
+            zero_grace.snapshot_profiles,
+            zero_grace.unavailable_profiles
+        ),
+        (0, 5)
+    );
+    let empty = crate::reports::build_info_quota_aggregate(&[], &snapshots, now, 0);
+    assert_eq!(
+        empty,
+        crate::InfoQuotaAggregate {
+            quota_compatible_profiles: 0,
+            live_profiles: 0,
+            snapshot_profiles: 0,
+            unavailable_profiles: 0,
+            five_hour_profiles_with_data: 0,
+            weekly_profiles_with_data: 0,
+            five_hour_pool_remaining: 0,
+            weekly_pool_remaining: 0,
+            earliest_five_hour_reset_at: None,
+            earliest_weekly_reset_at: None,
+        }
     );
 }
 

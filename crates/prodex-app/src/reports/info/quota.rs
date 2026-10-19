@@ -1,9 +1,12 @@
-//! Quota aggregation for info reports.
+//! Quota aggregation for info and status reports.
 
 use super::{
-    BTreeMap, InfoQuotaAggregate, InfoQuotaSource, RunProfileProbeReport,
-    RuntimeProfileUsageSnapshot, required_main_window_snapshot_at,
-    runtime_usage_snapshot_is_usable, usage_from_runtime_usage_snapshot,
+    BTreeMap, InfoQuotaAggregate, RunProfileProbeReport, RuntimeProfileUsageSnapshot,
+    required_main_window_snapshot_at, runtime_usage_snapshot_is_usable,
+    usage_from_runtime_usage_snapshot,
+};
+use prodex_mojo_core::quota_pool::{
+    QuotaPoolWindowInput, StatusQuotaProfileInput, StatusQuotaSummary, status_quota_summary_batch,
 };
 
 pub fn build_info_quota_aggregate(
@@ -12,96 +15,72 @@ pub fn build_info_quota_aggregate(
     now: i64,
     stale_grace_seconds: i64,
 ) -> InfoQuotaAggregate {
-    let mut aggregate = InfoQuotaAggregate {
-        quota_compatible_profiles: reports
-            .iter()
-            .filter(|report| report.auth.quota_compatible)
-            .count(),
-        live_profiles: 0,
-        snapshot_profiles: 0,
-        unavailable_profiles: 0,
-        five_hour_profiles_with_data: 0,
-        weekly_profiles_with_data: 0,
-        five_hour_pool_remaining: 0,
-        weekly_pool_remaining: 0,
-        earliest_five_hour_reset_at: None,
-        earliest_weekly_reset_at: None,
-    };
-
-    for report in reports {
-        update_info_quota_aggregate(
-            &mut aggregate,
-            report,
-            persisted_usage_snapshots,
-            now,
-            stale_grace_seconds,
-        );
+    let summary =
+        quota_report_summary(reports, persisted_usage_snapshots, now, stale_grace_seconds)
+            .expect("Mojo Info quota summary failed");
+    InfoQuotaAggregate {
+        quota_compatible_profiles: summary.compatible_profiles,
+        live_profiles: summary.live_profiles,
+        snapshot_profiles: summary.snapshot_profiles,
+        unavailable_profiles: summary.unavailable_profiles,
+        five_hour_profiles_with_data: summary.five_hour.profiles,
+        weekly_profiles_with_data: summary.weekly.profiles,
+        five_hour_pool_remaining: summary.five_hour.total_remaining,
+        weekly_pool_remaining: summary.weekly.total_remaining,
+        earliest_five_hour_reset_at: summary.five_hour.earliest_reset_at,
+        earliest_weekly_reset_at: summary.weekly.earliest_reset_at,
     }
-
-    aggregate
 }
 
-fn update_info_quota_aggregate(
-    aggregate: &mut InfoQuotaAggregate,
-    report: &RunProfileProbeReport,
-    persisted_usage_snapshots: &BTreeMap<String, RuntimeProfileUsageSnapshot>,
+// Rust projects dependency-owned usage types; Mojo chooses sources and reduces windows.
+pub(crate) fn quota_report_summary(
+    reports: &[RunProfileProbeReport],
+    snapshots: &BTreeMap<String, RuntimeProfileUsageSnapshot>,
     now: i64,
     stale_grace_seconds: i64,
-) {
-    if !report.auth.quota_compatible {
-        return;
-    }
-
-    let usage = match &report.result {
-        Ok(usage) => Some((usage.clone(), InfoQuotaSource::LiveProbe)),
-        Err(_) => persisted_usage_snapshots
-            .get(&report.name)
-            .filter(|snapshot| runtime_usage_snapshot_is_usable(snapshot, now, stale_grace_seconds))
+) -> Result<StatusQuotaSummary, prodex_mojo_core::MojoError> {
+    let mut inputs = Vec::with_capacity(reports.len());
+    for report in reports {
+        let report_succeeded = report.result.is_ok();
+        let report_windows = report
+            .result
+            .as_ref()
+            .ok()
+            .map(|usage| quota_report_windows(usage, now))
+            .unwrap_or_default();
+        let cached_usage = snapshots.get(&report.name).filter(|snapshot| {
+            runtime_usage_snapshot_is_usable(snapshot, now, stale_grace_seconds)
+        });
+        let cached_snapshot_usable = cached_usage.is_some();
+        let cached_windows = cached_usage
             .map(|snapshot| {
-                (
-                    usage_from_runtime_usage_snapshot(snapshot),
-                    InfoQuotaSource::PersistedSnapshot,
-                )
-            }),
-    };
-    let Some((usage, source)) = usage else {
-        aggregate.unavailable_profiles += 1;
-        return;
-    };
-
-    let five_hour = required_main_window_snapshot_at(&usage, "5h", now);
-    let weekly = required_main_window_snapshot_at(&usage, "weekly", now);
-    if five_hour.is_none() && weekly.is_none() {
-        aggregate.unavailable_profiles += 1;
-        return;
+                let usage = usage_from_runtime_usage_snapshot(snapshot);
+                quota_report_windows(&usage, now)
+            })
+            .unwrap_or_default();
+        inputs.push(StatusQuotaProfileInput {
+            quota_compatible: report.auth.quota_compatible,
+            report_succeeded,
+            cached_snapshot_usable,
+            report_five_hour: report_windows.0,
+            report_weekly: report_windows.1,
+            cached_five_hour: cached_windows.0,
+            cached_weekly: cached_windows.1,
+        });
     }
 
-    match source {
-        InfoQuotaSource::LiveProbe => aggregate.live_profiles += 1,
-        InfoQuotaSource::PersistedSnapshot => aggregate.snapshot_profiles += 1,
-    }
-    if let Some(five_hour) = five_hour {
-        aggregate.five_hour_profiles_with_data += 1;
-        aggregate.five_hour_pool_remaining += five_hour.remaining_percent;
-        if five_hour.reset_at != i64::MAX {
-            aggregate.earliest_five_hour_reset_at = Some(
-                aggregate
-                    .earliest_five_hour_reset_at
-                    .map_or(five_hour.reset_at, |current| {
-                        current.min(five_hour.reset_at)
-                    }),
-            );
-        }
-    }
-    if let Some(weekly) = weekly {
-        aggregate.weekly_profiles_with_data += 1;
-        aggregate.weekly_pool_remaining += weekly.remaining_percent;
-        if weekly.reset_at != i64::MAX {
-            aggregate.earliest_weekly_reset_at = Some(
-                aggregate
-                    .earliest_weekly_reset_at
-                    .map_or(weekly.reset_at, |current| current.min(weekly.reset_at)),
-            );
-        }
-    }
+    status_quota_summary_batch(&inputs)
+}
+
+fn quota_report_windows(
+    usage: &prodex_quota::UsageResponse,
+    now: i64,
+) -> (Option<QuotaPoolWindowInput>, Option<QuotaPoolWindowInput>) {
+    let window = |label| {
+        required_main_window_snapshot_at(usage, label, now).map(|snapshot| QuotaPoolWindowInput {
+            remaining_percent: snapshot.remaining_percent,
+            reset_at: snapshot.reset_at,
+        })
+    };
+    (window("5h"), window("weekly"))
 }
