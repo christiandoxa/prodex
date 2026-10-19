@@ -22,6 +22,9 @@ use std::time::Instant;
 #[path = "ping_diagnostic_tests.rs"]
 mod diagnostic;
 
+#[path = "ping_failure_detail_tests.rs"]
+mod failure_detail;
+
 #[cfg(unix)]
 use std::os::unix::process::ExitStatusExt;
 #[cfg(windows)]

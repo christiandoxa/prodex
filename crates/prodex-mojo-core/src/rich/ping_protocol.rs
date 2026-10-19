@@ -7,6 +7,9 @@ pub use diagnostic::{
     PING_ERROR_DETAIL_MAX_BYTES, PingChildExit, ping_bounded_detail, ping_output_failure_detail,
     ping_process_error,
 };
+#[path = "ping_protocol/failure_detail.rs"]
+mod failure_detail;
+pub use failure_detail::ping_structured_failure_detail;
 
 const PING_PROTOCOL_ABI_VERSION: i64 = 1;
 const PING_PROTOCOL_MAX_BYTES: usize = 4 * 1024 * 1024;
