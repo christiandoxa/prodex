@@ -1,6 +1,10 @@
 use crate::MojoError;
 mod analyzer;
 pub use analyzer::{AnalyzerFinding, AnalyzerSelection, analyzer_merge_plan};
+mod findings;
+pub use findings::{
+    FindingLocalizationError, FindingLocalizationMode, FindingLocation, finding_localization_plan,
+};
 mod language;
 pub use language::presidio_language_plan;
 

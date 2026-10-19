@@ -12,7 +12,7 @@ pub struct AnalyzerFinding<'a> {
 
 #[derive(Clone, Copy)]
 #[repr(C)]
-struct FindingFfi {
+pub(super) struct FindingFfi {
     start: u64,
     end: u64,
     score: f64,
@@ -47,12 +47,8 @@ unsafe extern "C" {
     ) -> i64;
 }
 
-/// Stable selection with exact duplicate, containment, and partial-overlap rules.
-pub fn analyzer_merge_plan(
-    findings: &[AnalyzerFinding<'_>],
-) -> Result<Vec<AnalyzerSelection>, MojoError> {
-    let count = i64::try_from(findings.len()).map_err(|_| MojoError::InvalidInput)?;
-    let input = findings
+pub(super) fn finding_records(findings: &[AnalyzerFinding<'_>]) -> Vec<FindingFfi> {
+    findings
         .iter()
         .map(|finding| FindingFfi {
             start: finding.start as u64,
@@ -61,7 +57,15 @@ pub fn analyzer_merge_plan(
             entity_address: finding.entity.as_ptr() as usize as u64,
             entity_length: finding.entity.len() as u64,
         })
-        .collect::<Vec<_>>();
+        .collect::<Vec<_>>()
+}
+
+/// Stable selection with exact duplicate, containment, and partial-overlap rules.
+pub fn analyzer_merge_plan(
+    findings: &[AnalyzerFinding<'_>],
+) -> Result<Vec<AnalyzerSelection>, MojoError> {
+    let count = i64::try_from(findings.len()).map_err(|_| MojoError::InvalidInput)?;
+    let input = finding_records(findings);
     let mut order = vec![0_i64; findings.len()];
     let mut output = vec![AnalyzerSelection::default(); findings.len()];
     let mut selected = -1_i64;

@@ -6119,3 +6119,15 @@ Indonesian/English substring keyword scores and configured-candidate priority
 out of Rust. Unicode matching preserves the only non-ASCII lowercase
 expansions that contain ASCII, established by an exhaustive Rust scalar audit.
 The unchanged official share is 35.240308433950055%, below the 75% goal.
+
+## Compiled Presidio finding localization and field filtering (2026-10-19)
+
+Language checkpoint `ba66567ee` is pushed to main with 37 final Presidio
+tests, three strict ABI tests and 5,000 seeded language parity vectors.
+The compiled redaction finding owner now selects fields, computes Unicode
+scalar-to-byte offsets, maps entity kinds and rounds confidence. The remote
+anonymizer's cross-field filter shares the same compiled range selection.
+Rust's independent range construction, Unicode offset helper, confidence
+arithmetic and entity string classifier are deleted. Five direct ABI tests,
+30,000 half-step rounding comparisons and all 38 Presidio tests pass.
+The official share is 35.252231806801646%; the 75% target remains outstanding.
