@@ -6108,3 +6108,14 @@ expansion. Rust keeps source metadata materialization and network calls;
 the previous Rust comparator and merge/replacement policy helpers are deleted.
 Direct Mojo, ABI rejection, caller contract and 4,096-element ordering
 regressions cover the versioned production kernel without a Rust fallback.
+
+## Compiled Presidio configured language selection (2026-10-19)
+
+Analyzer-merge checkpoint `db65934a4` is pushed to main. Its 36 final
+Presidio tests and 4,000 seeded comparisons with the removed Rust algorithm
+pass. Completed build output was cleaned (7.2 GiB); Trash was inspected
+and empty before trash-empty. The next compiled redaction owner moves the
+Indonesian/English substring keyword scores and configured-candidate priority
+out of Rust. Unicode matching preserves the only non-ASCII lowercase
+expansions that contain ASCII, established by an exhaustive Rust scalar audit.
+The unchanged official share is 35.240308433950055%, below the 75% goal.

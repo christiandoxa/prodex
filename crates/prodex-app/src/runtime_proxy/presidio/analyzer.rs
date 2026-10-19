@@ -2,37 +2,15 @@
 
 use super::findings::PresidioAnalyzerResult;
 
-pub(super) fn detect_presidio_language(text: &str, candidates: &[String]) -> Option<String> {
-    if candidates.len() == 1 {
-        return Some(candidates[0].clone());
-    }
-
-    let id_keywords = [
-        "yang", "dan", "di", "ke", "dari", "saya", "kami", "anda", "nomor", "nama", "alamat",
-        "tanggal", "lahir", "dengan", "untuk",
-    ];
-    let en_keywords = [
-        "the", "and", "to", "from", "my", "name", "phone", "email", "address", "with", "for",
-        "birth",
-    ];
-
-    let lower_text = text.to_lowercase();
-    let id_score = id_keywords
-        .iter()
-        .filter(|keyword| lower_text.contains(*keyword))
-        .count();
-    let en_score = en_keywords
-        .iter()
-        .filter(|keyword| lower_text.contains(*keyword))
-        .count();
-
-    if id_score > en_score && candidates.contains(&"id".to_string()) {
-        Some("id".to_string())
-    } else if en_score > id_score && candidates.contains(&"en".to_string()) {
-        Some("en".to_string())
-    } else {
-        candidates.first().cloned()
-    }
+pub(super) fn detect_presidio_language(
+    text: &str,
+    candidates: &[String],
+) -> anyhow::Result<Option<String>> {
+    let selected =
+        prodex_mojo_core::redaction::presidio_language_plan(text, candidates).map_err(|error| {
+            anyhow::anyhow!("compiled Mojo Presidio language selection failed: {error:?}")
+        })?;
+    Ok(selected.map(|index| candidates[index].clone()))
 }
 
 pub(super) fn merge_presidio_analyzer_results(

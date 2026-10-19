@@ -222,7 +222,7 @@ async fn runtime_presidio_redact_text(
         }
         PresidioLanguageMode::Auto => {
             let detected_lang =
-                detect_presidio_language(text, languages).unwrap_or_else(|| languages[0].clone());
+                detect_presidio_language(text, languages)?.unwrap_or_else(|| languages[0].clone());
             let results = presidio_analyze_async(
                 client,
                 &config.analyzer_url,

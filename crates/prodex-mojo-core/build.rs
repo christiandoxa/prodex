@@ -509,6 +509,7 @@ fn selected_sources() -> Vec<&'static str> {
         sources.push("../../mojo/prodex_core/redaction.mojo");
         sources.push("../../mojo/prodex_core/redaction_json.mojo");
         sources.push("../../mojo/prodex_core/redaction_analyzer.mojo");
+        sources.push("../../mojo/prodex_core/redaction_language.mojo");
         sources.push("../../mojo/prodex_core/redaction_local.mojo");
         sources.push("../../mojo/prodex_core/context.mojo");
         sources.push("../../mojo/prodex_core/context_text.mojo");
