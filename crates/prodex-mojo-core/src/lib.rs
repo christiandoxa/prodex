@@ -244,6 +244,8 @@ pub mod smart_context_markers;
 #[cfg(feature = "mojo-runtime")]
 pub mod smart_context_model_registry;
 #[cfg(feature = "mojo-runtime")]
+pub mod smart_context_rewrite_history;
+#[cfg(feature = "mojo-runtime")]
 pub mod smart_context_symbols;
 #[cfg(feature = "mojo-runtime")]
 pub mod sse_precommit;

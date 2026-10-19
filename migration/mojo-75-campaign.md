@@ -5997,3 +5997,16 @@ removed. Direct ABI, real SSE caller tests and source guards preserve
 exactly-once output and no replay after response completion. Rust
 keeps transport, tool-call state and JSON materialization. The separate
 75% Mojo production source target remains outstanding.
+
+
+## Smart Context persisted rewrite-safety history selection moved to Mojo
+
+The compiled Smart Context rewrite history owner now merges expired
+record filtering, stable timestamp ordering and bounded newest-K
+retention into one selection plan. The previous Rust full-vector
+rewrite-history retain/sort/truncate path was removed without a
+semantic fallback. Host JSON storage, timestamps and independent
+token-usage/calibration histories remain Rust responsibilities.
+Direct ABI and full sequential Smart Context regressions plus
+anti-fallback guards preserve the original stable-sort semantics.
+The separate 75% source-share goal remains outstanding.

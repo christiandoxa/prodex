@@ -349,19 +349,21 @@ fn runtime_smart_context_merge_persisted_token_calibration(
     existing
         .rewrite_safety_history
         .extend(incoming.rewrite_safety_history);
-    existing.rewrite_safety_history.retain(|record| {
-        runtime_smart_context_rewrite_safety_record_fresh(
-            RuntimeSmartContextRewriteSafetyRecord::from(*record),
-            now,
-        )
-    });
-    existing
+    let timestamps = existing
         .rewrite_safety_history
-        .sort_by_key(|record| record.observed_at_unix_secs);
-    runtime_smart_context_truncate_vec_tail(
-        &mut existing.rewrite_safety_history,
-        SMART_CONTEXT_REWRITE_SAFETY_HISTORY_LIMIT,
-    );
+        .iter()
+        .map(|record| record.observed_at_unix_secs)
+        .collect::<Vec<_>>();
+    let selected =
+        prodex_mojo_core::smart_context_rewrite_history::smart_context_rewrite_history_positions(
+            &timestamps,
+            now,
+            SMART_CONTEXT_REWRITE_SAFETY_TTL_SECS,
+            SMART_CONTEXT_REWRITE_SAFETY_HISTORY_LIMIT,
+        )
+        .expect("compiled Mojo Smart Context rewrite-safety retention planner failed");
+    let combined = existing.rewrite_safety_history;
+    existing.rewrite_safety_history = selected.into_iter().map(|index| combined[index]).collect();
 
     existing
 }
@@ -384,6 +386,105 @@ fn runtime_smart_context_extend_unique_tail<T: PartialEq>(items: &mut Vec<T>, in
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn compiled_smart_context_rewrite_history_merge_preserves_freshness_stable_ties_and_other_histories()
+     {
+        let now = runtime_smart_context_unix_secs_now();
+        let historical_usage = RuntimeSmartContextPersistedTokenUsage {
+            input_tokens: 20,
+            cached_input_tokens: 5,
+            output_tokens: 10,
+            reasoning_tokens: 2,
+        };
+        let second_usage = RuntimeSmartContextPersistedTokenUsage {
+            input_tokens: 30,
+            cached_input_tokens: 10,
+            output_tokens: 15,
+            reasoning_tokens: 5,
+        };
+        let bucket = RuntimeSmartContextPersistedTokenCalibrationObservation::default();
+        let record = |time: u64, value: u64| RuntimeSmartContextPersistedRewriteSafetyObservation {
+            safe: true,
+            saved_tokens: value,
+            observed_at_unix_secs: time,
+        };
+        let existing = RuntimeSmartContextPersistedTokenCalibration {
+            version: 0,
+            token_usage_history: vec![historical_usage],
+            token_calibration_history: vec![bucket.clone()],
+            rewrite_safety_history: vec![
+                record(
+                    now.saturating_sub(SMART_CONTEXT_REWRITE_SAFETY_TTL_SECS + 1),
+                    99,
+                ),
+                record(now.saturating_sub(10), 1),
+                record(now.saturating_sub(10), 2),
+            ],
+        };
+        let incoming = RuntimeSmartContextPersistedTokenCalibration {
+            version: 0,
+            token_usage_history: vec![historical_usage, second_usage],
+            token_calibration_history: vec![bucket.clone()],
+            rewrite_safety_history: vec![
+                record(0, 3),
+                record(now.saturating_sub(5), 4),
+                record(now.saturating_sub(10), 5),
+                record(now.saturating_add(5), 6),
+            ],
+        };
+        let merged = runtime_smart_context_merge_persisted_token_calibration(existing, incoming);
+        assert_eq!(
+            merged.version,
+            SMART_CONTEXT_TOKEN_CALIBRATION_PERSISTENCE_VERSION
+        );
+        assert_eq!(merged.token_usage_history, [historical_usage, second_usage]);
+        assert_eq!(merged.token_calibration_history, [bucket]);
+        assert_eq!(
+            merged
+                .rewrite_safety_history
+                .iter()
+                .map(|record| record.saved_tokens)
+                .collect::<Vec<_>>(),
+            [2, 5, 4, 6],
+        );
+        assert!(
+            merged
+                .rewrite_safety_history
+                .iter()
+                .all(|record| record.saved_tokens != 99),
+            "expired safety records must never be restored",
+        );
+    }
+
+    #[test]
+    fn compiled_smart_context_rewrite_history_merge_keeps_last_four_on_equal_timestamps() {
+        let now = runtime_smart_context_unix_secs_now();
+        let incoming = RuntimeSmartContextPersistedTokenCalibration {
+            rewrite_safety_history: (0..6)
+                .map(
+                    |index| RuntimeSmartContextPersistedRewriteSafetyObservation {
+                        safe: true,
+                        saved_tokens: index,
+                        observed_at_unix_secs: now,
+                    },
+                )
+                .collect(),
+            ..Default::default()
+        };
+        let merged = runtime_smart_context_merge_persisted_token_calibration(
+            RuntimeSmartContextPersistedTokenCalibration::default(),
+            incoming,
+        );
+        assert_eq!(
+            merged
+                .rewrite_safety_history
+                .iter()
+                .map(|record| record.saved_tokens)
+                .collect::<Vec<_>>(),
+            [2, 3, 4, 5],
+        );
+    }
 
     #[test]
     fn smart_context_token_calibration_error_log_value_redacts_secret_like_chain() {
