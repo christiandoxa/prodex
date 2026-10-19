@@ -26,13 +26,7 @@ pub use runtime_tuning::*;
 pub use summaries::*;
 pub use token_usage_render::*;
 
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub struct InfoTokenUsageCounts {
-    pub input_tokens: u64,
-    pub cached_input_tokens: u64,
-    pub output_tokens: u64,
-    pub reasoning_tokens: u64,
-}
+pub use prodex_mojo_core::info_render::TokenUsageCounts as InfoTokenUsageCounts;
 
 #[derive(Debug, Clone, Default, PartialEq, serde::Serialize)]
 pub struct InfoTokenUsageEvent {

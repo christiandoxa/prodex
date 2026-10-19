@@ -8,6 +8,7 @@ pub use runtime_load::{
     InfoRuntimeInflight, InfoRuntimeLoadConfig, InfoRuntimeLoadPlan, info_runtime_load_plan,
 };
 mod status;
+mod token_usage;
 pub use doctor::{InfoDoctorViewportPlan, doctor_value_color, doctor_viewport_plan};
 pub use provider::{
     InfoProviderCapability, InfoProviderRoutePolicy, format_provider_capabilities_summary,
@@ -21,6 +22,10 @@ pub use status::{
     InfoStatusTokenPlan, format_status_fields, format_status_quota_gauge, format_status_runway,
     status_profile_choice, status_profile_indices, status_resource_history_values,
     status_resource_metrics, status_token_plan,
+};
+pub use token_usage::{
+    InfoTokenUsageAggregate, InfoTokenUsageProfileSummary, TokenUsageCounts,
+    aggregate_info_token_usage,
 };
 
 const ABI_VERSION: i64 = 1;
