@@ -172,7 +172,7 @@ async fn runtime_presidio_redact_text_body(
             );
         }
         let mut redacted_values = redacted_values.into_iter();
-        replace_json_string_values(&mut json, false, &mut redacted_values);
+        replace_json_string_values(&mut json, &content, &mut redacted_values)?;
         return Ok(RedactionOutcome {
             body: serde_json::to_vec(&json)
                 .context("failed to serialize redacted JSON request body")?,

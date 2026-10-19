@@ -170,7 +170,13 @@ const PING_SUMMARY_CALLER_FILE = "crates/prodex-app/src/app_commands/ping_output
 const PING_SUMMARY_CALLER_TEST_FILE = "crates/prodex-app/src/app_commands/ping_tests.rs";
 const PING_SUMMARY_ADAPTER_FILE = "crates/prodex-mojo-core/src/rich/ping_protocol.rs";
 const PING_SUMMARY_MOJO_FILE = "mojo/prodex_core/ping_protocol.mojo";
+const PRESIDIO_JSON_CALLER_FILE = "crates/prodex-app/src/runtime_proxy/presidio/json_body.rs";
+const PRESIDIO_JSON_ADAPTER_FILE = "crates/prodex-mojo-core/src/json/redaction_content.rs";
+const PRESIDIO_JSON_MOJO_FILE = "mojo/prodex_core/redaction_json.mojo";
 const PROMOTED_FILES = [
+  PRESIDIO_JSON_CALLER_FILE,
+  PRESIDIO_JSON_ADAPTER_FILE,
+  PRESIDIO_JSON_MOJO_FILE,
   "crates/prodex-app/src/runtime_proxy/smart_context/token_calibration.rs",
   "crates/prodex-mojo-core/src/smart_context_rewrite_history.rs",
   "mojo/prodex_core/smart_context_rewrite_history.mojo",
@@ -4695,6 +4701,38 @@ export function findViolations(files) {
     if (filePath === "crates/prodex-app/src/app_commands/log_tui_render.rs") {
       return contents.includes("compiled_log_search_filters_ascii_case_without_folding_unicode")
         ? [] : [filePath + ": real log TUI search caller regression missing"];
+    }
+    return [];
+  });
+  const presidioJsonSelectionViolations = files.flatMap(([filePath, contents]) => {
+    if (filePath === PRESIDIO_JSON_CALLER_FILE) {
+      const production = contents.split("\n#[cfg(test)]\nmod tests", 1)[0];
+      const required = [
+        "redaction_json_content_plan(&tree.nodes)",
+        "content.slots.iter().copied().zip(replacements)",
+        "replacement_targets_match_collected_slots_through_opaque_root_objects",
+        "compiled_replacement_rejects_count_changes_before_mutation",
+      ];
+      const restored = [
+        "fn collect_json_content_at(", "fn collect_json_object_content(",
+        "fn replace_json_string_values_at(", "fn replace_json_object_strings(",
+        "json_field_plan(", "json_object_declares_tools(",
+      ];
+      return required.every((marker) => contents.includes(marker)) &&
+        restored.every((marker) => !production.includes(marker))
+        ? [] : [filePath + ": Presidio inspection and masking must share compiled Mojo selection"];
+    }
+    if (filePath === PRESIDIO_JSON_ADAPTER_FILE) {
+      return ["pub fn redaction_json_content_plan(", "prodex_redaction_json_content_plan_v1",
+        "compiled_redaction_plan_rejects_invalid_tree_and_abi_before_publishing"]
+        .filter((marker) => !contents.includes(marker))
+        .map((marker) => filePath + ": compiled Presidio JSON ABI missing " + marker);
+    }
+    if (filePath === PRESIDIO_JSON_MOJO_FILE) {
+      return ['@export("prodex_redaction_json_content_plan_v1")',
+        "def inspection_walk(", "path_length == 1", "reaction_presidio_inspect_mode(key)"]
+        .filter((marker) => !contents.includes(marker))
+        .map((marker) => filePath + ": compiled Presidio JSON selection missing " + marker);
     }
     return [];
   });
@@ -10062,6 +10100,7 @@ export function findViolations(files) {
     ...kiroAcpUpdateDispatchMojoViolations,
     ...logAsciiSearchMojoViolations,
     ...logTuiLayoutViolations,
+    ...presidioJsonSelectionViolations,
     ...rtkAutoWrapperManifestViolations,
     ...optionalToolsRenderViolations,
     ...defaultFeatureViolations, ...operationalHistogramViolations];
@@ -11909,6 +11948,16 @@ function selfTest() {
   assert.match(findViolations([[deepseekSseToolEventsFile,
     deepseekSseToolEventsCaller + '\nif tool_call.done {',
   ]]).join("\n"), /restored Rust DeepSeek SSE tool-event selection or done gate/u);
+  const presidioJsonConsumer = [
+    "redaction_json_content_plan(&tree.nodes)",
+    "content.slots.iter().copied().zip(replacements)",
+    "replacement_targets_match_collected_slots_through_opaque_root_objects",
+    "compiled_replacement_rejects_count_changes_before_mutation",
+  ].join("\n");
+  assert.deepEqual(findViolations([[PRESIDIO_JSON_CALLER_FILE, presidioJsonConsumer]]), []);
+  assert.match(findViolations([[PRESIDIO_JSON_CALLER_FILE,
+    presidioJsonConsumer + "\nfn replace_json_object_strings() {}",
+  ]]).join("\n"), /Presidio inspection and masking must share compiled Mojo selection/u);
   const logAsciiSearchConsumer = [
     "pub(super) fn contains_ignore_ascii_case(",
     "prodex_mojo_core::log::log_contains_ignore_ascii_case(haystack, needle)",
