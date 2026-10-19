@@ -6571,3 +6571,62 @@ passes with existing vendor warnings only. Final staged churn is within the
 reference checks found no target consumers, `cargo clean` removed 14.8 GiB.
 Inspected Trash was empty and `trash-empty -f` completed. No comparison oracle,
 scratch object or active test process remains.
+
+## Compiled Gemini simple-response classification (2026-10-20)
+
+Preflight checkpoint `88901a2d1` is pushed to main. The existing Gemini
+response-state owner now classifies the simple-response fast path using a
+version-1 40-byte-record ABI. Inputs contain only part keys, shape flags and
+function names. Prompt/media text and callback arguments remain Rust-owned.
+Rust projects Serde facts and executes ordered callback actions; the previous
+message/function-only classifiers, key allowlists and name-trimming decision
+are deleted. ABI failures are explicit without Rust recomputation.
+
+The plan preserves a subtle observable contract: a valid function call invokes
+the callback before rejection for extra part keys. Earlier visible text prevents
+later callbacks, and a blocked call stops later callbacks. Unicode name trimming
+validates non-emptiness while the original untrimmed name reaches the callback.
+Missing arguments still use an empty object; explicit null/array arguments remain
+unchanged. Missing parts and message-only arrays still bypass callbacks.
+
+All 8,192 generated comparisons match both the original decision and the full
+ordered callback trace. The temporary Rust oracle is removed. Permanent caller
+tests cover these contracts; ABI tests cover invalid flags, null/count/capacity,
+invalid UTF-8 and late malformed records before writes. A 65,537-part test
+prevents an accidental new count cap. Direct Mojo assertions pass. Initial
+compilation required explicit copies of borrowed Mojo records/views; corrected
+before final validation.
+
+The unchanged official metric rises from 35.50320652460463% to
+35.51019502439539% (128,021 Mojo / 232,498 Rust production lines), leaving
+39.48980497560461 percentage points to 75%. All 981 strict Mojo-core tests and
+500 provider-core tests pass via
+`PRODEX_MOJO_REQUIRED=1 CARGO_BUILD_JOBS=6 cargo test --locked -q -p prodex-mojo-core --features mojo-core -- --test-threads=1`
+and `PRODEX_MOJO_REQUIRED=1 CARGO_BUILD_JOBS=6 cargo test --locked -q -p prodex-provider-core --features mojo -- --test-threads=1`.
+Direct verification uses
+`mojo run -D ASSERT=all -I mojo/prodex_core mojo/tests/gemini_simple_response_test.mojo`.
+Offline baseline and all five replay fixtures pass via
+`node scripts/compat/check-upstream-baseline.mjs` and
+`node scripts/compat/capture-replay-fixture-tests.mjs`.
+
+A historical app-name filter selected zero tests; those legacy fixtures are not
+wired into the current app suite. Active coverage instead exercises the real
+buffered-response caller: ordinary calls reuse translation, while extra-key
+rejection rebuilds the response with the original callback trace. Its focused
+regression passes via
+`PRODEX_MOJO_REQUIRED=1 CARGO_BUILD_JOBS=6 cargo test --locked -q -p prodex-provider-core --features mojo --lib simple_response_plan_controls_buffered -- --test-threads=1`.
+Clippy identified a test assignment hidden behind an older raw pointer; tests
+now reacquire the record pointer after each mutation, and all three focused ABI
+cases pass. An attempted `provider-boundary-guard.mjs` command does not exist;
+the owning `provider-spi-boundary-guard.mjs` self-test/source checks pass instead.
+
+The final provider suite passes all 501 tests with `--features mojo` using the
+full command above. Workspace all-target/all-feature Clippy with warnings denied
+passes via
+`PRODEX_MOJO_REQUIRED=1 CARGO_BUILD_JOBS=6 cargo clippy --locked --workspace --all-targets --all-features -- -D warnings`.
+Canonical `CARGO_BUILD_JOBS=6 npm run test:changed`, docs, formatting, no-fallback
+self-test/source, authority, size, crate/provider-SPI boundary self-test/source,
+secret-boundary, churn and diff checks pass. Its default provider selection has
+499 tests; the explicit-feature suite supplies the final 501-test evidence.
+Existing vendor warnings are unchanged. The campaign retains the owned build
+cache for the next checkpoint; no comparison source remains.
