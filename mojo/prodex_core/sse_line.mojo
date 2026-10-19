@@ -349,3 +349,48 @@ def prodex_runtime_sse_precommit_boundary_v1(
     if elapsed_ms >= deadline_ms:
         return 1
     return 0
+
+
+# Shared provider SSE JSON framing precedence. Serde owns JSON syntax parsing
+# and Rust owns stream buffers; the compiled SSE owner alone chooses between
+# a valid joined event, separate complete JSON lines, bounded accumulation,
+# and a hard size-limit error for incomplete fragments.
+comptime SSE_JSON_FRAME_ABI_VERSION: Int64 = 1
+comptime SSE_JSON_FRAME_JOINED: Int64 = 0
+comptime SSE_JSON_FRAME_SEPARATE: Int64 = 1
+comptime SSE_JSON_FRAME_ACCUMULATE: Int64 = 2
+comptime SSE_JSON_FRAME_LIMIT_EXCEEDED: Int64 = 3
+
+
+@export("prodex_runtime_sse_json_frame_plan_v1")
+def prodex_runtime_sse_json_frame_plan_v1(
+    abi_version: Int64,
+    joined_json_valid: Int64,
+    separate_json_valid: Int64,
+    accumulated_bytes: UInt64,
+    fragment_bytes: UInt64,
+    accumulated_max_bytes: UInt64,
+    result_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != SSE_JSON_FRAME_ABI_VERSION:
+        return 4
+    if (
+        (joined_json_valid != 0 and joined_json_valid != 1)
+        or (separate_json_valid != 0 and separate_json_valid != 1)
+        or result_address == 0
+    ):
+        return 1
+    var decision = SSE_JSON_FRAME_JOINED
+    if joined_json_valid == 0:
+        decision = SSE_JSON_FRAME_SEPARATE
+        if separate_json_valid == 0:
+            decision = SSE_JSON_FRAME_ACCUMULATE
+            if (
+                fragment_bytes > accumulated_max_bytes
+                or accumulated_bytes > accumulated_max_bytes - fragment_bytes
+            ):
+                decision = SSE_JSON_FRAME_LIMIT_EXCEEDED
+    Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(result_address)
+    )[] = decision
+    return 0
