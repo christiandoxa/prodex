@@ -5952,3 +5952,14 @@ were deleted while command discovery and TOML acquisition remain host
 responsibilities. Two-phase preflight retains disabled-config precedence.
 Direct ABI, complete optional-tools tests and the no-fallback guard
 protect the contract. The separate project target remains outstanding.
+
+
+## RTK auto-wrapper command/subcommand manifest migrated to Mojo
+
+The compiled RTK noisy-shell domain now owns the automatic wrapper list
+and subcommand selection policy. The old Rust command table was deleted.
+Rust still performs platform command discovery and script/filesystem
+effects based on the Mojo manifest, without a Rust fallback table.
+Direct ABI, overlay caller and no-fallback guard tests retain all
+fourteen commands and the exact existing per-command behavior.
+The separate 75% target remains outstanding.
