@@ -213,6 +213,9 @@ const PING_SUMMARY_CALLER_FILE = "crates/prodex-app/src/app_commands/ping_output
 const PING_SUMMARY_CALLER_TEST_FILE = "crates/prodex-app/src/app_commands/ping_tests.rs";
 const PING_SUMMARY_ADAPTER_FILE = "crates/prodex-mojo-core/src/rich/ping_protocol.rs";
 const PING_SUMMARY_MOJO_FILE = "mojo/prodex_core/ping_protocol.mojo";
+const PING_DIAGNOSTIC_CALLER_FILE = "crates/prodex-app/src/app_commands/ping_process.rs";
+const PING_DIAGNOSTIC_ADAPTER_FILE = "crates/prodex-mojo-core/src/rich/ping_protocol/diagnostic.rs";
+const PING_DIAGNOSTIC_TEST_FILE = "crates/prodex-app/src/app_commands/ping_diagnostic_tests.rs";
 const PRESIDIO_FINDINGS_CALLER_FILE = "crates/prodex-app/src/runtime_proxy/presidio/findings.rs";
 const PRESIDIO_FINDINGS_ADAPTER_FILE = "crates/prodex-mojo-core/src/redaction/findings.rs";
 const PRESIDIO_FINDINGS_MOJO_FILE = "mojo/prodex_core/redaction_findings.mojo";
@@ -752,6 +755,9 @@ const PROMOTED_FILES = [
   PING_SUMMARY_CALLER_TEST_FILE,
   PING_SUMMARY_ADAPTER_FILE,
   PING_SUMMARY_MOJO_FILE,
+  PING_DIAGNOSTIC_CALLER_FILE,
+  PING_DIAGNOSTIC_ADAPTER_FILE,
+  PING_DIAGNOSTIC_TEST_FILE,
   "crates/prodex-app/src/app_commands/super_main_catalog.rs",
   "crates/prodex-app/src/app_commands/super_main_prompt.rs",
   "crates/prodex-app/src/app_commands/doctor.rs",
@@ -9578,6 +9584,30 @@ export function findViolations(files) {
     return [];
   });
   const pingSummaryViolations = files.flatMap(([filePath, contents]) => {
+    if (filePath === PING_DIAGNOSTIC_CALLER_FILE) {
+      const required = [
+        "redaction_redact_secret_like_text(&message)",
+        "prodex_mojo_core::rich::ping_process_error(&message, &redacted)",
+        "prodex_mojo_core::rich::ping_output_failure_detail(base, exit, &stderr)",
+        "prodex_mojo_core::rich::ping_bounded_detail(&text)",
+      ];
+      const restoredRust = [".replace(['\\r', '\\n']", ".char_indices()", "message.contains(", "detail.push_str("];
+      return required.every((marker) => contents.includes(marker))
+        && restoredRust.every((marker) => !contents.includes(marker))
+        ? [] : [`${filePath}: ping process diagnostics must remain Mojo-owned after native redaction`];
+    }
+    if (filePath === PING_DIAGNOSTIC_ADAPTER_FILE) {
+      return ["prodex_mojo_ping_diagnostic_v1(", "ensure_rich_abi()?", "PingChildExit", "MojoError::AbiMismatch"]
+        .filter((marker) => !contents.includes(marker))
+        .map((marker) => `${filePath}: ping diagnostic ABI must retain ${marker}`);
+    }
+    if (filePath === PING_DIAGNOSTIC_TEST_FILE) {
+      return ["process_error_diagnostics_preserve_precedence_cleanup_case_and_native_error_chains",
+        "ping_diagnostics_redact_before_normalization_and_keep_utf8_byte_bounds",
+        "ping_output_diagnostics_keep_exit_stderr_and_lossy_native_output_acquisition"]
+        .filter((marker) => !contents.includes(marker))
+        .map((marker) => `${filePath}: ping diagnostic caller coverage must retain ${marker}`);
+    }
     if (filePath === PING_SUMMARY_CALLER_FILE) {
       const required = [
         "ping_summary_plan(results)",
@@ -9611,6 +9641,10 @@ export function findViolations(files) {
         '@export("prodex_mojo_ping_summary_plan_v1")',
         "PING_SUMMARY_MAX_STATUSES",
         "ping_status_is_temporary(status)",
+        '@export("prodex_mojo_ping_diagnostic_v1")',
+        "ping_bounded_detail_bounds(redacted)",
+        "ping_classify_failure(raw)",
+        "ping_diagnostic_emit(",
       ].filter((marker) => !contents.includes(marker))
         .map((marker) => `${filePath}: ping summary decisions must remain compiled Mojo-owned (${marker})`);
     }
@@ -13864,7 +13898,19 @@ function selfTest() {
   assert.match(findViolations([[PING_SUMMARY_ADAPTER_FILE,
     "pub fn ping_summary_plan() {}"]]).join("\n"), /ping summary ABI adapter must retain/u);
   assert.deepEqual(findViolations([[PING_SUMMARY_MOJO_FILE,
-    '@export("prodex_mojo_ping_summary_plan_v1")\nPING_SUMMARY_MAX_STATUSES\nping_status_is_temporary(status)']]), []);
+    '@export("prodex_mojo_ping_summary_plan_v1")\nPING_SUMMARY_MAX_STATUSES\nping_status_is_temporary(status)\n@export("prodex_mojo_ping_diagnostic_v1")\nping_bounded_detail_bounds(redacted)\nping_classify_failure(raw)\nping_diagnostic_emit(']]), []);
+  const pingDiagnosticCaller = [
+    "redaction_redact_secret_like_text(&message)",
+    "prodex_mojo_core::rich::ping_process_error(&message, &redacted)",
+    "prodex_mojo_core::rich::ping_output_failure_detail(base, exit, &stderr)",
+    "prodex_mojo_core::rich::ping_bounded_detail(&text)",
+  ].join("\n");
+  assert.deepEqual(findViolations([[PING_DIAGNOSTIC_CALLER_FILE, pingDiagnosticCaller]]), []);
+  assert.match(findViolations([[PING_DIAGNOSTIC_CALLER_FILE,
+    `${pingDiagnosticCaller}\nmessage.contains("timed out")`,
+  ]]).join("\n"), /ping process diagnostics must remain Mojo-owned/u);
+  assert.match(findViolations([[PING_DIAGNOSTIC_ADAPTER_FILE, ""]]).join("\n"), /ping diagnostic ABI must retain/u);
+  assert.match(findViolations([[PING_DIAGNOSTIC_TEST_FILE, ""]]).join("\n"), /ping diagnostic caller coverage/u);
   assert.match(findViolations([[PING_SUMMARY_CALLER_TEST_FILE, "fn unrelated_test() {}"]]).join("\n"),
     /ping summary migration needs caller-boundary regression coverage/u);
 

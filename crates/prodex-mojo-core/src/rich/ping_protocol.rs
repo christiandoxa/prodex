@@ -1,6 +1,13 @@
 use super::{ensure_rich_abi, mojo_mut_pointer_address};
 use crate::MojoError;
 
+#[path = "ping_protocol/diagnostic.rs"]
+mod diagnostic;
+pub use diagnostic::{
+    PING_ERROR_DETAIL_MAX_BYTES, PingChildExit, ping_bounded_detail, ping_output_failure_detail,
+    ping_process_error,
+};
+
 const PING_PROTOCOL_ABI_VERSION: i64 = 1;
 const PING_PROTOCOL_MAX_BYTES: usize = 4 * 1024 * 1024;
 const PING_STATUS_DETAIL_MAX_BYTES: usize = 128;

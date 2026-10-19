@@ -1,5 +1,5 @@
 use super::ping_output::ping_summary_plan;
-use super::ping_process::{PING_ERROR_DETAIL_MAX_BYTES, ping_command_args};
+use super::ping_process::ping_command_args;
 #[cfg(unix)]
 use super::ping_process::{run_ping_child, run_ping_child_in_test_cwd};
 use super::{
@@ -9,6 +9,7 @@ use super::{
 };
 #[cfg(unix)]
 use crate::ChildProcessPlan;
+use prodex_mojo_core::rich::PING_ERROR_DETAIL_MAX_BYTES;
 #[cfg(unix)]
 use std::ffi::OsString;
 #[cfg(unix)]
@@ -17,6 +18,9 @@ use std::process::Output;
 #[cfg(unix)]
 use std::time::Duration;
 use std::time::Instant;
+
+#[path = "ping_diagnostic_tests.rs"]
+mod diagnostic;
 
 #[cfg(unix)]
 use std::os::unix::process::ExitStatusExt;

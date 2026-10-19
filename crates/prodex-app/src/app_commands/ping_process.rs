@@ -6,7 +6,7 @@ use super::super::{
 };
 use super::{
     PING_OUTPUT_MAX_BYTES, PING_PROMPT, PING_TIMEOUT, PingProbeOptions, PingStatus, PingTarget,
-    classify_failure_text,
+    ping_status_from_mojo,
 };
 use anyhow::{Context, Result, bail};
 use redaction::redaction_redact_secret_like_text;
@@ -16,43 +16,13 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-pub(super) const PING_ERROR_DETAIL_MAX_BYTES: usize = 4096;
-
 pub(super) fn classify_ping_process_error(error: &anyhow::Error) -> (PingStatus, String) {
+    // anyhow's native error chain stays in Rust; Mojo receives acquired text.
     let message = format!("{error:#}");
-    let classified = classify_failure_text(&message);
-    let (status, detail) = if classified.0 != PingStatus::ProcessFailed {
-        classified
-    } else if message.contains("timed out") {
-        (
-            PingStatus::Timeout,
-            "OpenAI application ping timed out".to_string(),
-        )
-    } else if message.contains("failed to start") {
-        (
-            PingStatus::SpawnFailed,
-            "OpenAI application ping could not start".to_string(),
-        )
-    } else if message.contains("clean the diagnostic directory") {
-        (
-            PingStatus::ProcessFailed,
-            "OpenAI application ping cleanup failed".to_string(),
-        )
-    } else {
-        (
-            PingStatus::ProcessFailed,
-            "OpenAI application ping process failed".to_string(),
-        )
-    };
-    let message = bounded_ping_detail(&message);
-    (
-        status,
-        if message.is_empty() || message == detail {
-            detail.to_string()
-        } else {
-            format!("{detail}: {message}")
-        },
-    )
+    let redacted = redaction_redact_secret_like_text(&message);
+    let (status, detail) = prodex_mojo_core::rich::ping_process_error(&message, &redacted)
+        .expect("Mojo ping process diagnostic returned invalid output");
+    (ping_status_from_mojo(status), detail)
 }
 
 pub(super) fn ping_command_args(options: &PingProbeOptions) -> Vec<OsString> {
@@ -186,37 +156,21 @@ fn ping_stdout_line_is_model_response(line: &[u8]) -> bool {
 }
 
 pub(super) fn ping_output_failure_detail(base: &str, output: &Output) -> String {
-    let mut detail = base.to_string();
-    if !output.status.success() {
-        detail.push_str(&format!(
-            " (exit code {})",
-            crate::child_exit_code(&output.status)
-        ));
-    }
-    let stderr = bounded_ping_detail(&String::from_utf8_lossy(&output.stderr));
-    if !stderr.is_empty() {
-        detail.push_str(": stderr: ");
-        detail.push_str(&stderr);
-    }
-    detail
+    use prodex_mojo_core::rich::PingChildExit;
+    let exit = if output.status.success() {
+        PingChildExit::Success
+    } else {
+        PingChildExit::Failed(crate::child_exit_code(&output.status))
+    };
+    let stderr = redaction_redact_secret_like_text(&String::from_utf8_lossy(&output.stderr));
+    prodex_mojo_core::rich::ping_output_failure_detail(base, exit, &stderr)
+        .expect("Mojo ping output diagnostic returned invalid output")
 }
 
 pub(super) fn bounded_ping_detail(text: &str) -> String {
-    let text = redaction_redact_secret_like_text(text)
-        .replace(['\r', '\n'], " ")
-        .trim()
-        .to_string();
-    if text.len() <= PING_ERROR_DETAIL_MAX_BYTES {
-        return text;
-    }
-    let end = text
-        .char_indices()
-        .take_while(|(index, _)| *index <= PING_ERROR_DETAIL_MAX_BYTES)
-        .map(|(index, _)| index)
-        .last()
-        .unwrap_or_default()
-        .min(PING_ERROR_DETAIL_MAX_BYTES);
-    text[..end].to_string()
+    let text = redaction_redact_secret_like_text(text);
+    prodex_mojo_core::rich::ping_bounded_detail(&text)
+        .expect("Mojo bounded ping diagnostic returned invalid output")
 }
 
 fn cleanup_ping_cwd(path: &Path) -> std::io::Result<()> {

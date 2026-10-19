@@ -1,6 +1,7 @@
 from std.collections import Array
 
 from std.memory import Pointer
+from json_sink import JsonSink, js_byte, js_literal, js_u64, js_view
 
 from json_view import (
     deepseek_json_byte,
@@ -9,7 +10,7 @@ from json_view import (
     deepseek_json_skip_ws,
     deepseek_json_value_end,
 )
-from rich_text import rich_view_ptr, rich_view_valid
+from rich_text import rich_view_ptr, rich_view_valid, rich_trim_bounds, rich_utf8_continuation
 from rich_types import ProdexRichStringView
 
 comptime PING_PROTOCOL_ABI_VERSION: Int64 = 1
@@ -37,13 +38,9 @@ comptime PING_STATUS_MODEL_UNAVAILABLE: Int64 = 11
 comptime PING_STATUS_PROCESS_FAILED: Int64 = 12
 comptime PING_STATUS_SPAWN_FAILED: Int64 = 13
 comptime PING_STATUS_CANCELLED: Int64 = 14
+comptime PING_ERROR_DETAIL_MAX_BYTES: Int64 = 4096
 
-def ping_status_detail_copy(
-    status: Int64,
-    output: Pointer[mut=True, UInt8, _],
-    capacity: Int64,
-    written: Pointer[mut=True, Int64, _],
-) -> Int64:
+def ping_status_detail_view(status: Int64) -> ProdexRichStringView:
     var detail = StringSlice("")
     if status == PING_STATUS_OK:
         detail = StringSlice("valid model response received")
@@ -76,13 +73,25 @@ def ping_status_detail_copy(
     elif status == PING_STATUS_UNEXPECTED_RESPONSE:
         detail = StringSlice("completed turn did not return a model response")
     else:
+        return ProdexRichStringView(0, 0)
+    return ProdexRichStringView(UInt(Int(detail.unsafe_ptr())), UInt(detail.byte_length()))
+
+
+def ping_status_detail_copy(
+    status: Int64,
+    output: Pointer[mut=True, UInt8, _],
+    capacity: Int64,
+    written: Pointer[mut=True, Int64, _],
+) -> Int64:
+    var detail = ping_status_detail_view(status)
+    var length = Int64(detail.len)
+    if length == 0:
         return PING_DETAIL_STATUS_INVALID
-    var length = Int64(detail.byte_length())
     if length > PING_DETAIL_MAX_BYTES:
         return PING_DETAIL_STATUS_INVALID
     if capacity < length:
         return PING_DETAIL_STATUS_CAPACITY
-    var source = detail.unsafe_ptr()
+    var source = rich_view_ptr(detail)
     for index in range(length):
         output[unsafe_offset=index] = source[unsafe_offset=index]
     written[] = length
@@ -184,7 +193,7 @@ def ping_status_is_temporary(status: Int64) -> Bool:
 def ping_ascii_lower(value: UInt8) -> UInt8:
     return value + 32 if value >= 65 and value <= 90 else value
 
-def ping_contains(view: ProdexRichStringView, literal: StringSlice) -> Bool:
+def ping_contains(view: ProdexRichStringView, literal: StringSlice, *, lowercase: Bool = True) -> Bool:
     var needle = Int64(literal.byte_length())
     var length = Int64(view.len)
     if needle == 0:
@@ -196,7 +205,10 @@ def ping_contains(view: ProdexRichStringView, literal: StringSlice) -> Bool:
     for start in range(length - needle + 1):
         var matched = True
         for index in range(needle):
-            if ping_ascii_lower(left[unsafe_offset=start + index]) != right[unsafe_offset=index]:
+            var byte = left[unsafe_offset=start + index]
+            if lowercase:
+                byte = ping_ascii_lower(byte)
+            if byte != right[unsafe_offset=index]:
                 matched = False
                 break
         if matched:
@@ -285,6 +297,103 @@ def ping_classify_failure(view: ProdexRichStringView) -> Int64:
     ):
         return PING_STATUS_TIMEOUT
     return PING_STATUS_PROCESS_FAILED
+
+
+def ping_bounded_detail_bounds(view: ProdexRichStringView) -> Tuple[Int64, Int64]:
+    # CR/LF replacement preserves byte lengths and edge-whitespace membership.
+    var bounds = rich_trim_bounds(view)
+    var end = bounds[1]
+    if end - bounds[0] > PING_ERROR_DETAIL_MAX_BYTES:
+        end = bounds[0] + PING_ERROR_DETAIL_MAX_BYTES
+        var bytes = rich_view_ptr(view)
+        while end > bounds[0] and rich_utf8_continuation(bytes[unsafe_offset=end]):
+            end -= 1
+    return (bounds[0], end)
+
+
+def ping_normalized_byte(byte: UInt8) -> UInt8:
+    return UInt8(32) if byte == 10 or byte == 13 else byte
+
+
+def ping_diagnostic_emit(
+    sink: Pointer[mut=True, JsonSink, _], operation: Int64,
+    label: ProdexRichStringView, normalized: ProdexRichStringView,
+    append: Bool, exit_failed: Bool, exit_code: Int64,
+):
+    if operation != 0:
+        js_view(sink, label)
+    if operation == 2 and exit_failed:
+        js_literal(sink, StringSlice(" (exit code "))
+        if exit_code < 0:
+            js_byte(sink, 45)
+        js_u64(sink, UInt64(-exit_code if exit_code < 0 else exit_code))
+        js_byte(sink, 41)
+    if append:
+        if operation == 1:
+            js_literal(sink, StringSlice(": "))
+        elif operation == 2:
+            js_literal(sink, StringSlice(": stderr: "))
+        var bytes = rich_view_ptr(normalized)
+        for index in range(Int64(normalized.len)):
+            js_byte(sink, ping_normalized_byte(bytes[unsafe_offset=index]))
+
+
+@export("prodex_mojo_ping_diagnostic_v1")
+def prodex_mojo_ping_diagnostic_v1(
+    version: Int64, operation: Int64, raw_address: UInt, raw_length: Int64,
+    redacted_address: UInt, redacted_length: Int64, exit_failed: Int64, exit_code: Int64,
+    output_address: UInt, output_capacity: Int64, metadata_address: UInt,
+) abi("C") -> Int64:
+    if version != PING_PROTOCOL_ABI_VERSION:
+        return 4
+    if operation < 0 or operation > 2 or raw_length < 0 or redacted_length < 0 or exit_failed < 0 or exit_failed > 1 or exit_code < -2147483648 or exit_code > 2147483647 or (exit_failed == 0 and exit_code != 0) or (operation != 2 and (exit_failed != 0 or exit_code != 0)) or output_capacity < 0 or metadata_address == 0 or metadata_address % 8 != 0 or (output_capacity > 0 and output_address == 0):
+        return 1
+    if (operation == 0 and raw_length != 0) or (operation == 1 and raw_length > PING_PROTOCOL_MAX_BYTES):
+        return 1
+    var raw = ProdexRichStringView(raw_address, UInt(raw_length))
+    var redacted = ProdexRichStringView(redacted_address, UInt(redacted_length))
+    if not rich_view_valid(raw, raw_length) or not rich_view_valid(redacted, redacted_length):
+        return 2
+    var bounds = ping_bounded_detail_bounds(redacted)
+    var normalized = ProdexRichStringView(redacted_address + UInt(bounds[0]), UInt(bounds[1] - bounds[0]))
+    var label = ProdexRichStringView(0, 0)
+    var status: Int64 = -1
+    if operation == 1:
+        status = ping_classify_failure(raw)
+        if status == PING_STATUS_PROCESS_FAILED:
+            var detail = StringSlice("OpenAI application ping process failed")
+            if ping_contains(raw, StringSlice("clean the diagnostic directory"), lowercase=False):
+                detail = StringSlice("OpenAI application ping cleanup failed")
+            label = ProdexRichStringView(UInt(Int(detail.unsafe_ptr())), UInt(detail.byte_length()))
+        else:
+            label = ping_status_detail_view(status)
+    elif operation == 2:
+        label = raw.copy()
+    if operation == 1 and label.len > UInt(PING_DETAIL_MAX_BYTES):
+        return 1
+    var append = normalized.len > 0
+    if operation == 1 and normalized.len == label.len:
+        var source = rich_view_ptr(normalized)
+        var prefix = rich_view_ptr(label)
+        var equal = True
+        for index in range(Int64(label.len)):
+            if ping_normalized_byte(source[unsafe_offset=index]) != prefix[unsafe_offset=index]:
+                equal = False
+                break
+        append = not equal
+    var output = Pointer[mut=True, UInt8, MutUntrackedOrigin](unsafe_from_address=Int(output_address))
+    var measure = JsonSink(output, output_capacity, 0, True, False)
+    ping_diagnostic_emit(Pointer(to=measure), operation, label, normalized, append, exit_failed == 1, exit_code)
+    if measure.failed or measure.written > output_capacity:
+        return 3
+    var sink = JsonSink(output, output_capacity, 0, False, False)
+    ping_diagnostic_emit(Pointer(to=sink), operation, label, normalized, append, exit_failed == 1, exit_code)
+    if sink.failed:
+        return 3
+    var metadata = Pointer[mut=True, Int64, MutUntrackedOrigin](unsafe_from_address=Int(metadata_address))
+    metadata[unsafe_offset=0] = status
+    metadata[unsafe_offset=1] = sink.written
+    return 0
 
 def ping_bounds_present(bounds: Array[Int64, 2]) -> Bool:
     return bounds[0] >= 0 and bounds[1] > bounds[0]
