@@ -2084,6 +2084,14 @@ def gemini_failure_text_equals(
     return True
 
 
+def gemini_failure_retryable_reason(address: UInt64, length: Int64) -> Bool:
+    return (
+        gemini_failure_text_equals(address, length, StringSlice("MALFORMED_FUNCTION_CALL"))
+        or gemini_failure_text_equals(address, length, StringSlice("UNEXPECTED_TOOL_CALL"))
+        or gemini_failure_text_equals(address, length, StringSlice("OTHER"))
+    )
+
+
 @export("prodex_gemini_failure_policy_v1")
 def prodex_gemini_failure_policy_v1(
     abi_version: Int64,
@@ -2114,11 +2122,7 @@ def prodex_gemini_failure_policy_v1(
     )
     var selected = False
     if operation == GEMINI_FAILURE_RETRYABLE_REASON:
-        selected = text_present == 1 and (
-            gemini_failure_text_equals(text_address, text_length, StringSlice("MALFORMED_FUNCTION_CALL"))
-            or gemini_failure_text_equals(text_address, text_length, StringSlice("UNEXPECTED_TOOL_CALL"))
-            or gemini_failure_text_equals(text_address, text_length, StringSlice("OTHER"))
-        )
+        selected = text_present == 1 and gemini_failure_retryable_reason(text_address, text_length)
     else:
         selected = has_error == 1 or (
             text_present == 1 and (

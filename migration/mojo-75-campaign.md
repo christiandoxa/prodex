@@ -7332,3 +7332,63 @@ confirms the workspace-owned target. No executable/cwd/fd/map references,
 active builds, release output or Trash entries remained before cleanup;
 `trash-empty -f` completed. Source and validation evidence remain preserved.
 `cargo clean` removed 11.1 GiB of reproducible build output.
+
+
+## Live Gemini candidate pre-commit policy (2026-10-20)
+
+Starting from `b5e382490`, the live provider pre-commit caller now delegates
+candidate commit, wait and retry decisions to `gemini_precommit.mojo`.
+Rust retains Serde/SSE acquisition, the existing Mojo envelope-normalization
+adapter, checked ABI storage and probe/result application. The old Rust
+parts/grounding implementation is deleted. Native `[DONE]` and final
+unparsed-frame dispatch remain unchanged for the next stage; no transport,
+affinity, rotation or streaming-commit orchestration changes here.
+
+The version-1 borrowed-tree ABI reuses the shared JSON marshaler, media and
+special-part projections, instruction sanitizer/echo guard and retryable
+finish-reason classifier. It preserves first-candidate selection, exact
+finish-reason bytes, whitespace output, grounding/error early returns,
+non-object-part rejection and flag updates even when visibility was already
+set. The sanitizer's internal length pointer keeps its tracked Mojo origin;
+the initial native crash from erasing that origin was reproduced and fixed.
+ABI versions, flags, tree relationships, UTF-8, output alignment and scratch
+capacity are validated before output writes. Errors never recompute policy
+in Rust. The native import probe exposes only the intended ABI symbol.
+
+All 8,640 comparisons with the committed Rust implementation pass, including
+observed flags and rejected shapes. The temporary test-only oracle and
+native probe have been removed after harvesting evidence and checking
+process references. Build output remains owned by this campaign for the
+following validation and migration consumers.
+
+Passed validation:
+
+- `mojo run -D ASSERT=all -I mojo/prodex_core mojo/tests/gemini_precommit_test.mojo`.
+- `PRODEX_MOJO_REQUIRED=1 CARGO_BUILD_JOBS=6 rtk cargo test --locked -q -p prodex-mojo-core --features mojo-core -- --test-threads=1`: 1,023 tests.
+- `PRODEX_MOJO_REQUIRED=1 CARGO_BUILD_JOBS=6 rtk cargo test --locked -q -p prodex-provider-core --features mojo -- --test-threads=1`: 511 tests.
+- `PRODEX_MOJO_REQUIRED=1 CARGO_BUILD_JOBS=6 rtk cargo test --locked -q -p prodex-app --lib gemini_precommit -- --test-threads=1`: 11 live-caller tests.
+- `node scripts/ci/mojo-no-fallback-guard.mjs --self-test` and its source check;
+  authority/crate-boundary self-test/source checks, provider-SPI and secret
+  boundaries, runtime hot-path self-test/source and runtime manifest checks.
+- `node scripts/compat/check-upstream-baseline.mjs` and
+  `node scripts/compat/capture-replay-fixture-tests.mjs`: all five replay fixtures.
+
+The unchanged official `node scripts/ci/mojo-production-share.mjs --check --json`
+metric rises from 35.65354008935129% to 35.670753586865914%
+(129,233 Mojo / 233,061 Rust / 362,294 total production lines), leaving
+39.329246413134086 percentage points to 75%. Release-floor and audited
+reachable-source non-regression checks pass; the project target remains unmet.
+
+All 459 serialized proxy regressions also pass via
+`PRODEX_MOJO_REQUIRED=1 CARGO_BUILD_JOBS=6 rtk cargo test --locked -q -p prodex-app --lib main_internal_tests::runtime_proxy_ -- --test-threads=1`.
+`CARGO_BUILD_JOBS=6 rtk proxy node scripts/ci/test-serial.mjs --suite runtime-smoke`
+also passes all nine steps, with existing vendor/dead-code warnings only.
+Workspace Clippy passes via
+`PRODEX_MOJO_REQUIRED=1 CARGO_BUILD_JOBS=6 rtk cargo clippy --locked --workspace --all-targets --all-features -- -D warnings`,
+with existing vendor/build warnings only. Canonical
+`RUST_TEST_THREADS=1 CARGO_BUILD_JOBS=6 rtk npm run test:changed` also passes,
+including featureless core checks and 510 provider tests with default features.
+The explicit-feature suite above supplies the 511-test evidence. Docs,
+formatting, size, staged churn/privacy and diff checks pass. Trash was inspected
+empty before `trash-empty -f`; source and validation evidence remain preserved.
+Full CI, live-provider and native macOS/Windows checks were not run.

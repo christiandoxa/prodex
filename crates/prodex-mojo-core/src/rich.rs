@@ -99,7 +99,12 @@ pub use catalog::{
     plan_catalog_choices, plan_catalog_configuration, plan_dynamic_catalog, resolve_catalog_model,
     resolve_catalog_model_exact, resolve_catalog_reasoning,
 };
+#[path = "rich/gemini_precommit.rs"]
+mod gemini_precommit;
 mod gemini_simple_response;
+pub use gemini_precommit::{
+    GeminiPrecommitDecision, GeminiPrecommitPlan, GeminiPrecommitState, gemini_precommit_plan,
+};
 #[path = "rich/gemini_sse_state.rs"]
 mod gemini_sse_state;
 pub use gemini_simple_response::{
