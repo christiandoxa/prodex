@@ -10,6 +10,9 @@ use crate::{
     OptionalToolId, OptionalToolSet, PLAYWRIGHT_MCP_PACKAGE, ToolActivation, ToolActivationPlan,
     resolve_optional_tools,
 };
+use prodex_mojo_core::optional_tools_policy::{
+    OptionalToolConfigShapeIssue, optional_tool_config_shape_preflight,
+};
 
 mod ponytail;
 
@@ -101,67 +104,60 @@ fn validate_optimizer_config_shapes(
         _ => bail!("{} did not parse as a TOML table", config_path.display()),
     };
 
-    if validate_ponytail {
-        validate_ponytail_config_shapes(&table)?;
-    }
-    if !validate_codebase_memory && !validate_playwright {
-        return Ok(Some(table));
-    }
-    let Some(mcp_servers) = table.get("mcp_servers") else {
-        return Ok(Some(table));
+    // The host acquires TOML types only. Mojo alone decides which
+    // activated subtrees must be tables and which error takes precedence.
+    let shape = |value: Option<&toml::Value>| match value {
+        None => 0_i64,
+        Some(toml::Value::Table(_)) => 1_i64,
+        Some(_) => 2_i64,
     };
-    let mcp_servers = match mcp_servers {
-        toml::Value::Table(table) => table,
-        _ => bail!("mcp_servers must be a TOML table"),
-    };
-    validate_selected_mcp_server_shapes(
-        mcp_servers,
-        validate_codebase_memory,
-        validate_playwright,
-    )?;
+    let marketplaces = table.get("marketplaces").and_then(toml::Value::as_table);
+    let plugins = table.get("plugins").and_then(toml::Value::as_table);
+    let mcp_servers = table.get("mcp_servers").and_then(toml::Value::as_table);
+    let shapes = [
+        shape(table.get("features")),
+        shape(table.get("marketplaces")),
+        shape(table.get("plugins")),
+        shape(marketplaces.and_then(|section| section.get("ponytail"))),
+        shape(plugins.and_then(|section| section.get("ponytail@ponytail"))),
+        shape(table.get("mcp_servers")),
+        shape(mcp_servers.and_then(|section| section.get("codebase-memory-mcp"))),
+        shape(mcp_servers.and_then(|section| section.get("playwright"))),
+    ];
+    let selected_mask = u8::from(validate_ponytail)
+        | (u8::from(validate_codebase_memory) << 1)
+        | (u8::from(validate_playwright) << 2);
+    let issue = optional_tool_config_shape_preflight(selected_mask, shapes).map_err(|error| {
+        anyhow::anyhow!("compiled Mojo optional-tool config preflight failed: {error:?}")
+    })?;
+    if let Some(issue) = issue {
+        let message = match issue {
+            OptionalToolConfigShapeIssue::Features => {
+                "configuration entry `features` must be a TOML table"
+            }
+            OptionalToolConfigShapeIssue::Marketplaces => {
+                "configuration entry `marketplaces` must be a TOML table"
+            }
+            OptionalToolConfigShapeIssue::Plugins => {
+                "configuration entry `plugins` must be a TOML table"
+            }
+            OptionalToolConfigShapeIssue::PonytailMarketplace => {
+                "configuration entry `ponytail` must be a TOML table"
+            }
+            OptionalToolConfigShapeIssue::PonytailPlugin => {
+                "configuration entry `ponytail@ponytail` must be a TOML table"
+            }
+            OptionalToolConfigShapeIssue::McpServers => "mcp_servers must be a TOML table",
+            OptionalToolConfigShapeIssue::CodebaseMemoryMcp => {
+                "mcp_servers.codebase-memory-mcp must be a TOML table"
+            }
+            OptionalToolConfigShapeIssue::Playwright => {
+                "mcp_servers.playwright must be a TOML table"
+            }
+        };
+        bail!("{message}");
+    }
     Ok(Some(table))
-}
-
-fn validate_ponytail_config_shapes(table: &toml::Table) -> Result<()> {
-    for key in ["features", "marketplaces", "plugins"] {
-        if let Some(value) = table.get(key)
-            && !matches!(value, toml::Value::Table(_))
-        {
-            bail!("configuration entry `{key}` must be a TOML table");
-        }
-    }
-    if let Some(marketplaces) = table.get("marketplaces").and_then(toml::Value::as_table)
-        && let Some(value) = marketplaces.get("ponytail")
-        && !matches!(value, toml::Value::Table(_))
-    {
-        bail!("configuration entry `ponytail` must be a TOML table");
-    }
-    if let Some(plugins) = table.get("plugins").and_then(toml::Value::as_table)
-        && let Some(value) = plugins.get("ponytail@ponytail")
-        && !matches!(value, toml::Value::Table(_))
-    {
-        bail!("configuration entry `ponytail@ponytail` must be a TOML table");
-    }
-    Ok(())
-}
-
-fn validate_selected_mcp_server_shapes(
-    mcp_servers: &toml::Table,
-    validate_codebase_memory: bool,
-    validate_playwright: bool,
-) -> Result<()> {
-    for (name, selected) in [
-        ("codebase-memory-mcp", validate_codebase_memory),
-        ("playwright", validate_playwright),
-    ] {
-        if selected
-            && let Some(value) = mcp_servers.get(name)
-            && !matches!(value, toml::Value::Table(_))
-        {
-            bail!("mcp_servers.{name} must be a TOML table");
-        }
-    }
-    Ok(())
 }
 
 fn validate_required_mcp_servers(

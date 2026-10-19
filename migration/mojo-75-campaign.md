@@ -5931,3 +5931,13 @@ Rust's alternative precedence tree was deleted while Serde and transport
 remain host responsibilities. Direct ABI and Anthropic/Gemini production
 caller suites protect partial frames and exactly-once event observation.
 The 75% target remains outstanding.
+
+
+## Super optional-tools config shape preflight moved to Mojo
+
+The compiled optional-tools policy now selects and validates Ponytail and
+MCP config subtree shapes before any Codex-home mutation. The original
+Rust section-validation loops were deleted. Rust retains TOML acquisition
+and presentation of the Mojo-selected first error. Strict ABI, complete
+optional-tools regression tests and a no-fallback guard protect behavior.
+The separate 75% project target remains outstanding.
