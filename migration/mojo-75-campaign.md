@@ -6892,3 +6892,56 @@ and native macOS/Windows checks were not run.
 After confirming no active build/test process and no release output,
 `cargo clean` removed 13.2 GiB. Trash contained only empty standard directories;
 `trash-empty -f` completed. Source WIP and campaign evidence remain preserved.
+
+
+## Compiled provider quota-reset duration grammar (2026-10-20)
+
+Probe-order checkpoint `73c7a6f55` is pushed to main. The provider quota owner
+now compiles a version-1 duration plan/finish ABI into the production archive.
+Mojo owns compound day/hour/minute/second/millisecond grammar, unit adjacency,
+Unicode edge trimming, ASCII interior whitespace, ordered floating-point
+summation, ceiling and signed saturation. Rust's former character scanner,
+numeric-token assembly, unit match and duration arithmetic are deleted.
+Rust retains RFC3339 decoding and wall-clock acquisition. Standard float
+acquisition uses the already-proven CompilerRT exception recorded above; no
+Mojo parser runtime shim or Rust semantic fallback is added.
+
+The plan probes exact numeric-buffer and row counts before allocation and
+checks all grammar before writing. Typed 24-byte number and acquired-value
+rows preserve full input sizes without an arbitrary segment cap. Empty input,
+invalid numbers and zero remain distinct. Fractional milliseconds accumulate
+before rounding, and overflow retains the previous saturated result. Interior
+vertical tab remains invalid while Unicode edge whitespace is accepted.
+
+All 32,768 generated comparisons match the former Rust parser, including
+compound units, malformed fragments, IEEE-derived decimal magnitudes and
+overflow/underflow. The owned comparison oracle and compiler object were
+removed after harvesting their results. Three initial focused ABI tests and
+all nine real quota-header caller tests pass through strict Cargo commands.
+An additional 65,537-segment regression exercises probed storage. Direct Mojo
+assertions pass via
+`mojo run -D ASSERT=all -I mojo/prodex_core mojo/tests/provider_quota_duration_test.mojo`.
+The initial direct fixture used unsupported Array initialization and raw stack
+aliases; the corrected fixture uses the established allocated-pointer pattern.
+The no-fallback self-test fixture was updated for the newly shared caller.
+
+The unchanged official metric rises from 35.52348948702902% to
+35.538015481743386% (128,455 Mojo / 233,003 Rust production lines), leaving
+39.461984518256614 percentage points to 75%. Release-floor and audited
+reachable-source non-regression checks pass; the project target remains unmet.
+
+All 1,001 strict Mojo-core tests pass via
+`PRODEX_MOJO_REQUIRED=1 CARGO_BUILD_JOBS=6 cargo test --locked -q -p prodex-mojo-core --features mojo-core -- --test-threads=1`.
+All nine caller tests pass via
+`PRODEX_MOJO_REQUIRED=1 CARGO_BUILD_JOBS=6 cargo test --locked -q -p prodex-app --lib local_rewrite_rate_limits::tests:: -- --test-threads=1`.
+Workspace Clippy passes via
+`PRODEX_MOJO_REQUIRED=1 CARGO_BUILD_JOBS=6 cargo clippy --locked --workspace --all-targets --all-features -- -D warnings`,
+with existing vendor warnings only. Canonical
+`RUST_TEST_THREADS=1 CARGO_BUILD_JOBS=6 npm run test:changed`,
+`PRODEX_MOJO_REQUIRED=1 CARGO_BUILD_JOBS=6 node scripts/ci/test-serial.mjs --suite runtime-smoke`,
+no-fallback/authority/crate-boundary self-test and source guards,
+provider-SPI boundary, runtime-hotpath self-test/source, secret-boundary, docs,
+formatting and diff checks pass. Offline baseline and all five replay fixtures
+pass. Staged churn is within the 1,200-line/500-per-file limits. No owned
+comparison or compiler probe remains; the recently rebuilt cache is retained.
+Full CI, live provider and native macOS/Windows checks were not run.
