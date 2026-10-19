@@ -275,14 +275,9 @@ pub(super) fn visible_text(
     max_lines: usize,
     scroll_from_bottom: usize,
 ) -> Text<'static> {
-    if max_lines == 0 {
-        lines.clear();
-        return Text::from(lines);
-    }
-    let hidden = lines.len().saturating_sub(max_lines);
-    let offset = hidden.saturating_sub(scroll_from_bottom.min(hidden));
-    let end = offset.saturating_add(max_lines).min(lines.len());
-    Text::from(lines.drain(offset..end).collect::<Vec<_>>())
+    let visible = prodex_mojo_core::log::log_tui_window(lines.len(), max_lines, scroll_from_bottom)
+        .expect("compiled Mojo log TUI viewport returned invalid output");
+    Text::from(lines.drain(visible).collect::<Vec<_>>())
 }
 
 pub(super) fn contains_ignore_ascii_case(haystack: &str, needle: &str) -> bool {

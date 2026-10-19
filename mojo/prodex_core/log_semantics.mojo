@@ -3350,3 +3350,158 @@ def prodex_mojo_log_ascii_casefold_contains_v1(
         unsafe_from_address=Int(result_address)
     )[] = Int64(found)
     return 0
+
+
+# The log TUI layout and event-source tone have a single compiled authority.
+# Rust only measures rendered rows and maps tone IDs to terminal palette values.
+comptime LOG_TUI_ABI_VERSION: Int64 = 1
+
+
+@export("prodex_mojo_log_tui_window_v1")
+def prodex_mojo_log_tui_window_v1(
+    abi_version: Int64,
+    line_count: UInt64,
+    max_lines: UInt64,
+    scroll_from_bottom: UInt64,
+    output_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != LOG_TUI_ABI_VERSION:
+        return 4
+    if output_address == 0:
+        return 1
+    var output = Pointer[mut=True, UInt64, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    if max_lines == 0:
+        output[unsafe_offset=0] = 0
+        output[unsafe_offset=1] = 0
+        return 0
+    var hidden: UInt64 = 0
+    if line_count > max_lines:
+        hidden = line_count - max_lines
+    var scroll = scroll_from_bottom
+    if scroll > hidden:
+        scroll = hidden
+    var offset = hidden - scroll
+    var end = line_count
+    if max_lines < line_count - offset:
+        end = offset + max_lines
+    output[unsafe_offset=0] = offset
+    output[unsafe_offset=1] = end
+    return 0
+
+
+@export("prodex_mojo_log_tui_snapshot_height_v1")
+def prodex_mojo_log_tui_snapshot_height_v1(
+    abi_version: Int64,
+    transcript_present: Int64,
+    transcript_rows: UInt64,
+    upstream_present: Int64,
+    upstream_rows: UInt64,
+    token_usage_present: Int64,
+    output_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != LOG_TUI_ABI_VERSION:
+        return 4
+    if (
+        output_address == 0
+        or not log_snapshot_flag_valid(transcript_present)
+        or not log_snapshot_flag_valid(upstream_present)
+        or not log_snapshot_flag_valid(token_usage_present)
+    ):
+        return 1
+    # Cap each measurement first to avoid overflowing on extreme row counts.
+    var body: UInt64 = 1
+    if transcript_present == 1:
+        var rows = transcript_rows
+        if rows > 28:
+            rows = 28
+        body += rows + 2
+    if upstream_present == 1:
+        var rows = upstream_rows
+        if rows > 28:
+            rows = 28
+        body += rows + 3
+    if token_usage_present == 1:
+        body += 3
+    var height = body + 4
+    if height < 8:
+        height = 8
+    if height > 28:
+        height = 28
+    Pointer[mut=True, UInt64, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )[] = height
+    return 0
+
+
+@export("prodex_mojo_log_tui_source_tone_v1")
+def prodex_mojo_log_tui_source_tone_v1(
+    abi_version: Int64,
+    source_address: UInt,
+    source_length: Int64,
+    output_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != LOG_TUI_ABI_VERSION:
+        return 4
+    if (
+        output_address == 0 or source_length < 0
+        or (source_length > 0 and source_address == 0)
+    ):
+        return 1
+    var source = ProdexRichStringView(source_address, UInt(source_length))
+    if not rich_view_valid(source, 0x7FFFFFFFFFFFFFFF):
+        return 1
+    var tone: Int64 = 0 # reset
+    if rich_view_matches_literal["user"](source, False):
+        tone = 1 # green
+    elif (
+        rich_view_matches_literal["assistant"](source, False)
+        or rich_view_matches_literal["upstream"](source, False)
+        or rich_view_matches_literal["response"](source, False)
+    ):
+        tone = 2 # cyan
+    elif (
+        rich_view_matches_literal["reasoning"](source, False)
+        or rich_view_matches_literal["retry"](source, False)
+        or rich_view_matches_literal["backoff"](source, False)
+    ):
+        tone = 3 # yellow
+    elif (
+        rich_view_matches_literal["turn-context"](source, False)
+        or rich_view_matches_literal["session-context"](source, False)
+        or rich_view_matches_literal["request"](source, False)
+        or rich_view_matches_literal["route"](source, False)
+        or rich_view_matches_literal["model"](source, False)
+    ):
+        tone = 4 # blue
+    elif (
+        rich_view_matches_literal["prompt-engineering"](source, False)
+        or rich_view_matches_literal["smart"](source, False)
+    ):
+        tone = 5 # light blue
+    elif (
+        rich_view_matches_literal["quota"](source, False)
+        or rich_view_matches_literal["compact"](source, False)
+    ):
+        tone = 6 # light yellow
+    elif rich_view_matches_literal["health"](source, False):
+        tone = 7 # light magenta
+    elif (
+        rich_view_matches_literal["agent"](source, False)
+        or rich_view_matches_literal["mcp"](source, False)
+        or rich_view_matches_literal["tool"](source, False)
+        or rich_view_matches_literal["tool-output"](source, False)
+        or log_view_starts_literal(source, StringSlice("tool-call:"))
+    ):
+        tone = 8 # magenta
+    elif (
+        rich_view_matches_literal["load"](source, False)
+        or rich_view_matches_literal["terminal"](source, False)
+        or rich_view_matches_literal["error"](source, False)
+    ):
+        tone = 9 # red
+    Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )[] = tone
+    return 0

@@ -186,6 +186,7 @@ const PROMOTED_FILES = [
   "crates/prodex-app/src/app_commands/log_tui.rs",
   "crates/prodex-app/src/app_commands/log_tui_render.rs",
   "crates/prodex-mojo-core/src/log/search.rs",
+  "crates/prodex-mojo-core/src/log/tui.rs",
   "mojo/prodex_core/log_semantics.mojo",
   "crates/prodex-optional-tools/src/rtk.rs",
   "crates/prodex-mojo-core/src/rtk_noisy.rs",
@@ -1295,6 +1296,7 @@ const TRANSCRIPT_SAFE_MOJO_FILE = "mojo/prodex_core/log_transcript_safe.mojo";
 const LOG_LOAD_APP_FILE = "crates/prodex-app/src/app_commands/log_load.rs";
 const LOG_LOAD_TUI_FILE = "crates/prodex-app/src/app_commands/log_command_tui.rs";
 const LOG_LOAD_ADAPTER_FILE = "crates/prodex-mojo-core/src/log_load.rs";
+const LOG_TUI_LAYOUT_ADAPTER_FILE = "crates/prodex-mojo-core/src/log/tui.rs";
 const LOG_STREAM_FILE = "crates/prodex-app/src/app_commands/log_stream.rs";
 const LOG_EVENT_SOURCE_FILE = "crates/prodex-app/src/app_commands/log_event_source.rs";
 const OBSERVABILITY_ADAPTER_FILE = "crates/prodex-mojo-core/src/observability.rs";
@@ -4692,6 +4694,48 @@ export function findViolations(files) {
     if (filePath === "crates/prodex-app/src/app_commands/log_tui_render.rs") {
       return contents.includes("compiled_log_search_filters_ascii_case_without_folding_unicode")
         ? [] : [filePath + ": real log TUI search caller regression missing"];
+    }
+    return [];
+  });
+  const logTuiLayoutViolations = files.flatMap(([filePath, contents]) => {
+    if (filePath === "crates/prodex-app/src/app_commands/log_tui.rs") {
+      const production = contents.split("\n#[cfg(test)]\nmod tests", 1)[0];
+      return production.includes("prodex_mojo_core::log::log_tui_window(") &&
+        !production.includes("let hidden = lines.len().saturating_sub(max_lines)") &&
+        !production.includes("hidden.saturating_sub(scroll_from_bottom")
+        ? [] : [filePath + ": log viewport selection must remain compiled Mojo-owned"];
+    }
+    if (filePath === "crates/prodex-app/src/app_commands/log_tui_render.rs") {
+      const production = contents.split("\n#[cfg(test)]\nmod tests", 1)[0];
+      const required = [
+        "log_tui_snapshot_height(",
+        "log_tui_source_tone(",
+        "compiled_log_snapshot_height_and_source_palette_reach_real_render_callers",
+      ];
+      return required.every((marker) => contents.includes(marker)) &&
+        !production.includes("match source {") &&
+        !production.includes("body_rows.saturating_add(")
+        ? [] : [filePath + ": log height/source policy must remain compiled Mojo-owned"];
+    }
+    if (filePath === LOG_TUI_LAYOUT_ADAPTER_FILE) {
+      return [
+        "fn prodex_mojo_log_tui_window_v1(",
+        "fn prodex_mojo_log_tui_snapshot_height_v1(",
+        "fn prodex_mojo_log_tui_source_tone_v1(",
+        "compiled_log_tui_window_handles_edges_and_maximum_scroll",
+        "compiled_log_tui_snapshot_height_clamps_measured_content",
+        "compiled_source_tone_preserves_exact_case_and_tool_prefix",
+      ].filter((marker) => !contents.includes(marker))
+        .map((marker) => filePath + ": compiled log TUI ABI or direct tests missing " + marker);
+    }
+    if (filePath === "mojo/prodex_core/log_semantics.mojo") {
+      return [
+        '@export("prodex_mojo_log_tui_window_v1")',
+        '@export("prodex_mojo_log_tui_snapshot_height_v1")',
+        '@export("prodex_mojo_log_tui_source_tone_v1")',
+        'log_view_starts_literal(source, StringSlice("tool-call:"))',
+      ].filter((marker) => !contents.includes(marker))
+        .map((marker) => filePath + ": compiled log TUI policy missing " + marker);
     }
     return [];
   });
@@ -9977,6 +10021,7 @@ export function findViolations(files) {
     ...smartContextRewriteHistoryMojoViolations,
     ...kiroAcpUpdateDispatchMojoViolations,
     ...logAsciiSearchMojoViolations,
+    ...logTuiLayoutViolations,
     ...rtkAutoWrapperManifestViolations,
     ...optionalToolsRenderViolations,
     ...defaultFeatureViolations, ...operationalHistogramViolations];
@@ -11828,6 +11873,7 @@ function selfTest() {
     "pub(super) fn contains_ignore_ascii_case(",
     "prodex_mojo_core::log::log_contains_ignore_ascii_case(haystack, needle)",
     "compiled_log_tui_ascii_folded_search_preserves_real_query_semantics",
+    "prodex_mojo_core::log::log_tui_window(",
   ].join("\n");
   const logAsciiSearchCaller = "crates/prodex-app/src/app_commands/log_tui.rs";
   assert.deepEqual(findViolations([[logAsciiSearchCaller, logAsciiSearchConsumer]]), []);
@@ -12712,6 +12758,10 @@ function selfTest() {
       "prefix[unsafe_offset=index] = matching",
       "matching = prefix[unsafe_offset=matching - 1]",
       "not rich_view_valid(haystack",
+      '@export("prodex_mojo_log_tui_window_v1")',
+      '@export("prodex_mojo_log_tui_snapshot_height_v1")',
+      '@export("prodex_mojo_log_tui_source_tone_v1")',
+      'log_view_starts_literal(source, StringSlice("tool-call:"))',
     ].join("\n")]]), []);
 
   const superPromptConsumer = [
@@ -12778,6 +12828,19 @@ function selfTest() {
     superMainCatalog.replace("super_prompt::super_prompt_model_choice_index(", "models.iter().position("),
   ]]).join("\n"), /main model prompt labels and preselection/u);
 
+  const logTuiCaller = [
+    "log_tui_snapshot_height(",
+    "log_tui_source_tone(",
+    "compiled_log_snapshot_height_and_source_palette_reach_real_render_callers",
+    "compiled_log_search_filters_ascii_case_without_folding_unicode",
+  ].join("\n");
+  assert.deepEqual(findViolations([["crates/prodex-app/src/app_commands/log_tui_render.rs",
+    logTuiCaller]]), []);
+  assert.match(findViolations([["crates/prodex-app/src/app_commands/log_tui_render.rs",
+    logTuiCaller + "\nmatch source {",
+  ]]).join("\n"), /log height\/source policy must remain compiled Mojo-owned/u);
+  assert.match(findViolations([[LOG_TUI_LAYOUT_ADAPTER_FILE, "fn unsupported_adapter() {}"]]).join("\n"),
+    /compiled log TUI ABI or direct tests missing/u);
   const superPromptAdapter = [
     "pub fn default_cli_invocation_to_run(",
     "CLI_DEFAULT_RUN,",

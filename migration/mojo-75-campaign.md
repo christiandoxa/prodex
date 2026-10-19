@@ -6058,3 +6058,12 @@ previous title/kind selection, label recording and default-name
 fallback were deleted. Live caller regressions, direct ABI tests and
 the strict no-fallback guard protect both paths and the single
 truncation marker. The 75% project goal remains outstanding.
+
+## Log TUI layout and source palette moved to Mojo (2026-10-19)
+
+The compiled log-semantic owner now selects snapshot height from measured
+row counts, terminal viewport/scroll ranges, and exact event-source tone
+classification including Unicode tool-call labels. Rust applies the typed
+output to terminal widgets but no longer implements height, scrolling, or
+source-color decisions. Direct compiled ABI tests, production caller tests,
+and a dedicated no-fallback guard cover the ownership boundary.
