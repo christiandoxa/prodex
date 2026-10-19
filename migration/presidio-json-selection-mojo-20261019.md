@@ -40,6 +40,6 @@ Validation from the repository root:
 - FAIL: `npm run test:changed` stops on the existing 860-line deepseek_sse_tests.rs and 33 near-limit files (budget 32).
 - FAIL: `PRODEX_MOJO_REQUIRED=1 CARGO_BUILD_JOBS=6 cargo clippy --locked --workspace --all-targets --all-features -- -D warnings` stops on existing chunks_exact_to_as_chunks in anthropic_stream_policy.rs and items_after_test_module in provider_constraints/gemini_bridge_request.rs.
 
-The 459-test proxy run was still running when this focused checkpoint was
-prepared. No guard was weakened; full CI and native macOS/Windows execution
-were not run.
+The broad proxy check subsequently passed all 459 tests:
+`cargo test --locked -q -p prodex-app --lib 'main_internal_tests::runtime_proxy_' -- --test-threads=1`.
+No guard was weakened; full CI and native macOS/Windows execution were not run.

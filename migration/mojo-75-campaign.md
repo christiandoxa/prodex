@@ -6097,3 +6097,14 @@ masking to replace an uninspected tool field and leave the input unmasked.
 The caller-owned bounded path buffer avoids Mojo heap-runtime dependencies.
 The measured share rises from 35.172814243880104% to 35.215954263254275%;
 the distinct 75% production-share target remains outstanding.
+
+## Compiled Presidio analyzer merge (2026-10-19)
+
+JSON-selection checkpoint `519fd70ec` is pushed to main. Its strict ABI
+and focused Presidio tests, runtime smoke and all 459 broad proxy tests pass.
+The next compiled redaction owner preserves analyzer stable ordering,
+adjacent duplicate handling, containment and stronger partial-overlap range
+expansion. Rust keeps source metadata materialization and network calls;
+the previous Rust comparator and merge/replacement policy helpers are deleted.
+Direct Mojo, ABI rejection, caller contract and 4,096-element ordering
+regressions cover the versioned production kernel without a Rust fallback.

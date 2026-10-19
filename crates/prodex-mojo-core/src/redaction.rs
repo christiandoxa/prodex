@@ -1,4 +1,6 @@
 use crate::MojoError;
+mod analyzer;
+pub use analyzer::{AnalyzerFinding, AnalyzerSelection, analyzer_merge_plan};
 
 const REDACTION_ABI_VERSION: i64 = 1;
 const REDACTION_LOCAL_PLACEHOLDER_EXPANSION: usize = 9;

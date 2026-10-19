@@ -36,71 +36,32 @@ pub(super) fn detect_presidio_language(text: &str, candidates: &[String]) -> Opt
 }
 
 pub(super) fn merge_presidio_analyzer_results(
-    mut results: Vec<PresidioAnalyzerResult>,
-) -> Vec<PresidioAnalyzerResult> {
-    results.sort_by(|a, b| {
-        a.start
-            .cmp(&b.start)
-            .then_with(|| a.end.cmp(&b.end))
-            .then_with(|| {
-                b.score
-                    .partial_cmp(&a.score)
-                    .unwrap_or(std::cmp::Ordering::Equal)
-            })
-            .then_with(|| b.entity_type.cmp(&a.entity_type))
-    });
-
-    let mut merged: Vec<PresidioAnalyzerResult> = Vec::new();
-    for result in results {
-        if let Some(result) = merge_presidio_analyzer_result(&mut merged, result) {
-            merged.push(result);
-        }
-    }
-    merged
+    results: Vec<PresidioAnalyzerResult>,
+) -> anyhow::Result<Vec<PresidioAnalyzerResult>> {
+    let facts = results
+        .iter()
+        .map(|result| prodex_mojo_core::redaction::AnalyzerFinding {
+            start: result.start,
+            end: result.end,
+            score: result.score,
+            entity: &result.entity_type,
+        })
+        .collect::<Vec<_>>();
+    let plan = prodex_mojo_core::redaction::analyzer_merge_plan(&facts).map_err(|error| {
+        anyhow::anyhow!("compiled Mojo Presidio analyzer merge failed: {error:?}")
+    })?;
+    Ok(plan
+        .into_iter()
+        .map(|selected| {
+            let mut result = results[selected.source as usize].clone();
+            result.start = selected.start as usize;
+            result.end = selected.end as usize;
+            result.score = selected.score;
+            result
+        })
+        .collect())
 }
 
-fn merge_presidio_analyzer_result(
-    merged: &mut [PresidioAnalyzerResult],
-    result: PresidioAnalyzerResult,
-) -> Option<PresidioAnalyzerResult> {
-    let Some(last) = merged.last_mut() else {
-        return Some(result);
-    };
-    if last.start == result.start
-        && last.end == result.end
-        && last.entity_type == result.entity_type
-    {
-        replace_presidio_analyzer_result_if_stronger(last, result);
-        return None;
-    }
-    let overlaps = result.start < last.end && result.end > last.start;
-    let stronger_or_longer = result.score > last.score
-        || (result.score == last.score && (result.end - result.start) > (last.end - last.start));
-    if !overlaps || !stronger_or_longer {
-        return Some(result);
-    }
-    let contained = (result.start >= last.start && result.end <= last.end)
-        || (last.start >= result.start && last.end <= result.end);
-    if contained {
-        replace_presidio_analyzer_result_if_stronger(last, result);
-        return None;
-    }
-    if result.score > last.score {
-        last.start = last.start.min(result.start);
-        last.end = last.end.max(result.end);
-        last.score = result.score;
-        last.entity_type = result.entity_type;
-        last.language = result.language;
-        return None;
-    }
-    Some(result)
-}
-
-fn replace_presidio_analyzer_result_if_stronger(
-    current: &mut PresidioAnalyzerResult,
-    candidate: PresidioAnalyzerResult,
-) {
-    if candidate.score > current.score {
-        *current = candidate;
-    }
-}
+#[cfg(test)]
+#[path = "analyzer_tests.rs"]
+mod tests;
