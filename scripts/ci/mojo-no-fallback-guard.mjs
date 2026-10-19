@@ -185,7 +185,13 @@ const DEEPSEEK_FUNCTION_TOOLS_CALLER = "crates/prodex-provider-core/src/deepseek
 const DEEPSEEK_FUNCTION_TOOLS_FUNCTIONS = "crates/prodex-provider-core/src/deepseek_bridge/request_tools/function_tools.rs";
 const DEEPSEEK_FUNCTION_TOOLS_ADAPTER = "crates/prodex-mojo-core/src/json/deepseek_function_tools.rs";
 const DEEPSEEK_FUNCTION_TOOLS_MOJO = "mojo/prodex_core/deepseek_function_tools.mojo";
+const GEMINI_TOOL_DESCRIPTIONS_CALLER = "crates/prodex-provider-core/src/gemini_bridge/tooling/gemini3.rs";
+const GEMINI_TOOL_DESCRIPTIONS_ADAPTER = "crates/prodex-mojo-core/src/json/gemini_tool_descriptions.rs";
+const GEMINI_TOOL_DESCRIPTIONS_MOJO = "mojo/prodex_core/gemini_tool_descriptions.mojo";
 const PROMOTED_FILES = [
+  GEMINI_TOOL_DESCRIPTIONS_CALLER,
+  GEMINI_TOOL_DESCRIPTIONS_ADAPTER,
+  GEMINI_TOOL_DESCRIPTIONS_MOJO,
   DEEPSEEK_FUNCTION_TOOLS_CALLER,
   DEEPSEEK_FUNCTION_TOOLS_FUNCTIONS,
   DEEPSEEK_FUNCTION_TOOLS_ADAPTER,
@@ -4725,6 +4731,34 @@ export function findViolations(files) {
     if (filePath === "crates/prodex-app/src/app_commands/log_tui_render.rs") {
       return contents.includes("compiled_log_search_filters_ascii_case_without_folding_unicode")
         ? [] : [filePath + ": real log TUI search caller regression missing"];
+    }
+    return [];
+  });
+  const geminiToolDescriptionViolations = files.flatMap(([filePath, contents]) => {
+    if (filePath === GEMINI_TOOL_DESCRIPTIONS_CALLER) {
+      const production = contents.split("\n#[cfg(test)]", 1)[0];
+      const required = ["GeminiToolDescriptionOperation::ApplyOverrides",
+        "GeminiToolDescriptionOperation::DescriptionIndex", "GeminiToolDescriptionOperation::Catalog",
+        "gemini_tool_description_policy(&document.nodes, raw, operation)",
+        "compiled_gemini_overrides_preserve_existing_parameters_and_fill_only_selected_objects",
+        "compiled_gemini_description_overrides_reach_the_production_declaration_builder"];
+      const restored = ["aliases.contains(", "fn gemini_provider_core_set_parameter_description(",
+        "fn gemini_provider_core_apply_gemini3_parameter_descriptions("];
+      return required.every((marker) => contents.includes(marker)) &&
+        restored.every((marker) => !production.includes(marker))
+        ? [] : [filePath + ": Gemini declaration descriptions must remain compiled Mojo-owned"];
+    }
+    if (filePath === GEMINI_TOOL_DESCRIPTIONS_ADAPTER) {
+      return ["fn prodex_mojo_gemini_tool_descriptions_v1(", "pub fn gemini_tool_description_policy(",
+        "compiled_description_abi_checks_version_flags_scratch_and_output_capacity"]
+        .filter((marker) => !contents.includes(marker))
+        .map((marker) => filePath + ": compiled Gemini description ABI missing " + marker);
+    }
+    if (filePath === GEMINI_TOOL_DESCRIPTIONS_MOJO) {
+      return ['@export("prodex_mojo_gemini_tool_descriptions_v1")', "tooling_name_policy(name, normalized, capacity)",
+        "tooling_model_uses_gemini3(model_view)", "def write_patch_parameters(", "def write_parameter_property("]
+        .filter((marker) => !contents.includes(marker))
+        .map((marker) => filePath + ": compiled Gemini description semantics missing " + marker);
     }
     return [];
   });
@@ -10239,12 +10273,14 @@ export function findViolations(files) {
     ...presidioLanguageSelectionViolations,
     ...presidioFindingLocalizationViolations,
     ...deepseekFunctionToolPolicyViolations,
+    ...geminiToolDescriptionViolations,
     ...rtkAutoWrapperManifestViolations,
     ...optionalToolsRenderViolations,
     ...defaultFeatureViolations, ...operationalHistogramViolations];
 }
 
 const RELOCATED_TEST_FILES = new Set([
+  "crates/prodex-provider-core/src/gemini_bridge/tooling/gemini3_tests.rs",
   "crates/prodex-provider-core/src/deepseek_bridge/request_tools_tests.rs",
   "crates/prodex-app/src/runtime_proxy/presidio/analyzer_tests.rs",
   "crates/prodex-mojo-core/src/provider_constraints/attempt_cursor_tests.rs",
@@ -12088,6 +12124,17 @@ function selfTest() {
   assert.match(findViolations([[deepseekSseToolEventsFile,
     deepseekSseToolEventsCaller + '\nif tool_call.done {',
   ]]).join("\n"), /restored Rust DeepSeek SSE tool-event selection or done gate/u);
+  const geminiDescriptionConsumer = [
+    "GeminiToolDescriptionOperation::ApplyOverrides", "GeminiToolDescriptionOperation::DescriptionIndex",
+    "GeminiToolDescriptionOperation::Catalog",
+    "gemini_tool_description_policy(&document.nodes, raw, operation)",
+    "compiled_gemini_overrides_preserve_existing_parameters_and_fill_only_selected_objects",
+    "compiled_gemini_description_overrides_reach_the_production_declaration_builder",
+  ].join("\n");
+  assert.deepEqual(findViolations([[GEMINI_TOOL_DESCRIPTIONS_CALLER, geminiDescriptionConsumer]]), []);
+  assert.match(findViolations([[GEMINI_TOOL_DESCRIPTIONS_CALLER,
+    geminiDescriptionConsumer + '\nif aliases.contains("read_file") {}',
+  ]]).join("\n"), /Gemini declaration descriptions must remain compiled Mojo-owned/u);
   const functionToolsConsumer = [
     "DeepSeekFunctionToolOperation::ValidateAndDeduplicate",
     "DeepSeekFunctionToolOperation::StrictSchema",
