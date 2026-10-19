@@ -3,6 +3,9 @@
 use super::{JsonKind, JsonNode, ffi_nodes, signed, status};
 use crate::MojoError;
 
+mod retry_duration;
+pub use retry_duration::{GeminiRetryTextKind, gemini_retry_text_delay_ms};
+
 unsafe extern "C" {
     fn prodex_gemini_quota_error_kind_v1(
         abi_version: i64,

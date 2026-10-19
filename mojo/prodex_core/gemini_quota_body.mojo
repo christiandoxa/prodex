@@ -1,12 +1,15 @@
 # Deterministic Gemini quota/rate-limit classification over Serde's borrowed
 # JSON tree. The host handles JSON and SSE decoding, never duplicate policy.
 from std.memory import Pointer
+from std.math import ceil, isfinite
+from log_number import log_parse_u64_text
+from rich_catalog import catalog_view_find_folded
 from parsed_json import (
     ParsedJson, ParsedJsonNode, JSON_OBJECT, JSON_STRING, pj_valid,
     pj_field, pj_string_field, pj_kind, pj_text, pj_child, pj_next,
 )
 from rich_types import ProdexRichStringView
-from rich_text import rich_trim_bounds, rich_view_ptr, rich_view_matches_literal
+from rich_text import rich_trim_bounds, rich_view_ptr, rich_view_matches_literal, rich_view_prefix, rich_view_valid
 
 comptime GEMINI_QUOTA_BODY_ABI: Int64 = 1
 
@@ -423,4 +426,120 @@ def prodex_gemini_quota_rotate_v1(
     Pointer[mut=True, Int64, MutUntrackedOrigin](
         unsafe_from_address=Int(result_address)
     )[] = Int64(rotate)
+    return 0
+
+
+# Numeric acquisition stays in Rust: the pinned fallible Float64 text parser
+# requires CompilerRT heap/error symbols absent from the native object ABI.
+def gemini_retry_text_candidate(
+    output: Pointer[mut=True, UInt64, MutUntrackedOrigin], slot: Int64,
+    start: Int64, end: Int64, multiplier: UInt64,
+):
+    output[unsafe_offset=0] = 2
+    output[unsafe_offset=2] = UInt64(slot + 1)
+    output[unsafe_offset=3 + slot * 3] = UInt64(start)
+    output[unsafe_offset=4 + slot * 3] = UInt64(end)
+    output[unsafe_offset=5 + slot * 3] = multiplier
+
+
+@export("prodex_gemini_retry_text_plan_v1")
+def prodex_gemini_retry_text_plan_v1(
+    version: Int64, operation: Int64, address: UInt, length: Int64,
+    output_address: UInt, capacity: Int64,
+) abi("C") -> Int64:
+    if version != 1:
+        return 4
+    if operation < 0 or operation > 2 or length < 0 or output_address == 0 or output_address % 8 != 0:
+        return 1
+    if capacity < 9:
+        return 3
+    var view = ProdexRichStringView(address, UInt(length))
+    if not rich_view_valid(view, length):
+        return 1
+    var output = Pointer[mut=True, UInt64, MutUntrackedOrigin](unsafe_from_address=Int(output_address))
+    for index in range(9):
+        output[unsafe_offset=index] = 0
+    var bounds = rich_trim_bounds(view)
+    var start = bounds[0]
+    var end = bounds[1]
+    if operation == 2:
+        var parsed = log_parse_u64_text(UInt64(address + UInt(start)), UInt64(end - start))
+        if parsed[0] and parsed[1] > 0:
+            output[unsafe_offset=0] = 1
+            output[unsafe_offset=1] = 18446744073709551615 if parsed[1] > 18446744073709551 else parsed[1] * 1000
+        return 0
+    var source = rich_view_ptr(view)
+    if operation == 0:
+        var multiplier: UInt64 = 1000
+        if end - start >= 2 and source[unsafe_offset=end - 2] == 109 and source[unsafe_offset=end - 1] == 115:
+            end -= 2
+            multiplier = 1
+        elif end > start and source[unsafe_offset=end - 1] == 115:
+            end -= 1
+        else:
+            return 0
+        var numeric = rich_trim_bounds(ProdexRichStringView(address + UInt(start), UInt(end - start)))
+        if numeric[0] < numeric[1]:
+            gemini_retry_text_candidate(output, 0, start + numeric[0], start + numeric[1], multiplier)
+        return 0
+    var count: Int64 = 0
+    for index in range(2):
+        var marker = StringSlice("please retry in ")
+        if index == 1:
+            marker = StringSlice("suggested retry after ")
+        var needle = ProdexRichStringView(UInt(Int(marker.unsafe_ptr())), UInt(marker.byte_length()))
+        var offset = catalog_view_find_folded(view, needle)
+        if offset < 0:
+            continue
+        var after = offset + Int64(needle.len)
+        var token = rich_trim_bounds(ProdexRichStringView(address + UInt(after), UInt(length - after)))
+        var number_start = after + token[0]
+        var number_end = number_start
+        while number_end < length:
+            var byte = source[unsafe_offset=number_end]
+            if byte != 46 and (byte < 48 or byte > 57):
+                break
+            number_end += 1
+        if number_end == number_start:
+            continue
+        var suffix = ProdexRichStringView(address + UInt(number_end), UInt(length - number_end))
+        var multiplier: UInt64 = 0
+        if rich_view_prefix["ms"](suffix, True):
+            multiplier = 1
+        elif rich_view_prefix["s"](suffix, True):
+            multiplier = 1000
+        if multiplier != 0:
+            gemini_retry_text_candidate(output, count, number_start, number_end, multiplier)
+            count += 1
+    return 0
+
+
+@export("prodex_gemini_retry_text_finish_v1")
+def prodex_gemini_retry_text_finish_v1(
+    version: Int64, count: Int64, parsed: UInt64, first: Float64, second: Float64,
+    first_multiplier: UInt64, second_multiplier: UInt64, output_address: UInt, capacity: Int64,
+) abi("C") -> Int64:
+    if version != 1:
+        return 4
+    if count < 1 or count > 2 or parsed >= (UInt64(1) << UInt64(count)) or output_address == 0 or output_address % 8 != 0:
+        return 1
+    if (first_multiplier != 1 and first_multiplier != 1000) or (count == 2 and second_multiplier != 1 and second_multiplier != 1000):
+        return 1
+    if capacity < 2:
+        return 3
+    var output = Pointer[mut=True, UInt64, MutUntrackedOrigin](unsafe_from_address=Int(output_address))
+    output[unsafe_offset=0] = 0
+    output[unsafe_offset=1] = 0
+    for index in range(count):
+        var value = first if index == 0 else second
+        if (parsed & (UInt64(1) << UInt64(index))) == 0 or not isfinite(value) or value <= 0.0:
+            continue
+        var multiplier = first_multiplier if index == 0 else second_multiplier
+        var millis = ceil(value * Float64(multiplier))
+        var delay = UInt64(18446744073709551615)
+        if isfinite(millis) and millis < Float64(delay):
+            delay = UInt64(millis)
+        output[unsafe_offset=0] = 1
+        output[unsafe_offset=1] = delay
+        break
     return 0
