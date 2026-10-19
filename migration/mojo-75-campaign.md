@@ -6010,3 +6010,15 @@ token-usage/calibration histories remain Rust responsibilities.
 Direct ABI and full sequential Smart Context regressions plus
 anti-fallback guards preserve the original stable-sort semantics.
 The separate 75% source-share goal remains outstanding.
+
+
+## Smart Context token and calibration unique history merge moved to Mojo
+
+The compiled Smart Context history owner now controls both token-usage
+and token-calibration unique-append and stable tail selection. Rust's
+old generic contains() and drain() merge helpers were deleted. Rust
+serializes typed persisted data through Serde for byte-equality
+comparison, then materializes the Mojo-selected positions without
+an alternative policy. Direct ABI, test-only historical oracles,
+full Smart Context regressions and no-fallback guard protect the
+original merge semantics. The 75% target is still outstanding.

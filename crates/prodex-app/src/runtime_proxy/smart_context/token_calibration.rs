@@ -327,21 +327,14 @@ fn runtime_smart_context_merge_persisted_token_calibration(
     incoming: RuntimeSmartContextPersistedTokenCalibration,
 ) -> RuntimeSmartContextPersistedTokenCalibration {
     existing.version = SMART_CONTEXT_TOKEN_CALIBRATION_PERSISTENCE_VERSION;
-    runtime_smart_context_extend_unique_tail(
-        &mut existing.token_usage_history,
+    existing.token_usage_history = runtime_smart_context_unique_history_tail(
+        existing.token_usage_history,
         incoming.token_usage_history,
-    );
-    runtime_smart_context_truncate_vec_tail(
-        &mut existing.token_usage_history,
         SMART_CONTEXT_TOKEN_USAGE_HISTORY_LIMIT,
     );
-
-    runtime_smart_context_extend_unique_tail(
-        &mut existing.token_calibration_history,
+    existing.token_calibration_history = runtime_smart_context_unique_history_tail(
+        existing.token_calibration_history,
         incoming.token_calibration_history,
-    );
-    runtime_smart_context_truncate_vec_tail(
-        &mut existing.token_calibration_history,
         SMART_CONTEXT_TOKEN_CALIBRATION_HISTORY_LIMIT,
     );
 
@@ -368,19 +361,45 @@ fn runtime_smart_context_merge_persisted_token_calibration(
     existing
 }
 
-fn runtime_smart_context_truncate_vec_tail<T>(items: &mut Vec<T>, limit: usize) {
-    if items.len() > limit {
-        let overflow = items.len().saturating_sub(limit);
-        items.drain(0..overflow);
-    }
-}
-
-fn runtime_smart_context_extend_unique_tail<T: PartialEq>(items: &mut Vec<T>, incoming: Vec<T>) {
-    for item in incoming {
-        if !items.contains(&item) {
-            items.push(item);
-        }
-    }
+fn runtime_smart_context_unique_history_tail<T: Serialize>(
+    existing: Vec<T>,
+    incoming: Vec<T>,
+    limit: usize,
+) -> Vec<T> {
+    let source = |items: &[T]| {
+        items
+            .iter()
+            .map(|item| {
+                serde_json::to_vec(item)
+                    .expect("persisted Smart Context token history must serialize to JSON")
+            })
+            .collect::<Vec<_>>()
+    };
+    // Serde produces canonical, ordered JSON for these deterministic
+    // persisted integer/string record types. Mojo owns equality, stable
+    // append and bounded tail; Rust only materializes selected records.
+    let original = source(&existing);
+    let additional = source(&incoming);
+    let indexes =
+        prodex_mojo_core::smart_context_rewrite_history::smart_context_unique_tail_positions(
+            &original,
+            &additional,
+            limit,
+        )
+        .expect("compiled Mojo Smart Context token history merge policy failed");
+    let mut records = existing
+        .into_iter()
+        .chain(incoming)
+        .map(Some)
+        .collect::<Vec<_>>();
+    indexes
+        .into_iter()
+        .map(|index| {
+            records[index]
+                .take()
+                .expect("compiled Mojo token history index must be valid and unique")
+        })
+        .collect()
 }
 
 #[cfg(test)]
@@ -454,6 +473,116 @@ mod tests {
                 .iter()
                 .all(|record| record.saved_tokens != 99),
             "expired safety records must never be restored",
+        );
+    }
+
+    #[test]
+    fn compiled_smart_context_token_history_merge_preserves_existing_duplicates_and_unicode_buckets()
+     {
+        fn prior_tail<T: PartialEq>(
+            mut existing: Vec<T>,
+            incoming: Vec<T>,
+            limit: usize,
+        ) -> Vec<T> {
+            // Test-only historical oracle: never called in production.
+            for value in incoming {
+                if !existing.contains(&value) {
+                    existing.push(value);
+                }
+            }
+            let overflow = existing.len().saturating_sub(limit);
+            existing.drain(0..overflow);
+            existing
+        }
+
+        let usage = |input_tokens| RuntimeSmartContextPersistedTokenUsage {
+            input_tokens,
+            cached_input_tokens: 0,
+            output_tokens: 7,
+            reasoning_tokens: 2,
+        };
+        let existing_usage = [1, 1, 2, 3, 4, 5].map(usage).to_vec();
+        let incoming_usage = [2, 6, 6, 7, 8, 9, 10, 3].map(usage).to_vec();
+
+        let bucket = |route: Option<&str>, model: Option<&str>| {
+            RuntimeSmartContextPersistedTokenCalibrationBucketKey {
+                route: route.map(str::to_owned),
+                model: model.map(str::to_owned),
+                profile: Some("profile_日本🚀".to_string()),
+                transport: None,
+            }
+        };
+        let calibration =
+            |route, model, count| RuntimeSmartContextPersistedTokenCalibrationObservation {
+                bucket_key: bucket(route, model),
+                usage: usage(count),
+            };
+        let existing_calibration = vec![
+            calibration(Some("responses"), Some("gpt-6"), 1),
+            calibration(Some("responses"), Some("gpt-6"), 1),
+            calibration(None, Some("モデル"), 2),
+        ];
+        let incoming_calibration = vec![
+            calibration(None, Some("モデル"), 2),
+            calibration(None, Some("モデル"), 3),
+            calibration(Some("Responses"), Some("gpt-6"), 1),
+            calibration(Some("responses"), Some("gpt-6"), 1),
+            calibration(None, None, 4),
+        ];
+
+        let merged = runtime_smart_context_merge_persisted_token_calibration(
+            RuntimeSmartContextPersistedTokenCalibration {
+                token_usage_history: existing_usage.clone(),
+                token_calibration_history: existing_calibration.clone(),
+                ..Default::default()
+            },
+            RuntimeSmartContextPersistedTokenCalibration {
+                token_usage_history: incoming_usage.clone(),
+                token_calibration_history: incoming_calibration.clone(),
+                ..Default::default()
+            },
+        );
+        assert_eq!(
+            merged.token_usage_history,
+            prior_tail(
+                existing_usage,
+                incoming_usage,
+                SMART_CONTEXT_TOKEN_USAGE_HISTORY_LIMIT
+            ),
+        );
+        assert_eq!(
+            merged.token_calibration_history,
+            prior_tail(
+                existing_calibration,
+                incoming_calibration,
+                SMART_CONTEXT_TOKEN_CALIBRATION_HISTORY_LIMIT,
+            ),
+        );
+        assert_eq!(
+            merged.token_usage_history.len(),
+            SMART_CONTEXT_TOKEN_USAGE_HISTORY_LIMIT
+        );
+        assert_eq!(merged.token_calibration_history.len(), 6);
+        assert_eq!(
+            merged.token_calibration_history[0]
+                .bucket_key
+                .route
+                .as_deref(),
+            Some("responses")
+        );
+        assert_eq!(
+            merged.token_calibration_history[2]
+                .bucket_key
+                .model
+                .as_deref(),
+            Some("モデル")
+        );
+        assert_eq!(
+            merged.token_calibration_history[5]
+                .bucket_key
+                .route
+                .as_deref(),
+            None
         );
     }
 
