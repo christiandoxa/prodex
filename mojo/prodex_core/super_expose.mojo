@@ -283,6 +283,12 @@ def prodex_mojo_super_expose_concurrency_plan_v1(
         selected[unsafe_offset=1] = menu[unsafe_offset=selected_index * 2 + 1]
     return 0
 
+def super_expose_tool_is_allowed(mode: Int64, tool_kind: Int64) -> Bool:
+    if mode == SUPER_EXPOSE_MODE_EXEC:
+        return tool_kind == SUPER_EXPOSE_TOOL_EXEC
+    return tool_kind != SUPER_EXPOSE_TOOL_UNKNOWN
+
+
 @export("prodex_mojo_super_expose_tool_allowed_v1")
 def prodex_mojo_super_expose_tool_allowed_v1(
     abi_version: Int64,
@@ -309,10 +315,7 @@ def prodex_mojo_super_expose_tool_allowed_v1(
         unsafe_from_address=Int(output_address)
     )
     var tool_kind = super_expose_tool(tool)
-    if mode == SUPER_EXPOSE_MODE_EXEC:
-        output[] = 1 if tool_kind == SUPER_EXPOSE_TOOL_EXEC else 0
-    else:
-        output[] = 1 if tool_kind != SUPER_EXPOSE_TOOL_UNKNOWN else 0
+    output[] = Int64(super_expose_tool_is_allowed(mode, tool_kind))
     return 0
 
 
