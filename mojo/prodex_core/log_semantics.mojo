@@ -3505,3 +3505,112 @@ def prodex_mojo_log_tui_source_tone_v1(
         unsafe_from_address=Int(output_address)
     )[] = tone
     return 0
+
+
+# Log TUI keyboard interpretation and scroll transitions are one Mojo-owned
+# state machine. Rust decodes terminal key kinds, then applies the compiled
+# edit/search actions to the retained UTF-8 state.
+comptime LOG_TUI_KEY_KIND_CHAR: Int64 = 0
+comptime LOG_TUI_KEY_KIND_ENTER: Int64 = 1
+comptime LOG_TUI_KEY_KIND_ESC: Int64 = 2
+comptime LOG_TUI_KEY_KIND_BACKSPACE: Int64 = 3
+comptime LOG_TUI_KEY_KIND_UP: Int64 = 4
+comptime LOG_TUI_KEY_KIND_DOWN: Int64 = 5
+comptime LOG_TUI_KEY_KIND_PAGE_UP: Int64 = 6
+comptime LOG_TUI_KEY_KIND_PAGE_DOWN: Int64 = 7
+comptime LOG_TUI_KEY_KIND_HOME: Int64 = 8
+comptime LOG_TUI_KEY_KIND_END: Int64 = 9
+comptime LOG_TUI_KEY_KIND_OTHER: Int64 = 10
+
+comptime LOG_TUI_SEARCH_UNCHANGED: UInt64 = 0
+comptime LOG_TUI_SEARCH_CLEAR: UInt64 = 1
+comptime LOG_TUI_SEARCH_POP: UInt64 = 2
+comptime LOG_TUI_SEARCH_PUSH: UInt64 = 3
+
+
+@export("prodex_mojo_log_tui_key_plan_v1")
+def prodex_mojo_log_tui_key_plan_v1(
+    abi_version: Int64,
+    key_kind: Int64,
+    scalar: Int64,
+    control: Int64,
+    editing_search: Int64,
+    scroll_from_bottom: UInt64,
+    max_scroll: UInt64,
+    output_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != LOG_TUI_ABI_VERSION:
+        return 4
+    if (
+        output_address == 0
+        or key_kind < LOG_TUI_KEY_KIND_CHAR
+        or key_kind > LOG_TUI_KEY_KIND_OTHER
+        or not log_snapshot_flag_valid(control)
+        or not log_snapshot_flag_valid(editing_search)
+        or scroll_from_bottom > max_scroll
+        or scalar < 0
+        or scalar > 0x10FFFF
+        or (scalar >= 0xD800 and scalar <= 0xDFFF)
+        or (key_kind != LOG_TUI_KEY_KIND_CHAR and scalar != 0)
+    ):
+        return 1
+
+    var is_char = key_kind == LOG_TUI_KEY_KIND_CHAR
+    var is_control = control == 1
+    var next_editing = editing_search == 1
+    var quit = False
+    var search_action = LOG_TUI_SEARCH_UNCHANGED
+    var scroll = scroll_from_bottom
+    if is_control and is_char and (scalar == 99 or scalar == 122):
+        quit = True
+    elif next_editing:
+        if key_kind == LOG_TUI_KEY_KIND_ENTER or key_kind == LOG_TUI_KEY_KIND_ESC:
+            next_editing = False
+        elif key_kind == LOG_TUI_KEY_KIND_BACKSPACE:
+            search_action = LOG_TUI_SEARCH_POP
+            scroll = 0
+        elif is_char and scalar == 117 and is_control:
+            search_action = LOG_TUI_SEARCH_CLEAR
+            scroll = 0
+        elif is_char and not is_control:
+            search_action = LOG_TUI_SEARCH_PUSH
+            scroll = 0
+    else:
+        if key_kind == LOG_TUI_KEY_KIND_ESC or (is_char and scalar == 113):
+            quit = True
+        elif is_char and scalar == 47:
+            next_editing = True
+            search_action = LOG_TUI_SEARCH_CLEAR
+            scroll = 0
+        elif is_char and scalar == 99:
+            search_action = LOG_TUI_SEARCH_CLEAR
+            scroll = 0
+        elif key_kind == LOG_TUI_KEY_KIND_UP or (is_char and scalar == 107):
+            if scroll < max_scroll:
+                scroll += 1
+        elif key_kind == LOG_TUI_KEY_KIND_DOWN or (is_char and scalar == 106):
+            if scroll > 0:
+                scroll -= 1
+        elif key_kind == LOG_TUI_KEY_KIND_PAGE_UP:
+            if max_scroll - scroll <= 10:
+                scroll = max_scroll
+            else:
+                scroll += 10
+        elif key_kind == LOG_TUI_KEY_KIND_PAGE_DOWN:
+            if scroll <= 10:
+                scroll = 0
+            else:
+                scroll -= 10
+        elif key_kind == LOG_TUI_KEY_KIND_HOME:
+            scroll = max_scroll
+        elif key_kind == LOG_TUI_KEY_KIND_END:
+            scroll = 0
+
+    var output = Pointer[mut=True, UInt64, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    output[unsafe_offset=0] = UInt64(quit)
+    output[unsafe_offset=1] = UInt64(next_editing)
+    output[unsafe_offset=2] = search_action
+    output[unsafe_offset=3] = scroll
+    return 0

@@ -6067,3 +6067,12 @@ classification including Unicode tool-call labels. Rust applies the typed
 output to terminal widgets but no longer implements height, scrolling, or
 source-color decisions. Direct compiled ABI tests, production caller tests,
 and a dedicated no-fallback guard cover the ownership boundary.
+
+## Compiled log TUI keyboard state machine (2026-10-19)
+
+Production log keyboard interactions are now planned through a single Mojo
+key-state ABI. Rust decodes terminal input and applies validated mutations,
+while control-shortcut priority, Unicode search-edit handling, scroll
+saturation, and quit/search/page semantics no longer have a Rust owner.
+Direct ABI and real-caller regressions plus the no-fallback guard cover
+this transition; the 75% goal remains outstanding.

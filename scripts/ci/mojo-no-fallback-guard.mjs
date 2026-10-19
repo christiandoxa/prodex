@@ -4699,11 +4699,24 @@ export function findViolations(files) {
   });
   const logTuiLayoutViolations = files.flatMap(([filePath, contents]) => {
     if (filePath === "crates/prodex-app/src/app_commands/log_tui.rs") {
-      const production = contents.split("\n#[cfg(test)]\nmod tests", 1)[0];
-      return production.includes("prodex_mojo_core::log::log_tui_window(") &&
-        !production.includes("let hidden = lines.len().saturating_sub(max_lines)") &&
-        !production.includes("hidden.saturating_sub(scroll_from_bottom")
-        ? [] : [filePath + ": log viewport selection must remain compiled Mojo-owned"];
+      const production = contents.split("\\n#[cfg(test)]\\nmod tests", 1)[0];
+      const required = [
+        "prodex_mojo_core::log::log_tui_window(",
+        "let plan = log_tui_key_plan(",
+        "LogTuiSearchAction::Push",
+        "compiled_log_tui_keyboard_caller_keeps_edit_mode_search_and_control_precedence",
+      ];
+      const restored = [
+        "let hidden = lines.len().saturating_sub(max_lines)",
+        "hidden.saturating_sub(scroll_from_bottom",
+        "self.scroll_from_bottom.saturating_add(",
+        "self.scroll_from_bottom.saturating_sub(",
+        "KeyCode::Char('q') | KeyCode::Esc => LogTuiInput::Quit",
+        "if self.editing_search {\\n            match key.code {",
+      ];
+      return required.every((marker) => contents.includes(marker)) &&
+        restored.every((marker) => !production.includes(marker))
+        ? [] : [filePath + ": log viewport and keyboard state policy must remain compiled Mojo-owned"];
     }
     if (filePath === "crates/prodex-app/src/app_commands/log_tui_render.rs") {
       const production = contents.split("\n#[cfg(test)]\nmod tests", 1)[0];
@@ -4722,6 +4735,10 @@ export function findViolations(files) {
         "fn prodex_mojo_log_tui_window_v1(",
         "fn prodex_mojo_log_tui_snapshot_height_v1(",
         "fn prodex_mojo_log_tui_source_tone_v1(",
+        "fn prodex_mojo_log_tui_key_plan_v1(",
+        "pub fn log_tui_key_plan(",
+        "compiled_log_tui_key_state_machine_preserves_control_and_unicode",
+        "compiled_log_tui_key_abi_rejects_invalid_inputs_before_writing",
         "compiled_log_tui_window_handles_edges_and_maximum_scroll",
         "compiled_log_tui_snapshot_height_clamps_measured_content",
         "compiled_source_tone_preserves_exact_case_and_tool_prefix",
@@ -4733,6 +4750,9 @@ export function findViolations(files) {
         '@export("prodex_mojo_log_tui_window_v1")',
         '@export("prodex_mojo_log_tui_snapshot_height_v1")',
         '@export("prodex_mojo_log_tui_source_tone_v1")',
+        '@export("prodex_mojo_log_tui_key_plan_v1")',
+        "scroll_from_bottom > max_scroll",
+        "search_action = LOG_TUI_SEARCH_PUSH",
         'log_view_starts_literal(source, StringSlice("tool-call:"))',
       ].filter((marker) => !contents.includes(marker))
         .map((marker) => filePath + ": compiled log TUI policy missing " + marker);
@@ -11874,12 +11894,21 @@ function selfTest() {
     "prodex_mojo_core::log::log_contains_ignore_ascii_case(haystack, needle)",
     "compiled_log_tui_ascii_folded_search_preserves_real_query_semantics",
     "prodex_mojo_core::log::log_tui_window(",
+    "let plan = log_tui_key_plan(",
+    "LogTuiSearchAction::Push",
+    "compiled_log_tui_keyboard_caller_keeps_edit_mode_search_and_control_precedence",
   ].join("\n");
   const logAsciiSearchCaller = "crates/prodex-app/src/app_commands/log_tui.rs";
   assert.deepEqual(findViolations([[logAsciiSearchCaller, logAsciiSearchConsumer]]), []);
   assert.match(findViolations([[logAsciiSearchCaller,
     logAsciiSearchConsumer + "\nhaystack.to_ascii_lowercase()",
   ]]).join("\n"), /log TUI search must remain compiled Mojo-owned/u);
+  assert.match(findViolations([[logAsciiSearchCaller,
+    logAsciiSearchConsumer + "\nself.scroll_from_bottom.saturating_add(10)",
+  ]]).join("\n"), /log viewport and keyboard state policy must remain compiled Mojo-owned/u);
+  assert.match(findViolations([[LOG_TUI_LAYOUT_ADAPTER_FILE,
+    "fn prodex_mojo_log_tui_window_v1()",
+  ]]).join("\n"), /compiled log TUI ABI or direct tests missing/u);
   const rtkWrapperConsumer = [
     "prodex_mojo_core::rtk_noisy::rtk_auto_wrapper_manifest()",
     "let subcommands = wrapper",
@@ -12761,6 +12790,9 @@ function selfTest() {
       '@export("prodex_mojo_log_tui_window_v1")',
       '@export("prodex_mojo_log_tui_snapshot_height_v1")',
       '@export("prodex_mojo_log_tui_source_tone_v1")',
+      '@export("prodex_mojo_log_tui_key_plan_v1")',
+      "scroll_from_bottom > max_scroll",
+      "search_action = LOG_TUI_SEARCH_PUSH",
       'log_view_starts_literal(source, StringSlice("tool-call:"))',
     ].join("\n")]]), []);
 

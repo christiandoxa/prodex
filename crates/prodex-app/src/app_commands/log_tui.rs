@@ -8,6 +8,7 @@ use crate::{
 };
 use chrono::{Local, TimeZone};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use prodex_mojo_core::log::{LogTuiKey, LogTuiSearchAction, log_tui_key_plan};
 use prodex_quota::RuntimeQuotaWindowStatus;
 use prodex_runtime_doctor::read_runtime_log_tail;
 use ratatui::text::{Line, Text};
@@ -182,70 +183,46 @@ pub(super) fn log_tui_header_next_refresh_at(
 
 impl LogTuiState {
     pub(super) fn apply_key(&mut self, key: KeyEvent) -> LogTuiInput {
-        if key.modifiers.contains(KeyModifiers::CONTROL)
-            && matches!(key.code, KeyCode::Char('c') | KeyCode::Char('z'))
-        {
-            return LogTuiInput::Quit;
+        // Decode the terminal API's event shape, not the key's semantics.
+        let decoded = match key.code {
+            KeyCode::Char(ch) => LogTuiKey::Char(ch),
+            KeyCode::Enter => LogTuiKey::Enter,
+            KeyCode::Esc => LogTuiKey::Esc,
+            KeyCode::Backspace => LogTuiKey::Backspace,
+            KeyCode::Up => LogTuiKey::Up,
+            KeyCode::Down => LogTuiKey::Down,
+            KeyCode::PageUp => LogTuiKey::PageUp,
+            KeyCode::PageDown => LogTuiKey::PageDown,
+            KeyCode::Home => LogTuiKey::Home,
+            KeyCode::End => LogTuiKey::End,
+            _ => LogTuiKey::Other,
+        };
+        let plan = log_tui_key_plan(
+            decoded,
+            key.modifiers.contains(KeyModifiers::CONTROL),
+            self.editing_search,
+            self.scroll_from_bottom,
+        )
+        .expect("compiled Mojo log TUI input plan returned invalid output");
+        self.editing_search = plan.editing_search;
+        self.scroll_from_bottom = plan.scroll_from_bottom;
+        match plan.search_action {
+            LogTuiSearchAction::Unchanged => {}
+            LogTuiSearchAction::Clear => self.search.clear(),
+            LogTuiSearchAction::Pop => {
+                self.search.pop();
+            }
+            LogTuiSearchAction::Push => {
+                let KeyCode::Char(ch) = key.code else {
+                    unreachable!("compiled Mojo requested character insertion for a non-char key");
+                };
+                self.search.push(ch);
+            }
         }
-
-        if self.editing_search {
-            match key.code {
-                KeyCode::Enter | KeyCode::Esc => self.editing_search = false,
-                KeyCode::Backspace => {
-                    self.search.pop();
-                    self.scroll_from_bottom = 0;
-                }
-                KeyCode::Char('u') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                    self.search.clear();
-                    self.scroll_from_bottom = 0;
-                }
-                KeyCode::Char(ch) if !key.modifiers.contains(KeyModifiers::CONTROL) => {
-                    self.search.push(ch);
-                    self.scroll_from_bottom = 0;
-                }
-                _ => {}
-            }
-            return LogTuiInput::Continue;
-        }
-
-        match key.code {
-            KeyCode::Char('q') | KeyCode::Esc => LogTuiInput::Quit,
-            KeyCode::Char('/') => {
-                self.search.clear();
-                self.editing_search = true;
-                self.scroll_from_bottom = 0;
-                LogTuiInput::Continue
-            }
-            KeyCode::Char('c') => {
-                self.search.clear();
-                self.scroll_from_bottom = 0;
-                LogTuiInput::Continue
-            }
-            KeyCode::Up | KeyCode::Char('k') => {
-                self.scroll_from_bottom = self.scroll_from_bottom.saturating_add(1);
-                LogTuiInput::Continue
-            }
-            KeyCode::Down | KeyCode::Char('j') => {
-                self.scroll_from_bottom = self.scroll_from_bottom.saturating_sub(1);
-                LogTuiInput::Continue
-            }
-            KeyCode::PageUp => {
-                self.scroll_from_bottom = self.scroll_from_bottom.saturating_add(10);
-                LogTuiInput::Continue
-            }
-            KeyCode::PageDown => {
-                self.scroll_from_bottom = self.scroll_from_bottom.saturating_sub(10);
-                LogTuiInput::Continue
-            }
-            KeyCode::Home => {
-                self.scroll_from_bottom = usize::MAX;
-                LogTuiInput::Continue
-            }
-            KeyCode::End => {
-                self.scroll_from_bottom = 0;
-                LogTuiInput::Continue
-            }
-            _ => LogTuiInput::Continue,
+        if plan.quit {
+            LogTuiInput::Quit
+        } else {
+            LogTuiInput::Continue
         }
     }
 
@@ -556,6 +533,45 @@ mod tests {
 
         assert_eq!(state.query(), Some("hi"));
         assert!(state.footer_text("q quit").contains("search: /hi"));
+    }
+
+    #[test]
+    fn compiled_log_tui_keyboard_caller_keeps_edit_mode_search_and_control_precedence() {
+        let mut state = LogTuiState::default();
+        state.apply_key(key(KeyCode::PageUp));
+        assert_eq!(state.scroll_from_bottom(), 10);
+        state.apply_key(key(KeyCode::Home));
+        assert_eq!(state.scroll_from_bottom(), usize::MAX);
+        state.apply_key(key(KeyCode::PageDown));
+        assert_eq!(state.scroll_from_bottom(), usize::MAX - 10);
+        state.apply_key(key(KeyCode::End));
+        assert_eq!(state.scroll_from_bottom(), 0);
+
+        assert_eq!(
+            state.apply_key(key(KeyCode::Char('/'))),
+            LogTuiInput::Continue
+        );
+        state.apply_key(key(KeyCode::Char('界')));
+        state.apply_key(key(KeyCode::Char('🚀')));
+        assert_eq!(state.query(), Some("界🚀"));
+        state.apply_key(key(KeyCode::Backspace));
+        assert_eq!(state.query(), Some("界"));
+        state.apply_key(key(KeyCode::Char('q')));
+        assert_eq!(state.query(), Some("界q"));
+        assert_eq!(
+            state.apply_key(KeyEvent::new(KeyCode::Char('u'), KeyModifiers::CONTROL)),
+            LogTuiInput::Continue
+        );
+        assert_eq!(state.query(), None);
+        assert_eq!(
+            state.apply_key(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL)),
+            LogTuiInput::Quit
+        );
+
+        state.apply_key(key(KeyCode::Char('🚀')));
+        state.apply_key(key(KeyCode::Esc));
+        assert_eq!(state.query(), Some("🚀"));
+        assert_eq!(state.apply_key(key(KeyCode::Char('q'))), LogTuiInput::Quit);
     }
 
     #[test]
