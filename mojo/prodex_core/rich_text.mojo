@@ -1,4 +1,5 @@
 from std.memory import Pointer
+from index_order import index_order_sort, index_order_swap as rich_view_order_swap
 
 from rich_types import (
     ProdexRichSlice,
@@ -383,45 +384,9 @@ def rich_view_compare(
         return 1
     return 0
 
-def rich_view_order_swap(
-    indices: Pointer[mut=True, Int64, MutUntrackedOrigin],
-    left: Int64,
-    right: Int64,
-) -> None:
-    var value = indices[unsafe_offset=left]
-    indices[unsafe_offset=left] = indices[unsafe_offset=right]
-    indices[unsafe_offset=right] = value
-
-def rich_view_order_sift_down(
-    values: Pointer[mut=False, ProdexRichStringView, ImmUntrackedOrigin],
-    indices: Pointer[mut=True, Int64, MutUntrackedOrigin],
-    root_index: Int64,
-    end: Int64,
-) -> None:
-    var root = root_index
-    while True:
-        var child = root * 2 + 1
-        if child > end:
-            break
-        if (
-            child + 1 <= end
-            and rich_view_compare(
-                values[unsafe_offset=indices[unsafe_offset=child]],
-                values[unsafe_offset=indices[unsafe_offset=child + 1]],
-            )
-            < 0
-        ):
-            child += 1
-        if (
-            rich_view_compare(
-                values[unsafe_offset=indices[unsafe_offset=root]],
-                values[unsafe_offset=indices[unsafe_offset=child]],
-            )
-            >= 0
-        ):
-            break
-        rich_view_order_swap(indices, root, child)
-        root = child
+def rich_view_order_compare(data: UInt, _width: Int64, left: Int64, right: Int64) -> Int64:
+    var values = Pointer[mut=False, ProdexRichStringView, ImmUntrackedOrigin](unsafe_from_address=Int(data))
+    return rich_view_compare(values[unsafe_offset=left], values[unsafe_offset=right])
 
 
 def rich_view_order_sort(
@@ -429,12 +394,4 @@ def rich_view_order_sort(
     indices: Pointer[mut=True, Int64, MutUntrackedOrigin],
     count: Int64,
 ) -> None:
-    var start = count // 2
-    while start > 0:
-        start -= 1
-        rich_view_order_sift_down(values, indices, start, count - 1)
-    var end = count
-    while end > 1:
-        end -= 1
-        rich_view_order_swap(indices, 0, end)
-        rich_view_order_sift_down(values, indices, 0, end - 1)
+    index_order_sort[rich_view_order_compare](UInt(Int(values)), 0, indices, count)

@@ -43,6 +43,9 @@ const GEMINI_SIMPLE_ADAPTER = "crates/prodex-mojo-core/src/rich/gemini_simple_re
 const GEMINI_SIMPLE_MOJO = "mojo/prodex_core/gemini_sse_state.mojo";
 const GEMINI_SIMPLE_TESTS = "crates/prodex-provider-core/src/gemini_bridge/response/simple_tests.rs";
 const GEMINI_SIMPLE_ABI_TESTS = "crates/prodex-mojo-core/src/rich/gemini_simple_response_tests.rs";
+const BINDING_PRUNE_ADAPTER = "crates/prodex-mojo-core/src/state_policy/binding_prune.rs";
+const BINDING_PRUNE_MOJO = "mojo/prodex_core/state_policy.mojo";
+const BINDING_PRUNE_STORE = "crates/prodex-runtime-store/src/continuations/compaction.rs";
 const QUOTA_LOG_PROFILE_CALLER = "crates/prodex-app/src/quota_support.rs";
 const INFO_LOAD_ADAPTER = "crates/prodex-mojo-core/src/info_render/runtime_load.rs";
 const INFO_LOAD_MOJO = "mojo/prodex_core/info_runtime_load.mojo";
@@ -683,6 +686,9 @@ const PROMOTED_FILES = [
   GEMINI_SIMPLE_MOJO,
   GEMINI_SIMPLE_TESTS,
   GEMINI_SIMPLE_ABI_TESTS,
+  BINDING_PRUNE_ADAPTER,
+  BINDING_PRUNE_MOJO,
+  BINDING_PRUNE_STORE,
   QUOTA_LOG_PROFILE_CALLER,
   INFO_LOAD_ADAPTER,
   INFO_LOAD_MOJO,
@@ -1554,6 +1560,27 @@ const FORBIDDEN_MARKERS = [
 ];
 
 export function findViolations(files) {
+  const bindingPruneViolations = files.flatMap(([filePath, contents]) => {
+    const functions = filePath === STATE_FILE ? ["prune_profile_bindings"]
+      : filePath === BINDING_PRUNE_STORE
+        ? ["prune_runtime_continuation_status_map", "prune_runtime_continuation_response_bindings"] : [];
+    const violations = functions.flatMap((name) => {
+      const body = contents.match(new RegExp(`pub fn ${name}\\([^]*?^\\}`, "mu"))?.[0] ?? "";
+      return body.includes("prodex_mojo_core::state_policy::binding_prune_indices(")
+        && !/sort(?:_by(?:_key)?)?\(|\.take\(|\.len\(\)\s*-\s*max_entries/u.test(body)
+        ? [] : [`${filePath}: ${name} must retain Mojo pruning without Rust ranking or limits`];
+    });
+    const required = filePath === BINDING_PRUNE_ADAPTER
+      ? ["prodex_state_binding_prune_v1(", "NEED_RANKS", "std::mem::replace(&mut seen[index], true)"]
+      : filePath === BINDING_PRUNE_MOJO
+        ? ["def prodex_state_binding_prune_v1(", "index_order_sort[state_binding_rank_compare]", "UInt64(count) <= max_entries"] : [];
+    violations.push(...required.filter((marker) => !contents.includes(marker))
+      .map((marker) => `${filePath}: compiled binding-pruning ABI must retain ${marker}`));
+    if (filePath === BINDING_PRUNE_ADAPTER && /\.sort(?:_by(?:_key)?)?\(/u.test(contents.split("#[cfg(test)]", 1)[0])) {
+      violations.push(`${filePath}: restored Rust binding-pruning sort`);
+    }
+    return violations;
+  });
   const geminiSimpleResponseViolations = files.flatMap(([filePath, contents]) => {
     const production = contents.split("#[cfg(test)]", 1)[0];
     if (filePath === GEMINI_SIMPLE_CALLER) {
@@ -10498,6 +10525,7 @@ export function findViolations(files) {
     return [];
   });
   return [...geminiSimpleResponseViolations, ...logPayloadProjectionViolations, ...nativeRecoveryOwnershipViolations, ...quotaRecoveryEligibilityViolations, ...runtimeBrokerReuseMojoViolations, ...geminiResponseMediaMojoViolations, ...cookieEvictionMojoViolations, ...websocketBudgetMojoViolations, ...affinityBindingMojoViolations, ...responsesCapacityRecoveryViolations, ...sseTapMojoOwnershipViolations, ...quotaWatchViolations, ...geminiCompactSnippetViolations, ...geminiCompactTextViolations, ...doctorSmartContextDecisionViolations, ...providerSseJsonFrameMojoViolations, ...geminiSseCompletionOwnershipViolations, ...anthropicNativeStreamDecisionViolations, ...anthropicAttemptCursorViolations, ...geminiUnsupportedToolRetryViolations, ...terminalGeometryViolations, ...previousResponseRecoveryTransitionViolations, ...chatCompatibleToolCallKindViolations, ...geminiQuotaBodyMojoViolations, ...geminiOAuthRotationMojoViolations, ...geminiBuiltinBatchMojoViolations, ...geminiToolArrayValidationMojoViolations, ...geminiOAuthModelMojoViolations, ...superExposeOriginMojoViolations, ...kiroAcpToolLedgerMojoViolations, ...quotaPoolSummarySectionsMojoViolations, ...deepseekRequestDiagnosticViolations, ...deepseekToolShapeIssueMojoViolations, ...deepseekReplayItemPolicyMojoViolations, ...chatNamespaceSplitMojoViolations, ...deepseekInputItemIssueMessageViolations, ...deepseekRequestIssueMessageViolations, ...smartContextTelemetrySampleViolations, ...compatibilityDiagnosticsMojoViolations, ...quotaHeaderProjectionViolations, ...smartContextCapsuleOrderViolations, ...markerViolations, ...deepseekCatalogPolicyViolations, ...featureOffViolations, ...liveLogRecordViolations, ...runtimePolicyPresetViolations, ...runtimeConfigScalarViolations, ...profileHealthCircuitViolations, ...logThroughputViolations, ...operationalDetailSpecViolations, ...transcriptPolicyViolations, ...logLoadPolicyViolations, ...routeReasonViolations, ...runtimeStateQuotaViolations, ...runtimeStateRoutePolicyViolations, ...runtimeProxyRootViolations, ...runtimeRecoveryDeadlineViolations, ...brokerVersionGuardViolations, ...brokerContinuityViolations, ...brokerLogCacheViolations, ...codexConfigViolations, ...statePolicyViolations, ...quotaSelectionPolicyViolations, ...routeTagMirrorViolations, ...enumTagMirrorViolations, ...appSelectionPolicyMirrorViolations, ...runtimeStateBackgroundViolations, ...redactionViolations, ...rateLimitHeaderSelectionViolations, ...profileIdentityViolations, ...governanceInspectionViolations, ...governanceInspectionOrderingViolations, ...exactnessPlannerViolations,
+    ...bindingPruneViolations,
     ...adaptiveBudgetViolations,
     ...providerUsageViolations,
     ...auditUsageViolations,
@@ -10618,6 +10646,16 @@ async function promotedFiles() {
 }
 
 function selfTest() {
+  const pruning = "prodex_mojo_core::state_policy::binding_prune_indices(";
+  const scopedPruning = `pub fn prune_profile_bindings() {\n ${pruning}\n}`;
+  assert(!findViolations([[STATE_FILE, scopedPruning]]).some((message) => message.includes("must retain Mojo pruning")));
+  assert.match(findViolations([[STATE_FILE, scopedPruning.replace(pruning, "oldest.sort_by_key(")]]).join("\n"), /must retain Mojo pruning/u);
+  const storePruning = ["prune_runtime_continuation_status_map", "prune_runtime_continuation_response_bindings"]
+    .map((name) => `pub fn ${name}() {\n ${pruning}\n}`).join("\n");
+  assert.deepEqual(findViolations([[BINDING_PRUNE_STORE, storePruning]]), []);
+  assert.match(findViolations([[BINDING_PRUNE_STORE, storePruning.replace(pruning, "oldest.sort_by_key(")]]).join("\n"), /must retain Mojo pruning/u);
+  assert.match(findViolations([[BINDING_PRUNE_ADAPTER, ""]]).join("\n"), /compiled binding-pruning ABI/u);
+  assert.match(findViolations([[BINDING_PRUNE_ADAPTER, "ranks.sort()"]]).join("\n"), /restored Rust binding-pruning sort/u);
   const geminiSimpleCaller = "plan_gemini_simple_response(&inputs) GeminiSimplePartAction::CheckCallThenReject";
   assert.deepEqual(findViolations([[GEMINI_SIMPLE_CALLER, geminiSimpleCaller]]), []);
   assert.match(findViolations([[GEMINI_SIMPLE_CALLER, geminiSimpleCaller + "\nname.trim()"]]).join("\n"), /restored Rust Gemini simple-response classification/u);

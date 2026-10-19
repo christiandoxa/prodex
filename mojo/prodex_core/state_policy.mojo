@@ -1,4 +1,5 @@
 from std.memory import Pointer
+from index_order import index_order_sort
 
 comptime PRODEX_STATE_POLICY_ABI_VERSION: Int64 = 1
 comptime PRODEX_STATE_POLICY_OK: Int64 = 0
@@ -13,6 +14,49 @@ comptime STATE_POLICY_BINDING_KEEP: Int64 = 4
 
 comptime INT64_MAX: Int64 = 9223372036854775807
 comptime INT64_MIN: Int64 = -9223372036854775808
+
+
+def state_binding_rank_compare(data: UInt, width: Int64, left: Int64, right: Int64) -> Int64:
+    var fields = Pointer[mut=False, Int64, ImmUntrackedOrigin](unsafe_from_address=Int(data))
+    for column in range(width):
+        var a = fields[unsafe_offset=left * width + column]
+        var b = fields[unsafe_offset=right * width + column]
+        if a < b:
+            return -1
+        if a > b:
+            return 1
+    # Preserve the map's original lexical order for equal ranks.
+    return Int64(-1 if left < right else 1 if left > right else 0)
+
+
+@export("prodex_state_binding_prune_v1")
+def prodex_state_binding_prune_v1(
+    version: Int64, ranks_address: UInt, count: Int64, width: Int64,
+    max_entries: UInt64, output_address: UInt, output_words: Int64,
+) abi("C") -> Int64:
+    if version != 1:
+        return 4
+    if (width != 2 and width != 9 and width != 10) or count < 0 or count > INT64_MAX // (width * 8) or output_address == 0 or output_address % 8 != 0:
+        return 1
+    if output_words < 1:
+        return 3
+    var output = Pointer[mut=True, Int64, MutUntrackedOrigin](unsafe_from_address=Int(output_address))
+    if UInt64(count) <= max_entries:
+        output[] = 0
+        return 0
+    # A null rank address probes whether lazy host facts are needed.
+    if ranks_address == 0:
+        return 5
+    if ranks_address % 8 != 0:
+        return 1
+    if output_words < count + 1:
+        return 3
+    var indices = output.unsafe_offset(1)
+    for index in range(count):
+        indices[unsafe_offset=index] = index
+    index_order_sort[state_binding_rank_compare](ranks_address, width, indices, count)
+    output[] = count - Int64(max_entries)
+    return 0
 
 
 def state_bool(value: Int64) -> Bool:
