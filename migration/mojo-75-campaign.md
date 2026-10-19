@@ -6945,3 +6945,63 @@ formatting and diff checks pass. Offline baseline and all five replay fixtures
 pass. Staged churn is within the 1,200-line/500-per-file limits. No owned
 comparison or compiler probe remains; the recently rebuilt cache is retained.
 Full CI, live provider and native macOS/Windows checks were not run.
+
+
+## Compiled Gemini normalized error bodies (2026-10-20)
+
+Duration checkpoint `d23025207` is pushed to main. The Gemini quota owner now
+owns the complete normalized error body through a version-1 measured JSON ABI.
+A fact-free probe preserves successful-status short-circuiting before Serde or
+buffered-SSE acquisition. Mojo owns structured-error selection, message scope,
+Unicode trimming, defaults, generic-429 admissibility and final wire bytes.
+The existing HTTP error labels and admissibility helpers remain the sole
+authority for both the scalar API and the new complete-body transform.
+
+The shared provider message selector now accepts a bounded subtree root. Its
+existing generic entrypoint still uses the full tree; Gemini selects only the
+chosen error object. An empty error object must not borrow a message from an
+outside sibling. Rust retains UTF-8/Serde acquisition and passes existing
+compiled quota facts without rescanning valid JSON. The former Rust error
+branching, message fallback, JSON assembly and obsolete private wrappers are
+removed. No semantic fallback or new input/body cap is introduced.
+
+All 90,112 generated comparisons match the former complete output bytes,
+including nested objects/arrays, null error fields, malformed JSON, buffered
+SSE, invalid UTF-8 and HTTP status boundaries. The owned oracle and native
+compiler object were removed after results were harvested. Symbol inspection
+confirmed the shared message import adds no duplicate exported entrypoints.
+Direct assertions pass via
+`mojo run -D ASSERT=all -I mojo/prodex_core mojo/tests/gemini_normalized_error_test.mojo`.
+Initial compilation required concrete borrowed label views and explicit copies;
+the corrected native object and ABI tests pass.
+
+All 1,004 strict core tests and 505 provider tests pass via
+`PRODEX_MOJO_REQUIRED=1 CARGO_BUILD_JOBS=6 cargo test --locked -q -p prodex-mojo-core --features mojo-core -- --test-threads=1`
+and `PRODEX_MOJO_REQUIRED=1 CARGO_BUILD_JOBS=6 cargo test --locked -q -p prodex-provider-core --features mojo -- --test-threads=1`.
+Caller cases compare complete wire bytes and preserve messages over 65,537
+bytes, Unicode, NUL and original structured error contents.
+
+The unchanged official metric rises from 35.538015481743386% to
+35.55582598786927% (128,556 Mojo / 233,005 Rust production lines), leaving
+39.44417401213073 percentage points to 75%. Release-floor and audited reachable
+source non-regression checks pass; the project target remains unmet.
+
+All 12 application caller tests pass via
+`PRODEX_MOJO_REQUIRED=1 CARGO_BUILD_JOBS=6 cargo test --locked -q -p prodex-app --lib local_rewrite_gemini_quota::tests:: -- --test-threads=1`.
+All 459 serialized proxy regressions pass via
+`PRODEX_MOJO_REQUIRED=1 CARGO_BUILD_JOBS=6 cargo test --locked -q -p prodex-app --lib main_internal_tests::runtime_proxy_ -- --test-threads=1`.
+
+Workspace Clippy passes via
+`PRODEX_MOJO_REQUIRED=1 CARGO_BUILD_JOBS=6 cargo clippy --locked --workspace --all-targets --all-features -- -D warnings`,
+with existing vendor warnings only. Canonical
+`RUST_TEST_THREADS=1 CARGO_BUILD_JOBS=6 npm run test:changed` passes, including
+504 provider tests under its default feature selection; the explicit-feature
+suite above supplies the 505-test evidence.
+`PRODEX_MOJO_REQUIRED=1 CARGO_BUILD_JOBS=6 node scripts/ci/test-serial.mjs --suite runtime-smoke`
+passes. No-fallback/authority/crate-boundary self-test/source, provider-SPI
+boundary, runtime-hotpath self-test/source, secret-boundary, docs, formatting,
+diff and staged privacy checks pass. Offline baseline and all five replay
+fixtures pass. Staged churn stays within 1,200 total lines and 500 per file.
+The build cache is retained for reuse. Full CI, live provider and native
+macOS/Windows checks were not run.
+`node scripts/ci/runtime-test-manifest-guard.mjs` also passes.

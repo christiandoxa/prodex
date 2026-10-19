@@ -100,6 +100,33 @@ mod tests {
     }
 
     #[test]
+    fn gemini_normalized_error_keeps_the_selected_error_subtree_and_default_message() {
+        let parts = RuntimeHeapTrimmedBufferedResponseParts {
+            status: 400,
+            headers: vec![("x-extra".to_string(), b"keep".to_vec())],
+            body: br#"{"error":{},"message":"outside the selected error"}"#
+                .to_vec()
+                .into(),
+        };
+        let normalized = runtime_gemini_normalized_error_parts(400, parts);
+        assert_eq!(normalized.status, 400);
+        assert_eq!(
+            serde_json::from_slice::<serde_json::Value>(normalized.body.as_slice()).unwrap(),
+            serde_json::json!({"error":{"code":"bad_request","gemini_error":{},"message":"Gemini upstream returned HTTP 400.","param":null,"type":"invalid_request_error"}})
+        );
+        assert_eq!(
+            normalized.headers,
+            vec![
+                ("x-extra".to_string(), b"keep".to_vec()),
+                (
+                    "content-type".to_string(),
+                    b"application/json; charset=utf-8".to_vec()
+                )
+            ]
+        );
+    }
+
+    #[test]
     fn gemini_google_resource_exhausted_is_quota_blocked() {
         let body = serde_json::to_vec(&serde_json::json!({
             "error": {

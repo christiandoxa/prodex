@@ -5,6 +5,8 @@ use crate::MojoError;
 
 mod retry_duration;
 pub use retry_duration::{GeminiRetryTextKind, gemini_retry_text_delay_ms};
+mod normalized_error;
+pub use normalized_error::{gemini_error_normalization_needs_body, gemini_normalized_error_json};
 
 unsafe extern "C" {
     fn prodex_gemini_quota_error_kind_v1(
