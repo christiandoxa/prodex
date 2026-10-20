@@ -30,17 +30,20 @@ pub enum RecentLogPathOrderMode {
     /// Original runtime-info path selection: descending SystemTime,
     /// descending path and reverse original order on complete ties.
     RuntimeSystemTime = 1,
+    /// prodex-core log retention: descending unsigned u128 modification
+    /// timestamp, descending path, last original record for exact ties.
+    NewestModifiedPath = 2,
 }
 
 #[derive(Debug, Clone, Copy)]
 pub struct RecentLogPathInput<'a> {
     pub path: &'a [u8],
     pub modified_before_unix_epoch: bool,
-    /// For SessionMilliseconds: high 64 bits of u128 epoch millis.
-    /// For RuntimeSystemTime: zero.
+    /// For SessionMilliseconds and NewestModifiedPath: high u64 of
+    /// the unsigned u128 timestamp. For RuntimeSystemTime: zero.
     pub modified_high: u64,
-    /// For SessionMilliseconds: low 64 bits of u128 epoch millis.
-    /// For RuntimeSystemTime: absolute seconds from Unix epoch.
+    /// For SessionMilliseconds and NewestModifiedPath: low u64 of
+    /// the unsigned u128 timestamp. For RuntimeSystemTime: seconds.
     pub modified_low: u64,
     pub modified_nanos: u32,
 }
@@ -59,8 +62,11 @@ pub fn recent_log_path_order(
         .map_err(|_| MojoError::Capacity)?;
     for candidate in candidates {
         if candidate.modified_nanos >= 1_000_000_000
-            || (mode == RecentLogPathOrderMode::SessionMilliseconds
-                && (candidate.modified_before_unix_epoch || candidate.modified_nanos != 0))
+            || (matches!(
+                mode,
+                RecentLogPathOrderMode::SessionMilliseconds
+                    | RecentLogPathOrderMode::NewestModifiedPath
+            ) && (candidate.modified_before_unix_epoch || candidate.modified_nanos != 0))
             || (mode == RecentLogPathOrderMode::RuntimeSystemTime && candidate.modified_high != 0)
         {
             return Err(MojoError::InvalidInput);
@@ -185,6 +191,37 @@ mod tests {
     }
 
     #[test]
+    fn compiled_recent_log_paths_select_newest_unsigned_u128_then_largest_path_and_last_exact_tie()
+    {
+        let high = (u64::MAX as u128) + 10;
+        let cases = [
+            millis("z", high),
+            millis("a", high),
+            millis("雪", high),
+            millis("z", high),
+            millis("é", high),
+            millis("later-but-older", high - 1),
+        ];
+        assert_eq!(
+            recent_log_path_order(RecentLogPathOrderMode::NewestModifiedPath, &cases, 6),
+            Ok(vec![2, 4, 3, 0, 1, 5]),
+        );
+        assert_eq!(
+            recent_log_path_order(RecentLogPathOrderMode::NewestModifiedPath, &cases, 1),
+            Ok(vec![2]),
+        );
+        assert_eq!(
+            recent_log_path_order(RecentLogPathOrderMode::NewestModifiedPath, &[], 1),
+            Ok(vec![]),
+        );
+        let invalid = [time("pre-epoch", true, 1, 0)];
+        assert_eq!(
+            recent_log_path_order(RecentLogPathOrderMode::NewestModifiedPath, &invalid, 1),
+            Err(MojoError::InvalidInput),
+        );
+    }
+
+    #[test]
     fn compiled_recent_log_paths_abi_rejects_late_malformed_row_without_writes() {
         let mut rows = [0_u64; 12];
         let mut scratch = [81_i64; 2];
@@ -196,7 +233,7 @@ mod tests {
         let count = (&mut written as *mut i64) as usize as u64;
         for (abi, mode, src, length, limit, cap, destination, expected) in [
             (2, 0, source, 2, 2, 2, count, 4),
-            (1, 2, source, 2, 2, 2, count, 1),
+            (1, 3, source, 2, 2, 2, count, 1),
             (1, 0, 0, 2, 2, 2, count, 1),
             (1, 0, source, -1, 2, 2, count, 1),
             (1, 0, source, 65_537, 2, 2, count, 1),

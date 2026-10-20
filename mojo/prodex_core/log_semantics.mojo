@@ -4022,6 +4022,7 @@ comptime RECENT_LOG_PATH_ORDER_ABI: Int64 = 1
 comptime RECENT_LOG_PATH_ORDER_MAX: Int64 = 65_536
 comptime RECENT_LOG_PATH_ORDER_SESSION: Int64 = 0
 comptime RECENT_LOG_PATH_ORDER_RUNTIME: Int64 = 1
+comptime RECENT_LOG_PATH_ORDER_NEWEST: Int64 = 2
 comptime RECENT_LOG_PATH_ROW_WORDS: Int64 = 6
 
 
@@ -4107,7 +4108,7 @@ def prodex_mojo_recent_log_paths_v1(
     if abi_version != RECENT_LOG_PATH_ORDER_ABI:
         return 4
     if (
-        mode < RECENT_LOG_PATH_ORDER_SESSION or mode > RECENT_LOG_PATH_ORDER_RUNTIME
+        mode < RECENT_LOG_PATH_ORDER_SESSION or mode > RECENT_LOG_PATH_ORDER_NEWEST
         or count < 0 or count > RECENT_LOG_PATH_ORDER_MAX
         or limit < 0 or limit > count
         or (count > 0 and (rows_address == 0 or rows_address % 8 != 0))
@@ -4129,7 +4130,8 @@ def prodex_mojo_recent_log_paths_v1(
             or recent_log_path_row(rows, index, 5) >= UInt64(1_000_000_000)
         ):
             return 1
-        if mode == RECENT_LOG_PATH_ORDER_SESSION and (
+        if (mode == RECENT_LOG_PATH_ORDER_SESSION
+            or mode == RECENT_LOG_PATH_ORDER_NEWEST) and (
             recent_log_path_row(rows, index, 2) != 0
             or recent_log_path_row(rows, index, 5) != 0
         ):

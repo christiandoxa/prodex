@@ -196,3 +196,57 @@ fn zero_orphan_retention_selects_fresh_orphan_managed_home() {
     assert_eq!(orphans, vec!["fresh-orphan"]);
     fs::remove_dir_all(&paths.root).expect("test root should clean up");
 }
+
+#[test]
+fn compiled_newest_runtime_log_selection_uses_timestamp_then_largest_eligible_filename() {
+    use std::time::UNIX_EPOCH;
+    let paths = test_paths("newest-runtime-log-mojo");
+    fs::create_dir_all(&paths.root).unwrap();
+    let candidates = [
+        ("prodex-runtime-a.log", 10_u64),
+        ("prodex-runtime-b.log", 10_u64),
+        ("prodex-runtime-z.log", 10_u64),
+        ("prodex-runtime-older.log", 9_u64),
+    ];
+    for (name, modified_seconds) in candidates {
+        let path = paths.root.join(name);
+        fs::write(&path, b"log\n").unwrap();
+        fs::File::options()
+            .write(true)
+            .open(&path)
+            .unwrap()
+            .set_modified(UNIX_EPOCH + Duration::from_secs(modified_seconds))
+            .unwrap();
+    }
+    fs::write(paths.root.join("not-prodex-runtime-a.log"), b"ignore").unwrap();
+    assert_eq!(
+        newest_runtime_proxy_log_in_dir(&paths.root, "prodex-runtime"),
+        Some(paths.root.join("prodex-runtime-z.log")),
+    );
+    fs::File::options()
+        .write(true)
+        .open(paths.root.join("prodex-runtime-older.log"))
+        .unwrap()
+        .set_modified(UNIX_EPOCH + Duration::from_secs(11))
+        .unwrap();
+    assert_eq!(
+        newest_runtime_proxy_log_in_dir(&paths.root, "prodex-runtime"),
+        Some(paths.root.join("prodex-runtime-older.log")),
+    );
+    fs::remove_dir_all(paths.root).unwrap();
+}
+
+#[test]
+fn compiled_newest_runtime_log_selection_handles_empty_directory() {
+    let paths = test_paths("newest-runtime-log-empty-mojo");
+    assert_eq!(
+        newest_runtime_proxy_log_in_dir(&paths.root, "prodex-runtime"),
+        None,
+    );
+    fs::create_dir_all(&paths.root).unwrap();
+    assert_eq!(
+        newest_runtime_proxy_log_in_dir(&paths.root, "prodex-runtime"),
+        None,
+    );
+    fs::remove_dir_all(paths.root).unwrap();
+}

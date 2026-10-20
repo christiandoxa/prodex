@@ -1,4 +1,4 @@
-# Direct ABI tests: two historically distinct recent-log sort contracts.
+# Direct ABI tests: three production recent-log path sort contracts.
 # Run with mojo run -D ASSERT=all -I mojo/prodex_core mojo/tests/recent_log_paths_test.mojo.
 from std.memory.alloc import alloc, dealloc, Layout
 from log_semantics import prodex_mojo_recent_log_paths_v1
@@ -54,6 +54,18 @@ def main() raises:
     assert output[unsafe_offset=1] == 0
     assert output[unsafe_offset=2] == 1
 
+    # Unsigned u128 mode has no pre-epoch row. Place snow in the high word.
+    rows[unsafe_offset=20] = 0
+    rows[unsafe_offset=21] = 1
+    assert prodex_mojo_recent_log_paths_v1(
+        1, 2, source, 4, 4, work, 4, result, 4, written,
+    ) == 0
+    assert count[unsafe_offset=0] == 4
+    assert output[unsafe_offset=0] == 3
+    assert output[unsafe_offset=1] == 2
+    assert output[unsafe_offset=2] == 0
+    assert output[unsafe_offset=3] == 1
+
     for index in range(4):
         output[unsafe_offset=index] = 73
         scratch[unsafe_offset=index] = 71
@@ -62,7 +74,7 @@ def main() raises:
         2, 1, source, 4, 4, work, 4, result, 4, written,
     ) == 4
     assert prodex_mojo_recent_log_paths_v1(
-        1, 2, source, 4, 4, work, 4, result, 4, written,
+        1, 3, source, 4, 4, work, 4, result, 4, written,
     ) == 1
     assert prodex_mojo_recent_log_paths_v1(
         1, 1, source, 4, 5, work, 4, result, 4, written,

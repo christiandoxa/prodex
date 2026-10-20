@@ -14,7 +14,7 @@ path = "src/lib.rs"
 anyhow = { workspace = true }
 dirs = { workspace = true }
 libc = { workspace = true }
-prodex_mojo_core = { workspace = true, features = ["mojo-runtime"] }
+prodex_mojo_core = { workspace = true, features = ["mojo-runtime", "mojo-routing", "mojo-rich"] }
 same-file = { workspace = true }
 
 [lints]
