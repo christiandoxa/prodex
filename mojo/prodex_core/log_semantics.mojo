@@ -4012,3 +4012,150 @@ def prodex_mojo_log_follow_selection_v1(
         unsafe_from_address=Int(selected_count_address)
     )[] = selected_unique
     return 0
+
+
+# One compiled ordering owner for recent session logs and recent runtime
+# info logs. Mode 0: quantized modification milliseconds descending/path
+# ascending. Mode 1: full signed SystemTime descending/path descending,
+# preserving Rust's historical ascending-sort-then-reverse tie order.
+comptime RECENT_LOG_PATH_ORDER_ABI: Int64 = 1
+comptime RECENT_LOG_PATH_ORDER_MAX: Int64 = 65_536
+comptime RECENT_LOG_PATH_ORDER_SESSION: Int64 = 0
+comptime RECENT_LOG_PATH_ORDER_RUNTIME: Int64 = 1
+comptime RECENT_LOG_PATH_ROW_WORDS: Int64 = 6
+
+
+def recent_log_path_row(
+    rows: Pointer[mut=False, UInt64, _], index: Int64, offset: Int64,
+) -> UInt64:
+    return rows[unsafe_offset=index * RECENT_LOG_PATH_ROW_WORDS + offset]
+
+
+def recent_log_path_compare(
+    rows: Pointer[mut=False, UInt64, _], mode: Int64,
+    left: Int64, right: Int64,
+) -> Int64:
+    var left_negative = recent_log_path_row(rows, left, 2)
+    var right_negative = recent_log_path_row(rows, right, 2)
+    if left_negative != right_negative:
+        return -1 if left_negative == 0 else 1
+    for slot in range(Int64(3), Int64(6)):
+        var a = recent_log_path_row(rows, left, slot)
+        var b = recent_log_path_row(rows, right, slot)
+        if a != b:
+            if left_negative == 1:
+                return -1 if a < b else 1
+            return -1 if a > b else 1
+    var left_len = Int64(recent_log_path_row(rows, left, 1))
+    var right_len = Int64(recent_log_path_row(rows, right, 1))
+    var a_ptr = Pointer[mut=False, UInt8, ImmUntrackedOrigin](
+        unsafe_from_address=Int(recent_log_path_row(rows, left, 0))
+    )
+    var b_ptr = Pointer[mut=False, UInt8, ImmUntrackedOrigin](
+        unsafe_from_address=Int(recent_log_path_row(rows, right, 0))
+    )
+    for index in range(min(left_len, right_len)):
+        var a_byte = a_ptr[unsafe_offset=index]
+        var b_byte = b_ptr[unsafe_offset=index]
+        if a_byte != b_byte:
+            if mode == RECENT_LOG_PATH_ORDER_SESSION:
+                return -1 if a_byte < b_byte else 1
+            return -1 if a_byte > b_byte else 1
+    if left_len != right_len:
+        if mode == RECENT_LOG_PATH_ORDER_SESSION:
+            return -1 if left_len < right_len else 1
+        return -1 if left_len > right_len else 1
+    if left != right:
+        if mode == RECENT_LOG_PATH_ORDER_SESSION:
+            return -1 if left < right else 1
+        return -1 if left > right else 1
+    return 0
+
+
+def recent_log_path_heap_down(
+    rows: Pointer[mut=False, UInt64, _], mode: Int64,
+    indices: Pointer[mut=True, Int64, _], root_start: Int64, count: Int64,
+):
+    var root = root_start
+    while root * 2 + 1 < count:
+        var child = root * 2 + 1
+        var swap = root
+        if recent_log_path_compare(
+            rows, mode, indices[unsafe_offset=swap], indices[unsafe_offset=child],
+        ) < 0:
+            swap = child
+        if child + 1 < count and recent_log_path_compare(
+            rows, mode, indices[unsafe_offset=swap], indices[unsafe_offset=child + 1],
+        ) < 0:
+            swap = child + 1
+        if swap == root:
+            return
+        var old = indices[unsafe_offset=root]
+        indices[unsafe_offset=root] = indices[unsafe_offset=swap]
+        indices[unsafe_offset=swap] = old
+        root = swap
+
+
+@export("prodex_mojo_recent_log_paths_v1")
+def prodex_mojo_recent_log_paths_v1(
+    abi_version: Int64, mode: Int64,
+    rows_address: UInt, count: Int64, limit: Int64,
+    scratch_address: UInt, scratch_capacity: Int64,
+    output_address: UInt, output_capacity: Int64,
+    written_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != RECENT_LOG_PATH_ORDER_ABI:
+        return 4
+    if (
+        mode < RECENT_LOG_PATH_ORDER_SESSION or mode > RECENT_LOG_PATH_ORDER_RUNTIME
+        or count < 0 or count > RECENT_LOG_PATH_ORDER_MAX
+        or limit < 0 or limit > count
+        or (count > 0 and (rows_address == 0 or rows_address % 8 != 0))
+        or scratch_address == 0 or scratch_address % 8 != 0
+        or output_address == 0 or output_address % 8 != 0
+        or scratch_capacity < count or output_capacity < limit
+        or written_address == 0 or written_address % 8 != 0
+    ):
+        return 1
+    var rows = Pointer[mut=False, UInt64, ImmUntrackedOrigin](
+        unsafe_from_address=Int(rows_address)
+    )
+    for index in range(count):
+        var length = recent_log_path_row(rows, index, 1)
+        if (
+            length > UInt64(9223372036854775807)
+            or (length > 0 and recent_log_path_row(rows, index, 0) == 0)
+            or recent_log_path_row(rows, index, 2) > 1
+            or recent_log_path_row(rows, index, 5) >= UInt64(1_000_000_000)
+        ):
+            return 1
+        if mode == RECENT_LOG_PATH_ORDER_SESSION and (
+            recent_log_path_row(rows, index, 2) != 0
+            or recent_log_path_row(rows, index, 5) != 0
+        ):
+            return 1
+    var scratch = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(scratch_address)
+    )
+    for index in range(count):
+        scratch[unsafe_offset=index] = index
+    var start = count // 2
+    while start > 0:
+        start -= 1
+        recent_log_path_heap_down(rows, mode, scratch, start, count)
+    var end = count
+    while end > 1:
+        end -= 1
+        var old = scratch[unsafe_offset=0]
+        scratch[unsafe_offset=0] = scratch[unsafe_offset=end]
+        scratch[unsafe_offset=end] = old
+        recent_log_path_heap_down(rows, mode, scratch, 0, end)
+    var output = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    for index in range(limit):
+        output[unsafe_offset=index] = scratch[unsafe_offset=index]
+    Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(written_address)
+    )[] = limit
+    return 0

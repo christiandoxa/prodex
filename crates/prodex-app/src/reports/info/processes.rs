@@ -118,13 +118,88 @@ pub fn select_recent_runtime_log_paths<I>(log_paths: I, limit: usize) -> Vec<Pat
 where
     I: IntoIterator<Item = (PathBuf, SystemTime)>,
 {
-    let mut paths = log_paths.into_iter().collect::<Vec<_>>();
-    paths.sort_by(|(left_path, left_modified), (right_path, right_modified)| {
-        left_modified
-            .cmp(right_modified)
-            .then_with(|| left_path.cmp(right_path))
-    });
-    paths.reverse();
-    paths.truncate(limit);
-    paths.into_iter().map(|(path, _)| path).collect()
+    use prodex_mojo_core::log::{
+        RecentLogPathInput, RecentLogPathOrderMode, recent_log_path_order,
+    };
+    let paths = log_paths.into_iter().collect::<Vec<_>>();
+    let facts = paths
+        .iter()
+        .map(|(path, modified)| {
+            let (before_epoch, absolute) = match modified.duration_since(std::time::UNIX_EPOCH) {
+                Ok(duration) => (false, duration),
+                Err(error) => (true, error.duration()),
+            };
+            RecentLogPathInput {
+                path: path.as_os_str().as_encoded_bytes(),
+                modified_before_unix_epoch: before_epoch,
+                modified_high: 0,
+                modified_low: absolute.as_secs(),
+                modified_nanos: absolute.subsec_nanos(),
+            }
+        })
+        .collect::<Vec<_>>();
+    let indices = recent_log_path_order(RecentLogPathOrderMode::RuntimeSystemTime, &facts, limit)
+        .expect("compiled Mojo recent runtime-info log ordering returned invalid output");
+    let mut paths = paths
+        .into_iter()
+        .map(|(path, _)| Some(path))
+        .collect::<Vec<_>>();
+    indices
+        .into_iter()
+        .map(|index| {
+            paths[index]
+                .take()
+                .expect("validated Mojo log path indices are unique")
+        })
+        .collect()
+}
+
+#[cfg(test)]
+mod compiled_recent_runtime_log_tests {
+    use super::*;
+
+    #[test]
+    fn compiled_runtime_info_log_order_preserves_subsecond_pre_epoch_and_unicode_path_ties() {
+        let base = std::time::UNIX_EPOCH;
+        let newer = base + std::time::Duration::from_secs(6);
+        let same = base + std::time::Duration::from_secs(5);
+        let newer_nanos = same + std::time::Duration::from_nanos(1);
+        let past = base - std::time::Duration::from_nanos(1);
+        let ancient = base - std::time::Duration::from_secs(2);
+        let selected = select_recent_runtime_log_paths(
+            [
+                (PathBuf::from("a.log"), same),
+                (PathBuf::from("z.log"), same),
+                (PathBuf::from("雪.log"), same),
+                (PathBuf::from("newest.log"), newer),
+                (PathBuf::from("subsecond.log"), newer_nanos),
+                (PathBuf::from("past.log"), past),
+                (PathBuf::from("ancient.log"), ancient),
+            ],
+            6,
+        );
+        assert_eq!(
+            selected,
+            [
+                "newest.log",
+                "subsecond.log",
+                "雪.log",
+                "z.log",
+                "a.log",
+                "past.log",
+            ]
+            .map(PathBuf::from)
+            .to_vec(),
+        );
+        assert_eq!(
+            select_recent_runtime_log_paths(
+                [
+                    (PathBuf::from("a.log"), same),
+                    (PathBuf::from("z.log"), same),
+                ],
+                0,
+            ),
+            Vec::<PathBuf>::new(),
+        );
+    }
 }
