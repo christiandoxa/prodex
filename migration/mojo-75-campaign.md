@@ -8008,3 +8008,15 @@ three direct core tests, a direct Mojo test and strict no-fallback
 and share guards pass. Share increases from 35.970853048974604%
 to 35.98176843960252% (132,310 Mojo / 235,404 Rust).
 The 75% target remains open.
+
+## Runtime quota current-profile log scanning ordered in Mojo (2026-10-20)
+
+The compiled quota owner now orders runtime log candidates by
+Option<SystemTime> ascending and raw path ties, preserving
+the priority of the most recent recognized profile event. Rust
+still performs filesystem and Serde acquisition but its old
+paths.sort_by policy was deleted without fallback. All 14
+quota_support tests, two direct core ABI tests, direct Mojo
+test, source no-fallback and metric guards pass. Share rises from
+35.98176843960252% to 35.996325158260106%
+(132,433 Mojo / 235,474 Rust); target 75% remains open.

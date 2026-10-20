@@ -300,3 +300,98 @@ fn quota_provider_filter_uses_mojo_casefold_identity() {
     assert!(QuotaProviderFilter::Local.matches_report(&external("LOCAL OPENAI-COMPATIBLE")));
     assert!(!QuotaProviderFilter::Local.matches_report(&external(" Local OpenAI-compatible ")));
 }
+
+#[test]
+fn compiled_quota_runtime_log_order_selects_newest_known_profile_regardless_of_input_order() {
+    let older = test_runtime_log_path("a-older.log");
+    let root = older.parent().unwrap().to_path_buf();
+    let newer = root.join("z-newer.log");
+    let missing = root.join("missing.log");
+    for (path, profile_name, timestamp) in [(&older, "active", 10_u64), (&newer, "runtime", 20_u64)]
+    {
+        fs::write(
+            path,
+            format!(
+                "{}\n",
+                serde_json::json!({
+                    "event": "profile_commit",
+                    "fields": {"profile": profile_name},
+                })
+            ),
+        )
+        .unwrap();
+        fs::File::options()
+            .write(true)
+            .open(path)
+            .unwrap()
+            .set_modified(UNIX_EPOCH + std::time::Duration::from_secs(timestamp))
+            .unwrap();
+    }
+    let state = AppState {
+        active_profile: Some("active".into()),
+        profiles: BTreeMap::from([
+            ("active".into(), profile("/tmp/active")),
+            ("runtime".into(), profile("/tmp/runtime")),
+        ]),
+        ..AppState::default()
+    };
+    for paths in [
+        vec![newer.clone(), older.clone(), missing.clone()],
+        vec![missing, older.clone(), newer.clone()],
+    ] {
+        assert_eq!(
+            quota_current_runtime_profile_name_from_paths(&state, paths).as_deref(),
+            Some("runtime"),
+        );
+    }
+    fs::write(
+        &newer,
+        r#"{"event":"profile_commit","fields":{"profile":"deleted"}}"#,
+    )
+    .unwrap();
+    assert_eq!(
+        quota_current_runtime_profile_name_from_paths(&state, [newer, older]).as_deref(),
+        Some("active"),
+        "the latest unknown profile cannot erase the last recognized one",
+    );
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn compiled_quota_runtime_log_order_breaks_equal_timestamps_by_path_ascending() {
+    let alpha = test_runtime_log_path("a-alpha.log");
+    let root = alpha.parent().unwrap().to_path_buf();
+    let zeta = root.join("z-雪.log");
+    for (path, profile_name) in [(&alpha, "active"), (&zeta, "runtime")] {
+        fs::write(
+            path,
+            format!(
+                "{}\n",
+                serde_json::json!({
+                    "event": "token_usage",
+                    "fields": {"profile": profile_name},
+                })
+            ),
+        )
+        .unwrap();
+        fs::File::options()
+            .write(true)
+            .open(path)
+            .unwrap()
+            .set_modified(UNIX_EPOCH + std::time::Duration::from_secs(90))
+            .unwrap();
+    }
+    let state = AppState {
+        profiles: BTreeMap::from([
+            ("active".into(), profile("/tmp/active")),
+            ("runtime".into(), profile("/tmp/runtime")),
+        ]),
+        ..AppState::default()
+    };
+    assert_eq!(
+        quota_current_runtime_profile_name_from_paths(&state, [zeta, alpha]).as_deref(),
+        Some("runtime"),
+        "the lexically last equally-timed path supplies the latest event",
+    );
+    fs::remove_dir_all(root).unwrap();
+}
