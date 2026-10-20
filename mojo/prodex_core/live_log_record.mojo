@@ -413,3 +413,146 @@ def prodex_live_log_compact_json_v1(
         unsafe_from_address=Int(written_address)
     )[] = sink.written
     return LIVE_LOG_RECORD_OK
+
+
+# Compiled JSON-tree owner for bounded live-log JSON. The host acquires
+# Serde's canonical number lexemes and borrowed string/key views; this
+# owner alone traverses containers, clips nested values at UTF-8-safe
+# boundaries, and serializes the canonical clipped JSON document.
+from parsed_json import (
+    JSON_NULL, JSON_FALSE, JSON_TRUE, JSON_NUMBER, JSON_STRING,
+    JSON_ARRAY, JSON_OBJECT, ParsedJson, ParsedJsonNode,
+    pj_child, pj_kind, pj_next, pj_text, pj_valid,
+)
+from json_sink import JsonSink, js_byte, js_literal, js_string, js_escaped, js_raw
+from rich_types import ProdexRichStringView
+
+
+def live_log_json_emit_node(
+    sink: Pointer[mut=True, JsonSink, _], tree: ParsedJson, node: Int64,
+) -> Bool:
+    var kind = pj_kind(tree, node)
+    if kind == JSON_NULL:
+        js_literal(sink, StringSlice("null"))
+    elif kind == JSON_FALSE:
+        js_literal(sink, StringSlice("false"))
+    elif kind == JSON_TRUE:
+        js_literal(sink, StringSlice("true"))
+    elif kind == JSON_NUMBER:
+        js_raw(sink, tree, node)
+    elif kind == JSON_STRING:
+        var value = pj_text(tree, node)
+        var length = Int64(value.len)
+        js_byte(sink, 34)
+        if length > LIVE_LOG_NESTED_STRING_MAX_BYTES:
+            var clipped = live_log_utf8_prefix_end(
+                Pointer[mut=False, UInt8, ImmUntrackedOrigin](
+                    unsafe_from_address=Int(value.ptr)
+                ), length, LIVE_LOG_NESTED_STRING_MAX_BYTES,
+            )
+            if not clipped[1]:
+                return False
+            js_escaped(
+                sink, ProdexRichStringView(value.ptr, UInt(clipped[0])),
+            )
+            js_literal(sink, StringSlice(" …[truncated]"))
+        else:
+            js_escaped(sink, value)
+        js_byte(sink, 34)
+    elif kind == JSON_ARRAY:
+        js_byte(sink, 91)
+    elif kind == JSON_OBJECT:
+        js_byte(sink, 123)
+    else:
+        return False
+    return True
+
+
+def live_log_json_project(sink: Pointer[mut=True, JsonSink, _], tree: ParsedJson) -> Bool:
+    var current: Int64 = 0
+    while current >= 0:
+        var kind = pj_kind(tree, current)
+        if current != 0:
+            var parent = tree.nodes[unsafe_offset=current].parent
+            if pj_child(tree, parent) != current:
+                js_byte(sink, 44)
+            if pj_kind(tree, parent) == JSON_OBJECT:
+                js_string(sink, tree.nodes[unsafe_offset=current].key)
+                js_byte(sink, 58)
+        if not live_log_json_emit_node(sink, tree, current):
+            return False
+        var child: Int64 = -1
+        if kind == JSON_ARRAY or kind == JSON_OBJECT:
+            child = pj_child(tree, current)
+        if child >= 0:
+            current = child
+            continue
+        if kind == JSON_ARRAY:
+            js_byte(sink, 93)
+        elif kind == JSON_OBJECT:
+            js_byte(sink, 125)
+        var advanced = False
+        while current != 0:
+            var sibling = pj_next(tree, current)
+            if sibling >= 0:
+                current = sibling
+                advanced = True
+                break
+            var parent = tree.nodes[unsafe_offset=current].parent
+            var parent_kind = pj_kind(tree, parent)
+            if parent_kind == JSON_ARRAY:
+                js_byte(sink, 93)
+            elif parent_kind == JSON_OBJECT:
+                js_byte(sink, 125)
+            current = parent
+        if not advanced:
+            break
+    return not sink[].failed
+
+
+@export("prodex_live_log_json_projection_v1")
+def prodex_live_log_json_projection_v1(
+    abi: Int64, operation: Int64, flag: Int64,
+    nodes_address: UInt, node_count: Int64,
+    raw_address: UInt, raw_length: Int64,
+    scratch_address: UInt, scratch_count: Int64,
+    measuring: Int64, output_address: UInt, output_capacity: Int64,
+    metadata_address: UInt,
+) abi("C") -> Int64:
+    if abi != LIVE_LOG_RECORD_ABI_VERSION:
+        return LIVE_LOG_RECORD_ABI
+    if (
+        operation != 0 or flag != 0
+        or node_count <= 0 or nodes_address == 0
+        or nodes_address % 8 != 0
+        or raw_length < 0 or (raw_length > 0 and raw_address == 0)
+        or scratch_address == 0 or scratch_address % 8 != 0
+        or scratch_count < node_count
+        or metadata_address == 0 or metadata_address % 8 != 0
+        or measuring < 0 or measuring > 1 or output_capacity < 0
+        or (measuring == 1 and (output_address != 0 or output_capacity != 0))
+        or (measuring == 0 and output_address == 0)
+    ):
+        return LIVE_LOG_RECORD_INVALID
+    var tree = ParsedJson(
+        Pointer[mut=False, ParsedJsonNode, ImmUntrackedOrigin](
+            unsafe_from_address=Int(nodes_address)
+        ), node_count, ProdexRichStringView(raw_address, UInt(raw_length)),
+    )
+    if not pj_valid(tree):
+        return LIVE_LOG_RECORD_INVALID
+    var sink = JsonSink(
+        Pointer[mut=True, UInt8, MutUntrackedOrigin](
+            unsafe_from_address=Int(output_address)
+        ), output_capacity, 0, measuring == 1, False,
+    )
+    if not live_log_json_project(Pointer(to=sink), tree):
+        # The shared JSON-tree Rust adapter expects status 3 for capacity;
+        # the older scalar live-log ABI uses status 2.
+        return 3 if sink.failed else LIVE_LOG_RECORD_INVALID
+    var metadata = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(metadata_address)
+    )
+    metadata[unsafe_offset=0] = 1
+    metadata[unsafe_offset=1] = sink.written
+    return LIVE_LOG_RECORD_OK

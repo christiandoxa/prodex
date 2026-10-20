@@ -2651,6 +2651,11 @@ export function findViolations(files) {
         "pub fn compact_json_metadata(",
         "compiled_live_log_compact_metadata_serializes_sorted_keys_and_newline",
         "compiled_live_log_compact_metadata_abi_rejects_bad_shapes_before_writes",
+        "fn prodex_live_log_json_projection_v1(",
+        "pub fn clipped_json_projection(",
+        "compiled_live_log_json_projection_escapes_keys_and_nested_utf8_strings",
+        "compiled_live_log_json_projection_clips_exact_utf8_prefix_without_recursive_host_policy",
+        "compiled_live_log_json_projection_abi_rejects_version_flags_and_capacity_before_metadata",
       ].filter((marker) => !contents.includes(marker))
         .map((marker) => filePath + ": compiled live-log retention ABI must retain " + marker);
     }
@@ -2665,19 +2670,27 @@ export function findViolations(files) {
         "js_view(Pointer(to=sink), live_log_compact_field(fields, 0))",
         "js_view(Pointer(to=sink), live_log_compact_field(fields, 1))",
         "js_view(Pointer(to=sink), live_log_compact_field(fields, 2))",
+        '@export("prodex_live_log_json_projection_v1")',
+        "def live_log_json_emit_node(",
+        "def live_log_json_project(",
+        "js_escaped(sink, value)",
+        "live_log_utf8_prefix_end(",
+        "return 3 if sink.failed else LIVE_LOG_RECORD_INVALID",
       ].filter((marker) => !contents.includes(marker))
         .map((marker) => filePath + ": live-log eviction authority must remain compiled Mojo (" + marker + ")");
     }
     if (filePath === LIVE_LOG_RECORD_DIRECT_TEST_FILE) {
       return contents.includes("test_retention_thresholds_and_stable_oldest_path()")
         && contents.includes("test_compact_json_renders_metadata_and_validates_capacity()")
+        && contents.includes("test_clipped_json_tree_is_compiled_and_validates_two_phase_output()")
         ? [] : [filePath + ": missing compiled retention/compact ABI assertions"];
     }
     if (filePath !== LIVE_LOG_RECORD_FILE) return [];
     const production = contents.split("#[cfg(test)]", 1)[0];
     const required = [
       "record_exceeds_bound(line.len())?",
-      "nested_string_clip_end(text)?",
+      "clipped_json_projection(&nodes, &raw)",
+      "fn live_log_borrowed_tree",
       "json_plan(serialized.len())?",
       "truncate_plain_text(line)",
       "let line = bounded_live_log_line(line)?;",
@@ -2689,13 +2702,19 @@ export function findViolations(files) {
     if (!contents.includes("compiled_live_log_compact_json_preserves_canonical_order_escapes_and_missing_metadata")) {
       missing.push("compiled_live_log_compact_json_preserves_canonical_order_escapes_and_missing_metadata");
     }
+    for (const test of [
+      "compiled_live_log_json_tree_preserves_serde_canonical_scalars_keys_and_arrays",
+      "compiled_live_log_json_tree_clips_utf8_without_truncating_json_keys",
+    ]) {
+      if (!contents.includes(test)) missing.push(test);
+    }
     if (!contents.includes("compiled_live_log_retention_evicts_oldest_global_paths_and_preserves_ties")) {
       missing.push("compiled_live_log_retention_evicts_oldest_global_paths_and_preserves_ties");
     }
     if (missing.length > 0) {
       return [`${filePath}: live-log record decisions must propagate through Mojo (${missing.join(", ")})`];
     }
-    return /clip_json_strings|\.char_indices\s*\(|MAX_RUNTIME_LIVE_LOG_LINE_BYTES|\.min_by_key\(|MAX_RUNTIME_LIVE_LOG_PATHS|fn serialize_compact_live_log_json\(|compact\.insert\(/u.test(production)
+    return /clip_json_strings|\.char_indices\s*\(|MAX_RUNTIME_LIVE_LOG_LINE_BYTES|\.min_by_key\(|MAX_RUNTIME_LIVE_LOG_PATHS|fn serialize_compact_live_log_json\(|compact\.insert\(|fn materialize_nested_string_clips\(|\.values_mut\(\)/u.test(production)
       ? [`${filePath}: contains restored Rust live-log clipping or truncation policy`]
       : [];
   });
@@ -12749,7 +12768,8 @@ function selfTest() {
   const liveLogRecordConsumer = [
     "fn bounded_live_log_line(line: &str) -> Result<String, MojoError> {",
     "record_exceeds_bound(line.len())?",
-    "nested_string_clip_end(text)?",
+    "clipped_json_projection(&nodes, &raw)",
+    "fn live_log_borrowed_tree",
     "json_plan(serialized.len())?",
     "truncate_plain_text(line)",
     "let line = bounded_live_log_line(line)?;",
@@ -12758,16 +12778,21 @@ function selfTest() {
     "compiled_live_log_retention_evicts_oldest_global_paths_and_preserves_ties",
     "mojo_live_log_record::compact_json_metadata(",
     "compiled_live_log_compact_json_preserves_canonical_order_escapes_and_missing_metadata",
+    "compiled_live_log_json_tree_preserves_serde_canonical_scalars_keys_and_arrays",
+    "compiled_live_log_json_tree_clips_utf8_without_truncating_json_keys",
   ].join("\n");
   assert.deepEqual(findViolations([[LIVE_LOG_RECORD_FILE, liveLogRecordConsumer]]), []);
   assert.match(findViolations([[LIVE_LOG_RECORD_FILE,
-    liveLogRecordConsumer.replace("nested_string_clip_end(text)?", "clip_json_strings(value, 8192);")]])
+    liveLogRecordConsumer.replace("clipped_json_projection(&nodes, &raw)", "clip_json_strings(value, 8192);")]])
     .join("\n"), /restored Rust live-log clipping or truncation policy|must propagate through Mojo/u);
   assert.match(findViolations([[LIVE_LOG_RECORD_FILE,
     liveLogRecordConsumer + "\nstate.paths.iter().min_by_key(|(_, bucket)| bucket.last_sequence)",
   ]]).join("\n"), /restored Rust live-log clipping or truncation policy/u);
   assert.match(findViolations([[LIVE_LOG_RECORD_FILE,
     liveLogRecordConsumer + "\nfn serialize_compact_live_log_json() {}",
+  ]]).join("\n"), /restored Rust live-log clipping or truncation policy/u);
+  assert.match(findViolations([[LIVE_LOG_RECORD_FILE,
+    liveLogRecordConsumer + "\nfn materialize_nested_string_clips() {}",
   ]]).join("\n"), /restored Rust live-log clipping or truncation policy/u);
   const runtimeLogEventClassification =
     "prodex_mojo_core::log_load::try_is_routine_event(event);";
