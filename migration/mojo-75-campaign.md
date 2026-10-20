@@ -8141,3 +8141,16 @@ previous-response tests, two direct core ABI tests, direct Mojo
 regression, anti-fallback guard and production-share validation pass.
 Official share increases from 36.06472593559358% to
 36.07194088829946% (133,275 Mojo / 236,195 Rust); 75% remains open.
+
+## Semantic chunk duplicate grouping batched in Mojo (2026-10-21)
+
+The compiled repo-map owner now sorts/group fingerprints by hash and
+byte length, preserves original occurrence order, and selects the
+first 64 groups/first eight occurrences plus completeness status in
+one batch ABI. Rust only materializes selected original semantic
+chunks; its BTreeMap grouping and the obsolete scalar group policy
+wrapper were deleted without fallback. All 15 artifact-store tests,
+two caller regressions, three direct core tests, direct Mojo ABI
+test and strict source/share guards pass. Official share rises from
+36.07194088829946% to 36.091252613612696%
+(133,429 Mojo / 236,270 Rust); the 75% target remains open.

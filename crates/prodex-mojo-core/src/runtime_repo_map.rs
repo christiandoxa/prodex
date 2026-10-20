@@ -5,6 +5,18 @@ const MAX_INPUT_BYTES: usize = 4 * 1024 * 1024;
 const MAX_OUTPUT_BYTES: usize = 512;
 
 unsafe extern "C" {
+    fn prodex_runtime_repo_duplicate_groups_v1(
+        abi_version: i64,
+        rows_address: u64,
+        count: i64,
+        max_groups: i64,
+        max_occurrences: i64,
+        indices_address: u64,
+        indices_capacity: i64,
+        groups_address: u64,
+        groups_capacity: i64,
+        result_address: u64,
+    ) -> i64;
     fn prodex_runtime_repo_map_path_set_v1(
         abi_version: i64,
         rows_address: u64,
@@ -47,13 +59,6 @@ unsafe extern "C" {
         byte_len: i64,
         text_len: i64,
         hash_matches: i64,
-    ) -> i64;
-    fn prodex_runtime_repo_duplicate_plan_v1(
-        abi_version: i64,
-        occurrence_count: i64,
-        duplicate_count: i64,
-        max_duplicate_count: i64,
-        max_occurrences: i64,
     ) -> i64;
     fn prodex_runtime_repo_path_distance_v1(
         abi_version: i64,
@@ -327,6 +332,128 @@ pub fn repo_map_unique_path_indices(paths: &[Option<&str>]) -> Result<Vec<usize>
         .collect()
 }
 
+/// Original semantic chunk metadata used only to group identical hashes
+/// and byte lengths; compiled Mojo owns grouping and retention limits.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RepoDuplicateChunkInput<'a> {
+    pub hash: &'a str,
+    pub byte_len: usize,
+}
+
+/// Source indices for the original first N occurrences in one selected
+/// sorted fingerprint group, preserving original chunk traversal order.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RepoDuplicateChunkGroup {
+    pub first_source: usize,
+    pub occurrence_count: usize,
+    pub occurrence_indices: Vec<usize>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RepoDuplicateChunkGroupsPlan {
+    pub groups: Vec<RepoDuplicateChunkGroup>,
+    pub complete: bool,
+}
+
+/// Sort and group all fingerprint observations in one compiled call.
+///
+/// This replaces per-group Rust BTreeMap construction, the Rust duplicate
+/// selection loop, and per-group semantic FFI transitions.
+pub fn repo_duplicate_chunk_groups(
+    chunks: &[RepoDuplicateChunkInput<'_>],
+    max_groups: usize,
+    max_occurrences: usize,
+) -> Result<RepoDuplicateChunkGroupsPlan, MojoError> {
+    if chunks.len() > 65_536 || max_groups > 65_536 || max_occurrences > 65_536 {
+        return Err(MojoError::InvalidInput);
+    }
+    let mut rows = Vec::<u64>::new();
+    rows.try_reserve_exact(chunks.len().checked_mul(3).ok_or(MojoError::Capacity)?)
+        .map_err(|_| MojoError::Capacity)?;
+    for chunk in chunks {
+        rows.extend([
+            chunk.hash.as_ptr() as usize as u64,
+            u64::try_from(chunk.hash.len()).map_err(|_| MojoError::InvalidInput)?,
+            u64::try_from(chunk.byte_len).map_err(|_| MojoError::InvalidInput)?,
+        ]);
+    }
+    let mut sorted = vec![-1_i64; chunks.len()];
+    let mut groups = Vec::<i64>::new();
+    groups
+        .try_reserve_exact(max_groups.checked_mul(3).ok_or(MojoError::Capacity)?)
+        .map_err(|_| MojoError::Capacity)?;
+    groups.resize(max_groups * 3, -1);
+    let mut result = [-1_i64; 2];
+    match unsafe {
+        prodex_runtime_repo_duplicate_groups_v1(
+            ABI_VERSION,
+            rows.as_ptr() as usize as u64,
+            i64::try_from(chunks.len()).map_err(|_| MojoError::InvalidInput)?,
+            i64::try_from(max_groups).map_err(|_| MojoError::InvalidInput)?,
+            i64::try_from(max_occurrences).map_err(|_| MojoError::InvalidInput)?,
+            sorted.as_mut_ptr() as usize as u64,
+            i64::try_from(sorted.len()).map_err(|_| MojoError::InvalidInput)?,
+            groups.as_mut_ptr() as usize as u64,
+            i64::try_from(groups.len()).map_err(|_| MojoError::InvalidInput)?,
+            result.as_mut_ptr() as usize as u64,
+        )
+    } {
+        0 => {}
+        1 => return Err(MojoError::InvalidInput),
+        3 => return Err(MojoError::Capacity),
+        4 => return Err(MojoError::AbiMismatch),
+        _ => return Err(MojoError::InvalidOutput),
+    }
+    let group_count = usize::try_from(result[0]).map_err(|_| MojoError::InvalidOutput)?;
+    if group_count > max_groups || group_count > chunks.len() {
+        return Err(MojoError::InvalidOutput);
+    }
+    let complete = match result[1] {
+        0 => false,
+        1 => true,
+        _ => return Err(MojoError::InvalidOutput),
+    };
+    let mut ordered = Vec::with_capacity(sorted.len());
+    let mut seen = vec![false; chunks.len()];
+    for value in sorted {
+        let index = usize::try_from(value).map_err(|_| MojoError::InvalidOutput)?;
+        let used = seen.get_mut(index).ok_or(MojoError::InvalidOutput)?;
+        if *used {
+            return Err(MojoError::InvalidOutput);
+        }
+        *used = true;
+        ordered.push(index);
+    }
+    let mut selected = Vec::with_capacity(group_count);
+    let mut prior_end = 0usize;
+    for raw in groups.chunks_exact(3).take(group_count) {
+        let start = usize::try_from(raw[0]).map_err(|_| MojoError::InvalidOutput)?;
+        let occurrences = usize::try_from(raw[1]).map_err(|_| MojoError::InvalidOutput)?;
+        let kept = usize::try_from(raw[2]).map_err(|_| MojoError::InvalidOutput)?;
+        let end = start
+            .checked_add(occurrences)
+            .ok_or(MojoError::InvalidOutput)?;
+        if start < prior_end
+            || end > ordered.len()
+            || occurrences < 2
+            || kept > occurrences
+            || kept > max_occurrences
+        {
+            return Err(MojoError::InvalidOutput);
+        }
+        prior_end = end;
+        selected.push(RepoDuplicateChunkGroup {
+            first_source: ordered[start],
+            occurrence_count: occurrences,
+            occurrence_indices: ordered[start..start + kept].to_vec(),
+        });
+    }
+    Ok(RepoDuplicateChunkGroupsPlan {
+        groups: selected,
+        complete,
+    })
+}
+
 fn input_len(value: &str) -> Result<i64, MojoError> {
     if value.len() > MAX_INPUT_BYTES {
         return Err(MojoError::InvalidInput);
@@ -363,41 +490,6 @@ pub fn repo_chunk_plan(
         1 => Ok(RepoChunkPlan::RejectCapacity),
         2 => Ok(RepoChunkPlan::RejectInvalid),
         -1 => Err(MojoError::InvalidInput),
-        _ => Err(MojoError::InvalidOutput),
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum RepoDuplicatePlan {
-    Skip,
-    Append { occurrences_complete: bool },
-    StopCapacity,
-}
-
-pub fn repo_duplicate_plan(
-    occurrence_count: usize,
-    duplicate_count: usize,
-    max_duplicate_count: usize,
-    max_occurrences: usize,
-) -> Result<RepoDuplicatePlan, MojoError> {
-    let result = unsafe {
-        prodex_runtime_repo_duplicate_plan_v1(
-            ABI_VERSION,
-            i64::try_from(occurrence_count).map_err(|_| MojoError::InvalidInput)?,
-            i64::try_from(duplicate_count).map_err(|_| MojoError::InvalidInput)?,
-            i64::try_from(max_duplicate_count).map_err(|_| MojoError::InvalidInput)?,
-            i64::try_from(max_occurrences).map_err(|_| MojoError::InvalidInput)?,
-        )
-    };
-    if result == -1 {
-        return Err(MojoError::InvalidInput);
-    }
-    match result & 0xff {
-        0 => Ok(RepoDuplicatePlan::Skip),
-        1 => Ok(RepoDuplicatePlan::Append {
-            occurrences_complete: ((result >> 8) & 0xff) == 1,
-        }),
-        2 => Ok(RepoDuplicatePlan::StopCapacity),
         _ => Err(MojoError::InvalidOutput),
     }
 }
@@ -519,12 +611,6 @@ mod tests {
         assert_eq!(
             repo_chunk_plan(0, 4, 10, 9, true).unwrap(),
             RepoChunkPlan::RejectInvalid
-        );
-        assert_eq!(
-            repo_duplicate_plan(3, 0, 8, 4).unwrap(),
-            RepoDuplicatePlan::Append {
-                occurrences_complete: true
-            }
         );
         assert_eq!(repo_path_distance(10, 20, 15).unwrap(), 0);
         assert_eq!(repo_path_distance(10, 20, 25).unwrap(), 5);
@@ -963,5 +1049,185 @@ mod compiled_repo_map_path_set_tests {
         );
         assert_eq!(output, [73; 2]);
         assert_eq!(selected, 91);
+    }
+}
+
+#[cfg(test)]
+mod compiled_duplicate_chunk_group_tests {
+    use super::*;
+
+    fn record<'a>(hash: &'a str, byte_len: usize) -> RepoDuplicateChunkInput<'a> {
+        RepoDuplicateChunkInput { hash, byte_len }
+    }
+
+    #[test]
+    fn compiled_duplicate_chunk_groups_sort_hash_and_size_with_source_order() {
+        let inputs = [
+            record("hashB", 3),
+            record("hashA", 2),
+            record("hashB", 3),
+            record("hashA", 2),
+            record("hashA", 5),
+            record("hashA", 5),
+            record("lonely", 2),
+            record("hashB", 3),
+        ];
+        let plan = repo_duplicate_chunk_groups(&inputs, 4, 3).unwrap();
+        assert_eq!(
+            plan,
+            RepoDuplicateChunkGroupsPlan {
+                groups: vec![
+                    RepoDuplicateChunkGroup {
+                        first_source: 1,
+                        occurrence_count: 2,
+                        occurrence_indices: vec![1, 3],
+                    },
+                    RepoDuplicateChunkGroup {
+                        first_source: 4,
+                        occurrence_count: 2,
+                        occurrence_indices: vec![4, 5],
+                    },
+                    RepoDuplicateChunkGroup {
+                        first_source: 0,
+                        occurrence_count: 3,
+                        occurrence_indices: vec![0, 2, 7],
+                    },
+                ],
+                complete: true,
+            }
+        );
+        let limited = repo_duplicate_chunk_groups(&inputs, 2, 3).unwrap();
+        assert_eq!(limited.groups.len(), 2);
+        assert!(!limited.complete);
+        let truncated = repo_duplicate_chunk_groups(&inputs, 4, 2).unwrap();
+        assert_eq!(truncated.groups[2].occurrence_indices, vec![0, 2]);
+        assert_eq!(truncated.groups[2].occurrence_count, 3);
+        assert!(!truncated.complete);
+        assert_eq!(
+            repo_duplicate_chunk_groups(&[record("solo", 1)], 0, 0),
+            Ok(RepoDuplicateChunkGroupsPlan {
+                groups: vec![],
+                complete: true,
+            }),
+        );
+        assert_eq!(
+            repo_duplicate_chunk_groups(&inputs, 0, 8).unwrap().complete,
+            false,
+        );
+        assert_eq!(
+            repo_duplicate_chunk_groups(&[], 64, 8),
+            Ok(RepoDuplicateChunkGroupsPlan {
+                groups: vec![],
+                complete: true,
+            }),
+        );
+    }
+
+    #[test]
+    fn compiled_duplicate_chunk_groups_enforce_64_group_and_8_occurrence_limits() {
+        let names = (0..65)
+            .map(|index| format!("{index:04}"))
+            .collect::<Vec<_>>();
+        let mut cases = Vec::new();
+        for name in &names {
+            cases.push(record(name, 1));
+            cases.push(record(name, 1));
+        }
+        let limit = repo_duplicate_chunk_groups(&cases, 64, 8).unwrap();
+        assert_eq!(limit.groups.len(), 64);
+        assert!(!limit.complete);
+        assert_eq!(limit.groups[0].occurrence_indices, vec![0, 1]);
+        assert_eq!(limit.groups[63].occurrence_indices, vec![126, 127]);
+        assert_eq!(
+            repo_duplicate_chunk_groups(&cases, 65, 8)
+                .unwrap()
+                .groups
+                .len(),
+            65
+        );
+        let repeated = vec![record("repeat", 1); 9];
+        let plan = repo_duplicate_chunk_groups(&repeated, 64, 8).unwrap();
+        assert_eq!(plan.groups.len(), 1);
+        assert_eq!(plan.groups[0].occurrence_count, 9);
+        assert_eq!(
+            plan.groups[0].occurrence_indices,
+            (0..8).collect::<Vec<_>>()
+        );
+        assert!(!plan.complete);
+    }
+
+    #[test]
+    fn compiled_duplicate_chunk_groups_abi_rejects_bad_late_rows_without_writes() {
+        let mut rows = [0_u64; 6];
+        let mut sorted = [73_i64; 2];
+        let mut groups = [79_i64; 6];
+        let mut result = [91_i64; 2];
+        let source = rows.as_ptr() as usize as u64;
+        let out = sorted.as_mut_ptr() as usize as u64;
+        let group_ptr = groups.as_mut_ptr() as usize as u64;
+        let result_ptr = result.as_mut_ptr() as usize as u64;
+        for (
+            version,
+            input,
+            count,
+            max_group,
+            max_occ,
+            idx_cap,
+            group_cap,
+            result_addr,
+            expected,
+        ) in [
+            (2, source, 2, 2, 3, 2, 6, result_ptr, 4),
+            (1, 0, 2, 2, 3, 2, 6, result_ptr, 1),
+            (1, source, -1, 2, 3, 2, 6, result_ptr, 1),
+            (1, source, 65_537, 2, 3, 2, 6, result_ptr, 1),
+            (1, source, 2, -1, 3, 2, 6, result_ptr, 1),
+            (1, source, 2, 2, -1, 2, 6, result_ptr, 1),
+            (1, source, 2, 2, 3, 1, 6, result_ptr, 1),
+            (1, source, 2, 2, 3, 2, 5, result_ptr, 1),
+            (1, source, 2, 2, 3, 2, 6, 0, 1),
+        ] {
+            assert_eq!(
+                unsafe {
+                    prodex_runtime_repo_duplicate_groups_v1(
+                        version,
+                        input,
+                        count,
+                        max_group,
+                        max_occ,
+                        out,
+                        idx_cap,
+                        group_ptr,
+                        group_cap,
+                        result_addr,
+                    )
+                },
+                expected,
+            );
+            assert_eq!(sorted, [73; 2]);
+            assert_eq!(groups, [79; 6]);
+            assert_eq!(result, [91; 2]);
+        }
+        rows[4] = 1;
+        assert_eq!(
+            unsafe {
+                prodex_runtime_repo_duplicate_groups_v1(
+                    1,
+                    rows.as_ptr() as usize as u64,
+                    2,
+                    2,
+                    3,
+                    out,
+                    2,
+                    group_ptr,
+                    6,
+                    result_ptr,
+                )
+            },
+            1,
+        );
+        assert_eq!(sorted, [73; 2]);
+        assert_eq!(groups, [79; 6]);
+        assert_eq!(result, [91; 2]);
     }
 }
