@@ -84,6 +84,15 @@ pub struct QuotaSummaryLogFields<'a> {
 }
 
 unsafe extern "C" {
+    fn prodex_runtime_state_startup_probe_batch_v1(
+        abi_version: i64,
+        rows_address: u64,
+        candidate_count: i64,
+        warm_remaining: i64,
+        output_address: u64,
+        output_capacity: i64,
+        remaining_address: u64,
+    ) -> i64;
     fn prodex_runtime_state_quota_policy_v1(
         abi_version: i64,
         mode: i64,
@@ -233,6 +242,76 @@ pub fn usage_snapshot_should_retain(
             ],
         )?[0],
     )
+}
+
+/// One candidate's externally classified freshness/usable observations.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct StartupProbeRefreshObservation {
+    pub probe_fresh: bool,
+    pub snapshot_usable: bool,
+}
+
+/// An entire bounded batch's ordered selection and remaining warm budget.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StartupProbeRefreshBatchPlan {
+    pub selected: Vec<bool>,
+    pub remaining: usize,
+}
+
+pub fn startup_probe_refresh_batch(
+    candidates: &[StartupProbeRefreshObservation],
+    warm_remaining: usize,
+) -> Result<StartupProbeRefreshBatchPlan, MojoError> {
+    if candidates.len() > 65_536 {
+        return Err(MojoError::InvalidInput);
+    }
+    let remaining = i64::try_from(warm_remaining).map_err(|_| MojoError::InvalidInput)?;
+    let mut rows = Vec::new();
+    rows.try_reserve_exact(candidates.len().checked_mul(2).ok_or(MojoError::Capacity)?)
+        .map_err(|_| MojoError::Capacity)?;
+    for candidate in candidates {
+        rows.extend([
+            i64::from(candidate.probe_fresh),
+            i64::from(candidate.snapshot_usable),
+        ]);
+    }
+    let mut selected = vec![-1_i64; candidates.len()];
+    let mut next_remaining = -1_i64;
+    match unsafe {
+        prodex_runtime_state_startup_probe_batch_v1(
+            ABI_VERSION,
+            rows.as_ptr() as usize as u64,
+            i64::try_from(candidates.len()).map_err(|_| MojoError::InvalidInput)?,
+            remaining,
+            selected.as_mut_ptr() as usize as u64,
+            i64::try_from(selected.len()).map_err(|_| MojoError::InvalidInput)?,
+            (&mut next_remaining as *mut i64) as usize as u64,
+        )
+    } {
+        0 => {}
+        1 => return Err(MojoError::InvalidInput),
+        4 => return Err(MojoError::AbiMismatch),
+        _ => return Err(MojoError::InvalidOutput),
+    }
+    let next_remaining = usize::try_from(next_remaining).map_err(|_| MojoError::InvalidOutput)?;
+    if next_remaining > warm_remaining {
+        return Err(MojoError::InvalidOutput);
+    }
+    let mut flags = Vec::with_capacity(selected.len());
+    for flag in selected {
+        match flag {
+            0 => flags.push(false),
+            1 => flags.push(true),
+            _ => return Err(MojoError::InvalidOutput),
+        }
+    }
+    if flags.iter().filter(|selected| **selected).count() != warm_remaining - next_remaining {
+        return Err(MojoError::InvalidOutput);
+    }
+    Ok(StartupProbeRefreshBatchPlan {
+        selected: flags,
+        remaining: next_remaining,
+    })
 }
 
 pub fn startup_probe_refresh_candidate_plan(
@@ -587,6 +666,133 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn compiled_startup_probe_batch_retains_order_and_warm_budget() {
+        let input = [
+            StartupProbeRefreshObservation {
+                probe_fresh: true,
+                snapshot_usable: false,
+            },
+            StartupProbeRefreshObservation {
+                probe_fresh: false,
+                snapshot_usable: true,
+            },
+            StartupProbeRefreshObservation {
+                probe_fresh: false,
+                snapshot_usable: false,
+            },
+            StartupProbeRefreshObservation {
+                probe_fresh: false,
+                snapshot_usable: false,
+            },
+            StartupProbeRefreshObservation {
+                probe_fresh: false,
+                snapshot_usable: false,
+            },
+        ];
+        assert_eq!(
+            startup_probe_refresh_batch(&input, 2),
+            Ok(StartupProbeRefreshBatchPlan {
+                selected: vec![false, false, true, true, false],
+                remaining: 0,
+            }),
+        );
+        assert_eq!(
+            startup_probe_refresh_batch(&input, 0),
+            Ok(StartupProbeRefreshBatchPlan {
+                selected: vec![false; 5],
+                remaining: 0,
+            }),
+        );
+        assert_eq!(
+            startup_probe_refresh_batch(&[], 10),
+            Ok(StartupProbeRefreshBatchPlan {
+                selected: Vec::new(),
+                remaining: 10,
+            }),
+        );
+        let mut many = vec![
+            StartupProbeRefreshObservation {
+                probe_fresh: true,
+                snapshot_usable: true
+            };
+            65_536
+        ];
+        many[65_534] = StartupProbeRefreshObservation {
+            probe_fresh: false,
+            snapshot_usable: false,
+        };
+        many[65_535] = many[65_534];
+        let plan = startup_probe_refresh_batch(&many, 1).unwrap();
+        assert_eq!(plan.selected.len(), 65_536);
+        assert_eq!(plan.selected.iter().filter(|flag| **flag).count(), 1);
+        assert!(plan.selected[65_534]);
+        assert!(!plan.selected[65_535]);
+        assert_eq!(plan.remaining, 0);
+        many.push(many[0]);
+        assert_eq!(
+            startup_probe_refresh_batch(&many, 1),
+            Err(MojoError::InvalidInput)
+        );
+        assert_eq!(
+            startup_probe_refresh_batch(&input, usize::MAX),
+            Err(MojoError::InvalidInput),
+        );
+    }
+
+    #[test]
+    fn compiled_startup_probe_batch_abi_rejects_late_invalid_row_without_writes() {
+        let mut rows = [0_i64, 0, 1, 0, 0, 0];
+        let mut output = [83_i64; 3];
+        let mut remaining = 79_i64;
+        let source = rows.as_ptr() as usize as u64;
+        let destination = output.as_mut_ptr() as usize as u64;
+        let rest = (&mut remaining as *mut i64) as usize as u64;
+        for (version, fields, count, warm, capacity, remaining_ptr, expected) in [
+            (2, source, 3, 2, 3, rest, 4),
+            (1, 0, 3, 2, 3, rest, 1),
+            (1, source, -1, 2, 3, rest, 1),
+            (1, source, 65_537, 2, 3, rest, 1),
+            (1, source, 3, -1, 3, rest, 1),
+            (1, source, 3, 2, 2, rest, 1),
+            (1, source, 3, 2, 3, 0, 1),
+        ] {
+            assert_eq!(
+                unsafe {
+                    prodex_runtime_state_startup_probe_batch_v1(
+                        version,
+                        fields,
+                        count,
+                        warm,
+                        destination,
+                        capacity,
+                        remaining_ptr,
+                    )
+                },
+                expected,
+            );
+            assert_eq!(output, [83; 3]);
+            assert_eq!(remaining, 79);
+        }
+        rows[5] = 2;
+        assert_eq!(
+            unsafe {
+                prodex_runtime_state_startup_probe_batch_v1(
+                    1,
+                    rows.as_ptr() as usize as u64,
+                    3,
+                    2,
+                    destination,
+                    3,
+                    rest,
+                )
+            },
+            1,
+        );
+        assert_eq!(output, [83; 3]);
+        assert_eq!(remaining, 79);
     }
 
     #[test]

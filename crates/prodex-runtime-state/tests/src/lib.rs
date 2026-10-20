@@ -921,3 +921,30 @@ fn runtime_proxy_admission_release_records_underflow_without_wrapping() {
 }
 
 mod profile_inflight;
+
+#[test]
+fn compiled_startup_probe_batch_preserves_over_65536_profile_order_and_remaining_slots() {
+    let rows = (0..65_540_usize)
+        .map(|index| RuntimeStartupProbeRefreshCandidate {
+            profile_name: index,
+            probe_fresh: index != 65_533 && index != 65_535 && index != 65_537,
+            snapshot_usable: false,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        runtime_profiles_needing_startup_probe_refresh(rows.clone(), 2),
+        vec![65_533, 65_535],
+    );
+    assert_eq!(
+        runtime_profiles_needing_startup_probe_refresh(rows, 3),
+        vec![65_533, 65_535, 65_537],
+    );
+    let no_slot = [RuntimeStartupProbeRefreshCandidate {
+        profile_name: "empty-budget",
+        probe_fresh: false,
+        snapshot_usable: false,
+    }];
+    assert!(runtime_profiles_needing_startup_probe_refresh(no_slot, 0).is_empty());
+    let empty: Vec<RuntimeStartupProbeRefreshCandidate<usize>> = Vec::new();
+    assert!(runtime_profiles_needing_startup_probe_refresh(empty, 10).is_empty());
+}

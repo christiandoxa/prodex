@@ -7768,3 +7768,16 @@ trim decisions were deleted. All 421 runtime-proxy tests, two direct
 core ABI tests, direct Mojo test and no-fallback/production checks pass.
 Official share rises from 35.83402093790177% to 35.83891367008976%
 (130,802 Mojo / 234,170 Rust). Project target 75% remains unmet.
+
+## Startup probe refresh selection moved to Mojo batches (2026-10-20)
+
+Compiled runtime-state quota policy now owns ordered batch admission
+of stale startup probes and the remaining warm budget across 65,536-item
+batches. Rust retains generic profile identifiers, fresh/usable
+observations, and the application of selected flags without the
+old per-candidate policy/budget loop. 25 runtime-state tests, two
+direct core ABI tests, direct Mojo test, no-fallback guard and audited
+non-regression checks pass. Official share changes from
+35.83891367008976% to 35.837909642431626%
+(130,846 Mojo / 234,259 Rust) due to the typed ABI acquisition
+overhead. The separate 75% objective remains open.

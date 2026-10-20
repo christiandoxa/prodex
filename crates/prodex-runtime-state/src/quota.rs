@@ -180,18 +180,35 @@ pub fn runtime_profiles_needing_startup_probe_refresh<N, I>(
 where
     I: IntoIterator<Item = RuntimeStartupProbeRefreshCandidate<N>>,
 {
+    let mut candidates = candidates.into_iter().map(Some).collect::<Vec<_>>();
     let mut remaining = warm_limit;
     let mut selected = Vec::new();
-    for candidate in candidates {
-        let plan = prodex_mojo_core::runtime_state_quota::startup_probe_refresh_candidate_plan(
-            candidate.probe_fresh,
-            candidate.snapshot_usable,
+    for batch in candidates.chunks_mut(65_536) {
+        let observations = batch
+            .iter()
+            .map(|candidate| {
+                let candidate = candidate.as_ref().expect("unprocessed probe candidate");
+                prodex_mojo_core::runtime_state_quota::StartupProbeRefreshObservation {
+                    probe_fresh: candidate.probe_fresh,
+                    snapshot_usable: candidate.snapshot_usable,
+                }
+            })
+            .collect::<Vec<_>>();
+        let plan = prodex_mojo_core::runtime_state_quota::startup_probe_refresh_batch(
+            &observations,
             remaining,
         )
-        .expect("Mojo startup probe refresh policy returned invalid output");
+        .expect("compiled Mojo startup probe refresh batch returned invalid output");
         remaining = plan.remaining;
-        if plan.selected {
-            selected.push(candidate.profile_name);
+        for (candidate, take) in batch.iter_mut().zip(plan.selected) {
+            if take {
+                selected.push(
+                    candidate
+                        .take()
+                        .expect("compiled Mojo selected unconsumed probe candidate")
+                        .profile_name,
+                );
+            }
         }
     }
     selected

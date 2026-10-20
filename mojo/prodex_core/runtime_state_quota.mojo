@@ -441,3 +441,55 @@ def prodex_runtime_state_quota_policy_v1(
     output[unsafe_offset=4] = retry_until
     output[unsafe_offset=5] = Int64(input3 == 0 or retry_until != input4)
     return RUNTIME_STATE_QUOTA_OK
+
+
+# Entire ordered startup-probe admission budget is compiled policy.
+# Rust supplies preclassified observations and applies the selected flags;
+# no per-row Rust remaining-budget decision is retained.
+comptime STARTUP_PROBE_BATCH_ABI: Int64 = 1
+comptime STARTUP_PROBE_BATCH_MAX: Int64 = 65536
+
+
+@export("prodex_runtime_state_startup_probe_batch_v1")
+def prodex_runtime_state_startup_probe_batch_v1(
+    abi_version: Int64,
+    rows_address: UInt, candidate_count: Int64,
+    warm_remaining: Int64,
+    output_address: UInt, output_capacity: Int64,
+    remaining_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != STARTUP_PROBE_BATCH_ABI:
+        return RUNTIME_STATE_QUOTA_ABI
+    if (
+        candidate_count < 0 or candidate_count > STARTUP_PROBE_BATCH_MAX
+        or warm_remaining < 0
+        or (candidate_count > 0 and (rows_address == 0 or rows_address % 8 != 0))
+        or output_address == 0 or output_address % 8 != 0
+        or output_capacity < candidate_count
+        or remaining_address == 0 or remaining_address % 8 != 0
+    ):
+        return RUNTIME_STATE_QUOTA_INVALID
+    var rows = Pointer[mut=False, Int64, ImmUntrackedOrigin](
+        unsafe_from_address=Int(rows_address)
+    )
+    for index in range(candidate_count):
+        if (
+            not state_quota_valid_bool(rows[unsafe_offset=index * 2])
+            or not state_quota_valid_bool(rows[unsafe_offset=index * 2 + 1])
+        ):
+            return RUNTIME_STATE_QUOTA_INVALID
+    var selected = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    var remaining = warm_remaining
+    for index in range(candidate_count):
+        var probe_fresh = rows[unsafe_offset=index * 2]
+        var snapshot_usable = rows[unsafe_offset=index * 2 + 1]
+        var take = remaining > 0 and probe_fresh == 0 and snapshot_usable == 0
+        selected[unsafe_offset=index] = Int64(take)
+        if take:
+            remaining -= 1
+    Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(remaining_address)
+    )[] = remaining
+    return RUNTIME_STATE_QUOTA_OK
