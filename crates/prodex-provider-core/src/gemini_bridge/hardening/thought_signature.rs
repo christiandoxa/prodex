@@ -13,7 +13,9 @@ pub fn gemini_provider_core_harden_tool_call_thought_signatures(
     body: &mut Vec<u8>,
     model: &str,
 ) -> Result<usize, serde_json::Error> {
-    if !gemini_provider_core_model_requires_tool_thought_signature(model) {
+    if !prodex_mojo_core::json::gemini_model_requires_tool_thought_signature(model)
+        .expect("compiled Mojo Gemini model signature policy returned invalid output")
+    {
         return Ok(0);
     }
     let value: Value = serde_json::from_slice(body)?;
@@ -42,20 +44,87 @@ pub fn gemini_provider_core_harden_tool_call_thought_signatures(
 }
 
 pub fn gemini_provider_core_thought_signature(part: &serde_json::Value) -> Option<String> {
-    part.get("thoughtSignature")
-        .or_else(|| part.get("thought_signature"))
-        .and_then(serde_json::Value::as_str)
-        .filter(|signature| !signature.trim().is_empty())
-        .map(str::to_string)
-}
-
-fn gemini_provider_core_model_requires_tool_thought_signature(model: &str) -> bool {
-    model.contains("gemini-3")
+    let mut document = crate::mojo_json::Document::default();
+    document.borrowed_shape(part);
+    let result = prodex_mojo_core::json::gemini_value_projection(
+        &document.nodes,
+        "",
+        prodex_mojo_core::json::GeminiValueOperation::ThoughtSignature,
+    )
+    .expect("compiled Mojo Gemini thought-signature selection returned invalid output");
+    serde_json::from_slice(&result)
+        .expect("compiled Mojo Gemini thought-signature selection must return an optional string")
 }
 
 #[cfg(test)]
 mod tests {
     use super::gemini_provider_core_harden_tool_call_thought_signatures;
+
+    #[test]
+    fn compiled_thought_signature_preserves_original_text_and_presence_barriers() {
+        for (input, expected) in [
+            (
+                serde_json::json!({"thoughtSignature":" signed 東京 "}),
+                Some(" signed 東京 "),
+            ),
+            (
+                serde_json::json!({"thought_signature":"legacy"}),
+                Some("legacy"),
+            ),
+            (
+                serde_json::json!({"thoughtSignature":"modern","thought_signature":"legacy"}),
+                Some("modern"),
+            ),
+            (
+                serde_json::json!({"thoughtSignature":null,"thought_signature":"blocked"}),
+                None,
+            ),
+            (
+                serde_json::json!({"thoughtSignature":12,"thought_signature":"blocked"}),
+                None,
+            ),
+            (
+                serde_json::json!({"thoughtSignature":"","thought_signature":"blocked"}),
+                None,
+            ),
+            (
+                serde_json::json!({"thoughtSignature":" \u{3000} ","thought_signature":"blocked"}),
+                None,
+            ),
+            (serde_json::json!({"thought_signature":" \u{2003} "}), None),
+            (serde_json::json!({}), None),
+            (serde_json::json!([]), None),
+            (serde_json::json!("text"), None),
+            (serde_json::json!(null), None),
+        ] {
+            assert_eq!(
+                super::gemini_provider_core_thought_signature(&input).as_deref(),
+                expected,
+                "{input}"
+            );
+        }
+    }
+
+    #[test]
+    fn compiled_gemini_three_model_policy_requires_exact_case_sensitive_substring() {
+        for (model, expected) in [
+            ("gemini-3", true),
+            ("gemini-3.1-pro-preview", true),
+            ("prefix-gemini-3-suffix", true),
+            ("gemini-3-雪", true),
+            ("gemini-2.5-pro", false),
+            ("Gemini-3", false),
+            ("gemini- 3", false),
+            ("gemini-30", true),
+            ("gemini-3.0", true),
+            ("", false),
+        ] {
+            assert_eq!(
+                prodex_mojo_core::json::gemini_model_requires_tool_thought_signature(model),
+                Ok(expected),
+            );
+        }
+    }
 
     #[test]
     fn mojo_hardening_injects_only_the_first_unsigned_call() {

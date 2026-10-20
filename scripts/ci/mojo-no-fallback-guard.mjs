@@ -418,6 +418,7 @@ const PROMOTED_FILES = [
   "mojo/prodex_core/runtime_broker_continuity.mojo",
   "crates/prodex-provider-core/src/translators/gemini/response_media.rs",
   "crates/prodex-provider-core/src/gemini_bridge/media/content_object.rs",
+  "crates/prodex-provider-core/src/gemini_bridge/hardening/thought_signature.rs",
   "crates/prodex-provider-core/src/gemini_bridge/media.rs",
   "crates/prodex-mojo-core/src/rich/gemini_response_media.rs",
   "mojo/prodex_core/gemini_response_media.mojo",
@@ -1971,6 +1972,25 @@ export function findViolations(files) {
     return [];
   });
   const geminiValueCollectionMojoViolations = files.flatMap(([filePath, contents]) => {
+    if (filePath === "crates/prodex-provider-core/src/gemini_bridge/hardening/thought_signature.rs") {
+      const required = [
+        "gemini_model_requires_tool_thought_signature(model)",
+        "document.borrowed_shape(part)",
+        "GeminiValueOperation::ThoughtSignature",
+        "compiled_thought_signature_preserves_original_text_and_presence_barriers",
+        "compiled_gemini_three_model_policy_requires_exact_case_sensitive_substring",
+      ];
+      const retired = [
+        'model.contains("gemini-3")',
+        'part.get("thoughtSignature")',
+        'part.get("thought_signature")',
+        "fn gemini_provider_core_model_requires_tool_thought_signature(",
+      ];
+      const production = contents.split("#[cfg(test)]", 1)[0];
+      return required.every((marker) => contents.includes(marker)) &&
+        retired.every((marker) => !production.includes(marker))
+        ? [] : [filePath + ": Gemini thought-signature selection must remain compiled Mojo-owned"];
+    }
     if (filePath === "crates/prodex-provider-core/src/gemini_bridge/util.rs") {
       const production = contents.split("#[cfg(test)]", 1)[0];
       const required = [
@@ -2036,6 +2056,10 @@ export function findViolations(files) {
         "MediaObjectIndices = 5",
         "compiled_gemini_media_indices_preserve_content_only_order",
         "compiled_gemini_media_indices_walk_deep_flat_tree_without_recursion",
+        "ThoughtSignature = 6",
+        "pub fn gemini_model_requires_tool_thought_signature(",
+        "compiled_gemini_thought_signature_keeps_first_present_priority_and_unicode",
+        "compiled_gemini_model_signature_classifies_substrings_without_rust_parser",
       ];
       return required.filter((marker) => !contents.includes(marker))
         .map((marker) => filePath + ": compiled Gemini value ABI must retain " + marker);
@@ -2058,6 +2082,10 @@ export function findViolations(files) {
         "def gemini_value_media_object_indices(",
         "gemini_value_media_object_indices(Pointer(to=sink), tree)",
         'child = pj_field(tree, cursor, StringSlice("content"))',
+        "def gemini_value_thought_signature(",
+        'pj_field(tree, 0, StringSlice("thoughtSignature"))',
+        'pj_field(tree, 0, StringSlice("thought_signature"))',
+        'rich_view_matches_literal["gemini-3"](fragment, False)',
       ];
       return required.filter((marker) => !contents.includes(marker))
         .map((marker) => filePath + ": compiled Gemini value traversal must retain " + marker);
@@ -2087,8 +2115,8 @@ export function findViolations(files) {
     if (filePath === "crates/prodex-mojo-core/src/json.rs" && contents.includes("mod gemini_contents;")) {
       return [
         "pub use gemini_value_policy::{",
-        "GeminiValueOperation, gemini_skip_context_path_name, gemini_tool_pattern_parts,",
-        "gemini_value_projection,",
+        "GeminiValueOperation, gemini_model_requires_tool_thought_signature,",
+        "gemini_skip_context_path_name, gemini_tool_pattern_parts, gemini_value_projection,",
       ].every((marker) => contents.includes(marker))
         ? [] : [filePath + ": Gemini value adapter must stay reachable"];
     }
