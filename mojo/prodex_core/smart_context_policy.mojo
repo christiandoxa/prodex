@@ -746,3 +746,157 @@ def prodex_smart_context_telemetry_label_v1(
             return 3
         return SMART_CONTEXT_REQUEST_PLAN_INVALID
     return SMART_CONTEXT_REQUEST_PLAN_OK
+
+
+# Smart Context scope-store retention. Host owns filesystem observations and
+# execution of removals; compiled Mojo owns chronological/path ordering,
+# strict expiry threshold, and the running disk byte budget.
+comptime SMART_CONTEXT_STORE_RETENTION_ABI: Int64 = 1
+comptime SMART_CONTEXT_STORE_RETENTION_MAX: Int64 = 65_536
+comptime SMART_CONTEXT_STORE_RETENTION_ROW_WORDS: Int64 = 9
+comptime SMART_CONTEXT_STORE_RETENTION_NANOS: UInt64 = 1_000_000_000
+
+
+def smart_context_store_row(
+    rows: Pointer[mut=False, UInt64, _], index: Int64, field: Int64,
+) -> UInt64:
+    return rows[unsafe_offset=index * SMART_CONTEXT_STORE_RETENTION_ROW_WORDS + field]
+
+
+def smart_context_store_compare(
+    rows: Pointer[mut=False, UInt64, _], left: Int64, right: Int64,
+) -> Int64:
+    var negative_left = smart_context_store_row(rows, left, 2)
+    var negative_right = smart_context_store_row(rows, right, 2)
+    if negative_left != negative_right:
+        return -1 if negative_left == 1 else 1
+    var a_secs = smart_context_store_row(rows, left, 3)
+    var b_secs = smart_context_store_row(rows, right, 3)
+    if a_secs != b_secs:
+        if negative_left == 1:
+            return -1 if a_secs > b_secs else 1
+        return -1 if a_secs < b_secs else 1
+    var a_nanos = smart_context_store_row(rows, left, 4)
+    var b_nanos = smart_context_store_row(rows, right, 4)
+    if a_nanos != b_nanos:
+        if negative_left == 1:
+            return -1 if a_nanos > b_nanos else 1
+        return -1 if a_nanos < b_nanos else 1
+
+    var a_len = Int64(smart_context_store_row(rows, left, 1))
+    var b_len = Int64(smart_context_store_row(rows, right, 1))
+    var a_ptr = Pointer[mut=False, UInt8, ImmUntrackedOrigin](
+        unsafe_from_address=Int(smart_context_store_row(rows, left, 0))
+    )
+    var b_ptr = Pointer[mut=False, UInt8, ImmUntrackedOrigin](
+        unsafe_from_address=Int(smart_context_store_row(rows, right, 0))
+    )
+    for index in range(min(a_len, b_len)):
+        var a = a_ptr[unsafe_offset=index]
+        var b = b_ptr[unsafe_offset=index]
+        if a != b:
+            return -1 if a < b else 1
+    if a_len != b_len:
+        return -1 if a_len < b_len else 1
+    if left != right:
+        return -1 if left < right else 1
+    return 0
+
+
+def smart_context_store_heap_down(
+    rows: Pointer[mut=False, UInt64, _],
+    indices: Pointer[mut=True, Int64, _], start: Int64, count: Int64,
+):
+    var root = start
+    while root * 2 + 1 < count:
+        var child = root * 2 + 1
+        var swap = root
+        if smart_context_store_compare(
+            rows, indices[unsafe_offset=swap], indices[unsafe_offset=child],
+        ) < 0:
+            swap = child
+        if child + 1 < count and smart_context_store_compare(
+            rows, indices[unsafe_offset=swap], indices[unsafe_offset=child + 1],
+        ) < 0:
+            swap = child + 1
+        if swap == root:
+            return
+        var saved = indices[unsafe_offset=root]
+        indices[unsafe_offset=root] = indices[unsafe_offset=swap]
+        indices[unsafe_offset=swap] = saved
+        root = swap
+
+
+@export("prodex_smart_context_store_retention_v1")
+def prodex_smart_context_store_retention_v1(
+    abi_version: Int64,
+    rows_address: UInt, count: Int64,
+    retention_seconds: UInt64, retention_nanos: UInt64,
+    disk_cap: UInt64,
+    output_address: UInt, output_capacity: Int64,
+    written_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != SMART_CONTEXT_STORE_RETENTION_ABI:
+        return 4
+    if (
+        count < 0 or count > SMART_CONTEXT_STORE_RETENTION_MAX
+        or (count > 0 and (rows_address == 0 or rows_address % 8 != 0))
+        or retention_nanos >= SMART_CONTEXT_STORE_RETENTION_NANOS
+        or output_address == 0 or output_address % 8 != 0
+        or output_capacity < count
+        or written_address == 0 or written_address % 8 != 0
+    ):
+        return 1
+    var rows = Pointer[mut=False, UInt64, ImmUntrackedOrigin](
+        unsafe_from_address=Int(rows_address)
+    )
+    var total = UInt64(0)
+    for index in range(count):
+        var path_length = smart_context_store_row(rows, index, 1)
+        if (
+            path_length > UInt64(9223372036854775807)
+            or (path_length > 0 and smart_context_store_row(rows, index, 0) == 0)
+            or smart_context_store_row(rows, index, 2) > 1
+            or smart_context_store_row(rows, index, 4) >= SMART_CONTEXT_STORE_RETENTION_NANOS
+            or smart_context_store_row(rows, index, 6) >= SMART_CONTEXT_STORE_RETENTION_NANOS
+        ):
+            return 1
+        var bytes = smart_context_store_row(rows, index, 7)
+        if bytes > UINT64_MAX - total:
+            return 1
+        total += bytes
+    var indices = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    for index in range(count):
+        indices[unsafe_offset=index] = index
+    var start = count // 2
+    while start > 0:
+        start -= 1
+        smart_context_store_heap_down(rows, indices, start, count)
+    var end = count
+    while end > 1:
+        end -= 1
+        var saved = indices[unsafe_offset=0]
+        indices[unsafe_offset=0] = indices[unsafe_offset=end]
+        indices[unsafe_offset=end] = saved
+        smart_context_store_heap_down(rows, indices, 0, end)
+    var selected = Int64(0)
+    for index in range(count):
+        var original = indices[unsafe_offset=index]
+        var elapsed_seconds = smart_context_store_row(rows, original, 5)
+        var elapsed_nanos = smart_context_store_row(rows, original, 6)
+        var expired = (
+            elapsed_seconds > retention_seconds
+            or (elapsed_seconds == retention_seconds and elapsed_nanos > retention_nanos)
+        )
+        if not expired and total <= disk_cap:
+            continue
+        indices[unsafe_offset=selected] = original
+        selected += 1
+        var bytes = smart_context_store_row(rows, original, 7)
+        total = 0 if bytes > total else total - bytes
+    Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(written_address)
+    )[] = selected
+    return 0

@@ -7946,3 +7946,15 @@ search and conditional drain policy were deleted. All 66
 runtime-doctor tests, two direct core ABI tests, direct Mojo test,
 no-fallback and share checks pass. The official share is
 35.908872666164704% (131,629 Mojo / 234,935 Rust); 75% remains open.
+
+## Smart Context scope-store retention selection migrated to Mojo (2026-10-20)
+
+The compiled Smart Context policy owner now sorts persisted store
+observations by full timestamp and raw path bytes, compares strict
+age boundaries and applies the cumulative disk cap. Rust retains
+filesystem metadata and removal side effects, but the old Rust
+sorting and eviction decisions are deleted. All 117 relevant app
+Smart Context tests, three direct core ABI tests, direct Mojo tests,
+source no-fallback and share checks pass. Official share increases
+from 35.908872666164704% to 35.921607541552966%
+(131,768 Mojo / 235,053 Rust); 75% remains open.
