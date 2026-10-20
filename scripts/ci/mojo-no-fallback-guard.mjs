@@ -290,6 +290,7 @@ const OPENAI_COMPAT_SSE_MOJO = "mojo/prodex_core/openai_compat.mojo";
 const OPENAI_COMPAT_SSE_EXPORT = "mojo/prodex_core/rich_abi.mojo";
 const OPENAI_COMPAT_SSE_DIRECT_TEST = "mojo/tests/openai_compat_sse_envelope_test.mojo";
 const OPENAI_COMPAT_SSE_CALLER_TEST = "crates/prodex-provider-core/src/translators/openai_chat_compat_response/stream/mojo_tests.rs";
+const GEMINI_PATCH_SOURCE_DIRECT_TEST_FILE = "mojo/tests/gemini_apply_patch_sources_test.mojo";
 const PROMOTED_FILES = [
   PROVIDER_USAGE_SSE_MOJO,
   PROVIDER_USAGE_SSE_TEST,
@@ -300,6 +301,7 @@ const PROMOTED_FILES = [
   OPENAI_COMPAT_SSE_EXPORT,
   OPENAI_COMPAT_SSE_DIRECT_TEST,
   OPENAI_COMPAT_SSE_CALLER_TEST,
+  GEMINI_PATCH_SOURCE_DIRECT_TEST_FILE,
   ANTHROPIC_DATA_SSE_CALLER,
   ANTHROPIC_DATA_SSE_CORE,
   ANTHROPIC_DATA_SSE_MOJO,
@@ -6899,6 +6901,58 @@ export function findViolations(files) {
     }
     return [];
   });
+  const geminiPatchSourceMojoViolations = files.flatMap(([filePath, contents]) => {
+    if (filePath === GEMINI_APPLY_PATCH_FILE &&
+        contents.includes("pub(crate) fn gemini_custom_apply_patch_input(")) {
+      const production = contents.split("#[cfg(test)]", 1)[0];
+      const required = [
+        "GEMINI_PATCH_SOURCE_FIELD_COUNT",
+        "gemini_apply_patch_sources(&fields)",
+        "if let Some(input) = plan.explicit",
+        "if let Some(path) = plan.path",
+        "if let Some(input) = plan.content",
+      ];
+      const retired = [
+        "fn gemini_explicit_apply_patch_input(",
+        "fn gemini_content_apply_patch_input(",
+        "fn gemini_edit_args(",
+        '.find_map(|key| object.get(*key).and_then(Value::as_str))',
+        '.filter(|path| !path.trim().is_empty())',
+      ];
+      return required.every((marker) => production.includes(marker))
+        && retired.every((marker) => !production.includes(marker))
+        ? [] : [filePath + ": Gemini apply-patch source alias/trim policy must remain Mojo-owned"];
+    }
+    if (filePath === GEMINI_APPLY_PATCH_ADAPTER_FILE &&
+        contents.includes("pub struct GeminiToolNamePolicy")) {
+      return [
+        "fn prodex_gemini_apply_patch_sources_v1(",
+        "pub fn gemini_apply_patch_sources",
+        "compiled_gemini_patch_sources_preserve_alias_priority_empty_values_and_unicode",
+        "compiled_gemini_patch_sources_abi_rejects_bad_late_rows_before_output_write",
+      ].filter((marker) => !contents.includes(marker))
+        .map((marker) => filePath + ": Gemini patch source ABI missing " + marker);
+    }
+    if (filePath === GEMINI_APPLY_PATCH_MOJO_FILE &&
+        contents.includes("GEMINI_TOOLING_ABI_VERSION")) {
+      return [
+        '@export("prodex_gemini_apply_patch_sources_v1")',
+        "GEMINI_PATCH_SOURCES_FIELD_COUNT",
+        "def tooling_patch_first_string(",
+        "var bounds = rich_trim_bounds(view)",
+      ].filter((marker) => !contents.includes(marker))
+        .map((marker) => filePath + ": Gemini patch source owner missing " + marker);
+    }
+    if (filePath === GEMINI_APPLY_PATCH_TEST_FILE && contents.includes("#[test]")) {
+      return contents.includes("compiled_gemini_apply_patch_sources_keep_empty_alias_barriers_and_unicode_trim")
+        ? [] : [filePath + ": missing compiled Gemini patch alias caller regression"];
+    }
+    if (filePath === GEMINI_PATCH_SOURCE_DIRECT_TEST_FILE) {
+      return contents.includes("prodex_gemini_apply_patch_sources_v1")
+        ? [] : [filePath + ": missing direct compiled Gemini patch selection ABI test"];
+    }
+    return [];
+  });
   const geminiApplyPatchViolations = files.flatMap(([filePath, contents]) => {
     if (filePath === GEMINI_APPLY_PATCH_FILE) {
       const production = contents.split("#[cfg(test)]", 1)[0];
@@ -11932,7 +11986,7 @@ export function findViolations(files) {
     }
     return [];
   });
-  return [...openAiCompatSseEnvelopeMojoViolations, ...anthropicSseDataLineMojoViolations, ...responseHeaderSelectionMojoViolations, ...previousResponseJsonSearchMojoViolations, ...domainErrorMojoViolations, ...geminiValueCollectionMojoViolations, ...geminiSimpleResponseViolations, ...logPayloadProjectionViolations, ...nativeRecoveryOwnershipViolations, ...quotaRecoveryEligibilityViolations, ...runtimeBrokerReuseMojoViolations, ...geminiResponseMediaMojoViolations, ...cookieEvictionMojoViolations, ...websocketBudgetMojoViolations, ...affinityBindingMojoViolations, ...responsesCapacityRecoveryViolations, ...sseTapMojoOwnershipViolations, ...quotaWatchViolations, ...geminiCompactSnippetViolations, ...geminiCompactTextViolations, ...doctorSmartContextDecisionViolations, ...providerSseJsonFrameMojoViolations, ...geminiSseCompletionOwnershipViolations, ...anthropicNativeStreamDecisionViolations, ...anthropicAttemptCursorViolations, ...geminiUnsupportedToolRetryViolations, ...terminalGeometryViolations, ...previousResponseRecoveryTransitionViolations, ...chatCompatibleToolCallKindViolations, ...geminiQuotaBodyMojoViolations, ...geminiOAuthRotationMojoViolations, ...geminiBuiltinBatchMojoViolations, ...geminiToolArrayValidationMojoViolations, ...geminiOAuthModelMojoViolations, ...superExposeOriginMojoViolations, ...kiroAcpToolLedgerMojoViolations, ...quotaPoolSummarySectionsMojoViolations, ...deepseekRequestDiagnosticViolations, ...deepseekToolShapeIssueMojoViolations, ...deepseekReplayItemPolicyMojoViolations, ...chatNamespaceSplitMojoViolations, ...deepseekInputItemIssueMessageViolations, ...deepseekRequestIssueMessageViolations, ...smartContextTelemetrySampleViolations, ...compatibilityDiagnosticsMojoViolations, ...quotaHeaderProjectionViolations, ...smartContextCapsuleOrderViolations, ...markerViolations, ...deepseekCatalogPolicyViolations, ...featureOffViolations, ...liveLogRecordViolations, ...runtimePolicyPresetViolations, ...runtimeConfigScalarViolations, ...profileHealthCircuitViolations, ...logThroughputViolations, ...operationalDetailSpecViolations, ...transcriptPolicyViolations, ...logLoadPolicyViolations, ...routeReasonViolations, ...quotaSnapshotCompareMojoViolations, ...startupProbeBatchMojoViolations, ...runtimeStateQuotaViolations, ...runtimeStateRoutePolicyViolations, ...runtimeProxyRootViolations, ...runtimeRecoveryDeadlineViolations, ...brokerVersionGuardViolations, ...brokerContinuityViolations, ...brokerLogCacheViolations, ...codexConfigViolations, ...statePolicyViolations, ...quotaSelectionPolicyViolations, ...routeTagMirrorViolations, ...enumTagMirrorViolations, ...appSelectionPolicyMirrorViolations, ...runtimeStateBackgroundViolations, ...redactionViolations, ...rateLimitHeaderSelectionViolations, ...profileIdentityViolations, ...governanceInspectionViolations, ...governanceInspectionOrderingViolations, ...exactnessPlannerViolations,
+  return [...geminiPatchSourceMojoViolations, ...openAiCompatSseEnvelopeMojoViolations, ...anthropicSseDataLineMojoViolations, ...responseHeaderSelectionMojoViolations, ...previousResponseJsonSearchMojoViolations, ...domainErrorMojoViolations, ...geminiValueCollectionMojoViolations, ...geminiSimpleResponseViolations, ...logPayloadProjectionViolations, ...nativeRecoveryOwnershipViolations, ...quotaRecoveryEligibilityViolations, ...runtimeBrokerReuseMojoViolations, ...geminiResponseMediaMojoViolations, ...cookieEvictionMojoViolations, ...websocketBudgetMojoViolations, ...affinityBindingMojoViolations, ...responsesCapacityRecoveryViolations, ...sseTapMojoOwnershipViolations, ...quotaWatchViolations, ...geminiCompactSnippetViolations, ...geminiCompactTextViolations, ...doctorSmartContextDecisionViolations, ...providerSseJsonFrameMojoViolations, ...geminiSseCompletionOwnershipViolations, ...anthropicNativeStreamDecisionViolations, ...anthropicAttemptCursorViolations, ...geminiUnsupportedToolRetryViolations, ...terminalGeometryViolations, ...previousResponseRecoveryTransitionViolations, ...chatCompatibleToolCallKindViolations, ...geminiQuotaBodyMojoViolations, ...geminiOAuthRotationMojoViolations, ...geminiBuiltinBatchMojoViolations, ...geminiToolArrayValidationMojoViolations, ...geminiOAuthModelMojoViolations, ...superExposeOriginMojoViolations, ...kiroAcpToolLedgerMojoViolations, ...quotaPoolSummarySectionsMojoViolations, ...deepseekRequestDiagnosticViolations, ...deepseekToolShapeIssueMojoViolations, ...deepseekReplayItemPolicyMojoViolations, ...chatNamespaceSplitMojoViolations, ...deepseekInputItemIssueMessageViolations, ...deepseekRequestIssueMessageViolations, ...smartContextTelemetrySampleViolations, ...compatibilityDiagnosticsMojoViolations, ...quotaHeaderProjectionViolations, ...smartContextCapsuleOrderViolations, ...markerViolations, ...deepseekCatalogPolicyViolations, ...featureOffViolations, ...liveLogRecordViolations, ...runtimePolicyPresetViolations, ...runtimeConfigScalarViolations, ...profileHealthCircuitViolations, ...logThroughputViolations, ...operationalDetailSpecViolations, ...transcriptPolicyViolations, ...logLoadPolicyViolations, ...routeReasonViolations, ...quotaSnapshotCompareMojoViolations, ...startupProbeBatchMojoViolations, ...runtimeStateQuotaViolations, ...runtimeStateRoutePolicyViolations, ...runtimeProxyRootViolations, ...runtimeRecoveryDeadlineViolations, ...brokerVersionGuardViolations, ...brokerContinuityViolations, ...brokerLogCacheViolations, ...codexConfigViolations, ...statePolicyViolations, ...quotaSelectionPolicyViolations, ...routeTagMirrorViolations, ...enumTagMirrorViolations, ...appSelectionPolicyMirrorViolations, ...runtimeStateBackgroundViolations, ...redactionViolations, ...rateLimitHeaderSelectionViolations, ...profileIdentityViolations, ...governanceInspectionViolations, ...governanceInspectionOrderingViolations, ...exactnessPlannerViolations,
     ...infoRunwayViolations,
     ...geminiNormalizedViolations,
     ...quotaDurationViolations,
@@ -15024,6 +15078,19 @@ function selfTest() {
   assert.match(findViolations([["crates/prodex-provider-core/src/translators/anthropic/messages/stream.rs",
     '#[cfg(not(feature = "mojo"))] fn existing_path() { Some("text") => () }',
   ]])[0], /Mojo-owned operation cannot have a feature-off Rust path/u);
+  const geminiPatchSourceFixture = [
+    "pub(crate) fn gemini_custom_apply_patch_input(",
+    "GEMINI_PATCH_SOURCE_FIELD_COUNT",
+    "gemini_apply_patch_sources(&fields)",
+    "if let Some(input) = plan.explicit",
+    "if let Some(path) = plan.path",
+    "if let Some(input) = plan.content",
+  ].join("\\n");
+  assert.deepEqual(findViolations([[GEMINI_APPLY_PATCH_FILE, geminiPatchSourceFixture]]).filter(
+    (message) => message.includes("Gemini apply-patch source alias/trim")), []);
+  assert.match(findViolations([[GEMINI_APPLY_PATCH_FILE,
+    geminiPatchSourceFixture + "\\nfn gemini_edit_args(",
+  ]]).join("\\n"), /Gemini apply-patch source alias\/trim policy must remain Mojo-owned/u);
   const strictEnvelopeFixture = [
     "fn translate_chat_stream_event_to_responses(",
     "openai_compat_sse_envelope(&event)",

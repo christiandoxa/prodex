@@ -480,3 +480,39 @@ fn gemini_provider_core_shapes_namespaced_and_special_tool_items() {
         })
     );
 }
+
+#[test]
+fn compiled_gemini_apply_patch_sources_keep_empty_alias_barriers_and_unicode_trim() {
+    const { assert!(prodex_mojo_core::MOJO_ACTIVE) }
+    assert_eq!(
+        gemini_custom_apply_patch_input(&json!({
+            "input": "",
+            "patch": "*** Begin Patch\n*** End Patch",
+        })),
+        "",
+        "the first present input string blocks later aliases even when empty",
+    );
+    assert_eq!(
+        gemini_custom_apply_patch_input(&json!({
+            "file_path": " \u{3000} ",
+            "path": "ignored.rs",
+            "content": "fallback content",
+        })),
+        "fallback content",
+    );
+    assert_eq!(
+        gemini_custom_apply_patch_input(&json!({
+            "filename": " \u{2003}docs/雪.rs\t",
+            "old_string": "before",
+            "new_string": "after",
+        })),
+        "*** Begin Patch\n*** Update File: docs/雪.rs\n@@\n-before\n+after\n*** End Patch",
+    );
+    assert_eq!(
+        gemini_custom_apply_patch_input(&json!({
+            "input": 17,
+            "diff": "*** Begin Patch\n*** End Patch",
+        })),
+        "*** Begin Patch\n*** End Patch",
+    );
+}
