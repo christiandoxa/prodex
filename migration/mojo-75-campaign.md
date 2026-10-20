@@ -7781,3 +7781,15 @@ non-regression checks pass. Official share changes from
 35.83891367008976% to 35.837909642431626%
 (130,846 Mojo / 234,259 Rust) due to the typed ABI acquisition
 overhead. The separate 75% objective remains open.
+
+## Runtime quota snapshot numerical comparison and persist decision in Mojo (2026-10-20)
+
+The production runtime-state quota owner now compares the four numeric
+window fields, checks previous-snapshot presence and decides persistence
+using saturating timestamp arithmetic. Rust only acquires equality
+facts for generic provider statuses and optional plan strings, with no
+numeric or timing-policy fallback. All 26 runtime-state tests, two
+direct core ABI tests, direct Mojo tests, no-fallback guard and
+canonical production non-regression checks pass. Official share
+changes from 35.837909642431626% to 35.836281199005576%
+(130,887 Mojo / 234,349 Rust). The 75% goal remains unmet.

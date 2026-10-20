@@ -252,17 +252,44 @@ where
     )
 }
 
+// Generic W and Option<String> Eq are acquired in Rust; compiled Mojo
+// chooses numeric comparisons, missing-previous behavior and touch policy.
+fn runtime_snapshot_compare_facts<W: PartialEq>(
+    previous: Option<&RuntimeProfileUsageSnapshot<W>>,
+    next: &RuntimeProfileUsageSnapshot<W>,
+    now: i64,
+    touch_persist_interval_seconds: i64,
+) -> prodex_mojo_core::runtime_state_quota::RuntimeQuotaSnapshotCompareFacts {
+    let prior = previous.unwrap_or(next);
+    prodex_mojo_core::runtime_state_quota::RuntimeQuotaSnapshotCompareFacts {
+        previous_present: previous.is_some(),
+        previous_five_hour_remaining: prior.five_hour_remaining_percent,
+        previous_five_hour_reset_at: prior.five_hour_reset_at,
+        previous_weekly_remaining: prior.weekly_remaining_percent,
+        previous_weekly_reset_at: prior.weekly_reset_at,
+        next_five_hour_remaining: next.five_hour_remaining_percent,
+        next_five_hour_reset_at: next.five_hour_reset_at,
+        next_weekly_remaining: next.weekly_remaining_percent,
+        next_weekly_reset_at: next.weekly_reset_at,
+        five_hour_status_equal: prior.five_hour_status == next.five_hour_status,
+        weekly_status_equal: prior.weekly_status == next.weekly_status,
+        plan_type_equal: prior.plan_type == next.plan_type,
+        previous_checked_at: prior.checked_at,
+        now,
+        touch_interval_seconds: touch_persist_interval_seconds,
+    }
+}
+
 pub fn runtime_profile_usage_snapshot_materially_matches<W: PartialEq>(
     previous: &RuntimeProfileUsageSnapshot<W>,
     next: &RuntimeProfileUsageSnapshot<W>,
 ) -> bool {
-    previous.five_hour_status == next.five_hour_status
-        && previous.plan_type == next.plan_type
-        && previous.five_hour_remaining_percent == next.five_hour_remaining_percent
-        && previous.five_hour_reset_at == next.five_hour_reset_at
-        && previous.weekly_status == next.weekly_status
-        && previous.weekly_remaining_percent == next.weekly_remaining_percent
-        && previous.weekly_reset_at == next.weekly_reset_at
+    prodex_mojo_core::runtime_state_quota::snapshot_compare_plan(
+        runtime_snapshot_compare_facts(Some(previous), next, 0, 0),
+        false,
+    )
+    .expect("compiled Mojo quota material comparison returned invalid output")
+    .materially_matches
 }
 
 pub fn runtime_profile_usage_snapshot_should_persist<W: PartialEq>(
@@ -271,16 +298,12 @@ pub fn runtime_profile_usage_snapshot_should_persist<W: PartialEq>(
     now: i64,
     touch_persist_interval_seconds: i64,
 ) -> bool {
-    let Some(previous) = previous else {
-        return true;
-    };
-
-    !runtime_profile_usage_snapshot_materially_matches(previous, next)
-        || runtime_timestamp_touch_should_persist(
-            previous.checked_at,
-            now,
-            touch_persist_interval_seconds,
-        )
+    prodex_mojo_core::runtime_state_quota::snapshot_compare_plan(
+        runtime_snapshot_compare_facts(previous, next, now, touch_persist_interval_seconds),
+        true,
+    )
+    .expect("compiled Mojo quota snapshot persistence returned invalid output")
+    .should_persist
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

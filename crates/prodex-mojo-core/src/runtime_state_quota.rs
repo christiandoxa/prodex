@@ -84,6 +84,13 @@ pub struct QuotaSummaryLogFields<'a> {
 }
 
 unsafe extern "C" {
+    fn prodex_runtime_state_quota_snapshot_compare_v1(
+        abi_version: i64,
+        operation: i64,
+        facts_address: u64,
+        fact_count: i64,
+        result_address: u64,
+    ) -> i64;
     fn prodex_runtime_state_startup_probe_batch_v1(
         abi_version: i64,
         rows_address: u64,
@@ -161,6 +168,76 @@ fn bool_output(value: i64) -> Result<bool, MojoError> {
         1 => Ok(true),
         _ => Err(MojoError::InvalidOutput),
     }
+}
+
+/// Borrowed generic-status comparisons and concrete numeric quota windows.
+#[derive(Debug, Clone, Copy)]
+pub struct RuntimeQuotaSnapshotCompareFacts {
+    pub previous_present: bool,
+    pub previous_five_hour_remaining: i64,
+    pub previous_five_hour_reset_at: i64,
+    pub previous_weekly_remaining: i64,
+    pub previous_weekly_reset_at: i64,
+    pub next_five_hour_remaining: i64,
+    pub next_five_hour_reset_at: i64,
+    pub next_weekly_remaining: i64,
+    pub next_weekly_reset_at: i64,
+    pub five_hour_status_equal: bool,
+    pub weekly_status_equal: bool,
+    pub plan_type_equal: bool,
+    pub previous_checked_at: i64,
+    pub now: i64,
+    pub touch_interval_seconds: i64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RuntimeQuotaSnapshotComparePlan {
+    pub materially_matches: bool,
+    pub should_persist: bool,
+}
+
+/// Compare normalized numerical quota fields and decide persistence solely
+/// in Mojo; host generic status/plan string Eq cannot cross a scalar ABI.
+pub fn snapshot_compare_plan(
+    facts: RuntimeQuotaSnapshotCompareFacts,
+    decide_persistence: bool,
+) -> Result<RuntimeQuotaSnapshotComparePlan, MojoError> {
+    let fields = [
+        facts.previous_five_hour_remaining,
+        facts.previous_five_hour_reset_at,
+        facts.previous_weekly_remaining,
+        facts.previous_weekly_reset_at,
+        facts.next_five_hour_remaining,
+        facts.next_five_hour_reset_at,
+        facts.next_weekly_remaining,
+        facts.next_weekly_reset_at,
+        i64::from(facts.previous_present),
+        i64::from(facts.five_hour_status_equal),
+        i64::from(facts.weekly_status_equal),
+        i64::from(facts.plan_type_equal),
+        facts.previous_checked_at,
+        facts.now,
+        facts.touch_interval_seconds,
+    ];
+    let mut output = [-1_i64; 2];
+    match unsafe {
+        prodex_runtime_state_quota_snapshot_compare_v1(
+            ABI_VERSION,
+            i64::from(decide_persistence),
+            fields.as_ptr() as usize as u64,
+            15,
+            output.as_mut_ptr() as usize as u64,
+        )
+    } {
+        0 => {}
+        1 => return Err(MojoError::InvalidInput),
+        4 => return Err(MojoError::AbiMismatch),
+        _ => return Err(MojoError::InvalidOutput),
+    }
+    Ok(RuntimeQuotaSnapshotComparePlan {
+        materially_matches: bool_output(output[0])?,
+        should_persist: bool_output(output[1])?,
+    })
 }
 
 pub fn timestamp_touch_should_persist(
@@ -666,6 +743,139 @@ mod tests {
                 }
             }
         }
+    }
+
+    fn snapshot_fact() -> RuntimeQuotaSnapshotCompareFacts {
+        RuntimeQuotaSnapshotCompareFacts {
+            previous_present: true,
+            previous_five_hour_remaining: 100,
+            previous_five_hour_reset_at: i64::MIN,
+            previous_weekly_remaining: 0,
+            previous_weekly_reset_at: i64::MAX,
+            next_five_hour_remaining: 100,
+            next_five_hour_reset_at: i64::MIN,
+            next_weekly_remaining: 0,
+            next_weekly_reset_at: i64::MAX,
+            five_hour_status_equal: true,
+            weekly_status_equal: true,
+            plan_type_equal: true,
+            previous_checked_at: 100,
+            now: 110,
+            touch_interval_seconds: 60,
+        }
+    }
+
+    #[test]
+    fn compiled_quota_snapshot_compare_detects_individual_differences_and_stale_touches() {
+        let initial = snapshot_fact();
+        assert_eq!(
+            snapshot_compare_plan(initial, true),
+            Ok(RuntimeQuotaSnapshotComparePlan {
+                materially_matches: true,
+                should_persist: false,
+            }),
+        );
+        let mut stale = initial;
+        stale.now = 161;
+        assert_eq!(
+            snapshot_compare_plan(stale, true),
+            Ok(RuntimeQuotaSnapshotComparePlan {
+                materially_matches: true,
+                should_persist: true,
+            }),
+        );
+        let mut missing = initial;
+        missing.previous_present = false;
+        assert_eq!(
+            snapshot_compare_plan(missing, true),
+            Ok(RuntimeQuotaSnapshotComparePlan {
+                materially_matches: false,
+                should_persist: true,
+            }),
+        );
+        for mutate in [
+            |f: &mut RuntimeQuotaSnapshotCompareFacts| f.next_five_hour_remaining = 99,
+            |f: &mut RuntimeQuotaSnapshotCompareFacts| f.next_five_hour_reset_at += 1,
+            |f: &mut RuntimeQuotaSnapshotCompareFacts| f.next_weekly_remaining = 1,
+            |f: &mut RuntimeQuotaSnapshotCompareFacts| f.next_weekly_reset_at -= 1,
+            |f: &mut RuntimeQuotaSnapshotCompareFacts| f.five_hour_status_equal = false,
+            |f: &mut RuntimeQuotaSnapshotCompareFacts| f.weekly_status_equal = false,
+            |f: &mut RuntimeQuotaSnapshotCompareFacts| f.plan_type_equal = false,
+        ] {
+            let mut changed = initial;
+            mutate(&mut changed);
+            assert_eq!(
+                snapshot_compare_plan(changed, true),
+                Ok(RuntimeQuotaSnapshotComparePlan {
+                    materially_matches: false,
+                    should_persist: true,
+                }),
+            );
+        }
+        assert_eq!(
+            snapshot_compare_plan(initial, false),
+            Ok(RuntimeQuotaSnapshotComparePlan {
+                materially_matches: true,
+                should_persist: false,
+            }),
+        );
+        let mut saturated = initial;
+        saturated.previous_checked_at = i64::MIN;
+        saturated.now = i64::MAX;
+        saturated.touch_interval_seconds = i64::MAX;
+        assert_eq!(
+            snapshot_compare_plan(saturated, true)
+                .unwrap()
+                .should_persist,
+            false
+        );
+    }
+
+    #[test]
+    fn compiled_quota_snapshot_compare_abi_rejects_shape_and_boolean_flags_before_writing() {
+        let mut inputs = [0_i64; 15];
+        let mut output = [73_i64; 2];
+        let source = inputs.as_ptr() as usize as u64;
+        let result = output.as_mut_ptr() as usize as u64;
+        for (version, operation, address, count, expected) in [
+            (2, 0, source, 15, 4),
+            (1, -1, source, 15, 1),
+            (1, 2, source, 15, 1),
+            (1, 0, 0, 15, 1),
+            (1, 0, source, 14, 1),
+        ] {
+            assert_eq!(
+                unsafe {
+                    prodex_runtime_state_quota_snapshot_compare_v1(
+                        version, operation, address, count, result,
+                    )
+                },
+                expected,
+            );
+            assert_eq!(output, [73; 2]);
+        }
+        for index in 8..12 {
+            inputs[index] = 2;
+            assert_eq!(
+                unsafe {
+                    prodex_runtime_state_quota_snapshot_compare_v1(
+                        1,
+                        0,
+                        inputs.as_ptr() as usize as u64,
+                        15,
+                        result,
+                    )
+                },
+                1,
+            );
+            assert_eq!(output, [73; 2]);
+            inputs[index] = 0;
+        }
+        assert_eq!(
+            unsafe { prodex_runtime_state_quota_snapshot_compare_v1(1, 0, source, 15, 0) },
+            1,
+        );
+        assert_eq!(output, [73; 2]);
     }
 
     #[test]

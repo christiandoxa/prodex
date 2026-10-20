@@ -11,6 +11,7 @@ use crate::{
     runtime_continuation_journal_save_enqueue_plan, runtime_hot_continuation_state_mutation,
     runtime_probe_usage_snapshot_apply_plan, runtime_profile_usage_snapshot_hold_active,
     runtime_profile_usage_snapshot_hold_expired, runtime_profile_usage_snapshot_is_usable,
+    runtime_profile_usage_snapshot_materially_matches,
     runtime_profile_usage_snapshot_should_persist, runtime_profiles_needing_startup_probe_refresh,
     runtime_profiles_needing_startup_probe_refresh_from_snapshots,
     runtime_proxy_queue_pressure_active, runtime_state_save_debounce,
@@ -947,4 +948,59 @@ fn compiled_startup_probe_batch_preserves_over_65536_profile_order_and_remaining
     assert!(runtime_profiles_needing_startup_probe_refresh(no_slot, 0).is_empty());
     let empty: Vec<RuntimeStartupProbeRefreshCandidate<usize>> = Vec::new();
     assert!(runtime_profiles_needing_startup_probe_refresh(empty, 10).is_empty());
+}
+
+#[test]
+fn compiled_quota_snapshot_material_differs_for_every_numeric_status_and_plan_field() {
+    let previous = RuntimeProfileUsageSnapshot {
+        checked_at: 100,
+        plan_type: Some("plus".to_owned()),
+        five_hour_status: RuntimeQuotaWindowStatus::Ready,
+        five_hour_remaining_percent: 80,
+        five_hour_reset_at: i64::MIN,
+        weekly_status: RuntimeQuotaWindowStatus::Thin,
+        weekly_remaining_percent: 60,
+        weekly_reset_at: i64::MAX,
+    };
+    let mut next = previous.clone();
+    next.checked_at += 20;
+    assert!(runtime_profile_usage_snapshot_materially_matches(
+        &previous, &next
+    ));
+    assert!(!runtime_profile_usage_snapshot_should_persist(
+        Some(&previous),
+        &next,
+        119,
+        20
+    ));
+    assert!(runtime_profile_usage_snapshot_should_persist(
+        Some(&previous),
+        &next,
+        121,
+        20
+    ));
+    assert!(runtime_profile_usage_snapshot_should_persist(
+        None, &next, 100, 20
+    ));
+    for change in 0..7 {
+        let mut altered = next.clone();
+        match change {
+            0 => altered.five_hour_status = RuntimeQuotaWindowStatus::Critical,
+            1 => altered.plan_type = Some("pro".to_owned()),
+            2 => altered.five_hour_remaining_percent = 79,
+            3 => altered.five_hour_reset_at += 1,
+            4 => altered.weekly_status = RuntimeQuotaWindowStatus::Ready,
+            5 => altered.weekly_remaining_percent = 59,
+            _ => altered.weekly_reset_at -= 1,
+        }
+        assert!(!runtime_profile_usage_snapshot_materially_matches(
+            &previous, &altered
+        ));
+        assert!(runtime_profile_usage_snapshot_should_persist(
+            Some(&previous),
+            &altered,
+            100,
+            60
+        ));
+    }
 }
