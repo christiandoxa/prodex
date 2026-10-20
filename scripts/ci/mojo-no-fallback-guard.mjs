@@ -357,6 +357,11 @@ const REPO_NEAREST_PATH_CALLER = "crates/prodex-app/src/runtime_state_shared/lin
 const REPO_NEAREST_PATH_CORE = "crates/prodex-mojo-core/src/runtime_repo_map.rs";
 const REPO_NEAREST_PATH_MOJO = "mojo/prodex_core/runtime_repo_map.mojo";
 const REPO_NEAREST_PATH_DIRECT_TEST = "mojo/tests/runtime_repo_nearest_path_test.mojo";
+const THREAD_DATABASE_ORDER_CALLER = "crates/prodex-app/src/runtime_thread_index.rs";
+const THREAD_DATABASE_ORDER_CORE = "crates/prodex-mojo-core/src/runtime/thread_index.rs";
+const THREAD_DATABASE_ORDER_MOJO = "mojo/prodex_core/runtime_thread_index.mojo";
+const THREAD_DATABASE_ORDER_DIRECT_TEST = "mojo/tests/runtime_thread_state_database_order_test.mojo";
+const THREAD_DATABASE_ORDER_CALLER_TEST = "crates/prodex-app/src/runtime_thread_index_tests.rs";
 const PROMOTED_FILES = [
   PROVIDER_USAGE_SSE_MOJO,
   PROVIDER_USAGE_SSE_TEST,
@@ -384,6 +389,10 @@ const PROMOTED_FILES = [
   RESPONSE_HEADER_SELECTION_TEST,
   RESPONSE_HEADER_SELECTION_CALLER_TEST,
   DEEPSEEK_BUFFERED_TEXT_DIRECT_TEST,
+  THREAD_DATABASE_ORDER_CALLER,
+  THREAD_DATABASE_ORDER_CORE,
+  THREAD_DATABASE_ORDER_DIRECT_TEST,
+  THREAD_DATABASE_ORDER_CALLER_TEST,
   REPO_NEAREST_PATH_DIRECT_TEST,
   COPILOT_INSTRUCTION_CALLER,
   COPILOT_INSTRUCTION_ADAPTER,
@@ -4867,6 +4876,54 @@ export function findViolations(files) {
     if (filePath === STARTUP_PROBE_BATCH_CALLER_TEST) {
       return contents.includes("compiled_startup_probe_batch_preserves_over_65536_profile_order_and_remaining_slots")
         ? [] : [filePath + ": startup batch requires cross-batch caller regression"];
+    }
+    return [];
+  });
+  const threadDatabaseOrderMojoViolations = files.flatMap(([filePath, contents]) => {
+    if (filePath === THREAD_DATABASE_ORDER_CALLER &&
+        contents.includes("fn runtime_thread_state_database_paths(")) {
+      const start = contents.indexOf("fn runtime_thread_state_database_paths(");
+      const end = contents.indexOf("\nfn open_runtime_thread_state_database(", start);
+      const body = contents.slice(start, end < 0 ? undefined : end);
+      const required = [
+        "thread_state_database_filename_order(&names)",
+        'name.starts_with("state_")',
+        'name.ends_with(".sqlite")',
+        "file_type.is_file() && !file_type.is_symlink()",
+      ];
+      return required.every((marker) => body.includes(marker))
+        && !body.includes("paths.sort_by(")
+        ? [] : [filePath + ": thread-state database descending filename precedence must remain compiled Mojo-owned"];
+    }
+    if (filePath === THREAD_DATABASE_ORDER_CORE) {
+      return [
+        "fn prodex_runtime_thread_index_database_order_v1(",
+        "pub fn thread_state_database_filename_order(",
+        "compiled_thread_state_database_filename_order_descends_lexically_and_stably",
+        "compiled_thread_state_database_filename_order_abi_rejects_bad_late_row_without_writes",
+      ].filter((marker) => !contents.includes(marker))
+        .map((marker) => filePath + ": thread-state database ordering ABI/test missing " + marker);
+    }
+    if (filePath === THREAD_DATABASE_ORDER_MOJO &&
+        contents.includes("THREAD_INDEX_ABI_VERSION")) {
+      return [
+        '@export("prodex_runtime_thread_index_database_order_v1")',
+        "def thread_index_database_filename_compare(",
+        "def thread_index_database_filename_heap_down(",
+        "return -1 if lhs > rhs else 1",
+      ].filter((marker) => !contents.includes(marker))
+        .map((marker) => filePath + ": compiled thread-state database precedence missing " + marker);
+    }
+    if (filePath === THREAD_DATABASE_ORDER_DIRECT_TEST) {
+      return contents.includes("prodex_runtime_thread_index_database_order_v1")
+        ? [] : [filePath + ": thread-state database direct Mojo ABI test missing"];
+    }
+    if (filePath === THREAD_DATABASE_ORDER_CALLER_TEST) {
+      return [
+        "compiled_thread_state_database_order_prefers_lexically_latest_sqlite_filename",
+        "compiled_thread_state_database_order_filters_out_directories_and_bad_names",
+      ].filter((marker) => !contents.includes(marker))
+        .map((marker) => filePath + ": real thread database ordering caller regression missing " + marker);
     }
     return [];
   });
@@ -12898,7 +12955,7 @@ export function findViolations(files) {
     }
     return [];
   });
-  return [...repoNearestPathMojoViolations, ...copilotInstructionMojoViolations, ...quotaStateProfileMojoViolations, ...quotaRuntimeLogOrderMojoViolations, ...repoArtifactEvictionMojoViolations, ...repoArtifactOrderMojoViolations, ...recentLogPathsMojoViolations, ...logFollowSelectionMojoViolations, ...smartContextStoreRetentionMojoViolations, ...runtimeLogTailMojoViolations, ...deepseekBufferedTextItemMojoViolations, ...runtimeSseResponseIdMojoViolations, ...upstreamPayloadBoundsMojoViolations, ...runtimeSseEventStateMojoViolations, ...geminiPatchSourceMojoViolations, ...openAiCompatSseEnvelopeMojoViolations, ...anthropicSseDataLineMojoViolations, ...responseHeaderSelectionMojoViolations, ...previousResponseTextSpanMojoViolations, ...previousResponseJsonSearchMojoViolations, ...domainErrorMojoViolations, ...geminiValueCollectionMojoViolations, ...geminiSimpleResponseViolations, ...logPayloadProjectionViolations, ...nativeRecoveryOwnershipViolations, ...quotaRecoveryEligibilityViolations, ...runtimeBrokerReuseMojoViolations, ...geminiResponseMediaMojoViolations, ...cookieEvictionMojoViolations, ...websocketBudgetMojoViolations, ...affinityBindingMojoViolations, ...responsesCapacityRecoveryViolations, ...sseTapMojoOwnershipViolations, ...quotaWatchViolations, ...geminiCompactSnippetViolations, ...geminiCompactTextViolations, ...doctorSmartContextDecisionViolations, ...providerSseJsonFrameMojoViolations, ...geminiSseCompletionOwnershipViolations, ...anthropicNativeStreamDecisionViolations, ...anthropicAttemptCursorViolations, ...geminiUnsupportedToolRetryViolations, ...terminalGeometryViolations, ...previousResponseRecoveryTransitionViolations, ...chatCompatibleToolCallKindViolations, ...geminiQuotaBodyMojoViolations, ...geminiOAuthRotationMojoViolations, ...geminiBuiltinBatchMojoViolations, ...geminiToolArrayValidationMojoViolations, ...geminiOAuthModelMojoViolations, ...superExposeOriginMojoViolations, ...kiroAcpToolLedgerMojoViolations, ...quotaPoolSummarySectionsMojoViolations, ...deepseekRequestDiagnosticViolations, ...deepseekToolShapeIssueMojoViolations, ...deepseekReplayItemPolicyMojoViolations, ...chatNamespaceSplitMojoViolations, ...deepseekInputItemIssueMessageViolations, ...deepseekRequestIssueMessageViolations, ...smartContextTelemetrySampleViolations, ...compatibilityDiagnosticsMojoViolations, ...quotaHeaderProjectionViolations, ...smartContextCapsuleOrderViolations, ...markerViolations, ...deepseekCatalogPolicyViolations, ...featureOffViolations, ...liveLogRecordViolations, ...runtimePolicyPresetViolations, ...runtimeConfigScalarViolations, ...profileHealthCircuitViolations, ...logThroughputViolations, ...operationalDetailSpecViolations, ...transcriptPolicyViolations, ...logLoadPolicyViolations, ...routeReasonViolations, ...quotaSnapshotCompareMojoViolations, ...startupProbeBatchMojoViolations, ...runtimeStateQuotaViolations, ...runtimeStateRoutePolicyViolations, ...runtimeProxyRootViolations, ...runtimeRecoveryDeadlineViolations, ...brokerVersionGuardViolations, ...brokerContinuityViolations, ...brokerLogCacheViolations, ...codexConfigViolations, ...statePolicyViolations, ...quotaSelectionPolicyViolations, ...routeTagMirrorViolations, ...enumTagMirrorViolations, ...appSelectionPolicyMirrorViolations, ...runtimeStateBackgroundViolations, ...redactionViolations, ...rateLimitHeaderSelectionViolations, ...profileIdentityViolations, ...governanceInspectionViolations, ...governanceInspectionOrderingViolations, ...exactnessPlannerViolations,
+  return [...threadDatabaseOrderMojoViolations, ...repoNearestPathMojoViolations, ...copilotInstructionMojoViolations, ...quotaStateProfileMojoViolations, ...quotaRuntimeLogOrderMojoViolations, ...repoArtifactEvictionMojoViolations, ...repoArtifactOrderMojoViolations, ...recentLogPathsMojoViolations, ...logFollowSelectionMojoViolations, ...smartContextStoreRetentionMojoViolations, ...runtimeLogTailMojoViolations, ...deepseekBufferedTextItemMojoViolations, ...runtimeSseResponseIdMojoViolations, ...upstreamPayloadBoundsMojoViolations, ...runtimeSseEventStateMojoViolations, ...geminiPatchSourceMojoViolations, ...openAiCompatSseEnvelopeMojoViolations, ...anthropicSseDataLineMojoViolations, ...responseHeaderSelectionMojoViolations, ...previousResponseTextSpanMojoViolations, ...previousResponseJsonSearchMojoViolations, ...domainErrorMojoViolations, ...geminiValueCollectionMojoViolations, ...geminiSimpleResponseViolations, ...logPayloadProjectionViolations, ...nativeRecoveryOwnershipViolations, ...quotaRecoveryEligibilityViolations, ...runtimeBrokerReuseMojoViolations, ...geminiResponseMediaMojoViolations, ...cookieEvictionMojoViolations, ...websocketBudgetMojoViolations, ...affinityBindingMojoViolations, ...responsesCapacityRecoveryViolations, ...sseTapMojoOwnershipViolations, ...quotaWatchViolations, ...geminiCompactSnippetViolations, ...geminiCompactTextViolations, ...doctorSmartContextDecisionViolations, ...providerSseJsonFrameMojoViolations, ...geminiSseCompletionOwnershipViolations, ...anthropicNativeStreamDecisionViolations, ...anthropicAttemptCursorViolations, ...geminiUnsupportedToolRetryViolations, ...terminalGeometryViolations, ...previousResponseRecoveryTransitionViolations, ...chatCompatibleToolCallKindViolations, ...geminiQuotaBodyMojoViolations, ...geminiOAuthRotationMojoViolations, ...geminiBuiltinBatchMojoViolations, ...geminiToolArrayValidationMojoViolations, ...geminiOAuthModelMojoViolations, ...superExposeOriginMojoViolations, ...kiroAcpToolLedgerMojoViolations, ...quotaPoolSummarySectionsMojoViolations, ...deepseekRequestDiagnosticViolations, ...deepseekToolShapeIssueMojoViolations, ...deepseekReplayItemPolicyMojoViolations, ...chatNamespaceSplitMojoViolations, ...deepseekInputItemIssueMessageViolations, ...deepseekRequestIssueMessageViolations, ...smartContextTelemetrySampleViolations, ...compatibilityDiagnosticsMojoViolations, ...quotaHeaderProjectionViolations, ...smartContextCapsuleOrderViolations, ...markerViolations, ...deepseekCatalogPolicyViolations, ...featureOffViolations, ...liveLogRecordViolations, ...runtimePolicyPresetViolations, ...runtimeConfigScalarViolations, ...profileHealthCircuitViolations, ...logThroughputViolations, ...operationalDetailSpecViolations, ...transcriptPolicyViolations, ...logLoadPolicyViolations, ...routeReasonViolations, ...quotaSnapshotCompareMojoViolations, ...startupProbeBatchMojoViolations, ...runtimeStateQuotaViolations, ...runtimeStateRoutePolicyViolations, ...runtimeProxyRootViolations, ...runtimeRecoveryDeadlineViolations, ...brokerVersionGuardViolations, ...brokerContinuityViolations, ...brokerLogCacheViolations, ...codexConfigViolations, ...statePolicyViolations, ...quotaSelectionPolicyViolations, ...routeTagMirrorViolations, ...enumTagMirrorViolations, ...appSelectionPolicyMirrorViolations, ...runtimeStateBackgroundViolations, ...redactionViolations, ...rateLimitHeaderSelectionViolations, ...profileIdentityViolations, ...governanceInspectionViolations, ...governanceInspectionOrderingViolations, ...exactnessPlannerViolations,
     ...infoRunwayViolations,
     ...geminiNormalizedViolations,
     ...quotaDurationViolations,
@@ -14067,6 +14124,18 @@ function selfTest() {
   assert.match(findViolations([[RESPONSE_FORWARDING_FILE,
     responseHeaderFixture + "\nheaders.into_iter().any(|(name, value)| ...)",
   ]]).join("\n"), /first-header, binary MIME and SSE flush selection must stay Mojo-owned/u);
+  const threadDbOrderFixture = [
+    "fn runtime_thread_state_database_paths(",
+    "thread_state_database_filename_order(&names)",
+    'name.starts_with("state_")',
+    'name.ends_with(".sqlite")',
+    "file_type.is_file() && !file_type.is_symlink()",
+  ].join("\n");
+  assert.deepEqual(findViolations([[THREAD_DATABASE_ORDER_CALLER, threadDbOrderFixture]]).filter(
+    (message) => message.includes("thread-state database descending filename")), []);
+  assert.match(findViolations([[THREAD_DATABASE_ORDER_CALLER,
+    threadDbOrderFixture + "\npaths.sort_by(",
+  ]]).join("\n"), /thread-state database descending filename precedence must remain compiled Mojo-owned/u);
   const repoNearestPathFixture = [
     "fn runtime_smart_context_repo_map_nearest_path(",
     "RepoNearestPathInput",

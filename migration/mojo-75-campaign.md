@@ -8057,3 +8057,15 @@ two direct core ABI tests, direct Mojo regression and no-fallback/share
 checks pass. Official share rises from 36.01139399995655% to
 36.01500636576116% (132,671 Mojo / 235,706 Rust).
 The separate 75% objective stays outstanding.
+
+## Thread state database filename-descending search priority in Mojo (2026-10-20)
+
+The compiled thread-index owner now orders state_*.sqlite candidates
+by descending filename bytes, preserving stable lexical priorities.
+Rust retains SQLite I/O and filesystem filters, with its old
+paths.sort_by policy removed rather than duplicated in Rust.
+All 15 thread-index app tests, two direct core ABI tests, direct
+Mojo test, no-fallback guard and canonical share checks pass.
+Production share increases from 36.01500636576116% to
+36.02408461634476% (132,761 Mojo / 235,773 Rust).
+The 75% objective stays open.

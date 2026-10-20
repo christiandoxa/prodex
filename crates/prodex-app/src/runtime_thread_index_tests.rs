@@ -567,3 +567,79 @@ fn dirty_marker_serialization_targeting_and_malformed_boundaries_use_mojo() {
     }
     let _ = fs::remove_dir_all(root);
 }
+
+#[test]
+fn compiled_thread_state_database_order_prefers_lexically_latest_sqlite_filename() {
+    let root = std::env::temp_dir().join(format!(
+        "prodex-thread-state-db-priority-{}-{}",
+        std::process::id(),
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    fs::create_dir_all(&root).unwrap();
+    let session_id = "01900000-0000-7000-8000-000000000075";
+    let winner = root.join("workspace-winner");
+    let loser = root.join("workspace-loser");
+    fs::create_dir_all(&winner).unwrap();
+    fs::create_dir_all(&loser).unwrap();
+    for (filename, cwd) in [("state_10.sqlite", &loser), ("state_9.sqlite", &winner)] {
+        let connection = rusqlite::Connection::open(root.join(filename)).unwrap();
+        connection
+            .execute("CREATE TABLE threads (id TEXT PRIMARY KEY, cwd TEXT)", [])
+            .unwrap();
+        connection
+            .execute(
+                "INSERT INTO threads (id, cwd) VALUES (?1, ?2)",
+                rusqlite::params![session_id, cwd.to_string_lossy().to_string()],
+            )
+            .unwrap();
+    }
+    let candidates = super::runtime_thread_state_database_paths(&root);
+    assert_eq!(
+        candidates
+            .into_iter()
+            .map(|path| path.file_name().unwrap().to_string_lossy().to_string())
+            .collect::<Vec<_>>(),
+        vec!["state_9.sqlite", "state_10.sqlite"],
+    );
+    assert_eq!(
+        super::runtime_thread_workspace_for_session(&root, session_id).as_deref(),
+        Some(winner.as_path()),
+    );
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn compiled_thread_state_database_order_filters_out_directories_and_bad_names() {
+    let root = std::env::temp_dir().join(format!(
+        "prodex-thread-state-db-filter-{}-{}",
+        std::process::id(),
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    fs::create_dir_all(&root).unwrap();
+    for name in ["state_雪.sqlite", "state_é.sqlite", "state_a.sqlite"] {
+        fs::write(root.join(name), b"invalid sqlite but valid candidate path").unwrap();
+    }
+    fs::write(root.join("not_state.sqlite"), b"not a candidate").unwrap();
+    fs::write(root.join("state_old.sqlite.bak"), b"not a candidate").unwrap();
+    fs::create_dir(root.join("state_dir.sqlite")).unwrap();
+    #[cfg(unix)]
+    {
+        std::os::unix::fs::symlink(root.join("state_a.sqlite"), root.join("state_link.sqlite"))
+            .unwrap();
+    }
+    let candidates = super::runtime_thread_state_database_paths(&root)
+        .into_iter()
+        .map(|path| path.file_name().unwrap().to_string_lossy().to_string())
+        .collect::<Vec<_>>();
+    assert_eq!(
+        candidates,
+        ["state_雪.sqlite", "state_é.sqlite", "state_a.sqlite"],
+    );
+    fs::remove_dir_all(root).unwrap();
+}
