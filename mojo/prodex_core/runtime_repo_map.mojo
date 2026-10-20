@@ -555,3 +555,128 @@ def prodex_runtime_repo_artifact_order_v1(
         indices[unsafe_offset=end] = saved
         repo_artifact_order_heap_down(rows, indices, 0, end)
     return REPO_MAP_OK
+
+
+# Persisted Smart Context artifact eviction: oldest first, then lowest
+# lexical artifact ID; remove until both item-count and tracked byte caps
+# are satisfied. This replaces the host's repeated Rust min_by scan.
+comptime REPO_ARTIFACT_EVICTION_ROW_WORDS: Int64 = 4
+comptime REPO_ARTIFACT_EVICTION_MAX: Int64 = 1_048_576
+
+
+def repo_artifact_eviction_compare(
+    rows: Pointer[mut=False, UInt64, _], left: Int64, right: Int64,
+) -> Int64:
+    var l = left * REPO_ARTIFACT_EVICTION_ROW_WORDS
+    var r = right * REPO_ARTIFACT_EVICTION_ROW_WORDS
+    var left_order = rows[unsafe_offset=l]
+    var right_order = rows[unsafe_offset=r]
+    if left_order != right_order:
+        return -1 if left_order < right_order else 1
+    var a = Pointer[mut=False, UInt8, ImmUntrackedOrigin](
+        unsafe_from_address=Int(rows[unsafe_offset=l + 1])
+    )
+    var b = Pointer[mut=False, UInt8, ImmUntrackedOrigin](
+        unsafe_from_address=Int(rows[unsafe_offset=r + 1])
+    )
+    var left_len = Int64(rows[unsafe_offset=l + 2])
+    var right_len = Int64(rows[unsafe_offset=r + 2])
+    if repo_lexical_less(a, left_len, b, right_len):
+        return -1
+    if repo_lexical_less(b, right_len, a, left_len):
+        return 1
+    if left != right:
+        return -1 if left < right else 1
+    return 0
+
+
+def repo_artifact_eviction_heap_down(
+    rows: Pointer[mut=False, UInt64, _],
+    indices: Pointer[mut=True, Int64, _],
+    first: Int64, count: Int64,
+):
+    var root = first
+    while root * 2 + 1 < count:
+        var child = root * 2 + 1
+        var swap = root
+        if repo_artifact_eviction_compare(
+            rows, indices[unsafe_offset=swap], indices[unsafe_offset=child],
+        ) < 0:
+            swap = child
+        if child + 1 < count and repo_artifact_eviction_compare(
+            rows, indices[unsafe_offset=swap], indices[unsafe_offset=child + 1],
+        ) < 0:
+            swap = child + 1
+        if swap == root:
+            return
+        var saved = indices[unsafe_offset=root]
+        indices[unsafe_offset=root] = indices[unsafe_offset=swap]
+        indices[unsafe_offset=swap] = saved
+        root = swap
+
+
+@export("prodex_runtime_repo_artifact_eviction_v1")
+def prodex_runtime_repo_artifact_eviction_v1(
+    abi_version: Int64,
+    rows_address: UInt, count: Int64,
+    max_count: Int64, total_bytes: UInt64, max_bytes: UInt64,
+    scratch_address: UInt, scratch_capacity: Int64,
+    output_address: UInt, output_capacity: Int64,
+    written_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != REPO_MAP_ABI_VERSION:
+        return 4
+    if (
+        count < 0 or count > REPO_ARTIFACT_EVICTION_MAX or max_count < 0
+        or (count > 0 and (rows_address == 0 or rows_address % 8 != 0))
+        or scratch_address == 0 or scratch_address % 8 != 0
+        or output_address == 0 or output_address % 8 != 0
+        or scratch_capacity < count or output_capacity < count
+        or written_address == 0 or written_address % 8 != 0
+    ):
+        return REPO_MAP_INVALID
+    var rows = Pointer[mut=False, UInt64, ImmUntrackedOrigin](
+        unsafe_from_address=Int(rows_address)
+    )
+    for index in range(count):
+        var address = rows[unsafe_offset=index * REPO_ARTIFACT_EVICTION_ROW_WORDS + 1]
+        var length = rows[unsafe_offset=index * REPO_ARTIFACT_EVICTION_ROW_WORDS + 2]
+        if length > UInt64(9223372036854775807) or (length > 0 and address == 0):
+            return REPO_MAP_INVALID
+
+    var indices = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(scratch_address)
+    )
+    for index in range(count):
+        indices[unsafe_offset=index] = index
+    var start = count // 2
+    while start > 0:
+        start -= 1
+        repo_artifact_eviction_heap_down(rows, indices, start, count)
+    var end = count
+    while end > 1:
+        end -= 1
+        var saved = indices[unsafe_offset=0]
+        indices[unsafe_offset=0] = indices[unsafe_offset=end]
+        indices[unsafe_offset=end] = saved
+        repo_artifact_eviction_heap_down(rows, indices, 0, end)
+
+    var selected = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    var chosen = Int64(0)
+    var tracked_bytes = total_bytes
+    var remaining = count
+    for index in range(count):
+        if remaining <= max_count and tracked_bytes <= max_bytes:
+            break
+        var original = indices[unsafe_offset=index]
+        selected[unsafe_offset=chosen] = original
+        chosen += 1
+        remaining -= 1
+        var bytes = rows[unsafe_offset=original * REPO_ARTIFACT_EVICTION_ROW_WORDS + 3]
+        tracked_bytes = 0 if bytes >= tracked_bytes else tracked_bytes - bytes
+    Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(written_address)
+    )[] = chosen
+    return REPO_MAP_OK

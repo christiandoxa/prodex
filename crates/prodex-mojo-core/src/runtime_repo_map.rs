@@ -5,6 +5,19 @@ const MAX_INPUT_BYTES: usize = 4 * 1024 * 1024;
 const MAX_OUTPUT_BYTES: usize = 512;
 
 unsafe extern "C" {
+    fn prodex_runtime_repo_artifact_eviction_v1(
+        abi_version: i64,
+        rows_address: u64,
+        count: i64,
+        max_count: i64,
+        total_bytes: u64,
+        max_bytes: u64,
+        scratch_address: u64,
+        scratch_capacity: i64,
+        output_address: u64,
+        output_capacity: i64,
+        written_address: u64,
+    ) -> i64;
     fn prodex_runtime_repo_artifact_order_v1(
         abi_version: i64,
         rows_address: u64,
@@ -107,6 +120,78 @@ pub fn repo_artifact_order(inputs: &[RepoArtifactOrderInput<'_>]) -> Result<Vec<
             return Err(MojoError::InvalidOutput);
         }
         *slot = true;
+        indices.push(index);
+    }
+    Ok(indices)
+}
+
+/// Original persisted artifact and tracked size. The host only supplies
+/// borrowed facts and later removes the Mojo-selected original records.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RepoArtifactEvictionInput<'a> {
+    pub order: u64,
+    pub id: &'a str,
+    pub byte_len: usize,
+}
+
+/// The compiled repo-map owner selects the oldest artifacts to evict until
+/// both the size and count limits are satisfied. No Rust min_by policy.
+pub fn repo_artifact_eviction_plan(
+    inputs: &[RepoArtifactEvictionInput<'_>],
+    total_bytes: usize,
+    max_count: usize,
+    max_bytes: usize,
+) -> Result<Vec<usize>, MojoError> {
+    if inputs.len() > 1_048_576 {
+        return Err(MojoError::InvalidInput);
+    }
+    let mut rows = Vec::<u64>::new();
+    rows.try_reserve_exact(inputs.len().checked_mul(4).ok_or(MojoError::Capacity)?)
+        .map_err(|_| MojoError::Capacity)?;
+    for input in inputs {
+        rows.extend([
+            input.order,
+            input.id.as_ptr() as usize as u64,
+            u64::try_from(input.id.len()).map_err(|_| MojoError::InvalidInput)?,
+            u64::try_from(input.byte_len).map_err(|_| MojoError::InvalidInput)?,
+        ]);
+    }
+    let mut scratch = vec![-1_i64; inputs.len()];
+    let mut output = vec![-1_i64; inputs.len()];
+    let mut written = -1_i64;
+    match unsafe {
+        prodex_runtime_repo_artifact_eviction_v1(
+            ABI_VERSION,
+            rows.as_ptr() as usize as u64,
+            i64::try_from(inputs.len()).map_err(|_| MojoError::InvalidInput)?,
+            i64::try_from(max_count).map_err(|_| MojoError::InvalidInput)?,
+            u64::try_from(total_bytes).map_err(|_| MojoError::InvalidInput)?,
+            u64::try_from(max_bytes).map_err(|_| MojoError::InvalidInput)?,
+            scratch.as_mut_ptr() as usize as u64,
+            i64::try_from(scratch.len()).map_err(|_| MojoError::InvalidInput)?,
+            output.as_mut_ptr() as usize as u64,
+            i64::try_from(output.len()).map_err(|_| MojoError::InvalidInput)?,
+            (&mut written as *mut i64) as usize as u64,
+        )
+    } {
+        0 => {}
+        1 => return Err(MojoError::InvalidInput),
+        4 => return Err(MojoError::AbiMismatch),
+        _ => return Err(MojoError::InvalidOutput),
+    }
+    let count = usize::try_from(written).map_err(|_| MojoError::InvalidOutput)?;
+    if count > inputs.len() {
+        return Err(MojoError::InvalidOutput);
+    }
+    let mut seen = vec![false; inputs.len()];
+    let mut indices = Vec::with_capacity(count);
+    for value in output.into_iter().take(count) {
+        let index = usize::try_from(value).map_err(|_| MojoError::InvalidOutput)?;
+        let used = seen.get_mut(index).ok_or(MojoError::InvalidOutput)?;
+        if *used {
+            return Err(MojoError::InvalidOutput);
+        }
+        *used = true;
         indices.push(index);
     }
     Ok(indices)
@@ -414,5 +499,129 @@ mod compiled_artifact_order_tests {
             0,
         );
         assert_eq!(output, [79; 2]);
+    }
+}
+
+#[cfg(test)]
+mod compiled_artifact_eviction_tests {
+    use super::*;
+
+    fn item<'a>(order: u64, id: &'a str, byte_len: usize) -> RepoArtifactEvictionInput<'a> {
+        RepoArtifactEvictionInput {
+            order,
+            id,
+            byte_len,
+        }
+    }
+
+    #[test]
+    fn compiled_artifact_eviction_selects_oldest_then_id_until_both_limits_hold() {
+        let inputs = [
+            item(1, "z", 4),
+            item(1, "a", 3),
+            item(2, "newer", 10),
+            item(3, "latest", 1),
+        ];
+        assert_eq!(
+            repo_artifact_eviction_plan(&inputs, 18, 2, 12),
+            Ok(vec![1, 0])
+        );
+        assert_eq!(
+            repo_artifact_eviction_plan(&inputs, 18, 4, 11),
+            Ok(vec![1, 0])
+        );
+        assert_eq!(
+            repo_artifact_eviction_plan(&inputs, 18, 2, 18),
+            Ok(vec![1, 0])
+        );
+        assert_eq!(repo_artifact_eviction_plan(&inputs, 18, 4, 18), Ok(vec![]));
+        assert_eq!(
+            repo_artifact_eviction_plan(&inputs, 18, 4, 0),
+            Ok(vec![1, 0, 2, 3])
+        );
+        assert_eq!(repo_artifact_eviction_plan(&[], 0, 0, 0), Ok(vec![]));
+        assert_eq!(
+            repo_artifact_eviction_plan(&[item(0, "x", usize::MAX)], 2, 0, 0),
+            Ok(vec![0]),
+            "total_bytes saturates to zero after evicting an oversized artifact",
+        );
+    }
+
+    #[test]
+    fn compiled_artifact_eviction_handles_unicode_equal_order_and_large_batches() {
+        let unicode = [
+            item(4, "雪", 1),
+            item(4, "é", 1),
+            item(4, "a", 1),
+            item(4, "a", 1),
+        ];
+        assert_eq!(
+            repo_artifact_eviction_plan(&unicode, 4, 1, 4),
+            Ok(vec![2, 3, 1])
+        );
+        let many = (0..1025)
+            .map(|idx| item(idx as u64, "id", 1))
+            .collect::<Vec<_>>();
+        let chosen = repo_artifact_eviction_plan(&many, 1025, 1000, 1000).unwrap();
+        assert_eq!(chosen, (0..25).collect::<Vec<_>>());
+        assert_eq!(
+            repo_artifact_eviction_plan(&many, 1025, 1025, 1025),
+            Ok(vec![]),
+        );
+    }
+
+    #[test]
+    fn compiled_artifact_eviction_abi_rejects_late_bad_input_without_partial_output() {
+        let mut rows = [0_u64; 8];
+        let mut scratch = [71_i64; 2];
+        let mut output = [73_i64; 2];
+        let mut written = 91_i64;
+        let source = rows.as_ptr() as usize as u64;
+        let work = scratch.as_mut_ptr() as usize as u64;
+        let dest = output.as_mut_ptr() as usize as u64;
+        let result = (&mut written as *mut i64) as usize as u64;
+        for (abi, address, count, max_count, cap, out, expected) in [
+            (2, source, 2, 1, 2, result, 4),
+            (1, 0, 2, 1, 2, result, 1),
+            (1, source, -1, 1, 2, result, 1),
+            (1, source, 1_048_577, 1, 2, result, 1),
+            (1, source, 2, -1, 2, result, 1),
+            (1, source, 2, 1, 1, result, 1),
+            (1, source, 2, 1, 2, 0, 1),
+        ] {
+            assert_eq!(
+                unsafe {
+                    prodex_runtime_repo_artifact_eviction_v1(
+                        abi, address, count, max_count, 2, 1, work, 2, dest, cap, out,
+                    )
+                },
+                expected,
+            );
+            assert_eq!(scratch, [71; 2]);
+            assert_eq!(output, [73; 2]);
+            assert_eq!(written, 91);
+        }
+        rows[6] = 1;
+        assert_eq!(
+            unsafe {
+                prodex_runtime_repo_artifact_eviction_v1(
+                    1,
+                    rows.as_ptr() as usize as u64,
+                    2,
+                    1,
+                    2,
+                    1,
+                    work,
+                    2,
+                    dest,
+                    2,
+                    result,
+                )
+            },
+            1,
+        );
+        assert_eq!(scratch, [71; 2]);
+        assert_eq!(output, [73; 2]);
+        assert_eq!(written, 91);
     }
 }
