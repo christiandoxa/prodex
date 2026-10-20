@@ -43,6 +43,7 @@ fn emit_cargo_directives() {
 fn emit_source_rerun_directives(sources: &[&str], manifest_dir: &Path) {
     for source in [
         "parsed_json.mojo",
+        "provider_boolean_tokens.mojo",
         "json_sink.mojo",
         "chat_tool_names.mojo",
         "chat_tool_shapes.mojo",
