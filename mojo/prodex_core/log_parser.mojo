@@ -178,3 +178,36 @@ def prodex_mojo_log_plain_envelope_v1(
             break
         cursor += 1
     return LOG_PARSE_STATUS_OK
+
+
+# Runtime-doctor log tail selection: when reading from the middle of a
+# persisted log, drop only the first partial line through the first LF.
+# Binary data is scanned as bytes; the host retains filesystem/seek I/O.
+@export("prodex_mojo_log_tail_boundary_v1")
+def prodex_mojo_log_tail_boundary_v1(
+    abi_version: Int64,
+    input_address: UInt, input_length: Int64,
+    drop_partial_first_line: Int64,
+    result_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != 1:
+        return 4
+    if (
+        input_length < 0 or (input_length > 0 and input_address == 0)
+        or (drop_partial_first_line != 0 and drop_partial_first_line != 1)
+        or result_address == 0 or result_address % 8 != 0
+    ):
+        return 1
+    var start = Int64(0)
+    if drop_partial_first_line == 1:
+        var input = Pointer[mut=False, UInt8, ImmUntrackedOrigin](
+            unsafe_from_address=Int(input_address)
+        )
+        for index in range(input_length):
+            if input[unsafe_offset=index] == 10:
+                start = index + 1
+                break
+    Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(result_address)
+    )[] = start
+    return LOG_PARSE_STATUS_OK

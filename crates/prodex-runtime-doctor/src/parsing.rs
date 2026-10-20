@@ -307,11 +307,9 @@ pub fn read_runtime_log_tail(path: &Path, max_bytes: usize) -> Result<Vec<u8>> {
     let mut buffer = Vec::new();
     file.read_to_end(&mut buffer)
         .with_context(|| format!("failed to read {}", path.display()))?;
-    if start > 0
-        && let Some(position) = buffer.iter().position(|byte| *byte == b'\n')
-    {
-        buffer.drain(..=position);
-    }
+    let drop_first = prodex_mojo_core::rich::log_tail_boundary(&buffer, start > 0)
+        .expect("compiled Mojo log tail line boundary returned invalid output");
+    buffer.drain(..drop_first);
     Ok(buffer)
 }
 
@@ -366,3 +364,30 @@ pub fn summarize_runtime_log_tail(tail: &[u8]) -> RuntimeDoctorSummary {
 #[cfg(all(test, feature = "runtime-log-mojo"))]
 #[path = "../tests/src/parsing.rs"]
 mod tests;
+
+#[cfg(test)]
+mod compiled_log_tail_reader_tests {
+    use super::read_runtime_log_tail;
+
+    #[test]
+    fn compiled_log_tail_boundary_keeps_only_complete_lines_after_middle_seek() {
+        let path = std::env::temp_dir().join(format!(
+            "prodex-runtime-doctor-tail-test-{}.log",
+            std::process::id(),
+        ));
+        let body = b"first\nsecond\nthird\n";
+        std::fs::write(&path, body).unwrap();
+        assert_eq!(read_runtime_log_tail(&path, 1024).unwrap(), body);
+        assert_eq!(read_runtime_log_tail(&path, 10).unwrap(), b"third\n");
+        assert_eq!(read_runtime_log_tail(&path, 4).unwrap(), b"");
+        assert_eq!(read_runtime_log_tail(&path, 0).unwrap(), b"");
+        std::fs::write(&path, b"unterminated").unwrap();
+        assert_eq!(read_runtime_log_tail(&path, 4).unwrap(), b"ated");
+        std::fs::write(&path, b"\xff\xfe\n{\"event\":\"\xe9\x9b\xaa\"}\n").unwrap();
+        assert_eq!(
+            read_runtime_log_tail(&path, 17).unwrap(),
+            "{\"event\":\"雪\"}\n".as_bytes()
+        );
+        std::fs::remove_file(&path).unwrap();
+    }
+}
