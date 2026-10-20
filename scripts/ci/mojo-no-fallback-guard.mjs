@@ -316,6 +316,11 @@ const RUNTIME_LOG_TAIL_CORE = "crates/prodex-mojo-core/src/rich/log_parser.rs";
 const RUNTIME_LOG_TAIL_FACADE = "crates/prodex-mojo-core/src/rich.rs";
 const RUNTIME_LOG_TAIL_MOJO = "mojo/prodex_core/log_parser.mojo";
 const RUNTIME_LOG_TAIL_DIRECT_TEST = "mojo/tests/log_tail_boundary_test.mojo";
+const SMART_CONTEXT_STORE_RETENTION_CALLER = "crates/prodex-app/src/runtime_proxy/smart_context/proxy_state.rs";
+const SMART_CONTEXT_STORE_RETENTION_CORE = "crates/prodex-mojo-core/src/runtime/smart_context_store_retention.rs";
+const SMART_CONTEXT_STORE_RETENTION_FACADE = "crates/prodex-mojo-core/src/runtime.rs";
+const SMART_CONTEXT_STORE_RETENTION_MOJO = "mojo/prodex_core/smart_context_policy.mojo";
+const SMART_CONTEXT_STORE_RETENTION_DIRECT_TEST = "mojo/tests/smart_context_store_retention_test.mojo";
 const PROMOTED_FILES = [
   PROVIDER_USAGE_SSE_MOJO,
   PROVIDER_USAGE_SSE_TEST,
@@ -343,6 +348,11 @@ const PROMOTED_FILES = [
   RESPONSE_HEADER_SELECTION_TEST,
   RESPONSE_HEADER_SELECTION_CALLER_TEST,
   DEEPSEEK_BUFFERED_TEXT_DIRECT_TEST,
+  SMART_CONTEXT_STORE_RETENTION_CALLER,
+  SMART_CONTEXT_STORE_RETENTION_CORE,
+  SMART_CONTEXT_STORE_RETENTION_FACADE,
+  SMART_CONTEXT_STORE_RETENTION_MOJO,
+  SMART_CONTEXT_STORE_RETENTION_DIRECT_TEST,
   RUNTIME_LOG_TAIL_CALLER,
   RUNTIME_LOG_TAIL_CORE,
   RUNTIME_LOG_TAIL_FACADE,
@@ -4792,6 +4802,59 @@ export function findViolations(files) {
     if (filePath === STARTUP_PROBE_BATCH_CALLER_TEST) {
       return contents.includes("compiled_startup_probe_batch_preserves_over_65536_profile_order_and_remaining_slots")
         ? [] : [filePath + ": startup batch requires cross-batch caller regression"];
+    }
+    return [];
+  });
+  const smartContextStoreRetentionMojoViolations = files.flatMap(([filePath, contents]) => {
+    if (filePath === SMART_CONTEXT_STORE_RETENTION_CALLER &&
+        contents.includes("fn runtime_smart_context_prune_scope_stores(")) {
+      const production = contents.split("#[cfg(test)]", 1)[0];
+      const required = [
+        "SmartContextStoreRetentionInput",
+        "smart_context_store_retention_plan(",
+        "runtime_smart_context_remove_scope_store(path)?",
+        "compiled Mojo Smart Context store retention plan failed",
+        "compiled_scope_retention_prunes_expired_and_over_budget_in_time_path_order",
+        "compiled_scope_retention_keeps_strict_age_boundary_and_uses_path_tie_break",
+      ];
+      const retired = [
+        "stores.sort_by(|left, right|",
+        "if !expired && total_bytes <= disk_cap_bytes",
+        "let mut total_bytes = stores.iter().map(|entry| entry.2).sum",
+      ];
+      return required.every((marker) => contents.includes(marker))
+        && retired.every((marker) => !production.includes(marker))
+        ? [] : [filePath + ": Smart Context scope-store order and disk/expiry decisions must stay Mojo-owned"];
+    }
+    if (filePath === SMART_CONTEXT_STORE_RETENTION_CORE) {
+      return [
+        "fn prodex_smart_context_store_retention_v1(",
+        "pub fn smart_context_store_retention_plan(",
+        "compiled_store_retention_sorts_by_timestamp_then_path_and_enforces_budget",
+        "compiled_store_retention_handles_strict_nano_expiry_pre_epoch_and_unicode_paths",
+        "compiled_store_retention_abi_rejects_late_invalid_row_before_writes",
+      ].filter((marker) => !contents.includes(marker))
+        .map((marker) => filePath + ": typed Smart Context retention ABI missing " + marker);
+    }
+    if (filePath === SMART_CONTEXT_STORE_RETENTION_FACADE &&
+        contents.includes("mod profile_schedule;")) {
+      return contents.includes("pub use smart_context_store_retention::{")
+        ? [] : [filePath + ": Smart Context store retention ABI must remain production reachable"];
+    }
+    if (filePath === SMART_CONTEXT_STORE_RETENTION_MOJO &&
+        contents.includes("prodex_smart_context_static_item_plan_v1")) {
+      return [
+        '@export("prodex_smart_context_store_retention_v1")',
+        "def smart_context_store_compare(",
+        "def smart_context_store_heap_down(",
+        "elapsed_seconds > retention_seconds",
+        "indices[unsafe_offset=selected] = original",
+      ].filter((marker) => !contents.includes(marker))
+        .map((marker) => filePath + ": compiled Smart Context scope retention owner missing " + marker);
+    }
+    if (filePath === SMART_CONTEXT_STORE_RETENTION_DIRECT_TEST) {
+      return contents.includes("prodex_smart_context_store_retention_v1")
+        ? [] : [filePath + ": direct Smart Context store-retention ABI test missing"];
     }
     return [];
   });
@@ -12331,7 +12394,7 @@ export function findViolations(files) {
     }
     return [];
   });
-  return [...runtimeLogTailMojoViolations, ...deepseekBufferedTextItemMojoViolations, ...runtimeSseResponseIdMojoViolations, ...upstreamPayloadBoundsMojoViolations, ...runtimeSseEventStateMojoViolations, ...geminiPatchSourceMojoViolations, ...openAiCompatSseEnvelopeMojoViolations, ...anthropicSseDataLineMojoViolations, ...responseHeaderSelectionMojoViolations, ...previousResponseTextSpanMojoViolations, ...previousResponseJsonSearchMojoViolations, ...domainErrorMojoViolations, ...geminiValueCollectionMojoViolations, ...geminiSimpleResponseViolations, ...logPayloadProjectionViolations, ...nativeRecoveryOwnershipViolations, ...quotaRecoveryEligibilityViolations, ...runtimeBrokerReuseMojoViolations, ...geminiResponseMediaMojoViolations, ...cookieEvictionMojoViolations, ...websocketBudgetMojoViolations, ...affinityBindingMojoViolations, ...responsesCapacityRecoveryViolations, ...sseTapMojoOwnershipViolations, ...quotaWatchViolations, ...geminiCompactSnippetViolations, ...geminiCompactTextViolations, ...doctorSmartContextDecisionViolations, ...providerSseJsonFrameMojoViolations, ...geminiSseCompletionOwnershipViolations, ...anthropicNativeStreamDecisionViolations, ...anthropicAttemptCursorViolations, ...geminiUnsupportedToolRetryViolations, ...terminalGeometryViolations, ...previousResponseRecoveryTransitionViolations, ...chatCompatibleToolCallKindViolations, ...geminiQuotaBodyMojoViolations, ...geminiOAuthRotationMojoViolations, ...geminiBuiltinBatchMojoViolations, ...geminiToolArrayValidationMojoViolations, ...geminiOAuthModelMojoViolations, ...superExposeOriginMojoViolations, ...kiroAcpToolLedgerMojoViolations, ...quotaPoolSummarySectionsMojoViolations, ...deepseekRequestDiagnosticViolations, ...deepseekToolShapeIssueMojoViolations, ...deepseekReplayItemPolicyMojoViolations, ...chatNamespaceSplitMojoViolations, ...deepseekInputItemIssueMessageViolations, ...deepseekRequestIssueMessageViolations, ...smartContextTelemetrySampleViolations, ...compatibilityDiagnosticsMojoViolations, ...quotaHeaderProjectionViolations, ...smartContextCapsuleOrderViolations, ...markerViolations, ...deepseekCatalogPolicyViolations, ...featureOffViolations, ...liveLogRecordViolations, ...runtimePolicyPresetViolations, ...runtimeConfigScalarViolations, ...profileHealthCircuitViolations, ...logThroughputViolations, ...operationalDetailSpecViolations, ...transcriptPolicyViolations, ...logLoadPolicyViolations, ...routeReasonViolations, ...quotaSnapshotCompareMojoViolations, ...startupProbeBatchMojoViolations, ...runtimeStateQuotaViolations, ...runtimeStateRoutePolicyViolations, ...runtimeProxyRootViolations, ...runtimeRecoveryDeadlineViolations, ...brokerVersionGuardViolations, ...brokerContinuityViolations, ...brokerLogCacheViolations, ...codexConfigViolations, ...statePolicyViolations, ...quotaSelectionPolicyViolations, ...routeTagMirrorViolations, ...enumTagMirrorViolations, ...appSelectionPolicyMirrorViolations, ...runtimeStateBackgroundViolations, ...redactionViolations, ...rateLimitHeaderSelectionViolations, ...profileIdentityViolations, ...governanceInspectionViolations, ...governanceInspectionOrderingViolations, ...exactnessPlannerViolations,
+  return [...smartContextStoreRetentionMojoViolations, ...runtimeLogTailMojoViolations, ...deepseekBufferedTextItemMojoViolations, ...runtimeSseResponseIdMojoViolations, ...upstreamPayloadBoundsMojoViolations, ...runtimeSseEventStateMojoViolations, ...geminiPatchSourceMojoViolations, ...openAiCompatSseEnvelopeMojoViolations, ...anthropicSseDataLineMojoViolations, ...responseHeaderSelectionMojoViolations, ...previousResponseTextSpanMojoViolations, ...previousResponseJsonSearchMojoViolations, ...domainErrorMojoViolations, ...geminiValueCollectionMojoViolations, ...geminiSimpleResponseViolations, ...logPayloadProjectionViolations, ...nativeRecoveryOwnershipViolations, ...quotaRecoveryEligibilityViolations, ...runtimeBrokerReuseMojoViolations, ...geminiResponseMediaMojoViolations, ...cookieEvictionMojoViolations, ...websocketBudgetMojoViolations, ...affinityBindingMojoViolations, ...responsesCapacityRecoveryViolations, ...sseTapMojoOwnershipViolations, ...quotaWatchViolations, ...geminiCompactSnippetViolations, ...geminiCompactTextViolations, ...doctorSmartContextDecisionViolations, ...providerSseJsonFrameMojoViolations, ...geminiSseCompletionOwnershipViolations, ...anthropicNativeStreamDecisionViolations, ...anthropicAttemptCursorViolations, ...geminiUnsupportedToolRetryViolations, ...terminalGeometryViolations, ...previousResponseRecoveryTransitionViolations, ...chatCompatibleToolCallKindViolations, ...geminiQuotaBodyMojoViolations, ...geminiOAuthRotationMojoViolations, ...geminiBuiltinBatchMojoViolations, ...geminiToolArrayValidationMojoViolations, ...geminiOAuthModelMojoViolations, ...superExposeOriginMojoViolations, ...kiroAcpToolLedgerMojoViolations, ...quotaPoolSummarySectionsMojoViolations, ...deepseekRequestDiagnosticViolations, ...deepseekToolShapeIssueMojoViolations, ...deepseekReplayItemPolicyMojoViolations, ...chatNamespaceSplitMojoViolations, ...deepseekInputItemIssueMessageViolations, ...deepseekRequestIssueMessageViolations, ...smartContextTelemetrySampleViolations, ...compatibilityDiagnosticsMojoViolations, ...quotaHeaderProjectionViolations, ...smartContextCapsuleOrderViolations, ...markerViolations, ...deepseekCatalogPolicyViolations, ...featureOffViolations, ...liveLogRecordViolations, ...runtimePolicyPresetViolations, ...runtimeConfigScalarViolations, ...profileHealthCircuitViolations, ...logThroughputViolations, ...operationalDetailSpecViolations, ...transcriptPolicyViolations, ...logLoadPolicyViolations, ...routeReasonViolations, ...quotaSnapshotCompareMojoViolations, ...startupProbeBatchMojoViolations, ...runtimeStateQuotaViolations, ...runtimeStateRoutePolicyViolations, ...runtimeProxyRootViolations, ...runtimeRecoveryDeadlineViolations, ...brokerVersionGuardViolations, ...brokerContinuityViolations, ...brokerLogCacheViolations, ...codexConfigViolations, ...statePolicyViolations, ...quotaSelectionPolicyViolations, ...routeTagMirrorViolations, ...enumTagMirrorViolations, ...appSelectionPolicyMirrorViolations, ...runtimeStateBackgroundViolations, ...redactionViolations, ...rateLimitHeaderSelectionViolations, ...profileIdentityViolations, ...governanceInspectionViolations, ...governanceInspectionOrderingViolations, ...exactnessPlannerViolations,
     ...infoRunwayViolations,
     ...geminiNormalizedViolations,
     ...quotaDurationViolations,
@@ -13500,6 +13563,20 @@ function selfTest() {
   assert.match(findViolations([[RESPONSE_FORWARDING_FILE,
     responseHeaderFixture + "\nheaders.into_iter().any(|(name, value)| ...)",
   ]]).join("\n"), /first-header, binary MIME and SSE flush selection must stay Mojo-owned/u);
+  const scopeRetentionFixture = [
+    "fn runtime_smart_context_prune_scope_stores(",
+    "SmartContextStoreRetentionInput",
+    "smart_context_store_retention_plan(",
+    "runtime_smart_context_remove_scope_store(path)?",
+    "compiled Mojo Smart Context store retention plan failed",
+    "compiled_scope_retention_prunes_expired_and_over_budget_in_time_path_order",
+    "compiled_scope_retention_keeps_strict_age_boundary_and_uses_path_tie_break",
+  ].join("\\n");
+  assert.deepEqual(findViolations([[SMART_CONTEXT_STORE_RETENTION_CALLER, scopeRetentionFixture]]).filter(
+    (message) => message.includes("Smart Context scope-store order")), []);
+  assert.match(findViolations([[SMART_CONTEXT_STORE_RETENTION_CALLER,
+    scopeRetentionFixture + "\\nstores.sort_by(|left, right| ...)",
+  ]]).join("\\n"), /Smart Context scope-store order and disk\/expiry decisions must stay Mojo-owned/u);
   const logTailFixture = [
     "pub fn read_runtime_log_tail(",
     "log_tail_boundary(&buffer, start > 0)",

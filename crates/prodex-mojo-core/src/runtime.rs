@@ -1,3 +1,8 @@
+#[path = "runtime/smart_context_store_retention.rs"]
+mod smart_context_store_retention;
+pub use smart_context_store_retention::{
+    SmartContextStoreRetentionInput, smart_context_store_retention_plan,
+};
 #[path = "runtime/profile_schedule.rs"]
 mod profile_schedule;
 pub use profile_schedule::profile_schedule_batch;

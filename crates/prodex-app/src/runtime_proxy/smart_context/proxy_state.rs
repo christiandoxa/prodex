@@ -302,16 +302,43 @@ pub(crate) fn runtime_smart_context_prune_scope_stores(
             metadata.len(),
         ));
     }
-    stores.sort_by(|left, right| left.1.cmp(&right.1).then_with(|| left.0.cmp(&right.0)));
-    let mut total_bytes = stores.iter().map(|entry| entry.2).sum::<u64>();
+    // The host only acquires SystemTime and original path metadata.
+    // Compiled Mojo owns chronological/path order, expiry and the disk cap.
+    let facts = stores
+        .iter()
+        .map(|(path, modified, bytes)| {
+            let (before_epoch, absolute) = match modified.duration_since(SystemTime::UNIX_EPOCH) {
+                Ok(duration) => (false, duration),
+                Err(error) => (true, error.duration()),
+            };
+            let elapsed = now.duration_since(*modified).unwrap_or_default();
+            prodex_mojo_core::runtime::SmartContextStoreRetentionInput {
+                path: path.as_os_str().as_encoded_bytes(),
+                modified_before_unix_epoch: before_epoch,
+                modified_abs_seconds: absolute.as_secs(),
+                modified_abs_nanos: absolute.subsec_nanos(),
+                elapsed_seconds: elapsed.as_secs(),
+                elapsed_nanos: elapsed.subsec_nanos(),
+                size: *bytes,
+            }
+        })
+        .collect::<Vec<_>>();
+    let selected = prodex_mojo_core::runtime::smart_context_store_retention_plan(
+        &facts,
+        retention,
+        disk_cap_bytes,
+    )
+    .map_err(|error| {
+        std::io::Error::other(format!(
+            "compiled Mojo Smart Context store retention plan failed: {error:?}"
+        ))
+    })?;
     let mut removed = 0usize;
-    for (path, modified, bytes) in stores {
-        let expired = now.duration_since(modified).unwrap_or_default() > retention;
-        if !expired && total_bytes <= disk_cap_bytes {
-            continue;
-        }
-        runtime_smart_context_remove_scope_store(&path)?;
-        total_bytes = total_bytes.saturating_sub(bytes);
+    for index in selected {
+        let (path, _, _) = stores.get(index).ok_or_else(|| {
+            std::io::Error::other("compiled Mojo Smart Context store index out of bounds")
+        })?;
+        runtime_smart_context_remove_scope_store(path)?;
         removed = removed.saturating_add(1);
     }
     Ok(removed)
@@ -449,6 +476,149 @@ pub(crate) fn observe_runtime_smart_context_token_usage_for_bucket(
             path,
             snapshot,
             "smart_context_token_calibration",
+        );
+    }
+}
+
+#[cfg(test)]
+mod compiled_store_retention_caller_tests {
+    use super::*;
+    use std::fs::{self, File};
+    use std::time::UNIX_EPOCH;
+
+    fn scope_root(label: &str) -> PathBuf {
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!(
+            "prodex-smart-scope-retention-{label}-{}-{nonce}",
+            std::process::id()
+        ));
+        fs::create_dir_all(&root).unwrap();
+        root
+    }
+
+    fn make_store(root: &Path, scope: &str, age_epoch: u64, size: usize) -> PathBuf {
+        let dir = root.join(scope);
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("artifacts.json");
+        fs::write(&path, vec![b'Q'; size]).unwrap();
+        File::options()
+            .write(true)
+            .open(&path)
+            .unwrap()
+            .set_modified(UNIX_EPOCH + Duration::from_secs(age_epoch))
+            .unwrap();
+        path
+    }
+
+    #[test]
+    fn compiled_scope_retention_prunes_expired_and_over_budget_in_time_path_order() {
+        let root = scope_root("expire-budget");
+        let old = make_store(&root, "z-old", 20, 5);
+        let newest = make_store(&root, "m-new", 180, 5);
+        let middle = make_store(&root, "a-mid", 150, 5);
+        let removed = runtime_smart_context_prune_scope_stores(
+            &root,
+            UNIX_EPOCH + Duration::from_secs(200),
+            Duration::from_secs(100),
+            9,
+        )
+        .unwrap();
+        assert_eq!(removed, 2);
+        assert!(!old.exists());
+        assert!(!middle.exists());
+        assert!(newest.is_file());
+        assert_eq!(
+            runtime_smart_context_prune_scope_stores(
+                &root,
+                UNIX_EPOCH + Duration::from_secs(200),
+                Duration::from_secs(100),
+                9,
+            )
+            .unwrap(),
+            0,
+        );
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn compiled_scope_retention_keeps_strict_age_boundary_and_uses_path_tie_break() {
+        let root = scope_root("ties");
+        let boundary = make_store(&root, "z-boundary", 100, 3);
+        let alpha = make_store(&root, "a-exact", 100, 3);
+        let omega = make_store(&root, "é-unicode", 100, 3);
+        let removed = runtime_smart_context_prune_scope_stores(
+            &root,
+            UNIX_EPOCH + Duration::from_secs(200),
+            Duration::from_secs(100),
+            6,
+        )
+        .unwrap();
+        assert_eq!(removed, 1);
+        assert!(
+            !alpha.exists(),
+            "lexically earliest path must be evicted first"
+        );
+        assert!(boundary.exists());
+        assert!(omega.exists());
+        fs::remove_dir_all(root).unwrap();
+
+        let root = scope_root("strict-expiry");
+        let expired = make_store(&root, "expired", 99, 1);
+        let at_boundary = make_store(&root, "boundary", 100, 1);
+        assert_eq!(
+            runtime_smart_context_prune_scope_stores(
+                &root,
+                UNIX_EPOCH + Duration::from_secs(200),
+                Duration::from_secs(100),
+                100,
+            )
+            .unwrap(),
+            1,
+        );
+        assert!(!expired.exists());
+        assert!(at_boundary.exists());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn compiled_scope_retention_ignores_missing_roots_and_future_timestamps() {
+        let root = scope_root("future");
+        assert_eq!(
+            runtime_smart_context_prune_scope_stores(
+                &root,
+                UNIX_EPOCH + Duration::from_secs(200),
+                Duration::ZERO,
+                1024,
+            )
+            .unwrap(),
+            0
+        );
+        let future = make_store(&root, "future", 250, 10);
+        assert_eq!(
+            runtime_smart_context_prune_scope_stores(
+                &root,
+                UNIX_EPOCH + Duration::from_secs(200),
+                Duration::ZERO,
+                100,
+            )
+            .unwrap(),
+            0,
+            "future modification time has elapsed=zero and is not expired",
+        );
+        assert!(future.exists());
+        fs::remove_dir_all(&root).unwrap();
+        assert_eq!(
+            runtime_smart_context_prune_scope_stores(
+                &root,
+                UNIX_EPOCH + Duration::from_secs(200),
+                Duration::ZERO,
+                0,
+            )
+            .unwrap(),
+            0,
         );
     }
 }
