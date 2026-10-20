@@ -288,3 +288,54 @@ def prodex_quota_pool_summary_sections_v1(
         output[unsafe_offset=1] = QUOTA_POOL_SECTION_EMPTY_FIVE_HOUR
         output[unsafe_offset=2] = QUOTA_POOL_SECTION_EMPTY_WEEKLY
     return 0
+
+
+# The caller observes provider-specific availability and fetch timestamps.
+# Mojo owns total/available counts and maximum timestamp across all reports,
+# including failed reports. Validate every row before writing any result.
+comptime QUOTA_REPORT_OVERVIEW_ABI: Int64 = 1
+comptime QUOTA_REPORT_OVERVIEW_MAX_REPORTS: Int64 = 1_048_576
+
+
+@export("prodex_quota_pool_report_overview_v1")
+def prodex_quota_pool_report_overview_v1(
+    abi_version: Int64,
+    input_address: UInt,
+    report_count: Int64,
+    output_address: UInt,
+    output_capacity: Int64,
+) abi("C") -> Int64:
+    if abi_version != QUOTA_REPORT_OVERVIEW_ABI:
+        return 4
+    if (
+        report_count < 0
+        or report_count > QUOTA_REPORT_OVERVIEW_MAX_REPORTS
+        or (report_count > 0 and (input_address == 0 or input_address % 8 != 0))
+        or output_address == 0 or output_address % 8 != 0
+    ):
+        return 1
+    if output_capacity < 4:
+        return 3
+    var rows = Pointer[mut=False, Int64, ImmUntrackedOrigin](
+        unsafe_from_address=Int(input_address)
+    )
+    var available: Int64 = 0
+    var latest: Int64 = 0
+    var has_latest = False
+    for index in range(report_count):
+        var fetched_at = rows[unsafe_offset=index * 2]
+        var usable = rows[unsafe_offset=index * 2 + 1]
+        if usable != 0 and usable != 1:
+            return 1
+        available += usable
+        if not has_latest or fetched_at > latest:
+            latest = fetched_at
+            has_latest = True
+    var output = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    output[unsafe_offset=0] = report_count
+    output[unsafe_offset=1] = available
+    output[unsafe_offset=2] = 1 if has_latest else 0
+    output[unsafe_offset=3] = latest
+    return 0
