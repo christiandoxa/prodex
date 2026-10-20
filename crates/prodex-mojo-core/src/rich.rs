@@ -131,9 +131,9 @@ pub use gemini_response::{
 mod gemini_response_media;
 pub use gemini_response_media::{
     GEMINI_MEDIA_REQUEST_SLOTS, GeminiMediaField, GeminiMediaRequestOperation, GeminiMediaSelected,
-    GeminiMediaSelectedKind, GeminiResponseMediaOperation, gemini_media_data_url_parts,
-    gemini_media_request_selection, gemini_response_media, gemini_response_media_mime_for_uri,
-    gemini_response_media_mime_is_text,
+    GeminiMediaSelectedKind, GeminiMediaUserRow, GeminiResponseMediaOperation,
+    gemini_media_append_user_target, gemini_media_data_url_parts, gemini_media_request_selection,
+    gemini_response_media, gemini_response_media_mime_for_uri, gemini_response_media_mime_is_text,
 };
 #[path = "rich/gemini_compact_snippet.rs"]
 mod gemini_compact_snippet;
