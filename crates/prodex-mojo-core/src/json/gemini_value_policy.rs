@@ -13,6 +13,7 @@ pub enum GeminiValueOperation {
     InputTexts = 2,
     StreamError = 3,
     Boolean = 4,
+    MediaObjectIndices = 5,
 }
 
 unsafe extern "C" {
@@ -143,6 +144,65 @@ mod tests {
             raw_start: 0,
             raw_length: 0,
         }
+    }
+
+    #[test]
+    fn compiled_gemini_media_indices_preserve_content_only_order() {
+        let nodes = [
+            node(JsonKind::Object, "", "", None, Some(1), None),
+            node(
+                JsonKind::String,
+                "ignored",
+                "not media",
+                Some(0),
+                None,
+                Some(2),
+            ),
+            node(JsonKind::Array, "content", "", Some(0), Some(3), None),
+            node(JsonKind::Object, "", "", Some(2), Some(4), Some(5)),
+            node(JsonKind::String, "type", "input_file", Some(3), None, None),
+            node(JsonKind::Object, "", "", Some(2), Some(6), None),
+            node(JsonKind::String, "type", "input_video", Some(5), None, None),
+        ];
+        assert_eq!(
+            gemini_value_projection(&nodes, "", GeminiValueOperation::MediaObjectIndices).unwrap(),
+            b"[0,3,5]",
+        );
+        let scalar = node(JsonKind::String, "", "scalar", None, None, None);
+        assert_eq!(
+            gemini_value_projection(&[scalar], "", GeminiValueOperation::MediaObjectIndices)
+                .unwrap(),
+            b"[]",
+        );
+    }
+
+    #[test]
+    fn compiled_gemini_media_indices_walk_deep_flat_tree_without_recursion() {
+        let mut nodes = Vec::new();
+        for index in 0_usize..4096 {
+            nodes.push(node(
+                JsonKind::Object,
+                if index == 0 { "" } else { "content" },
+                "",
+                index.checked_sub(1),
+                Some(index + 1),
+                None,
+            ));
+        }
+        nodes.push(node(
+            JsonKind::Object,
+            "content",
+            "",
+            Some(4095),
+            None,
+            None,
+        ));
+        let output =
+            gemini_value_projection(&nodes, "", GeminiValueOperation::MediaObjectIndices).unwrap();
+        let emitted = std::str::from_utf8(&output).unwrap();
+        assert!(emitted.starts_with("[0,1,2,3,"));
+        assert!(emitted.ends_with(",4094,4095,4096]"));
+        assert_eq!(emitted.bytes().filter(|byte| *byte == b',').count(), 4096);
     }
 
     #[test]
@@ -344,7 +404,7 @@ mod tests {
         let mut scratch = [0_u64; 4];
         let mut metadata = [99_i64; 2];
         for (version, operation, scratch_count, expected) in
-            [(2, 0, 4, 4), (1, -1, 4, 1), (1, 5, 4, 1), (1, 0, 1, 1)]
+            [(2, 0, 4, 4), (1, -1, 4, 1), (1, 6, 4, 1), (1, 0, 1, 1)]
         {
             let result = unsafe {
                 prodex_mojo_gemini_value_policy_v1(
