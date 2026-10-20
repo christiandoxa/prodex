@@ -269,7 +269,15 @@ const PREVIOUS_RESPONSE_JSON_CALLER_TEST = "crates/prodex-runtime-proxy/tests/sr
 const RESPONSE_HEADER_SELECTION_CORE = "crates/prodex-mojo-core/src/runtime_response_forwarding.rs";
 const RESPONSE_HEADER_SELECTION_TEST = "mojo/tests/response_header_selection_test.mojo";
 const RESPONSE_HEADER_SELECTION_CALLER_TEST = "crates/prodex-runtime-proxy/tests/src/response_forwarding.rs";
+const STARTUP_PROBE_BATCH_ADAPTER = "crates/prodex-mojo-core/src/runtime_state_quota.rs";
+const STARTUP_PROBE_BATCH_MOJO = "mojo/prodex_core/runtime_state_quota.mojo";
+const STARTUP_PROBE_BATCH_TEST = "mojo/tests/runtime_startup_probe_batch_test.mojo";
+const STARTUP_PROBE_BATCH_CALLER_TEST = "crates/prodex-runtime-state/tests/src/lib.rs";
 const PROMOTED_FILES = [
+  STARTUP_PROBE_BATCH_ADAPTER,
+  STARTUP_PROBE_BATCH_MOJO,
+  STARTUP_PROBE_BATCH_TEST,
+  STARTUP_PROBE_BATCH_CALLER_TEST,
   RESPONSE_HEADER_SELECTION_CORE,
   RESPONSE_HEADER_SELECTION_TEST,
   RESPONSE_HEADER_SELECTION_CALLER_TEST,
@@ -4425,7 +4433,7 @@ export function findViolations(files) {
       "prodex_mojo_core::runtime_state_quota::probe_cache_freshness(",
       "prodex_mojo_core::runtime_state_quota::snapshot_usability(",
       "prodex_mojo_core::runtime_state_quota::probe_usage_snapshot_apply_plan(",
-      "prodex_mojo_core::runtime_state_quota::startup_probe_refresh_candidate_plan(",
+      "prodex_mojo_core::runtime_state_quota::startup_probe_refresh_batch(",
     ];
     const violations = required
       .filter((call) => !contents.includes(call))
@@ -4434,6 +4442,52 @@ export function findViolations(files) {
       violations.push(filePath + ": contains restored Rust runtime-state quota timing policy");
     }
     return violations;
+  });
+  const startupProbeBatchMojoViolations = files.flatMap(([filePath, contents]) => {
+    if (filePath === RUNTIME_STATE_QUOTA_FILE) {
+      const production = contents.split("#[cfg(test)]", 1)[0];
+      const required = [
+        "candidates.chunks_mut(65_536)",
+        "StartupProbeRefreshObservation",
+        "startup_probe_refresh_batch(",
+        "remaining = plan.remaining",
+        "compiled Mojo selected unconsumed probe candidate",
+      ];
+      const retired = [
+        "startup_probe_refresh_candidate_plan(",
+        "let mut remaining = warm_limit;\n    let mut selected = Vec::new();\n    for candidate in candidates",
+      ];
+      return required.every((marker) => production.includes(marker))
+        && retired.every((marker) => !production.includes(marker))
+        ? [] : [filePath + ": ordered startup probe warm budget must be Mojo batch-owned"];
+    }
+    if (filePath === STARTUP_PROBE_BATCH_ADAPTER) {
+      return [
+        "fn prodex_runtime_state_startup_probe_batch_v1(",
+        "pub fn startup_probe_refresh_batch(",
+        "compiled_startup_probe_batch_retains_order_and_warm_budget",
+        "compiled_startup_probe_batch_abi_rejects_late_invalid_row_without_writes",
+      ].filter((marker) => !contents.includes(marker))
+        .map((marker) => filePath + ": startup probe batch adapter missing " + marker);
+    }
+    if (filePath === STARTUP_PROBE_BATCH_MOJO) {
+      return [
+        '@export("prodex_runtime_state_startup_probe_batch_v1")',
+        "STARTUP_PROBE_BATCH_MAX",
+        "var remaining = warm_remaining",
+        "selected[unsafe_offset=index] = Int64(take)",
+      ].filter((marker) => !contents.includes(marker))
+        .map((marker) => filePath + ": compiled startup probe budget policy missing " + marker);
+    }
+    if (filePath === STARTUP_PROBE_BATCH_TEST) {
+      return contents.includes("prodex_runtime_state_startup_probe_batch_v1")
+        ? [] : [filePath + ": startup batch requires direct Mojo ABI regression"];
+    }
+    if (filePath === STARTUP_PROBE_BATCH_CALLER_TEST) {
+      return contents.includes("compiled_startup_probe_batch_preserves_over_65536_profile_order_and_remaining_slots")
+        ? [] : [filePath + ": startup batch requires cross-batch caller regression"];
+    }
+    return [];
   });
   const runtimeProxyRootViolations = files.flatMap(([filePath, contents]) => {
     if (filePath !== RUNTIME_PROXY_ROOT_FILE) return [];
@@ -11642,7 +11696,7 @@ export function findViolations(files) {
     }
     return [];
   });
-  return [...responseHeaderSelectionMojoViolations, ...previousResponseJsonSearchMojoViolations, ...domainErrorMojoViolations, ...geminiValueCollectionMojoViolations, ...geminiSimpleResponseViolations, ...logPayloadProjectionViolations, ...nativeRecoveryOwnershipViolations, ...quotaRecoveryEligibilityViolations, ...runtimeBrokerReuseMojoViolations, ...geminiResponseMediaMojoViolations, ...cookieEvictionMojoViolations, ...websocketBudgetMojoViolations, ...affinityBindingMojoViolations, ...responsesCapacityRecoveryViolations, ...sseTapMojoOwnershipViolations, ...quotaWatchViolations, ...geminiCompactSnippetViolations, ...geminiCompactTextViolations, ...doctorSmartContextDecisionViolations, ...providerSseJsonFrameMojoViolations, ...geminiSseCompletionOwnershipViolations, ...anthropicNativeStreamDecisionViolations, ...anthropicAttemptCursorViolations, ...geminiUnsupportedToolRetryViolations, ...terminalGeometryViolations, ...previousResponseRecoveryTransitionViolations, ...chatCompatibleToolCallKindViolations, ...geminiQuotaBodyMojoViolations, ...geminiOAuthRotationMojoViolations, ...geminiBuiltinBatchMojoViolations, ...geminiToolArrayValidationMojoViolations, ...geminiOAuthModelMojoViolations, ...superExposeOriginMojoViolations, ...kiroAcpToolLedgerMojoViolations, ...quotaPoolSummarySectionsMojoViolations, ...deepseekRequestDiagnosticViolations, ...deepseekToolShapeIssueMojoViolations, ...deepseekReplayItemPolicyMojoViolations, ...chatNamespaceSplitMojoViolations, ...deepseekInputItemIssueMessageViolations, ...deepseekRequestIssueMessageViolations, ...smartContextTelemetrySampleViolations, ...compatibilityDiagnosticsMojoViolations, ...quotaHeaderProjectionViolations, ...smartContextCapsuleOrderViolations, ...markerViolations, ...deepseekCatalogPolicyViolations, ...featureOffViolations, ...liveLogRecordViolations, ...runtimePolicyPresetViolations, ...runtimeConfigScalarViolations, ...profileHealthCircuitViolations, ...logThroughputViolations, ...operationalDetailSpecViolations, ...transcriptPolicyViolations, ...logLoadPolicyViolations, ...routeReasonViolations, ...runtimeStateQuotaViolations, ...runtimeStateRoutePolicyViolations, ...runtimeProxyRootViolations, ...runtimeRecoveryDeadlineViolations, ...brokerVersionGuardViolations, ...brokerContinuityViolations, ...brokerLogCacheViolations, ...codexConfigViolations, ...statePolicyViolations, ...quotaSelectionPolicyViolations, ...routeTagMirrorViolations, ...enumTagMirrorViolations, ...appSelectionPolicyMirrorViolations, ...runtimeStateBackgroundViolations, ...redactionViolations, ...rateLimitHeaderSelectionViolations, ...profileIdentityViolations, ...governanceInspectionViolations, ...governanceInspectionOrderingViolations, ...exactnessPlannerViolations,
+  return [...responseHeaderSelectionMojoViolations, ...previousResponseJsonSearchMojoViolations, ...domainErrorMojoViolations, ...geminiValueCollectionMojoViolations, ...geminiSimpleResponseViolations, ...logPayloadProjectionViolations, ...nativeRecoveryOwnershipViolations, ...quotaRecoveryEligibilityViolations, ...runtimeBrokerReuseMojoViolations, ...geminiResponseMediaMojoViolations, ...cookieEvictionMojoViolations, ...websocketBudgetMojoViolations, ...affinityBindingMojoViolations, ...responsesCapacityRecoveryViolations, ...sseTapMojoOwnershipViolations, ...quotaWatchViolations, ...geminiCompactSnippetViolations, ...geminiCompactTextViolations, ...doctorSmartContextDecisionViolations, ...providerSseJsonFrameMojoViolations, ...geminiSseCompletionOwnershipViolations, ...anthropicNativeStreamDecisionViolations, ...anthropicAttemptCursorViolations, ...geminiUnsupportedToolRetryViolations, ...terminalGeometryViolations, ...previousResponseRecoveryTransitionViolations, ...chatCompatibleToolCallKindViolations, ...geminiQuotaBodyMojoViolations, ...geminiOAuthRotationMojoViolations, ...geminiBuiltinBatchMojoViolations, ...geminiToolArrayValidationMojoViolations, ...geminiOAuthModelMojoViolations, ...superExposeOriginMojoViolations, ...kiroAcpToolLedgerMojoViolations, ...quotaPoolSummarySectionsMojoViolations, ...deepseekRequestDiagnosticViolations, ...deepseekToolShapeIssueMojoViolations, ...deepseekReplayItemPolicyMojoViolations, ...chatNamespaceSplitMojoViolations, ...deepseekInputItemIssueMessageViolations, ...deepseekRequestIssueMessageViolations, ...smartContextTelemetrySampleViolations, ...compatibilityDiagnosticsMojoViolations, ...quotaHeaderProjectionViolations, ...smartContextCapsuleOrderViolations, ...markerViolations, ...deepseekCatalogPolicyViolations, ...featureOffViolations, ...liveLogRecordViolations, ...runtimePolicyPresetViolations, ...runtimeConfigScalarViolations, ...profileHealthCircuitViolations, ...logThroughputViolations, ...operationalDetailSpecViolations, ...transcriptPolicyViolations, ...logLoadPolicyViolations, ...routeReasonViolations, ...startupProbeBatchMojoViolations, ...runtimeStateQuotaViolations, ...runtimeStateRoutePolicyViolations, ...runtimeProxyRootViolations, ...runtimeRecoveryDeadlineViolations, ...brokerVersionGuardViolations, ...brokerContinuityViolations, ...brokerLogCacheViolations, ...codexConfigViolations, ...statePolicyViolations, ...quotaSelectionPolicyViolations, ...routeTagMirrorViolations, ...enumTagMirrorViolations, ...appSelectionPolicyMirrorViolations, ...runtimeStateBackgroundViolations, ...redactionViolations, ...rateLimitHeaderSelectionViolations, ...profileIdentityViolations, ...governanceInspectionViolations, ...governanceInspectionOrderingViolations, ...exactnessPlannerViolations,
     ...infoRunwayViolations,
     ...geminiNormalizedViolations,
     ...quotaDurationViolations,
@@ -12773,6 +12827,19 @@ function selfTest() {
   assert.match(findViolations([[QUOTA_WINDOW_DURATION_CALLER,
     "pub struct UsageWindow; minutes.checked_mul(60);",
   ]]).join("\n"), /quota duration fallback and conversion must remain Mojo-owned/u);
+  const startupBatchFixture = [
+    "pub fn runtime_profiles_needing_startup_probe_refresh",
+    "candidates.chunks_mut(65_536)",
+    "StartupProbeRefreshObservation",
+    "startup_probe_refresh_batch(",
+    "remaining = plan.remaining",
+    "compiled Mojo selected unconsumed probe candidate",
+  ].join("\n");
+  assert.deepEqual(findViolations([[RUNTIME_STATE_QUOTA_FILE, startupBatchFixture]]).filter(
+    (message) => message.includes("ordered startup probe warm budget")), []);
+  assert.match(findViolations([[RUNTIME_STATE_QUOTA_FILE,
+    startupBatchFixture + "\nstartup_probe_refresh_candidate_plan(",
+  ]]).join("\n"), /ordered startup probe warm budget must be Mojo batch-owned/u);
   const responseHeaderFixture = [
     "pub fn runtime_response_header_value(",
     "RuntimeResponseHeaderOperation::FirstValue",
