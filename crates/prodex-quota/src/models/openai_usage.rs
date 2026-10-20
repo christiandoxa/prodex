@@ -378,10 +378,15 @@ impl<'de> Deserialize<'de> for UsageWindow {
         Ok(Self {
             used_percent: raw.used_percent,
             reset_at: raw.reset_at,
-            limit_window_seconds: raw.limit_window_seconds.or_else(|| {
-                raw.window_duration_mins
-                    .and_then(|minutes| minutes.checked_mul(60))
-            }),
+            limit_window_seconds: prodex_mojo_core::quota::quota_window_duration_seconds(
+                raw.limit_window_seconds,
+                raw.window_duration_mins,
+            )
+            .map_err(|_| {
+                <D::Error as serde::de::Error>::custom(
+                    "compiled Mojo quota window duration normalization failed",
+                )
+            })?,
         })
     }
 }

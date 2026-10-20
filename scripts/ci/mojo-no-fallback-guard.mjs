@@ -254,6 +254,9 @@ const DOMAIN_ERROR_ADAPTER = "crates/prodex-mojo-core/src/domain_error_policy.rs
 const DOMAIN_ERROR_MOJO = "mojo/prodex_core/domain_error_policy.mojo";
 const DOMAIN_ERROR_IDS_TESTS = "crates/prodex-domain/tests/ids.rs";
 const DOMAIN_ERROR_SECRETS_TESTS = "crates/prodex-domain/tests/secrets.rs";
+const QUOTA_WINDOW_DURATION_CALLER = "crates/prodex-quota/src/models/openai_usage.rs";
+const QUOTA_WINDOW_DURATION_ADAPTER = "crates/prodex-mojo-core/src/quota/window_duration.rs";
+const QUOTA_WINDOW_DURATION_TEST = "mojo/tests/quota_window_duration_test.mojo";
 const QUOTA_CAPACITY_CHOICE_ADAPTER = "crates/prodex-mojo-core/src/quota/capacity_choice.rs";
 const QUOTA_CAPACITY_CHOICE_MOJO_TEST = "mojo/tests/quota_capacity_choice_test.mojo";
 const QUOTA_CAPACITY_CHOICE_CALLER_TEST = "crates/prodex-quota/tests/src/render/windows.rs";
@@ -264,6 +267,9 @@ const PROMOTED_FILES = [
   DOMAIN_ERROR_MOJO,
   DOMAIN_ERROR_IDS_TESTS,
   DOMAIN_ERROR_SECRETS_TESTS,
+  QUOTA_WINDOW_DURATION_CALLER,
+  QUOTA_WINDOW_DURATION_ADAPTER,
+  QUOTA_WINDOW_DURATION_TEST,
   QUOTA_CAPACITY_CHOICE_ADAPTER,
   QUOTA_CAPACITY_CHOICE_MOJO_TEST,
   QUOTA_CAPACITY_CHOICE_CALLER_TEST,
@@ -3670,6 +3676,47 @@ export function findViolations(files) {
         contents.includes("mod capacity;")) {
       return contents.includes("pub use capacity_choice::{")
         ? [] : [filePath + ": quota choice adapter must remain production reachable"];
+    }
+    return [];
+  });
+  const quotaWindowDurationMojoViolations = files.flatMap(([filePath, contents]) => {
+    if (filePath === QUOTA_WINDOW_DURATION_CALLER) {
+      const required = [
+        "pub struct UsageWindow",
+        "prodex_mojo_core::quota::quota_window_duration_seconds(",
+        "raw.limit_window_seconds",
+        "raw.window_duration_mins",
+      ];
+      return required.every((marker) => contents.includes(marker))
+        && !contents.includes("minutes.checked_mul(60)")
+        ? [] : [filePath + ": quota duration fallback and conversion must remain Mojo-owned"];
+    }
+    if (filePath === QUOTA_WINDOW_DURATION_ADAPTER) {
+      return [
+        "fn prodex_quota_window_duration_seconds_v1(",
+        "pub fn quota_window_duration_seconds(",
+        "compiled_quota_window_duration_preserves_seconds_presence_and_checked_multiplication",
+        "compiled_quota_window_duration_abi_rejects_bad_flags_version_and_missing_result",
+      ].filter((marker) => !contents.includes(marker))
+        .map((marker) => filePath + ": compiled quota duration ABI missing " + marker);
+    }
+    if (filePath === "mojo/prodex_core/quota.mojo" &&
+        contents.includes("QUOTA_CANDIDATE_CHOICE_ABI")) {
+      return [
+        '@export("prodex_quota_window_duration_seconds_v1")',
+        "QUOTA_WINDOW_MIN_MINUTES",
+        "QUOTA_WINDOW_MAX_MINUTES",
+      ].filter((marker) => !contents.includes(marker))
+        .map((marker) => filePath + ": Mojo duration owner missing " + marker);
+    }
+    if (filePath === QUOTA_WINDOW_DURATION_TEST) {
+      return contents.includes("prodex_quota_window_duration_seconds_v1")
+        ? [] : [filePath + ": missing direct Mojo duration ABI test"];
+    }
+    if (filePath === "crates/prodex-mojo-core/src/quota.rs" &&
+        contents.includes("mod capacity;")) {
+      return contents.includes("pub use window_duration::quota_window_duration_seconds;")
+        ? [] : [filePath + ": duration adapter must remain reachable"];
     }
     return [];
   });
@@ -11480,7 +11527,7 @@ export function findViolations(files) {
     ...kiroCatalogViolations,
     ...kiroEnvironmentViolations,
     ...deepseekStrictSchemaViolations,
-    ...quotaModelPolicyViolations, ...quotaDisplayPolicyViolations, ...quotaCapacityChoiceMojoViolations, ...quotaPlannerViolations,
+    ...quotaModelPolicyViolations, ...quotaDisplayPolicyViolations, ...quotaCapacityChoiceMojoViolations, ...quotaWindowDurationMojoViolations, ...quotaPlannerViolations,
     ...anthropicResponseViolations,
     ...anthropicEnvelopeViolations, ...anthropicRequestViolations,
     ...anthropicWebSearchViolations, ...superProviderConfigViolations, ...externalProviderCatalogViolations, ...subAgentPolicyViolations, ...runtimeOverlayPolicyViolations, ...cliRuntimeFeatureViolations,
@@ -12576,6 +12623,9 @@ function selfTest() {
   assert.match(findViolations([[kiroAcpLedgerCaller,
     kiroAcpLedgerConsumer + "\nif self.tool_activities_truncated {",
   ]]).join("\n"), /restored Rust Kiro ACP activity cap\/label inheritance policy/u);
+  assert.match(findViolations([[QUOTA_WINDOW_DURATION_CALLER,
+    "pub struct UsageWindow; minutes.checked_mul(60);",
+  ]]).join("\n"), /quota duration fallback and conversion must remain Mojo-owned/u);
   const quotaChoiceCaller = "crates/prodex-quota/src/render/windows.rs";
   const quotaChoiceFixture = [
     "fn openai_quota_runtime_window_pair(",

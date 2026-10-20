@@ -3785,3 +3785,43 @@ def prodex_quota_capacity_choice_v1(
     output[unsafe_offset=0] = first_eligible if first_eligible >= 0 else first_main
     output[unsafe_offset=1] = Int64(first_eligible >= 0)
     return 0
+
+
+# Serde acquires optional raw window durations. Compiled Mojo decides the
+# explicit-seconds precedence and overflow-safe minute-to-second conversion.
+comptime QUOTA_WINDOW_DURATION_ABI: Int64 = 1
+comptime QUOTA_WINDOW_MIN_MINUTES: Int64 = -153722867280912930
+comptime QUOTA_WINDOW_MAX_MINUTES: Int64 = 153722867280912930
+
+
+@export("prodex_quota_window_duration_seconds_v1")
+def prodex_quota_window_duration_seconds_v1(
+    abi_version: Int64,
+    seconds_present: Int64,
+    seconds: Int64,
+    minutes_present: Int64,
+    minutes: Int64,
+    output_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != QUOTA_WINDOW_DURATION_ABI:
+        return 4
+    if (
+        seconds_present < 0 or seconds_present > 1
+        or minutes_present < 0 or minutes_present > 1
+        or output_address == 0 or output_address % 8 != 0
+    ):
+        return 1
+    var present = False
+    var value: Int64 = 0
+    if seconds_present == 1:
+        present = True
+        value = seconds
+    elif minutes_present == 1 and minutes >= QUOTA_WINDOW_MIN_MINUTES and minutes <= QUOTA_WINDOW_MAX_MINUTES:
+        present = True
+        value = minutes * 60
+    var output = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    output[unsafe_offset=0] = 1 if present else 0
+    output[unsafe_offset=1] = value
+    return 0

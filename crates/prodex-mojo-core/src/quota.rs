@@ -31,6 +31,8 @@ mod capacity;
 pub use capacity::quota_capacity_batch;
 mod capacity_choice;
 pub use capacity_choice::{QuotaCapacityChoice, QuotaCapacityChoiceInput, quota_capacity_choice};
+mod window_duration;
+pub use window_duration::quota_window_duration_seconds;
 mod report_sort;
 mod retry_time;
 pub use retry_time::{QuotaRetryTimeCandidate, quota_retry_time_candidate};
