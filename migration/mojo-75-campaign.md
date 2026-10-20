@@ -8193,3 +8193,16 @@ a direct Mojo ABI test, anti-fallback and share guards pass.
 Measured share changes from 36.09557853295551% to
 36.09241084705437% (133,495 Mojo / 236,375 Rust) because bounded
 batch acquisition adds host adapter LOC. The 75% goal stays open.
+
+## Previous-response latest lineage turn binding batched in Mojo (2026-10-21)
+
+The production lineage owner now selects the most recent parsed
+turn-state binding by exact response/profile and signed bound_at,
+breaking equal timestamps by later input. Rust retains original
+borrowed metadata and applies compiled-selected indices, without
+its previous prefix/profile/time comparator fallback.
+All 427 runtime-proxy tests, two app lineage tests, two core ABI
+tests, direct Mojo tests and source/share guards pass. Official
+share rises from 36.09241084705437% to 36.102403908513125%
+(133,602 Mojo / 236,462 Rust production LOC).
+The 75% project target remains outstanding.

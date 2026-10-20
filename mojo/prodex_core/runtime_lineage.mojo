@@ -6,6 +6,7 @@ from rich_text import (
     rich_trim_bounds,
     rich_view_ptr,
     rich_view_valid,
+    rich_views_equal,
 )
 from rich_types import ProdexRichStringView
 
@@ -871,3 +872,121 @@ def prodex_runtime_session_replay_reset_v1(
         return -1
     return Int64(previous_response == 0 and turn_state == 0 and full_history == 1
         and conflict == 1 and committed == 0)
+
+
+# Batch selection of the last binding for an exact previous-response
+# identity. The caller acquires the parsed key parts through the existing
+# compiled lineage parser and supplies borrowed profile/timestamp facts.
+# Mojo alone filters response/profile facts and chooses greatest bound_at,
+# breaking exact timestamp ties by later original traversal position.
+comptime LINEAGE_LATEST_BINDING_MAX_COUNT: Int64 = 65_536
+comptime LINEAGE_LATEST_BINDING_ROW_WORDS: Int64 = 5
+
+
+@export("prodex_runtime_lineage_latest_turn_binding_v1")
+def prodex_runtime_lineage_latest_turn_binding_v1(
+    abi_version: Int64,
+    facts_address: UInt, timestamps_address: UInt, count: Int64,
+    response_address: UInt, response_length: Int64,
+    profile_address: UInt, profile_length: Int64, profile_present: Int64,
+    result_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != LINEAGE_ABI_VERSION:
+        return 4
+    if (
+        count < 0 or count > LINEAGE_LATEST_BINDING_MAX_COUNT
+        or (count > 0 and (
+            facts_address == 0 or facts_address % 8 != 0
+            or timestamps_address == 0 or timestamps_address % 8 != 0
+        ))
+        or response_length < 0
+        or (response_length > 0 and response_address == 0)
+        or profile_length < 0
+        or (profile_present != 0 and profile_present != 1)
+        or (profile_length > 0 and profile_address == 0)
+        or (profile_present == 0 and (
+            profile_length != 0 or profile_address != 0
+        ))
+        or result_address == 0 or result_address % 8 != 0
+    ):
+        return LINEAGE_INVALID
+    var response = ProdexRichStringView(response_address, UInt(response_length))
+    var filter_profile = ProdexRichStringView(profile_address, UInt(profile_length))
+    if (
+        not rich_view_valid(response, 0x7FFFFFFFFFFFFFFF)
+        or (
+            profile_present == 1
+            and not rich_view_valid(filter_profile, 0x7FFFFFFFFFFFFFFF)
+        )
+    ):
+        return LINEAGE_INVALID
+    var facts = Pointer[mut=False, UInt64, ImmUntrackedOrigin](
+        unsafe_from_address=Int(facts_address)
+    )
+    var timestamps = Pointer[mut=False, Int64, ImmUntrackedOrigin](
+        unsafe_from_address=Int(timestamps_address)
+    )
+    for index in range(count):
+        var offset = index * LINEAGE_LATEST_BINDING_ROW_WORDS
+        var response_address_candidate = facts[unsafe_offset=offset]
+        var response_length_candidate = facts[unsafe_offset=offset + 1]
+        var profile_address_candidate = facts[unsafe_offset=offset + 2]
+        var profile_length_candidate = facts[unsafe_offset=offset + 3]
+        var eligible = facts[unsafe_offset=offset + 4]
+        if (
+            eligible > 1
+            or response_length_candidate > UInt64(9223372036854775807)
+            or profile_length_candidate > UInt64(9223372036854775807)
+            or (response_length_candidate > 0 and response_address_candidate == 0)
+            or (profile_length_candidate > 0 and profile_address_candidate == 0)
+            or (eligible == 0 and (
+                response_address_candidate != 0 or response_length_candidate != 0
+            ))
+        ):
+            return LINEAGE_INVALID
+        if (
+            not rich_view_valid(
+                ProdexRichStringView(
+                    UInt(profile_address_candidate), UInt(profile_length_candidate)
+                ), 0x7FFFFFFFFFFFFFFF,
+            )
+            or (
+                eligible == 1
+                and not rich_view_valid(
+                    ProdexRichStringView(
+                        UInt(response_address_candidate),
+                        UInt(response_length_candidate),
+                    ), 0x7FFFFFFFFFFFFFFF,
+                )
+            )
+        ):
+            return LINEAGE_INVALID
+
+    var selected = Int64(-1)
+    var best_timestamp = Int64(0)
+    for index in range(count):
+        var offset = index * LINEAGE_LATEST_BINDING_ROW_WORDS
+        if facts[unsafe_offset=offset + 4] == 0:
+            continue
+        var candidate_response = ProdexRichStringView(
+            UInt(facts[unsafe_offset=offset]),
+            UInt(facts[unsafe_offset=offset + 1]),
+        )
+        if not rich_views_equal(candidate_response, response):
+            continue
+        if profile_present == 1:
+            var candidate_profile = ProdexRichStringView(
+                UInt(facts[unsafe_offset=offset + 2]),
+                UInt(facts[unsafe_offset=offset + 3]),
+            )
+            if not rich_views_equal(candidate_profile, filter_profile):
+                continue
+        var bound_at = timestamps[unsafe_offset=index]
+        if selected == -1 or bound_at >= best_timestamp:
+            selected = index
+            best_timestamp = bound_at
+
+    Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(result_address)
+    )[] = selected
+    return LINEAGE_OK

@@ -1,10 +1,10 @@
 use std::collections::BTreeSet;
 
 #[cfg(test)]
+use prodex_runtime_state::RUNTIME_RESPONSE_TURN_STATE_LINEAGE_PREFIX;
+#[cfg(test)]
 use prodex_runtime_state::runtime_response_turn_state_lineage_key;
-use prodex_runtime_state::{
-    RUNTIME_RESPONSE_TURN_STATE_LINEAGE_PREFIX, runtime_response_turn_state_lineage_parts,
-};
+use prodex_runtime_state::runtime_response_turn_state_lineage_parts;
 
 #[derive(Debug, Clone, Copy)]
 pub struct RuntimeResponseTurnStateLineageBinding<'a> {
@@ -53,31 +53,42 @@ pub fn runtime_previous_response_turn_state_from_bindings<'a>(
     previous_response_id: &str,
     bound_profile: Option<&str>,
 ) -> Option<String> {
-    let prefix = runtime_response_turn_state_lineage_prefix(previous_response_id);
-    let mut selected = None::<(i64, String)>;
-    for entry in bindings {
-        if !entry.key.starts_with(&prefix) {
-            continue;
-        }
-        if bound_profile.is_some_and(|profile_name| entry.profile_name != profile_name) {
-            continue;
-        }
-        let Some((response_id, turn_state)) = runtime_response_turn_state_lineage_parts(entry.key)
-        else {
-            continue;
-        };
-        if response_id != previous_response_id {
-            continue;
-        }
-        let candidate = (entry.bound_at, turn_state.to_string());
-        if selected
-            .as_ref()
-            .is_none_or(|(current_bound_at, _)| *current_bound_at <= candidate.0)
-        {
-            selected = Some(candidate);
+    use prodex_mojo_core::runtime_lineage::{
+        RuntimeLineageLatestBindingFact, runtime_lineage_latest_binding_index,
+    };
+    const BINDING_BATCH: usize = 65_536;
+    let originals = bindings.into_iter().collect::<Vec<_>>();
+    // The existing compiled lineage key parser acquires original borrowed
+    // response components; Mojo owns all response/profile filtering and
+    // maximum-bound_at selection from those parsed facts.
+    let facts = originals
+        .iter()
+        .map(|binding| RuntimeLineageLatestBindingFact {
+            response_id: runtime_response_turn_state_lineage_parts(binding.key)
+                .map(|(response, _)| response),
+            profile_name: binding.profile_name,
+            bound_at: binding.bound_at,
+        })
+        .collect::<Vec<_>>();
+    let mut winners = Vec::new();
+    for (batch, chunk) in facts.chunks(BINDING_BATCH).enumerate() {
+        let index =
+            runtime_lineage_latest_binding_index(chunk, previous_response_id, bound_profile)
+                .expect("compiled Mojo lineage turn-state binding selection failed");
+        if let Some(index) = index {
+            winners.push(batch * BINDING_BATCH + index);
         }
     }
-    selected.map(|(_, turn_state)| turn_state)
+    let finalists = winners
+        .iter()
+        .map(|index| facts[*index])
+        .collect::<Vec<_>>();
+    let selected =
+        runtime_lineage_latest_binding_index(&finalists, previous_response_id, bound_profile)
+            .expect("compiled Mojo lineage turn-state finalist selection failed")?;
+    let binding = originals[winners[selected]];
+    runtime_response_turn_state_lineage_parts(binding.key)
+        .map(|(_, turn_state)| turn_state.to_string())
 }
 
 pub fn runtime_live_response_turn_states_for_profile<'a>(
@@ -94,6 +105,7 @@ pub fn runtime_live_response_turn_states_for_profile<'a>(
         .collect()
 }
 
+#[cfg(test)]
 fn runtime_response_turn_state_lineage_prefix(previous_response_id: &str) -> String {
     format!(
         "{RUNTIME_RESPONSE_TURN_STATE_LINEAGE_PREFIX}{}:{previous_response_id}:",

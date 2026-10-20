@@ -17,6 +17,18 @@ const BUILD_COMPACT_TURN_STATE: i64 = 1;
 const BUILD_RESPONSE_TURN_STATE: i64 = 2;
 
 unsafe extern "C" {
+    fn prodex_runtime_lineage_latest_turn_binding_v1(
+        abi_version: i64,
+        facts_address: u64,
+        timestamps_address: u64,
+        count: i64,
+        response_address: u64,
+        response_length: i64,
+        profile_address: u64,
+        profile_length: i64,
+        profile_present: i64,
+        result_address: u64,
+    ) -> i64;
     fn prodex_runtime_lineage_classify_v1(
         abi_version: i64,
         kind: i64,
@@ -107,6 +119,90 @@ pub use binding_candidate::{
     RuntimeLineageLocalRewriteCandidate, RuntimeLineageProviderBindingIdentity,
     dispatch_binding_candidate_decision, local_rewrite_candidate_allowed,
 };
+
+/// Original parsed response identity, binding profile, and modification
+/// timestamp. The Rust host only borrows compiled parser output; Mojo
+/// chooses the latest matching candidate with later-input timestamp ties.
+#[derive(Debug, Clone, Copy)]
+pub struct RuntimeLineageLatestBindingFact<'a> {
+    pub response_id: Option<&'a str>,
+    pub profile_name: &'a str,
+    pub bound_at: i64,
+}
+
+/// Select the original index of the latest qualifying turn-state binding.
+/// The kernel handles exact response/profile filtering and signed time order.
+pub fn runtime_lineage_latest_binding_index(
+    candidates: &[RuntimeLineageLatestBindingFact<'_>],
+    response_id: &str,
+    profile_filter: Option<&str>,
+) -> Result<Option<usize>, MojoError> {
+    if candidates.len() > 65_536 {
+        return Err(MojoError::InvalidInput);
+    }
+    let mut facts = Vec::<u64>::new();
+    facts
+        .try_reserve_exact(candidates.len().checked_mul(5).ok_or(MojoError::Capacity)?)
+        .map_err(|_| MojoError::Capacity)?;
+    let mut timestamps = Vec::<i64>::new();
+    timestamps
+        .try_reserve_exact(candidates.len())
+        .map_err(|_| MojoError::Capacity)?;
+    for candidate in candidates {
+        let (address, length, present) = match candidate.response_id {
+            Some(response) => (
+                response.as_ptr() as usize as u64,
+                u64::try_from(response.len()).map_err(|_| MojoError::InvalidInput)?,
+                1_u64,
+            ),
+            None => (0_u64, 0_u64, 0_u64),
+        };
+        facts.extend([
+            address,
+            length,
+            candidate.profile_name.as_ptr() as usize as u64,
+            u64::try_from(candidate.profile_name.len()).map_err(|_| MojoError::InvalidInput)?,
+            present,
+        ]);
+        timestamps.push(candidate.bound_at);
+    }
+    let (profile_address, profile_length, profile_present) = match profile_filter {
+        Some(profile) => (
+            profile.as_ptr() as usize as u64,
+            i64::try_from(profile.len()).map_err(|_| MojoError::InvalidInput)?,
+            1_i64,
+        ),
+        None => (0_u64, 0_i64, 0_i64),
+    };
+    let mut selected = -7_i64;
+    match unsafe {
+        prodex_runtime_lineage_latest_turn_binding_v1(
+            ABI_VERSION,
+            facts.as_ptr() as usize as u64,
+            timestamps.as_ptr() as usize as u64,
+            i64::try_from(candidates.len()).map_err(|_| MojoError::InvalidInput)?,
+            response_id.as_ptr() as usize as u64,
+            signed_len(response_id)?,
+            profile_address,
+            profile_length,
+            profile_present,
+            (&mut selected as *mut i64) as usize as u64,
+        )
+    } {
+        0 => {}
+        1 => return Err(MojoError::InvalidInput),
+        4 => return Err(MojoError::AbiMismatch),
+        _ => return Err(MojoError::InvalidOutput),
+    }
+    if selected == -1 {
+        return Ok(None);
+    }
+    let index = usize::try_from(selected).map_err(|_| MojoError::InvalidOutput)?;
+    if index >= candidates.len() {
+        return Err(MojoError::InvalidOutput);
+    }
+    Ok(Some(index))
+}
 
 fn signed_len(value: &str) -> Result<i64, MojoError> {
     i64::try_from(value.len()).map_err(|_| MojoError::InvalidInput)
@@ -734,3 +830,162 @@ pub use session_epoch::{
 };
 
 pub use session_epoch::session_full_history_reset_allowed;
+
+#[cfg(test)]
+mod compiled_lineage_latest_binding_tests {
+    use super::*;
+
+    fn fact<'a>(
+        response: Option<&'a str>,
+        profile: &'a str,
+        timestamp: i64,
+    ) -> RuntimeLineageLatestBindingFact<'a> {
+        RuntimeLineageLatestBindingFact {
+            response_id: response,
+            profile_name: profile,
+            bound_at: timestamp,
+        }
+    }
+
+    #[test]
+    fn compiled_lineage_latest_binding_selects_last_newest_matching_identity_and_profile() {
+        let candidates = [
+            fact(Some("resp:雪"), "main", i64::MIN),
+            fact(Some("resp:雪"), "other", i64::MAX),
+            fact(None, "main", i64::MAX),
+            fact(Some("resp"), "main", i64::MAX),
+            fact(Some("resp:雪"), "main", -1),
+            fact(Some("resp:雪"), "main", 8),
+            fact(Some("resp:雪"), "main", 8),
+            fact(Some("resp:雪"), "other", i64::MIN),
+        ];
+        assert_eq!(
+            runtime_lineage_latest_binding_index(&candidates, "resp:雪", Some("main")),
+            Ok(Some(6)),
+        );
+        assert_eq!(
+            runtime_lineage_latest_binding_index(&candidates, "resp:雪", None),
+            Ok(Some(1)),
+        );
+        assert_eq!(
+            runtime_lineage_latest_binding_index(&candidates, "resp:雪", Some("missing")),
+            Ok(None),
+        );
+        assert_eq!(
+            runtime_lineage_latest_binding_index(&candidates, "resp", Some("main")),
+            Ok(Some(3)),
+        );
+        assert_eq!(
+            runtime_lineage_latest_binding_index(&[], "resp", None),
+            Ok(None)
+        );
+        assert_eq!(
+            runtime_lineage_latest_binding_index(&[fact(Some(""), "", -1)], "", Some(""),),
+            Ok(Some(0)),
+        );
+        let many = vec![fact(Some("resp"), "main", 1); 1025];
+        assert_eq!(
+            runtime_lineage_latest_binding_index(&many, "resp", Some("main")),
+            Ok(Some(1024)),
+            "equal timestamps choose the final source row",
+        );
+    }
+
+    #[test]
+    fn compiled_lineage_latest_binding_abi_rejects_late_invalid_row_without_write() {
+        let mut facts = [0_u64; 10];
+        let mut timestamps = [10_i64; 2];
+        let mut selected = 93_i64;
+        let source = facts.as_ptr() as usize as u64;
+        let times = timestamps.as_ptr() as usize as u64;
+        let result = (&mut selected as *mut i64) as usize as u64;
+        let query = b"resp";
+        let profile = b"main";
+        let query_ptr = query.as_ptr() as usize as u64;
+        let profile_ptr = profile.as_ptr() as usize as u64;
+        for (
+            version,
+            rows,
+            timestamp_ptr,
+            count,
+            resp_ptr,
+            resp_len,
+            profile_present,
+            destination,
+            expected,
+        ) in [
+            (2, source, times, 2, query_ptr, 4, 1, result, 4),
+            (1, 0, times, 2, query_ptr, 4, 1, result, 1),
+            (1, source, 0, 2, query_ptr, 4, 1, result, 1),
+            (1, source, times, -1, query_ptr, 4, 1, result, 1),
+            (1, source, times, 65_537, query_ptr, 4, 1, result, 1),
+            (1, source, times, 2, 0, 4, 1, result, 1),
+            (1, source, times, 2, query_ptr, -1, 1, result, 1),
+            (1, source, times, 2, query_ptr, 4, 2, result, 1),
+            (1, source, times, 2, query_ptr, 4, 1, 0, 1),
+        ] {
+            assert_eq!(
+                unsafe {
+                    prodex_runtime_lineage_latest_turn_binding_v1(
+                        version,
+                        rows,
+                        timestamp_ptr,
+                        count,
+                        resp_ptr,
+                        resp_len,
+                        profile_ptr,
+                        4,
+                        profile_present,
+                        destination,
+                    )
+                },
+                expected,
+            );
+            assert_eq!(selected, 93);
+        }
+        facts[9] = 2;
+        assert_eq!(
+            unsafe {
+                prodex_runtime_lineage_latest_turn_binding_v1(
+                    1,
+                    facts.as_ptr() as usize as u64,
+                    times,
+                    2,
+                    query_ptr,
+                    4,
+                    profile_ptr,
+                    4,
+                    1,
+                    result,
+                )
+            },
+            1,
+        );
+        assert_eq!(selected, 93);
+        facts[9] = 1;
+        facts[5] = query_ptr;
+        facts[6] = 4;
+        timestamps[1] = i64::MAX;
+        assert_eq!(
+            unsafe {
+                prodex_runtime_lineage_latest_turn_binding_v1(
+                    1,
+                    facts.as_ptr() as usize as u64,
+                    timestamps.as_ptr() as usize as u64,
+                    2,
+                    query_ptr,
+                    4,
+                    profile_ptr,
+                    4,
+                    1,
+                    result,
+                )
+            },
+            0,
+        );
+        assert_eq!(
+            selected, -1,
+            "no profile rows qualify without their profile views"
+        );
+    }
+}
