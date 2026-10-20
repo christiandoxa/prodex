@@ -758,3 +758,106 @@ def prodex_mojo_ping_summary_plan_v1(
     output[unsafe_offset=5] = total - healthy - exhausted - auth_failures - temporary_failures
     output[unsafe_offset=6] = UInt64(healthy > 0)
     return PING_DETAIL_STATUS_OK
+
+
+# Stable profile name ordering for completed parallel ping probes. Mojo owns
+# bytewise UTF-8 lexical precedence; Rust retains each completed result and
+# merely applies this compiled permutation to its original result objects.
+comptime PING_PROFILE_ORDER_MAX: Int64 = 65_536
+
+
+def ping_profile_order_less(
+    names: Pointer[mut=False, UInt64, _], left: Int64, right: Int64,
+) -> Bool:
+    var l_offset = left * 2
+    var r_offset = right * 2
+    var left_length = Int64(names[unsafe_offset=l_offset + 1])
+    var right_length = Int64(names[unsafe_offset=r_offset + 1])
+    var a = Pointer[mut=False, UInt8, ImmUntrackedOrigin](
+        unsafe_from_address=Int(names[unsafe_offset=l_offset])
+    )
+    var b = Pointer[mut=False, UInt8, ImmUntrackedOrigin](
+        unsafe_from_address=Int(names[unsafe_offset=r_offset])
+    )
+    for index in range(min(left_length, right_length)):
+        var left_byte = a[unsafe_offset=index]
+        var right_byte = b[unsafe_offset=index]
+        if left_byte != right_byte:
+            return left_byte < right_byte
+    if left_length != right_length:
+        return left_length < right_length
+    return left < right
+
+
+def ping_profile_order_heap_down(
+    names: Pointer[mut=False, UInt64, _],
+    indices: Pointer[mut=True, Int64, _],
+    first: Int64, count: Int64,
+):
+    var root = first
+    while root * 2 + 1 < count:
+        var child = root * 2 + 1
+        var swap = root
+        if ping_profile_order_less(
+            names, indices[unsafe_offset=swap], indices[unsafe_offset=child],
+        ):
+            swap = child
+        if child + 1 < count and ping_profile_order_less(
+            names, indices[unsafe_offset=swap], indices[unsafe_offset=child + 1],
+        ):
+            swap = child + 1
+        if swap == root:
+            return
+        var saved = indices[unsafe_offset=root]
+        indices[unsafe_offset=root] = indices[unsafe_offset=swap]
+        indices[unsafe_offset=swap] = saved
+        root = swap
+
+
+@export("prodex_mojo_ping_profile_order_v1")
+def prodex_mojo_ping_profile_order_v1(
+    abi_version: Int64,
+    names_address: UInt, count: Int64,
+    output_address: UInt, output_capacity: Int64,
+) abi("C") -> Int64:
+    if abi_version != PING_PROTOCOL_ABI_VERSION:
+        return PING_DETAIL_STATUS_ABI
+    if (
+        count < 0 or count > PING_PROFILE_ORDER_MAX
+        or (count > 0 and (names_address == 0 or names_address % 8 != 0))
+        or output_address == 0 or output_address % 8 != 0
+        or output_capacity < count
+    ):
+        return PING_DETAIL_STATUS_INVALID
+    var names = Pointer[mut=False, UInt64, ImmUntrackedOrigin](
+        unsafe_from_address=Int(names_address)
+    )
+    for index in range(count):
+        var address = names[unsafe_offset=index * 2]
+        var length = names[unsafe_offset=index * 2 + 1]
+        if (
+            length > UInt64(9223372036854775807)
+            or (length > 0 and address == 0)
+            or not rich_view_valid(
+                ProdexRichStringView(UInt(address), UInt(length)),
+                PING_PROTOCOL_MAX_BYTES,
+            )
+        ):
+            return PING_DETAIL_STATUS_INVALID
+    var indices = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    for index in range(count):
+        indices[unsafe_offset=index] = index
+    var start = count // 2
+    while start > 0:
+        start -= 1
+        ping_profile_order_heap_down(names, indices, start, count)
+    var end = count
+    while end > 1:
+        end -= 1
+        var saved = indices[unsafe_offset=0]
+        indices[unsafe_offset=0] = indices[unsafe_offset=end]
+        indices[unsafe_offset=end] = saved
+        ping_profile_order_heap_down(names, indices, 0, end)
+    return PING_DETAIL_STATUS_OK

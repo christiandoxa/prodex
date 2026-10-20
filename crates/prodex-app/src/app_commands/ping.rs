@@ -215,8 +215,27 @@ fn probe_ping_targets(
         Ok::<_, anyhow::Error>(())
     })?;
 
-    results.sort_by(|left, right| left.profile.cmp(&right.profile));
-    Ok(results)
+    Ok(ping_results_in_profile_order(results))
+}
+
+/// Parallel probe completion order is nondeterministic. Compiled ping
+/// policy alone sorts the original result values by profile name.
+fn ping_results_in_profile_order(results: Vec<PingResult>) -> Vec<PingResult> {
+    let names = results
+        .iter()
+        .map(|result| result.profile.as_str())
+        .collect::<Vec<_>>();
+    let order = prodex_mojo_core::rich::ping_profile_order(&names)
+        .expect("compiled Mojo ping result profile order returned invalid output");
+    let mut original = results.into_iter().map(Some).collect::<Vec<_>>();
+    order
+        .into_iter()
+        .map(|index| {
+            original[index]
+                .take()
+                .expect("validated Mojo result indices are unique")
+        })
+        .collect()
 }
 
 fn probe_ping_target(target: PingTarget, options: &PingProbeOptions) -> PingResult {
@@ -407,3 +426,76 @@ fn classify_failure_text(text: &str) -> (PingStatus, String) {
 #[cfg(test)]
 #[path = "ping_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+mod compiled_ping_result_profile_order_tests {
+    use super::*;
+
+    fn sample(name: &str, detail: &str) -> PingResult {
+        PingResult {
+            profile: name.to_owned(),
+            model: None,
+            effort: None,
+            effective_model: None,
+            status: PingStatus::Pass,
+            detail: detail.to_owned(),
+            first_response_latency_ms: None,
+            latency_ms: None,
+        }
+    }
+
+    #[test]
+    fn compiled_ping_result_order_preserves_profile_unicode_and_status_rows() {
+        let input = vec![
+            sample("雪", "first snow"),
+            sample("z", "z"),
+            sample("a", "first a"),
+            sample("é", "accent"),
+            sample("", "empty"),
+            sample("a", "second a"),
+            sample("雪", "second snow"),
+        ];
+        let output = ping_results_in_profile_order(input);
+        assert_eq!(
+            output
+                .iter()
+                .map(|row| row.profile.as_str())
+                .collect::<Vec<_>>(),
+            ["", "a", "a", "z", "é", "雪", "雪"],
+        );
+        assert_eq!(
+            output
+                .iter()
+                .map(|row| row.detail.as_str())
+                .collect::<Vec<_>>(),
+            [
+                "empty",
+                "first a",
+                "second a",
+                "z",
+                "accent",
+                "first snow",
+                "second snow"
+            ],
+        );
+        assert_eq!(ping_results_in_profile_order(Vec::new()).len(), 0);
+    }
+
+    #[test]
+    fn compiled_ping_result_order_handles_large_parallel_completion_permutations() {
+        let input = (0..1025)
+            .rev()
+            .map(|index| {
+                sample(
+                    &format!("profile-{index:04}"),
+                    &format!("completed-{index}"),
+                )
+            })
+            .collect::<Vec<_>>();
+        let output = ping_results_in_profile_order(input);
+        assert_eq!(output.len(), 1025);
+        assert_eq!(output[0].profile, "profile-0000");
+        assert_eq!(output[1024].profile, "profile-1024");
+        assert_eq!(output[0].detail, "completed-0");
+    }
+}

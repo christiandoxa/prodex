@@ -8106,3 +8106,15 @@ tests, direct Mojo test and strict no-fallback/share gates pass.
 Official share rises from 36.030173372161755% to
 36.049461001902344% (133,029 Mojo / 235,989 Rust).
 The 75% project goal stays open.
+
+## Parallel ping completed-result profile order compiled in Mojo (2026-10-20)
+
+The production ping protocol owner now returns stable sorted
+indices for original PingResult profile names, replacing Rust's
+sort_by after concurrent workers complete. Rust retains subprocess
+probing and applies Mojo-selected original rows with no comparator
+fallback. All 25 ping application tests, two direct core ABI tests,
+direct Mojo test and strict no-fallback/share guards pass.
+Official share increases from 36.049461001902344% to
+36.05829134839374% (133,120 Mojo / 236,060 Rust).
+The 75% objective stays outstanding.
