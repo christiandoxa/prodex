@@ -110,14 +110,35 @@ pub(crate) fn try_collect_prodex_processes() -> Result<Vec<ProdexProcessInfo>> {
             .map(ToOwned::to_owned)
     });
 
-    let mut processes = try_collect_process_rows()?
+    let processes = try_collect_process_rows()?
         .into_iter()
         .filter_map(|row| {
             classify_prodex_process_row(row, current_pid, current_basename.as_deref())
         })
         .collect::<Vec<_>>();
-    processes.sort_by_key(|process| process.pid);
-    Ok(processes)
+    order_prodex_process_rows(processes)
+}
+
+/// Keep the original detected process records. The compiled info renderer
+/// owns PID ordering and stable equal-PID precedence; no Rust sorting policy.
+fn order_prodex_process_rows(processes: Vec<ProdexProcessInfo>) -> Result<Vec<ProdexProcessInfo>> {
+    let pids = processes
+        .iter()
+        .map(|process| process.pid)
+        .collect::<Vec<_>>();
+    let selected =
+        prodex_mojo_core::info_render::info_process_pid_order(&pids).map_err(|error| {
+            anyhow::anyhow!("compiled Mojo info process PID ordering failed: {error:?}")
+        })?;
+    let mut original = processes.into_iter().map(Some).collect::<Vec<_>>();
+    Ok(selected
+        .into_iter()
+        .map(|index| {
+            original[index]
+                .take()
+                .expect("validated Mojo process indices are unique")
+        })
+        .collect())
 }
 
 pub(crate) fn collect_process_rows() -> Vec<ProcessRow> {
@@ -368,3 +389,52 @@ mod parity_tests {
 #[cfg(test)]
 #[path = "info_provider_tests.rs"]
 mod provider_tests;
+
+#[cfg(test)]
+mod compiled_info_pid_order_caller_tests {
+    use super::*;
+
+    fn process(pid: u32, command: &str, runtime: bool) -> ProdexProcessInfo {
+        ProdexProcessInfo {
+            pid,
+            command: command.to_owned(),
+            runtime,
+        }
+    }
+
+    #[test]
+    fn compiled_info_process_pid_order_retains_full_original_rows_on_equal_pid() {
+        let processes = vec![
+            process(42, "first duplicate", true),
+            process(u32::MAX, "highest", false),
+            process(0, "lowest", true),
+            process(17, "middle", false),
+            process(42, "second duplicate", false),
+            process(1, "early", true),
+        ];
+        let result = order_prodex_process_rows(processes).unwrap();
+        assert_eq!(
+            result.iter().map(|row| row.pid).collect::<Vec<_>>(),
+            [0, 1, 17, 42, 42, u32::MAX],
+        );
+        assert_eq!(result[3].command, "first duplicate");
+        assert_eq!(result[4].command, "second duplicate");
+        assert!(result[3].runtime);
+        assert!(!result[4].runtime);
+        assert!(order_prodex_process_rows(Vec::new()).unwrap().is_empty());
+    }
+
+    #[test]
+    fn compiled_info_process_pid_order_handles_many_processes_stably() {
+        let processes = (0..1025)
+            .rev()
+            .map(|pid| process(pid, &format!("proc-{pid}"), pid % 2 == 0))
+            .collect::<Vec<_>>();
+        let ordered = order_prodex_process_rows(processes).unwrap();
+        assert_eq!(ordered.len(), 1025);
+        assert_eq!(ordered[0].pid, 0);
+        assert_eq!(ordered[1024].pid, 1024);
+        assert_eq!(ordered[0].command, "proc-0");
+        assert!(ordered.windows(2).all(|pair| pair[0].pid <= pair[1].pid));
+    }
+}

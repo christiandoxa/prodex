@@ -2050,3 +2050,86 @@ def prodex_info_token_usage_summary_v1(
     if abi_version != 1:
         return 4
     return info_token_usage_summary(profiles_address, counts_address, count, output_address, output_words)
+
+
+# Stable ascending process-ID order for the info process table.
+# Host retains process discovery and the original process records;
+# compiled Mojo owns PID precedence and returns source indices.
+comptime INFO_PROCESS_PID_ORDER_ABI: Int64 = 1
+comptime INFO_PROCESS_PID_ORDER_MAX: Int64 = 1_048_576
+
+
+def info_process_pid_less(
+    values: Pointer[mut=False, UInt64, _],
+    left: Int64, right: Int64,
+) -> Bool:
+    var lhs = values[unsafe_offset=left]
+    var rhs = values[unsafe_offset=right]
+    if lhs != rhs:
+        return lhs < rhs
+    return left < right
+
+
+def info_process_pid_heap_down(
+    values: Pointer[mut=False, UInt64, _],
+    indices: Pointer[mut=True, Int64, _],
+    first: Int64, count: Int64,
+):
+    var root = first
+    while root * 2 + 1 < count:
+        var child = root * 2 + 1
+        var swap = root
+        if info_process_pid_less(
+            values, indices[unsafe_offset=swap], indices[unsafe_offset=child],
+        ):
+            swap = child
+        if child + 1 < count and info_process_pid_less(
+            values, indices[unsafe_offset=swap], indices[unsafe_offset=child + 1],
+        ):
+            swap = child + 1
+        if swap == root:
+            return
+        var saved = indices[unsafe_offset=root]
+        indices[unsafe_offset=root] = indices[unsafe_offset=swap]
+        indices[unsafe_offset=swap] = saved
+        root = swap
+
+
+@export("prodex_info_process_pid_order_v1")
+def prodex_info_process_pid_order_v1(
+    abi_version: Int64,
+    values_address: UInt, count: Int64,
+    output_address: UInt, output_capacity: Int64,
+) abi("C") -> Int64:
+    if abi_version != INFO_PROCESS_PID_ORDER_ABI:
+        return INFO_RENDER_ABI
+    if (
+        count < 0 or count > INFO_PROCESS_PID_ORDER_MAX
+        or (count > 0 and (values_address == 0 or values_address % 8 != 0))
+        or output_address == 0 or output_address % 8 != 0
+        or output_capacity < count
+    ):
+        return INFO_RENDER_INVALID
+    var values = Pointer[mut=False, UInt64, ImmUntrackedOrigin](
+        unsafe_from_address=Int(values_address)
+    )
+    for index in range(count):
+        if values[unsafe_offset=index] > UInt64(0xFFFFFFFF):
+            return INFO_RENDER_INVALID
+    var output = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    for index in range(count):
+        output[unsafe_offset=index] = index
+    var start = count // 2
+    while start > 0:
+        start -= 1
+        info_process_pid_heap_down(values, output, start, count)
+    var end = count
+    while end > 1:
+        end -= 1
+        var saved = output[unsafe_offset=0]
+        output[unsafe_offset=0] = output[unsafe_offset=end]
+        output[unsafe_offset=end] = saved
+        info_process_pid_heap_down(values, output, 0, end)
+    return INFO_RENDER_OK

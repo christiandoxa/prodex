@@ -34,6 +34,45 @@ pub use token_usage::{
 };
 
 const ABI_VERSION: i64 = 1;
+const INFO_PROCESS_PID_MAX_COUNT: usize = 1_048_576;
+
+/// Sort original process row indices by u32 PID ascending, keeping stable
+/// source order when PID values compare equal. Compiled Mojo owns the key.
+pub fn info_process_pid_order(pids: &[u32]) -> Result<Vec<usize>, MojoError> {
+    if pids.len() > INFO_PROCESS_PID_MAX_COUNT {
+        return Err(MojoError::InvalidInput);
+    }
+    let words = pids.iter().map(|pid| u64::from(*pid)).collect::<Vec<_>>();
+    let mut selected = vec![-1_i64; pids.len()];
+    match unsafe {
+        prodex_info_process_pid_order_v1(
+            ABI_VERSION,
+            words.as_ptr() as usize as u64,
+            i64::try_from(words.len()).map_err(|_| MojoError::InvalidInput)?,
+            selected.as_mut_ptr() as usize as u64,
+            i64::try_from(selected.len()).map_err(|_| MojoError::InvalidInput)?,
+        )
+    } {
+        0 => {}
+        1 => return Err(MojoError::InvalidInput),
+        4 => return Err(MojoError::AbiMismatch),
+        _ => return Err(MojoError::InvalidOutput),
+    }
+    let mut seen = vec![false; pids.len()];
+    selected
+        .into_iter()
+        .map(|index| {
+            let index = usize::try_from(index).map_err(|_| MojoError::InvalidOutput)?;
+            let used = seen.get_mut(index).ok_or(MojoError::InvalidOutput)?;
+            if *used {
+                return Err(MojoError::InvalidOutput);
+            }
+            *used = true;
+            Ok(index)
+        })
+        .collect()
+}
+
 const RELATIVE_DURATION: i64 = 0;
 const QUOTA_DATA: i64 = 1;
 const RUNTIME_POLICY: i64 = 2;
@@ -84,6 +123,13 @@ struct InfoStringView {
 }
 
 unsafe extern "C" {
+    fn prodex_info_process_pid_order_v1(
+        abi_version: i64,
+        pids_address: u64,
+        count: i64,
+        output_address: u64,
+        output_capacity: i64,
+    ) -> i64;
     fn prodex_terminal_info_render_v1(
         abi_version: i64,
         operation: i64,
@@ -477,5 +523,60 @@ mod tests {
             .unwrap(),
             "2 event(s), logs=3: input=110, cached_input=25, output=44, reasoning=9; by profile: main:100 in/25 cached/40 out/8 reasoning"
         );
+    }
+}
+
+#[cfg(test)]
+mod compiled_info_process_pid_order_tests {
+    use super::*;
+
+    #[test]
+    fn compiled_info_process_pid_order_is_ascending_and_stable_for_ties() {
+        let inputs = [42, u32::MAX, 0, 17, 42, 1, 17];
+        assert_eq!(
+            info_process_pid_order(&inputs),
+            Ok(vec![2, 5, 3, 6, 0, 4, 1])
+        );
+        assert_eq!(info_process_pid_order(&[]), Ok(Vec::new()));
+        assert_eq!(info_process_pid_order(&[42, 42, 42]), Ok(vec![0, 1, 2]));
+        let descending = (0..1025_u32).rev().collect::<Vec<_>>();
+        let chosen = info_process_pid_order(&descending).unwrap();
+        assert_eq!(chosen.len(), 1025);
+        assert_eq!(chosen[0], 1024);
+        assert_eq!(chosen[1024], 0);
+    }
+
+    #[test]
+    fn compiled_info_process_pid_order_abi_rejects_malformed_late_value_without_output() {
+        let mut input = [0_u64; 2];
+        let mut output = [83_i64; 2];
+        let source = input.as_ptr() as usize as u64;
+        let dest = output.as_mut_ptr() as usize as u64;
+        for (abi, ptr, count, capacity, expected) in [
+            (2, source, 2, 2, 4),
+            (1, 0, 2, 2, 1),
+            (1, source, -1, 2, 1),
+            (1, source, 1_048_577, 2, 1),
+            (1, source, 2, 1, 1),
+        ] {
+            assert_eq!(
+                unsafe { prodex_info_process_pid_order_v1(abi, ptr, count, dest, capacity) },
+                expected,
+            );
+            assert_eq!(output, [83; 2]);
+        }
+        input[1] = u64::from(u32::MAX) + 1;
+        assert_eq!(
+            unsafe {
+                prodex_info_process_pid_order_v1(1, input.as_ptr() as usize as u64, 2, dest, 2)
+            },
+            1,
+        );
+        assert_eq!(output, [83; 2]);
+        assert_eq!(
+            unsafe { prodex_info_process_pid_order_v1(1, 0, 0, dest, 2) },
+            0,
+        );
+        assert_eq!(output, [83; 2]);
     }
 }
