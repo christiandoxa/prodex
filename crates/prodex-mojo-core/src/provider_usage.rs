@@ -61,6 +61,15 @@ pub struct ProviderUsagePlan {
 }
 
 unsafe extern "C" {
+    fn prodex_provider_usage_sse_scan_v1(
+        abi_version: i64,
+        input_address: u64,
+        input_length: i64,
+        output_address: u64,
+        output_capacity: i64,
+        measuring: i64,
+        written_address: u64,
+    ) -> i64;
     fn prodex_provider_usage_extract_v1(
         abi_version: i64,
         address: u64,
@@ -117,6 +126,78 @@ unsafe extern "C" {
         body_empty: i64,
         output_address: u64,
     ) -> i64;
+}
+
+/// A borrowed SSE data segment or end-of-frame marker.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ProviderUsageSseFrameRecord {
+    Data { start: usize, end: usize },
+    End,
+}
+
+/// The compiled provider-usage kernel owns SSE line classification,
+/// CRLF normalization, optional leading-space stripping and blank-event
+/// boundaries. This adapter validates spans; the caller keeps Serde parsing.
+pub fn sse_frame_scan(text: &str) -> Result<Vec<ProviderUsageSseFrameRecord>, MojoError> {
+    let length = signed(text.len())?;
+    let mut record_count = -1_i64;
+    let input_address = text.as_ptr() as usize as u64;
+    let written_address = (&mut record_count as *mut i64) as usize as u64;
+    let invoke = |output: u64, capacity: i64, measuring: i64| unsafe {
+        prodex_provider_usage_sse_scan_v1(
+            ABI_VERSION,
+            input_address,
+            length,
+            output,
+            capacity,
+            measuring,
+            written_address,
+        )
+    };
+    status(invoke(0, 0, 1))?;
+    let count = usize::try_from(record_count).map_err(|_| MojoError::InvalidOutput)?;
+    if count > text.len().saturating_mul(2).saturating_add(1) {
+        return Err(MojoError::InvalidOutput);
+    }
+    let total_words = count.checked_mul(3).ok_or(MojoError::Capacity)?;
+    let mut words = Vec::<i64>::new();
+    words
+        .try_reserve_exact(total_words)
+        .map_err(|_| MojoError::Capacity)?;
+    words.resize(total_words, -7);
+    record_count = -1;
+    status(invoke(
+        words.as_mut_ptr() as usize as u64,
+        signed(count)?,
+        0,
+    ))?;
+    if usize::try_from(record_count).map_err(|_| MojoError::InvalidOutput)? != count {
+        return Err(MojoError::InvalidOutput);
+    }
+    let mut result = Vec::with_capacity(count);
+    let mut pending = false;
+    for words in words.chunks_exact(3) {
+        match words {
+            [1, start, end] => {
+                let start = usize::try_from(*start).map_err(|_| MojoError::InvalidOutput)?;
+                let end = usize::try_from(*end).map_err(|_| MojoError::InvalidOutput)?;
+                if start > end || text.get(start..end).is_none() {
+                    return Err(MojoError::InvalidOutput);
+                }
+                result.push(ProviderUsageSseFrameRecord::Data { start, end });
+                pending = true;
+            }
+            [2, 0, 0] if pending => {
+                result.push(ProviderUsageSseFrameRecord::End);
+                pending = false;
+            }
+            _ => return Err(MojoError::InvalidOutput),
+        }
+    }
+    if pending {
+        return Err(MojoError::InvalidOutput);
+    }
+    Ok(result)
 }
 
 fn status(code: i64) -> Result<(), MojoError> {
@@ -345,6 +426,116 @@ pub fn merge_latest_present(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn compiled_provider_usage_sse_frames_preserve_crlf_blank_and_multiline_data() {
+        use ProviderUsageSseFrameRecord::{Data, End};
+        let text = "event:ignored\r\ndata: {\"usage\":{\r\ndata:  \"input_tokens\":12}}\r\n\r\ndata: [DONE]\n\ndata:\ndata: 雪 \r\r\n\n";
+        let records = sse_frame_scan(text).unwrap();
+        let frames = [
+            ["{\"usage\":{", " \"input_tokens\":12}}"].as_slice(),
+            ["[DONE]"].as_slice(),
+            ["", "雪 "].as_slice(),
+        ];
+        let mut found = Vec::<Vec<&str>>::new();
+        let mut current = Vec::new();
+        for record in records {
+            match record {
+                Data { start, end } => current.push(&text[start..end]),
+                End => found.push(std::mem::take(&mut current)),
+            }
+        }
+        assert!(current.is_empty());
+        assert_eq!(found, frames);
+        assert_eq!(sse_frame_scan(""), Ok(Vec::new()));
+        assert_eq!(sse_frame_scan("\n\n"), Ok(Vec::new()));
+        assert_eq!(
+            sse_frame_scan("data: unclosed"),
+            Ok(vec![Data { start: 6, end: 14 }, End]),
+        );
+        assert_eq!(
+            sse_frame_scan("data: \r\r"),
+            Ok(vec![Data { start: 6, end: 6 }, End]),
+        );
+    }
+
+    #[test]
+    fn compiled_provider_usage_sse_scan_rejects_invalid_abi_and_capacity_before_output_writes() {
+        let text = "data: first\n\ndata: second\n\n";
+        let mut buffer = [79_i64; 18];
+        let mut written = 83_i64;
+        let output_address = buffer.as_mut_ptr() as usize as u64;
+        let written_address = (&mut written as *mut i64) as usize as u64;
+        let input_address = text.as_ptr() as usize as u64;
+        for (version, input, input_len, output, capacity, measuring, written_ptr, expected) in [
+            (
+                2,
+                input_address,
+                text.len() as i64,
+                0,
+                0,
+                1,
+                written_address,
+                4,
+            ),
+            (1, 0, text.len() as i64, 0, 0, 1, written_address, 1),
+            (1, input_address, -1, 0, 0, 1, written_address, 1),
+            (
+                1,
+                input_address,
+                text.len() as i64,
+                0,
+                0,
+                2,
+                written_address,
+                1,
+            ),
+            (1, input_address, text.len() as i64, 0, 0, 1, 0, 1),
+            (
+                1,
+                input_address,
+                text.len() as i64,
+                output_address,
+                3,
+                0,
+                written_address,
+                3,
+            ),
+        ] {
+            assert_eq!(
+                unsafe {
+                    prodex_provider_usage_sse_scan_v1(
+                        version,
+                        input,
+                        input_len,
+                        output,
+                        capacity,
+                        measuring,
+                        written_ptr,
+                    )
+                },
+                expected,
+            );
+            assert_eq!(buffer, [79; 18]);
+            assert_eq!(written, 83);
+        }
+        let bad = [0xff_u8, 0xfe_u8];
+        assert_eq!(
+            unsafe {
+                prodex_provider_usage_sse_scan_v1(
+                    1,
+                    bad.as_ptr() as usize as u64,
+                    2,
+                    0,
+                    0,
+                    1,
+                    written_address,
+                )
+            },
+            1,
+        );
+        assert_eq!(written, 83);
+    }
 
     #[test]
     fn provider_usage_kernel_smoke() {

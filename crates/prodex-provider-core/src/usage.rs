@@ -93,38 +93,33 @@ fn extract_usage_from_value(value: &serde_json::Value) -> ProviderTokenUsage {
 }
 
 fn extract_usage_from_sse(body: &[u8]) -> ProviderTokenUsage {
+    use prodex_mojo_core::provider_usage::ProviderUsageSseFrameRecord;
     let Ok(text) = std::str::from_utf8(body) else {
         return ProviderTokenUsage::default();
     };
+    let records = prodex_mojo_core::provider_usage::sse_frame_scan(text)
+        .expect("compiled Mojo provider usage SSE framing returned invalid output");
     let mut data_lines = Vec::new();
     let mut merged = ProviderTokenUsage::default();
-    for line in text.lines() {
-        if line.is_empty() || line == "\r" {
-            merge_sse_usage_data(&mut data_lines, &mut merged);
-            continue;
-        }
-        if let Some(data) = line.strip_prefix("data:") {
-            data_lines.push(
-                data.strip_prefix(' ')
-                    .unwrap_or(data)
-                    .trim_end_matches('\r'),
-            );
+    for record in records {
+        match record {
+            ProviderUsageSseFrameRecord::Data { start, end } => {
+                data_lines.push(&text[start..end]);
+            }
+            ProviderUsageSseFrameRecord::End => {
+                let data = data_lines.join("\n");
+                data_lines.clear();
+                merge_sse_usage_data(&data, &mut merged);
+            }
         }
     }
-    merge_sse_usage_data(&mut data_lines, &mut merged);
     merged
 }
 
-fn merge_sse_usage_data(data_lines: &mut Vec<&str>, merged: &mut ProviderTokenUsage) {
-    if data_lines.is_empty() {
-        return;
-    }
-    let data = data_lines.join("\n");
-    data_lines.clear();
-    if data.trim() == "[DONE]" {
-        return;
-    }
-    let Ok(value) = serde_json::from_str::<serde_json::Value>(&data) else {
+// Serde stays responsible for validating provider JSON. Token usage field
+// precedence and latest-present event merging are both compiled Mojo-owned.
+fn merge_sse_usage_data(data: &str, merged: &mut ProviderTokenUsage) {
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(data) else {
         return;
     };
     let usage = extract_usage_from_value(&value);
@@ -366,6 +361,66 @@ mod tests {
             }
         );
         assert_eq!(extract_usage_tokens(b""), ProviderTokenUsage::default());
+    }
+
+    #[test]
+    fn compiled_provider_usage_sse_framing_preserves_multiline_crlf_and_last_frame() {
+        let body = concat!(
+            "event: response.completed\r\n",
+            ":comment\r\n",
+            "data: {\"response\":{\"usage\":{\r\n",
+            "data:  \"input_tokens\":17,\"output_tokens\":5}}}\r\n",
+            "\r\n",
+            "data: [DONE]\r\n\r\n",
+            "event: response.completed\n",
+            "data: {\"usage\":{\"output_tokens\":21,\"total_tokens\":34}}\r\r\n",
+            "\r\n",
+            "data: {\"usage\":{\"input_tokens\":18}}",
+        );
+        assert_eq!(
+            extract_usage_tokens(body.as_bytes()),
+            ProviderTokenUsage {
+                input_tokens: Some(18),
+                output_tokens: Some(21),
+                total_tokens: Some(34),
+            },
+        );
+        assert_eq!(
+            extract_usage_tokens(b"data: {\"usage\":{\"input_tokens\":19}}\r"),
+            ProviderTokenUsage {
+                input_tokens: Some(19),
+                ..ProviderTokenUsage::default()
+            },
+        );
+    }
+
+    #[test]
+    fn compiled_provider_usage_sse_framing_ignores_invalid_and_non_data_lines() {
+        let body = concat!(
+            "event: irrelevant\n",
+            "note: {\"usage\":{\"input_tokens\":999}}\n\n",
+            "data: \n\n",
+            "data:  \n\n",
+            "DATA: {\"usage\":{\"input_tokens\":999}}\n\n",
+            "data: {\"usage\":{\"input_tokens\":4}}\n\n",
+            "data: [DONE] \u{3000}\r\n\r\n",
+            "data: {malformed\n\n",
+        );
+        assert_eq!(
+            extract_usage_tokens(body.as_bytes()),
+            ProviderTokenUsage {
+                input_tokens: Some(4),
+                ..ProviderTokenUsage::default()
+            },
+        );
+        assert_eq!(
+            extract_usage_tokens(&[0xff, 0xfe]),
+            ProviderTokenUsage::default(),
+        );
+        assert_eq!(
+            extract_usage_tokens(b"\n\r\n"),
+            ProviderTokenUsage::default()
+        );
     }
 
     #[test]
