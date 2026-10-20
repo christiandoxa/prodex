@@ -94,3 +94,58 @@ fn event_without_supported_delta_remains_unsupported() {
     );
     assert_eq!(result.body, None);
 }
+
+#[test]
+fn compiled_compat_stream_envelope_accepts_exact_done_and_json_but_rejects_near_misses() {
+    let message = translate_chat_stream_event_to_responses(
+        ProviderId::Anthropic,
+        ProviderTransformInput::new(ProviderEndpoint::Responses, b"data: [DONE]\n\n".to_vec()),
+    );
+    assert_event(message, "response.completed", json!({}));
+    for unsupported in [
+        b"DATA: [DONE]\n\n".as_slice(),
+        b"data:[DONE]\n\n",
+        b"event: test\ndata: [DONE]\n\n",
+        b"data: [DONE]\r\n\r\n",
+        b"data: [DONE]\n",
+    ] {
+        let result = translate_chat_stream_event_to_responses(
+            ProviderId::Anthropic,
+            ProviderTransformInput::new(ProviderEndpoint::Responses, unsupported.to_vec()),
+        );
+        assert_eq!(
+            result.loss,
+            ProviderTransformLoss::UnsupportedUpstream {
+                reason: "chat completions SSE event must use data: <json> framing".into(),
+            },
+        );
+    }
+    let empty_json = translate_chat_stream_event_to_responses(
+        ProviderId::Anthropic,
+        ProviderTransformInput::new(ProviderEndpoint::Responses, b"data: \n\n".to_vec()),
+    );
+    assert!(matches!(
+        empty_json.loss,
+        ProviderTransformLoss::Rejected { .. }
+    ));
+}
+
+#[test]
+fn compiled_compat_stream_envelope_keeps_transport_utf8_replacement_and_borrowed_unicode() {
+    let mut bytes = b"data: {\"choices\":[{\"delta\":{\"content\":\"".to_vec();
+    bytes.push(255);
+    bytes.extend_from_slice(b"\"}}]}\n\n");
+    let result = translate_chat_stream_event_to_responses(
+        ProviderId::Anthropic,
+        ProviderTransformInput::new(ProviderEndpoint::Responses, bytes),
+    );
+    assert_event(
+        result,
+        "response.output_text.delta",
+        json!({"type":"response.output_text.delta", "delta":"�"}),
+    );
+    assert_eq!(
+        prodex_mojo_core::rich::openai_compat_sse_envelope("data: 雪\n\n"),
+        Ok(prodex_mojo_core::rich::OpenAiCompatSseEnvelope::Json("雪")),
+    );
+}

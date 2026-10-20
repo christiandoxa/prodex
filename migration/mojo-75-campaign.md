@@ -7843,3 +7843,14 @@ two direct ABI tests, direct Mojo test, no-fallback guard and official
 non-regression checks pass. The canonical share is now
 35.87396734330007% (131,185 Mojo / 234,498 Rust); target 75%
 remains outstanding.
+
+## Strict OpenAI chat compatibility SSE envelope compiled in Mojo (2026-10-20)
+
+The live compatibility translator now delegates exact single SSE
+framing and DONE-vs-JSON decisions to the compiled openai_compat
+owner through the production-linked rich ABI. Rust retains transport
+decoding and Serde parsing but no longer owns strict prefix/suffix or
+DONE semantic branches. All 533 provider tests, two core ABI tests,
+direct Mojo tests and source/share guards pass. The audited share is
+35.88328851577359% (131,307 Mojo / 234,621 Rust).
+Project target 75% remains unmet.

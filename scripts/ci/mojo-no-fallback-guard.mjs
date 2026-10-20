@@ -283,9 +283,23 @@ const ANTHROPIC_DATA_SSE_CORE = "crates/prodex-mojo-core/src/anthropic_stream_po
 const ANTHROPIC_DATA_SSE_MOJO = "mojo/prodex_core/anthropic_stream_policy.mojo";
 const ANTHROPIC_DATA_SSE_TEST = "mojo/tests/anthropic_stream_data_line_test.mojo";
 const ANTHROPIC_DATA_SSE_CALLER_TEST = "crates/prodex-provider-core/src/translators/anthropic/messages_tests.rs";
+const OPENAI_COMPAT_SSE_CALLER = "crates/prodex-provider-core/src/translators/openai_chat_compat_response/stream.rs";
+const OPENAI_COMPAT_SSE_CORE = "crates/prodex-mojo-core/src/rich/openai_compat.rs";
+const OPENAI_COMPAT_SSE_FACADE = "crates/prodex-mojo-core/src/rich.rs";
+const OPENAI_COMPAT_SSE_MOJO = "mojo/prodex_core/openai_compat.mojo";
+const OPENAI_COMPAT_SSE_EXPORT = "mojo/prodex_core/rich_abi.mojo";
+const OPENAI_COMPAT_SSE_DIRECT_TEST = "mojo/tests/openai_compat_sse_envelope_test.mojo";
+const OPENAI_COMPAT_SSE_CALLER_TEST = "crates/prodex-provider-core/src/translators/openai_chat_compat_response/stream/mojo_tests.rs";
 const PROMOTED_FILES = [
   PROVIDER_USAGE_SSE_MOJO,
   PROVIDER_USAGE_SSE_TEST,
+  OPENAI_COMPAT_SSE_CALLER,
+  OPENAI_COMPAT_SSE_CORE,
+  OPENAI_COMPAT_SSE_FACADE,
+  OPENAI_COMPAT_SSE_MOJO,
+  OPENAI_COMPAT_SSE_EXPORT,
+  OPENAI_COMPAT_SSE_DIRECT_TEST,
+  OPENAI_COMPAT_SSE_CALLER_TEST,
   ANTHROPIC_DATA_SSE_CALLER,
   ANTHROPIC_DATA_SSE_CORE,
   ANTHROPIC_DATA_SSE_MOJO,
@@ -4025,6 +4039,67 @@ export function findViolations(files) {
     if (filePath === "crates/prodex-app/src/runtime_launch/proxy_startup/gemini_sse_tests.rs") {
       return contents.includes("gemini_sse_compiled_completion_emits_each_pending_tool_once_in_index_order")
         ? [] : [filePath + ": real Gemini SSE completion regression missing"];
+    }
+    return [];
+  });
+  const openAiCompatSseEnvelopeMojoViolations = files.flatMap(([filePath, contents]) => {
+    if (filePath === OPENAI_COMPAT_SSE_CALLER &&
+        contents.includes("fn translate_chat_stream_event_to_responses(")) {
+      const production = contents.split("#[cfg(test)]", 1)[0];
+      const required = [
+        "openai_compat_sse_envelope(&event)",
+        "OpenAiCompatSseEnvelope::Unsupported",
+        "OpenAiCompatSseEnvelope::Done",
+        "OpenAiCompatSseEnvelope::Json(data)",
+      ];
+      const retired = [
+        '.strip_prefix("data: ")',
+        '.strip_suffix("\\n\\n")',
+        'if data == "[DONE]"',
+      ];
+      return required.every((marker) => production.includes(marker))
+        && retired.every((marker) => !production.includes(marker))
+        ? [] : [filePath + ": strict OpenAI compatibility SSE framing must remain compiled Mojo-owned"];
+    }
+    if (filePath === OPENAI_COMPAT_SSE_CORE) {
+      return [
+        "fn prodex_openai_compat_sse_envelope_v1(",
+        "pub fn openai_compat_sse_envelope(",
+        "compiled_chat_compat_sse_envelope_preserves_exact_framing_and_done",
+        "compiled_chat_compat_sse_envelope_abi_fails_without_mutating_output",
+      ].filter((marker) => !contents.includes(marker))
+        .map((marker) => filePath + ": typed OpenAI compatibility SSE envelope ABI missing " + marker);
+    }
+    if (filePath === OPENAI_COMPAT_SSE_FACADE &&
+        contents.includes("pub use openai_compat::{")) {
+      return contents.includes("openai_compat_sse_envelope,")
+        ? [] : [filePath + ": SSE envelope adapter must remain reachable"];
+    }
+    if (filePath === OPENAI_COMPAT_SSE_MOJO) {
+      return [
+        "def openai_compat_sse_envelope_v1(",
+        "OPENAI_COMPAT_SSE_ENVELOPE_DONE",
+        'rich_view_matches_literal["[DONE]"](payload, False)',
+      ].filter((marker) => !contents.includes(marker))
+        .map((marker) => filePath + ": compiled strict envelope policy missing " + marker);
+    }
+    if (filePath === OPENAI_COMPAT_SSE_EXPORT) {
+      return [
+        "from openai_compat import openai_compat_kernel_v1, openai_compat_sse_envelope_v1",
+        '@export("prodex_openai_compat_sse_envelope_v1")',
+      ].filter((marker) => !contents.includes(marker))
+        .map((marker) => filePath + ": strict SSE envelope must be exported from linked rich ABI: " + marker);
+    }
+    if (filePath === OPENAI_COMPAT_SSE_DIRECT_TEST) {
+      return contents.includes("prodex_openai_compat_sse_envelope_v1")
+        ? [] : [filePath + ": direct strict SSE envelope test missing"];
+    }
+    if (filePath === OPENAI_COMPAT_SSE_CALLER_TEST) {
+      return [
+        "compiled_compat_stream_envelope_accepts_exact_done_and_json_but_rejects_near_misses",
+        "compiled_compat_stream_envelope_keeps_transport_utf8_replacement_and_borrowed_unicode",
+      ].filter((marker) => !contents.includes(marker))
+        .map((marker) => filePath + ": strict SSE envelope caller coverage missing " + marker);
     }
     return [];
   });
@@ -11857,7 +11932,7 @@ export function findViolations(files) {
     }
     return [];
   });
-  return [...anthropicSseDataLineMojoViolations, ...responseHeaderSelectionMojoViolations, ...previousResponseJsonSearchMojoViolations, ...domainErrorMojoViolations, ...geminiValueCollectionMojoViolations, ...geminiSimpleResponseViolations, ...logPayloadProjectionViolations, ...nativeRecoveryOwnershipViolations, ...quotaRecoveryEligibilityViolations, ...runtimeBrokerReuseMojoViolations, ...geminiResponseMediaMojoViolations, ...cookieEvictionMojoViolations, ...websocketBudgetMojoViolations, ...affinityBindingMojoViolations, ...responsesCapacityRecoveryViolations, ...sseTapMojoOwnershipViolations, ...quotaWatchViolations, ...geminiCompactSnippetViolations, ...geminiCompactTextViolations, ...doctorSmartContextDecisionViolations, ...providerSseJsonFrameMojoViolations, ...geminiSseCompletionOwnershipViolations, ...anthropicNativeStreamDecisionViolations, ...anthropicAttemptCursorViolations, ...geminiUnsupportedToolRetryViolations, ...terminalGeometryViolations, ...previousResponseRecoveryTransitionViolations, ...chatCompatibleToolCallKindViolations, ...geminiQuotaBodyMojoViolations, ...geminiOAuthRotationMojoViolations, ...geminiBuiltinBatchMojoViolations, ...geminiToolArrayValidationMojoViolations, ...geminiOAuthModelMojoViolations, ...superExposeOriginMojoViolations, ...kiroAcpToolLedgerMojoViolations, ...quotaPoolSummarySectionsMojoViolations, ...deepseekRequestDiagnosticViolations, ...deepseekToolShapeIssueMojoViolations, ...deepseekReplayItemPolicyMojoViolations, ...chatNamespaceSplitMojoViolations, ...deepseekInputItemIssueMessageViolations, ...deepseekRequestIssueMessageViolations, ...smartContextTelemetrySampleViolations, ...compatibilityDiagnosticsMojoViolations, ...quotaHeaderProjectionViolations, ...smartContextCapsuleOrderViolations, ...markerViolations, ...deepseekCatalogPolicyViolations, ...featureOffViolations, ...liveLogRecordViolations, ...runtimePolicyPresetViolations, ...runtimeConfigScalarViolations, ...profileHealthCircuitViolations, ...logThroughputViolations, ...operationalDetailSpecViolations, ...transcriptPolicyViolations, ...logLoadPolicyViolations, ...routeReasonViolations, ...quotaSnapshotCompareMojoViolations, ...startupProbeBatchMojoViolations, ...runtimeStateQuotaViolations, ...runtimeStateRoutePolicyViolations, ...runtimeProxyRootViolations, ...runtimeRecoveryDeadlineViolations, ...brokerVersionGuardViolations, ...brokerContinuityViolations, ...brokerLogCacheViolations, ...codexConfigViolations, ...statePolicyViolations, ...quotaSelectionPolicyViolations, ...routeTagMirrorViolations, ...enumTagMirrorViolations, ...appSelectionPolicyMirrorViolations, ...runtimeStateBackgroundViolations, ...redactionViolations, ...rateLimitHeaderSelectionViolations, ...profileIdentityViolations, ...governanceInspectionViolations, ...governanceInspectionOrderingViolations, ...exactnessPlannerViolations,
+  return [...openAiCompatSseEnvelopeMojoViolations, ...anthropicSseDataLineMojoViolations, ...responseHeaderSelectionMojoViolations, ...previousResponseJsonSearchMojoViolations, ...domainErrorMojoViolations, ...geminiValueCollectionMojoViolations, ...geminiSimpleResponseViolations, ...logPayloadProjectionViolations, ...nativeRecoveryOwnershipViolations, ...quotaRecoveryEligibilityViolations, ...runtimeBrokerReuseMojoViolations, ...geminiResponseMediaMojoViolations, ...cookieEvictionMojoViolations, ...websocketBudgetMojoViolations, ...affinityBindingMojoViolations, ...responsesCapacityRecoveryViolations, ...sseTapMojoOwnershipViolations, ...quotaWatchViolations, ...geminiCompactSnippetViolations, ...geminiCompactTextViolations, ...doctorSmartContextDecisionViolations, ...providerSseJsonFrameMojoViolations, ...geminiSseCompletionOwnershipViolations, ...anthropicNativeStreamDecisionViolations, ...anthropicAttemptCursorViolations, ...geminiUnsupportedToolRetryViolations, ...terminalGeometryViolations, ...previousResponseRecoveryTransitionViolations, ...chatCompatibleToolCallKindViolations, ...geminiQuotaBodyMojoViolations, ...geminiOAuthRotationMojoViolations, ...geminiBuiltinBatchMojoViolations, ...geminiToolArrayValidationMojoViolations, ...geminiOAuthModelMojoViolations, ...superExposeOriginMojoViolations, ...kiroAcpToolLedgerMojoViolations, ...quotaPoolSummarySectionsMojoViolations, ...deepseekRequestDiagnosticViolations, ...deepseekToolShapeIssueMojoViolations, ...deepseekReplayItemPolicyMojoViolations, ...chatNamespaceSplitMojoViolations, ...deepseekInputItemIssueMessageViolations, ...deepseekRequestIssueMessageViolations, ...smartContextTelemetrySampleViolations, ...compatibilityDiagnosticsMojoViolations, ...quotaHeaderProjectionViolations, ...smartContextCapsuleOrderViolations, ...markerViolations, ...deepseekCatalogPolicyViolations, ...featureOffViolations, ...liveLogRecordViolations, ...runtimePolicyPresetViolations, ...runtimeConfigScalarViolations, ...profileHealthCircuitViolations, ...logThroughputViolations, ...operationalDetailSpecViolations, ...transcriptPolicyViolations, ...logLoadPolicyViolations, ...routeReasonViolations, ...quotaSnapshotCompareMojoViolations, ...startupProbeBatchMojoViolations, ...runtimeStateQuotaViolations, ...runtimeStateRoutePolicyViolations, ...runtimeProxyRootViolations, ...runtimeRecoveryDeadlineViolations, ...brokerVersionGuardViolations, ...brokerContinuityViolations, ...brokerLogCacheViolations, ...codexConfigViolations, ...statePolicyViolations, ...quotaSelectionPolicyViolations, ...routeTagMirrorViolations, ...enumTagMirrorViolations, ...appSelectionPolicyMirrorViolations, ...runtimeStateBackgroundViolations, ...redactionViolations, ...rateLimitHeaderSelectionViolations, ...profileIdentityViolations, ...governanceInspectionViolations, ...governanceInspectionOrderingViolations, ...exactnessPlannerViolations,
     ...infoRunwayViolations,
     ...geminiNormalizedViolations,
     ...quotaDurationViolations,
@@ -14949,6 +15024,18 @@ function selfTest() {
   assert.match(findViolations([["crates/prodex-provider-core/src/translators/anthropic/messages/stream.rs",
     '#[cfg(not(feature = "mojo"))] fn existing_path() { Some("text") => () }',
   ]])[0], /Mojo-owned operation cannot have a feature-off Rust path/u);
+  const strictEnvelopeFixture = [
+    "fn translate_chat_stream_event_to_responses(",
+    "openai_compat_sse_envelope(&event)",
+    "OpenAiCompatSseEnvelope::Unsupported",
+    "OpenAiCompatSseEnvelope::Done",
+    "OpenAiCompatSseEnvelope::Json(data)",
+  ].join("\\n");
+  assert.deepEqual(findViolations([[OPENAI_COMPAT_SSE_CALLER, strictEnvelopeFixture]]).filter(
+    (message) => message.includes("strict OpenAI compatibility SSE framing")), []);
+  assert.match(findViolations([[OPENAI_COMPAT_SSE_CALLER,
+    strictEnvelopeFixture + '\\n.strip_prefix("data: ")',
+  ]]).join("\\n"), /strict OpenAI compatibility SSE framing must remain compiled Mojo-owned/u);
   const providerUsageFile = "crates/prodex-provider-core/src/usage.rs";
   const providerUsageCalls = [
     "prodex_mojo_core::provider_usage::extract_json(",

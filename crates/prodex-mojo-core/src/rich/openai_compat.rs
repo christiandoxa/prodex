@@ -166,6 +166,12 @@ struct OpenAiCompatKernelFfiInput {
 const _: () = assert!(std::mem::size_of::<OpenAiCompatKernelFfiInput>() == 512);
 
 unsafe extern "C" {
+    fn prodex_openai_compat_sse_envelope_v1(
+        abi_version: i64,
+        input_address: u64,
+        input_length: i64,
+        output_address: u64,
+    ) -> i64;
     fn prodex_mojo_openai_compat_kernel_v1(
         abi_version: i64,
         input: u64,
@@ -554,6 +560,54 @@ pub fn openai_compat_rtk_arguments(
         .map_err(|_| OpenAiCompatError::Mojo(MojoError::InvalidOutput))
 }
 
+/// Compiled strict chat-completions SSE envelope decision.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OpenAiCompatSseEnvelope<'a> {
+    Unsupported,
+    Done,
+    Json(&'a str),
+}
+
+/// Apply only the borrowed span and event kind selected by compiled Mojo.
+/// UTF-8 transport acquisition and Serde JSON decoding stay with Rust.
+pub fn openai_compat_sse_envelope(event: &str) -> Result<OpenAiCompatSseEnvelope<'_>, MojoError> {
+    ensure_rich_abi()?;
+    let mut result = [-7_i64; 3];
+    match unsafe {
+        prodex_openai_compat_sse_envelope_v1(
+            RICH_ABI_VERSION,
+            mojo_pointer_address(event.as_ptr()),
+            i64::try_from(event.len()).map_err(|_| MojoError::InvalidInput)?,
+            mojo_mut_pointer_address(result.as_mut_ptr()),
+        )
+    } {
+        0 => {}
+        1 => return Err(MojoError::InvalidInput),
+        4 => return Err(MojoError::AbiMismatch),
+        _ => return Err(MojoError::InvalidOutput),
+    }
+    match result {
+        [0, 0, 0] => Ok(OpenAiCompatSseEnvelope::Unsupported),
+        [kind @ (1 | 2), start, end] if start == 6 && end >= start => {
+            let start = usize::try_from(start).map_err(|_| MojoError::InvalidOutput)?;
+            let end = usize::try_from(end).map_err(|_| MojoError::InvalidOutput)?;
+            let payload = event.get(start..end).ok_or(MojoError::InvalidOutput)?;
+            if end.checked_add(2) != Some(event.len()) {
+                return Err(MojoError::InvalidOutput);
+            }
+            if kind == 1 {
+                if payload != "[DONE]" {
+                    return Err(MojoError::InvalidOutput);
+                }
+                Ok(OpenAiCompatSseEnvelope::Done)
+            } else {
+                Ok(OpenAiCompatSseEnvelope::Json(payload))
+            }
+        }
+        _ => Err(MojoError::InvalidOutput),
+    }
+}
+
 /// Builds one normalized Responses SSE event in Mojo.
 pub fn openai_compat_stream_event(
     input: OpenAiCompatStreamInput<'_>,
@@ -564,4 +618,67 @@ pub fn openai_compat_stream_event(
     kernel.name = input.name;
     kernel.delta = input.delta;
     run_kernel(kernel)
+}
+
+#[cfg(test)]
+mod sse_envelope_tests {
+    use super::*;
+
+    #[test]
+    fn compiled_chat_compat_sse_envelope_preserves_exact_framing_and_done() {
+        use OpenAiCompatSseEnvelope::{Done, Json, Unsupported};
+        for (source, expected) in [
+            ("data: [DONE]\n\n", Done),
+            ("data: {}\n\n", Json("{}")),
+            ("data: \n\n", Json("")),
+            ("data:  \n\n", Json(" ")),
+            ("data: 雪\n\n", Json("雪")),
+            (
+                "data: {\"text\":\"a\\nb\"}\n\n",
+                Json("{\"text\":\"a\\nb\"}"),
+            ),
+            ("", Unsupported),
+            ("DATA: [DONE]\n\n", Unsupported),
+            ("data:[DONE]\n\n", Unsupported),
+            ("data: [DONE]\r\n\r\n", Unsupported),
+            ("data: [DONE]\n", Unsupported),
+            ("event: begin\ndata: [DONE]\n\n", Unsupported),
+            ("data: [DONE]\n\n\n", Json("[DONE]\n")),
+            ("data: [done]\n\n", Json("[done]")),
+        ] {
+            assert_eq!(
+                openai_compat_sse_envelope(source),
+                Ok(expected),
+                "{source:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn compiled_chat_compat_sse_envelope_abi_fails_without_mutating_output() {
+        let source = "data: [DONE]\n\n";
+        let mut output = [73_i64; 3];
+        let ptr = source.as_ptr() as usize as u64;
+        let dest = output.as_mut_ptr() as usize as u64;
+        for (abi, address, len, destination, status) in [
+            (5, ptr, source.len() as i64, dest, 4),
+            (6, 0, source.len() as i64, dest, 1),
+            (6, ptr, -1, dest, 1),
+            (6, ptr, source.len() as i64, 0, 1),
+        ] {
+            assert_eq!(
+                unsafe { prodex_openai_compat_sse_envelope_v1(abi, address, len, destination) },
+                status,
+            );
+            assert_eq!(output, [73; 3]);
+        }
+        let malformed = [255_u8, 254];
+        assert_eq!(
+            unsafe {
+                prodex_openai_compat_sse_envelope_v1(6, malformed.as_ptr() as usize as u64, 2, dest)
+            },
+            1,
+        );
+        assert_eq!(output, [73; 3]);
+    }
 }

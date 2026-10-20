@@ -40,33 +40,34 @@ pub(crate) fn translate_chat_stream_event_to_responses(
     }
 
     let event = String::from_utf8_lossy(&input.body);
-    let Some(data) = event
-        .strip_prefix("data: ")
-        .and_then(|body| body.strip_suffix("\n\n"))
-    else {
-        return ProviderTransformResult::unsupported(
-            provider,
-            input.endpoint,
-            ProviderWireFormat::OpenAiChatCompletions,
-            ProviderWireFormat::OpenAiResponses,
-            "chat completions SSE event must use data: <json> framing",
-        );
+    let data = match prodex_mojo_core::rich::openai_compat_sse_envelope(&event)
+        .expect("compiled Mojo strict chat-completions SSE envelope returned invalid output")
+    {
+        prodex_mojo_core::rich::OpenAiCompatSseEnvelope::Unsupported => {
+            return ProviderTransformResult::unsupported(
+                provider,
+                input.endpoint,
+                ProviderWireFormat::OpenAiChatCompletions,
+                ProviderWireFormat::OpenAiResponses,
+                "chat completions SSE event must use data: <json> framing",
+            );
+        }
+        prodex_mojo_core::rich::OpenAiCompatSseEnvelope::Done => {
+            return ProviderTransformResult::lossless(
+                provider,
+                input.endpoint,
+                ProviderWireFormat::OpenAiChatCompletions,
+                ProviderWireFormat::OpenAiResponses,
+                stream_event_body(
+                    prodex_mojo_core::rich::OpenAiCompatStreamKind::Done,
+                    None,
+                    None,
+                    None,
+                ),
+            );
+        }
+        prodex_mojo_core::rich::OpenAiCompatSseEnvelope::Json(data) => data,
     };
-
-    if data == "[DONE]" {
-        return ProviderTransformResult::lossless(
-            provider,
-            input.endpoint,
-            ProviderWireFormat::OpenAiChatCompletions,
-            ProviderWireFormat::OpenAiResponses,
-            stream_event_body(
-                prodex_mojo_core::rich::OpenAiCompatStreamKind::Done,
-                None,
-                None,
-                None,
-            ),
-        );
-    }
 
     let value: Value = match serde_json::from_str(data) {
         Ok(value) => value,

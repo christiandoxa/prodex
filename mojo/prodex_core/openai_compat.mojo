@@ -1082,3 +1082,58 @@ def openai_compat_kernel_v1(
     var status = openai_compat_write_operation(writer_ptr, input[].copy())
     written[] = writer.written
     return status
+
+
+# Strict, single-event chat-completions SSE envelope contract.
+# Only the exact data prefix and two-LF suffix are supported. The
+# compiled owner returns an original borrowed span or the DONE event.
+comptime OPENAI_COMPAT_SSE_ENVELOPE_UNSUPPORTED: Int64 = 0
+comptime OPENAI_COMPAT_SSE_ENVELOPE_DONE: Int64 = 1
+comptime OPENAI_COMPAT_SSE_ENVELOPE_JSON: Int64 = 2
+
+
+def openai_compat_sse_envelope_v1(
+    abi_version: Int64, input_address: UInt, input_length: Int64,
+    output_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != PRODEX_RICH_ABI_VERSION:
+        return OPENAI_COMPAT_STATUS_ABI
+    if (
+        input_length < 0 or (input_length > 0 and input_address == 0)
+        or output_address == 0 or output_address % 8 != 0
+    ):
+        return OPENAI_COMPAT_STATUS_INVALID
+    var input = ProdexRichStringView(input_address, UInt(input_length))
+    if not rich_view_valid(input, 0x7FFFFFFFFFFFFFFF):
+        return OPENAI_COMPAT_STATUS_INVALID
+    var outcome = OPENAI_COMPAT_SSE_ENVELOPE_UNSUPPORTED
+    var start = Int64(0)
+    var end = Int64(0)
+    if input_length >= 8:
+        var bytes = rich_view_ptr(input)
+        if (
+            bytes[unsafe_offset=0] == 100
+            and bytes[unsafe_offset=1] == 97
+            and bytes[unsafe_offset=2] == 116
+            and bytes[unsafe_offset=3] == 97
+            and bytes[unsafe_offset=4] == 58
+            and bytes[unsafe_offset=5] == 32
+            and bytes[unsafe_offset=input_length - 2] == 10
+            and bytes[unsafe_offset=input_length - 1] == 10
+        ):
+            start = 6
+            end = input_length - 2
+            var payload = ProdexRichStringView(
+                input_address + UInt(start), UInt(end - start)
+            )
+            if rich_view_matches_literal["[DONE]"](payload, False):
+                outcome = OPENAI_COMPAT_SSE_ENVELOPE_DONE
+            else:
+                outcome = OPENAI_COMPAT_SSE_ENVELOPE_JSON
+    var output = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    output[unsafe_offset=0] = outcome
+    output[unsafe_offset=1] = start
+    output[unsafe_offset=2] = end
+    return OPENAI_COMPAT_STATUS_OK
