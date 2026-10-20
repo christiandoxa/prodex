@@ -8081,3 +8081,15 @@ direct Mojo regression, no-fallback guard and canonical share
 checks pass. Official share rises from 36.02408461634476% to
 36.02996620393727% (132,836 Mojo / 235,846 Rust).
 The separate 75% project target remains open.
+
+## Launch child stdout/stderr complete-line boundaries moved to Mojo (2026-10-20)
+
+The production launch-config owner now returns all LF boundaries
+from an original byte cursor, replacing Rust's repeated position
+scanner for child stdout/stderr. Rust still owns bounded pipe
+reads and calls the original matcher/timing callback, with no
+Rust newline selection fallback. All 23 ping tests, two caller
+regressions, two core ABI tests, direct Mojo ABI test and guards
+pass. Share increases from 36.02996620393727% to
+36.030173372161755% (132,880 Mojo / 235,922 Rust).
+The separate 75% project target remains open.

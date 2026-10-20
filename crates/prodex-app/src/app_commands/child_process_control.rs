@@ -417,10 +417,10 @@ fn bounded_output_reader(
                 break;
             }
             bytes.extend_from_slice(&chunk[..read]);
-            while let Some(relative_end) =
-                bytes[line_start..].iter().position(|byte| *byte == b'\n')
-            {
-                let line_end = line_start + relative_end;
+            let completed =
+                prodex_mojo_core::launch_config::launch_process_line_ends(&bytes, line_start)
+                    .expect("compiled Mojo child process output line scan returned invalid output");
+            for line_end in completed {
                 if line_match.is_some_and(|matches| matches(&bytes[line_start..line_end])) {
                     first_match = Some(started.elapsed());
                     line_match = None;
@@ -508,4 +508,105 @@ pub(crate) fn terminate_child_gracefully(
     _private_process_group: bool,
 ) -> io::Result<()> {
     child.kill()
+}
+
+#[cfg(test)]
+mod compiled_child_output_line_tests {
+    use super::*;
+
+    struct FragmentedReader {
+        bytes: Vec<u8>,
+        offset: usize,
+        chunk_size: usize,
+    }
+
+    impl Read for FragmentedReader {
+        fn read(&mut self, buffer: &mut [u8]) -> io::Result<usize> {
+            if self.offset == self.bytes.len() {
+                return Ok(0);
+            }
+            let end = self
+                .offset
+                .saturating_add(self.chunk_size)
+                .min(self.bytes.len())
+                .min(self.offset + buffer.len());
+            let count = end - self.offset;
+            buffer[..count].copy_from_slice(&self.bytes[self.offset..end]);
+            self.offset = end;
+            Ok(count)
+        }
+    }
+
+    fn matches_ready(line: &[u8]) -> bool {
+        line == b"STATUS:ready"
+    }
+
+    fn fragmented_reader(bytes: &[u8], chunk_size: usize) -> FragmentedReader {
+        FragmentedReader {
+            bytes: bytes.to_vec(),
+            offset: 0,
+            chunk_size,
+        }
+    }
+
+    #[test]
+    fn compiled_child_output_lines_detect_first_match_across_fragmented_binary_reads() {
+        for step in [1, 2, 3, 8192] {
+            let bytes = b"noise\n\xff\xfe\nSTATUS:ready\nSTATUS:ready\nend";
+            let handle = bounded_output_reader(
+                fragmented_reader(bytes, step),
+                1024,
+                Instant::now(),
+                Some(matches_ready),
+            );
+            let (observed, first_match) = handle.join().unwrap().unwrap();
+            assert_eq!(observed, bytes);
+            assert!(
+                first_match.is_some(),
+                "first complete match lost for chunk size {step}"
+            );
+        }
+        let bytes = b"noise\nSTATUS:ready";
+        let handle = bounded_output_reader(
+            fragmented_reader(bytes, 2),
+            1024,
+            Instant::now(),
+            Some(matches_ready),
+        );
+        let (observed, first_match) = handle.join().unwrap().unwrap();
+        assert_eq!(observed, bytes);
+        assert!(
+            first_match.is_some(),
+            "EOF partial line should still be inspected"
+        );
+    }
+
+    #[test]
+    fn compiled_child_output_lines_preserve_bounded_reads_and_nonmatches() {
+        let bytes = b"plain\ntext\nSTATUS:ready\n";
+        let limited = bounded_output_reader(
+            fragmented_reader(bytes, 1),
+            8,
+            Instant::now(),
+            Some(matches_ready),
+        );
+        let (observed, first_match) = limited.join().unwrap().unwrap();
+        assert_eq!(observed, &bytes[..9]);
+        assert!(first_match.is_none());
+
+        let empty = bounded_output_reader(
+            fragmented_reader(b"", 5),
+            1024,
+            Instant::now(),
+            Some(matches_ready),
+        );
+        assert_eq!(empty.join().unwrap().unwrap().0, b"");
+        let no_match = bounded_output_reader(
+            fragmented_reader(b"ordinary\n\r\nbinary\xff", 7),
+            1024,
+            Instant::now(),
+            Some(matches_ready),
+        );
+        assert!(no_match.join().unwrap().unwrap().1.is_none());
+    }
 }

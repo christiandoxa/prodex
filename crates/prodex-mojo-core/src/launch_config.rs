@@ -1,5 +1,8 @@
 //! Config assignment matching over borrowed arguments and override keys.
 //! Values stay with the native caller; this operation returns only typed plans.
+#[path = "launch_config/child_output.rs"]
+mod child_output;
+pub use child_output::launch_process_line_ends;
 #[path = "launch_config/instructions.rs"]
 mod instructions;
 pub use instructions::{launch_instruction_path_order, launch_instruction_text_cut};

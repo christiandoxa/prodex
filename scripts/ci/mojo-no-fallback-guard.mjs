@@ -366,6 +366,11 @@ const FOLLOW_LOG_FRAMING_CALLER = "crates/prodex-app/src/app_commands/log_follow
 const FOLLOW_LOG_FRAMING_CORE = "crates/prodex-mojo-core/src/live_log_record.rs";
 const FOLLOW_LOG_FRAMING_MOJO = "mojo/prodex_core/live_log_record.mojo";
 const FOLLOW_LOG_FRAMING_DIRECT_TEST = "mojo/tests/live_log_follow_framing_test.mojo";
+const LAUNCH_PROCESS_OUTPUT_LINES_CALLER = "crates/prodex-app/src/app_commands/child_process_control.rs";
+const LAUNCH_PROCESS_OUTPUT_LINES_CORE = "crates/prodex-mojo-core/src/launch_config/child_output.rs";
+const LAUNCH_PROCESS_OUTPUT_LINES_FACADE = "crates/prodex-mojo-core/src/launch_config.rs";
+const LAUNCH_PROCESS_OUTPUT_LINES_MOJO = "mojo/prodex_core/launch_config.mojo";
+const LAUNCH_PROCESS_OUTPUT_LINES_DIRECT_TEST = "mojo/tests/launch_process_output_line_ends_test.mojo";
 const PROMOTED_FILES = [
   PROVIDER_USAGE_SSE_MOJO,
   PROVIDER_USAGE_SSE_TEST,
@@ -393,6 +398,10 @@ const PROMOTED_FILES = [
   RESPONSE_HEADER_SELECTION_TEST,
   RESPONSE_HEADER_SELECTION_CALLER_TEST,
   DEEPSEEK_BUFFERED_TEXT_DIRECT_TEST,
+  LAUNCH_PROCESS_OUTPUT_LINES_CALLER,
+  LAUNCH_PROCESS_OUTPUT_LINES_CORE,
+  LAUNCH_PROCESS_OUTPUT_LINES_FACADE,
+  LAUNCH_PROCESS_OUTPUT_LINES_DIRECT_TEST,
   FOLLOW_LOG_FRAMING_CALLER,
   FOLLOW_LOG_FRAMING_CORE,
   FOLLOW_LOG_FRAMING_DIRECT_TEST,
@@ -4883,6 +4892,57 @@ export function findViolations(files) {
     if (filePath === STARTUP_PROBE_BATCH_CALLER_TEST) {
       return contents.includes("compiled_startup_probe_batch_preserves_over_65536_profile_order_and_remaining_slots")
         ? [] : [filePath + ": startup batch requires cross-batch caller regression"];
+    }
+    return [];
+  });
+  const launchProcessOutputLineMojoViolations = files.flatMap(([filePath, contents]) => {
+    if (filePath === LAUNCH_PROCESS_OUTPUT_LINES_CALLER &&
+        contents.includes("fn bounded_output_reader(")) {
+      const start = contents.indexOf("fn bounded_output_reader(");
+      const end = contents.indexOf("\nfn join_bounded_output_reader(", start);
+      const production = contents.slice(start, end < 0 ? undefined : end);
+      const required = [
+        "launch_process_line_ends(&bytes, line_start)",
+        "for line_end in completed",
+        "first_match = Some(started.elapsed())",
+        "compiled_child_output_lines_detect_first_match_across_fragmented_binary_reads",
+        "compiled_child_output_lines_preserve_bounded_reads_and_nonmatches",
+      ];
+      const retired = [
+        ".iter().position(|byte| *byte == b'\\n')",
+        "let line_end = line_start + relative_end",
+      ];
+      return required.every((marker) => contents.includes(marker))
+        && retired.every((marker) => !production.includes(marker))
+        ? [] : [filePath + ": child stdout/stderr LF framing must stay Mojo-owned"];
+    }
+    if (filePath === LAUNCH_PROCESS_OUTPUT_LINES_CORE) {
+      return [
+        "fn prodex_launch_process_line_ends_v1(",
+        "pub fn launch_process_line_ends(",
+        "compiled_launch_process_line_ends_handles_binary_and_partial_reads",
+        "compiled_launch_process_line_ends_abi_rejects_bad_capacity_without_writes",
+      ].filter((marker) => !contents.includes(marker))
+        .map((marker) => filePath + ": compiled launch child output ABI/test missing " + marker);
+    }
+    if (filePath === LAUNCH_PROCESS_OUTPUT_LINES_FACADE &&
+        contents.includes("mod child_output;")) {
+      return contents.includes("pub use child_output::launch_process_line_ends")
+        ? [] : [filePath + ": compiled child output scanner must remain reachable"];
+    }
+    if (filePath === LAUNCH_PROCESS_OUTPUT_LINES_MOJO &&
+        contents.includes("LAUNCH_PROCESS_LINES_ABI")) {
+      return [
+        '@export("prodex_launch_process_line_ends_v1")',
+        "LAUNCH_PROCESS_LINES_MAX_BYTES",
+        "if measuring == 0 and output_capacity < count:",
+        "output[unsafe_offset=position] = index",
+      ].filter((marker) => !contents.includes(marker))
+        .map((marker) => filePath + ": compiled child process line owner missing " + marker);
+    }
+    if (filePath === LAUNCH_PROCESS_OUTPUT_LINES_DIRECT_TEST) {
+      return contents.includes("prodex_launch_process_line_ends_v1")
+        ? [] : [filePath + ": direct child output line Mojo ABI test missing"];
     }
     return [];
   });
@@ -13014,7 +13074,7 @@ export function findViolations(files) {
     }
     return [];
   });
-  return [...followLogFramingMojoViolations, ...threadDatabaseOrderMojoViolations, ...repoNearestPathMojoViolations, ...copilotInstructionMojoViolations, ...quotaStateProfileMojoViolations, ...quotaRuntimeLogOrderMojoViolations, ...repoArtifactEvictionMojoViolations, ...repoArtifactOrderMojoViolations, ...recentLogPathsMojoViolations, ...logFollowSelectionMojoViolations, ...smartContextStoreRetentionMojoViolations, ...runtimeLogTailMojoViolations, ...deepseekBufferedTextItemMojoViolations, ...runtimeSseResponseIdMojoViolations, ...upstreamPayloadBoundsMojoViolations, ...runtimeSseEventStateMojoViolations, ...geminiPatchSourceMojoViolations, ...openAiCompatSseEnvelopeMojoViolations, ...anthropicSseDataLineMojoViolations, ...responseHeaderSelectionMojoViolations, ...previousResponseTextSpanMojoViolations, ...previousResponseJsonSearchMojoViolations, ...domainErrorMojoViolations, ...geminiValueCollectionMojoViolations, ...geminiSimpleResponseViolations, ...logPayloadProjectionViolations, ...nativeRecoveryOwnershipViolations, ...quotaRecoveryEligibilityViolations, ...runtimeBrokerReuseMojoViolations, ...geminiResponseMediaMojoViolations, ...cookieEvictionMojoViolations, ...websocketBudgetMojoViolations, ...affinityBindingMojoViolations, ...responsesCapacityRecoveryViolations, ...sseTapMojoOwnershipViolations, ...quotaWatchViolations, ...geminiCompactSnippetViolations, ...geminiCompactTextViolations, ...doctorSmartContextDecisionViolations, ...providerSseJsonFrameMojoViolations, ...geminiSseCompletionOwnershipViolations, ...anthropicNativeStreamDecisionViolations, ...anthropicAttemptCursorViolations, ...geminiUnsupportedToolRetryViolations, ...terminalGeometryViolations, ...previousResponseRecoveryTransitionViolations, ...chatCompatibleToolCallKindViolations, ...geminiQuotaBodyMojoViolations, ...geminiOAuthRotationMojoViolations, ...geminiBuiltinBatchMojoViolations, ...geminiToolArrayValidationMojoViolations, ...geminiOAuthModelMojoViolations, ...superExposeOriginMojoViolations, ...kiroAcpToolLedgerMojoViolations, ...quotaPoolSummarySectionsMojoViolations, ...deepseekRequestDiagnosticViolations, ...deepseekToolShapeIssueMojoViolations, ...deepseekReplayItemPolicyMojoViolations, ...chatNamespaceSplitMojoViolations, ...deepseekInputItemIssueMessageViolations, ...deepseekRequestIssueMessageViolations, ...smartContextTelemetrySampleViolations, ...compatibilityDiagnosticsMojoViolations, ...quotaHeaderProjectionViolations, ...smartContextCapsuleOrderViolations, ...markerViolations, ...deepseekCatalogPolicyViolations, ...featureOffViolations, ...liveLogRecordViolations, ...runtimePolicyPresetViolations, ...runtimeConfigScalarViolations, ...profileHealthCircuitViolations, ...logThroughputViolations, ...operationalDetailSpecViolations, ...transcriptPolicyViolations, ...logLoadPolicyViolations, ...routeReasonViolations, ...quotaSnapshotCompareMojoViolations, ...startupProbeBatchMojoViolations, ...runtimeStateQuotaViolations, ...runtimeStateRoutePolicyViolations, ...runtimeProxyRootViolations, ...runtimeRecoveryDeadlineViolations, ...brokerVersionGuardViolations, ...brokerContinuityViolations, ...brokerLogCacheViolations, ...codexConfigViolations, ...statePolicyViolations, ...quotaSelectionPolicyViolations, ...routeTagMirrorViolations, ...enumTagMirrorViolations, ...appSelectionPolicyMirrorViolations, ...runtimeStateBackgroundViolations, ...redactionViolations, ...rateLimitHeaderSelectionViolations, ...profileIdentityViolations, ...governanceInspectionViolations, ...governanceInspectionOrderingViolations, ...exactnessPlannerViolations,
+  return [...launchProcessOutputLineMojoViolations, ...followLogFramingMojoViolations, ...threadDatabaseOrderMojoViolations, ...repoNearestPathMojoViolations, ...copilotInstructionMojoViolations, ...quotaStateProfileMojoViolations, ...quotaRuntimeLogOrderMojoViolations, ...repoArtifactEvictionMojoViolations, ...repoArtifactOrderMojoViolations, ...recentLogPathsMojoViolations, ...logFollowSelectionMojoViolations, ...smartContextStoreRetentionMojoViolations, ...runtimeLogTailMojoViolations, ...deepseekBufferedTextItemMojoViolations, ...runtimeSseResponseIdMojoViolations, ...upstreamPayloadBoundsMojoViolations, ...runtimeSseEventStateMojoViolations, ...geminiPatchSourceMojoViolations, ...openAiCompatSseEnvelopeMojoViolations, ...anthropicSseDataLineMojoViolations, ...responseHeaderSelectionMojoViolations, ...previousResponseTextSpanMojoViolations, ...previousResponseJsonSearchMojoViolations, ...domainErrorMojoViolations, ...geminiValueCollectionMojoViolations, ...geminiSimpleResponseViolations, ...logPayloadProjectionViolations, ...nativeRecoveryOwnershipViolations, ...quotaRecoveryEligibilityViolations, ...runtimeBrokerReuseMojoViolations, ...geminiResponseMediaMojoViolations, ...cookieEvictionMojoViolations, ...websocketBudgetMojoViolations, ...affinityBindingMojoViolations, ...responsesCapacityRecoveryViolations, ...sseTapMojoOwnershipViolations, ...quotaWatchViolations, ...geminiCompactSnippetViolations, ...geminiCompactTextViolations, ...doctorSmartContextDecisionViolations, ...providerSseJsonFrameMojoViolations, ...geminiSseCompletionOwnershipViolations, ...anthropicNativeStreamDecisionViolations, ...anthropicAttemptCursorViolations, ...geminiUnsupportedToolRetryViolations, ...terminalGeometryViolations, ...previousResponseRecoveryTransitionViolations, ...chatCompatibleToolCallKindViolations, ...geminiQuotaBodyMojoViolations, ...geminiOAuthRotationMojoViolations, ...geminiBuiltinBatchMojoViolations, ...geminiToolArrayValidationMojoViolations, ...geminiOAuthModelMojoViolations, ...superExposeOriginMojoViolations, ...kiroAcpToolLedgerMojoViolations, ...quotaPoolSummarySectionsMojoViolations, ...deepseekRequestDiagnosticViolations, ...deepseekToolShapeIssueMojoViolations, ...deepseekReplayItemPolicyMojoViolations, ...chatNamespaceSplitMojoViolations, ...deepseekInputItemIssueMessageViolations, ...deepseekRequestIssueMessageViolations, ...smartContextTelemetrySampleViolations, ...compatibilityDiagnosticsMojoViolations, ...quotaHeaderProjectionViolations, ...smartContextCapsuleOrderViolations, ...markerViolations, ...deepseekCatalogPolicyViolations, ...featureOffViolations, ...liveLogRecordViolations, ...runtimePolicyPresetViolations, ...runtimeConfigScalarViolations, ...profileHealthCircuitViolations, ...logThroughputViolations, ...operationalDetailSpecViolations, ...transcriptPolicyViolations, ...logLoadPolicyViolations, ...routeReasonViolations, ...quotaSnapshotCompareMojoViolations, ...startupProbeBatchMojoViolations, ...runtimeStateQuotaViolations, ...runtimeStateRoutePolicyViolations, ...runtimeProxyRootViolations, ...runtimeRecoveryDeadlineViolations, ...brokerVersionGuardViolations, ...brokerContinuityViolations, ...brokerLogCacheViolations, ...codexConfigViolations, ...statePolicyViolations, ...quotaSelectionPolicyViolations, ...routeTagMirrorViolations, ...enumTagMirrorViolations, ...appSelectionPolicyMirrorViolations, ...runtimeStateBackgroundViolations, ...redactionViolations, ...rateLimitHeaderSelectionViolations, ...profileIdentityViolations, ...governanceInspectionViolations, ...governanceInspectionOrderingViolations, ...exactnessPlannerViolations,
     ...infoRunwayViolations,
     ...geminiNormalizedViolations,
     ...quotaDurationViolations,
@@ -14183,6 +14243,19 @@ function selfTest() {
   assert.match(findViolations([[RESPONSE_FORWARDING_FILE,
     responseHeaderFixture + "\nheaders.into_iter().any(|(name, value)| ...)",
   ]]).join("\n"), /first-header, binary MIME and SSE flush selection must stay Mojo-owned/u);
+  const launchProcessOutputFixture = [
+    "fn bounded_output_reader(",
+    "launch_process_line_ends(&bytes, line_start)",
+    "for line_end in completed",
+    "first_match = Some(started.elapsed())",
+    "compiled_child_output_lines_detect_first_match_across_fragmented_binary_reads",
+    "compiled_child_output_lines_preserve_bounded_reads_and_nonmatches",
+  ].join("\n");
+  assert.deepEqual(findViolations([[LAUNCH_PROCESS_OUTPUT_LINES_CALLER, launchProcessOutputFixture]]).filter(
+    (message) => message.includes("child stdout/stderr LF framing")), []);
+  assert.match(findViolations([[LAUNCH_PROCESS_OUTPUT_LINES_CALLER,
+    launchProcessOutputFixture + "\n.iter().position(|byte| *byte == b'\\n')",
+  ]]).join("\n"), /child stdout\/stderr LF framing must stay Mojo-owned/u);
   const followFramingFixture = [
     "fn drain_followed_log_lines(",
     "follow_last_complete_line_end(",
