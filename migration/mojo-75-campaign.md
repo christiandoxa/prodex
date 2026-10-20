@@ -7738,3 +7738,7 @@ The canonical share moves from 35.82742660744385% to
 35.826879696153064% (130,551 Mojo / 233,843 Rust) owing to the
 minimal typed adapter. The audited non-regression check passes and
 the 75% project target remains unmet.
+
+## Quota window duration normalized by compiled Mojo (2026-10-20)
+
+The seconds-before-minutes precedence and checked conversion now run in the quota Mojo owner. The old Rust duration fallback was deleted. All 100 quota tests, direct ABI tests, and no-fallback checks pass. Official share is 35.828561551188166%; target 75% remains open.
