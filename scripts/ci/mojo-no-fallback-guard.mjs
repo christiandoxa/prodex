@@ -399,6 +399,10 @@ const CATALOG_INSERTION_MOJO = "mojo/prodex_core/rich_catalog.mojo";
 const CATALOG_INSERTION_DIRECT_TEST = "mojo/tests/catalog_main_choice_insertion_test.mojo";
 const QUOTA_CURRENT_NAME_ROTATION_CALLER = "crates/prodex-runtime-quota/src/selection/scoring.rs";
 const QUOTA_CURRENT_NAME_ROTATION_TESTS = "crates/prodex-runtime-quota/tests/src/selection.rs";
+const CORE_NEWEST_LOG_CALLER = "crates/prodex-core/src/lib.rs";
+const CORE_NEWEST_LOG_MANIFEST = "crates/prodex-core/Cargo.toml";
+const CORE_NEWEST_LOG_TEST = "crates/prodex-core/tests/src/lib.rs";
+const CORE_NEWEST_LOG_HOUSEKEEPING_TEST = "crates/prodex-housekeeping/tests/src/lib.rs";
 const PROMOTED_FILES = [
   PROVIDER_USAGE_SSE_MOJO,
   PROVIDER_USAGE_SSE_TEST,
@@ -475,6 +479,10 @@ const PROMOTED_FILES = [
   REPO_ARTIFACT_ORDER_CORE,
   REPO_ARTIFACT_ORDER_MOJO,
   REPO_ARTIFACT_ORDER_DIRECT_TEST,
+  CORE_NEWEST_LOG_CALLER,
+  CORE_NEWEST_LOG_MANIFEST,
+  CORE_NEWEST_LOG_TEST,
+  CORE_NEWEST_LOG_HOUSEKEEPING_TEST,
   RECENT_LOG_PATHS_SESSION_CALLER,
   RECENT_LOG_PATHS_RUNTIME_CALLER,
   RECENT_LOG_PATHS_CORE,
@@ -5752,6 +5760,47 @@ export function findViolations(files) {
     }
     return [];
   });
+  const coreNewestLogPathMojoViolations = files.flatMap(([filePath, contents]) => {
+    if (filePath === CORE_NEWEST_LOG_CALLER &&
+        contents.includes("pub fn select_newest_modified_path(")) {
+      const start = contents.indexOf("pub fn select_newest_modified_path(");
+      const end = contents.indexOf("\npub fn login_temp_dir_name_is_owned(", start);
+      const body = contents.slice(start, end < 0 ? undefined : end);
+      const required = [
+        "RecentLogPathOrderMode::NewestModifiedPath",
+        "const MOJO_LOG_SORT_BATCH: usize = 65_536",
+        "recent_log_path_order(mode, &facts, 1)",
+        "recent_log_path_order(mode, &finalists, 1)",
+        "paths.into_iter().nth(original_index)",
+      ];
+      const retired = [
+        ".max_by(",
+        ".then_with(|| left_path.cmp(right_path))",
+      ];
+      return required.every((marker) => body.includes(marker))
+        && retired.every((marker) => !body.includes(marker))
+        ? [] : [filePath + ": newest runtime-log timestamp/path ties must remain Mojo-owned, including large batches"];
+    }
+    if (filePath === CORE_NEWEST_LOG_MANIFEST) {
+      return contents.includes('"mojo-routing", "mojo-rich"')
+        ? [] : [filePath + ": newest runtime log caller needs compiled logging features enabled"];
+    }
+    if (filePath === CORE_NEWEST_LOG_TEST) {
+      return [
+        "compiled_newest_runtime_log_path_uses_unsigned_timestamp_and_largest_path_with_last_ties",
+        "compiled_newest_runtime_log_path_reduces_over_65536_candidates_without_rust_comparator",
+      ].filter((marker) => !contents.includes(marker))
+        .map((marker) => filePath + ": compiled newest runtime log selection regression missing " + marker);
+    }
+    if (filePath === CORE_NEWEST_LOG_HOUSEKEEPING_TEST) {
+      return [
+        "compiled_newest_runtime_log_selection_uses_timestamp_then_largest_eligible_filename",
+        "compiled_newest_runtime_log_selection_handles_empty_directory",
+      ].filter((marker) => !contents.includes(marker))
+        .map((marker) => filePath + ": newest runtime log filesystem regression missing " + marker);
+    }
+    return [];
+  });
   const recentLogPathsMojoViolations = files.flatMap(([filePath, contents]) => {
     if (filePath === RECENT_LOG_PATHS_SESSION_CALLER &&
         contents.includes("fn recent_session_log_paths(")) {
@@ -5796,6 +5845,8 @@ export function findViolations(files) {
         "pub fn recent_log_path_order(",
         "compiled_recent_log_paths_session_millis_preserves_ascending_path_ties",
         "compiled_recent_log_paths_runtime_reverses_path_ties_and_signed_times",
+        "NewestModifiedPath = 2",
+        "compiled_recent_log_paths_select_newest_unsigned_u128_then_largest_path_and_last_exact_tie",
         "compiled_recent_log_paths_abi_rejects_late_malformed_row_without_writes",
       ].filter((marker) => !contents.includes(marker))
         .map((marker) => filePath + ": typed recent log paths ABI/test missing " + marker);
@@ -5811,6 +5862,8 @@ export function findViolations(files) {
         '@export("prodex_mojo_recent_log_paths_v1")',
         "RECENT_LOG_PATH_ORDER_SESSION",
         "RECENT_LOG_PATH_ORDER_RUNTIME",
+        "RECENT_LOG_PATH_ORDER_NEWEST",
+        "mode > RECENT_LOG_PATH_ORDER_NEWEST",
         "def recent_log_path_compare(",
         "def recent_log_path_heap_down(",
       ].filter((marker) => !contents.includes(marker))
@@ -13473,7 +13526,7 @@ export function findViolations(files) {
     }
     return [];
   });
-  return [...quotaCurrentNameRotationMojoViolations, ...catalogInsertionMojoViolations, ...repoDuplicateBatchMojoViolations, ...previousResponseCurrentNameMojoViolations, ...infoProcessPidMojoViolations, ...pingProfileOrderMojoViolations, ...repoMapPathSetMojoViolations, ...launchProcessOutputLineMojoViolations, ...followLogFramingMojoViolations, ...threadDatabaseOrderMojoViolations, ...repoNearestPathMojoViolations, ...copilotInstructionMojoViolations, ...quotaStateProfileMojoViolations, ...quotaRuntimeLogOrderMojoViolations, ...repoArtifactEvictionMojoViolations, ...repoArtifactOrderMojoViolations, ...recentLogPathsMojoViolations, ...logFollowSelectionMojoViolations, ...smartContextStoreRetentionMojoViolations, ...runtimeLogTailMojoViolations, ...deepseekBufferedTextItemMojoViolations, ...runtimeSseResponseIdMojoViolations, ...upstreamPayloadBoundsMojoViolations, ...runtimeSseEventStateMojoViolations, ...geminiPatchSourceMojoViolations, ...openAiCompatSseEnvelopeMojoViolations, ...anthropicSseDataLineMojoViolations, ...responseHeaderSelectionMojoViolations, ...previousResponseTextSpanMojoViolations, ...previousResponseJsonSearchMojoViolations, ...domainErrorMojoViolations, ...geminiValueCollectionMojoViolations, ...geminiSimpleResponseViolations, ...logPayloadProjectionViolations, ...nativeRecoveryOwnershipViolations, ...quotaRecoveryEligibilityViolations, ...runtimeBrokerReuseMojoViolations, ...geminiResponseMediaMojoViolations, ...cookieEvictionMojoViolations, ...websocketBudgetMojoViolations, ...affinityBindingMojoViolations, ...responsesCapacityRecoveryViolations, ...sseTapMojoOwnershipViolations, ...quotaWatchViolations, ...geminiCompactSnippetViolations, ...geminiCompactTextViolations, ...doctorSmartContextDecisionViolations, ...providerSseJsonFrameMojoViolations, ...geminiSseCompletionOwnershipViolations, ...anthropicNativeStreamDecisionViolations, ...anthropicAttemptCursorViolations, ...geminiUnsupportedToolRetryViolations, ...terminalGeometryViolations, ...previousResponseRecoveryTransitionViolations, ...chatCompatibleToolCallKindViolations, ...geminiQuotaBodyMojoViolations, ...geminiOAuthRotationMojoViolations, ...geminiBuiltinBatchMojoViolations, ...geminiToolArrayValidationMojoViolations, ...geminiOAuthModelMojoViolations, ...superExposeOriginMojoViolations, ...kiroAcpToolLedgerMojoViolations, ...quotaPoolSummarySectionsMojoViolations, ...deepseekRequestDiagnosticViolations, ...deepseekToolShapeIssueMojoViolations, ...deepseekReplayItemPolicyMojoViolations, ...chatNamespaceSplitMojoViolations, ...deepseekInputItemIssueMessageViolations, ...deepseekRequestIssueMessageViolations, ...smartContextTelemetrySampleViolations, ...compatibilityDiagnosticsMojoViolations, ...quotaHeaderProjectionViolations, ...smartContextCapsuleOrderViolations, ...markerViolations, ...deepseekCatalogPolicyViolations, ...featureOffViolations, ...liveLogRecordViolations, ...runtimePolicyPresetViolations, ...runtimeConfigScalarViolations, ...profileHealthCircuitViolations, ...logThroughputViolations, ...operationalDetailSpecViolations, ...transcriptPolicyViolations, ...logLoadPolicyViolations, ...routeReasonViolations, ...quotaSnapshotCompareMojoViolations, ...startupProbeBatchMojoViolations, ...runtimeStateQuotaViolations, ...runtimeStateRoutePolicyViolations, ...runtimeProxyRootViolations, ...runtimeRecoveryDeadlineViolations, ...brokerVersionGuardViolations, ...brokerContinuityViolations, ...brokerLogCacheViolations, ...codexConfigViolations, ...statePolicyViolations, ...quotaSelectionPolicyViolations, ...routeTagMirrorViolations, ...enumTagMirrorViolations, ...appSelectionPolicyMirrorViolations, ...runtimeStateBackgroundViolations, ...redactionViolations, ...rateLimitHeaderSelectionViolations, ...profileIdentityViolations, ...governanceInspectionViolations, ...governanceInspectionOrderingViolations, ...exactnessPlannerViolations,
+  return [...coreNewestLogPathMojoViolations, ...quotaCurrentNameRotationMojoViolations, ...catalogInsertionMojoViolations, ...repoDuplicateBatchMojoViolations, ...previousResponseCurrentNameMojoViolations, ...infoProcessPidMojoViolations, ...pingProfileOrderMojoViolations, ...repoMapPathSetMojoViolations, ...launchProcessOutputLineMojoViolations, ...followLogFramingMojoViolations, ...threadDatabaseOrderMojoViolations, ...repoNearestPathMojoViolations, ...copilotInstructionMojoViolations, ...quotaStateProfileMojoViolations, ...quotaRuntimeLogOrderMojoViolations, ...repoArtifactEvictionMojoViolations, ...repoArtifactOrderMojoViolations, ...recentLogPathsMojoViolations, ...logFollowSelectionMojoViolations, ...smartContextStoreRetentionMojoViolations, ...runtimeLogTailMojoViolations, ...deepseekBufferedTextItemMojoViolations, ...runtimeSseResponseIdMojoViolations, ...upstreamPayloadBoundsMojoViolations, ...runtimeSseEventStateMojoViolations, ...geminiPatchSourceMojoViolations, ...openAiCompatSseEnvelopeMojoViolations, ...anthropicSseDataLineMojoViolations, ...responseHeaderSelectionMojoViolations, ...previousResponseTextSpanMojoViolations, ...previousResponseJsonSearchMojoViolations, ...domainErrorMojoViolations, ...geminiValueCollectionMojoViolations, ...geminiSimpleResponseViolations, ...logPayloadProjectionViolations, ...nativeRecoveryOwnershipViolations, ...quotaRecoveryEligibilityViolations, ...runtimeBrokerReuseMojoViolations, ...geminiResponseMediaMojoViolations, ...cookieEvictionMojoViolations, ...websocketBudgetMojoViolations, ...affinityBindingMojoViolations, ...responsesCapacityRecoveryViolations, ...sseTapMojoOwnershipViolations, ...quotaWatchViolations, ...geminiCompactSnippetViolations, ...geminiCompactTextViolations, ...doctorSmartContextDecisionViolations, ...providerSseJsonFrameMojoViolations, ...geminiSseCompletionOwnershipViolations, ...anthropicNativeStreamDecisionViolations, ...anthropicAttemptCursorViolations, ...geminiUnsupportedToolRetryViolations, ...terminalGeometryViolations, ...previousResponseRecoveryTransitionViolations, ...chatCompatibleToolCallKindViolations, ...geminiQuotaBodyMojoViolations, ...geminiOAuthRotationMojoViolations, ...geminiBuiltinBatchMojoViolations, ...geminiToolArrayValidationMojoViolations, ...geminiOAuthModelMojoViolations, ...superExposeOriginMojoViolations, ...kiroAcpToolLedgerMojoViolations, ...quotaPoolSummarySectionsMojoViolations, ...deepseekRequestDiagnosticViolations, ...deepseekToolShapeIssueMojoViolations, ...deepseekReplayItemPolicyMojoViolations, ...chatNamespaceSplitMojoViolations, ...deepseekInputItemIssueMessageViolations, ...deepseekRequestIssueMessageViolations, ...smartContextTelemetrySampleViolations, ...compatibilityDiagnosticsMojoViolations, ...quotaHeaderProjectionViolations, ...smartContextCapsuleOrderViolations, ...markerViolations, ...deepseekCatalogPolicyViolations, ...featureOffViolations, ...liveLogRecordViolations, ...runtimePolicyPresetViolations, ...runtimeConfigScalarViolations, ...profileHealthCircuitViolations, ...logThroughputViolations, ...operationalDetailSpecViolations, ...transcriptPolicyViolations, ...logLoadPolicyViolations, ...routeReasonViolations, ...quotaSnapshotCompareMojoViolations, ...startupProbeBatchMojoViolations, ...runtimeStateQuotaViolations, ...runtimeStateRoutePolicyViolations, ...runtimeProxyRootViolations, ...runtimeRecoveryDeadlineViolations, ...brokerVersionGuardViolations, ...brokerContinuityViolations, ...brokerLogCacheViolations, ...codexConfigViolations, ...statePolicyViolations, ...quotaSelectionPolicyViolations, ...routeTagMirrorViolations, ...enumTagMirrorViolations, ...appSelectionPolicyMirrorViolations, ...runtimeStateBackgroundViolations, ...redactionViolations, ...rateLimitHeaderSelectionViolations, ...profileIdentityViolations, ...governanceInspectionViolations, ...governanceInspectionOrderingViolations, ...exactnessPlannerViolations,
     ...infoRunwayViolations,
     ...geminiNormalizedViolations,
     ...quotaDurationViolations,
@@ -14670,6 +14723,19 @@ function selfTest() {
   assert.match(findViolations([[REPO_DUPLICATE_BATCH_CALLER,
     repoDuplicateBatchFixture + "\nrepo_duplicate_plan(",
   ]]).join("\n"), /repo-map duplicate fingerprint grouping and completeness must remain Mojo batch-owned/u);
+  const newestRuntimeLogFixture = [
+    "pub fn select_newest_modified_path(",
+    "RecentLogPathOrderMode::NewestModifiedPath",
+    "const MOJO_LOG_SORT_BATCH: usize = 65_536",
+    "recent_log_path_order(mode, &facts, 1)",
+    "recent_log_path_order(mode, &finalists, 1)",
+    "paths.into_iter().nth(original_index)",
+  ].join("\n");
+  assert.deepEqual(findViolations([[CORE_NEWEST_LOG_CALLER, newestRuntimeLogFixture]]).filter(
+    (message) => message.includes("newest runtime-log timestamp/path ties")), []);
+  assert.match(findViolations([[CORE_NEWEST_LOG_CALLER,
+    newestRuntimeLogFixture + "\n.max_by(",
+  ]]).join("\n"), /newest runtime-log timestamp\/path ties must remain Mojo-owned/u);
   const quotaCurrentNameFixture = [
     "fn profile_selection_order_with_mojo<",
     "ProfileCurrentNameInclusion::Include",

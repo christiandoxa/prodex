@@ -8180,3 +8180,16 @@ tests, a direct Mojo regression and anti-fallback/share guards pass.
 Official share rises from 36.09407450674974% to
 36.09557853295551% (133,493 Mojo / 236,339 Rust production LOC).
 The 75% goal remains outstanding.
+
+## prodex-core newest runtime log ordering unified in compiled Mojo (2026-10-21)
+
+The existing recent-log compiled owner now chooses the newest
+runtime log by unsigned u128 modification time, descending original
+path, and later-input exact ties. Rust max_by comparator was deleted;
+large input sets are reduced in two Mojo-sorted stages without Rust
+semantic fallback. Thirteen core tests, 11 housekeeping tests,
+four Mojo-core regression tests, three existing app caller regressions,
+a direct Mojo ABI test, anti-fallback and share guards pass.
+Measured share changes from 36.09557853295551% to
+36.09241084705437% (133,495 Mojo / 236,375 Rust) because bounded
+batch acquisition adds host adapter LOC. The 75% goal stays open.

@@ -357,15 +357,54 @@ fn select_runtime_log_paths_to_remove(
         .collect()
 }
 
+/// Select the newest runtime log using the compiled shared log-ordering
+/// kernel. Rust retains original PathBufs and applies the selected index.
+/// Two-stage batch reduction preserves last-input ties even when the input
+/// exceeds the compiled sorter's bounded 65,536 rows.
 pub fn select_newest_modified_path(paths: Vec<(u128, PathBuf)>) -> Option<PathBuf> {
-    paths
-        .into_iter()
-        .max_by(|(left_modified, left_path), (right_modified, right_path)| {
-            left_modified
-                .cmp(right_modified)
-                .then_with(|| left_path.cmp(right_path))
+    use prodex_mojo_core::log::{
+        RecentLogPathInput, RecentLogPathOrderMode, recent_log_path_order,
+    };
+    const MOJO_LOG_SORT_BATCH: usize = 65_536;
+    let mode = RecentLogPathOrderMode::NewestModifiedPath;
+    let mut winners = Vec::new();
+    for (batch, chunk) in paths.chunks(MOJO_LOG_SORT_BATCH).enumerate() {
+        let facts = chunk
+            .iter()
+            .map(|(modified, path)| RecentLogPathInput {
+                path: path.as_os_str().as_encoded_bytes(),
+                modified_before_unix_epoch: false,
+                modified_high: (*modified >> 64) as u64,
+                modified_low: *modified as u64,
+                modified_nanos: 0,
+            })
+            .collect::<Vec<_>>();
+        let selected = recent_log_path_order(mode, &facts, 1)
+            .expect("compiled Mojo runtime log newest-path batch failed")
+            .into_iter()
+            .next()
+            .expect("a nonempty chunk has one compiled Mojo winner");
+        winners.push(batch * MOJO_LOG_SORT_BATCH + selected);
+    }
+    let finalists = winners
+        .iter()
+        .map(|index| {
+            let (modified, path) = &paths[*index];
+            RecentLogPathInput {
+                path: path.as_os_str().as_encoded_bytes(),
+                modified_before_unix_epoch: false,
+                modified_high: (*modified >> 64) as u64,
+                modified_low: *modified as u64,
+                modified_nanos: 0,
+            }
         })
-        .map(|(_, path)| path)
+        .collect::<Vec<_>>();
+    let selected = recent_log_path_order(mode, &finalists, 1)
+        .expect("compiled Mojo newest runtime log final selection failed")
+        .into_iter()
+        .next()?;
+    let original_index = winners[selected];
+    paths.into_iter().nth(original_index).map(|(_, path)| path)
 }
 
 pub fn login_temp_dir_name_is_owned(name: &str) -> bool {

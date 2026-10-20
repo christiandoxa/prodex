@@ -233,3 +233,59 @@ fn runtime_broker_artifact_key_parses_registry_and_lease_names() {
         None
     );
 }
+
+#[test]
+fn compiled_newest_runtime_log_path_uses_unsigned_timestamp_and_largest_path_with_last_ties() {
+    let huge = (u64::MAX as u128) + 123;
+    assert_eq!(select_newest_modified_path(Vec::new()), None);
+    assert_eq!(
+        select_newest_modified_path(vec![
+            (huge, PathBuf::from("a.log")),
+            (huge - 1, PathBuf::from("too-old.log")),
+            (huge, PathBuf::from("雪.log")),
+            (huge, PathBuf::from("é.log")),
+            (huge, PathBuf::from("z.log")),
+        ]),
+        Some(PathBuf::from("雪.log")),
+        "highest unsigned timestamp, then largest lexical path",
+    );
+    assert_eq!(
+        select_newest_modified_path(vec![
+            (1, PathBuf::from("same.log")),
+            (1, PathBuf::from("same.log")),
+            (1, PathBuf::from("same.log")),
+        ]),
+        Some(PathBuf::from("same.log")),
+    );
+    assert_eq!(
+        select_newest_modified_path(vec![
+            (u128::MAX, PathBuf::from("high")),
+            (0, PathBuf::from("lowest")),
+            (u128::MAX - 1, PathBuf::from("almost")),
+        ]),
+        Some(PathBuf::from("high")),
+    );
+}
+
+#[test]
+fn compiled_newest_runtime_log_path_reduces_over_65536_candidates_without_rust_comparator() {
+    let mut paths = (0..65_537)
+        .map(|index| (index as u128, PathBuf::from(format!("run-{index:05}.log"))))
+        .collect::<Vec<_>>();
+    paths[0] = (u128::MAX, PathBuf::from("same-top.log"));
+    paths[65_536] = (u128::MAX, PathBuf::from("same-top.log"));
+    assert_eq!(
+        select_newest_modified_path(paths),
+        Some(PathBuf::from("same-top.log")),
+        "compiled second pass must preserve the final input on a complete timestamp/path tie",
+    );
+    let mut paths = (0..65_537)
+        .map(|index| (1_u128, PathBuf::from(format!("run-{index:05}.log"))))
+        .collect::<Vec<_>>();
+    paths[0] = (u128::MAX, PathBuf::from("a.log"));
+    paths[65_536] = (u128::MAX, PathBuf::from("z.log"));
+    assert_eq!(
+        select_newest_modified_path(paths),
+        Some(PathBuf::from("z.log"))
+    );
+}
