@@ -7878,3 +7878,15 @@ runtime-proxy tests, two direct core ABI tests, direct Mojo test,
 source no-fallback guard and audited share checks pass. The share
 rises from 35.88328851577359% to 35.88682132415225%
 (131,335 Mojo / 234,635 Rust). Project target 75% remains open.
+
+## Runtime SSE poisoned event state moved to Mojo (2026-10-20)
+
+The compiled SSE line owner now decides buffer emission/discard,
+invalid-UTF-8 poisoning, later data suppression and the JSON payload
+gate using one versioned scalar ABI. Rust retains original streaming
+buffers and UTF-8 acquisition but no longer implements sentinel
+recognition or the emit/append decision branches. All 424 proxy
+tests, two direct core ABI tests, direct Mojo test and strict
+no-fallback/production checks pass. Official share increases from
+35.88682132415225% to 35.88952865852326%
+(131,393 Mojo / 234,711 Rust). The 75% objective stays unmet.

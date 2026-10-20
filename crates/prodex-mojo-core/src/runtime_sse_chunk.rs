@@ -13,6 +13,15 @@ struct SseUtf8Span {
 }
 
 unsafe extern "C" {
+    fn prodex_runtime_sse_event_state_v1(
+        abi_version: i64,
+        operation: i64,
+        line_count: i64,
+        first_address: u64,
+        first_length: i64,
+        utf8_valid: i64,
+        result_address: u64,
+    ) -> i64;
     fn prodex_runtime_sse_json_frame_plan_v1(
         abi_version: i64,
         joined_json_valid: i64,
@@ -44,6 +53,72 @@ unsafe extern "C" {
         offsets_capacity: i64,
         result: u64,
     ) -> i64;
+}
+
+/// The Mojo-owned event-buffer decision requested by the host.
+#[repr(i64)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SseEventStateOperation {
+    Emit = 0,
+    IncomingData = 1,
+    ParsePayload = 2,
+}
+
+/// Actions to apply to the original host-owned data-line buffer.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SseEventStateAction {
+    Empty,
+    Discard,
+    Emit,
+    MarkInvalid,
+    IgnoreIncoming,
+    AppendIncoming,
+}
+
+pub fn sse_event_state_action(
+    data_lines: &[String],
+    operation: SseEventStateOperation,
+    incoming_utf8_valid: bool,
+) -> Result<SseEventStateAction, MojoError> {
+    let first = data_lines.first().map(String::as_str);
+    let (address, length) = first.map_or(Ok((0, 0)), |first| {
+        Ok((
+            first.as_ptr() as usize as u64,
+            i64::try_from(first.len()).map_err(|_| MojoError::InvalidInput)?,
+        ))
+    })?;
+    let mut code = -1_i64;
+    match unsafe {
+        prodex_runtime_sse_event_state_v1(
+            1,
+            operation as i64,
+            i64::try_from(data_lines.len()).map_err(|_| MojoError::InvalidInput)?,
+            address,
+            length,
+            i64::from(incoming_utf8_valid),
+            (&mut code as *mut i64) as usize as u64,
+        )
+    } {
+        0 => {}
+        1 => return Err(MojoError::InvalidInput),
+        4 => return Err(MojoError::AbiMismatch),
+        _ => return Err(MojoError::InvalidOutput),
+    }
+    match (operation, code) {
+        (SseEventStateOperation::Emit | SseEventStateOperation::ParsePayload, 0) => {
+            Ok(SseEventStateAction::Empty)
+        }
+        (SseEventStateOperation::Emit | SseEventStateOperation::ParsePayload, 1) => {
+            Ok(SseEventStateAction::Discard)
+        }
+        (SseEventStateOperation::Emit | SseEventStateOperation::ParsePayload, 2) => {
+            Ok(SseEventStateAction::Emit)
+        }
+        (SseEventStateOperation::IncomingData, 3) => Ok(SseEventStateAction::MarkInvalid),
+        (SseEventStateOperation::IncomingData, 4) => Ok(SseEventStateAction::IgnoreIncoming),
+        (SseEventStateOperation::IncomingData, 5) => Ok(SseEventStateAction::AppendIncoming),
+        _ => Err(MojoError::InvalidOutput),
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -458,5 +533,90 @@ mod tests {
         }
         assert_eq!(offsets, [55; MAX_BOUNDARIES]);
         assert_eq!(result, [77; 2]);
+    }
+}
+
+#[cfg(test)]
+mod sse_event_state_tests {
+    use super::*;
+
+    #[test]
+    fn compiled_sse_event_state_selects_only_valid_buffer_transitions() {
+        let empty = Vec::<String>::new();
+        let present = vec!["first line".to_string(), "second line".to_string()];
+        let poisoned = vec!["\0prodex-invalid-sse-data".to_string()];
+        let almost = vec!["\0prodex-invalid-sse-data-extra".to_string()];
+        let empty_first = vec![String::new(), "next".to_string()];
+        for (data, expected) in [
+            (&empty, SseEventStateAction::Empty),
+            (&present, SseEventStateAction::Emit),
+            (&poisoned, SseEventStateAction::Discard),
+            (&almost, SseEventStateAction::Emit),
+            (&empty_first, SseEventStateAction::Emit),
+        ] {
+            for operation in [
+                SseEventStateOperation::Emit,
+                SseEventStateOperation::ParsePayload,
+            ] {
+                assert_eq!(sse_event_state_action(data, operation, true), Ok(expected));
+            }
+        }
+        assert_eq!(
+            sse_event_state_action(&empty, SseEventStateOperation::IncomingData, true),
+            Ok(SseEventStateAction::AppendIncoming),
+        );
+        assert_eq!(
+            sse_event_state_action(&present, SseEventStateOperation::IncomingData, true),
+            Ok(SseEventStateAction::AppendIncoming),
+        );
+        assert_eq!(
+            sse_event_state_action(&poisoned, SseEventStateOperation::IncomingData, true),
+            Ok(SseEventStateAction::IgnoreIncoming),
+        );
+        assert_eq!(
+            sse_event_state_action(&poisoned, SseEventStateOperation::IncomingData, false),
+            Ok(SseEventStateAction::MarkInvalid),
+        );
+        assert_eq!(
+            sse_event_state_action(&present, SseEventStateOperation::IncomingData, false),
+            Ok(SseEventStateAction::MarkInvalid),
+        );
+    }
+
+    #[test]
+    fn compiled_sse_event_state_abi_rejects_invalid_shapes_without_output_write() {
+        let marker = b"\0prodex-invalid-sse-data";
+        let mut result = 91_i64;
+        let address = marker.as_ptr() as usize as u64;
+        let output = (&mut result as *mut i64) as usize as u64;
+        for (abi, operation, count, first, length, utf8, dest, expected) in [
+            (2, 0, 1, address, marker.len() as i64, 1, output, 4),
+            (1, -1, 1, address, marker.len() as i64, 1, output, 1),
+            (1, 3, 1, address, marker.len() as i64, 1, output, 1),
+            (1, 0, -1, address, marker.len() as i64, 1, output, 1),
+            (1, 0, 1, 0, marker.len() as i64, 1, output, 1),
+            (1, 0, 0, address, marker.len() as i64, 1, output, 1),
+            (1, 0, 1, address, -1, 1, output, 1),
+            (1, 0, 1, address, marker.len() as i64, -1, output, 1),
+            (1, 0, 1, address, marker.len() as i64, 2, output, 1),
+            (1, 0, 1, address, marker.len() as i64, 1, 0, 1),
+        ] {
+            assert_eq!(
+                unsafe {
+                    prodex_runtime_sse_event_state_v1(
+                        abi, operation, count, first, length, utf8, dest,
+                    )
+                },
+                expected,
+            );
+            assert_eq!(result, 91);
+        }
+        assert_eq!(
+            unsafe {
+                prodex_runtime_sse_event_state_v1(1, 0, 1, address, marker.len() as i64, 1, output)
+            },
+            0,
+        );
+        assert_eq!(result, 1, "poisoned event must be discarded");
     }
 }

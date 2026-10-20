@@ -293,6 +293,11 @@ const OPENAI_COMPAT_SSE_EXPORT = "mojo/prodex_core/rich_abi.mojo";
 const OPENAI_COMPAT_SSE_DIRECT_TEST = "mojo/tests/openai_compat_sse_envelope_test.mojo";
 const OPENAI_COMPAT_SSE_CALLER_TEST = "crates/prodex-provider-core/src/translators/openai_chat_compat_response/stream/mojo_tests.rs";
 const GEMINI_PATCH_SOURCE_DIRECT_TEST_FILE = "mojo/tests/gemini_apply_patch_sources_test.mojo";
+const RUNTIME_SSE_EVENT_STATE_CALLER = "crates/prodex-runtime-proxy/src/payload_detection/sse.rs";
+const RUNTIME_SSE_EVENT_STATE_ADAPTER = "crates/prodex-mojo-core/src/runtime_sse_chunk.rs";
+const RUNTIME_SSE_EVENT_STATE_MOJO = "mojo/prodex_core/sse_line.mojo";
+const RUNTIME_SSE_EVENT_STATE_DIRECT_TEST = "mojo/tests/runtime_sse_event_state_test.mojo";
+const RUNTIME_SSE_EVENT_STATE_CALLER_TEST = "crates/prodex-runtime-proxy/tests/src/payload_detection.rs";
 const PROMOTED_FILES = [
   PROVIDER_USAGE_SSE_MOJO,
   PROVIDER_USAGE_SSE_TEST,
@@ -319,6 +324,7 @@ const PROMOTED_FILES = [
   RESPONSE_HEADER_SELECTION_CORE,
   RESPONSE_HEADER_SELECTION_TEST,
   RESPONSE_HEADER_SELECTION_CALLER_TEST,
+  RUNTIME_SSE_EVENT_STATE_DIRECT_TEST,
   PREVIOUS_RESPONSE_JSON_CALLER,
   PREVIOUS_RESPONSE_JSON_SHAPE,
   PREVIOUS_RESPONSE_JSON_CORE,
@@ -4758,6 +4764,61 @@ export function findViolations(files) {
     if (filePath === STARTUP_PROBE_BATCH_CALLER_TEST) {
       return contents.includes("compiled_startup_probe_batch_preserves_over_65536_profile_order_and_remaining_slots")
         ? [] : [filePath + ": startup batch requires cross-batch caller regression"];
+    }
+    return [];
+  });
+  const runtimeSseEventStateMojoViolations = files.flatMap(([filePath, contents]) => {
+    if (filePath === RUNTIME_SSE_EVENT_STATE_CALLER &&
+        contents.includes("fn runtime_sse_emit_event<")) {
+      const production = contents.split("#[cfg(test)]", 1)[0];
+      const required = [
+        "sse_event_state_action(data_lines, SseEventStateOperation::Emit, true)",
+        "SseEventStateOperation::IncomingData",
+        "SseEventStateOperation::ParsePayload",
+        "SseEventStateAction::MarkInvalid",
+        "SseEventStateAction::IgnoreIncoming",
+        "SseEventStateAction::AppendIncoming",
+        "SseEventStateAction::Discard",
+      ];
+      const retired = [
+        "fn runtime_sse_event_marked_invalid(",
+        "fn runtime_sse_mark_invalid(",
+        "if data_lines.is_empty() || runtime_sse_event_marked_invalid(data_lines)",
+        "Ok(text) if !runtime_sse_event_marked_invalid(data_lines)",
+      ];
+      return required.every((marker) => production.includes(marker))
+        && retired.every((marker) => !production.includes(marker))
+        ? [] : [filePath + ": SSE poisoned event state and append gating must remain Mojo-owned"];
+    }
+    if (filePath === RUNTIME_SSE_EVENT_STATE_ADAPTER) {
+      return [
+        "fn prodex_runtime_sse_event_state_v1(",
+        "pub fn sse_event_state_action(",
+        "compiled_sse_event_state_selects_only_valid_buffer_transitions",
+        "compiled_sse_event_state_abi_rejects_invalid_shapes_without_output_write",
+      ].filter((marker) => !contents.includes(marker))
+        .map((marker) => filePath + ": SSE event state typed ABI missing " + marker);
+    }
+    if (filePath === RUNTIME_SSE_EVENT_STATE_MOJO) {
+      return [
+        '@export("prodex_runtime_sse_event_state_v1")',
+        "SSE_EVENT_STATE_DISCARD",
+        "SSE_EVENT_STATE_IGNORE_DATA",
+        "SSE_EVENT_STATE_MARK_INVALID",
+        'StringSlice("prodex-invalid-sse-data")',
+      ].filter((marker) => !contents.includes(marker))
+        .map((marker) => filePath + ": SSE event state policy missing " + marker);
+    }
+    if (filePath === RUNTIME_SSE_EVENT_STATE_DIRECT_TEST) {
+      return contents.includes("prodex_runtime_sse_event_state_v1")
+        ? [] : [filePath + ": SSE event state requires direct Mojo ABI test"];
+    }
+    if (filePath === RUNTIME_SSE_EVENT_STATE_CALLER_TEST) {
+      return [
+        "compiled_sse_event_state_ignores_data_after_invalid_utf8_until_event_boundary",
+        "compiled_sse_event_state_discards_poisoned_pending_at_eof_and_empty_payloads",
+      ].filter((marker) => !contents.includes(marker))
+        .map((marker) => filePath + ": SSE event state needs production caller regression " + marker);
     }
     return [];
   });
@@ -12042,7 +12103,7 @@ export function findViolations(files) {
     }
     return [];
   });
-  return [...geminiPatchSourceMojoViolations, ...openAiCompatSseEnvelopeMojoViolations, ...anthropicSseDataLineMojoViolations, ...responseHeaderSelectionMojoViolations, ...previousResponseTextSpanMojoViolations, ...previousResponseJsonSearchMojoViolations, ...domainErrorMojoViolations, ...geminiValueCollectionMojoViolations, ...geminiSimpleResponseViolations, ...logPayloadProjectionViolations, ...nativeRecoveryOwnershipViolations, ...quotaRecoveryEligibilityViolations, ...runtimeBrokerReuseMojoViolations, ...geminiResponseMediaMojoViolations, ...cookieEvictionMojoViolations, ...websocketBudgetMojoViolations, ...affinityBindingMojoViolations, ...responsesCapacityRecoveryViolations, ...sseTapMojoOwnershipViolations, ...quotaWatchViolations, ...geminiCompactSnippetViolations, ...geminiCompactTextViolations, ...doctorSmartContextDecisionViolations, ...providerSseJsonFrameMojoViolations, ...geminiSseCompletionOwnershipViolations, ...anthropicNativeStreamDecisionViolations, ...anthropicAttemptCursorViolations, ...geminiUnsupportedToolRetryViolations, ...terminalGeometryViolations, ...previousResponseRecoveryTransitionViolations, ...chatCompatibleToolCallKindViolations, ...geminiQuotaBodyMojoViolations, ...geminiOAuthRotationMojoViolations, ...geminiBuiltinBatchMojoViolations, ...geminiToolArrayValidationMojoViolations, ...geminiOAuthModelMojoViolations, ...superExposeOriginMojoViolations, ...kiroAcpToolLedgerMojoViolations, ...quotaPoolSummarySectionsMojoViolations, ...deepseekRequestDiagnosticViolations, ...deepseekToolShapeIssueMojoViolations, ...deepseekReplayItemPolicyMojoViolations, ...chatNamespaceSplitMojoViolations, ...deepseekInputItemIssueMessageViolations, ...deepseekRequestIssueMessageViolations, ...smartContextTelemetrySampleViolations, ...compatibilityDiagnosticsMojoViolations, ...quotaHeaderProjectionViolations, ...smartContextCapsuleOrderViolations, ...markerViolations, ...deepseekCatalogPolicyViolations, ...featureOffViolations, ...liveLogRecordViolations, ...runtimePolicyPresetViolations, ...runtimeConfigScalarViolations, ...profileHealthCircuitViolations, ...logThroughputViolations, ...operationalDetailSpecViolations, ...transcriptPolicyViolations, ...logLoadPolicyViolations, ...routeReasonViolations, ...quotaSnapshotCompareMojoViolations, ...startupProbeBatchMojoViolations, ...runtimeStateQuotaViolations, ...runtimeStateRoutePolicyViolations, ...runtimeProxyRootViolations, ...runtimeRecoveryDeadlineViolations, ...brokerVersionGuardViolations, ...brokerContinuityViolations, ...brokerLogCacheViolations, ...codexConfigViolations, ...statePolicyViolations, ...quotaSelectionPolicyViolations, ...routeTagMirrorViolations, ...enumTagMirrorViolations, ...appSelectionPolicyMirrorViolations, ...runtimeStateBackgroundViolations, ...redactionViolations, ...rateLimitHeaderSelectionViolations, ...profileIdentityViolations, ...governanceInspectionViolations, ...governanceInspectionOrderingViolations, ...exactnessPlannerViolations,
+  return [...runtimeSseEventStateMojoViolations, ...geminiPatchSourceMojoViolations, ...openAiCompatSseEnvelopeMojoViolations, ...anthropicSseDataLineMojoViolations, ...responseHeaderSelectionMojoViolations, ...previousResponseTextSpanMojoViolations, ...previousResponseJsonSearchMojoViolations, ...domainErrorMojoViolations, ...geminiValueCollectionMojoViolations, ...geminiSimpleResponseViolations, ...logPayloadProjectionViolations, ...nativeRecoveryOwnershipViolations, ...quotaRecoveryEligibilityViolations, ...runtimeBrokerReuseMojoViolations, ...geminiResponseMediaMojoViolations, ...cookieEvictionMojoViolations, ...websocketBudgetMojoViolations, ...affinityBindingMojoViolations, ...responsesCapacityRecoveryViolations, ...sseTapMojoOwnershipViolations, ...quotaWatchViolations, ...geminiCompactSnippetViolations, ...geminiCompactTextViolations, ...doctorSmartContextDecisionViolations, ...providerSseJsonFrameMojoViolations, ...geminiSseCompletionOwnershipViolations, ...anthropicNativeStreamDecisionViolations, ...anthropicAttemptCursorViolations, ...geminiUnsupportedToolRetryViolations, ...terminalGeometryViolations, ...previousResponseRecoveryTransitionViolations, ...chatCompatibleToolCallKindViolations, ...geminiQuotaBodyMojoViolations, ...geminiOAuthRotationMojoViolations, ...geminiBuiltinBatchMojoViolations, ...geminiToolArrayValidationMojoViolations, ...geminiOAuthModelMojoViolations, ...superExposeOriginMojoViolations, ...kiroAcpToolLedgerMojoViolations, ...quotaPoolSummarySectionsMojoViolations, ...deepseekRequestDiagnosticViolations, ...deepseekToolShapeIssueMojoViolations, ...deepseekReplayItemPolicyMojoViolations, ...chatNamespaceSplitMojoViolations, ...deepseekInputItemIssueMessageViolations, ...deepseekRequestIssueMessageViolations, ...smartContextTelemetrySampleViolations, ...compatibilityDiagnosticsMojoViolations, ...quotaHeaderProjectionViolations, ...smartContextCapsuleOrderViolations, ...markerViolations, ...deepseekCatalogPolicyViolations, ...featureOffViolations, ...liveLogRecordViolations, ...runtimePolicyPresetViolations, ...runtimeConfigScalarViolations, ...profileHealthCircuitViolations, ...logThroughputViolations, ...operationalDetailSpecViolations, ...transcriptPolicyViolations, ...logLoadPolicyViolations, ...routeReasonViolations, ...quotaSnapshotCompareMojoViolations, ...startupProbeBatchMojoViolations, ...runtimeStateQuotaViolations, ...runtimeStateRoutePolicyViolations, ...runtimeProxyRootViolations, ...runtimeRecoveryDeadlineViolations, ...brokerVersionGuardViolations, ...brokerContinuityViolations, ...brokerLogCacheViolations, ...codexConfigViolations, ...statePolicyViolations, ...quotaSelectionPolicyViolations, ...routeTagMirrorViolations, ...enumTagMirrorViolations, ...appSelectionPolicyMirrorViolations, ...runtimeStateBackgroundViolations, ...redactionViolations, ...rateLimitHeaderSelectionViolations, ...profileIdentityViolations, ...governanceInspectionViolations, ...governanceInspectionOrderingViolations, ...exactnessPlannerViolations,
     ...infoRunwayViolations,
     ...geminiNormalizedViolations,
     ...quotaDurationViolations,
@@ -13211,6 +13272,21 @@ function selfTest() {
   assert.match(findViolations([[RESPONSE_FORWARDING_FILE,
     responseHeaderFixture + "\nheaders.into_iter().any(|(name, value)| ...)",
   ]]).join("\n"), /first-header, binary MIME and SSE flush selection must stay Mojo-owned/u);
+  const sseEventStateFixture = [
+    "fn runtime_sse_emit_event<",
+    "sse_event_state_action(data_lines, SseEventStateOperation::Emit, true)",
+    "SseEventStateOperation::IncomingData",
+    "SseEventStateOperation::ParsePayload",
+    "SseEventStateAction::MarkInvalid",
+    "SseEventStateAction::IgnoreIncoming",
+    "SseEventStateAction::AppendIncoming",
+    "SseEventStateAction::Discard",
+  ].join("\\n");
+  assert.deepEqual(findViolations([[RUNTIME_SSE_EVENT_STATE_CALLER, sseEventStateFixture]]).filter(
+    (message) => message.includes("SSE poisoned event state")), []);
+  assert.match(findViolations([[RUNTIME_SSE_EVENT_STATE_CALLER,
+    sseEventStateFixture + "\\nfn runtime_sse_event_marked_invalid(",
+  ]]).join("\\n"), /SSE poisoned event state and append gating must remain Mojo-owned/u);
   const textSpanFixture = [
     "pub fn extract_runtime_proxy_previous_response_message_from_text(",
     "previous_response_text_message_span(text)",
