@@ -8069,3 +8069,15 @@ Mojo test, no-fallback guard and canonical share checks pass.
 Production share increases from 36.01500636576116% to
 36.02408461634476% (132,761 Mojo / 235,773 Rust).
 The 75% objective stays open.
+
+## Live file-follow LF and inclusive line boundaries moved to Mojo (2026-10-20)
+
+The compiled live-log owner now locates the last complete binary
+line boundary and measures the original post-lossy-UTF-8 line lengths.
+Rust retains file I/O and materialization but its previous rposition
+and split_inclusive length-scanning policy branches were removed.
+All eight log-follow app tests, three direct core ABI tests,
+direct Mojo regression, no-fallback guard and canonical share
+checks pass. Official share rises from 36.02408461634476% to
+36.02996620393727% (132,836 Mojo / 235,846 Rust).
+The separate 75% project target remains open.

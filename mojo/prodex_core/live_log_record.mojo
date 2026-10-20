@@ -556,3 +556,89 @@ def prodex_live_log_json_projection_v1(
     metadata[unsafe_offset=0] = 1
     metadata[unsafe_offset=1] = sink.written
     return LIVE_LOG_RECORD_OK
+
+
+# Live file-follow byte framing: binary last-complete-line prefix followed
+# by UTF-8 line lengths after the host performs the historical lossy decode.
+# These two operations replace Rust rposition and split_inclusive length
+# acquisition without moving host file I/O or decoded String ownership.
+@export("prodex_live_log_follow_last_newline_v1")
+def prodex_live_log_follow_last_newline_v1(
+    abi_version: Int64,
+    buffer_address: UInt, buffer_length: Int64,
+    result_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != LIVE_LOG_RECORD_ABI_VERSION:
+        return LIVE_LOG_RECORD_ABI
+    if (
+        buffer_length < 0 or (buffer_length > 0 and buffer_address == 0)
+        or result_address == 0 or result_address % 8 != 0
+    ):
+        return LIVE_LOG_RECORD_INVALID
+    var best = Int64(0)
+    if buffer_length > 0:
+        var bytes = Pointer[mut=False, UInt8, ImmUntrackedOrigin](
+            unsafe_from_address=Int(buffer_address)
+        )
+        for index in range(buffer_length):
+            if bytes[unsafe_offset=index] == 10:
+                best = index + 1
+    Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(result_address)
+    )[] = best
+    return LIVE_LOG_RECORD_OK
+
+
+@export("prodex_live_log_follow_line_lengths_v1")
+def prodex_live_log_follow_line_lengths_v1(
+    abi_version: Int64,
+    text_address: UInt, text_length: Int64,
+    output_address: UInt, output_capacity: Int64,
+    measuring: Int64, count_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != LIVE_LOG_RECORD_ABI_VERSION:
+        return LIVE_LOG_RECORD_ABI
+    if (
+        text_length < 0 or (text_length > 0 and text_address == 0)
+        or output_capacity < 0
+        or (measuring != 0 and measuring != 1)
+        or (measuring == 1 and (output_address != 0 or output_capacity != 0))
+        or (measuring == 0 and output_address == 0)
+        or count_address == 0 or count_address % 8 != 0
+    ):
+        return LIVE_LOG_RECORD_INVALID
+    var bytes = Pointer[mut=False, UInt8, ImmUntrackedOrigin](
+        unsafe_from_address=Int(text_address)
+    )
+    if text_length > 0:
+        var utf8 = live_log_utf8_prefix_end(bytes, text_length, text_length)
+        if not utf8[1] or utf8[0] != text_length:
+            return LIVE_LOG_RECORD_INVALID
+    var count = Int64(0)
+    for index in range(text_length):
+        if bytes[unsafe_offset=index] == 10:
+            count += 1
+    if text_length > 0 and bytes[unsafe_offset=text_length - 1] != 10:
+        count += 1
+    if count > LIVE_LOG_FOLLOW_MAX_INPUT_LINES:
+        return LIVE_LOG_RECORD_INVALID
+    if measuring == 0 and output_capacity < count:
+        return LIVE_LOG_RECORD_CAPACITY
+
+    if measuring == 0:
+        var output = Pointer[mut=True, Int64, MutUntrackedOrigin](
+            unsafe_from_address=Int(output_address)
+        )
+        var first = Int64(0)
+        var item = Int64(0)
+        for index in range(text_length):
+            if bytes[unsafe_offset=index] == 10:
+                output[unsafe_offset=item] = index + 1 - first
+                first = index + 1
+                item += 1
+        if first < text_length:
+            output[unsafe_offset=item] = text_length - first
+    Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(count_address)
+    )[] = count
+    return LIVE_LOG_RECORD_OK

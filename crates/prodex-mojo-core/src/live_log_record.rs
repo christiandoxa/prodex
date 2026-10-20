@@ -10,6 +10,21 @@ const FOLLOW_MAX_INPUT_LINES: usize = 2 * 1024 * 1024;
 const _: () = assert!(std::mem::size_of::<usize>() == std::mem::size_of::<u64>());
 
 unsafe extern "C" {
+    fn prodex_live_log_follow_last_newline_v1(
+        abi_version: i64,
+        buffer_address: u64,
+        buffer_length: i64,
+        result_address: u64,
+    ) -> i64;
+    fn prodex_live_log_follow_line_lengths_v1(
+        abi_version: i64,
+        text_address: u64,
+        text_length: i64,
+        output_address: u64,
+        output_capacity: i64,
+        measuring: i64,
+        count_address: u64,
+    ) -> i64;
     fn prodex_live_log_json_projection_v1(
         abi: i64,
         operation: i64,
@@ -347,6 +362,75 @@ pub struct LiveLogSnapshotPlan {
     pub cursor: u64,
     /// Number of entries dropped from the path's bounded history.
     pub dropped: u64,
+}
+
+/// Find the byte immediately after the last complete binary LF line.
+/// A split UTF-8 scalar in a trailing partial line remains untouched.
+pub fn follow_last_complete_line_end(buffer: &[u8]) -> Result<usize, MojoError> {
+    let mut result = -1_i64;
+    status(unsafe {
+        prodex_live_log_follow_last_newline_v1(
+            ABI_VERSION,
+            pointer_address(buffer.as_ptr()),
+            input_length(buffer.len())?,
+            mutable_pointer_address(&mut result as *mut i64),
+        )
+    })?;
+    let end = usize::try_from(result).map_err(|_| MojoError::InvalidOutput)?;
+    if end > buffer.len() || (end > 0 && buffer[end - 1] != b'\n') {
+        return Err(MojoError::InvalidOutput);
+    }
+    Ok(end)
+}
+
+/// Extract original post-lossy UTF-8 split-inclusive line lengths using
+/// a read-only Mojo measure call followed by the Mojo materialization.
+pub fn follow_utf8_line_lengths(text: &str) -> Result<Vec<usize>, MojoError> {
+    let mut count = -1_i64;
+    let pointer = pointer_address(text.as_ptr());
+    let length = input_length(text.len())?;
+    let count_ptr = mutable_pointer_address(&mut count as *mut i64);
+    status(unsafe {
+        prodex_live_log_follow_line_lengths_v1(ABI_VERSION, pointer, length, 0, 0, 1, count_ptr)
+    })?;
+    let size = usize::try_from(count).map_err(|_| MojoError::InvalidOutput)?;
+    if size > FOLLOW_MAX_INPUT_LINES || size > text.len() {
+        return Err(MojoError::InvalidOutput);
+    }
+    let mut lengths = Vec::<i64>::new();
+    lengths
+        .try_reserve_exact(size)
+        .map_err(|_| MojoError::Capacity)?;
+    lengths.resize(size, -1);
+    count = -1;
+    status(unsafe {
+        prodex_live_log_follow_line_lengths_v1(
+            ABI_VERSION,
+            pointer,
+            length,
+            mutable_pointer_address(lengths.as_mut_ptr()),
+            input_length(lengths.len())?,
+            0,
+            count_ptr,
+        )
+    })?;
+    if usize::try_from(count).map_err(|_| MojoError::InvalidOutput)? != size {
+        return Err(MojoError::InvalidOutput);
+    }
+    let mut verified = Vec::with_capacity(size);
+    let mut total = 0usize;
+    for len in lengths {
+        let len = usize::try_from(len).map_err(|_| MojoError::InvalidOutput)?;
+        if len == 0 {
+            return Err(MojoError::InvalidOutput);
+        }
+        total = total.checked_add(len).ok_or(MojoError::InvalidOutput)?;
+        verified.push(len);
+    }
+    if total != text.len() {
+        return Err(MojoError::InvalidOutput);
+    }
+    Ok(verified)
 }
 
 /// Mojo's bounded classification for one file-follow read.
@@ -891,5 +975,110 @@ mod tests {
             follow_line_plan(&vec![0; 2 * 1024 * 1024 + 1], 0),
             Err(MojoError::InvalidInput)
         );
+    }
+}
+
+#[cfg(test)]
+mod compiled_follow_framing_tests {
+    use super::*;
+
+    #[test]
+    fn compiled_follow_last_newline_preserves_binary_and_incomplete_tail() {
+        for (bytes, expected) in [
+            (b"".as_slice(), 0),
+            (b"without newline", 0),
+            (b"a\n".as_slice(), 2),
+            (b"first\nsecond\n".as_slice(), 13),
+            (b"a\r\nb\npartial".as_slice(), 5),
+            (b"\xff\xfe\ntrailing".as_slice(), 3),
+            (b"one\n\xf0\x9f\x8c".as_slice(), 4),
+            (b"\r\n\n\n".as_slice(), 4),
+        ] {
+            assert_eq!(
+                follow_last_complete_line_end(bytes),
+                Ok(expected),
+                "{bytes:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn compiled_follow_utf8_line_lengths_match_exact_split_inclusive() {
+        for text in [
+            "",
+            "one",
+            "one\n",
+            "\n\n\n",
+            "a\r\nb\r\n",
+            "雪\n🦀\n",
+            "first\nsecond",
+            "�\ninvalid replacement\n",
+            "a\n\nlast",
+        ] {
+            let original = text.split_inclusive('\n').map(str::len).collect::<Vec<_>>();
+            assert_eq!(follow_utf8_line_lengths(text), Ok(original), "{text:?}");
+        }
+        let many = "x\n".repeat(1025);
+        assert_eq!(follow_utf8_line_lengths(&many), Ok(vec![2; 1025]),);
+        let binary = [255_u8, 254, b'\n'];
+        let mut output = [-7_i64; 2];
+        let mut written = -7_i64;
+        assert_eq!(
+            unsafe {
+                prodex_live_log_follow_line_lengths_v1(
+                    1,
+                    binary.as_ptr() as usize as u64,
+                    binary.len() as i64,
+                    output.as_mut_ptr() as usize as u64,
+                    2,
+                    0,
+                    (&mut written as *mut i64) as usize as u64,
+                )
+            },
+            1,
+        );
+        assert_eq!(output, [-7; 2]);
+        assert_eq!(written, -7);
+    }
+
+    #[test]
+    fn compiled_follow_framing_abi_rejects_invalid_and_short_capacity_without_writes() {
+        let bytes = b"a\nb\n";
+        let mut output = [71_i64; 3];
+        let mut count = 83_i64;
+        let source = bytes.as_ptr() as usize as u64;
+        let out = output.as_mut_ptr() as usize as u64;
+        let result = (&mut count as *mut i64) as usize as u64;
+        for (version, address, length, capacity, measuring, dest, expected) in [
+            (2, source, 4, 3, 0, result, 4),
+            (1, 0, 4, 3, 0, result, 1),
+            (1, source, -1, 3, 0, result, 1),
+            (1, source, 4, 1, 0, result, 2),
+            (1, source, 4, 3, 2, result, 1),
+            (1, source, 4, 3, 0, 0, 1),
+        ] {
+            assert_eq!(
+                unsafe {
+                    prodex_live_log_follow_line_lengths_v1(
+                        version, address, length, out, capacity, measuring, dest,
+                    )
+                },
+                expected,
+            );
+            assert_eq!(output, [71; 3]);
+            assert_eq!(count, 83);
+        }
+        for (version, address, length, dest, expected) in [
+            (2, source, 4, result, 4),
+            (1, 0, 4, result, 1),
+            (1, source, -1, result, 1),
+            (1, source, 4, 0, 1),
+        ] {
+            assert_eq!(
+                unsafe { prodex_live_log_follow_last_newline_v1(version, address, length, dest) },
+                expected,
+            );
+            assert_eq!(count, 83);
+        }
     }
 }
