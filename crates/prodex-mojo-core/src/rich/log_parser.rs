@@ -17,6 +17,13 @@ pub struct LogParsePlan {
 }
 
 unsafe extern "C" {
+    fn prodex_mojo_log_tail_boundary_v1(
+        abi_version: i64,
+        input_address: u64,
+        input_length: i64,
+        drop_partial_first_line: i64,
+        result_address: u64,
+    ) -> i64;
     fn prodex_mojo_log_plain_envelope_v1(
         abi_version: i64,
         line_address: u64,
@@ -31,6 +38,34 @@ unsafe extern "C" {
         record_capacity: i64,
         result_address: u64,
     ) -> i64;
+}
+
+/// The compiled log parser chooses how much of a byte-oriented log tail
+/// is an incomplete first line. Host file seek and reads remain unchanged.
+pub fn log_tail_boundary(buffer: &[u8], read_started_mid_file: bool) -> Result<usize, MojoError> {
+    let mut start = -1_i64;
+    match unsafe {
+        prodex_mojo_log_tail_boundary_v1(
+            1,
+            buffer.as_ptr() as usize as u64,
+            i64::try_from(buffer.len()).map_err(|_| MojoError::InvalidInput)?,
+            i64::from(read_started_mid_file),
+            (&mut start as *mut i64) as usize as u64,
+        )
+    } {
+        0 => {}
+        1 => return Err(MojoError::InvalidInput),
+        4 => return Err(MojoError::AbiMismatch),
+        _ => return Err(MojoError::InvalidOutput),
+    }
+    let start = usize::try_from(start).map_err(|_| MojoError::InvalidOutput)?;
+    if start > buffer.len()
+        || read_started_mid_file && start > 0 && buffer[start - 1] != b'\n'
+        || !read_started_mid_file && start != 0
+    {
+        return Err(MojoError::InvalidOutput);
+    }
+    Ok(start)
 }
 
 /// Borrowed UTF-8 ranges from the compiled Mojo delimiter plan.
@@ -189,6 +224,49 @@ mod tests {
             assert_eq!(prodex_mojo_log_plain_envelope_v1(1, 0, 7, result, 3), 1);
         }
         assert_eq!(slots, [7; 3]);
+    }
+
+    #[test]
+    fn compiled_log_tail_boundary_preserves_partial_lines_and_binary_bytes() {
+        for (source, partial, expected) in [
+            (b"complete\nnext\n".as_slice(), false, 0),
+            (b"complete\nnext\n".as_slice(), true, 9),
+            (b"part\r\nnext".as_slice(), true, 6),
+            (b"no-newline".as_slice(), true, 0),
+            (b"\nnext".as_slice(), true, 1),
+            (b"".as_slice(), true, 0),
+            (b"\xff\xfex\nrest".as_slice(), true, 4),
+        ] {
+            assert_eq!(
+                log_tail_boundary(source, partial),
+                Ok(expected),
+                "source={source:?}, partial={partial}",
+            );
+        }
+    }
+
+    #[test]
+    fn compiled_log_tail_boundary_abi_rejects_invalid_flags_before_result_writes() {
+        let data = b"partial\nrest";
+        let mut result = 77_i64;
+        let source = data.as_ptr() as usize as u64;
+        let output = (&mut result as *mut i64) as usize as u64;
+        for (version, address, length, mode, destination, expected) in [
+            (2, source, data.len() as i64, 1, output, 4),
+            (1, 0, data.len() as i64, 1, output, 1),
+            (1, source, -1, 1, output, 1),
+            (1, source, data.len() as i64, -1, output, 1),
+            (1, source, data.len() as i64, 2, output, 1),
+            (1, source, data.len() as i64, 1, 0, 1),
+        ] {
+            assert_eq!(
+                unsafe {
+                    prodex_mojo_log_tail_boundary_v1(version, address, length, mode, destination)
+                },
+                expected,
+            );
+            assert_eq!(result, 77);
+        }
     }
 
     #[test]

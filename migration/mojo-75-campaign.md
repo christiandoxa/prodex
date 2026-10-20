@@ -7925,3 +7925,14 @@ All 535 provider tests, two core ABI tests, direct Mojo writer
 regression and source/share guards pass. Official share increases
 from 35.905425870090184% to 35.90709045120557%
 (131,602 Mojo / 234,905 Rust LOC). The 75% target remains unmet.
+
+## Runtime doctor partial log-tail cutoff moved to Mojo (2026-10-20)
+
+The compiled log parser now selects the byte offset after the first
+LF in a tail that started mid-file. Rust still performs file seek,
+read and application of the selected boundary, without retaining
+its old iterator newline scan. All 66 doctor tests, two direct ABI
+core tests, direct Mojo test and strict no-fallback/share guards pass.
+Production share increases from 35.90709045120557% to
+35.908872666164704% (131,629 Mojo / 234,935 Rust LOC); project
+target 75% remains open.
