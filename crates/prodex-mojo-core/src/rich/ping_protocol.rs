@@ -34,6 +34,13 @@ pub const PING_STATUS_SPAWN_FAILED: i64 = 13;
 pub const PING_STATUS_CANCELLED: i64 = 14;
 
 unsafe extern "C" {
+    fn prodex_mojo_ping_profile_order_v1(
+        abi_version: i64,
+        names_address: u64,
+        count: i64,
+        output_address: u64,
+        output_capacity: i64,
+    ) -> i64;
     fn prodex_mojo_ping_validate_jsonl_v1(
         abi_version: i64,
         input_address: u64,
@@ -97,6 +104,57 @@ fn call(
         4 => Err(MojoError::AbiMismatch),
         _ => Err(MojoError::InvalidOutput),
     }
+}
+
+/// Sort completed ping result source indices by original profile name
+/// bytes, with stable indices on equal names. Host retains result ownership.
+pub fn ping_profile_order(names: &[&str]) -> Result<Vec<usize>, MojoError> {
+    ensure_rich_abi()?;
+    if names.len() > PING_SUMMARY_MAX_STATUSES
+        || names
+            .iter()
+            .any(|name| name.len() > PING_PROTOCOL_MAX_BYTES)
+    {
+        return Err(MojoError::InvalidInput);
+    }
+    let mut views = Vec::<u64>::new();
+    views
+        .try_reserve_exact(names.len().checked_mul(2).ok_or(MojoError::Capacity)?)
+        .map_err(|_| MojoError::Capacity)?;
+    for name in names {
+        views.extend([
+            name.as_ptr() as usize as u64,
+            u64::try_from(name.len()).map_err(|_| MojoError::InvalidInput)?,
+        ]);
+    }
+    let mut indices = vec![-1_i64; names.len()];
+    match unsafe {
+        prodex_mojo_ping_profile_order_v1(
+            PING_PROTOCOL_ABI_VERSION,
+            views.as_ptr() as usize as u64,
+            i64::try_from(names.len()).map_err(|_| MojoError::InvalidInput)?,
+            indices.as_mut_ptr() as usize as u64,
+            i64::try_from(indices.len()).map_err(|_| MojoError::InvalidInput)?,
+        )
+    } {
+        0 => {}
+        1 => return Err(MojoError::InvalidInput),
+        4 => return Err(MojoError::AbiMismatch),
+        _ => return Err(MojoError::InvalidOutput),
+    }
+    let mut seen = vec![false; names.len()];
+    indices
+        .into_iter()
+        .map(|index| {
+            let index = usize::try_from(index).map_err(|_| MojoError::InvalidOutput)?;
+            let slot = seen.get_mut(index).ok_or(MojoError::InvalidOutput)?;
+            if *slot {
+                return Err(MojoError::InvalidOutput);
+            }
+            *slot = true;
+            Ok(index)
+        })
+        .collect()
 }
 
 pub fn ping_validate_jsonl(input: &str) -> Result<i64, MojoError> {
@@ -393,5 +451,77 @@ mod tests {
                 .other_failures,
             2
         );
+    }
+}
+
+#[cfg(test)]
+mod compiled_ping_profile_order_tests {
+    use super::*;
+
+    #[test]
+    fn compiled_ping_profile_order_preserves_utf8_lexical_and_original_equal_order() {
+        let names = ["雪", "z", "a", "é", "", "a", "🦀", "雪"];
+        assert_eq!(ping_profile_order(&names), Ok(vec![4, 2, 5, 1, 3, 0, 7, 6]));
+        assert_eq!(ping_profile_order(&[]), Ok(vec![]));
+        assert_eq!(ping_profile_order(&["same", "same"]), Ok(vec![0, 1]));
+        let many = (0..1025)
+            .rev()
+            .map(|index| format!("profile-{index:04}"))
+            .collect::<Vec<_>>();
+        let borrowed = many.iter().map(String::as_str).collect::<Vec<_>>();
+        let indices = ping_profile_order(&borrowed).unwrap();
+        assert_eq!(indices.len(), 1025);
+        assert_eq!(indices[0], 1024);
+        assert_eq!(indices[1024], 0);
+        assert!(
+            indices
+                .windows(2)
+                .all(|pair| borrowed[pair[0]] <= borrowed[pair[1]])
+        );
+    }
+
+    #[test]
+    fn compiled_ping_profile_order_abi_rejects_malformed_late_view_without_writing() {
+        let mut views = [0_u64; 4];
+        let mut indices = [71_i64; 2];
+        let source = views.as_ptr() as usize as u64;
+        let output = indices.as_mut_ptr() as usize as u64;
+        for (abi, input, count, capacity, expected) in [
+            (2, source, 2, 2, 4),
+            (1, 0, 2, 2, 1),
+            (1, source, -1, 2, 1),
+            (1, source, 65_537, 2, 1),
+            (1, source, 2, 1, 1),
+            (1, source, 2, -1, 1),
+            (1, source, 2, 2, 0),
+        ] {
+            assert_eq!(
+                unsafe { prodex_mojo_ping_profile_order_v1(abi, input, count, output, capacity,) },
+                expected,
+            );
+            if expected != 0 {
+                assert_eq!(indices, [71; 2]);
+            }
+        }
+        indices = [71; 2];
+        views[3] = u64::MAX;
+        assert_eq!(
+            unsafe {
+                prodex_mojo_ping_profile_order_v1(1, views.as_ptr() as usize as u64, 2, output, 2)
+            },
+            1,
+        );
+        assert_eq!(indices, [71; 2]);
+        let malformed = [255_u8, 254];
+        views[0] = malformed.as_ptr() as usize as u64;
+        views[1] = 2;
+        views[3] = 0;
+        assert_eq!(
+            unsafe {
+                prodex_mojo_ping_profile_order_v1(1, views.as_ptr() as usize as u64, 2, output, 2)
+            },
+            1,
+        );
+        assert_eq!(indices, [71; 2]);
     }
 }
