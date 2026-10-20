@@ -9,6 +9,20 @@ const FOLLOW_MAX_INPUT_LINES: usize = 2 * 1024 * 1024;
 const _: () = assert!(std::mem::size_of::<usize>() == std::mem::size_of::<u64>());
 
 unsafe extern "C" {
+    fn prodex_live_log_retention_trim_v1(
+        abi_version: i64,
+        scope: i64,
+        entries: u64,
+        bytes: u64,
+        paths: u64,
+        output_address: u64,
+    ) -> i64;
+    fn prodex_live_log_oldest_path_v1(
+        abi_version: i64,
+        sequences_address: u64,
+        sequence_count: i64,
+        output_address: u64,
+    ) -> i64;
     fn prodex_live_log_record_over_limit_v1(
         abi_version: i64,
         record_length: i64,
@@ -75,6 +89,58 @@ fn pointer_address<T>(pointer: *const T) -> u64 {
 
 fn mutable_pointer_address<T>(pointer: *mut T) -> u64 {
     pointer as usize as u64
+}
+
+/// In-memory retention scope for the shared compiled live-log policy.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(i64)]
+pub enum LiveLogRetentionScope {
+    Path = 0,
+    Store = 1,
+}
+
+/// Decide whether a bounded path or the global store requires eviction.
+/// The Rust host retains the mutex, collections, and deletion effects.
+pub fn retention_trim_required(
+    scope: LiveLogRetentionScope,
+    entries: usize,
+    bytes: usize,
+    paths: usize,
+) -> Result<bool, MojoError> {
+    let mut decision = -1_i64;
+    status(unsafe {
+        prodex_live_log_retention_trim_v1(
+            ABI_VERSION,
+            scope as i64,
+            u64::try_from(entries).map_err(|_| MojoError::InvalidInput)?,
+            u64::try_from(bytes).map_err(|_| MojoError::InvalidInput)?,
+            u64::try_from(paths).map_err(|_| MojoError::InvalidInput)?,
+            mutable_pointer_address(&mut decision as *mut i64),
+        )
+    })?;
+    match decision {
+        0 => Ok(false),
+        1 => Ok(true),
+        _ => Err(MojoError::InvalidOutput),
+    }
+}
+
+/// Choose the least-recently updated path; ties preserve host key order.
+pub fn oldest_retention_path(sequences: &[u64]) -> Result<usize, MojoError> {
+    let mut index = -1_i64;
+    status(unsafe {
+        prodex_live_log_oldest_path_v1(
+            ABI_VERSION,
+            pointer_address(sequences.as_ptr()),
+            input_length(sequences.len())?,
+            mutable_pointer_address(&mut index as *mut i64),
+        )
+    })?;
+    let index = usize::try_from(index).map_err(|_| MojoError::InvalidOutput)?;
+    if index >= sequences.len() {
+        return Err(MojoError::InvalidOutput);
+    }
+    Ok(index)
 }
 
 /// Whether a live-log record exceeds the Mojo-owned record limit.
@@ -311,6 +377,63 @@ pub fn snapshot_plan(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn compiled_live_log_retention_bounds_keep_exact_thresholds_and_ties() {
+        use LiveLogRetentionScope::{Path, Store};
+        for (scope, entries, bytes, paths, expected) in [
+            (Path, 512, 2 * 1024 * 1024, 100, false),
+            (Path, 513, 0, 0, true),
+            (Path, 0, 2 * 1024 * 1024 + 1, 0, true),
+            (Store, 2048, 8 * 1024 * 1024, 64, false),
+            (Store, 2049, 0, 0, true),
+            (Store, 0, 8 * 1024 * 1024 + 1, 0, true),
+            (Store, 0, 0, 65, true),
+            (Store, usize::MAX, usize::MAX, usize::MAX, true),
+        ] {
+            assert_eq!(
+                retention_trim_required(scope, entries, bytes, paths).unwrap(),
+                expected
+            );
+        }
+        assert_eq!(oldest_retention_path(&[12, 7, 7, 9]).unwrap(), 1);
+        assert_eq!(oldest_retention_path(&[u64::MAX, 0, 1]).unwrap(), 1);
+        assert_eq!(oldest_retention_path(&[7]).unwrap(), 0);
+        assert_eq!(oldest_retention_path(&[]), Err(MojoError::InvalidInput));
+        assert_eq!(
+            oldest_retention_path(&vec![1_u64; 66]),
+            Err(MojoError::InvalidInput)
+        );
+    }
+
+    #[test]
+    fn compiled_live_log_retention_abi_rejects_bad_input_before_output_writes() {
+        let mut decision = 91_i64;
+        let result = (&mut decision as *mut i64) as usize as u64;
+        for (abi, scope, address, expected) in [
+            (2, 0, result, 4),
+            (1, -1, result, 1),
+            (1, 2, result, 1),
+            (1, 0, 0, 1),
+        ] {
+            assert_eq!(
+                unsafe { prodex_live_log_retention_trim_v1(abi, scope, 512, 0, 0, address) },
+                expected
+            );
+            assert_eq!(decision, 91);
+        }
+        let mut oldest = 72_i64;
+        let output = (&mut oldest as *mut i64) as usize as u64;
+        for (abi, count, sequences, expected) in
+            [(2, 1, 8, 4), (1, 0, 8, 1), (1, 66, 8, 1), (1, 1, 0, 1)]
+        {
+            assert_eq!(
+                unsafe { prodex_live_log_oldest_path_v1(abi, sequences, count, output) },
+                expected
+            );
+            assert_eq!(oldest, 72);
+        }
+    }
 
     #[test]
     fn runtime_live_log_mojo_adapter_checks_bounds_and_selected_metadata() {

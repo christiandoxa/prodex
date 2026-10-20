@@ -7589,3 +7589,14 @@ Gemini JSON ABI tests, existing provider scalar tests, no-fallback
 guard and official share checks pass. Production share rises from
 35.75250743965612% to 35.75917369898641% (129,794 Mojo / 233,173
 Rust). Project target 75% remains unmet.
+
+## Live-log per-path/global retention decisions moved to compiled Mojo (2026-10-20)
+
+Compiled live-log kernels now own per-path entry/byte trimming, global
+entry/byte/path pressure and stable oldest-path selection. Rust maintains
+the synchronized collections and applies the plans, with its previous
+limit predicates and min-by-key path selection deleted. The million-event
+bounded hot-path test and all 28 runtime-log tests pass, alongside direct
+ABI/negative tests and no-fallback guard. The audited production share
+rises from 35.75917369898641% to 35.76207093143992%
+(129,846 Mojo / 233,237 Rust); the project target remains 75%.

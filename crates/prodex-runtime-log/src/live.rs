@@ -5,9 +5,6 @@ use std::sync::Mutex;
 
 pub const DEFAULT_RUNTIME_LIVE_LOG_MAX_ENTRIES: usize = 512;
 pub const DEFAULT_RUNTIME_LIVE_LOG_MAX_BYTES: usize = 2 * 1024 * 1024;
-const MAX_RUNTIME_LIVE_LOG_PATHS: usize = 64;
-const MAX_RUNTIME_LIVE_LOG_ENTRIES: usize = 2048;
-const MAX_RUNTIME_LIVE_LOG_BYTES: usize = 8 * 1024 * 1024;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RuntimeLiveLogEntry {
@@ -62,12 +59,16 @@ impl RuntimeLiveLogStore {
             bucket.entries.push_back(entry);
             let mut removed_count = 0_usize;
             let mut removed_bytes = 0_usize;
-            while bucket.entries.len() > DEFAULT_RUNTIME_LIVE_LOG_MAX_ENTRIES
-                || bucket.bytes > DEFAULT_RUNTIME_LIVE_LOG_MAX_BYTES
-            {
-                let Some(removed) = bucket.entries.pop_front() else {
-                    break;
-                };
+            while mojo_live_log_record::retention_trim_required(
+                mojo_live_log_record::LiveLogRetentionScope::Path,
+                bucket.entries.len(),
+                bucket.bytes,
+                0,
+            )? {
+                let removed = bucket
+                    .entries
+                    .pop_front()
+                    .expect("compiled Mojo selected retention from nonempty path");
                 let removed_len = removed.line.len();
                 bucket.bytes = bucket.bytes.saturating_sub(removed_len);
                 bucket.dropped = bucket.dropped.saturating_add(1);
@@ -85,18 +86,24 @@ impl RuntimeLiveLogStore {
             .saturating_add(entry_bytes)
             .saturating_sub(removed_bytes);
 
-        while state.total_entries > MAX_RUNTIME_LIVE_LOG_ENTRIES
-            || state.total_bytes > MAX_RUNTIME_LIVE_LOG_BYTES
-            || state.paths.len() > MAX_RUNTIME_LIVE_LOG_PATHS
-        {
-            let Some(oldest_path) = state
+        while mojo_live_log_record::retention_trim_required(
+            mojo_live_log_record::LiveLogRetentionScope::Store,
+            state.total_entries,
+            state.total_bytes,
+            state.paths.len(),
+        )? {
+            let sequences = state
                 .paths
-                .iter()
-                .min_by_key(|(_, bucket)| bucket.last_sequence)
-                .map(|(path, _)| path.clone())
-            else {
-                break;
-            };
+                .values()
+                .map(|bucket| bucket.last_sequence)
+                .collect::<Vec<_>>();
+            let oldest_index = mojo_live_log_record::oldest_retention_path(&sequences)?;
+            let oldest_path = state
+                .paths
+                .keys()
+                .nth(oldest_index)
+                .expect("compiled Mojo selected a valid oldest live-log path")
+                .clone();
             if let Some(removed) = state.paths.remove(&oldest_path) {
                 state.total_entries = state.total_entries.saturating_sub(removed.entries.len());
                 state.total_bytes = state.total_bytes.saturating_sub(removed.bytes);
@@ -317,6 +324,83 @@ mod tests {
             snapshot.entries[0].line,
             "token_usage request=7 output_tokens=4\n"
         );
+    }
+
+    #[test]
+    fn compiled_live_log_retention_trims_byte_caps_without_changing_line_order() {
+        let store = RuntimeLiveLogStore::default();
+        let path = Path::new("bounded-bytes.log");
+        let line = "x".repeat(100 * 1024);
+        for _ in 0..22 {
+            store.append(path, &line).unwrap();
+        }
+        let snapshot = store.snapshot_after(path, 0, usize::MAX);
+        assert_eq!(snapshot.entries.len(), 20);
+        assert_eq!(snapshot.dropped, 2);
+        assert_eq!(snapshot.entries[0].sequence, 3);
+        assert_eq!(snapshot.entries[19].sequence, 22);
+    }
+
+    #[test]
+    fn compiled_live_log_retention_evicts_oldest_global_paths_and_preserves_ties() {
+        let store = RuntimeLiveLogStore::default();
+        for index in 0..66 {
+            store
+                .append(Path::new(&format!("bucket-{index:03}.log")), "x")
+                .unwrap();
+        }
+        let state = store.state.lock().unwrap();
+        assert_eq!(state.paths.len(), 64);
+        assert!(!state.paths.contains_key(Path::new("bucket-000.log")));
+        assert!(!state.paths.contains_key(Path::new("bucket-001.log")));
+        assert!(state.paths.contains_key(Path::new("bucket-065.log")));
+        drop(state);
+
+        // Force equal saturated sequence values; Mojo must retain the
+        // BTreeMap iteration order as its tie-breaker.
+        let tied = RuntimeLiveLogStore::default();
+        {
+            let mut state = tied.state.lock().unwrap();
+            state.next_sequence = u64::MAX;
+        }
+        for index in (0..66).rev() {
+            tied.append(Path::new(&format!("tie-{index:03}.log")), "x")
+                .unwrap();
+        }
+        let state = tied.state.lock().unwrap();
+        assert_eq!(state.paths.len(), 64);
+        assert!(!state.paths.contains_key(Path::new("tie-000.log")));
+        assert!(!state.paths.contains_key(Path::new("tie-001.log")));
+        assert!(state.paths.contains_key(Path::new("tie-065.log")));
+    }
+
+    #[test]
+    fn compiled_live_log_retention_reduces_global_entry_pressure() {
+        let store = RuntimeLiveLogStore::default();
+        for index in 0..2049 {
+            store
+                .append(Path::new(&format!("shard-{}.log", index % 5)), "entry")
+                .unwrap();
+        }
+        let state = store.state.lock().unwrap();
+        assert!(state.total_entries <= 2048);
+        assert_eq!(state.paths.len(), 4);
+        assert!(!state.paths.contains_key(Path::new("shard-4.log")));
+        assert_eq!(
+            state.total_entries,
+            state
+                .paths
+                .values()
+                .map(|path| path.entries.len())
+                .sum::<usize>()
+        );
+        assert_eq!(
+            state.total_bytes,
+            state.paths.values().map(|path| path.bytes).sum::<usize>()
+        );
+        drop(state);
+        store.append(Path::new("shard-4.log"), "entry").unwrap();
+        assert_eq!(store.state.lock().unwrap().paths.len(), 5);
     }
 
     #[test]

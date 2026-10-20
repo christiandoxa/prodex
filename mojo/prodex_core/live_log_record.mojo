@@ -270,3 +270,65 @@ def prodex_live_log_follow_plan_v1(
     dropped[] = dropped_count
     pending_gap[] = Int64(pending_length > LIVE_LOG_FOLLOW_MAX_PENDING_BYTES)
     return LIVE_LOG_RECORD_OK
+
+
+# Typed in-memory retention decisions. Synchronization, path keys, and
+# actual queue updates are host responsibilities.
+comptime LIVE_LOG_BUCKET_ENTRY_LIMIT: UInt64 = 512
+comptime LIVE_LOG_BUCKET_BYTE_LIMIT: UInt64 = 2 * 1024 * 1024
+comptime LIVE_LOG_TOTAL_ENTRY_LIMIT: UInt64 = 2048
+comptime LIVE_LOG_TOTAL_BYTE_LIMIT: UInt64 = 8 * 1024 * 1024
+comptime LIVE_LOG_PATH_LIMIT: UInt64 = 64
+
+
+@export("prodex_live_log_retention_trim_v1")
+def prodex_live_log_retention_trim_v1(
+    abi_version: Int64, scope: Int64, entries: UInt64, bytes: UInt64,
+    paths: UInt64, output_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != LIVE_LOG_RECORD_ABI_VERSION:
+        return LIVE_LOG_RECORD_ABI
+    if scope < 0 or scope > 1 or output_address == 0 or output_address % 8 != 0:
+        return LIVE_LOG_RECORD_INVALID
+    var trim = (
+        entries > LIVE_LOG_BUCKET_ENTRY_LIMIT
+        or bytes > LIVE_LOG_BUCKET_BYTE_LIMIT
+    ) if scope == 0 else (
+        entries > LIVE_LOG_TOTAL_ENTRY_LIMIT
+        or bytes > LIVE_LOG_TOTAL_BYTE_LIMIT
+        or paths > LIVE_LOG_PATH_LIMIT
+    )
+    Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )[] = Int64(trim)
+    return LIVE_LOG_RECORD_OK
+
+
+@export("prodex_live_log_oldest_path_v1")
+def prodex_live_log_oldest_path_v1(
+    abi_version: Int64,
+    sequences_address: UInt, sequence_count: Int64,
+    output_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != LIVE_LOG_RECORD_ABI_VERSION:
+        return LIVE_LOG_RECORD_ABI
+    if (
+        sequence_count <= 0 or sequence_count > 65
+        or sequences_address == 0 or sequences_address % 8 != 0
+        or output_address == 0 or output_address % 8 != 0
+    ):
+        return LIVE_LOG_RECORD_INVALID
+    var sequences = Pointer[mut=False, UInt64, ImmUntrackedOrigin](
+        unsafe_from_address=Int(sequences_address)
+    )
+    var index: Int64 = 0
+    var oldest = sequences[unsafe_offset=0]
+    for candidate in range(Int64(1), sequence_count):
+        var next_value = sequences[unsafe_offset=candidate]
+        if next_value < oldest:
+            oldest = next_value
+            index = candidate
+    Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )[] = index
+    return LIVE_LOG_RECORD_OK
