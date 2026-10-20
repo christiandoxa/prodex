@@ -70,6 +70,7 @@ pub enum DeepSeekKernelOperation {
     InputItemValidation = 48,
     ChatAssistantMessages = 49,
     StreamErrorClassification = 50,
+    BufferedOutputTextItem = 51,
 }
 
 #[repr(i64)]
@@ -339,6 +340,7 @@ fn operation_code(operation: DeepSeekKernelOperation) -> i64 {
         DeepSeekKernelOperation::InputItemValidation => 48,
         DeepSeekKernelOperation::ChatAssistantMessages => 49,
         DeepSeekKernelOperation::StreamErrorClassification => 50,
+        DeepSeekKernelOperation::BufferedOutputTextItem => 51,
     }
 }
 
@@ -394,7 +396,8 @@ fn kernel_output_capacity(
     }
     let multiplier = match operation {
         DeepSeekKernelOperation::ResponseToolCallItem
-        | DeepSeekKernelOperation::BufferedResponse => 6,
+        | DeepSeekKernelOperation::BufferedResponse
+        | DeepSeekKernelOperation::BufferedOutputTextItem => 6,
         _ => 8,
     };
     input_bytes
@@ -408,6 +411,7 @@ fn kernel_input_limit(operation: DeepSeekKernelOperation) -> usize {
         DeepSeekKernelOperation::ResponseMetadata => DEEPSEEK_RESPONSE_METADATA_MAX_BYTES,
         DeepSeekKernelOperation::ResponseToolCallItem
         | DeepSeekKernelOperation::BufferedResponse
+        | DeepSeekKernelOperation::BufferedOutputTextItem
         | DeepSeekKernelOperation::ResponsesHistoryCallId
         | DeepSeekKernelOperation::ResponsesHistoryContainsCallId => {
             DEEPSEEK_LARGE_RESPONSE_KERNEL_MAX_BYTES
@@ -763,6 +767,54 @@ mod request_issue_message_tests {
                 count
             ),
             3
+        );
+    }
+}
+
+#[cfg(test)]
+mod buffered_text_item_tests {
+    use super::*;
+
+    #[test]
+    fn compiled_deepseek_buffered_text_item_uses_the_shared_text_writer() {
+        let text = "東京🦀\n\"quoted\"\\";
+        let mut buffered =
+            DeepSeekKernelInput::new(DeepSeekKernelOperation::BufferedOutputTextItem);
+        buffered.delta = Some(text);
+        let mut streamed = DeepSeekKernelInput::new(DeepSeekKernelOperation::OutputTextItem);
+        streamed.delta = Some(text);
+        let buffered_json = deepseek_kernel(buffered).unwrap();
+        let streamed_json = deepseek_kernel(streamed).unwrap();
+        assert_eq!(buffered_json, streamed_json);
+        let encoded = String::from_utf8(buffered_json).unwrap();
+        assert!(encoded.contains("\"type\":\"message\""));
+        assert!(encoded.contains("\"role\":\"assistant\""));
+        assert!(encoded.contains("東京🦀"));
+        assert!(encoded.contains(r#"\n\"quoted\"\\"#));
+    }
+
+    #[test]
+    fn compiled_deepseek_buffered_text_item_preserves_large_response_budget_not_stream_limit() {
+        let text = "x".repeat(DEEPSEEK_KERNEL_MAX_BYTES + 128);
+        let mut buffered =
+            DeepSeekKernelInput::new(DeepSeekKernelOperation::BufferedOutputTextItem);
+        buffered.delta = Some(&text);
+        let mut streamed = DeepSeekKernelInput::new(DeepSeekKernelOperation::OutputTextItem);
+        streamed.delta = Some(&text);
+        assert_eq!(deepseek_kernel(streamed), Err(MojoError::InvalidInput));
+        let encoded = deepseek_kernel(buffered).unwrap();
+        let prefix = "{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"";
+        let suffix = "\"}]}";
+        assert_eq!(encoded.len(), prefix.len() + text.len() + suffix.len());
+        assert!(encoded.starts_with(prefix.as_bytes()));
+        assert_eq!(
+            &encoded[prefix.len()..prefix.len() + text.len()],
+            text.as_bytes()
+        );
+        assert!(encoded.ends_with(suffix.as_bytes()));
+        assert_eq!(
+            kernel_input_limit(DeepSeekKernelOperation::BufferedOutputTextItem),
+            DEEPSEEK_LARGE_RESPONSE_KERNEL_MAX_BYTES,
         );
     }
 }
