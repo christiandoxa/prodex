@@ -5,6 +5,13 @@ const MAX_INPUT_BYTES: usize = 4 * 1024 * 1024;
 const MAX_OUTPUT_BYTES: usize = 512;
 
 unsafe extern "C" {
+    fn prodex_runtime_repo_artifact_order_v1(
+        abi_version: i64,
+        rows_address: u64,
+        count: i64,
+        output_address: u64,
+        output_capacity: i64,
+    ) -> i64;
     fn prodex_runtime_repo_chunk_plan_v1(
         abi_version: i64,
         current_count: i64,
@@ -50,6 +57,59 @@ unsafe extern "C" {
         output_capacity: i64,
         written_address: u64,
     ) -> i64;
+}
+
+/// Borrowed artifact identity and source ordering facts. The caller retains
+/// artifact ownership; the compiled repo-map kernel alone chooses priority.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RepoArtifactOrderInput<'a> {
+    pub order: u64,
+    pub id: &'a str,
+}
+
+/// Newest artifact order first, bytewise ID ascending on equal order, and
+/// stable original index for exact equality. No per-compare Rust fallback.
+pub fn repo_artifact_order(inputs: &[RepoArtifactOrderInput<'_>]) -> Result<Vec<usize>, MojoError> {
+    if inputs.len() > 65_536 {
+        return Err(MojoError::InvalidInput);
+    }
+    let mut rows = Vec::<u64>::new();
+    rows.try_reserve_exact(inputs.len().checked_mul(3).ok_or(MojoError::Capacity)?)
+        .map_err(|_| MojoError::Capacity)?;
+    for input in inputs {
+        rows.extend([
+            input.order,
+            input.id.as_ptr() as usize as u64,
+            u64::try_from(input.id.len()).map_err(|_| MojoError::InvalidInput)?,
+        ]);
+    }
+    let mut output = vec![-1_i64; inputs.len()];
+    match unsafe {
+        prodex_runtime_repo_artifact_order_v1(
+            ABI_VERSION,
+            rows.as_ptr() as usize as u64,
+            i64::try_from(inputs.len()).map_err(|_| MojoError::InvalidInput)?,
+            output.as_mut_ptr() as usize as u64,
+            i64::try_from(output.len()).map_err(|_| MojoError::InvalidInput)?,
+        )
+    } {
+        0 => {}
+        1 => return Err(MojoError::InvalidInput),
+        4 => return Err(MojoError::AbiMismatch),
+        _ => return Err(MojoError::InvalidOutput),
+    }
+    let mut seen = vec![false; inputs.len()];
+    let mut indices = Vec::with_capacity(inputs.len());
+    for value in output {
+        let index = usize::try_from(value).map_err(|_| MojoError::InvalidOutput)?;
+        let slot = seen.get_mut(index).ok_or(MojoError::InvalidOutput)?;
+        if *slot {
+            return Err(MojoError::InvalidOutput);
+        }
+        *slot = true;
+        indices.push(index);
+    }
+    Ok(indices)
 }
 
 fn input_len(value: &str) -> Result<i64, MojoError> {
@@ -278,5 +338,81 @@ mod tests {
         ] {
             assert_eq!(repo_module_from_path(path).unwrap(), expected, "{path:?}");
         }
+    }
+}
+
+#[cfg(test)]
+mod compiled_artifact_order_tests {
+    use super::*;
+
+    #[test]
+    fn compiled_artifact_order_prioritizes_latest_then_id_with_stable_duplicates() {
+        let inputs = [
+            RepoArtifactOrderInput {
+                order: 1,
+                id: "last",
+            },
+            RepoArtifactOrderInput {
+                order: 10,
+                id: "雪",
+            },
+            RepoArtifactOrderInput { order: 10, id: "a" },
+            RepoArtifactOrderInput {
+                order: 10, id: "é"
+            },
+            RepoArtifactOrderInput { order: 10, id: "a" },
+            RepoArtifactOrderInput { order: 0, id: "" },
+        ];
+        assert_eq!(repo_artifact_order(&inputs), Ok(vec![2, 4, 3, 1, 0, 5]));
+        assert_eq!(repo_artifact_order(&[]), Ok(vec![]));
+        let lots = (0..1025)
+            .map(|index| RepoArtifactOrderInput {
+                order: (index % 10) as u64,
+                id: if index % 2 == 0 { "a" } else { "b" },
+            })
+            .collect::<Vec<_>>();
+        let selected = repo_artifact_order(&lots).unwrap();
+        assert_eq!(selected.len(), lots.len());
+        assert!(selected.windows(2).all(|window| {
+            let left = lots[window[0]];
+            let right = lots[window[1]];
+            left.order > right.order
+                || left.order == right.order
+                    && (left.id < right.id || left.id == right.id && window[0] < window[1])
+        }));
+    }
+
+    #[test]
+    fn compiled_artifact_order_abi_rejects_malformed_late_rows_without_output() {
+        let mut rows = [0_u64; 6];
+        let mut output = [79_i64; 2];
+        let source = rows.as_ptr() as usize as u64;
+        let dest = output.as_mut_ptr() as usize as u64;
+        for (abi, ptr, count, capacity, expected) in [
+            (2, source, 2, 2, 4),
+            (1, 0, 2, 2, 1),
+            (1, source, -1, 2, 1),
+            (1, source, 65_537, 2, 1),
+            (1, source, 2, 1, 1),
+        ] {
+            assert_eq!(
+                unsafe { prodex_runtime_repo_artifact_order_v1(abi, ptr, count, dest, capacity) },
+                expected,
+            );
+            assert_eq!(output, [79; 2]);
+        }
+        rows[5] = 2;
+        assert_eq!(
+            unsafe {
+                prodex_runtime_repo_artifact_order_v1(1, rows.as_ptr() as usize as u64, 2, dest, 2)
+            },
+            1,
+        );
+        assert_eq!(output, [79; 2]);
+        assert_eq!(
+            unsafe { prodex_runtime_repo_artifact_order_v1(1, 0, 0, dest, 2) },
+            0,
+        );
+        assert_eq!(output, [79; 2]);
     }
 }
