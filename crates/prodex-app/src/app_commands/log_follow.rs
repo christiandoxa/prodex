@@ -225,12 +225,9 @@ fn inspect_followed_log_metadata(
 }
 
 fn drain_followed_log_lines(state: &mut FollowedLog) -> Vec<String> {
-    let complete_len = state
-        .pending
-        .iter()
-        .rposition(|byte| *byte == b'\n')
-        .map(|index| index + 1)
-        .unwrap_or_default();
+    let complete_len =
+        prodex_mojo_core::live_log_record::follow_last_complete_line_end(&state.pending)
+            .expect("compiled Mojo followed-log last LF boundary returned invalid output");
     if complete_len == 0 {
         let plan = prodex_mojo_core::live_log_record::follow_line_plan(&[], state.pending.len())
             .expect("Mojo runtime-log follow plan returned invalid output");
@@ -242,10 +239,8 @@ fn drain_followed_log_lines(state: &mut FollowedLog) -> Vec<String> {
     }
     let complete = String::from_utf8_lossy(&state.pending[..complete_len]).into_owned();
     state.pending.drain(..complete_len);
-    let line_lengths = complete
-        .split_inclusive('\n')
-        .map(str::len)
-        .collect::<Vec<_>>();
+    let line_lengths = prodex_mojo_core::live_log_record::follow_utf8_line_lengths(&complete)
+        .expect("compiled Mojo followed-log UTF-8 line lengths returned invalid output");
     let plan =
         prodex_mojo_core::live_log_record::follow_line_plan(&line_lengths, state.pending.len())
             .expect("Mojo runtime-log follow plan returned invalid output");
@@ -437,5 +432,40 @@ mod tests {
         );
         drop(state);
         fs::remove_dir_all(root).unwrap();
+    }
+}
+
+#[cfg(test)]
+mod compiled_follow_framing_caller_tests {
+    use super::*;
+
+    #[test]
+    fn compiled_follow_framing_preserves_unicode_binary_and_leftover_partial_lines() {
+        let mut state = FollowedLog::default();
+        state
+            .pending
+            .extend_from_slice(b"first\n\xff\xfe\ntrailing");
+        assert_eq!(drain_followed_log_lines(&mut state), ["first", "��"]);
+        assert_eq!(state.pending, b"trailing");
+        state.pending.extend_from_slice("雪🦀\n".as_bytes());
+        assert_eq!(drain_followed_log_lines(&mut state), ["trailing雪🦀"]);
+        assert!(state.pending.is_empty());
+
+        state.pending.extend_from_slice(b"\r\n\n\nlast");
+        assert_eq!(drain_followed_log_lines(&mut state), ["", "", ""]);
+        assert_eq!(state.pending, b"last");
+    }
+
+    #[test]
+    fn compiled_follow_framing_waits_for_partial_utf8_and_emits_after_newline() {
+        let mut state = FollowedLog::default();
+        let scalar = "雪".as_bytes();
+        state.pending.extend_from_slice(b"prefix");
+        state.pending.extend_from_slice(&scalar[..2]);
+        assert!(drain_followed_log_lines(&mut state).is_empty());
+        state.pending.extend_from_slice(&scalar[2..]);
+        state.pending.push(b'\n');
+        assert_eq!(drain_followed_log_lines(&mut state), ["prefix雪"]);
+        assert!(state.pending.is_empty());
     }
 }
