@@ -413,6 +413,9 @@ const PROMOTED_FILES = [
   "crates/prodex-mojo-core/src/rich/gemini_precommit.rs",
   "crates/prodex-mojo-core/src/rich/gemini_precommit_tests.rs",
   "mojo/prodex_core/gemini_precommit.mojo",
+  "crates/prodex-provider-core/src/gemini_bridge/util.rs",
+  "crates/prodex-mojo-core/src/json/gemini_value_policy.rs",
+  "mojo/prodex_core/gemini_value_policy.mojo",
   "crates/prodex-provider-core/src/gemini_bridge/tooling/guardrails.rs",
   "crates/prodex-provider-core/src/gemini_bridge/tooling/guardrails/tool_text.rs",
   "crates/prodex-provider-core/src/gemini_bridge/tooling/guardrails/exact_output.rs",
@@ -1949,6 +1952,59 @@ export function findViolations(files) {
     if (filePath === "mojo/prodex_core/runtime_cookie_policy.mojo") {
       return contents.includes('@export("prodex_runtime_cookie_oldest_timestamp_index_v1")')
         ? [] : [`${filePath}: cookie eviction ordering must remain Mojo-owned`];
+    }
+    return [];
+  });
+  const geminiValueCollectionMojoViolations = files.flatMap(([filePath, contents]) => {
+    if (filePath === "crates/prodex-provider-core/src/gemini_bridge/util.rs") {
+      const production = contents.split("#[cfg(test)]", 1)[0];
+      const required = [
+        "fn gemini_collect_values(",
+        "gemini_value_projection(&document.nodes, raw, operation)",
+        "GeminiValueOperation::Strings",
+        "GeminiValueOperation::Paths",
+        "GeminiValueOperation::InputTexts",
+        "compiled_gemini_collect_input_texts_keeps_object_field_priority_and_duplicate_content",
+      ];
+      const retired = [
+        "Some(serde_json::Value::Array(items)) =>",
+        "gemini_provider_core_collect_string_values(Some(item), values)",
+        "gemini_provider_core_collect_path_values(Some(item), paths)",
+        "gemini_provider_core_collect_input_texts(Some(item), texts)",
+      ];
+      return required.every((marker) => contents.includes(marker)) &&
+        retired.every((marker) => !production.includes(marker))
+        ? [] : [filePath + ": Gemini collection policy must remain compiled Mojo-owned"];
+    }
+    if (filePath === "crates/prodex-mojo-core/src/json/gemini_value_policy.rs") {
+      const required = [
+        "fn prodex_mojo_gemini_value_policy_v1(",
+        "pub fn gemini_value_projection(",
+        "compiled_gemini_value_walks_nested_arrays_and_selected_object_content",
+        "compiled_gemini_value_abi_rejects_versions_and_invalid_shapes_without_writing",
+      ];
+      return required.filter((marker) => !contents.includes(marker))
+        .map((marker) => filePath + ": compiled Gemini value ABI must retain " + marker);
+    }
+    if (filePath === "mojo/prodex_core/gemini_value_policy.mojo") {
+      const required = [
+        '@export("prodex_mojo_gemini_value_policy_v1")',
+        "def gemini_value_collect(",
+        "pj_field(tree, cursor, StringSlice(\"content\"))",
+        "pj_trim(text)",
+        "pj_kind(tree, parent) == JSON_ARRAY",
+      ];
+      return required.filter((marker) => !contents.includes(marker))
+        .map((marker) => filePath + ": compiled Gemini value traversal must retain " + marker);
+    }
+    if (filePath === "crates/prodex-mojo-core/build.rs" &&
+        contents.includes('sources.push("../../mojo/prodex_core/gemini_content_hardening.mojo")')) {
+      return contents.includes('sources.push("../../mojo/prodex_core/gemini_value_policy.mojo")')
+        ? [] : [filePath + ": Gemini value kernel must stay linked into production"];
+    }
+    if (filePath === "crates/prodex-mojo-core/src/json.rs" && contents.includes("mod gemini_contents;")) {
+      return contents.includes("pub use gemini_value_policy::{GeminiValueOperation, gemini_value_projection};")
+        ? [] : [filePath + ": Gemini value adapter must stay reachable"];
     }
     return [];
   });
@@ -10953,7 +11009,7 @@ export function findViolations(files) {
     }
     return [];
   });
-  return [...geminiSimpleResponseViolations, ...logPayloadProjectionViolations, ...nativeRecoveryOwnershipViolations, ...quotaRecoveryEligibilityViolations, ...runtimeBrokerReuseMojoViolations, ...geminiResponseMediaMojoViolations, ...cookieEvictionMojoViolations, ...websocketBudgetMojoViolations, ...affinityBindingMojoViolations, ...responsesCapacityRecoveryViolations, ...sseTapMojoOwnershipViolations, ...quotaWatchViolations, ...geminiCompactSnippetViolations, ...geminiCompactTextViolations, ...doctorSmartContextDecisionViolations, ...providerSseJsonFrameMojoViolations, ...geminiSseCompletionOwnershipViolations, ...anthropicNativeStreamDecisionViolations, ...anthropicAttemptCursorViolations, ...geminiUnsupportedToolRetryViolations, ...terminalGeometryViolations, ...previousResponseRecoveryTransitionViolations, ...chatCompatibleToolCallKindViolations, ...geminiQuotaBodyMojoViolations, ...geminiOAuthRotationMojoViolations, ...geminiBuiltinBatchMojoViolations, ...geminiToolArrayValidationMojoViolations, ...geminiOAuthModelMojoViolations, ...superExposeOriginMojoViolations, ...kiroAcpToolLedgerMojoViolations, ...quotaPoolSummarySectionsMojoViolations, ...deepseekRequestDiagnosticViolations, ...deepseekToolShapeIssueMojoViolations, ...deepseekReplayItemPolicyMojoViolations, ...chatNamespaceSplitMojoViolations, ...deepseekInputItemIssueMessageViolations, ...deepseekRequestIssueMessageViolations, ...smartContextTelemetrySampleViolations, ...compatibilityDiagnosticsMojoViolations, ...quotaHeaderProjectionViolations, ...smartContextCapsuleOrderViolations, ...markerViolations, ...deepseekCatalogPolicyViolations, ...featureOffViolations, ...liveLogRecordViolations, ...runtimePolicyPresetViolations, ...runtimeConfigScalarViolations, ...profileHealthCircuitViolations, ...logThroughputViolations, ...operationalDetailSpecViolations, ...transcriptPolicyViolations, ...logLoadPolicyViolations, ...routeReasonViolations, ...runtimeStateQuotaViolations, ...runtimeStateRoutePolicyViolations, ...runtimeProxyRootViolations, ...runtimeRecoveryDeadlineViolations, ...brokerVersionGuardViolations, ...brokerContinuityViolations, ...brokerLogCacheViolations, ...codexConfigViolations, ...statePolicyViolations, ...quotaSelectionPolicyViolations, ...routeTagMirrorViolations, ...enumTagMirrorViolations, ...appSelectionPolicyMirrorViolations, ...runtimeStateBackgroundViolations, ...redactionViolations, ...rateLimitHeaderSelectionViolations, ...profileIdentityViolations, ...governanceInspectionViolations, ...governanceInspectionOrderingViolations, ...exactnessPlannerViolations,
+  return [...geminiValueCollectionMojoViolations, ...geminiSimpleResponseViolations, ...logPayloadProjectionViolations, ...nativeRecoveryOwnershipViolations, ...quotaRecoveryEligibilityViolations, ...runtimeBrokerReuseMojoViolations, ...geminiResponseMediaMojoViolations, ...cookieEvictionMojoViolations, ...websocketBudgetMojoViolations, ...affinityBindingMojoViolations, ...responsesCapacityRecoveryViolations, ...sseTapMojoOwnershipViolations, ...quotaWatchViolations, ...geminiCompactSnippetViolations, ...geminiCompactTextViolations, ...doctorSmartContextDecisionViolations, ...providerSseJsonFrameMojoViolations, ...geminiSseCompletionOwnershipViolations, ...anthropicNativeStreamDecisionViolations, ...anthropicAttemptCursorViolations, ...geminiUnsupportedToolRetryViolations, ...terminalGeometryViolations, ...previousResponseRecoveryTransitionViolations, ...chatCompatibleToolCallKindViolations, ...geminiQuotaBodyMojoViolations, ...geminiOAuthRotationMojoViolations, ...geminiBuiltinBatchMojoViolations, ...geminiToolArrayValidationMojoViolations, ...geminiOAuthModelMojoViolations, ...superExposeOriginMojoViolations, ...kiroAcpToolLedgerMojoViolations, ...quotaPoolSummarySectionsMojoViolations, ...deepseekRequestDiagnosticViolations, ...deepseekToolShapeIssueMojoViolations, ...deepseekReplayItemPolicyMojoViolations, ...chatNamespaceSplitMojoViolations, ...deepseekInputItemIssueMessageViolations, ...deepseekRequestIssueMessageViolations, ...smartContextTelemetrySampleViolations, ...compatibilityDiagnosticsMojoViolations, ...quotaHeaderProjectionViolations, ...smartContextCapsuleOrderViolations, ...markerViolations, ...deepseekCatalogPolicyViolations, ...featureOffViolations, ...liveLogRecordViolations, ...runtimePolicyPresetViolations, ...runtimeConfigScalarViolations, ...profileHealthCircuitViolations, ...logThroughputViolations, ...operationalDetailSpecViolations, ...transcriptPolicyViolations, ...logLoadPolicyViolations, ...routeReasonViolations, ...runtimeStateQuotaViolations, ...runtimeStateRoutePolicyViolations, ...runtimeProxyRootViolations, ...runtimeRecoveryDeadlineViolations, ...brokerVersionGuardViolations, ...brokerContinuityViolations, ...brokerLogCacheViolations, ...codexConfigViolations, ...statePolicyViolations, ...quotaSelectionPolicyViolations, ...routeTagMirrorViolations, ...enumTagMirrorViolations, ...appSelectionPolicyMirrorViolations, ...runtimeStateBackgroundViolations, ...redactionViolations, ...rateLimitHeaderSelectionViolations, ...profileIdentityViolations, ...governanceInspectionViolations, ...governanceInspectionOrderingViolations, ...exactnessPlannerViolations,
     ...infoRunwayViolations,
     ...geminiNormalizedViolations,
     ...quotaDurationViolations,
@@ -11082,6 +11138,19 @@ async function promotedFiles() {
 }
 
 function selfTest() {
+  const geminiValueCallerFixture = [
+    "fn gemini_collect_values(",
+    "gemini_value_projection(&document.nodes, raw, operation)",
+    "GeminiValueOperation::Strings",
+    "GeminiValueOperation::Paths",
+    "GeminiValueOperation::InputTexts",
+    "compiled_gemini_collect_input_texts_keeps_object_field_priority_and_duplicate_content",
+  ].join("\n");
+  const geminiValueCallerPath = "crates/prodex-provider-core/src/gemini_bridge/util.rs";
+  assert.deepEqual(findViolations([[geminiValueCallerPath, geminiValueCallerFixture]]), []);
+  assert.match(findViolations([[geminiValueCallerPath,
+    geminiValueCallerFixture + "\nSome(serde_json::Value::Array(items)) =>",
+  ]]).join("\n"), /Gemini collection policy must remain compiled Mojo-owned/u);
   const conversationFile = "crates/prodex-provider-core/src/gemini_bridge/tooling/guardrails/tool_text.rs";
   const conversationCalls = "gemini_guardrail_json( pub(super) fn gemini_provider_core_guardrail_projection<";
   assert.deepEqual(findViolations([[conversationFile, conversationCalls]]), []);

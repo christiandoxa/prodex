@@ -2,61 +2,49 @@
 
 use prodex_mojo_core::provider_constraints::provider_boolean_token;
 
+fn gemini_collect_values(
+    value: Option<&serde_json::Value>,
+    operation: prodex_mojo_core::json::GeminiValueOperation,
+) -> Vec<String> {
+    let envelope = serde_json::json!({"value": value});
+    let mut document = crate::mojo_json::Document::default();
+    document.root(&envelope);
+    let raw = std::str::from_utf8(&document.raw).expect("Serde emits UTF-8 JSON");
+    let bytes = prodex_mojo_core::json::gemini_value_projection(&document.nodes, raw, operation)
+        .expect("compiled Mojo Gemini value collection returned invalid output");
+    serde_json::from_slice(&bytes)
+        .expect("compiled Mojo Gemini value collection must emit string array")
+}
+
 pub fn gemini_provider_core_collect_string_values(
     value: Option<&serde_json::Value>,
     values: &mut Vec<String>,
 ) {
-    match value {
-        Some(serde_json::Value::String(value)) => values.push(value.to_string()),
-        Some(serde_json::Value::Array(items)) => {
-            for item in items {
-                gemini_provider_core_collect_string_values(Some(item), values);
-            }
-        }
-        _ => {}
-    }
+    values.extend(gemini_collect_values(
+        value,
+        prodex_mojo_core::json::GeminiValueOperation::Strings,
+    ));
 }
 
 pub fn gemini_provider_core_collect_path_values(
     value: Option<&serde_json::Value>,
     paths: &mut Vec<std::path::PathBuf>,
 ) {
-    match value {
-        Some(serde_json::Value::String(path)) if !path.trim().is_empty() => {
-            paths.push(std::path::PathBuf::from(path.trim()));
-        }
-        Some(serde_json::Value::Array(items)) => {
-            for item in items {
-                gemini_provider_core_collect_path_values(Some(item), paths);
-            }
-        }
-        _ => {}
-    }
+    paths.extend(
+        gemini_collect_values(value, prodex_mojo_core::json::GeminiValueOperation::Paths)
+            .into_iter()
+            .map(std::path::PathBuf::from),
+    );
 }
 
 pub fn gemini_provider_core_collect_input_texts(
     value: Option<&serde_json::Value>,
     texts: &mut Vec<String>,
 ) {
-    match value {
-        Some(serde_json::Value::String(text)) => texts.push(text.clone()),
-        Some(serde_json::Value::Array(items)) => {
-            for item in items {
-                gemini_provider_core_collect_input_texts(Some(item), texts);
-            }
-        }
-        Some(serde_json::Value::Object(object)) => {
-            if let Some(text) = object
-                .get("text")
-                .or_else(|| object.get("content"))
-                .and_then(serde_json::Value::as_str)
-            {
-                texts.push(text.to_string());
-            }
-            gemini_provider_core_collect_input_texts(object.get("content"), texts);
-        }
-        _ => {}
-    }
+    texts.extend(gemini_collect_values(
+        value,
+        prodex_mojo_core::json::GeminiValueOperation::InputTexts,
+    ));
 }
 
 pub fn gemini_provider_core_bool_value(value: &serde_json::Value) -> Option<bool> {
@@ -116,6 +104,80 @@ pub fn gemini_provider_core_stream_error(value: &serde_json::Value) -> Option<(S
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn compiled_gemini_collect_string_values_preserves_nested_array_order_and_existing_prefix() {
+        let input = serde_json::json!([
+            "", ["first", [null, false, "東京", {"content": "opaque"}]],
+            42, "last", [],
+        ]);
+        let mut values = vec!["existing".to_string()];
+        gemini_provider_core_collect_string_values(Some(&input), &mut values);
+        gemini_provider_core_collect_string_values(None, &mut values);
+        assert_eq!(values, ["existing", "", "first", "東京", "last"]);
+        gemini_provider_core_collect_string_values(Some(&serde_json::json!("!")), &mut values);
+        assert_eq!(values.last().map(String::as_str), Some("!"));
+    }
+
+    #[test]
+    fn compiled_gemini_collect_path_values_trims_unicode_and_preserves_array_order() {
+        use std::path::PathBuf;
+        let input = serde_json::json!([
+            "  /tmp/a  ", "", " \u{2003} ",
+            [" \u{2003}/tmp/東京\u{2003}", 4, null, "  relative/path  "],
+            {"content":"/tmp/opaque"},
+        ]);
+        let mut paths = vec![PathBuf::from("seed")];
+        gemini_provider_core_collect_path_values(Some(&input), &mut paths);
+        gemini_provider_core_collect_path_values(Some(&serde_json::Value::Null), &mut paths);
+        assert_eq!(
+            paths,
+            [
+                PathBuf::from("seed"),
+                PathBuf::from("/tmp/a"),
+                PathBuf::from("/tmp/東京"),
+                PathBuf::from("relative/path"),
+            ]
+        );
+    }
+
+    #[test]
+    fn compiled_gemini_collect_input_texts_keeps_object_field_priority_and_duplicate_content() {
+        let input = serde_json::json!([
+            "top",
+            {"text":"header", "content":"body", "ignored":"ignore"},
+            {"text": 22, "content":"child"},
+            {"text":null, "content":["nested", {"text":"inner", "content":{"content":"leaf"}}]},
+            {"text":"", "content":""},
+            {"content":true},
+            {"content":{"text":"branch","content":"tail"}},
+            ["end", {"text":"standalone","other":["excluded"]}],
+        ]);
+        let mut texts = vec!["seed".to_string()];
+        gemini_provider_core_collect_input_texts(Some(&input), &mut texts);
+        assert_eq!(
+            texts,
+            [
+                "seed",
+                "top",
+                "header",
+                "body",
+                "child",
+                "nested",
+                "inner",
+                "leaf",
+                "leaf",
+                "",
+                "",
+                "branch",
+                "tail",
+                "end",
+                "standalone",
+            ]
+        );
+        gemini_provider_core_collect_input_texts(None, &mut texts);
+        assert_eq!(texts.len(), 15);
+    }
 
     #[test]
     fn gemini_bool_tokens_use_mojo_policy() {

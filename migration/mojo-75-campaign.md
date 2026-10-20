@@ -7539,3 +7539,17 @@ all 39 terminal crate tests and the source guard pass.
 The unchanged official production-share metric rises from
 35.714305415730024% to 35.72208587265256% (129,539 Mojo / 233,091 Rust);
 audited non-regression passes, while the 75% project target remains open.
+
+## Gemini value collection traversal moved to compiled Mojo (2026-10-20)
+
+A focused production `gemini_value_policy.mojo` owner now handles nested
+string, Unicode-trimmed path, and input-text collection through one
+versioned measured JSON ABI. The prior Rust recursive algorithms were
+deleted; Rust retains Serde acquisition, `Vec` appends and OS `PathBuf`
+construction. Direct ABI and three caller-boundary cases cover nested
+arrays, ignored object fields, duplicate `content` emission, UTF-8, Unicode
+spaces and malformed ABI conditions. The 510-test strict provider suite,
+compiler, source no-fallback guard, format and production-share checks pass.
+The official share increases from 35.72208587265256% to
+35.737343386031895% (129,639 Mojo / 233,116 Rust); the 75% project
+objective remains outstanding.
