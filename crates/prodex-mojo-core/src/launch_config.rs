@@ -1,5 +1,9 @@
 //! Config assignment matching over borrowed arguments and override keys.
 //! Values stay with the native caller; this operation returns only typed plans.
+#[path = "launch_config/instructions.rs"]
+mod instructions;
+pub use instructions::{launch_instruction_path_order, launch_instruction_text_cut};
+
 use crate::{
     MojoError,
     launch::{boolean, index, status, views},

@@ -25,8 +25,24 @@ pub(crate) fn runtime_copilot_workspace_custom_instructions(root: &Path) -> Resu
     if paths.is_empty() {
         return Ok(None);
     }
-    paths.sort();
-    paths.truncate(RUNTIME_COPILOT_CUSTOM_INSTRUCTIONS_MAX_FILES);
+    // The compiled launch policy owns final path ordering. Filesystem
+    // discovery, symlink restrictions and file I/O remain host-owned.
+    let borrowed = paths
+        .iter()
+        .map(|path| path.as_os_str().as_encoded_bytes())
+        .collect::<Vec<_>>();
+    let sorted = prodex_mojo_core::launch_config::launch_instruction_path_order(&borrowed)
+        .expect("compiled Mojo Copilot instruction path order returned invalid output");
+    let mut original = paths.into_iter().map(Some).collect::<Vec<_>>();
+    let paths = sorted
+        .into_iter()
+        .take(RUNTIME_COPILOT_CUSTOM_INSTRUCTIONS_MAX_FILES)
+        .map(|index| {
+            original[index]
+                .take()
+                .expect("validated Mojo indices are unique")
+        })
+        .collect::<Vec<_>>();
 
     let mut output = String::new();
     let mut total_bytes = 0usize;
@@ -87,16 +103,22 @@ fn runtime_copilot_collect_instruction_paths(root: &Path, paths: &mut Vec<PathBu
     {
         return Ok(());
     }
-    let mut entries = fs::read_dir(root)
+    let entries = fs::read_dir(root)
         .with_context(|| format!("failed to read {}", root.display()))?
         .collect::<std::result::Result<Vec<_>, _>>()
         .with_context(|| format!("failed to list {}", root.display()))?;
-    entries.sort_by_key(|entry| entry.path());
-    for entry in entries {
+    let observed_paths = entries.iter().map(|entry| entry.path()).collect::<Vec<_>>();
+    let borrowed = observed_paths
+        .iter()
+        .map(|path| path.as_os_str().as_encoded_bytes())
+        .collect::<Vec<_>>();
+    let sorted = prodex_mojo_core::launch_config::launch_instruction_path_order(&borrowed)
+        .expect("compiled Mojo Copilot directory-entry order returned invalid output");
+    for index in sorted {
         if paths.len() >= RUNTIME_COPILOT_CUSTOM_INSTRUCTIONS_MAX_FILES {
             break;
         }
-        let path = entry.path();
+        let path = &observed_paths[index];
         let metadata = fs::symlink_metadata(&path)
             .with_context(|| format!("failed to inspect {}", path.display()))?;
         if metadata.file_type().is_symlink() {
@@ -110,7 +132,7 @@ fn runtime_copilot_collect_instruction_paths(root: &Path, paths: &mut Vec<PathBu
                 .and_then(|name| name.to_str())
                 .is_some_and(|name| name.ends_with(".instructions.md"))
         {
-            paths.push(path);
+            paths.push(path.clone());
         }
     }
     Ok(())
@@ -127,13 +149,9 @@ fn runtime_copilot_read_instruction_file(path: &Path, max_bytes: usize) -> Resul
         .read_to_end(&mut bytes)
         .with_context(|| format!("failed to read {}", path.display()))?;
     let mut content = String::from_utf8_lossy(&bytes).into_owned();
-    if content.len() > max_bytes {
-        let mut end = max_bytes.min(content.len());
-        while end > 0 && !content.is_char_boundary(end) {
-            end -= 1;
-        }
-        content.truncate(end);
-    }
+    let end = prodex_mojo_core::launch_config::launch_instruction_text_cut(&content, max_bytes)
+        .expect("compiled Mojo Copilot decoded text boundary returned invalid output");
+    content.truncate(end);
     Ok(Some(content))
 }
 
