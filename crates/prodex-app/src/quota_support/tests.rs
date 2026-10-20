@@ -395,3 +395,68 @@ fn compiled_quota_runtime_log_order_breaks_equal_timestamps_by_path_ascending() 
     );
     fs::remove_dir_all(root).unwrap();
 }
+
+#[test]
+fn compiled_quota_state_profile_selection_prefers_latest_valid_and_unicode_name_ties() {
+    let state = AppState {
+        active_profile: Some("active".into()),
+        profiles: BTreeMap::from([
+            ("active".into(), profile("/tmp/active")),
+            ("z".into(), profile("/tmp/z")),
+            ("é".into(), profile("/tmp/accent")),
+            ("雪".into(), profile("/tmp/snow")),
+            ("ancient".into(), profile("/tmp/ancient")),
+        ]),
+        last_run_selected_at: BTreeMap::from([
+            ("active".into(), 10),
+            ("z".into(), 20),
+            ("é".into(), 20),
+            ("雪".into(), 20),
+            ("deleted".into(), i64::MAX),
+            ("ancient".into(), i64::MIN),
+        ]),
+        ..AppState::default()
+    };
+    assert_eq!(
+        quota_state_current_profile_name(&state).as_deref(),
+        Some("雪")
+    );
+    let mut state = state;
+    state.last_run_selected_at.insert("雪".into(), -5);
+    assert_eq!(
+        quota_state_current_profile_name(&state).as_deref(),
+        Some("é")
+    );
+    state.last_run_selected_at.remove("é");
+    assert_eq!(
+        quota_state_current_profile_name(&state).as_deref(),
+        Some("z")
+    );
+}
+
+#[test]
+fn compiled_quota_state_profile_selection_requires_existing_active_fallback() {
+    let mut state = AppState {
+        active_profile: Some("active".into()),
+        profiles: BTreeMap::from([("active".into(), profile("/tmp/active"))]),
+        last_run_selected_at: BTreeMap::from([("deleted".into(), i64::MAX)]),
+        ..AppState::default()
+    };
+    assert_eq!(
+        quota_state_current_profile_name(&state).as_deref(),
+        Some("active")
+    );
+    state.profiles.clear();
+    assert_eq!(quota_state_current_profile_name(&state), None);
+    state.active_profile = None;
+    state.last_run_selected_at.clear();
+    assert_eq!(quota_state_current_profile_name(&state), None);
+    state
+        .profiles
+        .insert("active".into(), profile("/tmp/active"));
+    state.last_run_selected_at.insert("active".into(), i64::MIN);
+    assert_eq!(
+        quota_state_current_profile_name(&state).as_deref(),
+        Some("active")
+    );
+}

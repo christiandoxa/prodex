@@ -340,22 +340,29 @@ fn quota_current_profile_name(state: &AppState) -> Option<String> {
 }
 
 fn quota_state_current_profile_name(state: &AppState) -> Option<String> {
-    state
-        .last_run_selected_at
+    use prodex_mojo_core::quota::{
+        QuotaStateProfileChoice, QuotaStateProfileInput, quota_state_profile_choice,
+    };
+    let candidates = state.last_run_selected_at.iter().collect::<Vec<_>>();
+    let facts = candidates
         .iter()
-        .filter(|(profile_name, _)| state.profiles.contains_key(*profile_name))
-        .max_by(|(left_name, left_at), (right_name, right_at)| {
-            left_at
-                .cmp(right_at)
-                .then_with(|| left_name.cmp(right_name))
+        .map(|(name, timestamp)| QuotaStateProfileInput {
+            name,
+            last_selected_at: **timestamp,
+            exists: state.profiles.contains_key(*name),
         })
-        .map(|(profile_name, _)| profile_name.clone())
-        .or_else(|| {
-            state
-                .active_profile
-                .clone()
-                .filter(|profile_name| state.profiles.contains_key(profile_name))
-        })
+        .collect::<Vec<_>>();
+    let active_usable = state
+        .active_profile
+        .as_ref()
+        .is_some_and(|name| state.profiles.contains_key(name));
+    match quota_state_profile_choice(&facts, active_usable)
+        .expect("compiled Mojo quota state profile selection returned invalid output")
+    {
+        QuotaStateProfileChoice::LastRun(index) => Some(candidates[index].0.clone()),
+        QuotaStateProfileChoice::Active => state.active_profile.clone(),
+        QuotaStateProfileChoice::Unavailable => None,
+    }
 }
 
 fn quota_current_runtime_profile_name(state: &AppState) -> Option<String> {

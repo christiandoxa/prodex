@@ -4107,3 +4107,86 @@ def prodex_quota_runtime_log_order_v1(
         output[unsafe_offset=end] = saved
         quota_runtime_log_order_heap_down(rows, output, 0, end)
     return 0
+
+
+# Current quota profile selection from persisted last-run observations:
+# newest recorded timestamp wins, lexical profile-name descending on a
+# timestamp tie. The active-profile fallback is only used when no valid
+# observed profile remains in the store.
+comptime QUOTA_STATE_PROFILE_ABI: Int64 = 1
+comptime QUOTA_STATE_PROFILE_MAX: Int64 = 65_536
+comptime QUOTA_STATE_PROFILE_ROW_WORDS: Int64 = 4
+
+
+def quota_state_profile_name_greater(
+    rows: Pointer[mut=False, Int64, _],
+    left: Int64, right: Int64,
+) -> Bool:
+    var left_offset = left * QUOTA_STATE_PROFILE_ROW_WORDS
+    var right_offset = right * QUOTA_STATE_PROFILE_ROW_WORDS
+    var left_len = rows[unsafe_offset=left_offset + 1]
+    var right_len = rows[unsafe_offset=right_offset + 1]
+    var a = Pointer[mut=False, UInt8, ImmUntrackedOrigin](
+        unsafe_from_address=Int(rows[unsafe_offset=left_offset])
+    )
+    var b = Pointer[mut=False, UInt8, ImmUntrackedOrigin](
+        unsafe_from_address=Int(rows[unsafe_offset=right_offset])
+    )
+    for index in range(min(left_len, right_len)):
+        var lhs = a[unsafe_offset=index]
+        var rhs = b[unsafe_offset=index]
+        if lhs != rhs:
+            return lhs > rhs
+    return left_len > right_len
+
+
+@export("prodex_quota_state_current_profile_v1")
+def prodex_quota_state_current_profile_v1(
+    abi_version: Int64,
+    rows_address: UInt, count: Int64,
+    active_profile_usable: Int64,
+    output_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != QUOTA_STATE_PROFILE_ABI:
+        return 4
+    if (
+        count < 0 or count > QUOTA_STATE_PROFILE_MAX
+        or (count > 0 and (rows_address == 0 or rows_address % 8 != 0))
+        or (active_profile_usable != 0 and active_profile_usable != 1)
+        or output_address == 0 or output_address % 8 != 0
+    ):
+        return 1
+    var rows = Pointer[mut=False, Int64, ImmUntrackedOrigin](
+        unsafe_from_address=Int(rows_address)
+    )
+    for index in range(count):
+        var offset = index * QUOTA_STATE_PROFILE_ROW_WORDS
+        var address = rows[unsafe_offset=offset]
+        var length = rows[unsafe_offset=offset + 1]
+        var usable = rows[unsafe_offset=offset + 3]
+        if (
+            address < 0 or length < 0
+            or (length > 0 and address == 0)
+            or (usable != 0 and usable != 1)
+        ):
+            return 1
+    var selected = Int64(-1 if active_profile_usable == 1 else -2)
+    for index in range(count):
+        var offset = index * QUOTA_STATE_PROFILE_ROW_WORDS
+        if rows[unsafe_offset=offset + 3] != 1:
+            continue
+        if selected < 0:
+            selected = index
+            continue
+        var prior_offset = selected * QUOTA_STATE_PROFILE_ROW_WORDS
+        var timestamp = rows[unsafe_offset=offset + 2]
+        var prior_timestamp = rows[unsafe_offset=prior_offset + 2]
+        if timestamp > prior_timestamp or (
+            timestamp == prior_timestamp
+            and quota_state_profile_name_greater(rows, index, selected)
+        ):
+            selected = index
+    Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )[] = selected
+    return 0

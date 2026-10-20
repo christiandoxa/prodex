@@ -8020,3 +8020,16 @@ quota_support tests, two direct core ABI tests, direct Mojo
 test, source no-fallback and metric guards pass. Share rises from
 35.98176843960252% to 35.996325158260106%
 (132,433 Mojo / 235,474 Rust); target 75% remains open.
+
+## Persisted quota current-profile selection and active fallback in Mojo (2026-10-20)
+
+The compiled quota owner now selects the newest known
+last-run profile, lexically greatest name on ties and the
+configured active-profile fallback only when no valid
+historical candidate exists. Rust retains AppState
+acquisition and materializes the typed result but its
+previous filter/max_by and fallback branches were removed.
+All 16 app quota tests, two direct core ABI tests, direct
+Mojo tests and source/share guards pass. Official share rises
+from 35.996325158260106% to 36.00180409780166%
+(132,505 Mojo / 235,546 Rust). The 75% objective remains open.
