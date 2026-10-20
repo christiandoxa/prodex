@@ -7983,3 +7983,15 @@ were removed. All 129 log tests, 23 report-info tests, three core
 ABI tests, a direct Mojo test and source/share guards pass. Official
 share rises from 35.95155464268008% to 35.96076947575585%
 (132,108 Mojo / 235,259 Rust); the 75% target remains open.
+
+## Runtime repo/symbol map artifact priority sorted in Mojo (2026-10-20)
+
+The compiled repo-map owner now sorts artifacts by most-recent
+order descending, then artifact ID ascending, preserving stable
+input order for ties. Rust retains artifact metadata and projection
+materialization but its old sort_by precedence loop was removed.
+Fifteen artifact-store tests, two production caller regressions,
+two direct core ABI tests, the direct Mojo ABI test and source/share
+guards pass. Official share rises from 35.96076947575585% to
+35.970853048974604% (132,199 Mojo / 235,318 Rust).
+The 75% project target remains open.

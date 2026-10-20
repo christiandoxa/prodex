@@ -78,15 +78,21 @@ impl RuntimeSmartContextArtifactStore {
             RuntimeSmartContextArtifactRepoMapEntry,
         >::new();
         let mut complete = true;
-        let mut artifacts = self.artifacts.values().collect::<Vec<_>>();
-        artifacts.sort_by(|left, right| {
-            right
-                .order
-                .cmp(&left.order)
-                .then_with(|| left.id.cmp(&right.id))
-        });
+        let artifacts = self.artifacts.values().collect::<Vec<_>>();
+        let ordering = artifacts
+            .iter()
+            .map(
+                |artifact| prodex_mojo_core::runtime_repo_map::RepoArtifactOrderInput {
+                    order: artifact.order,
+                    id: &artifact.id,
+                },
+            )
+            .collect::<Vec<_>>();
+        let selected = prodex_mojo_core::runtime_repo_map::repo_artifact_order(&ordering)
+            .expect("compiled Mojo artifact repo-map projection ordering returned invalid output");
 
-        for artifact in artifacts {
+        for index in selected {
+            let artifact = artifacts[index];
             let Some(line_index) = artifact.line_index.as_ref() else {
                 complete = false;
                 continue;
@@ -284,5 +290,67 @@ impl RuntimeSmartContextArtifactStore {
             );
         }
         runtime_proxy_crate::smart_context_hash_text(&source)
+    }
+}
+
+#[cfg(test)]
+mod compiled_projection_artifact_order_tests {
+    use super::*;
+
+    #[test]
+    fn compiled_repo_map_projection_prioritizes_latest_artifact_over_id_sort() {
+        let mut store = RuntimeSmartContextArtifactStore::default();
+        let alpha = store
+            .insert_text("src/shared.rs:1:1\nfn first_symbol() {}\n")
+            .unwrap();
+        let beta = store
+            .insert_text("src/shared.rs:1:1\nfn second_symbol() {}\n")
+            .unwrap();
+        assert_ne!(alpha.id, beta.id);
+        store.artifacts.get_mut(&alpha.id).unwrap().order = 100;
+        store.artifacts.get_mut(&beta.id).unwrap().order = 10;
+        store.repo_map_prewarm = None;
+        let map = store.repo_map_projection(64);
+        assert!(
+            map.entries.iter().any(|entry| {
+                entry.kind == RuntimeSmartContextArtifactRepoMapEntryKind::Path
+                    && entry.path.as_deref() == Some("src/shared.rs")
+                    && entry.artifact_id == alpha.id
+            }),
+            "most recent artifact must win the path projection",
+        );
+        store.artifacts.get_mut(&alpha.id).unwrap().order = 10;
+        store.artifacts.get_mut(&beta.id).unwrap().order = 100;
+        store.repo_map_prewarm = None;
+        let map = store.repo_map_projection(64);
+        assert!(map.entries.iter().any(|entry| {
+            entry.kind == RuntimeSmartContextArtifactRepoMapEntryKind::Path
+                && entry.path.as_deref() == Some("src/shared.rs")
+                && entry.artifact_id == beta.id
+        }));
+    }
+
+    #[test]
+    fn compiled_repo_map_projection_tie_breaks_equal_order_by_artifact_id() {
+        let mut store = RuntimeSmartContextArtifactStore::default();
+        let first = store
+            .insert_text("src/shared.rs:1:1\npub fn one() {}\n")
+            .unwrap();
+        let second = store
+            .insert_text("src/shared.rs:1:1\npub fn two() {}\n")
+            .unwrap();
+        store.artifacts.get_mut(&first.id).unwrap().order = 100;
+        store.artifacts.get_mut(&second.id).unwrap().order = 100;
+        store.repo_map_prewarm = None;
+        store.symbol_map_prewarm = None;
+        let expected = first.id.min(second.id);
+        let repo = store.repo_map_projection(64);
+        assert!(repo.entries.iter().any(|entry| {
+            entry.kind == RuntimeSmartContextArtifactRepoMapEntryKind::Path
+                && entry.path.as_deref() == Some("src/shared.rs")
+                && entry.artifact_id == expected
+        }));
+        let symbols = store.symbol_map_projection(64);
+        assert!(!symbols.entries.is_empty());
     }
 }

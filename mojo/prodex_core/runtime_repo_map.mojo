@@ -451,3 +451,107 @@ def prodex_runtime_repo_entry_replace_v1(
             current_id_length,
         )
     )
+
+
+# Projection priority for artifacts: newest order first, lexical artifact ID
+# ascending on exact order ties, stable original index on exact equality.
+# The kernel uses the existing repo-map lexical byte comparator, not a
+# second policy implementation in Rust.
+comptime REPO_ARTIFACT_ORDER_MAX: Int64 = 65_536
+comptime REPO_ARTIFACT_ORDER_WORDS: Int64 = 3
+
+
+def repo_artifact_order_compare(
+    rows: Pointer[mut=False, UInt64, _], left: Int64, right: Int64,
+) -> Int64:
+    var l = left * REPO_ARTIFACT_ORDER_WORDS
+    var r = right * REPO_ARTIFACT_ORDER_WORDS
+    var left_order = rows[unsafe_offset=l]
+    var right_order = rows[unsafe_offset=r]
+    if left_order != right_order:
+        return -1 if left_order > right_order else 1
+    var left_ptr = Pointer[mut=False, UInt8, ImmUntrackedOrigin](
+        unsafe_from_address=Int(rows[unsafe_offset=l + 1])
+    )
+    var right_ptr = Pointer[mut=False, UInt8, ImmUntrackedOrigin](
+        unsafe_from_address=Int(rows[unsafe_offset=r + 1])
+    )
+    var left_len = Int64(rows[unsafe_offset=l + 2])
+    var right_len = Int64(rows[unsafe_offset=r + 2])
+    if repo_lexical_less(left_ptr, left_len, right_ptr, right_len):
+        return -1
+    if repo_lexical_less(right_ptr, right_len, left_ptr, left_len):
+        return 1
+    if left != right:
+        return -1 if left < right else 1
+    return 0
+
+
+def repo_artifact_order_heap_down(
+    rows: Pointer[mut=False, UInt64, _],
+    indices: Pointer[mut=True, Int64, _],
+    first: Int64, count: Int64,
+):
+    var root = first
+    while root * 2 + 1 < count:
+        var child = root * 2 + 1
+        var swap = root
+        if repo_artifact_order_compare(
+            rows, indices[unsafe_offset=swap], indices[unsafe_offset=child],
+        ) < 0:
+            swap = child
+        if child + 1 < count and repo_artifact_order_compare(
+            rows, indices[unsafe_offset=swap], indices[unsafe_offset=child + 1],
+        ) < 0:
+            swap = child + 1
+        if swap == root:
+            return
+        var saved = indices[unsafe_offset=root]
+        indices[unsafe_offset=root] = indices[unsafe_offset=swap]
+        indices[unsafe_offset=swap] = saved
+        root = swap
+
+
+@export("prodex_runtime_repo_artifact_order_v1")
+def prodex_runtime_repo_artifact_order_v1(
+    abi_version: Int64,
+    rows_address: UInt, count: Int64,
+    output_address: UInt, output_capacity: Int64,
+) abi("C") -> Int64:
+    if abi_version != REPO_MAP_ABI_VERSION:
+        return 4
+    if (
+        count < 0 or count > REPO_ARTIFACT_ORDER_MAX
+        or (count > 0 and (rows_address == 0 or rows_address % 8 != 0))
+        or output_address == 0 or output_address % 8 != 0
+        or output_capacity < count
+    ):
+        return REPO_MAP_INVALID
+    var rows = Pointer[mut=False, UInt64, ImmUntrackedOrigin](
+        unsafe_from_address=Int(rows_address)
+    )
+    for index in range(count):
+        var length = rows[unsafe_offset=index * REPO_ARTIFACT_ORDER_WORDS + 2]
+        var address = rows[unsafe_offset=index * REPO_ARTIFACT_ORDER_WORDS + 1]
+        if (
+            length > UInt64(9223372036854775807)
+            or (length > 0 and address == 0)
+        ):
+            return REPO_MAP_INVALID
+    var indices = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    for index in range(count):
+        indices[unsafe_offset=index] = index
+    var start = count // 2
+    while start > 0:
+        start -= 1
+        repo_artifact_order_heap_down(rows, indices, start, count)
+    var end = count
+    while end > 1:
+        end -= 1
+        var saved = indices[unsafe_offset=0]
+        indices[unsafe_offset=0] = indices[unsafe_offset=end]
+        indices[unsafe_offset=end] = saved
+        repo_artifact_order_heap_down(rows, indices, 0, end)
+    return REPO_MAP_OK
