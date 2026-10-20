@@ -2490,6 +2490,30 @@ export function findViolations(files) {
     )
     .map(([filePath]) => `${filePath}: Mojo-owned operation cannot have a feature-off Rust path`);
   const liveLogRecordViolations = files.flatMap(([filePath, contents]) => {
+    if (filePath === LIVE_LOG_RECORD_ADAPTER_FILE) {
+      return [
+        "prodex_live_log_retention_trim_v1(",
+        "prodex_live_log_oldest_path_v1(",
+        "pub fn retention_trim_required(",
+        "pub fn oldest_retention_path(",
+        "compiled_live_log_retention_abi_rejects_bad_input_before_output_writes",
+      ].filter((marker) => !contents.includes(marker))
+        .map((marker) => filePath + ": compiled live-log retention ABI must retain " + marker);
+    }
+    if (filePath === LIVE_LOG_RECORD_MOJO_FILE) {
+      return [
+        '@export("prodex_live_log_retention_trim_v1")',
+        '@export("prodex_live_log_oldest_path_v1")',
+        "LIVE_LOG_TOTAL_ENTRY_LIMIT",
+        "LIVE_LOG_TOTAL_BYTE_LIMIT",
+        "LIVE_LOG_PATH_LIMIT",
+      ].filter((marker) => !contents.includes(marker))
+        .map((marker) => filePath + ": live-log eviction authority must remain compiled Mojo (" + marker + ")");
+    }
+    if (filePath === LIVE_LOG_RECORD_DIRECT_TEST_FILE) {
+      return contents.includes("test_retention_thresholds_and_stable_oldest_path()")
+        ? [] : [filePath + ": missing compiled retention ABI assertions"];
+    }
     if (filePath !== LIVE_LOG_RECORD_FILE) return [];
     const production = contents.split("#[cfg(test)]", 1)[0];
     const required = [
@@ -2498,12 +2522,17 @@ export function findViolations(files) {
       "json_plan(serialized.len())?",
       "truncate_plain_text(line)",
       "let line = bounded_live_log_line(line)?;",
+      "retention_trim_required(",
+      "oldest_retention_path(&sequences)?",
     ];
     const missing = required.filter((marker) => !production.includes(marker));
+    if (!contents.includes("compiled_live_log_retention_evicts_oldest_global_paths_and_preserves_ties")) {
+      missing.push("compiled_live_log_retention_evicts_oldest_global_paths_and_preserves_ties");
+    }
     if (missing.length > 0) {
       return [`${filePath}: live-log record decisions must propagate through Mojo (${missing.join(", ")})`];
     }
-    return /clip_json_strings|\.char_indices\s*\(|MAX_RUNTIME_LIVE_LOG_LINE_BYTES/u.test(production)
+    return /clip_json_strings|\.char_indices\s*\(|MAX_RUNTIME_LIVE_LOG_LINE_BYTES|\.min_by_key\(|MAX_RUNTIME_LIVE_LOG_PATHS/u.test(production)
       ? [`${filePath}: contains restored Rust live-log clipping or truncation policy`]
       : [];
   });
@@ -12422,11 +12451,17 @@ function selfTest() {
     "json_plan(serialized.len())?",
     "truncate_plain_text(line)",
     "let line = bounded_live_log_line(line)?;",
+    "retention_trim_required(",
+    "oldest_retention_path(&sequences)?",
+    "compiled_live_log_retention_evicts_oldest_global_paths_and_preserves_ties",
   ].join("\n");
   assert.deepEqual(findViolations([[LIVE_LOG_RECORD_FILE, liveLogRecordConsumer]]), []);
   assert.match(findViolations([[LIVE_LOG_RECORD_FILE,
     liveLogRecordConsumer.replace("nested_string_clip_end(text)?", "clip_json_strings(value, 8192);")]])
     .join("\n"), /restored Rust live-log clipping or truncation policy|must propagate through Mojo/u);
+  assert.match(findViolations([[LIVE_LOG_RECORD_FILE,
+    liveLogRecordConsumer + "\nstate.paths.iter().min_by_key(|(_, bucket)| bucket.last_sequence)",
+  ]]).join("\n"), /restored Rust live-log clipping or truncation policy/u);
   const runtimeLogEventClassification =
     "prodex_mojo_core::log_load::try_is_routine_event(event);";
   assert.deepEqual(findViolations([[

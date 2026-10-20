@@ -10,6 +10,8 @@ from live_log_record import (
     prodex_live_log_record_over_limit_v1,
     prodex_live_log_snapshot_plan_v1,
     prodex_live_log_string_clip_end_v1,
+    prodex_live_log_retention_trim_v1,
+    prodex_live_log_oldest_path_v1,
 )
 
 comptime EXPECTED_LIVE_LOG_RECORD_MAX_BYTES: Int64 = 128 * 1024
@@ -228,9 +230,44 @@ def test_snapshot_plan_pages_after_cursor_and_rejects_unsorted_input() raises:
     )
 
 
+def test_retention_thresholds_and_stable_oldest_path() raises:
+    var decision = List[Int64]()
+    decision.append(-7)
+    var result = UInt(Int(decision.unsafe_ptr()))
+    assert prodex_live_log_retention_trim_v1(1, 0, 512, 2 * 1024 * 1024, 0, result) == 0
+    assert decision[0] == 0
+    assert prodex_live_log_retention_trim_v1(1, 0, 513, 0, 0, result) == 0
+    assert decision[0] == 1
+    assert prodex_live_log_retention_trim_v1(1, 1, 2048, 8 * 1024 * 1024, 64, result) == 0
+    assert decision[0] == 0
+    assert prodex_live_log_retention_trim_v1(1, 1, 2048, 8 * 1024 * 1024, 65, result) == 0
+    assert decision[0] == 1
+    decision[0] = 71
+    assert prodex_live_log_retention_trim_v1(2, 0, 512, 0, 0, result) == 4
+    assert decision[0] == 71
+    assert prodex_live_log_retention_trim_v1(1, 2, 512, 0, 0, result) == 1
+    assert decision[0] == 71
+
+    var values = List[UInt64]()
+    values.append(9)
+    values.append(7)
+    values.append(7)
+    values.append(12)
+    assert prodex_live_log_oldest_path_v1(
+        1, UInt(Int(values.unsafe_ptr())), 4, result,
+    ) == 0
+    assert decision[0] == 1
+    decision[0] = 83
+    assert prodex_live_log_oldest_path_v1(
+        1, UInt(Int(values.unsafe_ptr())), 0, result,
+    ) == 1
+    assert decision[0] == 83
+
+
 def main() raises:
     test_record_limit_and_serialized_json_fallback()
     test_nested_string_clip_keeps_ascii_and_unicode_character_boundaries()
     test_plain_text_truncation_writes_exact_tail_and_checks_capacity()
     test_plain_text_truncation_keeps_unicode_character_crossing_prefix_limit()
     test_snapshot_plan_pages_after_cursor_and_rejects_unsorted_input()
+    test_retention_thresholds_and_stable_oldest_path()
