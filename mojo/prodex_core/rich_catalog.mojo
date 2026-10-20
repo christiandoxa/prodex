@@ -2862,3 +2862,55 @@ def prodex_mojo_rich_catalog_provider_registry_costs_v1(
         )
         output_count[] += 1
     return RICH_STATUS_OK
+
+
+# Main model-choice insertion placement, reused by the live interactive
+# catalog for remembered models and bundled OpenAI catalog entries.
+# Host owns original choices and text; Mojo chooses insertion index.
+comptime CATALOG_INSERT_CURRENT_BEFORE_CUSTOM: Int64 = 0
+comptime CATALOG_INSERT_BUNDLED_AFTER_DEFAULT: Int64 = 1
+
+
+@export("prodex_mojo_rich_catalog_insertion_index_v1")
+def prodex_mojo_rich_catalog_insertion_index_v1(
+    abi_version: Int64, operation: Int64,
+    tags_address: UInt, tag_count: Int64,
+    result_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != PRODEX_RICH_ABI_VERSION:
+        return RICH_STATUS_ABI
+    if (
+        operation < CATALOG_INSERT_CURRENT_BEFORE_CUSTOM
+        or operation > CATALOG_INSERT_BUNDLED_AFTER_DEFAULT
+        or tag_count < 0 or tag_count > CATALOG_MAX_INPUT_MODELS
+        or (tag_count > 0 and (tags_address == 0 or tags_address % 8 != 0))
+        or result_address == 0 or result_address % 8 != 0
+    ):
+        return RICH_STATUS_INVALID
+    var tags = Pointer[mut=False, Int64, ImmUntrackedOrigin](
+        unsafe_from_address=Int(tags_address)
+    )
+    for i in range(tag_count):
+        var value = tags[unsafe_offset=i]
+        if (
+            value != CHOICE_PROVIDER_DEFAULT
+            and value != CHOICE_CATALOG
+            and value != CHOICE_CUSTOM
+        ):
+            return RICH_STATUS_INVALID
+    var selected = Int64(0)
+    if operation == CATALOG_INSERT_CURRENT_BEFORE_CUSTOM:
+        selected = tag_count
+        for i in range(tag_count):
+            if tags[unsafe_offset=i] == CHOICE_CUSTOM:
+                selected = i
+                break
+    else:
+        for i in range(tag_count):
+            if tags[unsafe_offset=i] == CHOICE_PROVIDER_DEFAULT:
+                selected = i + 1
+                break
+    Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(result_address)
+    )[] = selected
+    return RICH_STATUS_OK
