@@ -477,6 +477,7 @@ comptime LOG_RETENTION_POLICY_ABI_VERSION: Int64 = 1
 comptime LOG_RETENTION_POLICY_BOUNDED_VALUE: Int64 = 1
 comptime LOG_RETENTION_POLICY_ROTATION: Int64 = 2
 comptime LOG_RETENTION_POLICY_BOUNDED_TEXT: Int64 = 5
+comptime LOG_RETENTION_POLICY_SCAN_BASENAME: Int64 = 8
 comptime LOG_RETENTION_CANDIDATES_EXPIRED: Int64 = 6
 comptime LOG_RETENTION_CANDIDATES_OVER_BUDGET: Int64 = 7
 comptime LOG_RETENTION_CANDIDATE_STRIDE: Int = 5
@@ -544,6 +545,48 @@ def prodex_log_retention_policy_v1(
             output[unsafe_offset=0] = parsed[1]
         else:
             output[unsafe_offset=0] = input3
+        return LOG_THROUGHPUT_OK
+
+    if operation == LOG_RETENTION_POLICY_SCAN_BASENAME:
+        # input0/1 name address/length; input2/3 prefix address/length.
+        # Output 0 ignores the entry, 1 identifies a lock, 2 a log.
+        if (
+            input1 > UInt64(0x7FFFFFFFFFFFFFFF)
+            or input3 > UInt64(0x7FFFFFFFFFFFFFFF)
+            or (input1 > 0 and input0 == 0)
+            or (input3 > 0 and input2 == 0)
+        ):
+            return LOG_THROUGHPUT_INVALID
+        if input1 < input3:
+            return LOG_THROUGHPUT_OK
+        var name = Pointer[mut=False, UInt8, ImmUntrackedOrigin](
+            unsafe_from_address=Int(input0)
+        )
+        var prefix = Pointer[mut=False, UInt8, ImmUntrackedOrigin](
+            unsafe_from_address=Int(input2)
+        )
+        for index in range(Int(input3)):
+            if name[unsafe_offset=index] != prefix[unsafe_offset=index]:
+                return LOG_THROUGHPUT_OK
+        if input1 >= 5:
+            var lock = StringSlice(".lock").unsafe_ptr()
+            var matches = True
+            for index in range(5):
+                if name[unsafe_offset=Int(input1) - 5 + index] != lock[unsafe_offset=index]:
+                    matches = False
+                    break
+            if matches:
+                output[unsafe_offset=0] = 1
+                return LOG_THROUGHPUT_OK
+        if input1 >= 4:
+            var extension = StringSlice(".log").unsafe_ptr()
+            var matches = True
+            for index in range(4):
+                if name[unsafe_offset=Int(input1) - 4 + index] != extension[unsafe_offset=index]:
+                    matches = False
+                    break
+            if matches:
+                output[unsafe_offset=0] = 2
         return LOG_THROUGHPUT_OK
 
     return LOG_THROUGHPUT_INVALID

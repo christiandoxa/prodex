@@ -4046,11 +4046,19 @@ export function findViolations(files) {
         "mojo_retention::bounded_text_policy_value(",
         "selection::remove_expired_runtime_logs(",
         "selection::remove_over_budget_runtime_logs(",
+        "mojo_retention::log_scanned_basename_kind(name, log_prefix)",
       ];
       const violations = required
         .filter((call) => !contents.includes(call))
         .map((call) => filePath + ": runtime-log policy must retain " + call);
       const production = contents.split("#[cfg(test)]", 1)[0];
+      if (!contents.includes("compiled_runtime_log_basename_policy_reaches_disk_scanner_and_keeps_symlink_exclusion")) {
+        violations.push(filePath + ": missing runtime-log disk filename caller regression");
+      }
+      if (production.includes('name.starts_with(log_prefix)') ||
+          production.includes('name.ends_with(".log")')) {
+        violations.push(filePath + ": restored Rust runtime-log filename classification");
+      }
       if (production.includes(".parse::<u64>()")) {
         violations.push(filePath + ": contains restored Rust runtime-log environment numeric parser");
       }
@@ -4140,6 +4148,12 @@ export function findViolations(files) {
       return required.filter((marker) => !contents.includes(marker))
         .map((marker) => `${filePath}: log number policy must retain Mojo owner ${marker}`);
     }
+    if (filePath === "mojo/prodex_core/log_throughput_policy.mojo") {
+      return ['comptime LOG_RETENTION_POLICY_SCAN_BASENAME: Int64 = 8',
+        'if operation == LOG_RETENTION_POLICY_SCAN_BASENAME:'].filter(
+        (marker) => !contents.includes(marker),
+      ).map((marker) => filePath + ": compiled filename classifier must retain " + marker);
+    }
     if (filePath === "crates/prodex-mojo-core/src/log_throughput_policy.rs") {
       const required = [
         "prodex_log_throughput_sample_plan_v1(",
@@ -4147,6 +4161,9 @@ export function findViolations(files) {
         "prodex_log_throughput_stream_rate_v1(",
         "prodex_log_retention_policy_v1(",
         "prodex_log_retention_candidates_v1(",
+        "pub fn log_scanned_basename_kind(",
+        "compiled_log_retention_scanner_classifies_case_sensitive_names",
+        "compiled_log_retention_scanner_rejects_invalid_abi_without_writes",
       ];
       const violations = required
         .filter((call) => !contents.includes(call))
@@ -12561,6 +12578,8 @@ function selfTest() {
     "mojo_retention::bounded_text_policy_value(raw, default, min, max);",
     "selection::remove_expired_runtime_logs(logs, oldest_allowed);",
     "selection::remove_over_budget_runtime_logs(logs, policy);",
+    "mojo_retention::log_scanned_basename_kind(name, log_prefix)",
+    "compiled_runtime_log_basename_policy_reaches_disk_scanner_and_keeps_symlink_exclusion",
   ].join("\n");
   const runtimeLogSelectionCalls = [
     "mojo_retention::log_expired_candidate_plan(&candidates, oldest_allowed);",
@@ -12572,12 +12591,18 @@ function selfTest() {
     "prodex_log_throughput_stream_rate_v1();",
     "prodex_log_retention_policy_v1();",
     "prodex_log_retention_candidates_v1();",
+    "pub fn log_scanned_basename_kind(",
+    "compiled_log_retention_scanner_classifies_case_sensitive_names",
+    "compiled_log_retention_scanner_rejects_invalid_abi_without_writes",
   ].join("\n");
   assert.deepEqual(findViolations([
     [RUNTIME_LOG_RETENTION_FILE, runtimeLogRetentionCalls],
     [RUNTIME_LOG_RETENTION_SELECTION_FILE, runtimeLogSelectionCalls],
     ["crates/prodex-mojo-core/src/log_throughput_policy.rs", runtimeLogAdapterCalls],
   ]), []);
+  assert.match(findViolations([[RUNTIME_LOG_RETENTION_FILE,
+    runtimeLogRetentionCalls + '\nname.starts_with(log_prefix) && name.ends_with(".log")',
+  ]]).join("\n"), /restored Rust runtime-log filename classification/u);
   const tokenNumbersAdapter = "prodex_info_token_usage_numbers_v1( InfoTokenUsageFields rate_output(";
   assert.deepEqual(findViolations([[INFO_TOKEN_NUMBERS_ADAPTER, tokenNumbersAdapter]]), []);
   assert.match(findViolations([[INFO_TOKEN_NUMBERS_ADAPTER,
