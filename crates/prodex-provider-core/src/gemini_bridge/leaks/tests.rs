@@ -80,3 +80,68 @@ fn instruction_corpus_uses_system_messages_and_echo_checks_first_128_windows() {
         "alpha bravo charlie delta echo foxtrot golf hotel",
     ));
 }
+
+#[test]
+fn compiled_instruction_corpus_uses_original_system_order_and_selected_nested_fields() {
+    let messages = [
+        json!({
+            "role": "system",
+            "content": {
+                "output": "FOUR",
+                "input": "THREE",
+                "content": [
+                    {"output": "INNER-OUTPUT", "text": "INNER-TEXT", "unrelated": "EXCLUDE"},
+                    "TWO",
+                ],
+                "text": "ONE",
+                "metadata": {"text": "MUST-NOT-LEAK"},
+            },
+        }),
+        json!({"role": "user", "content": "USER-CONTENT"}),
+        json!({
+            "role": "system",
+            "content": [
+                {"text": "FIVE"},
+                {"input": ["SIX", {"output": "SEVEN"}]},
+            ]
+        }),
+        json!({"role": "SYSTEM", "content": "WRONG-ROLE"}),
+    ];
+    assert_eq!(
+        gemini_provider_core_internal_instruction_corpus(&messages),
+        "one inner-text inner-output two three four five six seven",
+    );
+    assert_eq!(
+        gemini_provider_core_internal_instruction_corpus(&[
+            json!({"role": "system"}),
+            json!({"role": "system", "content": null}),
+            json!({"role": "user", "content": "ignored"}),
+        ]),
+        "",
+    );
+    assert_eq!(gemini_provider_core_internal_instruction_corpus(&[]), "");
+}
+
+#[test]
+fn compiled_instruction_corpus_borrows_large_unicode_nested_inputs() {
+    let text = "P".repeat(1024 * 1024);
+    let mut content = json!({"text": text});
+    for _ in 0..256 {
+        content = json!([content]);
+    }
+    let messages = vec![
+        json!({"role":"user", "content":"excluded"}),
+        json!({"role":"system", "content":content}),
+        json!({"role":"assistant", "content":"excluded"}),
+    ];
+    let mut acquired = crate::mojo_json::Document::default();
+    acquired.borrowed_array(&messages);
+    assert!(
+        acquired.raw.is_empty(),
+        "borrowed shape cannot serialize media or instructions"
+    );
+    assert!(acquired.nodes.len() > 256);
+    let corpus = gemini_provider_core_internal_instruction_corpus(&messages);
+    assert_eq!(corpus.len(), 1024 * 1024);
+    assert!(corpus.bytes().all(|byte| byte == b'p'));
+}

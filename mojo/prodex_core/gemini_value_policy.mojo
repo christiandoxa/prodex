@@ -5,9 +5,9 @@ from std.memory import Pointer
 from rich_text import rich_trim_bounds, rich_view_matches_literal, rich_view_ptr, rich_view_valid
 from parsed_json import (
     JSON_ARRAY, JSON_OBJECT, JSON_STRING, JSON_NUMBER, JSON_TRUE, JSON_FALSE, ParsedJson, ParsedJsonNode,
-    pj_child, pj_field, pj_kind, pj_next, pj_text, pj_trim, pj_valid, pj_literal,
+    pj_child, pj_field, pj_kind, pj_next, pj_text, pj_trim, pj_valid, pj_literal, pj_is,
 )
-from json_sink import JsonSink, js_byte, js_string, js_literal, js_raw_view, js_u64
+from json_sink import JsonSink, js_byte, js_string, js_literal, js_raw_view, js_u64, js_escaped
 from rich_types import ProdexRichStringView
 from provider_boolean_tokens import provider_boolean_token_class
 
@@ -19,6 +19,7 @@ comptime GEMINI_VALUE_STREAM_ERROR: Int64 = 3
 comptime GEMINI_VALUE_BOOLEAN: Int64 = 4
 comptime GEMINI_VALUE_MEDIA_OBJECTS: Int64 = 5
 comptime GEMINI_VALUE_THOUGHT_SIGNATURE: Int64 = 6
+comptime GEMINI_VALUE_SYSTEM_CORPUS: Int64 = 7
 
 
 def gemini_value_emit(
@@ -132,6 +133,88 @@ def gemini_value_thought_signature(sink: Pointer[mut=True, JsonSink, _], tree: P
         js_string(sink, value)
 
 
+# Choose the original fixed object field priority without heap allocation.
+# Only text, content, input and output edges contribute to echo detection.
+def gemini_corpus_next_object_field(
+    tree: ParsedJson, parent: Int64, previous: Int64,
+) -> Int64:
+    var text_node = pj_field(tree, parent, StringSlice("text"))
+    var content_node = pj_field(tree, parent, StringSlice("content"))
+    var input_node = pj_field(tree, parent, StringSlice("input"))
+    var output_node = pj_field(tree, parent, StringSlice("output"))
+    if previous < 0:
+        if text_node >= 0:
+            return text_node
+        if content_node >= 0:
+            return content_node
+        if input_node >= 0:
+            return input_node
+        return output_node
+    if previous == text_node:
+        if content_node >= 0:
+            return content_node
+        if input_node >= 0:
+            return input_node
+        return output_node
+    if previous == content_node:
+        return input_node if input_node >= 0 else output_node
+    if previous == input_node:
+        return output_node
+    return -1
+
+
+# Iterative traversal replaces the old Rust recursion. Existing arrays are
+# visited in sequence and object members in fixed semantic key order.
+def gemini_corpus_write_content(
+    sink: Pointer[mut=True, JsonSink, _], tree: ParsedJson, root: Int64,
+):
+    var cursor = root
+    while cursor >= 0:
+        var kind = pj_kind(tree, cursor)
+        var child: Int64 = -1
+        if kind == JSON_STRING:
+            js_escaped(sink, pj_text(tree, cursor))
+            js_byte(sink, 92)
+            js_byte(sink, 110)
+        elif kind == JSON_ARRAY:
+            child = pj_child(tree, cursor)
+        elif kind == JSON_OBJECT:
+            child = gemini_corpus_next_object_field(tree, cursor, -1)
+        if child >= 0:
+            cursor = child
+            continue
+        var advanced = False
+        while cursor != root:
+            var parent = tree.nodes[unsafe_offset=cursor].parent
+            var sibling: Int64 = -1
+            if pj_kind(tree, parent) == JSON_ARRAY:
+                sibling = pj_next(tree, cursor)
+            elif pj_kind(tree, parent) == JSON_OBJECT:
+                sibling = gemini_corpus_next_object_field(tree, parent, cursor)
+            if sibling >= 0:
+                cursor = sibling
+                advanced = True
+                break
+            cursor = parent
+        if not advanced:
+            break
+
+
+def gemini_value_system_corpus(sink: Pointer[mut=True, JsonSink, _], tree: ParsedJson):
+    js_byte(sink, 34)
+    var message = pj_child(tree, 0)
+    while message >= 0:
+        if pj_is["system"](tree, pj_field(tree, message, StringSlice("role"))):
+            var content = pj_field(tree, message, StringSlice("content"))
+            if content >= 0:
+                gemini_corpus_write_content(sink, tree, content)
+            # Preserve the extra separator following every system message.
+            js_byte(sink, 92)
+            js_byte(sink, 110)
+        message = pj_next(tree, message)
+    js_byte(sink, 34)
+
+
 # Serde Number::as_i64 accepts decimal integers in the signed 64-bit range,
 # but not fractional/exponent values nor out-of-range unsigned integers.
 # Serde has already canonicalized the lexical representation in the host.
@@ -230,7 +313,7 @@ def prodex_mojo_gemini_value_policy_v1(
     if abi != GEMINI_VALUE_ABI:
         return 4
     if (
-        operation < GEMINI_VALUE_STRINGS or operation > GEMINI_VALUE_THOUGHT_SIGNATURE
+        operation < GEMINI_VALUE_STRINGS or operation > GEMINI_VALUE_SYSTEM_CORPUS
         or flag != 0 or node_count <= 0 or nodes_address == 0
         or nodes_address % 8 != 0 or raw_length < 0
         or (raw_length > 0 and raw_address == 0)
@@ -251,15 +334,20 @@ def prodex_mojo_gemini_value_policy_v1(
         operation != GEMINI_VALUE_BOOLEAN
         and operation != GEMINI_VALUE_MEDIA_OBJECTS
         and operation != GEMINI_VALUE_THOUGHT_SIGNATURE
+        and operation != GEMINI_VALUE_SYSTEM_CORPUS
         and pj_kind(tree, 0) != JSON_OBJECT
     ):
+        return 1
+    if operation == GEMINI_VALUE_SYSTEM_CORPUS and pj_kind(tree, 0) != JSON_ARRAY:
         return 1
     var sink = JsonSink(
         Pointer[mut=True, UInt8, MutUntrackedOrigin](
             unsafe_from_address=Int(output_address)
         ), output_capacity, 0, measuring == 1, False,
     )
-    if operation == GEMINI_VALUE_THOUGHT_SIGNATURE:
+    if operation == GEMINI_VALUE_SYSTEM_CORPUS:
+        gemini_value_system_corpus(Pointer(to=sink), tree)
+    elif operation == GEMINI_VALUE_THOUGHT_SIGNATURE:
         gemini_value_thought_signature(Pointer(to=sink), tree)
     elif operation == GEMINI_VALUE_MEDIA_OBJECTS:
         gemini_value_media_object_indices(Pointer(to=sink), tree)

@@ -30,9 +30,38 @@ impl<'a> Document<'a> {
     /// eligibility, and visit order using the stable indices and keys.
     pub(crate) fn borrowed_shape(&mut self, root: &'a Value) -> Vec<&'a Value> {
         assert!(self.nodes.is_empty() && self.raw.is_empty());
-        let mut pending = vec![(root, None::<usize>, "")];
+        self.append_borrowed_nodes(vec![(root, None, "")], Vec::new())
+    }
+
+    /// Acquire many Serde roots as a synthetic array without cloning or
+    /// serializing any string payload. Generic shape acquisition is host work.
+    pub(crate) fn borrowed_array(&mut self, roots: &'a [Value]) {
+        assert!(self.nodes.is_empty() && self.raw.is_empty());
+        self.nodes.push(JsonNode {
+            kind: JsonKind::Array,
+            first_child: None,
+            next_sibling: None,
+            parent: None,
+            key: "",
+            text: "",
+            raw_start: 0,
+            raw_length: 0,
+        });
+        let pending = roots
+            .iter()
+            .rev()
+            .map(|value| (value, Some(0_usize), ""))
+            .collect();
+        let _ = self.append_borrowed_nodes(pending, vec![None]);
+    }
+
+    /// Common host-only node linkage for a borrowed root or synthetic array.
+    fn append_borrowed_nodes(
+        &mut self,
+        mut pending: Vec<(&'a Value, Option<usize>, &'a str)>,
+        mut last_child: Vec<Option<usize>>,
+    ) -> Vec<&'a Value> {
         let mut values = Vec::new();
-        let mut last_child = Vec::<Option<usize>>::new();
         while let Some((value, parent, key)) = pending.pop() {
             let index = self.nodes.len();
             let kind = match value {
