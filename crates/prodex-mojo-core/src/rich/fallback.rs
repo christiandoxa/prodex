@@ -86,6 +86,12 @@ pub struct PreviousResponsePlan {
 }
 
 unsafe extern "C" {
+    fn prodex_mojo_previous_response_text_message_span_v1(
+        abi_version: i64,
+        text_address: u64,
+        text_length: i64,
+        result_address: u64,
+    ) -> i64;
     fn prodex_mojo_previous_response_json_search_v1(
         abi_version: i64,
         operation: i64,
@@ -431,6 +437,37 @@ pub fn previous_response_json_search(
                 return Err(MojoError::InvalidOutput);
             }
             Ok(PreviousResponseJsonSelection::InvalidId(index))
+        }
+        _ => Err(MojoError::InvalidOutput),
+    }
+}
+
+/// Borrow original trimmed text only if the compiled previous-response
+/// classifier accepts it. Rust owns no whitespace or matching policy.
+pub fn previous_response_text_message_span(text: &str) -> Result<Option<&str>, MojoError> {
+    ensure_rich_abi()?;
+    let mut output = [-7_i64; 3];
+    match unsafe {
+        prodex_mojo_previous_response_text_message_span_v1(
+            RICH_ABI_VERSION,
+            text.as_ptr() as usize as u64,
+            i64::try_from(text.len()).map_err(|_| MojoError::InvalidInput)?,
+            output.as_mut_ptr() as usize as u64,
+        )
+    } {
+        0 => {}
+        1 => return Err(MojoError::InvalidInput),
+        4 => return Err(MojoError::AbiMismatch),
+        _ => return Err(MojoError::InvalidOutput),
+    }
+    match output {
+        [0, 0, 0] => Ok(None),
+        [1, start, end] if start >= 0 && end > start => {
+            let start = usize::try_from(start).map_err(|_| MojoError::InvalidOutput)?;
+            let end = usize::try_from(end).map_err(|_| MojoError::InvalidOutput)?;
+            text.get(start..end)
+                .map(Some)
+                .ok_or(MojoError::InvalidOutput)
         }
         _ => Err(MojoError::InvalidOutput),
     }
@@ -926,3 +963,7 @@ mod rate_limit_header_presence_tests;
 #[cfg(test)]
 #[path = "fallback/previous_response_json_search_tests.rs"]
 mod previous_response_json_search_tests;
+
+#[cfg(test)]
+#[path = "fallback/previous_response_text_span_tests.rs"]
+mod previous_response_text_span_tests;

@@ -2712,3 +2712,37 @@ def prodex_mojo_previous_response_json_search_v1(
     result[unsafe_offset=1] = selected_class
     result[unsafe_offset=2] = selected_field
     return 0
+
+
+# Text-only previous-response error selection. Unicode trimming, positive
+# classification and span selection all remain inside the same compiled
+# owner as structured previous-response errors.
+@export("prodex_mojo_previous_response_text_message_span_v1")
+def prodex_mojo_previous_response_text_message_span_v1(
+    abi_version: Int64,
+    text_address: UInt, text_length: Int64,
+    output_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != PRODEX_RICH_ABI_VERSION:
+        return 4
+    if (
+        text_length < 0 or (text_length > 0 and text_address == 0)
+        or output_address == 0 or output_address % 8 != 0
+    ):
+        return 1
+    var input = ProdexRichStringView(text_address, UInt(text_length))
+    if not rich_view_valid(input, 0x7FFFFFFFFFFFFFFF):
+        return 1
+    var bounds = rich_trim_bounds(input)
+    var selected = False
+    if bounds[0] < bounds[1]:
+        selected = previous_response_text_class(
+            text_address + UInt(bounds[0]), bounds[1] - bounds[0],
+        ) != PREVIOUS_RESPONSE_ERROR_CLASS_NONE
+    var result = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    result[unsafe_offset=0] = Int64(selected)
+    result[unsafe_offset=1] = bounds[0] if selected else 0
+    result[unsafe_offset=2] = bounds[1] if selected else 0
+    return 0

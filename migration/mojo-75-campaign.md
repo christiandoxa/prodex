@@ -7866,3 +7866,15 @@ no-fallback/production metric checks pass. The checked production
 share is 35.88328851577359% (131,307 Mojo / 234,621 Rust).
 The source was already present as WIP during the previous share
 measurement; this checkpoint commits it. The 75% goal remains open.
+
+## Plain-text previous-response error selection migrated to Mojo (2026-10-20)
+
+The compiled rich fallback owner now trims Unicode whitespace and
+classifies/selects the original plain-text previous-response message
+as a single versioned ABI operation. Rust only materializes the
+Mojo-selected validated span; the old trim/empty/classifier decision
+branches and semantic Rust wrapper have been deleted. All 422
+runtime-proxy tests, two direct core ABI tests, direct Mojo test,
+source no-fallback guard and audited share checks pass. The share
+rises from 35.88328851577359% to 35.88682132415225%
+(131,335 Mojo / 234,635 Rust). Project target 75% remains open.
