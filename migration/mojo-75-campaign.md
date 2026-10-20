@@ -7903,3 +7903,14 @@ tests, three direct core ABI tests, direct Mojo ABI tests and
 no-fallback/share guards pass. Official share increases from
 35.88952865852326% to 35.89055457119222%
 (131,461 Mojo / 234,822 Rust). The 75% goal remains open.
+
+## SSE response-ID uniqueness and lexical ordering compiled in Mojo (2026-10-20)
+
+The live runtime-proxy inspection state now applies sorted unique
+source indices from a compiled Mojo heap sorter, replacing its Rust
+BTreeSet-based uniqueness and lexical ordering. Rust retains
+String ownership and SSE transport but no semantic sorting fallback.
+All 425 proxy tests, two direct core ABI tests, direct Mojo test
+and source/non-regression guards pass. Official production share rises
+from 35.89055457119222% to 35.905425870090184%
+(131,588 Mojo / 234,897 Rust). Project target 75% remains open.

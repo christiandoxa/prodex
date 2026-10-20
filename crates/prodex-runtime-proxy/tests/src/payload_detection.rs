@@ -1044,3 +1044,46 @@ fn compiled_sse_event_state_discards_poisoned_pending_at_eof_and_empty_payloads(
         Some(serde_json::json!({"type":"response.created"})),
     );
 }
+
+#[test]
+fn compiled_sse_inspection_response_ids_are_sorted_unique_across_unicode_events() {
+    let body = [
+        "resp-雪",
+        "resp-z",
+        "resp-é",
+        "resp-a",
+        "resp-z",
+        "resp-🦀",
+        "resp-a",
+    ]
+    .into_iter()
+    .map(|id| {
+        let event = serde_json::json!({
+            "type": "response.created",
+            "response_id": id,
+        });
+        format!("data: {event}\n\n")
+    })
+    .collect::<String>();
+    let expected = vec!["resp-a", "resp-z", "resp-é", "resp-雪", "resp-🦀"];
+    for chunks in [
+        vec![body.as_bytes()],
+        body.as_bytes().chunks(17).collect::<Vec<_>>(),
+    ] {
+        let mut line = Vec::new();
+        let mut pending = Vec::new();
+        let mut events = Vec::new();
+        for chunk in chunks {
+            runtime_sse_consume_chunk(&mut line, &mut pending, chunk, |event| events.push(event));
+        }
+        runtime_sse_finish_pending(&mut line, &mut pending, |event| events.push(event));
+        assert_eq!(events.len(), 7);
+    }
+    match inspect_runtime_sse_buffer_at_eof(body.as_bytes()) {
+        RuntimeSseInspectionProgress::Hold { response_ids, .. }
+        | RuntimeSseInspectionProgress::Commit { response_ids, .. } => {
+            assert_eq!(response_ids, expected);
+        }
+        other => panic!("ordinary response events must preserve IDs, got {other:?}"),
+    }
+}

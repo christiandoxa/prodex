@@ -13,6 +13,14 @@ struct SseUtf8Span {
 }
 
 unsafe extern "C" {
+    fn prodex_runtime_sse_response_id_order_v1(
+        abi_version: i64,
+        views_address: u64,
+        view_count: i64,
+        indices_address: u64,
+        indices_capacity: i64,
+        written_address: u64,
+    ) -> i64;
     fn prodex_runtime_sse_event_state_v1(
         abi_version: i64,
         operation: i64,
@@ -119,6 +127,63 @@ pub fn sse_event_state_action(
         (SseEventStateOperation::IncomingData, 5) => Ok(SseEventStateAction::AppendIncoming),
         _ => Err(MojoError::InvalidOutput),
     }
+}
+
+/// Return sorted unique source indices using compiled bytewise UTF-8
+/// ordering. Rust only borrows immutable response-ID strings and later
+/// materializes the selected original strings for its streaming state.
+pub fn response_id_sort_unique(ids: &[&str]) -> Result<Vec<usize>, MojoError> {
+    if ids.len() > 1_048_576 {
+        return Err(MojoError::InvalidInput);
+    }
+    let mut views = Vec::<SseUtf8Span>::new();
+    views
+        .try_reserve_exact(ids.len())
+        .map_err(|_| MojoError::Capacity)?;
+    for id in ids {
+        views.push(SseUtf8Span {
+            address: id.as_ptr() as usize as u64,
+            len: u64::try_from(id.len()).map_err(|_| MojoError::InvalidInput)?,
+        });
+    }
+    let mut indices = Vec::<i64>::new();
+    indices
+        .try_reserve_exact(ids.len())
+        .map_err(|_| MojoError::Capacity)?;
+    indices.resize(ids.len(), -1);
+    let mut written = -1_i64;
+    match unsafe {
+        prodex_runtime_sse_response_id_order_v1(
+            1,
+            views.as_ptr() as usize as u64,
+            i64::try_from(views.len()).map_err(|_| MojoError::InvalidInput)?,
+            indices.as_mut_ptr() as usize as u64,
+            i64::try_from(indices.len()).map_err(|_| MojoError::InvalidInput)?,
+            (&mut written as *mut i64) as usize as u64,
+        )
+    } {
+        0 => {}
+        1 => return Err(MojoError::InvalidInput),
+        3 => return Err(MojoError::Capacity),
+        4 => return Err(MojoError::AbiMismatch),
+        _ => return Err(MojoError::InvalidOutput),
+    }
+    let written = usize::try_from(written).map_err(|_| MojoError::InvalidOutput)?;
+    if written > ids.len() {
+        return Err(MojoError::InvalidOutput);
+    }
+    let mut seen = vec![false; ids.len()];
+    let mut result = Vec::with_capacity(written);
+    for position in indices.into_iter().take(written) {
+        let index = usize::try_from(position).map_err(|_| MojoError::InvalidOutput)?;
+        let used = seen.get_mut(index).ok_or(MojoError::InvalidOutput)?;
+        if *used {
+            return Err(MojoError::InvalidOutput);
+        }
+        *used = true;
+        result.push(index);
+    }
+    Ok(result)
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -618,5 +683,125 @@ mod sse_event_state_tests {
             0,
         );
         assert_eq!(result, 1, "poisoned event must be discarded");
+    }
+}
+
+#[cfg(test)]
+mod sse_response_id_order_tests {
+    use super::*;
+
+    #[test]
+    fn compiled_sse_response_id_order_deduplicates_unicode_in_bytewise_order() {
+        let ids = [
+            "resp-雪",
+            "resp-b",
+            "resp-é",
+            "",
+            "resp-a",
+            "resp-b",
+            "resp-🦀",
+            "resp-a",
+            "resp-é",
+            "resp-雪",
+            "resp-aa",
+        ];
+        let selected = response_id_sort_unique(&ids).unwrap();
+        assert_eq!(
+            selected
+                .into_iter()
+                .map(|index| ids[index])
+                .collect::<Vec<_>>(),
+            [
+                "",
+                "resp-a",
+                "resp-aa",
+                "resp-b",
+                "resp-é",
+                "resp-雪",
+                "resp-🦀"
+            ],
+        );
+        assert_eq!(response_id_sort_unique(&[]), Ok(vec![]));
+        assert_eq!(response_id_sort_unique(&["", "", ""]), Ok(vec![0]));
+        let descending = (0..1025)
+            .rev()
+            .map(|index| format!("response-{index:04}"))
+            .collect::<Vec<_>>();
+        let borrowed = descending.iter().map(String::as_str).collect::<Vec<_>>();
+        let sorted = response_id_sort_unique(&borrowed)
+            .unwrap()
+            .into_iter()
+            .map(|index| borrowed[index])
+            .collect::<Vec<_>>();
+        assert_eq!(sorted.len(), 1025);
+        assert_eq!(sorted[0], "response-0000");
+        assert_eq!(sorted[1024], "response-1024");
+        assert!(sorted.windows(2).all(|pair| pair[0] < pair[1]));
+    }
+
+    #[test]
+    fn compiled_sse_response_id_order_abi_rejects_late_invalid_row_before_output_write() {
+        let a = b"valid";
+        let malformed = [0xff_u8, 0xfe];
+        let mut views = [
+            SseUtf8Span {
+                address: a.as_ptr() as usize as u64,
+                len: a.len() as u64,
+            },
+            SseUtf8Span {
+                address: malformed.as_ptr() as usize as u64,
+                len: 2,
+            },
+        ];
+        let mut indices = [73_i64; 2];
+        let mut written = 91_i64;
+        let source = views.as_ptr() as usize as u64;
+        let output = indices.as_mut_ptr() as usize as u64;
+        let result = (&mut written as *mut i64) as usize as u64;
+        for (version, pointer, count, capacity, result_ptr, expected) in [
+            (2, source, 2, 2, result, 4),
+            (1, 0, 2, 2, result, 1),
+            (1, source, -1, 2, result, 1),
+            (1, source, 1_048_577, 2, result, 1),
+            (1, source, 2, 1, result, 1),
+            (1, source, 2, 2, 0, 1),
+        ] {
+            assert_eq!(
+                unsafe {
+                    prodex_runtime_sse_response_id_order_v1(
+                        version, pointer, count, output, capacity, result_ptr,
+                    )
+                },
+                expected,
+            );
+            assert_eq!(indices, [73; 2]);
+            assert_eq!(written, 91);
+        }
+        assert_eq!(
+            unsafe { prodex_runtime_sse_response_id_order_v1(1, source, 2, output, 2, result,) },
+            1,
+            "invalid second UTF-8 view must reject before writing any output",
+        );
+        assert_eq!(indices, [73; 2]);
+        assert_eq!(written, 91);
+        views[1] = SseUtf8Span {
+            address: a.as_ptr() as usize as u64,
+            len: a.len() as u64,
+        };
+        assert_eq!(
+            unsafe {
+                prodex_runtime_sse_response_id_order_v1(
+                    1,
+                    views.as_ptr() as usize as u64,
+                    2,
+                    output,
+                    2,
+                    result,
+                )
+            },
+            0,
+        );
+        assert_eq!(written, 1, "two identical values collapse to one");
+        assert_eq!(indices[0], 0, "equal bytes keep first input index");
     }
 }

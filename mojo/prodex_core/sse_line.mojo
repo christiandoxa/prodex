@@ -1,5 +1,7 @@
 
 from std.memory import Pointer
+from rich_text import rich_view_valid
+from rich_types import ProdexRichStringView
 
 comptime SSE_LINE_BLANK: Int64 = 0
 comptime SSE_LINE_IGNORE: Int64 = 1
@@ -464,4 +466,146 @@ def prodex_runtime_sse_event_state_v1(
     Pointer[mut=True, Int64, MutUntrackedOrigin](
         unsafe_from_address=Int(result_address)
     )[] = action
+    return 0
+
+
+# Response-ID collection from inspection events. The host retains all
+# String allocations; compiled Mojo owns lexicographic byte ordering and
+# deduplication, replacing Rust's former BTreeSet policy.
+comptime SSE_RESPONSE_ID_ORDER_ABI: Int64 = 1
+comptime SSE_RESPONSE_ID_ORDER_MAX: Int64 = 1_048_576
+
+
+def sse_response_id_less(
+    views: Pointer[mut=False, UInt64, _], left: Int64, right: Int64,
+) -> Bool:
+    var a_offset = left * 2
+    var b_offset = right * 2
+    var a_size = Int64(views[unsafe_offset=a_offset + 1])
+    var b_size = Int64(views[unsafe_offset=b_offset + 1])
+    var common = min(a_size, b_size)
+    var a = Pointer[mut=False, UInt8, ImmUntrackedOrigin](
+        unsafe_from_address=Int(views[unsafe_offset=a_offset])
+    )
+    var b = Pointer[mut=False, UInt8, ImmUntrackedOrigin](
+        unsafe_from_address=Int(views[unsafe_offset=b_offset])
+    )
+    for i in range(common):
+        var lhs = a[unsafe_offset=i]
+        var rhs = b[unsafe_offset=i]
+        if lhs != rhs:
+            return lhs < rhs
+    if a_size != b_size:
+        return a_size < b_size
+    return left < right
+
+
+def sse_response_id_equal(
+    views: Pointer[mut=False, UInt64, _], left: Int64, right: Int64,
+) -> Bool:
+    var a_offset = left * 2
+    var b_offset = right * 2
+    var a_size = Int64(views[unsafe_offset=a_offset + 1])
+    var b_size = Int64(views[unsafe_offset=b_offset + 1])
+    if a_size != b_size:
+        return False
+    if a_size == 0:
+        return True
+    var a = Pointer[mut=False, UInt8, ImmUntrackedOrigin](
+        unsafe_from_address=Int(views[unsafe_offset=a_offset])
+    )
+    var b = Pointer[mut=False, UInt8, ImmUntrackedOrigin](
+        unsafe_from_address=Int(views[unsafe_offset=b_offset])
+    )
+    for index in range(a_size):
+        if a[unsafe_offset=index] != b[unsafe_offset=index]:
+            return False
+    return True
+
+
+def sse_response_id_heap_down(
+    views: Pointer[mut=False, UInt64, _],
+    indices: Pointer[mut=True, Int64, _],
+    start: Int64, count: Int64,
+):
+    var root = start
+    while root * 2 + 1 < count:
+        var child = root * 2 + 1
+        var swap = root
+        if sse_response_id_less(
+            views, indices[unsafe_offset=swap], indices[unsafe_offset=child],
+        ):
+            swap = child
+        if child + 1 < count and sse_response_id_less(
+            views, indices[unsafe_offset=swap], indices[unsafe_offset=child + 1],
+        ):
+            swap = child + 1
+        if swap == root:
+            return
+        var saved = indices[unsafe_offset=root]
+        indices[unsafe_offset=root] = indices[unsafe_offset=swap]
+        indices[unsafe_offset=swap] = saved
+        root = swap
+
+
+@export("prodex_runtime_sse_response_id_order_v1")
+def prodex_runtime_sse_response_id_order_v1(
+    abi_version: Int64,
+    views_address: UInt, view_count: Int64,
+    indices_address: UInt, indices_capacity: Int64,
+    written_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != SSE_RESPONSE_ID_ORDER_ABI:
+        return 4
+    if (
+        view_count < 0 or view_count > SSE_RESPONSE_ID_ORDER_MAX
+        or (view_count > 0 and (views_address == 0 or views_address % 8 != 0))
+        or indices_address == 0 or indices_address % 8 != 0
+        or indices_capacity < view_count
+        or written_address == 0 or written_address % 8 != 0
+    ):
+        return 1
+    var views = Pointer[mut=False, UInt64, ImmUntrackedOrigin](
+        unsafe_from_address=Int(views_address)
+    )
+    # Validate each borrowed UTF-8 slice before publishing any indices.
+    for index in range(view_count):
+        var address = views[unsafe_offset=index * 2]
+        var length = views[unsafe_offset=index * 2 + 1]
+        if length > UInt64(9223372036854775807):
+            return 1
+        if length > 0 and address == 0:
+            return 1
+        if not rich_view_valid(
+            ProdexRichStringView(UInt(address), UInt(length)),
+            0x7FFFFFFFFFFFFFFF,
+        ):
+            return 1
+    var indices = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(indices_address)
+    )
+    for index in range(view_count):
+        indices[unsafe_offset=index] = index
+    var start = view_count // 2
+    while start > 0:
+        start -= 1
+        sse_response_id_heap_down(views, indices, start, view_count)
+    var end = view_count
+    while end > 1:
+        end -= 1
+        var saved = indices[unsafe_offset=0]
+        indices[unsafe_offset=0] = indices[unsafe_offset=end]
+        indices[unsafe_offset=end] = saved
+        sse_response_id_heap_down(views, indices, 0, end)
+    var unique: Int64 = 0
+    for index in range(view_count):
+        var next_index = indices[unsafe_offset=index]
+        if unique == 0 or not sse_response_id_equal(
+            views, indices[unsafe_offset=unique - 1], next_index,
+        ):
+            indices[unsafe_offset=unique] = next_index
+            unique += 1
+    Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(written_address)
+    )[] = unique
     return 0
