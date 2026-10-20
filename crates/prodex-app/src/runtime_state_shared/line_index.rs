@@ -314,22 +314,24 @@ pub(super) fn runtime_smart_context_repo_map_nearest_path(
     line_index: &RuntimeSmartContextArtifactLineIndex,
     line: usize,
 ) -> Option<String> {
-    line_index
+    let ranges = line_index
         .file_location_ranges
         .iter()
         .chain(line_index.diff_hunk_ranges.iter())
-        .filter_map(|range| {
-            let path = range.path.as_ref()?.clone();
-            let distance = prodex_mojo_core::runtime_repo_map::repo_path_distance(
-                range.start,
-                range.end,
-                line,
-            )
-            .expect("Mojo repo-map path distance returned invalid output");
-            Some((distance, range.start, path))
-        })
-        .min_by(|left, right| left.0.cmp(&right.0).then_with(|| left.1.cmp(&right.1)))
-        .map(|(_, _, path)| path)
+        .collect::<Vec<_>>();
+    let facts = ranges
+        .iter()
+        .map(
+            |range| prodex_mojo_core::runtime_repo_map::RepoNearestPathInput {
+                start: range.start,
+                end: range.end,
+                has_path: range.path.is_some(),
+            },
+        )
+        .collect::<Vec<_>>();
+    let index = prodex_mojo_core::runtime_repo_map::repo_nearest_path_index(&facts, line)
+        .expect("compiled Mojo repo-map nearest-path selection returned invalid output")?;
+    ranges[index].path.clone()
 }
 
 pub(super) fn runtime_smart_context_repo_map_symbol_kind(
@@ -395,4 +397,82 @@ pub(super) fn runtime_smart_context_insert_repo_map_entry(
             }
         })
         .or_insert(entry);
+}
+
+#[cfg(test)]
+mod compiled_repo_nearest_path_caller_tests {
+    use super::*;
+
+    fn path_range(
+        start: usize,
+        end: usize,
+        path: Option<&str>,
+    ) -> RuntimeSmartContextArtifactSemanticLineRange {
+        RuntimeSmartContextArtifactSemanticLineRange {
+            start,
+            end,
+            byte_len: 0,
+            content_hash: String::new(),
+            text: String::new(),
+            label: None,
+            path: path.map(str::to_owned),
+            line: None,
+            column: None,
+            old_start: None,
+            old_count: None,
+            new_start: None,
+            new_count: None,
+            code: None,
+            symbol: None,
+        }
+    }
+
+    #[test]
+    fn compiled_nearest_repo_path_considers_file_and_diff_ranges_and_start_ties() {
+        let index = RuntimeSmartContextArtifactLineIndex {
+            file_location_ranges: vec![
+                path_range(5, 5, Some("src/first-雪.rs")),
+                path_range(8, 9, Some("src/later.rs")),
+                path_range(3, 20, None),
+            ],
+            diff_hunk_ranges: vec![
+                path_range(3, 3, Some("src/earliest.rs")),
+                path_range(5, 5, Some("src/tie.rs")),
+            ],
+            ..Default::default()
+        };
+        assert_eq!(
+            runtime_smart_context_repo_map_nearest_path(&index, 4).as_deref(),
+            Some("src/earliest.rs"),
+            "equal distance prefers lower start even across range collections",
+        );
+        assert_eq!(
+            runtime_smart_context_repo_map_nearest_path(&index, 8).as_deref(),
+            Some("src/later.rs"),
+        );
+        assert_eq!(
+            runtime_smart_context_repo_map_nearest_path(&index, 5).as_deref(),
+            Some("src/first-雪.rs"),
+            "equal start and distance must preserve the first input range",
+        );
+    }
+
+    #[test]
+    fn compiled_nearest_repo_path_skips_missing_paths_but_preserves_empty_strings() {
+        let mut index = RuntimeSmartContextArtifactLineIndex {
+            file_location_ranges: vec![path_range(1, 10, None)],
+            diff_hunk_ranges: vec![path_range(20, 22, None)],
+            ..Default::default()
+        };
+        assert_eq!(runtime_smart_context_repo_map_nearest_path(&index, 4), None);
+        index.diff_hunk_ranges.push(path_range(30, 33, Some("")));
+        assert_eq!(
+            runtime_smart_context_repo_map_nearest_path(&index, 4),
+            Some(String::new()),
+            "the previous filter_map accepted Some(empty path)",
+        );
+        index.file_location_ranges.clear();
+        index.diff_hunk_ranges.clear();
+        assert_eq!(runtime_smart_context_repo_map_nearest_path(&index, 4), None);
+    }
 }

@@ -8045,3 +8045,15 @@ core ABI tests, direct Mojo test, no-fallback guard and production
 share checks pass. Official share increases from 36.00180409780166%
 to 36.01139399995655% (132,617 Mojo / 235,647 Rust).
 The 75% objective remains unmet.
+
+## Repo-map nearest source-path selection batched in Mojo (2026-10-20)
+
+The compiled repo-map owner now computes all path distances and chooses
+the minimum with earliest-range-start and first-original-row ties
+in one batch. Rust retains the semantic index and applies one
+validated selected path without its old per-range FFI calls and
+min_by policy. All 15 artifact-store tests, two caller tests,
+two direct core ABI tests, direct Mojo regression and no-fallback/share
+checks pass. Official share rises from 36.01139399995655% to
+36.01500636576116% (132,671 Mojo / 235,706 Rust).
+The separate 75% objective stays outstanding.

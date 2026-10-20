@@ -680,3 +680,66 @@ def prodex_runtime_repo_artifact_eviction_v1(
         unsafe_from_address=Int(written_address)
     )[] = chosen
     return REPO_MAP_OK
+
+
+# Nearest-path batch selection for repository symbol/error projections.
+# The existing compiled path-distance owner is reused without per-row
+# FFI, and Mojo alone chooses minimum distance, then lowest start, then
+# first original position for an exact tie.
+comptime REPO_NEAREST_PATH_BATCH_ABI: Int64 = 1
+comptime REPO_NEAREST_PATH_BATCH_MAX: Int64 = 1_048_576
+
+
+@export("prodex_runtime_repo_nearest_path_v1")
+def prodex_runtime_repo_nearest_path_v1(
+    abi_version: Int64,
+    rows_address: UInt, row_count: Int64,
+    target_line: Int64,
+    result_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != REPO_NEAREST_PATH_BATCH_ABI:
+        return 4
+    if (
+        row_count < 0 or row_count > REPO_NEAREST_PATH_BATCH_MAX
+        or target_line < 0
+        or (row_count > 0 and (rows_address == 0 or rows_address % 8 != 0))
+        or result_address == 0 or result_address % 8 != 0
+    ):
+        return REPO_MAP_INVALID
+    var rows = Pointer[mut=False, Int64, ImmUntrackedOrigin](
+        unsafe_from_address=Int(rows_address)
+    )
+    for index in range(row_count):
+        var offset = index * 3
+        var available = rows[unsafe_offset=offset + 2]
+        if available != 0 and available != 1:
+            return REPO_MAP_INVALID
+        if available == 1 and (
+            rows[unsafe_offset=offset] < 0
+            or rows[unsafe_offset=offset + 1] < rows[unsafe_offset=offset]
+        ):
+            return REPO_MAP_INVALID
+    var winner = Int64(-1)
+    var best_distance = Int64(0)
+    var best_start = Int64(0)
+    for index in range(row_count):
+        var offset = index * 3
+        if rows[unsafe_offset=offset + 2] == 0:
+            continue
+        var start = rows[unsafe_offset=offset]
+        var end = rows[unsafe_offset=offset + 1]
+        var distance = prodex_runtime_repo_path_distance_v1(
+            REPO_MAP_ABI_VERSION, start, end, target_line,
+        )
+        if distance < 0:
+            return REPO_MAP_INVALID
+        if winner < 0 or distance < best_distance or (
+            distance == best_distance and start < best_start
+        ):
+            winner = index
+            best_distance = distance
+            best_start = start
+    Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(result_address)
+    )[] = winner
+    return REPO_MAP_OK
