@@ -1969,6 +1969,9 @@ export function findViolations(files) {
         "gemini_skip_context_path_name(name)",
         "compiled_gemini_tool_pattern_parser_reaches_public_provider_boundary",
         "compiled_gemini_path_exclusion_reaches_public_provider_boundary",
+        "GeminiValueOperation::StreamError",
+        'document.member(value, "error")',
+        "compiled_gemini_stream_error_preserves_status_presence_and_i64_grammar",
       ];
       const retired = [
         "Some(serde_json::Value::Array(items)) =>",
@@ -1978,6 +1981,8 @@ export function findViolations(files) {
         "value.find('(')?",
         "value.rfind(')')?",
         '".git" | "node_modules" | "target"',
+        'let error = value.get("error")?',
+        "let code = error",
       ];
       return required.every((marker) => contents.includes(marker)) &&
         retired.every((marker) => !production.includes(marker))
@@ -1995,6 +2000,8 @@ export function findViolations(files) {
         "compiled_gemini_scalar_tool_parts_preserves_unicode_whitespace_and_last_close",
         "compiled_gemini_scalar_context_names_use_exact_case",
         "compiled_gemini_scalar_abi_rejects_bad_shape_before_output_writes",
+        "StreamError = 3",
+        "compiled_gemini_stream_error_reads_serde_number_lexemes_and_missing_errors",
       ];
       return required.filter((marker) => !contents.includes(marker))
         .map((marker) => filePath + ": compiled Gemini value ABI must retain " + marker);
@@ -2009,6 +2016,9 @@ export function findViolations(files) {
         '@export("prodex_mojo_gemini_value_scalar_v1")',
         'rich_view_matches_literal["vendor"](text, False)',
         "rich_trim_bounds(text)",
+        "def gemini_value_stream_error(",
+        "def gemini_value_signed_integer(",
+        'pj_field(tree, error, StringSlice("status"))',
       ];
       return required.filter((marker) => !contents.includes(marker))
         .map((marker) => filePath + ": compiled Gemini value traversal must retain " + marker);
@@ -11169,6 +11179,9 @@ function selfTest() {
     "gemini_skip_context_path_name(name)",
     "compiled_gemini_tool_pattern_parser_reaches_public_provider_boundary",
     "compiled_gemini_path_exclusion_reaches_public_provider_boundary",
+    "GeminiValueOperation::StreamError",
+    'document.member(value, "error")',
+    "compiled_gemini_stream_error_preserves_status_presence_and_i64_grammar",
   ].join("\n");
   const geminiValueCallerPath = "crates/prodex-provider-core/src/gemini_bridge/util.rs";
   assert.deepEqual(findViolations([[geminiValueCallerPath, geminiValueCallerFixture]]), []);

@@ -72,22 +72,19 @@ pub fn gemini_provider_core_skip_context_path_name(name: &str) -> bool {
 }
 
 pub fn gemini_provider_core_stream_error(value: &serde_json::Value) -> Option<(String, String)> {
-    let error = value.get("error")?;
-    let code = error
-        .get("status")
-        .or_else(|| error.get("code"))
-        .and_then(|code| {
-            code.as_str()
-                .map(str::to_string)
-                .or_else(|| code.as_i64().map(|code| code.to_string()))
-        })
-        .unwrap_or_else(|| "provider_stream_error".to_string());
-    let message = error
-        .get("message")
-        .and_then(serde_json::Value::as_str)
-        .unwrap_or("Gemini stream returned an embedded provider error")
-        .to_string();
-    Some((code, message))
+    let mut document = crate::mojo_json::Document::default();
+    // Acquire only the error member: successful SSE payloads may be large and
+    // must not be recopied merely to ask whether an embedded error exists.
+    document.member(value, "error");
+    let raw = std::str::from_utf8(&document.raw).expect("Serde emits UTF-8 JSON");
+    let bytes = prodex_mojo_core::json::gemini_value_projection(
+        &document.nodes,
+        raw,
+        prodex_mojo_core::json::GeminiValueOperation::StreamError,
+    )
+    .expect("compiled Mojo Gemini stream error projection returned invalid output");
+    serde_json::from_slice(&bytes)
+        .expect("compiled Mojo Gemini stream error projection must return an optional pair")
 }
 
 #[cfg(test)]
@@ -166,6 +163,85 @@ mod tests {
         );
         gemini_provider_core_collect_input_texts(None, &mut texts);
         assert_eq!(texts.len(), 15);
+    }
+
+    #[test]
+    fn compiled_gemini_stream_error_preserves_status_presence_and_i64_grammar() {
+        let fallback = "provider_stream_error";
+        let message_fallback = "Gemini stream returned an embedded provider error";
+        for (value, expected) in [
+            (serde_json::json!({}), None),
+            (
+                serde_json::json!({"error": null}),
+                Some((fallback, message_fallback)),
+            ),
+            (
+                serde_json::json!({"error": {}}),
+                Some((fallback, message_fallback)),
+            ),
+            (
+                serde_json::json!({"error": "unstructured"}),
+                Some((fallback, message_fallback)),
+            ),
+            (
+                serde_json::json!({"error":{"status":"E_CONN","message":"失败 🚀"}}),
+                Some(("E_CONN", "失败 🚀")),
+            ),
+            (
+                serde_json::json!({"error":{"code":"E_SECONDARY","message":""}}),
+                Some(("E_SECONDARY", "")),
+            ),
+            (
+                serde_json::json!({"error":{"status": null, "code": 404, "message": 9}}),
+                Some((fallback, message_fallback)),
+            ),
+            (
+                serde_json::json!({"error":{"status": false, "code": "OTHER"}}),
+                Some((fallback, message_fallback)),
+            ),
+            (
+                serde_json::json!({"error":{"status": 0}}),
+                Some(("0", message_fallback)),
+            ),
+            (
+                serde_json::json!({"error":{"status": -7}}),
+                Some(("-7", message_fallback)),
+            ),
+            (
+                serde_json::json!({"error":{"status": i64::MIN}}),
+                Some(("-9223372036854775808", message_fallback)),
+            ),
+            (
+                serde_json::json!({"error":{"status": i64::MAX}}),
+                Some(("9223372036854775807", message_fallback)),
+            ),
+            (
+                serde_json::json!({"error":{"status": u64::MAX}}),
+                Some((fallback, message_fallback)),
+            ),
+            (
+                serde_json::json!({"error":{"code": 1.25}}),
+                Some((fallback, message_fallback)),
+            ),
+            (
+                serde_json::json!({"error":{"code": 1.0}}),
+                Some((fallback, message_fallback)),
+            ),
+            (
+                serde_json::json!({"error":{"status": "", "message": ""}}),
+                Some(("", "")),
+            ),
+            (
+                serde_json::json!({"error":{"status": [], "message": []}}),
+                Some((fallback, message_fallback)),
+            ),
+        ] {
+            assert_eq!(
+                gemini_provider_core_stream_error(&value),
+                expected.map(|(code, message)| (code.to_owned(), message.to_owned())),
+                "value={value:?}",
+            );
+        }
     }
 
     #[test]
