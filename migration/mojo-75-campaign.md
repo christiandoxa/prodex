@@ -7890,3 +7890,16 @@ tests, two direct core ABI tests, direct Mojo test and strict
 no-fallback/production checks pass. Official share increases from
 35.88682132415225% to 35.88952865852326%
 (131,393 Mojo / 234,711 Rust). The 75% objective stays unmet.
+
+## Upstream payload log string budget and UTF-8 clipping in Mojo (2026-10-20)
+
+The production log semantics owner now decides cumulative 1,024-byte
+Serde JSON string-value omissions, preserving original iteration
+order and unused capacity across skipped values, and the capped
+64-KiB UTF-8/last-ASCII byte boundary. Rust retains generic Serde
+reference acquisition, existing redaction and logging, with the old
+Rust budgeting and truncation decisions removed. Five app-caller
+tests, three direct core ABI tests, direct Mojo ABI tests and
+no-fallback/share guards pass. Official share increases from
+35.88952865852326% to 35.89055457119222%
+(131,461 Mojo / 234,822 Rust). The 75% goal remains open.

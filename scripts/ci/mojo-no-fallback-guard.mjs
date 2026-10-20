@@ -298,6 +298,11 @@ const RUNTIME_SSE_EVENT_STATE_ADAPTER = "crates/prodex-mojo-core/src/runtime_sse
 const RUNTIME_SSE_EVENT_STATE_MOJO = "mojo/prodex_core/sse_line.mojo";
 const RUNTIME_SSE_EVENT_STATE_DIRECT_TEST = "mojo/tests/runtime_sse_event_state_test.mojo";
 const RUNTIME_SSE_EVENT_STATE_CALLER_TEST = "crates/prodex-runtime-proxy/tests/src/payload_detection.rs";
+const UPSTREAM_PAYLOAD_BOUNDS_CALLER = "crates/prodex-app/src/runtime_proxy/upstream_payload_log.rs";
+const UPSTREAM_PAYLOAD_BOUNDS_ADAPTER = "crates/prodex-mojo-core/src/log/upstream_payload_bounds.rs";
+const UPSTREAM_PAYLOAD_BOUNDS_FACADE = "crates/prodex-mojo-core/src/log.rs";
+const UPSTREAM_PAYLOAD_BOUNDS_MOJO = "mojo/prodex_core/log_semantics.mojo";
+const UPSTREAM_PAYLOAD_BOUNDS_DIRECT_TEST = "mojo/tests/upstream_payload_log_bounds_test.mojo";
 const PROMOTED_FILES = [
   PROVIDER_USAGE_SSE_MOJO,
   PROVIDER_USAGE_SSE_TEST,
@@ -324,6 +329,9 @@ const PROMOTED_FILES = [
   RESPONSE_HEADER_SELECTION_CORE,
   RESPONSE_HEADER_SELECTION_TEST,
   RESPONSE_HEADER_SELECTION_CALLER_TEST,
+  UPSTREAM_PAYLOAD_BOUNDS_CALLER,
+  UPSTREAM_PAYLOAD_BOUNDS_ADAPTER,
+  UPSTREAM_PAYLOAD_BOUNDS_DIRECT_TEST,
   RUNTIME_SSE_EVENT_STATE_DIRECT_TEST,
   PREVIOUS_RESPONSE_JSON_CALLER,
   PREVIOUS_RESPONSE_JSON_SHAPE,
@@ -4764,6 +4772,63 @@ export function findViolations(files) {
     if (filePath === STARTUP_PROBE_BATCH_CALLER_TEST) {
       return contents.includes("compiled_startup_probe_batch_preserves_over_65536_profile_order_and_remaining_slots")
         ? [] : [filePath + ": startup batch requires cross-batch caller regression"];
+    }
+    return [];
+  });
+  const upstreamPayloadBoundsMojoViolations = files.flatMap(([filePath, contents]) => {
+    if (filePath === UPSTREAM_PAYLOAD_BOUNDS_CALLER &&
+        contents.includes("fn redacted_upstream_payload(")) {
+      const production = contents.split("#[cfg(test)]", 1)[0];
+      const required = [
+        "collect_upstream_payload_string_views(&mut value, &mut strings)",
+        "strings.chunks_mut(1_048_576)",
+        "upstream_payload_string_budget_plan(",
+        "remaining = plan.remaining",
+        "redaction_redact_json(&mut value)",
+        "upstream_payload_log_prefix(",
+      ];
+      const retired = [
+        "fn bound_upstream_payload_json_strings(",
+        "*remaining -= text.len()",
+        ".rposition(|byte| *byte < 0x80)",
+        "if payload.len() <= MAX_UPSTREAM_PAYLOAD_LOG_BYTES",
+      ];
+      return required.every((marker) => production.includes(marker))
+        && retired.every((marker) => !production.includes(marker))
+        ? [] : [filePath + ": secure upstream payload byte budgets and UTF-8 cut must stay Mojo-owned"];
+    }
+    if (filePath === UPSTREAM_PAYLOAD_BOUNDS_ADAPTER) {
+      return [
+        "fn prodex_mojo_upstream_payload_string_budget_v1(",
+        "fn prodex_mojo_upstream_payload_truncate_v1(",
+        "pub fn upstream_payload_string_budget_plan(",
+        "pub fn upstream_payload_log_prefix(",
+        "compiled_upstream_payload_string_budget_preserves_order_and_skipped_items",
+        "compiled_upstream_payload_prefix_preserves_valid_utf8_and_legacy_ascii_fallback",
+        "compiled_upstream_payload_limits_reject_abi_and_capacity_without_writes",
+      ].filter((marker) => !contents.includes(marker))
+        .map((marker) => filePath + ": upstream log bounds ABI missing " + marker);
+    }
+    if (filePath === UPSTREAM_PAYLOAD_BOUNDS_FACADE &&
+        contents.includes("mod upstream_payload_bounds;")) {
+      return contents.includes("pub use upstream_payload_bounds::{")
+        ? [] : [filePath + ": compiled upstream payload limits must remain production reachable"];
+    }
+    if (filePath === UPSTREAM_PAYLOAD_BOUNDS_MOJO &&
+        contents.includes("prodex_mojo_upstream_payload_classify_v1")) {
+      return [
+        '@export("prodex_mojo_upstream_payload_string_budget_v1")',
+        '@export("prodex_mojo_upstream_payload_truncate_v1")',
+        "UPSTREAM_PAYLOAD_LOG_MAX_STRINGS",
+        "if length > remaining:",
+        "rich_utf8_valid(ptr, max_bytes)",
+      ].filter((marker) => !contents.includes(marker))
+        .map((marker) => filePath + ": upstream byte budget/cut owner missing " + marker);
+    }
+    if (filePath === UPSTREAM_PAYLOAD_BOUNDS_DIRECT_TEST) {
+      return contents.includes("prodex_mojo_upstream_payload_string_budget_v1")
+        && contents.includes("prodex_mojo_upstream_payload_truncate_v1")
+        ? [] : [filePath + ": direct upstream payload limit Mojo ABI test required"];
     }
     return [];
   });
@@ -12103,7 +12168,7 @@ export function findViolations(files) {
     }
     return [];
   });
-  return [...runtimeSseEventStateMojoViolations, ...geminiPatchSourceMojoViolations, ...openAiCompatSseEnvelopeMojoViolations, ...anthropicSseDataLineMojoViolations, ...responseHeaderSelectionMojoViolations, ...previousResponseTextSpanMojoViolations, ...previousResponseJsonSearchMojoViolations, ...domainErrorMojoViolations, ...geminiValueCollectionMojoViolations, ...geminiSimpleResponseViolations, ...logPayloadProjectionViolations, ...nativeRecoveryOwnershipViolations, ...quotaRecoveryEligibilityViolations, ...runtimeBrokerReuseMojoViolations, ...geminiResponseMediaMojoViolations, ...cookieEvictionMojoViolations, ...websocketBudgetMojoViolations, ...affinityBindingMojoViolations, ...responsesCapacityRecoveryViolations, ...sseTapMojoOwnershipViolations, ...quotaWatchViolations, ...geminiCompactSnippetViolations, ...geminiCompactTextViolations, ...doctorSmartContextDecisionViolations, ...providerSseJsonFrameMojoViolations, ...geminiSseCompletionOwnershipViolations, ...anthropicNativeStreamDecisionViolations, ...anthropicAttemptCursorViolations, ...geminiUnsupportedToolRetryViolations, ...terminalGeometryViolations, ...previousResponseRecoveryTransitionViolations, ...chatCompatibleToolCallKindViolations, ...geminiQuotaBodyMojoViolations, ...geminiOAuthRotationMojoViolations, ...geminiBuiltinBatchMojoViolations, ...geminiToolArrayValidationMojoViolations, ...geminiOAuthModelMojoViolations, ...superExposeOriginMojoViolations, ...kiroAcpToolLedgerMojoViolations, ...quotaPoolSummarySectionsMojoViolations, ...deepseekRequestDiagnosticViolations, ...deepseekToolShapeIssueMojoViolations, ...deepseekReplayItemPolicyMojoViolations, ...chatNamespaceSplitMojoViolations, ...deepseekInputItemIssueMessageViolations, ...deepseekRequestIssueMessageViolations, ...smartContextTelemetrySampleViolations, ...compatibilityDiagnosticsMojoViolations, ...quotaHeaderProjectionViolations, ...smartContextCapsuleOrderViolations, ...markerViolations, ...deepseekCatalogPolicyViolations, ...featureOffViolations, ...liveLogRecordViolations, ...runtimePolicyPresetViolations, ...runtimeConfigScalarViolations, ...profileHealthCircuitViolations, ...logThroughputViolations, ...operationalDetailSpecViolations, ...transcriptPolicyViolations, ...logLoadPolicyViolations, ...routeReasonViolations, ...quotaSnapshotCompareMojoViolations, ...startupProbeBatchMojoViolations, ...runtimeStateQuotaViolations, ...runtimeStateRoutePolicyViolations, ...runtimeProxyRootViolations, ...runtimeRecoveryDeadlineViolations, ...brokerVersionGuardViolations, ...brokerContinuityViolations, ...brokerLogCacheViolations, ...codexConfigViolations, ...statePolicyViolations, ...quotaSelectionPolicyViolations, ...routeTagMirrorViolations, ...enumTagMirrorViolations, ...appSelectionPolicyMirrorViolations, ...runtimeStateBackgroundViolations, ...redactionViolations, ...rateLimitHeaderSelectionViolations, ...profileIdentityViolations, ...governanceInspectionViolations, ...governanceInspectionOrderingViolations, ...exactnessPlannerViolations,
+  return [...upstreamPayloadBoundsMojoViolations, ...runtimeSseEventStateMojoViolations, ...geminiPatchSourceMojoViolations, ...openAiCompatSseEnvelopeMojoViolations, ...anthropicSseDataLineMojoViolations, ...responseHeaderSelectionMojoViolations, ...previousResponseTextSpanMojoViolations, ...previousResponseJsonSearchMojoViolations, ...domainErrorMojoViolations, ...geminiValueCollectionMojoViolations, ...geminiSimpleResponseViolations, ...logPayloadProjectionViolations, ...nativeRecoveryOwnershipViolations, ...quotaRecoveryEligibilityViolations, ...runtimeBrokerReuseMojoViolations, ...geminiResponseMediaMojoViolations, ...cookieEvictionMojoViolations, ...websocketBudgetMojoViolations, ...affinityBindingMojoViolations, ...responsesCapacityRecoveryViolations, ...sseTapMojoOwnershipViolations, ...quotaWatchViolations, ...geminiCompactSnippetViolations, ...geminiCompactTextViolations, ...doctorSmartContextDecisionViolations, ...providerSseJsonFrameMojoViolations, ...geminiSseCompletionOwnershipViolations, ...anthropicNativeStreamDecisionViolations, ...anthropicAttemptCursorViolations, ...geminiUnsupportedToolRetryViolations, ...terminalGeometryViolations, ...previousResponseRecoveryTransitionViolations, ...chatCompatibleToolCallKindViolations, ...geminiQuotaBodyMojoViolations, ...geminiOAuthRotationMojoViolations, ...geminiBuiltinBatchMojoViolations, ...geminiToolArrayValidationMojoViolations, ...geminiOAuthModelMojoViolations, ...superExposeOriginMojoViolations, ...kiroAcpToolLedgerMojoViolations, ...quotaPoolSummarySectionsMojoViolations, ...deepseekRequestDiagnosticViolations, ...deepseekToolShapeIssueMojoViolations, ...deepseekReplayItemPolicyMojoViolations, ...chatNamespaceSplitMojoViolations, ...deepseekInputItemIssueMessageViolations, ...deepseekRequestIssueMessageViolations, ...smartContextTelemetrySampleViolations, ...compatibilityDiagnosticsMojoViolations, ...quotaHeaderProjectionViolations, ...smartContextCapsuleOrderViolations, ...markerViolations, ...deepseekCatalogPolicyViolations, ...featureOffViolations, ...liveLogRecordViolations, ...runtimePolicyPresetViolations, ...runtimeConfigScalarViolations, ...profileHealthCircuitViolations, ...logThroughputViolations, ...operationalDetailSpecViolations, ...transcriptPolicyViolations, ...logLoadPolicyViolations, ...routeReasonViolations, ...quotaSnapshotCompareMojoViolations, ...startupProbeBatchMojoViolations, ...runtimeStateQuotaViolations, ...runtimeStateRoutePolicyViolations, ...runtimeProxyRootViolations, ...runtimeRecoveryDeadlineViolations, ...brokerVersionGuardViolations, ...brokerContinuityViolations, ...brokerLogCacheViolations, ...codexConfigViolations, ...statePolicyViolations, ...quotaSelectionPolicyViolations, ...routeTagMirrorViolations, ...enumTagMirrorViolations, ...appSelectionPolicyMirrorViolations, ...runtimeStateBackgroundViolations, ...redactionViolations, ...rateLimitHeaderSelectionViolations, ...profileIdentityViolations, ...governanceInspectionViolations, ...governanceInspectionOrderingViolations, ...exactnessPlannerViolations,
     ...infoRunwayViolations,
     ...geminiNormalizedViolations,
     ...quotaDurationViolations,
@@ -13272,6 +13337,20 @@ function selfTest() {
   assert.match(findViolations([[RESPONSE_FORWARDING_FILE,
     responseHeaderFixture + "\nheaders.into_iter().any(|(name, value)| ...)",
   ]]).join("\n"), /first-header, binary MIME and SSE flush selection must stay Mojo-owned/u);
+  const upstreamBoundsFixture = [
+    "fn redacted_upstream_payload(",
+    "collect_upstream_payload_string_views(&mut value, &mut strings)",
+    "strings.chunks_mut(1_048_576)",
+    "upstream_payload_string_budget_plan(",
+    "remaining = plan.remaining",
+    "redaction_redact_json(&mut value)",
+    "upstream_payload_log_prefix(",
+  ].join("\\n");
+  assert.deepEqual(findViolations([[UPSTREAM_PAYLOAD_BOUNDS_CALLER, upstreamBoundsFixture]]).filter(
+    (message) => message.includes("secure upstream payload byte budgets")), []);
+  assert.match(findViolations([[UPSTREAM_PAYLOAD_BOUNDS_CALLER,
+    upstreamBoundsFixture + "\\nfn bound_upstream_payload_json_strings(",
+  ]]).join("\\n"), /secure upstream payload byte budgets and UTF-8 cut must stay Mojo-owned/u);
   const sseEventStateFixture = [
     "fn runtime_sse_emit_event<",
     "sse_event_state_action(data_lines, SseEventStateOperation::Emit, true)",

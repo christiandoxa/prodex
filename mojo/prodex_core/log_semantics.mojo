@@ -2,7 +2,7 @@ from std.memory import Pointer
 
 from log_transcript_facts import PRODEX_TRANSCRIPT_ABI_VERSION, transcript_fact_view_valid, transcript_fact_whitespace, transcript_fact_control, transcript_fact_codepoint, transcript_fact_trim_bounds
 
-from rich_text import rich_codepoint, rich_codepoint_width, rich_trim_bounds, rich_utf8_continuation, rich_view_matches_literal, rich_view_valid
+from rich_text import rich_codepoint, rich_codepoint_width, rich_trim_bounds, rich_utf8_continuation, rich_view_matches_literal, rich_view_valid, rich_utf8_valid
 from rich_types import ProdexRichStringView, rich_view_ptr
 
 comptime PRODEX_LOG_SNAPSHOT_ABI_VERSION: Int64 = 1
@@ -3696,4 +3696,86 @@ def prodex_mojo_log_tui_header_layout_v1(
     output[unsafe_offset=1] = width0
     output[unsafe_offset=2] = width1
     output[unsafe_offset=3] = width2
+    return 0
+
+
+# Secure upstream request logging limits. Rust still owns Serde decoding,
+# secret redaction and transport logging; Mojo alone decides which original
+# JSON string values fit the shared byte budget and exactly where a capped
+# UTF-8/log byte prefix ends.
+comptime UPSTREAM_PAYLOAD_LOG_BOUNDS_ABI: Int64 = 1
+comptime UPSTREAM_PAYLOAD_LOG_MAX_STRINGS: Int64 = 1_048_576
+
+
+@export("prodex_mojo_upstream_payload_string_budget_v1")
+def prodex_mojo_upstream_payload_string_budget_v1(
+    abi_version: Int64,
+    lengths_address: UInt, count: Int64, budget: UInt64,
+    flags_address: UInt, flags_capacity: Int64,
+    remaining_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != UPSTREAM_PAYLOAD_LOG_BOUNDS_ABI:
+        return 4
+    if (
+        count < 0 or count > UPSTREAM_PAYLOAD_LOG_MAX_STRINGS
+        or (count > 0 and (lengths_address == 0 or lengths_address % 8 != 0))
+        or flags_address == 0 or flags_address % 8 != 0
+        or flags_capacity < count
+        or remaining_address == 0 or remaining_address % 8 != 0
+    ):
+        return 1
+    var lengths = Pointer[mut=False, UInt64, ImmUntrackedOrigin](
+        unsafe_from_address=Int(lengths_address)
+    )
+    var flags = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(flags_address)
+    )
+    var remaining = budget
+    for index in range(count):
+        var length = lengths[unsafe_offset=index]
+        if length > remaining:
+            flags[unsafe_offset=index] = 1
+        else:
+            flags[unsafe_offset=index] = 0
+            remaining -= length
+    Pointer[mut=True, UInt64, MutUntrackedOrigin](
+        unsafe_from_address=Int(remaining_address)
+    )[] = remaining
+    return 0
+
+
+@export("prodex_mojo_upstream_payload_truncate_v1")
+def prodex_mojo_upstream_payload_truncate_v1(
+    abi_version: Int64,
+    payload_address: UInt, payload_length: Int64, max_bytes: Int64,
+    result_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != UPSTREAM_PAYLOAD_LOG_BOUNDS_ABI:
+        return 4
+    if (
+        payload_length < 0 or max_bytes < 0
+        or (payload_length > 0 and payload_address == 0)
+        or result_address == 0 or result_address % 8 != 0
+    ):
+        return 1
+    var kept = payload_length
+    var truncated = False
+    if payload_length > max_bytes:
+        truncated = True
+        kept = max_bytes
+        var ptr = Pointer[mut=False, UInt8, ImmUntrackedOrigin](
+            unsafe_from_address=Int(payload_address)
+        )
+        # Preserve historical fallback: when the capped prefix is not
+        # valid UTF-8, keep the bytes through the last ASCII byte.
+        if not rich_utf8_valid(ptr, max_bytes):
+            kept = 0
+            for index in range(max_bytes):
+                if ptr[unsafe_offset=index] < 0x80:
+                    kept = index + 1
+    var result = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(result_address)
+    )
+    result[unsafe_offset=0] = kept
+    result[unsafe_offset=1] = Int64(truncated)
     return 0
