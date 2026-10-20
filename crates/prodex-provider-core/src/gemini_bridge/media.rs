@@ -88,15 +88,23 @@ pub fn gemini_provider_core_append_media_parts_to_last_user_content(
     contents: &mut Vec<serde_json::Value>,
     media_parts: Vec<serde_json::Value>,
 ) {
-    if let Some(content) = contents
-        .iter_mut()
-        .rev()
-        .find(|content| content.get("role").and_then(serde_json::Value::as_str) == Some("user"))
-        && let Some(parts) = content
+    let rows = contents
+        .iter()
+        .map(|content| prodex_mojo_core::rich::GeminiMediaUserRow {
+            role: content.get("role").and_then(serde_json::Value::as_str),
+            parts_is_array: content
+                .get("parts")
+                .is_some_and(serde_json::Value::is_array),
+        })
+        .collect::<Vec<_>>();
+    if let Some(index) = prodex_mojo_core::rich::gemini_media_append_user_target(&rows)
+        .expect("compiled Mojo Gemini media append selection returned invalid output")
+    {
+        contents[index]
             .get_mut("parts")
             .and_then(serde_json::Value::as_array_mut)
-    {
-        parts.extend(media_parts);
+            .expect("compiled Mojo selected a valid user parts array")
+            .extend(media_parts);
         return;
     }
     contents.push(gemini_provider_core_content("user", media_parts));
@@ -121,4 +129,85 @@ pub fn gemini_provider_core_content(
         "role": role,
         "parts": parts,
     })
+}
+
+#[cfg(test)]
+mod append_media_tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn compiled_media_append_attaches_to_latest_user_with_valid_parts() {
+        let mut contents = vec![
+            json!({"role":"user","parts":[{"text":"early"}]}),
+            json!({"role":"assistant","parts":[{"text":"answer"}]}),
+            json!({"role":"user","parts":[{"text":"last"}]}),
+        ];
+        gemini_provider_core_append_media_parts_to_last_user_content(
+            &mut contents,
+            vec![json!({"inlineData":{"mimeType":"image/png","data":"abc"}})],
+        );
+        assert_eq!(contents.len(), 3);
+        assert_eq!(contents[0]["parts"], json!([{"text":"early"}]));
+        assert_eq!(
+            contents[2]["parts"],
+            json!([
+                {"text":"last"},
+                {"inlineData":{"mimeType":"image/png","data":"abc"}}
+            ])
+        );
+    }
+
+    #[test]
+    fn compiled_media_append_does_not_fall_back_to_earlier_user_after_malformed_last() {
+        let mut contents = vec![
+            json!({"role":"user","parts":[{"text":"preserve"}]}),
+            json!({"role":"assistant","parts":[]}),
+            json!({"role":"user","parts":"invalid"}),
+        ];
+        gemini_provider_core_append_media_parts_to_last_user_content(
+            &mut contents,
+            vec![json!({"fileData":{"fileUri":"gs://media"}})],
+        );
+        assert_eq!(contents.len(), 4);
+        assert_eq!(contents[0]["parts"], json!([{"text":"preserve"}]));
+        assert_eq!(contents[2]["parts"], json!("invalid"));
+        assert_eq!(
+            contents[3],
+            json!({
+                "role":"user",
+                "parts":[{"fileData":{"fileUri":"gs://media"}}]
+            })
+        );
+    }
+
+    #[test]
+    fn compiled_media_append_handles_missing_user_wrong_role_case_and_empty_parts() {
+        let mut contents = vec![
+            json!({"role":"User","parts":[]}),
+            json!({"role":"assistant","parts":[]}),
+        ];
+        gemini_provider_core_append_media_parts_to_last_user_content(&mut contents, vec![]);
+        assert_eq!(contents.len(), 3);
+        assert_eq!(contents[2], json!({"role":"user","parts":[]}));
+
+        let mut empty = Vec::new();
+        gemini_provider_core_append_media_parts_to_last_user_content(
+            &mut empty,
+            vec![json!({"text":"media"})],
+        );
+        assert_eq!(
+            empty,
+            vec![json!({"role":"user","parts":[{"text":"media"}]})]
+        );
+
+        let mut last = vec![
+            json!({"role":"user","parts":[]}),
+            json!({"role":"user","parts":null}),
+        ];
+        gemini_provider_core_append_media_parts_to_last_user_content(&mut last, vec![]);
+        assert_eq!(last.len(), 3);
+        assert_eq!(last[0]["parts"], json!([]));
+        assert_eq!(last[1]["parts"], json!(null));
+    }
 }

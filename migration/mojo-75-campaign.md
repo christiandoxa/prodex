@@ -7624,3 +7624,14 @@ deleted. All 517 provider-core tests, direct core ABI tests, no-fallback
 guards and production-share checks pass. Official share rises from
 35.76609372332399% to 35.7782309443018%
 (130,007 Mojo / 233,362 Rust). The 75% project target remains unmet.
+
+## Gemini latest-user media append selection moved to Mojo (2026-10-20)
+
+The live Gemini request-media path now selects the last user append
+target through a versioned compiled Mojo ABI. The previous Rust reverse
+search was removed, preserving the important malformed last-user
+barrier and the new-user append behavior. Rust continues to mutate the
+original Serde parts array. All 520 provider tests, direct core ABI
+tests, no-fallback guard and official share checks pass.
+Share rises from 35.7782309443018% to 35.77956915288745%
+(130,048 Mojo / 233,422 Rust); the 75% project target remains open.

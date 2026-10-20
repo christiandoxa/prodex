@@ -628,3 +628,51 @@ def prodex_mojo_gemini_media_request_selection_v1(
     result[unsafe_offset=1] = source
     result[unsafe_offset=2] = mime
     return 0
+
+
+# Last-user append target for request media. The host passes borrowed roles
+# and whether each Serde parts member is an array. Mojo owns last-user
+# precedence, including a later user with malformed parts blocking older users.
+@export("prodex_mojo_gemini_media_append_user_v1")
+def prodex_mojo_gemini_media_append_user_v1(
+    abi_version: Int64, rows_address: UInt, row_count: Int64,
+    result_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != GEMINI_RESPONSE_MEDIA_ABI_VERSION:
+        return 4
+    if (
+        row_count < 0 or row_count > 1_048_576
+        or (row_count > 0 and (rows_address == 0 or rows_address % 8 != 0))
+        or result_address == 0 or result_address % 8 != 0
+    ):
+        return 1
+    var rows = Pointer[mut=False, UInt64, ImmUntrackedOrigin](
+        unsafe_from_address=Int(rows_address)
+    )
+    # Validate all row types before the caller's output is touched.
+    for index in range(row_count):
+        var offset = index * 3
+        var address = rows[unsafe_offset=offset]
+        var length = rows[unsafe_offset=offset + 1]
+        var array_tag = rows[unsafe_offset=offset + 2]
+        if array_tag > 1 or not rich_view_valid(
+            ProdexRichStringView(UInt(address), UInt(length)),
+            0x7FFFFFFFFFFFFFFF,
+        ):
+            return 1
+    var selected: Int64 = -1
+    var cursor = row_count
+    while cursor > 0:
+        cursor -= 1
+        var view = ProdexRichStringView(
+            UInt(rows[unsafe_offset=cursor * 3]),
+            UInt(rows[unsafe_offset=cursor * 3 + 1]),
+        )
+        if rich_view_matches_literal["user"](view, False):
+            if rows[unsafe_offset=cursor * 3 + 2] == 1:
+                selected = cursor
+            break
+    Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(result_address)
+    )[] = selected
+    return 0

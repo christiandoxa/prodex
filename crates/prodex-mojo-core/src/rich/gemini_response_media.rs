@@ -13,6 +13,12 @@ pub enum GeminiResponseMediaOperation {
 const GEMINI_RESPONSE_MEDIA_MAX_INPUT_BYTES: usize = 64 * 1024 * 1024;
 
 unsafe extern "C" {
+    fn prodex_mojo_gemini_media_append_user_v1(
+        abi_version: i64,
+        rows_address: u64,
+        row_count: i64,
+        result_address: u64,
+    ) -> i64;
     fn prodex_mojo_gemini_media_request_selection_v1(
         abi_version: i64,
         operation: i64,
@@ -61,6 +67,58 @@ pub fn gemini_response_media(
     }
     let kernel: JsonKernel = prodex_mojo_gemini_response_media_v1;
     transform_json(nodes, raw, operation as i64, false, kernel)
+}
+
+/// One borrowed Serde message observation for the Mojo-owned media append target.
+#[derive(Debug, Clone, Copy)]
+pub struct GeminiMediaUserRow<'a> {
+    pub role: Option<&'a str>,
+    pub parts_is_array: bool,
+}
+
+/// Select the latest user message if and only if that very message has an
+/// array of parts. Rust does not search backward for an earlier usable user.
+pub fn gemini_media_append_user_target(
+    messages: &[GeminiMediaUserRow<'_>],
+) -> Result<Option<usize>, MojoError> {
+    ensure_rich_abi()?;
+    if messages.len() > 1_048_576 {
+        return Err(MojoError::InvalidInput);
+    }
+    let mut rows = Vec::<u64>::with_capacity(messages.len() * 3);
+    for message in messages {
+        let role = message.role.unwrap_or("");
+        rows.extend([
+            role.as_ptr() as usize as u64,
+            u64::try_from(role.len()).map_err(|_| MojoError::InvalidInput)?,
+            u64::from(message.parts_is_array),
+        ]);
+    }
+    let mut index = -7_i64;
+    match unsafe {
+        prodex_mojo_gemini_media_append_user_v1(
+            GEMINI_RESPONSE_MEDIA_ABI_VERSION,
+            rows.as_ptr() as usize as u64,
+            i64::try_from(messages.len()).map_err(|_| MojoError::InvalidInput)?,
+            (&mut index as *mut i64) as usize as u64,
+        )
+    } {
+        0 => {}
+        1 => return Err(MojoError::InvalidInput),
+        4 => return Err(MojoError::AbiMismatch),
+        _ => return Err(MojoError::InvalidOutput),
+    }
+    if index == -1 {
+        return Ok(None);
+    }
+    let index = usize::try_from(index).map_err(|_| MojoError::InvalidOutput)?;
+    if !messages
+        .get(index)
+        .is_some_and(|message| message.parts_is_array)
+    {
+        return Err(MojoError::InvalidOutput);
+    }
+    Ok(Some(index))
 }
 
 /// Number of borrowed JSON field slots accepted by the request-media planner.
@@ -261,6 +319,74 @@ pub fn gemini_response_media_mime_is_text(mime: &str) -> Result<bool, MojoError>
         0 => Ok(false),
         1 => Ok(true),
         _ => Err(MojoError::InvalidOutput),
+    }
+}
+
+#[cfg(test)]
+mod media_append_user_tests {
+    use super::*;
+
+    #[test]
+    fn compiled_gemini_media_append_targets_only_the_latest_user() {
+        let rows = [
+            GeminiMediaUserRow {
+                role: Some("user"),
+                parts_is_array: true,
+            },
+            GeminiMediaUserRow {
+                role: Some("assistant"),
+                parts_is_array: true,
+            },
+            GeminiMediaUserRow {
+                role: Some("user"),
+                parts_is_array: true,
+            },
+        ];
+        assert_eq!(gemini_media_append_user_target(&rows), Ok(Some(2)));
+        let mut rows = rows;
+        rows[2].parts_is_array = false;
+        assert_eq!(gemini_media_append_user_target(&rows), Ok(None));
+        rows[2].role = Some("User");
+        assert_eq!(gemini_media_append_user_target(&rows), Ok(Some(0)));
+        rows[0].role = None;
+        assert_eq!(gemini_media_append_user_target(&rows), Ok(None));
+        assert_eq!(gemini_media_append_user_target(&[]), Ok(None));
+        assert_eq!(
+            gemini_media_append_user_target(&[GeminiMediaUserRow {
+                role: Some("user"),
+                parts_is_array: true,
+            }]),
+            Ok(Some(0))
+        );
+    }
+
+    #[test]
+    fn compiled_gemini_media_append_abi_rejects_shapes_before_output_writes() {
+        let values = [0_u64; 6];
+        let mut selected = 71_i64;
+        let out = (&mut selected as *mut i64) as usize as u64;
+        for (version, address, count, output, expected) in [
+            (2, values.as_ptr() as usize as u64, 2, out, 4),
+            (1, 0, 2, out, 1),
+            (1, values.as_ptr() as usize as u64, -1, out, 1),
+            (1, values.as_ptr() as usize as u64, 1_048_577, out, 1),
+            (1, values.as_ptr() as usize as u64, 2, 0, 1),
+        ] {
+            assert_eq!(
+                unsafe { prodex_mojo_gemini_media_append_user_v1(version, address, count, output) },
+                expected
+            );
+            assert_eq!(selected, 71);
+        }
+        let mut invalid = values;
+        invalid[2] = 2;
+        assert_eq!(
+            unsafe {
+                prodex_mojo_gemini_media_append_user_v1(1, invalid.as_ptr() as usize as u64, 2, out)
+            },
+            1
+        );
+        assert_eq!(selected, 71);
     }
 }
 

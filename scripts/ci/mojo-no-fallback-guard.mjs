@@ -406,6 +406,7 @@ const PROMOTED_FILES = [
   "mojo/prodex_core/runtime_broker_continuity.mojo",
   "crates/prodex-provider-core/src/translators/gemini/response_media.rs",
   "crates/prodex-provider-core/src/gemini_bridge/media/content_object.rs",
+  "crates/prodex-provider-core/src/gemini_bridge/media.rs",
   "crates/prodex-mojo-core/src/rich/gemini_response_media.rs",
   "mojo/prodex_core/gemini_response_media.mojo",
   "crates/prodex-provider-core/src/gemini_bridge/precommit.rs",
@@ -2193,6 +2194,20 @@ export function findViolations(files) {
         .filter((marker) => !contents.includes(marker))
         .map((marker) => `${filePath}: Gemini data-URL caller coverage must retain ${marker}`);
     }
+    if (filePath === "crates/prodex-provider-core/src/gemini_bridge/media.rs") {
+      const required = [
+        "prodex_mojo_core::rich::GeminiMediaUserRow",
+        "prodex_mojo_core::rich::gemini_media_append_user_target(&rows)",
+        "compiled_media_append_attaches_to_latest_user_with_valid_parts",
+        "compiled_media_append_does_not_fall_back_to_earlier_user_after_malformed_last",
+        "compiled_media_append_handles_missing_user_wrong_role_case_and_empty_parts",
+      ];
+      const production = contents.split("#[cfg(test)]", 1)[0];
+      return required.every((marker) => contents.includes(marker)) &&
+        !production.includes(".iter_mut().rev().find(") &&
+        !production.includes(".rposition(")
+        ? [] : [filePath + ": Gemini media append target must remain Mojo-owned"];
+    }
     if (filePath === "crates/prodex-provider-core/src/gemini_bridge/media/content_object.rs") {
       const required = [
         "fn acquired_object_fields",
@@ -2235,7 +2250,11 @@ export function findViolations(files) {
         "prodex_mojo_gemini_data_url_parts_v1(", "pub fn gemini_media_data_url_parts(",
         "prodex_mojo_gemini_media_request_selection_v1(",
         "pub fn gemini_media_request_selection<",
-        "compiled_gemini_request_media_abi_rejects_invalid_rows_before_output_writes"].filter(
+        "compiled_gemini_request_media_abi_rejects_invalid_rows_before_output_writes",
+        "prodex_mojo_gemini_media_append_user_v1(",
+        "pub fn gemini_media_append_user_target(",
+        "compiled_gemini_media_append_targets_only_the_latest_user",
+        "compiled_gemini_media_append_abi_rejects_shapes_before_output_writes"].filter(
         (marker) => !contents.includes(marker),
       ).map((marker) => `${filePath}: Gemini media adapter must retain Mojo ABI (${marker})`);
     }
@@ -2245,7 +2264,9 @@ export function findViolations(files) {
         "def media_data_url_parts(", '@export("prodex_mojo_gemini_data_url_parts_v1")',
         '@export("prodex_mojo_gemini_media_request_selection_v1")',
         "def request_media_first_present(",
-        "rich_trim_bounds(request_media_view(rows, data))"].filter(
+        "rich_trim_bounds(request_media_view(rows, data))",
+        '@export("prodex_mojo_gemini_media_append_user_v1")',
+        'rich_view_matches_literal["user"](view, False)'].filter(
         (marker) => !contents.includes(marker),
       ).map((marker) => `${filePath}: Gemini media projection must remain Mojo-owned (${marker})`);
     }
@@ -11436,6 +11457,18 @@ function selfTest() {
   assert.match(findViolations([[mediaRequestFile, mediaRequestFixture +
     "\nfn gemini_provider_core_media_part_from_generic_content_object("]]).join("\n"),
     /Gemini media request field decisions must remain compiled Mojo-owned/u);
+  const mediaAppendFile = "crates/prodex-provider-core/src/gemini_bridge/media.rs";
+  const mediaAppendFixture = [
+    "prodex_mojo_core::rich::GeminiMediaUserRow",
+    "prodex_mojo_core::rich::gemini_media_append_user_target(&rows)",
+    "compiled_media_append_attaches_to_latest_user_with_valid_parts",
+    "compiled_media_append_does_not_fall_back_to_earlier_user_after_malformed_last",
+    "compiled_media_append_handles_missing_user_wrong_role_case_and_empty_parts",
+  ].join("\n");
+  assert.deepEqual(findViolations([[mediaAppendFile, mediaAppendFixture]]), []);
+  assert.match(findViolations([[mediaAppendFile, mediaAppendFixture +
+    "\ncontents.iter_mut().rev().find(|item| item.is_object())"]]).join("\n"),
+    /Gemini media append target must remain Mojo-owned/u);
   const doctorPresentationCanonical = [
     "mojo_doctor_value_color(",
     "doctor_viewport_plan(",
