@@ -274,7 +274,11 @@ const STARTUP_PROBE_BATCH_ADAPTER = "crates/prodex-mojo-core/src/runtime_state_q
 const STARTUP_PROBE_BATCH_MOJO = "mojo/prodex_core/runtime_state_quota.mojo";
 const STARTUP_PROBE_BATCH_TEST = "mojo/tests/runtime_startup_probe_batch_test.mojo";
 const STARTUP_PROBE_BATCH_CALLER_TEST = "crates/prodex-runtime-state/tests/src/lib.rs";
+const PROVIDER_USAGE_SSE_MOJO = "mojo/prodex_core/provider_usage.mojo";
+const PROVIDER_USAGE_SSE_TEST = "mojo/tests/provider_usage_sse_scan_test.mojo";
 const PROMOTED_FILES = [
+  PROVIDER_USAGE_SSE_MOJO,
+  PROVIDER_USAGE_SSE_TEST,
   QUOTA_SNAPSHOT_COMPARE_TEST,
   STARTUP_PROBE_BATCH_ADAPTER,
   STARTUP_PROBE_BATCH_MOJO,
@@ -2945,6 +2949,11 @@ export function findViolations(files) {
         "prodex_mojo_core::provider_usage::calculate_cost(",
         "prodex_mojo_core::provider_usage::merged_total(",
         "prodex_mojo_core::provider_usage::merge_latest_present(",
+        "prodex_mojo_core::provider_usage::sse_frame_scan(",
+        "ProviderUsageSseFrameRecord::Data",
+        "ProviderUsageSseFrameRecord::End",
+        "compiled_provider_usage_sse_framing_preserves_multiline_crlf_and_last_frame",
+        "compiled_provider_usage_sse_framing_ignores_invalid_and_non_data_lines",
       ];
       const violations = required
         .filter((call) => !contents.includes(call))
@@ -2957,6 +2966,9 @@ export function findViolations(files) {
       ) {
         violations.push(filePath + ": contains restored Rust provider-usage semantics");
       }
+      if (/\btext\.lines\s*\(\s*\)|\.strip_prefix\(["']data:["']\)|\.trim_end_matches\(["']\\r["']\)/u.test(production)) {
+        violations.push(filePath + ": restored Rust SSE data framing or CRLF policy");
+      }
       if (/if\s+\w+\.(input|output|total)_tokens\.is_some\(\)\s*\{\s*\w+\.\1_tokens\s*=/u.test(production)) {
         violations.push(filePath + ": contains restored Rust SSE usage merge policy");
       }
@@ -2968,10 +2980,27 @@ export function findViolations(files) {
         "prodex_provider_usage_cost_v1(",
         "prodex_provider_usage_merged_total_v1(",
         "prodex_provider_usage_merge_latest_present_v1(",
+        "prodex_provider_usage_sse_scan_v1(",
+        "pub fn sse_frame_scan(",
+        "compiled_provider_usage_sse_frames_preserve_crlf_blank_and_multiline_data",
+        "compiled_provider_usage_sse_scan_rejects_invalid_abi_and_capacity_before_output_writes",
       ];
       return required
         .filter((call) => !contents.includes(call))
         .map((call) => filePath + ": provider usage ABI adapter must retain " + call);
+    }
+    if (filePath === PROVIDER_USAGE_SSE_MOJO) {
+      return [
+        '@export("prodex_provider_usage_sse_scan_v1")',
+        "def usage_sse_scan_rows(",
+        "def usage_sse_record(",
+        "if required_ptr[] > output_capacity:",
+      ].filter((marker) => !contents.includes(marker))
+        .map((marker) => filePath + ": compiled SSE usage framing policy missing " + marker);
+    }
+    if (filePath === PROVIDER_USAGE_SSE_TEST) {
+      return contents.includes("prodex_provider_usage_sse_scan_v1")
+        ? [] : [filePath + ": direct SSE usage ABI regression missing"];
     }
     return [];
   });
@@ -14818,6 +14847,11 @@ function selfTest() {
     "prodex_mojo_core::provider_usage::calculate_cost(",
     "prodex_mojo_core::provider_usage::merged_total(",
     "prodex_mojo_core::provider_usage::merge_latest_present(",
+    "prodex_mojo_core::provider_usage::sse_frame_scan(",
+    "ProviderUsageSseFrameRecord::Data",
+    "ProviderUsageSseFrameRecord::End",
+    "compiled_provider_usage_sse_framing_preserves_multiline_crlf_and_last_frame",
+    "compiled_provider_usage_sse_framing_ignores_invalid_and_non_data_lines",
   ].join("\n");
   assert.deepEqual(findViolations([[providerUsageFile, providerUsageCalls]]), []);
   assert.match(
@@ -14825,6 +14859,12 @@ function selfTest() {
       providerUsageCalls + "\nif usage.input_tokens.is_some() { merged.input_tokens = usage.input_tokens; }",
     ]]).join("\n"),
     /restored Rust SSE usage merge policy/u,
+  );
+  assert.match(
+    findViolations([[providerUsageFile,
+      providerUsageCalls + "\nfor line in text.lines() {",
+    ]]).join("\n"),
+    /restored Rust SSE data framing or CRLF policy/u,
   );
   const capsuleOrderBody = [
     "pub(in crate::smart_context) fn smart_context_select_memory_capsules_impl(input: Vec<Capsule>) {",

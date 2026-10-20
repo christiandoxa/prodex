@@ -583,3 +583,140 @@ def prodex_provider_usage_estimate_v1(
         return PROVIDER_USAGE_OK
 
     return PROVIDER_USAGE_INVALID
+
+
+# The compiled usage owner frames SSE data fields and blank-line events,
+# preserving CRLF and the single-space rule after "data:". The host only
+# materializes selected borrowed spans for its existing Serde JSON codec.
+comptime PROVIDER_USAGE_SSE_SCAN_ABI: Int64 = 1
+comptime PROVIDER_USAGE_SSE_DATA: Int64 = 1
+comptime PROVIDER_USAGE_SSE_END: Int64 = 2
+
+
+def usage_sse_record(
+    records: Pointer[mut=True, Int64, _],
+    capacity: Int64,
+    measuring: Bool,
+    written: Pointer[mut=True, Int64, _],
+    kind: Int64, start: Int64, end: Int64,
+) -> Bool:
+    if written[] >= capacity and not measuring:
+        return False
+    if not measuring:
+        records[unsafe_offset=written[] * 3] = kind
+        records[unsafe_offset=written[] * 3 + 1] = start
+        records[unsafe_offset=written[] * 3 + 2] = end
+    if written[] == 9223372036854775807:
+        return False
+    written[] += 1
+    return True
+
+
+def usage_sse_scan_rows(
+    ptr: Pointer[mut=False, UInt8, _], length: Int64,
+    records: Pointer[mut=True, Int64, _],
+    output_capacity: Int64, measuring: Bool,
+    written_ptr: Pointer[mut=True, Int64, _],
+) -> Int64:
+    var cursor = Int64(0)
+    var have_data = False
+    while cursor < length:
+        var line_start = cursor
+        while cursor < length and ptr[unsafe_offset=cursor] != 10:
+            cursor += 1
+        var line_end = cursor
+        var ends_with_lf = cursor < length
+        if ends_with_lf:
+            cursor += 1
+        # str::lines removes precisely one CR before LF; the data-value
+        # sanitizer removes all trailing CRs after the one ASCII space.
+        if ends_with_lf and line_end > line_start and ptr[unsafe_offset=line_end - 1] == 13:
+            line_end -= 1
+        var blank = line_end == line_start or (
+            line_end == line_start + 1 and ptr[unsafe_offset=line_start] == 13
+        )
+        if blank:
+            if have_data:
+                if not usage_sse_record(
+                    records, output_capacity, measuring, written_ptr,
+                    PROVIDER_USAGE_SSE_END, 0, 0,
+                ):
+                    return 3
+                have_data = False
+            continue
+        if line_end - line_start < 5:
+            continue
+        if (
+            ptr[unsafe_offset=line_start] != 100
+            or ptr[unsafe_offset=line_start + 1] != 97
+            or ptr[unsafe_offset=line_start + 2] != 116
+            or ptr[unsafe_offset=line_start + 3] != 97
+            or ptr[unsafe_offset=line_start + 4] != 58
+        ):
+            continue
+        var data_start = line_start + 5
+        if data_start < line_end and ptr[unsafe_offset=data_start] == 32:
+            data_start += 1
+        while line_end > data_start and ptr[unsafe_offset=line_end - 1] == 13:
+            line_end -= 1
+        if not usage_sse_record(
+            records, output_capacity, measuring, written_ptr,
+            PROVIDER_USAGE_SSE_DATA, data_start, line_end,
+        ):
+            return 3
+        have_data = True
+    if have_data and not usage_sse_record(
+        records, output_capacity, measuring, written_ptr,
+        PROVIDER_USAGE_SSE_END, 0, 0,
+    ):
+        return 3
+    return 0
+
+
+@export("prodex_provider_usage_sse_scan_v1")
+def prodex_provider_usage_sse_scan_v1(
+    abi_version: Int64,
+    address: UInt, length: Int64,
+    output_address: UInt, output_capacity: Int64,
+    measuring: Int64, written_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != PROVIDER_USAGE_SSE_SCAN_ABI:
+        return 4
+    if (
+        length < 0
+        or (length > 0 and address == 0)
+        or output_capacity < 0
+        or (measuring != 0 and measuring != 1)
+        or (measuring == 1 and (output_address != 0 or output_capacity != 0))
+        or (measuring == 0 and output_address == 0)
+        or written_address == 0 or written_address % 8 != 0
+    ):
+        return 1
+    var view = ProdexRichStringView(address, UInt(length))
+    if not rich_view_valid(view, length):
+        return 1
+    var ptr = rich_view_ptr(view)
+    var records = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    if measuring == 0:
+        var required = Int64(0)
+        var required_ptr = Pointer(to=required)
+        var count_status = usage_sse_scan_rows(
+            ptr, length, records, 0, True, required_ptr,
+        )
+        if count_status != 0:
+            return count_status
+        if required_ptr[] > output_capacity:
+            return 3
+    var written = Int64(0)
+    var written_ptr = Pointer(to=written)
+    var scan_status = usage_sse_scan_rows(
+        ptr, length, records, output_capacity, measuring == 1, written_ptr,
+    )
+    if scan_status != 0:
+        return scan_status
+    Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(written_address)
+    )[] = written_ptr[]
+    return 0

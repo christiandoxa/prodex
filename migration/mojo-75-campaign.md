@@ -7793,3 +7793,16 @@ direct core ABI tests, direct Mojo tests, no-fallback guard and
 canonical production non-regression checks pass. Official share
 changes from 35.837909642431626% to 35.836281199005576%
 (130,887 Mojo / 234,349 Rust). The 75% goal remains unmet.
+
+## Provider usage SSE data/frame parsing moved to Mojo (2026-10-20)
+
+A versioned compiled ABI now determines SSE data-line spans and frame
+boundaries, including exact CRLF, optional single-space and final-frame
+rules. The host retains original payload slices, Serde JSON parsing
+and application of already compiled token-usage extraction/merge
+plans. The former Rust line/prefix/blank-frame loop was deleted
+without fallback. The compiled preflight avoids partial output writes
+for insufficient capacity. All 529 provider tests, two direct core
+ABI tests, the direct Mojo ABI test, source guard and metric checks
+pass. Share rises from 35.836281199005576% to 35.851405897242934%
+(131,010 Mojo / 234,415 Rust); the project target stays at 75%.
