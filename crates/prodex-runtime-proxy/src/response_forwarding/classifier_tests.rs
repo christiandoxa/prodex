@@ -1,5 +1,14 @@
 use super::*;
 
+unsafe extern "C" {
+    fn prodex_runtime_response_forwarding_content_type_v1(
+        name_address: u64,
+        name_length: i64,
+        value_address: u64,
+        value_length: i64,
+    ) -> i64;
+}
+
 #[test]
 fn response_header_skip_expected_values_include_unicode_trimming() {
     for (name, expected) in [

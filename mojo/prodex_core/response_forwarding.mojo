@@ -720,3 +720,94 @@ def prodex_runtime_bound_overload_retry_v1(
     if delay_ms >= UInt64(60_000) - elapsed_ms:
         return -1
     return Int64(delay_ms)
+
+
+# Compiled first-match and content-type selection over borrowed HTTP headers.
+# Each row has name-address/length and binary-value-address/length. Host
+# retains the original buffers and applies only the validated index/span.
+comptime RESPONSE_HEADER_SELECTION_ABI: Int64 = 1
+comptime RESPONSE_HEADER_SELECTION_VALUE: Int64 = 0
+comptime RESPONSE_HEADER_SELECTION_BINARY_CONTENT_TYPE: Int64 = 1
+comptime RESPONSE_HEADER_SELECTION_SSE_FLUSH: Int64 = 2
+comptime RESPONSE_HEADER_SELECTION_MAX_ROWS: Int64 = 1_048_576
+
+
+@export("prodex_runtime_response_header_select_v1")
+def prodex_runtime_response_header_select_v1(
+    abi_version: Int64, operation: Int64,
+    rows_address: UInt, row_count: Int64,
+    query_address: UInt, query_length: Int64,
+    output_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != RESPONSE_HEADER_SELECTION_ABI:
+        return 4
+    if (
+        operation < 0 or operation > RESPONSE_HEADER_SELECTION_SSE_FLUSH
+        or row_count < 0 or row_count > RESPONSE_HEADER_SELECTION_MAX_ROWS
+        or (row_count > 0 and (rows_address == 0 or rows_address % 8 != 0))
+        or query_length < 0 or (query_length > 0 and query_address == 0)
+        or (operation != RESPONSE_HEADER_SELECTION_VALUE and (query_address != 0 or query_length != 0))
+        or output_address == 0 or output_address % 8 != 0
+    ):
+        return 1
+    var rows = Pointer[mut=False, UInt64, ImmUntrackedOrigin](
+        unsafe_from_address=Int(rows_address)
+    )
+    for index in range(row_count):
+        var offset = index * 4
+        var name_addr = rows[unsafe_offset=offset]
+        var name_len = rows[unsafe_offset=offset + 1]
+        var value_addr = rows[unsafe_offset=offset + 2]
+        var value_len = rows[unsafe_offset=offset + 3]
+        if name_len > UInt64(9223372036854775807) or value_len > UInt64(9223372036854775807):
+            return 1
+        if (name_len > 0 and name_addr == 0) or (value_len > 0 and value_addr == 0):
+            return 1
+    var selected: Int64 = -1
+    var start: Int64 = 0
+    var end: Int64 = 0
+    for index in range(row_count):
+        var offset = index * 4
+        var name_addr = UInt(rows[unsafe_offset=offset])
+        var name_len = Int64(rows[unsafe_offset=offset + 1])
+        var value_addr = UInt(rows[unsafe_offset=offset + 2])
+        var value_len = Int64(rows[unsafe_offset=offset + 3])
+        if operation == RESPONSE_HEADER_SELECTION_VALUE:
+            if name_len != query_length or not response_ranges_equal_ci(
+                name_addr, 0, name_len, query_address, 0, query_length,
+            ):
+                continue
+            if value_len > 0 and not rich_utf8_valid(response_text_ptr(value_addr), value_len):
+                return 1
+            var bounds = rich_trim_bounds(ProdexRichStringView(value_addr, UInt(value_len)))
+            if bounds[0] < bounds[1]:
+                selected = index
+                start = bounds[0]
+                end = bounds[1]
+            # First name match blocks all later duplicate names, even when empty.
+            break
+        elif operation == RESPONSE_HEADER_SELECTION_BINARY_CONTENT_TYPE:
+            if prodex_runtime_response_forwarding_content_type_v1(
+                name_addr, name_len, value_addr, value_len,
+            ) != 1:
+                continue
+            var bounds = rich_trim_bounds(ProdexRichStringView(value_addr, UInt(value_len)))
+            selected = index
+            start = bounds[0]
+            end = bounds[1]
+            break
+        else:
+            if response_equals_ci_range(
+                name_addr, 0, name_len, StringSlice("content-type"),
+            ) and response_contains_ci(
+                value_addr, value_len, StringSlice("text/event-stream"),
+            ):
+                selected = index
+                break
+    var output = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    output[unsafe_offset=0] = selected
+    output[unsafe_offset=1] = start
+    output[unsafe_offset=2] = end
+    return 0
