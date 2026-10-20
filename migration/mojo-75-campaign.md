@@ -7553,3 +7553,14 @@ compiler, source no-fallback guard, format and production-share checks pass.
 The official share increases from 35.72208587265256% to
 35.737343386031895% (129,639 Mojo / 233,116 Rust); the 75% project
 objective remains outstanding.
+
+## Gemini tool-pattern parsing and context-name policy compiled in Mojo (2026-10-20)
+
+The existing compiled Gemini value owner now also parses command-specific
+tool labels (Unicode trimming, first open / last close, nonempty parts)
+and classifies exact context-directory exclusions. The previous Rust parser
+and hard-coded exclusion table were deleted, leaving only typed UTF-8
+extraction. Three strict scalar ABI tests, public provider caller regressions,
+all 512 provider-core tests and no-fallback guards pass. Official share rises
+from 35.737343386031895% to 35.74326074615431% (129,703 Mojo / 233,171
+Rust LOC). The 75% target remains outstanding.
