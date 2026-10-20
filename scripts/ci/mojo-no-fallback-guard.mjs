@@ -248,7 +248,19 @@ const SUPER_EXPOSE_TOOL_CATALOG_CALLER = "crates/prodex-app/src/super_expose/pro
 const SUPER_EXPOSE_TOOL_CATALOG_ADAPTER = "crates/prodex-mojo-core/src/json/super_expose_tools.rs";
 const SUPER_EXPOSE_TOOL_CATALOG_MOJO = "mojo/prodex_core/super_expose_tools.mojo";
 const SUPER_EXPOSE_OPTIONAL_TOOLS_CALLER = "crates/prodex-app/src/super_expose/optional_tools.rs";
+const DOMAIN_ERROR_CALLER_IDS = "crates/prodex-domain/src/ids.rs";
+const DOMAIN_ERROR_CALLER_SECRETS = "crates/prodex-domain/src/secrets.rs";
+const DOMAIN_ERROR_ADAPTER = "crates/prodex-mojo-core/src/domain_error_policy.rs";
+const DOMAIN_ERROR_MOJO = "mojo/prodex_core/domain_error_policy.mojo";
+const DOMAIN_ERROR_IDS_TESTS = "crates/prodex-domain/tests/ids.rs";
+const DOMAIN_ERROR_SECRETS_TESTS = "crates/prodex-domain/tests/secrets.rs";
 const PROMOTED_FILES = [
+  DOMAIN_ERROR_CALLER_IDS,
+  DOMAIN_ERROR_CALLER_SECRETS,
+  DOMAIN_ERROR_ADAPTER,
+  DOMAIN_ERROR_MOJO,
+  DOMAIN_ERROR_IDS_TESTS,
+  DOMAIN_ERROR_SECRETS_TESTS,
   SUPER_EXPOSE_TOOL_CATALOG_CALLER,
   SUPER_EXPOSE_TOOL_CATALOG_ADAPTER,
   SUPER_EXPOSE_TOOL_CATALOG_MOJO,
@@ -4591,6 +4603,85 @@ export function findViolations(files) {
     if (filePath === GOVERNANCE_INSPECTION_TEST_FILE &&
         !contents.includes("inspection_result_ordering_uses_mojo_key_and_deduplicates")) {
       return [`${filePath}: production governance ordering needs a caller-boundary regression test`];
+    }
+    return [];
+  });
+  const domainErrorMojoViolations = files.flatMap(([filePath, contents]) => {
+    if (filePath === DOMAIN_ERROR_CALLER_IDS) {
+      const required = [
+        "prodex_mojo_core::domain_error_policy::identifier_error_plan(error.kind())",
+        "plan.code",
+        "plan.message",
+      ];
+      const retired = ['"tenant_id" => "tenant_id_invalid"', "let code = match error.kind()"];
+      return required.every((marker) => contents.includes(marker))
+        && retired.every((marker) => !contents.includes(marker))
+        ? [] : [filePath + ": identifier error code policy must remain Mojo-owned"];
+    }
+    if (filePath === DOMAIN_ERROR_CALLER_SECRETS) {
+      // Existing standalone secret-policy fixtures in the guard have no
+      // response-planner functions and exercise a different ABI.
+      if (!contents.includes("pub fn plan_secret_resolution_error_response(")) return [];
+      const required = [
+        "fn apply_compiled_secret_error_plan(",
+        "prodex_mojo_core::domain_error_policy::secret_rotation_error_plan(*error as i64)",
+        "prodex_mojo_core::domain_error_policy::secret_resolution_error_plan(*error as i64)",
+        "plan.code",
+        "plan.message",
+      ];
+      const production = contents.split("#[cfg(test)]", 1)[0];
+      const retired = [
+        'code: "secret_not_found"',
+        'code: "secret_permission_denied"',
+        'code: "secret_provider_unavailable"',
+        'code: "secret_version_stale"',
+        '"secret_rotation_max_age_invalid"',
+        '"secret_rotation_overlap_invalid"',
+      ];
+      return required.every((marker) => contents.includes(marker)) &&
+        retired.every((marker) => !production.includes(marker))
+        ? [] : [filePath + ": secret error status/code/message policy must remain Mojo-owned"];
+    }
+    if (filePath === DOMAIN_ERROR_ADAPTER) {
+      return [
+        "fn prodex_mojo_domain_error_plan_v1(",
+        "pub fn identifier_error_plan(",
+        "pub fn secret_rotation_error_plan(",
+        "pub fn secret_resolution_error_plan(",
+        "compiled_domain_error_identifier_kind_classification_is_exact",
+        "compiled_domain_error_secret_variants_keep_status_and_redacted_messages",
+        "compiled_domain_error_abi_rejects_invalid_input_without_writing",
+      ].filter((marker) => !contents.includes(marker))
+        .map((marker) => filePath + ": compiled domain error adapter missing " + marker);
+    }
+    if (filePath === DOMAIN_ERROR_MOJO) {
+      return [
+        '@export("prodex_mojo_domain_error_plan_v1")',
+        "def domain_identifier_code(",
+        'rich_view_matches_literal["tenant_id"]',
+        'rich_view_matches_literal["audit_event_id"]',
+        "DOMAIN_ERROR_ROTATION",
+        "DOMAIN_ERROR_RESOLUTION",
+      ].filter((marker) => !contents.includes(marker))
+        .map((marker) => filePath + ": domain error Mojo owner missing " + marker);
+    }
+    if (filePath === DOMAIN_ERROR_IDS_TESTS) {
+      return contents.includes("compiled_identifier_error_mapping_covers_every_public_id_without_raw_value_leakage")
+        ? [] : [filePath + ": domain identifier response needs exhaustive caller regression"];
+    }
+    if (filePath === DOMAIN_ERROR_SECRETS_TESTS) {
+      return contents.includes("compiled_secret_error_plans_exhaust_variants_and_never_expose_secret_values")
+        ? [] : [filePath + ": secret response needs exhaustive caller regression"];
+    }
+    if (filePath === "crates/prodex-mojo-core/build.rs" &&
+        contents.includes('sources.push("../../mojo/prodex_core/secret_policy.mojo")')) {
+      return contents.includes('sources.push("../../mojo/prodex_core/domain_error_policy.mojo")')
+        ? [] : [filePath + ": domain response ABI must link into production"];
+    }
+    if (filePath === "crates/prodex-mojo-core/src/lib.rs" &&
+        contents.includes("pub mod secret_policy;")) {
+      return contents.includes("pub mod domain_error_policy;")
+        ? [] : [filePath + ": typed domain response adapter must remain reachable"];
     }
     return [];
   });
@@ -11184,7 +11275,7 @@ export function findViolations(files) {
     }
     return [];
   });
-  return [...geminiValueCollectionMojoViolations, ...geminiSimpleResponseViolations, ...logPayloadProjectionViolations, ...nativeRecoveryOwnershipViolations, ...quotaRecoveryEligibilityViolations, ...runtimeBrokerReuseMojoViolations, ...geminiResponseMediaMojoViolations, ...cookieEvictionMojoViolations, ...websocketBudgetMojoViolations, ...affinityBindingMojoViolations, ...responsesCapacityRecoveryViolations, ...sseTapMojoOwnershipViolations, ...quotaWatchViolations, ...geminiCompactSnippetViolations, ...geminiCompactTextViolations, ...doctorSmartContextDecisionViolations, ...providerSseJsonFrameMojoViolations, ...geminiSseCompletionOwnershipViolations, ...anthropicNativeStreamDecisionViolations, ...anthropicAttemptCursorViolations, ...geminiUnsupportedToolRetryViolations, ...terminalGeometryViolations, ...previousResponseRecoveryTransitionViolations, ...chatCompatibleToolCallKindViolations, ...geminiQuotaBodyMojoViolations, ...geminiOAuthRotationMojoViolations, ...geminiBuiltinBatchMojoViolations, ...geminiToolArrayValidationMojoViolations, ...geminiOAuthModelMojoViolations, ...superExposeOriginMojoViolations, ...kiroAcpToolLedgerMojoViolations, ...quotaPoolSummarySectionsMojoViolations, ...deepseekRequestDiagnosticViolations, ...deepseekToolShapeIssueMojoViolations, ...deepseekReplayItemPolicyMojoViolations, ...chatNamespaceSplitMojoViolations, ...deepseekInputItemIssueMessageViolations, ...deepseekRequestIssueMessageViolations, ...smartContextTelemetrySampleViolations, ...compatibilityDiagnosticsMojoViolations, ...quotaHeaderProjectionViolations, ...smartContextCapsuleOrderViolations, ...markerViolations, ...deepseekCatalogPolicyViolations, ...featureOffViolations, ...liveLogRecordViolations, ...runtimePolicyPresetViolations, ...runtimeConfigScalarViolations, ...profileHealthCircuitViolations, ...logThroughputViolations, ...operationalDetailSpecViolations, ...transcriptPolicyViolations, ...logLoadPolicyViolations, ...routeReasonViolations, ...runtimeStateQuotaViolations, ...runtimeStateRoutePolicyViolations, ...runtimeProxyRootViolations, ...runtimeRecoveryDeadlineViolations, ...brokerVersionGuardViolations, ...brokerContinuityViolations, ...brokerLogCacheViolations, ...codexConfigViolations, ...statePolicyViolations, ...quotaSelectionPolicyViolations, ...routeTagMirrorViolations, ...enumTagMirrorViolations, ...appSelectionPolicyMirrorViolations, ...runtimeStateBackgroundViolations, ...redactionViolations, ...rateLimitHeaderSelectionViolations, ...profileIdentityViolations, ...governanceInspectionViolations, ...governanceInspectionOrderingViolations, ...exactnessPlannerViolations,
+  return [...domainErrorMojoViolations, ...geminiValueCollectionMojoViolations, ...geminiSimpleResponseViolations, ...logPayloadProjectionViolations, ...nativeRecoveryOwnershipViolations, ...quotaRecoveryEligibilityViolations, ...runtimeBrokerReuseMojoViolations, ...geminiResponseMediaMojoViolations, ...cookieEvictionMojoViolations, ...websocketBudgetMojoViolations, ...affinityBindingMojoViolations, ...responsesCapacityRecoveryViolations, ...sseTapMojoOwnershipViolations, ...quotaWatchViolations, ...geminiCompactSnippetViolations, ...geminiCompactTextViolations, ...doctorSmartContextDecisionViolations, ...providerSseJsonFrameMojoViolations, ...geminiSseCompletionOwnershipViolations, ...anthropicNativeStreamDecisionViolations, ...anthropicAttemptCursorViolations, ...geminiUnsupportedToolRetryViolations, ...terminalGeometryViolations, ...previousResponseRecoveryTransitionViolations, ...chatCompatibleToolCallKindViolations, ...geminiQuotaBodyMojoViolations, ...geminiOAuthRotationMojoViolations, ...geminiBuiltinBatchMojoViolations, ...geminiToolArrayValidationMojoViolations, ...geminiOAuthModelMojoViolations, ...superExposeOriginMojoViolations, ...kiroAcpToolLedgerMojoViolations, ...quotaPoolSummarySectionsMojoViolations, ...deepseekRequestDiagnosticViolations, ...deepseekToolShapeIssueMojoViolations, ...deepseekReplayItemPolicyMojoViolations, ...chatNamespaceSplitMojoViolations, ...deepseekInputItemIssueMessageViolations, ...deepseekRequestIssueMessageViolations, ...smartContextTelemetrySampleViolations, ...compatibilityDiagnosticsMojoViolations, ...quotaHeaderProjectionViolations, ...smartContextCapsuleOrderViolations, ...markerViolations, ...deepseekCatalogPolicyViolations, ...featureOffViolations, ...liveLogRecordViolations, ...runtimePolicyPresetViolations, ...runtimeConfigScalarViolations, ...profileHealthCircuitViolations, ...logThroughputViolations, ...operationalDetailSpecViolations, ...transcriptPolicyViolations, ...logLoadPolicyViolations, ...routeReasonViolations, ...runtimeStateQuotaViolations, ...runtimeStateRoutePolicyViolations, ...runtimeProxyRootViolations, ...runtimeRecoveryDeadlineViolations, ...brokerVersionGuardViolations, ...brokerContinuityViolations, ...brokerLogCacheViolations, ...codexConfigViolations, ...statePolicyViolations, ...quotaSelectionPolicyViolations, ...routeTagMirrorViolations, ...enumTagMirrorViolations, ...appSelectionPolicyMirrorViolations, ...runtimeStateBackgroundViolations, ...redactionViolations, ...rateLimitHeaderSelectionViolations, ...profileIdentityViolations, ...governanceInspectionViolations, ...governanceInspectionOrderingViolations, ...exactnessPlannerViolations,
     ...infoRunwayViolations,
     ...geminiNormalizedViolations,
     ...quotaDurationViolations,

@@ -7649,3 +7649,17 @@ test, 523 provider tests, nine focused core tests and no-fallback/metric
 guards pass. Share rises from 35.77956915288745% to
 35.78094701085088% (130,087 Mojo / 233,478 Rust).
 Target 75% remains unmet.
+
+## Domain identifier and secret-error responses moved to Mojo (2026-10-20)
+
+A production compiled domain-error ABI now chooses status, error code and
+public message for invalid UUID kinds, secret rotation and secret resolution
+errors. Rust only translates validated tags to existing public typed
+response shapes; the old Rust error classification/match tables are
+deleted. Raw UUID strings and secrets never cross this ABI.
+Three direct core tests and complete prodex-domain suites pass,
+including exhaustive caller coverage of all ten ID kinds and six secret
+error variants. Strict no-fallback guard, format and official production
+non-regression checks pass. Canonical share rises from
+35.78094701085088% to 35.78715858637232%
+(130,174 Mojo / 233,571 Rust). The 75% goal remains open.

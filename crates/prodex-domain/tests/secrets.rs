@@ -282,3 +282,57 @@ fn secret_error_responses_are_stable_and_redacted() {
         );
     }
 }
+
+#[test]
+fn compiled_secret_error_plans_exhaust_variants_and_never_expose_secret_values() {
+    use prodex_domain::{SecretErrorStatus, SecretResolutionError, SecretRotationPolicyError};
+    for (error, expected_code) in [
+        (
+            SecretRotationPolicyError::ZeroMaxAge,
+            "secret_rotation_max_age_invalid",
+        ),
+        (
+            SecretRotationPolicyError::OverlapNotShorterThanMaxAge,
+            "secret_rotation_overlap_invalid",
+        ),
+    ] {
+        let response = plan_secret_rotation_policy_error_response(&error);
+        assert_eq!(response.status, SecretErrorStatus::InvalidRequest);
+        assert_eq!(response.code, expected_code);
+        assert_eq!(response.message, "secret rotation policy is invalid");
+    }
+    for (error, status, code, message) in [
+        (
+            SecretResolutionError::NotFound,
+            SecretErrorStatus::NotFound,
+            "secret_not_found",
+            "secret could not be resolved",
+        ),
+        (
+            SecretResolutionError::PermissionDenied,
+            SecretErrorStatus::Forbidden,
+            "secret_permission_denied",
+            "secret could not be resolved",
+        ),
+        (
+            SecretResolutionError::ProviderUnavailable,
+            SecretErrorStatus::ServiceUnavailable,
+            "secret_provider_unavailable",
+            "secret provider is unavailable",
+        ),
+        (
+            SecretResolutionError::StaleVersion,
+            SecretErrorStatus::Conflict,
+            "secret_version_stale",
+            "secret version is stale",
+        ),
+    ] {
+        let response = plan_secret_resolution_error_response(&error);
+        assert_eq!(response.status, status);
+        assert_eq!(response.code, code);
+        assert_eq!(response.message, message);
+        let serialized = serde_json::to_string(&response).unwrap();
+        assert!(!serialized.contains("sensitive-secret-token"));
+        assert!(serialized.contains(code));
+    }
+}
