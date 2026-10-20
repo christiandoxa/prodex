@@ -81,6 +81,10 @@ pub use super_expose_tools::{
     SuperExposeOptionalToolOperation, super_expose_optional_tool_presentation,
     super_expose_tool_catalog,
 };
+#[cfg(feature = "mojo-rich")]
+mod gemini_value_policy;
+#[cfg(feature = "mojo-rich")]
+pub use gemini_value_policy::{GeminiValueOperation, gemini_value_projection};
 mod gemini_contents;
 pub use self::gemini_contents::{GeminiContentOperation, gemini_content_hardening};
 #[cfg(feature = "mojo-rich")]
