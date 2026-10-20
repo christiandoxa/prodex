@@ -27,25 +27,33 @@ pub(super) struct QuotaPoolAggregate {
 }
 
 pub(super) fn collect_quota_pool_aggregate(reports: &[QuotaReport]) -> QuotaPoolAggregate {
+    let observations = reports
+        .iter()
+        .map(
+            |report| prodex_mojo_core::quota_pool::QuotaReportOverviewInput {
+                fetched_at: report.fetched_at,
+                available: report
+                    .result
+                    .as_ref()
+                    .is_ok_and(provider_quota_snapshot_is_available),
+            },
+        )
+        .collect::<Vec<_>>();
+    let overview = prodex_mojo_core::quota_pool::quota_pool_report_overview(&observations)
+        .expect("compiled Mojo quota report overview returned an invalid plan");
     let mut aggregate = QuotaPoolAggregate {
-        total_profiles: reports.len(),
+        total_profiles: overview.total_profiles,
+        available_profiles: overview.available_profiles,
+        last_updated_at: overview.last_updated_at,
         ..QuotaPoolAggregate::default()
     };
     let mut main_quota_rows = Vec::<prodex_mojo_core::quota::MainQuotaAggregationInput>::new();
     let mut openai_quota_rows = Vec::new();
 
     for report in reports {
-        aggregate.last_updated_at = Some(
-            aggregate
-                .last_updated_at
-                .map_or(report.fetched_at, |current| current.max(report.fetched_at)),
-        );
         let Ok(snapshot) = &report.result else {
             continue;
         };
-        if provider_quota_snapshot_is_available(snapshot) {
-            aggregate.available_profiles += 1;
-        }
         match snapshot {
             ProviderQuotaSnapshot::OpenAi(usage) => {
                 let five_hour = required_main_window_snapshot(usage, "5h");
@@ -232,4 +240,64 @@ pub fn format_info_pool_remaining(
         reset.as_deref(),
     )
     .expect("Mojo quota-pool remaining rendering returned invalid output")
+}
+
+#[cfg(test)]
+mod overview_tests {
+    use super::*;
+    use crate::AuthSummary;
+
+    fn report(fetched_at: i64, result: Result<ProviderQuotaSnapshot, String>) -> QuotaReport {
+        QuotaReport {
+            name: format!("quota-overview-{fetched_at}"),
+            active: false,
+            auth: AuthSummary {
+                label: "external".to_string(),
+                quota_compatible: true,
+            },
+            workspace_id: None,
+            workspace_name: None,
+            result,
+            fetched_at,
+        }
+    }
+
+    fn external(available: bool) -> ProviderQuotaSnapshot {
+        ProviderQuotaSnapshot::External(ExternalQuotaInfo {
+            provider: "test".into(),
+            account: None,
+            plan: None,
+            status: "ok".into(),
+            main: "unknown".into(),
+            reset: None,
+            available: Some(available),
+            details: Vec::new(),
+        })
+    }
+
+    #[test]
+    fn quota_pool_report_overview_uses_mojo_for_failed_and_available_reports() {
+        let reports = [
+            report(5, Ok(external(true))),
+            report(20, Ok(external(false))),
+            report(100, Err("unavailable".into())),
+            report(-20, Ok(external(true))),
+        ];
+        let aggregate = collect_quota_pool_aggregate(&reports);
+        assert_eq!(aggregate.total_profiles, 4);
+        assert_eq!(aggregate.available_profiles, 2);
+        assert_eq!(aggregate.last_updated_at, Some(100));
+        assert_eq!(aggregate.profiles_with_data, 0);
+        assert_eq!(aggregate.main_profiles_with_data, 0);
+
+        let no_reports = collect_quota_pool_aggregate(&[]);
+        assert_eq!(no_reports.total_profiles, 0);
+        assert_eq!(no_reports.available_profiles, 0);
+        assert_eq!(no_reports.last_updated_at, None);
+
+        let only_failed = collect_quota_pool_aggregate(&[report(i64::MIN, Err("offline".into()))]);
+        assert_eq!(only_failed.total_profiles, 1);
+        assert_eq!(only_failed.available_profiles, 0);
+        assert_eq!(only_failed.last_updated_at, Some(i64::MIN));
+    }
 }

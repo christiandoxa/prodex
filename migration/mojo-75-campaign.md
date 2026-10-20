@@ -7713,3 +7713,15 @@ ABI and Mojo tests, source no-fallback guards and production share
 checks pass. Official share rises from 35.80922552817385% to
 35.82663759535591% (130,467 Mojo / 233,695 Rust).
 The 75% project objective remains outstanding.
+
+## Quota report availability and latest-fetch aggregate moved to Mojo (2026-10-20)
+
+The existing compiled quota pool owner now counts reports and
+available profiles and chooses the latest fetch timestamp across all
+reports (including failed fetches). Rust retains provider-specific
+readiness observation, report I/O and formatting but no longer owns
+the count/max policy. The 99 quota tests, direct core and Mojo ABI
+tests, source no-fallback guard and production share checks pass.
+Official share increases from 35.82663759535591% to
+35.82742660744385% (130,510 Mojo / 233,764 Rust).
+Project target 75% remains unmet.

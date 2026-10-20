@@ -73,6 +73,13 @@ pub struct StatusQuotaSummary {
 }
 
 unsafe extern "C" {
+    fn prodex_quota_pool_report_overview_v1(
+        abi_version: i64,
+        input_address: u64,
+        report_count: i64,
+        output_address: u64,
+        output_capacity: i64,
+    ) -> i64;
     fn prodex_quota_pool_summary_sections_v1(
         abi_version: i64,
         openai_profiles: i64,
@@ -92,6 +99,68 @@ unsafe extern "C" {
         count: i64,
         output_capacity: i64,
     ) -> i64;
+}
+
+/// One normalized quota-report observation. Provider-specific availability
+/// is determined by its existing owner; aggregation is compiled Mojo policy.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct QuotaReportOverviewInput {
+    pub fetched_at: i64,
+    pub available: bool,
+}
+
+/// Overall report counts and latest fetch time from the compiled planner.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct QuotaReportOverview {
+    pub total_profiles: usize,
+    pub available_profiles: usize,
+    pub last_updated_at: Option<i64>,
+}
+
+pub fn quota_pool_report_overview(
+    reports: &[QuotaReportOverviewInput],
+) -> Result<QuotaReportOverview, MojoError> {
+    if reports.len() > 1_048_576 {
+        return Err(MojoError::InvalidInput);
+    }
+    let mut rows = Vec::new();
+    rows.try_reserve_exact(reports.len().checked_mul(2).ok_or(MojoError::Capacity)?)
+        .map_err(|_| MojoError::Capacity)?;
+    for report in reports {
+        rows.extend([report.fetched_at, i64::from(report.available)]);
+    }
+    let mut output = [-1_i64; 4];
+    let status = unsafe {
+        prodex_quota_pool_report_overview_v1(
+            1,
+            rows.as_ptr() as usize as u64,
+            i64::try_from(reports.len()).map_err(|_| MojoError::InvalidInput)?,
+            output.as_mut_ptr() as usize as u64,
+            4,
+        )
+    };
+    match status {
+        0 => {}
+        1 => return Err(MojoError::InvalidInput),
+        3 => return Err(MojoError::Capacity),
+        4 => return Err(MojoError::AbiMismatch),
+        _ => return Err(MojoError::InvalidOutput),
+    }
+    let count = usize::try_from(output[0]).map_err(|_| MojoError::InvalidOutput)?;
+    let available = usize::try_from(output[1]).map_err(|_| MojoError::InvalidOutput)?;
+    if count != reports.len() || available > count {
+        return Err(MojoError::InvalidOutput);
+    }
+    let last_updated_at = match output[2] {
+        0 if count == 0 && output[3] == 0 => None,
+        1 if count > 0 => Some(output[3]),
+        _ => return Err(MojoError::InvalidOutput),
+    };
+    Ok(QuotaReportOverview {
+        total_profiles: count,
+        available_profiles: available,
+        last_updated_at,
+    })
 }
 
 /// Which summary section the compiled quota owner requires the CLI to
@@ -316,6 +385,96 @@ pub fn status_quota_summary_batch(
 #[cfg(test)]
 mod summary_section_tests {
     use super::*;
+
+    #[test]
+    fn mojo_quota_report_overview_counts_available_and_latest_across_failures() {
+        let rows = [
+            QuotaReportOverviewInput {
+                fetched_at: -50,
+                available: true,
+            },
+            QuotaReportOverviewInput {
+                fetched_at: i64::MIN,
+                available: false,
+            },
+            QuotaReportOverviewInput {
+                fetched_at: 100,
+                available: false,
+            },
+            QuotaReportOverviewInput {
+                fetched_at: 7,
+                available: true,
+            },
+        ];
+        assert_eq!(
+            quota_pool_report_overview(&rows),
+            Ok(QuotaReportOverview {
+                total_profiles: 4,
+                available_profiles: 2,
+                last_updated_at: Some(100),
+            }),
+        );
+        assert_eq!(
+            quota_pool_report_overview(&[]),
+            Ok(QuotaReportOverview::default()),
+        );
+        assert_eq!(
+            quota_pool_report_overview(&[QuotaReportOverviewInput {
+                fetched_at: i64::MIN,
+                available: false,
+            }]),
+            Ok(QuotaReportOverview {
+                total_profiles: 1,
+                available_profiles: 0,
+                last_updated_at: Some(i64::MIN),
+            }),
+        );
+        let many = vec![
+            QuotaReportOverviewInput {
+                fetched_at: 77,
+                available: true
+            };
+            1025
+        ];
+        assert_eq!(
+            quota_pool_report_overview(&many),
+            Ok(QuotaReportOverview {
+                total_profiles: 1025,
+                available_profiles: 1025,
+                last_updated_at: Some(77),
+            }),
+        );
+    }
+
+    #[test]
+    fn mojo_quota_report_overview_abi_rejects_malformed_late_rows_without_output() {
+        let mut output = [91_i64; 4];
+        let dest = output.as_mut_ptr() as usize as u64;
+        let mut rows = [4_i64, 1, 8, 0];
+        let ptr = rows.as_ptr() as usize as u64;
+        for (version, count, source, capacity, expected) in [
+            (2, 2, ptr, 4, 4),
+            (1, -1, ptr, 4, 1),
+            (1, 1_048_577, ptr, 4, 1),
+            (1, 2, 0, 4, 1),
+            (1, 2, ptr, 3, 3),
+        ] {
+            assert_eq!(
+                unsafe {
+                    prodex_quota_pool_report_overview_v1(version, source, count, dest, capacity)
+                },
+                expected,
+            );
+            assert_eq!(output, [91; 4]);
+        }
+        rows[3] = 2;
+        let late_input = rows.as_ptr() as usize as u64;
+        assert_eq!(
+            unsafe { prodex_quota_pool_report_overview_v1(1, late_input, 2, dest, 4) },
+            1,
+        );
+        assert_eq!(output, [91; 4]);
+    }
 
     #[test]
     fn quota_source_summary_abi_rejects_bad_shapes_and_late_records_before_writes() {

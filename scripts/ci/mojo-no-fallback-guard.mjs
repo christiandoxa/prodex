@@ -10905,9 +10905,18 @@ export function findViolations(files) {
       const retired = [
         "if aggregate.profiles_with_data > 0 {",
         "else if aggregate.main_profiles_with_data > 0 {",
+        "aggregate.available_profiles += 1",
+        "current.max(report.fetched_at)",
       ];
-      return retired.every((marker) => !source.includes(marker))
-        ? [] : [filePath + ": restored Rust quota summary row-selection branches"];
+      const required = [
+        "quota_pool_report_overview(&observations)",
+        "overview.available_profiles",
+        "overview.last_updated_at",
+        "quota_pool_report_overview_uses_mojo_for_failed_and_available_reports",
+      ];
+      return retired.every((marker) => !source.includes(marker)) &&
+        required.every((marker) => contents.includes(marker))
+        ? [] : [filePath + ": quota report overview and summary row selection must stay Mojo-owned"];
     }
     if (filePath === "crates/prodex-mojo-core/src/quota_pool.rs") {
       return [
@@ -10918,6 +10927,10 @@ export function findViolations(files) {
         "fn prodex_quota_status_summary_v2(",
         "const STATUS_QUOTA_SUMMARY_ABI_VERSION: i64 = 2",
         "quota_source_summary_abi_rejects_bad_shapes_and_late_records_before_writes",
+        "fn prodex_quota_pool_report_overview_v1(",
+        "pub fn quota_pool_report_overview(",
+        "mojo_quota_report_overview_counts_available_and_latest_across_failures",
+        "mojo_quota_report_overview_abi_rejects_malformed_late_rows_without_output",
       ].filter((marker) => !contents.includes(marker))
         .map((marker) => filePath + ": compiled quota-pool summary layout ABI/coverage missing " + marker);
     }
@@ -10931,6 +10944,10 @@ export function findViolations(files) {
         '@export("prodex_quota_status_summary_v2")',
         "output_fields[unsafe_offset=10] = live_profiles",
         "output_fields[unsafe_offset=11] = snapshot_profiles",
+        '@export("prodex_quota_pool_report_overview_v1")',
+        "QUOTA_REPORT_OVERVIEW_MAX_REPORTS",
+        "available += usable",
+        "if not has_latest or fetched_at > latest:",
       ].filter((marker) => !contents.includes(marker))
         .map((marker) => filePath + ": compiled quota-pool section precedence missing " + marker);
     }
@@ -12504,11 +12521,18 @@ function selfTest() {
     "prodex_mojo_core::quota::quota_info_pool_remaining(",
     "prodex_mojo_core::quota_pool::quota_pool_summary_sections(",
     "copilot_main_remaining_percent(",
+    "quota_pool_report_overview(&observations)",
+    "overview.available_profiles",
+    "overview.last_updated_at",
+    "quota_pool_report_overview_uses_mojo_for_failed_and_available_reports",
   ].join("\n");
   assert.deepEqual(findViolations([[QUOTA_POOL_FILE, quotaPoolLayoutConsumer]]), []);
   assert.match(findViolations([[QUOTA_POOL_FILE,
     quotaPoolLayoutConsumer + "\nif aggregate.profiles_with_data > 0 {",
-  ]]).join("\n"), /restored Rust quota summary row-selection branches/u);
+  ]]).join("\n"), /quota report overview and summary row selection must stay Mojo-owned/u);
+  assert.match(findViolations([[QUOTA_POOL_FILE,
+    quotaPoolLayoutConsumer + "\naggregate.available_profiles += 1",
+  ]]).join("\n"), /quota report overview and summary row selection must stay Mojo-owned/u);
   const deepseekToolShapeConsumer = [
     "DeepSeekRequestPolicyOperation::ToolsShape",
     "prodex_mojo_core::rich::deepseek_tool_shape_issue_message(",
