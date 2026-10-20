@@ -7854,3 +7854,15 @@ DONE semantic branches. All 533 provider tests, two core ABI tests,
 direct Mojo tests and source/share guards pass. The audited share is
 35.88328851577359% (131,307 Mojo / 234,621 Rust).
 Project target 75% remains unmet.
+
+## Gemini apply-patch source and alias precedence compiled in Mojo (2026-10-20)
+
+The Gemini tooling owner now selects the first explicit patch,
+old/new field, Unicode-trimmed path, and content fallback through
+one versioned borrowed-field ABI. The previous Rust first-string
+alias scanners and edit-path normalization were deleted. All 534
+provider tests, two direct core ABI tests, direct Mojo test and
+no-fallback/production metric checks pass. The checked production
+share is 35.88328851577359% (131,307 Mojo / 234,621 Rust).
+The source was already present as WIP during the previous share
+measurement; this checkpoint commits it. The 75% goal remains open.

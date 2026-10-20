@@ -1,38 +1,53 @@
 use serde_json::Value;
 
 pub(crate) fn gemini_custom_apply_patch_input(args_value: &Value) -> String {
-    if let Some(input) = gemini_explicit_apply_patch_input(args_value) {
+    // Host-only Serde acquisition: compiled Mojo owns first-string aliases
+    // and Unicode path trimming without cloning request patch strings.
+    let mut fields =
+        [None; prodex_mojo_core::gemini_tooling_policy::GEMINI_PATCH_SOURCE_FIELD_COUNT];
+    match args_value {
+        Value::String(text) => fields[0] = Some(text.as_str()),
+        Value::Object(object) => {
+            for (slot, key) in [
+                (1, "input"),
+                (2, "patch"),
+                (3, "diff"),
+                (4, "text"),
+                (5, "file_path"),
+                (6, "path"),
+                (7, "filename"),
+                (8, "old_string"),
+                (9, "old"),
+                (10, "search"),
+                (11, "find"),
+                (12, "new_string"),
+                (13, "new"),
+                (14, "replace"),
+                (15, "replacement"),
+                (16, "content"),
+            ] {
+                fields[slot] = object.get(key).and_then(Value::as_str);
+            }
+        }
+        _ => {}
+    }
+    let plan = prodex_mojo_core::gemini_tooling_policy::gemini_apply_patch_sources(&fields)
+        .expect("compiled Mojo Gemini apply-patch source selection failed");
+    if let Some(input) = plan.explicit {
         return gemini_normalize_apply_patch_input(input).unwrap_or_else(|| input.to_string());
     }
-    if let Some((path, old_string, new_string)) = gemini_edit_args(args_value)
+    if let Some(path) = plan.path
         && let Some(input) =
-            prodex_mojo_core::gemini_tooling_policy::gemini_edit_patch(path, old_string, new_string)
+            prodex_mojo_core::gemini_tooling_policy::gemini_edit_patch(path, plan.old, plan.new)
                 .expect("Mojo Gemini edit patch assembly failed")
     {
         return input;
     }
-    if let Some(input) = gemini_content_apply_patch_input(args_value) {
+    if let Some(input) = plan.content {
         return gemini_normalize_apply_patch_input(input).unwrap_or_else(|| input.to_string());
     }
     let input = args_value.to_string();
     gemini_normalize_apply_patch_input(&input).unwrap_or(input)
-}
-
-fn gemini_explicit_apply_patch_input(args_value: &Value) -> Option<&str> {
-    match args_value {
-        Value::String(input) => Some(input),
-        Value::Object(object) => ["input", "patch", "diff", "text"]
-            .iter()
-            .find_map(|key| object.get(*key).and_then(Value::as_str)),
-        _ => None,
-    }
-}
-
-fn gemini_content_apply_patch_input(args_value: &Value) -> Option<&str> {
-    args_value
-        .as_object()?
-        .get("content")
-        .and_then(Value::as_str)
 }
 
 fn gemini_normalize_apply_patch_input(input: &str) -> Option<String> {
@@ -42,20 +57,4 @@ fn gemini_normalize_apply_patch_input(input: &str) -> Option<String> {
             prodex_mojo_core::gemini_tooling_policy::gemini_unified_diff_to_apply_patch(input)
                 .expect("Mojo Gemini unified-diff conversion failed")
         })
-}
-
-fn gemini_edit_args(args_value: &Value) -> Option<(&str, Option<&str>, Option<&str>)> {
-    let object = args_value.as_object()?;
-    let path = ["file_path", "path", "filename"]
-        .iter()
-        .find_map(|key| object.get(*key).and_then(Value::as_str))
-        .filter(|path| !path.trim().is_empty())?
-        .trim();
-    let old_string = ["old_string", "old", "search", "find"]
-        .iter()
-        .find_map(|key| object.get(*key).and_then(Value::as_str));
-    let new_string = ["new_string", "new", "replace", "replacement", "content"]
-        .iter()
-        .find_map(|key| object.get(*key).and_then(Value::as_str));
-    Some((path, old_string, new_string))
 }

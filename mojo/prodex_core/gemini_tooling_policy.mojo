@@ -1238,3 +1238,83 @@ def prodex_gemini_rtk_shell_command_v1(
         output[unsafe_offset=index + 4] = source[unsafe_offset=index]
     written[] = input_length + 4
     return GEMINI_TOOLING_OK
+
+
+# Borrowed patch argument fields selected by compiled Mojo, not Rust.
+# Slots: direct text, input/patch/diff/text, file_path/path/filename,
+# old_string/old/search/find, new_string/new/replace/replacement/content.
+# All present slots are UTF-8 strings; non-string Serde fields stay absent.
+comptime GEMINI_PATCH_SOURCES_FIELD_COUNT: Int64 = 17
+
+
+def tooling_patch_first_string(
+    fields: Pointer[mut=False, UInt64, _], start: Int64, end: Int64
+) -> Int64:
+    for index in range(start, end):
+        if fields[unsafe_offset=index * 3] == 1:
+            return index
+    return -1
+
+
+@export("prodex_gemini_apply_patch_sources_v1")
+def prodex_gemini_apply_patch_sources_v1(
+    abi_version: Int64, fields_address: UInt, field_count: Int64,
+    result_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != GEMINI_TOOLING_ABI_VERSION:
+        return GEMINI_TOOLING_ABI
+    if (
+        field_count != GEMINI_PATCH_SOURCES_FIELD_COUNT
+        or fields_address == 0 or fields_address % 8 != 0
+        or result_address == 0 or result_address % 8 != 0
+    ):
+        return GEMINI_TOOLING_INVALID
+    var fields = Pointer[mut=False, UInt64, ImmUntrackedOrigin](
+        unsafe_from_address=Int(fields_address)
+    )
+    for index in range(GEMINI_PATCH_SOURCES_FIELD_COUNT):
+        var offset = index * 3
+        var present = fields[unsafe_offset=offset]
+        var address = fields[unsafe_offset=offset + 1]
+        var length = fields[unsafe_offset=offset + 2]
+        if present > 1 or (present == 0 and (address != 0 or length != 0)):
+            return GEMINI_TOOLING_INVALID
+        if present == 1 and not rich_view_valid(
+            ProdexRichStringView(UInt(address), UInt(length)),
+            0x7FFFFFFFFFFFFFFF,
+        ):
+            return GEMINI_TOOLING_INVALID
+
+    var explicit = tooling_patch_first_string(fields, 0, 1)
+    if explicit < 0:
+        explicit = tooling_patch_first_string(fields, 1, 5)
+    var path = tooling_patch_first_string(fields, 5, 8)
+    var path_start = Int64(0)
+    var path_end = Int64(0)
+    if path >= 0:
+        var offset = path * 3
+        var view = ProdexRichStringView(
+            UInt(fields[unsafe_offset=offset + 1]),
+            UInt(fields[unsafe_offset=offset + 2]),
+        )
+        var bounds = rich_trim_bounds(view)
+        if bounds[0] < bounds[1]:
+            path_start = bounds[0]
+            path_end = bounds[1]
+        else:
+            # An earlier whitespace-only path blocks later aliases.
+            path = -1
+    var old_text = tooling_patch_first_string(fields, 8, 12)
+    var new_text = tooling_patch_first_string(fields, 12, 17)
+    var content = tooling_patch_first_string(fields, 16, 17)
+    var result = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(result_address)
+    )
+    result[unsafe_offset=0] = explicit
+    result[unsafe_offset=1] = path
+    result[unsafe_offset=2] = path_start
+    result[unsafe_offset=3] = path_end
+    result[unsafe_offset=4] = old_text
+    result[unsafe_offset=5] = new_text
+    result[unsafe_offset=6] = content
+    return GEMINI_TOOLING_OK
