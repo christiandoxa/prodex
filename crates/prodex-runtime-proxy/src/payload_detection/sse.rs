@@ -362,7 +362,7 @@ fn inspect_runtime_sse_buffer_with_eof(
 
 #[derive(Default)]
 struct RuntimeSseInspectionState {
-    response_ids: std::collections::BTreeSet<String>,
+    response_ids: Vec<String>,
     saw_commit_ready_event: bool,
     turn_state: Option<String>,
 }
@@ -394,7 +394,22 @@ impl RuntimeSseInspectionState {
         if terminal.is_some() {
             return terminal;
         }
-        self.response_ids.extend(event.response_ids);
+        // Empty ID events leave the already Mojo-sorted state unchanged.
+        if !event.response_ids.is_empty() {
+            let borrowed = self
+                .response_ids
+                .iter()
+                .chain(event.response_ids.iter())
+                .map(String::as_str)
+                .collect::<Vec<_>>();
+            let selected = prodex_mojo_core::runtime_sse_chunk::response_id_sort_unique(&borrowed)
+                .expect("compiled Mojo SSE response-ID ordering returned invalid output");
+            let sorted = selected
+                .into_iter()
+                .map(|index| borrowed[index].to_owned())
+                .collect::<Vec<_>>();
+            self.response_ids = sorted;
+        }
         if event.turn_state.is_some() {
             self.turn_state = event.turn_state;
         }
@@ -405,12 +420,12 @@ impl RuntimeSseInspectionState {
     fn progress(self) -> RuntimeSseInspectionProgress {
         if self.saw_commit_ready_event {
             RuntimeSseInspectionProgress::Commit {
-                response_ids: self.response_ids.into_iter().collect(),
+                response_ids: self.response_ids,
                 turn_state: self.turn_state,
             }
         } else {
             RuntimeSseInspectionProgress::Hold {
-                response_ids: self.response_ids.into_iter().collect(),
+                response_ids: self.response_ids,
                 turn_state: self.turn_state,
             }
         }
