@@ -12,7 +12,9 @@ pub(in super::super) fn translate_anthropic_stream_event_to_responses(
         );
     }
     let event = String::from_utf8_lossy(&input.body);
-    let Some(data) = event.lines().find_map(|line| line.strip_prefix("data: ")) else {
+    let Some(data) = prodex_mojo_core::anthropic_stream_policy::anthropic_stream_data_line(&event)
+        .expect("compiled Mojo Anthropic SSE data-line selection failed")
+    else {
         return unsupported_stream(
             ProviderEndpoint::Responses,
             "Anthropic SSE event must contain data: <json> framing",

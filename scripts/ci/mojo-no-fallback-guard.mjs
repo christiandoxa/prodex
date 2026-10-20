@@ -278,9 +278,19 @@ const PROVIDER_USAGE_SSE_MOJO = "mojo/prodex_core/provider_usage.mojo";
 const PROVIDER_USAGE_SSE_TEST = "mojo/tests/provider_usage_sse_scan_test.mojo";
 const QUOTA_REPORT_SORT_BATCH_CORE_TEST = "crates/prodex-mojo-core/src/quota/report_sort_batch_tests.rs";
 const QUOTA_REPORT_SORT_BATCH_MOJO_TEST = "mojo/tests/quota_report_sort_batch_test.mojo";
+const ANTHROPIC_DATA_SSE_CALLER = "crates/prodex-provider-core/src/translators/anthropic/messages/stream.rs";
+const ANTHROPIC_DATA_SSE_CORE = "crates/prodex-mojo-core/src/anthropic_stream_policy.rs";
+const ANTHROPIC_DATA_SSE_MOJO = "mojo/prodex_core/anthropic_stream_policy.mojo";
+const ANTHROPIC_DATA_SSE_TEST = "mojo/tests/anthropic_stream_data_line_test.mojo";
+const ANTHROPIC_DATA_SSE_CALLER_TEST = "crates/prodex-provider-core/src/translators/anthropic/messages_tests.rs";
 const PROMOTED_FILES = [
   PROVIDER_USAGE_SSE_MOJO,
   PROVIDER_USAGE_SSE_TEST,
+  ANTHROPIC_DATA_SSE_CALLER,
+  ANTHROPIC_DATA_SSE_CORE,
+  ANTHROPIC_DATA_SSE_MOJO,
+  ANTHROPIC_DATA_SSE_TEST,
+  ANTHROPIC_DATA_SSE_CALLER_TEST,
   QUOTA_REPORT_SORT_BATCH_CORE_TEST,
   QUOTA_REPORT_SORT_BATCH_MOJO_TEST,
   QUOTA_SNAPSHOT_COMPARE_TEST,
@@ -4015,6 +4025,52 @@ export function findViolations(files) {
     if (filePath === "crates/prodex-app/src/runtime_launch/proxy_startup/gemini_sse_tests.rs") {
       return contents.includes("gemini_sse_compiled_completion_emits_each_pending_tool_once_in_index_order")
         ? [] : [filePath + ": real Gemini SSE completion regression missing"];
+    }
+    return [];
+  });
+  const anthropicSseDataLineMojoViolations = files.flatMap(([filePath, contents]) => {
+    if (filePath === ANTHROPIC_DATA_SSE_CALLER &&
+        contents.includes("fn translate_anthropic_stream_event_to_responses(")) {
+      const production = contents.split("#[cfg(test)]", 1)[0];
+      const required = [
+        "String::from_utf8_lossy(&input.body)",
+        "anthropic_stream_policy::anthropic_stream_data_line(&event)",
+      ];
+      const retired = [
+        'event.lines().find_map(',
+        '.strip_prefix("data: ")',
+      ];
+      return required.every((marker) => production.includes(marker))
+        && retired.every((marker) => !production.includes(marker))
+        ? [] : [filePath + ": Anthropic strict SSE data framing must remain compiled Mojo-owned"];
+    }
+    if (filePath === ANTHROPIC_DATA_SSE_CORE) {
+      return [
+        "fn prodex_anthropic_stream_data_line_v1(",
+        "pub fn anthropic_stream_data_line(",
+        "compiled_anthropic_sse_data_line_preserves_first_strict_field_and_crlf",
+        "compiled_anthropic_sse_data_line_abi_rejects_bad_version_utf8_and_shape_before_writes",
+      ].filter((marker) => !contents.includes(marker))
+        .map((marker) => filePath + ": typed Anthropic data-line ABI missing " + marker);
+    }
+    if (filePath === ANTHROPIC_DATA_SSE_MOJO) {
+      return [
+        '@export("prodex_anthropic_stream_data_line_v1")',
+        "selected_start = line_start + 6",
+        "line_end -= 1",
+      ].filter((marker) => !contents.includes(marker))
+        .map((marker) => filePath + ": compiled Anthropic strict SSE data selector missing " + marker);
+    }
+    if (filePath === ANTHROPIC_DATA_SSE_TEST) {
+      return contents.includes("prodex_anthropic_stream_data_line_v1")
+        ? [] : [filePath + ": direct Anthropic data-line ABI regression required"];
+    }
+    if (filePath === ANTHROPIC_DATA_SSE_CALLER_TEST) {
+      return [
+        "compiled_anthropic_sse_data_line_selection_keeps_first_strict_field_and_crlf",
+        "compiled_anthropic_sse_data_line_keeps_transport_utf8_replacement_semantics",
+      ].filter((marker) => !contents.includes(marker))
+        .map((marker) => filePath + ": missing live Anthropic data-line caller test " + marker);
     }
     return [];
   });
@@ -11801,7 +11857,7 @@ export function findViolations(files) {
     }
     return [];
   });
-  return [...responseHeaderSelectionMojoViolations, ...previousResponseJsonSearchMojoViolations, ...domainErrorMojoViolations, ...geminiValueCollectionMojoViolations, ...geminiSimpleResponseViolations, ...logPayloadProjectionViolations, ...nativeRecoveryOwnershipViolations, ...quotaRecoveryEligibilityViolations, ...runtimeBrokerReuseMojoViolations, ...geminiResponseMediaMojoViolations, ...cookieEvictionMojoViolations, ...websocketBudgetMojoViolations, ...affinityBindingMojoViolations, ...responsesCapacityRecoveryViolations, ...sseTapMojoOwnershipViolations, ...quotaWatchViolations, ...geminiCompactSnippetViolations, ...geminiCompactTextViolations, ...doctorSmartContextDecisionViolations, ...providerSseJsonFrameMojoViolations, ...geminiSseCompletionOwnershipViolations, ...anthropicNativeStreamDecisionViolations, ...anthropicAttemptCursorViolations, ...geminiUnsupportedToolRetryViolations, ...terminalGeometryViolations, ...previousResponseRecoveryTransitionViolations, ...chatCompatibleToolCallKindViolations, ...geminiQuotaBodyMojoViolations, ...geminiOAuthRotationMojoViolations, ...geminiBuiltinBatchMojoViolations, ...geminiToolArrayValidationMojoViolations, ...geminiOAuthModelMojoViolations, ...superExposeOriginMojoViolations, ...kiroAcpToolLedgerMojoViolations, ...quotaPoolSummarySectionsMojoViolations, ...deepseekRequestDiagnosticViolations, ...deepseekToolShapeIssueMojoViolations, ...deepseekReplayItemPolicyMojoViolations, ...chatNamespaceSplitMojoViolations, ...deepseekInputItemIssueMessageViolations, ...deepseekRequestIssueMessageViolations, ...smartContextTelemetrySampleViolations, ...compatibilityDiagnosticsMojoViolations, ...quotaHeaderProjectionViolations, ...smartContextCapsuleOrderViolations, ...markerViolations, ...deepseekCatalogPolicyViolations, ...featureOffViolations, ...liveLogRecordViolations, ...runtimePolicyPresetViolations, ...runtimeConfigScalarViolations, ...profileHealthCircuitViolations, ...logThroughputViolations, ...operationalDetailSpecViolations, ...transcriptPolicyViolations, ...logLoadPolicyViolations, ...routeReasonViolations, ...quotaSnapshotCompareMojoViolations, ...startupProbeBatchMojoViolations, ...runtimeStateQuotaViolations, ...runtimeStateRoutePolicyViolations, ...runtimeProxyRootViolations, ...runtimeRecoveryDeadlineViolations, ...brokerVersionGuardViolations, ...brokerContinuityViolations, ...brokerLogCacheViolations, ...codexConfigViolations, ...statePolicyViolations, ...quotaSelectionPolicyViolations, ...routeTagMirrorViolations, ...enumTagMirrorViolations, ...appSelectionPolicyMirrorViolations, ...runtimeStateBackgroundViolations, ...redactionViolations, ...rateLimitHeaderSelectionViolations, ...profileIdentityViolations, ...governanceInspectionViolations, ...governanceInspectionOrderingViolations, ...exactnessPlannerViolations,
+  return [...anthropicSseDataLineMojoViolations, ...responseHeaderSelectionMojoViolations, ...previousResponseJsonSearchMojoViolations, ...domainErrorMojoViolations, ...geminiValueCollectionMojoViolations, ...geminiSimpleResponseViolations, ...logPayloadProjectionViolations, ...nativeRecoveryOwnershipViolations, ...quotaRecoveryEligibilityViolations, ...runtimeBrokerReuseMojoViolations, ...geminiResponseMediaMojoViolations, ...cookieEvictionMojoViolations, ...websocketBudgetMojoViolations, ...affinityBindingMojoViolations, ...responsesCapacityRecoveryViolations, ...sseTapMojoOwnershipViolations, ...quotaWatchViolations, ...geminiCompactSnippetViolations, ...geminiCompactTextViolations, ...doctorSmartContextDecisionViolations, ...providerSseJsonFrameMojoViolations, ...geminiSseCompletionOwnershipViolations, ...anthropicNativeStreamDecisionViolations, ...anthropicAttemptCursorViolations, ...geminiUnsupportedToolRetryViolations, ...terminalGeometryViolations, ...previousResponseRecoveryTransitionViolations, ...chatCompatibleToolCallKindViolations, ...geminiQuotaBodyMojoViolations, ...geminiOAuthRotationMojoViolations, ...geminiBuiltinBatchMojoViolations, ...geminiToolArrayValidationMojoViolations, ...geminiOAuthModelMojoViolations, ...superExposeOriginMojoViolations, ...kiroAcpToolLedgerMojoViolations, ...quotaPoolSummarySectionsMojoViolations, ...deepseekRequestDiagnosticViolations, ...deepseekToolShapeIssueMojoViolations, ...deepseekReplayItemPolicyMojoViolations, ...chatNamespaceSplitMojoViolations, ...deepseekInputItemIssueMessageViolations, ...deepseekRequestIssueMessageViolations, ...smartContextTelemetrySampleViolations, ...compatibilityDiagnosticsMojoViolations, ...quotaHeaderProjectionViolations, ...smartContextCapsuleOrderViolations, ...markerViolations, ...deepseekCatalogPolicyViolations, ...featureOffViolations, ...liveLogRecordViolations, ...runtimePolicyPresetViolations, ...runtimeConfigScalarViolations, ...profileHealthCircuitViolations, ...logThroughputViolations, ...operationalDetailSpecViolations, ...transcriptPolicyViolations, ...logLoadPolicyViolations, ...routeReasonViolations, ...quotaSnapshotCompareMojoViolations, ...startupProbeBatchMojoViolations, ...runtimeStateQuotaViolations, ...runtimeStateRoutePolicyViolations, ...runtimeProxyRootViolations, ...runtimeRecoveryDeadlineViolations, ...brokerVersionGuardViolations, ...brokerContinuityViolations, ...brokerLogCacheViolations, ...codexConfigViolations, ...statePolicyViolations, ...quotaSelectionPolicyViolations, ...routeTagMirrorViolations, ...enumTagMirrorViolations, ...appSelectionPolicyMirrorViolations, ...runtimeStateBackgroundViolations, ...redactionViolations, ...rateLimitHeaderSelectionViolations, ...profileIdentityViolations, ...governanceInspectionViolations, ...governanceInspectionOrderingViolations, ...exactnessPlannerViolations,
     ...infoRunwayViolations,
     ...geminiNormalizedViolations,
     ...quotaDurationViolations,
@@ -14725,6 +14781,16 @@ function selfTest() {
   assert.match(findViolations([[geminiCompletionCaller,
     geminiCompletionFixture + "\nif tool_call.done {",
   ]]).join("\n"), /Gemini SSE completion eligibility must stay Mojo-owned/u);
+  const anthropicSseDataFixture = [
+    "fn translate_anthropic_stream_event_to_responses(",
+    "String::from_utf8_lossy(&input.body)",
+    "anthropic_stream_policy::anthropic_stream_data_line(&event)",
+  ].join("\n");
+  assert.deepEqual(findViolations([[ANTHROPIC_DATA_SSE_CALLER, anthropicSseDataFixture]]).filter(
+    (message) => message.includes("Anthropic strict SSE data framing")), []);
+  assert.match(findViolations([[ANTHROPIC_DATA_SSE_CALLER,
+    anthropicSseDataFixture + "\nevent.lines().find_map()",
+  ]]).join("\n"), /Anthropic strict SSE data framing must remain compiled Mojo-owned/u);
   const nativeAnthropicStreamFixture = [
     "anthropic_stream_action(AnthropicStreamFacts {",
     "anthropic_stream_finish_reason(",

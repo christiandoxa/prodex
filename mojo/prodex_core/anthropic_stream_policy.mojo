@@ -237,3 +237,60 @@ def prodex_anthropic_web_search_completion_v1(
             count += 1
     written[] = count
     return 0
+
+
+# First strict "data: " line from an Anthropic SSE event. Rust keeps the
+# String::from_utf8_lossy transport decode and Serde JSON parse; compiled
+# Mojo owns line scanning, one-CR removal, and first-match selection.
+@export("prodex_anthropic_stream_data_line_v1")
+def prodex_anthropic_stream_data_line_v1(
+    abi_version: Int64, event_address: UInt, event_length: Int64,
+    output_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != ANTHROPIC_STREAM_POLICY_ABI:
+        return 4
+    if (
+        event_length < 0 or (event_length > 0 and event_address == 0)
+        or output_address == 0 or output_address % 8 != 0
+    ):
+        return 1
+    var view = ProdexRichStringView(event_address, UInt(event_length))
+    if not rich_view_valid(view, 0x7FFFFFFFFFFFFFFF):
+        return 1
+    var bytes = Pointer[mut=False, UInt8, ImmUntrackedOrigin](
+        unsafe_from_address=Int(event_address)
+    )
+    var result = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    var cursor = Int64(0)
+    var selected = False
+    var selected_start = Int64(0)
+    var selected_end = Int64(0)
+    while cursor < event_length:
+        var line_start = cursor
+        while cursor < event_length and bytes[unsafe_offset=cursor] != 10:
+            cursor += 1
+        var line_end = cursor
+        if cursor < event_length:
+            cursor += 1
+        # Rust str::lines removes one final carriage return per line,
+        # including the last line without a trailing LF.
+        if line_end > line_start and bytes[unsafe_offset=line_end - 1] == 13:
+            line_end -= 1
+        if line_end - line_start >= 6 and (
+            bytes[unsafe_offset=line_start] == 100
+            and bytes[unsafe_offset=line_start + 1] == 97
+            and bytes[unsafe_offset=line_start + 2] == 116
+            and bytes[unsafe_offset=line_start + 3] == 97
+            and bytes[unsafe_offset=line_start + 4] == 58
+            and bytes[unsafe_offset=line_start + 5] == 32
+        ):
+            selected = True
+            selected_start = line_start + 6
+            selected_end = line_end
+            break
+    result[unsafe_offset=0] = Int64(selected)
+    result[unsafe_offset=1] = selected_start
+    result[unsafe_offset=2] = selected_end
+    return 0
