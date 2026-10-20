@@ -742,3 +742,68 @@ fn sse_tap_state_marks_generation_timing_only_after_output_begins() {
     };
     assert!(*generation_ms > 0);
 }
+
+#[test]
+fn compiled_response_header_batch_preserves_first_duplicate_and_unicode_trim() {
+    assert_eq!(
+        runtime_response_header_value(
+            [("x-visit", " \u{3000}\t "), ("X-VISIT", "later-valid"),],
+            "X-Visit",
+        ),
+        None,
+        "the first matching name blocks later duplicates even if its value is blank",
+    );
+    assert_eq!(
+        runtime_response_header_value(
+            [
+                ("x-other", "ignore"),
+                ("X-VISIT", " \u{3000}東京 雪 \t"),
+                ("x-visit", "later-valid"),
+            ],
+            "x-visit",
+        ),
+        Some("東京 雪".to_string()),
+    );
+    assert_eq!(runtime_response_header_value([], "missing"), None);
+}
+
+#[test]
+fn compiled_response_header_batch_skips_invalid_binary_values_then_selects_valid_content_type() {
+    let invalid = [255_u8, 254];
+    let inputs = [
+        ("Content-Type", invalid.as_slice()),
+        ("Content-Type", b" \t ".as_slice()),
+        (
+            " CONTENT-TYPE ",
+            b"  application/json; charset=utf-8  ".as_slice(),
+        ),
+        ("content-type", b"text/event-stream".as_slice()),
+    ];
+    assert_eq!(
+        runtime_response_content_type_from_binary_headers(inputs),
+        Some("application/json; charset=utf-8"),
+    );
+    assert_eq!(runtime_response_content_type_from_binary_headers([]), None);
+    assert_eq!(
+        runtime_response_content_type_from_binary_headers([
+            ("x-other", b"text/event-stream".as_slice()),
+            ("content-type", invalid.as_slice()),
+        ]),
+        None,
+    );
+}
+
+#[test]
+fn compiled_response_header_batch_sse_flush_requires_exact_header_name_and_any_sse_value() {
+    assert!(runtime_stream_response_should_flush_each_chunk([
+        ("x-other", "text/event-stream"),
+        ("CONTENT-TYPE", "application/json"),
+        ("content-type", "TEXT/EVENT-STREAM; charset=UTF-8"),
+    ]));
+    assert!(!runtime_stream_response_should_flush_each_chunk([
+        (" Content-Type ", "text/event-stream"),
+        ("x-content-type", "text/event-stream"),
+        ("content-type", "application/json"),
+    ]));
+    assert!(!runtime_stream_response_should_flush_each_chunk([]));
+}

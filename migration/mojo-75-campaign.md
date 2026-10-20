@@ -7756,3 +7756,15 @@ direct compiled-core/ABI tests, the direct Mojo test and no-fallback
 and production-share guards pass. Canonical share rises from
 35.828561551188166% to 35.83402093790177%
 (130,720 Mojo / 234,073 Rust); 75% remains outstanding.
+
+## Runtime response header matching, MIME and SSE flush selection compiled in Mojo (2026-10-20)
+
+The compiled response-forwarding owner now selects the first response
+header value with first-empty-duplicate blocking, the first valid
+binary Content-Type header and SSE chunk-flush eligibility through a
+single versioned borrowed-batch ABI. Rust only acquires headers and
+applies the selected span/flag; its former find/find_map/any and Unicode
+trim decisions were deleted. All 421 runtime-proxy tests, two direct
+core ABI tests, direct Mojo test and no-fallback/production checks pass.
+Official share rises from 35.83402093790177% to 35.83891367008976%
+(130,802 Mojo / 234,170 Rust). Project target 75% remains unmet.

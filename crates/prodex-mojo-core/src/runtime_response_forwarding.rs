@@ -15,6 +15,15 @@ const TOKEN_USAGE_LOG: i64 = 1;
 const TOKEN_USAGE_LOG_WITH_GENERATION: i64 = 2;
 
 unsafe extern "C" {
+    fn prodex_runtime_response_header_select_v1(
+        abi_version: i64,
+        operation: i64,
+        rows_address: u64,
+        row_count: i64,
+        query_address: u64,
+        query_length: i64,
+        output_address: u64,
+    ) -> i64;
     fn prodex_runtime_response_forwarding_tap_state_plan_v1(
         abi_version: i64,
         mode: i64,
@@ -27,6 +36,101 @@ unsafe extern "C" {
         loggable_usage: i64,
         generation_present: i64,
     ) -> i64;
+}
+
+/// One original borrowed HTTP header, with a binary wire value.
+#[derive(Debug, Clone, Copy)]
+pub struct RuntimeResponseHeaderInput<'a> {
+    pub name: &'a str,
+    pub value: &'a [u8],
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(i64)]
+pub enum RuntimeResponseHeaderOperation {
+    FirstValue = 0,
+    FirstBinaryContentType = 1,
+    SseChunkFlush = 2,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RuntimeResponseHeaderSelection {
+    pub index: Option<usize>,
+    pub start: usize,
+    pub end: usize,
+}
+
+/// Mojo owns first-match and Unicode whitespace semantics; the host keeps
+/// borrowed original buffers and only applies the chosen slice or flag.
+pub fn response_header_selection(
+    headers: &[RuntimeResponseHeaderInput<'_>],
+    operation: RuntimeResponseHeaderOperation,
+    query: Option<&str>,
+) -> Result<RuntimeResponseHeaderSelection, MojoError> {
+    if headers.len() > 1_048_576
+        || (operation == RuntimeResponseHeaderOperation::FirstValue) != query.is_some()
+    {
+        return Err(MojoError::InvalidInput);
+    }
+    let mut rows = Vec::<u64>::new();
+    rows.try_reserve_exact(headers.len().checked_mul(4).ok_or(MojoError::Capacity)?)
+        .map_err(|_| MojoError::Capacity)?;
+    for header in headers {
+        rows.extend([
+            header.name.as_ptr() as usize as u64,
+            u64::try_from(header.name.len()).map_err(|_| MojoError::InvalidInput)?,
+            header.value.as_ptr() as usize as u64,
+            u64::try_from(header.value.len()).map_err(|_| MojoError::InvalidInput)?,
+        ]);
+    }
+    let (query_address, query_length) = query.map_or(Ok((0, 0)), |value| {
+        Ok((
+            value.as_ptr() as usize as u64,
+            i64::try_from(value.len()).map_err(|_| MojoError::InvalidInput)?,
+        ))
+    })?;
+    let mut output = [-1_i64; 3];
+    match unsafe {
+        prodex_runtime_response_header_select_v1(
+            ABI_VERSION,
+            operation as i64,
+            rows.as_ptr() as usize as u64,
+            i64::try_from(headers.len()).map_err(|_| MojoError::InvalidInput)?,
+            query_address,
+            query_length,
+            output.as_mut_ptr() as usize as u64,
+        )
+    } {
+        0 => {}
+        1 => return Err(MojoError::InvalidInput),
+        4 => return Err(MojoError::AbiMismatch),
+        _ => return Err(MojoError::InvalidOutput),
+    }
+    let index = match output[0] {
+        -1 => None,
+        value => Some(usize::try_from(value).map_err(|_| MojoError::InvalidOutput)?),
+    };
+    if index.is_some_and(|index| index >= headers.len()) {
+        return Err(MojoError::InvalidOutput);
+    }
+    let start = usize::try_from(output[1]).map_err(|_| MojoError::InvalidOutput)?;
+    let end = usize::try_from(output[2]).map_err(|_| MojoError::InvalidOutput)?;
+    if start > end || index.is_none() && (start != 0 || end != 0) {
+        return Err(MojoError::InvalidOutput);
+    }
+    if operation == RuntimeResponseHeaderOperation::SseChunkFlush && (start != 0 || end != 0) {
+        return Err(MojoError::InvalidOutput);
+    }
+    if let Some(index) = index {
+        let value = headers[index].value;
+        if end > value.len()
+            || operation != RuntimeResponseHeaderOperation::SseChunkFlush
+                && (start == end || std::str::from_utf8(&value[start..end]).is_err())
+        {
+            return Err(MojoError::InvalidOutput);
+        }
+    }
+    Ok(RuntimeResponseHeaderSelection { index, start, end })
 }
 
 /// Facts needed to plan one response-ID update or turn-state backfill.
@@ -154,6 +258,152 @@ mod tests {
             loggable_usage: true,
             generation_present: true,
         }
+    }
+
+    #[test]
+    fn compiled_response_header_selection_preserves_first_match_and_utf8_aliases() {
+        use RuntimeResponseHeaderOperation::{FirstBinaryContentType, FirstValue, SseChunkFlush};
+        let text = [
+            RuntimeResponseHeaderInput {
+                name: "x-value",
+                value: " \u{3000} \t".as_bytes(),
+            },
+            RuntimeResponseHeaderInput {
+                name: "X-Value",
+                value: b"later",
+            },
+        ];
+        assert_eq!(
+            response_header_selection(&text, FirstValue, Some("X-VALUE")),
+            Ok(RuntimeResponseHeaderSelection {
+                index: None,
+                start: 0,
+                end: 0
+            }),
+        );
+        let text = [
+            RuntimeResponseHeaderInput {
+                name: "X-Value",
+                value: " \u{3000}selected 雪 \t".as_bytes(),
+            },
+            RuntimeResponseHeaderInput {
+                name: "x-value",
+                value: b"later",
+            },
+        ];
+        let choice = response_header_selection(&text, FirstValue, Some("x-value")).unwrap();
+        assert_eq!(choice.index, Some(0));
+        assert_eq!(
+            std::str::from_utf8(&text[0].value[choice.start..choice.end]),
+            Ok("selected 雪"),
+        );
+        assert_eq!(
+            response_header_selection(&text, FirstValue, Some("not-present"))
+                .unwrap()
+                .index,
+            None,
+        );
+        assert_eq!(
+            response_header_selection(&text, FirstValue, None),
+            Err(MojoError::InvalidInput)
+        );
+        assert_eq!(
+            response_header_selection(&text, SseChunkFlush, Some("value")),
+            Err(MojoError::InvalidInput),
+        );
+
+        let binary = [
+            RuntimeResponseHeaderInput {
+                name: "Content-Type",
+                value: &[255_u8, 250],
+            },
+            RuntimeResponseHeaderInput {
+                name: " CONTENT-TYPE ",
+                value: b"   ",
+            },
+            RuntimeResponseHeaderInput {
+                name: "content-type",
+                value: b"  application/json ",
+            },
+        ];
+        let choice = response_header_selection(&binary, FirstBinaryContentType, None).unwrap();
+        assert_eq!(choice.index, Some(2));
+        assert_eq!(
+            &binary[2].value[choice.start..choice.end],
+            b"application/json"
+        );
+        assert_eq!(
+            response_header_selection(&binary, SseChunkFlush, None)
+                .unwrap()
+                .index,
+            None,
+        );
+        let sse = [
+            RuntimeResponseHeaderInput {
+                name: "x-other",
+                value: b"text/event-stream",
+            },
+            RuntimeResponseHeaderInput {
+                name: "CONTENT-TYPE",
+                value: b"TEXT/EVENT-STREAM; charset=utf-8",
+            },
+        ];
+        assert_eq!(
+            response_header_selection(&sse, SseChunkFlush, None).unwrap(),
+            RuntimeResponseHeaderSelection {
+                index: Some(1),
+                start: 0,
+                end: 0
+            },
+        );
+        assert_eq!(
+            response_header_selection(&[], SseChunkFlush, None)
+                .unwrap()
+                .index,
+            None,
+        );
+    }
+
+    #[test]
+    fn compiled_response_header_selection_abi_rejects_bad_late_rows_without_writing() {
+        let mut result = [79_i64; 3];
+        let target = result.as_mut_ptr() as usize as u64;
+        let mut fields = [0_u64; 8];
+        let rows = fields.as_ptr() as usize as u64;
+        for (version, mode, rows, count, query, query_len, expected) in [
+            (2, 0, rows, 2, 0, 0, 4),
+            (1, 3, rows, 2, 0, 0, 1),
+            (1, 0, 0, 2, 0, 0, 1),
+            (1, 0, rows, -1, 0, 0, 1),
+            (1, 0, rows, 1_048_577, 0, 0, 1),
+            (1, 2, rows, 2, 2, 1, 1),
+        ] {
+            assert_eq!(
+                unsafe {
+                    prodex_runtime_response_header_select_v1(
+                        version, mode, rows, count, query, query_len, target,
+                    )
+                },
+                expected,
+            );
+            assert_eq!(result, [79; 3]);
+        }
+        fields[7] = u64::MAX;
+        assert_eq!(
+            unsafe {
+                prodex_runtime_response_header_select_v1(
+                    1,
+                    1,
+                    fields.as_ptr() as usize as u64,
+                    2,
+                    0,
+                    0,
+                    target,
+                )
+            },
+            1,
+        );
+        assert_eq!(result, [79; 3]);
     }
 
     #[test]

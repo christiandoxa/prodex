@@ -266,7 +266,13 @@ const PREVIOUS_RESPONSE_JSON_CORE = "crates/prodex-mojo-core/src/rich/fallback.r
 const PREVIOUS_RESPONSE_JSON_CORE_TEST = "crates/prodex-mojo-core/src/rich/fallback/previous_response_json_search_tests.rs";
 const PREVIOUS_RESPONSE_JSON_MOJO_TEST = "mojo/tests/previous_response_json_search_test.mojo";
 const PREVIOUS_RESPONSE_JSON_CALLER_TEST = "crates/prodex-runtime-proxy/tests/src/payload_detection.rs";
+const RESPONSE_HEADER_SELECTION_CORE = "crates/prodex-mojo-core/src/runtime_response_forwarding.rs";
+const RESPONSE_HEADER_SELECTION_TEST = "mojo/tests/response_header_selection_test.mojo";
+const RESPONSE_HEADER_SELECTION_CALLER_TEST = "crates/prodex-runtime-proxy/tests/src/response_forwarding.rs";
 const PROMOTED_FILES = [
+  RESPONSE_HEADER_SELECTION_CORE,
+  RESPONSE_HEADER_SELECTION_TEST,
+  RESPONSE_HEADER_SELECTION_CALLER_TEST,
   PREVIOUS_RESPONSE_JSON_CALLER,
   PREVIOUS_RESPONSE_JSON_SHAPE,
   PREVIOUS_RESPONSE_JSON_CORE,
@@ -3802,6 +3808,62 @@ export function findViolations(files) {
         "previous_response_structured_class(",
       ].filter((marker) => !contents.includes(marker))
         .map((marker) => filePath + ": compiled JSON traversal and classification missing " + marker);
+    }
+    return [];
+  });
+  const responseHeaderSelectionMojoViolations = files.flatMap(([filePath, contents]) => {
+    if (filePath === RESPONSE_FORWARDING_FILE &&
+        contents.includes("pub fn runtime_response_header_value(")) {
+      const production = contents.split("#[cfg(test)]", 1)[0];
+      const required = [
+        "RuntimeResponseHeaderOperation::FirstValue",
+        "RuntimeResponseHeaderOperation::FirstBinaryContentType",
+        "RuntimeResponseHeaderOperation::SseChunkFlush",
+        "response_header_selection(&inputs,",
+      ];
+      const retired = [
+        "ascii_casefold_equal_exact(candidate_name, name)",
+        "fn runtime_response_content_type_header_is_usable(",
+        ".find_map(|(name, value)|",
+        "headers.into_iter().any(|(name, value)|",
+      ];
+      return required.every((marker) => production.includes(marker))
+        && retired.every((marker) => !production.includes(marker))
+        ? [] : [filePath + ": first-header, binary MIME and SSE flush selection must stay Mojo-owned"];
+    }
+    if (filePath === RESPONSE_HEADER_SELECTION_CORE &&
+        contents.includes("pub fn response_id_plan(")) {
+      return [
+        "fn prodex_runtime_response_header_select_v1(",
+        "pub fn response_header_selection(",
+        "compiled_response_header_selection_preserves_first_match_and_utf8_aliases",
+        "compiled_response_header_selection_abi_rejects_bad_late_rows_without_writing",
+      ].filter((marker) => !contents.includes(marker))
+        .map((marker) => filePath + ": response header batch ABI missing " + marker);
+    }
+    if (filePath === "mojo/prodex_core/response_forwarding.mojo" &&
+        contents.includes('prodex_runtime_response_forwarding_classify_v1')) {
+      return [
+        '@export("prodex_runtime_response_header_select_v1")',
+        "RESPONSE_HEADER_SELECTION_VALUE",
+        "RESPONSE_HEADER_SELECTION_BINARY_CONTENT_TYPE",
+        "RESPONSE_HEADER_SELECTION_SSE_FLUSH",
+        "response_ranges_equal_ci(",
+        "prodex_runtime_response_forwarding_content_type_v1(",
+      ].filter((marker) => !contents.includes(marker))
+        .map((marker) => filePath + ": response header selection owner missing " + marker);
+    }
+    if (filePath === RESPONSE_HEADER_SELECTION_TEST) {
+      return contents.includes("prodex_runtime_response_header_select_v1")
+        ? [] : [filePath + ": missing direct compiled header selection test"];
+    }
+    if (filePath === RESPONSE_HEADER_SELECTION_CALLER_TEST) {
+      return [
+        "compiled_response_header_batch_preserves_first_duplicate_and_unicode_trim",
+        "compiled_response_header_batch_skips_invalid_binary_values_then_selects_valid_content_type",
+        "compiled_response_header_batch_sse_flush_requires_exact_header_name_and_any_sse_value",
+      ].filter((marker) => !contents.includes(marker))
+        .map((marker) => filePath + ": missing response header consumer regression " + marker);
     }
     return [];
   });
@@ -11580,7 +11642,7 @@ export function findViolations(files) {
     }
     return [];
   });
-  return [...previousResponseJsonSearchMojoViolations, ...domainErrorMojoViolations, ...geminiValueCollectionMojoViolations, ...geminiSimpleResponseViolations, ...logPayloadProjectionViolations, ...nativeRecoveryOwnershipViolations, ...quotaRecoveryEligibilityViolations, ...runtimeBrokerReuseMojoViolations, ...geminiResponseMediaMojoViolations, ...cookieEvictionMojoViolations, ...websocketBudgetMojoViolations, ...affinityBindingMojoViolations, ...responsesCapacityRecoveryViolations, ...sseTapMojoOwnershipViolations, ...quotaWatchViolations, ...geminiCompactSnippetViolations, ...geminiCompactTextViolations, ...doctorSmartContextDecisionViolations, ...providerSseJsonFrameMojoViolations, ...geminiSseCompletionOwnershipViolations, ...anthropicNativeStreamDecisionViolations, ...anthropicAttemptCursorViolations, ...geminiUnsupportedToolRetryViolations, ...terminalGeometryViolations, ...previousResponseRecoveryTransitionViolations, ...chatCompatibleToolCallKindViolations, ...geminiQuotaBodyMojoViolations, ...geminiOAuthRotationMojoViolations, ...geminiBuiltinBatchMojoViolations, ...geminiToolArrayValidationMojoViolations, ...geminiOAuthModelMojoViolations, ...superExposeOriginMojoViolations, ...kiroAcpToolLedgerMojoViolations, ...quotaPoolSummarySectionsMojoViolations, ...deepseekRequestDiagnosticViolations, ...deepseekToolShapeIssueMojoViolations, ...deepseekReplayItemPolicyMojoViolations, ...chatNamespaceSplitMojoViolations, ...deepseekInputItemIssueMessageViolations, ...deepseekRequestIssueMessageViolations, ...smartContextTelemetrySampleViolations, ...compatibilityDiagnosticsMojoViolations, ...quotaHeaderProjectionViolations, ...smartContextCapsuleOrderViolations, ...markerViolations, ...deepseekCatalogPolicyViolations, ...featureOffViolations, ...liveLogRecordViolations, ...runtimePolicyPresetViolations, ...runtimeConfigScalarViolations, ...profileHealthCircuitViolations, ...logThroughputViolations, ...operationalDetailSpecViolations, ...transcriptPolicyViolations, ...logLoadPolicyViolations, ...routeReasonViolations, ...runtimeStateQuotaViolations, ...runtimeStateRoutePolicyViolations, ...runtimeProxyRootViolations, ...runtimeRecoveryDeadlineViolations, ...brokerVersionGuardViolations, ...brokerContinuityViolations, ...brokerLogCacheViolations, ...codexConfigViolations, ...statePolicyViolations, ...quotaSelectionPolicyViolations, ...routeTagMirrorViolations, ...enumTagMirrorViolations, ...appSelectionPolicyMirrorViolations, ...runtimeStateBackgroundViolations, ...redactionViolations, ...rateLimitHeaderSelectionViolations, ...profileIdentityViolations, ...governanceInspectionViolations, ...governanceInspectionOrderingViolations, ...exactnessPlannerViolations,
+  return [...responseHeaderSelectionMojoViolations, ...previousResponseJsonSearchMojoViolations, ...domainErrorMojoViolations, ...geminiValueCollectionMojoViolations, ...geminiSimpleResponseViolations, ...logPayloadProjectionViolations, ...nativeRecoveryOwnershipViolations, ...quotaRecoveryEligibilityViolations, ...runtimeBrokerReuseMojoViolations, ...geminiResponseMediaMojoViolations, ...cookieEvictionMojoViolations, ...websocketBudgetMojoViolations, ...affinityBindingMojoViolations, ...responsesCapacityRecoveryViolations, ...sseTapMojoOwnershipViolations, ...quotaWatchViolations, ...geminiCompactSnippetViolations, ...geminiCompactTextViolations, ...doctorSmartContextDecisionViolations, ...providerSseJsonFrameMojoViolations, ...geminiSseCompletionOwnershipViolations, ...anthropicNativeStreamDecisionViolations, ...anthropicAttemptCursorViolations, ...geminiUnsupportedToolRetryViolations, ...terminalGeometryViolations, ...previousResponseRecoveryTransitionViolations, ...chatCompatibleToolCallKindViolations, ...geminiQuotaBodyMojoViolations, ...geminiOAuthRotationMojoViolations, ...geminiBuiltinBatchMojoViolations, ...geminiToolArrayValidationMojoViolations, ...geminiOAuthModelMojoViolations, ...superExposeOriginMojoViolations, ...kiroAcpToolLedgerMojoViolations, ...quotaPoolSummarySectionsMojoViolations, ...deepseekRequestDiagnosticViolations, ...deepseekToolShapeIssueMojoViolations, ...deepseekReplayItemPolicyMojoViolations, ...chatNamespaceSplitMojoViolations, ...deepseekInputItemIssueMessageViolations, ...deepseekRequestIssueMessageViolations, ...smartContextTelemetrySampleViolations, ...compatibilityDiagnosticsMojoViolations, ...quotaHeaderProjectionViolations, ...smartContextCapsuleOrderViolations, ...markerViolations, ...deepseekCatalogPolicyViolations, ...featureOffViolations, ...liveLogRecordViolations, ...runtimePolicyPresetViolations, ...runtimeConfigScalarViolations, ...profileHealthCircuitViolations, ...logThroughputViolations, ...operationalDetailSpecViolations, ...transcriptPolicyViolations, ...logLoadPolicyViolations, ...routeReasonViolations, ...runtimeStateQuotaViolations, ...runtimeStateRoutePolicyViolations, ...runtimeProxyRootViolations, ...runtimeRecoveryDeadlineViolations, ...brokerVersionGuardViolations, ...brokerContinuityViolations, ...brokerLogCacheViolations, ...codexConfigViolations, ...statePolicyViolations, ...quotaSelectionPolicyViolations, ...routeTagMirrorViolations, ...enumTagMirrorViolations, ...appSelectionPolicyMirrorViolations, ...runtimeStateBackgroundViolations, ...redactionViolations, ...rateLimitHeaderSelectionViolations, ...profileIdentityViolations, ...governanceInspectionViolations, ...governanceInspectionOrderingViolations, ...exactnessPlannerViolations,
     ...infoRunwayViolations,
     ...geminiNormalizedViolations,
     ...quotaDurationViolations,
@@ -12711,6 +12773,18 @@ function selfTest() {
   assert.match(findViolations([[QUOTA_WINDOW_DURATION_CALLER,
     "pub struct UsageWindow; minutes.checked_mul(60);",
   ]]).join("\n"), /quota duration fallback and conversion must remain Mojo-owned/u);
+  const responseHeaderFixture = [
+    "pub fn runtime_response_header_value(",
+    "RuntimeResponseHeaderOperation::FirstValue",
+    "RuntimeResponseHeaderOperation::FirstBinaryContentType",
+    "RuntimeResponseHeaderOperation::SseChunkFlush",
+    "response_header_selection(&inputs,",
+  ].join("\n");
+  assert.deepEqual(findViolations([[RESPONSE_FORWARDING_FILE, responseHeaderFixture]]).filter(
+    (message) => message.includes("first-header, binary MIME and SSE")), []);
+  assert.match(findViolations([[RESPONSE_FORWARDING_FILE,
+    responseHeaderFixture + "\nheaders.into_iter().any(|(name, value)| ...)",
+  ]]).join("\n"), /first-header, binary MIME and SSE flush selection must stay Mojo-owned/u);
   const jsonSearchFixture = [
     "runtime_json_borrowed_shape(value)",
     "fn previous_response_json_fields",

@@ -1,4 +1,3 @@
-use prodex_mojo_core::rich::ascii_casefold_equal_exact;
 use std::collections::BTreeSet;
 use std::time::Instant;
 
@@ -21,12 +20,6 @@ unsafe extern "C" {
         value_address: u64,
         value_length: i64,
         value_present: i64,
-    ) -> i64;
-    fn prodex_runtime_response_forwarding_content_type_v1(
-        name_address: u64,
-        name_length: i64,
-        value_address: u64,
-        value_length: i64,
     ) -> i64;
     fn prodex_runtime_response_forwarding_attempt_v1(
         status: i64,
@@ -137,22 +130,6 @@ fn runtime_response_forwarding_header_action(name: &str, value: Option<&[u8]>) -
 
 fn runtime_response_forwarding_header_is_connection(name: &str) -> bool {
     runtime_response_forwarding_header_action(name, None) == RESPONSE_FORWARDING_HEADER_CONNECTION
-}
-
-fn runtime_response_content_type_header_is_usable(name: &str, value: &[u8]) -> bool {
-    let result = unsafe {
-        prodex_runtime_response_forwarding_content_type_v1(
-            name.as_ptr() as usize as u64,
-            i64::try_from(name.len()).unwrap_or(i64::MAX),
-            value.as_ptr() as usize as u64,
-            i64::try_from(value.len()).unwrap_or(i64::MAX),
-        )
-    };
-    assert!(
-        matches!(result, 0 | 1),
-        "Mojo response-forwarding content-type planner returned invalid output"
-    );
-    result == 1
 }
 
 /// Mojo-owned pre-commit response outcome; Rust applies the returned effect.
@@ -361,13 +338,26 @@ pub fn runtime_forward_binary_response_headers<'a>(
 pub fn runtime_response_content_type_from_binary_headers<'a>(
     headers: impl IntoIterator<Item = (&'a str, &'a [u8])>,
 ) -> Option<&'a str> {
-    headers.into_iter().find_map(|(name, value)| {
-        runtime_response_content_type_header_is_usable(name, value)
-            .then(|| std::str::from_utf8(value).ok())
-            .flatten()
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-    })
+    use prodex_mojo_core::runtime_response_forwarding::{
+        RuntimeResponseHeaderInput, RuntimeResponseHeaderOperation, response_header_selection,
+    };
+    let original = headers.into_iter().collect::<Vec<_>>();
+    let inputs = original
+        .iter()
+        .map(|(name, value)| RuntimeResponseHeaderInput { name, value })
+        .collect::<Vec<_>>();
+    let plan = response_header_selection(
+        &inputs,
+        RuntimeResponseHeaderOperation::FirstBinaryContentType,
+        None,
+    )
+    .expect("compiled Mojo binary Content-Type header selection failed");
+    let index = plan.index?;
+    let value = original[index].1;
+    Some(
+        std::str::from_utf8(&value[plan.start..plan.end])
+            .expect("compiled Mojo selected a valid UTF-8 Content-Type span"),
+    )
 }
 
 pub fn runtime_response_forwarding_body_kind(
@@ -397,25 +387,46 @@ pub fn runtime_response_header_value<'a>(
     headers: impl IntoIterator<Item = (&'a str, &'a str)>,
     name: &str,
 ) -> Option<String> {
-    headers
-        .into_iter()
-        .find(|(candidate_name, _)| {
-            ascii_casefold_equal_exact(candidate_name, name)
-                .expect("Mojo response header-name comparison failed")
+    use prodex_mojo_core::runtime_response_forwarding::{
+        RuntimeResponseHeaderInput, RuntimeResponseHeaderOperation, response_header_selection,
+    };
+    let original = headers.into_iter().collect::<Vec<_>>();
+    let inputs = original
+        .iter()
+        .map(|(name, value)| RuntimeResponseHeaderInput {
+            name,
+            value: value.as_bytes(),
         })
-        .map(|(_, value)| value.trim())
-        .filter(|value| !value.is_empty())
-        .map(str::to_string)
+        .collect::<Vec<_>>();
+    let plan = response_header_selection(
+        &inputs,
+        RuntimeResponseHeaderOperation::FirstValue,
+        Some(name),
+    )
+    .expect("compiled Mojo first response header selection failed");
+    plan.index.map(|index| {
+        let value = original[index].1;
+        value[plan.start..plan.end].to_string()
+    })
 }
 
 pub fn runtime_stream_response_should_flush_each_chunk<'a>(
     headers: impl IntoIterator<Item = (&'a str, &'a str)>,
 ) -> bool {
-    headers.into_iter().any(|(name, value)| {
-        ascii_casefold_equal_exact(name, "content-type")
-            .expect("Mojo response Content-Type comparison failed")
-            && runtime_response_content_type_is_sse(Some(value))
-    })
+    use prodex_mojo_core::runtime_response_forwarding::{
+        RuntimeResponseHeaderInput, RuntimeResponseHeaderOperation, response_header_selection,
+    };
+    let inputs = headers
+        .into_iter()
+        .map(|(name, value)| RuntimeResponseHeaderInput {
+            name,
+            value: value.as_bytes(),
+        })
+        .collect::<Vec<_>>();
+    response_header_selection(&inputs, RuntimeResponseHeaderOperation::SseChunkFlush, None)
+        .expect("compiled Mojo SSE Content-Type selection failed")
+        .index
+        .is_some()
 }
 
 pub fn runtime_buffered_response_metadata<'a>(
