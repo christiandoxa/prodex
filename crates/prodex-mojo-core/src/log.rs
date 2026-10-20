@@ -11,6 +11,7 @@ mod snapshot;
 mod transcript;
 mod transcript_ansi;
 mod tui;
+mod upstream_payload_bounds;
 pub use event_name::render_log_event_name;
 pub use level::classify_log_level;
 pub use runtime_line::{RUNTIME_LOG_FORMAT_JSON, RUNTIME_LOG_FORMAT_TEXT, render_runtime_log_line};
@@ -29,6 +30,10 @@ pub use tui::{
     LogTuiQuotaMode, LogTuiSearchAction, LogTuiSourceTone, log_tui_header_gap,
     log_tui_header_layout, log_tui_key_plan, log_tui_quota_layout, log_tui_snapshot_height,
     log_tui_source_tone, log_tui_window,
+};
+pub use upstream_payload_bounds::{
+    UpstreamPayloadStringBudgetPlan, upstream_payload_log_prefix,
+    upstream_payload_string_budget_plan,
 };
 
 const _: () = assert!(std::mem::size_of::<usize>() == std::mem::size_of::<u64>());

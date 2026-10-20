@@ -44,8 +44,24 @@ pub(crate) fn log_runtime_upstream_payload_snapshot(
 
 fn redacted_upstream_payload(payload: &[u8]) -> Option<Vec<u8>> {
     if let Ok(mut value) = serde_json::from_slice::<serde_json::Value>(payload) {
-        let mut remaining_text_bytes = MAX_UPSTREAM_PAYLOAD_REDACTION_TEXT_BYTES;
-        bound_upstream_payload_json_strings(&mut value, &mut remaining_text_bytes);
+        // Borrow Serde's value strings in its original traversal order.
+        // Compiled Mojo owns which values fit the cumulative byte budget.
+        let mut strings = Vec::new();
+        collect_upstream_payload_string_views(&mut value, &mut strings);
+        let mut remaining = MAX_UPSTREAM_PAYLOAD_REDACTION_TEXT_BYTES;
+        for batch in strings.chunks_mut(1_048_576) {
+            let lengths = batch.iter().map(|text| text.len()).collect::<Vec<_>>();
+            let plan =
+                prodex_mojo_core::log::upstream_payload_string_budget_plan(&lengths, remaining)
+                    .expect("compiled Mojo upstream payload text budget returned invalid output");
+            remaining = plan.remaining;
+            for (text, omit) in batch.iter_mut().zip(plan.omit) {
+                if omit {
+                    **text = UPSTREAM_PAYLOAD_OMISSION_MARKER.to_owned();
+                }
+            }
+        }
+        drop(strings);
         redaction_redact_json(&mut value);
         return serde_json::to_vec(&value).ok();
     }
@@ -56,43 +72,34 @@ fn redacted_upstream_payload(payload: &[u8]) -> Option<Vec<u8>> {
     Some(redaction_redact_secret_like_text(text).into_bytes())
 }
 
-fn bound_upstream_payload_json_strings(value: &mut serde_json::Value, remaining: &mut usize) {
+// Host acquisition only: borrow each Serde string value in the same map/
+// array traversal order used by redaction. The byte budget, omit decisions
+// and remaining count are exclusively compiled Mojo policy.
+fn collect_upstream_payload_string_views<'a>(
+    value: &'a mut serde_json::Value,
+    strings: &mut Vec<&'a mut String>,
+) {
     match value {
         serde_json::Value::Object(map) => {
             for value in map.values_mut() {
-                bound_upstream_payload_json_strings(value, remaining);
+                collect_upstream_payload_string_views(value, strings);
             }
         }
         serde_json::Value::Array(values) => {
             for value in values {
-                bound_upstream_payload_json_strings(value, remaining);
+                collect_upstream_payload_string_views(value, strings);
             }
         }
-        serde_json::Value::String(text) => {
-            if text.len() > *remaining {
-                *text = UPSTREAM_PAYLOAD_OMISSION_MARKER.to_string();
-            } else {
-                *remaining -= text.len();
-            }
-        }
+        serde_json::Value::String(text) => strings.push(text),
         _ => {}
     }
 }
 
 fn truncate_upstream_payload(payload: &[u8]) -> (&[u8], bool) {
-    if payload.len() <= MAX_UPSTREAM_PAYLOAD_LOG_BYTES {
-        return (payload, false);
-    }
-    let end = std::str::from_utf8(&payload[..MAX_UPSTREAM_PAYLOAD_LOG_BYTES])
-        .map(|text| text.len())
-        .unwrap_or_else(|_| {
-            payload[..MAX_UPSTREAM_PAYLOAD_LOG_BYTES]
-                .iter()
-                .rposition(|byte| *byte < 0x80)
-                .map(|index| index + 1)
-                .unwrap_or(0)
-        });
-    (&payload[..end], true)
+    let (end, truncated) =
+        prodex_mojo_core::log::upstream_payload_log_prefix(payload, MAX_UPSTREAM_PAYLOAD_LOG_BYTES)
+            .expect("compiled Mojo upstream payload log prefix returned invalid output");
+    (&payload[..end], truncated)
 }
 
 #[cfg(test)]
@@ -125,6 +132,66 @@ mod tests {
         assert_eq!(value["nested"]["text"], "<redacted>");
         let output = value["output"].as_str().unwrap();
         assert_eq!(output, UPSTREAM_PAYLOAD_OMISSION_MARKER);
+    }
+
+    #[test]
+    fn compiled_upstream_payload_string_budget_preserves_serde_order_skips_and_secret_redaction() {
+        let payload = serde_json::json!({
+            "a": "x".repeat(900),
+            "b": "x".repeat(200),
+            "c": "x".repeat(100),
+            "d": "x".repeat(30),
+            "e": [{"text": ""}, {"text": "x".repeat(20)}],
+            "n": 24,
+            "access_token": "ignored-for-this-test",
+        });
+        let output = redacted_upstream_payload(payload.to_string().as_bytes()).unwrap();
+        let parsed: serde_json::Value = serde_json::from_slice(&output).unwrap();
+        // Serde's object order is the same as for the former Rust
+        // recursive budget walker; the budget planner may skip an
+        // oversized value without consuming the remaining allowance.
+        assert_eq!(parsed["a"].as_str().unwrap().len(), 900);
+        assert_eq!(parsed["b"], UPSTREAM_PAYLOAD_OMISSION_MARKER);
+        assert_eq!(parsed["c"].as_str().unwrap().len(), 100);
+        assert_eq!(parsed["d"], UPSTREAM_PAYLOAD_OMISSION_MARKER);
+        assert_eq!(parsed["e"][0]["text"], "");
+        assert_eq!(parsed["e"][1]["text"], UPSTREAM_PAYLOAD_OMISSION_MARKER);
+        assert_eq!(parsed["n"], 24);
+        assert_ne!(parsed["access_token"], "ignored-for-this-test");
+    }
+
+    #[test]
+    fn compiled_upstream_payload_log_prefix_keeps_exact_byte_boundary_semantics() {
+        let sample = format!("A{}", "é".repeat(32_768));
+        let (prefix, truncated) = truncate_upstream_payload(sample.as_bytes());
+        assert!(truncated);
+        assert_eq!(
+            prefix, b"A",
+            "cutting a multi-byte scalar falls back to last ASCII byte"
+        );
+
+        let ascii = vec![b'X'; MAX_UPSTREAM_PAYLOAD_LOG_BYTES + 1];
+        let (prefix, truncated) = truncate_upstream_payload(&ascii);
+        assert!(truncated);
+        assert_eq!(prefix.len(), MAX_UPSTREAM_PAYLOAD_LOG_BYTES);
+
+        let exactly_full = vec![b'Y'; MAX_UPSTREAM_PAYLOAD_LOG_BYTES];
+        let (prefix, truncated) = truncate_upstream_payload(&exactly_full);
+        assert!(!truncated);
+        assert_eq!(prefix.len(), exactly_full.len());
+
+        let unicode_only = "雪".repeat(21_846);
+        let (prefix, truncated) = truncate_upstream_payload(unicode_only.as_bytes());
+        assert!(truncated);
+        assert!(
+            prefix.is_empty(),
+            "the original fallback found no ASCII before the cut"
+        );
+
+        let malformed = vec![0xff_u8; MAX_UPSTREAM_PAYLOAD_LOG_BYTES + 1];
+        let (prefix, truncated) = truncate_upstream_payload(&malformed);
+        assert!(truncated);
+        assert!(prefix.is_empty());
     }
 
     #[test]
