@@ -4,9 +4,10 @@ use prodex_cli::SubAgentReasoningEffort;
 
 const CATALOG_MAX_PRIORITY: u64 = i64::MAX as u64;
 use prodex_mojo_core::rich::{
-    CatalogChoicesPlan, CatalogModel, CatalogPlanModel, ascii_casefold_equal_exact,
-    merge_catalog_ids, openai_model_is_retired as mojo_openai_model_is_retired,
-    plan_dynamic_catalog, resolve_catalog_model_exact,
+    CatalogChoicesPlan, CatalogInsertionChoice, CatalogInsertionPlacement, CatalogModel,
+    CatalogPlanModel, ascii_casefold_equal_exact, catalog_insertion_index, merge_catalog_ids,
+    openai_model_is_retired as mojo_openai_model_is_retired, plan_dynamic_catalog,
+    resolve_catalog_model_exact,
 };
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -58,15 +59,10 @@ pub(super) fn main_model_choices(
         })
         .filter(|model| !main_model_choice_is_selectable(&choices, model))
     {
-        let insert_at = choices
-            .iter()
-            .position(|choice| {
-                matches!(
-                    choice.choice,
-                    prodex_provider_core::ProviderModelChoice::Custom
-                )
-            })
-            .unwrap_or(choices.len());
+        let insert_at = main_model_choice_insertion_index(
+            &choices,
+            CatalogInsertionPlacement::CurrentBeforeCustom,
+        );
         let efforts = (provider == prodex_provider_core::ProviderId::OpenAi).then(|| {
             canonical_sub_agent_efforts(provider, Some(model))
                 .into_iter()
@@ -85,6 +81,26 @@ pub(super) fn main_model_choices(
         );
     }
     choices
+}
+
+/// Convert host model-choice variants to compiled catalog shape tags.
+/// Placement and first-match precedence are Mojo-owned.
+fn main_model_choice_insertion_index(
+    choices: &[MainModelChoice],
+    placement: CatalogInsertionPlacement,
+) -> usize {
+    let kinds = choices
+        .iter()
+        .map(|choice| match choice.choice {
+            prodex_provider_core::ProviderModelChoice::ProviderDefault => {
+                CatalogInsertionChoice::ProviderDefault
+            }
+            prodex_provider_core::ProviderModelChoice::Model(_) => CatalogInsertionChoice::Model,
+            prodex_provider_core::ProviderModelChoice::Custom => CatalogInsertionChoice::Custom,
+        })
+        .collect::<Vec<_>>();
+    catalog_insertion_index(&kinds, placement)
+        .expect("compiled Mojo main model picker insertion index invalid")
 }
 
 fn openai_model_is_retired(model: &str) -> bool {
@@ -243,15 +259,8 @@ fn merge_bundled_openai_choices(choices: &mut Vec<MainModelChoice>) {
         .collect::<Vec<_>>();
     let accepted = merge_catalog_ids(&existing, &bundled_ids)
         .expect("Mojo bundled OpenAI catalog merge failed");
-    let insert_at = choices
-        .iter()
-        .position(|choice| {
-            matches!(
-                &choice.choice,
-                prodex_provider_core::ProviderModelChoice::ProviderDefault
-            )
-        })
-        .map_or(0, |index| index + 1);
+    let insert_at =
+        main_model_choice_insertion_index(choices, CatalogInsertionPlacement::BundledAfterDefault);
     let bundled = accepted
         .into_iter()
         .map(|index| {
@@ -605,5 +614,93 @@ mod tests {
         assert_eq!(choices[1].default_effort.as_deref(), Some("low"));
         assert_eq!(choices[1].aliases, ["first-alias"]);
         assert_eq!(choices[2].default_effort, None);
+    }
+}
+
+#[cfg(test)]
+mod compiled_main_catalog_insertion_caller_tests {
+    use super::*;
+
+    fn choice(kind: prodex_provider_core::ProviderModelChoice) -> MainModelChoice {
+        MainModelChoice {
+            choice: kind,
+            label: "fixture".into(),
+            efforts: None,
+            aliases: Vec::new(),
+            default_effort: None,
+        }
+    }
+
+    #[test]
+    fn compiled_main_catalog_positions_remembered_model_before_custom() {
+        let choices = vec![
+            choice(prodex_provider_core::ProviderModelChoice::ProviderDefault),
+            choice(prodex_provider_core::ProviderModelChoice::Model(
+                "雪-model".into(),
+            )),
+            choice(prodex_provider_core::ProviderModelChoice::Custom),
+        ];
+        assert_eq!(
+            main_model_choice_insertion_index(
+                &choices,
+                CatalogInsertionPlacement::CurrentBeforeCustom,
+            ),
+            2,
+        );
+        assert_eq!(
+            main_model_choice_insertion_index(
+                &choices,
+                CatalogInsertionPlacement::BundledAfterDefault,
+            ),
+            1,
+        );
+        let no_custom = vec![
+            choice(prodex_provider_core::ProviderModelChoice::ProviderDefault),
+            choice(prodex_provider_core::ProviderModelChoice::Model("a".into())),
+        ];
+        assert_eq!(
+            main_model_choice_insertion_index(
+                &no_custom,
+                CatalogInsertionPlacement::CurrentBeforeCustom,
+            ),
+            2,
+        );
+    }
+
+    #[test]
+    fn compiled_main_catalog_places_bundled_models_after_first_provider_default() {
+        let choices = vec![
+            choice(prodex_provider_core::ProviderModelChoice::Model(
+                "first".into(),
+            )),
+            choice(prodex_provider_core::ProviderModelChoice::ProviderDefault),
+            choice(prodex_provider_core::ProviderModelChoice::Model(
+                "second".into(),
+            )),
+            choice(prodex_provider_core::ProviderModelChoice::Custom),
+        ];
+        assert_eq!(
+            main_model_choice_insertion_index(
+                &choices,
+                CatalogInsertionPlacement::BundledAfterDefault,
+            ),
+            2,
+        );
+        let no_default = choices
+            .into_iter()
+            .filter(|choice| {
+                !matches!(
+                    choice.choice,
+                    prodex_provider_core::ProviderModelChoice::ProviderDefault
+                )
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            main_model_choice_insertion_index(
+                &no_default,
+                CatalogInsertionPlacement::BundledAfterDefault,
+            ),
+            0,
+        );
     }
 }

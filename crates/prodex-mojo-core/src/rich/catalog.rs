@@ -19,6 +19,53 @@ const CATALOG_CHOICE_CONFIGURED: i64 = 2;
 const CATALOG_CHOICE_CURRENT: i64 = 3;
 const CATALOG_CHOICE_CUSTOM: i64 = 4;
 
+/// Borrowed model-choice shape tags for the compiled main picker planner.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(i64)]
+pub enum CatalogInsertionChoice {
+    ProviderDefault = 0,
+    Model = 1,
+    Custom = 4,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(i64)]
+pub enum CatalogInsertionPlacement {
+    CurrentBeforeCustom = 0,
+    BundledAfterDefault = 1,
+}
+
+/// Return the original insertion position chosen by compiled Mojo, without
+/// restoring a first-match search in Rust.
+pub fn catalog_insertion_index(
+    choices: &[CatalogInsertionChoice],
+    placement: CatalogInsertionPlacement,
+) -> Result<usize, MojoError> {
+    ensure_rich_abi()?;
+    if choices.len() > CATALOG_MAX_INPUT_MODELS {
+        return Err(MojoError::InvalidInput);
+    }
+    let tags = choices
+        .iter()
+        .map(|choice| *choice as i64)
+        .collect::<Vec<_>>();
+    let mut index = -1_i64;
+    status(unsafe {
+        prodex_mojo_rich_catalog_insertion_index_v1(
+            RICH_ABI_VERSION,
+            placement as i64,
+            tags.as_ptr() as usize as u64,
+            i64::try_from(tags.len()).map_err(|_| MojoError::InvalidInput)?,
+            (&mut index as *mut i64) as usize as u64,
+        )
+    })?;
+    let index = usize::try_from(index).map_err(|_| MojoError::InvalidOutput)?;
+    if index > choices.len() {
+        return Err(MojoError::InvalidOutput);
+    }
+    Ok(index)
+}
+
 #[derive(Debug, Clone, Copy)]
 pub struct CatalogModel<'a> {
     pub id: &'a str,
@@ -106,6 +153,13 @@ pub enum CatalogChoice {
 mod provider_tests;
 
 unsafe extern "C" {
+    fn prodex_mojo_rich_catalog_insertion_index_v1(
+        abi_version: i64,
+        operation: i64,
+        tags_address: u64,
+        count: i64,
+        result_address: u64,
+    ) -> i64;
     fn prodex_mojo_rich_ascii_casefold_equal_v1(
         abi_version: i64,
         left_address: u64,
@@ -774,4 +828,98 @@ pub fn resolve_catalog_reasoning(
         selected_effort: read_slice(result.selected_effort)?,
         default_effort: read_slice(result.default_effort)?,
     })
+}
+
+#[cfg(test)]
+mod compiled_main_model_insertion_tests {
+    use super::*;
+
+    #[test]
+    fn compiled_main_model_insertion_uses_first_default_or_custom_and_preserves_order() {
+        use CatalogInsertionChoice::{Custom, Model, ProviderDefault};
+        use CatalogInsertionPlacement::{BundledAfterDefault, CurrentBeforeCustom};
+        assert_eq!(
+            catalog_insertion_index(&[ProviderDefault, Model, Custom], CurrentBeforeCustom),
+            Ok(2),
+        );
+        assert_eq!(
+            catalog_insertion_index(&[ProviderDefault, Model, Custom], BundledAfterDefault),
+            Ok(1),
+        );
+        assert_eq!(
+            catalog_insertion_index(
+                &[Model, Custom, Model, Custom, ProviderDefault],
+                CurrentBeforeCustom
+            ),
+            Ok(1),
+        );
+        assert_eq!(
+            catalog_insertion_index(
+                &[Model, Custom, Model, Custom, ProviderDefault],
+                BundledAfterDefault
+            ),
+            Ok(5),
+        );
+        assert_eq!(
+            catalog_insertion_index(&[Model, Model], CurrentBeforeCustom),
+            Ok(2),
+        );
+        assert_eq!(
+            catalog_insertion_index(&[Model, Model], BundledAfterDefault),
+            Ok(0),
+        );
+        assert_eq!(catalog_insertion_index(&[], CurrentBeforeCustom), Ok(0));
+        assert_eq!(catalog_insertion_index(&[], BundledAfterDefault), Ok(0));
+        let many = vec![Model; 1025];
+        assert_eq!(
+            catalog_insertion_index(&many, CurrentBeforeCustom),
+            Ok(1025)
+        );
+    }
+
+    #[test]
+    fn compiled_main_model_insertion_abi_rejects_late_bad_tag_without_mutation() {
+        let mut tags = [0_i64, 1, 4, 1];
+        let mut output = 91_i64;
+        let source = tags.as_ptr() as usize as u64;
+        let result = (&mut output as *mut i64) as usize as u64;
+        for (version, mode, ptr, count, output_ptr, expected) in [
+            (5, 0, source, 4, result, 4),
+            (6, -1, source, 4, result, 1),
+            (6, 2, source, 4, result, 1),
+            (6, 0, 0, 4, result, 1),
+            (6, 0, source, -1, result, 1),
+            (6, 0, source, 65_537, result, 1),
+            (6, 0, source, 4, 0, 1),
+        ] {
+            assert_eq!(
+                unsafe {
+                    prodex_mojo_rich_catalog_insertion_index_v1(
+                        version, mode, ptr, count, output_ptr,
+                    )
+                },
+                expected,
+            );
+            assert_eq!(output, 91);
+        }
+        tags[3] = 99;
+        assert_eq!(
+            unsafe {
+                prodex_mojo_rich_catalog_insertion_index_v1(
+                    RICH_ABI_VERSION,
+                    1,
+                    tags.as_ptr() as usize as u64,
+                    4,
+                    result,
+                )
+            },
+            1,
+        );
+        assert_eq!(output, 91);
+        assert_eq!(
+            unsafe { prodex_mojo_rich_catalog_insertion_index_v1(6, 0, 0, 0, result) },
+            0,
+        );
+        assert_eq!(output, 0);
+    }
 }

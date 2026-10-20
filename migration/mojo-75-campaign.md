@@ -8154,3 +8154,16 @@ two caller regressions, three direct core tests, direct Mojo ABI
 test and strict source/share guards pass. Official share rises from
 36.07194088829946% to 36.091252613612696%
 (133,429 Mojo / 236,270 Rust); the 75% target remains open.
+
+## Main model catalog insertion positions compiled in Mojo (2026-10-21)
+
+The compiled catalog owner now selects the first Custom or
+ProviderDefault insertion position for current and bundled
+main-model choices. Rust retains original model and effort
+metadata but its two first-match .position decision branches
+have been deleted without fallback. All 16 main-model prompt
+tests, two caller regressions, two direct core ABI tests,
+direct Mojo test and strict source/share guards pass.
+Official share rises from 36.091252613612696% to
+36.09407450674974% (133,473 Mojo / 236,319 Rust).
+The separate 75% target remains open.

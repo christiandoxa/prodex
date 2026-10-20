@@ -392,6 +392,11 @@ const REPO_DUPLICATE_BATCH_CALLER = "crates/prodex-app/src/runtime_state_shared/
 const REPO_DUPLICATE_BATCH_CORE = "crates/prodex-mojo-core/src/runtime_repo_map.rs";
 const REPO_DUPLICATE_BATCH_MOJO = "mojo/prodex_core/runtime_repo_map.mojo";
 const REPO_DUPLICATE_BATCH_DIRECT_TEST = "mojo/tests/runtime_repo_duplicate_groups_test.mojo";
+const CATALOG_INSERTION_CALLER = "crates/prodex-app/src/app_commands/super_main_catalog.rs";
+const CATALOG_INSERTION_CORE = "crates/prodex-mojo-core/src/rich/catalog.rs";
+const CATALOG_INSERTION_FACADE = "crates/prodex-mojo-core/src/rich.rs";
+const CATALOG_INSERTION_MOJO = "mojo/prodex_core/rich_catalog.mojo";
+const CATALOG_INSERTION_DIRECT_TEST = "mojo/tests/catalog_main_choice_insertion_test.mojo";
 const PROMOTED_FILES = [
   PROVIDER_USAGE_SSE_MOJO,
   PROVIDER_USAGE_SSE_TEST,
@@ -419,6 +424,10 @@ const PROMOTED_FILES = [
   RESPONSE_HEADER_SELECTION_TEST,
   RESPONSE_HEADER_SELECTION_CALLER_TEST,
   DEEPSEEK_BUFFERED_TEXT_DIRECT_TEST,
+  CATALOG_INSERTION_CORE,
+  CATALOG_INSERTION_FACADE,
+  CATALOG_INSERTION_MOJO,
+  CATALOG_INSERTION_DIRECT_TEST,
   REPO_DUPLICATE_BATCH_DIRECT_TEST,
   PREVIOUS_RESPONSE_CURRENT_NAME_CALLER,
   PREVIOUS_RESPONSE_CURRENT_NAME_CORE,
@@ -4926,6 +4935,57 @@ export function findViolations(files) {
     if (filePath === STARTUP_PROBE_BATCH_CALLER_TEST) {
       return contents.includes("compiled_startup_probe_batch_preserves_over_65536_profile_order_and_remaining_slots")
         ? [] : [filePath + ": startup batch requires cross-batch caller regression"];
+    }
+    return [];
+  });
+  const catalogInsertionMojoViolations = files.flatMap(([filePath, contents]) => {
+    if (filePath === CATALOG_INSERTION_CALLER &&
+        contents.includes("fn main_model_choices(")) {
+      const required = [
+        "fn main_model_choice_insertion_index(",
+        "catalog_insertion_index(&kinds, placement)",
+        "CatalogInsertionPlacement::CurrentBeforeCustom",
+        "CatalogInsertionPlacement::BundledAfterDefault",
+        "compiled_main_catalog_positions_remembered_model_before_custom",
+        "compiled_main_catalog_places_bundled_models_after_first_provider_default",
+      ];
+      return required.every((marker) => contents.includes(marker))
+        && !contents.includes(".position(|choice|")
+        ? [] : [filePath + ": main picker insertion first-match placement must remain compiled Mojo-owned"];
+    }
+    if (filePath === CATALOG_INSERTION_CORE &&
+        contents.includes("pub enum CatalogChoice")) {
+      return [
+        "fn prodex_mojo_rich_catalog_insertion_index_v1(",
+        "pub fn catalog_insertion_index(",
+        "pub enum CatalogInsertionChoice",
+        "pub enum CatalogInsertionPlacement",
+        "compiled_main_model_insertion_uses_first_default_or_custom_and_preserves_order",
+        "compiled_main_model_insertion_abi_rejects_late_bad_tag_without_mutation",
+      ].filter((marker) => !contents.includes(marker))
+        .map((marker) => filePath + ": catalog insertion ABI/test missing " + marker);
+    }
+    if (filePath === CATALOG_INSERTION_FACADE &&
+        contents.includes("pub use catalog::{")) {
+      return [
+        "CatalogInsertionChoice, CatalogInsertionPlacement",
+        "catalog_insertion_index,",
+      ].filter((marker) => !contents.includes(marker))
+        .map((marker) => filePath + ": catalog insertion must remain production reachable " + marker);
+    }
+    if (filePath === CATALOG_INSERTION_MOJO &&
+        contents.includes("CATALOG_INSERT_CURRENT_BEFORE_CUSTOM")) {
+      return [
+        '@export("prodex_mojo_rich_catalog_insertion_index_v1")',
+        "CATALOG_INSERT_BUNDLED_AFTER_DEFAULT",
+        "tags[unsafe_offset=i] == CHOICE_CUSTOM",
+        "tags[unsafe_offset=i] == CHOICE_PROVIDER_DEFAULT",
+      ].filter((marker) => !contents.includes(marker))
+        .map((marker) => filePath + ": compiled main catalog insertion ownership missing " + marker);
+    }
+    if (filePath === CATALOG_INSERTION_DIRECT_TEST) {
+      return contents.includes("prodex_mojo_rich_catalog_insertion_index_v1")
+        ? [] : [filePath + ": direct catalog insertion ABI test missing"];
     }
     return [];
   });
@@ -13359,7 +13419,7 @@ export function findViolations(files) {
     }
     return [];
   });
-  return [...repoDuplicateBatchMojoViolations, ...previousResponseCurrentNameMojoViolations, ...infoProcessPidMojoViolations, ...pingProfileOrderMojoViolations, ...repoMapPathSetMojoViolations, ...launchProcessOutputLineMojoViolations, ...followLogFramingMojoViolations, ...threadDatabaseOrderMojoViolations, ...repoNearestPathMojoViolations, ...copilotInstructionMojoViolations, ...quotaStateProfileMojoViolations, ...quotaRuntimeLogOrderMojoViolations, ...repoArtifactEvictionMojoViolations, ...repoArtifactOrderMojoViolations, ...recentLogPathsMojoViolations, ...logFollowSelectionMojoViolations, ...smartContextStoreRetentionMojoViolations, ...runtimeLogTailMojoViolations, ...deepseekBufferedTextItemMojoViolations, ...runtimeSseResponseIdMojoViolations, ...upstreamPayloadBoundsMojoViolations, ...runtimeSseEventStateMojoViolations, ...geminiPatchSourceMojoViolations, ...openAiCompatSseEnvelopeMojoViolations, ...anthropicSseDataLineMojoViolations, ...responseHeaderSelectionMojoViolations, ...previousResponseTextSpanMojoViolations, ...previousResponseJsonSearchMojoViolations, ...domainErrorMojoViolations, ...geminiValueCollectionMojoViolations, ...geminiSimpleResponseViolations, ...logPayloadProjectionViolations, ...nativeRecoveryOwnershipViolations, ...quotaRecoveryEligibilityViolations, ...runtimeBrokerReuseMojoViolations, ...geminiResponseMediaMojoViolations, ...cookieEvictionMojoViolations, ...websocketBudgetMojoViolations, ...affinityBindingMojoViolations, ...responsesCapacityRecoveryViolations, ...sseTapMojoOwnershipViolations, ...quotaWatchViolations, ...geminiCompactSnippetViolations, ...geminiCompactTextViolations, ...doctorSmartContextDecisionViolations, ...providerSseJsonFrameMojoViolations, ...geminiSseCompletionOwnershipViolations, ...anthropicNativeStreamDecisionViolations, ...anthropicAttemptCursorViolations, ...geminiUnsupportedToolRetryViolations, ...terminalGeometryViolations, ...previousResponseRecoveryTransitionViolations, ...chatCompatibleToolCallKindViolations, ...geminiQuotaBodyMojoViolations, ...geminiOAuthRotationMojoViolations, ...geminiBuiltinBatchMojoViolations, ...geminiToolArrayValidationMojoViolations, ...geminiOAuthModelMojoViolations, ...superExposeOriginMojoViolations, ...kiroAcpToolLedgerMojoViolations, ...quotaPoolSummarySectionsMojoViolations, ...deepseekRequestDiagnosticViolations, ...deepseekToolShapeIssueMojoViolations, ...deepseekReplayItemPolicyMojoViolations, ...chatNamespaceSplitMojoViolations, ...deepseekInputItemIssueMessageViolations, ...deepseekRequestIssueMessageViolations, ...smartContextTelemetrySampleViolations, ...compatibilityDiagnosticsMojoViolations, ...quotaHeaderProjectionViolations, ...smartContextCapsuleOrderViolations, ...markerViolations, ...deepseekCatalogPolicyViolations, ...featureOffViolations, ...liveLogRecordViolations, ...runtimePolicyPresetViolations, ...runtimeConfigScalarViolations, ...profileHealthCircuitViolations, ...logThroughputViolations, ...operationalDetailSpecViolations, ...transcriptPolicyViolations, ...logLoadPolicyViolations, ...routeReasonViolations, ...quotaSnapshotCompareMojoViolations, ...startupProbeBatchMojoViolations, ...runtimeStateQuotaViolations, ...runtimeStateRoutePolicyViolations, ...runtimeProxyRootViolations, ...runtimeRecoveryDeadlineViolations, ...brokerVersionGuardViolations, ...brokerContinuityViolations, ...brokerLogCacheViolations, ...codexConfigViolations, ...statePolicyViolations, ...quotaSelectionPolicyViolations, ...routeTagMirrorViolations, ...enumTagMirrorViolations, ...appSelectionPolicyMirrorViolations, ...runtimeStateBackgroundViolations, ...redactionViolations, ...rateLimitHeaderSelectionViolations, ...profileIdentityViolations, ...governanceInspectionViolations, ...governanceInspectionOrderingViolations, ...exactnessPlannerViolations,
+  return [...catalogInsertionMojoViolations, ...repoDuplicateBatchMojoViolations, ...previousResponseCurrentNameMojoViolations, ...infoProcessPidMojoViolations, ...pingProfileOrderMojoViolations, ...repoMapPathSetMojoViolations, ...launchProcessOutputLineMojoViolations, ...followLogFramingMojoViolations, ...threadDatabaseOrderMojoViolations, ...repoNearestPathMojoViolations, ...copilotInstructionMojoViolations, ...quotaStateProfileMojoViolations, ...quotaRuntimeLogOrderMojoViolations, ...repoArtifactEvictionMojoViolations, ...repoArtifactOrderMojoViolations, ...recentLogPathsMojoViolations, ...logFollowSelectionMojoViolations, ...smartContextStoreRetentionMojoViolations, ...runtimeLogTailMojoViolations, ...deepseekBufferedTextItemMojoViolations, ...runtimeSseResponseIdMojoViolations, ...upstreamPayloadBoundsMojoViolations, ...runtimeSseEventStateMojoViolations, ...geminiPatchSourceMojoViolations, ...openAiCompatSseEnvelopeMojoViolations, ...anthropicSseDataLineMojoViolations, ...responseHeaderSelectionMojoViolations, ...previousResponseTextSpanMojoViolations, ...previousResponseJsonSearchMojoViolations, ...domainErrorMojoViolations, ...geminiValueCollectionMojoViolations, ...geminiSimpleResponseViolations, ...logPayloadProjectionViolations, ...nativeRecoveryOwnershipViolations, ...quotaRecoveryEligibilityViolations, ...runtimeBrokerReuseMojoViolations, ...geminiResponseMediaMojoViolations, ...cookieEvictionMojoViolations, ...websocketBudgetMojoViolations, ...affinityBindingMojoViolations, ...responsesCapacityRecoveryViolations, ...sseTapMojoOwnershipViolations, ...quotaWatchViolations, ...geminiCompactSnippetViolations, ...geminiCompactTextViolations, ...doctorSmartContextDecisionViolations, ...providerSseJsonFrameMojoViolations, ...geminiSseCompletionOwnershipViolations, ...anthropicNativeStreamDecisionViolations, ...anthropicAttemptCursorViolations, ...geminiUnsupportedToolRetryViolations, ...terminalGeometryViolations, ...previousResponseRecoveryTransitionViolations, ...chatCompatibleToolCallKindViolations, ...geminiQuotaBodyMojoViolations, ...geminiOAuthRotationMojoViolations, ...geminiBuiltinBatchMojoViolations, ...geminiToolArrayValidationMojoViolations, ...geminiOAuthModelMojoViolations, ...superExposeOriginMojoViolations, ...kiroAcpToolLedgerMojoViolations, ...quotaPoolSummarySectionsMojoViolations, ...deepseekRequestDiagnosticViolations, ...deepseekToolShapeIssueMojoViolations, ...deepseekReplayItemPolicyMojoViolations, ...chatNamespaceSplitMojoViolations, ...deepseekInputItemIssueMessageViolations, ...deepseekRequestIssueMessageViolations, ...smartContextTelemetrySampleViolations, ...compatibilityDiagnosticsMojoViolations, ...quotaHeaderProjectionViolations, ...smartContextCapsuleOrderViolations, ...markerViolations, ...deepseekCatalogPolicyViolations, ...featureOffViolations, ...liveLogRecordViolations, ...runtimePolicyPresetViolations, ...runtimeConfigScalarViolations, ...profileHealthCircuitViolations, ...logThroughputViolations, ...operationalDetailSpecViolations, ...transcriptPolicyViolations, ...logLoadPolicyViolations, ...routeReasonViolations, ...quotaSnapshotCompareMojoViolations, ...startupProbeBatchMojoViolations, ...runtimeStateQuotaViolations, ...runtimeStateRoutePolicyViolations, ...runtimeProxyRootViolations, ...runtimeRecoveryDeadlineViolations, ...brokerVersionGuardViolations, ...brokerContinuityViolations, ...brokerLogCacheViolations, ...codexConfigViolations, ...statePolicyViolations, ...quotaSelectionPolicyViolations, ...routeTagMirrorViolations, ...enumTagMirrorViolations, ...appSelectionPolicyMirrorViolations, ...runtimeStateBackgroundViolations, ...redactionViolations, ...rateLimitHeaderSelectionViolations, ...profileIdentityViolations, ...governanceInspectionViolations, ...governanceInspectionOrderingViolations, ...exactnessPlannerViolations,
     ...infoRunwayViolations,
     ...geminiNormalizedViolations,
     ...quotaDurationViolations,
@@ -14528,6 +14588,20 @@ function selfTest() {
   assert.match(findViolations([[RESPONSE_FORWARDING_FILE,
     responseHeaderFixture + "\nheaders.into_iter().any(|(name, value)| ...)",
   ]]).join("\n"), /first-header, binary MIME and SSE flush selection must stay Mojo-owned/u);
+  const catalogInsertionFixture = [
+    "fn main_model_choices(",
+    "fn main_model_choice_insertion_index(",
+    "catalog_insertion_index(&kinds, placement)",
+    "CatalogInsertionPlacement::CurrentBeforeCustom",
+    "CatalogInsertionPlacement::BundledAfterDefault",
+    "compiled_main_catalog_positions_remembered_model_before_custom",
+    "compiled_main_catalog_places_bundled_models_after_first_provider_default",
+  ].join("\n");
+  assert.deepEqual(findViolations([[CATALOG_INSERTION_CALLER, catalogInsertionFixture]]).filter(
+    (message) => message.includes("main picker insertion first-match")), []);
+  assert.match(findViolations([[CATALOG_INSERTION_CALLER,
+    catalogInsertionFixture + "\n.position(|choice|",
+  ]]).join("\n"), /main picker insertion first-match placement must remain compiled Mojo-owned/u);
   const repoDuplicateBatchFixture = [
     "fn runtime_smart_context_duplicate_chunk_fingerprints(",
     "RepoDuplicateChunkInput",
