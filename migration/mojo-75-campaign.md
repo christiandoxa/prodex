@@ -7742,3 +7742,17 @@ the 75% project target remains unmet.
 ## Quota window duration normalized by compiled Mojo (2026-10-20)
 
 The seconds-before-minutes precedence and checked conversion now run in the quota Mojo owner. The old Rust duration fallback was deleted. All 100 quota tests, direct ABI tests, and no-fallback checks pass. Official share is 35.828561551188166%; target 75% remains open.
+
+## Runtime proxy structured error JSON search moved to Mojo (2026-10-20)
+
+The existing compiled rich fallback owner now combines bounded
+depth-first error scanning, message/detail/error precedence,
+structured classification and exact 2048-node visit semantics.
+Rust provides borrowed generic Serde node shape and per-object
+field views, preserving all direct fields of the last visited object
+without copying payloads. The previous generic Rust error search
+and candidate classifier were deleted. All 418 runtime proxy tests,
+direct compiled-core/ABI tests, the direct Mojo test and no-fallback
+and production-share guards pass. Canonical share rises from
+35.828561551188166% to 35.83402093790177%
+(130,720 Mojo / 234,073 Rust); 75% remains outstanding.

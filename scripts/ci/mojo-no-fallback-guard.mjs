@@ -260,7 +260,19 @@ const QUOTA_WINDOW_DURATION_TEST = "mojo/tests/quota_window_duration_test.mojo";
 const QUOTA_CAPACITY_CHOICE_ADAPTER = "crates/prodex-mojo-core/src/quota/capacity_choice.rs";
 const QUOTA_CAPACITY_CHOICE_MOJO_TEST = "mojo/tests/quota_capacity_choice_test.mojo";
 const QUOTA_CAPACITY_CHOICE_CALLER_TEST = "crates/prodex-quota/tests/src/render/windows.rs";
+const PREVIOUS_RESPONSE_JSON_CALLER = "crates/prodex-runtime-proxy/src/payload_detection/error_messages.rs";
+const PREVIOUS_RESPONSE_JSON_SHAPE = "crates/prodex-runtime-proxy/src/payload_detection/json_utils.rs";
+const PREVIOUS_RESPONSE_JSON_CORE = "crates/prodex-mojo-core/src/rich/fallback.rs";
+const PREVIOUS_RESPONSE_JSON_CORE_TEST = "crates/prodex-mojo-core/src/rich/fallback/previous_response_json_search_tests.rs";
+const PREVIOUS_RESPONSE_JSON_MOJO_TEST = "mojo/tests/previous_response_json_search_test.mojo";
+const PREVIOUS_RESPONSE_JSON_CALLER_TEST = "crates/prodex-runtime-proxy/tests/src/payload_detection.rs";
 const PROMOTED_FILES = [
+  PREVIOUS_RESPONSE_JSON_CALLER,
+  PREVIOUS_RESPONSE_JSON_SHAPE,
+  PREVIOUS_RESPONSE_JSON_CORE,
+  PREVIOUS_RESPONSE_JSON_CORE_TEST,
+  PREVIOUS_RESPONSE_JSON_MOJO_TEST,
+  PREVIOUS_RESPONSE_JSON_CALLER_TEST,
   DOMAIN_ERROR_CALLER_IDS,
   DOMAIN_ERROR_CALLER_SECRETS,
   DOMAIN_ERROR_ADAPTER,
@@ -3717,6 +3729,79 @@ export function findViolations(files) {
         contents.includes("mod capacity;")) {
       return contents.includes("pub use window_duration::quota_window_duration_seconds;")
         ? [] : [filePath + ": duration adapter must remain reachable"];
+    }
+    return [];
+  });
+  const previousResponseJsonSearchMojoViolations = files.flatMap(([filePath, contents]) => {
+    if (filePath === PREVIOUS_RESPONSE_JSON_CALLER) {
+      const production = contents.split("#[cfg(test)]", 1)[0];
+      const required = [
+        "runtime_json_borrowed_shape(value)",
+        "fn previous_response_json_fields",
+        "previous_response_json_search(",
+        "PreviousResponseJsonOperation::Message",
+        "PreviousResponseJsonOperation::InvalidId",
+        "PreviousResponseJsonTextField::Detail",
+      ];
+      const retired = [
+        "runtime_json_find(",
+        "fn extract_runtime_proxy_previous_response_message_candidate(",
+        '.or_else(|| map.get("detail"))',
+      ];
+      return required.every((marker) => contents.includes(marker))
+        && retired.every((marker) => !production.includes(marker))
+        ? [] : [filePath + ": structured response-error search/aliases must remain compiled Mojo-owned"];
+    }
+    if (filePath === PREVIOUS_RESPONSE_JSON_SHAPE) {
+      const required = [
+        "fn runtime_json_borrowed_shape",
+        "const RUNTIME_PROXY_JSON_SCAN_LIMIT: usize = 2_048;",
+        "while nodes.len() < RUNTIME_PROXY_JSON_SCAN_LIMIT",
+      ];
+      return required.every((marker) => contents.includes(marker))
+        && !contents.includes("fn runtime_json_find<")
+        ? [] : [filePath + ": bounded Serde acquisition must not restore Rust error search"];
+    }
+    if (filePath === PREVIOUS_RESPONSE_JSON_CORE) {
+      const required = [
+        "fn prodex_mojo_previous_response_json_search_v1(",
+        "pub fn previous_response_json_search(",
+        "pub struct PreviousResponseJsonObjectFields",
+        "PreviousResponseJsonSelection::DefaultNotFound",
+      ];
+      return required.filter((marker) => !contents.includes(marker))
+        .map((marker) => filePath + ": typed compiled JSON search ABI missing " + marker);
+    }
+    if (filePath === PREVIOUS_RESPONSE_JSON_CORE_TEST) {
+      return [
+        "compiled_previous_response_json_selects_first_matching_object_and_alias",
+        "compiled_previous_response_json_preserves_invalid_id_and_no_match",
+        "compiled_previous_response_json_abi_rejects_invalid_rows_before_output_write",
+      ].filter((marker) => !contents.includes(marker))
+        .map((marker) => filePath + ": missing strict response search core ABI test " + marker);
+    }
+    if (filePath === PREVIOUS_RESPONSE_JSON_MOJO_TEST) {
+      return contents.includes("prodex_mojo_previous_response_json_search_v1")
+        ? [] : [filePath + ": missing direct bounded Mojo search test"];
+    }
+    if (filePath === PREVIOUS_RESPONSE_JSON_CALLER_TEST) {
+      return [
+        "compiled_previous_response_json_search_preserves_error_message_alias_priority",
+        "compiled_previous_response_json_search_detects_nested_invalid_id_and_ignores_plain_text",
+        "compiled_previous_response_json_search_honors_exact_2048_node_budget",
+        "compiled_previous_response_json_search_stops_after_first_preorder_match",
+      ].filter((marker) => !contents.includes(marker))
+        .map((marker) => filePath + ": missing runtime proxy caller regression " + marker);
+    }
+    if (filePath === "mojo/prodex_core/rich_fallback.mojo" &&
+        contents.includes("previous_response_structured_class(")) {
+      return [
+        '@export("prodex_mojo_previous_response_json_search_v1")',
+        "PREVIOUS_RESPONSE_JSON_SEARCH_MAX_NODES",
+        "previous_response_json_field_present(",
+        "previous_response_structured_class(",
+      ].filter((marker) => !contents.includes(marker))
+        .map((marker) => filePath + ": compiled JSON traversal and classification missing " + marker);
     }
     return [];
   });
@@ -11495,7 +11580,7 @@ export function findViolations(files) {
     }
     return [];
   });
-  return [...domainErrorMojoViolations, ...geminiValueCollectionMojoViolations, ...geminiSimpleResponseViolations, ...logPayloadProjectionViolations, ...nativeRecoveryOwnershipViolations, ...quotaRecoveryEligibilityViolations, ...runtimeBrokerReuseMojoViolations, ...geminiResponseMediaMojoViolations, ...cookieEvictionMojoViolations, ...websocketBudgetMojoViolations, ...affinityBindingMojoViolations, ...responsesCapacityRecoveryViolations, ...sseTapMojoOwnershipViolations, ...quotaWatchViolations, ...geminiCompactSnippetViolations, ...geminiCompactTextViolations, ...doctorSmartContextDecisionViolations, ...providerSseJsonFrameMojoViolations, ...geminiSseCompletionOwnershipViolations, ...anthropicNativeStreamDecisionViolations, ...anthropicAttemptCursorViolations, ...geminiUnsupportedToolRetryViolations, ...terminalGeometryViolations, ...previousResponseRecoveryTransitionViolations, ...chatCompatibleToolCallKindViolations, ...geminiQuotaBodyMojoViolations, ...geminiOAuthRotationMojoViolations, ...geminiBuiltinBatchMojoViolations, ...geminiToolArrayValidationMojoViolations, ...geminiOAuthModelMojoViolations, ...superExposeOriginMojoViolations, ...kiroAcpToolLedgerMojoViolations, ...quotaPoolSummarySectionsMojoViolations, ...deepseekRequestDiagnosticViolations, ...deepseekToolShapeIssueMojoViolations, ...deepseekReplayItemPolicyMojoViolations, ...chatNamespaceSplitMojoViolations, ...deepseekInputItemIssueMessageViolations, ...deepseekRequestIssueMessageViolations, ...smartContextTelemetrySampleViolations, ...compatibilityDiagnosticsMojoViolations, ...quotaHeaderProjectionViolations, ...smartContextCapsuleOrderViolations, ...markerViolations, ...deepseekCatalogPolicyViolations, ...featureOffViolations, ...liveLogRecordViolations, ...runtimePolicyPresetViolations, ...runtimeConfigScalarViolations, ...profileHealthCircuitViolations, ...logThroughputViolations, ...operationalDetailSpecViolations, ...transcriptPolicyViolations, ...logLoadPolicyViolations, ...routeReasonViolations, ...runtimeStateQuotaViolations, ...runtimeStateRoutePolicyViolations, ...runtimeProxyRootViolations, ...runtimeRecoveryDeadlineViolations, ...brokerVersionGuardViolations, ...brokerContinuityViolations, ...brokerLogCacheViolations, ...codexConfigViolations, ...statePolicyViolations, ...quotaSelectionPolicyViolations, ...routeTagMirrorViolations, ...enumTagMirrorViolations, ...appSelectionPolicyMirrorViolations, ...runtimeStateBackgroundViolations, ...redactionViolations, ...rateLimitHeaderSelectionViolations, ...profileIdentityViolations, ...governanceInspectionViolations, ...governanceInspectionOrderingViolations, ...exactnessPlannerViolations,
+  return [...previousResponseJsonSearchMojoViolations, ...domainErrorMojoViolations, ...geminiValueCollectionMojoViolations, ...geminiSimpleResponseViolations, ...logPayloadProjectionViolations, ...nativeRecoveryOwnershipViolations, ...quotaRecoveryEligibilityViolations, ...runtimeBrokerReuseMojoViolations, ...geminiResponseMediaMojoViolations, ...cookieEvictionMojoViolations, ...websocketBudgetMojoViolations, ...affinityBindingMojoViolations, ...responsesCapacityRecoveryViolations, ...sseTapMojoOwnershipViolations, ...quotaWatchViolations, ...geminiCompactSnippetViolations, ...geminiCompactTextViolations, ...doctorSmartContextDecisionViolations, ...providerSseJsonFrameMojoViolations, ...geminiSseCompletionOwnershipViolations, ...anthropicNativeStreamDecisionViolations, ...anthropicAttemptCursorViolations, ...geminiUnsupportedToolRetryViolations, ...terminalGeometryViolations, ...previousResponseRecoveryTransitionViolations, ...chatCompatibleToolCallKindViolations, ...geminiQuotaBodyMojoViolations, ...geminiOAuthRotationMojoViolations, ...geminiBuiltinBatchMojoViolations, ...geminiToolArrayValidationMojoViolations, ...geminiOAuthModelMojoViolations, ...superExposeOriginMojoViolations, ...kiroAcpToolLedgerMojoViolations, ...quotaPoolSummarySectionsMojoViolations, ...deepseekRequestDiagnosticViolations, ...deepseekToolShapeIssueMojoViolations, ...deepseekReplayItemPolicyMojoViolations, ...chatNamespaceSplitMojoViolations, ...deepseekInputItemIssueMessageViolations, ...deepseekRequestIssueMessageViolations, ...smartContextTelemetrySampleViolations, ...compatibilityDiagnosticsMojoViolations, ...quotaHeaderProjectionViolations, ...smartContextCapsuleOrderViolations, ...markerViolations, ...deepseekCatalogPolicyViolations, ...featureOffViolations, ...liveLogRecordViolations, ...runtimePolicyPresetViolations, ...runtimeConfigScalarViolations, ...profileHealthCircuitViolations, ...logThroughputViolations, ...operationalDetailSpecViolations, ...transcriptPolicyViolations, ...logLoadPolicyViolations, ...routeReasonViolations, ...runtimeStateQuotaViolations, ...runtimeStateRoutePolicyViolations, ...runtimeProxyRootViolations, ...runtimeRecoveryDeadlineViolations, ...brokerVersionGuardViolations, ...brokerContinuityViolations, ...brokerLogCacheViolations, ...codexConfigViolations, ...statePolicyViolations, ...quotaSelectionPolicyViolations, ...routeTagMirrorViolations, ...enumTagMirrorViolations, ...appSelectionPolicyMirrorViolations, ...runtimeStateBackgroundViolations, ...redactionViolations, ...rateLimitHeaderSelectionViolations, ...profileIdentityViolations, ...governanceInspectionViolations, ...governanceInspectionOrderingViolations, ...exactnessPlannerViolations,
     ...infoRunwayViolations,
     ...geminiNormalizedViolations,
     ...quotaDurationViolations,
@@ -12626,6 +12711,19 @@ function selfTest() {
   assert.match(findViolations([[QUOTA_WINDOW_DURATION_CALLER,
     "pub struct UsageWindow; minutes.checked_mul(60);",
   ]]).join("\n"), /quota duration fallback and conversion must remain Mojo-owned/u);
+  const jsonSearchFixture = [
+    "runtime_json_borrowed_shape(value)",
+    "fn previous_response_json_fields",
+    "previous_response_json_search(",
+    "PreviousResponseJsonOperation::Message",
+    "PreviousResponseJsonOperation::InvalidId",
+    "PreviousResponseJsonTextField::Detail",
+  ].join("\n");
+  assert.deepEqual(findViolations([[PREVIOUS_RESPONSE_JSON_CALLER, jsonSearchFixture]]).filter(
+    (message) => message.includes("structured response-error search/aliases")), []);
+  assert.match(findViolations([[PREVIOUS_RESPONSE_JSON_CALLER,
+    jsonSearchFixture + "\nruntime_json_find(root, callback)",
+  ]]).join("\n"), /structured response-error search\/aliases must remain compiled Mojo-owned/u);
   const quotaChoiceCaller = "crates/prodex-quota/src/render/windows.rs";
   const quotaChoiceFixture = [
     "fn openai_quota_runtime_window_pair(",
@@ -12976,7 +13074,7 @@ function selfTest() {
   assert.deepEqual(findViolations([
     [SESSION_USAGE_LIMIT_CONSUMER_FILE, sessionUsageConsumer],
     [SESSION_USAGE_LIMIT_ADAPTER_FILE,
-      "RUNTIME_ERROR_MODE_SESSION_USAGE_LIMIT: i64 = 15\npub fn runtime_session_usage_limit_marker(\nRuntimeUsageLimitInputFormat::Json\nRUNTIME_ERROR_SESSION_USAGE_LIMIT_MAX_BYTES\nfn prodex_mojo_rate_limit_header_nonempty_v1(\npub fn rate_limit_header_nonempty(\nmojo_rate_limit_header_nonempty_matches_unicode_whitespace_contract\nmojo_rate_limit_header_nonempty_strict_abi_rejects_malformed_shapes"],
+      "RUNTIME_ERROR_MODE_SESSION_USAGE_LIMIT: i64 = 15\npub fn runtime_session_usage_limit_marker(\nRuntimeUsageLimitInputFormat::Json\nRUNTIME_ERROR_SESSION_USAGE_LIMIT_MAX_BYTES\nfn prodex_mojo_rate_limit_header_nonempty_v1(\npub fn rate_limit_header_nonempty(\nmojo_rate_limit_header_nonempty_matches_unicode_whitespace_contract\nmojo_rate_limit_header_nonempty_strict_abi_rejects_malformed_shapes\nfn prodex_mojo_previous_response_json_search_v1(\npub fn previous_response_json_search(\npub struct PreviousResponseJsonObjectFields\nPreviousResponseJsonSelection::DefaultNotFound"],
     [SESSION_USAGE_LIMIT_FACADE_FILE, "runtime_session_usage_limit_marker"],
     [SESSION_USAGE_LIMIT_MOJO_FILE,
       "comptime RUNTIME_ERROR_MODE_SESSION_USAGE_LIMIT: Int64 = 15\nRUNTIME_ERROR_SESSION_USAGE_LIMIT_MAX_NODES: Int64 = 2_048\ndef runtime_error_session_usage_limit_marker(\ndef runtime_error_session_usage_json_matches(\ndef runtime_error_session_usage_queue_children(\n@export(\"prodex_mojo_rate_limit_header_nonempty_v1\")\nRATE_LIMIT_HEADER_NONEMPTY_ABI_VERSION\nrich_trim_bounds(view)"],

@@ -2560,3 +2560,155 @@ def prodex_mojo_rich_runtime_proxy_body_snippet_v1(
         output[unsafe_offset=written[] + 2] = 46
         written[] += 3
     return RICH_STATUS_OK
+
+
+# Previous-response structured error search. The host supplies borrowed
+# shape plus six direct, typed Serde fields for every bounded node. The
+# complete fields on the final visited object remain available even if its
+# child nodes lie past the 2048-node traversal budget.
+comptime PREVIOUS_RESPONSE_JSON_SEARCH_ABI: Int64 = 1
+comptime PREVIOUS_RESPONSE_JSON_SEARCH_MAX_NODES: Int64 = 2048
+comptime PREVIOUS_RESPONSE_JSON_SEARCH_FIELD_COUNT: Int64 = 6
+comptime PREVIOUS_RESPONSE_JSON_SEARCH_FIELD_WORDS: Int64 = 3
+
+
+def previous_response_json_field_words(
+    fields: Pointer[mut=False, UInt64, _], row: Int64, slot: Int64,
+) -> Int64:
+    return (
+        row * PREVIOUS_RESPONSE_JSON_SEARCH_FIELD_COUNT + slot
+    ) * PREVIOUS_RESPONSE_JSON_SEARCH_FIELD_WORDS
+
+
+def previous_response_json_field_present(
+    fields: Pointer[mut=False, UInt64, _], row: Int64, slot: Int64,
+) -> Bool:
+    return fields[unsafe_offset=previous_response_json_field_words(fields, row, slot)] == 1
+
+
+def previous_response_json_field_view(
+    fields: Pointer[mut=False, UInt64, _], row: Int64, slot: Int64,
+) -> ProdexRichStringView:
+    var offset = previous_response_json_field_words(fields, row, slot)
+    if fields[unsafe_offset=offset] == 0:
+        return ProdexRichStringView(0, 0)
+    return ProdexRichStringView(
+        UInt(fields[unsafe_offset=offset + 1]),
+        UInt(fields[unsafe_offset=offset + 2]),
+    )
+
+
+@export("prodex_mojo_previous_response_json_search_v1")
+def prodex_mojo_previous_response_json_search_v1(
+    abi_version: Int64, operation: Int64,
+    nodes_address: UInt, count: Int64,
+    fields_address: UInt, result_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != PREVIOUS_RESPONSE_JSON_SEARCH_ABI:
+        return 4
+    if (
+        operation < 0 or operation > 1
+        or nodes_address == 0 or nodes_address % 8 != 0
+        or fields_address == 0 or fields_address % 8 != 0
+        or count <= 0 or count > PREVIOUS_RESPONSE_JSON_SEARCH_MAX_NODES
+        or result_address == 0 or result_address % 8 != 0
+    ):
+        return 1
+    var tree = ParsedJson(
+        Pointer[mut=False, ParsedJsonNode, ImmUntrackedOrigin](
+            unsafe_from_address=Int(nodes_address)
+        ), count, ProdexRichStringView(0, 0),
+    )
+    if not pj_valid(tree):
+        return 1
+    var fields = Pointer[mut=False, UInt64, ImmUntrackedOrigin](
+        unsafe_from_address=Int(fields_address)
+    )
+    for row in range(count):
+        for slot in range(PREVIOUS_RESPONSE_JSON_SEARCH_FIELD_COUNT):
+            var offset = previous_response_json_field_words(fields, row, slot)
+            var present = fields[unsafe_offset=offset]
+            var address = fields[unsafe_offset=offset + 1]
+            var length = fields[unsafe_offset=offset + 2]
+            if present > 1 or (present == 0 and (address != 0 or length != 0)):
+                return 1
+            if present == 1 and not rich_view_valid(
+                ProdexRichStringView(UInt(address), UInt(length)),
+                0x7FFFFFFFFFFFFFFF,
+            ):
+                return 1
+
+    var selected: Int64 = -1
+    var selected_class: Int64 = PREVIOUS_RESPONSE_ERROR_CLASS_NONE
+    var selected_field: Int64 = -1
+    var current: Int64 = 0
+    var visited: Int64 = 0
+    while current >= 0 and visited < PREVIOUS_RESPONSE_JSON_SEARCH_MAX_NODES:
+        if pj_kind(tree, current) == JSON_OBJECT:
+            var message_slot: Int64 = -1
+            for slot in range(Int64(3), Int64(6)):
+                if previous_response_json_field_present(fields, current, slot):
+                    message_slot = slot
+                    break
+            var error_view = previous_response_json_field_view(fields, current, 0)
+            var code_view = previous_response_json_field_view(fields, current, 1)
+            var param_view = previous_response_json_field_view(fields, current, 2)
+            var message_view = ProdexRichStringView(0, 0)
+            if message_slot >= 0:
+                message_view = previous_response_json_field_view(
+                    fields, current, message_slot,
+                )
+            if (
+                error_view.len > UInt(PREVIOUS_RESPONSE_ERROR_MAX_BYTES)
+                or code_view.len > UInt(PREVIOUS_RESPONSE_ERROR_MAX_BYTES)
+                or param_view.len > UInt(PREVIOUS_RESPONSE_ERROR_MAX_BYTES)
+                or message_view.len > UInt(PREVIOUS_RESPONSE_ERROR_MAX_BYTES)
+            ):
+                return 1
+            var classified = previous_response_structured_class(
+                error_view.ptr, Int64(error_view.len),
+                code_view.ptr, Int64(code_view.len),
+                param_view.ptr, Int64(param_view.len),
+                message_view.ptr, Int64(message_view.len),
+            )
+            if operation == 0:
+                if classified == PREVIOUS_RESPONSE_ERROR_CLASS_NOT_FOUND:
+                    selected = current if message_slot >= 0 else -2
+                    selected_class = classified
+                    selected_field = message_slot
+                    break
+                if (
+                    (classified == PREVIOUS_RESPONSE_ERROR_CLASS_INVALID_ID
+                     or classified == PREVIOUS_RESPONSE_ERROR_CLASS_TOOL_CONTEXT)
+                    and message_slot >= 0
+                ):
+                    selected = current
+                    selected_class = classified
+                    selected_field = message_slot
+                    break
+            elif classified == PREVIOUS_RESPONSE_ERROR_CLASS_INVALID_ID:
+                selected = current
+                selected_class = classified
+                break
+        visited += 1
+        var child = pj_child(tree, current)
+        if child >= 0:
+            current = child
+            continue
+        var advanced = False
+        while current != 0:
+            var sibling = pj_next(tree, current)
+            if sibling >= 0:
+                current = sibling
+                advanced = True
+                break
+            current = tree.nodes[unsafe_offset=current].parent
+        if not advanced:
+            break
+    var result = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(result_address)
+    )
+    result[unsafe_offset=0] = selected
+    result[unsafe_offset=1] = selected_class
+    result[unsafe_offset=2] = selected_field
+    return 0

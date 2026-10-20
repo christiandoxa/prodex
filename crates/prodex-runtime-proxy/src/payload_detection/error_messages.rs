@@ -1,4 +1,4 @@
-use super::json_utils::{runtime_json_find, runtime_proxy_utf8_text};
+use super::json_utils::{runtime_json_borrowed_shape, runtime_proxy_utf8_text};
 use crate::{
     RuntimeHttpErrorClass, RuntimeHttpErrorPhase, RuntimeHttpErrorPolicy,
     runtime_http_error_policy, runtime_stream_error_policy,
@@ -114,33 +114,80 @@ pub fn runtime_proxy_body_snippet(body: &[u8], max_chars: usize) -> String {
         .expect("Mojo runtime proxy body snippet returned invalid output")
 }
 
+// Serde's map access is host acquisition only. First-string field
+// precedence and error classification are exclusively compiled Mojo policy.
+fn previous_response_json_fields<'a>(
+    originals: &[&'a serde_json::Value],
+) -> Vec<prodex_mojo_core::rich::PreviousResponseJsonObjectFields<'a>> {
+    originals
+        .iter()
+        .map(|value| {
+            let string = |key: &str| value.get(key).and_then(serde_json::Value::as_str);
+            prodex_mojo_core::rich::PreviousResponseJsonObjectFields {
+                error_type: string("type"),
+                code: string("code"),
+                param: string("param"),
+                message: string("message"),
+                detail: string("detail"),
+                error: string("error"),
+            }
+        })
+        .collect()
+}
+
 pub fn extract_runtime_proxy_previous_response_message_from_value(
     value: &serde_json::Value,
 ) -> Option<String> {
-    runtime_json_find(
-        value,
-        extract_runtime_proxy_previous_response_message_candidate,
+    use prodex_mojo_core::rich::{PreviousResponseJsonOperation, PreviousResponseJsonSelection};
+    let (nodes, originals) = runtime_json_borrowed_shape(value);
+    let fields = previous_response_json_fields(&originals);
+    let selection = prodex_mojo_core::rich::previous_response_json_search(
+        &nodes,
+        &fields,
+        PreviousResponseJsonOperation::Message,
     )
+    .expect("compiled Mojo previous-response JSON search returned invalid output");
+    match selection {
+        PreviousResponseJsonSelection::None => None,
+        PreviousResponseJsonSelection::Message {
+            object_index,
+            field,
+        } => {
+            let key = match field {
+                prodex_mojo_core::rich::PreviousResponseJsonTextField::Message => "message",
+                prodex_mojo_core::rich::PreviousResponseJsonTextField::Detail => "detail",
+                prodex_mojo_core::rich::PreviousResponseJsonTextField::Error => "error",
+            };
+            Some(
+                originals[object_index]
+                    .get(key)
+                    .and_then(serde_json::Value::as_str)
+                    .expect("Mojo-selected original error field must be text")
+                    .to_string(),
+            )
+        }
+        PreviousResponseJsonSelection::DefaultNotFound => {
+            Some("Previous response could not be found on the selected Codex account.".to_string())
+        }
+        PreviousResponseJsonSelection::InvalidId(_) => {
+            unreachable!("validated Mojo message operation")
+        }
+    }
 }
 
 pub fn runtime_proxy_value_is_invalid_previous_response_id(value: &serde_json::Value) -> bool {
-    runtime_json_find(value, |candidate| {
-        let serde_json::Value::Object(map) = candidate else {
-            return None;
-        };
-        let error_type = map.get("type").and_then(serde_json::Value::as_str);
-        let code = map.get("code").and_then(serde_json::Value::as_str);
-        let param = map.get("param").and_then(serde_json::Value::as_str);
-        let message = map
-            .get("message")
-            .and_then(serde_json::Value::as_str)
-            .or_else(|| map.get("detail").and_then(serde_json::Value::as_str))
-            .or_else(|| map.get("error").and_then(serde_json::Value::as_str));
-        (runtime_previous_response_class(true, error_type, code, param, message)
-            == PREVIOUS_RESPONSE_ERROR_CLASS_INVALID_ID)
-            .then_some(())
-    })
-    .is_some()
+    use prodex_mojo_core::rich::{PreviousResponseJsonOperation, PreviousResponseJsonSelection};
+    let (nodes, originals) = runtime_json_borrowed_shape(value);
+    let fields = previous_response_json_fields(&originals);
+    matches!(
+        prodex_mojo_core::rich::previous_response_json_search(
+            &nodes,
+            &fields,
+            PreviousResponseJsonOperation::InvalidId,
+        )
+        .expect("compiled Mojo previous-response ID detection returned invalid output"),
+        PreviousResponseJsonSelection::InvalidId(_),
+    )
 }
 
 pub fn runtime_proxy_body_is_invalid_previous_response_id(body: &[u8]) -> bool {
@@ -150,38 +197,6 @@ pub fn runtime_proxy_body_is_invalid_previous_response_id(body: &[u8]) -> bool {
 }
 
 const PREVIOUS_RESPONSE_ERROR_CLASS_NONE: i64 = 0;
-const PREVIOUS_RESPONSE_ERROR_CLASS_NOT_FOUND: i64 = 1;
-const PREVIOUS_RESPONSE_ERROR_CLASS_INVALID_ID: i64 = 2;
-const PREVIOUS_RESPONSE_ERROR_CLASS_TOOL_CONTEXT: i64 = 3;
-
-fn extract_runtime_proxy_previous_response_message_candidate(
-    value: &serde_json::Value,
-) -> Option<String> {
-    let serde_json::Value::Object(map) = value else {
-        return None;
-    };
-    let message = map
-        .get("message")
-        .and_then(serde_json::Value::as_str)
-        .or_else(|| map.get("detail").and_then(serde_json::Value::as_str))
-        .or_else(|| map.get("error").and_then(serde_json::Value::as_str));
-    let code = map.get("code").and_then(serde_json::Value::as_str);
-    let error_type = map.get("type").and_then(serde_json::Value::as_str);
-    let param = map.get("param").and_then(serde_json::Value::as_str);
-
-    match runtime_previous_response_class(true, error_type, code, param, message) {
-        PREVIOUS_RESPONSE_ERROR_CLASS_NOT_FOUND => Some(
-            message
-                .unwrap_or("Previous response could not be found on the selected Codex account.")
-                .to_string(),
-        ),
-        PREVIOUS_RESPONSE_ERROR_CLASS_INVALID_ID | PREVIOUS_RESPONSE_ERROR_CLASS_TOOL_CONTEXT => {
-            message.map(str::to_string)
-        }
-        PREVIOUS_RESPONSE_ERROR_CLASS_NONE => None,
-        _ => unreachable!("validated previous-response error class"),
-    }
-}
 
 pub fn extract_runtime_proxy_previous_response_message_from_text(text: &str) -> Option<String> {
     let trimmed = text.trim();
