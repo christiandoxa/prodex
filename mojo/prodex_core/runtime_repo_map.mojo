@@ -1,4 +1,6 @@
 from std.memory import Pointer
+from rich_text import rich_trim_bounds, rich_view_valid
+from rich_types import ProdexRichStringView
 
 comptime REPO_MAP_ABI_VERSION: Int64 = 1
 comptime REPO_MAP_OK: Int64 = 0
@@ -742,4 +744,174 @@ def prodex_runtime_repo_nearest_path_v1(
     Pointer[mut=True, Int64, MutUntrackedOrigin](
         unsafe_from_address=Int(result_address)
     )[] = winner
+    return REPO_MAP_OK
+
+
+# Sorted, unique, non-whitespace repository paths from file/diff ranges.
+# The host retains the original optional String references and applies
+# selected source indexes. Mojo alone owns Unicode trim filtering,
+# lexicographic precedence and exact raw-path de-duplication.
+comptime REPO_MAP_PATH_SET_ABI: Int64 = 1
+comptime REPO_MAP_PATH_SET_MAX: Int64 = 1_048_576
+comptime REPO_MAP_PATH_SET_FIELDS: Int64 = 3
+
+
+def repo_map_path_set_view(
+    rows: Pointer[mut=False, UInt64, _], index: Int64,
+) -> ProdexRichStringView:
+    var offset = index * REPO_MAP_PATH_SET_FIELDS
+    return ProdexRichStringView(
+        UInt(rows[unsafe_offset=offset + 1]),
+        UInt(rows[unsafe_offset=offset + 2]),
+    )
+
+
+def repo_map_path_set_present(
+    rows: Pointer[mut=False, UInt64, _], index: Int64,
+) -> Bool:
+    var offset = index * REPO_MAP_PATH_SET_FIELDS
+    if rows[unsafe_offset=offset] == 0:
+        return False
+    var bounds = rich_trim_bounds(repo_map_path_set_view(rows, index))
+    return bounds[1] > bounds[0]
+
+
+def repo_map_path_set_less(
+    rows: Pointer[mut=False, UInt64, _],
+    left: Int64, right: Int64,
+) -> Bool:
+    var present_left = repo_map_path_set_present(rows, left)
+    var present_right = repo_map_path_set_present(rows, right)
+    if present_left != present_right:
+        return present_left
+    if not present_left:
+        return left < right
+    var left_view = repo_map_path_set_view(rows, left)
+    var right_view = repo_map_path_set_view(rows, right)
+    var lhs = Pointer[mut=False, UInt8, ImmUntrackedOrigin](
+        unsafe_from_address=Int(left_view.ptr)
+    )
+    var rhs = Pointer[mut=False, UInt8, ImmUntrackedOrigin](
+        unsafe_from_address=Int(right_view.ptr)
+    )
+    var left_len = Int64(left_view.len)
+    var right_len = Int64(right_view.len)
+    if repo_lexical_less(lhs, left_len, rhs, right_len):
+        return True
+    if repo_lexical_less(rhs, right_len, lhs, left_len):
+        return False
+    return left < right
+
+
+def repo_map_path_set_equal(
+    rows: Pointer[mut=False, UInt64, _], left: Int64, right: Int64,
+) -> Bool:
+    var lhs = repo_map_path_set_view(rows, left)
+    var rhs = repo_map_path_set_view(rows, right)
+    if lhs.len != rhs.len:
+        return False
+    var a = Pointer[mut=False, UInt8, ImmUntrackedOrigin](
+        unsafe_from_address=Int(lhs.ptr)
+    )
+    var b = Pointer[mut=False, UInt8, ImmUntrackedOrigin](
+        unsafe_from_address=Int(rhs.ptr)
+    )
+    for index in range(Int64(lhs.len)):
+        if a[unsafe_offset=index] != b[unsafe_offset=index]:
+            return False
+    return True
+
+
+def repo_map_path_set_heap_down(
+    rows: Pointer[mut=False, UInt64, _],
+    output: Pointer[mut=True, Int64, _],
+    first: Int64, count: Int64,
+):
+    var root = first
+    while root * 2 + 1 < count:
+        var child = root * 2 + 1
+        var swap = root
+        if repo_map_path_set_less(
+            rows, output[unsafe_offset=swap], output[unsafe_offset=child],
+        ):
+            swap = child
+        if child + 1 < count and repo_map_path_set_less(
+            rows, output[unsafe_offset=swap], output[unsafe_offset=child + 1],
+        ):
+            swap = child + 1
+        if swap == root:
+            return
+        var saved = output[unsafe_offset=root]
+        output[unsafe_offset=root] = output[unsafe_offset=swap]
+        output[unsafe_offset=swap] = saved
+        root = swap
+
+
+@export("prodex_runtime_repo_map_path_set_v1")
+def prodex_runtime_repo_map_path_set_v1(
+    abi_version: Int64,
+    rows_address: UInt, count: Int64,
+    output_address: UInt, capacity: Int64,
+    selected_count_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != REPO_MAP_PATH_SET_ABI:
+        return 4
+    if (
+        count < 0 or count > REPO_MAP_PATH_SET_MAX
+        or (count > 0 and (rows_address == 0 or rows_address % 8 != 0))
+        or output_address == 0 or output_address % 8 != 0
+        or capacity < count
+        or selected_count_address == 0 or selected_count_address % 8 != 0
+    ):
+        return REPO_MAP_INVALID
+    var rows = Pointer[mut=False, UInt64, ImmUntrackedOrigin](
+        unsafe_from_address=Int(rows_address)
+    )
+    for index in range(count):
+        var offset = index * REPO_MAP_PATH_SET_FIELDS
+        var present = rows[unsafe_offset=offset]
+        var address = rows[unsafe_offset=offset + 1]
+        var length = rows[unsafe_offset=offset + 2]
+        if (
+            present > 1 or length > UInt64(9223372036854775807)
+            or (present == 0 and (address != 0 or length != 0))
+            or (present == 1 and length > 0 and address == 0)
+        ):
+            return REPO_MAP_INVALID
+        if present == 1 and not rich_view_valid(
+            repo_map_path_set_view(rows, index), 0x7FFFFFFFFFFFFFFF,
+        ):
+            return REPO_MAP_INVALID
+
+    var output = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    for index in range(count):
+        output[unsafe_offset=index] = index
+    var start = count // 2
+    while start > 0:
+        start -= 1
+        repo_map_path_set_heap_down(rows, output, start, count)
+    var end = count
+    while end > 1:
+        end -= 1
+        var saved = output[unsafe_offset=0]
+        output[unsafe_offset=0] = output[unsafe_offset=end]
+        output[unsafe_offset=end] = saved
+        repo_map_path_set_heap_down(rows, output, 0, end)
+
+    var chosen = Int64(0)
+    for index in range(count):
+        var original = output[unsafe_offset=index]
+        if not repo_map_path_set_present(rows, original):
+            break
+        if chosen > 0 and repo_map_path_set_equal(
+            rows, output[unsafe_offset=chosen - 1], original,
+        ):
+            continue
+        output[unsafe_offset=chosen] = original
+        chosen += 1
+    Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(selected_count_address)
+    )[] = chosen
     return REPO_MAP_OK
