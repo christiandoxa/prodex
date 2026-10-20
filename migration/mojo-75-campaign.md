@@ -7831,3 +7831,15 @@ tests, direct Mojo test, no-fallback guard and production share checks
 pass. Official share rises from 35.868414646488134% to
 35.87396734330007% (131,185 Mojo / 234,498 Rust);
 the 75% target remains unmet.
+
+## Anthropic first SSE data line moved to compiled Mojo (2026-10-20)
+
+The live Anthropic stream translator now asks its existing compiled
+stream policy to select the first exact data field and apply per-line
+one-CR normalization. Rust retains lossy UTF-8 transport decoding,
+Serde JSON parsing and response materialization, without the old
+Rust lines/find_map/strip_prefix policy. All 531 provider-core tests,
+two direct ABI tests, direct Mojo test, no-fallback guard and official
+non-regression checks pass. The canonical share is now
+35.87396734330007% (131,185 Mojo / 234,498 Rust); target 75%
+remains outstanding.
