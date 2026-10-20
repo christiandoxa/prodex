@@ -7576,3 +7576,16 @@ provider suite (513), six direct core tests, scalar-number edge cases,
 source guard and production-share regression check pass. Official share
 rises from 35.74326074615431% to 35.75250743965612%
 (129,753 Mojo / 233,167 Rust); the 75% project target remains unmet.
+
+## Gemini JSON Boolean semantics and shared provider token helper (2026-10-20)
+
+The compiled Gemini value owner now maps JSON Boolean/number/string/null
+types to optional booleans, preserving Serde signed-integer and float
+behavior. The duplicated Rust dispatch was removed. String tokens are
+handled through one shared non-exported Mojo helper also used by the
+existing provider scalar-policy ABI; the latter's duplicate token
+matching was deleted. The strict provider suite (514), seven direct
+Gemini JSON ABI tests, existing provider scalar tests, no-fallback
+guard and official share checks pass. Production share rises from
+35.75250743965612% to 35.75917369898641% (129,794 Mojo / 233,173
+Rust). Project target 75% remains unmet.

@@ -416,6 +416,7 @@ const PROMOTED_FILES = [
   "crates/prodex-provider-core/src/gemini_bridge/util.rs",
   "crates/prodex-mojo-core/src/json/gemini_value_policy.rs",
   "mojo/prodex_core/gemini_value_policy.mojo",
+  "mojo/prodex_core/provider_boolean_tokens.mojo",
   "crates/prodex-provider-core/src/gemini_bridge/tooling/guardrails.rs",
   "crates/prodex-provider-core/src/gemini_bridge/tooling/guardrails/tool_text.rs",
   "crates/prodex-provider-core/src/gemini_bridge/tooling/guardrails/exact_output.rs",
@@ -1972,6 +1973,8 @@ export function findViolations(files) {
         "GeminiValueOperation::StreamError",
         'document.member(value, "error")',
         "compiled_gemini_stream_error_preserves_status_presence_and_i64_grammar",
+        "GeminiValueOperation::Boolean",
+        "compiled_gemini_json_boolean_owns_serde_boolean_number_and_token_semantics",
       ];
       const retired = [
         "Some(serde_json::Value::Array(items)) =>",
@@ -1983,6 +1986,7 @@ export function findViolations(files) {
         '".git" | "node_modules" | "target"',
         'let error = value.get("error")?',
         "let code = error",
+        "serde_json::Value::Number(number) =>",
       ];
       return required.every((marker) => contents.includes(marker)) &&
         retired.every((marker) => !production.includes(marker))
@@ -2002,6 +2006,8 @@ export function findViolations(files) {
         "compiled_gemini_scalar_abi_rejects_bad_shape_before_output_writes",
         "StreamError = 3",
         "compiled_gemini_stream_error_reads_serde_number_lexemes_and_missing_errors",
+        "Boolean = 4",
+        "compiled_gemini_json_boolean_projector_accepts_non_object_trees",
       ];
       return required.filter((marker) => !contents.includes(marker))
         .map((marker) => filePath + ": compiled Gemini value ABI must retain " + marker);
@@ -2019,9 +2025,28 @@ export function findViolations(files) {
         "def gemini_value_stream_error(",
         "def gemini_value_signed_integer(",
         'pj_field(tree, error, StringSlice("status"))',
+        "def gemini_value_boolean(",
+        "provider_boolean_token_class(value)",
       ];
       return required.filter((marker) => !contents.includes(marker))
         .map((marker) => filePath + ": compiled Gemini value traversal must retain " + marker);
+    }
+    if (filePath === "mojo/prodex_core/provider_boolean_tokens.mojo") {
+      const required = [
+        "def provider_boolean_token_class(",
+        'rich_view_matches_literal["true"](trimmed, True)',
+        'rich_view_matches_literal["false"](trimmed, True)',
+        'rich_view_matches_literal["on"](trimmed, True)',
+        'rich_view_matches_literal["off"](trimmed, True)',
+      ];
+      return required.filter((marker) => !contents.includes(marker))
+        .map((marker) => filePath + ": shared boolean token policy must remain Mojo-owned: " + marker);
+    }
+    if (filePath === "mojo/prodex_core/provider_constraints.mojo" &&
+        contents.includes('@export("prodex_provider_scalar_policy_v1")')) {
+      return contents.includes("return provider_boolean_token_class(view)") &&
+        !contents.includes('provider_scalar_range_equals["true"](view, bounds[0], bounds[1])')
+        ? [] : [filePath + ": provider boolean classification must use the shared Mojo kernel"];
     }
     if (filePath === "crates/prodex-mojo-core/build.rs" &&
         contents.includes('sources.push("../../mojo/prodex_core/gemini_content_hardening.mojo")')) {
@@ -11182,6 +11207,8 @@ function selfTest() {
     "GeminiValueOperation::StreamError",
     'document.member(value, "error")',
     "compiled_gemini_stream_error_preserves_status_presence_and_i64_grammar",
+    "GeminiValueOperation::Boolean",
+    "compiled_gemini_json_boolean_owns_serde_boolean_number_and_token_semantics",
   ].join("\n");
   const geminiValueCallerPath = "crates/prodex-provider-core/src/gemini_bridge/util.rs";
   assert.deepEqual(findViolations([[geminiValueCallerPath, geminiValueCallerFixture]]), []);

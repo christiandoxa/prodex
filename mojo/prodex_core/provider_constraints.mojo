@@ -5,6 +5,7 @@ from std.math import isfinite
 
 from rich_text import rich_trim_bounds, rich_view_ptr, rich_view_valid, rich_view_matches_literal, rich_codepoint, rich_codepoint_width, rich_unicode_space, rich_view_prefix
 from rich_types import ProdexRichStringView
+from provider_boolean_tokens import provider_boolean_token_class
 
 comptime DECISION_COMPATIBLE: Int64 = 0
 comptime DECISION_ENDPOINT_UNSUPPORTED: Int64 = 1
@@ -640,21 +641,7 @@ def prodex_provider_scalar_policy_v1(
         return 8
 
     if operation == PROVIDER_SCALAR_POLICY_BOOLEAN_TOKEN:
-        if (
-            provider_scalar_range_equals["1"](view, bounds[0], bounds[1])
-            or provider_scalar_range_equals["true"](view, bounds[0], bounds[1])
-            or provider_scalar_range_equals["yes"](view, bounds[0], bounds[1])
-            or provider_scalar_range_equals["on"](view, bounds[0], bounds[1])
-        ):
-            return 1
-        if (
-            provider_scalar_range_equals["0"](view, bounds[0], bounds[1])
-            or provider_scalar_range_equals["false"](view, bounds[0], bounds[1])
-            or provider_scalar_range_equals["no"](view, bounds[0], bounds[1])
-            or provider_scalar_range_equals["off"](view, bounds[0], bounds[1])
-        ):
-            return 0
-        return -1
+        return provider_boolean_token_class(view)
 
     if (
         provider_scalar_range_equals["auto"](view, bounds[0], bounds[1])

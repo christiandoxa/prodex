@@ -12,6 +12,7 @@ pub enum GeminiValueOperation {
     Paths = 1,
     InputTexts = 2,
     StreamError = 3,
+    Boolean = 4,
 }
 
 unsafe extern "C" {
@@ -141,6 +142,49 @@ mod tests {
             next_sibling,
             raw_start: 0,
             raw_length: 0,
+        }
+    }
+
+    #[test]
+    fn compiled_gemini_json_boolean_projector_accepts_non_object_trees() {
+        let mut root = node(JsonKind::True, "", "", None, None, None);
+        assert_eq!(
+            gemini_value_projection(&[root], "true", GeminiValueOperation::Boolean),
+            Ok(b"true".to_vec())
+        );
+        root.kind = JsonKind::False;
+        assert_eq!(
+            gemini_value_projection(&[root], "false", GeminiValueOperation::Boolean),
+            Ok(b"false".to_vec())
+        );
+        root.kind = JsonKind::String;
+        root.text = " \u{2003} YES \u{2003}";
+        assert_eq!(
+            gemini_value_projection(&[root], "", GeminiValueOperation::Boolean),
+            Ok(b"true".to_vec())
+        );
+        root.text = "other";
+        assert_eq!(
+            gemini_value_projection(&[root], "", GeminiValueOperation::Boolean),
+            Ok(b"null".to_vec())
+        );
+        root.kind = JsonKind::Number;
+        root.text = "";
+        for (raw, expected) in [
+            ("-9223372036854775808", "true"),
+            ("9223372036854775807", "true"),
+            ("0", "false"),
+            ("18446744073709551615", "false"),
+            ("1.0", "false"),
+            ("-0.0", "false"),
+        ] {
+            root.raw_start = 0;
+            root.raw_length = raw.len();
+            assert_eq!(
+                gemini_value_projection(&[root], raw, GeminiValueOperation::Boolean),
+                Ok(expected.as_bytes().to_vec()),
+                "{raw}",
+            );
         }
     }
 
@@ -300,7 +344,7 @@ mod tests {
         let mut scratch = [0_u64; 4];
         let mut metadata = [99_i64; 2];
         for (version, operation, scratch_count, expected) in
-            [(2, 0, 4, 4), (1, -1, 4, 1), (1, 4, 4, 1), (1, 0, 1, 1)]
+            [(2, 0, 4, 4), (1, -1, 4, 1), (1, 5, 4, 1), (1, 0, 1, 1)]
         {
             let result = unsafe {
                 prodex_mojo_gemini_value_policy_v1(

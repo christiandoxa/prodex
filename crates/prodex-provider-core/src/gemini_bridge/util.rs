@@ -48,12 +48,17 @@ pub fn gemini_provider_core_collect_input_texts(
 }
 
 pub fn gemini_provider_core_bool_value(value: &serde_json::Value) -> Option<bool> {
-    match value {
-        serde_json::Value::Bool(value) => Some(*value),
-        serde_json::Value::Number(number) => Some(number.as_i64().unwrap_or_default() != 0),
-        serde_json::Value::String(value) => gemini_provider_core_bool_str(value),
-        _ => None,
-    }
+    let mut document = crate::mojo_json::Document::default();
+    document.root(value);
+    let raw = std::str::from_utf8(&document.raw).expect("Serde emits UTF-8 JSON");
+    let result = prodex_mojo_core::json::gemini_value_projection(
+        &document.nodes,
+        raw,
+        prodex_mojo_core::json::GeminiValueOperation::Boolean,
+    )
+    .expect("compiled Mojo Gemini JSON-boolean classifier returned invalid output");
+    serde_json::from_slice(&result)
+        .expect("compiled Mojo Gemini JSON-boolean classifier must return Option<bool>")
 }
 
 pub fn gemini_provider_core_bool_str(value: &str) -> Option<bool> {
@@ -281,6 +286,46 @@ mod tests {
             ("東京", false),
         ] {
             assert_eq!(gemini_provider_core_skip_context_path_name(name), excluded);
+        }
+    }
+
+    #[test]
+    fn compiled_gemini_json_boolean_owns_serde_boolean_number_and_token_semantics() {
+        use serde_json::json;
+        for (value, expected) in [
+            (json!(true), Some(true)),
+            (json!(false), Some(false)),
+            (json!(0), Some(false)),
+            (json!(-0), Some(false)),
+            (json!(1), Some(true)),
+            (json!(-1), Some(true)),
+            (json!(i64::MIN), Some(true)),
+            (json!(i64::MAX), Some(true)),
+            (json!(u64::MAX), Some(false)),
+            (json!(i64::MAX as u64 + 1), Some(false)),
+            (json!(1.0), Some(false)),
+            (json!(1.5), Some(false)),
+            (json!(-0.0), Some(false)),
+            (json!(1e20), Some(false)),
+            (json!(" true "), Some(true)),
+            (json!(" YES "), Some(true)),
+            (json!("ON"), Some(true)),
+            (json!("0"), Some(false)),
+            (json!(" Off "), Some(false)),
+            (json!("\u{2003}no\u{2003}"), Some(false)),
+            (json!("invalid"), None),
+            (json!(""), None),
+            (json!("é"), None),
+            (json!(null), None),
+            (json!([]), None),
+            (json!({}), None),
+            (json!({"content": "true"}), None),
+        ] {
+            assert_eq!(
+                gemini_provider_core_bool_value(&value),
+                expected,
+                "value={value}"
+            );
         }
     }
 

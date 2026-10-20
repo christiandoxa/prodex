@@ -4,17 +4,19 @@
 from std.memory import Pointer
 from rich_text import rich_trim_bounds, rich_view_matches_literal, rich_view_ptr, rich_view_valid
 from parsed_json import (
-    JSON_ARRAY, JSON_OBJECT, JSON_STRING, JSON_NUMBER, ParsedJson, ParsedJsonNode,
+    JSON_ARRAY, JSON_OBJECT, JSON_STRING, JSON_NUMBER, JSON_TRUE, JSON_FALSE, ParsedJson, ParsedJsonNode,
     pj_child, pj_field, pj_kind, pj_next, pj_text, pj_trim, pj_valid, pj_literal,
 )
 from json_sink import JsonSink, js_byte, js_string, js_literal, js_raw_view
 from rich_types import ProdexRichStringView
+from provider_boolean_tokens import provider_boolean_token_class
 
 comptime GEMINI_VALUE_ABI: Int64 = 1
 comptime GEMINI_VALUE_STRINGS: Int64 = 0
 comptime GEMINI_VALUE_PATHS: Int64 = 1
 comptime GEMINI_VALUE_INPUT_TEXT: Int64 = 2
 comptime GEMINI_VALUE_STREAM_ERROR: Int64 = 3
+comptime GEMINI_VALUE_BOOLEAN: Int64 = 4
 
 
 def gemini_value_emit(
@@ -127,6 +129,41 @@ def gemini_value_stream_error(sink: Pointer[mut=True, JsonSink, _], tree: Parsed
     js_byte(sink, 93)
 
 
+# Reuse the existing compiled provider token classifier for JSON strings.
+# Serde Number::as_i64 rejects floats and overflowing unsigned integers.
+def gemini_value_boolean(sink: Pointer[mut=True, JsonSink, _], tree: ParsedJson) -> Bool:
+    var kind = pj_kind(tree, 0)
+    if kind == JSON_TRUE:
+        js_literal(sink, StringSlice("true"))
+    elif kind == JSON_FALSE:
+        js_literal(sink, StringSlice("false"))
+    elif kind == JSON_STRING:
+        var value = pj_text(tree, 0)
+        var classification = provider_boolean_token_class(value)
+        if classification == 1:
+            js_literal(sink, StringSlice("true"))
+        elif classification == 0:
+            js_literal(sink, StringSlice("false"))
+        elif classification == -1:
+            js_literal(sink, StringSlice("null"))
+        else:
+            return False
+    elif kind == JSON_NUMBER:
+        var value = js_raw_view(tree, 0)
+        var nonzero = False
+        if gemini_value_signed_integer(value):
+            var ptr = rich_view_ptr(value)
+            for index in range(Int64(value.len)):
+                var byte = ptr[unsafe_offset=index]
+                if byte >= 49 and byte <= 57:
+                    nonzero = True
+                    break
+        js_literal(sink, StringSlice("true") if nonzero else StringSlice("false"))
+    else:
+        js_literal(sink, StringSlice("null"))
+    return True
+
+
 @export("prodex_mojo_gemini_value_policy_v1")
 def prodex_mojo_gemini_value_policy_v1(
     abi: Int64, operation: Int64, flag: Int64,
@@ -137,7 +174,7 @@ def prodex_mojo_gemini_value_policy_v1(
     if abi != GEMINI_VALUE_ABI:
         return 4
     if (
-        operation < GEMINI_VALUE_STRINGS or operation > GEMINI_VALUE_STREAM_ERROR
+        operation < GEMINI_VALUE_STRINGS or operation > GEMINI_VALUE_BOOLEAN
         or flag != 0 or node_count <= 0 or nodes_address == 0
         or nodes_address % 8 != 0 or raw_length < 0
         or (raw_length > 0 and raw_address == 0)
@@ -154,14 +191,17 @@ def prodex_mojo_gemini_value_policy_v1(
             unsafe_from_address=Int(nodes_address)
         ), node_count, ProdexRichStringView(raw_address, UInt(raw_length)),
     )
-    if not pj_valid(tree) or pj_kind(tree, 0) != JSON_OBJECT:
+    if not pj_valid(tree) or (operation != GEMINI_VALUE_BOOLEAN and pj_kind(tree, 0) != JSON_OBJECT):
         return 1
     var sink = JsonSink(
         Pointer[mut=True, UInt8, MutUntrackedOrigin](
             unsafe_from_address=Int(output_address)
         ), output_capacity, 0, measuring == 1, False,
     )
-    if operation == GEMINI_VALUE_STREAM_ERROR:
+    if operation == GEMINI_VALUE_BOOLEAN:
+        if not gemini_value_boolean(Pointer(to=sink), tree):
+            return 1
+    elif operation == GEMINI_VALUE_STREAM_ERROR:
         gemini_value_stream_error(Pointer(to=sink), tree)
     else:
         gemini_value_collect(Pointer(to=sink), tree, operation)
