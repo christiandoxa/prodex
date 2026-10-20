@@ -231,3 +231,40 @@ fn quota_capacity_adapter_batches_past_256_rows() {
         ));
     }
 }
+
+#[test]
+fn compiled_quota_capacity_choice_reaches_live_window_pair_and_ready_callers() {
+    let no_windows = usage(None, vec![]);
+    assert!(openai_quota_runtime_window_pair(&no_windows).is_none());
+    assert!(!openai_quota_has_ready_limit(&no_windows));
+
+    let unroutable_extra = AdditionalRateLimit {
+        limit_id: None,
+        limit_name: Some("standalone-extra".to_string()),
+        metered_feature: None,
+        rate_limit: pair(Some(window(Some(20), None, Some(18_000))), None),
+        allowed: None,
+        limit_reached: None,
+        extra: BTreeMap::new(),
+    };
+    let only_extra = usage(None, vec![unroutable_extra.clone()]);
+    assert!(openai_quota_runtime_window_pair(&only_extra).is_none());
+    assert!(!openai_quota_has_ready_limit(&only_extra));
+
+    let main = pair(Some(window(Some(20), None, Some(18_000))), None);
+    let with_main = usage(Some(main), vec![unroutable_extra.clone()]);
+    assert!(openai_quota_has_ready_limit(&with_main));
+    assert!(std::ptr::eq(
+        openai_quota_runtime_window_pair(&with_main).unwrap(),
+        with_main.rate_limit.as_ref().unwrap(),
+    ));
+
+    let mut blocked = pair(Some(window(Some(20), None, Some(18_000))), None);
+    blocked.allowed = Some(false);
+    let blocked_usage = usage(Some(blocked), vec![unroutable_extra]);
+    assert!(!openai_quota_has_ready_limit(&blocked_usage));
+    assert!(std::ptr::eq(
+        openai_quota_runtime_window_pair(&blocked_usage).unwrap(),
+        blocked_usage.rate_limit.as_ref().unwrap(),
+    ));
+}

@@ -53,28 +53,36 @@ pub(crate) fn window_pair_has_blocking_admission(pair: &WindowPair) -> bool {
         .admission_allowed
 }
 
+/// Rust acquires the original quota pairs; the compiled planner selects the
+/// first routing-eligible lane and, when none exists, the first main lane.
+fn compiled_capacity_choice(
+    candidates: &[crate::capacity::QuotaCapacityCandidate<'_>],
+) -> prodex_mojo_core::quota::QuotaCapacityChoice {
+    let inputs = candidates
+        .iter()
+        .map(
+            |candidate| prodex_mojo_core::quota::QuotaCapacityChoiceInput {
+                lane: candidate.output.lane,
+                routing_eligible: candidate.output.routing_eligible,
+            },
+        )
+        .collect::<Vec<_>>();
+    prodex_mojo_core::quota::quota_capacity_choice(&inputs)
+        .expect("compiled Mojo quota capacity ordering returned invalid output")
+}
+
 pub fn openai_quota_runtime_window_pair(usage: &UsageResponse) -> Option<&WindowPair> {
     let candidates = quota_window_capacity_candidates_at(usage, Local::now().timestamp())
         .expect("Mojo quota capacity classification failed");
-    candidates
-        .iter()
-        .find(|candidate| candidate.output.routing_eligible)
-        .map(|candidate| candidate.pair)
-        .or_else(|| {
-            candidates
-                .iter()
-                .find(|candidate| {
-                    candidate.output.lane == prodex_mojo_core::quota::QUOTA_CAPACITY_LANE_MAIN
-                })
-                .map(|candidate| candidate.pair)
-        })
+    compiled_capacity_choice(&candidates)
+        .selected_index
+        .map(|index| candidates[index].pair)
 }
 
 pub fn openai_quota_has_ready_limit(usage: &UsageResponse) -> bool {
-    quota_window_capacity_candidates_at(usage, Local::now().timestamp())
-        .expect("Mojo quota capacity classification failed")
-        .iter()
-        .any(|candidate| candidate.output.routing_eligible)
+    let candidates = quota_window_capacity_candidates_at(usage, Local::now().timestamp())
+        .expect("Mojo quota capacity classification failed");
+    compiled_capacity_choice(&candidates).any_routing_eligible
 }
 
 fn quota_window_capacity_candidates_at(

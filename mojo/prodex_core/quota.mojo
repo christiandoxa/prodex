@@ -3735,3 +3735,53 @@ def prodex_quota_usage_auth_kind_v1(
     ):
         return QUOTA_USAGE_AUTH_API_KEY
     return QUOTA_USAGE_AUTH_CHATGPT_ELIGIBLE
+
+
+# The caller supplies ordered, already-classified quota capacity candidates.
+# Compiled Mojo alone decides the first routing-eligible choice, whether any
+# candidate can route, and the fallback to the first main lane.
+comptime QUOTA_CANDIDATE_CHOICE_ABI: Int64 = 1
+comptime QUOTA_CANDIDATE_CHOICE_MAX: Int64 = 1_048_576
+
+
+@export("prodex_quota_capacity_choice_v1")
+def prodex_quota_capacity_choice_v1(
+    abi_version: Int64,
+    fields_address: UInt,
+    count: Int64,
+    output_address: UInt,
+    output_count: Int64,
+) abi("C") -> Int64:
+    if abi_version != QUOTA_CANDIDATE_CHOICE_ABI:
+        return 4
+    if (
+        count < 0 or count > QUOTA_CANDIDATE_CHOICE_MAX
+        or (count > 0 and (fields_address == 0 or fields_address % 8 != 0))
+        or output_address == 0 or output_address % 8 != 0
+        or output_count < 2
+    ):
+        return 1
+    var fields = Pointer[mut=False, Int64, ImmUntrackedOrigin](
+        unsafe_from_address=Int(fields_address)
+    )
+    # Validate every observation before writing the output.
+    for index in range(count):
+        var lane = fields[unsafe_offset=index * 2]
+        var eligible = fields[unsafe_offset=index * 2 + 1]
+        if lane < 0 or lane > 2 or eligible < 0 or eligible > 1:
+            return 1
+    var first_eligible: Int64 = -1
+    var first_main: Int64 = -1
+    for index in range(count):
+        var lane = fields[unsafe_offset=index * 2]
+        var eligible = fields[unsafe_offset=index * 2 + 1]
+        if first_main < 0 and lane == 0:
+            first_main = index
+        if first_eligible < 0 and eligible == 1:
+            first_eligible = index
+    var output = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    output[unsafe_offset=0] = first_eligible if first_eligible >= 0 else first_main
+    output[unsafe_offset=1] = Int64(first_eligible >= 0)
+    return 0
