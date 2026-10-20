@@ -8033,3 +8033,15 @@ All 16 app quota tests, two direct core ABI tests, direct
 Mojo tests and source/share guards pass. Official share rises
 from 35.996325158260106% to 36.00180409780166%
 (132,505 Mojo / 235,546 Rust). The 75% objective remains open.
+
+## Copilot custom instruction discovery ordering and UTF-8 cuts moved to Mojo (2026-10-20)
+
+The compiled launch-config owner now sorts directory candidates and
+global/scoped Copilot instruction paths and decides exact post-lossy
+UTF-8 file byte cutoffs. Rust retains filesystem/symlink safety,
+bounded reads and text assembly without the old Rust sort or
+char-boundary policy fallbacks. All 57 Copilot app tests, three
+core ABI tests, direct Mojo test, no-fallback guard and production
+share checks pass. Official share increases from 36.00180409780166%
+to 36.01139399995655% (132,617 Mojo / 235,647 Rust).
+The 75% objective remains unmet.

@@ -708,3 +708,66 @@ fn copilot_binding_recorder_reads_buffered_responses_body() {
 
     assert_eq!(captured.lock().unwrap().as_deref(), Some("resp_1"));
 }
+
+#[test]
+fn compiled_copilot_instruction_order_preserves_global_and_lexical_first_31_scoped_files() {
+    let root = temp_copilot_instruction_root("compiled-order-cap");
+    let scoped = root.join(".github/instructions");
+    std::fs::create_dir_all(&scoped).unwrap();
+    std::fs::write(
+        root.join(".github/copilot-instructions.md"),
+        "Global policy stays first.",
+    )
+    .unwrap();
+    for index in (0..40).rev() {
+        std::fs::write(
+            scoped.join(format!("{index:02}.instructions.md")),
+            format!("Scoped policy {index:02}"),
+        )
+        .unwrap();
+    }
+    let result = runtime_copilot_workspace_custom_instructions(&root)
+        .unwrap()
+        .unwrap();
+    assert_eq!(result.matches("## ").count(), 32);
+    assert_eq!(result.matches("Global policy stays first.").count(), 1);
+    assert!(result.starts_with("## .github/copilot-instructions.md\n"));
+    assert!(result.contains("## .github/instructions/00.instructions.md"));
+    assert!(result.contains("## .github/instructions/30.instructions.md"));
+    assert!(!result.contains("## .github/instructions/31.instructions.md"));
+    let position_a = result
+        .find("## .github/instructions/01.instructions.md")
+        .unwrap();
+    let position_b = result
+        .find("## .github/instructions/02.instructions.md")
+        .unwrap();
+    assert!(position_a < position_b);
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn compiled_copilot_instruction_utf8_limit_preserves_exact_post_lossy_cut_boundary() {
+    let root = temp_copilot_instruction_root("compiled-utf8-cut");
+    let scoped = root.join(".github");
+    std::fs::create_dir_all(&scoped).unwrap();
+    let path = scoped.join("copilot-instructions.md");
+    // The file reader caps original bytes first. Its lossy UTF-8 decoder
+    // adds a replacement character when the cut lands inside a scalar.
+    // Mojo must preserve the original conservative post-decode trimming.
+    std::fs::write(&path, format!("{}🦀", "x".repeat(65_535))).unwrap();
+    let result = runtime_copilot_workspace_custom_instructions(&root)
+        .unwrap()
+        .unwrap();
+    assert!(result.starts_with("## .github/copilot-instructions.md\n"));
+    assert!(result.ends_with(&"x".repeat(65_535)));
+    assert!(!result.contains('�'));
+    assert!(!result.contains('🦀'));
+
+    std::fs::write(&path, format!("{}🦀", "x".repeat(65_532))).unwrap();
+    let valid = runtime_copilot_workspace_custom_instructions(&root)
+        .unwrap()
+        .unwrap();
+    assert!(valid.ends_with('🦀'));
+    assert!(!valid.contains('�'));
+    std::fs::remove_dir_all(root).unwrap();
+}

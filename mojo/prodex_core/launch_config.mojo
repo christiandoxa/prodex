@@ -542,3 +542,130 @@ def prodex_launch_saved_session_guidance_v1(
         "Paused goals stay paused until /goal resume.\r\n"
     ))
     return offset
+
+
+# Copilot instruction discovery order and bounded lossy UTF-8 clipping.
+# Host retains symlink checks, original paths and file I/O; compiled Mojo
+# decides path priority and the post-decode byte boundary.
+comptime LAUNCH_INSTRUCTIONS_ABI: Int64 = 1
+comptime LAUNCH_INSTRUCTIONS_MAX_PATHS: Int64 = 1_048_576
+
+
+def launch_instruction_path_compare(
+    views: Pointer[mut=False, UInt64, _], left: Int64, right: Int64,
+) -> Int64:
+    var left_len = Int64(views[unsafe_offset=left * 2 + 1])
+    var right_len = Int64(views[unsafe_offset=right * 2 + 1])
+    var left_bytes = Pointer[mut=False, UInt8, ImmUntrackedOrigin](
+        unsafe_from_address=Int(views[unsafe_offset=left * 2])
+    )
+    var right_bytes = Pointer[mut=False, UInt8, ImmUntrackedOrigin](
+        unsafe_from_address=Int(views[unsafe_offset=right * 2])
+    )
+    for index in range(min(left_len, right_len)):
+        var left_byte = left_bytes[unsafe_offset=index]
+        var right_byte = right_bytes[unsafe_offset=index]
+        if left_byte != right_byte:
+            return -1 if left_byte < right_byte else 1
+    if left_len != right_len:
+        return -1 if left_len < right_len else 1
+    if left != right:
+        return -1 if left < right else 1
+    return 0
+
+
+def launch_instruction_path_heap_down(
+    views: Pointer[mut=False, UInt64, _],
+    indices: Pointer[mut=True, Int64, _],
+    first: Int64, count: Int64,
+):
+    var root = first
+    while root * 2 + 1 < count:
+        var child = root * 2 + 1
+        var swap = root
+        if launch_instruction_path_compare(
+            views, indices[unsafe_offset=swap], indices[unsafe_offset=child],
+        ) < 0:
+            swap = child
+        if child + 1 < count and launch_instruction_path_compare(
+            views, indices[unsafe_offset=swap], indices[unsafe_offset=child + 1],
+        ) < 0:
+            swap = child + 1
+        if swap == root:
+            return
+        var saved = indices[unsafe_offset=root]
+        indices[unsafe_offset=root] = indices[unsafe_offset=swap]
+        indices[unsafe_offset=swap] = saved
+        root = swap
+
+
+@export("prodex_launch_instruction_path_order_v1")
+def prodex_launch_instruction_path_order_v1(
+    abi_version: Int64,
+    views_address: UInt, count: Int64,
+    output_address: UInt, output_capacity: Int64,
+) abi("C") -> Int64:
+    if abi_version != LAUNCH_INSTRUCTIONS_ABI:
+        return 4
+    if (
+        count < 0 or count > LAUNCH_INSTRUCTIONS_MAX_PATHS
+        or (count > 0 and (views_address == 0 or views_address % 8 != 0))
+        or output_address == 0 or output_address % 8 != 0
+        or output_capacity < count
+    ):
+        return 1
+    var views = Pointer[mut=False, UInt64, ImmUntrackedOrigin](
+        unsafe_from_address=Int(views_address)
+    )
+    for index in range(count):
+        var address = views[unsafe_offset=index * 2]
+        var length = views[unsafe_offset=index * 2 + 1]
+        if length > UInt64(9223372036854775807) or (length > 0 and address == 0):
+            return 1
+    var indices = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    for index in range(count):
+        indices[unsafe_offset=index] = index
+    var start = count // 2
+    while start > 0:
+        start -= 1
+        launch_instruction_path_heap_down(views, indices, start, count)
+    var end = count
+    while end > 1:
+        end -= 1
+        var saved = indices[unsafe_offset=0]
+        indices[unsafe_offset=0] = indices[unsafe_offset=end]
+        indices[unsafe_offset=end] = saved
+        launch_instruction_path_heap_down(views, indices, 0, end)
+    return 0
+
+
+@export("prodex_launch_instruction_text_cut_v1")
+def prodex_launch_instruction_text_cut_v1(
+    abi_version: Int64,
+    text_address: UInt, text_length: Int64,
+    max_bytes: Int64, end_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != LAUNCH_INSTRUCTIONS_ABI:
+        return 4
+    if (
+        text_length < 0 or max_bytes < 0
+        or (text_length > 0 and text_address == 0)
+        or end_address == 0 or end_address % 8 != 0
+    ):
+        return 1
+    var view = ProdexRichStringView(text_address, UInt(text_length))
+    if not rich_view_valid(view, 0x7FFFFFFFFFFFFFFF):
+        return 1
+    var end = min(text_length, max_bytes)
+    if end < text_length:
+        var text = Pointer[mut=False, UInt8, ImmUntrackedOrigin](
+            unsafe_from_address=Int(text_address)
+        )
+        while end > 0 and text[unsafe_offset=end] >= 0x80 and text[unsafe_offset=end] <= 0xBF:
+            end -= 1
+    Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(end_address)
+    )[] = end
+    return 0
