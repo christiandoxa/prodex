@@ -452,13 +452,14 @@ fn runtime_previous_response_ordered_profiles(
         .iter()
         .map(|(_, _, profile)| profile.provider.runtime_pool_priority())
         .collect::<Vec<_>>();
-    let current_index = profiles
+    let names = profiles
         .iter()
-        .position(|(_, name, _)| *name == runtime.current_profile);
-    let ordered_indices = prodex_mojo_core::runtime::profile_selection_order_batch(
+        .map(|(_, name, _)| *name)
+        .collect::<Vec<_>>();
+    let ordered_indices = prodex_mojo_core::runtime::profile_selection_order_by_current_name(
+        &names,
         &provider_priorities,
-        current_index,
-        current_index.is_some(),
+        runtime.current_profile.as_str(),
     )
     .map_err(|error| anyhow::anyhow!("Mojo previous-response ordering failed: {error:?}"))?;
     ordered_indices

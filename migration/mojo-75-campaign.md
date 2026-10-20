@@ -8130,3 +8130,14 @@ direct Mojo regression, source and official share guards pass.
 Official share rises from 36.05829134839374% to
 36.06472593559358% (133,191 Mojo / 236,120 Rust).
 The 75% objective remains outstanding.
+
+## Previous-response exact current-name rotation batched in Mojo (2026-10-21)
+
+The compiled profile-schedule owner now matches the exact current
+profile name and performs stable provider-priority rotation in one ABI
+call. The previous-response Rust .position and current-index matching
+branch have been deleted without a Rust fallback. All 79 app
+previous-response tests, two direct core ABI tests, direct Mojo
+regression, anti-fallback guard and production-share validation pass.
+Official share increases from 36.06472593559358% to
+36.07194088829946% (133,275 Mojo / 236,195 Rust); 75% remains open.
