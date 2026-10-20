@@ -419,6 +419,8 @@ const PROMOTED_FILES = [
   "crates/prodex-provider-core/src/translators/gemini/response_media.rs",
   "crates/prodex-provider-core/src/gemini_bridge/media/content_object.rs",
   "crates/prodex-provider-core/src/gemini_bridge/hardening/thought_signature.rs",
+  "crates/prodex-provider-core/src/gemini_bridge/leaks/echo.rs",
+  "crates/prodex-provider-core/src/gemini_bridge/leaks/tests.rs",
   "crates/prodex-provider-core/src/gemini_bridge/media.rs",
   "crates/prodex-mojo-core/src/rich/gemini_response_media.rs",
   "mojo/prodex_core/gemini_response_media.mojo",
@@ -1972,6 +1974,31 @@ export function findViolations(files) {
     return [];
   });
   const geminiValueCollectionMojoViolations = files.flatMap(([filePath, contents]) => {
+    if (filePath === "crates/prodex-provider-core/src/gemini_bridge/leaks/echo.rs") {
+      const production = contents.split("#[cfg(test)]", 1)[0];
+      const required = [
+        "document.borrowed_array(messages)",
+        "GeminiValueOperation::SystemCorpus",
+        "gemini_internal_instruction::normalize_corpus(&corpus)",
+      ];
+      const retired = [
+        "fn gemini_provider_core_collect_text_for_echo_detection(",
+        "message.get(\"role\")",
+        "for message in messages",
+        'for key in ["text", "content", "input", "output"]',
+      ];
+      return required.every((marker) => contents.includes(marker))
+        && retired.every((marker) => !production.includes(marker))
+        ? [] : [filePath + ": internal instruction corpus traversal must remain Mojo-owned"];
+    }
+    if (filePath === "crates/prodex-provider-core/src/gemini_bridge/leaks/tests.rs") {
+      return [
+        "compiled_instruction_corpus_uses_original_system_order_and_selected_nested_fields",
+        "compiled_instruction_corpus_borrows_large_unicode_nested_inputs",
+      ].filter((marker) => !contents.includes(marker))
+        .map((marker) => filePath + ": missing compiled corpus caller regression: " + marker);
+    }
+
     if (filePath === "crates/prodex-provider-core/src/gemini_bridge/hardening/thought_signature.rs") {
       const required = [
         "gemini_model_requires_tool_thought_signature(model)",
@@ -2030,6 +2057,8 @@ export function findViolations(files) {
         contents.includes("pub(crate) fn root(")) {
       const required = [
         "pub(crate) fn borrowed_shape(",
+        "pub(crate) fn borrowed_array(",
+        "fn append_borrowed_nodes(",
         "while let Some((value, parent, key)) = pending.pop()",
         "raw_start: 0,",
         "raw_length: 0,",
@@ -2060,6 +2089,8 @@ export function findViolations(files) {
         "pub fn gemini_model_requires_tool_thought_signature(",
         "compiled_gemini_thought_signature_keeps_first_present_priority_and_unicode",
         "compiled_gemini_model_signature_classifies_substrings_without_rust_parser",
+        "SystemCorpus = 7",
+        "compiled_gemini_system_corpus_escapes_newlines_and_obeys_role",
       ];
       return required.filter((marker) => !contents.includes(marker))
         .map((marker) => filePath + ": compiled Gemini value ABI must retain " + marker);
@@ -2086,6 +2117,11 @@ export function findViolations(files) {
         'pj_field(tree, 0, StringSlice("thoughtSignature"))',
         'pj_field(tree, 0, StringSlice("thought_signature"))',
         'rich_view_matches_literal["gemini-3"](fragment, False)',
+        "def gemini_value_system_corpus(",
+        "def gemini_corpus_write_content(",
+        "def gemini_corpus_next_object_field(",
+        'pj_is["system"](tree, pj_field(tree, message, StringSlice("role")))',
+        "gemini_value_system_corpus(Pointer(to=sink), tree)",
       ];
       return required.filter((marker) => !contents.includes(marker))
         .map((marker) => filePath + ": compiled Gemini value traversal must retain " + marker);
@@ -11432,6 +11468,16 @@ async function promotedFiles() {
 }
 
 function selfTest() {
+  const geminiCorpusCaller = "crates/prodex-provider-core/src/gemini_bridge/leaks/echo.rs";
+  const geminiCorpusFixture = [
+    "document.borrowed_array(messages)",
+    "GeminiValueOperation::SystemCorpus",
+    "gemini_internal_instruction::normalize_corpus(&corpus)",
+  ].join("\n");
+  assert.deepEqual(findViolations([[geminiCorpusCaller, geminiCorpusFixture]]), []);
+  assert.match(findViolations([[geminiCorpusCaller, geminiCorpusFixture +
+    "\nfn gemini_provider_core_collect_text_for_echo_detection("]]).join("\n"),
+    /internal instruction corpus traversal must remain Mojo-owned/u);
   const geminiValueCallerFixture = [
     "fn gemini_collect_values(",
     "gemini_value_projection(&document.nodes, raw, operation)",

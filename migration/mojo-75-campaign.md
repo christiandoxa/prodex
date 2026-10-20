@@ -7675,3 +7675,17 @@ preserved, without a Rust semantic fallback. All 525 provider tests,
 11 focused core tests, no-fallback guard and canonical share checks
 pass. Official share rises from 35.78715858637232% to
 35.78999741606329% (130,199 Mojo / 233,587 Rust); 75% remains open.
+
+## Gemini internal-instruction corpus traversal compiled in Mojo (2026-10-20)
+
+The live internal-instruction corpus now comes from a compiled Gemini
+value JSON-tree operation. Mojo owns exact system-role filtering,
+text/content/input/output traversal priority, array ordering and
+newline emission, without recursive Rust collection. Rust builds
+borrowed Serde shape metadata and decodes the selected corpus; it
+retains no algorithmic fallback. Both borrowed-shape host paths now
+use shared iterative acquisition. All 527 provider tests, 12 direct
+Gemini value ABI tests and no-fallback/production metric checks pass.
+The official share increases from 35.78999741606329% to
+35.803093429485415% (130,276 Mojo / 233,592 Rust).
+The 75% project target remains unmet.

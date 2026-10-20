@@ -15,6 +15,7 @@ pub enum GeminiValueOperation {
     Boolean = 4,
     MediaObjectIndices = 5,
     ThoughtSignature = 6,
+    SystemCorpus = 7,
 }
 
 unsafe extern "C" {
@@ -217,6 +218,41 @@ mod tests {
         assert!(emitted.starts_with("[0,1,2,3,"));
         assert!(emitted.ends_with(",4094,4095,4096]"));
         assert_eq!(emitted.bytes().filter(|byte| *byte == b',').count(), 4096);
+    }
+
+    #[test]
+    fn compiled_gemini_system_corpus_escapes_newlines_and_obeys_role() {
+        let mut nodes = [
+            node(JsonKind::Array, "", "", None, Some(1), None),
+            node(JsonKind::Object, "", "", Some(0), Some(2), Some(6)),
+            node(JsonKind::String, "role", "system", Some(1), None, Some(3)),
+            node(JsonKind::Array, "content", "", Some(1), Some(4), None),
+            node(JsonKind::String, "", "ALPHA", Some(3), None, Some(5)),
+            node(JsonKind::String, "", "Beta\"\\X", Some(3), None, None),
+            node(JsonKind::Object, "", "", Some(0), Some(7), None),
+            node(JsonKind::String, "role", "user", Some(6), None, Some(8)),
+            node(JsonKind::String, "content", "excluded", Some(6), None, None),
+        ];
+        let expected = b"\"ALPHA\\nBeta\\\"\\\\X\\n\\n\"";
+        assert_eq!(
+            gemini_value_projection(&nodes, "", GeminiValueOperation::SystemCorpus).unwrap(),
+            expected
+        );
+        nodes[2].text = "System";
+        assert_eq!(
+            gemini_value_projection(&nodes, "", GeminiValueOperation::SystemCorpus),
+            Ok(b"\"\"".to_vec()),
+        );
+        nodes[0].first_child = None;
+        assert_eq!(
+            gemini_value_projection(&nodes[..1], "", GeminiValueOperation::SystemCorpus),
+            Ok(b"\"\"".to_vec()),
+        );
+        let scalar = node(JsonKind::String, "", "", None, None, None);
+        assert_eq!(
+            gemini_value_projection(&[scalar], "", GeminiValueOperation::SystemCorpus),
+            Err(MojoError::InvalidInput),
+        );
     }
 
     #[test]
@@ -487,7 +523,7 @@ mod tests {
         let mut scratch = [0_u64; 4];
         let mut metadata = [99_i64; 2];
         for (version, operation, scratch_count, expected) in
-            [(2, 0, 4, 4), (1, -1, 4, 1), (1, 7, 4, 1), (1, 0, 1, 1)]
+            [(2, 0, 4, 4), (1, -1, 4, 1), (1, 8, 4, 1), (1, 0, 1, 1)]
         {
             let result = unsafe {
                 prodex_mojo_gemini_value_policy_v1(
