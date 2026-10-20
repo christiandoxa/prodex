@@ -13,7 +13,7 @@ use super::{
     runtime_smart_context_artifact_semantic_line_index, runtime_smart_context_bounded_string,
     runtime_smart_context_line_excerpt,
 };
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 use std::fmt::Write as _;
 
 pub(super) fn runtime_smart_context_artifact_line_index(
@@ -286,17 +286,22 @@ pub(super) fn runtime_smart_context_push_projection_source_ranges(
 pub(super) fn runtime_smart_context_repo_map_paths(
     line_index: &RuntimeSmartContextArtifactLineIndex,
 ) -> Vec<String> {
-    let mut paths = BTreeSet::new();
-    for range in line_index
+    let paths = line_index
         .file_location_ranges
         .iter()
         .chain(line_index.diff_hunk_ranges.iter())
-    {
-        if let Some(path) = range.path.as_ref().filter(|path| !path.trim().is_empty()) {
-            paths.insert(path.clone());
-        }
-    }
-    paths.into_iter().collect()
+        .map(|range| range.path.as_deref())
+        .collect::<Vec<_>>();
+    let chosen = prodex_mojo_core::runtime_repo_map::repo_map_unique_path_indices(&paths)
+        .expect("compiled Mojo repo-map canonical path selection returned invalid output");
+    chosen
+        .into_iter()
+        .map(|index| {
+            paths[index]
+                .expect("validated Mojo selected a present path")
+                .to_owned()
+        })
+        .collect()
 }
 
 pub(super) fn runtime_smart_context_repo_map_first_path_range<'a>(
@@ -474,5 +479,76 @@ mod compiled_repo_nearest_path_caller_tests {
         index.file_location_ranges.clear();
         index.diff_hunk_ranges.clear();
         assert_eq!(runtime_smart_context_repo_map_nearest_path(&index, 4), None);
+    }
+}
+
+#[cfg(test)]
+mod compiled_repo_map_path_set_caller_tests {
+    use super::*;
+
+    fn semantic_path(path: Option<&str>) -> RuntimeSmartContextArtifactSemanticLineRange {
+        RuntimeSmartContextArtifactSemanticLineRange {
+            start: 1,
+            end: 1,
+            byte_len: 0,
+            content_hash: String::new(),
+            text: String::new(),
+            label: None,
+            path: path.map(str::to_owned),
+            line: None,
+            column: None,
+            old_start: None,
+            old_count: None,
+            new_start: None,
+            new_count: None,
+            code: None,
+            symbol: None,
+        }
+    }
+
+    #[test]
+    fn compiled_repo_map_path_set_keeps_unique_sorted_originals_across_file_and_diff_ranges() {
+        let index = RuntimeSmartContextArtifactLineIndex {
+            file_location_ranges: vec![
+                semantic_path(Some("src/雪.rs")),
+                semantic_path(Some("src/a.rs")),
+                semantic_path(Some("\u{2003}")),
+                semantic_path(None),
+                semantic_path(Some(" src/a.rs ")),
+            ],
+            diff_hunk_ranges: vec![
+                semantic_path(Some("src/a.rs")),
+                semantic_path(Some("src/🦀.rs")),
+                semantic_path(Some("")),
+                semantic_path(Some("src/雪.rs")),
+            ],
+            ..Default::default()
+        };
+        assert_eq!(
+            runtime_smart_context_repo_map_paths(&index),
+            [" src/a.rs ", "src/a.rs", "src/雪.rs", "src/🦀.rs",]
+        );
+        assert_eq!(
+            runtime_smart_context_repo_map_paths(&RuntimeSmartContextArtifactLineIndex::default()),
+            Vec::<String>::new(),
+        );
+    }
+
+    #[test]
+    fn compiled_repo_map_path_set_filters_only_whitespace_not_internal_or_surrounding_spaces() {
+        let index = RuntimeSmartContextArtifactLineIndex {
+            file_location_ranges: vec![
+                semantic_path(Some("\t")),
+                semantic_path(Some("  path with spaces  ")),
+                semantic_path(Some("\u{3000}")),
+                semantic_path(Some("x  y")),
+                semantic_path(Some("x  y")),
+            ],
+            ..Default::default()
+        };
+        assert_eq!(
+            runtime_smart_context_repo_map_paths(&index),
+            ["  path with spaces  ", "x  y"],
+        );
     }
 }

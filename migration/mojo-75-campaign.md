@@ -8093,3 +8093,16 @@ regressions, two core ABI tests, direct Mojo ABI test and guards
 pass. Share increases from 36.02996620393727% to
 36.030173372161755% (132,880 Mojo / 235,922 Rust).
 The separate 75% project target remains open.
+
+## Repo-map canonical path sorting/uniqueness in Mojo (2026-10-20)
+
+The compiled repo-map owner now filters absent and Unicode
+whitespace-only paths from file/diff semantic ranges, lexically
+sorts originals and removes exact duplicates in one batch. Rust
+only acquires borrowed optional String views and materializes the
+Mojo-selected indices without its old BTreeSet and trim policy.
+All 15 artifact-store tests, two caller regressions, two core ABI
+tests, direct Mojo test and strict no-fallback/share gates pass.
+Official share rises from 36.030173372161755% to
+36.049461001902344% (133,029 Mojo / 235,989 Rust).
+The 75% project goal stays open.
