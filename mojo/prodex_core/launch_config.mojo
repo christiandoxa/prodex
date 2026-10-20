@@ -669,3 +669,55 @@ def prodex_launch_instruction_text_cut_v1(
         unsafe_from_address=Int(end_address)
     )[] = end
     return 0
+
+
+# Byte-oriented process stdout/stderr line boundaries for launch probes.
+# The host owns the pipe, line callback, timestamps, and output buffers.
+# The compiled owner reports all LF indices after an original start.
+comptime LAUNCH_PROCESS_LINES_ABI: Int64 = 1
+comptime LAUNCH_PROCESS_LINES_MAX_BYTES: Int64 = 16 * 1024 * 1024
+
+
+@export("prodex_launch_process_line_ends_v1")
+def prodex_launch_process_line_ends_v1(
+    abi_version: Int64,
+    buffer_address: UInt, buffer_length: Int64,
+    start: Int64,
+    output_address: UInt, output_capacity: Int64,
+    measuring: Int64, count_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != LAUNCH_PROCESS_LINES_ABI:
+        return 4
+    if (
+        buffer_length < 0 or buffer_length > LAUNCH_PROCESS_LINES_MAX_BYTES
+        or start < 0 or start > buffer_length
+        or (buffer_length > 0 and buffer_address == 0)
+        or (measuring != 0 and measuring != 1)
+        or output_capacity < 0
+        or (measuring == 1 and (output_address != 0 or output_capacity != 0))
+        or (measuring == 0 and output_address == 0)
+        or count_address == 0 or count_address % 8 != 0
+    ):
+        return 1
+    var ptr = Pointer[mut=False, UInt8, ImmUntrackedOrigin](
+        unsafe_from_address=Int(buffer_address)
+    )
+    var count = Int64(0)
+    for index in range(start, buffer_length):
+        if ptr[unsafe_offset=index] == 10:
+            count += 1
+    if measuring == 0 and output_capacity < count:
+        return 3
+    if measuring == 0:
+        var output = Pointer[mut=True, Int64, MutUntrackedOrigin](
+            unsafe_from_address=Int(output_address)
+        )
+        var position = Int64(0)
+        for index in range(start, buffer_length):
+            if ptr[unsafe_offset=index] == 10:
+                output[unsafe_offset=position] = index
+                position += 1
+    Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(count_address)
+    )[] = count
+    return 0
