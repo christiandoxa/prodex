@@ -7663,3 +7663,15 @@ error variants. Strict no-fallback guard, format and official production
 non-regression checks pass. Canonical share rises from
 35.78094701085088% to 35.78715858637232%
 (130,174 Mojo / 233,571 Rust). The 75% goal remains open.
+
+## Gemini model and thought-signature selection compiled in Mojo (2026-10-20)
+
+The existing Gemini value owner now selects models requiring tool
+thought signatures and retrieves thoughtSignature or thought_signature
+from borrowed Serde JSON. The previous Rust substring classifier,
+property-precedence chain, and whitespace validation were removed.
+Empty/nonobject values and canonical-field presence barriers are
+preserved, without a Rust semantic fallback. All 525 provider tests,
+11 focused core tests, no-fallback guard and canonical share checks
+pass. Official share rises from 35.78715858637232% to
+35.78999741606329% (130,199 Mojo / 233,587 Rust); 75% remains open.

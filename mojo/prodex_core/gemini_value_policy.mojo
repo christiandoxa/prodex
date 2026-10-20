@@ -18,6 +18,7 @@ comptime GEMINI_VALUE_INPUT_TEXT: Int64 = 2
 comptime GEMINI_VALUE_STREAM_ERROR: Int64 = 3
 comptime GEMINI_VALUE_BOOLEAN: Int64 = 4
 comptime GEMINI_VALUE_MEDIA_OBJECTS: Int64 = 5
+comptime GEMINI_VALUE_THOUGHT_SIGNATURE: Int64 = 6
 
 
 def gemini_value_emit(
@@ -113,6 +114,22 @@ def gemini_value_media_object_indices(
         if not advanced:
             break
     js_byte(sink, 93)
+
+
+# A present canonical field blocks the legacy field even when null or
+# non-string, and Unicode-blank text is not a usable signature.
+def gemini_value_thought_signature(sink: Pointer[mut=True, JsonSink, _], tree: ParsedJson):
+    var selected = pj_field(tree, 0, StringSlice("thoughtSignature"))
+    if selected < 0:
+        selected = pj_field(tree, 0, StringSlice("thought_signature"))
+    if pj_kind(tree, selected) != JSON_STRING:
+        js_literal(sink, StringSlice("null"))
+        return
+    var value = pj_text(tree, selected)
+    if pj_trim(value).len == 0:
+        js_literal(sink, StringSlice("null"))
+    else:
+        js_string(sink, value)
 
 
 # Serde Number::as_i64 accepts decimal integers in the signed 64-bit range,
@@ -213,7 +230,7 @@ def prodex_mojo_gemini_value_policy_v1(
     if abi != GEMINI_VALUE_ABI:
         return 4
     if (
-        operation < GEMINI_VALUE_STRINGS or operation > GEMINI_VALUE_MEDIA_OBJECTS
+        operation < GEMINI_VALUE_STRINGS or operation > GEMINI_VALUE_THOUGHT_SIGNATURE
         or flag != 0 or node_count <= 0 or nodes_address == 0
         or nodes_address % 8 != 0 or raw_length < 0
         or (raw_length > 0 and raw_address == 0)
@@ -233,6 +250,7 @@ def prodex_mojo_gemini_value_policy_v1(
     if not pj_valid(tree) or (
         operation != GEMINI_VALUE_BOOLEAN
         and operation != GEMINI_VALUE_MEDIA_OBJECTS
+        and operation != GEMINI_VALUE_THOUGHT_SIGNATURE
         and pj_kind(tree, 0) != JSON_OBJECT
     ):
         return 1
@@ -241,7 +259,9 @@ def prodex_mojo_gemini_value_policy_v1(
             unsafe_from_address=Int(output_address)
         ), output_capacity, 0, measuring == 1, False,
     )
-    if operation == GEMINI_VALUE_MEDIA_OBJECTS:
+    if operation == GEMINI_VALUE_THOUGHT_SIGNATURE:
+        gemini_value_thought_signature(Pointer(to=sink), tree)
+    elif operation == GEMINI_VALUE_MEDIA_OBJECTS:
         gemini_value_media_object_indices(Pointer(to=sink), tree)
     elif operation == GEMINI_VALUE_BOOLEAN:
         if not gemini_value_boolean(Pointer(to=sink), tree):
@@ -264,6 +284,7 @@ def prodex_mojo_gemini_value_policy_v1(
 # allocates a five-word output and validates returned byte ranges only.
 comptime GEMINI_VALUE_SCALAR_TOOL_PARTS: Int64 = 0
 comptime GEMINI_VALUE_SCALAR_SKIP_PATH: Int64 = 1
+comptime GEMINI_VALUE_SCALAR_MODEL_SIGNATURE: Int64 = 2
 
 
 @export("prodex_mojo_gemini_value_scalar_v1")
@@ -275,7 +296,7 @@ def prodex_mojo_gemini_value_scalar_v1(
         return 4
     if (
         operation < GEMINI_VALUE_SCALAR_TOOL_PARTS
-        or operation > GEMINI_VALUE_SCALAR_SKIP_PATH
+        or operation > GEMINI_VALUE_SCALAR_MODEL_SIGNATURE
         or text_length < 0 or (text_length > 0 and text_address == 0)
         or output_address == 0 or output_address % 8 != 0
     ):
@@ -288,6 +309,14 @@ def prodex_mojo_gemini_value_scalar_v1(
     )
     for index in range(5):
         result[unsafe_offset=index] = 0
+    if operation == GEMINI_VALUE_SCALAR_MODEL_SIGNATURE:
+        if text.len >= 8:
+            for index in range(Int64(text.len) - 7):
+                var fragment = ProdexRichStringView(text.ptr + UInt(index), UInt(8))
+                if rich_view_matches_literal["gemini-3"](fragment, False):
+                    result[unsafe_offset=0] = 1
+                    break
+        return 0
     if operation == GEMINI_VALUE_SCALAR_SKIP_PATH:
         result[unsafe_offset=0] = UInt64(
             rich_view_matches_literal[".git"](text, False)

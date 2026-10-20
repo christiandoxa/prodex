@@ -14,6 +14,7 @@ pub enum GeminiValueOperation {
     StreamError = 3,
     Boolean = 4,
     MediaObjectIndices = 5,
+    ThoughtSignature = 6,
 }
 
 unsafe extern "C" {
@@ -71,6 +72,19 @@ fn gemini_value_scalar(input: &str, operation: i64) -> Result<[u64; 5], MojoErro
         0 => Ok(output),
         1 => Err(MojoError::InvalidInput),
         4 => Err(MojoError::AbiMismatch),
+        _ => Err(MojoError::InvalidOutput),
+    }
+}
+
+/// Exact, case-sensitive Gemini-3 model substring requirement owned by Mojo.
+pub fn gemini_model_requires_tool_thought_signature(model: &str) -> Result<bool, MojoError> {
+    let [flag, a, b, c, d] = gemini_value_scalar(model, 2)?;
+    if [a, b, c, d] != [0; 4] {
+        return Err(MojoError::InvalidOutput);
+    }
+    match flag {
+        0 => Ok(false),
+        1 => Ok(true),
         _ => Err(MojoError::InvalidOutput),
     }
 }
@@ -203,6 +217,75 @@ mod tests {
         assert!(emitted.starts_with("[0,1,2,3,"));
         assert!(emitted.ends_with(",4094,4095,4096]"));
         assert_eq!(emitted.bytes().filter(|byte| *byte == b',').count(), 4096);
+    }
+
+    #[test]
+    fn compiled_gemini_thought_signature_keeps_first_present_priority_and_unicode() {
+        let mut nodes = [
+            node(JsonKind::Object, "", "", None, Some(1), None),
+            node(
+                JsonKind::Null,
+                "thoughtSignature",
+                "",
+                Some(0),
+                None,
+                Some(2),
+            ),
+            node(
+                JsonKind::String,
+                "thought_signature",
+                "fallback",
+                Some(0),
+                None,
+                None,
+            ),
+        ];
+        let op = GeminiValueOperation::ThoughtSignature;
+        assert_eq!(
+            gemini_value_projection(&nodes, "", op),
+            Ok(b"null".to_vec())
+        );
+        nodes[1].kind = JsonKind::String;
+        nodes[1].text = " signed \u{3000} ";
+        assert_eq!(
+            gemini_value_projection(&nodes, "", op),
+            Ok("\" signed \u{3000} \"".as_bytes().to_vec()),
+        );
+        nodes[1].text = " \u{3000} ";
+        assert_eq!(
+            gemini_value_projection(&nodes, "", op),
+            Ok(b"null".to_vec())
+        );
+        nodes[0].first_child = None;
+        assert_eq!(
+            gemini_value_projection(&nodes[..1], "", op),
+            Ok(b"null".to_vec())
+        );
+        let scalar = node(JsonKind::String, "", "not-object", None, None, None);
+        assert_eq!(
+            gemini_value_projection(&[scalar], "", op),
+            Ok(b"null".to_vec())
+        );
+    }
+
+    #[test]
+    fn compiled_gemini_model_signature_classifies_substrings_without_rust_parser() {
+        for (model, expected) in [
+            ("gemini-3", true),
+            ("gemini-3.5-flash", true),
+            ("prefix-gemini-3", true),
+            ("東京-gemini-3-雪", true),
+            ("GEMINI-3", false),
+            ("gemini-2.5", false),
+            ("gemini-30", true),
+            ("gemini-3suffix", true),
+            ("", false),
+        ] {
+            assert_eq!(
+                gemini_model_requires_tool_thought_signature(model),
+                Ok(expected)
+            );
+        }
     }
 
     #[test]
@@ -346,7 +429,7 @@ mod tests {
         for (abi, operation, ptr, length, out, expected) in [
             (2, 0, address, 7, result_address, 4),
             (1, -1, address, 7, result_address, 1),
-            (1, 2, address, 7, result_address, 1),
+            (1, 3, address, 7, result_address, 1),
             (1, 0, 0, 7, result_address, 1),
             (1, 0, address, -1, result_address, 1),
             (1, 0, address, 7, 0, 1),
@@ -404,7 +487,7 @@ mod tests {
         let mut scratch = [0_u64; 4];
         let mut metadata = [99_i64; 2];
         for (version, operation, scratch_count, expected) in
-            [(2, 0, 4, 4), (1, -1, 4, 1), (1, 6, 4, 1), (1, 0, 1, 1)]
+            [(2, 0, 4, 4), (1, -1, 4, 1), (1, 7, 4, 1), (1, 0, 1, 1)]
         {
             let result = unsafe {
                 prodex_mojo_gemini_value_policy_v1(
