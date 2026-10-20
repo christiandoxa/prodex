@@ -92,6 +92,7 @@ fn bool_output(value: i64) -> Result<bool, MojoError> {
 const RETENTION_BOUNDED_VALUE: i64 = 1;
 const RETENTION_ROTATION: i64 = 2;
 const RETENTION_BOUNDED_TEXT: i64 = 5;
+const RETENTION_SCAN_BASENAME: i64 = 8;
 const RETENTION_EXPIRED_CANDIDATES: i64 = 6;
 const RETENTION_OVER_BUDGET_CANDIDATES: i64 = 7;
 const RETENTION_CANDIDATE_STRIDE: usize = 5;
@@ -112,6 +113,39 @@ fn retention_call(operation: i64, input: [u64; 6]) -> Result<[u64; 4], MojoError
         )
     })?;
     Ok(output)
+}
+
+/// Mojo-owned classification for on-disk runtime log scanner basenames.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LogRetentionFileKind {
+    Ignore,
+    Lock,
+    Log,
+}
+
+/// Classify a file name without touching the filesystem; exact, case-sensitive
+/// prefix and extension decisions belong solely to the compiled retention owner.
+pub fn log_scanned_basename_kind(
+    name: &str,
+    log_prefix: &str,
+) -> Result<LogRetentionFileKind, MojoError> {
+    let classified = retention_call(
+        RETENTION_SCAN_BASENAME,
+        [
+            name.as_ptr() as usize as u64,
+            u64::try_from(name.len()).map_err(|_| MojoError::InvalidInput)?,
+            log_prefix.as_ptr() as usize as u64,
+            u64::try_from(log_prefix.len()).map_err(|_| MojoError::InvalidInput)?,
+            0,
+            0,
+        ],
+    )?[0];
+    match classified {
+        0 => Ok(LogRetentionFileKind::Ignore),
+        1 => Ok(LogRetentionFileKind::Lock),
+        2 => Ok(LogRetentionFileKind::Log),
+        _ => Err(MojoError::InvalidOutput),
+    }
 }
 
 pub fn bounded_text_policy_value(
@@ -494,6 +528,62 @@ pub fn rate_display_plan(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn compiled_log_retention_scanner_classifies_case_sensitive_names() {
+        use LogRetentionFileKind::{Ignore, Lock, Log};
+        for (name, prefix, expected) in [
+            ("prodex-runtime-1.log", "prodex-runtime", Log),
+            ("prodex-runtime-1.lock", "prodex-runtime", Lock),
+            ("prodex-runtime-1.log.lock", "prodex-runtime", Lock),
+            ("prodex-runtime-1.lock.log", "prodex-runtime", Log),
+            ("prodex-runtime-1.LOG", "prodex-runtime", Ignore),
+            ("other-prodex-runtime-1.log", "prodex-runtime", Ignore),
+            ("prodex-runtime", "prodex-runtime", Ignore),
+            ("prodex-runtime-雪.log", "prodex-runtime", Log),
+            ("prodex-runtime-雪.lock", "prodex-runtime", Lock),
+            ("x.log", "", Log),
+            (".lock", "", Lock),
+            (".log", "a", Ignore),
+            ("", "", Ignore),
+        ] {
+            assert_eq!(
+                log_scanned_basename_kind(name, prefix),
+                Ok(expected),
+                "{name}"
+            );
+        }
+    }
+
+    #[test]
+    fn compiled_log_retention_scanner_rejects_invalid_abi_without_writes() {
+        let mut result = [53_u64; 4];
+        let target = result.as_mut_ptr() as usize as u64;
+        let name = b"app.log";
+        let prefix = b"app";
+        for (version, name_length, prefix_length, expected) in
+            [(2, 7, 3, 4), (1, u64::MAX, 3, 1), (1, 7, u64::MAX, 1)]
+        {
+            let status_code = unsafe {
+                prodex_log_retention_policy_v1(
+                    version,
+                    RETENTION_SCAN_BASENAME,
+                    name.as_ptr() as usize as u64,
+                    name_length,
+                    prefix.as_ptr() as usize as u64,
+                    prefix_length,
+                    0,
+                    0,
+                    target,
+                )
+            };
+            assert_eq!(status_code, expected);
+            if expected == 4 {
+                assert_eq!(result, [53; 4]);
+            }
+            result = [53; 4];
+        }
+    }
 
     #[test]
     fn throughput_policy_kernel_preserves_counter_and_rate_contract() {

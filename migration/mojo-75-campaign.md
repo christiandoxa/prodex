@@ -7600,3 +7600,14 @@ bounded hot-path test and all 28 runtime-log tests pass, alongside direct
 ABI/negative tests and no-fallback guard. The audited production share
 rises from 35.75917369898641% to 35.76207093143992%
 (129,846 Mojo / 233,237 Rust); the project target remains 75%.
+
+## Runtime log scanner basename selection moved to Mojo (2026-10-20)
+
+Disk scan filename prefix/suffix decisions are now compiled into the
+existing versioned log-retention policy ABI. The old Rust prefix/suffix
+selection was deleted. Rust retains directory I/O, symlink/regular-file
+validation and file locks. The direct Mojo and core ABI tests, 29
+runtime-log tests, source anti-fallback guard and production share checks
+pass. The official share increases from 35.76207093143992% to
+35.76609372332399% (129,886 Mojo / 233,268 Rust); the project target
+stays at 75%.

@@ -568,12 +568,15 @@ fn inspect_runtime_log_entry(path: PathBuf, log_prefix: &str, scan: &mut Runtime
     let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
         return;
     };
-    if name.starts_with(log_prefix) && name.ends_with(RUNTIME_LOG_ACTIVE_LOCK_SUFFIX) {
-        scan.lock_paths.push(path);
-        return;
-    }
-    if !(name.starts_with(log_prefix) && name.ends_with(".log")) {
-        return;
+    match mojo_retention::log_scanned_basename_kind(name, log_prefix)
+        .expect("compiled Mojo runtime-log basename classification failed")
+    {
+        mojo_retention::LogRetentionFileKind::Ignore => return,
+        mojo_retention::LogRetentionFileKind::Lock => {
+            scan.lock_paths.push(path);
+            return;
+        }
+        mojo_retention::LogRetentionFileKind::Log => {}
     }
     let Ok(metadata) = fs::symlink_metadata(&path) else {
         scan.report.scan_failures += 1;
@@ -697,4 +700,61 @@ fn bounded_environment_i64(name: &str, default: i64, min: i64, max: i64) -> i64 
     )
     .and_then(|value| i64::try_from(value).map_err(|_| prodex_mojo_core::MojoError::InvalidOutput))
     .expect("Mojo runtime-log environment max-age policy returned invalid output")
+}
+
+#[cfg(test)]
+mod scanner_mojo_tests {
+    use super::*;
+
+    #[test]
+    fn compiled_runtime_log_basename_policy_reaches_disk_scanner_and_keeps_symlink_exclusion() {
+        let stamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let directory = std::env::temp_dir().join(format!(
+            "prodex-runtime-log-name-policy-{}-{stamp}",
+            std::process::id()
+        ));
+        fs::create_dir(&directory).unwrap();
+        for name in [
+            "prodex-runtime-a.log",
+            "prodex-runtime-雪.log",
+            "prodex-runtime-upper.LOG",
+            "not-prodex-runtime.log",
+        ] {
+            fs::write(directory.join(name), b"x").unwrap();
+        }
+        fs::write(directory.join("prodex-runtime-a.log.lock"), b"").unwrap();
+        fs::create_dir(directory.join("prodex-runtime-dir.log")).unwrap();
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(
+            directory.join("prodex-runtime-a.log"),
+            directory.join("prodex-runtime-symlink.log"),
+        )
+        .unwrap();
+
+        let scanned = scan_runtime_log_directory(&directory, "prodex-runtime");
+        let mut names = scanned
+            .logs
+            .iter()
+            .map(|entry| {
+                entry
+                    .path
+                    .file_name()
+                    .unwrap()
+                    .to_string_lossy()
+                    .into_owned()
+            })
+            .collect::<Vec<_>>();
+        names.sort();
+        assert_eq!(names, ["prodex-runtime-a.log", "prodex-runtime-雪.log"]);
+        assert_eq!(scanned.lock_paths.len(), 1);
+        assert_eq!(
+            scanned.lock_paths[0].file_name().unwrap(),
+            "prodex-runtime-a.log.lock"
+        );
+        assert_eq!(scanned.report.scan_failures, 0);
+        fs::remove_dir_all(directory).unwrap();
+    }
 }
