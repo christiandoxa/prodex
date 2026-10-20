@@ -198,52 +198,46 @@ pub(super) fn runtime_smart_context_duplicate_chunk_fingerprints(
     Vec<RuntimeSmartContextArtifactDuplicateChunkFingerprint>,
     bool,
 ) {
-    let mut grouped =
-        BTreeMap::<(String, usize), Vec<&RuntimeSmartContextArtifactChunkFingerprint>>::new();
-    for chunk in chunks {
-        grouped
-            .entry((chunk.content_hash.clone(), chunk.byte_len))
-            .or_default()
-            .push(chunk);
-    }
-
-    let mut duplicates = Vec::new();
-    let mut complete = true;
-    for ((content_hash, byte_len), occurrences) in grouped {
-        let plan = prodex_mojo_core::runtime_repo_map::repo_duplicate_plan(
-            occurrences.len(),
-            duplicates.len(),
-            RUNTIME_SMART_CONTEXT_MAX_DUPLICATE_CHUNK_FINGERPRINTS,
-            RUNTIME_SMART_CONTEXT_MAX_DUPLICATE_CHUNK_OCCURRENCES,
+    let facts = chunks
+        .iter()
+        .map(
+            |chunk| prodex_mojo_core::runtime_repo_map::RepoDuplicateChunkInput {
+                hash: &chunk.content_hash,
+                byte_len: chunk.byte_len,
+            },
         )
-        .expect("Mojo repo-map duplicate policy returned invalid output");
-        let occurrences_complete = match plan {
-            prodex_mojo_core::runtime_repo_map::RepoDuplicatePlan::Skip => continue,
-            prodex_mojo_core::runtime_repo_map::RepoDuplicatePlan::StopCapacity => {
-                complete = false;
-                break;
+        .collect::<Vec<_>>();
+    let plan = prodex_mojo_core::runtime_repo_map::repo_duplicate_chunk_groups(
+        &facts,
+        RUNTIME_SMART_CONTEXT_MAX_DUPLICATE_CHUNK_FINGERPRINTS,
+        RUNTIME_SMART_CONTEXT_MAX_DUPLICATE_CHUNK_OCCURRENCES,
+    )
+    .expect("compiled Mojo repo-map duplicate chunk grouping returned invalid output");
+    let duplicates = plan
+        .groups
+        .into_iter()
+        .map(|group| {
+            let original = &chunks[group.first_source];
+            RuntimeSmartContextArtifactDuplicateChunkFingerprint {
+                byte_len: original.byte_len,
+                content_hash: original.content_hash.clone(),
+                occurrence_count: group.occurrence_count,
+                occurrences: group
+                    .occurrence_indices
+                    .into_iter()
+                    .map(|index| {
+                        let original = &chunks[index];
+                        RuntimeSmartContextArtifactChunkOccurrence {
+                            start: original.start,
+                            end: original.end,
+                            kind: original.kind.clone(),
+                        }
+                    })
+                    .collect(),
             }
-            prodex_mojo_core::runtime_repo_map::RepoDuplicatePlan::Append {
-                occurrences_complete,
-            } => occurrences_complete,
-        };
-        complete &= occurrences_complete;
-        duplicates.push(RuntimeSmartContextArtifactDuplicateChunkFingerprint {
-            byte_len,
-            content_hash,
-            occurrence_count: occurrences.len(),
-            occurrences: occurrences
-                .into_iter()
-                .take(RUNTIME_SMART_CONTEXT_MAX_DUPLICATE_CHUNK_OCCURRENCES)
-                .map(|chunk| RuntimeSmartContextArtifactChunkOccurrence {
-                    start: chunk.start,
-                    end: chunk.end,
-                    kind: chunk.kind.clone(),
-                })
-                .collect(),
-        });
-    }
-    (duplicates, complete)
+        })
+        .collect();
+    (duplicates, plan.complete)
 }
 
 pub(super) fn runtime_smart_context_limited_repo_map(
@@ -550,5 +544,116 @@ mod compiled_repo_map_path_set_caller_tests {
             runtime_smart_context_repo_map_paths(&index),
             ["  path with spaces  ", "x  y"],
         );
+    }
+}
+
+#[cfg(test)]
+mod compiled_duplicate_chunk_batch_caller_tests {
+    use super::*;
+
+    fn fingerprint(
+        hash: &str,
+        byte_len: usize,
+        start: usize,
+        kind: &str,
+    ) -> RuntimeSmartContextArtifactChunkFingerprint {
+        RuntimeSmartContextArtifactChunkFingerprint {
+            start,
+            end: start,
+            byte_len,
+            content_hash: hash.to_owned(),
+            kind: kind.to_owned(),
+            label: None,
+            path: None,
+            code: None,
+            symbol: None,
+        }
+    }
+
+    #[test]
+    fn compiled_duplicate_chunk_batch_groups_hash_size_and_preserves_occurrences() {
+        let chunks = [
+            fingerprint("b", 1, 10, "window"),
+            fingerprint("a", 2, 1, "error"),
+            fingerprint("b", 1, 11, "file"),
+            fingerprint("a", 2, 2, "diff"),
+            fingerprint("a", 4, 3, "symbol"),
+            fingerprint("a", 4, 4, "test"),
+            fingerprint("solo", 1, 5, "window"),
+        ];
+        let (groups, complete) = runtime_smart_context_duplicate_chunk_fingerprints(&chunks);
+        assert!(complete);
+        assert_eq!(groups.len(), 3);
+        assert_eq!(
+            groups
+                .iter()
+                .map(|group| (
+                    group.content_hash.as_str(),
+                    group.byte_len,
+                    group.occurrence_count
+                ))
+                .collect::<Vec<_>>(),
+            [("a", 2, 2), ("a", 4, 2), ("b", 1, 2)],
+        );
+        assert_eq!(
+            groups[0]
+                .occurrences
+                .iter()
+                .map(|item| (item.start, item.kind.as_str()))
+                .collect::<Vec<_>>(),
+            [(1, "error"), (2, "diff")],
+        );
+        assert_eq!(
+            groups[1]
+                .occurrences
+                .iter()
+                .map(|item| item.start)
+                .collect::<Vec<_>>(),
+            [3, 4],
+        );
+        assert_eq!(
+            groups[2]
+                .occurrences
+                .iter()
+                .map(|item| item.start)
+                .collect::<Vec<_>>(),
+            [10, 11],
+        );
+    }
+
+    #[test]
+    fn compiled_duplicate_chunk_batch_reports_truncated_metadata_without_data_loss() {
+        let repeated = (0..9)
+            .map(|index| fingerprint("duplicate", 1, index, "error"))
+            .collect::<Vec<_>>();
+        let (groups, complete) = runtime_smart_context_duplicate_chunk_fingerprints(&repeated);
+        assert_eq!(groups.len(), 1);
+        assert!(!complete);
+        assert_eq!(groups[0].occurrence_count, 9);
+        assert_eq!(groups[0].occurrences.len(), 8);
+
+        let mut many = Vec::new();
+        for index in 0..65 {
+            for repeat in 0..2 {
+                many.push(fingerprint(
+                    &format!("hash-{index:04}"),
+                    1,
+                    index * 2 + repeat,
+                    "test",
+                ));
+            }
+        }
+        let (groups, complete) = runtime_smart_context_duplicate_chunk_fingerprints(&many);
+        assert_eq!(groups.len(), 64);
+        assert!(!complete);
+        assert_eq!(groups[0].content_hash, "hash-0000");
+        assert_eq!(groups[63].content_hash, "hash-0063");
+        assert_eq!(
+            runtime_smart_context_duplicate_chunk_fingerprints(&[])
+                .0
+                .len(),
+            0,
+        );
+        assert!(runtime_smart_context_duplicate_chunk_fingerprints(&[]).1);
     }
 }

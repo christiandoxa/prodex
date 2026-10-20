@@ -285,10 +285,6 @@ comptime REPO_CHUNK_ACCEPT: Int64 = 0
 comptime REPO_CHUNK_REJECT_CAPACITY: Int64 = 1
 comptime REPO_CHUNK_REJECT_INVALID: Int64 = 2
 
-comptime REPO_DUPLICATE_SKIP: Int64 = 0
-comptime REPO_DUPLICATE_APPEND: Int64 = 1
-comptime REPO_DUPLICATE_STOP_CAPACITY: Int64 = 2
-
 comptime REPO_SYMBOL_KIND_MODULE: Int64 = 1
 comptime REPO_SYMBOL_KIND_SYMBOL: Int64 = 2
 comptime REPO_SYMBOL_KIND_TEST: Int64 = 3
@@ -317,30 +313,6 @@ def prodex_runtime_repo_chunk_plan_v1(
     if byte_len != text_len or hash_matches == 0:
         return REPO_CHUNK_REJECT_INVALID
     return REPO_CHUNK_ACCEPT
-
-
-@export("prodex_runtime_repo_duplicate_plan_v1")
-def prodex_runtime_repo_duplicate_plan_v1(
-    abi_version: Int64,
-    occurrence_count: Int64,
-    duplicate_count: Int64,
-    max_duplicate_count: Int64,
-    max_occurrences: Int64,
-) abi("C") -> Int64:
-    if (
-        abi_version != REPO_MAP_ABI_VERSION
-        or occurrence_count < 0
-        or duplicate_count < 0
-        or max_duplicate_count < 0
-        or max_occurrences < 0
-    ):
-        return -1
-    if occurrence_count < 2:
-        return REPO_DUPLICATE_SKIP
-    if duplicate_count >= max_duplicate_count:
-        return REPO_DUPLICATE_STOP_CAPACITY
-    var occurrences_complete = Int64(occurrence_count <= max_occurrences)
-    return REPO_DUPLICATE_APPEND | (occurrences_complete << 8)
 
 
 @export("prodex_runtime_repo_path_distance_v1")
@@ -914,4 +886,203 @@ def prodex_runtime_repo_map_path_set_v1(
     Pointer[mut=True, Int64, MutUntrackedOrigin](
         unsafe_from_address=Int(selected_count_address)
     )[] = chosen
+    return REPO_MAP_OK
+
+
+# Complete Smart Context chunk duplicate grouping and selection. Prior Rust
+# BTreeMap grouped (content_hash, byte_len) in sorted key order, preserving
+# source traversal order among occurrences. This Mojo batch owns the entire
+# grouping, bounded group/occurrence selection and metadata completeness.
+comptime REPO_CHUNK_DUPLICATE_GROUP_ABI: Int64 = 1
+comptime REPO_CHUNK_DUPLICATE_GROUP_MAX: Int64 = 65_536
+comptime REPO_CHUNK_DUPLICATE_GROUP_WORDS: Int64 = 3
+
+
+def repo_chunk_group_view(
+    rows: Pointer[mut=False, UInt64, _],
+    index: Int64,
+) -> ProdexRichStringView:
+    var offset = index * REPO_CHUNK_DUPLICATE_GROUP_WORDS
+    return ProdexRichStringView(
+        UInt(rows[unsafe_offset=offset]),
+        UInt(rows[unsafe_offset=offset + 1]),
+    )
+
+
+def repo_chunk_group_compare(
+    rows: Pointer[mut=False, UInt64, _],
+    left: Int64, right: Int64,
+) -> Int64:
+    var left_view = repo_chunk_group_view(rows, left)
+    var right_view = repo_chunk_group_view(rows, right)
+    var left_ptr = Pointer[mut=False, UInt8, ImmUntrackedOrigin](
+        unsafe_from_address=Int(left_view.ptr)
+    )
+    var right_ptr = Pointer[mut=False, UInt8, ImmUntrackedOrigin](
+        unsafe_from_address=Int(right_view.ptr)
+    )
+    var left_len = Int64(left_view.len)
+    var right_len = Int64(right_view.len)
+    if repo_lexical_less(left_ptr, left_len, right_ptr, right_len):
+        return -1
+    if repo_lexical_less(right_ptr, right_len, left_ptr, left_len):
+        return 1
+    var left_bytes = rows[
+        unsafe_offset=left * REPO_CHUNK_DUPLICATE_GROUP_WORDS + 2
+    ]
+    var right_bytes = rows[
+        unsafe_offset=right * REPO_CHUNK_DUPLICATE_GROUP_WORDS + 2
+    ]
+    if left_bytes != right_bytes:
+        return -1 if left_bytes < right_bytes else 1
+    if left != right:
+        return -1 if left < right else 1
+    return 0
+
+
+def repo_chunk_group_equal(
+    rows: Pointer[mut=False, UInt64, _],
+    left: Int64, right: Int64,
+) -> Bool:
+    var left_bytes = rows[
+        unsafe_offset=left * REPO_CHUNK_DUPLICATE_GROUP_WORDS + 2
+    ]
+    var right_bytes = rows[
+        unsafe_offset=right * REPO_CHUNK_DUPLICATE_GROUP_WORDS + 2
+    ]
+    if left_bytes != right_bytes:
+        return False
+    var lhs = repo_chunk_group_view(rows, left)
+    var rhs = repo_chunk_group_view(rows, right)
+    if lhs.len != rhs.len:
+        return False
+    var a = Pointer[mut=False, UInt8, ImmUntrackedOrigin](
+        unsafe_from_address=Int(lhs.ptr)
+    )
+    var b = Pointer[mut=False, UInt8, ImmUntrackedOrigin](
+        unsafe_from_address=Int(rhs.ptr)
+    )
+    for index in range(Int64(lhs.len)):
+        if a[unsafe_offset=index] != b[unsafe_offset=index]:
+            return False
+    return True
+
+
+def repo_chunk_group_heap_down(
+    rows: Pointer[mut=False, UInt64, _],
+    indices: Pointer[mut=True, Int64, _],
+    first: Int64, count: Int64,
+):
+    var root = first
+    while root * 2 + 1 < count:
+        var child = root * 2 + 1
+        var swap = root
+        if repo_chunk_group_compare(
+            rows, indices[unsafe_offset=swap], indices[unsafe_offset=child],
+        ) < 0:
+            swap = child
+        if child + 1 < count and repo_chunk_group_compare(
+            rows, indices[unsafe_offset=swap], indices[unsafe_offset=child + 1],
+        ) < 0:
+            swap = child + 1
+        if swap == root:
+            return
+        var saved = indices[unsafe_offset=root]
+        indices[unsafe_offset=root] = indices[unsafe_offset=swap]
+        indices[unsafe_offset=swap] = saved
+        root = swap
+
+
+@export("prodex_runtime_repo_duplicate_groups_v1")
+def prodex_runtime_repo_duplicate_groups_v1(
+    abi_version: Int64,
+    rows_address: UInt, count: Int64,
+    max_groups: Int64, max_occurrences: Int64,
+    indices_address: UInt, indices_capacity: Int64,
+    groups_address: UInt, groups_capacity: Int64,
+    result_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != REPO_CHUNK_DUPLICATE_GROUP_ABI:
+        return 4
+    if (
+        count < 0 or count > REPO_CHUNK_DUPLICATE_GROUP_MAX
+        or max_groups < 0 or max_groups > REPO_CHUNK_DUPLICATE_GROUP_MAX
+        or max_occurrences < 0 or max_occurrences > REPO_CHUNK_DUPLICATE_GROUP_MAX
+        or (count > 0 and (rows_address == 0 or rows_address % 8 != 0))
+        or indices_address == 0 or indices_address % 8 != 0
+        or indices_capacity < count
+        or groups_address == 0 or groups_address % 8 != 0
+        or groups_capacity < max_groups * REPO_CHUNK_DUPLICATE_GROUP_WORDS
+        or result_address == 0 or result_address % 8 != 0
+    ):
+        return REPO_MAP_INVALID
+
+    var rows = Pointer[mut=False, UInt64, ImmUntrackedOrigin](
+        unsafe_from_address=Int(rows_address)
+    )
+    for index in range(count):
+        var offset = index * REPO_CHUNK_DUPLICATE_GROUP_WORDS
+        var hash_address = rows[unsafe_offset=offset]
+        var hash_length = rows[unsafe_offset=offset + 1]
+        var byte_len = rows[unsafe_offset=offset + 2]
+        if (
+            hash_length > UInt64(9223372036854775807)
+            or byte_len > UInt64(9223372036854775807)
+            or (hash_length > 0 and hash_address == 0)
+            or not rich_view_valid(
+                repo_chunk_group_view(rows, index), 0x7FFFFFFFFFFFFFFF,
+            )
+        ):
+            return REPO_MAP_INVALID
+
+    var order = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(indices_address)
+    )
+    for index in range(count):
+        order[unsafe_offset=index] = index
+    var start = count // 2
+    while start > 0:
+        start -= 1
+        repo_chunk_group_heap_down(rows, order, start, count)
+    var end = count
+    while end > 1:
+        end -= 1
+        var saved = order[unsafe_offset=0]
+        order[unsafe_offset=0] = order[unsafe_offset=end]
+        order[unsafe_offset=end] = saved
+        repo_chunk_group_heap_down(rows, order, 0, end)
+
+    var groups = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(groups_address)
+    )
+    var emitted = Int64(0)
+    var complete = Int64(1)
+    var cursor = Int64(0)
+    while cursor < count:
+        var group_end = cursor + 1
+        while group_end < count and repo_chunk_group_equal(
+            rows,
+            order[unsafe_offset=cursor],
+            order[unsafe_offset=group_end],
+        ):
+            group_end += 1
+        var occurrences = group_end - cursor
+        if occurrences >= 2:
+            if emitted >= max_groups:
+                complete = 0
+                break
+            var keep = min(occurrences, max_occurrences)
+            groups[unsafe_offset=emitted * 3] = cursor
+            groups[unsafe_offset=emitted * 3 + 1] = occurrences
+            groups[unsafe_offset=emitted * 3 + 2] = keep
+            emitted += 1
+            if keep < occurrences:
+                complete = 0
+        cursor = group_end
+
+    var result = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(result_address)
+    )
+    result[unsafe_offset=0] = emitted
+    result[unsafe_offset=1] = complete
     return REPO_MAP_OK
