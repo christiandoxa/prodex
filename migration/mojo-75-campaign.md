@@ -7819,3 +7819,15 @@ projection. All 101 quota tests, three direct core ABI tests,
 direct Mojo test, and no-fallback and production-share checks pass.
 Share rises from 35.851405897242934% to 35.868414646488134%
 (131,136 Mojo / 234,467 Rust). The 75% goal remains open.
+
+## Anthropic SSE strict first-data line selector moved to Mojo (2026-10-20)
+
+The compiled Anthropic stream policy owner now scans ordered SSE lines,
+selects the first strict data colon space prefix and removes one CR
+under Rust str::lines semantics. The Rust prefix/line search was
+deleted. The host only retains lossy transport UTF-8 decoding and
+Serde event parsing. All 531 provider tests, two direct core ABI
+tests, direct Mojo test, no-fallback guard and production share checks
+pass. Official share rises from 35.868414646488134% to
+35.87396734330007% (131,185 Mojo / 234,498 Rust);
+the 75% target remains unmet.

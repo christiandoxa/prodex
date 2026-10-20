@@ -4,6 +4,12 @@
 use crate::MojoError;
 
 unsafe extern "C" {
+    fn prodex_anthropic_stream_data_line_v1(
+        abi_version: i64,
+        event_address: u64,
+        event_length: i64,
+        output_address: u64,
+    ) -> i64;
     fn prodex_anthropic_stream_action_v1(
         version: i64,
         event_address: u64,
@@ -78,6 +84,32 @@ fn check_status(status: i64) -> Result<(), MojoError> {
         0 => Ok(()),
         1 => Err(MojoError::InvalidInput),
         4 => Err(MojoError::AbiMismatch),
+        _ => Err(MojoError::InvalidOutput),
+    }
+}
+
+/// Select the first exact data field and remove at most one trailing CR.
+/// The host retains original lossy UTF-8 transport decoding and Serde JSON.
+pub fn anthropic_stream_data_line(event: &str) -> Result<Option<&str>, MojoError> {
+    let mut output = [-1_i64; 3];
+    check_status(unsafe {
+        prodex_anthropic_stream_data_line_v1(
+            1,
+            event.as_ptr() as usize as u64,
+            i64::try_from(event.len()).map_err(|_| MojoError::InvalidInput)?,
+            output.as_mut_ptr() as usize as u64,
+        )
+    })?;
+    match output {
+        [0, 0, 0] => Ok(None),
+        [1, start, end] if start >= 0 && end >= start => {
+            let start = usize::try_from(start).map_err(|_| MojoError::InvalidOutput)?;
+            let end = usize::try_from(end).map_err(|_| MojoError::InvalidOutput)?;
+            event
+                .get(start..end)
+                .map(Some)
+                .ok_or(MojoError::InvalidOutput)
+        }
         _ => Err(MojoError::InvalidOutput),
     }
 }
@@ -487,6 +519,59 @@ mod tests {
         ] {
             assert_eq!(anthropic_stream_finish_reason(reason), Ok(expected));
         }
+    }
+
+    #[test]
+    fn compiled_anthropic_sse_data_line_preserves_first_strict_field_and_crlf() {
+        for (event, expected) in [
+            ("", None),
+            ("event: ping\n", None),
+            ("DATA: uppercase\n", None),
+            ("data:missing-space\n", None),
+            ("data: ", Some("")),
+            ("data: \r", Some("")),
+            ("event: ping\r\ndata:  雪 \r\ndata: later\n", Some(" 雪 ")),
+            ("data: first\r\r\ndata: second\n", Some("first\r")),
+            ("data: first\n\ndata: later\n", Some("first")),
+            ("\n\n:data: ignored\n", None),
+            ("event: ping\rdata: no-newline", None),
+            ("data: \u{2003}🦀\r\n", Some("\u{2003}🦀")),
+        ] {
+            assert_eq!(anthropic_stream_data_line(event), Ok(expected), "{event:?}");
+        }
+    }
+
+    #[test]
+    fn compiled_anthropic_sse_data_line_abi_rejects_bad_version_utf8_and_shape_before_writes() {
+        let input = "data: valid";
+        let mut result = [97_i64; 3];
+        let dest = result.as_mut_ptr() as usize as u64;
+        let address = input.as_ptr() as usize as u64;
+        for (version, data_ptr, len, output_ptr, expected) in [
+            (2, address, input.len() as i64, dest, 4),
+            (1, 0, input.len() as i64, dest, 1),
+            (1, address, -1, dest, 1),
+            (1, address, input.len() as i64, 0, 1),
+        ] {
+            assert_eq!(
+                unsafe { prodex_anthropic_stream_data_line_v1(version, data_ptr, len, output_ptr) },
+                expected,
+            );
+            assert_eq!(result, [97; 3]);
+        }
+        let malformed = [255_u8, 250];
+        assert_eq!(
+            unsafe {
+                prodex_anthropic_stream_data_line_v1(
+                    1,
+                    malformed.as_ptr() as usize as u64,
+                    malformed.len() as i64,
+                    dest,
+                )
+            },
+            1,
+        );
+        assert_eq!(result, [97; 3]);
     }
 
     #[test]

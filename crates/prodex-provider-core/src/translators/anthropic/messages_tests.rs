@@ -669,3 +669,65 @@ fn stream_translation_preserves_ids_tool_deltas_errors_and_utf8_replacement() {
     .unwrap();
     assert_eq!(invalid_utf8["delta"], "bad � text");
 }
+
+#[test]
+fn compiled_anthropic_sse_data_line_selection_keeps_first_strict_field_and_crlf() {
+    let first =
+        anthropic_messages_translator().transform_stream_event(ProviderTransformInput::new(
+            ProviderEndpoint::Responses,
+            b"event: first\r\ndata: {\"type\":\"message_stop\"}\r\ndata: {\"type\":\"error\"}\r\n"
+                .to_vec(),
+        ));
+    assert!(matches!(first.loss, ProviderTransformLoss::Lossless));
+    assert_eq!(
+        first.body.as_deref(),
+        Some(b"event: response.completed\ndata: {\"type\":\"response.completed\"}\n\n".as_slice()),
+    );
+
+    let final_cr =
+        anthropic_messages_translator().transform_stream_event(ProviderTransformInput::new(
+            ProviderEndpoint::Responses,
+            b"data: {\"type\":\"message_stop\"}\r".to_vec(),
+        ));
+    assert!(matches!(final_cr.loss, ProviderTransformLoss::Lossless));
+    assert_eq!(final_cr.body, first.body);
+
+    for invalid_prefix in [
+        b"DATA: {\"type\":\"message_stop\"}\n".as_slice(),
+        b"data:{\"type\":\"message_stop\"}\n".as_slice(),
+        b"event: no_data\n\n".as_slice(),
+    ] {
+        let result = anthropic_messages_translator().transform_stream_event(
+            ProviderTransformInput::new(ProviderEndpoint::Responses, invalid_prefix.to_vec()),
+        );
+        assert!(matches!(
+            result.loss,
+            ProviderTransformLoss::UnsupportedUpstream { ref reason }
+                if reason == "Anthropic SSE event must contain data: <json> framing"
+        ));
+    }
+
+    let blank =
+        anthropic_messages_translator().transform_stream_event(ProviderTransformInput::new(
+            ProviderEndpoint::Responses,
+            b"data: \r\n\ndata: {\"type\":\"message_stop\"}\r\n".to_vec(),
+        ));
+    assert!(matches!(
+        blank.loss,
+        ProviderTransformLoss::Rejected { ref reason }
+            if reason.starts_with("failed to parse Anthropic SSE JSON:")
+    ));
+}
+
+#[test]
+fn compiled_anthropic_sse_data_line_keeps_transport_utf8_replacement_semantics() {
+    let mut input = b"data: {\"type\":\"error\",\"error\":{\"message\":\"".to_vec();
+    input.push(0xff);
+    input.extend_from_slice(b"\"}}\r\n");
+    let response = anthropic_messages_translator().transform_stream_event(
+        ProviderTransformInput::new(ProviderEndpoint::Responses, input),
+    );
+    assert!(matches!(response.loss, ProviderTransformLoss::Lossless));
+    let emitted = String::from_utf8(response.body.unwrap()).unwrap();
+    assert!(emitted.contains('\u{fffd}'));
+}
