@@ -7512,3 +7512,17 @@ Trash was inspected empty before `trash-empty -f`. Source, checkpoints and
 validation evidence remain preserved. The next audit can extend this existing
 conversation ABI to the remaining exact-output user/tool/command selection
 in `tooling/guardrails/exact_output.rs` and its command-matching module.
+
+## Gemini exact command-output conversation selector moved to Mojo (2026-10-20)
+
+The live exact-output guardrail now uses the compiled Gemini conversation JSON
+ABI to choose the latest user and subsequent tool, decide command-output-only
+intent, and extract required command and selected tool text. The former Rust
+message selection and text-extraction wrappers were removed without semantic
+fallback. Typed offset validation remains host-side; command-candidate parsing
+and matching are a separate remaining migration. Direct Mojo/core ABI and live
+provider regressions, malformed-shape tests and source guards pass.
+
+The canonical production share rose from 35.695920371657785% to
+35.714305415730024% (129,484 Mojo / 233,071 Rust); audited non-regression
+passes and the 75% project goal remains open.

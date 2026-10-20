@@ -9,6 +9,7 @@ const GEMINI_GUARDRAIL_ABI_VERSION: i64 = 1;
 pub enum GeminiGuardrailJsonOperation {
     PayloadText,
     UnverifiedSuccessClaim,
+    ExactOutputSelection,
 }
 
 /// Project payload text or verification evidence from a caller-acquired JSON tree.
