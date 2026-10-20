@@ -3,9 +3,10 @@ from std.memory import Pointer
 
 from gemini_guardrails import (
     guard_process_exited_zero, guard_success_claim, guard_tool_failure,
-    guard_verification_marker,
+    guard_verification_marker, guard_command_output_only,
+    guard_required_exact_output_command, guard_extract_command_output,
 )
-from json_sink import JsonSink, js_byte, js_literal, js_string, js_view
+from json_sink import JsonSink, js_byte, js_literal, js_string, js_view, js_u64
 from parsed_json import (
     JSON_ARRAY, JSON_OBJECT, JSON_STRING, ParsedJson, ParsedJsonNode, pj_child,
     pj_field, pj_is, pj_kind, pj_next, pj_string_field, pj_text, pj_trim, pj_valid,
@@ -91,6 +92,108 @@ def guard_unverified_claim(
     return Int64(not (last_verified and not previous_failed and not last_failed_without_exit))
 
 
+
+
+def guard_write_nullable_index(sink: Pointer[mut=True, JsonSink, _], index: Int64):
+    if index < 0:
+        js_literal(sink, StringSlice("null"))
+    else:
+        js_u64(sink, UInt64(index))
+
+
+def guard_write_nullable_slice(
+    sink: Pointer[mut=True, JsonSink, _],
+    source: ProdexRichStringView,
+    bounds: Tuple[Int64, Int64],
+):
+    if bounds[0] < 0 or bounds[1] <= bounds[0]:
+        js_literal(sink, StringSlice("null"))
+    else:
+        js_string(
+            sink,
+            ProdexRichStringView(source.ptr + UInt(bounds[0]), UInt(bounds[1] - bounds[0])),
+        )
+
+
+# Single owner for latest user, latest subsequent tool, output-only intent,
+# required command, and text extracted from the latest tool payload.
+# Serde JSON acquisition remains in Rust.
+def guard_exact_output_selection(
+    tree: ParsedJson,
+    scratch: Pointer[mut=True, UInt8, MutUntrackedOrigin],
+    capacity: Int64,
+    sink: Pointer[mut=True, JsonSink, _],
+) -> Bool:
+    var messages = pj_field(tree, 0, StringSlice("messages"))
+    var message = pj_child(tree, messages)
+    var user_node: Int64 = -1
+    var user_index: Int64 = -1
+    var index: Int64 = 0
+    while message >= 0:
+        if pj_is["user"](tree, pj_field(tree, message, StringSlice("role"))):
+            user_node = message
+            user_index = index
+        message = pj_next(tree, message)
+        index += 1
+
+    var requested = False
+    var required = (Int64(-1), Int64(0))
+    var user_text = ProdexRichStringView(0, 0)
+    if user_node >= 0:
+        var buffer = JsonSink(scratch, capacity, 0, False, False)
+        guard_collect_payload(
+            Pointer(to=buffer), tree,
+            pj_field(tree, user_node, StringSlice("content")),
+        )
+        if buffer.failed:
+            return False
+        user_text = ProdexRichStringView(UInt(Int(scratch)), UInt(buffer.written))
+        requested = guard_command_output_only(user_text)
+        if requested:
+            required = guard_required_exact_output_command(user_text)
+
+    var tool_node: Int64 = -1
+    var tool_index: Int64 = -1
+    if requested:
+        message = pj_child(tree, messages)
+        index = 0
+        while message >= 0:
+            if index > user_index and pj_is["tool"](
+                tree, pj_field(tree, message, StringSlice("role"))
+            ):
+                tool_node = message
+                tool_index = index
+            index += 1
+            message = pj_next(tree, message)
+
+    js_byte(sink, 91)
+    js_literal(sink, StringSlice("true") if requested else StringSlice("false"))
+    js_byte(sink, 44)
+    guard_write_nullable_index(sink, user_index)
+    js_byte(sink, 44)
+    guard_write_nullable_index(sink, tool_index)
+    js_byte(sink, 44)
+    if requested:
+        guard_write_nullable_slice(sink, user_text, required)
+    else:
+        js_literal(sink, StringSlice("null"))
+    js_byte(sink, 44)
+    if tool_node >= 0:
+        var tool_payload = pj_field(tree, tool_node, StringSlice("output"))
+        if tool_payload < 0:
+            tool_payload = pj_field(tree, tool_node, StringSlice("content"))
+        var buffer = JsonSink(scratch, capacity, 0, False, False)
+        guard_collect_payload(Pointer(to=buffer), tree, tool_payload)
+        if buffer.failed:
+            return False
+        var text = ProdexRichStringView(UInt(Int(scratch)), UInt(buffer.written))
+        guard_write_nullable_slice(sink, text, guard_extract_command_output(text))
+    else:
+        js_literal(sink, StringSlice("null"))
+    js_byte(sink, 93)
+    return True
+
+
 @export("prodex_mojo_gemini_guardrail_conversation_v1")
 def prodex_mojo_gemini_guardrail_conversation_v1(
     abi: Int64, operation: Int64, flag: Int64,
@@ -101,7 +204,7 @@ def prodex_mojo_gemini_guardrail_conversation_v1(
     if abi != 1:
         return 4
     if (
-        operation < 0 or operation > 1 or flag != 0
+        operation < 0 or operation > 2 or flag != 0
         or nodes_address == 0 or nodes_address % 8 != 0 or count <= 0
         or raw_length < 0 or (raw_length > 0 and raw_address == 0)
         or scratch_address == 0 or scratch_address % 8 != 0
@@ -132,7 +235,7 @@ def prodex_mojo_gemini_guardrail_conversation_v1(
     var messages = pj_field(tree, 0, StringSlice("messages"))
     if (operation == 0 and prefix < 0) or (
         operation == 1 and (text < 0 or pj_kind(tree, messages) != JSON_ARRAY)
-    ):
+    ) or (operation == 2 and pj_kind(tree, messages) != JSON_ARRAY):
         return 1
     var scratch = Pointer[mut=True, UInt8, MutUntrackedOrigin](unsafe_from_address=Int(scratch_address))
     var sink = JsonSink(
@@ -146,11 +249,14 @@ def prodex_mojo_gemini_guardrail_conversation_v1(
         if buffer.failed:
             return 3
         js_string(Pointer(to=sink), ProdexRichStringView(scratch_address, UInt(buffer.written)))
-    else:
+    elif operation == 1:
         var unverified = guard_unverified_claim(tree, scratch, capacity)
         if unverified < 0:
             return 3
         js_literal(Pointer(to=sink), StringSlice("true") if unverified == 1 else StringSlice("false"))
+    else:
+        if not guard_exact_output_selection(tree, scratch, capacity, Pointer(to=sink)):
+            return 3
     if sink.failed:
         return 3
     var metadata = Pointer[mut=True, Int64, MutUntrackedOrigin](unsafe_from_address=Int(metadata_address))

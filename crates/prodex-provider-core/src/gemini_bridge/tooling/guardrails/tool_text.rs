@@ -16,13 +16,3 @@ pub(super) fn gemini_provider_core_guardrail_projection<T: DeserializeOwned>(
     serde_json::from_slice(&bytes)
         .unwrap_or_else(|_| panic!("Mojo Gemini guardrail output violates its typed contract"))
 }
-
-pub(super) fn gemini_provider_core_collect_payload_text(
-    value: Option<&serde_json::Value>,
-    output: &mut String,
-) {
-    *output = gemini_provider_core_guardrail_projection(
-        &serde_json::json!({"value": value, "prefix": output.as_str()}),
-        GeminiGuardrailJsonOperation::PayloadText,
-    );
-}

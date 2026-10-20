@@ -414,6 +414,8 @@ const PROMOTED_FILES = [
   "mojo/prodex_core/gemini_precommit.mojo",
   "crates/prodex-provider-core/src/gemini_bridge/tooling/guardrails.rs",
   "crates/prodex-provider-core/src/gemini_bridge/tooling/guardrails/tool_text.rs",
+  "crates/prodex-provider-core/src/gemini_bridge/tooling/guardrails/exact_output.rs",
+  "crates/prodex-provider-core/src/gemini_bridge/tooling/guardrails/exact_output/commands.rs",
   "crates/prodex-provider-core/src/gemini_bridge/tooling/guardrails/tests.rs",
   "crates/prodex-mojo-core/src/gemini_guardrails.rs",
   "crates/prodex-mojo-core/src/gemini_guardrails/conversation_tests.rs",
@@ -1957,9 +1959,33 @@ export function findViolations(files) {
     }
     if (filePath === "crates/prodex-provider-core/src/gemini_bridge/tooling/guardrails/tool_text.rs") {
       return contents.includes("gemini_guardrail_json(")
-        && contents.includes("GeminiGuardrailJsonOperation::PayloadText")
+        && contents.includes("pub(super) fn gemini_provider_core_guardrail_projection<")
+        && !contents.includes("gemini_provider_core_collect_payload_text(")
         && !contents.includes("match value") && !contents.includes(".rposition(")
-        ? [] : [`${filePath}: Gemini payload traversal must remain Mojo-owned`];
+        ? [] : [filePath + ": Gemini payload traversal must remain Mojo-owned"];
+    }
+    if (filePath === "crates/prodex-provider-core/src/gemini_bridge/tooling/guardrails/exact_output.rs") {
+      const required = [
+        "GeminiGuardrailJsonOperation::ExactOutputSelection",
+        "fn gemini_exact_output_plan(",
+        "gemini_provider_core_tool_command_matches_required(",
+        "compiled Mojo selected an invalid exact-output tool",
+      ];
+      const retired = [
+        ".rposition(", ".rfind(", ".skip(user_index + 1)",
+        "fn gemini_provider_core_requests_command_output_only(",
+        "fn gemini_provider_core_command_output_from_tool_message(",
+        "gemini_provider_core_collect_payload_text(",
+      ];
+      return required.every((marker) => contents.includes(marker))
+        && retired.every((marker) => !contents.includes(marker))
+        ? [] : [filePath + ": exact-output conversation selection must remain Mojo-owned"];
+    }
+    if (filePath === "crates/prodex-provider-core/src/gemini_bridge/tooling/guardrails/exact_output/commands.rs") {
+      return contents.includes("gemini_exact_output_marker_match(")
+        && !contents.includes("gemini_provider_core_required_exact_output_command(")
+        && !contents.includes("gemini_provider_core_collect_payload_text(")
+        ? [] : [filePath + ": legacy Rust required-command extraction must remain deleted"];
     }
     const conversationMarkers = new Map([
       ["crates/prodex-app/src/runtime_launch/proxy_startup/gemini_sse_tests.rs", [
@@ -1970,16 +1996,26 @@ export function findViolations(files) {
         "mojo_payload_collection_preserves_prefix_empty_strings_and_first_present_field",
         "mojo_verification_history_keeps_user_boundary_nonblank_window_and_exit_precedence",
         "mojo_payload_selection_reaches_exact_command_output_callers",
+        "compiled_exact_output_selects_latest_user_and_subsequent_tool_via_mojo",
+        "compiled_exact_output_required_command_preserves_assistant_and_marker_precedence",
       ]],
-      ["crates/prodex-mojo-core/src/gemini_guardrails.rs", ["prodex_mojo_gemini_guardrail_conversation_v1(", "transform_json_with_scratch("]],
+      ["crates/prodex-mojo-core/src/gemini_guardrails.rs", [
+        "prodex_mojo_gemini_guardrail_conversation_v1(",
+        "transform_json_with_scratch(",
+        "ExactOutputSelection",
+      ]],
       ["crates/prodex-mojo-core/src/gemini_guardrails/conversation_tests.rs", [
         "compiled_guardrail_payload_preserves_presence_priority_empty_leaves_and_prefix",
         "compiled_guardrail_payload_handles_large_strings_and_deep_flat_abi_trees",
         "compiled_guardrail_json_rejects_invalid_abi_and_scratch_before_output_writes",
+        "compiled_exact_output_selection_preserves_roles_command_extraction_and_unicode",
+        "compiled_exact_output_selection_rejects_invalid_shapes_before_metadata_write",
       ]],
       ["mojo/prodex_core/gemini_guardrail_conversation.mojo", [
         '@export("prodex_mojo_gemini_guardrail_conversation_v1")', "def guard_collect_payload(",
         "def guard_unverified_claim(", "guard_tool_failure(", "guard_verification_marker(", "guard_process_exited_zero(",
+        "def guard_exact_output_selection(", "guard_command_output_only(",
+        "guard_required_exact_output_command(", "guard_extract_command_output(",
       ]],
       ["mojo/prodex_core/gemini_guardrails.mojo", ["def guard_process_exited_zero(", "return Int64(guard_process_exited_zero(view))"]],
       ["mojo/tests/gemini_guardrail_conversation_test.mojo", ["== 71", "prodex_mojo_gemini_guardrail_conversation_v1(2,"]],
@@ -11026,12 +11062,17 @@ async function promotedFiles() {
 
 function selfTest() {
   const conversationFile = "crates/prodex-provider-core/src/gemini_bridge/tooling/guardrails/tool_text.rs";
-  const conversationCalls = "gemini_guardrail_json( GeminiGuardrailJsonOperation::PayloadText";
+  const conversationCalls = "gemini_guardrail_json( pub(super) fn gemini_provider_core_guardrail_projection<";
   assert.deepEqual(findViolations([[conversationFile, conversationCalls]]), []);
   for (const restored of ["", `${conversationCalls}\nmatch value`, `${conversationCalls}\nmessages.rposition(`]) {
     assert.match(findViolations([[conversationFile, restored]]).join("\n"), /Gemini payload traversal/u);
   }
   assert.match(findViolations([["crates/prodex-provider-core/src/gemini_bridge/tooling/guardrails.rs", ""]]).join("\n"), /Gemini conversation verification/u);
+  assert.match(findViolations([["crates/prodex-provider-core/src/gemini_bridge/tooling/guardrails/exact_output.rs", ""]]).join("\n"),
+    /exact-output conversation selection must remain Mojo-owned/u);
+  assert.match(findViolations([["crates/prodex-provider-core/src/gemini_bridge/tooling/guardrails/exact_output/commands.rs",
+    "fn gemini_provider_core_required_exact_output_command() {}"]]).join("\n"),
+    /legacy Rust required-command extraction must remain deleted/u);
   const precommitFile = "crates/prodex-provider-core/src/gemini_bridge/precommit.rs";
   const precommitCall = "prodex_mojo_core::rich::gemini_precommit_plan(\nprodex_mojo_core::rich::gemini_precommit_frame_decision(";
   assert.deepEqual(findViolations([[precommitFile, precommitCall]]), []);
