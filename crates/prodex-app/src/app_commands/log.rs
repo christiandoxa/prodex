@@ -25,7 +25,6 @@ use crate::app_commands::log_format::local_log_timestamp;
 #[cfg(test)]
 use crate::reports::InfoTokenUsageEvent;
 use anyhow::Result;
-use std::collections::BTreeSet;
 #[cfg(test)]
 use std::collections::VecDeque;
 #[cfg(test)]
@@ -79,64 +78,42 @@ pub(super) fn bounded_followed_log_paths(
     runtime_paths: &[PathBuf],
     session_paths: &[PathBuf],
 ) -> (Vec<PathBuf>, Vec<PathBuf>) {
-    if runtime_paths.len() + session_paths.len() <= LOG_FOLLOW_MAX_FILES {
-        return (runtime_paths.to_vec(), session_paths.to_vec());
-    }
-
-    let mut candidates = runtime_paths
+    // Filesystem metadata and original PathBufs remain host-owned. Mojo
+    // exclusively orders and balances runtime/session descriptor candidates.
+    let input = runtime_paths
         .iter()
-        .cloned()
-        .map(|path| (path_modified_time(&path), path, 0_u8))
-        .chain(
-            session_paths
-                .iter()
-                .cloned()
-                .map(|path| (path_modified_time(&path), path, 1_u8)),
-        )
+        .map(|path| (path, 0_u8))
+        .chain(session_paths.iter().map(|path| (path, 1_u8)))
+        .map(|(path, source)| {
+            let modified = path_modified_time(path);
+            let (before_epoch, absolute) = match modified.duration_since(UNIX_EPOCH) {
+                Ok(duration) => (false, duration),
+                Err(error) => (true, error.duration()),
+            };
+            prodex_mojo_core::log::LogFollowSelectionInput {
+                path: path.as_os_str().as_encoded_bytes(),
+                source,
+                modified_before_unix_epoch: before_epoch,
+                modified_abs_seconds: absolute.as_secs(),
+                modified_abs_nanos: absolute.subsec_nanos(),
+            }
+        })
         .collect::<Vec<_>>();
-    candidates.sort_by(
-        |(left_modified, left_path, left_source), (right_modified, right_path, right_source)| {
-            right_modified
-                .cmp(left_modified)
-                .then_with(|| left_path.cmp(right_path))
-                .then_with(|| left_source.cmp(right_source))
-        },
-    );
-    let minimums = [
-        if session_paths.is_empty() {
-            LOG_FOLLOW_MAX_FILES
-        } else {
-            LOG_FOLLOW_MAX_FILES.div_ceil(2)
-        },
-        if runtime_paths.is_empty() {
-            LOG_FOLLOW_MAX_FILES
-        } else {
-            LOG_FOLLOW_MAX_FILES / 2
-        },
-    ];
-    let mut selected = BTreeSet::new();
-    let mut selected_counts = [0; 2];
-    for (_, path, source) in &candidates {
-        if selected_counts[*source as usize] < minimums[*source as usize]
-            && selected.insert((*source, path.clone()))
-        {
-            selected_counts[*source as usize] += 1;
-        }
-    }
-    for (_, path, source) in candidates {
-        if selected.len() >= LOG_FOLLOW_MAX_FILES {
-            break;
-        }
-        selected.insert((source, path));
-    }
-    let select = |paths: &[PathBuf], source: u8| {
-        paths
-            .iter()
-            .filter(|path| selected.contains(&(source, (*path).clone())))
-            .cloned()
-            .collect()
-    };
-    (select(runtime_paths, 0), select(session_paths, 1))
+    let plan = prodex_mojo_core::log::log_follow_selection_plan(&input, LOG_FOLLOW_MAX_FILES)
+        .expect("compiled Mojo combined log-follow selection returned invalid output");
+    let runtime = runtime_paths
+        .iter()
+        .zip(&plan.selected[..runtime_paths.len()])
+        .filter(|(_, selected)| **selected)
+        .map(|(path, _)| path.clone())
+        .collect();
+    let sessions = session_paths
+        .iter()
+        .zip(&plan.selected[runtime_paths.len()..])
+        .filter(|(_, selected)| **selected)
+        .map(|(path, _)| path.clone())
+        .collect();
+    (runtime, sessions)
 }
 
 fn path_modified_time(path: &Path) -> SystemTime {

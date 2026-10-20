@@ -7958,3 +7958,16 @@ Smart Context tests, three direct core ABI tests, direct Mojo tests,
 source no-fallback and share checks pass. Official share increases
 from 35.908872666164704% to 35.921607541552966%
 (131,768 Mojo / 235,053 Rust); 75% remains open.
+
+## Combined runtime/session log follower selection compiled in Mojo (2026-10-20)
+
+A compiled batch now orders runtime and session follower paths by
+modification timestamp/path, reserves each source's share of
+the 32-file descriptor budget, fills the remaining slots, and
+deduplicates selected source/path identities. Rust retains
+filesystem metadata and original file ownership but no
+Rust sorting, BTreeSet, reservation or refill policy fallback.
+All 127 log-module tests, three direct core ABI tests, direct Mojo
+test and source/share checks pass. Official share increases from
+35.921607541552966% to 35.95155464268008%
+(131,976 Mojo / 235,118 Rust). The 75% goal remains open.

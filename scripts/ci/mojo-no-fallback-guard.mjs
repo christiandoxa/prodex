@@ -321,6 +321,12 @@ const SMART_CONTEXT_STORE_RETENTION_CORE = "crates/prodex-mojo-core/src/runtime/
 const SMART_CONTEXT_STORE_RETENTION_FACADE = "crates/prodex-mojo-core/src/runtime.rs";
 const SMART_CONTEXT_STORE_RETENTION_MOJO = "mojo/prodex_core/smart_context_policy.mojo";
 const SMART_CONTEXT_STORE_RETENTION_DIRECT_TEST = "mojo/tests/smart_context_store_retention_test.mojo";
+const LOG_FOLLOW_SELECTION_CALLER = "crates/prodex-app/src/app_commands/log.rs";
+const LOG_FOLLOW_SELECTION_CORE = "crates/prodex-mojo-core/src/log/follow_selection.rs";
+const LOG_FOLLOW_SELECTION_FACADE = "crates/prodex-mojo-core/src/log.rs";
+const LOG_FOLLOW_SELECTION_MOJO = "mojo/prodex_core/log_semantics.mojo";
+const LOG_FOLLOW_SELECTION_DIRECT_TEST = "mojo/tests/log_follow_selection_test.mojo";
+const LOG_FOLLOW_SELECTION_CALLER_TEST = "crates/prodex-app/src/app_commands/log_descriptor_tests.rs";
 const PROMOTED_FILES = [
   PROVIDER_USAGE_SSE_MOJO,
   PROVIDER_USAGE_SSE_TEST,
@@ -348,6 +354,11 @@ const PROMOTED_FILES = [
   RESPONSE_HEADER_SELECTION_TEST,
   RESPONSE_HEADER_SELECTION_CALLER_TEST,
   DEEPSEEK_BUFFERED_TEXT_DIRECT_TEST,
+  LOG_FOLLOW_SELECTION_CALLER,
+  LOG_FOLLOW_SELECTION_CORE,
+  LOG_FOLLOW_SELECTION_FACADE,
+  LOG_FOLLOW_SELECTION_DIRECT_TEST,
+  LOG_FOLLOW_SELECTION_CALLER_TEST,
   SMART_CONTEXT_STORE_RETENTION_CALLER,
   SMART_CONTEXT_STORE_RETENTION_CORE,
   SMART_CONTEXT_STORE_RETENTION_FACADE,
@@ -4802,6 +4813,68 @@ export function findViolations(files) {
     if (filePath === STARTUP_PROBE_BATCH_CALLER_TEST) {
       return contents.includes("compiled_startup_probe_batch_preserves_over_65536_profile_order_and_remaining_slots")
         ? [] : [filePath + ": startup batch requires cross-batch caller regression"];
+    }
+    return [];
+  });
+  const logFollowSelectionMojoViolations = files.flatMap(([filePath, contents]) => {
+    if (filePath === LOG_FOLLOW_SELECTION_CALLER &&
+        contents.includes("fn bounded_followed_log_paths(")) {
+      const start = contents.indexOf("fn bounded_followed_log_paths(");
+      const end = contents.indexOf("\nfn path_modified_time(", start);
+      const production = contents.slice(start, end < 0 ? undefined : end);
+      const required = [
+        "LogFollowSelectionInput",
+        "log_follow_selection_plan(&input, LOG_FOLLOW_MAX_FILES)",
+        "plan.selected[..runtime_paths.len()]",
+        "plan.selected[runtime_paths.len()..]",
+      ];
+      const retired = [
+        "candidates.sort_by(",
+        "let mut selected = BTreeSet::new()",
+        "let minimums = [",
+        "selected_counts[*source as usize]",
+      ];
+      return required.every((marker) => production.includes(marker))
+        && retired.every((marker) => !production.includes(marker))
+        ? [] : [filePath + ": combined log follow sort, reserved slots and dedup must stay compiled Mojo-owned"];
+    }
+    if (filePath === LOG_FOLLOW_SELECTION_CORE) {
+      return [
+        "fn prodex_mojo_log_follow_selection_v1(",
+        "pub fn log_follow_selection_plan(",
+        "compiled_log_follow_selection_reserves_each_source_and_fills_spare_slots",
+        "compiled_log_follow_selection_preserves_duplicates_and_exact_small_input",
+        "compiled_log_follow_selection_abi_rejects_malformed_late_row_without_output",
+      ].filter((marker) => !contents.includes(marker))
+        .map((marker) => filePath + ": compiled log-follow batch ABI missing " + marker);
+    }
+    if (filePath === LOG_FOLLOW_SELECTION_FACADE &&
+        contents.includes("mod follow_selection;")) {
+      return contents.includes("pub use follow_selection::{")
+        ? [] : [filePath + ": log-follow selection ABI must remain production reachable"];
+    }
+    if (filePath === LOG_FOLLOW_SELECTION_MOJO &&
+        contents.includes("prodex_mojo_upstream_payload_string_budget_v1")) {
+      return [
+        '@export("prodex_mojo_log_follow_selection_v1")',
+        "def log_follow_compare(",
+        "def log_follow_heap_down(",
+        "def log_follow_already_selected(",
+        "var runtime_minimum = maximum_files if session_count == 0",
+        "selected_unique += 1",
+      ].filter((marker) => !contents.includes(marker))
+        .map((marker) => filePath + ": compiled log-follow balancing owner missing " + marker);
+    }
+    if (filePath === LOG_FOLLOW_SELECTION_DIRECT_TEST) {
+      return contents.includes("prodex_mojo_log_follow_selection_v1")
+        ? [] : [filePath + ": direct log-follow batch ABI test missing"];
+    }
+    if (filePath === LOG_FOLLOW_SELECTION_CALLER_TEST) {
+      return [
+        "compiled_log_follow_selection_reserves_slots_and_preserves_input_order",
+        "compiled_log_follow_selection_retains_duplicated_paths_and_unused_source_slots",
+      ].filter((marker) => !contents.includes(marker))
+        .map((marker) => filePath + ": log-follow production caller regression missing " + marker);
     }
     return [];
   });
@@ -12394,7 +12467,7 @@ export function findViolations(files) {
     }
     return [];
   });
-  return [...smartContextStoreRetentionMojoViolations, ...runtimeLogTailMojoViolations, ...deepseekBufferedTextItemMojoViolations, ...runtimeSseResponseIdMojoViolations, ...upstreamPayloadBoundsMojoViolations, ...runtimeSseEventStateMojoViolations, ...geminiPatchSourceMojoViolations, ...openAiCompatSseEnvelopeMojoViolations, ...anthropicSseDataLineMojoViolations, ...responseHeaderSelectionMojoViolations, ...previousResponseTextSpanMojoViolations, ...previousResponseJsonSearchMojoViolations, ...domainErrorMojoViolations, ...geminiValueCollectionMojoViolations, ...geminiSimpleResponseViolations, ...logPayloadProjectionViolations, ...nativeRecoveryOwnershipViolations, ...quotaRecoveryEligibilityViolations, ...runtimeBrokerReuseMojoViolations, ...geminiResponseMediaMojoViolations, ...cookieEvictionMojoViolations, ...websocketBudgetMojoViolations, ...affinityBindingMojoViolations, ...responsesCapacityRecoveryViolations, ...sseTapMojoOwnershipViolations, ...quotaWatchViolations, ...geminiCompactSnippetViolations, ...geminiCompactTextViolations, ...doctorSmartContextDecisionViolations, ...providerSseJsonFrameMojoViolations, ...geminiSseCompletionOwnershipViolations, ...anthropicNativeStreamDecisionViolations, ...anthropicAttemptCursorViolations, ...geminiUnsupportedToolRetryViolations, ...terminalGeometryViolations, ...previousResponseRecoveryTransitionViolations, ...chatCompatibleToolCallKindViolations, ...geminiQuotaBodyMojoViolations, ...geminiOAuthRotationMojoViolations, ...geminiBuiltinBatchMojoViolations, ...geminiToolArrayValidationMojoViolations, ...geminiOAuthModelMojoViolations, ...superExposeOriginMojoViolations, ...kiroAcpToolLedgerMojoViolations, ...quotaPoolSummarySectionsMojoViolations, ...deepseekRequestDiagnosticViolations, ...deepseekToolShapeIssueMojoViolations, ...deepseekReplayItemPolicyMojoViolations, ...chatNamespaceSplitMojoViolations, ...deepseekInputItemIssueMessageViolations, ...deepseekRequestIssueMessageViolations, ...smartContextTelemetrySampleViolations, ...compatibilityDiagnosticsMojoViolations, ...quotaHeaderProjectionViolations, ...smartContextCapsuleOrderViolations, ...markerViolations, ...deepseekCatalogPolicyViolations, ...featureOffViolations, ...liveLogRecordViolations, ...runtimePolicyPresetViolations, ...runtimeConfigScalarViolations, ...profileHealthCircuitViolations, ...logThroughputViolations, ...operationalDetailSpecViolations, ...transcriptPolicyViolations, ...logLoadPolicyViolations, ...routeReasonViolations, ...quotaSnapshotCompareMojoViolations, ...startupProbeBatchMojoViolations, ...runtimeStateQuotaViolations, ...runtimeStateRoutePolicyViolations, ...runtimeProxyRootViolations, ...runtimeRecoveryDeadlineViolations, ...brokerVersionGuardViolations, ...brokerContinuityViolations, ...brokerLogCacheViolations, ...codexConfigViolations, ...statePolicyViolations, ...quotaSelectionPolicyViolations, ...routeTagMirrorViolations, ...enumTagMirrorViolations, ...appSelectionPolicyMirrorViolations, ...runtimeStateBackgroundViolations, ...redactionViolations, ...rateLimitHeaderSelectionViolations, ...profileIdentityViolations, ...governanceInspectionViolations, ...governanceInspectionOrderingViolations, ...exactnessPlannerViolations,
+  return [...logFollowSelectionMojoViolations, ...smartContextStoreRetentionMojoViolations, ...runtimeLogTailMojoViolations, ...deepseekBufferedTextItemMojoViolations, ...runtimeSseResponseIdMojoViolations, ...upstreamPayloadBoundsMojoViolations, ...runtimeSseEventStateMojoViolations, ...geminiPatchSourceMojoViolations, ...openAiCompatSseEnvelopeMojoViolations, ...anthropicSseDataLineMojoViolations, ...responseHeaderSelectionMojoViolations, ...previousResponseTextSpanMojoViolations, ...previousResponseJsonSearchMojoViolations, ...domainErrorMojoViolations, ...geminiValueCollectionMojoViolations, ...geminiSimpleResponseViolations, ...logPayloadProjectionViolations, ...nativeRecoveryOwnershipViolations, ...quotaRecoveryEligibilityViolations, ...runtimeBrokerReuseMojoViolations, ...geminiResponseMediaMojoViolations, ...cookieEvictionMojoViolations, ...websocketBudgetMojoViolations, ...affinityBindingMojoViolations, ...responsesCapacityRecoveryViolations, ...sseTapMojoOwnershipViolations, ...quotaWatchViolations, ...geminiCompactSnippetViolations, ...geminiCompactTextViolations, ...doctorSmartContextDecisionViolations, ...providerSseJsonFrameMojoViolations, ...geminiSseCompletionOwnershipViolations, ...anthropicNativeStreamDecisionViolations, ...anthropicAttemptCursorViolations, ...geminiUnsupportedToolRetryViolations, ...terminalGeometryViolations, ...previousResponseRecoveryTransitionViolations, ...chatCompatibleToolCallKindViolations, ...geminiQuotaBodyMojoViolations, ...geminiOAuthRotationMojoViolations, ...geminiBuiltinBatchMojoViolations, ...geminiToolArrayValidationMojoViolations, ...geminiOAuthModelMojoViolations, ...superExposeOriginMojoViolations, ...kiroAcpToolLedgerMojoViolations, ...quotaPoolSummarySectionsMojoViolations, ...deepseekRequestDiagnosticViolations, ...deepseekToolShapeIssueMojoViolations, ...deepseekReplayItemPolicyMojoViolations, ...chatNamespaceSplitMojoViolations, ...deepseekInputItemIssueMessageViolations, ...deepseekRequestIssueMessageViolations, ...smartContextTelemetrySampleViolations, ...compatibilityDiagnosticsMojoViolations, ...quotaHeaderProjectionViolations, ...smartContextCapsuleOrderViolations, ...markerViolations, ...deepseekCatalogPolicyViolations, ...featureOffViolations, ...liveLogRecordViolations, ...runtimePolicyPresetViolations, ...runtimeConfigScalarViolations, ...profileHealthCircuitViolations, ...logThroughputViolations, ...operationalDetailSpecViolations, ...transcriptPolicyViolations, ...logLoadPolicyViolations, ...routeReasonViolations, ...quotaSnapshotCompareMojoViolations, ...startupProbeBatchMojoViolations, ...runtimeStateQuotaViolations, ...runtimeStateRoutePolicyViolations, ...runtimeProxyRootViolations, ...runtimeRecoveryDeadlineViolations, ...brokerVersionGuardViolations, ...brokerContinuityViolations, ...brokerLogCacheViolations, ...codexConfigViolations, ...statePolicyViolations, ...quotaSelectionPolicyViolations, ...routeTagMirrorViolations, ...enumTagMirrorViolations, ...appSelectionPolicyMirrorViolations, ...runtimeStateBackgroundViolations, ...redactionViolations, ...rateLimitHeaderSelectionViolations, ...profileIdentityViolations, ...governanceInspectionViolations, ...governanceInspectionOrderingViolations, ...exactnessPlannerViolations,
     ...infoRunwayViolations,
     ...geminiNormalizedViolations,
     ...quotaDurationViolations,
@@ -13563,6 +13636,18 @@ function selfTest() {
   assert.match(findViolations([[RESPONSE_FORWARDING_FILE,
     responseHeaderFixture + "\nheaders.into_iter().any(|(name, value)| ...)",
   ]]).join("\n"), /first-header, binary MIME and SSE flush selection must stay Mojo-owned/u);
+  const logFollowFixture = [
+    "fn bounded_followed_log_paths(",
+    "LogFollowSelectionInput",
+    "log_follow_selection_plan(&input, LOG_FOLLOW_MAX_FILES)",
+    "plan.selected[..runtime_paths.len()]",
+    "plan.selected[runtime_paths.len()..]",
+  ].join("\\n");
+  assert.deepEqual(findViolations([[LOG_FOLLOW_SELECTION_CALLER, logFollowFixture]]).filter(
+    (message) => message.includes("combined log follow sort")), []);
+  assert.match(findViolations([[LOG_FOLLOW_SELECTION_CALLER,
+    logFollowFixture + "\\ncandidates.sort_by(",
+  ]]).join("\\n"), /combined log follow sort, reserved slots and dedup must stay compiled Mojo-owned/u);
   const scopeRetentionFixture = [
     "fn runtime_smart_context_prune_scope_stores(",
     "SmartContextStoreRetentionInput",

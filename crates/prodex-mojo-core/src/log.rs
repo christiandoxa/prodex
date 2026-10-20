@@ -1,5 +1,9 @@
 use crate::MojoError;
 
+mod follow_selection;
+pub use follow_selection::{
+    LogFollowSelectionInput, LogFollowSelectionPlan, log_follow_selection_plan,
+};
 mod event_name;
 mod level;
 mod pointers;

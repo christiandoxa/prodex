@@ -3779,3 +3779,236 @@ def prodex_mojo_upstream_payload_truncate_v1(
     result[unsafe_offset=0] = kept
     result[unsafe_offset=1] = Int64(truncated)
     return 0
+
+
+# Combined runtime/session log-follower selection. One compiled batch owns
+# modified-time/path order, per-source reservations, uniqueness and the
+# shared descriptor cap; Rust retains filesystem observations and I/O.
+comptime LOG_FOLLOW_SELECTION_ABI: Int64 = 1
+comptime LOG_FOLLOW_SELECTION_MAX: Int64 = 65_536
+comptime LOG_FOLLOW_SELECTION_MAX_FILES: Int64 = 512
+comptime LOG_FOLLOW_SELECTION_ROW_WORDS: Int64 = 6
+
+
+def log_follow_field(
+    rows: Pointer[mut=False, UInt64, _], index: Int64, field: Int64,
+) -> UInt64:
+    return rows[unsafe_offset=index * LOG_FOLLOW_SELECTION_ROW_WORDS + field]
+
+
+def log_follow_path_compare(
+    rows: Pointer[mut=False, UInt64, _], left: Int64, right: Int64,
+) -> Int64:
+    var left_size = Int64(log_follow_field(rows, left, 1))
+    var right_size = Int64(log_follow_field(rows, right, 1))
+    var a = Pointer[mut=False, UInt8, ImmUntrackedOrigin](
+        unsafe_from_address=Int(log_follow_field(rows, left, 0))
+    )
+    var b = Pointer[mut=False, UInt8, ImmUntrackedOrigin](
+        unsafe_from_address=Int(log_follow_field(rows, right, 0))
+    )
+    for index in range(min(left_size, right_size)):
+        var lhs = a[unsafe_offset=index]
+        var rhs = b[unsafe_offset=index]
+        if lhs != rhs:
+            return -1 if lhs < rhs else 1
+    if left_size != right_size:
+        return -1 if left_size < right_size else 1
+    return 0
+
+
+def log_follow_compare(
+    rows: Pointer[mut=False, UInt64, _], left: Int64, right: Int64,
+) -> Int64:
+    var left_negative = log_follow_field(rows, left, 3)
+    var right_negative = log_follow_field(rows, right, 3)
+    if left_negative != right_negative:
+        return -1 if left_negative == 0 else 1
+    var a_secs = log_follow_field(rows, left, 4)
+    var b_secs = log_follow_field(rows, right, 4)
+    if a_secs != b_secs:
+        if left_negative == 1:
+            return -1 if a_secs < b_secs else 1
+        return -1 if a_secs > b_secs else 1
+    var a_nanos = log_follow_field(rows, left, 5)
+    var b_nanos = log_follow_field(rows, right, 5)
+    if a_nanos != b_nanos:
+        if left_negative == 1:
+            return -1 if a_nanos < b_nanos else 1
+        return -1 if a_nanos > b_nanos else 1
+    var by_path = log_follow_path_compare(rows, left, right)
+    if by_path != 0:
+        return by_path
+    var source_a = log_follow_field(rows, left, 2)
+    var source_b = log_follow_field(rows, right, 2)
+    if source_a != source_b:
+        return -1 if source_a < source_b else 1
+    if left != right:
+        return -1 if left < right else 1
+    return 0
+
+
+def log_follow_heap_down(
+    rows: Pointer[mut=False, UInt64, _],
+    indices: Pointer[mut=True, Int64, _], start: Int64, count: Int64,
+):
+    var root = start
+    while root * 2 + 1 < count:
+        var child = root * 2 + 1
+        var swap = root
+        if log_follow_compare(
+            rows, indices[unsafe_offset=swap], indices[unsafe_offset=child],
+        ) < 0:
+            swap = child
+        if child + 1 < count and log_follow_compare(
+            rows, indices[unsafe_offset=swap], indices[unsafe_offset=child + 1],
+        ) < 0:
+            swap = child + 1
+        if swap == root:
+            return
+        var old = indices[unsafe_offset=root]
+        indices[unsafe_offset=root] = indices[unsafe_offset=swap]
+        indices[unsafe_offset=swap] = old
+        root = swap
+
+
+def log_follow_same_source_path(
+    rows: Pointer[mut=False, UInt64, _], left: Int64, right: Int64,
+) -> Bool:
+    return (
+        log_follow_field(rows, left, 2) == log_follow_field(rows, right, 2)
+        and log_follow_path_compare(rows, left, right) == 0
+    )
+
+
+def log_follow_already_selected(
+    rows: Pointer[mut=False, UInt64, _],
+    selected: Pointer[mut=False, Int64, _],
+    selected_count: Int64, candidate: Int64,
+) -> Bool:
+    for position in range(selected_count):
+        if log_follow_same_source_path(
+            rows, candidate, selected[unsafe_offset=position],
+        ):
+            return True
+    return False
+
+
+@export("prodex_mojo_log_follow_selection_v1")
+def prodex_mojo_log_follow_selection_v1(
+    abi_version: Int64, rows_address: UInt, count: Int64,
+    maximum_files: Int64,
+    scratch_address: UInt, scratch_capacity: Int64,
+    flags_address: UInt, flags_capacity: Int64,
+    selected_count_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != LOG_FOLLOW_SELECTION_ABI:
+        return 4
+    if (
+        count < 0 or count > LOG_FOLLOW_SELECTION_MAX
+        or maximum_files < 0 or maximum_files > LOG_FOLLOW_SELECTION_MAX_FILES
+        or (count > 0 and (rows_address == 0 or rows_address % 8 != 0))
+        or scratch_address == 0 or scratch_address % 8 != 0
+        or flags_address == 0 or flags_address % 8 != 0
+        or scratch_capacity < count or flags_capacity < count
+        or selected_count_address == 0 or selected_count_address % 8 != 0
+    ):
+        return 1
+    var rows = Pointer[mut=False, UInt64, ImmUntrackedOrigin](
+        unsafe_from_address=Int(rows_address)
+    )
+    var runtime_count = Int64(0)
+    var session_count = Int64(0)
+    for index in range(count):
+        var size = log_follow_field(rows, index, 1)
+        var source = log_follow_field(rows, index, 2)
+        if (
+            size > UInt64(9223372036854775807)
+            or (size > 0 and log_follow_field(rows, index, 0) == 0)
+            or source > 1
+            or log_follow_field(rows, index, 3) > 1
+            or log_follow_field(rows, index, 5) >= UInt64(1_000_000_000)
+        ):
+            return 1
+        if source == 0:
+            runtime_count += 1
+        else:
+            session_count += 1
+
+    var flags = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(flags_address)
+    )
+    for index in range(count):
+        flags[unsafe_offset=index] = 0
+    var selected_unique = Int64(0)
+    if count <= maximum_files:
+        for index in range(count):
+            flags[unsafe_offset=index] = 1
+        # Only unique source/path pairs count against the descriptor cap.
+        for index in range(count):
+            var repeated = False
+            for other in range(index):
+                if log_follow_same_source_path(rows, index, other):
+                    repeated = True
+                    break
+            if not repeated:
+                selected_unique += 1
+    else:
+        var indices = Pointer[mut=True, Int64, MutUntrackedOrigin](
+            unsafe_from_address=Int(scratch_address)
+        )
+        for index in range(count):
+            indices[unsafe_offset=index] = index
+        var start = count // 2
+        while start > 0:
+            start -= 1
+            log_follow_heap_down(rows, indices, start, count)
+        var end = count
+        while end > 1:
+            end -= 1
+            var saved = indices[unsafe_offset=0]
+            indices[unsafe_offset=0] = indices[unsafe_offset=end]
+            indices[unsafe_offset=end] = saved
+            log_follow_heap_down(rows, indices, 0, end)
+
+        var runtime_minimum = maximum_files if session_count == 0 else (maximum_files + 1) // 2
+        var session_minimum = maximum_files if runtime_count == 0 else maximum_files // 2
+        var representatives = Array[Int64, 512](fill=-1)
+        var selected_runtime = Int64(0)
+        var selected_session = Int64(0)
+        for position in range(count):
+            var original = indices[unsafe_offset=position]
+            var source = log_follow_field(rows, original, 2)
+            if source == 0 and selected_runtime >= runtime_minimum:
+                continue
+            if source == 1 and selected_session >= session_minimum:
+                continue
+            if log_follow_already_selected(rows, representatives.unsafe_ptr(), selected_unique, original):
+                continue
+            flags[unsafe_offset=original] = 1
+            representatives.unsafe_ptr()[unsafe_offset=selected_unique] = original
+            selected_unique += 1
+            if source == 0:
+                selected_runtime += 1
+            else:
+                selected_session += 1
+        for position in range(count):
+            if selected_unique >= maximum_files:
+                break
+            var original = indices[unsafe_offset=position]
+            if log_follow_already_selected(rows, representatives.unsafe_ptr(), selected_unique, original):
+                continue
+            flags[unsafe_offset=original] = 1
+            representatives.unsafe_ptr()[unsafe_offset=selected_unique] = original
+            selected_unique += 1
+        # Duplicated input paths inherit the selected source/path entry.
+        # The returned original order, including duplicates, is host-owned.
+        for index in range(count):
+            if flags[unsafe_offset=index] == 1:
+                continue
+            if log_follow_already_selected(rows, representatives.unsafe_ptr(), selected_unique, index):
+                flags[unsafe_offset=index] = 1
+    Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(selected_count_address)
+    )[] = selected_unique
+    return 0
