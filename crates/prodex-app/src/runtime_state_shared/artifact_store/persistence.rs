@@ -137,22 +137,33 @@ impl RuntimeSmartContextArtifactStore {
     }
 
     pub(in crate::runtime_state_shared::artifact_store) fn enforce_limits(&mut self) {
-        while self.artifacts.len() > RUNTIME_SMART_CONTEXT_MAX_ARTIFACTS
-            || self.total_bytes > RUNTIME_SMART_CONTEXT_MAX_TOTAL_BYTES
-        {
-            let Some(oldest_id) = self
-                .artifacts
-                .values()
-                .min_by(|left, right| {
-                    left.order
-                        .cmp(&right.order)
-                        .then_with(|| left.id.cmp(&right.id))
-                })
-                .map(|artifact| artifact.id.clone())
-            else {
-                break;
-            };
-            if let Some(removed) = self.artifacts.remove(&oldest_id) {
+        // Mojo chooses the entire oldest-first removal plan under both
+        // persisted item-count and byte limits. Rust only applies it to
+        // original BTreeMap entries and updates its tracked byte count.
+        let artifacts = self.artifacts.values().collect::<Vec<_>>();
+        let inputs = artifacts
+            .iter()
+            .map(
+                |artifact| prodex_mojo_core::runtime_repo_map::RepoArtifactEvictionInput {
+                    order: artifact.order,
+                    id: &artifact.id,
+                    byte_len: artifact.byte_len,
+                },
+            )
+            .collect::<Vec<_>>();
+        let selected = prodex_mojo_core::runtime_repo_map::repo_artifact_eviction_plan(
+            &inputs,
+            self.total_bytes,
+            RUNTIME_SMART_CONTEXT_MAX_ARTIFACTS,
+            RUNTIME_SMART_CONTEXT_MAX_TOTAL_BYTES,
+        )
+        .expect("compiled Mojo persisted artifact eviction returned invalid output");
+        let ids = selected
+            .into_iter()
+            .map(|index| artifacts[index].id.clone())
+            .collect::<Vec<_>>();
+        for id in ids {
+            if let Some(removed) = self.artifacts.remove(&id) {
                 self.total_bytes = self.total_bytes.saturating_sub(removed.byte_len);
             }
         }
@@ -295,4 +306,66 @@ fn runtime_smart_context_artifact_key(
         .map_err(|_| anyhow::anyhow!("failed to generate Smart Context artifact key"))?;
     secret_store::write_private_file_atomic(path, &key)?;
     Ok(key)
+}
+
+#[cfg(test)]
+mod compiled_eviction_caller_tests {
+    use super::super::super::RuntimeSmartContextArtifact;
+    use super::*;
+
+    fn put(store: &mut RuntimeSmartContextArtifactStore, id: &str, order: u64, bytes: usize) {
+        store.artifacts.insert(
+            id.to_owned(),
+            RuntimeSmartContextArtifact {
+                id: id.to_owned(),
+                byte_len: bytes,
+                content_hash: format!("test-hash-{id}"),
+                text: String::new(),
+                order,
+                line_index: None,
+                chunk_index: None,
+            },
+        );
+        store.total_bytes += bytes;
+    }
+
+    #[test]
+    fn compiled_artifact_eviction_enforces_count_limit_in_oldest_first_order() {
+        let mut store = RuntimeSmartContextArtifactStore::default();
+        for index in 0..RUNTIME_SMART_CONTEXT_MAX_ARTIFACTS + 3 {
+            put(&mut store, &format!("artifact-{index:04}"), index as u64, 1);
+        }
+        store.enforce_limits();
+        assert_eq!(store.artifacts.len(), RUNTIME_SMART_CONTEXT_MAX_ARTIFACTS);
+        assert_eq!(store.total_bytes, RUNTIME_SMART_CONTEXT_MAX_ARTIFACTS);
+        for id in ["artifact-0000", "artifact-0001", "artifact-0002"] {
+            assert!(!store.artifacts.contains_key(id), "{id} was not evicted");
+        }
+        assert!(store.artifacts.contains_key("artifact-0130"));
+        store.enforce_limits();
+        assert_eq!(store.artifacts.len(), RUNTIME_SMART_CONTEXT_MAX_ARTIFACTS);
+    }
+
+    #[test]
+    fn compiled_artifact_eviction_enforces_byte_limit_and_equal_order_id_ties() {
+        let mut store = RuntimeSmartContextArtifactStore::default();
+        let each = RUNTIME_SMART_CONTEXT_MAX_TOTAL_BYTES / 2;
+        put(&mut store, "z", 1, each);
+        put(&mut store, "a", 1, each);
+        put(&mut store, "newest-雪", 2, each);
+        assert_eq!(store.total_bytes, 3 * each);
+        store.enforce_limits();
+        assert_eq!(store.total_bytes, 2 * each);
+        assert!(!store.artifacts.contains_key("a"));
+        assert!(store.artifacts.contains_key("z"));
+        assert!(store.artifacts.contains_key("newest-雪"));
+
+        // Persistence data may contain an overreported total. Retain the
+        // historical saturating subtraction of each removed byte length.
+        store.total_bytes = RUNTIME_SMART_CONTEXT_MAX_TOTAL_BYTES + each - 1;
+        store.enforce_limits();
+        assert_eq!(store.total_bytes, RUNTIME_SMART_CONTEXT_MAX_TOTAL_BYTES - 1);
+        assert!(!store.artifacts.contains_key("z"));
+        assert!(store.artifacts.contains_key("newest-雪"));
+    }
 }

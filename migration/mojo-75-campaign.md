@@ -7995,3 +7995,16 @@ two direct core ABI tests, the direct Mojo ABI test and source/share
 guards pass. Official share rises from 35.96076947575585% to
 35.970853048974604% (132,199 Mojo / 235,318 Rust).
 The 75% project target remains open.
+
+## Persisted Smart Context artifact count/byte eviction in Mojo (2026-10-20)
+
+The production repo-map owner now sorts oldest-first artifact
+candidates with ID-ascending ties and selects removals until both
+the persisted count and byte caps are satisfied. Rust retains the
+original artifact BTreeMap, application of selected removals and
+tracked byte updates; the previous Rust min_by and policy loop were
+deleted. All 15 artifact-store tests, two caller regressions,
+three direct core tests, a direct Mojo test and strict no-fallback
+and share guards pass. Share increases from 35.970853048974604%
+to 35.98176843960252% (132,310 Mojo / 235,404 Rust).
+The 75% target remains open.
