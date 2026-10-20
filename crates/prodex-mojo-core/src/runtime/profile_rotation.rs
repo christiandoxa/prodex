@@ -1,6 +1,17 @@
 use super::RUNTIME_PROFILE_SCHEDULE_MAX_COUNT;
 
 unsafe extern "C" {
+    fn prodex_runtime_profile_rotation_by_current_name_v1(
+        abi_version: i64,
+        names_address: u64,
+        priorities_address: u64,
+        count: i64,
+        current_name_address: u64,
+        current_name_length: i64,
+        output_address: u64,
+        output_capacity: i64,
+        written_address: u64,
+    ) -> i64;
     fn prodex_runtime_profile_rotation_order_batch(
         priorities: *const i64,
         ordered_indices: *mut i64,
@@ -9,6 +20,73 @@ unsafe extern "C" {
         current_index: i64,
         include_current: i64,
     ) -> i64;
+}
+
+/// Resolve the first exact current-profile name and apply existing compiled
+/// provider-priority rotation in one Mojo call. No Rust .position/label match.
+pub fn profile_selection_order_by_current_name(
+    names: &[&str],
+    provider_priorities: &[usize],
+    current_name: &str,
+) -> Result<Vec<usize>, crate::MojoError> {
+    use crate::MojoError;
+    if names.len() != provider_priorities.len()
+        || names.len() > RUNTIME_PROFILE_SCHEDULE_MAX_COUNT
+        || current_name.len() > 65_536
+        || names.iter().any(|name| name.len() > 65_536)
+    {
+        return Err(MojoError::InvalidInput);
+    }
+    let mut views = Vec::<u64>::new();
+    views
+        .try_reserve_exact(names.len().checked_mul(2).ok_or(MojoError::Capacity)?)
+        .map_err(|_| MojoError::Capacity)?;
+    for name in names {
+        views.extend([
+            name.as_ptr() as usize as u64,
+            u64::try_from(name.len()).map_err(|_| MojoError::InvalidInput)?,
+        ]);
+    }
+    let priorities = provider_priorities
+        .iter()
+        .map(|value| i64::try_from(*value).unwrap_or(i64::MAX))
+        .collect::<Vec<_>>();
+    let mut output = vec![-1_i64; names.len()];
+    let mut written = -1_i64;
+    match unsafe {
+        prodex_runtime_profile_rotation_by_current_name_v1(
+            1,
+            views.as_ptr() as usize as u64,
+            priorities.as_ptr() as usize as u64,
+            i64::try_from(names.len()).map_err(|_| MojoError::InvalidInput)?,
+            current_name.as_ptr() as usize as u64,
+            i64::try_from(current_name.len()).map_err(|_| MojoError::InvalidInput)?,
+            output.as_mut_ptr() as usize as u64,
+            i64::try_from(output.len()).map_err(|_| MojoError::InvalidInput)?,
+            (&mut written as *mut i64) as usize as u64,
+        )
+    } {
+        0 => {}
+        1 => return Err(MojoError::InvalidInput),
+        4 => return Err(MojoError::AbiMismatch),
+        _ => return Err(MojoError::InvalidOutput),
+    }
+    if usize::try_from(written).map_err(|_| MojoError::InvalidOutput)? != names.len() {
+        return Err(MojoError::InvalidOutput);
+    }
+    let mut seen = vec![false; names.len()];
+    output
+        .into_iter()
+        .map(|value| {
+            let index = usize::try_from(value).map_err(|_| MojoError::InvalidOutput)?;
+            let used = seen.get_mut(index).ok_or(MojoError::InvalidOutput)?;
+            if *used {
+                return Err(MojoError::InvalidOutput);
+            }
+            *used = true;
+            Ok(index)
+        })
+        .collect()
 }
 
 /// Returns the provider-priority order for a current-relative profile rotation.
@@ -91,4 +169,138 @@ pub fn profile_selection_order_batch(
     }
 
     Ok(ordered_indices)
+}
+
+#[cfg(test)]
+mod compiled_profile_rotation_name_tests {
+    use super::*;
+
+    #[test]
+    fn compiled_current_name_rotation_preserves_priority_and_current_relative_ties() {
+        let names = ["alpha", "雪", "z", "é"];
+        let priorities = [2, 0, 0, 1];
+        assert_eq!(
+            profile_selection_order_by_current_name(&names, &priorities, "雪"),
+            Ok(vec![1, 2, 3, 0]),
+        );
+        assert_eq!(
+            profile_selection_order_by_current_name(&names, &priorities, "z"),
+            Ok(vec![2, 1, 3, 0]),
+        );
+        assert_eq!(
+            profile_selection_order_by_current_name(&names, &priorities, "missing"),
+            Ok(vec![1, 2, 3, 0]),
+        );
+        assert_eq!(
+            profile_selection_order_by_current_name(&[], &[], "雪"),
+            Ok(vec![]),
+        );
+        assert_eq!(
+            profile_selection_order_by_current_name(&["", "same", "same"], &[0, 0, 0], "same",),
+            Ok(vec![1, 2, 0]),
+            "first exact duplicate name is current, even when equal priorities tie",
+        );
+        assert_eq!(
+            profile_selection_order_by_current_name(&["", "same", "same"], &[0, 0, 0], "",),
+            Ok(vec![0, 1, 2]),
+        );
+        assert_eq!(
+            profile_selection_order_by_current_name(&["alpha"], &[], "alpha"),
+            Err(crate::MojoError::InvalidInput),
+        );
+        assert_eq!(
+            profile_selection_order_by_current_name(&["alpha"], &[0], &"雪".repeat(21_846),),
+            Err(crate::MojoError::InvalidInput),
+        );
+    }
+
+    #[test]
+    fn compiled_current_name_rotation_rejects_malformed_late_views_before_writing() {
+        let known = "snow";
+        let mut names = [known.as_ptr() as usize as u64, known.len() as u64, 0, 0];
+        let mut priorities = [0_i64, 0];
+        let mut output = [73_i64; 2];
+        let mut written = 91_i64;
+        let name_ptr = names.as_ptr() as usize as u64;
+        let priority_ptr = priorities.as_ptr() as usize as u64;
+        let out = output.as_mut_ptr() as usize as u64;
+        let written_ptr = (&mut written as *mut i64) as usize as u64;
+        let current = known.as_ptr() as usize as u64;
+        for (
+            version,
+            names_address,
+            count,
+            current_addr,
+            current_len,
+            cap,
+            output_addr,
+            expected,
+        ) in [
+            (2, name_ptr, 2, current, 4, 2, out, 4),
+            (1, 0, 2, current, 4, 2, out, 1),
+            (1, name_ptr, -1, current, 4, 2, out, 1),
+            (1, name_ptr, 257, current, 4, 2, out, 1),
+            (1, name_ptr, 2, 0, 4, 2, out, 1),
+            (1, name_ptr, 2, current, -1, 2, out, 1),
+            (1, name_ptr, 2, current, 4, 1, out, 1),
+            (1, name_ptr, 2, current, 4, 2, 0, 1),
+        ] {
+            assert_eq!(
+                unsafe {
+                    prodex_runtime_profile_rotation_by_current_name_v1(
+                        version,
+                        names_address,
+                        priority_ptr,
+                        count,
+                        current_addr,
+                        current_len,
+                        output_addr,
+                        cap,
+                        written_ptr,
+                    )
+                },
+                expected,
+            );
+            assert_eq!(output, [73; 2]);
+            assert_eq!(written, 91);
+        }
+        names[3] = u64::MAX;
+        assert_eq!(
+            unsafe {
+                prodex_runtime_profile_rotation_by_current_name_v1(
+                    1,
+                    names.as_ptr() as usize as u64,
+                    priority_ptr,
+                    2,
+                    current,
+                    4,
+                    out,
+                    2,
+                    written_ptr,
+                )
+            },
+            1,
+        );
+        assert_eq!(output, [73; 2]);
+        assert_eq!(written, 91);
+        priorities[1] = -1;
+        assert_eq!(
+            unsafe {
+                prodex_runtime_profile_rotation_by_current_name_v1(
+                    1,
+                    name_ptr,
+                    priorities.as_ptr() as usize as u64,
+                    2,
+                    current,
+                    4,
+                    out,
+                    2,
+                    written_ptr,
+                )
+            },
+            1,
+        );
+        assert_eq!(output, [73; 2]);
+        assert_eq!(written, 91);
+    }
 }

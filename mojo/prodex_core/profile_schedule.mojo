@@ -1,4 +1,6 @@
 from std.memory import Pointer
+from rich_text import rich_view_valid
+from rich_types import ProdexRichStringView
 from runtime_math import (
     INT64_MAX,
     INT64_MIN,
@@ -530,4 +532,98 @@ def prodex_runtime_quota_profile_schedule_batch(
             ordered_indices[unsafe_offset=0] = affinity_index
 
     ordered_count[unsafe_offset=0] = sorted_count
+    return 0
+
+
+# Combined current-name match and stable profile rotation. The caller
+# retains the original profile strings; Mojo owns first exact name match,
+# "current" positioning and provider-priority ordering.
+comptime RUNTIME_PROFILE_CURRENT_NAME_ABI: Int64 = 1
+comptime RUNTIME_PROFILE_CURRENT_NAME_MAX_BYTES: Int64 = 65_536
+
+
+@export("prodex_runtime_profile_rotation_by_current_name_v1")
+def prodex_runtime_profile_rotation_by_current_name_v1(
+    abi_version: Int64,
+    names_address: UInt, priorities_address: UInt, count: Int64,
+    current_name_address: UInt, current_name_length: Int64,
+    output_address: UInt, output_capacity: Int64,
+    written_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != RUNTIME_PROFILE_CURRENT_NAME_ABI:
+        return 4
+    if (
+        count < 0 or count > RUNTIME_PROFILE_SCHEDULE_MAX_COUNT
+        or (count > 0 and (
+            names_address == 0 or names_address % 8 != 0
+            or priorities_address == 0 or priorities_address % 8 != 0
+        ))
+        or current_name_length < 0
+        or (current_name_length > 0 and current_name_address == 0)
+        or output_address == 0 or output_address % 8 != 0
+        or output_capacity < count
+        or written_address == 0 or written_address % 8 != 0
+    ):
+        return 1
+    var current_view = ProdexRichStringView(
+        current_name_address, UInt(current_name_length)
+    )
+    if not rich_view_valid(
+        current_view, RUNTIME_PROFILE_CURRENT_NAME_MAX_BYTES,
+    ):
+        return 1
+    var names = Pointer[mut=False, UInt64, ImmUntrackedOrigin](
+        unsafe_from_address=Int(names_address)
+    )
+    var priorities = Pointer[mut=False, Int64, ImmUntrackedOrigin](
+        unsafe_from_address=Int(priorities_address)
+    )
+    for index in range(count):
+        var offset = index * 2
+        var view = ProdexRichStringView(
+            UInt(names[unsafe_offset=offset]),
+            UInt(names[unsafe_offset=offset + 1]),
+        )
+        if not rich_view_valid(
+            view, RUNTIME_PROFILE_CURRENT_NAME_MAX_BYTES,
+        ) or priorities[unsafe_offset=index] < 0:
+            return 1
+
+    var current_index = Int64(-1)
+    var current_bytes = Pointer[mut=False, UInt8, ImmUntrackedOrigin](
+        unsafe_from_address=Int(current_name_address)
+    )
+    for index in range(count):
+        var offset = index * 2
+        var name_length = Int64(names[unsafe_offset=offset + 1])
+        if name_length != current_name_length:
+            continue
+        var name_ptr = Pointer[mut=False, UInt8, ImmUntrackedOrigin](
+            unsafe_from_address=Int(names[unsafe_offset=offset])
+        )
+        var equal = True
+        for byte_index in range(name_length):
+            if name_ptr[unsafe_offset=byte_index] != current_bytes[unsafe_offset=byte_index]:
+                equal = False
+                break
+        if equal:
+            current_index = index
+            break
+
+    var output = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    var written = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(written_address)
+    )
+    var result = prodex_runtime_profile_rotation_order_batch(
+        priorities,
+        output,
+        written,
+        count,
+        current_index,
+        Int64(current_index >= 0),
+    )
+    if result != 0:
+        return 1
     return 0

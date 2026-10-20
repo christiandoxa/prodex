@@ -95,7 +95,9 @@ pub use profile_health::{
     profile_transport_backoff_plan, profile_transport_backoff_until,
 };
 pub use profile_jitter::profile_selection_jitter;
-pub use profile_rotation::profile_selection_order_batch;
+pub use profile_rotation::{
+    profile_selection_order_batch, profile_selection_order_by_current_name,
+};
 pub use profile_route_circuit::{
     RuntimeProfileRouteCircuitAction, RuntimeProfileRouteCircuitActionInput,
     runtime_profile_route_circuit_action,
