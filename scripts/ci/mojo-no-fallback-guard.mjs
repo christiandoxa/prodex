@@ -345,6 +345,8 @@ const QUOTA_RUNTIME_LOG_ORDER_FACADE = "crates/prodex-mojo-core/src/quota.rs";
 const QUOTA_RUNTIME_LOG_ORDER_MOJO = "mojo/prodex_core/quota.mojo";
 const QUOTA_RUNTIME_LOG_ORDER_DIRECT_TEST = "mojo/tests/quota_runtime_log_order_test.mojo";
 const QUOTA_RUNTIME_LOG_ORDER_CALLER_TEST = "crates/prodex-app/src/quota_support/tests.rs";
+const QUOTA_STATE_PROFILE_CORE = "crates/prodex-mojo-core/src/quota/state_profile.rs";
+const QUOTA_STATE_PROFILE_DIRECT_TEST = "mojo/tests/quota_state_profile_selection_test.mojo";
 const PROMOTED_FILES = [
   PROVIDER_USAGE_SSE_MOJO,
   PROVIDER_USAGE_SSE_TEST,
@@ -372,6 +374,8 @@ const PROMOTED_FILES = [
   RESPONSE_HEADER_SELECTION_TEST,
   RESPONSE_HEADER_SELECTION_CALLER_TEST,
   DEEPSEEK_BUFFERED_TEXT_DIRECT_TEST,
+  QUOTA_STATE_PROFILE_CORE,
+  QUOTA_STATE_PROFILE_DIRECT_TEST,
   QUOTA_RUNTIME_LOG_ORDER_CALLER,
   QUOTA_RUNTIME_LOG_ORDER_CORE,
   QUOTA_RUNTIME_LOG_ORDER_FACADE,
@@ -4847,6 +4851,61 @@ export function findViolations(files) {
     if (filePath === STARTUP_PROBE_BATCH_CALLER_TEST) {
       return contents.includes("compiled_startup_probe_batch_preserves_over_65536_profile_order_and_remaining_slots")
         ? [] : [filePath + ": startup batch requires cross-batch caller regression"];
+    }
+    return [];
+  });
+  const quotaStateProfileMojoViolations = files.flatMap(([filePath, contents]) => {
+    if (filePath === QUOTA_RUNTIME_LOG_ORDER_CALLER &&
+        contents.includes("fn quota_state_current_profile_name(")) {
+      const start = contents.indexOf("fn quota_state_current_profile_name(");
+      const end = contents.indexOf("\nfn quota_current_runtime_profile_name(", start);
+      const body = contents.slice(start, end < 0 ? undefined : end);
+      const required = [
+        "QuotaStateProfileInput",
+        "quota_state_profile_choice(&facts, active_usable)",
+        "QuotaStateProfileChoice::LastRun(index)",
+        "QuotaStateProfileChoice::Active",
+        "QuotaStateProfileChoice::Unavailable",
+      ];
+      const retired = [".max_by(", ".or_else(||"];
+      return required.every((marker) => body.includes(marker))
+        && retired.every((marker) => !body.includes(marker))
+        ? [] : [filePath + ": quota state latest-timestamp/name and active fallback must remain Mojo-owned"];
+    }
+    if (filePath === QUOTA_STATE_PROFILE_CORE) {
+      return [
+        "fn prodex_quota_state_current_profile_v1(",
+        "pub fn quota_state_profile_choice(",
+        "compiled_quota_state_profile_picks_latest_known_and_lexically_greatest_tie",
+        "compiled_quota_state_profile_abi_rejects_malformed_late_rows_without_write",
+      ].filter((marker) => !contents.includes(marker))
+        .map((marker) => filePath + ": quota state current-profile ABI missing " + marker);
+    }
+    if (filePath === QUOTA_RUNTIME_LOG_ORDER_FACADE &&
+        contents.includes("mod state_profile;")) {
+      return contents.includes("pub use state_profile::{")
+        ? [] : [filePath + ": typed quota state profile adapter must remain reachable"];
+    }
+    if (filePath === QUOTA_RUNTIME_LOG_ORDER_MOJO &&
+        contents.includes("QUOTA_STATE_PROFILE_ABI")) {
+      return [
+        '@export("prodex_quota_state_current_profile_v1")',
+        "def quota_state_profile_name_greater(",
+        "timestamp > prior_timestamp",
+        "selected = Int64(-1 if active_profile_usable == 1 else -2)",
+      ].filter((marker) => !contents.includes(marker))
+        .map((marker) => filePath + ": quota current-state selection owner missing " + marker);
+    }
+    if (filePath === QUOTA_STATE_PROFILE_DIRECT_TEST) {
+      return contents.includes("prodex_quota_state_current_profile_v1")
+        ? [] : [filePath + ": direct quota state profile ABI test missing"];
+    }
+    if (filePath === QUOTA_RUNTIME_LOG_ORDER_CALLER_TEST) {
+      return [
+        "compiled_quota_state_profile_selection_prefers_latest_valid_and_unicode_name_ties",
+        "compiled_quota_state_profile_selection_requires_existing_active_fallback",
+      ].filter((marker) => !contents.includes(marker))
+        .map((marker) => filePath + ": real quota state profile caller regression missing " + marker);
     }
     return [];
   });
@@ -12715,7 +12774,7 @@ export function findViolations(files) {
     }
     return [];
   });
-  return [...quotaRuntimeLogOrderMojoViolations, ...repoArtifactEvictionMojoViolations, ...repoArtifactOrderMojoViolations, ...recentLogPathsMojoViolations, ...logFollowSelectionMojoViolations, ...smartContextStoreRetentionMojoViolations, ...runtimeLogTailMojoViolations, ...deepseekBufferedTextItemMojoViolations, ...runtimeSseResponseIdMojoViolations, ...upstreamPayloadBoundsMojoViolations, ...runtimeSseEventStateMojoViolations, ...geminiPatchSourceMojoViolations, ...openAiCompatSseEnvelopeMojoViolations, ...anthropicSseDataLineMojoViolations, ...responseHeaderSelectionMojoViolations, ...previousResponseTextSpanMojoViolations, ...previousResponseJsonSearchMojoViolations, ...domainErrorMojoViolations, ...geminiValueCollectionMojoViolations, ...geminiSimpleResponseViolations, ...logPayloadProjectionViolations, ...nativeRecoveryOwnershipViolations, ...quotaRecoveryEligibilityViolations, ...runtimeBrokerReuseMojoViolations, ...geminiResponseMediaMojoViolations, ...cookieEvictionMojoViolations, ...websocketBudgetMojoViolations, ...affinityBindingMojoViolations, ...responsesCapacityRecoveryViolations, ...sseTapMojoOwnershipViolations, ...quotaWatchViolations, ...geminiCompactSnippetViolations, ...geminiCompactTextViolations, ...doctorSmartContextDecisionViolations, ...providerSseJsonFrameMojoViolations, ...geminiSseCompletionOwnershipViolations, ...anthropicNativeStreamDecisionViolations, ...anthropicAttemptCursorViolations, ...geminiUnsupportedToolRetryViolations, ...terminalGeometryViolations, ...previousResponseRecoveryTransitionViolations, ...chatCompatibleToolCallKindViolations, ...geminiQuotaBodyMojoViolations, ...geminiOAuthRotationMojoViolations, ...geminiBuiltinBatchMojoViolations, ...geminiToolArrayValidationMojoViolations, ...geminiOAuthModelMojoViolations, ...superExposeOriginMojoViolations, ...kiroAcpToolLedgerMojoViolations, ...quotaPoolSummarySectionsMojoViolations, ...deepseekRequestDiagnosticViolations, ...deepseekToolShapeIssueMojoViolations, ...deepseekReplayItemPolicyMojoViolations, ...chatNamespaceSplitMojoViolations, ...deepseekInputItemIssueMessageViolations, ...deepseekRequestIssueMessageViolations, ...smartContextTelemetrySampleViolations, ...compatibilityDiagnosticsMojoViolations, ...quotaHeaderProjectionViolations, ...smartContextCapsuleOrderViolations, ...markerViolations, ...deepseekCatalogPolicyViolations, ...featureOffViolations, ...liveLogRecordViolations, ...runtimePolicyPresetViolations, ...runtimeConfigScalarViolations, ...profileHealthCircuitViolations, ...logThroughputViolations, ...operationalDetailSpecViolations, ...transcriptPolicyViolations, ...logLoadPolicyViolations, ...routeReasonViolations, ...quotaSnapshotCompareMojoViolations, ...startupProbeBatchMojoViolations, ...runtimeStateQuotaViolations, ...runtimeStateRoutePolicyViolations, ...runtimeProxyRootViolations, ...runtimeRecoveryDeadlineViolations, ...brokerVersionGuardViolations, ...brokerContinuityViolations, ...brokerLogCacheViolations, ...codexConfigViolations, ...statePolicyViolations, ...quotaSelectionPolicyViolations, ...routeTagMirrorViolations, ...enumTagMirrorViolations, ...appSelectionPolicyMirrorViolations, ...runtimeStateBackgroundViolations, ...redactionViolations, ...rateLimitHeaderSelectionViolations, ...profileIdentityViolations, ...governanceInspectionViolations, ...governanceInspectionOrderingViolations, ...exactnessPlannerViolations,
+  return [...quotaStateProfileMojoViolations, ...quotaRuntimeLogOrderMojoViolations, ...repoArtifactEvictionMojoViolations, ...repoArtifactOrderMojoViolations, ...recentLogPathsMojoViolations, ...logFollowSelectionMojoViolations, ...smartContextStoreRetentionMojoViolations, ...runtimeLogTailMojoViolations, ...deepseekBufferedTextItemMojoViolations, ...runtimeSseResponseIdMojoViolations, ...upstreamPayloadBoundsMojoViolations, ...runtimeSseEventStateMojoViolations, ...geminiPatchSourceMojoViolations, ...openAiCompatSseEnvelopeMojoViolations, ...anthropicSseDataLineMojoViolations, ...responseHeaderSelectionMojoViolations, ...previousResponseTextSpanMojoViolations, ...previousResponseJsonSearchMojoViolations, ...domainErrorMojoViolations, ...geminiValueCollectionMojoViolations, ...geminiSimpleResponseViolations, ...logPayloadProjectionViolations, ...nativeRecoveryOwnershipViolations, ...quotaRecoveryEligibilityViolations, ...runtimeBrokerReuseMojoViolations, ...geminiResponseMediaMojoViolations, ...cookieEvictionMojoViolations, ...websocketBudgetMojoViolations, ...affinityBindingMojoViolations, ...responsesCapacityRecoveryViolations, ...sseTapMojoOwnershipViolations, ...quotaWatchViolations, ...geminiCompactSnippetViolations, ...geminiCompactTextViolations, ...doctorSmartContextDecisionViolations, ...providerSseJsonFrameMojoViolations, ...geminiSseCompletionOwnershipViolations, ...anthropicNativeStreamDecisionViolations, ...anthropicAttemptCursorViolations, ...geminiUnsupportedToolRetryViolations, ...terminalGeometryViolations, ...previousResponseRecoveryTransitionViolations, ...chatCompatibleToolCallKindViolations, ...geminiQuotaBodyMojoViolations, ...geminiOAuthRotationMojoViolations, ...geminiBuiltinBatchMojoViolations, ...geminiToolArrayValidationMojoViolations, ...geminiOAuthModelMojoViolations, ...superExposeOriginMojoViolations, ...kiroAcpToolLedgerMojoViolations, ...quotaPoolSummarySectionsMojoViolations, ...deepseekRequestDiagnosticViolations, ...deepseekToolShapeIssueMojoViolations, ...deepseekReplayItemPolicyMojoViolations, ...chatNamespaceSplitMojoViolations, ...deepseekInputItemIssueMessageViolations, ...deepseekRequestIssueMessageViolations, ...smartContextTelemetrySampleViolations, ...compatibilityDiagnosticsMojoViolations, ...quotaHeaderProjectionViolations, ...smartContextCapsuleOrderViolations, ...markerViolations, ...deepseekCatalogPolicyViolations, ...featureOffViolations, ...liveLogRecordViolations, ...runtimePolicyPresetViolations, ...runtimeConfigScalarViolations, ...profileHealthCircuitViolations, ...logThroughputViolations, ...operationalDetailSpecViolations, ...transcriptPolicyViolations, ...logLoadPolicyViolations, ...routeReasonViolations, ...quotaSnapshotCompareMojoViolations, ...startupProbeBatchMojoViolations, ...runtimeStateQuotaViolations, ...runtimeStateRoutePolicyViolations, ...runtimeProxyRootViolations, ...runtimeRecoveryDeadlineViolations, ...brokerVersionGuardViolations, ...brokerContinuityViolations, ...brokerLogCacheViolations, ...codexConfigViolations, ...statePolicyViolations, ...quotaSelectionPolicyViolations, ...routeTagMirrorViolations, ...enumTagMirrorViolations, ...appSelectionPolicyMirrorViolations, ...runtimeStateBackgroundViolations, ...redactionViolations, ...rateLimitHeaderSelectionViolations, ...profileIdentityViolations, ...governanceInspectionViolations, ...governanceInspectionOrderingViolations, ...exactnessPlannerViolations,
     ...infoRunwayViolations,
     ...geminiNormalizedViolations,
     ...quotaDurationViolations,
@@ -13884,6 +13943,19 @@ function selfTest() {
   assert.match(findViolations([[RESPONSE_FORWARDING_FILE,
     responseHeaderFixture + "\nheaders.into_iter().any(|(name, value)| ...)",
   ]]).join("\n"), /first-header, binary MIME and SSE flush selection must stay Mojo-owned/u);
+  const quotaStateFixture = [
+    "fn quota_state_current_profile_name(",
+    "QuotaStateProfileInput",
+    "quota_state_profile_choice(&facts, active_usable)",
+    "QuotaStateProfileChoice::LastRun(index)",
+    "QuotaStateProfileChoice::Active",
+    "QuotaStateProfileChoice::Unavailable",
+  ].join("\\n");
+  assert.deepEqual(findViolations([[QUOTA_RUNTIME_LOG_ORDER_CALLER, quotaStateFixture]]).filter(
+    (message) => message.includes("quota state latest-timestamp/name")), []);
+  assert.match(findViolations([[QUOTA_RUNTIME_LOG_ORDER_CALLER,
+    quotaStateFixture + "\\n.max_by(",
+  ]]).join("\\n"), /quota state latest-timestamp\/name and active fallback must remain Mojo-owned/u);
   const quotaRuntimeLogFixture = [
     "fn quota_current_runtime_profile_name_from_paths<",
     "QuotaRuntimeLogOrderInput",
