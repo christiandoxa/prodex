@@ -86,6 +86,14 @@ pub struct PreviousResponsePlan {
 }
 
 unsafe extern "C" {
+    fn prodex_mojo_previous_response_json_search_v1(
+        abi_version: i64,
+        operation: i64,
+        nodes_address: u64,
+        node_count: i64,
+        fields_address: u64,
+        output_address: u64,
+    ) -> i64;
     fn prodex_mojo_rich_model_fallback_v2(
         abi_version: i64,
         provider: u64,
@@ -280,6 +288,150 @@ pub fn runtime_retry_after_millis(mode: i64, number: &str) -> Result<Option<u64>
         -1 => Ok(None),
         1..=RUNTIME_RETRY_AFTER_CAP_MILLIS => Ok(Some(value as u64)),
         -2 => Err(MojoError::InvalidInput),
+        _ => Err(MojoError::InvalidOutput),
+    }
+}
+
+/// Borrowed field observations, without any host-owned alias selection.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct PreviousResponseJsonObjectFields<'a> {
+    pub error_type: Option<&'a str>,
+    pub code: Option<&'a str>,
+    pub param: Option<&'a str>,
+    pub message: Option<&'a str>,
+    pub detail: Option<&'a str>,
+    pub error: Option<&'a str>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(i64)]
+pub enum PreviousResponseJsonOperation {
+    Message = 0,
+    InvalidId = 1,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PreviousResponseJsonTextField {
+    Message,
+    Detail,
+    Error,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PreviousResponseJsonSelection {
+    None,
+    Message {
+        object_index: usize,
+        field: PreviousResponseJsonTextField,
+    },
+    DefaultNotFound,
+    InvalidId(usize),
+}
+
+pub fn previous_response_json_search(
+    nodes: &[crate::json::JsonNode<'_>],
+    fields: &[PreviousResponseJsonObjectFields<'_>],
+    operation: PreviousResponseJsonOperation,
+) -> Result<PreviousResponseJsonSelection, MojoError> {
+    ensure_rich_abi()?;
+    if nodes.is_empty() || nodes.len() > 2048 || nodes.len() != fields.len() {
+        return Err(MojoError::InvalidInput);
+    }
+    let ffi = crate::json::ffi_nodes(nodes, "")?;
+    let mut borrowed = Vec::<u64>::new();
+    borrowed
+        .try_reserve_exact(fields.len().checked_mul(18).ok_or(MojoError::Capacity)?)
+        .map_err(|_| MojoError::Capacity)?;
+    for field in fields {
+        for value in [
+            field.error_type,
+            field.code,
+            field.param,
+            field.message,
+            field.detail,
+            field.error,
+        ] {
+            if let Some(value) = value {
+                borrowed.extend([
+                    1,
+                    value.as_ptr() as usize as u64,
+                    u64::try_from(value.len()).map_err(|_| MojoError::InvalidInput)?,
+                ]);
+            } else {
+                borrowed.extend([0, 0, 0]);
+            }
+        }
+    }
+    let mut result = [-3_i64; 3];
+    match unsafe {
+        prodex_mojo_previous_response_json_search_v1(
+            1,
+            operation as i64,
+            ffi.as_ptr() as usize as u64,
+            i64::try_from(ffi.len()).map_err(|_| MojoError::InvalidInput)?,
+            borrowed.as_ptr() as usize as u64,
+            result.as_mut_ptr() as usize as u64,
+        )
+    } {
+        0 => {}
+        1 => return Err(MojoError::InvalidInput),
+        4 => return Err(MojoError::AbiMismatch),
+        _ => return Err(MojoError::InvalidOutput),
+    }
+    match (operation, result) {
+        (_, [-1, PREVIOUS_RESPONSE_ERROR_CLASS_NONE, -1]) => {
+            Ok(PreviousResponseJsonSelection::None)
+        }
+        (
+            PreviousResponseJsonOperation::Message,
+            [-2, PREVIOUS_RESPONSE_ERROR_CLASS_NOT_FOUND, -1],
+        ) => Ok(PreviousResponseJsonSelection::DefaultNotFound),
+        (PreviousResponseJsonOperation::Message, [index, kind, field_index])
+            if index >= 0
+                && matches!(
+                    kind,
+                    PREVIOUS_RESPONSE_ERROR_CLASS_NOT_FOUND
+                        | PREVIOUS_RESPONSE_ERROR_CLASS_INVALID_ID
+                        | PREVIOUS_RESPONSE_ERROR_CLASS_TOOL_CONTEXT
+                ) =>
+        {
+            let index = usize::try_from(index).map_err(|_| MojoError::InvalidOutput)?;
+            let field = match field_index {
+                3 => PreviousResponseJsonTextField::Message,
+                4 => PreviousResponseJsonTextField::Detail,
+                5 => PreviousResponseJsonTextField::Error,
+                _ => return Err(MojoError::InvalidOutput),
+            };
+            let node = nodes.get(index).ok_or(MojoError::InvalidOutput)?;
+            let row = fields.get(index).ok_or(MojoError::InvalidOutput)?;
+            if !matches!(node.kind, crate::json::JsonKind::Object)
+                || match field {
+                    PreviousResponseJsonTextField::Message => row.message,
+                    PreviousResponseJsonTextField::Detail => row.detail,
+                    PreviousResponseJsonTextField::Error => row.error,
+                }
+                .is_none()
+            {
+                return Err(MojoError::InvalidOutput);
+            }
+            Ok(PreviousResponseJsonSelection::Message {
+                object_index: index,
+                field,
+            })
+        }
+        (
+            PreviousResponseJsonOperation::InvalidId,
+            [index, PREVIOUS_RESPONSE_ERROR_CLASS_INVALID_ID, -1],
+        ) if index >= 0 => {
+            let index = usize::try_from(index).map_err(|_| MojoError::InvalidOutput)?;
+            if !nodes
+                .get(index)
+                .is_some_and(|node| matches!(node.kind, crate::json::JsonKind::Object))
+            {
+                return Err(MojoError::InvalidOutput);
+            }
+            Ok(PreviousResponseJsonSelection::InvalidId(index))
+        }
         _ => Err(MojoError::InvalidOutput),
     }
 }
@@ -770,3 +922,7 @@ mod retry_after_text_tests;
 #[cfg(test)]
 #[path = "fallback/rate_limit_header_presence_tests.rs"]
 mod rate_limit_header_presence_tests;
+
+#[cfg(test)]
+#[path = "fallback/previous_response_json_search_tests.rs"]
+mod previous_response_json_search_tests;
