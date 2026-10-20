@@ -332,3 +332,84 @@ def prodex_live_log_oldest_path_v1(
         unsafe_from_address=Int(output_address)
     )[] = index
     return LIVE_LOG_RECORD_OK
+
+
+# Canonical compact JSON output when an oversized live record retains only
+# selected event/pid/timestamp metadata and a fixed truncation marker.
+# The Rust host serializes existing Serde field values only; the compiled
+# owner chooses ordering, conditional emission, punctuation and newline.
+from json_sink import JsonSink, js_byte, js_literal, js_view
+from rich_text import rich_view_valid
+from rich_types import ProdexRichStringView
+
+comptime LIVE_LOG_COMPACT_FIELD_COUNT: Int64 = 3
+
+
+def live_log_compact_field(
+    rows: Pointer[mut=False, UInt64, _], index: Int64,
+) -> ProdexRichStringView:
+    return ProdexRichStringView(
+        UInt(rows[unsafe_offset=index * 3 + 1]),
+        UInt(rows[unsafe_offset=index * 3 + 2]),
+    )
+
+
+@export("prodex_live_log_compact_json_v1")
+def prodex_live_log_compact_json_v1(
+    abi_version: Int64, fields_address: UInt, field_count: Int64,
+    output_address: UInt, output_capacity: Int64, measuring: Int64,
+    written_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != LIVE_LOG_RECORD_ABI_VERSION:
+        return LIVE_LOG_RECORD_ABI
+    if (
+        fields_address == 0 or fields_address % 8 != 0
+        or field_count != LIVE_LOG_COMPACT_FIELD_COUNT
+        or written_address == 0 or written_address % 8 != 0
+        or output_capacity < 0 or (measuring != 0 and measuring != 1)
+        or (measuring == 1 and (output_address != 0 or output_capacity != 0))
+        or (measuring == 0 and output_address == 0)
+    ):
+        return LIVE_LOG_RECORD_INVALID
+    var fields = Pointer[mut=False, UInt64, ImmUntrackedOrigin](
+        unsafe_from_address=Int(fields_address)
+    )
+    for index in range(LIVE_LOG_COMPACT_FIELD_COUNT):
+        var tag = fields[unsafe_offset=index * 3]
+        var address = fields[unsafe_offset=index * 3 + 1]
+        var length = fields[unsafe_offset=index * 3 + 2]
+        if tag > 1:
+            return LIVE_LOG_RECORD_INVALID
+        if tag == 0 and (address != 0 or length != 0):
+            return LIVE_LOG_RECORD_INVALID
+        if tag == 1 and not rich_view_valid(
+            ProdexRichStringView(UInt(address), UInt(length)),
+            0x7FFFFFFFFFFFFFFF,
+        ):
+            return LIVE_LOG_RECORD_INVALID
+    var sink = JsonSink(
+        Pointer[mut=True, UInt8, MutUntrackedOrigin](
+            unsafe_from_address=Int(output_address)
+        ), output_capacity, 0, measuring == 1, False,
+    )
+    if fields[unsafe_offset=0] == 1:
+        js_literal(Pointer(to=sink), StringSlice('{"event":'))
+        js_view(Pointer(to=sink), live_log_compact_field(fields, 0))
+        js_byte(Pointer(to=sink), 44)
+    else:
+        js_byte(Pointer(to=sink), 123)
+    js_literal(Pointer(to=sink), StringSlice('"message":"[live log record truncated]"'))
+    if fields[unsafe_offset=3] == 1:
+        js_literal(Pointer(to=sink), StringSlice(',"pid":'))
+        js_view(Pointer(to=sink), live_log_compact_field(fields, 1))
+    if fields[unsafe_offset=6] == 1:
+        js_literal(Pointer(to=sink), StringSlice(',"timestamp":'))
+        js_view(Pointer(to=sink), live_log_compact_field(fields, 2))
+    js_byte(Pointer(to=sink), 125)
+    js_byte(Pointer(to=sink), 10)
+    if sink.failed:
+        return LIVE_LOG_RECORD_CAPACITY
+    Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(written_address)
+    )[] = sink.written
+    return LIVE_LOG_RECORD_OK

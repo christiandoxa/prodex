@@ -7689,3 +7689,14 @@ Gemini value ABI tests and no-fallback/production metric checks pass.
 The official share increases from 35.78999741606329% to
 35.803093429485415% (130,276 Mojo / 233,592 Rust).
 The 75% project target remains unmet.
+
+## Live-log compact metadata JSON emitted by compiled Mojo (2026-10-20)
+
+The compiled live-log owner now materializes the canonical compact
+event/message/pid/timestamp JSON and truncation marker through a
+versioned measured-output ABI. Rust only provides Serde-canonical field
+values; the old Map assembly and Rust compact renderer were deleted.
+Thirty runtime-log tests, direct core and Mojo ABI tests, and all source
+and production-share guards pass. Official share rises from
+35.803093429485415% to 35.80922552817385%
+(130,342 Mojo / 233,648 Rust). The 75% project target remains open.

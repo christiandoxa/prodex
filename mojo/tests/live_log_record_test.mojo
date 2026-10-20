@@ -12,6 +12,7 @@ from live_log_record import (
     prodex_live_log_string_clip_end_v1,
     prodex_live_log_retention_trim_v1,
     prodex_live_log_oldest_path_v1,
+    prodex_live_log_compact_json_v1,
 )
 
 comptime EXPECTED_LIVE_LOG_RECORD_MAX_BYTES: Int64 = 128 * 1024
@@ -264,6 +265,50 @@ def test_retention_thresholds_and_stable_oldest_path() raises:
     assert decision[0] == 83
 
 
+def test_compact_json_renders_metadata_and_validates_capacity() raises:
+    var fields = List[UInt64]()
+    var event = StringSlice('"echo"')
+    var pid = StringSlice("3")
+    var timestamp = StringSlice("null")
+    for (_, value) in [
+        (0, event), (1, pid), (2, timestamp)
+    ]:
+        fields.append(1)
+        fields.append(UInt64(UInt(Int(value.unsafe_ptr()))))
+        fields.append(UInt64(value.byte_length()))
+    var written = List[Int64]()
+    written.append(-1)
+    assert prodex_live_log_compact_json_v1(
+        1, UInt(Int(fields.unsafe_ptr())), 3, 0, 0, 1,
+        UInt(Int(written.unsafe_ptr())),
+    ) == LIVE_LOG_RECORD_OK
+    var expected = StringSlice('{"event":"echo","message":"[live log record truncated]","pid":3,"timestamp":null}\n')
+    assert written[0] == Int64(expected.byte_length())
+    var bytes = List[UInt8]()
+    for _ in range(Int(expected.byte_length())):
+        bytes.append(77)
+    assert prodex_live_log_compact_json_v1(
+        1, UInt(Int(fields.unsafe_ptr())), 3,
+        UInt(Int(bytes.unsafe_ptr())), Int64(len(bytes)), 0,
+        UInt(Int(written.unsafe_ptr())),
+    ) == LIVE_LOG_RECORD_OK
+    var expected_ptr = expected.unsafe_ptr()
+    for index in range(Int(expected.byte_length())):
+        assert bytes[index] == expected_ptr[unsafe_offset=index]
+    written[0] = 81
+    assert prodex_live_log_compact_json_v1(
+        1, UInt(Int(fields.unsafe_ptr())), 3,
+        UInt(Int(bytes.unsafe_ptr())), 4, 0,
+        UInt(Int(written.unsafe_ptr())),
+    ) == LIVE_LOG_RECORD_CAPACITY
+    assert written[0] == 81
+    assert prodex_live_log_compact_json_v1(
+        2, UInt(Int(fields.unsafe_ptr())), 3, 0, 0, 1,
+        UInt(Int(written.unsafe_ptr())),
+    ) == 4
+    assert written[0] == 81
+
+
 def main() raises:
     test_record_limit_and_serialized_json_fallback()
     test_nested_string_clip_keeps_ascii_and_unicode_character_boundaries()
@@ -271,3 +316,4 @@ def main() raises:
     test_plain_text_truncation_keeps_unicode_character_crossing_prefix_limit()
     test_snapshot_plan_pages_after_cursor_and_rejects_unsorted_input()
     test_retention_thresholds_and_stable_oldest_path()
+    test_compact_json_renders_metadata_and_validates_capacity()
