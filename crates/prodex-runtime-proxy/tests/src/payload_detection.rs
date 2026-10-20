@@ -960,3 +960,31 @@ fn compiled_previous_response_json_search_stops_after_first_preorder_match() {
         Some("accepted".to_string()),
     );
 }
+
+#[test]
+fn compiled_previous_response_text_selection_trims_unicode_and_preserves_original_message() {
+    for (text, expected) in [
+        ("", None),
+        (" \t\n\u{3000}", None),
+        (
+            " \u{2003}previous_response_not_found \u{3000} ",
+            Some("previous_response_not_found"),
+        ),
+        (
+            " \tPrevious response with id 'resp-雪' not found.\u{2003}",
+            Some("Previous response with id 'resp-雪' not found."),
+        ),
+        ("output mentioning previous_response_not_found", None),
+        ("no ordinary failure here", None),
+    ] {
+        assert_eq!(
+            extract_runtime_proxy_previous_response_message_from_text(text).as_deref(),
+            expected,
+            "{text:?}",
+        );
+    }
+    assert_eq!(
+        extract_runtime_proxy_previous_response_message(b" \tprevious_response_not_found\n",),
+        Some("previous_response_not_found".to_string()),
+    );
+}

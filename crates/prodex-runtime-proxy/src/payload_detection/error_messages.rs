@@ -196,30 +196,8 @@ pub fn runtime_proxy_body_is_invalid_previous_response_id(body: &[u8]) -> bool {
         .is_some_and(|value| runtime_proxy_value_is_invalid_previous_response_id(&value))
 }
 
-const PREVIOUS_RESPONSE_ERROR_CLASS_NONE: i64 = 0;
-
 pub fn extract_runtime_proxy_previous_response_message_from_text(text: &str) -> Option<String> {
-    let trimmed = text.trim();
-    if trimmed.is_empty() {
-        return None;
-    }
-    (runtime_previous_response_class(false, None, None, None, Some(trimmed))
-        != PREVIOUS_RESPONSE_ERROR_CLASS_NONE)
-        .then(|| trimmed.to_string())
-}
-
-fn runtime_previous_response_class(
-    structured: bool,
-    error_type: Option<&str>,
-    code: Option<&str>,
-    param: Option<&str>,
-    message: Option<&str>,
-) -> i64 {
-    let mode = if structured {
-        prodex_mojo_core::rich::PREVIOUS_RESPONSE_ERROR_MODE_STRUCTURED
-    } else {
-        prodex_mojo_core::rich::PREVIOUS_RESPONSE_ERROR_MODE_TEXT
-    };
-    prodex_mojo_core::rich::previous_response_error_class(mode, error_type, code, param, message)
-        .expect("Mojo previous-response classifier returned an invalid result")
+    prodex_mojo_core::rich::previous_response_text_message_span(text)
+        .expect("compiled Mojo previous-response text-message selection failed")
+        .map(str::to_string)
 }
