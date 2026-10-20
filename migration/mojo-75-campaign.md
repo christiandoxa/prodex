@@ -7564,3 +7564,15 @@ extraction. Three strict scalar ABI tests, public provider caller regressions,
 all 512 provider-core tests and no-fallback guards pass. Official share rises
 from 35.737343386031895% to 35.74326074615431% (129,703 Mojo / 233,171
 Rust LOC). The 75% target remains outstanding.
+
+## Gemini stream error status/message projection moved to Mojo (2026-10-20)
+
+The shared compiled Gemini value owner now projects embedded stream errors:
+error presence, status-over-code precedence, signed 64-bit decimal codes,
+Unicode messages and original fallback diagnostic strings. Rust acquires
+only the Serde-decoded `error` member and decodes the typed Mojo output;
+its old field selection/default error mapper was deleted. The strict
+provider suite (513), six direct core tests, scalar-number edge cases,
+source guard and production-share regression check pass. Official share
+rises from 35.74326074615431% to 35.75250743965612%
+(129,753 Mojo / 233,167 Rust); the 75% project target remains unmet.

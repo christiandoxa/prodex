@@ -11,6 +11,7 @@ pub enum GeminiValueOperation {
     Strings = 0,
     Paths = 1,
     InputTexts = 2,
+    StreamError = 3,
 }
 
 unsafe extern "C" {
@@ -144,6 +145,44 @@ mod tests {
     }
 
     #[test]
+    fn compiled_gemini_stream_error_reads_serde_number_lexemes_and_missing_errors() {
+        let mut nodes = [
+            node(JsonKind::Object, "", "", None, Some(1), None),
+            node(JsonKind::Object, "error", "", Some(0), Some(2), None),
+            node(JsonKind::Number, "status", "", Some(1), None, Some(3)),
+            node(JsonKind::String, "message", "🚀", Some(1), None, None),
+        ];
+        nodes[2].raw_length = 3;
+        let op = GeminiValueOperation::StreamError;
+        assert_eq!(
+            gemini_value_projection(&nodes, "404", op).unwrap(),
+            "[\"404\",\"🚀\"]".as_bytes(),
+        );
+        nodes[2].raw_length = 4;
+        assert_eq!(
+            gemini_value_projection(&nodes, "1.25", op).unwrap(),
+            "[\"provider_stream_error\",\"🚀\"]".as_bytes(),
+        );
+        nodes[2].raw_length = 20;
+        assert_eq!(
+            gemini_value_projection(&nodes, "18446744073709551615", op).unwrap(),
+            "[\"provider_stream_error\",\"🚀\"]".as_bytes(),
+        );
+        nodes[2].kind = JsonKind::String;
+        nodes[2].raw_length = 0;
+        nodes[2].text = "";
+        assert_eq!(
+            gemini_value_projection(&nodes, "", op).unwrap(),
+            "[\"\",\"🚀\"]".as_bytes(),
+        );
+        nodes[0].first_child = None;
+        assert_eq!(
+            gemini_value_projection(&nodes[..1], "", op),
+            Ok(b"null".to_vec())
+        );
+    }
+
+    #[test]
     fn compiled_gemini_scalar_tool_parts_preserves_unicode_whitespace_and_last_close() {
         for (input, expected) in [
             ("tool(regex)", Some(("tool", "regex"))),
@@ -261,7 +300,7 @@ mod tests {
         let mut scratch = [0_u64; 4];
         let mut metadata = [99_i64; 2];
         for (version, operation, scratch_count, expected) in
-            [(2, 0, 4, 4), (1, -1, 4, 1), (1, 3, 4, 1), (1, 0, 1, 1)]
+            [(2, 0, 4, 4), (1, -1, 4, 1), (1, 4, 4, 1), (1, 0, 1, 1)]
         {
             let result = unsafe {
                 prodex_mojo_gemini_value_policy_v1(

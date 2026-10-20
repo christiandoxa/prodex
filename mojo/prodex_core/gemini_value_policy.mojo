@@ -4,16 +4,17 @@
 from std.memory import Pointer
 from rich_text import rich_trim_bounds, rich_view_matches_literal, rich_view_ptr, rich_view_valid
 from parsed_json import (
-    JSON_ARRAY, JSON_OBJECT, JSON_STRING, ParsedJson, ParsedJsonNode,
-    pj_child, pj_field, pj_kind, pj_next, pj_text, pj_trim, pj_valid,
+    JSON_ARRAY, JSON_OBJECT, JSON_STRING, JSON_NUMBER, ParsedJson, ParsedJsonNode,
+    pj_child, pj_field, pj_kind, pj_next, pj_text, pj_trim, pj_valid, pj_literal,
 )
-from json_sink import JsonSink, js_byte, js_string
+from json_sink import JsonSink, js_byte, js_string, js_literal, js_raw_view
 from rich_types import ProdexRichStringView
 
 comptime GEMINI_VALUE_ABI: Int64 = 1
 comptime GEMINI_VALUE_STRINGS: Int64 = 0
 comptime GEMINI_VALUE_PATHS: Int64 = 1
 comptime GEMINI_VALUE_INPUT_TEXT: Int64 = 2
+comptime GEMINI_VALUE_STREAM_ERROR: Int64 = 3
 
 
 def gemini_value_emit(
@@ -73,6 +74,59 @@ def gemini_value_collect(
     js_byte(sink, 93)
 
 
+# Serde Number::as_i64 accepts decimal integers in the signed 64-bit range,
+# but not fractional/exponent values nor out-of-range unsigned integers.
+# Serde has already canonicalized the lexical representation in the host.
+def gemini_value_signed_integer(view: ProdexRichStringView) -> Bool:
+    if view.len == 0:
+        return False
+    var source = rich_view_ptr(view)
+    var cursor: Int64 = 0
+    var negative = source[unsafe_offset=0] == 45
+    if negative:
+        cursor = 1
+    if cursor >= Int64(view.len):
+        return False
+    var maximum = UInt64(9223372036854775808) if negative else UInt64(9223372036854775807)
+    var value = UInt64(0)
+    while cursor < Int64(view.len):
+        var byte = source[unsafe_offset=cursor]
+        if byte < 48 or byte > 57:
+            return False
+        var digit = UInt64(byte - 48)
+        if value > (maximum - digit) // UInt64(10):
+            return False
+        value = value * UInt64(10) + digit
+        cursor += 1
+    return True
+
+
+def gemini_value_stream_error(sink: Pointer[mut=True, JsonSink, _], tree: ParsedJson):
+    var error = pj_field(tree, 0, StringSlice("error"))
+    if error < 0:
+        js_literal(sink, StringSlice("null"))
+        return
+    var code = pj_field(tree, error, StringSlice("status"))
+    if code < 0:
+        code = pj_field(tree, error, StringSlice("code"))
+    var code_text = pj_literal(StringSlice("provider_stream_error"))
+    if pj_kind(tree, code) == JSON_STRING:
+        code_text = pj_text(tree, code)
+    elif pj_kind(tree, code) == JSON_NUMBER:
+        var numeric_text = js_raw_view(tree, code)
+        if gemini_value_signed_integer(numeric_text):
+            code_text = numeric_text.copy()
+    var message_node = pj_field(tree, error, StringSlice("message"))
+    var message = pj_literal(StringSlice("Gemini stream returned an embedded provider error"))
+    if pj_kind(tree, message_node) == JSON_STRING:
+        message = pj_text(tree, message_node)
+    js_byte(sink, 91)
+    js_string(sink, code_text)
+    js_byte(sink, 44)
+    js_string(sink, message)
+    js_byte(sink, 93)
+
+
 @export("prodex_mojo_gemini_value_policy_v1")
 def prodex_mojo_gemini_value_policy_v1(
     abi: Int64, operation: Int64, flag: Int64,
@@ -83,7 +137,7 @@ def prodex_mojo_gemini_value_policy_v1(
     if abi != GEMINI_VALUE_ABI:
         return 4
     if (
-        operation < GEMINI_VALUE_STRINGS or operation > GEMINI_VALUE_INPUT_TEXT
+        operation < GEMINI_VALUE_STRINGS or operation > GEMINI_VALUE_STREAM_ERROR
         or flag != 0 or node_count <= 0 or nodes_address == 0
         or nodes_address % 8 != 0 or raw_length < 0
         or (raw_length > 0 and raw_address == 0)
@@ -107,7 +161,10 @@ def prodex_mojo_gemini_value_policy_v1(
             unsafe_from_address=Int(output_address)
         ), output_capacity, 0, measuring == 1, False,
     )
-    gemini_value_collect(Pointer(to=sink), tree, operation)
+    if operation == GEMINI_VALUE_STREAM_ERROR:
+        gemini_value_stream_error(Pointer(to=sink), tree)
+    else:
+        gemini_value_collect(Pointer(to=sink), tree, operation)
     if sink.failed:
         return 3
     var metadata = Pointer[mut=True, Int64, MutUntrackedOrigin](
