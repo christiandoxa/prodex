@@ -11,6 +11,52 @@ const MAX_SESSION_ID_BYTES: usize = 45;
 const MAX_SEEN_CURSORS: usize = 65_536;
 const MAX_SEEN_CURSOR_BYTES: usize = 16 * 1024 * 1024;
 
+/// Compiled descending filename priority for valid state_*.sqlite
+/// candidates. Original filesystem paths remain owned by the caller.
+pub fn thread_state_database_filename_order(names: &[&str]) -> Result<Vec<usize>, MojoError> {
+    if names.len() > 65_536 || names.iter().any(|name| name.len() > MAX_SESSION_STEM_BYTES) {
+        return Err(MojoError::InvalidInput);
+    }
+    let mut views = Vec::<u64>::new();
+    views
+        .try_reserve_exact(names.len().checked_mul(2).ok_or(MojoError::Capacity)?)
+        .map_err(|_| MojoError::Capacity)?;
+    for name in names {
+        views.extend([
+            name.as_ptr() as usize as u64,
+            u64::try_from(name.len()).map_err(|_| MojoError::InvalidInput)?,
+        ]);
+    }
+    let mut output = vec![-1_i64; names.len()];
+    match unsafe {
+        prodex_runtime_thread_index_database_order_v1(
+            ABI_VERSION,
+            views.as_ptr() as usize as u64,
+            i64::try_from(names.len()).map_err(|_| MojoError::InvalidInput)?,
+            output.as_mut_ptr() as usize as u64,
+            i64::try_from(output.len()).map_err(|_| MojoError::InvalidInput)?,
+        )
+    } {
+        0 => {}
+        1 => return Err(MojoError::InvalidInput),
+        4 => return Err(MojoError::AbiMismatch),
+        _ => return Err(MojoError::InvalidOutput),
+    }
+    let mut seen = vec![false; names.len()];
+    output
+        .into_iter()
+        .map(|value| {
+            let index = usize::try_from(value).map_err(|_| MojoError::InvalidOutput)?;
+            let previous = seen.get_mut(index).ok_or(MojoError::InvalidOutput)?;
+            if *previous {
+                return Err(MojoError::InvalidOutput);
+            }
+            *previous = true;
+            Ok(index)
+        })
+        .collect()
+}
+
 const OP_START: i64 = 0;
 const OP_RESPONSE: i64 = 1;
 const OP_EOF: i64 = 2;
@@ -26,6 +72,13 @@ const CURSORS_CLEAR: i64 = 1;
 const CURSORS_APPEND: i64 = 2;
 
 unsafe extern "C" {
+    fn prodex_runtime_thread_index_database_order_v1(
+        abi_version: i64,
+        views_address: u64,
+        count: i64,
+        output_address: u64,
+        output_capacity: i64,
+    ) -> i64;
     fn prodex_runtime_thread_index_session_id_v1(
         abi_version: i64,
         stem_address: u64,
@@ -702,4 +755,99 @@ pub fn dirty_marker_contents(path: &str) -> Result<Vec<u8>, MojoError> {
     })?;
     output.truncate(checked_length(written, output.len())?);
     Ok(output)
+}
+
+#[cfg(test)]
+mod compiled_state_database_filename_order_tests {
+    use super::*;
+
+    #[test]
+    fn compiled_thread_state_database_filename_order_descends_lexically_and_stably() {
+        let names = [
+            "state_10.sqlite",
+            "state_9.sqlite",
+            "state_雪.sqlite",
+            "state_a.sqlite",
+            "state_é.sqlite",
+            "state_10.sqlite",
+        ];
+        assert_eq!(
+            thread_state_database_filename_order(&names),
+            Ok(vec![2, 4, 3, 1, 0, 5]),
+        );
+        assert_eq!(thread_state_database_filename_order(&[]), Ok(vec![]));
+        let descending = (0..1025)
+            .map(|index| format!("state_{index:04}.sqlite"))
+            .collect::<Vec<_>>();
+        let borrowed = descending.iter().map(String::as_str).collect::<Vec<_>>();
+        let indices = thread_state_database_filename_order(&borrowed).unwrap();
+        assert_eq!(indices.len(), 1025);
+        assert_eq!(indices[0], 1024);
+        assert_eq!(indices[1024], 0);
+        assert!(
+            indices
+                .windows(2)
+                .all(|pair| borrowed[pair[0]] >= borrowed[pair[1]])
+        );
+        assert_eq!(
+            thread_state_database_filename_order(&["x".repeat(4097).as_str()]),
+            Err(MojoError::InvalidInput),
+        );
+    }
+
+    #[test]
+    fn compiled_thread_state_database_filename_order_abi_rejects_bad_late_row_without_writes() {
+        let mut views = [0_u64; 4];
+        let mut output = [79_i64; 2];
+        let source = views.as_ptr() as usize as u64;
+        let dest = output.as_mut_ptr() as usize as u64;
+        for (version, address, count, capacity, expected) in [
+            (2, source, 2, 2, 4),
+            (1, 0, 2, 2, 1),
+            (1, source, -1, 2, 1),
+            (1, source, 65_537, 2, 1),
+            (1, source, 2, 1, 1),
+        ] {
+            assert_eq!(
+                unsafe {
+                    prodex_runtime_thread_index_database_order_v1(
+                        version, address, count, dest, capacity,
+                    )
+                },
+                expected,
+            );
+            assert_eq!(output, [79; 2]);
+        }
+        views[3] = u64::MAX;
+        assert_eq!(
+            unsafe {
+                prodex_runtime_thread_index_database_order_v1(
+                    1,
+                    views.as_ptr() as usize as u64,
+                    2,
+                    dest,
+                    2,
+                )
+            },
+            1,
+        );
+        assert_eq!(output, [79; 2]);
+        let invalid = [255_u8; 2];
+        views[0] = invalid.as_ptr() as usize as u64;
+        views[1] = 2;
+        views[3] = 0;
+        assert_eq!(
+            unsafe {
+                prodex_runtime_thread_index_database_order_v1(
+                    1,
+                    views.as_ptr() as usize as u64,
+                    2,
+                    dest,
+                    2,
+                )
+            },
+            1,
+        );
+        assert_eq!(output, [79; 2]);
+    }
 }

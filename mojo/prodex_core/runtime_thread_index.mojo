@@ -993,3 +993,105 @@ def prodex_runtime_thread_index_repair_action_v1(
         return 1
     output[] = REPAIR_CLEAR_DIRTY_MARKER if marker_matches == 1 else REPAIR_NOOP
     return 0
+
+
+# State database priority for thread restoration. The host filters
+# state_*.sqlite regular files and retains SQLite I/O; compiled Mojo
+# owns filename-descending order, including bytewise UTF-8 ties.
+comptime THREAD_INDEX_DATABASE_ORDER_ABI: Int64 = 1
+comptime THREAD_INDEX_DATABASE_ORDER_MAX: Int64 = 65_536
+
+
+def thread_index_database_filename_compare(
+    views: Pointer[mut=False, UInt64, _], left: Int64, right: Int64,
+) -> Int64:
+    var left_len = Int64(views[unsafe_offset=left * 2 + 1])
+    var right_len = Int64(views[unsafe_offset=right * 2 + 1])
+    var left_ptr = Pointer[mut=False, UInt8, ImmUntrackedOrigin](
+        unsafe_from_address=Int(views[unsafe_offset=left * 2])
+    )
+    var right_ptr = Pointer[mut=False, UInt8, ImmUntrackedOrigin](
+        unsafe_from_address=Int(views[unsafe_offset=right * 2])
+    )
+    for index in range(min(left_len, right_len)):
+        var lhs = left_ptr[unsafe_offset=index]
+        var rhs = right_ptr[unsafe_offset=index]
+        if lhs != rhs:
+            return -1 if lhs > rhs else 1
+    if left_len != right_len:
+        return -1 if left_len > right_len else 1
+    if left != right:
+        return -1 if left < right else 1
+    return 0
+
+
+def thread_index_database_filename_heap_down(
+    views: Pointer[mut=False, UInt64, _],
+    indices: Pointer[mut=True, Int64, _],
+    first: Int64, count: Int64,
+):
+    var root = first
+    while root * 2 + 1 < count:
+        var child = root * 2 + 1
+        var swap = root
+        if thread_index_database_filename_compare(
+            views, indices[unsafe_offset=swap], indices[unsafe_offset=child],
+        ) < 0:
+            swap = child
+        if child + 1 < count and thread_index_database_filename_compare(
+            views, indices[unsafe_offset=swap], indices[unsafe_offset=child + 1],
+        ) < 0:
+            swap = child + 1
+        if swap == root:
+            return
+        var saved = indices[unsafe_offset=root]
+        indices[unsafe_offset=root] = indices[unsafe_offset=swap]
+        indices[unsafe_offset=swap] = saved
+        root = swap
+
+
+@export("prodex_runtime_thread_index_database_order_v1")
+def prodex_runtime_thread_index_database_order_v1(
+    abi_version: Int64,
+    views_address: UInt, view_count: Int64,
+    indices_address: UInt, indices_capacity: Int64,
+) abi("C") -> Int64:
+    if abi_version != THREAD_INDEX_DATABASE_ORDER_ABI:
+        return 4
+    if (
+        view_count < 0 or view_count > THREAD_INDEX_DATABASE_ORDER_MAX
+        or (view_count > 0 and (views_address == 0 or views_address % 8 != 0))
+        or indices_address == 0 or indices_address % 8 != 0
+        or indices_capacity < view_count
+    ):
+        return 1
+    var views = Pointer[mut=False, UInt64, ImmUntrackedOrigin](
+        unsafe_from_address=Int(views_address)
+    )
+    for index in range(view_count):
+        var address = views[unsafe_offset=index * 2]
+        var length = views[unsafe_offset=index * 2 + 1]
+        if length > UInt64(9223372036854775807) or (length > 0 and address == 0):
+            return 1
+        if not rich_view_valid(
+            ProdexRichStringView(UInt(address), UInt(length)),
+            THREAD_INDEX_MAX_SESSION_STEM_BYTES,
+        ):
+            return 1
+    var output = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(indices_address)
+    )
+    for index in range(view_count):
+        output[unsafe_offset=index] = index
+    var start = view_count // 2
+    while start > 0:
+        start -= 1
+        thread_index_database_filename_heap_down(views, output, start, view_count)
+    var end = view_count
+    while end > 1:
+        end -= 1
+        var saved = output[unsafe_offset=0]
+        output[unsafe_offset=0] = output[unsafe_offset=end]
+        output[unsafe_offset=end] = saved
+        thread_index_database_filename_heap_down(views, output, 0, end)
+    return 0

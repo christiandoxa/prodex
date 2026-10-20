@@ -252,7 +252,7 @@ fn runtime_thread_state_database_paths(sqlite_home: &Path) -> Vec<PathBuf> {
     let Ok(entries) = fs::read_dir(sqlite_home) else {
         return Vec::new();
     };
-    let mut paths = entries
+    let paths = entries
         .flatten()
         .filter_map(|entry| {
             let path = entry.path();
@@ -264,8 +264,25 @@ fn runtime_thread_state_database_paths(sqlite_home: &Path) -> Vec<PathBuf> {
             (file_type.is_file() && !file_type.is_symlink()).then_some(path)
         })
         .collect::<Vec<_>>();
-    paths.sort_by(|left, right| right.file_name().cmp(&left.file_name()));
-    paths
+    let names = paths
+        .iter()
+        .map(|path| {
+            path.file_name()
+                .and_then(|name| name.to_str())
+                .expect("filtered state database filename must be valid UTF-8")
+        })
+        .collect::<Vec<_>>();
+    let selected = thread_index_mojo::thread_state_database_filename_order(&names)
+        .expect("compiled Mojo thread state database order returned invalid output");
+    let mut originals = paths.into_iter().map(Some).collect::<Vec<_>>();
+    selected
+        .into_iter()
+        .map(|index| {
+            originals[index]
+                .take()
+                .expect("validated Mojo thread state database indices are unique")
+        })
+        .collect()
 }
 
 fn open_runtime_thread_state_database(path: &Path) -> Option<Connection> {
