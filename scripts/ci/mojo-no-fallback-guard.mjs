@@ -154,6 +154,7 @@ const DOCTOR_SMART_CONTEXT_DECISION_ADAPTER_FILE = DOCTOR_MARKER_ABI_ADAPTER_FIL
 const DOCTOR_SMART_CONTEXT_DECISION_MOJO_FILE = DOCTOR_MARKER_ABI_MOJO_FILE;
 const DOCTOR_LOG_FIELDS_CONSUMER_FILE = "crates/prodex-runtime-doctor/src/log_fields.rs";
 const TERMINAL_GEOMETRY_CONSUMER_FILE = "crates/prodex-terminal-ui/src/terminal.rs";
+const TERMINAL_TITLE_CONSUMER_FILE = "crates/prodex-terminal-ui/src/terminal_session.rs";
 const TERMINAL_SEPARATOR_CONSUMER_FILE = "crates/prodex-terminal-ui/src/panel.rs";
 const TERMINAL_GEOMETRY_ADAPTER_FILE = "crates/prodex-mojo-core/src/terminal_layout.rs";
 const TERMINAL_GEOMETRY_MOJO_FILE = "mojo/prodex_core/terminal_layout.mojo";
@@ -474,6 +475,7 @@ const PROMOTED_FILES = [
   DOCTOR_SMART_CONTEXT_DECISION_CONSUMER_FILE,
   DOCTOR_LOG_FIELDS_CONSUMER_FILE,
   TERMINAL_GEOMETRY_CONSUMER_FILE,
+  TERMINAL_TITLE_CONSUMER_FILE,
   TERMINAL_SEPARATOR_CONSUMER_FILE,
   TERMINAL_GEOMETRY_ADAPTER_FILE,
   TERMINAL_GEOMETRY_MOJO_FILE,
@@ -10876,6 +10878,19 @@ export function findViolations(files) {
     return [];
   });
   const terminalGeometryViolations = files.flatMap(([filePath, contents]) => {
+    if (filePath === TERMINAL_TITLE_CONSUMER_FILE) {
+      const required = [
+        "prodex_mojo_core::terminal_layout::sanitize_terminal_title(&basename)",
+        "compiled_terminal_title_sanitization_is_used_by_real_session_host",
+      ];
+      const replacedRust = [
+        ".filter(|character| !character.is_control())",
+        "DEFAULT_TERMINAL_TITLE",
+      ];
+      return required.every((marker) => contents.includes(marker))
+        && replacedRust.every((marker) => !contents.includes(marker))
+        ? [] : [filePath + ": compiled terminal-title policy must replace Rust control stripping"];
+    }
     if (filePath === TERMINAL_GEOMETRY_CONSUMER_FILE) {
       const required = [
         "terminal_positive_size_override(&value)",
@@ -10904,6 +10919,8 @@ export function findViolations(files) {
         "pub fn terminal_tty_dimensions(",
         "prodex_terminal_connected_separator_line_v1(",
         "pub fn terminal_connected_separator_line(",
+        "prodex_terminal_title_sanitize_v1(",
+        "pub fn sanitize_terminal_title(",
       ];
       return required.filter((name) => !contents.includes(name))
         .map((name) => `${filePath}: terminal geometry ABI adapter must retain ${name}`);
@@ -10917,6 +10934,8 @@ export function findViolations(files) {
         "rich_unicode_space(",
         '@export("prodex_terminal_connected_separator_line_v1")',
         "terminal_separator_write_glyph(",
+        '@export("prodex_terminal_title_sanitize_v1")',
+        "scalar <= 31 or (scalar >= 127 and scalar <= 159)",
       ];
       return required.filter((name) => !contents.includes(name))
         .map((name) => `${filePath}: terminal geometry decision must stay Mojo-owned (${name})`);
@@ -10927,6 +10946,8 @@ export function findViolations(files) {
         "terminal_geometry_strict_abi_rejects_bad_shape_before_output",
         "connected_separator_utf8_is_rendered_entirely_by_compiled_mojo",
         "connected_separator_abi_rejects_wrong_capacity_and_version_without_output",
+        "compiled_terminal_title_strips_control_scalars_and_preserves_format_unicode",
+        "compiled_terminal_title_abi_rejects_invalid_inputs_without_writing",
       ].filter((name) => !contents.includes(name))
         .map((name) => `${filePath}: terminal geometry strict coverage must retain ${name}`);
     }
@@ -12133,6 +12154,14 @@ function selfTest() {
   assert.match(findViolations([[TERMINAL_GEOMETRY_CONSUMER_FILE,
     terminalGeometryConsumer + "\ntext.split_whitespace()",
   ]]).join("\n"), /terminal numeric and stty parsing must remain Mojo-owned/u);
+  const titleCallerMarkers = [
+    "prodex_mojo_core::terminal_layout::sanitize_terminal_title(&basename)",
+    "compiled_terminal_title_sanitization_is_used_by_real_session_host",
+  ].join("\n");
+  assert.deepEqual(findViolations([[TERMINAL_TITLE_CONSUMER_FILE, titleCallerMarkers]]), []);
+  assert.match(findViolations([[TERMINAL_TITLE_CONSUMER_FILE,
+    titleCallerMarkers + "\nDEFAULT_TERMINAL_TITLE",
+  ]]).join("\n"), /terminal-title policy must replace Rust control stripping/u);
   const doctorSmartContextConsumer = [
     "prodex_mojo_core::rich::runtime_doctor_smart_context_bytes_plan(",
     "prodex_mojo_core::rich::runtime_doctor_smart_context_totals_plan(",

@@ -985,3 +985,65 @@ def prodex_terminal_pad_cell_spaces_v1(
         unsafe_from_address=Int(result_address)
     )[] = padding
     return TERMINAL_LAYOUT_OK
+
+
+# The terminal host supplies its decoded basename; compiled Mojo removes
+# Cc controls and chooses a stable title when no visible bytes remain.
+@export("prodex_terminal_title_sanitize_v1")
+def prodex_terminal_title_sanitize_v1(
+    abi: Int64,
+    text_address: UInt,
+    text_length: Int64,
+    output_address: UInt,
+    output_capacity: Int64,
+    written_address: UInt,
+) abi("C") -> Int64:
+    if abi != TERMINAL_LAYOUT_ABI:
+        return TERMINAL_LAYOUT_VERSION
+    if (
+        text_length < 0 or output_capacity < 0 or written_address == 0
+        or (text_length > 0 and text_address == 0)
+    ):
+        return TERMINAL_LAYOUT_INVALID
+    var text = ProdexRichStringView(text_address, UInt(text_length))
+    if not rich_view_valid(text, 0x7FFFFFFFFFFFFFFF):
+        return TERMINAL_LAYOUT_INVALID
+
+    var source = rich_view_ptr(text)
+    var position: Int64 = 0
+    var required: Int64 = 0
+    while position < text_length:
+        var byte_width = rich_codepoint_width(source[unsafe_offset=position])
+        var scalar = rich_codepoint(source, position, byte_width)
+        if not (scalar <= 31 or (scalar >= 127 and scalar <= 159)):
+            required += byte_width
+        position += byte_width
+    var fallback = required == 0
+    if fallback:
+        required = 6
+    if required > output_capacity or (required > 0 and output_address == 0):
+        return 3
+
+    var output = Pointer[mut=True, UInt8, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    var written: Int64 = 0
+    if fallback:
+        var replacement = StringSlice("prodex").unsafe_ptr()
+        for index in range(6):
+            output[unsafe_offset=index] = replacement[unsafe_offset=index]
+        written = 6
+    else:
+        position = 0
+        while position < text_length:
+            var byte_width = rich_codepoint_width(source[unsafe_offset=position])
+            var scalar = rich_codepoint(source, position, byte_width)
+            if not (scalar <= 31 or (scalar >= 127 and scalar <= 159)):
+                for index in range(byte_width):
+                    output[unsafe_offset=written + index] = source[unsafe_offset=position + index]
+                written += byte_width
+            position += byte_width
+    Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(written_address)
+    )[] = written
+    return TERMINAL_LAYOUT_OK

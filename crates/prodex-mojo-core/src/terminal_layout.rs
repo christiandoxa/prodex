@@ -5,6 +5,14 @@ use crate::MojoError;
 const ABI_VERSION: i64 = 1;
 
 unsafe extern "C" {
+    fn prodex_terminal_title_sanitize_v1(
+        abi: i64,
+        text_address: u64,
+        text_length: i64,
+        output_address: u64,
+        output_capacity: i64,
+        written_address: u64,
+    ) -> i64;
     fn prodex_terminal_connected_separator_line_v1(
         abi: i64,
         width: u64,
@@ -154,6 +162,29 @@ fn check_status(status: i64) -> Result<(), MojoError> {
 
 fn from_usize(value: usize) -> Result<u64, MojoError> {
     u64::try_from(value).map_err(|_| MojoError::InvalidInput)
+}
+
+/// Strip Unicode Cc controls from an OS-decoded directory basename and
+/// select the default terminal title exclusively through compiled Mojo.
+pub fn sanitize_terminal_title(basename: &str) -> Result<String, MojoError> {
+    let mut output = vec![0_u8; basename.len().max(6)];
+    let mut written = -1_i64;
+    check_status(unsafe {
+        prodex_terminal_title_sanitize_v1(
+            ABI_VERSION,
+            basename.as_ptr() as usize as u64,
+            i64::try_from(basename.len()).map_err(|_| MojoError::InvalidInput)?,
+            output.as_mut_ptr() as usize as u64,
+            i64::try_from(output.len()).map_err(|_| MojoError::InvalidInput)?,
+            (&mut written as *mut i64) as usize as u64,
+        )
+    })?;
+    let written = usize::try_from(written).map_err(|_| MojoError::InvalidOutput)?;
+    if written == 0 || written > output.len() {
+        return Err(MojoError::InvalidOutput);
+    }
+    output.truncate(written);
+    String::from_utf8(output).map_err(|_| MojoError::InvalidOutput)
 }
 
 /// Return the exact UTF-8 connected panel separator rendered by compiled
