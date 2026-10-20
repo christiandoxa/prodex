@@ -8118,3 +8118,15 @@ direct Mojo test and strict no-fallback/share guards pass.
 Official share increases from 36.049461001902344% to
 36.05829134839374% (133,120 Mojo / 236,060 Rust).
 The 75% objective stays outstanding.
+
+## Info process rows sorted by compiled Mojo PID order (2026-10-20)
+
+The production info render owner now selects process row indices
+by u32 PID ascending, with original ordering retained on ties.
+Rust still performs process enumeration/classification and applies
+the original selected rows without its previous sort_by_key fallback.
+All 23 info tests, two caller regressions, two core ABI tests,
+direct Mojo regression, source and official share guards pass.
+Official share rises from 36.05829134839374% to
+36.06472593559358% (133,191 Mojo / 236,120 Rust).
+The 75% objective remains outstanding.
