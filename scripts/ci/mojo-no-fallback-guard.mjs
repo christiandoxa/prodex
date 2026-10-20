@@ -254,6 +254,9 @@ const DOMAIN_ERROR_ADAPTER = "crates/prodex-mojo-core/src/domain_error_policy.rs
 const DOMAIN_ERROR_MOJO = "mojo/prodex_core/domain_error_policy.mojo";
 const DOMAIN_ERROR_IDS_TESTS = "crates/prodex-domain/tests/ids.rs";
 const DOMAIN_ERROR_SECRETS_TESTS = "crates/prodex-domain/tests/secrets.rs";
+const QUOTA_CAPACITY_CHOICE_ADAPTER = "crates/prodex-mojo-core/src/quota/capacity_choice.rs";
+const QUOTA_CAPACITY_CHOICE_MOJO_TEST = "mojo/tests/quota_capacity_choice_test.mojo";
+const QUOTA_CAPACITY_CHOICE_CALLER_TEST = "crates/prodex-quota/tests/src/render/windows.rs";
 const PROMOTED_FILES = [
   DOMAIN_ERROR_CALLER_IDS,
   DOMAIN_ERROR_CALLER_SECRETS,
@@ -261,6 +264,9 @@ const PROMOTED_FILES = [
   DOMAIN_ERROR_MOJO,
   DOMAIN_ERROR_IDS_TESTS,
   DOMAIN_ERROR_SECRETS_TESTS,
+  QUOTA_CAPACITY_CHOICE_ADAPTER,
+  QUOTA_CAPACITY_CHOICE_MOJO_TEST,
+  QUOTA_CAPACITY_CHOICE_CALLER_TEST,
   SUPER_EXPOSE_TOOL_CATALOG_CALLER,
   SUPER_EXPOSE_TOOL_CATALOG_ADAPTER,
   SUPER_EXPOSE_TOOL_CATALOG_MOJO,
@@ -3612,6 +3618,60 @@ export function findViolations(files) {
       violations.push(filePath + ": contains restored Rust quota report sort label mapping");
     }
     return violations;
+  });
+  const quotaCapacityChoiceMojoViolations = files.flatMap(([filePath, contents]) => {
+    if (filePath === QUOTA_WINDOWS_FILE &&
+        contents.includes("fn openai_quota_runtime_window_pair(")) {
+      const required = [
+        "fn compiled_capacity_choice(",
+        "quota::quota_capacity_choice(&inputs)",
+        "compiled_capacity_choice(&candidates).any_routing_eligible",
+        ".selected_index",
+      ];
+      const production = contents.split("#[cfg(test)]", 1)[0];
+      const retired = [
+        ".find(|candidate| candidate.output.routing_eligible)",
+        ".any(|candidate| candidate.output.routing_eligible)",
+        "candidate.output.lane == prodex_mojo_core::quota::QUOTA_CAPACITY_LANE_MAIN",
+      ];
+      return required.every((marker) => contents.includes(marker))
+        && retired.every((marker) => !production.includes(marker))
+        ? [] : [filePath + ": quota capacity candidate selection must be Mojo-owned"];
+    }
+    if (filePath === QUOTA_CAPACITY_CHOICE_ADAPTER) {
+      const required = [
+        "fn prodex_quota_capacity_choice_v1(",
+        "pub fn quota_capacity_choice(",
+        "compiled_quota_capacity_choice_preserves_first_ready_and_main_fallback",
+        "compiled_quota_capacity_choice_abi_rejects_late_invalid_flags_before_writes",
+      ];
+      return required.filter((marker) => !contents.includes(marker))
+        .map((marker) => filePath + ": compiled quota selection adapter missing " + marker);
+    }
+    if (filePath === "mojo/prodex_core/quota.mojo" &&
+        contents.includes('prodex_quota_openai_model_capacity_plan_v2')) {
+      const required = [
+        '@export("prodex_quota_capacity_choice_v1")',
+        "QUOTA_CANDIDATE_CHOICE_ABI",
+        "first_eligible if first_eligible >= 0 else first_main",
+      ];
+      return required.filter((marker) => !contents.includes(marker))
+        .map((marker) => filePath + ": compiled quota selection owner missing " + marker);
+    }
+    if (filePath === QUOTA_CAPACITY_CHOICE_CALLER_TEST) {
+      return contents.includes("compiled_quota_capacity_choice_reaches_live_window_pair_and_ready_callers")
+        ? [] : [filePath + ": quota selection needs real caller regression"];
+    }
+    if (filePath === QUOTA_CAPACITY_CHOICE_MOJO_TEST) {
+      return contents.includes("prodex_quota_capacity_choice_v1")
+        ? [] : [filePath + ": quota selection needs direct Mojo ABI test"];
+    }
+    if (filePath === "crates/prodex-mojo-core/src/quota.rs" &&
+        contents.includes("mod capacity;")) {
+      return contents.includes("pub use capacity_choice::{")
+        ? [] : [filePath + ": quota choice adapter must remain production reachable"];
+    }
+    return [];
   });
   const quotaPlannerViolations = files
     .filter(([filePath, contents]) => filePath === RUNTIME_QUOTA_FILE &&
@@ -11420,7 +11480,7 @@ export function findViolations(files) {
     ...kiroCatalogViolations,
     ...kiroEnvironmentViolations,
     ...deepseekStrictSchemaViolations,
-    ...quotaModelPolicyViolations, ...quotaDisplayPolicyViolations, ...quotaPlannerViolations,
+    ...quotaModelPolicyViolations, ...quotaDisplayPolicyViolations, ...quotaCapacityChoiceMojoViolations, ...quotaPlannerViolations,
     ...anthropicResponseViolations,
     ...anthropicEnvelopeViolations, ...anthropicRequestViolations,
     ...anthropicWebSearchViolations, ...superProviderConfigViolations, ...externalProviderCatalogViolations, ...subAgentPolicyViolations, ...runtimeOverlayPolicyViolations, ...cliRuntimeFeatureViolations,
@@ -12516,6 +12576,19 @@ function selfTest() {
   assert.match(findViolations([[kiroAcpLedgerCaller,
     kiroAcpLedgerConsumer + "\nif self.tool_activities_truncated {",
   ]]).join("\n"), /restored Rust Kiro ACP activity cap\/label inheritance policy/u);
+  const quotaChoiceCaller = "crates/prodex-quota/src/render/windows.rs";
+  const quotaChoiceFixture = [
+    "fn openai_quota_runtime_window_pair(",
+    "fn compiled_capacity_choice(",
+    "quota::quota_capacity_choice(&inputs)",
+    "compiled_capacity_choice(&candidates).any_routing_eligible",
+    ".selected_index",
+  ].join("\n");
+  assert.deepEqual(findViolations([[quotaChoiceCaller, quotaChoiceFixture]]).filter((message) =>
+    message.includes("quota capacity candidate selection")), []);
+  assert.match(findViolations([[quotaChoiceCaller,
+    quotaChoiceFixture + "\n.find(|candidate| candidate.output.routing_eligible)",
+  ]]).join("\n"), /quota capacity candidate selection must be Mojo-owned/u);
   const quotaPoolLayoutConsumer = [
     "prodex_mojo_core::quota::quota_ready_pool_remaining(",
     "prodex_mojo_core::quota::quota_info_pool_remaining(",

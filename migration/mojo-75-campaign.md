@@ -7725,3 +7725,16 @@ tests, source no-fallback guard and production share checks pass.
 Official share increases from 35.82663759535591% to
 35.82742660744385% (130,510 Mojo / 233,764 Rust).
 Project target 75% remains unmet.
+
+## Quota candidate ordering and ready-window selection compiled in Mojo (2026-10-20)
+
+The compiled quota owner now selects the first routing-eligible
+capacity lane, falls back to the first main lane when none is eligible,
+and returns readiness in a single versioned batch ABI. Both live
+openai quota window callers apply the typed plan and no longer
+implement find/or_else/any semantic selection in Rust. All 100 quota
+tests, direct core and Mojo ABI tests and no-fallback guards pass.
+The canonical share moves from 35.82742660744385% to
+35.826879696153064% (130,551 Mojo / 233,843 Rust) owing to the
+minimal typed adapter. The audited non-regression check passes and
+the 75% project target remains unmet.

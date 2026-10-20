@@ -29,6 +29,8 @@ mod self_checks;
 pub use self_checks::{main_quota_aggregation_self_test, self_test};
 mod capacity;
 pub use capacity::quota_capacity_batch;
+mod capacity_choice;
+pub use capacity_choice::{QuotaCapacityChoice, QuotaCapacityChoiceInput, quota_capacity_choice};
 mod report_sort;
 mod retry_time;
 pub use retry_time::{QuotaRetryTimeCandidate, quota_retry_time_candidate};
