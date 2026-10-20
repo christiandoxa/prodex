@@ -9,6 +9,15 @@ const FOLLOW_MAX_INPUT_LINES: usize = 2 * 1024 * 1024;
 const _: () = assert!(std::mem::size_of::<usize>() == std::mem::size_of::<u64>());
 
 unsafe extern "C" {
+    fn prodex_live_log_compact_json_v1(
+        abi_version: i64,
+        fields_address: u64,
+        field_count: i64,
+        output_address: u64,
+        output_capacity: i64,
+        measuring: i64,
+        written_address: u64,
+    ) -> i64;
     fn prodex_live_log_retention_trim_v1(
         abi_version: i64,
         scope: i64,
@@ -176,6 +185,60 @@ pub fn nested_string_clip_end(value: &str) -> Result<usize, MojoError> {
         return Err(MojoError::InvalidOutput);
     }
     Ok(end)
+}
+
+/// Render compact live-log JSON from existing Serde-canonical raw field
+/// values. Key ordering, omission and truncation-marker formatting belong
+/// entirely to compiled Mojo; caller keeps the values and their lifetimes.
+pub fn compact_json_metadata(
+    event: Option<&str>,
+    pid: Option<&str>,
+    timestamp: Option<&str>,
+) -> Result<String, MojoError> {
+    let mut fields = [0_u64; 9];
+    for (index, raw) in [event, pid, timestamp].into_iter().enumerate() {
+        if let Some(raw) = raw {
+            fields[index * 3] = 1;
+            fields[index * 3 + 1] = pointer_address(raw.as_ptr());
+            fields[index * 3 + 2] =
+                u64::try_from(raw.len()).map_err(|_| MojoError::InvalidInput)?;
+        }
+    }
+    let mut written = -1_i64;
+    let length_address = mutable_pointer_address(&mut written as *mut i64);
+    status(unsafe {
+        prodex_live_log_compact_json_v1(
+            ABI_VERSION,
+            pointer_address(fields.as_ptr()),
+            3,
+            0,
+            0,
+            1,
+            length_address,
+        )
+    })?;
+    let size = usize::try_from(written).map_err(|_| MojoError::InvalidOutput)?;
+    let mut output = Vec::new();
+    output
+        .try_reserve_exact(size)
+        .map_err(|_| MojoError::Capacity)?;
+    output.resize(size, 0_u8);
+    written = -1;
+    status(unsafe {
+        prodex_live_log_compact_json_v1(
+            ABI_VERSION,
+            pointer_address(fields.as_ptr()),
+            3,
+            mutable_pointer_address(output.as_mut_ptr()),
+            input_length(output.len())?,
+            0,
+            length_address,
+        )
+    })?;
+    if usize::try_from(written).map_err(|_| MojoError::InvalidOutput)? != size {
+        return Err(MojoError::InvalidOutput);
+    }
+    String::from_utf8(output).map_err(|_| MojoError::InvalidOutput)
 }
 
 /// Selected JSON fields to materialize if Mojo chooses compact metadata.
@@ -377,6 +440,83 @@ pub fn snapshot_plan(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn compiled_live_log_compact_metadata_serializes_sorted_keys_and_newline() {
+        assert_eq!(
+            compact_json_metadata(Some("\"雪\""), Some("42"), Some("\"2026-10-20T00:00:00Z\"")),
+            Ok(concat!(
+                "{\"event\":\"雪\",",
+                "\"message\":\"[live log record truncated]\",",
+                "\"pid\":42,",
+                "\"timestamp\":\"2026-10-20T00:00:00Z\"}\n",
+            )
+            .to_string()),
+        );
+        assert_eq!(
+            compact_json_metadata(None, None, None),
+            Ok("{\"message\":\"[live log record truncated]\"}\n".to_string()),
+        );
+        assert_eq!(
+            compact_json_metadata(
+                Some("\"a\\n\\\\b\""),
+                None,
+                Some("null"),
+            ),
+            Ok("{\"event\":\"a\\n\\\\b\",\"message\":\"[live log record truncated]\",\"timestamp\":null}\n".to_string()),
+        );
+    }
+
+    #[test]
+    fn compiled_live_log_compact_metadata_abi_rejects_bad_shapes_before_writes() {
+        let mut fields = [0_u64; 9];
+        let mut written = 87_i64;
+        let output = mutable_pointer_address(&mut written as *mut i64);
+        for (version, count, input, expected) in [
+            (2, 3, pointer_address(fields.as_ptr()), 4),
+            (1, 2, pointer_address(fields.as_ptr()), 1),
+            (1, 3, 0, 1),
+        ] {
+            assert_eq!(
+                unsafe { prodex_live_log_compact_json_v1(version, input, count, 0, 0, 1, output,) },
+                expected,
+            );
+            assert_eq!(written, 87);
+        }
+        fields[0] = 3;
+        assert_eq!(
+            unsafe {
+                prodex_live_log_compact_json_v1(
+                    1,
+                    pointer_address(fields.as_ptr()),
+                    3,
+                    0,
+                    0,
+                    1,
+                    output,
+                )
+            },
+            1
+        );
+        assert_eq!(written, 87);
+        fields[0] = 0;
+        let mut buffer = [79_u8; 4];
+        assert_eq!(
+            unsafe {
+                prodex_live_log_compact_json_v1(
+                    1,
+                    pointer_address(fields.as_ptr()),
+                    3,
+                    mutable_pointer_address(buffer.as_mut_ptr()),
+                    4,
+                    0,
+                    output,
+                )
+            },
+            2
+        );
+        assert_eq!(written, 87);
+    }
 
     #[test]
     fn compiled_live_log_retention_bounds_keep_exact_thresholds_and_ties() {

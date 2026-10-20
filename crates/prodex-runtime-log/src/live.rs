@@ -182,30 +182,28 @@ fn bounded_live_log_json(line: &str) -> Result<Option<String>, MojoError> {
     if !plan.compact_metadata {
         return Ok(Some(format!("{serialized}\n")));
     }
-    Ok(serialize_compact_live_log_json(&value, plan))
-}
-
-fn serialize_compact_live_log_json(
-    value: &serde_json::Value,
-    plan: mojo_live_log_record::LiveLogJsonPlan,
-) -> Option<String> {
-    let mut compact = serde_json::Map::new();
-    for (key, include) in [
-        ("timestamp", plan.timestamp),
-        ("pid", plan.pid),
-        ("event", plan.event),
-    ] {
-        if include && let Some(value) = value.get(key) {
-            compact.insert(key.to_string(), value.clone());
-        }
-    }
-    compact.insert(
-        "message".to_string(),
-        serde_json::Value::String("[live log record truncated]".to_string()),
-    );
-    serde_json::to_string(&compact)
-        .ok()
-        .map(|serialized| format!("{serialized}\n"))
+    // Serde acquires the three existing JSON values; compiled Mojo owns
+    // omission, canonical key order, the marker and the trailing newline.
+    let event = value
+        .get("event")
+        .map(serde_json::to_string)
+        .transpose()
+        .map_err(|_| MojoError::InvalidInput)?;
+    let pid = value
+        .get("pid")
+        .map(serde_json::to_string)
+        .transpose()
+        .map_err(|_| MojoError::InvalidInput)?;
+    let timestamp = value
+        .get("timestamp")
+        .map(serde_json::to_string)
+        .transpose()
+        .map_err(|_| MojoError::InvalidInput)?;
+    Ok(Some(mojo_live_log_record::compact_json_metadata(
+        event.as_deref(),
+        pid.as_deref(),
+        timestamp.as_deref(),
+    )?))
 }
 
 fn materialize_nested_string_clips(value: &mut serde_json::Value) -> Result<(), MojoError> {
@@ -514,6 +512,38 @@ mod tests {
                 "event": format!("{} …[truncated]", "e".repeat(8 * 1024)),
                 "message": "[live log record truncated]",
             })
+        );
+    }
+
+    #[test]
+    fn compiled_live_log_compact_json_preserves_canonical_order_escapes_and_missing_metadata() {
+        let mut value = serde_json::Map::new();
+        value.insert("event".to_string(), serde_json::json!("RUN\n雪"));
+        value.insert("pid".to_string(), serde_json::json!(0));
+        value.insert("timestamp".to_string(), serde_json::Value::Null);
+        value.insert("padding_key_".repeat(12_000), serde_json::json!("ignore"));
+        let line = serde_json::Value::Object(value);
+        let input = format!("{}\n", serde_json::to_string(&line).unwrap());
+        assert!(input.len() > 128 * 1024);
+        assert_eq!(
+            bounded_live_log_json(&input).unwrap(),
+            Some(
+                concat!(
+                    "{\"event\":\"RUN\\n雪\",",
+                    "\"message\":\"[live log record truncated]\",",
+                    "\"pid\":0,\"timestamp\":null}\n",
+                )
+                .to_string()
+            ),
+        );
+        let no_metadata = serde_json::json!({
+            "padding_key_".repeat(12_000): "unused"
+        });
+        let input = format!("{}\n", serde_json::to_string(&no_metadata).unwrap());
+        assert!(input.len() > 128 * 1024);
+        assert_eq!(
+            bounded_live_log_json(&input).unwrap(),
+            Some("{\"message\":\"[live log record truncated]\"}\n".to_string()),
         );
     }
 
