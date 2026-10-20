@@ -488,3 +488,143 @@ def gemini_response_media_kernel_v1(
     if sink.failed:
         return 3
     return 0
+
+
+# Borrowed request-media field plan. Each of 22 slots occupies three UInt64
+# words: presence (0 absent, 1 non-string, 2 UTF-8 string), address, length.
+# Rust only acquires Serde fields and executes MIME/data/URI/path effects;
+# all kind, field-priority, nonblank-data and fallback decisions live here.
+comptime GEMINI_MEDIA_REQUEST_SLOT_COUNT: Int64 = 22
+
+
+def request_media_kind(rows: Pointer[mut=False, UInt64, _], index: Int64) -> UInt64:
+    return rows[unsafe_offset=index * 3]
+
+
+def request_media_view(rows: Pointer[mut=False, UInt64, _], index: Int64) -> ProdexRichStringView:
+    return ProdexRichStringView(
+        UInt(rows[unsafe_offset=index * 3 + 1]),
+        UInt(rows[unsafe_offset=index * 3 + 2]),
+    )
+
+
+def request_media_first_present(
+    rows: Pointer[mut=False, UInt64, _], first: Int64, end: Int64,
+) -> Int64:
+    var index = first
+    while index < end:
+        if request_media_kind(rows, index) != 0:
+            return index
+        index += 1
+    return -1
+
+
+@export("prodex_mojo_gemini_media_request_selection_v1")
+def prodex_mojo_gemini_media_request_selection_v1(
+    abi_version: Int64, operation: Int64, rows_address: UInt,
+    row_count: Int64, result_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != GEMINI_RESPONSE_MEDIA_ABI_VERSION:
+        return 4
+    if (
+        operation < 0 or operation > 1
+        or row_count != GEMINI_MEDIA_REQUEST_SLOT_COUNT
+        or rows_address == 0 or rows_address % 8 != 0
+        or result_address == 0 or result_address % 8 != 0
+    ):
+        return 1
+    var rows = Pointer[mut=False, UInt64, ImmUntrackedOrigin](
+        unsafe_from_address=Int(rows_address)
+    )
+    for index in range(GEMINI_MEDIA_REQUEST_SLOT_COUNT):
+        var kind = request_media_kind(rows, index)
+        var address = rows[unsafe_offset=index * 3 + 1]
+        var length = rows[unsafe_offset=index * 3 + 2]
+        if kind > 2 or (kind != 2 and (address != 0 or length != 0)):
+            return 1
+        if kind == 2 and not rich_view_valid(
+            ProdexRichStringView(UInt(address), UInt(length)),
+            0x7FFFFFFFFFFFFFFF,
+        ):
+            return 1
+
+    var action: Int64 = 0
+    var source: Int64 = -1
+    var mime: Int64 = -1
+    if operation == 0:
+        # A direct JSON string wins; otherwise 'url' presence blocks
+        # 'image_url' even when the former is not a string.
+        if request_media_kind(rows, 0) == 2:
+            source = 0
+        elif request_media_kind(rows, 1) != 0:
+            if request_media_kind(rows, 1) == 2:
+                source = 1
+        elif request_media_kind(rows, 2) == 2:
+            source = 2
+        if source >= 0:
+            action = 2
+    else:
+        var type_view = request_media_view(rows, 3)
+        var image = request_media_kind(rows, 3) == 2 and (
+            rich_view_matches_literal["input_image"](type_view, False)
+            or rich_view_matches_literal["image_url"](type_view, False)
+        )
+        var generic = request_media_kind(rows, 3) == 2 and (
+            rich_view_matches_literal["input_file"](type_view, False)
+            or rich_view_matches_literal["file"](type_view, False)
+            or rich_view_matches_literal["media"](type_view, False)
+            or rich_view_matches_literal["input_audio"](type_view, False)
+            or rich_view_matches_literal["input_video"](type_view, False)
+        )
+        if image:
+            if request_media_kind(rows, 2) == 2:
+                source = 2
+            elif request_media_kind(rows, 4) != 0:
+                if request_media_kind(rows, 4) == 2:
+                    source = 4
+            elif request_media_kind(rows, 5) == 2:
+                source = 5
+            if source < 0 and request_media_kind(rows, 1) == 2:
+                source = 1
+            if source >= 0:
+                action = 2
+        elif generic:
+            var selected_mime = request_media_first_present(
+                rows, 6, 10,
+            )
+            if selected_mime >= 0 and request_media_kind(rows, selected_mime) == 2:
+                mime = selected_mime
+            var data = request_media_first_present(
+                rows, 10, 14,
+            )
+            if data >= 0 and request_media_kind(rows, data) == 2:
+                var bounds = rich_trim_bounds(request_media_view(rows, data))
+                if bounds[0] < bounds[1]:
+                    source = data
+                    action = 1
+            if action == 0:
+                var uri = request_media_first_present(rows, 14, 18)
+                if uri < 0 and request_media_kind(rows, 1) != 0:
+                    uri = 1
+                if uri < 0 and request_media_kind(rows, 18) != 0:
+                    uri = 18
+                if uri >= 0 and request_media_kind(rows, uri) == 2:
+                    source = uri
+                    action = 2
+            if action == 0:
+                var path = request_media_first_present(
+                    rows, 19, 22,
+                )
+                if path >= 0 and request_media_kind(rows, path) == 2:
+                    source = path
+                    action = 3
+
+    if action == 0:
+        mime = -1
+    var result = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(result_address)
+    )
+    result[unsafe_offset=0] = action
+    result[unsafe_offset=1] = source
+    result[unsafe_offset=2] = mime
+    return 0

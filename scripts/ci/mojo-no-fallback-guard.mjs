@@ -405,6 +405,7 @@ const PROMOTED_FILES = [
   "crates/prodex-runtime-broker/src/process.rs",
   "mojo/prodex_core/runtime_broker_continuity.mojo",
   "crates/prodex-provider-core/src/translators/gemini/response_media.rs",
+  "crates/prodex-provider-core/src/gemini_bridge/media/content_object.rs",
   "crates/prodex-mojo-core/src/rich/gemini_response_media.rs",
   "mojo/prodex_core/gemini_response_media.mojo",
   "crates/prodex-provider-core/src/gemini_bridge/precommit.rs",
@@ -2192,6 +2193,29 @@ export function findViolations(files) {
         .filter((marker) => !contents.includes(marker))
         .map((marker) => `${filePath}: Gemini data-URL caller coverage must retain ${marker}`);
     }
+    if (filePath === "crates/prodex-provider-core/src/gemini_bridge/media/content_object.rs") {
+      const required = [
+        "fn acquired_object_fields",
+        "gemini_media_request_selection(&fields, GeminiMediaRequestOperation::ImageUrl)",
+        "gemini_media_request_selection(&fields, GeminiMediaRequestOperation::ContentObject)",
+        "GeminiMediaSelectedKind::Data",
+        "GeminiMediaSelectedKind::Uri",
+        "GeminiMediaSelectedKind::Path",
+        "compiled_image_url_selection_honors_nested_presence_and_empty_values",
+        "compiled_media_object_selection_preserves_nested_image_and_data_precedence",
+        "compiled_media_object_path_callback_receives_borrowed_path_and_mime",
+      ];
+      const retired = [
+        "fn gemini_provider_core_media_part_from_generic_content_object(",
+        "match kind {",
+        '.or_else(|| object.get("mimeType"))',
+        '.or_else(|| object.get("fileUrl"))',
+        'value.as_str().or_else(',
+      ];
+      return required.every((marker) => contents.includes(marker))
+        && retired.every((marker) => !contents.includes(marker))
+        ? [] : [filePath + ": Gemini media request field decisions must remain compiled Mojo-owned"];
+    }
     if (filePath === "crates/prodex-provider-core/src/translators/gemini/response_media.rs") {
       const production = contents.split("#[cfg(test)]", 1)[0];
       const required = [
@@ -2208,14 +2232,20 @@ export function findViolations(files) {
     }
     if (filePath === "crates/prodex-mojo-core/src/rich/gemini_response_media.rs") {
       return ["prodex_mojo_gemini_response_media_v1(", "transform_json(",
-        "prodex_mojo_gemini_data_url_parts_v1(", "pub fn gemini_media_data_url_parts("].filter(
+        "prodex_mojo_gemini_data_url_parts_v1(", "pub fn gemini_media_data_url_parts(",
+        "prodex_mojo_gemini_media_request_selection_v1(",
+        "pub fn gemini_media_request_selection<",
+        "compiled_gemini_request_media_abi_rejects_invalid_rows_before_output_writes"].filter(
         (marker) => !contents.includes(marker),
       ).map((marker) => `${filePath}: Gemini media adapter must retain Mojo ABI (${marker})`);
     }
     if (filePath === "mojo/prodex_core/gemini_response_media.mojo") {
       return ["def gemini_response_media_kernel_v1(", "def media_put_content(",
         "def media_put_image_generation(", "def media_put_special_text(",
-        "def media_data_url_parts(", '@export("prodex_mojo_gemini_data_url_parts_v1")'].filter(
+        "def media_data_url_parts(", '@export("prodex_mojo_gemini_data_url_parts_v1")',
+        '@export("prodex_mojo_gemini_media_request_selection_v1")',
+        "def request_media_first_present(",
+        "rich_trim_bounds(request_media_view(rows, data))"].filter(
         (marker) => !contents.includes(marker),
       ).map((marker) => `${filePath}: Gemini media projection must remain Mojo-owned (${marker})`);
     }
@@ -11390,6 +11420,22 @@ function selfTest() {
     findViolations([[mediaFile, "fn gemini_data_url_parts() {}"]]).join("\n"),
     /Gemini response-media semantics must be Mojo-owned/u,
   );
+  const mediaRequestFile = "crates/prodex-provider-core/src/gemini_bridge/media/content_object.rs";
+  const mediaRequestFixture = [
+    "fn acquired_object_fields",
+    "gemini_media_request_selection(&fields, GeminiMediaRequestOperation::ImageUrl)",
+    "gemini_media_request_selection(&fields, GeminiMediaRequestOperation::ContentObject)",
+    "GeminiMediaSelectedKind::Data",
+    "GeminiMediaSelectedKind::Uri",
+    "GeminiMediaSelectedKind::Path",
+    "compiled_image_url_selection_honors_nested_presence_and_empty_values",
+    "compiled_media_object_selection_preserves_nested_image_and_data_precedence",
+    "compiled_media_object_path_callback_receives_borrowed_path_and_mime",
+  ].join("\n");
+  assert.deepEqual(findViolations([[mediaRequestFile, mediaRequestFixture]]), []);
+  assert.match(findViolations([[mediaRequestFile, mediaRequestFixture +
+    "\nfn gemini_provider_core_media_part_from_generic_content_object("]]).join("\n"),
+    /Gemini media request field decisions must remain compiled Mojo-owned/u);
   const doctorPresentationCanonical = [
     "mojo_doctor_value_color(",
     "doctor_viewport_plan(",

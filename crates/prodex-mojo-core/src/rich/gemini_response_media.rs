@@ -13,6 +13,13 @@ pub enum GeminiResponseMediaOperation {
 const GEMINI_RESPONSE_MEDIA_MAX_INPUT_BYTES: usize = 64 * 1024 * 1024;
 
 unsafe extern "C" {
+    fn prodex_mojo_gemini_media_request_selection_v1(
+        abi_version: i64,
+        operation: i64,
+        slots_address: u64,
+        slot_count: i64,
+        result_address: u64,
+    ) -> i64;
     fn prodex_mojo_gemini_data_url_parts_v1(
         abi: i64,
         address: u64,
@@ -54,6 +61,112 @@ pub fn gemini_response_media(
     }
     let kernel: JsonKernel = prodex_mojo_gemini_response_media_v1;
     transform_json(nodes, raw, operation as i64, false, kernel)
+}
+
+/// Number of borrowed JSON field slots accepted by the request-media planner.
+pub const GEMINI_MEDIA_REQUEST_SLOTS: usize = 22;
+
+/// Serde field acquisition without any host-owned precedence or type decisions.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct GeminiMediaField<'a> {
+    pub present: bool,
+    pub text: Option<&'a str>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(i64)]
+pub enum GeminiMediaRequestOperation {
+    ImageUrl = 0,
+    ContentObject = 1,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GeminiMediaSelectedKind {
+    Data,
+    Uri,
+    Path,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct GeminiMediaSelected<'a> {
+    pub kind: GeminiMediaSelectedKind,
+    pub source: &'a str,
+    pub mime: Option<&'a str>,
+}
+
+/// Mojo decides source/mime field priority without copying large media data.
+/// The host only applies the typed plan to the original borrowed strings.
+pub fn gemini_media_request_selection<'a>(
+    fields: &[GeminiMediaField<'a>; GEMINI_MEDIA_REQUEST_SLOTS],
+    operation: GeminiMediaRequestOperation,
+) -> Result<Option<GeminiMediaSelected<'a>>, MojoError> {
+    ensure_rich_abi()?;
+    let mut rows = Vec::<u64>::with_capacity(GEMINI_MEDIA_REQUEST_SLOTS * 3);
+    for field in fields {
+        if field.text.is_some() && !field.present {
+            return Err(MojoError::InvalidInput);
+        }
+        match (field.present, field.text) {
+            (false, None) => rows.extend([0, 0, 0]),
+            (true, None) => rows.extend([1, 0, 0]),
+            (true, Some(text)) => rows.extend([
+                2,
+                text.as_ptr() as usize as u64,
+                u64::try_from(text.len()).map_err(|_| MojoError::InvalidInput)?,
+            ]),
+            (false, Some(_)) => return Err(MojoError::InvalidInput),
+        }
+    }
+    let mut result = [-7_i64; 3];
+    match unsafe {
+        prodex_mojo_gemini_media_request_selection_v1(
+            GEMINI_RESPONSE_MEDIA_ABI_VERSION,
+            operation as i64,
+            rows.as_ptr() as usize as u64,
+            GEMINI_MEDIA_REQUEST_SLOTS as i64,
+            result.as_mut_ptr() as usize as u64,
+        )
+    } {
+        0 => {}
+        1 => return Err(MojoError::InvalidInput),
+        4 => return Err(MojoError::AbiMismatch),
+        _ => return Err(MojoError::InvalidOutput),
+    }
+    let [action, source, mime] = result;
+    if action == 0 {
+        return if source == -1 && mime == -1 {
+            Ok(None)
+        } else {
+            Err(MojoError::InvalidOutput)
+        };
+    }
+    let kind = match action {
+        1 => GeminiMediaSelectedKind::Data,
+        2 => GeminiMediaSelectedKind::Uri,
+        3 => GeminiMediaSelectedKind::Path,
+        _ => return Err(MojoError::InvalidOutput),
+    };
+    if operation == GeminiMediaRequestOperation::ImageUrl
+        && (kind != GeminiMediaSelectedKind::Uri || mime != -1)
+    {
+        return Err(MojoError::InvalidOutput);
+    }
+    let source = usize::try_from(source).map_err(|_| MojoError::InvalidOutput)?;
+    let source = fields
+        .get(source)
+        .and_then(|field| field.text)
+        .ok_or(MojoError::InvalidOutput)?;
+    let mime = if mime == -1 {
+        None
+    } else {
+        Some(
+            fields
+                .get(usize::try_from(mime).map_err(|_| MojoError::InvalidOutput)?)
+                .and_then(|field| field.text)
+                .ok_or(MojoError::InvalidOutput)?,
+        )
+    };
+    Ok(Some(GeminiMediaSelected { kind, source, mime }))
 }
 
 // A typed adapter is intentionally the only Rust surface for Mojo-owned MIME
@@ -148,6 +261,195 @@ pub fn gemini_response_media_mime_is_text(mime: &str) -> Result<bool, MojoError>
         0 => Ok(false),
         1 => Ok(true),
         _ => Err(MojoError::InvalidOutput),
+    }
+}
+
+#[cfg(test)]
+mod media_request_selection_tests {
+    use super::*;
+
+    fn slots<'a>() -> [GeminiMediaField<'a>; GEMINI_MEDIA_REQUEST_SLOTS] {
+        [GeminiMediaField::default(); GEMINI_MEDIA_REQUEST_SLOTS]
+    }
+
+    #[test]
+    fn compiled_gemini_request_media_image_selection_keeps_presence_barriers() {
+        let mut fields = slots();
+        fields[0] = GeminiMediaField {
+            present: true,
+            text: Some("direct"),
+        };
+        fields[1] = GeminiMediaField {
+            present: true,
+            text: Some("outer"),
+        };
+        fields[2] = GeminiMediaField {
+            present: true,
+            text: Some("image"),
+        };
+        assert_eq!(
+            gemini_media_request_selection(&fields, GeminiMediaRequestOperation::ImageUrl),
+            Ok(Some(GeminiMediaSelected {
+                kind: GeminiMediaSelectedKind::Uri,
+                source: "direct",
+                mime: None,
+            })),
+        );
+        fields[0] = GeminiMediaField::default();
+        assert_eq!(
+            gemini_media_request_selection(&fields, GeminiMediaRequestOperation::ImageUrl)
+                .unwrap()
+                .unwrap()
+                .source,
+            "outer",
+        );
+        fields[1] = GeminiMediaField {
+            present: true,
+            text: None,
+        };
+        assert_eq!(
+            gemini_media_request_selection(&fields, GeminiMediaRequestOperation::ImageUrl),
+            Ok(None),
+        );
+        fields[1] = GeminiMediaField::default();
+        assert_eq!(
+            gemini_media_request_selection(&fields, GeminiMediaRequestOperation::ImageUrl)
+                .unwrap()
+                .unwrap()
+                .source,
+            "image",
+        );
+    }
+
+    #[test]
+    fn compiled_gemini_request_media_selects_nonblank_data_then_uri_then_path() {
+        let mut fields = slots();
+        fields[3] = GeminiMediaField {
+            present: true,
+            text: Some("input_file"),
+        };
+        fields[6] = GeminiMediaField {
+            present: true,
+            text: None,
+        };
+        fields[7] = GeminiMediaField {
+            present: true,
+            text: Some("application/json"),
+        };
+        fields[10] = GeminiMediaField {
+            present: true,
+            text: Some(" \u{2003} "),
+        };
+        fields[11] = GeminiMediaField {
+            present: true,
+            text: Some("masked data"),
+        };
+        fields[14] = GeminiMediaField {
+            present: true,
+            text: Some(""),
+        };
+        fields[19] = GeminiMediaField {
+            present: true,
+            text: Some("local"),
+        };
+        assert_eq!(
+            gemini_media_request_selection(&fields, GeminiMediaRequestOperation::ContentObject),
+            Ok(Some(GeminiMediaSelected {
+                kind: GeminiMediaSelectedKind::Uri,
+                source: "",
+                mime: None,
+            })),
+        );
+        fields[14] = GeminiMediaField {
+            present: true,
+            text: None,
+        };
+        fields[15] = GeminiMediaField {
+            present: true,
+            text: Some("second URI"),
+        };
+        assert_eq!(
+            gemini_media_request_selection(&fields, GeminiMediaRequestOperation::ContentObject),
+            Ok(Some(GeminiMediaSelected {
+                kind: GeminiMediaSelectedKind::Path,
+                source: "local",
+                mime: None,
+            })),
+        );
+        fields[10] = GeminiMediaField {
+            present: true,
+            text: Some("nonblank 雪"),
+        };
+        fields[6] = GeminiMediaField {
+            present: true,
+            text: Some("image/png"),
+        };
+        assert_eq!(
+            gemini_media_request_selection(&fields, GeminiMediaRequestOperation::ContentObject),
+            Ok(Some(GeminiMediaSelected {
+                kind: GeminiMediaSelectedKind::Data,
+                source: "nonblank 雪",
+                mime: Some("image/png"),
+            })),
+        );
+    }
+
+    #[test]
+    fn compiled_gemini_request_media_abi_rejects_invalid_rows_before_output_writes() {
+        let rows = [0_u64; GEMINI_MEDIA_REQUEST_SLOTS * 3];
+        let mut result = [73_i64; 3];
+        for (abi, mode, count, address, expected) in [
+            (2, 0, 22, rows.as_ptr() as usize as u64, 4),
+            (1, 2, 22, rows.as_ptr() as usize as u64, 1),
+            (1, 0, 21, rows.as_ptr() as usize as u64, 1),
+            (1, 0, 22, 0, 1),
+        ] {
+            assert_eq!(
+                unsafe {
+                    prodex_mojo_gemini_media_request_selection_v1(
+                        abi,
+                        mode,
+                        address,
+                        count,
+                        result.as_mut_ptr() as usize as u64,
+                    )
+                },
+                expected
+            );
+            assert_eq!(result, [73; 3]);
+        }
+        let mut invalid = rows;
+        invalid[0] = 3;
+        assert_eq!(
+            unsafe {
+                prodex_mojo_gemini_media_request_selection_v1(
+                    1,
+                    0,
+                    invalid.as_ptr() as usize as u64,
+                    22,
+                    result.as_mut_ptr() as usize as u64,
+                )
+            },
+            1
+        );
+        assert_eq!(result, [73; 3]);
+        let mut invalid = rows;
+        invalid[3] = 2;
+        invalid[4] = 0;
+        invalid[5] = 1;
+        assert_eq!(
+            unsafe {
+                prodex_mojo_gemini_media_request_selection_v1(
+                    1,
+                    0,
+                    invalid.as_ptr() as usize as u64,
+                    22,
+                    result.as_mut_ptr() as usize as u64,
+                )
+            },
+            1
+        );
+        assert_eq!(result, [73; 3]);
     }
 }
 

@@ -7611,3 +7611,16 @@ runtime-log tests, source anti-fallback guard and production share checks
 pass. The official share increases from 35.76207093143992% to
 35.76609372332399% (129,886 Mojo / 233,268 Rust); the project target
 stays at 75%.
+
+## Gemini request-media field/source precedence moved to Mojo (2026-10-20)
+
+An additional typed ABI on the existing compiled Gemini response-media
+owner now chooses image URL fields, nested URL fallback, content type,
+MIME, data, URI and callback path, including Unicode-blank data and
+first-present non-string barriers. Rust only acquires borrowed Serde
+fields and applies the selected action without large payload copying.
+The old Rust kind/field selection and generic fallback chain were
+deleted. All 517 provider-core tests, direct core ABI tests, no-fallback
+guards and production-share checks pass. Official share rises from
+35.76609372332399% to 35.7782309443018%
+(130,007 Mojo / 233,362 Rust). The 75% project target remains unmet.
