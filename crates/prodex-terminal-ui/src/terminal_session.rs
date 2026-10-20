@@ -11,8 +11,6 @@ use std::io::{self, Write};
 use std::ops::{Deref, DerefMut};
 use std::path::Path;
 
-const DEFAULT_TERMINAL_TITLE: &str = "prodex";
-
 #[derive(Clone, Copy)]
 enum TerminalOutput {
     Stdout,
@@ -224,19 +222,12 @@ fn set_terminal_title(output: TerminalOutput) -> io::Result<()> {
 }
 
 fn terminal_title_for_path(path: &Path) -> String {
-    let Some(name) = path.file_name() else {
-        return DEFAULT_TERMINAL_TITLE.to_string();
-    };
-    let title: String = name
-        .to_string_lossy()
-        .chars()
-        .filter(|character| !character.is_control())
-        .collect();
-    if title.is_empty() {
-        DEFAULT_TERMINAL_TITLE.to_string()
-    } else {
-        title
-    }
+    let basename = path
+        .file_name()
+        .map(|name| name.to_string_lossy())
+        .unwrap_or_default();
+    prodex_mojo_core::terminal_layout::sanitize_terminal_title(&basename)
+        .expect("compiled Mojo terminal title sanitizer returned invalid output")
 }
 
 fn leave_alternate_screen(output: TerminalOutput) -> io::Result<()> {
@@ -355,6 +346,23 @@ mod tests {
     fn fake_set_title(_: TerminalOutput) -> io::Result<()> {
         record("set_title");
         Ok(())
+    }
+
+    #[test]
+    fn compiled_terminal_title_sanitization_is_used_by_real_session_host() {
+        for (path, expected) in [
+            ("/workspace/normal", "normal"),
+            ("/workspace/line\nfeed\u{0007}", "linefeed"),
+            ("/workspace/\u{0085}", "prodex"),
+            ("/workspace/🚀東京\u{009f}", "🚀東京"),
+            ("/workspace/zero\u{200d}width", "zero\u{200d}width"),
+        ] {
+            assert_eq!(
+                terminal_title_for_path(Path::new(path)),
+                expected,
+                "{path:?}"
+            );
+        }
     }
 
     #[test]

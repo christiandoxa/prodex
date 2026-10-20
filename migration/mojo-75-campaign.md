@@ -7526,3 +7526,16 @@ provider regressions, malformed-shape tests and source guards pass.
 The canonical production share rose from 35.695920371657785% to
 35.714305415730024% (129,484 Mojo / 233,071 Rust); audited non-regression
 passes and the 75% project goal remains open.
+
+## Terminal title sanitizer moved to compiled Mojo (2026-10-20)
+
+The production terminal layout owner now strips only Unicode Cc controls
+from the decoded OS basename, preserving other Unicode format scalars and
+choosing the empty-name default. Rust still obtains the OS path and applies
+the typed title; its previous control-stripping and fallback branches were
+removed. Direct ABI invalid-input tests, the live terminal-session caller,
+all 39 terminal crate tests and the source guard pass.
+
+The unchanged official production-share metric rises from
+35.714305415730024% to 35.72208587265256% (129,539 Mojo / 233,091 Rust);
+audited non-regression passes, while the 75% project target remains open.

@@ -603,3 +603,64 @@ fn connected_separator_abi_rejects_wrong_capacity_and_version_without_output() {
     assert_eq!(written, -5);
     assert_eq!(output, [91; 12]);
 }
+
+#[test]
+fn compiled_terminal_title_strips_control_scalars_and_preserves_format_unicode() {
+    for (text, expected) in [
+        ("", "prodex"),
+        ("\n\r\u{0000}\u{0085}", "prodex"),
+        ("normal", "normal"),
+        ("  foo  ", "  foo  "),
+        ("a\u{0007}b\u{007f}c\u{009f}", "abc"),
+        ("🚀東京\u{200d}\u{202e}🧭", "🚀東京\u{200d}\u{202e}🧭"),
+    ] {
+        assert_eq!(sanitize_terminal_title(text), Ok(expected.to_string()));
+    }
+}
+
+#[test]
+fn compiled_terminal_title_abi_rejects_invalid_inputs_without_writing() {
+    let mut output = [87_u8; 12];
+    let mut written = -7_i64;
+    for (version, address, length, capacity, expected) in [
+        (2, 0, 0, 12, 4),
+        (1, 0, 1, 12, 1),
+        (1, 0, -1, 12, 1),
+        (1, 0, 0, -1, 1),
+        (1, 0, 0, 5, 3),
+    ] {
+        let status = unsafe {
+            prodex_terminal_title_sanitize_v1(
+                version,
+                address,
+                length,
+                output.as_mut_ptr() as usize as u64,
+                capacity,
+                (&mut written as *mut i64) as usize as u64,
+            )
+        };
+        assert_eq!(status, expected);
+        assert_eq!(written, -7);
+        assert_eq!(output, [87; 12]);
+    }
+    assert_eq!(
+        unsafe { prodex_terminal_title_sanitize_v1(1, 0, 0, 0, 12, 0) },
+        1
+    );
+    let invalid_utf8 = [0xff_u8; 1];
+    assert_eq!(
+        unsafe {
+            prodex_terminal_title_sanitize_v1(
+                1,
+                invalid_utf8.as_ptr() as usize as u64,
+                1,
+                output.as_mut_ptr() as usize as u64,
+                12,
+                (&mut written as *mut i64) as usize as u64,
+            )
+        },
+        1
+    );
+    assert_eq!(written, -7);
+    assert_eq!(output, [87; 12]);
+}
