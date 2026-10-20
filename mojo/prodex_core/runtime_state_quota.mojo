@@ -493,3 +493,52 @@ def prodex_runtime_state_startup_probe_batch_v1(
         unsafe_from_address=Int(remaining_address)
     )[] = remaining
     return RUNTIME_STATE_QUOTA_OK
+
+
+# Compare provider-normalized quota snapshot facts and decide persistence.
+# The host supplies only equality facts for generic status types and plan
+# labels; numeric window comparisons and touch-time policy are compiled.
+comptime QUOTA_SNAPSHOT_COMPARE_ABI: Int64 = 1
+comptime QUOTA_SNAPSHOT_COMPARE_FIELD_COUNT: Int64 = 15
+
+
+@export("prodex_runtime_state_quota_snapshot_compare_v1")
+def prodex_runtime_state_quota_snapshot_compare_v1(
+    abi_version: Int64, operation: Int64,
+    facts_address: UInt, fact_count: Int64,
+    result_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != QUOTA_SNAPSHOT_COMPARE_ABI:
+        return RUNTIME_STATE_QUOTA_ABI
+    if (
+        operation < 0 or operation > 1
+        or facts_address == 0 or facts_address % 8 != 0
+        or fact_count != QUOTA_SNAPSHOT_COMPARE_FIELD_COUNT
+        or result_address == 0 or result_address % 8 != 0
+    ):
+        return RUNTIME_STATE_QUOTA_INVALID
+    var facts = Pointer[mut=False, Int64, ImmUntrackedOrigin](
+        unsafe_from_address=Int(facts_address)
+    )
+    for index in range(8, 12):
+        if not state_quota_valid_bool(facts[unsafe_offset=index]):
+            return RUNTIME_STATE_QUOTA_INVALID
+    var present = facts[unsafe_offset=8] == 1
+    var same = present
+    if present:
+        for index in range(4):
+            if facts[unsafe_offset=index] != facts[unsafe_offset=index + 4]:
+                same = False
+        if facts[unsafe_offset=9] != 1 or facts[unsafe_offset=10] != 1 or facts[unsafe_offset=11] != 1:
+            same = False
+    var persist = not same
+    if operation == 1 and not persist:
+        persist = state_quota_saturating_sub(
+            facts[unsafe_offset=13], facts[unsafe_offset=12],
+        ) > facts[unsafe_offset=14]
+    var result = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(result_address)
+    )
+    result[unsafe_offset=0] = Int64(same)
+    result[unsafe_offset=1] = Int64(persist)
+    return RUNTIME_STATE_QUOTA_OK
