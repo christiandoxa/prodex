@@ -206,3 +206,77 @@ fn combined_follow_budget_low_rlimit_child() {
     exercise_combined_follow_budget(&root, true);
     fs::remove_dir_all(root).expect("low-RLIMIT log test directory should be removed");
 }
+
+#[test]
+fn compiled_log_follow_selection_reserves_slots_and_preserves_input_order() {
+    let root = std::env::temp_dir().join(format!(
+        "prodex-log-follow-selection-{}-{}",
+        std::process::id(),
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos()
+    ));
+    fs::create_dir_all(&root).unwrap();
+    let runtime = (0..40)
+        .map(|index| root.join(format!("runtime-{index:02}.log")))
+        .collect::<Vec<_>>();
+    let sessions = (0..40)
+        .map(|index| root.join(format!("session-{index:02}.jsonl")))
+        .collect::<Vec<_>>();
+    for (index, path) in runtime.iter().chain(sessions.iter()).enumerate() {
+        fs::write(path, b"record\n").unwrap();
+        fs::File::options()
+            .write(true)
+            .open(path)
+            .unwrap()
+            .set_modified(
+                UNIX_EPOCH
+                    + std::time::Duration::from_secs(u64::try_from(index % 40 + 100).unwrap()),
+            )
+            .unwrap();
+    }
+    let (selected_runtime, selected_session) = bounded_followed_log_paths(&runtime, &sessions);
+    assert_eq!(selected_runtime, runtime[24..].to_vec());
+    assert_eq!(selected_session, sessions[24..].to_vec());
+    assert_eq!(
+        selected_runtime.len() + selected_session.len(),
+        LOG_FOLLOW_MAX_FILES
+    );
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn compiled_log_follow_selection_retains_duplicated_paths_and_unused_source_slots() {
+    let runtime = (0..64)
+        .map(|index| PathBuf::from(format!("runtime-{index:03}.log")))
+        .collect::<Vec<_>>();
+    let session = (0..10)
+        .map(|index| PathBuf::from(format!("session-{index:03}.jsonl")))
+        .collect::<Vec<_>>();
+    let (selected_runtime, selected_sessions) = bounded_followed_log_paths(&runtime, &session);
+    assert_eq!(selected_runtime.len(), 22);
+    assert_eq!(selected_sessions.len(), 10);
+    assert_eq!(selected_runtime, runtime[..22].to_vec());
+    assert_eq!(selected_sessions, session);
+
+    let single = PathBuf::from("same-runtime.log");
+    let duplicate_runtime = vec![single.clone(); 40];
+    let two_sessions = vec![
+        PathBuf::from("session-a.jsonl"),
+        PathBuf::from("session-b.jsonl"),
+    ];
+    let (selected_runtime, selected_sessions) =
+        bounded_followed_log_paths(&duplicate_runtime, &two_sessions);
+    assert_eq!(
+        selected_runtime, duplicate_runtime,
+        "the old BTreeSet deduplicated slots, not the returned original rows",
+    );
+    assert_eq!(selected_sessions, two_sessions);
+
+    let duplicate_within_capacity = vec![single; 32];
+    let (selected_runtime, selected_sessions) =
+        bounded_followed_log_paths(&duplicate_within_capacity, &[]);
+    assert_eq!(selected_runtime, duplicate_within_capacity);
+    assert!(selected_sessions.is_empty());
+}
