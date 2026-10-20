@@ -174,11 +174,11 @@ pub use deepseek_request_diagnostic::deepseek_request_diagnostic;
 mod openai_compat;
 pub use openai_compat::{
     OpenAiCompatError, OpenAiCompatKernelOperation, OpenAiCompatMessageInput,
-    OpenAiCompatMessageKind, OpenAiCompatParameter, OpenAiCompatStreamInput,
-    OpenAiCompatStreamKind, OpenAiCompatValidationInput, openai_compat_output_text,
-    openai_compat_request_message, openai_compat_response_usage, openai_compat_rtk_arguments,
-    openai_compat_split_tool_name, openai_compat_stream_event, openai_compat_supported_params,
-    openai_compat_validate_request,
+    OpenAiCompatMessageKind, OpenAiCompatParameter, OpenAiCompatSseEnvelope,
+    OpenAiCompatStreamInput, OpenAiCompatStreamKind, OpenAiCompatValidationInput,
+    openai_compat_output_text, openai_compat_request_message, openai_compat_response_usage,
+    openai_compat_rtk_arguments, openai_compat_split_tool_name, openai_compat_sse_envelope,
+    openai_compat_stream_event, openai_compat_supported_params, openai_compat_validate_request,
 };
 #[path = "rich/kiro.rs"]
 mod kiro;

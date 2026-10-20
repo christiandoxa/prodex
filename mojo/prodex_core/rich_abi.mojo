@@ -42,7 +42,7 @@ from deepseek import (
     deepseek_responses_request_v1,
 )
 from anthropic_request import anthropic_request_kernel_v1
-from openai_compat import openai_compat_kernel_v1
+from openai_compat import openai_compat_kernel_v1, openai_compat_sse_envelope_v1
 # Kiro shares the rich ABI while keeping ACP transport and session behavior in Rust.
 from kiro import (
     kiro_anthropic_response_rewrite_v1,
@@ -653,6 +653,16 @@ def prodex_mojo_openai_compat_kernel_v1(
 ) abi("C") -> Int64:
     return openai_compat_kernel_v1(
         abi_version, input_address, output_address, output_capacity, written_address
+    )
+
+
+@export("prodex_openai_compat_sse_envelope_v1")
+def prodex_openai_compat_sse_envelope_v1(
+    abi_version: Int64, input_address: UInt, input_length: Int64,
+    output_address: UInt,
+) abi("C") -> Int64:
+    return openai_compat_sse_envelope_v1(
+        abi_version, input_address, input_length, output_address,
     )
 
 
