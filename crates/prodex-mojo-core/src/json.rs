@@ -84,7 +84,10 @@ pub use super_expose_tools::{
 #[cfg(feature = "mojo-rich")]
 mod gemini_value_policy;
 #[cfg(feature = "mojo-rich")]
-pub use gemini_value_policy::{GeminiValueOperation, gemini_value_projection};
+pub use gemini_value_policy::{
+    GeminiValueOperation, gemini_skip_context_path_name, gemini_tool_pattern_parts,
+    gemini_value_projection,
+};
 mod gemini_contents;
 pub use self::gemini_contents::{GeminiContentOperation, gemini_content_hardening};
 #[cfg(feature = "mojo-rich")]

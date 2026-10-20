@@ -1965,12 +1965,19 @@ export function findViolations(files) {
         "GeminiValueOperation::Paths",
         "GeminiValueOperation::InputTexts",
         "compiled_gemini_collect_input_texts_keeps_object_field_priority_and_duplicate_content",
+        "gemini_tool_pattern_parts(value)",
+        "gemini_skip_context_path_name(name)",
+        "compiled_gemini_tool_pattern_parser_reaches_public_provider_boundary",
+        "compiled_gemini_path_exclusion_reaches_public_provider_boundary",
       ];
       const retired = [
         "Some(serde_json::Value::Array(items)) =>",
         "gemini_provider_core_collect_string_values(Some(item), values)",
         "gemini_provider_core_collect_path_values(Some(item), paths)",
         "gemini_provider_core_collect_input_texts(Some(item), texts)",
+        "value.find('(')?",
+        "value.rfind(')')?",
+        '".git" | "node_modules" | "target"',
       ];
       return required.every((marker) => contents.includes(marker)) &&
         retired.every((marker) => !production.includes(marker))
@@ -1982,6 +1989,12 @@ export function findViolations(files) {
         "pub fn gemini_value_projection(",
         "compiled_gemini_value_walks_nested_arrays_and_selected_object_content",
         "compiled_gemini_value_abi_rejects_versions_and_invalid_shapes_without_writing",
+        "fn prodex_mojo_gemini_value_scalar_v1(",
+        "pub fn gemini_tool_pattern_parts(",
+        "pub fn gemini_skip_context_path_name(",
+        "compiled_gemini_scalar_tool_parts_preserves_unicode_whitespace_and_last_close",
+        "compiled_gemini_scalar_context_names_use_exact_case",
+        "compiled_gemini_scalar_abi_rejects_bad_shape_before_output_writes",
       ];
       return required.filter((marker) => !contents.includes(marker))
         .map((marker) => filePath + ": compiled Gemini value ABI must retain " + marker);
@@ -1993,6 +2006,9 @@ export function findViolations(files) {
         "pj_field(tree, cursor, StringSlice(\"content\"))",
         "pj_trim(text)",
         "pj_kind(tree, parent) == JSON_ARRAY",
+        '@export("prodex_mojo_gemini_value_scalar_v1")',
+        'rich_view_matches_literal["vendor"](text, False)',
+        "rich_trim_bounds(text)",
       ];
       return required.filter((marker) => !contents.includes(marker))
         .map((marker) => filePath + ": compiled Gemini value traversal must retain " + marker);
@@ -2003,7 +2019,11 @@ export function findViolations(files) {
         ? [] : [filePath + ": Gemini value kernel must stay linked into production"];
     }
     if (filePath === "crates/prodex-mojo-core/src/json.rs" && contents.includes("mod gemini_contents;")) {
-      return contents.includes("pub use gemini_value_policy::{GeminiValueOperation, gemini_value_projection};")
+      return [
+        "pub use gemini_value_policy::{",
+        "GeminiValueOperation, gemini_skip_context_path_name, gemini_tool_pattern_parts,",
+        "gemini_value_projection,",
+      ].every((marker) => contents.includes(marker))
         ? [] : [filePath + ": Gemini value adapter must stay reachable"];
     }
     return [];
@@ -11145,6 +11165,10 @@ function selfTest() {
     "GeminiValueOperation::Paths",
     "GeminiValueOperation::InputTexts",
     "compiled_gemini_collect_input_texts_keeps_object_field_priority_and_duplicate_content",
+    "gemini_tool_pattern_parts(value)",
+    "gemini_skip_context_path_name(name)",
+    "compiled_gemini_tool_pattern_parser_reaches_public_provider_boundary",
+    "compiled_gemini_path_exclusion_reaches_public_provider_boundary",
   ].join("\n");
   const geminiValueCallerPath = "crates/prodex-provider-core/src/gemini_bridge/util.rs";
   assert.deepEqual(findViolations([[geminiValueCallerPath, geminiValueCallerFixture]]), []);

@@ -2,6 +2,7 @@
 # The host owns acquisition and PathBuf; compiled Mojo alone decides which
 # values are eligible and the depth-first traversal / output order.
 from std.memory import Pointer
+from rich_text import rich_trim_bounds, rich_view_matches_literal, rich_view_ptr, rich_view_valid
 from parsed_json import (
     JSON_ARRAY, JSON_OBJECT, JSON_STRING, ParsedJson, ParsedJsonNode,
     pj_child, pj_field, pj_kind, pj_next, pj_text, pj_trim, pj_valid,
@@ -114,4 +115,76 @@ def prodex_mojo_gemini_value_policy_v1(
     )
     metadata[unsafe_offset=0] = 1
     metadata[unsafe_offset=1] = sink.written
+    return 0
+
+
+# Scalar Gemini policy shares the same compiled owner. Rust supplies UTF-8,
+# allocates a five-word output and validates returned byte ranges only.
+comptime GEMINI_VALUE_SCALAR_TOOL_PARTS: Int64 = 0
+comptime GEMINI_VALUE_SCALAR_SKIP_PATH: Int64 = 1
+
+
+@export("prodex_mojo_gemini_value_scalar_v1")
+def prodex_mojo_gemini_value_scalar_v1(
+    abi: Int64, operation: Int64,
+    text_address: UInt, text_length: Int64, output_address: UInt,
+) abi("C") -> Int64:
+    if abi != GEMINI_VALUE_ABI:
+        return 4
+    if (
+        operation < GEMINI_VALUE_SCALAR_TOOL_PARTS
+        or operation > GEMINI_VALUE_SCALAR_SKIP_PATH
+        or text_length < 0 or (text_length > 0 and text_address == 0)
+        or output_address == 0 or output_address % 8 != 0
+    ):
+        return 1
+    var text = ProdexRichStringView(text_address, UInt(text_length))
+    if not rich_view_valid(text, 0x7FFFFFFFFFFFFFFF):
+        return 1
+    var result = Pointer[mut=True, UInt64, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    for index in range(5):
+        result[unsafe_offset=index] = 0
+    if operation == GEMINI_VALUE_SCALAR_SKIP_PATH:
+        result[unsafe_offset=0] = UInt64(
+            rich_view_matches_literal[".git"](text, False)
+            or rich_view_matches_literal["node_modules"](text, False)
+            or rich_view_matches_literal["target"](text, False)
+            or rich_view_matches_literal["dist"](text, False)
+            or rich_view_matches_literal["build"](text, False)
+            or rich_view_matches_literal["__pycache__"](text, False)
+            or rich_view_matches_literal["vendor"](text, False)
+        )
+        return 0
+
+    var bounds = rich_trim_bounds(text)
+    var start = bounds[0]
+    var end = bounds[1]
+    var open: Int64 = -1
+    var close: Int64 = -1
+    var source = rich_view_ptr(text)
+    for index in range(start, end):
+        var value = source[unsafe_offset=index]
+        if value == 40 and open < 0:
+            open = index
+        if value == 41:
+            close = index
+    if open < 0 or close <= open:
+        return 0
+    var tool = ProdexRichStringView(
+        text.ptr + UInt(start), UInt(open - start)
+    )
+    var pattern = ProdexRichStringView(
+        text.ptr + UInt(open + 1), UInt(close - open - 1)
+    )
+    var tool_bounds = rich_trim_bounds(tool)
+    var pattern_bounds = rich_trim_bounds(pattern)
+    if tool_bounds[0] == tool_bounds[1] or pattern_bounds[0] == pattern_bounds[1]:
+        return 0
+    result[unsafe_offset=0] = 1
+    result[unsafe_offset=1] = UInt64(start + tool_bounds[0])
+    result[unsafe_offset=2] = UInt64(start + tool_bounds[1])
+    result[unsafe_offset=3] = UInt64(open + 1 + pattern_bounds[0])
+    result[unsafe_offset=4] = UInt64(open + 1 + pattern_bounds[1])
     return 0

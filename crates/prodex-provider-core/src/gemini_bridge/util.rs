@@ -61,25 +61,14 @@ pub fn gemini_provider_core_bool_str(value: &str) -> Option<bool> {
 }
 
 pub fn gemini_provider_core_parse_command_specific_tool(value: &str) -> Option<(String, String)> {
-    let value = value.trim();
-    let open = value.find('(')?;
-    let close = value.rfind(')')?;
-    if close <= open {
-        return None;
-    }
-    let tool = value[..open].trim();
-    let pattern = value[open + 1..close].trim();
-    if tool.is_empty() || pattern.is_empty() {
-        return None;
-    }
-    Some((tool.to_string(), pattern.to_string()))
+    prodex_mojo_core::json::gemini_tool_pattern_parts(value)
+        .expect("compiled Mojo Gemini tool-pattern parser failed")
+        .map(|(tool, pattern)| (tool.to_string(), pattern.to_string()))
 }
 
 pub fn gemini_provider_core_skip_context_path_name(name: &str) -> bool {
-    matches!(
-        name,
-        ".git" | "node_modules" | "target" | "dist" | "build" | "__pycache__" | "vendor"
-    )
+    prodex_mojo_core::json::gemini_skip_context_path_name(name)
+        .expect("compiled Mojo Gemini context-name classifier failed")
 }
 
 pub fn gemini_provider_core_stream_error(value: &serde_json::Value) -> Option<(String, String)> {
@@ -177,6 +166,46 @@ mod tests {
         );
         gemini_provider_core_collect_input_texts(None, &mut texts);
         assert_eq!(texts.len(), 15);
+    }
+
+    #[test]
+    fn compiled_gemini_tool_pattern_parser_reaches_public_provider_boundary() {
+        for (input, expected) in [
+            ("cargo(rust tests)", Some(("cargo", "rust tests"))),
+            (
+                " \u{2003}検索 \u{2003}( \u{2003}foo.* \u{2003}) ",
+                Some(("検索", "foo.*")),
+            ),
+            ("grep(abc) trailing )", Some(("grep", "abc) trailing"))),
+            ("grep()", None),
+            ("(regex)", None),
+            ("x", None),
+        ] {
+            assert_eq!(
+                gemini_provider_core_parse_command_specific_tool(input),
+                expected.map(|(tool, pattern)| (tool.to_string(), pattern.to_string())),
+                "{input:?}",
+            );
+        }
+    }
+
+    #[test]
+    fn compiled_gemini_path_exclusion_reaches_public_provider_boundary() {
+        for (name, excluded) in [
+            (".git", true),
+            ("node_modules", true),
+            ("target", true),
+            ("dist", true),
+            ("build", true),
+            ("__pycache__", true),
+            ("vendor", true),
+            ("node_modules-extra", false),
+            ("vendor ", false),
+            (".GIT", false),
+            ("東京", false),
+        ] {
+            assert_eq!(gemini_provider_core_skip_context_path_name(name), excluded);
+        }
     }
 
     #[test]
