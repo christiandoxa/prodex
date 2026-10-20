@@ -7971,3 +7971,15 @@ All 127 log-module tests, three direct core ABI tests, direct Mojo
 test and source/share checks pass. Official share increases from
 35.921607541552966% to 35.95155464268008%
 (131,976 Mojo / 235,118 Rust). The 75% goal remains open.
+
+## Session and runtime-info recent-log sorting unified in compiled Mojo (2026-10-20)
+
+The compiled logging owner now performs newest-first sorting and
+top-N path selection for both session logs (millisecond timestamps,
+ascending path ties) and runtime-info logs (full signed SystemTime,
+descending path ties). Rust still acquires filesystem data and keeps
+the original PathBufs, but both Rust sort_by/reverse/truncate policies
+were removed. All 129 log tests, 23 report-info tests, three core
+ABI tests, a direct Mojo test and source/share guards pass. Official
+share rises from 35.95155464268008% to 35.96076947575585%
+(132,108 Mojo / 235,259 Rust); the 75% target remains open.

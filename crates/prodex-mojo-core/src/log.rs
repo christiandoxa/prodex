@@ -1,5 +1,7 @@
 use crate::MojoError;
 
+mod recent_paths;
+pub use recent_paths::{RecentLogPathInput, RecentLogPathOrderMode, recent_log_path_order};
 mod follow_selection;
 pub use follow_selection::{
     LogFollowSelectionInput, LogFollowSelectionPlan, log_follow_selection_plan,
