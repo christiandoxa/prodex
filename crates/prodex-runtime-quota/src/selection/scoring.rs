@@ -273,11 +273,17 @@ fn profile_selection_order_with_mojo<S: ProfileSelectionRead>(
                 .unwrap_or(usize::MAX)
         })
         .collect::<Vec<_>>();
-    let current_index = names.iter().position(|name| name == current_profile);
-    let order = prodex_mojo_core::runtime::profile_selection_order_batch(
+    let borrowed = names.iter().map(String::as_str).collect::<Vec<_>>();
+    let inclusion = if include_current {
+        prodex_mojo_core::runtime::ProfileCurrentNameInclusion::Include
+    } else {
+        prodex_mojo_core::runtime::ProfileCurrentNameInclusion::Exclude
+    };
+    let order = prodex_mojo_core::runtime::profile_selection_order_by_current_name(
+        &borrowed,
         &priorities,
-        current_index,
-        include_current,
+        current_profile,
+        inclusion,
     )
     .expect("Mojo profile rotation order returned invalid output");
     order

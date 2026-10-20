@@ -538,15 +538,19 @@ def prodex_runtime_quota_profile_schedule_batch(
 # Combined current-name match and stable profile rotation. The caller
 # retains the original profile strings; Mojo owns first exact name match,
 # "current" positioning and provider-priority ordering.
-comptime RUNTIME_PROFILE_CURRENT_NAME_ABI: Int64 = 1
+comptime RUNTIME_PROFILE_CURRENT_NAME_ABI: Int64 = 2
+comptime RUNTIME_PROFILE_ORDER_EXCLUDE: Int64 = 0
+comptime RUNTIME_PROFILE_ORDER_INCLUDE: Int64 = 1
+comptime RUNTIME_PROFILE_ORDER_INCLUDE_IF_PRESENT: Int64 = 2
 comptime RUNTIME_PROFILE_CURRENT_NAME_MAX_BYTES: Int64 = 65_536
 
 
-@export("prodex_runtime_profile_rotation_by_current_name_v1")
-def prodex_runtime_profile_rotation_by_current_name_v1(
+@export("prodex_runtime_profile_rotation_by_current_name_v2")
+def prodex_runtime_profile_rotation_by_current_name_v2(
     abi_version: Int64,
     names_address: UInt, priorities_address: UInt, count: Int64,
     current_name_address: UInt, current_name_length: Int64,
+    include_mode: Int64,
     output_address: UInt, output_capacity: Int64,
     written_address: UInt,
 ) abi("C") -> Int64:
@@ -559,9 +563,11 @@ def prodex_runtime_profile_rotation_by_current_name_v1(
             or priorities_address == 0 or priorities_address % 8 != 0
         ))
         or current_name_length < 0
+        or include_mode < RUNTIME_PROFILE_ORDER_EXCLUDE
+        or include_mode > RUNTIME_PROFILE_ORDER_INCLUDE_IF_PRESENT
         or (current_name_length > 0 and current_name_address == 0)
         or output_address == 0 or output_address % 8 != 0
-        or output_capacity < count
+        or output_capacity < 0
         or written_address == 0 or written_address % 8 != 0
     ):
         return 1
@@ -610,6 +616,21 @@ def prodex_runtime_profile_rotation_by_current_name_v1(
             current_index = index
             break
 
+    var include_current = (
+        include_mode == RUNTIME_PROFILE_ORDER_INCLUDE
+        or (
+            include_mode == RUNTIME_PROFILE_ORDER_INCLUDE_IF_PRESENT
+            and current_index >= 0
+        )
+    )
+    var output_count = count
+    if current_index < 0 and include_current:
+        output_count += 1
+    if current_index >= 0 and not include_current:
+        output_count -= 1
+    if output_count > RUNTIME_PROFILE_SCHEDULE_MAX_COUNT or output_capacity < output_count:
+        return 1
+
     var output = Pointer[mut=True, Int64, MutUntrackedOrigin](
         unsafe_from_address=Int(output_address)
     )
@@ -622,7 +643,7 @@ def prodex_runtime_profile_rotation_by_current_name_v1(
         written,
         count,
         current_index,
-        Int64(current_index >= 0),
+        Int64(include_current),
     )
     if result != 0:
         return 1
