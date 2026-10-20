@@ -7936,3 +7936,13 @@ core tests, direct Mojo test and strict no-fallback/share guards pass.
 Production share increases from 35.90709045120557% to
 35.908872666164704% (131,629 Mojo / 234,935 Rust LOC); project
 target 75% remains open.
+
+## Runtime-doctor persisted log-tail LF boundary in Mojo (2026-10-20)
+
+The compiled log parser now finds the first byte-oriented LF boundary
+when reading a runtime log from the middle. Rust retains filesystem
+seek/read and applies only the compiled offset; the old Rust byte
+search and conditional drain policy were deleted. All 66
+runtime-doctor tests, two direct core ABI tests, direct Mojo test,
+no-fallback and share checks pass. The official share is
+35.908872666164704% (131,629 Mojo / 234,935 Rust); 75% remains open.
