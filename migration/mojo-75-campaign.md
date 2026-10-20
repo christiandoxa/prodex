@@ -8167,3 +8167,16 @@ direct Mojo test and strict source/share guards pass.
 Official share rises from 36.091252613612696% to
 36.09407450674974% (133,473 Mojo / 236,319 Rust).
 The separate 75% target remains open.
+
+## Current-profile name matching reused across quota and previous response (2026-10-21)
+
+The compiled profile-schedule owner now resolves current profile names
+for both quota selection and previous-response routing using one v2
+ABI with exclude, include-with-synthetic and include-only-if-present
+modes. Rust retains profile record ownership but quota's .position
+matching was deleted; the superseded by-name v1 ABI was removed.
+All 30 quota tests, 79 previous-response tests, three direct core ABI
+tests, a direct Mojo regression and anti-fallback/share guards pass.
+Official share rises from 36.09407450674974% to
+36.09557853295551% (133,493 Mojo / 236,339 Rust production LOC).
+The 75% goal remains outstanding.

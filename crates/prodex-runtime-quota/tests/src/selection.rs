@@ -475,3 +475,83 @@ fn rotation_order_keeps_current_then_provider_aware_rotation() {
         ["current", "same-provider", "lower-provider"]
     );
 }
+
+#[test]
+fn compiled_current_name_rotation_retains_synthetic_active_profile_for_quota_only() {
+    let selection = SelectionView {
+        entries: &[
+            SelectionEntry {
+                name: "z",
+                provider_priority: 0,
+                last_run_selected_at: None,
+            },
+            SelectionEntry {
+                name: "雪",
+                provider_priority: 0,
+                last_run_selected_at: None,
+            },
+            SelectionEntry {
+                name: "other",
+                provider_priority: 1,
+                last_run_selected_at: None,
+            },
+        ],
+    };
+    assert_eq!(
+        active_profile_selection_order_with_view(selection, "missing-current"),
+        ["z", "雪", "other", "missing-current"],
+        "the missing active profile must be the synthetic last-priority member",
+    );
+    assert_eq!(
+        profile_rotation_order_with_view(selection, "missing-current"),
+        ["z", "雪", "other"],
+        "exclude must not synthesize an absent current name",
+    );
+    assert_eq!(
+        active_profile_selection_order_with_view(selection, "雪"),
+        ["雪", "z", "other"],
+        "exact Unicode current match rotates ahead of its original provider peers",
+    );
+    assert_eq!(
+        profile_rotation_order_with_view(selection, "雪"),
+        ["z", "other"],
+        "excluding current must retain deterministic provider priority",
+    );
+    let empty = SelectionView { entries: &[] };
+    assert_eq!(
+        active_profile_selection_order_with_view(empty, "fallback"),
+        ["fallback"],
+    );
+    assert!(profile_rotation_order_with_view(empty, "fallback").is_empty());
+}
+
+#[test]
+fn compiled_current_name_rotation_quota_preserves_first_equal_name_on_ties() {
+    let selection = SelectionView {
+        entries: &[
+            SelectionEntry {
+                name: "same",
+                provider_priority: 0,
+                last_run_selected_at: None,
+            },
+            SelectionEntry {
+                name: "same",
+                provider_priority: 0,
+                last_run_selected_at: None,
+            },
+            SelectionEntry {
+                name: "tail",
+                provider_priority: 1,
+                last_run_selected_at: None,
+            },
+        ],
+    };
+    assert_eq!(
+        active_profile_selection_order_with_view(selection, "same"),
+        ["same", "same", "tail"],
+    );
+    assert_eq!(
+        profile_rotation_order_with_view(selection, "same"),
+        ["same", "tail"],
+    );
+}

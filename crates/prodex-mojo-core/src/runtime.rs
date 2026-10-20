@@ -96,7 +96,8 @@ pub use profile_health::{
 };
 pub use profile_jitter::profile_selection_jitter;
 pub use profile_rotation::{
-    profile_selection_order_batch, profile_selection_order_by_current_name,
+    ProfileCurrentNameInclusion, profile_selection_order_batch,
+    profile_selection_order_by_current_name,
 };
 pub use profile_route_circuit::{
     RuntimeProfileRouteCircuitAction, RuntimeProfileRouteCircuitActionInput,

@@ -460,6 +460,7 @@ fn runtime_previous_response_ordered_profiles(
         &names,
         &provider_priorities,
         runtime.current_profile.as_str(),
+        prodex_mojo_core::runtime::ProfileCurrentNameInclusion::IncludeIfPresent,
     )
     .map_err(|error| anyhow::anyhow!("Mojo previous-response ordering failed: {error:?}"))?;
     ordered_indices
