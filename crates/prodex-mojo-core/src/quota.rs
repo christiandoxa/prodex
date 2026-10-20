@@ -39,8 +39,9 @@ pub use retry_time::{QuotaRetryTimeCandidate, quota_retry_time_candidate};
 mod error_label;
 pub use error_label::{quota_error_summary_kind, quota_error_summary_label};
 pub use report_sort::{
-    QuotaReportPagePlan, QuotaReportSortProjection, quota_report_compare, quota_report_page_plan,
-    quota_report_sort_label, quota_report_sort_next, quota_report_sort_projection,
+    QuotaReportPagePlan, QuotaReportSortBatchInput, QuotaReportSortProjection,
+    quota_report_compare, quota_report_page_plan, quota_report_sort_batch, quota_report_sort_label,
+    quota_report_sort_next, quota_report_sort_projection,
 };
 mod usage_response;
 pub use usage_response::{
