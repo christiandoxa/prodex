@@ -394,3 +394,74 @@ def prodex_runtime_sse_json_frame_plan_v1(
         unsafe_from_address=Int(result_address)
     )[] = decision
     return 0
+
+
+# SSE event-data state transitions. Rust owns Vec allocations and the original
+# buffered data, but no longer recognizes the private invalid event sentinel,
+# decides append eligibility, or duplicates skip/emit precedence.
+comptime SSE_EVENT_STATE_ABI: Int64 = 1
+comptime SSE_EVENT_STATE_EMIT: Int64 = 0
+comptime SSE_EVENT_STATE_DATA: Int64 = 1
+comptime SSE_EVENT_STATE_PARSE: Int64 = 2
+
+comptime SSE_EVENT_STATE_EMPTY: Int64 = 0
+comptime SSE_EVENT_STATE_DISCARD: Int64 = 1
+comptime SSE_EVENT_STATE_EMIT_OK: Int64 = 2
+comptime SSE_EVENT_STATE_MARK_INVALID: Int64 = 3
+comptime SSE_EVENT_STATE_IGNORE_DATA: Int64 = 4
+comptime SSE_EVENT_STATE_APPEND_DATA: Int64 = 5
+
+
+@export("prodex_runtime_sse_event_state_v1")
+def prodex_runtime_sse_event_state_v1(
+    abi_version: Int64, operation: Int64,
+    line_count: Int64,
+    first_address: UInt, first_length: Int64,
+    utf8_valid: Int64,
+    result_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != SSE_EVENT_STATE_ABI:
+        return 4
+    if (
+        operation < SSE_EVENT_STATE_EMIT or operation > SSE_EVENT_STATE_PARSE
+        or line_count < 0 or first_length < 0
+        or (line_count > 0 and first_length > 0 and first_address == 0)
+        or (line_count == 0 and (first_address != 0 or first_length != 0))
+        or (utf8_valid != 0 and utf8_valid != 1)
+        or result_address == 0 or result_address % 8 != 0
+    ):
+        return 1
+    var marker = False
+    if first_length > 0:
+        if first_address == 0:
+            return 1
+        # This ABI receives an actual borrowed Rust UTF-8 String.
+        # Reject malformed views before attempting sentinel recognition.
+        var ptr = Pointer[mut=False, UInt8, ImmUntrackedOrigin](
+            unsafe_from_address=Int(first_address)
+        )
+        # The sentinel starts with a NUL byte and is only used as
+        # internal parser state, never accepted as SSE user data.
+        if first_length == 24 and ptr[unsafe_offset=0] == 0:
+            var literal = StringSlice("prodex-invalid-sse-data")
+            marker = Int64(literal.byte_length()) == first_length - 1
+            if marker:
+                var bytes = literal.unsafe_ptr()
+                for index in range(first_length - 1):
+                    if ptr[unsafe_offset=index + 1] != bytes[unsafe_offset=index]:
+                        marker = False
+                        break
+    var action = SSE_EVENT_STATE_EMPTY
+    if operation == SSE_EVENT_STATE_DATA:
+        if utf8_valid == 0:
+            action = SSE_EVENT_STATE_MARK_INVALID
+        elif marker:
+            action = SSE_EVENT_STATE_IGNORE_DATA
+        else:
+            action = SSE_EVENT_STATE_APPEND_DATA
+    elif line_count > 0:
+        action = SSE_EVENT_STATE_DISCARD if marker else SSE_EVENT_STATE_EMIT_OK
+    Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(result_address)
+    )[] = action
+    return 0

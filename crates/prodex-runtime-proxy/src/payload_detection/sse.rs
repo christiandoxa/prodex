@@ -8,6 +8,9 @@ use crate::{
     RuntimeHttpErrorAction, RuntimeHttpErrorClass, RuntimeHttpErrorPhase,
     runtime_stream_error_policy_from_value,
 };
+use prodex_mojo_core::runtime_sse_chunk::{
+    SseEventStateAction, SseEventStateOperation, sse_event_state_action,
+};
 use std::time::Duration;
 
 const RUNTIME_SSE_INVALID_DATA_MARKER: &str = "\u{0}prodex-invalid-sse-data";
@@ -179,18 +182,6 @@ fn runtime_sse_inspection_step(
     (output[0], output[1] == 1)
 }
 
-fn runtime_sse_event_marked_invalid(data_lines: &[String]) -> bool {
-    matches!(
-        data_lines.first().map(String::as_str),
-        Some(RUNTIME_SSE_INVALID_DATA_MARKER)
-    )
-}
-
-fn runtime_sse_mark_invalid(data_lines: &mut Vec<String>) {
-    data_lines.clear();
-    data_lines.push(RUNTIME_SSE_INVALID_DATA_MARKER.to_string());
-}
-
 type RuntimeSseEventParser = fn(&[String]) -> RuntimeParsedSseEvent;
 
 fn runtime_sse_emit_event<F>(
@@ -200,15 +191,17 @@ fn runtime_sse_emit_event<F>(
 ) where
     F: FnMut(RuntimeParsedSseEvent),
 {
-    if data_lines.is_empty() {
-        return;
+    match sse_event_state_action(data_lines, SseEventStateOperation::Emit, true)
+        .expect("compiled Mojo SSE buffered-event state returned invalid output")
+    {
+        SseEventStateAction::Empty => {}
+        SseEventStateAction::Discard => data_lines.clear(),
+        SseEventStateAction::Emit => {
+            on_event(parse_event(data_lines));
+            data_lines.clear();
+        }
+        _ => unreachable!("validated Mojo SSE emission state"),
     }
-    if runtime_sse_event_marked_invalid(data_lines) {
-        data_lines.clear();
-        return;
-    }
-    on_event(parse_event(data_lines));
-    data_lines.clear();
 }
 
 fn runtime_sse_finish_line<F>(
@@ -223,12 +216,26 @@ fn runtime_sse_finish_line<F>(
     if plan.kind == RuntimeSseLineKind::Blank {
         runtime_sse_emit_event(data_lines, parse_event, on_event);
     } else if plan.kind == RuntimeSseLineKind::Data {
-        match std::str::from_utf8(&line[plan.value_start..plan.value_end]) {
-            Ok(text) if !runtime_sse_event_marked_invalid(data_lines) => {
-                data_lines.push(text.to_owned());
+        let text = std::str::from_utf8(&line[plan.value_start..plan.value_end]);
+        match sse_event_state_action(
+            data_lines,
+            SseEventStateOperation::IncomingData,
+            text.is_ok(),
+        )
+        .expect("compiled Mojo SSE incoming data state returned invalid output")
+        {
+            SseEventStateAction::AppendIncoming => {
+                data_lines.push(
+                    text.expect("validated Mojo incoming UTF-8 state")
+                        .to_owned(),
+                );
             }
-            Ok(_) => {}
-            Err(_) => runtime_sse_mark_invalid(data_lines),
+            SseEventStateAction::IgnoreIncoming => {}
+            SseEventStateAction::MarkInvalid => {
+                data_lines.clear();
+                data_lines.push(RUNTIME_SSE_INVALID_DATA_MARKER.to_string());
+            }
+            _ => unreachable!("validated Mojo SSE incoming-data state"),
         }
     }
     line.clear();
@@ -425,7 +432,10 @@ fn runtime_sse_inspection_event(data_lines: &[String]) -> RuntimeParsedSseEvent 
 }
 
 pub fn parse_runtime_sse_payload(data_lines: &[String]) -> Option<serde_json::Value> {
-    if data_lines.is_empty() || runtime_sse_event_marked_invalid(data_lines) {
+    if sse_event_state_action(data_lines, SseEventStateOperation::ParsePayload, true)
+        .expect("compiled Mojo SSE payload gate returned invalid output")
+        != SseEventStateAction::Emit
+    {
         return None;
     }
 

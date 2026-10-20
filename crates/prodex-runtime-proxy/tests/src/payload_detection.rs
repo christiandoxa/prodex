@@ -988,3 +988,59 @@ fn compiled_previous_response_text_selection_trims_unicode_and_preserves_origina
         Some("previous_response_not_found".to_string()),
     );
 }
+
+#[test]
+fn compiled_sse_event_state_ignores_data_after_invalid_utf8_until_event_boundary() {
+    let before = b"data: {\"type\":\"response.created\",\"response_id\":\"resp-invalid\"}\n";
+    let bad_line = b"data: \xff\n";
+    let later_in_same_event =
+        b"data: {\"type\":\"response.completed\",\"response_id\":\"resp-not-allowed\"}\n";
+    let next_event = b"data: {\"type\":\"response.completed\",\"response_id\":\"resp-valid\"}\n\n";
+    let mut line = Vec::new();
+    let mut pending = Vec::new();
+    let mut events = Vec::new();
+    for part in [before.as_slice(), bad_line, later_in_same_event] {
+        runtime_sse_consume_chunk(&mut line, &mut pending, part, |event| events.push(event));
+    }
+    assert_eq!(
+        pending.len(),
+        1,
+        "an invalid event must remain marked until EOF/blank"
+    );
+    assert!(events.is_empty());
+    runtime_sse_consume_chunk(&mut line, &mut pending, b"\n", |event| events.push(event));
+    assert!(events.is_empty(), "the entire poisoned event is discarded");
+    assert!(pending.is_empty());
+    runtime_sse_consume_chunk(&mut line, &mut pending, next_event, |event| {
+        events.push(event)
+    });
+    runtime_sse_finish_pending(&mut line, &mut pending, |event| events.push(event));
+    assert_eq!(events.len(), 1);
+    assert_eq!(events[0].response_ids, vec!["resp-valid".to_string()]);
+    assert_eq!(events[0].event_type.as_deref(), Some("response.completed"));
+}
+
+#[test]
+fn compiled_sse_event_state_discards_poisoned_pending_at_eof_and_empty_payloads() {
+    let mut line = Vec::new();
+    let mut pending = Vec::new();
+    let mut events = Vec::new();
+    runtime_sse_consume_chunk(
+        &mut line,
+        &mut pending,
+        b"data: {\"type\":\"response.created\"}\ndata: \xff",
+        |event| events.push(event),
+    );
+    runtime_sse_finish_pending(&mut line, &mut pending, |event| events.push(event));
+    assert!(events.is_empty());
+    assert!(line.is_empty() && pending.is_empty());
+    assert_eq!(
+        parse_runtime_sse_payload(&["\0prodex-invalid-sse-data".to_string()]),
+        None,
+    );
+    assert_eq!(parse_runtime_sse_payload(&[]), None);
+    assert_eq!(
+        parse_runtime_sse_payload(&["{\"type\":\"response.created\"}".into()]),
+        Some(serde_json::json!({"type":"response.created"})),
+    );
+}
