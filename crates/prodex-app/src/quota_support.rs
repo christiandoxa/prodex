@@ -369,24 +369,24 @@ fn quota_current_runtime_profile_name_from_paths<I>(state: &AppState, paths: I) 
 where
     I: IntoIterator<Item = PathBuf>,
 {
-    let mut paths: Vec<PathBuf> = paths.into_iter().collect();
-    paths.sort_by(|left, right| {
-        let left_modified = left
-            .metadata()
-            .and_then(|metadata| metadata.modified())
-            .ok();
-        let right_modified = right
-            .metadata()
-            .and_then(|metadata| metadata.modified())
-            .ok();
-        left_modified
-            .cmp(&right_modified)
-            .then_with(|| left.cmp(right))
-    });
+    let paths: Vec<PathBuf> = paths.into_iter().collect();
+    let observations = paths
+        .iter()
+        .map(|path| prodex_mojo_core::quota::QuotaRuntimeLogOrderInput {
+            path: path.as_os_str().as_encoded_bytes(),
+            modified_at: path
+                .metadata()
+                .and_then(|metadata| metadata.modified())
+                .ok(),
+        })
+        .collect::<Vec<_>>();
+    let ordered_indices = prodex_mojo_core::quota::quota_runtime_log_order(&observations)
+        .expect("compiled Mojo quota runtime-log ordering returned invalid output");
 
     let mut current = None;
-    for path in paths {
-        let Ok(tail) = read_runtime_log_tail(&path, QUOTA_RUNTIME_LOG_TAIL_BYTES) else {
+    for index in ordered_indices {
+        let path = &paths[index];
+        let Ok(tail) = read_runtime_log_tail(path, QUOTA_RUNTIME_LOG_TAIL_BYTES) else {
             continue;
         };
         let tail = String::from_utf8_lossy(&tail);

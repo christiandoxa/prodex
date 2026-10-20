@@ -31,6 +31,8 @@ mod capacity;
 pub use capacity::quota_capacity_batch;
 mod capacity_choice;
 pub use capacity_choice::{QuotaCapacityChoice, QuotaCapacityChoiceInput, quota_capacity_choice};
+mod runtime_log_order;
+pub use runtime_log_order::{QuotaRuntimeLogOrderInput, quota_runtime_log_order};
 mod window_duration;
 pub use window_duration::quota_window_duration_seconds;
 mod report_sort;

@@ -3969,3 +3969,141 @@ def prodex_quota_report_sort_batch_v1(
         indices[unsafe_offset=end] = saved
         quota_report_sort_batch_sift_down(rows, sort, indices, 0, end)
     return 0
+
+
+# Ascending scan order for runtime quota profile discovery. Missing file
+# modified-time metadata precedes any existing timestamp; previous code
+# compared Rust Option<SystemTime>. Host retains file I/O and profile lookup.
+comptime QUOTA_RUNTIME_LOG_ORDER_ABI: Int64 = 1
+comptime QUOTA_RUNTIME_LOG_ORDER_MAX: Int64 = 65_536
+comptime QUOTA_RUNTIME_LOG_ORDER_ROW_WORDS: Int64 = 6
+
+
+def quota_runtime_log_order_field(
+    rows: Pointer[mut=False, UInt64, _],
+    index: Int64, field: Int64,
+) -> UInt64:
+    return rows[unsafe_offset=index * QUOTA_RUNTIME_LOG_ORDER_ROW_WORDS + field]
+
+
+def quota_runtime_log_order_compare(
+    rows: Pointer[mut=False, UInt64, _],
+    left: Int64, right: Int64,
+) -> Int64:
+    var left_present = quota_runtime_log_order_field(rows, left, 2)
+    var right_present = quota_runtime_log_order_field(rows, right, 2)
+    if left_present != right_present:
+        return -1 if left_present == 0 else 1
+    if left_present == 1:
+        var left_negative = quota_runtime_log_order_field(rows, left, 3)
+        var right_negative = quota_runtime_log_order_field(rows, right, 3)
+        if left_negative != right_negative:
+            return -1 if left_negative == 1 else 1
+        var left_seconds = quota_runtime_log_order_field(rows, left, 4)
+        var right_seconds = quota_runtime_log_order_field(rows, right, 4)
+        if left_seconds != right_seconds:
+            if left_negative == 1:
+                return -1 if left_seconds > right_seconds else 1
+            return -1 if left_seconds < right_seconds else 1
+        var left_nanos = quota_runtime_log_order_field(rows, left, 5)
+        var right_nanos = quota_runtime_log_order_field(rows, right, 5)
+        if left_nanos != right_nanos:
+            if left_negative == 1:
+                return -1 if left_nanos > right_nanos else 1
+            return -1 if left_nanos < right_nanos else 1
+
+    var left_len = Int64(quota_runtime_log_order_field(rows, left, 1))
+    var right_len = Int64(quota_runtime_log_order_field(rows, right, 1))
+    var lhs = Pointer[mut=False, UInt8, ImmUntrackedOrigin](
+        unsafe_from_address=Int(quota_runtime_log_order_field(rows, left, 0))
+    )
+    var rhs = Pointer[mut=False, UInt8, ImmUntrackedOrigin](
+        unsafe_from_address=Int(quota_runtime_log_order_field(rows, right, 0))
+    )
+    for index in range(min(left_len, right_len)):
+        var a = lhs[unsafe_offset=index]
+        var b = rhs[unsafe_offset=index]
+        if a != b:
+            return -1 if a < b else 1
+    if left_len != right_len:
+        return -1 if left_len < right_len else 1
+    if left != right:
+        return -1 if left < right else 1
+    return 0
+
+
+def quota_runtime_log_order_heap_down(
+    rows: Pointer[mut=False, UInt64, _],
+    indices: Pointer[mut=True, Int64, _],
+    first: Int64, count: Int64,
+):
+    var root = first
+    while root * 2 + 1 < count:
+        var child = root * 2 + 1
+        var swap = root
+        if quota_runtime_log_order_compare(
+            rows, indices[unsafe_offset=swap], indices[unsafe_offset=child],
+        ) < 0:
+            swap = child
+        if child + 1 < count and quota_runtime_log_order_compare(
+            rows, indices[unsafe_offset=swap], indices[unsafe_offset=child + 1],
+        ) < 0:
+            swap = child + 1
+        if swap == root:
+            return
+        var saved = indices[unsafe_offset=root]
+        indices[unsafe_offset=root] = indices[unsafe_offset=swap]
+        indices[unsafe_offset=swap] = saved
+        root = swap
+
+
+@export("prodex_quota_runtime_log_order_v1")
+def prodex_quota_runtime_log_order_v1(
+    abi_version: Int64,
+    rows_address: UInt, count: Int64,
+    output_address: UInt, output_capacity: Int64,
+) abi("C") -> Int64:
+    if abi_version != QUOTA_RUNTIME_LOG_ORDER_ABI:
+        return 4
+    if (
+        count < 0 or count > QUOTA_RUNTIME_LOG_ORDER_MAX
+        or (count > 0 and (rows_address == 0 or rows_address % 8 != 0))
+        or output_address == 0 or output_address % 8 != 0
+        or output_capacity < count
+    ):
+        return 1
+    var rows = Pointer[mut=False, UInt64, ImmUntrackedOrigin](
+        unsafe_from_address=Int(rows_address)
+    )
+    for index in range(count):
+        var address = quota_runtime_log_order_field(rows, index, 0)
+        var length = quota_runtime_log_order_field(rows, index, 1)
+        var present = quota_runtime_log_order_field(rows, index, 2)
+        var negative = quota_runtime_log_order_field(rows, index, 3)
+        var seconds = quota_runtime_log_order_field(rows, index, 4)
+        var nanos = quota_runtime_log_order_field(rows, index, 5)
+        if (
+            length > UInt64(9223372036854775807)
+            or (length > 0 and address == 0)
+            or present > 1 or negative > 1
+            or nanos >= UInt64(1_000_000_000)
+            or (present == 0 and (negative != 0 or seconds != 0 or nanos != 0))
+        ):
+            return 1
+    var output = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    for index in range(count):
+        output[unsafe_offset=index] = index
+    var start = count // 2
+    while start > 0:
+        start -= 1
+        quota_runtime_log_order_heap_down(rows, output, start, count)
+    var end = count
+    while end > 1:
+        end -= 1
+        var saved = output[unsafe_offset=0]
+        output[unsafe_offset=0] = output[unsafe_offset=end]
+        output[unsafe_offset=end] = saved
+        quota_runtime_log_order_heap_down(rows, output, 0, end)
+    return 0
