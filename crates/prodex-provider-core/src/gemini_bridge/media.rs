@@ -64,23 +64,28 @@ pub fn gemini_provider_core_collect_media_parts(
     parts: &mut Vec<serde_json::Value>,
     local_path_part: &mut impl FnMut(&str, Option<&str>) -> Option<serde_json::Value>,
 ) {
-    match value {
-        serde_json::Value::Array(values) => {
-            for value in values {
-                gemini_provider_core_collect_media_parts(value, parts, local_path_part);
-            }
+    // Build only a borrowed structural tree. The entire media payload stays
+    // in the original Serde value; no raw JSON string is reserialized.
+    let mut document = crate::mojo_json::Document::default();
+    let values = document.borrowed_shape(value);
+    let selected = prodex_mojo_core::json::gemini_value_projection(
+        &document.nodes,
+        "",
+        prodex_mojo_core::json::GeminiValueOperation::MediaObjectIndices,
+    )
+    .expect("compiled Mojo Gemini media traversal returned invalid output");
+    let indices: Vec<usize> = serde_json::from_slice(&selected)
+        .expect("compiled Mojo Gemini media traversal must emit object indices");
+    for index in indices {
+        let object = values
+            .get(index)
+            .and_then(|value| value.as_object())
+            .expect("compiled Mojo media traversal selected a valid JSON object");
+        if let Some(part) =
+            gemini_provider_core_media_part_from_content_object(object, &mut *local_path_part)
+        {
+            parts.push(part);
         }
-        serde_json::Value::Object(object) => {
-            if let Some(part) =
-                gemini_provider_core_media_part_from_content_object(object, &mut *local_path_part)
-            {
-                parts.push(part);
-            }
-            if let Some(content) = object.get("content") {
-                gemini_provider_core_collect_media_parts(content, parts, local_path_part);
-            }
-        }
-        _ => {}
     }
 }
 
@@ -209,5 +214,104 @@ mod append_media_tests {
         assert_eq!(last.len(), 3);
         assert_eq!(last[0]["parts"], json!([]));
         assert_eq!(last[1]["parts"], json!(null));
+    }
+}
+
+#[cfg(test)]
+mod collected_media_tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn compiled_media_traversal_preserves_array_order_parent_before_content_and_local_callbacks() {
+        let input = json!([
+            {
+                "type": "input_file",
+                "data": "root",
+                "ignored": {"type":"input_file","data":"ignored"},
+                "content": [
+                    {"type":"input_file","data":"nested"},
+                    {
+                        "type":"input_image",
+                        "url":"https://example.test/leaf.png",
+                        "content": {"type":"input_file","path":"path/one"},
+                    }
+                ],
+            },
+            {"type":"input_audio","path":"path/two","mime_type":"audio/wav"},
+            {"content":[{"type":"input_file","data":"last"}]},
+        ]);
+        let mut seen_paths = Vec::new();
+        let mut parts = vec![json!({"text":"existing"})];
+        gemini_provider_core_collect_media_parts(&input, &mut parts, &mut |path, mime| {
+            seen_paths.push((path.to_owned(), mime.map(str::to_owned)));
+            Some(json!({"local":path}))
+        });
+        assert_eq!(
+            seen_paths,
+            vec![
+                ("path/one".to_owned(), None),
+                ("path/two".to_owned(), Some("audio/wav".to_owned())),
+            ],
+        );
+        assert_eq!(
+            parts,
+            vec![
+                json!({"text":"existing"}),
+                json!({"inlineData":{"mimeType":"application/octet-stream","data":"root"}}),
+                json!({"inlineData":{"mimeType":"application/octet-stream","data":"nested"}}),
+                json!({"fileData":{"mimeType":"image/png","fileUri":"https://example.test/leaf.png"}}),
+                json!({"local":"path/one"}),
+                json!({"local":"path/two"}),
+                json!({"inlineData":{"mimeType":"application/octet-stream","data":"last"}}),
+            ]
+        );
+    }
+
+    #[test]
+    fn compiled_media_traversal_ignores_unrelated_object_members_and_scalars() {
+        let input = json!({
+            "metadata": {"type":"input_file","data":"must ignore"},
+            "content": [
+                12, null, false,
+                {"other":{"type":"input_file","data":"must ignore"}},
+                {"content":{"type":"input_file","data":"allow"}},
+                [null, {"type":"input_file","data":"also allow"}],
+            ],
+        });
+        let mut parts = Vec::new();
+        gemini_provider_core_collect_media_parts(&input, &mut parts, &mut |_, _| {
+            panic!("no path callbacks expected")
+        });
+        assert_eq!(
+            parts,
+            vec![
+                json!({"inlineData":{"mimeType":"application/octet-stream","data":"allow"}}),
+                json!({"inlineData":{"mimeType":"application/octet-stream","data":"also allow"}}),
+            ]
+        );
+    }
+
+    #[test]
+    fn compiled_media_traversal_borrows_large_data_without_serialization_or_recursion() {
+        let large = "X".repeat(1_048_576);
+        let mut value = json!({"type":"input_file","data":large});
+        for _ in 0..256 {
+            value = json!([value]);
+        }
+        let mut document = crate::mojo_json::Document::default();
+        let borrowed = document.borrowed_shape(&value);
+        assert!(
+            document.raw.is_empty(),
+            "media acquisition cannot copy raw JSON"
+        );
+        assert!(borrowed.len() > 256);
+        let mut parts = Vec::new();
+        gemini_provider_core_collect_media_parts(&value, &mut parts, &mut |_, _| None);
+        assert_eq!(parts.len(), 1);
+        assert_eq!(
+            parts[0]["inlineData"]["data"].as_str().unwrap().len(),
+            1_048_576
+        );
     }
 }

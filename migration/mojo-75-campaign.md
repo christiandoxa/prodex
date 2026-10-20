@@ -7635,3 +7635,17 @@ original Serde parts array. All 520 provider tests, direct core ABI
 tests, no-fallback guard and official share checks pass.
 Share rises from 35.7782309443018% to 35.77956915288745%
 (130,048 Mojo / 233,422 Rust); the 75% project target remains open.
+
+## Gemini nested media traversal moved to compiled Mojo (2026-10-20)
+
+The Gemini value owner now emits the ordered media object indices from
+a borrowed JSON tree, visiting arrays and content objects without
+recursive Rust traversal. The host builds only Serde shape metadata
+and retains original references, avoiding large media reserialization;
+Mojo owns the eligible content edges and object evaluation order.
+The old Rust recursive collector was deleted with no production
+fallback. Three live collector regressions, a 4,097-level core traversal
+test, 523 provider tests, nine focused core tests and no-fallback/metric
+guards pass. Share rises from 35.77956915288745% to
+35.78094701085088% (130,087 Mojo / 233,478 Rust).
+Target 75% remains unmet.

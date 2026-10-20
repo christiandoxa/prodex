@@ -25,6 +25,62 @@ pub(crate) struct Document<'a> {
 }
 
 impl<'a> Document<'a> {
+    /// Borrow a flat Serde shape without serializing large media strings.
+    /// This is structure acquisition only: Mojo decides traversal, field
+    /// eligibility, and visit order using the stable indices and keys.
+    pub(crate) fn borrowed_shape(&mut self, root: &'a Value) -> Vec<&'a Value> {
+        assert!(self.nodes.is_empty() && self.raw.is_empty());
+        let mut pending = vec![(root, None::<usize>, "")];
+        let mut values = Vec::new();
+        let mut last_child = Vec::<Option<usize>>::new();
+        while let Some((value, parent, key)) = pending.pop() {
+            let index = self.nodes.len();
+            let kind = match value {
+                Value::Null => JsonKind::Null,
+                Value::Bool(false) => JsonKind::False,
+                Value::Bool(true) => JsonKind::True,
+                Value::Number(_) => JsonKind::Number,
+                Value::String(_) => JsonKind::String,
+                Value::Array(_) => JsonKind::Array,
+                Value::Object(_) => JsonKind::Object,
+            };
+            self.nodes.push(JsonNode {
+                kind,
+                first_child: None,
+                next_sibling: None,
+                parent,
+                key,
+                text: value.as_str().unwrap_or_default(),
+                raw_start: 0,
+                raw_length: 0,
+            });
+            last_child.push(None);
+            values.push(value);
+            if let Some(parent) = parent {
+                if let Some(previous) = last_child[parent] {
+                    self.nodes[previous].next_sibling = Some(index);
+                } else {
+                    self.nodes[parent].first_child = Some(index);
+                }
+                last_child[parent] = Some(index);
+            }
+            match value {
+                Value::Array(children) => {
+                    for child in children.iter().rev() {
+                        pending.push((child, Some(index), ""));
+                    }
+                }
+                Value::Object(children) => {
+                    for (key, child) in children.iter().rev() {
+                        pending.push((child, Some(index), key.as_str()));
+                    }
+                }
+                _ => {}
+            }
+        }
+        values
+    }
+
     pub(crate) fn root(&mut self, value: &'a Value) {
         assert!(
             self.nodes.is_empty(),

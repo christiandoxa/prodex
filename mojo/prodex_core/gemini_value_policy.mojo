@@ -7,7 +7,7 @@ from parsed_json import (
     JSON_ARRAY, JSON_OBJECT, JSON_STRING, JSON_NUMBER, JSON_TRUE, JSON_FALSE, ParsedJson, ParsedJsonNode,
     pj_child, pj_field, pj_kind, pj_next, pj_text, pj_trim, pj_valid, pj_literal,
 )
-from json_sink import JsonSink, js_byte, js_string, js_literal, js_raw_view
+from json_sink import JsonSink, js_byte, js_string, js_literal, js_raw_view, js_u64
 from rich_types import ProdexRichStringView
 from provider_boolean_tokens import provider_boolean_token_class
 
@@ -17,6 +17,7 @@ comptime GEMINI_VALUE_PATHS: Int64 = 1
 comptime GEMINI_VALUE_INPUT_TEXT: Int64 = 2
 comptime GEMINI_VALUE_STREAM_ERROR: Int64 = 3
 comptime GEMINI_VALUE_BOOLEAN: Int64 = 4
+comptime GEMINI_VALUE_MEDIA_OBJECTS: Int64 = 5
 
 
 def gemini_value_emit(
@@ -73,6 +74,44 @@ def gemini_value_collect(
                 cursor = parent
             if not advanced:
                 break
+    js_byte(sink, 93)
+
+
+# Emit media candidate object indices in original recursive visit order.
+# Objects are visited before their content child, and arrays preserve order.
+# All other object members are ignored. The host provides a borrowed shape
+# and never serializes media byte payloads.
+def gemini_value_media_object_indices(
+    sink: Pointer[mut=True, JsonSink, _], tree: ParsedJson,
+):
+    js_byte(sink, 91)
+    var cursor: Int64 = 0
+    var emitted = False
+    while cursor >= 0:
+        var kind = pj_kind(tree, cursor)
+        var child: Int64 = -1
+        if kind == JSON_ARRAY:
+            child = pj_child(tree, cursor)
+        elif kind == JSON_OBJECT:
+            if emitted:
+                js_byte(sink, 44)
+            js_u64(sink, UInt64(cursor))
+            emitted = True
+            child = pj_field(tree, cursor, StringSlice("content"))
+        if child >= 0:
+            cursor = child
+            continue
+        var advanced = False
+        while cursor != 0:
+            var parent = tree.nodes[unsafe_offset=cursor].parent
+            var sibling = pj_next(tree, cursor)
+            if pj_kind(tree, parent) == JSON_ARRAY and sibling >= 0:
+                cursor = sibling
+                advanced = True
+                break
+            cursor = parent
+        if not advanced:
+            break
     js_byte(sink, 93)
 
 
@@ -174,7 +213,7 @@ def prodex_mojo_gemini_value_policy_v1(
     if abi != GEMINI_VALUE_ABI:
         return 4
     if (
-        operation < GEMINI_VALUE_STRINGS or operation > GEMINI_VALUE_BOOLEAN
+        operation < GEMINI_VALUE_STRINGS or operation > GEMINI_VALUE_MEDIA_OBJECTS
         or flag != 0 or node_count <= 0 or nodes_address == 0
         or nodes_address % 8 != 0 or raw_length < 0
         or (raw_length > 0 and raw_address == 0)
@@ -191,14 +230,20 @@ def prodex_mojo_gemini_value_policy_v1(
             unsafe_from_address=Int(nodes_address)
         ), node_count, ProdexRichStringView(raw_address, UInt(raw_length)),
     )
-    if not pj_valid(tree) or (operation != GEMINI_VALUE_BOOLEAN and pj_kind(tree, 0) != JSON_OBJECT):
+    if not pj_valid(tree) or (
+        operation != GEMINI_VALUE_BOOLEAN
+        and operation != GEMINI_VALUE_MEDIA_OBJECTS
+        and pj_kind(tree, 0) != JSON_OBJECT
+    ):
         return 1
     var sink = JsonSink(
         Pointer[mut=True, UInt8, MutUntrackedOrigin](
             unsafe_from_address=Int(output_address)
         ), output_capacity, 0, measuring == 1, False,
     )
-    if operation == GEMINI_VALUE_BOOLEAN:
+    if operation == GEMINI_VALUE_MEDIA_OBJECTS:
+        gemini_value_media_object_indices(Pointer(to=sink), tree)
+    elif operation == GEMINI_VALUE_BOOLEAN:
         if not gemini_value_boolean(Pointer(to=sink), tree):
             return 1
     elif operation == GEMINI_VALUE_STREAM_ERROR:

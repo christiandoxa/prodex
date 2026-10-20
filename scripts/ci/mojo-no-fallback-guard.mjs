@@ -1994,6 +1994,17 @@ export function findViolations(files) {
         retired.every((marker) => !production.includes(marker))
         ? [] : [filePath + ": Gemini collection policy must remain compiled Mojo-owned"];
     }
+    if (filePath === "crates/prodex-provider-core/src/mojo_json.rs" &&
+        contents.includes("pub(crate) fn root(")) {
+      const required = [
+        "pub(crate) fn borrowed_shape(",
+        "while let Some((value, parent, key)) = pending.pop()",
+        "raw_start: 0,",
+        "raw_length: 0,",
+      ];
+      return required.filter((marker) => !contents.includes(marker))
+        .map((marker) => filePath + ": borrowed Gemini JSON traversal shape must remain available: " + marker);
+    }
     if (filePath === "crates/prodex-mojo-core/src/json/gemini_value_policy.rs") {
       const required = [
         "fn prodex_mojo_gemini_value_policy_v1(",
@@ -2010,6 +2021,9 @@ export function findViolations(files) {
         "compiled_gemini_stream_error_reads_serde_number_lexemes_and_missing_errors",
         "Boolean = 4",
         "compiled_gemini_json_boolean_projector_accepts_non_object_trees",
+        "MediaObjectIndices = 5",
+        "compiled_gemini_media_indices_preserve_content_only_order",
+        "compiled_gemini_media_indices_walk_deep_flat_tree_without_recursion",
       ];
       return required.filter((marker) => !contents.includes(marker))
         .map((marker) => filePath + ": compiled Gemini value ABI must retain " + marker);
@@ -2029,6 +2043,9 @@ export function findViolations(files) {
         'pj_field(tree, error, StringSlice("status"))',
         "def gemini_value_boolean(",
         "provider_boolean_token_class(value)",
+        "def gemini_value_media_object_indices(",
+        "gemini_value_media_object_indices(Pointer(to=sink), tree)",
+        'child = pj_field(tree, cursor, StringSlice("content"))',
       ];
       return required.filter((marker) => !contents.includes(marker))
         .map((marker) => filePath + ": compiled Gemini value traversal must retain " + marker);
@@ -2201,11 +2218,17 @@ export function findViolations(files) {
         "compiled_media_append_attaches_to_latest_user_with_valid_parts",
         "compiled_media_append_does_not_fall_back_to_earlier_user_after_malformed_last",
         "compiled_media_append_handles_missing_user_wrong_role_case_and_empty_parts",
+        "document.borrowed_shape(value)",
+        "prodex_mojo_core::json::GeminiValueOperation::MediaObjectIndices",
+        "compiled_media_traversal_preserves_array_order_parent_before_content_and_local_callbacks",
+        "compiled_media_traversal_ignores_unrelated_object_members_and_scalars",
+        "compiled_media_traversal_borrows_large_data_without_serialization_or_recursion",
       ];
       const production = contents.split("#[cfg(test)]", 1)[0];
       return required.every((marker) => contents.includes(marker)) &&
         !production.includes(".iter_mut().rev().find(") &&
-        !production.includes(".rposition(")
+        !production.includes(".rposition(") &&
+        !production.includes("gemini_provider_core_collect_media_parts(value, parts, local_path_part)")
         ? [] : [filePath + ": Gemini media append target must remain Mojo-owned"];
     }
     if (filePath === "crates/prodex-provider-core/src/gemini_bridge/media/content_object.rs") {
@@ -11464,6 +11487,11 @@ function selfTest() {
     "compiled_media_append_attaches_to_latest_user_with_valid_parts",
     "compiled_media_append_does_not_fall_back_to_earlier_user_after_malformed_last",
     "compiled_media_append_handles_missing_user_wrong_role_case_and_empty_parts",
+    "document.borrowed_shape(value)",
+    "prodex_mojo_core::json::GeminiValueOperation::MediaObjectIndices",
+    "compiled_media_traversal_preserves_array_order_parent_before_content_and_local_callbacks",
+    "compiled_media_traversal_ignores_unrelated_object_members_and_scalars",
+    "compiled_media_traversal_borrows_large_data_without_serialization_or_recursion",
   ].join("\n");
   assert.deepEqual(findViolations([[mediaAppendFile, mediaAppendFixture]]), []);
   assert.match(findViolations([[mediaAppendFile, mediaAppendFixture +
