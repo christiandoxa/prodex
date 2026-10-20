@@ -1,5 +1,8 @@
 # Run with `mojo run -D ASSERT=all -I mojo/prodex_core mojo/tests/live_log_record_test.mojo`.
 from std.collections.list import List
+from std.memory.alloc import alloc, dealloc, Layout
+from parsed_json import ParsedJsonNode, JSON_OBJECT, JSON_ARRAY, JSON_STRING, JSON_NUMBER, JSON_FALSE, pj_literal
+from rich_types import ProdexRichStringView
 
 from live_log_record import (
     LIVE_LOG_RECORD_CAPACITY,
@@ -13,6 +16,7 @@ from live_log_record import (
     prodex_live_log_retention_trim_v1,
     prodex_live_log_oldest_path_v1,
     prodex_live_log_compact_json_v1,
+    prodex_live_log_json_projection_v1,
 )
 
 comptime EXPECTED_LIVE_LOG_RECORD_MAX_BYTES: Int64 = 128 * 1024
@@ -309,6 +313,65 @@ def test_compact_json_renders_metadata_and_validates_capacity() raises:
     assert written[0] == 81
 
 
+def test_clipped_json_tree_is_compiled_and_validates_two_phase_output() raises:
+    var nodes_storage = alloc(Layout[ParsedJsonNode](count=5))
+    var nodes = nodes_storage.unsafe_ptr()
+    var empty = ProdexRichStringView(0, 0)
+    var number = StringSlice("42")
+    nodes[unsafe_offset=0] = ParsedJsonNode(JSON_OBJECT, 1, -1, -1, empty.copy(), empty.copy(), 0, 0)
+    nodes[unsafe_offset=1] = ParsedJsonNode(JSON_ARRAY, 2, 4, 0, pj_literal(StringSlice("rows")), empty.copy(), 0, 0)
+    nodes[unsafe_offset=2] = ParsedJsonNode(JSON_STRING, -1, 3, 1, empty.copy(), pj_literal(StringSlice("雪\n")), 0, 0)
+    nodes[unsafe_offset=3] = ParsedJsonNode(JSON_NUMBER, -1, -1, 1, empty.copy(), empty.copy(), 0, 2)
+    nodes[unsafe_offset=4] = ParsedJsonNode(JSON_FALSE, -1, -1, 0, pj_literal(StringSlice("flag")), empty.copy(), 0, 0)
+
+    var scratch_storage = alloc(Layout[UInt64](count=16))
+    var scratch = UInt(Int(scratch_storage.unsafe_ptr()))
+    var meta_storage = alloc(Layout[Int64](count=2))
+    var meta = meta_storage.unsafe_ptr()
+    var meta_address = UInt(Int(meta))
+    var input = UInt(Int(nodes))
+    var raw = UInt(Int(number.unsafe_ptr()))
+    var expected = StringSlice('{"rows":["雪\\n",42],"flag":false}')
+    assert prodex_live_log_json_projection_v1(
+        1, 0, 0, input, 5, raw, 2, scratch, 8,
+        1, 0, 0, meta_address
+    ) == 0
+    assert meta[unsafe_offset=0] == 1
+    assert meta[unsafe_offset=1] == Int64(expected.byte_length())
+
+    var output_storage = alloc(Layout[UInt8](count=64))
+    var output = output_storage.unsafe_ptr()
+    assert prodex_live_log_json_projection_v1(
+        1, 0, 0, input, 5, raw, 2, scratch, 8,
+        0, UInt(Int(output)), 64, meta_address
+    ) == 0
+    for index in range(Int(expected.byte_length())):
+        assert output[unsafe_offset=index] == expected.unsafe_ptr()[unsafe_offset=index]
+
+    meta[unsafe_offset=0] = 81
+    meta[unsafe_offset=1] = 82
+    assert prodex_live_log_json_projection_v1(
+        1, 0, 0, input, 5, raw, 2, scratch, 8,
+        0, UInt(Int(output)), 3, meta_address
+    ) == 3
+    assert meta[unsafe_offset=0] == 81 and meta[unsafe_offset=1] == 82
+    assert prodex_live_log_json_projection_v1(
+        2, 0, 0, input, 5, raw, 2, scratch, 8,
+        1, 0, 0, meta_address
+    ) == 4
+    assert meta[unsafe_offset=0] == 81 and meta[unsafe_offset=1] == 82
+    nodes[unsafe_offset=0].parent = 0
+    assert prodex_live_log_json_projection_v1(
+        1, 0, 0, input, 5, raw, 2, scratch, 8,
+        1, 0, 0, meta_address
+    ) == 1
+    assert meta[unsafe_offset=0] == 81 and meta[unsafe_offset=1] == 82
+    dealloc(output_storage^)
+    dealloc(meta_storage^)
+    dealloc(scratch_storage^)
+    dealloc(nodes_storage^)
+
+
 def main() raises:
     test_record_limit_and_serialized_json_fallback()
     test_nested_string_clip_keeps_ascii_and_unicode_character_boundaries()
@@ -317,3 +380,4 @@ def main() raises:
     test_snapshot_plan_pages_after_cursor_and_rejects_unsorted_input()
     test_retention_thresholds_and_stable_oldest_path()
     test_compact_json_renders_metadata_and_validates_capacity()
+    test_clipped_json_tree_is_compiled_and_validates_two_phase_output()

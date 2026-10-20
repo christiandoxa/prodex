@@ -7700,3 +7700,16 @@ Thirty runtime-log tests, direct core and Mojo ABI tests, and all source
 and production-share guards pass. Official share rises from
 35.803093429485415% to 35.80922552817385%
 (130,342 Mojo / 233,648 Rust). The 75% project target remains open.
+
+## Nested live-log JSON serialization and UTF-8 clipping moved to Mojo (2026-10-20)
+
+The existing compiled live-log owner now traverses the full borrowed
+Serde JSON-tree, escapes field names and values, emits canonical numeric
+lexemes, and clips nested strings at UTF-8-safe boundaries. The old Rust
+recursive clipping visitor and full JSON serialization after mutation
+were deleted; the host retains Serde parsing, borrowed structural node
+acquisition and side effects. Thirty-two runtime-log tests, direct core
+ABI and Mojo tests, source no-fallback guards and production share
+checks pass. Official share rises from 35.80922552817385% to
+35.82663759535591% (130,467 Mojo / 233,695 Rust).
+The 75% project objective remains outstanding.

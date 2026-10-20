@@ -1,4 +1,5 @@
 use crate::MojoError;
+use crate::json::{JsonNode, transform_json_with_scratch};
 
 const ABI_VERSION: i64 = 1;
 const MAX_RECORD_BYTES: usize = 128 * 1024;
@@ -9,6 +10,21 @@ const FOLLOW_MAX_INPUT_LINES: usize = 2 * 1024 * 1024;
 const _: () = assert!(std::mem::size_of::<usize>() == std::mem::size_of::<u64>());
 
 unsafe extern "C" {
+    fn prodex_live_log_json_projection_v1(
+        abi: i64,
+        operation: i64,
+        flag: i64,
+        nodes_address: u64,
+        node_count: i64,
+        raw_address: u64,
+        raw_length: i64,
+        scratch_address: u64,
+        scratch_count: i64,
+        measuring: i64,
+        output_address: u64,
+        output_capacity: i64,
+        metadata_address: u64,
+    ) -> i64;
     fn prodex_live_log_compact_json_v1(
         abi_version: i64,
         fields_address: u64,
@@ -310,6 +326,16 @@ pub fn truncate_plain_text(value: &str) -> Result<String, MojoError> {
     String::from_utf8(output.to_vec()).map_err(|_| MojoError::InvalidOutput)
 }
 
+/// Serialize one borrowed Serde JSON tree in compiled Mojo, truncating
+/// oversized nested string values at Mojo-owned UTF-8-safe byte boundaries.
+/// Numeric lexemes are acquired canonically by the host in the raw buffer.
+pub fn clipped_json_projection(nodes: &[JsonNode<'_>], raw: &str) -> Result<String, MojoError> {
+    let output =
+        transform_json_with_scratch(nodes, raw, 0, false, prodex_live_log_json_projection_v1, 1)?
+            .ok_or(MojoError::InvalidOutput)?;
+    String::from_utf8(output).map_err(|_| MojoError::InvalidOutput)
+}
+
 /// The bounded page selected from a live-log sequence list.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct LiveLogSnapshotPlan {
@@ -440,6 +466,218 @@ pub fn snapshot_plan(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn compiled_live_log_json_projection_escapes_keys_and_nested_utf8_strings() {
+        use crate::json::JsonKind;
+        let raw = "9007199254740991";
+        let nodes = [
+            JsonNode {
+                kind: JsonKind::Object,
+                key: "",
+                text: "",
+                first_child: Some(1),
+                next_sibling: None,
+                parent: None,
+                raw_start: 0,
+                raw_length: 0,
+            },
+            JsonNode {
+                kind: JsonKind::Array,
+                key: "key\n\"雪",
+                text: "",
+                first_child: Some(2),
+                next_sibling: None,
+                parent: Some(0),
+                raw_start: 0,
+                raw_length: 0,
+            },
+            JsonNode {
+                kind: JsonKind::String,
+                key: "",
+                text: "line\n\r\t\"\\雪",
+                first_child: None,
+                next_sibling: Some(3),
+                parent: Some(1),
+                raw_start: 0,
+                raw_length: 0,
+            },
+            JsonNode {
+                kind: JsonKind::Object,
+                key: "",
+                text: "",
+                first_child: Some(4),
+                next_sibling: None,
+                parent: Some(1),
+                raw_start: 0,
+                raw_length: 0,
+            },
+            JsonNode {
+                kind: JsonKind::Number,
+                key: "large",
+                text: "",
+                first_child: None,
+                next_sibling: Some(5),
+                parent: Some(3),
+                raw_start: 0,
+                raw_length: raw.len(),
+            },
+            JsonNode {
+                kind: JsonKind::True,
+                key: "flag",
+                text: "",
+                first_child: None,
+                next_sibling: None,
+                parent: Some(3),
+                raw_start: 0,
+                raw_length: 0,
+            },
+        ];
+        assert_eq!(
+            clipped_json_projection(&nodes, raw),
+            Ok("{\"key\\n\\\"雪\":[\"line\\n\\r\\t\\\"\\\\雪\",{\"large\":9007199254740991,\"flag\":true}]}".to_string()),
+        );
+        let scalar = JsonNode {
+            kind: JsonKind::Null,
+            key: "",
+            text: "",
+            parent: None,
+            first_child: None,
+            next_sibling: None,
+            raw_start: 0,
+            raw_length: 0,
+        };
+        assert_eq!(
+            clipped_json_projection(&[scalar], ""),
+            Ok("null".to_string())
+        );
+    }
+
+    #[test]
+    fn compiled_live_log_json_projection_clips_exact_utf8_prefix_without_recursive_host_policy() {
+        use crate::json::JsonKind;
+        let string = format!("{}é{}", "x".repeat(8191), "y".repeat(8192));
+        let nodes = [JsonNode {
+            kind: JsonKind::String,
+            key: "",
+            text: &string,
+            parent: None,
+            first_child: None,
+            next_sibling: None,
+            raw_start: 0,
+            raw_length: 0,
+        }];
+        let expected = format!("\"{}é …[truncated]\"", "x".repeat(8191));
+        assert_eq!(clipped_json_projection(&nodes, ""), Ok(expected));
+
+        let mut deep = Vec::new();
+        for i in 0..1024_usize {
+            deep.push(JsonNode {
+                kind: JsonKind::Array,
+                key: "",
+                text: "",
+                parent: i.checked_sub(1),
+                first_child: Some(i + 1),
+                next_sibling: None,
+                raw_start: 0,
+                raw_length: 0,
+            });
+        }
+        deep.push(JsonNode {
+            kind: JsonKind::String,
+            key: "",
+            text: "雪",
+            parent: Some(1023),
+            first_child: None,
+            next_sibling: None,
+            raw_start: 0,
+            raw_length: 0,
+        });
+        let result = clipped_json_projection(&deep, "").unwrap();
+        assert!(result.starts_with(&"[".repeat(1024)));
+        assert!(result.ends_with(&"]".repeat(1024)));
+        assert!(result.contains("\"雪\""));
+    }
+
+    #[test]
+    fn compiled_live_log_json_projection_abi_rejects_version_flags_and_capacity_before_metadata() {
+        use crate::json::{JsonKind, ffi_nodes};
+        let nodes = [JsonNode {
+            kind: JsonKind::String,
+            key: "",
+            text: "hello",
+            parent: None,
+            first_child: None,
+            next_sibling: None,
+            raw_start: 0,
+            raw_length: 0,
+        }];
+        let raw = "";
+        let ffi = ffi_nodes(&nodes, raw).unwrap();
+        let mut scratch = [0_u64; 2];
+        let mut metadata = [83_i64; 2];
+        let mut output = [71_u8; 3];
+        let ptr = ffi.as_ptr() as usize as u64;
+        let scratch_ptr = scratch.as_mut_ptr() as usize as u64;
+        let metadata_ptr = metadata.as_mut_ptr() as usize as u64;
+        let output_ptr = output.as_mut_ptr() as usize as u64;
+        for (abi, operation, flag, count, measuring, destination, capacity, expected) in [
+            (2, 0, 0, 1, 1, 0, 0, 4),
+            (1, 1, 0, 1, 1, 0, 0, 1),
+            (1, 0, 1, 1, 1, 0, 0, 1),
+            (1, 0, 0, 0, 1, 0, 0, 1),
+            (1, 0, 0, 1, 0, output_ptr, 3, 3),
+        ] {
+            assert_eq!(
+                unsafe {
+                    prodex_live_log_json_projection_v1(
+                        abi,
+                        operation,
+                        flag,
+                        ptr,
+                        count,
+                        0,
+                        0,
+                        scratch_ptr,
+                        2,
+                        measuring,
+                        destination,
+                        capacity,
+                        metadata_ptr,
+                    )
+                },
+                expected,
+            );
+            assert_eq!(metadata, [83; 2]);
+        }
+        // A rejected malformed tree must not mutate metadata either.
+        let invalid = [JsonNode {
+            parent: Some(0),
+            ..nodes[0]
+        }];
+        let invalid_ffi = ffi_nodes(&invalid, "").unwrap();
+        assert_eq!(
+            unsafe {
+                prodex_live_log_json_projection_v1(
+                    1,
+                    0,
+                    0,
+                    invalid_ffi.as_ptr() as usize as u64,
+                    1,
+                    0,
+                    0,
+                    scratch_ptr,
+                    2,
+                    1,
+                    0,
+                    0,
+                    metadata_ptr,
+                )
+            },
+            1,
+        );
+        assert_eq!(metadata, [83; 2]);
+    }
 
     #[test]
     fn compiled_live_log_compact_metadata_serializes_sorted_keys_and_newline() {

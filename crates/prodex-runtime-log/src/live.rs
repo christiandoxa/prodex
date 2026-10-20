@@ -1,3 +1,4 @@
+use prodex_mojo_core::json::{JsonKind, JsonNode};
 use prodex_mojo_core::{MojoError, live_log_record as mojo_live_log_record};
 use std::collections::{BTreeMap, VecDeque};
 use std::path::{Path, PathBuf};
@@ -170,64 +171,94 @@ fn bounded_live_log_line(line: &str) -> Result<String, MojoError> {
     mojo_live_log_record::truncate_plain_text(line)
 }
 
+// Serde remains the wire parser. Acquire only structural links, borrowed
+// strings/keys and canonical Number lexemes; Mojo owns all JSON iteration,
+// UTF-8 clipping, escape rules and serialization.
+fn live_log_borrowed_tree<'a>(
+    value: &'a serde_json::Value,
+) -> Result<(Vec<JsonNode<'a>>, String), MojoError> {
+    let mut pending = vec![(value, None::<usize>, "")];
+    let mut nodes: Vec<JsonNode<'a>> = Vec::new();
+    let mut last_child: Vec<Option<usize>> = Vec::new();
+    let mut raw = String::new();
+    while let Some((value, parent, key)) = pending.pop() {
+        let index = nodes.len();
+        let kind = match value {
+            serde_json::Value::Null => JsonKind::Null,
+            serde_json::Value::Bool(false) => JsonKind::False,
+            serde_json::Value::Bool(true) => JsonKind::True,
+            serde_json::Value::Number(_) => JsonKind::Number,
+            serde_json::Value::String(_) => JsonKind::String,
+            serde_json::Value::Array(_) => JsonKind::Array,
+            serde_json::Value::Object(_) => JsonKind::Object,
+        };
+        let raw_start = raw.len();
+        if let serde_json::Value::Number(number) = value {
+            raw.push_str(&number.to_string());
+        }
+        nodes.push(JsonNode {
+            kind,
+            first_child: None,
+            next_sibling: None,
+            parent,
+            key,
+            text: value.as_str().unwrap_or_default(),
+            raw_start,
+            raw_length: raw.len() - raw_start,
+        });
+        last_child.push(None);
+        if let Some(parent) = parent {
+            if let Some(previous) = last_child[parent] {
+                nodes[previous].next_sibling = Some(index);
+            } else {
+                nodes[parent].first_child = Some(index);
+            }
+            last_child[parent] = Some(index);
+        }
+        match value {
+            serde_json::Value::Array(children) => {
+                for child in children.iter().rev() {
+                    pending.push((child, Some(index), ""));
+                }
+            }
+            serde_json::Value::Object(children) => {
+                for (key, child) in children.iter().rev() {
+                    pending.push((child, Some(index), key.as_str()));
+                }
+            }
+            _ => {}
+        }
+    }
+    Ok((nodes, raw))
+}
+
+fn live_log_clipped_value(value: &serde_json::Value) -> Result<String, MojoError> {
+    let (nodes, raw) = live_log_borrowed_tree(value)?;
+    mojo_live_log_record::clipped_json_projection(&nodes, &raw)
+}
+
 fn bounded_live_log_json(line: &str) -> Result<Option<String>, MojoError> {
-    let Ok(mut value) = serde_json::from_str::<serde_json::Value>(line.trim_end()) else {
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(line.trim_end()) else {
         return Ok(None);
     };
-    materialize_nested_string_clips(&mut value)?;
-    let Ok(serialized) = serde_json::to_string(&value) else {
-        return Ok(None);
-    };
+    let serialized = live_log_clipped_value(&value)?;
     let plan = mojo_live_log_record::json_plan(serialized.len())?;
     if !plan.compact_metadata {
         return Ok(Some(format!("{serialized}\n")));
     }
-    // Serde acquires the three existing JSON values; compiled Mojo owns
-    // omission, canonical key order, the marker and the trailing newline.
-    let event = value
-        .get("event")
-        .map(serde_json::to_string)
-        .transpose()
-        .map_err(|_| MojoError::InvalidInput)?;
-    let pid = value
-        .get("pid")
-        .map(serde_json::to_string)
-        .transpose()
-        .map_err(|_| MojoError::InvalidInput)?;
+    // Compact metadata comes from the original Serde values, clipped by the
+    // same compiled Mojo serializer. The host does not reimplement clipping.
+    let event = value.get("event").map(live_log_clipped_value).transpose()?;
+    let pid = value.get("pid").map(live_log_clipped_value).transpose()?;
     let timestamp = value
         .get("timestamp")
-        .map(serde_json::to_string)
-        .transpose()
-        .map_err(|_| MojoError::InvalidInput)?;
+        .map(live_log_clipped_value)
+        .transpose()?;
     Ok(Some(mojo_live_log_record::compact_json_metadata(
         event.as_deref(),
         pid.as_deref(),
         timestamp.as_deref(),
     )?))
-}
-
-fn materialize_nested_string_clips(value: &mut serde_json::Value) -> Result<(), MojoError> {
-    match value {
-        serde_json::Value::String(text) => {
-            let end = mojo_live_log_record::nested_string_clip_end(text)?;
-            if end < text.len() {
-                text.truncate(end);
-                text.push_str(" …[truncated]");
-            }
-        }
-        serde_json::Value::Array(values) => {
-            for value in values {
-                materialize_nested_string_clips(value)?;
-            }
-        }
-        serde_json::Value::Object(values) => {
-            for value in values.values_mut() {
-                materialize_nested_string_clips(value)?;
-            }
-        }
-        serde_json::Value::Null | serde_json::Value::Bool(_) | serde_json::Value::Number(_) => {}
-    }
-    Ok(())
 }
 
 #[cfg(test)]
@@ -452,6 +483,62 @@ mod tests {
                 .entries
                 .iter()
                 .all(|entry| entry.line.contains("load"))
+        );
+    }
+
+    #[test]
+    fn compiled_live_log_json_tree_preserves_serde_canonical_scalars_keys_and_arrays() {
+        let value = serde_json::json!({
+            "a\n\"雪": ["text\t\r\n\0\"", null, true, false, -9223372036854775808_i64],
+            "z": [18446744073709551615_u64, 1.25, 0, {"quote\\key":"東京"}],
+            "empty": {},
+            "other": [],
+        });
+        let projected = live_log_clipped_value(&value).unwrap();
+        let expected = serde_json::to_string(&value).unwrap();
+        assert_eq!(projected, expected);
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&projected).unwrap(),
+            value
+        );
+        for scalar in [
+            serde_json::Value::Null,
+            serde_json::json!(true),
+            serde_json::json!(0),
+            serde_json::json!(-5),
+            serde_json::json!(1.25),
+            serde_json::json!("雪\n\"\\"),
+            serde_json::json!([]),
+            serde_json::json!({}),
+        ] {
+            assert_eq!(
+                live_log_clipped_value(&scalar),
+                Ok(serde_json::to_string(&scalar).unwrap()),
+                "{scalar:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn compiled_live_log_json_tree_clips_utf8_without_truncating_json_keys() {
+        let oversized = format!("{}é{}", "x".repeat(8191), "y".repeat(130_000));
+        let long_key = format!("very-large-key-{}", "a".repeat(10_000));
+        let value = serde_json::json!({
+            long_key.clone(): {
+                "nested": ["another", {"payload": oversized, "flag": true}],
+            },
+        });
+        let clipped = live_log_clipped_value(&value).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&clipped).unwrap();
+        assert!(parsed.get(&long_key).is_some(), "keys must not be clipped");
+        assert_eq!(
+            parsed[&long_key]["nested"][1]["payload"],
+            serde_json::json!(format!("{}é …[truncated]", "x".repeat(8191)))
+        );
+        assert_eq!(parsed[&long_key]["nested"][1]["flag"], true);
+        assert!(
+            !clipped.contains(&"y".repeat(100)),
+            "the original oversized payload suffix must not survive"
         );
     }
 
