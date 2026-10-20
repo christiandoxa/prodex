@@ -3825,3 +3825,147 @@ def prodex_quota_window_duration_seconds_v1(
     output[unsafe_offset=0] = 1 if present else 0
     output[unsafe_offset=1] = value
     return 0
+
+
+# All six quota report sort modes are now ordered as one compiled batch.
+# The existing compiled pairwise comparator remains the sole precedence
+# authority; the batch adds the same final profile-name tie-break and
+# stable original-index ordering previously applied in the Rust host.
+comptime QUOTA_REPORT_SORT_BATCH_ABI: Int64 = 1
+comptime QUOTA_REPORT_SORT_BATCH_ROW_WORDS: Int64 = 11
+comptime QUOTA_REPORT_SORT_BATCH_MAX: Int64 = 1_000_000
+
+
+# Rust String::cmp uses lexicographic UTF-8 bytes, without lowercasing
+# or trimming. Keep this final tie-break distinct from the historical
+# case-insensitive, trimmed quota report column comparator.
+def quota_report_sort_profile_tie(
+    left: ProdexRichStringView, right: ProdexRichStringView,
+) -> Int64:
+    var l = rich_view_ptr(left)
+    var r = rich_view_ptr(right)
+    for index in range(Int64(min(left.len, right.len))):
+        if l[unsafe_offset=index] < r[unsafe_offset=index]:
+            return -1
+        if l[unsafe_offset=index] > r[unsafe_offset=index]:
+            return 1
+    if left.len < right.len:
+        return -1
+    if left.len > right.len:
+        return 1
+    return 0
+
+
+def quota_report_sort_batch_compare(
+    rows: Pointer[mut=False, Int64, _], sort: Int64,
+    left: Int64, right: Int64,
+) -> Int64:
+    var l = left * QUOTA_REPORT_SORT_BATCH_ROW_WORDS
+    var r = right * QUOTA_REPORT_SORT_BATCH_ROW_WORDS
+    var result = prodex_quota_report_compare_v1(
+        QUOTA_MODEL_POLICY_ABI_VERSION, sort,
+        rows[unsafe_offset=l], rows[unsafe_offset=r],
+        rows[unsafe_offset=l + 1], rows[unsafe_offset=r + 1],
+        rows[unsafe_offset=l + 2], rows[unsafe_offset=r + 2],
+        UInt(rows[unsafe_offset=l + 3]), rows[unsafe_offset=l + 4],
+        UInt(rows[unsafe_offset=r + 3]), rows[unsafe_offset=r + 4],
+        UInt(rows[unsafe_offset=l + 5]), rows[unsafe_offset=l + 6],
+        UInt(rows[unsafe_offset=r + 5]), rows[unsafe_offset=r + 6],
+        UInt(rows[unsafe_offset=l + 7]), rows[unsafe_offset=l + 8],
+        UInt(rows[unsafe_offset=r + 7]), rows[unsafe_offset=r + 8],
+        UInt(rows[unsafe_offset=l + 9]), rows[unsafe_offset=l + 10],
+        UInt(rows[unsafe_offset=r + 9]), rows[unsafe_offset=r + 10],
+    )
+    if result != 0:
+        return result
+    var left_name = quota_model_policy_view(
+        UInt(rows[unsafe_offset=l + 3]), rows[unsafe_offset=l + 4],
+    )
+    var right_name = quota_model_policy_view(
+        UInt(rows[unsafe_offset=r + 3]), rows[unsafe_offset=r + 4],
+    )
+    var by_name = quota_report_sort_profile_tie(left_name, right_name)
+    if by_name != 0:
+        return by_name
+    return quota_report_compare_i64(left, right)
+
+
+def quota_report_sort_batch_sift_down(
+    rows: Pointer[mut=False, Int64, _], sort: Int64,
+    indices: Pointer[mut=True, Int64, _],
+    root_start: Int64, end: Int64,
+):
+    var root = root_start
+    while root * 2 + 1 < end:
+        var child = root * 2 + 1
+        var swap = root
+        if quota_report_sort_batch_compare(
+            rows, sort,
+            indices[unsafe_offset=swap], indices[unsafe_offset=child],
+        ) < 0:
+            swap = child
+        if child + 1 < end and quota_report_sort_batch_compare(
+            rows, sort,
+            indices[unsafe_offset=swap], indices[unsafe_offset=child + 1],
+        ) < 0:
+            swap = child + 1
+        if swap == root:
+            return
+        var saved = indices[unsafe_offset=root]
+        indices[unsafe_offset=root] = indices[unsafe_offset=swap]
+        indices[unsafe_offset=swap] = saved
+        root = swap
+
+
+@export("prodex_quota_report_sort_batch_v1")
+def prodex_quota_report_sort_batch_v1(
+    abi_version: Int64, sort: Int64,
+    rows_address: UInt, row_count: Int64,
+    indices_address: UInt, index_capacity: Int64,
+) abi("C") -> Int64:
+    if abi_version != QUOTA_REPORT_SORT_BATCH_ABI:
+        return 4
+    if (
+        sort < 0 or sort > 5
+        or row_count < 0 or row_count > QUOTA_REPORT_SORT_BATCH_MAX
+        or (row_count > 0 and (rows_address == 0 or rows_address % 8 != 0))
+        or indices_address == 0 or indices_address % 8 != 0
+        or index_capacity < row_count
+    ):
+        return 1
+    var rows = Pointer[mut=False, Int64, ImmUntrackedOrigin](
+        unsafe_from_address=Int(rows_address)
+    )
+    for index in range(row_count):
+        var offset = index * QUOTA_REPORT_SORT_BATCH_ROW_WORDS
+        var active = rows[unsafe_offset=offset]
+        var rank = rows[unsafe_offset=offset + 1]
+        if (active != 0 and active != 1) or rank < 0:
+            return 1
+        for slot in range(Int64(4)):
+            var address = rows[unsafe_offset=offset + 3 + slot * 2]
+            var length = rows[unsafe_offset=offset + 4 + slot * 2]
+            if length < 0 or (length > 0 and address == 0):
+                return 1
+            if not rich_view_valid(
+                quota_model_policy_view(UInt(address), length),
+                0x7FFFFFFFFFFFFFFF,
+            ):
+                return 1
+    var indices = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(indices_address)
+    )
+    for index in range(row_count):
+        indices[unsafe_offset=index] = index
+    var start = row_count // 2
+    while start > 0:
+        start -= 1
+        quota_report_sort_batch_sift_down(rows, sort, indices, start, row_count)
+    var end = row_count
+    while end > 1:
+        end -= 1
+        var saved = indices[unsafe_offset=0]
+        indices[unsafe_offset=0] = indices[unsafe_offset=end]
+        indices[unsafe_offset=end] = saved
+        quota_report_sort_batch_sift_down(rows, sort, indices, 0, end)
+    return 0

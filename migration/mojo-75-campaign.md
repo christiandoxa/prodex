@@ -7806,3 +7806,16 @@ for insufficient capacity. All 529 provider tests, two direct core
 ABI tests, the direct Mojo ABI test, source guard and metric checks
 pass. Share rises from 35.836281199005576% to 35.851405897242934%
 (131,010 Mojo / 234,415 Rust); the project target stays at 75%.
+
+## Full quota report index sorting compiled in Mojo (2026-10-20)
+
+The compiled quota owner now sorts all report indices in one versioned
+batch ABI for six render modes. It reuses the existing compiled
+pairwise column comparator, preserves exact case-sensitive Rust
+profile-name tie-breaking and stable original-index order, and
+eliminates the prior Rust sort_by loop and O(n log n) FFI comparator
+calls. The host retains original report references and provider
+projection. All 101 quota tests, three direct core ABI tests,
+direct Mojo test, and no-fallback and production-share checks pass.
+Share rises from 35.851405897242934% to 35.868414646488134%
+(131,136 Mojo / 234,467 Rust). The 75% goal remains open.

@@ -2,6 +2,14 @@ use super::{QUOTA_DISPLAY_LABEL_SORT, load_quota_display_label};
 use super::{QUOTA_MODEL_POLICY_ABI_VERSION, prodex_quota_report_compare_v1};
 
 unsafe extern "C" {
+    fn prodex_quota_report_sort_batch_v1(
+        abi_version: i64,
+        sort: i64,
+        rows_address: u64,
+        row_count: i64,
+        output_address: u64,
+        output_capacity: i64,
+    ) -> i64;
     fn prodex_quota_report_sort_projection_v1(
         abi_version: i64,
         provider_kind: i64,
@@ -25,6 +33,78 @@ unsafe extern "C" {
         limit_present: i64,
         output: *mut u64,
     ) -> i64;
+}
+
+/// Borrowed presentation facts; the compiled owner chooses the entire
+/// report order and the host keeps the original provider record references.
+#[derive(Debug, Clone, Copy)]
+pub struct QuotaReportSortBatchInput<'a> {
+    pub active: bool,
+    pub status_rank: i64,
+    pub reset_epoch: i64,
+    pub profile: &'a str,
+    pub auth: &'a str,
+    pub account: &'a str,
+    pub plan: &'a str,
+}
+
+/// Sort all report indices with one compiled Mojo call. The prior caller
+/// incurred one FFI transition for each comparison during Rust sorting.
+pub fn quota_report_sort_batch(
+    sort: i64,
+    records: &[QuotaReportSortBatchInput<'_>],
+) -> Result<Vec<usize>, crate::MojoError> {
+    use crate::MojoError;
+    if !(0..=5).contains(&sort) || records.len() > 1_000_000 {
+        return Err(MojoError::InvalidInput);
+    }
+    let mut rows = Vec::<i64>::new();
+    rows.try_reserve_exact(records.len().checked_mul(11).ok_or(MojoError::Capacity)?)
+        .map_err(|_| MojoError::Capacity)?;
+    for record in records {
+        if record.status_rank < 0 {
+            return Err(MojoError::InvalidInput);
+        }
+        rows.extend([
+            i64::from(record.active),
+            record.status_rank,
+            record.reset_epoch,
+        ]);
+        for text in [record.profile, record.auth, record.account, record.plan] {
+            rows.extend([
+                i64::try_from(text.as_ptr() as usize).map_err(|_| MojoError::InvalidInput)?,
+                i64::try_from(text.len()).map_err(|_| MojoError::InvalidInput)?,
+            ]);
+        }
+    }
+    let mut selected = vec![-1_i64; records.len()];
+    match unsafe {
+        prodex_quota_report_sort_batch_v1(
+            QUOTA_MODEL_POLICY_ABI_VERSION,
+            sort,
+            rows.as_ptr() as usize as u64,
+            i64::try_from(records.len()).map_err(|_| MojoError::InvalidInput)?,
+            selected.as_mut_ptr() as usize as u64,
+            i64::try_from(selected.len()).map_err(|_| MojoError::InvalidInput)?,
+        )
+    } {
+        0 => {}
+        1 => return Err(MojoError::InvalidInput),
+        4 => return Err(MojoError::AbiMismatch),
+        _ => return Err(MojoError::InvalidOutput),
+    }
+    let mut seen = vec![false; records.len()];
+    let mut order = Vec::with_capacity(records.len());
+    for index in selected {
+        let index = usize::try_from(index).map_err(|_| MojoError::InvalidOutput)?;
+        let slot = seen.get_mut(index).ok_or(MojoError::InvalidOutput)?;
+        if *slot {
+            return Err(MojoError::InvalidOutput);
+        }
+        *slot = true;
+        order.push(index);
+    }
+    Ok(order)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -267,3 +347,7 @@ pub fn quota_report_sort_label(sort: i64) -> Result<&'static str, crate::MojoErr
         Err(error) => Err(*error),
     }
 }
+
+#[cfg(test)]
+#[path = "report_sort_batch_tests.rs"]
+mod batch_tests;

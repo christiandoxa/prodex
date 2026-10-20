@@ -1,5 +1,4 @@
 use super::*;
-use std::cmp::Ordering;
 
 #[derive(Debug)]
 struct QuotaReportViewData {
@@ -334,12 +333,22 @@ pub fn sorted_quota_report_indexes_by(
         .iter()
         .map(quota_report_sort_record)
         .collect::<Vec<_>>();
-    let mut indexes = (0..reports.len()).collect::<Vec<_>>();
-    indexes.sort_by(|&left, &right| {
-        compare_quota_report_sort_records(&records[left], &records[right], sort)
-            .then_with(|| reports[left].name.cmp(&reports[right].name))
-    });
-    indexes
+    let fields = records
+        .iter()
+        .map(
+            |record| prodex_mojo_core::quota::QuotaReportSortBatchInput {
+                active: record.active,
+                status_rank: record.status_rank,
+                reset_epoch: record.reset_epoch,
+                profile: &record.profile,
+                auth: &record.auth,
+                account: &record.account,
+                plan: &record.plan,
+            },
+        )
+        .collect::<Vec<_>>();
+    prodex_mojo_core::quota::quota_report_sort_batch(sort as i64, &fields)
+        .expect("compiled Mojo quota report batch ordering returned invalid output")
 }
 
 #[derive(Debug)]
@@ -414,36 +423,5 @@ fn quota_report_sort_record(report: &QuotaReport) -> QuotaReportSortRecord {
         auth: report.auth.label.clone(),
         account: view.account,
         plan: view.plan,
-    }
-}
-
-fn compare_quota_report_sort_records(
-    left: &QuotaReportSortRecord,
-    right: &QuotaReportSortRecord,
-    sort: QuotaReportSort,
-) -> Ordering {
-    match prodex_mojo_core::quota::quota_report_compare(
-        sort as i64,
-        left.active,
-        right.active,
-        left.status_rank,
-        right.status_rank,
-        left.reset_epoch,
-        right.reset_epoch,
-        &left.profile,
-        &right.profile,
-        &left.auth,
-        &right.auth,
-        &left.account,
-        &right.account,
-        &left.plan,
-        &right.plan,
-    )
-    .expect("Mojo quota report comparator returned invalid output")
-    {
-        -1 => Ordering::Less,
-        0 => Ordering::Equal,
-        1 => Ordering::Greater,
-        _ => unreachable!("validated Mojo quota report ordering"),
     }
 }
