@@ -114,3 +114,60 @@ fn id_parse_error_response_is_stable_and_redacted() {
         );
     }
 }
+
+#[test]
+fn compiled_identifier_error_mapping_covers_every_public_id_without_raw_value_leakage() {
+    use prodex_domain::{ProviderCredentialId, RoleBindingId};
+    let invalid = "invalid-uuid-contains-sensitive-雪";
+    let cases = [
+        (
+            TenantId::from_str(invalid).unwrap_err(),
+            "tenant_id_invalid",
+        ),
+        (
+            PrincipalId::from_str(invalid).unwrap_err(),
+            "principal_id_invalid",
+        ),
+        (
+            RequestId::from_str(invalid).unwrap_err(),
+            "request_id_invalid",
+        ),
+        (CallId::from_str(invalid).unwrap_err(), "call_id_invalid"),
+        (
+            ReservationId::from_str(invalid).unwrap_err(),
+            "reservation_id_invalid",
+        ),
+        (
+            VirtualKeyId::from_str(invalid).unwrap_err(),
+            "virtual_key_id_invalid",
+        ),
+        (
+            RoleBindingId::from_str(invalid).unwrap_err(),
+            "role_binding_id_invalid",
+        ),
+        (
+            ProviderCredentialId::from_str(invalid).unwrap_err(),
+            "provider_credential_id_invalid",
+        ),
+        (
+            PolicyRevisionId::from_str(invalid).unwrap_err(),
+            "policy_revision_id_invalid",
+        ),
+        (
+            AuditEventId::from_str(invalid).unwrap_err(),
+            "audit_event_id_invalid",
+        ),
+    ];
+    for (error, expected) in cases {
+        let plan = plan_id_parse_error_response(&error);
+        assert_eq!(plan.status, IdParseErrorStatus::InvalidRequest);
+        assert_eq!(plan.code, expected);
+        assert_eq!(plan.message, "identifier is invalid");
+        let rendered = serde_json::to_string(&plan).unwrap();
+        assert!(!rendered.contains(invalid), "raw invalid ID leaked");
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&rendered).unwrap()["code"],
+            expected,
+        );
+    }
+}

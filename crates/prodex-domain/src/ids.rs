@@ -50,24 +50,17 @@ impl fmt::Display for IdParseError {
 impl Error for IdParseError {}
 
 pub fn plan_id_parse_error_response(error: &IdParseError) -> IdParseErrorResponsePlan {
-    let code = match error.kind() {
-        "tenant_id" => "tenant_id_invalid",
-        "principal_id" => "principal_id_invalid",
-        "request_id" => "request_id_invalid",
-        "call_id" => "call_id_invalid",
-        "reservation_id" => "reservation_id_invalid",
-        "virtual_key_id" => "virtual_key_id_invalid",
-        "role_binding_id" => "role_binding_id_invalid",
-        "provider_credential_id" => "provider_credential_id_invalid",
-        "policy_revision_id" => "policy_revision_id_invalid",
-        "audit_event_id" => "audit_event_id_invalid",
-        _ => "identifier_invalid",
-    };
-
+    let plan = prodex_mojo_core::domain_error_policy::identifier_error_plan(error.kind())
+        .expect("compiled Mojo identifier-error response plan returned invalid output");
+    assert_eq!(
+        plan.status,
+        prodex_mojo_core::domain_error_policy::DomainErrorStatus::InvalidRequest,
+        "compiled Mojo identifier-error plan returned an invalid status"
+    );
     IdParseErrorResponsePlan {
         status: IdParseErrorStatus::InvalidRequest,
-        code,
-        message: "identifier is invalid",
+        code: plan.code,
+        message: plan.message,
     }
 }
 

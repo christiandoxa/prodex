@@ -119,6 +119,9 @@ pub mod deepseek_attempt_policy;
 pub mod deepseek_local_rewrite;
 #[cfg(feature = "mojo-rich")]
 pub mod deepseek_stream_policy;
+#[cfg(feature = "mojo-runtime")]
+#[cfg(feature = "mojo-runtime")]
+pub mod domain_error_policy;
 #[cfg(feature = "mojo-rich")]
 pub mod gemini_code_assist_policy;
 #[cfg(feature = "mojo-rich")]
@@ -229,7 +232,6 @@ pub mod runtime_sse_chunk;
 pub mod runtime_state;
 #[cfg(feature = "mojo-runtime")]
 pub mod runtime_state_quota;
-#[cfg(feature = "mojo-runtime")]
 pub mod secret_policy;
 #[cfg(feature = "mojo-runtime")]
 pub mod session_cli_policy;

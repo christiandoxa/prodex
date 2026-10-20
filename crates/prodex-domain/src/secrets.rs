@@ -237,6 +237,7 @@ impl SecretRotationPolicy {
     }
 }
 
+#[repr(i64)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SecretRotationPolicyError {
@@ -261,19 +262,31 @@ pub struct SecretErrorResponsePlan {
     pub message: &'static str,
 }
 
+fn apply_compiled_secret_error_plan(
+    plan: prodex_mojo_core::domain_error_policy::DomainErrorPlan,
+) -> SecretErrorResponsePlan {
+    use prodex_mojo_core::domain_error_policy::DomainErrorStatus;
+    let status = match plan.status {
+        DomainErrorStatus::InvalidRequest => SecretErrorStatus::InvalidRequest,
+        DomainErrorStatus::Forbidden => SecretErrorStatus::Forbidden,
+        DomainErrorStatus::NotFound => SecretErrorStatus::NotFound,
+        DomainErrorStatus::ServiceUnavailable => SecretErrorStatus::ServiceUnavailable,
+        DomainErrorStatus::Conflict => SecretErrorStatus::Conflict,
+    };
+    SecretErrorResponsePlan {
+        status,
+        code: plan.code,
+        message: plan.message,
+    }
+}
+
 pub fn plan_secret_rotation_policy_error_response(
     error: &SecretRotationPolicyError,
 ) -> SecretErrorResponsePlan {
-    let code = match error {
-        SecretRotationPolicyError::ZeroMaxAge => "secret_rotation_max_age_invalid",
-        SecretRotationPolicyError::OverlapNotShorterThanMaxAge => "secret_rotation_overlap_invalid",
-    };
-
-    SecretErrorResponsePlan {
-        status: SecretErrorStatus::InvalidRequest,
-        code,
-        message: "secret rotation policy is invalid",
-    }
+    apply_compiled_secret_error_plan(
+        prodex_mojo_core::domain_error_policy::secret_rotation_error_plan(*error as i64)
+            .expect("compiled Mojo secret-rotation error plan returned invalid output"),
+    )
 }
 
 #[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -318,6 +331,7 @@ impl SecretRotationStatus {
     }
 }
 
+#[repr(i64)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SecretResolutionError {
@@ -330,28 +344,10 @@ pub enum SecretResolutionError {
 pub fn plan_secret_resolution_error_response(
     error: &SecretResolutionError,
 ) -> SecretErrorResponsePlan {
-    match error {
-        SecretResolutionError::NotFound => SecretErrorResponsePlan {
-            status: SecretErrorStatus::NotFound,
-            code: "secret_not_found",
-            message: "secret could not be resolved",
-        },
-        SecretResolutionError::PermissionDenied => SecretErrorResponsePlan {
-            status: SecretErrorStatus::Forbidden,
-            code: "secret_permission_denied",
-            message: "secret could not be resolved",
-        },
-        SecretResolutionError::ProviderUnavailable => SecretErrorResponsePlan {
-            status: SecretErrorStatus::ServiceUnavailable,
-            code: "secret_provider_unavailable",
-            message: "secret provider is unavailable",
-        },
-        SecretResolutionError::StaleVersion => SecretErrorResponsePlan {
-            status: SecretErrorStatus::Conflict,
-            code: "secret_version_stale",
-            message: "secret version is stale",
-        },
-    }
+    apply_compiled_secret_error_plan(
+        prodex_mojo_core::domain_error_policy::secret_resolution_error_plan(*error as i64)
+            .expect("compiled Mojo secret-resolution error plan returned invalid output"),
+    )
 }
 
 pub trait SecretProvider {

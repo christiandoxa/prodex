@@ -489,6 +489,7 @@ fn selected_sources() -> Vec<&'static str> {
         sources.push("../../mojo/prodex_core/kiro_environment.mojo");
         sources.push("../../mojo/prodex_core/profile_ui_policy.mojo");
         sources.push("../../mojo/prodex_core/secret_policy.mojo");
+        sources.push("../../mojo/prodex_core/domain_error_policy.mojo");
         sources.push("../../mojo/prodex_core/sub_agent_policy.mojo");
         sources.push("../../mojo/prodex_core/super_provider_config.mojo");
         sources.push("../../mojo/prodex_core/optional_tools_policy.mojo");
