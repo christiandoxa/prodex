@@ -110,6 +110,7 @@ comptime DEEPSEEK_CHAT_ROLE: Int64 = 47
 comptime DEEPSEEK_INPUT_ITEM_VALIDATION: Int64 = 48
 comptime DEEPSEEK_CHAT_ASSISTANT_MESSAGES: Int64 = 49
 comptime DEEPSEEK_STREAM_ERROR_CLASSIFICATION: Int64 = 50
+comptime DEEPSEEK_BUFFERED_OUTPUT_TEXT_ITEM: Int64 = 51
 comptime DEEPSEEK_JSON_MAX_DEPTH: Int64 = 256
 comptime DEEPSEEK_UINT64_MAX: UInt64 = 18_446_744_073_709_551_615
 
@@ -3531,6 +3532,19 @@ def deepseek_put_response_usage(
     return deepseek_put_byte(writer, 125)
 
 
+# Buffered and streaming output-text messages use exactly one compiled
+# renderer. Only the buffered operation admits the larger response budget.
+def deepseek_write_output_text_item(
+    writer: Pointer[mut=True, DeepSeekResponseWriter, _],
+    text: ProdexRichStringView,
+) -> Bool:
+    return (
+        deepseek_put_literal(writer, StringSlice('{"type":"message","role":"assistant","content":[{"type":"output_text","text":'))
+        and deepseek_put_json_string(writer, text)
+        and deepseek_put_literal(writer, StringSlice("}]}"))
+    )
+
+
 def deepseek_write_operation(
     writer: Pointer[mut=True, DeepSeekResponseWriter, _],
     input: ProdexDeepSeekKernelInput,
@@ -3719,12 +3733,8 @@ def deepseek_write_operation(
             and deepseek_put_json_string(writer, input.delta)
             and deepseek_put_byte(writer, 125)
         )
-    if operation == DEEPSEEK_OUTPUT_TEXT_ITEM:
-        return (
-            deepseek_put_literal(writer, StringSlice('{"type":"message","role":"assistant","content":[{"type":"output_text","text":'))
-            and deepseek_put_json_string(writer, input.delta)
-            and deepseek_put_literal(writer, StringSlice("}]}"))
-        )
+    if operation == DEEPSEEK_OUTPUT_TEXT_ITEM or operation == DEEPSEEK_BUFFERED_OUTPUT_TEXT_ITEM:
+        return deepseek_write_output_text_item(writer, input.delta)
     if operation == DEEPSEEK_STREAM_ASSISTANT_MESSAGE:
         if not deepseek_put_literal(writer, StringSlice('{"role":"assistant","content":')):
             return False
@@ -3822,7 +3832,7 @@ def deepseek_flag_valid(value: Int64) -> Bool:
 def deepseek_input_valid(input: ProdexDeepSeekKernelInput) -> Bool:
     return (
         input.operation >= DEEPSEEK_REQUEST_BODY
-        and input.operation <= DEEPSEEK_STREAM_ERROR_CLASSIFICATION
+        and input.operation <= DEEPSEEK_BUFFERED_OUTPUT_TEXT_ITEM
         and
         deepseek_flag_valid(input.stream)
         and deepseek_flag_valid(input.response_id_present)
@@ -3874,7 +3884,15 @@ def deepseek_input_valid(input: ProdexDeepSeekKernelInput) -> Bool:
             )
         )
         and rich_view_valid(input.signature, DEEPSEEK_KERNEL_MAX_BYTES)
-        and rich_view_valid(input.delta, DEEPSEEK_KERNEL_MAX_BYTES)
+        and (
+            rich_view_valid(input.delta, DEEPSEEK_KERNEL_MAX_BYTES)
+            or (
+                input.operation == DEEPSEEK_BUFFERED_OUTPUT_TEXT_ITEM
+                and rich_view_valid(
+                    input.delta, DEEPSEEK_LARGE_RESPONSE_KERNEL_MAX_BYTES,
+                )
+            )
+        )
         and (
             rich_view_valid(input.messages, DEEPSEEK_KERNEL_MAX_BYTES)
             or (

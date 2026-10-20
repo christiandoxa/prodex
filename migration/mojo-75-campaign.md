@@ -7914,3 +7914,14 @@ All 425 proxy tests, two direct core ABI tests, direct Mojo test
 and source/non-regression guards pass. Official production share rises
 from 35.89055457119222% to 35.905425870090184%
 (131,588 Mojo / 234,897 Rust). Project target 75% remains open.
+
+## DeepSeek buffered response text items constructed in compiled Mojo (2026-10-20)
+
+The buffered DeepSeek translator now obtains its output-text JSON
+object from the shared compiled renderer. A dedicated operation
+preserves the original 16 MiB buffered limit without relaxing the
+4 MiB stream limit. The Rust JSON message assembly was deleted.
+All 535 provider tests, two core ABI tests, direct Mojo writer
+regression and source/share guards pass. Official share increases
+from 35.905425870090184% to 35.90709045120557%
+(131,602 Mojo / 234,905 Rust LOC). The 75% target remains unmet.

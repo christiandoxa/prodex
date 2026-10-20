@@ -1,6 +1,6 @@
 use super::tooling::deepseek_responses_tool_call_item;
 use crate::bridge::provider_core_chat_compatible_created_at;
-use serde_json::{Value, json};
+use serde_json::Value;
 
 use prodex_mojo_core::rich::{DeepSeekKernelInput, DeepSeekKernelOperation, deepseek_kernel};
 
@@ -36,11 +36,18 @@ pub(super) fn deepseek_responses_value_from_chat_value(value: &Value) -> Result<
         .and_then(Value::as_str)
         .filter(|text| !text.is_empty())
     {
-        output.push(json!({
-            "type":"message",
-            "role":"assistant",
-            "content":[{"type":"output_text","text":text}],
-        }));
+        // Buffered responses reuse the compiled DeepSeek text-item builder.
+        // Unlike stream events, this bounded operation accepts large text
+        // through the same 16 MiB envelope limit as buffered responses.
+        let mut text_input =
+            DeepSeekKernelInput::new(DeepSeekKernelOperation::BufferedOutputTextItem);
+        text_input.delta = Some(text);
+        let bytes = deepseek_kernel(text_input).map_err(|_| {
+            "DeepSeek response exceeds the bounded Mojo normalization limit".to_string()
+        })?;
+        output.push(serde_json::from_slice::<Value>(&bytes).map_err(|error| {
+            format!("DeepSeek compiled text item returned invalid JSON: {error}")
+        })?);
     }
     if let Some(tool_calls) = message
         .and_then(|message| message.get("tool_calls"))
@@ -292,6 +299,45 @@ mod tests {
                 }
             })
         );
+    }
+
+    #[test]
+    fn buffered_response_text_item_is_rendered_by_compiled_mojo_with_unicode_and_tools() {
+        let text = "雪🦀\r\n\"quoted\"\\";
+        let response = json!({
+            "id": "chatcmpl-compiled-text",
+            "created": 42,
+            "choices": [{
+                "message": {
+                    "content": text,
+                    "tool_calls": [{
+                        "id": "call-live",
+                        "function": {"name": "functions.lookup", "arguments": "{}"},
+                    }],
+                }
+            }],
+        });
+        let value = deepseek_responses_value_from_chat_value(&response).unwrap();
+        assert_eq!(value["output"].as_array().unwrap().len(), 2);
+        assert_eq!(
+            value["output"][0],
+            json!({
+                "type": "message",
+                "role": "assistant",
+                "content": [{"type": "output_text", "text": text}],
+            }),
+        );
+        assert_eq!(value["output"][1]["type"], "function_call");
+        assert_eq!(value["output"][1]["call_id"], "call-live");
+        assert_eq!(value["output"][1]["name"], "lookup");
+        for content in [json!(""), json!(null), json!(42)] {
+            let response = json!({
+                "created": 42,
+                "choices": [{"message": {"content": content}}],
+            });
+            let normalized = deepseek_responses_value_from_chat_value(&response).unwrap();
+            assert_eq!(normalized["output"], json!([]));
+        }
     }
 
     #[test]
