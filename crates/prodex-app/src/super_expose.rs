@@ -1,7 +1,6 @@
 use anyhow::{Context, Result, bail};
 use base64::Engine as _;
 use prodex_cli::SuperExposeArgs;
-use redaction::redaction_redact_secret_like_text;
 use serde_json::json;
 use std::io::Read;
 use std::net::SocketAddr;
@@ -568,11 +567,6 @@ pub(super) fn now_millis() -> u64 {
             u64::try_from(duration.as_millis()).unwrap_or(u64::MAX)
         })
         .saturating_add(CLOCK_SEQUENCE.fetch_add(1, Ordering::Relaxed))
-}
-
-pub(super) fn bounded_redacted_text(bytes: &[u8], max_bytes: usize) -> String {
-    let redacted = redaction_redact_secret_like_text(&String::from_utf8_lossy(bytes));
-    bounded_text(&redacted, max_bytes)
 }
 
 fn bounded_text(text: &str, max_bytes: usize) -> String {

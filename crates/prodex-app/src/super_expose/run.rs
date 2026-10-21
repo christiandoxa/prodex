@@ -1,4 +1,4 @@
-use super::{bounded_redacted_text, bounded_text, logging::ExposeAuditLog, now_millis};
+use super::{bounded_text, logging::ExposeAuditLog, now_millis};
 use crate::{configure_child_process_group, terminate_child_process_tree};
 use anyhow::{Context, Result};
 use base64::Engine as _;
@@ -36,6 +36,10 @@ mod retention_tests;
 #[cfg(test)]
 #[path = "run/event_tests.rs"]
 mod event_tests;
+
+#[cfg(test)]
+#[path = "run/output_tests.rs"]
+mod output_tests;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum RunState {

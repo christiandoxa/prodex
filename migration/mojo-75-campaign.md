@@ -8406,3 +8406,15 @@ two override regressions, 113 Super expose tests and strict workspace Clippy
 pass. Official share is 36.31324608695189% (136,463 Mojo / 239,331 Rust LOC).
 The 75% objective remains open. Detailed evidence is in
 `migration/super-run-override-text-mojo-20261022.md`.
+
+## Super run output append and marker plans compiled in Mojo (2026-10-22)
+
+One compiled plan now owns output/event prefixes, sticky truncation, normal
+event retention and marker insertion after eviction. Rust's capacity and
+marker policy is removed; redaction, compatibility budgets and buffer/deque
+effects remain in the host. The event C facade shares the same pure mutation
+kernel, and fixed retention masks replace the new Rust test oracle. Direct
+Mojo, nine strict run-policy bridge tests, three output regressions and all
+116 Super expose tests pass. Canonical share is 36.31228157896137% (136,532 Mojo
+/ 239,462 Rust LOC). The 75% target remains open. Detailed evidence is in
+`migration/super-run-output-plan-mojo-20261022.md`.

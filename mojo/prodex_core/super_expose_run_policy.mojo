@@ -1,6 +1,8 @@
 # Completed-run retention; identifiers, locks and process ownership stay in Rust.
 from std.memory import Pointer
 from index_order import index_order_sort
+from rich_text import rich_utf8_prefix_end, rich_view_valid
+from rich_types import ProdexRichStringView
 
 comptime SUPER_RUN_TERMINAL_LIMIT: Int64 = 32
 
@@ -68,6 +70,13 @@ def prodex_super_run_retention_v1(
 comptime SUPER_RUN_EVENT_LIMIT: Int64 = 256
 
 
+def super_run_event_push(event_count: Int64, next_seq: UInt64) -> Tuple[UInt64, UInt64]:
+    var incremented = next_seq
+    if incremented < 18446744073709551615:
+        incremented += 1
+    return (incremented, UInt64(max(event_count - (SUPER_RUN_EVENT_LIMIT - 1), 0)))
+
+
 @export("prodex_super_run_event_push_v1")
 def prodex_super_run_event_push_v1(
     version: Int64, event_count: Int64, next_seq: UInt64, output_address: UInt,
@@ -77,11 +86,9 @@ def prodex_super_run_event_push_v1(
     if event_count < 0 or output_address == 0 or output_address % 8 != 0:
         return 1
     var output = Pointer[mut=True, UInt64, MutUntrackedOrigin](unsafe_from_address=Int(output_address))
-    var incremented = next_seq
-    if incremented < 18446744073709551615:
-        incremented += 1
-    output[unsafe_offset=0] = incremented
-    output[unsafe_offset=1] = UInt64(max(event_count - (SUPER_RUN_EVENT_LIMIT - 1), 0))
+    var plan = super_run_event_push(event_count, next_seq)
+    output[unsafe_offset=0] = plan[0]
+    output[unsafe_offset=1] = plan[1]
     return 0
 
 
@@ -120,4 +127,77 @@ def prodex_super_run_events_page_v1(
     var output = Pointer[mut=True, Int64, MutUntrackedOrigin](unsafe_from_address=Int(output_address))
     output[unsafe_offset=0] = written
     output[unsafe_offset=1] = 1 if after_next < first_seq else 0
+    return 0
+
+
+@fieldwise_init
+struct SuperRunOutputInput(Copyable):
+    var text_address: UInt64
+    var text_length: Int64
+    var output_bytes: UInt64
+    var output_truncated: Int64
+    var next_seq: UInt64
+    var markers_address: UInt64
+    var marker_count: Int64
+    var event_is_marker: Int64
+    var event_text_limit: UInt64
+    var output_limit: UInt64
+
+
+@export("prodex_super_run_output_plan_v1")
+def prodex_super_run_output_plan_v1(
+    version: Int64, input_address: UInt, output_address: UInt,
+) abi("C") -> Int64:
+    if version != 1:
+        return 4
+    if input_address == 0 or input_address % 8 != 0 or output_address == 0 or output_address % 8 != 0:
+        return 1
+    var input = Pointer[mut=False, SuperRunOutputInput, ImmUntrackedOrigin](unsafe_from_address=Int(input_address))[].copy()
+    if input.text_length < 0 or input.marker_count < 0 or input.marker_count > 9223372036854775807 // 8:
+        return 1
+    if input.output_truncated < 0 or input.output_truncated > 1 or input.event_is_marker < 0 or input.event_is_marker > 1:
+        return 1
+    if input.marker_count > 0 and input.markers_address == 0:
+        return 1
+    var text = ProdexRichStringView(UInt(input.text_address), UInt(input.text_length))
+    if not rich_view_valid(text, 9223372036854775807):
+        return 1
+    var markers = Pointer[mut=False, UInt8, ImmUntrackedOrigin](unsafe_from_address=Int(input.markers_address))
+    for index in range(input.marker_count):
+        if markers[unsafe_offset=index] > 1:
+            return 1
+    var text_end = UInt64(rich_utf8_prefix_end(text, input.event_text_limit))
+    var append_end: UInt64 = 0
+    var truncated = input.output_truncated == 1
+    var emit_output = text_end > 0
+    var event_push = (input.next_seq, UInt64(0))
+    var marker_push = (input.next_seq, UInt64(0))
+    var emit_marker = False
+    if emit_output:
+        var remaining: UInt64 = 0
+        if input.output_bytes < input.output_limit:
+            remaining = input.output_limit - input.output_bytes
+        append_end = UInt64(rich_utf8_prefix_end(text, min(remaining, text_end)))
+        truncated = truncated or append_end < text_end
+        event_push = super_run_event_push(input.marker_count, input.next_seq)
+        var marker_present = input.event_is_marker == 1
+        # Preserve the original scan after the normal event's oldest-row eviction.
+        for index in range(Int64(event_push[1]), input.marker_count):
+            if markers[unsafe_offset=index] == 1:
+                marker_present = True
+                break
+        emit_marker = truncated and not marker_present
+        if emit_marker:
+            var retained_count = input.marker_count + 1 - Int64(event_push[1])
+            marker_push = super_run_event_push(retained_count, event_push[0])
+    var output = Pointer[mut=True, UInt64, MutUntrackedOrigin](unsafe_from_address=Int(output_address))
+    output[unsafe_offset=0] = text_end
+    output[unsafe_offset=1] = append_end
+    output[unsafe_offset=2] = 1 if truncated else 0
+    output[unsafe_offset=3] = 1 if emit_output else 0
+    output[unsafe_offset=4] = event_push[0]
+    output[unsafe_offset=5] = event_push[1]
+    output[unsafe_offset=6] = 1 if emit_marker else 0
+    output[unsafe_offset=7] = marker_push[0]
+    output[unsafe_offset=8] = marker_push[1]
     return 0

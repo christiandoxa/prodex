@@ -34,8 +34,8 @@ file is now 582 lines; size thresholds and allowlists are unchanged.
 
 Direct Mojo assertions cover active protection, full-width unsigned times,
 finished-time fallback, the fixed cap, empty input and atomic ABI rejection.
-Three compiled tests also compare masks with a test-only original-policy
-oracle across several input sizes and verify stable ties and malformed rows.
+Three compiled tests also compare complete masks with fixed expected results
+across several input sizes and verify stable ties and malformed rows.
 Production caller tests preserve all three live states, all four terminal
 states, the 32-record cap, lexical ties, optional finish times and idempotence.
 The whole Super expose namespace validates the relocated tests and callers.

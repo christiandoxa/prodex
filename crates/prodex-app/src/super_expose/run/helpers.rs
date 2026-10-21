@@ -146,30 +146,44 @@ pub(super) fn spawn_reader(
 }
 
 pub(super) fn append_output(record: &mut RunRecord, event_type: &str, bytes: &[u8]) {
-    let text = bounded_redacted_text(bytes, MAX_RUN_EVENT_TEXT_BYTES);
-    if text.is_empty() {
+    let text = crate::redaction_redact_secret_like_text(&String::from_utf8_lossy(bytes));
+    let markers = record
+        .events
+        .iter()
+        .map(|event| event.event_type == "output_truncated")
+        .collect::<Vec<_>>();
+    let Ok(plan) = prodex_mojo_core::rich::super_run_output_plan(
+        prodex_mojo_core::rich::SuperRunOutputInput {
+            text: &text,
+            output_bytes: record.output.len(),
+            output_truncated: record.output_truncated,
+            next_seq: record.next_seq,
+            marker_flags: &markers,
+            event_is_marker: event_type == "output_truncated",
+            event_text_limit: MAX_RUN_EVENT_TEXT_BYTES,
+            output_limit: OUTPUT_MAX_BYTES,
+        },
+    ) else {
         return;
-    }
-    if record.output.len() < OUTPUT_MAX_BYTES {
-        let remaining = OUTPUT_MAX_BYTES - record.output.len();
-        let Ok(end) = prodex_mojo_core::rich::super_expose_text_cut(&text, remaining) else {
-            return;
-        };
-        record.output.push_str(&text[..end]);
-        if end < text.len() {
-            record.output_truncated = true;
-        }
-    } else {
-        record.output_truncated = true;
-    }
-    push_event(record, event_type, &text);
-    if record.output_truncated
-        && !record
-            .events
-            .iter()
-            .any(|event| event.event_type == "output_truncated")
-    {
-        push_event(record, "output_truncated", "output limit reached");
+    };
+    let Some(event_push) = plan.event_push else {
+        return;
+    };
+    record.output.push_str(&text[..plan.append_end]);
+    record.output_truncated = plan.truncated;
+    apply_event(
+        record,
+        event_type,
+        text[..plan.text_end].to_string(),
+        event_push,
+    );
+    if let Some(marker_push) = plan.marker_push {
+        apply_event(
+            record,
+            "output_truncated",
+            "output limit reached".to_string(),
+            marker_push,
+        );
     }
 }
 
@@ -204,6 +218,15 @@ pub(super) fn push_event(record: &mut RunRecord, event_type: &str, text: &str) {
         return;
     };
     let text = bounded_text(text, MAX_RUN_EVENT_TEXT_BYTES);
+    apply_event(record, event_type, text, plan);
+}
+
+fn apply_event(
+    record: &mut RunRecord,
+    event_type: &str,
+    text: String,
+    plan: prodex_mojo_core::rich::SuperRunEventPushPlan,
+) {
     record.events.push_back(RunEvent {
         seq: record.next_seq,
         event_type: event_type.to_string(),
