@@ -315,10 +315,13 @@ pub fn unique_profile_lifecycle_journal_path(
 }
 
 pub fn validate_profile_lifecycle_operation(operation: &str) -> Result<()> {
-    if matches!(operation, "import" | "login" | "manage" | "remove") {
-        return Ok(());
+    let valid = prodex_mojo_core::profile_export::journal_lifecycle_operation_valid(operation)
+        .expect("compiled Mojo profile lifecycle operation policy failed");
+    if valid {
+        Ok(())
+    } else {
+        bail!("unknown profile lifecycle operation '{operation}'")
     }
-    bail!("unknown profile lifecycle operation '{operation}'")
 }
 
 pub fn validate_profile_lifecycle_journal_path(path: impl AsRef<Path>) -> Result<()> {
@@ -430,17 +433,13 @@ fn validate_journal_filename(path: &Path, label: &str) -> Result<()> {
 }
 
 fn validate_filename_component(value: &str, label: &str) -> Result<()> {
-    if value.is_empty()
-        || matches!(value, "." | "..")
-        || value.contains('/')
-        || value.contains('\\')
-        || !value.chars().all(|character| {
-            character.is_ascii_alphanumeric() || matches!(character, '-' | '_' | '.')
-        })
-    {
+    let valid = prodex_mojo_core::profile_export::journal_filename_component_valid(value)
+        .expect("compiled Mojo journal component policy failed");
+    if valid {
+        Ok(())
+    } else {
         bail!("{label} contains an unsafe filename component")
     }
-    Ok(())
 }
 
 fn ensure_journal_root_is_directory(root: &Path) -> Result<()> {
