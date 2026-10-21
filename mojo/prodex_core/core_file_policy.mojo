@@ -215,3 +215,136 @@ def prodex_core_file_policy_v1(
     output[unsafe_offset=0] = UInt64(parsed[0])
     output[unsafe_offset=1] = parsed[1]
     return CORE_FILE_POLICY_OK
+
+
+# Reusable lexical ordering of original host-owned filesystem paths and
+# broker registry keys. Raw byte views intentionally accept non-UTF8 OS
+# filenames. Mojo owns ascending lexical comparison, stable ties and
+# optional exact duplicate elimination; Rust retains all filesystem I/O.
+comptime CORE_FILE_LEXICAL_ORDER_MAX: Int64 = 1_048_576
+
+
+def core_file_lexical_less(
+    views: Pointer[mut=False, UInt64, _],
+    left: Int64, right: Int64,
+) -> Bool:
+    var left_len = Int64(views[unsafe_offset=left * 2 + 1])
+    var right_len = Int64(views[unsafe_offset=right * 2 + 1])
+    var a = Pointer[mut=False, UInt8, ImmUntrackedOrigin](
+        unsafe_from_address=Int(views[unsafe_offset=left * 2])
+    )
+    var b = Pointer[mut=False, UInt8, ImmUntrackedOrigin](
+        unsafe_from_address=Int(views[unsafe_offset=right * 2])
+    )
+    for index in range(min(left_len, right_len)):
+        var lhs = a[unsafe_offset=index]
+        var rhs = b[unsafe_offset=index]
+        if lhs != rhs:
+            return lhs < rhs
+    if left_len != right_len:
+        return left_len < right_len
+    return left < right
+
+
+def core_file_lexical_equal(
+    views: Pointer[mut=False, UInt64, _],
+    left: Int64, right: Int64,
+) -> Bool:
+    var length = Int64(views[unsafe_offset=left * 2 + 1])
+    if length != Int64(views[unsafe_offset=right * 2 + 1]):
+        return False
+    var a = Pointer[mut=False, UInt8, ImmUntrackedOrigin](
+        unsafe_from_address=Int(views[unsafe_offset=left * 2])
+    )
+    var b = Pointer[mut=False, UInt8, ImmUntrackedOrigin](
+        unsafe_from_address=Int(views[unsafe_offset=right * 2])
+    )
+    for index in range(length):
+        if a[unsafe_offset=index] != b[unsafe_offset=index]:
+            return False
+    return True
+
+
+def core_file_lexical_heap_down(
+    views: Pointer[mut=False, UInt64, _],
+    indices: Pointer[mut=True, Int64, _],
+    first: Int64, count: Int64,
+):
+    var root = first
+    while root * 2 + 1 < count:
+        var child = root * 2 + 1
+        var swap = root
+        if core_file_lexical_less(
+            views, indices[unsafe_offset=swap], indices[unsafe_offset=child],
+        ):
+            swap = child
+        if child + 1 < count and core_file_lexical_less(
+            views, indices[unsafe_offset=swap], indices[unsafe_offset=child + 1],
+        ):
+            swap = child + 1
+        if swap == root:
+            return
+        var saved = indices[unsafe_offset=root]
+        indices[unsafe_offset=root] = indices[unsafe_offset=swap]
+        indices[unsafe_offset=swap] = saved
+        root = swap
+
+
+@export("prodex_core_file_lexical_order_v1")
+def prodex_core_file_lexical_order_v1(
+    abi_version: Int64,
+    views_address: UInt, count: Int64,
+    unique: Int64,
+    indices_address: UInt, indices_capacity: Int64,
+    selected_count_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != CORE_FILE_POLICY_ABI_VERSION:
+        return CORE_FILE_POLICY_ABI
+    if (
+        count < 0 or count > CORE_FILE_LEXICAL_ORDER_MAX
+        or unique < 0 or unique > 1
+        or (count > 0 and (views_address == 0 or views_address % 8 != 0))
+        or indices_address == 0 or indices_address % 8 != 0
+        or indices_capacity < count
+        or selected_count_address == 0 or selected_count_address % 8 != 0
+    ):
+        return CORE_FILE_POLICY_INVALID
+    var views = Pointer[mut=False, UInt64, ImmUntrackedOrigin](
+        unsafe_from_address=Int(views_address)
+    )
+    for index in range(count):
+        var address = views[unsafe_offset=index * 2]
+        var length = views[unsafe_offset=index * 2 + 1]
+        if length > UInt64(9223372036854775807) or (length > 0 and address == 0):
+            return CORE_FILE_POLICY_INVALID
+
+    var output = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(indices_address)
+    )
+    for index in range(count):
+        output[unsafe_offset=index] = index
+    var start = count // 2
+    while start > 0:
+        start -= 1
+        core_file_lexical_heap_down(views, output, start, count)
+    var end = count
+    while end > 1:
+        end -= 1
+        var saved = output[unsafe_offset=0]
+        output[unsafe_offset=0] = output[unsafe_offset=end]
+        output[unsafe_offset=end] = saved
+        core_file_lexical_heap_down(views, output, 0, end)
+
+    var selected = Int64(0)
+    for index in range(count):
+        var original = output[unsafe_offset=index]
+        if unique == 1 and selected > 0 and core_file_lexical_equal(
+            views, output[unsafe_offset=selected - 1], original,
+        ):
+            continue
+        output[unsafe_offset=selected] = original
+        selected += 1
+    Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(selected_count_address)
+    )[] = selected
+    return CORE_FILE_POLICY_OK

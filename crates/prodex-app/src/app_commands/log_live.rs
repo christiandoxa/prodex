@@ -46,8 +46,18 @@ impl LiveRuntimeLogSource {
             .collect::<BTreeSet<_>>();
         let mut broker_keys = runtime_broker_registry_keys(&self.paths);
         broker_keys.extend(direct_keys.iter().cloned());
-        broker_keys.sort();
-        broker_keys.dedup();
+        let views = broker_keys.iter().map(String::as_bytes).collect::<Vec<_>>();
+        let selected = prodex_mojo_core::core_file_policy::lexical_file_key_order(&views, true)
+            .expect("compiled Mojo live-log broker key order returned invalid output");
+        let mut originals = broker_keys.into_iter().map(Some).collect::<Vec<_>>();
+        let broker_keys = selected
+            .into_iter()
+            .map(|index| {
+                originals[index]
+                    .take()
+                    .expect("validated Mojo live broker indices are unique")
+            })
+            .collect::<Vec<String>>();
         self.cursors
             .retain(|key, _| broker_keys.binary_search(key).is_ok());
         self.verified_source_identities

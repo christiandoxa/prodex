@@ -310,6 +310,13 @@ pub fn unique_root_temp_file_path(
     target.with_file_name(file_name)
 }
 
+/// Original source indices ordered lexically by compiled Mojo. Rust callers
+/// retain all filenames, registry keys and filesystem side effects.
+pub fn lexical_file_key_order(keys: &[&[u8]], unique: bool) -> Vec<usize> {
+    prodex_mojo_core::core_file_policy::lexical_file_key_order(keys, unique)
+        .expect("compiled Mojo lexical file/key ordering returned invalid output")
+}
+
 pub fn owned_root_temp_file_name(name: &str) -> bool {
     prodex_mojo_core::core_file_policy::owned_root_temp_file_name(name)
         .expect("Mojo root-temp ownership policy returned invalid output")

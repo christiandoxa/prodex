@@ -250,3 +250,51 @@ fn compiled_newest_runtime_log_selection_handles_empty_directory() {
     );
     fs::remove_dir_all(paths.root).unwrap();
 }
+
+#[test]
+fn compiled_lexical_file_key_order_preserves_unicode_runtime_log_directory_order() {
+    let paths = test_paths("compiled-lexical-runtime-logs");
+    fs::create_dir_all(&paths.root).unwrap();
+    let mut expected = Vec::new();
+    for name in [
+        "prodex-runtime-雪.log",
+        "prodex-runtime-z.log",
+        "prodex-runtime-a.log",
+        "prodex-runtime-é.log",
+    ] {
+        let path = paths.root.join(name);
+        fs::write(&path, b"runtime log line\n").unwrap();
+        expected.push(path);
+    }
+    expected.sort(); // Test oracle only; production sorting stays compiled Mojo.
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::symlink;
+        symlink(
+            paths.root.join("prodex-runtime-a.log"),
+            paths.root.join("prodex-runtime-link.log"),
+        )
+        .unwrap();
+    }
+    let found = prodex_runtime_log_paths_in_dir(&paths.root, "prodex-runtime");
+    assert_eq!(found, expected, "sorted original paths, symlink excluded");
+    fs::remove_dir_all(paths.root).unwrap();
+}
+
+#[test]
+fn compiled_lexical_file_key_order_preserves_orphan_profile_dir_order_and_filters_active() {
+    let paths = test_paths("compiled-lexical-orphan-profile");
+    fs::create_dir_all(&paths.managed_profiles_root).unwrap();
+    let active = AppState::default();
+    for name in ["雪", "z", "a", "é"] {
+        let path = paths.managed_profiles_root.join(name);
+        fs::create_dir_all(&path).unwrap();
+        fs::write(path.join("state.json"), b"{}").unwrap();
+    }
+    let at = SystemTime::now() + Duration::from_secs(90);
+    let (found, fail_count) =
+        collect_orphan_managed_profile_dirs_at_with_counts(&paths, &active, at, 30);
+    assert_eq!(found, ["a", "z", "é", "雪"]);
+    assert_eq!(fail_count, 0);
+    fs::remove_dir_all(paths.root).unwrap();
+}

@@ -45,7 +45,20 @@ pub fn prodex_runtime_log_paths_in_dir_with_counts(
             Err(_) => scan_failures += 1,
         }
     }
-    paths.sort();
+    let path_bytes = paths
+        .iter()
+        .map(|path| path.as_os_str().as_encoded_bytes())
+        .collect::<Vec<_>>();
+    let order = prodex_core::lexical_file_key_order(&path_bytes, false);
+    let mut original = paths.into_iter().map(Some).collect::<Vec<_>>();
+    let paths = order
+        .into_iter()
+        .map(|index| {
+            original[index]
+                .take()
+                .expect("validated Mojo file indices are unique")
+        })
+        .collect();
     (paths, scan_failures)
 }
 

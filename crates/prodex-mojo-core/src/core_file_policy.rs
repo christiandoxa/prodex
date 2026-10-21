@@ -11,6 +11,15 @@ const BROKER_LEASE_PID: i64 = 6;
 const STALE_LOGIN_TEMP: i64 = 7;
 
 unsafe extern "C" {
+    fn prodex_core_file_lexical_order_v1(
+        abi_version: i64,
+        views_address: u64,
+        count: i64,
+        unique: i64,
+        indices_address: u64,
+        indices_capacity: i64,
+        selected_count_address: u64,
+    ) -> i64;
     fn prodex_core_file_policy_v1(
         abi_version: i64,
         operation: i64,
@@ -32,6 +41,58 @@ fn status(value: i64) -> Result<(), MojoError> {
         4 => Err(MojoError::AbiMismatch),
         _ => Err(MojoError::InvalidOutput),
     }
+}
+
+/// Stable original source indices for raw lexical filename/key order.
+/// The compiled file-policy owner optionally collapses identical views.
+/// The host performs no comparison or duplicate-suppression fallback.
+pub fn lexical_file_key_order(keys: &[&[u8]], unique: bool) -> Result<Vec<usize>, MojoError> {
+    if keys.len() > 1_048_576 {
+        return Err(MojoError::InvalidInput);
+    }
+    let mut views = Vec::<u64>::new();
+    views
+        .try_reserve_exact(keys.len().checked_mul(2).ok_or(MojoError::Capacity)?)
+        .map_err(|_| MojoError::Capacity)?;
+    for key in keys {
+        views.extend([
+            key.as_ptr() as usize as u64,
+            u64::try_from(key.len()).map_err(|_| MojoError::InvalidInput)?,
+        ]);
+    }
+    let mut indices = Vec::<i64>::new();
+    indices
+        .try_reserve_exact(keys.len())
+        .map_err(|_| MojoError::Capacity)?;
+    indices.resize(keys.len(), -1);
+    let mut written = -1_i64;
+    status(unsafe {
+        prodex_core_file_lexical_order_v1(
+            ABI_VERSION,
+            views.as_ptr() as usize as u64,
+            i64::try_from(keys.len()).map_err(|_| MojoError::InvalidInput)?,
+            i64::from(unique),
+            indices.as_mut_ptr() as usize as u64,
+            i64::try_from(indices.len()).map_err(|_| MojoError::InvalidInput)?,
+            (&mut written as *mut i64) as usize as u64,
+        )
+    })?;
+    let count = usize::try_from(written).map_err(|_| MojoError::InvalidOutput)?;
+    if count > keys.len() || (!unique && count != keys.len()) {
+        return Err(MojoError::InvalidOutput);
+    }
+    let mut seen = vec![false; keys.len()];
+    let mut selected = Vec::with_capacity(count);
+    for raw in indices.into_iter().take(count) {
+        let index = usize::try_from(raw).map_err(|_| MojoError::InvalidOutput)?;
+        let used = seen.get_mut(index).ok_or(MojoError::InvalidOutput)?;
+        if *used {
+            return Err(MojoError::InvalidOutput);
+        }
+        *used = true;
+        selected.push(index);
+    }
+    Ok(selected)
 }
 
 fn call(
@@ -202,5 +263,100 @@ mod tests {
             Some(1234)
         );
         assert_eq!(runtime_broker_lease_pid("x-main.json").unwrap(), None);
+    }
+}
+
+#[cfg(test)]
+mod lexical_file_key_order_tests {
+    use super::*;
+
+    #[test]
+    fn compiled_lexical_file_key_order_sorts_raw_names_and_stable_duplicates() {
+        let keys = [
+            "雪".as_bytes(),
+            "z".as_bytes(),
+            "".as_bytes(),
+            "é".as_bytes(),
+            "a".as_bytes(),
+            "a".as_bytes(),
+        ];
+        assert_eq!(
+            lexical_file_key_order(&keys, false),
+            Ok(vec![2, 4, 5, 1, 3, 0])
+        );
+        assert_eq!(lexical_file_key_order(&keys, true), Ok(vec![2, 4, 1, 3, 0]));
+        let non_utf8 = [255_u8, 254];
+        let raw = [non_utf8.as_slice(), b"z".as_slice(), b"a".as_slice()];
+        assert_eq!(lexical_file_key_order(&raw, true), Ok(vec![2, 1, 0]));
+        assert_eq!(lexical_file_key_order(&[], false), Ok(vec![]));
+        assert_eq!(lexical_file_key_order(&[], true), Ok(vec![]));
+        let keys = (0..1025_u64)
+            .rev()
+            .map(|x| format!("key-{x:04}"))
+            .collect::<Vec<_>>();
+        let borrowed = keys.iter().map(String::as_bytes).collect::<Vec<_>>();
+        let indices = lexical_file_key_order(&borrowed, true).unwrap();
+        assert_eq!(indices.len(), 1025);
+        assert_eq!(indices[0], 1024);
+        assert_eq!(indices[1024], 0);
+        assert!(
+            indices
+                .windows(2)
+                .all(|two| borrowed[two[0]] < borrowed[two[1]])
+        );
+    }
+
+    #[test]
+    fn compiled_lexical_file_key_order_abi_rejects_bad_late_view_without_output_writes() {
+        let mut views = [0_u64; 4];
+        let mut selected = [73_i64; 2];
+        let mut count = 91_i64;
+        let source = views.as_ptr() as usize as u64;
+        let output = selected.as_mut_ptr() as usize as u64;
+        let result = (&mut count as *mut i64) as usize as u64;
+        for (version, address, size, mode, capacity, selected_addr, count_addr, expected) in [
+            (2, source, 2, 1, 2, output, result, 4),
+            (1, 0, 2, 1, 2, output, result, 1),
+            (1, source, -1, 1, 2, output, result, 1),
+            (1, source, 1_048_577, 1, 2, output, result, 1),
+            (1, source, 2, 2, 2, output, result, 1),
+            (1, source, 2, 1, 1, output, result, 1),
+            (1, source, 2, 1, 2, 0, result, 1),
+            (1, source, 2, 1, 2, output, 0, 1),
+        ] {
+            assert_eq!(
+                unsafe {
+                    prodex_core_file_lexical_order_v1(
+                        version,
+                        address,
+                        size,
+                        mode,
+                        selected_addr,
+                        capacity,
+                        count_addr,
+                    )
+                },
+                expected,
+            );
+            assert_eq!(selected, [73; 2]);
+            assert_eq!(count, 91);
+        }
+        views[3] = u64::MAX;
+        assert_eq!(
+            unsafe {
+                prodex_core_file_lexical_order_v1(
+                    1,
+                    views.as_ptr() as usize as u64,
+                    2,
+                    1,
+                    output,
+                    2,
+                    result,
+                )
+            },
+            1,
+        );
+        assert_eq!(selected, [73; 2]);
+        assert_eq!(count, 91);
     }
 }
