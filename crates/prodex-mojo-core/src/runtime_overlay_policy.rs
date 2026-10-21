@@ -1,4 +1,7 @@
 use crate::MojoError;
+#[path = "runtime_overlay_policy/trust_entries.rs"]
+mod trust_entries;
+pub use trust_entries::workspace_trust_entry_indices;
 
 const ABI_VERSION: i64 = 1;
 const MAX_OPTIONAL_TOOLS: usize = 6;
