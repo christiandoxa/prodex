@@ -36,6 +36,14 @@ unsafe extern "C" {
         output_address: u64,
         output_capacity: i64,
     ) -> i64;
+    fn prodex_session_report_filter_v1(
+        abi_version: i64,
+        facts_address: u64,
+        facts_count: i64,
+        views_address: u64,
+        views_count: i64,
+        output_address: u64,
+    ) -> i64;
     fn prodex_session_report_query_matches_v1(
         abi_version: i64,
         query_address: u64,
@@ -353,6 +361,70 @@ pub fn session_recent_workspace_plan(
 /// ABI. Mojo then owns the bounded, allocation-free substring scan over those
 /// caller-owned UTF-8 views. The fields are ordered as id, thread name, cwd,
 /// profile, model provider, and path; `None` represents an absent optional field.
+/// Host-only path facts plus six borrowed report fields. Compiled Mojo
+/// selects all query, profile, subagent and current-directory filter gates.
+#[derive(Debug, Clone, Copy)]
+pub struct SessionReportFilterInput<'a> {
+    pub has_current_dir: bool,
+    pub current_dir_matches: bool,
+    pub include_subagents: bool,
+    pub is_subagent: bool,
+    pub report_profile: Option<&'a str>,
+    pub filter_profile: Option<&'a str>,
+    pub query: Option<&'a str>,
+    pub fields: [Option<&'a str>; SESSION_REPORT_QUERY_FIELD_COUNT],
+}
+
+/// Evaluate session-report visibility in the compiled production planner.
+/// Rust normalizes Unicode lowercase for substring search and acquires paths;
+/// it does not recompute any filter condition if Mojo fails.
+pub fn session_report_filter_matches(
+    input: SessionReportFilterInput<'_>,
+) -> Result<bool, MojoError> {
+    let facts: [i64; 7] = [
+        i64::from(input.has_current_dir),
+        i64::from(input.current_dir_matches),
+        i64::from(input.include_subagents),
+        i64::from(input.is_subagent),
+        i64::from(input.report_profile.is_some()),
+        i64::from(input.filter_profile.is_some()),
+        i64::from(input.query.is_some()),
+    ];
+    let lowered_query = input.query.map(str::to_lowercase);
+    let lowered_fields = if input.query.is_some() {
+        input.fields.map(|field| field.map(str::to_lowercase))
+    } else {
+        std::array::from_fn(|_| None)
+    };
+    let views: [StringView; 9] = [
+        view(input.report_profile.unwrap_or("")),
+        view(input.filter_profile.unwrap_or("")),
+        view(lowered_query.as_deref().unwrap_or("")),
+        view(lowered_fields[0].as_deref().unwrap_or("")),
+        view(lowered_fields[1].as_deref().unwrap_or("")),
+        view(lowered_fields[2].as_deref().unwrap_or("")),
+        view(lowered_fields[3].as_deref().unwrap_or("")),
+        view(lowered_fields[4].as_deref().unwrap_or("")),
+        view(lowered_fields[5].as_deref().unwrap_or("")),
+    ];
+    let mut output = -1_i64;
+    status(unsafe {
+        prodex_session_report_filter_v1(
+            1,
+            facts.as_ptr() as u64,
+            i64::try_from(facts.len()).map_err(|_| MojoError::InvalidInput)?,
+            views.as_ptr() as u64,
+            i64::try_from(views.len()).map_err(|_| MojoError::InvalidInput)?,
+            (&mut output as *mut i64) as u64,
+        )
+    })?;
+    match output {
+        0 => Ok(false),
+        1 => Ok(true),
+        _ => Err(MojoError::InvalidOutput),
+    }
+}
+
 pub fn session_report_query_matches(
     query: &str,
     fields: &[Option<&str>; SESSION_REPORT_QUERY_FIELD_COUNT],
@@ -451,9 +523,9 @@ pub fn session_selector_match_plan(
 #[cfg(all(test, prodex_mojo_active))]
 mod tests {
     use super::{
-        SessionStateDbRowMatchKind, SessionStateDbRowSessionIdSource, session_file_name_plan,
-        session_report_query_matches, session_selector_match_plan, session_selector_path_span,
-        session_state_db_row_match_plan,
+        SessionReportFilterInput, SessionStateDbRowMatchKind, SessionStateDbRowSessionIdSource,
+        session_file_name_plan, session_report_filter_matches, session_report_query_matches,
+        session_selector_match_plan, session_selector_path_span, session_state_db_row_match_plan,
     };
 
     #[test]
@@ -542,6 +614,72 @@ mod tests {
                 .unwrap()
                 .session_id_source,
             SessionStateDbRowSessionIdSource::PathStem
+        );
+    }
+
+    #[test]
+    fn session_report_compiled_filter_owns_all_gate_precedence() {
+        let fields = [
+            Some("01900000-0000-7000-8000-000000000301"),
+            Some("Issue Triage"),
+            Some("/home/test-user/Workspace"),
+            Some("Main"),
+            Some("OpenAI"),
+            Some("/home/test-user/.codex/sessions/triage.jsonl"),
+        ];
+        let base = SessionReportFilterInput {
+            has_current_dir: false,
+            current_dir_matches: false,
+            include_subagents: false,
+            is_subagent: false,
+            report_profile: Some("Main"),
+            filter_profile: Some("Main"),
+            query: Some("  TRIAGE  "),
+            fields,
+        };
+        assert_eq!(session_report_filter_matches(base), Ok(true));
+        assert_eq!(
+            session_report_filter_matches(SessionReportFilterInput {
+                query: Some("  \u{2003}\u{00a0} "),
+                ..base
+            }),
+            Ok(true)
+        );
+        assert_eq!(
+            session_report_filter_matches(SessionReportFilterInput {
+                has_current_dir: true,
+                ..base
+            }),
+            Ok(false)
+        );
+        assert_eq!(
+            session_report_filter_matches(SessionReportFilterInput {
+                is_subagent: true,
+                ..base
+            }),
+            Ok(false)
+        );
+        assert_eq!(
+            session_report_filter_matches(SessionReportFilterInput {
+                filter_profile: Some("main"),
+                ..base
+            }),
+            Ok(false)
+        );
+        assert_eq!(
+            session_report_filter_matches(SessionReportFilterInput {
+                query: Some("not present"),
+                ..base
+            }),
+            Ok(false)
+        );
+        assert_eq!(
+            session_report_filter_matches(SessionReportFilterInput {
+                include_subagents: true,
+                is_subagent: true,
+                ..base
+            }),
+            Ok(true)
         );
     }
 

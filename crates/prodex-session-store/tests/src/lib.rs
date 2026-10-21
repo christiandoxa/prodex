@@ -243,6 +243,40 @@ fn session_reports_attach_profile_bindings() {
 }
 
 #[test]
+fn session_filter_mojo_preserves_exact_profile_and_blank_query_semantics() {
+    let mut report =
+        SessionReport::from_path(Path::new("/home/test-user/rollout-example.jsonl"), 1);
+    report.id = "id-α".to_owned();
+    report.thread_name = Some("İstanbul Trİage".to_owned());
+    report.set_profile(Some("Main".to_owned()));
+
+    let matches = |profile, query| {
+        session_report_matches_filter(
+            &report,
+            &SessionReportFilter {
+                profile,
+                query,
+                ..SessionReportFilter::default()
+            },
+        )
+    };
+    assert!(matches(None, None));
+    assert!(matches(Some("Main"), Some("  ")));
+    assert!(!matches(Some("main"), None));
+    assert!(matches(None, Some("İSTANBUL")));
+    assert!(matches(None, Some("  İSTANBUL  ")));
+    assert!(!matches(None, Some("nonmatching search")));
+    assert!(!matches(Some("unknown"), Some("istanbul")));
+    assert!(!session_report_matches_filter(
+        &report,
+        &SessionReportFilter {
+            current_dir: Some(Path::new("/home/test-user/other")),
+            ..SessionReportFilter::default()
+        }
+    ));
+}
+
+#[test]
 fn session_reports_filter_by_profile_and_query() {
     let root = test_temp_dir("session-filter");
     let sessions = root.join("sessions");
