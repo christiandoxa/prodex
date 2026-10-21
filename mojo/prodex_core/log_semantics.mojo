@@ -4161,3 +4161,109 @@ def prodex_mojo_recent_log_paths_v1(
         unsafe_from_address=Int(written_address)
     )[] = limit
     return 0
+
+# Log upstream TUI query against the virtual concatenation of nine UTF-8
+# display fields, separated by one ASCII space. The payload is never copied.
+comptime LOG_VIRTUAL_FIELDS_ABI_VERSION: Int64 = 1
+comptime LOG_VIRTUAL_FIELD_COUNT: Int64 = 9
+comptime LOG_VIRTUAL_FIELD_MAX_BYTES: Int64 = 1_048_576
+
+
+def log_virtual_search_step(
+    value: UInt8,
+    pattern: Pointer[mut=False, UInt8, ImmUntrackedOrigin],
+    prefix: Pointer[mut=True, Int64, MutUntrackedOrigin],
+    matched: Int64,
+) -> Int64:
+    var current = log_ascii_fold_byte(value)
+    var length = matched
+    while (
+        length > 0
+        and current != log_ascii_fold_byte(pattern[unsafe_offset=length])
+    ):
+        length = prefix[unsafe_offset=length - 1]
+    if current == log_ascii_fold_byte(pattern[unsafe_offset=length]):
+        length += 1
+    return length
+
+
+@export("prodex_mojo_log_virtual_fields_contains_v1")
+def prodex_mojo_log_virtual_fields_contains_v1(
+    abi_version: Int64,
+    fields_address: UInt,
+    field_count: Int64,
+    needle_address: UInt,
+    needle_length: Int64,
+    scratch_address: UInt,
+    scratch_capacity: Int64,
+    result_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != LOG_VIRTUAL_FIELDS_ABI_VERSION:
+        return 4
+    if (
+        field_count != LOG_VIRTUAL_FIELD_COUNT
+        or fields_address == 0 or fields_address % 8 != 0
+        or needle_length < 0 or needle_length > LOG_VIRTUAL_FIELD_MAX_BYTES
+        or (needle_length > 0 and needle_address == 0)
+        or scratch_capacity < needle_length
+        or (needle_length > 0 and (
+            scratch_address == 0 or scratch_address % 8 != 0
+        ))
+        or result_address == 0 or result_address % 8 != 0
+    ):
+        return 1
+    var fields = Pointer[
+        mut=False, ProdexRichStringView, ImmUntrackedOrigin
+    ](unsafe_from_address=Int(fields_address))
+    var needle = ProdexRichStringView(needle_address, UInt(needle_length))
+    if not rich_view_valid(needle, LOG_VIRTUAL_FIELD_MAX_BYTES):
+        return 1
+    for index in range(LOG_VIRTUAL_FIELD_COUNT):
+        if not rich_view_valid(
+            fields[unsafe_offset=index], LOG_VIRTUAL_FIELD_MAX_BYTES
+        ):
+            return 1
+
+    var found = needle_length == 0
+    if needle_length > 0:
+        var pattern = rich_view_ptr(needle)
+        var prefix = Pointer[mut=True, Int64, MutUntrackedOrigin](
+            unsafe_from_address=Int(scratch_address)
+        )
+        prefix[unsafe_offset=0] = 0
+        var length: Int64 = 0
+        for index in range(Int64(1), needle_length):
+            var next_value = log_ascii_fold_byte(pattern[unsafe_offset=index])
+            while (
+                length > 0
+                and next_value != log_ascii_fold_byte(pattern[unsafe_offset=length])
+            ):
+                length = prefix[unsafe_offset=length - 1]
+            if next_value == log_ascii_fold_byte(pattern[unsafe_offset=length]):
+                length += 1
+            prefix[unsafe_offset=index] = length
+
+        var matching: Int64 = 0
+        for field_index in range(LOG_VIRTUAL_FIELD_COUNT):
+            var field = fields[unsafe_offset=field_index].copy()
+            var bytes = rich_view_ptr(field)
+            for index in range(Int64(field.len)):
+                matching = log_virtual_search_step(
+                    bytes[unsafe_offset=index], pattern, prefix, matching
+                )
+                if matching == needle_length:
+                    found = True
+                    break
+            if found:
+                break
+            if field_index + 1 < LOG_VIRTUAL_FIELD_COUNT:
+                matching = log_virtual_search_step(
+                    UInt8(32), pattern, prefix, matching
+                )
+                if matching == needle_length:
+                    found = True
+                    break
+    Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(result_address)
+    )[] = Int64(found)
+    return 0

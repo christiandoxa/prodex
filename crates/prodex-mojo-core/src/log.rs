@@ -12,6 +12,8 @@ mod pointers;
 use pointers::{mutable_pointer_address, pointer_address};
 mod search;
 pub use search::log_contains_ignore_ascii_case;
+mod virtual_fields_search;
+pub use virtual_fields_search::log_virtual_fields_contains;
 mod runtime_line;
 mod snapshot;
 mod transcript;
