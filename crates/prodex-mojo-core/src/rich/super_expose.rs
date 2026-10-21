@@ -1,5 +1,8 @@
 use super::{ensure_rich_abi, mojo_mut_pointer_address};
 use crate::MojoError;
+#[path = "super_expose/run_policy.rs"]
+mod run_policy;
+pub use run_policy::{SuperRunRetentionInput, super_run_retention_mask};
 
 #[path = "super_expose/origin.rs"]
 mod origin;

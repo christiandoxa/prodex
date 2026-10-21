@@ -620,6 +620,7 @@ fn selected_sources() -> Vec<&'static str> {
         sources.push("../../mojo/prodex_core/super_expose.mojo");
         sources.push("../../mojo/prodex_core/super_expose_tools.mojo");
         sources.push("../../mojo/prodex_core/super_expose_exec.mojo");
+        sources.push("../../mojo/prodex_core/super_expose_run_policy.mojo");
         sources.push("../../mojo/prodex_core/ping_protocol.mojo");
         sources.push("../../mojo/prodex_core/ping_failure_detail.mojo");
     }

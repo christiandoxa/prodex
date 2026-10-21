@@ -427,6 +427,9 @@ const CORE_LEXICAL_BROKER_PATHS = "crates/prodex-app/src/runtime_persistence/pat
 const CORE_LEXICAL_APP_HOUSEKEEPING = "crates/prodex-app/src/housekeeping.rs";
 const CORE_LEXICAL_LIVE_LOG = "crates/prodex-app/src/app_commands/log_live.rs";
 const PROMOTED_FILES = [
+  "crates/prodex-app/src/super_expose/run/helpers.rs",
+  "crates/prodex-mojo-core/src/rich/super_expose/run_policy.rs",
+  "mojo/prodex_core/super_expose_run_policy.mojo",
   "crates/prodex-quota/src/render/gemini.rs",
   "crates/prodex-quota/src/mojo.rs",
   "crates/prodex-mojo-core/src/quota/gemini_numeric.rs",
@@ -7918,6 +7921,27 @@ export function findViolations(files) {
     }
     return [];
   });
+  const superRunRetentionViolations = files.flatMap(([filePath, contents]) => {
+    if (filePath === "crates/prodex-app/src/super_expose/run/helpers.rs") {
+      const body = contents.match(/fn prune_terminal_runs\([^]*?(?=^pub\(super\) struct SpawnedChildPipes)/mu)?.[0] ?? "";
+      return body.includes("rich::super_run_retention_mask(")
+        && body.includes("runs.retain(")
+        && !/\.min_by_key\(|\.filter\(|\.count\(|finished_at\.unwrap_or/u.test(body)
+        ? [] : [filePath + ": Super run retention must apply the compiled mask without Rust eviction"];
+    }
+    if (filePath === "crates/prodex-mojo-core/src/rich/super_expose/run_policy.rs") {
+      const body = contents.split("#[cfg(test)]")[0];
+      return body.includes("prodex_super_run_retention_v1(")
+        && !/\.sort|\.min_by_key|\.filter\(/u.test(body)
+        ? [] : [filePath + ": Super run retention bridge must retain Mojo authority"];
+    }
+    if (filePath === "mojo/prodex_core/super_expose_run_policy.mojo") {
+      return contents.includes('@export("prodex_super_run_retention_v1")')
+        && contents.includes("index_order_sort[super_run_retention_compare]")
+        ? [] : [filePath + ": Super run retention must reuse compiled index ordering"];
+    }
+    return [];
+  });
   const superExposeViolations = files
     .filter(([filePath, contents]) => filePath === SUPER_EXPOSE_FILE &&
       (!contents.includes("prodex_mojo_core::launch::find_super_expose_alias_index") ||
@@ -13958,6 +13982,7 @@ export function findViolations(files) {
     ...anthropicEnvelopeViolations, ...anthropicRequestViolations,
     ...anthropicWebSearchViolations, ...superProviderConfigViolations, ...externalProviderCatalogViolations, ...subAgentPolicyViolations, ...runtimeOverlayPolicyViolations, ...cliRuntimeFeatureViolations,
     ...superExposeProtocolViolations, ...superExposeExecViolations, ...superExposeViolations,
+    ...superRunRetentionViolations,
     ...geminiFallbackViolations, ...geminiGenerationViolations, ...geminiTranslatorHardReplacementViolations, ...geminiBridgeFallbackViolations, ...geminiSignatureViolations, ...geminiResponseConformanceViolations,
     ...geminiToolResponseOrderViolations, ...geminiApplyPatchViolations,
     ...hardReplacementViolations, ...precommitBudgetOracleViolations,
@@ -17921,6 +17946,13 @@ function selfTest() {
   const geminiAmountCaller = "crate::mojo::gemini_bucket_numeric_batch(batch) quota_gemini_bucket_label( quota_gemini_display( quota_gemini_bucket_summary(";
   assert.deepEqual(findViolations([[geminiAmountFile, geminiAmountCaller]]), []);
   assert.match(findViolations([[geminiAmountFile, geminiAmountCaller + ".parse::<i64>()"]]).join("\n"), /Gemini counter rendering/u);
+
+  const runRetentionFile = "crates/prodex-app/src/super_expose/run/helpers.rs";
+  const runRetentionCaller = "fn prune_terminal_runs() { rich::super_run_retention_mask( runs.retain( }\npub(super) struct SpawnedChildPipes;";
+  assert.deepEqual(findViolations([[runRetentionFile, runRetentionCaller]]), []);
+  for (const restored of [".min_by_key(", ".filter(", ".count(", "finished_at.unwrap_or("]) {
+    assert.match(findViolations([[runRetentionFile, runRetentionCaller.replace(" runs.retain(", " runs.retain( " + restored)]]).join("\n"), /compiled mask without Rust eviction/u);
+  }
 
 }
 

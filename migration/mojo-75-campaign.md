@@ -8360,3 +8360,15 @@ Rust still counts completed records and repeatedly selects the oldest one by
 finished-or-created time, then creation time and lexical run ID. A migration
 must preserve active/queued records, the 32-terminal-record cap and full-width
 unsigned timestamps, while keeping run storage and process effects in Rust.
+
+## Super completed-run retention compiled in Mojo (2026-10-22)
+
+All four Super run completion/cancellation paths now apply a compiled retention
+mask. Mojo owns the fixed 32-terminal cap, timestamp precedence and stable
+lexical tie break; the Rust eviction loop and cap are removed. All live states
+survive, unsigned timestamps keep their full range and ABI errors preserve
+storage without a Rust fallback. Direct Mojo, three strict bridge, ten run and
+106 Super expose tests plus strict workspace Clippy pass. The official share is
+36.31261863497566% (136,400 Mojo / 239,227 Rust production LOC). The 75% target
+remains open. Detailed evidence is in
+`migration/super-run-retention-mojo-20261022.md`.

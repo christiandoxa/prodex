@@ -1,17 +1,19 @@
 use super::*;
 
 pub(super) fn prune_terminal_runs(runs: &mut BTreeMap<String, RunRecord>) {
-    while runs.values().filter(|run| run.state.terminal()).count() > MAX_RETAINED_TERMINAL_RUNS {
-        let Some(oldest_id) = runs
-            .iter()
-            .filter(|(_, run)| run.state.terminal())
-            .min_by_key(|(_, run)| (run.finished_at.unwrap_or(run.created_at), run.created_at))
-            .map(|(run_id, _)| run_id.clone())
-        else {
-            break;
-        };
-        runs.remove(&oldest_id);
-    }
+    let facts = runs
+        .values()
+        .map(|run| prodex_mojo_core::rich::SuperRunRetentionInput {
+            terminal: run.state.terminal(),
+            created_at: run.created_at,
+            finished_at: run.finished_at,
+        })
+        .collect::<Vec<_>>();
+    let Ok(mask) = prodex_mojo_core::rich::super_run_retention_mask(&facts) else {
+        return;
+    };
+    let mut keep = mask.into_iter();
+    runs.retain(|_, _| keep.next() == Some(true));
 }
 
 pub(super) struct SpawnedChildPipes {
