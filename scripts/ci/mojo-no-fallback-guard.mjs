@@ -7975,6 +7975,15 @@ export function findViolations(files) {
     }
     return [];
   });
+  const superOverrideStringViolations = files.flatMap(([filePath, contents]) => {
+    if (filePath === "crates/prodex-app/src/super_expose/run/config.rs" && contents.includes("fn optional_bounded_string(")) {
+      const body = contents.match(/fn optional_bounded_string\([^]*?(?=\n#\[cfg\(test\)\])/u)?.[0] ?? "";
+      return body.includes("super_expose_bounded_text_valid(")
+        && !/value\.is_empty\(|value\.len\(\) > max_bytes|value\.chars\(|value\.as_bytes\(\)\.contains/u.test(body)
+        ? [] : [filePath + ": run override content validation must reuse the compiled text policy"];
+    }
+    return [];
+  });
   const superExposeViolations = files
     .filter(([filePath, contents]) => filePath === SUPER_EXPOSE_FILE &&
       (!contents.includes("prodex_mojo_core::launch::find_super_expose_alias_index") ||
@@ -14016,6 +14025,7 @@ export function findViolations(files) {
     ...anthropicWebSearchViolations, ...superProviderConfigViolations, ...externalProviderCatalogViolations, ...subAgentPolicyViolations, ...runtimeOverlayPolicyViolations, ...cliRuntimeFeatureViolations,
     ...superExposeProtocolViolations, ...superExposeExecViolations, ...superExposeViolations,
     ...superRunRetentionViolations, ...superRunEventViolations, ...superTextClipViolations,
+    ...superOverrideStringViolations,
     ...geminiFallbackViolations, ...geminiGenerationViolations, ...geminiTranslatorHardReplacementViolations, ...geminiBridgeFallbackViolations, ...geminiSignatureViolations, ...geminiResponseConformanceViolations,
     ...geminiToolResponseOrderViolations, ...geminiApplyPatchViolations,
     ...hardReplacementViolations, ...precommitBudgetOracleViolations,
@@ -17999,6 +18009,13 @@ function selfTest() {
   assert.deepEqual(clipViolations(sharedTextCaller), []);
   for (const restored of ["is_char_boundary", "char_indices", "saturating_sub"]) {
     assert.match(clipViolations(sharedTextCaller.replace("super_expose_text_cut(", restored + " super_expose_text_cut(")).join("\n"), /compiled text kernel/u);
+  }
+
+  const overrideFile = "crates/prodex-app/src/super_expose/run/config.rs";
+  const overrideCaller = codexRemovalCaller + "\nfn optional_bounded_string() { super_expose_bounded_text_valid( }\n#[cfg(test)]";
+  assert.deepEqual(findViolations([[overrideFile, overrideCaller]]), []);
+  for (const restored of ["value.is_empty(", "value.len() > max_bytes", "value.chars(", "value.as_bytes().contains"]) {
+    assert.match(findViolations([[overrideFile, overrideCaller.replace("super_expose_bounded_text_valid(", restored + " super_expose_bounded_text_valid(")]]).join("\n"), /compiled text policy/u);
   }
 
 }

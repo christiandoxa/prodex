@@ -132,7 +132,7 @@ fn compiled_super_expose_text_cut_rejects_invalid_views_before_writes() {
     let mut output = [71_i64; 2];
     for (version, op, address, length, expected) in [
         (2, OP_TEXT_CUT, input.as_ptr() as u64, 3, 4),
-        (1, 9, input.as_ptr() as u64, 3, 1),
+        (1, 99, input.as_ptr() as u64, 3, 1),
         (1, OP_TEXT_CUT, invalid.as_ptr() as u64, 1, 1),
         (1, OP_TEXT_CUT, 0, 3, 1),
         (1, OP_TEXT_CUT, input.as_ptr() as u64, -1, 1),
@@ -165,6 +165,60 @@ fn compiled_super_expose_text_cut_rejects_invalid_views_before_writes() {
                 0,
                 3,
                 output.as_mut_ptr() as u64 + 1,
+            )
+        },
+        1
+    );
+    assert_eq!(output, [71; 2]);
+}
+#[test]
+fn compiled_bounded_text_preserves_byte_caps_and_unicode_control_rules() {
+    for (text, max, expected) in [
+        ("", 256, false),
+        (" ", 256, true),
+        (" é雪🙂 ", 256, true),
+        ("é", 1, false),
+        ("é", 2, true),
+        ("é", 0, false),
+        ("\0", 256, false),
+        ("line\nnext", 256, false),
+        ("\u{0085}", 256, false),
+        ("\u{009F}", 256, false),
+        ("\u{00A0}", 256, true),
+        ("\u{200B}", 256, true),
+        ("model", usize::MAX, true),
+    ] {
+        assert_eq!(
+            super_expose_bounded_text_valid(text, max),
+            Ok(expected),
+            "{text:?}"
+        );
+    }
+    assert_eq!(
+        super_expose_bounded_text_valid(&"é".repeat(64), 128),
+        Ok(true)
+    );
+    assert_eq!(
+        super_expose_bounded_text_valid(&"é".repeat(65), 128),
+        Ok(false)
+    );
+}
+
+#[test]
+fn compiled_bounded_text_rejects_malformed_utf8_atomically() {
+    let input = [255_u8];
+    let mut output = [71_i64; 2];
+    assert_eq!(
+        unsafe {
+            prodex_mojo_super_expose_exec_validation_v1(
+                1,
+                OP_BOUNDED_TEXT,
+                input.as_ptr() as u64,
+                1,
+                0,
+                0,
+                256,
+                output.as_mut_ptr() as u64,
             )
         },
         1

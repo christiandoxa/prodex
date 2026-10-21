@@ -18,10 +18,10 @@ pub use tunnel::{super_expose_tunnel_client_version_output_valid, super_expose_t
 mod exec;
 pub use exec::{
     SuperExposeExecCountKind, SuperExposeExecTextKind, SuperExposeExecValidation,
-    super_expose_exec_validate_argument, super_expose_exec_validate_count,
-    super_expose_exec_validate_env_entry, super_expose_exec_validate_stdin,
-    super_expose_exec_validate_text, super_expose_exec_validate_timeout,
-    super_expose_optional_alias_plan, super_expose_text_cut,
+    super_expose_bounded_text_valid, super_expose_exec_validate_argument,
+    super_expose_exec_validate_count, super_expose_exec_validate_env_entry,
+    super_expose_exec_validate_stdin, super_expose_exec_validate_text,
+    super_expose_exec_validate_timeout, super_expose_optional_alias_plan, super_expose_text_cut,
 };
 
 const SUPER_EXPOSE_ABI_VERSION: i64 = 1;

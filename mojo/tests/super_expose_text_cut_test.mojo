@@ -26,7 +26,7 @@ def main() raises:
     output[unsafe_offset=1] = 71
     assert prodex_mojo_super_expose_exec_validation_v1(1,8,UInt(Int(invalid)),1,0,0,1,o) == 1
     assert prodex_mojo_super_expose_exec_validation_v1(2,8,t,11,0,0,1,o) == 4
-    assert prodex_mojo_super_expose_exec_validation_v1(1,9,t,11,0,0,1,o) == 1
+    assert prodex_mojo_super_expose_exec_validation_v1(1,99,t,11,0,0,1,o) == 1
     assert prodex_mojo_super_expose_exec_validation_v1(1,8,t,-1,0,0,1,o) == 1
     assert prodex_mojo_super_expose_exec_validation_v1(1,8,t,11,0,0,1,o+1) == 1
     assert output[unsafe_offset=0] == 71 and output[unsafe_offset=1] == 71

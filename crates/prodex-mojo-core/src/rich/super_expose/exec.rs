@@ -11,6 +11,7 @@ const OP_ENV_ENTRY: i64 = 5;
 const OP_STDIN: i64 = 6;
 const OP_TIMEOUT: i64 = 7;
 const OP_TEXT_CUT: i64 = 8;
+const OP_BOUNDED_TEXT: i64 = 9;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(i64)]
@@ -245,6 +246,20 @@ pub fn super_expose_text_cut(text: &str, max_bytes: usize) -> Result<usize, Mojo
         return Err(MojoError::InvalidOutput);
     }
     Ok(end)
+}
+
+/// Validates nonempty bounded text with the compiled Unicode control policy.
+pub fn super_expose_bounded_text_valid(value: &str, max_bytes: usize) -> Result<bool, MojoError> {
+    match call(
+        OP_BOUNDED_TEXT,
+        Some(value),
+        None,
+        u64::try_from(max_bytes).map_err(|_| MojoError::InvalidInput)?,
+    )? {
+        [1, 0] => Ok(true),
+        [2, 0] => Ok(false),
+        _ => Err(MojoError::InvalidOutput),
+    }
 }
 
 #[cfg(test)]
