@@ -4,6 +4,7 @@ mod binding_identity;
 mod bridge;
 mod catalog;
 mod chat_tools_bridge;
+mod conversation_memory;
 mod deepseek_bridge;
 mod errors;
 mod fallback;
@@ -46,6 +47,7 @@ pub use chat_tools_bridge::{
     provider_core_chat_web_search_options_from_responses_request,
     provider_core_flatten_namespace_tool_name,
 };
+pub use conversation_memory::provider_core_conversation_estimated_bytes;
 pub use deepseek_bridge::{
     deepseek_provider_core_apply_reasoning_from_responses_request,
     deepseek_provider_core_apply_strict_function_schema,

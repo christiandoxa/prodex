@@ -1,4 +1,5 @@
 use prodex_mojo_core::provider_conversation_policy::{self, ConversationEntry};
+use prodex_provider_core::provider_core_conversation_estimated_bytes;
 use std::collections::BTreeMap;
 use std::fmt;
 use std::sync::{Arc, Mutex};
@@ -103,8 +104,11 @@ impl RuntimeDeepSeekConversationStore {
         messages: Vec<serde_json::Value>,
     ) {
         let storage_key = self.storage_key(response_id);
-        let estimated_bytes =
-            runtime_provider_conversation_estimated_bytes(&storage_key, &messages);
+        let Ok(estimated_bytes) =
+            provider_core_conversation_estimated_bytes(&storage_key, &messages)
+        else {
+            return;
+        };
         let Ok(mut state) = self.state.lock() else {
             return;
         };
@@ -149,33 +153,6 @@ impl RuntimeDeepSeekConversationStore {
             .map(|state| state.conversations.len())
             .unwrap_or_default()
     }
-}
-
-fn runtime_provider_conversation_estimated_bytes(
-    storage_key: &str,
-    messages: &[serde_json::Value],
-) -> usize {
-    messages.iter().fold(storage_key.len(), |size, message| {
-        size.saturating_add(runtime_provider_json_estimated_bytes(message))
-    })
-}
-
-fn runtime_provider_json_estimated_bytes(value: &serde_json::Value) -> usize {
-    const NODE_BYTES: usize = std::mem::size_of::<serde_json::Value>();
-    let payload = match value {
-        serde_json::Value::Null => 0,
-        serde_json::Value::Bool(_) => std::mem::size_of::<bool>(),
-        serde_json::Value::Number(_) => std::mem::size_of::<serde_json::Number>(),
-        serde_json::Value::String(value) => value.len(),
-        serde_json::Value::Array(values) => values.iter().fold(0_usize, |size, value| {
-            size.saturating_add(runtime_provider_json_estimated_bytes(value))
-        }),
-        serde_json::Value::Object(values) => values.iter().fold(0_usize, |size, (key, value)| {
-            size.saturating_add(key.len())
-                .saturating_add(runtime_provider_json_estimated_bytes(value))
-        }),
-    };
-    NODE_BYTES.saturating_add(payload)
 }
 
 #[cfg(test)]
