@@ -359,14 +359,14 @@ fn format_terminal_version(name: &str, version: &Option<String>) -> String {
 }
 
 fn sanitize_terminal_header_value(value: String) -> String {
-    value.replace(
-        |ch: char| !(ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_' | '.' | '/')),
-        "_",
-    )
+    prodex_mojo_core::codex_auth_headers::codex_terminal_header_token(&value)
+        .expect("compiled Mojo terminal header token sanitizer failed")
 }
 
 fn none_if_whitespace(value: String) -> Option<String> {
-    (!value.trim().is_empty()).then_some(value)
+    let nonblank = prodex_mojo_core::codex_auth_headers::codex_nonwhitespace(&value)
+        .expect("compiled Mojo terminal environment whitespace policy failed");
+    nonblank.then_some(value)
 }
 
 #[cfg(test)]
@@ -380,6 +380,25 @@ mod compiled_auth_headers_tests {
             Some("2.3.4".to_owned())
         );
         assert_eq!(parse_codex_cli_version_output("codex-cli v0.100.1"), None);
+    }
+
+    #[test]
+    fn compiled_terminal_header_token_replaces_invalid_scalars_and_preserves_value() {
+        let terminal = TerminalInfo::from_term_program(
+            TerminalName::Ghostty,
+            "Ghostty".to_owned(),
+            Some("1.2 🌍".to_owned()),
+        );
+        assert_eq!(terminal.user_agent_token(), "Ghostty/1.2__");
+        assert_eq!(none_if_whitespace(" \u{2003}\u{00a0} ".to_owned()), None);
+        assert_eq!(
+            none_if_whitespace(" \u{2003}Ghostty ".to_owned()),
+            Some(" \u{2003}Ghostty ".to_owned())
+        );
+        assert_eq!(
+            sanitize_terminal_header_value("A/B-.\tα".to_owned()),
+            "A/B-.__"
+        );
     }
 
     #[test]
