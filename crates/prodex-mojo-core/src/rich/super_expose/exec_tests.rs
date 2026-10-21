@@ -114,3 +114,60 @@ fn exec_validation_abi_rejects_bad_version_shape_without_output() {
     assert_eq!(call(1, 99, input_address, 7, output_address), 1);
     assert_eq!(output, [77; 2]);
 }
+#[test]
+fn compiled_super_expose_text_cut_preserves_scalar_widths_and_byte_caps() {
+    let expected = [0, 1, 1, 3, 3, 3, 6, 6, 6, 6, 10, 11, 11];
+    for (maximum, end) in expected.into_iter().enumerate() {
+        assert_eq!(super_expose_text_cut("aé雪🙂z", maximum), Ok(end));
+    }
+    assert_eq!(super_expose_text_cut("aé雪🙂z", usize::MAX), Ok(11));
+    assert_eq!(super_expose_text_cut("", 0), Ok(0));
+    assert_eq!(super_expose_text_cut("\0é", 2), Ok(1));
+}
+
+#[test]
+fn compiled_super_expose_text_cut_rejects_invalid_views_before_writes() {
+    let invalid = [255_u8];
+    let input = "雪";
+    let mut output = [71_i64; 2];
+    for (version, op, address, length, expected) in [
+        (2, OP_TEXT_CUT, input.as_ptr() as u64, 3, 4),
+        (1, 9, input.as_ptr() as u64, 3, 1),
+        (1, OP_TEXT_CUT, invalid.as_ptr() as u64, 1, 1),
+        (1, OP_TEXT_CUT, 0, 3, 1),
+        (1, OP_TEXT_CUT, input.as_ptr() as u64, -1, 1),
+    ] {
+        assert_eq!(
+            unsafe {
+                prodex_mojo_super_expose_exec_validation_v1(
+                    version,
+                    op,
+                    address,
+                    length,
+                    0,
+                    0,
+                    3,
+                    output.as_mut_ptr() as u64,
+                )
+            },
+            expected
+        );
+        assert_eq!(output, [71; 2]);
+    }
+    assert_eq!(
+        unsafe {
+            prodex_mojo_super_expose_exec_validation_v1(
+                1,
+                OP_TEXT_CUT,
+                input.as_ptr() as u64,
+                3,
+                0,
+                0,
+                3,
+                output.as_mut_ptr() as u64 + 1,
+            )
+        },
+        1
+    );
+    assert_eq!(output, [71; 2]);
+}

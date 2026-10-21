@@ -576,15 +576,15 @@ pub(super) fn bounded_redacted_text(bytes: &[u8], max_bytes: usize) -> String {
 }
 
 fn bounded_text(text: &str, max_bytes: usize) -> String {
-    if text.len() <= max_bytes {
-        return text.to_string();
-    }
-    let mut end = max_bytes.min(text.len());
-    while !text.is_char_boundary(end) {
-        end = end.saturating_sub(1);
-    }
+    let Ok(end) = prodex_mojo_core::rich::super_expose_text_cut(text, max_bytes) else {
+        return String::new();
+    };
     text[..end].to_string()
 }
+
+#[cfg(test)]
+#[path = "super_expose/text_tests.rs"]
+mod text_tests;
 
 #[cfg(test)]
 mod tests {

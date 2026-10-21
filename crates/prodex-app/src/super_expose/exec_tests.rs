@@ -1,6 +1,7 @@
 use super::{
-    EXEC_MAX_OUTPUT_BYTES, EXEC_MAX_STDIN_BYTES, EXEC_MAX_TIMEOUT_MS, exec_log_command_preview,
-    execute_tool, execute_tool_with_optional_tools, parse_request,
+    CapturedOutput, EXEC_MAX_OUTPUT_BYTES, EXEC_MAX_STDIN_BYTES, EXEC_MAX_TIMEOUT_MS,
+    exec_log_command_preview, execute_tool, execute_tool_with_optional_tools, parse_request,
+    render_output,
 };
 use crate::super_expose::optional_tools::ExposeOptionalTools;
 use serde_json::{Value, json};
@@ -313,4 +314,14 @@ fn exec_request_validation_preserves_bounds_and_error_order() {
         parse_error(json!({"program": "sh", "timeout_ms": EXEC_MAX_TIMEOUT_MS + 1})),
         "timeout_ms must be between 1 and 120000"
     );
+}
+#[test]
+fn compiled_shared_text_cut_preserves_exec_output_at_multibyte_cap() {
+    let bytes = format!("{}🦀tail", "x".repeat(EXEC_MAX_OUTPUT_BYTES - 1)).into_bytes();
+    let (text, truncated) = render_output(CapturedOutput {
+        bytes,
+        truncated: false,
+    });
+    assert_eq!(text, "x".repeat(EXEC_MAX_OUTPUT_BYTES - 1));
+    assert!(truncated);
 }

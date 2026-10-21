@@ -8384,3 +8384,14 @@ bridge, 12 run and 108 Super expose tests plus strict workspace Clippy pass.
 Canonical share is 36.31104286805347% (136,450 Mojo / 239,331 Rust LOC); checked
 bridge growth slightly lowers raw share. The 75% goal remains open. Evidence is
 in `migration/super-run-events-mojo-20261022.md`.
+
+## Super output UTF-8 clipping shares a compiled kernel (2026-10-22)
+
+Four Rust byte-boundary scanners are removed. Redacted run output, event text,
+aggregate buffers, exec output and audit previews now use one checked operation
+on the existing exec ABI. The unchanged Copilot C facade reuses the same pure
+kernel in `rich_text.mojo`. Direct Mojo, eight Super exec and three launch
+instruction bridge tests, 111 Super expose tests and two Copilot caller
+regressions pass. Canonical share is 36.31346167151882% (136,458 Mojo / 239,320
+Rust production LOC). No Rust clipping fallback remains. The 75% target stays
+open. Evidence is in `migration/super-expose-text-cut-mojo-20261022.md`.

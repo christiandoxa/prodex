@@ -1,6 +1,6 @@
 from std.memory import Pointer
 
-from rich_text import rich_codepoint, rich_codepoint_width, rich_view_ptr, rich_view_valid, rich_view_matches_literal
+from rich_text import rich_codepoint, rich_codepoint_width, rich_view_ptr, rich_view_valid, rich_view_matches_literal, rich_utf8_prefix_end
 from rich_types import ProdexRichStringView
 from parsed_json import pj_literal
 from json_sink import JsonSink, js_literal, js_escaped, js_string
@@ -18,6 +18,7 @@ comptime SUPER_EXPOSE_EXEC_ENV_COUNT: Int64 = 4
 comptime SUPER_EXPOSE_EXEC_ENV_ENTRY: Int64 = 5
 comptime SUPER_EXPOSE_EXEC_STDIN: Int64 = 6
 comptime SUPER_EXPOSE_EXEC_TIMEOUT: Int64 = 7
+comptime SUPER_EXPOSE_EXEC_TEXT_CUT: Int64 = 8
 
 comptime SUPER_EXPOSE_EXEC_OK: Int64 = 1
 comptime SUPER_EXPOSE_EXEC_INVALID: Int64 = 2
@@ -118,20 +119,27 @@ def prodex_mojo_super_expose_exec_validation_v1(
         return 4
     if (
         operation < SUPER_EXPOSE_EXEC_PROGRAM
-        or operation > SUPER_EXPOSE_EXEC_TIMEOUT
+        or operation > SUPER_EXPOSE_EXEC_TEXT_CUT
         or input_length < 0
         or secondary_length < 0
-        or output_address == 0
+        or output_address == 0 or output_address % 8 != 0
         or (input_length > 0 and input_address == 0)
         or (secondary_length > 0 and secondary_address == 0)
     ):
         return 1
 
+    if operation == SUPER_EXPOSE_EXEC_TEXT_CUT:
+        if not rich_view_valid(super_expose_exec_view(input_address, input_length), 9223372036854775807):
+            return 1
     var output = Pointer[mut=True, Int64, MutUntrackedOrigin](
         unsafe_from_address=Int(output_address)
     )
     output[unsafe_offset=0] = 0
     output[unsafe_offset=1] = 0
+
+    if operation == SUPER_EXPOSE_EXEC_TEXT_CUT:
+        output[unsafe_offset=0] = rich_utf8_prefix_end(super_expose_exec_view(input_address, input_length), numeric_value)
+        return 0
 
     if operation == SUPER_EXPOSE_EXEC_PROGRAM:
         var value = super_expose_exec_view(input_address, input_length)

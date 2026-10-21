@@ -152,10 +152,9 @@ pub(super) fn append_output(record: &mut RunRecord, event_type: &str, bytes: &[u
     }
     if record.output.len() < OUTPUT_MAX_BYTES {
         let remaining = OUTPUT_MAX_BYTES - record.output.len();
-        let mut end = text.len().min(remaining);
-        while !text.is_char_boundary(end) {
-            end = end.saturating_sub(1);
-        }
+        let Ok(end) = prodex_mojo_core::rich::super_expose_text_cut(&text, remaining) else {
+            return;
+        };
         record.output.push_str(&text[..end]);
         if end < text.len() {
             record.output_truncated = true;
@@ -204,7 +203,7 @@ pub(super) fn push_event(record: &mut RunRecord, event_type: &str, text: &str) {
     else {
         return;
     };
-    let text = bounded_event_text(text);
+    let text = bounded_text(text, MAX_RUN_EVENT_TEXT_BYTES);
     record.events.push_back(RunEvent {
         seq: record.next_seq,
         event_type: event_type.to_string(),
@@ -212,17 +211,6 @@ pub(super) fn push_event(record: &mut RunRecord, event_type: &str, text: &str) {
     });
     record.next_seq = plan.next_seq;
     record.events.drain(..plan.drop_front);
-}
-
-pub(super) fn bounded_event_text(text: &str) -> String {
-    if text.len() <= MAX_RUN_EVENT_TEXT_BYTES {
-        return text.to_string();
-    }
-    let mut end = MAX_RUN_EVENT_TEXT_BYTES;
-    while !text.is_char_boundary(end) {
-        end = end.saturating_sub(1);
-    }
-    text[..end].to_string()
 }
 
 pub(super) fn summary_json(run_id: &str, record: &RunRecord) -> Value {
