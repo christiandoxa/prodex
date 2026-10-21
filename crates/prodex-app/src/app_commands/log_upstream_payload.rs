@@ -101,7 +101,9 @@ fn readable_upstream_payload(payload_bytes: &[u8], fields: &BTreeMap<String, Str
 }
 
 fn upstream_payload_binary_path(fields: &BTreeMap<String, String>) -> Option<&str> {
-    [
+    // Rust reads the seven metadata keys; compiled Mojo exclusively decides
+    // first-present precedence and the Unicode-trimmed value span.
+    let paths = [
         "path",
         "file_path",
         "local_path",
@@ -110,10 +112,9 @@ fn upstream_payload_binary_path(fields: &BTreeMap<String, String>) -> Option<&st
         "attachment_path",
         "uri",
     ]
-    .into_iter()
-    .find_map(|key| fields.get(key).map(String::as_str))
-    .map(|path| path.trim())
-    .filter(|path| !path.is_empty())
+    .map(|key| fields.get(key).map(String::as_str));
+    prodex_mojo_core::log::upstream_binary_path(paths)
+        .expect("compiled Mojo upstream binary path display planner failed")
 }
 
 pub(crate) fn render_upstream_payload_lines(payload: &str, width: usize) -> Vec<String> {
@@ -423,5 +424,32 @@ mod tests {
 
         assert!(rendered.contains("\"outer\": {"));
         assert!(rendered.contains("\"inner\": \"value\""));
+    }
+}
+
+#[cfg(test)]
+mod binary_path_tests {
+    use super::*;
+
+    #[test]
+    fn compiled_upstream_binary_path_priority_does_not_fall_through_empty() {
+        let fields = BTreeMap::from([
+            ("file_path".to_owned(), " /tmp/later.json ".to_owned()),
+            ("uri".to_owned(), "https://example.test/raw".to_owned()),
+        ]);
+        assert_eq!(
+            upstream_payload_binary_path(&fields),
+            Some("/tmp/later.json")
+        );
+
+        let mut fields = fields;
+        fields.insert("path".to_owned(), " \u{2003} \u{00a0} ".to_owned());
+        assert_eq!(upstream_payload_binary_path(&fields), None);
+        fields.insert("path".to_owned(), " 雪/metadata.json ".to_owned());
+        assert_eq!(
+            upstream_payload_binary_path(&fields),
+            Some("雪/metadata.json")
+        );
+        assert_eq!(upstream_payload_binary_path(&BTreeMap::new()), None);
     }
 }

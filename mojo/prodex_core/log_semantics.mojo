@@ -4315,3 +4315,73 @@ def prodex_mojo_log_latest_timestamp_v1(
         unsafe_from_address=Int(output_address)
     )[] = Int64(selected)
     return 0
+
+# Upstream binary-path display policy picks the FIRST PRESENT metadata key,
+# even when that key's value becomes empty after Unicode whitespace trim.
+# The host maps seven known field names to 7 owned UTF-8 views and only
+# materializes the selected span. This path never touches local filesystem.
+comptime UPSTREAM_BINARY_PATH_ABI_VERSION: Int64 = 1
+comptime UPSTREAM_BINARY_PATH_FIELD_COUNT: Int64 = 7
+comptime UPSTREAM_BINARY_PATH_MAX_VALUE_BYTES: Int64 = 1_048_576
+
+
+@export("prodex_mojo_upstream_binary_path_plan_v1")
+def prodex_mojo_upstream_binary_path_plan_v1(
+    abi_version: Int64,
+    field_views_address: UInt,
+    field_count: Int64,
+    output_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != UPSTREAM_BINARY_PATH_ABI_VERSION:
+        return 4
+    if (
+        field_count != UPSTREAM_BINARY_PATH_FIELD_COUNT
+        or field_views_address == 0 or field_views_address % 8 != 0
+        or output_address == 0 or output_address % 8 != 0
+    ):
+        return 1
+    # Every entry is (borrowed pointer, byte length, present flag).
+    var fields = Pointer[mut=False, UInt64, ImmUntrackedOrigin](
+        unsafe_from_address=Int(field_views_address)
+    )
+    for index in range(UPSTREAM_BINARY_PATH_FIELD_COUNT):
+        var presence = fields[unsafe_offset=index * 3 + 2]
+        var address = fields[unsafe_offset=index * 3]
+        var length = fields[unsafe_offset=index * 3 + 1]
+        if presence == 0:
+            if address != 0 or length != 0:
+                return 1
+            continue
+        if (
+            presence != 1 or length > UInt64(UPSTREAM_BINARY_PATH_MAX_VALUE_BYTES)
+            or not rich_view_valid(
+                ProdexRichStringView(UInt(address), UInt(length)),
+                UPSTREAM_BINARY_PATH_MAX_VALUE_BYTES
+            )
+        ):
+            return 1
+
+    var chosen: Int64 = -1
+    var start: Int64 = -1
+    var end: Int64 = -1
+    for index in range(UPSTREAM_BINARY_PATH_FIELD_COUNT):
+        if fields[unsafe_offset=index * 3 + 2] == 1:
+            var value = ProdexRichStringView(
+                UInt(fields[unsafe_offset=index * 3]),
+                UInt(fields[unsafe_offset=index * 3 + 1]),
+            )
+            var bounds = rich_trim_bounds(value)
+            if bounds[1] > bounds[0]:
+                chosen = index
+                start = bounds[0]
+                end = bounds[1]
+            # An empty higher-priority field stops the scan. Do not use a
+            # lower-priority path, preserving the old first-present contract.
+            break
+    var output = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    output[unsafe_offset=0] = chosen
+    output[unsafe_offset=1] = start
+    output[unsafe_offset=2] = end
+    return 0

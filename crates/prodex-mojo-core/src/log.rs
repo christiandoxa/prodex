@@ -21,6 +21,7 @@ mod snapshot;
 mod transcript;
 mod transcript_ansi;
 mod tui;
+mod upstream_binary_path;
 mod upstream_payload_bounds;
 pub use event_name::render_log_event_name;
 pub use level::classify_log_level;
@@ -41,6 +42,7 @@ pub use tui::{
     log_tui_header_layout, log_tui_key_plan, log_tui_quota_layout, log_tui_snapshot_height,
     log_tui_source_tone, log_tui_window,
 };
+pub use upstream_binary_path::upstream_binary_path;
 pub use upstream_payload_bounds::{
     UpstreamPayloadStringBudgetPlan, upstream_payload_log_prefix,
     upstream_payload_string_budget_plan,
