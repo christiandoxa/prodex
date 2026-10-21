@@ -1,4 +1,7 @@
 use crate::MojoError;
+#[path = "optional_tools_policy/marked_blocks.rs"]
+mod marked_blocks;
+pub use marked_blocks::{MarkedBlockStripError, strip_marked_instruction_blocks};
 
 #[path = "optional_tools_policy/legacy_paragraphs.rs"]
 mod legacy_paragraphs;

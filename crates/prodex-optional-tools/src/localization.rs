@@ -116,19 +116,18 @@ pub fn remove_agents_block(codex_home: &Path, begin: &str, end: &str) -> Result<
 }
 
 fn without_marked_block(contents: &str, begin: &str, end: &str) -> Result<String> {
-    let mut cleaned = contents.to_string();
-    while let Some(start) = cleaned.find(begin) {
-        let tail = &cleaned[start + begin.len()..];
-        let end_offset = tail
-            .find(end)
-            .ok_or_else(|| anyhow::anyhow!("instruction block is missing its end marker"))?;
-        let block_end = start + begin.len() + end_offset + end.len();
-        cleaned.replace_range(start..block_end, "");
-    }
-    if cleaned.contains(end) {
-        bail!("instruction block is missing its begin marker");
-    }
-    Ok(cleaned)
+    use prodex_mojo_core::optional_tools_policy::{
+        MarkedBlockStripError, strip_marked_instruction_blocks,
+    };
+    strip_marked_instruction_blocks(contents, begin, end).map_err(|error| match error {
+        MarkedBlockStripError::MissingEnd => {
+            anyhow::anyhow!("instruction block is missing its end marker")
+        }
+        MarkedBlockStripError::MissingBegin => {
+            anyhow::anyhow!("instruction block is missing its begin marker")
+        }
+        other => anyhow::anyhow!("compiled Mojo instruction marker policy failed: {other:?}"),
+    })
 }
 
 fn read_optional_link_target_contents(path: &Path) -> Result<String> {
