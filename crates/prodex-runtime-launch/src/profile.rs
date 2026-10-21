@@ -1,5 +1,8 @@
 use anyhow::bail;
 use prodex_mojo_core::rich::ascii_casefold_equal_exact;
+use prodex_mojo_core::runtime::{
+    ProfileNameResolution, profile_name_resolution_plan, profile_next_selection_at,
+};
 use std::path::{Path, PathBuf};
 
 pub fn allow_profileless_local_home(
@@ -46,50 +49,55 @@ pub fn record_run_selection_at(
     state
         .last_run_selected_at
         .retain(|name, _| state.profiles.contains_key(name));
-    let selected_at = selected_at.max(
-        state
-            .last_run_selected_at
-            .values()
-            .copied()
-            .max()
-            .unwrap_or_default()
-            .saturating_add(1),
-    );
+    let timestamps = state
+        .last_run_selected_at
+        .values()
+        .copied()
+        .collect::<Vec<_>>();
+    let selected_at = profile_next_selection_at(&timestamps, selected_at)
+        .expect("compiled Mojo run-selection timestamp planner failed");
     state
         .last_run_selected_at
-        .entry(profile_name.to_string())
-        .and_modify(|current| *current = (*current).max(selected_at))
-        .or_insert(selected_at);
+        .insert(profile_name.to_string(), selected_at);
 }
 
 pub fn resolve_profile_name(
     state: &prodex_state::AppState,
     requested: Option<&str>,
 ) -> anyhow::Result<String> {
-    if let Some(name) = requested {
-        if state.profiles.contains_key(name) {
-            return Ok(name.to_string());
-        }
-        bail!("profile '{}' does not exist", name);
-    }
-
-    if let Some(active) = state.active_profile.as_deref() {
-        if state.profiles.contains_key(active) {
-            return Ok(active.to_string());
-        }
-        bail!("active profile '{}' no longer exists", active);
-    }
-
-    if state.profiles.len() == 1 {
-        let (name, _) = state
+    let active = state.active_profile.as_deref();
+    let action = profile_name_resolution_plan(
+        requested.map(|name| state.profiles.contains_key(name)),
+        active.map(|name| state.profiles.contains_key(name)),
+        state.profiles.len(),
+    )
+    .expect("compiled Mojo profile-name resolution planner failed");
+    match action {
+        ProfileNameResolution::Requested => Ok(requested
+            .expect("Mojo chose absent requested profile")
+            .to_string()),
+        ProfileNameResolution::Active => Ok(active
+            .expect("Mojo chose absent active profile")
+            .to_string()),
+        ProfileNameResolution::Single => Ok(state
             .profiles
-            .iter()
+            .keys()
             .next()
-            .ok_or_else(|| anyhow::anyhow!("single profile lookup failed unexpectedly"))?;
-        return Ok(name.clone());
+            .expect("Mojo chose single profile from empty state")
+            .clone()),
+        ProfileNameResolution::MissingRequested => {
+            bail!("profile '{}' does not exist", requested.unwrap_or_default())
+        }
+        ProfileNameResolution::MissingActive => {
+            bail!(
+                "active profile '{}' no longer exists",
+                active.unwrap_or_default()
+            )
+        }
+        ProfileNameResolution::NoSelection => {
+            bail!("no active profile selected; use `prodex use --profile <name>` or pass --profile")
+        }
     }
-
-    bail!("no active profile selected; use `prodex use --profile <name>` or pass --profile")
 }
 
 pub fn ensure_profile_path_is_unique(

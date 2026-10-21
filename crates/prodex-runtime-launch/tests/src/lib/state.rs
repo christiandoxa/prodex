@@ -38,6 +38,27 @@ fn later_run_selection_advances_past_another_profile() {
 }
 
 #[test]
+fn record_run_selection_preserves_negative_epochs_and_saturation() {
+    let mut state = prodex_state::AppState {
+        profiles: BTreeMap::from([
+            ("first".to_string(), test_profile("/tmp/first")),
+            ("second".to_string(), test_profile("/tmp/second")),
+        ]),
+        last_run_selected_at: BTreeMap::from([("first".to_string(), i64::MIN)]),
+        ..prodex_state::AppState::default()
+    };
+    record_run_selection_at(&mut state, "second", -50);
+    assert_eq!(state.last_run_selected_at["second"], 1);
+    state
+        .last_run_selected_at
+        .insert("first".to_string(), i64::MAX);
+    record_run_selection_at(&mut state, "second", 42);
+    assert_eq!(state.last_run_selected_at["second"], i64::MAX);
+    record_run_selection_at(&mut state, "second", i64::MIN);
+    assert_eq!(state.last_run_selected_at["second"], i64::MAX);
+}
+
+#[test]
 fn fixed_runtime_proxy_state_keeps_only_selected_profile() {
     let state = prodex_state::AppState {
         active_profile: Some("second".to_string()),
