@@ -558,6 +558,44 @@ fn usage_snapshot_round_trip_preserves_plan_type() {
 }
 
 #[test]
+fn compiled_snapshot_rebuild_preserves_unknown_sentinel_and_clamped_usage() {
+    let snapshot = RuntimeProfileUsageSnapshot {
+        checked_at: 1000,
+        plan_type: Some("pro".to_owned()),
+        five_hour_status: RuntimeQuotaWindowStatus::Ready,
+        five_hour_remaining_percent: i64::MIN,
+        five_hour_reset_at: i64::MAX,
+        weekly_status: RuntimeQuotaWindowStatus::Unknown,
+        weekly_remaining_percent: i64::MAX,
+        weekly_reset_at: 2,
+    };
+    let result = usage_from_runtime_usage_snapshot(&snapshot);
+    let pair = result.rate_limit.expect("rate limit");
+    assert_eq!(result.plan_type.as_deref(), Some("pro"));
+    assert!(pair.secondary_window.is_none());
+    let five_hour = pair.primary_window.expect("five hour");
+    assert_eq!(five_hour.used_percent, Some(100));
+    assert_eq!(five_hour.reset_at, None);
+    assert_eq!(five_hour.limit_window_seconds, Some(18_000));
+
+    let weekly = RuntimeProfileUsageSnapshot {
+        five_hour_status: RuntimeQuotaWindowStatus::Unknown,
+        weekly_status: RuntimeQuotaWindowStatus::Exhausted,
+        weekly_remaining_percent: i64::MAX,
+        weekly_reset_at: 4000,
+        ..snapshot
+    };
+    let pair = usage_from_runtime_usage_snapshot(&weekly)
+        .rate_limit
+        .unwrap();
+    assert!(pair.primary_window.is_none());
+    let week = pair.secondary_window.expect("weekly window");
+    assert_eq!(week.used_percent, Some(0));
+    assert_eq!(week.reset_at, Some(4000));
+    assert_eq!(week.limit_window_seconds, Some(604_800));
+}
+
+#[test]
 fn probe_cache_entry_freshness_uses_configured_windows() {
     let now = 10_000;
     let fresh = probe_cache_entry(now - 60);

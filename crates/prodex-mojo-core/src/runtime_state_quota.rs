@@ -1,4 +1,9 @@
 use crate::MojoError;
+#[path = "runtime_state_quota/snapshot_rebuild.rs"]
+mod snapshot_rebuild;
+pub use snapshot_rebuild::{
+    QuotaSnapshotRebuildPlan, QuotaSnapshotRebuildWindow, quota_snapshot_rebuild_plan,
+};
 
 const ABI_VERSION: i64 = 1;
 const MODE_TIMESTAMP_PERSIST: i64 = 0;

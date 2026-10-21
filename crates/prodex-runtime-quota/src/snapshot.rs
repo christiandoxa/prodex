@@ -64,7 +64,36 @@ pub fn runtime_profile_usage_snapshot_from_usage(
     }
 }
 
+fn runtime_quota_snapshot_status_tag(status: RuntimeQuotaWindowStatus) -> i64 {
+    match status {
+        RuntimeQuotaWindowStatus::Ready => 0,
+        RuntimeQuotaWindowStatus::Thin => 1,
+        RuntimeQuotaWindowStatus::Critical => 2,
+        RuntimeQuotaWindowStatus::Exhausted => 3,
+        RuntimeQuotaWindowStatus::Unknown => 4,
+    }
+}
+
 pub fn usage_from_runtime_usage_snapshot(snapshot: &RuntimeProfileUsageSnapshot) -> UsageResponse {
+    let plan = prodex_mojo_core::runtime_state_quota::quota_snapshot_rebuild_plan([
+        runtime_quota_snapshot_status_tag(snapshot.five_hour_status),
+        snapshot.five_hour_remaining_percent,
+        snapshot.five_hour_reset_at,
+        runtime_quota_snapshot_status_tag(snapshot.weekly_status),
+        snapshot.weekly_remaining_percent,
+        snapshot.weekly_reset_at,
+    ])
+    .expect("compiled Mojo snapshot reconstruction returned invalid output");
+    // Rust only constructs the serde/chrono domain model from the checked plan.
+    let window = |chosen: prodex_mojo_core::runtime_state_quota::QuotaSnapshotRebuildWindow,
+                  reset_at: i64,
+                  limit_window_seconds: i64| {
+        chosen.include.then(|| UsageWindow {
+            used_percent: Some(chosen.used_percent),
+            reset_at: chosen.include_reset.then_some(reset_at),
+            limit_window_seconds: Some(limit_window_seconds),
+        })
+    };
     UsageResponse {
         email: None,
         plan_type: snapshot.plan_type.clone(),
@@ -72,22 +101,8 @@ pub fn usage_from_runtime_usage_snapshot(snapshot: &RuntimeProfileUsageSnapshot)
             allowed: None,
             limit_reached: None,
             extra: std::collections::BTreeMap::new(),
-            primary_window: (snapshot.five_hour_status != RuntimeQuotaWindowStatus::Unknown).then(
-                || UsageWindow {
-                    used_percent: Some((100 - snapshot.five_hour_remaining_percent).clamp(0, 100)),
-                    reset_at: (snapshot.five_hour_reset_at != i64::MAX)
-                        .then_some(snapshot.five_hour_reset_at),
-                    limit_window_seconds: Some(18_000),
-                },
-            ),
-            secondary_window: (snapshot.weekly_status != RuntimeQuotaWindowStatus::Unknown).then(
-                || UsageWindow {
-                    used_percent: Some((100 - snapshot.weekly_remaining_percent).clamp(0, 100)),
-                    reset_at: (snapshot.weekly_reset_at != i64::MAX)
-                        .then_some(snapshot.weekly_reset_at),
-                    limit_window_seconds: Some(604_800),
-                },
-            ),
+            primary_window: window(plan.five_hour, snapshot.five_hour_reset_at, 18_000),
+            secondary_window: window(plan.weekly, snapshot.weekly_reset_at, 604_800),
         }),
         code_review_rate_limit: None,
         rate_limit_reset_credits: None,
