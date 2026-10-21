@@ -1,4 +1,8 @@
 use crate::MojoError;
+#[path = "optional_tools_policy/agents_reference.rs"]
+mod agents_reference;
+pub use agents_reference::{AgentsReferenceUpdate, agents_reference_update};
+
 #[path = "optional_tools_policy/marked_blocks.rs"]
 mod marked_blocks;
 pub use marked_blocks::{MarkedBlockStripError, strip_marked_instruction_blocks};

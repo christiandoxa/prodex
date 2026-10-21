@@ -798,3 +798,108 @@ def prodex_optional_tool_marked_block_strip_v1(
         unsafe_from_address=Int(written_address)
     )[] = length
     return 0
+
+# Canonical managed AGENTS reference update: full Rust str::lines behavior,
+# Unicode trim and exact reference first-occurrence detection are in Mojo.
+# The host constructs the @path reference, reads/writes files only.
+comptime OPTIONAL_TOOL_AGENTS_REFERENCE_ABI: Int64 = 1
+comptime OPTIONAL_TOOL_AGENTS_REFERENCE_MAX_BYTES: Int64 = 1_048_576
+
+
+@export("prodex_optional_tool_agents_reference_update_v1")
+def prodex_optional_tool_agents_reference_update_v1(
+    abi_version: Int64,
+    text_address: UInt,
+    text_length: Int64,
+    reference_address: UInt,
+    reference_length: Int64,
+    output_address: UInt,
+    output_capacity: Int64,
+    result_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != OPTIONAL_TOOL_AGENTS_REFERENCE_ABI:
+        return 4
+    if (
+        text_length < 0 or text_length > OPTIONAL_TOOL_AGENTS_REFERENCE_MAX_BYTES
+        or reference_length <= 0 or reference_length > OPTIONAL_TOOL_AGENTS_REFERENCE_MAX_BYTES
+        or (text_length > 0 and text_address == 0)
+        or reference_address == 0
+        or output_capacity < text_length + reference_length + 3
+        or output_address == 0 or result_address == 0 or result_address % 8 != 0
+    ):
+        return 1
+    var contents = ProdexRichStringView(text_address, UInt(text_length))
+    var reference = ProdexRichStringView(reference_address, UInt(reference_length))
+    if (
+        not rich_view_valid(contents, OPTIONAL_TOOL_AGENTS_REFERENCE_MAX_BYTES)
+        or not rich_view_valid(reference, OPTIONAL_TOOL_AGENTS_REFERENCE_MAX_BYTES)
+    ):
+        return 1
+
+    var source = rich_view_ptr(contents)
+    var reference_bytes = rich_view_ptr(reference)
+    var output = Pointer[mut=True, UInt8, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    var source_pos: Int64 = 0
+    var written: Int64 = 0
+    var kept_count: Int64 = 0
+    var reference_seen = False
+    # Rust str::lines splits on LF, omits the final empty tail and removes
+    # optional CR at the end of each line.
+    while source_pos < text_length:
+        var line_end = source_pos
+        while line_end < text_length and source[unsafe_offset=line_end] != 10:
+            line_end += 1
+        var next_pos = line_end + 1
+        if line_end > source_pos and source[unsafe_offset=line_end - 1] == 13:
+            line_end -= 1
+
+        var line = ProdexRichStringView(
+            text_address + UInt(source_pos), UInt(line_end - source_pos)
+        )
+        var bounds = rich_trim_bounds(line)
+        var normalized = ProdexRichStringView(
+            text_address + UInt(source_pos + bounds[0]),
+            UInt(bounds[1] - bounds[0]),
+        )
+        if optional_tool_views_equal(normalized, reference):
+            reference_seen = True
+        else:
+            if kept_count > 0:
+                output[unsafe_offset=written] = 10
+                written += 1
+            for index in range(source_pos, line_end):
+                output[unsafe_offset=written] = source[unsafe_offset=index]
+                written += 1
+            kept_count += 1
+        source_pos = next_pos
+
+    var trimmed = rich_trim_bounds(
+        ProdexRichStringView(output_address, UInt(written))
+    )
+    written = trimmed[1] if trimmed[1] > trimmed[0] else Int64(0)
+    if written > 0:
+        output[unsafe_offset=written] = 10
+        output[unsafe_offset=written + 1] = 10
+        written += 2
+    for index in range(reference_length):
+        output[unsafe_offset=written] = reference_bytes[unsafe_offset=index]
+        written += 1
+    output[unsafe_offset=written] = 10
+    written += 1
+
+    # Preserve Rust's reference_seen && updated == contents idempotence:
+    # absent original reference causes an explicit write even if equal.
+    var should_write = not reference_seen or written != text_length
+    if reference_seen and written == text_length:
+        for index in range(written):
+            if output[unsafe_offset=index] != source[unsafe_offset=index]:
+                should_write = True
+                break
+    var result = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(result_address)
+    )
+    result[unsafe_offset=0] = written
+    result[unsafe_offset=1] = Int64(should_write)
+    return 0

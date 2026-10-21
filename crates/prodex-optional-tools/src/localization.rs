@@ -32,27 +32,15 @@ pub(crate) fn ensure_agents_reference(codex_home: &Path, reference_path: &Path) 
     localize_text_file(&agents_path)?;
     let reference = format!("@{}", reference_path.display());
     let contents = read_text_file_limited(&agents_path)?.unwrap_or_default();
-    let mut lines = Vec::new();
-    let mut reference_seen = false;
-    for line in contents.lines() {
-        let trimmed = line.trim();
-        let is_reference = trimmed == reference;
-        if is_reference {
-            reference_seen = true;
-        } else {
-            lines.push(line);
-        }
-    }
-    let cleaned = lines.join("\n");
-    let updated = if cleaned.trim().is_empty() {
-        format!("{reference}\n")
+    let plan =
+        prodex_mojo_core::optional_tools_policy::agents_reference_update(&contents, &reference)
+            .map_err(|error| {
+                anyhow::anyhow!("compiled Mojo AGENTS reference update failed: {error:?}")
+            })?;
+    if plan.write_needed {
+        write_text_file(&agents_path, &plan.content)
     } else {
-        format!("{}\n\n{reference}\n", cleaned.trim_end())
-    };
-    if reference_seen && updated == contents {
         Ok(())
-    } else {
-        write_text_file(&agents_path, &updated)
     }
 }
 
