@@ -8287,3 +8287,22 @@ two caller regressions, 60 launch tests, eight frontend tests, direct Mojo,
 workspace Clippy, guards and documentation/changed tests pass. Canonical share
 is 36.28732388355108% (136,039 Mojo / 238,855 Rust production LOC). The 75%
 objective stays open; details are in `migration/codex-config-removal-mojo-20261021.md`.
+
+
+## Runtime broker snapshot query parsing compiled in Mojo (2026-10-21)
+
+The existing broker-admin owner now parses pagination, checked integers,
+duplicate precedence and first errors. The Rust query parser is removed;
+HTTP authentication and response assembly remain host responsibilities. The
+legacy authenticated snapshot test was unwired; it is now active, checks
+403/400/200 behavior and runs in runtime-smoke. Five bridge and five admin tests,
+one real HTTP regression, 459 runtime proxy tests, smoke, manifest, workspace
+Clippy, guards and documentation/changed tests pass. The canonical share is
+36.295778741969634% (136,103 Mojo / 238,880 Rust production LOC). Evidence,
+including corrected zero-test filters, is in `migration/broker-log-query-mojo-20261021.md`.
+
+The 75% objective stays open. A subsequent audited candidate is
+`runtime_launch/proxy_startup/deepseek_rewrite/conversation_store.rs`: its scope
+matching, latest-sequence selection, per-scope/global eviction and memory
+accounting still belong to Rust and serve multiple provider adapters. Preserve
+host locks and Serde acquisition while moving those deterministic decisions.

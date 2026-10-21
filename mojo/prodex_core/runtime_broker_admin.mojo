@@ -2,6 +2,8 @@ from std.memory import Pointer
 
 from rich_text import rich_trim_bounds, rich_view_ptr, rich_view_valid
 from rich_types import ProdexRichStringView
+from rich_text import rich_view_matches_literal
+from log_number import log_parse_u64_text
 
 comptime BROKER_ADMIN_ABI_VERSION: Int64 = 1
 comptime BROKER_ADMIN_INVALID: Int64 = -1
@@ -12,6 +14,74 @@ comptime BROKER_ADMIN_OPERATION_RELEASE_SESSION_AFFINITY: Int64 = 1
 comptime BROKER_ADMIN_VALUE_ACTIVATION_PROFILE: Int64 = 0
 comptime BROKER_ADMIN_VALUE_SESSION_ID: Int64 = 1
 comptime BROKER_ADMIN_MAX_VALUE_BYTES: Int64 = 256
+
+
+# Parse only the borrowed URL; work and storage remain bounded by its length.
+@export("prodex_runtime_broker_snapshot_query_v1")
+def prodex_runtime_broker_snapshot_query_v1(
+    abi_version: Int64,
+    input_address: UInt,
+    input_length: Int64,
+    max_entries: UInt64,
+    output_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != BROKER_ADMIN_ABI_VERSION:
+        return 4
+    if (
+        input_length < 0 or (input_length > 0 and input_address == 0)
+        or max_entries == 0
+        or output_address == 0 or output_address % 8 != 0
+    ):
+        return 1
+    var view = ProdexRichStringView(input_address, UInt(input_length))
+    if not rich_view_valid(view, input_length):
+        return 1
+    var source = rich_view_ptr(view)
+    var cursor: Int64 = 0
+    while cursor < input_length and source[unsafe_offset=cursor] != 63:
+        cursor += 1
+    var after: UInt64 = 0
+    var limit = max_entries
+    var issue: UInt64 = 0
+    if cursor < input_length:
+        cursor += 1
+    while cursor < input_length:
+        var start = cursor
+        var equals: Int64 = -1
+        while cursor < input_length and source[unsafe_offset=cursor] != 38:
+            if equals == -1 and source[unsafe_offset=cursor] == 61:
+                equals = cursor
+            cursor += 1
+        var end = cursor
+        cursor += 1
+        if start == end:
+            continue
+        if equals == -1:
+            issue = 1
+            break
+        var name = ProdexRichStringView(input_address + UInt(start), UInt(equals - start))
+        var is_after = rich_view_matches_literal["after"](name, False)
+        var is_limit = rich_view_matches_literal["limit"](name, False)
+        if not is_after and not is_limit:
+            continue
+        var value = log_parse_u64_text(UInt64(input_address) + UInt64(equals + 1), UInt64(end - equals - 1))
+        if not value[0]:
+            issue = 2 if is_after else 3
+            break
+        if is_after:
+            after = value[1]
+        elif value[1] == 0 or value[1] > max_entries:
+            issue = 4
+            break
+        else:
+            limit = value[1]
+    var output = Pointer[mut=True, UInt64, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    output[unsafe_offset=0] = issue
+    output[unsafe_offset=1] = after if issue == 0 else UInt64(0)
+    output[unsafe_offset=2] = limit if issue == 0 else UInt64(0)
+    return 0
 
 
 def broker_admin_view(address: UInt, length: Int64) -> ProdexRichStringView:

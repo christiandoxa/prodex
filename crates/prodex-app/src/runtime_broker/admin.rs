@@ -173,49 +173,24 @@ fn runtime_broker_log_snapshot_query(
 fn runtime_broker_log_snapshot_query_url(
     url: &str,
 ) -> std::result::Result<(u64, usize), tiny_http::ResponseBox> {
-    let mut after = 0_u64;
-    let mut limit = runtime_log::DEFAULT_RUNTIME_LIVE_LOG_MAX_ENTRIES;
-    let Some((_, query)) = url.split_once('?') else {
-        return Ok((after, limit));
+    use prodex_mojo_core::runtime_broker_admin::RuntimeBrokerSnapshotQuery as Q;
+    let plan = prodex_mojo_core::runtime_broker_admin::log_snapshot_query(
+        url,
+        runtime_log::DEFAULT_RUNTIME_LIVE_LOG_MAX_ENTRIES,
+    )
+    .expect("compiled Mojo runtime broker snapshot query returned invalid output");
+    let message = match plan {
+        Q::Query { after, limit } => return Ok((after, limit)),
+        Q::Malformed => "runtime log snapshot query is malformed",
+        Q::InvalidCursor => "runtime log snapshot cursor is invalid",
+        Q::InvalidLimit => "runtime log snapshot limit is invalid",
+        Q::LimitOutOfBounds => "runtime log snapshot limit is outside the supported bound",
     };
-    for pair in query.split('&').filter(|pair| !pair.is_empty()) {
-        let Some((name, value)) = pair.split_once('=') else {
-            return Err(build_runtime_proxy_json_error_response(
-                400,
-                "invalid_request",
-                "runtime log snapshot query is malformed",
-            ));
-        };
-        match name {
-            "after" => {
-                after = value.parse().map_err(|_| {
-                    build_runtime_proxy_json_error_response(
-                        400,
-                        "invalid_request",
-                        "runtime log snapshot cursor is invalid",
-                    )
-                })?;
-            }
-            "limit" => {
-                limit = value.parse::<usize>().map_err(|_| {
-                    build_runtime_proxy_json_error_response(
-                        400,
-                        "invalid_request",
-                        "runtime log snapshot limit is invalid",
-                    )
-                })?;
-                if limit == 0 || limit > runtime_log::DEFAULT_RUNTIME_LIVE_LOG_MAX_ENTRIES {
-                    return Err(build_runtime_proxy_json_error_response(
-                        400,
-                        "invalid_request",
-                        "runtime log snapshot limit is outside the supported bound",
-                    ));
-                }
-            }
-            _ => {}
-        }
-    }
-    Ok((after, limit))
+    Err(build_runtime_proxy_json_error_response(
+        400,
+        "invalid_request",
+        message,
+    ))
 }
 
 fn runtime_broker_log_snapshot_response(
@@ -500,5 +475,31 @@ mod tests {
             runtime_broker_log_snapshot_query_url("/__prodex/runtime/log/snapshot?after=nope")
                 .is_err()
         );
+    }
+
+    #[test]
+    fn compiled_runtime_broker_snapshot_query_preserves_http_errors() {
+        for (query, message) in [
+            ("broken", "runtime log snapshot query is malformed"),
+            ("after=nope", "runtime log snapshot cursor is invalid"),
+            ("limit=bad", "runtime log snapshot limit is invalid"),
+            (
+                "limit=0",
+                "runtime log snapshot limit is outside the supported bound",
+            ),
+        ] {
+            let response =
+                runtime_broker_log_snapshot_query_url(&format!("/snapshot?{query}")).unwrap_err();
+            assert_eq!(response.status_code().0, 400);
+            let mut body = String::new();
+            response.into_reader().read_to_string(&mut body).unwrap();
+            let value: serde_json::Value = serde_json::from_str(&body).unwrap();
+            assert_eq!(value["error"]["code"], "invalid_request");
+            assert_eq!(value["error"]["message"], message);
+        }
+        assert!(matches!(
+            runtime_broker_log_snapshot_query_url("/snapshot?after=1&after=+2&limit=3"),
+            Ok((2, 3))
+        ));
     }
 }
