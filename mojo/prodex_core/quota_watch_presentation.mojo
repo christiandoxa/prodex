@@ -2,12 +2,12 @@
 # renderers and Serde acquisition remain the host's existing boundaries.
 from std.memory import Pointer
 from parsed_json import (
-    ParsedJson, ParsedJsonNode, JSON_OBJECT, JSON_STRING, JSON_NUMBER, JSON_ARRAY, JSON_TRUE,
+    ParsedJson, ParsedJsonNode, JSON_OBJECT, JSON_STRING, JSON_ARRAY, JSON_TRUE,
     pj_valid, pj_kind, pj_field, pj_text, pj_literal, pj_trim, pj_is, pj_child, pj_next,
 )
 from rich_text import rich_view_prefix, rich_trim_bounds
 from rich_types import ProdexRichStringView
-from json_sink import JsonSink, js_byte, js_literal, js_string, js_view, js_raw, js_escaped
+from json_sink import JsonSink, js_byte, js_literal, js_string, js_view, js_escaped
 from quota_watch_policy import (
     quota_watch_reset_kind, quota_watch_text_starts_at_exact,
 )
@@ -50,11 +50,10 @@ def qwp_reset(
     elif kind != 4:
         js_literal(Pointer(to=sink), StringSlice("unavailable"))
     if kind == 0:
-        var credits = pj_field(tree, 0, StringSlice("reset_credits"))
-        if pj_kind(tree, credits) == JSON_NUMBER:
+        var credits = pj_field(tree, 0, StringSlice("reset_credit_summary"))
+        if pj_kind(tree, credits) == JSON_STRING:
             js_literal(Pointer(to=sink), StringSlice("; reset credits: "))
-            js_raw(Pointer(to=sink), tree, credits)
-            js_literal(Pointer(to=sink), StringSlice(" available"))
+            js_view(Pointer(to=sink), pj_text(tree, credits))
     return (not sink.failed, ProdexRichStringView(address, UInt(sink.written)))
 
 
@@ -134,6 +133,11 @@ def qwp_render(
                 reset_value = pj_text(tree, raw_reset) if pj_kind(tree, raw_reset) == JSON_STRING else pj_literal(StringSlice("unavailable"))
             js_byte(sink, 44)
             qwp_pair(sink, StringSlice("Reset"), reset_value)
+        if kind == 0 and not detail:
+            var credits = pj_field(tree, 0, StringSlice("reset_credit_summary"))
+            if pj_kind(tree, credits) == JSON_STRING:
+                js_byte(sink, 44)
+                qwp_pair(sink, StringSlice("Reset credits"), pj_text(tree, credits))
         js_byte(sink, 44)
         qwp_pair(sink, StringSlice("Last Updated"), qwp_value(tree, StringSlice("updated")))
         js_byte(sink, 93)

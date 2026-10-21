@@ -27,7 +27,7 @@ fn quota_watch_snapshot_facts(snapshot: &ProviderQuotaSnapshot) -> serde_json::V
             "compact_main": format_main_windows_compact(usage),
             "status": format_openai_quota_status(usage),
             "reset": prodex_quota::format_main_reset_summary(usage),
-            "reset_credits": usage.rate_limit_reset_credits.as_ref().map(|credits| credits.available_count),
+            "reset_credit_summary": usage.rate_limit_reset_credits.as_ref().map(prodex_quota::format_reset_credits),
             "additional": prodex_quota::format_openai_additional_limit_summaries(usage),
         }),
         ProviderQuotaSnapshot::Copilot(info) => serde_json::json!({

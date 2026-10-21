@@ -483,9 +483,9 @@ pub(crate) fn fetch_profile_quota(
         return Ok(ProviderQuotaSnapshot::External(info));
     }
     match provider {
-        ProfileProvider::Openai => Ok(ProviderQuotaSnapshot::OpenAi(fetch_usage(
-            codex_home, base_url,
-        )?)),
+        ProfileProvider::Openai => Ok(ProviderQuotaSnapshot::OpenAi(
+            UsageFetchFlow::new(codex_home, base_url)?.execute_for_display()?,
+        )),
         ProfileProvider::Gemini { project_id, .. } => Ok(ProviderQuotaSnapshot::Gemini(
             fetch_gemini_quota(codex_home, project_id.as_deref())?,
         )),

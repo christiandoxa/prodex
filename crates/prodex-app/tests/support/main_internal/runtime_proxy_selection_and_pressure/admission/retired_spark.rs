@@ -103,7 +103,7 @@ fn standard_precommit_blocks_retired_model_before_auto_redeem() {
     ))
     .expect("exhausted usage should parse");
     usage.rate_limit_reset_credits =
-        Some(prodex_quota::RateLimitResetCreditsSummary { available_count: 1 });
+        Some(prodex_quota::RateLimitResetCreditsSummary { available_count: 1, ..Default::default() });
     let shared = harness.shared_mut();
     shared.auto_redeem_enabled = true;
     shared

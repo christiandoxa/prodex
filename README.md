@@ -649,6 +649,15 @@ Bare `prodex quota` opens the detailed live view across every profile, equivalen
 
 `prodex status` opens a btop-inspired live terminal dashboard combining the active/runtime profile, 5-hour and weekly quota/reset/runway, historical token usage and cache efficiency, and aggregate Prodex process CPU, resident memory, disk I/O, and network socket queues. Press `r` to refresh immediately and `q` or `Esc` to exit. `prodex status --once` emits one snapshot for scripts. Resource counters use Linux `/proc`; non-Linux systems show those fields as unavailable while quota and token panels continue working.
 
+OpenAI quota views append the nearest available reset-credit expiry after the credit
+count, for example `reset credits: 3 available | next expiry: 2026-10-23 01:23:45 +07:00`.
+The timestamp uses the local time zone and is separate from the 5-hour and weekly
+quota resets. A successful detail response with only non-expiring available credits
+shows `next expiry: never`; failed or incomplete details show `next expiry: unavailable`
+while preserving the credit count. Zero credits skip the detail request and expiry
+label. The live view and `--once` share this display; `--raw` keeps its original
+one-shot usage JSON and does not request credit details.
+
 The detailed live pool view (`prodex quota` or `prodex quota --all --detail`) accepts `s` to cycle sort modes and `f` to cycle the provider filter through `all`, `openai`, `gemini`, `anthropic`, `copilot`, `kiro`, `deepseek`, `local`, and `agy`. Add `--provider openai`, `--provider gemini`, `--provider anthropic`, `--provider copilot`, `--provider kiro`, `--provider deepseek`, `--provider local`, or `--provider agy` to start locked to a single provider. The table compacts to the current terminal width while preserving status and remaining-quota visibility; its live height keeps the sorted top rows and reports how many profiles are hidden.
 
 Reset-credit redemption, desktop GUI, and other retired paths are intentionally

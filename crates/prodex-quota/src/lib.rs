@@ -9,11 +9,19 @@ pub use self::models::*;
 pub use self::render::*;
 
 pub fn usage_url(base_url: &str) -> String {
+    quota_endpoint_url(base_url, "usage")
+}
+
+pub fn rate_limit_reset_credits_url(base_url: &str) -> String {
+    quota_endpoint_url(base_url, "rate-limit-reset-credits")
+}
+
+fn quota_endpoint_url(base_url: &str, resource: &str) -> String {
     let base_url = base_url.trim_end_matches('/');
     if base_url.contains("/backend-api") {
-        format!("{base_url}/wham/usage")
+        format!("{base_url}/wham/{resource}")
     } else {
-        format!("{base_url}/api/codex/usage")
+        format!("{base_url}/api/codex/{resource}")
     }
 }
 

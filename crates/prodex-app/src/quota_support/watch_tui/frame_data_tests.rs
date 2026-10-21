@@ -6,7 +6,7 @@ fn compiled_quota_row_assembly_preserves_workspace_credits_and_provider_order() 
         "kind": "openai", "profile": " profile ", "active": true, "auth": "chatgpt",
         "account": "\u{2003}test@example.com\u{3000}", "plan": " plus ",
         "main": "5h full", "compact_main": "5h compact", "status": "Ready",
-        "reset": "5h 1h", "reset_credits": 2,
+        "reset": "5h 1h", "reset_credit_summary": "2 available | next expiry: 2026-10-23 01:23:45 +07:00",
         "workspace_name": " \u{2003} ", "workspace_id": " fake-workspace ",
         "additional": ["extra-one", "extra-東京"], "updated": "now",
     });
@@ -17,7 +17,7 @@ fn compiled_quota_row_assembly_preserves_workspace_credits_and_provider_order() 
             "profile": [" profile "], "current": ["*"], "auth": ["chatgpt"],
             "account": ["test@example.com"], "plan": ["plus"], "status": ["Ready"],
             "remaining": ["5h compact"],
-            "detail": ["resets: 5h 1h | workspace: profile | reset credits: 2 available | extra-one | extra-東京"],
+            "detail": ["resets: 5h 1h | workspace: profile | reset credits: 2 available | next expiry: 2026-10-23 01:23:45 +07:00 | extra-one | extra-東京"],
         })
     );
     let fields: Vec<(String, String)> =
@@ -29,6 +29,10 @@ fn compiled_quota_row_assembly_preserves_workspace_credits_and_provider_order() 
             ("Plan".to_string(), "plus".to_string()),
             ("Status".to_string(), "Ready".to_string()),
             ("Main".to_string(), "5h full".to_string()),
+            (
+                "Reset credits".to_string(),
+                "2 available | next expiry: 2026-10-23 01:23:45 +07:00".to_string()
+            ),
             ("Last Updated".to_string(), "now".to_string()),
         ]
     );
@@ -36,7 +40,10 @@ fn compiled_quota_row_assembly_preserves_workspace_credits_and_provider_order() 
         quota_watch_projection(&facts, QuotaWatchPresentation::ProfileFields, true);
     assert_eq!(
         fields[4],
-        serde_json::json!(["Reset", "5h 1h; reset credits: 2 available"])
+        serde_json::json!([
+            "Reset",
+            "5h 1h; reset credits: 2 available | next expiry: 2026-10-23 01:23:45 +07:00"
+        ])
     );
     let compact: serde_json::Value =
         quota_watch_projection(&facts, QuotaWatchPresentation::Row, false);
@@ -77,4 +84,45 @@ fn compiled_quota_rows_preserve_empty_present_plan_and_error_passthrough() {
     assert!(!quota_human_tui_has_compact_label(
         "model provider: example"
     ));
+}
+
+#[test]
+fn quota_live_profile_preserves_expiry_in_both_detail_modes() {
+    use prodex_quota::{RateLimitResetCreditExpiry as Expiry, RateLimitResetCreditsSummary};
+    for (count, expiry, suffix) in [
+        (3, Expiry::At(1_792_693_425), None),
+        (2, Expiry::Never, Some("2 available | next expiry: never")),
+        (
+            1,
+            Expiry::Unavailable,
+            Some("1 available | next expiry: unavailable"),
+        ),
+        (0, Expiry::At(1_792_693_425), Some("0 available")),
+    ] {
+        let credits = RateLimitResetCreditsSummary {
+            available_count: count,
+            next_expiry: expiry,
+        };
+        let expected = prodex_quota::format_reset_credits(&credits);
+        if let Some(suffix) = suffix {
+            assert_eq!(expected, suffix);
+        }
+        let mut usage: prodex_quota::UsageResponse =
+            serde_json::from_value(serde_json::json!({})).unwrap();
+        usage.rate_limit_reset_credits = Some(credits);
+        let snapshot = ProviderQuotaSnapshot::OpenAi(usage);
+        for detail in [false, true] {
+            let fields = quota_watch_profile_fields("now", &snapshot, detail);
+            let values = fields
+                .iter()
+                .map(|(_, value)| value.as_str())
+                .collect::<Vec<_>>()
+                .join(" ");
+            assert_eq!(values.matches(&expected).count(), 1);
+            assert_eq!(values.contains("next expiry:"), count > 0);
+        }
+    }
+    let usage = serde_json::from_value(serde_json::json!({})).unwrap();
+    let fields = quota_watch_profile_fields("now", &ProviderQuotaSnapshot::OpenAi(usage), false);
+    assert!(!fields.iter().any(|(label, _)| label == "Reset credits"));
 }

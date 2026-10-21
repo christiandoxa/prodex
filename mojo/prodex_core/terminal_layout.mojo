@@ -250,7 +250,7 @@ def prodex_terminal_field_row_layout_v1(
     if result_address == 0 or result_capacity < 3:
         return TERMINAL_LAYOUT_INVALID
 
-    var label_and_separator = label_width
+    var label_and_separator = max(label_width, label_cells)
     if label_and_separator < TERMINAL_LAYOUT_UINT64_MAX:
         label_and_separator += UInt64(1)
     var value_width: UInt64 = 1

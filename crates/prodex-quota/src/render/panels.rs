@@ -33,7 +33,7 @@ pub fn render_profile_quota_with_width(
     if let Some(reset_credits) = usage.rate_limit_reset_credits.as_ref() {
         fields.push((
             "Reset credits".to_string(),
-            format!("{} available", reset_credits.available_count),
+            format_reset_credits(reset_credits),
         ));
     }
 
@@ -94,7 +94,7 @@ fn render_profile_quota_with_detail(
     if let Some(reset_credits) = usage.rate_limit_reset_credits.as_ref() {
         fields.push((
             "Reset credits".to_string(),
-            format!("{} available", reset_credits.available_count),
+            format_reset_credits(reset_credits),
         ));
     }
     fields.extend(format_additional_limits(usage));

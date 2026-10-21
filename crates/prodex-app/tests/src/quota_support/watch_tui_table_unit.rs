@@ -18,10 +18,12 @@ fn quota_watch_table_starts_rows_without_header_padding() {
     assert!(!format!("{:?}", text.lines[0]).contains("|"));
     assert!(format!("{:?}", text.lines[1]).contains("main"));
     assert_eq!(text.lines.len(), 2);
-    assert!(text.lines[1]
-        .spans
-        .iter()
-        .all(|span| span.content.as_ref() != " | "));
+    assert!(
+        text.lines[1]
+            .spans
+            .iter()
+            .all(|span| span.content.as_ref() != " | ")
+    );
 }
 
 #[test]
@@ -92,6 +94,7 @@ fn all_quota_watch_tui_detail_keeps_profile_column_clean() {
     let mut usage = test_openai_usage_with_windows(20, 10, 1_700_086_400);
     usage.rate_limit_reset_credits = Some(prodex_quota::RateLimitResetCreditsSummary {
         available_count: 1,
+        next_expiry: prodex_quota::RateLimitResetCreditExpiry::Never,
     });
     let mut reports = vec![test_openai_quota_report(usage)];
     reports[0].name = "workspace-alpha".to_string();
@@ -134,7 +137,28 @@ fn all_quota_watch_tui_detail_keeps_profile_column_clean() {
     assert!(!row.detail[0].contains("workspace-alpha"));
     assert!(!row.detail[0].contains("acct_workspace"));
     assert!(row.detail[0].contains(" | reset credits: 1 available"));
-    assert!(!row.detail[0].contains("expires"));
+    assert!(row.detail[0].contains("1 available | next expiry: never"));
+    let narrow = super::watch_tui::quota_watch_table_text_with_width(
+        frame.table.as_ref().expect("table"),
+        48,
+    );
+    let area = ratatui::layout::Rect::new(0, 0, 48, 20);
+    let mut buffer = ratatui::buffer::Buffer::empty(area);
+    ratatui::widgets::Widget::render(
+        ratatui::widgets::Paragraph::new(narrow).wrap(ratatui::widgets::Wrap { trim: false }),
+        area,
+        &mut buffer,
+    );
+    let rendered = (0..area.height)
+        .map(|y| {
+            (0..area.width)
+                .map(|x| buffer[(x, y)].symbol())
+                .collect::<String>()
+        })
+        .collect::<Vec<_>>()
+        .join(" ");
+    let compact = rendered.split_whitespace().collect::<String>();
+    assert!(compact.contains("resetcredits:1available|nextexpiry:never"));
 
     let text = quota_watch_table_text(frame.table.as_ref().expect("table"));
     let main_line = &text.lines[1];
@@ -156,7 +180,11 @@ fn all_quota_watch_tui_detail_keeps_profile_column_clean() {
 #[test]
 fn all_quota_watch_tui_marks_weekly_only_profile_ready() {
     let mut usage = test_openai_usage_with_windows(0, 1, 1_783_999_934);
-    usage.rate_limit.as_mut().expect("rate limit").primary_window = None;
+    usage
+        .rate_limit
+        .as_mut()
+        .expect("rate limit")
+        .primary_window = None;
     let snapshot = AllQuotaWatchSnapshot::Reports {
         updated: "2026-07-14 10:00:00 UTC".to_string(),
         profile_count: 1,
@@ -180,9 +208,12 @@ fn all_quota_watch_tui_marks_weekly_only_profile_ready() {
     assert_eq!(row.status, vec!["Ready".to_string()]);
     assert_eq!(row.remaining, vec!["weekly 99%".to_string()]);
     assert!(row.detail[0].contains("resets: 5h unavailable | weekly "));
-    assert!(frame.overview_fields.iter().any(|(label, value)| {
-        label == "Available" && value.contains("1/1 profile")
-    }));
+    assert!(
+        frame
+            .overview_fields
+            .iter()
+            .any(|(label, value)| { label == "Available" && value.contains("1/1 profile") })
+    );
 }
 
 #[test]

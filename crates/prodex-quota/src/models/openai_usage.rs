@@ -310,10 +310,13 @@ fn selected_usage_extra_text(
         .ok_or("Mojo quota normalization returned an invalid UTF-8 range")
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RateLimitResetCreditsSummary {
     #[serde(rename = "availableCount", alias = "available_count")]
     pub available_count: i64,
+    /// Display-only enrichment; the usage JSON contract remains unchanged.
+    #[serde(skip)]
+    pub next_expiry: super::RateLimitResetCreditExpiry,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]

@@ -220,9 +220,9 @@ fn quota_report_view_data(report: &QuotaReport) -> QuotaReportViewData {
             status: format_openai_quota_status(usage),
             resets: Some(match usage.rate_limit_reset_credits.as_ref() {
                 Some(credits) => format!(
-                    "resets: {}; reset credits: {} available",
+                    "resets: {}; reset credits: {}",
                     format_main_reset_summary(usage),
-                    credits.available_count
+                    format_reset_credits(credits)
                 ),
                 None => format!("resets: {}", format_main_reset_summary(usage)),
             }),
