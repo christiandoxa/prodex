@@ -1,4 +1,5 @@
 use super::*;
+use prodex_mojo_core::shared_attachment_policy::{ImageTagScan, image_tag_path_ranges};
 use std::borrow::Cow;
 use std::io::{Read, Write};
 
@@ -10,7 +11,6 @@ const CODEX_SESSION_ATTACHMENT_REWRITE_MAX_BYTES: u64 = 64 * 1024 * 1024;
 
 const SESSION_IMAGE_ATTACHMENT_DIR: &str = "image_attachments";
 const SESSION_ATTACHMENT_DIR: &str = "attachments";
-const CODEX_IMAGE_TAG_PREFIX: &str = "<image ";
 
 pub fn persist_codex_session_image_attachments(codex_home: &Path) -> Result<()> {
     let Some(_maintenance_lock) = try_lock_codex_session_maintenance(codex_home)? else {
@@ -169,22 +169,10 @@ pub(crate) fn codex_session_image_attachments_are_stable(
 ) -> bool {
     let stable_image_dir = codex_home.join(SESSION_IMAGE_ATTACHMENT_DIR);
     let stable_attachment_dir = codex_home.join(SESSION_ATTACHMENT_DIR);
-    let mut cursor = 0;
-
-    while let Some(relative_tag_start) = contents[cursor..].find(CODEX_IMAGE_TAG_PREFIX) {
-        let tag_start = cursor + relative_tag_start;
-        let Some(relative_tag_end) = contents[tag_start..].find('>') else {
-            break;
-        };
-        let tag_end = tag_start + relative_tag_end;
-        let tag = &contents[tag_start..tag_end];
-        let Some((relative_path_start, relative_path_end)) = image_tag_path_range(tag) else {
-            cursor = tag_end;
-            continue;
-        };
-        let path_start = tag_start + relative_path_start;
-        let path_end = tag_start + relative_path_end;
-        let raw_path = &contents[path_start..path_end];
+    for range in image_tag_path_ranges(contents, ImageTagScan::WholeTags)
+        .expect("Mojo shared attachment image-tag scan returned invalid output")
+    {
+        let raw_path = &contents[range.start..range.end];
         let decoded_path = decode_codex_session_path(raw_path);
         let path = Path::new(decoded_path.as_ref());
         let is_clipboard_path = path
@@ -194,7 +182,6 @@ pub(crate) fn codex_session_image_attachments_are_stable(
         if path.is_absolute() && is_clipboard_path && !path.starts_with(&stable_image_dir) {
             return false;
         }
-        cursor = tag_end;
     }
 
     let mut cursor = 0;
@@ -231,21 +218,10 @@ pub(crate) fn codex_session_persisted_attachment_paths(contents: &str) -> Vec<Pa
         }
     };
 
-    let mut cursor = 0;
-    while let Some(relative_tag_start) = contents[cursor..].find(CODEX_IMAGE_TAG_PREFIX) {
-        let tag_start = cursor + relative_tag_start;
-        let Some(relative_tag_end) = contents[tag_start..].find('>') else {
-            break;
-        };
-        let tag_end = tag_start + relative_tag_end;
-        let tag = &contents[tag_start..tag_end];
-        let Some((relative_path_start, relative_path_end)) = image_tag_path_range(tag) else {
-            cursor = tag_end;
-            continue;
-        };
-        let path_start = tag_start + relative_path_start;
-        let path_end = tag_start + relative_path_end;
-        let decoded_path = decode_codex_session_path(&contents[path_start..path_end]);
+    for range in image_tag_path_ranges(contents, ImageTagScan::WholeTags)
+        .expect("Mojo shared attachment image-tag scan returned invalid output")
+    {
+        let decoded_path = decode_codex_session_path(&contents[range.start..range.end]);
         let path = Path::new(decoded_path.as_ref());
         if path.is_absolute()
             && path
@@ -255,7 +231,6 @@ pub(crate) fn codex_session_persisted_attachment_paths(contents: &str) -> Vec<Pa
         {
             add_path(path);
         }
-        cursor = tag_end;
     }
 
     let mut cursor = 0;
@@ -295,20 +270,11 @@ fn rewrite_codex_session_image_paths(codex_home: &Path, contents: &str) -> Resul
     let mut output = String::with_capacity(contents.len());
     let mut cursor = 0;
 
-    while let Some(relative_tag_start) = contents[cursor..].find(CODEX_IMAGE_TAG_PREFIX) {
-        let tag_start = cursor + relative_tag_start;
-        let Some(relative_tag_end) = contents[tag_start..].find('>') else {
-            break;
-        };
-        let tag_end = tag_start + relative_tag_end;
-        let tag = &contents[tag_start..tag_end];
-        let Some((relative_path_start, relative_path_end)) = image_tag_path_range(tag) else {
-            output.push_str(&contents[cursor..tag_end]);
-            cursor = tag_end;
-            continue;
-        };
-        let path_start = tag_start + relative_path_start;
-        let path_end = tag_start + relative_path_end;
+    for range in image_tag_path_ranges(contents, ImageTagScan::RewritePaths).map_err(|error| {
+        anyhow::anyhow!("failed to plan codex session image attachment paths: {error:?}")
+    })? {
+        let path_start = range.start;
+        let path_end = range.end;
         let raw_path = &contents[path_start..path_end];
         let replacement = stable_codex_session_image_path(codex_home, raw_path)?;
 
@@ -319,11 +285,6 @@ fn rewrite_codex_session_image_paths(codex_home: &Path, contents: &str) -> Resul
 
     output.push_str(&contents[cursor..]);
     Ok(output)
-}
-
-fn image_tag_path_range(tag: &str) -> Option<(usize, usize)> {
-    prodex_mojo_core::shared_attachment_policy::image_tag_path_range(tag)
-        .expect("Mojo shared attachment image-tag policy returned invalid output")
 }
 
 fn codex_clipboard_file_name(file_name: &str) -> bool {

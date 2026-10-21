@@ -8252,3 +8252,15 @@ strict workspace Clippy, guards and documentation/changed tests pass. The
 canonical share is 36.261584893565875% (135,767 Mojo / 238,643 Rust production
 LOC); the 75% target remains open. Full evidence is in
 `migration/codex-terminal-render-plan-mojo-20261021.md`.
+
+
+## Shared session image-tag scan progression compiled in Mojo (2026-10-21)
+
+The existing attachment owner now emits complete path-range batches for the
+stability, reference collection and rewrite callers. Three Rust tag-scanning
+loops and their per-tag shim are deleted. Whole-tag and path-end cursor modes
+preserve nested and malformed tags, quoted paths and Unicode offsets. Seven
+strict bridge tests, 95 filesystem tests, direct Mojo assertions, workspace
+Clippy, guards, documentation and changed tests pass. Official share reaches
+36.26932905386101% (135,829 Mojo / 238,672 Rust production LOC). The 75% target
+remains open; details are in `migration/shared-image-tag-batch-mojo-20261021.md`.

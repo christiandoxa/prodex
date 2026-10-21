@@ -3486,7 +3486,8 @@ export function findViolations(files) {
   const sharedAttachmentMigrationViolations = files.flatMap(([filePath, contents]) => {
     if (filePath === "crates/prodex-shared-codex-fs/src/image_attachments.rs") {
       const required = [
-        "shared_attachment_policy::image_tag_path_range(",
+        "image_tag_path_ranges(contents, ImageTagScan::WholeTags)",
+        "image_tag_path_ranges(contents, ImageTagScan::RewritePaths)",
         "shared_attachment_policy::next_clipboard_path(",
         "shared_attachment_policy::next_attachment_path(",
         "shared_attachment_policy::clipboard_file_name(",
@@ -3497,7 +3498,8 @@ export function findViolations(files) {
         .filter((call) => !contents.includes(call))
         .map((call) => filePath + ": shared attachment hard replacement must retain " + call);
       if (
-        /fn\s+image_tag_path_attr\s*\(/u.test(contents)
+        /CODEX_IMAGE_TAG_PREFIX/u.test(contents)
+        || /fn\s+image_tag_path_attr\s*\(/u.test(contents)
         || /fn\s+codex_session_path_continues\s*\(/u.test(contents)
         || /fn\s+is_codex_session_path_byte\s*\(/u.test(contents)
         || /CODEX_ATTACHMENT_PATH_MARKERS/u.test(contents)
@@ -3519,9 +3521,13 @@ export function findViolations(files) {
       }
       return violations;
     }
-    if (filePath === "crates/prodex-mojo-core/src/shared_attachment_policy.rs" &&
-        !contents.includes("prodex_shared_attachment_policy_v1(")) {
-      return [filePath + ": shared attachment ABI adapter must retain prodex_shared_attachment_policy_v1("];
+    if (filePath === "crates/prodex-mojo-core/src/shared_attachment_policy.rs") {
+      return [
+        "prodex_shared_attachment_policy_v1(",
+        "prodex_shared_image_tag_paths_v1(",
+        "pub fn image_tag_path_ranges(",
+      ].filter((call) => !contents.includes(call))
+        .map((call) => filePath + ": shared attachment ABI adapter must retain " + call);
     }
     return [];
   });
@@ -17696,6 +17702,25 @@ function selfTest() {
   assert.match(findViolations([[PING_FAILURE_TEST_FILE, ""]]).join("\n"), /structured ping error caller coverage/u);
   assert.match(findViolations([[PING_SUMMARY_CALLER_TEST_FILE, "fn unrelated_test() {}"]]).join("\n"),
     /ping summary migration needs caller-boundary regression coverage/u);
+
+
+  const sharedImageBatchFile = "crates/prodex-shared-codex-fs/src/image_attachments.rs";
+  const sharedImageBatchCaller = [
+    "image_tag_path_ranges(contents, ImageTagScan::WholeTags)",
+    "image_tag_path_ranges(contents, ImageTagScan::RewritePaths)",
+    "shared_attachment_policy::next_clipboard_path(",
+    "shared_attachment_policy::next_attachment_path(",
+    "shared_attachment_policy::clipboard_file_name(",
+    "shared_attachment_policy::persistable_attachment_file_name(",
+    "shared_attachment_policy::rollout_file_name(",
+  ].join("\n");
+  assert.deepEqual(findViolations([[sharedImageBatchFile, sharedImageBatchCaller]]), []);
+  assert.match(findViolations([[sharedImageBatchFile,
+    sharedImageBatchCaller.replace("image_tag_path_ranges(contents, ImageTagScan::RewritePaths)", "")
+  ]]).join("\n"), /shared attachment hard replacement/u);
+  assert.match(findViolations([[sharedImageBatchFile,
+    sharedImageBatchCaller + '\nconst CODEX_IMAGE_TAG_PREFIX: &str = "<image ";'
+  ]]).join("\n"), /restored Rust shared-attachment scanner/u);
 
 }
 

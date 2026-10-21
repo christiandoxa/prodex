@@ -232,6 +232,74 @@ def shared_image_tag_range(
     return (False, Int64(0), Int64(0))
 
 
+def shared_image_tag_paths(
+    view: ProdexRichStringView, rewrite_paths: Bool, output_address: UInt,
+) -> Int64:
+    var cursor: Int64 = 0
+    var count: Int64 = 0
+    var output = Pointer[mut=True, UInt64, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    while cursor < Int64(view.len):
+        var tag_start = shared_find(view, StringSlice("<image "), cursor)
+        if tag_start < 0:
+            break
+        var tag_end = shared_find(view, StringSlice(">"), tag_start)
+        if tag_end < 0:
+            break
+        var tag = ProdexRichStringView(
+            view.ptr + UInt(tag_start), UInt(tag_end - tag_start)
+        )
+        var path = shared_image_tag_range(tag)
+        cursor = tag_end
+        if path[0]:
+            var path_start = tag_start + path[1]
+            var path_end = tag_start + path[2]
+            if output_address != 0:
+                output[unsafe_offset=count * 2] = UInt64(path_start)
+                output[unsafe_offset=count * 2 + 1] = UInt64(path_end)
+            count += 1
+            if rewrite_paths:
+                cursor = path_end
+    return count
+
+
+# Count before writing so insufficient caller capacity never exposes a partial plan.
+@export("prodex_shared_image_tag_paths_v1")
+def prodex_shared_image_tag_paths_v1(
+    abi_version: Int64,
+    mode: Int64,
+    input_address: UInt,
+    input_length: Int64,
+    output_address: UInt,
+    output_capacity: Int64,
+    required_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != SHARED_ATTACHMENT_ABI_VERSION:
+        return SHARED_ATTACHMENT_ABI
+    if (
+        (mode != 0 and mode != 1)
+        or input_length < 0 or input_length > SHARED_ATTACHMENT_MAX_BYTES
+        or (input_length > 0 and input_address == 0)
+        or output_capacity < 0
+        or (output_capacity > 0 and output_address == 0)
+        or output_address % 8 != 0
+        or required_address == 0 or required_address % 8 != 0
+    ):
+        return SHARED_ATTACHMENT_INVALID
+    var view = ProdexRichStringView(input_address, UInt(input_length))
+    if not rich_view_valid(view, SHARED_ATTACHMENT_MAX_BYTES):
+        return SHARED_ATTACHMENT_INVALID
+    var count = shared_image_tag_paths(view, mode == 1, 0)
+    Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(required_address)
+    )[] = count
+    if count > output_capacity:
+        return 3
+    _ = shared_image_tag_paths(view, mode == 1, output_address)
+    return SHARED_ATTACHMENT_OK
+
+
 def shared_scan_cursor(view: ProdexRichStringView, cursor: Int64) -> Int64:
     var length = Int64(view.len)
     if cursor < 0 or cursor >= length:
