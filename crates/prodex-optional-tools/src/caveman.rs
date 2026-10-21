@@ -305,6 +305,33 @@ mod tests {
     }
 
     #[test]
+    fn compiled_tree_order_preserves_unicode_nested_digest_bytes() {
+        let root = temp_dir("compiled-tree-order");
+        fs::create_dir_all(root.join("nested")).unwrap();
+        fs::create_dir_all(root.join(".git")).unwrap();
+        for (name, text) in [
+            ("雪.txt", "snow"),
+            ("z.txt", "last-ascii"),
+            ("nested/a.txt", "nested"),
+            ("ø.txt", "accent"),
+            ("A.txt", "upper"),
+            ("prodex-tool.json", "ignored manifest"),
+            (".git/ignored", "ignored metadata"),
+        ] {
+            fs::write(root.join(name), text).unwrap();
+        }
+        assert_eq!(
+            tree_sha256(&root, b"prodex-caveman-tree-v1\0").unwrap(),
+            "d4984b74a6d0d60f92ad87eeb72085f2d2e567f007efed3e35d06a3e0ff36544"
+        );
+        assert_eq!(
+            tree_sha256(&root, b"prodex-ponytail-tree-v1\0").unwrap(),
+            "760ea1908aeddc299e2bebbdb2683b758b517d74be1b512ea048618eb8f0002a"
+        );
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
     fn previous_stable_and_legacy_manifests_require_vetted_identity_and_tree() {
         let previous = CavemanInstallManifest {
             schema_version: 1,
