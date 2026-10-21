@@ -331,10 +331,8 @@ fn copy_prodex_overlay_rollout_state_symlink(source_link: &Path, destination: &P
 }
 
 fn is_prodex_overlay_rollout_state_file_name(file_name: &str) -> bool {
-    file_name.starts_with("state_")
-        && [".sqlite", ".sqlite-shm", ".sqlite-wal"]
-            .iter()
-            .any(|suffix| file_name.ends_with(suffix))
+    prodex_mojo_core::optional_tools_policy::optional_tool_overlay_rollout_name(file_name)
+        .expect("compiled Mojo optional-tool rollout state filename policy failed")
 }
 
 fn replace_prodex_overlay_path_with_symlink(
@@ -464,4 +462,29 @@ fn remove_legacy_caveman_instructions(table: &mut toml::Table) -> bool {
         );
     }
     true
+}
+
+#[cfg(test)]
+mod rollout_name_tests {
+    use super::is_prodex_overlay_rollout_state_file_name;
+
+    #[test]
+    fn compiled_overlay_sqlite_state_classifier_excludes_other_files() {
+        for expected in [
+            "state_main.sqlite",
+            "state_main.sqlite-wal",
+            "state_main.sqlite-shm",
+        ] {
+            assert!(is_prodex_overlay_rollout_state_file_name(expected));
+        }
+        for ignored in [
+            "STATE_main.sqlite",
+            "state_main.sqlite-journal",
+            "state_main.sqlite-wal.bak",
+            "profile.sqlite",
+            "state_main.db",
+        ] {
+            assert!(!is_prodex_overlay_rollout_state_file_name(ignored));
+        }
+    }
 }
