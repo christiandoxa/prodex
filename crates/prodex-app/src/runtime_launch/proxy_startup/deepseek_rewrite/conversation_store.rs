@@ -1,11 +1,9 @@
+use prodex_mojo_core::provider_conversation_policy::{self, ConversationEntry};
 use std::collections::BTreeMap;
 use std::fmt;
 use std::sync::{Arc, Mutex};
 
 const RUNTIME_PROVIDER_CONVERSATION_SCOPE_PREFIX: &str = "\0prodex:";
-const RUNTIME_PROVIDER_CONVERSATIONS_PER_SCOPE: usize = 256;
-const RUNTIME_PROVIDER_CONVERSATIONS_TOTAL: usize = 2_048;
-const RUNTIME_PROVIDER_CONVERSATIONS_MAX_ESTIMATED_BYTES: usize = 64 * 1024 * 1024;
 
 #[derive(Debug)]
 struct RuntimeProviderConversation {
@@ -19,14 +17,6 @@ struct RuntimeProviderConversationState {
     conversations: BTreeMap<String, RuntimeProviderConversation>,
     next_sequence: u64,
     estimated_bytes: usize,
-}
-
-impl RuntimeProviderConversationState {
-    fn remove(&mut self, key: &str) {
-        if let Some(removed) = self.conversations.remove(key) {
-            self.estimated_bytes = self.estimated_bytes.saturating_sub(removed.estimated_bytes);
-        }
-    }
 }
 
 #[derive(Clone, Default)]
@@ -62,13 +52,6 @@ impl RuntimeDeepSeekConversationStore {
         )
     }
 
-    fn key_is_in_scope(&self, key: &str) -> bool {
-        self.scope_prefix.as_deref().map_or_else(
-            || !key.starts_with(RUNTIME_PROVIDER_CONVERSATION_SCOPE_PREFIX),
-            |prefix| key.starts_with(prefix),
-        )
-    }
-
     pub(in crate::runtime_launch::proxy_startup) fn history(
         &self,
         response_id: &str,
@@ -94,13 +77,23 @@ impl RuntimeDeepSeekConversationStore {
         predicate: impl Fn(&[serde_json::Value]) -> bool,
     ) -> Option<Vec<serde_json::Value>> {
         let state = self.state.lock().ok()?;
-        state
-            .conversations
+        let entries = state.conversations.iter().collect::<Vec<_>>();
+        let facts = entries
             .iter()
-            .filter(|(key, conversation)| {
-                self.key_is_in_scope(key) && predicate(&conversation.messages)
+            .map(|(key, conversation)| ConversationEntry {
+                key,
+                sequence: conversation.sequence,
+                estimated_bytes: conversation.estimated_bytes,
             })
-            .max_by_key(|(_, conversation)| conversation.sequence)
+            .collect::<Vec<_>>();
+        let selected = provider_conversation_policy::latest_matching(
+            &facts,
+            self.scope_prefix.as_deref(),
+            |index| predicate(&entries[index].1.messages),
+        )
+        .ok()??;
+        entries
+            .get(selected)
             .map(|(_, conversation)| conversation.messages.clone())
     }
 
@@ -115,53 +108,38 @@ impl RuntimeDeepSeekConversationStore {
         let Ok(mut state) = self.state.lock() else {
             return;
         };
-        state.remove(&storage_key);
-        if estimated_bytes > RUNTIME_PROVIDER_CONVERSATIONS_MAX_ESTIMATED_BYTES {
-            return;
-        }
-        state.next_sequence = state.next_sequence.saturating_add(1);
-        let sequence = state.next_sequence;
-        state.estimated_bytes = state.estimated_bytes.saturating_add(estimated_bytes);
-        state.conversations.insert(
-            storage_key.clone(),
-            RuntimeProviderConversation {
-                messages,
-                sequence,
-                estimated_bytes,
-            },
-        );
-
-        while state
+        let facts = state
             .conversations
-            .keys()
-            .filter(|key| self.key_is_in_scope(key))
-            .count()
-            > RUNTIME_PROVIDER_CONVERSATIONS_PER_SCOPE
-        {
-            let stale_key = state
-                .conversations
-                .iter()
-                .filter(|(key, _)| self.key_is_in_scope(key))
-                .min_by_key(|(_, conversation)| conversation.sequence)
-                .map(|(key, _)| key.clone());
-            let Some(stale_key) = stale_key else {
-                break;
-            };
-            state.remove(&stale_key);
+            .iter()
+            .map(|(key, conversation)| ConversationEntry {
+                key,
+                sequence: conversation.sequence,
+                estimated_bytes: conversation.estimated_bytes,
+            })
+            .collect::<Vec<_>>();
+        let Ok(plan) = provider_conversation_policy::retention_plan(
+            &facts,
+            self.scope_prefix.as_deref(),
+            &storage_key,
+            estimated_bytes,
+            state.next_sequence,
+        ) else {
+            return;
+        };
+        let mut keep = plan.keep.into_iter();
+        state.conversations.retain(|_, _| keep.next() == Some(true));
+        if plan.keep_incoming {
+            state.conversations.insert(
+                storage_key,
+                RuntimeProviderConversation {
+                    messages,
+                    sequence: plan.next_sequence,
+                    estimated_bytes,
+                },
+            );
         }
-        while state.conversations.len() > RUNTIME_PROVIDER_CONVERSATIONS_TOTAL
-            || state.estimated_bytes > RUNTIME_PROVIDER_CONVERSATIONS_MAX_ESTIMATED_BYTES
-        {
-            let stale_key = state
-                .conversations
-                .iter()
-                .min_by_key(|(_, conversation)| conversation.sequence)
-                .map(|(key, _)| key.clone());
-            let Some(stale_key) = stale_key else {
-                break;
-            };
-            state.remove(&stale_key);
-        }
+        state.next_sequence = plan.next_sequence;
+        state.estimated_bytes = plan.estimated_bytes;
     }
 
     #[cfg(test)]
@@ -201,29 +179,5 @@ fn runtime_provider_json_estimated_bytes(value: &serde_json::Value) -> usize {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn conversation_store_evicts_oldest_entry_per_scope() {
-        let conversations = RuntimeDeepSeekConversationStore::default();
-        let scoped = conversations.scoped("tenant-a");
-        for index in 0..=RUNTIME_PROVIDER_CONVERSATIONS_PER_SCOPE {
-            scoped.insert(
-                &format!("resp-{index}"),
-                vec![serde_json::json!({"role": "user", "content": index})],
-            );
-        }
-
-        assert!(scoped.history("resp-0").is_none());
-        assert!(
-            scoped
-                .history(&format!("resp-{RUNTIME_PROVIDER_CONVERSATIONS_PER_SCOPE}"))
-                .is_some()
-        );
-        assert_eq!(
-            conversations.len(),
-            RUNTIME_PROVIDER_CONVERSATIONS_PER_SCOPE
-        );
-    }
-}
+#[path = "conversation_store_tests.rs"]
+mod tests;

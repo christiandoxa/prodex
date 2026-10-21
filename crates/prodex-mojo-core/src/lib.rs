@@ -172,6 +172,8 @@ pub mod profile_login_policy;
 pub mod profile_ui_policy;
 #[cfg(feature = "mojo-provider-constraints")]
 pub mod provider_constraints;
+#[cfg(feature = "mojo-runtime")]
+pub mod provider_conversation_policy;
 #[cfg(feature = "mojo-provider-constraints")]
 pub mod provider_error_policy;
 #[cfg(feature = "mojo-provider-constraints")]
