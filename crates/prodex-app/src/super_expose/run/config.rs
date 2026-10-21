@@ -141,41 +141,11 @@ fn validate_configured_reasoning_effort(args: &SuperArgs) -> std::result::Result
 }
 
 fn remove_codex_config_override(args: &mut Vec<OsString>, key: &str) {
-    let mut retained = Vec::with_capacity(args.len());
-    let mut index = 0;
-    while index < args.len() {
-        let argument = args[index].to_string_lossy();
-        if matches!(argument.as_ref(), "-c" | "--config")
-            && args
-                .get(index + 1)
-                .and_then(|value| value.to_str())
-                .is_some_and(|assignment| config_assignment_has_key(assignment, key))
-        {
-            index += 2;
-            continue;
-        }
-        if (argument.starts_with("--config=") || argument.starts_with("-c"))
-            && config_assignment_has_key(
-                argument
-                    .strip_prefix("--config=")
-                    .or_else(|| argument.strip_prefix("-c"))
-                    .unwrap_or_default(),
-                key,
-            )
-        {
-            index += 1;
-            continue;
-        }
-        retained.push(args[index].clone());
-        index += 1;
-    }
-    *args = retained;
-}
-
-fn config_assignment_has_key(assignment: &str, key: &str) -> bool {
-    assignment
-        .split_once('=')
-        .is_some_and(|(name, _)| name.trim() == key)
+    crate::app_commands::runtime_launch::remove_codex_config_overrides(
+        args,
+        key,
+        prodex_mojo_core::codex_config::ConfigOverrideRemoval::AllForms,
+    );
 }
 
 fn optional_bounded_string(

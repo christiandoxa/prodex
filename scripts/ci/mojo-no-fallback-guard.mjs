@@ -427,6 +427,8 @@ const CORE_LEXICAL_BROKER_PATHS = "crates/prodex-app/src/runtime_persistence/pat
 const CORE_LEXICAL_APP_HOUSEKEEPING = "crates/prodex-app/src/housekeeping.rs";
 const CORE_LEXICAL_LIVE_LOG = "crates/prodex-app/src/app_commands/log_live.rs";
 const PROMOTED_FILES = [
+  "crates/prodex-app/src/app_commands/runtime_launch.rs",
+  "crates/prodex-app/src/super_expose/run/config.rs",
   PROVIDER_USAGE_SSE_MOJO,
   PROVIDER_USAGE_SSE_TEST,
   OPENAI_COMPAT_SSE_CALLER,
@@ -3485,6 +3487,25 @@ export function findViolations(files) {
       return required
         .filter((call) => !contents.includes(call))
         .map((call) => filePath + ": Mojo release-version owner must retain " + call);
+    }
+    return [];
+  });
+  const codexConfigRemovalViolations = files.flatMap(([filePath, contents]) => {
+    if (filePath === "crates/prodex-app/src/app_commands/runtime_launch.rs") {
+      const body = contents.match(/pub\(crate\) fn remove_first_codex_config_override_pair\([^]*?(?=^struct RuntimeLaunchPreparationBuilder)/mu)?.[0] ?? "";
+      return body.includes("config_override_removal_mask(&views, key, mode)")
+        && !body.includes("assignment.split_once('=')")
+        && !body.includes("candidate.trim() == key")
+        ? [] : [filePath + ": Codex override removal must use the compiled mask"];
+    }
+    if (filePath === "crates/prodex-app/src/super_expose/run/config.rs") {
+      return contents.includes("runtime_launch::remove_codex_config_overrides(")
+        && !contents.includes("fn config_assignment_has_key(")
+        ? [] : [filePath + ": frontend override removal must reuse the compiled owner"];
+    }
+    if (filePath === "crates/prodex-mojo-core/src/codex_config.rs") {
+      return contents.includes("prodex_codex_config_removal_mask_v1(")
+        ? [] : [filePath + ": Codex override removal ABI must remain wired"];
     }
     return [];
   });
@@ -13796,6 +13817,7 @@ export function findViolations(files) {
     ...sharedHistoryPolicyViolations,
     ...runtimeCookiePolicyViolations,
     ...updateNoticeMigrationViolations,
+    ...codexConfigRemovalViolations,
     ...sharedAttachmentMigrationViolations,
     ...runtimeCookieMigrationViolations,
     ...deepseekSimpleRequestViolations,
@@ -17740,6 +17762,14 @@ function selfTest() {
   assert.match(findViolations([[mcpChunkFile,
     mcpChunkCaller + "\n.find(|byte| !byte.is_ascii_whitespace())"
   ]]).join("\n"), /restored Rust MCP Content-Length semantics/u);
+
+
+  const codexRemovalFile = "crates/prodex-app/src/super_expose/run/config.rs";
+  const codexRemovalCaller = "runtime_launch::remove_codex_config_overrides(";
+  assert.deepEqual(findViolations([[codexRemovalFile, codexRemovalCaller]]), []);
+  assert.match(findViolations([[codexRemovalFile,
+    codexRemovalCaller + "\nfn config_assignment_has_key(assignment: &str, key: &str) {}"
+  ]]).join("\n"), /frontend override removal must reuse/u);
 
 }
 

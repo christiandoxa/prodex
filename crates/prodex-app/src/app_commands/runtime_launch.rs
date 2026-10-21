@@ -142,20 +142,44 @@ pub(crate) fn restore_resume_session_settings(
     }
 }
 pub(crate) fn remove_first_codex_config_override_pair(args: &mut Vec<OsString>, key: &str) -> bool {
-    let mut index = 0;
-    while index + 1 < args.len() {
-        let is_config_flag = matches!(args[index].to_str(), Some("-c" | "--config"));
-        let matches_key = args[index + 1]
-            .to_str()
-            .and_then(|assignment| assignment.split_once('='))
-            .is_some_and(|(candidate, _)| candidate.trim() == key);
-        if is_config_flag && matches_key {
-            args.drain(index..=index + 1);
-            return true;
-        }
-        index += 1;
-    }
-    false
+    remove_codex_config_overrides(
+        args,
+        key,
+        prodex_mojo_core::codex_config::ConfigOverrideRemoval::FirstPair,
+    )
+}
+
+pub(crate) fn remove_codex_config_overrides(
+    args: &mut Vec<OsString>,
+    key: &str,
+    mode: prodex_mojo_core::codex_config::ConfigOverrideRemoval,
+) -> bool {
+    let mask = {
+        let text = args
+            .iter()
+            .map(|argument| argument.to_string_lossy())
+            .collect::<Vec<_>>();
+        let views = args
+            .iter()
+            .zip(&text)
+            .map(
+                |(argument, text)| prodex_mojo_core::codex_config::ConfigRemovalArgument {
+                    text,
+                    original_utf8: argument.to_str().is_some(),
+                },
+            )
+            .collect::<Vec<_>>();
+        prodex_mojo_core::codex_config::config_override_removal_mask(&views, key, mode)
+            .expect("compiled Mojo Codex override removal returned invalid output")
+    };
+    let before = args.len();
+    let mut mask = mask.into_iter();
+    args.retain(|_| {
+        !mask
+            .next()
+            .expect("compiled Mojo override mask covers every argument")
+    });
+    args.len() != before
 }
 struct RuntimeLaunchPreparationBuilder<'a> {
     request: RuntimeLaunchRequest<'a>,

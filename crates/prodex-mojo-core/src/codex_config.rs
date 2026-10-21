@@ -2,6 +2,21 @@ use crate::MojoError;
 
 const ABI_VERSION: i64 = 1;
 
+/// Borrow the platform's lossy text while retaining whether the original
+/// argument was valid UTF-8; paired values require the original encoding.
+#[derive(Clone, Copy)]
+pub struct ConfigRemovalArgument<'a> {
+    pub text: &'a str,
+    pub original_utf8: bool,
+}
+
+/// Preserve the existing launch-pair and frontend-all-forms removal contracts.
+#[derive(Clone, Copy)]
+pub enum ConfigOverrideRemoval {
+    FirstPair,
+    AllForms,
+}
+
 #[repr(C)]
 #[derive(Clone, Copy)]
 struct ArgumentView {
@@ -35,6 +50,16 @@ pub enum ModelProviderPlan {
 }
 
 unsafe extern "C" {
+    fn prodex_codex_config_removal_mask_v1(
+        abi_version: i64,
+        mode: i64,
+        arguments_address: u64,
+        count: i64,
+        key_address: u64,
+        key_length: i64,
+        output_address: u64,
+        output_capacity: i64,
+    ) -> i64;
     fn prodex_codex_config_normalize_value_v1(
         abi_version: i64,
         input_address: u64,
@@ -72,6 +97,48 @@ unsafe extern "C" {
         config_file_loaded: i64,
         result_address: u64,
     ) -> i64;
+}
+
+/// Select complete original arguments to remove without rewriting retained text.
+pub fn config_override_removal_mask(
+    arguments: &[ConfigRemovalArgument<'_>],
+    key: &str,
+    mode: ConfigOverrideRemoval,
+) -> Result<Vec<bool>, MojoError> {
+    if arguments.len() > 1_048_576 || key.len() > 16_777_216 {
+        return Err(MojoError::InvalidInput);
+    }
+    let views = arguments
+        .iter()
+        .map(|argument| ArgumentView {
+            address: argument.text.as_ptr() as usize as u64,
+            length: argument.text.len() as u64,
+            valid_utf8: i64::from(argument.original_utf8),
+        })
+        .collect::<Vec<_>>();
+    let mut mask = vec![2_u8; arguments.len()];
+    validate_status(unsafe {
+        prodex_codex_config_removal_mask_v1(
+            ABI_VERSION,
+            match mode {
+                ConfigOverrideRemoval::FirstPair => 0,
+                ConfigOverrideRemoval::AllForms => 1,
+            },
+            views.as_ptr() as usize as u64,
+            views.len() as i64,
+            key.as_ptr() as usize as u64,
+            key.len() as i64,
+            mask.as_mut_ptr() as usize as u64,
+            mask.len() as i64,
+        )
+    })?;
+    mask.into_iter()
+        .map(|value| match value {
+            0 => Ok(false),
+            1 => Ok(true),
+            _ => Err(MojoError::InvalidOutput),
+        })
+        .collect()
 }
 
 fn views(arguments: &[Option<&str>]) -> Result<Vec<ArgumentView>, MojoError> {
@@ -256,6 +323,10 @@ pub fn model_provider_plan(
         _ => Err(MojoError::InvalidOutput),
     }
 }
+
+#[cfg(test)]
+#[path = "codex_config/removal_tests.rs"]
+mod removal_tests;
 
 #[cfg(test)]
 mod tests {

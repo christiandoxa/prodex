@@ -8276,3 +8276,14 @@ tests, three CLI subprocess regressions, direct Mojo assertions, workspace
 Clippy, guards and documentation/changed tests pass. Canonical share is
 36.278758251903874% (135,959 Mojo / 238,803 Rust production LOC). The 75% target
 stays open; full evidence is in `migration/mcp-line-chunk-mojo-20261021.md`.
+
+
+## Codex config override removal unified in compiled Mojo (2026-10-21)
+
+Launch first-pair removal and frontend all-form removal now use one compiled
+mask from the existing Codex config owner. Two Rust parsers/scanners are
+deleted; retained OsString values remain byte-exact. Five strict bridge tests,
+two caller regressions, 60 launch tests, eight frontend tests, direct Mojo,
+workspace Clippy, guards and documentation/changed tests pass. Canonical share
+is 36.28732388355108% (136,039 Mojo / 238,855 Rust production LOC). The 75%
+objective stays open; details are in `migration/codex-config-removal-mojo-20261021.md`.
