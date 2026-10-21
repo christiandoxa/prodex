@@ -1055,3 +1055,64 @@ def prodex_runtime_profile_active_backoff_max_v1(
     output[unsafe_offset=0] = Int64(found)
     output[unsafe_offset=1] = latest if found else 0
     return 0
+
+# Profile usage-auth freshness and HTTP-auth failure score decisions belong
+# to the compiled runtime health policy; Rust owns cache locks and IO.
+comptime RUNTIME_PROFILE_AUTH_ABI_VERSION: Int64 = 1
+comptime RUNTIME_PROFILE_AUTH_OPERATION_REFRESH: Int64 = 0
+comptime RUNTIME_PROFILE_AUTH_OPERATION_SCORE: Int64 = 1
+
+
+@export("prodex_runtime_profile_auth_cache_policy_v1")
+def prodex_runtime_profile_auth_cache_policy_v1(
+    abi_version: Int64,
+    operation: Int64,
+    fields_address: UInt,
+    field_count: Int64,
+    output_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != RUNTIME_PROFILE_AUTH_ABI_VERSION:
+        return 4
+    if (
+        (operation != RUNTIME_PROFILE_AUTH_OPERATION_REFRESH and operation != RUNTIME_PROFILE_AUTH_OPERATION_SCORE)
+        or field_count != 4
+        or fields_address == 0 or fields_address % 8 != 0
+        or output_address == 0 or output_address % 8 != 0
+    ):
+        return 1
+    var fields = Pointer[mut=False, Int64, ImmUntrackedOrigin](
+        unsafe_from_address=Int(fields_address)
+    )
+    var result: Int64
+    if operation == RUNTIME_PROFILE_AUTH_OPERATION_REFRESH:
+        # fields: now, previous checked_at, freshness threshold,
+        # proactive-refresh flag decided by the existing quota-auth owner.
+        var proactively_due = fields[unsafe_offset=3]
+        if proactively_due != 0 and proactively_due != 1:
+            return 1
+        result = Int64(
+            fields[unsafe_offset=0] < fields[unsafe_offset=1]
+            or runtime_health_saturating_sub(
+                fields[unsafe_offset=0], fields[unsafe_offset=1]
+            ) >= fields[unsafe_offset=2]
+            or proactively_due == 1
+        )
+    else:
+        # All non-401 status codes historically receive the "403" score.
+        var status = fields[unsafe_offset=0]
+        var effective = fields[unsafe_offset=1]
+        var unauthorized_score = fields[unsafe_offset=2]
+        var other_auth_score = fields[unsafe_offset=3]
+        if (
+            status < 0 or status > 65535
+            or effective < 0 or effective > UINT32_MAX
+            or unauthorized_score < 0 or unauthorized_score > UINT32_MAX
+            or other_auth_score < 0 or other_auth_score > UINT32_MAX
+        ):
+            return 1
+        var failure_score = unauthorized_score if status == 401 else other_auth_score
+        result = max(effective, failure_score)
+    Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )[] = result
+    return 0
