@@ -109,10 +109,11 @@ mod tests {
             Ok(vec![5, 2, 3, 4, 6, 1, 7, 0]),
         );
         assert_eq!(quota_runtime_log_order(&[]), Ok(vec![]));
+        // Use subsecond increments representable by SystemTime on Windows too.
         let finer = [
-            entry("newer", Some(epoch + std::time::Duration::from_nanos(2))),
-            entry("older", Some(epoch + std::time::Duration::from_nanos(1))),
-            entry("pre", Some(epoch - std::time::Duration::from_nanos(1))),
+            entry("newer", Some(epoch + std::time::Duration::from_nanos(200))),
+            entry("older", Some(epoch + std::time::Duration::from_nanos(100))),
+            entry("pre", Some(epoch - std::time::Duration::from_nanos(100))),
         ];
         assert_eq!(quota_runtime_log_order(&finer), Ok(vec![2, 1, 0]));
         let many = (0..1025)
