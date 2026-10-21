@@ -186,37 +186,13 @@ impl TerminalInfo {
     }
 
     fn user_agent_token(&self) -> String {
-        let raw = if let Some(program) = self.term_program.as_ref() {
-            match self.version.as_ref().filter(|value| !value.is_empty()) {
-                Some(version) => format!("{program}/{version}"),
-                None => program.clone(),
-            }
-        } else if let Some(term) = self.term.as_ref().filter(|value| !value.is_empty()) {
-            term.clone()
-        } else {
-            match self.name {
-                TerminalName::AppleTerminal => {
-                    format_terminal_version("Apple_Terminal", &self.version)
-                }
-                TerminalName::Ghostty => format_terminal_version("Ghostty", &self.version),
-                TerminalName::Iterm2 => format_terminal_version("iTerm.app", &self.version),
-                TerminalName::WarpTerminal => {
-                    format_terminal_version("WarpTerminal", &self.version)
-                }
-                TerminalName::VsCode => format_terminal_version("vscode", &self.version),
-                TerminalName::WezTerm => format_terminal_version("WezTerm", &self.version),
-                TerminalName::Kitty => "kitty".to_string(),
-                TerminalName::Alacritty => "Alacritty".to_string(),
-                TerminalName::Konsole => format_terminal_version("Konsole", &self.version),
-                TerminalName::GnomeTerminal => "gnome-terminal".to_string(),
-                TerminalName::Vte => format_terminal_version("VTE", &self.version),
-                TerminalName::WindowsTerminal => "WindowsTerminal".to_string(),
-                TerminalName::Dumb => "dumb".to_string(),
-                TerminalName::Unknown => "unknown".to_string(),
-            }
-        };
-
-        sanitize_terminal_header_value(raw)
+        prodex_mojo_core::codex_auth_headers::codex_terminal_token(
+            self.name,
+            self.term_program.as_deref(),
+            self.version.as_deref(),
+            self.term.as_deref(),
+        )
+        .expect("compiled Mojo terminal User-Agent projection returned invalid output")
     }
 }
 
@@ -351,18 +327,6 @@ fn terminal_name_from_term_program(value: &str) -> TerminalName {
     .expect("compiled Mojo TERM_PROGRAM classifier returned invalid output")
 }
 
-fn format_terminal_version(name: &str, version: &Option<String>) -> String {
-    match version.as_ref().filter(|value| !value.is_empty()) {
-        Some(version) => format!("{name}/{version}"),
-        None => name.to_string(),
-    }
-}
-
-fn sanitize_terminal_header_value(value: String) -> String {
-    prodex_mojo_core::codex_auth_headers::codex_terminal_header_token(&value)
-        .expect("compiled Mojo terminal header token sanitizer failed")
-}
-
 fn none_if_whitespace(value: String) -> Option<String> {
     let nonblank = prodex_mojo_core::codex_auth_headers::codex_nonwhitespace(&value)
         .expect("compiled Mojo terminal environment whitespace policy failed");
@@ -372,6 +336,26 @@ fn none_if_whitespace(value: String) -> Option<String> {
 #[cfg(test)]
 mod compiled_auth_headers_tests {
     use super::*;
+
+    #[test]
+    fn compiled_codex_terminal_token_uses_original_metadata_and_safe_scalars() {
+        let terminal = TerminalInfo::new(
+            TerminalName::Ghostty,
+            Some("Custom 🦀 Terminal".into()),
+            Some("2.0\nβ".into()),
+            Some("ignored-term".into()),
+        );
+        assert_eq!(terminal.user_agent_token(), "Custom___Terminal/2.0__");
+        assert_eq!(
+            TerminalInfo::from_term("xterm-256color".into()).user_agent_token(),
+            "xterm-256color"
+        );
+        assert_eq!(
+            TerminalInfo::from_name(TerminalName::Kitty, Some("ignored".into())).user_agent_token(),
+            "kitty"
+        );
+        assert_eq!(TerminalInfo::unknown().user_agent_token(), "unknown");
+    }
 
     #[test]
     fn compiled_codex_probe_preserves_unicode_whitespace_and_last_candidate() {
@@ -396,7 +380,7 @@ mod compiled_auth_headers_tests {
             Some(" \u{2003}Ghostty ".to_owned())
         );
         assert_eq!(
-            sanitize_terminal_header_value("A/B-.\tα".to_owned()),
+            prodex_mojo_core::codex_auth_headers::codex_terminal_header_token("A/B-.\tα").unwrap(),
             "A/B-.__"
         );
     }
