@@ -1,4 +1,8 @@
 use crate::MojoError;
+#[path = "optional_tools_policy/agents_block_render.rs"]
+mod agents_block_render;
+pub use agents_block_render::{AgentsBlockOperation, AgentsBlockRender, agents_block_render};
+
 #[path = "optional_tools_policy/agents_reference.rs"]
 mod agents_reference;
 pub use agents_reference::{AgentsReferenceUpdate, agents_reference_update};

@@ -903,3 +903,100 @@ def prodex_optional_tool_agents_reference_update_v1(
     result[unsafe_offset=0] = written
     result[unsafe_offset=1] = Int64(should_write)
     return 0
+
+# Managed AGENTS block text projection: the host supplies the prior contents,
+# compiled-stripped contents, block delimiters and user block. Mojo chooses
+# Unicode trim rules, paragraph separators, removal/no-op and exact output.
+comptime OPTIONAL_TOOL_AGENTS_BLOCK_RENDER_ABI: Int64 = 1
+comptime OPTIONAL_TOOL_AGENTS_BLOCK_MAX_TEXT: Int64 = 1_048_576
+comptime OPTIONAL_TOOL_AGENTS_BLOCK_VIEW_COUNT: Int64 = 5
+
+
+@export("prodex_optional_tool_agents_block_render_v1")
+def prodex_optional_tool_agents_block_render_v1(
+    abi_version: Int64,
+    operation: Int64,
+    views_address: UInt,
+    view_count: Int64,
+    output_address: UInt,
+    output_capacity: Int64,
+    result_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != OPTIONAL_TOOL_AGENTS_BLOCK_RENDER_ABI:
+        return 4
+    if (
+        operation != 0 and operation != 1
+        or view_count != OPTIONAL_TOOL_AGENTS_BLOCK_VIEW_COUNT
+        or views_address == 0 or views_address % 8 != 0
+        or output_address == 0 or output_capacity < 0
+        or result_address == 0 or result_address % 8 != 0
+    ):
+        return 1
+    var views = Pointer[mut=False, ProdexRichStringView, ImmUntrackedOrigin](
+        unsafe_from_address=Int(views_address)
+    )
+    for index in range(OPTIONAL_TOOL_AGENTS_BLOCK_VIEW_COUNT):
+        if not rich_view_valid(
+            views[unsafe_offset=index], OPTIONAL_TOOL_AGENTS_BLOCK_MAX_TEXT
+        ):
+            return 1
+    var original = views[unsafe_offset=0].copy()
+    var cleaned = views[unsafe_offset=1].copy()
+    var begin = views[unsafe_offset=2].copy()
+    var end = views[unsafe_offset=3].copy()
+    var block = views[unsafe_offset=4].copy()
+    var required = Int64(cleaned.len)
+    if operation == 0:
+        required += Int64(begin.len) + Int64(end.len) + Int64(block.len) + 8
+    if required > output_capacity:
+        return 3
+    var result = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(result_address)
+    )
+    if operation == 1 and optional_tool_views_equal(original, cleaned):
+        result[unsafe_offset=0] = 0
+        result[unsafe_offset=1] = 0
+        return 0
+
+    var output = Pointer[mut=True, UInt8, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    var written: Int64 = 0
+    var bounds = rich_trim_bounds(cleaned)
+    var content_end = bounds[1] if bounds[1] > bounds[0] else Int64(0)
+    if operation == 1:
+        var source = rich_view_ptr(cleaned)
+        for index in range(content_end):
+            output[unsafe_offset=written] = source[unsafe_offset=index]
+            written += 1
+    else:
+        if content_end > 0:
+            var source = rich_view_ptr(cleaned)
+            for index in range(content_end):
+                output[unsafe_offset=written] = source[unsafe_offset=index]
+                written += 1
+            output[unsafe_offset=written] = 10
+            output[unsafe_offset=written + 1] = 10
+            written += 2
+        var begin_bytes = rich_view_ptr(begin)
+        for index in range(Int64(begin.len)):
+            output[unsafe_offset=written] = begin_bytes[unsafe_offset=index]
+            written += 1
+        output[unsafe_offset=written] = 10
+        written += 1
+        var body = rich_trim_bounds(block)
+        var block_bytes = rich_view_ptr(block)
+        for index in range(body[0], body[1]):
+            output[unsafe_offset=written] = block_bytes[unsafe_offset=index]
+            written += 1
+        output[unsafe_offset=written] = 10
+        written += 1
+        var end_bytes = rich_view_ptr(end)
+        for index in range(Int64(end.len)):
+            output[unsafe_offset=written] = end_bytes[unsafe_offset=index]
+            written += 1
+        output[unsafe_offset=written] = 10
+        written += 1
+    result[unsafe_offset=0] = written
+    result[unsafe_offset=1] = 1
+    return 0

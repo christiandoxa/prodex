@@ -66,16 +66,16 @@ pub fn upsert_agents_block(
     localize_text_file(&path)?;
     let contents = read_text_file_limited(&path)?.unwrap_or_default();
     let cleaned = without_marked_block(&contents, begin, end)?;
-    let updated = if cleaned.trim().is_empty() {
-        format!("{begin}\n{}\n{end}\n", block.trim())
-    } else {
-        format!(
-            "{}\n\n{begin}\n{}\n{end}\n",
-            cleaned.trim_end(),
-            block.trim()
-        )
-    };
-    write_text_file(&path, &updated)?;
+    let updated = prodex_mojo_core::optional_tools_policy::agents_block_render(
+        prodex_mojo_core::optional_tools_policy::AgentsBlockOperation::Upsert,
+        &contents,
+        &cleaned,
+        begin,
+        end,
+        block,
+    )
+    .map_err(|error| anyhow::anyhow!("Mojo AGENTS block insertion render failed: {error:?}"))?;
+    write_text_file(&path, &updated.content)?;
     Ok(path)
 }
 
@@ -88,16 +88,18 @@ pub fn remove_agents_block(codex_home: &Path, begin: &str, end: &str) -> Result<
             continue;
         };
         let cleaned = without_marked_block(&contents, begin, end)?;
-        if cleaned != contents {
+        let rendered = prodex_mojo_core::optional_tools_policy::agents_block_render(
+            prodex_mojo_core::optional_tools_policy::AgentsBlockOperation::Remove,
+            &contents,
+            &cleaned,
+            begin,
+            end,
+            "",
+        )
+        .map_err(|error| anyhow::anyhow!("Mojo AGENTS block removal render failed: {error:?}"))?;
+        if rendered.write_needed {
             localize_text_file(&path)?;
-            write_text_file(
-                &path,
-                if cleaned.trim().is_empty() {
-                    ""
-                } else {
-                    cleaned.trim_end()
-                },
-            )?;
+            write_text_file(&path, &rendered.content)?;
         }
     }
     Ok(())
