@@ -144,3 +144,86 @@ fn fixed_runtime_proxy_state_keeps_only_selected_profile() {
         vec!["session-main"]
     );
 }
+
+#[test]
+fn fixed_proxy_state_uses_compiled_exact_name_filter_across_maps() {
+    let selected = "雪";
+    let state = prodex_state::AppState {
+        profiles: BTreeMap::from([
+            (selected.to_string(), test_profile("/tmp/unicode")),
+            ("雪-extra".to_string(), test_profile("/tmp/unicode-extra")),
+            ("SNOW".to_string(), test_profile("/tmp/snow")),
+        ]),
+        last_run_selected_at: BTreeMap::from([
+            (selected.to_string(), 4),
+            ("雪-extra".to_string(), 5),
+        ]),
+        response_profile_bindings: BTreeMap::from([
+            (
+                "selected".to_string(),
+                prodex_state::ResponseProfileBinding {
+                    binding_identity: None,
+                    profile_name: selected.to_string(),
+                    bound_at: 4,
+                },
+            ),
+            (
+                "other".to_string(),
+                prodex_state::ResponseProfileBinding {
+                    binding_identity: None,
+                    profile_name: "雪-extra".to_string(),
+                    bound_at: 5,
+                },
+            ),
+        ]),
+        session_profile_bindings: BTreeMap::from([
+            (
+                "selected".to_string(),
+                prodex_state::ResponseProfileBinding {
+                    binding_identity: None,
+                    profile_name: selected.to_string(),
+                    bound_at: 4,
+                },
+            ),
+            (
+                "other".to_string(),
+                prodex_state::ResponseProfileBinding {
+                    binding_identity: None,
+                    profile_name: "雪-extra".to_string(),
+                    bound_at: 5,
+                },
+            ),
+        ]),
+        ..prodex_state::AppState::default()
+    };
+    let selected_state = fixed_runtime_proxy_state(&state, selected).expect("selected state");
+    assert_eq!(selected_state.active_profile.as_deref(), Some(selected));
+    assert_eq!(
+        selected_state.profiles.keys().collect::<Vec<_>>(),
+        vec![selected]
+    );
+    assert_eq!(
+        selected_state
+            .last_run_selected_at
+            .keys()
+            .collect::<Vec<_>>(),
+        vec![selected]
+    );
+    assert_eq!(
+        selected_state
+            .response_profile_bindings
+            .keys()
+            .collect::<Vec<_>>(),
+        vec!["selected"]
+    );
+    assert_eq!(
+        selected_state
+            .session_profile_bindings
+            .keys()
+            .collect::<Vec<_>>(),
+        vec!["selected"]
+    );
+    // The original state is not mutated by the fixed snapshot projection.
+    assert_eq!(state.profiles.len(), 3);
+    assert!(fixed_runtime_proxy_state(&state, "missing").is_err());
+}

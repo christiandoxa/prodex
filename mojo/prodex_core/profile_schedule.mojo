@@ -725,3 +725,73 @@ def prodex_runtime_profile_name_resolution_v1(
     )
     output[unsafe_offset=0] = action
     return 0
+
+# Fixed-proxy state keeps only entries assigned to the exact selected name.
+# The Rust host owns BTreeMap storage; Mojo decides all name visibility.
+comptime PROFILE_VISIBILITY_ABI: Int64 = 1
+comptime PROFILE_VISIBILITY_MAX_COUNT: Int64 = 1_048_576
+comptime PROFILE_VISIBILITY_MAX_NAME_BYTES: Int64 = 65_536
+
+
+@export("prodex_runtime_profile_exact_visibility_v1")
+def prodex_runtime_profile_exact_visibility_v1(
+    abi_version: Int64,
+    names_address: UInt,
+    count: Int64,
+    selected_address: UInt,
+    selected_length: Int64,
+    output_address: UInt,
+    output_capacity: Int64,
+) abi("C") -> Int64:
+    if abi_version != PROFILE_VISIBILITY_ABI:
+        return 4
+    if (
+        count < 0 or count > PROFILE_VISIBILITY_MAX_COUNT
+        or selected_length < 0
+        or selected_length > PROFILE_VISIBILITY_MAX_NAME_BYTES
+        or output_capacity != count
+        or (count > 0 and (
+            names_address == 0 or names_address % 8 != 0
+            or output_address == 0 or output_address % 8 != 0
+        ))
+        or (selected_length > 0 and selected_address == 0)
+    ):
+        return 1
+    var selected = ProdexRichStringView(
+        selected_address, UInt(selected_length)
+    )
+    if not rich_view_valid(selected, PROFILE_VISIBILITY_MAX_NAME_BYTES):
+        return 1
+    var names = Pointer[mut=False, UInt64, ImmUntrackedOrigin](
+        unsafe_from_address=Int(names_address)
+    )
+    var selected_ptr = Pointer[mut=False, UInt8, ImmUntrackedOrigin](
+        unsafe_from_address=Int(selected_address)
+    )
+    for index in range(count):
+        var name = ProdexRichStringView(
+            UInt(names[unsafe_offset=index * 2]),
+            UInt(names[unsafe_offset=index * 2 + 1]),
+        )
+        if not rich_view_valid(name, PROFILE_VISIBILITY_MAX_NAME_BYTES):
+            return 1
+    var output = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    for index in range(count):
+        var candidate_address = UInt(names[unsafe_offset=index * 2])
+        var candidate_length = Int64(names[unsafe_offset=index * 2 + 1])
+        var same = candidate_length == selected_length
+        if same and selected_length > 0:
+            var candidate_ptr = Pointer[mut=False, UInt8, ImmUntrackedOrigin](
+                unsafe_from_address=Int(candidate_address)
+            )
+            for position in range(selected_length):
+                if (
+                    selected_ptr[unsafe_offset=position]
+                    != candidate_ptr[unsafe_offset=position]
+                ):
+                    same = False
+                    break
+        output[unsafe_offset=index] = Int64(same)
+    return 0
