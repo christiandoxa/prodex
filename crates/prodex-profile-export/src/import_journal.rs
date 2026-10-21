@@ -325,16 +325,28 @@ pub fn validate_profile_lifecycle_operation(operation: &str) -> Result<()> {
 }
 
 pub fn validate_profile_lifecycle_journal_path(path: impl AsRef<Path>) -> Result<()> {
-    let path = path.as_ref();
-    let filename = journal_filename(path)?;
-    let stem = filename
-        .strip_suffix(".json")
-        .context("profile lifecycle journal filename must end with .json")?;
-    let (operation, token) = stem
-        .split_once('-')
-        .context("profile lifecycle journal filename is missing its token")?;
-    validate_profile_lifecycle_operation(operation)?;
-    validate_filename_component(token, "profile lifecycle journal token")
+    use prodex_mojo_core::profile_export::{
+        ProfileJournalFilenameDecision as Decision, ProfileJournalFilenameKind as Kind,
+        profile_journal_filename_plan,
+    };
+    let filename = journal_filename(path.as_ref())?;
+    let decision = profile_journal_filename_plan(filename, Kind::Lifecycle)
+        .expect("compiled Mojo lifecycle journal filename planner failed");
+    match decision {
+        Decision::Valid => Ok(()),
+        Decision::MissingSuffix => {
+            bail!("profile lifecycle journal filename must end with .json")
+        }
+        Decision::MissingToken => {
+            bail!("profile lifecycle journal filename is missing its token")
+        }
+        Decision::InvalidOperation(operation) => {
+            bail!("unknown profile lifecycle operation '{operation}'")
+        }
+        Decision::UnsafeComponent => {
+            bail!("profile lifecycle journal token contains an unsafe filename component")
+        }
+    }
 }
 
 pub fn validate_profile_import_auth_update_journal_path(path: impl AsRef<Path>) -> Result<()> {
@@ -425,11 +437,21 @@ fn journal_filename(path: &Path) -> Result<&str> {
 }
 
 fn validate_journal_filename(path: &Path, label: &str) -> Result<()> {
+    use prodex_mojo_core::profile_export::{
+        ProfileJournalFilenameDecision as Decision, ProfileJournalFilenameKind as Kind,
+        profile_journal_filename_plan,
+    };
     let filename = journal_filename(path)?;
-    let stem = filename
-        .strip_suffix(".json")
-        .with_context(|| format!("{label} filename must end with .json"))?;
-    validate_filename_component(stem, label)
+    let decision = profile_journal_filename_plan(filename, Kind::AuthUpdate)
+        .expect("compiled Mojo auth-update journal filename planner failed");
+    match decision {
+        Decision::Valid => Ok(()),
+        Decision::MissingSuffix => bail!("{label} filename must end with .json"),
+        Decision::UnsafeComponent => bail!("{label} contains an unsafe filename component"),
+        Decision::MissingToken | Decision::InvalidOperation(_) => {
+            bail!("compiled Mojo auth-update journal returned invalid filename category")
+        }
+    }
 }
 
 fn validate_filename_component(value: &str, label: &str) -> Result<()> {

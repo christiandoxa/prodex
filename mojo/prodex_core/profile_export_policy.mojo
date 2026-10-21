@@ -1993,6 +1993,34 @@ comptime PROFILE_JOURNAL_TOKEN_ABI_VERSION: Int64 = 1
 comptime PROFILE_JOURNAL_TOKEN_MAX_BYTES: Int64 = 1_048_576
 
 
+
+def profile_journal_component_valid(view: ProdexRichStringView) -> Bool:
+    if view.len == 0:
+        return False
+    if rich_view_matches_literal["."](view, False) or rich_view_matches_literal[".."](view, False):
+        return False
+    var bytes = rich_view_ptr(view)
+    for index in range(Int64(view.len)):
+        var byte = bytes[unsafe_offset=index]
+        if not (
+            (byte >= 48 and byte <= 57)
+            or (byte >= 65 and byte <= 90)
+            or (byte >= 97 and byte <= 122)
+            or byte == 45 or byte == 95 or byte == 46
+        ):
+            return False
+    return True
+
+
+def profile_journal_operation_valid(view: ProdexRichStringView) -> Bool:
+    return (
+        rich_view_matches_literal["import"](view, False)
+        or rich_view_matches_literal["login"](view, False)
+        or rich_view_matches_literal["manage"](view, False)
+        or rich_view_matches_literal["remove"](view, False)
+    )
+
+
 @export("prodex_profile_export_journal_token_policy_v1")
 def prodex_profile_export_journal_token_policy_v1(
     abi_version: Int64,
@@ -2013,34 +2041,88 @@ def prodex_profile_export_journal_token_policy_v1(
     var view = ProdexRichStringView(value_address, UInt(value_length))
     if not rich_view_valid(view, PROFILE_JOURNAL_TOKEN_MAX_BYTES):
         return 1
-    var accepted: Bool
-    if operation == 1:
-        accepted = (
-            rich_view_matches_literal["import"](view, False)
-            or rich_view_matches_literal["login"](view, False)
-            or rich_view_matches_literal["manage"](view, False)
-            or rich_view_matches_literal["remove"](view, False)
-        )
-    else:
-        accepted = value_length > 0
-        if (
-            rich_view_matches_literal["."](view, False)
-            or rich_view_matches_literal[".."](view, False)
-        ):
-            accepted = False
-        if accepted:
-            var bytes = rich_view_ptr(view)
-            for index in range(value_length):
-                var byte = bytes[unsafe_offset=index]
-                if not (
-                    (byte >= 48 and byte <= 57)
-                    or (byte >= 65 and byte <= 90)
-                    or (byte >= 97 and byte <= 122)
-                    or byte == 45 or byte == 95 or byte == 46
-                ):
-                    accepted = False
-                    break
+    var accepted = (
+        profile_journal_component_valid(view)
+        if operation == 0
+        else profile_journal_operation_valid(view)
+    )
     Pointer[mut=True, Int64, MutUntrackedOrigin](
         unsafe_from_address=Int(output_address)
     )[] = Int64(accepted)
+    return 0
+
+# Journal filename plan. Kind=0 auth-update, kind=1 lifecycle. Issue tags:
+# 0 valid, 1 missing .json suffix, 2 missing '-' operation separator,
+# 3 unsupported lifecycle operation (returned [start,end] source span),
+# 4 unsafe basename/token. Never performs any filesystem operation.
+comptime PROFILE_JOURNAL_FILENAME_ABI_VERSION: Int64 = 1
+
+
+@export("prodex_profile_export_journal_filename_plan_v1")
+def prodex_profile_export_journal_filename_plan_v1(
+    abi_version: Int64,
+    kind: Int64,
+    name_address: UInt,
+    name_length: Int64,
+    output_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != PROFILE_JOURNAL_FILENAME_ABI_VERSION:
+        return 4
+    if (
+        (kind != 0 and kind != 1)
+        or name_length < 0 or name_length > PROFILE_JOURNAL_TOKEN_MAX_BYTES
+        or (name_length > 0 and name_address == 0)
+        or output_address == 0 or output_address % 8 != 0
+    ):
+        return 1
+    var view = ProdexRichStringView(name_address, UInt(name_length))
+    if not rich_view_valid(view, PROFILE_JOURNAL_TOKEN_MAX_BYTES):
+        return 1
+    var issue: Int64 = 0
+    var operation_start: Int64 = 0
+    var operation_end: Int64 = 0
+    if name_length < 5:
+        issue = 1
+    else:
+        var suffix = ProdexRichStringView(
+            name_address + UInt(name_length - 5), UInt(5)
+        )
+        if not rich_view_matches_literal[".json"](suffix, False):
+            issue = 1
+        else:
+            var stem_length = name_length - 5
+            var stem = ProdexRichStringView(
+                name_address, UInt(stem_length)
+            )
+            if kind == 0:
+                if not profile_journal_component_valid(stem):
+                    issue = 4
+            else:
+                var bytes = rich_view_ptr(stem)
+                var separator: Int64 = -1
+                for index in range(stem_length):
+                    if bytes[unsafe_offset=index] == 45:
+                        separator = index
+                        break
+                if separator == -1:
+                    issue = 2
+                else:
+                    var operation = ProdexRichStringView(
+                        name_address, UInt(separator)
+                    )
+                    var token = ProdexRichStringView(
+                        name_address + UInt(separator + 1),
+                        UInt(stem_length - separator - 1),
+                    )
+                    if not profile_journal_operation_valid(operation):
+                        issue = 3
+                        operation_end = separator
+                    elif not profile_journal_component_valid(token):
+                        issue = 4
+    var out = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    out[unsafe_offset=0] = issue
+    out[unsafe_offset=1] = operation_start
+    out[unsafe_offset=2] = operation_end
     return 0
