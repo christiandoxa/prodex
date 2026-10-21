@@ -368,30 +368,45 @@ def config_contains_unicode_whitespace(view: ProdexRichStringView) -> Bool:
 
 def config_parse_external_provider_uint(
     view: ProdexRichStringView,
-) -> Tuple[Int64, UInt64]:
+) -> Tuple[Int64, UInt64, Int64]:
     if view.len == 0:
-        return (1, UInt64(0))
+        return (1, UInt64(0), 0)
     if config_contains_unicode_whitespace(view):
-        return (2, UInt64(0))
+        return (2, UInt64(0), 0)
     var ptr = rich_view_ptr(view)
     var index: Int64 = 0
     if ptr[unsafe_offset=0] == 43:
         index = 1
     if index == Int64(view.len):
-        return (3, UInt64(0))
+        return (3, UInt64(0), 1)
     var value = UInt64(0)
     while index < Int64(view.len):
         var digit = ptr[unsafe_offset=index]
         if digit < 48 or digit > 57:
-            return (3, UInt64(0))
+            return (3, UInt64(0), 1)
         var numeric_digit = UInt64(digit - 48)
         if value > (UInt64(0xFFFFFFFFFFFFFFFF) - numeric_digit) // 10:
-            return (3, UInt64(0))
+            return (3, UInt64(0), 2)
         value = value * 10 + numeric_digit
         index += 1
     if value <= 1:
-        return (4, UInt64(0))
-    return (0, value)
+        return (4, UInt64(0), 0)
+    return (0, value, 0)
+
+
+@export("prodex_provider_catalog_uint_v1")
+def prodex_provider_catalog_uint_v1(
+    version: Int64, address: UInt, length: Int64, output_address: UInt,
+) abi("C") -> Int64:
+    if version != SUPER_PROVIDER_CONFIG_ABI_VERSION:
+        return 4
+    if not config_valid_view(address, length) or output_address == 0 or output_address % 8 != 0:
+        return 1
+    var parsed = config_parse_external_provider_uint(config_view(address, length))
+    var output = Pointer[mut=True, UInt64, MutUntrackedOrigin](unsafe_from_address=Int(output_address))
+    output[unsafe_offset=0] = parsed[1]
+    output[unsafe_offset=1] = UInt64(parsed[2])
+    return 0 if parsed[0] == 0 else 10 + parsed[0]
 
 
 def config_external_provider_optional_view_valid(

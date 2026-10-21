@@ -8331,3 +8331,15 @@ runtime-smoke, strict workspace Clippy and ownership/compatibility guards pass.
 Official share is 36.304688936071585% (136,278 Mojo / 239,095 Rust production
 LOC). The 75% goal remains active. Details are in
 `migration/provider-conversation-memory-mojo-20261022.md`.
+
+## Native provider catalog integers reuse Mojo validation (2026-10-22)
+
+DeepSeek, Gemini and local-provider catalog preparation now reuse the existing
+Mojo external-provider integer parser. The Rust parser and whitespace/lower
+bound checks are removed, while exact error messages and integer source-error
+text remain covered. Direct Mojo, five bridge, two shared caller and 15
+provider-config tests, strict workspace Clippy and ownership/compatibility
+guards pass. The additional checked Rust shim moves raw share slightly down
+to 36.303050159420174% (136,290 Mojo / 239,133 Rust LOC); no counting rule or guard
+was changed. The 75% target remains open. Evidence is in
+`migration/provider-catalog-uint-mojo-20261022.md`.

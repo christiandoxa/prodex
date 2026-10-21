@@ -1,4 +1,6 @@
 use crate::MojoError;
+mod catalog_unsigned;
+pub use catalog_unsigned::{CatalogUnsignedPlan, catalog_unsigned_value};
 
 const ABI_VERSION: i64 = 1;
 const CONFIG_RECORDS: usize = 14;

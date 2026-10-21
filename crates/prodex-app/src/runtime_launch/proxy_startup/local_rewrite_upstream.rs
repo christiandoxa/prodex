@@ -1253,7 +1253,7 @@ mod tests {
     use prodex_state::ResponseProfileBinding;
     use std::collections::VecDeque;
     use std::io::{self, Cursor, Read, Write};
-    use std::net::{TcpListener, TcpStream};
+    use std::net::TcpListener;
     use std::sync::Arc;
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::thread::{self, JoinHandle};
@@ -1421,6 +1421,9 @@ mod tests {
             .expect("mock upstream address should be available");
         let server = thread::spawn(move || {
             let (mut stream, _) = listener.accept().expect("mock upstream should accept");
+            stream
+                .set_read_timeout(Some(Duration::from_millis(10)))
+                .expect("mock request timeout should set");
             read_mock_request(&mut stream);
             stream
                 .write_all(
@@ -1442,17 +1445,6 @@ mod tests {
             runtime,
             server,
         )
-    }
-
-    fn read_mock_request(stream: &mut TcpStream) {
-        let mut request = Vec::new();
-        let mut chunk = [0_u8; 256];
-        while !request.windows(4).any(|window| window == b"\r\n\r\n") {
-            match stream.read(&mut chunk) {
-                Ok(0) | Err(_) => break,
-                Ok(read) => request.extend_from_slice(&chunk[..read]),
-            }
-        }
     }
 
     fn read_prefetch_body(prefetch: super::RuntimeLocalRewriteSsePrefetch) -> io::Result<Vec<u8>> {
