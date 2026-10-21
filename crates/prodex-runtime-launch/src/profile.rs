@@ -1,7 +1,8 @@
 use anyhow::bail;
 use prodex_mojo_core::rich::ascii_casefold_equal_exact;
 use prodex_mojo_core::runtime::{
-    ProfileNameResolution, profile_name_resolution_plan, profile_next_selection_at,
+    ProfileNameResolution, profile_exact_visibility_mask, profile_name_resolution_plan,
+    profile_next_selection_at,
 };
 use std::path::{Path, PathBuf};
 
@@ -25,19 +26,61 @@ pub fn fixed_runtime_proxy_state(
     if !fixed.profiles.contains_key(profile_name) {
         bail!("profile '{}' is missing", profile_name);
     }
-    fixed
-        .profiles
-        .retain(|candidate_name, _| candidate_name == profile_name);
+    // Project borrowed profile identifiers while maps are immutable. Mojo
+    // returns the exact-match keep mask for every map in a single call.
+    let (profile_keep, selection_keep, response_keep, session_keep) = {
+        let mut names = Vec::<&str>::new();
+        names.extend(fixed.profiles.keys().map(String::as_str));
+        let profiles_end = names.len();
+        names.extend(fixed.last_run_selected_at.keys().map(String::as_str));
+        let selections_end = names.len();
+        names.extend(
+            fixed
+                .response_profile_bindings
+                .values()
+                .map(|binding| binding.profile_name.as_str()),
+        );
+        let responses_end = names.len();
+        names.extend(
+            fixed
+                .session_profile_bindings
+                .values()
+                .map(|binding| binding.profile_name.as_str()),
+        );
+        let keep = profile_exact_visibility_mask(&names, profile_name)
+            .expect("compiled Mojo fixed-profile visibility planner failed");
+        (
+            keep[..profiles_end].to_vec(),
+            keep[profiles_end..selections_end].to_vec(),
+            keep[selections_end..responses_end].to_vec(),
+            keep[responses_end..].to_vec(),
+        )
+    };
+    let mut index = 0usize;
+    fixed.profiles.retain(|_, _| {
+        let keep = profile_keep[index];
+        index += 1;
+        keep
+    });
+    index = 0;
+    fixed.last_run_selected_at.retain(|_, _| {
+        let keep = selection_keep[index];
+        index += 1;
+        keep
+    });
+    index = 0;
+    fixed.response_profile_bindings.retain(|_, _| {
+        let keep = response_keep[index];
+        index += 1;
+        keep
+    });
+    index = 0;
+    fixed.session_profile_bindings.retain(|_, _| {
+        let keep = session_keep[index];
+        index += 1;
+        keep
+    });
     fixed.active_profile = Some(profile_name.to_string());
-    fixed
-        .last_run_selected_at
-        .retain(|candidate_name, _| candidate_name == profile_name);
-    fixed
-        .response_profile_bindings
-        .retain(|_, binding| binding.profile_name == profile_name);
-    fixed
-        .session_profile_bindings
-        .retain(|_, binding| binding.profile_name == profile_name);
     Ok(fixed)
 }
 

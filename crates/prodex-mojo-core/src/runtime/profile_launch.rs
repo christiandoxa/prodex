@@ -11,6 +11,15 @@ unsafe extern "C" {
         selected_at: i64,
         output_address: u64,
     ) -> i64;
+    fn prodex_runtime_profile_exact_visibility_v1(
+        abi_version: i64,
+        names_address: u64,
+        count: i64,
+        selected_address: u64,
+        selected_length: i64,
+        output_address: u64,
+        output_capacity: i64,
+    ) -> i64;
     fn prodex_runtime_profile_name_resolution_v1(
         abi_version: i64,
         has_requested: i64,
@@ -94,6 +103,47 @@ pub fn profile_name_resolution_plan(
     }
 }
 
+/// Return the exact-match keep mask for borrowed profile identifiers. Mojo
+/// owns the comparison; the host only applies the returned flags to its maps.
+pub fn profile_exact_visibility_mask(
+    names: &[&str],
+    selected: &str,
+) -> Result<Vec<bool>, MojoError> {
+    if names.len() > MAX_OBSERVATIONS
+        || selected.len() > 65_536
+        || names.iter().any(|name| name.len() > 65_536)
+    {
+        return Err(MojoError::InvalidInput);
+    }
+    let mut views = Vec::<u64>::with_capacity(names.len().saturating_mul(2));
+    for name in names {
+        views.extend([
+            name.as_ptr() as usize as u64,
+            u64::try_from(name.len()).map_err(|_| MojoError::InvalidInput)?,
+        ]);
+    }
+    let mut output = vec![-1_i64; names.len()];
+    check_status(unsafe {
+        prodex_runtime_profile_exact_visibility_v1(
+            ABI_VERSION,
+            views.as_ptr() as usize as u64,
+            i64::try_from(names.len()).map_err(|_| MojoError::InvalidInput)?,
+            selected.as_ptr() as usize as u64,
+            i64::try_from(selected.len()).map_err(|_| MojoError::InvalidInput)?,
+            output.as_mut_ptr() as usize as u64,
+            i64::try_from(output.len()).map_err(|_| MojoError::InvalidInput)?,
+        )
+    })?;
+    output
+        .into_iter()
+        .map(|tag| match tag {
+            0 => Ok(false),
+            1 => Ok(true),
+            _ => Err(MojoError::InvalidOutput),
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -106,6 +156,19 @@ mod tests {
         assert_eq!(profile_next_selection_at(&[12, 20], 30), Ok(30));
         assert_eq!(profile_next_selection_at(&[i64::MAX], 0), Ok(i64::MAX));
         assert_eq!(profile_next_selection_at(&[i64::MIN, 0], i64::MIN), Ok(1));
+    }
+
+    #[test]
+    fn compiled_profile_visibility_is_exact_and_handles_unicode() {
+        assert_eq!(
+            profile_exact_visibility_mask(&["main", "main-extra", "MAIN", "雪", "雪", ""], "雪",),
+            Ok(vec![false, false, false, true, true, false])
+        );
+        assert_eq!(profile_exact_visibility_mask(&[], "anything"), Ok(vec![]));
+        assert_eq!(
+            profile_exact_visibility_mask(&["", "main"], ""),
+            Ok(vec![true, false])
+        );
     }
 
     #[test]
