@@ -3377,6 +3377,7 @@ export function findViolations(files) {
         "mcp_stdio_policy::header_is_content_length(",
         "mcp_stdio_policy::parse_content_length(",
         "mcp_stdio_policy::first_line_is_header(",
+        "line_chunk_plan(",
       ];
       const violations = required
         .filter((call) => !contents.includes(call))
@@ -3386,6 +3387,8 @@ export function findViolations(files) {
         || /split_once\(':'\)/u.test(contents)
         || /parse::<usize>\(\)/u.test(contents)
         || /fn\s+mcp_first_line_looks_like_header\s*\(/u.test(contents)
+        || contents.includes(".position(|byte| *byte == b'\\n')")
+        || contents.includes(".find(|byte| !byte.is_ascii_whitespace())")
       ) {
         violations.push(filePath + ": contains restored Rust MCP Content-Length semantics");
       }
@@ -3396,6 +3399,8 @@ export function findViolations(files) {
         "prodex_mcp_header_is_content_length_v1(",
         "prodex_mcp_content_length_parse_v1(",
         "prodex_mcp_first_line_is_header_v1(",
+        "prodex_mcp_line_chunk_v1(",
+        "pub fn line_chunk_plan(",
       ];
       return required
         .filter((call) => !contents.includes(call))
@@ -17721,6 +17726,20 @@ function selfTest() {
   assert.match(findViolations([[sharedImageBatchFile,
     sharedImageBatchCaller + '\nconst CODEX_IMAGE_TAG_PREFIX: &str = "<image ";'
   ]]).join("\n"), /restored Rust shared-attachment scanner/u);
+  const mcpChunkFile = "crates/prodex-mcp-stdio/src/lib.rs";
+  const mcpChunkCaller = [
+    "mcp_stdio_policy::header_is_content_length(",
+    "mcp_stdio_policy::parse_content_length(",
+    "mcp_stdio_policy::first_line_is_header(",
+    "line_chunk_plan(",
+  ].join("\n");
+  assert.deepEqual(findViolations([[mcpChunkFile, mcpChunkCaller]]), []);
+  assert.match(findViolations([[mcpChunkFile,
+    mcpChunkCaller.replace("line_chunk_plan(", "")
+  ]]).join("\n"), /MCP framing hard replacement/u);
+  assert.match(findViolations([[mcpChunkFile,
+    mcpChunkCaller + "\n.find(|byte| !byte.is_ascii_whitespace())"
+  ]]).join("\n"), /restored Rust MCP Content-Length semantics/u);
 
 }
 

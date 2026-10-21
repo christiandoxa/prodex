@@ -9,6 +9,71 @@ comptime MCP_STDIO_INVALID: Int64 = 1
 comptime MCP_STDIO_ABI: Int64 = 4
 comptime MCP_STDIO_MAX_HEADER_BYTES: Int64 = 65_536
 comptime MCP_STDIO_U64_MAX: UInt64 = 18_446_744_073_709_551_615
+comptime MCP_STDIO_MESSAGE_MAX_BYTES: UInt64 = 67_108_864
+comptime MCP_STDIO_FIRST_HEADER_MAX_BYTES: UInt64 = 4_096
+
+
+def mcp_first_byte_is_header(first_byte: Int64) -> Bool:
+    return first_byte != 123 and first_byte != 91
+
+
+# Raw chunks can end inside UTF-8. The host validates the completed line only.
+@export("prodex_mcp_line_chunk_v1")
+def prodex_mcp_line_chunk_v1(
+    abi_version: Int64,
+    mode: Int64,
+    input_address: UInt,
+    input_length: Int64,
+    buffered: UInt64,
+    first_byte: Int64,
+    fixed_limit: UInt64,
+    output_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != MCP_STDIO_ABI_VERSION:
+        return MCP_STDIO_ABI
+    if (
+        (mode != 0 and mode != 1)
+        or input_length < 0 or input_length > Int64(MCP_STDIO_MESSAGE_MAX_BYTES) + 1
+        or (input_length > 0 and input_address == 0)
+        or first_byte < -1 or first_byte > 255
+        or fixed_limit > MCP_STDIO_MESSAGE_MAX_BYTES
+        or output_address == 0 or output_address % 8 != 0
+    ):
+        return MCP_STDIO_INVALID
+    var source = Pointer[mut=False, UInt8, ImmUntrackedOrigin](
+        unsafe_from_address=Int(input_address)
+    )
+    var take: Int64 = 0
+    var first = first_byte
+    var complete = False
+    while take < input_length:
+        var byte = source[unsafe_offset=take]
+        # Rust ASCII whitespace excludes vertical tab (11).
+        if first == -1 and not (
+            byte == 9 or byte == 10 or byte == 12 or byte == 13 or byte == 32
+        ):
+            first = Int64(byte)
+        take += 1
+        if byte == 10:
+            complete = True
+            break
+    var limit = fixed_limit
+    if mode == 0:
+        limit = MCP_STDIO_FIRST_HEADER_MAX_BYTES
+        if first != -1 and not mcp_first_byte_is_header(first):
+            limit = MCP_STDIO_MESSAGE_MAX_BYTES
+    var too_large = buffered > limit
+    if not too_large:
+        too_large = UInt64(take) > limit - buffered
+    var output = Pointer[mut=True, UInt64, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    output[unsafe_offset=0] = UInt64(take)
+    output[unsafe_offset=1] = UInt64(first) if first != -1 else UInt64(256)
+    output[unsafe_offset=2] = limit
+    output[unsafe_offset=3] = UInt64(too_large)
+    output[unsafe_offset=4] = UInt64(complete)
+    return MCP_STDIO_OK
 
 
 def mcp_ascii_lower(byte: UInt8) -> UInt8:
@@ -175,5 +240,5 @@ def prodex_mcp_first_line_is_header_v1(
     var output = Pointer[mut=True, Int64, MutUntrackedOrigin](
         unsafe_from_address=Int(output_address)
     )
-    output[] = Int64(first_byte != 123 and first_byte != 91)
+    output[] = Int64(mcp_first_byte_is_header(first_byte))
     return MCP_STDIO_OK

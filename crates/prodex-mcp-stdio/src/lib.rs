@@ -1,10 +1,12 @@
 use anyhow::{Context, Result};
+use prodex_mojo_core::mcp_stdio_policy::{McpLineLimit, line_chunk_plan};
 use serde_json::Value;
 use std::io::{self, BufRead, Write};
 
 const MCP_MESSAGE_MAX_BYTES: usize = 64 * 1024 * 1024;
 // Framing headers are bounded independently so an attacker cannot grow the
 // first-line buffer to the much larger JSON message limit.
+#[cfg(test)]
 const MCP_FIRST_HEADER_LINE_MAX_BYTES: usize = 4 * 1024;
 const MCP_HEADER_LINE_MAX_BYTES: usize = 16 * 1024;
 // Bound the complete framing block, including blank preambles and separators,
@@ -58,14 +60,9 @@ fn read_mcp_first_line<R: BufRead>(
     framing_bytes: &mut usize,
 ) -> io::Result<Option<String>> {
     loop {
-        let Some(line) = read_mcp_physical_first_line(reader)? else {
+        let Some((line, first_non_whitespace)) = read_mcp_physical_first_line(reader)? else {
             return Ok(None);
         };
-        let first_non_whitespace = line
-            .as_bytes()
-            .iter()
-            .find(|byte| !byte.is_ascii_whitespace())
-            .copied();
         let first_line_is_header = first_non_whitespace.is_some_and(|byte| {
             prodex_mojo_core::mcp_stdio_policy::first_line_is_header(byte)
                 .expect("Mojo MCP first-line policy returned invalid output")
@@ -93,24 +90,20 @@ fn charge_mcp_framing_bytes(total: &mut usize, bytes: usize) -> io::Result<()> {
     Ok(())
 }
 
-fn read_mcp_physical_first_line<R: BufRead>(reader: &mut R) -> io::Result<Option<String>> {
+fn read_mcp_physical_first_line<R: BufRead>(
+    reader: &mut R,
+) -> io::Result<Option<(String, Option<u8>)>> {
     let mut bytes = Vec::new();
     let mut first_non_whitespace = None;
-    let mut first_line_is_header = None;
     loop {
-        match append_mcp_first_line_chunk(
-            reader,
-            &mut bytes,
-            &mut first_non_whitespace,
-            &mut first_line_is_header,
-        )? {
+        match append_mcp_first_line_chunk(reader, &mut bytes, &mut first_non_whitespace)? {
             McpFirstLineRead::Eof => return Ok(None),
             McpFirstLineRead::More => {}
             McpFirstLineRead::Complete => break,
         }
     }
     String::from_utf8(bytes)
-        .map(Some)
+        .map(|line| Some((line, first_non_whitespace)))
         .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err))
 }
 
@@ -124,7 +117,6 @@ fn append_mcp_first_line_chunk<R: BufRead>(
     reader: &mut R,
     bytes: &mut Vec<u8>,
     first_non_whitespace: &mut Option<u8>,
-    first_line_is_header: &mut Option<bool>,
 ) -> io::Result<McpFirstLineRead> {
     let available = reader.fill_buf()?;
     if available.is_empty() {
@@ -134,41 +126,25 @@ fn append_mcp_first_line_chunk<R: BufRead>(
             McpFirstLineRead::Complete
         });
     }
-    let take = available
-        .iter()
-        .position(|byte| *byte == b'\n')
-        .map(|index| index + 1)
-        .unwrap_or(available.len());
-    let next_first_non_whitespace = available[..take]
-        .iter()
-        .find(|byte| !byte.is_ascii_whitespace())
-        .copied();
-    let first = first_non_whitespace.or(next_first_non_whitespace);
-    if first_line_is_header.is_none()
-        && let Some(byte) = first
-    {
-        *first_line_is_header = Some(
-            prodex_mojo_core::mcp_stdio_policy::first_line_is_header(byte)
-                .expect("Mojo MCP first-line policy returned invalid output"),
-        );
-    }
-    let limit = if *first_line_is_header == Some(false) {
-        MCP_MESSAGE_MAX_BYTES
-    } else {
-        MCP_FIRST_HEADER_LINE_MAX_BYTES
-    };
-    if bytes.len().saturating_add(take) > limit {
+    let plan = line_chunk_plan(
+        available,
+        bytes.len(),
+        *first_non_whitespace,
+        McpLineLimit::FirstLine,
+    )
+    .expect("Mojo MCP first-line chunk plan returned invalid output");
+    let limit = plan.limit;
+    if plan.too_large {
         return Err(io::Error::new(
             io::ErrorKind::InvalidData,
             format!("MCP first line exceeds safe size limit ({limit} bytes)"),
         ));
     }
+    let take = plan.take;
     bytes.extend_from_slice(&available[..take]);
     reader.consume(take);
-    if first_non_whitespace.is_none() {
-        *first_non_whitespace = next_first_non_whitespace;
-    }
-    Ok(if bytes.last() == Some(&b'\n') {
+    *first_non_whitespace = plan.first_non_whitespace;
+    Ok(if plan.complete {
         McpFirstLineRead::Complete
     } else {
         McpFirstLineRead::More
@@ -185,12 +161,10 @@ fn read_limited_line<R: BufRead>(reader: &mut R, limit: usize) -> io::Result<Opt
             }
             break;
         }
-        let take = available
-            .iter()
-            .position(|byte| *byte == b'\n')
-            .map(|index| index + 1)
-            .unwrap_or(available.len());
-        if bytes.len().saturating_add(take) > limit {
+        let plan = line_chunk_plan(available, bytes.len(), None, McpLineLimit::Fixed(limit))
+            .expect("Mojo MCP bounded-line chunk plan returned invalid output");
+        let take = plan.take;
+        if plan.too_large {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidData,
                 format!("MCP line exceeds safe size limit ({limit} bytes)"),
@@ -198,7 +172,7 @@ fn read_limited_line<R: BufRead>(reader: &mut R, limit: usize) -> io::Result<Opt
         }
         bytes.extend_from_slice(&available[..take]);
         reader.consume(take);
-        if bytes.last() == Some(&b'\n') {
+        if plan.complete {
             break;
         }
     }

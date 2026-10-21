@@ -1,6 +1,25 @@
 use crate::MojoError;
 
 const ABI_VERSION: i64 = 1;
+const MESSAGE_MAX_BYTES: usize = 67_108_864;
+
+/// First-line classification uses the existing separate header/message limits.
+/// Continuation headers use the caller's exact line limit.
+#[derive(Debug, Clone, Copy)]
+pub enum McpLineLimit {
+    FirstLine,
+    Fixed(usize),
+}
+
+/// Checked copy/consume plan for a borrowed raw BufRead chunk.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct McpLineChunkPlan {
+    pub take: usize,
+    pub first_non_whitespace: Option<u8>,
+    pub limit: usize,
+    pub too_large: bool,
+    pub complete: bool,
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum McpContentLengthParse {
@@ -10,6 +29,16 @@ pub enum McpContentLengthParse {
 }
 
 unsafe extern "C" {
+    fn prodex_mcp_line_chunk_v1(
+        abi_version: i64,
+        mode: i64,
+        input_address: u64,
+        input_length: i64,
+        buffered: u64,
+        first_byte: i64,
+        fixed_limit: u64,
+        output_address: u64,
+    ) -> i64;
     fn prodex_mcp_header_is_content_length_v1(
         abi_version: i64,
         input_address: u64,
@@ -29,6 +58,55 @@ unsafe extern "C" {
         first_byte: i64,
         output_address: u64,
     ) -> i64;
+}
+
+/// Mojo owns LF scanning, ASCII first-byte detection, line limits and overflow.
+/// Raw input is bounded before borrowing; UTF-8 validation stays at line assembly.
+pub fn line_chunk_plan(
+    available: &[u8],
+    buffered: usize,
+    first: Option<u8>,
+    limits: McpLineLimit,
+) -> Result<McpLineChunkPlan, MojoError> {
+    let available = &available[..available.len().min(MESSAGE_MAX_BYTES + 1)];
+    let (mode, fixed_limit) = match limits {
+        McpLineLimit::FirstLine => (0, 0),
+        McpLineLimit::Fixed(limit) => (1, limit as u64),
+    };
+    let mut output = [u64::MAX; 5];
+    status(unsafe {
+        prodex_mcp_line_chunk_v1(
+            ABI_VERSION,
+            mode,
+            available.as_ptr() as usize as u64,
+            available.len() as i64,
+            buffered as u64,
+            first.map_or(-1, i64::from),
+            fixed_limit,
+            output.as_mut_ptr() as usize as u64,
+        )
+    })?;
+    let take = usize::try_from(output[0]).map_err(|_| MojoError::InvalidOutput)?;
+    let first_non_whitespace = match output[1] {
+        256 => None,
+        value => Some(u8::try_from(value).map_err(|_| MojoError::InvalidOutput)?),
+    };
+    let limit = usize::try_from(output[2]).map_err(|_| MojoError::InvalidOutput)?;
+    if take > available.len()
+        || (take == 0 && !available.is_empty())
+        || limit > MESSAGE_MAX_BYTES
+        || output[3] > 1
+        || output[4] > 1
+    {
+        return Err(MojoError::InvalidOutput);
+    }
+    Ok(McpLineChunkPlan {
+        take,
+        first_non_whitespace,
+        limit,
+        too_large: output[3] == 1,
+        complete: output[4] == 1,
+    })
 }
 
 fn status(value: i64) -> Result<(), MojoError> {
@@ -94,6 +172,10 @@ pub fn first_line_is_header(byte: u8) -> Result<bool, MojoError> {
         _ => Err(MojoError::InvalidOutput),
     }
 }
+
+#[cfg(test)]
+#[path = "mcp_stdio_policy/chunk_tests.rs"]
+mod chunk_tests;
 
 #[cfg(test)]
 mod tests {
