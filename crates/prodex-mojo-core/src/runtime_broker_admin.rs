@@ -2,6 +2,16 @@ use crate::MojoError;
 
 const ABI_VERSION: i64 = 1;
 
+/// Parsed admin pagination or the original first query error.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RuntimeBrokerSnapshotQuery {
+    Query { after: u64, limit: usize },
+    Malformed,
+    InvalidCursor,
+    InvalidLimit,
+    LimitOutOfBounds,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RuntimeBrokerAdminOperation {
     Activate,
@@ -15,6 +25,13 @@ pub enum RuntimeBrokerAdminValueKind {
 }
 
 unsafe extern "C" {
+    fn prodex_runtime_broker_snapshot_query_v1(
+        abi_version: i64,
+        input_address: u64,
+        input_length: i64,
+        max_entries: u64,
+        output_address: u64,
+    ) -> i64;
     fn prodex_runtime_broker_admin_method_v1(
         abi_version: i64,
         operation: i64,
@@ -29,6 +46,46 @@ unsafe extern "C" {
         value_length: i64,
         output_address: u64,
     ) -> i64;
+}
+
+/// Parse pagination in the existing compiled broker admin owner. Duplicate
+/// keys retain last-value precedence, without URL decoding or whitespace trim.
+pub fn log_snapshot_query(
+    url: &str,
+    max_entries: usize,
+) -> Result<RuntimeBrokerSnapshotQuery, MojoError> {
+    let mut output = [u64::MAX; 3];
+    match unsafe {
+        prodex_runtime_broker_snapshot_query_v1(
+            ABI_VERSION,
+            url.as_ptr() as usize as u64,
+            signed_len(url)?,
+            max_entries as u64,
+            output.as_mut_ptr() as usize as u64,
+        )
+    } {
+        0 => {}
+        1 => return Err(MojoError::InvalidInput),
+        4 => return Err(MojoError::AbiMismatch),
+        _ => return Err(MojoError::InvalidOutput),
+    }
+    match output[0] {
+        0 => {
+            let limit = usize::try_from(output[2]).map_err(|_| MojoError::InvalidOutput)?;
+            if limit == 0 || limit > max_entries {
+                return Err(MojoError::InvalidOutput);
+            }
+            Ok(RuntimeBrokerSnapshotQuery::Query {
+                after: output[1],
+                limit,
+            })
+        }
+        1 => Ok(RuntimeBrokerSnapshotQuery::Malformed),
+        2 => Ok(RuntimeBrokerSnapshotQuery::InvalidCursor),
+        3 => Ok(RuntimeBrokerSnapshotQuery::InvalidLimit),
+        4 => Ok(RuntimeBrokerSnapshotQuery::LimitOutOfBounds),
+        _ => Err(MojoError::InvalidOutput),
+    }
 }
 
 fn signed_len(value: &str) -> Result<i64, MojoError> {
@@ -111,6 +168,10 @@ pub fn value_span(
     }
     Ok(Some((start, end)))
 }
+
+#[cfg(test)]
+#[path = "runtime_broker_admin/snapshot_query_tests.rs"]
+mod snapshot_query_tests;
 
 #[cfg(test)]
 mod tests {

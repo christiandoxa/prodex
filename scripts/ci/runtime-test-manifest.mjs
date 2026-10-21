@@ -32,6 +32,10 @@ export const RUNTIME_TEST_TAGS = TAGS;
 
 export const RUNTIME_SMOKE_TESTS = [
   {
+    label: "broker-live-log-snapshot",
+    filter: "runtime_proxy_broker_live_log_snapshot_is_authenticated_and_bounded",
+  },
+  {
     label: "websocket-precommit-transport-recovery",
     filter: "runtime_proxy::websocket::response_tracking::tests::transport_recovery::",
   },

@@ -1,5 +1,8 @@
 use super::*;
 
+#[path = "runtime_broker_snapshot.rs"]
+mod runtime_broker_snapshot;
+
 #[cfg(feature = "mojo-quota")]
 fn smart_context_enabled_from_default_super_shortcut() -> bool {
     let command = parse_cli_command_from(["prodex", "s", "exec", "hi"])

@@ -427,6 +427,9 @@ const CORE_LEXICAL_BROKER_PATHS = "crates/prodex-app/src/runtime_persistence/pat
 const CORE_LEXICAL_APP_HOUSEKEEPING = "crates/prodex-app/src/housekeeping.rs";
 const CORE_LEXICAL_LIVE_LOG = "crates/prodex-app/src/app_commands/log_live.rs";
 const PROMOTED_FILES = [
+  "crates/prodex-app/src/runtime_broker/admin.rs",
+  "crates/prodex-mojo-core/src/runtime_broker_admin.rs",
+  "mojo/prodex_core/runtime_broker_admin.mojo",
   "crates/prodex-app/src/app_commands/runtime_launch.rs",
   "crates/prodex-app/src/super_expose/run/config.rs",
   PROVIDER_USAGE_SSE_MOJO,
@@ -3506,6 +3509,24 @@ export function findViolations(files) {
     if (filePath === "crates/prodex-mojo-core/src/codex_config.rs") {
       return contents.includes("prodex_codex_config_removal_mask_v1(")
         ? [] : [filePath + ": Codex override removal ABI must remain wired"];
+    }
+    return [];
+  });
+  const brokerSnapshotQueryViolations = files.flatMap(([filePath, contents]) => {
+    if (filePath === "crates/prodex-app/src/runtime_broker/admin.rs") {
+      const body = contents.match(/fn runtime_broker_log_snapshot_query_url\([^]*?(?=^fn runtime_broker_log_snapshot_response)/mu)?.[0] ?? "";
+      return body.includes("runtime_broker_admin::log_snapshot_query(")
+        && !body.includes("split_once") && !body.includes("parse::<")
+        ? [] : [filePath + ": runtime broker snapshot query must remain compiled Mojo"];
+    }
+    if (filePath === "crates/prodex-mojo-core/src/runtime_broker_admin.rs") {
+      return contents.includes("prodex_runtime_broker_snapshot_query_v1(")
+        ? [] : [filePath + ": runtime broker snapshot ABI must remain wired"];
+    }
+    if (filePath === "mojo/prodex_core/runtime_broker_admin.mojo") {
+      return contents.includes('@export("prodex_runtime_broker_snapshot_query_v1")')
+        && contents.includes("log_parse_u64_text(")
+        ? [] : [filePath + ": runtime broker snapshot parsing must reuse checked Mojo integers"];
     }
     return [];
   });
@@ -13818,6 +13839,7 @@ export function findViolations(files) {
     ...runtimeCookiePolicyViolations,
     ...updateNoticeMigrationViolations,
     ...codexConfigRemovalViolations,
+    ...brokerSnapshotQueryViolations,
     ...sharedAttachmentMigrationViolations,
     ...runtimeCookieMigrationViolations,
     ...deepseekSimpleRequestViolations,
@@ -17770,6 +17792,13 @@ function selfTest() {
   assert.match(findViolations([[codexRemovalFile,
     codexRemovalCaller + "\nfn config_assignment_has_key(assignment: &str, key: &str) {}"
   ]]).join("\n"), /frontend override removal must reuse/u);
+
+  const brokerQueryFile = "crates/prodex-app/src/runtime_broker/admin.rs";
+  const brokerQueryCaller = "fn runtime_broker_log_snapshot_query_url() { runtime_broker_admin::log_snapshot_query( }\nfn runtime_broker_log_snapshot_response() {}";
+  assert.deepEqual(findViolations([[brokerQueryFile, brokerQueryCaller]]), []);
+  assert.match(findViolations([[brokerQueryFile,
+    brokerQueryCaller.replace("runtime_broker_admin::log_snapshot_query(", "url.split_once('?')")
+  ]]).join("\n"), /snapshot query must remain compiled Mojo/u);
 
 }
 
