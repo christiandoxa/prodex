@@ -280,8 +280,18 @@ fn runtime_broker_artifact_keys(paths: &AppPaths) -> (Vec<String>, ProdexCleanup
             keys.push(key.to_string());
         }
     }
-    keys.sort();
-    keys.dedup();
+    let views = keys.iter().map(String::as_bytes).collect::<Vec<_>>();
+    let selected = prodex_mojo_core::core_file_policy::lexical_file_key_order(&views, true)
+        .expect("compiled Mojo broker artifact key sort/dedup returned invalid output");
+    let mut originals = keys.into_iter().map(Some).collect::<Vec<_>>();
+    let keys = selected
+        .into_iter()
+        .map(|index| {
+            originals[index]
+                .take()
+                .expect("validated Mojo artifact key indices are unique")
+        })
+        .collect();
     (keys, counts)
 }
 

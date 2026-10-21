@@ -416,6 +416,16 @@ const BROKER_LOG_FRAME_FACADE = "crates/prodex-mojo-core/src/runtime_broker_cont
 const BROKER_LOG_FRAME_MOJO = "mojo/prodex_core/runtime_broker_continuity.mojo";
 const BROKER_LOG_FRAME_TEST = "crates/prodex-runtime-broker-log/tests/src/lib.rs";
 const BROKER_LOG_FRAME_DIRECT_TEST = "mojo/tests/runtime_broker_log_frame_plan_test.mojo";
+const CORE_LEXICAL_POLICY_MOJO = "mojo/prodex_core/core_file_policy.mojo";
+const CORE_LEXICAL_POLICY_ADAPTER = "crates/prodex-mojo-core/src/core_file_policy.rs";
+const CORE_LEXICAL_POLICY_FACADE = "crates/prodex-core/src/lib.rs";
+const CORE_LEXICAL_POLICY_DIRECT_TEST = "mojo/tests/core_file_lexical_order_test.mojo";
+const CORE_LEXICAL_HOUSEKEEPING = "crates/prodex-housekeeping/src/lib.rs";
+const CORE_LEXICAL_RUNTIME_LOGS = "crates/prodex-housekeeping/src/runtime_logs.rs";
+const CORE_LEXICAL_HOUSEKEEPING_TEST = "crates/prodex-housekeeping/tests/src/lib.rs";
+const CORE_LEXICAL_BROKER_PATHS = "crates/prodex-app/src/runtime_persistence/paths.rs";
+const CORE_LEXICAL_APP_HOUSEKEEPING = "crates/prodex-app/src/housekeeping.rs";
+const CORE_LEXICAL_LIVE_LOG = "crates/prodex-app/src/app_commands/log_live.rs";
 const PROMOTED_FILES = [
   PROVIDER_USAGE_SSE_MOJO,
   PROVIDER_USAGE_SSE_TEST,
@@ -497,6 +507,16 @@ const PROMOTED_FILES = [
   LINEAGE_LATEST_BINDING_MOJO,
   LINEAGE_LATEST_BINDING_CALLER_TEST,
   LINEAGE_LATEST_BINDING_DIRECT_TEST,
+  CORE_LEXICAL_POLICY_MOJO,
+  CORE_LEXICAL_POLICY_ADAPTER,
+  CORE_LEXICAL_POLICY_FACADE,
+  CORE_LEXICAL_POLICY_DIRECT_TEST,
+  CORE_LEXICAL_HOUSEKEEPING,
+  CORE_LEXICAL_RUNTIME_LOGS,
+  CORE_LEXICAL_HOUSEKEEPING_TEST,
+  CORE_LEXICAL_BROKER_PATHS,
+  CORE_LEXICAL_APP_HOUSEKEEPING,
+  CORE_LEXICAL_LIVE_LOG,
   CORE_NEWEST_LOG_CALLER,
   CORE_NEWEST_LOG_MANIFEST,
   CORE_NEWEST_LOG_TEST,
@@ -5924,6 +5944,60 @@ export function findViolations(files) {
     if (filePath === LINEAGE_LATEST_BINDING_DIRECT_TEST) {
       return contents.includes("prodex_runtime_lineage_latest_turn_binding_v1")
         ? [] : [filePath + ": direct latest lineage binding Mojo ABI test missing"];
+    }
+    return [];
+  });
+  const coreLexicalFileKeyMojoViolations = files.flatMap(([filePath, contents]) => {
+    if (filePath === CORE_LEXICAL_POLICY_MOJO &&
+        contents.includes("prodex_core_file_policy_v1")) {
+      return [
+        '@export("prodex_core_file_lexical_order_v1")',
+        "def core_file_lexical_less(",
+        "def core_file_lexical_equal(",
+        "def core_file_lexical_heap_down(",
+        "if unique == 1 and selected > 0",
+      ].filter((marker) => !contents.includes(marker))
+        .map((marker) => filePath + ": compiled stable lexical sort/dedup policy missing " + marker);
+    }
+    if (filePath === CORE_LEXICAL_POLICY_ADAPTER &&
+        contents.includes("pub fn owned_root_temp_file_name(")) {
+      return [
+        "fn prodex_core_file_lexical_order_v1(",
+        "pub fn lexical_file_key_order(",
+        "compiled_lexical_file_key_order_sorts_raw_names_and_stable_duplicates",
+        "compiled_lexical_file_key_order_abi_rejects_bad_late_view_without_output_writes",
+      ].filter((marker) => !contents.includes(marker))
+        .map((marker) => filePath + ": typed compiled lexical policy ABI/tests missing " + marker);
+    }
+    if (filePath === CORE_LEXICAL_POLICY_FACADE &&
+        contents.includes("pub fn owned_root_temp_file_name(")) {
+      return contents.includes("pub fn lexical_file_key_order(")
+        ? [] : [filePath + ": Mojo lexical policy facade must stay reachable by housekeeping"];
+    }
+    const owners = [
+      [CORE_LEXICAL_HOUSEKEEPING, "collect_orphan_managed_profile_dirs_at_with_counts(", "prodex_core::lexical_file_key_order(&name_bytes, false)", "names.sort();"],
+      [CORE_LEXICAL_RUNTIME_LOGS, "prodex_runtime_log_paths_in_dir_with_counts(", "prodex_core::lexical_file_key_order(&path_bytes, false)", "paths.sort();"],
+      [CORE_LEXICAL_BROKER_PATHS, "fn runtime_registry_keys(", "prodex_mojo_core::core_file_policy::lexical_file_key_order(&views, true)", "keys.sort();"],
+      [CORE_LEXICAL_APP_HOUSEKEEPING, "fn runtime_broker_artifact_keys(", "prodex_mojo_core::core_file_policy::lexical_file_key_order(&views, true)", "keys.sort();"],
+      [CORE_LEXICAL_LIVE_LOG, "fn poll(&mut self)", "prodex_mojo_core::core_file_policy::lexical_file_key_order(&views, true)", "broker_keys.sort();"],
+    ];
+    for (const [owner, target, compiled, retired] of owners) {
+      if (filePath === owner && contents.includes(target)) {
+        const source = contents.split("#[cfg(test)]", 1)[0];
+        return contents.includes(compiled) && !source.includes(retired)
+          ? [] : [filePath + ": file/key sorting/dedup must remain compiled Mojo-owned"];
+      }
+    }
+    if (filePath === CORE_LEXICAL_HOUSEKEEPING_TEST) {
+      return [
+        "compiled_lexical_file_key_order_preserves_unicode_runtime_log_directory_order",
+        "compiled_lexical_file_key_order_preserves_orphan_profile_dir_order_and_filters_active",
+      ].filter((marker) => !contents.includes(marker))
+        .map((marker) => filePath + ": file-policy real filesystem tests missing " + marker);
+    }
+    if (filePath === CORE_LEXICAL_POLICY_DIRECT_TEST) {
+      return contents.includes("prodex_core_file_lexical_order_v1")
+        ? [] : [filePath + ": direct file-policy Mojo ABI test required"];
     }
     return [];
   });
@@ -13693,7 +13767,7 @@ export function findViolations(files) {
     }
     return [];
   });
-  return [...lineageLatestBindingMojoViolations, ...coreNewestLogPathMojoViolations, ...quotaCurrentNameRotationMojoViolations, ...catalogInsertionMojoViolations, ...repoDuplicateBatchMojoViolations, ...previousResponseCurrentNameMojoViolations, ...infoProcessPidMojoViolations, ...pingProfileOrderMojoViolations, ...repoMapPathSetMojoViolations, ...launchProcessOutputLineMojoViolations, ...followLogFramingMojoViolations, ...threadDatabaseOrderMojoViolations, ...repoNearestPathMojoViolations, ...copilotInstructionMojoViolations, ...quotaStateProfileMojoViolations, ...quotaRuntimeLogOrderMojoViolations, ...repoArtifactEvictionMojoViolations, ...repoArtifactOrderMojoViolations, ...recentLogPathsMojoViolations, ...logFollowSelectionMojoViolations, ...smartContextStoreRetentionMojoViolations, ...runtimeLogTailMojoViolations, ...deepseekBufferedTextItemMojoViolations, ...runtimeSseResponseIdMojoViolations, ...upstreamPayloadBoundsMojoViolations, ...runtimeSseEventStateMojoViolations, ...geminiPatchSourceMojoViolations, ...openAiCompatSseEnvelopeMojoViolations, ...anthropicSseDataLineMojoViolations, ...responseHeaderSelectionMojoViolations, ...previousResponseTextSpanMojoViolations, ...previousResponseJsonSearchMojoViolations, ...domainErrorMojoViolations, ...geminiValueCollectionMojoViolations, ...geminiSimpleResponseViolations, ...logPayloadProjectionViolations, ...nativeRecoveryOwnershipViolations, ...quotaRecoveryEligibilityViolations, ...runtimeBrokerReuseMojoViolations, ...geminiResponseMediaMojoViolations, ...cookieEvictionMojoViolations, ...websocketBudgetMojoViolations, ...affinityBindingMojoViolations, ...responsesCapacityRecoveryViolations, ...sseTapMojoOwnershipViolations, ...quotaWatchViolations, ...geminiCompactSnippetViolations, ...geminiCompactTextViolations, ...doctorSmartContextDecisionViolations, ...providerSseJsonFrameMojoViolations, ...geminiSseCompletionOwnershipViolations, ...anthropicNativeStreamDecisionViolations, ...anthropicAttemptCursorViolations, ...geminiUnsupportedToolRetryViolations, ...terminalGeometryViolations, ...previousResponseRecoveryTransitionViolations, ...chatCompatibleToolCallKindViolations, ...geminiQuotaBodyMojoViolations, ...geminiOAuthRotationMojoViolations, ...geminiBuiltinBatchMojoViolations, ...geminiToolArrayValidationMojoViolations, ...geminiOAuthModelMojoViolations, ...superExposeOriginMojoViolations, ...kiroAcpToolLedgerMojoViolations, ...quotaPoolSummarySectionsMojoViolations, ...deepseekRequestDiagnosticViolations, ...deepseekToolShapeIssueMojoViolations, ...deepseekReplayItemPolicyMojoViolations, ...chatNamespaceSplitMojoViolations, ...deepseekInputItemIssueMessageViolations, ...deepseekRequestIssueMessageViolations, ...smartContextTelemetrySampleViolations, ...compatibilityDiagnosticsMojoViolations, ...quotaHeaderProjectionViolations, ...smartContextCapsuleOrderViolations, ...markerViolations, ...deepseekCatalogPolicyViolations, ...featureOffViolations, ...liveLogRecordViolations, ...runtimePolicyPresetViolations, ...runtimeConfigScalarViolations, ...profileHealthCircuitViolations, ...logThroughputViolations, ...operationalDetailSpecViolations, ...transcriptPolicyViolations, ...logLoadPolicyViolations, ...routeReasonViolations, ...quotaSnapshotCompareMojoViolations, ...startupProbeBatchMojoViolations, ...runtimeStateQuotaViolations, ...runtimeStateRoutePolicyViolations, ...runtimeProxyRootViolations, ...runtimeRecoveryDeadlineViolations, ...brokerVersionGuardViolations, ...brokerContinuityViolations, ...brokerLogFrameMojoViolations, ...brokerLogCacheViolations, ...codexConfigViolations, ...statePolicyViolations, ...quotaSelectionPolicyViolations, ...routeTagMirrorViolations, ...enumTagMirrorViolations, ...appSelectionPolicyMirrorViolations, ...runtimeStateBackgroundViolations, ...redactionViolations, ...rateLimitHeaderSelectionViolations, ...profileIdentityViolations, ...governanceInspectionViolations, ...governanceInspectionOrderingViolations, ...exactnessPlannerViolations,
+  return [...coreLexicalFileKeyMojoViolations, ...lineageLatestBindingMojoViolations, ...coreNewestLogPathMojoViolations, ...quotaCurrentNameRotationMojoViolations, ...catalogInsertionMojoViolations, ...repoDuplicateBatchMojoViolations, ...previousResponseCurrentNameMojoViolations, ...infoProcessPidMojoViolations, ...pingProfileOrderMojoViolations, ...repoMapPathSetMojoViolations, ...launchProcessOutputLineMojoViolations, ...followLogFramingMojoViolations, ...threadDatabaseOrderMojoViolations, ...repoNearestPathMojoViolations, ...copilotInstructionMojoViolations, ...quotaStateProfileMojoViolations, ...quotaRuntimeLogOrderMojoViolations, ...repoArtifactEvictionMojoViolations, ...repoArtifactOrderMojoViolations, ...recentLogPathsMojoViolations, ...logFollowSelectionMojoViolations, ...smartContextStoreRetentionMojoViolations, ...runtimeLogTailMojoViolations, ...deepseekBufferedTextItemMojoViolations, ...runtimeSseResponseIdMojoViolations, ...upstreamPayloadBoundsMojoViolations, ...runtimeSseEventStateMojoViolations, ...geminiPatchSourceMojoViolations, ...openAiCompatSseEnvelopeMojoViolations, ...anthropicSseDataLineMojoViolations, ...responseHeaderSelectionMojoViolations, ...previousResponseTextSpanMojoViolations, ...previousResponseJsonSearchMojoViolations, ...domainErrorMojoViolations, ...geminiValueCollectionMojoViolations, ...geminiSimpleResponseViolations, ...logPayloadProjectionViolations, ...nativeRecoveryOwnershipViolations, ...quotaRecoveryEligibilityViolations, ...runtimeBrokerReuseMojoViolations, ...geminiResponseMediaMojoViolations, ...cookieEvictionMojoViolations, ...websocketBudgetMojoViolations, ...affinityBindingMojoViolations, ...responsesCapacityRecoveryViolations, ...sseTapMojoOwnershipViolations, ...quotaWatchViolations, ...geminiCompactSnippetViolations, ...geminiCompactTextViolations, ...doctorSmartContextDecisionViolations, ...providerSseJsonFrameMojoViolations, ...geminiSseCompletionOwnershipViolations, ...anthropicNativeStreamDecisionViolations, ...anthropicAttemptCursorViolations, ...geminiUnsupportedToolRetryViolations, ...terminalGeometryViolations, ...previousResponseRecoveryTransitionViolations, ...chatCompatibleToolCallKindViolations, ...geminiQuotaBodyMojoViolations, ...geminiOAuthRotationMojoViolations, ...geminiBuiltinBatchMojoViolations, ...geminiToolArrayValidationMojoViolations, ...geminiOAuthModelMojoViolations, ...superExposeOriginMojoViolations, ...kiroAcpToolLedgerMojoViolations, ...quotaPoolSummarySectionsMojoViolations, ...deepseekRequestDiagnosticViolations, ...deepseekToolShapeIssueMojoViolations, ...deepseekReplayItemPolicyMojoViolations, ...chatNamespaceSplitMojoViolations, ...deepseekInputItemIssueMessageViolations, ...deepseekRequestIssueMessageViolations, ...smartContextTelemetrySampleViolations, ...compatibilityDiagnosticsMojoViolations, ...quotaHeaderProjectionViolations, ...smartContextCapsuleOrderViolations, ...markerViolations, ...deepseekCatalogPolicyViolations, ...featureOffViolations, ...liveLogRecordViolations, ...runtimePolicyPresetViolations, ...runtimeConfigScalarViolations, ...profileHealthCircuitViolations, ...logThroughputViolations, ...operationalDetailSpecViolations, ...transcriptPolicyViolations, ...logLoadPolicyViolations, ...routeReasonViolations, ...quotaSnapshotCompareMojoViolations, ...startupProbeBatchMojoViolations, ...runtimeStateQuotaViolations, ...runtimeStateRoutePolicyViolations, ...runtimeProxyRootViolations, ...runtimeRecoveryDeadlineViolations, ...brokerVersionGuardViolations, ...brokerContinuityViolations, ...brokerLogFrameMojoViolations, ...brokerLogCacheViolations, ...codexConfigViolations, ...statePolicyViolations, ...quotaSelectionPolicyViolations, ...routeTagMirrorViolations, ...enumTagMirrorViolations, ...appSelectionPolicyMirrorViolations, ...runtimeStateBackgroundViolations, ...redactionViolations, ...rateLimitHeaderSelectionViolations, ...profileIdentityViolations, ...governanceInspectionViolations, ...governanceInspectionOrderingViolations, ...exactnessPlannerViolations,
     ...infoRunwayViolations,
     ...geminiNormalizedViolations,
     ...quotaDurationViolations,
@@ -14928,6 +15002,15 @@ function selfTest() {
   assert.match(findViolations([[LINEAGE_LATEST_BINDING_CALLER,
     lineageLatestBindingFixture + "\nentry.key.starts_with(&prefix)",
   ]]).join("\n"), /lineage latest-time\/profile selection must stay compiled Mojo-owned/u);
+  const lexicalKeyFixture = [
+    "fn runtime_registry_keys(",
+    "prodex_mojo_core::core_file_policy::lexical_file_key_order(&views, true)",
+  ].join("\n");
+  assert.deepEqual(findViolations([[CORE_LEXICAL_BROKER_PATHS, lexicalKeyFixture]]).filter(
+    (message) => message.includes("file/key sorting/dedup")), []);
+  assert.match(findViolations([[CORE_LEXICAL_BROKER_PATHS,
+    lexicalKeyFixture + "\nkeys.sort();",
+  ]]).join("\n"), /file\/key sorting\/dedup must remain compiled Mojo-owned/u);
   const newestRuntimeLogFixture = [
     "pub fn select_newest_modified_path(",
     "RecentLogPathOrderMode::NewestModifiedPath",

@@ -8229,3 +8229,14 @@ broker-log tests, three core ABI tests, direct Mojo regression and
 source/share guard checks pass. Official share increases from
 36.11279186610626% to 36.11452395546711%
 (133,744 Mojo / 236,589 Rust); 75% remains unmet.
+
+## Shared lexical filesystem/broker key ordering compiled in Mojo (2026-10-21)
+
+The production core file-policy owner now lexically sorts original
+host-owned byte views with stable ties and optional exact deduplication.
+Rust filesystem/broker callers retain I/O but their duplicated
+sort/dedup logic was deleted without fallback. Thirteen housekeeping,
+thirteen core, two app registry and three live-log tests, two compiled
+core ABI tests, direct Mojo regression and source/share guards pass.
+Official share rises to 36.12350969608325%
+(133,860 Mojo / 236,702 Rust). The 75% goal remains open.

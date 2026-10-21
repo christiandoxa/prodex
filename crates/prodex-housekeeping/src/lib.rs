@@ -309,7 +309,17 @@ pub fn collect_orphan_managed_profile_dirs_at_with_counts(
             Err(()) => scan_failures += 1,
         }
     }
-    names.sort();
+    let name_bytes = names.iter().map(String::as_bytes).collect::<Vec<_>>();
+    let order = prodex_core::lexical_file_key_order(&name_bytes, false);
+    let mut original = names.into_iter().map(Some).collect::<Vec<_>>();
+    let names = order
+        .into_iter()
+        .map(|index| {
+            original[index]
+                .take()
+                .expect("validated Mojo directory indices are unique")
+        })
+        .collect();
     (names, scan_failures)
 }
 
