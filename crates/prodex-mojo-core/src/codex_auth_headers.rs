@@ -11,6 +11,20 @@ unsafe extern "C" {
         input_length: i64,
         result_address: u64,
     ) -> i64;
+    fn prodex_codex_auth_terminal_token_ascii_v1(
+        abi_version: i64,
+        input_address: u64,
+        input_length: i64,
+        output_address: u64,
+        output_capacity: i64,
+        written_address: u64,
+    ) -> i64;
+    fn prodex_codex_auth_nonwhitespace_v1(
+        abi_version: i64,
+        input_address: u64,
+        input_length: i64,
+        result_address: u64,
+    ) -> i64;
     fn prodex_codex_auth_terminal_name_v1(
         abi_version: i64,
         mode: i64,
@@ -74,21 +88,37 @@ pub fn codex_probe_version(output: &str) -> Result<Option<&str>, MojoError> {
 
 /// Replace every non-printable/non-ASCII scalar with exactly one underscore.
 /// Host HTTP HeaderValue validity checks remain Rust-owned.
-pub fn codex_user_agent_printable(candidate: &str) -> Result<String, MojoError> {
+fn project_codex_auth_ascii(candidate: &str, terminal: bool) -> Result<String, MojoError> {
     if candidate.len() > MAX_BYTES {
         return Err(MojoError::InvalidInput);
     }
     let mut output = vec![0_u8; candidate.len()];
     let mut written = -1_i64;
+    let input_ptr = candidate.as_ptr() as usize as u64;
+    let input_len = i64::try_from(candidate.len()).map_err(|_| MojoError::InvalidInput)?;
+    let output_ptr = output.as_mut_ptr() as usize as u64;
+    let capacity = i64::try_from(output.len()).map_err(|_| MojoError::InvalidInput)?;
+    let written_ptr = (&mut written as *mut i64) as usize as u64;
     status(unsafe {
-        prodex_codex_auth_user_agent_ascii_v1(
-            ABI_VERSION,
-            candidate.as_ptr() as usize as u64,
-            i64::try_from(candidate.len()).map_err(|_| MojoError::InvalidInput)?,
-            output.as_mut_ptr() as usize as u64,
-            i64::try_from(output.len()).map_err(|_| MojoError::InvalidInput)?,
-            (&mut written as *mut i64) as usize as u64,
-        )
+        if terminal {
+            prodex_codex_auth_terminal_token_ascii_v1(
+                ABI_VERSION,
+                input_ptr,
+                input_len,
+                output_ptr,
+                capacity,
+                written_ptr,
+            )
+        } else {
+            prodex_codex_auth_user_agent_ascii_v1(
+                ABI_VERSION,
+                input_ptr,
+                input_len,
+                output_ptr,
+                capacity,
+                written_ptr,
+            )
+        }
     })?;
     let size = usize::try_from(written).map_err(|_| MojoError::InvalidOutput)?;
     if size > output.len() {
@@ -96,6 +126,39 @@ pub fn codex_user_agent_printable(candidate: &str) -> Result<String, MojoError> 
     }
     output.truncate(size);
     String::from_utf8(output).map_err(|_| MojoError::InvalidOutput)
+}
+
+/// Printable-ASCII User-Agent fallback when a HeaderValue was rejected.
+pub fn codex_user_agent_printable(candidate: &str) -> Result<String, MojoError> {
+    project_codex_auth_ascii(candidate, false)
+}
+
+/// Exact allowed terminal token alphabet, one underscore per invalid Unicode
+/// scalar. No host-side string replacement or sanitizer fallback.
+pub fn codex_terminal_header_token(candidate: &str) -> Result<String, MojoError> {
+    project_codex_auth_ascii(candidate, true)
+}
+
+/// Unicode-aware empty/whitespace predicate used by environment/termtype
+/// selection. The host retains the original string when this returns true.
+pub fn codex_nonwhitespace(value: &str) -> Result<bool, MojoError> {
+    if value.len() > MAX_BYTES {
+        return Err(MojoError::InvalidInput);
+    }
+    let mut found = -1_i64;
+    status(unsafe {
+        prodex_codex_auth_nonwhitespace_v1(
+            ABI_VERSION,
+            value.as_ptr() as usize as u64,
+            i64::try_from(value.len()).map_err(|_| MojoError::InvalidInput)?,
+            (&mut found as *mut i64) as usize as u64,
+        )
+    })?;
+    match found {
+        0 => Ok(false),
+        1 => Ok(true),
+        _ => Err(MojoError::InvalidOutput),
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -233,6 +296,22 @@ mod tests {
             codex_probe_version(&"x".repeat(MAX_BYTES + 1)),
             Err(MojoError::InvalidInput)
         );
+    }
+
+    #[test]
+    fn compiled_terminal_token_projection_and_nonspace_are_unicode_scalar_based() {
+        assert_eq!(
+            codex_terminal_header_token("Ghostty/1.2 α\t🧭"),
+            Ok("Ghostty/1.2____".into())
+        );
+        assert_eq!(
+            codex_terminal_header_token("xterm-256color"),
+            Ok("xterm-256color".into())
+        );
+        assert_eq!(codex_terminal_header_token(""), Ok(String::new()));
+        assert_eq!(codex_nonwhitespace(" \u{2003} \u{00a0}"), Ok(false));
+        assert_eq!(codex_nonwhitespace(" \u{2003}α "), Ok(true));
+        assert_eq!(codex_nonwhitespace(""), Ok(false));
     }
 
     #[test]

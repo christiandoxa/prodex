@@ -76,17 +76,16 @@ def prodex_codex_auth_probe_version_span_v1(
     return 0
 
 
-@export("prodex_codex_auth_user_agent_ascii_v1")
-def prodex_codex_auth_user_agent_ascii_v1(
-    abi_version: Int64,
+# Shared Unicode-scalar ASCII projection for standard Codex User-Agent
+# fallback and terminal metadata token. Both modes write one byte per scalar.
+def codex_auth_project_ascii(
     input_address: UInt,
     input_length: Int64,
     output_address: UInt,
     output_capacity: Int64,
     written_address: UInt,
-) abi("C") -> Int64:
-    if abi_version != CODEX_AUTH_HEADER_ABI_VERSION:
-        return 4
+    terminal_mode: Bool,
+) -> Int64:
     if (
         input_length < 0 or input_length > CODEX_AUTH_HEADER_MAX_BYTES
         or (input_length > 0 and input_address == 0)
@@ -107,17 +106,82 @@ def prodex_codex_auth_user_agent_ascii_v1(
     while index < input_length:
         var width = rich_codepoint_width(bytes[unsafe_offset=index])
         var codepoint = rich_codepoint(bytes, index, width)
-        # One underscore per Unicode scalar outside printable ASCII.
-        if codepoint >= 32 and codepoint <= 126:
-            output[unsafe_offset=written] = UInt8(codepoint)
-        else:
-            output[unsafe_offset=written] = 95
+        var allowed = codepoint >= 32 and codepoint <= 126
+        if terminal_mode:
+            allowed = (
+                (codepoint >= 48 and codepoint <= 57)
+                or (codepoint >= 65 and codepoint <= 90)
+                or (codepoint >= 97 and codepoint <= 122)
+                or codepoint == 45 or codepoint == 95
+                or codepoint == 46 or codepoint == 47
+            )
+        output[unsafe_offset=written] = UInt8(codepoint) if allowed else UInt8(95)
         written += 1
         index += width
     Pointer[mut=True, Int64, MutUntrackedOrigin](
         unsafe_from_address=Int(written_address)
     )[] = written
     return 0
+
+
+@export("prodex_codex_auth_user_agent_ascii_v1")
+def prodex_codex_auth_user_agent_ascii_v1(
+    abi_version: Int64,
+    input_address: UInt,
+    input_length: Int64,
+    output_address: UInt,
+    output_capacity: Int64,
+    written_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != CODEX_AUTH_HEADER_ABI_VERSION:
+        return 4
+    return codex_auth_project_ascii(
+        input_address, input_length,
+        output_address, output_capacity, written_address, False
+    )
+
+
+@export("prodex_codex_auth_terminal_token_ascii_v1")
+def prodex_codex_auth_terminal_token_ascii_v1(
+    abi_version: Int64,
+    input_address: UInt,
+    input_length: Int64,
+    output_address: UInt,
+    output_capacity: Int64,
+    written_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != CODEX_AUTH_HEADER_ABI_VERSION:
+        return 4
+    return codex_auth_project_ascii(
+        input_address, input_length,
+        output_address, output_capacity, written_address, True
+    )
+
+
+@export("prodex_codex_auth_nonwhitespace_v1")
+def prodex_codex_auth_nonwhitespace_v1(
+    abi_version: Int64,
+    input_address: UInt,
+    input_length: Int64,
+    result_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != CODEX_AUTH_HEADER_ABI_VERSION:
+        return 4
+    if (
+        input_length < 0 or input_length > CODEX_AUTH_HEADER_MAX_BYTES
+        or (input_length > 0 and input_address == 0)
+        or result_address == 0 or result_address % 8 != 0
+    ):
+        return 1
+    var view = ProdexRichStringView(input_address, UInt(input_length))
+    if not rich_view_valid(view, CODEX_AUTH_HEADER_MAX_BYTES):
+        return 1
+    var bounds = rich_trim_bounds(view)
+    Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(result_address)
+    )[] = Int64(bounds[1] > bounds[0])
+    return 0
+
 
 # Terminal kind normalization is an exact projection of TERM_PROGRAM strings
 # (Unicode trim, casefold ASCII, remove ASCII space/hyphen/underscore/dot),
