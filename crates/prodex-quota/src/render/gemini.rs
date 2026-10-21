@@ -1,30 +1,12 @@
 use super::*;
 use prodex_mojo_core::quota::GeminiBucketNumericOutput;
 
-fn gemini_numeric_input(
-    bucket: &GeminiQuotaBucket,
-) -> prodex_mojo_core::quota::GeminiBucketNumericInput {
-    let remaining_amount = match bucket.remaining_amount.as_deref() {
-        None => prodex_mojo_core::quota::GeminiRemainingAmount::Absent,
-        Some(raw_remaining) => raw_remaining
-            .trim()
-            .parse::<i64>()
-            .map(prodex_mojo_core::quota::GeminiRemainingAmount::Parsed)
-            .unwrap_or(prodex_mojo_core::quota::GeminiRemainingAmount::Invalid),
-    };
-    prodex_mojo_core::quota::GeminiBucketNumericInput {
-        remaining_amount,
-        remaining_fraction: bucket.remaining_fraction,
-    }
-}
-
 fn gemini_numeric_batch(buckets: &[GeminiQuotaBucket]) -> Vec<GeminiBucketNumericOutput> {
     // ponytail: 1,024-row ABI batches; raise only with a versioned ABI/capacity review.
     buckets
         .chunks(prodex_mojo_core::quota::QUOTA_GEMINI_BUCKET_BATCH_MAX_COUNT)
         .flat_map(|batch| {
-            let inputs = batch.iter().map(gemini_numeric_input).collect::<Vec<_>>();
-            crate::mojo::gemini_bucket_numeric_batch(&inputs)
+            crate::mojo::gemini_bucket_numeric_batch(batch)
                 .unwrap_or_else(|error| panic!("Mojo Gemini quota numeric batch failed: {error:?}"))
         })
         .collect()
@@ -100,6 +82,80 @@ fn parse_gemini_reset_time(value: &str) -> Option<i64> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn gemini_counter_text_preserves_numeric_and_rendered_outputs() {
+        use prodex_mojo_core::quota::{GeminiBucketNumericInput, GeminiRemainingAmount};
+
+        let counters = [
+            None,
+            Some(""),
+            Some("bad"),
+            Some("　+42\t"),
+            Some("0"),
+            Some("-2"),
+            Some("-9223372036854775808"),
+            Some("9223372036854775807"),
+            Some("9223372036854775808"),
+            Some("4 2"),
+        ];
+        let buckets = counters
+            .iter()
+            .map(|amount| GeminiQuotaBucket {
+                remaining_amount: amount.map(str::to_string),
+                remaining_fraction: Some(0.5),
+                reset_time: None,
+                token_type: None,
+                model_id: None,
+            })
+            .collect::<Vec<_>>();
+        let reference_inputs = counters
+            .iter()
+            .map(|amount| GeminiBucketNumericInput {
+                remaining_amount: match amount {
+                    None => GeminiRemainingAmount::Absent,
+                    Some(value) => value
+                        .trim()
+                        .parse::<i64>()
+                        .map(GeminiRemainingAmount::Parsed)
+                        .unwrap_or(GeminiRemainingAmount::Invalid),
+                },
+                remaining_fraction: Some(0.5),
+            })
+            .collect::<Vec<_>>();
+        let reference =
+            prodex_mojo_core::quota::gemini_bucket_numeric_batch(&reference_inputs).unwrap();
+        assert_eq!(
+            crate::mojo::gemini_bucket_numeric_batch(&buckets).unwrap(),
+            reference
+        );
+        assert_eq!(reference[0].remaining, Some(50));
+        assert_eq!(reference[1].remaining, None);
+        assert_eq!(reference[3].remaining, Some(42));
+        let display = prodex_mojo_core::quota::quota_gemini_display(&reference).unwrap();
+        let expected_summaries = reference
+            .iter()
+            .zip(&buckets)
+            .map(|(numeric, bucket)| {
+                let label = prodex_mojo_core::quota::quota_gemini_bucket_label(
+                    bucket.model_id.as_deref(),
+                    bucket.token_type.as_deref(),
+                )
+                .unwrap();
+                prodex_mojo_core::quota::quota_gemini_bucket_summary(&label, *numeric).unwrap()
+            })
+            .collect::<Vec<_>>();
+        let info = GeminiQuotaInfo {
+            email: None,
+            plan: None,
+            project_id: None,
+            buckets,
+        };
+        assert_eq!(format_gemini_main_quota(&info), display.main);
+        assert_eq!(format_gemini_quota_status(&info), display.status);
+        assert_eq!(gemini_quota_is_ready(&info), display.ready);
+        assert_eq!(format_gemini_bucket_summaries(&info), expected_summaries);
+    }
 
     #[test]
     fn gemini_numeric_batches_preserve_full_rendering_after_abi_limit() {
