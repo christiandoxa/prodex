@@ -96,9 +96,13 @@ pub(crate) fn runtime_profile_usage_auth(
     };
 
     if let Some(entry) = cached_entry {
-        let revalidation_due = now < entry.checked_at
-            || now.saturating_sub(entry.checked_at) >= RUNTIME_PROFILE_USAGE_CACHE_FRESH_SECONDS
-            || usage_auth_needs_proactive_refresh(&entry.auth, now);
+        let revalidation_due = prodex_mojo_core::runtime::profile_usage_auth_revalidation_due(
+            now,
+            entry.checked_at,
+            RUNTIME_PROFILE_USAGE_CACHE_FRESH_SECONDS,
+            usage_auth_needs_proactive_refresh(&entry.auth, now),
+        )
+        .expect("compiled Mojo usage-auth cache refresh policy failed");
         let auth = entry.auth;
         if revalidation_due {
             schedule_runtime_probe_refresh(shared, profile_name, &codex_home);
@@ -191,13 +195,6 @@ pub(crate) fn runtime_profile_auth_failure_active(
     runtime_profile_auth_failure_active_from_map(&runtime.profile_health, profile_name, now)
 }
 
-pub(crate) fn runtime_profile_auth_failure_score(status: u16) -> u32 {
-    match status {
-        401 => RUNTIME_PROFILE_AUTH_FAILURE_401_SCORE,
-        _ => RUNTIME_PROFILE_AUTH_FAILURE_403_SCORE,
-    }
-}
-
 pub(crate) fn clear_runtime_profile_auth_failure(
     shared: &RuntimeRotationProxyShared,
     profile_name: &str,
@@ -241,13 +238,19 @@ pub(crate) fn note_runtime_profile_auth_failure(
         .get(profile_name)
         .map(|profile| profile.codex_home.clone());
     let now = Local::now().timestamp();
-    let next_score = runtime_profile_effective_score_from_map(
+    let existing_score = runtime_profile_effective_score_from_map(
         &runtime.profile_health,
         &runtime_profile_auth_failure_key(profile_name),
         now,
         RUNTIME_PROFILE_AUTH_FAILURE_DECAY_SECONDS,
+    );
+    let next_score = prodex_mojo_core::runtime::profile_auth_failure_next_score(
+        status,
+        existing_score,
+        RUNTIME_PROFILE_AUTH_FAILURE_401_SCORE,
+        RUNTIME_PROFILE_AUTH_FAILURE_403_SCORE,
     )
-    .max(runtime_profile_auth_failure_score(status));
+    .expect("compiled Mojo auth-failure score policy failed");
     runtime.profile_health.insert(
         runtime_profile_auth_failure_key(profile_name),
         RuntimeProfileHealth {
@@ -277,5 +280,32 @@ pub(crate) fn note_runtime_profile_auth_failure(
     drop(runtime);
     if let Some(codex_home) = codex_home {
         schedule_runtime_probe_refresh(shared, profile_name, &codex_home);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn compiled_auth_score_respects_testing_configured_status_weights() {
+        assert_eq!(
+            prodex_mojo_core::runtime::profile_auth_failure_next_score(
+                401,
+                0,
+                RUNTIME_PROFILE_AUTH_FAILURE_401_SCORE,
+                RUNTIME_PROFILE_AUTH_FAILURE_403_SCORE,
+            ),
+            Ok(RUNTIME_PROFILE_AUTH_FAILURE_401_SCORE)
+        );
+        assert_eq!(
+            prodex_mojo_core::runtime::profile_auth_failure_next_score(
+                403,
+                0,
+                RUNTIME_PROFILE_AUTH_FAILURE_401_SCORE,
+                RUNTIME_PROFILE_AUTH_FAILURE_403_SCORE,
+            ),
+            Ok(RUNTIME_PROFILE_AUTH_FAILURE_403_SCORE)
+        );
     }
 }
