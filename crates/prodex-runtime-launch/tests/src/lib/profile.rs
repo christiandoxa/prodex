@@ -51,6 +51,30 @@ fn resolve_profile_name_prefers_requested_then_active_then_single_profile() {
 }
 
 #[test]
+fn profile_resolution_preserves_missing_requested_and_stale_active_errors() {
+    let state = prodex_state::AppState {
+        active_profile: Some("stale".to_string()),
+        profiles: BTreeMap::from([("only".to_string(), test_profile("/tmp/only"))]),
+        ..prodex_state::AppState::default()
+    };
+    assert_eq!(
+        resolve_profile_name(&state, Some("missing"))
+            .unwrap_err()
+            .to_string(),
+        "profile 'missing' does not exist"
+    );
+    assert_eq!(
+        resolve_profile_name(&state, None).unwrap_err().to_string(),
+        "active profile 'stale' no longer exists"
+    );
+    let empty = prodex_state::AppState::default();
+    assert_eq!(
+        resolve_profile_name(&empty, None).unwrap_err().to_string(),
+        "no active profile selected; use `prodex use --profile <name>` or pass --profile"
+    );
+}
+
+#[test]
 fn ensure_profile_path_is_unique_rejects_existing_profile_home() {
     let state = prodex_state::AppState {
         profiles: BTreeMap::from([("main".to_string(), test_profile("/tmp/main"))]),

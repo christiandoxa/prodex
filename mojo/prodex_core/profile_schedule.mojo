@@ -648,3 +648,80 @@ def prodex_runtime_profile_rotation_by_current_name_v2(
     if result != 0:
         return 1
     return 0
+
+# Runtime launch owns the stored profile maps; compiled Mojo owns the
+# monotonic timestamp rule (including negative epochs and saturated maxima).
+comptime PROFILE_LAUNCH_ABI: Int64 = 1
+comptime PROFILE_LAUNCH_MAX_OBSERVATIONS: Int64 = 1_048_576
+
+
+@export("prodex_runtime_profile_next_selection_at_v1")
+def prodex_runtime_profile_next_selection_at_v1(
+    abi_version: Int64,
+    timestamps_address: UInt,
+    count: Int64,
+    selected_at: Int64,
+    output_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != PROFILE_LAUNCH_ABI:
+        return 4
+    if (
+        count < 0 or count > PROFILE_LAUNCH_MAX_OBSERVATIONS
+        or (count > 0 and (
+            timestamps_address == 0 or timestamps_address % 8 != 0
+        ))
+        or output_address == 0 or output_address % 8 != 0
+    ):
+        return 1
+    var latest: Int64 = 0
+    if count > 0:
+        var timestamps = Pointer[mut=False, Int64, ImmUntrackedOrigin](
+            unsafe_from_address=Int(timestamps_address)
+        )
+        for index in range(count):
+            if timestamps[unsafe_offset=index] > latest:
+                latest = timestamps[unsafe_offset=index]
+    if latest < INT64_MAX:
+        latest += 1
+    var output = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    output[unsafe_offset=0] = max(selected_at, latest)
+    return 0
+
+
+# Tags: requested, active, single, missing requested, missing active,
+# or no selection. Rust provides only lookup facts and materializes messages.
+@export("prodex_runtime_profile_name_resolution_v1")
+def prodex_runtime_profile_name_resolution_v1(
+    abi_version: Int64,
+    has_requested: Int64,
+    requested_exists: Int64,
+    has_active: Int64,
+    active_exists: Int64,
+    profile_count: Int64,
+    output_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != PROFILE_LAUNCH_ABI:
+        return 4
+    if (
+        has_requested < 0 or has_requested > 1
+        or requested_exists < 0 or requested_exists > has_requested
+        or has_active < 0 or has_active > 1
+        or active_exists < 0 or active_exists > has_active
+        or profile_count < 0 or profile_count > PROFILE_LAUNCH_MAX_OBSERVATIONS
+        or output_address == 0 or output_address % 8 != 0
+    ):
+        return 1
+    var action: Int64 = 5
+    if has_requested == 1:
+        action = 0 if requested_exists == 1 else 3
+    elif has_active == 1:
+        action = 1 if active_exists == 1 else 4
+    elif profile_count == 1:
+        action = 2
+    var output = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    output[unsafe_offset=0] = action
+    return 0

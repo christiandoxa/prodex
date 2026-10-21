@@ -26,6 +26,10 @@ mod continuation_replay;
 mod continuation_status;
 mod noncompact_loop;
 mod profile_health;
+mod profile_launch;
+pub use profile_launch::{
+    ProfileNameResolution, profile_name_resolution_plan, profile_next_selection_at,
+};
 mod profile_jitter;
 mod profile_rotation;
 mod profile_route_circuit;
