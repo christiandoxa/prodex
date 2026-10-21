@@ -102,22 +102,9 @@ fn resolve_codex_cli_version() -> Option<String> {
 }
 
 pub(crate) fn parse_codex_cli_version_output(output: &str) -> Option<String> {
-    output
-        .split_whitespace()
-        .rev()
-        .find(|token| {
-            token
-                .bytes()
-                .next()
-                .is_some_and(|byte| byte.is_ascii_digit())
-                && token.bytes().any(|byte| byte == b'.')
-        })
-        .map(|token| {
-            token
-                .trim_matches(|ch: char| !ch.is_ascii_alphanumeric() && ch != '.' && ch != '-')
-                .to_string()
-        })
-        .filter(|token| !token.is_empty())
+    prodex_mojo_core::codex_auth_headers::codex_probe_version(output)
+        .expect("compiled Mojo Codex version-probe lexer returned invalid output")
+        .map(ToOwned::to_owned)
 }
 
 fn sanitize_codex_user_agent(candidate: String, fallback: &str) -> String {
@@ -125,10 +112,8 @@ fn sanitize_codex_user_agent(candidate: String, fallback: &str) -> String {
         return candidate;
     }
 
-    let sanitized = candidate
-        .chars()
-        .map(|ch| if matches!(ch, ' '..='~') { ch } else { '_' })
-        .collect::<String>();
+    let sanitized = prodex_mojo_core::codex_auth_headers::codex_user_agent_printable(&candidate)
+        .expect("compiled Mojo Codex User-Agent sanitizer returned invalid output");
     if !sanitized.is_empty() && reqwest::header::HeaderValue::from_str(sanitized.as_str()).is_ok() {
         sanitized
     } else if reqwest::header::HeaderValue::from_str(fallback).is_ok() {
@@ -420,4 +405,34 @@ fn sanitize_terminal_header_value(value: String) -> String {
 
 fn none_if_whitespace(value: String) -> Option<String> {
     (!value.trim().is_empty()).then_some(value)
+}
+
+#[cfg(test)]
+mod compiled_auth_headers_tests {
+    use super::*;
+
+    #[test]
+    fn compiled_codex_probe_preserves_unicode_whitespace_and_last_candidate() {
+        assert_eq!(
+            parse_codex_cli_version_output("codex-cli 0.100.1\u{2003}2.3.4!"),
+            Some("2.3.4".to_owned())
+        );
+        assert_eq!(parse_codex_cli_version_output("codex-cli v0.100.1"), None);
+    }
+
+    #[test]
+    fn compiled_codex_user_agent_sanitizes_invalid_unicode_per_scalar() {
+        // HeaderValue accepts a valid UTF-8 field; a linefeed forces the
+        // printable fallback, which also replaces non-ASCII scalars.
+        let bad = "codex_cli_rs/0.142 (OS 🚀 β)\n";
+        assert_eq!(
+            sanitize_codex_user_agent(bad.to_owned(), "fallback"),
+            "codex_cli_rs/0.142 (OS _ _)_"
+        );
+        let direct = "codex_cli_rs/0.142 (OS)";
+        assert_eq!(
+            sanitize_codex_user_agent(direct.to_owned(), "fallback"),
+            direct
+        );
+    }
 }
