@@ -634,3 +634,85 @@ def prodex_session_report_filter_v1(
         unsafe_from_address=Int(output_address)
     )[] = Int64(matches)
     return SESSION_SELECTOR_OK
+
+# Decoded JSONL cursor arithmetic and newline completion decisions.
+# Rust owns buffered reads and visitor callbacks, compiled Mojo owns progress.
+comptime SESSION_FILE_FRAME_ABI_VERSION: Int64 = 1
+comptime SESSION_FILE_FRAME_UINT64_MAX: UInt64 = 18_446_744_073_709_551_615
+
+
+@export("prodex_session_file_line_frame_v1")
+def prodex_session_file_line_frame_v1(
+    abi_version: Int64,
+    decoded_before: UInt64,
+    scan_start: UInt64,
+    maximum_scan_bytes: UInt64,
+    line_address: UInt,
+    line_length: UInt64,
+    output_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != SESSION_FILE_FRAME_ABI_VERSION:
+        return 4
+    if (
+        line_length > UInt64(0x7FFFFFFFFFFFFFFF)
+        or (line_length > 0 and line_address == 0)
+        or output_address == 0 or output_address % 8 != 0
+    ):
+        return 1
+    var output = Pointer[mut=True, UInt64, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    # Action 0 EOF, 1 TooLarge, 2 Incomplete, 3 Complete.
+    if line_length == 0:
+        output[unsafe_offset=0] = 0
+        output[unsafe_offset=1] = decoded_before
+        return 0
+    var next_offset = (
+        SESSION_FILE_FRAME_UINT64_MAX
+        if line_length > SESSION_FILE_FRAME_UINT64_MAX - decoded_before
+        else decoded_before + line_length
+    )
+    var scanned = next_offset - scan_start if next_offset >= scan_start else UInt64(0)
+    if scanned > maximum_scan_bytes:
+        output[unsafe_offset=0] = 1
+        output[unsafe_offset=1] = next_offset
+        return 0
+    var bytes = Pointer[mut=False, UInt8, ImmUntrackedOrigin](
+        unsafe_from_address=Int(line_address)
+    )
+    if bytes[unsafe_offset=Int64(line_length) - 1] != 10:
+        output[unsafe_offset=0] = 2
+        output[unsafe_offset=1] = (
+            UInt64(0) if next_offset < line_length else next_offset - line_length
+        )
+        return 0
+    output[unsafe_offset=0] = 3
+    output[unsafe_offset=1] = next_offset
+    return 0
+
+
+@export("prodex_session_file_compressed_suffix_v1")
+def prodex_session_file_compressed_suffix_v1(
+    abi_version: Int64,
+    name_address: UInt,
+    name_length: Int64,
+    output_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != SESSION_FILE_FRAME_ABI_VERSION:
+        return 4
+    if (
+        name_length < 0 or name_length > 1_048_576
+        or (name_length > 0 and name_address == 0)
+        or output_address == 0 or output_address % 8 != 0
+    ):
+        return 1
+    var view = ProdexRichStringView(name_address, UInt(name_length))
+    if not rich_view_valid(view, 1_048_576):
+        return 1
+    var compressed = session_file_name_suffix_length(
+        view, StringSlice(".jsonl.zst")
+    ) >= 0
+    Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )[] = Int64(compressed)
+    return 0

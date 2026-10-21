@@ -155,44 +155,51 @@ fn visit_session_lines_from_reader<R: Read>(
     scan_start: u64,
     mut visit: impl FnMut(&str) -> bool,
 ) -> Result<SessionFileScan> {
+    use prodex_mojo_core::json::{SessionLineFrameAction, session_line_frame_plan};
     let mut line = String::new();
     loop {
         line.clear();
-        let read = reader
+        reader
             .read_line(&mut line)
             .with_context(|| format!("failed to read session {}", path.display()))?;
-        if read == 0 {
-            return Ok(SessionFileScan {
-                matched: false,
-                complete_offset: decoded_bytes,
-            });
-        }
-        decoded_bytes = decoded_bytes.saturating_add(read as u64);
-        if decoded_bytes.saturating_sub(scan_start) > SESSION_STORE_FILE_MAX_BYTES {
-            bail!(
+        let plan = session_line_frame_plan(
+            decoded_bytes,
+            scan_start,
+            SESSION_STORE_FILE_MAX_BYTES,
+            &line,
+        )
+        .expect("compiled Mojo session JSONL frame plan failed");
+        match plan.action {
+            SessionLineFrameAction::Eof | SessionLineFrameAction::Incomplete => {
+                return Ok(SessionFileScan {
+                    matched: false,
+                    complete_offset: plan.complete_offset,
+                });
+            }
+            SessionLineFrameAction::TooLarge => bail!(
                 "session exceeds safe size limit ({} bytes)",
                 SESSION_STORE_FILE_MAX_BYTES
-            );
-        }
-        if !line.ends_with('\n') {
-            return Ok(SessionFileScan {
-                matched: false,
-                complete_offset: decoded_bytes.saturating_sub(read as u64),
-            });
-        }
-        if visit(&line) {
-            return Ok(SessionFileScan {
-                matched: true,
-                complete_offset: decoded_bytes,
-            });
+            ),
+            SessionLineFrameAction::Complete => {
+                decoded_bytes = plan.complete_offset;
+                if visit(&line) {
+                    return Ok(SessionFileScan {
+                        matched: true,
+                        complete_offset: plan.complete_offset,
+                    });
+                }
+            }
         }
     }
 }
 
 fn is_compressed_session_file(path: &Path) -> bool {
-    path.file_name()
-        .and_then(|name| name.to_str())
-        .is_some_and(|name| name.ends_with(".jsonl.zst"))
+    let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
+        // Non-UTF-8 file names stay owned by the OS-aware Rust host.
+        return false;
+    };
+    prodex_mojo_core::json::session_file_is_compressed_name(name)
+        .expect("compiled Mojo session compression suffix classification failed")
 }
 
 fn open_session_regular_file(path: &Path) -> Result<fs::File> {
@@ -219,6 +226,29 @@ fn open_session_regular_file(path: &Path) -> Result<fs::File> {
 mod tests {
     use super::*;
     use std::time::{SystemTime, UNIX_EPOCH};
+
+    #[test]
+    fn compiled_session_compression_classifier_preserves_suffix_and_opaque_names() {
+        assert!(is_compressed_session_file(Path::new(
+            "/tmp/rollout-1.jsonl.zst"
+        )));
+        assert!(!is_compressed_session_file(Path::new(
+            "/tmp/rollout-1.jsonl"
+        )));
+        assert!(!is_compressed_session_file(Path::new(
+            "/tmp/rollout-1.jsonl.zst.bak"
+        )));
+        assert!(!is_compressed_session_file(Path::new(
+            "/tmp/ROLLout.JSONL.ZST"
+        )));
+        #[cfg(unix)]
+        {
+            use std::os::unix::ffi::OsStrExt;
+            assert!(!is_compressed_session_file(Path::new(
+                std::ffi::OsStr::from_bytes(b"/tmp/name-\xff.jsonl.zst",)
+            )));
+        }
+    }
 
     #[test]
     fn compressed_rollout_is_read_as_jsonl() {
