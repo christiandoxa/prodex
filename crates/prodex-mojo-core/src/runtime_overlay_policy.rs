@@ -1,4 +1,8 @@
 use crate::MojoError;
+#[path = "runtime_overlay_policy/path_alias.rs"]
+mod path_alias;
+pub use path_alias::lexical_workspace_component_indices;
+
 #[path = "runtime_overlay_policy/trust_entries.rs"]
 mod trust_entries;
 pub use trust_entries::workspace_trust_entry_indices;

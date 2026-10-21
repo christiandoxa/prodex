@@ -662,3 +662,68 @@ def prodex_runtime_overlay_trust_entry_plan_v1(
         encoded_bytes = projected
     written[unsafe_offset=0] = selected_count
     return RUNTIME_OVERLAY_OK
+
+# Component-only lexical alias normalization. Rust's std::path owns
+# platform-specific component acquisition, prefix representation and push.
+# Kinds: 0 prefix, 1 root, 2 current, 3 normal, 4 parent.
+comptime OVERLAY_LEXICAL_PATH_ABI_VERSION: Int64 = 1
+comptime OVERLAY_LEXICAL_PATH_MAX_COMPONENTS: Int64 = 65_536
+
+
+@export("prodex_runtime_overlay_lexical_path_v1")
+def prodex_runtime_overlay_lexical_path_v1(
+    abi_version: Int64,
+    kinds_address: UInt,
+    count: Int64,
+    output_address: UInt,
+    output_capacity: Int64,
+    written_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != OVERLAY_LEXICAL_PATH_ABI_VERSION:
+        return RUNTIME_OVERLAY_ABI
+    if (
+        count < 0 or count > OVERLAY_LEXICAL_PATH_MAX_COMPONENTS
+        or output_capacity < count
+        or (count > 0 and (
+            kinds_address == 0 or kinds_address % 8 != 0
+            or output_address == 0 or output_address % 8 != 0
+        ))
+        or written_address == 0 or written_address % 8 != 0
+    ):
+        return RUNTIME_OVERLAY_INVALID
+    var kinds = Pointer[mut=False, Int64, ImmUntrackedOrigin](
+        unsafe_from_address=Int(kinds_address)
+    )
+    # All tags must be valid before any caller-owned output is mutated.
+    for index in range(count):
+        var kind = kinds[unsafe_offset=index]
+        if kind < 0 or kind > 4:
+            return RUNTIME_OVERLAY_INVALID
+    var output = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    var written = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(written_address)
+    )
+    var rooted = False
+    var length: Int64 = 0
+    for index in range(count):
+        var kind = kinds[unsafe_offset=index]
+        if kind == 0 or kind == 1:
+            output[unsafe_offset=length] = index
+            length += 1
+            rooted = True
+        elif kind == 2:
+            continue
+        elif kind == 3:
+            output[unsafe_offset=length] = index
+            length += 1
+        else:
+            var previous = kinds[unsafe_offset=output[unsafe_offset=length - 1]] if length > 0 else Int64(-1)
+            if previous == 3:
+                length -= 1
+            elif not rooted and (length == 0 or previous == 4):
+                output[unsafe_offset=length] = index
+                length += 1
+    written[unsafe_offset=0] = length
+    return RUNTIME_OVERLAY_OK
