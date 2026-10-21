@@ -1,7 +1,4 @@
-use super::{
-    MojoError, PROFILE_PRIMARY_PRESENT, ProfileIdentityOperation, call_kernel, optional_flag,
-    string_result,
-};
+use super::{MojoError, ProfileIdentityOperation, call_kernel, string_result};
 
 pub fn normalize_email(value: &str) -> Result<String, MojoError> {
     string_result(ProfileIdentityOperation::NormalizeEmail, value, 1)
@@ -48,24 +45,4 @@ pub fn sanitize_profile_slug(value: &str) -> Result<String, MojoError> {
         value,
         "api_key".len(),
     )
-}
-
-pub fn default_api_key_profile_name(host: Option<&str>) -> Result<String, MojoError> {
-    let host_value = host.unwrap_or_default();
-    let capacity = host_value
-        .len()
-        .checked_add("api_key_".len())
-        .ok_or(MojoError::InvalidInput)?
-        .max("api_key".len());
-    let result = call_kernel(
-        ProfileIdentityOperation::DefaultApiKeyName,
-        host_value,
-        "",
-        optional_flag(host, PROFILE_PRIMARY_PRESENT),
-        0,
-        0,
-        capacity,
-    )?;
-    String::from_utf8(result.output[..result.written].to_vec())
-        .map_err(|_| MojoError::InvalidOutput)
 }
