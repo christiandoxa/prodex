@@ -8240,3 +8240,15 @@ thirteen core, two app registry and three live-log tests, two compiled
 core ABI tests, direct Mojo regression and source/share guards pass.
 Official share rises to 36.12350969608325%
 (133,860 Mojo / 236,702 Rust). The 75% goal remains open.
+
+
+## Codex terminal token rendering compiled in Mojo (2026-10-21)
+
+The existing Codex-auth owner now selects original program/TERM metadata,
+terminal labels and version rules, then renders through the shared Mojo scalar
+sanitizer. Rust label/version rendering and its sanitizer shim are removed.
+Nine compiled bridge tests, five application tests, four direct Mojo programs,
+strict workspace Clippy, guards and documentation/changed tests pass. The
+canonical share is 36.261584893565875% (135,767 Mojo / 238,643 Rust production
+LOC); the 75% target remains open. Full evidence is in
+`migration/codex-terminal-render-plan-mojo-20261021.md`.

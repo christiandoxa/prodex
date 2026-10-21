@@ -1,4 +1,4 @@
-# Codex version-probe output and printable User-Agent projection.
+# Codex version-probe output, terminal identity and User-Agent projection.
 # Compiled Mojo owns Unicode whitespace/token rules and scalar replacement.
 # Rust alone executes processes, validates reqwest HeaderValue and sends HTTP.
 from std.memory import Pointer
@@ -76,6 +76,123 @@ def prodex_codex_auth_probe_version_span_v1(
     return 0
 
 
+def codex_terminal_label(kind: Int64) -> ProdexRichStringView:
+    var label = StringSlice("unknown")
+    if kind == 0:
+        label = StringSlice("Apple_Terminal")
+    elif kind == 1:
+        label = StringSlice("Ghostty")
+    elif kind == 2:
+        label = StringSlice("iTerm.app")
+    elif kind == 3:
+        label = StringSlice("WarpTerminal")
+    elif kind == 4:
+        label = StringSlice("vscode")
+    elif kind == 5:
+        label = StringSlice("WezTerm")
+    elif kind == 6:
+        label = StringSlice("kitty")
+    elif kind == 7:
+        label = StringSlice("Alacritty")
+    elif kind == 8:
+        label = StringSlice("Konsole")
+    elif kind == 9:
+        label = StringSlice("gnome-terminal")
+    elif kind == 10:
+        label = StringSlice("VTE")
+    elif kind == 11:
+        label = StringSlice("WindowsTerminal")
+    elif kind == 12:
+        label = StringSlice("dumb")
+    return ProdexRichStringView(UInt(Int(label.unsafe_ptr())), UInt(label.byte_length()))
+
+def codex_auth_write_ascii_part(
+    input_view: ProdexRichStringView,
+    output: Pointer[mut=True, UInt8, MutUntrackedOrigin],
+    offset: Int64,
+    terminal_mode: Bool,
+) -> Int64:
+    var bytes = rich_view_ptr(input_view)
+    var index: Int64 = 0
+    var written = offset
+    while index < Int64(input_view.len):
+        var width = rich_codepoint_width(bytes[unsafe_offset=index])
+        var codepoint = rich_codepoint(bytes, index, width)
+        var allowed = codepoint >= 32 and codepoint <= 126
+        if terminal_mode:
+            allowed = (
+                (codepoint >= 48 and codepoint <= 57)
+                or (codepoint >= 65 and codepoint <= 90)
+                or (codepoint >= 97 and codepoint <= 122)
+                or codepoint == 45 or codepoint == 95
+                or codepoint == 46 or codepoint == 47
+            )
+        output[unsafe_offset=written] = UInt8(codepoint) if allowed else UInt8(95)
+        written += 1
+        index += width
+    return written
+
+
+# fields holds exactly three borrowed UTF-8 views: program, version, TERM.
+# program_present distinguishes an absent program from an explicitly empty one.
+@export("prodex_codex_auth_terminal_token_v1")
+def prodex_codex_auth_terminal_token_v1(
+    abi_version: Int64,
+    kind: Int64,
+    program_present: Int64,
+    fields_address: UInt,
+    output_address: UInt,
+    output_capacity: Int64,
+    written_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != CODEX_AUTH_HEADER_ABI_VERSION:
+        return 4
+    if (
+        kind < 0 or kind > 13
+        or (program_present != 0 and program_present != 1)
+        or fields_address == 0 or fields_address % 8 != 0
+        or output_capacity < 0
+        or written_address == 0 or written_address % 8 != 0
+    ):
+        return 1
+    var fields = Pointer[mut=False, ProdexRichStringView, ImmUntrackedOrigin](
+        unsafe_from_address=Int(fields_address)
+    )
+    for index in range(3):
+        if not rich_view_valid(fields[unsafe_offset=index], CODEX_AUTH_HEADER_MAX_BYTES):
+            return 1
+    var program = fields[unsafe_offset=0].copy()
+    var version = fields[unsafe_offset=1].copy()
+    var term = fields[unsafe_offset=2].copy()
+    var base = codex_terminal_label(kind)
+    var with_version = kind < 6 or kind == 8 or kind == 10
+    if program_present == 1:
+        base = program.copy()
+        with_version = True
+    elif term.len > 0:
+        base = term.copy()
+        with_version = False
+    with_version = with_version and version.len > 0
+    var required_capacity = Int64(base.len)
+    if with_version:
+        required_capacity += 1 + Int64(version.len)
+    if required_capacity > 0 and output_address == 0:
+        return 1
+    if output_capacity < required_capacity:
+        return 3
+    var output = Pointer[mut=True, UInt8, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    var written = codex_auth_write_ascii_part(base, output, 0, True)
+    if with_version:
+        output[unsafe_offset=written] = 47
+        written = codex_auth_write_ascii_part(version, output, written + 1, True)
+    Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(written_address)
+    )[] = written
+    return 0
+
+
 # Shared Unicode-scalar ASCII projection for standard Codex User-Agent
 # fallback and terminal metadata token. Both modes write one byte per scalar.
 def codex_auth_project_ascii(
@@ -97,27 +214,10 @@ def codex_auth_project_ascii(
     var input_view = ProdexRichStringView(input_address, UInt(input_length))
     if not rich_view_valid(input_view, CODEX_AUTH_HEADER_MAX_BYTES):
         return 1
-    var bytes = rich_view_ptr(input_view)
     var output = Pointer[mut=True, UInt8, MutUntrackedOrigin](
         unsafe_from_address=Int(output_address)
     )
-    var index: Int64 = 0
-    var written: Int64 = 0
-    while index < input_length:
-        var width = rich_codepoint_width(bytes[unsafe_offset=index])
-        var codepoint = rich_codepoint(bytes, index, width)
-        var allowed = codepoint >= 32 and codepoint <= 126
-        if terminal_mode:
-            allowed = (
-                (codepoint >= 48 and codepoint <= 57)
-                or (codepoint >= 65 and codepoint <= 90)
-                or (codepoint >= 97 and codepoint <= 122)
-                or codepoint == 45 or codepoint == 95
-                or codepoint == 46 or codepoint == 47
-            )
-        output[unsafe_offset=written] = UInt8(codepoint) if allowed else UInt8(95)
-        written += 1
-        index += width
+    var written = codex_auth_write_ascii_part(input_view, output, 0, terminal_mode)
     Pointer[mut=True, Int64, MutUntrackedOrigin](
         unsafe_from_address=Int(written_address)
     )[] = written

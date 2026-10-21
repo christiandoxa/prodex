@@ -38,6 +38,15 @@ unsafe extern "C" {
         input_length: i64,
         output_address: u64,
     ) -> i64;
+    fn prodex_codex_auth_terminal_token_v1(
+        abi_version: i64,
+        kind: i64,
+        program_present: i64,
+        fields_address: u64,
+        output_address: u64,
+        output_capacity: i64,
+        written_address: u64,
+    ) -> i64;
     fn prodex_codex_auth_user_agent_ascii_v1(
         abi_version: i64,
         input_address: u64,
@@ -168,21 +177,60 @@ pub enum CodexTerminalInput {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(i64)]
 pub enum CodexTerminalKind {
-    AppleTerminal,
-    Ghostty,
-    Iterm2,
-    WarpTerminal,
-    VsCode,
-    WezTerm,
-    Kitty,
-    Alacritty,
-    Konsole,
-    GnomeTerminal,
-    Vte,
-    WindowsTerminal,
-    Dumb,
-    Unknown,
+    AppleTerminal = 0,
+    Ghostty = 1,
+    Iterm2 = 2,
+    WarpTerminal = 3,
+    VsCode = 4,
+    WezTerm = 5,
+    Kitty = 6,
+    Alacritty = 7,
+    Konsole = 8,
+    GnomeTerminal = 9,
+    Vte = 10,
+    WindowsTerminal = 11,
+    Dumb = 12,
+    Unknown = 13,
+}
+
+/// Render and sanitize a terminal token in compiled Mojo. An explicitly empty
+/// program still takes precedence over TERM and the detected terminal kind.
+pub fn codex_terminal_token(
+    kind: CodexTerminalKind,
+    program: Option<&str>,
+    version: Option<&str>,
+    term: Option<&str>,
+) -> Result<String, MojoError> {
+    let fields = [
+        program.unwrap_or_default(),
+        version.unwrap_or_default(),
+        term.unwrap_or_default(),
+    ];
+    if fields.iter().any(|value| value.len() > MAX_BYTES) {
+        return Err(MojoError::InvalidInput);
+    }
+    let views = fields.map(|value| [value.as_ptr() as usize as u64, value.len() as u64]);
+    let mut output = vec![0_u8; fields.iter().map(|value| value.len()).sum::<usize>() + 32];
+    let mut written = -1_i64;
+    status(unsafe {
+        prodex_codex_auth_terminal_token_v1(
+            ABI_VERSION,
+            kind as i64,
+            i64::from(program.is_some()),
+            views.as_ptr() as usize as u64,
+            output.as_mut_ptr() as usize as u64,
+            output.len() as i64,
+            (&mut written as *mut i64) as usize as u64,
+        )
+    })?;
+    let size = usize::try_from(written).map_err(|_| MojoError::InvalidOutput)?;
+    if size > output.len() {
+        return Err(MojoError::InvalidOutput);
+    }
+    output.truncate(size);
+    String::from_utf8(output).map_err(|_| MojoError::InvalidOutput)
 }
 
 /// Classify the old TERM_PROGRAM normalization or exact TERM aliases in Mojo.
@@ -273,6 +321,10 @@ pub fn codex_term_program_parts(text: &str) -> Result<(String, Option<String>), 
         spans[1].map(|(_, _, value)| value.to_owned()),
     ))
 }
+
+#[cfg(test)]
+#[path = "codex_auth_headers/terminal_token_tests.rs"]
+mod terminal_token_tests;
 
 #[cfg(test)]
 mod tests {
