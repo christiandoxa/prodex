@@ -1,5 +1,8 @@
 use super::*;
 
+#[path = "runtime_launch/config_removal.rs"]
+mod config_removal;
+
 #[path = "runtime_launch/arg0_cleanup.rs"]
 mod arg0_cleanup;
 #[path = "runtime_launch/force_proxy.rs"]

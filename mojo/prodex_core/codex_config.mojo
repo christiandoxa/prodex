@@ -78,6 +78,93 @@ def codex_config_contains_equals(
     return False
 
 
+def codex_config_assignment_has_key(
+    value: ProdexRichStringView, start: Int64, key: ProdexRichStringView,
+) -> Bool:
+    var raw_start: Int64 = 0
+    var raw_length: Int64 = 0
+    var normalized_start: Int64 = 0
+    var normalized_length: Int64 = 0
+    return codex_config_assignment_value(
+        value, start, key, Pointer(to=raw_start), Pointer(to=raw_length),
+        Pointer(to=normalized_start), Pointer(to=normalized_length)
+    )
+
+
+# Unlike value lookup, both removal modes deliberately scan beyond `--`.
+# FirstPair preserves the launch API; AllForms also removes inline overrides.
+@export("prodex_codex_config_removal_mask_v1")
+def prodex_codex_config_removal_mask_v1(
+    abi_version: Int64,
+    mode: Int64,
+    arguments_address: UInt,
+    count: Int64,
+    key_address: UInt,
+    key_length: Int64,
+    output_address: UInt,
+    output_capacity: Int64,
+) abi("C") -> Int64:
+    if abi_version != CODEX_CONFIG_ABI_VERSION:
+        return CODEX_CONFIG_ABI
+    if (
+        (mode != 0 and mode != 1)
+        or count < 0 or count > 1_048_576
+        or key_length < 0 or key_length > 16_777_216
+        or (key_length > 0 and key_address == 0)
+        or (count > 0 and (arguments_address == 0 or output_address == 0))
+        or arguments_address % 8 != 0
+        or output_capacity < count
+    ):
+        return CODEX_CONFIG_INVALID
+    var key = ProdexRichStringView(key_address, UInt(key_length))
+    if not rich_view_valid(key, 16_777_216):
+        return CODEX_CONFIG_INVALID
+    var bytes: UInt64 = 0
+    for index in range(count):
+        var argument = codex_config_arg(arguments_address, index)
+        if (
+            (argument.valid_utf8 != 0 and argument.valid_utf8 != 1)
+            or not rich_view_valid(codex_config_view(argument), 16_777_216)
+        ):
+            return CODEX_CONFIG_INVALID
+        bytes += argument.length
+        if bytes > 67_108_864:
+            return CODEX_CONFIG_INVALID
+    var output = Pointer[mut=True, UInt8, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    for index in range(count):
+        output[unsafe_offset=index] = 0
+    var index: Int64 = 0
+    while index < count:
+        var view = codex_config_view(codex_config_arg(arguments_address, index))
+        if (
+            (rich_view_matches_literal["-c"](view, False)
+             or rich_view_matches_literal["--config"](view, False))
+            and index + 1 < count
+        ):
+            var assignment = codex_config_arg(arguments_address, index + 1)
+            if assignment.valid_utf8 == 1 and codex_config_assignment_has_key(
+                codex_config_view(assignment), 0, key
+            ):
+                output[unsafe_offset=index] = 1
+                output[unsafe_offset=index + 1] = 1
+                if mode == 0:
+                    return CODEX_CONFIG_OK
+                index += 2
+                continue
+        if mode == 1:
+            var start: Int64 = -1
+            if rich_view_prefix["--config="](view, False):
+                start = 9
+            elif rich_view_prefix["-c"](view, False):
+                start = 2
+            if start >= 0 and codex_config_assignment_has_key(view, start, key):
+                output[unsafe_offset=index] = 1
+        index += 1
+    return CODEX_CONFIG_OK
+
+
 def codex_config_assignment_value(
     view: ProdexRichStringView,
     assignment_start: Int64,
