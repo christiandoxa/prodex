@@ -8264,3 +8264,15 @@ strict bridge tests, 95 filesystem tests, direct Mojo assertions, workspace
 Clippy, guards, documentation and changed tests pass. Official share reaches
 36.26932905386101% (135,829 Mojo / 238,672 Rust production LOC). The 75% target
 remains open; details are in `migration/shared-image-tag-batch-mojo-20261021.md`.
+
+
+## MCP physical line copy/consume planning compiled in Mojo (2026-10-21)
+
+The existing MCP stdio owner now selects first LF, first non-whitespace byte,
+header/message or fixed line cap, overflow and completion in one bounded raw
+byte ABI. Rust's duplicate scans and limit decisions are removed; Rust retains
+BufRead, EOF, completed-line UTF-8 and Serde. Five strict bridge tests, 19 MCP
+tests, three CLI subprocess regressions, direct Mojo assertions, workspace
+Clippy, guards and documentation/changed tests pass. Canonical share is
+36.278758251903874% (135,959 Mojo / 238,803 Rust production LOC). The 75% target
+stays open; full evidence is in `migration/mcp-line-chunk-mojo-20261021.md`.
