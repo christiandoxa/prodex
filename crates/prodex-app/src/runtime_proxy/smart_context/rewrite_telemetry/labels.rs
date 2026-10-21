@@ -1,6 +1,6 @@
 //! Smart-context telemetry label and category formatting helpers.
 
-use super::*;
+use super::RuntimeSmartContextTransformStats;
 
 pub(in crate::runtime_proxy::smart_context) fn runtime_smart_context_pressure_band_label(
     value: runtime_proxy_crate::SmartContextPressureBand,

@@ -1,6 +1,11 @@
 //! Smart-context temporary-disable cooldown state.
 
-use super::*;
+use super::RuntimeRotationProxyShared;
+use std::{
+    collections::BTreeMap,
+    path::PathBuf,
+    sync::{Mutex, OnceLock},
+};
 
 const RUNTIME_SMART_CONTEXT_PANIC_COOLDOWN_SECS: u64 = 60;
 static RUNTIME_SMART_CONTEXT_DISABLED_UNTIL: OnceLock<Mutex<BTreeMap<PathBuf, u64>>> =
