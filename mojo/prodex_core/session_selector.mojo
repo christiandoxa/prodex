@@ -1,6 +1,6 @@
 from std.memory import Pointer
 
-from rich_text import rich_view_ptr, rich_view_valid, rich_views_equal
+from rich_text import rich_trim_bounds, rich_view_ptr, rich_view_valid, rich_views_equal
 from rich_types import ProdexRichStringView
 
 comptime SESSION_SELECTOR_ABI_VERSION: Int64 = 1
@@ -560,4 +560,77 @@ def prodex_session_file_name_policy_v1(
         stem_length -= suffix_length
     output[unsafe_offset=0] = Int64(is_metadata)
     output[unsafe_offset=1] = stem_length
+    return SESSION_SELECTOR_OK
+
+# Session report filter ownership. Host supplies path-equality and
+# Unicode-lowercased query/fields, while Mojo chooses all filter gates.
+# facts: has_dir, dir_match, include_subagents, is_subagent,
+#        report_profile_present, filter_profile_present, query_present.
+# views: report profile, requested profile, search query, six search fields.
+comptime SESSION_REPORT_FILTER_ABI_VERSION: Int64 = 1
+comptime SESSION_REPORT_FILTER_FACT_COUNT: Int64 = 7
+comptime SESSION_REPORT_FILTER_VIEW_COUNT: Int64 = 9
+comptime SESSION_REPORT_FILTER_MAX_TEXT_BYTES: Int64 = 1_048_576
+
+
+@export("prodex_session_report_filter_v1")
+def prodex_session_report_filter_v1(
+    abi_version: Int64,
+    facts_address: UInt,
+    facts_count: Int64,
+    views_address: UInt,
+    views_count: Int64,
+    output_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != SESSION_REPORT_FILTER_ABI_VERSION:
+        return 4
+    if (
+        facts_count != SESSION_REPORT_FILTER_FACT_COUNT
+        or views_count != SESSION_REPORT_FILTER_VIEW_COUNT
+        or facts_address == 0 or facts_address % 8 != 0
+        or views_address == 0 or views_address % 8 != 0
+        or output_address == 0 or output_address % 8 != 0
+    ):
+        return SESSION_SELECTOR_INVALID
+    var facts = Pointer[mut=False, Int64, ImmUntrackedOrigin](
+        unsafe_from_address=Int(facts_address)
+    )
+    var views = Pointer[mut=False, ProdexRichStringView, ImmUntrackedOrigin](
+        unsafe_from_address=Int(views_address)
+    )
+    for index in range(SESSION_REPORT_FILTER_FACT_COUNT):
+        if facts[unsafe_offset=index] < 0 or facts[unsafe_offset=index] > 1:
+            return SESSION_SELECTOR_INVALID
+    for index in range(SESSION_REPORT_FILTER_VIEW_COUNT):
+        if not rich_view_valid(
+            views[unsafe_offset=index], SESSION_REPORT_FILTER_MAX_TEXT_BYTES
+        ):
+            return SESSION_SELECTOR_INVALID
+
+    var matches = True
+    if facts[unsafe_offset=0] == 1 and facts[unsafe_offset=1] == 0:
+        matches = False
+    if facts[unsafe_offset=2] == 0 and facts[unsafe_offset=3] == 1:
+        matches = False
+    if facts[unsafe_offset=5] == 1:
+        if facts[unsafe_offset=4] == 0 or not rich_views_equal(
+            views[unsafe_offset=0], views[unsafe_offset=1]
+        ):
+            matches = False
+    if facts[unsafe_offset=6] == 1:
+        var query = views[unsafe_offset=2].copy()
+        var bounds = rich_trim_bounds(query)
+        if bounds[1] > bounds[0]:
+            query.ptr += UInt(bounds[0])
+            query.len = UInt(bounds[1] - bounds[0])
+            var found = False
+            for index in range(Int64(3), SESSION_REPORT_FILTER_VIEW_COUNT):
+                if session_report_query_contains(views[unsafe_offset=index], query):
+                    found = True
+                    break
+            if not found:
+                matches = False
+    Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )[] = Int64(matches)
     return SESSION_SELECTOR_OK

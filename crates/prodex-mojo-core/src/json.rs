@@ -63,11 +63,11 @@ pub use self::session_repair::{
 };
 mod session_selector;
 pub use self::session_selector::{
-    SessionFileNamePlan, SessionRecentWorkspaceCandidate, SessionStateDbRowMatchKind,
-    SessionStateDbRowMatchPlan, SessionStateDbRowSessionIdSource, session_file_name_plan,
-    session_recent_workspace_plan, session_report_query_matches, session_selector_is_full,
-    session_selector_match_plan, session_selector_matches, session_selector_path_span,
-    session_state_db_row_match_plan,
+    SessionFileNamePlan, SessionRecentWorkspaceCandidate, SessionReportFilterInput,
+    SessionStateDbRowMatchKind, SessionStateDbRowMatchPlan, SessionStateDbRowSessionIdSource,
+    session_file_name_plan, session_recent_workspace_plan, session_report_filter_matches,
+    session_report_query_matches, session_selector_is_full, session_selector_match_plan,
+    session_selector_matches, session_selector_path_span, session_state_db_row_match_plan,
 };
 #[cfg(feature = "mojo-rich")]
 mod deepseek_function_tools;

@@ -121,32 +121,31 @@ pub fn session_report_matches_filter(
     report: &SessionReport,
     filter: &SessionReportFilter<'_>,
 ) -> bool {
-    if let Some(current_dir) = filter.current_dir
-        && !report.matches_current_dir(current_dir)
-    {
-        return false;
-    }
-
-    if !filter.include_subagents && report.is_subagent() {
-        return false;
-    }
-
-    if let Some(profile) = filter.profile
-        && report.profile.as_deref() != Some(profile)
-    {
-        return false;
-    }
-
-    if let Some(query) = filter
-        .query
-        .map(str::trim)
-        .filter(|query| !query.is_empty())
-        && !session_report_matches_query(report, query)
-    {
-        return false;
-    }
-
-    true
+    // Path equivalence uses the OS-aware Rust path owner. All filter
+    // precedence and matching semantics are selected in compiled Mojo.
+    let fields = [
+        Some(report.id.as_str()),
+        report.thread_name.as_deref(),
+        report.cwd.as_deref(),
+        report.profile.as_deref(),
+        report.model_provider.as_deref(),
+        Some(report.path.as_str()),
+    ];
+    prodex_mojo_core::json::session_report_filter_matches(
+        prodex_mojo_core::json::SessionReportFilterInput {
+            has_current_dir: filter.current_dir.is_some(),
+            current_dir_matches: filter
+                .current_dir
+                .is_some_and(|directory| report.matches_current_dir(directory)),
+            include_subagents: filter.include_subagents,
+            is_subagent: report.is_subagent(),
+            report_profile: report.profile.as_deref(),
+            filter_profile: filter.profile,
+            query: filter.query,
+            fields,
+        },
+    )
+    .expect("Mojo session-report filter planner returned invalid output")
 }
 
 pub fn session_report_matches_query(report: &SessionReport, query: &str) -> bool {
