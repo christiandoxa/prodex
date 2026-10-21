@@ -542,3 +542,56 @@ def prodex_runtime_state_quota_snapshot_compare_v1(
     result[unsafe_offset=0] = Int64(same)
     result[unsafe_offset=1] = Int64(persist)
     return RUNTIME_STATE_QUOTA_OK
+
+# Reconstruct usage windows from persisted quota snapshot metadata.
+# Status tags: 0 ready, 1 thin, 2 critical, 3 exhausted, 4 unknown.
+# Rust provides enum tags and retains ownership of serde usage models.
+comptime QUOTA_SNAPSHOT_REBUILD_ABI: Int64 = 1
+comptime QUOTA_SNAPSHOT_UNKNOWN: Int64 = 4
+
+
+@export("prodex_runtime_quota_snapshot_rebuild_v1")
+def prodex_runtime_quota_snapshot_rebuild_v1(
+    abi_version: Int64,
+    facts_address: UInt,
+    fact_count: Int64,
+    output_address: UInt,
+    output_capacity: Int64,
+) abi("C") -> Int64:
+    if abi_version != QUOTA_SNAPSHOT_REBUILD_ABI:
+        return 4
+    if (
+        fact_count != 6 or output_capacity != 6
+        or facts_address == 0 or facts_address % 8 != 0
+        or output_address == 0 or output_address % 8 != 0
+    ):
+        return 1
+    var facts = Pointer[mut=False, Int64, ImmUntrackedOrigin](
+        unsafe_from_address=Int(facts_address)
+    )
+    var output = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    for index in range(2):
+        var status = facts[unsafe_offset=index * 3]
+        if status < 0 or status > QUOTA_SNAPSHOT_UNKNOWN:
+            return 1
+    for index in range(2):
+        var offset = index * 3
+        var status = facts[unsafe_offset=offset]
+        var remaining = facts[unsafe_offset=offset + 1]
+        var reset_at = facts[unsafe_offset=offset + 2]
+        if status == QUOTA_SNAPSHOT_UNKNOWN:
+            output[unsafe_offset=offset] = 0
+            output[unsafe_offset=offset + 1] = 0
+            output[unsafe_offset=offset + 2] = 0
+            continue
+        var used: Int64 = 0
+        if remaining <= 0:
+            used = 100
+        elif remaining < 100:
+            used = 100 - remaining
+        output[unsafe_offset=offset] = 1
+        output[unsafe_offset=offset + 1] = used
+        output[unsafe_offset=offset + 2] = Int64(reset_at != INT64_MAX)
+    return 0
