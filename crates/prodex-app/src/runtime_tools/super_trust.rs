@@ -1,4 +1,3 @@
-use std::collections::BTreeSet;
 use std::ffi::OsString;
 use std::path::{Component, Path, PathBuf};
 
@@ -113,6 +112,33 @@ pub(crate) fn trusted_workspace_codex_args(
     trusted_workspaces_codex_args([workspace.to_path_buf()], codex_args)
 }
 
+fn deduplicated_super_trust_homes(homes: Vec<PathBuf>) -> Vec<PathBuf> {
+    // Host computes the platform lexical alias; compiled Mojo chooses the
+    // first original home for each exact alias without a Rust dedup fallback.
+    let keys = homes
+        .iter()
+        .map(|home| lexical_workspace_alias(home).to_string_lossy().into_owned())
+        .collect::<Vec<_>>();
+    let records = keys
+        .iter()
+        .map(|key| (key.as_str(), 0usize))
+        .collect::<Vec<_>>();
+    let selected = prodex_mojo_core::runtime_overlay_policy::workspace_trust_entry_indices(
+        &records,
+        usize::MAX,
+    )
+    .expect("compiled Mojo Super profile-home dedup planner failed");
+    let mut slots = homes.into_iter().map(Some).collect::<Vec<_>>();
+    selected
+        .into_iter()
+        .map(|index| {
+            slots[index]
+                .take()
+                .expect("compiled Mojo Super profile-home index repeated")
+        })
+        .collect()
+}
+
 fn super_trust_codex_homes(paths: &AppPaths) -> Vec<PathBuf> {
     let mut homes = vec![paths.shared_codex_root.clone()];
     if let Ok(state) = AppState::load(paths) {
@@ -142,9 +168,7 @@ fn super_trust_codex_homes(paths: &AppPaths) -> Vec<PathBuf> {
             homes.push(path);
         }
     }
-    let mut seen = BTreeSet::new();
-    homes.retain(|home| seen.insert(lexical_workspace_alias(home).to_string_lossy().into_owned()));
-    homes
+    deduplicated_super_trust_homes(homes)
 }
 
 fn exact_resume_session_path_from_profile_homes(
@@ -215,6 +239,26 @@ pub(crate) fn trusted_super_resume_codex_args(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn compiled_super_profile_home_dedup_preserves_first_lexical_alias() {
+        let source = vec![
+            PathBuf::from("/home/test-user/alpha/../beta"),
+            PathBuf::from("/home/test-user/beta"),
+            PathBuf::from("/home/test-user/Beta"),
+            PathBuf::from("/home/test-user/α"),
+            PathBuf::from("/home/test-user/α/"),
+        ];
+        assert_eq!(
+            deduplicated_super_trust_homes(source),
+            vec![
+                PathBuf::from("/home/test-user/alpha/../beta"),
+                PathBuf::from("/home/test-user/Beta"),
+                PathBuf::from("/home/test-user/α"),
+            ]
+        );
+        assert!(deduplicated_super_trust_homes(vec![]).is_empty());
+    }
 
     #[test]
     fn compiled_lexical_workspace_alias_handles_rooted_and_relative_parent_paths() {
