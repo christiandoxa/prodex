@@ -162,12 +162,14 @@ fn optional_bounded_string(
     let Some(value) = value.as_str() else {
         return Err(format!("{name} must be a string"));
     };
-    if value.is_empty()
-        || value.len() > max_bytes
-        || value.as_bytes().contains(&0)
-        || value.chars().any(char::is_control)
-    {
+    let valid = prodex_mojo_core::rich::super_expose_bounded_text_valid(value, max_bytes)
+        .map_err(|error| format!("failed to validate {name}: {error:?}"))?;
+    if !valid {
         return Err(format!("{name} is empty or too large"));
     }
     Ok(Some(value.to_string()))
 }
+
+#[cfg(test)]
+#[path = "config_tests.rs"]
+mod tests;

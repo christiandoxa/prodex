@@ -13,7 +13,7 @@ algorithm, moved into `rich_text.mojo`. Its existing versioned C export and
 Rust adapter retain their contract and call the shared kernel. Super expose
 adds operation 8 to its existing v1 exec record ABI, reusing input acquisition,
 the rich ABI check, status handling and caller-owned two-word output. Existing
-operations keep their numbers and fields; unknown operation 9 is still rejected.
+operations keep their numbers and fields; unknown opcodes are still rejected.
 There is no new C export, dependency or configuration surface.
 
 The new operation accepts a full-width unsigned byte budget, validates UTF-8

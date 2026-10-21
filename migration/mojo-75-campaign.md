@@ -8395,3 +8395,14 @@ instruction bridge tests, 111 Super expose tests and two Copilot caller
 regressions pass. Canonical share is 36.31346167151882% (136,458 Mojo / 239,320
 Rust production LOC). No Rust clipping fallback remains. The 75% target stays
 open. Evidence is in `migration/super-expose-text-cut-mojo-20261022.md`.
+
+## Super run override content reuses compiled validation (2026-10-22)
+
+Provider, model, reasoning-effort and profile overrides now reuse Mojo's
+existing bounded-text/control validator. Rust's content predicates are removed;
+Serde, missing/null handling, error text and configuration mutation stay with
+their existing host owners. Direct Mojo, ten strict Super exec bridge tests,
+two override regressions, 113 Super expose tests and strict workspace Clippy
+pass. Official share is 36.31324608695189% (136,463 Mojo / 239,331 Rust LOC).
+The 75% objective remains open. Detailed evidence is in
+`migration/super-run-override-text-mojo-20261022.md`.

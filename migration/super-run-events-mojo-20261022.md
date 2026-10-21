@@ -64,7 +64,7 @@ ownership, no-fallback self-test, size, crate-boundary self-test/check,
 secret-boundary, documentation and whitespace checks pass. Canonical share is
 36.31104286805347% (136,450 Mojo / 239,331 Rust production LOC). The additional
 checked Rust ABI adapters slightly reduce raw source share; the counting rules
-and guards are unchanged.
+and guard thresholds are unchanged.
 
 The full local CI gate and changed-test runner pass. CI includes 685
 runtime-launch tests, 43 auto-rotate tests and 282 passing Node tests; its

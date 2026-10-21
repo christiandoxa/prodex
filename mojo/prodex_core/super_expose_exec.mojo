@@ -19,6 +19,7 @@ comptime SUPER_EXPOSE_EXEC_ENV_ENTRY: Int64 = 5
 comptime SUPER_EXPOSE_EXEC_STDIN: Int64 = 6
 comptime SUPER_EXPOSE_EXEC_TIMEOUT: Int64 = 7
 comptime SUPER_EXPOSE_EXEC_TEXT_CUT: Int64 = 8
+comptime SUPER_EXPOSE_EXEC_BOUNDED_TEXT: Int64 = 9
 
 comptime SUPER_EXPOSE_EXEC_OK: Int64 = 1
 comptime SUPER_EXPOSE_EXEC_INVALID: Int64 = 2
@@ -119,7 +120,7 @@ def prodex_mojo_super_expose_exec_validation_v1(
         return 4
     if (
         operation < SUPER_EXPOSE_EXEC_PROGRAM
-        or operation > SUPER_EXPOSE_EXEC_TEXT_CUT
+        or operation > SUPER_EXPOSE_EXEC_BOUNDED_TEXT
         or input_length < 0
         or secondary_length < 0
         or output_address == 0 or output_address % 8 != 0
@@ -128,7 +129,7 @@ def prodex_mojo_super_expose_exec_validation_v1(
     ):
         return 1
 
-    if operation == SUPER_EXPOSE_EXEC_TEXT_CUT:
+    if operation == SUPER_EXPOSE_EXEC_TEXT_CUT or operation == SUPER_EXPOSE_EXEC_BOUNDED_TEXT:
         if not rich_view_valid(super_expose_exec_view(input_address, input_length), 9223372036854775807):
             return 1
     var output = Pointer[mut=True, Int64, MutUntrackedOrigin](
@@ -139,6 +140,11 @@ def prodex_mojo_super_expose_exec_validation_v1(
 
     if operation == SUPER_EXPOSE_EXEC_TEXT_CUT:
         output[unsafe_offset=0] = rich_utf8_prefix_end(super_expose_exec_view(input_address, input_length), numeric_value)
+        return 0
+
+    if operation == SUPER_EXPOSE_EXEC_BOUNDED_TEXT:
+        var maximum = Int64(min(numeric_value, UInt64(9223372036854775807)))
+        output[unsafe_offset=0] = SUPER_EXPOSE_EXEC_OK if super_expose_exec_path_valid(super_expose_exec_view(input_address, input_length), maximum) else SUPER_EXPOSE_EXEC_INVALID
         return 0
 
     if operation == SUPER_EXPOSE_EXEC_PROGRAM:
