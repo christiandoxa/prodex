@@ -10,7 +10,6 @@ use prodex_mojo_core::optional_tools_policy::{
     optional_tool_manifest_tree_supported,
 };
 use prodex_mojo_core::rich::ascii_casefold_contains;
-use semver::Version;
 use sha2::{Digest, Sha256};
 use std::collections::BTreeSet;
 use std::fmt;
@@ -41,33 +40,9 @@ pub(crate) fn manifest_tree_sha256_supported(
         .expect("Mojo optional-tool manifest-tree policy failed")
 }
 
-fn parsed_probe_semver(value: &str) -> Option<Version> {
-    value
-        .split_whitespace()
-        .map(|token| {
-            token
-                .trim_matches(|ch: char| {
-                    !ch.is_ascii_alphanumeric() && !matches!(ch, '.' | '-' | '+')
-                })
-                .trim_start_matches('v')
-        })
-        .find_map(|token| Version::parse(token).ok())
-}
-
-fn validate_minimum_probe_version(id: OptionalToolId, version_line: &str) -> Result<Version> {
-    let found = parsed_probe_semver(version_line).with_context(|| {
-        format!("{id} did not report a recognizable semantic version: {version_line}")
-    })?;
-    let minimum = Version::parse(crate::optional_tool_minimum_supported_version(id))
-        .with_context(|| format!("invalid Prodex minimum version policy for {id}"))?;
-    anyhow::ensure!(
-        found >= minimum,
-        "{id} {found} is too old; Prodex requires {} or newer. Update {id} to the latest stable release (release-qualified reference: {})",
-        crate::optional_tool_minimum_supported_version(id),
-        crate::optional_tool_recommended_version(id),
-    );
-    Ok(found)
-}
+#[path = "optional_tools/probe_version.rs"]
+mod probe_version;
+use probe_version::validate_minimum_probe_version;
 
 fn probe_version_line(program: &Path, args: &[&str]) -> Result<String> {
     let output = crate::process::probe_command(program, args, TOOL_PROBE_TIMEOUT)?;

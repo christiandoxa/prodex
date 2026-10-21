@@ -1,4 +1,7 @@
 use crate::MojoError;
+#[path = "optional_tools_policy/probe_version.rs"]
+mod probe_version;
+pub use probe_version::{OptionalToolProbeToken, optional_tool_probe_token};
 
 const ABI_VERSION: i64 = 1;
 const AWARENESS_TEXT_COUNT: usize = 4;
