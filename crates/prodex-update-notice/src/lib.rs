@@ -282,9 +282,13 @@ fn cached_latest_codex_version(paths: &AppPaths, current_version: &str) -> Resul
     else {
         return Ok(None);
     };
-    Ok((Local::now().timestamp().saturating_sub(checked_at)
-        < update_check_cache_ttl_seconds(&latest_version, current_version)?)
-    .then_some(latest_version))
+    let fresh = map_update_notice_mojo(prodex_mojo_core::update_notice_policy::cache_is_fresh(
+        true,
+        Local::now().timestamp(),
+        checked_at,
+        update_check_cache_ttl_seconds(&latest_version, current_version)?,
+    ))?;
+    Ok(fresh.then_some(latest_version))
 }
 
 pub fn should_use_cached_update_version(
