@@ -1,7 +1,5 @@
-use super::{
-    RuntimeDeepSeekConversationStore, RuntimeProviderConversation,
-    runtime_provider_conversation_estimated_bytes,
-};
+use super::{RuntimeDeepSeekConversationStore, RuntimeProviderConversation};
+use prodex_provider_core::provider_core_conversation_estimated_bytes;
 use std::cell::RefCell;
 
 #[test]
@@ -82,7 +80,7 @@ fn conversation_store_replacement_updates_accounting_and_oversize_removes_old_va
         let state = root.state.lock().unwrap();
         assert_eq!(
             state.estimated_bytes,
-            runtime_provider_conversation_estimated_bytes("a", &replacement)
+            provider_core_conversation_estimated_bytes("a", &replacement).unwrap()
         );
         assert_eq!(state.next_sequence, 2);
     }
@@ -123,4 +121,26 @@ fn conversation_store_applies_global_count_and_byte_eviction_plans() {
     root.insert("new", vec![]);
     assert!(!root.contains("old"));
     assert_eq!(root.state.lock().unwrap().estimated_bytes, "new".len());
+}
+
+#[test]
+fn conversation_store_accounts_nested_json_and_scoped_utf8_keys() {
+    let root = RuntimeDeepSeekConversationStore::default();
+    let scope = root.scoped("é");
+    let messages = vec![serde_json::json!({"a": [null, true, 7, "é"], "empty": {}})];
+    scope.insert("resp", messages.clone());
+    let expected = "\0prodex:2:é:resp".len()
+        + 7 * std::mem::size_of::<serde_json::Value>()
+        + std::mem::size_of::<bool>()
+        + std::mem::size_of::<serde_json::Number>()
+        + "a".len()
+        + "empty".len()
+        + "é".len();
+    assert_eq!(scope.history("resp"), Some(messages));
+    let state = root.state.lock().unwrap();
+    assert_eq!(state.estimated_bytes, expected);
+    assert_eq!(
+        state.conversations["\0prodex:2:é:resp"].estimated_bytes,
+        expected
+    );
 }

@@ -2,6 +2,8 @@
 //! parsing and compatibility serialization remain outside the Mojo bridge.
 mod raw_span;
 use raw_span::validated_optional_raw_span;
+mod provider_conversation_memory;
+pub use provider_conversation_memory::{JsonMemoryLayout, conversation_estimated_bytes};
 
 #[cfg(feature = "mojo-runtime")]
 mod smart_context_artifact_projection;

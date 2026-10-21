@@ -8319,3 +8319,15 @@ runtime-smoke, strict workspace Clippy and the ownership/compatibility guards
 pass. The official share is 36.30450538791955% (136,245 Mojo / 239,039 Rust LOC).
 The 75% goal remains active. Evidence is in
 `migration/provider-conversation-retention-mojo-20261021.md`.
+
+## Provider conversation memory estimation compiled in Mojo (2026-10-22)
+
+The provider-core adapter now reuses borrowed Serde acquisition and supplies
+numeric memory facts to the compiled estimator. Mojo owns per-node, payload,
+key/string byte costs and saturation. The recursive Rust estimator and its
+arithmetic are deleted without a fallback. Direct Mojo, two bridge, all 535
+provider-core, six caller-filter, 550 provider/startup and 459 proxy tests,
+runtime-smoke, strict workspace Clippy and ownership/compatibility guards pass.
+Official share is 36.304688936071585% (136,278 Mojo / 239,095 Rust production
+LOC). The 75% goal remains active. Details are in
+`migration/provider-conversation-memory-mojo-20261022.md`.

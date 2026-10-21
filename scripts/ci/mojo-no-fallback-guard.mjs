@@ -430,6 +430,9 @@ const PROMOTED_FILES = [
   "crates/prodex-app/src/runtime_launch/proxy_startup/deepseek_rewrite/conversation_store.rs",
   "crates/prodex-mojo-core/src/provider_conversation_policy.rs",
   "mojo/prodex_core/provider_conversation_policy.mojo",
+  "crates/prodex-provider-core/src/conversation_memory.rs",
+  "crates/prodex-mojo-core/src/json/provider_conversation_memory.rs",
+  "mojo/prodex_core/provider_conversation_memory.mojo",
   "crates/prodex-app/src/runtime_broker/admin.rs",
   "crates/prodex-mojo-core/src/runtime_broker_admin.rs",
   "mojo/prodex_core/runtime_broker_admin.mojo",
@@ -3519,7 +3522,8 @@ export function findViolations(files) {
     if (filePath === "crates/prodex-app/src/runtime_launch/proxy_startup/deepseek_rewrite/conversation_store.rs") {
       return contents.includes("provider_conversation_policy::latest_matching(")
         && contents.includes("provider_conversation_policy::retention_plan(")
-        && !/key_is_in_scope|\.min_by_key\(|\.max_by_key\(|\.starts_with\(|next_sequence\.saturating_add/u.test(contents)
+        && contents.includes("provider_core_conversation_estimated_bytes(")
+        && !/key_is_in_scope|runtime_provider_json_estimated_bytes|runtime_provider_conversation_estimated_bytes|\.min_by_key\(|\.max_by_key\(|\.starts_with\(|\.saturating_add/u.test(contents)
         ? [] : [filePath + ": provider conversation selection and retention must remain compiled Mojo"];
     }
     if (filePath === "crates/prodex-mojo-core/src/provider_conversation_policy.rs") {
@@ -3533,6 +3537,22 @@ export function findViolations(files) {
         && contents.includes('@export("prodex_provider_conversation_retention_v1")')
         && contents.includes("index_order_sort[conversation_oldest_compare]")
         ? [] : [filePath + ": provider conversation Mojo production exports must remain reachable"];
+    }
+    if (filePath === "crates/prodex-provider-core/src/conversation_memory.rs") {
+      return contents.includes("document.borrowed_array(messages)")
+        && contents.includes("json::conversation_estimated_bytes(")
+        && !/\.saturating_add|\.fold\(|\.sum\(/u.test(contents)
+        ? [] : [filePath + ": provider conversation cost must reuse Serde acquisition and compiled Mojo"];
+    }
+    if (filePath === "crates/prodex-mojo-core/src/json/provider_conversation_memory.rs") {
+      return contents.includes("prodex_provider_conversation_memory_v1(")
+        && !/\.saturating_add|\.fold\(|\.sum\(/u.test(contents)
+        ? [] : [filePath + ": provider conversation memory bridge must retain Mojo arithmetic"];
+    }
+    if (filePath === "mojo/prodex_core/provider_conversation_memory.mojo") {
+      return contents.includes('@export("prodex_provider_conversation_memory_v1")')
+        && contents.includes("UInt128")
+        ? [] : [filePath + ": provider conversation memory export must remain compiled"];
     }
     return [];
   });
@@ -17826,12 +17846,16 @@ function selfTest() {
   ]]).join("\n"), /snapshot query must remain compiled Mojo/u);
 
   const providerConversationFile = "crates/prodex-app/src/runtime_launch/proxy_startup/deepseek_rewrite/conversation_store.rs";
-  const providerConversationCaller = "provider_conversation_policy::latest_matching( provider_conversation_policy::retention_plan(";
+  const providerConversationCaller = "provider_conversation_policy::latest_matching( provider_conversation_policy::retention_plan( provider_core_conversation_estimated_bytes(";
   assert.deepEqual(findViolations([[providerConversationFile, providerConversationCaller]]), []);
-  for (const restored of ["key_is_in_scope", ".min_by_key(", ".max_by_key(", ".starts_with(", "next_sequence.saturating_add"]) {
+  for (const restored of ["key_is_in_scope", ".min_by_key(", ".max_by_key(", ".starts_with(", "next_sequence.saturating_add", "fn runtime_provider_json_estimated_bytes("]) {
     assert.match(findViolations([[providerConversationFile, providerConversationCaller + restored]]).join("\n"), /conversation selection and retention/u);
   }
   assert.match(findViolations([[providerConversationFile, providerConversationCaller.replace("provider_conversation_policy::retention_plan(", "")]]).join("\n"), /conversation selection and retention/u);
+  const conversationMemoryFile = "crates/prodex-provider-core/src/conversation_memory.rs";
+  const conversationMemoryCaller = "document.borrowed_array(messages) json::conversation_estimated_bytes(";
+  assert.deepEqual(findViolations([[conversationMemoryFile, conversationMemoryCaller]]), []);
+  assert.match(findViolations([[conversationMemoryFile, conversationMemoryCaller + ".saturating_add("]]).join("\n"), /conversation cost must reuse/u);
 
 }
 
