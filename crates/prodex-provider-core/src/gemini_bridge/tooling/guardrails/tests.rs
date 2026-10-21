@@ -107,9 +107,13 @@ fn compiled_exact_output_selects_latest_user_and_subsequent_tool_via_mojo() {
     let request = json!({"role":"user","content":"Return only the command output."});
     assert!(!gemini_provider_core_conversation_requests_command_output_only(&[]));
     assert_eq!(gemini_provider_core_forced_command_output(&[]), None);
-    assert!(gemini_provider_core_conversation_requests_command_output_only(&[request.clone()]));
+    assert!(
+        gemini_provider_core_conversation_requests_command_output_only(std::slice::from_ref(
+            &request
+        ))
+    );
     assert_eq!(
-        gemini_provider_core_forced_command_output(&[request.clone()]),
+        gemini_provider_core_forced_command_output(std::slice::from_ref(&request)),
         None
     );
 

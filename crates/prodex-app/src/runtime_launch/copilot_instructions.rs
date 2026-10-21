@@ -119,13 +119,13 @@ fn runtime_copilot_collect_instruction_paths(root: &Path, paths: &mut Vec<PathBu
             break;
         }
         let path = &observed_paths[index];
-        let metadata = fs::symlink_metadata(&path)
+        let metadata = fs::symlink_metadata(path)
             .with_context(|| format!("failed to inspect {}", path.display()))?;
         if metadata.file_type().is_symlink() {
             continue;
         }
         if metadata.is_dir() {
-            runtime_copilot_collect_instruction_paths(&path, paths)?;
+            runtime_copilot_collect_instruction_paths(path, paths)?;
         } else if metadata.is_file()
             && path
                 .file_name()

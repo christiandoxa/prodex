@@ -175,11 +175,10 @@ mod tests {
                 emit_metrics: false,
             },
         );
-        assert_eq!(
+        assert!(
             broker_log_frame_plan(b"next\n", 0, false)
                 .unwrap()
-                .emit_metrics,
-            true,
+                .emit_metrics
         );
     }
 
