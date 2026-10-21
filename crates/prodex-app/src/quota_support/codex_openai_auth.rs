@@ -1,4 +1,5 @@
 use codex_config::codex_config_value;
+use prodex_mojo_core::codex_auth_headers::{CodexTerminalInput, CodexTerminalKind as TerminalName};
 use prodex_mojo_core::rich::ascii_casefold_equal_exact;
 use std::env;
 use std::path::Path;
@@ -138,24 +139,6 @@ struct TerminalInfo {
     term: Option<String>,
 }
 
-#[derive(Clone, Copy, Debug)]
-enum TerminalName {
-    AppleTerminal,
-    Ghostty,
-    Iterm2,
-    WarpTerminal,
-    VsCode,
-    WezTerm,
-    Kitty,
-    Alacritty,
-    Konsole,
-    GnomeTerminal,
-    Vte,
-    WindowsTerminal,
-    Dumb,
-    Unknown,
-}
-
 #[derive(Default)]
 struct TmuxClientInfo {
     termtype: Option<String>,
@@ -190,12 +173,12 @@ impl TerminalInfo {
     }
 
     fn from_term(term: String) -> Self {
-        let name = match term.as_str() {
-            "dumb" => TerminalName::Dumb,
-            "wezterm" | "wezterm-mux" => TerminalName::WezTerm,
-            _ => TerminalName::Unknown,
-        };
-        Self::new(name, None, None, Some(term))
+        let kind = prodex_mojo_core::codex_auth_headers::codex_terminal_kind(
+            &term,
+            CodexTerminalInput::Term,
+        )
+        .expect("compiled Mojo exact TERM fallback classifier failed");
+        Self::new(kind, None, None, Some(term))
     }
 
     fn unknown() -> Self {
@@ -255,7 +238,7 @@ fn detect_terminal_from_term_program(tmux: bool) -> Option<TerminalInfo> {
         return Some(terminal);
     }
     let version = terminal_env_var_non_empty("TERM_PROGRAM_VERSION");
-    let name = terminal_name_from_term_program(&term_program).unwrap_or(TerminalName::Unknown);
+    let name = terminal_name_from_term_program(&term_program);
     Some(TerminalInfo::from_term_program(name, term_program, version))
 }
 
@@ -338,7 +321,7 @@ fn terminal_from_tmux_client_info(client_info: TmuxClientInfo) -> Option<Termina
 
     if let Some(termtype) = termtype {
         let (program, version) = split_term_program_and_version(&termtype);
-        let name = terminal_name_from_term_program(&program).unwrap_or(TerminalName::Unknown);
+        let name = terminal_name_from_term_program(&program);
         return Some(TerminalInfo::new(name, Some(program), version, termname));
     }
 
@@ -346,11 +329,8 @@ fn terminal_from_tmux_client_info(client_info: TmuxClientInfo) -> Option<Termina
 }
 
 fn split_term_program_and_version(value: &str) -> (String, Option<String>) {
-    let mut parts = value.split_whitespace();
-    (
-        parts.next().unwrap_or_default().to_string(),
-        parts.next().map(ToString::to_string),
-    )
+    prodex_mojo_core::codex_auth_headers::codex_term_program_parts(value)
+        .expect("compiled Mojo tmux TERM_PROGRAM lexer returned invalid output")
 }
 
 fn tmux_display_message(format: &str) -> Option<String> {
@@ -363,30 +343,12 @@ fn tmux_display_message(format: &str) -> Option<String> {
     none_if_whitespace(String::from_utf8(output.stdout).ok()?.trim().to_string())
 }
 
-fn terminal_name_from_term_program(value: &str) -> Option<TerminalName> {
-    let normalized = value
-        .trim()
-        .chars()
-        .filter(|ch| !matches!(ch, ' ' | '-' | '_' | '.'))
-        .map(|ch| ch.to_ascii_lowercase())
-        .collect::<String>();
-
-    match normalized.as_str() {
-        "appleterminal" => Some(TerminalName::AppleTerminal),
-        "ghostty" => Some(TerminalName::Ghostty),
-        "iterm" | "iterm2" | "itermapp" => Some(TerminalName::Iterm2),
-        "warp" | "warpterminal" => Some(TerminalName::WarpTerminal),
-        "vscode" => Some(TerminalName::VsCode),
-        "wezterm" => Some(TerminalName::WezTerm),
-        "kitty" => Some(TerminalName::Kitty),
-        "alacritty" => Some(TerminalName::Alacritty),
-        "konsole" => Some(TerminalName::Konsole),
-        "gnometerminal" => Some(TerminalName::GnomeTerminal),
-        "vte" => Some(TerminalName::Vte),
-        "windowsterminal" => Some(TerminalName::WindowsTerminal),
-        "dumb" => Some(TerminalName::Dumb),
-        _ => None,
-    }
+fn terminal_name_from_term_program(value: &str) -> TerminalName {
+    prodex_mojo_core::codex_auth_headers::codex_terminal_kind(
+        value,
+        CodexTerminalInput::TermProgram,
+    )
+    .expect("compiled Mojo TERM_PROGRAM classifier returned invalid output")
 }
 
 fn format_terminal_version(name: &str, version: &Option<String>) -> String {
@@ -418,6 +380,37 @@ mod compiled_auth_headers_tests {
             Some("2.3.4".to_owned())
         );
         assert_eq!(parse_codex_cli_version_output("codex-cli v0.100.1"), None);
+    }
+
+    #[test]
+    fn compiled_codex_terminal_detection_preserves_tmux_and_program_aliases() {
+        assert!(matches!(
+            terminal_name_from_term_program("  iTerm.app  "),
+            TerminalName::Iterm2
+        ));
+        assert!(matches!(
+            terminal_name_from_term_program("Warp Terminal"),
+            TerminalName::WarpTerminal
+        ));
+        assert_eq!(
+            terminal_name_from_term_program("unknown"),
+            TerminalName::Unknown
+        );
+        assert_eq!(
+            split_term_program_and_version("\u{2003}Ghostty 1.2.3 extra"),
+            ("Ghostty".to_owned(), Some("1.2.3".to_owned()))
+        );
+        let term = TerminalInfo::from_term("wezterm-mux".to_string());
+        assert!(matches!(term.name, TerminalName::WezTerm));
+        let term = TerminalInfo::from_term("DUMB".to_string());
+        assert!(matches!(term.name, TerminalName::Unknown));
+        let terminal = terminal_from_tmux_client_info(TmuxClientInfo {
+            termtype: Some("iTerm.app\u{2003}3.5.0 extra".into()),
+            termname: Some("xterm-256color".into()),
+        })
+        .unwrap();
+        assert_eq!(terminal.name, TerminalName::Iterm2);
+        assert_eq!(terminal.user_agent_token(), "iTerm.app/3.5.0");
     }
 
     #[test]
