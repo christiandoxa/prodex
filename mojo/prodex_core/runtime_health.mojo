@@ -1061,6 +1061,7 @@ def prodex_runtime_profile_active_backoff_max_v1(
 comptime RUNTIME_PROFILE_AUTH_ABI_VERSION: Int64 = 1
 comptime RUNTIME_PROFILE_AUTH_OPERATION_REFRESH: Int64 = 0
 comptime RUNTIME_PROFILE_AUTH_OPERATION_SCORE: Int64 = 1
+comptime RUNTIME_PROFILE_AUTH_OPERATION_SOURCE: Int64 = 2
 
 
 @export("prodex_runtime_profile_auth_cache_policy_v1")
@@ -1074,7 +1075,7 @@ def prodex_runtime_profile_auth_cache_policy_v1(
     if abi_version != RUNTIME_PROFILE_AUTH_ABI_VERSION:
         return 4
     if (
-        (operation != RUNTIME_PROFILE_AUTH_OPERATION_REFRESH and operation != RUNTIME_PROFILE_AUTH_OPERATION_SCORE)
+        (operation != RUNTIME_PROFILE_AUTH_OPERATION_REFRESH and operation != RUNTIME_PROFILE_AUTH_OPERATION_SCORE and operation != RUNTIME_PROFILE_AUTH_OPERATION_SOURCE)
         or field_count != 4
         or fields_address == 0 or fields_address % 8 != 0
         or output_address == 0 or output_address % 8 != 0
@@ -1097,7 +1098,7 @@ def prodex_runtime_profile_auth_cache_policy_v1(
             ) >= fields[unsafe_offset=2]
             or proactively_due == 1
         )
-    else:
+    elif operation == RUNTIME_PROFILE_AUTH_OPERATION_SCORE:
         # All non-401 status codes historically receive the "403" score.
         var status = fields[unsafe_offset=0]
         var effective = fields[unsafe_offset=1]
@@ -1112,6 +1113,16 @@ def prodex_runtime_profile_auth_cache_policy_v1(
             return 1
         var failure_score = unauthorized_score if status == 401 else other_auth_score
         result = max(effective, failure_score)
+    else:
+        # Source selection: none=0, usage-auth=1, probe-auth=2.
+        var usage_present = fields[unsafe_offset=0]
+        var probe_present = fields[unsafe_offset=1]
+        if (
+            (usage_present != 0 and usage_present != 1)
+            or (probe_present != 0 and probe_present != 1)
+        ):
+            return 1
+        result = Int64(1) if usage_present == 1 else Int64(2) if probe_present == 1 else Int64(0)
     Pointer[mut=True, Int64, MutUntrackedOrigin](
         unsafe_from_address=Int(output_address)
     )[] = result
