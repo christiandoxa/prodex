@@ -190,6 +190,14 @@ pub fn gemini_media_request_selection<'a>(
         4 => return Err(MojoError::AbiMismatch),
         _ => return Err(MojoError::InvalidOutput),
     }
+    decode_gemini_media_request_selection(fields, operation, result)
+}
+
+fn decode_gemini_media_request_selection<'a>(
+    fields: &[GeminiMediaField<'a>; GEMINI_MEDIA_REQUEST_SLOTS],
+    operation: GeminiMediaRequestOperation,
+    result: [i64; 3],
+) -> Result<Option<GeminiMediaSelected<'a>>, MojoError> {
     let [action, source, mime] = result;
     if action == 0 {
         return if source == -1 && mime == -1 {

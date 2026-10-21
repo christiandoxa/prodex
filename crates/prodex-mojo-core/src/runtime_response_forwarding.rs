@@ -106,6 +106,14 @@ pub fn response_header_selection(
         4 => return Err(MojoError::AbiMismatch),
         _ => return Err(MojoError::InvalidOutput),
     }
+    decode_response_header_selection(headers, operation, output)
+}
+
+fn decode_response_header_selection(
+    headers: &[RuntimeResponseHeaderInput<'_>],
+    operation: RuntimeResponseHeaderOperation,
+    output: [i64; 3],
+) -> Result<RuntimeResponseHeaderSelection, MojoError> {
     let index = match output[0] {
         -1 => None,
         value => Some(usize::try_from(value).map_err(|_| MojoError::InvalidOutput)?),

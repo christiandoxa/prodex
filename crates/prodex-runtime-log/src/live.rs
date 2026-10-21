@@ -207,14 +207,7 @@ fn live_log_borrowed_tree<'a>(
             raw_length: raw.len() - raw_start,
         });
         last_child.push(None);
-        if let Some(parent) = parent {
-            if let Some(previous) = last_child[parent] {
-                nodes[previous].next_sibling = Some(index);
-            } else {
-                nodes[parent].first_child = Some(index);
-            }
-            last_child[parent] = Some(index);
-        }
+        link_live_log_child(&mut nodes, &mut last_child, parent, index);
         match value {
             serde_json::Value::Array(children) => {
                 for child in children.iter().rev() {
@@ -230,6 +223,22 @@ fn live_log_borrowed_tree<'a>(
         }
     }
     Ok((nodes, raw))
+}
+
+fn link_live_log_child(
+    nodes: &mut [JsonNode<'_>],
+    last_child: &mut [Option<usize>],
+    parent: Option<usize>,
+    index: usize,
+) {
+    if let Some(parent) = parent {
+        if let Some(previous) = last_child[parent] {
+            nodes[previous].next_sibling = Some(index);
+        } else {
+            nodes[parent].first_child = Some(index);
+        }
+        last_child[parent] = Some(index);
+    }
 }
 
 fn live_log_clipped_value(value: &serde_json::Value) -> Result<String, MojoError> {

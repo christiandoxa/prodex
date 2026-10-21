@@ -86,12 +86,7 @@ impl<'a> Document<'a> {
             last_child.push(None);
             values.push(value);
             if let Some(parent) = parent {
-                if let Some(previous) = last_child[parent] {
-                    self.nodes[previous].next_sibling = Some(index);
-                } else {
-                    self.nodes[parent].first_child = Some(index);
-                }
-                last_child[parent] = Some(index);
+                self.link(parent, &mut last_child[parent], index);
             }
             match value {
                 Value::Array(children) => {

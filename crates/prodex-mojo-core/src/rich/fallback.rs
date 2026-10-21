@@ -390,6 +390,15 @@ pub fn previous_response_json_search(
         4 => return Err(MojoError::AbiMismatch),
         _ => return Err(MojoError::InvalidOutput),
     }
+    decode_previous_response_json_selection(nodes, fields, operation, result)
+}
+
+fn decode_previous_response_json_selection(
+    nodes: &[crate::json::JsonNode<'_>],
+    fields: &[PreviousResponseJsonObjectFields<'_>],
+    operation: PreviousResponseJsonOperation,
+    result: [i64; 3],
+) -> Result<PreviousResponseJsonSelection, MojoError> {
     match (operation, result) {
         (_, [-1, PREVIOUS_RESPONSE_ERROR_CLASS_NONE, -1]) => {
             Ok(PreviousResponseJsonSelection::None)

@@ -46,14 +46,7 @@ pub(super) fn runtime_json_borrowed_shape<'a>(
         });
         last_child.push(None);
         values.push(value);
-        if let Some(parent) = parent {
-            if let Some(previous) = last_child[parent] {
-                nodes[previous].next_sibling = Some(index);
-            } else {
-                nodes[parent].first_child = Some(index);
-            }
-            last_child[parent] = Some(index);
-        }
+        link_borrowed_json_child(&mut nodes, &mut last_child, parent, index);
         match value {
             serde_json::Value::Array(children) => {
                 for child in children.iter().rev() {
@@ -69,4 +62,20 @@ pub(super) fn runtime_json_borrowed_shape<'a>(
         }
     }
     (nodes, values)
+}
+
+fn link_borrowed_json_child(
+    nodes: &mut [JsonNode<'_>],
+    last_child: &mut [Option<usize>],
+    parent: Option<usize>,
+    index: usize,
+) {
+    if let Some(parent) = parent {
+        if let Some(previous) = last_child[parent] {
+            nodes[previous].next_sibling = Some(index);
+        } else {
+            nodes[parent].first_child = Some(index);
+        }
+        last_child[parent] = Some(index);
+    }
 }
