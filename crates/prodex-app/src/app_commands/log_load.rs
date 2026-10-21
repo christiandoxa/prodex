@@ -114,12 +114,41 @@ impl LogLoadAggregate {
 
     pub(crate) fn matches(&self, query: &str) -> bool {
         let event = self.as_transcript();
-        contains_ignore_ascii_case(
-            &format!("{} {} {}", event.timestamp, event.source, event.text),
+        prodex_mojo_core::log::log_virtual_fields_contains(
+            &[&event.timestamp, &event.source, &event.text],
             query,
-        ) || self
-            .unique_runs
-            .iter()
-            .any(|run| contains_ignore_ascii_case(run, query))
+        )
+        .expect("compiled Mojo log-load virtual-field search returned invalid output")
+            || self
+                .unique_runs
+                .iter()
+                .any(|run| contains_ignore_ascii_case(run, query))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn compiled_log_load_search_preserves_cross_field_and_run_id_matching() {
+        let aggregate = LogLoadAggregate {
+            event: TranscriptEvent {
+                timestamp: "2026-10-21".to_owned(),
+                source: "main".to_owned(),
+                text: "payload".to_owned(),
+            },
+            key: "payload-key".to_owned(),
+            occurrences: 1,
+            unique_runs: vec!["run-A".to_owned()],
+            run_count_overflow: false,
+            last_seen: Instant::now(),
+        };
+        assert!(aggregate.matches("2026-10-21 MAIN"));
+        assert!(aggregate.matches("main PAYLOAD"));
+        assert!(!aggregate.matches("main  payload"));
+        assert!(aggregate.matches("RUN-A"));
+        assert!(!aggregate.matches("payload run-A"));
+        assert!(aggregate.matches(""));
     }
 }

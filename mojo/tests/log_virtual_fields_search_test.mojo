@@ -50,8 +50,16 @@ def main() raises:
     assert prodex_mojo_log_virtual_fields_contains_v1(
         2, v, 9, 0, 0, 0, 0, answer
     ) == 4
+    # Three-field search retains exact join boundaries.
+    var three_fields = StringSlice("MAIN  WEBSOCKET")
     assert prodex_mojo_log_virtual_fields_contains_v1(
-        1, v, 8, 0, 0, 0, 0, answer
+        1, v, 3, UInt(Int(three_fields.unsafe_ptr())),
+        Int64(three_fields.byte_length()), k, 64, answer
+    ) == 0
+    assert result[unsafe_offset=0] == 1
+    result[unsafe_offset=0] = 77
+    assert prodex_mojo_log_virtual_fields_contains_v1(
+        1, v, 0, 0, 0, 0, 0, answer
     ) == 1
     views[unsafe_offset=1] = UInt64(1_048_577)
     assert prodex_mojo_log_virtual_fields_contains_v1(
