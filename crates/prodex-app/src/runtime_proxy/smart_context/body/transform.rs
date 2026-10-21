@@ -3,7 +3,11 @@
 use super::super::{
     RuntimeSmartContextBudget, RuntimeSmartContextProxyState, RuntimeSmartContextTransformOutcome,
 };
-use super::*;
+use super::{
+    runtime_smart_context_append_inline_reference_protocol,
+    runtime_smart_context_dedupe_input_text_within_request,
+    runtime_smart_context_rehydrate_value_with_budget,
+};
 
 pub(super) struct RuntimeSmartContextBodyTransformInput<'a> {
     pub(super) budget: &'a RuntimeSmartContextBudget,

@@ -1,3 +1,9 @@
+mod casefold;
+pub use casefold::{
+    ascii_casefold_contains, ascii_casefold_ends_with, ascii_casefold_equal_exact,
+    ascii_casefold_find, ascii_casefold_starts_with,
+};
+
 use super::*;
 
 #[path = "catalog_planner.rs"]
@@ -391,26 +397,6 @@ fn reasoning_views(models: &[CatalogReasoningModel<'_>]) -> Result<ReasoningView
     Ok((catalog, efforts, effort_models, effort_presence, defaults))
 }
 
-pub fn ascii_casefold_equal_exact(left: &str, right: &str) -> Result<bool, MojoError> {
-    ensure_rich_abi()?;
-    let mut output = -1_i64;
-    status(unsafe {
-        prodex_mojo_rich_ascii_casefold_equal_v1(
-            RICH_ABI_VERSION,
-            left.as_ptr() as usize as u64,
-            i64::try_from(left.len()).map_err(|_| MojoError::InvalidInput)?,
-            right.as_ptr() as usize as u64,
-            i64::try_from(right.len()).map_err(|_| MojoError::InvalidInput)?,
-            count_address(&mut output),
-        )
-    })?;
-    match output {
-        0 => Ok(false),
-        1 => Ok(true),
-        _ => Err(MojoError::InvalidOutput),
-    }
-}
-
 pub fn openai_model_is_retired(model: &str) -> Result<bool, MojoError> {
     ensure_rich_abi()?;
     let mut output = -1_i64;
@@ -443,73 +429,6 @@ pub fn catalog_context_window_is_positive(tokens: u64) -> Result<bool, MojoError
     match output {
         0 => Ok(false),
         1 => Ok(true),
-        _ => Err(MojoError::InvalidOutput),
-    }
-}
-
-#[repr(i64)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum AsciiCasefoldRelation {
-    StartsWith = 0,
-    EndsWith = 1,
-    Contains = 2,
-}
-
-fn ascii_casefold_relation(
-    operation: AsciiCasefoldRelation,
-    value: &str,
-    needle: &str,
-) -> Result<bool, MojoError> {
-    ensure_rich_abi()?;
-    let mut output = -1_i64;
-    status(unsafe {
-        prodex_mojo_rich_ascii_casefold_relation_v1(
-            RICH_ABI_VERSION,
-            operation as i64,
-            value.as_ptr() as usize as u64,
-            i64::try_from(value.len()).map_err(|_| MojoError::InvalidInput)?,
-            needle.as_ptr() as usize as u64,
-            i64::try_from(needle.len()).map_err(|_| MojoError::InvalidInput)?,
-            count_address(&mut output),
-        )
-    })?;
-    match output {
-        0 => Ok(false),
-        1 => Ok(true),
-        _ => Err(MojoError::InvalidOutput),
-    }
-}
-
-pub fn ascii_casefold_starts_with(value: &str, prefix: &str) -> Result<bool, MojoError> {
-    ascii_casefold_relation(AsciiCasefoldRelation::StartsWith, value, prefix)
-}
-
-pub fn ascii_casefold_ends_with(value: &str, suffix: &str) -> Result<bool, MojoError> {
-    ascii_casefold_relation(AsciiCasefoldRelation::EndsWith, value, suffix)
-}
-
-pub fn ascii_casefold_contains(value: &str, needle: &str) -> Result<bool, MojoError> {
-    ascii_casefold_relation(AsciiCasefoldRelation::Contains, value, needle)
-}
-
-pub fn ascii_casefold_find(value: &str, needle: &str) -> Result<Option<usize>, MojoError> {
-    ensure_rich_abi()?;
-    let mut output_offset = -1_i64;
-    status(unsafe {
-        prodex_mojo_rich_ascii_casefold_find_v1(
-            RICH_ABI_VERSION,
-            value.as_ptr() as usize as u64,
-            i64::try_from(value.len()).map_err(|_| MojoError::InvalidInput)?,
-            needle.as_ptr() as usize as u64,
-            i64::try_from(needle.len()).map_err(|_| MojoError::InvalidInput)?,
-            count_address(&mut output_offset),
-        )
-    })?;
-    match output_offset {
-        -1 => Ok(None),
-        offset if offset >= 0 => usize::try_from(offset)
-            .map(Some)
-            .map_err(|_| MojoError::InvalidOutput),
         _ => Err(MojoError::InvalidOutput),
     }
 }
@@ -831,95 +750,5 @@ pub fn resolve_catalog_reasoning(
 }
 
 #[cfg(test)]
-mod compiled_main_model_insertion_tests {
-    use super::*;
-
-    #[test]
-    fn compiled_main_model_insertion_uses_first_default_or_custom_and_preserves_order() {
-        use CatalogInsertionChoice::{Custom, Model, ProviderDefault};
-        use CatalogInsertionPlacement::{BundledAfterDefault, CurrentBeforeCustom};
-        assert_eq!(
-            catalog_insertion_index(&[ProviderDefault, Model, Custom], CurrentBeforeCustom),
-            Ok(2),
-        );
-        assert_eq!(
-            catalog_insertion_index(&[ProviderDefault, Model, Custom], BundledAfterDefault),
-            Ok(1),
-        );
-        assert_eq!(
-            catalog_insertion_index(
-                &[Model, Custom, Model, Custom, ProviderDefault],
-                CurrentBeforeCustom
-            ),
-            Ok(1),
-        );
-        assert_eq!(
-            catalog_insertion_index(
-                &[Model, Custom, Model, Custom, ProviderDefault],
-                BundledAfterDefault
-            ),
-            Ok(5),
-        );
-        assert_eq!(
-            catalog_insertion_index(&[Model, Model], CurrentBeforeCustom),
-            Ok(2),
-        );
-        assert_eq!(
-            catalog_insertion_index(&[Model, Model], BundledAfterDefault),
-            Ok(0),
-        );
-        assert_eq!(catalog_insertion_index(&[], CurrentBeforeCustom), Ok(0));
-        assert_eq!(catalog_insertion_index(&[], BundledAfterDefault), Ok(0));
-        let many = vec![Model; 1025];
-        assert_eq!(
-            catalog_insertion_index(&many, CurrentBeforeCustom),
-            Ok(1025)
-        );
-    }
-
-    #[test]
-    fn compiled_main_model_insertion_abi_rejects_late_bad_tag_without_mutation() {
-        let mut tags = [0_i64, 1, 4, 1];
-        let mut output = 91_i64;
-        let source = tags.as_ptr() as usize as u64;
-        let result = (&mut output as *mut i64) as usize as u64;
-        for (version, mode, ptr, count, output_ptr, expected) in [
-            (5, 0, source, 4, result, 4),
-            (6, -1, source, 4, result, 1),
-            (6, 2, source, 4, result, 1),
-            (6, 0, 0, 4, result, 1),
-            (6, 0, source, -1, result, 1),
-            (6, 0, source, 65_537, result, 1),
-            (6, 0, source, 4, 0, 1),
-        ] {
-            assert_eq!(
-                unsafe {
-                    prodex_mojo_rich_catalog_insertion_index_v1(
-                        version, mode, ptr, count, output_ptr,
-                    )
-                },
-                expected,
-            );
-            assert_eq!(output, 91);
-        }
-        tags[3] = 99;
-        assert_eq!(
-            unsafe {
-                prodex_mojo_rich_catalog_insertion_index_v1(
-                    RICH_ABI_VERSION,
-                    1,
-                    tags.as_ptr() as usize as u64,
-                    4,
-                    result,
-                )
-            },
-            1,
-        );
-        assert_eq!(output, 91);
-        assert_eq!(
-            unsafe { prodex_mojo_rich_catalog_insertion_index_v1(6, 0, 0, 0, result) },
-            0,
-        );
-        assert_eq!(output, 0);
-    }
-}
+#[path = "../../tests/src/rich/catalog/compiled_main_model_insertion_tests.rs"]
+mod compiled_main_model_insertion_tests;
