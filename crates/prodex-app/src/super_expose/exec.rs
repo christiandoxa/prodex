@@ -1,3 +1,4 @@
+use super::bounded_text;
 use super::logging::ExposeAuditLog;
 use super::optional_tools::ExposeOptionalTools;
 use serde_json::{Value, json};
@@ -560,20 +561,6 @@ fn render_output(output: CapturedOutput) -> (String, bool) {
         text,
         output.truncated || redacted.len() > EXEC_MAX_OUTPUT_BYTES,
     )
-}
-
-fn bounded_text(value: &str, max_bytes: usize) -> String {
-    if value.len() <= max_bytes {
-        return value.to_string();
-    }
-    let end = value
-        .char_indices()
-        .take_while(|(index, _)| *index <= max_bytes)
-        .map(|(index, _)| index)
-        .last()
-        .unwrap_or(0)
-        .min(max_bytes);
-    value[..end].to_string()
 }
 
 fn join_reader(

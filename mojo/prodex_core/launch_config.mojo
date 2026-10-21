@@ -3,7 +3,7 @@ from std.memory import Pointer
 from launch_args_common import (
     LaunchArgView, launch_arg, launch_is, launch_prefix, launch_rust_space, launch_view,
 )
-from rich_text import rich_codepoint, rich_codepoint_width, rich_view_ptr, rich_view_valid
+from rich_text import rich_codepoint, rich_codepoint_width, rich_view_ptr, rich_view_valid, rich_utf8_prefix_end
 from rich_types import ProdexRichStringView
 
 comptime LAUNCH_CONFIG_ABI_VERSION: Int64 = 1
@@ -658,13 +658,7 @@ def prodex_launch_instruction_text_cut_v1(
     var view = ProdexRichStringView(text_address, UInt(text_length))
     if not rich_view_valid(view, 0x7FFFFFFFFFFFFFFF):
         return 1
-    var end = min(text_length, max_bytes)
-    if end < text_length:
-        var text = Pointer[mut=False, UInt8, ImmUntrackedOrigin](
-            unsafe_from_address=Int(text_address)
-        )
-        while end > 0 and text[unsafe_offset=end] >= 0x80 and text[unsafe_offset=end] <= 0xBF:
-            end -= 1
+    var end = rich_utf8_prefix_end(view, UInt64(max_bytes))
     Pointer[mut=True, Int64, MutUntrackedOrigin](
         unsafe_from_address=Int(end_address)
     )[] = end

@@ -395,3 +395,13 @@ def rich_view_order_sort(
     count: Int64,
 ) -> None:
     index_order_sort[rich_view_order_compare](UInt(Int(values)), 0, indices, count)
+
+
+# The caller validates UTF-8 and the signed byte-length bound before clipping.
+def rich_utf8_prefix_end(view: ProdexRichStringView, maximum: UInt64) -> Int64:
+    var end = Int64(min(UInt64(view.len), maximum))
+    if end < Int64(view.len):
+        var source = rich_view_ptr(view)
+        while end > 0 and rich_utf8_continuation(source[unsafe_offset=end]):
+            end -= 1
+    return end

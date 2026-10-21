@@ -10,6 +10,7 @@ const OP_ENV_COUNT: i64 = 4;
 const OP_ENV_ENTRY: i64 = 5;
 const OP_STDIN: i64 = 6;
 const OP_TIMEOUT: i64 = 7;
+const OP_TEXT_CUT: i64 = 8;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(i64)]
@@ -226,6 +227,24 @@ pub fn super_expose_exec_validate_timeout(
     timeout_ms: u64,
 ) -> Result<SuperExposeExecValidation, MojoError> {
     decode(call(OP_TIMEOUT, None, None, timeout_ms)?[0])
+}
+
+/// Clips borrowed UTF-8 text to a byte budget through the shared compiled text kernel.
+pub fn super_expose_text_cut(text: &str, max_bytes: usize) -> Result<usize, MojoError> {
+    let [end, reserved] = call(
+        OP_TEXT_CUT,
+        Some(text),
+        None,
+        u64::try_from(max_bytes).map_err(|_| MojoError::InvalidInput)?,
+    )?;
+    let end = usize::try_from(end).map_err(|_| MojoError::InvalidOutput)?;
+    if reserved != 0 || end > text.len() || end > max_bytes || !text.is_char_boundary(end) {
+        return Err(MojoError::InvalidOutput);
+    }
+    if text.len() <= max_bytes && end != text.len() {
+        return Err(MojoError::InvalidOutput);
+    }
+    Ok(end)
 }
 
 #[cfg(test)]

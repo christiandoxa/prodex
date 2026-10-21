@@ -1,4 +1,4 @@
-use super::{bounded_redacted_text, logging::ExposeAuditLog, now_millis};
+use super::{bounded_redacted_text, bounded_text, logging::ExposeAuditLog, now_millis};
 use crate::{configure_child_process_group, terminate_child_process_tree};
 use anyhow::{Context, Result};
 use base64::Engine as _;

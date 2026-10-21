@@ -427,6 +427,7 @@ const CORE_LEXICAL_BROKER_PATHS = "crates/prodex-app/src/runtime_persistence/pat
 const CORE_LEXICAL_APP_HOUSEKEEPING = "crates/prodex-app/src/housekeeping.rs";
 const CORE_LEXICAL_LIVE_LOG = "crates/prodex-app/src/app_commands/log_live.rs";
 const PROMOTED_FILES = [
+  "mojo/prodex_core/rich_text.mojo",
   "crates/prodex-app/src/super_expose/run/helpers.rs",
   "crates/prodex-mojo-core/src/rich/super_expose/run_policy.rs",
   "mojo/prodex_core/super_expose_run_policy.mojo",
@@ -5824,7 +5825,7 @@ export function findViolations(files) {
         '@export("prodex_launch_instruction_text_cut_v1")',
         "def launch_instruction_path_compare(",
         "def launch_instruction_path_heap_down(",
-        "while end > 0 and text[unsafe_offset=end] >= 0x80",
+        "rich_utf8_prefix_end(view, UInt64(max_bytes))",
       ].filter((marker) => !contents.includes(marker))
         .map((marker) => filePath + ": compiled Copilot instruction policy missing " + marker);
     }
@@ -7944,11 +7945,33 @@ export function findViolations(files) {
   });
   const superRunEventViolations = files.flatMap(([filePath, contents]) => {
     if (filePath === "crates/prodex-app/src/super_expose/run/helpers.rs" && contents.includes("fn events_page(")) {
-      const body = contents.match(/pub\(super\) fn events_page\([^]*?(?=^pub\(super\) fn bounded_event_text)/mu)?.[0] ?? "";
+      const body = contents.match(/pub\(super\) fn events_page\([^]*?(?=^pub\(super\) fn summary_json)/mu)?.[0] ?? "";
       return body.includes("super_run_events_page_plan(")
         && body.includes("super_run_event_push_plan(")
         && !/\.filter\(|limit\.min\(|next_seq\.saturating_add\(|while record\.events\.len\(|MAX_RUN_EVENTS/u.test(body)
         ? [] : [filePath + ": Super event retention and cursor selection must remain compiled Mojo-owned"];
+    }
+    return [];
+  });
+  const superTextClipViolations = files.flatMap(([filePath, contents]) => {
+    if (filePath === SUPER_EXPOSE_FILE && contents.includes("fn bounded_text(")) {
+      const body = contents.match(/fn bounded_text\([^]*?(?=\n#\[cfg\(test\)\])/u)?.[0] ?? "";
+      return body.includes("super_expose_text_cut(") && !/is_char_boundary|char_indices|saturating_sub/u.test(body)
+        ? [] : [filePath + ": shared UTF-8 clipping must use the compiled text kernel"];
+    }
+    if (filePath === "crates/prodex-app/src/super_expose/run/helpers.rs" && contents.includes("fn append_output(")) {
+      return contents.includes("super_expose_text_cut(") && contents.includes("bounded_text(text,")
+        && !/is_char_boundary|fn bounded_event_text/u.test(contents)
+        ? [] : [filePath + ": run UTF-8 clipping must use the shared compiled boundary"];
+    }
+    if (filePath === SUPER_EXPOSE_EXEC_FILE && contents.includes("fn render_output(")) {
+      return contents.includes("use super::bounded_text;") && !contents.includes("fn bounded_text(")
+        ? [] : [filePath + ": exec UTF-8 clipping must reuse the shared text adapter"];
+    }
+    if (filePath === "mojo/prodex_core/rich_text.mojo") {
+      return contents.includes("def rich_utf8_prefix_end(")
+        && contents.includes("while end > 0 and rich_utf8_continuation(source[unsafe_offset=end])")
+        ? [] : [filePath + ": compiled UTF-8 prefix kernel must remain available"];
     }
     return [];
   });
@@ -13992,7 +14015,7 @@ export function findViolations(files) {
     ...anthropicEnvelopeViolations, ...anthropicRequestViolations,
     ...anthropicWebSearchViolations, ...superProviderConfigViolations, ...externalProviderCatalogViolations, ...subAgentPolicyViolations, ...runtimeOverlayPolicyViolations, ...cliRuntimeFeatureViolations,
     ...superExposeProtocolViolations, ...superExposeExecViolations, ...superExposeViolations,
-    ...superRunRetentionViolations, ...superRunEventViolations,
+    ...superRunRetentionViolations, ...superRunEventViolations, ...superTextClipViolations,
     ...geminiFallbackViolations, ...geminiGenerationViolations, ...geminiTranslatorHardReplacementViolations, ...geminiBridgeFallbackViolations, ...geminiSignatureViolations, ...geminiResponseConformanceViolations,
     ...geminiToolResponseOrderViolations, ...geminiApplyPatchViolations,
     ...hardReplacementViolations, ...precommitBudgetOracleViolations,
@@ -17964,10 +17987,18 @@ function selfTest() {
     assert.match(findViolations([[runRetentionFile, runRetentionCaller.replace(" runs.retain(", " runs.retain( " + restored)]]).join("\n"), /compiled mask without Rust eviction/u);
   }
 
-  const eventCaller = runRetentionCaller + "\npub(super) fn events_page() { super_run_events_page_plan( }\npub(super) fn push_event() { super_run_event_push_plan( }\npub(super) fn bounded_event_text(";
+  const eventCaller = runRetentionCaller + "\npub(super) fn events_page() { super_run_events_page_plan( }\npub(super) fn push_event() { super_run_event_push_plan( }\npub(super) fn summary_json(";
   assert.deepEqual(findViolations([[runRetentionFile, eventCaller]]), []);
   for (const restored of [".filter(", "limit.min(", "next_seq.saturating_add(", "while record.events.len(", "MAX_RUN_EVENTS"]) {
     assert.match(findViolations([[runRetentionFile, eventCaller.replace("super_run_events_page_plan(", restored + " super_run_events_page_plan(")]]).join("\n"), /Super event retention and cursor selection/u);
+  }
+
+  const sharedTextCaller = "fn bounded_text() { super_expose_text_cut( }\n#[cfg(test)]";
+  const clipViolations = (source) => findViolations([[SUPER_EXPOSE_FILE, source]])
+    .filter((violation) => violation.includes("shared UTF-8 clipping"));
+  assert.deepEqual(clipViolations(sharedTextCaller), []);
+  for (const restored of ["is_char_boundary", "char_indices", "saturating_sub"]) {
+    assert.match(clipViolations(sharedTextCaller.replace("super_expose_text_cut(", restored + " super_expose_text_cut(")).join("\n"), /compiled text kernel/u);
   }
 
 }
