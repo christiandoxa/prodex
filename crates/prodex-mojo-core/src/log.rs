@@ -14,6 +14,8 @@ mod search;
 pub use search::log_contains_ignore_ascii_case;
 mod virtual_fields_search;
 pub use virtual_fields_search::log_virtual_fields_contains;
+mod latest_timestamp;
+pub use latest_timestamp::log_timestamp_should_replace;
 mod runtime_line;
 mod snapshot;
 mod transcript;
