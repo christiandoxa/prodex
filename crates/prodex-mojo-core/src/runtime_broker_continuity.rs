@@ -1,3 +1,7 @@
+#[path = "runtime_broker_continuity/log_framing.rs"]
+mod log_framing;
+pub use log_framing::{BrokerLogFrameAction, BrokerLogFramePlan, broker_log_frame_plan};
+
 #[path = "runtime_broker_continuity/log_cache.rs"]
 mod log_cache;
 use crate::MojoError;

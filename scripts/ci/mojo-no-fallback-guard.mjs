@@ -410,6 +410,12 @@ const LINEAGE_LATEST_BINDING_CALLER_TEST = "crates/prodex-runtime-proxy/tests/sr
 const LINEAGE_LATEST_BINDING_DIRECT_TEST = "mojo/tests/runtime_lineage_latest_binding_test.mojo";
 const SHARED_HISTORY_ORDER_MOJO_FILE = "mojo/prodex_core/shared_history_policy.mojo";
 const SHARED_HISTORY_ORDER_DIRECT_TEST = "mojo/tests/shared_history_timestamp_order_test.mojo";
+const BROKER_LOG_FRAME_CALLER = "crates/prodex-runtime-broker-log/src/lib.rs";
+const BROKER_LOG_FRAME_CORE = "crates/prodex-mojo-core/src/runtime_broker_continuity/log_framing.rs";
+const BROKER_LOG_FRAME_FACADE = "crates/prodex-mojo-core/src/runtime_broker_continuity.rs";
+const BROKER_LOG_FRAME_MOJO = "mojo/prodex_core/runtime_broker_continuity.mojo";
+const BROKER_LOG_FRAME_TEST = "crates/prodex-runtime-broker-log/tests/src/lib.rs";
+const BROKER_LOG_FRAME_DIRECT_TEST = "mojo/tests/runtime_broker_log_frame_plan_test.mojo";
 const PROMOTED_FILES = [
   PROVIDER_USAGE_SSE_MOJO,
   PROVIDER_USAGE_SSE_TEST,
@@ -939,6 +945,11 @@ const PROMOTED_FILES = [
   "crates/prodex-mojo-core/src/runtime_broker_continuity/metrics.rs",
   "crates/prodex-mojo-core/src/runtime_broker_continuity/continuation_metrics.rs",
   "crates/prodex-runtime-broker/src/continuity.rs",
+  BROKER_LOG_FRAME_CORE,
+  BROKER_LOG_FRAME_FACADE,
+  BROKER_LOG_FRAME_MOJO,
+  BROKER_LOG_FRAME_TEST,
+  BROKER_LOG_FRAME_DIRECT_TEST,
   "crates/prodex-runtime-broker-log/src/lib.rs",
   "crates/prodex-mojo-core/src/state_policy.rs",
   "crates/prodex-state/src/provider_capabilities.rs",
@@ -3567,6 +3578,67 @@ export function findViolations(files) {
       return required
         .filter((call) => !contents.includes(call))
         .map((call) => filePath + ": runtime-cookie ABI adapter must retain " + call);
+    }
+    return [];
+  });
+  const brokerLogFrameMojoViolations = files.flatMap(([filePath, contents]) => {
+    if (filePath === BROKER_LOG_FRAME_CALLER &&
+        contents.includes("fn runtime_broker_continuity_failure_reason_metrics_from_log_range(")) {
+      const start = contents.indexOf("fn runtime_broker_continuity_failure_reason_metrics_from_log_range(");
+      const end = contents.indexOf("pub fn runtime_broker_cached_continuity_failure_reason_metrics(", start);
+      const production = contents.slice(start, end < 0 ? undefined : end);
+      const required = [
+        "broker_log_frame_plan(available, line.len(), line_oversized)",
+        "match plan.action",
+        "line_oversized = plan.oversized_after",
+        "if plan.complete",
+        "if plan.emit_metrics",
+      ];
+      const retired = [
+        ".position(|byte| *byte == b'\n')",
+        "fn append_runtime_broker_log_chunk(",
+        "if !line_oversized",
+        "line_oversized = append_runtime_broker_log_chunk(",
+      ];
+      return required.every((marker) => production.includes(marker))
+        && retired.every((marker) => !contents.includes(marker))
+        ? [] : [filePath + ": broker log LF scan, overflow transitions and metric gate must remain Mojo-owned"];
+    }
+    if (filePath === BROKER_LOG_FRAME_CORE) {
+      return [
+        "fn prodex_runtime_broker_log_frame_plan_v1(",
+        "pub fn broker_log_frame_plan(",
+        "compiled_broker_log_frame_scans_binary_and_partial_line_boundaries",
+        "compiled_broker_log_frame_enforces_exact_megabyte_cap_and_recovers",
+        "compiled_broker_log_frame_abi_rejects_bad_inputs_without_modifying_output",
+      ].filter((marker) => !contents.includes(marker))
+        .map((marker) => filePath + ": compiled broker log framing typed ABI/test missing " + marker);
+    }
+    if (filePath === BROKER_LOG_FRAME_FACADE &&
+        contents.includes("mod log_framing;")) {
+      return contents.includes("pub use log_framing::{")
+        ? [] : [filePath + ": compiled broker log framing must remain production reachable"];
+    }
+    if (filePath === BROKER_LOG_FRAME_MOJO &&
+        contents.includes("BROKER_LOG_FRAME_ABI")) {
+      return [
+        '@export("prodex_runtime_broker_log_frame_plan_v1")',
+        "BROKER_LOG_FRAME_MAX_LINE_BYTES",
+        "BROKER_LOG_FRAME_CLEAR_OVERSIZED",
+        "output[unsafe_offset=4] = Int64(complete and not oversized)",
+      ].filter((marker) => !contents.includes(marker))
+        .map((marker) => filePath + ": broker log compiled framing policy missing " + marker);
+    }
+    if (filePath === BROKER_LOG_FRAME_DIRECT_TEST) {
+      return contents.includes("prodex_runtime_broker_log_frame_plan_v1")
+        ? [] : [filePath + ": direct broker log frame Mojo ABI regression missing"];
+    }
+    if (filePath === BROKER_LOG_FRAME_TEST) {
+      return [
+        "compiled_broker_log_framing_retains_incomplete_tail_until_newline",
+        "compiled_broker_log_framing_discards_oversize_and_recovers_on_following_lines",
+      ].filter((marker) => !contents.includes(marker))
+        .map((marker) => filePath + ": broker log framing caller regression missing " + marker);
     }
     return [];
   });
@@ -13621,7 +13693,7 @@ export function findViolations(files) {
     }
     return [];
   });
-  return [...lineageLatestBindingMojoViolations, ...coreNewestLogPathMojoViolations, ...quotaCurrentNameRotationMojoViolations, ...catalogInsertionMojoViolations, ...repoDuplicateBatchMojoViolations, ...previousResponseCurrentNameMojoViolations, ...infoProcessPidMojoViolations, ...pingProfileOrderMojoViolations, ...repoMapPathSetMojoViolations, ...launchProcessOutputLineMojoViolations, ...followLogFramingMojoViolations, ...threadDatabaseOrderMojoViolations, ...repoNearestPathMojoViolations, ...copilotInstructionMojoViolations, ...quotaStateProfileMojoViolations, ...quotaRuntimeLogOrderMojoViolations, ...repoArtifactEvictionMojoViolations, ...repoArtifactOrderMojoViolations, ...recentLogPathsMojoViolations, ...logFollowSelectionMojoViolations, ...smartContextStoreRetentionMojoViolations, ...runtimeLogTailMojoViolations, ...deepseekBufferedTextItemMojoViolations, ...runtimeSseResponseIdMojoViolations, ...upstreamPayloadBoundsMojoViolations, ...runtimeSseEventStateMojoViolations, ...geminiPatchSourceMojoViolations, ...openAiCompatSseEnvelopeMojoViolations, ...anthropicSseDataLineMojoViolations, ...responseHeaderSelectionMojoViolations, ...previousResponseTextSpanMojoViolations, ...previousResponseJsonSearchMojoViolations, ...domainErrorMojoViolations, ...geminiValueCollectionMojoViolations, ...geminiSimpleResponseViolations, ...logPayloadProjectionViolations, ...nativeRecoveryOwnershipViolations, ...quotaRecoveryEligibilityViolations, ...runtimeBrokerReuseMojoViolations, ...geminiResponseMediaMojoViolations, ...cookieEvictionMojoViolations, ...websocketBudgetMojoViolations, ...affinityBindingMojoViolations, ...responsesCapacityRecoveryViolations, ...sseTapMojoOwnershipViolations, ...quotaWatchViolations, ...geminiCompactSnippetViolations, ...geminiCompactTextViolations, ...doctorSmartContextDecisionViolations, ...providerSseJsonFrameMojoViolations, ...geminiSseCompletionOwnershipViolations, ...anthropicNativeStreamDecisionViolations, ...anthropicAttemptCursorViolations, ...geminiUnsupportedToolRetryViolations, ...terminalGeometryViolations, ...previousResponseRecoveryTransitionViolations, ...chatCompatibleToolCallKindViolations, ...geminiQuotaBodyMojoViolations, ...geminiOAuthRotationMojoViolations, ...geminiBuiltinBatchMojoViolations, ...geminiToolArrayValidationMojoViolations, ...geminiOAuthModelMojoViolations, ...superExposeOriginMojoViolations, ...kiroAcpToolLedgerMojoViolations, ...quotaPoolSummarySectionsMojoViolations, ...deepseekRequestDiagnosticViolations, ...deepseekToolShapeIssueMojoViolations, ...deepseekReplayItemPolicyMojoViolations, ...chatNamespaceSplitMojoViolations, ...deepseekInputItemIssueMessageViolations, ...deepseekRequestIssueMessageViolations, ...smartContextTelemetrySampleViolations, ...compatibilityDiagnosticsMojoViolations, ...quotaHeaderProjectionViolations, ...smartContextCapsuleOrderViolations, ...markerViolations, ...deepseekCatalogPolicyViolations, ...featureOffViolations, ...liveLogRecordViolations, ...runtimePolicyPresetViolations, ...runtimeConfigScalarViolations, ...profileHealthCircuitViolations, ...logThroughputViolations, ...operationalDetailSpecViolations, ...transcriptPolicyViolations, ...logLoadPolicyViolations, ...routeReasonViolations, ...quotaSnapshotCompareMojoViolations, ...startupProbeBatchMojoViolations, ...runtimeStateQuotaViolations, ...runtimeStateRoutePolicyViolations, ...runtimeProxyRootViolations, ...runtimeRecoveryDeadlineViolations, ...brokerVersionGuardViolations, ...brokerContinuityViolations, ...brokerLogCacheViolations, ...codexConfigViolations, ...statePolicyViolations, ...quotaSelectionPolicyViolations, ...routeTagMirrorViolations, ...enumTagMirrorViolations, ...appSelectionPolicyMirrorViolations, ...runtimeStateBackgroundViolations, ...redactionViolations, ...rateLimitHeaderSelectionViolations, ...profileIdentityViolations, ...governanceInspectionViolations, ...governanceInspectionOrderingViolations, ...exactnessPlannerViolations,
+  return [...lineageLatestBindingMojoViolations, ...coreNewestLogPathMojoViolations, ...quotaCurrentNameRotationMojoViolations, ...catalogInsertionMojoViolations, ...repoDuplicateBatchMojoViolations, ...previousResponseCurrentNameMojoViolations, ...infoProcessPidMojoViolations, ...pingProfileOrderMojoViolations, ...repoMapPathSetMojoViolations, ...launchProcessOutputLineMojoViolations, ...followLogFramingMojoViolations, ...threadDatabaseOrderMojoViolations, ...repoNearestPathMojoViolations, ...copilotInstructionMojoViolations, ...quotaStateProfileMojoViolations, ...quotaRuntimeLogOrderMojoViolations, ...repoArtifactEvictionMojoViolations, ...repoArtifactOrderMojoViolations, ...recentLogPathsMojoViolations, ...logFollowSelectionMojoViolations, ...smartContextStoreRetentionMojoViolations, ...runtimeLogTailMojoViolations, ...deepseekBufferedTextItemMojoViolations, ...runtimeSseResponseIdMojoViolations, ...upstreamPayloadBoundsMojoViolations, ...runtimeSseEventStateMojoViolations, ...geminiPatchSourceMojoViolations, ...openAiCompatSseEnvelopeMojoViolations, ...anthropicSseDataLineMojoViolations, ...responseHeaderSelectionMojoViolations, ...previousResponseTextSpanMojoViolations, ...previousResponseJsonSearchMojoViolations, ...domainErrorMojoViolations, ...geminiValueCollectionMojoViolations, ...geminiSimpleResponseViolations, ...logPayloadProjectionViolations, ...nativeRecoveryOwnershipViolations, ...quotaRecoveryEligibilityViolations, ...runtimeBrokerReuseMojoViolations, ...geminiResponseMediaMojoViolations, ...cookieEvictionMojoViolations, ...websocketBudgetMojoViolations, ...affinityBindingMojoViolations, ...responsesCapacityRecoveryViolations, ...sseTapMojoOwnershipViolations, ...quotaWatchViolations, ...geminiCompactSnippetViolations, ...geminiCompactTextViolations, ...doctorSmartContextDecisionViolations, ...providerSseJsonFrameMojoViolations, ...geminiSseCompletionOwnershipViolations, ...anthropicNativeStreamDecisionViolations, ...anthropicAttemptCursorViolations, ...geminiUnsupportedToolRetryViolations, ...terminalGeometryViolations, ...previousResponseRecoveryTransitionViolations, ...chatCompatibleToolCallKindViolations, ...geminiQuotaBodyMojoViolations, ...geminiOAuthRotationMojoViolations, ...geminiBuiltinBatchMojoViolations, ...geminiToolArrayValidationMojoViolations, ...geminiOAuthModelMojoViolations, ...superExposeOriginMojoViolations, ...kiroAcpToolLedgerMojoViolations, ...quotaPoolSummarySectionsMojoViolations, ...deepseekRequestDiagnosticViolations, ...deepseekToolShapeIssueMojoViolations, ...deepseekReplayItemPolicyMojoViolations, ...chatNamespaceSplitMojoViolations, ...deepseekInputItemIssueMessageViolations, ...deepseekRequestIssueMessageViolations, ...smartContextTelemetrySampleViolations, ...compatibilityDiagnosticsMojoViolations, ...quotaHeaderProjectionViolations, ...smartContextCapsuleOrderViolations, ...markerViolations, ...deepseekCatalogPolicyViolations, ...featureOffViolations, ...liveLogRecordViolations, ...runtimePolicyPresetViolations, ...runtimeConfigScalarViolations, ...profileHealthCircuitViolations, ...logThroughputViolations, ...operationalDetailSpecViolations, ...transcriptPolicyViolations, ...logLoadPolicyViolations, ...routeReasonViolations, ...quotaSnapshotCompareMojoViolations, ...startupProbeBatchMojoViolations, ...runtimeStateQuotaViolations, ...runtimeStateRoutePolicyViolations, ...runtimeProxyRootViolations, ...runtimeRecoveryDeadlineViolations, ...brokerVersionGuardViolations, ...brokerContinuityViolations, ...brokerLogFrameMojoViolations, ...brokerLogCacheViolations, ...codexConfigViolations, ...statePolicyViolations, ...quotaSelectionPolicyViolations, ...routeTagMirrorViolations, ...enumTagMirrorViolations, ...appSelectionPolicyMirrorViolations, ...runtimeStateBackgroundViolations, ...redactionViolations, ...rateLimitHeaderSelectionViolations, ...profileIdentityViolations, ...governanceInspectionViolations, ...governanceInspectionOrderingViolations, ...exactnessPlannerViolations,
     ...infoRunwayViolations,
     ...geminiNormalizedViolations,
     ...quotaDurationViolations,
@@ -13751,6 +13823,19 @@ async function promotedFiles() {
 
 function selfTest() {
   const geminiCorpusCaller = "crates/prodex-provider-core/src/gemini_bridge/leaks/echo.rs";
+  const brokerLogFrameFixture = [
+    "fn runtime_broker_continuity_failure_reason_metrics_from_log_range(",
+    "broker_log_frame_plan(available, line.len(), line_oversized)",
+    "match plan.action",
+    "line_oversized = plan.oversized_after",
+    "if plan.complete",
+    "if plan.emit_metrics",
+  ].join("\n");
+  assert.deepEqual(findViolations([[BROKER_LOG_FRAME_CALLER, brokerLogFrameFixture]]).filter(
+    (message) => message.includes("broker log LF scan")), []);
+  assert.match(findViolations([[BROKER_LOG_FRAME_CALLER,
+    brokerLogFrameFixture + "\nfn append_runtime_broker_log_chunk(",
+  ]]).join("\n"), /broker log LF scan, overflow transitions and metric gate must remain Mojo-owned/u);
   const historyTimestampFixture = [
     "shared_history_policy::dedup_plan(",
     "shared_history_policy::timestamp_merge_order(&timestamps)",
