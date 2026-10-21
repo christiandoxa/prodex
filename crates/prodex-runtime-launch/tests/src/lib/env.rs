@@ -273,6 +273,38 @@ fn local_proxy_bypass_env_deduplicates_existing_values() {
 }
 
 #[test]
+fn proxy_bypass_mojo_preserves_source_order_case_and_unicode_trim() {
+    let parts = local_proxy_bypass_env_for_hosts_and_env(
+        ["EXAMPLE.com", "::1", "internal.local", "LOCALHOST"],
+        &environment(&[
+            (
+                "NO_PROXY",
+                "  Example.COM , ,\u{2003}LOCALHOST\u{00a0}, localhost ",
+            ),
+            ("no_proxy", "example.com, ::1 ,"),
+            ("NO_PROXY", "should-not-win.example"),
+        ]),
+    );
+    assert_eq!(
+        parts[0].1,
+        OsString::from("Example.COM,LOCALHOST,::1,127.0.0.1,internal.local")
+    );
+    assert_eq!(parts[1].1, parts[0].1);
+}
+
+#[test]
+fn proxy_bypass_mojo_preserves_empty_inputs_and_lowers_only_ascii() {
+    let parts = local_proxy_bypass_env_for_hosts_and_env(
+        ["雪.example", "雪.EXAMPLE", "snow.example"],
+        &environment(&[("NO_PROXY", ",\u{2002}  ,"), ("no_proxy", "    ")]),
+    );
+    assert_eq!(
+        parts[0].1,
+        OsString::from("127.0.0.1,localhost,::1,雪.example,snow.example")
+    );
+}
+
+#[test]
 fn codex_child_plan_adds_local_provider_host_to_proxy_bypass_env() {
     let args = vec![
         OsString::from("-c"),

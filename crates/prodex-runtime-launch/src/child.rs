@@ -1,4 +1,4 @@
-use prodex_mojo_core::rich::ascii_casefold_equal_exact;
+use prodex_mojo_core::launch_config::normalize_proxy_bypass_candidates;
 use std::collections::BTreeSet;
 use std::env;
 use std::ffi::OsString;
@@ -182,22 +182,28 @@ where
     I: IntoIterator<Item = S>,
     S: AsRef<str>,
 {
-    let mut parts = Vec::<String>::new();
+    // Host environment reads and OsString reconstruction stay in Rust.
+    // The compiled Mojo owner splits, trims, and deduplicates the candidate
+    // texts once while retaining first-seen casing and source order.
+    let mut candidates = Vec::<String>::new();
     for key in LOCAL_PROXY_BYPASS_ENV_KEYS {
         if let Some(value) = environment
             .iter()
             .find(|(name, _)| name == key)
             .map(|(_, value)| value)
         {
-            push_proxy_bypass_parts(&mut parts, &value.to_string_lossy());
+            candidates.push(value.to_string_lossy().into_owned());
         }
     }
-    for host in LOCAL_PROXY_BYPASS_HOSTS {
-        push_proxy_bypass_part(&mut parts, host);
-    }
-    for host in extra_hosts {
-        push_proxy_bypass_part(&mut parts, host.as_ref());
-    }
+    candidates.extend(LOCAL_PROXY_BYPASS_HOSTS.into_iter().map(str::to_string));
+    candidates.extend(
+        extra_hosts
+            .into_iter()
+            .map(|host| host.as_ref().to_string()),
+    );
+    let borrowed = candidates.iter().map(String::as_str).collect::<Vec<_>>();
+    let parts = normalize_proxy_bypass_candidates(&borrowed)
+        .expect("compiled Mojo proxy bypass normalization failed");
     let merged = OsString::from(parts.join(","));
     LOCAL_PROXY_BYPASS_ENV_KEYS
         .into_iter()
@@ -228,33 +234,14 @@ fn push_proxy_bypass_url_hosts(parts: &mut Vec<String>, base_url: &str) {
     let Some(host) = parsed.host_str() else {
         return;
     };
-    push_proxy_bypass_part(parts, host);
+    parts.push(host.to_string());
     if let Some(port) = parsed.port() {
         let host_port = if host.contains(':') {
             format!("[{host}]:{port}")
         } else {
             format!("{host}:{port}")
         };
-        push_proxy_bypass_part(parts, &host_port);
-    }
-}
-
-fn push_proxy_bypass_parts(parts: &mut Vec<String>, value: &str) {
-    for part in value.split(',') {
-        push_proxy_bypass_part(parts, part);
-    }
-}
-
-fn push_proxy_bypass_part(parts: &mut Vec<String>, value: &str) {
-    let trimmed = value.trim();
-    if trimmed.is_empty() {
-        return;
-    }
-    if !parts.iter().any(|existing| {
-        ascii_casefold_equal_exact(existing, trimmed)
-            .expect("Mojo proxy-bypass identity comparison failed")
-    }) {
-        parts.push(trimmed.to_string());
+        parts.push(host_port);
     }
 }
 
