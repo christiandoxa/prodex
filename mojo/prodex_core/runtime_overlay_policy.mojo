@@ -727,3 +727,65 @@ def prodex_runtime_overlay_lexical_path_v1(
                 length += 1
     written[unsafe_offset=0] = length
     return RUNTIME_OVERLAY_OK
+
+# Hook-trust read-only JSON status classification. Rust owns app-server RPC,
+# DOM parsing, key/hash validation and the eventual config write.
+comptime OVERLAY_HOOK_TRUST_ABI_VERSION: Int64 = 1
+comptime OVERLAY_HOOK_TRUST_MAX_COUNT: Int64 = 65_536
+comptime OVERLAY_HOOK_TRUST_MAX_STATUS_BYTES: Int64 = 65_536
+
+
+@export("prodex_runtime_overlay_hook_trust_policy_v1")
+def prodex_runtime_overlay_hook_trust_policy_v1(
+    abi_version: Int64,
+    operation: Int64,
+    statuses_address: UInt,
+    count: Int64,
+    output_address: UInt,
+    output_capacity: Int64,
+    written_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != OVERLAY_HOOK_TRUST_ABI_VERSION:
+        return RUNTIME_OVERLAY_ABI
+    if (
+        operation < 0 or operation > 1
+        or count < 0 or count > OVERLAY_HOOK_TRUST_MAX_COUNT
+        or (operation == 1 and count != 1)
+        or output_capacity < count
+        or (count > 0 and (
+            statuses_address == 0 or statuses_address % 8 != 0
+            or output_address == 0 or output_address % 8 != 0
+        ))
+        or written_address == 0 or written_address % 8 != 0
+    ):
+        return RUNTIME_OVERLAY_INVALID
+    var statuses = Pointer[
+        mut=False, ProdexRichStringView, ImmUntrackedOrigin
+    ](unsafe_from_address=Int(statuses_address))
+    for index in range(count):
+        var status = statuses[unsafe_offset=index].copy()
+        if not rich_view_valid(status, OVERLAY_HOOK_TRUST_MAX_STATUS_BYTES):
+            return RUNTIME_OVERLAY_INVALID
+    var output = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    var written = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(written_address)
+    )
+    if operation == 1:
+        var status = statuses[unsafe_offset=0].copy()
+        output[unsafe_offset=0] = Int64(
+            rich_view_matches_literal["ok"](status, False)
+            or rich_view_matches_literal["okOverridden"](status, False)
+        )
+        written[unsafe_offset=0] = 1
+        return RUNTIME_OVERLAY_OK
+
+    var selected: Int64 = 0
+    for index in range(count):
+        var status = statuses[unsafe_offset=index].copy()
+        if rich_view_matches_literal["untrusted"](status, False) or rich_view_matches_literal["modified"](status, False):
+            output[unsafe_offset=selected] = index
+            selected += 1
+    written[unsafe_offset=0] = selected
+    return RUNTIME_OVERLAY_OK

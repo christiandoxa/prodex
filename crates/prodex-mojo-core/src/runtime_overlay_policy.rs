@@ -1,4 +1,8 @@
 use crate::MojoError;
+#[path = "runtime_overlay_policy/hook_trust.rs"]
+mod hook_trust;
+pub use hook_trust::{hook_config_write_succeeded, untrusted_hook_indices};
+
 #[path = "runtime_overlay_policy/path_alias.rs"]
 mod path_alias;
 pub use path_alias::lexical_workspace_component_indices;

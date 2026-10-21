@@ -252,10 +252,26 @@ fn expect_rpc_result(reply: RpcReply, operation: &str) -> Result<Value> {
 }
 
 fn hook_trust_config_write_succeeded(result: &Value) -> bool {
-    matches!(
-        result.get("status").and_then(Value::as_str),
-        Some("ok" | "okOverridden")
+    prodex_mojo_core::runtime_overlay_policy::hook_config_write_succeeded(
+        result
+            .get("status")
+            .and_then(Value::as_str)
+            .unwrap_or_default(),
     )
+    .expect("compiled Mojo hook config-write classification failed")
+}
+
+fn hook_trust_indices(hooks: &[Value]) -> Vec<usize> {
+    let statuses = hooks
+        .iter()
+        .map(|hook| {
+            hook.get("trustStatus")
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+        })
+        .collect::<Vec<_>>();
+    prodex_mojo_core::runtime_overlay_policy::untrusted_hook_indices(&statuses)
+        .expect("compiled Mojo hook trust selection returned invalid output")
 }
 
 fn hook_trust_updates(listed: &Value) -> Result<serde_json::Map<String, Value>> {
@@ -265,10 +281,8 @@ fn hook_trust_updates(listed: &Value) -> Result<serde_json::Map<String, Value>> 
         let Some(hooks) = entry.get("hooks").and_then(Value::as_array) else {
             bail!("Codex hooks/list entry omitted hooks");
         };
-        for hook in hooks {
-            if !hook_needs_trust(hook) {
-                continue;
-            }
+        for index in hook_trust_indices(hooks) {
+            let hook = &hooks[index];
             let key = hook
                 .get("key")
                 .and_then(Value::as_str)
@@ -296,7 +310,8 @@ fn verify_hooks_trusted(listed: &Value) -> Result<()> {
         let Some(hooks) = entry.get("hooks").and_then(Value::as_array) else {
             bail!("Codex hooks/list entry omitted hooks");
         };
-        if let Some(hook) = hooks.iter().find(|hook| hook_needs_trust(hook)) {
+        if let Some(index) = hook_trust_indices(hooks).into_iter().next() {
+            let hook = &hooks[index];
             let key = hook
                 .get("key")
                 .and_then(Value::as_str)
@@ -305,13 +320,6 @@ fn verify_hooks_trusted(listed: &Value) -> Result<()> {
         }
     }
     Ok(())
-}
-
-fn hook_needs_trust(hook: &Value) -> bool {
-    matches!(
-        hook.get("trustStatus").and_then(Value::as_str),
-        Some("untrusted" | "modified")
-    )
 }
 
 fn hook_list_entries(listed: &Value) -> Result<&[Value]> {
@@ -378,6 +386,48 @@ mod tests {
             })
         );
         assert!(verify_hooks_trusted(&listed).is_err());
+    }
+
+    #[test]
+    fn mojo_hook_status_selection_is_case_sensitive_and_reports_missing_key_only_for_selected() {
+        let listed = json!({
+            "data": [{
+                "hooks": [
+                    {"trustStatus": "Untrusted"},
+                    {"trustStatus": "modified", "key": "eligible", "currentHash": "sha256:123"},
+                    {"trustStatus": "trustED"},
+                    {"trustStatus": "untrusted", "key": "untrusted-id", "currentHash": "sha256:456"}
+                ],
+                "warnings": [],
+                "errors": []
+            }]
+        });
+        assert_eq!(
+            Value::Object(hook_trust_updates(&listed).unwrap()),
+            json!({
+                "eligible":{"trusted_hash":"sha256:123"},
+                "untrusted-id":{"trusted_hash":"sha256:456"}
+            })
+        );
+        assert!(
+            verify_hooks_trusted(&listed)
+                .unwrap_err()
+                .to_string()
+                .contains("eligible")
+        );
+        let missing_selected_key = json!({
+            "data": [{"hooks": [{"trustStatus": "modified", "currentHash": "sha256:a"}]}]
+        });
+        assert!(
+            hook_trust_updates(&missing_selected_key)
+                .unwrap_err()
+                .to_string()
+                .contains("without key")
+        );
+        assert!(!hook_trust_config_write_succeeded(&json!({"status":"Ok"})));
+        assert!(!hook_trust_config_write_succeeded(
+            &json!({"status":"okoverridden"})
+        ));
     }
 
     #[test]
