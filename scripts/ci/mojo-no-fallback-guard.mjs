@@ -7960,7 +7960,7 @@ export function findViolations(files) {
         ? [] : [filePath + ": shared UTF-8 clipping must use the compiled text kernel"];
     }
     if (filePath === "crates/prodex-app/src/super_expose/run/helpers.rs" && contents.includes("fn append_output(")) {
-      return contents.includes("super_expose_text_cut(") && contents.includes("bounded_text(text,")
+      return contents.includes("super_run_output_plan(") && contents.includes("bounded_text(text,")
         && !/is_char_boundary|fn bounded_event_text/u.test(contents)
         ? [] : [filePath + ": run UTF-8 clipping must use the shared compiled boundary"];
     }
@@ -7981,6 +7981,21 @@ export function findViolations(files) {
       return body.includes("super_expose_bounded_text_valid(")
         && !/value\.is_empty\(|value\.len\(\) > max_bytes|value\.chars\(|value\.as_bytes\(\)\.contains/u.test(body)
         ? [] : [filePath + ": run override content validation must reuse the compiled text policy"];
+    }
+    return [];
+  });
+  const superRunOutputViolations = files.flatMap(([filePath, contents]) => {
+    if (filePath === "crates/prodex-app/src/super_expose/run/helpers.rs" && contents.includes("fn append_output(")) {
+      const body = contents.match(/pub\(super\) fn append_output\([^]*?(?=^pub\(super\) fn events_page)/mu)?.[0] ?? "";
+      return body.includes("super_run_output_plan(") && body.includes("apply_event(")
+        && !/record\.output\.len\(\) <|let remaining|\.any\(|output_truncated = true|push_event\(/u.test(body)
+        ? [] : [filePath + ": output append and marker decisions must remain compiled Mojo-owned"];
+    }
+    if (filePath === "mojo/prodex_core/super_expose_run_policy.mojo") {
+      return contents.includes('@export("prodex_super_run_output_plan_v1")')
+        && contents.includes("event_push = super_run_event_push(")
+        && contents.includes("rich_utf8_prefix_end(text,")
+        ? [] : [filePath + ": output plans must share compiled event and text kernels"];
     }
     return [];
   });
@@ -14025,7 +14040,7 @@ export function findViolations(files) {
     ...anthropicWebSearchViolations, ...superProviderConfigViolations, ...externalProviderCatalogViolations, ...subAgentPolicyViolations, ...runtimeOverlayPolicyViolations, ...cliRuntimeFeatureViolations,
     ...superExposeProtocolViolations, ...superExposeExecViolations, ...superExposeViolations,
     ...superRunRetentionViolations, ...superRunEventViolations, ...superTextClipViolations,
-    ...superOverrideStringViolations,
+    ...superOverrideStringViolations, ...superRunOutputViolations,
     ...geminiFallbackViolations, ...geminiGenerationViolations, ...geminiTranslatorHardReplacementViolations, ...geminiBridgeFallbackViolations, ...geminiSignatureViolations, ...geminiResponseConformanceViolations,
     ...geminiToolResponseOrderViolations, ...geminiApplyPatchViolations,
     ...hardReplacementViolations, ...precommitBudgetOracleViolations,
@@ -18016,6 +18031,12 @@ function selfTest() {
   assert.deepEqual(findViolations([[overrideFile, overrideCaller]]), []);
   for (const restored of ["value.is_empty(", "value.len() > max_bytes", "value.chars(", "value.as_bytes().contains"]) {
     assert.match(findViolations([[overrideFile, overrideCaller.replace("super_expose_bounded_text_valid(", restored + " super_expose_bounded_text_valid(")]]).join("\n"), /compiled text policy/u);
+  }
+
+  const outputCaller = runRetentionCaller + "\npub(super) fn append_output() { super_run_output_plan( apply_event( bounded_text(text, }\npub(super) fn events_page() { super_run_events_page_plan( super_run_event_push_plan( }\npub(super) fn summary_json(";
+  assert.deepEqual(findViolations([[runRetentionFile, outputCaller]]), []);
+  for (const restored of ["record.output.len() <", "let remaining", ".any(", "output_truncated = true", "push_event("]) {
+    assert.match(findViolations([[runRetentionFile, outputCaller.replace("super_run_output_plan(", restored + " super_run_output_plan(")]]).join("\n"), /output append and marker decisions/u);
   }
 
 }

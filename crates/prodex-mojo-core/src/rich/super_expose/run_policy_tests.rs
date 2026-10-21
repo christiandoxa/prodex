@@ -56,7 +56,7 @@ fn compiled_retention_preserves_active_runs_and_full_width_time_order() {
 }
 
 #[test]
-fn compiled_retention_matches_the_original_eviction_order() {
+fn compiled_retention_matches_fixed_unsigned_eviction_contracts() {
     let rows = (0..80_u64)
         .map(|index| SuperRunRetentionInput {
             terminal: index % 4 != 0,
@@ -68,26 +68,27 @@ fn compiled_retention_matches_the_original_eviction_order() {
             finished_at: (index % 5 != 0).then_some(index % 7),
         })
         .collect::<Vec<_>>();
-    for count in [0, 1, 31, 32, 33, 60, 80] {
-        let rows = &rows[..count];
-        let mut expected = vec![true; rows.len()];
-        while rows
-            .iter()
-            .zip(&expected)
-            .filter(|(row, keep)| row.terminal && **keep)
-            .count()
-            > 32
-        {
-            let index = rows
-                .iter()
-                .enumerate()
-                .filter(|(index, row)| row.terminal && expected[*index])
-                .min_by_key(|(_, row)| (row.finished_at.unwrap_or(row.created_at), row.created_at))
-                .map(|(index, _)| index)
-                .unwrap();
+    let cases: &[(usize, &[usize])] = &[
+        (0, &[]),
+        (1, &[]),
+        (31, &[]),
+        (32, &[]),
+        (33, &[]),
+        (60, &[1, 7, 10, 14, 21, 22, 29, 37, 42, 43, 49, 55, 57]),
+        (
+            80,
+            &[
+                1, 2, 7, 9, 10, 14, 21, 22, 23, 29, 31, 37, 38, 42, 43, 49, 51, 55, 57, 58, 59, 63,
+                65, 71, 73, 77, 78, 79,
+            ],
+        ),
+    ];
+    for &(count, removed) in cases {
+        let mut expected = vec![true; count];
+        for &index in removed {
             expected[index] = false;
         }
-        assert_eq!(super_run_retention_mask(rows).unwrap(), expected);
+        assert_eq!(super_run_retention_mask(&rows[..count]).unwrap(), expected);
     }
 }
 
@@ -217,4 +218,132 @@ fn compiled_event_abis_reject_invalid_shapes_without_writing() {
         );
         assert_eq!(output, [71; 2]);
     }
+}
+
+fn input<'a>(text: &'a str, flags: &'a [bool]) -> SuperRunOutputInput<'a> {
+    SuperRunOutputInput {
+        text,
+        output_bytes: 0,
+        output_truncated: false,
+        next_seq: 7,
+        marker_flags: flags,
+        event_is_marker: false,
+        event_text_limit: 8192,
+        output_limit: 262144,
+    }
+}
+
+#[test]
+fn compiled_output_plan_keeps_exact_prefixes_and_saturated_events() {
+    let mut facts = input("🦀tail", &[]);
+    facts.output_bytes = 262142;
+    facts.next_seq = u64::MAX;
+    assert_eq!(
+        super_run_output_plan(facts),
+        Ok(SuperRunOutputPlan {
+            text_end: 8,
+            append_end: 0,
+            truncated: true,
+            event_push: Some(SuperRunEventPushPlan {
+                next_seq: u64::MAX,
+                drop_front: 0
+            }),
+            marker_push: Some(SuperRunEventPushPlan {
+                next_seq: u64::MAX,
+                drop_front: 0
+            }),
+        })
+    );
+    let text = format!("{}é", "x".repeat(8191));
+    assert_eq!(
+        super_run_output_plan(input(&text, &[])),
+        Ok(SuperRunOutputPlan {
+            text_end: 8191,
+            append_end: 8191,
+            truncated: false,
+            event_push: Some(SuperRunEventPushPlan {
+                next_seq: 8,
+                drop_front: 0
+            }),
+            marker_push: None,
+        })
+    );
+    let mut facts = input("", &[]);
+    facts.output_bytes = usize::MAX;
+    assert_eq!(
+        super_run_output_plan(facts),
+        Ok(SuperRunOutputPlan {
+            text_end: 0,
+            append_end: 0,
+            truncated: false,
+            event_push: None,
+            marker_push: None,
+        })
+    );
+}
+
+#[test]
+fn compiled_output_plan_checks_markers_after_normal_event_eviction() {
+    for (position, expected) in [(0, true), (1, false), (255, false)] {
+        let mut flags = [false; 256];
+        flags[position] = true;
+        let mut facts = input("tail", &flags);
+        facts.output_bytes = usize::MAX;
+        let plan = super_run_output_plan(facts).unwrap();
+        assert_eq!(
+            plan.marker_push,
+            expected.then_some(SuperRunEventPushPlan {
+                next_seq: 9,
+                drop_front: 1
+            })
+        );
+        assert_eq!(
+            plan.event_push,
+            Some(SuperRunEventPushPlan {
+                next_seq: 8,
+                drop_front: 1
+            })
+        );
+    }
+    let mut facts = input("marker", &[false; 256]);
+    facts.event_is_marker = true;
+    facts.output_truncated = true;
+    assert_eq!(super_run_output_plan(facts).unwrap().marker_push, None);
+    let mut facts = input("more", &[]);
+    facts.output_truncated = true;
+    assert!(super_run_output_plan(facts).unwrap().marker_push.is_some());
+}
+
+#[test]
+fn compiled_output_plan_rejects_late_invalid_flags_before_writes() {
+    let invalid_text = [255_u8];
+    let mut flags = [0_u8, 2];
+    let mut row = OutputRow {
+        text_address: 0,
+        text_length: 0,
+        output_bytes: 0,
+        output_truncated: 0,
+        next_seq: 0,
+        markers_address: flags.as_ptr() as u64,
+        marker_count: 2,
+        event_is_marker: 0,
+        event_text_limit: 8192,
+        output_limit: 262144,
+    };
+    let mut output = [71_u64; 9];
+    let mut call = |version, address| unsafe {
+        prodex_super_run_output_plan_v1(version, address, output.as_mut_ptr() as u64)
+    };
+    assert_eq!(call(2, (&row as *const OutputRow) as u64), 4);
+    assert_eq!(call(1, (&row as *const OutputRow) as u64 + 1), 1);
+    assert_eq!(call(1, (&row as *const OutputRow) as u64), 1);
+    flags[1] = 0;
+    row.markers_address = flags.as_ptr() as u64;
+    row.text_address = invalid_text.as_ptr() as u64;
+    row.text_length = 1;
+    assert_eq!(call(1, (&row as *const OutputRow) as u64), 1);
+    row.text_length = 0;
+    row.output_truncated = 2;
+    assert_eq!(call(1, (&row as *const OutputRow) as u64), 1);
+    assert_eq!(output, [71; 9]);
 }

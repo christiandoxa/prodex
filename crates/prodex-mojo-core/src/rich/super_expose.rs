@@ -6,6 +6,7 @@ pub use run_policy::{
     SuperRunEventPagePlan, SuperRunEventPushPlan, SuperRunRetentionInput,
     super_run_event_push_plan, super_run_events_page_plan, super_run_retention_mask,
 };
+pub use run_policy::{SuperRunOutputInput, SuperRunOutputPlan, super_run_output_plan};
 
 #[path = "super_expose/origin.rs"]
 mod origin;
