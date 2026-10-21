@@ -4201,7 +4201,7 @@ def prodex_mojo_log_virtual_fields_contains_v1(
     if abi_version != LOG_VIRTUAL_FIELDS_ABI_VERSION:
         return 4
     if (
-        field_count != LOG_VIRTUAL_FIELD_COUNT
+        field_count < 1 or field_count > LOG_VIRTUAL_FIELD_COUNT
         or fields_address == 0 or fields_address % 8 != 0
         or needle_length < 0 or needle_length > LOG_VIRTUAL_FIELD_MAX_BYTES
         or (needle_length > 0 and needle_address == 0)
@@ -4218,7 +4218,7 @@ def prodex_mojo_log_virtual_fields_contains_v1(
     var needle = ProdexRichStringView(needle_address, UInt(needle_length))
     if not rich_view_valid(needle, LOG_VIRTUAL_FIELD_MAX_BYTES):
         return 1
-    for index in range(LOG_VIRTUAL_FIELD_COUNT):
+    for index in range(field_count):
         if not rich_view_valid(
             fields[unsafe_offset=index], LOG_VIRTUAL_FIELD_MAX_BYTES
         ):
@@ -4244,7 +4244,7 @@ def prodex_mojo_log_virtual_fields_contains_v1(
             prefix[unsafe_offset=index] = length
 
         var matching: Int64 = 0
-        for field_index in range(LOG_VIRTUAL_FIELD_COUNT):
+        for field_index in range(field_count):
             var field = fields[unsafe_offset=field_index].copy()
             var bytes = rich_view_ptr(field)
             for index in range(Int64(field.len)):
@@ -4256,7 +4256,7 @@ def prodex_mojo_log_virtual_fields_contains_v1(
                     break
             if found:
                 break
-            if field_index + 1 < LOG_VIRTUAL_FIELD_COUNT:
+            if field_index + 1 < field_count:
                 matching = log_virtual_search_step(
                     UInt8(32), pattern, prefix, matching
                 )
