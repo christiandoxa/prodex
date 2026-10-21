@@ -427,6 +427,9 @@ const CORE_LEXICAL_BROKER_PATHS = "crates/prodex-app/src/runtime_persistence/pat
 const CORE_LEXICAL_APP_HOUSEKEEPING = "crates/prodex-app/src/housekeeping.rs";
 const CORE_LEXICAL_LIVE_LOG = "crates/prodex-app/src/app_commands/log_live.rs";
 const PROMOTED_FILES = [
+  "crates/prodex-app/src/runtime_launch/proxy_startup/deepseek_rewrite/conversation_store.rs",
+  "crates/prodex-mojo-core/src/provider_conversation_policy.rs",
+  "mojo/prodex_core/provider_conversation_policy.mojo",
   "crates/prodex-app/src/runtime_broker/admin.rs",
   "crates/prodex-mojo-core/src/runtime_broker_admin.rs",
   "mojo/prodex_core/runtime_broker_admin.mojo",
@@ -3509,6 +3512,27 @@ export function findViolations(files) {
     if (filePath === "crates/prodex-mojo-core/src/codex_config.rs") {
       return contents.includes("prodex_codex_config_removal_mask_v1(")
         ? [] : [filePath + ": Codex override removal ABI must remain wired"];
+    }
+    return [];
+  });
+  const providerConversationViolations = files.flatMap(([filePath, contents]) => {
+    if (filePath === "crates/prodex-app/src/runtime_launch/proxy_startup/deepseek_rewrite/conversation_store.rs") {
+      return contents.includes("provider_conversation_policy::latest_matching(")
+        && contents.includes("provider_conversation_policy::retention_plan(")
+        && !/key_is_in_scope|\.min_by_key\(|\.max_by_key\(|\.starts_with\(|next_sequence\.saturating_add/u.test(contents)
+        ? [] : [filePath + ": provider conversation selection and retention must remain compiled Mojo"];
+    }
+    if (filePath === "crates/prodex-mojo-core/src/provider_conversation_policy.rs") {
+      return contents.includes("prodex_provider_conversation_history_v1(")
+        && contents.includes("prodex_provider_conversation_retention_v1(")
+        && !/\.sort|\.min_by_key|\.max_by_key|\.saturating_add|\.starts_with/u.test(contents)
+        ? [] : [filePath + ": provider conversation bridge must retain compiled policy authority"];
+    }
+    if (filePath === "mojo/prodex_core/provider_conversation_policy.mojo") {
+      return contents.includes('@export("prodex_provider_conversation_history_v1")')
+        && contents.includes('@export("prodex_provider_conversation_retention_v1")')
+        && contents.includes("index_order_sort[conversation_oldest_compare]")
+        ? [] : [filePath + ": provider conversation Mojo production exports must remain reachable"];
     }
     return [];
   });
@@ -13840,6 +13864,7 @@ export function findViolations(files) {
     ...updateNoticeMigrationViolations,
     ...codexConfigRemovalViolations,
     ...brokerSnapshotQueryViolations,
+    ...providerConversationViolations,
     ...sharedAttachmentMigrationViolations,
     ...runtimeCookieMigrationViolations,
     ...deepseekSimpleRequestViolations,
@@ -17799,6 +17824,14 @@ function selfTest() {
   assert.match(findViolations([[brokerQueryFile,
     brokerQueryCaller.replace("runtime_broker_admin::log_snapshot_query(", "url.split_once('?')")
   ]]).join("\n"), /snapshot query must remain compiled Mojo/u);
+
+  const providerConversationFile = "crates/prodex-app/src/runtime_launch/proxy_startup/deepseek_rewrite/conversation_store.rs";
+  const providerConversationCaller = "provider_conversation_policy::latest_matching( provider_conversation_policy::retention_plan(";
+  assert.deepEqual(findViolations([[providerConversationFile, providerConversationCaller]]), []);
+  for (const restored of ["key_is_in_scope", ".min_by_key(", ".max_by_key(", ".starts_with(", "next_sequence.saturating_add"]) {
+    assert.match(findViolations([[providerConversationFile, providerConversationCaller + restored]]).join("\n"), /conversation selection and retention/u);
+  }
+  assert.match(findViolations([[providerConversationFile, providerConversationCaller.replace("provider_conversation_policy::retention_plan(", "")]]).join("\n"), /conversation selection and retention/u);
 
 }
 

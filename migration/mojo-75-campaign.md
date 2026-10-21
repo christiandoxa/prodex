@@ -8306,3 +8306,16 @@ The 75% objective stays open. A subsequent audited candidate is
 matching, latest-sequence selection, per-scope/global eviction and memory
 accounting still belong to Rust and serve multiple provider adapters. Preserve
 host locks and Serde acquisition while moving those deterministic decisions.
+
+## Provider conversation selection and retention compiled in Mojo (2026-10-21)
+
+The shared provider conversation store now applies compiled scope masks,
+latest-history selection and complete replacement/retention plans. Rust scope,
+sequence, oldest-entry and byte-accounting decisions are deleted without a
+fallback. Predicate invocation order, scope isolation, oversized replacement,
+per-scope/global limits and saturated sequence ties remain covered. Five bridge,
+five caller-filter, 549 provider/startup and 459 proxy tests, direct Mojo,
+runtime-smoke, strict workspace Clippy and the ownership/compatibility guards
+pass. The official share is 36.30450538791955% (136,245 Mojo / 239,039 Rust LOC).
+The 75% goal remains active. Evidence is in
+`migration/provider-conversation-retention-mojo-20261021.md`.

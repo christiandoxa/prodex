@@ -32,6 +32,11 @@ export const RUNTIME_TEST_TAGS = TAGS;
 
 export const RUNTIME_SMOKE_TESTS = [
   {
+    label: "provider-conversation-retention",
+    package: "prodex-app",
+    filter: "conversation_store::tests::",
+  },
+  {
     label: "broker-live-log-snapshot",
     filter: "runtime_proxy_broker_live_log_snapshot_is_authenticated_and_bounded",
   },
