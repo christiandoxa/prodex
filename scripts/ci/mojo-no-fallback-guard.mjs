@@ -408,6 +408,8 @@ const LINEAGE_LATEST_BINDING_CORE = "crates/prodex-mojo-core/src/runtime_lineage
 const LINEAGE_LATEST_BINDING_MOJO = "mojo/prodex_core/runtime_lineage.mojo";
 const LINEAGE_LATEST_BINDING_CALLER_TEST = "crates/prodex-runtime-proxy/tests/src/lineage.rs";
 const LINEAGE_LATEST_BINDING_DIRECT_TEST = "mojo/tests/runtime_lineage_latest_binding_test.mojo";
+const SHARED_HISTORY_ORDER_MOJO_FILE = "mojo/prodex_core/shared_history_policy.mojo";
+const SHARED_HISTORY_ORDER_DIRECT_TEST = "mojo/tests/shared_history_timestamp_order_test.mojo";
 const PROMOTED_FILES = [
   PROVIDER_USAGE_SSE_MOJO,
   PROVIDER_USAGE_SSE_TEST,
@@ -839,6 +841,8 @@ const PROMOTED_FILES = [
   "crates/prodex-audit-log/src/lib.rs",
   "crates/prodex-core/src/lib.rs",
   "crates/prodex-mcp-stdio/src/lib.rs",
+  SHARED_HISTORY_ORDER_MOJO_FILE,
+  SHARED_HISTORY_ORDER_DIRECT_TEST,
   "crates/prodex-shared-codex-fs/src/history.rs",
   "crates/prodex-mojo-core/src/shared_history_policy.rs",
   UPDATE_NOTICE_VERSION_CALLER_FILE,
@@ -3570,22 +3574,45 @@ export function findViolations(files) {
     if (filePath === "crates/prodex-shared-codex-fs/src/history.rs") {
       const required = [
         "shared_history_policy::dedup_plan(",
+        "shared_history_policy::timestamp_merge_order(&timestamps)",
+        "let merged = selected",
+        "compiled_history_merge_preserves_missing_timestamp_barriers_and_deduplicates",
+        "compiled_history_merge_orders_equal_negative_timestamps_stably",
       ];
-      const violations = required
-        .filter((call) => !contents.includes(call))
-        .map((call) => filePath + ": shared history hard replacement must retain " + call);
-      if (
-        contents.includes("let mut seen = BTreeSet::new()")
-        || contents.includes("!seen.insert(line.to_string())")
-        || contents.includes("let next_len = content")
-      ) {
-        violations.push(filePath + ": contains restored Rust shared-history dedup/size semantics");
-      }
-      return violations;
+      const retired = [
+        "merged.sort_by(",
+        "left.ts.cmp(&right.ts)",
+        "order: merged.len()",
+      ];
+      return required.filter((marker) => !contents.includes(marker))
+        .map((marker) => filePath + ": compiled history merge sorting missing " + marker)
+        .concat(retired.filter((marker) => contents.includes(marker))
+          .map((marker) => filePath + ": Rust history chronological sort/fallback must be deleted " + marker));
     }
-    if (filePath === "crates/prodex-mojo-core/src/shared_history_policy.rs" &&
-        !contents.includes("prodex_shared_history_dedup_plan_v1(")) {
-      return [filePath + ": shared history ABI adapter must retain prodex_shared_history_dedup_plan_v1("];
+    if (filePath === "crates/prodex-mojo-core/src/shared_history_policy.rs") {
+      const required = [
+        "prodex_shared_history_dedup_plan_v1(",
+        "fn prodex_shared_history_timestamp_order_v1(",
+        "pub fn timestamp_merge_order(",
+        "compiled_history_timestamp_merge_orders_only_consecutive_valid_runs",
+        "compiled_history_timestamp_merge_rejects_invalid_abi_before_output_writes",
+      ];
+      return required.filter((marker) => !contents.includes(marker))
+        .map((marker) => filePath + ": compiled history typed ABI/test missing " + marker);
+    }
+    if (filePath === SHARED_HISTORY_ORDER_MOJO_FILE) {
+      const required = [
+        '@export("prodex_shared_history_timestamp_order_v1")',
+        "def shared_history_timestamp_less(",
+        "def shared_history_order_heap_down(",
+        "while run_end < row_count",
+      ];
+      return required.filter((marker) => !contents.includes(marker))
+        .map((marker) => filePath + ": history chronological run-sorting Mojo authority missing " + marker);
+    }
+    if (filePath === SHARED_HISTORY_ORDER_DIRECT_TEST) {
+      return contents.includes("prodex_shared_history_timestamp_order_v1")
+        ? [] : [filePath + ": direct history chronology ABI regression missing"];
     }
     return [];
   });
@@ -13724,6 +13751,18 @@ async function promotedFiles() {
 
 function selfTest() {
   const geminiCorpusCaller = "crates/prodex-provider-core/src/gemini_bridge/leaks/echo.rs";
+  const historyTimestampFixture = [
+    "shared_history_policy::dedup_plan(",
+    "shared_history_policy::timestamp_merge_order(&timestamps)",
+    "let merged = selected",
+    "compiled_history_merge_preserves_missing_timestamp_barriers_and_deduplicates",
+    "compiled_history_merge_orders_equal_negative_timestamps_stably",
+  ].join("\n");
+  assert.deepEqual(findViolations([["crates/prodex-shared-codex-fs/src/history.rs",
+    historyTimestampFixture]]).filter((message) => message.includes("Rust history chronological sort")), []);
+  assert.match(findViolations([["crates/prodex-shared-codex-fs/src/history.rs",
+    historyTimestampFixture + "\nmerged.sort_by(",
+  ]]).join("\n"), /Rust history chronological sort\/fallback must be deleted/u);
   const geminiCorpusFixture = [
     "document.borrowed_array(messages)",
     "GeminiValueOperation::SystemCorpus",

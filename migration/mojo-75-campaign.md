@@ -8206,3 +8206,15 @@ tests, direct Mojo tests and source/share guards pass. Official
 share rises from 36.09241084705437% to 36.102403908513125%
 (133,602 Mojo / 236,462 Rust production LOC).
 The 75% project target remains outstanding.
+
+## Shared Codex history merge timestamp ordering in compiled Mojo (2026-10-21)
+
+The compiled history owner now chooses stable signed timestamp
+ordering within consecutive timestamped JSONL observations while
+preserving non-timestamp records in place. Rust retains guarded
+filesystem I/O and Serde acquisition; its old sort_by comparator and
+source-order field have been removed without fallback. All 94 shared
+filesystem tests, two direct core ABI tests, the direct Mojo test,
+anti-fallback guard and official production-share checks pass. The
+audited share rises from 36.102403908513125% to 36.11279186610626%
+(133,691 Mojo / 236,513 Rust); the 75% target remains outstanding.

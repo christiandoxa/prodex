@@ -7,7 +7,6 @@ const CODEX_HISTORY_MERGE_MAX_BYTES: u64 = 64 * 1024 * 1024;
 struct HistoryLine {
     ts: Option<i64>,
     line: String,
-    order: usize,
 }
 
 pub(super) fn is_history_jsonl(path: &Path) -> bool {
@@ -49,12 +48,18 @@ pub(super) fn merge_history_files(source: &Path, destination: &Path) -> Result<(
     });
     debug_assert_eq!(merged.len(), plan.unique_count);
 
-    merged.sort_by(|left, right| match (left.ts, right.ts) {
-        (Some(left_ts), Some(right_ts)) => {
-            left_ts.cmp(&right_ts).then(left.order.cmp(&right.order))
-        }
-        _ => left.order.cmp(&right.order),
-    });
+    let timestamps = merged.iter().map(|entry| entry.ts).collect::<Vec<_>>();
+    let selected = prodex_mojo_core::shared_history_policy::timestamp_merge_order(&timestamps)
+        .expect("compiled Mojo shared history chronological order returned invalid output");
+    let mut original = merged.into_iter().map(Some).collect::<Vec<_>>();
+    let merged = selected
+        .into_iter()
+        .map(|index| {
+            original[index]
+                .take()
+                .expect("validated Mojo history indices are unique")
+        })
+        .collect::<Vec<_>>();
 
     let capacity = usize::try_from(plan.total_bytes)
         .context("merged history size does not fit this platform")?;
@@ -118,7 +123,6 @@ fn load_history_lines(path: &Path, merged: &mut Vec<HistoryLine>) -> Result<()> 
         merged.push(HistoryLine {
             ts,
             line: line.to_string(),
-            order: merged.len(),
         });
     }
 
@@ -237,6 +241,93 @@ mod tests {
         assert_eq!(
             fs::read_to_string(&destination).unwrap(),
             "{\"ts\":1,\"text\":\"old\"}\n{\"ts\":2,\"text\":\"new\"}"
+        );
+        fs::remove_dir_all(root).unwrap();
+    }
+}
+
+#[cfg(test)]
+mod compiled_history_timestamp_caller_tests {
+    use super::*;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn history_root(label: &str) -> std::path::PathBuf {
+        let root = std::env::temp_dir().join(format!(
+            "prodex-history-compiled-order-{label}-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos(),
+        ));
+        fs::create_dir_all(&root).unwrap();
+        root
+    }
+
+    #[test]
+    fn compiled_history_merge_preserves_missing_timestamp_barriers_and_deduplicates() {
+        let root = history_root("mixed");
+        let source = root.join("source-history.jsonl");
+        let destination = root.join("history.jsonl");
+        let destination_lines = [
+            r#"{"ts":40,"text":"late"}"#,
+            r#"{"ts":2,"text":"early"}"#,
+            r#"{"ts":2,"text":"early"}"#,
+            r#"{"text":"missing timestamp"}"#,
+            r#"{"ts":12,"text":"post barrier late"}"#,
+        ];
+        let source_lines = [
+            r#"{"ts":-10,"text":"post barrier earliest"}"#,
+            r#"not-json"#,
+            r#"{"ts":9223372036854775807,"text":"max"}"#,
+            r#"{"ts":-9223372036854775808,"text":"min"}"#,
+            r#"{"ts":-9223372036854775808,"text":"min"}"#,
+        ];
+        fs::write(&destination, format!("{}\n", destination_lines.join("\n"))).unwrap();
+        fs::write(&source, format!("{}\n", source_lines.join("\n"))).unwrap();
+
+        merge_history_files(&source, &destination).unwrap();
+        let merged = fs::read_to_string(&destination).unwrap();
+        assert_eq!(
+            merged.lines().collect::<Vec<_>>(),
+            [
+                destination_lines[1],
+                destination_lines[0],
+                destination_lines[3],
+                source_lines[0],
+                destination_lines[4],
+                source_lines[1],
+                source_lines[3],
+                source_lines[2],
+            ],
+        );
+        merge_history_files(&source, &destination).unwrap();
+        assert_eq!(fs::read_to_string(&destination).unwrap(), merged);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn compiled_history_merge_orders_equal_negative_timestamps_stably() {
+        let root = history_root("stable");
+        let source = root.join("src-history.jsonl");
+        let destination = root.join("history.jsonl");
+        let old = [
+            r#"{"ts":9,"text":"nine"}"#,
+            r#"{"ts":-2,"text":"equal first"}"#,
+        ];
+        let newer = [
+            r#"{"ts":-2,"text":"equal second"}"#,
+            r#"{"ts":0,"text":"zero"}"#,
+        ];
+        fs::write(&destination, format!("{}\n", old.join("\n"))).unwrap();
+        fs::write(&source, newer.join("\n")).unwrap();
+        merge_history_files(&source, &destination).unwrap();
+        assert_eq!(
+            fs::read_to_string(&destination)
+                .unwrap()
+                .lines()
+                .collect::<Vec<_>>(),
+            [old[1], newer[0], newer[1], old[0]],
         );
         fs::remove_dir_all(root).unwrap();
     }
