@@ -1,4 +1,8 @@
 use crate::MojoError;
+
+#[path = "optional_tools_policy/legacy_paragraphs.rs"]
+mod legacy_paragraphs;
+pub use legacy_paragraphs::optional_tool_retained_legacy_paragraph_indices;
 #[path = "optional_tools_policy/probe_version.rs"]
 mod probe_version;
 pub use probe_version::{OptionalToolProbeToken, optional_tool_probe_token};

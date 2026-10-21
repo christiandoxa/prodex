@@ -9,8 +9,6 @@ use crate::fs_ops::{
 };
 use crate::localization::localize_text_file;
 
-const LEGACY_CAVEMAN_INSTRUCTIONS_SHA256: &str =
-    "a07e8d5167e454f7637eb0e35230a84987c537ae98d6f795d246338b652810f1";
 const LEGACY_CAVEMAN_MARKETPLACE: &str = "prodex-caveman";
 const LEGACY_CAVEMAN_PLUGIN: &str = "caveman@prodex-caveman";
 
@@ -443,16 +441,27 @@ fn remove_legacy_caveman_instructions(table: &mut toml::Table) -> bool {
     else {
         return false;
     };
-    let retained = instructions
-        .split("\n\n")
-        .filter(|paragraph| {
-            crate::optional_tools::hex_digest(&Sha256::digest(paragraph.as_bytes()))
-                != LEGACY_CAVEMAN_INSTRUCTIONS_SHA256
+    let paragraphs = instructions.split("\n\n").collect::<Vec<_>>();
+    let digests = paragraphs
+        .iter()
+        .map(|paragraph| {
+            let mut digest = [0_u8; 32];
+            digest.copy_from_slice(&Sha256::digest(paragraph.as_bytes()));
+            digest
         })
         .collect::<Vec<_>>();
-    if retained.len() == instructions.split("\n\n").count() {
+    let selected =
+        prodex_mojo_core::optional_tools_policy::optional_tool_retained_legacy_paragraph_indices(
+            &digests,
+        )
+        .expect("compiled Mojo legacy Caveman instruction selection failed");
+    if selected.len() == paragraphs.len() {
         return false;
     }
+    let retained = selected
+        .into_iter()
+        .map(|index| paragraphs[index])
+        .collect::<Vec<_>>();
     if retained.is_empty() {
         table.remove("developer_instructions");
     } else {
@@ -486,5 +495,28 @@ mod rollout_name_tests {
         ] {
             assert!(!is_prodex_overlay_rollout_state_file_name(ignored));
         }
+    }
+}
+
+#[cfg(test)]
+mod legacy_caveman_paragraph_tests {
+    use super::*;
+
+    #[test]
+    fn compiled_legacy_cleanup_keeps_nonmatching_instructions_exactly() {
+        let instructions = "Do not expose tokens.\n\nNever change source branches.\n\n日本語の指示";
+        let mut table = toml::Table::new();
+        table.insert(
+            "developer_instructions".into(),
+            toml::Value::String(instructions.into()),
+        );
+        assert!(!remove_legacy_caveman_instructions(&mut table));
+        assert_eq!(
+            table
+                .get("developer_instructions")
+                .and_then(toml::Value::as_str),
+            Some(instructions)
+        );
+        assert!(!remove_legacy_caveman_instructions(&mut toml::Table::new()));
     }
 }

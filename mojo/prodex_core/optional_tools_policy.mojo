@@ -634,3 +634,65 @@ def prodex_optional_tool_overlay_rollout_name_v1(
         unsafe_from_address=Int(output_address)
     )[] = Int64(matched)
     return 0
+
+# Legacy Caveman instruction cleanup uses SHA-256 digests acquired by Rust.
+# Compiled Mojo alone compares the one known retired instruction digest and
+# selects input-order paragraphs to retain, without touching TOML or files.
+comptime OPTIONAL_TOOL_LEGACY_INSTRUCTIONS_ABI: Int64 = 1
+comptime OPTIONAL_TOOL_LEGACY_INSTRUCTIONS_MAX_PARAGRAPHS: Int64 = 65_536
+
+
+def optional_tool_legacy_digest_matches(
+    digests: Pointer[mut=False, UInt8, _], paragraph_index: Int64
+) -> Bool:
+    var expected = StringSlice(
+        "a07e8d5167e454f7637eb0e35230a84987c537ae98d6f795d246338b652810f1"
+    ).unsafe_ptr()
+    for offset in range(Int64(32)):
+        var byte = digests[unsafe_offset=paragraph_index * 32 + offset]
+        if (
+            optional_tool_hex_digit(byte >> 4) != expected[unsafe_offset=offset * 2]
+            or optional_tool_hex_digit(byte & 15) != expected[unsafe_offset=offset * 2 + 1]
+        ):
+            return False
+    return True
+
+
+@export("prodex_optional_tool_legacy_instruction_paragraphs_v1")
+def prodex_optional_tool_legacy_instruction_paragraphs_v1(
+    abi_version: Int64,
+    digests_address: UInt,
+    count: Int64,
+    indices_address: UInt,
+    capacity: Int64,
+    written_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != OPTIONAL_TOOL_LEGACY_INSTRUCTIONS_ABI:
+        return 4
+    if (
+        count < 0 or count > OPTIONAL_TOOL_LEGACY_INSTRUCTIONS_MAX_PARAGRAPHS
+        or capacity < 0
+        or (count > 0 and (
+            digests_address == 0
+            or indices_address == 0 or indices_address % 8 != 0
+        ))
+        or written_address == 0 or written_address % 8 != 0
+    ):
+        return 1
+    if capacity < count:
+        return 3
+    var digests = Pointer[mut=False, UInt8, ImmUntrackedOrigin](
+        unsafe_from_address=Int(digests_address)
+    )
+    var indices = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(indices_address)
+    )
+    var selected: Int64 = 0
+    for index in range(count):
+        if not optional_tool_legacy_digest_matches(digests, index):
+            indices[unsafe_offset=selected] = index
+            selected += 1
+    Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(written_address)
+    )[] = selected
+    return 0
