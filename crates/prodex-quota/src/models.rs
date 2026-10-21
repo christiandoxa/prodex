@@ -1,8 +1,10 @@
 use anyhow::{Result, bail};
 mod openai_usage;
+mod reset_credits;
 pub use openai_usage::{
     AdditionalRateLimit, RateLimitResetCreditsSummary, UsageResponse, UsageWindow, WindowPair,
 };
+pub use reset_credits::RateLimitResetCreditExpiry;
 
 use prodex_mojo_core::quota::QuotaAdmissionValue;
 use serde::{Deserialize, Serialize};

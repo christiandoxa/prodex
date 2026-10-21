@@ -313,7 +313,10 @@ fn compact_window_format_uses_scale_of_100() {
 #[test]
 fn openai_quota_renders_rate_limit_reset_credits() {
     let mut usage = main_windows(0, 1_700_001_800, 80, 1_700_259_200);
-    usage.rate_limit_reset_credits = Some(RateLimitResetCreditsSummary { available_count: 2 });
+    usage.rate_limit_reset_credits = Some(RateLimitResetCreditsSummary {
+        available_count: 2,
+        ..Default::default()
+    });
 
     let panel =
         render_profile_quota_snapshot("main", &ProviderQuotaSnapshot::OpenAi(usage.clone()));
@@ -787,3 +790,6 @@ fn compiled_quota_report_batch_sorts_large_live_report_sets_and_stable_duplicate
     assert_eq!(names.first(), Some(&"duplicate"));
     assert_eq!(names.last(), Some(&"quota-2048"));
 }
+
+#[path = "render/reset_credit_expiry.rs"]
+mod reset_credit_expiry;

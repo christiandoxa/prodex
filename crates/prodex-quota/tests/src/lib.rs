@@ -13,6 +13,22 @@ fn usage_url_matches_backend_shape() {
 }
 
 #[test]
+fn reset_credit_details_url_matches_usage_base_and_trailing_slashes() {
+    for (base, expected) in [
+        (
+            "https://example.com/backend-api///",
+            "https://example.com/backend-api/wham/rate-limit-reset-credits",
+        ),
+        (
+            "https://example.com/",
+            "https://example.com/api/codex/rate-limit-reset-credits",
+        ),
+    ] {
+        assert_eq!(rate_limit_reset_credits_url(base), expected);
+    }
+}
+
+#[test]
 fn response_body_pretty_prints_json() {
     let formatted = format_response_body(br#"{"error":{"message":"quota"}}"#);
     assert!(formatted.contains("\"message\": \"quota\""));

@@ -37,6 +37,11 @@ pub use state_profile::{
 };
 mod runtime_log_order;
 pub use runtime_log_order::{QuotaRuntimeLogOrderInput, quota_runtime_log_order};
+mod reset_credits;
+pub use reset_credits::{
+    QuotaResetCreditExpiry, QuotaResetCreditInput, quota_reset_credit_expiry,
+    quota_reset_credit_text,
+};
 mod window_duration;
 pub use window_duration::quota_window_duration_seconds;
 mod report_sort;

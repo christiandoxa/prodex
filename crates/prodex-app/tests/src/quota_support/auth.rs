@@ -423,3 +423,6 @@ fn temp_dir(name: &str) -> PathBuf {
     }
     dir
 }
+
+#[path = "reset_credit_details.rs"]
+mod reset_credit_details;

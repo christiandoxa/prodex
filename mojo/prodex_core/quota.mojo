@@ -4190,3 +4190,104 @@ def prodex_quota_state_current_profile_v1(
         unsafe_from_address=Int(output_address)
     )[] = selected
     return 0
+
+
+# Reset-credit details are optional enrichment, separate from quota windows.
+# Row words: status address, status length, expiry kind (unknown/null/instant), epoch.
+@export("prodex_quota_reset_credit_expiry_v1")
+def prodex_quota_reset_credit_expiry_v1(
+    abi_version: Int64, available_count: Int64,
+    rows_address: UInt, count: Int64, output_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != QUOTA_MODEL_POLICY_ABI_VERSION:
+        return QUOTA_MODEL_POLICY_ABI
+    if (
+        count < 0 or count > 1_000_000
+        or (count > 0 and (rows_address == 0 or rows_address % 8 != 0))
+        or output_address == 0 or output_address % 8 != 0
+    ):
+        return QUOTA_MODEL_POLICY_INVALID
+    var rows = Pointer[mut=False, Int64, ImmUntrackedOrigin](
+        unsafe_from_address=Int(rows_address)
+    )
+    var kind: Int64 = 0
+    var epoch: Int64 = 0
+    var incomplete = False
+    for index in range(count):
+        var offset = index * 4
+        var address = rows[unsafe_offset=offset]
+        var length = rows[unsafe_offset=offset + 1]
+        var expiry_kind = rows[unsafe_offset=offset + 2]
+        if (
+            address < 0 or length < 0 or (length > 0 and address == 0)
+            or expiry_kind < 0 or expiry_kind > 2
+        ):
+            return QUOTA_MODEL_POLICY_INVALID
+        var status = ProdexRichStringView(UInt(address), UInt(length))
+        if not rich_view_valid(status, length):
+            return QUOTA_MODEL_POLICY_INVALID
+        if available_count <= 0 or length != 9 or not rich_view_prefix["available"](status, False):
+            continue
+        if expiry_kind == 0:
+            incomplete = True
+        elif expiry_kind == 1:
+            if kind == 0:
+                kind = 1
+        else:
+            var candidate = rows[unsafe_offset=offset + 3]
+            if kind != 2 or candidate < epoch:
+                epoch = candidate
+                kind = 2
+    if incomplete:
+        kind = 0
+        epoch = 0
+    var output = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    output[unsafe_offset=0] = kind
+    output[unsafe_offset=1] = epoch
+    return QUOTA_MODEL_POLICY_OK
+
+
+@export("prodex_quota_reset_credit_text_v1")
+def prodex_quota_reset_credit_text_v1(
+    abi_version: Int64, available_count: Int64, expiry_kind: Int64,
+    timestamp_address: UInt, timestamp_length: Int64,
+    output_address: UInt, output_capacity: Int64, written_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != QUOTA_MODEL_POLICY_ABI_VERSION:
+        return QUOTA_MODEL_POLICY_ABI
+    if (
+        expiry_kind < 0 or expiry_kind > 2 or timestamp_length < 0
+        or (timestamp_length > 0 and timestamp_address == 0)
+        or output_address == 0 or output_capacity < 0
+        or written_address == 0 or written_address % 8 != 0
+    ):
+        return QUOTA_MODEL_POLICY_INVALID
+    var timestamp = ProdexRichStringView(timestamp_address, UInt(timestamp_length))
+    if not rich_view_valid(timestamp, timestamp_length):
+        return QUOTA_MODEL_POLICY_INVALID
+    var output = Pointer[mut=True, UInt8, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    var writer = QuotaDisplayWriter(output, output_capacity, 0)
+    if (
+        not quota_display_put_i64(Pointer(to=writer), available_count)
+        or not quota_display_put_literal(Pointer(to=writer), StringSlice(" available"))
+    ):
+        return QUOTA_MODEL_POLICY_CAPACITY
+    if available_count > 0:
+        if not quota_display_put_literal(Pointer(to=writer), StringSlice(" | next expiry: ")):
+            return QUOTA_MODEL_POLICY_CAPACITY
+        if expiry_kind == 2 and timestamp_length > 0:
+            if not quota_display_put_view(Pointer(to=writer), timestamp):
+                return QUOTA_MODEL_POLICY_CAPACITY
+        elif expiry_kind == 1:
+            if not quota_display_put_literal(Pointer(to=writer), StringSlice("never")):
+                return QUOTA_MODEL_POLICY_CAPACITY
+        elif not quota_display_put_literal(Pointer(to=writer), StringSlice("unavailable")):
+            return QUOTA_MODEL_POLICY_CAPACITY
+    Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(written_address)
+    )[] = writer.written
+    return QUOTA_MODEL_POLICY_OK

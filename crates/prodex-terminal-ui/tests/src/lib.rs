@@ -141,6 +141,14 @@ fn field_layout_respects_requested_width() {
         format_field_lines_with_layout("Long Label", "some longer value that must wrap", 24, 10);
     assert!(lines.iter().all(|line| text_width(line) <= 24));
     assert!(lines.len() > 1);
+
+    let credits = format_field_lines_with_layout(
+        "Reset credits",
+        "3 available | next expiry: 2026-10-23 01:23:45 +07:00",
+        40,
+        10,
+    );
+    assert!(credits.iter().all(|line| text_width(line) <= 40));
 }
 
 #[test]

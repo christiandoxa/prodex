@@ -99,6 +99,7 @@ pub(crate) struct RateLimitResetCreditConsumeFlow<'a> {
 pub(super) struct UsageFetchFlow<'a> {
     codex_home: &'a Path,
     usage_url: String,
+    reset_credits_url: String,
     client: Client,
     auth: UsageAuth,
     upstream_no_proxy: bool,
@@ -238,7 +239,9 @@ impl<'a> UsageFetchFlow<'a> {
         base_url: Option<&str>,
         upstream_no_proxy: bool,
     ) -> Result<Self> {
-        let usage_url = usage_url(&quota_base_url(base_url)?);
+        let base_url = quota_base_url(base_url)?;
+        let usage_url = usage_url(&base_url);
+        let reset_credits_url = prodex_quota::rate_limit_reset_credits_url(&base_url);
         let mut auth = read_usage_auth(codex_home)?;
         if usage_auth_needs_proactive_refresh(&auth, Local::now().timestamp())
             && let Ok(outcome) = sync_usage_auth_from_disk_or_refresh_with_proxy_policy(
@@ -253,6 +256,7 @@ impl<'a> UsageFetchFlow<'a> {
         Ok(Self {
             codex_home,
             usage_url,
+            reset_credits_url,
             client: build_upstream_blocking_http_client("quota HTTP", upstream_no_proxy)?,
             auth,
             upstream_no_proxy,
