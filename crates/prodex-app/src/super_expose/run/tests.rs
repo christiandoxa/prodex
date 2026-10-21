@@ -1,7 +1,6 @@
 use super::{
-    MAX_ACTIVE_RUNS, MAX_QUEUED_RUNS, MAX_RUN_EVENT_TEXT_BYTES, MAX_RUN_EVENTS, OUTPUT_MAX_BYTES,
-    RunRecord, RunState, append_output, build_child_args, events_page, new_run_id, push_event,
-    summary_json,
+    MAX_ACTIVE_RUNS, MAX_QUEUED_RUNS, MAX_RUN_EVENT_TEXT_BYTES, OUTPUT_MAX_BYTES, RunRecord,
+    RunState, append_output, build_child_args, events_page, new_run_id, push_event, summary_json,
 };
 use std::collections::VecDeque;
 use std::ffi::OsString;
@@ -132,7 +131,6 @@ fn run_ids_match_the_04294_opaque_shape() {
 fn run_limits_match_04294() {
     assert_eq!(MAX_ACTIVE_RUNS, 4);
     assert_eq!(MAX_QUEUED_RUNS, 16);
-    assert_eq!(MAX_RUN_EVENTS, 256);
     assert_eq!(MAX_RUN_EVENT_TEXT_BYTES, 8 * 1024);
     assert_eq!(OUTPUT_MAX_BYTES, 256 * 1024);
 }
@@ -147,14 +145,14 @@ fn event_retention_and_pagination_match_04294() {
     assert_eq!(record.events.front().map(|event| event.seq), Some(44));
     assert_eq!(record.next_seq, 300);
 
-    let page = events_page(&record, 0, 64);
+    let page = events_page(&record, 0, 64).unwrap();
     assert_eq!(page.events.len(), 64);
     assert_eq!(page.events.first().map(|event| event.seq), Some(44));
     assert_eq!(page.events.last().map(|event| event.seq), Some(107));
     assert_eq!(page.next_seq, 300);
     assert!(page.truncated);
 
-    let next = events_page(&record, 107, 64);
+    let next = events_page(&record, 107, 64).unwrap();
     assert_eq!(next.events.first().map(|event| event.seq), Some(108));
     assert!(!next.truncated);
 }

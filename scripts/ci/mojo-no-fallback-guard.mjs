@@ -7942,6 +7942,16 @@ export function findViolations(files) {
     }
     return [];
   });
+  const superRunEventViolations = files.flatMap(([filePath, contents]) => {
+    if (filePath === "crates/prodex-app/src/super_expose/run/helpers.rs" && contents.includes("fn events_page(")) {
+      const body = contents.match(/pub\(super\) fn events_page\([^]*?(?=^pub\(super\) fn bounded_event_text)/mu)?.[0] ?? "";
+      return body.includes("super_run_events_page_plan(")
+        && body.includes("super_run_event_push_plan(")
+        && !/\.filter\(|limit\.min\(|next_seq\.saturating_add\(|while record\.events\.len\(|MAX_RUN_EVENTS/u.test(body)
+        ? [] : [filePath + ": Super event retention and cursor selection must remain compiled Mojo-owned"];
+    }
+    return [];
+  });
   const superExposeViolations = files
     .filter(([filePath, contents]) => filePath === SUPER_EXPOSE_FILE &&
       (!contents.includes("prodex_mojo_core::launch::find_super_expose_alias_index") ||
@@ -13982,7 +13992,7 @@ export function findViolations(files) {
     ...anthropicEnvelopeViolations, ...anthropicRequestViolations,
     ...anthropicWebSearchViolations, ...superProviderConfigViolations, ...externalProviderCatalogViolations, ...subAgentPolicyViolations, ...runtimeOverlayPolicyViolations, ...cliRuntimeFeatureViolations,
     ...superExposeProtocolViolations, ...superExposeExecViolations, ...superExposeViolations,
-    ...superRunRetentionViolations,
+    ...superRunRetentionViolations, ...superRunEventViolations,
     ...geminiFallbackViolations, ...geminiGenerationViolations, ...geminiTranslatorHardReplacementViolations, ...geminiBridgeFallbackViolations, ...geminiSignatureViolations, ...geminiResponseConformanceViolations,
     ...geminiToolResponseOrderViolations, ...geminiApplyPatchViolations,
     ...hardReplacementViolations, ...precommitBudgetOracleViolations,
@@ -17952,6 +17962,12 @@ function selfTest() {
   assert.deepEqual(findViolations([[runRetentionFile, runRetentionCaller]]), []);
   for (const restored of [".min_by_key(", ".filter(", ".count(", "finished_at.unwrap_or("]) {
     assert.match(findViolations([[runRetentionFile, runRetentionCaller.replace(" runs.retain(", " runs.retain( " + restored)]]).join("\n"), /compiled mask without Rust eviction/u);
+  }
+
+  const eventCaller = runRetentionCaller + "\npub(super) fn events_page() { super_run_events_page_plan( }\npub(super) fn push_event() { super_run_event_push_plan( }\npub(super) fn bounded_event_text(";
+  assert.deepEqual(findViolations([[runRetentionFile, eventCaller]]), []);
+  for (const restored of [".filter(", "limit.min(", "next_seq.saturating_add(", "while record.events.len(", "MAX_RUN_EVENTS"]) {
+    assert.match(findViolations([[runRetentionFile, eventCaller.replace("super_run_events_page_plan(", restored + " super_run_events_page_plan(")]]).join("\n"), /Super event retention and cursor selection/u);
   }
 
 }
