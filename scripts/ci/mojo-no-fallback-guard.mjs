@@ -427,6 +427,7 @@ const CORE_LEXICAL_BROKER_PATHS = "crates/prodex-app/src/runtime_persistence/pat
 const CORE_LEXICAL_APP_HOUSEKEEPING = "crates/prodex-app/src/housekeeping.rs";
 const CORE_LEXICAL_LIVE_LOG = "crates/prodex-app/src/app_commands/log_live.rs";
 const PROMOTED_FILES = [
+  "crates/prodex-optional-tools/src/tree.rs",
   "mojo/prodex_core/rich_text.mojo",
   "crates/prodex-app/src/super_expose/run/helpers.rs",
   "crates/prodex-mojo-core/src/rich/super_expose/run_policy.rs",
@@ -7999,6 +8000,15 @@ export function findViolations(files) {
     }
     return [];
   });
+  const optionalTreeOrderViolations = files.flatMap(([filePath, contents]) => {
+    if (filePath === "crates/prodex-optional-tools/src/tree.rs") {
+      return contents.includes("core_file_policy::lexical_file_key_order(&keys, false)")
+        && contents.includes("for index in order")
+        && !/files\.sort|relative\.cmp\(/u.test(contents)
+        ? [] : [filePath + ": optional-tool tree digest must reuse compiled lexical ordering"];
+    }
+    return [];
+  });
   const superExposeViolations = files
     .filter(([filePath, contents]) => filePath === SUPER_EXPOSE_FILE &&
       (!contents.includes("prodex_mojo_core::launch::find_super_expose_alias_index") ||
@@ -14040,7 +14050,7 @@ export function findViolations(files) {
     ...anthropicWebSearchViolations, ...superProviderConfigViolations, ...externalProviderCatalogViolations, ...subAgentPolicyViolations, ...runtimeOverlayPolicyViolations, ...cliRuntimeFeatureViolations,
     ...superExposeProtocolViolations, ...superExposeExecViolations, ...superExposeViolations,
     ...superRunRetentionViolations, ...superRunEventViolations, ...superTextClipViolations,
-    ...superOverrideStringViolations, ...superRunOutputViolations,
+    ...superOverrideStringViolations, ...superRunOutputViolations, ...optionalTreeOrderViolations,
     ...geminiFallbackViolations, ...geminiGenerationViolations, ...geminiTranslatorHardReplacementViolations, ...geminiBridgeFallbackViolations, ...geminiSignatureViolations, ...geminiResponseConformanceViolations,
     ...geminiToolResponseOrderViolations, ...geminiApplyPatchViolations,
     ...hardReplacementViolations, ...precommitBudgetOracleViolations,
@@ -18038,6 +18048,11 @@ function selfTest() {
   for (const restored of ["record.output.len() <", "let remaining", ".any(", "output_truncated = true", "push_event("]) {
     assert.match(findViolations([[runRetentionFile, outputCaller.replace("super_run_output_plan(", restored + " super_run_output_plan(")]]).join("\n"), /output append and marker decisions/u);
   }
+
+  const optionalTreeFile = "crates/prodex-optional-tools/src/tree.rs";
+  const optionalTreeCaller = "core_file_policy::lexical_file_key_order(&keys, false) for index in order";
+  assert.deepEqual(findViolations([[optionalTreeFile, optionalTreeCaller]]), []);
+  assert.match(findViolations([[optionalTreeFile, optionalTreeCaller + "files.sort_by("]]).join("\n"), /optional-tool tree digest/u);
 
 }
 

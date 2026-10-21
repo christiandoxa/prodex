@@ -8418,3 +8418,22 @@ Mojo, nine strict run-policy bridge tests, three output regressions and all
 116 Super expose tests pass. Canonical share is 36.31228157896137% (136,532 Mojo
 / 239,462 Rust LOC). The 75% target remains open. Detailed evidence is in
 `migration/super-run-output-plan-mojo-20261022.md`.
+
+## Optional-tool digest order reuses compiled lexical sorting (2026-10-22)
+
+Caveman and Ponytail installation digests now stream files in the checked
+Mojo lexical permutation. The Rust string sort is deleted; both digest
+domains, UTF-8 relative names, length encoding and excluded metadata remain
+covered by fixed filesystem fixtures. Existing direct Mojo, two strict bridge,
+the real-tree digest regression, all 69 optional-tools tests and strict
+workspace Clippy pass. Canonical share is 36.31160555424055% (136,532 Mojo /
+239,469 Rust LOC). The 75% target remains open. Full evidence is in
+`migration/optional-tool-tree-order-mojo-20261022.md`.
+
+An audited next candidate is
+`app_commands/redeem.rs::{nearest_manual_redeem_reset, manual_redeem_window_near_reset}`.
+Rust still computes saturated signed reset-minus-now, compares the near-reset
+threshold and selects the first minimum across primary/weekly windows. Keep
+past-reset eligibility, absent windows, primary-first ties and all signed
+limits while leaving the clock, prompt and consume request in Rust. This
+must remain distinct from automatic redemption's quota/availability policy.

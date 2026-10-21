@@ -12,7 +12,13 @@ const MAX_FILE_BYTES: u64 = 16 * 1024 * 1024;
 pub(crate) fn tree_sha256(root: &Path, digest_domain: &[u8]) -> Result<String> {
     let mut files = Vec::new();
     collect_tree_files(root, root, &mut files)?;
-    files.sort_by(|left, right| left.0.cmp(&right.0));
+    let keys = files
+        .iter()
+        .map(|(relative, _, _)| relative.as_bytes())
+        .collect::<Vec<_>>();
+    let order = prodex_mojo_core::core_file_policy::lexical_file_key_order(&keys, false).map_err(
+        |error| anyhow::anyhow!("compiled optional-tool tree ordering failed: {error:?}"),
+    )?;
     let total_bytes = files
         .iter()
         .try_fold(0_u64, |total, (_, _, len)| total.checked_add(*len))
@@ -24,13 +30,14 @@ pub(crate) fn tree_sha256(root: &Path, digest_domain: &[u8]) -> Result<String> {
 
     let mut hasher = Sha256::new();
     hasher.update(digest_domain);
-    for (relative, path, expected_len) in files {
+    for index in order {
+        let (relative, path, expected_len) = &files[index];
         hasher.update(relative.as_bytes());
         hasher.update([0]);
         hasher.update(expected_len.to_be_bytes());
-        let bytes = read_bounded_file(&path, MAX_FILE_BYTES)?;
+        let bytes = read_bounded_file(path, MAX_FILE_BYTES)?;
         ensure!(
-            bytes.len() as u64 == expected_len,
+            bytes.len() as u64 == *expected_len,
             "{} changed while it was validated",
             path.display()
         );
