@@ -427,6 +427,8 @@ const CORE_LEXICAL_BROKER_PATHS = "crates/prodex-app/src/runtime_persistence/pat
 const CORE_LEXICAL_APP_HOUSEKEEPING = "crates/prodex-app/src/housekeeping.rs";
 const CORE_LEXICAL_LIVE_LOG = "crates/prodex-app/src/app_commands/log_live.rs";
 const PROMOTED_FILES = [
+  "crates/prodex-app/src/runtime_catalog_config.rs",
+  "crates/prodex-mojo-core/src/super_provider_config/catalog_unsigned.rs",
   "crates/prodex-app/src/runtime_launch/proxy_startup/deepseek_rewrite/conversation_store.rs",
   "crates/prodex-mojo-core/src/provider_conversation_policy.rs",
   "mojo/prodex_core/provider_conversation_policy.mojo",
@@ -3515,6 +3517,25 @@ export function findViolations(files) {
     if (filePath === "crates/prodex-mojo-core/src/codex_config.rs") {
       return contents.includes("prodex_codex_config_removal_mask_v1(")
         ? [] : [filePath + ": Codex override removal ABI must remain wired"];
+    }
+    return [];
+  });
+  const catalogUnsignedViolations = files.flatMap(([filePath, contents]) => {
+    if (filePath === "crates/prodex-app/src/runtime_catalog_config.rs") {
+      const body = contents.split("#[cfg(test)]")[0];
+      return body.includes("catalog_unsigned_value(value)")
+        && !/\.parse::<u64>|\.chars\(|value\.is_empty\(|parsed <= 1/u.test(body)
+        ? [] : [filePath + ": provider catalog scalar validation must remain compiled Mojo"];
+    }
+    if (filePath === "crates/prodex-mojo-core/src/super_provider_config/catalog_unsigned.rs") {
+      return contents.includes("prodex_provider_catalog_uint_v1(")
+        && !/\.parse::<u64>|\.chars\(/u.test(contents)
+        ? [] : [filePath + ": provider catalog scalar ABI must retain Mojo parsing"];
+    }
+    if (filePath === "mojo/prodex_core/super_provider_config.mojo") {
+      return contents.includes('@export("prodex_provider_catalog_uint_v1")')
+        && contents.includes("config_parse_external_provider_uint(config_view(address, length))")
+        ? [] : [filePath + ": provider catalog scalar must reuse the existing Mojo parser"];
     }
     return [];
   });
@@ -13885,6 +13906,7 @@ export function findViolations(files) {
     ...codexConfigRemovalViolations,
     ...brokerSnapshotQueryViolations,
     ...providerConversationViolations,
+    ...catalogUnsignedViolations,
     ...sharedAttachmentMigrationViolations,
     ...runtimeCookieMigrationViolations,
     ...deepseekSimpleRequestViolations,
@@ -17856,6 +17878,13 @@ function selfTest() {
   const conversationMemoryCaller = "document.borrowed_array(messages) json::conversation_estimated_bytes(";
   assert.deepEqual(findViolations([[conversationMemoryFile, conversationMemoryCaller]]), []);
   assert.match(findViolations([[conversationMemoryFile, conversationMemoryCaller + ".saturating_add("]]).join("\n"), /conversation cost must reuse/u);
+
+  const catalogScalarFile = "crates/prodex-app/src/runtime_catalog_config.rs";
+  const catalogScalarCaller = "catalog_unsigned_value(value)";
+  assert.deepEqual(findViolations([[catalogScalarFile, catalogScalarCaller]]), []);
+  for (const restored of [".parse::<u64>()", ".chars()", "value.is_empty()", "parsed <= 1"]) {
+    assert.match(findViolations([[catalogScalarFile, catalogScalarCaller + restored]]).join("\n"), /catalog scalar validation/u);
+  }
 
 }
 

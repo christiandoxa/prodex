@@ -1,3 +1,48 @@
+fn read_mock_request(stream: &mut impl Read) {
+    let deadline = Instant::now() + Duration::from_secs(2);
+    let mut request = Vec::new();
+    let mut chunk = [0_u8; 256];
+    while !request.windows(4).any(|window| window == b"\r\n\r\n") {
+        assert!(Instant::now() < deadline, "mock request headers timed out");
+        match stream.read(&mut chunk) {
+            Ok(0) => panic!("mock request ended before complete headers"),
+            Ok(read) => request.extend_from_slice(&chunk[..read]),
+            Err(error)
+                if matches!(
+                    error.kind(),
+                    io::ErrorKind::TimedOut
+                        | io::ErrorKind::WouldBlock
+                        | io::ErrorKind::Interrupted
+                ) => {}
+            Err(error) => panic!("mock request headers could not be read: {error}"),
+        }
+    }
+}
+
+#[test]
+fn mock_request_reader_waits_through_header_read_timeouts() {
+    struct DelayedHeaders {
+        timeout_pending: bool,
+        body: std::io::Cursor<&'static [u8]>,
+    }
+
+    impl Read for DelayedHeaders {
+        fn read(&mut self, buffer: &mut [u8]) -> io::Result<usize> {
+            if std::mem::take(&mut self.timeout_pending) {
+                return Err(io::ErrorKind::TimedOut.into());
+            }
+            self.body.read(buffer)
+        }
+    }
+
+    let headers = b"GET /v1/responses HTTP/1.1\r\nHost: example.com\r\n\r\n";
+    let mut reader = DelayedHeaders {
+        timeout_pending: true,
+        body: std::io::Cursor::new(headers.as_slice()),
+    };
+    read_mock_request(&mut reader);
+    assert_eq!(reader.body.position(), headers.len() as u64);
+}
 
 #[test]
 fn async_prefetch_splits_large_upstream_chunks_before_queueing() {
