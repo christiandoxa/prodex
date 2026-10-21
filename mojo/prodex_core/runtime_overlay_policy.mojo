@@ -1,7 +1,10 @@
 from std.memory import Pointer
+from index_order import index_order_sort
 
 from rich_text import (
     rich_trim_bounds,
+    rich_view_compare,
+    rich_views_equal,
     rich_view_matches_literal,
     rich_view_prefix,
     rich_view_valid,
@@ -547,4 +550,115 @@ def prodex_runtime_overlay_optional_tool_plan_v1(
     if optional_incompatible_mask > 0:
         result[unsafe_offset=0] = OVERLAY_TOOL_PLAN_SKIP_INCOMPATIBLE
     result[unsafe_offset=2] = optional_incompatible_mask
+    return RUNTIME_OVERLAY_OK
+
+# Planned trusted workspace entries are serialized by Rust, but Mojo owns
+# first-occurrence de-duplication, input order and the total projects cap.
+# Records are [path pointer, UTF-8 byte len, serialized entry byte len].
+comptime OVERLAY_TRUST_ENTRY_ABI_VERSION: Int64 = 1
+comptime OVERLAY_TRUST_ENTRY_MAX_COUNT: Int64 = 65_536
+comptime OVERLAY_TRUST_ENTRY_MAX_PATH_BYTES: Int64 = 1_048_576
+
+
+def runtime_overlay_trust_path(
+    records: Pointer[mut=False, UInt64, _], index: Int64
+) -> ProdexRichStringView:
+    return ProdexRichStringView(
+        UInt(records[unsafe_offset=index * 3]),
+        UInt(records[unsafe_offset=index * 3 + 1]),
+    )
+
+
+def runtime_overlay_trust_entry_compare(
+    records_address: UInt, _width: Int64, left: Int64, right: Int64
+) -> Int64:
+    var records = Pointer[mut=False, UInt64, ImmUntrackedOrigin](
+        unsafe_from_address=Int(records_address)
+    )
+    var comparison = rich_view_compare(
+        runtime_overlay_trust_path(records, left),
+        runtime_overlay_trust_path(records, right),
+    )
+    if comparison != 0:
+        return comparison
+    # Heap sort itself is not stable. Exact ties retain the earlier source.
+    return Int64(-1) if left < right else Int64(1) if left > right else Int64(0)
+
+
+@export("prodex_runtime_overlay_trust_entry_plan_v1")
+def prodex_runtime_overlay_trust_entry_plan_v1(
+    abi_version: Int64,
+    records_address: UInt,
+    count: Int64,
+    max_encoded_bytes: UInt64,
+    output_address: UInt,
+    output_capacity: Int64,
+    scratch_address: UInt,
+    scratch_capacity: Int64,
+    written_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != OVERLAY_TRUST_ENTRY_ABI_VERSION:
+        return RUNTIME_OVERLAY_ABI
+    if (
+        count < 0 or count > OVERLAY_TRUST_ENTRY_MAX_COUNT
+        or output_capacity < count
+        or scratch_capacity < count * 2
+        or (count > 0 and (
+            records_address == 0 or records_address % 8 != 0
+            or output_address == 0 or output_address % 8 != 0
+            or scratch_address == 0 or scratch_address % 8 != 0
+        ))
+        or written_address == 0 or written_address % 8 != 0
+    ):
+        return RUNTIME_OVERLAY_INVALID
+    var records = Pointer[mut=False, UInt64, ImmUntrackedOrigin](
+        unsafe_from_address=Int(records_address)
+    )
+    for index in range(count):
+        var path = runtime_overlay_trust_path(records, index)
+        if not rich_view_valid(path, OVERLAY_TRUST_ENTRY_MAX_PATH_BYTES):
+            return RUNTIME_OVERLAY_INVALID
+
+    var output = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    var scratch = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(scratch_address)
+    )
+    var written = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(written_address)
+    )
+    for index in range(count):
+        scratch[unsafe_offset=index] = index
+        scratch[unsafe_offset=count + index] = 0
+    if count > 1:
+        index_order_sort[runtime_overlay_trust_entry_compare](
+            records_address, 3, scratch, count
+        )
+    var previous: Int64 = -1
+    for position in range(count):
+        var index = scratch[unsafe_offset=position]
+        if previous == -1 or not rich_views_equal(
+            runtime_overlay_trust_path(records, previous),
+            runtime_overlay_trust_path(records, index),
+        ):
+            scratch[unsafe_offset=count + index] = 1
+        previous = index
+
+    var selected_count: Int64 = 0
+    var encoded_bytes = UInt128(11)  # len("projects={}") in UTF-8
+    for index in range(count):
+        if scratch[unsafe_offset=count + index] == 0:
+            continue
+        var separator = UInt128(1) if selected_count > 0 else UInt128(0)
+        var length = UInt128(records[unsafe_offset=index * 3 + 2])
+        var projected = encoded_bytes + separator + length
+        # Preserve original behavior: first entry is retained unconditionally
+        # even if the resulting projects assignment exceeds the target size.
+        if selected_count > 0 and projected > UInt128(max_encoded_bytes):
+            break
+        output[unsafe_offset=selected_count] = index
+        selected_count += 1
+        encoded_bytes = projected
+    written[unsafe_offset=0] = selected_count
     return RUNTIME_OVERLAY_OK

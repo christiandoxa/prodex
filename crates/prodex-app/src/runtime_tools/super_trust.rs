@@ -70,30 +70,32 @@ fn trusted_workspaces_codex_args(
     workspaces: impl IntoIterator<Item = PathBuf>,
     codex_args: &[OsString],
 ) -> Vec<OsString> {
-    let mut seen = BTreeSet::new();
-    let mut entries = Vec::new();
-    let mut encoded_bytes = "projects={}".len();
-
-    'workspaces: for workspace in workspaces {
+    // The Rust host resolves the original/lexical/canonical OS paths and
+    // serializes TOML-compatible entries. Compiled Mojo owns exact path
+    // deduplication, first occurrence and bounded config selection.
+    let mut candidates = Vec::<(String, String)>::new();
+    for workspace in workspaces {
         for candidate in trusted_workspace_candidates(workspace) {
             let workspace = candidate.to_string_lossy().into_owned();
-            if !seen.insert(workspace.clone()) {
-                continue;
-            }
-            let workspace = serde_json::to_string(&workspace)
+            let serialized = serde_json::to_string(&workspace)
                 .expect("workspace path should serialize as a TOML-compatible string");
-            let entry = format!("{workspace}={{trust_level=\"trusted\"}}");
-            let separator_bytes = usize::from(!entries.is_empty());
-            let projected = encoded_bytes
-                .saturating_add(separator_bytes)
-                .saturating_add(entry.len());
-            if !entries.is_empty() && projected > SUPER_TRUST_CONFIG_MAX_BYTES {
-                break 'workspaces;
-            }
-            encoded_bytes = projected;
-            entries.push(entry);
+            let entry = format!("{serialized}={{trust_level=\"trusted\"}}");
+            candidates.push((workspace, entry));
         }
     }
+    let inputs = candidates
+        .iter()
+        .map(|(path, entry)| (path.as_str(), entry.len()))
+        .collect::<Vec<_>>();
+    let selected = prodex_mojo_core::runtime_overlay_policy::workspace_trust_entry_indices(
+        &inputs,
+        SUPER_TRUST_CONFIG_MAX_BYTES,
+    )
+    .expect("compiled Mojo Super trust entry planner returned invalid output");
+    let entries = selected
+        .into_iter()
+        .map(|index| candidates[index].1.as_str())
+        .collect::<Vec<_>>();
 
     let mut args = Vec::with_capacity(codex_args.len() + 2);
     if !entries.is_empty() {
@@ -216,6 +218,52 @@ pub(crate) fn trusted_super_resume_codex_args(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn compiled_super_trust_selection_deduplicates_exact_paths_and_preserves_order() {
+        let args = trusted_workspaces_codex_args(
+            [
+                PathBuf::from("/home/test-user/alpha"),
+                PathBuf::from("/home/test-user/alpha"),
+                PathBuf::from("/home/test-user/ALPHA"),
+                PathBuf::from("/home/test-user/beta"),
+            ],
+            &[OsString::from("exec"), OsString::from("hello")],
+        );
+        assert_eq!(args.len(), 4);
+        assert_eq!(args[0], "-c");
+        let config = args[1].to_string_lossy();
+        assert_eq!(config.matches("trust_level").count(), 3);
+        assert!(
+            config.find("/home/test-user/alpha").unwrap()
+                < config.find("/home/test-user/ALPHA").unwrap()
+        );
+        assert!(
+            config.find("/home/test-user/ALPHA").unwrap()
+                < config.find("/home/test-user/beta").unwrap()
+        );
+        assert_eq!(args[2], "exec");
+        assert_eq!(args[3], "hello");
+    }
+
+    #[test]
+    fn compiled_super_trust_byte_cap_stops_on_first_overflow() {
+        let workspaces = (0..500)
+            .map(|index| PathBuf::from(format!("/home/test-user/{index:04}-{}", "abc".repeat(100))))
+            .collect::<Vec<_>>();
+        let args = trusted_workspaces_codex_args(workspaces, &[]);
+        assert_eq!(args.len(), 2);
+        let config = args[1].to_string_lossy();
+        assert!(config.len() <= SUPER_TRUST_CONFIG_MAX_BYTES);
+        assert!(config.contains("/home/test-user/0000-"));
+        assert!(!config.contains("/home/test-user/0499-"));
+
+        // Previous contract: a single entry must be retained even if
+        // the configured byte budget is exceeded.
+        let first = PathBuf::from(format!("/home/test-user/{}", "x".repeat(132_000)));
+        let args = trusted_workspaces_codex_args([first], &[]);
+        assert!(args[1].to_string_lossy().len() > SUPER_TRUST_CONFIG_MAX_BYTES);
+    }
 
     #[test]
     fn direct_super_resume_trusts_persisted_session_workspace() {
