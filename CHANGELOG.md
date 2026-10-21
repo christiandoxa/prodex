@@ -2,6 +2,77 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.438.4 - 2026-10-21
+
+### CLI
+
+- Show nearest OpenAI reset-credit expiry (`4c8b44b`)
+
+### Deps
+
+- Patch distrusted TLS certificate verification (`c09b7fc`)
+- Integrate Dependabot fuzz serde_json update (#113) (`077dfb0`)
+- Integrate Dependabot Cargo updates (#112) (`5cec445`)
+- Bump the cargo group across 1 directory with 8 updates (`79b5672`)
+- Bump serde_json (`34f020e`)
+# Prodex 0.438.4
+
+This patch adds the next OpenAI reset-credit expiry to quota views and updates
+the dependency graph.
+
+## New Features
+
+### Show the nearest available reset-credit expiry
+
+`prodex quota` now shows `next expiry` immediately after the available reset-credit
+count in interactive and `--once` views. The timestamp uses the machine's local
+time zone and includes a numeric UTC offset.
+
+The date is the earliest expiry among credits whose status is `available`.
+It is independent of the five-hour and weekly quota reset windows. The read-only
+detail request runs only when the available count is positive, uses the identity
+accepted by the quota request, and respects the configured backend base URL.
+
+Expiry summaries wrap within the existing terminal layout, including narrow
+terminals.
+
+## Bug Fixes
+
+- Preserve the available credit count when details cannot be fetched or parsed,
+  and show `next expiry: unavailable`.
+- Distinguish unavailable details from non-expiring credits. When every available
+  credit has `expires_at: null`, show `next expiry: never`. When expiring and
+  non-expiring credits coexist, show the earliest finite expiry.
+- Compare RFC3339 timestamps as instants, including different UTC offsets, and
+  ignore credits that are no longer available.
+- Preserve automatic refresh, the previous snapshot during loading, `--raw`
+  output, runtime quota probes, and other providers' behavior.
+- Repair stale Mojo ownership references and use representable 100-nanosecond
+  Windows timestamp fixtures. Mechanical module extractions preserve existing
+  test identities. Correct existing Clippy findings and simplify private ABI
+  validation and JSON node linkage to satisfy the SonarQube complexity gate.
+
+## Changelog
+
+- Include the compiled Mojo policy migrations already on `main` for provider
+  adapters, quota, runtime state and logs, Smart Context, and diagnostics.
+- Incorporate Dependabot [#112](https://github.com/christiandoxa/prodex/pull/112),
+  covering eight Cargo dependency updates.
+- Update the fuzz workspace to `serde_json` 1.0.154 via
+  [#113](https://github.com/christiandoxa/prodex/pull/113).
+- Update `setup-uv` to 10.3.0 via
+  [#114](https://github.com/christiandoxa/prodex/pull/114).
+- Refresh fuzz lockfile resolutions to `cc` 1.9.0, `find-msvc-tools` 0.1.15,
+  and `inout` 0.2.5 during release synchronization.
+- Update `rustls-webpki` to 0.103.16 and `webpki-root-certs` to 1.0.10 to address
+  dependency advisories.
+- Add offline regression coverage for expiry parsing and selection, unavailable
+  and non-expiring details, profile authentication, raw output, and terminal
+  rendering. Fixtures use local mocks without live credit consumption or
+  redemption.
+
+Full Changelog: [0.438.3...0.438.4](https://github.com/christiandoxa/prodex/compare/0.438.3...0.438.4)
+
 ## 0.438.3 - 2026-10-18
 
 ### Runtime
@@ -9,116 +80,6 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 - Consume buffered terminal frames before idle expiry (`528c90a`)
 - Poll readiness without expiring blocking receive state (`21c8463`)
 - Recover quiet and broken WebSocket continuations before commit (`167546f`)
-# Prodex 0.438.3
-
-This patch repairs WebSocket recovery paths that could interrupt a Responses
-or compaction request while another profile still had available quota.
-
-## New Features
-
-This maintenance release adds no new user-facing flags.
-
-## Bug Fixes
-
-### Keep transport failures inside affinity-aware recovery
-
-Precommit connection, send, read, and close failures now return typed attempt
-outcomes to the outer recovery owner. A lower-level transport action that
-previously became an invalid-action error can no longer close the local
-client socket before safe recovery is evaluated. The transport layer does not
-itself grant permission to rotate or replay a continuation.
-
-Full-history requests bound only to a failed turn-state transport can use the
-same compiled safety proof as quota recovery to move to a Ready alternative.
-The failed binding is removed from both headers and request metadata. A
-previous-response dependency still uses native full-context recovery when
-eligible; delta-only requests and strict compact-followup bindings are not
-replayed across accounts.
-
-### Keep quiet Responses connections alive without hiding deadlines
-
-A compiled Mojo wait plan schedules transport-only Ping frames during quiet
-upstream waits, including waits where response metadata remains buffered.
-Client idle time no longer expires merely because the proxy is safely holding
-precommit metadata. These control frames never commit output, extend the
-logical request deadline, reset the upstream idle clock, or change quota.
-A genuinely stalled upstream still fails within its configured timeout.
-
-Committed output is never replayed and no synthetic response completion is
-emitted. Existing idle-socket permit release and per-request reacquisition
-remain intact. Realtime duplex handling retains its committed-session rules.
-
-### Keep readiness polling safe on native Windows sockets
-
-Quiet-stream liveness now performs a nonblocking read before a bounded OS
-readiness wait (`poll` on Unix, `WSAPoll` on Windows), preserving buffered TLS
-and partial WebSocket frames. It no longer repeatedly expires a blocking
-socket receive timeout to wake the heartbeat loop: Winsock documents the
-connection state after that timeout as indeterminate. Blocking write and
-cached-session contracts are restored before dispatching each frame.
-
-A causal local fixture pauses before any data, splits a WebSocket text frame
-inside its payload, then sends a second terminal/error frame. Both frames
-must be received exactly, without changing the socket's configured receive
-timeout. Existing live frame/Pong and post-commit continuation pass-through
-regressions remain mandatory on Windows rather than weakening their assertions.
-
-### Drain queued terminal frames before declaring upstream idle
-
-Windows qualification exposed an independent ordering defect: synchronous
-commit/state persistence could exceed the short test idle budget while a
-`response.completed` or `response.failed` frame was already buffered. The
-loop checked elapsed idle time before attempting to consume that queued
-frame, inventing an upstream timeout and closing the client after output.
-
-The loop now tries a nonblocking read before the idle decision. An actual
-frame refreshes upstream progress; a poll or heartbeat does not. The absolute
-precommit deadline is still checked before and after every read. A causal
-local test pauses downstream dispatch for 200 ms with a 100 ms upstream idle
-budget and queues both success/error terminal cases. It fails before this
-ordering fix and passes afterward without changing the budget or assertions.
-
-### Keep the release dependency graph maintained
-
-The OS keyring adapter now selects maintained native stores explicitly. On
-Linux it uses encrypted Secret Service transport through the maintained D-Bus
-backend, removing retired standalone zvariant dependencies that blocked the
-supply-chain gate. macOS Keychain and Windows Credential Manager remain the
-platform stores. Service/user lookup attributes and the binary secret envelope
-are unchanged; publication does not enumerate, migrate, or rewrite credentials.
-
-### Maintain the native credential-store dependency chain
-
-Linux/Unix Secret Service access now uses an explicit maintained D-Bus store
-with Rust cryptography and a bundled libdbus instead of the retired standalone
-zvariant dependency chain. macOS Keychain and Windows Credential Manager stay
-on their native stores. The service/username lookup attributes, default
-collection and binary secret envelope are unchanged. An isolated old/new
-backend interoperability test verified cross-reading, updating and deleting
-the same synthetic entry; no user keyring was accessed during qualification.
-No advisory ignore or security gate exemption was added.
-
-## Changelog
-
-### Qualification
-
-Regression tests reproduce the precommit invalid-action failure and the quiet
-client timeout before the patch. A separate test reproduces a full-history
-transport failure with one five-hour-blocked profile, one weekly-blocked
-profile and one Ready profile. Controls verify that delta-only input remains
-bound, previous-response recovery is explicit, heartbeats cannot postpone a
-real upstream timeout, and a committed response cannot become a retryable
-attempt. A real local broker test closes the owner's upstream connection
-before output, then completes the same full-history request exactly once on
-the alternate profile without leaking the failed turn-state binding.
-
-Available quota is not a guarantee that every upstream connection or model is
-healthy. This patch repairs the reproduced proxy recovery defects; it does
-not bypass quota limits, mask exhausted request deadlines, or claim that
-external network failures are impossible. Saved conversations, credentials,
-and paused goals are not modified by release publication.
-
-Full Changelog: [0.438.2...0.438.3](https://github.com/christiandoxa/prodex/compare/0.438.2...0.438.3)
 
 ## 0.438.2 - 2026-10-17
 
