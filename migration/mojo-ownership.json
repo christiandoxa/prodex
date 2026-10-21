@@ -117,6 +117,40 @@
     "runtime_recovery_cooldown_epoch": {
       "mojo_entry": "prodex_runtime_recovery_epoch_pending_v2",
       "mojo_abi_version": 2
+    },
+    "status_quota_summary": {
+      "mojo_entry": "prodex_quota_status_summary_v2"
+    },
+    "runtime_profile_rotation_planning": {
+      "mojo_entry": "prodex_runtime_profile_rotation_by_current_name_v2",
+      "consumer_marker": "profile_selection_order_by_current_name"
+    },
+    "deepseek_strict_schema_normalization": {
+      "mojo_entry": "prodex_mojo_deepseek_function_tools_v1",
+      "mojo_source": "mojo/prodex_core/deepseek_function_tools.mojo",
+      "consumer_marker": "DeepSeekFunctionToolOperation::StrictSchema",
+      "rust_adapter_scope": "Serde context acquisition and DTO materialization; strict-schema normalization uses the compiled function-tool policy"
+    },
+    "gemini_exact_output_slice_policy": {
+      "mojo_entry": "prodex_mojo_gemini_guardrail_conversation_v1",
+      "mojo_source": "mojo/prodex_core/gemini_guardrail_conversation.mojo",
+      "consumer_marker": "GeminiGuardrailJsonOperation::ExactOutputSelection",
+      "rust_adapter_scope": "Serde conversation acquisition and typed selection/output reconstruction; compiled conversation policy owns extraction"
+    },
+    "catalog_ascii_casefold_find": {
+      "consumer": "crates/prodex-quota/src/render/windows.rs",
+      "consumer_marker": "ascii_casefold_find",
+      "production_reachability_test": "crates/prodex-quota/src/render/windows.rs"
+    },
+    "runtime_live_log_nested_string_clipping": {
+      "mojo_entry": "prodex_live_log_json_projection_v1",
+      "consumer_marker": "mojo_live_log_record::clipped_json_projection"
+    },
+    "provider_error_message_extraction": {
+      "mojo_entry": "prodex_gemini_normalized_error_v1",
+      "mojo_source": "mojo/prodex_core/gemini_quota_body.mojo",
+      "consumer_marker": "prodex_mojo_core::json::gemini_normalized_error_json",
+      "rust_adapter_scope": "Serde error-context acquisition and byte materialization; compiled normalization owns message selection"
     }
   },
   "classification_legend": {
@@ -916,7 +950,6 @@
         "operations": [
           "provider_error_request_member_rejection",
           "provider_error_code_extraction",
-          "provider_error_message_extraction",
           "provider_native_sse_error_classification"
         ]
       },
@@ -930,7 +963,6 @@
           "deepseek_response_tool_call_argument_validation",
           "deepseek_simple_request_eligibility",
           "deepseek_request_metadata_composition",
-          "deepseek_strict_schema_normalization",
           "anthropic_web_search_result_shaping",
           "anthropic_response_output_projection",
           "kiro_chat_response_mapping",
@@ -1505,7 +1537,6 @@
         "role": "semantic",
         "operations": [
           "gemini_guardrail_text_classification",
-          "gemini_exact_output_slice_policy",
           "gemini_exact_output_marker_policy",
           "gemini_command_normalized_empty_policy",
           "gemini_command_match_policy"
@@ -2777,6 +2808,36 @@
         "role": "adapter",
         "operations": [
           "runtime_request_target_validation"
+        ]
+      },
+      {
+        "path": "mojo/prodex_core/deepseek_function_tools.mojo",
+        "language": "mojo",
+        "classification": "DETERMINISTIC_DOMAIN",
+        "production_reachable": true,
+        "role": "semantic",
+        "operations": [
+          "deepseek_strict_schema_normalization"
+        ]
+      },
+      {
+        "path": "mojo/prodex_core/gemini_guardrail_conversation.mojo",
+        "language": "mojo",
+        "classification": "DETERMINISTIC_DOMAIN",
+        "production_reachable": true,
+        "role": "semantic",
+        "operations": [
+          "gemini_exact_output_slice_policy"
+        ]
+      },
+      {
+        "path": "mojo/prodex_core/gemini_quota_body.mojo",
+        "language": "mojo",
+        "classification": "DETERMINISTIC_DOMAIN",
+        "production_reachable": true,
+        "role": "semantic",
+        "operations": [
+          "provider_error_message_extraction"
         ]
       }
     ],

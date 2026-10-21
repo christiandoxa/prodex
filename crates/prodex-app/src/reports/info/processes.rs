@@ -163,8 +163,9 @@ mod compiled_recent_runtime_log_tests {
         let base = std::time::UNIX_EPOCH;
         let newer = base + std::time::Duration::from_secs(6);
         let same = base + std::time::Duration::from_secs(5);
-        let newer_nanos = same + std::time::Duration::from_nanos(1);
-        let past = base - std::time::Duration::from_nanos(1);
+        // Windows SystemTime preserves 100-nanosecond increments.
+        let newer_nanos = same + std::time::Duration::from_nanos(100);
+        let past = base - std::time::Duration::from_nanos(100);
         let ancient = base - std::time::Duration::from_secs(2);
         let selected = select_recent_runtime_log_paths(
             [
