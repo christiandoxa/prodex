@@ -24,28 +24,25 @@ fn canonical_workspace_alias(_path: &Path) -> Option<PathBuf> {
 }
 
 fn lexical_workspace_alias(path: &Path) -> PathBuf {
+    // Rust projects OS-aware components without losing non-UTF-8 names.
+    // Compiled Mojo alone chooses which original segments survive.
+    let components = path.components().collect::<Vec<_>>();
+    let kinds = components
+        .iter()
+        .map(|component| match component {
+            Component::Prefix(_) => 0_i64,
+            Component::RootDir => 1,
+            Component::CurDir => 2,
+            Component::Normal(_) => 3,
+            Component::ParentDir => 4,
+        })
+        .collect::<Vec<_>>();
+    let indices =
+        prodex_mojo_core::runtime_overlay_policy::lexical_workspace_component_indices(&kinds)
+            .expect("compiled Mojo Super lexical path planner returned invalid output");
     let mut normalized = PathBuf::new();
-    let mut rooted = false;
-    for component in path.components() {
-        match component {
-            Component::Prefix(prefix) => {
-                normalized.push(prefix.as_os_str());
-                rooted = true;
-            }
-            Component::RootDir => {
-                normalized.push(component.as_os_str());
-                rooted = true;
-            }
-            Component::CurDir => {}
-            Component::Normal(part) => normalized.push(part),
-            Component::ParentDir => match normalized.components().next_back() {
-                Some(Component::Normal(_)) => {
-                    normalized.pop();
-                }
-                Some(Component::ParentDir) | None if !rooted => normalized.push(".."),
-                _ => {}
-            },
-        }
+    for index in indices {
+        normalized.push(components[index].as_os_str());
     }
     normalized
 }
@@ -218,6 +215,40 @@ pub(crate) fn trusted_super_resume_codex_args(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn compiled_lexical_workspace_alias_handles_rooted_and_relative_parent_paths() {
+        assert_eq!(
+            lexical_workspace_alias(Path::new("/home/test-user/./workspace/../repo")),
+            PathBuf::from("/home/test-user/repo")
+        );
+        assert_eq!(
+            lexical_workspace_alias(Path::new("/../../home/test-user/../workspace")),
+            PathBuf::from("/home/workspace")
+        );
+        assert_eq!(
+            lexical_workspace_alias(Path::new("../alpha/./beta/../../delta")),
+            PathBuf::from("../delta")
+        );
+        assert_eq!(
+            lexical_workspace_alias(Path::new("../../alpha/../")),
+            PathBuf::from("../..")
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn compiled_lexical_workspace_alias_preserves_opaque_non_utf8_components() {
+        use std::os::unix::ffi::{OsStrExt, OsStringExt};
+        let path = PathBuf::from(OsString::from_vec(
+            b"/home/test-user/opaque-\xff/../target-\xfe".to_vec(),
+        ));
+        let normalized = lexical_workspace_alias(&path);
+        assert_eq!(
+            normalized.as_os_str().as_bytes(),
+            b"/home/test-user/target-\xfe"
+        );
+    }
 
     #[test]
     fn compiled_super_trust_selection_deduplicates_exact_paths_and_preserves_order() {
