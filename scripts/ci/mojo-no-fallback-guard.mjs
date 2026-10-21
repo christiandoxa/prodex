@@ -5637,7 +5637,7 @@ export function findViolations(files) {
         "launch_instruction_path_order(&borrowed)",
         "launch_instruction_text_cut(&content, max_bytes)",
         "runtime_copilot_instruction_path_is_regular_file(path)",
-        "fs::symlink_metadata(&path)",
+        "fs::symlink_metadata(path)",
       ];
       const retired = [
         "paths.sort();",
@@ -13838,6 +13838,27 @@ export function findViolations(files) {
 }
 
 const RELOCATED_TEST_FILES = new Set([
+  "crates/prodex-mojo-core/tests/src/gemini_tooling_policy/builtin_retry_tests.rs",
+  "crates/prodex-mojo-core/tests/src/gemini_tooling_policy/patch_sources_tests.rs",
+  "crates/prodex-mojo-core/tests/src/gemini_tooling_policy/rtk_policy_tests.rs",
+  "crates/prodex-mojo-core/tests/src/gemini_tooling_policy/tests.rs",
+  "crates/prodex-mojo-core/tests/src/live_log_record/compiled_follow_framing_tests.rs",
+  "crates/prodex-mojo-core/tests/src/live_log_record/tests.rs",
+  "crates/prodex-mojo-core/tests/src/log_throughput_policy/tests.rs",
+  "crates/prodex-mojo-core/tests/src/rich/catalog/compiled_main_model_insertion_tests.rs",
+  "crates/prodex-mojo-core/tests/src/runtime/thread_index/compiled_state_database_filename_order_tests.rs",
+  "crates/prodex-mojo-core/tests/src/runtime_lineage/compiled_lineage_latest_binding_tests.rs",
+  "crates/prodex-mojo-core/tests/src/runtime_lineage/hard_binding_plan_tests.rs",
+  "crates/prodex-mojo-core/tests/src/runtime_lineage/release_plan_tests.rs",
+  "crates/prodex-mojo-core/tests/src/runtime_repo_map/compiled_artifact_eviction_tests.rs",
+  "crates/prodex-mojo-core/tests/src/runtime_repo_map/compiled_artifact_order_tests.rs",
+  "crates/prodex-mojo-core/tests/src/runtime_repo_map/compiled_duplicate_chunk_group_tests.rs",
+  "crates/prodex-mojo-core/tests/src/runtime_repo_map/compiled_nearest_path_tests.rs",
+  "crates/prodex-mojo-core/tests/src/runtime_repo_map/compiled_repo_map_path_set_tests.rs",
+  "crates/prodex-mojo-core/tests/src/runtime_repo_map/tests.rs",
+  "crates/prodex-mojo-core/tests/src/runtime_state_quota/tests.rs",
+  "crates/prodex-runtime-proxy/tests/src/payload_detection/error_classification.rs",
+  "crates/prodex-runtime-proxy/tests/src/payload_detection/previous_response_search.rs",
   "crates/prodex-app/src/app_commands/info_provider_tests.rs",
   "crates/prodex-app/src/super_expose/optional_alias_tests.rs",
   "crates/prodex-app/src/super_expose/optional_tools_presentation_tests.rs",
@@ -13857,8 +13878,13 @@ const RELOCATED_TEST_FILES = new Set([
 ]);
 
 function relocatedTestPaths(filePath, contents) {
-  return [...contents.matchAll(/#\[cfg\(test\)\]\s*#\[path = "([^"]+)"\]\s*mod \w+;/gu)]
-    .map((match) => path.posix.join(path.posix.dirname(filePath), match[1]))
+  const ownerPath = path.posix.normalize(filePath.replaceAll("\\", "/"));
+  const modules = [...contents.matchAll(/#\[cfg\(test\)\]\s*#\[path = "([^"]+)"\]\s*mod \w+;/gu)];
+  const includes = ownerPath.includes("/tests/")
+    ? [...contents.matchAll(/^include!\("([^"]+)"\);$/gmu)]
+    : [];
+  return [...modules, ...includes]
+    .map((match) => path.posix.join(path.posix.dirname(ownerPath), match[1]))
     .filter((testPath) => RELOCATED_TEST_FILES.has(testPath));
 }
 
@@ -14035,6 +14061,22 @@ function selfTest() {
     testWiring.replace("cfg(test)", "cfg(not(test))")), []);
   assert.deepEqual(relocatedTestPaths("crates/prodex-mojo-core/src/redaction.rs",
     testWiring.replace("mod tests;", "")), []);
+  const includeWiring = 'include!("payload_detection/previous_response_search.rs");';
+  const includeOwner = "crates/prodex-runtime-proxy/tests/src/payload_detection.rs";
+  assert.deepEqual(relocatedTestPaths(includeOwner, includeWiring),
+    ["crates/prodex-runtime-proxy/tests/src/payload_detection/previous_response_search.rs"]);
+  assert.deepEqual(relocatedTestPaths(includeOwner, "// " + includeWiring), []);
+  assert.deepEqual(relocatedTestPaths(includeOwner,
+    includeWiring.replace("previous_response_search.rs", "unreviewed.rs")), []);
+  assert.deepEqual(relocatedTestPaths(includeOwner, ""), []);
+  assert.deepEqual(relocatedTestPaths("crates/prodex-runtime-proxy/src/payload_detection.rs",
+    includeWiring), []);
+  assert.deepEqual(relocatedTestPaths(includeOwner.replaceAll("/", "\\"), includeWiring),
+    ["crates/prodex-runtime-proxy/tests/src/payload_detection/previous_response_search.rs"]);
+  assert.deepEqual(relocatedTestPaths("crates/prodex-runtime-proxy/tests/../src/payload_detection.rs",
+    includeWiring), []);
+  assert.match(findViolations([[includeOwner, ""]]).join("\n"),
+    /missing runtime proxy caller regression compiled_previous_response_json_search/u);
   const payloadCaller = "prodex_mojo_core::json::log_payload_projection( parse_plain_log_envelope(line)";
   const launchQuotaCaller = "prodex_mojo_core::info_render::no_ready_runtime_profiles_plan( prodex_mojo_core::info_render::blocked_selected_runtime_profile_plan(";
   assert.deepEqual(findViolations([[LAUNCH_QUOTA_CALLER, launchQuotaCaller]]), []);
@@ -15144,13 +15186,16 @@ function selfTest() {
     "launch_instruction_path_order(&borrowed)",
     "launch_instruction_text_cut(&content, max_bytes)",
     "runtime_copilot_instruction_path_is_regular_file(path)",
-    "fs::symlink_metadata(&path)",
+    "fs::symlink_metadata(path)",
   ].join("\\n");
   assert.deepEqual(findViolations([[COPILOT_INSTRUCTION_CALLER, copilotInstructionFixture]]).filter(
     (message) => message.includes("Copilot instruction lexical sorting")), []);
   assert.match(findViolations([[COPILOT_INSTRUCTION_CALLER,
     copilotInstructionFixture + "\\npaths.sort();",
   ]]).join("\\n"), /Copilot instruction lexical sorting and lossy UTF-8 clipping must stay compiled Mojo-owned/u);
+  assert.match(findViolations([[COPILOT_INSTRUCTION_CALLER,
+    copilotInstructionFixture.replace("fs::symlink_metadata(path)", "fs::metadata(path)"),
+  ]]).join("\n"), /Copilot instruction lexical sorting/u);
   const quotaStateFixture = [
     "fn quota_state_current_profile_name(",
     "QuotaStateProfileInput",

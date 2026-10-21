@@ -659,40 +659,7 @@ fn quota_reports_do_not_force_sixty_column_width() {
     assert!(output.lines().take(4).all(|line| text_width(line) <= 40));
 }
 
-#[test]
-fn quota_reset_at_from_message_parses_ordinal_date() {
-    let parsed = quota_reset_at_from_message(
-        "You've hit your usage limit. Try again at Mar 24th, 2026 2:04 AM.",
-    )
-    .expect("reset timestamp should parse");
-    let expected = Local
-        .with_ymd_and_hms(2026, 3, 24, 2, 4, 0)
-        .single()
-        .or_else(|| Local.with_ymd_and_hms(2026, 3, 24, 2, 4, 0).earliest())
-        .expect("local timestamp should resolve")
-        .timestamp();
-
-    assert_eq!(parsed, expected);
-}
-
-#[test]
-fn quota_reset_at_from_message_parses_usage_limit_json() {
-    let parsed = quota_reset_at_from_message(
-        r#"{"type":"error","error":{"type":"usage_limit_reached","message":"The usage limit has been reached","resets_at":1780245646},"headers":{"X-Codex-Primary-Reset-At":"1780241111"}}"#,
-    )
-    .expect("reset timestamp should parse from usage limit JSON");
-
-    assert_eq!(parsed, 1_780_245_646);
-}
-#[test]
-fn quota_reset_at_from_message_parses_codex_reset_headers() {
-    let parsed = quota_reset_at_from_message(
-        r#"{"status_code":429,"headers":{"X-Codex-Primary-Used-Percent":"100","X-Codex-Primary-Reset-At":"1780245646","X-Codex-Secondary-Used-Percent":"91","X-Codex-Secondary-Reset-At":"1780243339"}}"#,
-    )
-    .expect("reset timestamp should parse from Codex reset headers");
-
-    assert_eq!(parsed, 1_780_245_646);
-}
+include!("render/reset_message_fixtures.rs");
 
 #[path = "render/provider.rs"]
 mod provider;
@@ -728,7 +695,68 @@ fn quota_report_pagination_mojo_clamps_extreme_scroll_and_respects_tight_height(
     assert!(empty.output.contains("No quota profiles."));
 }
 
-include!("render/report_batch.rs");
+#[cfg(feature = "mojo")]
+#[test]
+fn compiled_quota_report_batch_sorts_large_live_report_sets_and_stable_duplicates() {
+    let report = |name: String, fetched_at: i64| QuotaReport {
+        name,
+        active: false,
+        auth: AuthSummary {
+            label: "external".to_string(),
+            quota_compatible: false,
+        },
+        workspace_id: None,
+        workspace_name: None,
+        result: Ok(ProviderQuotaSnapshot::External(ExternalQuotaInfo {
+            provider: "local".to_string(),
+            account: None,
+            plan: None,
+            status: "unknown".to_string(),
+            main: "unknown".to_string(),
+            reset: None,
+            available: None,
+            details: Vec::new(),
+        })),
+        fetched_at,
+    };
+    let mut reports = (0..2_049_i64)
+        .rev()
+        .map(|index| report(format!("quota-{index:04}"), index))
+        .collect::<Vec<_>>();
+    // These rows compare equal in every sort mode and must retain original
+    // input indices even after a large compiled heap-sort permutation.
+    reports[7].name = "duplicate".to_string();
+    reports[1_023].name = "duplicate".to_string();
+    reports[2_048].name = "duplicate".to_string();
+    for mode in [
+        QuotaReportSort::Current,
+        QuotaReportSort::Remaining,
+        QuotaReportSort::Profile,
+        QuotaReportSort::Auth,
+        QuotaReportSort::Account,
+        QuotaReportSort::Plan,
+    ] {
+        let indices = sorted_quota_report_indexes_by(&reports, mode);
+        assert_eq!(indices.len(), reports.len(), "mode {mode:?}");
+        let mut seen = vec![false; reports.len()];
+        for index in indices.iter().copied() {
+            assert!(!std::mem::replace(&mut seen[index], true));
+        }
+        let duplicates = indices
+            .iter()
+            .copied()
+            .filter(|index| reports[*index].name == "duplicate")
+            .collect::<Vec<_>>();
+        assert_eq!(duplicates, vec![7, 1_023, 2_048], "mode {mode:?}");
+    }
+    let profile_indices = sorted_quota_report_indexes_by(&reports, QuotaReportSort::Profile);
+    let names = profile_indices
+        .iter()
+        .map(|index| reports[*index].name.as_str())
+        .collect::<Vec<_>>();
+    assert_eq!(names.first(), Some(&"duplicate"));
+    assert_eq!(names.last(), Some(&"quota-2048"));
+}
 
 #[path = "render/reset_credit_expiry.rs"]
 mod reset_credit_expiry;
