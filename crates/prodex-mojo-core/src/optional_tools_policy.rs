@@ -70,6 +70,12 @@ unsafe extern "C" {
     ) -> i64;
     fn prodex_optional_tool_class_v1(abi_version: i64, address: u64, length: i64) -> i64;
     fn prodex_optional_tool_descriptor_policy_v1(abi_version: i64, tool_id: i64) -> i64;
+    fn prodex_optional_tool_overlay_rollout_name_v1(
+        abi_version: i64,
+        name_address: u64,
+        name_length: i64,
+        output_address: u64,
+    ) -> i64;
     fn prodex_optional_tool_manifest_tree_supported_v1(
         abi_version: i64,
         value_address: u64,
@@ -279,6 +285,34 @@ pub fn optional_tool_descriptor_policy(
         capability_mask,
         super_default,
     })
+}
+
+/// Compiled exact Codex SQLite state-name policy used by overlay sharing
+/// and localization. Host filesystem side effects remain outside Mojo.
+pub fn optional_tool_overlay_rollout_name(name: &str) -> Result<bool, MojoError> {
+    if name.len() > 1_048_576 {
+        return Err(MojoError::InvalidInput);
+    }
+    let mut result = -1_i64;
+    let status = unsafe {
+        prodex_optional_tool_overlay_rollout_name_v1(
+            ABI_VERSION,
+            name.as_ptr() as usize as u64,
+            i64::try_from(name.len()).map_err(|_| MojoError::InvalidInput)?,
+            (&mut result as *mut i64) as usize as u64,
+        )
+    };
+    match status {
+        0 => {}
+        1 => return Err(MojoError::InvalidInput),
+        4 => return Err(MojoError::AbiMismatch),
+        _ => return Err(MojoError::InvalidOutput),
+    }
+    match result {
+        0 => Ok(false),
+        1 => Ok(true),
+        _ => Err(MojoError::InvalidOutput),
+    }
 }
 
 pub fn optional_tool_manifest_tree_supported(
@@ -588,6 +622,34 @@ mod tests {
         assert_eq!(guard[9], 0xa5);
         let mut empty: [u8; 0] = [];
         assert_eq!(optional_tool_hex_encode(&[], &mut empty), Ok(0));
+    }
+
+    #[test]
+    fn compiled_overlay_rollout_state_name_preserves_exact_sqlite_suffixes() {
+        for (name, expected) in [
+            ("state_1.sqlite", true),
+            ("state_1.sqlite-shm", true),
+            ("state_1.sqlite-wal", true),
+            ("state_.sqlite", true),
+            ("state_雪.sqlite-wal", true),
+            ("state_1.Sqlite", false),
+            ("STATE_1.sqlite", false),
+            ("state_1.sqlite-wal.backup", false),
+            ("state_1.sqlite-journal", false),
+            ("state_1.db", false),
+            ("different.sqlite", false),
+            ("", false),
+        ] {
+            assert_eq!(
+                optional_tool_overlay_rollout_name(name),
+                Ok(expected),
+                "{name:?}"
+            );
+        }
+        assert_eq!(
+            optional_tool_overlay_rollout_name(&"x".repeat(1_048_577)),
+            Err(MojoError::InvalidInput)
+        );
     }
 
     #[test]

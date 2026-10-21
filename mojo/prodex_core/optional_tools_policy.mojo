@@ -1,6 +1,8 @@
 from std.memory import Pointer
+from core_file_policy import core_file_view_suffix
 
 from rich_text import (
+    rich_view_prefix,
     rich_codepoint, rich_codepoint_width, rich_trim_bounds,
     rich_unicode_space, rich_view_ptr, rich_view_valid,
 )
@@ -599,4 +601,36 @@ def prodex_optional_tool_probe_token_v1(
         output[unsafe_offset=0] = start
         output[unsafe_offset=1] = end
         output[unsafe_offset=2] = token_end
+    return 0
+
+# Overlay home may only share/localize SQLite rollout state files that match
+# the exact Codex state_ prefix and a supported canonical suffix.
+comptime OPTIONAL_TOOL_OVERLAY_STATE_ABI_VERSION: Int64 = 1
+comptime OPTIONAL_TOOL_OVERLAY_STATE_NAME_MAX: Int64 = 1_048_576
+
+
+@export("prodex_optional_tool_overlay_rollout_name_v1")
+def prodex_optional_tool_overlay_rollout_name_v1(
+    abi_version: Int64,
+    name_address: UInt,
+    name_length: Int64,
+    output_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != OPTIONAL_TOOL_OVERLAY_STATE_ABI_VERSION:
+        return 4
+    if (
+        name_length < 0 or name_length > OPTIONAL_TOOL_OVERLAY_STATE_NAME_MAX
+        or not optional_tool_valid(name_address, name_length)
+        or output_address == 0 or output_address % 8 != 0
+    ):
+        return 1
+    var name = ProdexRichStringView(name_address, UInt(name_length))
+    var matched = rich_view_prefix["state_"](name, False) and (
+        core_file_view_suffix[".sqlite"](name)
+        or core_file_view_suffix[".sqlite-shm"](name)
+        or core_file_view_suffix[".sqlite-wal"](name)
+    )
+    Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )[] = Int64(matched)
     return 0
