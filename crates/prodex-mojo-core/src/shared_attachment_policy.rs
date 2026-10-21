@@ -10,8 +10,35 @@ const ROLLOUT_NAME: i64 = 5;
 const GOAL_OBJECTIVE_NAME: i64 = 6;
 const SQLITE_HEADER: i64 = 7;
 const DYNAMIC_FILE_NAME: i64 = 8;
+const MAX_BYTES: usize = 67_108_864;
+
+/// Preserve the different scan cursors used by observation and path rewriting.
+#[derive(Debug, Clone, Copy)]
+pub enum ImageTagScan {
+    WholeTags,
+    RewritePaths,
+}
+
+/// Checked UTF-8 byte range selected from the original session text by Mojo.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(C)]
+pub struct ImageTagPathRange {
+    pub start: usize,
+    pub end: usize,
+}
+
+const _: () = assert!(std::mem::size_of::<ImageTagPathRange>() == 16);
 
 unsafe extern "C" {
+    fn prodex_shared_image_tag_paths_v1(
+        abi_version: i64,
+        mode: i64,
+        input_address: u64,
+        input_length: i64,
+        output_address: u64,
+        output_capacity: i64,
+        required_address: u64,
+    ) -> i64;
     fn prodex_shared_attachment_policy_v1(
         abi_version: i64,
         operation: i64,
@@ -26,6 +53,7 @@ fn status(value: i64) -> Result<(), MojoError> {
     match value {
         0 => Ok(()),
         1 => Err(MojoError::InvalidInput),
+        3 => Err(MojoError::Capacity),
         4 => Err(MojoError::AbiMismatch),
         _ => Err(MojoError::InvalidOutput),
     }
@@ -86,6 +114,55 @@ pub fn image_tag_path_range(tag: &str) -> Result<Option<(usize, usize)>, MojoErr
     optional_range(call(IMAGE_TAG_RANGE, tag, 0)?, tag, 0)
 }
 
+/// Batch the existing image-tag lexer and scan progression in the compiled owner.
+pub fn image_tag_path_ranges(
+    contents: &str,
+    scan: ImageTagScan,
+) -> Result<Vec<ImageTagPathRange>, MojoError> {
+    if contents.len() > MAX_BYTES {
+        return Err(MojoError::InvalidInput);
+    }
+    let call = |rows: &mut [ImageTagPathRange], required: &mut i64| unsafe {
+        prodex_shared_image_tag_paths_v1(
+            ABI_VERSION,
+            match scan {
+                ImageTagScan::WholeTags => 0,
+                ImageTagScan::RewritePaths => 1,
+            },
+            contents.as_ptr() as usize as u64,
+            contents.len() as i64,
+            rows.as_mut_ptr() as usize as u64,
+            rows.len() as i64,
+            (required as *mut i64) as usize as u64,
+        )
+    };
+    let mut required = -1_i64;
+    let probe_status = call(&mut [], &mut required);
+    if probe_status != 3 {
+        status(probe_status)?;
+    }
+    let count = usize::try_from(required).map_err(|_| MojoError::InvalidOutput)?;
+    if count > contents.len() / 7 {
+        return Err(MojoError::InvalidOutput);
+    }
+    let mut rows = vec![ImageTagPathRange { start: 0, end: 0 }; count];
+    status(call(&mut rows, &mut required))?;
+    if usize::try_from(required).ok() != Some(count) {
+        return Err(MojoError::InvalidOutput);
+    }
+    let mut previous_end = 0;
+    for row in &rows {
+        if row.start < previous_end
+            || row.start > row.end
+            || contents.get(row.start..row.end).is_none()
+        {
+            return Err(MojoError::InvalidOutput);
+        }
+        previous_end = row.end;
+    }
+    Ok(rows)
+}
+
 pub fn next_clipboard_path(
     contents: &str,
     cursor: usize,
@@ -125,6 +202,10 @@ pub fn sqlite_header_is_sqlite(header: &[u8]) -> Result<bool, MojoError> {
 pub fn shared_codex_file_name_is_shared(file_name: &str) -> Result<bool, MojoError> {
     bool_output(call(DYNAMIC_FILE_NAME, file_name, 0)?)
 }
+
+#[cfg(test)]
+#[path = "shared_attachment_policy/image_tag_batch_tests.rs"]
+mod image_tag_batch_tests;
 
 #[cfg(test)]
 mod tests {

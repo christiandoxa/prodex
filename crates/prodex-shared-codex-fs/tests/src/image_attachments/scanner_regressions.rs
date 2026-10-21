@@ -1,6 +1,42 @@
 use super::*;
 
 #[test]
+fn compiled_image_tag_batch_rewrites_nested_paths_and_preserves_malformed_text() {
+    let temp_dir = ImageAttachmentTestDir::new("compiled-image-tag-batch");
+    let codex_home = temp_dir.path.join("codex-home");
+    let first = temp_dir.path.join("codex-clipboard-outer.png");
+    let second = temp_dir.path.join("codex-clipboard-inner.png");
+    fs::write(&first, b"first").unwrap();
+    fs::write(&second, b"second").unwrap();
+    let input = format!(
+        "prefix <image missing> <image path=\"{}\" <image path=\"{}\">> tail <image unfinished",
+        first.display(),
+        second.display()
+    );
+    let rewritten = rewrite_codex_persisted_attachment_paths(&codex_home, &input).unwrap();
+    let stable_first = codex_home.join("image_attachments/codex-clipboard-outer.png");
+    let stable_second = codex_home.join("image_attachments/codex-clipboard-inner.png");
+    assert_eq!(
+        rewritten,
+        format!(
+            "prefix <image missing> <image path=\"{}\" <image path=\"{}\">> tail <image unfinished",
+            stable_first.display(),
+            stable_second.display()
+        )
+    );
+    assert_eq!(fs::read(&stable_first).unwrap(), b"first");
+    assert_eq!(fs::read(&stable_second).unwrap(), b"second");
+    assert!(codex_session_image_attachments_are_stable(
+        &codex_home,
+        &rewritten
+    ));
+    assert_eq!(
+        codex_session_persisted_attachment_paths(&rewritten),
+        vec![stable_first, stable_second]
+    );
+}
+
+#[test]
 fn persist_codex_session_attachment_scanner_never_rewinds_across_escaped_newline() {
     let temp_dir = ImageAttachmentTestDir::new("attachment-monotonic-cursor");
     let codex_home = temp_dir.path.join("codex-home");
