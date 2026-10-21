@@ -53,10 +53,12 @@ pub(crate) fn latest_transcript_event() -> Result<Option<TranscriptEvent>> {
         let mut latest = None;
         for line in String::from_utf8_lossy(&tail).lines() {
             for event in transcript_events_from_session_line(line) {
-                if latest
-                    .as_ref()
-                    .is_none_or(|current: &TranscriptEvent| event.timestamp >= current.timestamp)
-                {
+                if crate::app_commands::log_format::log_latest_timestamp_wins(
+                    latest
+                        .as_ref()
+                        .map(|current: &TranscriptEvent| current.timestamp.as_str()),
+                    &event.timestamp,
+                ) {
                     latest = Some(event);
                 }
             }

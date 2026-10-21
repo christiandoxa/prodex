@@ -1,5 +1,10 @@
 use chrono::{DateTime, Local};
 
+pub(super) fn log_latest_timestamp_wins(current: Option<&str>, incoming: &str) -> bool {
+    prodex_mojo_core::log::log_timestamp_should_replace(current, incoming)
+        .expect("compiled Mojo log newest-timestamp plan returned invalid output")
+}
+
 pub(super) fn local_log_timestamp(timestamp: &str) -> String {
     parse_log_timestamp(timestamp)
         .map(|datetime| {
@@ -80,6 +85,23 @@ fn render_body(body: &[String], width: usize) -> Vec<String> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn compiled_log_newest_timestamp_policy_preserves_equal_event_precedence() {
+        assert!(super::log_latest_timestamp_wins(None, "2026-10-21"));
+        assert!(super::log_latest_timestamp_wins(
+            Some("2026-10-20"),
+            "2026-10-21"
+        ));
+        assert!(super::log_latest_timestamp_wins(
+            Some("2026-10-21"),
+            "2026-10-21"
+        ));
+        assert!(!super::log_latest_timestamp_wins(
+            Some("2026-10-22"),
+            "2026-10-21"
+        ));
+    }
+
     use super::*;
     use chrono::{DateTime, Local};
 

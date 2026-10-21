@@ -45,6 +45,7 @@ use super::{
     recent_session_log_paths, retain_followed_logs, runtime_log_paths_for_follow,
 };
 use crate::app_commands::collect_recent_runtime_log_paths;
+use crate::app_commands::log_format::log_latest_timestamp_wins;
 use crate::app_commands::log_tui::{
     LogTuiHeaderDetail, LogTuiInput, LogTuiState, LogTuiTerminal, OutputThroughput,
     OutputThroughputDisplay, log_tui_header_detail, log_tui_header_next_refresh_at,
@@ -111,10 +112,12 @@ fn latest_token_usage_event() -> Option<InfoTokenUsageEvent> {
             else {
                 continue;
             };
-            if latest
-                .as_ref()
-                .is_none_or(|current: &InfoTokenUsageEvent| event.timestamp >= current.timestamp)
-            {
+            if log_latest_timestamp_wins(
+                latest
+                    .as_ref()
+                    .map(|current: &InfoTokenUsageEvent| current.timestamp.as_str()),
+                &event.timestamp,
+            ) {
                 latest = Some(event);
             }
         }
@@ -130,10 +133,12 @@ fn latest_token_usage_event() -> Option<InfoTokenUsageEvent> {
         else {
             continue;
         };
-        if latest
-            .as_ref()
-            .is_none_or(|current: &InfoTokenUsageEvent| event.timestamp >= current.timestamp)
-        {
+        if log_latest_timestamp_wins(
+            latest
+                .as_ref()
+                .map(|current: &InfoTokenUsageEvent| current.timestamp.as_str()),
+            &event.timestamp,
+        ) {
             latest = Some(event);
         }
     }
@@ -378,27 +383,32 @@ fn latest_runtime_snapshot_events() -> (
         };
         for line in String::from_utf8_lossy(&tail).lines() {
             if let Some(event) = super::log_stream::stream_payload_event_from_runtime_line(line)
-                && latest_stream
-                    .as_ref()
-                    .is_none_or(|current: &TranscriptEvent| event.timestamp >= current.timestamp)
+                && log_latest_timestamp_wins(
+                    latest_stream
+                        .as_ref()
+                        .map(|current: &TranscriptEvent| current.timestamp.as_str()),
+                    &event.timestamp,
+                )
             {
                 latest_stream = Some(event);
             }
             if let Some(event) = upstream_payload_event_from_runtime_line(line)
-                && latest_upstream
-                    .as_ref()
-                    .is_none_or(|current: &UpstreamPayloadEvent| {
-                        event.timestamp >= current.timestamp
-                    })
+                && log_latest_timestamp_wins(
+                    latest_upstream
+                        .as_ref()
+                        .map(|current: &UpstreamPayloadEvent| current.timestamp.as_str()),
+                    &event.timestamp,
+                )
             {
                 latest_upstream = Some(event);
             }
             if let Some(event) = info_token_usage_event_from_line(line).map(local_token_usage_event)
-                && latest_token_usage
-                    .as_ref()
-                    .is_none_or(|current: &InfoTokenUsageEvent| {
-                        event.timestamp >= current.timestamp
-                    })
+                && log_latest_timestamp_wins(
+                    latest_token_usage
+                        .as_ref()
+                        .map(|current: &InfoTokenUsageEvent| current.timestamp.as_str()),
+                    &event.timestamp,
+                )
             {
                 latest_token_usage = Some(event);
             }

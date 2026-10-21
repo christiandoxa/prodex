@@ -2,7 +2,7 @@ from std.memory import Pointer
 
 from log_transcript_facts import PRODEX_TRANSCRIPT_ABI_VERSION, transcript_fact_view_valid, transcript_fact_whitespace, transcript_fact_control, transcript_fact_codepoint, transcript_fact_trim_bounds
 
-from rich_text import rich_codepoint, rich_codepoint_width, rich_trim_bounds, rich_utf8_continuation, rich_view_matches_literal, rich_view_valid, rich_utf8_valid
+from rich_text import rich_codepoint, rich_codepoint_width, rich_trim_bounds, rich_utf8_continuation, rich_view_matches_literal, rich_view_valid, rich_utf8_valid, rich_view_compare
 from rich_types import ProdexRichStringView, rich_view_ptr
 
 comptime PRODEX_LOG_SNAPSHOT_ABI_VERSION: Int64 = 1
@@ -4266,4 +4266,52 @@ def prodex_mojo_log_virtual_fields_contains_v1(
     Pointer[mut=True, Int64, MutUntrackedOrigin](
         unsafe_from_address=Int(result_address)
     )[] = Int64(found)
+    return 0
+
+# Newest-log-event decision across upstream, transcript, token usage, and
+# the combined log snapshot. Lexical UTF-8 comparison matches Rust str Ord.
+comptime LOG_LATEST_TIMESTAMP_ABI_VERSION: Int64 = 1
+comptime LOG_LATEST_TIMESTAMP_MAX_BYTES: Int64 = 1_048_576
+
+
+@export("prodex_mojo_log_latest_timestamp_v1")
+def prodex_mojo_log_latest_timestamp_v1(
+    abi_version: Int64,
+    current_address: UInt,
+    current_length: Int64,
+    current_present: Int64,
+    incoming_address: UInt,
+    incoming_length: Int64,
+    output_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != LOG_LATEST_TIMESTAMP_ABI_VERSION:
+        return 4
+    if (
+        current_length < 0 or incoming_length < 0
+        or current_length > LOG_LATEST_TIMESTAMP_MAX_BYTES
+        or incoming_length > LOG_LATEST_TIMESTAMP_MAX_BYTES
+        or (current_present != 0 and current_present != 1)
+        or (current_length > 0 and current_address == 0)
+        or (incoming_length > 0 and incoming_address == 0)
+        or output_address == 0 or output_address % 8 != 0
+    ):
+        return 1
+    var current = ProdexRichStringView(
+        current_address, UInt(current_length)
+    )
+    var incoming = ProdexRichStringView(
+        incoming_address, UInt(incoming_length)
+    )
+    if (
+        not rich_view_valid(current, LOG_LATEST_TIMESTAMP_MAX_BYTES)
+        or not rich_view_valid(incoming, LOG_LATEST_TIMESTAMP_MAX_BYTES)
+    ):
+        return 1
+    var selected = (
+        current_present == 0
+        or rich_view_compare(incoming, current) >= 0
+    )
+    Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )[] = Int64(selected)
     return 0

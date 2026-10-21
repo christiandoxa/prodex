@@ -4,7 +4,7 @@ use super::log::{
     collect_live_log_items, collect_new_runtime_log_stream_items_with_throughput, followed_log_map,
     retain_followed_logs, runtime_log_paths_for_follow,
 };
-use super::log_format::render_log_block;
+use super::log_format::{log_latest_timestamp_wins, render_log_block};
 use super::log_tui::{
     LOG_TUI_TITLE, LogTuiHeaderDetail, LogTuiInput, LogTuiState, LogTuiTerminal, OutputThroughput,
     OutputThroughputDisplay, log_tui_header_detail, log_tui_header_next_refresh_at, visible_text,
@@ -431,10 +431,12 @@ pub(crate) fn latest_upstream_payload_event() -> Option<UpstreamPayloadEvent> {
             let Some(event) = upstream_payload_event_from_runtime_line(line) else {
                 continue;
             };
-            if latest
-                .as_ref()
-                .is_none_or(|current: &UpstreamPayloadEvent| event.timestamp >= current.timestamp)
-            {
+            if log_latest_timestamp_wins(
+                latest
+                    .as_ref()
+                    .map(|current: &UpstreamPayloadEvent| current.timestamp.as_str()),
+                &event.timestamp,
+            ) {
                 latest = Some(event);
             }
         }
