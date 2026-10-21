@@ -1985,3 +1985,62 @@ def prodex_profile_export_copilot_candidate_users_v1(
             output[unsafe_offset=written[]] = index
             written[] += 1
     return PROFILE_EXPORT_POLICY_OK
+
+# Private journal name contracts: no path components, dot/dotdot, Unicode,
+# slash, or backslash accepted as safe ASCII filename data. Operation tags
+# correspond to the four historical lifecycle verbs, case-sensitive.
+comptime PROFILE_JOURNAL_TOKEN_ABI_VERSION: Int64 = 1
+comptime PROFILE_JOURNAL_TOKEN_MAX_BYTES: Int64 = 1_048_576
+
+
+@export("prodex_profile_export_journal_token_policy_v1")
+def prodex_profile_export_journal_token_policy_v1(
+    abi_version: Int64,
+    operation: Int64,
+    value_address: UInt,
+    value_length: Int64,
+    output_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != PROFILE_JOURNAL_TOKEN_ABI_VERSION:
+        return 4
+    if (
+        (operation != 0 and operation != 1)
+        or value_length < 0 or value_length > PROFILE_JOURNAL_TOKEN_MAX_BYTES
+        or (value_length > 0 and value_address == 0)
+        or output_address == 0 or output_address % 8 != 0
+    ):
+        return 1
+    var view = ProdexRichStringView(value_address, UInt(value_length))
+    if not rich_view_valid(view, PROFILE_JOURNAL_TOKEN_MAX_BYTES):
+        return 1
+    var accepted: Bool
+    if operation == 1:
+        accepted = (
+            rich_view_matches_literal["import"](view, False)
+            or rich_view_matches_literal["login"](view, False)
+            or rich_view_matches_literal["manage"](view, False)
+            or rich_view_matches_literal["remove"](view, False)
+        )
+    else:
+        accepted = value_length > 0
+        if (
+            rich_view_matches_literal["."](view, False)
+            or rich_view_matches_literal[".."](view, False)
+        ):
+            accepted = False
+        if accepted:
+            var bytes = rich_view_ptr(view)
+            for index in range(value_length):
+                var byte = bytes[unsafe_offset=index]
+                if not (
+                    (byte >= 48 and byte <= 57)
+                    or (byte >= 65 and byte <= 90)
+                    or (byte >= 97 and byte <= 122)
+                    or byte == 45 or byte == 95 or byte == 46
+                ):
+                    accepted = False
+                    break
+    Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )[] = Int64(accepted)
+    return 0
