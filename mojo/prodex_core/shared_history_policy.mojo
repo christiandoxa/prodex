@@ -151,3 +151,109 @@ def prodex_shared_history_dedup_plan_v1(
     output_total_bytes[] = total_bytes
     output_exceeds[] = Int64(total_bytes > max_bytes)
     return SHARED_HISTORY_OK
+
+
+# Chronological merge ordering for Codex history.jsonl. Missing/noninteger
+# timestamps retain their original positions and separate sortable runs of
+# integer-timestamp events, preserving the preexisting Rust comparison:
+# two timestamped rows use timestamp then original order; otherwise
+# original input order wins.
+comptime SHARED_HISTORY_ORDER_ABI: Int64 = 1
+
+
+def shared_history_timestamp_less(
+    rows: Pointer[mut=False, Int64, _],
+    left: Int64, right: Int64,
+) -> Bool:
+    var lhs = rows[unsafe_offset=left * 2 + 1]
+    var rhs = rows[unsafe_offset=right * 2 + 1]
+    if lhs != rhs:
+        return lhs < rhs
+    return left < right
+
+
+def shared_history_order_heap_down(
+    rows: Pointer[mut=False, Int64, _],
+    indices: Pointer[mut=True, Int64, _],
+    base: Int64, root_start: Int64, count: Int64,
+):
+    var root = root_start
+    while root * 2 + 1 < count:
+        var child = root * 2 + 1
+        var swap = root
+        if shared_history_timestamp_less(
+            rows,
+            indices[unsafe_offset=base + swap],
+            indices[unsafe_offset=base + child],
+        ):
+            swap = child
+        if child + 1 < count and shared_history_timestamp_less(
+            rows,
+            indices[unsafe_offset=base + swap],
+            indices[unsafe_offset=base + child + 1],
+        ):
+            swap = child + 1
+        if swap == root:
+            return
+        var previous = indices[unsafe_offset=base + root]
+        indices[unsafe_offset=base + root] = indices[unsafe_offset=base + swap]
+        indices[unsafe_offset=base + swap] = previous
+        root = swap
+
+
+@export("prodex_shared_history_timestamp_order_v1")
+def prodex_shared_history_timestamp_order_v1(
+    abi_version: Int64,
+    rows_address: UInt, row_count: Int64,
+    indices_address: UInt, indices_capacity: Int64,
+) abi("C") -> Int64:
+    if abi_version != SHARED_HISTORY_ORDER_ABI:
+        return SHARED_HISTORY_ABI
+    if (
+        row_count < 0 or row_count > SHARED_HISTORY_MAX_LINES
+        or (row_count > 0 and (rows_address == 0 or rows_address % 8 != 0))
+        or indices_address == 0 or indices_address % 8 != 0
+        or indices_capacity < row_count
+    ):
+        return SHARED_HISTORY_INVALID
+    var rows = Pointer[mut=False, Int64, ImmUntrackedOrigin](
+        unsafe_from_address=Int(rows_address)
+    )
+    # Validate the complete input before mutating caller-owned output.
+    for index in range(row_count):
+        var present = rows[unsafe_offset=index * 2]
+        if present != 0 and present != 1:
+            return SHARED_HISTORY_INVALID
+
+    var indices = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(indices_address)
+    )
+    for index in range(row_count):
+        indices[unsafe_offset=index] = index
+
+    var run_start = Int64(0)
+    while run_start < row_count:
+        if rows[unsafe_offset=run_start * 2] == 0:
+            run_start += 1
+            continue
+        var run_end = run_start + 1
+        while run_end < row_count and rows[unsafe_offset=run_end * 2] == 1:
+            run_end += 1
+        var length = run_end - run_start
+        var start = length // 2
+        while start > 0:
+            start -= 1
+            shared_history_order_heap_down(
+                rows, indices, run_start, start, length,
+            )
+        var end = length
+        while end > 1:
+            end -= 1
+            var saved = indices[unsafe_offset=run_start]
+            indices[unsafe_offset=run_start] = indices[unsafe_offset=run_start + end]
+            indices[unsafe_offset=run_start + end] = saved
+            shared_history_order_heap_down(
+                rows, indices, run_start, 0, end,
+            )
+        run_start = run_end
+    return SHARED_HISTORY_OK
