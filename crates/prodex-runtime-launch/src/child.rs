@@ -1,4 +1,6 @@
-use prodex_mojo_core::launch_config::normalize_proxy_bypass_candidates;
+use prodex_mojo_core::launch_config::{
+    child_environment_removal_plan, normalize_proxy_bypass_candidates,
+};
 use std::collections::BTreeSet;
 use std::env;
 use std::ffi::OsString;
@@ -21,7 +23,6 @@ const UPSTREAM_PROXY_ENV_KEYS: [&str; 8] = [
     "PROXY",
     "proxy",
 ];
-const CHILD_HARDENING_ALLOW_ENV: &str = "PRODEX_ALLOW_UNSAFE_CHILD_ENV";
 const DANGEROUS_CHILD_ENV_KEYS: [&str; 7] = [
     "LD_PRELOAD",
     "LD_AUDIT",
@@ -251,18 +252,20 @@ pub fn codex_sandbox_removed_env() -> Vec<OsString> {
 
 #[doc(hidden)]
 pub fn codex_sandbox_removed_env_from(environment: &[(OsString, OsString)]) -> Vec<OsString> {
+    let names = environment
+        .iter()
+        .map(|(key, _)| key.to_str())
+        .collect::<Vec<_>>();
+    let plan = child_environment_removal_plan(&names)
+        .expect("compiled Mojo sandbox environment key classifier failed");
     let mut removed = BTreeSet::from([
         OsString::from("CODEX_SANDBOX"),
         OsString::from("CODEX_SANDBOX_NETWORK_DISABLED"),
     ]);
     removed.extend(
-        environment
-            .iter()
-            .filter(|(key, _)| {
-                key.to_str()
-                    .is_some_and(|value| value.starts_with("CODEX_SANDBOX"))
-            })
-            .map(|(key, _)| key.clone()),
+        plan.sandbox_key_indices
+            .into_iter()
+            .map(|index| environment[index].0.clone()),
     );
     removed.into_iter().collect()
 }
@@ -275,18 +278,20 @@ pub fn child_process_hardening_removed_env() -> Vec<OsString> {
 pub fn child_process_hardening_removed_env_from(
     environment: &[(OsString, OsString)],
 ) -> Vec<OsString> {
-    if environment
+    let names = environment
         .iter()
-        .any(|(key, _)| key == CHILD_HARDENING_ALLOW_ENV)
-    {
+        .map(|(key, _)| key.to_str())
+        .collect::<Vec<_>>();
+    let plan = child_environment_removal_plan(&names)
+        .expect("compiled Mojo child hardening classifier failed");
+    if plan.allow_unsafe_child_env {
         return Vec::new();
     }
     let mut removed = BTreeSet::from_iter(DANGEROUS_CHILD_ENV_KEYS.into_iter().map(OsString::from));
     removed.extend(
-        environment
-            .iter()
-            .filter(|(key, _)| key.to_str().is_some_and(|value| value.starts_with("DYLD_")))
-            .map(|(key, _)| key.clone()),
+        plan.dyld_key_indices
+            .into_iter()
+            .map(|index| environment[index].0.clone()),
     );
     removed.into_iter().collect()
 }

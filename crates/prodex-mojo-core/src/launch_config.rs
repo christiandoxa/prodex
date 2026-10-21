@@ -7,6 +7,10 @@ pub use child_output::launch_process_line_ends;
 mod instructions;
 pub use instructions::{launch_instruction_path_order, launch_instruction_text_cut};
 
+#[path = "launch_config/child_env.rs"]
+mod child_env;
+pub use child_env::{ChildEnvironmentRemovalPlan, child_environment_removal_plan};
+
 #[path = "launch_config/proxy_bypass.rs"]
 mod proxy_bypass;
 pub use proxy_bypass::normalize_proxy_bypass_candidates;

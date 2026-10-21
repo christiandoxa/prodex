@@ -206,6 +206,53 @@ fn child_process_hardening_can_be_explicitly_disabled() {
 }
 
 #[test]
+fn mojo_child_env_policy_is_case_sensitive_and_opt_out_has_exact_key() {
+    let mixed = environment(&[
+        ("CODEX_SANDBOX_OVERRIDDEN", "any"),
+        ("CODEX_SANDBOXING", "any"),
+        ("codex_sandbox", "any"),
+        ("DYLD_CUSTOM_FEATURE", "x"),
+        ("dyld_other", "x"),
+        ("prodex_allow_unsafe_child_env", "true"),
+    ]);
+    let sandbox = codex_sandbox_removed_env_from(&mixed);
+    assert!(sandbox.iter().any(|key| key == "CODEX_SANDBOXING"));
+    assert!(sandbox.iter().any(|key| key == "CODEX_SANDBOX_OVERRIDDEN"));
+    assert!(!sandbox.iter().any(|key| key == "codex_sandbox"));
+    let hardening = child_process_hardening_removed_env_from(&mixed);
+    assert!(hardening.iter().any(|key| key == "DYLD_CUSTOM_FEATURE"));
+    assert!(!hardening.iter().any(|key| key == "dyld_other"));
+    assert!(hardening.iter().any(|key| key == "LD_PRELOAD"));
+    assert!(
+        child_process_hardening_removed_env_from(&environment(&[(
+            "PRODEX_ALLOW_UNSAFE_CHILD_ENV",
+            ""
+        )]))
+        .is_empty()
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn mojo_child_env_policy_keeps_non_utf8_environment_keys_opaque() {
+    use std::os::unix::ffi::OsStringExt;
+    let hidden_sandbox = OsString::from_vec(b"CODEX_SANDBOX\xff".to_vec());
+    let hidden_dyld = OsString::from_vec(b"DYLD_\xfe".to_vec());
+    let inherited = vec![
+        (hidden_sandbox.clone(), OsString::from("secret")),
+        (hidden_dyld.clone(), OsString::from("secret")),
+        (OsString::from("CODEX_SANDBOX_VALID"), OsString::from("y")),
+        (OsString::from("DYLD_VALID"), OsString::from("y")),
+    ];
+    let sandbox = codex_sandbox_removed_env_from(&inherited);
+    assert!(!sandbox.contains(&hidden_sandbox));
+    assert!(sandbox.contains(&OsString::from("CODEX_SANDBOX_VALID")));
+    let hardening = child_process_hardening_removed_env_from(&inherited);
+    assert!(!hardening.contains(&hidden_dyld));
+    assert!(hardening.contains(&OsString::from("DYLD_VALID")));
+}
+
+#[test]
 fn codex_child_plan_scopes_pre_exec_config_overrides() {
     let args = vec![
         OsString::from("-c"),
