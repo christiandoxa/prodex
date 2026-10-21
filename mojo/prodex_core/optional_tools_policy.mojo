@@ -696,3 +696,105 @@ def prodex_optional_tool_legacy_instruction_paragraphs_v1(
         unsafe_from_address=Int(written_address)
     )[] = selected
     return 0
+
+# AGENTS.md / override.md marked-block stripping. The byte-level UTF-8
+# operation matches Rust's repeated find(begin), find(end after begin),
+# replace_range(..., "") and final unmatched-end detection. Original text
+# is cloned into caller-owned output, then edits are applied in place.
+comptime OPTIONAL_TOOL_MARKED_BLOCK_ABI_VERSION: Int64 = 1
+comptime OPTIONAL_TOOL_MARKED_BLOCK_MAX_BYTES: Int64 = 1_048_576
+
+
+def optional_tool_marked_block_find(
+    value: Pointer[mut=True, UInt8, MutUntrackedOrigin],
+    length: Int64,
+    pattern: Pointer[mut=False, UInt8, ImmUntrackedOrigin],
+    pattern_length: Int64,
+    offset: Int64,
+) -> Int64:
+    if offset > length or pattern_length > length - offset:
+        return -1
+    var position = offset
+    while position <= length - pattern_length:
+        var matched = True
+        for index in range(pattern_length):
+            if value[unsafe_offset=position + index] != pattern[unsafe_offset=index]:
+                matched = False
+                break
+        if matched:
+            return position
+        position += 1
+    return -1
+
+
+@export("prodex_optional_tool_marked_block_strip_v1")
+def prodex_optional_tool_marked_block_strip_v1(
+    abi_version: Int64,
+    text_address: UInt,
+    text_length: Int64,
+    begin_address: UInt,
+    begin_length: Int64,
+    end_address: UInt,
+    end_length: Int64,
+    output_address: UInt,
+    output_capacity: Int64,
+    written_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != OPTIONAL_TOOL_MARKED_BLOCK_ABI_VERSION:
+        return 4
+    if (
+        text_length < 0 or text_length > OPTIONAL_TOOL_MARKED_BLOCK_MAX_BYTES
+        or begin_length <= 0 or begin_length > OPTIONAL_TOOL_MARKED_BLOCK_MAX_BYTES
+        or end_length <= 0 or end_length > OPTIONAL_TOOL_MARKED_BLOCK_MAX_BYTES
+        or output_capacity < text_length
+        or (text_length > 0 and (text_address == 0 or output_address == 0))
+        or begin_address == 0 or end_address == 0
+        or written_address == 0 or written_address % 8 != 0
+    ):
+        return 1
+    var text = ProdexRichStringView(text_address, UInt(text_length))
+    var begin = ProdexRichStringView(begin_address, UInt(begin_length))
+    var end = ProdexRichStringView(end_address, UInt(end_length))
+    if (
+        not rich_view_valid(text, OPTIONAL_TOOL_MARKED_BLOCK_MAX_BYTES)
+        or not rich_view_valid(begin, OPTIONAL_TOOL_MARKED_BLOCK_MAX_BYTES)
+        or not rich_view_valid(end, OPTIONAL_TOOL_MARKED_BLOCK_MAX_BYTES)
+    ):
+        return 1
+
+    var source = rich_view_ptr(text)
+    var begin_bytes = rich_view_ptr(begin)
+    var end_bytes = rich_view_ptr(end)
+    var output = Pointer[mut=True, UInt8, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    var length = text_length
+    for index in range(length):
+        output[unsafe_offset=index] = source[unsafe_offset=index]
+
+    while True:
+        var start = optional_tool_marked_block_find(
+            output, length, begin_bytes, begin_length, 0
+        )
+        if start == -1:
+            break
+        var end_start = optional_tool_marked_block_find(
+            output, length, end_bytes, end_length, start + begin_length
+        )
+        if end_start == -1:
+            return 2
+        var stop = end_start + end_length
+        var removed = stop - start
+        for index in range(stop, length):
+            output[unsafe_offset=index - removed] = output[unsafe_offset=index]
+        length -= removed
+
+    # An unmatched trailing end marker is an error even without a begin.
+    if optional_tool_marked_block_find(
+        output, length, end_bytes, end_length, 0
+    ) >= 0:
+        return 3
+    Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(written_address)
+    )[] = length
+    return 0
