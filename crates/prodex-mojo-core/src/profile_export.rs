@@ -1,7 +1,10 @@
 use crate::{MojoError, rich::ensure_rich_abi};
 #[path = "profile_export/journal_policy.rs"]
 mod journal_policy;
-pub use journal_policy::{journal_filename_component_valid, journal_lifecycle_operation_valid};
+pub use journal_policy::{
+    ProfileJournalFilenameDecision, ProfileJournalFilenameKind, journal_filename_component_valid,
+    journal_lifecycle_operation_valid, profile_journal_filename_plan,
+};
 
 #[path = "profile_export/envelope_schema.rs"]
 mod envelope_schema;
