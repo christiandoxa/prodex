@@ -1,4 +1,4 @@
-//! Compiled Codex version-probe selection and printable User-Agent projection.
+//! Compiled Codex version, terminal identity, and User-Agent projections.
 use crate::MojoError;
 
 const ABI_VERSION: i64 = 1;
@@ -10,6 +10,19 @@ unsafe extern "C" {
         input_address: u64,
         input_length: i64,
         result_address: u64,
+    ) -> i64;
+    fn prodex_codex_auth_terminal_name_v1(
+        abi_version: i64,
+        mode: i64,
+        input_address: u64,
+        input_length: i64,
+        output_address: u64,
+    ) -> i64;
+    fn prodex_codex_auth_terminal_parts_v1(
+        abi_version: i64,
+        input_address: u64,
+        input_length: i64,
+        output_address: u64,
     ) -> i64;
     fn prodex_codex_auth_user_agent_ascii_v1(
         abi_version: i64,
@@ -85,6 +98,119 @@ pub fn codex_user_agent_printable(candidate: &str) -> Result<String, MojoError> 
     String::from_utf8(output).map_err(|_| MojoError::InvalidOutput)
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CodexTerminalInput {
+    TermProgram,
+    Term,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CodexTerminalKind {
+    AppleTerminal,
+    Ghostty,
+    Iterm2,
+    WarpTerminal,
+    VsCode,
+    WezTerm,
+    Kitty,
+    Alacritty,
+    Konsole,
+    GnomeTerminal,
+    Vte,
+    WindowsTerminal,
+    Dumb,
+    Unknown,
+}
+
+/// Classify the old TERM_PROGRAM normalization or exact TERM aliases in Mojo.
+pub fn codex_terminal_kind(
+    input: &str,
+    source: CodexTerminalInput,
+) -> Result<CodexTerminalKind, MojoError> {
+    if input.len() > MAX_BYTES {
+        return Err(MojoError::InvalidInput);
+    }
+    let mut result = -1_i64;
+    status(unsafe {
+        prodex_codex_auth_terminal_name_v1(
+            ABI_VERSION,
+            match source {
+                CodexTerminalInput::TermProgram => 0,
+                CodexTerminalInput::Term => 1,
+            },
+            input.as_ptr() as usize as u64,
+            i64::try_from(input.len()).map_err(|_| MojoError::InvalidInput)?,
+            (&mut result as *mut i64) as usize as u64,
+        )
+    })?;
+    let kind = match result {
+        0 => CodexTerminalKind::AppleTerminal,
+        1 => CodexTerminalKind::Ghostty,
+        2 => CodexTerminalKind::Iterm2,
+        3 => CodexTerminalKind::WarpTerminal,
+        4 => CodexTerminalKind::VsCode,
+        5 => CodexTerminalKind::WezTerm,
+        6 => CodexTerminalKind::Kitty,
+        7 => CodexTerminalKind::Alacritty,
+        8 => CodexTerminalKind::Konsole,
+        9 => CodexTerminalKind::GnomeTerminal,
+        10 => CodexTerminalKind::Vte,
+        11 => CodexTerminalKind::WindowsTerminal,
+        12 => CodexTerminalKind::Dumb,
+        13 => CodexTerminalKind::Unknown,
+        _ => return Err(MojoError::InvalidOutput),
+    };
+    Ok(kind)
+}
+
+/// Select the first two whitespace-delimited tmux termtype tokens; host
+/// only materializes checked original source ranges, never tokenizes again.
+pub fn codex_term_program_parts(text: &str) -> Result<(String, Option<String>), MojoError> {
+    if text.len() > MAX_BYTES {
+        return Err(MojoError::InvalidInput);
+    }
+    let mut output = [-2_i64; 4];
+    status(unsafe {
+        prodex_codex_auth_terminal_parts_v1(
+            ABI_VERSION,
+            text.as_ptr() as usize as u64,
+            i64::try_from(text.len()).map_err(|_| MojoError::InvalidInput)?,
+            output.as_mut_ptr() as usize as u64,
+        )
+    })?;
+    let spans = output
+        .as_chunks::<2>()
+        .0
+        .iter()
+        .map(|pair| {
+            if *pair == [-1, -1] {
+                return Ok(None);
+            }
+            let start = usize::try_from(pair[0]).map_err(|_| MojoError::InvalidOutput)?;
+            let end = usize::try_from(pair[1]).map_err(|_| MojoError::InvalidOutput)?;
+            if start >= end {
+                return Err(MojoError::InvalidOutput);
+            }
+            let text = text.get(start..end).ok_or(MojoError::InvalidOutput)?;
+            Ok(Some((start, end, text)))
+        })
+        .collect::<Result<Vec<_>, MojoError>>()?;
+    if spans[0].is_none() && spans[1].is_some() {
+        return Err(MojoError::InvalidOutput);
+    }
+    if let (Some((_, first_end, _)), Some((second_start, _, _))) = (spans[0], spans[1])
+        && first_end >= second_start
+    {
+        return Err(MojoError::InvalidOutput);
+    }
+    Ok((
+        spans[0]
+            .map(|(_, _, value)| value.to_owned())
+            .unwrap_or_default(),
+        spans[1].map(|(_, _, value)| value.to_owned()),
+    ))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -105,6 +231,114 @@ mod tests {
         }
         assert_eq!(
             codex_probe_version(&"x".repeat(MAX_BYTES + 1)),
+            Err(MojoError::InvalidInput)
+        );
+    }
+
+    #[test]
+    fn compiled_codex_terminal_aliases_preserve_exact_modes() {
+        use CodexTerminalInput::{Term, TermProgram};
+        use CodexTerminalKind as K;
+        for (name, expected) in [
+            ("Apple_Terminal", K::AppleTerminal),
+            ("  iTerm.app  ", K::Iterm2),
+            ("I-TERM_2", K::Iterm2),
+            ("WARP terminal", K::WarpTerminal),
+            ("gnome-terminal", K::GnomeTerminal),
+            ("Windows.Terminal", K::WindowsTerminal),
+            ("Ghostty", K::Ghostty),
+            ("kitty", K::Kitty),
+            ("VsCode", K::VsCode),
+            ("WezTerm", K::WezTerm),
+            ("alacritty", K::Alacritty),
+            ("Konsole", K::Konsole),
+            ("VTE", K::Vte),
+            ("DUMB", K::Dumb),
+            ("unsupported", K::Unknown),
+            (" Ghostty\t", K::Ghostty),
+            ("\u{2003}Ghostty\u{00a0}", K::Ghostty),
+            ("ghostty\tbroken", K::Unknown),
+            ("ghostty\0", K::Unknown),
+            ("日本語", K::Unknown),
+        ] {
+            assert_eq!(
+                codex_terminal_kind(name, TermProgram),
+                Ok(expected),
+                "{name:?}"
+            );
+        }
+        for (name, expected) in [
+            ("wezterm", K::WezTerm),
+            ("wezterm-mux", K::WezTerm),
+            ("dumb", K::Dumb),
+            ("DUMB", K::Unknown),
+            ("ghostty", K::Unknown),
+            ("wezterm\n", K::Unknown),
+        ] {
+            assert_eq!(codex_terminal_kind(name, Term), Ok(expected));
+        }
+    }
+
+    #[test]
+    fn compiled_codex_tmux_termtype_split_uses_unicode_whitespace() {
+        assert_eq!(codex_term_program_parts(""), Ok(("".into(), None)));
+        assert_eq!(
+            codex_term_program_parts(" \u{2003}Ghostty\u{00a0}1.2.3 extra"),
+            Ok(("Ghostty".into(), Some("1.2.3".into())))
+        );
+        assert_eq!(
+            codex_term_program_parts("wezterm"),
+            Ok(("wezterm".into(), None))
+        );
+        assert_eq!(
+            codex_term_program_parts(" \u{2003} "),
+            Ok(("".into(), None))
+        );
+        assert_eq!(
+            codex_term_program_parts("日本語\u{2028}2.0"),
+            Ok(("日本語".into(), Some("2.0".into())))
+        );
+    }
+
+    #[test]
+    fn compiled_codex_terminal_abi_rejects_malformed_input_without_writes() {
+        let input = [0xff_u8];
+        let mut output = [77_i64; 4];
+        let address = output.as_mut_ptr() as usize as u64;
+        for (version, mode, pointer, length, expected) in [
+            (2, 0, 0, 0, 4),
+            (1, 2, 0, 0, 1),
+            (1, 0, 0, 1, 1),
+            (1, 0, 0, -1, 1),
+            (1, 0, input.as_ptr() as usize as u64, 1, 1),
+        ] {
+            assert_eq!(
+                unsafe {
+                    prodex_codex_auth_terminal_name_v1(version, mode, pointer, length, address)
+                },
+                expected
+            );
+            assert_eq!(output, [77; 4]);
+        }
+        for (version, pointer, length, expected) in [
+            (2, 0, 0, 4),
+            (1, 0, 1, 1),
+            (1, 0, -1, 1),
+            (1, input.as_ptr() as usize as u64, 1, 1),
+        ] {
+            assert_eq!(
+                unsafe { prodex_codex_auth_terminal_parts_v1(version, pointer, length, address) },
+                expected
+            );
+            assert_eq!(output, [77; 4]);
+        }
+        let oversized = "x".repeat(MAX_BYTES + 1);
+        assert_eq!(
+            codex_terminal_kind(&oversized, CodexTerminalInput::Term),
+            Err(MojoError::InvalidInput)
+        );
+        assert_eq!(
+            codex_term_program_parts(&oversized),
             Err(MojoError::InvalidInput)
         );
     }
