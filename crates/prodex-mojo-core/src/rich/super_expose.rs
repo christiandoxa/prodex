@@ -2,7 +2,10 @@ use super::{ensure_rich_abi, mojo_mut_pointer_address};
 use crate::MojoError;
 #[path = "super_expose/run_policy.rs"]
 mod run_policy;
-pub use run_policy::{SuperRunRetentionInput, super_run_retention_mask};
+pub use run_policy::{
+    SuperRunEventPagePlan, SuperRunEventPushPlan, SuperRunRetentionInput,
+    super_run_event_push_plan, super_run_events_page_plan, super_run_retention_mask,
+};
 
 #[path = "super_expose/origin.rs"]
 mod origin;

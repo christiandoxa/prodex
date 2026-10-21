@@ -63,3 +63,61 @@ def prodex_super_run_retention_v1(
     for index in range(terminal - SUPER_RUN_TERMINAL_LIMIT):
         keep[unsafe_offset=indices[unsafe_offset=index]] = 0
     return 0
+
+
+comptime SUPER_RUN_EVENT_LIMIT: Int64 = 256
+
+
+@export("prodex_super_run_event_push_v1")
+def prodex_super_run_event_push_v1(
+    version: Int64, event_count: Int64, next_seq: UInt64, output_address: UInt,
+) abi("C") -> Int64:
+    if version != 1:
+        return 4
+    if event_count < 0 or output_address == 0 or output_address % 8 != 0:
+        return 1
+    var output = Pointer[mut=True, UInt64, MutUntrackedOrigin](unsafe_from_address=Int(output_address))
+    var incremented = next_seq
+    if incremented < 18446744073709551615:
+        incremented += 1
+    output[unsafe_offset=0] = incremented
+    output[unsafe_offset=1] = UInt64(max(event_count - (SUPER_RUN_EVENT_LIMIT - 1), 0))
+    return 0
+
+
+@export("prodex_super_run_events_page_v1")
+def prodex_super_run_events_page_v1(
+    version: Int64, sequences_address: UInt, count: Int64,
+    after_seq: UInt64, next_seq: UInt64, limit: UInt64,
+    indices_address: UInt, indices_capacity: Int64, output_address: UInt,
+) abi("C") -> Int64:
+    if version != 1:
+        return 4
+    if count < 0 or count > 9223372036854775807 // 8:
+        return 1
+    if count > 0 and (sequences_address == 0 or sequences_address % 8 != 0 or indices_address == 0 or indices_address % 8 != 0):
+        return 1
+    if output_address == 0 or output_address % 8 != 0:
+        return 1
+    if indices_capacity < count:
+        return 3
+    var sequences = Pointer[mut=False, UInt64, ImmUntrackedOrigin](unsafe_from_address=Int(sequences_address))
+    var indices = Pointer[mut=True, Int64, MutUntrackedOrigin](unsafe_from_address=Int(indices_address))
+    var first_seq = next_seq
+    if count > 0:
+        first_seq = sequences[unsafe_offset=0]
+    var after_next = after_seq
+    if after_next < 18446744073709551615:
+        after_next += 1
+    var maximum = Int64(min(limit, UInt64(SUPER_RUN_EVENT_LIMIT)))
+    var written: Int64 = 0
+    for index in range(count):
+        if written == maximum:
+            break
+        if sequences[unsafe_offset=index] > after_seq:
+            indices[unsafe_offset=written] = index
+            written += 1
+    var output = Pointer[mut=True, Int64, MutUntrackedOrigin](unsafe_from_address=Int(output_address))
+    output[unsafe_offset=0] = written
+    output[unsafe_offset=1] = 1 if after_next < first_seq else 0
+    return 0

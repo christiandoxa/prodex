@@ -132,3 +132,89 @@ fn compiled_retention_rejects_malformed_shapes_before_writing() {
     assert_eq!(keep, [7; 2]);
     assert_eq!(scratch, [77; 2]);
 }
+#[test]
+fn compiled_event_push_bounds_deque_and_saturates_unsigned_sequence() {
+    for (count, seq, next_seq, drop_front) in [
+        (0, 0, 1, 0),
+        (255, u64::MAX - 1, u64::MAX, 0),
+        (256, u64::MAX, u64::MAX, 1),
+        (300, 4, 5, 45),
+    ] {
+        assert_eq!(
+            super_run_event_push_plan(count, seq),
+            Ok(SuperRunEventPushPlan {
+                next_seq,
+                drop_front
+            }),
+        );
+    }
+}
+
+#[test]
+fn compiled_event_pages_preserve_original_order_cap_and_cursor_gaps() {
+    let sequences = (0..300).collect::<Vec<u64>>();
+    assert_eq!(
+        super_run_events_page_plan(&sequences, 0, 300, usize::MAX),
+        Ok(SuperRunEventPagePlan {
+            indices: (1..257).collect(),
+            truncated: false
+        }),
+    );
+    for (after, next, limit, indices, truncated) in [
+        (8, u64::MAX, 3, vec![0, 2, 3], false),
+        (0, u64::MAX, 2, vec![0, 1], true),
+        (0, u64::MAX, 0, vec![], true),
+        (u64::MAX, u64::MAX, 9, vec![], false),
+    ] {
+        assert_eq!(
+            super_run_events_page_plan(&[9, 1, 9, u64::MAX, u64::MAX], after, next, limit),
+            Ok(SuperRunEventPagePlan { indices, truncated }),
+        );
+    }
+    for (after, truncated) in [(98, true), (99, false), (u64::MAX, false)] {
+        assert_eq!(
+            super_run_events_page_plan(&[], after, 100, 9),
+            Ok(SuperRunEventPagePlan {
+                indices: vec![],
+                truncated
+            }),
+        );
+    }
+}
+
+#[test]
+fn compiled_event_abis_reject_invalid_shapes_without_writing() {
+    let sequences = [0_u64, u64::MAX];
+    let mut indices = [77_i64; 2];
+    let mut output = [71_i64; 2];
+    let mut call = |version, source, count, capacity| unsafe {
+        prodex_super_run_events_page_v1(
+            version,
+            source,
+            count,
+            0,
+            0,
+            256,
+            indices.as_mut_ptr() as u64,
+            capacity,
+            output.as_mut_ptr() as u64,
+        )
+    };
+    assert_eq!(call(2, sequences.as_ptr() as u64, 2, 2), 4);
+    assert_eq!(call(1, sequences.as_ptr() as u64 + 1, 2, 2), 1);
+    assert_eq!(call(1, 0, 2, 2), 1);
+    assert_eq!(call(1, sequences.as_ptr() as u64, -1, 2), 1);
+    assert_eq!(call(1, sequences.as_ptr() as u64, i64::MAX / 8 + 1, 2), 1);
+    assert_eq!(call(1, sequences.as_ptr() as u64, 2, 1), 3);
+    assert_eq!(indices, [77; 2]);
+    assert_eq!(output, [71; 2]);
+    for (version, count, expected) in [(2, 0, 4), (1, -1, 1)] {
+        assert_eq!(
+            unsafe {
+                prodex_super_run_event_push_v1(version, count, 0, output.as_mut_ptr() as u64)
+            },
+            expected
+        );
+        assert_eq!(output, [71; 2]);
+    }
+}

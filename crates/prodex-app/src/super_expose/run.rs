@@ -16,7 +16,6 @@ use std::time::Duration;
 const MAX_ACTIVE_RUNS: usize = 4;
 const MAX_QUEUED_RUNS: usize = 16;
 const OUTPUT_MAX_BYTES: usize = 256 * 1024;
-const MAX_RUN_EVENTS: usize = 256;
 const MAX_RUN_EVENT_TEXT_BYTES: usize = 8 * 1024;
 
 #[path = "run/child_args.rs"]
@@ -33,6 +32,10 @@ use helpers::*;
 #[cfg(test)]
 #[path = "run/retention_tests.rs"]
 mod retention_tests;
+
+#[cfg(test)]
+#[path = "run/event_tests.rs"]
+mod event_tests;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum RunState {
@@ -262,7 +265,7 @@ impl RunManager {
     pub(super) fn events(&self, run_id: &str, after_seq: u64, limit: usize) -> Option<RunEvents> {
         let state = self.inner.state.lock().ok()?;
         let record = state.runs.get(run_id)?;
-        Some(events_page(record, after_seq, limit))
+        events_page(record, after_seq, limit)
     }
 
     pub(super) fn cancel(&self, run_id: &str) -> Option<Value> {

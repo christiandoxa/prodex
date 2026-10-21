@@ -174,35 +174,44 @@ pub(super) fn append_output(record: &mut RunRecord, event_type: &str, bytes: &[u
     }
 }
 
-pub(super) fn events_page(record: &RunRecord, after_seq: u64, limit: usize) -> RunEvents {
-    let first_seq = record
+pub(super) fn events_page(record: &RunRecord, after_seq: u64, limit: usize) -> Option<RunEvents> {
+    let sequences = record
         .events
-        .front()
-        .map_or(record.next_seq, |event| event.seq);
-    RunEvents {
-        events: record
-            .events
-            .iter()
-            .filter(|event| event.seq > after_seq)
-            .take(limit.min(MAX_RUN_EVENTS))
-            .cloned()
+        .iter()
+        .map(|event| event.seq)
+        .collect::<Vec<_>>();
+    let plan = prodex_mojo_core::rich::super_run_events_page_plan(
+        &sequences,
+        after_seq,
+        record.next_seq,
+        limit,
+    )
+    .ok()?;
+    Some(RunEvents {
+        events: plan
+            .indices
+            .into_iter()
+            .map(|index| record.events[index].clone())
             .collect(),
         next_seq: record.next_seq,
-        truncated: after_seq.saturating_add(1) < first_seq,
-    }
+        truncated: plan.truncated,
+    })
 }
 
 pub(super) fn push_event(record: &mut RunRecord, event_type: &str, text: &str) {
+    let Ok(plan) =
+        prodex_mojo_core::rich::super_run_event_push_plan(record.events.len(), record.next_seq)
+    else {
+        return;
+    };
     let text = bounded_event_text(text);
     record.events.push_back(RunEvent {
         seq: record.next_seq,
         event_type: event_type.to_string(),
         text,
     });
-    record.next_seq = record.next_seq.saturating_add(1);
-    while record.events.len() > MAX_RUN_EVENTS {
-        record.events.pop_front();
-    }
+    record.next_seq = plan.next_seq;
+    record.events.drain(..plan.drop_front);
 }
 
 pub(super) fn bounded_event_text(text: &str) -> String {

@@ -8372,3 +8372,15 @@ storage without a Rust fallback. Direct Mojo, three strict bridge, ten run and
 36.31261863497566% (136,400 Mojo / 239,227 Rust production LOC). The 75% target
 remains open. Detailed evidence is in
 `migration/super-run-retention-mojo-20261022.md`.
+
+## Super event retention and cursor pages compiled in Mojo (2026-10-22)
+
+The same Super run owner now supplies event mutation and page plans to all
+lifecycle/output callers and the live protocol. Rust's 256-event cap, deque
+eviction loop, sequence increment, cursor filter and truncation arithmetic are
+removed without a fallback. Deque order, empty-page gaps, unsigned saturation
+and post-output-cap events remain covered. Direct Mojo, six strict run-policy
+bridge, 12 run and 108 Super expose tests plus strict workspace Clippy pass.
+Canonical share is 36.31104286805347% (136,450 Mojo / 239,331 Rust LOC); checked
+bridge growth slightly lowers raw share. The 75% goal remains open. Evidence is
+in `migration/super-run-events-mojo-20261022.md`.
