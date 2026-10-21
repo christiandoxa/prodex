@@ -5,7 +5,9 @@ pub use labels::{
     quota_window_label, quota_workspace_label,
 };
 mod gemini_numeric;
-pub use gemini_numeric::gemini_bucket_numeric_batch;
+pub use gemini_numeric::{
+    GeminiBucketTextInput, gemini_bucket_numeric_batch, gemini_bucket_text_numeric_batch,
+};
 mod auth_policy;
 mod blocked;
 pub use auth_policy::{
@@ -217,20 +219,6 @@ unsafe extern "C" {
     fn prodex_quota_remaining_percent(used_percent: i64, has_value: i64) -> i64;
     fn prodex_quota_window_status(remaining_percent: i64, has_window: i64) -> i64;
     fn prodex_quota_pressure_band(five_hour_status: i64, weekly_status: i64) -> i64;
-    fn prodex_quota_gemini_bucket_batch(
-        remaining_amount: *const i64,
-        remaining_amount_state: *const i64,
-        remaining_fraction: *const f64,
-        remaining_fraction_present: *const i64,
-        remaining: *mut i64,
-        remaining_present: *mut i64,
-        total: *mut i64,
-        total_present: *mut i64,
-        remaining_percent: *mut i64,
-        remaining_percent_present: *mut i64,
-        exhausted: *mut i64,
-        count: i64,
-    ) -> i64;
     fn prodex_quota_main_aggregate_batch(
         remaining_percent: *const i64,
         remaining_present: *const i64,

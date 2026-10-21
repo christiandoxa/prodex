@@ -84,8 +84,7 @@ def prodex_quota_panel_first_line_v1(
     return QUOTA_PANEL_OK
 
 
-@export("prodex_quota_round_f64")
-def prodex_quota_round_f64(value: Float64) abi("C") -> Int64:
+def quota_round_f64(value: Float64) -> Int64:
     if value != value:
         return 0
     if value >= 9223372036854775808.0:
@@ -95,6 +94,11 @@ def prodex_quota_round_f64(value: Float64) abi("C") -> Int64:
     if value >= 0.0:
         return Int64(value + 0.5)
     return Int64(value - 0.5)
+
+
+@export("prodex_quota_round_f64")
+def prodex_quota_round_f64(value: Float64) abi("C") -> Int64:
+    return quota_round_f64(value)
 
 
 @export("prodex_quota_remaining_percent")
@@ -154,6 +158,57 @@ def prodex_quota_pressure_band(
 comptime QUOTA_GEMINI_BUCKET_BATCH_MAX_COUNT: Int64 = 1_024
 
 
+@fieldwise_init
+struct GeminiBucketNumericPlan(Copyable):
+    var remaining: Int64
+    var remaining_present: Int64
+    var total: Int64
+    var total_present: Int64
+    var remaining_percent: Int64
+    var remaining_percent_present: Int64
+    var exhausted: Int64
+
+
+def quota_gemini_numeric_plan(amount_state: Int64, amount: Int64, fraction: Float64, has_fraction: Int64) -> GeminiBucketNumericPlan:
+    var has_remaining: Int64 = 0
+    var remaining_value: Int64 = 0
+    var has_total: Int64 = 0
+    var total_value: Int64 = 0
+    var has_percent: Int64 = 0
+    var percent_value: Int64 = 0
+    var exhausted_value: Int64 = 0
+
+    if amount_state == 1:
+        remaining_value = amount
+        has_remaining = 1
+        if has_fraction == 1 and fraction > 0.0:
+            total_value = quota_round_f64(
+                Float64(remaining_value) / fraction
+            )
+            if total_value >= remaining_value:
+                has_total = 1
+    elif amount_state == 0 and has_fraction == 1:
+        remaining_value = quota_round_f64(fraction * 100.0)
+        has_remaining = 1
+        total_value = 100
+        has_total = 1
+    if has_fraction == 1:
+        percent_value = quota_round_f64(fraction * 100.0)
+        has_percent = 1
+    elif has_remaining == 1 and has_total == 1 and total_value > 0:
+        percent_value = quota_round_f64(
+            Float64(remaining_value) / Float64(total_value) * 100.0
+        )
+        has_percent = 1
+
+    if has_fraction == 1 and fraction <= 0.0:
+        exhausted_value = 1
+    elif has_remaining == 1 and remaining_value <= 0:
+        exhausted_value = 1
+
+    return GeminiBucketNumericPlan(remaining_value, has_remaining, total_value, has_total, percent_value, has_percent, exhausted_value)
+
+
 @export("prodex_quota_gemini_bucket_batch")
 def prodex_quota_gemini_bucket_batch(
     remaining_amount: Pointer[mut=False, Int64, _],
@@ -180,52 +235,15 @@ def prodex_quota_gemini_bucket_batch(
         if has_fraction != 0 and has_fraction != 1:
             return 2
 
-        var has_remaining: Int64 = 0
-        var remaining_value: Int64 = 0
-        var has_total: Int64 = 0
-        var total_value: Int64 = 0
-        var has_percent: Int64 = 0
-        var percent_value: Int64 = 0
-        var exhausted_value: Int64 = 0
-        var fraction = remaining_fraction[unsafe_offset=index]
-
-        if amount_state == 1:
-            remaining_value = remaining_amount[unsafe_offset=index]
-            has_remaining = 1
-            if has_fraction == 1 and fraction > 0.0:
-                total_value = prodex_quota_round_f64(
-                    Float64(remaining_value) / fraction
-                )
-                if total_value >= remaining_value:
-                    has_total = 1
-        elif amount_state == 0 and has_fraction == 1:
-            remaining_value = prodex_quota_round_f64(fraction * 100.0)
-            has_remaining = 1
-            total_value = 100
-            has_total = 1
-        if has_fraction == 1:
-            percent_value = prodex_quota_round_f64(fraction * 100.0)
-            has_percent = 1
-        elif has_remaining == 1 and has_total == 1 and total_value > 0:
-            percent_value = prodex_quota_round_f64(
-                Float64(remaining_value) / Float64(total_value) * 100.0
-            )
-            has_percent = 1
-
-        if has_fraction == 1 and fraction <= 0.0:
-            exhausted_value = 1
-        elif has_remaining == 1 and remaining_value <= 0:
-            exhausted_value = 1
-
-        remaining[unsafe_offset=index] = remaining_value
-        remaining_present[unsafe_offset=index] = has_remaining
-        total[unsafe_offset=index] = total_value
-        total_present[unsafe_offset=index] = has_total
-        remaining_percent[unsafe_offset=index] = percent_value
-        remaining_percent_present[unsafe_offset=index] = has_percent
-        exhausted[unsafe_offset=index] = exhausted_value
+        var plan = quota_gemini_numeric_plan(amount_state, remaining_amount[unsafe_offset=index], remaining_fraction[unsafe_offset=index], has_fraction)
+        remaining[unsafe_offset=index] = plan.remaining
+        remaining_present[unsafe_offset=index] = plan.remaining_present
+        total[unsafe_offset=index] = plan.total
+        total_present[unsafe_offset=index] = plan.total_present
+        remaining_percent[unsafe_offset=index] = plan.remaining_percent
+        remaining_percent_present[unsafe_offset=index] = plan.remaining_percent_present
+        exhausted[unsafe_offset=index] = plan.exhausted
     return 0
-
 
 comptime QUOTA_MAIN_AGGREGATION_MAX_COUNT: Int64 = 1_024
 

@@ -446,6 +446,7 @@ fn selected_sources() -> Vec<&'static str> {
         || env::var_os("CARGO_FEATURE_MOJO_CORE").is_some()
     {
         sources.push("../../mojo/prodex_core/quota.mojo");
+        sources.push("../../mojo/prodex_core/quota_gemini_amount.mojo");
         sources.push("../../mojo/prodex_core/quota_usage_response.mojo");
         sources.push("../../mojo/prodex_core/quota_pool.mojo");
     }

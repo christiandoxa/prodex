@@ -427,6 +427,10 @@ const CORE_LEXICAL_BROKER_PATHS = "crates/prodex-app/src/runtime_persistence/pat
 const CORE_LEXICAL_APP_HOUSEKEEPING = "crates/prodex-app/src/housekeeping.rs";
 const CORE_LEXICAL_LIVE_LOG = "crates/prodex-app/src/app_commands/log_live.rs";
 const PROMOTED_FILES = [
+  "crates/prodex-quota/src/render/gemini.rs",
+  "crates/prodex-quota/src/mojo.rs",
+  "crates/prodex-mojo-core/src/quota/gemini_numeric.rs",
+  "mojo/prodex_core/quota_gemini_amount.mojo",
   "crates/prodex-app/src/runtime_catalog_config.rs",
   "crates/prodex-mojo-core/src/super_provider_config/catalog_unsigned.rs",
   "crates/prodex-app/src/runtime_launch/proxy_startup/deepseek_rewrite/conversation_store.rs",
@@ -3517,6 +3521,33 @@ export function findViolations(files) {
     if (filePath === "crates/prodex-mojo-core/src/codex_config.rs") {
       return contents.includes("prodex_codex_config_removal_mask_v1(")
         ? [] : [filePath + ": Codex override removal ABI must remain wired"];
+    }
+    return [];
+  });
+  const geminiAmountTextViolations = files.flatMap(([filePath, contents]) => {
+    const body = contents.split("#[cfg(test)]")[0];
+    if (filePath === "crates/prodex-quota/src/render/gemini.rs") {
+      return body.includes("crate::mojo::gemini_bucket_numeric_batch(batch)")
+        && !/fn gemini_numeric_input\(|\.parse::<i64>/u.test(body)
+        ? [] : [filePath + ": Gemini counter rendering must retain compiled text parsing"];
+    }
+    if (filePath === "crates/prodex-quota/src/mojo.rs" && body.includes("fn gemini_bucket_numeric_batch(")) {
+      const batch = body.match(/pub\(crate\) fn gemini_bucket_numeric_batch\([^]*?(?=^pub\(crate\) fn quota_capacity_batch)/mu)?.[0] ?? "";
+      return batch.includes("quota::gemini_bucket_text_numeric_batch(&inputs)")
+        && batch.includes("GeminiBucketTextInput")
+        && !/\.parse::<i64>|\.trim\(/u.test(batch)
+        ? [] : [filePath + ": Gemini counters must pass through compiled text and numeric kernels"];
+    }
+    if (filePath === "crates/prodex-mojo-core/src/quota/gemini_numeric.rs") {
+      return body.includes("prodex_quota_gemini_bucket_records_v1(")
+        && !/\.parse::<i64>|\.trim\(/u.test(body)
+        ? [] : [filePath + ": Gemini counter bridge must retain Mojo text authority"];
+    }
+    if (filePath === "mojo/prodex_core/quota_gemini_amount.mojo") {
+      return contents.includes('@export("prodex_quota_gemini_bucket_records_v1")')
+        && contents.includes("runtime_config_scalar_parse_signed(")
+        && contents.includes("rich_trim_bounds(")
+        ? [] : [filePath + ": Gemini counter text must reuse shared Mojo parsing"];
     }
     return [];
   });
@@ -13907,6 +13938,7 @@ export function findViolations(files) {
     ...brokerSnapshotQueryViolations,
     ...providerConversationViolations,
     ...catalogUnsignedViolations,
+    ...geminiAmountTextViolations,
     ...sharedAttachmentMigrationViolations,
     ...runtimeCookieMigrationViolations,
     ...deepseekSimpleRequestViolations,
@@ -17885,6 +17917,10 @@ function selfTest() {
   for (const restored of [".parse::<u64>()", ".chars()", "value.is_empty()", "parsed <= 1"]) {
     assert.match(findViolations([[catalogScalarFile, catalogScalarCaller + restored]]).join("\n"), /catalog scalar validation/u);
   }
+  const geminiAmountFile = "crates/prodex-quota/src/render/gemini.rs";
+  const geminiAmountCaller = "crate::mojo::gemini_bucket_numeric_batch(batch) quota_gemini_bucket_label( quota_gemini_display( quota_gemini_bucket_summary(";
+  assert.deepEqual(findViolations([[geminiAmountFile, geminiAmountCaller]]), []);
+  assert.match(findViolations([[geminiAmountFile, geminiAmountCaller + ".parse::<i64>()"]]).join("\n"), /Gemini counter rendering/u);
 
 }
 

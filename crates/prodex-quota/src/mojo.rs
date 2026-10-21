@@ -11,9 +11,16 @@ pub(super) fn pressure_band(five_hour_status: i64, weekly_status: i64) -> i64 {
 }
 
 pub(crate) fn gemini_bucket_numeric_batch(
-    inputs: &[prodex_mojo_core::quota::GeminiBucketNumericInput],
+    buckets: &[crate::GeminiQuotaBucket],
 ) -> Result<Vec<prodex_mojo_core::quota::GeminiBucketNumericOutput>, prodex_mojo_core::MojoError> {
-    prodex_mojo_core::quota::gemini_bucket_numeric_batch(inputs)
+    let inputs = buckets
+        .iter()
+        .map(|bucket| prodex_mojo_core::quota::GeminiBucketTextInput {
+            remaining_amount: bucket.remaining_amount.as_deref(),
+            remaining_fraction: bucket.remaining_fraction,
+        })
+        .collect::<Vec<_>>();
+    prodex_mojo_core::quota::gemini_bucket_text_numeric_batch(&inputs)
 }
 
 pub(crate) fn quota_capacity_batch(

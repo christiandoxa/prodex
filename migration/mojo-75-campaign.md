@@ -8343,3 +8343,20 @@ guards pass. The additional checked Rust shim moves raw share slightly down
 to 36.303050159420174% (136,290 Mojo / 239,133 Rust LOC); no counting rule or guard
 was changed. The 75% target remains open. Evidence is in
 `migration/provider-catalog-uint-mojo-20261022.md`.
+
+## Gemini quota text counters use compiled record plans (2026-10-22)
+
+Gemini quota rendering now sends borrowed counter strings and fractions through
+one checked record ABI. Mojo owns Unicode trim, signed integer parsing and the
+existing numeric quota plan; the Rust parser and separate field-array bridge
+are removed. Parsed-counter callers and legacy C exports reuse the same pure
+numeric/rounding functions. Direct Mojo, 21 bridge and 109 quota tests, strict
+workspace Clippy and ownership/boundary guards pass. Official share is
+36.3105684345082% (136,348 Mojo / 239,157 Rust LOC). The 75% goal remains open.
+Full evidence is in `migration/gemini-counter-records-mojo-20261022.md`.
+
+An audited next owner is `super_expose/run/helpers.rs::prune_terminal_runs`:
+Rust still counts completed records and repeatedly selects the oldest one by
+finished-or-created time, then creation time and lexical run ID. A migration
+must preserve active/queued records, the 32-terminal-record cap and full-width
+unsigned timestamps, while keeping run storage and process effects in Rust.
