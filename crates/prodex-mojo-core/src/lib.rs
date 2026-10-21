@@ -104,6 +104,8 @@ pub mod audit_log_policy;
 #[cfg(feature = "mojo-rich")]
 pub mod chat_tool_name_policy;
 #[cfg(feature = "mojo-runtime")]
+pub mod codex_auth_headers;
+#[cfg(feature = "mojo-runtime")]
 pub mod codex_config;
 #[cfg(feature = "mojo-runtime")]
 pub mod confirmation_policy;
