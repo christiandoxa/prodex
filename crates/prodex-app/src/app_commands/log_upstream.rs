@@ -7,8 +7,7 @@ use super::log::{
 use super::log_format::render_log_block;
 use super::log_tui::{
     LOG_TUI_TITLE, LogTuiHeaderDetail, LogTuiInput, LogTuiState, LogTuiTerminal, OutputThroughput,
-    OutputThroughputDisplay, contains_ignore_ascii_case, log_tui_header_detail,
-    log_tui_header_next_refresh_at, visible_text,
+    OutputThroughputDisplay, log_tui_header_detail, log_tui_header_next_refresh_at, visible_text,
 };
 use super::log_upstream_payload::{
     UpstreamPayloadEvent, render_upstream_payload_lines, upstream_payload_event_from_runtime_line,
@@ -395,25 +394,30 @@ fn matching_upstream_payload_events<'a>(
 }
 
 fn upstream_payload_event_matches(event: &UpstreamPayloadEvent, query: &str) -> bool {
+    // Rust owns the display scalar strings. Mojo searches their virtual
+    // space-joined stream without copying the potentially large payload.
     let request = event
         .request
-        .map(|request| request.to_string())
+        .map(|value| value.to_string())
         .unwrap_or_default();
-    contains_ignore_ascii_case(
-        &format!(
-            "{} {} {} {} {} {} {} {} {}",
-            event.timestamp,
-            event.profile,
-            request,
-            event.transport,
-            event.route,
-            event.bytes,
-            event.logged_bytes,
-            event.truncated,
-            event.payload
-        ),
+    let bytes = event.bytes.to_string();
+    let logged_bytes = event.logged_bytes.to_string();
+    let truncated = event.truncated.to_string();
+    prodex_mojo_core::log::log_virtual_fields_contains(
+        &[
+            &event.timestamp,
+            &event.profile,
+            &request,
+            &event.transport,
+            &event.route,
+            &bytes,
+            &logged_bytes,
+            &truncated,
+            &event.payload,
+        ],
         query,
     )
+    .expect("compiled Mojo upstream log virtual-field search failed")
 }
 
 pub(crate) fn latest_upstream_payload_event() -> Option<UpstreamPayloadEvent> {
@@ -442,7 +446,8 @@ pub(crate) fn latest_upstream_payload_event() -> Option<UpstreamPayloadEvent> {
 mod tests {
     use super::{
         FollowedLog, SystemTime, UNIX_EPOCH, UpstreamPayloadEvent,
-        collect_new_upstream_payload_events, env, upstream_payload_tui_text,
+        collect_new_upstream_payload_events, env, upstream_payload_event_matches,
+        upstream_payload_tui_text,
     };
     use crate::app_commands::log_upstream_payload::BASE64_STANDARD;
     use base64::Engine;
@@ -499,6 +504,41 @@ mod tests {
         assert!(state.pending.is_empty());
         drop(state);
         fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn compiled_upstream_log_search_keeps_cross_field_matches_and_unicode() {
+        let event = UpstreamPayloadEvent {
+            timestamp: "2026-10-21 12:34:56".into(),
+            request: Some(7),
+            transport: "websocket".into(),
+            route: "responses".into(),
+            profile: "Main".into(),
+            bytes: 150,
+            logged_bytes: 50,
+            truncated: false,
+            payload: "🧭αb payload".into(),
+        };
+        assert!(upstream_payload_event_matches(&event, "MAIN 7 WEBSOCKET"));
+        assert!(upstream_payload_event_matches(&event, "150 50 FALSE"));
+        assert!(upstream_payload_event_matches(&event, "false 🧭αb"));
+        assert!(upstream_payload_event_matches(&event, "responses 150"));
+        assert!(!upstream_payload_event_matches(&event, "MAIN WEBSOCKET"));
+        assert!(!upstream_payload_event_matches(&event, "🧭Αb"));
+        assert!(upstream_payload_event_matches(&event, ""));
+
+        let without_id = UpstreamPayloadEvent {
+            request: None,
+            ..event
+        };
+        assert!(upstream_payload_event_matches(
+            &without_id,
+            "Main  websocket"
+        ));
+        assert!(!upstream_payload_event_matches(
+            &without_id,
+            "Main websocket"
+        ));
     }
 
     #[test]
