@@ -54,10 +54,7 @@ fn compiled_duplicate_chunk_groups_sort_hash_and_size_with_source_order() {
             complete: true,
         }),
     );
-    assert_eq!(
-        repo_duplicate_chunk_groups(&inputs, 0, 8).unwrap().complete,
-        false,
-    );
+    assert!(!repo_duplicate_chunk_groups(&inputs, 0, 8).unwrap().complete);
     assert_eq!(
         repo_duplicate_chunk_groups(&[], 64, 8),
         Ok(RepoDuplicateChunkGroupsPlan {

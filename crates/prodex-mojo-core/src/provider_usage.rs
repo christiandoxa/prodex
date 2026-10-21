@@ -176,7 +176,7 @@ pub fn sse_frame_scan(text: &str) -> Result<Vec<ProviderUsageSseFrameRecord>, Mo
     }
     let mut result = Vec::with_capacity(count);
     let mut pending = false;
-    for words in words.chunks_exact(3) {
+    for words in words.as_chunks::<3>().0 {
         match words {
             [1, start, end] => {
                 let start = usize::try_from(*start).map_err(|_| MojoError::InvalidOutput)?;

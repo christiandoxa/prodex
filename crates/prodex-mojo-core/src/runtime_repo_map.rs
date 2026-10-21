@@ -426,7 +426,7 @@ pub fn repo_duplicate_chunk_groups(
     }
     let mut selected = Vec::with_capacity(group_count);
     let mut prior_end = 0usize;
-    for raw in groups.chunks_exact(3).take(group_count) {
+    for raw in groups.as_chunks::<3>().0.iter().take(group_count) {
         let start = usize::try_from(raw[0]).map_err(|_| MojoError::InvalidOutput)?;
         let occurrences = usize::try_from(raw[1]).map_err(|_| MojoError::InvalidOutput)?;
         let kept = usize::try_from(raw[2]).map_err(|_| MojoError::InvalidOutput)?;

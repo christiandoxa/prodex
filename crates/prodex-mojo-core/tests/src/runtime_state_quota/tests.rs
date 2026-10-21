@@ -157,11 +157,10 @@ fn compiled_quota_snapshot_compare_detects_individual_differences_and_stale_touc
     saturated.previous_checked_at = i64::MIN;
     saturated.now = i64::MAX;
     saturated.touch_interval_seconds = i64::MAX;
-    assert_eq!(
-        snapshot_compare_plan(saturated, true)
+    assert!(
+        !snapshot_compare_plan(saturated, true)
             .unwrap()
-            .should_persist,
-        false
+            .should_persist
     );
 }
 
