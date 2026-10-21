@@ -27,7 +27,8 @@ mod continuation_status;
 mod noncompact_loop;
 mod profile_auth;
 mod profile_health;
-pub use profile_auth::{profile_auth_failure_next_score, profile_usage_auth_revalidation_due};
+// This private module has only the explicit public auth planner surface.
+pub use profile_auth::*;
 mod profile_launch;
 pub use profile_launch::{
     ProfileNameResolution, profile_exact_visibility_mask, profile_name_resolution_plan,

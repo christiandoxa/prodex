@@ -51,5 +51,25 @@ def main() raises:
     inputs[unsafe_offset=0] = 65536
     assert prodex_runtime_profile_auth_cache_policy_v1(1, 1, source, 4, target) == 1
     assert output[unsafe_offset=0] == 77
+    # Cached-auth source selection: none=0, usage=1, probe=2.
+    inputs[unsafe_offset=0] = 0
+    inputs[unsafe_offset=1] = 0
+    assert prodex_runtime_profile_auth_cache_policy_v1(1, 2, source, 4, target) == 0
+    assert output[unsafe_offset=0] == 0
+    inputs[unsafe_offset=1] = 1
+    assert prodex_runtime_profile_auth_cache_policy_v1(1, 2, source, 4, target) == 0
+    assert output[unsafe_offset=0] == 2
+    inputs[unsafe_offset=0] = 1
+    assert prodex_runtime_profile_auth_cache_policy_v1(1, 2, source, 4, target) == 0
+    assert output[unsafe_offset=0] == 1
+    inputs[unsafe_offset=1] = 0
+    assert prodex_runtime_profile_auth_cache_policy_v1(1, 2, source, 4, target) == 0
+    assert output[unsafe_offset=0] == 1
+
+    output[unsafe_offset=0] = 77
+    inputs[unsafe_offset=0] = 2
+    assert prodex_runtime_profile_auth_cache_policy_v1(1, 2, source, 4, target) == 1
+    assert output[unsafe_offset=0] == 77
+
     dealloc(output_store^)
     dealloc(inputs_store^)

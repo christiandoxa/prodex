@@ -71,6 +71,34 @@ pub fn profile_auth_failure_next_score(
     .map_err(|_| MojoError::InvalidOutput)
 }
 
+/// Source precedence chosen by compiled Mojo for runtime auth summaries.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ProfileCachedAuthSource {
+    None,
+    UsageAuth,
+    Probe,
+}
+
+pub fn profile_cached_auth_source(
+    usage_auth_present: bool,
+    probe_present: bool,
+) -> Result<ProfileCachedAuthSource, MojoError> {
+    match policy(
+        2,
+        [
+            i64::from(usage_auth_present),
+            i64::from(probe_present),
+            0,
+            0,
+        ],
+    )? {
+        0 => Ok(ProfileCachedAuthSource::None),
+        1 => Ok(ProfileCachedAuthSource::UsageAuth),
+        2 => Ok(ProfileCachedAuthSource::Probe),
+        _ => Err(MojoError::InvalidOutput),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -92,6 +120,21 @@ mod tests {
                 Ok(due)
             );
         }
+    }
+
+    #[test]
+    fn compiled_auth_source_keeps_usage_over_probe_precedence() {
+        use ProfileCachedAuthSource as Source;
+        assert_eq!(profile_cached_auth_source(false, false), Ok(Source::None));
+        assert_eq!(
+            profile_cached_auth_source(true, false),
+            Ok(Source::UsageAuth)
+        );
+        assert_eq!(profile_cached_auth_source(false, true), Ok(Source::Probe));
+        assert_eq!(
+            profile_cached_auth_source(true, true),
+            Ok(Source::UsageAuth)
+        );
     }
 
     #[test]
