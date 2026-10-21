@@ -34,7 +34,13 @@ fn runtime_proxy_broker_live_log_snapshot_is_authenticated_and_bounded() {
     register_runtime_broker_metadata(
         &proxy.log_path,
         RuntimeBrokerMetadata {
-            broker_key: runtime_broker_key_with_smart_context(&backend.base_url(), false, false, false, None),
+            broker_key: runtime_broker_key_with_smart_context(
+                &backend.base_url(),
+                false,
+                false,
+                false,
+                None,
+            ),
             listen_addr: proxy.listen_addr.to_string(),
             started_at: Local::now().timestamp(),
             current_profile: "main".to_string(),
@@ -73,11 +79,19 @@ fn runtime_proxy_broker_live_log_snapshot_is_authenticated_and_bounded() {
 
     for (query, expected_message) in [
         ("after=nope", "runtime log snapshot cursor is invalid"),
-        ("limit=0", "runtime log snapshot limit is outside the supported bound"),
+        (
+            "limit=0",
+            "runtime log snapshot limit is outside the supported bound",
+        ),
     ] {
-        let response = client.get(format!(
-            "http://{}/__prodex/runtime/log/snapshot?{query}", proxy.listen_addr
-        )).header("X-Prodex-Admin-Token", "secret").send().unwrap();
+        let response = client
+            .get(format!(
+                "http://{}/__prodex/runtime/log/snapshot?{query}",
+                proxy.listen_addr
+            ))
+            .header("X-Prodex-Admin-Token", "secret")
+            .send()
+            .unwrap();
         assert_eq!(response.status().as_u16(), 400);
         let body: serde_json::Value = response.json().unwrap();
         assert_eq!(body["error"]["code"], "invalid_request");
@@ -96,12 +110,13 @@ fn runtime_proxy_broker_live_log_snapshot_is_authenticated_and_bounded() {
     let body = response
         .json::<serde_json::Value>()
         .expect("snapshot should be JSON");
-    assert!(body["entries"]
-        .as_array()
-        .is_some_and(|entries| entries.iter().any(|entry| {
-            entry["line"]
-                .as_str()
-                .is_some_and(|line| line.contains("live_log_snapshot_test"))
-        })));
+    assert!(
+        body["entries"]
+            .as_array()
+            .is_some_and(|entries| entries.iter().any(|entry| {
+                entry["line"]
+                    .as_str()
+                    .is_some_and(|line| line.contains("live_log_snapshot_test"))
+            }))
+    );
 }
-
