@@ -8218,3 +8218,14 @@ filesystem tests, two direct core ABI tests, the direct Mojo test,
 anti-fallback guard and official production-share checks pass. The
 audited share rises from 36.102403908513125% to 36.11279186610626%
 (133,691 Mojo / 236,513 Rust); the 75% target remains outstanding.
+
+## Broker continuity log line framing compiled in Mojo (2026-10-21)
+
+The compiled continuity owner now selects first LF, line size cap,
+buffer action and metric eligibility from one binary borrowed slice.
+Rust retains BufReader, buffer storage and metrics application; its
+former position scanner and overflow policy helper are removed. Seven
+broker-log tests, three core ABI tests, direct Mojo regression and
+source/share guard checks pass. Official share increases from
+36.11279186610626% to 36.11452395546711%
+(133,744 Mojo / 236,589 Rust); 75% remains unmet.

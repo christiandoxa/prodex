@@ -1,6 +1,6 @@
 use prodex_mojo_core::runtime_broker_continuity::{
-    BrokerLogFingerprintRelation, ContinuityEvent, continuity_event_kind, log_fingerprint_relation,
-    lru_evict_index,
+    BrokerLogFingerprintRelation, BrokerLogFrameAction, ContinuityEvent, broker_log_frame_plan,
+    continuity_event_kind, log_fingerprint_relation, lru_evict_index,
 };
 use prodex_runtime_broker::{
     RuntimeBrokerContinuityFailureReasonMetrics,
@@ -15,7 +15,6 @@ use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, UNIX_EPOCH};
 
 pub const DEFAULT_RUNTIME_BROKER_CONTINUITY_FAILURE_REASON_CACHE_LIMIT: usize = 16;
-const RUNTIME_BROKER_LOG_LINE_MAX_BYTES: usize = 1024 * 1024;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct RuntimeLogFingerprint {
@@ -212,18 +211,19 @@ fn runtime_broker_continuity_failure_reason_metrics_from_log_range(
         if available.is_empty() {
             break;
         }
-        let take = available
-            .iter()
-            .position(|byte| *byte == b'\n')
-            .map_or(available.len(), |index| index + 1);
-        let line_complete = available.get(take.saturating_sub(1)) == Some(&b'\n');
-        if !line_oversized {
-            line_oversized = append_runtime_broker_log_chunk(&mut line, &available[..take]);
+        let plan = broker_log_frame_plan(available, line.len(), line_oversized)
+            .expect("compiled Mojo broker log frame plan returned invalid output");
+        let take = plan.take;
+        match plan.action {
+            BrokerLogFrameAction::Ignore => {}
+            BrokerLogFrameAction::Append => line.extend_from_slice(&available[..take]),
+            BrokerLogFrameAction::ClearOversized => line.clear(),
         }
+        line_oversized = plan.oversized_after;
         reader.consume(take);
         consumed = consumed.checked_add(u64::try_from(take).ok()?)?;
-        if line_complete {
-            if !line_oversized {
+        if plan.complete {
+            if plan.emit_metrics {
                 runtime_broker_merge_continuity_failure_reason_metrics(
                     &mut metrics,
                     runtime_broker_continuity_failure_reason_metrics_from_log_bytes(&line),
@@ -236,15 +236,6 @@ fn runtime_broker_continuity_failure_reason_metrics_from_log_range(
     }
 
     Some((metrics, parsed_len))
-}
-
-fn append_runtime_broker_log_chunk(line: &mut Vec<u8>, chunk: &[u8]) -> bool {
-    if line.len().saturating_add(chunk.len()) > RUNTIME_BROKER_LOG_LINE_MAX_BYTES {
-        line.clear();
-        return true;
-    }
-    line.extend_from_slice(chunk);
-    false
 }
 
 pub fn runtime_broker_cached_continuity_failure_reason_metrics(

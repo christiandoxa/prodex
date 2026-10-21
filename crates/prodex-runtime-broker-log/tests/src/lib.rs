@@ -194,7 +194,7 @@ fn continuity_failure_reason_metrics_skip_oversized_line_and_continue() {
     let _guard = lock_continuity_cache();
     clear_runtime_broker_continuity_failure_reason_cache_for_test();
     let log_path = temp_log_path("oversized-line");
-    let mut content = vec![b'x'; RUNTIME_BROKER_LOG_LINE_MAX_BYTES + 1];
+    let mut content = vec![b'x'; 1024 * 1024 + 1];
     content.extend_from_slice(b"\nstale_continuation reason=previous_response_not_found\n");
     fs::write(&log_path, content).expect("oversized test log should write");
 
@@ -205,4 +205,78 @@ fn continuity_failure_reason_metrics_skip_oversized_line_and_continue() {
         BTreeMap::from([("previous_response_not_found".to_string(), 1)])
     );
     fs::remove_file(&log_path).expect("test log should clean up");
+}
+
+#[test]
+fn compiled_broker_log_framing_retains_incomplete_tail_until_newline() {
+    let _guard = lock_continuity_cache();
+    clear_runtime_broker_continuity_failure_reason_cache_for_test();
+    let log_path = temp_log_path("mojo-partial-frame");
+    let first = b"chain_retried_owner reason=first\n";
+    let partial = b"stale_continuation reason=second";
+    let mut contents = [first.as_slice(), partial.as_slice()].concat();
+    fs::write(&log_path, &contents).unwrap();
+
+    let (metrics, parsed_len) = runtime_broker_continuity_failure_reason_metrics_from_log_range(
+        &log_path,
+        0,
+        contents.len() as u64,
+    )
+    .unwrap();
+    assert_eq!(parsed_len, first.len() as u64);
+    assert_eq!(metrics.chain_retried_owner.get("first"), Some(&1));
+    assert!(metrics.stale_continuation.is_empty());
+
+    contents.push(b'\n');
+    fs::write(&log_path, &contents).unwrap();
+    let (delta, parsed_end) = runtime_broker_continuity_failure_reason_metrics_from_log_range(
+        &log_path,
+        parsed_len,
+        contents.len() as u64,
+    )
+    .unwrap();
+    assert_eq!(parsed_end, contents.len() as u64);
+    assert_eq!(delta.stale_continuation.get("second"), Some(&1));
+    fs::remove_file(log_path).unwrap();
+}
+
+#[test]
+fn compiled_broker_log_framing_discards_oversize_and_recovers_on_following_lines() {
+    let _guard = lock_continuity_cache();
+    clear_runtime_broker_continuity_failure_reason_cache_for_test();
+    let log_path = temp_log_path("mojo-skip-overflow");
+    let mut contents = Vec::new();
+    contents.extend_from_slice(b"chain_retried_owner reason=before\r\n");
+    contents.extend(std::iter::repeat_n(b'x', 1024 * 1024));
+    contents.extend_from_slice(b"stale_continuation reason=poisoned\n");
+    contents.extend_from_slice(b"chain_dead_upstream_confirmed reason=after\n");
+    contents.extend_from_slice(b"stale_continuation reason=last-partial");
+
+    fs::write(&log_path, &contents).unwrap();
+    let (metrics, parsed_len) = runtime_broker_continuity_failure_reason_metrics_from_log_range(
+        &log_path,
+        0,
+        contents.len() as u64,
+    )
+    .unwrap();
+    assert_eq!(metrics.chain_retried_owner.get("before"), Some(&1));
+    assert_eq!(metrics.chain_dead_upstream_confirmed.get("after"), Some(&1));
+    assert!(metrics.stale_continuation.is_empty());
+    assert!(parsed_len < contents.len() as u64);
+    assert_eq!(
+        parsed_len,
+        contents.len() as u64 - b"stale_continuation reason=last-partial".len() as u64,
+    );
+
+    contents.push(b'\n');
+    fs::write(&log_path, &contents).unwrap();
+    let (last, end) = runtime_broker_continuity_failure_reason_metrics_from_log_range(
+        &log_path,
+        parsed_len,
+        contents.len() as u64,
+    )
+    .unwrap();
+    assert_eq!(last.stale_continuation.get("last-partial"), Some(&1));
+    assert_eq!(end, contents.len() as u64);
+    fs::remove_file(log_path).unwrap();
 }

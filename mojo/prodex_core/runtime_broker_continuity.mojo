@@ -1408,3 +1408,66 @@ def prodex_runtime_broker_termination_outcome_plan_v1(
     if termination_outcome == 2:
         return BROKER_TERMINATION_DISCARD_STALE
     return BROKER_TERMINATION_FAILURE
+
+
+# Streaming broker-log line framing and bounded buffering. The host retains
+# BufRead, metric aggregation and Vec effects; the compiled broker owner
+# decides first-LF consumption, oversized-state transitions and whether a
+# complete line may be emitted to continuity parsing.
+comptime BROKER_LOG_FRAME_ABI: Int64 = 1
+comptime BROKER_LOG_FRAME_MAX_LINE_BYTES: Int64 = 1_048_576
+comptime BROKER_LOG_FRAME_MAX_INPUT: Int64 = 64 * 1024 * 1024
+comptime BROKER_LOG_FRAME_SKIP: Int64 = 0
+comptime BROKER_LOG_FRAME_APPEND: Int64 = 1
+comptime BROKER_LOG_FRAME_CLEAR_OVERSIZED: Int64 = 2
+
+
+@export("prodex_runtime_broker_log_frame_plan_v1")
+def prodex_runtime_broker_log_frame_plan_v1(
+    abi_version: Int64,
+    data_address: UInt, data_length: Int64,
+    buffered_line_length: Int64,
+    already_oversized: Int64,
+    output_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != BROKER_LOG_FRAME_ABI:
+        return 4
+    if (
+        data_length < 0 or data_length > BROKER_LOG_FRAME_MAX_INPUT
+        or (data_length > 0 and data_address == 0)
+        or buffered_line_length < 0
+        or (already_oversized != 0 and already_oversized != 1)
+        or output_address == 0 or output_address % 8 != 0
+    ):
+        return 1
+    var take = data_length
+    var complete = False
+    if data_length > 0:
+        var ptr = Pointer[mut=False, UInt8, ImmUntrackedOrigin](
+            unsafe_from_address=Int(data_address)
+        )
+        for index in range(data_length):
+            if ptr[unsafe_offset=index] == 10:
+                take = index + 1
+                complete = True
+                break
+
+    var action = BROKER_LOG_FRAME_APPEND
+    var oversized = already_oversized == 1
+    if oversized:
+        action = BROKER_LOG_FRAME_SKIP
+    elif (
+        buffered_line_length > BROKER_LOG_FRAME_MAX_LINE_BYTES
+        or take > BROKER_LOG_FRAME_MAX_LINE_BYTES - buffered_line_length
+    ):
+        action = BROKER_LOG_FRAME_CLEAR_OVERSIZED
+        oversized = True
+    var output = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    output[unsafe_offset=0] = take
+    output[unsafe_offset=1] = Int64(complete)
+    output[unsafe_offset=2] = action
+    output[unsafe_offset=3] = Int64(oversized)
+    output[unsafe_offset=4] = Int64(complete and not oversized)
+    return 0
