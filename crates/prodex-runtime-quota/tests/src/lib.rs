@@ -619,6 +619,49 @@ fn probe_cache_entry_freshness_uses_configured_windows() {
 }
 
 #[test]
+fn compiled_cache_freshness_preserves_future_timestamps_and_saturation() {
+    let mut fresh = probe_cache_entry(0);
+    fresh.checked_at = i64::MAX;
+    assert!(runtime_profile_usage_cache_is_fresh(&fresh, i64::MIN, 60));
+    assert_eq!(
+        runtime_profile_probe_cache_freshness(&fresh, i64::MIN, 60, 300),
+        RuntimeProbeCacheFreshness::Fresh
+    );
+
+    let mut expired = probe_cache_entry(0);
+    expired.checked_at = i64::MIN;
+    assert!(!runtime_profile_usage_cache_is_fresh(
+        &expired,
+        i64::MAX,
+        60
+    ));
+    assert_eq!(
+        runtime_profile_probe_cache_freshness(&expired, i64::MAX, 60, 300),
+        RuntimeProbeCacheFreshness::Expired
+    );
+    assert!(!runtime_profile_usage_cache_is_fresh(
+        &probe_cache_entry(10),
+        10,
+        -1
+    ));
+    assert!(runtime_profile_usage_cache_is_fresh(
+        &probe_cache_entry(10),
+        10,
+        0
+    ));
+    assert!(runtime_profile_usage_cache_is_fresh(
+        &probe_cache_entry(10),
+        20,
+        10
+    ));
+    assert!(!runtime_profile_usage_cache_is_fresh(
+        &probe_cache_entry(10),
+        21,
+        10
+    ));
+}
+
+#[test]
 fn quota_summary_log_fields_use_existing_reason_labels() {
     let summary = RuntimeQuotaSummary {
         five_hour: RuntimeQuotaWindowSummary {

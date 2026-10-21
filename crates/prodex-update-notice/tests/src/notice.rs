@@ -164,6 +164,33 @@ fn cached_update_policy_preserves_source_age_and_clock_edges() {
 }
 
 #[test]
+fn codex_cached_version_uses_compiled_age_policy_at_clock_extremes() {
+    let paths = test_paths("codex-cache-age");
+    let mut cache = UpdateCheckCache {
+        codex_latest_version: Some("999.0.0".to_string()),
+        codex_checked_at: Some(Local::now().timestamp()),
+        ..UpdateCheckCache::default()
+    };
+    save_update_check_cache(&paths, &cache).expect("save current Codex version cache");
+    assert_eq!(
+        cached_latest_codex_version(&paths, "0.1.0").unwrap(),
+        Some("999.0.0".to_string())
+    );
+
+    cache.codex_checked_at = Some(i64::MIN);
+    save_update_check_cache(&paths, &cache).expect("save expired Codex version cache");
+    assert_eq!(cached_latest_codex_version(&paths, "0.1.0").unwrap(), None);
+
+    cache.codex_checked_at = Some(i64::MAX);
+    save_update_check_cache(&paths, &cache).expect("save future Codex version cache");
+    assert_eq!(
+        cached_latest_codex_version(&paths, "0.1.0").unwrap(),
+        Some("999.0.0".to_string())
+    );
+    let _ = fs::remove_dir_all(paths.root);
+}
+
+#[test]
 fn prodex_version_status_uses_mojo_update_decision_for_cached_releases() {
     let newer_paths = test_paths("version-status-newer");
     save_update_check_cache(
