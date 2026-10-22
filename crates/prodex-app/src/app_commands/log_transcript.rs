@@ -160,9 +160,14 @@ fn operation_transcript_event(
                 }
             };
             let output = match kind {
-                TranscriptOperationKind::ShellCall => transcript_tool_name(node.text),
+                TranscriptOperationKind::ShellCall
+                | TranscriptOperationKind::FunctionCall
+                | TranscriptOperationKind::CustomCall => transcript_tool_name(node.text),
                 TranscriptOperationKind::ShellOutput => {
                     transcript_visible_tool_output(&scalar).unwrap_or_default()
+                }
+                TranscriptOperationKind::ToolOutput => {
+                    transcript_visible_tool_output(node.text).unwrap_or_default()
                 }
                 TranscriptOperationKind::ToolProtocol
                 | TranscriptOperationKind::McpProtocol
@@ -262,46 +267,13 @@ fn response_item_transcript_event(
             })
         }
         TranscriptItemKind::FunctionCall => {
-            let name = payload
-                .get("name")
-                .and_then(serde_json::Value::as_str)
-                .map(transcript_tool_name)
-                .unwrap_or_else(|| "tool".to_string());
-            let arguments = payload
-                .get("arguments")
-                .and_then(serde_json::Value::as_str)
-                .unwrap_or("");
-            Some(TranscriptEvent {
-                timestamp,
-                source: format!("tool-call:{name}"),
-                text: arguments.to_string(),
-            })
+            operation_transcript_event(timestamp, payload, TranscriptOperationKind::FunctionCall)
         }
         TranscriptItemKind::FunctionOutput | TranscriptItemKind::CustomOutput => {
-            let output = transcript_visible_tool_output(
-                payload.get("output").and_then(serde_json::Value::as_str)?,
-            )?;
-            Some(TranscriptEvent {
-                timestamp,
-                source: "tool-output".to_string(),
-                text: output,
-            })
+            operation_transcript_event(timestamp, payload, TranscriptOperationKind::ToolOutput)
         }
         TranscriptItemKind::CustomCall => {
-            let name = payload
-                .get("name")
-                .and_then(serde_json::Value::as_str)
-                .map(transcript_tool_name)
-                .unwrap_or_else(|| "custom-tool".to_string());
-            let input = payload
-                .get("input")
-                .and_then(serde_json::Value::as_str)
-                .unwrap_or("");
-            Some(TranscriptEvent {
-                timestamp,
-                source: format!("tool-call:{name}"),
-                text: input.to_string(),
-            })
+            operation_transcript_event(timestamp, payload, TranscriptOperationKind::CustomCall)
         }
         TranscriptItemKind::ShellCall => {
             operation_transcript_event(timestamp, payload, TranscriptOperationKind::ShellCall)

@@ -52,11 +52,24 @@ def main() raises:
     verify(nodes, values, output, metadata, 9, "[[\"tool-output\",\"\"]]")
     nodes[unsafe_offset=1].key = view("other")
     verify(nodes, values, output, metadata, 9, "[[\"tool-output\",\"visible\"]]")
+    nodes[unsafe_offset=1].kind = JSON_STRING
+    nodes[unsafe_offset=1].key = view("arguments")
+    nodes[unsafe_offset=1].text = view("raw 東京")
+    nodes[unsafe_offset=2].key = view("input")
+    nodes[unsafe_offset=2].text = view("custom\nraw")
+    nodes[unsafe_offset=3].kind = JSON_STRING
+    verify(nodes, values, output, metadata, 10, "[[\"tool-call:sh\",\"raw 東京\"]]")
+    verify(nodes, values, output, metadata, 11, "[[\"tool-call:sh\",\"custom\\nraw\"]]")
+    nodes[unsafe_offset=3].kind = JSON_NULL
+    verify(nodes, values, output, metadata, 11, "[[\"tool-call:custom-tool\",\"custom\\nraw\"]]")
+    nodes[unsafe_offset=1].key = view("output")
+    values[unsafe_offset=3] = view("full result")
+    verify(nodes, values, output, metadata, 12, "[[\"tool-output\",\"full result\"]]")
     output[unsafe_offset=0] = 61
     metadata[unsafe_offset=0] = 71
     assert prodex_mojo_log_transcript_context_v1(1, 9, 0, UInt64(Int(nodes)), 4, 0, 0,
         UInt64(Int(values)), 8, 0, UInt64(Int(output)), 1, UInt64(Int(metadata))) == 3
-    assert prodex_mojo_log_transcript_context_v1(1, 10, 0, UInt64(Int(nodes)), 4, 0, 0,
+    assert prodex_mojo_log_transcript_context_v1(1, 9223372036854775807, 0, UInt64(Int(nodes)), 4, 0, 0,
         UInt64(Int(values)), 8, 0, UInt64(Int(output)), 128, UInt64(Int(metadata))) == 1
     assert prodex_mojo_log_transcript_context_v1(2, 8, 0, UInt64(Int(nodes)), 4, 0, 0,
         UInt64(Int(values)), 8, 0, UInt64(Int(output)), 128, UInt64(Int(metadata))) == 4

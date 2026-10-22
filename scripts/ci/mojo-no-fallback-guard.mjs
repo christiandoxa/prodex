@@ -427,6 +427,8 @@ const CORE_LEXICAL_BROKER_PATHS = "crates/prodex-app/src/runtime_persistence/pat
 const CORE_LEXICAL_APP_HOUSEKEEPING = "crates/prodex-app/src/housekeeping.rs";
 const CORE_LEXICAL_LIVE_LOG = "crates/prodex-app/src/app_commands/log_live.rs";
 const PROMOTED_FILES = [
+  "crates/prodex-mojo-core/src/json/log_transcript_tool_tests.rs",
+  "crates/prodex-app/src/app_commands/log_transcript_tool_tests.rs",
   "crates/prodex-mojo-core/src/json/log_transcript_shell_tests.rs",
   "crates/prodex-app/src/app_commands/log_transcript_shell_tests.rs",
   "crates/prodex-app/src/app_commands/info_handler.rs",
@@ -12229,13 +12231,13 @@ export function findViolations(files) {
   const transcriptPolicyViolations = files.flatMap(([filePath, contents]) => {
     if (filePath === TRANSCRIPT_CONTEXT_ADAPTER_FILE) {
       return ["prodex_mojo_log_transcript_context_v1(", "transform_json(", "TranscriptContextKind",
-        "transform_json_with_views(", "pub fn log_transcript_operation(", "TranscriptOperationKind", "ShellCall = 8", "ShellOutput = 9"]
+        "transform_json_with_views(", "pub fn log_transcript_operation(", "TranscriptOperationKind", "ShellCall = 8", "ShellOutput = 9", "FunctionCall = 10", "CustomCall = 11", "ToolOutput = 12"]
         .filter((marker) => !contents.includes(marker))
         .map((marker) => `${filePath}: transcript context ABI must retain ${marker}`);
     }
     if (filePath === TRANSCRIPT_CONTEXT_MOJO_FILE) {
       return ['@export("prodex_mojo_log_transcript_context_v1")', "if provider < 0:",
-        "transcript_context_fields(", "transcript_reasoning_part(", "transcript_reasoning_text(", "transcript_operation_render(", "operation > 9"]
+        "transcript_context_fields(", "transcript_reasoning_part(", "transcript_reasoning_text(", "transcript_operation_render(", "operation > 12"]
         .filter((marker) => !contents.includes(marker))
         .map((marker) => `${filePath}: transcript context semantics must remain compiled Mojo-owned (${marker})`);
     }
@@ -12249,7 +12251,7 @@ export function findViolations(files) {
     }
     if (filePath === TRANSCRIPT_OPERATION_MOJO_FILE) {
       return ["def transcript_protocol_fields(", "def transcript_status_fields(",
-        "def transcript_operation_fallback(", "def transcript_operation_render(", "if not has_status:", "def transcript_shell_render("]
+        "def transcript_operation_fallback(", "def transcript_operation_render(", "if not has_status:", "def transcript_tool_render("]
         .filter((marker) => !contents.includes(marker))
         .map((marker) => `${filePath}: transcript operation semantics must remain compiled Mojo-owned (${marker})`);
     }
@@ -12266,6 +12268,20 @@ export function findViolations(files) {
         "shell_projection_keeps_large_container_text_and_serde_wire_spelling", "prodex_mojo_core::MOJO_ACTIVE"]
         .filter((marker) => !contents.includes(marker))
         .map((marker) => filePath + ": shell transcript caller coverage must retain " + marker);
+    }
+    if (filePath === "crates/prodex-mojo-core/src/json/log_transcript_tool_tests.rs") {
+      return ["compiled_tool_calls_use_raw_arguments_and_prepared_names_with_typed_defaults",
+        "compiled_tool_results_require_strings_and_preserve_full_prepared_output",
+        "compiled_tool_abi_checks_new_modes_before_output_mutation"]
+        .filter((marker) => !contents.includes(marker))
+        .map((marker) => filePath + ": tool transcript ABI coverage must retain " + marker);
+    }
+    if (filePath === "crates/prodex-app/src/app_commands/log_transcript_tool_tests.rs") {
+      return ["tool_calls_keep_field_types_defaults_and_full_raw_arguments",
+        "tool_outputs_keep_string_only_shape_full_text_and_ansi_projection",
+        "tool_projection_retains_final_safe_text_cap_without_scalar_truncation", "prodex_mojo_core::MOJO_ACTIVE"]
+        .filter((marker) => !contents.includes(marker))
+        .map((marker) => filePath + ": tool transcript caller coverage must retain " + marker);
     }
     if (filePath === TRANSCRIPT_OPERATION_CALLER_TEST_FILE) {
       return ["operation_projection_preserves_alias_priority_and_inferred_subagent_status",
@@ -12291,6 +12307,9 @@ export function findViolations(files) {
         "TranscriptOperationKind::ShellCall",
         "TranscriptOperationKind::ShellOutput",
         "transcript_visible_tool_output(&scalar)",
+        "TranscriptOperationKind::FunctionCall",
+        "TranscriptOperationKind::CustomCall",
+        "TranscriptOperationKind::ToolOutput",
       ];
       const violations = required
         .filter((call) => !contents.includes(call))
@@ -12302,6 +12321,11 @@ export function findViolations(files) {
       }
       if (/\bfn\s+(?:shell_call_transcript_event|shell_output_transcript_event|transcript_json_scalar|transcript_json_text)\s*\(/u.test(contents)) {
         violations.push(filePath + ": contains restored Rust shell transcript field policy");
+      }
+      for (const selector of ['.get("name")', '.get("arguments")', '.get("input")', '.get("output")', 'format!("tool-call:']) {
+        if (contents.includes(selector)) {
+          violations.push(filePath + ": contains restored Rust tool transcript field policy");
+        }
       }
       const production = contents.split("#[cfg(test)]", 1)[0];
       if (/\bfn\s+(?:session_meta_transcript_events|turn_context_transcript_event|reasoning_summary_text|transcript_text_from_reasoning|status_transcript_event|protocol_operation_transcript_event)\s*\(/u.test(contents)) {
@@ -17814,6 +17838,9 @@ function selfTest() {
     "TranscriptOperationKind::ShellCall",
     "TranscriptOperationKind::ShellOutput",
     "transcript_visible_tool_output(&scalar)",
+    "TranscriptOperationKind::FunctionCall",
+    "TranscriptOperationKind::CustomCall",
+    "TranscriptOperationKind::ToolOutput",
   ].join("\n");
   assert.deepEqual(findViolations([[LOG_TRANSCRIPT_FILE, transcriptConsumerCalls]]), []);
   assert.match(findViolations([[LOG_TRANSCRIPT_FILE,
@@ -18180,6 +18207,10 @@ function selfTest() {
 
   for (const symbol of ["shell_call_transcript_event", "shell_output_transcript_event", "transcript_json_scalar", "transcript_json_text"]) {
     assert.match(findViolations([[LOG_TRANSCRIPT_FILE, transcriptConsumerCalls + "\nfn " + symbol + "() {}"]]).join("\n"), /restored Rust shell transcript/u);
+  }
+
+  for (const selector of ['.get("name")', '.get("arguments")', '.get("input")', '.get("output")', 'format!("tool-call:']) {
+    assert.match(findViolations([[LOG_TRANSCRIPT_FILE, transcriptConsumerCalls + selector]]).join("\n"), /restored Rust tool transcript/u);
   }
 
   const infoPanelFile = "crates/prodex-app/src/app_commands/info_handler.rs";

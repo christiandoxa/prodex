@@ -64,6 +64,9 @@ mod tests;
 #[cfg(test)]
 #[path = "log_throughput_tests.rs"]
 mod throughput_tests;
+#[cfg(test)]
+#[path = "log_transcript_tool_tests.rs"]
+mod tool_tests;
 
 const LOG_SNAPSHOT_TAIL_BYTES: usize = 1024 * 1024;
 const SESSION_SNAPSHOT_TAIL_BYTES: usize = 2 * 1024 * 1024;

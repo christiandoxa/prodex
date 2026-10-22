@@ -55,14 +55,17 @@ pub enum TranscriptOperationKind {
     ErrorStatus = 7,
     ShellCall = 8,
     ShellOutput = 9,
+    FunctionCall = 10,
+    CustomCall = 11,
+    ToolOutput = 12,
 }
 
 /// Native scalar/JSON acquisition and existing redacted display text for one node.
 #[derive(Default)]
 pub struct TranscriptOperationValue {
     pub scalar: String,
-    /// Final safe text for protocol/status; sanitized name for shell calls;
-    /// visible tool output for shell results. The compiled mode chooses its field.
+    /// Final safe text for protocol/status; sanitized name for calls;
+    /// visible tool output for results. The compiled mode chooses its field.
     pub output: String,
 }
 
@@ -108,3 +111,7 @@ mod operation_tests;
 #[cfg(test)]
 #[path = "log_transcript_shell_tests.rs"]
 mod shell_tests;
+
+#[cfg(test)]
+#[path = "log_transcript_tool_tests.rs"]
+mod tool_tests;
