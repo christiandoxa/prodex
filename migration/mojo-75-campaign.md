@@ -8437,3 +8437,15 @@ threshold and selects the first minimum across primary/weekly windows. Keep
 past-reset eligibility, absent windows, primary-first ties and all signed
 limits while leaving the clock, prompt and consume request in Rust. This
 must remain distinct from automatic redemption's quota/availability policy.
+
+## Manual redemption reset selection compiled in Mojo (2026-10-22)
+
+Manual confirmation now uses compiled saturated time arithmetic, eligibility
+and primary-first nearest-window selection. Rust's filtering/minimum and
+per-window eligibility implementation are deleted. Clock, prompt and consume
+effects stay in Rust; ABI errors stop before consumption. Both manual and
+automatic redemption share the original signed subtraction kernel. Direct
+Mojo, four manual/confirmation bridge, six auto-redemption bridge and eight
+caller tests plus strict workspace Clippy pass. Official share is
+36.30965676420222% (136,549 Mojo / 239,519 Rust LOC). The 75% goal remains open.
+Detailed evidence is in `migration/manual-redeem-reset-mojo-20261022.md`.

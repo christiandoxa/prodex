@@ -427,6 +427,9 @@ const CORE_LEXICAL_BROKER_PATHS = "crates/prodex-app/src/runtime_persistence/pat
 const CORE_LEXICAL_APP_HOUSEKEEPING = "crates/prodex-app/src/housekeeping.rs";
 const CORE_LEXICAL_LIVE_LOG = "crates/prodex-app/src/app_commands/log_live.rs";
 const PROMOTED_FILES = [
+  "crates/prodex-app/src/app_commands/redeem.rs",
+  "crates/prodex-mojo-core/src/confirmation_policy.rs",
+  "mojo/prodex_core/confirmation_policy.mojo",
   "crates/prodex-optional-tools/src/tree.rs",
   "mojo/prodex_core/rich_text.mojo",
   "crates/prodex-app/src/super_expose/run/helpers.rs",
@@ -8009,6 +8012,25 @@ export function findViolations(files) {
     }
     return [];
   });
+  const manualRedeemResetViolations = files.flatMap(([filePath, contents]) => {
+    if (filePath === "crates/prodex-app/src/app_commands/redeem.rs") {
+      const body = contents.match(/fn nearest_manual_redeem_reset\([^]*?(?=\n#\[derive)/u)?.[0] ?? "";
+      return body.includes("manual_redeem_reset_window(")
+        && !/\.min_by_key\(|\.filter_map\(|\.saturating_sub\(|fn manual_redeem_window_near_reset/u.test(body)
+        ? [] : [filePath + ": manual redeem reset selection must remain compiled Mojo-owned"];
+    }
+    if (filePath === "crates/prodex-mojo-core/src/confirmation_policy.rs") {
+      return contents.includes("prodex_manual_redeem_reset_v1(")
+        && !contents.includes(".saturating_sub(")
+        ? [] : [filePath + ": manual redeem bridge must retain compiled reset authority"];
+    }
+    if (filePath === "mojo/prodex_core/confirmation_policy.mojo") {
+      return contents.includes('@export("prodex_manual_redeem_reset_v1")')
+        && contents.includes("runtime_i64_saturating_sub(")
+        ? [] : [filePath + ": manual redeem reset policy must share compiled saturated arithmetic"];
+    }
+    return [];
+  });
   const superExposeViolations = files
     .filter(([filePath, contents]) => filePath === SUPER_EXPOSE_FILE &&
       (!contents.includes("prodex_mojo_core::launch::find_super_expose_alias_index") ||
@@ -14051,6 +14073,7 @@ export function findViolations(files) {
     ...superExposeProtocolViolations, ...superExposeExecViolations, ...superExposeViolations,
     ...superRunRetentionViolations, ...superRunEventViolations, ...superTextClipViolations,
     ...superOverrideStringViolations, ...superRunOutputViolations, ...optionalTreeOrderViolations,
+    ...manualRedeemResetViolations,
     ...geminiFallbackViolations, ...geminiGenerationViolations, ...geminiTranslatorHardReplacementViolations, ...geminiBridgeFallbackViolations, ...geminiSignatureViolations, ...geminiResponseConformanceViolations,
     ...geminiToolResponseOrderViolations, ...geminiApplyPatchViolations,
     ...hardReplacementViolations, ...precommitBudgetOracleViolations,
@@ -18053,6 +18076,13 @@ function selfTest() {
   const optionalTreeCaller = "core_file_policy::lexical_file_key_order(&keys, false) for index in order";
   assert.deepEqual(findViolations([[optionalTreeFile, optionalTreeCaller]]), []);
   assert.match(findViolations([[optionalTreeFile, optionalTreeCaller + "files.sort_by("]]).join("\n"), /optional-tool tree digest/u);
+
+  const redeemResetFile = "crates/prodex-app/src/app_commands/redeem.rs";
+  const redeemResetCaller = "fn nearest_manual_redeem_reset() { manual_redeem_reset_window( }\n#[derive";
+  assert.deepEqual(findViolations([[redeemResetFile, redeemResetCaller]]), []);
+  for (const restored of [".min_by_key(", ".filter_map(", ".saturating_sub(", "fn manual_redeem_window_near_reset"]) {
+    assert.match(findViolations([[redeemResetFile, redeemResetCaller.replace("manual_redeem_reset_window(", restored + " manual_redeem_reset_window(")]]).join("\n"), /manual redeem reset selection/u);
+  }
 
 }
 

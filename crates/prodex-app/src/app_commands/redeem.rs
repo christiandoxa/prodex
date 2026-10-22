@@ -1,10 +1,13 @@
-use prodex_mojo_core::confirmation_policy::{ConfirmationPolicy, confirmation_value};
+use prodex_mojo_core::confirmation_policy::{
+    ConfirmationPolicy, ManualRedeemResetInput, ManualRedeemResetWindow, confirmation_value,
+    manual_redeem_reset_window,
+};
 use std::io::{self, IsTerminal};
 
 use anyhow::{Context, Result, bail};
 use crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
 use prodex_domain::RequestId;
-use prodex_quota::{UsageResponse, UsageWindow, format_precise_reset_time};
+use prodex_quota::{UsageResponse, format_precise_reset_time};
 use ratatui::layout::{Constraint, Direction, Layout};
 use ratatui::style::Modifier;
 use ratatui::text::{Line, Span};
@@ -71,7 +74,8 @@ fn confirm_manual_redeem_if_reset_near(
         usage,
         chrono::Local::now().timestamp(),
         MANUAL_REDEEM_NEAR_RESET_SECONDS,
-    ) else {
+    )?
+    else {
         return Ok(());
     };
 
@@ -101,31 +105,29 @@ fn nearest_manual_redeem_reset(
     usage: &UsageResponse,
     now: i64,
     near_reset_seconds: i64,
-) -> Option<ManualRedeemNearReset> {
-    let rate_limit = usage.rate_limit.as_ref()?;
-    [
-        ("5h", rate_limit.primary_window.as_ref()),
-        ("weekly", rate_limit.secondary_window.as_ref()),
-    ]
-    .into_iter()
-    .filter_map(|(label, window)| {
-        manual_redeem_window_near_reset(label, window?, now, near_reset_seconds)
+) -> Result<Option<ManualRedeemNearReset>> {
+    let rate_limit = usage.rate_limit.as_ref();
+    let selected = manual_redeem_reset_window(ManualRedeemResetInput {
+        primary_reset_at: rate_limit
+            .and_then(|limit| limit.primary_window.as_ref())
+            .and_then(|window| window.reset_at),
+        weekly_reset_at: rate_limit
+            .and_then(|limit| limit.secondary_window.as_ref())
+            .and_then(|window| window.reset_at),
+        now,
+        near_reset_seconds,
     })
-    .min_by_key(|reset| reset.reset_at)
-}
-
-fn manual_redeem_window_near_reset(
-    label: &'static str,
-    window: &UsageWindow,
-    now: i64,
-    near_reset_seconds: i64,
-) -> Option<ManualRedeemNearReset> {
-    let reset_at = window.reset_at?;
-    let seconds_until_reset = reset_at.saturating_sub(now);
-    if seconds_until_reset <= near_reset_seconds {
-        return Some(ManualRedeemNearReset { label, reset_at });
-    }
-    None
+    .map_err(|error| anyhow::anyhow!("compiled manual redeem reset selection failed: {error:?}"))?;
+    Ok(selected.map(|window| match window {
+        ManualRedeemResetWindow::Primary { reset_at } => ManualRedeemNearReset {
+            label: "5h",
+            reset_at,
+        },
+        ManualRedeemResetWindow::Weekly { reset_at } => ManualRedeemNearReset {
+            label: "weekly",
+            reset_at,
+        },
+    }))
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
