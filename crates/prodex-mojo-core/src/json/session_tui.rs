@@ -1,5 +1,5 @@
 //! Native observed fields for the compiled session TUI presentation.
-use super::{StringView, render_native_json, signed};
+use super::{StringView, render_native_text, signed};
 use crate::MojoError;
 
 /// Existing inline and scrollable session-list presentations.
@@ -74,7 +74,7 @@ pub fn session_tui_rows_json(
         });
     }
     // Typed rows keep their native ABI and share metadata/output validation.
-    render_native_json(|phase, address, capacity, metadata| {
+    render_native_text(|phase, address, capacity, metadata| {
         // SAFETY: borrowed rows and strings outlive this synchronous call;
         // the shared runner owns distinct output and metadata allocations.
         unsafe {

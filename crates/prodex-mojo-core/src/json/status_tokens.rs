@@ -1,5 +1,5 @@
 //! Native observations for the compiled status token-panel presentation.
-use super::{StringView, render_native_json};
+use super::{StringView, render_native_text};
 use crate::{MojoError, info_render::TokenUsageCounts};
 
 /// Observed token counters and display text; empty timestamps retain their presence.
@@ -58,7 +58,7 @@ pub fn status_token_panel_json(
         ],
     });
     let mut scratch = [0_u8; 128];
-    render_native_json(|phase, address, capacity, metadata| {
+    render_native_text(|phase, address, capacity, metadata| {
         // SAFETY: the observed row/strings outlive this synchronous call; scratch,
         // output and metadata are distinct caller-owned allocations.
         unsafe {

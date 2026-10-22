@@ -1,6 +1,34 @@
 use super::*;
 
 #[test]
+fn super_dry_run_reports_default_profile_and_disabled_redaction_completion() {
+    let fixture = setup_fixture();
+    let output = run_prodex(
+        &fixture,
+        &[
+            "super",
+            "--dry-run",
+            "--skip-quota-check",
+            "--no-presidio",
+            "--no-sub-agent",
+            "exec",
+            "hello",
+        ],
+    );
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    assert!(stdout.contains("Profile: (active/default)\n"), "{stdout}");
+    assert!(
+        stdout.ends_with("Presidio redaction: disabled (not started)\n"),
+        "{stdout}"
+    );
+}
+
+#[test]
 fn super_dry_run_presidio_flag_reports_redaction_enabled() {
     let fixture = setup_fixture();
 

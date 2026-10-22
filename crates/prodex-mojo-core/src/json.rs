@@ -67,7 +67,7 @@ pub use self::session_prompt_write::{
 mod native_text;
 mod session_report;
 #[cfg(feature = "mojo-runtime")]
-use native_text::render_native_json;
+pub(crate) use native_text::render_native_text;
 #[cfg(feature = "mojo-runtime")]
 mod session_tui;
 #[cfg(feature = "mojo-runtime")]
@@ -194,7 +194,7 @@ pub enum ChatToolOperation {
 
 #[repr(C)]
 #[derive(Clone, Copy, Default)]
-struct StringView {
+pub(crate) struct StringView {
     address: u64,
     length: u64,
 }

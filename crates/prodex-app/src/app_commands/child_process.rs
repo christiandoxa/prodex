@@ -390,11 +390,7 @@ pub(crate) fn print_runtime_launch_dry_run(
 ) -> Result<()> {
     let upstream_no_proxy = request.upstream_no_proxy;
     let presidio_redaction_enabled = request.presidio_redaction_enabled;
-    let profile = if request.profile.is_some() {
-        "<configured>"
-    } else {
-        "(active/default)"
-    };
+    let configured_profile = request.profile.is_some();
     let prepared = super::runtime_launch::prepare_runtime_launch_dry_run(request)?;
     let child =
         profile_openai_compatible_dry_run_child(&prepared.paths, &prepared.codex_home, child)?;
@@ -412,26 +408,21 @@ pub(crate) fn print_runtime_launch_dry_run(
         SUPER_LOCAL_PROVIDER_ID,
         child,
     );
-    let mut output = prodex_runtime_launch::runtime_launch_dry_run_report(
+    let output = prodex_runtime_launch::runtime_launch_dry_run_report(
         flow,
         &prepared.codex_home,
         runtime_proxy,
         &plan,
     )?;
-    output.push_str(&format!("Profile: {profile}\n"));
-    if let Some(extra_report) = extra_report {
-        output.push_str(extra_report);
-        output.push('\n');
-    }
-    output.push_str(&format!(
-        "Presidio redaction: {}",
-        if presidio_redaction_enabled {
-            "enabled (would start at launch)"
-        } else {
-            "disabled (not started)"
-        }
-    ));
-    output.push('\n');
+    let output = prodex_mojo_core::launch::complete_runtime_launch_report(
+        prodex_mojo_core::launch::RuntimeLaunchReportCompletion {
+            report: &output,
+            configured_profile,
+            extra_report,
+            presidio_redaction_enabled,
+        },
+    )
+    .map_err(|error| anyhow::anyhow!("Mojo runtime launch completion failed: {error:?}"))?;
     print_runtime_launch_dry_run_report(flow, &output)?;
     Ok(())
 }
