@@ -1,23 +1,30 @@
 use super::StatusOverview;
 use anyhow::Result;
 use prodex_mojo_core::json::{StatusTokenPanelInput, status_token_panel_json};
+use ratatui::style::Modifier;
 use ratatui::text::{Line, Span};
 use serde::Deserialize;
-use terminal_ui::{tui_accent_style, tui_metric_style, tui_muted_style, tui_secondary_style};
+use terminal_ui::{
+    tui_accent_style, tui_error_style, tui_hint_style, tui_metric_style, tui_muted_style,
+    tui_secondary_style, tui_title_style,
+};
 
 #[derive(Deserialize)]
 #[serde(rename_all = "snake_case")]
-enum TokenTone {
+pub(super) enum StatusTuiTone {
     Raw,
     Secondary,
     Metric,
     Muted,
     Accent,
+    Title,
+    Error,
+    HintBold,
 }
 
 #[derive(Deserialize)]
 struct TokenPresentation {
-    lines: Vec<Vec<(TokenTone, String)>>,
+    lines: Vec<Vec<(StatusTuiTone, String)>>,
     history_title: String,
 }
 
@@ -37,23 +44,26 @@ pub(super) fn status_token_panel_lines(
     .map_err(|error| anyhow::anyhow!("Mojo status token presentation failed: {error:?}"))?;
     let report: TokenPresentation = serde_json::from_str(&rendered)?;
     // Ratatui styles stay at the host boundary; Mojo owns text, order and tone.
-    let lines = report
-        .lines
-        .into_iter()
-        .map(|spans| {
-            Line::from(
-                spans
-                    .into_iter()
-                    .map(|(tone, text)| match tone {
-                        TokenTone::Raw => Span::raw(text),
-                        TokenTone::Secondary => Span::styled(text, tui_secondary_style()),
-                        TokenTone::Metric => Span::styled(text, tui_metric_style()),
-                        TokenTone::Muted => Span::styled(text, tui_muted_style()),
-                        TokenTone::Accent => Span::styled(text, tui_accent_style()),
-                    })
-                    .collect::<Vec<_>>(),
-            )
-        })
-        .collect();
+    let lines = report.lines.into_iter().map(status_tui_line).collect();
     Ok((lines, report.history_title))
+}
+
+pub(super) fn status_tui_line(spans: Vec<(StatusTuiTone, String)>) -> Line<'static> {
+    Line::from(
+        spans
+            .into_iter()
+            .map(|(tone, text)| match tone {
+                StatusTuiTone::Title => Span::styled(text, tui_title_style()),
+                StatusTuiTone::Error => Span::styled(text, tui_error_style()),
+                StatusTuiTone::HintBold => {
+                    Span::styled(text, tui_hint_style().add_modifier(Modifier::BOLD))
+                }
+                StatusTuiTone::Raw => Span::raw(text),
+                StatusTuiTone::Secondary => Span::styled(text, tui_secondary_style()),
+                StatusTuiTone::Metric => Span::styled(text, tui_metric_style()),
+                StatusTuiTone::Muted => Span::styled(text, tui_muted_style()),
+                StatusTuiTone::Accent => Span::styled(text, tui_accent_style()),
+            })
+            .collect::<Vec<_>>(),
+    )
 }

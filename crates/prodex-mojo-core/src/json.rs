@@ -59,7 +59,11 @@ mod session_prompt_write;
 pub use self::session_prompt_write::{
     SessionPromptWriteJsonCheck, session_prompt_write_json_check,
 };
+#[cfg(feature = "mojo-runtime")]
+mod native_text;
 mod session_report;
+#[cfg(feature = "mojo-runtime")]
+use native_text::render_native_json;
 #[cfg(feature = "mojo-runtime")]
 mod session_tui;
 #[cfg(feature = "mojo-runtime")]
@@ -73,6 +77,10 @@ pub use self::session_report::{
 pub use session_tui::{SessionTuiMode, SessionTuiRow, session_tui_rows_json};
 #[cfg(feature = "mojo-runtime")]
 pub use status_tokens::{StatusTokenPanelInput, status_token_panel_json};
+#[cfg(feature = "mojo-runtime")]
+mod status_bar;
+#[cfg(feature = "mojo-runtime")]
+pub use status_bar::{StatusHeaderInput, status_footer_json, status_header_json};
 mod session_repair;
 pub use self::session_repair::{
     SessionRepairLine, SessionRepairPlan, SessionSyntheticMetadataPlan,

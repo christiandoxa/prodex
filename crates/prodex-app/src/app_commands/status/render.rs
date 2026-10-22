@@ -2,17 +2,15 @@ use super::{
     StatusOverview, StatusResourceHistory, StatusResourceSnapshot, format_info_load_summary,
     format_info_pool_remaining, format_info_token_usage_summary,
 };
+use anyhow::Result;
 use chrono::{Local, TimeZone};
 use prodex_mojo_core::info_render;
 use ratatui::Frame;
 use ratatui::layout::{Alignment, Constraint, Direction, Layout, Rect};
-use ratatui::style::{Color, Modifier, Style};
+use ratatui::style::{Color, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Gauge, Paragraph, Sparkline, Wrap};
-use terminal_ui::{
-    tui_accent_style, tui_border_style, tui_error_style, tui_hint_style, tui_muted_style,
-    tui_secondary_style, tui_title_style,
-};
+use terminal_ui::{tui_border_style, tui_secondary_style, tui_title_style};
 
 pub(super) fn render_status_dashboard(
     frame: &mut Frame<'_>,
@@ -21,7 +19,7 @@ pub(super) fn render_status_dashboard(
     history: &StatusResourceHistory,
     error: Option<&str>,
     refreshing: bool,
-) {
+) -> Result<()> {
     let area = frame.area();
     let rows = Layout::default()
         .direction(Direction::Vertical)
@@ -31,7 +29,7 @@ pub(super) fn render_status_dashboard(
             Constraint::Length(1),
         ])
         .split(area);
-    render_status_header(frame, rows[0], overview, refreshing);
+    render_status_header(frame, rows[0], overview, refreshing)?;
 
     if rows[1].height < 14 || rows[1].width < 70 {
         render_compact_status(frame, rows[1], overview, resources, error);
@@ -60,24 +58,9 @@ pub(super) fn render_status_dashboard(
         render_resource_panel(frame, detail[1], resources, history);
     }
 
-    let footer = if let Some(error) = error {
-        Line::from(vec![
-            Span::styled(" refresh error: ", tui_error_style()),
-            Span::styled(error.to_string(), tui_muted_style()),
-        ])
-    } else {
-        Line::from(vec![
-            Span::styled(" q/esc ", tui_hint_style().add_modifier(Modifier::BOLD)),
-            Span::raw("quit  "),
-            Span::styled("r ", tui_hint_style().add_modifier(Modifier::BOLD)),
-            Span::raw("refresh  "),
-            Span::styled(
-                "NET shows Prodex socket queues; disk rates come from /proc/<pid>/io",
-                tui_muted_style(),
-            ),
-        ])
-    };
+    let footer = bar_presentation::status_footer_line(error)?;
     frame.render_widget(Paragraph::new(footer), rows[2]);
+    Ok(())
 }
 
 fn render_status_header(
@@ -85,26 +68,17 @@ fn render_status_header(
     area: Rect,
     overview: Option<&StatusOverview>,
     refreshing: bool,
-) {
-    let profile = overview
-        .map(|overview| overview.runtime_profile.as_str())
-        .unwrap_or("loading");
-    let updated = overview
-        .map(|overview| overview.updated_at.as_str())
-        .unwrap_or("waiting for first snapshot");
-    let state = if refreshing { "refreshing" } else { "live" };
-    let header = Paragraph::new(Line::from(vec![
-        Span::styled(" PRODEX STATUS ", tui_title_style()),
-        Span::styled(format!(" profile {profile} "), tui_accent_style()),
-        Span::styled(format!(" {state} · {updated} "), tui_secondary_style()),
-    ]))
-    .block(
-        Block::default()
-            .borders(Borders::ALL)
-            .border_style(tui_border_style()),
-    )
-    .alignment(Alignment::Center);
+) -> Result<()> {
+    let line = bar_presentation::status_header_line(overview, refreshing)?;
+    let header = Paragraph::new(line)
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .border_style(tui_border_style()),
+        )
+        .alignment(Alignment::Center);
     frame.render_widget(header, area);
+    Ok(())
 }
 
 fn render_quota_gauge(
@@ -468,3 +442,10 @@ mod token_presentation;
 #[cfg(test)]
 #[path = "token_presentation_tests.rs"]
 mod token_presentation_tests;
+
+#[path = "bar_presentation.rs"]
+mod bar_presentation;
+
+#[cfg(test)]
+#[path = "bar_presentation_tests.rs"]
+mod bar_presentation_tests;

@@ -5,7 +5,7 @@ use ratatui::{Terminal, backend::TestBackend};
 use serde_json::{Value, json};
 use sha2::{Digest as _, Sha256};
 
-fn token_overview(total: TokenUsageCounts) -> StatusOverview {
+pub(super) fn token_overview(total: TokenUsageCounts) -> StatusOverview {
     StatusOverview {
         updated_at: "synthetic snapshot".to_string(),
         active_profile: "active-a".to_string(),

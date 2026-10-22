@@ -513,6 +513,7 @@ fn selected_sources() -> Vec<&'static str> {
         sources.push("../../mojo/prodex_core/session_report.mojo");
         sources.push("../../mojo/prodex_core/session_tui_presentation.mojo");
         sources.push("../../mojo/prodex_core/status_token_presentation.mojo");
+        sources.push("../../mojo/prodex_core/status_bar_presentation.mojo");
         sources.push("../../mojo/prodex_core/session_repair.mojo");
         sources.push("../../mojo/prodex_core/runtime_broker_continuity.mojo");
         sources.push("../../mojo/prodex_core/runtime_broker_admin.mojo");
