@@ -1,4 +1,4 @@
-# Protocol/status field selection over native, already-redacted presentations.
+# Operation field selection over native, already-redacted presentations.
 from std.memory import Pointer
 from rich_types import ProdexRichStringView, rich_view_ptr
 from rich_text import rich_view_prefix
@@ -11,11 +11,11 @@ from json_sink import JsonSink, js_byte, js_literal, js_string, js_escaped
 
 def transcript_operation_value(
     tree: ParsedJson, values: Pointer[mut=False, ProdexRichStringView, _],
-    node: Int64, *, output: Bool = False,
+    node: Int64, *, output: Bool = False, containers: Bool = False,
 ) -> ProdexRichStringView:
     var kind = pj_kind(tree, node)
     if (kind == JSON_STRING or kind == JSON_NUMBER or kind == JSON_FALSE or kind == JSON_TRUE
-        or (output and (kind == JSON_ARRAY or kind == JSON_OBJECT))):
+        or ((output or containers) and (kind == JSON_ARRAY or kind == JSON_OBJECT))):
         return values[unsafe_offset=node * 2 + Int64(output)].copy()
     return ProdexRichStringView(0, 0)
 
@@ -92,10 +92,39 @@ def transcript_operation_fallback(sink: Pointer[mut=True, JsonSink, _], event: P
     js_escaped(sink, ProdexRichStringView(event.ptr + UInt(start), event.len - UInt(start)))
 
 
+def transcript_shell_render(
+    sink: Pointer[mut=True, JsonSink, _], tree: ParsedJson, operation: Int64,
+    values: Pointer[mut=False, ProdexRichStringView, _],
+):
+    var selected: Int64 = -1
+    if operation == 8:
+        for key in [StringSlice("command"), StringSlice("arguments"), StringSlice("action")]:
+            if selected < 0:
+                selected = pj_field(tree, 0, key)
+        js_literal(sink, StringSlice("[[\"tool-call:"))
+        var name = pj_field(tree, 0, StringSlice("name"))
+        if pj_kind(tree, name) == JSON_STRING:
+            js_escaped(sink, values[unsafe_offset=name * 2 + 1])
+        else:
+            js_literal(sink, StringSlice("shell"))
+        js_literal(sink, StringSlice("\",\""))
+        js_escaped(sink, transcript_operation_value(tree, values, selected, containers=True))
+    else:
+        for key in [StringSlice("output"), StringSlice("aggregated_output"), StringSlice("stdout")]:
+            if selected < 0:
+                selected = pj_field(tree, 0, key)
+        js_literal(sink, StringSlice("[[\"tool-output\",\""))
+        js_escaped(sink, transcript_operation_value(tree, values, selected, output=True))
+    js_literal(sink, StringSlice("\"]]"))
+
+
 def transcript_operation_render(
     sink: Pointer[mut=True, JsonSink, _], tree: ParsedJson, operation: Int64,
     values: Pointer[mut=False, ProdexRichStringView, _],
 ):
+    if operation == 8 or operation == 9:
+        transcript_shell_render(sink, tree, operation, values)
+        return
     var event = pj_text(tree, pj_field(tree, 0, StringSlice("type")))
     var probe = JsonSink(sink[].output, 0, 0, True, False)
     if operation <= 5:

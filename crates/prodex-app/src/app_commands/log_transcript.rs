@@ -159,7 +159,17 @@ fn operation_transcript_event(
                     raw[node.raw_start..node.raw_start + node.raw_length].to_string()
                 }
             };
-            let output = transcript_safe_text(&scalar);
+            let output = match kind {
+                TranscriptOperationKind::ShellCall => transcript_tool_name(node.text),
+                TranscriptOperationKind::ShellOutput => {
+                    transcript_visible_tool_output(&scalar).unwrap_or_default()
+                }
+                TranscriptOperationKind::ToolProtocol
+                | TranscriptOperationKind::McpProtocol
+                | TranscriptOperationKind::AgentProtocol
+                | TranscriptOperationKind::TerminalStatus
+                | TranscriptOperationKind::ErrorStatus => transcript_safe_text(&scalar),
+            };
             TranscriptOperationValue { scalar, output }
         })
         .collect::<Vec<_>>();
@@ -223,27 +233,6 @@ fn event_msg_transcript_event(
         }
         TranscriptEventKind::Unknown => None,
     }
-}
-
-fn transcript_json_scalar(value: &serde_json::Value) -> Option<String> {
-    match value {
-        serde_json::Value::String(value) => transcript_safe_operation_value(value),
-        serde_json::Value::Number(value) => Some(value.to_string()),
-        serde_json::Value::Bool(value) => Some(value.to_string()),
-        _ => None,
-    }
-}
-
-fn transcript_json_text(value: &serde_json::Value) -> Option<String> {
-    transcript_json_scalar(value).or_else(|| match value {
-        serde_json::Value::Array(_) | serde_json::Value::Object(_) => {
-            serde_json::to_string(value).ok()
-        }
-        serde_json::Value::Null
-        | serde_json::Value::Bool(_)
-        | serde_json::Value::Number(_)
-        | serde_json::Value::String(_) => None,
-    })
 }
 
 fn response_item_transcript_event(
@@ -314,8 +303,12 @@ fn response_item_transcript_event(
                 text: input.to_string(),
             })
         }
-        TranscriptItemKind::ShellCall => shell_call_transcript_event(timestamp, payload),
-        TranscriptItemKind::ShellOutput => shell_output_transcript_event(timestamp, payload),
+        TranscriptItemKind::ShellCall => {
+            operation_transcript_event(timestamp, payload, TranscriptOperationKind::ShellCall)
+        }
+        TranscriptItemKind::ShellOutput => {
+            operation_transcript_event(timestamp, payload, TranscriptOperationKind::ShellOutput)
+        }
         TranscriptItemKind::Reasoning => {
             context_transcript_events(timestamp, payload, TranscriptContextKind::Reasoning).pop()
         }
@@ -327,49 +320,10 @@ fn response_item_transcript_event(
     .filter(|event| !event.text.trim().is_empty())
 }
 
-fn shell_call_transcript_event(
-    timestamp: String,
-    payload: &serde_json::Value,
-) -> Option<TranscriptEvent> {
-    let name = payload
-        .get("name")
-        .and_then(serde_json::Value::as_str)
-        .map(transcript_tool_name)
-        .unwrap_or_else(|| "shell".to_string());
-    let command = payload
-        .get("command")
-        .or_else(|| payload.get("arguments"))
-        .or_else(|| payload.get("action"))
-        .and_then(transcript_json_text)
-        .unwrap_or_default();
-    Some(TranscriptEvent {
-        timestamp,
-        source: format!("tool-call:{name}"),
-        text: command,
-    })
-}
-
 fn transcript_tool_name(value: &str) -> String {
     let value = redaction::redaction_redact_secret_like_text(value);
     prodex_mojo_core::log::sanitize_transcript_tool_name(&value)
         .expect("Mojo transcript tool-name sanitizer returned invalid output")
-}
-
-fn shell_output_transcript_event(
-    timestamp: String,
-    payload: &serde_json::Value,
-) -> Option<TranscriptEvent> {
-    let output = payload
-        .get("output")
-        .or_else(|| payload.get("aggregated_output"))
-        .or_else(|| payload.get("stdout"))
-        .and_then(transcript_json_text)
-        .and_then(|output| transcript_visible_tool_output(&output))?;
-    Some(TranscriptEvent {
-        timestamp,
-        source: "tool-output".to_string(),
-        text: output,
-    })
 }
 
 fn transcript_user_message_is_visible(payload: &serde_json::Value) -> bool {
