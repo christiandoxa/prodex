@@ -225,3 +225,15 @@ fn compiled_bounded_text_rejects_malformed_utf8_atomically() {
     );
     assert_eq!(output, [71; 2]);
 }
+#[test]
+fn compiled_unbounded_log_field_validation_keeps_c0_c1_and_noncontrol_unicode_distinct() {
+    for value in ["", "a\0b", "a\nb", "a\u{7f}b", "a\u{85}b", "a\u{9f}b"] {
+        assert_eq!(
+            super_expose_bounded_text_valid(value, usize::MAX),
+            Ok(false)
+        );
+    }
+    for value in [" ", "\u{a0}", "é🦀\u{200b}\u{feff}"] {
+        assert_eq!(super_expose_bounded_text_valid(value, usize::MAX), Ok(true));
+    }
+}

@@ -1,7 +1,7 @@
 from std.memory import Pointer
 from std.collections import Array
 from rich_types import ProdexRichStringView
-from rich_text import rich_view_valid, rich_view_matches_literal
+from rich_text import rich_view_valid, rich_view_matches_literal, rich_scalar_prefix_end
 from log_load_classification import log_load_event_is_routine
 from observability_labels import (
     operational_event_classify, OPERATIONAL_EVENT_SOURCE_NONE,
@@ -96,4 +96,23 @@ def prodex_mojo_operational_log_stream_v1(
     var metadata = Pointer[mut=True, Int64, MutUntrackedOrigin](unsafe_from_address=Int(metadata_address))
     metadata[unsafe_offset=0] = source
     metadata[unsafe_offset=1] = Int64(load)
+    return 0
+
+
+@export("prodex_mojo_operational_log_text_span_v1")
+def prodex_mojo_operational_log_text_span_v1(
+    abi_version: Int64, input_address: UInt, input_length: Int64,
+    max_chars: UInt64, output_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != 1:
+        return 4
+    if input_length < 0 or input_length > 67_108_864 or output_address == 0 or output_address % 8 != 0:
+        return 1
+    var text = ProdexRichStringView(input_address, UInt(input_length))
+    if not rich_view_valid(text, 67_108_864):
+        return 1
+    var end = rich_scalar_prefix_end(text, max_chars)
+    var output = Pointer[mut=True, Int64, MutUntrackedOrigin](unsafe_from_address=Int(output_address))
+    output[unsafe_offset=0] = end
+    output[unsafe_offset=1] = Int64(end < input_length)
     return 0

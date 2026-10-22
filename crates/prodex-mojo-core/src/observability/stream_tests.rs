@@ -1,6 +1,49 @@
 use super::*;
 
 #[test]
+fn compiled_operational_text_span_counts_scalars_and_preserves_full_width_limits() {
+    for (value, limit, end, truncated) in [
+        ("", 0, 0, false),
+        ("text", 0, 0, true),
+        ("é🦀e\u{301}", 3, 7, true),
+        ("é🦀e\u{301}", 4, 9, false),
+        ("é🦀e\u{301}", usize::MAX, 9, false),
+        ("line\nnext", 5, 5, true),
+        ("a\0b", 3, 3, false),
+    ] {
+        assert_eq!(
+            operational_log_text_span(value, limit),
+            Ok(OperationalTextSpan { end, truncated })
+        );
+    }
+}
+
+#[test]
+fn compiled_operational_text_span_abi_rejects_invalid_utf8_and_shapes_before_writes() {
+    let invalid = [0xff_u8];
+    let mut output = [73_i64, 83];
+    let mut call = |version, address, length, target| unsafe {
+        prodex_mojo_operational_log_text_span_v1(
+            version,
+            address,
+            length,
+            0,
+            if target {
+                output.as_mut_ptr() as u64
+            } else {
+                0
+            },
+        )
+    };
+    assert_eq!(call(2, 0, 0, true), 4);
+    assert_eq!(call(1, 0, 1, true), 1);
+    assert_eq!(call(1, 0, -1, true), 1);
+    assert_eq!(call(1, invalid.as_ptr() as u64, 1, true), 1);
+    assert_eq!(call(1, 0, 0, false), 1);
+    assert_eq!(output, [73, 83]);
+}
+
+#[test]
 fn compiled_stream_policy_keeps_payload_exclusion_and_exact_switch_values() {
     const { assert!(crate::MOJO_ACTIVE) }
     for event in [
