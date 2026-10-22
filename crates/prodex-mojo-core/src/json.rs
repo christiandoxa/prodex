@@ -114,10 +114,12 @@ mod copilot_catalog;
 mod kiro_catalog;
 pub use self::copilot_catalog::copilot_model_catalog_json;
 mod runtime_catalog;
+mod runtime_catalog_plan;
 pub use self::kiro_catalog::{
     KiroModelCatalogModel, KiroModelCatalogPlan, kiro_model_catalog_plan,
 };
 pub use self::runtime_catalog::{runtime_dynamic_catalog_json, runtime_model_catalog_json};
+pub use self::runtime_catalog_plan::runtime_catalog_plan_json;
 mod log_payload;
 pub use log_payload::{LogPayloadJsonPresentation, log_payload_projection};
 mod log_transcript_context;

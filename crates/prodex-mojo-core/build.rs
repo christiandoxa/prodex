@@ -573,6 +573,7 @@ fn selected_sources() -> Vec<&'static str> {
         sources.push("../../mojo/prodex_core/kiro_model_catalog.mojo");
         sources.push("../../mojo/prodex_core/copilot_model_catalog.mojo");
         sources.push("../../mojo/prodex_core/runtime_model_catalog.mojo");
+        sources.push("../../mojo/prodex_core/runtime_catalog_plan.mojo");
         sources.push("../../mojo/prodex_core/kiro_acp_tool_activity_policy.mojo");
         sources.push("../../mojo/prodex_core/kiro_acp_update_policy.mojo");
         sources.push("../../mojo/prodex_core/runtime_cookie_policy.mojo");

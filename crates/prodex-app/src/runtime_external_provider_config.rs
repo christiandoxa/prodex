@@ -9,15 +9,13 @@ use prodex_cli::{
     SUPER_ANTHROPIC_DEFAULT_MODEL, SUPER_COPILOT_DEFAULT_AUTO_COMPACT_LIMIT,
     SUPER_COPILOT_DEFAULT_CONTEXT_WINDOW, SUPER_COPILOT_DEFAULT_MODEL,
     SUPER_KIRO_DEFAULT_AUTO_COMPACT_LIMIT, SUPER_KIRO_DEFAULT_CONTEXT_WINDOW,
-    SUPER_KIRO_DEFAULT_MODEL, super_copilot_prompt_token_limit_for_model,
+    SUPER_KIRO_DEFAULT_MODEL,
 };
 use prodex_mojo_core::super_provider_config::{
     ExternalProviderConfigError, ExternalProviderNumericField, ExternalProviderNumericIssue,
     external_provider_numeric_config,
 };
-use prodex_provider_core::{
-    ProviderCatalogEntry, ProviderId, provider_catalog_entries_for, provider_catalog_entry,
-};
+use prodex_provider_core::ProviderId;
 use serde_json::json;
 use std::ffi::OsString;
 use std::fs;
@@ -260,35 +258,6 @@ impl ExternalCatalogProvider {
             Self::Kiro => SUPER_KIRO_DEFAULT_AUTO_COMPACT_LIMIT,
         }
     }
-
-    fn model_prompt_token_limit(self, model: &str) -> Option<u64> {
-        match self {
-            Self::Anthropic => None,
-            Self::Copilot => super_copilot_prompt_token_limit_for_model(model).map(|v| v as u64),
-            Self::Kiro => None,
-        }
-    }
-
-    fn static_model_context_window(self, model: &str) -> Option<u64> {
-        provider_catalog_entry(self.provider_id(), model)
-            .and_then(|entry| entry.context_window_tokens)
-    }
-
-    fn models(self) -> Vec<&'static ProviderCatalogEntry> {
-        provider_catalog_entries_for(self.provider_id())
-    }
-
-    fn model_metadata(self, model: &str) -> (String, String) {
-        provider_catalog_entry(self.provider_id(), model)
-            .map(|entry| (entry.display_name.clone(), entry.description.clone()))
-            .unwrap_or_else(|| {
-                (
-                    model.to_string(),
-                    "External provider model routed through the Prodex Responses adapter."
-                        .to_string(),
-                )
-            })
-    }
 }
 
 #[cfg(test)]
@@ -307,24 +276,33 @@ mod tests {
 
     #[test]
     fn external_provider_model_metadata_uses_canonical_provider_catalog() {
-        assert_eq!(
-            ExternalCatalogProvider::Copilot
-                .model_metadata("GPT-6.1-SOL")
-                .0,
-            "GPT-6.1 Sol"
-        );
-        assert_eq!(
-            ExternalCatalogProvider::Copilot
-                .model_metadata(" GPT-6.1-SOL ")
-                .0,
-            "GPT-6.1 Sol"
-        );
-        assert_eq!(
-            ExternalCatalogProvider::Kiro
-                .model_metadata("GPT-5.6-LUNA")
-                .0,
-            "GPT-5.6 Luna"
-        );
+        for (provider, model, display) in [
+            (
+                ExternalCatalogProvider::Copilot,
+                "GPT-6.1-SOL",
+                "GPT-6.1 Sol",
+            ),
+            (
+                ExternalCatalogProvider::Copilot,
+                " GPT-6.1-SOL ",
+                "GPT-6.1 Sol",
+            ),
+            (
+                ExternalCatalogProvider::Kiro,
+                "GPT-5.6-LUNA",
+                "GPT-5.6 Luna",
+            ),
+        ] {
+            let models = catalog_model::external_catalog_models(
+                &temp_codex_home("metadata"),
+                provider,
+                model,
+                100_000,
+                90_000,
+            )
+            .unwrap();
+            assert_eq!(models[0]["display_name"], display);
+        }
     }
 
     #[test]
@@ -371,7 +349,7 @@ mod tests {
 
     #[test]
     fn external_copilot_static_catalog_reuses_latest_canonical_provider_models() {
-        let models = ExternalCatalogProvider::Copilot.models();
+        let models = prodex_provider_core::provider_catalog_entries_for(ProviderId::Copilot);
         let ids = models
             .iter()
             .map(|model| model.id.as_str())

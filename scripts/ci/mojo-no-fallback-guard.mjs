@@ -1203,6 +1203,9 @@ const PROMOTED_FILES = [
   SESSION_SELECTOR_MATCH_MOJO_TEST_FILE,
   "crates/prodex-app/src/runtime_external_provider_config.rs",
   "crates/prodex-app/src/runtime_external_provider_config/catalog_model.rs",
+  "crates/prodex-provider-core/src/catalog/runtime.rs",
+  "crates/prodex-mojo-core/src/json/runtime_catalog_plan.rs",
+  "mojo/prodex_core/runtime_catalog_plan.mojo",
   "crates/prodex-app/src/super_expose/protocol.rs",
   "crates/prodex-app/src/super_expose/openai_tunnel.rs",
   "crates/prodex-app/src/app_commands/log_event_source.rs",
@@ -1420,6 +1423,8 @@ const PROMOTED_FILES = [
 ];
 
 const UNCONDITIONAL_MOJO_FILES = new Set([
+  "crates/prodex-provider-core/src/catalog/runtime.rs",
+  "crates/prodex-mojo-core/src/json/runtime_catalog_plan.rs",
   "crates/prodex-app/src/app_commands/log_throughput_state.rs",
   "crates/prodex-mojo-core/src/log_throughput_policy.rs",
   "crates/prodex-runtime-broker/src/version_guard.rs",
@@ -1841,6 +1846,9 @@ const REDACTION_CALLER_TEST_FILE = "crates/prodex-redaction/tests/src/lib.rs";
 const SUPER_PROVIDER_CONFIG_FILE = "crates/prodex-cli/src/runtime_args.rs";
 const SUPER_PROVIDER_CONFIG_ADAPTER_FILE = "crates/prodex-mojo-core/src/super_provider_config.rs";
 const EXTERNAL_PROVIDER_CONFIG_FILE = "crates/prodex-app/src/runtime_external_provider_config.rs";
+const EXTERNAL_CATALOG_FILE = "crates/prodex-app/src/runtime_external_provider_config/catalog_model.rs";
+const EXTERNAL_CATALOG_ADAPTER_FILE = "crates/prodex-provider-core/src/catalog/runtime.rs";
+const EXTERNAL_CATALOG_MOJO_FILE = "mojo/prodex_core/runtime_catalog_plan.mojo";
 const SUB_AGENT_POLICY_FILE = "crates/prodex-cli/src/sub_agent.rs";
 const SUB_AGENT_CLI_VALIDATION_FILE = "crates/prodex-cli/src/runtime_args/super_validation.rs";
 const SUB_AGENT_POLICY_ADAPTER_FILE = "crates/prodex-mojo-core/src/sub_agent_policy.rs";
@@ -7546,30 +7554,17 @@ export function findViolations(files) {
   });
   const externalProviderCatalogViolations = files.flatMap(([filePath, contents]) => {
     if (filePath === EXTERNAL_PROVIDER_CONFIG_FILE) {
-      const required = [
-        "provider_catalog_entries_for(",
-        "provider_catalog_entry(",
-      ];
-      const violations = required
-        .filter((call) => !contents.includes(call))
-        .map((call) => filePath + ": external-provider catalog must reuse canonical provider-core source " + call);
-      for (const retired of [
-        "external_catalog_static_models(",
-        "external_catalog_model_metadata(",
-        "ExternalCatalogProviderClass",
-      ]) {
-        if (contents.includes(retired)) {
-          violations.push(filePath + ": production external-provider catalog must not use the duplicate Mojo static table");
-          break;
-        }
-      }
-      return violations;
+      return ["external_catalog_static_models(", "external_catalog_model_metadata(", "ExternalCatalogProviderClass"]
+        .filter((retired) => contents.includes(retired))
+        .map(() => filePath + ": production external-provider catalog must not use the duplicate Mojo static table");
     }
-    if (filePath === "crates/prodex-app/src/runtime_external_provider_config/catalog_model.rs") {
-      return contents.includes("let static_models = provider.models();")
-        ? [] : [filePath + ": external-provider catalog builder must consume canonical static models"];
-    }
-    return [];
+    const required = {
+      [EXTERNAL_CATALOG_FILE]: ["plan_runtime_model_catalog(", "provider_catalog_entry("],
+      [EXTERNAL_CATALOG_ADAPTER_FILE]: ["provider_catalog_entries_for(input.provider)", "runtime_catalog_plan_json("],
+      [EXTERNAL_CATALOG_MOJO_FILE]: ["catalog_merge_additional(", "config_saturating_mul_u64(", "provider_copilot_prompt_token_limit("],
+    }[filePath] ?? [];
+    return required.filter((call) => !contents.includes(call))
+      .map((call) => filePath + ": external-provider catalog must retain canonical authority " + call);
   });
   const subAgentPolicyViolations = files.flatMap(([filePath, contents]) => {
     if (filePath === SUB_AGENT_CLI_VALIDATION_FILE) {
@@ -10903,12 +10898,13 @@ export function findViolations(files) {
     return [];
   });
   const catalogModelViolations = files.flatMap(([filePath, contents]) => {
-    if (filePath !== "crates/prodex-app/src/runtime_external_provider_config/catalog_model.rs") return [];
-    const body = contents.match(/\bpub\(super\) fn external_catalog_model_indices\([^]*?^\}/mu)?.[0];
-    return body?.includes("merge_catalog_ids(") &&
+    if (filePath !== EXTERNAL_CATALOG_FILE) return [];
+    const body = contents.match(/\bpub\(super\) fn external_catalog_models\([^]*?^\}/mu)?.[0];
+    return body?.includes("plan_runtime_model_catalog(") &&
       !FEATURE_OFF_RUST_PATH.test(body) &&
-      !/\b(?:BTreeSet|to_ascii_lowercase)\b/u.test(body)
-      ? [] : [`${filePath}: catalog dedup must use Mojo without a feature-off Rust path`];
+      !/\b(?:BTreeSet|to_ascii_lowercase|saturating_mul|saturating_div|saturating_sub|or_else)\b/u.test(body) &&
+      !/\bfn (?:external_catalog_model_indices|external_dynamic_catalog_model)\b/u.test(contents)
+      ? [] : [`${filePath}: catalog dedup must use Mojo via the compiled plan without retired Rust selection`];
   });
   const deepseekShapingViolations = files.flatMap(([filePath, contents]) => {
     if (filePath !== DEEPSEEK_SHAPING_FILE) return [];
@@ -17729,6 +17725,18 @@ function selfTest() {
     "crates/prodex-app/src/runtime_external_provider_config/catalog_model.rs",
     "let static_models = provider.models();\npub(super) fn external_catalog_model_indices(ids: &[&str]) -> Vec<usize> { ids.iter().map(|id| id.to_ascii_lowercase()).collect() }",
   ]]).join("\n"), /catalog dedup must use Mojo/u);
+  for (const [file, markers] of [
+    [EXTERNAL_CATALOG_FILE, ["plan_runtime_model_catalog(", "provider_catalog_entry("]],
+    [EXTERNAL_CATALOG_ADAPTER_FILE, ["provider_catalog_entries_for(input.provider)", "runtime_catalog_plan_json("]],
+    [EXTERNAL_CATALOG_MOJO_FILE, ["catalog_merge_additional(", "config_saturating_mul_u64(", "provider_copilot_prompt_token_limit("]],
+  ]) {
+    const valid = "pub(super) fn external_catalog_models() {\n" + markers.join(";\n") + "\n}";
+    assert.deepEqual(findViolations([[file, valid]]), []);
+    for (const marker of markers) assert.ok(findViolations([[file, valid.replace(marker, "missing")]]).length > 0);
+  }
+  for (const file of [EXTERNAL_CATALOG_ADAPTER_FILE, "crates/prodex-mojo-core/src/json/runtime_catalog_plan.rs"]) {
+    assert.match(findViolations([[file, '#[cfg(not(feature = "mojo-core"))] fn existing_path() {}']]).join("\n"), /feature-off Rust path/u);
+  }
   assert.match(findViolations([["crates/prodex-runtime-proxy/src/health/inflight.rs",
     "fn f(route_kind: RuntimeRouteKind) { match route_kind { RuntimeRouteKind::Responses => 0, RuntimeRouteKind::Compact => 1, RuntimeRouteKind::Websocket => 2, RuntimeRouteKind::Standard => 3 } }"]]).join("\n"),
   /RuntimeRouteKind numeric ABI mirror/u);

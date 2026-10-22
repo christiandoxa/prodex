@@ -8955,3 +8955,8 @@ pass, with strict workspace Clippy and guards. Canonical share is
 and twelve original catalog
 baselines remain owned and protected; the 75% goal stays open. Evidence is in
 `migration/catalog-kernel-helpers-mojo-20261022.md`.
+
+## Runtime catalog plans compiled in Mojo (2026-10-22)
+
+Compiled candidate/context/metadata ownership removes the Rust algorithm without a fallback.
+Evidence and remaining coverage are in [runtime-catalog-plan-mojo-20261022.md](runtime-catalog-plan-mojo-20261022.md).
