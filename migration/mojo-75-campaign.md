@@ -9087,3 +9087,16 @@ Typed adapters and mechanical inspection-module wiring add 115 net Rust
 production LOC. Full default CI passes 1,451 Rust tests in 226.14 seconds.
 The 75% target remains open. Evidence and coverage are in
 [runtime-launch-report-mojo-20261023.md](runtime-launch-report-mojo-20261023.md).
+
+## Runtime launch dry-run TUI plans compiled in Mojo (2026-10-23)
+
+The launch-report owner now selects line kinds, field boundaries, Unicode value
+trimming, value-color precedence and bounded inline height. Rust's former
+classifiers and height arithmetic are removed without a fallback; Ratatui applies
+the checked native plan. All 92 original complete input/Text/style/height objects
+match after adoption. Canonical share is 36.81329088947936% (139,931 Mojo /
+240,179 Rust production LOC). Typed adapters add 56 net Rust production LOC while
+transferring presentation decisions; Mojo adds 64 net production LOC. Full
+default CI passes 1,452 Rust tests in 540.78 seconds. The 75% target remains
+open. Evidence and coverage are in
+[runtime-launch-tui-mojo-20261023.md](runtime-launch-tui-mojo-20261023.md).

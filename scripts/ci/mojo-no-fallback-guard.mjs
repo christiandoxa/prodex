@@ -115,11 +115,15 @@ const QUOTA_TUI_MOJO_MARKERS = [
   "def qwp_status_tone(", "rich_unicode_space(", "output_capacity < 3",
 ];
 const RUNTIME_LAUNCH_REPORT_RULES = {
+  "crates/prodex-mojo-core/src/launch/report_tui.rs": ["prodex_runtime_launch_tui_plan_v1(", "TuiOperation::Line", "TuiOperation::Height", "text.get(..label_end)", "text.get(value_start..)"],
+  "crates/prodex-mojo-core/src/launch/report_tui_tests.rs": ["launch_tui_bridge_preserves_precedence_unicode_slices_and_reset_foreground", "launch_tui_height_bridge_preserves_empty_crlf_trailing_newline_and_clamp_edges"],
+  "crates/prodex-app/src/app_commands/child_process_dry_run_presentation_tests.rs": ["dry_run_tui_preserves_original_complete_text_and_heights", "Sha256::digest(", "include_str!(", '"child_process_dry_run_presentation_baseline.json"'],
+  "mojo/tests/runtime_launch_tui_test.mojo": ["prodex_runtime_launch_tui_plan_v1(", "source,26", "target,3", "output[unsafe_offset=index] == 77"],
   "crates/prodex-runtime-launch/src/dry_run.rs": ["render_runtime_launch_report(RuntimeLaunchReportInput {", "RuntimeLaunchReportProxy {", "redaction::redaction_redacted_cli_args(", "redaction::redaction_redacted_env_value(", "dry_run_redact_paths("],
-  "crates/prodex-app/src/app_commands/child_process.rs": ["prodex_mojo_core::launch::complete_runtime_launch_report(", "prodex_mojo_core::launch::RuntimeLaunchReportCompletion {", "configured_profile = request.profile.is_some()"],
+  "crates/prodex-app/src/app_commands/child_process.rs": ["prodex_mojo_core::launch::complete_runtime_launch_report(", "prodex_mojo_core::launch::RuntimeLaunchReportCompletion {", "configured_profile = request.profile.is_some()", "prodex_mojo_core::launch::runtime_launch_tui_height(output)", "prodex_mojo_core::launch::runtime_launch_tui_line_plan(line)", "RuntimeLaunchTuiLine::Field", "RuntimeLaunchTuiColor::Reset"],
   "crates/prodex-mojo-core/src/launch/report.rs": ["prodex_runtime_launch_report_v1(", "render_native_text(", "ReportOperation::Report", "ReportOperation::Completion", "signed(texts.len())?"],
   "crates/prodex-mojo-core/src/launch/report_tests.rs": ["launch_report_bridge_preserves_full_schema_presence_order_and_empty_entries", "launch_completion_bridge_preserves_optional_empty_text_and_control_bytes"],
-  "mojo/prodex_core/runtime_launch_report.mojo": ['@export("prodex_runtime_launch_report_v1")', "lrp_report(", "lrp_completion(", "lrp_emit(", "remaining -= env_count * 2", "rich_view_valid(", "capacity < required"],
+  "mojo/prodex_core/runtime_launch_report.mojo": ['@export("prodex_runtime_launch_report_v1")', "lrp_report(", "lrp_completion(", "lrp_emit(", "remaining -= env_count * 2", "rich_view_valid(", "capacity < required", '@export("prodex_runtime_launch_tui_plan_v1")', "lrp_tui_line_plan(", "lrp_tui_height(", "lrp_tui_value_color(", "quota_watch_text_contains(", "output_capacity < 4"],
   "mojo/tests/runtime_launch_report_test.mojo": ["prodex_runtime_launch_report_v1(", "metadata[unsafe_offset=0] == 77", "required-1"],
   "crates/prodex-runtime-launch/tests/src/lib/dry_run_report.rs": ["runtime_launch_reports_preserve_original_complete_text", 'include_str!("dry_run_report_baseline.txt")', 'report.contains("synthetic-launch-secret")'],
 };
@@ -1493,6 +1497,7 @@ const PROMOTED_FILES = [
 ];
 
 const UNCONDITIONAL_MOJO_FILES = new Set([
+  "crates/prodex-mojo-core/src/launch/report_tui.rs",
   "crates/prodex-runtime-launch/src/dry_run.rs",
   "crates/prodex-app/src/app_commands/child_process.rs",
   "crates/prodex-mojo-core/src/launch/report.rs",
@@ -2970,7 +2975,9 @@ export function findViolations(files) {
       const retired = filePath === "crates/prodex-runtime-launch/src/dry_run.rs"
         ? ['output.push_str(', '"(codex default)"', '"would be enabled with mount']
         : filePath === "crates/prodex-app/src/app_commands/child_process.rs"
-          ? ['"Profile: {profile}', '"Presidio redaction: {}"', '"(active/default)"'] : [];
+          ? ['"Profile: {profile}', '"Presidio redaction: {}"', '"(active/default)"',
+            "fn runtime_launch_dry_run_tui_height(", "fn runtime_launch_dry_run_value_color(",
+            "output.lines().count()", "value.trim_start()"] : [];
       for (const marker of retired) {
         if (contents.includes(marker)) violations.push(`${filePath}: restored Rust dry-run report decisions`);
       }
@@ -18403,6 +18410,15 @@ function selfTest() {
     /external quota selection and detail assembly must remain Mojo-owned/u);
   assert.match(findViolations([[externalQuotaFile, externalQuotaCalls.replace("::Agy", "::RustAgy")]]).join("\n"),
     /external quota selection and detail assembly must remain Mojo-owned/u);
+  {
+    const file = "crates/prodex-app/src/app_commands/child_process.rs";
+    const valid = RUNTIME_LAUNCH_REPORT_RULES[file].join(";\n");
+    for (const retired of ["fn runtime_launch_dry_run_tui_height(", "fn runtime_launch_dry_run_value_color(", "output.lines().count()", "value.trim_start()"]) {
+      assert.match(findViolations([[file, valid + "\n" + retired]]).join("\n"), /restored Rust dry-run report/u);
+    }
+    assert.match(findViolations([["crates/prodex-mojo-core/src/launch/report_tui.rs",
+      '#[cfg(not(feature = "mojo-runtime"))] fn fallback() {}']]).join("\n"), /feature-off Rust path/u);
+  }
   for (const [file, markers] of Object.entries(RUNTIME_LAUNCH_REPORT_RULES)) {
     const valid = markers.join(";\n");
     assert.deepEqual(findViolations([[file, valid]]), []);
