@@ -50,6 +50,8 @@ comptime INFO_RENDER_PROVIDER_CAPABILITIES: Int64 = 31
 comptime INFO_RENDER_LAUNCH_NO_READY: Int64 = 32
 comptime INFO_RENDER_LAUNCH_BLOCKED: Int64 = 33
 comptime INFO_RENDER_INFO_RUNWAY: Int64 = 34
+comptime INFO_RENDER_INFO_PANEL_VALUE_COLOR: Int64 = 35
+comptime INFO_RENDER_INFO_PANEL_FIELD_VISIBLE: Int64 = 36
 comptime INFO_STATUS_HISTORY_LIMIT: Int64 = 64
 comptime INFO_STATUS_FIELD_COUNT: Int64 = 14
 
@@ -1631,6 +1633,64 @@ def info_render_doctor_value_color(
     return info_put_u64(writer, UInt64(0))
 
 
+# Main prodex info panel status colors and optional five-hour field
+# visibility. Reuses the shared ASCII casefold substring comparator.
+def info_render_info_panel_color(
+    writer: Pointer[mut=True, InfoRenderWriter, _],
+    text_address: UInt,
+) -> Bool:
+    var label = info_text(text_address, 2, 0)
+    var value = info_text(text_address, 2, 1)
+    var quota_available = (
+        label.len == UInt(StringSlice("Codex quota data").byte_length())
+        and info_doctor_contains(label, StringSlice("Codex quota data"), False)
+        and info_doctor_contains(value, StringSlice("unavailable=0"), True)
+    )
+    if (
+        info_doctor_contains(value, StringSlice("error"), True)
+        or info_doctor_contains(value, StringSlice("missing"), True)
+        or (info_doctor_contains(value, StringSlice("unavailable"), True) and not quota_available)
+        or info_doctor_contains(value, StringSlice("exhausted"), True)
+        or info_doctor_contains(value, StringSlice("critical"), True)
+        or info_doctor_contains(value, StringSlice("thin"), True)
+        or info_doctor_contains(value, StringSlice("warning"), True)
+    ):
+        return info_put_u64(writer, UInt64(1))
+    if (
+        info_doctor_contains(value, StringSlice("ready"), True)
+        or info_doctor_contains(value, StringSlice("healthy"), True)
+        or info_doctor_contains(value, StringSlice("up to date"), True)
+        or (
+            label.len == UInt(StringSlice("Active profile").byte_length())
+            and info_doctor_contains(label, StringSlice("Active profile"), False)
+        )
+        or quota_available
+    ):
+        return info_put_u64(writer, UInt64(2))
+    if (
+        info_doctor_contains(label, StringSlice("Runtime"), False)
+        or info_doctor_contains(label, StringSlice("Codex"), False)
+    ):
+        return info_put_u64(writer, UInt64(3))
+    return info_put_u64(writer, UInt64(0))
+
+
+def info_render_info_panel_visible(
+    writer: Pointer[mut=True, InfoRenderWriter, _],
+    unsigned_address: UInt,
+    text_address: UInt,
+) -> Bool:
+    var label = info_text(text_address, 1, 0)
+    var five_hour_count = info_unsigned(unsigned_address, 1, 0)
+    var is_five_hour = (
+        (label.len == UInt(StringSlice("Codex 5h pool").byte_length())
+         and info_doctor_contains(label, StringSlice("Codex 5h pool"), False))
+        or (label.len == UInt(StringSlice("Codex 5h runway").byte_length())
+            and info_doctor_contains(label, StringSlice("Codex 5h runway"), False))
+    )
+    return info_put_u64(writer, UInt64(five_hour_count > 0 or not is_five_hour))
+
+
 def info_render_doctor_viewport(
     writer: Pointer[mut=True, InfoRenderWriter, _],
     unsigned_address: UInt,
@@ -1678,7 +1738,7 @@ def prodex_terminal_info_render_v1(
     if (
         abi_version != INFO_RENDER_ABI_VERSION
         or operation < INFO_RENDER_RELATIVE_DURATION
-        or operation > INFO_RENDER_INFO_RUNWAY
+        or operation > INFO_RENDER_INFO_PANEL_FIELD_VISIBLE
         or signed_count < 0
         or unsigned_count < 0
         or text_count < 0
@@ -1716,6 +1776,15 @@ def prodex_terminal_info_render_v1(
         if signed_count != 0 or unsigned_count != 0 or text_count != 2 or presence != 0:
             return INFO_RENDER_INVALID
         required_text = 2
+    elif operation == INFO_RENDER_INFO_PANEL_VALUE_COLOR:
+        if signed_count != 0 or unsigned_count != 0 or text_count != 2 or presence != 0:
+            return INFO_RENDER_INVALID
+        required_text = 2
+    elif operation == INFO_RENDER_INFO_PANEL_FIELD_VISIBLE:
+        if signed_count != 0 or unsigned_count != 1 or text_count != 1 or presence != 0:
+            return INFO_RENDER_INVALID
+        required_unsigned = 1
+        required_text = 1
     elif operation == INFO_RENDER_DOCTOR_VIEWPORT:
         if signed_count != 0 or text_count != 0 or presence != 0 or unsigned_count < 2:
             return INFO_RENDER_INVALID
@@ -2018,6 +2087,12 @@ def prodex_terminal_info_render_v1(
         ok = info_render_doctor_value_color(Pointer(to=writer), text_address)
     elif operation == INFO_RENDER_DOCTOR_VIEWPORT:
         ok = info_render_doctor_viewport(Pointer(to=writer), unsigned_address)
+    elif operation == INFO_RENDER_INFO_PANEL_VALUE_COLOR:
+        ok = info_render_info_panel_color(Pointer(to=writer), text_address)
+    elif operation == INFO_RENDER_INFO_PANEL_FIELD_VISIBLE:
+        ok = info_render_info_panel_visible(
+            Pointer(to=writer), unsigned_address, text_address
+        )
     else:
         ok = info_render_token_usage(
             Pointer(to=writer), unsigned_address, text_address, text_count

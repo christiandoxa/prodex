@@ -209,7 +209,8 @@ pub(crate) fn handle_info(args: InfoArgs) -> Result<()> {
 }
 
 fn show_info_field(label: &str, five_hour_profiles_with_data: usize) -> bool {
-    five_hour_profiles_with_data > 0 || !matches!(label, "Codex 5h pool" | "Codex 5h runway")
+    prodex_mojo_core::info_render::info_panel_field_visible(label, five_hour_profiles_with_data)
+        .expect("compiled Mojo info panel field visibility policy failed")
 }
 
 fn print_info_panel(fields: &[(String, String)]) -> Result<()> {
@@ -295,28 +296,15 @@ fn info_panel_tui_label_width(fields: &[(String, String)]) -> usize {
 }
 
 fn info_panel_value_color(label: &str, value: &str) -> Color {
-    let lower = value.to_ascii_lowercase();
-    let quota_available = label == "Codex quota data" && lower.contains("unavailable=0");
-    if lower.contains("error")
-        || lower.contains("missing")
-        || (lower.contains("unavailable") && !quota_available)
-        || lower.contains("exhausted")
-        || lower.contains("critical")
-        || lower.contains("thin")
-        || lower.contains("warning")
+    use prodex_mojo_core::info_render::InfoPanelValueColor;
+
+    match prodex_mojo_core::info_render::info_panel_value_color(label, value)
+        .expect("compiled Mojo info panel value color policy failed")
     {
-        Color::Red
-    } else if lower.contains("ready")
-        || lower.contains("healthy")
-        || lower.contains("up to date")
-        || label == "Active profile"
-        || quota_available
-    {
-        Color::Green
-    } else if label.contains("Runtime") || label.contains("Codex") {
-        Color::Cyan
-    } else {
-        Color::Reset
+        InfoPanelValueColor::Reset => Color::Reset,
+        InfoPanelValueColor::Red => Color::Red,
+        InfoPanelValueColor::Green => Color::Green,
+        InfoPanelValueColor::Cyan => Color::Cyan,
     }
 }
 
@@ -353,6 +341,16 @@ mod tests {
             info_panel_value_color(quota_label, "unavailable=1"),
             Color::Red
         );
+    }
+
+    #[test]
+    fn compiled_info_panel_preserves_warnings_and_neutral_statuses() {
+        assert_eq!(
+            info_panel_value_color("Runtime limits", "unmatched"),
+            Color::Cyan
+        );
+        assert_eq!(info_panel_value_color("Info", "unmatched"), Color::Reset);
+        assert_eq!(info_panel_value_color("x", "READY but WARNING"), Color::Red);
     }
 
     #[test]

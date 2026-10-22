@@ -8459,3 +8459,15 @@ redaction and existing raw-line limits stay with Rust. Existing numeric APIs
 share the same Mojo kernels. Canonical share is 36.33835470028661% (136,678
 Mojo / 239,448 Rust LOC); the 75% objective remains open. Detailed validation
 is in `migration/session-prompt-json-mojo-20261022.md`.
+
+## Main info-panel color and visibility compiled in Mojo (2026-10-22)
+
+The pending panel migration is integrated against current main while its
+original WIP stays intact. Mojo owns status keyword precedence, exact quota
+label exceptions and five-hour field visibility; Rust's lowercase/contains
+chain and field-name predicate are deleted. A checked enum supplies terminal
+colors, and the compiled owner reuses the existing ASCII comparator. Direct
+Mojo, 23 strict bridge and five caller tests plus workspace Clippy pass.
+Canonical share is 36.348485291498655% (136,747 Mojo / 239,464 Rust LOC). The 75% goal
+remains open. Evidence is in
+`migration/info-panel-color-visibility-mojo-20261022.md`.

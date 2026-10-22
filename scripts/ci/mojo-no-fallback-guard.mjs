@@ -427,6 +427,8 @@ const CORE_LEXICAL_BROKER_PATHS = "crates/prodex-app/src/runtime_persistence/pat
 const CORE_LEXICAL_APP_HOUSEKEEPING = "crates/prodex-app/src/housekeeping.rs";
 const CORE_LEXICAL_LIVE_LOG = "crates/prodex-app/src/app_commands/log_live.rs";
 const PROMOTED_FILES = [
+  "crates/prodex-app/src/app_commands/info_handler.rs",
+  "crates/prodex-mojo-core/src/info_render/panel.rs",
   "crates/prodex-mojo-core/src/json/session_prompt_write.rs",
   "mojo/prodex_core/session_prompt_write_json.mojo",
   "crates/prodex-app/src/app_commands/redeem.rs",
@@ -8020,6 +8022,29 @@ export function findViolations(files) {
     }
     return [];
   });
+  const infoPanelViolations = files.flatMap(([filePath, contents]) => {
+    if (filePath === "crates/prodex-app/src/app_commands/info_handler.rs") {
+      return contents.includes("prodex_mojo_core::info_render::info_panel_value_color(")
+        && contents.includes("prodex_mojo_core::info_render::info_panel_field_visible(")
+        && !contents.includes("value.to_ascii_lowercase()")
+        && !contents.includes('matches!(label, "Codex 5h pool"')
+        ? [] : [filePath + ": main info color and visibility policy must remain compiled Mojo-owned"];
+    }
+    if (filePath === "crates/prodex-mojo-core/src/info_render/panel.rs") {
+      return contents.includes("render(INFO_PANEL_VALUE_COLOR")
+        && contents.includes("render(INFO_PANEL_FIELD_VISIBLE")
+        && contents.includes("pub enum InfoPanelValueColor")
+        && !contents.includes(".contains(")
+        ? [] : [filePath + ": info-panel adapter must retain checked compiled decisions"];
+    }
+    if (filePath === "mojo/prodex_core/info_render.mojo") {
+      return contents.includes("def info_render_info_panel_color(")
+        && contents.includes("def info_render_info_panel_visible(")
+        && contents.includes("operation > INFO_RENDER_INFO_PANEL_FIELD_VISIBLE")
+        ? [] : [filePath + ": info-panel decisions must remain in the compiled info-render ABI"];
+    }
+    return [];
+  });
   const sessionPromptJsonViolations = files.flatMap(([filePath, contents]) => {
     if (filePath === "crates/prodex-mojo-core/src/json/session_prompt_write.rs") {
       return contents.includes("prodex_session_prompt_write_json_v1(")
@@ -10069,6 +10094,9 @@ export function findViolations(files) {
         "info_render_doctor_value_color(",
         "info_render_doctor_viewport(",
         "if operation == INFO_RENDER_DOCTOR_VALUE_COLOR:",
+        "def info_render_info_panel_color(",
+        "def info_render_info_panel_visible(",
+        "operation > INFO_RENDER_INFO_PANEL_FIELD_VISIBLE",
         "elif operation == INFO_RENDER_DOCTOR_VIEWPORT:",
         "INFO_RENDER_PROVIDER_SUMMARY",
         "INFO_RENDER_PROVIDER_CAPABILITIES",
@@ -14106,7 +14134,7 @@ export function findViolations(files) {
     ...superExposeProtocolViolations, ...superExposeExecViolations, ...superExposeViolations,
     ...superRunRetentionViolations, ...superRunEventViolations, ...superTextClipViolations,
     ...superOverrideStringViolations, ...superRunOutputViolations, ...optionalTreeOrderViolations,
-    ...manualRedeemResetViolations, ...sessionPromptJsonViolations,
+    ...manualRedeemResetViolations, ...sessionPromptJsonViolations, ...infoPanelViolations,
     ...geminiFallbackViolations, ...geminiGenerationViolations, ...geminiTranslatorHardReplacementViolations, ...geminiBridgeFallbackViolations, ...geminiSignatureViolations, ...geminiResponseConformanceViolations,
     ...geminiToolResponseOrderViolations, ...geminiApplyPatchViolations,
     ...hardReplacementViolations, ...precommitBudgetOracleViolations,
@@ -14555,6 +14583,9 @@ function selfTest() {
     "info_render_doctor_value_color(",
     "info_render_doctor_viewport(",
     "if operation == INFO_RENDER_DOCTOR_VALUE_COLOR:",
+    "def info_render_info_panel_color(",
+    "def info_render_info_panel_visible(",
+    "operation > INFO_RENDER_INFO_PANEL_FIELD_VISIBLE",
     "elif operation == INFO_RENDER_DOCTOR_VIEWPORT:",
     "INFO_RENDER_PROVIDER_SUMMARY",
     "INFO_RENDER_PROVIDER_CAPABILITIES",
@@ -18121,6 +18152,14 @@ function selfTest() {
   assert.match(findViolations([[LOG_TRANSCRIPT_FILE, transcriptConsumerCalls + '.get("content_item_kinds")']]).join("\n"), /restored Rust session visibility/u);
   assert.match(findViolations([["crates/prodex-mojo-core/src/json/session_prompt_write.rs", ""]]).join("\n"), /compiled Mojo authority/u);
   assert.match(findViolations([["mojo/prodex_core/session_prompt_write_json.mojo", ""]]).join("\n"), /decoded session policy/u);
+
+  const infoPanelFile = "crates/prodex-app/src/app_commands/info_handler.rs";
+  const infoPanelCaller = "prodex_mojo_core::info_render::info_panel_value_color( prodex_mojo_core::info_render::info_panel_field_visible(";
+  assert.deepEqual(findViolations([[infoPanelFile, infoPanelCaller]]), []);
+  for (const restored of ["value.to_ascii_lowercase()", 'matches!(label, "Codex 5h pool"']) {
+    assert.match(findViolations([[infoPanelFile, infoPanelCaller + restored]]).join("\n"), /main info color and visibility/u);
+  }
+  assert.match(findViolations([["crates/prodex-mojo-core/src/info_render/panel.rs", ""]]).join("\n"), /checked compiled decisions/u);
 
   const redeemResetFile = "crates/prodex-app/src/app_commands/redeem.rs";
   const redeemResetCaller = "fn nearest_manual_redeem_reset() { manual_redeem_reset_window( }\n#[derive";
