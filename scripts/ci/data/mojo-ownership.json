@@ -1617,7 +1617,8 @@
         "production_reachable": true,
         "role": "semantic",
         "operations": [
-          "runtime_doctor_binding_source_aggregation"
+          "runtime_doctor_binding_source_aggregation",
+          "runtime_doctor_binding_display"
         ]
       },
       {
@@ -8086,6 +8087,27 @@
       "rust_adapter_scope": "BTreeMap iteration, borrowed profile-name deduplication and known-name lookup, typed row marshalling, validated Mojo index materialization and string-owning diagnostic DTOs"
     },
     {
+      "name": "runtime_doctor_binding_display",
+      "domain": "runtime-doctor/render",
+      "introduced_in": "0.439.0",
+      "baseline_state": "Rust built per-source labels/counts, top-profile placeholders and four-source binding text with a missing-count sum",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_mojo_runtime_doctor_binding_display_v1",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/runtime_doctor_bindings.mojo",
+      "consumer": "crates/prodex-runtime-doctor/src/render.rs",
+      "consumer_marker": "prodex_mojo_core::rich::runtime_doctor_binding_display(",
+      "production_consumers": ["crates/prodex-runtime-doctor/src/render.rs"],
+      "production_reachability_test": "crates/prodex-mojo-core/src/rich/runtime_doctor_binding_display_tests.rs",
+      "rust_owner_before": "binding_source_text and binding_state_text formatters and missing-profile count addition",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "deleted; direct Mojo, bridge and public report callers preserve full binding text, four-source order, absent/empty names and unsigned counts",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "borrow existing summary metadata and first profile from the compiled aggregation order, marshal typed numeric records and validate UTF-8 output"
+    },
+    {
       "name": "runtime_doctor_report_field_plan",
       "domain": "runtime-doctor/render",
       "introduced_in": "0.439.0",
@@ -8106,7 +8128,7 @@
       "production_fallback": false,
       "duplicate_production_owner": false,
       "platform_fallback": false,
-      "rust_adapter_scope": "Path display, summary map lookup, the separate existing binding-state formatter, borrowed typed ABI records, checked output and Serde field-pair materialization"
+      "rust_adapter_scope": "Path display, summary map lookup, compiled binding-display output, borrowed typed ABI records, checked output and Serde field-pair materialization"
     },
     {
       "name": "runtime_doctor_marker_scope_render",

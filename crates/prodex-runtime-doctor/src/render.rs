@@ -2,42 +2,6 @@ use std::path::Path;
 
 use super::*;
 
-fn binding_source_text(source: &RuntimeDoctorBindingSourceSummary) -> String {
-    let top_profile = source
-        .profiles
-        .first()
-        .map(|profile| format!("{}={}", profile.profile, profile.total_bindings))
-        .unwrap_or_else(|| "-".to_string());
-    format!(
-        "r={} s={} t={} sid={} total={} profiles={} top={}",
-        source.response_bindings,
-        source.session_bindings,
-        source.turn_state_bindings,
-        source.session_id_bindings,
-        source.total_bindings,
-        source.profile_count,
-        top_profile
-    )
-}
-
-fn binding_state_text(summary: &RuntimeDoctorBindingStateSummary) -> String {
-    let missing = summary.state.missing_profile_bindings
-        + summary.runtime_continuations.missing_profile_bindings
-        + summary.continuation_journal.missing_profile_bindings
-        + summary.merged_continuations.missing_profile_bindings;
-    format!(
-        "active={} profiles={} selected={} | state {} | runtime {} | journal {} | merged {} | missing={}",
-        summary.active_profile.as_deref().unwrap_or("-"),
-        summary.profile_count,
-        summary.last_run_selected_profiles,
-        binding_source_text(&summary.state),
-        binding_source_text(&summary.runtime_continuations),
-        binding_source_text(&summary.continuation_journal),
-        binding_source_text(&summary.merged_continuations),
-        missing
-    )
-}
-
 fn marker_field<'a>(
     summary: &'a RuntimeDoctorSummary,
     marker: &str,
@@ -59,7 +23,36 @@ pub fn runtime_doctor_fields_for_summary(
         .log_path
         .as_ref()
         .map(|path| path.display().to_string());
-    let binding_state = binding_state_text(&summary.binding_state);
+    let binding = &summary.binding_state;
+    let binding_state = prodex_mojo_core::rich::runtime_doctor_binding_display(
+        prodex_mojo_core::rich::RuntimeDoctorBindingDisplayInput {
+            active_profile: binding.active_profile.as_deref(),
+            profile_count: binding.profile_count as u64,
+            selected_profiles: binding.last_run_selected_profiles as u64,
+            sources: [
+                &binding.state,
+                &binding.runtime_continuations,
+                &binding.continuation_journal,
+                &binding.merged_continuations,
+            ]
+            .map(
+                |source| prodex_mojo_core::rich::RuntimeDoctorBindingDisplaySource {
+                    response_bindings: source.response_bindings as u64,
+                    session_bindings: source.session_bindings as u64,
+                    turn_state_bindings: source.turn_state_bindings as u64,
+                    session_id_bindings: source.session_id_bindings as u64,
+                    total_bindings: source.total_bindings as u64,
+                    profile_count: source.profile_count as u64,
+                    missing_profile_bindings: source.missing_profile_bindings as u64,
+                    top_profile: source
+                        .profiles
+                        .first()
+                        .map(|profile| (profile.profile.as_str(), profile.total_bindings as u64)),
+                },
+            ),
+        },
+    )
+    .expect("Mojo runtime-doctor binding display failed");
     let hot_reason = diagnosis::runtime_doctor_top_facet(summary, "reason");
     let body = prodex_mojo_core::rich::runtime_doctor_report_fields_json(
         prodex_mojo_core::rich::RuntimeDoctorReportInput {

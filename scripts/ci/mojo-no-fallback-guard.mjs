@@ -430,6 +430,11 @@ const CORE_LEXICAL_BROKER_PATHS = "crates/prodex-app/src/runtime_persistence/pat
 const CORE_LEXICAL_APP_HOUSEKEEPING = "crates/prodex-app/src/housekeeping.rs";
 const CORE_LEXICAL_LIVE_LOG = "crates/prodex-app/src/app_commands/log_live.rs";
 const PROMOTED_FILES = [
+  "crates/prodex-mojo-core/src/rich/runtime_doctor_binding_display.rs",
+  "crates/prodex-mojo-core/src/rich/runtime_doctor_binding_display_tests.rs",
+  "crates/prodex-runtime-doctor/tests/binding_display.rs",
+  "mojo/tests/runtime_doctor_binding_display_test.mojo",
+  "mojo/prodex_core/runtime_doctor_bindings.mojo",
   DOCTOR_REPORT_CONSUMER_FILE,
   DOCTOR_REPORT_ADAPTER_FILE,
   DOCTOR_REPORT_MOJO_FILE,
@@ -7745,8 +7750,20 @@ export function findViolations(files) {
     if (filePath === DOCTOR_REPORT_CONSUMER_FILE) {
       const production = contents.split("\n#[cfg(test)]", 1)[0];
       return production.includes("prodex_mojo_core::rich::runtime_doctor_report_fields_json(")
-        && !/fn compact_list\b|for field in report_plan|"Log pointer"|"Sync-probe deferred"/u.test(production)
+        && production.includes("prodex_mojo_core::rich::runtime_doctor_binding_display(")
+        && !/fn compact_list\b|fn binding_source_text\b|fn binding_state_text\b|for field in report_plan|"Log pointer"|"Sync-probe deferred"/u.test(production)
         ? [] : [filePath + ": human report labels, list clipping and optional rows must use compiled Mojo rendering"];
+    }
+    if (filePath === "crates/prodex-mojo-core/src/rich/runtime_doctor_binding_display.rs") {
+      return contents.includes("prodex_mojo_runtime_doctor_binding_display_v1(")
+        && !/format!|"active="|" top="/u.test(contents)
+        ? [] : [filePath + ": binding display adapter must retain compiled text without Rust templates"];
+    }
+    if (filePath === "mojo/prodex_core/runtime_doctor_bindings.mojo") {
+      return contents.includes('@export("prodex_mojo_runtime_doctor_binding_display_v1")')
+        && contents.includes("def doctor_binding_display(")
+        && contents.includes("js_u64(writer, missing)")
+        ? [] : [filePath + ": binding display text and missing-count aggregation must stay in Mojo"];
     }
     if (filePath === DOCTOR_REPORT_ADAPTER_FILE) {
       return contents.includes("prodex_mojo_runtime_doctor_report_render_v1(")
@@ -14481,14 +14498,22 @@ async function promotedFiles() {
 }
 
 function selfTest() {
-  const reportCaller = "prodex_mojo_core::rich::runtime_doctor_report_fields_json(";
+  const reportCaller = "prodex_mojo_core::rich::runtime_doctor_report_fields_json(; prodex_mojo_core::rich::runtime_doctor_binding_display(";
   assert.deepEqual(findViolations([[DOCTOR_REPORT_CONSUMER_FILE, reportCaller]]), []);
-  for (const restored of ['"Log pointer"', '"Sync-probe deferred"', "fn compact_list(", "for field in report_plan"]) {
+  for (const restored of ['"Log pointer"', '"Sync-probe deferred"', "fn compact_list(", "for field in report_plan", "fn binding_state_text(", "fn binding_source_text("]) {
     assert.match(findViolations([[DOCTOR_REPORT_CONSUMER_FILE, reportCaller + restored]])
       .join("\n"), /must use compiled Mojo rendering/u);
   }
   assert.match(findViolations([[DOCTOR_REPORT_CONSUMER_FILE, "fn runtime_doctor_fields_for_summary() {}"]])
     .join("\n"), /must use compiled Mojo rendering/u);
+  const bindingAdapter = "crates/prodex-mojo-core/src/rich/runtime_doctor_binding_display.rs";
+  assert.deepEqual(findViolations([[bindingAdapter, "prodex_mojo_runtime_doctor_binding_display_v1("]]), []);
+  assert.match(findViolations([[bindingAdapter, 'prodex_mojo_runtime_doctor_binding_display_v1(; format!("active=")']])
+    .join("\n"), /without Rust templates/u);
+  const bindingMojo = '@export("prodex_mojo_runtime_doctor_binding_display_v1"); def doctor_binding_display(; js_u64(writer, missing)';
+  assert.deepEqual(findViolations([["mojo/prodex_core/runtime_doctor_bindings.mojo", bindingMojo]]), []);
+  assert.match(findViolations([["mojo/prodex_core/runtime_doctor_bindings.mojo", bindingMojo.replace("js_u64(writer, missing)", "local_missing()")]])
+    .join("\n"), /aggregation must stay in Mojo/u);
   const reportAdapter = "prodex_mojo_runtime_doctor_report_render_v1(";
   assert.deepEqual(findViolations([[DOCTOR_REPORT_ADAPTER_FILE, reportAdapter]]), []);
   assert.match(findViolations([[DOCTOR_REPORT_ADAPTER_FILE, reportAdapter + "match field {}"]])
