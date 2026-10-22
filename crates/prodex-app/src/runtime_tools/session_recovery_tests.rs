@@ -13,6 +13,7 @@ const THREAD: &str = "00000000-0000-7000-8000-000000000042";
 struct Scenario {
     status: &'static str,
     goal: Option<&'static str>,
+    goal_fields: Option<&'static str>,
     expected_goal: bool,
     exhausted_budget: bool,
     wrong_thread: bool,
@@ -26,6 +27,7 @@ impl Default for Scenario {
         Self {
             status: "idle",
             goal: Some("blocked"),
+            goal_fields: None,
             expected_goal: true,
             exhausted_budget: false,
             wrong_thread: false,
@@ -74,10 +76,21 @@ fn mock_recovery(scenario: Scenario) -> (NativeRecoveryOutcome, Vec<Value>, bool
                     "sessionId":THREAD, "ephemeral":false, "canAcceptDirectInput":true,
                     "cwd":home, "status":{"type":scenario.status}
                 }}),
-                "thread/goal/get" => json!({"goal":scenario.goal.map(|status| json!({
-                    "threadId":THREAD, "status":status, "objective":"preserved synthetic objective",
-                    "tokenBudget":100, "tokensUsed":if scenario.exhausted_budget {100} else {10}
-                }))}),
+                "thread/goal/get" => {
+                    let goal = scenario.goal_fields.map_or_else(
+                        || scenario.goal.map(|status| json!({
+                            "threadId":THREAD, "status":status, "objective":"preserved synthetic objective",
+                            "tokenBudget":100, "tokensUsed":if scenario.exhausted_budget {100} else {10}
+                        })),
+                        |fields| {
+                            let mut fields: serde_json::Map<String, Value> =
+                                serde_json::from_str(fields).unwrap();
+                            fields.insert("threadId".into(), json!(THREAD));
+                            Some(Value::Object(fields))
+                        },
+                    );
+                    json!({"goal":goal})
+                }
                 "thread/goal/set" | "turn/start" => {
                     if scenario.ambiguous_mutation {
                         let _ = socket.close(None);
@@ -313,5 +326,151 @@ fn native_unloaded_and_unknown_thread_states_do_not_start_recovery() {
         assert_eq!(outcome, NativeRecoveryOutcome::Deferred, "{status}");
         assert!(!released);
         assert!(mutations(&calls).is_empty());
+    }
+}
+
+#[test]
+fn native_recovery_preserves_wire_statuses_and_malformed_goal_fields() {
+    for goal in ["active", "blocked", "usageLimited"] {
+        let (outcome, calls, released) = mock_recovery(Scenario {
+            goal: Some(goal),
+            ..Scenario::default()
+        });
+        assert_eq!(outcome, NativeRecoveryOutcome::Accepted, "{goal}");
+        assert!(released);
+        let writes = mutations(&calls);
+        assert_eq!(writes.len(), 1);
+        assert_eq!(writes[0]["method"], "thread/goal/set");
+    }
+    for fields in [
+        "{}",
+        r#"{"status":null}"#,
+        r#"{"status":false}"#,
+        r#"{"status":{}}"#,
+        r#"{"status":"Active"}"#,
+        r#"{"status":"blocked "}"#,
+        r#"{"status":"未知"}"#,
+    ] {
+        let (outcome, calls, released) = mock_recovery(Scenario {
+            goal_fields: Some(fields),
+            ..Scenario::default()
+        });
+        assert_eq!(outcome, NativeRecoveryOutcome::Stopped, "{fields}");
+        assert!(!released);
+        assert!(mutations(&calls).is_empty());
+    }
+    for status in ["Idle", " idle", "systemError ", "未知", ""] {
+        let (outcome, calls, released) = mock_recovery(Scenario {
+            status,
+            ..Scenario::default()
+        });
+        assert_eq!(outcome, NativeRecoveryOutcome::Deferred, "{status}");
+        assert!(!released);
+        assert!(mutations(&calls).is_empty());
+    }
+}
+
+#[test]
+fn native_recovery_preserves_signed_budget_types_and_unlimited_missing_values() {
+    for (fields, available) in [
+        (r#"{"status":"blocked"}"#, true),
+        (r#"{"status":"blocked","tokensUsed":"malformed"}"#, true),
+        (
+            r#"{"status":"blocked","tokenBudget":null,"tokensUsed":-10}"#,
+            true,
+        ),
+        (
+            r#"{"status":"blocked","tokenBudget":100,"tokensUsed":0}"#,
+            true,
+        ),
+        (
+            r#"{"status":"blocked","tokenBudget":100,"tokensUsed":99}"#,
+            true,
+        ),
+        (
+            r#"{"status":"blocked","tokenBudget":9223372036854775807,"tokensUsed":9223372036854775806}"#,
+            true,
+        ),
+        (
+            r#"{"status":"blocked","tokenBudget":100,"tokensUsed":100}"#,
+            false,
+        ),
+        (
+            r#"{"status":"blocked","tokenBudget":100,"tokensUsed":101}"#,
+            false,
+        ),
+        (
+            r#"{"status":"blocked","tokenBudget":0,"tokensUsed":0}"#,
+            false,
+        ),
+        (
+            r#"{"status":"blocked","tokenBudget":-1,"tokensUsed":0}"#,
+            false,
+        ),
+        (
+            r#"{"status":"blocked","tokenBudget":100,"tokensUsed":-1}"#,
+            false,
+        ),
+        (r#"{"status":"blocked","tokenBudget":100}"#, false),
+        (
+            r#"{"status":"blocked","tokenBudget":100,"tokensUsed":null}"#,
+            false,
+        ),
+        (
+            r#"{"status":"blocked","tokenBudget":100,"tokensUsed":1.0}"#,
+            false,
+        ),
+        (
+            r#"{"status":"blocked","tokenBudget":100,"tokensUsed":"1"}"#,
+            false,
+        ),
+        (
+            r#"{"status":"blocked","tokenBudget":100,"tokensUsed":true}"#,
+            false,
+        ),
+        (
+            r#"{"status":"blocked","tokenBudget":100,"tokensUsed":9223372036854775808}"#,
+            false,
+        ),
+        (
+            r#"{"status":"blocked","tokenBudget":100.0,"tokensUsed":1}"#,
+            false,
+        ),
+        (
+            r#"{"status":"blocked","tokenBudget":"100","tokensUsed":1}"#,
+            false,
+        ),
+        (
+            r#"{"status":"blocked","tokenBudget":true,"tokensUsed":1}"#,
+            false,
+        ),
+        (
+            r#"{"status":"blocked","tokenBudget":{},"tokensUsed":1}"#,
+            false,
+        ),
+        (
+            r#"{"status":"blocked","tokenBudget":[],"tokensUsed":1}"#,
+            false,
+        ),
+        (
+            r#"{"status":"blocked","tokenBudget":9223372036854775808,"tokensUsed":1}"#,
+            false,
+        ),
+    ] {
+        let (outcome, calls, released) = mock_recovery(Scenario {
+            goal_fields: Some(fields),
+            ..Scenario::default()
+        });
+        assert_eq!(
+            outcome,
+            if available {
+                NativeRecoveryOutcome::Accepted
+            } else {
+                NativeRecoveryOutcome::Stopped
+            },
+            "{fields}"
+        );
+        assert_eq!(released, available, "{fields}");
+        assert_eq!(mutations(&calls).len(), usize::from(available), "{fields}");
     }
 }

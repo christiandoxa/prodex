@@ -10292,7 +10292,7 @@
       "mojo_abi_version": 2,
       "mojo_source": "mojo/prodex_core/launch_config.mojo",
       "consumer": "crates/prodex-app/src/runtime_tools/session_recovery.rs",
-      "consumer_marker": "in_place_recovery_action(",
+      "consumer_marker": "in_place_recovery_action_from_wire(",
       "production_consumers": [
         "crates/prodex-app/src/runtime_tools/session_recovery.rs"
       ],

@@ -8823,3 +8823,27 @@ wire-status classification and the optional signed-integer token-budget check.
 Extend the existing compiled launch-recovery owner. Preserve missing/null versus
 malformed values and unknown statuses. Native Path identity, RPC/socket effects,
 affinity release and mutation delivery remain in Rust.
+
+## Native recovery wire state compiled in Mojo (2026-10-22)
+
+The existing launch-recovery owner now classifies goal/thread wire statuses,
+distinguishes absent and unknown goals, handles missing/null unlimited budgets
+and checks signed integer budget bounds. The new wire entry delegates to the
+unchanged typed action policy. Rust's matches and comparisons are deleted without
+a fallback; Serde acquisition, native identity and RPC/affinity effects remain.
+Two caller regressions pass on the original Rust implementation. Direct Mojo,
+14 bridge tests in each core/runtime mode, 11 caller tests and 19 serialized smoke
+tests pass after migration. Strict workspace Clippy, guards and full default CI
+pass: 1,443 Rust tests in 493.38 seconds. Default changed tests pass with zero Rust
+tests selected; explicit feature/caller commands supply that coverage.
+Canonical share is 36.54822871858054% (138,236 Mojo / 239,993 Rust production
+LOC). The checked adapter adds 20 Rust production LOC while transferring decisions.
+The 75% goal remains open. Evidence and corrected compiler/consumer-marker failures
+are in `migration/native-recovery-wire-mojo-20261022.md`.
+
+The next audit targets Copilot runtime catalog traversal, normalized model
+projection and recursive object-null removal. Preserve raw entry limits before
+filtering/deduplication, traversal order, presence-first field precedence, Unicode
+trim, unsigned limits and null array elements. Reuse the provider catalog boundary,
+parsed JSON tree/writer and existing compiled ID merge; keep credentials and HTTP
+effects in Rust.

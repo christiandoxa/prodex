@@ -1,6 +1,10 @@
 //! Single semantic owner for live native recovery arbitration.
 use crate::MojoError;
 
+#[path = "recovery/native_wire.rs"]
+mod native_wire;
+pub use native_wire::{NativeRecoveryWireInput, in_place_recovery_action_from_wire};
+
 #[repr(i64)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum RecoveryObservationKind {
@@ -329,7 +333,7 @@ pub fn in_place_recovery_action(
     goal_status: NativeGoalStatus,
     budget_available: bool,
 ) -> Result<InPlaceRecoveryAction, MojoError> {
-    match unsafe {
+    decode_in_place_recovery_action(unsafe {
         prodex_launch_in_place_recovery_v2(
             2,
             i64::from(verified),
@@ -338,7 +342,11 @@ pub fn in_place_recovery_action(
             goal_status as i64,
             i64::from(budget_available),
         )
-    } {
+    })
+}
+
+fn decode_in_place_recovery_action(result: i64) -> Result<InPlaceRecoveryAction, MojoError> {
+    match result {
         0 => Ok(InPlaceRecoveryAction::Defer),
         1 => Ok(InPlaceRecoveryAction::Stop),
         2 => Ok(InPlaceRecoveryAction::ResumeGoal),
