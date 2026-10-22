@@ -8,8 +8,8 @@ from runtime_catalog_plan import prodex_mojo_runtime_catalog_plan_v1
 
 def main() raises:
     var raw = StringSlice("{\"provider\":\"deepseek\",\"launch_model\":\" PRO \",\"context_window\":0,\"auto_compact_token_limit\":18446744073709551615,\"dynamic_models\":[],\"static_models\":[{\"id\":\"pro\",\"display_name\":\"DeepSeek Pro\",\"description\":\"Known\",\"context_window_tokens\":999,\"aliases\":[]}]}")
-    var nodes_storage = alloc(Layout[ParsedJsonNode](count=13))
-    var scratch_storage = alloc(Layout[Int64](count=104))
+    var nodes_storage = alloc(Layout[ParsedJsonNode](count=14))
+    var scratch_storage = alloc(Layout[Int64](count=112))
     var output_storage = alloc(Layout[UInt8](count=4096))
     var metadata_storage = alloc(Layout[Int64](count=2))
     var nodes = nodes_storage.unsafe_ptr()
@@ -42,6 +42,23 @@ def main() raises:
     assert prodex_mojo_runtime_catalog_plan_v1(1, 2, 0, input, 13, source, length, scratch, 52, 0, target, 4096, meta) == 0
     assert rich_slice_contains(output, ProdexRichSlice(0, metadata[unsafe_offset=1]), StringSlice('"description":"DeepSeek model routed through the Prodex Responses adapter."'), False)
     assert rich_slice_contains(output, ProdexRichSlice(0, metadata[unsafe_offset=1]), StringSlice('"priority":2,"context_window":0,"auto_compact_token_limit":18446744073709551615'), False)
+    nodes[unsafe_offset=1].text = pj_literal(StringSlice("gemini"))
+    nodes[unsafe_offset=2].text = pj_literal(StringSlice(" PRO "))
+    assert prodex_mojo_runtime_catalog_plan_v1(1, 1, 0, input, 13, source, length, scratch, 52, 0, target, 4096, meta) == 0
+    assert metadata[unsafe_offset=1] == Int64(expected.byte_length())
+    assert rich_slice_contains(output, ProdexRichSlice(0, metadata[unsafe_offset=1]), expected, False)
+    nodes[unsafe_offset=2].text = pj_literal(StringSlice("unknown\n雪"))
+    assert prodex_mojo_runtime_catalog_plan_v1(1, 2, 0, input, 13, source, length, scratch, 52, 0, target, 4096, meta) == 0
+    assert rich_slice_contains(output, ProdexRichSlice(0, metadata[unsafe_offset=1]), StringSlice('"description":"Gemini model routed through the Prodex Responses adapter."'), False)
+    nodes[unsafe_offset=2].text = pj_literal(StringSlice("catalog-alias"))
+    nodes[unsafe_offset=12].first_child = 13
+    nodes[unsafe_offset=13] = ParsedJsonNode(JSON_STRING, -1, -1, 12, pj_literal(StringSlice("")), pj_literal(StringSlice("catalog-alias")), 0, 0)
+    assert prodex_mojo_runtime_catalog_plan_v1(1, 2, 0, input, 14, source, length, scratch, 56, 0, target, 4096, meta) == 0
+    assert rich_slice_contains(output, ProdexRichSlice(0, metadata[unsafe_offset=1]), StringSlice('"slug":"catalog-alias","display_name":"catalog-alias","description":"Gemini model routed through the Prodex Responses adapter."'), False)
+    assert prodex_mojo_runtime_catalog_plan_v1(1, 1, 0, input, 14, source, length, scratch, 56, 0, target, 4096, meta) == 0
+    var limit_error = StringSlice('{"Err":"Gemini model catalog exceeds the hard limit of 1 entries"}')
+    assert metadata[unsafe_offset=1] == Int64(limit_error.byte_length())
+    assert rich_slice_contains(output, ProdexRichSlice(0, metadata[unsafe_offset=1]), limit_error, False)
     dealloc(nodes_storage^)
     dealloc(scratch_storage^)
     dealloc(output_storage^)

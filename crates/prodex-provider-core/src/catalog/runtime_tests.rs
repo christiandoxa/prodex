@@ -64,6 +64,7 @@ fn runtime_schema_preserves_provider_capabilities_unsigned_endpoints_and_rejecti
         (ProviderId::Copilot, true),
         (ProviderId::Kiro, false),
         (ProviderId::DeepSeek, false),
+        (ProviderId::Gemini, true),
     ] {
         let model = render_runtime_model_catalog(RuntimeModelCatalogInput {
             provider,
@@ -93,7 +94,7 @@ fn runtime_schema_preserves_provider_capabilities_unsigned_endpoints_and_rejecti
     }
     assert!(matches!(
         render_runtime_model_catalog(RuntimeModelCatalogInput {
-            provider: ProviderId::Gemini,
+            provider: ProviderId::Local,
             ..observation()
         }),
         Err(RuntimeModelCatalogError::Mojo(MojoError::InvalidInput))
@@ -123,6 +124,54 @@ fn deepseek_runtime_schema_keeps_fixed_efforts_and_instructions() {
     assert_eq!(instructions.len(), 430);
     assert_eq!(instructions.lines().count(), 5);
     assert!(!instructions.contains('\r'));
+}
+
+#[test]
+fn gemini_runtime_catalog_keeps_fixed_reasoning_and_exact_caller_budgets() {
+    let models = plan_runtime_model_catalog(RuntimeModelCatalogPlanInput {
+        provider: ProviderId::Gemini,
+        launch_model: " custom\"\\\n雪 ",
+        context_window: 0,
+        auto_compact_token_limit: u64::MAX,
+        dynamic_models: &[],
+    })
+    .unwrap();
+    assert_eq!(models[0].slug, "custom\"\\\n雪");
+    assert_eq!(models[0].display_name, models[0].slug);
+    assert_eq!(models[0].priority, 1);
+    assert_eq!(
+        models[0].description,
+        "Gemini model routed through the Prodex Responses adapter."
+    );
+    assert!(
+        models.iter().all(|model| {
+            model.context_window == 0 && model.auto_compact_token_limit == u64::MAX
+        })
+    );
+    let model = render_runtime_model_catalog(RuntimeModelCatalogInput {
+        provider: ProviderId::Gemini,
+        supported_reasoning_efforts: Some(&[]),
+        default_reasoning_effort: Some(ProviderReasoningEffort::Max),
+        ..observation()
+    })
+    .unwrap();
+    assert_eq!(model["default_reasoning_level"], json!("high"));
+    assert_eq!(
+        model["supported_reasoning_levels"],
+        json!([
+            {"effort":"minimal","description":"Disable Gemini thinking budget where supported"},
+            {"effort":"low","description":"Small Gemini thinking budget"},
+            {"effort":"medium","description":"Default Gemini thinking budget"},
+            {"effort":"high","description":"High Gemini thinking budget"},
+            {"effort":"xhigh","description":"Maximum Gemini thinking effort"}
+        ])
+    );
+    let deepseek = render_runtime_model_catalog(RuntimeModelCatalogInput {
+        provider: ProviderId::DeepSeek,
+        ..observation()
+    })
+    .unwrap();
+    assert_eq!(model["base_instructions"], deepseek["base_instructions"]);
 }
 
 #[test]

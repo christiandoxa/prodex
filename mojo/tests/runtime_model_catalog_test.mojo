@@ -68,6 +68,19 @@ def main() raises:
     assert has(output, metadata[unsafe_offset=1], StringSlice('"input_modalities":["text"]'))
     assert has(output, metadata[unsafe_offset=1], StringSlice('"supports_reasoning_summaries":false'))
     assert has(output, metadata[unsafe_offset=1], StringSlice('"base_instructions":"You are Codex, a coding agent.'))
+    nodes[unsafe_offset=1].text = pj_literal(StringSlice("gemini"))
+    assert prodex_mojo_runtime_model_catalog_v1(1, 0, 0, input, 10, source, 232, scratch, 11, 0, target, 4096, meta) == 0
+    assert has(output, metadata[unsafe_offset=1], StringSlice(
+        '"supported_reasoning_levels":[{"effort":"minimal","description":"Disable Gemini thinking budget where supported"},'
+        '{"effort":"low","description":"Small Gemini thinking budget"},'
+        '{"effort":"medium","description":"Default Gemini thinking budget"},'
+        '{"effort":"high","description":"High Gemini thinking budget"},'
+        '{"effort":"xhigh","description":"Maximum Gemini thinking effort"}]'
+    ))
+    assert has(output, metadata[unsafe_offset=1], StringSlice('"supports_reasoning_summaries":true'))
+    assert has(output, metadata[unsafe_offset=1], StringSlice('"supports_search_tool":true'))
+    assert has(output, metadata[unsafe_offset=1], StringSlice('"input_modalities":["text","image"]'))
+    assert has(output, metadata[unsafe_offset=1], StringSlice('"base_instructions":"You are Codex, a coding agent.'))
     nodes[unsafe_offset=1].text = pj_literal(StringSlice("kiro"))
     assert prodex_mojo_runtime_model_catalog_v1(1, 0, 0, input, 10, source, 232, scratch, 11, 0, target, 4096, meta) == 0
     assert has(output, metadata[unsafe_offset=1], StringSlice('"supports_reasoning_summaries":false'))

@@ -3,16 +3,15 @@ use crate::{
     codex_cli_config_override_value, codex_effective_config_exact_value,
     codex_effective_config_value,
 };
-use anyhow::{Context, Result, bail};
-use prodex_mojo_core::{
-    rich::{CatalogModel, merge_catalog_ids, resolve_catalog_model},
-    super_provider_config::{RuntimeModelProviderClass, runtime_model_provider_class},
+use anyhow::{Context, Result};
+use prodex_mojo_core::super_provider_config::{
+    RuntimeModelProviderClass, runtime_model_provider_class,
 };
 use prodex_provider_core::{
     PRODEX_GEMINI_DEFAULT_AUTO_COMPACT_LIMIT as GEMINI_DEFAULT_AUTO_COMPACT_LIMIT,
     PRODEX_GEMINI_DEFAULT_CONTEXT_WINDOW as GEMINI_DEFAULT_CONTEXT_WINDOW,
-    PRODEX_GEMINI_DEFAULT_MODEL as GEMINI_DEFAULT_MODEL, PROVIDER_MODEL_CATALOG_HARD_LIMIT,
-    ProviderId, provider_model_catalog,
+    PRODEX_GEMINI_DEFAULT_MODEL as GEMINI_DEFAULT_MODEL, ProviderId, RuntimeModelCatalogInput,
+    RuntimeModelCatalogPlanInput, plan_runtime_model_catalog, render_runtime_model_catalog,
 };
 use serde_json::json;
 use std::ffi::OsString;
@@ -21,11 +20,10 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 const GEMINI_MODEL_CATALOG_FILE: &str = "prodex-gemini-model-catalog.json";
-const GEMINI_BASE_INSTRUCTIONS: &str = r#"You are Codex, a coding agent. You and the user share the same workspace.
 
-Focus on the user's software task. Inspect the codebase before changing behavior, make narrow edits, preserve user changes, and verify with relevant tests or commands when feasible.
-
-Use tools deliberately. For shell work, prefer fast focused commands. For file edits, keep changes minimal and explain non-obvious logic in short comments only when useful."#;
+#[cfg(test)]
+#[path = "runtime_gemini_config/catalog_tests.rs"]
+mod catalog_tests;
 
 #[derive(Clone, Copy, Debug, Default)]
 pub(crate) struct RuntimeGeminiModelResolution;
@@ -170,127 +168,29 @@ fn gemini_catalog_models(
     context_window: u64,
     auto_compact_token_limit: u64,
 ) -> Result<Vec<serde_json::Value>> {
-    let candidates = std::iter::once(launch_model)
-        .chain(
-            provider_model_catalog(ProviderId::Gemini)
-                .iter()
-                .map(|spec| spec.id),
-        )
-        .collect::<Vec<_>>();
-    let accepted = merge_catalog_ids(&[], &candidates)
-        .expect("Mojo Gemini catalog dedup returned an invalid structured result");
-    let mut models = Vec::with_capacity(accepted.len());
-
-    for candidate_index in accepted {
-        let slug = candidates[candidate_index].trim();
-        if models.len() >= PROVIDER_MODEL_CATALOG_HARD_LIMIT {
-            bail!(
-                "Gemini model catalog exceeds the hard limit of {} entries",
-                PROVIDER_MODEL_CATALOG_HARD_LIMIT
-            );
-        }
-        let priority = models.len() + 1;
-        let (display_name, description) = gemini_catalog_model_metadata(slug);
-        models.push(gemini_catalog_model(
-            slug,
-            &display_name,
-            &description,
-            priority,
-            context_window,
-            auto_compact_token_limit,
-        ));
-    }
-
-    Ok(models)
-}
-
-fn gemini_catalog_model_metadata(model: &str) -> (String, String) {
-    let specs = provider_model_catalog(ProviderId::Gemini);
-    let catalog = specs
-        .iter()
-        .map(|spec| CatalogModel {
-            id: spec.id,
-            aliases: &[],
+    let plan = plan_runtime_model_catalog(RuntimeModelCatalogPlanInput {
+        provider: ProviderId::Gemini,
+        launch_model,
+        context_window,
+        auto_compact_token_limit,
+        dynamic_models: &[],
+    })?;
+    plan.into_iter()
+        .map(|model| {
+            render_runtime_model_catalog(RuntimeModelCatalogInput {
+                provider: ProviderId::Gemini,
+                slug: &model.slug,
+                display_name: &model.display_name,
+                description: &model.description,
+                priority: model.priority,
+                context_window: model.context_window,
+                auto_compact_token_limit: model.auto_compact_token_limit,
+                supported_reasoning_efforts: None,
+                default_reasoning_effort: None,
+            })
+            .context("failed to render Gemini model catalog")
         })
-        .collect::<Vec<_>>();
-    resolve_catalog_model(&catalog, model)
-        .expect("Mojo Gemini catalog lookup returned an invalid structured result")
-        .map(|index| {
-            let spec = specs[index];
-            (spec.display_name.to_string(), spec.description.to_string())
-        })
-        .unwrap_or((
-            model.to_string(),
-            "Gemini model routed through the Prodex Responses adapter.".to_string(),
-        ))
-}
-
-fn gemini_catalog_model(
-    slug: &str,
-    display_name: &str,
-    description: &str,
-    priority: usize,
-    context_window: u64,
-    auto_compact_token_limit: u64,
-) -> serde_json::Value {
-    json!({
-        "slug": slug,
-        "display_name": display_name,
-        "description": description,
-        "default_reasoning_level": "high",
-        "supported_reasoning_levels": [
-            {
-                "effort": "minimal",
-                "description": "Disable Gemini thinking budget where supported"
-            },
-            {
-                "effort": "low",
-                "description": "Small Gemini thinking budget"
-            },
-            {
-                "effort": "medium",
-                "description": "Default Gemini thinking budget"
-            },
-            {
-                "effort": "high",
-                "description": "High Gemini thinking budget"
-            },
-            {
-                "effort": "xhigh",
-                "description": "Maximum Gemini thinking effort"
-            }
-        ],
-        "shell_type": "shell_command",
-        "visibility": "list",
-        "supported_in_api": true,
-        "priority": priority,
-        "additional_speed_tiers": [],
-        "service_tiers": [],
-        "default_service_tier": null,
-        "availability_nux": null,
-        "upgrade": null,
-        "base_instructions": GEMINI_BASE_INSTRUCTIONS,
-        "supports_reasoning_summaries": true,
-        "supports_reasoning_summary_parameter": true,
-        "default_reasoning_summary": "none",
-        "support_verbosity": false,
-        "default_verbosity": null,
-        "apply_patch_tool_type": "freeform",
-        "web_search_tool_type": "text",
-        "truncation_policy": {
-            "mode": "tokens",
-            "limit": 10000
-        },
-        "supports_parallel_tool_calls": true,
-        "supports_image_detail_original": false,
-        "context_window": context_window,
-        "max_context_window": context_window,
-        "auto_compact_token_limit": auto_compact_token_limit,
-        "effective_context_window_percent": 95,
-        "experimental_supported_tools": [],
-        "input_modalities": ["text", "image"],
-        "supports_search_tool": true
-    })
+        .collect()
 }
 
 fn gemini_codex_args_without_consumed_overrides(user_args: &[OsString]) -> Vec<OsString> {
