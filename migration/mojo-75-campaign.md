@@ -8689,3 +8689,17 @@ The 75% goal stays open. Evidence is in `migration/doctor-binding-display-mojo-2
 The next audited owner is `prodex-optional-tools/src/super_optimizers.rs`:
 shape-preflight and required-MCP error-message tables still live in Rust around
 compiled policy. Preserve exact diagnostics and preflight-before-write ordering.
+
+## Optimizer preflight diagnostics compiled in Mojo (2026-10-22)
+
+Eight shape messages and three required-MCP templates now use the compiled
+optional-tools diagnostic owner. Both Rust message tables are removed without a fallback.
+Two caller regressions pass before/after migration and assert exact text,
+no configuration writes and enabled-state precedence before command resolution.
+Direct Mojo, three bridge tests in each feature configuration, 71 optional-tools
+and 18 app tests plus strict workspace Clippy, formatting and guards pass.
+Canonical share is 36.447182333903626% (137,618 Mojo / 239,964 Rust production LOC).
+The 75% goal stays open. Evidence is in `migration/optimizer-diagnostics-mojo-20261022.md`.
+The next audited owner is `prodex-profile-export/src/envelope.rs::profile_export_schema_error`:
+preserve exact schema diagnostics, version/absent-value details, ciphertext-length
+aliases and safe iteration bounds while retaining crypto and transport errors in Rust.

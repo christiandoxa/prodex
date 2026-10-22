@@ -121,16 +121,17 @@ unsafe extern "C" {
 
 /// TOML type facts are acquired by Rust, but the selected-section shape
 /// policy, precedence, and error identity belong exclusively to Mojo.
+#[repr(i64)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OptionalToolConfigShapeIssue {
-    Features,
-    Marketplaces,
-    Plugins,
-    PonytailMarketplace,
-    PonytailPlugin,
-    McpServers,
-    CodebaseMemoryMcp,
-    Playwright,
+    Features = 1,
+    Marketplaces = 2,
+    Plugins = 3,
+    PonytailMarketplace = 4,
+    PonytailPlugin = 5,
+    McpServers = 6,
+    CodebaseMemoryMcp = 7,
+    Playwright = 8,
 }
 
 /// Fields: features, marketplaces, plugins, marketplaces.ponytail,
@@ -179,12 +180,19 @@ pub enum RequiredMcpEnabled {
     Invalid,
 }
 
+#[repr(i64)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RequiredMcpConfigIssue {
-    Disabled,
-    EnabledNotBoolean,
-    CommandOrArgsMismatch,
+    Disabled = 1,
+    EnabledNotBoolean = 2,
+    CommandOrArgsMismatch = 3,
 }
+
+#[path = "optional_tools_policy/diagnostics.rs"]
+mod diagnostics;
+pub use diagnostics::{
+    optional_tool_config_shape_diagnostic, optional_tool_required_mcp_diagnostic,
+};
 
 /// Validate the exact inherited command, args vector and enabled flag through
 /// compiled Mojo. None indicates an absent or non-string command/args field;
