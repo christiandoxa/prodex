@@ -49,6 +49,7 @@ impl std::error::Error for RuntimeModelCatalogError {
 }
 
 /// Render one provider Codex model entry; Mojo owns its schema and defaults.
+/// Use `render_local_runtime_model_catalog` for Local's fixed metadata.
 pub fn render_runtime_model_catalog(
     input: RuntimeModelCatalogInput<'_>,
 ) -> Result<Value, RuntimeModelCatalogError> {
@@ -60,8 +61,25 @@ pub fn render_runtime_model_catalog(
         "supported_reasoning_efforts":input.supported_reasoning_efforts,
         "default_reasoning_effort":input.default_reasoning_effort,
     });
+    render_runtime_model_catalog_value(&value)
+}
+
+/// Render Local's fixed metadata and schema from its observed slug and budgets.
+/// Mojo chooses descriptions, priority, reasoning levels and capability fields.
+pub fn render_local_runtime_model_catalog(
+    slug: &str,
+    context_window: u64,
+    auto_compact_token_limit: u64,
+) -> Result<Value, RuntimeModelCatalogError> {
+    render_runtime_model_catalog_value(&json!({
+        "provider":ProviderId::Local, "slug":slug,
+        "context_window":context_window, "auto_compact_token_limit":auto_compact_token_limit,
+    }))
+}
+
+fn render_runtime_model_catalog_value(value: &Value) -> Result<Value, RuntimeModelCatalogError> {
     let mut document = Document::default();
-    document.root(&value);
+    document.root(value);
     let raw = std::str::from_utf8(&document.raw)
         .map_err(|_| RuntimeModelCatalogError::Mojo(MojoError::InvalidInput))?;
     let output = prodex_mojo_core::json::runtime_model_catalog_json(&document.nodes, raw)

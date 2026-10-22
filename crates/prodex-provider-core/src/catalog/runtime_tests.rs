@@ -94,7 +94,7 @@ fn runtime_schema_preserves_provider_capabilities_unsigned_endpoints_and_rejecti
     }
     assert!(matches!(
         render_runtime_model_catalog(RuntimeModelCatalogInput {
-            provider: ProviderId::Local,
+            provider: ProviderId::OpenAi,
             ..observation()
         }),
         Err(RuntimeModelCatalogError::Mojo(MojoError::InvalidInput))
@@ -172,6 +172,35 @@ fn gemini_runtime_catalog_keeps_fixed_reasoning_and_exact_caller_budgets() {
     })
     .unwrap();
     assert_eq!(model["base_instructions"], deepseek["base_instructions"]);
+}
+
+#[test]
+fn local_runtime_schema_keeps_fixed_metadata_efforts_and_unsigned_budgets() {
+    let model = render_local_runtime_model_catalog(" \t雪\n ", 0, u64::MAX).unwrap();
+    assert_eq!(model["slug"], json!(" \t雪\n "));
+    assert_eq!(model["display_name"], model["slug"]);
+    assert_eq!(
+        model["description"],
+        json!("Local OpenAI-compatible model routed through Prodex.")
+    );
+    assert_eq!(model["priority"], json!(1));
+    assert_eq!(model["context_window"], json!(0));
+    assert_eq!(model["max_context_window"], json!(0));
+    assert_eq!(model["auto_compact_token_limit"], json!(u64::MAX));
+    assert_eq!(model["base_instructions"], json!(""));
+    assert_eq!(model["supports_reasoning_summaries"], json!(false));
+    assert_eq!(model["supports_reasoning_summary_parameter"], json!(false));
+    assert_eq!(model["input_modalities"], json!(["text"]));
+    assert_eq!(model["supports_search_tool"], json!(true));
+    assert_eq!(
+        model["supported_reasoning_levels"],
+        json!([
+            {"effort":"low","description":"Low reasoning effort"},
+            {"effort":"medium","description":"Medium reasoning effort"},
+            {"effort":"high","description":"High reasoning effort"},
+            {"effort":"xhigh","description":"Max reasoning effort"}
+        ])
+    );
 }
 
 #[test]

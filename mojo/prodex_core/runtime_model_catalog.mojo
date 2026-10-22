@@ -120,26 +120,27 @@ def runtime_catalog_emit(sink: Pointer[mut=True, JsonSink, _], tree: ParsedJson,
     var provider = pj_field(tree, 0, StringSlice("provider"))
     var deepseek = pj_is["deepseek"](tree, provider)
     var gemini = pj_is["gemini"](tree, provider)
+    var local = pj_is["local"](tree, provider)
     var kiro = pj_is["kiro"](tree, provider)
     var capable = gemini or pj_is["anthropic"](tree, provider) or pj_is["copilot"](tree, provider)
-    if not deepseek and not kiro and not capable:
+    if not deepseek and not kiro and not capable and not local:
         return False
     var slug = pj_field(tree, 0, StringSlice("slug"))
     var display = pj_field(tree, 0, StringSlice("display_name"))
     var description = pj_field(tree, 0, StringSlice("description"))
-    if pj_kind(tree, slug) != JSON_STRING or pj_kind(tree, display) != JSON_STRING or pj_kind(tree, description) != JSON_STRING:
+    if pj_kind(tree, slug) != JSON_STRING or (not local and (pj_kind(tree, display) != JSON_STRING or pj_kind(tree, description) != JSON_STRING)):
         return False
     var priority = pj_field(tree, 0, StringSlice("priority"))
     var context = pj_field(tree, 0, StringSlice("context_window"))
     var compact = pj_field(tree, 0, StringSlice("auto_compact_token_limit"))
-    if not runtime_catalog_unsigned(tree, priority) or not runtime_catalog_unsigned(tree, context) or not runtime_catalog_unsigned(tree, compact):
+    if (not local and not runtime_catalog_unsigned(tree, priority)) or not runtime_catalog_unsigned(tree, context) or not runtime_catalog_unsigned(tree, compact):
         return False
     var default = pj_field(tree, 0, StringSlice("default_reasoning_effort"))
     var efforts = pj_field(tree, 0, StringSlice("supported_reasoning_efforts"))
-    if pj_kind(tree, default) != JSON_NULL and not pj_is["unknown"](tree, default):
+    if not local and pj_kind(tree, default) != JSON_NULL and not pj_is["unknown"](tree, default):
         if pj_kind(tree, default) != JSON_STRING or runtime_reasoning_description(pj_text(tree, default)).len == 0:
             return False
-    if pj_kind(tree, efforts) != JSON_NULL:
+    if not local and pj_kind(tree, efforts) != JSON_NULL:
         if pj_kind(tree, efforts) != JSON_ARRAY:
             return False
         var child = pj_child(tree, efforts)
@@ -151,11 +152,14 @@ def runtime_catalog_emit(sink: Pointer[mut=True, JsonSink, _], tree: ParsedJson,
     js_literal(sink, StringSlice('{"slug":'))
     js_raw(sink, tree, slug)
     js_literal(sink, StringSlice(',"display_name":'))
-    js_raw(sink, tree, display)
+    js_raw(sink, tree, slug if local else display)
     js_literal(sink, StringSlice(',"description":'))
-    js_raw(sink, tree, description)
+    if local:
+        js_string(sink, pj_literal(StringSlice("Local OpenAI-compatible model routed through Prodex.")))
+    else:
+        js_raw(sink, tree, description)
     js_literal(sink, StringSlice(',"default_reasoning_level":'))
-    if deepseek or gemini or pj_kind(tree, default) == JSON_NULL or pj_is["unknown"](tree, default):
+    if deepseek or gemini or local or pj_kind(tree, default) == JSON_NULL or pj_is["unknown"](tree, default):
         js_literal(sink, StringSlice('"high"'))
     else:
         js_raw(sink, tree, default)
@@ -175,14 +179,17 @@ def runtime_catalog_emit(sink: Pointer[mut=True, JsonSink, _], tree: ParsedJson,
             '{"effort":"high","description":"High Gemini thinking budget"},'
             '{"effort":"xhigh","description":"Maximum Gemini thinking effort"}'
         ))
-    elif pj_kind(tree, efforts) == JSON_NULL:
+    elif local or pj_kind(tree, efforts) == JSON_NULL:
         runtime_put_reasoning(sink, pj_literal(StringSlice("low")))
         js_byte(sink, 44)
         runtime_put_reasoning(sink, pj_literal(StringSlice("medium")))
         js_byte(sink, 44)
         runtime_put_reasoning(sink, pj_literal(StringSlice("high")))
         js_byte(sink, 44)
-        runtime_put_reasoning(sink, pj_literal(StringSlice("xhigh")))
+        if local:
+            js_literal(sink, StringSlice('{"effort":"xhigh","description":"Max reasoning effort"}'))
+        else:
+            runtime_put_reasoning(sink, pj_literal(StringSlice("xhigh")))
     else:
         var child = pj_child(tree, efforts)
         var first = True
@@ -196,7 +203,10 @@ def runtime_catalog_emit(sink: Pointer[mut=True, JsonSink, _], tree: ParsedJson,
     js_literal(sink, StringSlice(
         '],"shell_type":"shell_command","visibility":"list","supported_in_api":true,"priority":'
     ))
-    js_raw(sink, tree, priority)
+    if local:
+        js_u64(sink, UInt64(1))
+    else:
+        js_raw(sink, tree, priority)
     js_literal(sink, StringSlice(
         ',"additional_speed_tiers":[],"service_tiers":[],"default_service_tier":null,'
         '"availability_nux":null,"upgrade":null,"base_instructions":'
@@ -208,6 +218,7 @@ def runtime_catalog_emit(sink: Pointer[mut=True, JsonSink, _], tree: ParsedJson,
             "Use tools deliberately. For shell work, prefer fast focused commands. For file edits, keep changes minimal and explain non-obvious logic in short comments only when useful."
         )))
     else:
+        # Local preserves an explicit empty instruction source for persisted-session prompts.
         js_literal(sink, StringSlice('""'))
     var capability = StringSlice("true") if capable else StringSlice("false")
     js_literal(sink, StringSlice(',"supports_reasoning_summaries":'))
@@ -228,7 +239,7 @@ def runtime_catalog_emit(sink: Pointer[mut=True, JsonSink, _], tree: ParsedJson,
     js_literal(sink, StringSlice(',"effective_context_window_percent":95,"experimental_supported_tools":[],"input_modalities":'))
     js_literal(sink, StringSlice('["text","image"]') if capable else StringSlice('["text"]'))
     js_literal(sink, StringSlice(',"supports_search_tool":'))
-    js_literal(sink, capability)
+    js_literal(sink, StringSlice("true") if local else capability)
     js_byte(sink, 125)
     return True
 
