@@ -222,6 +222,9 @@ const PING_SUMMARY_CALLER_FILE = "crates/prodex-app/src/app_commands/ping_output
 const PING_SUMMARY_CALLER_TEST_FILE = "crates/prodex-app/src/app_commands/ping_tests.rs";
 const PING_SUMMARY_ADAPTER_FILE = "crates/prodex-mojo-core/src/rich/ping_protocol.rs";
 const PING_SUMMARY_MOJO_FILE = "mojo/prodex_core/ping_protocol.mojo";
+const PING_REPORT_ADAPTER_FILE = "crates/prodex-mojo-core/src/rich/ping_protocol/report.rs";
+const PING_REPORT_MOJO_FILE = "mojo/prodex_core/ping_report.mojo";
+const PING_REPORT_CALLER_TEST_FILE = "crates/prodex-app/src/app_commands/ping_output/report_tests.rs";
 const PING_DIAGNOSTIC_CALLER_FILE = "crates/prodex-app/src/app_commands/ping_process.rs";
 const PING_DIAGNOSTIC_ADAPTER_FILE = "crates/prodex-mojo-core/src/rich/ping_protocol/diagnostic.rs";
 const PING_DIAGNOSTIC_TEST_FILE = "crates/prodex-app/src/app_commands/ping_diagnostic_tests.rs";
@@ -1218,6 +1221,9 @@ const PROMOTED_FILES = [
   PING_SUMMARY_CALLER_TEST_FILE,
   PING_SUMMARY_ADAPTER_FILE,
   PING_SUMMARY_MOJO_FILE,
+  PING_REPORT_ADAPTER_FILE,
+  PING_REPORT_MOJO_FILE,
+  PING_REPORT_CALLER_TEST_FILE,
   PING_DIAGNOSTIC_CALLER_FILE,
   PING_DIAGNOSTIC_ADAPTER_FILE,
   PING_DIAGNOSTIC_TEST_FILE,
@@ -1423,6 +1429,7 @@ const PROMOTED_FILES = [
 ];
 
 const UNCONDITIONAL_MOJO_FILES = new Set([
+  PING_REPORT_ADAPTER_FILE,
   "crates/prodex-provider-core/src/catalog/runtime.rs",
   "crates/prodex-mojo-core/src/json/runtime_catalog_plan.rs",
   "crates/prodex-app/src/app_commands/log_throughput_state.rs",
@@ -13251,9 +13258,9 @@ export function findViolations(files) {
     }
     if (filePath === PING_SUMMARY_CALLER_FILE) {
       const required = [
-        "ping_summary_plan(results)",
+        "render_ping_report(PingReportInput",
         "result.status.mojo_code()",
-        "prodex_mojo_core::rich::ping_summary_plan(&statuses)",
+        "PingReportRow {",
       ];
       const production = contents.split("#[cfg(test)]", 1)[0];
       const restoredRust = [
@@ -13262,12 +13269,20 @@ export function findViolations(files) {
         ".filter(|result| result.status == PingStatus::AuthFailed)",
         ".filter(|result| result.status.is_temporary())",
         "let pool_usable = healthy > 0;",
+        "configured/default", "credential_validation", "profiles_discovered", "format!(", "fn ping_summary_plan(",
       ];
       return required.every((marker) => production.includes(marker))
         && restoredRust.every((marker) => !production.includes(marker))
         ? []
         : [`${filePath}: ping summary bucket aggregation must remain Mojo-owned`];
     }
+    const reportRequired = {
+      [PING_REPORT_ADAPTER_FILE]: ["prodex_mojo_ping_report_v1(", "pub fn render_ping_report("],
+      [PING_REPORT_MOJO_FILE]: ['@export("prodex_mojo_ping_report_v1")', "ping_summary_counts(", "ping_status_label_view(", "js_u128("],
+      [PING_REPORT_CALLER_TEST_FILE]: ["ping_report_preserves_original_complete_output", "ping_report_capture_fixture_child", "report_baseline.json"],
+    }[filePath];
+    if (reportRequired) return reportRequired.filter((marker) => !contents.includes(marker))
+      .map((marker) => `${filePath}: ping report must retain compiled authority and caller coverage ${marker}`);
     if (filePath === PING_SUMMARY_ADAPTER_FILE) {
       return [
         "prodex_mojo_ping_summary_plan_v1(",
@@ -13282,6 +13297,7 @@ export function findViolations(files) {
         '@export("prodex_mojo_ping_summary_plan_v1")',
         "PING_SUMMARY_MAX_STATUSES",
         "ping_status_is_temporary(status)",
+        "def ping_status_label_view(", "def ping_summary_counts(",
         '@export("prodex_mojo_ping_diagnostic_v1")',
         "ping_bounded_detail_bounds(redacted)",
         "ping_classify_failure(raw)",
@@ -18432,9 +18448,9 @@ function selfTest() {
   assert.deepEqual(findViolations([[SUPER_PROMPT_DIRECT_TEST_FILE, superPromptTests]]), []);
 
   const pingSummaryCaller = [
-    "let summary = ping_summary_plan(results);",
+    "render_ping_report(PingReportInput",
     "result.status.mojo_code()",
-    "prodex_mojo_core::rich::ping_summary_plan(&statuses)",
+    "PingReportRow {",
   ].join("\n");
   assert.deepEqual(findViolations([[PING_SUMMARY_CALLER_FILE, pingSummaryCaller]]), []);
   assert.match(findViolations([[PING_SUMMARY_CALLER_FILE,
@@ -18450,7 +18466,21 @@ function selfTest() {
   assert.match(findViolations([[PING_SUMMARY_ADAPTER_FILE,
     "pub fn ping_summary_plan() {}"]]).join("\n"), /ping summary ABI adapter must retain/u);
   assert.deepEqual(findViolations([[PING_SUMMARY_MOJO_FILE,
-    '@export("prodex_mojo_ping_summary_plan_v1")\nPING_SUMMARY_MAX_STATUSES\nping_status_is_temporary(status)\n@export("prodex_mojo_ping_diagnostic_v1")\nping_bounded_detail_bounds(redacted)\nping_classify_failure(raw)\nping_diagnostic_emit(']]), []);
+    '@export("prodex_mojo_ping_summary_plan_v1")\nPING_SUMMARY_MAX_STATUSES\nping_status_is_temporary(status)\ndef ping_status_label_view(\ndef ping_summary_counts(\n@export("prodex_mojo_ping_diagnostic_v1")\nping_bounded_detail_bounds(redacted)\nping_classify_failure(raw)\nping_diagnostic_emit(']]), []);
+  for (const [file, markers] of [
+    [PING_SUMMARY_CALLER_FILE, ["render_ping_report(PingReportInput", "result.status.mojo_code()", "PingReportRow {"]],
+    [PING_REPORT_ADAPTER_FILE, ["prodex_mojo_ping_report_v1(", "pub fn render_ping_report("]],
+    [PING_REPORT_MOJO_FILE, ['@export("prodex_mojo_ping_report_v1")', "ping_summary_counts(", "ping_status_label_view(", "js_u128("]],
+    [PING_REPORT_CALLER_TEST_FILE, ["ping_report_preserves_original_complete_output", "ping_report_capture_fixture_child", "report_baseline.json"]],
+  ]) {
+    const valid = markers.join(";\n");
+    assert.deepEqual(findViolations([[file, valid]]), []);
+    for (const marker of markers) assert.ok(findViolations([[file, valid.replace(marker, "missing")]]).length > 0);
+  }
+  assert.match(findViolations([[PING_REPORT_ADAPTER_FILE, '#[cfg(not(feature = "mojo-core"))] fn fallback() {}']]).join("\n"), /feature-off Rust path/u);
+  for (const retired of ["configured/default", "credential_validation", "profiles_discovered", "format!(", "fn ping_summary_plan("]) {
+    assert.match(findViolations([[PING_SUMMARY_CALLER_FILE, pingSummaryCaller + "\n" + retired]]).join("\n"), /Mojo-owned/u);
+  }
   const pingDiagnosticCaller = [
     "redaction_redact_secret_like_text(&message)",
     "prodex_mojo_core::rich::ping_process_error(&message, &redacted)",

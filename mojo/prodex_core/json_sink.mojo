@@ -64,6 +64,14 @@ def js_u64(sink: Pointer[mut=True, JsonSink, _], value: UInt64):
         divisor /= 10
 
 
+def js_u128(sink: Pointer[mut=True, JsonSink, _], value: UInt128):
+    if value <= UInt128(18_446_744_073_709_551_615):
+        js_u64(sink, UInt64(value))
+        return
+    js_u128(sink, value // UInt128(10))
+    js_byte(sink, UInt8(value % UInt128(10)) + 48)
+
+
 def js_escaped(sink: Pointer[mut=True, JsonSink, _], view: ProdexRichStringView):
     var ptr = rich_view_ptr(view)
     var run_start: Int64 = 0

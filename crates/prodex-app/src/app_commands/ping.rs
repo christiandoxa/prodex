@@ -69,16 +69,6 @@ impl PingStatus {
             Self::Cancelled => prodex_mojo_core::rich::PING_STATUS_CANCELLED,
         }
     }
-
-    fn label(self) -> String {
-        prodex_mojo_core::rich::ping_status_label(self.mojo_code(), false)
-            .expect("Mojo ping status label formatter returned invalid output")
-    }
-
-    fn json_label(self) -> String {
-        prodex_mojo_core::rich::ping_status_label(self.mojo_code(), true)
-            .expect("Mojo ping status JSON label formatter returned invalid output")
-    }
 }
 
 #[derive(Debug, Clone)]
