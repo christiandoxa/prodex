@@ -8800,3 +8800,26 @@ The next presentation audit targets `prodex-cli/src/help.rs` and
 bytes, static string lifetimes and the doctor-tail byte constant intact. Reuse
 the existing cached compiled-label pattern; retain only Clap variant/tag
 marshalling in Rust, with no duplicate text or runtime-classification table.
+
+## CLI presentation compiled in Mojo (2026-10-22)
+
+Nine after-help bodies, all 21 canonical process labels and the five-command
+runtime classification move to the compiled CLI presentation owner. Rust help
+constants, labels and classification branches are removed without a fallback;
+Clap parsing, exhaustive variant/tag marshalling and static text storage remain.
+All 9,775 help bytes match the original Rust compiler capture. Explicit LF
+literals preserve bytes in both LF and CRLF compiler probes. Two caller tests
+pass before migration; direct Mojo, two bridge tests in each core/runtime mode,
+155 CLI, one application process and 27 info tests pass after migration.
+Strict workspace Clippy, guards and full default CI pass: 1,443 Rust tests in
+537.00 seconds. Default changed tests pass 155 Rust tests in 76.30 seconds.
+Canonical share is 36.54009398411737% (138,176 Mojo / 239,973 Rust production
+LOC), removing 73 Rust production LOC. The 75% goal remains open. Evidence and
+the corrected multiline-source CRLF mismatch are in
+`migration/cli-presentation-mojo-20261022.md`.
+
+The next audited owner is `runtime_tools/session_recovery.rs`: goal and thread
+wire-status classification and the optional signed-integer token-budget check.
+Extend the existing compiled launch-recovery owner. Preserve missing/null versus
+malformed values and unknown statuses. Native Path identity, RPC/socket effects,
+affinity release and mutation delivery remain in Rust.

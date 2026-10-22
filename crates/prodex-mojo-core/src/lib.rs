@@ -11,6 +11,7 @@ pub const MOJO_REQUIRED: bool = cfg!(prodex_mojo_required);
 pub const MOJO_VERSION: Option<&str> = option_env!("PRODEX_MOJO_VERSION");
 
 #[cfg(any(
+    feature = "mojo-runtime",
     feature = "mojo-observability",
     all(feature = "mojo-rich", feature = "mojo-routing")
 ))]
@@ -109,6 +110,8 @@ pub mod app_command_policy;
 pub mod audit_log_policy;
 #[cfg(feature = "mojo-rich")]
 pub mod chat_tool_name_policy;
+#[cfg(feature = "mojo-runtime")]
+pub mod cli_presentation;
 #[cfg(feature = "mojo-runtime")]
 pub mod codex_auth_headers;
 #[cfg(feature = "mojo-runtime")]
