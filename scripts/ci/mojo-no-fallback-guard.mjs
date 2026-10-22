@@ -94,6 +94,12 @@ const RUNTIME_CATALOG_REQUIRED = {
   "mojo/prodex_core/runtime_model_catalog.mojo": ['var gemini = pj_is["gemini"]', "Maximum Gemini thinking effort", "if deepseek or gemini:", 'var local = pj_is["local"]', "Local OpenAI-compatible model routed through Prodex.", "Max reasoning effort", 'StringSlice("true") if local else capability'],
   "crates/prodex-app/src/runtime_gemini_config/catalog_tests.rs": ["gemini_catalog_preserves_original_complete_catalogs", "Sha256::digest(", 'include_str!("catalog_baseline.json")'],
 };
+const MAIN_CATALOG_PROJECTION_REQUIRED = {
+  "crates/prodex-provider-core/src/catalog/main_projection.rs": ["document.array(entries)", "main_catalog_projection_json("],
+  "crates/prodex-mojo-core/src/json/main_catalog_projection.rs": ["prodex_mojo_main_catalog_projection_v1(", "transform_json("],
+  "mojo/prodex_core/main_catalog_projection.mojo": ['@export("prodex_mojo_main_catalog_projection_v1")', "main_catalog_string(", "runtime_catalog_unsigned(", 'rich_view_matches_literal["list"]', "pj_valid(tree)"],
+  "crates/prodex-app/src/app_commands/super_main_catalog/projection_tests.rs": ["main_catalog_projection_preserves_original_complete_choices", "Sha256::digest(", 'include_str!("projection_baseline.json")'],
+};
 const SESSION_SELECTOR_MATCH_ADAPTER_FILE = "crates/prodex-mojo-core/src/json/session_selector.rs";
 const SESSION_SELECTOR_MATCH_MOJO_FILE = "mojo/prodex_core/session_selector.mojo";
 const SESSION_SELECTOR_MATCH_CALLER_TEST_FILE = "crates/prodex-session-store/tests/src/lib.rs";
@@ -1217,6 +1223,7 @@ const PROMOTED_FILES = [
   SESSION_REPAIR_MOJO_FILE,
   ...Object.keys(SESSION_TUI_RULES),
   ...Object.keys(RUNTIME_CATALOG_REQUIRED),
+  ...Object.keys(MAIN_CATALOG_PROJECTION_REQUIRED),
   SESSION_SELECTOR_MATCH_ADAPTER_FILE,
   SESSION_SELECTOR_MATCH_MOJO_FILE,
   SESSION_SELECTOR_MATCH_CALLER_TEST_FILE,
@@ -1446,6 +1453,9 @@ const PROMOTED_FILES = [
 ];
 
 const UNCONDITIONAL_MOJO_FILES = new Set([
+  MAIN_MODEL_CATALOG_FILE,
+  "crates/prodex-provider-core/src/catalog/main_projection.rs",
+  "crates/prodex-mojo-core/src/json/main_catalog_projection.rs",
   "crates/prodex-app/src/runtime_local_provider_config.rs",
   "crates/prodex-app/src/runtime_gemini_config.rs",
   SESSION_TUI_ADAPTER_FILE,
@@ -10705,8 +10715,18 @@ export function findViolations(files) {
       !contents.includes("resolve_catalog_model("))
     .map(([filePath]) => `${filePath}: model matcher must use the Mojo catalog kernel`);
   const mainModelCatalogViolations = files.flatMap(([filePath, contents]) => {
+    if (MAIN_CATALOG_PROJECTION_REQUIRED[filePath]) {
+      const violations = MAIN_CATALOG_PROJECTION_REQUIRED[filePath].filter((marker) => !contents.includes(marker))
+        .map((marker) => `${filePath}: main catalog projection must retain compiled authority/caller proof ${marker}`);
+      if (filePath === "crates/prodex-provider-core/src/catalog/main_projection.rs" &&
+          ["str::trim", ".unwrap_or", '"display_name"', '"supported_in_api"', '"default_reasoning_level"'].some((retired) => contents.includes(retired))) {
+        violations.push(`${filePath}: main catalog field extraction must use Mojo`);
+      }
+      return violations;
+    }
     if (filePath === MAIN_MODEL_CATALOG_FILE) {
       const required = [
+        "project_main_catalog_models(&entries)",
         "plan_dynamic_catalog(",
         "source.aliases.clone()",
         "default_effort: model.default_effort",
@@ -10717,6 +10737,10 @@ export function findViolations(files) {
       if (contents.includes("valid_default_effort(") ||
           /owned\.iter\(\)\.find\(\|entry\|\s*entry\.id\.trim\(\)/u.test(contents)) {
         violations.push(`${filePath}: default-effort validation and source selection must remain Mojo-owned`);
+      }
+      const production = contents.split("#[cfg(test)]", 1)[0];
+      for (const retired of ["fn dynamic_catalog_model(", "fn catalog_entry_aliases(", "fn catalog_entry_default_effort(", "fn catalog_entry_model_id(", "const CATALOG_MAX_PRIORITY:"]) {
+        if (production.includes(retired)) violations.push(`${filePath}: restored Rust main catalog projection`);
       }
       return violations;
     }
@@ -17746,7 +17770,7 @@ function selfTest() {
     "fn matches_id_or_alias() { self.id.eq_ignore_ascii_case(model) }"]]).join("\n"),
     /model matcher must use the Mojo catalog kernel/u);
   assert.deepEqual(findViolations([[MAIN_MODEL_CATALOG_FILE,
-    "fn main_model_choices_from_catalog() { plan_dynamic_catalog(&models); default_effort: model.default_effort; source.aliases.clone(); }"]]), []);
+    "fn main_model_choices_from_catalog() { project_main_catalog_models(&entries); plan_dynamic_catalog(&models); default_effort: model.default_effort; source.aliases.clone(); }"]]), []);
   assert.match(findViolations([[MAIN_MODEL_CATALOG_FILE,
     "fn valid_default_effort() {}"]]).join("\n"),
     /default-effort validation and source selection must remain Mojo-owned/u);
@@ -17803,6 +17827,24 @@ function selfTest() {
     const valid = "pub(super) fn external_catalog_models() {\n" + markers.join(";\n") + "\n}";
     assert.deepEqual(findViolations([[file, valid]]), []);
     for (const marker of markers) assert.ok(findViolations([[file, valid.replace(marker, "missing")]]).length > 0);
+  }
+  for (const [file, markers] of Object.entries(MAIN_CATALOG_PROJECTION_REQUIRED)) {
+    const valid = markers.join(";\n");
+    assert.deepEqual(findViolations([[file, valid]]), []);
+    for (const marker of markers) assert.ok(findViolations([[file, valid.replace(marker, "missing")]]).length > 0);
+  }
+  {
+    const valid = "project_main_catalog_models(&entries); plan_dynamic_catalog(); source.aliases.clone(); default_effort: model.default_effort;";
+    for (const retired of ["fn dynamic_catalog_model(", "fn catalog_entry_aliases(", "fn catalog_entry_default_effort(", "fn catalog_entry_model_id(", "const CATALOG_MAX_PRIORITY:"]) {
+      assert.match(findViolations([[MAIN_MODEL_CATALOG_FILE, valid + "\n" + retired]]).join("\n"), /restored Rust main catalog projection/u);
+    }
+    const provider = "crates/prodex-provider-core/src/catalog/main_projection.rs";
+    for (const retired of ["str::trim", ".unwrap_or", '"display_name"', '"supported_in_api"', '"default_reasoning_level"']) {
+      assert.match(findViolations([[provider, MAIN_CATALOG_PROJECTION_REQUIRED[provider].join(";\n") + "\n" + retired]]).join("\n"), /field extraction must use Mojo/u);
+    }
+    for (const file of [MAIN_MODEL_CATALOG_FILE, provider, "crates/prodex-mojo-core/src/json/main_catalog_projection.rs"]) {
+      assert.match(findViolations([[file, '#[cfg(not(feature = "mojo-core"))] fn fallback() {}']]).join("\n"), /feature-off Rust path/u);
+    }
   }
   for (const [file, markers] of Object.entries(RUNTIME_CATALOG_REQUIRED)) {
     const valid = markers.join(";\n");
@@ -18421,6 +18463,7 @@ function selfTest() {
   ]]).join("\n"), /preselection must use the Mojo prompt planner/u);
 
   const superMainCatalog = [
+    "project_main_catalog_models(&entries)",
     "plan_dynamic_catalog(",
     "source.aliases.clone()",
     "default_effort: model.default_effort",

@@ -32,16 +32,17 @@ pub use bridge::{
     provider_core_split_flat_namespace_tool_name,
 };
 pub use catalog::{
-    CopilotModelCatalogError, KiroModelCatalogError, PROVIDER_MODEL_CATALOG_HARD_LIMIT,
-    ProviderCatalogEntry, ProviderCatalogFeatureFlags, ProviderModelCatalogLimitError,
-    ProviderModelChoice, ProviderModelReasoningError, ProviderModelReasoningResolution,
-    RuntimeDynamicCatalogModel, RuntimeModelCatalogError, RuntimeModelCatalogInput,
-    RuntimeModelCatalogPlanInput, RuntimePlannedCatalogModel, merge_provider_model_catalog_json,
-    normalize_copilot_model_catalog, normalize_kiro_model_catalog,
-    normalize_kiro_model_catalog_models, normalize_runtime_dynamic_catalog,
-    plan_runtime_model_catalog, provider_catalog_entries, provider_catalog_entries_for,
-    provider_catalog_entry, provider_catalog_json, provider_model_catalog_json,
-    provider_model_json, provider_model_reasoning_resolution, render_local_runtime_model_catalog,
+    CopilotModelCatalogError, KiroModelCatalogError, MainCatalogModel,
+    PROVIDER_MODEL_CATALOG_HARD_LIMIT, ProviderCatalogEntry, ProviderCatalogFeatureFlags,
+    ProviderModelCatalogLimitError, ProviderModelChoice, ProviderModelReasoningError,
+    ProviderModelReasoningResolution, RuntimeDynamicCatalogModel, RuntimeModelCatalogError,
+    RuntimeModelCatalogInput, RuntimeModelCatalogPlanInput, RuntimePlannedCatalogModel,
+    merge_provider_model_catalog_json, normalize_copilot_model_catalog,
+    normalize_kiro_model_catalog, normalize_kiro_model_catalog_models,
+    normalize_runtime_dynamic_catalog, plan_runtime_model_catalog, project_main_catalog_models,
+    provider_catalog_entries, provider_catalog_entries_for, provider_catalog_entry,
+    provider_catalog_json, provider_model_catalog_json, provider_model_json,
+    provider_model_reasoning_resolution, render_local_runtime_model_catalog,
     render_runtime_model_catalog, resolve_provider_model_choices,
 };
 pub use chat_tools_bridge::{

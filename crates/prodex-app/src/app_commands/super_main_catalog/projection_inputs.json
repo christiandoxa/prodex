@@ -1,0 +1,223 @@
+[
+  {
+    "name": "empty",
+    "entries": []
+  },
+  {
+    "name": "scalars",
+    "entries": [
+      null,
+      false,
+      7,
+      "value",
+      [],
+      {}
+    ]
+  },
+  {
+    "name": "typed-aliases",
+    "entries": [
+      {
+        "slug": null,
+        "id": "  model-a\t ",
+        "display_name": 9,
+        "displayName": "  Model A\t ",
+        "default_reasoning_level": false,
+        "default_reasoning_effort": " HIGH ",
+        "aliases": [
+          "  alias-a\t ",
+          null,
+          42,
+          false,
+          "",
+          " \t ",
+          "alias-a"
+        ],
+        "supported_reasoning_levels": [
+          {
+            "effort": " HIGH "
+          },
+          {
+            "effort": null
+          },
+          {
+            "effort": 3
+          },
+          "low",
+          {
+            "effort": "low"
+          },
+          {
+            "effort": ""
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "blank-blocks-alias",
+    "entries": [
+      {
+        "slug": " \t ",
+        "id": "ignored",
+        "display_name": " ",
+        "displayName": "ignored",
+        "default_reasoning_level": " ",
+        "default_reasoning_effort": "high"
+      },
+      {
+        "slug": "kept",
+        "display_name": "   ",
+        "displayName": "ignored",
+        "default_reasoning_level": "",
+        "default_reasoning_effort": "high"
+      }
+    ]
+  },
+  {
+    "name": "flags-and-priority",
+    "entries": [
+      {
+        "id": "default"
+      },
+      {
+        "id": "zero",
+        "priority": 0,
+        "supported_in_api": false,
+        "hidden": false,
+        "visibility": "LiST"
+      },
+      {
+        "id": "unsigned-max",
+        "priority": 18446744073709551615,
+        "supported_in_api": "false",
+        "hidden": "true",
+        "visibility": null
+      },
+      {
+        "id": "hidden",
+        "priority": 1,
+        "hidden": true
+      },
+      {
+        "id": "unlisted",
+        "visibility": " list "
+      },
+      {
+        "id": "float",
+        "priority": 1.0
+      },
+      {
+        "id": "negative",
+        "priority": -1
+      },
+      {
+        "id": "malformed",
+        "priority": "1",
+        "supported_in_api": null,
+        "hidden": 1,
+        "visibility": true
+      }
+    ]
+  },
+  {
+    "name": "metadata-types",
+    "entries": [
+      {
+        "slug": " 雪\"\\\n ",
+        "displayName": " Label 雪\"\\\n ",
+        "aliases": [
+          " 別名 ",
+          "\"\\\n"
+        ],
+        "supported_reasoning_levels": [
+          {
+            "effort": " LOW "
+          },
+          {
+            "effort": " custom "
+          },
+          {
+            "effort": "none"
+          }
+        ],
+        "default_reasoning_effort": " low "
+      },
+      {
+        "slug": "nonarrays",
+        "aliases": {
+          "id": "alias"
+        },
+        "supported_reasoning_levels": {
+          "effort": "low"
+        }
+      }
+    ]
+  },
+  {
+    "name": "duplicates-and-order",
+    "entries": [
+      {
+        "id": "z",
+        "priority": 9,
+        "aliases": [
+          " z-alias ",
+          "z-alias"
+        ],
+        "supported_reasoning_levels": [
+          {
+            "effort": " low "
+          },
+          {
+            "effort": "LOW"
+          },
+          {
+            "effort": "high"
+          }
+        ],
+        "default_reasoning_level": "HIGH"
+      },
+      {
+        "id": "a",
+        "priority": 9
+      },
+      {
+        "slug": " Z ",
+        "priority": 0,
+        "aliases": [
+          " other "
+        ],
+        "supported_reasoning_levels": [
+          {
+            "effort": "medium"
+          }
+        ]
+      },
+      {
+        "id": "b",
+        "priority": 0
+      }
+    ]
+  },
+  {
+    "name": "priority-endpoints",
+    "entries": [
+      {
+        "id": "at-i64-max",
+        "priority": 9223372036854775807
+      },
+      {
+        "id": "above-i64-max",
+        "priority": 9223372036854775808
+      },
+      {
+        "id": "at-u64-max",
+        "priority": 18446744073709551615
+      },
+      {
+        "id": "zero",
+        "priority": 0
+      }
+    ]
+  }
+]

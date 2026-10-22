@@ -9023,3 +9023,15 @@ Full default CI passes 1,446 Rust tests in 522.33 seconds.
 Canonical share is 36.74501510892666% (139,354 Mojo / 239,892 Rust production LOC),
 removing 47 net Rust production LOC. The 75% target remains open. Evidence and
 coverage are in [local-runtime-model-schema-mojo-20261023.md](local-runtime-model-schema-mojo-20261023.md).
+
+## Main model catalog fields compiled in Mojo (2026-10-23)
+
+The main picker now receives compiled ID, label, priority, flag, effort, alias
+and default-effort observations before its existing compiled planner. Rust's
+parser and field helpers are removed without a fallback. Twelve original
+complete-choice digests match, including malformed metadata and bounded
+rejections. Direct Mojo, both bridges, 17 prompt callers and all 557 provider
+tests pass, with strict workspace Clippy and guards. Full default CI passes
+1,447 Rust tests in 589.64 seconds. Canonical share is 36.76933094665025% (139,476 Mojo / 239,851 Rust production LOC), removing 41 net
+Rust production LOC. The 75% target remains open. Evidence and coverage are in
+[main-model-catalog-projection-mojo-20261023.md](main-model-catalog-projection-mojo-20261023.md).

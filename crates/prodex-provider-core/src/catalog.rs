@@ -115,6 +115,10 @@ pub use kiro::{
 mod copilot;
 pub use copilot::{CopilotModelCatalogError, normalize_copilot_model_catalog};
 
+#[path = "catalog/main_projection.rs"]
+mod main_projection;
+pub use main_projection::{MainCatalogModel, project_main_catalog_models};
+
 #[path = "catalog/runtime.rs"]
 mod runtime;
 pub use runtime::{
