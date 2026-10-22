@@ -9035,3 +9035,17 @@ tests pass, with strict workspace Clippy and guards. Full default CI passes
 1,447 Rust tests in 589.64 seconds. Canonical share is 36.76933094665025% (139,476 Mojo / 239,851 Rust production LOC), removing 41 net
 Rust production LOC. The 75% target remains open. Evidence and coverage are in
 [main-model-catalog-projection-mojo-20261023.md](main-model-catalog-projection-mojo-20261023.md).
+
+## Status token-panel rows compiled in Mojo (2026-10-23)
+
+Token totals, labels, spacing, tones, counts, loading text and history titles
+now use a compiled native presentation. The former Rust assembly and total
+arithmetic are removed without a fallback. Existing numeric workers have typed
+Mojo callers and bounded caller-owned scratch. Thirty original complete Ratatui
+buffer digests match. Direct Mojo, both bridges, 19 status callers and 23 shared
+formatter regressions per mode pass, with strict workspace Clippy and guards.
+Full default CI passes 1,448 Rust tests in 616.79 seconds. Canonical share is
+36.783193197597974% (139,597 Mojo / 239,916 Rust production LOC).
+The checked native/terminal adapters add 65 net Rust production LOC while
+transferring text decisions. The 75% target remains open. Evidence and coverage
+are in [status-token-presentation-mojo-20261023.md](status-token-presentation-mojo-20261023.md).

@@ -857,7 +857,12 @@ def info_render_human_count(
     writer: Pointer[mut=True, InfoRenderWriter, _],
     unsigned_address: UInt,
 ) -> Bool:
-    var value = info_unsigned(unsigned_address, 1, 0)
+    return info_write_human_count(writer, info_unsigned(unsigned_address, 1, 0))
+
+
+def info_write_human_count(
+    writer: Pointer[mut=True, InfoRenderWriter, _], value: UInt64,
+) -> Bool:
     var divisor = UInt64(0)
     var suffix = StringSlice("")
     if value >= UInt64(1_000_000_000):
@@ -882,9 +887,14 @@ def info_render_token_efficiency(
     writer: Pointer[mut=True, InfoRenderWriter, _],
     unsigned_address: UInt,
 ) -> Bool:
-    var input = info_unsigned(unsigned_address, 3, 0)
-    var cached = info_unsigned(unsigned_address, 3, 1)
-    var output = info_unsigned(unsigned_address, 3, 2)
+    return info_write_token_efficiency(writer,
+        info_unsigned(unsigned_address, 3, 0), info_unsigned(unsigned_address, 3, 1),
+        info_unsigned(unsigned_address, 3, 2))
+
+
+def info_write_token_efficiency(
+    writer: Pointer[mut=True, InfoRenderWriter, _], input: UInt64, cached: UInt64, output: UInt64,
+) -> Bool:
     var cache_tenths = UInt64(0)
     if input != 0:
         cache_tenths = info_round_nonnegative_tenths(
