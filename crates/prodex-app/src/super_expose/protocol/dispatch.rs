@@ -80,71 +80,26 @@ fn parse_dispatch_request(
     )
     .expect("Mojo Super expose dispatch validation returned invalid output");
 
-    use prodex_mojo_core::rich::SuperExposeDispatchDecision;
-    match validation {
-        SuperExposeDispatchDecision::NotificationAccepted => {
-            return Err(json_response(202, Value::Null));
+    let response_plan = prodex_mojo_core::rich::super_expose_dispatch_response_plan(validation)
+        .expect("Mojo Super expose dispatch response returned invalid output");
+    let route = response_plan.audit_required.then(|| {
+        let (method_kind, tool_kind) = expose_route(method, tool_name);
+        audit_dispatch_request(context, method_kind, tool_kind, body.len());
+        (method_kind, tool_kind)
+    });
+    use prodex_mojo_core::rich::SuperExposeDispatchReply;
+    match response_plan.reply {
+        SuperExposeDispatchReply::Continue => {}
+        SuperExposeDispatchReply::Accepted { status } => {
+            return Err(json_response(status, Value::Null));
         }
-        SuperExposeDispatchDecision::NotificationUnsupported => {
-            return Err(error(None, -32601, "notification is unsupported"));
-        }
-        SuperExposeDispatchDecision::InvalidRequestId => {
-            return Err(error(None, -32600, "invalid request id"));
-        }
-        SuperExposeDispatchDecision::Ok
-        | SuperExposeDispatchDecision::InitializeParamsRequired
-        | SuperExposeDispatchDecision::ProtocolVersionRequired
-        | SuperExposeDispatchDecision::ToolParamsRequired
-        | SuperExposeDispatchDecision::ToolNameRequired
-        | SuperExposeDispatchDecision::ToolArgumentsObjectRequired => {}
+        SuperExposeDispatchReply::Rejected {
+            status,
+            code,
+            message,
+        } => return Err(mcp_error_response(status, id, code, &message)),
     }
-
-    let (method_kind, tool_kind) = expose_route(method, tool_name);
-    audit_dispatch_request(context, method_kind, tool_kind, body.len());
-
-    match validation {
-        SuperExposeDispatchDecision::InitializeParamsRequired => {
-            return Err(mcp_error_response(
-                400,
-                id,
-                -32602,
-                "initialize params are required",
-            ));
-        }
-        SuperExposeDispatchDecision::ProtocolVersionRequired => {
-            return Err(mcp_error_response(
-                400,
-                id,
-                -32602,
-                "protocolVersion is required",
-            ));
-        }
-        SuperExposeDispatchDecision::ToolParamsRequired => {
-            return Err(mcp_error_response(
-                400,
-                id,
-                -32602,
-                "tool parameters are required",
-            ));
-        }
-        SuperExposeDispatchDecision::ToolNameRequired => {
-            return Err(mcp_error_response(400, id, -32602, "tool name is required"));
-        }
-        SuperExposeDispatchDecision::ToolArgumentsObjectRequired => {
-            return Err(mcp_error_response(
-                400,
-                id,
-                -32602,
-                "tool arguments must be an object",
-            ));
-        }
-        SuperExposeDispatchDecision::Ok => {}
-        SuperExposeDispatchDecision::NotificationAccepted
-        | SuperExposeDispatchDecision::NotificationUnsupported
-        | SuperExposeDispatchDecision::InvalidRequestId => {
-            unreachable!("handled before dispatch audit")
-        }
-    }
+    let (method_kind, tool_kind) = route.expect("Mojo validated continuation audit");
 
     if method_kind == ExposeMethod::ToolsCall {
         let empty_arguments = Value::Object(Default::default());
@@ -354,3 +309,7 @@ fn audit_dispatch_completion(
         ],
     );
 }
+
+#[cfg(test)]
+#[path = "dispatch_reply_tests.rs"]
+mod reply_tests;

@@ -1,5 +1,11 @@
 use super::{ensure_rich_abi, mojo_mut_pointer_address};
 use crate::MojoError;
+#[path = "super_expose/dispatch_response.rs"]
+mod dispatch_response;
+pub use dispatch_response::{
+    SuperExposeDispatchReply, SuperExposeDispatchResponsePlan, super_expose_dispatch_response_plan,
+};
+
 #[path = "super_expose/run_policy.rs"]
 mod run_policy;
 pub use run_policy::{
