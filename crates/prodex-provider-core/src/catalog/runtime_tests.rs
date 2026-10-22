@@ -183,3 +183,45 @@ fn runtime_dynamic_catalog_projection_preserves_exact_rejections_and_raw_limits(
         format!("provider model catalog exceeds the hard limit of {limit} entries")
     );
 }
+
+#[test]
+fn runtime_catalog_plan_uses_typed_metadata_saturated_budgets_and_provider_rejections() {
+    let dynamic = [RuntimeDynamicCatalogModel {
+        slug: "synthetic-plan".into(),
+        display_name: Some("".into()),
+        description: None,
+        context_window: Some(u64::MAX),
+    }];
+    let input = RuntimeModelCatalogPlanInput {
+        provider: ProviderId::Copilot,
+        launch_model: "SYNTHETIC-PLAN",
+        context_window: 1,
+        auto_compact_token_limit: 0,
+        dynamic_models: &dynamic,
+    };
+    let models = plan_runtime_model_catalog(input).unwrap();
+    let first = &models[0];
+    assert_eq!(first.slug, "SYNTHETIC-PLAN");
+    assert_eq!(first.display_name, "");
+    assert_eq!(first.priority, 1);
+    assert_eq!(first.context_window, u64::MAX);
+    assert_eq!(first.auto_compact_token_limit, 184_467_440_737_095_516_u64);
+    let oversized = [RuntimeDynamicCatalogModel {
+        slug: "x".repeat(4097),
+        ..dynamic[0].clone()
+    }];
+    assert!(matches!(
+        plan_runtime_model_catalog(RuntimeModelCatalogPlanInput {
+            dynamic_models: &oversized,
+            ..input
+        }),
+        Err(RuntimeModelCatalogError::Mojo(MojoError::InvalidInput))
+    ));
+    assert!(matches!(
+        plan_runtime_model_catalog(RuntimeModelCatalogPlanInput {
+            provider: ProviderId::Gemini,
+            ..input
+        }),
+        Err(RuntimeModelCatalogError::Mojo(MojoError::InvalidInput))
+    ));
+}

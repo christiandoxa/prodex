@@ -119,7 +119,8 @@ pub use copilot::{CopilotModelCatalogError, normalize_copilot_model_catalog};
 mod runtime;
 pub use runtime::{
     RuntimeDynamicCatalogModel, RuntimeModelCatalogError, RuntimeModelCatalogInput,
-    normalize_runtime_dynamic_catalog, render_runtime_model_catalog,
+    RuntimeModelCatalogPlanInput, RuntimePlannedCatalogModel, normalize_runtime_dynamic_catalog,
+    plan_runtime_model_catalog, render_runtime_model_catalog,
 };
 
 pub fn merge_provider_model_catalog_json<'a>(

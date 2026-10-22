@@ -22,7 +22,7 @@ fn external_catalog_model_indices_preserve_unicode_and_long_ids() {
         "Β",
     ];
     assert_eq!(
-        catalog_model::external_catalog_model_indices(&ids).unwrap(),
+        prodex_mojo_core::rich::merge_catalog_ids(&[], &ids).unwrap(),
         [1, 3, 4, 5, 6, 7, 9, 11, 12]
     );
 }

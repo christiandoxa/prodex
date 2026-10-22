@@ -1,0 +1,86 @@
+[
+  {
+    "first_auto_compact_token_limit": 316350,
+    "first_context_window": 333000,
+    "models": 34,
+    "name": "copilot-dynamic",
+    "sha256": "d0032ca3a4b04abb3f301ba1e66bc66f332abfaee8e583e16b78e4fcbe532772"
+  },
+  {
+    "first_auto_compact_token_limit": 875900,
+    "first_context_window": 922000,
+    "models": 34,
+    "name": "copilot-untrimmed-query",
+    "sha256": "f91c61c3f779c0d8e4843b11bcdef311a449bfea03929db82b930ecd136c4a49"
+  },
+  {
+    "first_auto_compact_token_limit": 997500,
+    "first_context_window": 1050000,
+    "models": 34,
+    "name": "copilot-registry-fallback",
+    "sha256": "af783c037c4b30383b147f142915381028edc67ce49325170137322e2748958f"
+  },
+  {
+    "first_auto_compact_token_limit": 316350,
+    "first_context_window": 333000,
+    "models": 34,
+    "name": "copilot-empty-launch",
+    "sha256": "a679b6bee2def7751afd497a78a60a8d79165ec901881c2108cd24de21a7c223"
+  },
+  {
+    "first_auto_compact_token_limit": 9,
+    "first_context_window": 10,
+    "models": 34,
+    "name": "copilot-unicode-query",
+    "sha256": "25cbf5811a40c1505ab525b27a10c890c72472a02b4d68f16da8d3b054992ed7"
+  },
+  {
+    "first_auto_compact_token_limit": 10,
+    "first_context_window": 11,
+    "models": 7,
+    "name": "kiro-untrimmed-query",
+    "sha256": "c9f6e11b3d0b0be8f1783db79527e5c01ef4dee03663d792096394dc221c6399"
+  },
+  {
+    "first_auto_compact_token_limit": 184467440737095516,
+    "first_context_window": 18446744073709551615,
+    "models": 7,
+    "name": "kiro-saturated-budget",
+    "sha256": "72c2b253ff774960880c2c22a70ecc8c27abe458ead7f8370808840dc8a310ee"
+  },
+  {
+    "first_auto_compact_token_limit": 190000,
+    "first_context_window": 200000,
+    "models": 12,
+    "name": "anthropic-registry-alias",
+    "sha256": "21e8c72368cf18279f7a94e4800ec4fa6d224391274ba9635506fa7dc140df79"
+  },
+  {
+    "first_auto_compact_token_limit": 0,
+    "first_context_window": 0,
+    "models": 13,
+    "name": "anthropic-unknown-zero",
+    "sha256": "c8650ed441e663610d5e4ec775ac841181fc6b4224485e2e48dbf82cfbb80b34"
+  },
+  {
+    "first_auto_compact_token_limit": 18446744073709551614,
+    "first_context_window": 18446744073709551615,
+    "models": 13,
+    "name": "anthropic-unknown-max",
+    "sha256": "073ab61ff9b51b5d6fb79063f8d585aeae350c32a61a8a6555efcf0601678917"
+  },
+  {
+    "first_auto_compact_token_limit": 90000,
+    "first_context_window": 100000,
+    "models": 35,
+    "name": "copilot-long-query",
+    "sha256": "0051820ec9a574d92414709b929a8cab5b79371d8c014f45cf58adb93f5d0958"
+  },
+  {
+    "first_auto_compact_token_limit": 997500,
+    "first_context_window": 1050000,
+    "models": 34,
+    "name": "copilot-long-padded-alias",
+    "sha256": "af783c037c4b30383b147f142915381028edc67ce49325170137322e2748958f"
+  }
+]

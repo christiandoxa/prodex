@@ -2,11 +2,11 @@ use super::{
     COPILOT_RUNTIME_MODEL_CATALOG_FILE, ExternalCatalogProvider, read_provider_model_catalog_text,
 };
 use crate::profile_commands::KIRO_MODEL_CATALOG_FILE;
-use anyhow::{Context, Result, bail};
-use prodex_mojo_core::rich::{CatalogModel, resolve_catalog_model_exact};
+use anyhow::{Context, Result};
 use prodex_provider_core::{
     RuntimeDynamicCatalogModel as ExternalDynamicCatalogModel, RuntimeModelCatalogInput,
-    normalize_runtime_dynamic_catalog, provider_catalog_entry, render_runtime_model_catalog,
+    RuntimeModelCatalogPlanInput, normalize_runtime_dynamic_catalog, plan_runtime_model_catalog,
+    provider_catalog_entry, render_runtime_model_catalog,
 };
 use serde_json::{Value, json};
 use std::path::Path;
@@ -18,6 +18,10 @@ mod schema_tests;
 #[cfg(test)]
 #[path = "catalog_model/dynamic_tests.rs"]
 mod dynamic_tests;
+
+#[cfg(test)]
+#[path = "catalog_model/assembly_tests.rs"]
+mod assembly_tests;
 
 pub(super) fn read_external_model_catalog(
     provider: ExternalCatalogProvider,
@@ -65,87 +69,26 @@ pub(super) fn external_catalog_models(
     auto_compact_token_limit: u64,
 ) -> Result<Vec<Value>> {
     let dynamic_models = external_dynamic_catalog_models(codex_home, provider)?;
-    let static_models = provider.models();
-    let mut models = Vec::with_capacity(static_models.len() + dynamic_models.len() + 1);
-    let launch_model_context_window = external_dynamic_catalog_model(&dynamic_models, launch_model)
-        .and_then(|model| model.context_window)
-        .or_else(|| provider.model_prompt_token_limit(launch_model))
-        .or_else(|| provider.static_model_context_window(launch_model));
-    let default_compact_limit = auto_compact_token_limit;
-    let candidates = std::iter::once((launch_model, launch_model_context_window))
-        .chain(dynamic_models.iter().map(|model| {
-            (
-                model.slug.as_str(),
-                model
-                    .context_window
-                    .or_else(|| provider.model_prompt_token_limit(&model.slug)),
+    let plan = plan_runtime_model_catalog(RuntimeModelCatalogPlanInput {
+        provider: provider.provider_id(),
+        launch_model,
+        context_window,
+        auto_compact_token_limit,
+        dynamic_models: &dynamic_models,
+    })?;
+    plan.into_iter()
+        .map(|model| {
+            external_catalog_model(
+                provider,
+                &model.slug,
+                &model.display_name,
+                &model.description,
+                model.priority,
+                model.context_window,
+                model.auto_compact_token_limit,
             )
-        }))
-        .chain(static_models.iter().map(|model| {
-            (
-                model.id.as_str(),
-                provider
-                    .model_prompt_token_limit(&model.id)
-                    .or(model.context_window_tokens),
-            )
-        }))
-        .collect::<Vec<_>>();
-    let candidate_ids = candidates.iter().map(|(slug, _)| *slug).collect::<Vec<_>>();
-    for index in external_catalog_model_indices(&candidate_ids)? {
-        let (slug, per_model_context_window) = candidates[index];
-        let slug = slug.trim();
-        if models.len() >= prodex_provider_core::PROVIDER_MODEL_CATALOG_HARD_LIMIT {
-            bail!(
-                "provider model catalog exceeds the hard limit of {} entries",
-                prodex_provider_core::PROVIDER_MODEL_CATALOG_HARD_LIMIT
-            );
-        }
-        let priority = models.len() + 1;
-        let dynamic_model = external_dynamic_catalog_model(&dynamic_models, slug);
-        let (fallback_display_name, fallback_description) = provider.model_metadata(slug);
-        let display_name = dynamic_model
-            .and_then(|model| model.display_name.as_deref())
-            .unwrap_or(fallback_display_name.as_str());
-        let description = dynamic_model
-            .and_then(|model| model.description.as_deref())
-            .unwrap_or(fallback_description.as_str());
-        let model_context_window = per_model_context_window.unwrap_or(context_window);
-        let model_compact_limit = per_model_context_window
-            .map(|cw| cw.saturating_mul(95).saturating_div(100))
-            .unwrap_or(default_compact_limit)
-            .min(model_context_window.saturating_sub(1));
-        models.push(external_catalog_model(
-            provider,
-            slug,
-            display_name,
-            description,
-            priority,
-            model_context_window,
-            model_compact_limit,
-        )?);
-    }
-    Ok(models)
-}
-
-pub(super) fn external_catalog_model_indices(ids: &[&str]) -> Result<Vec<usize>> {
-    prodex_mojo_core::rich::merge_catalog_ids(&[], ids)
-        .map_err(|error| anyhow::anyhow!("external model catalog merge failed: {error:?}"))
-}
-
-fn external_dynamic_catalog_model<'a>(
-    models: &'a [ExternalDynamicCatalogModel],
-    model: &str,
-) -> Option<&'a ExternalDynamicCatalogModel> {
-    let catalog = models
-        .iter()
-        .map(|entry| CatalogModel {
-            id: &entry.slug,
-            aliases: &[],
         })
-        .collect::<Vec<_>>();
-    resolve_catalog_model_exact(&catalog, model)
-        .expect("Mojo exact external catalog lookup failed")
-        .map(|index| &models[index])
+        .collect()
 }
 
 fn external_dynamic_catalog_models(
@@ -163,26 +106,4 @@ fn external_dynamic_catalog_models(
     };
     let value = read_external_model_catalog(provider, &contents)?;
     Ok(normalize_runtime_dynamic_catalog(&value)?)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn external_dynamic_catalog_lookup_uses_exact_mojo_identity() {
-        let models = vec![ExternalDynamicCatalogModel {
-            slug: "Account/Model-X".to_string(),
-            display_name: None,
-            description: None,
-            context_window: Some(123),
-        }];
-        assert_eq!(
-            external_dynamic_catalog_model(&models, "account/model-x")
-                .and_then(|model| model.context_window),
-            Some(123)
-        );
-        assert!(external_dynamic_catalog_model(&models, " account/model-x ").is_none());
-        assert!(external_dynamic_catalog_model(&models, "missing").is_none());
-    }
 }
