@@ -34,6 +34,10 @@ mod quota_watch_presentation;
 #[cfg(feature = "mojo-runtime")]
 pub use self::quota_watch_presentation::{QuotaWatchPresentation, quota_watch_presentation};
 #[cfg(feature = "mojo-runtime")]
+mod quota_tui_spans;
+#[cfg(feature = "mojo-runtime")]
+pub use quota_tui_spans::{QuotaTuiLine, QuotaTuiTone, quota_tui_line_plan, quota_tui_status_tone};
+#[cfg(feature = "mojo-runtime")]
 mod smart_context_inline;
 #[cfg(feature = "mojo-runtime")]
 mod smart_context_static_request;
