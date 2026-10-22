@@ -345,6 +345,72 @@ def prodex_launch_in_place_recovery_v2(
     return 2
 
 
+# These flags carry field presence/type facts, never a Rust recovery decision.
+comptime NATIVE_GOAL_PRESENT: Int64 = 1
+comptime NATIVE_BUDGET_PRESENT: Int64 = 2
+comptime NATIVE_BUDGET_NULL: Int64 = 4
+comptime NATIVE_BUDGET_INTEGER: Int64 = 8
+comptime NATIVE_USED_INTEGER: Int64 = 16
+comptime NATIVE_EXPECTED_GOAL: Int64 = 32
+
+
+@export("prodex_launch_native_recovery_wire_v1")
+def prodex_launch_native_recovery_wire_v1(
+    abi_version: Int64, statuses_address: UInt64, statuses_count: Int64,
+    flags: Int64, token_budget: Int64, tokens_used: Int64,
+) abi("C") -> Int64:
+    if abi_version != 1:
+        return -3
+    if (
+        statuses_count != 2 or statuses_address == 0 or statuses_address % 8 != 0
+        or flags < 0 or flags > 63
+    ):
+        return -2
+    for index in range(2):
+        var value = launch_arg(statuses_address, 0, Int64(index))
+        if value.valid_utf8 == 0:
+            if value.address != 0 or value.length != 0:
+                return -2
+        elif value.valid_utf8 != 1 or not rich_view_valid(launch_view(value), 0x7FFFFFFFFFFFFFFF):
+            return -2
+    var thread = launch_arg(statuses_address, 0, 0)
+    var thread_status: Int64 = 0
+    if launch_is["idle"](thread):
+        thread_status = 1
+    elif launch_is["systemError"](thread):
+        thread_status = 2
+    elif launch_is["active"](thread):
+        thread_status = 3
+    elif launch_is["notLoaded"](thread):
+        thread_status = 4
+    var goal = launch_arg(statuses_address, 0, 1)
+    var goal_status: Int64 = 0
+    if (flags & NATIVE_GOAL_PRESENT) != 0:
+        goal_status = 7
+        if launch_is["active"](goal):
+            goal_status = 1
+        elif launch_is["blocked"](goal):
+            goal_status = 2
+        elif launch_is["usageLimited"](goal):
+            goal_status = 3
+        elif launch_is["paused"](goal):
+            goal_status = 4
+        elif launch_is["budgetLimited"](goal):
+            goal_status = 5
+        elif launch_is["complete"](goal):
+            goal_status = 6
+    var budget_available = (flags & NATIVE_BUDGET_PRESENT) == 0 or (flags & NATIVE_BUDGET_NULL) != 0
+    if not budget_available:
+        budget_available = (
+            (flags & NATIVE_BUDGET_INTEGER) != 0 and (flags & NATIVE_USED_INTEGER) != 0
+            and token_budget > 0 and tokens_used >= 0 and tokens_used < token_budget
+        )
+    return prodex_launch_in_place_recovery_v2(
+        2, 1, thread_status, Int64((flags & NATIVE_EXPECTED_GOAL) != 0),
+        goal_status, Int64(budget_available),
+    )
+
+
 # SessionStart identifies the root session shared by its agent tree. Legacy
 # notify identifies the concrete completing thread and inherits the parent's
 # hook command. It must not redirect an established root recovery monitor.

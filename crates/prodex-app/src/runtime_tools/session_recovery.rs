@@ -2,7 +2,7 @@
 //! the frontend, reloading an overlay, or replaying terminal keyboard input.
 use anyhow::Result;
 use prodex_mojo_core::launch::{
-    InPlaceRecoveryAction, NativeGoalStatus, NativeThreadStatus, in_place_recovery_action,
+    InPlaceRecoveryAction, NativeRecoveryWireInput, in_place_recovery_action_from_wire,
 };
 use serde_json::{Value, json};
 use std::path::{Path, PathBuf};
@@ -100,29 +100,13 @@ fn accepted(outcome: AppServerRequestOutcome) -> Option<Value> {
     }
 }
 
-fn native_goal_status(goal: Option<&Value>) -> NativeGoalStatus {
-    match goal
-        .and_then(|goal| goal.get("status"))
-        .and_then(Value::as_str)
-    {
-        Some("active") => NativeGoalStatus::Active,
-        Some("blocked") => NativeGoalStatus::Blocked,
-        Some("usageLimited") => NativeGoalStatus::UsageLimited,
-        Some("paused") => NativeGoalStatus::Paused,
-        Some("budgetLimited") => NativeGoalStatus::BudgetLimited,
-        Some("complete") => NativeGoalStatus::Complete,
-        None if goal.is_none() => NativeGoalStatus::Absent,
-        _ => NativeGoalStatus::Unknown,
-    }
-}
-
-/// Project the native wire status after verifying that this is our loaded,
-/// persistent workspace thread. Mojo owns quiescent-state recovery eligibility.
-fn verified_native_thread_status(
+/// Verify that this is our loaded, persistent workspace thread.
+/// Mojo owns wire-status classification and quiescent-state recovery eligibility.
+fn verify_native_thread(
     thread: &Value,
     workspace: &Path,
     session_id: &str,
-) -> Result<NativeThreadStatus, NativeRecoveryOutcome> {
+) -> Result<(), NativeRecoveryOutcome> {
     let identity = thread.get("id").and_then(Value::as_str) == Some(session_id)
         && thread.get("sessionId").and_then(Value::as_str) == Some(session_id)
         && thread.get("ephemeral").and_then(Value::as_bool) == Some(false)
@@ -134,29 +118,7 @@ fn verified_native_thread_status(
     if !identity {
         return Err(NativeRecoveryOutcome::Stopped);
     }
-    Ok(
-        match thread
-            .get("status")
-            .and_then(|status| status.get("type"))
-            .and_then(Value::as_str)
-        {
-            Some("idle") => NativeThreadStatus::Idle,
-            Some("systemError") => NativeThreadStatus::SystemError,
-            Some("active") => NativeThreadStatus::Active,
-            Some("notLoaded") => NativeThreadStatus::NotLoaded,
-            _ => NativeThreadStatus::Unknown,
-        },
-    )
-}
-
-fn native_goal_budget_available(goal: Option<&Value>) -> bool {
-    goal.is_none_or(|goal| match goal.get("tokenBudget") {
-        None | Some(Value::Null) => true,
-        Some(budget) => budget
-            .as_i64()
-            .zip(goal.get("tokensUsed").and_then(Value::as_i64))
-            .is_some_and(|(limit, used)| limit > 0 && used >= 0 && used < limit),
-    })
+    Ok(())
 }
 
 fn read_native_recovery_plan(
@@ -198,7 +160,7 @@ fn read_native_recovery_plan(
     ))
     .ok_or(NativeRecoveryOutcome::Deferred)?;
     let thread = read.get("thread").ok_or(NativeRecoveryOutcome::Deferred)?;
-    let thread_status = verified_native_thread_status(thread, workspace, session_id)?;
+    verify_native_thread(thread, workspace, session_id)?;
     let goals = accepted(request_result(
         socket,
         3,
@@ -214,13 +176,24 @@ fn read_native_recovery_plan(
     if goal.is_some_and(|goal| goal.get("threadId").and_then(Value::as_str) != Some(session_id)) {
         return Err(NativeRecoveryOutcome::Stopped);
     }
-    in_place_recovery_action(
-        true,
-        thread_status,
+    let budget = goal.and_then(|goal| goal.get("tokenBudget"));
+    in_place_recovery_action_from_wire(NativeRecoveryWireInput {
+        thread_status: thread
+            .get("status")
+            .and_then(|status| status.get("type"))
+            .and_then(Value::as_str),
         expected_goal,
-        native_goal_status(goal),
-        native_goal_budget_available(goal),
-    )
+        goal_present: goal.is_some(),
+        goal_status: goal
+            .and_then(|goal| goal.get("status"))
+            .and_then(Value::as_str),
+        token_budget_present: budget.is_some(),
+        token_budget_is_null: budget.is_some_and(Value::is_null),
+        token_budget: budget.and_then(Value::as_i64),
+        tokens_used: goal
+            .and_then(|goal| goal.get("tokensUsed"))
+            .and_then(Value::as_i64),
+    })
     .map_err(|_| NativeRecoveryOutcome::Stopped)
 }
 
