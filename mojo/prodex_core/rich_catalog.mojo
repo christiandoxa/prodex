@@ -2211,6 +2211,46 @@ def prodex_mojo_rich_catalog_defaults_v1(
     return RICH_STATUS_OK
 
 
+@fieldwise_init
+struct CatalogMergeResult(Copyable):
+    var status: Int64
+    var count: Int64
+
+
+# Callers validate views and counts before entering this shared typed kernel.
+def catalog_merge_additional(
+    model_ids: Pointer[mut=False, ProdexRichStringView, _], model_count: Int64,
+    aliases: Pointer[mut=False, ProdexRichStringView, _],
+    alias_models: Pointer[mut=False, Int64, _], alias_count: Int64,
+    additional: Pointer[mut=False, ProdexRichStringView, _], additional_count: Int64,
+    accepted: Pointer[mut=True, Int64, _], output_capacity: Int64,
+) -> CatalogMergeResult:
+    var written: Int64 = 0
+    for additional_index in range(additional_count):
+        var query = additional[unsafe_offset=additional_index].copy()
+        var bounds = rich_trim_bounds(query)
+        if bounds[1] <= bounds[0]:
+            continue
+        var resolved = catalog_find(model_ids, model_count, aliases, alias_models, alias_count, query)
+        if not catalog_merge_seen(
+            query,
+            resolved,
+            model_ids,
+            model_count,
+            aliases,
+            alias_models,
+            alias_count,
+            additional,
+            accepted,
+            written,
+        ):
+            if written >= output_capacity:
+                return CatalogMergeResult(RICH_STATUS_CAPACITY, written)
+            accepted[unsafe_offset=written] = additional_index
+            written += 1
+    return CatalogMergeResult(RICH_STATUS_OK, written)
+
+
 @export("prodex_mojo_rich_catalog_merge_v1")
 def prodex_mojo_rich_catalog_merge_v1(
     abi_version: Int64,
@@ -2256,30 +2296,12 @@ def prodex_mojo_rich_catalog_merge_v1(
     var output_count = Pointer[mut=True, Int64, MutUntrackedOrigin](
         unsafe_from_address=Int(output_count_address)
     )
-    output_count[] = 0
-    for additional_index in range(additional_count):
-        var query = additional[unsafe_offset=additional_index].copy()
-        var bounds = rich_trim_bounds(query)
-        if bounds[1] <= bounds[0]:
-            continue
-        var resolved = catalog_find(model_ids, model_count, aliases, alias_models, alias_count, query)
-        if not catalog_merge_seen(
-            query,
-            resolved,
-            model_ids,
-            model_count,
-            aliases,
-            alias_models,
-            alias_count,
-            additional,
-            accepted,
-            output_count[],
-        ):
-            if output_count[] >= output_capacity:
-                return RICH_STATUS_CAPACITY
-            accepted[unsafe_offset=output_count[]] = additional_index
-            output_count[] += 1
-    return RICH_STATUS_OK
+    var merged = catalog_merge_additional(
+        model_ids, model_count, aliases, alias_models, alias_count,
+        additional, additional_count, accepted, output_capacity,
+    )
+    output_count[] = merged.count
+    return merged.status
 
 
 comptime CATALOG_PROVIDER_REGISTRY_MAX_NAMES: Int64 = 65_536

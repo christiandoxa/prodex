@@ -8942,3 +8942,16 @@ assembly. Reuse the existing compiled merge and scalar-limit owners, preserve
 launch/dynamic/static ordering and first-match metadata, and keep saturated
 compact arithmetic and hard bounds exact. Capture whole final catalogs before
 changing production; config/file effects remain in Rust.
+
+## Shared catalog kernels retain their C contracts (2026-10-22)
+
+The existing merge and Copilot prompt-limit decisions now have typed Mojo
+entrypoints behind unchanged C exports. This preparation separates the real
+catalog-plan migration within the unchanged churn limit; it adds no new semantic
+ownership. Direct Mojo, one core scalar, eight runtime and 29 rich bridge cases,
+552 provider and 19 application callers
+pass, with strict workspace Clippy and guards. Canonical share is
+36.6340713504604% (138,690 Mojo / 239,892 Rust production LOC). The feature WIP
+and twelve original catalog
+baselines remain owned and protected; the 75% goal stays open. Evidence is in
+`migration/catalog-kernel-helpers-mojo-20261022.md`.
