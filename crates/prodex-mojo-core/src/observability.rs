@@ -1,5 +1,8 @@
 use crate::MojoError;
 
+mod stream;
+pub use stream::{OperationalLoadField, OperationalStreamPlan, operational_stream_plan};
+
 pub const OBSERVABILITY_LABEL_ABI_VERSION: i64 = 1;
 const OBSERVABILITY_LABEL_MAX_BYTES: usize = 128;
 

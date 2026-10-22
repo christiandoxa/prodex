@@ -4,6 +4,7 @@ from log_transcript_facts import PRODEX_TRANSCRIPT_ABI_VERSION, transcript_fact_
 
 from rich_text import rich_codepoint, rich_codepoint_width, rich_trim_bounds, rich_utf8_continuation, rich_view_matches_literal, rich_view_valid, rich_utf8_valid, rich_view_compare
 from rich_types import ProdexRichStringView, rich_view_ptr
+from log_load_classification import log_load_event_is_routine
 
 comptime PRODEX_LOG_SNAPSHOT_ABI_VERSION: Int64 = 1
 comptime PRODEX_LOG_SNAPSHOT_STATUS_OK: Int64 = 0
@@ -2291,25 +2292,6 @@ def log_load_text_equal(
     return True
 
 
-def log_load_matches_literal(
-    address: UInt, length: UInt64, literal: StringSlice
-) -> Bool:
-    if length != UInt64(literal.byte_length()):
-        return False
-    if length == 0:
-        return True
-    if address == 0:
-        return False
-    var input = Pointer[mut=False, UInt8, ImmUntrackedOrigin](
-        unsafe_from_address=Int(address)
-    )
-    var expected = literal.unsafe_ptr()
-    for index in range(Int(length)):
-        if input[unsafe_offset=index] != expected[unsafe_offset=index]:
-            return False
-    return True
-
-
 def log_load_update_impl(
     input_address: UInt,
     output_address: UInt,
@@ -2372,21 +2354,7 @@ def log_load_update_impl(
     var output = Pointer[mut=True, UInt64, MutUntrackedOrigin](
         unsafe_from_address=Int(output_address)
     )
-    var routine = (
-        log_load_matches_literal(
-            event_address, event_length, StringSlice("profile_inflight_saturated")
-        )
-        or log_load_matches_literal(
-            event_address,
-            event_length,
-            StringSlice("runtime_proxy_active_limit_reached"),
-        )
-        or log_load_matches_literal(
-            event_address,
-            event_length,
-            StringSlice("runtime_proxy_lane_limit_reached"),
-        )
-    )
+    var routine = log_load_event_is_routine(ProdexRichStringView(event_address, UInt(event_length)))
     if routine:
         output[unsafe_offset=0] = UInt64(1)
         output[unsafe_offset=1] = UInt64(0)

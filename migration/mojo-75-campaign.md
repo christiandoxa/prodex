@@ -8505,3 +8505,14 @@ plus strict workspace Clippy, full default CI and changed tests pass. Canonical 
 is 36.3730118227439% (136,844 Mojo / 239,380 Rust production LOC); the 75%
 objective remains open. Evidence is in
 `migration/transcript-message-fields-mojo-20261022.md`.
+
+## Operational log stream selection compiled in Mojo (2026-10-22)
+
+The live log timeline now uses compiled visibility, load escalation and retained
+field plans. Rust's payload/switch branches and field whitelist are deleted
+without a fallback. Both the original event ABI and the stream reuse one pure
+classifier, and load aggregation shares the routine-name kernel. Direct Mojo,
+ten bridge tests in both feature configurations, four aggregation, three new
+caller and 96 log tests plus strict workspace Clippy pass. Canonical share is 36.38097971069944%
+(136,922 Mojo / 239,434 Rust production LOC). The 75% objective remains open.
+Evidence is in `migration/operational-log-stream-mojo-20261022.md`.

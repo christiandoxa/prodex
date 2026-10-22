@@ -24,6 +24,10 @@ mod event_source;
 mod operational;
 use event_source::operational_event_plan;
 
+#[cfg(test)]
+#[path = "log_stream/selection_tests.rs"]
+mod selection_tests;
+
 #[derive(Debug, Clone)]
 pub(crate) enum LogStreamItem {
     Transcript(TranscriptEvent),
@@ -234,30 +238,10 @@ fn operational_event_from_runtime_line(line: &str) -> Result<Option<ParsedOperat
     let Some(event) = parsed.event.as_deref() else {
         return Ok(None);
     };
-    if matches!(
-        event,
-        "stream_payload" | "upstream_payload" | "token_usage" | "token_usage_progress"
-    ) {
-        return Ok(None);
-    }
-    let event_plan = operational_event_plan(event, &parsed.fields)?;
-    if !event_plan.interesting {
-        return Ok(None);
-    }
-    let Some(source) = event_plan.source else {
+    let Some(event_plan) = operational_event_plan(event, &parsed.fields)? else {
         return Ok(None);
     };
-    let source = if source == "load" && !is_routine_load_event(event) {
-        "error"
-    } else {
-        source
-    };
-    if source == "route"
-        && event == "profile_commit"
-        && parsed.fields.get("switched").map(String::as_str) != Some("true")
-    {
-        return Ok(None);
-    }
+    let source = event_plan.source;
     let request = parsed
         .fields
         .get("request")
@@ -271,39 +255,10 @@ fn operational_event_from_runtime_line(line: &str) -> Result<Option<ParsedOperat
         source: source.to_string(),
         text: format!("{correlation}  {summary}"),
     };
-    let load = (source == "load").then(|| LogLoadObservation {
+    let load = event_plan.load_fields.map(|fields| LogLoadObservation {
         event: transcript.clone(),
         event_name: event.to_string(),
-        fields: parsed
-            .fields
-            .iter()
-            .filter(|(key, _)| {
-                matches!(
-                    key.as_str(),
-                    "profile"
-                        | "route"
-                        | "lane"
-                        | "transport"
-                        | "context"
-                        | "provider"
-                        | "model"
-                        | "path"
-                        | "limit"
-                        | "hard_limit"
-                        | "reason"
-                )
-            })
-            .map(|(key, value)| {
-                (
-                    key.clone(),
-                    if key == "path" {
-                        safe_endpoint(value)
-                    } else {
-                        value.clone()
-                    },
-                )
-            })
-            .collect(),
+        fields,
         run_id: request.map(short_request_id),
     });
     Ok(Some(ParsedOperationalEvent { transcript, load }))

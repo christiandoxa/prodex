@@ -427,6 +427,12 @@ const CORE_LEXICAL_BROKER_PATHS = "crates/prodex-app/src/runtime_persistence/pat
 const CORE_LEXICAL_APP_HOUSEKEEPING = "crates/prodex-app/src/housekeeping.rs";
 const CORE_LEXICAL_LIVE_LOG = "crates/prodex-app/src/app_commands/log_live.rs";
 const PROMOTED_FILES = [
+  "crates/prodex-mojo-core/src/observability/stream.rs",
+  "crates/prodex-mojo-core/src/observability/stream_tests.rs",
+  "crates/prodex-app/src/app_commands/log_stream/selection_tests.rs",
+  "mojo/prodex_core/operational_log_stream.mojo",
+  "mojo/prodex_core/log_load_classification.mojo",
+  "mojo/tests/operational_log_stream_test.mojo",
   "crates/prodex-mojo-core/src/json/log_transcript_message_tests.rs",
   "crates/prodex-app/src/app_commands/log_transcript_message_tests.rs",
   "crates/prodex-mojo-core/src/json/log_transcript_tool_tests.rs",
@@ -12198,9 +12204,9 @@ export function findViolations(files) {
   });
   const operationalDetailSpecViolations = files.flatMap(([filePath, contents]) => {
     if (filePath === LOG_EVENT_SOURCE_FILE) {
-      const violations = contents.includes("operational_event_source_label(")
+      const violations = contents.includes("prodex_mojo_core::observability::operational_stream_plan(")
         ? []
-        : [filePath + ": operational event source rendering must retain Mojo-owned source labels"];
+        : [filePath + ": operational event selection must retain the compiled stream plan"];
       const production = contents.split("#[cfg(test)]", 1)[0];
       if (production.includes("const SOURCES:")) {
         violations.push(filePath + ": contains restored Rust operational event source label table");
@@ -12218,7 +12224,24 @@ export function findViolations(files) {
       ) {
         violations.push(filePath + ": contains restored Rust operational detail metadata table");
       }
+      const selection = production.split("fn operational_event_from_runtime_line(")[1]?.split("fn short_request_id(")[0] || "";
+      if (/event\s*==\s*"profile_commit"|\.get\("switched"\)|\.filter\(\|\(key,|if\s+key\s*==/u.test(selection)
+          || selection.includes('"token_usage_progress"')) {
+        violations.push(filePath + ": contains restored Rust operational stream selection");
+      }
       return violations;
+    }
+    if (filePath === "crates/prodex-mojo-core/src/observability/stream.rs") {
+      return ["prodex_mojo_operational_log_stream_v1(", "operational_event_source_label("]
+        .filter((marker) => !contents.includes(marker))
+        .map((marker) => filePath + ": operational stream ABI must retain " + marker);
+    }
+    if (filePath === "mojo/prodex_core/operational_log_stream.mojo") {
+      return ['@export("prodex_mojo_operational_log_stream_v1")',
+        "operational_event_classify(", "log_load_event_is_routine(",
+        "operational_stream_load_field("]
+        .filter((marker) => !contents.includes(marker))
+        .map((marker) => filePath + ": compiled operational stream owner must retain " + marker);
     }
     if (filePath === OBSERVABILITY_ADAPTER_FILE) {
       const required = [
@@ -18241,6 +18264,19 @@ function selfTest() {
   }
 
   assert.match(findViolations([[LOG_TRANSCRIPT_TEXT_FILE, transcriptTextCalls + "\nfn transcript_text_from_content() {}"]]).join("\n"), /restored Rust message content/u);
+
+  const streamSource = "prodex_mojo_core::observability::operational_stream_plan(";
+  assert.deepEqual(findViolations([[LOG_EVENT_SOURCE_FILE, streamSource]]), []);
+  assert.match(findViolations([[LOG_EVENT_SOURCE_FILE, ""]]).join("\n"), /compiled stream plan/u);
+  const streamAdapter = "prodex_mojo_operational_log_stream_v1( operational_event_source_label(";
+  const streamAdapterFile = "crates/prodex-mojo-core/src/observability/stream.rs";
+  assert.deepEqual(findViolations([[streamAdapterFile, streamAdapter]]), []);
+  assert.match(findViolations([[streamAdapterFile, ""]]).join("\n"), /operational stream ABI/u);
+  for (const restored of ['event == "profile_commit"', '.get("switched")', '.filter(|(key, value)|']) {
+    assert.match(findViolations([[LOG_STREAM_FILE,
+      "operational_detail_spec( fn operational_event_from_runtime_line() {" + restored + "} fn short_request_id() {}",
+    ]]).join("\n"), /restored Rust operational stream selection/u);
+  }
 
   const infoPanelFile = "crates/prodex-app/src/app_commands/info_handler.rs";
   const infoPanelCaller = "prodex_mojo_core::info_render::info_panel_value_color( prodex_mojo_core::info_render::info_panel_field_visible(";
