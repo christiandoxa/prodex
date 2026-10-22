@@ -63,6 +63,7 @@ fn runtime_schema_preserves_provider_capabilities_unsigned_endpoints_and_rejecti
         (ProviderId::Anthropic, true),
         (ProviderId::Copilot, true),
         (ProviderId::Kiro, false),
+        (ProviderId::DeepSeek, false),
     ] {
         let model = render_runtime_model_catalog(RuntimeModelCatalogInput {
             provider,
@@ -97,4 +98,29 @@ fn runtime_schema_preserves_provider_capabilities_unsigned_endpoints_and_rejecti
         }),
         Err(RuntimeModelCatalogError::Mojo(MojoError::InvalidInput))
     ));
+}
+
+#[test]
+fn deepseek_runtime_schema_keeps_fixed_efforts_and_instructions() {
+    let model = render_runtime_model_catalog(RuntimeModelCatalogInput {
+        provider: ProviderId::DeepSeek,
+        supported_reasoning_efforts: Some(&[]),
+        default_reasoning_effort: Some(ProviderReasoningEffort::Max),
+        ..observation()
+    })
+    .unwrap();
+    assert_eq!(model["default_reasoning_level"], json!("high"));
+    assert_eq!(
+        model["supported_reasoning_levels"],
+        json!([
+            {"effort":"low","description":"DeepSeek low reasoning effort"},
+            {"effort":"medium","description":"DeepSeek medium reasoning effort"},
+            {"effort":"high","description":"DeepSeek high reasoning effort"},
+            {"effort":"xhigh","description":"DeepSeek max reasoning effort"}
+        ])
+    );
+    let instructions = model["base_instructions"].as_str().unwrap();
+    assert_eq!(instructions.len(), 430);
+    assert_eq!(instructions.lines().count(), 5);
+    assert!(!instructions.contains('\r'));
 }
