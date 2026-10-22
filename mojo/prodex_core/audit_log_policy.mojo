@@ -6,6 +6,7 @@ from rich_text import (
     rich_trim_bounds,
     rich_view_ptr,
     rich_view_valid,
+    rich_scalar_prefix_end,
 )
 from rich_types import ProdexRichStringView
 
@@ -742,11 +743,7 @@ def prodex_audit_truncate_text_v1(
     if not rich_view_valid(input, AUDIT_LOG_POLICY_MAX_TEXT_BYTES):
         return AUDIT_LOG_POLICY_INVALID
     var source = rich_view_ptr(input)
-    var cursor: Int64 = 0
-    var count: Int64 = 0
-    while cursor < input_length and count < max_chars:
-        cursor += rich_codepoint_width(source[unsafe_offset=cursor])
-        count += 1
+    var cursor = rich_scalar_prefix_end(input, UInt64(max_chars))
     var truncated = cursor < input_length
     var required = cursor + (Int64(3) if truncated else Int64(0))
     if required > output_capacity:

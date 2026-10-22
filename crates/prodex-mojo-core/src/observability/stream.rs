@@ -32,7 +32,21 @@ pub struct OperationalStreamPlan {
     pub load_fields: Option<Vec<OperationalLoadField>>,
 }
 
+/// UTF-8 prefix selected by a Unicode scalar count, with explicit suffix intent.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct OperationalTextSpan {
+    pub end: usize,
+    pub truncated: bool,
+}
+
 unsafe extern "C" {
+    fn prodex_mojo_operational_log_text_span_v1(
+        abi_version: i64,
+        input_address: u64,
+        input_length: i64,
+        max_chars: u64,
+        output_address: u64,
+    ) -> i64;
     fn prodex_mojo_operational_log_stream_v1(
         abi_version: i64,
         event_address: u64,
@@ -43,6 +57,39 @@ unsafe extern "C" {
         output_capacity: i64,
         metadata_address: u64,
     ) -> i64;
+}
+
+/// Select a scalar-bounded span without trimming or changing field contents.
+pub fn operational_log_text_span(
+    value: &str,
+    max_chars: usize,
+) -> Result<OperationalTextSpan, MojoError> {
+    let mut output = [-1_i64; 2];
+    let status = unsafe {
+        prodex_mojo_operational_log_text_span_v1(
+            OBSERVABILITY_LABEL_ABI_VERSION,
+            value.as_ptr() as u64,
+            i64::try_from(value.len()).map_err(|_| MojoError::InvalidInput)?,
+            u64::try_from(max_chars).map_err(|_| MojoError::InvalidInput)?,
+            output.as_mut_ptr() as u64,
+        )
+    };
+    match status {
+        0 => {}
+        1 => return Err(MojoError::InvalidInput),
+        4 => return Err(MojoError::AbiMismatch),
+        _ => return Err(MojoError::InvalidOutput),
+    }
+    let end = usize::try_from(output[0]).map_err(|_| MojoError::InvalidOutput)?;
+    let truncated = match output[1] {
+        0 => false,
+        1 => true,
+        _ => return Err(MojoError::InvalidOutput),
+    };
+    if end > value.len() || !value.is_char_boundary(end) || truncated != (end < value.len()) {
+        return Err(MojoError::InvalidOutput);
+    }
+    Ok(OperationalTextSpan { end, truncated })
 }
 
 /// Plan visibility, final source and retained fields without Rust recomputation.

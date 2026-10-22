@@ -24,10 +24,6 @@ mod event_source;
 mod operational;
 use event_source::operational_event_plan;
 
-#[cfg(test)]
-#[path = "log_stream/selection_tests.rs"]
-mod selection_tests;
-
 #[derive(Debug, Clone)]
 pub(crate) enum LogStreamItem {
     Transcript(TranscriptEvent),
@@ -298,10 +294,10 @@ fn operational_event_summary(
 }
 
 fn display_log_field<'a>(fields: &'a BTreeMap<String, String>, key: &str) -> Option<&'a str> {
-    fields
-        .get(key)
-        .map(String::as_str)
-        .filter(|value| !value.is_empty() && value.chars().all(|character| !character.is_control()))
+    fields.get(key).map(String::as_str).filter(|value| {
+        prodex_mojo_core::rich::super_expose_bounded_text_valid(value, usize::MAX)
+            .expect("compiled Mojo log field validation failed")
+    })
 }
 
 fn add_log_detail(
@@ -353,8 +349,10 @@ fn join_log_details(event: &str, details: Vec<String>) -> String {
 }
 
 fn bounded_log_value(value: &str, max_chars: usize) -> String {
-    let mut bounded = value.chars().take(max_chars).collect::<String>();
-    if value.chars().nth(max_chars).is_some() {
+    let span = prodex_mojo_core::observability::operational_log_text_span(value, max_chars)
+        .expect("compiled Mojo log field text span failed");
+    let mut bounded = value[..span.end].to_string();
+    if span.truncated {
         bounded.push('…');
     }
     bounded
@@ -505,3 +503,11 @@ pub(crate) fn print_upstream_payload_event(event: &UpstreamPayloadEvent) -> Resu
 #[cfg(test)]
 #[path = "log_stream/summary_tests.rs"]
 mod summary_tests;
+
+#[cfg(test)]
+#[path = "log_stream/selection_tests.rs"]
+mod selection_tests;
+
+#[cfg(test)]
+#[path = "log_stream/text_tests.rs"]
+mod text_tests;

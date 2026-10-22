@@ -8516,3 +8516,21 @@ ten bridge tests in both feature configurations, four aggregation, three new
 caller and 96 log tests plus strict workspace Clippy pass. Canonical share is 36.38097971069944%
 (136,922 Mojo / 239,434 Rust production LOC). The 75% objective remains open.
 Evidence is in `migration/operational-log-stream-mojo-20261022.md`.
+
+## Operational log field text compiled in Mojo (2026-10-22)
+
+Log detail control filtering and scalar-count clipping now use compiled policy.
+Rust's control predicate and character scans are removed. Audit truncation and
+log spans share one pure Unicode prefix kernel while retaining their distinct
+suffixes. Direct Mojo, focused bridges, three new caller regressions, all 99 log
+and 18 audit tests plus workspace Clippy, full default CI and changed tests pass.
+The checked Rust adapter slightly lowers raw share to
+36.380276339524094% (136,943 Mojo / 239,478 Rust production LOC). The 75% goal
+remains open. Evidence is in `migration/operational-log-field-text-mojo-20261022.md`.
+
+An audited next candidate is `app_commands/log_stream.rs::{add_log_detail,
+add_log_percent_detail, add_log_endpoint_detail, join_log_details}`. Rust still
+owns blank/sentinel suppression, percent suffixes, detail separators and the
+event/detail layout. Preserve the existing redaction and URL acquisition
+boundary, and reuse compiled detail metadata and Unicode prefix decisions
+before removing those builders.

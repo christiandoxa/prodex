@@ -398,6 +398,17 @@ def rich_view_order_sort(
 
 
 # The caller validates UTF-8 and the signed byte-length bound before clipping.
+def rich_scalar_prefix_end(view: ProdexRichStringView, maximum: UInt64) -> Int64:
+    var source = rich_view_ptr(view)
+    var cursor: Int64 = 0
+    var count: UInt64 = 0
+    while cursor < Int64(view.len) and count < maximum:
+        cursor += rich_codepoint_width(source[unsafe_offset=cursor])
+        count += 1
+    return cursor
+
+
+# The caller validates UTF-8 and the signed byte-length bound before clipping.
 def rich_utf8_prefix_end(view: ProdexRichStringView, maximum: UInt64) -> Int64:
     var end = Int64(min(UInt64(view.len), maximum))
     if end < Int64(view.len):
