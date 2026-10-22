@@ -1,26 +1,15 @@
-use super::{PingResult, PingStatus};
+use super::PingResult;
 use anyhow::Result;
+use prodex_mojo_core::rich::{PingReportInput, PingReportKind, PingReportRow, render_ping_report};
 use std::time::Duration;
 use terminal_ui::print_stdout_line;
 
 pub(super) fn render_ping_result(result: &PingResult) -> Result<()> {
-    let first_response = result.first_response_latency_ms.map_or_else(
-        || "unavailable".to_string(),
-        |latency| format!("{latency}ms"),
-    );
-    print_stdout_line(&format!(
-        "{}  {:<20} first={} completion={}ms  requested={} effort={} effective={}",
-        result.profile,
-        result.status.label(),
-        first_response,
-        result.latency_ms.unwrap_or_default(),
-        result.model.as_deref().unwrap_or("configured/default"),
-        result.effort.as_deref().unwrap_or("configured/default"),
-        result.effective_model.as_deref().unwrap_or("unavailable")
-    ))?;
-    if result.status.is_failure() {
-        print_stdout_line(&format!("  reason: {}", result.detail))?;
-    }
+    print_stdout_line(&ping_report_text(
+        std::slice::from_ref(result),
+        Duration::ZERO,
+        PingReportKind::Profile,
+    )?)?;
     Ok(())
 }
 
@@ -29,76 +18,39 @@ pub(super) fn render_ping_summary(
     elapsed: Duration,
     json: bool,
 ) -> Result<()> {
-    let summary = ping_summary_plan(results);
-    let total = summary.total;
-    let healthy = summary.healthy;
-    let exhausted = summary.exhausted;
-    let auth_failures = summary.auth_failures;
-    let temporary_failures = summary.temporary_failures;
-    let other_failures = summary.other_failures;
-    let pool_usable = summary.pool_usable;
-    if json {
-        let value = serde_json::json!({
-            "provider": "openai",
-            "status": if healthy == total && total > 0 { "ok" } else { "failed" },
-            "model": results.first().and_then(|result| result.model.clone()),
-            "requested_model": results.first().and_then(|result| result.model.clone()),
-            "effort": results.first().and_then(|result| result.effort.clone()),
-            "requested_effort": results.first().and_then(|result| result.effort.clone()),
-            "effective_model": results.first().and_then(|result| result.effective_model.clone()),
-            "latency_ms": elapsed.as_millis(),
-            "detail": format!("{healthy}/{total} profiles healthy"),
-            "profiles": results.iter().map(|result| serde_json::json!({
-                "profile": result.profile,
-                "status": result.status.json_label(),
-                "model": result.model,
-                "requested_model": result.model,
-                "effort": result.effort,
-                "requested_effort": result.effort,
-                "effective_model": result.effective_model,
-                "credential_validation": if result.status == PingStatus::AuthFailed { "failed" } else if result.status == PingStatus::Pass { "valid" } else { "unknown" },
-                "first_response_latency_ms": result.first_response_latency_ms,
-                "completion_latency_ms": result.latency_ms,
-                "latency_ms": result.latency_ms,
-                "detail": result.detail,
-            })).collect::<Vec<_>>(),
-            "summary": {
-                "profiles_discovered": total,
-                "profiles_tested": total,
-                "healthy": healthy,
-                "exhausted": exhausted,
-                "auth_failures": auth_failures,
-                "temporary_failures": temporary_failures,
-                "other_failures": other_failures,
-                "duration_ms": elapsed.as_millis(),
-                "pool_usable": pool_usable,
-            },
-        });
-        print_stdout_line(&serde_json::to_string(&value)?)?;
-        return Ok(());
-    }
-    print_stdout_line(&format!("Profiles discovered: {total}"))?;
-    print_stdout_line(&format!("Profiles tested: {total}"))?;
-    print_stdout_line(&format!("Healthy: {healthy}"))?;
-    print_stdout_line(&format!("Exhausted: {exhausted}"))?;
-    print_stdout_line(&format!("Auth failures: {auth_failures}"))?;
-    print_stdout_line(&format!("Temporary failures: {temporary_failures}"))?;
-    print_stdout_line(&format!("Other failures: {other_failures}"))?;
-    print_stdout_line(&format!("Total duration: {}ms", elapsed.as_millis()))?;
-    print_stdout_line(&format!(
-        "Pool usable: {}",
-        if pool_usable { "yes" } else { "no" }
-    ))?;
+    let kind = if json {
+        PingReportKind::SummaryJson
+    } else {
+        PingReportKind::SummaryHuman
+    };
+    print_stdout_line(&ping_report_text(results, elapsed, kind)?)?;
     Ok(())
 }
 
-pub(super) fn ping_summary_plan(results: &[PingResult]) -> prodex_mojo_core::rich::PingSummaryPlan {
-    let statuses = results
+pub(super) fn ping_report_text(
+    results: &[PingResult],
+    elapsed: Duration,
+    kind: PingReportKind,
+) -> Result<String> {
+    let rows = results
         .iter()
-        .map(|result| result.status.mojo_code())
+        .map(|result| PingReportRow {
+            profile: &result.profile,
+            status: result.status.mojo_code(),
+            model: result.model.as_deref(),
+            effort: result.effort.as_deref(),
+            effective_model: result.effective_model.as_deref(),
+            detail: &result.detail,
+            first_response_latency_ms: result.first_response_latency_ms,
+            latency_ms: result.latency_ms,
+        })
         .collect::<Vec<_>>();
-    prodex_mojo_core::rich::ping_summary_plan(&statuses)
-        .expect("Mojo ping summary planner returned invalid output")
+    render_ping_report(PingReportInput {
+        rows: &rows,
+        kind,
+        elapsed_ms: elapsed.as_millis(),
+    })
+    .map_err(|error| anyhow::anyhow!("Mojo ping report rendering failed: {error:?}"))
 }
 
 #[cfg(test)]

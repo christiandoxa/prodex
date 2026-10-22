@@ -8976,3 +8976,15 @@ behind their unchanged C exports. Eleven original stdout cases are frozen across
 a child-process caller boundary. This preparation transfers no new Rust semantics;
 it separates the complete report feature within the unchanged churn limit.
 Evidence and coverage are in [ping-report-kernels-mojo-20261023.md](ping-report-kernels-mojo-20261023.md).
+
+## Complete ping reports compiled in Mojo (2026-10-23)
+
+Human rows, aggregate reports and the complete JSON schema now use compiled
+Mojo formatting and shared status/count kernels. Rust retains native field
+projection, allocation and stdout I/O; its former report implementation is
+deleted without a fallback. Eleven frozen stdout cases, direct Mojo, strict
+core/rich bridges and application callers pass. Full default CI passes 1,445
+Rust tests in 542.41 seconds, completing the preceding preparation's CI deferral.
+Canonical share is 36.71811128282759% (139,227 Mojo / 239,951 Rust production LOC).
+The 75% target remains open. Evidence and coverage are in
+[ping-report-mojo-20261023.md](ping-report-mojo-20261023.md).

@@ -1,4 +1,4 @@
-use super::ping_output::ping_summary_plan;
+use super::ping_output::ping_report_text;
 use super::ping_process::ping_command_args;
 #[cfg(unix)]
 use super::ping_process::{run_ping_child, run_ping_child_in_test_cwd};
@@ -76,14 +76,21 @@ fn ping_summary_buckets_are_selected_by_mojo_for_the_app_caller() {
         ping_result_with_status(PingStatus::Timeout),
         ping_result_with_status(PingStatus::ProtocolFailed),
     ];
-    let summary = ping_summary_plan(&results);
-    assert_eq!(summary.total, 5);
-    assert_eq!(summary.healthy, 1);
-    assert_eq!(summary.exhausted, 1);
-    assert_eq!(summary.auth_failures, 1);
-    assert_eq!(summary.temporary_failures, 1);
-    assert_eq!(summary.other_failures, 1);
-    assert!(summary.pool_usable);
+    let text = ping_report_text(
+        &results,
+        std::time::Duration::ZERO,
+        prodex_mojo_core::rich::PingReportKind::SummaryJson,
+    )
+    .unwrap();
+    let report: serde_json::Value = serde_json::from_str(&text).unwrap();
+    assert_eq!(
+        report["summary"],
+        serde_json::json!({
+            "profiles_discovered":5, "profiles_tested":5, "healthy":1, "exhausted":1,
+            "auth_failures":1, "temporary_failures":1, "other_failures":1,
+            "duration_ms":0, "pool_usable":true,
+        })
+    );
 }
 
 #[test]

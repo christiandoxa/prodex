@@ -11,6 +11,10 @@ pub use diagnostic::{
 mod failure_detail;
 pub use failure_detail::ping_structured_failure_detail;
 
+#[path = "ping_protocol/report.rs"]
+mod report;
+pub use report::{PingReportInput, PingReportKind, PingReportRow, render_ping_report};
+
 const PING_PROTOCOL_ABI_VERSION: i64 = 1;
 const PING_PROTOCOL_MAX_BYTES: usize = 4 * 1024 * 1024;
 const PING_STATUS_DETAIL_MAX_BYTES: usize = 128;

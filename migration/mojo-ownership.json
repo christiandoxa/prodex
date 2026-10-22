@@ -151,6 +151,16 @@
       "mojo_source": "mojo/prodex_core/gemini_quota_body.mojo",
       "consumer_marker": "prodex_mojo_core::json::gemini_normalized_error_json",
       "rust_adapter_scope": "Serde error-context acquisition and byte materialization; compiled normalization owns message selection"
+    },
+    "ping_status_label_and_temporary_classification": {
+      "consumer": "crates/prodex-app/src/app_commands/ping_output.rs",
+      "consumer_marker": "render_ping_report(PingReportInput",
+      "production_reachability_test": "crates/prodex-app/src/app_commands/ping_tests.rs",
+      "rust_adapter_scope": "Typed status-to-ABI and native-row projection; the compiled report uses shared Mojo label/count kernels directly"
+    },
+    "ping_summary_bucket_aggregation": {
+      "consumer_marker": "render_ping_report(PingReportInput",
+      "rust_adapter_scope": "Native-row projection, checked ABI allocation and stdout I/O; summary schema and totals remain compiled Mojo authority"
     }
   },
   "classification_legend": {
@@ -12603,8 +12613,8 @@
           "start": 53,
           "end": 78
         },
-        "release_symbol": "fn label(self)",
-        "release_marker": "prodex_mojo_core::rich::ping_status_label("
+        "release_symbol": "fn mojo_code(self)",
+        "release_marker": "Self::Pass => prodex_mojo_core::rich::PING_STATUS_OK"
       },
       "rust_before": "crates/prodex-app/src/app_commands/ping.rs::PingStatus::label/json_label/is_temporary",
       "rust_after": "Rust retains only typed status-to-ABI mapping and validated Mojo result conversion",
