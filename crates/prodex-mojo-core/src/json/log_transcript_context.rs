@@ -58,6 +58,10 @@ pub enum TranscriptOperationKind {
     FunctionCall = 10,
     CustomCall = 11,
     ToolOutput = 12,
+    ResponseMessage = 13,
+    UserMessage = 14,
+    AssistantMessage = 15,
+    ReasoningMessage = 16,
 }
 
 /// Native scalar/JSON acquisition and existing redacted display text for one node.
@@ -65,7 +69,8 @@ pub enum TranscriptOperationKind {
 pub struct TranscriptOperationValue {
     pub scalar: String,
     /// Final safe text for protocol/status; sanitized name for calls;
-    /// visible tool output for results. The compiled mode chooses its field.
+    /// visible text for results/messages. Empty message text encodes no visible part.
+    /// The compiled mode chooses its field.
     pub output: String,
 }
 
@@ -115,3 +120,7 @@ mod shell_tests;
 #[cfg(test)]
 #[path = "log_transcript_tool_tests.rs"]
 mod tool_tests;
+
+#[cfg(test)]
+#[path = "log_transcript_message_tests.rs"]
+mod message_tests;

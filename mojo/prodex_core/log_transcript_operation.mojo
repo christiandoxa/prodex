@@ -5,8 +5,10 @@ from rich_text import rich_view_prefix
 from parsed_json import (
     ParsedJson, JSON_STRING, JSON_NUMBER, JSON_FALSE, JSON_TRUE, JSON_ARRAY, JSON_OBJECT,
     pj_kind, pj_field, pj_text, pj_literal,
+    pj_child, pj_next, pj_is,
 )
 from json_sink import JsonSink, js_byte, js_literal, js_string, js_escaped
+from session_prompt_write_json import session_prompt_content_part, session_prompt_payload_visible
 
 
 def transcript_operation_value(
@@ -133,10 +135,57 @@ def transcript_tool_render(
     js_literal(sink, StringSlice("\"]]"))
 
 
+def transcript_message_render(
+    sink: Pointer[mut=True, JsonSink, _], tree: ParsedJson, operation: Int64,
+    values: Pointer[mut=False, ProdexRichStringView, _],
+):
+    if operation == 13:
+        var role = pj_field(tree, 0, StringSlice("role"))
+        if pj_is["user"](tree, role) and not session_prompt_payload_visible(tree, 0):
+            js_literal(sink, StringSlice("[]"))
+            return
+        var source = pj_text(tree, role)
+        if pj_kind(tree, role) != JSON_STRING:
+            source = pj_literal(StringSlice("message"))
+        js_literal(sink, StringSlice("[["))
+        js_string(sink, source)
+        js_literal(sink, StringSlice(",\""))
+        var content = pj_field(tree, 0, StringSlice("content"))
+        if pj_kind(tree, content) == JSON_ARRAY:
+            var child = pj_child(tree, content)
+            var first = True
+            while child >= 0:
+                var selected = session_prompt_content_part(tree, child)
+                if pj_kind(tree, selected) == JSON_STRING:
+                    var part = values[unsafe_offset=selected * 2 + 1].copy()
+                    if part.len > 0:
+                        if not first:
+                            js_literal(sink, StringSlice("\\n"))
+                        js_escaped(sink, part)
+                        first = False
+                child = pj_next(tree, child)
+    else:
+        var source = StringSlice("user")
+        if operation == 15:
+            source = StringSlice("assistant")
+        elif operation == 16:
+            source = StringSlice("reasoning")
+        var selected = pj_field(tree, 0, StringSlice("text") if operation == 16 else StringSlice("message"))
+        js_literal(sink, StringSlice("[["))
+        js_string(sink, pj_literal(source))
+        js_literal(sink, StringSlice(",\""))
+        if pj_kind(tree, selected) == JSON_STRING:
+            js_escaped(sink, values[unsafe_offset=selected * 2 + 1])
+    js_literal(sink, StringSlice("\"]]"))
+
+
 def transcript_operation_render(
     sink: Pointer[mut=True, JsonSink, _], tree: ParsedJson, operation: Int64,
     values: Pointer[mut=False, ProdexRichStringView, _],
 ):
+    if operation >= 13:
+        transcript_message_render(sink, tree, operation, values)
+        return
     if operation >= 8 and operation <= 12:
         transcript_tool_render(sink, tree, operation, values)
         return

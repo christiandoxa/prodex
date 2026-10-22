@@ -65,6 +65,25 @@ def session_prompt_metadata_visible(tree: ParsedJson, kinds: Int64) -> Bool:
     return True
 
 
+def session_prompt_payload_visible(tree: ParsedJson, payload: Int64) -> Bool:
+    var metadata = pj_field(tree, payload, "internal_chat_message_metadata_passthrough")
+    var kinds = pj_field(tree, metadata, "content_item_kinds")
+    # The log caller has already classified the record when metadata is absent.
+    if pj_kind(tree, kinds) != JSON_ARRAY:
+        return True
+    var visible = session_prompt_metadata_visible(tree, kinds)
+    return session_prompt_user_visible(
+        2, pj_is["message"](tree, pj_field(tree, payload, "type")),
+        pj_is["user"](tree, pj_field(tree, payload, "role")), True, visible, visible,
+    )
+
+
+def session_prompt_content_part(tree: ParsedJson, item: Int64) -> Int64:
+    var text = pj_field(tree, item, "text")
+    # Presence precedes type: a non-string text must not use content instead.
+    return text if text >= 0 else pj_field(tree, item, "content")
+
+
 def session_prompt_content_matches(
     tree: ParsedJson, payload: Int64, expected: ProdexRichStringView,
 ) -> Bool:
@@ -78,10 +97,7 @@ def session_prompt_content_matches(
     var cursor: UInt = 0
     var expected_ptr = rich_view_ptr(expected)
     while child >= 0:
-        var text = pj_field(tree, child, "text")
-        # Presence precedes type: a non-string text must not use content instead.
-        if text < 0:
-            text = pj_field(tree, child, "content")
+        var text = session_prompt_content_part(tree, child)
         if pj_kind(tree, text) != JSON_STRING:
             return False
         var part = pj_text(tree, text)
@@ -127,8 +143,10 @@ def session_prompt_json_check(
         decoded_bytes += node.text.len
     if not pj_valid(tree):
         return -1
+    if operation == 3:
+        return Int64(session_prompt_payload_visible(tree, 0))
     var record_type = session_prompt_record_type(tree)
-    var payload = 0 if operation == 3 else pj_field(tree, 0, "payload")
+    var payload = pj_field(tree, 0, "payload")
     var payload_type = pj_field(tree, payload, "type")
     if operation == 0:
         return Int64(session_prompt_record_shape(
@@ -141,11 +159,6 @@ def session_prompt_json_check(
     var metadata_visible = session_prompt_metadata_visible(tree, kinds)
     var role_user = pj_is["user"](tree, pj_field(tree, payload, "role"))
     var payload_message = pj_is["message"](tree, payload_type)
-    if operation == 3:
-        # The log caller has already classified the record when metadata is absent.
-        return Int64(not metadata_present or session_prompt_user_visible(
-            2, payload_message, role_user, True, metadata_visible, metadata_visible,
-        ))
     var message = pj_field(tree, payload, "message")
     var payload_user = (pj_is["user_message"](tree, payload_type)
         and pj_kind(tree, message) == JSON_STRING) if record_type == 1 else payload_message

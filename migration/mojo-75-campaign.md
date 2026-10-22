@@ -8493,3 +8493,15 @@ truncation. Direct Mojo, ten strict bridge, 88 log and 120 Super expose tests
 plus workspace Clippy pass. Canonical share is 36.36187225536168% (136,789 Mojo / 239,399 Rust
 LOC); the 75% goal remains open. Evidence is in
 `migration/transcript-tool-fields-mojo-20261022.md`.
+
+## Transcript message projection compiled in Mojo (2026-10-22)
+
+Response role/default selection, message fields, visible content-part ordering
+and LF joins now use the existing transcript ABI. Rust's message builders and
+visibility adapter are removed without a fallback. Shared compiled prompt
+helpers preserve exact delivery matching and metadata policy. Direct Mojo,
+14 transcript bridge, three prompt bridge, 93 log and 120 Super expose tests
+plus strict workspace Clippy, full default CI and changed tests pass. Canonical share
+is 36.3730118227439% (136,844 Mojo / 239,380 Rust production LOC); the 75%
+objective remains open. Evidence is in
+`migration/transcript-message-fields-mojo-20261022.md`.

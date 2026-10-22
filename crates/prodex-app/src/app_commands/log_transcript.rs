@@ -1,6 +1,4 @@
-use super::log_transcript_text::{
-    transcript_text_from_content, transcript_visible_message_text, transcript_visible_tool_output,
-};
+use super::log_transcript_text::{transcript_visible_message_text, transcript_visible_tool_output};
 use super::*;
 use crate::app_commands::log_format::local_log_timestamp;
 use prodex_mojo_core::json::{
@@ -136,27 +134,44 @@ fn operation_transcript_event(
     kind: TranscriptOperationKind,
 ) -> Option<TranscriptEvent> {
     use prodex_mojo_core::json::JsonKind;
-    let tree = crate::json_boundary::app_json_tree(payload)
-        .expect("transcript operation exceeded the JSON ABI boundary");
+    let message_mode = matches!(
+        kind,
+        TranscriptOperationKind::ResponseMessage
+            | TranscriptOperationKind::UserMessage
+            | TranscriptOperationKind::AssistantMessage
+            | TranscriptOperationKind::ReasoningMessage
+    );
+    let tree = if message_mode {
+        crate::json_boundary::app_json_tree_without_wire(payload)
+    } else {
+        crate::json_boundary::app_json_tree(payload)
+    }
+    .expect("transcript operation exceeded the JSON ABI boundary");
     let raw = std::str::from_utf8(&tree.raw).expect("Serde emits UTF-8 JSON");
     let values = tree
         .nodes
         .iter()
         .map(|node| {
-            // The ABI consumes root members; avoid copying overlapping subtree presentations.
-            if node.parent != Some(0) {
+            // Only response messages need nested text; other schemas consume root members.
+            if node.parent != Some(0) && !matches!(kind, TranscriptOperationKind::ResponseMessage) {
                 return TranscriptOperationValue::default();
             }
             // Serde owns number/container spelling; decoded strings use the existing sanitizer.
-            let scalar = match node.kind {
-                JsonKind::String => transcript_safe_operation_value(node.text).unwrap_or_default(),
-                JsonKind::Null
-                | JsonKind::False
-                | JsonKind::True
-                | JsonKind::Number
-                | JsonKind::Array
-                | JsonKind::Object => {
-                    raw[node.raw_start..node.raw_start + node.raw_length].to_string()
+            let scalar = if message_mode {
+                String::new()
+            } else {
+                match node.kind {
+                    JsonKind::String => {
+                        transcript_safe_operation_value(node.text).unwrap_or_default()
+                    }
+                    JsonKind::Null
+                    | JsonKind::False
+                    | JsonKind::True
+                    | JsonKind::Number
+                    | JsonKind::Array
+                    | JsonKind::Object => {
+                        raw[node.raw_start..node.raw_start + node.raw_length].to_string()
+                    }
                 }
             };
             let output = match kind {
@@ -168,6 +183,12 @@ fn operation_transcript_event(
                 }
                 TranscriptOperationKind::ToolOutput => {
                     transcript_visible_tool_output(node.text).unwrap_or_default()
+                }
+                TranscriptOperationKind::ResponseMessage
+                | TranscriptOperationKind::UserMessage
+                | TranscriptOperationKind::AssistantMessage
+                | TranscriptOperationKind::ReasoningMessage => {
+                    transcript_visible_message_text(node.text).unwrap_or_default()
                 }
                 TranscriptOperationKind::ToolProtocol
                 | TranscriptOperationKind::McpProtocol
@@ -217,25 +238,19 @@ fn event_msg_transcript_event(
         TranscriptEventKind::StatusError => {
             operation_transcript_event(timestamp, payload, TranscriptOperationKind::ErrorStatus)
         }
-        TranscriptEventKind::User
-        | TranscriptEventKind::Assistant
-        | TranscriptEventKind::Reasoning => {
-            let (text_field, source) = match plan.kind {
-                TranscriptEventKind::User => ("message", "user"),
-                TranscriptEventKind::Assistant => ("message", "assistant"),
-                TranscriptEventKind::Reasoning => ("text", "reasoning"),
-                _ => unreachable!("matched transcript message event"),
-            };
-            let text = payload
-                .get(text_field)
-                .and_then(serde_json::Value::as_str)
-                .and_then(transcript_visible_message_text)?;
-            Some(TranscriptEvent {
-                timestamp,
-                source: source.to_string(),
-                text: text.to_string(),
-            })
+        TranscriptEventKind::User => {
+            operation_transcript_event(timestamp, payload, TranscriptOperationKind::UserMessage)
         }
+        TranscriptEventKind::Assistant => operation_transcript_event(
+            timestamp,
+            payload,
+            TranscriptOperationKind::AssistantMessage,
+        ),
+        TranscriptEventKind::Reasoning => operation_transcript_event(
+            timestamp,
+            payload,
+            TranscriptOperationKind::ReasoningMessage,
+        ),
         TranscriptEventKind::Unknown => None,
     }
 }
@@ -251,20 +266,7 @@ fn response_item_transcript_event(
         .expect("Mojo transcript response-item classifier returned invalid output");
     match plan.kind {
         TranscriptItemKind::Message => {
-            let source = payload
-                .get("role")
-                .and_then(serde_json::Value::as_str)
-                .unwrap_or("message")
-                .to_string();
-            if source == "user" && !transcript_user_message_is_visible(payload) {
-                return None;
-            }
-            let text = transcript_text_from_content(payload.get("content")?)?;
-            Some(TranscriptEvent {
-                timestamp,
-                source,
-                text,
-            })
+            operation_transcript_event(timestamp, payload, TranscriptOperationKind::ResponseMessage)
         }
         TranscriptItemKind::FunctionCall => {
             operation_transcript_event(timestamp, payload, TranscriptOperationKind::FunctionCall)
@@ -296,16 +298,6 @@ fn transcript_tool_name(value: &str) -> String {
     let value = redaction::redaction_redact_secret_like_text(value);
     prodex_mojo_core::log::sanitize_transcript_tool_name(&value)
         .expect("Mojo transcript tool-name sanitizer returned invalid output")
-}
-
-fn transcript_user_message_is_visible(payload: &serde_json::Value) -> bool {
-    let tree = crate::json_boundary::app_json_tree_without_wire(payload)
-        .expect("transcript visibility exceeded the JSON ABI boundary");
-    prodex_mojo_core::json::session_prompt_write_json_check(
-        &tree.nodes,
-        prodex_mojo_core::json::SessionPromptWriteJsonCheck::TranscriptPayloadVisible,
-    )
-    .expect("compiled-in Mojo transcript visibility policy failed")
 }
 
 fn transcript_safe_operation_value(value: &str) -> Option<String> {
