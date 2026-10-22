@@ -1,0 +1,233 @@
+[
+  {
+    "additional_speed_tiers": [],
+    "apply_patch_tool_type": "freeform",
+    "auto_compact_token_limit": 190000,
+    "availability_nux": null,
+    "base_instructions": "",
+    "context_window": 200000,
+    "default_reasoning_level": "high",
+    "default_reasoning_summary": "none",
+    "default_service_tier": null,
+    "default_verbosity": null,
+    "description": "Description",
+    "display_name": "Display",
+    "effective_context_window_percent": 95,
+    "experimental_supported_tools": [],
+    "input_modalities": [
+      "text",
+      "image"
+    ],
+    "max_context_window": 200000,
+    "priority": 1,
+    "service_tiers": [],
+    "shell_type": "shell_command",
+    "slug": "synthetic",
+    "support_verbosity": false,
+    "supported_in_api": true,
+    "supported_reasoning_levels": [
+      {
+        "description": "Low reasoning effort",
+        "effort": "low"
+      },
+      {
+        "description": "Medium reasoning effort",
+        "effort": "medium"
+      },
+      {
+        "description": "High reasoning effort",
+        "effort": "high"
+      },
+      {
+        "description": "Extra-high reasoning effort",
+        "effort": "xhigh"
+      }
+    ],
+    "supports_image_detail_original": false,
+    "supports_parallel_tool_calls": true,
+    "supports_reasoning_summaries": true,
+    "supports_reasoning_summary_parameter": true,
+    "supports_search_tool": true,
+    "truncation_policy": {
+      "limit": 10000,
+      "mode": "tokens"
+    },
+    "upgrade": null,
+    "visibility": "list",
+    "web_search_tool_type": "text"
+  },
+  {
+    "additional_speed_tiers": [],
+    "apply_patch_tool_type": "freeform",
+    "auto_compact_token_limit": 123,
+    "availability_nux": null,
+    "base_instructions": "",
+    "context_window": 321,
+    "default_reasoning_level": "high",
+    "default_reasoning_summary": "none",
+    "default_service_tier": null,
+    "default_verbosity": null,
+    "description": "Catalog schema",
+    "display_name": "Kiro",
+    "effective_context_window_percent": 95,
+    "experimental_supported_tools": [],
+    "input_modalities": [
+      "text"
+    ],
+    "max_context_window": 321,
+    "priority": 2,
+    "service_tiers": [],
+    "shell_type": "shell_command",
+    "slug": "auto",
+    "support_verbosity": false,
+    "supported_in_api": true,
+    "supported_reasoning_levels": [
+      {
+        "description": "Low reasoning effort",
+        "effort": "low"
+      },
+      {
+        "description": "Medium reasoning effort",
+        "effort": "medium"
+      },
+      {
+        "description": "High reasoning effort",
+        "effort": "high"
+      },
+      {
+        "description": "Extra-high reasoning effort",
+        "effort": "xhigh"
+      },
+      {
+        "description": "Max reasoning effort",
+        "effort": "max"
+      }
+    ],
+    "supports_image_detail_original": false,
+    "supports_parallel_tool_calls": true,
+    "supports_reasoning_summaries": false,
+    "supports_reasoning_summary_parameter": false,
+    "supports_search_tool": false,
+    "truncation_policy": {
+      "limit": 10000,
+      "mode": "tokens"
+    },
+    "upgrade": null,
+    "visibility": "list",
+    "web_search_tool_type": "text"
+  },
+  {
+    "additional_speed_tiers": [],
+    "apply_patch_tool_type": "freeform",
+    "auto_compact_token_limit": 100000,
+    "availability_nux": null,
+    "base_instructions": "",
+    "context_window": 400000,
+    "default_reasoning_level": "high",
+    "default_reasoning_summary": "none",
+    "default_service_tier": null,
+    "default_verbosity": null,
+    "description": "Catalog schema",
+    "display_name": "Claude",
+    "effective_context_window_percent": 95,
+    "experimental_supported_tools": [],
+    "input_modalities": [
+      "text",
+      "image"
+    ],
+    "max_context_window": 400000,
+    "priority": 3,
+    "service_tiers": [],
+    "shell_type": "shell_command",
+    "slug": "claude-opus-4-8",
+    "support_verbosity": false,
+    "supported_in_api": true,
+    "supported_reasoning_levels": [
+      {
+        "description": "Low reasoning effort",
+        "effort": "low"
+      },
+      {
+        "description": "Medium reasoning effort",
+        "effort": "medium"
+      },
+      {
+        "description": "High reasoning effort",
+        "effort": "high"
+      },
+      {
+        "description": "Extra-high reasoning effort",
+        "effort": "xhigh"
+      }
+    ],
+    "supports_image_detail_original": false,
+    "supports_parallel_tool_calls": true,
+    "supports_reasoning_summaries": true,
+    "supports_reasoning_summary_parameter": true,
+    "supports_search_tool": true,
+    "truncation_policy": {
+      "limit": 10000,
+      "mode": "tokens"
+    },
+    "upgrade": null,
+    "visibility": "list",
+    "web_search_tool_type": "text"
+  },
+  {
+    "additional_speed_tiers": [],
+    "apply_patch_tool_type": "freeform",
+    "auto_compact_token_limit": 0,
+    "availability_nux": null,
+    "base_instructions": "",
+    "context_window": 18446744073709551615,
+    "default_reasoning_level": "high",
+    "default_reasoning_summary": "none",
+    "default_service_tier": null,
+    "default_verbosity": null,
+    "description": "Description\t\\\"",
+    "display_name": "Display\n雪",
+    "effective_context_window_percent": 95,
+    "experimental_supported_tools": [],
+    "input_modalities": [
+      "text",
+      "image"
+    ],
+    "max_context_window": 18446744073709551615,
+    "priority": 18446744073709551615,
+    "service_tiers": [],
+    "shell_type": "shell_command",
+    "slug": " whitespace\"\\雪 ",
+    "support_verbosity": false,
+    "supported_in_api": true,
+    "supported_reasoning_levels": [
+      {
+        "description": "Low reasoning effort",
+        "effort": "low"
+      },
+      {
+        "description": "Medium reasoning effort",
+        "effort": "medium"
+      },
+      {
+        "description": "High reasoning effort",
+        "effort": "high"
+      },
+      {
+        "description": "Extra-high reasoning effort",
+        "effort": "xhigh"
+      }
+    ],
+    "supports_image_detail_original": false,
+    "supports_parallel_tool_calls": true,
+    "supports_reasoning_summaries": true,
+    "supports_reasoning_summary_parameter": true,
+    "supports_search_tool": true,
+    "truncation_policy": {
+      "limit": 10000,
+      "mode": "tokens"
+    },
+    "upgrade": null,
+    "visibility": "list",
+    "web_search_tool_type": "text"
+  }
+]

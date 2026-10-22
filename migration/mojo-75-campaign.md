@@ -8871,3 +8871,28 @@ flags and DeepSeek base instructions. Preserve complete model objects, text byte
 u64 endpoints and existing metadata lookup. Reuse the provider catalog boundary
 and measured JSON writer. Keep config/filesystem effects in Rust; separate dynamic
 catalog parsing and context-budget arithmetic remain a later checkpoint.
+
+## External runtime model schema compiled in Mojo (2026-10-22)
+
+The Copilot/Kiro/Anthropic runtime schema, reasoning defaults, eight descriptions,
+Unknown handling and capability/modalities decisions move to a compiled runtime
+catalog owner. Rust's object, defaults and decisions are deleted without a fallback.
+Provider metadata passes unchanged through a typed Serde adapter; bridge errors
+propagate through existing config Results. Four whole objects captured by the
+original Rust caller match before/after migration, including Unicode and unsigned
+endpoints. Direct Mojo, two bridge tests in each core/runtime mode, 17 config
+callers and 549 provider tests pass, with strict workspace Clippy, boundary guards
+and offline replay. Full default CI passes 1,443 Rust tests in 594.20 seconds;
+default changed tests pass 549 Rust tests in 92.52 seconds. Initial CI caught one
+new wildcard test import; explicit imports restore its ratchet without a cap change.
+Canonical share is 36.610706785190665% (138,588 Mojo / 239,957 Rust production
+LOC); the checked adapter adds 21 Rust production LOC while transferring decisions.
+The 75% goal remains open. Evidence is in
+`migration/external-model-schema-mojo-20261022.md`.
+
+The next complete checkpoint adds the actual DeepSeek path to this owner and
+removes its Rust schema and private base-instruction constant. Capture original
+whole objects first; preserve exact LF instruction bytes, fixed DeepSeek effort
+descriptions and text-only capabilities. Propagate the renderer Result through
+model-list construction and the existing secure writer; metadata lookup/fallback
+and filesystem effects remain unchanged.

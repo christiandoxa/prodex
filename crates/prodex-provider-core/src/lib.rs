@@ -35,10 +35,11 @@ pub use catalog::{
     CopilotModelCatalogError, KiroModelCatalogError, PROVIDER_MODEL_CATALOG_HARD_LIMIT,
     ProviderCatalogEntry, ProviderCatalogFeatureFlags, ProviderModelCatalogLimitError,
     ProviderModelChoice, ProviderModelReasoningError, ProviderModelReasoningResolution,
-    merge_provider_model_catalog_json, normalize_copilot_model_catalog,
-    normalize_kiro_model_catalog, normalize_kiro_model_catalog_models, provider_catalog_entries,
-    provider_catalog_entries_for, provider_catalog_entry, provider_catalog_json,
-    provider_model_catalog_json, provider_model_json, provider_model_reasoning_resolution,
+    RuntimeModelCatalogError, RuntimeModelCatalogInput, merge_provider_model_catalog_json,
+    normalize_copilot_model_catalog, normalize_kiro_model_catalog,
+    normalize_kiro_model_catalog_models, provider_catalog_entries, provider_catalog_entries_for,
+    provider_catalog_entry, provider_catalog_json, provider_model_catalog_json,
+    provider_model_json, provider_model_reasoning_resolution, render_runtime_model_catalog,
     resolve_provider_model_choices,
 };
 pub use chat_tools_bridge::{
