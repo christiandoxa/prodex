@@ -1,3 +1,9 @@
+mod inspection_aggregation;
+pub use inspection_aggregation::{
+    GovernanceInspectionAggregation, GovernanceInspectionAggregationError,
+    GovernanceInspectionSource, governance_inspection_aggregate,
+};
+
 unsafe extern "C" {
     fn prodex_mojo_governance_finding_classification_v1(
         abi_version: i64,

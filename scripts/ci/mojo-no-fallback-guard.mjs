@@ -427,6 +427,10 @@ const CORE_LEXICAL_BROKER_PATHS = "crates/prodex-app/src/runtime_persistence/pat
 const CORE_LEXICAL_APP_HOUSEKEEPING = "crates/prodex-app/src/housekeeping.rs";
 const CORE_LEXICAL_LIVE_LOG = "crates/prodex-app/src/app_commands/log_live.rs";
 const PROMOTED_FILES = [
+  "crates/prodex-mojo-core/src/policy/inspection_aggregation.rs",
+  "crates/prodex-mojo-core/src/policy/inspection_aggregation_tests.rs",
+  "crates/prodex-app/src/runtime_proxy/presidio/findings/aggregation_tests.rs",
+  "mojo/tests/inspection_aggregation_test.mojo",
   "crates/prodex-mojo-core/src/operational_metrics/label_order.rs",
   "crates/prodex-mojo-core/src/operational_metrics/label_order_tests.rs",
   "crates/prodex-app/src/runtime_operational_metrics/label_tests.rs",
@@ -8392,12 +8396,22 @@ export function findViolations(files) {
       const production = contents.split("\n#[cfg(test)]", 1)[0];
       const required = ["prodex_mojo_core::redaction::finding_localization_plan(&facts, &text, separator, mode)",
         "FindingLocalizationMode::RetainWithinValues", "FindingKind::ALL[location.kind as usize]",
+        "prodex_mojo_core::policy::governance_inspection_aggregate(",
         "compiled_presidio_finding_localization_preserves_all_entity_kinds_and_rounding"];
       const restored = ["fn unicode_scalar_offset_to_byte(", "fn presidio_confidence_basis_points(",
-        "fn presidio_finding_kind(", "score * 10_000.0", "separator.chars().count()"];
+        "fn presidio_finding_kind(", "score * 10_000.0", "separator.chars().count()",
+        "current.combine(source.coverage)", "classification.raised_to(",
+        "masked_findings.sort()", "masked_findings.dedup()",
+        "source.findings.iter().any(|finding| finding.kind() == kind)"];
       return required.every((marker) => contents.includes(marker)) &&
         restored.every((marker) => !production.includes(marker))
         ? [] : [filePath + ": Presidio finding localization must remain compiled Mojo-owned"];
+    }
+    if (filePath === "crates/prodex-mojo-core/src/policy/inspection_aggregation.rs") {
+      if (!contents.includes("prodex_mojo_governance_inspection_aggregate_v1(")
+        || /\.sort(?:_by(?:_key)?)?\(|\.dedup\(/u.test(contents)) {
+        return [filePath + ": inspection aggregation must retain Mojo without a Rust mask sort"];
+      }
     }
     if (filePath === PRESIDIO_FINDINGS_ADAPTER_FILE) {
       return ["pub fn finding_localization_plan(", "prodex_redaction_findings_plan_v1",
@@ -17027,9 +17041,25 @@ function selfTest() {
   const presidioFindingsConsumer = [
     "prodex_mojo_core::redaction::finding_localization_plan(&facts, &text, separator, mode)",
     "FindingLocalizationMode::RetainWithinValues", "FindingKind::ALL[location.kind as usize]",
+    "prodex_mojo_core::policy::governance_inspection_aggregate(",
     "compiled_presidio_finding_localization_preserves_all_entity_kinds_and_rounding",
   ].join("\n");
   assert.deepEqual(findViolations([[PRESIDIO_FINDINGS_CALLER_FILE, presidioFindingsConsumer]]), []);
+  assert.match(findViolations([[PRESIDIO_FINDINGS_CALLER_FILE,
+    presidioFindingsConsumer.replace("governance_inspection_aggregate(", "rust_aggregate(")]])
+    .join("\n"), /must remain compiled Mojo-owned/u);
+  for (const restored of ["current.combine(source.coverage)", "classification.raised_to(minimum)",
+    "masked_findings.sort()", "masked_findings.dedup()",
+    "source.findings.iter().any(|finding| finding.kind() == kind)"]) {
+    assert.match(findViolations([[PRESIDIO_FINDINGS_CALLER_FILE, presidioFindingsConsumer + restored]])
+      .join("\n"), /must remain compiled Mojo-owned/u);
+  }
+  const inspectionAggregateAdapter = "crates/prodex-mojo-core/src/policy/inspection_aggregation.rs";
+  assert.deepEqual(findViolations([[inspectionAggregateAdapter,
+    "prodex_mojo_governance_inspection_aggregate_v1("]]), []);
+  assert.match(findViolations([[inspectionAggregateAdapter,
+    "prodex_mojo_governance_inspection_aggregate_v1(; masks.sort()"]]).join("\n"),
+    /without a Rust mask sort/u);
   assert.match(findViolations([[PRESIDIO_FINDINGS_CALLER_FILE,
     presidioFindingsConsumer + "\nfn unicode_scalar_offset_to_byte() {}",
   ]]).join("\n"), /Presidio finding localization must remain compiled Mojo-owned/u);

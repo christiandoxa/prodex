@@ -175,12 +175,96 @@ def prodex_mojo_governance_coverage_combine_v1(
     var output = Pointer[mut=True, Int64, MutUntrackedOrigin](
         unsafe_from_address=Int(output_address)
     )
+    output[] = governance_coverage_combined(left, right)
+    return GOVERNANCE_INSPECTION_OK
+
+
+def governance_coverage_combined(left: Int64, right: Int64) -> Int64:
     if left == 0 and right == 0:
-        output[] = 0
-    elif left == 2 and right == 2:
-        output[] = 2
-    else:
-        output[] = 1
+        return 0
+    if left == 2 and right == 2:
+        return 2
+    return 1
+
+
+@fieldwise_init
+struct GovernanceInspectionSourceFacts(Copyable):
+    var coverage: Int64
+    var finding_address: UInt
+    var finding_count: Int64
+    var masked_address: UInt
+    var masked_count: Int64
+    var tag_count: Int64
+    var reason_count: Int64
+
+
+@export("prodex_mojo_governance_inspection_aggregate_v1")
+def prodex_mojo_governance_inspection_aggregate_v1(
+    abi_version: Int64, sources_address: UInt, source_count: Int64,
+    default_classification: Int64, output_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != GOVERNANCE_INSPECTION_ABI_VERSION:
+        return GOVERNANCE_INSPECTION_ABI
+    if (source_count < 0 or source_count > 8
+        or default_classification < 0 or default_classification > 3
+        or (source_count > 0 and (sources_address == 0 or sources_address % 8 != 0))
+        or output_address == 0 or output_address % 8 != 0):
+        return GOVERNANCE_INSPECTION_INVALID
+    var sources = Pointer[mut=False, GovernanceInspectionSourceFacts, ImmUntrackedOrigin](unsafe_from_address=Int(sources_address))
+    for index in range(source_count):
+        var source = sources[unsafe_offset=index].copy()
+        if (source.coverage < 0 or source.coverage > 2
+            or source.finding_count < 0 or source.tag_count < 0 or source.reason_count < 0
+            or source.masked_count < 0 or source.masked_count > 12
+            or (source.finding_count > 0 and source.finding_address == 0)
+            or (source.masked_count > 0 and source.masked_address == 0)):
+            return GOVERNANCE_INSPECTION_INVALID
+    var finding_count: UInt64 = 0
+    var tag_count: UInt64 = 0
+    var reason_count: UInt64 = 0
+    for index in range(source_count):
+        var source = sources[unsafe_offset=index].copy()
+        if not governance_result_counts_valid(UInt64(source.finding_count), UInt64(source.tag_count),
+            UInt64(source.reason_count), UInt64(GOVERNANCE_MAX_FINDINGS),
+            UInt64(GOVERNANCE_MAX_TAGS), UInt64(GOVERNANCE_MAX_REASON_CODES)):
+            return 5
+        finding_count += UInt64(source.finding_count)
+        tag_count += UInt64(source.tag_count)
+        reason_count += UInt64(source.reason_count)
+    if not governance_result_counts_valid(finding_count, tag_count, reason_count,
+        UInt64(GOVERNANCE_MAX_FINDINGS), UInt64(GOVERNANCE_MAX_TAGS), UInt64(GOVERNANCE_MAX_REASON_CODES)):
+        return 5
+    var coverage: Int64 = 2
+    var classification = default_classification
+    var combined_mask: UInt64 = 0
+    for index in range(source_count):
+        var source = sources[unsafe_offset=index].copy()
+        coverage = source.coverage if index == 0 else governance_coverage_combined(coverage, source.coverage)
+        var findings = Pointer[mut=False, UInt8, ImmUntrackedOrigin](unsafe_from_address=Int(source.finding_address))
+        var available: UInt64 = 0
+        for item in range(source.finding_count):
+            var kind = Int64(findings[unsafe_offset=item])
+            var minimum = governance_finding_minimum_classification(kind)
+            if minimum < 0:
+                return GOVERNANCE_INSPECTION_INVALID
+            if minimum > classification:
+                classification = minimum
+            available |= UInt64(1) << UInt64(kind)
+        var masked = Pointer[mut=False, UInt8, ImmUntrackedOrigin](unsafe_from_address=Int(source.masked_address))
+        for item in range(source.masked_count):
+            var kind = Int64(masked[unsafe_offset=item])
+            if kind > 11:
+                return GOVERNANCE_INSPECTION_INVALID
+            combined_mask |= available & (UInt64(1) << UInt64(kind))
+    var output = Pointer[mut=True, Int64, MutUntrackedOrigin](unsafe_from_address=Int(output_address))
+    var count: Int64 = 0
+    for kind in range(12):
+        if combined_mask & (UInt64(1) << UInt64(kind)) != 0:
+            output[unsafe_offset=3 + count] = Int64(kind)
+            count += 1
+    output[unsafe_offset=0] = coverage
+    output[unsafe_offset=1] = classification
+    output[unsafe_offset=2] = count
     return GOVERNANCE_INSPECTION_OK
 
 
@@ -513,6 +597,13 @@ def prodex_mojo_governance_inspection_order_v1(
 
 # Governance record validation: range, confidence and per-result collection
 # caps have one compiled Mojo owner. Rust retains strongly typed DTOs.
+def governance_result_counts_valid(
+    findings: UInt64, tags: UInt64, reasons: UInt64,
+    max_findings: UInt64, max_tags: UInt64, max_reasons: UInt64,
+) -> Bool:
+    return findings <= max_findings and tags <= max_tags and reasons <= max_reasons
+
+
 @export("prodex_mojo_governance_record_valid_v1")
 def prodex_mojo_governance_record_valid_v1(
     abi_version: Int64,
@@ -539,7 +630,7 @@ def prodex_mojo_governance_record_valid_v1(
     elif mode == 1:
         valid = a <= UInt64(10000)
     else:
-        valid = a <= d and b <= e and c <= f
+        valid = governance_result_counts_valid(a, b, c, d, e, f)
     var output = Pointer[mut=True, Int64, MutUntrackedOrigin](
         unsafe_from_address=Int(output_address)
     )

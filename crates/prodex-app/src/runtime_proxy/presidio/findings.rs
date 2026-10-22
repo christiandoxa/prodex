@@ -111,36 +111,83 @@ pub(super) fn runtime_presidio_inspection_plan(
     if sources.len() > limits.max_detectors {
         anyhow::bail!("too many inspection sources");
     }
-    let mut coverage: Option<InspectionCoverage> = None;
-    let mut classification = default_classification;
-    let mut findings = Vec::new();
-    let mut masked_findings = Vec::new();
-    let mut tags = Vec::new();
-    let mut reason_codes = Vec::new();
-    for source in sources {
+    for source in &sources {
         if source.masked_findings.len() > FindingKind::ALL.len() {
             anyhow::bail!("too many masked finding kinds");
         }
-        coverage = Some(match coverage {
-            Some(current) => current.combine(source.coverage),
-            None => source.coverage,
-        });
-        for kind in source.masked_findings {
-            if source.findings.iter().any(|finding| finding.kind() == kind) {
-                masked_findings.push(kind);
-            }
+    }
+    let finding_kinds = sources
+        .iter()
+        .map(|source| {
+            source
+                .findings
+                .iter()
+                .map(|finding| finding.kind() as u8)
+                .collect::<Vec<_>>()
+        })
+        .collect::<Vec<_>>();
+    let masked_kinds = sources
+        .iter()
+        .map(|source| {
+            source
+                .masked_findings
+                .iter()
+                .map(|kind| *kind as u8)
+                .collect::<Vec<_>>()
+        })
+        .collect::<Vec<_>>();
+    let facts = sources
+        .iter()
+        .enumerate()
+        .map(
+            |(index, source)| prodex_mojo_core::policy::GovernanceInspectionSource {
+                coverage: source.coverage as u8,
+                finding_kinds: &finding_kinds[index],
+                masked_kinds: &masked_kinds[index],
+                tag_count: source.tags.len(),
+                reason_count: source.reason_codes.len(),
+            },
+        )
+        .collect::<Vec<_>>();
+    let aggregate = prodex_mojo_core::policy::governance_inspection_aggregate(
+        &facts,
+        default_classification as u8,
+    )
+    .map_err(|error| match error {
+        prodex_mojo_core::policy::GovernanceInspectionAggregationError::LimitExceeded => {
+            anyhow::Error::new(prodex_domain::InspectionModelError::LimitExceeded)
+                .context("failed to build inspection result")
         }
-        for finding in source.findings {
-            classification = classification.raised_to(finding.kind().minimum_classification());
-            findings.push(finding);
+        prodex_mojo_core::policy::GovernanceInspectionAggregationError::Abi(error) => {
+            anyhow::anyhow!("compiled Mojo inspection aggregation failed: {error:?}")
         }
+    })?;
+    let coverage = [
+        InspectionCoverage::Full,
+        InspectionCoverage::Partial,
+        InspectionCoverage::Unsupported,
+    ][usize::from(aggregate.coverage)];
+    let classification = [
+        DataClassification::Public,
+        DataClassification::Internal,
+        DataClassification::Confidential,
+        DataClassification::Restricted,
+    ][usize::from(aggregate.classification)];
+    let masked_findings = aggregate
+        .masked_kinds
+        .into_iter()
+        .map(|kind| FindingKind::ALL[usize::from(kind)])
+        .collect();
+    let mut findings = Vec::new();
+    let mut tags = Vec::new();
+    let mut reason_codes = Vec::new();
+    for source in sources {
+        findings.extend(source.findings);
         tags.extend(source.tags);
         reason_codes.extend(source.reason_codes);
     }
-    masked_findings.sort();
-    masked_findings.dedup();
     let result = InspectionResult::new(
-        coverage.unwrap_or(InspectionCoverage::Unsupported),
+        coverage,
         classification,
         findings,
         tags,
@@ -238,6 +285,10 @@ fn runtime_presidio_localization(
         },
     )
 }
+
+#[cfg(test)]
+#[path = "findings/aggregation_tests.rs"]
+mod aggregation_tests;
 
 #[cfg(test)]
 mod tests {
