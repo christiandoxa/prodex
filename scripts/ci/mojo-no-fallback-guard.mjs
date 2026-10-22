@@ -87,9 +87,11 @@ const SESSION_TUI_RULES = {
   "mojo/prodex_core/session_tui_presentation.mojo": ['@export("prodex_session_tui_rows_v1")', "rich_trim_bounds(", "stp_emit(", "JsonSink"],
   "crates/prodex-app/src/app_commands/session/presentation_tests.rs": ["session_tui_rows_preserve_original_complete_spans", 'include_str!("presentation_baseline.json")'],
 };
-const GEMINI_CATALOG_REQUIRED = {
+const RUNTIME_CATALOG_REQUIRED = {
+  "crates/prodex-app/src/runtime_local_provider_config.rs": ["render_local_runtime_model_catalog("],
+  "crates/prodex-app/src/runtime_local_provider_config/catalog_tests.rs": ["local_catalog_preserves_original_complete_file_bytes", "Sha256::digest(", 'include_str!("catalog_baseline.json")'],
   "crates/prodex-app/src/runtime_gemini_config.rs": ["plan_runtime_model_catalog(", "render_runtime_model_catalog("],
-  "mojo/prodex_core/runtime_model_catalog.mojo": ['var gemini = pj_is["gemini"]', "Maximum Gemini thinking effort", "if deepseek or gemini:"],
+  "mojo/prodex_core/runtime_model_catalog.mojo": ['var gemini = pj_is["gemini"]', "Maximum Gemini thinking effort", "if deepseek or gemini:", 'var local = pj_is["local"]', "Local OpenAI-compatible model routed through Prodex.", "Max reasoning effort", 'StringSlice("true") if local else capability'],
   "crates/prodex-app/src/runtime_gemini_config/catalog_tests.rs": ["gemini_catalog_preserves_original_complete_catalogs", "Sha256::digest(", 'include_str!("catalog_baseline.json")'],
 };
 const SESSION_SELECTOR_MATCH_ADAPTER_FILE = "crates/prodex-mojo-core/src/json/session_selector.rs";
@@ -1214,7 +1216,7 @@ const PROMOTED_FILES = [
   SESSION_REPAIR_ADAPTER_FILE,
   SESSION_REPAIR_MOJO_FILE,
   ...Object.keys(SESSION_TUI_RULES),
-  ...Object.keys(GEMINI_CATALOG_REQUIRED),
+  ...Object.keys(RUNTIME_CATALOG_REQUIRED),
   SESSION_SELECTOR_MATCH_ADAPTER_FILE,
   SESSION_SELECTOR_MATCH_MOJO_FILE,
   SESSION_SELECTOR_MATCH_CALLER_TEST_FILE,
@@ -1444,6 +1446,7 @@ const PROMOTED_FILES = [
 ];
 
 const UNCONDITIONAL_MOJO_FILES = new Set([
+  "crates/prodex-app/src/runtime_local_provider_config.rs",
   "crates/prodex-app/src/runtime_gemini_config.rs",
   SESSION_TUI_ADAPTER_FILE,
   PING_REPORT_ADAPTER_FILE,
@@ -7584,7 +7587,7 @@ export function findViolations(files) {
     }
     const required = {
       [EXTERNAL_CATALOG_FILE]: ["plan_runtime_model_catalog(", "provider_catalog_entry("],
-      [EXTERNAL_CATALOG_ADAPTER_FILE]: ["provider_catalog_entries_for(input.provider)", "runtime_catalog_plan_json(", "deepseek_catalog_static_models("],
+      [EXTERNAL_CATALOG_ADAPTER_FILE]: ["provider_catalog_entries_for(input.provider)", "runtime_catalog_plan_json(", "deepseek_catalog_static_models(", "pub fn render_local_runtime_model_catalog(", "render_runtime_model_catalog_value(", "runtime_model_catalog_json("],
       [EXTERNAL_CATALOG_MOJO_FILE]: ["catalog_merge_additional(", "config_saturating_mul_u64(", "provider_copilot_prompt_token_limit(", 'pj_is["deepseek"](', 'pj_is["gemini"](', "0 if gemini else alias_count", "not deepseek and not gemini and compact > ceiling"],
     }[filePath] ?? [];
     return required.filter((call) => !contents.includes(call))
@@ -12735,9 +12738,15 @@ export function findViolations(files) {
     return [];
   });
   const deepseekCatalogPolicyViolations = files.flatMap(([filePath, contents]) => {
-    if (GEMINI_CATALOG_REQUIRED[filePath]) {
-      const violations = GEMINI_CATALOG_REQUIRED[filePath].filter((marker) => !contents.includes(marker))
-        .map((marker) => `${filePath}: Gemini catalog must retain compiled authority/caller proof ${marker}`);
+    if (RUNTIME_CATALOG_REQUIRED[filePath]) {
+      const violations = RUNTIME_CATALOG_REQUIRED[filePath].filter((marker) => !contents.includes(marker))
+        .map((marker) => `${filePath}: runtime catalog must retain compiled authority/caller proof ${marker}`);
+      if (filePath === "crates/prodex-app/src/runtime_local_provider_config.rs") {
+        const production = contents.split("\n#[cfg(test)]\nmod tests {", 1)[0];
+        for (const retired of ["fn local_catalog_model(", '"supported_reasoning_levels":', "Local OpenAI-compatible model routed through Prodex.", '"supports_search_tool":']) {
+          if (production.includes(retired)) violations.push(`${filePath}: restored Rust Local catalog semantics`);
+        }
+      }
       if (filePath === "crates/prodex-app/src/runtime_gemini_config.rs") {
         const production = contents.split("\n#[cfg(test)]\nmod tests {", 1)[0];
         for (const retired of ["fn gemini_catalog_model(", "fn gemini_catalog_model_metadata(", "const GEMINI_BASE_INSTRUCTIONS:", '"supported_reasoning_levels":', "merge_catalog_ids(", "resolve_catalog_model("]) {
@@ -17788,24 +17797,29 @@ function selfTest() {
   ]]).join("\n"), /catalog dedup must use Mojo/u);
   for (const [file, markers] of [
     [EXTERNAL_CATALOG_FILE, ["plan_runtime_model_catalog(", "provider_catalog_entry("]],
-    [EXTERNAL_CATALOG_ADAPTER_FILE, ["provider_catalog_entries_for(input.provider)", "runtime_catalog_plan_json(", "deepseek_catalog_static_models("]],
+    [EXTERNAL_CATALOG_ADAPTER_FILE, ["provider_catalog_entries_for(input.provider)", "runtime_catalog_plan_json(", "deepseek_catalog_static_models(", "pub fn render_local_runtime_model_catalog(", "render_runtime_model_catalog_value(", "runtime_model_catalog_json("]],
     [EXTERNAL_CATALOG_MOJO_FILE, ["catalog_merge_additional(", "config_saturating_mul_u64(", "provider_copilot_prompt_token_limit(", 'pj_is["deepseek"](', 'pj_is["gemini"](', "0 if gemini else alias_count", "not deepseek and not gemini and compact > ceiling"]],
   ]) {
     const valid = "pub(super) fn external_catalog_models() {\n" + markers.join(";\n") + "\n}";
     assert.deepEqual(findViolations([[file, valid]]), []);
     for (const marker of markers) assert.ok(findViolations([[file, valid.replace(marker, "missing")]]).length > 0);
   }
-  for (const [file, markers] of Object.entries(GEMINI_CATALOG_REQUIRED)) {
+  for (const [file, markers] of Object.entries(RUNTIME_CATALOG_REQUIRED)) {
     const valid = markers.join(";\n");
     assert.deepEqual(findViolations([[file, valid]]), []);
     for (const marker of markers) assert.ok(findViolations([[file, valid.replace(marker, "missing")]]).length > 0);
+    if (file.endsWith("/runtime_local_provider_config.rs")) {
+      for (const retired of ["fn local_catalog_model(", '"supported_reasoning_levels":', "Local OpenAI-compatible model routed through Prodex.", '"supports_search_tool":']) {
+        assert.match(findViolations([[file, valid + "\n" + retired]]).join("\n"), /restored Rust Local/u);
+      }
+    }
     if (file.endsWith("/runtime_gemini_config.rs")) {
       for (const retired of ["fn gemini_catalog_model(", "fn gemini_catalog_model_metadata(", "const GEMINI_BASE_INSTRUCTIONS:", '"supported_reasoning_levels":', "merge_catalog_ids(", "resolve_catalog_model("]) {
         assert.match(findViolations([[file, valid + "\n" + retired]]).join("\n"), /restored Rust Gemini/u);
       }
     }
   }
-  for (const file of [EXTERNAL_CATALOG_ADAPTER_FILE, "crates/prodex-mojo-core/src/json/runtime_catalog_plan.rs", "crates/prodex-app/src/runtime_gemini_config.rs"]) {
+  for (const file of [EXTERNAL_CATALOG_ADAPTER_FILE, "crates/prodex-mojo-core/src/json/runtime_catalog_plan.rs", "crates/prodex-app/src/runtime_gemini_config.rs", "crates/prodex-app/src/runtime_local_provider_config.rs"]) {
     assert.match(findViolations([[file, '#[cfg(not(feature = "mojo-core"))] fn existing_path() {}']]).join("\n"), /feature-off Rust path/u);
   }
   {

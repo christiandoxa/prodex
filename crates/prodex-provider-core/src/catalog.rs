@@ -120,7 +120,7 @@ mod runtime;
 pub use runtime::{
     RuntimeDynamicCatalogModel, RuntimeModelCatalogError, RuntimeModelCatalogInput,
     RuntimeModelCatalogPlanInput, RuntimePlannedCatalogModel, normalize_runtime_dynamic_catalog,
-    plan_runtime_model_catalog, render_runtime_model_catalog,
+    plan_runtime_model_catalog, render_local_runtime_model_catalog, render_runtime_model_catalog,
 };
 
 pub fn merge_provider_model_catalog_json<'a>(

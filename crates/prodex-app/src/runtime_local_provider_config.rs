@@ -10,6 +10,7 @@ use prodex_cli::{
 use prodex_mojo_core::super_provider_config::{
     RuntimeModelProviderClass, runtime_model_provider_class,
 };
+use prodex_provider_core::render_local_runtime_model_catalog;
 use serde_json::json;
 use std::ffi::OsString;
 use std::path::Path;
@@ -131,7 +132,7 @@ fn write_local_model_catalog(
         prodex_shared_codex_fs::create_codex_home_if_missing(parent)?;
     }
     let catalog = json!({
-        "models": [local_catalog_model(model, context_window, auto_compact_token_limit)]
+        "models": [render_local_runtime_model_catalog(model, context_window, auto_compact_token_limit)?]
     });
     let contents =
         serde_json::to_string_pretty(&catalog).context("failed to serialize local catalog")?;
@@ -141,74 +142,12 @@ fn write_local_model_catalog(
         .with_context(|| format!("failed to write {}", catalog_path.display()))
 }
 
-fn local_catalog_model(
-    slug: &str,
-    context_window: u64,
-    auto_compact_token_limit: u64,
-) -> serde_json::Value {
-    json!({
-        "slug": slug,
-        "display_name": slug,
-        "description": "Local OpenAI-compatible model routed through Prodex.",
-        "default_reasoning_level": "high",
-        "supported_reasoning_levels": [
-            {
-                "effort": "low",
-                "description": "Low reasoning effort"
-            },
-            {
-                "effort": "medium",
-                "description": "Medium reasoning effort"
-            },
-            {
-                "effort": "high",
-                "description": "High reasoning effort"
-            },
-            {
-                "effort": "xhigh",
-                "description": "Max reasoning effort"
-            }
-        ],
-        "shell_type": "shell_command",
-        "visibility": "list",
-        "supported_in_api": true,
-        "priority": 1,
-        "additional_speed_tiers": [],
-        "service_tiers": [],
-        "default_service_tier": null,
-        "availability_nux": null,
-        "upgrade": null,
-        // Codex app-server requires an explicit instruction source for persisted
-        // sessions; an empty value preserves the local provider's existing
-        // prompt semantics without inventing provider instructions.
-        "base_instructions": "",
-        "supports_reasoning_summaries": false,
-        "supports_reasoning_summary_parameter": false,
-        "default_reasoning_summary": "none",
-        "support_verbosity": false,
-        "default_verbosity": null,
-        "apply_patch_tool_type": "freeform",
-        "web_search_tool_type": "text",
-        "truncation_policy": {
-            "mode": "tokens",
-            "limit": 10000
-        },
-        "supports_parallel_tool_calls": true,
-        "supports_image_detail_original": false,
-        "context_window": context_window,
-        "max_context_window": context_window,
-        "auto_compact_token_limit": auto_compact_token_limit,
-        "effective_context_window_percent": 95,
-        "experimental_supported_tools": [],
-        "input_modalities": ["text"],
-        "supports_search_tool": true
-    })
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::time::{SystemTime, UNIX_EPOCH};
+
+    include!("runtime_local_provider_config/catalog_tests.rs");
 
     fn temp_codex_home(name: &str) -> PathBuf {
         let stamp = SystemTime::now()

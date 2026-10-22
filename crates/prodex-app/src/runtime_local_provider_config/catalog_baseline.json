@@ -1,0 +1,51 @@
+[
+  {
+    "auto_compact_token_limit": 120000,
+    "bytes": 1720,
+    "context_window": 128000,
+    "name": "ordinary",
+    "sha256": "6a37bebe44e40cd88fa3222e9c363021d46ce46340dde3f53e128d416f03ee8a"
+  },
+  {
+    "auto_compact_token_limit": 18446744073709551615,
+    "bytes": 1732,
+    "context_window": 0,
+    "name": "raw-unicode",
+    "sha256": "a983d9c30d598cf057e778e9288259f861214d6be3dd4047ad3d4e19d2cadd69"
+  },
+  {
+    "auto_compact_token_limit": 0,
+    "bytes": 1675,
+    "context_window": 1,
+    "name": "empty-slug",
+    "sha256": "3e89956bc480ab039b270c475c80db0284b1b5a0900a9d8a70f954bb18b1329a"
+  },
+  {
+    "auto_compact_token_limit": 0,
+    "bytes": 1695,
+    "context_window": 0,
+    "name": "zero-budget",
+    "sha256": "d1a58a04d917d8e36952f11b8487b68fb97d1e146af0fba8d2111685f1ac3bd4"
+  },
+  {
+    "auto_compact_token_limit": 18446744073709551615,
+    "bytes": 1750,
+    "context_window": 18446744073709551615,
+    "name": "max-unsigned",
+    "sha256": "9db416f3dd8c6cd4246dbbadf03288cc5365207d291c5d8365887a086e0091c1"
+  },
+  {
+    "auto_compact_token_limit": 18446744073709551615,
+    "bytes": 1720,
+    "context_window": 8,
+    "name": "compact-above-context",
+    "sha256": "fccf48cf65fd7ebbeef4cf3b37339bbf03d06550c2f534556bc22b17ff68383e"
+  },
+  {
+    "auto_compact_token_limit": 18446744073709551615,
+    "bytes": 9888,
+    "context_window": 1,
+    "name": "long-slug",
+    "sha256": "23c6a15001663123988b18afa52ecf3ab82a07d0ec551039623cbca2b1153ec1"
+  }
+]

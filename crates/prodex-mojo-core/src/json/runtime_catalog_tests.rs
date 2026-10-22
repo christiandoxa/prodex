@@ -218,3 +218,77 @@ fn compiled_dynamic_catalog_bridge_preserves_order_duplicates_and_raw_entry_boun
         );
     }
 }
+
+#[test]
+fn compiled_local_schema_from_minimal_observations_keeps_fixed_metadata() {
+    let raw = r#"{"provider":"local","slug":"synthetic","context_window":0,"auto_compact_token_limit":18446744073709551615}"#;
+    let nodes = [
+        (JsonKind::Object, None, Some(1), None, "", "", 0, 106),
+        (
+            JsonKind::String,
+            Some(0),
+            None,
+            Some(2),
+            "provider",
+            "local",
+            12,
+            7,
+        ),
+        (
+            JsonKind::String,
+            Some(0),
+            None,
+            Some(3),
+            "slug",
+            "synthetic",
+            27,
+            11,
+        ),
+        (
+            JsonKind::Number,
+            Some(0),
+            None,
+            Some(4),
+            "context_window",
+            "",
+            56,
+            1,
+        ),
+        (
+            JsonKind::Number,
+            Some(0),
+            None,
+            None,
+            "auto_compact_token_limit",
+            "",
+            85,
+            20,
+        ),
+    ]
+    .into_iter()
+    .map(
+        |(kind, parent, first_child, next_sibling, key, text, raw_start, raw_length)| JsonNode {
+            kind,
+            parent,
+            first_child,
+            next_sibling,
+            key,
+            text,
+            raw_start,
+            raw_length,
+        },
+    )
+    .collect::<Vec<_>>();
+    let output = runtime_model_catalog_json(&nodes, raw).unwrap();
+    let text = std::str::from_utf8(&output).unwrap();
+    assert!(text.contains(r#""slug":"synthetic","display_name":"synthetic""#));
+    assert!(
+        text.contains(r#""description":"Local OpenAI-compatible model routed through Prodex.""#)
+    );
+    assert!(text.contains(r#""priority":1"#));
+    assert!(text.contains(r#""effort":"xhigh","description":"Max reasoning effort""#));
+    assert!(text.contains(r#""supports_reasoning_summaries":false"#));
+    assert!(text.contains(r#""supports_search_tool":true"#));
+    assert!(text.contains(r#""input_modalities":["text"]"#));
+    assert!(text.contains(r#""context_window":0,"max_context_window":0,"auto_compact_token_limit":18446744073709551615"#));
+}
