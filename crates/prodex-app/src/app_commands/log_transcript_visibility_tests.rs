@@ -1,5 +1,14 @@
-use super::{transcript_events_from_session_line, transcript_user_message_is_visible};
+use super::transcript_events_from_session_line;
 use serde_json::json;
+
+fn transcript_user_message_is_visible(payload: &serde_json::Value) -> bool {
+    let tree = crate::json_boundary::app_json_tree_without_wire(payload).unwrap();
+    prodex_mojo_core::json::session_prompt_write_json_check(
+        &tree.nodes,
+        prodex_mojo_core::json::SessionPromptWriteJsonCheck::TranscriptPayloadVisible,
+    )
+    .unwrap()
+}
 
 #[test]
 fn decoded_log_visibility_keeps_absent_metadata_fast_path_and_filters_internal_context() {

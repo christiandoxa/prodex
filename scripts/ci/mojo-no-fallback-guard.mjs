@@ -427,6 +427,8 @@ const CORE_LEXICAL_BROKER_PATHS = "crates/prodex-app/src/runtime_persistence/pat
 const CORE_LEXICAL_APP_HOUSEKEEPING = "crates/prodex-app/src/housekeeping.rs";
 const CORE_LEXICAL_LIVE_LOG = "crates/prodex-app/src/app_commands/log_live.rs";
 const PROMOTED_FILES = [
+  "crates/prodex-mojo-core/src/json/log_transcript_message_tests.rs",
+  "crates/prodex-app/src/app_commands/log_transcript_message_tests.rs",
   "crates/prodex-mojo-core/src/json/log_transcript_tool_tests.rs",
   "crates/prodex-app/src/app_commands/log_transcript_tool_tests.rs",
   "crates/prodex-mojo-core/src/json/log_transcript_shell_tests.rs",
@@ -8059,6 +8061,7 @@ export function findViolations(files) {
     if (filePath === "mojo/prodex_core/session_prompt_write_json.mojo") {
       return ["def session_prompt_record_shape(", "def session_prompt_user_visible(",
         "def session_prompt_exact_match(", "def session_prompt_content_matches(",
+        "def session_prompt_content_part(", "def session_prompt_payload_visible(",
         "def session_prompt_json_check(", "pj_valid(tree)", "node_count > 1_048_576"]
         .filter((marker) => !contents.includes(marker))
         .map((marker) => filePath + ": decoded session policy must remain compiled Mojo-owned: " + marker);
@@ -12231,13 +12234,13 @@ export function findViolations(files) {
   const transcriptPolicyViolations = files.flatMap(([filePath, contents]) => {
     if (filePath === TRANSCRIPT_CONTEXT_ADAPTER_FILE) {
       return ["prodex_mojo_log_transcript_context_v1(", "transform_json(", "TranscriptContextKind",
-        "transform_json_with_views(", "pub fn log_transcript_operation(", "TranscriptOperationKind", "ShellCall = 8", "ShellOutput = 9", "FunctionCall = 10", "CustomCall = 11", "ToolOutput = 12"]
+        "transform_json_with_views(", "pub fn log_transcript_operation(", "TranscriptOperationKind", "ShellCall = 8", "ShellOutput = 9", "FunctionCall = 10", "CustomCall = 11", "ToolOutput = 12", "ResponseMessage = 13", "UserMessage = 14", "AssistantMessage = 15", "ReasoningMessage = 16"]
         .filter((marker) => !contents.includes(marker))
         .map((marker) => `${filePath}: transcript context ABI must retain ${marker}`);
     }
     if (filePath === TRANSCRIPT_CONTEXT_MOJO_FILE) {
       return ['@export("prodex_mojo_log_transcript_context_v1")', "if provider < 0:",
-        "transcript_context_fields(", "transcript_reasoning_part(", "transcript_reasoning_text(", "transcript_operation_render(", "operation > 12"]
+        "transcript_context_fields(", "transcript_reasoning_part(", "transcript_reasoning_text(", "transcript_operation_render(", "operation > 16"]
         .filter((marker) => !contents.includes(marker))
         .map((marker) => `${filePath}: transcript context semantics must remain compiled Mojo-owned (${marker})`);
     }
@@ -12251,7 +12254,7 @@ export function findViolations(files) {
     }
     if (filePath === TRANSCRIPT_OPERATION_MOJO_FILE) {
       return ["def transcript_protocol_fields(", "def transcript_status_fields(",
-        "def transcript_operation_fallback(", "def transcript_operation_render(", "if not has_status:", "def transcript_tool_render("]
+        "def transcript_operation_fallback(", "def transcript_operation_render(", "if not has_status:", "def transcript_tool_render(", "def transcript_message_render(", "session_prompt_content_part(tree, child)", "session_prompt_payload_visible(tree, 0)"]
         .filter((marker) => !contents.includes(marker))
         .map((marker) => `${filePath}: transcript operation semantics must remain compiled Mojo-owned (${marker})`);
     }
@@ -12283,6 +12286,23 @@ export function findViolations(files) {
         .filter((marker) => !contents.includes(marker))
         .map((marker) => filePath + ": tool transcript caller coverage must retain " + marker);
     }
+    if (filePath === "crates/prodex-mojo-core/src/json/log_transcript_message_tests.rs") {
+      return ["compiled_message_projection_joins_selected_prepared_parts_and_blocks_present_nonstring_fallback",
+        "compiled_message_projection_keeps_role_defaults_and_shared_visibility_rules",
+        "compiled_event_messages_select_prepared_text_field_and_stable_source",
+        "compiled_message_abi_rejects_invalid_shapes_views_and_capacity_without_writes"]
+        .filter((marker) => !contents.includes(marker))
+        .map((marker) => filePath + ": message transcript ABI coverage must retain " + marker);
+    }
+    if (filePath === "crates/prodex-app/src/app_commands/log_transcript_message_tests.rs") {
+      return ["response_messages_keep_part_priority_normalization_and_lf_order",
+        "response_message_visibility_keeps_metadata_and_raw_role_contracts",
+        "response_messages_ignore_invalid_content_without_using_blocked_fallbacks",
+        "event_messages_keep_sources_text_fields_and_full_visible_payload",
+        "message_projection_keeps_unicode_redaction_and_final_text_bound", "prodex_mojo_core::MOJO_ACTIVE"]
+        .filter((marker) => !contents.includes(marker))
+        .map((marker) => filePath + ": message transcript caller coverage must retain " + marker);
+    }
     if (filePath === TRANSCRIPT_OPERATION_CALLER_TEST_FILE) {
       return ["operation_projection_preserves_alias_priority_and_inferred_subagent_status",
         "operation_projection_preserves_scalar_types_json_spelling_and_output_order",
@@ -12298,7 +12318,7 @@ export function findViolations(files) {
         "prodex_mojo_core::log::transcript_operation_span(",
         "prodex_mojo_core::log::sanitize_transcript_tool_name(",
         "prodex_mojo_core::log::normalize_transcript_safe_text(",
-        "prodex_mojo_core::json::session_prompt_write_json_check(",
+        "TranscriptOperationKind::ResponseMessage",
         "prodex_mojo_core::json::log_transcript_context(",
         "app_json_tree_without_wire(payload)",
         "prodex_mojo_core::json::log_transcript_operation(",
@@ -12310,6 +12330,9 @@ export function findViolations(files) {
         "TranscriptOperationKind::FunctionCall",
         "TranscriptOperationKind::CustomCall",
         "TranscriptOperationKind::ToolOutput",
+        "TranscriptOperationKind::UserMessage",
+        "TranscriptOperationKind::AssistantMessage",
+        "TranscriptOperationKind::ReasoningMessage",
       ];
       const violations = required
         .filter((call) => !contents.includes(call))
@@ -12322,7 +12345,7 @@ export function findViolations(files) {
       if (/\bfn\s+(?:shell_call_transcript_event|shell_output_transcript_event|transcript_json_scalar|transcript_json_text)\s*\(/u.test(contents)) {
         violations.push(filePath + ": contains restored Rust shell transcript field policy");
       }
-      for (const selector of ['.get("name")', '.get("arguments")', '.get("input")', '.get("output")', 'format!("tool-call:']) {
+      for (const selector of ['.get("name")', '.get("arguments")', '.get("input")', '.get("output")', '.get("role")', '.get("content")', 'format!("tool-call:']) {
         if (contents.includes(selector)) {
           violations.push(filePath + ": contains restored Rust tool transcript field policy");
         }
@@ -12343,10 +12366,12 @@ export function findViolations(files) {
     }
     if (filePath === LOG_TRANSCRIPT_TEXT_FILE) {
       const required = [
-        "prodex_mojo_core::log::join_transcript_user_parts(",
         "prodex_mojo_core::log::normalize_transcript_visible_text(",
         "prodex_mojo_core::log::strip_transcript_ansi_codes(",
       ];
+      if (contents.includes("fn transcript_text_from_content(")) {
+        return [filePath + ": contains restored Rust message content selection"];
+      }
       const violations = required
         .filter((call) => !contents.includes(call))
         .map((call) => filePath + ": transcript text projection must retain Mojo call " + call);
@@ -17829,7 +17854,7 @@ function selfTest() {
     "prodex_mojo_core::log::transcript_operation_span(",
     "prodex_mojo_core::log::sanitize_transcript_tool_name(",
     "prodex_mojo_core::log::normalize_transcript_safe_text(",
-    "prodex_mojo_core::json::session_prompt_write_json_check(",
+    "TranscriptOperationKind::ResponseMessage",
     "prodex_mojo_core::json::log_transcript_context(",
     "app_json_tree_without_wire(payload)",
     "prodex_mojo_core::json::log_transcript_operation(",
@@ -17841,6 +17866,9 @@ function selfTest() {
     "TranscriptOperationKind::FunctionCall",
     "TranscriptOperationKind::CustomCall",
     "TranscriptOperationKind::ToolOutput",
+    "TranscriptOperationKind::UserMessage",
+    "TranscriptOperationKind::AssistantMessage",
+    "TranscriptOperationKind::ReasoningMessage",
   ].join("\n");
   assert.deepEqual(findViolations([[LOG_TRANSCRIPT_FILE, transcriptConsumerCalls]]), []);
   assert.match(findViolations([[LOG_TRANSCRIPT_FILE,
@@ -17858,7 +17886,6 @@ function selfTest() {
     `${transcriptConsumerCalls}\nfn event_msg_is_status() {}`,
   ]]).join("\n"), /restored Rust transcript classification\/bounding semantics/u);
   const transcriptTextCalls = [
-    "prodex_mojo_core::log::join_transcript_user_parts(",
     "prodex_mojo_core::log::normalize_transcript_visible_text(",
     "prodex_mojo_core::log::strip_transcript_ansi_codes(",
   ].join("\n");
@@ -18209,9 +18236,11 @@ function selfTest() {
     assert.match(findViolations([[LOG_TRANSCRIPT_FILE, transcriptConsumerCalls + "\nfn " + symbol + "() {}"]]).join("\n"), /restored Rust shell transcript/u);
   }
 
-  for (const selector of ['.get("name")', '.get("arguments")', '.get("input")', '.get("output")', 'format!("tool-call:']) {
+  for (const selector of ['.get("name")', '.get("arguments")', '.get("input")', '.get("output")', '.get("role")', '.get("content")', 'format!("tool-call:']) {
     assert.match(findViolations([[LOG_TRANSCRIPT_FILE, transcriptConsumerCalls + selector]]).join("\n"), /restored Rust tool transcript/u);
   }
+
+  assert.match(findViolations([[LOG_TRANSCRIPT_TEXT_FILE, transcriptTextCalls + "\nfn transcript_text_from_content() {}"]]).join("\n"), /restored Rust message content/u);
 
   const infoPanelFile = "crates/prodex-app/src/app_commands/info_handler.rs";
   const infoPanelCaller = "prodex_mojo_core::info_render::info_panel_value_color( prodex_mojo_core::info_render::info_panel_field_visible(";

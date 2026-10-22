@@ -56,6 +56,9 @@ mod log_transcript;
 #[path = "log_transcript_text.rs"]
 mod log_transcript_text;
 #[cfg(test)]
+#[path = "log_transcript_message_tests.rs"]
+mod message_tests;
+#[cfg(test)]
 #[path = "log_transcript_shell_tests.rs"]
 mod shell_tests;
 #[cfg(test)]
