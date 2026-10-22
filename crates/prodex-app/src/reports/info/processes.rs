@@ -1,6 +1,6 @@
 //! Process classification and runtime-log selection.
 
-use super::{BTreeMap, BTreeSet, Path, PathBuf, ProcessRow, ProdexProcessInfo, SystemTime};
+use super::{Path, PathBuf, ProcessRow, ProdexProcessInfo, SystemTime};
 use prodex_cli::Commands;
 
 pub fn parse_ps_process_rows(text: &str) -> Vec<ProcessRow> {
@@ -80,9 +80,8 @@ pub fn process_basename(input: &str) -> &str {
 
 pub fn runtime_log_pid_from_path_with_prefix(path: &Path, prefix: &str) -> Option<u32> {
     let name = path.file_name()?.to_str()?;
-    let rest = name.strip_prefix(&format!("{prefix}-"))?;
-    let (pid, _) = rest.split_once('-')?;
-    pid.parse::<u32>().ok()
+    prodex_mojo_core::log::runtime_log_pid(name, prefix)
+        .expect("compiled Mojo runtime log PID parser returned invalid output")
 }
 
 pub fn select_active_runtime_log_paths_with_prefix<I>(
@@ -93,25 +92,35 @@ pub fn select_active_runtime_log_paths_with_prefix<I>(
 where
     I: IntoIterator<Item = PathBuf>,
 {
-    let runtime_pids = processes
+    use prodex_mojo_core::log::{ActiveRuntimeLogProcess, active_runtime_log_plan};
+    let facts = processes
         .iter()
-        .filter(|process| process.runtime)
-        .map(|process| process.pid)
-        .collect::<BTreeSet<_>>();
-    if runtime_pids.is_empty() {
+        .map(|process| ActiveRuntimeLogProcess {
+            pid: process.pid,
+            runtime: process.runtime,
+        })
+        .collect::<Vec<_>>();
+    let initial = active_runtime_log_plan(&facts, &[])
+        .expect("compiled Mojo active runtime log query returned invalid output");
+    if !initial.runtime_processes_present {
         return Vec::new();
     }
-
-    let mut latest_logs = BTreeMap::new();
-    for path in log_paths {
-        let Some(pid) = runtime_log_pid_from_path_with_prefix(&path, prefix) else {
-            continue;
-        };
-        if runtime_pids.contains(&pid) {
-            latest_logs.insert(pid, path);
-        }
-    }
-    latest_logs.into_values().collect()
+    let paths = log_paths.into_iter().collect::<Vec<_>>();
+    let path_pids = paths
+        .iter()
+        .map(|path| runtime_log_pid_from_path_with_prefix(path, prefix))
+        .collect::<Vec<_>>();
+    let plan = active_runtime_log_plan(&facts, &path_pids)
+        .expect("compiled Mojo active runtime log selection returned invalid output");
+    let mut paths = paths.into_iter().map(Some).collect::<Vec<_>>();
+    plan.path_indices
+        .into_iter()
+        .map(|index| {
+            paths[index]
+                .take()
+                .expect("validated Mojo active log indices are unique")
+        })
+        .collect()
 }
 
 pub fn select_recent_runtime_log_paths<I>(log_paths: I, limit: usize) -> Vec<PathBuf>
@@ -204,3 +213,7 @@ mod compiled_recent_runtime_log_tests {
         );
     }
 }
+
+#[cfg(test)]
+#[path = "active_paths_tests.rs"]
+mod active_paths_tests;

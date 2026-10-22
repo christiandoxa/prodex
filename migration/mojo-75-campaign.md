@@ -8761,3 +8761,24 @@ PID output to Mojo. Preserve optional ASCII plus signs, leading zeros, the full
 u32 range, exact prefixes and the empty-runtime return before path iteration.
 Reuse core-file decimal parsing and index heapsort. Native Path/OsStr basename
 acquisition, filesystem effects and original path ownership stay in Rust.
+
+## Active runtime-log selection compiled in Mojo (2026-10-22)
+
+PID parsing, runtime membership, last-encountered retention and ascending PID
+order now use one compiled active-log owner, reusing core-file decimal parsing
+and index heapsort. Rust's parser and set/map algorithm are removed without a
+fallback. An empty-path query preserves the early return before consuming a
+path iterator. Four caller regressions pass before/after migration, with direct
+Mojo, three active-log bridge, three core-file and 27 info tests plus strict
+workspace Clippy, formatting and full default CI: 1,443 Rust tests in 732.74
+seconds. Canonical share is 36.481147777398505%
+(137,867 Mojo / 240,046 Rust production LOC); the checked ABI adapter increases
+Rust source while transferring decisions. The 75% target remains open.
+Evidence and the retained optional-feature link failure are in
+`migration/active-runtime-logs-mojo-20261022.md`.
+
+The optional `mojo-rich,mojo-routing` experiment exposes existing runtime/session
+references without their `mojo-runtime` link inputs. Its missing-symbol callers
+and pre-existing source-selection gates match the published parent. Audit the
+explicit feature dependency before broadening this configuration's coverage;
+keep that build-contract repair separate from the active-log policy.
