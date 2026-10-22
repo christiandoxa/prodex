@@ -430,6 +430,11 @@ const CORE_LEXICAL_BROKER_PATHS = "crates/prodex-app/src/runtime_persistence/pat
 const CORE_LEXICAL_APP_HOUSEKEEPING = "crates/prodex-app/src/housekeeping.rs";
 const CORE_LEXICAL_LIVE_LOG = "crates/prodex-app/src/app_commands/log_live.rs";
 const PROMOTED_FILES = [
+  "crates/prodex-mojo-core/src/profile_export/diagnostics.rs",
+  "crates/prodex-mojo-core/src/profile_export/diagnostics_tests.rs",
+  "crates/prodex-profile-export/src/envelope/diagnostic_tests.rs",
+  "mojo/prodex_core/profile_export_diagnostics.mojo",
+  "mojo/tests/profile_export_diagnostics_test.mojo",
   "crates/prodex-mojo-core/src/optional_tools_policy/diagnostics.rs",
   "crates/prodex-mojo-core/src/optional_tools_policy/diagnostics_tests.rs",
   "crates/prodex-optional-tools/src/optimizer_diagnostic_tests.rs",
@@ -11336,14 +11341,29 @@ export function findViolations(files) {
       const required = [
         "prodex_mojo_core::profile_export::validate_password_bytes(",
         "prodex_mojo_core::profile_export::validate_profile_export_envelope_schema(",
+        "prodex_mojo_core::profile_export::profile_export_schema_diagnostic(",
       ];
       const violations = required
         .filter((call) => !production.includes(call))
         .map((call) => `${filePath}: profile-export password/envelope semantics must retain Mojo call ${call}`);
+      const diagnostic = production.match(/\bfn profile_export_schema_error\([^]*?^\}/mu)?.[0] ?? "";
+      if (/unsupported profile export (?:format|version|cipher|KDF)|invalid encrypted export|outside safe range/u.test(diagnostic)) {
+        violations.push(`${filePath}: contains restored Rust profile-export diagnostic templates`);
+      }
       if (/password\.is_empty\(\)|PROFILE_EXPORT_PBKDF2_MIN_ITERATIONS\.\.=PROFILE_EXPORT_PBKDF2_MAX_ITERATIONS|PROFILE_EXPORT_ARGON2_MIN_(?:MEMORY_KIB|ITERATIONS|PARALLELISM)|fn\s+(?:validate_profile_export_header_version|validate_profile_export_cipher|validate_profile_export_pbkdf2_iterations|validate_profile_export_argon2id_parameters|validate_encrypted_profile_export_fields|validate_base64_field|decoded_base64_length)\s*\(/u.test(production)) {
         violations.push(`${filePath}: contains restored Rust profile-export schema/password/KDF semantic policy`);
       }
       return violations;
+    }
+    if (filePath === "crates/prodex-mojo-core/src/profile_export/diagnostics.rs") {
+      return contents.includes("prodex_profile_export_diagnostic_v1(")
+        && !/format!|unsupported profile export|invalid encrypted export|outside safe range/u.test(contents)
+        ? [] : [filePath + ": profile-export diagnostics must retain compiled templates with numeric metadata"];
+    }
+    if (filePath === "mojo/prodex_core/profile_export_diagnostics.mojo") {
+      return ['@export("prodex_profile_export_diagnostic_v1")', "PROFILE_EXPORT_PBKDF2_MIN_ITERATIONS",
+        "PROFILE_EXPORT_ENVELOPE_VERSION_V1", "writer.written > capacity"].every((required) => contents.includes(required))
+        ? [] : [filePath + ": profile-export diagnostic templates must reuse compiled bounds and bounded output"];
     }
     if (filePath === "crates/prodex-profile-export/src/selection.rs") {
       const production = contents.split("#[cfg(test)]", 1)[0];
@@ -14514,6 +14534,14 @@ async function promotedFiles() {
 }
 
 function selfTest() {
+  const exportDiagnosticAdapter = "crates/prodex-mojo-core/src/profile_export/diagnostics.rs";
+  assert.deepEqual(findViolations([[exportDiagnosticAdapter, "prodex_profile_export_diagnostic_v1("]]), []);
+  assert.match(findViolations([[exportDiagnosticAdapter, 'prodex_profile_export_diagnostic_v1(; format!("unsupported profile export")']])
+    .join("\n"), /compiled templates with numeric metadata/u);
+  const exportDiagnosticMojo = '@export("prodex_profile_export_diagnostic_v1"); PROFILE_EXPORT_PBKDF2_MIN_ITERATIONS; PROFILE_EXPORT_ENVELOPE_VERSION_V1; writer.written > capacity';
+  assert.deepEqual(findViolations([["mojo/prodex_core/profile_export_diagnostics.mojo", exportDiagnosticMojo]]), []);
+  assert.match(findViolations([["mojo/prodex_core/profile_export_diagnostics.mojo", exportDiagnosticMojo.replace("PROFILE_EXPORT_PBKDF2_MIN_ITERATIONS", "local_bound")]])
+    .join("\n"), /reuse compiled bounds/u);
   const diagnosticAdapterFile = "crates/prodex-mojo-core/src/optional_tools_policy/diagnostics.rs";
   const diagnosticAdapterCall = "prodex_optional_tool_diagnostic_v1(";
   assert.deepEqual(findViolations([[diagnosticAdapterFile, diagnosticAdapterCall]]), []);
@@ -15363,10 +15391,17 @@ function selfTest() {
   const envelopeOwnerCaller = [
     "prodex_mojo_core::profile_export::validate_password_bytes(",
     "prodex_mojo_core::profile_export::validate_profile_export_envelope_schema(",
+    "prodex_mojo_core::profile_export::profile_export_schema_diagnostic(",
   ].join("\\n");
   assert.deepEqual(findViolations([[
     "crates/prodex-profile-export/src/envelope.rs", envelopeOwnerCaller,
   ]]), []);
+  assert.match(findViolations([["crates/prodex-profile-export/src/envelope.rs",
+    envelopeOwnerCaller.replace("profile_export_schema_diagnostic(", "rust_diagnostic(")]])
+    .join("\n"), /must retain Mojo call/u);
+  assert.match(findViolations([["crates/prodex-profile-export/src/envelope.rs",
+    envelopeOwnerCaller + '\nfn profile_export_schema_error() {\n "unsupported profile export format";\n}\n']])
+    .join("\n"), /restored Rust profile-export diagnostic templates/u);
   assert.match(findViolations([[
     "crates/prodex-profile-export/src/envelope.rs",
     "prodex_mojo_core::profile_export::validate_password_bytes(",

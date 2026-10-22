@@ -8703,3 +8703,19 @@ The 75% goal stays open. Evidence is in `migration/optimizer-diagnostics-mojo-20
 The next audited owner is `prodex-profile-export/src/envelope.rs::profile_export_schema_error`:
 preserve exact schema diagnostics, version/absent-value details, ciphertext-length
 aliases and safe iteration bounds while retaining crypto and transport errors in Rust.
+
+## Profile export schema diagnostics compiled in Mojo (2026-10-22)
+
+Seventeen schema diagnostics, numeric defaults and ciphertext-length aliases
+now use the compiled export owner. Rust's template table is removed; the host
+retains crypto, encodings and the original Mojo transport-error context. Only
+numeric metadata enters the new ABI. Supported versions and PBKDF2 bounds share
+their compiled policy authority. Two caller regressions pass before/after
+migration, with direct Mojo, 16 bridge, 62 export-crate, 12 app export and 25
+app import tests plus strict workspace Clippy, formatting and guards. Canonical
+share is 36.460421140144405% (137,707 Mojo / 239,982 Rust production LOC).
+The 75% goal stays open. Evidence is in `migration/profile-export-diagnostics-mojo-20261022.md`.
+The next audit targets repeated `NoncompactLoopInput` marshalling in
+`runtime_noncompact_next_action`. Decisions already belong to Mojo; reduce the
+Rust adapter while preserving every per-stage observation and effect, then run
+the full runtime matrix. This cleanup must not claim a new semantic migration.

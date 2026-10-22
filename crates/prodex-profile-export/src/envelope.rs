@@ -16,7 +16,6 @@ use crate::data_model::{
     PROFILE_EXPORT_ARGON2_ITERATIONS, PROFILE_EXPORT_ARGON2_MEMORY_KIB,
     PROFILE_EXPORT_ARGON2_PARALLELISM, PROFILE_EXPORT_ARGON2_VERSION, PROFILE_EXPORT_FORMAT,
     PROFILE_EXPORT_KEY_BYTES, PROFILE_EXPORT_NONCE_BYTES, PROFILE_EXPORT_PASSWORD_MAX_BYTES,
-    PROFILE_EXPORT_PBKDF2_MAX_ITERATIONS, PROFILE_EXPORT_PBKDF2_MIN_ITERATIONS,
     PROFILE_EXPORT_PLAINTEXT_MAX_BYTES, PROFILE_EXPORT_SALT_BYTES, PROFILE_EXPORT_VERSION_V1,
     PROFILE_EXPORT_VERSION_V2,
 };
@@ -309,75 +308,18 @@ fn profile_export_schema_error(
     pbkdf2_iterations: Option<u32>,
     argon2_version: Option<u32>,
 ) -> anyhow::Error {
-    use prodex_mojo_core::profile_export::ProfileExportEnvelopeSchemaError;
-
-    match error {
-        ProfileExportEnvelopeSchemaError::Mojo(error) => {
-            anyhow::anyhow!("Mojo profile-export envelope validation failed: {error:?}")
-        }
-        ProfileExportEnvelopeSchemaError::Format => {
-            anyhow::anyhow!("unsupported profile export format")
-        }
-        ProfileExportEnvelopeSchemaError::Version => anyhow::anyhow!(
-            "unsupported profile export version {} (supported: {}, {})",
-            received_version,
-            PROFILE_EXPORT_VERSION_V1,
-            PROFILE_EXPORT_VERSION_V2
-        ),
-        ProfileExportEnvelopeSchemaError::KindVersion => {
-            let Some(expected_version) = expected_version else {
-                return anyhow::anyhow!("invalid profile export envelope version");
-            };
-            anyhow::anyhow!(
-                "profile export envelope kind requires version {} (received {})",
-                expected_version,
-                received_version
-            )
-        }
-        ProfileExportEnvelopeSchemaError::Cipher => {
-            anyhow::anyhow!("unsupported profile export cipher")
-        }
-        ProfileExportEnvelopeSchemaError::Kdf => anyhow::anyhow!("unsupported profile export KDF"),
-        ProfileExportEnvelopeSchemaError::SaltEncoding => {
-            anyhow::anyhow!("invalid encrypted export salt encoding")
-        }
-        ProfileExportEnvelopeSchemaError::SaltLength => {
-            anyhow::anyhow!("invalid encrypted export salt length")
-        }
-        ProfileExportEnvelopeSchemaError::NonceEncoding => {
-            anyhow::anyhow!("invalid encrypted export nonce encoding")
-        }
-        ProfileExportEnvelopeSchemaError::NonceLength => {
-            anyhow::anyhow!("invalid encrypted export nonce length")
-        }
-        ProfileExportEnvelopeSchemaError::CiphertextEncoding => {
-            anyhow::anyhow!("invalid encrypted export payload encoding")
-        }
-        ProfileExportEnvelopeSchemaError::CiphertextLength
-        | ProfileExportEnvelopeSchemaError::CiphertextMinimumLength => {
-            anyhow::anyhow!("invalid encrypted export payload length")
-        }
-        ProfileExportEnvelopeSchemaError::Pbkdf2Iterations => anyhow::anyhow!(
-            "profile export PBKDF2 iteration count {} is outside safe range {}..={}",
-            pbkdf2_iterations.unwrap_or_default(),
-            PROFILE_EXPORT_PBKDF2_MIN_ITERATIONS,
-            PROFILE_EXPORT_PBKDF2_MAX_ITERATIONS
-        ),
-        ProfileExportEnvelopeSchemaError::Argon2Version => {
-            anyhow::anyhow!(
-                "unsupported profile export Argon2id version {}",
-                argon2_version.unwrap_or_default()
-            )
-        }
-        ProfileExportEnvelopeSchemaError::Argon2Memory => {
-            anyhow::anyhow!("profile export Argon2id memory cost is outside safe range")
-        }
-        ProfileExportEnvelopeSchemaError::Argon2Iterations => {
-            anyhow::anyhow!("profile export Argon2id iteration count is outside safe range")
-        }
-        ProfileExportEnvelopeSchemaError::Argon2Parallelism => {
-            anyhow::anyhow!("profile export Argon2id parallelism is outside safe range")
-        }
+    if let prodex_mojo_core::profile_export::ProfileExportEnvelopeSchemaError::Mojo(error) = error {
+        return anyhow::anyhow!("Mojo profile-export envelope validation failed: {error:?}");
+    }
+    match prodex_mojo_core::profile_export::profile_export_schema_diagnostic(
+        error,
+        expected_version,
+        received_version,
+        pbkdf2_iterations,
+        argon2_version,
+    ) {
+        Ok(message) => anyhow::anyhow!(message),
+        Err(error) => anyhow::anyhow!("Mojo profile-export diagnostic failed: {error:?}"),
     }
 }
 
@@ -560,3 +502,7 @@ where
 #[cfg(test)]
 #[path = "envelope/tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "envelope/diagnostic_tests.rs"]
+mod diagnostic_tests;

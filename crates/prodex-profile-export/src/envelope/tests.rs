@@ -1,6 +1,8 @@
 use super::*;
-use crate::PROFILE_EXPORT_KDF;
 use crate::{ExportedProfile, ExportedSecretFile, ProfileExportPayload};
+use crate::{
+    PROFILE_EXPORT_KDF, PROFILE_EXPORT_PBKDF2_MAX_ITERATIONS, PROFILE_EXPORT_PBKDF2_MIN_ITERATIONS,
+};
 use std::sync::atomic::{AtomicBool, Ordering};
 
 fn encrypted_envelope(iterations: u32, salt: &[u8]) -> ProfileExportEnvelope<serde_json::Value> {

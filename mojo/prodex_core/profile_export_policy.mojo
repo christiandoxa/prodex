@@ -7,6 +7,8 @@ comptime PROFILE_EXPORT_POLICY_ABI_VERSION: Int64 = 1
 comptime PROFILE_EXPORT_POLICY_OK: Int64 = 0
 comptime PROFILE_EXPORT_POLICY_INVALID: Int64 = 99
 comptime PROFILE_EXPORT_POLICY_ABI: Int64 = 100
+comptime PROFILE_EXPORT_ENVELOPE_VERSION_V1: Int64 = 1
+comptime PROFILE_EXPORT_ENVELOPE_VERSION_V2: Int64 = 2
 
 comptime PROFILE_EXPORT_POLICY_COLLECTION: Int64 = 0
 comptime PROFILE_EXPORT_POLICY_PROFILE_SECRET_FILES: Int64 = 1
@@ -337,16 +339,16 @@ def prodex_profile_export_envelope_schema_v1(
         or not rich_view_matches_literal["prodex_profile_export"](input.format, False)
     ):
         return PROFILE_EXPORT_ENVELOPE_FORMAT_ERROR
-    if input.version != 1 and input.version != 2:
+    if input.version != PROFILE_EXPORT_ENVELOPE_VERSION_V1 and input.version != PROFILE_EXPORT_ENVELOPE_VERSION_V2:
         return PROFILE_EXPORT_ENVELOPE_VERSION_ERROR
     if input.kind == PROFILE_EXPORT_ENVELOPE_HEADER:
         return PROFILE_EXPORT_POLICY_OK
     if input.kind == PROFILE_EXPORT_ENVELOPE_PLAIN:
-        if input.version != 1:
+        if input.version != PROFILE_EXPORT_ENVELOPE_VERSION_V1:
             return PROFILE_EXPORT_ENVELOPE_KIND_VERSION_ERROR
         return PROFILE_EXPORT_POLICY_OK
     if input.kind == PROFILE_EXPORT_ENVELOPE_ENCRYPTED_V1:
-        if input.version != 1:
+        if input.version != PROFILE_EXPORT_ENVELOPE_VERSION_V1:
             return PROFILE_EXPORT_ENVELOPE_KIND_VERSION_ERROR
         if (
             not profile_import_view_valid(input.cipher, False)
@@ -369,7 +371,7 @@ def prodex_profile_export_envelope_schema_v1(
         if parameter_status != PROFILE_EXPORT_POLICY_OK:
             return parameter_status
     else:
-        if input.version != 2:
+        if input.version != PROFILE_EXPORT_ENVELOPE_VERSION_V2:
             return PROFILE_EXPORT_ENVELOPE_KIND_VERSION_ERROR
         if (
             not profile_import_view_valid(input.cipher, False)
