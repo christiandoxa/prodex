@@ -115,6 +115,12 @@ pub use kiro::{
 mod copilot;
 pub use copilot::{CopilotModelCatalogError, normalize_copilot_model_catalog};
 
+#[path = "catalog/runtime.rs"]
+mod runtime;
+pub use runtime::{
+    RuntimeModelCatalogError, RuntimeModelCatalogInput, render_runtime_model_catalog,
+};
+
 pub fn merge_provider_model_catalog_json<'a>(
     provider: ProviderId,
     additional_models: impl IntoIterator<Item = &'a serde_json::Value>,
