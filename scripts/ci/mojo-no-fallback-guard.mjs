@@ -430,6 +430,11 @@ const CORE_LEXICAL_BROKER_PATHS = "crates/prodex-app/src/runtime_persistence/pat
 const CORE_LEXICAL_APP_HOUSEKEEPING = "crates/prodex-app/src/housekeeping.rs";
 const CORE_LEXICAL_LIVE_LOG = "crates/prodex-app/src/app_commands/log_live.rs";
 const PROMOTED_FILES = [
+  "crates/prodex-mojo-core/src/optional_tools_policy/diagnostics.rs",
+  "crates/prodex-mojo-core/src/optional_tools_policy/diagnostics_tests.rs",
+  "crates/prodex-optional-tools/src/optimizer_diagnostic_tests.rs",
+  "mojo/prodex_core/optional_tool_diagnostics.mojo",
+  "mojo/tests/optional_tool_diagnostics_test.mojo",
   "crates/prodex-mojo-core/src/rich/runtime_doctor_binding_display.rs",
   "crates/prodex-mojo-core/src/rich/runtime_doctor_binding_display_tests.rs",
   "crates/prodex-runtime-doctor/tests/binding_display.rs",
@@ -8696,11 +8701,10 @@ export function findViolations(files) {
       const required = [
         "prodex_mojo_core::optional_tools_policy::render_optional_tool_awareness(",
         "optional_tool_config_shape_preflight(selected_mask, shapes)",
-        "OptionalToolConfigShapeIssue::Features",
-        "OptionalToolConfigShapeIssue::Playwright",
+        "optional_tool_config_shape_diagnostic(issue)",
         "optional_tool_required_mcp_contract(",
         "RequiredMcpConfigIssue::Disabled",
-        "RequiredMcpConfigIssue::CommandOrArgsMismatch",
+        "optional_tool_required_mcp_diagnostic(issue, name)",
       ];
       const violations = required.every((marker) => contents.includes(marker))
         ? []
@@ -8714,6 +8718,8 @@ export function findViolations(files) {
         "fn validate_required_mcp_server_enabled(",
         "fn validate_required_mcp_server_command(",
         "server.get(\"args\") != Some(&expected_args)",
+        "let message = match issue",
+        "RequiredMcpConfigIssue::Disabled => bail!",
       ]) {
         if (contents.includes(retired)) {
           violations.push(filePath + ": contains restored Rust optional-tool awareness formatting");
@@ -8721,6 +8727,16 @@ export function findViolations(files) {
         }
       }
       return violations;
+    }
+    if (filePath === "crates/prodex-mojo-core/src/optional_tools_policy/diagnostics.rs") {
+      return contents.includes("prodex_optional_tool_diagnostic_v1(")
+        && !/match\s+issue\b|configuration entry|refusing to override user configuration/u.test(contents)
+        ? [] : [filePath + ": optimizer diagnostics must use compiled Mojo without Rust message tables"];
+    }
+    if (filePath === "mojo/prodex_core/optional_tool_diagnostics.mojo") {
+      return ['@export("prodex_optional_tool_diagnostic_v1")', "def optional_tool_diagnostic(",
+        "def optional_tool_shape_key(", "writer.written > capacity"].every((required) => contents.includes(required))
+        ? [] : [filePath + ": optimizer diagnostic text must retain compiled bounded ownership"];
     }
     if (filePath === OPTIONAL_TOOLS_RENDER_ADAPTER_FILE) {
       return [
@@ -14498,6 +14514,17 @@ async function promotedFiles() {
 }
 
 function selfTest() {
+  const diagnosticAdapterFile = "crates/prodex-mojo-core/src/optional_tools_policy/diagnostics.rs";
+  const diagnosticAdapterCall = "prodex_optional_tool_diagnostic_v1(";
+  assert.deepEqual(findViolations([[diagnosticAdapterFile, diagnosticAdapterCall]]), []);
+  assert.match(findViolations([[diagnosticAdapterFile, diagnosticAdapterCall + "match issue {}"]])
+    .join("\n"), /without Rust message tables/u);
+  assert.match(findViolations([[diagnosticAdapterFile, "fn rust_diagnostic() {}"]])
+    .join("\n"), /without Rust message tables/u);
+  const diagnosticMojo = '@export("prodex_optional_tool_diagnostic_v1"); def optional_tool_diagnostic(; def optional_tool_shape_key(; writer.written > capacity';
+  assert.deepEqual(findViolations([["mojo/prodex_core/optional_tool_diagnostics.mojo", diagnosticMojo]]), []);
+  assert.match(findViolations([["mojo/prodex_core/optional_tool_diagnostics.mojo", diagnosticMojo.replace("writer.written > capacity", "")]])
+    .join("\n"), /compiled bounded ownership/u);
   const reportCaller = "prodex_mojo_core::rich::runtime_doctor_report_fields_json(; prodex_mojo_core::rich::runtime_doctor_binding_display(";
   assert.deepEqual(findViolations([[DOCTOR_REPORT_CONSUMER_FILE, reportCaller]]), []);
   for (const restored of ['"Log pointer"', '"Sync-probe deferred"', "fn compact_list(", "for field in report_plan", "fn binding_state_text(", "fn binding_source_text("]) {
@@ -17225,11 +17252,10 @@ function selfTest() {
   const optionalToolsRenderConsumer = [
     "prodex_mojo_core::optional_tools_policy::render_optional_tool_awareness(",
     "optional_tool_config_shape_preflight(selected_mask, shapes)",
-    "OptionalToolConfigShapeIssue::Features",
-    "OptionalToolConfigShapeIssue::Playwright",
+    "optional_tool_config_shape_diagnostic(issue)",
     "optional_tool_required_mcp_contract(",
     "RequiredMcpConfigIssue::Disabled",
-    "RequiredMcpConfigIssue::CommandOrArgsMismatch",
+    "optional_tool_required_mcp_diagnostic(issue, name)",
   ].join("\n");
   const optionalToolsRenderAdapter = [
     "prodex_optional_tool_awareness_v1(",
@@ -17260,6 +17286,14 @@ function selfTest() {
     [OPTIONAL_TOOLS_RENDER_MOJO_FILE, optionalToolsRenderMojo],
     [OPTIONAL_TOOLS_RENDER_CALLER_TEST_FILE, "awareness_contains_only_the_minimal_stack"],
   ]), []);
+  for (const removed of ["optional_tool_config_shape_diagnostic(issue)", "optional_tool_required_mcp_diagnostic(issue, name)"]) {
+    assert.match(findViolations([[OPTIONAL_TOOLS_RENDER_FILE, optionalToolsRenderConsumer.replace(removed, "rust_message()")]])
+      .join("\n"), /must retain Mojo ownership/u);
+  }
+  for (const restored of ["let message = match issue", "RequiredMcpConfigIssue::Disabled => bail!"]) {
+    assert.match(findViolations([[OPTIONAL_TOOLS_RENDER_FILE, optionalToolsRenderConsumer + restored]])
+      .join("\n"), /restored Rust optional-tool awareness formatting/u);
+  }
   assert.match(findViolations([[OPTIONAL_TOOLS_RENDER_FILE,
     optionalToolsRenderConsumer + "\nPRODEX_SUPER_OPTIMIZER_AWARENESS"]]).join("\n"),
     /restored Rust optional-tool awareness formatting/u);

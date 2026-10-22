@@ -1577,6 +1577,15 @@
         ]
       },
       {
+        "path": "mojo/prodex_core/optional_tool_diagnostics.mojo",
+        "language": "mojo",
+        "classification": "MIXED",
+        "semantic_ranges": [{"start": 9, "end": 44}],
+        "production_reachable": true,
+        "role": "semantic",
+        "operations": ["optional_tool_preflight_diagnostics"]
+      },
+      {
         "path": "mojo/prodex_core/gemini_tooling_policy.mojo",
         "language": "mojo",
         "classification": "DETERMINISTIC_DOMAIN",
@@ -7732,6 +7741,27 @@
       "duplicate_production_owner": false,
       "platform_fallback": false,
       "rust_adapter_scope": "allocate bounded caller-owned output and pass Rust-owned digest bytes across the ABI; file reads and SHA-256 hashing stay in Rust"
+    },
+    {
+      "name": "optional_tool_preflight_diagnostics",
+      "domain": "optional-tools/diagnostics",
+      "introduced_in": "0.439.0",
+      "baseline_state": "Rust selected eight TOML-shape diagnostics and three required-MCP message templates around compiled policy",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_optional_tool_diagnostic_v1",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/optional_tool_diagnostics.mojo",
+      "consumer": "crates/prodex-optional-tools/src/super_optimizers.rs",
+      "consumer_marker": "optional_tool_config_shape_diagnostic(issue)",
+      "production_consumers": ["crates/prodex-optional-tools/src/super_optimizers.rs"],
+      "production_reachability_test": "crates/prodex-mojo-core/src/optional_tools_policy/diagnostics_tests.rs",
+      "rust_owner_before": "Two message-selection matches in optimizer shape and required-MCP validation",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "deleted; direct Mojo, bridge and caller regressions preserve every exact diagnostic and enabled-before-command precedence",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "TOML and filesystem acquisition, existing validation calls and sequence, explicit numeric issue tags, bounded caller-owned output and error propagation"
     },
     {
       "name": "optional_tool_awareness_rendering",

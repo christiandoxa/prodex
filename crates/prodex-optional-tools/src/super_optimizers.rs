@@ -11,8 +11,9 @@ use crate::{
     resolve_optional_tools,
 };
 use prodex_mojo_core::optional_tools_policy::{
-    OptionalToolConfigShapeIssue, RequiredMcpConfigIssue, RequiredMcpEnabled,
+    RequiredMcpConfigIssue, RequiredMcpEnabled, optional_tool_config_shape_diagnostic,
     optional_tool_config_shape_preflight, optional_tool_required_mcp_contract,
+    optional_tool_required_mcp_diagnostic,
 };
 
 mod ponytail;
@@ -132,30 +133,9 @@ fn validate_optimizer_config_shapes(
         anyhow::anyhow!("compiled Mojo optional-tool config preflight failed: {error:?}")
     })?;
     if let Some(issue) = issue {
-        let message = match issue {
-            OptionalToolConfigShapeIssue::Features => {
-                "configuration entry `features` must be a TOML table"
-            }
-            OptionalToolConfigShapeIssue::Marketplaces => {
-                "configuration entry `marketplaces` must be a TOML table"
-            }
-            OptionalToolConfigShapeIssue::Plugins => {
-                "configuration entry `plugins` must be a TOML table"
-            }
-            OptionalToolConfigShapeIssue::PonytailMarketplace => {
-                "configuration entry `ponytail` must be a TOML table"
-            }
-            OptionalToolConfigShapeIssue::PonytailPlugin => {
-                "configuration entry `ponytail@ponytail` must be a TOML table"
-            }
-            OptionalToolConfigShapeIssue::McpServers => "mcp_servers must be a TOML table",
-            OptionalToolConfigShapeIssue::CodebaseMemoryMcp => {
-                "mcp_servers.codebase-memory-mcp must be a TOML table"
-            }
-            OptionalToolConfigShapeIssue::Playwright => {
-                "mcp_servers.playwright must be a TOML table"
-            }
-        };
+        let message = optional_tool_config_shape_diagnostic(issue).map_err(|error| {
+            anyhow::anyhow!("compiled Mojo optional-tool diagnostic failed: {error:?}")
+        })?;
         bail!("{message}");
     }
     Ok(Some(table))
@@ -246,17 +226,10 @@ fn validate_required_mcp_server(
         Some(_) => RequiredMcpEnabled::Invalid,
     };
     let emit_issue = |issue: RequiredMcpConfigIssue| -> Result<()> {
-        match issue {
-            RequiredMcpConfigIssue::Disabled => bail!(
-                "required MCP server `mcp_servers.{name}` is disabled (`enabled = false`); refusing to override user configuration"
-            ),
-            RequiredMcpConfigIssue::EnabledNotBoolean => bail!(
-                "required MCP server `mcp_servers.{name}` cannot be safely verified: `enabled` must be a boolean"
-            ),
-            RequiredMcpConfigIssue::CommandOrArgsMismatch => bail!(
-                "required MCP server `mcp_servers.{name}` cannot be safely verified: inherited configuration is custom or incomplete; refusing to replace user configuration"
-            ),
-        }
+        let message = optional_tool_required_mcp_diagnostic(issue, name).map_err(|error| {
+            anyhow::anyhow!("compiled Mojo required MCP diagnostic failed: {error:?}")
+        })?;
+        bail!("{message}")
     };
     // Preserve enabled=false/nonboolean precedence before obtaining the
     // required command, which can itself fail to resolve on the host.
@@ -555,3 +528,7 @@ fn mcp_jsonl_bridge_command_args(command: &Path) -> Option<(PathBuf, Vec<String>
 #[cfg(test)]
 #[path = "super_optimizers_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "optimizer_diagnostic_tests.rs"]
+mod diagnostic_tests;
