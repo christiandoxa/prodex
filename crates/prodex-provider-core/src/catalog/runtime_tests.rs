@@ -124,3 +124,62 @@ fn deepseek_runtime_schema_keeps_fixed_efforts_and_instructions() {
     assert_eq!(instructions.lines().count(), 5);
     assert!(!instructions.contains('\r'));
 }
+
+#[test]
+fn runtime_dynamic_catalog_projection_preserves_complete_models_and_duplicates() {
+    let models = normalize_runtime_dynamic_catalog(&json!({"models":[
+        {"id":" \u{3000}Model雪 ","name":"","description":" Raw\n", "max_prompt_tokens":1, "context_window_tokens":1, "context_window":999},
+        {"id":null,"slug":"ignored"},
+        {"slug":"Model雪","model_name":" Name ", "max_prompt_tokens":u64::MAX},
+        {"model":"last","capabilities":{"limits":{"max_prompt_tokens":345}}},
+        false
+    ]})).unwrap();
+    assert_eq!(
+        models,
+        vec![
+            RuntimeDynamicCatalogModel {
+                slug: "Model雪".into(),
+                display_name: Some("".into()),
+                description: Some(" Raw\n".into()),
+                context_window: None
+            },
+            RuntimeDynamicCatalogModel {
+                slug: "Model雪".into(),
+                display_name: Some(" Name ".into()),
+                description: None,
+                context_window: Some(u64::MAX)
+            },
+            RuntimeDynamicCatalogModel {
+                slug: "last".into(),
+                display_name: None,
+                description: None,
+                context_window: Some(345)
+            },
+        ]
+    );
+}
+
+#[test]
+fn runtime_dynamic_catalog_projection_preserves_exact_rejections_and_raw_limits() {
+    for input in [json!(null), json!([]), json!({}), json!({"models":{}})] {
+        let error = normalize_runtime_dynamic_catalog(&input).unwrap_err();
+        assert!(matches!(&error, RuntimeModelCatalogError::Rejected(_)));
+        assert_eq!(
+            error.to_string(),
+            "provider model catalog is missing models array"
+        );
+    }
+    let limit = super::super::PROVIDER_MODEL_CATALOG_HARD_LIMIT;
+    let at_limit = json!({"models":vec![Value::Null;limit]});
+    assert!(
+        normalize_runtime_dynamic_catalog(&at_limit)
+            .unwrap()
+            .is_empty()
+    );
+    let over_limit = json!({"models":vec![Value::Null;limit+1]});
+    let error = normalize_runtime_dynamic_catalog(&over_limit).unwrap_err();
+    assert_eq!(
+        error.to_string(),
+        format!("provider model catalog exceeds the hard limit of {limit} entries")
+    );
+}
