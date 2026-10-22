@@ -1,5 +1,9 @@
 //! Typed, borrowed JSON-tree ABI for complete semantic transforms. JSON wire
 //! parsing and compatibility serialization remain outside the Mojo bridge.
+mod openai_chat_request;
+pub use openai_chat_request::{
+    OpenAiChatRequestTransform, chat_compatible_request_shape_error, transform_openai_chat_request,
+};
 mod raw_span;
 use raw_span::validated_optional_raw_span;
 mod provider_conversation_memory;
@@ -645,30 +649,6 @@ fn transform_json_with_views(
 pub fn provider_error_codes_json(nodes: &[JsonNode<'_>], raw: &str) -> Result<Vec<u8>, MojoError> {
     transform_json(nodes, raw, 0, false, prodex_mojo_provider_error_codes_v1)?
         .ok_or(MojoError::InvalidOutput)
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum OpenAiChatRequestTransform {
-    Body(Vec<u8>),
-    Rejected(String),
-}
-
-pub fn transform_openai_chat_request(
-    nodes: &[JsonNode<'_>],
-    raw: &str,
-) -> Result<OpenAiChatRequestTransform, MojoError> {
-    let output = transform_json(nodes, raw, 0, false, prodex_mojo_openai_chat_request_v1)?
-        .ok_or(MojoError::InvalidOutput)?;
-    let Some((&tag, payload)) = output.split_first() else {
-        return Err(MojoError::InvalidOutput);
-    };
-    match tag {
-        b'S' => Ok(OpenAiChatRequestTransform::Body(payload.to_vec())),
-        b'E' => String::from_utf8(payload.to_vec())
-            .map(OpenAiChatRequestTransform::Rejected)
-            .map_err(|_| MojoError::InvalidOutput),
-        _ => Err(MojoError::InvalidOutput),
-    }
 }
 
 /// Convert a parsed chat completion response to the Responses JSON body.

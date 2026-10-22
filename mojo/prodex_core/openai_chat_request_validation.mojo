@@ -4,6 +4,7 @@ from rich_text import rich_view_ptr
 from parsed_json import (
     ParsedJson,
     JSON_FALSE,
+    JSON_TRUE,
     JSON_NUMBER,
     JSON_STRING,
     JSON_ARRAY,
@@ -15,8 +16,32 @@ from parsed_json import (
     pj_field,
     pj_string_field,
     pj_is,
+    pj_trim,
+    pj_literal,
 )
 from json_sink import JsonSink, js_byte, js_view, js_literal, js_raw_view
+
+
+def ocr_top_level_shape_issue(tree: ParsedJson, request: Int64) -> ProdexRichStringView:
+    if pj_kind(tree, request) != JSON_OBJECT:
+        return pj_literal(StringSlice(" request body must be a JSON object"))
+    var model = pj_field(tree, request, StringSlice("model"))
+    if model >= 0:
+        if pj_kind(tree, model) != JSON_STRING:
+            return pj_literal(StringSlice(" model must be a string"))
+        if pj_trim(pj_text(tree, model)).len == 0:
+            return pj_literal(StringSlice(" model must not be empty"))
+    var stream = pj_field(tree, request, StringSlice("stream"))
+    if stream >= 0 and pj_kind(tree, stream) != JSON_FALSE and pj_kind(tree, stream) != JSON_TRUE:
+        return pj_literal(StringSlice(" stream must be a boolean"))
+    var instructions = pj_field(tree, request, StringSlice("instructions"))
+    if instructions >= 0 and pj_kind(tree, instructions) != JSON_STRING:
+        return pj_literal(StringSlice(" instructions must be a string"))
+    var previous = pj_field(tree, request, StringSlice("previous_response_id"))
+    if previous >= 0 and pj_kind(tree, previous) != JSON_STRING:
+        return pj_literal(StringSlice(" previous_response_id must be a string"))
+    return pj_literal(StringSlice(""))
+
 
 def ocr_error(
     sink: Pointer[mut=True, JsonSink, _],
