@@ -8547,3 +8547,25 @@ formatting, documentation and changed tests.
 Canonical share is 36.38903569692801% (137,016 Mojo / 239,515 Rust production
 LOC). The 75% goal stays open. Evidence is in
 `migration/operational-log-detail-render-mojo-20261022.md`.
+
+## Human log source labels compiled in Mojo (2026-10-22)
+
+The CLI/TUI header now uses compiled common-source, role/transport alias,
+tool-call prefix and unknown-source labels. Rust's source match/default
+formatting is removed. The numeric source facade and display renderer share
+one canonical catalog; Rust shares only allocation/status validation between
+the two text operations. Two header regressions pass before/after migration,
+with direct Mojo, 20 bridge tests in each feature configuration, 104 log and
+17 TUI tests plus strict workspace Clippy, full default CI and changed tests.
+Canonical share is
+36.399797132774474% (137,082 Mojo / 239,519 Rust production LOC). The 75% goal
+stays open. Evidence is in `migration/log-source-labels-mojo-20261022.md`.
+
+An audited next owner is
+`crates/prodex-runtime-proxy/src/log_event.rs::RuntimeProxyLogEvent::render_message`.
+Rust still assembles event/key/value separators and applies empty/skip-key
+selection around existing compiled field policy. Preserve input field order,
+duplicate fields, empty-event spacing, quoting and the distinction between
+the sanitized display key and original redaction key. The field-map projection
+has a separate last-key-wins contract. Keep redaction/dependency acquisition in
+the host and apply the full runtime-proxy validation matrix to this shared path.

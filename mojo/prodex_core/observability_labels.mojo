@@ -1,4 +1,6 @@
 from std.memory import Pointer
+from rich_types import ProdexRichStringView, rich_view_ptr
+from parsed_json import pj_literal
 
 comptime OBSERVABILITY_LABEL_ABI_VERSION: Int64 = 1
 comptime OBSERVABILITY_LABEL_MAX_BYTES: Int64 = 128
@@ -7,17 +9,20 @@ comptime OBSERVABILITY_STATUS_INVALID: Int64 = 1
 comptime OBSERVABILITY_STATUS_CAPACITY: Int64 = 2
 comptime OBSERVABILITY_STATUS_ABI: Int64 = 4
 
-def observability_copy_label(label: StringSlice, output: Pointer[mut=True, UInt8, _], capacity: Int64, output_length: Pointer[mut=True, Int64, _]) -> Int64:
-    var length = Int64(label.byte_length())
+def observability_copy_view_label(label: ProdexRichStringView, output: Pointer[mut=True, UInt8, _], capacity: Int64, output_length: Pointer[mut=True, Int64, _]) -> Int64:
+    var length = Int64(label.len)
     output_length[] = length
     if length < 0 or length > OBSERVABILITY_LABEL_MAX_BYTES:
         return OBSERVABILITY_STATUS_INVALID
     if capacity < length:
         return OBSERVABILITY_STATUS_CAPACITY
-    var source = label.unsafe_ptr()
+    var source = rich_view_ptr(label)
     for index in range(length):
         output[unsafe_offset=index] = source[unsafe_offset=index]
     return OBSERVABILITY_STATUS_OK
+
+def observability_copy_label(label: StringSlice, output: Pointer[mut=True, UInt8, _], capacity: Int64, output_length: Pointer[mut=True, Int64, _]) -> Int64:
+    return observability_copy_view_label(pj_literal(label), output, capacity, output_length)
 
 @export("prodex_mojo_observability_label_v1")
 def prodex_mojo_observability_label_v1(
@@ -3330,32 +3335,7 @@ def prodex_mojo_operational_event_plan_v1(
     interesting[] = plan[1]
     return OBSERVABILITY_STATUS_OK
 
-@export("prodex_mojo_operational_event_source_label_v1")
-def prodex_mojo_operational_event_source_label_v1(
-    abi_version: Int64,
-    source: Int64,
-    output_address: UInt,
-    output_capacity: Int64,
-    output_length_address: UInt,
-) abi("C") -> Int64:
-    if abi_version != OBSERVABILITY_LABEL_ABI_VERSION:
-        return OBSERVABILITY_STATUS_ABI
-    if (
-        source < OPERATIONAL_EVENT_SOURCE_NONE
-        or source > OPERATIONAL_EVENT_SOURCE_EVENT
-        or output_address == 0
-        or output_capacity < 0
-        or output_length_address == 0
-    ):
-        return OBSERVABILITY_STATUS_INVALID
-
-    var output_length = Pointer[mut=True, Int64, MutUntrackedOrigin](
-        unsafe_from_address=Int(output_length_address)
-    )
-    if source == OPERATIONAL_EVENT_SOURCE_NONE:
-        output_length[] = -1
-        return OBSERVABILITY_STATUS_OK
-
+def operational_source_label_view(source: Int64) -> ProdexRichStringView:
     var label = StringSlice("")
     if source == OPERATIONAL_EVENT_SOURCE_REQUEST:
         label = StringSlice("request")
@@ -3396,12 +3376,40 @@ def prodex_mojo_operational_event_source_label_v1(
     elif source == OPERATIONAL_EVENT_SOURCE_EVENT:
         label = StringSlice("event")
     else:
+        return pj_literal(StringSlice(""))
+
+    return pj_literal(label)
+
+@export("prodex_mojo_operational_event_source_label_v1")
+def prodex_mojo_operational_event_source_label_v1(
+    abi_version: Int64,
+    source: Int64,
+    output_address: UInt,
+    output_capacity: Int64,
+    output_length_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != OBSERVABILITY_LABEL_ABI_VERSION:
+        return OBSERVABILITY_STATUS_ABI
+    if (
+        source < OPERATIONAL_EVENT_SOURCE_NONE
+        or source > OPERATIONAL_EVENT_SOURCE_EVENT
+        or output_address == 0
+        or output_capacity < 0
+        or output_length_address == 0
+    ):
         return OBSERVABILITY_STATUS_INVALID
+
+    var output_length = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_length_address)
+    )
+    if source == OPERATIONAL_EVENT_SOURCE_NONE:
+        output_length[] = -1
+        return OBSERVABILITY_STATUS_OK
 
     var output = Pointer[mut=True, UInt8, MutUntrackedOrigin](
         unsafe_from_address=Int(output_address)
     )
-    return observability_copy_label(label, output, output_capacity, output_length)
+    return observability_copy_view_label(operational_source_label_view(source), output, output_capacity, output_length)
 
 
 comptime OPERATIONAL_DETAIL_PROFILE: Int64 = 0

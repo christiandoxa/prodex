@@ -407,39 +407,8 @@ pub(crate) fn print_transcript_event(event: &TranscriptEvent) -> Result<()> {
 }
 
 pub(crate) fn log_event_label(source: &str) -> String {
-    match source {
-        "request" => "REQUEST".to_string(),
-        "route" => "ROUTE".to_string(),
-        "quota" => "QUOTA".to_string(),
-        "retry" => "RETRY".to_string(),
-        "backoff" => "BACKOFF".to_string(),
-        "health" => "HEALTH".to_string(),
-        "upstream" => "UPSTREAM".to_string(),
-        "stream" => "STREAM".to_string(),
-        "response" => "RESPONSE".to_string(),
-        "tokens" => "TOKENS".to_string(),
-        "smart" => "SMART".to_string(),
-        "compact" => "COMPACT".to_string(),
-        "model" => "MODEL".to_string(),
-        "tool" => "TOOL".to_string(),
-        "agent" => "AGENT".to_string(),
-        "mcp" => "MCP".to_string(),
-        "hook" => "HOOK".to_string(),
-        "load" => "LOAD".to_string(),
-        "event" => "EVENT".to_string(),
-        "ws" => "WEBSOCKET".to_string(),
-        "terminal" => "TERMINAL".to_string(),
-        "error" => "ERROR".to_string(),
-        "user" => "USER".to_string(),
-        "assistant" => "ASSISTANT".to_string(),
-        "reasoning" => "REASONING".to_string(),
-        "turn-context" => "MODEL".to_string(),
-        "session-context" => "SESSION".to_string(),
-        "prompt-engineering" => "PROMPT".to_string(),
-        "tool-output" => "TOOL RESULT".to_string(),
-        source if source.starts_with("tool-call:") => "TOOL CALL".to_string(),
-        _ => format!("stream {source}"),
-    }
+    prodex_mojo_core::observability::render_log_event_label(source)
+        .expect("Mojo log event-label renderer failed")
 }
 
 pub(crate) fn print_upstream_payload_event(event: &UpstreamPayloadEvent) -> Result<()> {
@@ -457,3 +426,7 @@ mod selection_tests;
 #[cfg(test)]
 #[path = "log_stream/detail_tests.rs"]
 mod detail_tests;
+
+#[cfg(test)]
+#[path = "log_stream/label_tests.rs"]
+mod label_tests;

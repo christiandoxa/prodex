@@ -78,9 +78,16 @@ fn runtime_proxy_observability_labels_are_mojo_owned() {
 #[test]
 fn operational_event_source_labels_are_mojo_owned() {
     assert_eq!(operational_event_source_label(0).unwrap(), None);
-    assert_eq!(operational_event_source_label(1).unwrap(), Some("request"));
-    assert_eq!(operational_event_source_label(2).unwrap(), Some("mcp"));
-    assert_eq!(operational_event_source_label(19).unwrap(), Some("event"));
+    assert_eq!(
+        (1..=19)
+            .map(|kind| operational_event_source_label(kind).unwrap().unwrap())
+            .collect::<Vec<_>>(),
+        [
+            "request", "mcp", "agent", "route", "quota", "retry", "backoff", "health", "error",
+            "model", "upstream", "stream", "response", "terminal", "tool", "load", "smart",
+            "compact", "event"
+        ]
+    );
     assert_eq!(
         operational_event_source_label(20),
         Err(MojoError::InvalidInput)

@@ -427,6 +427,11 @@ const CORE_LEXICAL_BROKER_PATHS = "crates/prodex-app/src/runtime_persistence/pat
 const CORE_LEXICAL_APP_HOUSEKEEPING = "crates/prodex-app/src/housekeeping.rs";
 const CORE_LEXICAL_LIVE_LOG = "crates/prodex-app/src/app_commands/log_live.rs";
 const PROMOTED_FILES = [
+  "crates/prodex-app/src/app_commands/log_stream/label_tests.rs",
+  "crates/prodex-mojo-core/src/observability/labels.rs",
+  "crates/prodex-mojo-core/src/observability/labels_tests.rs",
+  "crates/prodex-mojo-core/src/observability/text.rs",
+  "mojo/tests/log_event_label_test.mojo",
   "crates/prodex-app/src/app_commands/log_stream/detail_tests.rs",
   "crates/prodex-mojo-core/src/observability/details.rs",
   "crates/prodex-mojo-core/src/observability/details_tests.rs",
@@ -12222,7 +12227,7 @@ export function findViolations(files) {
     if (filePath === LOG_STREAM_FILE) {
       // Tests are in sibling files; a mid-file cfg(test) gates an I/O helper.
       const production = contents;
-      const violations = ["operational_detail_spec(", "render_operational_details("]
+      const violations = ["operational_detail_spec(", "render_operational_details(", "render_log_event_label("]
         .filter((marker) => !production.includes(marker))
         .map((marker) => filePath + ": operational field rendering must retain compiled policy " + marker);
       if (
@@ -12243,16 +12248,27 @@ export function findViolations(files) {
       if (/\bfn\s+(?:add_log_detail|add_log_percent_detail|add_log_endpoint_detail|join_log_details|display_log_field|bounded_log_value)\s*\(/u.test(production)) {
         violations.push(filePath + ": contains restored Rust operational detail builders");
       }
+      const labelBody = production.split("pub(crate) fn log_event_label(")[1]?.split("pub(crate) fn print_upstream_payload_event(")[0] || "";
+      if (/match\s+source|starts_with\("tool-call:"\)|format!\("stream/u.test(labelBody)) {
+        violations.push(filePath + ": contains restored Rust log event label mapping");
+      }
       return violations;
     }
     if (filePath === "crates/prodex-mojo-core/src/observability/details.rs") {
-      return ["prodex_mojo_operational_log_details_v1(", "invoke(None)", "invoke(Some(&mut output))"]
+      return ["prodex_mojo_operational_log_details_v1(", "render_measured_text("]
         .filter((marker) => !contents.includes(marker))
         .map((marker) => filePath + ": operational detail ABI must retain " + marker);
     }
+    if (filePath === "crates/prodex-mojo-core/src/observability/labels.rs") {
+      return ["prodex_mojo_log_event_label_v1(", "render_measured_text("]
+        .filter((marker) => !contents.includes(marker))
+        .map((marker) => filePath + ": log event label ABI must retain " + marker);
+    }
     if (filePath === "mojo/prodex_core/operational_log_details.mojo") {
       return ['@export("prodex_mojo_operational_log_details_v1")', "operational_details_render(",
-        "super_expose_exec_path_valid(", "rich_scalar_prefix_end("]
+        "super_expose_exec_path_valid(", "rich_scalar_prefix_end(",
+        '@export("prodex_mojo_log_event_label_v1")', "operational_source_label_view(",
+        "operational_event_label_render("]
         .filter((marker) => !contents.includes(marker))
         .map((marker) => filePath + ": compiled detail renderer must retain " + marker);
     }
@@ -18309,10 +18325,10 @@ function selfTest() {
       .join("\n"), /restored Rust operational field text policy/u);
   }
   assert.deepEqual(findViolations([[LOG_STREAM_FILE,
-    "operational_detail_spec( render_operational_details(",
+    "operational_detail_spec( render_operational_details( render_log_event_label(",
   ]]), []);
   assert.match(findViolations([[LOG_STREAM_FILE, "operational_detail_spec("]]).join("\n"), /compiled policy/u);
-  const streamCalls = "operational_detail_spec( render_operational_details(";
+  const streamCalls = "operational_detail_spec( render_operational_details( render_log_event_label(";
   const streamTestHelper = "#[cfg(test)]\nfn read_new_token_usage_events() {}\n";
   assert.deepEqual(findViolations([[LOG_STREAM_FILE, streamTestHelper + streamCalls]]), []);
   assert.match(findViolations([[LOG_STREAM_FILE, streamTestHelper + streamCalls + ".chars().take(max_chars)"]])
@@ -18321,10 +18337,16 @@ function selfTest() {
     assert.match(findViolations([[LOG_STREAM_FILE, streamCalls + "\nfn " + name + "() {}"]])
       .join("\n"), /restored Rust operational detail builders/u);
   }
-  const detailCalls = "prodex_mojo_operational_log_details_v1( invoke(None) invoke(Some(&mut output))";
+  const detailCalls = "prodex_mojo_operational_log_details_v1( render_measured_text(";
   assert.deepEqual(findViolations([["crates/prodex-mojo-core/src/observability/details.rs", detailCalls]]), []);
   assert.match(findViolations([["crates/prodex-mojo-core/src/observability/details.rs", ""]])
     .join("\n"), /operational detail ABI/u);
+  assert.match(findViolations([[LOG_STREAM_FILE, streamCalls + "\npub(crate) fn log_event_label() { match source {} }"]])
+    .join("\n"), /restored Rust log event label mapping/u);
+  assert.deepEqual(findViolations([["crates/prodex-mojo-core/src/observability/labels.rs",
+    "prodex_mojo_log_event_label_v1( render_measured_text("]]), []);
+  assert.match(findViolations([["crates/prodex-mojo-core/src/observability/labels.rs", ""]])
+    .join("\n"), /log event label ABI/u);
 
   const infoPanelFile = "crates/prodex-app/src/app_commands/info_handler.rs";
   const infoPanelCaller = "prodex_mojo_core::info_render::info_panel_value_color( prodex_mojo_core::info_render::info_panel_field_visible(";
