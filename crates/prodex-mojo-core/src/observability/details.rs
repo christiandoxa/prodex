@@ -1,4 +1,7 @@
-use super::{OBSERVABILITY_LABEL_ABI_VERSION, OperationalDetailFormat, stream::TextView};
+use super::{
+    OBSERVABILITY_LABEL_ABI_VERSION, OperationalDetailFormat, stream::TextView,
+    text::render_measured_text,
+};
 use crate::MojoError;
 
 /// One compiled metadata descriptor and its host-acquired display text.
@@ -55,43 +58,20 @@ pub fn render_operational_details(
             },
         })
         .collect();
-    let invoke = |buffer: Option<&mut [u8]>| {
-        let (measuring, output, capacity) = match buffer {
-            None => (1, 0, 0),
-            Some(buffer) => (0, buffer.as_mut_ptr() as u64, buffer.len() as i64),
-        };
-        let mut written = -1_i64;
-        let status = unsafe {
-            prodex_mojo_operational_log_details_v1(
-                OBSERVABILITY_LABEL_ABI_VERSION,
-                title.as_ptr() as u64,
-                i64::try_from(title.len()).map_err(|_| MojoError::InvalidInput)?,
-                fields.as_ptr() as u64,
-                fields.len() as i64,
-                measuring,
-                output,
-                capacity,
-                &mut written as *mut i64 as u64,
-            )
-        };
-        match status {
-            0 => {}
-            1 => return Err(MojoError::InvalidInput),
-            2 => return Err(MojoError::Capacity),
-            4 => return Err(MojoError::AbiMismatch),
-            _ => return Err(MojoError::InvalidOutput),
-        }
-        usize::try_from(written).map_err(|_| MojoError::InvalidOutput)
-    };
-    let capacity = invoke(None)?;
-    if capacity > 67_108_864 {
-        return Err(MojoError::InvalidOutput);
-    }
-    let mut output = vec![0_u8; capacity];
-    if invoke(Some(&mut output))? != capacity {
-        return Err(MojoError::InvalidOutput);
-    }
-    String::from_utf8(output).map_err(|_| MojoError::InvalidOutput)
+    let title_length = i64::try_from(title.len()).map_err(|_| MojoError::InvalidInput)?;
+    render_measured_text(|measuring, output, capacity, written| unsafe {
+        prodex_mojo_operational_log_details_v1(
+            OBSERVABILITY_LABEL_ABI_VERSION,
+            title.as_ptr() as u64,
+            title_length,
+            fields.as_ptr() as u64,
+            fields.len() as i64,
+            measuring,
+            output,
+            capacity,
+            written,
+        )
+    })
 }
 
 #[cfg(test)]
