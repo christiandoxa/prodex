@@ -636,6 +636,54 @@ def prodex_mojo_super_expose_dispatch_validation_v1(
     return 0
 
 
+@export("prodex_mojo_super_expose_dispatch_response_v1")
+def prodex_mojo_super_expose_dispatch_response_v1(
+    abi_version: Int64, decision: Int64, output_address: UInt,
+    output_capacity: Int64, metadata_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != SUPER_EXPOSE_ABI_VERSION:
+        return 4
+    if (decision < SUPER_EXPOSE_DISPATCH_OK or decision > SUPER_EXPOSE_DISPATCH_TOOL_ARGUMENTS_OBJECT_REQUIRED
+        or output_capacity < 0 or output_capacity > 64
+        or (output_capacity > 0 and output_address == 0)
+        or metadata_address == 0 or metadata_address % 8 != 0):
+        return 1
+    var message = StringSlice("")
+    if decision == SUPER_EXPOSE_DISPATCH_NOTIFICATION_UNSUPPORTED:
+        message = StringSlice("notification is unsupported")
+    elif decision == SUPER_EXPOSE_DISPATCH_INVALID_REQUEST_ID:
+        message = StringSlice("invalid request id")
+    elif decision == SUPER_EXPOSE_DISPATCH_INITIALIZE_PARAMS_REQUIRED:
+        message = StringSlice("initialize params are required")
+    elif decision == SUPER_EXPOSE_DISPATCH_PROTOCOL_VERSION_REQUIRED:
+        message = StringSlice("protocolVersion is required")
+    elif decision == SUPER_EXPOSE_DISPATCH_TOOL_PARAMS_REQUIRED:
+        message = StringSlice("tool parameters are required")
+    elif decision == SUPER_EXPOSE_DISPATCH_TOOL_NAME_REQUIRED:
+        message = StringSlice("tool name is required")
+    elif decision == SUPER_EXPOSE_DISPATCH_TOOL_ARGUMENTS_OBJECT_REQUIRED:
+        message = StringSlice("tool arguments must be an object")
+    var status = super_expose_copy_label(message, output_address, output_capacity, metadata_address + 32)
+    if status != 0:
+        return status
+    var metadata = Pointer[mut=True, Int64, MutUntrackedOrigin](unsafe_from_address=Int(metadata_address))
+    metadata[unsafe_offset=0] = Int64(
+        0 if decision == SUPER_EXPOSE_DISPATCH_OK
+        else 1 if decision == SUPER_EXPOSE_DISPATCH_NOTIFICATION_ACCEPTED else 2
+    )
+    metadata[unsafe_offset=1] = Int64(decision == SUPER_EXPOSE_DISPATCH_OK or decision >= SUPER_EXPOSE_DISPATCH_INITIALIZE_PARAMS_REQUIRED)
+    metadata[unsafe_offset=2] = Int64(
+        0 if decision == SUPER_EXPOSE_DISPATCH_OK
+        else 202 if decision == SUPER_EXPOSE_DISPATCH_NOTIFICATION_ACCEPTED else 400
+    )
+    metadata[unsafe_offset=3] = Int64(
+        0 if decision <= SUPER_EXPOSE_DISPATCH_NOTIFICATION_ACCEPTED
+        else -32601 if decision == SUPER_EXPOSE_DISPATCH_NOTIFICATION_UNSUPPORTED
+        else -32600 if decision == SUPER_EXPOSE_DISPATCH_INVALID_REQUEST_ID else -32602
+    )
+    return 0
+
+
 @export("prodex_mojo_super_expose_protocol_version_supported_v1")
 def prodex_mojo_super_expose_protocol_version_supported_v1(
     abi_version: Int64,

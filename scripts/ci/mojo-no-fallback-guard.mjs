@@ -427,6 +427,10 @@ const CORE_LEXICAL_BROKER_PATHS = "crates/prodex-app/src/runtime_persistence/pat
 const CORE_LEXICAL_APP_HOUSEKEEPING = "crates/prodex-app/src/housekeeping.rs";
 const CORE_LEXICAL_LIVE_LOG = "crates/prodex-app/src/app_commands/log_live.rs";
 const PROMOTED_FILES = [
+  "crates/prodex-app/src/super_expose/protocol/dispatch_reply_tests.rs",
+  "crates/prodex-mojo-core/src/rich/super_expose/dispatch_response.rs",
+  "crates/prodex-mojo-core/src/rich/super_expose/dispatch_response_tests.rs",
+  "mojo/tests/super_expose_dispatch_response_test.mojo",
   "crates/prodex-mojo-core/src/policy/inspection_aggregation.rs",
   "crates/prodex-mojo-core/src/policy/inspection_aggregation_tests.rs",
   "crates/prodex-app/src/runtime_proxy/presidio/findings/aggregation_tests.rs",
@@ -7730,9 +7734,17 @@ export function findViolations(files) {
       return violations;
     }
     if (filePath === SUPER_EXPOSE_DISPATCH_FILE) {
-      const required = "prodex_mojo_core::rich::super_expose_dispatch_validation(";
-      const violations = contents.includes(required)
-        ? [] : [filePath + ": Super-expose dispatch validation must retain Mojo call " + required];
+      const production = contents.split("\n#[cfg(test)]", 1)[0];
+      const required = ["prodex_mojo_core::rich::super_expose_dispatch_validation(",
+        "prodex_mojo_core::rich::super_expose_dispatch_response_plan("];
+      const violations = required.filter((call) => !production.includes(call))
+        .map((call) => filePath + ": Super-expose dispatch validation must retain Mojo call " + call);
+      if (/\bmatch\s+validation\b/u.test(production)
+        || production.includes('"notification is unsupported"')
+        || production.includes('"initialize params are required"')
+        || production.includes('"tool arguments must be an object"')) {
+        violations.push(filePath + ": contains restored Rust dispatch reply selection");
+      }
       for (const retired of [
         "fn validate_request_id_presence(",
         "fn validate_method_params(",
@@ -7745,6 +7757,13 @@ export function findViolations(files) {
         }
       }
       return violations;
+    }
+    if (filePath === "crates/prodex-mojo-core/src/rich/super_expose/dispatch_response.rs") {
+      if (!contents.includes("prodex_mojo_super_expose_dispatch_response_v1(")
+        || /\bmatch\s+decision\b/u.test(contents)
+        || contents.includes('"notification is unsupported"')) {
+        return [filePath + ": dispatch reply adapter must retain compiled policy without a Rust reply table"];
+      }
     }
     if (filePath === SUPER_EXPOSE_VALIDATION_FILE) {
       const required = [
@@ -14436,6 +14455,22 @@ async function promotedFiles() {
 }
 
 function selfTest() {
+  const dispatchReplyCaller = "prodex_mojo_core::rich::super_expose_dispatch_validation(; prodex_mojo_core::rich::super_expose_dispatch_response_plan(";
+  assert.deepEqual(findViolations([[SUPER_EXPOSE_DISPATCH_FILE, dispatchReplyCaller]]), []);
+  assert.match(findViolations([[SUPER_EXPOSE_DISPATCH_FILE,
+    dispatchReplyCaller.replace("super_expose_dispatch_response_plan(", "local_response(")]])
+    .join("\n"), /must retain Mojo call/u);
+  for (const restored of ["match validation {}", '"notification is unsupported"',
+    '"initialize params are required"', '"tool arguments must be an object"']) {
+    assert.match(findViolations([[SUPER_EXPOSE_DISPATCH_FILE, dispatchReplyCaller + restored]])
+      .join("\n"), /restored Rust dispatch reply selection/u);
+  }
+  const dispatchReplyAdapter = "crates/prodex-mojo-core/src/rich/super_expose/dispatch_response.rs";
+  assert.deepEqual(findViolations([[dispatchReplyAdapter,
+    "prodex_mojo_super_expose_dispatch_response_v1("]]), []);
+  assert.match(findViolations([[dispatchReplyAdapter,
+    "prodex_mojo_super_expose_dispatch_response_v1(; match decision {}"]])
+    .join("\n"), /without a Rust reply table/u);
   const geminiCorpusCaller = "crates/prodex-provider-core/src/gemini_bridge/leaks/echo.rs";
   const brokerLogFrameFixture = [
     "fn runtime_broker_continuity_failure_reason_metrics_from_log_range(",

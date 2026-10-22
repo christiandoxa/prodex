@@ -8638,3 +8638,26 @@ code/message and whether audit precedes parameter rejection. Preserve 202 null
 notifications, null IDs for invalid request IDs, 400 error envelopes, header
 validation precedence and audit sequencing. Keep transport/Serde and audit
 effects in Rust; extend the existing compiled Super expose owner.
+
+## Super expose dispatch replies compiled in Mojo (2026-10-22)
+
+The production parser now consumes a compiled reply/audit plan. Both Rust
+decision matches and the response literal table are removed without a fallback.
+Early notification and invalid-ID replies retain their pre-route/pre-audit
+position; parameter errors retain exact status, ID, payload and audit ordering.
+Two caller regressions pass before/after migration, along with direct Mojo,
+34 bridge and 122 Super expose tests plus strict workspace Clippy, formatting
+and full default CI with 1,443 Rust tests. Canonical share is
+36.40900533000981% (137,302 Mojo / 239,808 Rust production LOC). The 75% goal
+remains open. Evidence is in
+`migration/super-expose-dispatch-replies-mojo-20261022.md`.
+
+The next audited owner is
+`crates/prodex-runtime-doctor/src/render.rs::runtime_doctor_fields_for_summary`.
+Rust still composes fixed human-report rows, clips diagnostic lists to their
+first five entries and materializes optional field labels and suffixes from
+the compiled field plan. Reuse its compiled selection kernel and JSON writer;
+preserve ordered/duplicate/empty list entries, empty versus missing text,
+cold-start jobs-before-profiles precedence and full unsigned count formatting.
+Path acquisition, summary maps and binding-state formatting are separate
+boundaries for this checkpoint.
