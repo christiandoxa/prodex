@@ -114,6 +114,72 @@ const QUOTA_TUI_MOJO_MARKERS = [
   '@export("prodex_quota_tui_span_plan_v1")', "def qwp_human_span_plan(",
   "def qwp_status_tone(", "rich_unicode_space(", "output_capacity < 3",
 ];
+const TOKEN_LOG_PRESENTATION_RULES = {
+  "crates/prodex-app/src/app_commands/log_stream.rs": [
+    "project_token_log::<serde_json::Value>(",
+    "LogTokenPresentation::Envelope",
+    "LogTokenPresentation::Metadata",
+    "mod token_presentation;"
+  ],
+  "crates/prodex-app/src/app_commands/log_tui_render.rs": [
+    "project_token_log::<String>(",
+    "LogTokenPresentation::Search",
+    "LogTokenPresentation::Tui",
+    "TokenLogTone::Raw",
+    "TokenLogTone::Tool"
+  ],
+  "crates/prodex-app/src/app_commands/log_stream/token_presentation.rs": [
+    "app_json_tree(&input)",
+    "log_token_presentation_json(",
+    "output_tokens_per_second",
+    ".map(",
+    "serde_json::from_slice(&output)"
+  ],
+  "crates/prodex-mojo-core/src/json/log_token.rs": [
+    "prodex_log_token_presentation_v1(",
+    "transform_json(",
+    "LogTokenPresentation"
+  ],
+  "mojo/prodex_core/log_token_presentation.mojo": [
+    "@export(\"prodex_log_token_presentation_v1\")",
+    "ltp_envelope(",
+    "ltp_metadata(",
+    "ltp_tui(",
+    "ltp_has_average(",
+    "pj_valid(tree)",
+    "capacity < required"
+  ],
+  "mojo/tests/log_token_presentation_test.mojo": [
+    "prodex_log_token_presentation_v1(",
+    "required-1",
+    "output[] == 93 and metadata[unsafe_offset=0] == 77"
+  ],
+  "crates/prodex-mojo-core/src/json/log_token_tests.rs": [
+    "token_log_bridge_preserves_complete_projections_unicode_and_u64_endpoints",
+    "token_log_bridge_rejects_wrong_fields_types_and_tree_links",
+    "token_log_abi_preserves_short_or_invalid_output_and_metadata"
+  ],
+  "crates/prodex-app/src/app_commands/log_token_presentation_tests.rs": [
+    "token_log_presentations_preserve_original_complete_objects",
+    "Sha256::digest(",
+    "include_str!(",
+    "\"log_token_presentation_baseline.json\""
+  ]
+};
+const TOKEN_LOG_RETIRED = {
+  "crates/prodex-app/src/app_commands/log_stream.rs": [
+    "fn token_usage_json_value(",
+    "fn token_usage_metadata(",
+    "\"avg_output\"",
+    "\"cached_input_tokens\".to_string()"
+  ],
+  "crates/prodex-app/src/app_commands/log_tui_render.rs": [
+    "event.generation_ms.is_some_and(",
+    "event.input_tokens.to_string()",
+    "event.cached_input_tokens.to_string()",
+    "event.reasoning_tokens.to_string()"
+  ]
+};
 const RUNTIME_LAUNCH_REPORT_RULES = {
   "crates/prodex-mojo-core/src/launch/report_tui.rs": ["prodex_runtime_launch_tui_plan_v1(", "TuiOperation::Line", "TuiOperation::Height", "text.get(..label_end)", "text.get(value_start..)"],
   "crates/prodex-mojo-core/src/launch/report_tui_tests.rs": ["launch_tui_bridge_preserves_precedence_unicode_slices_and_reset_foreground", "launch_tui_height_bridge_preserves_empty_crlf_trailing_newline_and_clamp_edges"],
@@ -1265,6 +1331,7 @@ const PROMOTED_FILES = [
   ...Object.keys(STATUS_TOKEN_RULES),
   ...Object.keys(STATUS_BAR_RULES),
   ...Object.keys(QUOTA_TUI_SPAN_RULES),
+  ...Object.keys(TOKEN_LOG_PRESENTATION_RULES),
   ...Object.keys(RUNTIME_LAUNCH_REPORT_RULES),
   ...Object.keys(RUNTIME_CATALOG_REQUIRED),
   ...Object.keys(MAIN_CATALOG_PROJECTION_REQUIRED),
@@ -1497,6 +1564,8 @@ const PROMOTED_FILES = [
 ];
 
 const UNCONDITIONAL_MOJO_FILES = new Set([
+  "crates/prodex-mojo-core/src/json/log_token.rs",
+  "crates/prodex-app/src/app_commands/log_stream/token_presentation.rs",
   "crates/prodex-mojo-core/src/launch/report_tui.rs",
   "crates/prodex-runtime-launch/src/dry_run.rs",
   "crates/prodex-app/src/app_commands/child_process.rs",
@@ -2968,6 +3037,14 @@ export function findViolations(files) {
     if (externalQuotaRequirements.has(filePath)) {
       return externalQuotaRequirements.get(filePath).filter((marker) => !contents.includes(marker))
         .map((marker) => filePath + ": compiled external quota ownership missing " + marker);
+    }
+    if (TOKEN_LOG_PRESENTATION_RULES[filePath]) {
+      const violations = TOKEN_LOG_PRESENTATION_RULES[filePath].filter((marker) => !contents.includes(marker))
+        .map((marker) => `${filePath}: token log authority/caller proof missing ${marker}`);
+      for (const retired of TOKEN_LOG_RETIRED[filePath] ?? []) {
+        if (contents.includes(retired)) violations.push(`${filePath}: restored Rust token log presentation`);
+      }
+      return violations;
     }
     if (RUNTIME_LAUNCH_REPORT_RULES[filePath]) {
       const violations = RUNTIME_LAUNCH_REPORT_RULES[filePath].filter((marker) => !contents.includes(marker))
@@ -18419,6 +18496,18 @@ function selfTest() {
     assert.match(findViolations([["crates/prodex-mojo-core/src/launch/report_tui.rs",
       '#[cfg(not(feature = "mojo-runtime"))] fn fallback() {}']]).join("\n"), /feature-off Rust path/u);
   }
+  for (const [file, markers] of Object.entries(TOKEN_LOG_PRESENTATION_RULES)) {
+    const valid = markers.join(";\n");
+    assert.equal(findViolations([[file, valid]]).filter((item) => item.includes("token log authority")).length, 0);
+    for (const marker of markers) {
+      assert.match(findViolations([[file, valid.replace(marker, "")]]).join("\n"), /token log authority\/caller proof missing/u);
+    }
+    for (const retired of TOKEN_LOG_RETIRED[file] ?? []) {
+      assert.match(findViolations([[file, valid + "\n" + retired]]).join("\n"), /restored Rust token log presentation/u);
+    }
+  }
+  assert.match(findViolations([["crates/prodex-mojo-core/src/json/log_token.rs",
+    '#[cfg(not(feature = "mojo-runtime"))] fn fallback() {}']]).join("\n"), /feature-off Rust path/u);
   for (const [file, markers] of Object.entries(RUNTIME_LAUNCH_REPORT_RULES)) {
     const valid = markers.join(";\n");
     assert.deepEqual(findViolations([[file, valid]]), []);
@@ -18629,6 +18718,7 @@ function selfTest() {
   ]]).join("\n"), /main model prompt labels and preselection/u);
 
   const logTuiCaller = [
+    ...TOKEN_LOG_PRESENTATION_RULES["crates/prodex-app/src/app_commands/log_tui_render.rs"],
     "log_tui_snapshot_height(",
     "log_tui_source_tone(",
     "compiled_log_snapshot_height_and_source_palette_reach_real_render_callers",
@@ -18948,10 +19038,10 @@ function selfTest() {
       .join("\n"), /restored Rust operational field text policy/u);
   }
   assert.deepEqual(findViolations([[LOG_STREAM_FILE,
-    "operational_detail_spec( render_operational_details( render_log_event_label(",
+    "operational_detail_spec( render_operational_details( render_log_event_label(" + TOKEN_LOG_PRESENTATION_RULES[LOG_STREAM_FILE].join(";\n"),
   ]]), []);
   assert.match(findViolations([[LOG_STREAM_FILE, "operational_detail_spec("]]).join("\n"), /compiled policy/u);
-  const streamCalls = "operational_detail_spec( render_operational_details( render_log_event_label(";
+  const streamCalls = "operational_detail_spec( render_operational_details( render_log_event_label(" + TOKEN_LOG_PRESENTATION_RULES[LOG_STREAM_FILE].join(";\n");
   const streamTestHelper = "#[cfg(test)]\nfn read_new_token_usage_events() {}\n";
   assert.deepEqual(findViolations([[LOG_STREAM_FILE, streamTestHelper + streamCalls]]), []);
   assert.match(findViolations([[LOG_STREAM_FILE, streamTestHelper + streamCalls + ".chars().take(max_chars)"]])

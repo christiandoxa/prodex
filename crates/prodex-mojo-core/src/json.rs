@@ -142,6 +142,8 @@ pub use self::kiro_catalog::{
 };
 pub use self::runtime_catalog::{runtime_dynamic_catalog_json, runtime_model_catalog_json};
 pub use self::runtime_catalog_plan::runtime_catalog_plan_json;
+mod log_token;
+pub use log_token::{LogTokenPresentation, log_token_presentation_json};
 mod log_payload;
 pub use log_payload::{LogPayloadJsonPresentation, log_payload_projection};
 mod log_transcript_context;
