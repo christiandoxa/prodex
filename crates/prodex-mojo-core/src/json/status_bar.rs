@@ -1,4 +1,4 @@
-use super::{MojoError, StringView, render_native_json, signed};
+use super::{MojoError, StringView, render_native_text, signed};
 
 /// Snapshot text observed by the status header; empty text remains present.
 pub struct StatusHeaderInput<'a> {
@@ -57,7 +57,7 @@ fn render_status_bar(kind: StatusBar, texts: &[&str], presence: u64) -> Result<S
         .iter()
         .map(|text| StringView::from(*text))
         .collect::<Vec<_>>();
-    render_native_json(|phase, output, capacity, metadata| {
+    render_native_text(|phase, output, capacity, metadata| {
         // SAFETY: views and borrowed text outlive the synchronous call, and the
         // shared native renderer owns distinct output and metadata allocations.
         unsafe {

@@ -25,3 +25,6 @@ mod mount_path;
 
 #[path = "lib/args_codex_0161.rs"]
 mod args_codex_0161;
+
+#[path = "lib/dry_run_report.rs"]
+mod dry_run_report;

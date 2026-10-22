@@ -1,9 +1,9 @@
 use super::{signed, status};
 use crate::{MojoError, text_output::render_measured_string};
 
-/// Validate the shared [present, length] metadata of native JSON text kernels.
+/// Validate the shared [present, length] metadata of native text kernels.
 /// Their input-specific call sites retain ownership and the standard JSON status codes.
-pub(super) fn render_native_json(
+pub(crate) fn render_native_text(
     mut invoke: impl FnMut(i64, u64, i64, u64) -> i64,
 ) -> Result<String, MojoError> {
     render_measured_string(|output| {

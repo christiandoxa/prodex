@@ -9075,3 +9075,15 @@ Typed native adapters add 17 net Rust production LOC while transferring the
 classification decisions. Full default CI passes 1,450 Rust tests in 609.03
 seconds. The 75% target remains open. Evidence and coverage
 are in [quota-tui-span-plan-mojo-20261023.md](quota-tui-span-plan-mojo-20261023.md).
+
+## Runtime launch dry-run reports compiled in Mojo (2026-10-23)
+
+The plain report schema and application completion now use compiled defaults,
+labels, proxy descriptions, ordering and spacing. Rust retains host acquisition
+and existing redaction; its former report schemas are removed without a fallback.
+Seven original complete reports match through all 83 owning-crate tests.
+Canonical share is 36.80807389668149% (139,867 Mojo / 240,123 Rust production LOC).
+Typed adapters and mechanical inspection-module wiring add 115 net Rust
+production LOC. Full default CI passes 1,451 Rust tests in 226.14 seconds.
+The 75% target remains open. Evidence and coverage are in
+[runtime-launch-report-mojo-20261023.md](runtime-launch-report-mojo-20261023.md).

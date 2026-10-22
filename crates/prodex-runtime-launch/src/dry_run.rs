@@ -1,4 +1,7 @@
 use super::*;
+use prodex_mojo_core::launch::{
+    RuntimeLaunchReportInput, RuntimeLaunchReportProxy, render_runtime_launch_report,
+};
 use std::ffi::OsString;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -112,65 +115,49 @@ pub fn runtime_launch_dry_run_report(
             ],
         )
     };
-    let provider = dry_run_config_value(&child.args, base_codex_home, "model_provider")?
-        .unwrap_or_else(|| "openai".to_string());
-    let model = dry_run_config_value(&child.args, base_codex_home, "model")?
-        .unwrap_or_else(|| "(codex default)".to_string());
-    let mut output = String::new();
-    output.push_str("Prodex dry run: launch diagnostics\n");
-    output.push_str(&format!("Flow: {flow}\n"));
-    output.push_str(&format!(
-        "Binary: {}\n",
-        redaction::redaction_display_os(
-            Path::new(&child.binary)
-                .file_name()
-                .unwrap_or(child.binary.as_os_str())
-        )
-    ));
-    output.push_str(&format!("Provider: {provider}\n"));
-    output.push_str(&format!("Model: {model}\n"));
-    output.push_str("CODEX_HOME: <CODEX_HOME>\n");
-    output.push_str(&format!(
-        "Runtime proxy: {}\n",
-        runtime_proxy
-            .map(|proxy| {
-                if proxy.listen_addr.port() == 0 {
-                    format!("would be enabled with mount {}", proxy.openai_mount_path)
-                } else {
-                    format!(
-                        "enabled at http://{}{}",
-                        proxy.listen_addr, proxy.openai_mount_path
-                    )
-                }
-            })
-            .unwrap_or_else(|| "disabled".to_string())
-    ));
-    output.push_str("Args:\n");
-    if child.args.is_empty() {
-        output.push_str("  (none)\n");
-    } else {
-        for arg in redaction::redaction_redacted_cli_args(&child.args) {
-            output.push_str(&format!("  {}\n", redact(&arg)));
-        }
-    }
-    output.push_str("Env:\n");
-    output.push_str("  CODEX_HOME=<CODEX_HOME>\n");
-    for (key, value) in &child.extra_env {
-        let value = redaction::redaction_redacted_env_value(key, value);
-        output.push_str(&format!(
-            "  {}={}\n",
-            redaction::redaction_display_os(key),
-            redact(&value)
-        ));
-    }
-    if !child.removed_env.is_empty() {
-        output.push_str("Removed env:\n");
-        for key in &child.removed_env {
-            output.push_str(&format!("  {}\n", redaction::redaction_display_os(key)));
-        }
-    }
-    output.push_str("Codex/TUI not started because --dry-run was set.\n");
-    Ok(output)
+    let provider = dry_run_config_value(&child.args, base_codex_home, "model_provider")?;
+    let model = dry_run_config_value(&child.args, base_codex_home, "model")?;
+    let binary = redaction::redaction_display_os(
+        Path::new(&child.binary)
+            .file_name()
+            .unwrap_or(child.binary.as_os_str()),
+    );
+    let args = redaction::redaction_redacted_cli_args(&child.args)
+        .into_iter()
+        .map(|arg| redact(&arg))
+        .collect::<Vec<_>>();
+    let env = child
+        .extra_env
+        .iter()
+        .map(|(key, value)| {
+            let value = redaction::redaction_redacted_env_value(key, value);
+            (redaction::redaction_display_os(key), redact(&value))
+        })
+        .collect::<Vec<_>>();
+    let removed_env = child
+        .removed_env
+        .iter()
+        .map(|key| redaction::redaction_display_os(key))
+        .collect::<Vec<_>>();
+    let proxy_address = runtime_proxy.map(|proxy| proxy.listen_addr.to_string());
+    // As with path redaction, native formatting failures are internal invariants.
+    Ok(render_runtime_launch_report(RuntimeLaunchReportInput {
+        flow,
+        binary: &binary,
+        provider: provider.as_deref(),
+        model: model.as_deref(),
+        proxy: runtime_proxy
+            .zip(proxy_address.as_deref())
+            .map(|(proxy, address)| RuntimeLaunchReportProxy {
+                address,
+                mount: proxy.openai_mount_path,
+                port: proxy.listen_addr.port(),
+            }),
+        args: &args,
+        env: &env,
+        removed_env: &removed_env,
+    })
+    .expect("Mojo runtime launch report returned invalid output"))
 }
 
 fn dry_run_redact_paths<'a>(
