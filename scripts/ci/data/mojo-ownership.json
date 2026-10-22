@@ -1352,6 +1352,15 @@
         ]
       },
       {
+        "path": "mojo/prodex_core/profile_export_diagnostics.mojo",
+        "language": "mojo",
+        "classification": "MIXED",
+        "semantic_ranges": [{"start": 10, "end": 64}],
+        "production_reachable": true,
+        "role": "semantic",
+        "operations": ["profile_export_schema_diagnostics"]
+      },
+      {
         "path": "mojo/prodex_core/runtime_lineage.mojo",
         "language": "mojo",
         "classification": "DETERMINISTIC_DOMAIN",
@@ -10136,6 +10145,27 @@
       "duplicate_production_owner": false,
       "platform_fallback": false,
       "rust_adapter_scope": "environment and policy acquisition, URL/filesystem/path handling, typed status-to-error mapping, compatibility marker recording, and RuntimeConfig construction"
+    },
+    {
+      "name": "profile_export_schema_diagnostics",
+      "domain": "profile-export/diagnostics",
+      "introduced_in": "0.439.0",
+      "baseline_state": "Rust mapped seventeen typed schema violations to fixed/numeric diagnostic templates",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_profile_export_diagnostic_v1",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/profile_export_diagnostics.mojo",
+      "consumer": "crates/prodex-profile-export/src/envelope.rs",
+      "consumer_marker": "prodex_mojo_core::profile_export::profile_export_schema_diagnostic(",
+      "production_consumers": ["crates/prodex-profile-export/src/envelope.rs"],
+      "production_reachability_test": "crates/prodex-mojo-core/src/profile_export/diagnostics_tests.rs",
+      "rust_owner_before": "profile_export_schema_error matched every schema issue to string templates and optional-value defaults",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "deleted; direct Mojo, bridge and real schema callers preserve every diagnostic, metadata detail, absence behavior and precedence",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "Existing crypto/encoding and schema adapters, typed numeric metadata marshalling, host Mojo-transport error context and checked UTF-8 result"
     },
     {
       "name": "profile_export_envelope_schema_validation",

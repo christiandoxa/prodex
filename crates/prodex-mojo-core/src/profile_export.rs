@@ -13,6 +13,10 @@ pub use envelope_schema::{
     validate_profile_export_envelope_schema,
 };
 
+#[path = "profile_export/diagnostics.rs"]
+mod diagnostics;
+pub use diagnostics::profile_export_schema_diagnostic;
+
 const ABI_VERSION: i64 = 1;
 const PROFILE_IMPORT_PLAN_ABI_VERSION: i64 = 1;
 const PROFILE_IMPORT_AUTH_UPDATE_ABI_VERSION: i64 = 1;
