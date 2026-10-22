@@ -21,10 +21,15 @@ use crate::{
     print_stdout_line, print_stdout_text,
 };
 use prodex_cli::CodexRuntimeFeatureArgs;
+use prodex_mojo_core::json::SessionTuiMode;
 use prodex_mojo_core::session_cli_policy::{
     self as session_cli_mojo, SessionOutputPlan, SessionResumeRepairAction,
 };
 use prodex_mojo_core::super_provider_config::runtime_ci_truth_token;
+
+#[path = "session/presentation.rs"]
+mod presentation;
+use presentation::session_tui_report_lines;
 pub(crate) use prodex_session_store::SessionReport;
 
 pub(crate) fn handle_session(command: SessionCommands) -> Result<()> {
@@ -173,6 +178,10 @@ fn render_session_reports_tui(reports: &[SessionReport], empty_message: &str) ->
         print_stdout_text(&output)?;
         return Ok(());
     };
+    let items = reports
+        .iter()
+        .map(session_report_tui_item)
+        .collect::<Result<Vec<_>>>()?;
     terminal
         .draw(|frame| {
             let chunks = Layout::default()
@@ -205,10 +214,6 @@ fn render_session_reports_tui(reports: &[SessionReport], empty_message: &str) ->
                         );
                 frame.render_widget(empty, chunks[1]);
             } else {
-                let items = reports
-                    .iter()
-                    .map(session_report_tui_item)
-                    .collect::<Vec<_>>();
                 let list = List::new(items).block(
                     Block::default()
                         .borders(Borders::LEFT | Borders::RIGHT)
@@ -239,10 +244,10 @@ fn render_session_reports_tui_scrollable(
 ) -> Result<()> {
     let mut terminal = terminal_ui::AlternateScreenTerminal::stdout("session list TUI")?;
 
+    let lines = session_scroll_lines(reports)?;
     let mut scroll_offset = 0usize;
     (|| -> Result<()> {
         loop {
-            let lines: Vec<Line<'_>> = session_scroll_lines(reports);
             let total = lines.len();
             let size = terminal.size()?;
             let visible = usize::from(size.height).saturating_sub(6).max(1);
@@ -399,78 +404,19 @@ fn session_scroll_update(
     Ok((plan.offset, plan.exit))
 }
 
-fn session_scroll_lines(reports: &[SessionReport]) -> Vec<Line<'_>> {
-    let mut lines = Vec::new();
-    for report in reports {
-        let title = report
-            .thread_name
-            .as_deref()
-            .filter(|v| !v.trim().is_empty())
-            .unwrap_or("Untitled session");
-        let updated = report.updated_at.as_deref().unwrap_or("-");
-        let profile = report.profile.as_deref().unwrap_or("-");
-        let provider = report.model_provider.as_deref().unwrap_or("-");
-        lines.push(Line::from(vec![
-            Span::styled(
-                report.id.as_str(),
-                tui_hint_style().add_modifier(Modifier::BOLD),
-            ),
-            Span::raw("  "),
-            Span::styled(title, tui_primary_style()),
-        ]));
-        lines.push(Line::from(vec![
-            Span::styled("updated ", tui_secondary_style()),
-            Span::raw(updated),
-            Span::styled("  profile ", tui_secondary_style()),
-            Span::raw(profile),
-            Span::styled("  provider ", tui_secondary_style()),
-            Span::raw(provider),
-        ]));
-        if let Some(cwd) = &report.cwd {
-            lines.push(Line::from(vec![
-                Span::styled("cwd ", tui_secondary_style()),
-                Span::raw(cwd.as_str()),
-            ]));
-        }
-        lines.push(Line::raw(""));
-    }
-    lines
+fn session_scroll_lines(reports: &[SessionReport]) -> Result<Vec<Line<'static>>> {
+    Ok(session_tui_report_lines(reports, SessionTuiMode::Scroll)?
+        .into_iter()
+        .flatten()
+        .collect())
 }
 
-fn session_report_tui_item(report: &SessionReport) -> ListItem<'_> {
-    let title = report
-        .thread_name
-        .as_deref()
-        .filter(|value| !value.trim().is_empty())
-        .unwrap_or("Untitled session");
-    let updated = report.updated_at.as_deref().unwrap_or("-");
-    let profile = report.profile.as_deref().unwrap_or("-");
-    let cwd = report.cwd.as_deref().unwrap_or("-");
-    let provider = report.model_provider.as_deref().unwrap_or("-");
-    ListItem::new(Text::from(vec![
-        Line::from(vec![
-            Span::styled(
-                report.id.as_str(),
-                tui_hint_style().add_modifier(Modifier::BOLD),
-            ),
-            Span::raw("  "),
-            Span::styled(title.to_string(), tui_primary_style()),
-        ]),
-        Line::from(vec![
-            Span::styled("updated ", tui_secondary_style()),
-            Span::raw(updated.to_string()),
-            Span::styled(" profile ", tui_secondary_style()),
-            Span::raw(profile.to_string()),
-            Span::styled(" provider ", tui_secondary_style()),
-            Span::raw(provider.to_string()),
-        ]),
-        Line::from(vec![
-            Span::styled("cwd ", tui_secondary_style()),
-            Span::raw(cwd.to_string()),
-        ]),
-        Line::raw(""),
-    ]))
-    .style(Style::default())
+fn session_report_tui_item(report: &SessionReport) -> Result<ListItem<'static>> {
+    let mut rows = session_tui_report_lines(std::slice::from_ref(report), SessionTuiMode::Inline)?;
+    let lines = rows
+        .pop()
+        .ok_or_else(|| anyhow::anyhow!("Mojo session presentation returned no report"))?;
+    Ok(ListItem::new(Text::from(lines)).style(Style::default()))
 }
 
 fn print_session_lines(lines: impl IntoIterator<Item = String>) -> io::Result<()> {
@@ -555,3 +501,7 @@ fn session_resume_repair_action(
 #[cfg(test)]
 #[path = "../../tests/src/app_commands/session.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "session/presentation_tests.rs"]
+mod presentation_tests;

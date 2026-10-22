@@ -1,5 +1,22 @@
 use crate::MojoError;
 
+/// Allocate native text at its measured size without the legacy text ABI's 64 MiB cap.
+#[cfg(feature = "mojo-runtime")]
+pub(crate) fn render_measured_string(
+    mut invoke: impl FnMut(Option<&mut [u8]>) -> Result<usize, MojoError>,
+) -> Result<String, MojoError> {
+    let required = invoke(None)?;
+    let mut output = Vec::new();
+    output
+        .try_reserve_exact(required)
+        .map_err(|_| MojoError::Capacity)?;
+    output.resize(required, 0);
+    if invoke(Some(&mut output))? != required {
+        return Err(MojoError::InvalidOutput);
+    }
+    String::from_utf8(output).map_err(|_| MojoError::InvalidOutput)
+}
+
 /// Shared caller-owned allocation and status validation for measured text ABIs.
 pub(crate) fn render_measured_text(
     mut invoke: impl FnMut(i64, u64, i64, u64) -> i64,
@@ -37,6 +54,29 @@ fn status(code: i64) -> Result<(), MojoError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(feature = "mojo-runtime")]
+    #[test]
+    fn native_text_retains_sizes_above_legacy_cap_and_rejects_changed_lengths() {
+        let length = 67_108_865;
+        let text = render_measured_string(|output| {
+            if let Some(output) = output {
+                assert_eq!(output.len(), length);
+                output.fill(b'x');
+            }
+            Ok(length)
+        })
+        .unwrap();
+        assert_eq!(text.len(), length);
+        assert!(text.bytes().all(|byte| byte == b'x'));
+        assert_eq!(
+            render_measured_string(|output| match output {
+                None => Ok(1),
+                Some(_) => Ok(0),
+            }),
+            Err(MojoError::InvalidOutput)
+        );
+    }
 
     #[test]
     fn measured_text_rejects_bad_lengths_status_and_utf8_without_recomputation() {
