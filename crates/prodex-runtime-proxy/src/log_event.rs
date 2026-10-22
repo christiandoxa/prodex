@@ -49,33 +49,28 @@ impl<'a> RuntimeProxyLogEvent<'a> {
     }
 
     pub fn render_message(&self) -> String {
-        let capacity = self.event.len()
-            + self
-                .fields
-                .iter()
-                .map(|field| field.key().len() + field.value().len() + 2)
-                .sum::<usize>();
-        let mut message = String::with_capacity(capacity);
-        message.push_str(&runtime_proxy_redact_log_text(&self.event));
-        for field in &self.fields {
-            let key = runtime_proxy_sanitize_log_fragment(field.key());
-            let policy = prodex_mojo_core::log::structured_log_field_policy(&key, field.value())
-                .expect("Mojo structured-log field policy returned invalid output");
-            if key.is_empty() || policy.skip {
-                continue;
-            }
-            if !message.is_empty() {
-                message.push(' ');
-            }
-            message.push_str(&key);
-            message.push('=');
-            message.push_str(&runtime_proxy_format_log_field_value_with_policy(
-                field.key(),
-                field.value(),
-                policy,
-            ));
-        }
-        message
+        let event = runtime_proxy_redact_log_text(&self.event);
+        let fields = self
+            .fields
+            .iter()
+            .filter_map(|field| {
+                let key = runtime_proxy_sanitize_log_fragment(field.key());
+                let policy =
+                    prodex_mojo_core::log::structured_log_message_field_policy(&key, field.value())
+                        .expect("Mojo structured-log message field policy returned invalid output");
+                if policy.skip {
+                    return None;
+                }
+                let value = runtime_proxy_format_log_field_value_with_policy(
+                    field.key(),
+                    field.value(),
+                    policy,
+                );
+                Some((key, value))
+            })
+            .collect::<Vec<_>>();
+        prodex_mojo_core::log::render_structured_log_message(&event, &fields)
+            .expect("Mojo structured-log message renderer returned invalid output")
     }
 }
 

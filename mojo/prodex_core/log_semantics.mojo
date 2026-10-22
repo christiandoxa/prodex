@@ -5,6 +5,7 @@ from log_transcript_facts import PRODEX_TRANSCRIPT_ABI_VERSION, transcript_fact_
 from rich_text import rich_codepoint, rich_codepoint_width, rich_trim_bounds, rich_utf8_continuation, rich_view_matches_literal, rich_view_valid, rich_utf8_valid, rich_view_compare
 from rich_types import ProdexRichStringView, rich_view_ptr
 from log_load_classification import log_load_event_is_routine
+from json_sink import JsonSink, js_view, js_byte
 
 comptime PRODEX_LOG_SNAPSHOT_ABI_VERSION: Int64 = 1
 comptime PRODEX_LOG_SNAPSHOT_STATUS_OK: Int64 = 0
@@ -2112,6 +2113,81 @@ def prodex_mojo_structured_log_field_policy_v1(
     output[unsafe_offset=2] = 1 if structured_log_key_free_form(key) else 0
     output[unsafe_offset=3] = 1 if structured_log_value_stable_code(value) else 0
     output[unsafe_offset=4] = 1 if structured_log_key_location(key) else 0
+    return PRODEX_STRUCTURED_LOG_STATUS_OK
+
+
+@export("prodex_mojo_structured_log_message_field_policy_v1")
+def prodex_mojo_structured_log_message_field_policy_v1(
+    abi_version: Int64, key_address: UInt, key_length: Int64,
+    value_address: UInt, value_length: Int64, output_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != PRODEX_STRUCTURED_LOG_ABI_VERSION:
+        return PRODEX_STRUCTURED_LOG_STATUS_ABI
+    if output_address % 8 != 0 or key_length > 67_108_864 or value_length > 67_108_864:
+        return PRODEX_STRUCTURED_LOG_STATUS_INVALID
+    var status = prodex_mojo_structured_log_field_policy_v1(
+        abi_version, key_address, key_length, value_address, value_length, output_address
+    )
+    if status == PRODEX_STRUCTURED_LOG_STATUS_OK and key_length == 0:
+        Pointer[mut=True, Int64, MutUntrackedOrigin](unsafe_from_address=Int(output_address))[] = 1
+    return status
+
+
+def structured_log_message_render(
+    sink: Pointer[mut=True, JsonSink, _], event: ProdexRichStringView,
+    fields: Pointer[mut=False, ProdexRichStringView, _], count: Int64,
+):
+    js_view(sink, event)
+    for index in range(count):
+        if sink[].written > 0:
+            js_byte(sink, 32)
+        js_view(sink, fields[unsafe_offset=index * 2])
+        js_byte(sink, 61)
+        js_view(sink, fields[unsafe_offset=index * 2 + 1])
+
+
+@export("prodex_mojo_structured_log_message_v1")
+def prodex_mojo_structured_log_message_v1(
+    abi_version: Int64, event_address: UInt, event_length: Int64,
+    fields_address: UInt, field_count: Int64, measuring: Int64,
+    output_address: UInt, output_capacity: Int64, written_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != PRODEX_STRUCTURED_LOG_ABI_VERSION:
+        return PRODEX_STRUCTURED_LOG_STATUS_ABI
+    if (event_length < 0 or event_length > 67_108_864
+        or field_count < 0 or field_count > 65_536
+        or (field_count > 0 and (fields_address == 0 or fields_address % 8 != 0))
+        or (measuring != 0 and measuring != 1)
+        or output_capacity < 0 or output_capacity > 67_108_864
+        or (measuring == 1 and (output_address != 0 or output_capacity != 0))
+        or (measuring == 0 and output_address == 0)
+        or written_address == 0 or written_address % 8 != 0):
+        return PRODEX_STRUCTURED_LOG_STATUS_INVALID
+    var event = ProdexRichStringView(event_address, UInt(event_length))
+    if not rich_view_valid(event, 67_108_864):
+        return PRODEX_STRUCTURED_LOG_STATUS_INVALID
+    var fields = Pointer[mut=False, ProdexRichStringView, ImmUntrackedOrigin](unsafe_from_address=Int(fields_address))
+    var total = event.len
+    for index in range(field_count * 2):
+        var field = fields[unsafe_offset=index].copy()
+        if not rich_view_valid(field, 67_108_864):
+            return PRODEX_STRUCTURED_LOG_STATUS_INVALID
+        total += field.len
+        if total > 67_108_864:
+            return PRODEX_STRUCTURED_LOG_STATUS_INVALID
+    var output = Pointer[mut=True, UInt8, MutUntrackedOrigin](unsafe_from_address=Int(output_address))
+    var probe = JsonSink(output, 0, 0, True, False)
+    structured_log_message_render(Pointer(to=probe), event, fields, field_count)
+    if probe.failed or probe.written > 67_108_864:
+        return PRODEX_STRUCTURED_LOG_STATUS_INVALID
+    if measuring == 0 and output_capacity < probe.written:
+        return PRODEX_STRUCTURED_LOG_STATUS_CAPACITY
+    if measuring == 0:
+        var sink = JsonSink(output, output_capacity, 0, False, False)
+        structured_log_message_render(Pointer(to=sink), event, fields, field_count)
+        if sink.failed:
+            return PRODEX_STRUCTURED_LOG_STATUS_CAPACITY
+    Pointer[mut=True, Int64, MutUntrackedOrigin](unsafe_from_address=Int(written_address))[] = probe.written
     return PRODEX_STRUCTURED_LOG_STATUS_OK
 
 

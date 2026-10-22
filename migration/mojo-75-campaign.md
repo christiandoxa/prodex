@@ -8569,3 +8569,24 @@ duplicate fields, empty-event spacing, quoting and the distinction between
 the sanitized display key and original redaction key. The field-map projection
 has a separate last-key-wins contract. Keep redaction/dependency acquisition in
 the host and apply the full runtime-proxy validation matrix to this shared path.
+
+## Structured runtime-log composition compiled in Mojo (2026-10-22)
+
+Runtime log messages now use compiled empty-key selection, separators and
+ordered key/value assembly. The existing field-policy ABI stays compatible;
+the message-specific facade adds its missing empty-key decision. Rust only
+applies the compiled selection and acquires sanitized, redacted, quoted text.
+Duplicate display fields and the separate raw-key last-key-wins map retain
+their contracts. Direct Mojo, two five-test bridge configurations, three
+caller regressions before/after migration, 430 proxy-crate, 459 application
+proxy and 19 smoke tests plus strict workspace Clippy, full default CI
+and changed tests pass. Canonical share is 36.40482782235695%
+(137,149 Mojo / 239,584 Rust production LOC). The 75% target remains open.
+Evidence is in `migration/structured-log-message-mojo-20261022.md`.
+
+The next audited owner is
+`crates/prodex-app/src/runtime_operational_metrics.rs::runtime_operational_metric_key`.
+Its Rust tuple sort determines both counter and histogram identity before
+the registry locks. Preserve key-then-value UTF-8 order, duplicate labels and
+invalid-label rejection, while reusing the compiled index sorter and text
+comparator in the existing operational-metrics owner.

@@ -3,7 +3,6 @@ use crate::MojoError;
 mod details;
 mod labels;
 mod stream;
-mod text;
 pub use details::{OperationalDetailText, render_operational_details};
 pub use labels::render_log_event_label;
 pub use stream::{
