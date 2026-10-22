@@ -97,15 +97,7 @@ def ping_status_detail_copy(
     written[] = length
     return PING_DETAIL_STATUS_OK
 
-def ping_status_label_copy(
-    status: Int64,
-    json_label: Bool,
-    output: Pointer[mut=True, UInt8, _],
-    capacity: Int64,
-    written: Pointer[mut=True, Int64, _],
-) -> Int64:
-    if status < PING_STATUS_OK or status > PING_STATUS_CANCELLED or capacity < 0:
-        return PING_DETAIL_STATUS_INVALID
+def ping_status_label_view(status: Int64, json_label: Bool) -> ProdexRichStringView:
     var label = StringSlice("")
     if json_label:
         if status == PING_STATUS_OK:
@@ -168,18 +160,30 @@ def ping_status_label_copy(
         label = StringSlice("SPAWN_FAILED")
     elif status == PING_STATUS_CANCELLED:
         label = StringSlice("CANCELLED")
-    if label.byte_length() == 0:
+    return ProdexRichStringView(UInt(Int(label.unsafe_ptr())), UInt(label.byte_length()))
+
+
+def ping_status_label_copy(
+    status: Int64,
+    json_label: Bool,
+    output: Pointer[mut=True, UInt8, _],
+    capacity: Int64,
+    written: Pointer[mut=True, Int64, _],
+) -> Int64:
+    if status < PING_STATUS_OK or status > PING_STATUS_CANCELLED or capacity < 0:
         return PING_DETAIL_STATUS_INVALID
-    var length = Int64(label.byte_length())
-    if length > PING_STATUS_LABEL_MAX_BYTES:
+    var label = ping_status_label_view(status, json_label)
+    var length = Int64(label.len)
+    if length == 0 or length > PING_STATUS_LABEL_MAX_BYTES:
         return PING_DETAIL_STATUS_INVALID
     if length > capacity:
         return PING_DETAIL_STATUS_CAPACITY
-    var source = label.unsafe_ptr()
+    var source = rich_view_ptr(label)
     for index in range(length):
         output[unsafe_offset=index] = source[unsafe_offset=index]
     written[] = length
     return PING_DETAIL_STATUS_OK
+
 
 def ping_status_is_temporary(status: Int64) -> Bool:
     return (
@@ -711,6 +715,45 @@ def prodex_mojo_ping_status_temporary_v1(
     output[] = Int64(ping_status_is_temporary(status))
     return PING_DETAIL_STATUS_OK
 
+@fieldwise_init
+struct PingSummaryCounts(Copyable):
+    var valid: Bool
+    var total: UInt64
+    var healthy: UInt64
+    var exhausted: UInt64
+    var auth_failures: UInt64
+    var temporary_failures: UInt64
+    var other_failures: UInt64
+    var pool_usable: Bool
+
+
+# Callers validate the borrowed array, count and storage stride.
+def ping_summary_counts(
+    statuses: Pointer[mut=False, Int64, _], status_count: Int64, stride: Int64,
+) -> PingSummaryCounts:
+    var healthy: UInt64 = 0
+    var exhausted: UInt64 = 0
+    var auth_failures: UInt64 = 0
+    var temporary_failures: UInt64 = 0
+    for index in range(status_count):
+        var status = statuses[unsafe_offset=index * stride]
+        if status < PING_STATUS_OK or status > PING_STATUS_CANCELLED:
+            return PingSummaryCounts(False, 0, 0, 0, 0, 0, 0, False)
+        if status == PING_STATUS_OK:
+            healthy += 1
+        elif status == PING_STATUS_QUOTA_EXHAUSTED:
+            exhausted += 1
+        elif status == PING_STATUS_AUTH_FAILED:
+            auth_failures += 1
+        elif ping_status_is_temporary(status):
+            temporary_failures += 1
+    var total = UInt64(status_count)
+    return PingSummaryCounts(
+        True, total, healthy, exhausted, auth_failures, temporary_failures,
+        total - healthy - exhausted - auth_failures - temporary_failures, healthy > 0,
+    )
+
+
 @export("prodex_mojo_ping_summary_plan_v1")
 def prodex_mojo_ping_summary_plan_v1(
     abi_version: Int64,
@@ -730,33 +773,19 @@ def prodex_mojo_ping_summary_plan_v1(
     var output = Pointer[mut=True, UInt64, MutUntrackedOrigin](
         unsafe_from_address=Int(output_address)
     )
-    var healthy: UInt64 = 0
-    var exhausted: UInt64 = 0
-    var auth_failures: UInt64 = 0
-    var temporary_failures: UInt64 = 0
-    var statuses = Pointer[mut=False, Int64, ImmUntrackedOrigin](
-        unsafe_from_address=Int(statuses_address)
+    var counts = ping_summary_counts(
+        Pointer[mut=False, Int64, ImmUntrackedOrigin](unsafe_from_address=Int(statuses_address)),
+        status_count, 1,
     )
-    for index in range(status_count):
-        var status = statuses[unsafe_offset=index]
-        if status < PING_STATUS_OK or status > PING_STATUS_CANCELLED:
-            return PING_DETAIL_STATUS_INVALID
-        if status == PING_STATUS_OK:
-            healthy += 1
-        elif status == PING_STATUS_QUOTA_EXHAUSTED:
-            exhausted += 1
-        elif status == PING_STATUS_AUTH_FAILED:
-            auth_failures += 1
-        elif ping_status_is_temporary(status):
-            temporary_failures += 1
-    var total = UInt64(status_count)
-    output[unsafe_offset=0] = total
-    output[unsafe_offset=1] = healthy
-    output[unsafe_offset=2] = exhausted
-    output[unsafe_offset=3] = auth_failures
-    output[unsafe_offset=4] = temporary_failures
-    output[unsafe_offset=5] = total - healthy - exhausted - auth_failures - temporary_failures
-    output[unsafe_offset=6] = UInt64(healthy > 0)
+    if not counts.valid:
+        return PING_DETAIL_STATUS_INVALID
+    output[unsafe_offset=0] = counts.total
+    output[unsafe_offset=1] = counts.healthy
+    output[unsafe_offset=2] = counts.exhausted
+    output[unsafe_offset=3] = counts.auth_failures
+    output[unsafe_offset=4] = counts.temporary_failures
+    output[unsafe_offset=5] = counts.other_failures
+    output[unsafe_offset=6] = UInt64(counts.pool_usable)
     return PING_DETAIL_STATUS_OK
 
 

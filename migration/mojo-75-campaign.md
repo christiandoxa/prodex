@@ -8968,3 +8968,11 @@ preserving its seven legacy entries and exact configured token budgets.
 Canonical share is 36.67728728192322% (138,942 Mojo / 239,881 Rust production LOC).
 The 75% target remains open.
 Evidence and coverage are in [deepseek-catalog-plan-mojo-20261022.md](deepseek-catalog-plan-mojo-20261022.md).
+
+## Shared ping kernels preserve existing reports (2026-10-23)
+
+Existing status-label and summary decisions now have typed internal Mojo owners
+behind their unchanged C exports. Eleven original stdout cases are frozen across
+a child-process caller boundary. This preparation transfers no new Rust semantics;
+it separates the complete report feature within the unchanged churn limit.
+Evidence and coverage are in [ping-report-kernels-mojo-20261023.md](ping-report-kernels-mojo-20261023.md).
