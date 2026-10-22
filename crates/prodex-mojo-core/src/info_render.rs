@@ -1,6 +1,8 @@
 use crate::MojoError;
 
 mod doctor;
+mod panel;
+pub use panel::{InfoPanelValueColor, info_panel_field_visible, info_panel_value_color};
 mod launch_quota;
 mod provider;
 mod runtime_load;
