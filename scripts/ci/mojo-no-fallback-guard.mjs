@@ -23,6 +23,9 @@ const DOCTOR_COMPACT_EXIT_COUNTS_CALLER_TEST_FILE = "crates/prodex-runtime-docto
 const DOCTOR_TIMELINE_DETAIL_CONSUMER_FILE = "crates/prodex-runtime-doctor/src/parsing/request_timeline.rs";
 const DOCTOR_LAST_MARKER_LINE_CONSUMER_FILE = "crates/prodex-runtime-doctor/src/parsing/log_line.rs";
 const DOCTOR_RENDER_ADAPTER_FILE = "crates/prodex-mojo-core/src/rich/runtime_doctor_render.rs";
+const DOCTOR_REPORT_CONSUMER_FILE = "crates/prodex-runtime-doctor/src/render.rs";
+const DOCTOR_REPORT_ADAPTER_FILE = "crates/prodex-mojo-core/src/rich/runtime_doctor_report_render.rs";
+const DOCTOR_REPORT_MOJO_FILE = "mojo/prodex_core/runtime_doctor_report_render.mojo";
 const DOCTOR_RENDER_MOJO_FILE = "mojo/prodex_core/runtime_doctor_render.mojo";
 const DOCTOR_PRESENTATION_CONSUMER_FILE = "crates/prodex-app/src/app_commands/doctor/render.rs";
 const DOCTOR_PRESENTATION_ADAPTER_FILE = "crates/prodex-mojo-core/src/info_render/doctor.rs";
@@ -427,6 +430,12 @@ const CORE_LEXICAL_BROKER_PATHS = "crates/prodex-app/src/runtime_persistence/pat
 const CORE_LEXICAL_APP_HOUSEKEEPING = "crates/prodex-app/src/housekeeping.rs";
 const CORE_LEXICAL_LIVE_LOG = "crates/prodex-app/src/app_commands/log_live.rs";
 const PROMOTED_FILES = [
+  DOCTOR_REPORT_CONSUMER_FILE,
+  DOCTOR_REPORT_ADAPTER_FILE,
+  DOCTOR_REPORT_MOJO_FILE,
+  "crates/prodex-mojo-core/src/rich/runtime_doctor_report_render_tests.rs",
+  "crates/prodex-runtime-doctor/tests/report_fields.rs",
+  "mojo/tests/runtime_doctor_report_render_test.mojo",
   "crates/prodex-app/src/super_expose/protocol/dispatch_reply_tests.rs",
   "crates/prodex-mojo-core/src/rich/super_expose/dispatch_response.rs",
   "crates/prodex-mojo-core/src/rich/super_expose/dispatch_response_tests.rs",
@@ -7733,6 +7742,23 @@ export function findViolations(files) {
       }
       return violations;
     }
+    if (filePath === DOCTOR_REPORT_CONSUMER_FILE) {
+      const production = contents.split("\n#[cfg(test)]", 1)[0];
+      return production.includes("prodex_mojo_core::rich::runtime_doctor_report_fields_json(")
+        && !/fn compact_list\b|for field in report_plan|"Log pointer"|"Sync-probe deferred"/u.test(production)
+        ? [] : [filePath + ": human report labels, list clipping and optional rows must use compiled Mojo rendering"];
+    }
+    if (filePath === DOCTOR_REPORT_ADAPTER_FILE) {
+      return contents.includes("prodex_mojo_runtime_doctor_report_render_v1(")
+        && !/match\s+field\b|"Log pointer"|"Sync-probe deferred"/u.test(contents)
+        ? [] : [filePath + ": doctor report adapter must retain its compiled renderer without a Rust field table"];
+    }
+    if (filePath === DOCTOR_REPORT_MOJO_FILE) {
+      return ['@export("prodex_mojo_runtime_doctor_report_render_v1")',
+        "runtime_doctor_report_field_enabled", "runtime_doctor_report_sync_source",
+        "JsonSink", "def report_list_row("].every((required) => contents.includes(required))
+        ? [] : [filePath + ": doctor report renderer must reuse compiled field policy and bounded JSON writing"];
+    }
     if (filePath === SUPER_EXPOSE_DISPATCH_FILE) {
       const production = contents.split("\n#[cfg(test)]", 1)[0];
       const required = ["prodex_mojo_core::rich::super_expose_dispatch_validation(",
@@ -14455,6 +14481,22 @@ async function promotedFiles() {
 }
 
 function selfTest() {
+  const reportCaller = "prodex_mojo_core::rich::runtime_doctor_report_fields_json(";
+  assert.deepEqual(findViolations([[DOCTOR_REPORT_CONSUMER_FILE, reportCaller]]), []);
+  for (const restored of ['"Log pointer"', '"Sync-probe deferred"', "fn compact_list(", "for field in report_plan"]) {
+    assert.match(findViolations([[DOCTOR_REPORT_CONSUMER_FILE, reportCaller + restored]])
+      .join("\n"), /must use compiled Mojo rendering/u);
+  }
+  assert.match(findViolations([[DOCTOR_REPORT_CONSUMER_FILE, "fn runtime_doctor_fields_for_summary() {}"]])
+    .join("\n"), /must use compiled Mojo rendering/u);
+  const reportAdapter = "prodex_mojo_runtime_doctor_report_render_v1(";
+  assert.deepEqual(findViolations([[DOCTOR_REPORT_ADAPTER_FILE, reportAdapter]]), []);
+  assert.match(findViolations([[DOCTOR_REPORT_ADAPTER_FILE, reportAdapter + "match field {}"]])
+    .join("\n"), /without a Rust field table/u);
+  const reportMojo = '@export("prodex_mojo_runtime_doctor_report_render_v1"); runtime_doctor_report_field_enabled; runtime_doctor_report_sync_source; JsonSink; def report_list_row(';
+  assert.deepEqual(findViolations([[DOCTOR_REPORT_MOJO_FILE, reportMojo]]), []);
+  assert.match(findViolations([[DOCTOR_REPORT_MOJO_FILE, reportMojo.replace("runtime_doctor_report_sync_source", "local_sync_source")]])
+    .join("\n"), /must reuse compiled field policy/u);
   const dispatchReplyCaller = "prodex_mojo_core::rich::super_expose_dispatch_validation(; prodex_mojo_core::rich::super_expose_dispatch_response_plan(";
   assert.deepEqual(findViolations([[SUPER_EXPOSE_DISPATCH_FILE, dispatchReplyCaller]]), []);
   assert.match(findViolations([[SUPER_EXPOSE_DISPATCH_FILE,

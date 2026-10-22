@@ -1,7 +1,7 @@
 //! Runtime-doctor human report field planning ABI.
 //!
-//! Mojo owns optional-row precedence and order. Rust keeps the summary maps,
-//! value formatting, and the existing `(label, value)` DTOs.
+//! Mojo owns optional-row precedence and order, shared with its report renderer.
+//! Rust keeps summary maps and materializes the `(label, value)` DTOs.
 
 use super::{ensure_rich_abi, mojo_mut_pointer_address};
 use crate::MojoError;

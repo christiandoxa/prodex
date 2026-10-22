@@ -249,6 +249,12 @@ pub use runtime_doctor_facet::*;
 #[path = "rich/runtime_doctor_report_fields.rs"]
 mod runtime_doctor_report_fields;
 pub use runtime_doctor_report_fields::*;
+
+#[path = "rich/runtime_doctor_report_render.rs"]
+mod runtime_doctor_report_render;
+pub use runtime_doctor_report_render::{
+    RuntimeDoctorReportInput, runtime_doctor_report_fields_json,
+};
 #[path = "rich/super_expose.rs"]
 mod super_expose;
 pub use super_expose::*;

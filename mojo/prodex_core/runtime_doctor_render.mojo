@@ -1016,7 +1016,7 @@ def prodex_mojo_runtime_doctor_count_breakdown_v1(
 
 
 # Mojo owns the optional human-report row order and the cold-start detail
-# precedence. Rust materializes the selected rows around this bounded plan.
+# precedence. The field-plan ABI and renderer share these decisions.
 comptime RUNTIME_DOCTOR_REPORT_FIELDS_ABI_VERSION: Int64 = 1
 comptime RUNTIME_DOCTOR_REPORT_FIELDS_MAX: Int64 = 8
 comptime RUNTIME_DOCTOR_REPORT_FIELD_LEGACY_PREV: Int64 = 0
@@ -1040,6 +1040,26 @@ def runtime_doctor_report_fields_append(
     fields[unsafe_offset=count[]] = value
     count[] += 1
     return True
+
+
+def runtime_doctor_report_field_enabled(presence_bits: Int64, field: Int64) -> Bool:
+    if field == RUNTIME_DOCTOR_REPORT_FIELD_LEGACY_PREV:
+        return presence_bits & 1 != 0
+    if field >= RUNTIME_DOCTOR_REPORT_FIELD_COMPACT_FINAL and field <= RUNTIME_DOCTOR_REPORT_FIELD_COMPACT_LAST_FAILURE:
+        return presence_bits & 2 != 0
+    if field == RUNTIME_DOCTOR_REPORT_FIELD_SYNC_DEFERRED:
+        return presence_bits & 4 != 0
+    if field == RUNTIME_DOCTOR_REPORT_FIELD_PROBE_PRESSURE_PROFILE:
+        return presence_bits & 8 != 0
+    return field == RUNTIME_DOCTOR_REPORT_FIELD_HOT_REASON and presence_bits & 16 != 0
+
+
+def runtime_doctor_report_sync_source(presence_bits: Int64) -> Int64:
+    if presence_bits & 4 == 0:
+        return RUNTIME_DOCTOR_REPORT_SYNC_SOURCE_NONE
+    if presence_bits & 32 != 0:
+        return RUNTIME_DOCTOR_REPORT_SYNC_SOURCE_JOBS
+    return RUNTIME_DOCTOR_REPORT_SYNC_SOURCE_PROFILES if presence_bits & 64 != 0 else RUNTIME_DOCTOR_REPORT_SYNC_SOURCE_NONE
 
 
 @export("prodex_mojo_runtime_doctor_report_fields_v1")
@@ -1072,38 +1092,11 @@ def prodex_mojo_runtime_doctor_report_fields_v1(
     for index in range(RUNTIME_DOCTOR_REPORT_FIELDS_MAX):
         fields[unsafe_offset=index] = -1
     field_count[] = 0
-    sync_source[] = RUNTIME_DOCTOR_REPORT_SYNC_SOURCE_NONE
-    if presence_bits & 1 != 0:
-        if not runtime_doctor_report_fields_append(
-            fields, field_count, RUNTIME_DOCTOR_REPORT_FIELD_LEGACY_PREV
-        ):
-            return 3
-    if presence_bits & 2 != 0:
-        for field in range(
-            RUNTIME_DOCTOR_REPORT_FIELD_COMPACT_FINAL,
-            RUNTIME_DOCTOR_REPORT_FIELD_COMPACT_LAST_FAILURE + 1,
-        ):
+    sync_source[] = runtime_doctor_report_sync_source(presence_bits)
+    for field in range(RUNTIME_DOCTOR_REPORT_FIELDS_MAX):
+        if runtime_doctor_report_field_enabled(presence_bits, field):
             if not runtime_doctor_report_fields_append(fields, field_count, field):
                 return 3
-    if presence_bits & 4 != 0:
-        if not runtime_doctor_report_fields_append(
-            fields, field_count, RUNTIME_DOCTOR_REPORT_FIELD_SYNC_DEFERRED
-        ):
-            return 3
-        if presence_bits & 32 != 0:
-            sync_source[] = RUNTIME_DOCTOR_REPORT_SYNC_SOURCE_JOBS
-        elif presence_bits & 64 != 0:
-            sync_source[] = RUNTIME_DOCTOR_REPORT_SYNC_SOURCE_PROFILES
-    if presence_bits & 8 != 0:
-        if not runtime_doctor_report_fields_append(
-            fields, field_count, RUNTIME_DOCTOR_REPORT_FIELD_PROBE_PRESSURE_PROFILE
-        ):
-            return 3
-    if presence_bits & 16 != 0:
-        if not runtime_doctor_report_fields_append(
-            fields, field_count, RUNTIME_DOCTOR_REPORT_FIELD_HOT_REASON
-        ):
-            return 3
     return 0
 
 # The last twelve events per request are retained in arrival order.

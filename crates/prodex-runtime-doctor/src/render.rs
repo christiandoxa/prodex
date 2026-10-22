@@ -2,24 +2,6 @@ use std::path::Path;
 
 use super::*;
 
-fn display_path(path: Option<&std::path::PathBuf>) -> String {
-    path.map(|path| path.display().to_string())
-        .unwrap_or_else(|| "-".to_string())
-}
-
-fn compact_list(values: &[String]) -> String {
-    if values.is_empty() {
-        "-".to_string()
-    } else {
-        values
-            .iter()
-            .take(5)
-            .cloned()
-            .collect::<Vec<_>>()
-            .join("; ")
-    }
-}
-
 fn binding_source_text(source: &RuntimeDoctorBindingSourceSummary) -> String {
     let top_profile = source
         .profiles
@@ -56,169 +38,73 @@ fn binding_state_text(summary: &RuntimeDoctorBindingStateSummary) -> String {
     )
 }
 
-fn marker_field(summary: &RuntimeDoctorSummary, marker: &str, field: &str) -> String {
+fn marker_field<'a>(
+    summary: &'a RuntimeDoctorSummary,
+    marker: &str,
+    field: &str,
+) -> Option<&'a str> {
     summary
         .marker_last_fields
-        .get(marker)
-        .and_then(|fields| fields.get(field))
-        .cloned()
-        .unwrap_or_else(|| "-".to_string())
+        .get(marker)?
+        .get(field)
+        .map(String::as_str)
 }
 
 pub fn runtime_doctor_fields_for_summary(
     summary: &RuntimeDoctorSummary,
     pointer_path: &Path,
 ) -> Vec<(String, String)> {
-    let mut fields = vec![
-        (
-            "Log pointer".to_string(),
-            format!(
-                "{} ({})",
-                pointer_path.display(),
-                if summary.pointer_exists {
-                    "exists"
-                } else {
-                    "missing"
-                }
+    let pointer_path = pointer_path.display().to_string();
+    let log_path = summary
+        .log_path
+        .as_ref()
+        .map(|path| path.display().to_string());
+    let binding_state = binding_state_text(&summary.binding_state);
+    let hot_reason = diagnosis::runtime_doctor_top_facet(summary, "reason");
+    let body = prodex_mojo_core::rich::runtime_doctor_report_fields_json(
+        prodex_mojo_core::rich::RuntimeDoctorReportInput {
+            pointer_path: &pointer_path,
+            pointer_exists: summary.pointer_exists,
+            log_path: log_path.as_deref(),
+            log_exists: summary.log_exists,
+            line_count: summary.line_count as u64,
+            diagnosis: &summary.diagnosis,
+            selection_pressure: &summary.selection_pressure,
+            transport_pressure: &summary.transport_pressure,
+            persistence_pressure: &summary.persistence_pressure,
+            quota_freshness_pressure: &summary.quota_freshness_pressure,
+            profile_count: summary.profiles.len() as u64,
+            binding_state: &binding_state,
+            degraded_routes: &summary.degraded_routes,
+            suspect_continuations: &summary.suspect_continuation_bindings,
+            runtime_brokers: &summary.runtime_broker_identities,
+            legacy_previous: diagnosis::runtime_doctor_marker_count(
+                summary,
+                "previous_response_fresh_fallback",
+            ) as u64,
+            compact_final: diagnosis::runtime_doctor_marker_count(summary, "compact_final_failure")
+                as u64,
+            sync_probe: diagnosis::runtime_doctor_marker_count(summary, "selection_skip_sync_probe")
+                as u64,
+            probe_pressure: diagnosis::runtime_doctor_marker_count(
+                summary,
+                "profile_probe_refresh_backpressure",
+            ) as u64,
+            compact_exit: marker_field(summary, "compact_final_failure", "exit"),
+            compact_reason: marker_field(summary, "compact_final_failure", "reason"),
+            compact_last_failure: marker_field(summary, "compact_final_failure", "last_failure"),
+            sync_jobs: marker_field(summary, "selection_skip_sync_probe", "cold_start_jobs"),
+            sync_profiles: marker_field(
+                summary,
+                "selection_skip_sync_probe",
+                "cold_start_profiles",
             ),
-        ),
-        (
-            "Latest log".to_string(),
-            format!(
-                "{} ({})",
-                display_path(summary.log_path.as_ref()),
-                if summary.log_exists {
-                    "exists"
-                } else {
-                    "missing"
-                }
-            ),
-        ),
-        (
-            "Log sample".to_string(),
-            format!("{} lines", summary.line_count),
-        ),
-        ("Diagnosis".to_string(), summary.diagnosis.clone()),
-        (
-            "Selection pressure".to_string(),
-            summary.selection_pressure.clone(),
-        ),
-        (
-            "Transport pressure".to_string(),
-            summary.transport_pressure.clone(),
-        ),
-        (
-            "Persistence pressure".to_string(),
-            summary.persistence_pressure.clone(),
-        ),
-        (
-            "Quota freshness pressure".to_string(),
-            summary.quota_freshness_pressure.clone(),
-        ),
-        ("Profiles".to_string(), summary.profiles.len().to_string()),
-        (
-            "Binding state".to_string(),
-            binding_state_text(&summary.binding_state),
-        ),
-        (
-            "Degraded routes".to_string(),
-            compact_list(&summary.degraded_routes),
-        ),
-        (
-            "Suspect continuations".to_string(),
-            compact_list(&summary.suspect_continuation_bindings),
-        ),
-        (
-            "Runtime brokers".to_string(),
-            compact_list(&summary.runtime_broker_identities),
-        ),
-    ];
-
-    let legacy_prev =
-        diagnosis::runtime_doctor_marker_count(summary, "previous_response_fresh_fallback");
-    let compact_final = diagnosis::runtime_doctor_marker_count(summary, "compact_final_failure");
-    let sync_probe = diagnosis::runtime_doctor_marker_count(summary, "selection_skip_sync_probe");
-    let probe_pressure =
-        diagnosis::runtime_doctor_marker_count(summary, "profile_probe_refresh_backpressure");
-    let mut hot_reason = diagnosis::runtime_doctor_top_facet(summary, "reason");
-    let sync_fields = summary.marker_last_fields.get("selection_skip_sync_probe");
-    let report_plan = prodex_mojo_core::rich::runtime_doctor_report_field_plan(
-        legacy_prev > 0,
-        compact_final > 0,
-        sync_probe > 0,
-        probe_pressure > 0,
-        hot_reason.is_some(),
-        sync_fields.is_some_and(|fields| fields.contains_key("cold_start_jobs")),
-        sync_fields.is_some_and(|fields| fields.contains_key("cold_start_profiles")),
+            probe_profile: marker_field(summary, "profile_probe_refresh_backpressure", "profile"),
+            hot_reason: hot_reason.as_deref(),
+        },
     )
-    .expect("Mojo runtime-doctor report field plan returned invalid output");
-    for field in report_plan.fields[..report_plan.field_count]
-        .iter()
-        .copied()
-    {
-        match field {
-            prodex_mojo_core::rich::RUNTIME_DOCTOR_REPORT_FIELD_LEGACY_PREV => {
-                fields.push(("Legacy prev recovery".to_string(), legacy_prev.to_string()));
-            }
-            prodex_mojo_core::rich::RUNTIME_DOCTOR_REPORT_FIELD_COMPACT_FINAL => {
-                fields.push(("Compact final".to_string(), compact_final.to_string()));
-            }
-            prodex_mojo_core::rich::RUNTIME_DOCTOR_REPORT_FIELD_COMPACT_EXIT => {
-                fields.push((
-                    "Compact exit".to_string(),
-                    marker_field(summary, "compact_final_failure", "exit"),
-                ));
-            }
-            prodex_mojo_core::rich::RUNTIME_DOCTOR_REPORT_FIELD_COMPACT_REASON => {
-                fields.push((
-                    "Compact reason".to_string(),
-                    marker_field(summary, "compact_final_failure", "reason"),
-                ));
-            }
-            prodex_mojo_core::rich::RUNTIME_DOCTOR_REPORT_FIELD_COMPACT_LAST_FAILURE => {
-                fields.push((
-                    "Compact last fail".to_string(),
-                    marker_field(summary, "compact_final_failure", "last_failure"),
-                ));
-            }
-            prodex_mojo_core::rich::RUNTIME_DOCTOR_REPORT_FIELD_SYNC_DEFERRED => {
-                let deferred = match report_plan.sync_source {
-                    prodex_mojo_core::rich::RUNTIME_DOCTOR_REPORT_SYNC_SOURCE_JOBS => sync_fields
-                        .and_then(|fields| fields.get("cold_start_jobs"))
-                        .map(|count| format!("{count} job(s)"))
-                        .unwrap_or_else(|| "-".to_string()),
-                    prodex_mojo_core::rich::RUNTIME_DOCTOR_REPORT_SYNC_SOURCE_PROFILES => {
-                        sync_fields
-                            .and_then(|fields| fields.get("cold_start_profiles"))
-                            .map(|count| format!("{count} profile(s)"))
-                            .unwrap_or_else(|| "-".to_string())
-                    }
-                    prodex_mojo_core::rich::RUNTIME_DOCTOR_REPORT_SYNC_SOURCE_NONE => {
-                        "-".to_string()
-                    }
-                    _ => unreachable!("validated Mojo sync-probe detail source"),
-                };
-                fields.push(("Sync-probe deferred".to_string(), deferred));
-            }
-            prodex_mojo_core::rich::RUNTIME_DOCTOR_REPORT_FIELD_PROBE_PRESSURE_PROFILE => {
-                fields.push((
-                    "Probe pressure profile".to_string(),
-                    marker_field(summary, "profile_probe_refresh_backpressure", "profile"),
-                ));
-            }
-            prodex_mojo_core::rich::RUNTIME_DOCTOR_REPORT_FIELD_HOT_REASON => {
-                fields.push((
-                    "Hot reason".to_string(),
-                    hot_reason
-                        .take()
-                        .expect("Mojo report plan selected an absent hot reason"),
-                ));
-            }
-            _ => unreachable!("validated Mojo runtime-doctor report field"),
-        }
-    }
-
-    fields
+    .expect("Mojo runtime-doctor report renderer failed");
+    serde_json::from_str(&body).expect("Mojo runtime-doctor report returned invalid field pairs")
 }
 
 pub fn runtime_doctor_json_value(summary: &RuntimeDoctorSummary) -> serde_json::Value {
