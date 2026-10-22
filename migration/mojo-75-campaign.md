@@ -8482,3 +8482,14 @@ Direct Mojo, seven strict bridge, 85 log and 120 Super expose tests plus
 workspace Clippy pass. Canonical share is 36.35691843125163% (136,774 Mojo / 239,424 Rust LOC); the 75%
 objective remains open. Evidence is in
 `migration/transcript-shell-fields-mojo-20261022.md`.
+
+## Transcript function/custom tool fields compiled in Mojo (2026-10-22)
+
+Function/custom call fields, default names/source prefixes and string-only
+output selection now share the shell record's compiled projection. Rust's
+three field-building branches are deleted without another bridge or parser.
+Full raw call payloads and full tool output stay distinct from shell scalar
+truncation. Direct Mojo, ten strict bridge, 88 log and 120 Super expose tests
+plus workspace Clippy pass. Canonical share is 36.36187225536168% (136,789 Mojo / 239,399 Rust
+LOC); the 75% goal remains open. Evidence is in
+`migration/transcript-tool-fields-mojo-20261022.md`.

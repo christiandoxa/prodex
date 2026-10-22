@@ -136,7 +136,7 @@ fn compiled_shell_abi_rejects_invalid_shapes_and_capacity_before_writes() {
         )
     };
     assert_eq!(call(2, 8, 2, 64, views.as_ptr() as u64), 4);
-    assert_eq!(call(1, 10, 2, 64, views.as_ptr() as u64), 1);
+    assert_eq!(call(1, i64::MAX, 2, 64, views.as_ptr() as u64), 1);
     assert_eq!(call(1, 8, 1, 64, views.as_ptr() as u64), 1);
     assert_eq!(call(1, 9, 2, 1, views.as_ptr() as u64), 3);
     let invalid = [0xff_u8];
