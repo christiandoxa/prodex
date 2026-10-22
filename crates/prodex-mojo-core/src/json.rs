@@ -117,6 +117,8 @@ pub use deepseek_function_tools::{DeepSeekFunctionToolOperation, deepseek_functi
 mod copilot_catalog;
 mod kiro_catalog;
 pub use self::copilot_catalog::copilot_model_catalog_json;
+mod main_catalog_projection;
+pub use main_catalog_projection::main_catalog_projection_json;
 mod runtime_catalog;
 mod runtime_catalog_plan;
 pub use self::kiro_catalog::{

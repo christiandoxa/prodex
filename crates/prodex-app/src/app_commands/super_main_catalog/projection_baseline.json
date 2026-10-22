@@ -1,0 +1,62 @@
+[
+  {
+    "name": "empty",
+    "bytes": 4,
+    "sha256": "74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b"
+  },
+  {
+    "name": "scalars",
+    "bytes": 4,
+    "sha256": "74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b"
+  },
+  {
+    "name": "typed-aliases",
+    "bytes": 367,
+    "sha256": "d39350514fd2bddac798eba07bd31e88a1a79173ab43dbbec067cad2eb58b8ac"
+  },
+  {
+    "name": "blank-blocks-alias",
+    "bytes": 330,
+    "sha256": "a949a73f81ca3a77929e318845c45055e934b7e81af8a3edfc932c0532d36212"
+  },
+  {
+    "name": "flags-and-priority",
+    "bytes": 4,
+    "sha256": "74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b"
+  },
+  {
+    "name": "metadata-types",
+    "bytes": 495,
+    "sha256": "cbfe34f92a2741f5af836ed38553b1fda3138d3e7940b3c088c77a16a622fe7b"
+  },
+  {
+    "name": "duplicates-and-order",
+    "bytes": 541,
+    "sha256": "7ea07b7c1ba7192a0e6f4081caaca3898c5e914d031078730253be60036e542b"
+  },
+  {
+    "name": "priority-endpoints",
+    "bytes": 4,
+    "sha256": "74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b"
+  },
+  {
+    "name": "long-model",
+    "bytes": 4,
+    "sha256": "74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b"
+  },
+  {
+    "name": "long-label",
+    "bytes": 4430,
+    "sha256": "3435eb0e0f42f881554c4da8ec85dfacf9bc0933db33ab973c976127e5bfc035"
+  },
+  {
+    "name": "long-alias",
+    "bytes": 4,
+    "sha256": "74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b"
+  },
+  {
+    "name": "many-raw",
+    "bytes": 4,
+    "sha256": "74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b"
+  }
+]

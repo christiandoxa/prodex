@@ -2,13 +2,13 @@ use super::super_prompt;
 use crate::{canonical_sub_agent_efforts, effective_provider_model_catalog, provider_display_name};
 use prodex_cli::SubAgentReasoningEffort;
 
-const CATALOG_MAX_PRIORITY: u64 = i64::MAX as u64;
 use prodex_mojo_core::rich::{
     CatalogChoicesPlan, CatalogInsertionChoice, CatalogInsertionPlacement, CatalogModel,
     CatalogPlanModel, ascii_casefold_equal_exact, catalog_insertion_index, merge_catalog_ids,
     openai_model_is_retired as mojo_openai_model_is_retired, plan_dynamic_catalog,
     resolve_catalog_model_exact,
 };
+use prodex_provider_core::{MainCatalogModel as DynamicCatalogModel, project_main_catalog_models};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) struct MainModelChoice {
@@ -273,96 +273,11 @@ fn merge_bundled_openai_choices(choices: &mut Vec<MainModelChoice>) {
     choices.splice(insert_at..insert_at, bundled);
 }
 
-#[derive(Debug)]
-struct DynamicCatalogModel {
-    id: String,
-    label: String,
-    priority: u64,
-    supported: bool,
-    hidden: bool,
-    listed: bool,
-    efforts: Vec<String>,
-    aliases: Vec<String>,
-    default_effort: Option<String>,
-}
-
-fn dynamic_catalog_model(entry: serde_json::Value) -> DynamicCatalogModel {
-    let id = catalog_entry_model_id(&entry).to_string();
-    let label = ["display_name", "displayName"]
-        .into_iter()
-        .find_map(|key| entry.get(key).and_then(serde_json::Value::as_str))
-        .map(str::trim)
-        .filter(|label| !label.is_empty())
-        .unwrap_or(id.as_str())
-        .to_string();
-    let efforts = entry
-        .get("supported_reasoning_levels")
-        .and_then(serde_json::Value::as_array)
-        .map(|levels| {
-            levels
-                .iter()
-                .filter_map(|level| level.get("effort").and_then(serde_json::Value::as_str))
-                .map(str::to_string)
-                .collect()
-        })
-        .unwrap_or_default();
-    DynamicCatalogModel {
-        id,
-        label,
-        priority: entry
-            .get("priority")
-            .and_then(serde_json::Value::as_u64)
-            .unwrap_or(CATALOG_MAX_PRIORITY),
-        supported: entry
-            .get("supported_in_api")
-            .and_then(serde_json::Value::as_bool)
-            != Some(false),
-        hidden: entry.get("hidden").and_then(serde_json::Value::as_bool) == Some(true),
-        listed: entry
-            .get("visibility")
-            .and_then(serde_json::Value::as_str)
-            .is_none_or(|visibility| {
-                ascii_casefold_equal_exact(visibility, "list")
-                    .expect("Mojo catalog visibility comparison failed")
-            }),
-        efforts,
-        aliases: catalog_entry_aliases(&entry),
-        default_effort: catalog_entry_default_effort(&entry),
-    }
-}
-
-fn catalog_entry_aliases(entry: &serde_json::Value) -> Vec<String> {
-    entry
-        .get("aliases")
-        .and_then(serde_json::Value::as_array)
-        .map(|aliases| {
-            aliases
-                .iter()
-                .filter_map(serde_json::Value::as_str)
-                .map(str::trim)
-                .filter(|alias| !alias.is_empty())
-                .map(str::to_string)
-                .collect()
-        })
-        .unwrap_or_default()
-}
-
-fn catalog_entry_default_effort(entry: &serde_json::Value) -> Option<String> {
-    ["default_reasoning_level", "default_reasoning_effort"]
-        .into_iter()
-        .find_map(|key| entry.get(key).and_then(serde_json::Value::as_str))
-        .map(str::trim)
-        .filter(|effort| !effort.is_empty())
-        .map(str::to_string)
-}
-
 fn main_model_catalog_plan_with_mojo(
     entries: Vec<serde_json::Value>,
 ) -> Option<(Vec<DynamicCatalogModel>, CatalogChoicesPlan)> {
-    let owned = entries
-        .into_iter()
-        .map(dynamic_catalog_model)
-        .collect::<Vec<_>>();
+    let owned = project_main_catalog_models(&entries)
+        .expect("compiled Mojo main catalog projection failed");
     let effort_views = owned
         .iter()
         .map(|entry| entry.efforts.iter().map(String::as_str).collect::<Vec<_>>())
@@ -427,15 +342,6 @@ pub(super) fn main_model_choices_from_catalog(
         default_effort: None,
     });
     Some(choices)
-}
-
-fn catalog_entry_model_id(entry: &serde_json::Value) -> &str {
-    ["slug", "id"]
-        .into_iter()
-        .find_map(|key| entry.get(key).and_then(serde_json::Value::as_str))
-        .map(str::trim)
-        .filter(|model| !model.is_empty())
-        .unwrap_or("")
 }
 
 fn main_model_prompt_title(
@@ -704,3 +610,7 @@ mod compiled_main_catalog_insertion_caller_tests {
         );
     }
 }
+
+#[cfg(test)]
+#[path = "super_main_catalog/projection_tests.rs"]
+mod projection_tests;
