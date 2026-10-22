@@ -8449,3 +8449,13 @@ Mojo, four manual/confirmation bridge, six auto-redemption bridge and eight
 caller tests plus strict workspace Clippy pass. Official share is
 36.30965676420222% (136,549 Mojo / 239,519 Rust LOC). The 75% goal remains open.
 Detailed evidence is in `migration/manual-redeem-reset-mojo-20261022.md`.
+
+## Session prompt JSON record policy compiled in Mojo (2026-10-22)
+
+Exact rollout matching, output record shape/visibility and transcript metadata
+filtering now use one compiled decoded-tree policy. Rust field classifiers,
+metadata iteration and exact-message extraction are deleted. Serde, effects,
+redaction and existing raw-line limits stay with Rust. Existing numeric APIs
+share the same Mojo kernels. Canonical share is 36.33835470028661% (136,678
+Mojo / 239,448 Rust LOC); the 75% objective remains open. Detailed validation
+is in `migration/session-prompt-json-mojo-20261022.md`.

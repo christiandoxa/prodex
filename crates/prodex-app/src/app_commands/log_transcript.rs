@@ -112,32 +112,6 @@ pub(crate) fn transcript_events_from_session_line(line: &str) -> Vec<TranscriptE
         .collect()
 }
 
-/// Returns exact visible user-message text from a raw response-item payload.
-///
-/// Output rendering normalizes whitespace. Prompt delivery verification cannot use that
-/// projection because trailing whitespace and newlines are part of the submitted message.
-pub(crate) fn transcript_exact_visible_user_message(payload: &serde_json::Value) -> Option<String> {
-    if payload.get("type").and_then(serde_json::Value::as_str) != Some("message")
-        || payload.get("role").and_then(serde_json::Value::as_str) != Some("user")
-        || !transcript_user_message_is_visible(payload)
-    {
-        return None;
-    }
-    let content = payload.get("content")?.as_array()?;
-    let parts = content
-        .iter()
-        .map(|item| {
-            item.get("text")
-                .or_else(|| item.get("content"))
-                .and_then(serde_json::Value::as_str)
-        })
-        .collect::<Option<Vec<_>>>()?;
-    (!parts.is_empty()).then(|| {
-        prodex_mojo_core::log::join_transcript_user_parts(&parts)
-            .expect("compiled-in Mojo transcript part joiner failed")
-    })
-}
-
 fn transcript_safe_text(text: &str) -> String {
     let redacted = redaction::redaction_redact_secret_like_text(text);
     prodex_mojo_core::log::normalize_transcript_safe_text(&redacted)
@@ -399,23 +373,11 @@ fn shell_output_transcript_event(
 }
 
 fn transcript_user_message_is_visible(payload: &serde_json::Value) -> bool {
-    let Some(kinds) = payload
-        .get("internal_chat_message_metadata_passthrough")
-        .and_then(|metadata| metadata.get("content_item_kinds"))
-        .and_then(serde_json::Value::as_array)
-    else {
-        return true;
-    };
-    let kinds_nonempty = !kinds.is_empty();
-    let kinds_all_user_text =
-        kinds_nonempty && kinds.iter().all(|kind| kind.as_str() == Some("user.text"));
-    prodex_mojo_core::session_cli_policy::prompt_write_user_message_visible(
-        2,
-        payload.get("type").and_then(serde_json::Value::as_str) == Some("message"),
-        payload.get("role").and_then(serde_json::Value::as_str) == Some("user"),
-        true,
-        kinds_nonempty,
-        kinds_all_user_text,
+    let tree = crate::json_boundary::app_json_tree_without_wire(payload)
+        .expect("transcript visibility exceeded the JSON ABI boundary");
+    prodex_mojo_core::json::session_prompt_write_json_check(
+        &tree.nodes,
+        prodex_mojo_core::json::SessionPromptWriteJsonCheck::TranscriptPayloadVisible,
     )
     .expect("compiled-in Mojo transcript visibility policy failed")
 }
@@ -430,3 +392,7 @@ fn transcript_safe_operation_value(value: &str) -> Option<String> {
     }
     Some(result)
 }
+
+#[cfg(test)]
+#[path = "log_transcript_visibility_tests.rs"]
+mod visibility_tests;
