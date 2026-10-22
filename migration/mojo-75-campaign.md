@@ -8661,3 +8661,18 @@ preserve ordered/duplicate/empty list entries, empty versus missing text,
 cold-start jobs-before-profiles precedence and full unsigned count formatting.
 Path acquisition, summary maps and binding-state formatting are separate
 boundaries for this checkpoint.
+
+## Runtime doctor report fields compiled in Mojo (2026-10-22)
+
+Fixed/optional row labels, order, placeholders, count text, first-five lists and
+suffixes now use a compiled renderer. Rust's tables, optional-field match and
+list formatter are removed without a fallback. The legacy plan ABI shares
+pure selection kernels with the renderer. Three caller regressions pass before
+and after migration, with direct Mojo, four bridge, 70 doctor-crate and 27 app
+doctor tests plus strict workspace Clippy, formatting and ownership guards.
+Canonical share is 36.4310533555615% (137,454 Mojo / 239,845 Rust production LOC).
+The 75% goal remains open. Evidence is in
+`migration/doctor-report-fields-mojo-20261022.md`. The next audited owner is
+`render.rs::{binding_source_text, binding_state_text}`: preserve first-profile
+order from compiled aggregation, empty names, four source segments and unsigned
+counts while moving their remaining templates and missing-count sum into Mojo.

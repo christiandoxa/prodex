@@ -1748,6 +1748,22 @@
         ]
       },
       {
+        "path": "mojo/prodex_core/runtime_doctor_report_render.mojo",
+        "language": "mojo",
+        "classification": "MIXED",
+        "semantic_ranges": [
+          {
+            "start": 41,
+            "end": 146
+          }
+        ],
+        "production_reachable": true,
+        "role": "semantic",
+        "operations": [
+          "runtime_doctor_report_field_plan"
+        ]
+      },
+      {
         "path": "mojo/prodex_core/runtime_doctor_plan.mojo",
         "language": "mojo",
         "classification": "MIXED",
@@ -8075,22 +8091,22 @@
       "introduced_in": "0.439.0",
       "baseline_state": "Rust decided optional runtime-doctor row inclusion and cold-start jobs-over-profiles precedence",
       "final_state": "authoritative",
-      "mojo_entry": "prodex_mojo_runtime_doctor_report_fields_v1",
+      "mojo_entry": "prodex_mojo_runtime_doctor_report_render_v1",
       "mojo_abi_version": 1,
-      "mojo_source": "mojo/prodex_core/runtime_doctor_render.mojo",
+      "mojo_source": "mojo/prodex_core/runtime_doctor_report_render.mojo",
       "consumer": "crates/prodex-runtime-doctor/src/render.rs",
-      "consumer_marker": "prodex_mojo_core::rich::runtime_doctor_report_field_plan(",
+      "consumer_marker": "prodex_mojo_core::rich::runtime_doctor_report_fields_json(",
       "production_consumers": [
         "crates/prodex-runtime-doctor/src/render.rs"
       ],
       "production_reachability_test": "crates/prodex-runtime-doctor/src/render.rs",
-      "rust_owner_before": "Rust optional-row branches for legacy recovery, compact final details, deferred sync probes, probe pressure, and hot reason",
+      "rust_owner_before": "Rust optional-row branches and later fixed-row labels, first-five list clipping, placeholders, count text and suffix formatting",
       "rust_state_after": "adapter-only",
-      "rust_test_oracle": "deleted; direct Mojo plan cases and the runtime-doctor caller regression cover fixed optional-row order and cold-start jobs precedence",
+      "rust_test_oracle": "deleted; direct Mojo, bridge and caller regressions cover complete row order, list clipping, empty/missing text, unsigned counts and cold-start jobs precedence; legacy plan ABI shares pure kernels with the renderer",
       "production_fallback": false,
       "duplicate_production_owner": false,
       "platform_fallback": false,
-      "rust_adapter_scope": "marker-count and field-presence lookup, bounded ABI flags, selected-value formatting, and existing field DTO materialization"
+      "rust_adapter_scope": "Path display, summary map lookup, the separate existing binding-state formatter, borrowed typed ABI records, checked output and Serde field-pair materialization"
     },
     {
       "name": "runtime_doctor_marker_scope_render",
@@ -13718,13 +13734,13 @@
       "previous_responsibility": "Rust decided optional report rows and cold-start detail precedence while assembling the runtime-doctor human panel",
       "final_state": "adapter-only",
       "rust_before": "crates/prodex-runtime-doctor/src/render.rs::runtime_doctor_fields_for_summary optional-row branches",
-      "rust_after": "Rust supplies bounded presence facts and materializes the Mojo-selected rows",
-      "mojo_owner": "mojo/prodex_core/runtime_doctor_render.mojo::prodex_mojo_runtime_doctor_report_fields_v1",
-      "mojo_source": "mojo/prodex_core/runtime_doctor_render.mojo",
-      "mojo_entry": "prodex_mojo_runtime_doctor_report_fields_v1",
+      "rust_after": "Rust acquires paths, summary values and binding-state text; compiled Mojo returns complete ordered field pairs for Serde materialization",
+      "mojo_owner": "mojo/prodex_core/runtime_doctor_report_render.mojo::prodex_mojo_runtime_doctor_report_render_v1",
+      "mojo_source": "mojo/prodex_core/runtime_doctor_report_render.mojo",
+      "mojo_entry": "prodex_mojo_runtime_doctor_report_render_v1",
       "production_consumer": "crates/prodex-runtime-doctor/src/render.rs",
-      "parity_test": "crates/prodex-runtime-doctor/tests/src/diagnosis.rs",
-      "cleanup_evidence": "The Rust optional-row decision tree and jobs-over-profiles precedence are removed; the production report path applies only the validated Mojo field plan."
+      "parity_test": "crates/prodex-runtime-doctor/tests/report_fields.rs",
+      "cleanup_evidence": "Rust fixed/optional row tables, list clipping, placeholders and suffixes are removed without a fallback; the legacy plan ABI and production renderer share compiled field predicates and sync-source precedence."
     },
     {
       "file": "crates/prodex-runtime-doctor/src/parsing.rs",
