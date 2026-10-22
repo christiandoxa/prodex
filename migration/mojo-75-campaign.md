@@ -8960,3 +8960,11 @@ baselines remain owned and protected; the 75% goal stays open. Evidence is in
 
 Compiled candidate/context/metadata ownership removes the Rust algorithm without a fallback.
 Evidence and remaining coverage are in [runtime-catalog-plan-mojo-20261022.md](runtime-catalog-plan-mojo-20261022.md).
+
+## DeepSeek runtime catalog plans compiled in Mojo (2026-10-22)
+
+The compiled planner now owns DeepSeek assembly and metadata defaults while
+preserving its seven legacy entries and exact configured token budgets.
+Canonical share is 36.67728728192322% (138,942 Mojo / 239,881 Rust production LOC).
+The 75% target remains open.
+Evidence and coverage are in [deepseek-catalog-plan-mojo-20261022.md](deepseek-catalog-plan-mojo-20261022.md).

@@ -8,16 +8,14 @@ use prodex_cli::{
     SUPER_DEEPSEEK_DEFAULT_AUTO_COMPACT_LIMIT, SUPER_DEEPSEEK_DEFAULT_CONTEXT_WINDOW,
     SUPER_DEEPSEEK_DEFAULT_MODEL,
 };
-use prodex_mojo_core::{
-    rich::merge_catalog_ids,
-    super_provider_config::{
-        RuntimeDeepSeekWebSearchToken, RuntimeModelProviderClass,
-        deepseek_catalog_model_metadata as mojo_deepseek_catalog_model_metadata,
-        deepseek_catalog_static_models, runtime_bool_token, runtime_deepseek_web_search_token,
-        runtime_model_provider_class,
-    },
+use prodex_mojo_core::super_provider_config::{
+    RuntimeDeepSeekWebSearchToken, RuntimeModelProviderClass, runtime_bool_token,
+    runtime_deepseek_web_search_token, runtime_model_provider_class,
 };
-use prodex_provider_core::{ProviderId, RuntimeModelCatalogInput, render_runtime_model_catalog};
+use prodex_provider_core::{
+    ProviderId, RuntimeModelCatalogInput, RuntimeModelCatalogPlanInput, plan_runtime_model_catalog,
+    render_runtime_model_catalog,
+};
 use serde_json::json;
 use std::ffi::{OsStr, OsString};
 #[cfg(test)]
@@ -29,6 +27,10 @@ const DEEPSEEK_MODEL_CATALOG_FILE: &str = "prodex-deepseek-model-catalog.json";
 #[cfg(test)]
 #[path = "runtime_deepseek_config/schema_tests.rs"]
 mod schema_tests;
+
+#[cfg(test)]
+#[path = "runtime_deepseek_config/assembly_tests.rs"]
+mod assembly_tests;
 
 pub(crate) fn runtime_deepseek_gateway_strict_tools(
     codex_home: &Path,
@@ -277,42 +279,25 @@ fn deepseek_catalog_models(
     context_window: u64,
     auto_compact_token_limit: u64,
 ) -> Result<Vec<serde_json::Value>> {
-    let static_models =
-        deepseek_catalog_static_models().expect("Mojo DeepSeek static catalog enumeration failed");
-    let candidates = std::iter::once(launch_model)
-        .chain(static_models.iter().map(|model| model.slug.as_str()))
-        .collect::<Vec<_>>();
-    let accepted = merge_catalog_ids(&[], &candidates)
-        .expect("Mojo DeepSeek catalog dedup returned an invalid structured result");
-    let mut models = Vec::with_capacity(accepted.len());
-
-    for candidate_index in accepted {
-        let slug = candidates[candidate_index].trim();
-        let priority = models.len() + 1;
-        let (display_name, description) = deepseek_catalog_model_metadata(slug);
-        models.push(deepseek_catalog_model(
-            slug,
-            &display_name,
-            &description,
-            priority,
-            context_window,
-            auto_compact_token_limit,
-        )?);
-    }
-
-    Ok(models)
-}
-
-fn deepseek_catalog_model_metadata(model: &str) -> (String, String) {
-    mojo_deepseek_catalog_model_metadata(model)
-        .expect("Mojo DeepSeek catalog lookup returned invalid output")
-        .map(|entry| (entry.display_name, entry.description))
-        .unwrap_or_else(|| {
-            (
-                model.to_string(),
-                "DeepSeek model routed through the Prodex Responses adapter.".to_string(),
+    let plan = plan_runtime_model_catalog(RuntimeModelCatalogPlanInput {
+        provider: ProviderId::DeepSeek,
+        launch_model,
+        context_window,
+        auto_compact_token_limit,
+        dynamic_models: &[],
+    })?;
+    plan.into_iter()
+        .map(|model| {
+            deepseek_catalog_model(
+                &model.slug,
+                &model.display_name,
+                &model.description,
+                model.priority,
+                model.context_window,
+                model.auto_compact_token_limit,
             )
         })
+        .collect()
 }
 
 fn deepseek_catalog_model(

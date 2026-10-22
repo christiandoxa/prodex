@@ -106,3 +106,14 @@ fn compiled_catalog_plan_abi_preserves_output_and_metadata_on_invalid_input() {
         assert_eq!(metadata, [77, 88]);
     }
 }
+
+#[test]
+fn compiled_deepseek_catalog_plan_bridge_preserves_complete_metadata() {
+    let mut nodes = input();
+    nodes[1].text = "deepseek";
+    let output = runtime_catalog_plan_json(&nodes, RAW, 1).unwrap();
+    assert_eq!(
+        std::str::from_utf8(&output).unwrap(),
+        r#"{"Ok":[{"slug":"synthetic","display_name":"synthetic","description":"DeepSeek model routed through the Prodex Responses adapter.","priority":1,"context_window":100000,"auto_compact_token_limit":90000}]}"#
+    );
+}

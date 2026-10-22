@@ -225,3 +225,53 @@ fn runtime_catalog_plan_uses_typed_metadata_saturated_budgets_and_provider_rejec
         Err(RuntimeModelCatalogError::Mojo(MojoError::InvalidInput))
     ));
 }
+
+#[test]
+fn deepseek_catalog_plan_keeps_legacy_static_entries_and_unclamped_budgets() {
+    let input = RuntimeModelCatalogPlanInput {
+        provider: ProviderId::DeepSeek,
+        launch_model: " PRO ",
+        context_window: 0,
+        auto_compact_token_limit: u64::MAX,
+        dynamic_models: &[],
+    };
+    let models = plan_runtime_model_catalog(input).unwrap();
+    assert_eq!(
+        models
+            .iter()
+            .map(|model| model.slug.as_str())
+            .collect::<Vec<_>>(),
+        [
+            "PRO",
+            "auto",
+            "flash",
+            "deepseek-v4-pro",
+            "deepseek-v4-flash",
+            "deepseek-chat",
+            "deepseek-reasoner"
+        ]
+    );
+    assert_eq!(models[0].display_name, "DeepSeek Pro");
+    assert_eq!(
+        models[0].description,
+        "Prodex DeepSeek Pro alias routed through DeepSeek V4 Pro."
+    );
+    assert!(
+        models
+            .iter()
+            .all(|model| model.context_window == 0 && model.auto_compact_token_limit == u64::MAX)
+    );
+    let dynamic = [RuntimeDynamicCatalogModel {
+        slug: "synthetic".into(),
+        display_name: None,
+        description: None,
+        context_window: None,
+    }];
+    assert!(matches!(
+        plan_runtime_model_catalog(RuntimeModelCatalogPlanInput {
+            dynamic_models: &dynamic,
+            ..input
+        }),
+        Err(RuntimeModelCatalogError::Mojo(MojoError::InvalidInput))
+    ));
+}
