@@ -719,3 +719,12 @@ pub use report::{
     RuntimeLaunchReportCompletion, RuntimeLaunchReportInput, RuntimeLaunchReportProxy,
     complete_runtime_launch_report, render_runtime_launch_report,
 };
+
+#[cfg(feature = "mojo-runtime")]
+#[path = "launch/report_tui.rs"]
+mod report_tui;
+#[cfg(feature = "mojo-runtime")]
+pub use report_tui::{
+    RuntimeLaunchTuiColor, RuntimeLaunchTuiLine, runtime_launch_tui_height,
+    runtime_launch_tui_line_plan,
+};

@@ -428,11 +428,13 @@ pub(crate) fn print_runtime_launch_dry_run(
 }
 
 pub(crate) fn print_runtime_launch_dry_run_report(flow: &str, output: &str) -> Result<()> {
-    let height = runtime_launch_dry_run_tui_height(output);
+    let height = prodex_mojo_core::launch::runtime_launch_tui_height(output)
+        .map_err(|error| anyhow::anyhow!("Mojo dry-run TUI height failed: {error:?}"))?;
     let Some(mut terminal) = crate::try_inline_stdout_terminal(height) else {
         print!("{output}");
         return Ok(());
     };
+    let report_text = runtime_launch_dry_run_tui_text(output)?;
     terminal.draw(|frame| {
         let chunks = Layout::default()
             .direction(Direction::Vertical)
@@ -446,7 +448,7 @@ pub(crate) fn print_runtime_launch_dry_run_report(flow: &str, output: &str) -> R
         .block(tui_connected_header_block(tui_border_style()));
         frame.render_widget(header, chunks[0]);
 
-        let body = Paragraph::new(runtime_launch_dry_run_tui_text(output))
+        let body = Paragraph::new(report_text)
             .block(
                 Block::default()
                     .borders(Borders::LEFT | Borders::RIGHT | Borders::BOTTOM)
@@ -459,58 +461,35 @@ pub(crate) fn print_runtime_launch_dry_run_report(flow: &str, output: &str) -> R
     Ok(())
 }
 
-fn runtime_launch_dry_run_tui_height(output: &str) -> u16 {
-    let rows = output.lines().count().saturating_add(5).clamp(8, 32);
-    rows as u16
-}
-
-fn runtime_launch_dry_run_tui_text(output: &str) -> Text<'static> {
-    Text::from(
-        output
-            .lines()
-            .map(|line| {
-                if line.ends_with(':') {
-                    Line::from(Span::styled(line.to_string(), tui_title_style()))
-                } else if let Some((label, value)) = line.split_once(':') {
-                    let value_color = runtime_launch_dry_run_value_color(label, value);
-                    Line::from(vec![
-                        Span::styled(
-                            format!("{label}:"),
-                            tui_secondary_style().add_modifier(Modifier::BOLD),
-                        ),
-                        Span::raw(" "),
-                        Span::styled(
-                            value.trim_start().to_string(),
-                            Style::default().fg(value_color),
-                        ),
-                    ])
-                } else {
-                    Line::from(Span::styled(line.to_string(), tui_primary_style()))
-                }
-            })
-            .collect::<Vec<_>>(),
-    )
-}
-
-fn runtime_launch_dry_run_value_color(label: &str, value: &str) -> Color {
-    let lower_label = label.to_ascii_lowercase();
-    let lower_value = value.to_ascii_lowercase();
-    if lower_value.contains("disabled") || lower_value.contains("removed") {
-        Color::Red
-    } else if lower_value.contains("enabled")
-        || lower_value.contains("ready")
-        || lower_value.contains("ok")
-        || lower_label.contains("proxy")
-    {
-        Color::Green
-    } else if lower_label.contains("command")
-        || lower_label.contains("binary")
-        || lower_label.contains("codex_home")
-    {
-        Color::Cyan
-    } else {
-        Color::Reset
+fn runtime_launch_dry_run_tui_text(output: &str) -> Result<Text<'_>> {
+    use prodex_mojo_core::launch::{RuntimeLaunchTuiColor, RuntimeLaunchTuiLine};
+    let mut lines = Vec::new();
+    for line in output.lines() {
+        let plan = prodex_mojo_core::launch::runtime_launch_tui_line_plan(line)
+            .map_err(|error| anyhow::anyhow!("Mojo dry-run TUI line failed: {error:?}"))?;
+        lines.push(match plan {
+            RuntimeLaunchTuiLine::Primary => Line::from(Span::styled(line, tui_primary_style())),
+            RuntimeLaunchTuiLine::Title => Line::from(Span::styled(line, tui_title_style())),
+            RuntimeLaunchTuiLine::Field {
+                label,
+                value,
+                color,
+            } => {
+                let color = match color {
+                    RuntimeLaunchTuiColor::Reset => Color::Reset,
+                    RuntimeLaunchTuiColor::Red => Color::Red,
+                    RuntimeLaunchTuiColor::Green => Color::Green,
+                    RuntimeLaunchTuiColor::Cyan => Color::Cyan,
+                };
+                Line::from(vec![
+                    Span::styled(label, tui_secondary_style().add_modifier(Modifier::BOLD)),
+                    Span::raw(" "),
+                    Span::styled(value, Style::default().fg(color)),
+                ])
+            }
+        });
     }
+    Ok(Text::from(lines))
 }
 
 fn profile_openai_compatible_dry_run_child(
@@ -562,3 +541,7 @@ fn runtime_proxy_codex_endpoint<'a>(
 #[cfg(test)]
 #[path = "child_process_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "child_process_dry_run_presentation_tests.rs"]
+mod dry_run_presentation_tests;
