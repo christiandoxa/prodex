@@ -111,6 +111,10 @@ pub use kiro::{
     KiroModelCatalogError, normalize_kiro_model_catalog, normalize_kiro_model_catalog_models,
 };
 
+#[path = "catalog/copilot.rs"]
+mod copilot;
+pub use copilot::{CopilotModelCatalogError, normalize_copilot_model_catalog};
+
 pub fn merge_provider_model_catalog_json<'a>(
     provider: ProviderId,
     additional_models: impl IntoIterator<Item = &'a serde_json::Value>,

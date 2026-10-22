@@ -110,7 +110,9 @@ mod gemini_contents;
 pub use self::gemini_contents::{GeminiContentOperation, gemini_content_hardening};
 #[cfg(feature = "mojo-rich")]
 pub use deepseek_function_tools::{DeepSeekFunctionToolOperation, deepseek_function_tool_policy};
+mod copilot_catalog;
 mod kiro_catalog;
+pub use self::copilot_catalog::copilot_model_catalog_json;
 pub use self::kiro_catalog::{
     KiroModelCatalogModel, KiroModelCatalogPlan, kiro_model_catalog_plan,
 };
