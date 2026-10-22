@@ -8739,3 +8739,25 @@ exact provider-labelled diagnostics into the existing compiled chat-request
 validation owner. Preserve absent fields, empty optional strings, Unicode model
 whitespace and every caller's error precedence. Reuse the versioned JSON ABI;
 Serde acquisition and dependency-specific parsing remain in Rust.
+
+## Chat-compatible request shape compiled in Mojo (2026-10-22)
+
+The six ordered Rust shape/model/type rejections and exact diagnostic templates
+now use the existing compiled chat-request validation owner. Borrowed Serde
+nodes avoid request-body serialization. Missing fields, empty optional strings,
+Unicode model whitespace and provider-labelled error precedence remain intact;
+the old Rust branches are deleted without a fallback. Direct Mojo, three bridge
+tests in each feature configuration, two caller regressions before/after,
+547 provider-crate and 551 application provider tests pass, with strict workspace
+Clippy, guards and full default CI: 1,443 Rust tests in 493.80 seconds.
+Canonical share is 36.47306475315425% (137,746 Mojo /
+239,919 Rust production LOC). The 75% target stays open. Evidence is in
+`migration/chat-request-shape-mojo-20261022.md`.
+
+The next audited owner is
+`reports/info/processes.rs::{runtime_log_pid_from_path_with_prefix,select_active_runtime_log_paths_with_prefix}`.
+Move PID parsing, runtime-process membership, last-path retention and ascending
+PID output to Mojo. Preserve optional ASCII plus signs, leading zeros, the full
+u32 range, exact prefixes and the empty-runtime return before path iteration.
+Reuse core-file decimal parsing and index heapsort. Native Path/OsStr basename
+acquisition, filesystem effects and original path ownership stay in Rust.

@@ -7,6 +7,10 @@ mod tool_calls;
 #[path = "chat_compat/usage.rs"]
 mod usage;
 
+#[cfg(test)]
+#[path = "chat_compat/shape_tests.rs"]
+mod shape_tests;
+
 use std::time::{SystemTime, UNIX_EPOCH};
 
 pub use self::response::{
@@ -31,35 +35,9 @@ pub fn provider_core_chat_compatible_validate_top_level_request_shape(
     value: &serde_json::Value,
     provider_label: &str,
 ) -> Result<(), String> {
-    if !value.is_object() {
-        return Err(format!(
-            "{provider_label} request body must be a JSON object"
-        ));
-    }
-    if let Some(model) = value.get("model") {
-        let Some(model) = model.as_str() else {
-            return Err(format!("{provider_label} model must be a string"));
-        };
-        if model.trim().is_empty() {
-            return Err(format!("{provider_label} model must not be empty"));
-        }
-    }
-    if let Some(stream) = value.get("stream")
-        && !stream.is_boolean()
-    {
-        return Err(format!("{provider_label} stream must be a boolean"));
-    }
-    if let Some(instructions) = value.get("instructions")
-        && !instructions.is_string()
-    {
-        return Err(format!("{provider_label} instructions must be a string"));
-    }
-    if let Some(previous_response_id) = value.get("previous_response_id")
-        && !previous_response_id.is_string()
-    {
-        return Err(format!(
-            "{provider_label} previous_response_id must be a string"
-        ));
-    }
-    Ok(())
+    let mut document = crate::mojo_json::Document::default();
+    let _ = document.borrowed_shape(value);
+    prodex_mojo_core::json::chat_compatible_request_shape_error(&document.nodes, provider_label)
+        .map_err(|error| format!("{provider_label} request shape validation failed: {error:?}"))?
+        .map_or(Ok(()), Err)
 }

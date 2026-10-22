@@ -12,8 +12,8 @@ from parsed_json import (
     pj_literal,
     pj_valid,
 )
-from json_sink import JsonSink, js_byte, js_literal, js_string, js_raw
-from openai_chat_request_validation import ocr_validate, ocr_error_literal
+from json_sink import JsonSink, js_byte, js_literal, js_string, js_raw, js_view
+from openai_chat_request_validation import ocr_validate, ocr_error_literal, ocr_top_level_shape_issue
 from openai_chat_request_messages import ocr_message_count, ocr_write_messages
 
 comptime OPENAI_CHAT_REQUEST_ABI: Int64 = 1
@@ -143,7 +143,7 @@ def prodex_mojo_openai_chat_request_v1(
 ) abi("C") -> Int64:
     if abi != OPENAI_CHAT_REQUEST_ABI:
         return 4
-    if operation != 0 or flag != 0 or measuring < 0 or measuring > 1 or raw_length < 0:
+    if operation < 0 or operation > 1 or flag != 0 or measuring < 0 or measuring > 1 or raw_length < 0:
         return 1
     if (
         capacity < 0
@@ -158,6 +158,8 @@ def prodex_mojo_openai_chat_request_v1(
             return 1
     elif output_address == 0:
         return 1
+    if operation == 1 and (nodes_address % 8 != 0 or scratch_address % 8 != 0 or metadata_address % 8 != 0):
+        return 1
 
     var tree = ParsedJson(
         Pointer[mut=False, ParsedJsonNode, ImmUntrackedOrigin](
@@ -166,13 +168,20 @@ def prodex_mojo_openai_chat_request_v1(
         nodes_count,
         ProdexRichStringView(UInt(raw_address), UInt(raw_length)),
     )
-    if not pj_valid(tree) or pj_kind(tree, 0) != JSON_OBJECT:
+    if not pj_valid(tree):
         return 1
-    var provider = pj_string_field(tree, 0, StringSlice("provider"))
-    var default_model = pj_string_field(tree, 0, StringSlice("default_model"))
-    var request = pj_field(tree, 0, StringSlice("request"))
-    if provider < 0 or default_model < 0 or request < 0:
-        return 1
+    # Shape validation borrows the request root and uses raw only for its label.
+    var request: Int64 = 0
+    var provider = tree.raw.copy()
+    if operation == 0:
+        if pj_kind(tree, 0) != JSON_OBJECT:
+            return 1
+        var provider_index = pj_string_field(tree, 0, StringSlice("provider"))
+        var default_model = pj_string_field(tree, 0, StringSlice("default_model"))
+        request = pj_field(tree, 0, StringSlice("request"))
+        if provider_index < 0 or default_model < 0 or request < 0:
+            return 1
+        provider = pj_text(tree, provider_index)
 
     var sink = JsonSink(
         Pointer[mut=True, UInt8, MutUntrackedOrigin](
@@ -183,7 +192,16 @@ def prodex_mojo_openai_chat_request_v1(
         measuring == 1,
         False,
     )
-    if ocr_validate(Pointer(to=sink), tree, request, pj_text(tree, provider)):
+    if operation == 1:
+        var issue = ocr_top_level_shape_issue(tree, request)
+        if issue.len > 0:
+            var required = 1 + Int64(provider.len) + Int64(issue.len)
+            if measuring == 0 and capacity < required:
+                return 3
+            js_byte(Pointer(to=sink), 69)
+            js_view(Pointer(to=sink), provider)
+            js_view(Pointer(to=sink), issue)
+    elif ocr_validate(Pointer(to=sink), tree, request, provider):
         if ocr_message_count(tree, request) == 0:
             ocr_error_literal(
                 Pointer(to=sink),
@@ -197,6 +215,6 @@ def prodex_mojo_openai_chat_request_v1(
     var meta = Pointer[mut=True, Int64, MutUntrackedOrigin](
         unsafe_from_address=Int(metadata_address)
     )
-    meta[unsafe_offset=0] = 1
+    meta[unsafe_offset=0] = 1 if operation == 0 or sink.written > 0 else 0
     meta[unsafe_offset=1] = sink.written
     return 0
