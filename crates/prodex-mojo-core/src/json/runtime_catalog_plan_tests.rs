@@ -61,6 +61,22 @@ fn compiled_catalog_plan_bridge_preserves_budget_and_zero_limit_rejection() {
 }
 
 #[test]
+fn compiled_gemini_plan_keeps_complete_metadata_and_provider_limit_diagnostic() {
+    let mut nodes = input();
+    nodes[1].text = "gemini";
+    let output = runtime_catalog_plan_json(&nodes, RAW, 1).unwrap();
+    assert_eq!(
+        std::str::from_utf8(&output).unwrap(),
+        r#"{"Ok":[{"slug":"synthetic","display_name":"synthetic","description":"Gemini model routed through the Prodex Responses adapter.","priority":1,"context_window":100000,"auto_compact_token_limit":90000}]}"#
+    );
+    let output = runtime_catalog_plan_json(&nodes, RAW, 0).unwrap();
+    assert_eq!(
+        std::str::from_utf8(&output).unwrap(),
+        r#"{"Err":"Gemini model catalog exceeds the hard limit of 0 entries"}"#
+    );
+}
+
+#[test]
 fn compiled_catalog_plan_abi_preserves_output_and_metadata_on_invalid_input() {
     let nodes = ffi_nodes(&input(), RAW).unwrap();
     let mut scratch = vec![0_u64; nodes.len() * 8];

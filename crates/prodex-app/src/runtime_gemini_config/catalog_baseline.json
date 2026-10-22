@@ -1,0 +1,72 @@
+[
+  {
+    "first_auto_compact_token_limit": 900000,
+    "first_context_window": 1048576,
+    "models": 22,
+    "name": "default",
+    "sha256": "21af39d71c6d3269f54ef4193289fdba2ae119ef9693cadbcbfd0fec586209c7"
+  },
+  {
+    "first_auto_compact_token_limit": 190000,
+    "first_context_window": 200000,
+    "models": 22,
+    "name": "known",
+    "sha256": "592a38296b64731a842a6b43f7f933134ac2f23e9a8db08e1d7973007d36fb74"
+  },
+  {
+    "first_auto_compact_token_limit": 18446744073709551615,
+    "first_context_window": 18446744073709551615,
+    "models": 22,
+    "name": "case-folded-padded",
+    "sha256": "13836a3e1433f748ed14b9cb93fc4df3da1f30786b8b9e9a42e96b7b812969d9"
+  },
+  {
+    "first_auto_compact_token_limit": 18446744073709551615,
+    "first_context_window": 0,
+    "models": 23,
+    "name": "unknown-unicode",
+    "sha256": "336bdece4ceee9557b4b582e01661fab339766c5d42fffe7d62fcc3e6e2fcdf6"
+  },
+  {
+    "first_auto_compact_token_limit": 0,
+    "first_context_window": 0,
+    "models": 22,
+    "name": "empty",
+    "sha256": "da8960c5e3de2827b467e937afbdb6f16ce43f0126cf29cbdce5f4277b03391d"
+  },
+  {
+    "first_auto_compact_token_limit": 0,
+    "first_context_window": 1,
+    "models": 22,
+    "name": "unicode-blank",
+    "sha256": "2b649d6e1e887a0d2e1df28a20145ec5b8730a8559b02ee0de89e687d8fdb6c9"
+  },
+  {
+    "first_auto_compact_token_limit": 18446744073709551615,
+    "first_context_window": 8,
+    "models": 23,
+    "name": "compact-above-context",
+    "sha256": "e8d4f489a424b59bca91cb3b321650a95f48c0e683147870daddab82fd43f04b"
+  },
+  {
+    "first_auto_compact_token_limit": 18446744073709551615,
+    "first_context_window": 18446744073709551615,
+    "models": 23,
+    "name": "max-unsigned",
+    "sha256": "363eb0a90fc9435b1a8e90475300d8aefffe050e23fd026f56859e74629ed306"
+  },
+  {
+    "first_auto_compact_token_limit": 18446744073709551615,
+    "first_context_window": 1,
+    "models": 23,
+    "name": "long-query",
+    "sha256": "baeb1942e448f4cce13eac0bc6a0f96a0b1146d740a00cf8fc49d2acbd0f2c4f"
+  },
+  {
+    "first_auto_compact_token_limit": 18446744073709551615,
+    "first_context_window": 1,
+    "models": 22,
+    "name": "long-padded",
+    "sha256": "b9635d9632c0fdfd06b13ecdff896d8159a42015aae851e7f6e03afff8121f70"
+  }
+]

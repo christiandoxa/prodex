@@ -119,8 +119,9 @@ def runtime_catalog_emit(sink: Pointer[mut=True, JsonSink, _], tree: ParsedJson,
         return False
     var provider = pj_field(tree, 0, StringSlice("provider"))
     var deepseek = pj_is["deepseek"](tree, provider)
+    var gemini = pj_is["gemini"](tree, provider)
     var kiro = pj_is["kiro"](tree, provider)
-    var capable = pj_is["anthropic"](tree, provider) or pj_is["copilot"](tree, provider)
+    var capable = gemini or pj_is["anthropic"](tree, provider) or pj_is["copilot"](tree, provider)
     if not deepseek and not kiro and not capable:
         return False
     var slug = pj_field(tree, 0, StringSlice("slug"))
@@ -154,7 +155,7 @@ def runtime_catalog_emit(sink: Pointer[mut=True, JsonSink, _], tree: ParsedJson,
     js_literal(sink, StringSlice(',"description":'))
     js_raw(sink, tree, description)
     js_literal(sink, StringSlice(',"default_reasoning_level":'))
-    if deepseek or pj_kind(tree, default) == JSON_NULL or pj_is["unknown"](tree, default):
+    if deepseek or gemini or pj_kind(tree, default) == JSON_NULL or pj_is["unknown"](tree, default):
         js_literal(sink, StringSlice('"high"'))
     else:
         js_raw(sink, tree, default)
@@ -165,6 +166,14 @@ def runtime_catalog_emit(sink: Pointer[mut=True, JsonSink, _], tree: ParsedJson,
             '{"effort":"medium","description":"DeepSeek medium reasoning effort"},'
             '{"effort":"high","description":"DeepSeek high reasoning effort"},'
             '{"effort":"xhigh","description":"DeepSeek max reasoning effort"}'
+        ))
+    elif gemini:
+        js_literal(sink, StringSlice(
+            '{"effort":"minimal","description":"Disable Gemini thinking budget where supported"},'
+            '{"effort":"low","description":"Small Gemini thinking budget"},'
+            '{"effort":"medium","description":"Default Gemini thinking budget"},'
+            '{"effort":"high","description":"High Gemini thinking budget"},'
+            '{"effort":"xhigh","description":"Maximum Gemini thinking effort"}'
         ))
     elif pj_kind(tree, efforts) == JSON_NULL:
         runtime_put_reasoning(sink, pj_literal(StringSlice("low")))
@@ -192,7 +201,7 @@ def runtime_catalog_emit(sink: Pointer[mut=True, JsonSink, _], tree: ParsedJson,
         ',"additional_speed_tiers":[],"service_tiers":[],"default_service_tier":null,'
         '"availability_nux":null,"upgrade":null,"base_instructions":'
     ))
-    if deepseek:
+    if deepseek or gemini:
         js_string(sink, pj_literal(StringSlice(
             "You are Codex, a coding agent. You and the user share the same workspace.\n\n"
             "Focus on the user's software task. Inspect the codebase before changing behavior, make narrow edits, preserve user changes, and verify with relevant tests or commands when feasible.\n\n"

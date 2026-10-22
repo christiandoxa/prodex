@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::fmt;
 
-/// Host-observed fields for a DeepSeek, Copilot, Kiro or Anthropic Codex model entry.
+/// Host-observed fields for a Gemini, DeepSeek, Copilot, Kiro or Anthropic Codex model entry.
 #[derive(Clone, Copy, Debug)]
 pub struct RuntimeModelCatalogInput<'a> {
     pub provider: ProviderId,
@@ -118,7 +118,7 @@ pub struct RuntimeModelCatalogPlanInput<'a> {
     pub dynamic_models: &'a [RuntimeDynamicCatalogModel],
 }
 
-/// Plan DeepSeek, Copilot, Kiro or Anthropic model metadata, ordering and token budgets.
+/// Plan Gemini, DeepSeek, Copilot, Kiro or Anthropic metadata, ordering and token budgets.
 pub fn plan_runtime_model_catalog(
     input: RuntimeModelCatalogPlanInput<'_>,
 ) -> Result<Vec<RuntimePlannedCatalogModel>, RuntimeModelCatalogError> {

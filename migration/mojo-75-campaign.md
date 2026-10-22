@@ -8999,3 +8999,15 @@ Full default CI passes 1,446 Rust tests in 521.81 seconds.
 Canonical share is 36.72706568327156% (139,330 Mojo / 240,036 Rust production LOC).
 The 75% target remains open. Evidence and coverage are in
 [session-tui-presentation-mojo-20261023.md](session-tui-presentation-mojo-20261023.md).
+
+## Gemini runtime catalogs compiled in Mojo (2026-10-23)
+
+Gemini now reuses the existing compiled catalog planner and model-entry renderer.
+Its Rust assembly, metadata defaults, priority loop, schema and duplicate prompt
+constant are deleted. Ten complete original catalog digests match; ID-only
+metadata lookup and exact caller budgets remain distinct from other providers.
+Direct Mojo, both bridge modes, provider/application callers and all 555 provider
+tests pass. Full default CI passes 1,446 Rust tests in 476.88 seconds.
+Canonical share is 36.738793987602925% (139,344 Mojo / 239,939 Rust production LOC),
+removing 97 net Rust production LOC. The 75% target remains open. Evidence and
+coverage are in [gemini-runtime-catalog-mojo-20261023.md](gemini-runtime-catalog-mojo-20261023.md).

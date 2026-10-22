@@ -77,6 +77,25 @@ fn compiled_runtime_schema_bridge_preserves_defaults_and_provider_capabilities()
 }
 
 #[test]
+fn compiled_gemini_schema_keeps_complete_efforts_and_capabilities() {
+    let mut nodes = input();
+    nodes[1].text = "gemini";
+    let output = runtime_model_catalog_json(&nodes, RAW).unwrap();
+    let text = std::str::from_utf8(&output).unwrap();
+    assert!(text.contains(concat!(
+        r#""supported_reasoning_levels":[{"effort":"minimal","description":"Disable Gemini thinking budget where supported"},"#,
+        r#"{"effort":"low","description":"Small Gemini thinking budget"},"#,
+        r#"{"effort":"medium","description":"Default Gemini thinking budget"},"#,
+        r#"{"effort":"high","description":"High Gemini thinking budget"},"#,
+        r#"{"effort":"xhigh","description":"Maximum Gemini thinking effort"}]"#,
+    )));
+    assert!(text.contains(r#""supports_reasoning_summaries":true"#));
+    assert!(text.contains(r#""supports_search_tool":true"#));
+    assert!(text.contains(r#""input_modalities":["text","image"]"#));
+    assert!(text.contains("share the same workspace.\\n\\nFocus on the user's software task."));
+}
+
+#[test]
 fn compiled_runtime_schema_abi_rejects_invalid_input_before_output_and_metadata() {
     let nodes = ffi_nodes(&input(), RAW).unwrap();
     let mut scratch = [0_u64; 20];

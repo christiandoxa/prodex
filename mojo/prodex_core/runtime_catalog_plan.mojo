@@ -101,7 +101,8 @@ def runtime_catalog_build_emit(sink: Pointer[mut=True, JsonSink, _], tree: Parse
     var provider = pj_field(tree, 0, StringSlice("provider"))
     var copilot = pj_is["copilot"](tree, provider)
     var deepseek = pj_is["deepseek"](tree, provider)
-    if not deepseek and not copilot and not pj_is["kiro"](tree, provider) and not pj_is["anthropic"](tree, provider):
+    var gemini = pj_is["gemini"](tree, provider)
+    if not deepseek and not gemini and not copilot and not pj_is["kiro"](tree, provider) and not pj_is["anthropic"](tree, provider):
         return False
     var launch = pj_field(tree, 0, StringSlice("launch_model"))
     var default_context = pj_field(tree, 0, StringSlice("context_window"))
@@ -143,7 +144,7 @@ def runtime_catalog_build_emit(sink: Pointer[mut=True, JsonSink, _], tree: Parse
         count += 1
         child = pj_next(tree, child)
     var dynamic_count = count - 1
-    if deepseek and dynamic_count != 0:
+    if (deepseek or gemini) and dynamic_count != 0:
         return False
     var static_start = count
     var alias_count: Int64 = 0
@@ -189,22 +190,23 @@ def runtime_catalog_build_emit(sink: Pointer[mut=True, JsonSink, _], tree: Parse
         return False
     var accepted_count = merged.count
     if accepted_count > limit:
-        js_literal(sink, StringSlice('{"Err":"provider model catalog exceeds the hard limit of '))
+        js_literal(sink, StringSlice('{"Err":"Gemini model catalog exceeds the hard limit of ') if gemini else StringSlice('{"Err":"provider model catalog exceeds the hard limit of '))
         js_u64(sink, UInt64(limit))
         js_literal(sink, StringSlice(' entries"}'))
         return True
-    var plan = RuntimeCatalogPlan(ids, sources, aliases, alias_owners, dynamic_count, static_count, alias_count)
+    # Gemini's legacy metadata lookup matches catalog IDs without aliases.
+    var plan = RuntimeCatalogPlan(ids, sources, aliases, alias_owners, dynamic_count, static_count, 0 if gemini else alias_count)
     var fallback_context = kiro_catalog_positive_u64(tree, default_context)
     var fallback_compact = kiro_catalog_positive_u64(tree, default_compact)
     js_literal(sink, StringSlice('{"Ok":['))
     for offset in range(accepted_count):
         var position = accepted[unsafe_offset=offset]
         var slug = pj_trim(ids[unsafe_offset=position])
-        var window = RuntimeCatalogWindow(False, 0) if deepseek else runtime_catalog_candidate_window(tree, plan, position, copilot)
+        var window = RuntimeCatalogWindow(False, 0) if (deepseek or gemini) else runtime_catalog_candidate_window(tree, plan, position, copilot)
         var context = window.tokens if window.present else fallback_context
         var compact = config_saturating_mul_u64(window.tokens, UInt64(95)) / UInt64(100) if window.present else fallback_compact
         var ceiling = context - UInt64(1) if context > 0 else UInt64(0)
-        if not deepseek and compact > ceiling:
+        if not deepseek and not gemini and compact > ceiling:
             compact = ceiling
         var observed = runtime_catalog_dynamic_node(plan, slug)
         var bundled = runtime_catalog_static_node(plan, slug)
@@ -215,7 +217,11 @@ def runtime_catalog_build_emit(sink: Pointer[mut=True, JsonSink, _], tree: Parse
         var description = pj_field(tree, observed, StringSlice("description"))
         if pj_kind(tree, description) != JSON_STRING:
             description = pj_field(tree, bundled, StringSlice("description"))
-        var fallback = pj_literal(StringSlice("DeepSeek model routed through the Prodex Responses adapter.")) if deepseek else pj_literal(StringSlice("External provider model routed through the Prodex Responses adapter."))
+        var fallback = pj_literal(StringSlice("External provider model routed through the Prodex Responses adapter."))
+        if deepseek:
+            fallback = pj_literal(StringSlice("DeepSeek model routed through the Prodex Responses adapter."))
+        elif gemini:
+            fallback = pj_literal(StringSlice("Gemini model routed through the Prodex Responses adapter."))
         var detail = pj_text(tree, description) if description >= 0 else fallback.copy()
         if offset > 0:
             js_byte(sink, 44)
