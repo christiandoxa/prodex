@@ -1,6 +1,6 @@
 //! Native observed fields for the compiled session TUI presentation.
-use super::{StringView, signed, status};
-use crate::{MojoError, text_output::render_measured_string};
+use super::{StringView, render_native_json, signed};
+use crate::MojoError;
 
 /// Existing inline and scrollable session-list presentations.
 #[derive(Clone, Copy)]
@@ -73,16 +73,11 @@ pub fn session_tui_rows_json(
             fields: fields.map(|field| field.unwrap_or_default().into()),
         });
     }
-    // Existing parsed-tree and measured-text runners impose a new 64 MiB limit here.
-    render_measured_string(|output| {
-        let (phase, address, capacity) = match output {
-            None => (1, 0, 0),
-            Some(output) => (0, output.as_mut_ptr() as u64, signed(output.len())?),
-        };
-        let mut metadata = [-1_i64; 2];
-        // SAFETY: borrowed strings and rows outlive this synchronous call; output
-        // and metadata are distinct host allocations. Mojo validates all fields.
-        status(unsafe {
+    // Typed rows keep their native ABI and share metadata/output validation.
+    render_native_json(|phase, address, capacity, metadata| {
+        // SAFETY: borrowed rows and strings outlive this synchronous call;
+        // the shared runner owns distinct output and metadata allocations.
+        unsafe {
             prodex_session_tui_rows_v1(
                 1,
                 mode as i64,
@@ -91,13 +86,9 @@ pub fn session_tui_rows_json(
                 phase,
                 address,
                 capacity,
-                metadata.as_mut_ptr() as u64,
+                metadata,
             )
-        })?;
-        if metadata[0] != 1 {
-            return Err(MojoError::InvalidOutput);
         }
-        usize::try_from(metadata[1]).map_err(|_| MojoError::InvalidOutput)
     })
 }
 

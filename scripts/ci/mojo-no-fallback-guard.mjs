@@ -83,15 +83,23 @@ const SESSION_TUI_ADAPTER_FILE = "crates/prodex-mojo-core/src/json/session_tui.r
 const SESSION_TUI_RULES = {
   "crates/prodex-app/src/app_commands/session.rs": ["session_tui_report_lines(reports, SessionTuiMode::Scroll)", "SessionTuiMode::Inline"],
   "crates/prodex-app/src/app_commands/session/presentation.rs": ["session_tui_rows_json(&rows, mode)", "SessionTuiRow {", "SessionTuiTone"],
-  [SESSION_TUI_ADAPTER_FILE]: ["prodex_session_tui_rows_v1(", "render_measured_string("],
+  [SESSION_TUI_ADAPTER_FILE]: ["prodex_session_tui_rows_v1(", "render_native_json("],
   "mojo/prodex_core/session_tui_presentation.mojo": ['@export("prodex_session_tui_rows_v1")', "rich_trim_bounds(", "stp_emit(", "JsonSink"],
   "crates/prodex-app/src/app_commands/session/presentation_tests.rs": ["session_tui_rows_preserve_original_complete_spans", 'include_str!("presentation_baseline.json")'],
 };
 const STATUS_TOKEN_RULES = {
-  "crates/prodex-app/src/app_commands/status/token_presentation.rs": ["status_token_panel_json(overview.map(", "TokenTone::Metric", "TokenTone::Raw"],
-  "crates/prodex-mojo-core/src/json/status_tokens.rs": ["prodex_status_token_panel_v1(", "render_measured_string(", "let mut scratch = [0_u8; 128]"],
+  "crates/prodex-app/src/app_commands/status/token_presentation.rs": ["status_token_panel_json(overview.map(", "StatusTuiTone::Metric", "StatusTuiTone::Raw"],
+  "crates/prodex-mojo-core/src/json/status_tokens.rs": ["prodex_status_token_panel_v1(", "render_native_json(", "let mut scratch = [0_u8; 128]"],
   "mojo/prodex_core/status_token_presentation.mojo": ['@export("prodex_status_token_panel_v1")', "info_write_human_count(", "info_write_token_efficiency(", "info_status_u64_saturating_add(", "scratch_capacity < 128", "row.presence == 3"],
   "crates/prodex-app/src/app_commands/status/token_presentation_tests.rs": ["status_token_panel_preserves_original_complete_buffers", "Sha256::digest(", 'include_str!("token_presentation_baseline.json")'],
+};
+const STATUS_BAR_RULES = {
+  "crates/prodex-app/src/app_commands/status/bar_presentation.rs": ["status_header_json(", "status_footer_json(error)", "status_tui_line(spans)"],
+  "crates/prodex-mojo-core/src/json/status_bar.rs": ["prodex_status_bar_v1(", "render_native_json(", "StatusBar::Header", "StatusBar::Footer"],
+  "crates/prodex-mojo-core/src/json/native_text.rs": ["render_measured_string(", "metadata[0] != 1", "usize::try_from(metadata[1])"],
+  "crates/prodex-mojo-core/src/json/native_text_tests.rs": ["native_json_metadata_preserves_payload_and_rejects_bad_presence_or_lengths", "native_json_metadata_rejects_changed_write_length_and_invalid_utf8"],
+  "mojo/prodex_core/status_bar_presentation.mojo": ['@export("prodex_status_bar_v1")', "sb_emit(", "stp_literal(", "text_count > 2", "waiting for first snapshot", "hint_bold"],
+  "crates/prodex-app/src/app_commands/status/bar_presentation_tests.rs": ["status_bars_preserve_original_complete_dashboard_buffers", "Sha256::digest(", 'include_str!("bar_presentation_baseline.json")'],
 };
 const RUNTIME_CATALOG_REQUIRED = {
   "crates/prodex-app/src/runtime_local_provider_config.rs": ["render_local_runtime_model_catalog("],
@@ -1229,6 +1237,7 @@ const PROMOTED_FILES = [
   SESSION_REPAIR_MOJO_FILE,
   ...Object.keys(SESSION_TUI_RULES),
   ...Object.keys(STATUS_TOKEN_RULES),
+  ...Object.keys(STATUS_BAR_RULES),
   ...Object.keys(RUNTIME_CATALOG_REQUIRED),
   ...Object.keys(MAIN_CATALOG_PROJECTION_REQUIRED),
   SESSION_SELECTOR_MATCH_ADAPTER_FILE,
@@ -1460,6 +1469,9 @@ const PROMOTED_FILES = [
 ];
 
 const UNCONDITIONAL_MOJO_FILES = new Set([
+  "crates/prodex-app/src/app_commands/status/bar_presentation.rs",
+  "crates/prodex-mojo-core/src/json/status_bar.rs",
+  "crates/prodex-mojo-core/src/json/native_text.rs",
   "crates/prodex-app/src/app_commands/status/render.rs",
   "crates/prodex-app/src/app_commands/status/token_presentation.rs",
   "crates/prodex-mojo-core/src/json/status_tokens.rs",
@@ -9970,6 +9982,8 @@ export function findViolations(files) {
       const required = [
         "info_render::format_human_bytes(",
         "token_presentation::status_token_panel_lines(overview)",
+        "bar_presentation::status_header_line(overview, refreshing)",
+        "bar_presentation::status_footer_line(error)",
         "info_render::format_memory_percent(",
         "info_render::format_text_sparkline(",
       ];
@@ -9985,6 +9999,10 @@ export function findViolations(files) {
       const tokenBody = production.match(/fn render_token_panel\([^]*?(?=\nfn render_resource_panel)/u)?.[0] ?? "";
       if ([".saturating_add(", "format_human_count(", "format_token_efficiency(", "history_title = match", "Span::styled("].some((retired) => tokenBody.includes(retired))) {
         violations.push(`${filePath}: token-panel decisions must remain Mojo-owned`);
+      }
+      const bars = production.split("fn render_quota_gauge", 1)[0];
+      if (["let footer = if let Some(error)", "let profile = overview", "let state = if refreshing", "waiting for first snapshot", '" q/esc "'].some((retired) => bars.includes(retired))) {
+        violations.push(`${filePath}: status header/footer decisions must remain Mojo-owned`);
       }
       return violations;
     }
@@ -11701,6 +11719,16 @@ export function findViolations(files) {
       }
       if (contents.includes("first_string_value(") || contents.includes('.get("type")')) {
         violations.push(filePath + ": contains restored Rust session selector metadata semantics");
+      }
+      return violations;
+    }
+    if (STATUS_BAR_RULES[filePath]) {
+      const violations = STATUS_BAR_RULES[filePath].filter((marker) => !contents.includes(marker))
+        .map((marker) => `${filePath}: status bars must retain compiled authority/caller proof ${marker}`);
+      if (filePath.endsWith("/bar_presentation.rs") || filePath.endsWith("/status_bar.rs")) {
+        for (const retired of ["waiting for first snapshot", '" q/esc "', '" profile {profile} "']) {
+          if (contents.includes(retired)) violations.push(`${filePath}: restored Rust status bar presentation`);
+        }
       }
       return violations;
     }
@@ -18583,6 +18611,15 @@ function selfTest() {
   ].join("\n");
   assert.deepEqual(findViolations([[SUPER_PROMPT_DIRECT_TEST_FILE, superPromptTests]]), []);
 
+  for (const [file, markers] of Object.entries(STATUS_BAR_RULES)) {
+    const valid = markers.join(";\n");
+    assert.deepEqual(findViolations([[file, valid]]), []);
+    for (const marker of markers) assert.ok(findViolations([[file, valid.replace(marker, "missing")]]).length > 0);
+    if (file.endsWith("/bar_presentation.rs") || file.endsWith("/status_bar.rs")) {
+      assert.match(findViolations([[file, valid + '\n" q/esc "']]).join("\n"), /restored Rust status bar/u);
+      assert.match(findViolations([[file, '#[cfg(not(feature = "mojo-runtime"))] fn fallback() {}']]).join("\n"), /feature-off Rust path/u);
+    }
+  }
   for (const [file, markers] of Object.entries(STATUS_TOKEN_RULES)) {
     const valid = markers.join(";\n");
     assert.deepEqual(findViolations([[file, valid]]), []);
@@ -18594,10 +18631,15 @@ function selfTest() {
   }
   {
     const file = "crates/prodex-app/src/app_commands/status/render.rs";
-    const valid = ["info_render::format_human_bytes(", "token_presentation::status_token_panel_lines(overview)", "info_render::format_memory_percent(", "info_render::format_text_sparkline("].join(";\n");
+    const valid = ["info_render::format_human_bytes(", "token_presentation::status_token_panel_lines(overview)",
+        "bar_presentation::status_header_line(overview, refreshing)",
+        "bar_presentation::status_footer_line(error)", "info_render::format_memory_percent(", "info_render::format_text_sparkline("].join(";\n");
     assert.deepEqual(findViolations([[file, valid]]), []);
     for (const retired of [".saturating_add(", "format_human_count(", "format_token_efficiency(", "history_title = match", "Span::styled("]) {
       assert.match(findViolations([[file, valid + "\nfn render_token_panel() { " + retired + " }\nfn render_resource_panel() {}"]]).join("\n"), /token-panel decisions must remain Mojo-owned/u);
+    }
+    for (const retired of ["let footer = if let Some(error)", "let profile = overview", "let state = if refreshing", "waiting for first snapshot", '" q/esc "']) {
+      assert.match(findViolations([[file, valid + "\n" + retired]]).join("\n"), /header\/footer decisions must remain Mojo-owned/u);
     }
   }
   for (const [file, markers] of Object.entries(SESSION_TUI_RULES)) {

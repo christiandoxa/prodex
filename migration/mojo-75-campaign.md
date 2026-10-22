@@ -9049,3 +9049,16 @@ Full default CI passes 1,448 Rust tests in 616.79 seconds. Canonical share is
 The checked native/terminal adapters add 65 net Rust production LOC while
 transferring text decisions. The 75% target remains open. Evidence and coverage
 are in [status-token-presentation-mojo-20261023.md](status-token-presentation-mojo-20261023.md).
+
+## Status header and footer compiled in Mojo (2026-10-23)
+
+Header/footer titles, defaults, refresh state, spacing, hints, errors and tones
+now use a compiled native owner. Their Rust assembly is removed without a
+fallback. Native JSON bridges share existing metadata validation; rich ping
+retains its separate contract. Twenty status callers preserve all 57 original
+dashboard/token buffer digests. New bar errors propagate through Ratatui's
+fallible draw boundary. Canonical share is 36.78824849471372% (139,671 Mojo /
+239,991 Rust production LOC). Host adapters add 75 net Rust production LOC while
+transferring presentation decisions. Full default CI passes 1,449 Rust tests in
+622.53 seconds. The 75% target remains open. Evidence and
+coverage are in [status-bar-presentation-mojo-20261023.md](status-bar-presentation-mojo-20261023.md).

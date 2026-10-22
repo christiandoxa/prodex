@@ -234,7 +234,7 @@ fn watch_status(resource_interval: Duration) -> Result<()> {
         });
 
         if dirty {
-            tui.terminal.draw(|frame| {
+            tui.terminal.try_draw(|frame| {
                 render_status_dashboard(
                     frame,
                     overview.as_ref(),
@@ -243,6 +243,7 @@ fn watch_status(resource_interval: Duration) -> Result<()> {
                     overview_error.as_deref(),
                     refresh.in_flight,
                 )
+                .map_err(io::Error::other)
             })?;
             dirty = false;
         }

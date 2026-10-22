@@ -684,6 +684,7 @@ fn dashboard_renders_at_wide_standard_and_compact_sizes() {
                     None,
                     false,
                 )
+                .expect("status presentation should succeed");
             })
             .expect("status dashboard should render");
     }
