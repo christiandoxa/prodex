@@ -3141,6 +3141,141 @@ def operational_event_exact_source(event_address: UInt, event_length: Int64) -> 
     return -1
 
 
+def operational_event_classify(
+    event_address: UInt, event_length: Int64,
+    tool_surface_address: UInt, tool_surface_length: Int64, tool_surface_present: Int64,
+    continuation_address: UInt, continuation_length: Int64, continuation_present: Int64,
+    family_address: UInt, family_length: Int64, family_present: Int64,
+    decision_address: UInt, decision_length: Int64, decision_present: Int64,
+) -> Tuple[Int64, Int64]:
+    var source = OPERATIONAL_EVENT_SOURCE_EVENT
+    var interesting: Int64 = 1
+
+    if operational_text_equals(event_address, event_length, StringSlice("request_captured")):
+        source = OPERATIONAL_EVENT_SOURCE_REQUEST
+        return (source, interesting)
+
+    if operational_text_equals(event_address, event_length, StringSlice("compat_request_surface")):
+        var has_tool_surface = tool_surface_present == 1
+        var is_interesting = (
+            operational_field_not_literal(
+                tool_surface_present,
+                tool_surface_address,
+                tool_surface_length,
+                StringSlice("none"),
+            )
+            or operational_field_not_literal(
+                continuation_present,
+                continuation_address,
+                continuation_length,
+                StringSlice("none"),
+            )
+            or operational_field_not_literal(
+                family_present,
+                family_address,
+                family_length,
+                StringSlice("codex"),
+            )
+        )
+        interesting = 1 if is_interesting else 0
+        if (
+            has_tool_surface
+            and operational_text_contains(
+                tool_surface_address, tool_surface_length, StringSlice("mcp")
+            )
+        ):
+            source = OPERATIONAL_EVENT_SOURCE_MCP
+        elif (
+            has_tool_surface
+            and (
+                operational_text_contains(
+                    tool_surface_address,
+                    tool_surface_length,
+                    StringSlice("sub_agent"),
+                )
+                or operational_text_contains(
+                    tool_surface_address,
+                    tool_surface_length,
+                    StringSlice("subagent"),
+                )
+            )
+        ):
+            source = OPERATIONAL_EVENT_SOURCE_AGENT
+        elif is_interesting:
+            source = OPERATIONAL_EVENT_SOURCE_REQUEST
+        else:
+            source = OPERATIONAL_EVENT_SOURCE_NONE
+        return (source, interesting)
+
+    var exact_source = operational_event_exact_source(event_address, event_length)
+    if exact_source >= 0:
+        source = exact_source
+        return (source, interesting)
+
+    if operational_text_equals(
+        event_address, event_length, StringSlice("smart_context_prepare_fallback")
+    ):
+        var smart = (
+            decision_present == 1
+            and not operational_text_equals(
+                decision_address, decision_length, StringSlice("pass_through")
+            )
+        )
+        source = (
+            OPERATIONAL_EVENT_SOURCE_SMART
+            if smart
+            else OPERATIONAL_EVENT_SOURCE_EVENT
+        )
+        interesting = (
+            1
+            if decision_present == 0
+            or not operational_text_equals(
+                decision_address, decision_length, StringSlice("pass_through")
+            )
+            else 0
+        )
+        return (source, interesting)
+
+    if (
+        operational_text_contains(event_address, event_length, StringSlice("compact"))
+        or operational_text_contains(event_address, event_length, StringSlice("compaction"))
+    ):
+        source = OPERATIONAL_EVENT_SOURCE_COMPACT
+    elif operational_text_starts_with(
+        event_address, event_length, StringSlice("super_expose_exec_")
+    ):
+        source = OPERATIONAL_EVENT_SOURCE_TOOL
+    elif (
+        operational_text_contains(event_address, event_length, StringSlice("mcp"))
+        or operational_text_starts_with(
+            event_address, event_length, StringSlice("expose_")
+        )
+        or operational_text_starts_with(
+            event_address, event_length, StringSlice("super_expose_")
+        )
+    ):
+        source = OPERATIONAL_EVENT_SOURCE_MCP
+    elif (
+        operational_text_contains(event_address, event_length, StringSlice("sub_agent"))
+        or operational_text_contains(event_address, event_length, StringSlice("subagent"))
+    ):
+        source = OPERATIONAL_EVENT_SOURCE_AGENT
+    elif (
+        operational_text_starts_with(
+            event_address, event_length, StringSlice("local_rewrite_")
+        )
+        and operational_text_contains(event_address, event_length, StringSlice("retry"))
+    ):
+        source = OPERATIONAL_EVENT_SOURCE_RETRY
+    elif (
+        operational_text_starts_with(
+            event_address, event_length, StringSlice("local_rewrite_")
+        )
+        and operational_text_contains(event_address, event_length, StringSlice("error"))
+    ):
+        source = OPERATIONAL_EVENT_SOURCE_ERROR
+    return (source, interesting)
+
 @export("prodex_mojo_operational_event_plan_v1")
 def prodex_mojo_operational_event_plan_v1(
     abi_version: Int64,
@@ -3186,132 +3321,13 @@ def prodex_mojo_operational_event_plan_v1(
     var interesting = Pointer[mut=True, Int64, MutUntrackedOrigin](
         unsafe_from_address=Int(interesting_address)
     )
-    source[] = OPERATIONAL_EVENT_SOURCE_EVENT
-    interesting[] = 1
-
-    if operational_text_equals(event_address, event_length, StringSlice("request_captured")):
-        source[] = OPERATIONAL_EVENT_SOURCE_REQUEST
-        return OBSERVABILITY_STATUS_OK
-
-    if operational_text_equals(event_address, event_length, StringSlice("compat_request_surface")):
-        var has_tool_surface = tool_surface_present == 1
-        var is_interesting = (
-            operational_field_not_literal(
-                tool_surface_present,
-                tool_surface_address,
-                tool_surface_length,
-                StringSlice("none"),
-            )
-            or operational_field_not_literal(
-                continuation_present,
-                continuation_address,
-                continuation_length,
-                StringSlice("none"),
-            )
-            or operational_field_not_literal(
-                family_present,
-                family_address,
-                family_length,
-                StringSlice("codex"),
-            )
-        )
-        interesting[] = 1 if is_interesting else 0
-        if (
-            has_tool_surface
-            and operational_text_contains(
-                tool_surface_address, tool_surface_length, StringSlice("mcp")
-            )
-        ):
-            source[] = OPERATIONAL_EVENT_SOURCE_MCP
-        elif (
-            has_tool_surface
-            and (
-                operational_text_contains(
-                    tool_surface_address,
-                    tool_surface_length,
-                    StringSlice("sub_agent"),
-                )
-                or operational_text_contains(
-                    tool_surface_address,
-                    tool_surface_length,
-                    StringSlice("subagent"),
-                )
-            )
-        ):
-            source[] = OPERATIONAL_EVENT_SOURCE_AGENT
-        elif is_interesting:
-            source[] = OPERATIONAL_EVENT_SOURCE_REQUEST
-        else:
-            source[] = OPERATIONAL_EVENT_SOURCE_NONE
-        return OBSERVABILITY_STATUS_OK
-
-    var exact_source = operational_event_exact_source(event_address, event_length)
-    if exact_source >= 0:
-        source[] = exact_source
-        return OBSERVABILITY_STATUS_OK
-
-    if operational_text_equals(
-        event_address, event_length, StringSlice("smart_context_prepare_fallback")
-    ):
-        var smart = (
-            decision_present == 1
-            and not operational_text_equals(
-                decision_address, decision_length, StringSlice("pass_through")
-            )
-        )
-        source[] = (
-            OPERATIONAL_EVENT_SOURCE_SMART
-            if smart
-            else OPERATIONAL_EVENT_SOURCE_EVENT
-        )
-        interesting[] = (
-            1
-            if decision_present == 0
-            or not operational_text_equals(
-                decision_address, decision_length, StringSlice("pass_through")
-            )
-            else 0
-        )
-        return OBSERVABILITY_STATUS_OK
-
-    if (
-        operational_text_contains(event_address, event_length, StringSlice("compact"))
-        or operational_text_contains(event_address, event_length, StringSlice("compaction"))
-    ):
-        source[] = OPERATIONAL_EVENT_SOURCE_COMPACT
-    elif operational_text_starts_with(
-        event_address, event_length, StringSlice("super_expose_exec_")
-    ):
-        source[] = OPERATIONAL_EVENT_SOURCE_TOOL
-    elif (
-        operational_text_contains(event_address, event_length, StringSlice("mcp"))
-        or operational_text_starts_with(
-            event_address, event_length, StringSlice("expose_")
-        )
-        or operational_text_starts_with(
-            event_address, event_length, StringSlice("super_expose_")
-        )
-    ):
-        source[] = OPERATIONAL_EVENT_SOURCE_MCP
-    elif (
-        operational_text_contains(event_address, event_length, StringSlice("sub_agent"))
-        or operational_text_contains(event_address, event_length, StringSlice("subagent"))
-    ):
-        source[] = OPERATIONAL_EVENT_SOURCE_AGENT
-    elif (
-        operational_text_starts_with(
-            event_address, event_length, StringSlice("local_rewrite_")
-        )
-        and operational_text_contains(event_address, event_length, StringSlice("retry"))
-    ):
-        source[] = OPERATIONAL_EVENT_SOURCE_RETRY
-    elif (
-        operational_text_starts_with(
-            event_address, event_length, StringSlice("local_rewrite_")
-        )
-        and operational_text_contains(event_address, event_length, StringSlice("error"))
-    ):
-        source[] = OPERATIONAL_EVENT_SOURCE_ERROR
+    var plan = operational_event_classify(event_address, event_length,
+        tool_surface_address, tool_surface_length, tool_surface_present,
+        continuation_address, continuation_length, continuation_present,
+        family_address, family_length, family_present,
+        decision_address, decision_length, decision_present)
+    source[] = plan[0]
+    interesting[] = plan[1]
     return OBSERVABILITY_STATUS_OK
 
 @export("prodex_mojo_operational_event_source_label_v1")
