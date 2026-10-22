@@ -90,7 +90,7 @@ def main() raises:
     output[] = 93
     assert prodex_mojo_runtime_model_catalog_v1(2, 0, 0, input, 11, source, 232, scratch, 11, 0, target, 4096, meta) == 4
     assert prodex_mojo_runtime_model_catalog_v1(1, 1, 0, input, 11, source, 232, scratch, 11, 0, target, 4096, meta) == 1
-    assert prodex_mojo_runtime_model_catalog_v1(1, 0, 1, input, 11, source, 232, scratch, 11, 0, target, 4096, meta) == 1
+    assert prodex_mojo_runtime_model_catalog_v1(1, 0, 2, input, 11, source, 232, scratch, 11, 0, target, 4096, meta) == 1
     assert prodex_mojo_runtime_model_catalog_v1(1, 0, 0, input + 1, 11, source, 232, scratch, 11, 0, target, 4096, meta) == 1
     assert prodex_mojo_runtime_model_catalog_v1(1, 0, 0, input, 11, source, 232, scratch, 11, 1, target, 0, meta) == 1
     assert prodex_mojo_runtime_model_catalog_v1(1, 0, 0, input, 11, source, 232, scratch, 11, 0, target, 4096, meta + 1) == 1

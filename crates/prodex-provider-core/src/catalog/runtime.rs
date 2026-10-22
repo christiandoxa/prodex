@@ -1,5 +1,6 @@
 use crate::{ProviderId, ProviderReasoningEffort, mojo_json::Document};
 use prodex_mojo_core::MojoError;
+use serde::Deserialize;
 use serde_json::{Value, json};
 use std::fmt;
 
@@ -17,11 +18,12 @@ pub struct RuntimeModelCatalogInput<'a> {
     pub default_reasoning_effort: Option<ProviderReasoningEffort>,
 }
 
-/// A compiled renderer failure or invalid JSON returned across its boundary.
+/// A compiled catalog failure, model rejection or invalid returned JSON.
 #[derive(Debug)]
 pub enum RuntimeModelCatalogError {
     Mojo(MojoError),
     Json(serde_json::Error),
+    Rejected(String),
 }
 
 impl fmt::Display for RuntimeModelCatalogError {
@@ -32,6 +34,7 @@ impl fmt::Display for RuntimeModelCatalogError {
                 "Mojo runtime model catalog renderer failed: {error:?}"
             ),
             Self::Json(error) => fmt::Display::fmt(error, formatter),
+            Self::Rejected(message) => formatter.write_str(message),
         }
     }
 }
@@ -39,7 +42,7 @@ impl fmt::Display for RuntimeModelCatalogError {
 impl std::error::Error for RuntimeModelCatalogError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
-            Self::Mojo(_) => None,
+            Self::Mojo(_) | Self::Rejected(_) => None,
             Self::Json(error) => Some(error),
         }
     }
@@ -64,6 +67,34 @@ pub fn render_runtime_model_catalog(
     let output = prodex_mojo_core::json::runtime_model_catalog_json(&document.nodes, raw)
         .map_err(RuntimeModelCatalogError::Mojo)?;
     serde_json::from_slice(&output).map_err(RuntimeModelCatalogError::Json)
+}
+
+/// Runtime metadata projected by the compiled stored-catalog owner, in input order.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
+pub struct RuntimeDynamicCatalogModel {
+    pub slug: String,
+    pub display_name: Option<String>,
+    pub description: Option<String>,
+    pub context_window: Option<u64>,
+}
+
+/// Select stored Copilot/Kiro runtime fields without deduplicating entries.
+pub fn normalize_runtime_dynamic_catalog(
+    value: &Value,
+) -> Result<Vec<RuntimeDynamicCatalogModel>, RuntimeModelCatalogError> {
+    let mut document = Document::default();
+    document.root(value);
+    let raw = std::str::from_utf8(&document.raw)
+        .map_err(|_| RuntimeModelCatalogError::Mojo(MojoError::InvalidInput))?;
+    let output = prodex_mojo_core::json::runtime_dynamic_catalog_json(
+        &document.nodes,
+        raw,
+        super::PROVIDER_MODEL_CATALOG_HARD_LIMIT,
+    )
+    .map_err(RuntimeModelCatalogError::Mojo)?;
+    serde_json::from_slice::<Result<Vec<RuntimeDynamicCatalogModel>, String>>(&output)
+        .map_err(RuntimeModelCatalogError::Json)?
+        .map_err(RuntimeModelCatalogError::Rejected)
 }
 
 #[cfg(test)]

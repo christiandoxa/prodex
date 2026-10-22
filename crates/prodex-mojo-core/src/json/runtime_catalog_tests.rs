@@ -101,7 +101,7 @@ fn compiled_runtime_schema_abi_rejects_invalid_input_before_output_and_metadata(
     ) in [
         (2, 0, 0, input, 10, 0, target, 2048, meta, 4),
         (1, 1, 0, input, 10, 0, target, 2048, meta, 1),
-        (1, 0, 1, input, 10, 0, target, 2048, meta, 1),
+        (1, 0, 2, input, 10, 0, target, 2048, meta, 1),
         (1, 0, 0, input + 1, 10, 0, target, 2048, meta, 1),
         (1, 0, 0, input, 0, 0, target, 2048, meta, 1),
         (1, 0, 0, input, 10, 1, target, 0, meta, 1),
@@ -130,5 +130,72 @@ fn compiled_runtime_schema_abi_rejects_invalid_input_before_output_and_metadata(
         );
         assert_eq!(output, [93; 2048]);
         assert_eq!(metadata, [77, 88]);
+    }
+}
+
+#[test]
+fn compiled_dynamic_catalog_bridge_preserves_order_duplicates_and_raw_entry_bounds() {
+    let raw = r#"{"models":[{"id":" A "},{"id":"a"},{"id":null,"slug":"ignored"},{"model":"雪"}]}"#;
+    let nodes = [
+        (JsonKind::Object, None, Some(1), None, "", "", 0, 81),
+        (
+            JsonKind::Array,
+            Some(0),
+            Some(2),
+            None,
+            "models",
+            "",
+            10,
+            70,
+        ),
+        (JsonKind::Object, Some(1), Some(3), Some(4), "", "", 11, 12),
+        (JsonKind::String, Some(2), None, None, "id", " A ", 17, 5),
+        (JsonKind::Object, Some(1), Some(5), Some(6), "", "", 24, 10),
+        (JsonKind::String, Some(4), None, None, "id", "a", 30, 3),
+        (JsonKind::Object, Some(1), Some(7), Some(9), "", "", 35, 28),
+        (JsonKind::Null, Some(6), None, Some(8), "id", "", 41, 4),
+        (
+            JsonKind::String,
+            Some(6),
+            None,
+            None,
+            "slug",
+            "ignored",
+            53,
+            9,
+        ),
+        (JsonKind::Object, Some(1), Some(10), None, "", "", 64, 15),
+        (JsonKind::String, Some(9), None, None, "model", "雪", 73, 5),
+    ]
+    .into_iter()
+    .map(
+        |(kind, parent, first_child, next_sibling, key, text, raw_start, raw_length)| JsonNode {
+            kind,
+            parent,
+            first_child,
+            next_sibling,
+            key,
+            text,
+            raw_start,
+            raw_length,
+        },
+    )
+    .collect::<Vec<_>>();
+    let output = runtime_dynamic_catalog_json(&nodes, raw, 4).unwrap();
+    assert_eq!(
+        std::str::from_utf8(&output).unwrap(),
+        r#"{"Ok":[{"slug":"A","display_name":null,"description":null,"context_window":null},{"slug":"a","display_name":null,"description":null,"context_window":null},{"slug":"雪","display_name":null,"description":null,"context_window":null}]}"#
+    );
+
+    let output = runtime_dynamic_catalog_json(&nodes, raw, 3).unwrap();
+    assert_eq!(
+        std::str::from_utf8(&output).unwrap(),
+        r#"{"Err":"provider model catalog exceeds the hard limit of 3 entries"}"#
+    );
+    if let Ok(too_large) = usize::try_from(i64::MAX as u64 + 1) {
+        assert_eq!(
+            runtime_dynamic_catalog_json(&nodes, raw, too_large),
+            Err(MojoError::InvalidInput)
+        );
     }
 }

@@ -117,7 +117,7 @@ mod runtime_catalog;
 pub use self::kiro_catalog::{
     KiroModelCatalogModel, KiroModelCatalogPlan, kiro_model_catalog_plan,
 };
-pub use self::runtime_catalog::runtime_model_catalog_json;
+pub use self::runtime_catalog::{runtime_dynamic_catalog_json, runtime_model_catalog_json};
 mod log_payload;
 pub use log_payload::{LogPayloadJsonPresentation, log_payload_projection};
 mod log_transcript_context;

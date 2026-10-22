@@ -8920,3 +8920,25 @@ presence-first id/slug/model and name/model_name aliases, untrimmed display text
 unsigned-limit precedence, order and duplicates. Reuse the runtime-catalog
 parsed-tree/writer ABI; keep file reads and the existing Kiro normalization in
 Rust. Context-budget and candidate assembly are a separate next checkpoint.
+
+## Stored runtime model catalogs projected in Mojo (2026-10-22)
+
+Models-array validation, raw-entry limits, presence-first aliases, Unicode trim,
+optional runtime metadata and unsigned prompt/context precedence now belong to
+the existing compiled runtime-catalog owner. The Rust parser and prompt-limit
+helper are deleted without a fallback. Typed Serde decoding, file reads and Kiro
+normalization remain in Rust. Two original caller regressions pass unchanged
+inside all 19 external config tests. Both direct Mojo tests, three bridge tests
+in each core/runtime mode, five DeepSeek callers and 552 provider tests pass,
+with strict workspace Clippy, formatting, guards and offline replay.
+Full default CI passes 1,443 Rust tests in 571.39 seconds; default changed tests
+pass 552 Rust tests in 96.97 seconds.
+Canonical share is 36.63089102738514% (138,671 Mojo / 239,892 Rust production
+LOC), removing 19 Rust production LOC. The 75% goal remains open.
+Evidence is in `migration/dynamic-model-catalog-mojo-20261022.md`.
+
+The next audit targets the remaining external-catalog candidate/context/metadata
+assembly. Reuse the existing compiled merge and scalar-limit owners, preserve
+launch/dynamic/static ordering and first-match metadata, and keep saturated
+compact arithmetic and hard bounds exact. Capture whole final catalogs before
+changing production; config/file effects remain in Rust.

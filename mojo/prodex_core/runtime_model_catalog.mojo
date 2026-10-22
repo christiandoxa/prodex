@@ -1,11 +1,11 @@
 from std.memory import Pointer
 from parsed_json import (
     ParsedJson, ParsedJsonNode, JSON_NULL, JSON_ARRAY, JSON_OBJECT, JSON_STRING, JSON_NUMBER,
-    pj_child, pj_next, pj_field, pj_kind, pj_text, pj_valid, pj_is, pj_literal,
+    pj_child, pj_next, pj_field, pj_kind, pj_text, pj_valid, pj_is, pj_literal, pj_trim,
 )
 from rich_types import ProdexRichStringView
 from rich_text import rich_view_matches_literal
-from json_sink import JsonSink, js_byte, js_literal, js_string, js_raw, js_raw_view
+from json_sink import JsonSink, js_byte, js_literal, js_string, js_raw, js_raw_view, js_u64
 from kiro_model_catalog import kiro_catalog_positive_u64
 
 
@@ -44,7 +44,77 @@ def runtime_catalog_unsigned(tree: ParsedJson, index: Int64) -> Bool:
     )
 
 
-def runtime_catalog_emit(sink: Pointer[mut=True, JsonSink, _], tree: ParsedJson) -> Bool:
+def runtime_dynamic_catalog_emit(sink: Pointer[mut=True, JsonSink, _], tree: ParsedJson, limit: Int64):
+    var models = pj_field(tree, 0, StringSlice("models"))
+    if pj_kind(tree, models) != JSON_ARRAY:
+        js_literal(sink, StringSlice('{"Err":"provider model catalog is missing models array"}'))
+        return
+    var count: Int64 = 0
+    var child = pj_child(tree, models)
+    while child >= 0:
+        if count >= limit:
+            js_literal(sink, StringSlice('{"Err":"provider model catalog exceeds the hard limit of '))
+            js_u64(sink, UInt64(limit))
+            js_literal(sink, StringSlice(' entries"}'))
+            return
+        count += 1
+        child = pj_next(tree, child)
+    js_literal(sink, StringSlice('{"Ok":['))
+    var first = True
+    child = pj_child(tree, models)
+    while child >= 0:
+        var slug = pj_field(tree, child, StringSlice("id"))
+        if slug < 0:
+            slug = pj_field(tree, child, StringSlice("slug"))
+        if slug < 0:
+            slug = pj_field(tree, child, StringSlice("model"))
+        var identifier = pj_trim(pj_text(tree, slug))
+        if identifier.len > 0:
+            var name = pj_field(tree, child, StringSlice("name"))
+            if name < 0:
+                name = pj_field(tree, child, StringSlice("model_name"))
+            var description = pj_field(tree, child, StringSlice("description"))
+            var prompt = pj_field(tree, child, StringSlice("max_prompt_tokens"))
+            if prompt < 0:
+                var capabilities = pj_field(tree, child, StringSlice("capabilities"))
+                var limits = pj_field(tree, capabilities, StringSlice("limits"))
+                prompt = pj_field(tree, limits, StringSlice("max_prompt_tokens"))
+            var context = kiro_catalog_positive_u64(tree, prompt)
+            if context <= 1:
+                # Unsigned 0/1 token limits block the context alias before final validation.
+                var tokens = pj_field(tree, child, StringSlice("context_window_tokens"))
+                if not runtime_catalog_unsigned(tree, tokens):
+                    tokens = pj_field(tree, child, StringSlice("context_window"))
+                context = kiro_catalog_positive_u64(tree, tokens)
+            if not first:
+                js_byte(sink, 44)
+            first = False
+            js_literal(sink, StringSlice('{"slug":'))
+            js_string(sink, identifier)
+            js_literal(sink, StringSlice(',"display_name":'))
+            if pj_kind(tree, name) == JSON_STRING:
+                js_raw(sink, tree, name)
+            else:
+                js_literal(sink, StringSlice("null"))
+            js_literal(sink, StringSlice(',"description":'))
+            if pj_kind(tree, description) == JSON_STRING:
+                js_raw(sink, tree, description)
+            else:
+                js_literal(sink, StringSlice("null"))
+            js_literal(sink, StringSlice(',"context_window":'))
+            if context > 1:
+                js_u64(sink, context)
+            else:
+                js_literal(sink, StringSlice("null"))
+            js_byte(sink, 125)
+        child = pj_next(tree, child)
+    js_literal(sink, StringSlice(']}'))
+
+
+def runtime_catalog_emit(sink: Pointer[mut=True, JsonSink, _], tree: ParsedJson, limit: Int64, stored_catalog: Int64) -> Bool:
+    if stored_catalog == 1:
+        runtime_dynamic_catalog_emit(sink, tree, limit)
+        return True
     if pj_kind(tree, 0) != JSON_OBJECT:
         return False
     var provider = pj_field(tree, 0, StringSlice("provider"))
@@ -154,9 +224,10 @@ def runtime_catalog_emit(sink: Pointer[mut=True, JsonSink, _], tree: ParsedJson)
     return True
 
 
+# Mode 0 renders one schema; mode 1 projects stored entries with a raw-entry bound.
 @export("prodex_mojo_runtime_model_catalog_v1")
 def prodex_mojo_runtime_model_catalog_v1(
-    abi: Int64, operation: Int64, flag: Int64,
+    abi: Int64, max_entries: Int64, stored_catalog: Int64,
     nodes_address: UInt64, nodes_count: Int64, raw_address: UInt64, raw_length: Int64,
     scratch_address: UInt64, scratch_count: Int64,
     measuring: Int64, output_address: UInt64, capacity: Int64, metadata_address: UInt64,
@@ -164,7 +235,8 @@ def prodex_mojo_runtime_model_catalog_v1(
     if abi != 1:
         return 4
     if (
-        operation != 0 or flag != 0 or nodes_address == 0 or nodes_address % 8 != 0
+        (stored_catalog == 0 and max_entries != 0) or (stored_catalog == 1 and max_entries < 0)
+        or stored_catalog < 0 or stored_catalog > 1 or nodes_address == 0 or nodes_address % 8 != 0
         or nodes_count <= 0 or nodes_count > 0x7FFFFFFFFFFFFFFF // 80
         or raw_address == 0 or raw_length <= 0 or scratch_address == 0 or scratch_address % 8 != 0
         or scratch_count < nodes_count or measuring < 0 or measuring > 1 or capacity < 0
@@ -186,7 +258,7 @@ def prodex_mojo_runtime_model_catalog_v1(
         Pointer[mut=True, UInt8, MutUntrackedOrigin](unsafe_from_address=Int(scratch_address)),
         0, 0, True, False,
     )
-    if not runtime_catalog_emit(Pointer(to=sink), tree):
+    if not runtime_catalog_emit(Pointer(to=sink), tree, max_entries, stored_catalog):
         return 1
     if sink.failed:
         return 3
@@ -198,7 +270,7 @@ def prodex_mojo_runtime_model_catalog_v1(
             Pointer[mut=True, UInt8, MutUntrackedOrigin](unsafe_from_address=Int(output_address)),
             capacity, 0, False, False,
         )
-        if not runtime_catalog_emit(Pointer(to=sink), tree) or sink.failed or sink.written != required:
+        if not runtime_catalog_emit(Pointer(to=sink), tree, max_entries, stored_catalog) or sink.failed or sink.written != required:
             return 3
     var metadata = Pointer[mut=True, Int64, MutUntrackedOrigin](unsafe_from_address=Int(metadata_address))
     metadata[unsafe_offset=0] = 1

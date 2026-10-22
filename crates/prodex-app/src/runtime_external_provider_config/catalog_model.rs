@@ -5,7 +5,8 @@ use crate::profile_commands::KIRO_MODEL_CATALOG_FILE;
 use anyhow::{Context, Result, bail};
 use prodex_mojo_core::rich::{CatalogModel, resolve_catalog_model_exact};
 use prodex_provider_core::{
-    RuntimeModelCatalogInput, provider_catalog_entry, render_runtime_model_catalog,
+    RuntimeDynamicCatalogModel as ExternalDynamicCatalogModel, RuntimeModelCatalogInput,
+    normalize_runtime_dynamic_catalog, provider_catalog_entry, render_runtime_model_catalog,
 };
 use serde_json::{Value, json};
 use std::path::Path;
@@ -13,6 +14,10 @@ use std::path::Path;
 #[cfg(test)]
 #[path = "catalog_model/schema_tests.rs"]
 mod schema_tests;
+
+#[cfg(test)]
+#[path = "catalog_model/dynamic_tests.rs"]
+mod dynamic_tests;
 
 pub(super) fn read_external_model_catalog(
     provider: ExternalCatalogProvider,
@@ -127,14 +132,6 @@ pub(super) fn external_catalog_model_indices(ids: &[&str]) -> Result<Vec<usize>>
         .map_err(|error| anyhow::anyhow!("external model catalog merge failed: {error:?}"))
 }
 
-#[derive(Clone, Debug)]
-struct ExternalDynamicCatalogModel {
-    slug: String,
-    display_name: Option<String>,
-    description: Option<String>,
-    context_window: Option<u64>,
-}
-
 fn external_dynamic_catalog_model<'a>(
     models: &'a [ExternalDynamicCatalogModel],
     model: &str,
@@ -165,60 +162,7 @@ fn external_dynamic_catalog_models(
         return Ok(Vec::new());
     };
     let value = read_external_model_catalog(provider, &contents)?;
-    let models = value
-        .get("models")
-        .and_then(Value::as_array)
-        .context("provider model catalog is missing models array")?;
-    if models.len() > prodex_provider_core::PROVIDER_MODEL_CATALOG_HARD_LIMIT {
-        bail!(
-            "provider model catalog exceeds the hard limit of {} entries",
-            prodex_provider_core::PROVIDER_MODEL_CATALOG_HARD_LIMIT
-        );
-    }
-    Ok(models
-        .iter()
-        .filter_map(|model| {
-            let slug = model
-                .get("id")
-                .or_else(|| model.get("slug"))
-                .or_else(|| model.get("model"))
-                .and_then(Value::as_str)?
-                .trim();
-            let context_window = copilot_catalog_entry_prompt_token_limit(model)
-                .or_else(|| model.get("context_window_tokens").and_then(Value::as_u64))
-                .or_else(|| model.get("context_window").and_then(Value::as_u64))
-                .filter(|cw| *cw > 1);
-            if slug.is_empty() {
-                return None;
-            }
-            Some(ExternalDynamicCatalogModel {
-                slug: slug.to_string(),
-                display_name: model
-                    .get("name")
-                    .or_else(|| model.get("model_name"))
-                    .and_then(Value::as_str)
-                    .map(str::to_string),
-                description: model
-                    .get("description")
-                    .and_then(Value::as_str)
-                    .map(str::to_string),
-                context_window,
-            })
-        })
-        .collect())
-}
-
-fn copilot_catalog_entry_prompt_token_limit(model: &Value) -> Option<u64> {
-    model
-        .get("max_prompt_tokens")
-        .or_else(|| {
-            model
-                .get("capabilities")
-                .and_then(|c| c.get("limits"))
-                .and_then(|l| l.get("max_prompt_tokens"))
-        })
-        .and_then(Value::as_u64)
-        .filter(|tokens| *tokens > 1)
+    Ok(normalize_runtime_dynamic_catalog(&value)?)
 }
 
 #[cfg(test)]
