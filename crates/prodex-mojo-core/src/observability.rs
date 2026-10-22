@@ -1,6 +1,8 @@
 use crate::MojoError;
 
+mod details;
 mod stream;
+pub use details::{OperationalDetailText, render_operational_details};
 pub use stream::{
     OperationalLoadField, OperationalStreamPlan, OperationalTextSpan, operational_log_text_span,
     operational_stream_plan,

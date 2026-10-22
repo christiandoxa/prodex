@@ -634,6 +634,7 @@ fn selected_sources() -> Vec<&'static str> {
     {
         sources.push("../../mojo/prodex_core/observability_labels.mojo");
         sources.push("../../mojo/prodex_core/operational_log_stream.mojo");
+        sources.push("../../mojo/prodex_core/operational_log_details.mojo");
         sources.push("../../mojo/prodex_core/telemetry_label.mojo");
         sources.push("../../mojo/prodex_core/operational_metrics.mojo");
     }
