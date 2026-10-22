@@ -12,6 +12,7 @@ use crate::app_commands::log_upstream_payload::UpstreamPayloadEvent;
 use crate::app_commands::log_upstream_payload::parse_runtime_log_line;
 use crate::reports::{InfoTokenUsageEvent, info_token_usage_event_from_line};
 use anyhow::{Context, Result};
+use prodex_mojo_core::json::LogTokenPresentation;
 use prodex_mojo_core::observability::{OperationalDetailFormat, operational_detail_spec};
 use std::collections::BTreeMap;
 use std::io::{self, Write};
@@ -23,6 +24,10 @@ mod event_source;
 #[path = "log_stream/operational.rs"]
 mod operational;
 use event_source::operational_event_plan;
+
+#[path = "log_stream/token_presentation.rs"]
+mod token_presentation;
+pub(super) use token_presentation::{TokenLogTone, project_token_log};
 
 #[derive(Debug, Clone)]
 pub(crate) enum LogStreamItem {
@@ -68,55 +73,15 @@ pub(crate) fn log_stream_item_json(event: &LogStreamItem) -> Result<String> {
         LogStreamItem::Transcript(event) => serde_json::to_string(event),
         LogStreamItem::LoadObservation(event) => serde_json::to_string(&event.event),
         LogStreamItem::LoadAggregate(event) => serde_json::to_string(&event.as_transcript()),
-        LogStreamItem::TokenUsage(event) => serde_json::to_string(&token_usage_json_value(event)),
+        LogStreamItem::TokenUsage(event) => {
+            serde_json::to_string(&project_token_log::<serde_json::Value>(
+                event,
+                LogTokenPresentation::Envelope,
+            )?)
+        }
         LogStreamItem::UpstreamPayload(event) => serde_json::to_string(event),
     }
     .context("failed to serialize JSON log event")
-}
-
-fn token_usage_json_value(event: &InfoTokenUsageEvent) -> serde_json::Value {
-    let mut value = serde_json::to_value(event).unwrap_or_else(|_| serde_json::json!({}));
-    value["event"] = serde_json::Value::String("token_usage".to_string());
-    let mut fields = serde_json::Map::new();
-    if let Some(request) = event.request {
-        fields.insert(
-            "request".to_string(),
-            serde_json::json!(request.to_string()),
-        );
-    }
-    fields.insert("transport".to_string(), serde_json::json!(event.transport));
-    fields.insert("profile".to_string(), serde_json::json!(event.profile));
-    fields.insert("source".to_string(), serde_json::json!(event.source));
-    fields.insert(
-        "input_tokens".to_string(),
-        serde_json::json!(event.input_tokens),
-    );
-    fields.insert(
-        "cached_input_tokens".to_string(),
-        serde_json::json!(event.cached_input_tokens),
-    );
-    fields.insert(
-        "output_tokens".to_string(),
-        serde_json::json!(event.output_tokens),
-    );
-    fields.insert(
-        "reasoning_tokens".to_string(),
-        serde_json::json!(event.reasoning_tokens),
-    );
-    if let Some(generation_ms) = event.generation_ms {
-        fields.insert(
-            "generation_ms".to_string(),
-            serde_json::json!(generation_ms),
-        );
-    }
-    if let Some(rate) = event.output_tokens_per_second {
-        fields.insert(
-            "output_tokens_per_second".to_string(),
-            serde_json::json!(rate),
-        );
-    }
-    value["fields"] = serde_json::Value::Object(fields);
-    value
 }
 
 #[cfg(test)]
@@ -339,36 +304,12 @@ pub(crate) fn print_token_usage_event(event: &InfoTokenUsageEvent, json: bool) -
     if json {
         println!("{}", serde_json::to_string(event)?);
     } else {
-        let request = event
-            .request
-            .map(|request| request.to_string())
-            .unwrap_or_else(|| "-".to_string());
-        let meta = [
-            ("profile", event.profile.clone()),
-            ("request", request),
-            ("transport", event.transport.clone()),
-            ("source", event.source.clone()),
-            ("input", event.input_tokens.to_string()),
-            ("cache", event.cached_input_tokens.to_string()),
-            ("output", event.output_tokens.to_string()),
-            ("reasoning", event.reasoning_tokens.to_string()),
-            (
-                "generation",
-                event
-                    .generation_ms
-                    .map(|duration| format!("{duration}ms"))
-                    .unwrap_or_else(|| "unavailable".to_string()),
-            ),
-            (
-                "avg_output",
-                event
-                    .generation_ms
-                    .filter(|duration| *duration > 0)
-                    .and(event.output_tokens_per_second)
-                    .map(|rate| format_output_tokens_per_second(Some(rate)))
-                    .unwrap_or_else(|| format_output_tokens_per_second(None)),
-            ),
-        ];
+        let fields: Vec<(String, String)> =
+            project_token_log(event, LogTokenPresentation::Metadata)?;
+        let meta = fields
+            .iter()
+            .map(|(label, value)| (label.as_str(), value.clone()))
+            .collect::<Vec<_>>();
         for line in render_log_block(
             &event.timestamp,
             "TOKENS",

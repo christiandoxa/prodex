@@ -1,3 +1,4 @@
+use super::super::log_stream::{TokenLogTone, project_token_log};
 use crate::app_commands::log_format::render_text_body;
 use crate::app_commands::log_tui::{
     LOG_TUI_TITLE, LogTuiHeaderDetail, LogTuiState, OutputThroughputDisplay,
@@ -8,6 +9,7 @@ use crate::app_commands::log_upstream_payload::{
 };
 use crate::app_commands::{LogStreamItem, TranscriptEvent, is_routine_load_event, log_event_label};
 use crate::reports::InfoTokenUsageEvent;
+use prodex_mojo_core::json::LogTokenPresentation;
 use prodex_mojo_core::log::{LogTuiSourceTone, log_tui_snapshot_height, log_tui_source_tone};
 use ratatui::layout::{Constraint, Direction, Layout};
 use ratatui::style::{Color, Modifier, Style};
@@ -188,21 +190,10 @@ fn log_stream_item_matches(item: &LogStreamItem, query: &str) -> bool {
             )
         }
         LogStreamItem::LoadAggregate(event) => return event.matches(query),
-        LogStreamItem::TokenUsage(event) => format!(
-            "{} {} {} {} {} {} {} {} {}",
-            event.timestamp,
-            event
-                .request
-                .map(|value| value.to_string())
-                .unwrap_or_default(),
-            event.transport,
-            event.profile,
-            event.source,
-            event.input_tokens,
-            event.cached_input_tokens,
-            event.output_tokens,
-            event.reasoning_tokens
-        ),
+        LogStreamItem::TokenUsage(event) => {
+            project_token_log::<String>(event, LogTokenPresentation::Search)
+                .expect("compiled token log search projection failed")
+        }
         LogStreamItem::UpstreamPayload(event) => format!(
             "{} {} {} {} {} {} {} {} {}",
             event.timestamp,
@@ -237,59 +228,30 @@ fn push_log_stream_item_lines(
             push_transcript_lines(lines, &event, body_width);
         }
         LogStreamItem::TokenUsage(event) => {
-            let request = event
-                .request
-                .map(|request| request.to_string())
-                .unwrap_or_else(|| "-".to_string());
-            lines.push(Line::from(vec![
-                Span::styled(event.timestamp.clone(), tui_muted_style()),
-                Span::raw(" "),
-                Span::styled(
-                    "TOKENS",
-                    Style::default()
-                        .fg(Color::LightMagenta)
-                        .add_modifier(Modifier::BOLD),
-                ),
-            ]));
-            lines.push(Line::from(vec![
-                Span::styled("profile ", tui_muted_style()),
-                Span::styled(event.profile.clone(), tui_primary_style()),
-                Span::styled(" request ", tui_muted_style()),
-                Span::styled(request, tui_primary_style()),
-                Span::styled(" transport ", tui_muted_style()),
-                Span::styled(event.transport.clone(), tui_primary_style()),
-                Span::styled(" source ", tui_muted_style()),
-                Span::styled(event.source.clone(), tui_primary_style()),
-            ]));
-            lines.push(Line::from(vec![
-                Span::styled("input ", tui_muted_style()),
-                Span::styled(event.input_tokens.to_string(), tui_metric_style()),
-                Span::styled(" cache ", tui_muted_style()),
-                Span::styled(event.cached_input_tokens.to_string(), tui_accent_style()),
-                Span::styled(" output ", tui_muted_style()),
-                Span::styled(event.output_tokens.to_string(), tui_metric_style()),
-                Span::styled(" reasoning ", tui_muted_style()),
-                Span::styled(event.reasoning_tokens.to_string(), tui_tool_style()),
-                Span::styled(" generation ", tui_muted_style()),
-                Span::styled(
-                    event
-                        .generation_ms
-                        .map(|duration| format!("{duration}ms"))
-                        .unwrap_or_else(|| "unavailable".to_string()),
-                    tui_metric_style(),
-                ),
-            ]));
-            if event.generation_ms.is_some_and(|duration| duration > 0)
-                && let Some(rate) = event.output_tokens_per_second
-            {
-                lines.push(Line::from(vec![
-                    Span::styled("average ", tui_muted_style()),
-                    Span::styled(
-                        crate::app_commands::log_tui::format_output_tokens_per_second(Some(rate)),
-                        tui_metric_style(),
-                    ),
-                ]));
-            }
+            let projected: Vec<Vec<(TokenLogTone, String)>> =
+                project_token_log(event, LogTokenPresentation::Tui)
+                    .expect("compiled token log TUI projection failed");
+            lines.extend(projected.into_iter().map(|spans| {
+                Line::from(
+                    spans
+                        .into_iter()
+                        .map(|(tone, text)| {
+                            let style = match tone {
+                                TokenLogTone::Raw => Style::default(),
+                                TokenLogTone::Muted => tui_muted_style(),
+                                TokenLogTone::Token => Style::default()
+                                    .fg(Color::LightMagenta)
+                                    .add_modifier(Modifier::BOLD),
+                                TokenLogTone::Primary => tui_primary_style(),
+                                TokenLogTone::Metric => tui_metric_style(),
+                                TokenLogTone::Accent => tui_accent_style(),
+                                TokenLogTone::Tool => tui_tool_style(),
+                            };
+                            Span::styled(text, style)
+                        })
+                        .collect::<Vec<_>>(),
+                )
+            }));
         }
         LogStreamItem::UpstreamPayload(event) => {
             let request = event
@@ -481,3 +443,7 @@ mod tests {
         assert!(!scrolled.contains("beta second"));
     }
 }
+
+#[cfg(test)]
+#[path = "log_token_presentation_tests.rs"]
+mod token_presentation_tests;

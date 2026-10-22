@@ -9100,3 +9100,15 @@ transferring presentation decisions; Mojo adds 64 net production LOC. Full
 default CI passes 1,452 Rust tests in 540.78 seconds. The 75% target remains
 open. Evidence and coverage are in
 [runtime-launch-tui-mojo-20261023.md](runtime-launch-tui-mojo-20261023.md).
+
+## Token log presentations compiled in Mojo (2026-10-23)
+
+Stream JSON envelopes, human metadata, TUI rows/tones and search text now use
+one compiled log owner. Their Rust schemas and assembly are removed without a
+fallback. Serde, rate formatting, Ratatui themes and terminal effects retain
+their existing owners. The original complete 135-case presentation corpus is
+frozen. Canonical share is 36.853758266608814% (140,153 Mojo / 240,142 Rust
+production LOC), removing 37 net Rust production LOC and adding 222 net Mojo
+production LOC. Full default CI passes 1,453 Rust tests in 620.16 seconds.
+The 75% target remains open. Evidence and coverage are in
+[token-log-presentation-mojo-20261023.md](token-log-presentation-mojo-20261023.md).
