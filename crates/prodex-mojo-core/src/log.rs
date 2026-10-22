@@ -1,5 +1,9 @@
 use crate::MojoError;
 
+mod active_paths;
+pub use active_paths::{
+    ActiveRuntimeLogPlan, ActiveRuntimeLogProcess, active_runtime_log_plan, runtime_log_pid,
+};
 mod recent_paths;
 pub use recent_paths::{RecentLogPathInput, RecentLogPathOrderMode, recent_log_path_order};
 mod follow_selection;

@@ -60,6 +60,7 @@ fn emit_source_rerun_directives(sources: &[&str], manifest_dir: &Path) {
         "provider_upstream.mojo",
         "runtime_local_rewrite_transport.mojo",
         "status_resource.mojo",
+        "runtime_active_logs.mojo",
         "info_provider.mojo",
         "info_runtime_load.mojo",
         "info_token_usage.mojo",
@@ -611,6 +612,7 @@ fn selected_sources() -> Vec<&'static str> {
         sources.push("../../mojo/prodex_core/log_payload.mojo");
         sources.push("../../mojo/prodex_core/log_transcript_context.mojo");
         sources.push("../../mojo/prodex_core/log_throughput_policy.mojo");
+        sources.push("../../mojo/prodex_core/runtime_active_logs.mojo");
         sources.push("../../mojo/prodex_core/live_log_record.mojo");
         sources.push("../../mojo/prodex_core/log_parser.mojo");
         sources.push("../../mojo/prodex_core/runtime_doctor_plan.mojo");
