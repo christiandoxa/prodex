@@ -1,7 +1,7 @@
 use crate::MojoError;
 
-/// Shared caller-owned allocation and status validation for observability text ABIs.
-pub(super) fn render_measured_text(
+/// Shared caller-owned allocation and status validation for measured text ABIs.
+pub(crate) fn render_measured_text(
     mut invoke: impl FnMut(i64, u64, i64, u64) -> i64,
 ) -> Result<String, MojoError> {
     let mut measured = -1_i64;

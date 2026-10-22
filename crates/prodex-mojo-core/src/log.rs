@@ -17,6 +17,8 @@ pub use virtual_fields_search::log_virtual_fields_contains;
 mod latest_timestamp;
 pub use latest_timestamp::log_timestamp_should_replace;
 mod runtime_line;
+mod structured_message;
+pub use structured_message::{render_structured_log_message, structured_log_message_field_policy};
 mod snapshot;
 mod transcript;
 mod transcript_ansi;
@@ -175,9 +177,17 @@ pub fn structured_log_field_policy(
     key: &str,
     value: &str,
 ) -> Result<StructuredLogFieldPolicy, MojoError> {
+    structured_log_field_policy_with(key, value, prodex_mojo_structured_log_field_policy_v1)
+}
+
+fn structured_log_field_policy_with(
+    key: &str,
+    value: &str,
+    invoke: unsafe extern "C" fn(i64, u64, i64, u64, i64, u64) -> i64,
+) -> Result<StructuredLogFieldPolicy, MojoError> {
     let mut output = [-1_i64; 5];
     let status = unsafe {
-        prodex_mojo_structured_log_field_policy_v1(
+        invoke(
             STRUCTURED_LOG_ABI_VERSION,
             key.as_ptr() as usize as u64,
             i64::try_from(key.len()).map_err(|_| MojoError::InvalidInput)?,

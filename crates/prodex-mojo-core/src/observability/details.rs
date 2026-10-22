@@ -1,8 +1,5 @@
-use super::{
-    OBSERVABILITY_LABEL_ABI_VERSION, OperationalDetailFormat, stream::TextView,
-    text::render_measured_text,
-};
-use crate::MojoError;
+use super::{OBSERVABILITY_LABEL_ABI_VERSION, OperationalDetailFormat, stream::TextView};
+use crate::{MojoError, text_output::render_measured_text};
 
 /// One compiled metadata descriptor and its host-acquired display text.
 /// `prepared` must already be redacted (plain/percent) or URL-parsed (endpoint).

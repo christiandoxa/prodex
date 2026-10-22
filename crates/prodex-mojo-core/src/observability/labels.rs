@@ -1,5 +1,5 @@
-use super::{OBSERVABILITY_LABEL_ABI_VERSION, text::render_measured_text};
-use crate::MojoError;
+use super::OBSERVABILITY_LABEL_ABI_VERSION;
+use crate::{MojoError, text_output::render_measured_text};
 
 unsafe extern "C" {
     fn prodex_mojo_log_event_label_v1(

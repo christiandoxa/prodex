@@ -427,10 +427,14 @@ const CORE_LEXICAL_BROKER_PATHS = "crates/prodex-app/src/runtime_persistence/pat
 const CORE_LEXICAL_APP_HOUSEKEEPING = "crates/prodex-app/src/housekeeping.rs";
 const CORE_LEXICAL_LIVE_LOG = "crates/prodex-app/src/app_commands/log_live.rs";
 const PROMOTED_FILES = [
+  "crates/prodex-mojo-core/src/log/structured_message.rs",
+  "crates/prodex-mojo-core/src/log/structured_message_tests.rs",
+  "crates/prodex-runtime-proxy/tests/src/structured_log_render.rs",
+  "mojo/tests/structured_log_message_test.mojo",
   "crates/prodex-app/src/app_commands/log_stream/label_tests.rs",
   "crates/prodex-mojo-core/src/observability/labels.rs",
   "crates/prodex-mojo-core/src/observability/labels_tests.rs",
-  "crates/prodex-mojo-core/src/observability/text.rs",
+  "crates/prodex-mojo-core/src/text_output.rs",
   "mojo/tests/log_event_label_test.mojo",
   "crates/prodex-app/src/app_commands/log_stream/detail_tests.rs",
   "crates/prodex-mojo-core/src/observability/details.rs",
@@ -9598,6 +9602,8 @@ export function findViolations(files) {
   const structuredLogPolicyViolations = files.flatMap(([filePath, contents]) => {
     if (filePath === "crates/prodex-runtime-proxy/src/log_event.rs") {
       const required = [
+        "prodex_mojo_core::log::structured_log_message_field_policy(",
+        "prodex_mojo_core::log::render_structured_log_message(",
         "prodex_mojo_core::log::structured_log_field_policy(",
         "prodex_mojo_core::log::structured_log_sanitize(",
         "prodex_mojo_core::log::structured_log_strip_location(",
@@ -9613,11 +9619,23 @@ export function findViolations(files) {
         /\bfn\s+runtime_proxy_log_key_is_location\s*\(/u,
         /\bfn\s+runtime_proxy_strip_log_location_secrets\s*\(/u,
         /\bfn\s+runtime_proxy_log_field_value_needs_quotes\s*\(/u,
+        /\bmessage\.push(?:_str)?\s*\(/u,
+        /\bkey\.is_empty\s*\(/u,
       ];
       if (forbidden.some((pattern) => pattern.test(contents))) {
         violations.push(filePath + ": contains restored Rust structured-log policy semantics");
       }
       return violations;
+    }
+    if (filePath === "crates/prodex-mojo-core/src/log/structured_message.rs") {
+      if (
+        !contents.includes("prodex_mojo_structured_log_message_field_policy_v1")
+        || !contents.includes("prodex_mojo_structured_log_message_v1(")
+        || !contents.includes("render_measured_text(")
+        || /\bformat!\s*\(|\.push_str\s*\(|\.join\s*\(/u.test(contents)
+      ) {
+        return [filePath + ": structured-log message adapter must retain compiled rendering without Rust copies"];
+      }
     }
     if (
       filePath === "crates/prodex-mojo-core/src/log.rs"
@@ -17150,6 +17168,28 @@ function selfTest() {
   assert.match(findViolations([["crates/prodex-runtime-proxy/src/log_event.rs",
     '#[cfg(not(feature = "mojo"))] fn runtime_proxy_parse_log_message_rust() {}']]).join("\n"),
     /feature-off Rust path/u);
+  const structuredMessageCaller = [
+    "prodex_mojo_core::log::structured_log_message_field_policy(",
+    "prodex_mojo_core::log::render_structured_log_message(",
+    "prodex_mojo_core::log::structured_log_field_policy(",
+    "prodex_mojo_core::log::structured_log_sanitize(",
+    "prodex_mojo_core::log::structured_log_strip_location(",
+  ].join("\n");
+  const structuredMessageFile = "crates/prodex-runtime-proxy/src/log_event.rs";
+  assert.deepEqual(findViolations([[structuredMessageFile, structuredMessageCaller]])
+    .filter((message) => message.includes("structured-log")), []);
+  assert.match(findViolations([[structuredMessageFile,
+    structuredMessageCaller.replace("render_structured_log_message(", "render_local(")]])
+    .join("\n"), /structured-log policy must retain Mojo call/u);
+  for (const restored of ["message.push(' ')", "message.push_str(key)", "key.is_empty()"] ) {
+    assert.match(findViolations([[structuredMessageFile, structuredMessageCaller + restored]])
+      .join("\n"), /restored Rust structured-log policy semantics/u);
+  }
+  const structuredMessageAdapter = "crates/prodex-mojo-core/src/log/structured_message.rs";
+  const structuredMessageBridge = "prodex_mojo_structured_log_message_field_policy_v1; prodex_mojo_structured_log_message_v1(; render_measured_text(";
+  assert.deepEqual(findViolations([[structuredMessageAdapter, structuredMessageBridge]]), []);
+  assert.match(findViolations([[structuredMessageAdapter, structuredMessageBridge + "text.join(\" \")"]])
+    .join("\n"), /without Rust copies/u);
   assert.match(findViolations([["crates/prodex-quota/src/render/gemini.rs",
     '#[cfg(not(feature = "mojo"))] fn gemini_bucket_numeric_rust() {}']]).join("\n"),
     /feature-off Rust path/u);

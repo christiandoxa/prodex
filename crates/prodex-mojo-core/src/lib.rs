@@ -10,6 +10,12 @@ pub const MOJO_ACTIVE: bool = cfg!(prodex_mojo_active);
 pub const MOJO_REQUIRED: bool = cfg!(prodex_mojo_required);
 pub const MOJO_VERSION: Option<&str> = option_env!("PRODEX_MOJO_VERSION");
 
+#[cfg(any(
+    feature = "mojo-observability",
+    all(feature = "mojo-rich", feature = "mojo-routing")
+))]
+mod text_output;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MojoError {
     InvalidInput,

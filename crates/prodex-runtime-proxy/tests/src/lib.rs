@@ -1,5 +1,7 @@
 use super::*;
 
+mod structured_log_render;
+
 #[path = "payload_detection_invalid_previous_response.rs"]
 mod payload_detection_invalid_previous_response;
 
