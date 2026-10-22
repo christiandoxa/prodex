@@ -2,6 +2,7 @@ from std.memory import Pointer
 
 from rich_text import rich_trim_bounds, rich_view_ptr, rich_view_valid
 from rich_types import ProdexRichStringView
+from runtime_math import runtime_i64_saturating_sub
 
 comptime CONFIRMATION_POLICY_ABI_VERSION: Int64 = 1
 comptime CONFIRMATION_POLICY_REDEEM: Int64 = 0
@@ -67,3 +68,23 @@ def prodex_confirmation_policy_v1(
     ):
         return 0
     return -1
+
+
+@export("prodex_manual_redeem_reset_v1")
+def prodex_manual_redeem_reset_v1(
+    version: Int64, primary_present: Int64, primary_reset: Int64,
+    weekly_present: Int64, weekly_reset: Int64, now: Int64, near_seconds: Int64,
+) abi("C") -> Int64:
+    if version != 1:
+        return -2
+    if primary_present < 0 or primary_present > 1 or weekly_present < 0 or weekly_present > 1:
+        return -1
+    if primary_present == 0 and primary_reset != 0 or weekly_present == 0 and weekly_reset != 0:
+        return -1
+    var selected: Int64 = 0
+    if primary_present == 1 and runtime_i64_saturating_sub(primary_reset, now) <= near_seconds:
+        selected = 1
+    if weekly_present == 1 and runtime_i64_saturating_sub(weekly_reset, now) <= near_seconds:
+        if selected == 0 or weekly_reset < primary_reset:
+            selected = 2
+    return selected

@@ -58,7 +58,7 @@ fn usage_with_resets(five_hour_reset_at: i64, weekly_reset_at: i64) -> UsageResp
 fn manual_redeem_allows_remaining_quota_when_reset_is_not_near() {
     let usage = usage_with_resets(1_000 + MANUAL_REDEEM_NEAR_RESET_SECONDS + 1, 604_800);
     assert_eq!(
-        nearest_manual_redeem_reset(&usage, 1_000, MANUAL_REDEEM_NEAR_RESET_SECONDS),
+        nearest_manual_redeem_reset(&usage, 1_000, MANUAL_REDEEM_NEAR_RESET_SECONDS).unwrap(),
         None
     );
 }
@@ -67,7 +67,7 @@ fn manual_redeem_allows_remaining_quota_when_reset_is_not_near() {
 fn manual_redeem_detects_nearest_near_reset() {
     let usage = usage_with_resets(1_060, 1_030);
     assert_eq!(
-        nearest_manual_redeem_reset(&usage, 1_000, MANUAL_REDEEM_NEAR_RESET_SECONDS),
+        nearest_manual_redeem_reset(&usage, 1_000, MANUAL_REDEEM_NEAR_RESET_SECONDS).unwrap(),
         Some(ManualRedeemNearReset {
             label: "weekly",
             reset_at: 1_030
@@ -229,4 +229,58 @@ fn manual_redeem_confirmation_defaults_to_no() {
     assert_eq!(parse_manual_redeem_confirmation("no"), Some(false));
     assert_eq!(parse_manual_redeem_confirmation("yes"), Some(true));
     assert_eq!(parse_manual_redeem_confirmation("wat"), None);
+}
+
+#[test]
+fn compiled_manual_reset_keeps_primary_ties_and_past_reset_eligibility() {
+    for (primary, weekly, now, near, label, reset_at) in [
+        (1030, 1030, 1000, 3600, "5h", 1030),
+        (800, 900, 1000, -100, "5h", 800),
+        (i64::MIN, i64::MAX, i64::MAX, i64::MIN, "5h", i64::MIN),
+        (i64::MAX, i64::MAX, i64::MIN, i64::MAX, "5h", i64::MAX),
+    ] {
+        assert_eq!(
+            nearest_manual_redeem_reset(&usage_with_resets(primary, weekly), now, near).unwrap(),
+            Some(ManualRedeemNearReset { label, reset_at })
+        );
+    }
+    assert_eq!(
+        nearest_manual_redeem_reset(
+            &usage_with_resets(i64::MAX, i64::MAX),
+            i64::MIN,
+            i64::MAX - 1
+        )
+        .unwrap(),
+        None
+    );
+}
+
+#[test]
+fn compiled_manual_reset_handles_missing_windows_and_timestamps() {
+    let mut usage = usage_with_resets(1060, 1030);
+    usage.rate_limit.as_mut().unwrap().primary_window = None;
+    assert_eq!(
+        nearest_manual_redeem_reset(&usage, 1000, 3600).unwrap(),
+        Some(ManualRedeemNearReset {
+            label: "weekly",
+            reset_at: 1030
+        })
+    );
+    usage
+        .rate_limit
+        .as_mut()
+        .unwrap()
+        .secondary_window
+        .as_mut()
+        .unwrap()
+        .reset_at = None;
+    assert_eq!(
+        nearest_manual_redeem_reset(&usage, 1000, 3600).unwrap(),
+        None
+    );
+    usage.rate_limit = None;
+    assert_eq!(
+        nearest_manual_redeem_reset(&usage, 1000, 3600).unwrap(),
+        None
+    );
 }

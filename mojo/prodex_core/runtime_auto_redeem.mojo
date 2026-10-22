@@ -2,7 +2,7 @@ from std.memory import Pointer
 
 from rich_text import rich_trim_bounds, rich_view_valid
 from rich_types import ProdexRichStringView, rich_view_ptr
-from runtime_math import INT64_MAX, INT64_MIN
+from runtime_math import INT64_MAX, INT64_MIN, runtime_i64_saturating_sub as runtime_auto_redeem_saturating_sub
 
 
 comptime RUNTIME_AUTO_REDEEM_FIELD_COUNT: Int64 = 6
@@ -75,14 +75,6 @@ def runtime_auto_redeem_plan_priority(view: ProdexRichStringView) -> Int64:
     ](view) or runtime_auto_redeem_plan_matches["enterprise"](view):
         return 3
     return 2
-
-
-def runtime_auto_redeem_saturating_sub(left: Int64, right: Int64) -> Int64:
-    if right > 0 and left < INT64_MIN + right:
-        return INT64_MIN
-    if right < 0 and left > INT64_MAX + right:
-        return INT64_MAX
-    return left - right
 
 
 def runtime_auto_redeem_saturating_neg(value: Int64) -> Int64:

@@ -3,6 +3,14 @@ comptime INT64_MIN: Int64 = -9223372036854775808
 comptime UINT64_MAX: UInt64 = 18446744073709551615
 
 
+def runtime_i64_saturating_sub(left: Int64, right: Int64) -> Int64:
+    if right > 0 and left < INT64_MIN + right:
+        return INT64_MIN
+    if right < 0 and left > INT64_MAX + right:
+        return INT64_MAX
+    return left - right
+
+
 def runtime_quota_saturating_add(left: Int64, right: Int64) -> Int64:
     if right > 0 and left > INT64_MAX - right:
         return INT64_MAX
