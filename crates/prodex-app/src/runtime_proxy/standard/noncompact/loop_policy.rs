@@ -31,23 +31,22 @@ pub(super) fn runtime_noncompact_next_action(
             preferred_profile,
             runtime_route_kind_inflight_context(RuntimeRouteKind::Standard),
         )?;
-    let initial_action = prodex_mojo_core::runtime::noncompact_loop_action(
-        prodex_mojo_core::runtime::NoncompactLoopInput {
-            stage: prodex_mojo_core::runtime::NoncompactLoopStage::SelectPreferred,
-            excluded_profiles_empty: loop_state.excluded_profiles.is_empty(),
-            preferred_is_session,
-            preferred_hard_limited,
-            fresh_candidate_present: false,
-            candidate_hard_affinity: false,
-            candidate_hard_limited: false,
-            inflight_relieved: false,
-            session_present,
-            cold_start_profiles_present: false,
-            cold_start_probe_waited: loop_state.cold_start_probe_waited,
-            transient_recovered: false,
-        },
-    )
-    .map_err(|error| anyhow::anyhow!("Mojo noncompact loop policy failed: {error:?}"))?;
+    let mut policy_input = prodex_mojo_core::runtime::NoncompactLoopInput {
+        stage: prodex_mojo_core::runtime::NoncompactLoopStage::SelectPreferred,
+        excluded_profiles_empty: loop_state.excluded_profiles.is_empty(),
+        preferred_is_session,
+        preferred_hard_limited,
+        fresh_candidate_present: false,
+        candidate_hard_affinity: false,
+        candidate_hard_limited: false,
+        inflight_relieved: false,
+        session_present,
+        cold_start_profiles_present: false,
+        cold_start_probe_waited: loop_state.cold_start_probe_waited,
+        transient_recovered: false,
+    };
+    let initial_action = prodex_mojo_core::runtime::noncompact_loop_action(policy_input)
+        .map_err(|error| anyhow::anyhow!("Mojo noncompact loop policy failed: {error:?}"))?;
     match initial_action {
         prodex_mojo_core::runtime::NoncompactLoopAction::AttemptPreferred => {
             runtime_selection_trace_log_direct(
@@ -111,23 +110,12 @@ pub(super) fn runtime_noncompact_next_action(
         Some(request_id),
         request_model_name,
     )?;
-    let candidate_action = prodex_mojo_core::runtime::noncompact_loop_action(
-        prodex_mojo_core::runtime::NoncompactLoopInput {
-            stage: prodex_mojo_core::runtime::NoncompactLoopStage::AfterFreshSelection,
-            excluded_profiles_empty: false,
-            preferred_is_session,
-            preferred_hard_limited,
-            fresh_candidate_present: candidate_name.is_some(),
-            candidate_hard_affinity: false,
-            candidate_hard_limited: false,
-            inflight_relieved: false,
-            session_present,
-            cold_start_profiles_present: false,
-            cold_start_probe_waited: loop_state.cold_start_probe_waited,
-            transient_recovered: false,
-        },
-    )
-    .map_err(|error| anyhow::anyhow!("Mojo noncompact loop policy failed: {error:?}"))?;
+    policy_input.stage = prodex_mojo_core::runtime::NoncompactLoopStage::AfterFreshSelection;
+    policy_input.excluded_profiles_empty = false;
+    policy_input.fresh_candidate_present = candidate_name.is_some();
+    policy_input.cold_start_probe_waited = loop_state.cold_start_probe_waited;
+    let candidate_action = prodex_mojo_core::runtime::noncompact_loop_action(policy_input)
+        .map_err(|error| anyhow::anyhow!("Mojo noncompact loop policy failed: {error:?}"))?;
     match candidate_action {
         prodex_mojo_core::runtime::NoncompactLoopAction::AttemptCandidate => {
             let candidate_name = candidate_name.ok_or_else(|| {
@@ -145,7 +133,7 @@ pub(super) fn runtime_noncompact_next_action(
                     loop_state,
                 },
                 candidate_name,
-                preferred_hard_limited,
+                policy_input,
             );
         }
         prodex_mojo_core::runtime::NoncompactLoopAction::WaitInflight => {}
@@ -175,23 +163,13 @@ pub(super) fn runtime_noncompact_next_action(
         &loop_state.excluded_profiles,
         RuntimeRouteKind::Standard,
     )?;
-    let mut post_wait_action = prodex_mojo_core::runtime::noncompact_loop_action(
-        prodex_mojo_core::runtime::NoncompactLoopInput {
-            stage: prodex_mojo_core::runtime::NoncompactLoopStage::AfterInflightWait,
-            excluded_profiles_empty: false,
-            preferred_is_session,
-            preferred_hard_limited,
-            fresh_candidate_present: false,
-            candidate_hard_affinity: false,
-            candidate_hard_limited: false,
-            inflight_relieved,
-            session_present,
-            cold_start_profiles_present: remaining_cold_start_profiles > 0,
-            cold_start_probe_waited: loop_state.cold_start_probe_waited,
-            transient_recovered: false,
-        },
-    )
-    .map_err(|error| anyhow::anyhow!("Mojo noncompact loop policy failed: {error:?}"))?;
+    policy_input.stage = prodex_mojo_core::runtime::NoncompactLoopStage::AfterInflightWait;
+    policy_input.fresh_candidate_present = false;
+    policy_input.inflight_relieved = inflight_relieved;
+    policy_input.cold_start_profiles_present = remaining_cold_start_profiles > 0;
+    policy_input.cold_start_probe_waited = loop_state.cold_start_probe_waited;
+    let mut post_wait_action = prodex_mojo_core::runtime::noncompact_loop_action(policy_input)
+        .map_err(|error| anyhow::anyhow!("Mojo noncompact loop policy failed: {error:?}"))?;
     loop {
         match post_wait_action {
             prodex_mojo_core::runtime::NoncompactLoopAction::Continue => {
@@ -208,25 +186,14 @@ pub(super) fn runtime_noncompact_next_action(
                     runtime_proxy_probe_refresh_pause(shared, RuntimeRouteKind::Standard);
                     return Ok(RuntimePrecommitLoopAction::Continue);
                 }
-                post_wait_action = prodex_mojo_core::runtime::noncompact_loop_action(
-                    prodex_mojo_core::runtime::NoncompactLoopInput {
-                        stage: prodex_mojo_core::runtime::NoncompactLoopStage::AfterInflightWait,
-                        excluded_profiles_empty: false,
-                        preferred_is_session,
-                        preferred_hard_limited,
-                        fresh_candidate_present: false,
-                        candidate_hard_affinity: false,
-                        candidate_hard_limited: false,
-                        inflight_relieved,
-                        session_present,
-                        cold_start_profiles_present: remaining_cold_start_profiles > 0,
-                        cold_start_probe_waited: true,
-                        transient_recovered: false,
-                    },
-                )
-                .map_err(|error| {
-                    anyhow::anyhow!("Mojo noncompact loop policy failed: {error:?}")
-                })?;
+                policy_input.stage =
+                    prodex_mojo_core::runtime::NoncompactLoopStage::AfterInflightWait;
+                policy_input.cold_start_probe_waited = true;
+                policy_input.transient_recovered = false;
+                post_wait_action = prodex_mojo_core::runtime::noncompact_loop_action(policy_input)
+                    .map_err(|error| {
+                        anyhow::anyhow!("Mojo noncompact loop policy failed: {error:?}")
+                    })?;
             }
             prodex_mojo_core::runtime::NoncompactLoopAction::WaitTransient => {
                 let transient_recovered = loop_state.maybe_wait_for_transient_recovery(
@@ -234,25 +201,14 @@ pub(super) fn runtime_noncompact_next_action(
                     shared,
                     RuntimeRouteKind::Standard,
                 )?;
-                post_wait_action = prodex_mojo_core::runtime::noncompact_loop_action(
-                    prodex_mojo_core::runtime::NoncompactLoopInput {
-                        stage: prodex_mojo_core::runtime::NoncompactLoopStage::AfterTransientWait,
-                        excluded_profiles_empty: false,
-                        preferred_is_session,
-                        preferred_hard_limited,
-                        fresh_candidate_present: false,
-                        candidate_hard_affinity: false,
-                        candidate_hard_limited: false,
-                        inflight_relieved,
-                        session_present,
-                        cold_start_profiles_present: remaining_cold_start_profiles > 0,
-                        cold_start_probe_waited: loop_state.cold_start_probe_waited,
-                        transient_recovered,
-                    },
-                )
-                .map_err(|error| {
-                    anyhow::anyhow!("Mojo noncompact loop policy failed: {error:?}")
-                })?;
+                policy_input.stage =
+                    prodex_mojo_core::runtime::NoncompactLoopStage::AfterTransientWait;
+                policy_input.cold_start_probe_waited = loop_state.cold_start_probe_waited;
+                policy_input.transient_recovered = transient_recovered;
+                post_wait_action = prodex_mojo_core::runtime::noncompact_loop_action(policy_input)
+                    .map_err(|error| {
+                        anyhow::anyhow!("Mojo noncompact loop policy failed: {error:?}")
+                    })?;
             }
             prodex_mojo_core::runtime::NoncompactLoopAction::Return => {
                 return Ok(RuntimePrecommitLoopAction::Return(
@@ -281,12 +237,11 @@ pub(super) fn runtime_noncompact_next_action(
 fn runtime_noncompact_candidate_admission(
     context: RuntimeNoncompactNextActionContext<'_>,
     candidate_name: String,
-    preferred_hard_limited: bool,
+    mut policy_input: prodex_mojo_core::runtime::NoncompactLoopInput,
 ) -> Result<RuntimePrecommitLoopAction<String, tiny_http::ResponseBox>> {
     let RuntimeNoncompactNextActionContext {
         request_id,
         shared,
-        preferred_is_session,
         session_present,
         wait_affinity_owner,
         loop_state,
@@ -297,23 +252,13 @@ fn runtime_noncompact_candidate_admission(
         &candidate_name,
         "standard_http",
     )?;
-    let admission_action = prodex_mojo_core::runtime::noncompact_loop_action(
-        prodex_mojo_core::runtime::NoncompactLoopInput {
-            stage: prodex_mojo_core::runtime::NoncompactLoopStage::CandidateAdmission,
-            excluded_profiles_empty: false,
-            preferred_is_session,
-            preferred_hard_limited,
-            fresh_candidate_present: true,
-            candidate_hard_affinity: wait_affinity_owner == Some(candidate_name.as_str()),
-            candidate_hard_limited,
-            inflight_relieved: false,
-            session_present,
-            cold_start_profiles_present: false,
-            cold_start_probe_waited: loop_state.cold_start_probe_waited,
-            transient_recovered: false,
-        },
-    )
-    .map_err(|error| anyhow::anyhow!("Mojo noncompact loop policy failed: {error:?}"))?;
+    policy_input.stage = prodex_mojo_core::runtime::NoncompactLoopStage::CandidateAdmission;
+    policy_input.fresh_candidate_present = true;
+    policy_input.candidate_hard_affinity = wait_affinity_owner == Some(candidate_name.as_str());
+    policy_input.candidate_hard_limited = candidate_hard_limited;
+    policy_input.cold_start_probe_waited = loop_state.cold_start_probe_waited;
+    let admission_action = prodex_mojo_core::runtime::noncompact_loop_action(policy_input)
+        .map_err(|error| anyhow::anyhow!("Mojo noncompact loop policy failed: {error:?}"))?;
     match admission_action {
         prodex_mojo_core::runtime::NoncompactLoopAction::AttemptCandidate => {
             Ok(RuntimePrecommitLoopAction::Attempt(candidate_name))

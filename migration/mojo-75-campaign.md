@@ -8719,3 +8719,23 @@ The next audit targets repeated `NoncompactLoopInput` marshalling in
 `runtime_noncompact_next_action`. Decisions already belong to Mojo; reduce the
 Rust adapter while preserving every per-stage observation and effect, then run
 the full runtime matrix. This cleanup must not claim a new semantic migration.
+
+## Noncompact compiled-policy fact marshalling reduced (2026-10-22)
+
+Six repeated Rust input records become one local record while all six compiled
+policy calls remain. Stage facts and the sequence of 38 host/effect-related calls
+match the original source. This is adapter cleanup around existing Mojo authority,
+not a new semantic transfer. Direct Mojo, four bridge, 459 before/after runtime
+and 19 serialized smoke tests pass, with strict workspace Clippy, compatibility,
+runtime guards and full default CI: 1,443 Rust tests in 544.73 seconds.
+Canonical share is 36.465731369527106% (137,707 Mojo / 239,927 Rust production
+LOC), removing 55 Rust production LOC. The 75% target remains open. Evidence is
+in `migration/noncompact-adapter-facts-mojo-20261022.md`.
+
+The next audited semantic owner is
+`prodex-provider-core/src/bridge/chat_compat.rs::provider_core_chat_compatible_validate_top_level_request_shape`.
+Move its ordered root/model/stream/instructions/previous-response checks and
+exact provider-labelled diagnostics into the existing compiled chat-request
+validation owner. Preserve absent fields, empty optional strings, Unicode model
+whitespace and every caller's error precedence. Reuse the versioned JSON ABI;
+Serde acquisition and dependency-specific parsing remain in Rust.
