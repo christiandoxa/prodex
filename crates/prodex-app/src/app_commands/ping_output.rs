@@ -100,3 +100,7 @@ pub(super) fn ping_summary_plan(results: &[PingResult]) -> prodex_mojo_core::ric
     prodex_mojo_core::rich::ping_summary_plan(&statuses)
         .expect("Mojo ping summary planner returned invalid output")
 }
+
+#[cfg(test)]
+#[path = "ping_output/report_tests.rs"]
+mod report_tests;
