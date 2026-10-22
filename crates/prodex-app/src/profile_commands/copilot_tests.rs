@@ -8,6 +8,9 @@ use std::net::TcpListener;
 use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
 
+#[path = "copilot_runtime_catalog_tests.rs"]
+mod runtime_catalog;
+
 fn start_copilot_auth_test_server(
     routes: Vec<(&'static str, u16, serde_json::Value)>,
 ) -> (String, Arc<Mutex<Vec<String>>>, JoinHandle<()>) {

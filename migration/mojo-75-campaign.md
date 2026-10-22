@@ -8847,3 +8847,27 @@ filtering/deduplication, traversal order, presence-first field precedence, Unico
 trim, unsigned limits and null array elements. Reuse the provider catalog boundary,
 parsed JSON tree/writer and existing compiled ID merge; keep credentials and HTTP
 effects in Rust.
+
+## Copilot runtime catalogs compiled in Mojo (2026-10-22)
+
+Recursive model-list discovery, raw-entry limits, presence-first aliases, Unicode
+trim, unsigned context/prompt limits, normalized model JSON and recursive
+object-null removal move to the compiled Copilot catalog owner. Five Rust semantic
+functions are removed without a fallback. The provider adapter reuses Serde
+acquisition, compiled ID merge and provider catalog validation. Credential/HTTP
+host code is unchanged except removed imports. Four caller regressions pass on
+the original Rust implementation. Direct Mojo, two bridge tests in each core/
+runtime mode, 547 provider and 13 catalog/auth caller tests pass after migration.
+Strict workspace Clippy, guards, boundary self-tests and offline replay pass.
+Full default CI passes 1,443 Rust tests in 577.71 seconds; default changed tests
+pass 547 Rust tests in 87.73 seconds. Canonical share is 36.58358662613982%
+(138,414 Mojo / 239,936 Rust production LOC), removing 57 Rust production LOC.
+The 75% goal remains open. Evidence and corrected prototype compiler errors are
+in `migration/copilot-model-catalog-mojo-20261022.md`.
+
+The next audit targets `external_catalog_model` and `deepseek_catalog_model`:
+shared runtime model schema, reasoning defaults/descriptions, provider capability
+flags and DeepSeek base instructions. Preserve complete model objects, text bytes,
+u64 endpoints and existing metadata lookup. Reuse the provider catalog boundary
+and measured JSON writer. Keep config/filesystem effects in Rust; separate dynamic
+catalog parsing and context-budget arithmetic remain a later checkpoint.
