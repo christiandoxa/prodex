@@ -30,7 +30,7 @@ pub use super_provider_limits::{
     name = "prodex",
     version,
     about = "Manage multiple Codex account profiles with profile-local auth and shared Codex state.",
-    after_help = CLI_TOP_LEVEL_AFTER_HELP
+    after_help = cli_after_help(CliHelpKind::TopLevel)
 )]
 pub struct Cli {
     #[command(subcommand)]
@@ -42,7 +42,7 @@ pub enum Commands {
     #[command(
         subcommand,
         about = "Add, inspect, remove, and activate managed profiles.",
-        after_help = CLI_PROFILE_AFTER_HELP
+        after_help = cli_after_help(CliHelpKind::Profile)
     )]
     Profile(ProfileCommands),
     #[command(
@@ -72,18 +72,18 @@ pub enum Commands {
     #[command(
         subcommand,
         about = "Inspect shared Codex session metadata.",
-        after_help = CLI_SESSION_AFTER_HELP
+        after_help = cli_after_help(CliHelpKind::Session)
     )]
     Session(SessionCommands),
     #[command(
         about = "Inspect local state, Codex resolution, quota readiness, and runtime logs.",
-        after_help = CLI_DOCTOR_AFTER_HELP
+        after_help = cli_after_help(CliHelpKind::Doctor)
     )]
     Doctor(DoctorArgs),
     #[command(
         trailing_var_arg = true,
         about = "Run provider login flows, using Prodex profiles where supported.",
-        after_help = CLI_LOGIN_AFTER_HELP
+        after_help = cli_after_help(CliHelpKind::Login)
     )]
     Login(CodexPassthroughArgs),
     #[command(about = "Run codex logout for the selected or active profile.")]
@@ -92,12 +92,12 @@ pub enum Commands {
     Update(ProdexUpdateArgs),
     #[command(
         about = "Inspect live quota for one profile or the whole profile pool.",
-        after_help = CLI_QUOTA_AFTER_HELP
+        after_help = cli_after_help(CliHelpKind::Quota)
     )]
     Quota(QuotaArgs),
     #[command(
         about = "Redeem one reset credit manually for a named OpenAI/Codex profile.",
-        after_help = CLI_REDEEM_AFTER_HELP
+        after_help = cli_after_help(CliHelpKind::Redeem)
     )]
     Redeem(RedeemArgs),
     #[command(
@@ -108,14 +108,14 @@ pub enum Commands {
     #[command(
         trailing_var_arg = true,
         about = "Run codex through prodex with quota preflight and eligible pre-commit rotation.",
-        after_help = CLI_RUN_AFTER_HELP
+        after_help = cli_after_help(CliHelpKind::Run)
     )]
     Run(RunArgs),
     #[command(
         trailing_var_arg = true,
         visible_alias = "s",
         about = "YOLO shortcut for the Super tool stack with opt-in Presidio.",
-        after_help = CLI_SUPER_AFTER_HELP
+        after_help = cli_after_help(CliHelpKind::Super)
     )]
     Super(Box<SuperArgs>),
     #[command(about = "Run a lean OpenAI-compatible provider gateway.")]
@@ -131,41 +131,41 @@ pub enum Commands {
 }
 
 impl Commands {
+    fn presentation_kind(&self) -> prodex_mojo_core::cli_presentation::CliCommandKind {
+        use prodex_mojo_core::cli_presentation::CliCommandKind;
+        match self {
+            Self::Profile(_) => CliCommandKind::Profile,
+            Self::UseProfile(_) => CliCommandKind::UseProfile,
+            Self::Current => CliCommandKind::Current,
+            Self::Info(_) => CliCommandKind::Info,
+            Self::Status(_) => CliCommandKind::Status,
+            Self::Log(_) => CliCommandKind::Log,
+            Self::Session(_) => CliCommandKind::Session,
+            Self::Doctor(_) => CliCommandKind::Doctor,
+            Self::Login(_) => CliCommandKind::Login,
+            Self::Logout(_) => CliCommandKind::Logout,
+            Self::Update(_) => CliCommandKind::Update,
+            Self::Quota(_) => CliCommandKind::Quota,
+            Self::Redeem(_) => CliCommandKind::Redeem,
+            Self::Ping(_) => CliCommandKind::Ping,
+            Self::Run(_) => CliCommandKind::Run,
+            Self::Super(_) => CliCommandKind::Super,
+            Self::Gateway(_) => CliCommandKind::Gateway,
+            Self::SuperExpose(_) => CliCommandKind::SuperExpose,
+            Self::RuntimeBroker(_) => CliCommandKind::RuntimeBroker,
+            Self::McpJsonlBridge(_) => CliCommandKind::McpJsonlBridge,
+            Self::SubAgentExec(_) => CliCommandKind::SubAgentExec,
+        }
+    }
+
     pub fn launches_runtime(&self) -> bool {
-        matches!(
-            self,
-            Self::Run(_)
-                | Self::Super(_)
-                | Self::Gateway(_)
-                | Self::SuperExpose(_)
-                | Self::RuntimeBroker(_)
-        )
+        prodex_mojo_core::cli_presentation::launches_runtime(self.presentation_kind())
+            .expect("compiled Mojo CLI runtime classification returned invalid output")
     }
 
     pub fn process_label(&self) -> &'static str {
-        match self {
-            Self::Profile(_) => "profile",
-            Self::UseProfile(_) => "use",
-            Self::Current => "current",
-            Self::Info(_) => "info",
-            Self::Status(_) => "status",
-            Self::Log(_) => "log",
-            Self::Session(_) => "session",
-            Self::Doctor(_) => "doctor",
-            Self::Login(_) => "login",
-            Self::Logout(_) => "logout",
-            Self::Update(_) => "update",
-            Self::Quota(_) => "quota",
-            Self::Redeem(_) => "redeem",
-            Self::Ping(_) => "ping",
-            Self::Run(_) => "run",
-            Self::Super(_) => "super",
-            Self::Gateway(_) => "gateway",
-            Self::SuperExpose(_) => "super-expose",
-            Self::RuntimeBroker(_) => "__runtime-broker",
-            Self::McpJsonlBridge(_) => "__mcp-jsonl-bridge",
-            Self::SubAgentExec(_) => "__sub-agent-exec",
-        }
+        prodex_mojo_core::cli_presentation::process_label(self.presentation_kind())
+            .expect("compiled Mojo CLI process label returned invalid output")
     }
 }
 
