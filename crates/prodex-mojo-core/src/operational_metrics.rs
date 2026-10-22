@@ -1,5 +1,8 @@
 use crate::MojoError;
 
+mod label_order;
+pub use label_order::operational_metric_label_order;
+
 const OPERATIONAL_METRICS_ABI_VERSION: i64 = 1;
 const MAX_HISTOGRAM_BUCKETS: usize = 16;
 

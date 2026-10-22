@@ -1,4 +1,8 @@
 from std.memory import Pointer
+from rich_types import ProdexRichStringView
+from rich_text import rich_view_valid, rich_view_compare
+from index_order import index_order_sort
+from telemetry_label import TELEMETRY_LABEL_MAX_BYTES
 
 comptime OPERATIONAL_METRICS_ABI_VERSION: Int64 = 1
 comptime OPERATIONAL_METRICS_STATUS_OK: Int64 = 0
@@ -6,6 +10,38 @@ comptime OPERATIONAL_METRICS_STATUS_INVALID: Int64 = 1
 comptime OPERATIONAL_METRICS_STATUS_CAPACITY: Int64 = 2
 comptime OPERATIONAL_METRICS_STATUS_ABI: Int64 = 4
 comptime OPERATIONAL_METRICS_MAX_NAME_BYTES: Int64 = 128
+
+
+def operational_metric_label_compare(data: UInt, width: Int64, left: Int64, right: Int64) -> Int64:
+    var fields = Pointer[mut=False, ProdexRichStringView, ImmUntrackedOrigin](unsafe_from_address=Int(data))
+    var result = rich_view_compare(fields[unsafe_offset=left * width], fields[unsafe_offset=right * width])
+    if result == 0:
+        result = rich_view_compare(fields[unsafe_offset=left * width + 1], fields[unsafe_offset=right * width + 1])
+    return left - right if result == 0 else result
+
+
+@export("prodex_mojo_operational_metric_label_order_v1")
+def prodex_mojo_operational_metric_label_order_v1(
+    abi_version: Int64, fields_address: UInt, label_count: Int64,
+    indices_address: UInt, indices_capacity: Int64,
+) abi("C") -> Int64:
+    if abi_version != OPERATIONAL_METRICS_ABI_VERSION:
+        return OPERATIONAL_METRICS_STATUS_ABI
+    if (label_count < 0 or label_count > 65_536 or indices_capacity < 0
+        or (label_count > 0 and (fields_address == 0 or fields_address % 8 != 0
+            or indices_address == 0 or indices_address % 8 != 0))):
+        return OPERATIONAL_METRICS_STATUS_INVALID
+    var fields = Pointer[mut=False, ProdexRichStringView, ImmUntrackedOrigin](unsafe_from_address=Int(fields_address))
+    for index in range(label_count * 2):
+        if not rich_view_valid(fields[unsafe_offset=index], TELEMETRY_LABEL_MAX_BYTES):
+            return OPERATIONAL_METRICS_STATUS_INVALID
+    if indices_capacity < label_count:
+        return OPERATIONAL_METRICS_STATUS_CAPACITY
+    var indices = Pointer[mut=True, Int64, MutUntrackedOrigin](unsafe_from_address=Int(indices_address))
+    for index in range(label_count):
+        indices[unsafe_offset=index] = index
+    index_order_sort[operational_metric_label_compare](fields_address, 2, indices, label_count)
+    return OPERATIONAL_METRICS_STATUS_OK
 
 
 def operational_metrics_name_ends_with(

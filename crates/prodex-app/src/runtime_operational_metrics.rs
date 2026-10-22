@@ -84,12 +84,20 @@ fn runtime_operational_metric_key(
     let mut metric_labels = Vec::with_capacity(labels.len());
     for label in labels {
         let (key, value) = label.as_metric_label().ok()?;
-        metric_labels.push((key.to_string(), value.to_string()));
+        metric_labels.push((key, value));
     }
-    metric_labels.sort();
+    let order =
+        prodex_mojo_core::operational_metrics::operational_metric_label_order(&metric_labels)
+            .ok()?;
     Some(RuntimeOperationalMetricKey {
         name,
-        labels: metric_labels,
+        labels: order
+            .into_iter()
+            .map(|index| {
+                let (key, value) = metric_labels[index];
+                (key.to_string(), value.to_string())
+            })
+            .collect(),
     })
 }
 
@@ -241,3 +249,7 @@ mod tests {
         assert_eq!(millis.sum, 501);
     }
 }
+
+#[cfg(test)]
+#[path = "runtime_operational_metrics/label_tests.rs"]
+mod label_tests;

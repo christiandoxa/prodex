@@ -427,6 +427,10 @@ const CORE_LEXICAL_BROKER_PATHS = "crates/prodex-app/src/runtime_persistence/pat
 const CORE_LEXICAL_APP_HOUSEKEEPING = "crates/prodex-app/src/housekeeping.rs";
 const CORE_LEXICAL_LIVE_LOG = "crates/prodex-app/src/app_commands/log_live.rs";
 const PROMOTED_FILES = [
+  "crates/prodex-mojo-core/src/operational_metrics/label_order.rs",
+  "crates/prodex-mojo-core/src/operational_metrics/label_order_tests.rs",
+  "crates/prodex-app/src/runtime_operational_metrics/label_tests.rs",
+  "mojo/tests/operational_metric_label_order_test.mojo",
   "crates/prodex-mojo-core/src/log/structured_message.rs",
   "crates/prodex-mojo-core/src/log/structured_message_tests.rs",
   "crates/prodex-runtime-proxy/tests/src/structured_log_render.rs",
@@ -12833,14 +12837,22 @@ export function findViolations(files) {
       const required = [
         "histogram_bucket_bounds(name)",
         "prodex_mojo_core::operational_metrics::observe_histogram(",
+        "prodex_mojo_core::operational_metrics::operational_metric_label_order(",
       ];
       const restoredRust = /histogram\.(?:count|sum)\s*=|bucket_counts\.iter_mut\(\)|observation\s*<=\s*\*bound/u;
       return required.every((marker) => production.includes(marker)) &&
         !/\bruntime_operational_histogram_bounds\s*\(/u.test(production) &&
         !/\b120_000_000\b/u.test(production) &&
-        !restoredRust.test(production)
+        !restoredRust.test(production) &&
+        !/\bmetric_labels\.sort(?:_by(?:_key)?)?\s*\(/u.test(production)
         ? []
         : [`${filePath}: histogram bucket planning and observation must use Mojo without a Rust policy copy`];
+    }
+    if (filePath === "crates/prodex-mojo-core/src/operational_metrics/label_order.rs") {
+      if (!contents.includes("prodex_mojo_operational_metric_label_order_v1(")
+        || /\.sort(?:_by(?:_key)?)?\s*\(/u.test(contents)) {
+        return [`${filePath}: metric label pair order must use Mojo without a Rust sort`];
+      }
     }
     if (filePath === OPERATIONAL_HISTOGRAM_ADAPTER_FILE) {
       const required = [
@@ -12855,6 +12867,8 @@ export function findViolations(files) {
       const required = [
         '@export("prodex_mojo_operational_histogram_bounds_v1")',
         '@export("prodex_mojo_operational_histogram_observe_v1")',
+        '@export("prodex_mojo_operational_metric_label_order_v1")',
+        "index_order_sort[operational_metric_label_compare]",
         "operational_histogram_saturating_add(",
         "observation <= bounds[index]",
       ];
@@ -15263,6 +15277,7 @@ function selfTest() {
   const operationalHistogramCaller = [
     "histogram_bucket_bounds(name)",
     "prodex_mojo_core::operational_metrics::observe_histogram(",
+    "prodex_mojo_core::operational_metrics::operational_metric_label_order(",
   ].join("\n");
   const operationalHistogramFiles = [
     [OPERATIONAL_HISTOGRAM_CALLER_FILE, operationalHistogramCaller],
@@ -15274,6 +15289,8 @@ function selfTest() {
     [OPERATIONAL_HISTOGRAM_MOJO_FILE, [
       '@export("prodex_mojo_operational_histogram_bounds_v1")',
       '@export("prodex_mojo_operational_histogram_observe_v1")',
+      '@export("prodex_mojo_operational_metric_label_order_v1")',
+      "index_order_sort[operational_metric_label_compare]",
       "operational_histogram_saturating_add(",
       "observation <= bounds[index]",
     ].join("\n")],
@@ -15284,6 +15301,18 @@ function selfTest() {
     ].join("\n")],
   ];
   assert.deepEqual(findViolations(operationalHistogramFiles), []);
+  assert.match(findViolations([[OPERATIONAL_HISTOGRAM_CALLER_FILE,
+    operationalHistogramCaller.replace("operational_metric_label_order(", "rust_label_order(")]])
+    .join("\n"), /without a Rust policy copy/u);
+  assert.match(findViolations([[OPERATIONAL_HISTOGRAM_CALLER_FILE,
+    operationalHistogramCaller + "\nmetric_labels.sort();"]]).join("\n"),
+    /without a Rust policy copy/u);
+  const metricPairAdapter = "crates/prodex-mojo-core/src/operational_metrics/label_order.rs";
+  assert.deepEqual(findViolations([[metricPairAdapter,
+    "prodex_mojo_operational_metric_label_order_v1("]]), []);
+  assert.match(findViolations([[metricPairAdapter,
+    "prodex_mojo_operational_metric_label_order_v1(; labels.sort_by_key(key)"]])
+    .join("\n"), /without a Rust sort/u);
   assert.match(findViolations([[OPERATIONAL_HISTOGRAM_CALLER_FILE,
     operationalHistogramCaller + "\nhistogram.count = histogram.count.saturating_add(1);",
   ]]).join("\n"), /histogram bucket planning and observation must use Mojo/u);
