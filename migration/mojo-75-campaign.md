@@ -8896,3 +8896,27 @@ whole objects first; preserve exact LF instruction bytes, fixed DeepSeek effort
 descriptions and text-only capabilities. Propagate the renderer Result through
 model-list construction and the existing secure writer; metadata lookup/fallback
 and filesystem effects remain unchanged.
+
+## DeepSeek runtime model schema compiled in Mojo (2026-10-22)
+
+The shared compiled runtime-catalog owner now renders the actual DeepSeek path:
+four fixed reasoning descriptions, high default, text-only capabilities and
+exact 430-byte LF instructions. The former Rust schema and constant are deleted
+without a fallback. Rust retains metadata lookup, candidate order, Serde and
+secure config/filesystem effects; renderer Results propagate through the list
+and writer. Two frozen complete objects pass on original Rust and migrated Mojo.
+Direct Mojo, two bridge tests in each core/runtime mode, five DeepSeek callers,
+17 external config callers and 550 provider tests pass, with strict workspace
+Clippy, formatting, guards and offline replay. Full default CI passes 1,443
+Rust tests in 551.04 seconds. Default changed tests pass 550 Rust tests in
+108.41 seconds.
+Canonical share is 36.6176680386987% (138,603 Mojo / 239,911 Rust production
+LOC), removing 46 Rust production LOC. The 75% goal remains open.
+Evidence is in `migration/deepseek-model-schema-mojo-20261022.md`.
+
+The next audited owner is `external_dynamic_catalog_models` and its prompt-limit
+helper. Preserve models-array errors and raw-entry limits before filtering,
+presence-first id/slug/model and name/model_name aliases, untrimmed display text,
+unsigned-limit precedence, order and duplicates. Reuse the runtime-catalog
+parsed-tree/writer ABI; keep file reads and the existing Kiro normalization in
+Rust. Context-budget and candidate assembly are a separate next checkpoint.

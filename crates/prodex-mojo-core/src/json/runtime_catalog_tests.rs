@@ -57,6 +57,18 @@ fn compiled_runtime_schema_bridge_preserves_defaults_and_provider_capabilities()
     assert!(text.contains("\"supports_reasoning_summaries\":false"));
     assert!(text.contains("\"supports_search_tool\":false"));
     assert!(text.contains("\"input_modalities\":[\"text\"]"));
+    nodes[1].text = "deepseek";
+    let output = runtime_model_catalog_json(&nodes, RAW).unwrap();
+    let text = std::str::from_utf8(&output).unwrap();
+    assert!(text.contains("\"default_reasoning_level\":\"high\""));
+    assert!(
+        text.contains("\"effort\":\"xhigh\",\"description\":\"DeepSeek max reasoning effort\"")
+    );
+    assert!(text.contains("\"input_modalities\":[\"text\"]"));
+    assert!(text.contains("\"supports_reasoning_summaries\":false"));
+    assert!(text.contains("\"supports_reasoning_summary_parameter\":false"));
+    assert!(text.contains("\"supports_search_tool\":false"));
+    assert!(text.contains("share the same workspace.\\n\\nFocus on the user's software task."));
     nodes[1].text = "unsupported";
     assert_eq!(
         runtime_model_catalog_json(&nodes, RAW),

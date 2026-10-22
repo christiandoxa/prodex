@@ -3,7 +3,7 @@ use prodex_mojo_core::MojoError;
 use serde_json::{Value, json};
 use std::fmt;
 
-/// Host-observed fields for a Copilot, Kiro or Anthropic Codex model entry.
+/// Host-observed fields for a DeepSeek, Copilot, Kiro or Anthropic Codex model entry.
 #[derive(Clone, Copy, Debug)]
 pub struct RuntimeModelCatalogInput<'a> {
     pub provider: ProviderId,
@@ -45,7 +45,7 @@ impl std::error::Error for RuntimeModelCatalogError {
     }
 }
 
-/// Render one external Codex model entry; Mojo owns its schema and defaults.
+/// Render one provider Codex model entry; Mojo owns its schema and defaults.
 pub fn render_runtime_model_catalog(
     input: RuntimeModelCatalogInput<'_>,
 ) -> Result<Value, RuntimeModelCatalogError> {
