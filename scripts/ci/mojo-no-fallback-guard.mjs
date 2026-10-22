@@ -427,7 +427,11 @@ const CORE_LEXICAL_BROKER_PATHS = "crates/prodex-app/src/runtime_persistence/pat
 const CORE_LEXICAL_APP_HOUSEKEEPING = "crates/prodex-app/src/housekeeping.rs";
 const CORE_LEXICAL_LIVE_LOG = "crates/prodex-app/src/app_commands/log_live.rs";
 const PROMOTED_FILES = [
-  "crates/prodex-app/src/app_commands/log_stream/text_tests.rs",
+  "crates/prodex-app/src/app_commands/log_stream/detail_tests.rs",
+  "crates/prodex-mojo-core/src/observability/details.rs",
+  "crates/prodex-mojo-core/src/observability/details_tests.rs",
+  "mojo/prodex_core/operational_log_details.mojo",
+  "mojo/tests/operational_log_details_test.mojo",
   "mojo/tests/operational_log_text_test.mojo",
   "crates/prodex-mojo-core/src/observability/stream.rs",
   "crates/prodex-mojo-core/src/observability/stream_tests.rs",
@@ -12218,7 +12222,7 @@ export function findViolations(files) {
     if (filePath === LOG_STREAM_FILE) {
       // Tests are in sibling files; a mid-file cfg(test) gates an I/O helper.
       const production = contents;
-      const violations = ["operational_detail_spec(", "operational_log_text_span(", "super_expose_bounded_text_valid("]
+      const violations = ["operational_detail_spec(", "render_operational_details("]
         .filter((marker) => !production.includes(marker))
         .map((marker) => filePath + ": operational field rendering must retain compiled policy " + marker);
       if (
@@ -12236,7 +12240,21 @@ export function findViolations(files) {
           || production.includes("character.is_control()")) {
         violations.push(filePath + ": contains restored Rust operational field text policy");
       }
+      if (/\bfn\s+(?:add_log_detail|add_log_percent_detail|add_log_endpoint_detail|join_log_details|display_log_field|bounded_log_value)\s*\(/u.test(production)) {
+        violations.push(filePath + ": contains restored Rust operational detail builders");
+      }
       return violations;
+    }
+    if (filePath === "crates/prodex-mojo-core/src/observability/details.rs") {
+      return ["prodex_mojo_operational_log_details_v1(", "invoke(None)", "invoke(Some(&mut output))"]
+        .filter((marker) => !contents.includes(marker))
+        .map((marker) => filePath + ": operational detail ABI must retain " + marker);
+    }
+    if (filePath === "mojo/prodex_core/operational_log_details.mojo") {
+      return ['@export("prodex_mojo_operational_log_details_v1")', "operational_details_render(",
+        "super_expose_exec_path_valid(", "rich_scalar_prefix_end("]
+        .filter((marker) => !contents.includes(marker))
+        .map((marker) => filePath + ": compiled detail renderer must retain " + marker);
     }
     if (filePath === "crates/prodex-mojo-core/src/observability/stream.rs") {
       return ["prodex_mojo_operational_log_stream_v1(", "operational_event_source_label(",
@@ -18291,14 +18309,22 @@ function selfTest() {
       .join("\n"), /restored Rust operational field text policy/u);
   }
   assert.deepEqual(findViolations([[LOG_STREAM_FILE,
-    "operational_detail_spec( operational_log_text_span( super_expose_bounded_text_valid(",
+    "operational_detail_spec( render_operational_details(",
   ]]), []);
   assert.match(findViolations([[LOG_STREAM_FILE, "operational_detail_spec("]]).join("\n"), /compiled policy/u);
-  const streamCalls = "operational_detail_spec( operational_log_text_span( super_expose_bounded_text_valid(";
+  const streamCalls = "operational_detail_spec( render_operational_details(";
   const streamTestHelper = "#[cfg(test)]\nfn read_new_token_usage_events() {}\n";
   assert.deepEqual(findViolations([[LOG_STREAM_FILE, streamTestHelper + streamCalls]]), []);
   assert.match(findViolations([[LOG_STREAM_FILE, streamTestHelper + streamCalls + ".chars().take(max_chars)"]])
     .join("\n"), /restored Rust operational field text policy/u);
+  for (const name of ["add_log_detail", "add_log_percent_detail", "add_log_endpoint_detail", "join_log_details", "display_log_field", "bounded_log_value"]) {
+    assert.match(findViolations([[LOG_STREAM_FILE, streamCalls + "\nfn " + name + "() {}"]])
+      .join("\n"), /restored Rust operational detail builders/u);
+  }
+  const detailCalls = "prodex_mojo_operational_log_details_v1( invoke(None) invoke(Some(&mut output))";
+  assert.deepEqual(findViolations([["crates/prodex-mojo-core/src/observability/details.rs", detailCalls]]), []);
+  assert.match(findViolations([["crates/prodex-mojo-core/src/observability/details.rs", ""]])
+    .join("\n"), /operational detail ABI/u);
 
   const infoPanelFile = "crates/prodex-app/src/app_commands/info_handler.rs";
   const infoPanelCaller = "prodex_mojo_core::info_render::info_panel_value_color( prodex_mojo_core::info_render::info_panel_field_visible(";

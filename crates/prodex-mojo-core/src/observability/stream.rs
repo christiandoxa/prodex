@@ -4,9 +4,9 @@ use crate::MojoError;
 // Observability can compile independently of the rich/JSON bridge features.
 #[repr(C)]
 #[derive(Clone, Copy)]
-struct TextView {
-    address: u64,
-    length: u64,
+pub(super) struct TextView {
+    pub(super) address: u64,
+    pub(super) length: u64,
 }
 
 impl From<&str> for TextView {

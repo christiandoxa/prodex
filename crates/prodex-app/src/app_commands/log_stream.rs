@@ -274,88 +274,34 @@ fn operational_event_summary(
         event == "first_local_chunk",
     )
     .unwrap_or_else(|error| panic!("Mojo operational detail plan failed: {error:?}"));
-    let mut details = Vec::new();
-    for detail in plan {
-        let spec = operational_detail_spec(detail)
-            .unwrap_or_else(|error| panic!("Mojo operational detail spec failed: {error:?}"));
-        match spec.format {
-            OperationalDetailFormat::Plain => {
-                add_log_detail(&mut details, fields, &spec.key, &spec.label)
-            }
-            OperationalDetailFormat::Percent => {
-                add_log_percent_detail(&mut details, fields, &spec.key, &spec.label)
-            }
-            OperationalDetailFormat::Endpoint => {
-                add_log_endpoint_detail(&mut details, fields, &spec.key, &spec.label)
-            }
-        }
-    }
-    join_log_details(&human_event_name(event), details)
-}
-
-fn display_log_field<'a>(fields: &'a BTreeMap<String, String>, key: &str) -> Option<&'a str> {
-    fields.get(key).map(String::as_str).filter(|value| {
-        prodex_mojo_core::rich::super_expose_bounded_text_valid(value, usize::MAX)
-            .expect("compiled Mojo log field validation failed")
-    })
-}
-
-fn add_log_detail(
-    details: &mut Vec<String>,
-    fields: &BTreeMap<String, String>,
-    key: &str,
-    label: &str,
-) {
-    if let Some(value) = display_log_field(fields, key) {
-        let value = runtime_proxy_crate::runtime_proxy_redact_log_field_value(key, value);
-        if !value.is_empty() && value != "-" {
-            details.push(format!("{label}={}", bounded_log_value(&value, 192)));
-        }
-    }
-}
-
-fn add_log_percent_detail(
-    details: &mut Vec<String>,
-    fields: &BTreeMap<String, String>,
-    key: &str,
-    label: &str,
-) {
-    if let Some(value) = display_log_field(fields, key) {
-        let value = runtime_proxy_crate::runtime_proxy_redact_log_field_value(key, value);
-        details.push(format!("{label}={}%", bounded_log_value(&value, 32)));
-    }
-}
-
-fn add_log_endpoint_detail(
-    details: &mut Vec<String>,
-    fields: &BTreeMap<String, String>,
-    key: &str,
-    label: &str,
-) {
-    if let Some(value) = display_log_field(fields, key) {
-        details.push(format!(
-            "{label}={}",
-            bounded_log_value(&safe_endpoint(value), 192)
-        ));
-    }
-}
-
-fn join_log_details(event: &str, details: Vec<String>) -> String {
-    if details.is_empty() {
-        event.to_string()
-    } else {
-        format!("{event}  {}", details.join(" · "))
-    }
-}
-
-fn bounded_log_value(value: &str, max_chars: usize) -> String {
-    let span = prodex_mojo_core::observability::operational_log_text_span(value, max_chars)
-        .expect("compiled Mojo log field text span failed");
-    let mut bounded = value[..span.end].to_string();
-    if span.truncated {
-        bounded.push('…');
-    }
-    bounded
+    let acquired: Vec<_> = plan
+        .into_iter()
+        .map(|detail| {
+            let spec =
+                operational_detail_spec(detail).expect("Mojo operational detail metadata failed");
+            let original = fields.get(&spec.key).map(String::as_str).unwrap_or("");
+            let prepared = match spec.format {
+                OperationalDetailFormat::Plain | OperationalDetailFormat::Percent => {
+                    runtime_proxy_crate::runtime_proxy_redact_log_field_value(&spec.key, original)
+                }
+                OperationalDetailFormat::Endpoint => safe_endpoint(original),
+            };
+            (spec, original, prepared)
+        })
+        .collect();
+    let details: Vec<_> = acquired
+        .iter()
+        .map(
+            |(spec, original, prepared)| prodex_mojo_core::observability::OperationalDetailText {
+                label: &spec.label,
+                format: spec.format,
+                original,
+                prepared,
+            },
+        )
+        .collect();
+    prodex_mojo_core::observability::render_operational_details(&human_event_name(event), &details)
+        .expect("Mojo operational detail rendering failed")
 }
 
 fn safe_endpoint(url: &str) -> String {
@@ -509,5 +455,5 @@ mod summary_tests;
 mod selection_tests;
 
 #[cfg(test)]
-#[path = "log_stream/text_tests.rs"]
-mod text_tests;
+#[path = "log_stream/detail_tests.rs"]
+mod detail_tests;

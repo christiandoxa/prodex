@@ -8534,3 +8534,16 @@ owns blank/sentinel suppression, percent suffixes, detail separators and the
 event/detail layout. Preserve the existing redaction and URL acquisition
 boundary, and reuse compiled detail metadata and Unicode prefix decisions
 before removing those builders.
+
+## Operational log detail rendering compiled in Mojo (2026-10-22)
+
+The live summary now uses one compiled detail renderer for eligibility,
+sentinels, Unicode budgets, labels, suffixes and separators. Six Rust display
+helpers are deleted without a fallback; security redaction and URL parsing
+retain their existing host boundaries. Six caller regressions pass before
+and after migration, together with direct Mojo, 16 bridge tests in both feature
+configurations, 102 log and 17 TUI tests plus strict workspace Clippy,
+formatting, documentation and changed tests.
+Canonical share is 36.38903569692801% (137,016 Mojo / 239,515 Rust production
+LOC). The 75% goal stays open. Evidence is in
+`migration/operational-log-detail-render-mojo-20261022.md`.
