@@ -51,6 +51,10 @@ pub use gemini_quota::{
 };
 mod provider_error;
 pub use self::provider_error::provider_error_message_json;
+mod session_prompt_write;
+pub use self::session_prompt_write::{
+    SessionPromptWriteJsonCheck, session_prompt_write_json_check,
+};
 mod session_report;
 pub use self::session_report::{
     SessionReportOrderKey, SessionReportUpdatePlan, session_report_metadata_json,

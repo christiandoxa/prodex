@@ -1381,6 +1381,16 @@
         ]
       },
       {
+        "path": "mojo/prodex_core/session_prompt_write_json.mojo",
+        "language": "mojo",
+        "classification": "DETERMINISTIC_DOMAIN",
+        "production_reachable": true,
+        "role": "semantic",
+        "operations": [
+          "super_expose_exact_user_message_match_policy"
+        ]
+      },
+      {
         "path": "mojo/prodex_core/smart_context_artifact_ref.mojo",
         "language": "mojo",
         "classification": "DETERMINISTIC_DOMAIN",
@@ -6840,23 +6850,24 @@
       "introduced_in": "0.438.0",
       "baseline_state": "candidate",
       "final_state": "authoritative",
-      "mojo_entry": "prodex_session_prompt_write_exact_user_message_match_v1",
+      "mojo_entry": "prodex_session_prompt_write_json_v1",
       "mojo_abi_version": 1,
       "mojo_source": "mojo/prodex_core/session_report.mojo",
       "consumer": "crates/prodex-app/src/super_expose/session_prompt_write/output.rs",
-      "consumer_marker": "prodex_mojo_core::session_cli_policy::exact_user_message_match",
+      "consumer_marker": "SessionPromptWriteJsonCheck::ExactUserMessage",
       "production_consumers": [
-        "crates/prodex-app/src/super_expose/session_prompt_write/output.rs"
+        "crates/prodex-app/src/super_expose/session_prompt_write/output.rs",
+        "crates/prodex-app/src/app_commands/log_transcript.rs"
       ],
-      "production_reachability_test": "crates/prodex-app/src/super_expose/session_prompt_write_queue_tests.rs",
-      "caller_regression_test": "crates/prodex-app/src/super_expose/session_prompt_write_queue_tests.rs",
+      "production_reachability_test": "crates/prodex-app/src/super_expose/session_prompt_write/output_policy_tests.rs",
+      "caller_regression_test": "crates/prodex-app/src/super_expose/session_prompt_write/output_policy_tests.rs",
       "rust_owner_before": "Rust accepted event-msg and response-item user records directly during rollout write verification",
       "rust_state_after": "adapter-only",
       "rust_test_oracle": "deleted; direct ABI boundary tests and rollout verification caller coverage retain exact acceptance and hidden-response rejection",
       "production_fallback": false,
       "duplicate_production_owner": false,
       "platform_fallback": false,
-      "rust_adapter_scope": "Rust retains bounded file reads, Serde parsing, secret-safe message comparison, transcript payload extraction, and typed I/O error mapping"
+      "rust_adapter_scope": "Rust retains bounded file reads, Serde parsing, borrowed decoded JSON acquisition and typed I/O error mapping; Mojo owns payload classification, metadata visibility and exact LF-joined message comparison"
     },
     {
       "domain": "cli/super-provider-config",

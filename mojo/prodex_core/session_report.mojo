@@ -11,6 +11,10 @@ from json_view import (
 )
 from launch_args_common import launch_rust_space
 from parsed_json import pj_equal, pj_less
+from session_prompt_write_json import (
+    session_prompt_record_shape, session_prompt_user_visible,
+    session_prompt_exact_match, session_prompt_json_check,
+)
 from rich_types import ProdexRichStringView
 from rich_text import (
     rich_codepoint,
@@ -1256,14 +1260,9 @@ def prodex_session_prompt_write_policy_v1(
             or not session_prompt_write_valid_bool(fourth)
         ):
             return SESSION_REPORT_INVALID
-        if second == 0:
-            output[unsafe_offset=0] = 0
-        elif first == 1 or first == 2:
-            output[unsafe_offset=0] = Int64(third == 1 and fourth == 1)
-        elif first == 3 or first == 4:
-            output[unsafe_offset=0] = Int64(third == 1)
-        else:
-            output[unsafe_offset=0] = 1
+        output[unsafe_offset=0] = Int64(session_prompt_record_shape(
+            first, second == 1, third == 1, fourth == 1,
+        ))
         return SESSION_REPORT_OK
 
     if operation == SESSION_PROMPT_WRITE_POLICY_ENDPOINT_ARGS:
@@ -1294,16 +1293,9 @@ def prodex_session_prompt_write_policy_v1(
             or not session_prompt_write_valid_bool(sixth)
         ):
             return SESSION_REPORT_INVALID
-        if first == 1:
-            output[unsafe_offset=0] = Int64(second == 1)
-        elif first == 2:
-            output[unsafe_offset=0] = Int64(
-                second == 1
-                and third == 1
-                and (fourth == 0 or (fifth == 1 and sixth == 1))
-            )
-        else:
-            output[unsafe_offset=0] = 0
+        output[unsafe_offset=0] = Int64(session_prompt_user_visible(
+            first, second == 1, third == 1, fourth == 1, fifth == 1, sixth == 1,
+        ))
         return SESSION_REPORT_OK
 
     if first < SESSION_PROMPT_WRITE_VERIFY_QUEUE_FAILED or first > SESSION_PROMPT_WRITE_VERIFY_ROLLOUT:
@@ -1385,19 +1377,10 @@ def prodex_session_prompt_write_exact_user_message_match_v1(
     var output = Pointer[mut=True, Int64, MutUntrackedOrigin](
         unsafe_from_address=Int(output_address)
     )
-    if record_type == 1:
-        output[unsafe_offset=0] = Int64(
-            payload_user_message == 1 and message_matches == 1
-        )
-    elif record_type == 2:
-        output[unsafe_offset=0] = Int64(
-            payload_user_message == 1
-            and role_user == 1
-            and visible == 1
-            and message_matches == 1
-        )
-    else:
-        output[unsafe_offset=0] = 0
+    output[unsafe_offset=0] = Int64(session_prompt_exact_match(
+        record_type, payload_user_message == 1, role_user == 1,
+        visible == 1, message_matches == 1,
+    ))
     return SESSION_REPORT_OK
 
 
@@ -1593,3 +1576,13 @@ def prodex_session_prompt_write_rollout_name_v1(
     output[unsafe_offset=1] = span[0]
     output[unsafe_offset=2] = span[1]
     return SESSION_REPORT_OK
+
+
+@export("prodex_session_prompt_write_json_v1")
+def prodex_session_prompt_write_json_v1(
+    version: Int64, operation: Int64, nodes_address: UInt, node_count: Int64,
+    expected_address: UInt, expected_length: Int64,
+) abi("C") -> Int64:
+    return session_prompt_json_check(
+        version, operation, nodes_address, node_count, expected_address, expected_length,
+    )

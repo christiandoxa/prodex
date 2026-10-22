@@ -5,6 +5,7 @@ use super::{
     SessionPromptWriteError, legacy_thread_id,
 };
 use base64::Engine;
+use prodex_mojo_core::json::{SessionPromptWriteJsonCheck, session_prompt_write_json_check};
 use sha2::{Digest, Sha256};
 use std::fs;
 use std::io::{Read, Seek, SeekFrom};
@@ -292,39 +293,11 @@ fn exact_user_message_line(
     let Ok(value) = serde_json::from_slice::<serde_json::Value>(line) else {
         return Ok(false);
     };
-    let Some(payload) = value.get("payload") else {
-        return Ok(false);
-    };
-    let (record_type, payload_user_message, role_user, visible, message_matches) =
-        match value.get("type").and_then(serde_json::Value::as_str) {
-            Some("event_msg") => (
-                1,
-                payload.get("type").and_then(serde_json::Value::as_str) == Some("user_message"),
-                false,
-                false,
-                payload
-                    .get("message")
-                    .and_then(serde_json::Value::as_str)
-                    .is_some_and(|message| message == expected),
-            ),
-            Some("response_item") => {
-                let exact = crate::app_commands::transcript_exact_visible_user_message(payload);
-                (
-                    2,
-                    payload.get("type").and_then(serde_json::Value::as_str) == Some("message"),
-                    payload.get("role").and_then(serde_json::Value::as_str) == Some("user"),
-                    exact.is_some(),
-                    exact.is_some_and(|message| message == expected),
-                )
-            }
-            _ => (0, false, false, false, false),
-        };
-    prodex_mojo_core::session_cli_policy::exact_user_message_match(
-        record_type,
-        payload_user_message,
-        role_user,
-        visible,
-        message_matches,
+    let tree = crate::json_boundary::app_json_tree_without_wire(&value)
+        .map_err(|_| SessionPromptWriteError::OutputReadFailed)?;
+    session_prompt_write_json_check(
+        &tree.nodes,
+        SessionPromptWriteJsonCheck::ExactUserMessage { expected },
     )
     .map_err(|_| SessionPromptWriteError::OutputReadFailed)
 }
@@ -537,79 +510,6 @@ fn read_output_line(
     Ok(None)
 }
 
-fn raw_line_is_visible_user_message(
-    raw_line: &[u8],
-) -> std::result::Result<bool, SessionPromptWriteError> {
-    if raw_line.len() > OUTPUT_VERIFY_MAX_LINE_BYTES {
-        return Ok(false);
-    }
-    let line = raw_line.strip_suffix(b"\n").unwrap_or(raw_line);
-    let Ok(value) = serde_json::from_slice::<serde_json::Value>(line) else {
-        return Ok(false);
-    };
-    let Some(payload) = value.get("payload") else {
-        return Ok(false);
-    };
-    let record_type = match value.get("type").and_then(serde_json::Value::as_str) {
-        Some("event_msg") => 1,
-        Some("response_item") => 2,
-        _ => 0,
-    };
-    let payload_user_message = if record_type == 1 {
-        payload.get("type").and_then(serde_json::Value::as_str) == Some("user_message")
-            && payload
-                .get("message")
-                .and_then(serde_json::Value::as_str)
-                .is_some()
-    } else {
-        payload.get("type").and_then(serde_json::Value::as_str) == Some("message")
-    };
-    let role_user = payload.get("role").and_then(serde_json::Value::as_str) == Some("user");
-    let kinds = payload
-        .get("internal_chat_message_metadata_passthrough")
-        .and_then(|metadata| metadata.get("content_item_kinds"))
-        .and_then(serde_json::Value::as_array);
-    let metadata_present = kinds.is_some();
-    let kinds_nonempty = kinds.is_some_and(|kinds| !kinds.is_empty());
-    let kinds_all_user_text =
-        kinds.is_some_and(|kinds| kinds.iter().all(|kind| kind.as_str() == Some("user.text")));
-    prodex_mojo_core::session_cli_policy::prompt_write_user_message_visible(
-        record_type,
-        payload_user_message,
-        role_user,
-        metadata_present,
-        kinds_nonempty,
-        kinds_all_user_text,
-    )
-    .map_err(|_| SessionPromptWriteError::OutputReadFailed)
-}
-
-fn transcript_record_shape_is_valid(
-    line: &str,
-) -> std::result::Result<bool, SessionPromptWriteError> {
-    let value = serde_json::from_str::<serde_json::Value>(line)
-        .map_err(|_| SessionPromptWriteError::OutputReadFailed)?;
-    let record_type = match value.get("type").and_then(serde_json::Value::as_str) {
-        Some("event_msg") => 1,
-        Some("response_item") => 2,
-        Some("session_meta") => 3,
-        Some("turn_context") => 4,
-        Some(_) => 5,
-        None => 0,
-    };
-    let payload = value.get("payload");
-    prodex_mojo_core::session_cli_policy::prompt_write_record_shape(
-        record_type,
-        payload.is_some(),
-        payload.is_some_and(serde_json::Value::is_object),
-        payload
-            .and_then(|payload| payload.get("type"))
-            .and_then(serde_json::Value::as_str)
-            .is_some(),
-    )
-    .map_err(|_| SessionPromptWriteError::OutputReadFailed)
-}
-
 fn output_gap_event(
     sequence: u64,
     reason: &'static str,
@@ -641,13 +541,26 @@ fn output_line_plan(
 > {
     let line = raw_line.strip_suffix(b"\n").unwrap_or(raw_line);
     let utf8_valid = std::str::from_utf8(line).is_ok();
-    let json_valid = utf8_valid && serde_json::from_slice::<serde_json::Value>(line).is_ok();
-    let shape_valid = if json_valid {
-        let line =
-            std::str::from_utf8(line).map_err(|_| SessionPromptWriteError::OutputReadFailed)?;
-        transcript_record_shape_is_valid(line)?
+    let value = if utf8_valid {
+        serde_json::from_slice::<serde_json::Value>(line).ok()
     } else {
-        false
+        None
+    };
+    let (shape_valid, visible_user_message) = if let Some(value) = &value {
+        let tree = crate::json_boundary::app_json_tree_without_wire(value)
+            .map_err(|_| SessionPromptWriteError::OutputReadFailed)?;
+        let shape =
+            session_prompt_write_json_check(&tree.nodes, SessionPromptWriteJsonCheck::RecordShape)
+                .map_err(|_| SessionPromptWriteError::OutputReadFailed)?;
+        let visible = raw_line.len() <= OUTPUT_VERIFY_MAX_LINE_BYTES
+            && session_prompt_write_json_check(
+                &tree.nodes,
+                SessionPromptWriteJsonCheck::VisibleUserMessage,
+            )
+            .map_err(|_| SessionPromptWriteError::OutputReadFailed)?;
+        (shape, visible)
+    } else {
+        (false, false)
     };
     prodex_mojo_core::session_cli_policy::prompt_write_output_line_plan(
         prodex_mojo_core::session_cli_policy::SessionPromptWriteOutputLineInput {
@@ -655,9 +568,9 @@ fn output_line_plan(
             read_limit: OUTPUT_READ_MAX_LINE_BYTES,
             verify_limit: OUTPUT_VERIFY_MAX_LINE_BYTES,
             utf8_valid,
-            json_valid,
+            json_valid: value.is_some(),
             shape_valid,
-            visible_user_message: raw_line_is_visible_user_message(raw_line)?,
+            visible_user_message,
             limit_reached,
         },
     )
@@ -837,3 +750,7 @@ pub(crate) fn rollout_path_exists_in_roots(path: &Path, roots: &[PathBuf]) -> bo
         .iter()
         .any(|root| fs::symlink_metadata(root.join(path)).is_ok())
 }
+
+#[cfg(test)]
+#[path = "output_policy_tests.rs"]
+mod policy_tests;

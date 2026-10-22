@@ -427,6 +427,8 @@ const CORE_LEXICAL_BROKER_PATHS = "crates/prodex-app/src/runtime_persistence/pat
 const CORE_LEXICAL_APP_HOUSEKEEPING = "crates/prodex-app/src/housekeeping.rs";
 const CORE_LEXICAL_LIVE_LOG = "crates/prodex-app/src/app_commands/log_live.rs";
 const PROMOTED_FILES = [
+  "crates/prodex-mojo-core/src/json/session_prompt_write.rs",
+  "mojo/prodex_core/session_prompt_write_json.mojo",
   "crates/prodex-app/src/app_commands/redeem.rs",
   "crates/prodex-mojo-core/src/confirmation_policy.rs",
   "mojo/prodex_core/confirmation_policy.mojo",
@@ -7773,7 +7775,7 @@ export function findViolations(files) {
       const required = [
         "prodex_mojo_core::rich::super_expose_output_cursor_valid(",
         "prodex_mojo_core::session_cli_policy::output_event_plan(",
-        "prodex_mojo_core::session_cli_policy::exact_user_message_match(",
+        "SessionPromptWriteJsonCheck::ExactUserMessage",
       ];
       const violations = required
         .filter((call) => !contents.includes(call))
@@ -7786,6 +7788,12 @@ export function findViolations(files) {
         if (contents.includes(retired)) {
           violations.push(filePath + ": contains restored Rust output-cursor validation semantics");
           break;
+        }
+      }
+      for (const restored of ['.get("payload")', '.get("content_item_kinds")',
+        "fn raw_line_is_visible_user_message(", "fn transcript_record_shape_is_valid("]) {
+        if (contents.includes(restored)) {
+          violations.push(filePath + ": contains restored Rust session JSON policy");
         }
       }
       const production = contents.split("#[cfg(test)]", 1)[0];
@@ -8009,6 +8017,22 @@ export function findViolations(files) {
         && contents.includes("for index in order")
         && !/files\.sort|relative\.cmp\(/u.test(contents)
         ? [] : [filePath + ": optional-tool tree digest must reuse compiled lexical ordering"];
+    }
+    return [];
+  });
+  const sessionPromptJsonViolations = files.flatMap(([filePath, contents]) => {
+    if (filePath === "crates/prodex-mojo-core/src/json/session_prompt_write.rs") {
+      return contents.includes("prodex_session_prompt_write_json_v1(")
+        && contents.includes('ffi_nodes(nodes, "")')
+        && !contents.includes("serde_json::")
+        ? [] : [filePath + ": decoded session checks must retain compiled Mojo authority"];
+    }
+    if (filePath === "mojo/prodex_core/session_prompt_write_json.mojo") {
+      return ["def session_prompt_record_shape(", "def session_prompt_user_visible(",
+        "def session_prompt_exact_match(", "def session_prompt_content_matches(",
+        "def session_prompt_json_check(", "pj_valid(tree)", "node_count > 1_048_576"]
+        .filter((marker) => !contents.includes(marker))
+        .map((marker) => filePath + ": decoded session policy must remain compiled Mojo-owned: " + marker);
     }
     return [];
   });
@@ -11512,6 +11536,11 @@ export function findViolations(files) {
         '@export("prodex_session_report_update_json_v2")',
         '@export("prodex_session_prompt_write_output_event_plan_v1")',
         '@export("prodex_session_prompt_write_exact_user_message_match_v1")',
+        '@export("prodex_session_prompt_write_json_v1")',
+        "session_prompt_json_check(",
+        "session_prompt_record_shape(",
+        "session_prompt_user_visible(",
+        "session_prompt_exact_match(",
         "SESSION_PROMPT_WRITE_OUTPUT_EVENT_TEXT_LIMIT",
         "session_prompt_write_valid_bool(message_matches)",
         "def session_report_raw_metadata(",
@@ -12208,9 +12237,8 @@ export function findViolations(files) {
         "prodex_mojo_core::log::classify_transcript_item(",
         "prodex_mojo_core::log::transcript_operation_span(",
         "prodex_mojo_core::log::sanitize_transcript_tool_name(",
-        "prodex_mojo_core::log::join_transcript_user_parts(",
         "prodex_mojo_core::log::normalize_transcript_safe_text(",
-        "prodex_mojo_core::session_cli_policy::prompt_write_user_message_visible(",
+        "prodex_mojo_core::json::session_prompt_write_json_check(",
         "prodex_mojo_core::json::log_transcript_context(",
         "app_json_tree_without_wire(payload)",
         "prodex_mojo_core::json::log_transcript_operation(",
@@ -12220,6 +12248,11 @@ export function findViolations(files) {
       const violations = required
         .filter((call) => !contents.includes(call))
         .map((call) => filePath + ": transcript migration must retain Mojo call " + call);
+      if (contents.includes('payload.get("content_item_kinds")')
+        || contents.includes('.get("content_item_kinds")')
+        || contents.includes("fn transcript_exact_visible_user_message(")) {
+        violations.push(filePath + ": contains restored Rust session visibility/exact-message semantics");
+      }
       const production = contents.split("#[cfg(test)]", 1)[0];
       if (/\bfn\s+(?:session_meta_transcript_events|turn_context_transcript_event|reasoning_summary_text|transcript_text_from_reasoning|status_transcript_event|protocol_operation_transcript_event)\s*\(/u.test(contents)) {
         violations.push(filePath + ": contains restored Rust transcript context semantics");
@@ -14073,7 +14106,7 @@ export function findViolations(files) {
     ...superExposeProtocolViolations, ...superExposeExecViolations, ...superExposeViolations,
     ...superRunRetentionViolations, ...superRunEventViolations, ...superTextClipViolations,
     ...superOverrideStringViolations, ...superRunOutputViolations, ...optionalTreeOrderViolations,
-    ...manualRedeemResetViolations,
+    ...manualRedeemResetViolations, ...sessionPromptJsonViolations,
     ...geminiFallbackViolations, ...geminiGenerationViolations, ...geminiTranslatorHardReplacementViolations, ...geminiBridgeFallbackViolations, ...geminiSignatureViolations, ...geminiResponseConformanceViolations,
     ...geminiToolResponseOrderViolations, ...geminiApplyPatchViolations,
     ...hardReplacementViolations, ...precommitBudgetOracleViolations,
@@ -14655,7 +14688,7 @@ function selfTest() {
   const outputPolicyConsumer = [
     "prodex_mojo_core::rich::super_expose_output_cursor_valid(",
     "prodex_mojo_core::session_cli_policy::output_event_plan(",
-    "prodex_mojo_core::session_cli_policy::exact_user_message_match(",
+    "SessionPromptWriteJsonCheck::ExactUserMessage",
     "output_page_does_not_drop_events_from_one_rollout_line",
   ].join("\n");
   assert.deepEqual(findViolations([[SUPER_EXPOSE_OUTPUT_FILE, outputPolicyConsumer]]), []);
@@ -14677,6 +14710,11 @@ function selfTest() {
     '@export("prodex_session_report_update_json_v2")',
     '@export("prodex_session_prompt_write_output_event_plan_v1")',
     '@export("prodex_session_prompt_write_exact_user_message_match_v1")',
+        '@export("prodex_session_prompt_write_json_v1")',
+        "session_prompt_json_check(",
+        "session_prompt_record_shape(",
+        "session_prompt_user_visible(",
+        "session_prompt_exact_match(",
     "SESSION_PROMPT_WRITE_OUTPUT_EVENT_TEXT_LIMIT",
     "session_prompt_write_valid_bool(message_matches)",
     "def session_report_raw_metadata(",
@@ -17713,9 +17751,8 @@ function selfTest() {
     "prodex_mojo_core::log::classify_transcript_item(",
     "prodex_mojo_core::log::transcript_operation_span(",
     "prodex_mojo_core::log::sanitize_transcript_tool_name(",
-    "prodex_mojo_core::log::join_transcript_user_parts(",
     "prodex_mojo_core::log::normalize_transcript_safe_text(",
-    "prodex_mojo_core::session_cli_policy::prompt_write_user_message_visible(",
+    "prodex_mojo_core::json::session_prompt_write_json_check(",
     "prodex_mojo_core::json::log_transcript_context(",
     "app_json_tree_without_wire(payload)",
     "prodex_mojo_core::json::log_transcript_operation(",
@@ -18076,6 +18113,14 @@ function selfTest() {
   const optionalTreeCaller = "core_file_policy::lexical_file_key_order(&keys, false) for index in order";
   assert.deepEqual(findViolations([[optionalTreeFile, optionalTreeCaller]]), []);
   assert.match(findViolations([[optionalTreeFile, optionalTreeCaller + "files.sort_by("]]).join("\n"), /optional-tool tree digest/u);
+
+  for (const restored of ['.get("payload")', '.get("content_item_kinds")',
+    "fn raw_line_is_visible_user_message(", "fn transcript_record_shape_is_valid("]) {
+    assert.match(findViolations([[SUPER_EXPOSE_OUTPUT_FILE, outputPolicyConsumer + restored]]).join("\n"), /restored Rust session JSON/u);
+  }
+  assert.match(findViolations([[LOG_TRANSCRIPT_FILE, transcriptConsumerCalls + '.get("content_item_kinds")']]).join("\n"), /restored Rust session visibility/u);
+  assert.match(findViolations([["crates/prodex-mojo-core/src/json/session_prompt_write.rs", ""]]).join("\n"), /compiled Mojo authority/u);
+  assert.match(findViolations([["mojo/prodex_core/session_prompt_write_json.mojo", ""]]).join("\n"), /decoded session policy/u);
 
   const redeemResetFile = "crates/prodex-app/src/app_commands/redeem.rs";
   const redeemResetCaller = "fn nearest_manual_redeem_reset() { manual_redeem_reset_window( }\n#[derive";
