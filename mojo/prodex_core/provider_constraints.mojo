@@ -619,9 +619,8 @@ def prodex_provider_scalar_policy_v1(
     var view = ProdexRichStringView(address, UInt(length))
     if not rich_view_valid(view, PROVIDER_SCALAR_POLICY_MAX_BYTES):
         return -2
-    var bounds = rich_trim_bounds(view)
-
     if operation == PROVIDER_SCALAR_POLICY_REASONING_EFFORT:
+        var bounds = rich_trim_bounds(view)
         if provider_scalar_range_equals["none"](view, bounds[0], bounds[1]):
             return 0
         if provider_scalar_range_equals["minimal"](view, bounds[0], bounds[1]):
@@ -643,6 +642,11 @@ def prodex_provider_scalar_policy_v1(
     if operation == PROVIDER_SCALAR_POLICY_BOOLEAN_TOKEN:
         return provider_boolean_token_class(view)
 
+    return provider_copilot_prompt_token_limit(view)
+
+
+def provider_copilot_prompt_token_limit(view: ProdexRichStringView) -> Int64:
+    var bounds = rich_trim_bounds(view)
     if (
         provider_scalar_range_equals["auto"](view, bounds[0], bounds[1])
         or provider_scalar_range_equals["codex"](view, bounds[0], bounds[1])
