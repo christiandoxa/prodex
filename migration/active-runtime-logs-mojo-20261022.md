@@ -60,7 +60,8 @@ An optional `cargo test --locked -q -p prodex-mojo-core --features mojo-rich,moj
 experiment fails to link existing runtime/session symbols without `mojo-runtime`.
 The missing-symbol callers and all pre-existing build-selection gates match the
 published parent. This is a source-level comparison, not a separate baseline
-build. The failure is retained; feature dependencies and guards are unchanged.
+build. The failure is retained; feature dependencies and guards were unchanged
+at that checkpoint.
 The complete `mojo-core` configuration and real application callers pass.
 A prototype comparator needed explicit Int64 conversion before its direct test
 passed; that compiler failure is also retained. The first CI run stopped at
@@ -70,5 +71,6 @@ the unchanged cap, caller regressions, strict Clippy and formatting pass again.
 Canonical share is 36.481147777398505% (137,867 Mojo / 240,046 Rust production
 LOC). The 75% target remains open. Native non-Linux execution, live providers,
 exhaustive workspace/all-serialized suites and performance benchmarks are outside
-local coverage. The optional feature combination above remains a known linking
-limitation.
+local coverage. The optional feature failure above is subsequently repaired by
+the Cargo dependency change documented in
+`migration/rich-runtime-feature-contract-20261022.md`, with 968 passing tests.

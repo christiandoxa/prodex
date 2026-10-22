@@ -8782,3 +8782,21 @@ references without their `mojo-runtime` link inputs. Its missing-symbol callers
 and pre-existing source-selection gates match the published parent. Audit the
 explicit feature dependency before broadening this configuration's coverage;
 keep that build-contract repair separate from the active-log policy.
+
+## Rich feature declares its runtime link dependency (2026-10-22)
+
+The observed rich/routing link gap is repaired at its Cargo feature declaration:
+`mojo-rich` now enables the runtime exports already used by its public JSON API.
+The identical previously failing command passes three bridge tests, and all
+968 library tests in that configuration pass. Strict workspace Clippy, formatting,
+version synchronization, crate-boundary checks and metadata/Clippy preflight pass.
+This is a build-contract repair with no new semantic transfer. Canonical share
+remains 36.481147777398505% (137,867 Mojo / 240,046 Rust production LOC).
+The 75% goal remains open. Evidence is in
+`migration/rich-runtime-feature-contract-20261022.md`.
+
+The next presentation audit targets `prodex-cli/src/help.rs` and
+`Commands::{process_label,launches_runtime}`. Keep canonical Clap parsing, help
+bytes, static string lifetimes and the doctor-tail byte constant intact. Reuse
+the existing cached compiled-label pattern; retain only Clap variant/tag
+marshalling in Rust, with no duplicate text or runtime-classification table.
