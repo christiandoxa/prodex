@@ -9,7 +9,7 @@ there is no Rust recomputation or fallback. Rust retains observed field
 projection, native ABI storage, allocation, Duration acquisition and stdout I/O.
 The production build source list and existing rich exports reach the new owner.
 
-The version-1 ABI borrows 128-byte aligned native rows, including presence bits,
+The version-1 ABI borrows 128-byte native rows aligned to eight bytes, with presence bits,
 five string views and low/high u64 words for each u128 latency. This avoids
 manufacturing JSON or imposing the parsed-JSON acquisition limit on existing
 ping fields. The existing measured-text runner also caps output at 64 MiB;

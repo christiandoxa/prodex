@@ -60,11 +60,15 @@ pub use self::session_prompt_write::{
     SessionPromptWriteJsonCheck, session_prompt_write_json_check,
 };
 mod session_report;
+#[cfg(feature = "mojo-runtime")]
+mod session_tui;
 pub use self::session_report::{
     SessionReportOrderKey, SessionReportUpdatePlan, session_report_metadata_json,
     session_report_order, session_report_record_shape, session_report_timestamp_sort_key,
     session_report_update_json,
 };
+#[cfg(feature = "mojo-runtime")]
+pub use session_tui::{SessionTuiMode, SessionTuiRow, session_tui_rows_json};
 mod session_repair;
 pub use self::session_repair::{
     SessionRepairLine, SessionRepairPlan, SessionSyntheticMetadataPlan,

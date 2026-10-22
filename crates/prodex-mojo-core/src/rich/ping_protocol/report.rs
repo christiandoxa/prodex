@@ -1,6 +1,7 @@
 //! Borrowed native rows keep legacy ping reports outside JSON acquisition limits.
 use crate::MojoError;
 use crate::rich::{RichStringView, ensure_rich_abi, status_error, view};
+use crate::text_output::render_measured_string;
 
 /// Original ping report surfaces selected by the caller's output mode.
 #[derive(Clone, Copy)]
@@ -135,16 +136,7 @@ pub fn render_ping_report(input: PingReportInput<'_>) -> Result<String, MojoErro
         }
         usize::try_from(metadata[1]).map_err(|_| MojoError::InvalidOutput)
     };
-    let required = invoke(None)?;
-    let mut output = Vec::new();
-    output
-        .try_reserve_exact(required)
-        .map_err(|_| MojoError::Capacity)?;
-    output.resize(required, 0);
-    if invoke(Some(&mut output))? != required {
-        return Err(MojoError::InvalidOutput);
-    }
-    String::from_utf8(output).map_err(|_| MojoError::InvalidOutput)
+    render_measured_string(invoke)
 }
 
 #[cfg(test)]

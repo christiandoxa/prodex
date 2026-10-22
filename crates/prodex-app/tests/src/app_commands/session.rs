@@ -119,7 +119,7 @@ fn session_report_viewport_plan_scales_with_reports() {
 #[test]
 fn session_report_tui_item_contains_key_fields() {
     let report = test_session_report("session-1");
-    let item = session_report_tui_item(&report);
+    let item = session_report_tui_item(&report).unwrap();
     let text = format!("{item:?}");
     assert!(text.contains("session-1"));
     assert!(text.contains("Build UI"));

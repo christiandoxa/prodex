@@ -8988,3 +8988,14 @@ Rust tests in 542.41 seconds, completing the preceding preparation's CI deferral
 Canonical share is 36.71811128282759% (139,227 Mojo / 239,951 Rust production LOC).
 The 75% target remains open. Evidence and coverage are in
 [ping-report-mojo-20261023.md](ping-report-mojo-20261023.md).
+
+## Session TUI rows compiled in Mojo (2026-10-23)
+
+Both session views now use compiled title/default, label, spacing, conditional
+row and tone decisions. Frozen original ListItems/scroll spans retain all bytes,
+styles and line boundaries. Native core/runtime bridges, application callers and
+ping regressions pass; the two native renderers share checked host allocation.
+Full default CI passes 1,446 Rust tests in 521.81 seconds.
+Canonical share is 36.72706568327156% (139,330 Mojo / 240,036 Rust production LOC).
+The 75% target remains open. Evidence and coverage are in
+[session-tui-presentation-mojo-20261023.md](session-tui-presentation-mojo-20261023.md).

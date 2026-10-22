@@ -79,6 +79,14 @@ const PROVIDER_BINDING_IDENTITY_MOJO_FILE = "mojo/prodex_core/provider_binding_i
 const SESSION_REPAIR_CONSUMER_FILE = "crates/prodex-session-store/src/lib.rs";
 const SESSION_REPAIR_ADAPTER_FILE = "crates/prodex-mojo-core/src/json/session_repair.rs";
 const SESSION_REPAIR_MOJO_FILE = "mojo/prodex_core/session_repair.mojo";
+const SESSION_TUI_ADAPTER_FILE = "crates/prodex-mojo-core/src/json/session_tui.rs";
+const SESSION_TUI_RULES = {
+  "crates/prodex-app/src/app_commands/session.rs": ["session_tui_report_lines(reports, SessionTuiMode::Scroll)", "SessionTuiMode::Inline"],
+  "crates/prodex-app/src/app_commands/session/presentation.rs": ["session_tui_rows_json(&rows, mode)", "SessionTuiRow {", "SessionTuiTone"],
+  [SESSION_TUI_ADAPTER_FILE]: ["prodex_session_tui_rows_v1(", "render_measured_string("],
+  "mojo/prodex_core/session_tui_presentation.mojo": ['@export("prodex_session_tui_rows_v1")', "rich_trim_bounds(", "stp_emit(", "JsonSink"],
+  "crates/prodex-app/src/app_commands/session/presentation_tests.rs": ["session_tui_rows_preserve_original_complete_spans", 'include_str!("presentation_baseline.json")'],
+};
 const SESSION_SELECTOR_MATCH_ADAPTER_FILE = "crates/prodex-mojo-core/src/json/session_selector.rs";
 const SESSION_SELECTOR_MATCH_MOJO_FILE = "mojo/prodex_core/session_selector.mojo";
 const SESSION_SELECTOR_MATCH_CALLER_TEST_FILE = "crates/prodex-session-store/tests/src/lib.rs";
@@ -1200,6 +1208,7 @@ const PROMOTED_FILES = [
   SESSION_REPAIR_CONSUMER_FILE,
   SESSION_REPAIR_ADAPTER_FILE,
   SESSION_REPAIR_MOJO_FILE,
+  ...Object.keys(SESSION_TUI_RULES),
   SESSION_SELECTOR_MATCH_ADAPTER_FILE,
   SESSION_SELECTOR_MATCH_MOJO_FILE,
   SESSION_SELECTOR_MATCH_CALLER_TEST_FILE,
@@ -1429,6 +1438,7 @@ const PROMOTED_FILES = [
 ];
 
 const UNCONDITIONAL_MOJO_FILES = new Set([
+  SESSION_TUI_ADAPTER_FILE,
   PING_REPORT_ADAPTER_FILE,
   "crates/prodex-provider-core/src/catalog/runtime.rs",
   "crates/prodex-mojo-core/src/json/runtime_catalog_plan.rs",
@@ -1622,7 +1632,7 @@ const UNCONDITIONAL_MOJO_FILES = new Set([
   "crates/prodex-provider-core/src/catalog/serialization.rs",
   "crates/prodex-provider-core/src/models.rs",
 ]);
-const FEATURE_OFF_RUST_PATH = /\bnot\s*\(\s*feature\s*=\s*"(?:mojo|mojo-core|runtime-log-mojo|state-summary-mojo)"\s*\)/u;
+const FEATURE_OFF_RUST_PATH = /\bnot\s*\(\s*feature\s*=\s*"(?:mojo|mojo-core|mojo-runtime|runtime-log-mojo|state-summary-mojo)"\s*\)/u;
 const ANTHROPIC_RESPONSE_FILE = "crates/prodex-provider-core/src/translators/anthropic/messages/response.rs";
 const ANTHROPIC_MESSAGES_FILE = "crates/prodex-provider-core/src/translators/anthropic/messages.rs";
 const ANTHROPIC_WEB_SEARCH_FILE = "crates/prodex-provider-core/src/translators/anthropic/messages/web_search.rs";
@@ -11643,6 +11653,16 @@ export function findViolations(files) {
       }
       return violations;
     }
+    if (SESSION_TUI_RULES[filePath]) {
+      const violations = SESSION_TUI_RULES[filePath].filter((marker) => !contents.includes(marker))
+        .map((marker) => `${filePath}: session TUI must retain compiled authority/caller proof ${marker}`);
+      if (filePath.endsWith("/session.rs") || filePath.endsWith("/presentation.rs")) {
+        for (const retired of ['"Untitled session"', "let title = report", 'Span::styled("updated "', 'Span::styled("cwd "']) {
+          if (contents.includes(retired)) violations.push(`${filePath}: session row defaults/labels must remain Mojo-owned`);
+        }
+      }
+      return violations;
+    }
     if (filePath === SESSION_SELECTOR_MATCH_ADAPTER_FILE) {
       const required = [
         "fn prodex_session_selector_match_plan_v1(",
@@ -18446,6 +18466,16 @@ function selfTest() {
     "super_prompt_choice_preselection_and_labels_use_real_mojo",
   ].join("\n");
   assert.deepEqual(findViolations([[SUPER_PROMPT_DIRECT_TEST_FILE, superPromptTests]]), []);
+
+  for (const [file, markers] of Object.entries(SESSION_TUI_RULES)) {
+    const valid = markers.join(";\n");
+    assert.deepEqual(findViolations([[file, valid]]), []);
+    for (const marker of markers) assert.ok(findViolations([[file, valid.replace(marker, "missing")]]).length > 0);
+    if (file.endsWith("/session.rs") || file.endsWith("/presentation.rs")) {
+      assert.match(findViolations([[file, valid + '\n"Untitled session"']]).join("\n"), /Mojo-owned/u);
+    }
+  }
+  assert.match(findViolations([[SESSION_TUI_ADAPTER_FILE, '#[cfg(not(feature = "mojo-runtime"))] fn fallback() {}']]).join("\n"), /feature-off Rust path/u);
 
   const pingSummaryCaller = [
     "render_ping_report(PingReportInput",
