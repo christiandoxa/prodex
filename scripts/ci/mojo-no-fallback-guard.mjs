@@ -7560,8 +7560,8 @@ export function findViolations(files) {
     }
     const required = {
       [EXTERNAL_CATALOG_FILE]: ["plan_runtime_model_catalog(", "provider_catalog_entry("],
-      [EXTERNAL_CATALOG_ADAPTER_FILE]: ["provider_catalog_entries_for(input.provider)", "runtime_catalog_plan_json("],
-      [EXTERNAL_CATALOG_MOJO_FILE]: ["catalog_merge_additional(", "config_saturating_mul_u64(", "provider_copilot_prompt_token_limit("],
+      [EXTERNAL_CATALOG_ADAPTER_FILE]: ["provider_catalog_entries_for(input.provider)", "runtime_catalog_plan_json(", "deepseek_catalog_static_models("],
+      [EXTERNAL_CATALOG_MOJO_FILE]: ["catalog_merge_additional(", "config_saturating_mul_u64(", "provider_copilot_prompt_token_limit(", 'pj_is["deepseek"]('],
     }[filePath] ?? [];
     return required.filter((call) => !contents.includes(call))
       .map((call) => filePath + ": external-provider catalog must retain canonical authority " + call);
@@ -12703,14 +12703,21 @@ export function findViolations(files) {
   const deepseekCatalogPolicyViolations = files.flatMap(([filePath, contents]) => {
     if (filePath === "crates/prodex-app/src/runtime_deepseek_config.rs") {
       const required = [
-        "deepseek_catalog_static_models(",
-        "mojo_deepseek_catalog_model_metadata(",
+        "plan_runtime_model_catalog(",
+        "render_runtime_model_catalog(",
       ];
       const violations = required
         .filter((call) => !contents.includes(call))
         .map((call) => filePath + ": DeepSeek static catalog hard replacement must retain " + call);
+      const body = contents.match(/\bfn deepseek_catalog_models\([^]*?^\}/mu)?.[0];
+      if (!body?.includes("plan_runtime_model_catalog(")) {
+        violations.push(filePath + ": DeepSeek catalog assembly must use the compiled plan");
+      }
       if (
-        contents.includes("DEEPSEEK_CATALOG_MODELS")
+        ["std::iter::once(", ".trim(", ".unwrap_or_else(", "models.len(", "deepseek_catalog_model_metadata("]
+          .some((retired) => body?.includes(retired))
+        || contents.includes("fn deepseek_catalog_model_metadata(")
+        || contents.includes("DEEPSEEK_CATALOG_MODELS")
         || contents.includes("CatalogModel {")
         || contents.includes("resolve_catalog_model(&catalog, model)")
       ) {
@@ -17727,8 +17734,8 @@ function selfTest() {
   ]]).join("\n"), /catalog dedup must use Mojo/u);
   for (const [file, markers] of [
     [EXTERNAL_CATALOG_FILE, ["plan_runtime_model_catalog(", "provider_catalog_entry("]],
-    [EXTERNAL_CATALOG_ADAPTER_FILE, ["provider_catalog_entries_for(input.provider)", "runtime_catalog_plan_json("]],
-    [EXTERNAL_CATALOG_MOJO_FILE, ["catalog_merge_additional(", "config_saturating_mul_u64(", "provider_copilot_prompt_token_limit("]],
+    [EXTERNAL_CATALOG_ADAPTER_FILE, ["provider_catalog_entries_for(input.provider)", "runtime_catalog_plan_json(", "deepseek_catalog_static_models("]],
+    [EXTERNAL_CATALOG_MOJO_FILE, ["catalog_merge_additional(", "config_saturating_mul_u64(", "provider_copilot_prompt_token_limit(", 'pj_is["deepseek"](']],
   ]) {
     const valid = "pub(super) fn external_catalog_models() {\n" + markers.join(";\n") + "\n}";
     assert.deepEqual(findViolations([[file, valid]]), []);
@@ -17736,6 +17743,17 @@ function selfTest() {
   }
   for (const file of [EXTERNAL_CATALOG_ADAPTER_FILE, "crates/prodex-mojo-core/src/json/runtime_catalog_plan.rs"]) {
     assert.match(findViolations([[file, '#[cfg(not(feature = "mojo-core"))] fn existing_path() {}']]).join("\n"), /feature-off Rust path/u);
+  }
+  {
+    const file = "crates/prodex-app/src/runtime_deepseek_config.rs";
+    const valid = "fn deepseek_catalog_models() {\nplan_runtime_model_catalog();\n}\nfn schema() { render_runtime_model_catalog(); }";
+    assert.deepEqual(findViolations([[file, valid]]), []);
+    for (const marker of ["plan_runtime_model_catalog(", "render_runtime_model_catalog("]) {
+      assert.match(findViolations([[file, valid.replace(marker, "missing")]]).join("\n"), /DeepSeek/u);
+    }
+    for (const retired of ["std::iter::once(", ".trim(", ".unwrap_or_else(", "models.len(", "deepseek_catalog_model_metadata("]) {
+      assert.match(findViolations([[file, valid.replace("plan_runtime_model_catalog();", "plan_runtime_model_catalog(); " + retired)]]).join("\n"), /restored Rust DeepSeek/u);
+    }
   }
   assert.match(findViolations([["crates/prodex-runtime-proxy/src/health/inflight.rs",
     "fn f(route_kind: RuntimeRouteKind) { match route_kind { RuntimeRouteKind::Responses => 0, RuntimeRouteKind::Compact => 1, RuntimeRouteKind::Websocket => 2, RuntimeRouteKind::Standard => 3 } }"]]).join("\n"),

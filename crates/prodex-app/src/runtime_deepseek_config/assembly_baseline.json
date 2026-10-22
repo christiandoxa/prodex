@@ -1,0 +1,58 @@
+[
+  {
+    "first_auto_compact_token_limit": 90000,
+    "first_context_window": 100000,
+    "models": 7,
+    "name": "known-model",
+    "sha256": "360ef7b841002299eabe3b686dd3c75481f1edcd961fb222de1f5ab1715adf1d"
+  },
+  {
+    "first_auto_compact_token_limit": 18446744073709551615,
+    "first_context_window": 1,
+    "models": 7,
+    "name": "case-folded-alias",
+    "sha256": "0aab07e56b4b52798aea676a17b583aa2f534cf6b650b00ea38924f2149bde5f"
+  },
+  {
+    "first_auto_compact_token_limit": 18446744073709551615,
+    "first_context_window": 18446744073709551615,
+    "models": 7,
+    "name": "padded-model",
+    "sha256": "13d4af83771e60fb425833539ccfa8cf072f02370729a316fa3360dd842d4320"
+  },
+  {
+    "first_auto_compact_token_limit": 0,
+    "first_context_window": 1,
+    "models": 7,
+    "name": "auto-alias",
+    "sha256": "f549f67e0d6747d2e6a7fe2f4a909ab27202a373edcfdc57bf73ee695ddaa143"
+  },
+  {
+    "first_auto_compact_token_limit": 18446744073709551615,
+    "first_context_window": 0,
+    "models": 8,
+    "name": "unknown-unicode",
+    "sha256": "eae255c1f57e037b8bd4cb43025d242f2b419289340dd09537bcc6a3ff1ab9f7"
+  },
+  {
+    "first_auto_compact_token_limit": 0,
+    "first_context_window": 0,
+    "models": 7,
+    "name": "empty-launch",
+    "sha256": "9828868b3fd7c2b4f74fcf93f9c02dd33b8c185a2c590216a56edb56dd5a4c44"
+  },
+  {
+    "first_auto_compact_token_limit": 18446744073709551615,
+    "first_context_window": 1,
+    "models": 8,
+    "name": "long-query",
+    "sha256": "4410692f5e029f2ff8226f39a4c3cc8e2e59acd744dddf18763e6932eadf5e20"
+  },
+  {
+    "first_auto_compact_token_limit": 18446744073709551615,
+    "first_context_window": 1,
+    "models": 7,
+    "name": "long-padded-model",
+    "sha256": "64c70ddd534e2904a4f311530554701220fc751a22bd24f99d5921efd9383329"
+  }
+]

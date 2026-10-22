@@ -118,16 +118,32 @@ pub struct RuntimeModelCatalogPlanInput<'a> {
     pub dynamic_models: &'a [RuntimeDynamicCatalogModel],
 }
 
-/// Plan Copilot, Kiro or Anthropic model metadata, ordering and token budgets.
+/// Plan DeepSeek, Copilot, Kiro or Anthropic model metadata, ordering and token budgets.
 pub fn plan_runtime_model_catalog(
     input: RuntimeModelCatalogPlanInput<'_>,
 ) -> Result<Vec<RuntimePlannedCatalogModel>, RuntimeModelCatalogError> {
+    // DeepSeek retains its distinct legacy runtime entries and descriptions.
+    let static_models = if input.provider == ProviderId::DeepSeek {
+        let models = prodex_mojo_core::super_provider_config::deepseek_catalog_static_models()
+            .map_err(RuntimeModelCatalogError::Mojo)?;
+        json!(
+            models
+                .into_iter()
+                .map(|model| json!({
+                    "id":model.slug, "display_name":model.display_name,
+                    "description":model.description, "context_window_tokens":null, "aliases":[],
+                }))
+                .collect::<Vec<_>>()
+        )
+    } else {
+        json!(super::provider_catalog_entries_for(input.provider))
+    };
     let value = json!({
         "provider":input.provider, "launch_model":input.launch_model,
         "context_window":input.context_window,
         "auto_compact_token_limit":input.auto_compact_token_limit,
         "dynamic_models":input.dynamic_models,
-        "static_models":super::provider_catalog_entries_for(input.provider),
+        "static_models":static_models,
     });
     let mut document = Document::default();
     document.root(&value);
