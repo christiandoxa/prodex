@@ -8471,3 +8471,14 @@ Mojo, 23 strict bridge and five caller tests plus workspace Clippy pass.
 Canonical share is 36.348485291498655% (136,747 Mojo / 239,464 Rust LOC). The 75% goal
 remains open. Evidence is in
 `migration/info-panel-color-visibility-mojo-20261022.md`.
+
+## Transcript shell field projection compiled in Mojo (2026-10-22)
+
+Shell-call/output alias selection, type eligibility, names/defaults and source
+labels now use the existing compiled transcript ABI. Four Rust builders and
+fallback helpers are removed without a new bridge or parser. Existing scalar
+bounds, control rejection, container spelling and final redaction stay intact.
+Direct Mojo, seven strict bridge, 85 log and 120 Super expose tests plus
+workspace Clippy pass. Canonical share is 36.35691843125163% (136,774 Mojo / 239,424 Rust LOC); the 75%
+objective remains open. Evidence is in
+`migration/transcript-shell-fields-mojo-20261022.md`.

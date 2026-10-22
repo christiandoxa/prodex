@@ -120,7 +120,7 @@ def prodex_mojo_log_transcript_context_v1(
 ) abi("C") -> Int64:
     if abi != 1:
         return 4
-    if (operation < 0 or operation > 7 or flag != 0 or nodes_count <= 0 or nodes_count > 0x7FFFFFFFFFFFFFFF // 80
+    if (operation < 0 or operation > 9 or flag != 0 or nodes_count <= 0 or nodes_count > 0x7FFFFFFFFFFFFFFF // 80
         or nodes_address == 0 or nodes_address % 8 != 0 or raw_length < 0
         or scratch_count != nodes_count * Int64(2 if operation >= 3 else 1) or scratch_address == 0 or scratch_address % 8 != 0
         or capacity < 0 or metadata_address == 0 or metadata_address % 8 != 0

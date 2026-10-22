@@ -53,16 +53,20 @@ pub enum TranscriptOperationKind {
     AgentProtocol = 5,
     TerminalStatus = 6,
     ErrorStatus = 7,
+    ShellCall = 8,
+    ShellOutput = 9,
 }
 
 /// Native scalar/JSON acquisition and existing redacted display text for one node.
 #[derive(Default)]
 pub struct TranscriptOperationValue {
     pub scalar: String,
+    /// Final safe text for protocol/status; sanitized name for shell calls;
+    /// visible tool output for shell results. The compiled mode chooses its field.
     pub output: String,
 }
 
-/// Project protocol/status fields from a tree and its acquired presentations.
+/// Project operation fields from a tree and its acquired presentations.
 pub fn log_transcript_operation(
     nodes: &[JsonNode<'_>],
     raw: &str,
@@ -100,3 +104,7 @@ mod tests;
 #[cfg(test)]
 #[path = "log_transcript_operation_tests.rs"]
 mod operation_tests;
+
+#[cfg(test)]
+#[path = "log_transcript_shell_tests.rs"]
+mod shell_tests;
