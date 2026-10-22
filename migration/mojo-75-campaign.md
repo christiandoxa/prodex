@@ -8614,3 +8614,27 @@ empty-source unsupported coverage, default classification, existing limits
 and error precedence. Reuse the compiled governance coverage/classification
 owners and send only numeric metadata across the ABI; keep finding locations,
 detector revision and validated domain-object construction in Rust.
+
+## Runtime inspection aggregation compiled in Mojo (2026-10-22)
+
+Coverage combination, classification escalation, source-local mask intersection
+and sorted unique mask union now use the compiled governance owner. Rust's
+aggregation loops, membership checks, sort and dedup are removed without a
+fallback. Original finding locations, detector revision and domain construction
+stay in Rust. Existing coverage/count facades share pure kernels with the new
+aggregate; oversized results retain the domain error and original precedence.
+Six caller regressions pass before/after migration, along with direct Mojo,
+five bridge tests in both feature configurations, seven domain, 44 Presidio,
+459 proxy and 19 smoke tests plus strict workspace Clippy, formatting, full
+default CI, changed tests and guards. Canonical share is 36.40382983237853% (137,257 Mojo /
+239,783 Rust production LOC); checked host transport slightly reduces raw
+share. The 75% objective remains open. Evidence is in
+`migration/inspection-aggregation-mojo-20261022.md`.
+
+The next audited owner is
+`crates/prodex-app/src/super_expose/protocol/dispatch.rs::parse_dispatch_request`.
+Its two Rust decision matches still select reply kind, HTTP status, JSON-RPC
+code/message and whether audit precedes parameter rejection. Preserve 202 null
+notifications, null IDs for invalid request IDs, 400 error envelopes, header
+validation precedence and audit sequencing. Keep transport/Serde and audit
+effects in Rust; extend the existing compiled Super expose owner.
