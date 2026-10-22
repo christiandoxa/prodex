@@ -10,8 +10,8 @@ use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Gauge, Paragraph, Sparkline, Wrap};
 use terminal_ui::{
-    tui_accent_style, tui_border_style, tui_error_style, tui_hint_style, tui_metric_style,
-    tui_muted_style, tui_secondary_style, tui_title_style,
+    tui_accent_style, tui_border_style, tui_error_style, tui_hint_style, tui_muted_style,
+    tui_secondary_style, tui_title_style,
 };
 
 pub(super) fn render_status_dashboard(
@@ -168,75 +168,17 @@ fn render_token_panel(frame: &mut Frame<'_>, area: Rect, overview: Option<&Statu
     let block = status_block("TOKEN USAGE · HISTORICAL");
     let inner = block.inner(area);
     frame.render_widget(block, area);
+    let (lines, history_title) = token_presentation::status_token_panel_lines(overview)
+        .expect("Mojo status token-panel presentation returned invalid output");
     let Some(overview) = overview else {
-        frame.render_widget(Paragraph::new("loading token history…"), inner);
+        frame.render_widget(Paragraph::new(lines), inner);
         return;
     };
     let rows = Layout::default()
         .direction(Direction::Vertical)
         .constraints([Constraint::Length(4), Constraint::Min(2)])
         .split(inner);
-    let total = overview
-        .token_summary
-        .total
-        .input_tokens
-        .saturating_add(overview.token_summary.total.output_tokens);
-    let lines = vec![
-        Line::from(vec![
-            Span::styled("total ", tui_secondary_style()),
-            Span::styled(
-                info_render::format_human_count(total)
-                    .expect("Mojo status human-count formatter returned invalid output"),
-                tui_metric_style(),
-            ),
-            Span::styled(
-                format!(
-                    "  {} event(s) / {} log(s)",
-                    overview.token_summary.event_count, overview.token_summary.log_count
-                ),
-                tui_muted_style(),
-            ),
-        ]),
-        Line::from(format!(
-            "in {}  cached {}  out {}  reasoning {}",
-            info_render::format_human_count(overview.token_summary.total.input_tokens)
-                .expect("Mojo status human-count formatter returned invalid output"),
-            info_render::format_human_count(overview.token_summary.total.cached_input_tokens)
-                .expect("Mojo status human-count formatter returned invalid output"),
-            info_render::format_human_count(overview.token_summary.total.output_tokens)
-                .expect("Mojo status human-count formatter returned invalid output"),
-            info_render::format_human_count(overview.token_summary.total.reasoning_tokens)
-                .expect("Mojo status human-count formatter returned invalid output"),
-        )),
-        Line::from(vec![
-            Span::styled("token efficiency ", tui_secondary_style()),
-            Span::styled(
-                info_render::format_token_efficiency(
-                    overview.token_summary.total.input_tokens,
-                    overview.token_summary.total.cached_input_tokens,
-                    overview.token_summary.total.output_tokens,
-                )
-                .expect("Mojo status token-efficiency formatter returned invalid output"),
-                tui_accent_style(),
-            ),
-        ]),
-        Line::from(vec![
-            Span::styled("active/config ", tui_secondary_style()),
-            Span::styled(
-                format!("{} / {}", overview.runtime_profile, overview.active_profile),
-                tui_accent_style(),
-            ),
-            Span::styled(
-                format!("  {} profile(s)", overview.profile_count),
-                tui_muted_style(),
-            ),
-        ]),
-    ];
     frame.render_widget(Paragraph::new(lines).wrap(Wrap { trim: false }), rows[0]);
-    let history_title = match (&overview.token_first_at, &overview.token_last_at) {
-        (Some(first), Some(last)) => format!(" recent events {first} → {last} "),
-        _ => " no token events ".to_string(),
-    };
     frame.render_widget(
         Sparkline::default()
             .block(Block::default().title(history_title))
@@ -519,3 +461,10 @@ fn resource_color(remaining: f64) -> Color {
         Color::LightGreen
     }
 }
+
+#[path = "token_presentation.rs"]
+mod token_presentation;
+
+#[cfg(test)]
+#[path = "token_presentation_tests.rs"]
+mod token_presentation_tests;

@@ -62,6 +62,8 @@ pub use self::session_prompt_write::{
 mod session_report;
 #[cfg(feature = "mojo-runtime")]
 mod session_tui;
+#[cfg(feature = "mojo-runtime")]
+mod status_tokens;
 pub use self::session_report::{
     SessionReportOrderKey, SessionReportUpdatePlan, session_report_metadata_json,
     session_report_order, session_report_record_shape, session_report_timestamp_sort_key,
@@ -69,6 +71,8 @@ pub use self::session_report::{
 };
 #[cfg(feature = "mojo-runtime")]
 pub use session_tui::{SessionTuiMode, SessionTuiRow, session_tui_rows_json};
+#[cfg(feature = "mojo-runtime")]
+pub use status_tokens::{StatusTokenPanelInput, status_token_panel_json};
 mod session_repair;
 pub use self::session_repair::{
     SessionRepairLine, SessionRepairPlan, SessionSyntheticMetadataPlan,

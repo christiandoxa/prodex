@@ -87,6 +87,12 @@ const SESSION_TUI_RULES = {
   "mojo/prodex_core/session_tui_presentation.mojo": ['@export("prodex_session_tui_rows_v1")', "rich_trim_bounds(", "stp_emit(", "JsonSink"],
   "crates/prodex-app/src/app_commands/session/presentation_tests.rs": ["session_tui_rows_preserve_original_complete_spans", 'include_str!("presentation_baseline.json")'],
 };
+const STATUS_TOKEN_RULES = {
+  "crates/prodex-app/src/app_commands/status/token_presentation.rs": ["status_token_panel_json(overview.map(", "TokenTone::Metric", "TokenTone::Raw"],
+  "crates/prodex-mojo-core/src/json/status_tokens.rs": ["prodex_status_token_panel_v1(", "render_measured_string(", "let mut scratch = [0_u8; 128]"],
+  "mojo/prodex_core/status_token_presentation.mojo": ['@export("prodex_status_token_panel_v1")', "info_write_human_count(", "info_write_token_efficiency(", "info_status_u64_saturating_add(", "scratch_capacity < 128", "row.presence == 3"],
+  "crates/prodex-app/src/app_commands/status/token_presentation_tests.rs": ["status_token_panel_preserves_original_complete_buffers", "Sha256::digest(", 'include_str!("token_presentation_baseline.json")'],
+};
 const RUNTIME_CATALOG_REQUIRED = {
   "crates/prodex-app/src/runtime_local_provider_config.rs": ["render_local_runtime_model_catalog("],
   "crates/prodex-app/src/runtime_local_provider_config/catalog_tests.rs": ["local_catalog_preserves_original_complete_file_bytes", "Sha256::digest(", 'include_str!("catalog_baseline.json")'],
@@ -1222,6 +1228,7 @@ const PROMOTED_FILES = [
   SESSION_REPAIR_ADAPTER_FILE,
   SESSION_REPAIR_MOJO_FILE,
   ...Object.keys(SESSION_TUI_RULES),
+  ...Object.keys(STATUS_TOKEN_RULES),
   ...Object.keys(RUNTIME_CATALOG_REQUIRED),
   ...Object.keys(MAIN_CATALOG_PROJECTION_REQUIRED),
   SESSION_SELECTOR_MATCH_ADAPTER_FILE,
@@ -1453,6 +1460,9 @@ const PROMOTED_FILES = [
 ];
 
 const UNCONDITIONAL_MOJO_FILES = new Set([
+  "crates/prodex-app/src/app_commands/status/render.rs",
+  "crates/prodex-app/src/app_commands/status/token_presentation.rs",
+  "crates/prodex-mojo-core/src/json/status_tokens.rs",
   MAIN_MODEL_CATALOG_FILE,
   "crates/prodex-provider-core/src/catalog/main_projection.rs",
   "crates/prodex-mojo-core/src/json/main_catalog_projection.rs",
@@ -9959,8 +9969,7 @@ export function findViolations(files) {
     if (filePath === "crates/prodex-app/src/app_commands/status/render.rs") {
       const required = [
         "info_render::format_human_bytes(",
-        "info_render::format_human_count(",
-        "info_render::format_token_efficiency(",
+        "token_presentation::status_token_panel_lines(overview)",
         "info_render::format_memory_percent(",
         "info_render::format_text_sparkline(",
       ];
@@ -9972,6 +9981,10 @@ export function findViolations(files) {
         /\bfn\s+(?:human_bytes|human_count|token_efficiency|resource_memory_percent|text_sparkline)\s*\(/u.test(production)
       ) {
         violations.push(filePath + ": contains restored Rust status formatting semantics");
+      }
+      const tokenBody = production.match(/fn render_token_panel\([^]*?(?=\nfn render_resource_panel)/u)?.[0] ?? "";
+      if ([".saturating_add(", "format_human_count(", "format_token_efficiency(", "history_title = match", "Span::styled("].some((retired) => tokenBody.includes(retired))) {
+        violations.push(`${filePath}: token-panel decisions must remain Mojo-owned`);
       }
       return violations;
     }
@@ -10253,6 +10266,10 @@ export function findViolations(files) {
         "INFO_RENDER_TEXT_SPARKLINE",
         "info_render_human_bytes(",
         "info_render_human_count(",
+        "def info_write_human_count(",
+        "def info_write_token_efficiency(",
+        "return info_write_human_count(writer, info_unsigned(",
+        "return info_write_token_efficiency(writer,",
         "info_render_token_efficiency(",
         "info_render_memory_percent(",
         "info_render_text_sparkline(",
@@ -11684,6 +11701,16 @@ export function findViolations(files) {
       }
       if (contents.includes("first_string_value(") || contents.includes('.get("type")')) {
         violations.push(filePath + ": contains restored Rust session selector metadata semantics");
+      }
+      return violations;
+    }
+    if (STATUS_TOKEN_RULES[filePath]) {
+      const violations = STATUS_TOKEN_RULES[filePath].filter((marker) => !contents.includes(marker))
+        .map((marker) => `${filePath}: status tokens must retain compiled authority/caller proof ${marker}`);
+      if (filePath.endsWith("/token_presentation.rs") || filePath.endsWith("/status_tokens.rs")) {
+        for (const retired of [".saturating_add(", '"total "', '" no token events "']) {
+          if (contents.includes(retired)) violations.push(`${filePath}: restored Rust status token presentation`);
+        }
       }
       return violations;
     }
@@ -14997,6 +15024,10 @@ function selfTest() {
     "INFO_RENDER_TEXT_SPARKLINE",
     "info_render_human_bytes(",
     "info_render_human_count(",
+    "def info_write_human_count(",
+    "def info_write_token_efficiency(",
+    "return info_write_human_count(writer, info_unsigned(",
+    "return info_write_token_efficiency(writer,",
     "info_render_token_efficiency(",
     "info_render_memory_percent(",
     "info_render_text_sparkline(",
@@ -18552,6 +18583,23 @@ function selfTest() {
   ].join("\n");
   assert.deepEqual(findViolations([[SUPER_PROMPT_DIRECT_TEST_FILE, superPromptTests]]), []);
 
+  for (const [file, markers] of Object.entries(STATUS_TOKEN_RULES)) {
+    const valid = markers.join(";\n");
+    assert.deepEqual(findViolations([[file, valid]]), []);
+    for (const marker of markers) assert.ok(findViolations([[file, valid.replace(marker, "missing")]]).length > 0);
+    if (file.endsWith("/token_presentation.rs") || file.endsWith("/status_tokens.rs")) {
+      assert.match(findViolations([[file, valid + '\n.saturating_add(']]).join("\n"), /restored Rust status token/u);
+      assert.match(findViolations([[file, '#[cfg(not(feature = "mojo-runtime"))] fn fallback() {}']]).join("\n"), /feature-off Rust path/u);
+    }
+  }
+  {
+    const file = "crates/prodex-app/src/app_commands/status/render.rs";
+    const valid = ["info_render::format_human_bytes(", "token_presentation::status_token_panel_lines(overview)", "info_render::format_memory_percent(", "info_render::format_text_sparkline("].join(";\n");
+    assert.deepEqual(findViolations([[file, valid]]), []);
+    for (const retired of [".saturating_add(", "format_human_count(", "format_token_efficiency(", "history_title = match", "Span::styled("]) {
+      assert.match(findViolations([[file, valid + "\nfn render_token_panel() { " + retired + " }\nfn render_resource_panel() {}"]]).join("\n"), /token-panel decisions must remain Mojo-owned/u);
+    }
+  }
   for (const [file, markers] of Object.entries(SESSION_TUI_RULES)) {
     const valid = markers.join(";\n");
     assert.deepEqual(findViolations([[file, valid]]), []);
