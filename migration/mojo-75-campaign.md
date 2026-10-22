@@ -8590,3 +8590,27 @@ Its Rust tuple sort determines both counter and histogram identity before
 the registry locks. Preserve key-then-value UTF-8 order, duplicate labels and
 invalid-label rejection, while reusing the compiled index sorter and text
 comparator in the existing operational-metrics owner.
+
+## Operational metric label ordering compiled in Mojo (2026-10-22)
+
+Counter and histogram keys now use a compiled key-then-value permutation,
+sharing the existing index heapsort and UTF-8 comparator. Rust's tuple sort
+is deleted without a fallback. Duplicate labels, stable ties and invalid-label
+rejection remain intact, and planning stays before registry locks. Direct
+Mojo, three order and four histogram bridge tests, three caller regressions
+before/after migration, all four registry and 11 observability tests plus
+strict workspace Clippy, formatting, changed tests and guards pass.
+Canonical share is 36.403974353530636% (137,176 Mojo / 239,640 Rust production
+LOC); checked host views/permutation validation slightly reduce raw share.
+The 75% goal remains open. Detailed evidence is in
+`migration/operational-metric-label-order-mojo-20261022.md`.
+
+An audited next owner is
+`crates/prodex-app/src/runtime_proxy/presidio/findings.rs::runtime_presidio_inspection_plan`.
+Rust still combines source coverage, raises classification, intersects each
+source's requested masked kinds with its actual findings, then sorts and
+deduplicates the combined mask. Preserve the source-local intersection,
+empty-source unsupported coverage, default classification, existing limits
+and error precedence. Reuse the compiled governance coverage/classification
+owners and send only numeric metadata across the ABI; keep finding locations,
+detector revision and validated domain-object construction in Rust.
