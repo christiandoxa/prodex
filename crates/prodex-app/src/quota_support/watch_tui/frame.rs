@@ -1,7 +1,8 @@
-use super::frame_data::{
-    build_all_quota_watch_tui_row, quota_human_tui_has_compact_label, quota_watch_profile_fields,
-};
+use super::frame_data::{build_all_quota_watch_tui_row, quota_watch_profile_fields};
 use super::*;
+use prodex_mojo_core::json::{
+    QuotaTuiLine, QuotaTuiTone, quota_tui_line_plan, quota_tui_status_tone,
+};
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span, Text};
@@ -365,12 +366,20 @@ fn quota_watch_table_cell_text(value: &str, width: usize) -> String {
 }
 
 fn quota_watch_status_style(status: &str) -> Style {
-    if status.contains("Blocked") || status.contains("Error") {
-        tui_error_style()
-    } else if status.contains("Ready") || status.contains("healthy") {
-        tui_success_style()
-    } else {
-        Style::default()
+    quota_tui_style(
+        quota_tui_status_tone(status).expect("Mojo quota status tone returned invalid output"),
+    )
+}
+
+fn quota_tui_style(tone: QuotaTuiTone) -> Style {
+    match tone {
+        QuotaTuiTone::Raw => Style::default(),
+        QuotaTuiTone::Title => tui_title_style(),
+        QuotaTuiTone::Muted => tui_muted_style(),
+        QuotaTuiTone::Error => tui_error_style(),
+        QuotaTuiTone::Success => tui_success_style(),
+        QuotaTuiTone::Bold => Style::default().add_modifier(Modifier::BOLD),
+        QuotaTuiTone::Detail => tui_detail_style(),
     }
 }
 
@@ -403,81 +412,15 @@ pub(crate) fn quota_human_tui_text(output: &str) -> Text<'_> {
 }
 
 pub(crate) fn quota_human_tui_spans(line: &str) -> Vec<Span<'_>> {
-    if let Some(spans) = quota_human_tui_header_spans(line) {
-        return spans;
-    }
-    if let Some(spans) = quota_human_tui_status_spans(line) {
-        return spans;
-    }
-    if line.starts_with("PROFILE") {
-        return vec![Span::styled(
-            line,
-            Style::default().add_modifier(Modifier::BOLD),
-        )];
-    }
-    if let Some(spans) = quota_human_tui_detail_spans(line) {
-        return spans;
-    }
-    if let Some(spans) = quota_human_tui_muted_spans(line) {
-        return spans;
-    }
-    vec![Span::raw(line)]
-}
-
-fn quota_human_tui_detail_spans(line: &str) -> Option<Vec<Span<'_>>> {
-    let label = line.trim_start();
-    let is_detail = [
-        "workspace:",
-        "error:",
-        "resets:",
-        "status:",
-        "reset credits:",
-    ]
-    .iter()
-    .any(|prefix| line.starts_with(prefix) || label.starts_with(prefix));
-    is_detail.then(|| vec![Span::styled(line, tui_detail_style())])
-}
-
-fn quota_human_tui_muted_spans(line: &str) -> Option<Vec<Span<'_>>> {
-    let is_muted = line.starts_with("press ") || line.trim_start().starts_with("press ");
-    is_muted.then(|| vec![Span::styled(line, tui_muted_style())])
-}
-
-fn quota_human_tui_header_spans(line: &str) -> Option<Vec<Span<'_>>> {
-    if line.starts_with("== ")
-        || line == "Quota Overview"
-        || line.starts_with("Quota ")
-        || line.ends_with("profiles")
-    {
-        return Some(vec![Span::styled(line, tui_title_style())]);
-    }
-    if quota_human_tui_has_compact_label(line) {
-        let Some((label, value)) = line.split_once(':') else {
-            return Some(vec![Span::raw(line)]);
-        };
-        return Some(vec![
-            Span::styled(format!("{label}:"), tui_title_style()),
+    // Valid UTF-8 and fixed output storage make bridge errors renderer invariants.
+    match quota_tui_line_plan(line).expect("Mojo quota line spans returned invalid output") {
+        QuotaTuiLine::Whole(tone) => vec![Span::styled(line, quota_tui_style(tone))],
+        QuotaTuiLine::Field { label, value } => vec![
+            Span::styled(label, tui_title_style()),
             Span::raw(" "),
-            Span::raw(value.trim_start().to_string()),
-        ]);
+            Span::raw(value),
+        ],
     }
-    None
-}
-
-fn quota_human_tui_status_spans(line: &str) -> Option<Vec<Span<'_>>> {
-    if line.chars().all(|ch| ch == '-' || ch.is_whitespace()) {
-        return Some(vec![Span::styled(line, tui_muted_style())]);
-    }
-    let style = if line.contains("Blocked") || line.contains("Error") {
-        Some(tui_error_style())
-    } else if line.contains("Ready") || line.contains("healthy") {
-        Some(tui_success_style())
-    } else if line.contains("thin") || line.contains("critical") || line.contains("exhausted") {
-        Some(tui_error_style())
-    } else {
-        None
-    };
-    style.map(|style| vec![Span::styled(line, style)])
 }
 
 pub(crate) fn quota_watch_tui_table_lines(
@@ -580,3 +523,7 @@ pub(crate) fn quota_watch_tui_max_scroll_offset_for_snapshot_with_width(
     )
     .max_scroll
 }
+
+#[cfg(test)]
+#[path = "span_presentation_tests.rs"]
+mod span_presentation_tests;

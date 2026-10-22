@@ -9062,3 +9062,16 @@ fallible draw boundary. Canonical share is 36.78824849471372% (139,671 Mojo /
 transferring presentation decisions. Full default CI passes 1,449 Rust tests in
 622.53 seconds. The 75% target remains open. Evidence and
 coverage are in [status-bar-presentation-mojo-20261023.md](status-bar-presentation-mojo-20261023.md).
+
+## Quota TUI span plans compiled in Mojo (2026-10-23)
+
+Human-line and table-cell style decisions, Unicode separators and compact-field
+boundaries now use the existing compiled quota presentation owner. Rust's
+classifiers and field splitting are deleted without a fallback. The unchanged
+JSON label operation and native planner share one label worker. All 186 original
+span/style objects and four Text objects match through 50 quota-watch callers.
+Canonical share is 36.798752870294294% (139,744 Mojo / 240,008 Rust production LOC).
+Typed native adapters add 17 net Rust production LOC while transferring the
+classification decisions. Full default CI passes 1,450 Rust tests in 609.03
+seconds. The 75% target remains open. Evidence and coverage
+are in [quota-tui-span-plan-mojo-20261023.md](quota-tui-span-plan-mojo-20261023.md).

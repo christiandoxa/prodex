@@ -101,6 +101,19 @@ const STATUS_BAR_RULES = {
   "mojo/prodex_core/status_bar_presentation.mojo": ['@export("prodex_status_bar_v1")', "sb_emit(", "stp_literal(", "text_count > 2", "waiting for first snapshot", "hint_bold"],
   "crates/prodex-app/src/app_commands/status/bar_presentation_tests.rs": ["status_bars_preserve_original_complete_dashboard_buffers", "Sha256::digest(", 'include_str!("bar_presentation_baseline.json")'],
 };
+const QUOTA_TUI_SPAN_RULES = {
+  "crates/prodex-app/src/quota_support/watch_tui/frame.rs": ["quota_tui_line_plan(line)", "quota_tui_status_tone(status)", "QuotaTuiLine::Field", "QuotaTuiTone::Detail"],
+  "crates/prodex-mojo-core/src/json/quota_tui_spans.rs": ["prodex_quota_tui_span_plan_v1(", "signed(text.len())?", "text.get(..label_end)", "text.get(value_start..)", "QuotaTuiContext::HumanLine", "QuotaTuiContext::StatusCell"],
+  "crates/prodex-mojo-core/src/json/quota_tui_spans_tests.rs": ["quota_tui_bridge_preserves_precedence_and_rejects_invalid_abi_without_writes", "quota_tui_bridge_preserves_borrowed_unicode_fields_controls_and_large_text", "64 * 1024 * 1024 + 1"],
+  "crates/prodex-app/src/quota_support/watch_tui/span_presentation_tests.rs": ["quota_tui_spans_preserve_original_complete_objects", "Sha256::digest(", 'include_str!("span_presentation_baseline.json")'],
+  "mojo/tests/quota_tui_spans_test.mojo": ["prodex_quota_tui_span_plan_v1(", 'StringSlice("Status: Error")', "output[unsafe_offset=0] == -5"],
+};
+const QUOTA_TUI_MOJO_MARKERS = [
+  '@export("prodex_quota_watch_presentation_v1")', "def qwp_render(",
+  "def qwp_compact_label_end(", "def qwp_reset(", "quota_watch_reset_kind(",
+  '@export("prodex_quota_tui_span_plan_v1")', "def qwp_human_span_plan(",
+  "def qwp_status_tone(", "rich_unicode_space(", "output_capacity < 3",
+];
 const RUNTIME_CATALOG_REQUIRED = {
   "crates/prodex-app/src/runtime_local_provider_config.rs": ["render_local_runtime_model_catalog("],
   "crates/prodex-app/src/runtime_local_provider_config/catalog_tests.rs": ["local_catalog_preserves_original_complete_file_bytes", "Sha256::digest(", 'include_str!("catalog_baseline.json")'],
@@ -1238,6 +1251,7 @@ const PROMOTED_FILES = [
   ...Object.keys(SESSION_TUI_RULES),
   ...Object.keys(STATUS_TOKEN_RULES),
   ...Object.keys(STATUS_BAR_RULES),
+  ...Object.keys(QUOTA_TUI_SPAN_RULES),
   ...Object.keys(RUNTIME_CATALOG_REQUIRED),
   ...Object.keys(MAIN_CATALOG_PROJECTION_REQUIRED),
   SESSION_SELECTOR_MATCH_ADAPTER_FILE,
@@ -1469,6 +1483,8 @@ const PROMOTED_FILES = [
 ];
 
 const UNCONDITIONAL_MOJO_FILES = new Set([
+  "crates/prodex-app/src/quota_support/watch_tui/frame.rs",
+  "crates/prodex-mojo-core/src/json/quota_tui_spans.rs",
   "crates/prodex-app/src/app_commands/status/bar_presentation.rs",
   "crates/prodex-mojo-core/src/json/status_bar.rs",
   "crates/prodex-mojo-core/src/json/native_text.rs",
@@ -2935,11 +2951,22 @@ export function findViolations(files) {
       return externalQuotaRequirements.get(filePath).filter((marker) => !contents.includes(marker))
         .map((marker) => filePath + ": compiled external quota ownership missing " + marker);
     }
+    if (QUOTA_TUI_SPAN_RULES[filePath]) {
+      const violations = QUOTA_TUI_SPAN_RULES[filePath].filter((marker) => !contents.includes(marker))
+        .map((marker) => `${filePath}: quota span authority/caller proof missing ${marker}`);
+      if (filePath.endsWith("/frame.rs")) {
+        for (const retired of ["fn quota_human_tui_header_spans(", "fn quota_human_tui_status_spans(",
+          "fn quota_human_tui_detail_spans(", "fn quota_human_tui_muted_spans(",
+          'line.chars().all(', '.contains("Blocked")', '.contains("Ready")']) {
+          if (contents.includes(retired)) violations.push(`${filePath}: restored Rust quota span classification`);
+        }
+      }
+      return violations;
+    }
     if (filePath === "crates/prodex-app/src/quota_support/watch_tui/frame_data.rs") {
       const required = [
         "prodex_mojo_core::json::quota_watch_presentation(",
         "QuotaWatchPresentation::Row", "QuotaWatchPresentation::ProfileFields",
-        "QuotaWatchPresentation::CompactLabel",
       ];
       const retired = [
         "fn quota_watch_reset_detail(", "fn quota_watch_should_show_workspace(",
@@ -2960,13 +2987,12 @@ export function findViolations(files) {
     if (filePath === "crates/prodex-app/src/quota_support/watch_tui/frame_data_tests.rs") {
       return ["compiled_quota_row_assembly_preserves_workspace_credits_and_provider_order",
         "compiled_quota_rows_preserve_empty_present_plan_and_error_passthrough",
+        "QuotaWatchPresentation::CompactLabel",
       ].filter((marker) => !contents.includes(marker))
         .map((marker) => filePath + ": quota presentation caller coverage missing " + marker);
     }
     if (filePath === "mojo/prodex_core/quota_watch_presentation.mojo") {
-      return ['@export("prodex_quota_watch_presentation_v1")', "def qwp_render(",
-        "def qwp_compact_label(", "def qwp_reset(", "quota_watch_reset_kind(",
-      ].filter((marker) => !contents.includes(marker))
+      return QUOTA_TUI_MOJO_MARKERS.filter((marker) => !contents.includes(marker))
         .map((marker) => filePath + ": compiled quota presentation ownership missing " + marker);
     }
     if (filePath === QUOTA_WATCH_CALLER_FILE) {
@@ -18352,10 +18378,28 @@ function selfTest() {
     /external quota selection and detail assembly must remain Mojo-owned/u);
   assert.match(findViolations([[externalQuotaFile, externalQuotaCalls.replace("::Agy", "::RustAgy")]]).join("\n"),
     /external quota selection and detail assembly must remain Mojo-owned/u);
+  for (const [file, markers] of Object.entries(QUOTA_TUI_SPAN_RULES)) {
+    const valid = markers.join(";\n");
+    assert.deepEqual(findViolations([[file, valid]]), []);
+    for (const marker of markers) assert.ok(findViolations([[file, valid.replace(marker, "missing")]]).length > 0);
+    if (file.endsWith("/frame.rs")) {
+      for (const retired of ['.contains("Blocked")', "fn quota_human_tui_header_spans(", "line.chars().all("]) {
+        assert.match(findViolations([[file, valid + "\n" + retired]]).join("\n"), /restored Rust quota span/u);
+      }
+    }
+  }
+  {
+    const file = "mojo/prodex_core/quota_watch_presentation.mojo";
+    const valid = QUOTA_TUI_MOJO_MARKERS.join(";\n");
+    assert.deepEqual(findViolations([[file, valid]]), []);
+    for (const marker of QUOTA_TUI_MOJO_MARKERS) assert.ok(findViolations([[file, valid.replace(marker, "missing")]]).length > 0);
+    assert.match(findViolations([["crates/prodex-mojo-core/src/json/quota_tui_spans.rs",
+      '#[cfg(not(feature = "mojo-runtime"))] fn fallback() {}']]).join("\n"), /feature-off Rust path/u);
+  }
   const quotaPresentationFile = "crates/prodex-app/src/quota_support/watch_tui/frame_data.rs";
   const quotaPresentationCaller = [
     "prodex_mojo_core::json::quota_watch_presentation(", "QuotaWatchPresentation::Row",
-    "QuotaWatchPresentation::ProfileFields", "QuotaWatchPresentation::CompactLabel",
+    "QuotaWatchPresentation::ProfileFields",
   ].join("\n");
   assert.deepEqual(findViolations([[quotaPresentationFile, quotaPresentationCaller]]), []);
   assert.match(findViolations([[quotaPresentationFile,

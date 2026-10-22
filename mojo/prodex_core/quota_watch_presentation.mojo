@@ -5,11 +5,14 @@ from parsed_json import (
     ParsedJson, ParsedJsonNode, JSON_OBJECT, JSON_STRING, JSON_ARRAY, JSON_TRUE,
     pj_valid, pj_kind, pj_field, pj_text, pj_literal, pj_trim, pj_is, pj_child, pj_next,
 )
-from rich_text import rich_view_prefix, rich_trim_bounds
+from rich_text import (
+    rich_view_prefix, rich_trim_bounds, rich_view_valid, rich_codepoint_width,
+    rich_codepoint, rich_unicode_space,
+)
 from rich_types import ProdexRichStringView
 from json_sink import JsonSink, js_byte, js_literal, js_string, js_view, js_escaped
 from quota_watch_policy import (
-    quota_watch_reset_kind, quota_watch_text_starts_at_exact,
+    quota_watch_reset_kind, quota_watch_text_starts_at_exact, quota_watch_text_contains_exact,
 )
 
 
@@ -78,8 +81,7 @@ def qwp_pair(sink: Pointer[mut=True, JsonSink, _], name: StringSlice, value: Pro
     js_byte(sink, 93)
 
 
-def qwp_compact_label(tree: ParsedJson) -> Bool:
-    var text = pj_text(tree, 0)
+def qwp_compact_label_end(text: ProdexRichStringView) -> Int64:
     var first = rich_trim_bounds(text)[0]
     for label in [
         StringSlice("Available"), StringSlice("Last Updated"),
@@ -96,8 +98,8 @@ def qwp_compact_label(tree: ParsedJson) -> Bool:
         if quota_watch_text_starts_at_exact(UInt64(text.ptr), Int64(text.len), first, label) and quota_watch_text_starts_at_exact(
             UInt64(text.ptr), Int64(text.len), end, StringSlice(":"),
         ):
-            return True
-    return False
+            return end + 1
+    return -1
 
 
 def qwp_render(
@@ -105,7 +107,7 @@ def qwp_render(
     detail: Bool, kind: Int64, reset: ProdexRichStringView, reset_kind: Int64,
 ):
     if operation == 2:
-        js_literal(sink, StringSlice("true") if qwp_compact_label(tree) else StringSlice("false"))
+        js_literal(sink, StringSlice("true") if qwp_compact_label_end(pj_text(tree, 0)) >= 0 else StringSlice("false"))
         return
     var account = qwp_optional(qwp_value(tree, StringSlice("account")))
     var plan_node = pj_field(tree, 0, StringSlice("plan"))
@@ -243,4 +245,87 @@ def prodex_quota_watch_presentation_v1(
     var metadata = Pointer[mut=True, Int64, MutUntrackedOrigin](unsafe_from_address=Int(metadata_address))
     metadata[unsafe_offset=0] = 1
     metadata[unsafe_offset=1] = sink.written
+    return 0
+
+
+@fieldwise_init
+struct QuotaTuiSpanPlan(Copyable):
+    var kind: Int64
+    var label_end: Int64
+    var value_start: Int64
+
+
+def qwp_status_tone(text: ProdexRichStringView) -> Int64:
+    for word in [StringSlice("Blocked"), StringSlice("Error")]:
+        if quota_watch_text_contains_exact(UInt64(text.ptr), Int64(text.len), word):
+            return 3
+    for word in [StringSlice("Ready"), StringSlice("healthy")]:
+        if quota_watch_text_contains_exact(UInt64(text.ptr), Int64(text.len), word):
+            return 4
+    return 0
+
+
+def qwp_separator(text: ProdexRichStringView) -> Bool:
+    var bytes = Pointer[mut=False, UInt8, ImmUntrackedOrigin](unsafe_from_address=Int(text.ptr))
+    var cursor: Int64 = 0
+    while cursor < Int64(text.len):
+        var width = rich_codepoint_width(bytes[unsafe_offset=cursor])
+        var value = rich_codepoint(bytes, cursor, width)
+        if value != 45 and not rich_unicode_space(value):
+            return False
+        cursor += width
+    return True
+
+
+def qwp_human_span_plan(text: ProdexRichStringView) -> QuotaTuiSpanPlan:
+    if (
+        rich_view_prefix["== "](text, False) or rich_view_prefix["Quota "](text, False)
+        or quota_watch_text_starts_at_exact(UInt64(text.ptr), Int64(text.len), Int64(text.len) - 8, StringSlice("profiles"))
+    ):
+        return QuotaTuiSpanPlan(1, 0, 0)
+    var label_end = qwp_compact_label_end(text)
+    if label_end >= 0:
+        var value = ProdexRichStringView(text.ptr + UInt(label_end), text.len - UInt(label_end))
+        return QuotaTuiSpanPlan(7, label_end, label_end + rich_trim_bounds(value)[0])
+    if qwp_separator(text):
+        return QuotaTuiSpanPlan(2, 0, 0)
+    var status_tone = qwp_status_tone(text)
+    if status_tone != 0:
+        return QuotaTuiSpanPlan(status_tone, 0, 0)
+    for word in [StringSlice("thin"), StringSlice("critical"), StringSlice("exhausted")]:
+        if quota_watch_text_contains_exact(UInt64(text.ptr), Int64(text.len), word):
+            return QuotaTuiSpanPlan(3, 0, 0)
+    if rich_view_prefix["PROFILE"](text, False):
+        return QuotaTuiSpanPlan(5, 0, 0)
+    var first = rich_trim_bounds(text)[0]
+    for label in [StringSlice("workspace:"), StringSlice("error:"), StringSlice("resets:"), StringSlice("status:"), StringSlice("reset credits:")]:
+        if quota_watch_text_starts_at_exact(UInt64(text.ptr), Int64(text.len), first, label):
+            return QuotaTuiSpanPlan(6, 0, 0)
+    if quota_watch_text_starts_at_exact(UInt64(text.ptr), Int64(text.len), first, StringSlice("press ")):
+        return QuotaTuiSpanPlan(2, 0, 0)
+    return QuotaTuiSpanPlan(0, 0, 0)
+
+
+@export("prodex_quota_tui_span_plan_v1")
+def prodex_quota_tui_span_plan_v1(
+    abi: Int64, operation: Int64, text_address: UInt64, text_length: Int64,
+    output_address: UInt64, output_capacity: Int64,
+) abi("C") -> Int64:
+    if abi != 1:
+        return 4
+    if (
+        operation < 0 or operation > 1 or text_length < 0
+        or output_address == 0 or output_address % 8 != 0 or output_capacity < 0
+    ):
+        return 1
+    var text = ProdexRichStringView(UInt(text_address), UInt(text_length))
+    if not rich_view_valid(text, 0x7FFFFFFFFFFFFFFF):
+        return 1
+    if output_capacity < 3:
+        return 3
+    var plan = qwp_human_span_plan(text) if operation == 0 else QuotaTuiSpanPlan(qwp_status_tone(text), 0, 0)
+    var output = Pointer[mut=True, Int64, MutUntrackedOrigin](unsafe_from_address=Int(output_address))
+    output[unsafe_offset=0] = plan.kind
+    output[unsafe_offset=1] = plan.label_end
+    output[unsafe_offset=2] = plan.value_start
     return 0

@@ -78,11 +78,15 @@ fn compiled_quota_rows_preserve_empty_present_plan_and_error_passthrough() {
         serde_json::json!(["error: bad \"credential\" 🧭"])
     );
     assert_eq!(row["remaining"], serde_json::json!(["-"]));
-    assert!(quota_human_tui_has_compact_label(
-        "\u{2003}Model provider: example"
+    assert!(quota_watch_projection::<bool>(
+        &serde_json::json!("\u{2003}Model provider: example"),
+        QuotaWatchPresentation::CompactLabel,
+        false,
     ));
-    assert!(!quota_human_tui_has_compact_label(
-        "model provider: example"
+    assert!(!quota_watch_projection::<bool>(
+        &serde_json::json!("model provider: example"),
+        QuotaWatchPresentation::CompactLabel,
+        false,
     ));
 }
 

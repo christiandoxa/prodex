@@ -78,14 +78,6 @@ pub(super) fn build_all_quota_watch_tui_row(
     quota_watch_projection(&facts, QuotaWatchPresentation::Row, detail)
 }
 
-pub(super) fn quota_human_tui_has_compact_label(line: &str) -> bool {
-    quota_watch_projection(
-        &serde_json::json!(line),
-        QuotaWatchPresentation::CompactLabel,
-        false,
-    )
-}
-
 pub(super) fn quota_watch_profile_fields(
     updated: &str,
     snapshot: &ProviderQuotaSnapshot,
