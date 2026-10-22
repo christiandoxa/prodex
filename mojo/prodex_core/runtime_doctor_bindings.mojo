@@ -1,4 +1,7 @@
 from std.memory import Pointer
+from rich_types import ProdexRichStringView
+from rich_text import rich_view_valid
+from json_sink import JsonSink, js_literal, js_view, js_u64
 
 # Runtime-doctor profile binding audits. Rust owns map traversal, known-name
 # normalization and string materialization; Mojo owns the complete numeric
@@ -151,4 +154,117 @@ def prodex_mojo_runtime_doctor_binding_source_v1(
         for i in range(profile_count):
             order[unsafe_offset=i] = scratch[unsafe_offset=i]
         width *= 2
+    return 0
+
+
+@fieldwise_init
+struct DoctorBindingDisplaySource(Copyable):
+    var response: UInt64
+    var session: UInt64
+    var turn_state: UInt64
+    var session_id: UInt64
+    var total: UInt64
+    var profiles: UInt64
+    var missing: UInt64
+    var top_present: UInt64
+    var top_name: ProdexRichStringView
+    var top_count: UInt64
+
+
+@fieldwise_init
+struct DoctorBindingDisplayInput(Copyable):
+    var active_present: UInt64
+    var active: ProdexRichStringView
+    var profiles: UInt64
+    var selected: UInt64
+    var sources: Array[DoctorBindingDisplaySource, 4]
+
+
+def doctor_binding_display_source(
+    writer: Pointer[mut=True, JsonSink, _], source: DoctorBindingDisplaySource,
+):
+    js_literal(writer, StringSlice("r="))
+    js_u64(writer, source.response)
+    js_literal(writer, StringSlice(" s="))
+    js_u64(writer, source.session)
+    js_literal(writer, StringSlice(" t="))
+    js_u64(writer, source.turn_state)
+    js_literal(writer, StringSlice(" sid="))
+    js_u64(writer, source.session_id)
+    js_literal(writer, StringSlice(" total="))
+    js_u64(writer, source.total)
+    js_literal(writer, StringSlice(" profiles="))
+    js_u64(writer, source.profiles)
+    js_literal(writer, StringSlice(" top="))
+    if source.top_present != 0:
+        js_view(writer, source.top_name)
+        js_literal(writer, StringSlice("="))
+        js_u64(writer, source.top_count)
+    else:
+        js_literal(writer, StringSlice("-"))
+
+
+def doctor_binding_display(
+    writer: Pointer[mut=True, JsonSink, _], input: DoctorBindingDisplayInput,
+):
+    js_literal(writer, StringSlice("active="))
+    if input.active_present != 0:
+        js_view(writer, input.active)
+    else:
+        js_literal(writer, StringSlice("-"))
+    js_literal(writer, StringSlice(" profiles="))
+    js_u64(writer, input.profiles)
+    js_literal(writer, StringSlice(" selected="))
+    js_u64(writer, input.selected)
+    var missing: UInt64 = 0
+    for index in range(4):
+        if index == 0:
+            js_literal(writer, StringSlice(" | state "))
+        elif index == 1:
+            js_literal(writer, StringSlice(" | runtime "))
+        elif index == 2:
+            js_literal(writer, StringSlice(" | journal "))
+        else:
+            js_literal(writer, StringSlice(" | merged "))
+        doctor_binding_display_source(writer, input.sources[index])
+        missing += input.sources[index].missing
+    js_literal(writer, StringSlice(" | missing="))
+    js_u64(writer, missing)
+
+
+@export("prodex_mojo_runtime_doctor_binding_display_v1")
+def prodex_mojo_runtime_doctor_binding_display_v1(
+    version: Int64, input_address: UInt, output_address: UInt,
+    capacity: Int64, written_address: UInt,
+) abi("C") -> Int64:
+    if version != 1:
+        return 4
+    if (input_address == 0 or input_address % 8 != 0 or capacity < 0
+        or written_address == 0 or written_address % 8 != 0):
+        return 1
+    var input = Pointer[mut=False, DoctorBindingDisplayInput, ImmUntrackedOrigin](
+        unsafe_from_address=Int(input_address)
+    )[].copy()
+    if input.active_present > 1 or not rich_view_valid(input.active, 0x7FFFFFFFFFFFFFFF):
+        return 1
+    for index in range(4):
+        var source = input.sources[index].copy()
+        if source.top_present > 1 or not rich_view_valid(source.top_name, 0x7FFFFFFFFFFFFFFF):
+            return 1
+    var writer = JsonSink(
+        Pointer[mut=True, UInt8, MutUntrackedOrigin](unsafe_from_address=1), 0, 0, True, False,
+    )
+    doctor_binding_display(Pointer(to=writer), input)
+    if writer.failed or writer.written > capacity:
+        return 3
+    if output_address == 0:
+        return 1
+    writer.output = Pointer[mut=True, UInt8, MutUntrackedOrigin](unsafe_from_address=Int(output_address))
+    writer.capacity = capacity
+    writer.written = 0
+    writer.measuring = False
+    doctor_binding_display(Pointer(to=writer), input)
+    if writer.failed:
+        return 3
+    Pointer[mut=True, Int64, MutUntrackedOrigin](unsafe_from_address=Int(written_address))[] = writer.written
     return 0

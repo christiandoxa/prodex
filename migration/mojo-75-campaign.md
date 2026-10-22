@@ -8676,3 +8676,16 @@ The 75% goal remains open. Evidence is in
 `render.rs::{binding_source_text, binding_state_text}`: preserve first-profile
 order from compiled aggregation, empty names, four source segments and unsigned
 counts while moving their remaining templates and missing-count sum into Mojo.
+
+## Runtime doctor binding display compiled in Mojo (2026-10-22)
+
+The binding owner now formats every source count/label, absent-name placeholder,
+four-source segment and combined missing count. Both Rust formatters and their
+sum are removed without a fallback. Two public caller regressions pass before
+and after migration, with direct Mojo, 55 doctor bridge, 72 doctor-crate and
+27 app doctor tests plus strict workspace Clippy, formatting and guards.
+Canonical share is 36.438917910843145% (137,554 Mojo / 239,938 Rust production LOC).
+The 75% goal stays open. Evidence is in `migration/doctor-binding-display-mojo-20261022.md`.
+The next audited owner is `prodex-optional-tools/src/super_optimizers.rs`:
+shape-preflight and required-MCP error-message tables still live in Rust around
+compiled policy. Preserve exact diagnostics and preflight-before-write ordering.

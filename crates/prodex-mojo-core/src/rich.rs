@@ -250,6 +250,13 @@ pub use runtime_doctor_facet::*;
 mod runtime_doctor_report_fields;
 pub use runtime_doctor_report_fields::*;
 
+#[path = "rich/runtime_doctor_binding_display.rs"]
+mod runtime_doctor_binding_display;
+pub use runtime_doctor_binding_display::{
+    RuntimeDoctorBindingDisplayInput, RuntimeDoctorBindingDisplaySource,
+    runtime_doctor_binding_display,
+};
+
 #[path = "rich/runtime_doctor_report_render.rs"]
 mod runtime_doctor_report_render;
 pub use runtime_doctor_report_render::{
