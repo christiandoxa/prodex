@@ -16,7 +16,7 @@ mojo-quota = []
 mojo-runtime = []
 mojo-routing = []
 mojo-provider-constraints = []
-mojo-rich = []
+mojo-rich = ["mojo-runtime"]
 mojo-observability = []
 mojo-core = [
     "mojo-quota",
