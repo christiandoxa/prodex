@@ -1,72 +1,68 @@
-//! Borrowed UTF-8 token ranges planned by compiled Mojo for probe versions.
+//! Borrowed canonical versions selected and classified by compiled Mojo.
 use crate::MojoError;
 
-const ABI_VERSION: i64 = 1;
 const MAX_INPUT_BYTES: usize = 1_048_576;
 
 unsafe extern "C" {
-    fn prodex_optional_tool_probe_token_v1(
+    fn prodex_optional_tool_probe_version_v1(
         abi_version: i64,
         input_address: u64,
         input_length: i64,
-        cursor: i64,
+        minimum_address: u64,
+        minimum_length: i64,
         output_address: u64,
     ) -> i64;
 }
 
+/// Classification of the first valid SemVer candidate, irrespective of later tokens.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct OptionalToolProbeToken {
-    pub start: usize,
-    pub end: usize,
-    pub next_cursor: usize,
+pub enum OptionalToolProbeVersion<'a> {
+    Missing,
+    TooOld(&'a str),
+    Supported(&'a str),
 }
 
-/// Return the next whitespace-delimited, punctuation-trimmed semver candidate.
-/// Invalid Mojo output is an error; this adapter never scans in Rust.
-pub fn optional_tool_probe_token(
-    text: &str,
-    cursor: usize,
-) -> Result<Option<OptionalToolProbeToken>, MojoError> {
-    if text.len() > MAX_INPUT_BYTES || cursor > text.len() || !text.is_char_boundary(cursor) {
+/// Probe text and minimum are bounded to 1 MiB; Rust only validates ABI spans.
+pub fn optional_tool_probe_version<'a>(
+    text: &'a str,
+    minimum: &str,
+) -> Result<OptionalToolProbeVersion<'a>, MojoError> {
+    if text.len() > MAX_INPUT_BYTES || minimum.len() > MAX_INPUT_BYTES {
         return Err(MojoError::InvalidInput);
     }
-    let mut output = [-2_i64; 3];
-    let status = unsafe {
-        prodex_optional_tool_probe_token_v1(
-            ABI_VERSION,
-            text.as_ptr() as usize as u64,
-            i64::try_from(text.len()).map_err(|_| MojoError::InvalidInput)?,
-            i64::try_from(cursor).map_err(|_| MojoError::InvalidInput)?,
-            output.as_mut_ptr() as usize as u64,
+    let mut output = [-1_i64; 3];
+    match unsafe {
+        prodex_optional_tool_probe_version_v1(
+            1,
+            text.as_ptr() as u64,
+            text.len() as i64,
+            minimum.as_ptr() as u64,
+            minimum.len() as i64,
+            output.as_mut_ptr() as u64,
         )
-    };
-    match status {
+    } {
         0 => {}
         1 => return Err(MojoError::InvalidInput),
         4 => return Err(MojoError::AbiMismatch),
         _ => return Err(MojoError::InvalidOutput),
     }
-    if output[0] == -1 && output[1] == -1 && output[2] == text.len() as i64 {
-        return Ok(None);
+    match output {
+        [0, 0, 0] => Ok(OptionalToolProbeVersion::Missing),
+        [tag @ (1 | 2), start, end] => {
+            let start = usize::try_from(start).map_err(|_| MojoError::InvalidOutput)?;
+            let end = usize::try_from(end).map_err(|_| MojoError::InvalidOutput)?;
+            let version = text
+                .get(start..end)
+                .filter(|value| !value.is_empty())
+                .ok_or(MojoError::InvalidOutput)?;
+            Ok(if tag == 1 {
+                OptionalToolProbeVersion::TooOld(version)
+            } else {
+                OptionalToolProbeVersion::Supported(version)
+            })
+        }
+        _ => Err(MojoError::InvalidOutput),
     }
-    let start = usize::try_from(output[0]).map_err(|_| MojoError::InvalidOutput)?;
-    let end = usize::try_from(output[1]).map_err(|_| MojoError::InvalidOutput)?;
-    let next_cursor = usize::try_from(output[2]).map_err(|_| MojoError::InvalidOutput)?;
-    if start > end
-        || end > next_cursor
-        || next_cursor <= cursor
-        || next_cursor > text.len()
-        || !text.is_char_boundary(start)
-        || !text.is_char_boundary(end)
-        || !text.is_char_boundary(next_cursor)
-    {
-        return Err(MojoError::InvalidOutput);
-    }
-    Ok(Some(OptionalToolProbeToken {
-        start,
-        end,
-        next_cursor,
-    }))
 }
 
 #[cfg(test)]
@@ -74,27 +70,44 @@ mod tests {
     use super::*;
 
     #[test]
-    fn compiled_probe_tokens_preserve_scan_and_ascii_trimming() {
-        let line = " tool\u{2003}v1.2.3\u{00a0}[vv2.3.4] ";
-        let mut cursor = 0;
-        let mut tokens = Vec::new();
-        while let Some(token) = optional_tool_probe_token(line, cursor).unwrap() {
-            tokens.push(line[token.start..token.end].to_owned());
-            cursor = token.next_cursor;
+    fn compiled_probe_version_preserves_token_priority_and_compatibility() {
+        use OptionalToolProbeVersion::*;
+        for (text, minimum, expected) in [
+            (
+                " tool\u{2003}v1.2.3\u{a0}[vv2.3.4] ",
+                "1.2.3",
+                Supported("1.2.3"),
+            ),
+            ("[vv2.3.4]", "2.3.4", Supported("2.3.4")),
+            ("0.0.1 999.0.0", "1.0.0", TooOld("0.0.1")),
+            ("1.2.3-rc.1 1.2.3", "1.2.3", TooOld("1.2.3-rc.1")),
+            ("invalid 01.2.3 1.2.3", "1.2.3", Supported("1.2.3")),
+            ("1.2.3+build.01", "1.2.3", Supported("1.2.3+build.01")),
+            ("V1.2.3", "1.2.3", Missing),
+            ("18446744073709551616.0.0", "1.0.0", Missing),
+            ("\u{2002} ", "1.0.0", Missing),
+            ("", "1.0.0", Missing),
+        ] {
+            assert_eq!(
+                optional_tool_probe_version(text, minimum),
+                Ok(expected),
+                "{text}"
+            );
         }
-        assert_eq!(tokens, ["tool", "1.2.3", "2.3.4"]);
-        assert_eq!(optional_tool_probe_token("  ", 0), Ok(None));
-        assert_eq!(optional_tool_probe_token("", 0), Ok(None));
     }
 
     #[test]
-    fn compiled_probe_tokens_reject_invalid_cursor_and_size() {
+    fn compiled_probe_version_rejects_invalid_minimum_and_size() {
         assert_eq!(
-            optional_tool_probe_token("é", 1),
+            optional_tool_probe_version("1.2.3", "invalid"),
             Err(MojoError::InvalidInput)
         );
         assert_eq!(
-            optional_tool_probe_token(&"a".repeat(MAX_INPUT_BYTES + 1), 0),
+            optional_tool_probe_version(&"x".repeat(MAX_INPUT_BYTES + 1), "1.0.0"),
+            Err(MojoError::InvalidInput)
+        );
+        assert_eq!(
+            optional_tool_probe_version("1.2.3", &"x".repeat(MAX_INPUT_BYTES + 1)),
             Err(MojoError::InvalidInput)
         );
     }

@@ -3,8 +3,7 @@ from core_file_policy import core_file_view_suffix
 
 from rich_text import (
     rich_view_prefix,
-    rich_codepoint, rich_codepoint_width, rich_trim_bounds,
-    rich_unicode_space, rich_view_ptr, rich_view_valid,
+    rich_trim_bounds, rich_view_ptr, rich_view_valid,
 )
 from rich_types import ProdexRichStringView
 
@@ -514,93 +513,6 @@ def prodex_optional_tool_required_mcp_contract_v1(
     Pointer[mut=True, Int64, MutUntrackedOrigin](
         unsafe_from_address=Int(output_address)
     )[] = issue
-    return 0
-
-# Rust owns the semver parser, Mojo owns the exact first-candidate lexical
-# traversal used for optional tool probe output, including Unicode whitespace
-# and ASCII token punctuation trimming. Output [start,end,next_cursor].
-comptime OPTIONAL_TOOL_PROBE_TOKEN_ABI: Int64 = 1
-comptime OPTIONAL_TOOL_PROBE_TOKEN_MAX_BYTES: Int64 = 1_048_576
-
-
-def optional_tool_probe_token_char_allowed(codepoint: Int64) -> Bool:
-    return (
-        (codepoint >= 48 and codepoint <= 57)
-        or (codepoint >= 65 and codepoint <= 90)
-        or (codepoint >= 97 and codepoint <= 122)
-        or codepoint == 43 or codepoint == 45 or codepoint == 46
-    )
-
-
-@export("prodex_optional_tool_probe_token_v1")
-def prodex_optional_tool_probe_token_v1(
-    abi_version: Int64,
-    input_address: UInt,
-    input_length: Int64,
-    cursor: Int64,
-    output_address: UInt,
-) abi("C") -> Int64:
-    if abi_version != OPTIONAL_TOOL_PROBE_TOKEN_ABI:
-        return 4
-    if (
-        input_length < 0 or input_length > OPTIONAL_TOOL_PROBE_TOKEN_MAX_BYTES
-        or cursor < 0 or cursor > input_length
-        or (input_length > 0 and input_address == 0)
-        or output_address == 0 or output_address % 8 != 0
-    ):
-        return 1
-    var view = ProdexRichStringView(input_address, UInt(input_length))
-    if not rich_view_valid(view, OPTIONAL_TOOL_PROBE_TOKEN_MAX_BYTES):
-        return 1
-    var bytes = rich_view_ptr(view)
-    var index = cursor
-    while index < input_length:
-        var width = rich_codepoint_width(bytes[unsafe_offset=index])
-        var codepoint = rich_codepoint(bytes, index, width)
-        if not rich_unicode_space(codepoint):
-            break
-        index += width
-
-    var token_start = index
-    while index < input_length:
-        var width = rich_codepoint_width(bytes[unsafe_offset=index])
-        var codepoint = rich_codepoint(bytes, index, width)
-        if rich_unicode_space(codepoint):
-            break
-        index += width
-    var token_end = index
-    # Rust char::is_ascii_alphanumeric is strictly ASCII. Non-ASCII characters
-    # inside a token remain intact; only boundary punctuation is trimmed.
-    var start = token_start
-    var end = token_start
-    var saw_allowed = False
-    var probe = token_start
-    while probe < token_end:
-        var width = rich_codepoint_width(bytes[unsafe_offset=probe])
-        var codepoint = rich_codepoint(bytes, probe, width)
-        probe += width
-        if optional_tool_probe_token_char_allowed(codepoint):
-            if not saw_allowed:
-                start = probe - width
-                saw_allowed = True
-            end = probe
-    if not saw_allowed:
-        start = token_end
-        end = token_end
-    while start < end and bytes[unsafe_offset=start] == 118:
-        start += 1
-
-    var output = Pointer[mut=True, Int64, MutUntrackedOrigin](
-        unsafe_from_address=Int(output_address)
-    )
-    if token_start == input_length:
-        output[unsafe_offset=0] = -1
-        output[unsafe_offset=1] = -1
-        output[unsafe_offset=2] = input_length
-    else:
-        output[unsafe_offset=0] = start
-        output[unsafe_offset=1] = end
-        output[unsafe_offset=2] = token_end
     return 0
 
 # Overlay home may only share/localize SQLite rollout state files that match
