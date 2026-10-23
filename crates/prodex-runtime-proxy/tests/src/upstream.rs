@@ -176,6 +176,36 @@ fn request_header_forwarding_strips_connection_named_headers() {
 }
 
 #[test]
+fn connection_header_tokens_preserve_unicode_trim_casing_duplicates_and_metadata() {
+    let headers = [
+        (
+            "Connection",
+            "\u{2003}X-One\u{00a0}, x-one, bad name, X-Two",
+        ),
+        ("cOnNeCtIoN", "\u{3000}X-Three\u{2028},bad/segment,,"),
+        (" Connection ", "x-codex-turn-state"),
+        ("X-One", "drop"),
+        ("X-Two", "drop"),
+        ("X-Three", "drop"),
+        ("x-codex-turn-state", "keep-state"),
+        ("session_id", "keep-session"),
+        ("User-Agent", "codex-test"),
+    ];
+    assert_eq!(
+        runtime_connection_header_tokens(headers),
+        ["X-One", "x-one", "X-Two", "X-Three"]
+    );
+    assert_eq!(
+        runtime_forward_request_headers(headers),
+        vec![
+            ("x-codex-turn-state", "keep-state"),
+            ("session_id", "keep-session"),
+            ("User-Agent", "codex-test"),
+        ]
+    );
+}
+
+#[test]
 fn effective_user_agent_ignores_empty_values() {
     assert_eq!(
         runtime_proxy_effective_user_agent(&[

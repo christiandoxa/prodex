@@ -1101,6 +1101,7 @@ const PROMOTED_FILES = [
   "crates/prodex-shared-codex-fs/src/image_attachments.rs",
   "crates/prodex-shared-codex-fs/src/prepare/goal_attachments.rs",
   "crates/prodex-runtime-cookies/src/lib.rs",
+  "crates/prodex-runtime-proxy/src/upstream.rs",
   "crates/prodex-mojo-core/src/runtime_cookie_policy.rs",
   "crates/prodex-mojo-core/src/shared_attachment_policy.rs",
   UPDATE_NOTICE_VERSION_ADAPTER_FILE,
@@ -3916,6 +3917,13 @@ export function findViolations(files) {
     return [];
   });
   const sharedAttachmentMigrationViolations = files.flatMap(([filePath, contents]) => {
+    if (filePath === "crates/prodex-runtime-proxy/src/upstream.rs") {
+      const production = contents.split("#[cfg(test)]", 1)[0];
+      return production.includes("runtime_response_header_policy::request_connection_tokens(")
+        && !production.includes(".flat_map(")
+        && !production.includes("byte.is_ascii_alphanumeric()")
+        ? [] : [filePath + ": request Connection token parsing must remain Mojo-owned"];
+    }
     if (filePath === "crates/prodex-shared-codex-fs/src/image_attachments.rs") {
       const required = [
         "image_tag_path_ranges(contents, ImageTagScan::WholeTags)",

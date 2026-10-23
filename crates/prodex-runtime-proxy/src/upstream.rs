@@ -63,39 +63,16 @@ pub fn runtime_forward_request_headers<'a>(
 pub fn runtime_connection_header_tokens<'a>(
     headers: impl IntoIterator<Item = (&'a str, &'a str)>,
 ) -> Vec<String> {
-    headers
+    let values = headers
         .into_iter()
         .filter(|(name, _)| {
             ascii_casefold_equal_exact(name, "connection")
                 .expect("Mojo connection header-name comparison failed")
         })
-        .flat_map(|(_, value)| value.split(','))
-        .map(str::trim)
-        .filter(|token| {
-            !token.is_empty()
-                && token.bytes().all(|byte| {
-                    byte.is_ascii_alphanumeric()
-                        || matches!(
-                            byte,
-                            b'!' | b'#'
-                                | b'$'
-                                | b'%'
-                                | b'&'
-                                | b'\''
-                                | b'*'
-                                | b'+'
-                                | b'-'
-                                | b'.'
-                                | b'^'
-                                | b'_'
-                                | b'`'
-                                | b'|'
-                                | b'~'
-                        )
-                })
-        })
-        .map(str::to_string)
-        .collect()
+        .map(|(_, value)| value)
+        .collect::<Vec<_>>();
+    prodex_mojo_core::runtime_response_header_policy::request_connection_tokens(&values)
+        .expect("compiled Mojo request Connection token parser returned invalid output")
 }
 
 pub fn runtime_header_name_matches_connection_token(name: &str, tokens: &[String]) -> bool {

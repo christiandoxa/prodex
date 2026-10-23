@@ -712,6 +712,14 @@
     },
     "additions": [
       {
+        "path": "mojo/prodex_core/request_connection_tokens.mojo",
+        "language": "mojo",
+        "classification": "DETERMINISTIC_DOMAIN",
+        "production_reachable": true,
+        "role": "semantic",
+        "operations": ["runtime_request_connection_token_parsing"]
+      },
+      {
         "path": "mojo/prodex_core/rtk_wrapper.mojo",
         "language": "mojo",
         "classification": "DETERMINISTIC_DOMAIN",
@@ -2939,6 +2947,27 @@
     "deepseek_chat_stream_event_translation"
   ],
   "authoritative_operations": [
+    {
+      "name": "runtime_request_connection_token_parsing",
+      "domain": "runtime/request-headers",
+      "introduced_in": "0.439.0",
+      "baseline_state": "Rust split Connection fields, trimmed Unicode whitespace, and checked HTTP token characters",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_runtime_request_connection_tokens_v1",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/request_connection_tokens.mojo",
+      "consumer": "crates/prodex-runtime-proxy/src/upstream.rs",
+      "consumer_marker": "runtime_response_header_policy::request_connection_tokens(",
+      "production_consumers": ["crates/prodex-runtime-proxy/src/upstream.rs"],
+      "production_reachability_test": "crates/prodex-mojo-core/src/runtime_response_header_policy/request_tokens/tests.rs",
+      "rust_owner_before": "Comma splitting, Unicode edge trimming, RFC token grammar and accepted-token order across Connection fields",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "test-only original parser checks ASCII grammar, Unicode trim, casing, duplicates and large batches; forwarding caller assertions preserve continuation metadata",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "header acquisition and existing compiled exact Connection-name filtering, borrowed value views, measured range allocation and checked token materialization; unrelated header values never cross this ABI"
+    },
     {
       "name": "rtk_native_wrapper_scripts",
       "domain": "optional-tools/rtk-wrapper",

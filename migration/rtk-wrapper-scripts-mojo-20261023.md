@@ -26,7 +26,8 @@ Verification uses `PRODEX_MOJO_REQUIRED=1 PRODEX_MOJO_VERSION=1.2.0`:
 - PASS: `rtk proxy npm run test:node` (282 passed, one native Windows installer test skipped on Linux).
 - PASS: release guard fixtures (24), version-metadata guard, crate-boundary/self-test, production boundary, runtime hotpath, ownership, authority, no-fallback/self-test, size and churn guards, formatting and whitespace, offline baseline and five replay checks.
 - PASS: optimized object generation, the versioned export and absence of Modular runtime references for all six release targets and their release CPU choices.
-- PENDING: final provider-constraints-only check, full Mojo-core library suite, focused final RTK caller rerun and repeated default CI. Their live processes remain owned by the campaign until results are harvested.
+- PASS: `rtk cargo check --locked -q -p prodex-mojo-core --features mojo-provider-constraints`; `rtk cargo test --locked -q -p prodex-mojo-core --features mojo-core --lib` (1,112 tests); and `rtk cargo test --locked -q -p prodex-optional-tools --lib rtk::` (6 tests).
+- PENDING: repeated default CI. Its live process remains owned by the campaign until results are harvested.
 
 The first core command used `--features mojo-rich`, which does not expose the
 RTK subsystem and selected zero tests. It is not verification; the corrected
