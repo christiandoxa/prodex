@@ -2,6 +2,78 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.439.0 - 2026-10-23
+
+### Runtime
+
+- Qualify Codex 0.164.0 and refresh runtime release pins (`200c35d`)
+- Declare rich runtime dependency (`c9c41d9`)
+
+### Docs
+
+- Curate Codex compatibility release notes (`b7c08e5`)
+
+### Misc
+
+- Align ABI regression coverage and simplify child environment validation (`1fb93e5`)
+# Prodex 0.439.0
+
+This release qualifies Codex 0.164.0 and includes the compiled Mojo migrations
+already merged since Prodex 0.438.4.
+
+## New Features
+
+### Codex 0.164.0 compatibility
+
+- Qualify the exact official `rust-v0.164.0` source and binaries, with 82 critical
+  source files and 101 semantic contracts. Eleven new mandatory checks cover
+  cache identity, metadata patches, model catalogs, scoped CLI overrides,
+  compaction, and resume behavior.
+- Preserve custom or omitted prompt-cache keys independently of the Responses
+  session header, and preserve native merged turn metadata and unknown fields
+  across the local proxy. Native `turn/start` and `turn/steer` metadata patches
+  remain owned by Codex.
+- Preserve repeated `-c`/`--config` overrides across root, exec, and resume
+  command scopes. Native inline commands remain unchanged prompt text.
+- Follow the new model-instructions world-state owner, transient provider-catalog
+  retention, isolated failed compaction attempts, and compressed-rollout resume
+  settings. No wrapper permission defaults, hard continuation affinity, or
+  committed-response retry rules are relaxed.
+- Leave native presets, Kitty/Sixel images, enterprise MCP authentication,
+  remote-shell credential masking, and Bedrock setup with the official Codex
+  runtime. The minimum accepted Codex capability floor remains 0.153.2.
+
+## Bug Fixes
+
+- Repair a stale cross-platform Mojo ABI fixture: operation 1 is a supported
+  shape validator; unknown operations remain rejected with output canaries.
+- Make optimizer and image-scanner fixtures portable across canonical macOS
+  temporary roots and native Windows path separators, retaining all safety assertions.
+- Simplify child-environment result validation without adding a Rust fallback
+  or changing the compiled hardening policy.
+
+## Changelog
+
+- Advance the audited tunnel-client reference to 0.0.17 and the standalone
+  Kiro CLI packaging pin to 2.33.1. Existing minimum-version and digest checks
+  remain in place; optional-tool references were also checked for freshness.
+- Refresh the fuzz-only `ctutils` lockfile resolution from 0.4.3 to 0.4.5
+  during the standard release sync; the production third-party lock graph is unchanged.
+- Include the preceding compiled Mojo migrations for terminal and quota
+  presentation, launch/configuration policies, session processing, provider
+  validation, and runtime diagnostics. Existing reset-credit expiry behavior
+  remains intact; this release does not claim the 75% migration target is met.
+
+## Verification
+
+The official Linux Codex and app-server assets were checksum-verified, then
+probed using isolated configuration and no credentials. Version/help,
+app-server initialization and thread listing, startup discovery, and generated
+start/steer schemas were checked without model inference. Offline proxy,
+launch, session, and ABI regressions cover the wrapper boundaries.
+
+Full Changelog: [0.438.4...0.439.0](https://github.com/christiandoxa/prodex/compare/0.438.4...0.439.0)
+
 ## 0.438.4 - 2026-10-21
 
 ### CLI
@@ -15,63 +87,6 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 - Integrate Dependabot Cargo updates (#112) (`5cec445`)
 - Bump the cargo group across 1 directory with 8 updates (`79b5672`)
 - Bump serde_json (`34f020e`)
-# Prodex 0.438.4
-
-This patch adds the next OpenAI reset-credit expiry to quota views and updates
-the dependency graph.
-
-## New Features
-
-### Show the nearest available reset-credit expiry
-
-`prodex quota` now shows `next expiry` immediately after the available reset-credit
-count in interactive and `--once` views. The timestamp uses the machine's local
-time zone and includes a numeric UTC offset.
-
-The date is the earliest expiry among credits whose status is `available`.
-It is independent of the five-hour and weekly quota reset windows. The read-only
-detail request runs only when the available count is positive, uses the identity
-accepted by the quota request, and respects the configured backend base URL.
-
-Expiry summaries wrap within the existing terminal layout, including narrow
-terminals.
-
-## Bug Fixes
-
-- Preserve the available credit count when details cannot be fetched or parsed,
-  and show `next expiry: unavailable`.
-- Distinguish unavailable details from non-expiring credits. When every available
-  credit has `expires_at: null`, show `next expiry: never`. When expiring and
-  non-expiring credits coexist, show the earliest finite expiry.
-- Compare RFC3339 timestamps as instants, including different UTC offsets, and
-  ignore credits that are no longer available.
-- Preserve automatic refresh, the previous snapshot during loading, `--raw`
-  output, runtime quota probes, and other providers' behavior.
-- Repair stale Mojo ownership references and use representable 100-nanosecond
-  Windows timestamp fixtures. Mechanical module extractions preserve existing
-  test identities. Correct existing Clippy findings and simplify private ABI
-  validation and JSON node linkage to satisfy the SonarQube complexity gate.
-
-## Changelog
-
-- Include the compiled Mojo policy migrations already on `main` for provider
-  adapters, quota, runtime state and logs, Smart Context, and diagnostics.
-- Incorporate Dependabot [#112](https://github.com/christiandoxa/prodex/pull/112),
-  covering eight Cargo dependency updates.
-- Update the fuzz workspace to `serde_json` 1.0.154 via
-  [#113](https://github.com/christiandoxa/prodex/pull/113).
-- Update `setup-uv` to 10.3.0 via
-  [#114](https://github.com/christiandoxa/prodex/pull/114).
-- Refresh fuzz lockfile resolutions to `cc` 1.9.0, `find-msvc-tools` 0.1.15,
-  and `inout` 0.2.5 during release synchronization.
-- Update `rustls-webpki` to 0.103.16 and `webpki-root-certs` to 1.0.10 to address
-  dependency advisories.
-- Add offline regression coverage for expiry parsing and selection, unavailable
-  and non-expiring details, profile authentication, raw output, and terminal
-  rendering. Fixtures use local mocks without live credit consumption or
-  redemption.
-
-Full Changelog: [0.438.3...0.438.4](https://github.com/christiandoxa/prodex/compare/0.438.3...0.438.4)
 
 ## 0.438.3 - 2026-10-18
 
