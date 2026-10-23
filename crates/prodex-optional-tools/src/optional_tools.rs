@@ -40,6 +40,17 @@ pub(crate) fn manifest_tree_sha256_supported(
         .expect("Mojo optional-tool manifest-tree policy failed")
 }
 
+pub(crate) fn validate_manifest_policy(
+    result: std::result::Result<Option<String>, prodex_mojo_core::MojoError>,
+) -> Result<()> {
+    if let Some(message) = result
+        .map_err(|error| anyhow::anyhow!("optional-tool manifest policy failed: {error:?}"))?
+    {
+        anyhow::bail!("{message}");
+    }
+    Ok(())
+}
+
 #[path = "optional_tools/probe_version.rs"]
 mod probe_version;
 use probe_version::validate_minimum_probe_version;

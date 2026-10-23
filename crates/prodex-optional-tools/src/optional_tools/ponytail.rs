@@ -1,11 +1,14 @@
 use super::{
     OptionalToolId, ResolvedTool, TOOL_PROBE_TIMEOUT, ToolDiscoverySource, ToolHealth,
     find_path_command, invalid_tool, manifest_tree_sha256_supported, optional_tool_descriptor,
+    validate_manifest_policy,
 };
 use crate::discovery::{managed_optimizer_roots, newest_stable_managed_version};
 use anyhow::{Context, Result};
 use prodex_mojo_core::optional_tools_policy::{
-    OptionalToolStableVersion, optional_tool_stable_version,
+    OptionalToolManifestIdentity, OptionalToolPolicyId, optional_tool_manifest_header_error,
+    optional_tool_manifest_identity_error, optional_tool_manifest_version_error,
+    optional_tool_stable_version,
 };
 use serde::Deserialize;
 use std::fs;
@@ -86,14 +89,6 @@ fn candidate() -> Result<Option<(PathBuf, PathBuf)>> {
     Ok(None)
 }
 
-fn valid_git_sha(value: &str) -> bool {
-    value.len() == 40 && value.bytes().all(|byte| byte.is_ascii_hexdigit())
-}
-
-fn valid_sha256(value: &str) -> bool {
-    value.len() == 64 && value.bytes().all(|byte| byte.is_ascii_hexdigit())
-}
-
 fn previous_stable_legacy_manifest_supported(
     manifest: &ToolInstallManifest,
     actual_digest: &str,
@@ -114,48 +109,34 @@ fn validate_install(allowed_root: &Path, candidate: &Path) -> Result<ResolvedToo
     let manifest: ToolInstallManifest =
         serde_json::from_slice(&crate::tree::read_bounded_file(&manifest_path, 64 * 1024)?)
             .with_context(|| format!("failed to parse {}", manifest_path.display()))?;
-    anyhow::ensure!(
-        manifest.schema_version == 1,
-        "unsupported Ponytail manifest schema"
-    );
-    anyhow::ensure!(
-        manifest.id == "ponytail",
-        "Ponytail manifest id must be ponytail"
-    );
+    validate_manifest_policy(optional_tool_manifest_header_error(
+        OptionalToolPolicyId::Ponytail,
+        manifest.schema_version,
+        &manifest.id,
+    ))?;
     let version =
         optional_tool_stable_version(&manifest.version, crate::PONYTAIL_MINIMUM_SUPPORTED_VERSION)
             .map_err(|error| {
                 anyhow::anyhow!("failed to validate Ponytail manifest version: {error:?}")
             })?;
-    anyhow::ensure!(
-        version != OptionalToolStableVersion::Malformed,
-        "invalid Ponytail version {}",
-        manifest.version
-    );
-    anyhow::ensure!(
-        version == OptionalToolStableVersion::Supported,
-        "Ponytail {} is incompatible; Prodex requires {} or newer. Update Ponytail to the latest stable release (release-qualified reference: {})",
-        manifest.version,
+    validate_manifest_policy(optional_tool_manifest_version_error(
+        OptionalToolPolicyId::Ponytail,
+        version,
+        &manifest.version,
         crate::PONYTAIL_MINIMUM_SUPPORTED_VERSION,
-        crate::PONYTAIL_LATEST_STABLE_REFERENCE
-    );
-    anyhow::ensure!(
-        candidate.file_name().and_then(|name| name.to_str()) == Some(manifest.version.as_str()),
-        "Ponytail version directory does not match manifest version {}",
-        manifest.version
-    );
-    anyhow::ensure!(
-        manifest.source == PONYTAIL_SOURCE,
-        "unexpected Ponytail source"
-    );
-    anyhow::ensure!(
-        valid_git_sha(&manifest.commit),
-        "Ponytail manifest commit must be a 40-character Git SHA"
-    );
-    anyhow::ensure!(
-        valid_sha256(&manifest.tree_sha256),
-        "Ponytail manifest tree digest must be SHA-256"
-    );
+        crate::PONYTAIL_LATEST_STABLE_REFERENCE,
+    ))?;
+    validate_manifest_policy(optional_tool_manifest_identity_error(
+        OptionalToolPolicyId::Ponytail,
+        OptionalToolManifestIdentity {
+            version: &manifest.version,
+            directory_version: candidate.file_name().and_then(|name| name.to_str()),
+            source: &manifest.source,
+            expected_source: PONYTAIL_SOURCE,
+            commit: &manifest.commit,
+            tree_sha256: &manifest.tree_sha256,
+        },
+    ))?;
 
     let plugin_path = candidate.join(".codex-plugin/plugin.json");
     let plugin: CodexPluginManifest =
@@ -309,6 +290,52 @@ mod tests {
         let tool = validate_install(&allowed_root, &candidate).unwrap();
         assert_eq!(tool.version.as_deref(), Some("4.11.0"));
         assert_eq!(tool.digest, Some(format!("sha256:{digest}")));
+
+        let manifest_path = candidate.join(TOOL_MANIFEST);
+        let original: serde_json::Value =
+            serde_json::from_slice(&fs::read(&manifest_path).unwrap()).unwrap();
+        for (changes, expected) in [
+            (
+                serde_json::json!({"schema_version": 0, "id": "wrong", "version": "bad"}),
+                "unsupported Ponytail manifest schema",
+            ),
+            (
+                serde_json::json!({"id": "wrong", "version": "bad"}),
+                "Ponytail manifest id must be ponytail",
+            ),
+            (
+                serde_json::json!({"version": "v4.11.0", "source": "wrong"}),
+                "invalid Ponytail version v4.11.0",
+            ),
+            (
+                serde_json::json!({"version": "4.12.0", "source": "wrong"}),
+                "Ponytail version directory does not match manifest version 4.12.0",
+            ),
+            (
+                serde_json::json!({"source": "wrong", "commit": "bad"}),
+                "unexpected Ponytail source",
+            ),
+            (
+                serde_json::json!({"commit": "bad", "tree_sha256": "bad"}),
+                "Ponytail manifest commit must be a 40-character Git SHA",
+            ),
+            (
+                serde_json::json!({"tree_sha256": "bad"}),
+                "Ponytail manifest tree digest must be SHA-256",
+            ),
+        ] {
+            let mut invalid = original.clone();
+            for (field, value) in changes.as_object().unwrap() {
+                invalid[field] = value.clone();
+            }
+            fs::write(&manifest_path, serde_json::to_vec(&invalid).unwrap()).unwrap();
+            assert_eq!(
+                validate_install(&allowed_root, &candidate)
+                    .unwrap_err()
+                    .to_string(),
+                expected
+            );
+        }
         fs::remove_dir_all(allowed_root).unwrap();
     }
 }
