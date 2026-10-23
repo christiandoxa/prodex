@@ -3923,6 +3923,8 @@ export function findViolations(files) {
         "shared_attachment_policy::clipboard_file_name(",
         "shared_attachment_policy::persistable_attachment_file_name(",
         "shared_attachment_policy::rollout_file_name(",
+        "shared_attachment_policy::decode_session_path(",
+        "shared_attachment_policy::render_session_path(",
       ];
       const violations = required
         .filter((call) => !contents.includes(call))
@@ -3933,6 +3935,7 @@ export function findViolations(files) {
         || /fn\s+codex_session_path_continues\s*\(/u.test(contents)
         || /fn\s+is_codex_session_path_byte\s*\(/u.test(contents)
         || /CODEX_ATTACHMENT_PATH_MARKERS/u.test(contents)
+        || /fn\s+codex_session_path_escape_width\s*\(/u.test(contents)
       ) {
         violations.push(filePath + ": contains restored Rust shared-attachment scanner semantics");
       }
@@ -18913,6 +18916,8 @@ function selfTest() {
     "shared_attachment_policy::clipboard_file_name(",
     "shared_attachment_policy::persistable_attachment_file_name(",
     "shared_attachment_policy::rollout_file_name(",
+    "shared_attachment_policy::decode_session_path(",
+    "shared_attachment_policy::render_session_path(",
   ].join("\n");
   assert.deepEqual(findViolations([[sharedImageBatchFile, sharedImageBatchCaller]]), []);
   assert.match(findViolations([[sharedImageBatchFile,

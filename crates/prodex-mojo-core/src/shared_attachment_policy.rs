@@ -1,5 +1,8 @@
 use crate::MojoError;
 
+mod path_codec;
+pub use path_codec::{decode_session_path, render_session_path};
+
 const ABI_VERSION: i64 = 1;
 const IMAGE_TAG_RANGE: i64 = 0;
 const CLIPBOARD_RANGE: i64 = 1;
