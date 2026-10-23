@@ -24,6 +24,9 @@ const GEMINI_MODEL_CATALOG_FILE: &str = "prodex-gemini-model-catalog.json";
 #[cfg(test)]
 #[path = "runtime_gemini_config/catalog_tests.rs"]
 mod catalog_tests;
+#[cfg(test)]
+#[path = "runtime_gemini_config/override_tests.rs"]
+mod override_tests;
 
 #[derive(Clone, Copy, Debug, Default)]
 pub(crate) struct RuntimeGeminiModelResolution;
@@ -194,47 +197,13 @@ fn gemini_catalog_models(
 }
 
 fn gemini_codex_args_without_consumed_overrides(user_args: &[OsString]) -> Vec<OsString> {
-    let mut args = Vec::with_capacity(user_args.len());
-    let mut index = 0;
-    while index < user_args.len() {
-        let Some(arg) = user_args[index].to_str() else {
-            args.push(user_args[index].clone());
-            index += 1;
-            continue;
-        };
-        if matches!(arg, "-c" | "--config")
-            && let Some(next) = user_args.get(index + 1)
-            && next.to_str().is_some_and(gemini_consumed_config_override)
-        {
-            index += 2;
-            continue;
-        }
-        if let Some(value) = arg.strip_prefix("--config=")
-            && gemini_consumed_config_override(value)
-        {
-            index += 1;
-            continue;
-        }
-        if let Some(value) = arg.strip_prefix("-c")
-            && !value.is_empty()
-            && value.contains('=')
-            && gemini_consumed_config_override(value)
-        {
-            index += 1;
-            continue;
-        }
-        args.push(user_args[index].clone());
-        index += 1;
-    }
+    let mut args = user_args.to_vec();
+    crate::app_commands::runtime_launch::remove_codex_config_overrides(
+        &mut args,
+        "model_thinking_budget",
+        prodex_mojo_core::codex_config::ConfigOverrideRemoval::AllUtf8Forms,
+    );
     args
-}
-
-fn gemini_consumed_config_override(value: &str) -> bool {
-    value
-        .trim_start()
-        .split_once('=')
-        .map(|(key, _)| key.trim() == "model_thinking_budget")
-        .unwrap_or(false)
 }
 
 #[cfg(test)]
