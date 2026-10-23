@@ -2,6 +2,9 @@
 
 use crate::MojoError;
 
+mod provider_filter;
+pub use provider_filter::{ProviderFilterParse, filter_matches_profile, parse_provider_filter};
+
 const ABI_VERSION: i64 = 1;
 
 pub const ACTION_UP: i64 = 0;

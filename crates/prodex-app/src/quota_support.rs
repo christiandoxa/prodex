@@ -52,40 +52,38 @@ pub(crate) enum QuotaProviderFilter {
 
 impl QuotaProviderFilter {
     pub(crate) fn parse(value: &str) -> Result<Self> {
-        let normalized = value.trim().to_ascii_lowercase().replace('_', "-");
-        match normalized.as_str() {
-            "" | "all" => Ok(Self::All),
-            "openai" | "chatgpt" | "codex" | "openai-codex" => Ok(Self::OpenAi),
-            "gemini" | "google" | "google-gemini" => Ok(Self::Gemini),
-            "anthropic" | "claude" | "anthropic-claude" => Ok(Self::Anthropic),
-            "copilot" | "github-copilot" | "github" => Ok(Self::Copilot),
-            "kiro" | "kiro-cli" => Ok(Self::Kiro),
-            "deepseek" => Ok(Self::DeepSeek),
-            "local" | "openai-compatible" | "openai_compatible" => Ok(Self::Local),
-            "agy" | "anti-gravity" => Ok(Self::Agy),
-            other => bail!(
-                "invalid quota provider filter '{other}'; supported values are all, openai, gemini, anthropic, claude, copilot, kiro, deepseek, local, agy"
-            ),
+        use prodex_mojo_core::quota_watch_policy::ProviderFilterParse;
+        match prodex_mojo_core::quota_watch_policy::parse_provider_filter(value).map_err(
+            |error| anyhow::anyhow!("compiled Mojo quota provider-filter parser failed: {error:?}"),
+        )? {
+            ProviderFilterParse::Known(kind) => Ok(Self::from_policy_kind(kind)),
+            ProviderFilterParse::Invalid(message) => Err(anyhow::Error::msg(message)),
         }
     }
 
     pub(crate) fn matches(self, provider: &ProfileProvider) -> bool {
-        match self {
-            Self::All => true,
-            Self::OpenAi => matches!(provider, ProfileProvider::Openai),
-            Self::Gemini => matches!(provider, ProfileProvider::Gemini { .. }),
-            Self::Anthropic => matches!(provider, ProfileProvider::Anthropic { .. }),
-            Self::Copilot => matches!(provider, ProfileProvider::Copilot { .. }),
-            Self::Kiro => matches!(provider, ProfileProvider::Kiro { .. }),
-            Self::Agy => matches!(provider, ProfileProvider::Agy { .. }),
-            Self::DeepSeek | Self::Local => false,
-        }
+        use prodex_mojo_core::quota_watch_policy as policy;
+        let profile_kind = match provider {
+            ProfileProvider::Openai => policy::FILTER_OPENAI,
+            ProfileProvider::Gemini { .. } => policy::FILTER_GEMINI,
+            ProfileProvider::Anthropic { .. } => policy::FILTER_ANTHROPIC,
+            ProfileProvider::Copilot { .. } => policy::FILTER_COPILOT,
+            ProfileProvider::Kiro { .. } => policy::FILTER_KIRO,
+            ProfileProvider::Agy { .. } => policy::FILTER_AGY,
+        };
+        policy::filter_matches_profile(self.policy_kind(), profile_kind)
+            .expect("compiled Mojo quota native-profile filter returned invalid output")
     }
 
     pub(crate) fn next(self) -> Self {
-        match prodex_mojo_core::quota_watch_policy::filter_next(self.policy_kind())
-            .expect("Mojo quota-watch filter cycle policy failed")
-        {
+        Self::from_policy_kind(
+            prodex_mojo_core::quota_watch_policy::filter_next(self.policy_kind())
+                .expect("Mojo quota-watch filter cycle policy failed"),
+        )
+    }
+
+    fn from_policy_kind(kind: i64) -> Self {
+        match kind {
             prodex_mojo_core::quota_watch_policy::FILTER_ALL => Self::All,
             prodex_mojo_core::quota_watch_policy::FILTER_OPENAI => Self::OpenAi,
             prodex_mojo_core::quota_watch_policy::FILTER_GEMINI => Self::Gemini,

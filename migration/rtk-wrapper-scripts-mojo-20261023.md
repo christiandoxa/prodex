@@ -27,7 +27,7 @@ Verification uses `PRODEX_MOJO_REQUIRED=1 PRODEX_MOJO_VERSION=1.2.0`:
 - PASS: release guard fixtures (24), version-metadata guard, crate-boundary/self-test, production boundary, runtime hotpath, ownership, authority, no-fallback/self-test, size and churn guards, formatting and whitespace, offline baseline and five replay checks.
 - PASS: optimized object generation, the versioned export and absence of Modular runtime references for all six release targets and their release CPU choices.
 - PASS: `rtk cargo check --locked -q -p prodex-mojo-core --features mojo-provider-constraints`; `rtk cargo test --locked -q -p prodex-mojo-core --features mojo-core --lib` (1,112 tests); and `rtk cargo test --locked -q -p prodex-optional-tools --lib rtk::` (6 tests).
-- PENDING: repeated default CI. Its live process remains owned by the campaign until results are harvested.
+- PASS: the previously started `rtk proxy npm run ci` completed, including its default Rust shards and all 282 Node tests. The former benchmark-pin assertion failure is resolved.
 
 The first core command used `--features mojo-rich`, which does not expose the
 RTK subsystem and selected zero tests. It is not verification; the corrected
@@ -39,8 +39,7 @@ production LOC); the 75% campaign goal remains open. All previous checkpoints
 were pushed to main without a release or tag. Native Windows/macOS execution
 remains in their CI lanes. The pre-existing Docker scaffold failure remains in
 the stable-toolchain report. The previous broad CI run's stale benchmark-pin
-assertion is fixed and all related Node tests now pass; the new broad run is not
-reported green before it finishes.
+assertion is fixed and all related Node tests now pass; the new broad run has now completed successfully.
 
 After the previous checkpoint, the coordinator verified zero active compiler or
 Cargo processes, harvested 48 validation artifacts to owned external evidence,

@@ -30,12 +30,13 @@ Verification with `PRODEX_MOJO_REQUIRED=1 PRODEX_MOJO_VERSION=1.2.0`:
 - PASS: `rtk cargo test --locked -q -p prodex-runtime-proxy` (431 tests).
 - PASS: `rtk cargo fmt --check`, `rtk git diff --check`, crate-boundary and runtime-hotpath guards/self-tests, ownership, authority and no-fallback/self-test.
 - PASS: optimized objects, the versioned export and absence of Modular runtime references for all six release targets. The context-text compatibility fix also compiles for the five foreign release triples; the Linux production link and 1,112-test Mojo-core suite already passed.
-- PENDING: serialized `main_internal_tests::runtime_proxy_` app cases, runtime-smoke, changed-path checks and repeated default CI. Their active processes remain owned by the coordinator.
+- PASS: `PRODEX_MOJO_REQUIRED=1 PRODEX_MOJO_VERSION=1.2.0 rtk cargo test --locked -q -p prodex-app --lib 'main_internal_tests::runtime_proxy_' -- --test-threads=1` (459 tests); `rtk proxy npm run test:changed -- --base HEAD --no-untracked`; and the previously started `rtk proxy npm run ci`.
+- FOLLOW-UP: the runtime-smoke process later compiled the next uncommitted quota-filter slice and failed on an unqualified `anyhow!` macro. Its namespace is fixed; the suite is repeated with that slice before the campaign handoff.
 
 The RTK checkpoint's provider-constraints-only build, 1,112-test full Mojo-core
-suite and final six RTK caller cases have now passed. The repeated default CI has
-passed metadata preflight, Clippy and all 282 Node tests and is running Rust
-shards; it is not claimed green before completion. Earlier failed CI evidence
+suite and final six RTK caller cases have now passed. The repeated default CI completed successfully, including metadata preflight,
+Clippy, all 282 Node tests and the selected Rust shards. New quota-filter changes
+receive separate focused verification after this earlier run. Earlier failed CI evidence
 and the pre-existing Docker scaffold omission remain documented in the preceding
 toolchain and RTK reports. Native macOS/Windows final linking and execution,
 live providers and release publication remain outside local coverage.

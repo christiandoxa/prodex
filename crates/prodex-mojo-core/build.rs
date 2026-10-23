@@ -456,6 +456,7 @@ fn selected_sources() -> Vec<&'static str> {
     {
         sources.push("../../mojo/prodex_core/quota_pressure.mojo");
         sources.push("../../mojo/prodex_core/quota_watch_policy.mojo");
+        sources.push("../../mojo/prodex_core/quota_watch_provider_filter.mojo");
         sources.push("../../mojo/prodex_core/quota_watch_presentation.mojo");
         sources.push("../../mojo/prodex_core/external_quota.mojo");
         sources.push("../../mojo/prodex_core/runtime_auto_redeem.mojo");
