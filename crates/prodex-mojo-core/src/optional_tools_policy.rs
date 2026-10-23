@@ -16,7 +16,7 @@ mod legacy_paragraphs;
 pub use legacy_paragraphs::optional_tool_retained_legacy_paragraph_indices;
 #[path = "optional_tools_policy/probe_version.rs"]
 mod probe_version;
-pub use probe_version::{OptionalToolProbeToken, optional_tool_probe_token};
+pub use probe_version::{OptionalToolProbeVersion, optional_tool_probe_version};
 
 const ABI_VERSION: i64 = 1;
 const AWARENESS_TEXT_COUNT: usize = 4;
