@@ -29,6 +29,13 @@ pub enum CookieDefaultPathPlan {
 }
 
 unsafe extern "C" {
+    fn prodex_runtime_cookie_relay_order_v1(
+        abi_version: i64,
+        rows_address: u64,
+        count: i64,
+        output_address: u64,
+        output_capacity: i64,
+    ) -> i64;
     fn prodex_runtime_cookie_pair_plan_v1(
         abi_version: i64,
         mode: i64,
@@ -87,6 +94,55 @@ fn status(value: i64) -> Result<(), MojoError> {
         4 => Err(MojoError::AbiMismatch),
         _ => Err(MojoError::InvalidOutput),
     }
+}
+
+/// Borrowed path specificity and cookie name needed to order already
+/// security-filtered relay entries; their full values remain host-owned.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CookieRelayOrderInput<'a> {
+    pub path_length: usize,
+    pub name: &'a str,
+}
+
+/// Return original indices sorted longest-path-first, then cookie-name
+/// ascending, then original position. Compiled Mojo owns every comparison.
+pub fn cookie_relay_order(inputs: &[CookieRelayOrderInput<'_>]) -> Result<Vec<usize>, MojoError> {
+    if inputs.len() > 4096 {
+        return Err(MojoError::InvalidInput);
+    }
+    let mut rows = Vec::<u64>::new();
+    rows.try_reserve_exact(inputs.len().checked_mul(3).ok_or(MojoError::Capacity)?)
+        .map_err(|_| MojoError::Capacity)?;
+    for input in inputs {
+        rows.extend([
+            u64::try_from(input.path_length).map_err(|_| MojoError::InvalidInput)?,
+            input.name.as_ptr() as usize as u64,
+            u64::try_from(input.name.len()).map_err(|_| MojoError::InvalidInput)?,
+        ]);
+    }
+    let mut indices = vec![-1_i64; inputs.len()];
+    status(unsafe {
+        prodex_runtime_cookie_relay_order_v1(
+            ABI_VERSION,
+            rows.as_ptr() as usize as u64,
+            i64::try_from(inputs.len()).map_err(|_| MojoError::InvalidInput)?,
+            indices.as_mut_ptr() as usize as u64,
+            i64::try_from(indices.len()).map_err(|_| MojoError::InvalidInput)?,
+        )
+    })?;
+    let mut seen = vec![false; inputs.len()];
+    indices
+        .into_iter()
+        .map(|index| {
+            let index = usize::try_from(index).map_err(|_| MojoError::InvalidOutput)?;
+            let used = seen.get_mut(index).ok_or(MojoError::InvalidOutput)?;
+            if *used {
+                return Err(MojoError::InvalidOutput);
+            }
+            *used = true;
+            Ok(index)
+        })
+        .collect()
 }
 
 fn text_args(value: &str) -> Result<(u64, i64), MojoError> {
@@ -340,6 +396,77 @@ pub fn oldest_timestamp_index(timestamps: &[SystemTime]) -> Result<Option<usize>
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn cookie_relay_mojo_preserves_path_name_and_stable_precedence() {
+        for count in [0, 1, 2, 31, 32, 33, 4096] {
+            let inputs = (0..count)
+                .map(|index| CookieRelayOrderInput {
+                    path_length: [0, 512, 4, usize::MAX][index % 4],
+                    name: ["sid", "alpha", "sid", "é", "a", ""][index % 6],
+                })
+                .collect::<Vec<_>>();
+            let mut expected = (0..count).collect::<Vec<_>>();
+            expected.sort_by(|&left, &right| {
+                inputs[right]
+                    .path_length
+                    .cmp(&inputs[left].path_length)
+                    .then_with(|| inputs[left].name.cmp(inputs[right].name))
+            });
+            assert_eq!(cookie_relay_order(&inputs), Ok(expected), "count={count}");
+        }
+        assert_eq!(
+            cookie_relay_order(&vec![
+                CookieRelayOrderInput {
+                    path_length: 1,
+                    name: "sid"
+                };
+                4097
+            ]),
+            Err(MojoError::InvalidInput)
+        );
+    }
+
+    #[test]
+    fn cookie_relay_abi_rejects_invalid_views_and_capacity_without_writing() {
+        let name = b"sid";
+        let mut rows = [1_u64, name.as_ptr() as usize as u64, name.len() as u64];
+        let mut output = -7_i64;
+        for (version, count, capacity, expected) in [
+            (ABI_VERSION + 1, 1, 1, 4),
+            (ABI_VERSION, -1, 1, 1),
+            (ABI_VERSION, 4097, 1, 1),
+            (ABI_VERSION, 1, 0, 1),
+        ] {
+            assert_eq!(
+                unsafe {
+                    prodex_runtime_cookie_relay_order_v1(
+                        version,
+                        rows.as_ptr() as usize as u64,
+                        count,
+                        (&mut output as *mut i64) as usize as u64,
+                        capacity,
+                    )
+                },
+                expected
+            );
+            assert_eq!(output, -7);
+        }
+        rows[1] = 0;
+        assert_eq!(
+            unsafe {
+                prodex_runtime_cookie_relay_order_v1(
+                    ABI_VERSION,
+                    rows.as_ptr() as usize as u64,
+                    1,
+                    (&mut output as *mut i64) as usize as u64,
+                    1,
+                )
+            },
+            1
+        );
+        assert_eq!(output, -7);
+    }
 
     #[test]
     fn cookie_eviction_mojo_preserves_timestamp_order_and_first_tie() {

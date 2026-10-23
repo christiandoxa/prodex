@@ -27,7 +27,7 @@ env:
   SCCACHE_GHA_ENABLED: "true"
   SCCACHE_CACHE_SIZE: 2G
   PRODEX_MOJO_REQUIRED: "1"
-  PRODEX_MOJO_VERSION: "1.1.0"
+  PRODEX_MOJO_VERSION: "1.2.0"
   PRODEX_MOJO_TARGET: x86_64-apple-darwin
   PRODEX_MOJO_TARGET_CPU: x86-64
   RUSTC_WRAPPER: sccache
@@ -95,7 +95,7 @@ jobs:
       - name: Install Rust 1.99 target and compiler cache
         uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
         with:
-          toolchain: 1.99.0
+          toolchain: 1.99.1
           targets: x86_64-apple-darwin
 
       - name: Install sccache

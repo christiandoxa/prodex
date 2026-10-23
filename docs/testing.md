@@ -96,7 +96,7 @@ If a runtime test needs parallel coverage, prefer a separate process with isolat
 ### Default and real Mojo validation
 
 The default runtime-quota build uses the compiled Mojo scoring and profile-order kernels. Install
-the pinned Mojo compiler (`mojo==1.1.0`) or provide a target-matched archive through
+the pinned Mojo compiler (`mojo==1.2.0`) or provide a target-matched archive through
 `PRODEX_MOJO_ARCHIVE` before running Cargo commands that build `prodex-runtime-quota` or its
 dependents. Its Rust parity oracle compiles only for tests.
 
@@ -116,27 +116,27 @@ cargo test --locked -p prodex-provider-spi --features mojo
 
 For a strict real-Mojo check, install the pinned stable Mojo package from the
 [official Mojo installation instructions](https://docs.modular.com/mojo/manual/install/)
-(`mojo==1.1.0` via `uv`), then run:
+(`mojo==1.2.0` via `uv`), then run:
 
 ```bash
-PRODEX_MOJO_REQUIRED=1 PRODEX_MOJO_VERSION=1.1.0 \
+PRODEX_MOJO_REQUIRED=1 PRODEX_MOJO_VERSION=1.2.0 \
   cargo build --locked --features mojo-core --bin prodex
-PRODEX_MOJO_REQUIRED=1 PRODEX_MOJO_VERSION=1.1.0 \
+PRODEX_MOJO_REQUIRED=1 PRODEX_MOJO_VERSION=1.2.0 \
   cargo test --locked -p prodex-quota --features mojo -- --test-threads=1
-PRODEX_MOJO_REQUIRED=1 PRODEX_MOJO_VERSION=1.1.0 \
+PRODEX_MOJO_REQUIRED=1 PRODEX_MOJO_VERSION=1.2.0 \
   cargo test --locked -p prodex-runtime-proxy --features mojo -- --test-threads=1
-PRODEX_MOJO_REQUIRED=1 PRODEX_MOJO_VERSION=1.1.0 \
+PRODEX_MOJO_REQUIRED=1 PRODEX_MOJO_VERSION=1.2.0 \
   cargo test --locked -p prodex-runtime-quota -- --test-threads=1
-PRODEX_MOJO_REQUIRED=1 PRODEX_MOJO_VERSION=1.1.0 \
+PRODEX_MOJO_REQUIRED=1 PRODEX_MOJO_VERSION=1.2.0 \
   cargo test --locked -p prodex-provider-spi --features mojo -- --test-threads=1
-PRODEX_MOJO_REQUIRED=1 PRODEX_MOJO_VERSION=1.1.0 \
+PRODEX_MOJO_REQUIRED=1 PRODEX_MOJO_VERSION=1.2.0 \
   cargo test --locked -p prodex-context --features mojo -- --test-threads=1
-PRODEX_MOJO_REQUIRED=1 PRODEX_MOJO_VERSION=1.1.0 \
+PRODEX_MOJO_REQUIRED=1 PRODEX_MOJO_VERSION=1.2.0 \
   cargo test --locked -p prodex-mojo-core --features mojo-core -- --test-threads=1
 
-PRODEX_MOJO_REQUIRED=1 PRODEX_MOJO_VERSION=1.1.0 \
+PRODEX_MOJO_REQUIRED=1 PRODEX_MOJO_VERSION=1.2.0 \
   cargo test --locked -p prodex-provider-core --features mojo -- --test-threads=1
-PRODEX_MOJO_REQUIRED=1 PRODEX_MOJO_VERSION=1.1.0 \
+PRODEX_MOJO_REQUIRED=1 PRODEX_MOJO_VERSION=1.2.0 \
   cargo test --locked -p prodex-runtime-policy --features mojo -- --test-threads=1
 
 target/debug/prodex doctor --runtime --json
@@ -455,7 +455,7 @@ Context verification exercises the production Mojo-owned runtime directly:
 ```bash
 node scripts/ci/smart-context-guard.mjs --self-test
 node scripts/ci/smart-context-guard.mjs
-PRODEX_MOJO_REQUIRED=1 PRODEX_MOJO_VERSION=1.1.0 \
+PRODEX_MOJO_REQUIRED=1 PRODEX_MOJO_VERSION=1.2.0 \
   cargo test --locked -q -p prodex-runtime-proxy --features mojo --lib -- smart_context --test-threads=1
 ```
 

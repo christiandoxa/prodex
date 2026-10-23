@@ -42,6 +42,30 @@ fn text_abi_rejects_malformed_utf8_null_nonempty_and_short_output() {
 }
 
 #[test]
+fn text_grouping_compares_all_borrowed_bytes_after_embedded_nul() {
+    let line = |text| ContextSignalLine {
+        text,
+        counts: [1, 0, 0, 0, 0, 0, 0],
+    };
+    let before = [
+        line("error: 🙂\0a"),
+        line("error: 🙂\0b"),
+        line("error: 🙂\0a"),
+    ];
+    let rows = prepare_signal_rows(&before, &[line("error: 🙂\0a")]).unwrap();
+    assert_eq!(rows.after_available, [1, 0]);
+    assert_eq!(
+        rows.before_rows
+            .as_chunks::<8>()
+            .0
+            .iter()
+            .map(|row| row[0])
+            .collect::<Vec<_>>(),
+        [0, 1, 0]
+    );
+}
+
+#[test]
 fn text_pipeline_is_reentrant_across_concurrent_calls() {
     let threads = (0..8)
         .map(|_| {

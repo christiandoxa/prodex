@@ -65,7 +65,7 @@ jobs:
     timeout-minutes: 45
     env:
       GH_TOKEN: ${{ github.token }}
-      MOJO_VERSION: "1.1.0"
+      MOJO_VERSION: "1.2.0"
       UV_VERSION: "0.11.7"
 
     steps:
@@ -82,7 +82,7 @@ jobs:
         if: ${{ inputs.log_source == 'fresh-benchmark' }}
         uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
         with:
-          toolchain: 1.99.0
+          toolchain: 1.99.1
 
       - name: Install pinned uv
         if: ${{ inputs.log_source == 'fresh-benchmark' }}

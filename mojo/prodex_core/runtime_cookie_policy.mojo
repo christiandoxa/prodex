@@ -1,8 +1,10 @@
 from std.memory import Pointer
+from index_order import index_order_sort
 
 from rich_text import (
     rich_codepoint,
     rich_codepoint_width,
+    rich_view_compare,
     rich_trim_bounds,
     rich_unicode_space,
     rich_view_ptr,
@@ -567,4 +569,77 @@ def prodex_runtime_cookie_oldest_timestamp_index_v1(
 
     # Strict comparison keeps the first candidate when timestamps tie.
     output[] = selected_index
+    return COOKIE_POLICY_OK
+
+
+# Relay precedence for already filtered, profile-scoped cookie entries:
+# longest path first, bytewise cookie name ascending, then stable source
+# order. Host still owns cookie jar isolation, secure/path eligibility,
+# caller-name precedence and emission of the original cookie pair.
+comptime COOKIE_RELAY_ORDER_MAX: Int64 = 4096
+comptime COOKIE_RELAY_ORDER_WORDS: Int64 = 3
+
+
+def cookie_relay_compare(data: UInt, _width: Int64, left: Int64, right: Int64) -> Int64:
+    var rows = Pointer[mut=False, UInt64, ImmUntrackedOrigin](
+        unsafe_from_address=Int(data)
+    )
+    var left_base = left * COOKIE_RELAY_ORDER_WORDS
+    var right_base = right * COOKIE_RELAY_ORDER_WORDS
+    var lhs_path = rows[unsafe_offset=left_base]
+    var rhs_path = rows[unsafe_offset=right_base]
+    if lhs_path != rhs_path:
+        return Int64(-1) if lhs_path > rhs_path else Int64(1)
+    var names = rich_view_compare(
+        ProdexRichStringView(
+            UInt(rows[unsafe_offset=left_base + 1]),
+            UInt(rows[unsafe_offset=left_base + 2]),
+        ),
+        ProdexRichStringView(
+            UInt(rows[unsafe_offset=right_base + 1]),
+            UInt(rows[unsafe_offset=right_base + 2]),
+        ),
+    )
+    if names != 0:
+        return names
+    return Int64(-1) if left < right else (Int64(1) if left > right else Int64(0))
+
+
+@export("prodex_runtime_cookie_relay_order_v1")
+def prodex_runtime_cookie_relay_order_v1(
+    abi_version: Int64,
+    rows_address: UInt, count: Int64,
+    indices_address: UInt, indices_capacity: Int64,
+) abi("C") -> Int64:
+    if abi_version != COOKIE_POLICY_ABI_VERSION:
+        return COOKIE_POLICY_ABI
+    if (
+        count < 0 or count > COOKIE_RELAY_ORDER_MAX
+        or (count > 0 and (rows_address == 0 or rows_address % 8 != 0))
+        or indices_address == 0 or indices_address % 8 != 0
+        or indices_capacity < count
+    ):
+        return COOKIE_POLICY_INVALID
+    var rows = Pointer[mut=False, UInt64, ImmUntrackedOrigin](
+        unsafe_from_address=Int(rows_address)
+    )
+    for index in range(count):
+        var address = rows[unsafe_offset=index * COOKIE_RELAY_ORDER_WORDS + 1]
+        var length = rows[unsafe_offset=index * COOKIE_RELAY_ORDER_WORDS + 2]
+        if (
+            length > UInt64(9223372036854775807)
+            or (length > 0 and address == 0)
+            or not rich_view_valid(
+                ProdexRichStringView(UInt(address), UInt(length)),
+                COOKIE_POLICY_MAX_BYTES,
+            )
+        ):
+            return COOKIE_POLICY_INVALID
+
+    var output = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(indices_address)
+    )
+    for index in range(count):
+        output[unsafe_offset=index] = index
+    index_order_sort[cookie_relay_compare](rows_address, 0, output, count)
     return COOKIE_POLICY_OK

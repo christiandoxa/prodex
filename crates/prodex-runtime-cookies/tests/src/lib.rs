@@ -290,6 +290,40 @@ fn cookie_jar_keeps_same_name_on_distinct_paths_and_deletes_only_one_path() {
 }
 
 #[test]
+fn cookie_jar_orders_relayed_paths_and_names_after_caller_cookies() {
+    let jar = RuntimeProxyCookieJar::new();
+    capture(
+        &jar,
+        "alpha",
+        "example.com",
+        "/api/responses",
+        &[
+            "z=deep; Path=/api",
+            "a=root; Path=/",
+            "sid=root; Path=/",
+            "sid=deep; Path=/api",
+            "a=deep; Path=/api",
+            "secure=hidden; Path=/api; Secure",
+            "other=hidden; Path=/elsewhere",
+        ],
+    );
+    assert_eq!(
+        merged(&jar, "alpha", "http://example.com/api/responses", &[]).as_deref(),
+        Some("a=deep; sid=deep; z=deep; a=root; sid=root")
+    );
+    assert_eq!(
+        jar.merged_cookie_header_for_websocket_in_namespace(
+            "",
+            "alpha",
+            "wss://example.com/api/responses",
+            &[("Cookie".to_string(), "sid=caller".to_string())],
+        )
+        .as_deref(),
+        Some("sid=caller; a=deep; secure=hidden; z=deep; a=root")
+    );
+}
+
+#[test]
 fn cookie_jar_debug_redacts_cookie_values() {
     let jar = RuntimeProxyCookieJar::new();
     capture(
