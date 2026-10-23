@@ -31,6 +31,12 @@ fn compiled_config_removal_preserves_pair_inline_separator_and_duplicate_contrac
         ])
     );
     assert_eq!(
+        config_override_removal_mask(&views, "model", ConfigOverrideRemoval::AllUtf8Forms),
+        Ok(vec![
+            false, true, true, true, true, true, true, false, false, false
+        ])
+    );
+    assert_eq!(
         config_override_removal_mask(&[], "model", ConfigOverrideRemoval::AllForms),
         Ok(vec![])
     );
@@ -72,6 +78,10 @@ fn compiled_config_removal_keeps_non_utf8_paired_values_but_matches_lossy_inline
         config_override_removal_mask(&views, "model", ConfigOverrideRemoval::AllForms),
         Ok(vec![false, false, true, false])
     );
+    assert_eq!(
+        config_override_removal_mask(&views, "model", ConfigOverrideRemoval::AllUtf8Forms),
+        Ok(vec![false; 4])
+    );
 }
 
 #[test]
@@ -87,7 +97,7 @@ fn compiled_config_removal_abi_validates_all_records_before_writing_mask() {
     let key = "model";
     for (abi, mode, pointer, count, capacity, expected) in [
         (2, 0, 0, 0, 1, 4),
-        (1, 2, 0, 0, 1, 1),
+        (1, 3, 0, 0, 1, 1),
         (1, 0, 0, 1, 1, 1),
         (1, 0, 0, -1, 1, 1),
         (1, 0, 0, 1_048_577, 1_048_577, 1),

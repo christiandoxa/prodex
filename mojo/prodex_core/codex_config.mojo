@@ -91,8 +91,9 @@ def codex_config_assignment_has_key(
     )
 
 
-# Unlike value lookup, both removal modes deliberately scan beyond `--`.
+# Unlike value lookup, all removal modes deliberately scan beyond `--`.
 # FirstPair preserves the launch API; AllForms also removes inline overrides.
+# Mode 2 preserves opaque OS arguments while consuming all UTF-8 forms.
 @export("prodex_codex_config_removal_mask_v1")
 def prodex_codex_config_removal_mask_v1(
     abi_version: Int64,
@@ -107,7 +108,7 @@ def prodex_codex_config_removal_mask_v1(
     if abi_version != CODEX_CONFIG_ABI_VERSION:
         return CODEX_CONFIG_ABI
     if (
-        (mode != 0 and mode != 1)
+        (mode < 0 or mode > 2)
         or count < 0 or count > 1_048_576
         or key_length < 0 or key_length > 16_777_216
         or (key_length > 0 and key_address == 0)
@@ -137,7 +138,11 @@ def prodex_codex_config_removal_mask_v1(
         output[unsafe_offset=index] = 0
     var index: Int64 = 0
     while index < count:
-        var view = codex_config_view(codex_config_arg(arguments_address, index))
+        var argument = codex_config_arg(arguments_address, index)
+        if mode == 2 and argument.valid_utf8 == 0:
+            index += 1
+            continue
+        var view = codex_config_view(argument)
         if (
             (rich_view_matches_literal["-c"](view, False)
              or rich_view_matches_literal["--config"](view, False))
@@ -153,7 +158,7 @@ def prodex_codex_config_removal_mask_v1(
                     return CODEX_CONFIG_OK
                 index += 2
                 continue
-        if mode == 1:
+        if mode != 0:
             var start: Int64 = -1
             if rich_view_prefix["--config="](view, False):
                 start = 9

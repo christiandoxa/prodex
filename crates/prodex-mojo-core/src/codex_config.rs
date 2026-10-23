@@ -15,6 +15,8 @@ pub struct ConfigRemovalArgument<'a> {
 pub enum ConfigOverrideRemoval {
     FirstPair,
     AllForms,
+    /// Consume all forms only when the original OS argument is valid UTF-8.
+    AllUtf8Forms,
 }
 
 #[repr(C)]
@@ -123,6 +125,7 @@ pub fn config_override_removal_mask(
             match mode {
                 ConfigOverrideRemoval::FirstPair => 0,
                 ConfigOverrideRemoval::AllForms => 1,
+                ConfigOverrideRemoval::AllUtf8Forms => 2,
             },
             views.as_ptr() as usize as u64,
             views.len() as i64,
