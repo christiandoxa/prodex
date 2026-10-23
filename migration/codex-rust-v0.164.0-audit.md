@@ -78,6 +78,13 @@ ABI behavior and gates are unchanged. The separate Sonar child-environment
 bridge issue is addressed by branch-free accumulation of the returned bypass
 bit; compiled Mojo remains the decision owner.
 
+The subsequent source run `39906937663` passed the repaired ABI and Sonar gates
+and exposed two additional platform-only fixture assumptions. The optimizer
+fixture resolves its trusted temporary root before production's no-symlink
+check on macOS; image-scanner expected paths use separate native joins on
+Windows. No production filesystem guard or malformed-image assertion is
+weakened or skipped.
+
 ## Release dependency qualification
 
 The stable tunnel-client reference advances from 0.0.16 to 0.0.17; its minimum

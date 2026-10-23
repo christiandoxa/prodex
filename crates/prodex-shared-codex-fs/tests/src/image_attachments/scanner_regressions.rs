@@ -14,8 +14,13 @@ fn compiled_image_tag_batch_rewrites_nested_paths_and_preserves_malformed_text()
         second.display()
     );
     let rewritten = rewrite_codex_persisted_attachment_paths(&codex_home, &input).unwrap();
-    let stable_first = codex_home.join("image_attachments/codex-clipboard-outer.png");
-    let stable_second = codex_home.join("image_attachments/codex-clipboard-inner.png");
+    // Match the production OS-native joins, including Windows separators.
+    let stable_first = codex_home
+        .join("image_attachments")
+        .join("codex-clipboard-outer.png");
+    let stable_second = codex_home
+        .join("image_attachments")
+        .join("codex-clipboard-inner.png");
     assert_eq!(
         rewritten,
         format!(
