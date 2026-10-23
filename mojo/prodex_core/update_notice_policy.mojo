@@ -206,6 +206,16 @@ def update_notice_parse_release_version(
     )
 
 
+def update_notice_parse_exact_release_version(
+    view: ProdexRichStringView,
+) -> UpdateNoticeReleaseVersion:
+    # Tool contracts require exact SemVer; notices additionally normalize trim and v.
+    var bounds = rich_trim_bounds(view)
+    if view.len == 0 or bounds[0] != 0 or bounds[1] != Int64(view.len) or rich_view_ptr(view)[] == 118:
+        return update_notice_invalid_release_version()
+    return update_notice_parse_release_version(view)
+
+
 def update_notice_release_identifier_compare(
     left_ptr: Pointer[mut=False, UInt8, _],
     left_start: Int64,

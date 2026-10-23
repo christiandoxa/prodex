@@ -28,6 +28,102 @@ fn optional_tool_ids_parse_to_typed_values() {
 }
 
 #[test]
+fn managed_version_discovery_batches_exact_stable_directory_names() {
+    let root = temp_dir("version-directory-batch");
+    let tool = root.join("caveman");
+    for name in [
+        "1.9.0",
+        "1.10.0+build.1",
+        "1.10.0+build.2",
+        "2.0.0-rc.1",
+        "v99.0.0",
+        "01.2.3",
+        "invalid",
+    ] {
+        fs::create_dir_all(tool.join(name)).unwrap();
+    }
+    fs::write(tool.join("99.0.0"), "regular file").unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::ffi::OsStringExt;
+        std::os::unix::fs::symlink(tool.join("1.10.0+build.2"), tool.join("999.0.0")).unwrap();
+        fs::create_dir(tool.join(std::ffi::OsString::from_vec(b"9.0.0\xff".to_vec()))).unwrap();
+    }
+    assert_eq!(
+        crate::discovery::newest_stable_managed_version(&root, "caveman").unwrap(),
+        Some(("1.10.0+build.2".to_owned(), tool.join("1.10.0+build.2")))
+    );
+    assert_eq!(
+        crate::discovery::newest_stable_managed_version(&root, "absent").unwrap(),
+        None
+    );
+    assert!(
+        crate::discovery::newest_stable_managed_version(&tool.join("99.0.0"), "caveman").is_err()
+    );
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn compiled_stable_version_and_directory_selection_match_semver_oracle() {
+    use prodex_mojo_core::optional_tools_policy::{
+        OptionalToolStableVersion, optional_tool_newest_stable_version,
+        optional_tool_stable_version,
+    };
+    use semver::Version;
+
+    let versions = [
+        "0.0.0",
+        "1.2.3",
+        "1.2.3+build.01",
+        "1.2.3+build.2",
+        "1.2.3+build.002",
+        "2.0.0-rc.1",
+        "18446744073709551615.0.0",
+        "18446744073709551616.0.0",
+        "v99.0.0",
+        " 9.0.0",
+        "1.02.3",
+    ];
+    for minimum in ["0.0.0", "1.2.3", "1.2.3+build.2", "2.0.0-rc.1"] {
+        for candidate in versions {
+            let expected = match Version::parse(candidate) {
+                Err(_) => OptionalToolStableVersion::Malformed,
+                Ok(version)
+                    if version.pre.is_empty() && version >= Version::parse(minimum).unwrap() =>
+                {
+                    OptionalToolStableVersion::Supported
+                }
+                Ok(_) => OptionalToolStableVersion::Incompatible,
+            };
+            assert_eq!(
+                optional_tool_stable_version(candidate, minimum),
+                Ok(expected),
+                "{candidate} >= {minimum}"
+            );
+        }
+    }
+    for offset in 0..versions.len() {
+        let mut names = versions.to_vec();
+        names.rotate_left(offset);
+        let mut expected: Option<(usize, Version)> = None;
+        for (index, name) in names.iter().enumerate() {
+            if let Ok(version) = Version::parse(name)
+                && version.pre.is_empty()
+                && expected
+                    .as_ref()
+                    .is_none_or(|(_, current)| &version > current)
+            {
+                expected = Some((index, version));
+            }
+        }
+        assert_eq!(
+            optional_tool_newest_stable_version(&names),
+            Ok(expected.map(|(index, _)| index))
+        );
+    }
+}
+
+#[test]
 fn optional_tool_descriptors_follow_mojo_policy() {
     let caveman = optional_tool_descriptor(OptionalToolId::Caveman);
     assert_eq!(caveman.kind, ToolKind::CodexPlugin);

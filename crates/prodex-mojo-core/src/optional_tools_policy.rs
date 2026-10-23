@@ -17,6 +17,13 @@ pub use legacy_paragraphs::optional_tool_retained_legacy_paragraph_indices;
 #[path = "optional_tools_policy/probe_version.rs"]
 mod probe_version;
 pub use probe_version::{OptionalToolProbeVersion, optional_tool_probe_version};
+#[path = "optional_tools_policy/version_policy.rs"]
+mod version_policy;
+pub use version_policy::{
+    OptionalToolStableVersion, codebase_memory_daemon_status_supported,
+    codebase_memory_version_supported, optional_tool_newest_stable_version,
+    optional_tool_stable_version, optional_tool_version_at_least,
+};
 
 const ABI_VERSION: i64 = 1;
 const AWARENESS_TEXT_COUNT: usize = 4;

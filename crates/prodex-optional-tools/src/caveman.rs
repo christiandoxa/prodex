@@ -13,7 +13,9 @@ use crate::{
     CAVEMAN_PREVIOUS_STABLE_TREE_SHA256,
 };
 use anyhow::{Context, Result, bail, ensure};
-use semver::Version;
+use prodex_mojo_core::optional_tools_policy::{
+    OptionalToolStableVersion, optional_tool_stable_version,
+};
 use serde::Deserialize;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -108,14 +110,16 @@ fn invalid_health(path: Option<PathBuf>, error: anyhow::Error) -> ToolHealth {
 }
 
 fn caveman_candidate() -> Result<Option<(PathBuf, PathBuf)>> {
-    let minimum = Version::parse(CAVEMAN_MINIMUM_SUPPORTED_VERSION)
-        .context("invalid Caveman minimum supported version")?;
     for root in managed_optimizer_roots() {
         let Some((version, candidate)) = newest_stable_managed_version(&root, "caveman")? else {
             continue;
         };
         ensure!(
-            version >= minimum,
+            prodex_mojo_core::optional_tools_policy::optional_tool_version_at_least(
+                &version,
+                CAVEMAN_MINIMUM_SUPPORTED_VERSION
+            )
+            .map_err(|error| anyhow::anyhow!("failed to validate Caveman version: {error:?}"))?,
             "installed Caveman {version} is too old; Prodex requires {CAVEMAN_MINIMUM_SUPPORTED_VERSION} or newer. Update Caveman to the latest stable release (release-qualified reference: {CAVEMAN_LATEST_STABLE_REFERENCE})"
         );
         return Ok(Some((root, candidate)));
@@ -186,12 +190,18 @@ fn validate_caveman_install(allowed_root: &Path, candidate: &Path) -> Result<Res
         "Caveman manifest id must be caveman"
     );
 
-    let version = Version::parse(&manifest.version)
-        .with_context(|| format!("invalid Caveman version {}", manifest.version))?;
-    let minimum = Version::parse(CAVEMAN_MINIMUM_SUPPORTED_VERSION)
-        .context("invalid Caveman minimum supported version")?;
+    let version =
+        optional_tool_stable_version(&manifest.version, CAVEMAN_MINIMUM_SUPPORTED_VERSION)
+            .map_err(|error| {
+                anyhow::anyhow!("failed to validate Caveman manifest version: {error:?}")
+            })?;
     ensure!(
-        version.pre.is_empty() && version >= minimum,
+        version != OptionalToolStableVersion::Malformed,
+        "invalid Caveman version {}",
+        manifest.version
+    );
+    ensure!(
+        version == OptionalToolStableVersion::Supported,
         "Caveman {} is incompatible; Prodex requires {} or newer. Update Caveman to the latest stable release (release-qualified reference: {})",
         manifest.version,
         CAVEMAN_MINIMUM_SUPPORTED_VERSION,
