@@ -1,8 +1,12 @@
 use anyhow::{Context, Result, bail};
-use semver::Version;
+use prodex_mojo_core::json::{PresidioDockerValidation, presidio_docker_validation_error};
 use std::env;
 use std::process::Command;
 use std::time::Duration;
+
+#[cfg(test)]
+#[path = "docker_policy_tests.rs"]
+mod policy_tests;
 
 pub(super) const PRESIDIO_ANALYZER_CONTAINER: &str = "presidio-analyzer";
 pub(super) const PRESIDIO_ANONYMIZER_CONTAINER: &str = "presidio-anonymizer";
@@ -43,34 +47,30 @@ fn resolve_presidio_image(variable: &str, service: &str, default: &str) -> Resul
     Ok(image)
 }
 
-fn validate_presidio_image(image: &str, service: &str) -> Result<Version> {
-    let prefix = format!("ghcr.io/data-privacy-stack/presidio-{service}:");
-    let tagged = image.strip_prefix(&prefix).with_context(|| {
-        format!("Presidio {service} image must use the official {prefix}<version> image")
+fn validate_presidio_image(image: &str, service: &str) -> Result<()> {
+    validate_presidio_observations(
+        &serde_json::json!({
+            "image": image,
+            "service": service,
+            "minimum": prodex_optional_tools::PRESIDIO_MINIMUM_SUPPORTED_VERSION,
+            "latest": prodex_optional_tools::PRESIDIO_LATEST_STABLE_REFERENCE,
+        }),
+        PresidioDockerValidation::Image,
+    )
+}
+
+fn validate_presidio_observations(
+    value: &serde_json::Value,
+    validation: PresidioDockerValidation,
+) -> Result<()> {
+    let tree = crate::json_boundary::app_json_tree_without_wire(value)?;
+    let error = presidio_docker_validation_error(&tree.nodes, validation).map_err(|error| {
+        anyhow::anyhow!("failed to validate Presidio Docker configuration: {error:?}")
     })?;
-    let version_text = tagged
-        .split_once('@')
-        .map_or(tagged, |(version, _)| version);
-    let version = Version::parse(version_text)
-        .with_context(|| format!("Presidio {service} image has invalid version {version_text}"))?;
-    let minimum = Version::parse(prodex_optional_tools::PRESIDIO_MINIMUM_SUPPORTED_VERSION)
-        .context("invalid Prodex Presidio minimum supported version")?;
-    if !version.pre.is_empty() || version < minimum {
-        bail!(
-            "Presidio {service} {version} is incompatible; Prodex requires {} or newer. Update Presidio to the latest stable release (release-qualified reference: {})",
-            prodex_optional_tools::PRESIDIO_MINIMUM_SUPPORTED_VERSION,
-            prodex_optional_tools::PRESIDIO_LATEST_STABLE_REFERENCE,
-        )
+    if let Some(error) = error {
+        bail!("{error}");
     }
-    if let Some((_, digest)) = tagged.split_once('@') {
-        let Some(hex) = digest.strip_prefix("sha256:") else {
-            bail!("Presidio {service} image digest must use sha256")
-        };
-        if hex.len() != 64 || !hex.bytes().all(|byte| byte.is_ascii_hexdigit()) {
-            bail!("Presidio {service} image digest must be a 64-character SHA-256")
-        }
-    }
-    Ok(version)
+    Ok(())
 }
 
 pub(super) fn docker_available() -> bool {
@@ -194,44 +194,15 @@ fn validate_presidio_container(
     name: &str,
     host_port: &str,
 ) -> Result<()> {
-    let labels = container.pointer("/Config/Labels");
-    let managed = labels
-        .and_then(|labels| labels.get(PRESIDIO_MANAGED_LABEL))
-        .and_then(serde_json::Value::as_str)
-        == Some("true");
-    let service = labels
-        .and_then(|labels| labels.get(PRESIDIO_SERVICE_LABEL))
-        .and_then(serde_json::Value::as_str)
-        == Some(name);
-    let service_kind = match name {
-        PRESIDIO_ANALYZER_CONTAINER => "analyzer",
-        PRESIDIO_ANONYMIZER_CONTAINER => "anonymizer",
-        _ => {
-            bail!("unknown Prodex-managed Presidio container {name}")
-        }
-    };
-    let image_matches = container
-        .pointer("/Config/Image")
-        .and_then(serde_json::Value::as_str)
-        .is_some_and(|image| validate_presidio_image(image, service_kind).is_ok());
-    let bindings = container.pointer("/HostConfig/PortBindings");
-    let port_matches = bindings
-        .and_then(|bindings| bindings.as_object())
-        .filter(|bindings| bindings.len() == 1)
-        .and_then(|bindings| bindings.get("3000/tcp"))
-        .and_then(serde_json::Value::as_array)
-        .filter(|bindings| bindings.len() == 1)
-        .and_then(|bindings| bindings.first())
-        .is_some_and(|binding| {
-            binding.get("HostPort").and_then(serde_json::Value::as_str) == Some(host_port)
-                && binding.get("HostIp").and_then(serde_json::Value::as_str) == Some("127.0.0.1")
-        });
-    if !managed || !service || !image_matches || !port_matches {
-        bail!(
-            "refusing existing Presidio container {name}: Prodex ownership, compatible official image version, or port configuration does not match"
-        );
-    }
-    Ok(())
+    validate_presidio_observations(
+        &serde_json::json!({
+            "container": container,
+            "name": name,
+            "host_port": host_port,
+            "minimum": prodex_optional_tools::PRESIDIO_MINIMUM_SUPPORTED_VERSION,
+        }),
+        PresidioDockerValidation::Container,
+    )
 }
 
 #[cfg(test)]
