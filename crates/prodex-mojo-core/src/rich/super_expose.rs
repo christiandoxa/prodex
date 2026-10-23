@@ -20,7 +20,7 @@ pub use origin::{SuperExposeParsedOriginUrl, super_expose_origin_allowed};
 
 #[path = "super_expose/tunnel.rs"]
 mod tunnel;
-pub use tunnel::{super_expose_tunnel_client_version_output_valid, super_expose_tunnel_id_valid};
+pub use tunnel::{super_expose_tunnel_id_valid, super_expose_tunnel_supported_version};
 #[path = "super_expose/exec.rs"]
 mod exec;
 pub use exec::{

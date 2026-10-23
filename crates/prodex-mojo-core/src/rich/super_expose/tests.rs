@@ -7,7 +7,11 @@ fn tunnel_client_version_policy_accepts_official_format_across_versions() {
         "0.0.15+a390c168ff1b2d14e73a95991c186c6aba3ff5a0 (git sha: a390c168ff1b2d14e73a95991c186c6aba3ff5a0)",
         "0.0.16+1111111111111111111111111111111111111111 (git sha: 1111111111111111111111111111111111111111)",
     ] {
-        assert!(super_expose_tunnel_client_version_output_valid(value).unwrap());
+        assert!(
+            super_expose_tunnel_supported_version(value, "0.0.13")
+                .unwrap()
+                .is_some()
+        );
     }
 }
 
@@ -18,7 +22,11 @@ fn tunnel_client_version_policy_rejects_malformed_official_format() {
         "0.0.15+not-a-git-sha (git sha: not-a-git-sha)",
         "0.0.15",
     ] {
-        assert!(!super_expose_tunnel_client_version_output_valid(value).unwrap());
+        assert!(
+            super_expose_tunnel_supported_version(value, "0.0.13")
+                .unwrap()
+                .is_none()
+        );
     }
 }
 
