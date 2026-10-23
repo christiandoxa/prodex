@@ -6,6 +6,10 @@ pub use openai_chat_request::{
 };
 mod raw_span;
 use raw_span::validated_optional_raw_span;
+#[cfg(feature = "mojo-runtime")]
+mod presidio_docker;
+#[cfg(feature = "mojo-runtime")]
+pub use presidio_docker::{PresidioDockerValidation, presidio_docker_validation_error};
 mod provider_conversation_memory;
 pub use provider_conversation_memory::{JsonMemoryLayout, conversation_estimated_bytes};
 

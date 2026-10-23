@@ -500,6 +500,7 @@ fn selected_sources() -> Vec<&'static str> {
         sources.push("../../mojo/prodex_core/super_provider_config.mojo");
         sources.push("../../mojo/prodex_core/optional_tools_policy.mojo");
         sources.push("../../mojo/prodex_core/optional_tool_diagnostics.mojo");
+        sources.push("../../mojo/prodex_core/presidio_docker_policy.mojo");
         sources.push("../../mojo/prodex_core/profile_export_policy.mojo");
         sources.push("../../mojo/prodex_core/profile_export_diagnostics.mojo");
         sources.push("../../mojo/prodex_core/profile_login_policy.mojo");
