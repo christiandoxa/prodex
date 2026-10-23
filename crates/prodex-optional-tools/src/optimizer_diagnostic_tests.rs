@@ -13,7 +13,9 @@ impl Drop for TestHome {
 #[test]
 fn optimizer_shape_diagnostics_preserve_exact_messages_without_config_writes() -> Result<()> {
     let stamp = SystemTime::now().duration_since(UNIX_EPOCH)?.as_nanos();
-    let home = TestHome(env::temp_dir().join(format!(
+    // macOS temp roots can use /var -> /private/var. Resolve the trusted
+    // test root before invoking production's deliberate no-symlink guard.
+    let home = TestHome(env::temp_dir().canonicalize()?.join(format!(
         "prodex-optimizer-diagnostic-{}-{stamp}",
         std::process::id()
     )));
