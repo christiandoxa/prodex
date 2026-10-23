@@ -525,6 +525,34 @@
     }
 
     #[test]
+    fn quota_provider_filter_preserves_normalized_error_and_native_membership() {
+        for (raw, expected) in [
+            ("\u{2003}OPENAI_COMPATIBLE\u{00a0}", QuotaProviderFilter::Local),
+            (" ANTI_GRAVITY ", QuotaProviderFilter::Agy),
+            ("\u{0085}\u{3000}", QuotaProviderFilter::All),
+        ] {
+            assert_eq!(QuotaProviderFilter::parse(raw).unwrap(), expected);
+        }
+        assert_eq!(
+            QuotaProviderFilter::parse(" UNKNOWN_PROVIDER ").unwrap_err().to_string(),
+            "invalid quota provider filter 'unknown-provider'; supported values are all, openai, gemini, anthropic, claude, copilot, kiro, deepseek, local, agy"
+        );
+        let profiles = [
+            (ProfileProvider::Openai, QuotaProviderFilter::OpenAi),
+            (ProfileProvider::Gemini { email: "test@example.com".to_string(), project_id: None }, QuotaProviderFilter::Gemini),
+            (ProfileProvider::Anthropic { account: None, auth_method: None }, QuotaProviderFilter::Anthropic),
+            (ProfileProvider::Copilot { host: "example.com".to_string(), login: "test-user".to_string(), api_url: "https://example.com".to_string(), access_type_sku: None, copilot_plan: None }, QuotaProviderFilter::Copilot),
+            (ProfileProvider::Kiro { auth_key: "synthetic".to_string(), auth_kind: None, profile_arn: None, profile_name: None, start_url: None, region: None }, QuotaProviderFilter::Kiro),
+            (ProfileProvider::Agy { account: None }, QuotaProviderFilter::Agy),
+        ];
+        for (provider, owning) in profiles {
+            for filter in [QuotaProviderFilter::All, QuotaProviderFilter::OpenAi, QuotaProviderFilter::Gemini, QuotaProviderFilter::Anthropic, QuotaProviderFilter::Copilot, QuotaProviderFilter::Kiro, QuotaProviderFilter::DeepSeek, QuotaProviderFilter::Local, QuotaProviderFilter::Agy] {
+                assert_eq!(filter.matches(&provider), filter == QuotaProviderFilter::All || filter == owning);
+            }
+        }
+    }
+
+    #[test]
     fn virtual_provider_filter_keeps_failed_quota_reports_visible() {
         let mut deepseek = test_quota_report("deepseek", Err("unavailable".to_string()));
         deepseek.auth.label = "deepseek-key".to_string();

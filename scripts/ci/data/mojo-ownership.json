@@ -712,6 +712,14 @@
     },
     "additions": [
       {
+        "path": "mojo/prodex_core/quota_watch_provider_filter.mojo",
+        "language": "mojo",
+        "classification": "DETERMINISTIC_DOMAIN",
+        "production_reachable": true,
+        "role": "semantic",
+        "operations": ["quota_provider_filter_parse_and_native_membership"]
+      },
+      {
         "path": "mojo/prodex_core/request_connection_tokens.mojo",
         "language": "mojo",
         "classification": "DETERMINISTIC_DOMAIN",
@@ -2947,6 +2955,27 @@
     "deepseek_chat_stream_event_translation"
   ],
   "authoritative_operations": [
+    {
+      "name": "quota_provider_filter_parse_and_native_membership",
+      "domain": "quota-watch/provider-filter",
+      "introduced_in": "0.439.0",
+      "baseline_state": "Rust normalized provider aliases, rendered invalid-filter errors and selected native profile providers",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_quota_watch_provider_filter_parse_v1",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/quota_watch_provider_filter.mojo",
+      "consumer": "crates/prodex-app/src/quota_support.rs",
+      "consumer_marker": "quota_watch_policy::parse_provider_filter(",
+      "production_consumers": ["crates/prodex-app/src/quota_support.rs"],
+      "production_reachability_test": "crates/prodex-mojo-core/src/quota_watch_policy/provider_filter/tests.rs",
+      "rust_owner_before": "Unicode trim, ASCII case folding, underscore normalization, provider alias classification, exact CLI diagnostic text and native-profile membership",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "test-only expected alias and membership matrices verify normalized diagnostics, Unicode/NUL text, invalid ABI fields and all native providers",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "typed native profile variant projection without credential fields, validated ABI tag-to-enum mapping, CLI error materialization and unchanged config/filesystem acquisition"
+    },
     {
       "name": "runtime_request_connection_token_parsing",
       "domain": "runtime/request-headers",

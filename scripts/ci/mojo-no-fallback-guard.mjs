@@ -1104,6 +1104,7 @@ const PROMOTED_FILES = [
   "crates/prodex-runtime-proxy/src/upstream.rs",
   "crates/prodex-mojo-core/src/runtime_cookie_policy.rs",
   "crates/prodex-mojo-core/src/shared_attachment_policy.rs",
+  "crates/prodex-app/src/quota_support.rs",
   UPDATE_NOTICE_VERSION_ADAPTER_FILE,
   UPDATE_NOTICE_VERSION_MOJO_FILE,
   "crates/prodex-mojo-core/src/mcp_stdio_policy.rs",
@@ -3025,6 +3026,17 @@ export function findViolations(files) {
     return [];
   });
   const quotaWatchViolations = files.flatMap(([filePath, contents]) => {
+    if (filePath === "crates/prodex-app/src/quota_support.rs") {
+      const required = [
+        "quota_watch_policy::parse_provider_filter(",
+        "policy::filter_matches_profile(",
+      ];
+      const missing = required.filter((marker) => !contents.includes(marker));
+      if (contents.includes(".to_ascii_lowercase().replace('_', \"-\")")) {
+        missing.push("duplicate Rust provider alias normalization");
+      }
+      return missing.map((marker) => filePath + ": quota provider filter must remain Mojo-owned (" + marker + ")");
+    }
     if (filePath === "crates/prodex-app/src/quota_support/virtual_provider.rs") {
       const required = ["project_external_quota(", "ExternalQuotaProjection::DeepSeekBalance", "ExternalQuotaProjection::LocalModels"];
       const retired = ['.get("is_available")', '.get("balance_infos")', '.get("total_balance")', '.get("data")'];
@@ -15079,7 +15091,11 @@ function selfTest() {
   assert.match(findViolations([[LOG_PAYLOAD_CALLER_FILE, "fn legacy_projection() {}"]]).join("\n"), /must remain Mojo-owned/u);
   assert.match(findViolations([[LOG_PAYLOAD_CALLER_FILE, payloadCaller + '\nsplit_once("] ")']]).join("\n"), /envelope parsing must remain Mojo-owned/u);
   const quotaEnvelopeCaller = "fn quota_runtime_profile_from_line(line: &str) {\n    parse_plain_log_envelope(line)\n}";
-  assert.deepEqual(findViolations([[QUOTA_LOG_PROFILE_CALLER, quotaEnvelopeCaller + '\nfn auth_backoff() { split_once("] ") }']]), []);
+  const quotaProviderFilterCalls = "quota_watch_policy::parse_provider_filter(\npolicy::filter_matches_profile(";
+  assert.deepEqual(findViolations([[QUOTA_LOG_PROFILE_CALLER, quotaEnvelopeCaller + '\nfn auth_backoff() { split_once("] ") }\n' + quotaProviderFilterCalls]]), []);
+  assert.match(findViolations([[QUOTA_LOG_PROFILE_CALLER,
+    quotaEnvelopeCaller + "\n" + quotaProviderFilterCalls + '\n.to_ascii_lowercase().replace(\'_\', "-")',
+  ]]).join("\n"), /quota provider filter must remain Mojo-owned/u);
   assert.match(findViolations([[QUOTA_LOG_PROFILE_CALLER, quotaEnvelopeCaller.replace("parse_plain_log_envelope(line)", 'line.split_once("] ")')]]).join("\n"), /envelope parsing must remain Mojo-owned/u);
   assert.match(findViolations([[LOG_PAYLOAD_ADAPTER_FILE, "fn legacy_projection() {}"]]).join("\n"), /ABI must remain active/u);
   assert.match(findViolations([[LOG_PAYLOAD_MOJO_FILE, ""]]).join("\n"), /Mojo payload projection must retain/u);
