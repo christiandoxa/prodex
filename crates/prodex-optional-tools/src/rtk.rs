@@ -98,163 +98,71 @@ fn wrapper_path(bin_dir: &Path, command: &str) -> PathBuf {
     bin_dir.join(command)
 }
 
-#[cfg(not(windows))]
 fn write_rtk_command_wrapper(
     path: &Path,
     rtk: &Path,
     command: &Path,
     subcommands: &[&str],
 ) -> Result<()> {
-    let rtk = shell_single_quote(&rtk.display().to_string());
-    let command = shell_single_quote(&command.display().to_string());
-    let rtk_env = rtk_state_exports();
-    let routing = if subcommands.is_empty() {
-        format!("export PRODEX_RTK_AUTO_WRAP_DEPTH=1\n{rtk_env}exec {rtk} {command} \"$@\"\n")
-    } else {
-        let pattern = subcommands
-            .iter()
-            .map(|subcommand| subcommand.replace('|', "\\|"))
-            .collect::<Vec<_>>()
-            .join("|");
-        format!(
-            "for prodex_rtk_arg in \"$@\"; do\n  case \"$prodex_rtk_arg\" in\n    {pattern})\n      export PRODEX_RTK_AUTO_WRAP_DEPTH=1\n      {rtk_env}exec {rtk} {command} \"$@\"\n      ;;\n  esac\ndone\nexec {command} \"$@\"\n",
-        )
-    };
-    let script = format!(
-        "#!/usr/bin/env sh\nif [ \"${{PRODEX_RTK_DISABLE_AUTO_WRAP:-}}\" = \"1\" ] || [ -n \"${{PRODEX_RTK_AUTO_WRAP_DEPTH:-}}\" ]; then\n  exec {command} \"$@\"\nfi\n{routing}",
-    );
+    let script = render_wrapper(
+        prodex_mojo_core::rtk_noisy::RtkWrapperKind::Command,
+        &rtk.display().to_string(),
+        &command.display().to_string(),
+        subcommands,
+    )?;
     write_executable_script(path, &script)
 }
 
-#[cfg(windows)]
-fn write_rtk_command_wrapper(
-    path: &Path,
-    rtk: &Path,
-    command: &Path,
-    subcommands: &[&str],
-) -> Result<()> {
-    let rtk = cmd_double_quote(&rtk.display().to_string());
-    let command = cmd_double_quote(&command.display().to_string());
-    let rtk_env = rtk_state_exports();
-    let routing = if subcommands.is_empty() {
-        format!(
-            "set \"PRODEX_RTK_AUTO_WRAP_DEPTH=1\"\r\n{rtk_env}{rtk} {command} %*\r\nexit /b %ERRORLEVEL%\r\n"
-        )
-    } else {
-        let checks = subcommands
-            .iter()
-            .map(|subcommand| {
-                format!(
-                    "if /I \"%~1\"==\"{}\" goto prodex_rtk_wrap\r\n",
-                    cmd_escape(subcommand)
-                )
-            })
-            .collect::<String>();
-        format!(
-            ":prodex_rtk_scan\r\nif \"%~1\"==\"\" goto prodex_rtk_raw\r\n{checks}shift\r\ngoto prodex_rtk_scan\r\n:prodex_rtk_wrap\r\nset \"PRODEX_RTK_AUTO_WRAP_DEPTH=1\"\r\n{rtk_env}{rtk} {command} %*\r\nexit /b %ERRORLEVEL%\r\n"
-        )
-    };
-    let script = format!(
-        "@echo off\r\nif \"%PRODEX_RTK_DISABLE_AUTO_WRAP%\"==\"1\" goto prodex_rtk_raw\r\nif defined PRODEX_RTK_AUTO_WRAP_DEPTH goto prodex_rtk_raw\r\n{routing}:prodex_rtk_raw\r\n{command} %*\r\nexit /b %ERRORLEVEL%\r\n"
-    );
-    write_executable_script(path, &script)
-}
-
-#[cfg(not(windows))]
 fn write_shell_wrapper(path: &Path, command: &Path, args: &[&str]) -> Result<()> {
-    let args = args
-        .iter()
-        .map(|arg| format!(" {}", shell_single_quote(arg)))
-        .collect::<String>();
-    let rtk_env = rtk_state_exports();
-    let script = format!(
-        "#!/usr/bin/env sh\n{}exec {}{} \"$@\"\n",
-        rtk_env,
-        shell_single_quote(&command.display().to_string()),
-        args
-    );
+    let script = render_wrapper(
+        prodex_mojo_core::rtk_noisy::RtkWrapperKind::Shell,
+        "",
+        &command.display().to_string(),
+        args,
+    )?;
     write_executable_script(path, &script)
 }
 
-#[cfg(windows)]
-fn write_shell_wrapper(path: &Path, command: &Path, args: &[&str]) -> Result<()> {
-    let args = args
-        .iter()
-        .map(|arg| format!(" {}", cmd_double_quote(arg)))
-        .collect::<String>();
-    let script = format!(
-        "@echo off\r\n{}{}{} %*\r\nexit /b %ERRORLEVEL%\r\n",
-        rtk_state_exports(),
-        cmd_double_quote(&command.display().to_string()),
-        args
-    );
-    write_executable_script(path, &script)
-}
-
-#[cfg(not(windows))]
 fn write_unavailable_command_wrapper(path: &Path, command: &str) -> Result<()> {
-    let message = shell_single_quote(&format!(
-        "prodex: {command} requested but '{command}' is not installed or not on PATH"
-    ));
-    let script = format!("#!/usr/bin/env sh\necho {message} >&2\nexit 127\n");
+    let script = render_wrapper(
+        prodex_mojo_core::rtk_noisy::RtkWrapperKind::Unavailable,
+        "",
+        command,
+        &[],
+    )?;
     write_executable_script(path, &script)
 }
 
-#[cfg(windows)]
-fn write_unavailable_command_wrapper(path: &Path, command: &str) -> Result<()> {
-    let message = cmd_escape(&format!(
-        "prodex: {command} requested but '{command}' is not installed or not on PATH"
-    ));
-    let script = format!("@echo off\r\n>&2 echo {message}\r\nexit /b 127\r\n");
-    write_executable_script(path, &script)
-}
-
-#[cfg(not(windows))]
-fn shell_single_quote(value: &str) -> String {
-    format!("'{}'", value.replace('\'', "'\\''"))
-}
-
-#[cfg(windows)]
-fn cmd_escape(value: &str) -> String {
-    value.replace('%', "%%")
-}
-
-#[cfg(windows)]
-fn cmd_double_quote(value: &str) -> String {
-    format!("\"{}\"", cmd_escape(value))
-}
-
-fn rtk_state_exports() -> String {
-    let Some(root) =
-        prodex_home_from_env().map(|home| home.join("optimizer-state").join(RTK_STATE_DIR_NAME))
-    else {
-        return String::new();
+fn render_wrapper(
+    kind: prodex_mojo_core::rtk_noisy::RtkWrapperKind,
+    rtk: &str,
+    command: &str,
+    arguments: &[&str],
+) -> Result<String> {
+    use prodex_mojo_core::rtk_noisy::{RtkWrapperInput, RtkWrapperPlatform, render_rtk_wrapper};
+    let state_paths = match prodex_home_from_env() {
+        Some(home) => {
+            let root = home.join("optimizer-state").join(RTK_STATE_DIR_NAME);
+            ["history.db", "tee", "audit"]
+                .map(|name| root.join(name).display().to_string())
+                .to_vec()
+        }
+        None => Vec::new(),
     };
-    [
-        ("RTK_DB_PATH", root.join("history.db")),
-        ("RTK_TEE_DIR", root.join("tee")),
-        ("RTK_AUDIT_DIR", root.join("audit")),
-    ]
-    .into_iter()
-    .map(|(key, value)| {
-        #[cfg(not(windows))]
-        {
-            format!(
-                "export {}={}\n",
-                key,
-                shell_single_quote(&value.display().to_string())
-            )
-        }
-        #[cfg(windows)]
-        {
-            format!(
-                "set \"{}={}\"\r\n",
-                key,
-                cmd_escape(&value.display().to_string())
-            )
-        }
+    let state_paths = state_paths.iter().map(String::as_str).collect::<Vec<_>>();
+    render_rtk_wrapper(RtkWrapperInput {
+        platform: if cfg!(windows) {
+            RtkWrapperPlatform::Windows
+        } else {
+            RtkWrapperPlatform::Posix
+        },
+        kind,
+        rtk,
+        command,
+        arguments,
+        state_paths: &state_paths,
     })
-    .collect()
+    .map_err(|error| anyhow::anyhow!("compiled Mojo RTK wrapper rendering failed: {error:?}"))
 }
 
 fn prodex_home_from_env() -> Option<PathBuf> {
@@ -305,6 +213,22 @@ mod tests {
             "prodex-rtk-wrapper-{name}-{}-{stamp}",
             std::process::id()
         ))
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn compiled_shell_wrapper_preserves_quoted_literal_arguments() {
+        let dir = temp_dir("quoted-shell-arguments");
+        let wrapper = dir.join("wrapper");
+        let argument = "single'quote $HOME `id` 10% 账户🙂";
+        write_shell_wrapper(&wrapper, Path::new("/usr/bin/printf"), &["%s", argument])
+            .expect("wrapper should render and write");
+        let output = Command::new(&wrapper)
+            .output()
+            .expect("wrapper should execute");
+        assert!(output.status.success());
+        assert_eq!(String::from_utf8(output.stdout).unwrap(), argument);
+        fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]

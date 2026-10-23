@@ -831,6 +831,8 @@ const PROMOTED_FILES = [
   "crates/prodex-optional-tools/src/rtk.rs",
   "crates/prodex-mojo-core/src/rtk_noisy.rs",
   "mojo/prodex_core/rtk_noisy.mojo",
+  "mojo/prodex_core/rtk_wrapper.mojo",
+  "crates/prodex-mojo-core/src/rtk_noisy/wrappers.rs",
   "crates/prodex-app/src/runtime_launch/proxy_startup/provider_sse_reader.rs",
   "crates/prodex-mojo-core/src/runtime_sse_chunk.rs",
   "mojo/prodex_core/sse_line.mojo",
@@ -8870,6 +8872,7 @@ export function findViolations(files) {
         "prodex_mojo_core::rtk_noisy::rtk_auto_wrapper_manifest()",
         "let subcommands = wrapper",
         ".map(String::as_str)",
+        "render_rtk_wrapper(RtkWrapperInput {",
       ];
       const retired = [
         "fn rtk_command_wrappers(",
@@ -8877,6 +8880,10 @@ export function findViolations(files) {
         'command: "cargo",',
         'command: "npm",',
         "subcommands: &[\"test\", \"build\"",
+        "fn shell_single_quote(",
+        "fn cmd_escape(",
+        "fn rtk_state_exports(",
+        "PRODEX_RTK_AUTO_WRAP_DEPTH=1",
       ];
       return required.every((marker) => production.includes(marker)) &&
         retired.every((marker) => !production.includes(marker))
@@ -8900,6 +8907,16 @@ export function findViolations(files) {
         "kubectl|logs,describe,get,events,top",
       ].filter((marker) => !contents.includes(marker))
         .map((marker) => filePath + ": compiled RTK auto wrapper manifest missing " + marker);
+    }
+    if (filePath === "mojo/prodex_core/rtk_wrapper.mojo") {
+      return ['@export("prodex_rtk_wrapper_script_v1")', "def rtkw_quote(", "def rtkw_emit("]
+        .filter((marker) => !contents.includes(marker))
+        .map((marker) => filePath + ": compiled RTK wrapper rendering missing " + marker);
+    }
+    if (filePath === "crates/prodex-mojo-core/src/rtk_noisy/wrappers.rs") {
+      return ["fn prodex_rtk_wrapper_script_v1(", "pub fn render_rtk_wrapper("]
+        .filter((marker) => !contents.includes(marker))
+        .map((marker) => filePath + ": RTK wrapper ABI bridge missing " + marker);
     }
     return [];
   });
@@ -17575,6 +17592,7 @@ function selfTest() {
     "prodex_mojo_core::rtk_noisy::rtk_auto_wrapper_manifest()",
     "let subcommands = wrapper",
     ".map(String::as_str)",
+    "render_rtk_wrapper(RtkWrapperInput {",
   ].join("\n");
   const rtkWrapperCaller = "crates/prodex-optional-tools/src/rtk.rs";
   assert.deepEqual(findViolations([[rtkWrapperCaller, rtkWrapperConsumer]]), []);
