@@ -136,6 +136,220 @@ fn manifest_identity_preserves_first_issue_and_ascii_digest_rules() {
 }
 
 #[test]
+fn manifest_content_preserves_release_precedence_and_compatibility_rules() {
+    let latest = OptionalToolReleaseIdentity {
+        version: "9.0.0",
+        commit: "latest-commit",
+        tree_sha256: "latest-tree",
+    };
+    let previous = OptionalToolReleaseIdentity {
+        version: "8.0.0",
+        commit: "previous-commit",
+        tree_sha256: "previous-tree",
+    };
+    let legacy = OptionalToolReleaseIdentity {
+        version: "7.0.0",
+        commit: "legacy-commit",
+        tree_sha256: "legacy-tree",
+    };
+    for (kind, name, legacy_identity) in [
+        (OptionalToolPolicyId::Caveman, "Caveman", Some(legacy)),
+        (OptionalToolPolicyId::Ponytail, "Ponytail", None),
+    ] {
+        let input = OptionalToolManifestContent {
+            version: latest.version,
+            commit: latest.commit,
+            tree_sha256: latest.tree_sha256,
+            actual_tree_sha256: latest.tree_sha256,
+            latest,
+            previous,
+            legacy: legacy_identity,
+            legacy_manifest_tree_sha256: "vetted-alias",
+        };
+        assert_eq!(optional_tool_manifest_content_error(kind, input), Ok(None));
+        for (invalid, expected) in [
+            (
+                OptionalToolManifestContent {
+                    commit: "changed",
+                    tree_sha256: "changed",
+                    actual_tree_sha256: "changed",
+                    ..input
+                },
+                format!("{name} latest-stable commit does not match release-qualified metadata"),
+            ),
+            (
+                OptionalToolManifestContent {
+                    tree_sha256: "changed",
+                    actual_tree_sha256: "changed",
+                    ..input
+                },
+                format!(
+                    "{name} latest-stable manifest tree digest does not match release-qualified metadata"
+                ),
+            ),
+            (
+                OptionalToolManifestContent {
+                    actual_tree_sha256: "changed",
+                    ..input
+                },
+                format!("{name} tree digest mismatch: expected latest-tree, got changed"),
+            ),
+            (
+                OptionalToolManifestContent {
+                    version: "10.0.0",
+                    actual_tree_sha256: "changed",
+                    ..input
+                },
+                format!("{name} tree digest mismatch: manifest latest-tree, got changed"),
+            ),
+        ] {
+            assert_eq!(
+                optional_tool_manifest_content_error(kind, invalid),
+                Ok(Some(expected))
+            );
+        }
+        assert_eq!(
+            optional_tool_manifest_content_error(
+                kind,
+                OptionalToolManifestContent {
+                    version: "10.0.0",
+                    commit: "new-commit",
+                    ..input
+                }
+            ),
+            Ok(None)
+        );
+        let prior = OptionalToolManifestContent {
+            version: previous.version,
+            commit: previous.commit,
+            tree_sha256: previous.tree_sha256,
+            actual_tree_sha256: previous.tree_sha256,
+            ..input
+        };
+        assert_eq!(optional_tool_manifest_content_error(kind, prior), Ok(None));
+        let previous_error = if kind == OptionalToolPolicyId::Caveman {
+            "previously release-qualified Caveman 3.2.0 identity or content changed"
+        } else {
+            "Ponytail previous-stable metadata does not match release-qualified compatibility metadata"
+        };
+        for invalid in [
+            OptionalToolManifestContent {
+                commit: "changed",
+                ..prior
+            },
+            OptionalToolManifestContent {
+                tree_sha256: "changed",
+                actual_tree_sha256: "changed",
+                ..prior
+            },
+            OptionalToolManifestContent {
+                actual_tree_sha256: "changed",
+                ..prior
+            },
+        ] {
+            assert_eq!(
+                optional_tool_manifest_content_error(kind, invalid),
+                Ok(Some(previous_error.to_string()))
+            );
+        }
+        let expected_alias = if kind == OptionalToolPolicyId::Caveman {
+            Some(previous_error.to_string())
+        } else {
+            None
+        };
+        assert_eq!(
+            optional_tool_manifest_content_error(
+                kind,
+                OptionalToolManifestContent {
+                    tree_sha256: "vetted-alias",
+                    ..prior
+                }
+            ),
+            Ok(expected_alias)
+        );
+        if kind == OptionalToolPolicyId::Caveman {
+            let old = OptionalToolManifestContent {
+                version: legacy.version,
+                commit: legacy.commit,
+                tree_sha256: "vetted-alias",
+                actual_tree_sha256: legacy.tree_sha256,
+                ..input
+            };
+            assert_eq!(optional_tool_manifest_content_error(kind, old), Ok(None));
+            assert_eq!(
+                optional_tool_manifest_content_error(
+                    kind,
+                    OptionalToolManifestContent {
+                        tree_sha256: legacy.tree_sha256,
+                        ..old
+                    }
+                ),
+                Ok(None)
+            );
+            // A failed Caveman legacy exception still allows ordinary digest equality.
+            assert_eq!(
+                optional_tool_manifest_content_error(
+                    kind,
+                    OptionalToolManifestContent {
+                        commit: "changed",
+                        tree_sha256: "self-consistent",
+                        actual_tree_sha256: "self-consistent",
+                        ..old
+                    }
+                ),
+                Ok(None)
+            );
+            assert_eq!(
+                optional_tool_manifest_content_error(
+                    kind,
+                    OptionalToolManifestContent {
+                        commit: "changed",
+                        ..old
+                    }
+                ),
+                Ok(Some(
+                    "Caveman tree digest mismatch: manifest vetted-alias, got legacy-tree"
+                        .to_string()
+                ))
+            );
+        }
+    }
+}
+
+#[test]
+fn manifest_content_abi_rejects_reserved_views_and_wrong_tags() {
+    let mut fields = [OptionalToolStringView { ptr: 0, len: 0 }; 14];
+    let nonempty = "unexpected";
+    fields[10] = OptionalToolStringView {
+        ptr: nonempty.as_ptr() as u64,
+        len: nonempty.len() as u64,
+    };
+    let mut output = [77_u8; 32];
+    let mut written = 99_i64;
+    for (tool, tag, count) in [(4, 0, 14), (0, 1, 14), (0, 0, 13)] {
+        assert_eq!(
+            unsafe {
+                prodex_optional_tool_install_policy_v1(
+                    1,
+                    tool,
+                    3,
+                    tag,
+                    fields.as_ptr() as u64,
+                    count,
+                    0,
+                    output.as_mut_ptr() as u64,
+                    output.len() as i64,
+                    &mut written as *mut i64 as u64,
+                )
+            },
+            1
+        );
+        assert_eq!(output, [77; 32]);
+        assert_eq!(written, 99);
+    }
+}
+
+#[test]
 fn manifest_abi_rejects_invalid_headers_and_views_without_output_writes() {
     let id = "caveman";
     let mut fields = [OptionalToolStringView { ptr: 0, len: 0 }; 6];

@@ -27,7 +27,8 @@ pub use version_policy::{
 #[path = "optional_tools_policy/install_policy.rs"]
 mod install_policy;
 pub use install_policy::{
-    OptionalToolManifestIdentity, optional_tool_manifest_header_error,
+    OptionalToolManifestContent, OptionalToolManifestIdentity, OptionalToolReleaseIdentity,
+    optional_tool_manifest_content_error, optional_tool_manifest_header_error,
     optional_tool_manifest_identity_error, optional_tool_manifest_version_error,
 };
 
@@ -103,15 +104,6 @@ unsafe extern "C" {
         name_address: u64,
         name_length: i64,
         output_address: u64,
-    ) -> i64;
-    fn prodex_optional_tool_manifest_tree_supported_v1(
-        abi_version: i64,
-        value_address: u64,
-        value_length: i64,
-        vetted_address: u64,
-        vetted_length: i64,
-        legacy_address: u64,
-        legacy_length: i64,
     ) -> i64;
     fn prodex_optional_tool_hex_encode_v1(
         abi_version: i64,
@@ -345,30 +337,6 @@ pub fn optional_tool_overlay_rollout_name(name: &str) -> Result<bool, MojoError>
         _ => return Err(MojoError::InvalidOutput),
     }
     match result {
-        0 => Ok(false),
-        1 => Ok(true),
-        _ => Err(MojoError::InvalidOutput),
-    }
-}
-
-pub fn optional_tool_manifest_tree_supported(
-    value: &str,
-    vetted: &str,
-    legacy: &str,
-) -> Result<bool, MojoError> {
-    let result = unsafe {
-        prodex_optional_tool_manifest_tree_supported_v1(
-            ABI_VERSION,
-            value.as_ptr() as usize as u64,
-            signed_len(value)?,
-            vetted.as_ptr() as usize as u64,
-            signed_len(vetted)?,
-            legacy.as_ptr() as usize as u64,
-            signed_len(legacy)?,
-        )
-    };
-    match result {
-        -2 => Err(MojoError::InvalidInput),
         0 => Ok(false),
         1 => Ok(true),
         _ => Err(MojoError::InvalidOutput),
@@ -709,10 +677,6 @@ mod tests {
         assert_eq!(presidio.kind, OptionalToolPolicyKind::Service);
         assert_eq!(presidio.capability_mask, CAP_REDACTION);
         assert!(!presidio.super_default);
-
-        assert!(optional_tool_manifest_tree_supported("current", "current", "legacy").unwrap());
-        assert!(optional_tool_manifest_tree_supported("legacy", "current", "legacy").unwrap());
-        assert!(!optional_tool_manifest_tree_supported("CURRENT", "current", "legacy").unwrap());
     }
 
     #[test]

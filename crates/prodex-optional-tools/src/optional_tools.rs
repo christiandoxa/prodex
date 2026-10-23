@@ -7,7 +7,6 @@ use prodex_mojo_core::optional_tools_policy::{
     CAP_BROWSER_AUTOMATION, CAP_CLAUDE, CAP_CODEX, CAP_REDACTION, CAP_SHELL_COMPRESSION,
     CAP_SIMPLICITY_REVIEW, CAP_STRUCTURAL_NAVIGATION, OptionalToolPolicyId, OptionalToolPolicyKind,
     optional_tool_class, optional_tool_descriptor_policy, optional_tool_hex_encode,
-    optional_tool_manifest_tree_supported,
 };
 use prodex_mojo_core::rich::ascii_casefold_contains;
 use sha2::{Digest, Sha256};
@@ -30,15 +29,6 @@ const MAX_EXECUTABLE_DIGEST_BYTES: u64 = 512 * 1024 * 1024;
 const TOOL_PROBE_TIMEOUT: Duration = Duration::from_secs(5);
 const PLAYWRIGHT_MCP_PROBE_ARGS: [&str; 3] =
     ["--no-install", crate::PLAYWRIGHT_MCP_PACKAGE, "--version"];
-
-pub(crate) fn manifest_tree_sha256_supported(
-    value: &str,
-    vetted: &str,
-    legacy_manifest: &str,
-) -> bool {
-    optional_tool_manifest_tree_supported(value, vetted, legacy_manifest)
-        .expect("Mojo optional-tool manifest-tree policy failed")
-}
 
 pub(crate) fn validate_manifest_policy(
     result: std::result::Result<Option<String>, prodex_mojo_core::MojoError>,
@@ -679,19 +669,6 @@ pub(crate) fn hex_digest(bytes: &[u8]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn manifest_tree_digest_accepts_current_and_legacy_metadata_only() {
-        assert!(manifest_tree_sha256_supported(
-            "current", "current", "legacy"
-        ));
-        assert!(manifest_tree_sha256_supported(
-            "legacy", "current", "legacy"
-        ));
-        assert!(!manifest_tree_sha256_supported(
-            "other", "current", "legacy"
-        ));
-    }
 
     #[test]
     fn missing_playwright_package_is_optional_but_incompatible_install_is_invalid() {

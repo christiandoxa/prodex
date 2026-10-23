@@ -9,6 +9,7 @@ enum ManifestPhase {
     Header,
     Version,
     Identity,
+    Content,
 }
 
 /// Host-acquired manifest fields after the compiled stable-version gate.
@@ -20,6 +21,29 @@ pub struct OptionalToolManifestIdentity<'a> {
     pub expected_source: &'a str,
     pub commit: &'a str,
     pub tree_sha256: &'a str,
+}
+
+/// Release metadata acquired by the host, compared only by compiled policy.
+#[derive(Clone, Copy)]
+pub struct OptionalToolReleaseIdentity<'a> {
+    pub version: &'a str,
+    pub commit: &'a str,
+    pub tree_sha256: &'a str,
+}
+
+/// Manifest identity and the host-computed digest after required-file checks.
+#[derive(Clone, Copy)]
+pub struct OptionalToolManifestContent<'a> {
+    pub version: &'a str,
+    pub commit: &'a str,
+    pub tree_sha256: &'a str,
+    pub actual_tree_sha256: &'a str,
+    pub latest: OptionalToolReleaseIdentity<'a>,
+    pub previous: OptionalToolReleaseIdentity<'a>,
+    /// Caveman's additional compatibility release; absent for Ponytail.
+    pub legacy: Option<OptionalToolReleaseIdentity<'a>>,
+    /// Vetted manifest alias for Caveman's legacy or Ponytail's previous release.
+    pub legacy_manifest_tree_sha256: &'a str,
 }
 
 unsafe extern "C" {
@@ -37,11 +61,11 @@ unsafe extern "C" {
     ) -> i64;
 }
 
-fn diagnostic(
+fn diagnostic<const N: usize>(
     tool: OptionalToolPolicyId,
     phase: ManifestPhase,
     tag: i64,
-    fields: [&str; 6],
+    fields: [&str; N],
 ) -> Result<Option<String>, MojoError> {
     if fields.iter().any(|field| field.len() > MAX_TEXT_BYTES) {
         return Err(MojoError::InvalidInput);
@@ -120,6 +144,39 @@ pub fn optional_tool_manifest_identity_error(
             input.expected_source,
             input.commit,
             input.tree_sha256,
+        ],
+    )
+}
+
+/// Enforce release identity and digest compatibility without reading any files.
+pub fn optional_tool_manifest_content_error(
+    tool: OptionalToolPolicyId,
+    input: OptionalToolManifestContent<'_>,
+) -> Result<Option<String>, MojoError> {
+    let legacy = input.legacy.unwrap_or(OptionalToolReleaseIdentity {
+        version: "",
+        commit: "",
+        tree_sha256: "",
+    });
+    diagnostic(
+        tool,
+        ManifestPhase::Content,
+        0,
+        [
+            input.version,
+            input.commit,
+            input.tree_sha256,
+            input.actual_tree_sha256,
+            input.latest.version,
+            input.latest.commit,
+            input.latest.tree_sha256,
+            input.previous.version,
+            input.previous.commit,
+            input.previous.tree_sha256,
+            legacy.version,
+            legacy.commit,
+            legacy.tree_sha256,
+            input.legacy_manifest_tree_sha256,
         ],
     )
 }
