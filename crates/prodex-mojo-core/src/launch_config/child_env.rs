@@ -78,9 +78,7 @@ pub fn child_environment_removal_plan(
         if tag & 2 != 0 {
             dyld_key_indices.push(index);
         }
-        if tag & 4 != 0 {
-            actual_bypass = true;
-        }
+        actual_bypass |= tag & 4 != 0;
     }
     if actual_bypass != allow_unsafe_child_env {
         return Err(MojoError::InvalidOutput);
