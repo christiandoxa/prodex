@@ -1,6 +1,5 @@
 use anyhow::{Context, Result, bail};
 use reqwest::blocking::Client;
-use semver::Version;
 use std::ffi::OsString;
 use std::fmt;
 use std::fs;
@@ -29,6 +28,9 @@ const OPENAI_TUNNEL_HEALTH_REQUEST_TIMEOUT: Duration = Duration::from_millis(750
 const OPENAI_TUNNEL_HEALTH_URL_MAX_BYTES: u64 = 4096;
 const OPENAI_TUNNEL_API_KEY_MAX_BYTES: usize = 4096;
 static NEXT_OPENAI_TUNNEL_CONFIG_ID: AtomicU64 = AtomicU64::new(1);
+
+/// The process probe admits only a Mojo-validated canonical stable version.
+pub(super) struct ValidatedTunnelClientVersion(String);
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) struct OpenAiTunnelStatus {
@@ -173,7 +175,9 @@ pub(super) fn resolve_openai_tunnel_id(explicit: Option<&str>) -> Result<String>
     Ok(value.to_owned())
 }
 
-pub(super) fn ensure_openai_tunnel_available(tunnel_id: &str) -> Result<String> {
+pub(super) fn ensure_openai_tunnel_available(
+    tunnel_id: &str,
+) -> Result<ValidatedTunnelClientVersion> {
     validate_openai_tunnel_id(tunnel_id)?;
     let mut command = openai_tunnel_client_command()?;
     command.arg("--version");
@@ -185,7 +189,7 @@ pub(super) fn ensure_openai_tunnel_available(tunnel_id: &str) -> Result<String> 
             "tunnel-client --version failed; update the official openai/tunnel-client to the latest stable release from {OPENAI_TUNNEL_CLIENT_RELEASE_URL}"
         )
     }
-    let version = safe_client_version(&output).ok_or_else(|| {
+    let version = safe_client_version(&output)?.ok_or_else(|| {
         anyhow::anyhow!(
             "tunnel-client did not report a compatible official stable build; Prodex requires {OPENAI_TUNNEL_CLIENT_MINIMUM_VERSION} or newer. Update to the latest stable release (release-qualified reference: {OPENAI_TUNNEL_CLIENT_LATEST_STABLE_REFERENCE}) from {OPENAI_TUNNEL_CLIENT_RELEASE_URL}"
         )
@@ -197,7 +201,8 @@ pub(super) fn ensure_openai_tunnel_available(tunnel_id: &str) -> Result<String> 
         .map_err(|_| openai_tunnel_install_error())?;
     if !output.status.success() {
         bail!(
-            "tunnel-client {version} does not expose the required run capability; update to the latest stable release from {OPENAI_TUNNEL_CLIENT_RELEASE_URL}"
+            "tunnel-client {} does not expose the required run capability; update to the latest stable release from {OPENAI_TUNNEL_CLIENT_RELEASE_URL}",
+            version.0
         )
     }
     Ok(version)
@@ -225,7 +230,7 @@ pub(super) fn openai_tunnel_client_command() -> Result<Command> {
 pub(super) fn spawn_openai_tunnel(
     client_mcp_url: &str,
     credentials: OpenAiTunnelCredentials,
-    client_version: String,
+    client_version: ValidatedTunnelClientVersion,
 ) -> Result<OpenAiTunnel> {
     let tunnel_id = credentials.tunnel_id().to_owned();
     validate_openai_tunnel_id(&tunnel_id)?;
@@ -261,7 +266,7 @@ pub(super) fn spawn_openai_tunnel(
         child,
         status: OpenAiTunnelStatus {
             tunnel_id,
-            client_version: safe_version_label(&client_version),
+            client_version: client_version.0,
         },
         files,
         shut_down: false,
@@ -402,50 +407,20 @@ fn yaml_quote(value: &str) -> String {
     value.replace('\'', "''")
 }
 
-fn safe_client_version(output: &Output) -> Option<String> {
+fn safe_client_version(output: &Output) -> Result<Option<ValidatedTunnelClientVersion>> {
     let text = format!(
         "{}\n{}",
         String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr)
     );
-    let version = supported_client_version_from_text(&text)?;
-    {
-        let valid = prodex_mojo_core::rich::super_expose_tunnel_client_version_output_valid(&text)
-            .unwrap_or_else(|error| {
-                panic!("Mojo tunnel-client version format policy failed: {error:?}")
-            });
-        if !valid {
-            return None;
-        }
-    }
-    Some(version.to_string())
-}
-
-fn supported_client_version_from_text(text: &str) -> Option<Version> {
-    let minimum = Version::parse(OPENAI_TUNNEL_CLIENT_MINIMUM_VERSION).ok()?;
-    text.lines().find_map(|line| {
-        let line = line.trim();
-        let (version_and_sha, sha_suffix) = line.rsplit_once(" (git sha: ")?;
-        let sha_suffix = sha_suffix.strip_suffix(')')?;
-        let (version, build_sha) = version_and_sha.split_once('+')?;
-        if build_sha != sha_suffix || !valid_git_sha(build_sha) {
-            return None;
-        }
-        let version = Version::parse(version).ok()?;
-        (version.pre.is_empty() && version.build.is_empty() && version >= minimum)
-            .then_some(version)
-    })
-}
-
-fn valid_git_sha(value: &str) -> bool {
-    value.len() == 40 && value.bytes().all(|byte| byte.is_ascii_hexdigit())
-}
-
-fn safe_version_label(value: &str) -> String {
-    Version::parse(value)
-        .ok()
-        .filter(|version| version.pre.is_empty())
-        .map_or_else(|| "unknown".to_string(), |version| version.to_string())
+    let version = prodex_mojo_core::rich::super_expose_tunnel_supported_version(
+        &text,
+        OPENAI_TUNNEL_CLIENT_MINIMUM_VERSION,
+    )
+    .map_err(|error| {
+        anyhow::anyhow!("failed to validate tunnel-client version output: {error:?}")
+    })?;
+    Ok(version.map(|version| ValidatedTunnelClientVersion(version.to_owned())))
 }
 
 fn wait_for_openai_tunnel_ready(
@@ -621,10 +596,11 @@ mod version_policy_tests {
             ),
         ] {
             assert_eq!(
-                supported_client_version_from_text(value)
-                    .unwrap()
-                    .to_string(),
-                expected
+                prodex_mojo_core::rich::super_expose_tunnel_supported_version(
+                    value,
+                    OPENAI_TUNNEL_CLIENT_MINIMUM_VERSION
+                ),
+                Ok(Some(expected))
             );
         }
     }
@@ -637,8 +613,12 @@ mod version_policy_tests {
             "0.0.15+1111111111111111111111111111111111111111 (git sha: 2222222222222222222222222222222222222222)",
             "0.0.15",
         ] {
-            assert!(
-                supported_client_version_from_text(value).is_none(),
+            assert_eq!(
+                prodex_mojo_core::rich::super_expose_tunnel_supported_version(
+                    value,
+                    OPENAI_TUNNEL_CLIENT_MINIMUM_VERSION
+                ),
+                Ok(None),
                 "{value}"
             );
         }
