@@ -4,7 +4,9 @@ use super::{
 };
 use crate::discovery::{managed_optimizer_roots, newest_stable_managed_version};
 use anyhow::{Context, Result};
-use semver::Version;
+use prodex_mojo_core::optional_tools_policy::{
+    OptionalToolStableVersion, optional_tool_stable_version,
+};
 use serde::Deserialize;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -65,14 +67,16 @@ fn tool_status_with_node(node: Option<PathBuf>) -> ToolHealth {
 }
 
 fn candidate() -> Result<Option<(PathBuf, PathBuf)>> {
-    let minimum = Version::parse(crate::PONYTAIL_MINIMUM_SUPPORTED_VERSION)
-        .context("invalid Ponytail minimum supported version")?;
     for root in managed_optimizer_roots() {
         let Some((version, candidate)) = newest_stable_managed_version(&root, "ponytail")? else {
             continue;
         };
         anyhow::ensure!(
-            version >= minimum,
+            prodex_mojo_core::optional_tools_policy::optional_tool_version_at_least(
+                &version,
+                crate::PONYTAIL_MINIMUM_SUPPORTED_VERSION
+            )
+            .map_err(|error| anyhow::anyhow!("failed to validate Ponytail version: {error:?}"))?,
             "installed Ponytail {version} is too old; Prodex requires {} or newer. Update Ponytail to the latest stable release (release-qualified reference: {})",
             crate::PONYTAIL_MINIMUM_SUPPORTED_VERSION,
             crate::PONYTAIL_LATEST_STABLE_REFERENCE
@@ -118,12 +122,18 @@ fn validate_install(allowed_root: &Path, candidate: &Path) -> Result<ResolvedToo
         manifest.id == "ponytail",
         "Ponytail manifest id must be ponytail"
     );
-    let version = Version::parse(&manifest.version)
-        .with_context(|| format!("invalid Ponytail version {}", manifest.version))?;
-    let minimum = Version::parse(crate::PONYTAIL_MINIMUM_SUPPORTED_VERSION)
-        .context("invalid Ponytail minimum supported version")?;
+    let version =
+        optional_tool_stable_version(&manifest.version, crate::PONYTAIL_MINIMUM_SUPPORTED_VERSION)
+            .map_err(|error| {
+                anyhow::anyhow!("failed to validate Ponytail manifest version: {error:?}")
+            })?;
     anyhow::ensure!(
-        version.pre.is_empty() && version >= minimum,
+        version != OptionalToolStableVersion::Malformed,
+        "invalid Ponytail version {}",
+        manifest.version
+    );
+    anyhow::ensure!(
+        version == OptionalToolStableVersion::Supported,
         "Ponytail {} is incompatible; Prodex requires {} or newer. Update Ponytail to the latest stable release (release-qualified reference: {})",
         manifest.version,
         crate::PONYTAIL_MINIMUM_SUPPORTED_VERSION,

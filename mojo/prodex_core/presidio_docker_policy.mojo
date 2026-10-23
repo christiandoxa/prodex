@@ -1,13 +1,13 @@
 # Presidio Docker trust policy. Rust owns process execution and JSON acquisition.
 from std.memory import Pointer
 from rich_types import ProdexRichStringView
-from rich_text import rich_trim_bounds, rich_view_ptr, rich_view_prefix, rich_view_matches_literal
+from rich_text import rich_view_ptr, rich_view_prefix, rich_view_matches_literal
 from parsed_json import (
     JSON_STRING, JSON_ARRAY, JSON_OBJECT, ParsedJson, ParsedJsonNode,
     pj_child, pj_next, pj_kind, pj_field, pj_text, pj_is, pj_equal, pj_literal, pj_valid,
 )
 from json_sink import JsonSink, js_literal, js_view
-from update_notice_policy import update_notice_parse_release_version, UpdateNoticeReleaseVersion
+from update_notice_policy import update_notice_parse_release_version, update_notice_parse_exact_release_version, UpdateNoticeReleaseVersion
 
 
 def presidio_image_check(
@@ -28,11 +28,7 @@ def presidio_image_check(
     while version_end < Int64(image.len) and source[unsafe_offset=version_end] != 64:
         version_end += 1
     var version = ProdexRichStringView(image.ptr + UInt(prefix_length), UInt(version_end - prefix_length))
-    var bounds = rich_trim_bounds(version)
-    # Docker tags require exact SemVer; release notices also accept trim and v prefixes.
-    if version.len == 0 or bounds[0] != 0 or bounds[1] != Int64(version.len) or rich_view_ptr(version)[] == 118:
-        return (Int64(2), version^)
-    var parsed = update_notice_parse_release_version(version)
+    var parsed = update_notice_parse_exact_release_version(version)
     if not parsed.valid:
         return (Int64(2), version^)
     if parsed.has_pre or (
