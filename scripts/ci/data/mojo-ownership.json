@@ -712,6 +712,14 @@
     },
     "additions": [
       {
+        "path": "mojo/prodex_core/rtk_wrapper.mojo",
+        "language": "mojo",
+        "classification": "DETERMINISTIC_DOMAIN",
+        "production_reachable": true,
+        "role": "semantic",
+        "operations": ["rtk_native_wrapper_scripts"]
+      },
+      {
         "path": "mojo/prodex_core/runtime_cookie_policy.mojo",
         "language": "mojo",
         "classification": "DETERMINISTIC_DOMAIN",
@@ -2931,6 +2939,27 @@
     "deepseek_chat_stream_event_translation"
   ],
   "authoritative_operations": [
+    {
+      "name": "rtk_native_wrapper_scripts",
+      "domain": "optional-tools/rtk-wrapper",
+      "introduced_in": "0.439.0",
+      "baseline_state": "Rust generated POSIX shell and Windows CMD wrappers, quoting and state exports",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_rtk_wrapper_script_v1",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/rtk_wrapper.mojo",
+      "consumer": "crates/prodex-optional-tools/src/rtk.rs",
+      "consumer_marker": "render_rtk_wrapper(RtkWrapperInput {",
+      "production_consumers": ["crates/prodex-optional-tools/src/rtk.rs"],
+      "production_reachability_test": "crates/prodex-mojo-core/src/rtk_noisy/wrappers/tests.rs",
+      "rust_owner_before": "Single-quote escaping, percent escaping, platform line endings, RTK recursion/disable guards, subcommand routing, state exports, and unavailable-tool diagnostics",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "test-only original templates verify complete output across both platforms and all three roles; caller tests execute local wrappers with literal shell metacharacters",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "executable discovery, platform selection, environment and optimizer-state path acquisition, borrowed argument marshalling, checked UTF-8 materialization, file writes and executable permissions"
+    },
     {
       "name": "shared_attachment_windows_path_codec",
       "domain": "shared-codex-fs/session-path",

@@ -2,6 +2,11 @@
 
 use crate::MojoError;
 
+#[cfg(feature = "mojo-runtime")]
+mod wrappers;
+#[cfg(feature = "mojo-runtime")]
+pub use wrappers::{RtkWrapperInput, RtkWrapperKind, RtkWrapperPlatform, render_rtk_wrapper};
+
 const RTK_NOISY_ABI_VERSION: i64 = 1;
 const RTK_NOISY_MODE_WRAPPED: i64 = 0;
 const RTK_NOISY_MODE_PREFIXED: i64 = 1;
