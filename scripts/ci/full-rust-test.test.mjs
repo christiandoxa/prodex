@@ -119,7 +119,7 @@ test("push CI omits redundant optional-tool freshness lane", () => {
 test("fresh benchmark compiles required Mojo runtime with the pinned toolchain", () => {
   const workflow = readFileSync(".github/workflows/bench-calibration.yml", "utf8");
 
-  assert.match(workflow, /MOJO_VERSION: "1\.1\.0"/);
+  assert.match(workflow, /MOJO_VERSION: "1\.2\.0"/);
   assert.match(workflow, /Install pinned Mojo toolchain[\s\S]*?mojo==\$\{MOJO_VERSION\}/);
   assert.match(workflow, /"PRODEX_MOJO_REQUIRED=1"/);
   assert.match(workflow, /"PRODEX_MOJO_VERSION=\$\{MOJO_VERSION\}"/);
