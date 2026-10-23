@@ -1,7 +1,7 @@
 # Official tunnel-client version selection; process probing stays with Rust.
 from std.collections import Array
 from std.memory import Pointer
-from rich_text import rich_trim_bounds, rich_view_prefix, rich_view_ptr, rich_view_valid
+from rich_text import rich_trim_bounds, rich_view_prefix, rich_view_ptr, rich_view_valid, rich_ascii_hex
 from rich_types import ProdexRichStringView
 from update_notice_policy import update_notice_release_numeric
 
@@ -33,13 +33,6 @@ def super_expose_ascii_trim_bounds(
 def super_expose_ascii_digit(byte: UInt8) -> Bool:
     return byte >= 48 and byte <= 57
 
-def super_expose_ascii_hex(byte: UInt8) -> Bool:
-    return (
-        (byte >= 48 and byte <= 57)
-        or (byte >= 97 and byte <= 102)
-        or (byte >= 65 and byte <= 70)
-    )
-
 def super_expose_tunnel_client_version_line_valid(
     view: ProdexRichStringView,
     start: Int64,
@@ -65,7 +58,7 @@ def super_expose_tunnel_client_version_line_valid(
     cursor += 1
     var first_sha = cursor
     for _ in range(40):
-        if cursor >= end or not super_expose_ascii_hex(ptr[unsafe_offset=cursor]):
+        if cursor >= end or not rich_ascii_hex(ptr[unsafe_offset=cursor]):
             return False
         cursor += 1
     var marker = StringSlice(" (git sha: ")
@@ -77,7 +70,7 @@ def super_expose_tunnel_client_version_line_valid(
     cursor += marker_len
     var second_sha = cursor
     for index in range(40):
-        if cursor >= end or not super_expose_ascii_hex(ptr[unsafe_offset=cursor]):
+        if cursor >= end or not rich_ascii_hex(ptr[unsafe_offset=cursor]):
             return False
         var sha_index = Int64(index)
         if ptr[unsafe_offset=first_sha + sha_index] != ptr[unsafe_offset=second_sha + sha_index]:

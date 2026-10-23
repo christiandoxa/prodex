@@ -24,6 +24,12 @@ pub use version_policy::{
     codebase_memory_version_supported, optional_tool_newest_stable_version,
     optional_tool_stable_version, optional_tool_version_at_least,
 };
+#[path = "optional_tools_policy/install_policy.rs"]
+mod install_policy;
+pub use install_policy::{
+    OptionalToolManifestIdentity, optional_tool_manifest_header_error,
+    optional_tool_manifest_identity_error, optional_tool_manifest_version_error,
+};
 
 const ABI_VERSION: i64 = 1;
 const AWARENESS_TEXT_COUNT: usize = 4;

@@ -12,6 +12,14 @@ def rich_utf8_continuation(value: UInt8) -> Bool:
     return value >= 0x80 and value <= 0xBF
 
 
+def rich_ascii_hex(value: UInt8) -> Bool:
+    return (
+        (value >= 48 and value <= 57)
+        or (value >= 97 and value <= 102)
+        or (value >= 65 and value <= 70)
+    )
+
+
 def rich_utf8_valid(ptr: Pointer[mut=False, UInt8, _], length: Int64) -> Bool:
     var index: Int64 = 0
     # Skip complete ASCII prefixes with byte-aligned loads on every target.

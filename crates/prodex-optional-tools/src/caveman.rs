@@ -2,7 +2,7 @@ use crate::discovery::{managed_optimizer_roots, newest_stable_managed_version};
 use crate::localization::ensure_agents_reference;
 use crate::optional_tools::{
     OptionalToolId, ResolvedTool, ToolDiscoverySource, ToolHealth, ToolHealthStatus,
-    optional_tool_descriptor,
+    optional_tool_descriptor, validate_manifest_policy,
 };
 use crate::tree::{read_bounded_file, tree_sha256};
 use crate::{
@@ -14,7 +14,9 @@ use crate::{
 };
 use anyhow::{Context, Result, bail, ensure};
 use prodex_mojo_core::optional_tools_policy::{
-    OptionalToolStableVersion, optional_tool_stable_version,
+    OptionalToolManifestIdentity, OptionalToolPolicyId, optional_tool_manifest_header_error,
+    optional_tool_manifest_identity_error, optional_tool_manifest_version_error,
+    optional_tool_stable_version,
 };
 use serde::Deserialize;
 use std::fs;
@@ -127,14 +129,6 @@ fn caveman_candidate() -> Result<Option<(PathBuf, PathBuf)>> {
     Ok(None)
 }
 
-fn valid_git_sha(value: &str) -> bool {
-    value.len() == 40 && value.bytes().all(|byte| byte.is_ascii_hexdigit())
-}
-
-fn valid_sha256(value: &str) -> bool {
-    value.len() == 64 && value.bytes().all(|byte| byte.is_ascii_hexdigit())
-}
-
 fn previous_stable_manifest_supported(
     manifest: &CavemanInstallManifest,
     actual_digest: &str,
@@ -181,49 +175,35 @@ fn validate_caveman_install(allowed_root: &Path, candidate: &Path) -> Result<Res
     let manifest: CavemanInstallManifest =
         serde_json::from_slice(&read_bounded_file(&manifest_path, 64 * 1024)?)
             .with_context(|| format!("failed to parse {}", manifest_path.display()))?;
-    ensure!(
-        manifest.schema_version == 1,
-        "unsupported Caveman manifest schema"
-    );
-    ensure!(
-        manifest.id == "caveman",
-        "Caveman manifest id must be caveman"
-    );
+    validate_manifest_policy(optional_tool_manifest_header_error(
+        OptionalToolPolicyId::Caveman,
+        manifest.schema_version,
+        &manifest.id,
+    ))?;
 
     let version =
         optional_tool_stable_version(&manifest.version, CAVEMAN_MINIMUM_SUPPORTED_VERSION)
             .map_err(|error| {
                 anyhow::anyhow!("failed to validate Caveman manifest version: {error:?}")
             })?;
-    ensure!(
-        version != OptionalToolStableVersion::Malformed,
-        "invalid Caveman version {}",
-        manifest.version
-    );
-    ensure!(
-        version == OptionalToolStableVersion::Supported,
-        "Caveman {} is incompatible; Prodex requires {} or newer. Update Caveman to the latest stable release (release-qualified reference: {})",
-        manifest.version,
+    validate_manifest_policy(optional_tool_manifest_version_error(
+        OptionalToolPolicyId::Caveman,
+        version,
+        &manifest.version,
         CAVEMAN_MINIMUM_SUPPORTED_VERSION,
-        CAVEMAN_LATEST_STABLE_REFERENCE
-    );
-    ensure!(
-        candidate.file_name().and_then(|name| name.to_str()) == Some(manifest.version.as_str()),
-        "Caveman version directory does not match manifest version {}",
-        manifest.version
-    );
-    ensure!(
-        manifest.source == CAVEMAN_SOURCE,
-        "unexpected Caveman source"
-    );
-    ensure!(
-        valid_git_sha(&manifest.commit),
-        "Caveman manifest commit must be a 40-character Git SHA"
-    );
-    ensure!(
-        valid_sha256(&manifest.tree_sha256),
-        "Caveman manifest tree digest must be SHA-256"
-    );
+        CAVEMAN_LATEST_STABLE_REFERENCE,
+    ))?;
+    validate_manifest_policy(optional_tool_manifest_identity_error(
+        OptionalToolPolicyId::Caveman,
+        OptionalToolManifestIdentity {
+            version: &manifest.version,
+            directory_version: candidate.file_name().and_then(|name| name.to_str()),
+            source: &manifest.source,
+            expected_source: CAVEMAN_SOURCE,
+            commit: &manifest.commit,
+            tree_sha256: &manifest.tree_sha256,
+        },
+    ))?;
 
     validate_required_files(&candidate)?;
     let actual_digest = tree_sha256(&candidate, b"prodex-caveman-tree-v1\0")?;
@@ -410,6 +390,53 @@ mod tests {
             tool.path.as_deref(),
             Some(candidate.canonicalize().unwrap().as_path())
         );
+
+        let manifest_path = candidate.join(TOOL_MANIFEST);
+        let original: serde_json::Value =
+            serde_json::from_slice(&fs::read(&manifest_path).unwrap()).unwrap();
+        for (changes, expected) in [
+            (
+                serde_json::json!({"schema_version": 0, "id": "wrong", "version": "bad"}),
+                "unsupported Caveman manifest schema",
+            ),
+            (
+                serde_json::json!({"id": "wrong", "version": "bad"}),
+                "Caveman manifest id must be caveman",
+            ),
+            (
+                serde_json::json!({"version": "v2.3.1", "source": "wrong"}),
+                "invalid Caveman version v2.3.1",
+            ),
+            (
+                serde_json::json!({"version": "2.3.2", "source": "wrong"}),
+                "Caveman version directory does not match manifest version 2.3.2",
+            ),
+            (
+                serde_json::json!({"source": "wrong", "commit": "bad"}),
+                "unexpected Caveman source",
+            ),
+            (
+                serde_json::json!({"commit": "bad", "tree_sha256": "bad"}),
+                "Caveman manifest commit must be a 40-character Git SHA",
+            ),
+            (
+                serde_json::json!({"tree_sha256": "bad"}),
+                "Caveman manifest tree digest must be SHA-256",
+            ),
+        ] {
+            let mut invalid = original.clone();
+            for (field, value) in changes.as_object().unwrap() {
+                invalid[field] = value.clone();
+            }
+            fs::write(&manifest_path, serde_json::to_vec(&invalid).unwrap()).unwrap();
+            assert_eq!(
+                validate_caveman_install(&allowed_root, &candidate)
+                    .unwrap_err()
+                    .to_string(),
+                expected
+            );
+        }
+        fs::write(&manifest_path, serde_json::to_vec(&original).unwrap()).unwrap();
 
         fs::write(candidate.join("skills/caveman/SKILL.md"), "changed\n").unwrap();
         assert!(
