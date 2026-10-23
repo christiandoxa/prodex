@@ -309,33 +309,6 @@ def prodex_optional_tool_descriptor_policy_v1(
     return kind | (capabilities << OPTIONAL_TOOL_CAP_SHIFT) | (super_default << OPTIONAL_TOOL_DEFAULT_SHIFT)
 
 
-@export("prodex_optional_tool_manifest_tree_supported_v1")
-def prodex_optional_tool_manifest_tree_supported_v1(
-    abi_version: Int64,
-    value_address: UInt,
-    value_length: Int64,
-    vetted_address: UInt,
-    vetted_length: Int64,
-    legacy_address: UInt,
-    legacy_length: Int64,
-) abi("C") -> Int64:
-    if abi_version != OPTIONAL_TOOLS_POLICY_ABI_VERSION:
-        return -2
-    if (
-        not optional_tool_valid(value_address, value_length)
-        or not optional_tool_valid(vetted_address, vetted_length)
-        or not optional_tool_valid(legacy_address, legacy_length)
-    ):
-        return -2
-    var value = optional_tool_view(value_address, value_length)
-    var vetted = optional_tool_view(vetted_address, vetted_length)
-    var legacy = optional_tool_view(legacy_address, legacy_length)
-    return Int64(
-        optional_tool_views_equal(value, vetted)
-        or optional_tool_views_equal(value, legacy)
-    )
-
-
 @export("prodex_optional_tool_hex_encode_v1")
 def prodex_optional_tool_hex_encode_v1(
     abi_version: Int64,
