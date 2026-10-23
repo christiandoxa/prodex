@@ -1,4 +1,5 @@
 from std.memory import Pointer
+from json_sink import JsonSink, js_byte, js_view
 
 from rich_text import rich_view_ptr, rich_view_valid
 from rich_types import ProdexRichStringView
@@ -452,4 +453,90 @@ def prodex_shared_attachment_policy_v1(
         shared_suffix(view, StringSlice(".jsonl"))
         or shared_suffix(view, StringSlice(".jsonl.zst"))
     )
+    return SHARED_ATTACHMENT_OK
+
+
+def shared_session_path_escape_width(view: ProdexRichStringView) -> Int64:
+    var source = rich_view_ptr(view)
+    var width = Int64(view.len) + 1
+    var run: Int64 = 0
+    for index in range(Int64(view.len)):
+        if source[unsafe_offset=index] == 92:
+            run += 1
+        elif run > 0:
+            width = min(width, run)
+            run = 0
+    if run > 0:
+        width = min(width, run)
+    return Int64(1) if width > Int64(view.len) else width
+
+
+def shared_emit_session_path(
+    sink: Pointer[mut=True, JsonSink, _], mode: Int64,
+    value: ProdexRichStringView, width: Int64,
+):
+    if width <= 1:
+        js_view(sink, value)
+        return
+    var source = rich_view_ptr(value)
+    var cursor: Int64 = 0
+    while cursor < Int64(value.len):
+        var start = cursor
+        while cursor < Int64(value.len) and source[unsafe_offset=cursor] != 92:
+            cursor += 1
+        js_view(sink, ProdexRichStringView(value.ptr + UInt(start), UInt(cursor - start)))
+        start = cursor
+        while cursor < Int64(value.len) and source[unsafe_offset=cursor] == 92:
+            cursor += 1
+        var run = cursor - start
+        # Both input lengths are bounded to 64 MiB, so this product fits Int64.
+        var count = (run + width - 1) // width if mode == 0 else run * width
+        if sink[].measuring:
+            sink[].written += count
+        else:
+            for _ in range(count):
+                js_byte(sink, 92)
+
+
+@export("prodex_shared_session_path_codec_v1")
+def prodex_shared_session_path_codec_v1(
+    abi_version: Int64, mode: Int64,
+    value_address: UInt, value_length: Int64,
+    template_address: UInt, template_length: Int64,
+    measuring: Int64, output_address: UInt, capacity: Int64, metadata_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != SHARED_ATTACHMENT_ABI_VERSION:
+        return SHARED_ATTACHMENT_ABI
+    if (
+        mode < 0 or mode > 1 or value_length < 0 or template_length < 0
+        or measuring < 0 or measuring > 1 or capacity < 0
+        or metadata_address == 0 or metadata_address % 8 != 0
+        or (measuring == 1 and (output_address != 0 or capacity != 0))
+        or (measuring == 0 and output_address == 0)
+    ):
+        return SHARED_ATTACHMENT_INVALID
+    var value = ProdexRichStringView(value_address, UInt(value_length))
+    var template = ProdexRichStringView(template_address, UInt(template_length))
+    if (
+        not rich_view_valid(value, SHARED_ATTACHMENT_MAX_BYTES)
+        or not rich_view_valid(template, SHARED_ATTACHMENT_MAX_BYTES)
+    ):
+        return SHARED_ATTACHMENT_INVALID
+    var width = shared_session_path_escape_width(value if mode == 0 else template)
+    var output = Pointer[mut=True, UInt8, MutUntrackedOrigin](unsafe_from_address=Int(output_address))
+    var sink = JsonSink(output, capacity, 0, True, False)
+    shared_emit_session_path(Pointer(to=sink), mode, value, width)
+    if sink.failed:
+        return 3
+    var required = sink.written
+    if measuring == 0:
+        if capacity < required:
+            return 3
+        sink = JsonSink(output, capacity, 0, False, False)
+        shared_emit_session_path(Pointer(to=sink), mode, value, width)
+        if sink.failed or sink.written != required:
+            return 3
+    var metadata = Pointer[mut=True, Int64, MutUntrackedOrigin](unsafe_from_address=Int(metadata_address))
+    metadata[unsafe_offset=0] = 1
+    metadata[unsafe_offset=1] = required
     return SHARED_ATTACHMENT_OK

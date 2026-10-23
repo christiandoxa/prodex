@@ -2420,27 +2420,32 @@
         "classification": "DETERMINISTIC_DOMAIN",
         "semantic_ranges": [
           {
-            "start": 20,
-            "end": 20
+            "start": 21,
+            "end": 21
           },
           {
-            "start": 72,
-            "end": 103
+            "start": 73,
+            "end": 104
           },
           {
-            "start": 309,
-            "end": 319
+            "start": 310,
+            "end": 320
           },
           {
-            "start": 325,
-            "end": 329
+            "start": 326,
+            "end": 330
+          },
+          {
+            "start": 457,
+            "end": 542
           }
         ],
         "production_reachable": true,
         "role": "semantic",
         "operations": [
           "shared_attachment_sqlite_header_classification",
-          "shared_codex_dynamic_file_name_classification"
+          "shared_codex_dynamic_file_name_classification",
+          "shared_attachment_windows_path_codec"
         ]
       },
       {
@@ -2926,6 +2931,27 @@
     "deepseek_chat_stream_event_translation"
   ],
   "authoritative_operations": [
+    {
+      "name": "shared_attachment_windows_path_codec",
+      "domain": "shared-codex-fs/session-path",
+      "introduced_in": "0.439.0",
+      "baseline_state": "Rust inferred the shortest backslash run and decoded or reproduced Windows session path escaping",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_shared_session_path_codec_v1",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/shared_attachment_policy.mojo",
+      "consumer": "crates/prodex-shared-codex-fs/src/image_attachments.rs",
+      "consumer_marker": "shared_attachment_policy::decode_session_path(",
+      "production_consumers": ["crates/prodex-shared-codex-fs/src/image_attachments.rs"],
+      "production_reachability_test": "crates/prodex-mojo-core/src/shared_attachment_policy/path_codec/tests.rs",
+      "rust_owner_before": "Shortest nonempty backslash-run selection, ceiling division of escaped runs, and repeated-backslash rendering",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "test-only original codec verifies Unicode, NUL, UNC, uneven/trailing runs and long input; native caller tests verify platform behavior",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "platform selection, OS path display and interpretation, validated caller-owned UTF-8 output, and protected filesystem operations; non-Windows paths retain literal backslashes"
+    },
     {
       "name": "runtime_cookie_relay_precedence",
       "domain": "runtime/cookies",

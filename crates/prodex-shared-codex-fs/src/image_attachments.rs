@@ -393,54 +393,33 @@ fn render_codex_session_path(path: &Path, raw_path: &str) -> String {
     let rendered = path.display().to_string();
     #[cfg(windows)]
     {
-        let escape_width = codex_session_path_escape_width(raw_path);
-        if escape_width > 1 {
-            return rendered.replace('\\', &"\\".repeat(escape_width));
-        }
+        prodex_mojo_core::shared_attachment_policy::render_session_path(&rendered, raw_path)
+            .expect("compiled Mojo session path rendering returned invalid output")
     }
-    let _ = raw_path;
-    rendered
+    #[cfg(not(windows))]
+    {
+        let _ = raw_path;
+        rendered
+    }
 }
 
 fn decode_codex_session_path(raw_path: &str) -> Cow<'_, str> {
     #[cfg(windows)]
     {
-        let escape_width = codex_session_path_escape_width(raw_path);
-        if escape_width > 1 {
-            let mut decoded = String::with_capacity(raw_path.len());
-            let mut backslashes = 0usize;
-            for character in raw_path.chars() {
-                if character == '\\' {
-                    backslashes += 1;
-                    continue;
-                }
-                decoded.extend(std::iter::repeat_n(
-                    '\\',
-                    backslashes.div_ceil(escape_width),
-                ));
-                backslashes = 0;
-                decoded.push(character);
-            }
-            decoded.extend(std::iter::repeat_n(
-                '\\',
-                backslashes.div_ceil(escape_width),
-            ));
-            return Cow::Owned(decoded);
-        }
+        Cow::Owned(
+            prodex_mojo_core::shared_attachment_policy::decode_session_path(raw_path)
+                .expect("compiled Mojo session path decoding returned invalid output"),
+        )
     }
-    Cow::Borrowed(raw_path)
+    #[cfg(not(windows))]
+    {
+        Cow::Borrowed(raw_path)
+    }
 }
 
-#[cfg(windows)]
-fn codex_session_path_escape_width(raw_path: &str) -> usize {
-    raw_path
-        .as_bytes()
-        .split(|byte| *byte != b'\\')
-        .map(<[u8]>::len)
-        .filter(|width| *width > 0)
-        .min()
-        .unwrap_or(1)
-}
+#[cfg(test)]
+#[path = "../tests/src/image_attachments/path_codec.rs"]
+mod path_codec_tests;
 
 fn codex_attachment_path_suffix(path: &Path) -> Option<PathBuf> {
     let components: Vec<_> = path.components().collect();
