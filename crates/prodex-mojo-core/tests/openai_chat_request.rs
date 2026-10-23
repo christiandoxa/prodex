@@ -143,9 +143,32 @@ fn raw_request_boundary_rejects_bad_abi_and_capacity_without_writes() {
     };
     let mut scratch = [empty];
     let raw = b"{}";
+    // Operation 1 is now the public-field shape validator, not an invalid tag.
+    // Its valid empty object produces no error; unknown operations still fail closed.
+    let mut shape_metadata = [31_i64; 2];
+    let shape_status = unsafe {
+        prodex_mojo_openai_chat_request_v1(
+            1,
+            1,
+            0,
+            &node as *const Node as u64,
+            1,
+            raw.as_ptr() as u64,
+            2,
+            scratch.as_mut_ptr() as u64,
+            1,
+            1,
+            0,
+            0,
+            shape_metadata.as_mut_ptr() as u64,
+        )
+    };
+    assert_eq!(shape_status, 0);
+    assert_eq!(shape_metadata, [0, 0]);
     for (abi, operation, flag, measuring, output_address, capacity, expected) in [
         (2, 0, 0, 1, 0, 0, 4),
-        (1, 1, 0, 1, 0, 0, 1),
+        (1, 2, 0, 1, 0, 0, 1),
+        (1, -1, 0, 1, 0, 0, 1),
         (1, 0, 1, 1, 0, 0, 1),
         (1, 0, 0, 2, 0, 0, 1),
         (1, 0, 0, 0, 0, 8, 1),
@@ -173,7 +196,10 @@ fn raw_request_boundary_rejects_bad_abi_and_capacity_without_writes() {
                 metadata.as_mut_ptr() as u64,
             )
         };
-        assert_eq!(status, expected);
+        assert_eq!(
+            status, expected,
+            "abi={abi} operation={operation} flag={flag} measuring={measuring}"
+        );
         assert_eq!(metadata, [31, 31]);
         assert_eq!(output, [0xa5; 8]);
     }
