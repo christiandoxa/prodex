@@ -111,7 +111,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     env:
-      MOJO_VERSION: "1.1.0"
+      MOJO_VERSION: "1.2.0"
       UV_VERSION: "0.11.7"
 
     steps:
@@ -124,13 +124,13 @@ jobs:
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
         with:
           path: target/mojo-runtime/x86_64-unknown-linux-gnu/libprodex_mojo_core.a
-          key: mojo-static-v2-${{ runner.os }}-x86_64-unknown-linux-gnu-x86-64-mojo-${{ env.MOJO_VERSION }}-rust1.99.0-${{ hashFiles('mojo/**/*.mojo', 'crates/prodex-mojo-core/build.rs', 'crates/prodex-mojo-core/build/*.rs', 'crates/prodex-mojo-core/Cargo.toml') }}
+          key: mojo-static-v2-${{ runner.os }}-x86_64-unknown-linux-gnu-x86-64-mojo-${{ env.MOJO_VERSION }}-rust1.99.1-${{ hashFiles('mojo/**/*.mojo', 'crates/prodex-mojo-core/build.rs', 'crates/prodex-mojo-core/build/*.rs', 'crates/prodex-mojo-core/Cargo.toml') }}
 
       - name: Install Rust toolchain
         if: ${{ steps.mojo-archive-cache.outputs.cache-hit != 'true' }}
         uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
         with:
-          toolchain: 1.99.0
+          toolchain: 1.99.1
           targets: x86_64-unknown-linux-gnu
 
       - name: Install pinned uv
@@ -211,7 +211,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     env:
-      MOJO_VERSION: "1.1.0"
+      MOJO_VERSION: "1.2.0"
       UV_VERSION: "0.11.7"
     strategy:
       fail-fast: false
@@ -237,13 +237,13 @@ jobs:
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
         with:
           path: target/mojo-runtime/${{ matrix.target }}/${{ matrix.archive_name }}
-          key: mojo-static-v2-${{ runner.os }}-${{ matrix.target }}-${{ matrix.mojo_target_cpu }}-mojo-${{ env.MOJO_VERSION }}-rust1.99.0-${{ hashFiles('mojo/**/*.mojo', 'crates/prodex-mojo-core/build.rs', 'crates/prodex-mojo-core/build/*.rs', 'crates/prodex-mojo-core/Cargo.toml') }}
+          key: mojo-static-v2-${{ runner.os }}-${{ matrix.target }}-${{ matrix.mojo_target_cpu }}-mojo-${{ env.MOJO_VERSION }}-rust1.99.1-${{ hashFiles('mojo/**/*.mojo', 'crates/prodex-mojo-core/build.rs', 'crates/prodex-mojo-core/build/*.rs', 'crates/prodex-mojo-core/Cargo.toml') }}
 
       - name: Install Rust target
         if: ${{ steps.mojo-archive-cache.outputs.cache-hit != 'true' }}
         uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
         with:
-          toolchain: 1.99.0
+          toolchain: 1.99.1
           targets: ${{ matrix.target }}
 
       - name: Install pinned uv
@@ -345,7 +345,7 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
         with:
-          toolchain: 1.99.0
+          toolchain: 1.99.1
           components: rustfmt
 
       - name: Check formatting
@@ -380,7 +380,7 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
         with:
-          toolchain: 1.99.0
+          toolchain: 1.99.1
 
       - name: Install sccache
         uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
@@ -450,7 +450,7 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
         with:
-          toolchain: 1.99.0
+          toolchain: 1.99.1
 
       - name: Install pinned fuzz toolchain
         run: rustup toolchain install nightly-2026-07-11 --profile minimal
@@ -595,7 +595,7 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
         with:
-          toolchain: 1.99.0
+          toolchain: 1.99.1
 
       - name: Install sccache
         uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
@@ -715,7 +715,7 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
         with:
-          toolchain: 1.99.0
+          toolchain: 1.99.1
 
       - name: Install sccache
         uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
@@ -801,7 +801,7 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
         with:
-          toolchain: 1.99.0
+          toolchain: 1.99.1
 
       - name: Install sccache
         uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
@@ -916,7 +916,7 @@ jobs:
         if: matrix.lane == 'static'
         uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
         with:
-          toolchain: 1.99.0
+          toolchain: 1.99.1
 
       - name: Install sccache
         if: matrix.lane == 'static'
@@ -1045,7 +1045,7 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
         with:
-          toolchain: 1.99.0
+          toolchain: 1.99.1
           components: clippy
 
       - name: Install sccache
@@ -1236,7 +1236,7 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
         with:
-          toolchain: 1.99.0
+          toolchain: 1.99.1
 
       - name: Install sccache
         uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
@@ -1394,7 +1394,7 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
         with:
-          toolchain: 1.99.0
+          toolchain: 1.99.1
 
       - name: Install sccache
         uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
@@ -1458,7 +1458,7 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
         with:
-          toolchain: 1.99.0
+          toolchain: 1.99.1
 
       - name: Install sccache
         uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
@@ -1500,7 +1500,7 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
         with:
-          toolchain: 1.99.0
+          toolchain: 1.99.1
 
       - name: Install sccache
         uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
@@ -1569,7 +1569,7 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
         with:
-          toolchain: 1.99.0
+          toolchain: 1.99.1
 
       - name: Install sccache
         uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
@@ -1612,7 +1612,7 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
         with:
-          toolchain: 1.99.0
+          toolchain: 1.99.1
 
       - name: Install sccache
         uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
@@ -1652,7 +1652,7 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
         with:
-          toolchain: 1.99.0
+          toolchain: 1.99.1
 
       - name: Install sccache
         uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
@@ -1716,7 +1716,7 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
         with:
-          toolchain: 1.99.0
+          toolchain: 1.99.1
 
       - name: Install sccache
         uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
@@ -1768,7 +1768,7 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
         with:
-          toolchain: 1.99.0
+          toolchain: 1.99.1
 
       - name: Install sccache
         uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
@@ -1862,7 +1862,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     env:
-      MOJO_VERSION: "1.1.0"
+      MOJO_VERSION: "1.2.0"
       PRODEX_MOJO_REQUIRED: "1"
       RUSTC_WRAPPER: sccache
       # Reuse the strict, pinned Mojo archive produced for this exact commit.
@@ -1881,7 +1881,7 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
         with:
-          toolchain: 1.99.0
+          toolchain: 1.99.1
           components: clippy
 
       - name: Install sccache
@@ -1961,7 +1961,7 @@ jobs:
             label: app, CLI, and Mojo core
     env:
       PRODEX_MOJO_REQUIRED: "1"
-      PRODEX_MOJO_VERSION: "1.1.0"
+      PRODEX_MOJO_VERSION: "1.2.0"
       RUSTC_WRAPPER: sccache
       PRODEX_MOJO_ARCHIVE: ${{ github.workspace }}/.prodex-ci/mojo-runtime/x86_64-unknown-linux-gnu/libprodex_mojo_core.a
 
@@ -1984,7 +1984,7 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
         with:
-          toolchain: 1.99.0
+          toolchain: 1.99.1
 
       - name: Install sccache
         uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11

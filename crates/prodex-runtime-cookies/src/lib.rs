@@ -241,7 +241,7 @@ impl RuntimeProxyCookieJar {
                 .unwrap_or_else(|poisoned| poisoned.into_inner());
             runtime_proxy_cookie_prune_expired_locked(&mut jar, now);
             if let Some(cookies) = jar.get(&key) {
-                let mut matching = cookies
+                let matching = cookies
                     .values()
                     .filter(|entry| {
                         !caller_names.contains(entry.name.as_str())
@@ -249,14 +249,20 @@ impl RuntimeProxyCookieJar {
                             && runtime_proxy_cookie_path_matches(path, &entry.path)
                     })
                     .collect::<Vec<_>>();
-                matching.sort_by(|left, right| {
-                    right
-                        .path
-                        .len()
-                        .cmp(&left.path.len())
-                        .then_with(|| left.name.cmp(&right.name))
-                });
-                for entry in matching {
+                let order = prodex_mojo_core::runtime_cookie_policy::cookie_relay_order(
+                    &matching
+                        .iter()
+                        .map(|entry| {
+                            prodex_mojo_core::runtime_cookie_policy::CookieRelayOrderInput {
+                                path_length: entry.path.len(),
+                                name: &entry.name,
+                            }
+                        })
+                        .collect::<Vec<_>>(),
+                )
+                .expect("compiled Mojo cookie relay precedence returned invalid output");
+                for index in order {
+                    let entry = matching[index];
                     relayed_segments.push(format!("{}={}", entry.name, entry.value));
                 }
             }

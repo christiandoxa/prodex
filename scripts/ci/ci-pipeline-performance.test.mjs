@@ -174,7 +174,7 @@ test("trusted main archive cache preserves strict Mojo compile and ABI verificat
     assert.match(block, /id: mojo-archive-cache/);
     assert.match(block, /if: \$\{\{ github.event_name == 'push' && github.ref == 'refs\/heads\/main' \}\}/);
     assert.match(block, /mojo-static-v2-/);
-    assert.match(block, /rust1\.99\.0/);
+    assert.match(block, /rust1\.99\.1/);
     assert.match(block, /env\.MOJO_VERSION/);
     for (const item of requiredHashes) {
       assert.ok(block.includes("'" + item + "'"), "cache fingerprint missing " + item);
@@ -228,7 +228,7 @@ test("release-only ARM64 archive cache is bounded, source-addressed and preserve
   assert.match(cache, /matrix\.target/);
   assert.match(cache, /matrix\.mojo-target-cpu/);
   assert.match(cache, /env\.MOJO_VERSION/);
-  assert.match(cache, /rust1\.99\.0/);
+  assert.match(cache, /rust1\.99\.1/);
   assert.match(archive, /- name: Verify target archive\n\s+shell: bash/);
   for (const input of [
     "mojo/**/*.mojo", "crates/prodex-mojo-core/build.rs",
@@ -451,7 +451,7 @@ test("stable cargo release dependency cache keeps version churn out without acce
   assert.match(cache, /Swatinem\/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6/);
   assert.match(cache, /add-rust-environment-hash-key: "false"/);
   assert.match(cache, /cache-workspace-crates: "false"/);
-  assert.match(cache, /release-deps-v1-rust1\.99\.0-thinlto-cgu16/);
+  assert.match(cache, /release-deps-v1-rust1\.99\.1-thinlto-cgu16/);
   assert.match(cache, /env\.MOJO_VERSION/);
   assert.match(cache, /runner\.os/);
   assert.match(cache, /runner\.arch/);

@@ -2524,17 +2524,24 @@ export function findViolations(files) {
   });
   const cookieEvictionMojoViolations = files.flatMap(([filePath, contents]) => {
     if (filePath === "crates/prodex-runtime-cookies/src/lib.rs") {
-      const missing = ["runtime_cookie_policy::oldest_timestamp_index"].filter(
+      const missing = [
+        "runtime_cookie_policy::oldest_timestamp_index",
+        "runtime_cookie_policy::cookie_relay_order(",
+      ].filter(
         (marker) => !contents.includes(marker),
       );
       if (contents.includes(".min_by_key(")) {
         missing.push("duplicate Rust cookie eviction comparator");
+      }
+      if (contents.includes(".sort_by(")) {
+        missing.push("duplicate Rust cookie relay comparator");
       }
       return missing.map((marker) => `${filePath}: cookie eviction must remain Mojo-owned (${marker})`);
     }
     if (filePath === "crates/prodex-mojo-core/src/runtime_cookie_policy.rs") {
       const required = [
         "prodex_runtime_cookie_oldest_timestamp_index_v1(",
+        "prodex_runtime_cookie_relay_order_v1(",
         "fn oldest_timestamp_index_chunk(",
         "pub fn oldest_timestamp_index(",
       ];
@@ -2542,8 +2549,11 @@ export function findViolations(files) {
         .map((marker) => `${filePath}: chunked Mojo cookie ordering must stay authoritative (${marker})`);
     }
     if (filePath === "mojo/prodex_core/runtime_cookie_policy.mojo") {
-      return contents.includes('@export("prodex_runtime_cookie_oldest_timestamp_index_v1")')
-        ? [] : [`${filePath}: cookie eviction ordering must remain Mojo-owned`];
+      return [
+        '@export("prodex_runtime_cookie_oldest_timestamp_index_v1")',
+        '@export("prodex_runtime_cookie_relay_order_v1")',
+      ].filter((marker) => !contents.includes(marker))
+        .map((marker) => `${filePath}: cookie ordering must remain Mojo-owned (${marker})`);
     }
     return [];
   });

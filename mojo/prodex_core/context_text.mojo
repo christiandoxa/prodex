@@ -2,6 +2,8 @@ from std.collections import Array
 
 from std.memory import Pointer
 from std.sys.info import align_of, size_of
+from rich_text import rich_view_compare
+from rich_types import ProdexRichStringView
 
 
 comptime CONTEXT_SIGNAL_COUNTER_COUNT: Int64 = 7
@@ -168,12 +170,9 @@ def context_text_hash(view: ProdexStringView) -> UInt64:
     if view.len == 0:
         return value
     ref ptr = view.ptr.unsafe_value()
-    var text = StringSlice(
-        unsafe_from_utf8=Span[UInt8](unsafe_ptr=ptr, length=Int(view.len))
-    )
-    var text_ptr = text.unsafe_ptr()
-    for index in range(Int64(text.byte_length())):
-        value = value ^ UInt64(text_ptr[unsafe_offset=index])
+    # Avoid Mojo 1.2's recursive CStringSpan constructor resolution for borrowed bytes.
+    for index in range(Int64(view.len)):
+        value = value ^ UInt64(ptr[unsafe_offset=index])
         value = (value << 7) | (value >> 57)
         value = value ^ (value >> 17)
     return value
@@ -186,17 +185,10 @@ def context_text_views_equal(
         return False
     if left.len == 0:
         return True
-    ref left_ptr = left.ptr.unsafe_value()
-    ref right_ptr = right.ptr.unsafe_value()
-    var left_text = StringSlice(
-        unsafe_from_utf8=Span[UInt8](unsafe_ptr=left_ptr, length=Int(left.len))
-    )
-    var right_text = StringSlice(
-        unsafe_from_utf8=Span[UInt8](
-            unsafe_ptr=right_ptr, length=Int(right.len)
-        )
-    )
-    return left_text == right_text
+    return rich_view_compare(
+        ProdexRichStringView(UInt(Int(left.ptr.unsafe_value())), left.len),
+        ProdexRichStringView(UInt(Int(right.ptr.unsafe_value())), right.len),
+    ) == 0
 
 
 def context_text_key_matches(

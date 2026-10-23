@@ -712,6 +712,14 @@
     },
     "additions": [
       {
+        "path": "mojo/prodex_core/runtime_cookie_policy.mojo",
+        "language": "mojo",
+        "classification": "DETERMINISTIC_DOMAIN",
+        "production_reachable": true,
+        "role": "semantic",
+        "operations": ["runtime_cookie_relay_precedence"]
+      },
+      {
         "path": "mojo/prodex_core/openai_chat_response_common.mojo",
         "language": "mojo",
         "classification": "DETERMINISTIC_DOMAIN",
@@ -2918,6 +2926,27 @@
     "deepseek_chat_stream_event_translation"
   ],
   "authoritative_operations": [
+    {
+      "name": "runtime_cookie_relay_precedence",
+      "domain": "runtime/cookies",
+      "introduced_in": "0.439.0",
+      "baseline_state": "Rust sorted security-filtered relay cookies by path length and cookie name",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_runtime_cookie_relay_order_v1",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/runtime_cookie_policy.mojo",
+      "consumer": "crates/prodex-runtime-cookies/src/lib.rs",
+      "consumer_marker": "runtime_cookie_policy::cookie_relay_order(",
+      "production_consumers": ["crates/prodex-runtime-cookies/src/lib.rs"],
+      "production_reachability_test": "crates/prodex-mojo-core/src/runtime_cookie_policy.rs",
+      "rust_owner_before": "Stable longest-path-first, bytewise cookie-name relay ordering",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "test-only comparator verifies exact ordering; caller assertions cover final HTTP and WebSocket headers",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "profile-scoped jar and locks, security eligibility, clocks, borrowed path lengths and cookie names, validated index permutation, and original cookie-value emission"
+    },
     {
       "name": "quota_watch_cadence_cache_lifetime",
       "domain": "runtime/quota-watch",
