@@ -13,7 +13,7 @@ use std::time::{Duration, Instant};
 use zeroize::Zeroizing;
 
 const OPENAI_TUNNEL_CLIENT_MINIMUM_VERSION: &str = "0.0.13";
-const OPENAI_TUNNEL_CLIENT_LATEST_STABLE_REFERENCE: &str = "0.0.16";
+const OPENAI_TUNNEL_CLIENT_LATEST_STABLE_REFERENCE: &str = "0.0.17";
 const OPENAI_TUNNEL_CLIENT_RELEASE_URL: &str =
     "https://github.com/openai/tunnel-client/releases/latest";
 const OPENAI_TUNNEL_CLIENT_READY_TIMEOUT: Duration = if cfg!(all(test, windows)) {

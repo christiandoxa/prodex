@@ -375,3 +375,35 @@ fn codex_resume_requested_includes_last_without_classifying_fork() {
         OsString::from("--last"),
     ]));
 }
+
+#[test]
+fn codex_0164_config_overrides_keep_root_exec_and_resume_scope_order() {
+    let session = "01900000-0000-7000-8000-000000000164";
+    let args = [
+        "-c",
+        "model=\"gpt-5.6\"",
+        "exec",
+        "--config",
+        "model_reasoning_effort=\"high\"",
+        "resume",
+        "-c",
+        "model_reasoning_effort=\"medium\"",
+        session,
+        "continue without replaying completed tools",
+    ]
+    .map(OsString::from);
+    let (normalized, review) = prepare_codex_launch_args(&args, false);
+    assert_eq!(normalized, args);
+    assert_eq!(codex_resume_session_id(&normalized), Some(session));
+    assert!(!review);
+}
+
+#[test]
+fn codex_0164_inline_native_commands_remain_prompt_text() {
+    let session = "01900000-0000-7000-8000-000000000164";
+    for prompt in ["/model gpt-5.6 high", "/permissions read-only", "/presets"] {
+        let args = ["resume", session, prompt].map(OsString::from);
+        assert_eq!(prepare_codex_launch_args(&args, false).0, args);
+        assert_eq!(codex_resume_session_id(&args), Some(session));
+    }
+}

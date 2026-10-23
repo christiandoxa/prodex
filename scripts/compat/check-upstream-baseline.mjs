@@ -30,7 +30,7 @@ const REQUIRED_CRITICAL_FILES = [
   "codex-rs/codex-api/src/endpoint/responses.rs",
   "codex-rs/codex-api/src/endpoint/responses_websocket.rs",
   "codex-rs/core/src/context/base_instructions.rs",
-  "codex-rs/core/src/context/world_state/base_instructions.rs",
+  "codex-rs/core/src/context/world_state/model.rs",
   "codex-rs/core/src/context/world_state/top_level_tools.rs",
   "codex-rs/core/src/tools/spec_plan.rs",
   "codex-rs/protocol/src/turn_input.rs",
@@ -81,6 +81,11 @@ const REQUIRED_CRITICAL_FILES = [
   "codex-rs/core/src/responses_retry.rs",
   "codex-rs/codex-api/src/common.rs",
   "codex-rs/core/src/cyber_access_program.rs",
+  "codex-rs/cli/src/config_override_args.rs",
+  "codex-rs/core/src/compact.rs",
+  "codex-rs/core/src/session/async_compaction.rs",
+  "codex-rs/thread-store/src/local/read_thread.rs",
+  "codex-rs/app-server/src/request_processors/persisted_resume_settings.rs",
 ];
 
 const REQUIRED_FILE_CONTAINS = {
@@ -127,7 +132,7 @@ const REQUIRED_FILE_CONTAINS = {
     "responses_request_properties_mismatch",
     "responses_session_id",
     "session_source.is_non_root_agent()",
-    "prompt_cache_key(metadata)",
+    "self.session_derived_cache_key(metadata)",
     "clear_tool_result_metadata",
     "include_internal",
     ".include_internal_metadata(&client_setup.api_provider)",
@@ -138,6 +143,10 @@ const REQUIRED_FILE_CONTAINS = {
     "create_tools_raw_json_for_responses_api(&prompt.tools)?.into()",
     "BaseInstructionsFragment(",
     "input.splice(0..0, prefix);",
+    "PromptCacheKey::SessionDerived => Some(self.session_derived_cache_key(metadata))",
+    "PromptCacheKey::Custom(key) => Some(key.clone())",
+    "PromptCacheKey::Omit => None",
+    "prompt_cache_key: self.prompt_cache_key(responses_metadata)",
   ],
   "codex-rs/core/src/compact_remote_v2.rs": [
     "run_remote_compact_task",
@@ -177,7 +186,11 @@ const REQUIRED_FILE_CONTAINS = {
     "CodexResponsesRequestKind",
     "to_responses_metadata",
     "responses_metadata_template",
-    "set_responsesapi_client_metadata",
+    "update_responsesapi_client_metadata",
+    "update.replacement.map(filter_extra_metadata)",
+    "update.patch.map(filter_extra_metadata).unwrap_or_default()",
+    "current.extend(patch);",
+    "current.insert(\"misalignment_override\".to_string(), continuation);",
   ],
   "codex-rs/core/src/responses_metadata.rs": [
     "CodexResponsesMetadata",
@@ -472,15 +485,20 @@ const REQUIRED_FILE_CONTAINS = {
   ],
   "codex-rs/core/src/context/base_instructions.rs": [
     "pub(crate) const KIND: &str = \"model.base_instructions\";",
-    "pub(crate) fn matches_item(item: &ResponseItem) -> bool",
+    "pub(crate) fn text_from_item(item: &ResponseItem) -> Option<&str>",
     "internal_chat_message_metadata_passthrough: Some(metadata)",
     "kind.as_str() == Self::KIND",
   ],
-  "codex-rs/core/src/context/world_state/base_instructions.rs": [
-    "pub(crate) struct BaseInstructionsState(pub(crate) String);",
-    "const ID: &'static str = \"base_instructions\";",
-    "WorldStateUpdate::optional_prefix_boxed_fragment",
-    "PreviousSectionState::Absent",
+  "codex-rs/core/src/context/world_state/model.rs": [
+      "pub(crate) enum ModelInstructionsSnapshot",
+      "pub(crate) struct ModelInstructionsState",
+      "pub(crate) fn for_incremental_tools",
+      "const ID: &'static str = \"model\";",
+      "ModelInstructionsSnapshot::WithInstructions",
+      "WorldStateUpdate::prefix_item",
+      "BaseInstructionsFragment(self.instructions.clone())",
+      "instructions_changed",
+      "WorldStateUpdate::optional_standalone_boxed_fragment(fragment)"
   ],
   "codex-rs/core/src/context/world_state/top_level_tools.rs": [
     "pub(crate) struct TopLevelToolsState",
@@ -762,6 +780,9 @@ const REQUIRED_FILE_CONTAINS = {
     "pub parent_turn_id: Option<String>",
     "pub root_turn_id: Option<String>",
     "pub environments: Option<Vec<TurnEnvironmentParams>>",
+    "turn/start.responsesapiClientMetadataPatch",
+    "turn/steer.responsesapiClientMetadataPatch",
+    "pub responsesapi_client_metadata_patch: Option<HashMap<String, String>>",
   ],
   "codex-rs/app-server-protocol/src/protocol/v2/environment.rs": [
     "EnvironmentAddParams",
@@ -791,6 +812,12 @@ const REQUIRED_FILE_CONTAINS = {
     "ThreadForkParams",
     "ThreadCompactStartParams",
     "ConnectionRequestId",
+    "latest_persisted_model_settings(&thread_history)",
+    "typesafe_overrides.service_tier.is_none() && !has_override(\"service_tier\")",
+    "let restore_summary = !has_override(\"model_reasoning_summary\")",
+    "config.service_tier.clone_from(&settings.service_tier)",
+    "config.model_reasoning_summary = settings.reasoning_summary",
+    "existing_thread.resume_config_snapshot().await",
   ],
   "codex-rs/app-server/src/request_processors/turn_processor.rs": [
     "TurnRequestProcessor",
@@ -842,7 +869,7 @@ const REQUIRED_FILE_CONTAINS = {
     "RouteAwareClientPool::new_without_redirects",
     "{}/wham/security-setup",
     "config.chatgpt_base_url.trim_end_matches('/')",
-    "auth_provider_from_auth(&auth).to_auth_headers()",
+    "auth_provider_from_auth(&auth)\n                        .to_auth_headers()\n                        .ok()?",
     "url.host_str() == Some(\"chatgpt.com\")",
     "Duration::from_secs(3)",
   ],
@@ -854,6 +881,12 @@ const REQUIRED_FILE_CONTAINS = {
     "matches!(&self.catalog_source, CatalogSource::ExplicitProvider(_))",
     "current.models.clear();",
     "if !remote_only && let Some(mut models) = self.catalog_source.fallback_models()",
+    "let access_denied = matches!(error.http_status_code_value(), Some(401 | 403));",
+    "CodexErrorDetails::RefreshTokenFailed(_)",
+    "CodexErrorDetails::GatewayLoginRequired(_)",
+    "if is_provider_catalog && (access_denied || credentials_rejected)",
+    "request_identity != self.endpoint_client.identity()",
+    "entry.identity == self.endpoint_client.identity()",
   ],
   "codex-rs/tui/src/app_server_session/provider_selection.rs": [
     "Provider request overrides honor managed requirements over explicit invocation choices.",
@@ -947,6 +980,42 @@ const REQUIRED_FILE_CONTAINS = {
     "Feature::ApiKeyCyberAccessPrograms",
     "if auth.is_chatgpt_auth()",
     "if !auth.is_api_key_auth()",
+  ],
+  "codex-rs/cli/src/config_override_args.rs": [
+      "pub(super) fn try_parse_from",
+      "localize_config_arg(MultitoolCli::command()).try_get_matches_from(args)?",
+      "std::iter::successors(Some(&matches)",
+      "scope.get_many::<String>(\"raw_overrides\")",
+      ".mut_arg(\"raw_overrides\", |arg| arg.global(false))",
+      ".mut_subcommands(localize_config_arg)"
+  ],
+  "codex-rs/core/src/compact.rs": [
+      "Keep each attempt isolated until the response completes successfully.",
+      "Ok(ResponseEvent::OutputItemDone(item)) => output.push(item)",
+      "for item in std::mem::take(&mut output)",
+      "sess.record_annotated_conversation_items",
+      "sess.record_observed_response_completed"
+  ],
+  "codex-rs/core/src/session/async_compaction.rs": [
+      "let mut result = state.async_compaction.result.take()?",
+      "Err(oneshot::error::TryRecvError::Empty)",
+      "state.async_compaction.result = Some(result);",
+      "Err(oneshot::error::TryRecvError::Closed) => return None"
+  ],
+  "codex-rs/thread-store/src/local/read_thread.rs": [
+      "resolve_requested_rollout_path",
+      "let mut retries_remaining = 3;",
+      "codex_rollout::existing_rollout_path(path.as_path()).await",
+      "std::fs::canonicalize(&resolved_path)",
+      "err.kind() == std::io::ErrorKind::NotFound && retries_remaining > 0"
+  ],
+  "codex-rs/app-server/src/request_processors/persisted_resume_settings.rs": [
+      "pub(super) fn latest_persisted_model_settings",
+      "InitialHistory::Resumed(history)",
+      "EventMsg::ThreadSettingsApplied(event)",
+      "thread_id == history.conversation_id",
+      "Some(_) => crossed_foreign_snapshot = true",
+      "None if !crossed_foreign_snapshot => return Some(&event.thread_settings)"
   ],
 };
 
@@ -1797,7 +1866,7 @@ const REQUIRED_SEMANTIC_CHECKS = [
       "RouteAwareClientPool::new_without_redirects",
       "{}/wham/security-setup",
       "config.chatgpt_base_url.trim_end_matches('/')",
-      "auth_provider_from_auth(&auth).to_auth_headers()",
+      "auth_provider_from_auth(&auth)\n                        .to_auth_headers()\n                        .ok()?",
       "url.host_str() == Some(\"chatgpt.com\")",
       "Duration::from_secs(3)",
     ],
@@ -2000,7 +2069,7 @@ const REQUIRED_SEMANTIC_CHECKS = [
     file: "codex-rs/core/src/context/base_instructions.rs",
     file_contains_all: [
       "pub(crate) const KIND: &str = \"model.base_instructions\";",
-      "pub(crate) fn matches_item(item: &ResponseItem) -> bool",
+      "pub(crate) fn text_from_item(item: &ResponseItem) -> Option<&str>",
       "internal_chat_message_metadata_passthrough: Some(metadata)",
       "kind.as_str() == Self::KIND",
     ],
@@ -2201,6 +2270,144 @@ const REQUIRED_SEMANTIC_CHECKS = [
       "Reconnecting... waiting for network",
       "Duration::from_secs(60)",
       "tokio::time::sleep(retry_delay).await;"
+    ]
+  },
+  {
+    "id": "responses.prompt-cache-key-independent",
+    "kind": "affinity_contract",
+    "file": "codex-rs/core/src/client.rs",
+    "file_contains_all": [
+      "PromptCacheKey::SessionDerived => Some(self.session_derived_cache_key(metadata))",
+      "PromptCacheKey::Custom(key) => Some(key.clone())",
+      "PromptCacheKey::Omit => None",
+      "self.session_derived_cache_key(metadata)",
+      "prompt_cache_key: self.prompt_cache_key(responses_metadata)"
+    ]
+  },
+  {
+    "id": "turn-metadata.replacement-then-patch",
+    "kind": "metadata_group",
+    "file": "codex-rs/core/src/turn_metadata.rs",
+    "file_contains_all": [
+      "update_responsesapi_client_metadata",
+      "update.replacement.map(filter_extra_metadata)",
+      "update.patch.map(filter_extra_metadata).unwrap_or_default()",
+      "current.extend(patch);",
+      "current.insert(\"misalignment_override\".to_string(), continuation);"
+    ]
+  },
+  {
+    "id": "app-server.client-metadata-patch-wire",
+    "kind": "jsonrpc_schema",
+    "file": "codex-rs/app-server-protocol/src/protocol/v2/turn.rs",
+    "file_contains_all": [
+      "turn/start.responsesapiClientMetadataPatch",
+      "turn/steer.responsesapiClientMetadataPatch",
+      "pub responsesapi_client_metadata_patch: Option<HashMap<String, String>>"
+    ]
+  },
+  {
+    "id": "models.provider-transient-refresh-retains-snapshot",
+    "kind": "cache_identity",
+    "file": "codex-rs/models-manager/src/manager.rs",
+    "file_contains_all": [
+      "let access_denied = matches!(error.http_status_code_value(), Some(401 | 403));",
+      "CodexErrorDetails::RefreshTokenFailed(_)",
+      "CodexErrorDetails::GatewayLoginRequired(_)",
+      "if is_provider_catalog && (access_denied || credentials_rejected)",
+      "request_identity != self.endpoint_client.identity()",
+      "current.models.clear();",
+      "entry.identity == self.endpoint_client.identity()"
+    ]
+  },
+  {
+    "id": "context.incremental-model-instructions",
+    "kind": "context_boundary",
+    "file": "codex-rs/core/src/context/world_state/model.rs",
+    "file_contains_all": [
+      "pub(crate) enum ModelInstructionsSnapshot",
+      "pub(crate) struct ModelInstructionsState",
+      "pub(crate) fn for_incremental_tools",
+      "const ID: &'static str = \"model\";",
+      "ModelInstructionsSnapshot::WithInstructions",
+      "WorldStateUpdate::prefix_item",
+      "BaseInstructionsFragment(self.instructions.clone())",
+      "instructions_changed",
+      "WorldStateUpdate::optional_standalone_boxed_fragment(fragment)"
+    ]
+  },
+  {
+    "id": "cli.config-overrides-across-scopes",
+    "kind": "cli_contract",
+    "file": "codex-rs/cli/src/config_override_args.rs",
+    "file_contains_all": [
+      "pub(super) fn try_parse_from",
+      "localize_config_arg(MultitoolCli::command()).try_get_matches_from(args)?",
+      "std::iter::successors(Some(&matches)",
+      "scope.get_many::<String>(\"raw_overrides\")",
+      ".mut_arg(\"raw_overrides\", |arg| arg.global(false))",
+      ".mut_subcommands(localize_config_arg)"
+    ]
+  },
+  {
+    "id": "compact.failed-attempt-history-isolation",
+    "kind": "retry_lifecycle",
+    "file": "codex-rs/core/src/compact.rs",
+    "file_contains_all": [
+      "Keep each attempt isolated until the response completes successfully.",
+      "Ok(ResponseEvent::OutputItemDone(item)) => output.push(item)",
+      "for item in std::mem::take(&mut output)",
+      "sess.record_annotated_conversation_items",
+      "sess.record_observed_response_completed"
+    ]
+  },
+  {
+    "id": "compact.background-closed-receiver",
+    "kind": "retry_lifecycle",
+    "file": "codex-rs/core/src/session/async_compaction.rs",
+    "file_contains_all": [
+      "let mut result = state.async_compaction.result.take()?",
+      "Err(oneshot::error::TryRecvError::Empty)",
+      "state.async_compaction.result = Some(result);",
+      "Err(oneshot::error::TryRecvError::Closed) => return None"
+    ]
+  },
+  {
+    "id": "resume.compressed-rollout-resolution",
+    "kind": "session_lifecycle",
+    "file": "codex-rs/thread-store/src/local/read_thread.rs",
+    "file_contains_all": [
+      "resolve_requested_rollout_path",
+      "let mut retries_remaining = 3;",
+      "codex_rollout::existing_rollout_path(path.as_path()).await",
+      "std::fs::canonicalize(&resolved_path)",
+      "err.kind() == std::io::ErrorKind::NotFound && retries_remaining > 0"
+    ]
+  },
+  {
+    "id": "resume.persisted-model-settings-owner",
+    "kind": "session_lifecycle",
+    "file": "codex-rs/app-server/src/request_processors/persisted_resume_settings.rs",
+    "file_contains_all": [
+      "pub(super) fn latest_persisted_model_settings",
+      "InitialHistory::Resumed(history)",
+      "EventMsg::ThreadSettingsApplied(event)",
+      "thread_id == history.conversation_id",
+      "Some(_) => crossed_foreign_snapshot = true",
+      "None if !crossed_foreign_snapshot => return Some(&event.thread_settings)"
+    ]
+  },
+  {
+    "id": "resume.model-settings-explicit-overrides",
+    "kind": "session_lifecycle",
+    "file": "codex-rs/app-server/src/request_processors/thread_processor.rs",
+    "file_contains_all": [
+      "latest_persisted_model_settings(&thread_history)",
+      "typesafe_overrides.service_tier.is_none() && !has_override(\"service_tier\")",
+      "let restore_summary = !has_override(\"model_reasoning_summary\")",
+      "config.service_tier.clone_from(&settings.service_tier)",
+      "config.model_reasoning_summary = settings.reasoning_summary",
+      "existing_thread.resume_config_snapshot().await"
     ]
   },
 ];
@@ -2769,6 +2976,32 @@ function runSelfTest() {
   const valid = validateBaseline(buildSelfTestBaseline());
   if (valid.errors.length > 0) {
     throw new Error(`self-test valid baseline failed: ${valid.errors.join("; ")}`);
+  }
+
+  // Every 0.164 contract must stay mandatory; losing its decisive marker fails closed.
+  for (const id of [
+    "responses.prompt-cache-key-independent",
+    "turn-metadata.replacement-then-patch",
+    "app-server.client-metadata-patch-wire",
+    "models.provider-transient-refresh-retains-snapshot",
+    "context.incremental-model-instructions",
+    "cli.config-overrides-across-scopes",
+    "compact.failed-attempt-history-isolation",
+    "compact.background-closed-receiver",
+    "resume.compressed-rollout-resolution",
+    "resume.persisted-model-settings-owner",
+    "resume.model-settings-explicit-overrides"
+]) {
+    const required = REQUIRED_SEMANTIC_CHECKS.find((check) => check.id === id);
+    const marker = required.file_contains_all[0];
+    assertSelfTestError({
+      name: `${id} marker removal`,
+      mutate: (compat) => {
+        const check = semanticCheck(compat, id);
+        check.file_contains_all = check.file_contains_all.filter((value) => value !== marker);
+      },
+      expectedMessage: `codex.compatibility.semantic_checks.${id}.file_contains_all missing ${JSON.stringify(marker)}`,
+    });
   }
 
   assertSelfTestError({

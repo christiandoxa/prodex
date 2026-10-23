@@ -1,0 +1,77 @@
+{
+  "schema_version": 1,
+  "release": "rust-v0.164.0",
+  "release_url": "https://github.com/openai/codex/releases/tag/rust-v0.164.0",
+  "published_at": "2026-10-23T04:48:10Z",
+  "previous_commit": "83086188ae0614bd882818ff1aa23f3194962012",
+  "tag_object": "fe3b29455488c2e189e43ad5526a107900c5e1b7",
+  "commit": "6aaac694803004a63c6f393d153c96d22521a6b9",
+  "source_archive_sha256": "952c3b6f476e063f4bce2b6760ac76c07d5a0f839c5ded1dd0d7b2f95b1795a7",
+  "tagged_delta": {
+    "files": 1898,
+    "insertions": 95636,
+    "deletions": 19067
+  },
+  "source_contracts": {
+    "critical_files": 82,
+    "semantic_groups": 101,
+    "new_required_groups": 11
+  },
+  "reviewed_owners": {
+    "codex-rs/core/src/client.rs": "f019ea748a1692e51b8467a808af2610db493b7e29b1809b16336e7fb976d68a",
+    "codex-rs/core/src/turn_metadata.rs": "2fac79a2d70ce18ad7bc0aa77f2259da8fbe85334a68d2f0e70188cd2f6bf28c",
+    "codex-rs/models-manager/src/manager.rs": "dff3f90e9690aad5b57a52a1c3079d9ccb12a4c71a5ea7f7afdbcbe253907eff",
+    "codex-rs/core/src/context/world_state/model.rs": "86018bb56c9591f09c000747548c2cc5ec34d934db47396429899dc365a1cf42",
+    "codex-rs/core/src/context/base_instructions.rs": "62a326271c0dc7f413c2ffc8e0d684b08fac6c3d4c6348f968344fcdc72bbf6c",
+    "codex-rs/tui/src/security_setup.rs": "78dfc5c6d075a8c1c045a8d8c133fa9a478a3fc1e1ce1f7afa07b60d4f5213c9",
+    "codex-rs/app-server-protocol/src/protocol/v2/turn.rs": "f002e06cb8c505d737dd208ad3deab6fb837bc963d8462d24e98c010c242e9e0",
+    "codex-rs/cli/src/config_override_args.rs": "e26d6455ef6e5069bcd700fd4caefa2e00bb1b02a94ac7cc2e349ea44b4ef95a",
+    "codex-rs/core/src/compact.rs": "8fdc85c3ccfb66cc41855622cd3219c43d3d55930c7a0e2595f29caaa74f895d",
+    "codex-rs/core/src/session/async_compaction.rs": "275a1ea41773da9644e9f03d41548fed92cf4ad8891a0b4fcd61675ff64ef909",
+    "codex-rs/thread-store/src/local/read_thread.rs": "a20101d62bedb87d63640a8723d84034bdf7dce9387c1daeb2387b14781dc335",
+    "codex-rs/app-server/src/request_processors/persisted_resume_settings.rs": "026c95a1ee73af9e5d692898a8901caabf262de3f7570a2f73a3cfe3864e12fb",
+    "codex-rs/app-server/src/request_processors/thread_processor.rs": "0c806ff3aaf348f7373032171d55ff110dfd30bcbb5cfabded89330b5b4375b6"
+  },
+  "official_binary_probes": {
+    "platform": "x86_64-unknown-linux-musl",
+    "codex": {
+      "asset": "codex-x86_64-unknown-linux-musl.zst",
+      "sha256": "be6825b7a9a1511d10093df93715c1b5b75d1b543613f5c42e7cc1141688d7f5",
+      "published_digest": "sha256:be6825b7a9a1511d10093df93715c1b5b75d1b543613f5c42e7cc1141688d7f5",
+      "binary_sha256": "b93f6811d3f653f0fb83be4050d857fb9abbb111dfa2ce160563327daff7f306"
+    },
+    "app_server": {
+      "asset": "codex-app-server-x86_64-unknown-linux-musl.zst",
+      "sha256": "7aefc55b1f0e31cabe2d02fa02c969d8b1602c97d239b2fe6ba82660567b84c3",
+      "published_digest": "sha256:7aefc55b1f0e31cabe2d02fa02c969d8b1602c97d239b2fe6ba82660567b84c3",
+      "binary_sha256": "27e9426359a5b34b8de3c10efd60765924929b6a61ea8d2b8b4e05c00abad6bc"
+    },
+    "commands": [
+      "--version",
+      "app-server --help",
+      "initialize + initialized + thread/list",
+      "app-server --print-startup-config with root and subcommand overrides",
+      "app-server generate-json-schema --experimental"
+    ],
+    "live_model_turns": 0,
+    "credentials_provided": false
+  },
+  "tunnel_client": {
+    "version": "0.0.17",
+    "source_commit": "a248b7f725fc989c1eb26680cf4351ee33421f61",
+    "sha256": "bd6a57c6c0511644267cafadd13ffdb53ece0d753e0b88857f957e78a8fbc793",
+    "asset": "tunnel-client-v0.0.17-linux-amd64.zip",
+    "checks": [
+      "--version",
+      "--help",
+      "codex --help"
+    ],
+    "live_tunnel_created": false
+  },
+  "kiro_packaging": {
+    "version": "2.33.1",
+    "manifest_url": "https://prod.download.cli.kiro.dev/stable/latest/manifest.json",
+    "manifest_sha256": "62a0614fedbf5eecc81b36a0581396ef823080ffd5e7c682de19dcd99c819b80",
+    "verification_scope": "stable-manifest version and existing packaging digest enforcement"
+  }
+}
