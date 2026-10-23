@@ -14,6 +14,8 @@ fn runtime_proxy_http_memory_consolidation_metadata_survives_precommit_rotation(
         "sandbox_mode": "read-only",
         "thread_source": "memory_consolidation",
         "future_metadata": {"preserve": true},
+        "root_turn_id": "root-0164",
+        "reviewed_patch_label": "native-merged-metadata",
     })
     .to_string();
     let body = serde_json::json!({

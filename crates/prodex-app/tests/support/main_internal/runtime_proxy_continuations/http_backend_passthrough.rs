@@ -182,6 +182,7 @@ fn runtime_proxy_http_does_not_synthesize_user_agent() {
             proxy.listen_addr
         ))
         .header(reqwest::header::CONTENT_TYPE, "application/json")
+        .header("session_id", "session-with-omitted-cache-key-0164")
         .body(serde_json::json!({"model": "gpt-5", "input": "hello"}).to_string())
         .send()
         .expect("responses request should succeed");
@@ -193,8 +194,32 @@ fn runtime_proxy_http_does_not_synthesize_user_agent() {
         1,
         "backend should observe one responses request: {responses_headers:?}"
     );
+    assert_eq!(responses_headers[0].get("session_id").map(String::as_str), Some("session-with-omitted-cache-key-0164"));
+    let forwarded: serde_json::Value = serde_json::from_str(&backend.responses_bodies()[0]).unwrap();
+    assert!(forwarded.get("prompt_cache_key").is_none(), "native omitted cache key must remain omitted");
     assert!(
         !responses_headers[0].contains_key("user-agent"),
         "proxy should not synthesize User-Agent; upstream Codex owns client/version headers"
     );
+
+    // Codex 0.164 can supply a custom cache identity unrelated to session_id.
+    // Use the existing single-profile fixture: this verifies transport bytes,
+    // not the separate multi-profile cache-key placement policy.
+    let custom = serde_json::json!({
+        "model": "gpt-5", "input": "hello again",
+        "prompt_cache_key": "custom-cache-key-not-session-0164",
+        "client_metadata": {"root_turn_id": "root-0164", "native_patch_result": "preserve"},
+    });
+    let response = Client::builder().no_proxy().build().expect("client")
+        .post(format!("http://{}/backend-api/prodex/responses", proxy.listen_addr))
+        .header(reqwest::header::CONTENT_TYPE, "application/json")
+        .header("session_id", "independent-session-0164")
+        .body(custom.to_string()).send().expect("custom-cache response");
+    assert_eq!(response.status().as_u16(), 200);
+    let headers = backend.responses_headers();
+    assert_eq!(headers.len(), 2);
+    assert_eq!(headers[1].get("session_id").map(String::as_str), Some("independent-session-0164"));
+    assert!(!headers[1].contains_key("user-agent"));
+    let forwarded: serde_json::Value = serde_json::from_str(&backend.responses_bodies()[1]).unwrap();
+    assert_eq!(forwarded, custom, "cache identity and merged native metadata must pass unchanged");
 }

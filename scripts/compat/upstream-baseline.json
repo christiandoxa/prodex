@@ -2,7 +2,7 @@
   "codex": {
     "compatibility": {
       "upstream_repository": "https://github.com/openai/codex",
-      "baseline_source": "openai/codex rust-v0.162.1 release",
+      "baseline_source": "openai/codex rust-v0.164.0 release",
       "guard_command": "node scripts/compat/check-upstream-baseline.mjs",
       "format_version": 2,
       "critical_files": [
@@ -54,7 +54,7 @@
             "build_responses_request",
             "responses_session_id",
             "session_source.is_non_root_agent()",
-            "prompt_cache_key(metadata)",
+            "self.session_derived_cache_key(metadata)",
             "clear_tool_result_metadata",
             "include_internal",
             ".include_internal_metadata(&client_setup.api_provider)",
@@ -64,7 +64,11 @@
             "create_tools_json_for_responses_lite(&prompt.tools)?",
             "create_tools_raw_json_for_responses_api(&prompt.tools)?.into()",
             "BaseInstructionsFragment(",
-            "input.splice(0..0, prefix);"
+            "input.splice(0..0, prefix);",
+            "PromptCacheKey::SessionDerived => Some(self.session_derived_cache_key(metadata))",
+            "PromptCacheKey::Custom(key) => Some(key.clone())",
+            "PromptCacheKey::Omit => None",
+            "prompt_cache_key: self.prompt_cache_key(responses_metadata)"
           ]
         },
         {
@@ -113,10 +117,14 @@
             "CodexResponsesRequestKind",
             "to_responses_metadata",
             "responses_metadata_template",
-            "set_responsesapi_client_metadata",
+            "update_responsesapi_client_metadata",
             "ThreadSource",
             "thread_source",
-            "ThreadSource::MemoryConsolidation"
+            "ThreadSource::MemoryConsolidation",
+            "update.replacement.map(filter_extra_metadata)",
+            "update.patch.map(filter_extra_metadata).unwrap_or_default()",
+            "current.extend(patch);",
+            "current.insert(\"misalignment_override\".to_string(), continuation);"
           ]
         },
         {
@@ -804,7 +812,13 @@
             "ThreadResumeParams",
             "ThreadForkParams",
             "ThreadCompactStartParams",
-            "ConnectionRequestId"
+            "ConnectionRequestId",
+            "latest_persisted_model_settings(&thread_history)",
+            "typesafe_overrides.service_tier.is_none() && !has_override(\"service_tier\")",
+            "let restore_summary = !has_override(\"model_reasoning_summary\")",
+            "config.service_tier.clone_from(&settings.service_tier)",
+            "config.model_reasoning_summary = settings.reasoning_summary",
+            "existing_thread.resume_config_snapshot().await"
           ]
         },
         {
@@ -911,7 +925,7 @@
             "RouteAwareClientPool::new_without_redirects",
             "{}/wham/security-setup",
             "config.chatgpt_base_url.trim_end_matches('/')",
-            "auth_provider_from_auth(&auth).to_auth_headers()",
+            "auth_provider_from_auth(&auth)\n                        .to_auth_headers()\n                        .ok()?",
             "url.host_str() == Some(\"chatgpt.com\")",
             "Duration::from_secs(3)"
           ]
@@ -926,7 +940,13 @@
             "self.remote_models.get_mut().models.clear();",
             "matches!(&self.catalog_source, CatalogSource::ExplicitProvider(_))",
             "current.models.clear();",
-            "if !remote_only && let Some(mut models) = self.catalog_source.fallback_models()"
+            "if !remote_only && let Some(mut models) = self.catalog_source.fallback_models()",
+            "let access_denied = matches!(error.http_status_code_value(), Some(401 | 403));",
+            "CodexErrorDetails::RefreshTokenFailed(_)",
+            "CodexErrorDetails::GatewayLoginRequired(_)",
+            "if is_provider_catalog && (access_denied || credentials_rejected)",
+            "request_identity != self.endpoint_client.identity()",
+            "entry.identity == self.endpoint_client.identity()"
           ]
         },
         {
@@ -1094,19 +1114,24 @@
           "reason": "Owns stable identity matching for base-instruction items in incremental Responses Lite context.",
           "required_contains": [
             "pub(crate) const KIND: &str = \"model.base_instructions\";",
-            "pub(crate) fn matches_item(item: &ResponseItem) -> bool",
+            "pub(crate) fn text_from_item(item: &ResponseItem) -> Option<&str>",
             "internal_chat_message_metadata_passthrough: Some(metadata)",
             "kind.as_str() == Self::KIND"
           ]
         },
         {
-          "path": "codex-rs/core/src/context/world_state/base_instructions.rs",
-          "reason": "Owns prefix placement and snapshot hashing for base instructions in incremental world state.",
+          "path": "codex-rs/core/src/context/world_state/model.rs",
+          "reason": "Codex 0.164 moves initial base instructions and incremental model/instruction refresh into ModelInstructionsState; retain stable history identity without rebuilding native world-state policy in Prodex.",
           "required_contains": [
-            "pub(crate) struct BaseInstructionsState(pub(crate) String);",
-            "const ID: &'static str = \"base_instructions\";",
-            "WorldStateUpdate::optional_prefix_boxed_fragment",
-            "PreviousSectionState::Absent"
+            "pub(crate) enum ModelInstructionsSnapshot",
+            "pub(crate) struct ModelInstructionsState",
+            "pub(crate) fn for_incremental_tools",
+            "const ID: &'static str = \"model\";",
+            "ModelInstructionsSnapshot::WithInstructions",
+            "WorldStateUpdate::prefix_item",
+            "BaseInstructionsFragment(self.instructions.clone())",
+            "instructions_changed",
+            "WorldStateUpdate::optional_standalone_boxed_fragment(fragment)"
           ]
         },
         {
@@ -1170,7 +1195,10 @@
           "required_contains": [
             "pub parent_turn_id: Option<String>",
             "pub root_turn_id: Option<String>",
-            "pub environments: Option<Vec<TurnEnvironmentParams>>"
+            "pub environments: Option<Vec<TurnEnvironmentParams>>",
+            "turn/start.responsesapiClientMetadataPatch",
+            "turn/steer.responsesapiClientMetadataPatch",
+            "pub responsesapi_client_metadata_patch: Option<HashMap<String, String>>"
           ]
         },
         {
@@ -1192,6 +1220,62 @@
             "ScopedSkillsConfig",
             ".skills",
             "upsert_environment_with_options(params.environment_id, options, skills)"
+          ]
+        },
+        {
+          "path": "codex-rs/cli/src/config_override_args.rs",
+          "reason": "Repeated -c/--config values at root and child scopes are retained in order. Prodex launch normalization must preserve each override and leave native precedence to Codex.",
+          "required_contains": [
+            "pub(super) fn try_parse_from",
+            "localize_config_arg(MultitoolCli::command()).try_get_matches_from(args)?",
+            "std::iter::successors(Some(&matches)",
+            "scope.get_many::<String>(\"raw_overrides\")",
+            ".mut_arg(\"raw_overrides\", |arg| arg.global(false))",
+            ".mut_subcommands(localize_config_arg)"
+          ]
+        },
+        {
+          "path": "codex-rs/core/src/compact.rs",
+          "reason": "Failed compaction attempts do not commit partial summaries. Codex owns history installation only after successful completion; Prodex must not convert a partial stream into success.",
+          "required_contains": [
+            "Keep each attempt isolated until the response completes successfully.",
+            "Ok(ResponseEvent::OutputItemDone(item)) => output.push(item)",
+            "for item in std::mem::take(&mut output)",
+            "sess.record_annotated_conversation_items",
+            "sess.record_observed_response_completed"
+          ]
+        },
+        {
+          "path": "codex-rs/core/src/session/async_compaction.rs",
+          "reason": "Background compaction discards a closed oneshot receiver instead of retaining it for a panicking later await; empty receivers remain pending.",
+          "required_contains": [
+            "let mut result = state.async_compaction.result.take()?",
+            "Err(oneshot::error::TryRecvError::Empty)",
+            "state.async_compaction.result = Some(result);",
+            "Err(oneshot::error::TryRecvError::Closed) => return None"
+          ]
+        },
+        {
+          "path": "codex-rs/thread-store/src/local/read_thread.rs",
+          "reason": "Resume resolves plain/compressed rollout siblings again if compression races with canonicalization, without changing logical thread identity.",
+          "required_contains": [
+            "resolve_requested_rollout_path",
+            "let mut retries_remaining = 3;",
+            "codex_rollout::existing_rollout_path(path.as_path()).await",
+            "std::fs::canonicalize(&resolved_path)",
+            "err.kind() == std::io::ErrorKind::NotFound && retries_remaining > 0"
+          ]
+        },
+        {
+          "path": "codex-rs/app-server/src/request_processors/persisted_resume_settings.rs",
+          "reason": "Saved thread settings are scoped to the resumed conversation, excluding foreign snapshots across fork history.",
+          "required_contains": [
+            "pub(super) fn latest_persisted_model_settings",
+            "InitialHistory::Resumed(history)",
+            "EventMsg::ThreadSettingsApplied(event)",
+            "thread_id == history.conversation_id",
+            "Some(_) => crossed_foreign_snapshot = true",
+            "None if !crossed_foreign_snapshot => return Some(&event.thread_settings)"
           ]
         }
       ],
@@ -2145,7 +2229,7 @@
           "id": "features.instant-interrupt-opt-in",
           "kind": "feature_gate",
           "file": "codex-rs/features/src/lib.rs",
-          "reason": "Codex 0.159 instant_interrupt remains opt-in and disabled by default; Prodex must preserve rather than silently force this steering behavior.",
+          "reason": "Historical feature-key presence only; native current InstantInterrupt default is enforced by features.instant-interrupt-default. Prodex does not override this upstream setting.",
           "file_contains_all": [
             "Feature::InstantInterrupt",
             "key: \"instant_interrupt\"",
@@ -2205,7 +2289,7 @@
             "RouteAwareClientPool::new_without_redirects",
             "{}/wham/security-setup",
             "config.chatgpt_base_url.trim_end_matches('/')",
-            "auth_provider_from_auth(&auth).to_auth_headers()",
+            "auth_provider_from_auth(&auth)\n                        .to_auth_headers()\n                        .ok()?",
             "url.host_str() == Some(\"chatgpt.com\")",
             "Duration::from_secs(3)"
           ]
@@ -2214,7 +2298,7 @@
           "id": "models.explicit-provider-catalog-authoritative",
           "kind": "provider_catalog",
           "file": "codex-rs/models-manager/src/manager.rs",
-          "reason": "Explicit provider model catalogs must suppress bundled fallback and clear stale state on refresh failure.",
+          "reason": "Explicit provider model catalogs suppress bundled fallback. Codex 0.164 retains same-identity snapshots on transient failures and invalidates them on explicit access or credential rejection.",
           "file_contains_all": [
             "Only explicit catalogs serialize refresh and suppress bundled fallback.",
             "Self::ExplicitProvider(_) => None",
@@ -2472,10 +2556,10 @@
           "id": "context.base-instructions-identity",
           "kind": "context_boundary",
           "file": "codex-rs/core/src/context/base_instructions.rs",
-          "reason": "Incremental context must recognize stable base-instruction message identity through internal content metadata.",
+          "reason": "Codex 0.164 reads only dedicated developer input-text base instruction items with an exact single harness kind, including explicitly empty bases.",
           "file_contains_all": [
             "pub(crate) const KIND: &str = \"model.base_instructions\";",
-            "pub(crate) fn matches_item(item: &ResponseItem) -> bool",
+            "pub(crate) fn text_from_item(item: &ResponseItem) -> Option<&str>",
             "internal_chat_message_metadata_passthrough: Some(metadata)",
             "kind.as_str() == Self::KIND"
           ]
@@ -2647,9 +2731,158 @@
             "Duration::from_secs(60)",
             "tokio::time::sleep(retry_delay).await;"
           ]
+        },
+        {
+          "id": "responses.prompt-cache-key-independent",
+          "kind": "affinity_contract",
+          "file": "codex-rs/core/src/client.rs",
+          "reason": "Codex 0.164 allows a custom or omitted prompt cache key independently of the Responses session header. Prodex must not derive or overwrite one from the other.",
+          "file_contains_all": [
+            "PromptCacheKey::SessionDerived => Some(self.session_derived_cache_key(metadata))",
+            "PromptCacheKey::Custom(key) => Some(key.clone())",
+            "PromptCacheKey::Omit => None",
+            "self.session_derived_cache_key(metadata)",
+            "prompt_cache_key: self.prompt_cache_key(responses_metadata)"
+          ]
+        },
+        {
+          "id": "turn-metadata.replacement-then-patch",
+          "kind": "metadata_group",
+          "file": "codex-rs/core/src/turn_metadata.rs",
+          "reason": "Codex applies replacement then patch to client metadata while preserving reviewed continuation and reserved metadata; Prodex forwards, rather than merging this policy itself.",
+          "file_contains_all": [
+            "update_responsesapi_client_metadata",
+            "update.replacement.map(filter_extra_metadata)",
+            "update.patch.map(filter_extra_metadata).unwrap_or_default()",
+            "current.extend(patch);",
+            "current.insert(\"misalignment_override\".to_string(), continuation);"
+          ]
+        },
+        {
+          "id": "app-server.client-metadata-patch-wire",
+          "kind": "jsonrpc_schema",
+          "file": "codex-rs/app-server-protocol/src/protocol/v2/turn.rs",
+          "reason": "Start and steer accept additive metadata patches without dropping existing fields; upstream owns reserved-key validation.",
+          "file_contains_all": [
+            "turn/start.responsesapiClientMetadataPatch",
+            "turn/steer.responsesapiClientMetadataPatch",
+            "pub responsesapi_client_metadata_patch: Option<HashMap<String, String>>"
+          ]
+        },
+        {
+          "id": "models.provider-transient-refresh-retains-snapshot",
+          "kind": "cache_identity",
+          "file": "codex-rs/models-manager/src/manager.rs",
+          "reason": "Transient provider catalog failures retain the last successful same-identity snapshot. Explicit access or credential rejection still invalidates it; bundled fallback stays suppressed for explicit catalogs.",
+          "file_contains_all": [
+            "let access_denied = matches!(error.http_status_code_value(), Some(401 | 403));",
+            "CodexErrorDetails::RefreshTokenFailed(_)",
+            "CodexErrorDetails::GatewayLoginRequired(_)",
+            "if is_provider_catalog && (access_denied || credentials_rejected)",
+            "request_identity != self.endpoint_client.identity()",
+            "current.models.clear();",
+            "entry.identity == self.endpoint_client.identity()"
+          ]
+        },
+        {
+          "id": "context.incremental-model-instructions",
+          "kind": "context_boundary",
+          "file": "codex-rs/core/src/context/world_state/model.rs",
+          "reason": "Codex 0.164 moves initial base instructions and incremental model/instruction refresh into ModelInstructionsState; retain stable history identity without rebuilding native world-state policy in Prodex.",
+          "file_contains_all": [
+            "pub(crate) enum ModelInstructionsSnapshot",
+            "pub(crate) struct ModelInstructionsState",
+            "pub(crate) fn for_incremental_tools",
+            "const ID: &'static str = \"model\";",
+            "ModelInstructionsSnapshot::WithInstructions",
+            "WorldStateUpdate::prefix_item",
+            "BaseInstructionsFragment(self.instructions.clone())",
+            "instructions_changed",
+            "WorldStateUpdate::optional_standalone_boxed_fragment(fragment)"
+          ]
+        },
+        {
+          "id": "cli.config-overrides-across-scopes",
+          "kind": "cli_contract",
+          "file": "codex-rs/cli/src/config_override_args.rs",
+          "reason": "Repeated -c/--config values at root and child scopes are retained in order. Prodex launch normalization must preserve each override and leave native precedence to Codex.",
+          "file_contains_all": [
+            "pub(super) fn try_parse_from",
+            "localize_config_arg(MultitoolCli::command()).try_get_matches_from(args)?",
+            "std::iter::successors(Some(&matches)",
+            "scope.get_many::<String>(\"raw_overrides\")",
+            ".mut_arg(\"raw_overrides\", |arg| arg.global(false))",
+            ".mut_subcommands(localize_config_arg)"
+          ]
+        },
+        {
+          "id": "compact.failed-attempt-history-isolation",
+          "kind": "retry_lifecycle",
+          "file": "codex-rs/core/src/compact.rs",
+          "reason": "Failed compaction attempts do not commit partial summaries. Codex owns history installation only after successful completion; Prodex must not convert a partial stream into success.",
+          "file_contains_all": [
+            "Keep each attempt isolated until the response completes successfully.",
+            "Ok(ResponseEvent::OutputItemDone(item)) => output.push(item)",
+            "for item in std::mem::take(&mut output)",
+            "sess.record_annotated_conversation_items",
+            "sess.record_observed_response_completed"
+          ]
+        },
+        {
+          "id": "compact.background-closed-receiver",
+          "kind": "retry_lifecycle",
+          "file": "codex-rs/core/src/session/async_compaction.rs",
+          "reason": "Background compaction discards a closed oneshot receiver instead of retaining it for a panicking later await; empty receivers remain pending.",
+          "file_contains_all": [
+            "let mut result = state.async_compaction.result.take()?",
+            "Err(oneshot::error::TryRecvError::Empty)",
+            "state.async_compaction.result = Some(result);",
+            "Err(oneshot::error::TryRecvError::Closed) => return None"
+          ]
+        },
+        {
+          "id": "resume.compressed-rollout-resolution",
+          "kind": "session_lifecycle",
+          "file": "codex-rs/thread-store/src/local/read_thread.rs",
+          "reason": "Resume resolves plain/compressed rollout siblings again if compression races with canonicalization, without changing logical thread identity.",
+          "file_contains_all": [
+            "resolve_requested_rollout_path",
+            "let mut retries_remaining = 3;",
+            "codex_rollout::existing_rollout_path(path.as_path()).await",
+            "std::fs::canonicalize(&resolved_path)",
+            "err.kind() == std::io::ErrorKind::NotFound && retries_remaining > 0"
+          ]
+        },
+        {
+          "id": "resume.persisted-model-settings-owner",
+          "kind": "session_lifecycle",
+          "file": "codex-rs/app-server/src/request_processors/persisted_resume_settings.rs",
+          "reason": "Saved thread settings are scoped to the resumed conversation, excluding foreign snapshots across fork history.",
+          "file_contains_all": [
+            "pub(super) fn latest_persisted_model_settings",
+            "InitialHistory::Resumed(history)",
+            "EventMsg::ThreadSettingsApplied(event)",
+            "thread_id == history.conversation_id",
+            "Some(_) => crossed_foreign_snapshot = true",
+            "None if !crossed_foreign_snapshot => return Some(&event.thread_settings)"
+          ]
+        },
+        {
+          "id": "resume.model-settings-explicit-overrides",
+          "kind": "session_lifecycle",
+          "file": "codex-rs/app-server/src/request_processors/thread_processor.rs",
+          "reason": "Native resume restores saved speed, reasoning summary and personality only when explicit invocation choices are absent.",
+          "file_contains_all": [
+            "latest_persisted_model_settings(&thread_history)",
+            "typesafe_overrides.service_tier.is_none() && !has_override(\"service_tier\")",
+            "let restore_summary = !has_override(\"model_reasoning_summary\")",
+            "config.service_tier.clone_from(&settings.service_tier)",
+            "config.model_reasoning_summary = settings.reasoning_summary",
+            "existing_thread.resume_config_snapshot().await"
+          ]
         }
       ],
-      "tested_codex_release": "rust-v0.163.0",
+      "tested_codex_release": "rust-v0.164.0",
       "patch_deltas": [
         {
           "from": "rust-v0.150.0",
@@ -3040,6 +3273,14 @@
           "source_commit": "83086188ae0614bd882818ff1aa23f3194962012",
           "audit_note": "migration/codex-rust-v0.163.0-audit.md",
           "summary": "Qualifies native default instant interrupt and Daybreak, response.incomplete terminal usage retention, foreground/background v2 compaction, reasoned websocket continuation mismatch, connection-scoped app-server replies, remote MCP Windows overrides and resolved tool message catalogs. Local listener resilience is fixed without overriding native retry/continuation ownership."
+        },
+        {
+          "from": "rust-v0.163.0",
+          "to": "rust-v0.164.0",
+          "source_commit": "6aaac694803004a63c6f393d153c96d22521a6b9",
+          "tag_object": "fe3b29455488c2e189e43ad5526a107900c5e1b7",
+          "audit_note": "migration/codex-rust-v0.164.0-audit.md",
+          "summary": "Qualifies independent prompt-cache/session identities, metadata replacement+patch, transient provider-catalog retention, moved incremental base-instruction ownership, scoped CLI config overrides, compressed resume/saved settings, and isolated failed compaction. Native presets, images, MCP enterprise auth and credential masking remain upstream-owned."
         }
       ],
       "app_server_protocol": {
@@ -3062,30 +3303,30 @@
       }
     },
     "latestRelease": {
-      "tag_name": "rust-v0.163.0",
-      "name": "0.163.0",
-      "published_at": "2026-10-15T21:30:38Z",
-      "html_url": "https://github.com/openai/codex/releases/tag/rust-v0.163.0",
+      "tag_name": "rust-v0.164.0",
+      "name": "0.164.0",
+      "published_at": "2026-10-23T04:48:10Z",
+      "html_url": "https://github.com/openai/codex/releases/tag/rust-v0.164.0",
       "body_head": [
         "## New Features",
         "",
-        "- Open `/config` to search preferences across categories, change supported settings immediately, and see which changes require a restart. (#52990, #53429)",
-        "- Send a follow-up while Codex is responding to steer it immediately. Interrupting a turn also stops active Code Mode cells and their nested tool calls. (#51812, #51835)",
-        "- Configure a leader key in `/keymap`. The default is `Ctrl+X`, shortcut hints stay open until you choose or cancel, and voice mute moves to `F9`. (#52273)",
-        "- Restart a managed background server from `/daemon`. Codex warns about work the restart could interrupt, then reconnects automatically. (#53173)",
-        "- Codex can run independent read-only tools in parallel, including skill, memory, and conversation-history lookups. (#52245)",
-        "- Daybreak is enabled by default for eligible accounts. `codex exec` can also select it with an OpenAI API key when the server offers access. (#53701, #53717)",
+        "- Save reusable prompts and slash commands in ten numbered `/presets` slots, with a keyboard menu for quick access. (#54380, #54381)",
+        "- Set model, reasoning effort, speed, and permission profiles directly with inline `/model` and `/permissions` arguments. (#54378, #54383)",
+        "- Preview viewed and generated images in the fullscreen transcript on terminals supporting Kitty or Sixel graphics. (#54216)",
+        "- Authenticate enterprise MCP connections using eligible Codex account grants or dedicated sign-in, including OAuth clients requiring secrets. (#55334, #55859, #56001)",
+        "- Mask credentials during supported remote Bash commands and Zsh snapshot sessions, including credentials from custom providers. (#54309, #54432, #56049)",
+        "- The Amazon Bedrock setup wizard is now enabled by default, with API key entry grouped alongside other AWS sign-in methods when credentials are detected. (#56033, #56023)",
         "",
         "## Bug Fixes",
         "",
-        "- Resuming a saved thread restores its permissions and network approvals, while respecting explicit overrides and current managed policy. (#53150, #53419, #53424)",
-        "- The network proxy now checks permission before a DNS lookup, rejects duplicate `Host` headers, and prevents credential aliases from bypassing inspection hooks. (#51650, #52661, #53506)",
-        "- Return to an existing side conversation with `/side` after switching threads. Answers to pending prompts also go back to the thread that asked. (#52184, #53436)",
-        "- On Windows, `Ctrl+V` and `Shift+Insert` paste text as well as images. On WSL, repeated pastes reuse the clipboard reader, and copy attempts time out instead of hanging. (#53224, #52967, #53453)",
-        "- Local commands finish promptly when a child keeps an output pipe open. Remote commands preserve late-arriving output so the final poll can still collect it. (#52652, #53331, #53622)",
-        "- `codex exec` no longer prints the same file diff again after an unrelated command. (#53444)",
+        "- Failed compaction no longer leaves partial summaries in conversation history, and background compaction failures fall back without panicking. (#53932, #55581)",
+        "- Resuming sessions now finds compressed histories and restores saved thread settings instead of replacing them with global defaults. (#54008, #55923)",
+        "- Windows HTTPS and WebSocket connections now handle proxy authentication challenges using the signed-in user’s Negotiate or NTLM credentials. (#55994, #56000)",
+        "- CLI configuration overrides are preserved when `-c` or `--config` appears at multiple subcommand levels. (#56022)",
+        "- Queued prompts now wait for pending permission selections to resolve before continuing. (#55682)",
+        "- Hardened sandbox checks for case-variant metadata paths on macOS and replaceable symlinks used to locate executables. (#54273, #55384)",
         "",
-        "## Documentation",
+        "## Chores",
         ""
       ]
     }
