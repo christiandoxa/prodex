@@ -1,7 +1,10 @@
-//! Typed host bridge for compiled Mojo HTTP response Connection headers.
-//! Rust retains source buffers and ordered output; Mojo owns filtering.
+//! Typed host bridge for compiled Mojo HTTP Connection headers.
+//! Rust retains source buffers and ordered output; Mojo owns filtering and tokens.
 
 use crate::MojoError;
+
+mod request_tokens;
+pub use request_tokens::request_connection_tokens;
 
 #[repr(C)]
 #[derive(Clone, Copy)]
