@@ -38,6 +38,12 @@ mod quota_watch_presentation;
 #[cfg(feature = "mojo-runtime")]
 pub use self::quota_watch_presentation::{QuotaWatchPresentation, quota_watch_presentation};
 #[cfg(feature = "mojo-runtime")]
+mod quota_profile_panel;
+#[cfg(feature = "mojo-runtime")]
+pub use quota_profile_panel::{
+    QuotaPanelExtra, QuotaPanelInput, QuotaPanelKind, quota_profile_panel_json,
+};
+#[cfg(feature = "mojo-runtime")]
 mod quota_tui_spans;
 #[cfg(feature = "mojo-runtime")]
 pub use quota_tui_spans::{QuotaTuiLine, QuotaTuiTone, quota_tui_line_plan, quota_tui_status_tone};
