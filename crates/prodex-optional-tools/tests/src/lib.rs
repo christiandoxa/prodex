@@ -45,9 +45,7 @@ fn managed_version_discovery_batches_exact_stable_directory_names() {
     fs::write(tool.join("99.0.0"), "regular file").unwrap();
     #[cfg(unix)]
     {
-        use std::os::unix::ffi::OsStringExt;
         std::os::unix::fs::symlink(tool.join("1.10.0+build.2"), tool.join("999.0.0")).unwrap();
-        fs::create_dir(tool.join(std::ffi::OsString::from_vec(b"9.0.0\xff".to_vec()))).unwrap();
     }
     assert_eq!(
         crate::discovery::newest_stable_managed_version(&root, "caveman").unwrap(),

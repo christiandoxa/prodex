@@ -1,4 +1,7 @@
-use super::*;
+use super::{
+    PRESIDIO_ANALYZER_CONTAINER, PRESIDIO_ANALYZER_IMAGE, PRESIDIO_ANONYMIZER_CONTAINER,
+    PRESIDIO_ANONYMIZER_IMAGE, validate_presidio_container, validate_presidio_image,
+};
 
 #[test]
 fn image_policy_preserves_exact_semver_and_digest_compatibility() {
