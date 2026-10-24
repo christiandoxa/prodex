@@ -68,7 +68,10 @@ fn newest_stable_version_directory(tool_root: &Path) -> Result<Option<(String, P
     for entry in entries {
         let entry =
             entry.with_context(|| format!("failed to read entry in {}", tool_root.display()))?;
-        let Some(candidate) = managed_version_directory_entry(&entry)? else {
+        let file_type = entry
+            .file_type()
+            .with_context(|| format!("failed to inspect {}", entry.path().display()))?;
+        let Some(candidate) = managed_version_directory_entry(entry.path(), file_type) else {
             continue;
         };
         candidates.push(candidate);
@@ -82,17 +85,15 @@ fn newest_stable_version_directory(tool_root: &Path) -> Result<Option<(String, P
     Ok(selected.map(|index| candidates.swap_remove(index)))
 }
 
-fn managed_version_directory_entry(entry: &fs::DirEntry) -> Result<Option<(String, PathBuf)>> {
-    let file_type = entry
-        .file_type()
-        .with_context(|| format!("failed to inspect {}", entry.path().display()))?;
+fn managed_version_directory_entry(
+    path: PathBuf,
+    file_type: fs::FileType,
+) -> Option<(String, PathBuf)> {
     if !file_type.is_dir() || file_type.is_symlink() {
-        return Ok(None);
+        return None;
     }
-    let Some(name) = entry.file_name().to_str().map(str::to_owned) else {
-        return Ok(None);
-    };
-    Ok(Some((name, entry.path())))
+    let name = path.file_name()?.to_str()?.to_owned();
+    Some((name, path))
 }
 
 pub(crate) fn managed_optimizer_command_candidates(root: &Path, command: &str) -> Vec<PathBuf> {
@@ -131,5 +132,28 @@ fn push_command_candidate(candidates: &mut Vec<PathBuf>, path: PathBuf) {
             exe_name.push(".exe");
             candidates.push(path.with_file_name(exe_name));
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn managed_version_directory_rejects_non_unicode_names() {
+        #[cfg(unix)]
+        let name = {
+            use std::os::unix::ffi::OsStringExt;
+            std::ffi::OsString::from_vec(b"9.0.0\xff".to_vec())
+        };
+        #[cfg(windows)]
+        let name = {
+            use std::os::windows::ffi::OsStringExt;
+            std::ffi::OsString::from_wide(&[b'9' as u16, b'.' as u16, 0xd800])
+        };
+        let file_type = std::fs::metadata(std::env::temp_dir()).unwrap().file_type();
+        // Some filesystems reject these names before discovery can inspect them.
+        assert_eq!(
+            super::managed_version_directory_entry(name.into(), file_type),
+            None
+        );
     }
 }

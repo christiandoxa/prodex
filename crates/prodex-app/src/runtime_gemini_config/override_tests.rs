@@ -1,4 +1,5 @@
-use super::*;
+use super::gemini_codex_args_without_consumed_overrides;
+use std::ffi::OsString;
 
 #[test]
 fn compiled_gemini_consumption_preserves_order_and_unrelated_config_forms() {
