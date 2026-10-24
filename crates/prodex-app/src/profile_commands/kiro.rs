@@ -7,8 +7,6 @@ use std::env;
 use std::ffi::OsString;
 use std::fmt;
 use std::path::Path;
-#[cfg(test)]
-use std::path::PathBuf;
 #[path = "kiro_command.rs"]
 mod command;
 use command::run_kiro_metadata_command;
@@ -25,6 +23,9 @@ mod lifecycle_support;
 pub(crate) use lifecycle_support::handle_import_kiro_profile;
 #[path = "kiro/catalog.rs"]
 mod catalog;
+#[cfg(test)]
+#[path = "kiro/catalog_snapshot_tests.rs"]
+mod catalog_snapshot_tests;
 pub(crate) use catalog::{normalize_kiro_model_catalog_models, parse_kiro_model_catalog_text};
 
 use super::manage::print_profile_panel;
@@ -545,32 +546,6 @@ mod tests {
         }
     }
 
-    fn write_fake_kiro_binary(root: &Path) -> PathBuf {
-        crate::test_support::write_test_python_executable(
-            root,
-            "fake-kiro-cli",
-            r#"#!/usr/bin/env python3
-import json, os, sys
-assert os.environ['KIRO_DATA_DIR'] == os.environ['Q_CLI_DATA_DIR']
-if len(sys.argv) > 2 and sys.argv[1] == 'chat' and sys.argv[2] == '--list-models':
-    print(json.dumps({"models":[{"model_name":"auto","description":"Models chosen by task","model_id":"auto","context_window_tokens":1000000},{"model_name":"catalog-model-a","description":"Catalog model A","model_id":"catalog-model-a","context_window_tokens":200000}],"default_model":"auto"}))
-    sys.exit(0)
-if len(sys.argv) > 1 and sys.argv[1] == 'acp':
-    first = json.loads(sys.stdin.readline())
-    second = json.loads(sys.stdin.readline())
-    assert first["method"] == "initialize"
-    assert second["method"] == "session/new"
-    print(json.dumps({"jsonrpc":"2.0","result":{"protocolVersion":1,"agentCapabilities":{"loadSession":True,"promptCapabilities":{"image":True,"audio":False,"embeddedContext":False},"mcpCapabilities":{"http":True,"sse":False},"sessionCapabilities":{},"auth":{}},"authMethods":[{"id":"kiro-login","name":"Kiro Login","description":"Run 'kiro-cli login'."}],"agentInfo":{"name":"Kiro CLI Agent","title":"Kiro CLI Agent","version":"2.10.0"}},"id":0}), flush=True)
-    print(json.dumps({"jsonrpc":"2.0","result":{"sessionId":"session-1","models":{"currentModelId":"catalog-model-a","availableModels":[{"modelId":"catalog-model-a","name":"Catalog Model A"},{"modelId":"catalog-model-b","name":"Catalog Model B"}]}},"id":1}), flush=True)
-    sys.exit(0)
-if len(sys.argv) > 2 and sys.argv[1] == 'whoami' and sys.argv[2] == '--format':
-    print(json.dumps({"email":"kiro-user@example.com"}))
-    sys.exit(0)
-sys.exit(1)
-"#,
-        )
-    }
-
     #[test]
     fn write_kiro_cli_data_dir_materializes_auth_and_profile_state() {
         let root = std::env::temp_dir().join(format!(
@@ -719,97 +694,5 @@ sys.exit(1)
         }
 
         let _ = std::fs::remove_dir_all(root);
-    }
-
-    #[test]
-    fn write_kiro_model_catalog_snapshot_from_acp_session_models() {
-        let root = std::env::temp_dir().join(format!(
-            "prodex-kiro-model-catalog-{}-{}",
-            std::process::id(),
-            SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-        ));
-        fs::create_dir_all(&root).expect("test root should exist");
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            fs::set_permissions(&root, fs::Permissions::from_mode(0o700)).unwrap();
-        }
-        let codex_home = root.join("codex-home");
-        create_codex_home_if_missing(&codex_home).expect("codex home should exist");
-        let fake_kiro = write_fake_kiro_binary(&root);
-
-        let secret = KiroAuthSecret {
-            auth_key: "codewhisperer:odic:token".to_string(),
-            auth_kind: "builder-id".to_string(),
-            auth_json: serde_json::json!({
-                "access_token": "kiro-access-token",
-                "region": "us-east-1"
-            })
-            .to_string(),
-            email: Some("kiro-user@example.com".to_string()),
-            profile_arn: Some(
-                "arn:aws:codewhisperer:us-east-1:123456789012:profile/test".to_string(),
-            ),
-            profile_name: Some("builder-id-test".to_string()),
-            start_url: Some("https://view.awsapps.com/start".to_string()),
-            region: Some("us-east-1".to_string()),
-        };
-        write_kiro_model_catalog_snapshot_with_command(&codex_home, &secret, fake_kiro.as_os_str())
-            .expect("model catalog snapshot should be written");
-        let catalog_path = codex_home.join(KIRO_MODEL_CATALOG_FILE);
-        let catalog_text = fs::read_to_string(&catalog_path).expect("catalog should exist");
-        let value: Value = serde_json::from_str(&catalog_text).expect("catalog json should parse");
-        assert_eq!(value["models"][0]["id"], "auto");
-        assert_eq!(value["models"][0]["context_window_tokens"], 1_000_000);
-        assert_eq!(value["models"][1]["id"], "catalog-model-a");
-        let _ = fs::remove_dir_all(root);
-    }
-
-    #[test]
-    fn failed_kiro_catalog_refresh_preserves_previous_snapshot() {
-        let root = std::env::temp_dir().join(format!(
-            "prodex-kiro-model-catalog-preserve-{}-{}",
-            std::process::id(),
-            SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-        ));
-        fs::create_dir_all(&root).unwrap();
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            fs::set_permissions(&root, fs::Permissions::from_mode(0o700)).unwrap();
-        }
-        let codex_home = root.join("codex-home");
-        create_codex_home_if_missing(&codex_home).unwrap();
-        let secret = KiroAuthSecret {
-            auth_key: "codewhisperer:odic:token".to_string(),
-            auth_kind: "builder-id".to_string(),
-            auth_json: serde_json::json!({"access_token":"kiro-access-token"}).to_string(),
-            email: Some("example@example.test".to_string()),
-            profile_arn: None,
-            profile_name: None,
-            start_url: None,
-            region: None,
-        };
-        write_kiro_auth_secret(&codex_home, &secret).unwrap();
-        let catalog_path = codex_home.join(KIRO_MODEL_CATALOG_FILE);
-        let previous = r#"{"models":[{"id":"known-model"}]}"#;
-        fs::write(&catalog_path, previous).unwrap();
-
-        assert!(
-            write_kiro_model_catalog_snapshot_with_command(
-                &codex_home,
-                &secret,
-                std::ffi::OsStr::new("false"),
-            )
-            .is_err()
-        );
-        assert_eq!(fs::read_to_string(catalog_path).unwrap(), previous);
-        let _ = fs::remove_dir_all(root);
     }
 }
