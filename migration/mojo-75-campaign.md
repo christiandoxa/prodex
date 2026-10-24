@@ -9112,3 +9112,11 @@ production LOC), removing 37 net Rust production LOC and adding 222 net Mojo
 production LOC. Full default CI passes 1,453 Rust tests in 620.16 seconds.
 The 75% target remains open. Evidence and coverage are in
 [token-log-presentation-mojo-20261023.md](token-log-presentation-mojo-20261023.md).
+
+## Blocked quota messages compiled in Mojo (2026-10-24)
+
+Complete blocked-message construction, missing-data rows and provider name
+precedence now belong to the compiled quota owner. The Rust builder and old
+selection ABI are removed without a fallback. Evidence and coverage are in
+[quota-blocked-messages-mojo-20261024.md](quota-blocked-messages-mojo-20261024.md).
+The 75% target remains open.

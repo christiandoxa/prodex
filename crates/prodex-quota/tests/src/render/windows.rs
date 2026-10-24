@@ -185,6 +185,71 @@ fn blocked_window_planner_preserves_provider_order_and_rendered_messages() {
 }
 
 #[test]
+fn blocked_messages_keep_missing_main_rows_before_code_review() {
+    for (main, expected) in [
+        (
+            None,
+            vec![
+                "5h quota unavailable",
+                "weekly quota unavailable",
+                "code-review 60s exhausted until -",
+            ],
+        ),
+        (
+            Some(pair(None, None)),
+            vec!["quota unavailable", "code-review 60s exhausted until -"],
+        ),
+    ] {
+        let mut observation = usage(main, vec![]);
+        observation.code_review_rate_limit =
+            Some(pair(Some(window(Some(100), None, Some(60))), None));
+        assert_eq!(
+            collect_blocked_limits(&observation, true)
+                .into_iter()
+                .map(|limit| limit.message)
+                .collect::<Vec<_>>(),
+            expected
+        );
+    }
+}
+
+#[test]
+fn blocked_messages_keep_additional_name_precedence_and_unicode() {
+    for (names, expected) in [
+        (
+            [Some(""), Some("feature"), Some("id")],
+            "60s exhausted until -",
+        ),
+        (
+            [None, Some("週\n\"\\\0"), Some("id")],
+            "週\n\"\\\0 60s exhausted until -",
+        ),
+        ([None, None, Some("id")], "id 60s exhausted until -"),
+    ] {
+        let extra = AdditionalRateLimit {
+            limit_name: names[0].map(str::to_owned),
+            metered_feature: names[1].map(str::to_owned),
+            limit_id: names[2].map(str::to_owned),
+            rate_limit: pair(Some(window(Some(100), None, Some(60))), None),
+            allowed: None,
+            limit_reached: None,
+            extra: BTreeMap::new(),
+        };
+        let observation = usage(
+            Some(pair(Some(window(Some(100), None, Some(18_000))), None)),
+            vec![extra],
+        );
+        assert_eq!(
+            collect_blocked_limits(&observation, false)
+                .into_iter()
+                .map(|limit| limit.message)
+                .collect::<Vec<_>>(),
+            ["5h exhausted until -", expected]
+        );
+    }
+}
+
+#[test]
 fn additional_capacity_preserves_unicode_label_rendering() {
     let additional = AdditionalRateLimit {
         limit_id: None,

@@ -303,97 +303,23 @@ pub fn collect_blocked_limits(
     usage: &UsageResponse,
     include_code_review: bool,
 ) -> Vec<BlockedLimit> {
-    let mut blocked = Vec::new();
-    let runtime_ready = openai_quota_has_ready_runtime_limit(usage);
-    let main_pair_missing = !runtime_ready && usage.rate_limit.is_none();
+    use prodex_mojo_core::quota::{
+        QuotaBlockedWindowInput, QuotaBlockedWindowKind, quota_blocked_windows_json,
+    };
     let mut windows = Vec::new();
-
-    if !runtime_ready {
-        collect_runtime_blocked_window_refs(usage, &mut blocked, &mut windows);
-    }
-
-    let code_review_start = windows.len();
-    if include_code_review && let Some(code_review) = usage.code_review_rate_limit.as_ref() {
-        for window in [
-            code_review.primary_window.as_ref(),
-            code_review.secondary_window.as_ref(),
-        ]
-        .into_iter()
-        .flatten()
-        {
-            windows.push(BlockedWindowRef {
-                kind: prodex_mojo_core::quota::QUOTA_BLOCKED_WINDOW_KIND_CODE_REVIEW,
-                name: Some("code-review"),
-                main_label: None,
-                window,
-            });
-        }
-    }
-
-    let plan = prodex_mojo_core::quota::quota_blocked_window_plan(
-        runtime_ready,
-        include_code_review,
-        &windows
-            .iter()
-            .map(|entry| prodex_mojo_core::quota::QuotaBlockedWindowInput {
-                kind: entry.kind,
-                used_percent: entry.window.used_percent,
-            })
-            .collect::<Vec<_>>(),
-    )
-    .expect("Mojo quota blocked-window planner returned invalid output");
-    append_planned_blocked_windows(
-        &mut blocked,
-        &windows[..code_review_start],
-        &plan[..code_review_start],
-    );
-    if !runtime_ready && !main_pair_missing && blocked.is_empty() {
-        blocked.push(BlockedLimit {
-            message: "quota unavailable".to_string(),
-        });
-    }
-    append_planned_blocked_windows(
-        &mut blocked,
-        &windows[code_review_start..],
-        &plan[code_review_start..],
-    );
-
-    blocked
-}
-
-// Project borrowed runtime windows in their existing main/additional order.
-// The Mojo planner remains responsible for blocking decisions.
-fn collect_runtime_blocked_window_refs<'a>(
-    usage: &'a UsageResponse,
-    blocked: &mut Vec<BlockedLimit>,
-    windows: &mut Vec<BlockedWindowRef<'a>>,
-) {
     if let Some(main) = usage.rate_limit.as_ref() {
         for label in ["5h", "weekly"] {
             if let Some(window) = find_main_window(main, label) {
-                windows.push(BlockedWindowRef {
-                    kind: prodex_mojo_core::quota::QUOTA_BLOCKED_WINDOW_KIND_MAIN,
-                    name: None,
-                    main_label: Some(label),
-                    window,
-                });
+                windows.push((QuotaBlockedWindowKind::Main, [None; 3], window));
             }
         }
-    } else {
-        blocked.push(BlockedLimit {
-            message: "5h quota unavailable".to_string(),
-        });
-        blocked.push(BlockedLimit {
-            message: "weekly quota unavailable".to_string(),
-        });
     }
-
     for additional in &usage.additional_rate_limits {
-        let label = additional
-            .limit_name
-            .as_deref()
-            .or(additional.metered_feature.as_deref())
-            .or(additional.limit_id.as_deref());
+        let names = [
+            additional.limit_name.as_deref(),
+            additional.metered_feature.as_deref(),
+            additional.limit_id.as_deref(),
+        ];
         for window in [
             additional.rate_limit.primary_window.as_ref(),
             additional.rate_limit.secondary_window.as_ref(),
@@ -401,22 +327,45 @@ fn collect_runtime_blocked_window_refs<'a>(
         .into_iter()
         .flatten()
         {
-            windows.push(BlockedWindowRef {
-                kind: prodex_mojo_core::quota::QUOTA_BLOCKED_WINDOW_KIND_ADDITIONAL,
-                name: label,
-                main_label: None,
-                window,
-            });
+            windows.push((QuotaBlockedWindowKind::Additional, names, window));
         }
     }
-}
-
-#[derive(Clone, Copy)]
-struct BlockedWindowRef<'a> {
-    kind: i64,
-    name: Option<&'a str>,
-    main_label: Option<&'static str>,
-    window: &'a UsageWindow,
+    for window in usage
+        .code_review_rate_limit
+        .iter()
+        .flat_map(|pair| [pair.primary_window.as_ref(), pair.secondary_window.as_ref()])
+        .flatten()
+    {
+        windows.push((QuotaBlockedWindowKind::CodeReview, [None; 3], window));
+    }
+    let resets = windows
+        .iter()
+        .map(|(_, _, window)| format_reset_time(window.reset_at))
+        .collect::<Vec<_>>();
+    let inputs = windows
+        .iter()
+        .zip(&resets)
+        .map(|((kind, names, window), reset)| QuotaBlockedWindowInput {
+            kind: *kind,
+            used_percent: window.used_percent,
+            seconds: window.limit_window_seconds,
+            names: *names,
+            reset,
+        })
+        .collect::<Vec<_>>();
+    let json = quota_blocked_windows_json(
+        openai_quota_has_ready_runtime_limit(usage),
+        usage.rate_limit.is_some(),
+        include_code_review,
+        &inputs,
+    )
+    .expect("Mojo quota blocked-window renderer failed");
+    let messages: Vec<String> = serde_json::from_str(&json)
+        .expect("Mojo quota blocked-window renderer returned invalid JSON");
+    messages
+        .into_iter()
+        .map(|message| BlockedLimit { message })
+        .collect()
 }
 
 pub fn find_main_window<'a>(main: &'a WindowPair, expected_label: &str) -> Option<&'a UsageWindow> {
@@ -424,42 +373,6 @@ pub fn find_main_window<'a>(main: &'a WindowPair, expected_label: &str) -> Optio
         .into_iter()
         .flatten()
         .find(|window| window_label(window.limit_window_seconds) == expected_label)
-}
-
-fn append_planned_blocked_windows(
-    blocked: &mut Vec<BlockedLimit>,
-    windows: &[BlockedWindowRef<'_>],
-    plan: &[bool],
-) {
-    debug_assert_eq!(windows.len(), plan.len());
-    for (entry, should_block) in windows.iter().zip(plan) {
-        if !should_block {
-            continue;
-        }
-        if entry.kind == prodex_mojo_core::quota::QUOTA_BLOCKED_WINDOW_KIND_MAIN
-            && entry.window.used_percent.is_none()
-        {
-            blocked.push(BlockedLimit {
-                message: format!(
-                    "{} quota unknown",
-                    entry.main_label.expect("main window label is present")
-                ),
-            });
-            continue;
-        }
-        let label = match entry.name {
-            Some(base) if !base.is_empty() => {
-                format!("{base} {}", window_label(entry.window.limit_window_seconds))
-            }
-            _ => window_label(entry.window.limit_window_seconds),
-        };
-        blocked.push(BlockedLimit {
-            message: format!(
-                "{label} exhausted until {}",
-                format_reset_time(entry.window.reset_at)
-            ),
-        });
-    }
 }
 
 pub fn format_blocked_limits(blocked: &[BlockedLimit]) -> String {

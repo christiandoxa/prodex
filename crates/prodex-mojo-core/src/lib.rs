@@ -11,6 +11,7 @@ pub const MOJO_REQUIRED: bool = cfg!(prodex_mojo_required);
 pub const MOJO_VERSION: Option<&str> = option_env!("PRODEX_MOJO_VERSION");
 
 #[cfg(any(
+    feature = "mojo-quota",
     feature = "mojo-runtime",
     feature = "mojo-observability",
     all(feature = "mojo-rich", feature = "mojo-routing")

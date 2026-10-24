@@ -673,7 +673,6 @@
           "quota_error_summary_label_rendering",
           "quota_panel_first_line_normalization",
           "quota_human_retry_time_normalization",
-          "quota_blocked_window_planning",
           "quota_window_display_text_composition"
         ]
       },
@@ -1612,7 +1611,6 @@
         "operations": [
           "optional_tool_alias_classification",
           "optional_tool_descriptor_policy",
-          "optional_tool_manifest_tree_compatibility",
           "optional_tool_digest_hex_encoding",
           "optional_tool_awareness_rendering"
         ]
@@ -2930,6 +2928,26 @@
         "role": "semantic",
         "operations": [
           "provider_error_message_extraction"
+        ]
+      },
+      {
+        "path": "mojo/prodex_core/quota_blocked_windows.mojo",
+        "language": "mojo",
+        "classification": "DETERMINISTIC_DOMAIN",
+        "production_reachable": true,
+        "role": "semantic",
+        "operations": [
+          "quota_blocked_window_planning"
+        ]
+      },
+      {
+        "path": "mojo/prodex_core/optional_tool_install_policy.mojo",
+        "language": "mojo",
+        "classification": "DETERMINISTIC_DOMAIN",
+        "production_reachable": true,
+        "role": "semantic",
+        "operations": [
+          "optional_tool_manifest_tree_compatibility"
         ]
       }
     ],
@@ -7863,22 +7881,23 @@
       "introduced_in": "0.433.0",
       "baseline_state": "Rust exact comparison against vetted and legacy optional-tool manifest tree digests",
       "final_state": "authoritative",
-      "mojo_entry": "prodex_optional_tool_manifest_tree_supported_v1",
+      "mojo_entry": "prodex_optional_tool_install_policy_v1",
       "mojo_abi_version": 1,
-      "mojo_source": "mojo/prodex_core/optional_tools_policy.mojo",
-      "consumer": "crates/prodex-optional-tools/src/optional_tools.rs",
-      "consumer_marker": "optional_tool_manifest_tree_supported",
+      "mojo_source": "mojo/prodex_core/optional_tool_install_policy.mojo",
+      "consumer": "crates/prodex-optional-tools/src/caveman.rs",
+      "consumer_marker": "optional_tool_manifest_content_error(",
       "production_consumers": [
-        "crates/prodex-optional-tools/src/optional_tools.rs"
+        "crates/prodex-optional-tools/src/caveman.rs",
+        "crates/prodex-optional-tools/src/optional_tools/ponytail.rs"
       ],
-      "production_reachability_test": "crates/prodex-mojo-core/src/optional_tools_policy.rs",
+      "production_reachability_test": "crates/prodex-optional-tools/src/caveman.rs",
       "rust_owner_before": "exact current-or-legacy manifest tree compatibility decision",
       "rust_state_after": "adapter-only",
       "rust_test_oracle": "deleted; direct Mojo adapter and manifest compatibility regression preserve exact case-sensitive current/legacy matching",
       "production_fallback": false,
       "duplicate_production_owner": false,
       "platform_fallback": false,
-      "rust_adapter_scope": "borrow manifest digest strings and map the Mojo boolean into the existing validation flow"
+      "rust_adapter_scope": "borrow manifest identity and digest strings and surface the Mojo-owned diagnostic through the existing validation flow"
     },
     {
       "name": "optional_tool_digest_hex_encoding",
@@ -10811,11 +10830,11 @@
       "introduced_in": "0.420.0",
       "baseline_state": "candidate",
       "final_state": "authoritative",
-      "mojo_entry": "prodex_quota_blocked_window_plan_v1",
+      "mojo_entry": "prodex_quota_blocked_windows_json_v1",
       "mojo_abi_version": 1,
-      "mojo_source": "mojo/prodex_core/quota.mojo",
+      "mojo_source": "mojo/prodex_core/quota_blocked_windows.mojo",
       "consumer": "crates/prodex-quota/src/render/windows.rs",
-      "consumer_marker": "prodex_mojo_core::quota::quota_blocked_window_plan(",
+      "consumer_marker": "quota_blocked_windows_json(",
       "production_consumers": [
         "crates/prodex-quota/src/render/windows.rs"
       ],
@@ -10826,7 +10845,7 @@
       "production_fallback": false,
       "duplicate_production_owner": false,
       "platform_fallback": false,
-      "rust_adapter_scope": "provider window observation ordering, label/reset text formatting, and terminal row rendering"
+      "rust_adapter_scope": "borrow provider observations in source order, resolve local reset times with Chrono, and deserialize Mojo-owned blocked messages into terminal rows"
     },
     {
       "name": "quota_window_display_text_composition",
@@ -13873,13 +13892,13 @@
       "migrated_semantic_loc": 54,
       "final_state": "adapter-only",
       "rust_before": "crates/prodex-quota/src/render/windows.rs::collect_blocked_limits",
-      "rust_after": "Rust keeps provider observation ordering, unavailable-message construction, reset formatting and terminal row materialization while Mojo owns blocked-window eligibility",
-      "mojo_owner": "mojo/prodex_core/quota.mojo::prodex_quota_blocked_window_plan_v1",
-      "mojo_source": "mojo/prodex_core/quota.mojo",
-      "mojo_entry": "prodex_quota_blocked_window_plan_v1",
+      "rust_after": "Rust borrows provider observations and resolves local reset times; Mojo owns eligibility, unavailable rows, name precedence and complete blocked messages",
+      "mojo_owner": "mojo/prodex_core/quota_blocked_windows.mojo::prodex_quota_blocked_windows_json_v1",
+      "mojo_source": "mojo/prodex_core/quota_blocked_windows.mojo",
+      "mojo_entry": "prodex_quota_blocked_windows_json_v1",
       "production_consumer": "crates/prodex-quota/src/render/windows.rs",
       "parity_test": "crates/prodex-quota/tests/src/render/windows.rs::blocked_window_planner_preserves_provider_order_and_rendered_messages",
-      "performance": "one bounded blocked-window plan call per rendered quota snapshot"
+      "performance": "one measured two-pass blocked-message batch per rendered quota snapshot; no per-window FFI calls"
     },
     {
       "file": "crates/prodex-app/src/runtime_state_shared/semantic_index/symbols.rs",

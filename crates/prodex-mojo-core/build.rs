@@ -45,6 +45,8 @@ fn emit_source_rerun_directives(sources: &[&str], manifest_dir: &Path) {
         "parsed_json.mojo",
         "provider_boolean_tokens.mojo",
         "json_sink.mojo",
+        "rich_types.mojo",
+        "rich_text.mojo",
         "chat_tool_names.mojo",
         "chat_tool_shapes.mojo",
         "deepseek_message_index.mojo",
@@ -447,6 +449,7 @@ fn selected_sources() -> Vec<&'static str> {
         || env::var_os("CARGO_FEATURE_MOJO_CORE").is_some()
     {
         sources.push("../../mojo/prodex_core/quota.mojo");
+        sources.push("../../mojo/prodex_core/quota_blocked_windows.mojo");
         sources.push("../../mojo/prodex_core/quota_gemini_amount.mojo");
         sources.push("../../mojo/prodex_core/quota_usage_response.mojo");
         sources.push("../../mojo/prodex_core/quota_pool.mojo");

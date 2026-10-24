@@ -64,6 +64,14 @@ def js_u64(sink: Pointer[mut=True, JsonSink, _], value: UInt64):
         divisor /= 10
 
 
+def js_i64(sink: Pointer[mut=True, JsonSink, _], value: Int64):
+    if value < 0:
+        js_byte(sink, 45)
+        js_u64(sink, UInt64(-(value + 1)) + 1)
+    else:
+        js_u64(sink, UInt64(value))
+
+
 def js_u128(sink: Pointer[mut=True, JsonSink, _], value: UInt128):
     if value <= UInt128(18_446_744_073_709_551_615):
         js_u64(sink, UInt64(value))
