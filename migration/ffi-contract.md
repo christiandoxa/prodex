@@ -104,7 +104,7 @@ five-hour and weekly statuses. Window-pair readiness is false when both values a
 missing or either present value is at least `100`.
 
 Development-only Rust builds may omit the Mojo feature. Every target advertised by the
-`0.418.0` release matrix is Mojo-backed; its build receives a target archive and fails when the
+release matrix is Mojo-backed; its build receives a target archive and fails when the
 archive, compiler-produced ABI, or self-test is unavailable. There is no release-target Rust
 fallback after a Mojo failure.
 
@@ -455,7 +455,7 @@ The supported strict controls are:
 
 ```text
 PRODEX_MOJO_REQUIRED=1
-PRODEX_MOJO_VERSION=1.0.0
+PRODEX_MOJO_VERSION=1.2.0
 PRODEX_MOJO_TARGET=<Cargo target triple>
 PRODEX_MOJO_TARGET_CPU=<verified Mojo CPU name>
 PRODEX_MOJO_ARCHIVE=<verified target archive, release cross-link only>
@@ -552,23 +552,3 @@ are never selected after a Mojo-enabled call fails. Catalog v2 adds
 filtering/sorting dynamic model caches and `prodex_mojo_rich_catalog_config_v1` for remembered,
 provider-default, main-agent, and sub-agent model/effort precedence. Both use caller-owned rich
 record arrays and remain Mojo-authoritative when the rich feature is enabled.
-
-## Migration accounting
-
-`migrated_semantic_loc` is qualifying migration volume only when its Rust file is present in the
-frozen baseline inventory. `cleanup_loc` is separate source-only cleanup evidence: it records
-semantic Rust lines deleted or removed from the Mojo-enabled production path, but never counts
-toward the frozen-baseline migration floor. Every `cleanup_loc` record carries a baseline source
-range; feature-gated records also identify the release gate and retained Rust symbol so the guard
-can verify the evidence instead of treating a zero or unsupported claim as migration volume.
-
-Current 0.420.0 cleanup evidence is 17 lines for the deleted auto-redeem priority helper, 84 lines
-for the feature-gated dynamic catalog Rust planner, and 78 lines for the feature-gated main model
-configuration Rust planner. These 179 lines are reported separately from the 423-line requirement.
-
-The 0.420.0 qualifying migration inventory also records profile provider-order planning,
-Smart Context calibration matching, and provider constraint preclassification. Their Rust
-consumers retain only observation acquisition, bounded DTO construction, status validation, and
-typed result reconstruction; the deterministic decisions execute through the listed Mojo entry
-points in production feature builds. Historical feature-off Rust copies still present for
-unfinished migrations are cleanup debt. A completed migration deletes them before commit.

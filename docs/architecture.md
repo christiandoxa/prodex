@@ -233,12 +233,7 @@ When a rule fires, prefer one of these fixes:
 - Call orchestration upward from `prodex-app`, not from helper crates.
 - Keep hot-path runtime proxy helpers side-effect-free in `prodex-runtime-proxy`.
 
-## Mojo-first provider and launch ownership
-
-The 75% production-source migration campaign is tracked in
-[`migration/mojo-75-campaign.md`](../migration/mojo-75-campaign.md). Its target is
-separate from the historical release floor and does not change source-counting
-rules or existing release guarantees.
+## Provider and launch ownership
 
 `prodex-runtime-launch/mojo` delegates Codex argument/configuration plans through
 versioned borrowed OS-string views, retaining native ownership in Rust. Provider

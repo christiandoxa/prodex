@@ -68,48 +68,21 @@ module in the owning crate.
 - Keep new modules private by default and re-export only deliberate public contracts.
 - When extracting code, move its tests, invariants, and module/type documentation with it.
 
-## Mojo-first development
+## Rust and Mojo maintenance
 
-Mojo is the default implementation language for new production semantics across the
-repository. Rust is the exception and must be chosen only when a concrete technical
-constraint makes Mojo unsuitable.
+The Rust-to-Mojo migration campaign is closed. Further migration requires an explicit task;
+do not resume it to increase language-share metrics. Choose new implementation work according
+to the existing owner, technical constraints, and the requested behavior.
 
-- Before adding an algorithm, policy, parser, classifier, normalizer, scorer, planner,
-  validator, formatter, routing decision, transformation, or other deterministic behavior,
-  identify its side-effect-free kernel and determine whether Mojo can own it safely.
-- Search existing Mojo production modules for the domain owner and extend that owner when
-  appropriate. If no owner exists, create a focused `mojo/prodex_core/<domain>.mojo` module.
-- Nearby Rust code, author familiarity, implementation convenience, small scope, easier Rust
-  tests, or a promise to migrate later are not valid reasons to add new Rust semantics.
-- If new production Rust semantics are technically necessary, record the concrete limitation:
-  compiler/runtime or ABI support, data representation, Rust-only dependency, measurable
-  correctness/performance constraint, platform API, security boundary, or host-side effect.
-  Keep the Rust surface minimal; obvious filesystem, process, network, credential, and storage
-  boundaries need no repetitive justification.
-- Keep filesystem, process, signal, terminal, clipboard, Git, OS, network, HTTP, sockets, TLS,
-  credentials, secret stores, authentication, persistence execution, SQL/Redis/Postgres/SQLite
-  adapters, async runtimes, locks, synchronization, and cross-process coordination in Rust when
-  they are host/system responsibilities.
-- For mixed responsibilities, use a narrow typed Rust adapter: Rust obtains input and performs
-  effects, Mojo computes the deterministic plan or result, and Rust applies it.
-- Do not implement a complete feature in Rust with a “Mojo later” migration TODO. When modifying
-  an existing deterministic Rust algorithm, evaluate reducing its semantic ownership instead of
-  expanding it.
-- Mojo-owned production behavior must be reachable from the real production build graph,
-  versioned at its ABI boundary, meaningfully tested at its caller boundary, and free of a
-  duplicate Rust production decision or silent fallback recomputation.
-- Never create wrapper-only, dead, unreachable, generated, filler, or duplicate Mojo to satisfy
-  ownership metrics. Keep reusable Mojo under a coherent domain owner, not a generic dumping
-  ground.
-- Review meaningful new Rust behavior in this order: Mojo suitability, existing Mojo ownership,
-  minimum host boundary, production reachability, single semantic authority, and meaningful
-  verification; only then review ordinary style concerns.
-- This policy does not require an immediate rewrite of unrelated existing Rust. It applies to new
-  capabilities and significant maintenance additions, while preserving safe host boundaries.
+- Preserve existing Rust/Mojo ownership and versioned ABI contracts. Mojo-owned production
+  behavior must remain reachable, tested at its caller boundary, and free of duplicate Rust
+  decisions or silent fallback recomputation.
+- Keep filesystem, process, network, credentials, persistence, async runtimes, synchronization,
+  and other host responsibilities in Rust. Use narrow typed adapters for existing Mojo kernels.
+- Never add dead, wrapper-only, generated, filler, or duplicate code to satisfy ownership metrics.
 
-The canonical production-share policy uses a general 7.0% release floor and a separate 75.0%
-long-term project target. `node scripts/ci/mojo-production-share.mjs --check` enforces the floor
-and the audited reachable-Mojo non-regression baseline; it does not require the project target.
+`node scripts/ci/mojo-production-share.mjs --check` continues to enforce the 7.0% release floor
+and the audited reachable-Mojo non-regression baseline.
 The historical 0.421.0 quantity waiver is expired metadata only and must never satisfy a current
 release check or be replaced with a version-specific waiver.
 

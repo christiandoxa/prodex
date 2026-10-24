@@ -99,7 +99,7 @@ suite coverage.
 | Threat | Required control | Test/evidence | File(s) | Status |
 | --- | --- | --- | --- | --- |
 | Malformed rich Mojo record corrupts domain state | Versioned `repr(C)` records, bounded caller-owned arenas, UTF-8 checks, structured issues, and result validation | strict rich self-test, null/invalid UTF-8 ABI cases, layout probe, 10,000 context cases, 20,000 policy/fallback cases, 10,000 routing cases | `crates/prodex-mojo-core/src/rich.rs`; `mojo/prodex_core/rich_types.mojo`; `mojo/prodex_core/rich_context_v2.mojo`; `mojo/prodex_core/rich_route.mojo` | pass |
-| Heap-owning Mojo types alter release surface | Release archive must stay static and KGEN-free with the existing GLIBC floor | owning collection probe evidence plus archive symbol/dependency gates | `migration/mojo-ecosystem-evidence.md`; `.github/workflows/ci.yml`; `.github/workflows/standalone-release.yml` | pass |
+| Heap-owning Mojo types alter release surface | Release archive must stay static and KGEN-free with the existing GLIBC floor | owning collection probe evidence plus archive symbol/dependency gates | `migration/mojo-ecosystem-audit.json`; `.github/workflows/ci.yml`; `.github/workflows/standalone-release.yml` | pass |
 | Rich path exposes secret or persistent content | Only bounded non-secret diagnostics, identifiers, capability labels, and opaque artifact references cross; no pointer retention | threat-model review and caller-owned lifetime tests | `docs/threat-model.md`; `migration/ffi-contract.md`; rich consumer wrappers | pass |
 
 ## Phase 7 Supply-Chain Evidence

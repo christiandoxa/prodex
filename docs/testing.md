@@ -161,8 +161,8 @@ The Rust implementations remain differential oracles only. Rich ABI tests cover 
 null/zero-length views, null output pointers, capacity exhaustion, invalid tags/indices, and
 offset/result validation.
 
-The live package audit is recorded in `migration/mojo-ecosystem-audit.json` with narrative evidence
-in `migration/mojo-ecosystem-evidence.md`. Mojo stdlib capabilities are audited first; EmberJson,
+The package audit is recorded in `migration/mojo-ecosystem-audit.json`.
+Mojo stdlib capabilities are audited first; EmberJson,
 ExtraMojo, mojo-regex, ArgMojo, UUID, and decimo are evaluated before any package adoption. The
 current release uses no third-party Mojo package and keeps the native owning collection probe
 outside release artifacts.
@@ -401,7 +401,7 @@ The default test-compile guard runs `cargo test --locked --workspace --all-targe
 
 Use `node scripts/ci/runtime-test-manifest-guard.mjs` after adding or renaming runtime proxy tests. New `main_internal_tests::runtime_proxy_` tests should normally get a targeted `RUNTIME_CI_TEST_CASES` entry; only add or rely on `RUNTIME_CI_BROAD_SHARD_FILTERS` when a broad CI shard intentionally owns that whole module or prefix. Broad shard filters must mirror the `label|filter` entries in the `main-internal-runtime-proxy` matrix in `.github/workflows/ci.yml` and must not match tests outside runtime CI ownership.
 
-When changing `prodex-context` audit, prose compression, or command-output context-saver helpers, run `cargo test -q -p prodex-context`. If the `prodex context compact-output` CLI surface changes, also run a focused CLI parse/handler test. The command-output helpers are pure and opt-in; they should not require runtime proxy tests unless a separate runtime integration changes.
+When changing `prodex-context` audit, prose compression, or command-output context-saver helpers, run `cargo test -q -p prodex-context`. The command-output helpers are pure and opt-in; they should not require runtime proxy tests unless a separate runtime integration changes.
 
 When changing the Mojo text ABI or critical-signal grouping, also run the Rust-only and strict
 Mojo variants of `cargo bench --locked -p prodex-context --bench context_text_boundary`. The

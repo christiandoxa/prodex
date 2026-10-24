@@ -5,7 +5,7 @@
 
 `prodex` is a multi-account, multi-provider Codex wrapper with quota-aware profile routing.
 
-Use multiple Codex accounts and supported provider backends from one command line. OpenAI/Codex profiles get quota-aware routing and can auto-rotate when multiple eligible profiles exist; provider adapters let `prodex s` launch the Codex front end against Gemini, Anthropic, Copilot, Kiro, DeepSeek, and local OpenAI-compatible servers.
+Manage multiple Codex accounts, rotate eligible profiles as quota runs out, and use supported providers through the same front end.
 
 ![Prodex overview](https://github.com/christiandoxa/prodex/releases/download/assets/prodex-overview.png)
 
@@ -18,6 +18,7 @@ Use multiple Codex accounts and supported provider backends from one command lin
 - [Optional tools](#optional-tools)
 - [Quick start](#quick-start)
 - [Daily command: `prodex s`](#daily-command-prodex-s)
+- [OpenAI profile diagnostic](#openai-profile-diagnostic)
 - [Commands](#commands)
 - [Modes](#modes)
 - [Sub-agents](docs/sub-agents.md)
@@ -77,7 +78,7 @@ Prodex supports two provider paths:
 | Kiro CLI | `prodex s --provider kiro` or `prodex super --cli kiro` | Imported Kiro CLI profile via `prodex profile import kiro` | Imported profiles | Codex uses Prodex's Kiro ACP adapter; native Kiro uses an authenticated loopback CONNECT tunnel while its proprietary TLS payload remains opaque. |
 | DeepSeek | `prodex s deepseek` | `DEEPSEEK_API_KEY(S)` / `--api-key` | API-key balance | `prodex quota --all --provider deepseek` reads DeepSeek `/user/balance`. |
 | Local OpenAI-compatible | `prodex super --url http://127.0.0.1:8131` | Local server auth/config | Health snapshot | `prodex quota --all --provider local --base-url ...` checks the local `/models` endpoint. |
-| Bedrock / custom Codex `model_provider` | `prodex run` / `prodex caveman` direct pass-through | Codex-owned config | Config snapshot | Prodex reports configured provider metadata; provider-side quota stays owned by Codex/upstream. |
+| Bedrock / custom Codex `model_provider` | `prodex run` / `prodex super` direct pass-through | Codex-owned config | Config snapshot | Prodex reports configured provider metadata; provider-side quota stays owned by Codex/upstream. |
 
 </details>
 
@@ -150,10 +151,15 @@ Windows PowerShell:
 irm https://github.com/christiandoxa/prodex/releases/latest/download/install.ps1 | iex
 ```
 
+<details>
+<summary>Windows profile permissions</summary>
+
 Managed profiles require Windows symbolic-link permission. Enable Developer
 Mode, grant `SeCreateSymbolicLinkPrivilege`, or run Prodex as an administrator
 before importing or creating a profile. Prodex checks this before migrating
 profile state and reports an actionable error when permission is unavailable.
+
+</details>
 
 <details>
 <summary>Installer verification and legacy migration</summary>
@@ -177,9 +183,19 @@ Prodex Super keeps a deliberately small optional stack:
 - [Ponytail](https://github.com/DietrichGebert/ponytail) for minimal-implementation guidance.
 - [Presidio](https://github.com/data-privacy-stack/presidio) for opt-in PII redaction.
 
-Caveman is externally installed and validated; Smart Context is built into the Codex runtime proxy, not guaranteed for native opaque CLIs. Every default Codex-based `prodex s` or `prodex playwright` launch adds the installed compatible Playwright MCP package to its temporary overlay when Node.js 18+ and `npx` pass launch-time validation. Prodex does not require one exact optional-tool version at runtime: missing tools are skipped, compatible releases at or above each minimum are accepted, and an installed-but-incompatible tool fails with an upgrade instruction. Release qualification still tracks the latest stable references. See [Optional Tools](docs/optional-tools.md) for minimum versions, latest-stable references, managed paths, and validation rules.
+<details>
+<summary>Tool discovery and compatibility</summary>
+
+Caveman is externally installed and validated; Smart Context is built into the Codex runtime proxy, not guaranteed for native opaque CLIs. Every default Codex-based `prodex s` launch adds the installed compatible Playwright MCP package to its temporary overlay when Node.js 18+ and `npx` pass launch-time validation. Prodex does not require one exact optional-tool version at runtime: missing tools are skipped, compatible releases at or above each minimum are accepted, and an installed-but-incompatible tool fails with an upgrade instruction. Release qualification still tracks the latest stable references. See [Optional Tools](docs/optional-tools.md) for minimum versions, latest-stable references, managed paths, and validation rules.
+
+</details>
+
+<details>
+<summary>Remote optional-tool aliases</summary>
 
 `prodex s expose exec` snapshots the same launch-resolved optional-tool stack when the endpoint starts and advertises the usable entries in MCP initialize instructions and the `prodex_super_exec` tool metadata. Remote callers can use explicit `program: "optional:<tool>"` aliases without guessing installation paths: `optional:rtk` and `optional:codebase-memory-mcp` run their validated executables directly, `optional:playwright-mcp` runs the validated Playwright MCP package through `npx --no-install`, and `optional:caveman`, `optional:ponytail`, `optional:playwright`, and `optional:presidio` launch the corresponding Prodex Super integration. Presidio is advertised only while both configured services pass a bounded health probe. Ordinary `program` names and absolute paths keep their existing behavior and are never silently remapped.
+
+</details>
 
 <details>
 <summary>Install and verify the Super tools</summary>
@@ -205,8 +221,8 @@ cat >"$PRODEX_OPTIMIZERS_HOME/caveman/3.1.0/prodex-tool.json" <<'JSON'
 }
 JSON
 
-prodex capability super-doctor --json
-prodex caveman --dry-run
+prodex doctor --install
+prodex super --tool caveman --dry-run
 ```
 
 The target directory must not already exist. Prodex validates the commit metadata and complete tree digest before activating Caveman. Caveman 3.1.0 documents telemetry as enabled by default for its CLI and agent hooks; its skill-only integration sends no telemetry. Use Caveman's documented `caveman telemetry off` or `DO_NOT_TRACK=1` controls when running its CLI/plugin hooks if telemetry is not desired.
@@ -228,7 +244,7 @@ install -m 0755 "$rtk_dir/rtk" "$HOME/.local/bin/rtk"
 
 rtk --version
 rtk gain
-prodex capability super-doctor
+prodex doctor --install
 ```
 
 Use the matching archive and checksum row from the official v0.52.0 release on
@@ -245,7 +261,7 @@ curl -fsSLo "$cbm_install_dir/install.sh" \
 CBM_DOWNLOAD_URL=https://github.com/DeusData/codebase-memory-mcp/releases/download/v0.11.0 \
   bash "$cbm_install_dir/install.sh" --skip-config
 codebase-memory-mcp daemon status || true
-prodex capability super-doctor
+prodex doctor --install
 ```
 
 Prodex accepts daemon-capable Codebase Memory MCP builds (`0.9.1-rc.1` or newer, plus development
@@ -264,8 +280,8 @@ npx --version
 npm install -g @playwright/mcp@latest
 npx --no-install @playwright/mcp install-browser chrome
 npx --no-install @playwright/mcp --version
-prodex capability super-doctor
-prodex playwright --dry-run
+prodex doctor --install
+prodex super --tool playwright --dry-run
 ```
 
 The browser install command above installs the Chrome channel used by Prodex's default MCP configuration. On Linux hosts missing browser system libraries, rerun it with `--with-deps`. Playwright starts through `npx` in headless, isolated mode, so concurrent Prodex terminals do not share browser login state. It prompts before tools marked as writes. Playwright MCP is not a security boundary.
@@ -293,8 +309,8 @@ cat >"$PRODEX_OPTIMIZERS_HOME/ponytail/4.13.0/prodex-tool.json" <<'JSON'
 }
 JSON
 
-prodex capability super-doctor --json
-prodex ponytail --dry-run
+prodex doctor --install
+prodex super --tool ponytail --dry-run
 ```
 
 The target directory must not already exist. Prodex validates the commit metadata and complete tree digest, then activates Ponytail only in the temporary overlay for that session. The base Codex profile remains unchanged.
@@ -312,16 +328,15 @@ docker run -d --name presidio-anonymizer \
   --label com.prodex.presidio.service=presidio-anonymizer \
   -p 127.0.0.1:5001:3000 \
   ghcr.io/data-privacy-stack/presidio-anonymizer:2.2.364@sha256:e567013893ebc80994e3799f6f55c86aa1f0b0fadb779571ab346f0ec45365c1
-prodex presidio enable --language-mode fixed --languages en
-prodex presidio doctor --json
+prodex super --require-tool presidio --dry-run
 ```
 
-The standard Analyzer image is English-only. Indonesian detection requires an Analyzer configured with Indonesian NLP models and recognizers before enabling `--language-mode auto --languages en,id`.
+The standard Analyzer image is English-only. Indonesian detection requires an Analyzer configured with Indonesian NLP models and recognizers.
 
 Verify the optional stack:
 
 ```bash
-prodex capability super-doctor --presidio --strict
+prodex doctor --install
 prodex s --no-presidio --dry-run
 prodex s --presidio --dry-run
 ```
@@ -438,8 +453,8 @@ This reads the installed Kiro CLI state from the local auth database, snapshots 
 ```bash
 prodex s
 prodex s exec "review this repo"
-prodex s doctor --strict
-prodex s doctor --presidio --strict
+prodex doctor --install
+prodex super --require-tool presidio --dry-run
 ```
 
 <details>
@@ -489,6 +504,11 @@ Managed optimizer roots are checked in this order: `PRODEX_OPTIMIZERS_HOME`, `$X
 
 ## OpenAI profile diagnostic
 
+`prodex ping openai` checks configured OpenAI profiles through the normal Codex request path.
+
+<details>
+<summary>Probe behavior, model selection, and output</summary>
+
 `prodex ping openai` snapshots every configured eligible OpenAI profile and
 sends the minimal user text `hello` through the normal Prodex OpenAI/Codex
 request path, pinning each probe so one account cannot hide behind another.
@@ -509,15 +529,18 @@ latency, and terminal completion latency separately. This is an
 application-level provider diagnostic, not ICMP, DNS,
 TCP, TLS, or `/models` connectivity testing.
 
+</details>
+
 ## Sub-agents
 
-`prodex s` can delegate bounded tasks to fresh child Prodex processes. Main and
-child providers remain separate; Presidio is inherited explicitly; recursion is
-disabled; and the official shell-free launcher enforces the active-child limit
-across separate launcher processes.
+`prodex s` can delegate bounded tasks to fresh child Prodex processes.
 
 <details>
 <summary>Sub-agent configuration, runtime enforcement, and MVP boundaries</summary>
+
+Main and child providers remain separate; Presidio is inherited explicitly; recursion is
+disabled; and the official shell-free launcher enforces the active-child limit
+across separate launcher processes.
 
 ```bash
 prodex s --sub-agent --no-presidio
@@ -577,13 +600,8 @@ launcher, concurrency, resume-affinity, and isolation contracts.
 
 ## Commands
 
-The current CLI intentionally keeps only the supported profile, quota, session,
-diagnostic, run, Super, gateway, and ping surfaces. Retired top-level
-`setup`, `capability`, `audit`, `context`, `cleanup`, `gui`, `dashboard`,
-`caveman`, `rtk`, `playwright`, `ponytail`, `presidio`, `redeem`, `claude`, and
-standalone/public expose paths are not compatibility aliases and must not be
-resurrected. Optional tools are selected through Super's typed `--tool` and
-`--require-tool` flags.
+Use `prodex --help` for the current command list. Select optional tools with
+Super's `--tool` and `--require-tool` flags.
 
 <details>
 <summary>Most used commands</summary>
@@ -660,10 +678,6 @@ one-shot usage JSON and does not request credit details.
 
 The detailed live pool view (`prodex quota` or `prodex quota --all --detail`) accepts `s` to cycle sort modes and `f` to cycle the provider filter through `all`, `openai`, `gemini`, `anthropic`, `copilot`, `kiro`, `deepseek`, `local`, and `agy`. Add `--provider openai`, `--provider gemini`, `--provider anthropic`, `--provider copilot`, `--provider kiro`, `--provider deepseek`, `--provider local`, or `--provider agy` to start locked to a single provider. The table compacts to the current terminal width while preserving status and remaining-quota visibility; its live height keeps the sorted top rows and reports how many profiles are hidden.
 
-Reset-credit redemption, desktop GUI, and other retired paths are intentionally
-not part of the 0.430.x CLI. Use the quota/status views and normal Codex/Super
-launches instead.
-
 </details>
 
 <details>
@@ -718,7 +732,7 @@ unless Prodex explicitly owns that command.
 <details>
 <summary>Codex runtime feature overrides and app-server compatibility (advanced)</summary>
 
-Prodex keeps recent Codex runtime switches as Codex-owned behavior by rendering launch flags into `codex -c ...` overrides on `prodex run`, `prodex caveman`, and `prodex super`:
+Prodex keeps recent Codex runtime switches as Codex-owned behavior by rendering launch flags into `codex -c ...` overrides on `prodex run` and `prodex super`:
 
 ```bash
 prodex run --web-search indexed
@@ -739,7 +753,7 @@ Codex `rust-v0.153.2` thread classification remains transparent passthrough. `--
 ```bash
 prodex exec --thread-source automated_review "review this repository"
 prodex run exec --thread-source automated_review "review this repository"
-prodex caveman exec --thread-source automated_review "review this repository"
+prodex super --tool caveman exec --thread-source automated_review "review this repository"
 prodex s --no-presidio --no-sub-agent exec --thread-source automated_review "review this repository"
 prodex exec fork THREAD_ID --thread-source automated_review "continue the review"
 ```
@@ -749,7 +763,7 @@ Prodex preserves the value and its position in Codex argv. It does not inject Co
 ```bash
 prodex -c features.compaction_image_budget=true exec "review this repository"
 prodex run -c features.compaction_image_budget=true exec "review this repository"
-prodex caveman -c features.compaction_image_budget=true exec "review this repository"
+prodex super --tool caveman -c features.compaction_image_budget=true exec "review this repository"
 prodex s --no-presidio --no-sub-agent -c features.compaction_image_budget=true exec "review this repository"
 prodex s --provider gemini -c features.compaction_image_budget=true exec "review this repository"
 prodex -c features.compaction_image_budget=false exec "review this repository"
@@ -789,9 +803,8 @@ prodex plugin marketplace
 | Mode | Command | Description |
 |---|---|---|
 | Normal Codex | `prodex` or `prodex run` | Managed Codex launch with profile selection and quota routing. |
-| Caveman | `prodex caveman` | Runs Codex with Caveman mode enabled. |
+| Optional tools | `prodex super --tool caveman` | Selects tools for the Super invocation. |
 | Super | `prodex s` or `prodex super` | Daily mode with Caveman, RTK guidance, full access, and deterministic/local token optimizations. |
-| Claude Code | `prodex claude` | Runs Claude Code through Prodex-managed state. |
 
 <details>
 <summary>Normal Codex — managed Codex launch</summary>
@@ -986,25 +999,6 @@ containers explicitly.
 The standard Presidio Analyzer image is English-only. Indonesian detection requires an Analyzer with Indonesian models and recognizers. Presidio quality depends on that service configuration.
 
 </details>
-
-</details>
-
-<details>
-<summary>Claude Code — managed Claude Code state</summary>
-
-```bash
-prodex claude -- -p "summarize this repo"
-prodex claude caveman
-prodex claude caveman -- -p "summarize this repo briefly"
-prodex claude --profile second caveman -- -p "review the latest diff briefly"
-prodex claude --profile second -- -p --output-format json "show the latest diff"
-```
-
-`prodex claude` uses the normal Claude Code flow while keeping state under Prodex-managed configuration.
-
-`prodex claude caveman` enables Caveman for that session while keeping state under the Prodex-managed `CLAUDE_CONFIG_DIR`, not the global `~/.claude`.
-
-`prodex claude` is only supported with the default OpenAI/Codex provider.
 
 </details>
 
@@ -1219,7 +1213,7 @@ Set `PRODEX_SHARED_CODEX_HOME` only when you intentionally want a different shar
 
 Auto-rotate and quota checks apply to supported OpenAI/Codex profiles. `prodex quota` also supports Antigravity CLI quota snapshots, Anthropic OAuth profiles, imported Copilot accounts, DeepSeek API-key balances, local OpenAI-compatible health snapshots, supported Gemini API-key configurations, and configured custom providers. Disabled Gemini OAuth profiles receive migration guidance.
 
-If a profile's `config.toml` sets `model_provider` to a non-OpenAI backend such as `amazon-bedrock` or Codex 0.148's built-in `amazon-bedrock-runtime`, `prodex run` and `prodex caveman` launch Codex directly without quota preflight or the local auto-rotate proxy. Prodex does not rewrite either provider ID.
+If a profile's `config.toml` sets `model_provider` to a non-OpenAI backend such as `amazon-bedrock` or Codex 0.148's built-in `amazon-bedrock-runtime`, `prodex run` and `prodex super` launch Codex directly without quota preflight or the local auto-rotate proxy. Prodex does not rewrite either provider ID.
 
 Codex 0.149.0 raises the maximum context override for `openai.gpt-5.6-sol`, `openai.gpt-5.6-terra`, and `openai.gpt-5.6-luna` to 872,000 tokens and refreshes expired AWS credentials for Bedrock. Prodex preserves those model-specific limits and leaves AWS refresh, model IDs, reasoning effort, and service-tier behavior owned by the direct Codex launch.
 
@@ -1252,7 +1246,7 @@ localhost
 
 This prevents a user proxy from intercepting the local runtime proxy.
 
-Use `--no-proxy` on `prodex run`, `prodex caveman`, `prodex super`, or `prodex claude` only when you explicitly want Prodex upstream requests to bypass proxy settings.
+Use `--no-proxy` on `prodex run` or `prodex super` when you want Prodex upstream requests to bypass proxy settings.
 
 </details>
 
