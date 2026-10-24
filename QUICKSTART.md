@@ -276,16 +276,6 @@ complete native-provider fidelity. Check the generated
 [provider matrix](docs/provider-capabilities.md) and local-model notes in
 [LOCAL.md](LOCAL.md).
 
-## 7. Claude Code front end
-
-```bash
-prodex claude -- -p "summarize this repository"
-prodex claude --profile second -- -p "show the latest diff"
-```
-
-Claude Code talks through Prodex's Anthropic-compatible local boundary while
-profile affinity and pre-commit rotation stay Prodex-owned.
-
 ## 8. Diagnose a problem
 
 ```bash
