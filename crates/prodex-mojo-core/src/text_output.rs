@@ -1,7 +1,7 @@
 use crate::MojoError;
 
 /// Allocate native text at its measured size without the legacy text ABI's 64 MiB cap.
-#[cfg(feature = "mojo-runtime")]
+#[cfg(any(feature = "mojo-runtime", feature = "mojo-quota"))]
 pub(crate) fn render_measured_string(
     mut invoke: impl FnMut(Option<&mut [u8]>) -> Result<usize, MojoError>,
 ) -> Result<String, MojoError> {
@@ -18,6 +18,7 @@ pub(crate) fn render_measured_string(
 }
 
 /// Shared caller-owned allocation and status validation for measured text ABIs.
+#[cfg(any(feature = "mojo-runtime", feature = "mojo-observability", test))]
 pub(crate) fn render_measured_text(
     mut invoke: impl FnMut(i64, u64, i64, u64) -> i64,
 ) -> Result<String, MojoError> {
@@ -41,7 +42,7 @@ pub(crate) fn render_measured_text(
     String::from_utf8(output).map_err(|_| MojoError::InvalidOutput)
 }
 
-fn status(code: i64) -> Result<(), MojoError> {
+pub(crate) fn status(code: i64) -> Result<(), MojoError> {
     match code {
         0 => Ok(()),
         1 => Err(MojoError::InvalidInput),
@@ -55,7 +56,7 @@ fn status(code: i64) -> Result<(), MojoError> {
 mod tests {
     use super::*;
 
-    #[cfg(feature = "mojo-runtime")]
+    #[cfg(any(feature = "mojo-runtime", feature = "mojo-quota"))]
     #[test]
     fn native_text_retains_sizes_above_legacy_cap_and_rejects_changed_lengths() {
         let length = 67_108_865;

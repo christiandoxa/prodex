@@ -14,11 +14,7 @@ pub use auth_policy::{
     quota_auth_filter_matches, quota_auth_filter_parse, quota_auth_needs_proactive_refresh,
     quota_auth_summary_kind, quota_usage_auth_kind,
 };
-pub use blocked::{
-    QUOTA_BLOCKED_WINDOW_BATCH_MAX_COUNT, QUOTA_BLOCKED_WINDOW_KIND_ADDITIONAL,
-    QUOTA_BLOCKED_WINDOW_KIND_CODE_REVIEW, QUOTA_BLOCKED_WINDOW_KIND_MAIN, QuotaBlockedWindowInput,
-    quota_blocked_window_plan,
-};
+pub use blocked::{QuotaBlockedWindowInput, QuotaBlockedWindowKind, quota_blocked_windows_json};
 mod panel_text;
 pub use panel_text::quota_panel_first_line;
 mod model_capacity;
