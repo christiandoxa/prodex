@@ -95,17 +95,17 @@ If a runtime test needs parallel coverage, prefer a separate process with isolat
 
 ### Default and real Mojo validation
 
-The default runtime-quota build uses the compiled Mojo scoring and profile-order kernels. Install
+Default runtime and quota paths already use compiled Mojo kernels. Install
 the pinned Mojo compiler (`mojo==1.2.0`) or provide a target-matched archive through
 `PRODEX_MOJO_ARCHIVE` before running Cargo commands that build `prodex-runtime-quota` or its
-dependents. Its Rust parity oracle compiles only for tests.
+dependents. An empty root default-feature list does not remove these transitive requirements.
 
 ```bash
 cargo test --locked
 ```
 
-Other Mojo surfaces remain opt-in. The runtime-quota `mojo` feature also enables the runtime
-proxy's wider Mojo features:
+Cargo manifests define which additional Mojo surfaces each feature enables. The runtime-quota
+`mojo` feature also enables the runtime proxy's wider Mojo features:
 
 ```bash
 cargo test --locked -p prodex-quota --features mojo
@@ -143,8 +143,8 @@ target/debug/prodex doctor --runtime --json
 ```
 
 The context/core strict suites execute real string-view records, Unicode and embedded-nul text,
-malformed/truncated UTF-8 rejection, output-capacity and ABI-version failures, exact Rust-oracle
-grouping, repeated calls, and concurrent calls. The release and Real Mojo jobs also reject an
+malformed/truncated UTF-8 rejection, output-capacity and ABI-version failures, expected-result
+fixtures, repeated calls, and concurrent calls. The release and Real Mojo jobs also reject an
 unexpected `KGEN_CompilerRT_*` archive dependency.
 
 Strict Mojo builds fail if the compiler or archiver is missing, the checked-out Mojo source
@@ -152,14 +152,11 @@ does not compile, or the static archive is missing. The authoritative `Real Mojo
 `.github/workflows/ci.yml`; it lints the all-feature workspace, runs the built `prodex --version`
 binary, and checks the generated static archives.
 
-The rich strict suites additionally execute six production operations: context diagnostic analysis,
-provider/model fallback parsing, gateway route-alias validation, governed provider routing, Smart
-Context rehydration planning, and runtime log-event classification. Their generated parity floors
-are 10,000 context cases, 20,000 fallback/parser cases, 20,000 policy cases, and 10,000 routing
-candidate sets.
-The Rust implementations remain differential oracles only. Rich ABI tests cover invalid UTF-8,
-null/zero-length views, null output pointers, capacity exhaustion, invalid tags/indices, and
-offset/result validation.
+Rich ABI tests cover production operations, invalid UTF-8, null/zero-length views, null output
+pointers, capacity exhaustion, invalid tags/indices, and offset/result validation. Hard-replaced
+operations use independent expected-result and caller fixtures; do not restore deleted Rust
+implementations or differential oracles. Feature-off builds do not authorize a Rust fallback for
+an operation that already requires Mojo.
 
 The package audit is recorded in `migration/mojo-ecosystem-audit.json`.
 Mojo stdlib capabilities are audited first; EmberJson,

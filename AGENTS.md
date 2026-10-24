@@ -8,7 +8,8 @@ policy, threat-model, and test contracts.
 
 When rules conflict, use this order:
 
-1. Current repository behavior and safety invariants.
+1. Current task requirements and safety invariants. Existing behavior is a compatibility
+   baseline; it is not proof that an implementation is correct.
 2. Enforced CI guards, test runners, and `package.json` scripts.
 3. Maintained Prodex documentation: [architecture](docs/architecture.md),
    [testing](docs/testing.md), [runtime policy](docs/runtime-policy.md), and
@@ -67,6 +68,8 @@ module in the owning crate.
   speculative abstractions, configurability, dependencies, and drive-by refactors.
 - Keep new modules private by default and re-export only deliberate public contracts.
 - When extracting code, move its tests, invariants, and module/type documentation with it.
+- Comment non-obvious invariants, security/transport behavior, and `unsafe` code. Preserve
+  unrelated existing comments during focused changes.
 
 ## Rust and Mojo maintenance
 
@@ -83,8 +86,6 @@ to the existing owner, technical constraints, and the requested behavior.
 
 `node scripts/ci/mojo-production-share.mjs --check` continues to enforce the 7.0% release floor
 and the audited reachable-Mojo non-regression baseline.
-The historical 0.421.0 quantity waiver is expired metadata only and must never satisfy a current
-release check or be replaced with a version-specific waiver.
 
 ## Temporary artifact lifecycle
 
@@ -111,6 +112,7 @@ release check or be replaced with a version-specific waiver.
   every non-trivial fix, and run focused validation before broad CI.
 - Report the exact validation command and result. Never bypass a guard, hide a failure, or claim
   completion when a required check was skipped; record residual risk and unexecuted coverage.
+- Preserve pre-existing WIP and keep unrelated changes out of task commits.
 
 ## Runtime Proxy Rules
 
@@ -236,7 +238,10 @@ All Prodex-owned screens should adapt to the current terminal width. Live views 
 to terminal height when hidden critical state is surfaced, and must keep the previous snapshot
 visible until the next snapshot is fully ready to render.
 
-- By default, `prodex quota` should refresh continuously every 5 seconds.
+- Bare `prodex quota` opens the detailed pool view, equivalent to `--all --detail`. Provider
+  and auth filters use this default scope without requiring `--all`.
+- Explicit `--all` keeps the compact pool view; `--profile` and `--raw` select one profile.
+- By default, human quota views should refresh continuously every 5 seconds.
 - This default applies to both single-profile quota views and `prodex quota --all`.
 - `prodex quota --raw` should remain one-shot.
 - `prodex quota --once` is the explicit one-shot escape hatch for human-facing quota views.
@@ -336,13 +341,17 @@ files and a directory may have at most 9 near-limit production siblings.
 - Never pipe a remote script into a shell. Pin external CI actions and downloaded tools to full
   immutable SHAs or explicit versions. Review dependency and lockfile changes; add no dependency
   when an existing crate or the standard library is sufficient.
-- Do not commit or push unless explicitly authorized.
+- Do not commit or push unless explicitly authorized. Follow the user's requested destination;
+  use the required PR flow unless the user explicitly authorizes a direct push with the
+  necessary permissions.
 
 ## Testing strategy
 
 - Every behavior change needs meaningful observable regression coverage. Prefer integration or
   boundary tests when behavior crosses crates, processes, protocols, persistence, CLI surfaces,
   gateway contracts, or runtime proxy transport.
+- For a bug fix, demonstrate that the regression check fails on the broken behavior and passes
+  with the fix.
 - Prefer whole-object equality when it states the contract clearly. Do not add tests that only
   restate static constants or deleted behavior. Keep substantial new test modules in focused
   sibling files; do not grow an oversized test file for convenience.
@@ -397,6 +406,9 @@ exact commands and results; do not claim a skipped or failed command passed.
 - Rust module/API changes: `cargo fmt --check`, a focused `cargo test --locked -q -p <crate>`
   command, and `cargo clippy --locked --workspace --all-targets --all-features -- -D warnings`
   when shared/API or CI-sensitive code is touched.
+- Mojo kernel/ABI changes: run the owning Mojo tests, strict Rust bridge/caller suites, and
+  applicable authority/no-fallback guards with the pinned toolchain; see
+  [Mojo validation](docs/testing.md#default-and-real-mojo-validation).
 - Runtime proxy changes: `node scripts/ci/test-serial.mjs --suite runtime-smoke`,
   `cargo test --locked -q -p prodex-app --lib 'main_internal_tests::runtime_proxy_' -- --test-threads=1`,
   `node scripts/ci/runtime-hotpath-guard.mjs --self-test && node scripts/ci/runtime-hotpath-guard.mjs`, `node scripts/ci/runtime-test-manifest-guard.mjs`, and
@@ -407,16 +419,18 @@ exact commands and results; do not claim a skipped or failed command passed.
   `npm run test:serial -- --suite all` when global state/runtime paths changed and
   `npm run test:full -- --timings` when full workspace evidence is required.
 - Release metadata: after changing `Cargo.toml`, run `npm run npm:sync-version`, review
-  `Cargo.lock`, and use `npm run release:prepare` or the dry-run release flow before publishing.
+  `Cargo.lock` and `fuzz/Cargo.lock`, and use `npm run release:prepare` or the dry-run release
+  flow before publishing.
 
 ## Documentation and release behavior
 
 Keep detailed contracts in the canonical docs above; do not turn this file into a full
 architecture manual. Update README/QUICKSTART, CLI help, compatibility fixtures, or the owning
-docs when user-visible behavior changes. Quota is a Prodex-owned screen: human views refresh
-every 5 seconds by default, `--raw` and `--once` are one-shot modes, the prior snapshot remains
-visible during refresh, and `--all` preserves sort order while reporting hidden rows; snapshot
-style tests should use `--once`.
+docs when user-visible behavior changes.
+
+Keep current contracts and required release/security evidence. Use Git history for superseded
+plans and progress logs; remove obsolete documents with their references. Do not create per-task
+migration or progress documents unless requested or required by an active evidence contract.
 
 Keep the README installation commands versionless and pointed at the latest published release
 (`releases/latest/download`). Do not replace them with versioned URLs or rewrite them during a
@@ -426,6 +440,8 @@ For an authorized release, follow the repository release scripts and
 `.github/workflows/standalone-release.yml`: synchronize version metadata, lockfiles, tests, and
 docs as required by their guards. The default release path is GitHub/container artifacts, not
 npm or crates.io publication. Do not publish, tag, commit, or push without explicit authorization.
+Use the release scripts to synchronize root and fuzz lockfiles; do not broadly refresh the
+dependency graph solely for a version bump.
 On the `0.x` line, the normal release increment is the minor component unless the user requests
 another version. Use conventional commit subjects for authorized commits. The release workflow,
 not a manual Git command, owns the plain `0.x.y` tag and version-only GitHub Release title.

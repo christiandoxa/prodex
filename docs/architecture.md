@@ -206,6 +206,13 @@ hard-replaced operations have no feature-off Rust implementation or test oracle.
 static-item ordering and volatile metadata classification use the Mojo planning and normalization
 kernels in every feature mode.
 
+The Rust ABI declarations in `crates/prodex-mojo-core/src/` and paired exports in
+`mojo/prodex_core/` define the active signatures, layouts, and per-operation versions. Rust owns
+input/output storage; Mojo borrows it only for the synchronous call and retains no pointers.
+Adapters validate versions, status tags, record counts, offsets, and capacities before applying
+results. ABI changes must keep both sides and their caller tests aligned. Shared heap objects
+and runtime Rust fallback recomputation are outside this contract.
+
 The versioned `sub_agent_policy` ABI renders the sub-agent overlay rules and enabled/disabled
 dry-run report templates. Rust prepares display DTOs, redacts model/UUID values, quotes and
 sanitizes platform paths and launcher commands, and performs overlay filesystem writes; renderer
