@@ -12,7 +12,6 @@ not retained here; Git history is the record for obsolete material.
 | [Quickstart](../QUICKSTART.md) | First successful launch |
 | [Local models](../LOCAL.md) | Self-hosted OpenAI-compatible model setup |
 | [Architecture](architecture.md) | Workspace, dependency, and runtime boundaries |
-| [Rust-Mojo FFI](../migration/ffi-contract.md) | Existing ABI, memory ownership, and build contracts |
 | [Runtime policy](runtime-policy.md) | Runtime policy keys and enforcement behavior |
 | [State model](state-model.md) | Affinity and persistence |
 | [Optional tools](optional-tools.md) | Discovery, validation, and activation |
