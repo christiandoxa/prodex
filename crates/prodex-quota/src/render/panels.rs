@@ -1,4 +1,11 @@
 use super::*;
+use prodex_mojo_core::json::{
+    QuotaPanelExtra, QuotaPanelInput, QuotaPanelKind, quota_profile_panel_json,
+};
+
+#[cfg(test)]
+#[path = "../../tests/src/render/profile_panels.rs"]
+mod tests;
 
 pub(super) fn display_optional(value: Option<&str>) -> &str {
     value.unwrap_or("-")
@@ -13,32 +20,7 @@ pub fn render_profile_quota_with_width(
     usage: &UsageResponse,
     total_width: usize,
 ) -> String {
-    let mut fields = vec![
-        ("Profile".to_string(), profile_name.to_string()),
-        (
-            "Account".to_string(),
-            display_optional(usage.email.as_deref()).to_string(),
-        ),
-        (
-            "Plan".to_string(),
-            display_optional(usage.plan_type.as_deref()).to_string(),
-        ),
-        ("Status".to_string(), format_openai_quota_status(usage)),
-        ("Main".to_string(), format_main_windows(usage)),
-    ];
-
-    if let Some(code_review) = usage.code_review_rate_limit.as_ref() {
-        fields.push(("Code review".to_string(), format_window_pair(code_review)));
-    }
-    if let Some(reset_credits) = usage.rate_limit_reset_credits.as_ref() {
-        fields.push((
-            "Reset credits".to_string(),
-            format_reset_credits(reset_credits),
-        ));
-    }
-
-    fields.extend(format_additional_limits(usage));
-    render_panel_with_width(&format!("Quota {profile_name}"), &fields, total_width)
+    render_openai_profile_panel(profile_name, usage, false, total_width)
 }
 
 pub fn render_profile_quota_snapshot(
@@ -71,37 +53,70 @@ fn render_profile_quota_with_detail(
     usage: &UsageResponse,
     detail: bool,
 ) -> String {
-    if !detail {
-        return render_profile_quota(profile_name, usage);
-    }
-    let mut fields = vec![
-        ("Profile".to_string(), profile_name.to_string()),
-        (
-            "Account".to_string(),
-            display_optional(usage.email.as_deref()).to_string(),
-        ),
-        (
-            "Plan".to_string(),
-            display_optional(usage.plan_type.as_deref()).to_string(),
-        ),
-        ("Status".to_string(), format_openai_quota_status(usage)),
-        ("Main".to_string(), format_main_windows(usage)),
-        ("Reset".to_string(), format_main_reset_summary(usage)),
-    ];
-    if let Some(code_review) = usage.code_review_rate_limit.as_ref() {
-        fields.push(("Code review".to_string(), format_window_pair(code_review)));
-    }
-    if let Some(reset_credits) = usage.rate_limit_reset_credits.as_ref() {
-        fields.push((
-            "Reset credits".to_string(),
-            format_reset_credits(reset_credits),
-        ));
-    }
-    fields.extend(format_additional_limits(usage));
-    render_panel_with_width(
-        &format!("Quota {profile_name}"),
-        &fields,
-        current_cli_width(),
+    render_openai_profile_panel(profile_name, usage, detail, current_cli_width())
+}
+
+fn render_openai_profile_panel(
+    profile_name: &str,
+    usage: &UsageResponse,
+    detail: bool,
+    total_width: usize,
+) -> String {
+    let observations = usage
+        .additional_rate_limits
+        .iter()
+        .flat_map(|additional| {
+            [
+                additional.rate_limit.primary_window.as_ref(),
+                additional.rate_limit.secondary_window.as_ref(),
+            ]
+            .into_iter()
+            .flatten()
+            .map(move |window| {
+                (
+                    additional,
+                    window_label(window.limit_window_seconds),
+                    format_window_details(window),
+                )
+            })
+        })
+        .collect::<Vec<_>>();
+    let extras = observations
+        .iter()
+        .map(|(additional, label, value)| QuotaPanelExtra {
+            names: [
+                additional.limit_name.as_deref(),
+                additional.metered_feature.as_deref(),
+                additional.limit_id.as_deref(),
+            ],
+            window_label: label,
+            value,
+        })
+        .collect::<Vec<_>>();
+    let code_review = usage
+        .code_review_rate_limit
+        .as_ref()
+        .map(format_window_pair);
+    let credits = usage
+        .rate_limit_reset_credits
+        .as_ref()
+        .map(format_reset_credits);
+    render_compiled_profile_panel(
+        QuotaPanelKind::OpenAi,
+        QuotaPanelInput {
+            profile: profile_name,
+            account: usage.email.as_deref(),
+            plan: usage.plan_type.as_deref(),
+            status: &format_openai_quota_status(usage),
+            main: &format_main_windows(usage),
+            reset: Some(&format_main_reset_summary(usage)),
+            code_review: code_review.as_deref(),
+            reset_credits: credits.as_deref(),
+            extras: &extras,
+            ..Default::default()
+        },
+        detail,
+        total_width,
     )
 }
 
@@ -114,33 +129,22 @@ pub fn render_profile_copilot_quota_with_width(
     info: &CopilotQuotaInfo,
     total_width: usize,
 ) -> String {
-    let mut fields = vec![
-        ("Profile".to_string(), profile_name.to_string()),
-        (
-            "Account".to_string(),
-            display_optional(info.login.as_deref()).to_string(),
-        ),
-        (
-            "Plan".to_string(),
-            display_optional(
-                info.copilot_plan
-                    .as_deref()
-                    .or(info.access_type_sku.as_deref()),
-            )
-            .to_string(),
-        ),
-    ];
-    if let Some(access_type) = info.access_type_sku.as_deref()
-        && info.copilot_plan.as_deref() != Some(access_type)
-    {
-        fields.push(("Access".to_string(), access_type.to_string()));
-    }
-    fields.push(("Status".to_string(), format_copilot_quota_status(info)));
-    fields.push(("Main".to_string(), format_copilot_main_quota(info)));
-    if let Some(reset) = format_copilot_reset_summary(info) {
-        fields.push(("Reset".to_string(), reset));
-    }
-    render_panel_with_width(&format!("Quota {profile_name}"), &fields, total_width)
+    let reset = format_copilot_reset_summary(info);
+    render_compiled_profile_panel(
+        QuotaPanelKind::Copilot,
+        QuotaPanelInput {
+            profile: profile_name,
+            account: info.login.as_deref(),
+            plan: info.copilot_plan.as_deref(),
+            access: info.access_type_sku.as_deref(),
+            status: &format_copilot_quota_status(info),
+            main: &format_copilot_main_quota(info),
+            reset: reset.as_deref(),
+            ..Default::default()
+        },
+        false,
+        total_width,
+    )
 }
 
 pub fn render_profile_gemini_quota(profile_name: &str, info: &GeminiQuotaInfo) -> String {
@@ -152,30 +156,31 @@ pub fn render_profile_gemini_quota_with_width(
     info: &GeminiQuotaInfo,
     total_width: usize,
 ) -> String {
-    let mut fields = vec![
-        ("Profile".to_string(), profile_name.to_string()),
-        (
-            "Account".to_string(),
-            display_optional(info.email.as_deref()).to_string(),
-        ),
-        (
-            "Plan".to_string(),
-            display_optional(info.plan.as_deref()).to_string(),
-        ),
-        (
-            "Project".to_string(),
-            display_optional(info.project_id.as_deref()).to_string(),
-        ),
-        ("Status".to_string(), format_gemini_quota_status(info)),
-        ("Main".to_string(), format_gemini_main_quota(info)),
-    ];
-    if let Some(reset) = format_gemini_reset_summary(info) {
-        fields.push(("Reset".to_string(), reset));
-    }
-    for (index, summary) in format_gemini_bucket_summaries(info).into_iter().enumerate() {
-        fields.push((format!("Bucket {}", index + 1), summary));
-    }
-    render_panel_with_width(&format!("Quota {profile_name}"), &fields, total_width)
+    let reset = format_gemini_reset_summary(info);
+    let buckets = format_gemini_bucket_summaries(info);
+    let extras = buckets
+        .iter()
+        .map(|value| QuotaPanelExtra {
+            value,
+            ..Default::default()
+        })
+        .collect::<Vec<_>>();
+    render_compiled_profile_panel(
+        QuotaPanelKind::Gemini,
+        QuotaPanelInput {
+            profile: profile_name,
+            account: info.email.as_deref(),
+            plan: info.plan.as_deref(),
+            project: info.project_id.as_deref(),
+            status: &format_gemini_quota_status(info),
+            main: &format_gemini_main_quota(info),
+            reset: reset.as_deref(),
+            extras: &extras,
+            ..Default::default()
+        },
+        false,
+        total_width,
+    )
 }
 
 pub fn render_profile_external_quota(profile_name: &str, info: &ExternalQuotaInfo) -> String {
@@ -187,27 +192,44 @@ pub fn render_profile_external_quota_with_width(
     info: &ExternalQuotaInfo,
     total_width: usize,
 ) -> String {
-    let mut fields = vec![
-        ("Profile".to_string(), profile_name.to_string()),
-        ("Provider".to_string(), info.provider.clone()),
-        (
-            "Account".to_string(),
-            display_optional(info.account.as_deref()).to_string(),
-        ),
-        (
-            "Plan".to_string(),
-            display_optional(info.plan.as_deref()).to_string(),
-        ),
-        ("Status".to_string(), info.status.clone()),
-        ("Main".to_string(), info.main.clone()),
-    ];
-    if let Some(reset) = info.reset.as_deref() {
-        fields.push(("Reset".to_string(), reset.to_string()));
-    }
-    for detail in &info.details {
-        fields.push((detail.label.clone(), detail.value.clone()));
-    }
-    render_panel_with_width(&format!("Quota {profile_name}"), &fields, total_width)
+    let extras = info
+        .details
+        .iter()
+        .map(|detail| QuotaPanelExtra {
+            names: [Some(detail.label.as_str()), None, None],
+            value: &detail.value,
+            ..Default::default()
+        })
+        .collect::<Vec<_>>();
+    render_compiled_profile_panel(
+        QuotaPanelKind::External,
+        QuotaPanelInput {
+            profile: profile_name,
+            provider: Some(&info.provider),
+            account: info.account.as_deref(),
+            plan: info.plan.as_deref(),
+            status: &info.status,
+            main: &info.main,
+            reset: info.reset.as_deref(),
+            extras: &extras,
+            ..Default::default()
+        },
+        false,
+        total_width,
+    )
+}
+
+fn render_compiled_profile_panel(
+    kind: QuotaPanelKind,
+    input: QuotaPanelInput<'_>,
+    detail: bool,
+    total_width: usize,
+) -> String {
+    let json =
+        quota_profile_panel_json(kind, input, detail).expect("Mojo quota panel schema failed");
+    let (title, fields): (String, Vec<(String, String)>) =
+        serde_json::from_str(&json).expect("Mojo quota panel schema returned invalid rows");
+    render_panel_with_width(&title, &fields, total_width)
 }
 
 pub fn render_quota_error_panel_with_width(
@@ -234,38 +256,6 @@ fn render_panel_with_width(title: &str, fields: &[(String, String)], total_width
         ));
     }
     lines.join("\n")
-}
-
-fn format_additional_limits(usage: &UsageResponse) -> Vec<(String, String)> {
-    let mut lines = Vec::new();
-
-    for additional in &usage.additional_rate_limits {
-        let name = additional
-            .limit_name
-            .as_deref()
-            .or(additional.metered_feature.as_deref())
-            .or(additional.limit_id.as_deref())
-            .unwrap_or("Additional");
-
-        if let Some(primary) = additional.rate_limit.primary_window.as_ref() {
-            lines.push((
-                additional_window_label(name, primary),
-                format_window_details(primary),
-            ));
-        }
-        if let Some(secondary) = additional.rate_limit.secondary_window.as_ref() {
-            lines.push((
-                additional_window_label(name, secondary),
-                format_window_details(secondary),
-            ));
-        }
-    }
-
-    lines
-}
-
-fn additional_window_label(base: &str, window: &UsageWindow) -> String {
-    format!("{base} {}", window_label(window.limit_window_seconds))
 }
 
 pub fn first_line_of_error(input: &str) -> String {

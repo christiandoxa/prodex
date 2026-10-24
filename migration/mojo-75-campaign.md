@@ -9120,3 +9120,12 @@ precedence now belong to the compiled quota owner. The Rust builder and old
 selection ABI are removed without a fallback. Evidence and coverage are in
 [quota-blocked-messages-mojo-20261024.md](quota-blocked-messages-mojo-20261024.md).
 The 75% target remains open.
+
+## Quota profile panel schemas compiled in Mojo (2026-10-24)
+
+Titles, field order, defaults, optional rows, name precedence and bucket labels
+now use the shared compiled quota presentation owner. Original renderer parity
+fixtures pass before and after adoption. The Rust builders are deleted without
+a fallback. Evidence is in
+[quota-profile-panels-mojo-20261024.md](quota-profile-panels-mojo-20261024.md).
+The 75% target remains open.

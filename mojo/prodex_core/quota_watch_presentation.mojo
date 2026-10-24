@@ -6,11 +6,11 @@ from parsed_json import (
     pj_valid, pj_kind, pj_field, pj_text, pj_literal, pj_trim, pj_is, pj_child, pj_next,
 )
 from rich_text import (
-    rich_view_prefix, rich_trim_bounds, rich_view_valid, rich_codepoint_width,
+    rich_view_prefix, rich_trim_bounds, rich_view_valid, rich_codepoint_width, rich_views_equal,
     rich_codepoint, rich_unicode_space,
 )
 from rich_types import ProdexRichStringView
-from json_sink import JsonSink, js_byte, js_literal, js_string, js_view, js_escaped
+from json_sink import JsonSink, js_byte, js_literal, js_string, js_view, js_escaped, js_u64
 from quota_watch_policy import (
     quota_watch_reset_kind, quota_watch_text_starts_at_exact, quota_watch_text_contains_exact,
 )
@@ -328,4 +328,137 @@ def prodex_quota_tui_span_plan_v1(
     output[unsafe_offset=0] = plan.kind
     output[unsafe_offset=1] = plan.label_end
     output[unsafe_offset=2] = plan.value_start
+    return 0
+
+
+@fieldwise_init
+struct QuotaProfilePanelExtra(Copyable):
+    var presence: UInt64
+    var name: ProdexRichStringView
+    var feature: ProdexRichStringView
+    var id: ProdexRichStringView
+    var window: ProdexRichStringView
+    var value: ProdexRichStringView
+
+
+def qpf_optional(fields: Pointer[mut=False, ProdexRichStringView, _], presence: UInt64, index: Int64) -> ProdexRichStringView:
+    return fields[unsafe_offset=index].copy() if presence & (UInt64(1) << UInt64(index)) != 0 else pj_literal("-")
+
+
+def qpf_emit(
+    sink: Pointer[mut=True, JsonSink, _], kind: Int64, detail: Int64,
+    fields: Pointer[mut=False, ProdexRichStringView, _], presence: UInt64,
+    extras: Pointer[mut=False, QuotaProfilePanelExtra, _], count: Int64,
+):
+    js_literal(sink, StringSlice('["Quota '))
+    js_escaped(sink, fields[unsafe_offset=0])
+    js_literal(sink, StringSlice('",['))
+    qwp_pair(sink, StringSlice("Profile"), fields[unsafe_offset=0])
+    if kind == 3:
+        js_byte(sink, 44)
+        qwp_pair(sink, StringSlice("Provider"), qpf_optional(fields, presence, 1))
+    js_byte(sink, 44)
+    qwp_pair(sink, StringSlice("Account"), qpf_optional(fields, presence, 2))
+    js_byte(sink, 44)
+    var plan_index: Int64 = 4 if kind == 1 and presence & 8 == 0 else 3
+    qwp_pair(sink, StringSlice("Plan"), qpf_optional(fields, presence, plan_index))
+    if kind == 1 and presence & 16 != 0 and (presence & 8 == 0 or not rich_views_equal(fields[unsafe_offset=3], fields[unsafe_offset=4])):
+        js_byte(sink, 44)
+        qwp_pair(sink, StringSlice("Access"), fields[unsafe_offset=4])
+    if kind == 2:
+        js_byte(sink, 44)
+        qwp_pair(sink, StringSlice("Project"), qpf_optional(fields, presence, 5))
+    js_byte(sink, 44)
+    qwp_pair(sink, StringSlice("Status"), fields[unsafe_offset=6])
+    js_byte(sink, 44)
+    qwp_pair(sink, StringSlice("Main"), fields[unsafe_offset=7])
+    if (kind == 0 and detail == 1) or (kind != 0 and presence & 256 != 0):
+        js_byte(sink, 44)
+        qwp_pair(sink, StringSlice("Reset"), qpf_optional(fields, presence, 8))
+    if kind == 0:
+        if presence & 512 != 0:
+            js_byte(sink, 44)
+            qwp_pair(sink, StringSlice("Code review"), fields[unsafe_offset=9])
+        if presence & 1024 != 0:
+            js_byte(sink, 44)
+            qwp_pair(sink, StringSlice("Reset credits"), fields[unsafe_offset=10])
+    for index in range(count):
+        var row = extras[unsafe_offset=index].copy()
+        js_literal(sink, StringSlice(',["'))
+        if kind == 0:
+            var name = pj_literal("Additional")
+            if row.presence & 1 != 0:
+                name = row.name.copy()
+            elif row.presence & 2 != 0:
+                name = row.feature.copy()
+            elif row.presence & 4 != 0:
+                name = row.id.copy()
+            js_escaped(sink, name)
+            js_byte(sink, 32)
+            js_escaped(sink, row.window)
+        elif kind == 2:
+            js_literal(sink, StringSlice("Bucket "))
+            js_u64(sink, UInt64(index + 1))
+        else:
+            js_escaped(sink, row.name)
+        js_literal(sink, StringSlice('",'))
+        js_string(sink, row.value)
+        js_byte(sink, 93)
+    js_literal(sink, StringSlice("]]"))
+
+
+@export("prodex_quota_profile_panel_v1")
+def prodex_quota_profile_panel_v1(
+    abi: Int64, kind: Int64, detail: Int64, fields_address: UInt64, presence: UInt64,
+    extras_address: UInt64, count: Int64, measuring: Int64,
+    output_address: UInt64, capacity: Int64, metadata_address: UInt64,
+) abi("C") -> Int64:
+    if abi != 1:
+        return 4
+    if (
+        kind < 0 or kind > 3 or detail < 0 or detail > 1
+        or fields_address == 0 or fields_address % 8 != 0
+        or presence > 2047 or presence & 193 != 193
+        or count < 0 or count > 0x7FFFFFFFFFFFFFFF // 88 or kind == 1 and count != 0
+        or count > 0 and (extras_address == 0 or extras_address % 8 != 0)
+        or measuring < 0 or measuring > 1 or capacity < 0
+        or metadata_address == 0 or metadata_address % 8 != 0
+        or measuring == 1 and (output_address != 0 or capacity != 0)
+        or measuring == 0 and output_address == 0
+    ):
+        return 1
+    var fields = Pointer[mut=False, ProdexRichStringView, ImmUntrackedOrigin](unsafe_from_address=Int(fields_address))
+    for index in range(11):
+        var field = fields[unsafe_offset=index].copy()
+        if not rich_view_valid(field, 0x7FFFFFFFFFFFFFFF) or presence & (UInt64(1) << UInt64(index)) == 0 and field.len != 0:
+            return 1
+    var extras = Pointer[mut=False, QuotaProfilePanelExtra, ImmUntrackedOrigin](unsafe_from_address=Int(extras_address))
+    for index in range(count):
+        var row = extras[unsafe_offset=index].copy()
+        if (
+            row.presence > 7 or kind == 3 and row.presence & 1 == 0
+            or not rich_view_valid(row.name, 0x7FFFFFFFFFFFFFFF)
+            or not rich_view_valid(row.feature, 0x7FFFFFFFFFFFFFFF)
+            or not rich_view_valid(row.id, 0x7FFFFFFFFFFFFFFF)
+            or not rich_view_valid(row.window, 0x7FFFFFFFFFFFFFFF)
+            or not rich_view_valid(row.value, 0x7FFFFFFFFFFFFFFF)
+            or row.presence & 1 == 0 and row.name.len != 0
+            or row.presence & 2 == 0 and row.feature.len != 0
+            or row.presence & 4 == 0 and row.id.len != 0
+        ):
+            return 1
+    var output = Pointer[mut=True, UInt8, MutUntrackedOrigin](unsafe_from_address=Int(output_address))
+    var sink = JsonSink(output, capacity, 0, True, False)
+    qpf_emit(Pointer(to=sink), kind, detail, fields, presence, extras, count)
+    if sink.failed or measuring == 0 and sink.written > capacity:
+        return 3
+    var required = sink.written
+    if measuring == 0:
+        sink = JsonSink(output, capacity, 0, False, False)
+        qpf_emit(Pointer(to=sink), kind, detail, fields, presence, extras, count)
+        if sink.failed or sink.written != required:
+            return 3
+    var metadata = Pointer[mut=True, Int64, MutUntrackedOrigin](unsafe_from_address=Int(metadata_address))
+    metadata[unsafe_offset=0] = 1
+    metadata[unsafe_offset=1] = required
     return 0

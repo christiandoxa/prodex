@@ -2941,6 +2941,14 @@
         ]
       },
       {
+        "path": "mojo/prodex_core/quota_watch_presentation.mojo",
+        "language": "mojo",
+        "classification": "DETERMINISTIC_DOMAIN",
+        "production_reachable": true,
+        "role": "semantic",
+        "operations": ["quota_profile_panel_schema"]
+      },
+      {
         "path": "mojo/prodex_core/optional_tool_install_policy.mojo",
         "language": "mojo",
         "classification": "DETERMINISTIC_DOMAIN",
@@ -2973,6 +2981,28 @@
     "deepseek_chat_stream_event_translation"
   ],
   "authoritative_operations": [
+    {
+      "name": "quota_profile_panel_schema",
+      "domain": "quota/display-policy",
+      "introduced_in": "0.439.0",
+      "baseline_state": "Rust field assembly and optional row decisions",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_quota_profile_panel_v1",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/quota_watch_presentation.mojo",
+      "consumer": "crates/prodex-quota/src/render/panels.rs",
+      "consumer_marker": "quota_profile_panel_json(",
+      "production_consumers": ["crates/prodex-quota/src/render/panels.rs"],
+      "production_reachability_test": "crates/prodex-mojo-core/src/json/quota_profile_panel_tests.rs",
+      "caller_regression_test": "crates/prodex-quota/tests/src/render/profile_panels.rs",
+      "rust_owner_before": "panel titles, row labels and order, optional defaults, access equality, additional-name precedence and bucket numbering",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "deleted; original-renderer field and width fixtures pass through the promoted caller",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "acquire existing formatted provider observations, borrow native UTF-8 views, materialize the compiled title and rows, and invoke the existing terminal layout owner"
+    },
     {
       "name": "quota_provider_filter_parse_and_native_membership",
       "domain": "quota-watch/provider-filter",
