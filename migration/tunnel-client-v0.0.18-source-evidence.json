@@ -1,0 +1,61 @@
+{
+  "schema_version": 1,
+  "release": "v0.0.18",
+  "release_url": "https://github.com/openai/tunnel-client/releases/tag/v0.0.18",
+  "published_at": "2026-10-23T20:25:58Z",
+  "source_commit": "274a5588414819f063d27100a4fb1096aae3830f",
+  "previous_release": "v0.0.17",
+  "delta_commits": 9,
+  "runtime_minimum": "0.0.13",
+  "qualification_scope": "Official binary identity and CLI capabilities, upstream source compatibility review, and deterministic wrapper environment regression; no live provider authentication or tunnel provisioning.",
+  "reviewed_upstream_owners": [
+    "pkg/runtimeconfig/aws_identity.go",
+    "pkg/runtimeconfig/config.go",
+    "pkg/runtimeconfig/file_config.go",
+    "pkg/controlplane/internal/roundtripper.go",
+    "pkg/controlplane/internal/tunnel_service_client.go",
+    "pkg/proxyhealth/checker.go",
+    "pkg/localfiles/files.go",
+    "docs/protocol.md"
+  ],
+  "compatibility_findings": [
+    "AWS workload identity is opt-in and mutually exclusive with static API keys. Prodex removes both ambient AWS identity-selection variables before its existing static-key probes and child startup.",
+    "Static-key authentication and the existing run/config/health/log flags remain available. The runtime minimum and native version/capability policy are unchanged.",
+    "Loopback Harpoon templates and local upload tracing remain explicit upstream opt-ins; Prodex does not enable them or change its MCP endpoint configuration."
+  ],
+  "official_binary": {
+    "platform": "linux-amd64",
+    "asset": "tunnel-client-v0.0.18-linux-amd64.zip",
+    "sha256": "3c82307316acd93c88a384b62af1d81d3f4cb0efa975f9c0bfaef922866a04c4",
+    "published_digest": "sha256:3c82307316acd93c88a384b62af1d81d3f4cb0efa975f9c0bfaef922866a04c4",
+    "checksum_manifest_sha256": "63f9996246424301c8b0680c943c67d0ea7fe2f0853a234649104f8062c67329",
+    "binary_sha256": "55c48566e682473a602eea4951978d27acc0f2c8de2340b684a8b114feba7a83"
+  },
+  "successful_probes": [
+    "--version",
+    "--help",
+    "run --help",
+    "codex --help",
+    "doctor --help",
+    "doctor --json with wrapper-shaped YAML, synthetic key and loopback-only mocked MCP/OAuth endpoints"
+  ],
+  "required_run_flags_verified": [
+    "--config",
+    "--control-plane.base-url",
+    "--control-plane.tunnel-id",
+    "--control-plane.api-key",
+    "--health.listen-addr",
+    "--health.url-file",
+    "--log.level",
+    "--log.format"
+  ],
+  "regression": {
+    "test": "super_expose::openai_tunnel::version_policy_tests::static_key_tunnel_child_does_not_inherit_aws_identity_configuration",
+    "baseline": "Failed before the environment filter change; conflicting AWS identity provider remained in the child environment.",
+    "official_binary_confirmation": "The official binary rejects ambient AWS identity selectors alongside a synthetic static key, then passes all mandatory doctor checks after those selectors are removed. All probe destinations were loopback mocks; no real control-plane authentication, model turn or tunnel provisioning occurred."
+  },
+  "live_tunnel_created": false,
+  "installed_binary_replaced": false,
+  "live_credentials_provided": false,
+  "synthetic_credentials_used": true
+}
