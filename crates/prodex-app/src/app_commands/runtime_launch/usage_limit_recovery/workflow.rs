@@ -149,13 +149,16 @@ fn native_workflow_observation(object: &Map<String, Value>) -> WorkflowObservati
     }
 }
 
+/// Updates acceptance evidence and reports a newly observed progress milestone.
+/// Control acknowledgments and synthetic continuation input are not progress.
 pub(super) fn observe_runtime_workflow_evidence(
     value: &Value,
     evidence: &mut RuntimeWorkflowEvidence,
-) {
+) -> bool {
     let Some(object) = value.as_object() else {
-        return;
+        return false;
     };
+    let was_committed = evidence.stream_committed == Some(true);
     let observation = native_workflow_observation(object);
     let current = WorkflowEvidencePlan {
         acceptance_state: match evidence.acceptance_state {
@@ -195,6 +198,17 @@ pub(super) fn observe_runtime_workflow_evidence(
             _ => "unknown",
         },
     };
+    // Only a new output/tool commitment or completed compaction resets the
+    // retry schedule. Keep wire-shape projection alongside the existing
+    // Mojo-owned evidence transition, not in session-file scan orchestration.
+    let compacted = matches!(
+        (
+            object.get("type").and_then(Value::as_str),
+            value.pointer("/payload/type").and_then(Value::as_str),
+        ),
+        (Some("compacted"), _) | (Some("event_msg"), Some("context_compacted"))
+    );
+    (!was_committed && evidence.stream_committed == Some(true)) || compacted
 }
 
 /// Projects native event envelopes; policy and precedence are Mojo-owned.

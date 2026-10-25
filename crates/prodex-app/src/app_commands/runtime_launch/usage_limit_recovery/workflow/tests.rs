@@ -390,3 +390,35 @@ fn timeout_text_does_not_override_explicit_failure_or_terminal_guards() {
         "error":{"message":"request timed out","codex_error_info":"other"}});
     assert_eq!(runtime_workflow_recovery_class(&foreign, SESSION), None);
 }
+
+#[test]
+fn workflow_progress_projection_preserves_control_and_compaction_boundaries() {
+    let mut evidence = RuntimeWorkflowEvidence::default();
+    for value in [
+        serde_json::json!(null),
+        serde_json::json!({"type":"event_msg", "payload":{"type":"task_started"}}),
+        serde_json::json!({"type":"event_msg", "payload":{"type":"thread_goal_updated"}}),
+        serde_json::json!({"type":"response_item", "payload":{"type":"message", "role":"user"}}),
+    ] {
+        assert!(!observe_runtime_workflow_evidence(&value, &mut evidence));
+    }
+    let output = serde_json::json!({"type":"response_item", "payload":{"type":"message", "role":"assistant"}});
+    assert!(observe_runtime_workflow_evidence(&output, &mut evidence));
+    assert!(
+        !observe_runtime_workflow_evidence(&output, &mut evidence),
+        "another record in the same committed turn is not a new commitment"
+    );
+    for value in [
+        serde_json::json!({"type":"compacted", "payload":{}}),
+        serde_json::json!({"type":"event_msg", "payload":{"type":"context_compacted"}}),
+    ] {
+        assert!(observe_runtime_workflow_evidence(&value, &mut evidence));
+    }
+    assert!(
+        !observe_runtime_workflow_evidence(
+            &serde_json::json!({"type":"response_item", "payload":{"type":"context_compacted"}}),
+            &mut evidence,
+        ),
+        "a matching payload under an unrelated envelope is not completed compaction"
+    );
+}
