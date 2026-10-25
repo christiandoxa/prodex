@@ -102,7 +102,9 @@ fn committed_stream_remains_readable_after_precommit_watchdog_expires() {
         .active_profile("main").current_profile("main").upstream_base_url(backend.base_url())
         .profile_usage_snapshot("main", ready).build();
     let mut scoped = harness.shared().clone();
-    scoped.precommit_deadline = Some(Instant::now() + Duration::from_secs(1));
+    // Allow cold Windows runtime startup before commitment. The assertion below
+    // still waits for this exact original deadline to expire before reading.
+    scoped.precommit_deadline = Some(Instant::now() + Duration::from_secs(5));
     let RuntimeResponsesReply::Streaming(mut response) = proxy_runtime_responses_request(1202, &request(), &scoped).unwrap() else {
         panic!("fixture must commit a stream");
     };

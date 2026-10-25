@@ -58,19 +58,7 @@ impl GoalUsageLimitMonitor {
                 if let Some(observed) = runtime_workflow_effective_model(&value) {
                     model = Some(observed);
                 }
-                let was_committed = evidence.stream_committed == Some(true);
-                observe_runtime_workflow_evidence(&value, &mut evidence);
-                // Only persisted output/tool results or completed compaction
-                // establish progress. Goal updates, task_started and repeated
-                // synthetic user continuation messages never reset backoff.
-                let compacted = value.get("type").and_then(serde_json::Value::as_str)
-                    == Some("compacted")
-                    || value.get("type").and_then(serde_json::Value::as_str) == Some("event_msg")
-                        && value
-                            .pointer("/payload/type")
-                            .and_then(serde_json::Value::as_str)
-                            == Some("context_compacted");
-                if (!was_committed && evidence.stream_committed == Some(true)) || compacted {
+                if observe_runtime_workflow_evidence(&value, &mut evidence) {
                     progress_revision = progress_revision.saturating_add(1);
                 }
                 let class = runtime_workflow_recovery_class(&value, session_id);
