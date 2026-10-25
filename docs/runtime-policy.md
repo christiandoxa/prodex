@@ -664,7 +664,13 @@ shared-state integration around those operations.
   and WebSocket hold these events before commitment, so a later capacity failure can still
   use the existing bounded retry/rotation policy. A heartbeat never resets the request
   deadline, relaxes hard continuation ownership, or makes already-committed output replayable.
-- Healthy local capacity contention waits for a permit instead of consuming an upstream retry.
+- Ingress never waits for worker queue space or upstream I/O. Bounded route queues
+  isolate cached WebSocket connections, HTTP responses, unary compaction and metadata.
+  Authenticated local control remains reachable under upstream worker saturation.
+  A full route queue returns 503 with `Retry-After`; it does not mark other lanes
+  overloaded, exhaust an account's quota, or rotate an already-committed response.
+  Queue latency metrics measure enqueue-to-dequeue residence, not acceptor blocking.
+- Healthy admitted capacity contention waits for a permit instead of consuming an upstream retry.
   The retry clock starts with the first upstream dispatch and pauses during capacity waits;
   waiting never clears failed-profile exclusions or replenishes the actual attempt limit.
   A separate request-local wall-clock watchdog includes ingress queueing, admission,
@@ -739,11 +745,11 @@ shared-state integration around those operations.
 <!-- BEGIN GENERATED RUNTIME_PROXY_KEYS -->
 | Policy key | Environment override | Default | Meaning |
 | --- | --- | --- | --- |
-| `runtime_proxy.worker_count` | `PRODEX_RUNTIME_PROXY_WORKER_COUNT` | CPU parallelism clamped to `4..12` | Short-lived proxy worker pool size. |
-| `runtime_proxy.long_lived_worker_count` | `PRODEX_RUNTIME_PROXY_LONG_LIVED_WORKER_COUNT` | `parallelism * 2` clamped to `8..24` | Worker pool for long-lived streams and websocket work. |
+| `runtime_proxy.worker_count` | `PRODEX_RUNTIME_PROXY_WORKER_COUNT` | CPU parallelism clamped to `4..12` | Ingress worker count and separate standard HTTP worker count; compaction has `min(worker_count, compact_active_limit)` workers (at least one). |
+| `runtime_proxy.long_lived_worker_count` | `PRODEX_RUNTIME_PROXY_LONG_LIVED_WORKER_COUNT` | `parallelism * 2` clamped to `8..24` | Worker count in each of two isolated pools: HTTP responses and WebSocket connections. |
 | `runtime_proxy.probe_refresh_worker_count` | `PRODEX_RUNTIME_PROBE_REFRESH_WORKER_COUNT` | CPU parallelism clamped to `2..4` | Background profile probe refresh workers. |
 | `runtime_proxy.async_worker_count` | `PRODEX_RUNTIME_PROXY_ASYNC_WORKER_COUNT` | CPU parallelism clamped to `2..4` | Async runtime worker count. |
-| `runtime_proxy.long_lived_queue_capacity` | `PRODEX_RUNTIME_PROXY_LONG_LIVED_QUEUE_CAPACITY` | `long_lived_worker_count * 8` clamped to `128..1024` | Queue capacity for long-lived proxy work. |
+| `runtime_proxy.long_lived_queue_capacity` | `PRODEX_RUNTIME_PROXY_LONG_LIVED_QUEUE_CAPACITY` | `long_lived_worker_count * 8` clamped to `128..1024` | Bounded queue capacity per worker lane; a full lane fails fast without blocking control or other lanes. |
 | `runtime_proxy.active_request_limit` | `PRODEX_RUNTIME_PROXY_ACTIVE_REQUEST_LIMIT` | `worker_count + long_lived_worker_count * 3` clamped to `64..512` | Global local admission cap for fresh runtime proxy requests. |
 | `runtime_proxy.responses_active_limit` | `PRODEX_RUNTIME_PROXY_RESPONSES_ACTIVE_LIMIT` | `75%` of global limit, clamped to `4..global` | Lane cap for main Responses traffic. |
 | `runtime_proxy.compact_active_limit` | `PRODEX_RUNTIME_PROXY_COMPACT_ACTIVE_LIMIT` | `25%` of global limit, clamped to `2..6` | Lane cap for `/responses/compact`. |
@@ -753,8 +759,8 @@ shared-state integration around those operations.
 | `runtime_proxy.profile_inflight_hard_limit` | `PRODEX_RUNTIME_PROXY_PROFILE_INFLIGHT_HARD_LIMIT` | `8` | Fresh selection avoids profiles whose next weighted admission would exceed this count; a route always admits one request, and hard affinity still wins. |
 | `runtime_proxy.admission_wait_budget_ms` | `PRODEX_RUNTIME_PROXY_ADMISSION_WAIT_BUDGET_MS` | `750` | Normal wait budget for local admission pressure. |
 | `runtime_proxy.pressure_admission_wait_budget_ms` | `PRODEX_RUNTIME_PROXY_PRESSURE_ADMISSION_WAIT_BUDGET_MS` | `200` | Shorter admission wait budget when proxy is already under pressure. |
-| `runtime_proxy.long_lived_queue_wait_budget_ms` | `PRODEX_RUNTIME_PROXY_LONG_LIVED_QUEUE_WAIT_BUDGET_MS` | `750` | Normal wait budget for long-lived queue pressure. |
-| `runtime_proxy.pressure_long_lived_queue_wait_budget_ms` | `PRODEX_RUNTIME_PROXY_PRESSURE_LONG_LIVED_QUEUE_WAIT_BUDGET_MS` | `200` | Shorter long-lived queue wait budget under pressure. |
+| `runtime_proxy.long_lived_queue_wait_budget_ms` | `PRODEX_RUNTIME_PROXY_LONG_LIVED_QUEUE_WAIT_BUDGET_MS` | `750` | Legacy compatibility setting; ingress queue admission no longer sleeps. |
+| `runtime_proxy.pressure_long_lived_queue_wait_budget_ms` | `PRODEX_RUNTIME_PROXY_PRESSURE_LONG_LIVED_QUEUE_WAIT_BUDGET_MS` | `200` | Legacy compatibility setting; full ingress queues return retryable 503 immediately. |
 | `runtime_proxy.http_connect_timeout_ms` | `PRODEX_RUNTIME_PROXY_HTTP_CONNECT_TIMEOUT_MS` | `5000` | Upstream HTTP connect timeout. |
 | `runtime_proxy.stream_idle_timeout_ms` | `PRODEX_RUNTIME_PROXY_STREAM_IDLE_TIMEOUT_MS` | `300000` | Responses stream idle timeout, aligned with Codex behavior. |
 | `runtime_proxy.compact_request_timeout_ms` | `PRODEX_RUNTIME_PROXY_COMPACT_REQUEST_TIMEOUT_MS` | `90000` | Total request timeout for unary remote compact calls before Codex can observe failure and retry. |
@@ -811,6 +817,24 @@ rollout cursor instead of seeking past a terminal error. A genuine new SessionSt
 can switch roots; the existing app-server still verifies identity, workspace,
 persistence, quiescence and goal policy before any in-place continuation RPC.
 
+
+### Native recovery without progress
+
+An accepted native continuation RPC confirms only control-plane acceptance, not
+successful model execution. Repeated terminal failures without new persisted
+assistant output, tool results, or completed compaction use Mojo-owned retry
+delays of 5, 10, 20, 40, then at most 60 seconds. The first recovery is immediate.
+Each new failed turn starts its own delay: a 96-second upstream timeout cannot
+consume the cooldown for that failure. Repeated control-transport failures also
+back off without requiring another terminal event.
+
+Automatic goal updates, task-start records and synthetic continuation input do
+not reset this schedule. Genuine progress or a different root session does.
+Recovery continues to verify ownership, quiescence, cancellation and goal budgets;
+it neither restarts the frontend nor replays the original prompt. Diagnostics
+include `attempts_without_progress`, `retry_wait_ms` and
+`control_ack_is_progress=false` rather than treating an RPC acknowledgment as
+workflow recovery.
 
 ### WebSocket readiness and transport liveness
 

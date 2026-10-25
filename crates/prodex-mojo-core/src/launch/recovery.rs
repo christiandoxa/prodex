@@ -52,6 +52,8 @@ pub enum InPlaceRecoveryAction {
 }
 
 unsafe extern "C" {
+    fn prodex_launch_recovery_retry_delay_v1(abi: i64, attempts_without_progress: i64) -> i64;
+
     fn prodex_launch_session_marker_update_v1(
         abi_version: i64,
         canonical_session: i64,
@@ -300,6 +302,18 @@ pub fn workflow_evidence_plan(
         }
         1 => Err(MojoError::InvalidInput),
         4 => Err(MojoError::AbiMismatch),
+        _ => Err(MojoError::InvalidOutput),
+    }
+}
+
+/// Bounded no-progress retry delay. The host applies it after observing a new
+/// failed turn; elapsed upstream timeout time must not consume this delay.
+pub fn recovery_retry_delay_ms(attempts_without_progress: u32) -> Result<u64, MojoError> {
+    match unsafe { prodex_launch_recovery_retry_delay_v1(1, i64::from(attempts_without_progress)) }
+    {
+        delay @ 0..=60_000 => Ok(delay as u64),
+        -3 => Err(MojoError::AbiMismatch),
+        -2 => Err(MojoError::InvalidInput),
         _ => Err(MojoError::InvalidOutput),
     }
 }
@@ -726,3 +740,26 @@ mod websocket_timeout_tests {
 #[cfg(test)]
 #[path = "recovery_exit_status_tests.rs"]
 mod recovery_exit_status_tests;
+
+#[cfg(test)]
+mod retry_delay_tests {
+    use super::*;
+
+    #[test]
+    fn native_recovery_backoff_is_bounded_and_does_not_overflow() {
+        for (attempts, delay) in [
+            (0, 0),
+            (1, 5_000),
+            (2, 10_000),
+            (3, 20_000),
+            (4, 40_000),
+            (5, 60_000),
+            (6, 60_000),
+            (u32::MAX, 60_000),
+        ] {
+            assert_eq!(recovery_retry_delay_ms(attempts), Ok(delay));
+        }
+        assert_eq!(unsafe { prodex_launch_recovery_retry_delay_v1(2, 0) }, -3);
+        assert_eq!(unsafe { prodex_launch_recovery_retry_delay_v1(1, -1) }, -2);
+    }
+}
