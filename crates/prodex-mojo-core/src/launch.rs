@@ -30,9 +30,9 @@ pub use recovery::{
     InPlaceRecoveryAction, NativeGoalStatus, NativeRecoveryWireInput, NativeThreadStatus,
     RecoveryObservationAction, RecoveryObservationKind, WorkflowEvidencePlan,
     WorkflowObservationKind, WorkflowRecoveryClass, in_place_recovery_action,
-    in_place_recovery_action_from_wire, recovery_observation_action, runtime_exit_status_cancelled,
-    session_marker_should_update, workflow_evidence_plan, workflow_recovery_class,
-    workflow_recovery_class_with_message,
+    in_place_recovery_action_from_wire, recovery_observation_action, recovery_retry_delay_ms,
+    runtime_exit_status_cancelled, session_marker_should_update, workflow_evidence_plan,
+    workflow_recovery_class, workflow_recovery_class_with_message,
 };
 
 #[path = "launch/usage_limit.rs"]

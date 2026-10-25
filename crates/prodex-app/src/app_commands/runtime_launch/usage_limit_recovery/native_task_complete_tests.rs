@@ -589,3 +589,74 @@ fn terminal_timeout_after_compaction_arms_one_in_place_recovery_without_replayin
 
 #[path = "session_marker_tests.rs"]
 mod session_marker_tests;
+
+#[test]
+fn native_retry_observations_distinguish_timeout_churn_from_real_progress_04391() {
+    let root = fixture_root("native-retry-progress");
+    let (_home, _shared) = configured_env(&root);
+    let paths = AppPaths::discover().unwrap();
+    let session_path = populate_fixture(&root, &paths, &["a"]);
+    let mut monitor = GoalUsageLimitMonitor::new(
+        paths,
+        None,
+        root.join("retry-marker"),
+        Some(SESSION_ID.to_owned()),
+    );
+    for failure in 1..=3 {
+        append_record(
+            &session_path,
+            serde_json::json!({
+                "type":"event_msg", "payload":{"type":"task_started", "turn_id":"retry-turn"}
+            }),
+        );
+        append_user_event(&session_path);
+        append_record(
+            &session_path,
+            serde_json::json!({
+                "type":"event_msg", "payload":{"type":"thread_goal_updated"}
+            }),
+        );
+        append_record(
+            &session_path,
+            serde_json::json!({
+                "type":"event_msg", "payload":{"type":"task_complete",
+                    "error":{"message":"request timed out", "codex_error_info":"other"}}
+            }),
+        );
+        assert!(
+            monitor
+                .observe_workflow_recovery(SESSION_ID)
+                .unwrap()
+                .is_some()
+        );
+        assert_eq!(monitor.workflow_failure_revision, failure);
+        assert_eq!(
+            monitor.workflow_progress_revision, 0,
+            "automatic goal/task/input churn is not productive work"
+        );
+        monitor.acknowledge_in_place_recovery();
+    }
+    append_record(
+        &session_path,
+        serde_json::json!({
+            "type":"response_item", "payload":{"type":"message", "role":"assistant",
+                "content":[{"type":"output_text", "text":"completed work retained"}]}
+        }),
+    );
+    monitor.observe_workflow_recovery(SESSION_ID).unwrap();
+    assert_eq!(monitor.workflow_progress_revision, 1);
+    append_record(
+        &session_path,
+        serde_json::json!({"type":"compacted", "payload":{}}),
+    );
+    monitor.observe_workflow_recovery(SESSION_ID).unwrap();
+    assert_eq!(monitor.workflow_progress_revision, 2);
+    monitor.observe_workflow_recovery(SESSION_ID).unwrap();
+    assert_eq!(
+        monitor.workflow_progress_revision, 2,
+        "tail rescans must not invent progress"
+    );
+    assert_eq!(monitor.workflow_failure_revision, 3);
+    drop(monitor);
+    let _ = fs::remove_dir_all(root);
+}

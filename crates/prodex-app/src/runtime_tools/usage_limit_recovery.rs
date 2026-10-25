@@ -97,16 +97,30 @@ impl RuntimeToolLaunchStrategy {
         let Some(recovery) = self.native_session_recovery.as_mut() else {
             return false;
         };
-        let outcome = recovery.recover(session_id, resume_goal);
+        let (progress_revision, failure_revision) = self
+            .goal_usage_limit_monitor
+            .as_ref()
+            .map(|monitor| monitor.recovery_observation_revisions())
+            .unwrap_or_default();
+        let before = recovery.retry_schedule();
+        let outcome =
+            recovery.recover(session_id, resume_goal, progress_revision, failure_revision);
+        let after = recovery.retry_schedule();
         if outcome != NativeRecoveryOutcome::Deferred {
             if let Some(monitor) = self.goal_usage_limit_monitor.as_mut() {
                 monitor.acknowledge_in_place_recovery();
             }
-            if let Some(target) = self.runtime_recovery_log_target.as_ref() {
-                target.log(&format!(
-                    "runtime_session_recovery mode=in_place outcome={outcome:?} failure_class={failure_class} frontend_restarted=false last_prompt_requeued=false"
+        }
+        if (outcome != NativeRecoveryOutcome::Deferred || before != after)
+            && let Some(target) = self.runtime_recovery_log_target.as_ref()
+        {
+            let retry_wait_ms = after
+                .1
+                .saturating_duration_since(std::time::Instant::now())
+                .as_millis();
+            target.log(&format!(
+                    "runtime_session_recovery mode=in_place outcome={outcome:?} failure_class={failure_class} frontend_restarted=false last_prompt_requeued=false attempts_without_progress={} retry_wait_ms={retry_wait_ms} control_ack_is_progress=false", after.0
                 ));
-            }
         }
         true
     }

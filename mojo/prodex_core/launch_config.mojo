@@ -314,6 +314,27 @@ def prodex_launch_workflow_evidence_v1(
     return PRODEX_WORKFLOW_EVIDENCE_STATUS_OK
 
 
+# Delay after a new failed turn, not time already spent awaiting that turn.
+# An accepted control RPC is not workflow progress. The host supplies the
+# count since the last observed model/tool/compaction progress, and owns clocks.
+@export("prodex_launch_recovery_retry_delay_v1")
+def prodex_launch_recovery_retry_delay_v1(
+    abi_version: Int64, attempts_without_progress: Int64,
+) abi("C") -> Int64:
+    if abi_version != 1:
+        return -3
+    if attempts_without_progress < 0:
+        return -2
+    if attempts_without_progress == 0:
+        return 0
+    if attempts_without_progress >= 5:
+        return 60000
+    var delay: Int64 = 5000
+    for _ in range(Int(attempts_without_progress - 1)):
+        delay *= 2
+    return delay
+
+
 # Goal status: absent=0, active=1, blocked=2, usageLimited=3,
 # paused=4, budgetLimited=5, complete=6, unknown=7.
 # Thread status: unknown=0, idle=1, systemError=2, active=3, notLoaded=4.

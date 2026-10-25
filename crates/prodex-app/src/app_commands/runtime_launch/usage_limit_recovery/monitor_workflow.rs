@@ -43,6 +43,8 @@ impl GoalUsageLimitMonitor {
         let mut clear_pending = false;
         let mut model = self.workflow_model.clone();
         let mut evidence = self.workflow_evidence;
+        let mut progress_revision = self.workflow_progress_revision;
+        let mut failure_revision = self.workflow_failure_revision;
         let scan = match prodex_session_store::session_file_scan_since(
             &path,
             self.session_scan_offset,
@@ -56,7 +58,21 @@ impl GoalUsageLimitMonitor {
                 if let Some(observed) = runtime_workflow_effective_model(&value) {
                     model = Some(observed);
                 }
+                let was_committed = evidence.stream_committed == Some(true);
                 observe_runtime_workflow_evidence(&value, &mut evidence);
+                // Only persisted output/tool results or completed compaction
+                // establish progress. Goal updates, task_started and repeated
+                // synthetic user continuation messages never reset backoff.
+                let compacted = value.get("type").and_then(serde_json::Value::as_str)
+                    == Some("compacted")
+                    || value.get("type").and_then(serde_json::Value::as_str) == Some("event_msg")
+                        && value
+                            .pointer("/payload/type")
+                            .and_then(serde_json::Value::as_str)
+                            == Some("context_compacted");
+                if (!was_committed && evidence.stream_committed == Some(true)) || compacted {
+                    progress_revision = progress_revision.saturating_add(1);
+                }
                 let class = runtime_workflow_recovery_class(&value, session_id);
                 let action = prodex_mojo_core::launch::recovery_observation_action(
                     workflow::live_recovery_observation_kind(&value),
@@ -71,6 +87,7 @@ impl GoalUsageLimitMonitor {
                         clear_pending = true;
                     }
                     prodex_mojo_core::launch::RecoveryObservationAction::Arm => {
+                        failure_revision = failure_revision.saturating_add(1);
                         recovery = class;
                         clear_pending = false;
                     }
@@ -94,6 +111,8 @@ impl GoalUsageLimitMonitor {
         self.session_scan_offset = scan.complete_offset;
         self.workflow_model = model;
         self.workflow_evidence = evidence;
+        self.workflow_progress_revision = progress_revision;
+        self.workflow_failure_revision = failure_revision;
         self.workflow_activity_observed = clear_pending;
         if clear_pending {
             self.usage_limit_pending = false;
@@ -125,6 +144,14 @@ impl GoalUsageLimitMonitor {
         let path = PathBuf::from(report.path);
         self.session_path = Some(path.clone());
         Ok(Some(path))
+    }
+
+    #[cfg(unix)]
+    pub(crate) fn recovery_observation_revisions(&self) -> (u64, u64) {
+        (
+            self.workflow_progress_revision,
+            self.workflow_failure_revision,
+        )
     }
 
     pub(crate) fn recovery_failure_class(&self) -> &'static str {

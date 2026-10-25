@@ -2375,6 +2375,7 @@
         "production_reachable": true,
         "role": "semantic",
         "operations": [
+          "native_recovery_no_progress_backoff",
           "native_live_recovery_observation",
           "native_in_place_recovery_eligibility",
           "runtime_workflow_recovery_class",
@@ -10459,6 +10460,29 @@
       "duplicate_production_owner": false,
       "platform_fallback": false,
       "rust_adapter_scope": "BTreeMap acquisition, borrowed key/value marshalling, validated source/slice reconstruction, and final diagnostic string materialization"
+    },
+    {
+      "name": "native_recovery_no_progress_backoff",
+      "domain": "runtime/native-recovery",
+      "introduced_in": "0.439.1",
+      "baseline_state": "Native recovery used a fixed interval and counted elapsed failed-turn time toward the next retry",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_launch_recovery_retry_delay_v1",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/launch_config.mojo",
+      "consumer": "crates/prodex-app/src/runtime_tools/session_recovery/retry.rs",
+      "consumer_marker": "prodex_mojo_core::launch::recovery_retry_delay_ms(",
+      "production_consumers": [
+        "crates/prodex-app/src/runtime_tools/session_recovery/retry.rs"
+      ],
+      "production_reachability_test": "crates/prodex-app/src/runtime_tools/session_recovery/retry.rs",
+      "rust_owner_before": "Fixed native recovery retry interval",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "No duplicate policy; direct ABI boundaries and monotonic-clock regression tests cover accepted RPCs, long failures, progress, and session identity",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "Monotonic clock acquisition, session and observation revisions, bounded attempt counter, and application of the Mojo delay"
     },
     {
       "name": "native_live_recovery_observation",

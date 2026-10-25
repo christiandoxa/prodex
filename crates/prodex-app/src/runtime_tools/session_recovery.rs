@@ -6,7 +6,13 @@ use prodex_mojo_core::launch::{
 };
 use serde_json::{Value, json};
 use std::path::{Path, PathBuf};
-use std::time::{Duration, Instant};
+#[cfg(test)]
+use std::time::Duration;
+use std::time::Instant;
+
+#[path = "session_recovery/retry.rs"]
+mod retry;
+use retry::NativeRecoveryRetry;
 use tungstenite::Message;
 
 use crate::super_expose::app_server_control::{
@@ -20,7 +26,7 @@ pub(super) struct NativeSessionRecovery {
     sqlite_home: PathBuf,
     workspace: PathBuf,
     affinity: Option<crate::RuntimeBrokerSessionAffinityControl>,
-    next_attempt_at: Instant,
+    retry: NativeRecoveryRetry,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -45,19 +51,35 @@ impl NativeSessionRecovery {
             sqlite_home,
             workspace,
             affinity,
-            next_attempt_at: Instant::now(),
+            retry: NativeRecoveryRetry::new(Instant::now()),
         }
+    }
+
+    pub(super) fn retry_schedule(&self) -> (u32, Instant) {
+        (self.retry.attempts, self.retry.next_attempt_at)
     }
 
     pub(super) fn recover(
         &mut self,
         session_id: &str,
         expected_goal: bool,
+        progress_revision: u64,
+        failure_revision: u64,
     ) -> NativeRecoveryOutcome {
-        if Instant::now() < self.next_attempt_at {
+        if !self.retry.ready(
+            session_id,
+            progress_revision,
+            failure_revision,
+            Instant::now(),
+        ) {
             return NativeRecoveryOutcome::Deferred;
         }
-        self.next_attempt_at = Instant::now() + Duration::from_secs(5);
+        let outcome = self.recover_once(session_id, expected_goal);
+        self.retry.completed_attempt(Instant::now());
+        outcome
+    }
+
+    fn recover_once(&self, session_id: &str, expected_goal: bool) -> NativeRecoveryOutcome {
         if uuid::Uuid::parse_str(session_id).is_err() {
             return NativeRecoveryOutcome::Stopped;
         }

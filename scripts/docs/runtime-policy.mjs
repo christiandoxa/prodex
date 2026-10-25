@@ -21,13 +21,13 @@ const runtimeProxyKeys = [
     policy: "runtime_proxy.worker_count",
     env: "PRODEX_RUNTIME_PROXY_WORKER_COUNT",
     defaultValue: "CPU parallelism clamped to `4..12`",
-    meaning: "Short-lived proxy worker pool size.",
+    meaning: "Ingress worker count and separate standard HTTP worker count; compaction has `min(worker_count, compact_active_limit)` workers (at least one).",
   },
   {
     policy: "runtime_proxy.long_lived_worker_count",
     env: "PRODEX_RUNTIME_PROXY_LONG_LIVED_WORKER_COUNT",
     defaultValue: "`parallelism * 2` clamped to `8..24`",
-    meaning: "Worker pool for long-lived streams and websocket work.",
+    meaning: "Worker count in each of two isolated pools: HTTP responses and WebSocket connections.",
   },
   {
     policy: "runtime_proxy.probe_refresh_worker_count",
@@ -45,7 +45,7 @@ const runtimeProxyKeys = [
     policy: "runtime_proxy.long_lived_queue_capacity",
     env: "PRODEX_RUNTIME_PROXY_LONG_LIVED_QUEUE_CAPACITY",
     defaultValue: "`long_lived_worker_count * 8` clamped to `128..1024`",
-    meaning: "Queue capacity for long-lived proxy work.",
+    meaning: "Bounded queue capacity per worker lane; a full lane fails fast without blocking control or other lanes.",
   },
   {
     policy: "runtime_proxy.active_request_limit",
@@ -105,13 +105,13 @@ const runtimeProxyKeys = [
     policy: "runtime_proxy.long_lived_queue_wait_budget_ms",
     env: "PRODEX_RUNTIME_PROXY_LONG_LIVED_QUEUE_WAIT_BUDGET_MS",
     defaultValue: "`750`",
-    meaning: "Normal wait budget for long-lived queue pressure.",
+    meaning: "Legacy compatibility setting; ingress queue admission no longer sleeps.",
   },
   {
     policy: "runtime_proxy.pressure_long_lived_queue_wait_budget_ms",
     env: "PRODEX_RUNTIME_PROXY_PRESSURE_LONG_LIVED_QUEUE_WAIT_BUDGET_MS",
     defaultValue: "`200`",
-    meaning: "Shorter long-lived queue wait budget under pressure.",
+    meaning: "Legacy compatibility setting; full ingress queues return retryable 503 immediately.",
   },
   {
     policy: "runtime_proxy.http_connect_timeout_ms",
