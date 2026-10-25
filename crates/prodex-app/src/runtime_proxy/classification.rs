@@ -10,7 +10,6 @@ pub(crate) use runtime_proxy_crate::{
 };
 pub(crate) use runtime_proxy_crate::{
     is_runtime_realtime_call_path, is_runtime_realtime_websocket_path,
-    runtime_proxy_request_is_long_lived,
 };
 
 pub(crate) fn runtime_proxy_request_lane(path: &str, websocket: bool) -> RuntimeRouteKind {
@@ -35,22 +34,6 @@ pub(crate) fn runtime_proxy_admission_wait_budget_with_config(
         config.tuning.pressure_admission_wait_budget_ms
     } else {
         config.tuning.admission_wait_budget_ms
-    };
-    Duration::from_millis(runtime_proxy_interactive_wait_budget_ms(
-        path,
-        base_budget_ms,
-    ))
-}
-
-pub(crate) fn runtime_proxy_long_lived_queue_wait_budget_with_config(
-    path: &str,
-    pressure_mode: bool,
-    config: &RuntimeConfig,
-) -> Duration {
-    let base_budget_ms = if pressure_mode {
-        config.tuning.pressure_long_lived_queue_wait_budget_ms
-    } else {
-        config.tuning.long_lived_queue_wait_budget_ms
     };
     Duration::from_millis(runtime_proxy_interactive_wait_budget_ms(
         path,

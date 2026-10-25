@@ -157,7 +157,7 @@ pub(super) fn start_runtime_continuation_fixture(
                     (*response_id).to_string(),
                     ResponseProfileBinding {
                         binding_identity: None,
-                profile_name: (*profile_name).to_string(),
+                        profile_name: (*profile_name).to_string(),
                         bound_at: now,
                     },
                 )
@@ -170,7 +170,7 @@ pub(super) fn start_runtime_continuation_fixture(
                     session_key,
                     ResponseProfileBinding {
                         binding_identity: None,
-                profile_name: profile_name.to_string(),
+                        profile_name: profile_name.to_string(),
                         bound_at: now,
                     },
                 )
@@ -199,6 +199,10 @@ pub(super) fn start_runtime_continuation_fixture(
 }
 
 impl RuntimeContinuationFixture {
+    pub(super) fn listen_addr(&self) -> SocketAddr {
+        self.proxy.listen_addr
+    }
+
     pub(super) fn lane_admission_for_test(&self) -> RuntimeProxyLaneAdmission {
         self.proxy.test_lane_admission.clone()
     }
@@ -216,14 +220,9 @@ impl RuntimeContinuationFixture {
             .active_profile
             .as_deref()
             .expect("reloaded runtime state should have an active profile");
-        let proxy = start_runtime_rotation_proxy(
-            &paths,
-            &state,
-            active_profile,
-            backend.base_url(),
-            false,
-        )
-        .expect("runtime proxy should restart");
+        let proxy =
+            start_runtime_rotation_proxy(&paths, &state, active_profile, backend.base_url(), false)
+                .expect("runtime proxy should restart");
         Self {
             proxy,
             backend,
@@ -303,14 +302,9 @@ impl RuntimeContinuationFixture {
             .active_profile
             .as_deref()
             .expect("reloaded runtime state should have an active profile");
-        let proxy = start_runtime_rotation_proxy(
-            &paths,
-            &state,
-            active_profile,
-            backend.base_url(),
-            false,
-        )
-        .expect("runtime proxy should restart from continuation journal");
+        let proxy =
+            start_runtime_rotation_proxy(&paths, &state, active_profile, backend.base_url(), false)
+                .expect("runtime proxy should restart from continuation journal");
         Self {
             proxy,
             backend,
@@ -383,8 +377,7 @@ impl RuntimeContinuationFixture {
                     .expect("websocket header value should be valid"),
             );
         }
-        let (mut socket, _response) =
-            ws_connect(request).expect("websocket client should connect");
+        let (mut socket, _response) = ws_connect(request).expect("websocket client should connect");
         set_test_websocket_io_timeout(&mut socket, ci_timing_upper_bound_ms(1_000, 10_000));
         socket
     }
