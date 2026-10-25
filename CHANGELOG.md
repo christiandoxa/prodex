@@ -2,6 +2,19 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.439.1 - 2026-10-25
+
+### Runtime
+
+- Keep recovery acknowledgment lint clean (`e920e81`)
+- Back off native retries until actual workflow progress (`9361786`)
+- Isolate proxy worker lanes and keep ingress responsive (`34d78fd`)
+
+### Docs
+
+- Refresh agent guidance from repository history (`d52db7d`)
+- Retire migration notes and collapse README details (`0782b86`)
+
 ## 0.439.0 - 2026-10-23
 
 ### Runtime
@@ -16,131 +29,19 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 ### Misc
 
 - Align ABI regression coverage and simplify child environment validation (`1fb93e5`)
-# Prodex 0.439.0
-
-This release qualifies Codex 0.164.0 and includes the compiled Mojo migrations
-already merged since Prodex 0.438.4.
-
-## New Features
-
-### Codex 0.164.0 compatibility
-
-- Qualify the exact official `rust-v0.164.0` source and binaries, with 82 critical
-  source files and 101 semantic contracts. Eleven new mandatory checks cover
-  cache identity, metadata patches, model catalogs, scoped CLI overrides,
-  compaction, and resume behavior.
-- Preserve custom or omitted prompt-cache keys independently of the Responses
-  session header, and preserve native merged turn metadata and unknown fields
-  across the local proxy. Native `turn/start` and `turn/steer` metadata patches
-  remain owned by Codex.
-- Preserve repeated `-c`/`--config` overrides across root, exec, and resume
-  command scopes. Native inline commands remain unchanged prompt text.
-- Follow the new model-instructions world-state owner, transient provider-catalog
-  retention, isolated failed compaction attempts, and compressed-rollout resume
-  settings. No wrapper permission defaults, hard continuation affinity, or
-  committed-response retry rules are relaxed.
-- Leave native presets, Kitty/Sixel images, enterprise MCP authentication,
-  remote-shell credential masking, and Bedrock setup with the official Codex
-  runtime. The minimum accepted Codex capability floor remains 0.153.2.
-
-## Bug Fixes
-
-- Repair a stale cross-platform Mojo ABI fixture: operation 1 is a supported
-  shape validator; unknown operations remain rejected with output canaries.
-- Make optimizer and image-scanner fixtures portable across canonical macOS
-  temporary roots and native Windows path separators, retaining all safety assertions.
-- Simplify child-environment result validation without adding a Rust fallback
-  or changing the compiled hardening policy.
-
-## Changelog
-
-- Advance the audited tunnel-client reference to 0.0.17 and the standalone
-  Kiro CLI packaging pin to 2.33.1. Existing minimum-version and digest checks
-  remain in place; optional-tool references were also checked for freshness.
-- Refresh the fuzz-only `ctutils` lockfile resolution from 0.4.3 to 0.4.5
-  during the standard release sync; the production third-party lock graph is unchanged.
-- Include the preceding compiled Mojo migrations for terminal and quota
-  presentation, launch/configuration policies, session processing, provider
-  validation, and runtime diagnostics. Existing reset-credit expiry behavior
-  remains intact; this release does not claim the 75% migration target is met.
-
-## Verification
-
-The official Linux Codex and app-server assets were checksum-verified, then
-probed using isolated configuration and no credentials. Version/help,
-app-server initialization and thread listing, startup discovery, and generated
-start/steer schemas were checked without model inference. Offline proxy,
-launch, session, and ABI regressions cover the wrapper boundaries.
-
-Full Changelog: [0.438.4...0.439.0](https://github.com/christiandoxa/prodex/compare/0.438.4...0.439.0)
 
 ## 0.438.4 - 2026-10-21
-
-### CLI
-
-- Show nearest OpenAI reset-credit expiry (`4c8b44b`)
-
-### Deps
-
-- Patch distrusted TLS certificate verification (`c09b7fc`)
-- Integrate Dependabot fuzz serde_json update (#113) (`077dfb0`)
-- Integrate Dependabot Cargo updates (#112) (`5cec445`)
-- Bump the cargo group across 1 directory with 8 updates (`79b5672`)
-- Bump serde_json (`34f020e`)
-
-## 0.438.3 - 2026-10-18
 
 ### Runtime
 
 - Consume buffered terminal frames before idle expiry (`528c90a`)
 - Poll readiness without expiring blocking receive state (`21c8463`)
 - Recover quiet and broken WebSocket continuations before commit (`167546f`)
-
-## 0.438.2 - 2026-10-17
-
-### Runtime
-
 - Release idle WebSocket capacity and enforce recovery deadlines (`1f8d26c`)
-
-### Docs
-
-- Structure 0.438.2 notes for the release renderer (`96a86ca`)
-
-## 0.438.1 - 2026-10-17
-
-### Runtime
-
 - Keep queue waits cohesive and audit recovery ABI v2 (`9fcac3f`)
 - Bound queue and retry lifetimes and wake ready-profile recovery (`78de057`)
 - Satisfy scalar adapter clippy (`a8143da`)
 - Preserve compatibility scalar defaults (`65a3f27`)
-
-### CLI
-
-- Allow ABI test argument shape (`139f674`)
-
-### Docs
-
-- Record verified Kiro native client qualification (`bbe0d02`)
-
-### Deps
-
-- Qualify pinned Kiro CLI 2.32.0 (`ce43fad`)
-- Refresh audited optional-tool release references (`1808e48`)
-
-### Misc
-
-- Separate Kiro source qualification from release metadata (`78827db`)
-- Preserve portable paths and isolate host prompt adapters (`2adc881`)
-- Preserve nested error message precedence (`7dad781`)
-- Preserve long model names in Mojo (`969cbe8`)
-- Derive Kiro default state (`f8172a5`)
-- Preserve transcript projection parity (`8a747b6`)
-
-## 0.438.0 - 2026-10-16
-
-### Runtime
-
 - Accept signed Windows exit status in Mojo recovery (`a31ef6f`)
 - Keep local proxy listeners alive under descriptor pressure (`d28ba19`)
 - Migrate runtime affinity admission (`74a7573`)
@@ -407,6 +308,8 @@ Full Changelog: [0.438.4...0.439.0](https://github.com/christiandoxa/prodex/comp
 
 ### CLI
 
+- Show nearest OpenAI reset-credit expiry (`4c8b44b`)
+- Allow ABI test argument shape (`139f674`)
 - Move profile import identity email policy (`5576854`)
 - Move Super normalization policies to Mojo (`a9281db`)
 - Migrate quota watch table columns (`a7f620f`)
@@ -582,6 +485,8 @@ Full Changelog: [0.438.4...0.439.0](https://github.com/christiandoxa/prodex/comp
 
 ### Docs
 
+- Structure 0.438.2 notes for the release renderer (`96a86ca`)
+- Record verified Kiro native client qualification (`bbe0d02`)
 - Record login authority coverage (`980c21d`)
 - Record extended Mojo wave (`e6c410a`)
 - Record Mojo 75 campaign wave (`8d4e04e`)
@@ -664,6 +569,13 @@ Full Changelog: [0.438.4...0.439.0](https://github.com/christiandoxa/prodex/comp
 
 ### Deps
 
+- Patch distrusted TLS certificate verification (`c09b7fc`)
+- Integrate Dependabot fuzz serde_json update (#113) (`077dfb0`)
+- Integrate Dependabot Cargo updates (#112) (`5cec445`)
+- Bump the cargo group across 1 directory with 8 updates (`79b5672`)
+- Bump serde_json (`34f020e`)
+- Qualify pinned Kiro CLI 2.32.0 (`ce43fad`)
+- Refresh audited optional-tool release references (`1808e48`)
 - Update rustls for October security advisories (`a2bd78c`)
 - Align Kiro stable native release probe (`082bfc9`)
 - Verify Ponytail 5.2.0 compaction compatibility (`38112e8`)
@@ -714,6 +626,12 @@ Full Changelog: [0.438.4...0.439.0](https://github.com/christiandoxa/prodex/comp
 
 ### Misc
 
+- Separate Kiro source qualification from release metadata (`78827db`)
+- Preserve portable paths and isolate host prompt adapters (`2adc881`)
+- Preserve nested error message precedence (`7dad781`)
+- Preserve long model names in Mojo (`969cbe8`)
+- Derive Kiro default state (`f8172a5`)
+- Preserve transcript projection parity (`8a747b6`)
 - Clarify source digests and isolate Copilot validation (`c2e82b5`)
 - Qualify Codex 0.163 native retry and compaction (`6073f85`)
 - Migrate usage-limit recovery selection (`7087fdc`)
