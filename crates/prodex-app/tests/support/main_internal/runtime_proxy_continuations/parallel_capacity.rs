@@ -176,7 +176,10 @@ fn runtime_proxy_saturated_idle_websocket_workers_do_not_block_unary_compact_043
     // One retry fills the queue; the next previously blocked the only acceptor.
     let pending = (0..2).map(|_| {
         let mut stream = TcpStream::connect(fixture.listen_addr()).unwrap();
-        stream.write_all(b"GET /backend-api/prodex/responses HTTP/1.1\r\nHost: localhost\r\nConnection: Upgrade\r\nUpgrade: websocket\r\nSec-WebSocket-Version: 13\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n\r\n").unwrap();
+        // WebSocket handshake nonces are ephemeral protocol values, not credentials.
+        let nonce = tungstenite::handshake::client::generate_key();
+        let handshake = format!("GET /backend-api/prodex/responses HTTP/1.1\r\nHost: localhost\r\nConnection: Upgrade\r\nUpgrade: websocket\r\nSec-WebSocket-Version: 13\r\nSec-WebSocket-Key: {nonce}\r\n\r\n");
+        stream.write_all(handshake.as_bytes()).unwrap();
         stream
     }).collect::<Vec<_>>();
     let pressure = fixture.wait_for_log(|log| {
