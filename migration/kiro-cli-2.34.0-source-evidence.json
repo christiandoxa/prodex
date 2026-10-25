@@ -1,0 +1,62 @@
+{
+  "schema_version": 1,
+  "version": "2.34.0",
+  "upstream_changelog": "https://kiro.dev/changelog/cli/2-34/",
+  "manifest_url": "https://prod.download.cli.kiro.dev/stable/latest/manifest.json",
+  "manifest_sha256": "a9548c0c36d35015b3a4defbce775080168a91c4cbf390c378f8b2d260e4f0fc",
+  "archive_url": "https://prod.download.cli.kiro.dev/stable/2.34.0/kirocli-x86_64-linux.tar.gz",
+  "archive_sha256": "1a703c4e5a0cdfb4990d9476a0b0d4255a7802946f01220edaa717e8d7bdca05",
+  "archive_size": 155456841,
+  "qualification_scope": "Standalone release client-discovery and direct-native launcher contract; no change to provider behavior or native Kiro policy.",
+  "probes": [
+    {
+      "binary": "kiro-cli",
+      "arguments": [
+        "--version"
+      ],
+      "exit_code": 0
+    },
+    {
+      "binary": "kiro-cli-chat",
+      "arguments": [
+        "--version"
+      ],
+      "exit_code": 0
+    },
+    {
+      "binary": "kiro-cli-chat",
+      "arguments": [
+        "chat",
+        "--help"
+      ],
+      "exit_code": 0
+    }
+  ],
+  "required_chat_flag": "--model",
+  "required_environment_contract": "KIRO_DATA_DIR",
+  "installer_digest_pins_unchanged": [
+    {
+      "name": "kiro-install.sh",
+      "url": "https://cli.kiro.dev/install",
+      "sha256": "d8dd659c11c156002942f09443b6cb7904959004d4e7f1f73777fdbb2d909b54"
+    },
+    {
+      "name": "copilot-install.sh",
+      "url": "https://gh.io/copilot-install",
+      "sha256": "00efcc2e196f0793d097935d6230062fc66e8247dc01334d2ac3eae4e26a1c7f"
+    },
+    {
+      "name": "claude-install.sh",
+      "url": "https://claude.ai/install.sh",
+      "sha256": "3a68d3406cf674e17bed1733a4dcf37805e2e47d87417700007d7e1aa766a944"
+    }
+  ],
+  "workflow_changes": [
+    "Advance the explicit Kiro packaging reference from 2.33.1 to 2.34.0.",
+    "Verify all runtime pins before waiting for the exact-main CI matrix. No binary build or publication bypasses CI."
+  ],
+  "live_credentials_used": false,
+  "model_inference_performed": false,
+  "user_installation_changed": false,
+  "probe_environment": "Isolated HOME, XDG directories, KIRO_HOME and KIRO_DATA_DIR; stdin closed."
+}

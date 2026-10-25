@@ -29,7 +29,7 @@ env:
   CARGO_HTTP_MULTIPLEXING: "false"
   SCCACHE_CACHE_SIZE: 2G
   SCCACHE_GHA_ENABLED: "true"
-  KIRO_CLI_VERSION: "2.33.1"
+  KIRO_CLI_VERSION: "2.34.0"
   MOJO_VERSION: "1.2.0"
   UV_VERSION: "0.11.7"
 
@@ -157,6 +157,16 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
+      - name: Verify pinned Kiro CLI release
+        shell: bash
+        run: |
+          set -euo pipefail
+          manifest_version="$(curl --proto '=https' --tlsv1.2 --retry 5 --retry-all-errors --retry-delay 2 -fsSL https://prod.download.cli.kiro.dev/stable/latest/manifest.json | python -c 'import json, sys; print(json.load(sys.stdin)["version"])')"
+          if [ "${manifest_version}" != "${KIRO_CLI_VERSION}" ]; then
+            echo "Kiro stable release ${manifest_version} does not match pinned ${KIRO_CLI_VERSION}" >&2
+            exit 1
+          fi
+
       - name: Wait for CI success
         env:
           GH_TOKEN: ${{ github.token }}
@@ -216,15 +226,6 @@ jobs:
             sleep 30
           done
 
-      - name: Verify pinned Kiro CLI release
-        shell: bash
-        run: |
-          set -euo pipefail
-          manifest_version="$(curl --proto '=https' --tlsv1.2 --retry 5 --retry-all-errors --retry-delay 2 -fsSL https://prod.download.cli.kiro.dev/stable/latest/manifest.json | python -c 'import json, sys; print(json.load(sys.stdin)["version"])')"
-          if [ "${manifest_version}" != "${KIRO_CLI_VERSION}" ]; then
-            echo "Kiro stable release ${manifest_version} does not match pinned ${KIRO_CLI_VERSION}" >&2
-            exit 1
-          fi
 
   build-mojo-archives:
     name: Build Mojo archive ${{ matrix.target }}
