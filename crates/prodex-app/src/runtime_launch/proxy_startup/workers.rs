@@ -1,7 +1,11 @@
-//! Worker spawning for the runtime rotation proxy listener.
+//! Bounded, isolated worker lanes for the runtime rotation proxy listener.
 
 use super::*;
-use crate::runtime_proxy::{RuntimeProxyQueuedRequest, reject_runtime_proxy_recovery_timeout};
+use crate::runtime_proxy::{
+    RuntimeProxyQueuedRequest, enqueue_runtime_proxy_request, reject_runtime_proxy_recovery_timeout,
+};
+
+type RuntimeWorkerQueues = BTreeMap<RuntimeRouteKind, mpsc::SyncSender<RuntimeProxyQueuedRequest>>;
 
 pub(super) fn spawn_runtime_rotation_proxy_workers(
     server: &Arc<TinyServer>,
@@ -12,34 +16,69 @@ pub(super) fn spawn_runtime_rotation_proxy_workers(
     long_lived_queue_capacity: usize,
 ) -> Result<Vec<thread::JoinHandle<()>>> {
     let mut worker_threads = Vec::new();
-    let (long_lived_sender, long_lived_receiver) =
-        mpsc::sync_channel::<RuntimeProxyQueuedRequest>(long_lived_queue_capacity);
-    let long_lived_receiver = Arc::new(Mutex::new(long_lived_receiver));
+    let mut queues = RuntimeWorkerQueues::new();
     let mut startup_guard = RuntimeRotationWorkerStartupGuard::new(server, shutdown, worker_count);
-
-    for worker_index in 0..long_lived_worker_count {
-        let worker_shutdown = Arc::clone(shutdown);
-        let shared = shared.clone();
-        let receiver = Arc::clone(&long_lived_receiver);
-        worker_threads.push(try_spawn_runtime_supervised_worker(
-            format!("prodex-runtime-long-lived-{worker_index}"),
-            shared.log_path.clone(),
-            Arc::clone(shutdown),
-            move || {
-                runtime_rotation_long_lived_worker_loop(
-                    Arc::clone(&receiver),
-                    shared.clone(),
-                    Arc::clone(&worker_shutdown),
-                );
-            },
-        )?);
+    // An idle cached WebSocket owns a connection worker, not an HTTP worker.
+    // Reserve compaction separately from responses and ordinary metadata I/O.
+    // These are bounded host executors; existing Mojo admission, quota, and
+    // affinity policy still decides whether each dequeued request may execute.
+    let lanes = [
+        (
+            RuntimeRouteKind::Responses,
+            "responses",
+            long_lived_worker_count,
+        ),
+        (
+            RuntimeRouteKind::Websocket,
+            "websocket",
+            long_lived_worker_count,
+        ),
+        (
+            RuntimeRouteKind::Compact,
+            "compact",
+            shared
+                .lane_admission
+                .limit(RuntimeRouteKind::Compact)
+                .min(worker_count)
+                .max(1),
+        ),
+        (RuntimeRouteKind::Standard, "standard", worker_count),
+    ];
+    for (route, lane, count) in lanes {
+        let (sender, receiver) = mpsc::sync_channel(long_lived_queue_capacity);
+        queues.insert(route, sender);
+        let receiver = Arc::new(Mutex::new(receiver));
+        for worker_index in 0..count {
+            let worker_shutdown = Arc::clone(shutdown);
+            let shared = shared.clone();
+            let receiver = Arc::clone(&receiver);
+            worker_threads.push(try_spawn_runtime_supervised_worker(
+                format!("prodex-runtime-{lane}-{worker_index}"),
+                shared.log_path.clone(),
+                Arc::clone(shutdown),
+                move || {
+                    runtime_rotation_request_worker_loop(
+                        Arc::clone(&receiver),
+                        shared.clone(),
+                        Arc::clone(&worker_shutdown),
+                        lane,
+                    );
+                },
+            )?);
+        }
+        runtime_proxy_log(
+            shared,
+            format!(
+                "runtime_proxy_worker_lane lane={lane} workers={count} queue_capacity={long_lived_queue_capacity}"
+            ),
+        );
     }
 
     for worker_index in 0..worker_count {
         let server: Arc<TinyServer> = Arc::clone(server);
         let worker_shutdown = Arc::clone(shutdown);
         let shared = shared.clone();
-        let long_lived_sender = long_lived_sender.clone();
+        let queues = queues.clone();
         worker_threads.push(try_spawn_runtime_supervised_worker(
             format!("prodex-runtime-accept-{worker_index}"),
             shared.log_path.clone(),
@@ -47,9 +86,9 @@ pub(super) fn spawn_runtime_rotation_proxy_workers(
             move || {
                 runtime_rotation_accept_worker_loop(
                     Arc::clone(&server),
-                    long_lived_sender.clone(),
-                    shared.clone(),
-                    Arc::clone(&worker_shutdown),
+                    &queues,
+                    &shared,
+                    &worker_shutdown,
                 );
             },
         )?);
@@ -59,10 +98,11 @@ pub(super) fn spawn_runtime_rotation_proxy_workers(
     Ok(worker_threads)
 }
 
-fn runtime_rotation_long_lived_worker_loop(
+fn runtime_rotation_request_worker_loop(
     receiver: Arc<Mutex<mpsc::Receiver<RuntimeProxyQueuedRequest>>>,
     shared: RuntimeRotationProxyShared,
     shutdown: Arc<AtomicBool>,
+    lane: &str,
 ) {
     loop {
         let request = receiver
@@ -72,43 +112,34 @@ fn runtime_rotation_long_lived_worker_loop(
         let Ok(request) = request else {
             break;
         };
+        shared
+            .lane_admission
+            .long_lived_queue_wait_metric_counters()
+            .record_wait(request.queued_at.elapsed());
         let mut scoped = shared.clone();
         scoped.precommit_deadline = request.deadline;
-        runtime_rotation_handle_long_lived_request(request.request, &scoped);
+        if scoped.check_precommit_deadline().is_err() {
+            reject_runtime_proxy_recovery_timeout(request.request, &scoped, "worker_queue");
+        } else {
+            runtime_rotation_handle_request_with_panic_log(request.request, &scoped, lane);
+        }
         if shutdown.load(Ordering::SeqCst) {
             break;
         }
     }
 }
 
-fn runtime_rotation_handle_long_lived_request(
-    request: tiny_http::Request,
-    shared: &RuntimeRotationProxyShared,
-) {
-    let (mutex, condvar) = shared.lane_admission.wait();
-    let guard = mutex
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
-    condvar.notify_all();
-    drop(guard);
-    if shared.check_precommit_deadline().is_err() {
-        reject_runtime_proxy_recovery_timeout(request, shared, "long_lived_queue");
-        return;
-    }
-    runtime_rotation_handle_request_with_panic_log(request, shared, "long_lived");
-}
-
 fn runtime_rotation_accept_worker_loop(
     server: Arc<TinyServer>,
-    long_lived_sender: mpsc::SyncSender<RuntimeProxyQueuedRequest>,
-    shared: RuntimeRotationProxyShared,
-    shutdown: Arc<AtomicBool>,
+    queues: &RuntimeWorkerQueues,
+    shared: &RuntimeRotationProxyShared,
+    shutdown: &AtomicBool,
 ) {
     loop {
         let Ok(request) = server.recv() else {
             break;
         };
-        runtime_rotation_dispatch_received_request(request, &long_lived_sender, &shared);
+        runtime_rotation_dispatch_received_request(request, queues, shared);
         if shutdown.load(Ordering::SeqCst) {
             break;
         }
@@ -116,26 +147,36 @@ fn runtime_rotation_accept_worker_loop(
 }
 
 fn runtime_rotation_dispatch_received_request(
-    request: tiny_http::Request,
-    long_lived_sender: &mpsc::SyncSender<RuntimeProxyQueuedRequest>,
+    mut request: tiny_http::Request,
+    queues: &RuntimeWorkerQueues,
     shared: &RuntimeRotationProxyShared,
 ) {
-    let websocket = is_tiny_http_websocket_upgrade(&request);
-    if !runtime_proxy_request_is_long_lived(request.url(), websocket) {
-        runtime_rotation_handle_request_with_panic_log(request, shared, "standard");
+    // Preserve the authenticated local control plane even when every upstream
+    // executor is occupied. Never wait for upstream work or queue space here.
+    if let Some(response) =
+        crate::runtime_broker::handle_runtime_proxy_admin_request(&mut request, shared)
+    {
+        let _ = request.respond(response);
         return;
     }
-    match enqueue_runtime_proxy_long_lived_request_with_wait(long_lived_sender, request, shared) {
+    let route = runtime_proxy_request_lane(request.url(), is_tiny_http_websocket_upgrade(&request));
+    let Some(sender) = queues.get(&route) else {
+        runtime_rotation_reject_queued_request(request, shared, "worker_lane_unavailable");
+        return;
+    };
+    let scoped = shared.for_precommit_request();
+    match enqueue_runtime_proxy_request(sender, request, &scoped) {
         Ok(()) => {}
-        Err((RuntimeProxyQueueRejection::Full, request)) => {
-            runtime_rotation_reject_queued_request(request, shared, "long_lived_queue_full");
-        }
-        Err((RuntimeProxyQueueRejection::Disconnected, request)) => {
-            runtime_rotation_reject_queued_request(
-                request,
-                shared,
-                "long_lived_queue_disconnected",
-            );
+        Err((reason, request)) => {
+            if scoped.check_precommit_deadline().is_err() {
+                reject_runtime_proxy_recovery_timeout(request, &scoped, "ingress_queue");
+                return;
+            }
+            let reason = match reason {
+                RuntimeProxyQueueRejection::Full => "worker_queue_full",
+                RuntimeProxyQueueRejection::Disconnected => "worker_queue_disconnected",
+            };
+            runtime_rotation_reject_queued_request(request, shared, reason);
         }
     }
 }
@@ -145,7 +186,8 @@ fn runtime_rotation_reject_queued_request(
     shared: &RuntimeRotationProxyShared,
     reason: &str,
 ) {
-    mark_runtime_proxy_local_overload(shared, reason);
+    // This lane is full, not the whole proxy or any upstream account. A
+    // global overload marker would make healthy compact/control work fail too.
     reject_runtime_proxy_overloaded_request(request, shared, reason);
 }
 
@@ -162,7 +204,7 @@ fn runtime_rotation_handle_request_with_panic_log(
             shared,
             format!(
                 "runtime_proxy_worker_panic lane={lane} panic={}",
-                crate::runtime_panic::runtime_panic_payload_label(panic.as_ref())
+                crate::runtime_panic::runtime_panic_payload_label(panic.as_ref()),
             ),
         );
     }

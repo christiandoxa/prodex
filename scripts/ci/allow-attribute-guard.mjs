@@ -30,7 +30,7 @@ export const ALLOW_ATTRIBUTE_LOCATION_KEYS = Object.freeze([
   "clippy::large_enum_variant|crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_search_fallback.rs|pub(super) enum RuntimeLocalRewritePreparedSendResult {",
   "clippy::large_enum_variant|crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_upstream.rs|pub(super) enum RuntimeLocalRewriteLiveBody {",
   "clippy::large_enum_variant|crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_upstream.rs|pub(super) enum RuntimeLocalRewriteUpstreamResponse {",
-  "clippy::result_large_err|crates/prodex-app/src/runtime_proxy/lifecycle.rs|pub(crate) fn enqueue_runtime_proxy_long_lived_request_with_wait(",
+  "clippy::result_large_err|crates/prodex-app/src/runtime_proxy/lifecycle.rs|pub(crate) fn enqueue_runtime_proxy_request(",
   "clippy::result_large_err|crates/prodex-app/tests/support/main_internal/runtime_proxy_backend/websocket/handler/accepted.rs|pub(super) fn accept_runtime_proxy_backend_websocket(",
   // tungstenite fixes the server callback error shape to an unboxed HTTP response.
   "clippy::too_many_arguments|crates/prodex-app/src/runtime_launch/proxy_startup/deepseek_rewrite/response.rs|pub(in crate::runtime_launch::proxy_startup) fn runtime_deepseek_chat_buffered_response_parts(",

@@ -429,9 +429,7 @@ fn websocket_lane_limit_does_not_override_owned_turn_state_affinity() {
 }
 
 #[test]
-fn long_lived_queue_wait_metrics_record_each_started_wait_once() {
-    let _budget_guard =
-        TestEnvVarGuard::set("PRODEX_RUNTIME_PROXY_LONG_LIVED_QUEUE_WAIT_BUDGET_MS", "5");
+fn ingress_queue_probes_once_and_returns_unsent_work_without_waiting() {
     let harness = RuntimeProxyProfileHarnessBuilder::single_openai_profile(
         "main",
         "main-account",
@@ -439,85 +437,31 @@ fn long_lived_queue_wait_metrics_record_each_started_wait_once() {
     )
     .build();
     let shared = harness.shared();
-    let path = "/backend-api/codex/responses";
-    let wait_count = || {
+    assert!(try_enqueue_runtime_proxy_work(17_u64, shared, |_| Ok(())).is_ok());
+    for reason in [
+        RuntimeProxyQueueRejection::Full,
+        RuntimeProxyQueueRejection::Disconnected,
+    ] {
+        let mut attempts = 0;
+        let result = try_enqueue_runtime_proxy_work(17_u64, shared, |item| {
+            attempts += 1;
+            Err((reason, item))
+        });
+        assert!(matches!(result, Err((observed, 17)) if observed == reason));
+        assert_eq!(
+            attempts, 1,
+            "ingress must not wait for capacity or silently retry"
+        );
+    }
+    assert_eq!(
         shared
             .lane_admission
             .long_lived_queue_wait_metric_counters()
             .snapshot()
-            .wait_count
-    };
-
-    wait_for_runtime_proxy_queue_capacity((), shared, "http", path, |_| Ok(()))
-        .expect("immediate queue capacity should not wait");
-    assert_eq!(wait_count(), 0);
-
-    let mut attempts = 0;
-    wait_for_runtime_proxy_queue_capacity((), shared, "http", path, |item| {
-        attempts += 1;
-        if attempts == 1 {
-            Err((RuntimeProxyQueueRejection::Full, item))
-        } else {
-            Ok(())
-        }
-    })
-    .expect("second queue probe should recover");
-    assert_eq!(wait_count(), 1);
-
-    let mut attempts = 0;
-    wait_for_runtime_proxy_queue_capacity((), shared, "http", path, |item| {
-        attempts += 1;
-        if attempts <= 2 {
-            Err((RuntimeProxyQueueRejection::Full, item))
-        } else {
-            Ok(())
-        }
-    })
-    .expect("queue should recover after its bounded wait");
-    assert_eq!(wait_count(), 2);
-
-    let mut attempts = 0;
-    assert!(matches!(
-        wait_for_runtime_proxy_queue_capacity((), shared, "http", path, |item| {
-            attempts += 1;
-            if attempts == 1 {
-                Err((RuntimeProxyQueueRejection::Full, item))
-            } else {
-                Err((RuntimeProxyQueueRejection::Disconnected, item))
-            }
-        }),
-        Err((RuntimeProxyQueueRejection::Disconnected, ()))
-    ));
-    assert_eq!(wait_count(), 3);
-
-    let mut attempts = 0;
-    wait_for_runtime_proxy_queue_capacity((), shared, "http", path, |item| {
-        attempts += 1;
-        if attempts <= 4 {
-            Err((RuntimeProxyQueueRejection::Full, item))
-        } else {
-            Ok(())
-        }
-    })
-    .expect("queue saturation should keep waiting across old timeout epochs");
-    assert_eq!(wait_count(), 4);
-
-    assert!(matches!(
-        wait_for_runtime_proxy_queue_capacity((), shared, "http", path, |item| Err((
-            RuntimeProxyQueueRejection::Disconnected,
-            item,
-        ))),
-        Err((RuntimeProxyQueueRejection::Disconnected, ()))
-    ));
-    assert_eq!(wait_count(), 4);
-
-    let wait = shared
-        .lane_admission
-        .long_lived_queue_wait_metric_counters()
-        .snapshot();
-    assert_eq!(wait.wait_count, 4);
-    assert!(wait.wait_total_ns > 0);
-    assert!(wait.wait_max_ns > 0);
+            .wait_count,
+        0,
+        "ingress never records a blocking capacity wait"
+    );
 }
 
 #[test]

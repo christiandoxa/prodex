@@ -368,80 +368,20 @@ pub(crate) fn acquire_runtime_proxy_active_request_slot_with_wait_for_request(
     }
 }
 
-pub(crate) fn wait_for_runtime_proxy_queue_capacity<T, F>(
-    mut item: T,
+/// Ingress must never wait behind the work it is responsible for accepting.
+/// Return ownership of an unsent item immediately, including expired work.
+pub(crate) fn try_enqueue_runtime_proxy_work<T, F>(
+    item: T,
     shared: &RuntimeRotationProxyShared,
-    transport: &str,
-    path: &str,
-    mut try_enqueue: F,
+    try_enqueue: F,
 ) -> Result<(), (RuntimeProxyQueueRejection, T)>
 where
-    F: FnMut(T) -> Result<(), (RuntimeProxyQueueRejection, T)>,
+    F: FnOnce(T) -> Result<(), (RuntimeProxyQueueRejection, T)>,
 {
-    let scoped_shared = shared.for_precommit_request();
-    let shared = &scoped_shared;
-    let started_at = Instant::now();
-    let pressure_mode =
-        runtime_proxy_pressure_mode_active_for_request_path(shared, path, transport == "websocket");
-    let budget = runtime_proxy_long_lived_queue_wait_budget_with_config(
-        path,
-        pressure_mode,
-        &shared.runtime_config,
-    );
-    let mut wait_metric = RuntimeProxyWaitMetricGuard::new(
-        shared
-            .lane_admission
-            .long_lived_queue_wait_metric_counters(),
-    );
-    loop {
-        if shared.check_precommit_deadline().is_err() {
-            return Err((RuntimeProxyQueueRejection::Full, item));
-        }
-        match try_enqueue(item) {
-            Ok(()) => {
-                if wait_metric.started() {
-                    runtime_proxy_log(
-                        shared,
-                        format!(
-                            "runtime_proxy_queue_recovered transport={transport} path={path} waited_ms={}",
-                            started_at.elapsed().as_millis()
-                        ),
-                    );
-                }
-                return Ok(());
-            }
-            Err((RuntimeProxyQueueRejection::Full, returned_item)) => {
-                item = returned_item;
-                let elapsed = started_at.elapsed();
-                runtime_proxy_queue_wait_is_exhausted_or_started(
-                    shared,
-                    transport,
-                    path,
-                    pressure_mode,
-                    budget,
-                    elapsed,
-                    &mut wait_metric,
-                );
-                match runtime_proxy_queue_enqueue_after_wait(
-                    item,
-                    &mut try_enqueue,
-                    shared,
-                    transport,
-                    path,
-                    started_at,
-                    budget,
-                ) {
-                    Ok(None) => return Ok(()),
-                    Ok(Some(returned_item)) => item = returned_item,
-                    Err(error) => return Err(error),
-                }
-            }
-            Err((RuntimeProxyQueueRejection::Disconnected, returned_item)) => {
-                log_runtime_proxy_queue_disconnected(shared, transport, path, started_at);
-                return Err((RuntimeProxyQueueRejection::Disconnected, returned_item));
-            }
-        }
+    if shared.check_precommit_deadline().is_err() {
+        return Err((RuntimeProxyQueueRejection::Full, item));
     }
+    try_enqueue(item)
 }
 
 struct RuntimeProxyAdmissionWaitContext<'a> {
@@ -484,117 +424,27 @@ fn runtime_proxy_admission_rejection_reason(
     }
 }
 
-fn runtime_proxy_queue_wait_is_exhausted_or_started(
-    shared: &RuntimeRotationProxyShared,
-    transport: &str,
-    path: &str,
-    pressure_mode: bool,
-    budget: Duration,
-    elapsed: Duration,
-    wait_metric: &mut RuntimeProxyWaitMetricGuard<'_>,
-) {
-    if !wait_metric.started() {
-        runtime_proxy_log(
-            shared,
-            format!(
-                "runtime_proxy_queue_wait_started transport={transport} path={path} poll_ms={} waited_ms={} reason=long_lived_queue_full pressure_mode={pressure_mode} mode=backpressure",
-                budget.as_millis(),
-                elapsed.as_millis()
-            ),
-        );
-        wait_metric.start();
-    }
-}
-
-// One queue retry and its notification wait form a single lock-order-safe
-// host operation. Return the still-owned item only when another poll is needed.
-fn runtime_proxy_queue_enqueue_after_wait<T, F>(
-    item: T,
-    try_enqueue: &mut F,
-    shared: &RuntimeRotationProxyShared,
-    transport: &str,
-    path: &str,
-    started_at: Instant,
-    budget: Duration,
-) -> Result<Option<T>, (RuntimeProxyQueueRejection, T)>
-where
-    F: FnMut(T) -> Result<(), (RuntimeProxyQueueRejection, T)>,
-{
-    let (mutex, condvar) = shared.lane_admission.wait();
-    let wait_guard = mutex
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
-    if shared.check_precommit_deadline().is_err() {
-        return Err((RuntimeProxyQueueRejection::Full, item));
-    }
-    let item = match try_enqueue(item) {
-        Ok(()) => return Ok(None),
-        Err((RuntimeProxyQueueRejection::Full, returned_item)) => returned_item,
-        Err((RuntimeProxyQueueRejection::Disconnected, returned_item)) => {
-            log_runtime_proxy_queue_disconnected(shared, transport, path, started_at);
-            return Err((RuntimeProxyQueueRejection::Disconnected, returned_item));
-        }
-    };
-    let requested = if budget.is_zero() {
-        Duration::from_millis(1)
-    } else {
-        budget
-    };
-    let wait_for = match shared.precommit_wait_slice(requested) {
-        Ok(wait_for) => wait_for,
-        Err(_) => return Err((RuntimeProxyQueueRejection::Full, item)),
-    };
-    let _ = condvar
-        .wait_timeout(wait_guard, wait_for)
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
-    Ok(Some(item))
-}
-
-fn log_runtime_proxy_queue_disconnected(
-    shared: &RuntimeRotationProxyShared,
-    transport: &str,
-    path: &str,
-    started_at: Instant,
-) {
-    runtime_proxy_log(
-        shared,
-        runtime_proxy_structured_log_message(
-            "runtime_proxy_queue_wait_exhausted",
-            [
-                runtime_proxy_log_field("transport", transport),
-                runtime_proxy_log_field("path", runtime_proxy_log_url(path)),
-                runtime_proxy_log_field("waited_ms", started_at.elapsed().as_millis().to_string()),
-                runtime_proxy_log_field("reason", "long_lived_queue_disconnected"),
-            ],
-        ),
-    );
-}
-
 // Keep the ingress watchdog with queued work. A new worker must not grant
 // an already-expired request another full retry budget after dequeueing it.
 pub(crate) struct RuntimeProxyQueuedRequest {
     pub(crate) request: tiny_http::Request,
     pub(crate) deadline: Option<Instant>,
+    pub(crate) queued_at: Instant,
 }
 
 #[allow(clippy::result_large_err)]
-pub(crate) fn enqueue_runtime_proxy_long_lived_request_with_wait(
+pub(crate) fn enqueue_runtime_proxy_request(
     sender: &mpsc::SyncSender<RuntimeProxyQueuedRequest>,
     request: tiny_http::Request,
     shared: &RuntimeRotationProxyShared,
 ) -> Result<(), (RuntimeProxyQueueRejection, tiny_http::Request)> {
-    let path = request.url().to_string();
-    let transport = if is_tiny_http_websocket_upgrade(&request) {
-        "websocket"
-    } else {
-        "http"
-    };
     let scoped_shared = shared.for_precommit_request();
     let queued = RuntimeProxyQueuedRequest {
         request,
         deadline: scoped_shared.precommit_deadline,
+        queued_at: Instant::now(),
     };
-    wait_for_runtime_proxy_queue_capacity(queued, &scoped_shared, transport, &path, |queued| {
+    try_enqueue_runtime_proxy_work(queued, &scoped_shared, |queued| {
         match sender.try_send(queued) {
             Ok(()) => Ok(()),
             Err(TrySendError::Full(returned)) => Err((RuntimeProxyQueueRejection::Full, returned)),
