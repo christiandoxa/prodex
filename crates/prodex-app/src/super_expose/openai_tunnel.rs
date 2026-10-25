@@ -12,7 +12,7 @@ use std::time::{Duration, Instant};
 use zeroize::Zeroizing;
 
 const OPENAI_TUNNEL_CLIENT_MINIMUM_VERSION: &str = "0.0.13";
-const OPENAI_TUNNEL_CLIENT_LATEST_STABLE_REFERENCE: &str = "0.0.17";
+const OPENAI_TUNNEL_CLIENT_LATEST_STABLE_REFERENCE: &str = "0.0.18";
 const OPENAI_TUNNEL_CLIENT_RELEASE_URL: &str =
     "https://github.com/openai/tunnel-client/releases/latest";
 const OPENAI_TUNNEL_CLIENT_READY_TIMEOUT: Duration = if cfg!(all(test, windows)) {
@@ -325,6 +325,10 @@ fn remove_inherited_tunnel_configuration(command: &mut Command) {
         "OPENAI_API_KEYS",
         "OPENAI_ADMIN_KEY",
         "CONTROL_PLANE_API_KEY",
+        // The wrapper explicitly selects static-key authentication. Upstream
+        // 0.0.18 rejects combining it with ambient AWS workload identity.
+        "CONTROL_PLANE_AWS_IDENTITY_PROVIDER_ID",
+        "CONTROL_PLANE_AWS_SERVICE_ACCOUNT_ID",
         "TUNNEL_CLIENT_CONFIG",
         "TUNNEL_CLIENT_PROFILE",
         "TUNNEL_CLIENT_PROFILE_FILE",
@@ -594,6 +598,14 @@ mod version_policy_tests {
                 "0.0.17+1111111111111111111111111111111111111111 (git sha: 1111111111111111111111111111111111111111)",
                 "0.0.17",
             ),
+            (
+                "0.0.18+274a5588414819f063d27100a4fb1096aae3830f (git sha: 274a5588414819f063d27100a4fb1096aae3830f)",
+                "0.0.18",
+            ),
+            (
+                "0.0.19+1111111111111111111111111111111111111111 (git sha: 1111111111111111111111111111111111111111)",
+                "0.0.19",
+            ),
         ] {
             assert_eq!(
                 prodex_mojo_core::rich::super_expose_tunnel_supported_version(
@@ -603,6 +615,35 @@ mod version_policy_tests {
                 Ok(Some(expected))
             );
         }
+    }
+
+    #[test]
+    fn static_key_tunnel_child_does_not_inherit_aws_identity_configuration() {
+        let mut command = Command::new("tunnel-client-not-launched");
+        let identity_variables = [
+            "CONTROL_PLANE_AWS_IDENTITY_PROVIDER_ID",
+            "CONTROL_PLANE_AWS_SERVICE_ACCOUNT_ID",
+        ];
+        for variable in identity_variables {
+            command.env(variable, "synthetic-inherited-identity");
+        }
+        command.env("PATH", "synthetic-search-path");
+        remove_inherited_tunnel_configuration(&mut command);
+        let overrides = command
+            .get_envs()
+            .collect::<std::collections::BTreeMap<_, _>>();
+        for variable in identity_variables {
+            assert_eq!(
+                overrides.get(std::ffi::OsStr::new(variable)),
+                Some(&None),
+                "static-key startup must explicitly remove conflicting {variable}",
+            );
+        }
+        assert_eq!(
+            overrides.get(std::ffi::OsStr::new("PATH")),
+            Some(&Some(std::ffi::OsStr::new("synthetic-search-path"))),
+            "identity isolation must not clear unrelated process configuration",
+        );
     }
 
     #[test]
