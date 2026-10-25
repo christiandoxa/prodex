@@ -106,10 +106,10 @@ impl RuntimeToolLaunchStrategy {
         let outcome =
             recovery.recover(session_id, resume_goal, progress_revision, failure_revision);
         let after = recovery.retry_schedule();
-        if outcome != NativeRecoveryOutcome::Deferred {
-            if let Some(monitor) = self.goal_usage_limit_monitor.as_mut() {
-                monitor.acknowledge_in_place_recovery();
-            }
+        if outcome != NativeRecoveryOutcome::Deferred
+            && let Some(monitor) = self.goal_usage_limit_monitor.as_mut()
+        {
+            monitor.acknowledge_in_place_recovery();
         }
         if (outcome != NativeRecoveryOutcome::Deferred || before != after)
             && let Some(target) = self.runtime_recovery_log_target.as_ref()
