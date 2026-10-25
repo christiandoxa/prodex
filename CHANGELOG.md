@@ -16,6 +16,77 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 - Refresh agent guidance from repository history (`d52db7d`)
 - Retire migration notes and collapse README details (`0782b86`)
 
+### Misc
+
+- Qualify tunnel-client 0.0.18 and isolate auth selection (`579c7e4`)
+# Prodex 0.439.1
+
+This patch release prevents local proxy queue starvation from turning into
+repeated compaction timeouts and makes native recovery account for actual
+workflow progress. It also qualifies OpenAI tunnel-client 0.0.18.
+
+## New Features
+
+- Native recovery diagnostics report `attempts_without_progress`, `retry_wait_ms`
+  and `control_ack_is_progress=false`. Acceptance of a continuation RPC is no
+  longer presented as evidence that the workflow is making progress.
+- Separate bounded worker queues serve cached WebSocket connections, HTTP
+  responses, unary compaction and ordinary requests. Authenticated local control
+  remains responsive when an upstream worker lane is saturated.
+
+## Bug Fixes
+
+- Stop waiting for worker capacity in proxy ingress. A full lane returns a
+  retryable 503 with `Retry-After` instead of blocking unrelated requests.
+  Lane-local pressure does not globally penalize other routes or upstream accounts.
+- Preserve compaction and HTTP fallback capacity while cached WebSockets are idle.
+  Original request deadlines, continuation affinity and committed-response
+  no-replay boundaries remain enforced.
+- Back off repeated native recovery failures without real progress using delays
+  of 5, 10, 20, 40 and at most 60 seconds. The first recovery is immediate; each
+  subsequent failed turn starts its own cooldown. Time spent in the preceding
+  upstream timeout does not consume that cooldown.
+- Reset no-progress retry state only on observed assistant/tool output,
+  completed compaction or a different root session. Synthetic continuation
+  input, goal updates and accepted control RPCs do not reset it. User
+  cancellation, goal budgets and exact native session ownership remain intact.
+- Prevent inherited AWS identity settings from conflicting with Prodex's
+  explicitly selected static-key tunnel authentication in tunnel-client 0.0.18.
+  The wrapper removes the two AWS identity-selection variables for its probes
+  and tunnel child; it does not modify the user's shell or installed tools.
+- Retain the committed-stream deadline regression on Windows with sufficient
+  cold-start headroom, without removing its post-deadline read assertion.
+
+## Changelog
+
+- Qualify the official tunnel-client v0.0.18 source at
+  `274a5588414819f063d27100a4fb1096aae3830f`. The runtime minimum remains 0.0.13
+  plus the existing native version and `run` capability checks.
+- Verify the Linux binary against its published SHA-256 digest and checksum
+  manifest. Isolated version/help and loopback-only doctor probes confirm the
+  wrapper's command-line contract and the reproduced authentication conflict.
+  Qualification evidence is retained in
+  `migration/tunnel-client-v0.0.18-source-evidence.json`.
+- Preserve the qualified Codex 0.164.0 baseline and existing third-party Cargo
+  dependency pins. No authentication mode, API permission or active user
+  session is changed by this release.
+
+## Verification
+
+The original queue-saturation test fails on the old implementation and passes
+with the fix. Focused capacity, admission/rotation, persisted-workflow and
+native-recovery suites cover exactly-once fallback and progress-aware retry.
+The tunnel child-environment regression likewise fails before the fix and
+passes afterward; the official binary confirms the conflict using synthetic
+credentials and loopback-only mocks. No live model turn or tunnel provisioning
+was used for qualification.
+
+Existing running processes retain their loaded binary until they exit or are
+restarted. The fixes prevent the reproduced local failure modes; they do not
+promise that networks or upstream services cannot fail.
+
+Full Changelog: [0.439.0...0.439.1](https://github.com/christiandoxa/prodex/compare/0.439.0...0.439.1)
+
 ## 0.439.0 - 2026-10-23
 
 ### Runtime
