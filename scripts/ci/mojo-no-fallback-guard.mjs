@@ -3004,7 +3004,10 @@ export function findViolations(files) {
         "pub(crate) fn runtime_has_route_recoverable_quota_fallback_for_model(",
         "prodex_mojo_core::runtime::waitable_candidate_eligible(",
         "WaitableCandidateMode::RetryablePool",
-        "runtime_quota_precommit_guard_reason(summary, route_kind)",
+        "runtime_quota_has_exhausted_window(summary)",
+        "prodex_runtime_quota::runtime_selection_quota_summary_to_proxy(summary)",
+        "[summary.five_hour, summary.weekly]",
+        "runtime_proxy_crate::runtime_quota_window_precommit_guard(window, 1)",
       ].filter((marker) => !contents.includes(marker))
         .map((marker) => `${filePath}: recoverable quota pool must retain Mojo auth/quota gating (${marker})`);
     }
@@ -14864,6 +14867,22 @@ async function promotedFiles() {
 }
 
 function selfTest() {
+  const quotaGatePath = "crates/prodex-app/src/runtime_proxy/quota/gate.rs";
+  const quotaGateMarkers = [
+    "pub(crate) fn runtime_has_route_recoverable_quota_fallback_for_model(",
+    "prodex_mojo_core::runtime::waitable_candidate_eligible(",
+    "WaitableCandidateMode::RetryablePool",
+    "runtime_quota_has_exhausted_window(summary)",
+    "prodex_runtime_quota::runtime_selection_quota_summary_to_proxy(summary)",
+    "[summary.five_hour, summary.weekly]",
+    "runtime_proxy_crate::runtime_quota_window_precommit_guard(window, 1)",
+  ];
+  const quotaGateSource = quotaGateMarkers.join(";\n");
+  assert.deepEqual(findViolations([[quotaGatePath, quotaGateSource]]), []);
+  for (const marker of quotaGateMarkers) {
+    assert.match(findViolations([[quotaGatePath, quotaGateSource.replace(marker, "")]]).join("\n"),
+      /recoverable quota pool must retain Mojo auth\/quota gating/u);
+  }
   const exportDiagnosticAdapter = "crates/prodex-mojo-core/src/profile_export/diagnostics.rs";
   assert.deepEqual(findViolations([[exportDiagnosticAdapter, "prodex_profile_export_diagnostic_v1("]]), []);
   assert.match(findViolations([[exportDiagnosticAdapter, 'prodex_profile_export_diagnostic_v1(; format!("unsupported profile export")']])
