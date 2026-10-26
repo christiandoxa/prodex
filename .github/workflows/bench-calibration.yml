@@ -86,7 +86,7 @@ jobs:
 
       - name: Install pinned uv
         if: ${{ inputs.log_source == 'fresh-benchmark' }}
-        uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+        uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
         with:
           version: ${{ env.UV_VERSION }}
           enable-cache: false
@@ -102,7 +102,7 @@ jobs:
 
       - name: Cache Rust dependencies
         if: ${{ inputs.log_source == 'fresh-benchmark' }}
-        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
 
       - name: Collect benchmark log
         id: collect
