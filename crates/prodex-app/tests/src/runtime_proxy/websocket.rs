@@ -305,6 +305,11 @@ fn websocket_response_frame_plan_reaches_live_consumer_once() {
 
     let shared = websocket_test_shared_with_main_profile("frame-plan-consumer", upstream_addr);
     let (mut local_socket, mut client_socket) = websocket_test_local_pair();
+    // The real consumer sends keepalive Ping frames when scheduling is slow.
+    // Reproduce that legal interleaving without relying on platform timing.
+    local_socket
+        .send(WsMessage::Ping("downstream-control-fixture".into()))
+        .expect("fixture keepalive should reach the client");
     let handshake_request = RuntimeProxyRequest {
         method: "GET".to_string(),
         path_and_query: "/backend-api/prodex/responses".to_string(),
@@ -334,14 +339,36 @@ fn websocket_response_frame_plan_reaches_live_consumer_once() {
         websocket_session.can_reuse("main", None),
         "successful response.completed should keep the upstream session reusable"
     );
-    let frames = (0..4)
-        .map(|_| {
-            client_socket
-                .read()
-                .expect("client should receive frame")
-                .to_string()
-        })
-        .collect::<Vec<_>>();
+    let tungstenite::stream::MaybeTlsStream::Plain(stream) = client_socket.get_mut() else {
+        panic!("local fixture must use a plain TCP stream");
+    };
+    stream
+        .set_read_timeout(Some(Duration::from_secs(5)))
+        .expect("client completion wait should be bounded");
+    let mut frames = Vec::new();
+    let mut control_frames = 0;
+    for _ in 0..16 {
+        match client_socket
+            .read()
+            .expect("client should receive a complete response")
+        {
+            WsMessage::Text(text) => frames.push(text.to_string()),
+            WsMessage::Ping(_) | WsMessage::Pong(_) => control_frames += 1,
+            other => panic!("unexpected downstream frame before completion: {other:?}"),
+        }
+        if frames.len() == 4 {
+            break;
+        }
+    }
+    assert!(
+        control_frames > 0,
+        "fixture must exercise a real control-frame interleaving"
+    );
+    assert_eq!(
+        frames.len(),
+        4,
+        "all four ordered application frames must arrive"
+    );
     assert_eq!(frames[0], "", "empty frame should stay forward-only");
     assert!(frames[1].contains("response.created"));
     assert!(frames[2].contains("response.output_text.delta"));
