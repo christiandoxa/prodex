@@ -6,9 +6,10 @@ use prodex_cli::SubAgentReasoningEffort;
 use prodex_mojo_core::rich::{CatalogModel, merge_catalog_ids};
 use prodex_mojo_core::sub_agent_policy::{CatalogEntryPlan, CatalogStatusPlan};
 use prodex_provider_core::{
-    PROVIDER_IMPLEMENTATION_ORDER, ProviderId, ProviderModelChoice,
-    provider_implementation_registry, provider_model_reasoning_resolution,
-    resolve_provider_model_choices,
+    ModelCatalogScope, PROVIDER_IMPLEMENTATION_ORDER, ProviderId, ProviderModelChoice,
+    provider_implementation_registry, provider_model_is_retired_in_scope,
+    provider_model_reasoning_resolution, resolve_provider_model_choices,
+    resolve_provider_snapshot_model_choices,
 };
 use serde_json::Value;
 use std::path::PathBuf;
@@ -29,6 +30,7 @@ pub(crate) enum DynamicCatalogStatus {
 pub(crate) struct EffectiveProviderModelCatalog {
     pub(crate) models: Vec<Value>,
     pub(crate) status: DynamicCatalogStatus,
+    pub(crate) scope: ModelCatalogScope,
 }
 
 impl EffectiveProviderModelCatalog {
@@ -37,6 +39,30 @@ impl EffectiveProviderModelCatalog {
             .iter()
             .filter_map(catalog_entry_model_id)
             .map(str::to_string)
+            .collect()
+    }
+
+    pub(crate) fn model_is_retired(&self, provider: ProviderId, model: &str) -> bool {
+        provider_model_is_retired_in_scope(provider, model, self.scope)
+    }
+
+    pub(crate) fn choices(
+        &self,
+        provider: ProviderId,
+        current_model: Option<&str>,
+        discovered: &[String],
+    ) -> Vec<ProviderModelChoice> {
+        let choices = if discovered.is_empty() {
+            resolve_provider_model_choices(provider, &[], current_model)
+        } else {
+            resolve_provider_snapshot_model_choices(provider, discovered, current_model)
+        };
+        choices
+            .into_iter()
+            .filter(|choice| {
+                !matches!(choice,
+            ProviderModelChoice::Model(model) if self.model_is_retired(provider, model))
+            })
             .collect()
     }
 
@@ -68,9 +94,21 @@ pub(crate) fn effective_provider_model_catalog_from_paths(
     paths: &AppPaths,
     provider: ProviderId,
 ) -> EffectiveProviderModelCatalog {
-    let sources = match catalog_sources(paths, provider) {
-        Ok(sources) => sources,
-        Err(_) => return degraded_catalog(),
+    let (scope, api_key) = openai_catalog_auth_surface(paths, provider);
+    // Codex's shared cache is a ChatGPT account catalog, not an API-key model
+    // entitlement list. Never let it erase still-supported API-key choices.
+    let sources = if api_key {
+        Vec::new()
+    } else {
+        match catalog_sources(paths, provider) {
+            Ok(sources) => sources,
+            Err(_) => {
+                return EffectiveProviderModelCatalog {
+                    scope,
+                    ..degraded_catalog()
+                };
+            }
+        }
     };
     let mut models = Vec::new();
     let mut degraded = false;
@@ -106,8 +144,16 @@ pub(crate) fn effective_provider_model_catalog_from_paths(
         }
     }
 
+    models.retain(|entry| {
+        catalog_entry_model_id(entry)
+            .is_some_and(|id| !provider_model_is_retired_in_scope(provider, id, scope))
+    });
     let status = dynamic_catalog_status(&models, degraded);
-    EffectiveProviderModelCatalog { models, status }
+    EffectiveProviderModelCatalog {
+        models,
+        status,
+        scope,
+    }
 }
 
 enum CatalogSourceLoad {
@@ -198,7 +244,40 @@ fn degraded_catalog() -> EffectiveProviderModelCatalog {
     EffectiveProviderModelCatalog {
         models: Vec::new(),
         status: DynamicCatalogStatus::Degraded,
+        scope: ModelCatalogScope::Provider,
     }
+}
+
+fn openai_catalog_auth_surface(
+    paths: &AppPaths,
+    provider: ProviderId,
+) -> (ModelCatalogScope, bool) {
+    if provider != ProviderId::OpenAi {
+        return (ModelCatalogScope::Provider, false);
+    }
+    let home = AppState::load(paths)
+        .ok()
+        .and_then(|state| {
+            state
+                .active_profile
+                .as_ref()
+                .and_then(|name| state.profiles.get(name))
+                .filter(|profile| matches!(profile.provider, ProfileProvider::Openai))
+                .map(|profile| profile.codex_home.clone())
+        })
+        .or_else(|| prodex_core::default_codex_home(paths).ok());
+    let Some(home) = home else {
+        return (ModelCatalogScope::Provider, false);
+    };
+    // Existing auth inspection owns secret parsing; only its non-secret summary
+    // is used here. No quota call, token refresh or user-state mutation occurs.
+    let auth = crate::read_auth_summary(&home);
+    let scope = if auth.quota_compatible {
+        ModelCatalogScope::Chatgpt
+    } else {
+        ModelCatalogScope::Provider
+    };
+    (scope, auth.label == "api-key")
 }
 
 fn catalog_sources(paths: &AppPaths, provider: ProviderId) -> anyhow::Result<Vec<CatalogSource>> {

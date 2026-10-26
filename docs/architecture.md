@@ -195,6 +195,24 @@ and leaves identity normalization, canonical ordering, deduplication, aliases, a
 reasoning metadata to `prodex-provider-core`. Main-agent and sub-agent pickers consume this same
 source path; picker rendering never performs provider network discovery.
 
+A usable account catalog is authoritative for picker membership: offline models
+are not unioned back into it, and a remembered bundled model absent from it is
+not reinserted. Missing/malformed catalogs retain a bounded offline fallback;
+explicit unknown custom IDs remain available. Lifecycle facts are separately
+reviewed per provider and authentication surface in
+`crates/prodex-provider-core/catalog/retired-models.json`, with exact identity
+matching delegated to the compiled Mojo catalog owner. They also filter imported
+snapshots and generated provider runtime catalogs, so stale files cannot revive
+published retirements. Deprecation alone, future retirement dates and another
+provider's retirement are not removal evidence.
+
+Codex ChatGPT sign-in uses its own retirement scope. API-key authentication does
+not consume the shared ChatGPT entitlement cache or inherit its retirements;
+GPT-5.4, for example, remains valid on the API. Local/custom endpoints are not
+classified using hosted-provider lifecycle lists. Picker reads never rewrite
+user config, credentials, cached catalogs, or already-running sessions. Generic
+explicit CLI/custom model execution is not silently retargeted by this cleanup.
+
 The rich Mojo core is an additive ABI v6 boundary for deterministic domain work. The active
 context, provider fallback, route-alias policy, provider-routing, and Smart Context planning
 paths pass bounded non-secret UTF-8 views and caller-owned record/output arenas to Mojo. Mojo

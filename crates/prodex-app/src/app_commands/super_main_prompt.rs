@@ -35,7 +35,9 @@ fn resolve_main_model_and_effort_mojo(
         .or_else(|| codex_cli_config_override_value(&args.codex_args, "model"));
     let explicit_effort =
         codex_cli_config_override_value(&args.codex_args, "model_reasoning_effort");
-    let remembered_selection = current_main_selection(args, provider);
+    let remembered_selection = current_main_selection(args, provider).filter(|(model, _)| {
+        catalog::main_model_choice_is_selectable(&main_model_choices(provider, Some(model)), model)
+    });
     let choices = main_model_choices(provider, None);
     let owned_models = choices
         .iter()
@@ -257,7 +259,15 @@ pub(super) fn prompt_super_model(
     current_model: Option<&str>,
     configured_models: Vec<String>,
 ) -> anyhow::Result<Option<String>> {
-    let models = super_sub_agent_model_choices(provider, current_model, &configured_models);
+    let catalog = crate::effective_provider_model_catalog(provider);
+    let models = super_sub_agent_model_choices(provider, current_model, &configured_models)
+        .into_iter()
+        .filter(|choice| {
+            !matches!(choice,
+            prodex_provider_core::ProviderModelChoice::Model(model)
+                if catalog.model_is_retired(provider, model))
+        })
+        .collect::<Vec<_>>();
     let choices = models
         .iter()
         .map(super_prompt::super_prompt_model_choice_id_label)
@@ -282,7 +292,7 @@ pub(super) fn super_sub_agent_model_choices(
     if configured_models.is_empty() {
         canonical_sub_agent_model_choices(provider, current_model)
     } else {
-        prodex_provider_core::resolve_provider_model_choices(
+        prodex_provider_core::resolve_provider_snapshot_model_choices(
             provider,
             configured_models,
             current_model,
