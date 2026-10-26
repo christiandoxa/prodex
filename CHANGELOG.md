@@ -14,6 +14,7 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 
 ### Misc
 
+- Qualify current RTK and Presidio releases (`7984b0d`)
 - Merge Dependabot GitHub Actions updates (#119) (`e5c5a62`)
 - Merge Dependabot Cargo updates (#118) (`b6d641b`)
 # Prodex 0.439.2
@@ -55,6 +56,15 @@ Cargo and GitHub Actions Dependabot updates.
 - Incorporate Dependabot GitHub Actions PR #119: rust-cache v2.9.3 and
   setup-uv v10.3.2, both pinned to reviewed immutable commit hashes. Update the
   release-cache contract assertion to the new pinned rust-cache revision.
+- Re-qualify RTK 1.1.0 using verified official archive checksums and isolated
+  OSS version, bypass, legacy proxy-alias and exit-status probes. Its supported
+  minimum remains 0.46.0, and no installed user tool is automatically replaced.
+- Qualify Presidio 2.2.365 and pin both official multi-platform image indexes.
+  Offline image endpoint tests verify health, email detection and replacement.
+  The anonymizer contains cryptography 50.0.1, outside the previously disclosed
+  GHSA-g6cj-pr64-35w5 affected range. This does not imply a vulnerability-free
+  image. Existing service ownership checks, opt-in behavior and the compatible
+  2.2.364 minimum remain unchanged.
 - Register ten focused quota-handoff regression cases in the runtime smoke and
   relevant CI suites. Strengthen ownership checks so both quota windows remain
   governed by the existing compiled Mojo decisions.
