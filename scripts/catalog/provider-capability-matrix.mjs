@@ -160,7 +160,7 @@ function render() {
   lines.push("");
   lines.push("Fixture summary counts are `request/response/stream-event` conformance cases per provider.");
   lines.push("");
-  lines.push("Model counts cover deterministic offline built-ins. Imported or provider-discovered runtime routes may augment them, and Super accepts an explicit non-empty custom child model ID without requiring live discovery.");
+  lines.push("Model counts cover deterministic offline built-ins after provider-wide retirements. Runtime catalogs filter published provider retirements; Super pickers use a usable account snapshot without restoring absent offline suggestions. Provider/authentication exceptions and explicit custom child model IDs remain supported without mandatory live discovery.");
   lines.push("");
   const translatedLimitations = contracts
     .map((contract) => {

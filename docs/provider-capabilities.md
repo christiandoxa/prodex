@@ -5,9 +5,9 @@ Generated from the current prodex_provider_core implementation registry and tran
 | Provider | Models | Transform | Streaming | Fallback | Fixtures req/resp/stream | responses | responses/compact | chat-completions | messages | models | embeddings | images | audio | batches | rerank | a2a |
 |---|---:|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
 | openai | 11 | passthrough | true | false | 7/7/1 | native | emulated | native | unsupported | native | native | native | native | native | unsupported | unsupported |
-| anthropic | 12 | translated | true | true | 12/5/4 | translated | emulated | passthrough | passthrough | emulated | unsupported | unsupported | unsupported | unsupported | unsupported | unsupported |
-| copilot | 30 | passthrough | true | true | 10/5/2 | native | passthrough | passthrough | passthrough | emulated | unsupported | unsupported | unsupported | unsupported | unsupported | unsupported |
-| deepseek | 4 | translated | true | true | 16/4/3 | translated | emulated | passthrough | passthrough | emulated | unsupported | unsupported | unsupported | unsupported | unsupported | unsupported |
+| anthropic | 11 | translated | true | true | 12/5/4 | translated | emulated | passthrough | passthrough | emulated | unsupported | unsupported | unsupported | unsupported | unsupported | unsupported |
+| copilot | 21 | passthrough | true | true | 10/5/2 | native | passthrough | passthrough | passthrough | emulated | unsupported | unsupported | unsupported | unsupported | unsupported | unsupported |
+| deepseek | 2 | translated | true | true | 16/4/3 | translated | emulated | passthrough | passthrough | emulated | unsupported | unsupported | unsupported | unsupported | unsupported | unsupported |
 | gemini | 22 | translated | true | true | 18/14/3 | translated | emulated | passthrough | passthrough | emulated | passthrough | unsupported | unsupported | unsupported | unsupported | unsupported |
 | kiro | 2 | translated | true | false | 9/6/1 | translated | emulated | translated | translated | emulated | unsupported | unsupported | unsupported | unsupported | unsupported | unsupported |
 | local | 1 | passthrough | true | false | 10/10/1 | passthrough | emulated | passthrough | passthrough | passthrough | passthrough | passthrough | passthrough | passthrough | passthrough | passthrough |
@@ -16,7 +16,7 @@ Status values: `native`, `translated`, `passthrough`, `emulated`, `partial`, `un
 
 Fixture summary counts are `request/response/stream-event` conformance cases per provider.
 
-Model counts cover deterministic offline built-ins. Imported or provider-discovered runtime routes may augment them, and Super accepts an explicit non-empty custom child model ID without requiring live discovery.
+Model counts cover deterministic offline built-ins after provider-wide retirements. Runtime catalogs filter published provider retirements; Super pickers use a usable account snapshot without restoring absent offline suggestions. Provider/authentication exceptions and explicit custom child model IDs remain supported without mandatory live discovery.
 
 ## Declared Responses parameter limitations
 
