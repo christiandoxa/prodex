@@ -448,7 +448,7 @@ test("stable cargo release dependency cache keeps version churn out without acce
   assert.match(fingerprint, /scripts\/ci\/release_cargo_deps_cache_key\.py/);
   assert.match(fingerprint, /--lockfile Cargo\.lock/);
   assert.match(fingerprint, /--output "\$\{GITHUB_OUTPUT\}"/);
-  assert.match(cache, /Swatinem\/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6/);
+  assert.match(cache, /Swatinem\/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0/);
   assert.match(cache, /add-rust-environment-hash-key: "false"/);
   assert.match(cache, /cache-workspace-crates: "false"/);
   assert.match(cache, /release-deps-v1-rust1\.99\.1-thinlto-cgu16/);
