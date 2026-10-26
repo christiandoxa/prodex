@@ -386,14 +386,48 @@ mod tests {
 
     #[test]
     fn discovery_completes_within_expose_startup_budget() {
-        let started = std::time::Instant::now();
-        let context = ExposeOptionalTools::discover();
-        assert_eq!(context.tools.len(), OptionalToolId::ALL.len());
-        assert!(
-            started.elapsed() < std::time::Duration::from_secs(8),
-            "optional-tool discovery exceeded startup budget: {:?}",
-            started.elapsed()
-        );
+        let _lock = crate::test_support::acquire_test_env_lock();
+        let root = crate::test_support::test_temp_root().join(format!(
+            "prodex-expose-discovery-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos(),
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        // This is the absent-tool startup contract, not a benchmark of the
+        // runner's Node/npm cache or a user's local redaction services. Those
+        // external health probes have separate bounded-process coverage.
+        std::fs::write(root.join("presidio.toml"),
+            "analyzer_url = 'http://127.0.0.1:0'\nanonymizer_url = 'http://127.0.0.1:0'\ntimeout_ms = 100\n",
+        ).unwrap();
+        {
+            let _home = crate::TestEnvVarGuard::set_home(&root);
+            let _path = crate::TestEnvVarGuard::set("PATH", root.to_str().unwrap());
+            let _prodex = crate::TestEnvVarGuard::set("PRODEX_HOME", root.to_str().unwrap());
+            let _data = crate::TestEnvVarGuard::set("XDG_DATA_HOME", root.to_str().unwrap());
+            let _optimizers = crate::TestEnvVarGuard::set(
+                prodex_optional_tools::PRODEX_OPTIMIZERS_HOME_ENV,
+                root.to_str().unwrap(),
+            );
+            let _no_proxy = crate::TestEnvVarGuard::set("NO_PROXY", "127.0.0.1");
+            let _no_proxy_lower = crate::TestEnvVarGuard::set("no_proxy", "127.0.0.1");
+            let started = std::time::Instant::now();
+            let context = ExposeOptionalTools::discover();
+            assert_eq!(context.tools.len(), OptionalToolId::ALL.len());
+            assert_eq!(
+                context.available_count(),
+                0,
+                "host tools must not enter the isolated fixture"
+            );
+            assert!(
+                started.elapsed() < std::time::Duration::from_secs(8),
+                "optional-tool discovery exceeded startup budget: {:?}",
+                started.elapsed()
+            );
+        }
+        std::fs::remove_dir_all(&root).unwrap();
     }
 
     #[test]
