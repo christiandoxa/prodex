@@ -32,6 +32,11 @@ export const RUNTIME_TEST_TAGS = TAGS;
 
 export const RUNTIME_SMOKE_TESTS = [
   {
+    label: "quota-aware-continuation-handoff",
+    package: "prodex-app",
+    filter: "quota_handoff::",
+  },
+  {
     label: "provider-conversation-retention",
     package: "prodex-app",
     filter: "conversation_store::tests::",
@@ -167,6 +172,11 @@ export const RUNTIME_CI_WORKFLOW_SHARDS = [
         id: "admission-pre-send",
         filter: `${ADMISSION_PREFIX}pre_send::`,
         label: "admission-pre-send",
+      },
+      {
+        id: "admission-quota-handoff",
+        filter: `${ADMISSION_PREFIX}quota_handoff::`,
+        label: "admission-quota-handoff",
       },
       {
         id: "admission-hard-affinity-replay",
