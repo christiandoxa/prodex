@@ -10,8 +10,8 @@ mod policy_tests;
 
 pub(super) const PRESIDIO_ANALYZER_CONTAINER: &str = "presidio-analyzer";
 pub(super) const PRESIDIO_ANONYMIZER_CONTAINER: &str = "presidio-anonymizer";
-pub(super) const PRESIDIO_ANALYZER_IMAGE: &str = "ghcr.io/data-privacy-stack/presidio-analyzer:2.2.364@sha256:ae8f6f111ac2f04e3fec552f7f80edd0dcbfa2dd69ee1b9e030475be31669885";
-pub(super) const PRESIDIO_ANONYMIZER_IMAGE: &str = "ghcr.io/data-privacy-stack/presidio-anonymizer:2.2.364@sha256:e567013893ebc80994e3799f6f55c86aa1f0b0fadb779571ab346f0ec45365c1";
+pub(super) const PRESIDIO_ANALYZER_IMAGE: &str = "ghcr.io/data-privacy-stack/presidio-analyzer:2.2.365@sha256:2a5e226748f5bc72e6426fa0cc7eec38dc84e6bc8fe599fd9bcf721a337aa1a4";
+pub(super) const PRESIDIO_ANONYMIZER_IMAGE: &str = "ghcr.io/data-privacy-stack/presidio-anonymizer:2.2.365@sha256:61b718359559655117da5c199ea1bc8e3e1d5f7d97e10cb77c2d2c78eb4cee63";
 pub(super) const PRESIDIO_ANALYZER_IMAGE_ENV: &str = "PRODEX_PRESIDIO_ANALYZER_IMAGE";
 pub(super) const PRESIDIO_ANONYMIZER_IMAGE_ENV: &str = "PRODEX_PRESIDIO_ANONYMIZER_IMAGE";
 const PRESIDIO_MANAGED_LABEL: &str = "com.prodex.presidio.managed";

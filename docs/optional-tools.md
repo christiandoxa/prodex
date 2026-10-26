@@ -104,7 +104,7 @@ Ponytail uses the same versioned manifest/tree contract, accepts stable 4.9.0 or
 
 The 5.3.2 qualified reference requires its exact audited commit and complete tree digest. Existing stable 4.10.x checkouts remain accepted through the minimum-version and manifest-digest compatibility rules, including the previously qualified 4.10.0 legacy-manifest rule. Future stable releases are accepted when the plugin version matches the managed manifest and the recomputed tree digest matches that manifest.
 
-RTK requires `0.46.0` or newer; `1.0.1` is the latest stable release-qualified reference for this Prodex release. It remains externally managed and version-compatible rather than latest-only. Codebase Memory MCP
+RTK requires `0.46.0` or newer; `1.1.0` is the latest stable release-qualified reference for this Prodex release. It remains externally managed and version-compatible rather than latest-only. Codebase Memory MCP
 `0.12.1` is the latest stable release validated for this Prodex release. Both resolve from
 managed roots first and then `PATH`.
 The README installs the current stable Codebase Memory MCP `0.12.1`; Prodex
@@ -123,14 +123,13 @@ Schema composition; all other Codebase Memory tools remain available.
 Playwright MCP requires validated Node.js 18+, `npx`, and Playwright MCP `0.0.79` or newer. Prodex invokes `npx --no-install @playwright/mcp`, probes the installed package version, and rejects an installed version below the minimum. `0.0.83` is the current latest-stable release-qualified reference.
 Presidio remains an explicit service selection and is checked by its existing doctor path. Prodex accepts official Presidio analyzer/anonymizer images at `2.2.364` or newer; the release-qualified defaults remain digest-pinned, while newer official images can be supplied with `PRODEX_PRESIDIO_ANALYZER_IMAGE` and `PRODEX_PRESIDIO_ANONYMIZER_IMAGE`. `--require-tool presidio` additionally requires healthy services
 and `fail_mode = "closed"`, so an inspection failure cannot silently bypass
-redaction. Presidio 2.2.364 currently constrains `cryptography` below the
-50.0.0 fix for
-[GHSA-g6cj-pr64-35w5](https://github.com/advisories/GHSA-g6cj-pr64-35w5).
-The affected PKCS#7 EnvelopedData decrypt
-API is not used by Prodex's tested anonymize route, but the optional image is
-not reported as dependency-clean while
-[upstream issue #2229](https://github.com/data-privacy-stack/presidio/issues/2229)
-remains open.
+redaction. The release-qualified 2.2.365 defaults are pinned to official image-index
+SHA-256 digests. Isolated service probes verify email detection, replacement and
+health responses without exposing host ports or using user data. The anonymizer
+image contains `cryptography` 50.0.1, outside the previously documented
+GHSA-g6cj-pr64-35w5 affected range; this is not a blanket clean-image claim.
+Existing compatible 2.2.364 deployments are not automatically replaced, and
+English images still do not imply Indonesian recognizer support.
 
 Native Gemini, Copilot, Kiro, and Antigravity frontends do not consume Codex
 overlays, so they reject `--tool` and `--require-tool` instead of claiming the

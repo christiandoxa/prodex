@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
-  "audited_at": "2026-10-17T02:50:16.592030+00:00",
-  "release": "0.438.1",
+  "audited_at": "2026-10-26T09:28:05.869710+00:00",
+  "release": "0.439.2",
   "tools": [
     {
       "id": "caveman",
@@ -27,17 +27,17 @@
     {
       "id": "rtk",
       "repository": "https://github.com/rtk-ai/rtk",
-      "latest_stable": "1.0.1",
-      "release": "v1.0.1",
-      "commit": "4ef8730cf3a0dea11c8d64a9b90bc0616fe52100",
-      "git_tree": "6912dde8aea7aa9026e6382769d017679df6a01c",
-      "checksums_asset": "sha256:3dc6975d97c9faa43aa997a5d68a3255ceccea43ffa2d9d9ac22950b1b2d93a2",
+      "latest_stable": "1.1.0",
+      "release": "v1.1.0",
+      "commit": "753a3b0e939f2e4490fc24e3a1984010f40a103c",
+      "git_tree": "46bf15ae94050e7edad7e148891a2d60b2e9040e",
+      "checksums_asset": "sha256:57622fe1d00db0cbd7473161ec264806402844cd0f5e9314195e0f8eb9f4b0b5",
       "assets": {
-        "linux-x86_64-musl": "sha256:5b919c3bccb799b67a61866d0e617410a4fcdf173e2614440e59de2fa2003436",
-        "linux-aarch64-gnu": "sha256:cd627c4091ad90b5e5aca83ca5af66ee4b8aa8537a736533fa90544f461f1c2b",
-        "darwin-x86_64": "sha256:4b716b2f45d677de41c99f77d9a71199ad060b98ec2f78ef712885312b3a6578",
-        "darwin-aarch64": "sha256:4aae2f60cfc49c9e81b8c8c57020aa0cb824da608c78b4f0cf5c0988e19e824e",
-        "windows-x86_64": "sha256:64b4807c50b61dddf2ac1e86751dbda9117ab94ed02bf266e6584da571c39896"
+        "linux-x86_64-musl": "sha256:9454ad1b9489daa57ab0a9f4ebe2faaf4dc82b8a0f26c9e5135151abd7c9378d",
+        "linux-aarch64-gnu": "sha256:a5c00c3ab0129884bcb757d348afc1a650efa0f4f0769da97c341f28f89719ed",
+        "darwin-x86_64": "sha256:1e23e8b9542b58428e6409c49b1c3fb92c4c0d5125da72e80f002a46086a6c20",
+        "darwin-aarch64": "sha256:8da773b0954cf90b115ec95c4e4eb420f04c39de233c5db102246a6caf073ba7",
+        "windows-x86_64": "sha256:c9a8f7a8bad471e64a343314168f38d2399a06fa327cdf5772fb0e645d99ea6f"
       },
       "license": "Apache-2.0 (CLI/rtk-oss); default full binary also includes BUSL-1.1 engine",
       "runtime": "Externally managed executable; recommended, not latest-only",
@@ -47,8 +47,8 @@
         "windows"
       ],
       "decision": "ADOPT_PACKAGE",
-      "notes": "Re-audited for Prodex 0.437.13 after the release freshness check found v1.0.1. Verified exact upstream commit/tree, checksum manifest and five official platform archives against GitHub digests and downloaded SHA-256 checksums. Verified the Apache-only rtk-oss Linux binary version, bypass and legacy proxy alias in an isolated HOME with telemetry and tracking disabled. The full edition still includes the BUSL-1.1 engine. No installed user tool was changed; the compatible minimum remains 0.46.0.",
-      "audited_at": "2026-10-14T23:28:20.865629+00:00"
+      "notes": "Re-qualified for Prodex 0.439.2 after release freshness detected v1.1.0. Reviewed the exact commit/tree and relevant CLI/config delta; verified checksum manifest, all five platform archives and the official Apache-only rtk-oss Linux archive against published SHA-256 digests. Isolated HOME probes passed version/help, bypass, legacy proxy alias and child exit-status propagation. Full binary retains its disclosed BUSL-1.1 engine; no installed tool, hook or user configuration changed. Compatible minimum remains 0.46.0.",
+      "audited_at": "2026-10-26T09:28:05.869710+00:00"
     },
     {
       "id": "codebase-memory-mcp",
@@ -123,13 +123,13 @@
     {
       "id": "presidio",
       "repository": "https://github.com/data-privacy-stack/presidio",
-      "latest_stable": "2.2.364",
-      "release": "2.2.364",
-      "commit": "779dbd286d5ef4d1fbe2514275fb1bce358f2417",
-      "git_tree": "faa34e3cfd7b00ab1e99b570ac16333488b4f9a8",
+      "latest_stable": "2.2.365",
+      "release": "2.2.365",
+      "commit": "a8882cba0b6a9bcd9fb60892a118af37f9a7461c",
+      "git_tree": "63cce88b46ccc2c174860624b498d08a4c03c51e",
       "images": {
-        "analyzer": "ghcr.io/data-privacy-stack/presidio-analyzer:2.2.364@sha256:ae8f6f111ac2f04e3fec552f7f80edd0dcbfa2dd69ee1b9e030475be31669885",
-        "anonymizer": "ghcr.io/data-privacy-stack/presidio-anonymizer:2.2.364@sha256:e567013893ebc80994e3799f6f55c86aa1f0b0fadb779571ab346f0ec45365c1"
+        "analyzer": "ghcr.io/data-privacy-stack/presidio-analyzer:2.2.365@sha256:2a5e226748f5bc72e6426fa0cc7eec38dc84e6bc8fe599fd9bcf721a337aa1a4",
+        "anonymizer": "ghcr.io/data-privacy-stack/presidio-anonymizer:2.2.365@sha256:61b718359559655117da5c199ea1bc8e3e1d5f7d97e10cb77c2d2c78eb4cee63"
       },
       "license": "MIT",
       "runtime": "Opt-in Analyzer/Anonymizer containers; fail-closed redaction",
@@ -142,10 +142,12 @@
       "security_review": {
         "advisory": "GHSA-g6cj-pr64-35w5 / CVE-2026-69247",
         "affected_dependency": "cryptography >=44.0.0,<50.0.0",
-        "observed_anonymizer_version": "48.0.1",
-        "prodex_path": "The tested Prodex anonymize route does not call PKCS#7 EnvelopedData decryption; Presidio issue #2229 and pull request #2231 remain open upstream."
+        "observed_anonymizer_version": "50.0.1",
+        "prodex_path": "Upstream PR #2231 raises cryptography to >=50.0.0. The digest-pinned 2.2.365 anonymizer contains 50.0.1, verified in an isolated container. This specific dependency check is not a claim of a vulnerability-free image.",
+        "status": "The qualified anonymizer image is outside this advisory's affected cryptography range."
       },
-      "notes": "English service images do not imply Indonesian recognizer support. The pinned image remains optional and its unresolved upstream cryptography advisory is disclosed rather than treated as a clean dependency scan."
+      "notes": "Verified official multi-platform image-index digests and shipped 2.2.365 project metadata. Actual image Flask health/analyze/anonymize routes passed synthetic email detection and replacement tests with network disabled and no host mounts/ports. The unchanged analyzer API returns 500 for missing text; this remains a service error, not a success or relaxed assertion. Anonymizer output adds a score field compatible with the existing response parser. No user services were restarted. English images do not imply Indonesian recognizer support; opt-in and the 2.2.364 compatible minimum are unchanged.",
+      "audited_at": "2026-10-26T09:28:05.869710+00:00"
     }
   ]
 }
