@@ -60,6 +60,31 @@ fn handle_runtime_responses_attempt(
     loop_state: &mut RuntimePrecommitLoopState<RuntimeUpstreamFailureResponse>,
 ) -> Result<Option<RuntimeResponsesReply>> {
     let hard_affinity = affinity_state.candidate_has_hard_affinity(candidate_name);
+    if hard_affinity
+        && runtime_quota_exhausted_with_recoverable_alternative(
+            context.shared,
+            candidate_name,
+            &loop_state.excluded_profiles,
+            RuntimeRouteKind::Responses,
+            context.request_model_name.as_deref(),
+        )?
+        && let Some(reply) =
+            try_signal_runtime_responses_full_context_retry(RuntimeResponsesFullContextRetry {
+                request_id: context.request_id,
+                shared: context.shared,
+                profile_name: candidate_name,
+                prompt_cache_key: context.prompt_cache_key,
+                previous_response_id: context.previous_response_id,
+                request_turn_state: context.request_turn_state,
+                request_session_id: context.request_session_id,
+                request_model_name: context.request_model_name.as_deref(),
+                affinity_state,
+                excluded_profiles: &loop_state.excluded_profiles,
+                reason: "quota_exhausted_before_send",
+            })?
+    {
+        return Ok(Some(reply));
+    }
     loop_state.begin_attempt();
     let attempt = attempt_runtime_responses_request(
         context.request_id,

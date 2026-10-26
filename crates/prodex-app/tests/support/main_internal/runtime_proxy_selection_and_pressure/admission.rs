@@ -54,3 +54,6 @@ mod probe_recovery_043714;
 
 #[path = "admission/quota_transition_043714.rs"]
 mod quota_transition_043714;
+
+#[path = "admission/quota_handoff.rs"]
+mod quota_handoff;

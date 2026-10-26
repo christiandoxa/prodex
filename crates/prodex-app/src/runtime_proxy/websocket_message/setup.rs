@@ -343,6 +343,23 @@ impl<'a> RuntimeWebsocketTextMessageFlow<'a> {
     ) -> Result<RuntimeWebsocketAttempt> {
         let promote_committed_profile = self.should_promote_committed_profile();
         let hard_affinity = self.candidate_has_hard_affinity(profile_name);
+        if hard_affinity
+            && crate::runtime_quota_exhausted_with_recoverable_alternative(
+                self.shared,
+                profile_name,
+                &self.excluded_profiles,
+                RuntimeRouteKind::Websocket,
+                runtime_smart_context_model_name_from_body(self.request_text.as_bytes()).as_deref(),
+            )?
+            && self.full_context_retry_available(profile_name)?
+        {
+            // Reuse the native recovery path instead of sending a known-empty
+            // owner's delta upstream or moving that delta to another account.
+            return Ok(RuntimeWebsocketAttempt::LocalSelectionBlocked {
+                profile_name: profile_name.to_owned(),
+                reason: "quota_exhausted_before_send",
+            });
+        }
         attempt_runtime_websocket_request_with_hard_affinity(
             RuntimeWebsocketAttemptRequest {
                 request_id: self.request_id,

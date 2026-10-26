@@ -6,7 +6,10 @@ enum FullHistoryFailure {
 }
 
 impl<'a> RuntimeWebsocketTextMessageFlow<'a> {
-    pub(super) fn full_context_retry_available(&mut self, profile_name: &str) -> Result<bool> {
+    pub(in super::super) fn full_context_retry_available(
+        &mut self,
+        profile_name: &str,
+    ) -> Result<bool> {
         if !runtime_proxy_crate::runtime_full_context_retry_signal_eligible(
             self.previous_response_id.is_some(),
             self.request_session_id.is_some(),
