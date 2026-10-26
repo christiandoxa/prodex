@@ -695,3 +695,6 @@ fn candidate_overloaded_hard_affinity_without_fallback_remains_terminal() {
 
 #[path = "failure_handling/transport_affinity.rs"]
 mod transport_affinity;
+
+#[path = "failure_handling/quota_handoff.rs"]
+mod quota_handoff;

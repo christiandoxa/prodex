@@ -111,8 +111,7 @@ pub(crate) fn runtime_has_route_recoverable_quota_fallback_for_model(
                     candidate_name,
                     now,
                 ),
-                quota_blocked: quota_quarantined
-                    || runtime_quota_precommit_guard_reason(summary, route_kind).is_some(),
+                quota_blocked: quota_quarantined || runtime_quota_has_exhausted_window(summary),
                 ..Default::default()
             },
         )
@@ -171,9 +170,6 @@ fn runtime_has_route_quota_fallback(
         {
             continue;
         }
-        if !require_quota_evidence {
-            return Ok(true);
-        }
         let (summary, source) = runtime_profile_quota_summary_for_route_from_state_with_model(
             &runtime,
             candidate_name,
@@ -181,11 +177,54 @@ fn runtime_has_route_quota_fallback(
             requested_model,
             now,
         );
+        // Unknown quota may warrant a bounded probe; known exhaustion is not
+        // an eligible alternate just because positive evidence is optional.
+        if runtime_quota_has_exhausted_window(summary) {
+            continue;
+        }
+        if !require_quota_evidence {
+            return Ok(true);
+        }
         if runtime_quota_summary_allows_soft_affinity(summary, source, route_kind) {
             return Ok(true);
         }
     }
     Ok(false)
+}
+
+/// Detect an exhausted owner before transport I/O, without weakening affinity.
+/// Callers must separately prove that native full-history recovery is supported.
+/// An alternate may be temporarily busy; this check never grants admission.
+pub(crate) fn runtime_quota_exhausted_with_recoverable_alternative(
+    shared: &RuntimeRotationProxyShared,
+    profile_name: &str,
+    excluded_profiles: &BTreeSet<String>,
+    route_kind: RuntimeRouteKind,
+    requested_model: Option<&str>,
+) -> Result<bool> {
+    let (summary, _) = runtime_profile_quota_summary_for_route_with_model(
+        shared,
+        profile_name,
+        route_kind,
+        requested_model,
+    )?;
+    if !runtime_quota_has_exhausted_window(summary) {
+        return Ok(false);
+    }
+    runtime_has_route_recoverable_quota_fallback_for_model(
+        shared,
+        profile_name,
+        excluded_profiles,
+        route_kind,
+        requested_model,
+    )
+}
+
+fn runtime_quota_has_exhausted_window(summary: RuntimeQuotaSummary) -> bool {
+    let summary = prodex_runtime_quota::runtime_selection_quota_summary_to_proxy(summary);
+    [summary.five_hour, summary.weekly]
+        .into_iter()
+        .any(|window| runtime_proxy_crate::runtime_quota_window_precommit_guard(window, 1))
 }
 
 pub(crate) fn schedule_runtime_profile_quota_refresh(

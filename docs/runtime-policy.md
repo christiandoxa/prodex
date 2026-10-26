@@ -818,6 +818,26 @@ can switch roots; the existing app-server still verifies identity, workspace,
 persistence, quiescence and goal policy before any in-place continuation RPC.
 
 
+### Quota-aware continuation handoff
+
+Before a new Responses HTTP request or WebSocket message is sent, a cached,
+model-aware quota observation can identify an exhausted owner. When another
+compatible account has usable quota and native full-history recovery is proven
+safe, Prodex asks Codex to reconstruct the complete request before contacting
+that owner. It never sends an opaque continuation delta to another account.
+The original upstream 429 and its potentially long retry delay are therefore
+avoided for this known-empty-owner case; no synthetic quota failure is invented.
+
+A quota-positive alternative can be recoverable while temporarily busy or in
+transport cooldown. HTTP and WebSocket recovery use this distinction consistently,
+without bypassing real admission limits, account quarantine, authentication,
+model compatibility, cancellation or the original request deadline. Known
+five-hour or weekly exhaustion is not treated as unknown quota or as an eligible
+fallback. Unknown quota and a healthy continuation owner do not trigger this
+preflight handoff. If no safe alternative exists, the existing owner and upstream
+failure semantics remain authoritative. Post-commit output is never replayed or
+rotated, and reset credits are not consumed by this preflight path.
+
 ### Native recovery without progress
 
 An accepted native continuation RPC confirms only control-plane acceptance, not

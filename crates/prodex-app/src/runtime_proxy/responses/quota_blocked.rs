@@ -19,7 +19,16 @@ fn runtime_responses_full_context_fallback_available(
 ) -> Result<bool> {
     let mut excluded_profiles = excluded_profiles.clone();
     excluded_profiles.insert(profile_name.to_string());
-    if runtime_has_route_eligible_quota_fallback_for_model(
+    // Native full-history recovery can wait for a quota-positive account's
+    // local capacity or transient transport cooldown, just as WebSocket can.
+    // Actual admission still happens only when the complete request arrives.
+    if runtime_has_route_recoverable_quota_fallback_for_model(
+        shared,
+        profile_name,
+        &excluded_profiles,
+        RuntimeRouteKind::Responses,
+        request_model_name,
+    )? || runtime_has_route_eligible_quota_fallback_for_model(
         shared,
         profile_name,
         &excluded_profiles,
