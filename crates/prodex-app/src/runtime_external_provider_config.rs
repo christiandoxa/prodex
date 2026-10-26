@@ -468,7 +468,7 @@ mod tests {
             OsString::from("-c"),
             OsString::from("model_provider=\"prodex-copilot\""),
             OsString::from("-c"),
-            OsString::from("model=\"gpt-5.5\""),
+            OsString::from("model=\"gpt-6.1-sol\""),
         ];
 
         prepare_external_provider_catalog_codex_args(&codex_home, &user_args)
@@ -477,16 +477,16 @@ mod tests {
         let catalog_path = codex_home.join(EXTERNAL_MODEL_CATALOG_FILE);
         let catalog: serde_json::Value =
             serde_json::from_str(&fs::read_to_string(&catalog_path).unwrap()).unwrap();
-        assert_eq!(catalog["models"][0]["slug"], "gpt-5.5");
-        assert_eq!(catalog["models"][0]["context_window"], 922000);
-        assert_eq!(catalog["models"][0]["auto_compact_token_limit"], 875900);
+        assert_eq!(catalog["models"][0]["slug"], "gpt-6.1-sol");
+        assert_eq!(catalog["models"][0]["context_window"], 1050000);
+        assert_eq!(catalog["models"][0]["auto_compact_token_limit"], 997500);
         let efforts = catalog["models"][0]["supported_reasoning_levels"]
             .as_array()
             .expect("reasoning levels should be present")
             .iter()
             .map(|level| level["effort"].as_str().unwrap())
             .collect::<Vec<_>>();
-        assert_eq!(efforts, vec!["low", "medium", "high", "xhigh"]);
+        assert_eq!(efforts, vec!["low", "medium", "high", "xhigh", "max"]);
     }
 
     #[test]
@@ -527,7 +527,7 @@ mod tests {
                 .any(|model| { model["slug"] == "account/model-v1" })
         );
         assert!(
-            catalog["models"]
+            !catalog["models"]
                 .as_array()
                 .unwrap()
                 .iter()

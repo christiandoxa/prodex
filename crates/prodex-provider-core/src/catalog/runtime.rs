@@ -173,9 +173,12 @@ pub fn plan_runtime_model_catalog(
         super::PROVIDER_MODEL_CATALOG_HARD_LIMIT,
     )
     .map_err(RuntimeModelCatalogError::Mojo)?;
-    serde_json::from_slice::<Result<Vec<RuntimePlannedCatalogModel>, String>>(&output)
-        .map_err(RuntimeModelCatalogError::Json)?
-        .map_err(RuntimeModelCatalogError::Rejected)
+    let mut models =
+        serde_json::from_slice::<Result<Vec<RuntimePlannedCatalogModel>, String>>(&output)
+            .map_err(RuntimeModelCatalogError::Json)?
+            .map_err(RuntimeModelCatalogError::Rejected)?;
+    models.retain(|model| !super::provider_model_is_retired(input.provider, &model.slug));
+    Ok(models)
 }
 
 #[cfg(test)]

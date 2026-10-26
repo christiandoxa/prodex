@@ -31,7 +31,7 @@ fn gemini_models_endpoint_exposes_catalog_from_gemini_cli() {
 }
 
 #[test]
-fn deepseek_models_endpoint_exposes_current_and_compat_models() {
+fn deepseek_models_endpoint_exposes_current_and_excludes_retired_models() {
     let parts = runtime_provider_models_buffered_response(
         RuntimeProviderBridgeKind::DeepSeek,
         None,
@@ -48,9 +48,9 @@ fn deepseek_models_endpoint_exposes_current_and_compat_models() {
             .iter()
             .any(|model| model["id"] == "deepseek-v4-flash")
     );
-    assert!(models.iter().any(|model| model["id"] == "deepseek-chat"));
+    assert!(!models.iter().any(|model| model["id"] == "deepseek-chat"));
     assert!(
-        models
+        !models
             .iter()
             .any(|model| model["id"] == "deepseek-reasoner")
     );

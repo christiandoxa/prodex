@@ -90,7 +90,7 @@ pub fn merge_provider_model_catalog_json<'a>(
                 .get("id")
                 .and_then(serde_json::Value::as_str)
                 .map(str::trim)
-                .filter(|id| !id.is_empty())
+                .filter(|id| !id.is_empty() && !super::provider_model_is_retired(provider, id))
                 .map(|id| (index, id.to_string()))
         })
         .collect::<Vec<_>>();

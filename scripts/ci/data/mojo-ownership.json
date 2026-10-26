@@ -55,13 +55,13 @@
       "rust_adapter_scope": "row preparation and range DTO adapter; Rust oracle deleted"
     },
     "provider_catalog_merge_dedup": {
-      "production_reachability_test": "crates/prodex-app/src/app_commands/super_main_catalog.rs",
+      "production_reachability_test": "crates/prodex-provider-core/src/catalog.rs",
       "expanded_in": "0.433.0",
-      "consumer": "crates/prodex-app/src/app_commands/super_main_catalog.rs",
-      "consumer_marker": "merge_catalog_ids",
+      "consumer": "crates/prodex-provider-core/src/catalog.rs",
+      "consumer_marker": "prodex_mojo_core::rich::merge_catalog_ids",
       "rust_adapter_scope": "collect normalized canonical IDs across Super, sub-agent, Copilot runtime, and Kiro profile catalogs; invoke Mojo merge deduplication; materialize accepted entries; preserve first-win source/insertion order and caller limits",
       "production_consumers": [
-        "crates/prodex-app/src/app_commands/super_main_catalog.rs",
+        "crates/prodex-provider-core/src/catalog.rs",
         "crates/prodex-app/src/runtime_tools/sub_agent_catalog.rs",
         "crates/prodex-app/src/profile_commands/copilot/runtime_auth.rs",
         "crates/prodex-app/src/profile_commands/kiro/catalog.rs"
@@ -4429,10 +4429,10 @@
       "mojo_entry": "prodex_mojo_rich_catalog_openai_retired_v1",
       "mojo_abi_version": 6,
       "mojo_source": "mojo/prodex_core/rich_catalog.mojo",
-      "consumer": "crates/prodex-app/src/app_commands/super_main_catalog.rs",
-      "consumer_marker": "mojo_openai_model_is_retired",
+      "consumer": "crates/prodex-provider-core/src/catalog/lifecycle.rs",
+      "consumer_marker": "prodex_mojo_core::rich::openai_model_is_retired",
       "production_consumers": [
-        "crates/prodex-app/src/app_commands/super_main_catalog.rs"
+        "crates/prodex-provider-core/src/catalog/lifecycle.rs"
       ],
       "production_reachability_test": "crates/prodex-mojo-core/src/rich/catalog_provider_tests.rs",
       "rust_owner_before": "Rust owned Unicode trim, ASCII lowercase normalization, and exact matching for spark, gpt-5.3-codex-spark, and gpt-5.3-spark",

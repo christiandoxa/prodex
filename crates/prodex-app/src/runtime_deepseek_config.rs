@@ -383,14 +383,14 @@ mod tests {
                 .any(|model| model["slug"] == "auto")
         );
         assert!(
-            catalog["models"]
+            !catalog["models"]
                 .as_array()
                 .unwrap()
                 .iter()
                 .any(|model| model["slug"] == "deepseek-chat")
         );
         assert!(
-            catalog["models"]
+            !catalog["models"]
                 .as_array()
                 .unwrap()
                 .iter()
