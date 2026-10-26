@@ -2,6 +2,83 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.439.3 - 2026-10-26
+
+### CLI
+
+- Honor account catalogs in main and subagent pickers (`3d1a386`)
+
+### Docs
+
+- Document model lifecycle cleanup for 0.439.3 (`98da019`)
+
+### Misc
+
+- Synchronize provider capability matrix (`7951f94`)
+- Filter provider-specific retired model entries (`98e8d8d`)
+# Prodex 0.439.3
+
+This patch removes confirmed upstream-retired model suggestions and makes
+main-agent and sub-agent selection use the same provider-specific lifecycle and
+account-availability rules. It does not replace models in running sessions or
+rewrite users' configuration, authentication, or cached provider files.
+
+## New Features
+
+- Reviewable lifecycle evidence records exact provider IDs, authentication scope,
+  and official upstream sources in
+  `crates/prodex-provider-core/catalog/retired-models.json`.
+- A usable account model snapshot is authoritative for picker membership. Models
+  missing from that snapshot are no longer restored by merging the entire
+  offline catalog or a remembered bundled model into it.
+- The same membership rules apply to main-agent and sub-agent pickers, while
+  retaining provider defaults, model-specific reasoning metadata, and explicit
+  unknown custom model IDs.
+
+## Bug Fixes
+
+- Remove 12 retired entries from the bundled hosted-provider catalog: Anthropic
+  Opus 4 (2025-05-14); retired Copilot GPT, Claude, and Gemini entries; and
+  DeepSeek's retired `deepseek-chat` and `deepseek-reasoner` endpoints.
+- Filter known provider retirements from imported snapshots, configured/current
+  picker candidates, generated runtime model catalogs, and model-list endpoints.
+  Stale cache files cannot restore these suggestions.
+- Keep Codex ChatGPT model retirements separate from API-key availability. Models
+  such as GPT-5.4 remain available for API-key users, and their choices are not
+  restricted by a shared ChatGPT-only model cache.
+- Prevent a retired remembered main-agent selection from becoming the automatic
+  default again. Preserve the existing compiled OpenAI Spark retirement policy.
+- Preserve bounded offline fallback for missing or malformed catalogs. Keep
+  provider-specific exceptions, including Copilot GPT-5.3-Codex LTS, eligible
+  Sonnet 4.6 plans, supported Gemini 2.5 models, Kiro models still available on
+  Kiro, callable DeepSeek compatibility aliases, and local/custom endpoints.
+
+## Changelog
+
+- Lifecycle matching reuses compiled Mojo identity, deduplication, and choice
+  planners; there is no second Rust string-normalization policy.
+- Deprecated-but-callable models and future retirement dates are not treated as
+  removals. A retirement on one provider does not remove the same ID from another.
+- Catalog reads do not perform provider network discovery, invoke model turns,
+  refresh credentials, rewrite caches, or change existing session settings.
+  Explicit custom/CLI model requests are not silently retargeted.
+- Add regression coverage for stale cached/current IDs, provider/authentication
+  boundaries, custom names, Unicode/case normalization, empty/malformed caches,
+  reasoning metadata, runtime catalogs, and matching main/sub-agent membership.
+
+## Verification
+
+The new retirement regressions fail on the previous implementation and pass
+with this patch. Provider-core and application catalog suites preserve bounds,
+exact metadata, and exception behavior. Deterministic runtime-catalog fixtures
+were reviewed for the intended retired-entry removals; unrelated Kiro fixture
+hashes remain unchanged. Authentication tests use synthetic private fixtures. The WebSocket completion
+fixture now deterministically exercises valid control-frame interleaving while
+retaining ordered application frames, successful completion and single-commit
+assertions.
+
+Full Changelog: [0.439.2...0.439.3](https://github.com/christiandoxa/prodex/compare/0.439.2...0.439.3)
+
 ## 0.439.2 - 2026-10-26
 
 ### Runtime
@@ -17,76 +94,6 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 - Qualify current RTK and Presidio releases (`7984b0d`)
 - Merge Dependabot GitHub Actions updates (#119) (`e5c5a62`)
 - Merge Dependabot Cargo updates (#118) (`b6d641b`)
-# Prodex 0.439.2
-
-This patch release improves quota-aware continuation recovery while preserving
-account ownership and committed-output safety. It also incorporates the reviewed
-Cargo and GitHub Actions Dependabot updates.
-
-## New Features
-
-- No new CLI commands or configuration switches. Existing HTTP and WebSocket
-  workflows gain earlier quota handoff and more consistent recovery eligibility.
-
-## Bug Fixes
-
-- Before contacting a known-exhausted continuation owner, use the existing native
-  full-history recovery protocol when another compatible account is recoverable.
-  Do not send an opaque continuation delta to a different account. This avoids
-  waiting for a predictable quota rejection and its long upstream retry delay.
-- Keep a quota-positive alternative recoverable when its local capacity is busy
-  or its transport is temporarily cooling down. HTTP now matches WebSocket's
-  distinction between recoverability and immediate admission; real capacity
-  limits, authentication, model eligibility and quota quarantine still apply.
-- Reject known five-hour or weekly exhaustion when evaluating optimistic and
-  recoverable alternatives. A missing five-hour window on a weekly-only Prolite
-  account is not treated as exhaustion. Expired holds are re-evaluated rather
-  than forcing another unnecessary full-history retry.
-- Preserve healthy-owner affinity, unknown-quota handling, original upstream
-  failures when the pool is exhausted, and all post-commit no-replay rules.
-  Cancellation, session identity and original request deadlines remain intact.
-- Make the absent-optional-tool startup test independent of runner Node/npm
-  caches and local redaction services, retaining its existing startup budget.
-
-## Changelog
-
-- Incorporate Dependabot Cargo PR #118: arc-swap 1.9.3, libc 0.2.191 and
-  Tokio 1.54.1. Preserve the compatible shared Windows dependency resolution
-  instead of widening cargo-deny exceptions for an avoidable duplicate graph.
-- Incorporate Dependabot GitHub Actions PR #119: rust-cache v2.9.3 and
-  setup-uv v10.3.2, both pinned to reviewed immutable commit hashes. Update the
-  release-cache contract assertion to the new pinned rust-cache revision.
-- Re-qualify RTK 1.1.0 using verified official archive checksums and isolated
-  OSS version, bypass, legacy proxy-alias and exit-status probes. Its supported
-  minimum remains 0.46.0, and no installed user tool is automatically replaced.
-- Qualify Presidio 2.2.365 and pin both official multi-platform image indexes.
-  Offline image endpoint tests verify health, email detection and replacement.
-  The anonymizer contains cryptography 50.0.1, outside the previously disclosed
-  GHSA-g6cj-pr64-35w5 affected range. This does not imply a vulnerability-free
-  image. Existing service ownership checks, opt-in behavior and the compatible
-  2.2.364 minimum remain unchanged.
-- Register ten focused quota-handoff regression cases in the runtime smoke and
-  relevant CI suites. Strengthen ownership checks so both quota windows remain
-  governed by the existing compiled Mojo decisions.
-
-## Verification and Limits
-
-The original implementation fails four synthetic local-upstream regressions:
-known-empty owner dispatch, a busy quota-positive alternative, exhausted fallback
-eligibility and WebSocket pre-send recovery. The corrected implementation passes
-those cases plus negative controls for healthy ownership, unknown quota, exhausted
-pools, weekly-only Prolite accounts and expired reset windows.
-
-These tests use synthetic accounts and local HTTP/WebSocket peers, not paid model
-requests or live customer credentials. Native recovery still requires its safety
-proof; this release does not guarantee that every upstream throttle or network
-failure can be hidden. If no safe usable alternative exists, the original failure
-and retry semantics remain observable. Already committed output is never replayed.
-
-Running processes retain their loaded binary until restarted or transitioned.
-Publication does not replace a user's active Prodex or Codex session.
-
-Full Changelog: [0.439.1...0.439.2](https://github.com/christiandoxa/prodex/compare/0.439.1...0.439.2)
 
 ## 0.439.1 - 2026-10-25
 
