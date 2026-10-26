@@ -119,7 +119,7 @@ fn imported_kiro_snapshot_populates_sub_agent_picker() {
     assert_eq!(configured, ["catalog-model-a", "catalog-model-b"]);
     assert_eq!(
         picker_model_ids(&configured),
-        ["gpt-5.6-luna", "auto", "catalog-model-a", "catalog-model-b"]
+        ["catalog-model-a", "catalog-model-b"]
     );
     assert_eq!(
         prodex_provider_core::resolve_provider_model_choices(ProviderId::Kiro, &configured, None)
@@ -278,7 +278,7 @@ fn missing_or_malformed_kiro_snapshot_keeps_static_picker_safe() {
 }
 
 #[test]
-fn copilot_snapshot_augments_canonical_picker_choices() {
+fn copilot_snapshot_supplies_account_picker_choices() {
     let root = crate::test_support::test_temp_root().join(format!(
         "prodex-copilot-sub-agent-catalog-{}",
         std::process::id()
@@ -343,7 +343,7 @@ fn copilot_snapshot_augments_canonical_picker_choices() {
 }
 
 #[test]
-fn gemini_snapshot_augments_canonical_picker_choices() {
+fn gemini_snapshot_supplies_account_picker_choices() {
     let root = crate::test_support::test_temp_root().join(format!(
         "prodex-gemini-sub-agent-catalog-{}",
         std::process::id()
@@ -414,7 +414,7 @@ fn cached_deepseek_and_local_catalogs_use_the_effective_source_path() {
 }
 
 #[test]
-fn openai_models_cache_augments_sub_agent_choices_without_network() {
+fn openai_models_cache_supplies_sub_agent_choices_without_network() {
     let root = crate::test_support::test_temp_root().join(format!(
         "prodex-openai-sub-agent-catalog-{}",
         std::process::id()
@@ -450,17 +450,17 @@ fn openai_models_cache_augments_sub_agent_choices_without_network() {
     );
     for model in ["gpt-6-astra", "gpt-6.1-sol", "gpt-6-luna", "gpt-6-sol"] {
         assert!(
-            choices.contains(&prodex_provider_core::ProviderModelChoice::Model(
-                model.to_string()
+            !choices.contains(&prodex_provider_core::ProviderModelChoice::Model(
+                model.into()
             )),
-            "OpenAI sub-agent picker lost latest canonical model {model}"
+            "account catalog must not be augmented with absent {model}"
         );
     }
     let _ = fs::remove_dir_all(root);
 }
 
 #[test]
-fn provider_matrix_keeps_canonical_models_and_deduplicates_dynamic_ids() {
+fn provider_matrix_uses_account_models_and_deduplicates_dynamic_ids() {
     for provider in [
         ProviderId::OpenAi,
         ProviderId::Anthropic,
@@ -484,10 +484,10 @@ fn provider_matrix_keeps_canonical_models_and_deduplicates_dynamic_ids() {
         );
         for model in prodex_provider_core::provider_model_catalog(provider) {
             assert!(
-                choices.contains(&prodex_provider_core::ProviderModelChoice::Model(
+                !choices.contains(&prodex_provider_core::ProviderModelChoice::Model(
                     model.id.to_string()
                 )),
-                "{provider:?} lost canonical model {}",
+                "{provider:?} reintroduced absent bundled model {}",
                 model.id
             );
         }
@@ -568,4 +568,34 @@ fn kiro_catalog_parser_preserves_normalized_metadata() {
     assert_eq!(models[2]["name"], "Camel");
     assert_eq!(models[3]["name"], "slug-id");
     assert_eq!(models[4]["name"], "model-id");
+}
+
+#[test]
+fn kiro_retirement_is_scoped_and_missing_account_models_are_not_reintroduced_04393() {
+    let (paths, root) = save_kiro_catalog_state(
+        "retired-04393",
+        &[(
+            "kiro-a",
+            serde_json::json!({
+                "models":[{"model_id":"claude-sonnet-4"},{"model_id":"claude-opus-4-6"},{"model_id":"tenant/custom"}]
+            }),
+        )],
+    );
+    let catalog = effective_provider_model_catalog_from_paths(&paths, ProviderId::Kiro);
+    assert_eq!(catalog.model_ids(), ["claude-opus-4-6", "tenant/custom"]);
+    let ids = catalog.choices(
+        ProviderId::Kiro,
+        Some("claude-sonnet-4"),
+        &catalog.model_ids(),
+    );
+    assert!(!ids.iter().any(
+        |choice| matches!(choice, prodex_provider_core::ProviderModelChoice::Model(id)
+        if id == "claude-sonnet-4" || id == "gpt-5.6-luna")
+    ));
+    assert!(
+        ids.contains(&prodex_provider_core::ProviderModelChoice::Model(
+            "claude-opus-4-6".into()
+        ))
+    );
+    let _ = fs::remove_dir_all(root);
 }

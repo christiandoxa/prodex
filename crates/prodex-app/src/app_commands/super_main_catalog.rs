@@ -4,8 +4,7 @@ use prodex_cli::SubAgentReasoningEffort;
 
 use prodex_mojo_core::rich::{
     CatalogChoicesPlan, CatalogInsertionChoice, CatalogInsertionPlacement, CatalogModel,
-    CatalogPlanModel, ascii_casefold_equal_exact, catalog_insertion_index, merge_catalog_ids,
-    openai_model_is_retired as mojo_openai_model_is_retired, plan_dynamic_catalog,
+    CatalogPlanModel, ascii_casefold_equal_exact, catalog_insertion_index, plan_dynamic_catalog,
     resolve_catalog_model_exact,
 };
 use prodex_provider_core::{MainCatalogModel as DynamicCatalogModel, project_main_catalog_models};
@@ -23,39 +22,40 @@ pub(super) fn main_model_choices(
     provider: prodex_provider_core::ProviderId,
     current_model: Option<&str>,
 ) -> Vec<MainModelChoice> {
-    let mut choices = if provider == prodex_provider_core::ProviderId::OpenAi {
-        openai_main_model_choices().unwrap_or_else(|| {
-            prodex_provider_core::resolve_provider_model_choices(provider, &[], current_model)
-                .into_iter()
-                .map(|choice| main_model_choice_from_provider(provider, choice))
-                .collect()
-        })
-    } else {
-        let configured_models = effective_provider_model_catalog(provider).model_ids();
-        prodex_provider_core::resolve_provider_model_choices(
-            provider,
-            &configured_models,
-            current_model,
-        )
-        .into_iter()
-        .map(|choice| main_model_choice_from_provider(provider, choice))
-        .collect()
+    let catalog = effective_provider_model_catalog(provider);
+    let discovered = catalog.model_ids();
+    let allowed = catalog.choices(provider, current_model, &discovered);
+    let fallback = || {
+        allowed
+            .iter()
+            .cloned()
+            .map(|choice| main_model_choice_from_provider(provider, choice))
+            .collect()
     };
-    if provider == prodex_provider_core::ProviderId::OpenAi {
-        choices.retain(|choice| {
-            !matches!(
-                &choice.choice,
-                prodex_provider_core::ProviderModelChoice::Model(model)
-                    if openai_model_is_retired(model)
-            )
-        });
-    }
+    let mut choices = if provider == prodex_provider_core::ProviderId::OpenAi {
+        main_model_choices_from_catalog(catalog.models.clone()).unwrap_or_else(fallback)
+    } else {
+        fallback()
+    };
+    choices.retain(|choice| {
+        !matches!(&choice.choice,
+        prodex_provider_core::ProviderModelChoice::Model(model)
+            if catalog.model_is_retired(provider, model))
+    });
 
     if let Some(model) = current_model
         .map(str::trim)
         .filter(|model| !model.is_empty())
         .filter(|model| {
-            provider != prodex_provider_core::ProviderId::OpenAi || !openai_model_is_retired(model)
+            let canonical = prodex_provider_core::provider_catalog_entry(provider, model)
+                .map(|entry| entry.id.as_str())
+                .unwrap_or(model);
+            allowed.iter().any(|choice| {
+                matches!(choice,
+                prodex_provider_core::ProviderModelChoice::Model(id)
+                    if ascii_casefold_equal_exact(id, canonical)
+                        .expect("compiled current-model identity matching failed"))
+            })
         })
         .filter(|model| !main_model_choice_is_selectable(&choices, model))
     {
@@ -101,11 +101,6 @@ fn main_model_choice_insertion_index(
         .collect::<Vec<_>>();
     catalog_insertion_index(&kinds, placement)
         .expect("compiled Mojo main model picker insertion index invalid")
-}
-
-fn openai_model_is_retired(model: &str) -> bool {
-    mojo_openai_model_is_retired(model)
-        .expect("Mojo OpenAI catalog retirement classification failed")
 }
 
 fn main_model_choice_from_provider(
@@ -214,63 +209,11 @@ fn sub_agent_effort(
     }
 }
 
+#[cfg(test)]
 pub(super) fn openai_main_model_choices() -> Option<Vec<MainModelChoice>> {
-    let catalog = effective_provider_model_catalog(prodex_provider_core::ProviderId::OpenAi);
-    // Dynamic cache input is optional. The caller keeps the bundled catalog when
-    // this planner reports invalid input; ABI and output failures remain hard.
-    let mut choices = main_model_choices_from_catalog(catalog.models)?;
-    merge_bundled_openai_choices(&mut choices);
-    choices.retain(|choice| {
-        !matches!(
-            &choice.choice,
-            prodex_provider_core::ProviderModelChoice::Model(model)
-                if openai_model_is_retired(model)
-        )
-    });
-    Some(choices)
-}
-
-fn merge_bundled_openai_choices(choices: &mut Vec<MainModelChoice>) {
-    let existing_ids = choices
-        .iter()
-        .filter_map(|choice| match &choice.choice {
-            prodex_provider_core::ProviderModelChoice::Model(model) => Some(model.as_str()),
-            _ => None,
-        })
-        .collect::<Vec<_>>();
-    let existing = existing_ids
-        .iter()
-        .map(|id| CatalogModel { id, aliases: &[] })
-        .collect::<Vec<_>>();
-    let bundled_models = prodex_provider_core::resolve_provider_model_choices(
-        prodex_provider_core::ProviderId::OpenAi,
-        &[],
-        None,
-    )
-    .into_iter()
-    .filter_map(|choice| match choice {
-        prodex_provider_core::ProviderModelChoice::Model(model) => Some(model),
-        _ => None,
-    })
-    .collect::<Vec<_>>();
-    let bundled_ids = bundled_models
-        .iter()
-        .map(String::as_str)
-        .collect::<Vec<_>>();
-    let accepted = merge_catalog_ids(&existing, &bundled_ids)
-        .expect("Mojo bundled OpenAI catalog merge failed");
-    let insert_at =
-        main_model_choice_insertion_index(choices, CatalogInsertionPlacement::BundledAfterDefault);
-    let bundled = accepted
-        .into_iter()
-        .map(|index| {
-            main_model_choice_from_provider(
-                prodex_provider_core::ProviderId::OpenAi,
-                prodex_provider_core::ProviderModelChoice::Model(bundled_models[index].clone()),
-            )
-        })
-        .collect::<Vec<_>>();
-    choices.splice(insert_at..insert_at, bundled);
+    let provider = prodex_provider_core::ProviderId::OpenAi;
+    let catalog = effective_provider_model_catalog(provider);
+    main_model_choices_from_catalog(catalog.models)
 }
 
 fn main_model_catalog_plan_with_mojo(
@@ -433,53 +376,6 @@ mod tests {
     }
 
     #[test]
-    fn bundled_openai_merge_keeps_canonical_case_insensitive_dedup() {
-        let mut choices = vec![
-            MainModelChoice {
-                choice: prodex_provider_core::ProviderModelChoice::ProviderDefault,
-                label: "provider default".to_string(),
-                efforts: None,
-                aliases: Vec::new(),
-                default_effort: None,
-            },
-            MainModelChoice {
-                choice: prodex_provider_core::ProviderModelChoice::Model("GPT-5.6-SOL".to_string()),
-                label: "existing".to_string(),
-                efforts: None,
-                aliases: vec!["gpt-5.6-terra".to_string()],
-                default_effort: None,
-            },
-            MainModelChoice {
-                choice: prodex_provider_core::ProviderModelChoice::Custom,
-                label: "custom model...".to_string(),
-                efforts: None,
-                aliases: Vec::new(),
-                default_effort: None,
-            },
-        ];
-        merge_bundled_openai_choices(&mut choices);
-        let models = choices
-            .iter()
-            .filter_map(|choice| match &choice.choice {
-                prodex_provider_core::ProviderModelChoice::Model(model) => Some(model.as_str()),
-                _ => None,
-            })
-            .collect::<Vec<_>>();
-        assert_eq!(
-            models
-                .iter()
-                .filter(|model| model.eq_ignore_ascii_case("gpt-5.6-sol"))
-                .count(),
-            1
-        );
-        assert!(
-            models
-                .iter()
-                .any(|model| model.eq_ignore_ascii_case("gpt-5.6-terra"))
-        );
-    }
-
-    #[test]
     fn degraded_main_model_title_is_bounded_and_non_secret() {
         assert_eq!(
             main_model_prompt_title(
@@ -614,3 +510,7 @@ mod compiled_main_catalog_insertion_caller_tests {
 #[cfg(test)]
 #[path = "super_main_catalog/projection_tests.rs"]
 mod projection_tests;
+
+#[cfg(test)]
+#[path = "super_main_catalog/lifecycle_tests.rs"]
+mod lifecycle_tests;

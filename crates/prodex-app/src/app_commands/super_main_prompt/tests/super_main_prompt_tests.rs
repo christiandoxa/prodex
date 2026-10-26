@@ -92,22 +92,7 @@ fn openai_main_picker_reads_the_active_models_cache() {
             _ => None,
         })
         .collect::<Vec<_>>();
-    assert_eq!(
-        models,
-        [
-            "gpt-6-astra",
-            "gpt-6.1-sol",
-            "gpt-6-luna",
-            "gpt-6-sol",
-            "gpt-5.4",
-            "gpt-5.4-mini",
-            "gpt-5.3-codex",
-            "gpt-5.2",
-            "gpt-5.6-sol",
-            "gpt-5.6-terra",
-            "gpt-5.6-luna"
-        ]
-    );
+    assert_eq!(models, ["gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"]);
     drop(_codex_home);
     drop(_prodex_home);
     drop(_env_lock);
@@ -115,7 +100,7 @@ fn openai_main_picker_reads_the_active_models_cache() {
 }
 
 #[test]
-fn openai_main_picker_keeps_canonical_models_when_cache_is_partial() {
+fn openai_main_picker_does_not_add_bundled_models_absent_from_account_cache() {
     let root = crate::test_temp_root().join(format!(
         "prodex-main-partial-model-cache-{}",
         std::process::id()
@@ -149,23 +134,7 @@ fn openai_main_picker_keeps_canonical_models_when_cache_is_partial() {
             _ => None,
         })
         .collect::<Vec<_>>();
-    assert_eq!(
-        models,
-        [
-            "gpt-6-astra",
-            "gpt-6.1-sol",
-            "gpt-6-luna",
-            "gpt-6-sol",
-            "gpt-5.6-sol",
-            "gpt-5.6-terra",
-            "gpt-5.6-luna",
-            "gpt-5.4",
-            "gpt-5.4-mini",
-            "gpt-5.3-codex",
-            "gpt-5.2",
-            "account-model"
-        ]
-    );
+    assert_eq!(models, ["account-model"]);
     drop(_codex_home);
     drop(_prodex_home);
     drop(_env_lock);
