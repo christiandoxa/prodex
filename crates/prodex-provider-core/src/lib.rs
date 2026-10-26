@@ -32,7 +32,7 @@ pub use bridge::{
     provider_core_split_flat_namespace_tool_name,
 };
 pub use catalog::{
-    CopilotModelCatalogError, KiroModelCatalogError, MainCatalogModel,
+    CopilotModelCatalogError, KiroModelCatalogError, MainCatalogModel, ModelCatalogScope,
     PROVIDER_MODEL_CATALOG_HARD_LIMIT, ProviderCatalogEntry, ProviderCatalogFeatureFlags,
     ProviderModelCatalogLimitError, ProviderModelChoice, ProviderModelReasoningError,
     ProviderModelReasoningResolution, RuntimeDynamicCatalogModel, RuntimeModelCatalogError,
@@ -41,9 +41,10 @@ pub use catalog::{
     normalize_kiro_model_catalog, normalize_kiro_model_catalog_models,
     normalize_runtime_dynamic_catalog, plan_runtime_model_catalog, project_main_catalog_models,
     provider_catalog_entries, provider_catalog_entries_for, provider_catalog_entry,
-    provider_catalog_json, provider_model_catalog_json, provider_model_json,
-    provider_model_reasoning_resolution, render_local_runtime_model_catalog,
-    render_runtime_model_catalog, resolve_provider_model_choices,
+    provider_catalog_json, provider_model_catalog_json, provider_model_is_retired,
+    provider_model_is_retired_in_scope, provider_model_json, provider_model_reasoning_resolution,
+    render_local_runtime_model_catalog, render_runtime_model_catalog,
+    resolve_provider_model_choices, resolve_provider_snapshot_model_choices,
 };
 pub use chat_tools_bridge::{
     provider_core_chat_request_body_without_web_search_options,

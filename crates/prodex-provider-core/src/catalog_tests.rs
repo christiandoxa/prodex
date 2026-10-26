@@ -156,3 +156,73 @@ fn omitted_reasoning_metadata_uses_mojo_default_effort_policy() {
     );
     assert_eq!(resolution.supported_reasoning_efforts.len(), 8);
 }
+
+#[test]
+fn retired_provider_models_cannot_return_through_configured_or_current_choices_04393() {
+    for (provider, retired) in [
+        (ProviderId::OpenAi, "gpt-5.3-codex-spark"),
+        (ProviderId::Anthropic, "claude-opus-4-20250514"),
+        (ProviderId::Copilot, "gpt-5.5"),
+        (ProviderId::DeepSeek, "deepseek-reasoner"),
+        (ProviderId::Gemini, "gemini-3-pro-preview"),
+        (ProviderId::Kiro, "claude-sonnet-4"),
+    ] {
+        let configured = [retired.to_uppercase(), "tenant/custom-model".into()];
+        let current = format!("\u{3000}{retired} ");
+        let choices = resolve_provider_model_choices(provider, &configured, Some(&current));
+        assert!(
+            !choices.iter().any(|choice| matches!(choice,
+            ProviderModelChoice::Model(id) if id.trim().eq_ignore_ascii_case(retired))),
+            "{} reintroduced retired {retired}",
+            provider.label()
+        );
+        assert!(choices.contains(&ProviderModelChoice::Model("tenant/custom-model".into())));
+        assert_eq!(choices.first(), Some(&ProviderModelChoice::ProviderDefault));
+        assert_eq!(choices.last(), Some(&ProviderModelChoice::Custom));
+    }
+}
+
+#[test]
+fn retired_provider_models_are_absent_from_merged_runtime_catalogs_04393() {
+    for (provider, retired) in [
+        (ProviderId::Anthropic, "claude-opus-4-20250514"),
+        (ProviderId::Copilot, "gemini-3.7-flash"),
+        (ProviderId::DeepSeek, "deepseek-chat"),
+        (ProviderId::Kiro, "claude-sonnet-4"),
+    ] {
+        let discovered = [
+            serde_json::json!({"id":retired}),
+            serde_json::json!({"id":"tenant/new-model"}),
+        ];
+        let models = merge_provider_model_catalog_json(provider, &discovered).unwrap();
+        assert!(
+            !models.iter().any(|model| model["id"] == retired),
+            "{} runtime catalog reintroduced retired {retired}",
+            provider.label()
+        );
+        assert!(models.iter().any(|model| model["id"] == "tenant/new-model"));
+    }
+}
+
+#[test]
+fn retirement_does_not_cross_provider_entitlement_or_custom_boundaries_04393() {
+    for (provider, available) in [
+        (ProviderId::OpenAi, "gpt-5.4"), // Still supported with API-key authentication.
+        (ProviderId::Anthropic, "claude-opus-4-6"),
+        (ProviderId::Copilot, "gpt-5.3-codex"), // Copilot's LTS model.
+        (ProviderId::Copilot, "claude-sonnet-4-6"), // Annual-plan entitlement.
+        (ProviderId::Gemini, "gemini-2.5-pro"),
+        (ProviderId::Gemini, "gemini-3-flash-preview"),
+        (ProviderId::Kiro, "gpt-5.6-luna"),
+        (ProviderId::Local, "deepseek-chat"),
+        (ProviderId::DeepSeek, "deepseek-chat-custom"),
+    ] {
+        let choices =
+            resolve_provider_model_choices(provider, &[available.into()], Some(available));
+        assert!(
+            choices.contains(&ProviderModelChoice::Model(available.into())),
+            "{} lost supported/custom {available}",
+            provider.label()
+        );
+    }
+}

@@ -94,6 +94,13 @@ pub enum ProviderModelChoice {
     Custom,
 }
 
+#[path = "catalog/lifecycle.rs"]
+mod lifecycle;
+pub use lifecycle::{
+    ModelCatalogScope, provider_model_is_retired, provider_model_is_retired_in_scope,
+    resolve_provider_snapshot_model_choices,
+};
+
 #[path = "catalog/reasoning.rs"]
 mod reasoning;
 pub use reasoning::{
@@ -195,6 +202,10 @@ pub fn resolve_provider_model_choices(
                 normalize_model(provider, current_model.expect("current catalog choice")),
             ),
             prodex_mojo_core::rich::CatalogChoice::Custom => ProviderModelChoice::Custom,
+        })
+        .filter(|choice| {
+            !matches!(choice, ProviderModelChoice::Model(model)
+            if provider_model_is_retired(provider, model))
         })
         .collect()
 }

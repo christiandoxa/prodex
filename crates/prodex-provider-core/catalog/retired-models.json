@@ -1,0 +1,152 @@
+{
+  "reviewed_at": "2026-10-26",
+  "policy": "Exact provider-scoped retirement evidence, not model-age inference. Local/custom IDs and deprecated-but-supported models remain eligible.",
+  "retirements": [
+    {
+      "provider": "openai",
+      "scope": "provider",
+      "sources": [
+        "https://developers.openai.com/api/docs/deprecations",
+        "https://learn.chatgpt.com/docs/models"
+      ],
+      "models": [
+        "codex-mini-latest",
+        "gpt-5-codex",
+        "gpt-5.1-codex",
+        "gpt-5.1-codex-max",
+        "gpt-5.1-codex-mini",
+        "gpt-5.2-codex"
+      ]
+    },
+    {
+      "provider": "openai",
+      "scope": "chatgpt",
+      "sources": [
+        "https://learn.chatgpt.com/docs/models"
+      ],
+      "note": "Codex ChatGPT sign-in only. These IDs remain supported with API-key authentication.",
+      "models": [
+        "gpt-5.5",
+        "gpt-5.4",
+        "gpt-5.4-mini",
+        "gpt-5.3-codex",
+        "gpt-5.2"
+      ]
+    },
+    {
+      "provider": "anthropic",
+      "scope": "provider",
+      "sources": [
+        "https://platform.claude.com/docs/en/about-claude/model-deprecations"
+      ],
+      "models": [
+        "claude-opus-4-20250514",
+        "claude-opus-4-1-20250805",
+        "claude-sonnet-4-20250514",
+        "claude-3-7-sonnet-20250219",
+        "claude-3-5-haiku-20241022",
+        "claude-3-haiku-20240307",
+        "claude-3-5-sonnet-20240620",
+        "claude-3-5-sonnet-20241022",
+        "claude-3-opus-20240229",
+        "claude-3-sonnet-20240229",
+        "claude-2.0",
+        "claude-2.1"
+      ]
+    },
+    {
+      "provider": "copilot",
+      "scope": "provider",
+      "sources": [
+        "https://docs.github.com/en/copilot/reference/ai-models/supported-models",
+        "https://github.blog/changelog/2025-08-06-deprecation-of-gpt-4o-in-copilot-chat/"
+      ],
+      "note": "Chat/agent models. Sonnet 4.6 annual-plan entitlement, GPT-5.3-Codex LTS and GPT-5.4 nano remain supported. Future retirements are not applied early.",
+      "models": [
+        "gemini-3.7-flash",
+        "gemini-3.6-flash",
+        "gemini-3.5-flash",
+        "gpt-5-mini",
+        "gpt-5.4",
+        "gpt-5.4-mini",
+        "gpt-5.5",
+        "claude-opus-4-7",
+        "gpt-4o",
+        "claude-opus-4-5",
+        "claude-opus-4-6",
+        "claude-sonnet-4-5",
+        "gemini-3.1-pro",
+        "gemini-3.1-pro-preview",
+        "gemini-2.5-pro",
+        "gemini-3-flash",
+        "gemini-3-flash-preview",
+        "gpt-5.2",
+        "gpt-5.2-codex",
+        "gpt-4.1",
+        "gpt-5.1",
+        "gpt-5.1-codex",
+        "gpt-5.1-codex-max",
+        "gpt-5.1-codex-mini",
+        "gpt-5",
+        "gpt-5-codex"
+      ]
+    },
+    {
+      "provider": "deepseek",
+      "scope": "provider",
+      "sources": [
+        "https://api-docs.deepseek.com/updates/"
+      ],
+      "note": "Retired 2026-07-24. deepseek-v4-flash remains callable as an upstream compatibility alias.",
+      "models": [
+        "deepseek-chat",
+        "deepseek-reasoner"
+      ]
+    },
+    {
+      "provider": "gemini",
+      "scope": "provider",
+      "sources": [
+        "https://ai.google.dev/gemini-api/docs/deprecations"
+      ],
+      "note": "Keep Gemini 2.5 stable and 3.1 Pro/3 Flash preview IDs with no announced shutdown, and still-callable redirect aliases.",
+      "models": [
+        "gemini-3-pro-preview",
+        "gemini-3.1-flash-lite-preview",
+        "gemini-2.5-pro-preview-03-25",
+        "gemini-2.5-pro-preview-05-06",
+        "gemini-2.5-pro-preview-06-05",
+        "gemini-2.5-flash-lite-preview-09-2025",
+        "gemini-2.5-flash-preview-05-20",
+        "gemini-2.5-flash-preview-09-25",
+        "gemini-2.0-flash",
+        "gemini-2.0-flash-001",
+        "gemini-2.0-flash-lite",
+        "gemini-2.0-flash-lite-001",
+        "gemini-2.0-flash-lite-preview",
+        "gemini-2.0-flash-lite-preview-02-05"
+      ]
+    },
+    {
+      "provider": "kiro",
+      "scope": "provider",
+      "sources": [
+        "https://kiro.dev/docs/models/available-models/"
+      ],
+      "note": "Sonnet 4.0 EOL 2026-10-14. Other Claude models and GPT-5.6 Luna have provider-specific availability.",
+      "models": [
+        "claude-sonnet-4",
+        "claude-sonnet-4.0"
+      ]
+    }
+  ],
+  "legacy_openai_operation": {
+    "owner": "prodex_mojo_rich_catalog_openai_retired_v1",
+    "models": [
+      "spark",
+      "gpt-5.3-codex-spark",
+      "gpt-5.3-spark"
+    ],
+    "source": "https://learn.chatgpt.com/docs/models"
+  }
+}

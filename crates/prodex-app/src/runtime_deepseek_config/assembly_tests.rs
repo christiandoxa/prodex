@@ -3,7 +3,7 @@ use serde_json::{Value, json};
 use sha2::{Digest as _, Sha256};
 
 #[test]
-fn deepseek_catalog_assembly_preserves_original_complete_catalogs() {
+fn deepseek_catalog_assembly_preserves_current_complete_catalogs() {
     let long_model = "x".repeat(4097);
     let padded_model = format!("{}deepseek-v4-flash", " ".repeat(4097));
     let cases = [
@@ -24,6 +24,15 @@ fn deepseek_catalog_assembly_preserves_original_complete_catalogs() {
     let mut summary = Vec::new();
     for (name, launch, context, compact) in cases {
         let models = deepseek_catalog_models(launch, context, compact).unwrap();
+        assert!(
+            models
+                .iter()
+                .all(|entry| !prodex_provider_core::provider_model_is_retired(
+                    prodex_provider_core::ProviderId::DeepSeek,
+                    entry["slug"].as_str().unwrap()
+                )),
+            "retired model in {name}"
+        );
         let digest = Sha256::digest(serde_json::to_vec(&models).unwrap())
             .iter()
             .map(|byte| format!("{byte:02x}"))

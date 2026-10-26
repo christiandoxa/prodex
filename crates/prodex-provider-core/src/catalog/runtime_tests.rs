@@ -305,7 +305,7 @@ fn runtime_catalog_plan_uses_typed_metadata_saturated_budgets_and_provider_rejec
 }
 
 #[test]
-fn deepseek_catalog_plan_keeps_legacy_static_entries_and_unclamped_budgets() {
+fn deepseek_catalog_plan_omits_retired_models_and_keeps_unclamped_budgets() {
     let input = RuntimeModelCatalogPlanInput {
         provider: ProviderId::DeepSeek,
         launch_model: " PRO ",
@@ -324,9 +324,7 @@ fn deepseek_catalog_plan_keeps_legacy_static_entries_and_unclamped_budgets() {
             "auto",
             "flash",
             "deepseek-v4-pro",
-            "deepseek-v4-flash",
-            "deepseek-chat",
-            "deepseek-reasoner"
+            "deepseek-v4-flash"
         ]
     );
     assert_eq!(models[0].display_name, "DeepSeek Pro");
@@ -352,4 +350,33 @@ fn deepseek_catalog_plan_keeps_legacy_static_entries_and_unclamped_budgets() {
         }),
         Err(RuntimeModelCatalogError::Mojo(MojoError::InvalidInput))
     ));
+}
+
+#[test]
+fn runtime_catalog_filters_retired_launch_and_cached_ids_without_cross_provider_leaks_04393() {
+    let dynamic = [
+        RuntimeDynamicCatalogModel {
+            slug: "gpt-5.5".into(),
+            display_name: None,
+            description: None,
+            context_window: None,
+        },
+        RuntimeDynamicCatalogModel {
+            slug: "tenant/retained".into(),
+            display_name: None,
+            description: None,
+            context_window: None,
+        },
+    ];
+    let models = plan_runtime_model_catalog(RuntimeModelCatalogPlanInput {
+        provider: ProviderId::Copilot,
+        launch_model: "gpt-5.5",
+        context_window: 100_000,
+        auto_compact_token_limit: 90_000,
+        dynamic_models: &dynamic,
+    })
+    .unwrap();
+    assert!(!models.iter().any(|entry| entry.slug == "gpt-5.5"));
+    assert!(models.iter().any(|entry| entry.slug == "tenant/retained"));
+    assert!(models.iter().any(|entry| entry.slug == "gpt-5.3-codex"));
 }

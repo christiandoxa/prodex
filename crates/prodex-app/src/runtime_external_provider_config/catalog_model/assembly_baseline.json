@@ -1,38 +1,38 @@
 [
   {
-    "first_auto_compact_token_limit": 316350,
-    "first_context_window": 333000,
-    "models": 34,
+    "first_auto_compact_token_limit": 90000,
+    "first_context_window": 100000,
+    "models": 25,
     "name": "copilot-dynamic",
-    "sha256": "d0032ca3a4b04abb3f301ba1e66bc66f332abfaee8e583e16b78e4fcbe532772"
+    "sha256": "847bc0554a3e79a9071c61aabedfe193acb75973d2a2c9ca0fb4bb226c145772"
   },
   {
-    "first_auto_compact_token_limit": 875900,
-    "first_context_window": 922000,
-    "models": 34,
+    "first_auto_compact_token_limit": 90000,
+    "first_context_window": 100000,
+    "models": 25,
     "name": "copilot-untrimmed-query",
-    "sha256": "f91c61c3f779c0d8e4843b11bcdef311a449bfea03929db82b930ecd136c4a49"
+    "sha256": "847bc0554a3e79a9071c61aabedfe193acb75973d2a2c9ca0fb4bb226c145772"
   },
   {
     "first_auto_compact_token_limit": 997500,
     "first_context_window": 1050000,
-    "models": 34,
+    "models": 25,
     "name": "copilot-registry-fallback",
-    "sha256": "af783c037c4b30383b147f142915381028edc67ce49325170137322e2748958f"
+    "sha256": "478e95ff23909f4b54faa13da998217882fb47abd543e12d02ab5d127871cceb"
   },
   {
-    "first_auto_compact_token_limit": 316350,
-    "first_context_window": 333000,
-    "models": 34,
+    "first_auto_compact_token_limit": 0,
+    "first_context_window": 0,
+    "models": 25,
     "name": "copilot-empty-launch",
-    "sha256": "a679b6bee2def7751afd497a78a60a8d79165ec901881c2108cd24de21a7c223"
+    "sha256": "bde2a89bf336836745387f0aef9aece7fdf3002b7544d2a992a6ea82a6420d06"
   },
   {
     "first_auto_compact_token_limit": 9,
     "first_context_window": 10,
-    "models": 34,
+    "models": 25,
     "name": "copilot-unicode-query",
-    "sha256": "25cbf5811a40c1505ab525b27a10c890c72472a02b4d68f16da8d3b054992ed7"
+    "sha256": "e1d6f769bd848ca4dc53ee4dd8f25aae7cfbfc594465bd8620ffad13282a9976"
   },
   {
     "first_auto_compact_token_limit": 10,
@@ -51,36 +51,36 @@
   {
     "first_auto_compact_token_limit": 190000,
     "first_context_window": 200000,
-    "models": 12,
+    "models": 11,
     "name": "anthropic-registry-alias",
-    "sha256": "21e8c72368cf18279f7a94e4800ec4fa6d224391274ba9635506fa7dc140df79"
+    "sha256": "d0a35fa3f0eb20a08b87156febb4005838edd68f941d471ff537b17a2849d63e"
   },
   {
     "first_auto_compact_token_limit": 0,
     "first_context_window": 0,
-    "models": 13,
+    "models": 12,
     "name": "anthropic-unknown-zero",
-    "sha256": "c8650ed441e663610d5e4ec775ac841181fc6b4224485e2e48dbf82cfbb80b34"
+    "sha256": "11ddc4f27458f353807d5ab2c4694e2b3a346e7a0b83f7d242439b1b1bb9d31d"
   },
   {
     "first_auto_compact_token_limit": 18446744073709551614,
     "first_context_window": 18446744073709551615,
-    "models": 13,
+    "models": 12,
     "name": "anthropic-unknown-max",
-    "sha256": "073ab61ff9b51b5d6fb79063f8d585aeae350c32a61a8a6555efcf0601678917"
+    "sha256": "bfd408e368a79f2a3457dfd6fcf9789d8c97b4bde236a16469f83ddd90fdd254"
   },
   {
     "first_auto_compact_token_limit": 90000,
     "first_context_window": 100000,
-    "models": 35,
+    "models": 26,
     "name": "copilot-long-query",
-    "sha256": "0051820ec9a574d92414709b929a8cab5b79371d8c014f45cf58adb93f5d0958"
+    "sha256": "530880c147c4b5d969e9df1b790ec8c21607900ab981ffce71e9f767645ad27b"
   },
   {
     "first_auto_compact_token_limit": 997500,
     "first_context_window": 1050000,
-    "models": 34,
+    "models": 25,
     "name": "copilot-long-padded-alias",
-    "sha256": "af783c037c4b30383b147f142915381028edc67ce49325170137322e2748958f"
+    "sha256": "478e95ff23909f4b54faa13da998217882fb47abd543e12d02ab5d127871cceb"
   }
 ]

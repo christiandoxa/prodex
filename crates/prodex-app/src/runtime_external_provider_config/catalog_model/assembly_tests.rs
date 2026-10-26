@@ -26,7 +26,7 @@ fn catalog_home(name: &str) -> PathBuf {
 }
 
 #[test]
-fn external_catalog_assembly_preserves_original_complete_catalogs() {
+fn external_catalog_assembly_preserves_current_complete_catalogs() {
     let home = catalog_home("whole");
     let fixture = json!({"models":[
         {"id":" gpt-5.4 ","name":"First Dynamic Name", "description":"First description\n雪", "max_prompt_tokens":333000},
@@ -112,6 +112,15 @@ fn external_catalog_assembly_preserves_original_complete_catalogs() {
     let mut summary = Vec::new();
     for (name, provider, launch, context, compact) in cases {
         let models = external_catalog_models(&home, provider, launch, context, compact).unwrap();
+        assert!(
+            models
+                .iter()
+                .all(|entry| !prodex_provider_core::provider_model_is_retired(
+                    provider.provider_id(),
+                    entry["slug"].as_str().unwrap()
+                )),
+            "retired model in {name}"
+        );
         let digest = Sha256::digest(serde_json::to_vec(&models).unwrap())
             .iter()
             .map(|byte| format!("{byte:02x}"))
