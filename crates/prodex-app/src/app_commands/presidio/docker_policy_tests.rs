@@ -60,7 +60,7 @@ fn image_policy_preserves_diagnostics_and_validation_precedence() {
         ),
         (
             "ghcr.io/data-privacy-stack/presidio-analyzer:2.2.363@wrong",
-            "Presidio analyzer 2.2.363 is incompatible; Prodex requires 2.2.364 or newer. Update Presidio to the latest stable release (release-qualified reference: 2.2.364)",
+            "Presidio analyzer 2.2.363 is incompatible; Prodex requires 2.2.364 or newer. Update Presidio to the latest stable release (release-qualified reference: 2.2.365)",
         ),
         (
             "ghcr.io/data-privacy-stack/presidio-analyzer:3.0.0@wrong",
@@ -156,5 +156,25 @@ fn container_policy_preserves_ownership_service_and_single_loopback_binding() {
             .unwrap_err()
             .to_string(),
         "unknown Prodex-managed Presidio container other"
+    );
+}
+
+#[test]
+fn release_qualified_defaults_remain_official_and_digest_pinned() {
+    let reference = prodex_optional_tools::PRESIDIO_LATEST_STABLE_REFERENCE;
+    for (service, image) in [
+        ("analyzer", PRESIDIO_ANALYZER_IMAGE),
+        ("anonymizer", PRESIDIO_ANONYMIZER_IMAGE),
+    ] {
+        assert!(image.starts_with(&format!(
+            "ghcr.io/data-privacy-stack/presidio-{service}:{reference}@sha256:"
+        )));
+        assert_eq!(image.rsplit_once("@sha256:").unwrap().1.len(), 64);
+        validate_presidio_image(image, service).unwrap();
+    }
+    assert_eq!(
+        prodex_optional_tools::PRESIDIO_MINIMUM_SUPPORTED_VERSION,
+        "2.2.364",
+        "release qualification must not silently make already compatible user services unusable"
     );
 }
