@@ -64,7 +64,7 @@ test("every publishing side effect waits for successful exact-source CI and asse
   assert.match(publish, /refusing to overwrite/);
   assert.match(jobs.get("validate-release-assets"), /sha256sum --check SHA256SUMS/);
   assert.match(jobs.get("validate-release-assets"), /Scan release assets for malware/);
-  assert.match(jobs.get("validate-release-assets"), /EICAR/);
+  assert.match(jobs.get("antivirus-health"), /EICAR/);
   assert.match(jobs.get("validate-release-assets"), /Validate curated release notes/);
 });
 
@@ -103,4 +103,24 @@ test("supply-chain guard rejects missing publication gates and unscanned asset s
   assert.ok(validateReleaseMalwareGate(damaged).length > 0);
   const writable = workflow.replace(jobs.get("prepare-release"), jobs.get("prepare-release").replace("contents: read", "contents: write"));
   assert.ok(validateReleaseContainerPublication(writable, targetWorkflow).length > 0, "preparation must not gain publication authority");
+});
+
+
+test("the same pinned antivirus engine is proven during compilation, before final assets can pass", () => {
+  assert.ok(jobs.has("antivirus-health"), "early antivirus health proof missing");
+  assert.deepEqual(needs("antivirus-health"), ["release-preflight"]);
+  assert.ok(!ancestors("antivirus-health").has("build"));
+  assert.ok(ancestors("validate-release-assets").has("antivirus-health"));
+  assert.ok(needs("verify-release").includes("antivirus-health"));
+  for (const name of ["antivirus-health", "validate-release-assets"]) {
+    const body=jobs.get(name);
+    assert.match(body, /Verify pinned antivirus image/);
+    assert.match(body, /RepoDigests/);
+    assert.match(body, /clamav_update: "True"/);
+    assert.doesNotMatch(body, /contents: write|id-token: write/);
+  }
+  assert.match(jobs.get("antivirus-health"), /EICAR/);
+  assert.doesNotMatch(jobs.get("validate-release-assets"), /Prepare antivirus engine health check/);
+  const noHealth=workflow.replace(jobs.get("validate-release-assets"),jobs.get("validate-release-assets").replace("      - antivirus-health\n", ""));
+  assert.ok(validateReleaseMalwareGate(noHealth).length>0, "engine proof must gate clean assets");
 });

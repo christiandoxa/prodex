@@ -33,6 +33,7 @@ permissions:
   contents: read
 
 env:
+  CLAMAV_IMAGE: ghcr.io/hugoalh/scan-virus-ghaction:0.20.1-clamav@sha256:806278ed1a2829743c4b9d92f29bdd49e384ab3cdc6bf19caea19b1390d4c085
   CARGO_INCREMENTAL: "0"
   CARGO_HTTP_MULTIPLEXING: "false"
   SCCACHE_CACHE_SIZE: 2G
@@ -262,6 +263,55 @@ jobs:
           done
 
 
+  antivirus-health:
+    name: Prove antivirus engine while targets compile
+    needs: release-preflight
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - name: Verify pinned antivirus image
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker image inspect "${CLAMAV_IMAGE%@*}" --format '{{range .RepoDigests}}{{println .}}{{end}}' \
+            | grep -Fx "ghcr.io/hugoalh/scan-virus-ghaction@${CLAMAV_IMAGE##*@}"
+
+      - name: Prepare antivirus engine health check
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p scan-health
+          printf '%s' 'X5O!P%@AP[4\PZX54(P^)7CC)7}$' 'EICAR-STANDARD-ANTIVIRUS-TEST-FILE!$H+H*' > scan-health/eicar.com
+
+      - name: Verify antivirus engine detects EICAR
+        id: antivirus_health
+        continue-on-error: true
+        uses: hugoalh/scan-virus-ghaction/clamav@99c81e8991ad1074a14e5f22a21bce9be035e14e # v0.20.1
+        with:
+          clamav_update: "True"
+          ignores_pre: |-
+            Param($ElementPreMeta)
+            Return ($ElementPreMeta.Path -notmatch '^scan-health[\\/]')
+
+      - name: Require a working antivirus engine
+        if: ${{ always() }}
+        env:
+          SCAN_OUTCOME: ${{ steps.antivirus_health.outcome }}
+          SCAN_FINISH: ${{ steps.antivirus_health.outputs.finish }}
+          SCAN_FOUND: ${{ steps.antivirus_health.outputs.found }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -f scan-health/eicar.com
+          rmdir scan-health
+          if [ "${SCAN_OUTCOME}" != "failure" ] || [ "${SCAN_FINISH}" != "true" ] || [ "${SCAN_FOUND}" != "true" ]; then
+            echo "antivirus engine health check did not detect EICAR" >&2
+            exit 1
+          fi
+
+
   build:
     name: Release target ${{ matrix.target }}
     needs: release-preflight
@@ -456,6 +506,7 @@ jobs:
       - release-preflight
       - prepare-release
       - artifact-smoke
+      - antivirus-health
     timeout-minutes: 35
     permissions:
       contents: read
@@ -549,38 +600,12 @@ jobs:
             sha256sum --check SHA256SUMS
           )
 
-      - name: Prepare antivirus engine health check
+      - name: Verify pinned antivirus image
         shell: bash
         run: |
           set -euo pipefail
-          mkdir -p scan-health
-          printf '%s' 'X5O!P%@AP[4\PZX54(P^)7CC)7}$' 'EICAR-STANDARD-ANTIVIRUS-TEST-FILE!$H+H*' > scan-health/eicar.com
-
-      - name: Verify antivirus engine detects EICAR
-        id: antivirus_health
-        continue-on-error: true
-        uses: hugoalh/scan-virus-ghaction/clamav@99c81e8991ad1074a14e5f22a21bce9be035e14e # v0.20.1
-        with:
-          clamav_update: "True"
-          ignores_pre: |-
-            Param($ElementPreMeta)
-            Return ($ElementPreMeta.Path -notmatch '^scan-health[\\/]')
-
-      - name: Require a working antivirus engine
-        if: ${{ always() }}
-        env:
-          SCAN_OUTCOME: ${{ steps.antivirus_health.outcome }}
-          SCAN_FINISH: ${{ steps.antivirus_health.outputs.finish }}
-          SCAN_FOUND: ${{ steps.antivirus_health.outputs.found }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          rm -f scan-health/eicar.com
-          rmdir scan-health
-          if [ "${SCAN_OUTCOME}" != "failure" ] || [ "${SCAN_FINISH}" != "true" ] || [ "${SCAN_FOUND}" != "true" ]; then
-            echo "antivirus engine health check did not detect EICAR" >&2
-            exit 1
-          fi
+          docker image inspect "${CLAMAV_IMAGE%@*}" --format '{{range .RepoDigests}}{{println .}}{{end}}' \
+            | grep -Fx "ghcr.io/hugoalh/scan-virus-ghaction@${CLAMAV_IMAGE##*@}"
 
       - name: Scan release assets for malware
         id: release_malware_scan
@@ -963,6 +988,7 @@ jobs:
       - artifact-smoke
       - prepare-release
       - validate-release-assets
+      - antivirus-health
     timeout-minutes: 5
     permissions:
       contents: read

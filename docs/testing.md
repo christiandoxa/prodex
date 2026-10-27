@@ -88,9 +88,18 @@ macOS temp-path alias that previously exposed non-canonical test fixture paths.
 Windows runs native crate coverage, app-specific security regressions, and root
 tests concurrently. The root shard that already compiled `prodex` also builds
 the installer fixture, avoiding a second full Windows binary build. Large
-`prodex-app` coverage uses fifteen disjoint Windows groups, retaining parallel execution while avoiding repeated Windows
-compilations and late hosted-runner queueing. One group writes the shared
-dependency cache. High-fanout app, full-test, Windows, and macOS lanes disable
+`prodex-app` coverage uses fifteen disjoint Windows groups. One Windows producer
+compiles the library test executable once, records its complete native test census,
+and uploads an artifact bound to the exact checkout SHA, workflow run, platform,
+and architecture. Consumers verify the manifest against the producer job output,
+check the executable checksum and census, then execute unchanged filters and
+exclusions with `--test-threads=1` from Cargo's package-root working directory.
+Zero-test matches and failed filters remain fatal, and later filters still run to
+preserve diagnostics. Rerun-failed can consume a successful producer from an earlier
+attempt of the same run, never another source or workflow run. Only the producer
+restores and saves build dependencies; the fifteen consumers do not compile,
+link, or contact the shared compiler cache. Other native/workspace lanes retain
+their independent compilation and test coverage. High-fanout app, full-test, Windows, and macOS lanes disable
 incremental artifacts and test/dev debug symbols so sccache remains effective
 and linking is faster.
 
@@ -99,8 +108,13 @@ and linking is faster.
 Release preparation and publication have separate trust boundaries. The
 read-only source/pin preflight starts archive and binary compilation while the
 exact-source CI gate is running. Linux artifact smoke and SBOM generation run
-independently. Asset assembly, checksum validation, EICAR engine validation and
-malware scanning produce one immutable `validated-release-assets` artifact.
+independently. The EICAR engine proof runs during target compilation on a read-only
+runner. It and the final scanner must use the same explicitly pinned container
+digest, and both retain database updates. Asset assembly, checksum validation and
+malware scanning still wait for that successful engine proof and produce one
+immutable `validated-release-assets` artifact. The EICAR fixture remains outside
+the release asset bundle; a missing engine proof or incomplete/unclean scan blocks
+both the verification verdict and all publication paths.
 Signing, documentation pushes and GitHub Release creation require both that
 artifact validation and successful complete CI for the exact dispatched main SHA.
 The publisher downloads those same scanned bytes, checks their checksums again,
