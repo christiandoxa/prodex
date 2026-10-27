@@ -99,6 +99,29 @@ export function validateWindowsSecurityJob(contents) {
   return violations;
 }
 
+export function validateLinuxNativeTests(contents) {
+  const producer = workflowJob(contents, "linux-app-test-build");
+  const consumer = workflowJob(contents, "prodex-app-lib");
+  const telemetry = workflowJob(contents, "ci-duration-telemetry");
+  if (!producer || !consumer || !telemetry) return ["CI requires the Linux native bundle producer and consumers"];
+  const violations = [];
+  for (const [job, markers] of [
+    [producer, ["needs: [changes, mojo-runtime-linux-archive]", "runs-on: ubuntu-latest",
+      "PRODEX_MOJO_ARCHIVE:", "native-test-artifact.mjs pack", "name: linux-app-tests",
+      "manifest_sha256: ${{ steps.pack.outputs.manifest_sha256 }}", "if-no-files-found: error"]],
+    [consumer, ["needs: [changes, linux-app-test-build]", "runs-on: ubuntu-latest",
+      "fromJSON(needs.changes.outputs.prodex_app_matrix)", "PRODEX_APP_FILTERS:", "PRODEX_APP_SKIP_FILTERS:",
+      "TEST_MANIFEST_SHA256: ${{ needs.linux-app-test-build.outputs.manifest_sha256 }}",
+      "name: linux-app-tests", "native-test-artifact.mjs run"]],
+    [telemetry, ["- linux-app-test-build", "- prodex-app-lib"]],
+  ]) {
+    for (const marker of markers) {
+      if (!job.includes(marker)) violations.push(`CI Linux native-test binding missing ${marker}`);
+    }
+  }
+  return violations;
+}
+
 export function validateProcessGuard(contents) {
   const job = workflowJob(contents, "process-guard");
   if (!job) return [".github/workflows/ci.yml: missing process-guard job"];
@@ -408,6 +431,24 @@ export function validateReleaseContainerPublication(contents, targetWorkflow = "
     violations.push(".github/workflows/release-target.yml: target preparation must remain local, called and read-only");
   }
 
+  const smoke = workflowJob(targetWorkflow, "artifact-smoke") ?? "";
+  for (const marker of [
+    "needs: build", "if: ${{ fromJSON(inputs.platforms)[0].target == 'x86_64-unknown-linux-gnu' }}",
+    "persist-credentials: false", "name: x86_64-unknown-linux-gnu",
+    "RELEASE_VERSION: ${{ inputs.version }}", "node scripts/ci/release-artifact-smoke.mjs",
+    '--binary "${binary}"', '--version "${RELEASE_VERSION}"',
+  ]) {
+    if (!smoke.includes(marker)) violations.push(`release-target.yml: native artifact smoke missing ${marker}`);
+  }
+  if (/continue-on-error: true|if:.*always\(/u.test(smoke)) {
+    violations.push("release-target.yml: artifact smoke must fail closed after successful native build");
+  }
+  for (const name of ["prepare-release", "verify-release"]) {
+    if (!workflowJob(contents, name)?.includes("      - build\n")) {
+      violations.push(`standalone-release.yml: ${name} must include all target builds and native smoke`);
+    }
+  }
+
   const workflowHeader = contents.slice(0, contents.indexOf("\njobs:"));
   if (/^\s*(?:artifact-metadata|attestations|id-token):\s*write\s*$/mu.test(workflowHeader)) {
     violations.push(
@@ -567,6 +608,12 @@ export function validateReleaseContainerPublication(contents, targetWorkflow = "
 
 export function validateWorkflow(filePath, contents) {
   const violations = [];
+  for (const step of contents.split(/\n      - name:/u)) {
+    if (step.includes("uses: Swatinem/rust-cache@") &&
+        /^          shared-key:/mu.test(step) && /^          key:/mu.test(step)) {
+      violations.push(`${filePath}: Rust cache key is ignored when shared-key is present; put discriminators in shared-key`);
+    }
+  }
   let rustActions = 0;
   for (const match of contents.matchAll(ACTION)) {
     const [target, comment] = match.slice(1);
@@ -655,7 +702,7 @@ export function validateProdexPackaging(
   return violations;
 }
 
-export function validateReleaseCodexExclusion(contents) {
+export function validateReleaseCodexExclusion(contents, targetWorkflow = contents) {
   const violations = [];
   for (const marker of [
     "Build patched Codex runtime",
@@ -663,14 +710,14 @@ export function validateReleaseCodexExclusion(contents) {
     "codex_binary",
     "release-assets/codex",
   ]) {
-    if (contents.includes(marker)) {
+    if ((contents + targetWorkflow).includes(marker)) {
       violations.push(`.github/workflows/standalone-release.yml: release contains forbidden Codex packaging marker ${marker}`);
     }
   }
   if (!contents.includes("find release-assets -maxdepth 1 -type f")) {
     violations.push(".github/workflows/standalone-release.yml: release asset scope must be explicit");
   }
-  const artifactSmoke = workflowJob(contents, "artifact-smoke") ?? "";
+  const artifactSmoke = workflowJob(targetWorkflow, "artifact-smoke") ?? "";
   const prepare = workflowJob(contents, "prepare-release") ?? "";
   const release = workflowJob(contents, "validate-release-assets") ?? "";
   for (const [surface, job, marker] of [
@@ -1029,6 +1076,7 @@ async function main() {
     if (fileName === "ci.yml") {
       violations.push(
         ...validateWindowsSecurityJob(contents),
+        ...validateLinuxNativeTests(contents),
         ...validateProcessGuard(contents),
         ...validateKicsConfiguration(contents),
       );
@@ -1037,7 +1085,7 @@ async function main() {
       violations.push(
         ...validateReleaseMalwareGate(contents),
         ...validateReleaseContainerPublication(contents, await fs.readFile(path.join(workflowDir, "release-target.yml"), "utf8")),
-        ...validateReleaseCodexExclusion(contents),
+        ...validateReleaseCodexExclusion(contents, await fs.readFile(path.join(workflowDir, "release-target.yml"), "utf8")),
       );
     }
   }

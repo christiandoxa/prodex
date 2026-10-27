@@ -40,7 +40,7 @@ test("each release target owns its archive-to-binary dependency instead of waiti
 });
 
 test("the aggregate target result is required before all release asset and publication paths", () => {
-  for (const name of ["artifact-smoke", "prepare-release", "verify-release"]) {
+  for (const name of ["prepare-release", "verify-release"]) {
     assert.match(job(parent, name), /      - build\n/, `${name} lost all-platform success`);
   }
   for (const name of ["attest-binaries", "sync-release-docs", "publish-github-release"]) {

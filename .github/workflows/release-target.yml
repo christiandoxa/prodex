@@ -281,8 +281,9 @@ jobs:
           # Workspace production crates are never included in this cache.
           add-rust-environment-hash-key: "false"
           cache-workspace-crates: "false"
-          shared-key: production-release-deps-v1
-          key: release-deps-v1-rust1.99.1-thinlto-cgu16-mojo${{ env.MOJO_VERSION }}-${{ runner.os }}-${{ runner.arch }}-${{ matrix.target }}-${{ matrix.mojo-target-cpu }}${{ matrix.target == 'x86_64-apple-darwin' && '-arm64-cross' || '' }}${{ matrix.target == 'aarch64-pc-windows-msvc' && '-arm64-native' || '' }}-${{ steps.rust-deps-cache-key.outputs.external_sha256 }}
+          # The pinned action ignores key when shared-key is set. Keep every
+          # target/profile/input discriminator in the effective shared key.
+          shared-key: production-release-deps-v2-rust1.99.1-thinlto-cgu16-mojo${{ env.MOJO_VERSION }}-${{ runner.os }}-${{ runner.arch }}-${{ matrix.target }}-${{ matrix.mojo-target-cpu }}${{ matrix.target == 'x86_64-apple-darwin' && '-arm64-cross' || '' }}${{ matrix.target == 'aarch64-pc-windows-msvc' && '-arm64-native' || '' }}-${{ steps.rust-deps-cache-key.outputs.external_sha256 }}
 
       - name: Download target Mojo archive
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
@@ -675,3 +676,45 @@ jobs:
             exit 1
           fi
           grep -q -- "--presidio is unsupported" "${RUNNER_TEMP}/presidio-error.txt"
+
+  artifact-smoke:
+    name: Smoke official Linux artifact
+    needs: build
+    if: ${{ fromJSON(inputs.platforms)[0].target == 'x86_64-unknown-linux-gnu' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      - name: Install Node.js for artifact smoke
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+        with:
+          node-version: 22
+          package-manager-cache: false
+
+      - name: Download official Linux artifact
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
+        with:
+          name: x86_64-unknown-linux-gnu
+          path: artifact
+
+      - name: Run official artifact smoke
+        env:
+          RELEASE_VERSION: ${{ inputs.version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          binary="artifact/prodex"
+          test -f "${binary}"
+          chmod 0755 "${binary}"
+          node scripts/ci/codex-purity-guard.mjs package-lock.json install.sh install.ps1 artifact
+          node scripts/ci/npm-package-smoke.mjs --binary-dir artifact
+          node scripts/ci/release-artifact-smoke.mjs \
+            --binary "${binary}" \
+            --version "${RELEASE_VERSION}"

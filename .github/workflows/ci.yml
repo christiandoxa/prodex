@@ -335,28 +335,26 @@ jobs:
       - name: Check formatting
         run: cargo fmt --check
 
-  prodex-app-lib:
-    name: prodex-app library tests (${{ matrix.label }})
+  linux-app-test-build:
+    name: Compile Linux application tests once
     needs: [changes, mojo-runtime-linux-archive]
     if: ${{ github.event_name != 'schedule' && (needs.changes.outputs.heavy == 'true' || github.event_name == 'workflow_dispatch') }}
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 60
     env:
       CARGO_INCREMENTAL: "0"
       CARGO_PROFILE_DEV_DEBUG: "0"
       CARGO_PROFILE_TEST_DEBUG: "0"
       RUSTC_WRAPPER: sccache
-      SCCACHE_GHA_RW_MODE: ${{ matrix.save_cache && 'READ_WRITE' || 'READ_ONLY' }}
+      SCCACHE_GHA_RW_MODE: READ_WRITE
       PRODEX_MOJO_ARCHIVE: ${{ github.workspace }}/.prodex-ci/mojo-runtime/x86_64-unknown-linux-gnu/libprodex_mojo_core.a
-    strategy:
-      fail-fast: false
-      matrix: ${{ fromJSON(needs.changes.outputs.prodex_app_matrix) }}
-
+    outputs:
+      manifest_sha256: ${{ steps.pack.outputs.manifest_sha256 }}
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
-      - name: Download runtime Mojo archive
+      - name: Download Linux runtime Mojo archive
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
           name: mojo-runtime-archive-x86_64-unknown-linux-gnu
@@ -374,44 +372,69 @@ jobs:
         uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
         with:
           cache-bin: false
-          save-if: ${{ matrix.save_cache }}
+          shared-key: prodex-app-lib
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      - name: Install Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+        with:
+          node-version: 22
+          package-manager-cache: false
+
+      - name: Compile and bind the exact-run native test executable
+        id: pack
+        shell: bash
+        run: node scripts/ci/native-test-artifact.mjs pack .prodex-ci/linux-app-tests
+
+      - name: Upload the exact-run native test executable
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: linux-app-tests
+          path: .prodex-ci/linux-app-tests
+          if-no-files-found: error
+          overwrite: true
+          retention-days: 7
+
+  prodex-app-lib:
+    name: prodex-app library tests (${{ matrix.label }})
+    needs: [changes, linux-app-test-build]
+    if: ${{ github.event_name != 'schedule' && (needs.changes.outputs.heavy == 'true' || github.event_name == 'workflow_dispatch') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.changes.outputs.prodex_app_matrix) }}
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Install Rust toolchain for existing runtime fixtures
+        uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
+        with:
+          toolchain: 1.99.1
+
+      - name: Install Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+        with:
+          node-version: 22
+          package-manager-cache: false
+
+      - name: Download this run's native test executable
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
+        with:
+          name: linux-app-tests
+          path: .prodex-ci/linux-app-tests
 
       - name: Run prodex-app library partition ${{ matrix.label }}
         shell: bash
         env:
+          TEST_MANIFEST_SHA256: ${{ needs.linux-app-test-build.outputs.manifest_sha256 }}
           PRODEX_APP_FILTERS: ${{ matrix.filters }}
           PRODEX_APP_SKIP_FILTERS: ${{ matrix.skip_filters }}
-        run: |
-          set -euo pipefail
-          test_log="$(mktemp)"
-          trap 'rm -f "${test_log}"' EXIT
-          skip_args=()
-          while IFS= read -r filter; do
-            [[ -z "${filter}" ]] && continue
-            skip_args+=(--skip "${filter}")
-          done <<< "${PRODEX_APP_SKIP_FILTERS}"
-          if [[ -n "${PRODEX_APP_FILTERS}" ]]; then
-            status=0
-            while IFS= read -r filter; do
-              [[ -z "${filter}" ]] && continue
-              if ! cargo test --locked -q -p prodex-app --lib \
-                "${filter}" -- --test-threads=1 "${skip_args[@]}" 2>&1 | tee "${test_log}"; then
-                status=1
-              fi
-              if grep -Fq 'running 0 tests' "${test_log}"; then
-                echo "prodex-app filter matched no tests: ${filter}"
-                status=1
-              fi
-            done <<< "${PRODEX_APP_FILTERS}"
-            exit "${status}"
-          else
-            cargo test --locked -q -p prodex-app --lib \
-              -- --test-threads=1 "${skip_args[@]}" 2>&1 | tee "${test_log}"
-            if grep -Fq 'running 0 tests' "${test_log}"; then
-              echo "prodex-app shard matched no tests"
-              exit 1
-            fi
-          fi
+          RUST_BACKTRACE: "1"
+        run: node scripts/ci/native-test-artifact.mjs run .prodex-ci/linux-app-tests
+
 
   fuzz-build:
     needs: [changes, mojo-runtime-linux-archive]
@@ -806,6 +829,7 @@ jobs:
         uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
         with:
           cache-bin: false
+          shared-key: macos-workspace
 
       - name: Install Node.js
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
@@ -817,6 +841,51 @@ jobs:
         env:
           RUST_BACKTRACE: "1"
         run: npm run test:full -- --jobs 2 --test-threads 2 --no-prodex-app-lib
+
+
+  macos-native-regressions:
+    name: macOS native broker and Kiro regressions
+    needs: [changes, mojo-runtime-platform-archives]
+    if: ${{ needs.changes.outputs.heavy == 'true' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
+    runs-on: macos-14
+    timeout-minutes: 90
+    env:
+      CARGO_PROFILE_DEV_DEBUG: "0"
+      CARGO_PROFILE_TEST_DEBUG: "0"
+      RUSTC_WRAPPER: sccache
+      SCCACHE_GHA_RW_MODE: READ_ONLY
+      PRODEX_MOJO_ARCHIVE: ${{ github.workspace }}/.prodex-ci/mojo-runtime/aarch64-apple-darwin/libprodex_mojo_core.a
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Download macOS runtime Mojo archive
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
+        with:
+          name: mojo-runtime-archive-aarch64-apple-darwin
+          path: .prodex-ci/mojo-runtime/aarch64-apple-darwin
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
+        with:
+          toolchain: 1.99.1
+
+      - name: Install sccache
+        uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
+        with:
+          cache-bin: false
+          shared-key: macos-workspace
+          save-if: false
+
+      - name: Install Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+        with:
+          node-version: 22
+          package-manager-cache: false
 
       - name: Run native macOS broker recovery tests
         env:
@@ -1405,8 +1474,8 @@ jobs:
           cache-bin: false
           cache-workspace-crates: "false"
           add-rust-environment-hash-key: "false"
-          shared-key: npm-host-release-deps-v1
-          key: rust1.99.1-mojo1.2.0-${{ runner.os }}-${{ runner.arch }}-x86_64-unknown-linux-gnu-${{ steps.rust-deps-cache-key.outputs.external_sha256 }}
+          # shared-key is the effective key; a separate key would be ignored.
+          shared-key: npm-host-release-deps-v2-rust1.99.1-mojo1.2.0-${{ runner.os }}-${{ runner.arch }}-x86_64-unknown-linux-gnu-${{ steps.rust-deps-cache-key.outputs.external_sha256 }}
           save-if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
 
       - name: Install Node.js
@@ -2098,6 +2167,7 @@ jobs:
     needs:
       - changes
       - fmt
+      - linux-app-test-build
       - prodex-app-lib
       - fuzz-build
       - docs-lint
@@ -2107,6 +2177,7 @@ jobs:
       - windows-prodex-app
       - windows-app-test-build
       - macos-workspace
+      - macos-native-regressions
       - process-guard
       - compat-replay-gate
       - rust-quality

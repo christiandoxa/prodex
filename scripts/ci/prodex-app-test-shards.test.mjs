@@ -240,8 +240,11 @@ test("CI consumes generated app shards and retains required safety gates", () =>
   assert.match(workflow, /PRODEX_APP_FILTERS/);
   assert.match(workflow, /--test-threads=1/);
   assert.match(workflow, /save-if: \$\{\{ matrix\.save_cache \}\}/);
-  assert.match(workflow, /prodex-app shard matched no tests/);
-  assert.match(workflow, /"\$\{skip_args\[@\]\}"/);
+  const bundle = readFileSync("scripts/ci/native-test-artifact.mjs", "utf8");
+  assert.match(workflow, /native-test-artifact\.mjs run/);
+  assert.match(bundle, /Native test partition failed or matched no tests/);
+  assert.match(bundle, /--test-threads=1/);
+  assert.match(bundle, /excluded.flatMap/);
   assert.match(workflow, /^  profile-commands-internal:/m);
   assert.match(workflow, /^  main-internal-core:/m);
   assert.match(workflow, /^  main-internal-runtime-proxy:/m);
@@ -253,7 +256,7 @@ test("CI consumes generated app shards and retains required safety gates", () =>
   assert.match(fullWorkflow, /^  CARGO_PROFILE_DEV_DEBUG: "0"$/m);
   assert.match(fullWorkflow, /^  CARGO_PROFILE_TEST_DEBUG: "0"$/m);
 
-  const macosWorkspace = workflow.match(/\n  macos-workspace:\n([\s\S]*?)\n  process-guard:/)?.[1];
+  const macosWorkspace = workflow.match(/\n  macos-native-regressions:\n([\s\S]*?)\n  process-guard:/)?.[1];
   assert.ok(macosWorkspace, "macOS workspace job missing");
   assert.match(macosWorkspace, /CARGO_PROFILE_DEV_DEBUG: "0"/);
   assert.match(macosWorkspace, /CARGO_PROFILE_TEST_DEBUG: "0"/);

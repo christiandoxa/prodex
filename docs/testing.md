@@ -103,12 +103,32 @@ their independent compilation and test coverage. High-fanout app, full-test, Win
 incremental artifacts and test/dev debug symbols so sccache remains effective
 and linking is faster.
 
+Linux push/PR application partitions now also consume one same-run native test
+artifact rather than each compiling the application harness. The existing eight
+partitions, filters, remainder coverage, zero-test failure handling and serial
+libtest scheduling are unchanged. The producer and consumers use the same
+`native-test-artifact.mjs` verification as Windows: exact source, run, platform,
+architecture, checkout path, independently supplied manifest digest, executable
+checksum and test inventory. This is not a cache of executables across commits.
+The scheduled full-test, stress and other direct Cargo lanes remain independent.
+
+The macOS workspace suite and focused native broker/Kiro regressions run in
+separate jobs on the same pinned runner/toolchain. They share compatible Cargo
+dependencies; only the workspace job writes the shared cache. All original native
+filters and zero-test guards remain mandatory, and duration telemetry waits for
+both jobs. A slow workspace suite no longer delays the focused native regressions.
+
 ## Release critical path and nonpublishing verification
 
 Release preparation and publication have separate trust boundaries. The
 read-only source/pin preflight starts archive and binary compilation while the
-exact-source CI gate is running. Linux artifact smoke and SBOM generation run
-independently. The EICAR engine proof runs during target compilation on a read-only
+exact-source CI gate is running. Linux artifact smoke runs immediately after its own target binary is uploaded,
+inside the target-local reusable workflow. It downloads and tests those exact
+artifact bytes with the same commands as before, while other platforms may still
+compile. The other five target calls skip only this Linux-only job, not their
+native platform checks. The parent build result includes the Linux artifact smoke;
+SBOM generation and final verification still require successful results from all
+six target calls. The EICAR engine proof runs during target compilation on a read-only
 runner. It and the final scanner must use the same explicitly pinned container
 digest, and both retain database updates. Asset assembly, checksum validation and
 malware scanning still wait for that successful engine proof and produce one
@@ -127,6 +147,15 @@ Each called workflow builds and validates its Mojo archive, then immediately
 schedules its matching native binary. A cold Linux ARM64 or Windows ARM64 archive
 no longer holds back a ready target. The archive/binary commands, CPU settings,
 strict ABI checks, production profile, and native/emulated smoke tests are unchanged.
+Production and calibration dependency caches put every compiler, Mojo version,
+host, target, CPU, codegen and external-dependency discriminator in `shared-key`.
+The pinned Rust cache action ignores its separate `key` input when `shared-key`
+is present; a constant shared prefix would merge incompatible target caches.
+Matching calibrated profiles still share dependencies, but different targets,
+codegen units or dependency graphs cannot collide. Application production crates
+remain excluded, and Cargo still validates its fingerprints after restoration.
+The corrected namespaces initially require a cold dependency build.
+
 The parent `build` result still requires every target to succeed before any final
 asset validation, signing or publication. The called workflow has read-only
 permissions and cannot be independently dispatched or publish anything.
