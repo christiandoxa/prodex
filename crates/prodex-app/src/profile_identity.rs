@@ -162,9 +162,14 @@ fn collect_profile_identities(state: &mut AppState) -> Vec<(String, ProfileIdent
         .collect();
 
     let discovered = map_parallel(jobs, |job| {
-        let mut identity = fetch_profile_identity(&job.codex_home).unwrap_or_default();
-        if identity.email.is_none() {
+        let mut identity = read_profile_identity_from_auth(&job.codex_home).unwrap_or_default();
+        if !identity.has_email() {
             identity.email = job.cached_email;
+        }
+        if !identity.has_email() {
+            // Legacy profiles may still need authenticated identity discovery.
+            // Login performs this fallback outside the global lifecycle lock.
+            identity = fetch_profile_identity(&job.codex_home).unwrap_or(identity);
         }
         (job.name, identity)
     });

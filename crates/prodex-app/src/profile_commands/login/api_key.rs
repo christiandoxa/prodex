@@ -11,8 +11,7 @@ use super::{LoginMethod, default_api_key_profile_name, unique_profile_name_for_s
 use crate::{
     AppPaths, AppState, AppStateIoExt, ProfileEntry, ProfileProvider, activate_profile,
     create_codex_home_if_missing, managed_profile_home_path, persist_login_home,
-    prepare_managed_codex_home, remove_dir_if_exists, update_existing_profile_auth,
-    write_profile_openai_compatible_base_url,
+    remove_dir_if_exists, update_existing_profile_auth, write_profile_openai_compatible_base_url,
 };
 use anyhow::{Context, Result};
 use serde_json::json;
@@ -184,7 +183,7 @@ fn finish_api_key_login_for_new_profile(
         write_profile_openai_compatible_base_url(login_home, openai_base_url)?;
     }
     persist_login_home(login_home, &codex_home)?;
-    prepare_managed_codex_home(paths, &codex_home)?;
+    prodex_shared_codex_fs::prepare_managed_codex_home_for_auth_update(paths, &codex_home)?;
 
     state.profiles.insert(profile_name.clone(), desired_profile);
     activate_profile(state, &profile_name);

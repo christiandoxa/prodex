@@ -1,5 +1,11 @@
 use super::*;
 
+#[path = "login/responsiveness.rs"]
+mod responsiveness;
+
+#[path = "login/concurrency.rs"]
+mod concurrency;
+
 #[test]
 fn login_without_profile_creates_profile_from_email() {
     let fixture = setup_fixture();

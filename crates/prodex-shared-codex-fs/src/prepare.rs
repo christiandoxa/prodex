@@ -50,8 +50,31 @@ struct RecentSessionMaintenanceCache {
     thread_id: Option<String>,
 }
 
+#[derive(Clone, Copy)]
+enum SessionPreparation {
+    FullMaintenance,
+    GoalAttachments,
+    Deferred,
+}
+
+/// Wires a managed home for credential persistence without reading or repairing
+/// saved rollouts or goal databases. Login commits hold the profile lifecycle
+/// lock; unrelated historical maintenance must never extend that critical section.
+/// Runtime launch and explicit maintenance retain their existing repair paths.
+pub fn prepare_managed_codex_home_for_auth_update(
+    paths: &AppPaths,
+    codex_home: &Path,
+) -> Result<()> {
+    prepare_managed_codex_home_internal(paths, codex_home, SessionPreparation::Deferred, false)
+}
+
 pub fn prepare_managed_codex_home(paths: &AppPaths, codex_home: &Path) -> Result<()> {
-    prepare_managed_codex_home_internal(paths, codex_home, true, false)
+    prepare_managed_codex_home_internal(
+        paths,
+        codex_home,
+        SessionPreparation::FullMaintenance,
+        false,
+    )
 }
 
 /// Prepares a managed Codex home while keeping `.credentials.json` local to the profile.
@@ -59,14 +82,24 @@ pub fn prepare_managed_codex_home_with_local_credentials(
     paths: &AppPaths,
     codex_home: &Path,
 ) -> Result<()> {
-    prepare_managed_codex_home_internal(paths, codex_home, true, true)
+    prepare_managed_codex_home_internal(
+        paths,
+        codex_home,
+        SessionPreparation::FullMaintenance,
+        true,
+    )
 }
 
 pub fn prepare_managed_codex_home_for_runtime_launch(
     paths: &AppPaths,
     codex_home: &Path,
 ) -> Result<()> {
-    prepare_managed_codex_home_internal(paths, codex_home, false, false)
+    prepare_managed_codex_home_internal(
+        paths,
+        codex_home,
+        SessionPreparation::GoalAttachments,
+        false,
+    )
 }
 
 /// Prepares a managed runtime home while keeping `.credentials.json` local to the profile.
@@ -74,13 +107,18 @@ pub fn prepare_managed_codex_home_for_runtime_launch_with_local_credentials(
     paths: &AppPaths,
     codex_home: &Path,
 ) -> Result<()> {
-    prepare_managed_codex_home_internal(paths, codex_home, false, true)
+    prepare_managed_codex_home_internal(
+        paths,
+        codex_home,
+        SessionPreparation::GoalAttachments,
+        true,
+    )
 }
 
 fn prepare_managed_codex_home_internal(
     paths: &AppPaths,
     codex_home: &Path,
-    maintain_sessions: bool,
+    session_preparation: SessionPreparation,
     keep_credentials_local: bool,
 ) -> Result<()> {
     ensure_managed_profiles_root(paths)?;
@@ -99,12 +137,14 @@ fn prepare_managed_codex_home_internal(
             ensure_shared_codex_entry(paths, codex_home, &entry)?;
         }
     }
-    if maintain_sessions {
-        maintain_managed_codex_sessions(paths)?;
-    } else {
-        // The native picker can select any saved goal, including one with no
-        // recent rollout. Other live processes must not suppress this repair.
-        persist_codex_goal_attachment_paths(&paths.shared_codex_root)?;
+    match session_preparation {
+        SessionPreparation::FullMaintenance => maintain_managed_codex_sessions(paths)?,
+        SessionPreparation::GoalAttachments => {
+            // The native picker can select any saved goal, including one with no
+            // recent rollout. Other live processes must not suppress this repair.
+            persist_codex_goal_attachment_paths(&paths.shared_codex_root)?;
+        }
+        SessionPreparation::Deferred => {}
     }
 
     Ok(())
@@ -678,3 +718,7 @@ mod tests;
 #[cfg(test)]
 #[path = "../tests/src/recent_maintenance.rs"]
 mod recent_maintenance_tests;
+
+#[cfg(all(test, unix))]
+#[path = "../tests/src/auth_preparation.rs"]
+mod auth_preparation_tests;

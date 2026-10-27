@@ -93,6 +93,25 @@ pub(super) fn managed_profile_home_path(paths: &AppPaths, profile_name: &str) ->
 }
 
 pub(super) fn prepare_profile_codex_home(paths: &AppPaths, profile: &ProfileEntry) -> Result<()> {
+    prepare_profile_home_with(paths, profile, prepare_managed_codex_home)
+}
+
+pub(super) fn prepare_profile_home_for_auth_update(
+    paths: &AppPaths,
+    profile: &ProfileEntry,
+) -> Result<()> {
+    prepare_profile_home_with(
+        paths,
+        profile,
+        prodex_shared_codex_fs::prepare_managed_codex_home_for_auth_update,
+    )
+}
+
+fn prepare_profile_home_with(
+    paths: &AppPaths,
+    profile: &ProfileEntry,
+    prepare_managed_home: fn(&AppPaths, &Path) -> Result<()>,
+) -> Result<()> {
     if profile.managed {
         if matches!(&profile.provider, ProfileProvider::Anthropic { .. }) {
             return prepare_claude_profile_codex_home(paths, profile);
@@ -108,7 +127,7 @@ pub(super) fn prepare_profile_codex_home(paths: &AppPaths, profile: &ProfileEntr
                 paths.managed_profiles_root.display()
             );
         }
-        prepare_managed_codex_home(paths, &profile.codex_home)
+        prepare_managed_home(paths, &profile.codex_home)
     } else {
         create_codex_home_if_missing(&profile.codex_home)
     }
@@ -150,7 +169,7 @@ pub(super) fn update_existing_profile_auth(
         .with_context(|| format!("profile '{}' is missing", profile_name))?
         .clone();
 
-    prepare_profile_codex_home(paths, &profile)?;
+    prepare_profile_home_for_auth_update(paths, &profile)?;
     write_secret_text_file(
         &secret_store::auth_json_path(&profile.codex_home),
         auth_json,
