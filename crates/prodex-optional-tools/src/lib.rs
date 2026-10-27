@@ -71,7 +71,7 @@ pub(crate) const PONYTAIL_PREVIOUS_LEGACY_MANIFEST_TREE_SHA256: &str =
     "5443a5ee4a7248adcb59e1e102dd5bbd14af3083a9c3b4f271dd86790ac88c9c";
 
 pub const PRESIDIO_MINIMUM_SUPPORTED_VERSION: &str = "2.2.364";
-pub const PRESIDIO_LATEST_STABLE_REFERENCE: &str = "2.2.366";
+pub const PRESIDIO_LATEST_STABLE_REFERENCE: &str = "2.2.365";
 
 pub fn optional_tool_recommended_version(id: OptionalToolId) -> &'static str {
     match id {
