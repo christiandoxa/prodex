@@ -156,6 +156,12 @@ codegen units or dependency graphs cannot collide. Application production crates
 remain excluded, and Cargo still validates its fingerprints after restoration.
 The corrected namespaces initially require a cold dependency build.
 
+Linux ARM64 host tools use the Ubuntu archive/security HTTPS endpoints with the
+runner's official Ubuntu signing key for that APT invocation only. Runner source
+configuration is not rewritten. This avoids the observed slow cloud-image mirror;
+setup has a five-minute step bound and finite connection timeouts/retries. Both
+tool versions are verified, and failed package preparation still fails the target.
+
 The parent `build` result still requires every target to succeed before any final
 asset validation, signing or publication. The called workflow has read-only
 permissions and cannot be independently dispatched or publish anything.
