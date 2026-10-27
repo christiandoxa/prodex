@@ -3,10 +3,7 @@ use prodex_cli::{SubAgentConfig, SuperLaunchTarget};
 use prodex_mojo_core::sub_agent_policy::{
     ConfigReasoningState, ConfigUrlState, ConfigValidationAction, config_validation_plan,
 };
-use prodex_provider_core::{
-    ProviderId, ProviderModelReasoningError, provider_model_reasoning_resolution,
-    provider_model_spec,
-};
+use prodex_provider_core::{ProviderId, ProviderModelReasoningError, provider_model_spec};
 
 use super::ResolvedSuperSubAgent;
 
@@ -22,7 +19,7 @@ pub(super) fn provider_model_effort_facts(
     });
     let reasoning = match effort {
         None => ConfigReasoningState::Absent,
-        Some(effort) => match provider_model_reasoning_resolution(
+        Some(effort) => match crate::effective_provider_model_reasoning_resolution(
             provider,
             model.as_deref(),
             Some(effort.as_str()),

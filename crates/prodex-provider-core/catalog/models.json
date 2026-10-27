@@ -86,6 +86,45 @@
   {
     "provider": "openai",
     "owned_by": "openai",
+    "id": "gpt-6.1-terra",
+    "display_name": "GPT-6.1 Terra",
+    "description": "OpenAI model for everyday agentic coding and terminal work. Account catalogs may supply different context and reasoning defaults.",
+    "context_window_tokens": 1050000,
+    "max_output_tokens": 128000,
+    "supported_reasoning_efforts": [
+      "none",
+      "low",
+      "medium",
+      "high",
+      "xhigh",
+      "max"
+    ],
+    "default_reasoning_effort": "medium",
+    "input_cost_per_million_microusd": null,
+    "output_cost_per_million_microusd": null,
+    "supported_endpoints": [
+      "responses",
+      "responses/compact",
+      "chat-completions",
+      "models",
+      "batches"
+    ],
+    "aliases": [
+      "terra"
+    ],
+    "feature_flags": {
+      "tools": true,
+      "json_schema": true,
+      "vision": true,
+      "audio": false,
+      "web_search": true,
+      "reasoning": true
+    },
+    "pricing_known": false
+  },
+  {
+    "provider": "openai",
+    "owned_by": "openai",
     "id": "gpt-6-luna",
     "display_name": "GPT-6 Luna",
     "description": "Efficient OpenAI model for focused, high-volume workloads.",
@@ -234,9 +273,7 @@
       "audio",
       "batches"
     ],
-    "aliases": [
-      "terra"
-    ],
+    "aliases": [],
     "feature_flags": {
       "tools": true,
       "json_schema": true,

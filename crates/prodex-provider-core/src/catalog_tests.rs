@@ -74,7 +74,7 @@ fn model_choices_keep_order_and_deduplicate_aliases_and_unicode_custom_ids() {
         ProviderModelChoice::Model("gpt-6-astra".to_string())
     );
     assert_eq!(
-        choices[3],
+        choices[4],
         ProviderModelChoice::Model("gpt-6-luna".to_string())
     );
     assert!(choices.contains(&ProviderModelChoice::Model("gpt-5.6-sol".to_string())));
@@ -122,7 +122,7 @@ fn reasoning_resolves_long_unicode_model_ids_and_rejects_unicode_effort() {
     let resolution =
         provider_model_reasoning_resolution(ProviderId::OpenAi, Some(&query), Some("MAX")).unwrap();
 
-    assert_eq!(resolution.model_index, Some(6));
+    assert_eq!(resolution.model_index, Some(7));
     assert_eq!(
         resolution.default_reasoning_effort,
         Some(ProviderReasoningEffort::Medium)
@@ -225,4 +225,28 @@ fn retirement_does_not_cross_provider_entitlement_or_custom_boundaries_04393() {
             provider.label()
         );
     }
+}
+
+#[test]
+fn terra_api_metadata_and_supported_effort_are_not_inferred_from_old_terra_04394() {
+    let terra = provider_catalog_entry(ProviderId::OpenAi, "gpt-6.1-terra").unwrap();
+    assert_eq!(terra.context_window_tokens, Some(1_050_000));
+    assert_eq!(terra.max_output_tokens, Some(128_000));
+    assert!(terra.feature_flags.vision);
+    for effort in ["none", "low", "medium", "high", "xhigh", "max"] {
+        assert!(
+            provider_model_reasoning_resolution(ProviderId::OpenAi, Some(&terra.id), Some(effort))
+                .is_ok()
+        );
+    }
+    assert_eq!(
+        provider_model_reasoning_resolution(ProviderId::OpenAi, Some(&terra.id), Some("ultra")),
+        Err(ProviderModelReasoningError::UnsupportedEffort)
+    );
+    assert_eq!(
+        provider_catalog_entry(ProviderId::OpenAi, "gpt-5.6-terra")
+            .unwrap()
+            .id,
+        "gpt-5.6-terra"
+    );
 }

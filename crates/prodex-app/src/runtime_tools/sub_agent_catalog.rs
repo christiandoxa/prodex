@@ -8,8 +8,8 @@ use prodex_mojo_core::sub_agent_policy::{CatalogEntryPlan, CatalogStatusPlan};
 use prodex_provider_core::{
     ModelCatalogScope, PROVIDER_IMPLEMENTATION_ORDER, ProviderId, ProviderModelChoice,
     provider_implementation_registry, provider_model_is_retired_in_scope,
-    provider_model_reasoning_resolution, resolve_provider_model_choices,
-    resolve_provider_snapshot_model_choices,
+    provider_model_reasoning_resolution, provider_model_reasoning_resolution_with_catalog,
+    resolve_provider_model_choices, resolve_provider_snapshot_model_choices,
 };
 use serde_json::Value;
 use std::path::PathBuf;
@@ -64,6 +64,18 @@ impl EffectiveProviderModelCatalog {
             ProviderModelChoice::Model(model) if self.model_is_retired(provider, model))
             })
             .collect()
+    }
+
+    pub(crate) fn reasoning_resolution(
+        &self,
+        provider: ProviderId,
+        model: Option<&str>,
+        effort: Option<&str>,
+    ) -> Result<
+        prodex_provider_core::ProviderModelReasoningResolution,
+        prodex_provider_core::ProviderModelReasoningError,
+    > {
+        provider_model_reasoning_resolution_with_catalog(provider, model, effort, &self.models)
     }
 
     pub(crate) fn is_degraded(&self) -> bool {
@@ -139,7 +151,9 @@ pub(crate) fn effective_provider_model_catalog_from_paths(
         } else if source.required {
             usable_sources += 1;
         }
-        if models.len() >= model_limit {
+        // An OpenAI cache belongs to one authenticated account. A usable active
+        // profile snapshot must not be unioned with another account's shared cache.
+        if models.len() >= model_limit || (provider == ProviderId::OpenAi && usable) {
             break;
         }
     }
@@ -282,6 +296,19 @@ fn openai_catalog_auth_surface(
 
 fn catalog_sources(paths: &AppPaths, provider: ProviderId) -> anyhow::Result<Vec<CatalogSource>> {
     let mut sources = Vec::new();
+    if provider == ProviderId::OpenAi
+        && let Ok(state) = AppState::load(paths)
+        && let Some(profile) = state
+            .active_profile
+            .as_ref()
+            .and_then(|name| state.profiles.get(name))
+        && matches!(profile.provider, ProfileProvider::Openai)
+    {
+        sources.push(CatalogSource {
+            path: profile.codex_home.join(OPENAI_MODEL_CACHE_FILE),
+            required: false,
+        });
+    }
     if let Some(file) = optional_catalog_file(provider) {
         sources.push(CatalogSource {
             path: prodex_core::default_codex_home(paths)?.join(file),
@@ -390,12 +417,39 @@ pub(crate) fn canonical_sub_agent_model_choices(
     resolve_provider_model_choices(provider, &[], current_model)
 }
 
+pub(crate) fn effective_provider_model_reasoning_resolution(
+    provider: ProviderId,
+    model: Option<&str>,
+    effort: Option<&str>,
+) -> Result<
+    prodex_provider_core::ProviderModelReasoningResolution,
+    prodex_provider_core::ProviderModelReasoningError,
+> {
+    effective_provider_model_catalog(provider).reasoning_resolution(provider, model, effort)
+}
+
+pub(crate) fn effective_sub_agent_efforts(
+    provider: ProviderId,
+    model: Option<&str>,
+) -> Vec<SubAgentReasoningEffort> {
+    sub_agent_efforts_from_resolution(
+        effective_provider_model_reasoning_resolution(provider, model, None)
+            .expect("effective provider reasoning catalog is invalid"),
+    )
+}
+
 pub(crate) fn canonical_sub_agent_efforts(
     provider: ProviderId,
     model: Option<&str>,
 ) -> Vec<SubAgentReasoningEffort> {
     let resolution = provider_model_reasoning_resolution(provider, model, None)
         .expect("provider model reasoning resolution failed");
+    sub_agent_efforts_from_resolution(resolution)
+}
+
+fn sub_agent_efforts_from_resolution(
+    resolution: prodex_provider_core::ProviderModelReasoningResolution,
+) -> Vec<SubAgentReasoningEffort> {
     if prodex_mojo_core::sub_agent_policy::use_all_effort_suggestions(
         resolution.model_index.is_some(),
     )

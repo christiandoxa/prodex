@@ -43,7 +43,7 @@ pub(super) fn apply_overrides(
         let provider = main_provider(args);
         let configured_model = crate::codex_cli_config_override_value(&args.codex_args, "model");
         let model = args.local_model.as_deref().or(configured_model.as_deref());
-        if !crate::canonical_sub_agent_efforts(provider, model).contains(&parsed) {
+        if !crate::effective_sub_agent_efforts(provider, model).contains(&parsed) {
             return Err("reasoning_effort is unsupported for the selected model".to_string());
         }
         remove_codex_config_override(&mut args.codex_args, "model_reasoning_effort");
@@ -133,7 +133,7 @@ fn validate_configured_reasoning_effort(args: &SuperArgs) -> std::result::Result
         .map_err(|_| "reasoning_effort is unsupported".to_string())?;
     let configured_model = crate::codex_cli_config_override_value(&args.codex_args, "model");
     let model = args.local_model.as_deref().or(configured_model.as_deref());
-    if crate::canonical_sub_agent_efforts(main_provider(args), model).contains(&parsed) {
+    if crate::effective_sub_agent_efforts(main_provider(args), model).contains(&parsed) {
         Ok(())
     } else {
         Err("reasoning_effort is unsupported for the selected model".to_string())

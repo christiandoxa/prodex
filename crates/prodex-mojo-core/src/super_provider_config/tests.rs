@@ -150,6 +150,7 @@ fn super_provider_config_kernel_preserves_aliases_escaping_and_order() {
         "GPT-5.6-SOL",
         " gpt-5-mini ",
         "gpt-6.1-sol",
+        " GPT-6.1-TERRA ",
         "gpt-6-sol",
         "CODEX-AUTO-REVIEW",
     ] {
@@ -167,6 +168,7 @@ fn super_provider_config_kernel_preserves_aliases_escaping_and_order() {
         "gpt-5.6-sol",
         " GPT-5.6-TERRA ",
         "gpt-6.1-sol",
+        " GPT-6.1-TERRA ",
         "gpt-6-luna",
     ] {
         assert!(

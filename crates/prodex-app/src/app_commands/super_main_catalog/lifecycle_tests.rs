@@ -148,3 +148,114 @@ fn malformed_or_retired_only_chatgpt_cache_keeps_current_offline_models_04393() 
         assert_eq!(choices.last().unwrap().choice, ProviderModelChoice::Custom);
     }
 }
+
+#[test]
+fn terra_main_and_subagent_preserve_account_efforts_without_changing_api_defaults_04394() {
+    let fixture = Fixture::new("terra-efforts", chatgpt());
+    fs::write(
+        fixture.home.join("models_cache.json"),
+        json!({"models":[{
+            "slug":"gpt-6.1-terra", "visibility":"list", "supported_in_api":true,
+            "context_window":500000, "max_context_window":872000,
+            "supported_reasoning_levels":[{"effort":"low"},{"effort":"max"},{"effort":"ultra"}],
+            "default_reasoning_level":"low"
+        }]})
+        .to_string(),
+    )
+    .unwrap();
+    let before = fs::read(fixture.home.join("models_cache.json")).unwrap();
+    let main = main_model_choices(ProviderId::OpenAi, None);
+    assert_eq!(ids(&main), ["gpt-6.1-terra"]);
+    let sub = crate::effective_sub_agent_efforts(ProviderId::OpenAi, Some("terra"));
+    assert_eq!(
+        main[1].efforts.as_ref().unwrap(),
+        &sub.iter()
+            .map(|effort| effort.as_str().to_string())
+            .collect::<Vec<_>>()
+    );
+    let resolution = crate::effective_provider_model_reasoning_resolution(
+        ProviderId::OpenAi,
+        Some("gpt-6.1-terra"),
+        Some("ultra"),
+    )
+    .unwrap();
+    assert_eq!(
+        resolution.default_reasoning_effort,
+        Some(prodex_provider_core::ProviderReasoningEffort::Low)
+    );
+    assert_eq!(
+        resolution.selected_reasoning_effort,
+        Some(prodex_provider_core::ProviderReasoningEffort::Ultra)
+    );
+    assert_eq!(
+        before,
+        fs::read(fixture.home.join("models_cache.json")).unwrap()
+    );
+    secret_store::write_private_file_atomic(
+        &fixture.home.join("auth.json"),
+        json!({"auth_mode":"apikey","OPENAI_API_KEY":"synthetic-api-key"})
+            .to_string()
+            .as_bytes(),
+    )
+    .unwrap();
+    assert_eq!(
+        crate::effective_provider_model_reasoning_resolution(
+            ProviderId::OpenAi,
+            Some("gpt-6.1-terra"),
+            Some("ultra")
+        ),
+        Err(prodex_provider_core::ProviderModelReasoningError::UnsupportedEffort)
+    );
+    assert!(
+        crate::effective_provider_model_reasoning_resolution(
+            ProviderId::OpenAi,
+            Some("gpt-6.1-terra"),
+            Some("max")
+        )
+        .is_ok()
+    );
+}
+
+#[test]
+fn active_openai_account_catalog_precedes_unrelated_shared_cache_04394() {
+    use crate::AppStateIoExt;
+    let fixture = Fixture::new("active-account", chatgpt());
+    fixture.cache(&["shared-account-only"]);
+    let paths = crate::AppPaths::discover().unwrap();
+    let profile_home = paths.managed_profiles_root.join("synthetic-account");
+    secret_store::ensure_private_directory(&paths.root).unwrap();
+    secret_store::ensure_private_directory(&paths.managed_profiles_root).unwrap();
+    secret_store::ensure_private_directory(&profile_home).unwrap();
+    secret_store::write_private_file_atomic(
+        &profile_home.join("auth.json"),
+        chatgpt().to_string().as_bytes(),
+    )
+    .unwrap();
+    fs::write(profile_home.join("models_cache.json"), json!({"models":[{
+        "slug":"gpt-6.1-terra","visibility":"list","supported_reasoning_levels":[{"effort":"max"}]
+    }]}).to_string()).unwrap();
+    let mut state = crate::AppState::default();
+    state.active_profile = Some("synthetic-account".into());
+    state.profiles.insert(
+        "synthetic-account".into(),
+        crate::ProfileEntry {
+            codex_home: profile_home.clone(),
+            managed: true,
+            email: None,
+            provider: crate::ProfileProvider::Openai,
+        },
+    );
+    state.save(&paths).unwrap();
+    let catalog = effective_provider_model_catalog(ProviderId::OpenAi);
+    assert_eq!(catalog.model_ids(), ["gpt-6.1-terra"]);
+    assert_eq!(
+        ids(&main_model_choices(ProviderId::OpenAi, None)),
+        ["gpt-6.1-terra"]
+    );
+    // An unreadable active snapshot must retain the ordinary shared-cache fallback.
+    fs::write(profile_home.join("models_cache.json"), "{").unwrap();
+    assert_eq!(
+        effective_provider_model_catalog(ProviderId::OpenAi).model_ids(),
+        ["shared-account-only"]
+    );
+}
