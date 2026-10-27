@@ -10,8 +10,8 @@ mod policy_tests;
 
 pub(super) const PRESIDIO_ANALYZER_CONTAINER: &str = "presidio-analyzer";
 pub(super) const PRESIDIO_ANONYMIZER_CONTAINER: &str = "presidio-anonymizer";
-pub(super) const PRESIDIO_ANALYZER_IMAGE: &str = "ghcr.io/data-privacy-stack/presidio-analyzer:2.2.365@sha256:2a5e226748f5bc72e6426fa0cc7eec38dc84e6bc8fe599fd9bcf721a337aa1a4";
-pub(super) const PRESIDIO_ANONYMIZER_IMAGE: &str = "ghcr.io/data-privacy-stack/presidio-anonymizer:2.2.365@sha256:61b718359559655117da5c199ea1bc8e3e1d5f7d97e10cb77c2d2c78eb4cee63";
+pub(super) const PRESIDIO_ANALYZER_IMAGE: &str = "ghcr.io/data-privacy-stack/presidio-analyzer:2.2.366@sha256:036d2f9b3c274fb36497383acef8f2d5aea528a014801c2c3040fb067990c79c";
+pub(super) const PRESIDIO_ANONYMIZER_IMAGE: &str = "ghcr.io/data-privacy-stack/presidio-anonymizer:2.2.366@sha256:b4d9ec900135c694b84353e03e1abd5127ccdfcd916d32db73002c28f0eaddc7";
 pub(super) const PRESIDIO_ANALYZER_IMAGE_ENV: &str = "PRODEX_PRESIDIO_ANALYZER_IMAGE";
 pub(super) const PRESIDIO_ANONYMIZER_IMAGE_ENV: &str = "PRODEX_PRESIDIO_ANONYMIZER_IMAGE";
 const PRESIDIO_MANAGED_LABEL: &str = "com.prodex.presidio.managed";
@@ -272,7 +272,7 @@ mod tests {
     fn presidio_image_policy_accepts_newer_official_versions_and_rejects_old_or_foreign() {
         assert!(
             validate_presidio_image(
-                "ghcr.io/data-privacy-stack/presidio-analyzer:2.2.365",
+                "ghcr.io/data-privacy-stack/presidio-analyzer:2.2.366",
                 "analyzer"
             )
             .is_ok()
