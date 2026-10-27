@@ -115,7 +115,7 @@ fn super_provider_config_kernel_preserves_aliases_escaping_and_order() {
             .unwrap()
             .is_none()
     );
-    assert_eq!(deepseek_catalog_static_model_count().unwrap(), 7);
+    assert_eq!(deepseek_catalog_static_model_count().unwrap(), 8);
     let deepseek = deepseek_catalog_model_metadata(" DEEPSEEK-V4-PRO ")
         .unwrap()
         .unwrap();
