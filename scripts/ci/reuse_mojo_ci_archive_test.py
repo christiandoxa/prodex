@@ -66,12 +66,47 @@ class MojoArchiveReuseTests(unittest.TestCase):
             {"repository": {"full_name": "attacker/repo"}},
             {"status": "completed", "conclusion": "failure"},
             {"status": "completed", "conclusion": "cancelled"},
-            {"status": "queued", "conclusion": None},
+            {"status": "waiting", "conclusion": None},
         ]:
             with self.subTest(damaged=damaged):
                 self.assertFalse(MODULE.valid_ci_run(
                     run_details(**damaged), REPO, SHA,
                 ))
+
+    def test_ready_archive_is_reused_while_other_ci_jobs_are_queued(self):
+        # GitHub can report the whole matrix as queued after its archive job
+        # finished. That is not permission to publish, but the immutable archive
+        # can already replace redundant speculative compilation.
+        for status in ("queued", "pending"):
+            with self.subTest(status=status), tempfile.TemporaryDirectory() as directory:
+                def download(args, **_kwargs):
+                    root = Path(args[args.index("--dir") + 1])
+                    (root / ARCHIVE_NAME).write_bytes(b"TRUSTED-ARCHIVE" * 128)
+                    return subprocess.CompletedProcess(args, 0, "", "")
+                with mock.patch.object(MODULE, "gh_json", side_effect=[
+                    listing(status=status, conclusion=None),
+                    run_details(status=status, conclusion=None), archive_list(),
+                ]), mock.patch.object(MODULE.subprocess, "run", side_effect=download):
+                    self.assertTrue(MODULE.try_reuse(TARGET, SHA, REPO, Path(directory)))
+                self.assertEqual((Path(directory) / ARCHIVE_NAME).read_bytes(), b"TRUSTED-ARCHIVE" * 128)
+
+    def test_queued_run_without_a_ready_artifact_still_compiles_fresh(self):
+        with tempfile.TemporaryDirectory() as directory:
+            with mock.patch.object(MODULE, "gh_json", side_effect=[
+                listing(status="queued", conclusion=None),
+                run_details(status="queued", conclusion=None), {"artifacts": []},
+            ]), mock.patch.object(MODULE.subprocess, "run") as download:
+                self.assertFalse(MODULE.try_reuse(TARGET, SHA, REPO, Path(directory)))
+                download.assert_not_called()
+            self.assertEqual(list(Path(directory).iterdir()), [])
+
+    def test_active_status_with_terminal_failure_is_not_reusable(self):
+        for status in ("queued", "pending", "in_progress"):
+            with self.subTest(status=status):
+                self.assertFalse(MODULE.valid_ci_run(
+                    run_details(status=status, conclusion="failure"), REPO, SHA,
+                ))
+                self.assertEqual(MODULE.candidates(listing(status=status, conclusion="failure"), SHA), [])
 
     def test_only_eligible_exact_sha_push_runs_are_considered(self):
         runs = listing() + [
@@ -81,7 +116,7 @@ class MojoArchiveReuseTests(unittest.TestCase):
             {"databaseId": 500, "headSha": SHA, "status": "queued", "conclusion": None},
             {"databaseId": "not-integer", "headSha": SHA, "status": "completed", "conclusion": "success"},
         ]
-        self.assertEqual(MODULE.candidates(runs, SHA), [RUN_ID, 200])
+        self.assertEqual(MODULE.candidates(runs, SHA), [RUN_ID, 200, 500])
 
     def test_expired_empty_or_wrong_named_artifacts_fail_closed(self):
         self.assertTrue(MODULE.available_artifact(

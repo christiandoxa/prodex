@@ -34,6 +34,14 @@ def gh_json(*args):
     return json.loads(process.stdout)
 
 
+def reusable_run_state(status, conclusion):
+    # A matrix may return to queued while some producer jobs are already done.
+    # Only a ready immutable artifact is reused; release still waits for full CI.
+    return (
+        status in {"queued", "pending", "in_progress"} and conclusion in (None, "")
+    ) or (status == "completed" and conclusion == "success")
+
+
 def valid_ci_run(details, expected_repo, expected_sha):
     if not isinstance(details, dict):
         return False
@@ -43,13 +51,7 @@ def valid_ci_run(details, expected_repo, expected_sha):
         and details.get("head_branch") == "main"
         and details.get("path") == ".github/workflows/ci.yml"
         and details.get("repository", {}).get("full_name") == expected_repo
-        and (
-            details.get("status") == "in_progress"
-            or (
-                details.get("status") == "completed"
-                and details.get("conclusion") == "success"
-            )
-        )
+        and reusable_run_state(details.get("status"), details.get("conclusion"))
     )
 
 
@@ -61,12 +63,9 @@ def candidates(runs, expected_sha):
         run_id = run.get("databaseId")
         if not isinstance(run_id, int) or run_id <= 0:
             continue
-        if run.get("status") == "completed" and run.get("conclusion") == "success":
-            rank = 0
-        elif run.get("status") == "in_progress":
-            rank = 1
-        else:
+        if not reusable_run_state(run.get("status"), run.get("conclusion")):
             continue
+        rank = {"completed": 0, "in_progress": 1, "queued": 2, "pending": 2}[run["status"]]
         ranked.append((rank, -run_id, run_id))
     return [run_id for _, _, run_id in sorted(ranked)]
 
@@ -85,7 +84,7 @@ def try_reuse(target, target_sha, repository, output_dir):
     if target not in CI_ARCHIVE_TARGETS:
         return False
     run_listing = gh_json(
-        "run", "list", "--workflow", "ci.yml", "--event", "push",
+        "run", "list", "--repo", repository, "--workflow", "ci.yml", "--event", "push",
         "--limit", "50", "--json",
         "databaseId,headSha,status,conclusion",
     )

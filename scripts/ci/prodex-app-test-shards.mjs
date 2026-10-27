@@ -104,25 +104,24 @@ export const PRODEX_APP_LIB_SHARDS = Object.freeze([
   },
 ]);
 
-// Filters in each targeted shard are disjoint. Give each independent filter its
-// own runner; Windows stays grouped below to avoid recompiling the workspace
-// for every filter on the slower platform.
-function splitIndependentShards(shards) {
+// Keep two disjoint filters together so a runner pays the native compile,
+// artifact download and cache setup cost once. Each filter still executes
+// serially and preserves its exclusions and zero-test guard. Larger groups
+// retain parallelism without the old per-filter cache-service request storm.
+function packIndependentShards(shards) {
   return shards.flatMap((shard) => {
     if (!Array.isArray(shard.filters) || shard.filters.length < 2) return [shard];
-    return shard.filters.map((filter, index) => {
-      const split = {
-        suite: `${shard.suite}-${index + 1}`,
-        label: `${shard.label} ${index + 1}/${shard.filters.length}`,
-        filters: [filter],
-      };
-      if (shard.skipFilters) split.skipFilters = shard.skipFilters;
-      return split;
-    });
+    const groups = Math.ceil(shard.filters.length / 2);
+    return Array.from({ length: groups }, (_, index) => ({
+      ...shard,
+      suite: `${shard.suite}-${index + 1}`,
+      label: `${shard.label} ${index + 1}/${groups}`,
+      filters: shard.filters.slice(index * 2, index * 2 + 2),
+    }));
   });
 }
 
-export const PRODEX_APP_FULL_TEST_SHARDS = Object.freeze(splitIndependentShards(PRODEX_APP_LIB_SHARDS));
+export const PRODEX_APP_FULL_TEST_SHARDS = Object.freeze(packIndependentShards(PRODEX_APP_LIB_SHARDS));
 
 
 // The scheduled full suite previously ran ~388 unassigned prodex-app tests

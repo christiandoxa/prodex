@@ -15,5 +15,5 @@ test("release Mojo CI archive reuse rejects bad provenance and keeps a strict co
   );
   if (result.error) throw result.error;
   assert.equal(result.status, 0, result.stdout + "\n" + result.stderr);
-  assert.match(result.stderr, /Ran 8 tests/);
+  assert.match(result.stderr, /Ran 11 tests/);
 });

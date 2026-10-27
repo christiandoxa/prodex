@@ -119,7 +119,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       - name: Restore exact-input Mojo archive from trusted main cache
-        if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+        if: ${{ github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') }}
         id: mojo-archive-cache
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
         with:
@@ -152,15 +152,7 @@ jobs:
       - name: Ensure LLVM archive tools
         shell: bash
         run: |
-          set -euo pipefail
-          if command -v llvm-nm >/dev/null 2>&1 &&
-             command -v llvm-ar >/dev/null 2>&1 &&
-             command -v llvm-lib >/dev/null 2>&1; then
-            echo "LLVM archive tools already installed"
-          else
-            sudo apt-get update
-            sudo apt-get install -y llvm
-          fi
+          bash scripts/ci/ensure-llvm-archive-tools.sh
 
       - name: Build strict runtime Mojo archive
         if: ${{ steps.mojo-archive-cache.outputs.cache-hit != 'true' }}
@@ -232,7 +224,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       - name: Restore exact-input platform Mojo archive from trusted main cache
-        if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+        if: ${{ github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') }}
         id: mojo-archive-cache
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
         with:
@@ -265,15 +257,7 @@ jobs:
       - name: Ensure LLVM archive tools
         shell: bash
         run: |
-          set -euo pipefail
-          if command -v llvm-nm >/dev/null 2>&1 &&
-             command -v llvm-ar >/dev/null 2>&1 &&
-             command -v llvm-lib >/dev/null 2>&1; then
-            echo "LLVM archive tools already installed"
-          else
-            sudo apt-get update
-            sudo apt-get install -y llvm
-          fi
+          bash scripts/ci/ensure-llvm-archive-tools.sh
 
       - name: Build strict runtime Mojo archive
         if: ${{ steps.mojo-archive-cache.outputs.cache-hit != 'true' }}
@@ -362,6 +346,7 @@ jobs:
       CARGO_PROFILE_DEV_DEBUG: "0"
       CARGO_PROFILE_TEST_DEBUG: "0"
       RUSTC_WRAPPER: sccache
+      SCCACHE_GHA_RW_MODE: ${{ matrix.save_cache && 'READ_WRITE' || 'READ_ONLY' }}
       PRODEX_MOJO_ARCHIVE: ${{ github.workspace }}/.prodex-ci/mojo-runtime/x86_64-unknown-linux-gnu/libprodex_mojo_core.a
     strategy:
       fail-fast: false
@@ -556,6 +541,7 @@ jobs:
       CARGO_PROFILE_DEV_DEBUG: "0"
       CARGO_PROFILE_TEST_DEBUG: "0"
       RUSTC_WRAPPER: sccache
+      SCCACHE_GHA_RW_MODE: ${{ matrix.save_cache && 'READ_WRITE' || 'READ_ONLY' }}
       PRODEX_MOJO_ARCHIVE: ${{ github.workspace }}/.prodex-ci/mojo-runtime/x86_64-pc-windows-msvc/prodex_mojo_core.lib
     strategy:
       fail-fast: false
@@ -697,6 +683,7 @@ jobs:
       CARGO_PROFILE_DEV_DEBUG: "0"
       CARGO_PROFILE_TEST_DEBUG: "0"
       RUSTC_WRAPPER: sccache
+      SCCACHE_GHA_RW_MODE: ${{ matrix.save_cache && 'READ_WRITE' || 'READ_ONLY' }}
       PRODEX_MOJO_ARCHIVE: ${{ github.workspace }}/.prodex-ci/mojo-runtime/x86_64-pc-windows-msvc/prodex_mojo_core.lib
     strategy:
       fail-fast: false
@@ -1399,11 +1386,19 @@ jobs:
       - name: Install sccache
         uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
 
+      - name: Fingerprint host release dependency inputs
+        id: rust-deps-cache-key
+        run: python3 scripts/ci/release_cargo_deps_cache_key.py --lockfile Cargo.lock --output "$GITHUB_OUTPUT"
+
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
         with:
           cache-bin: false
-          save-if: false
+          cache-workspace-crates: "false"
+          add-rust-environment-hash-key: "false"
+          shared-key: npm-host-release-deps-v1
+          key: rust1.99.1-mojo1.2.0-${{ runner.os }}-${{ runner.arch }}-x86_64-unknown-linux-gnu-${{ steps.rust-deps-cache-key.outputs.external_sha256 }}
+          save-if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
 
       - name: Install Node.js
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
@@ -1530,6 +1525,7 @@ jobs:
     timeout-minutes: 30
     env:
       RUSTC_WRAPPER: sccache
+      SCCACHE_GHA_RW_MODE: ${{ matrix.save_cache && 'READ_WRITE' || 'READ_ONLY' }}
       PRODEX_MOJO_ARCHIVE: ${{ github.workspace }}/.prodex-ci/mojo-runtime/x86_64-unknown-linux-gnu/libprodex_mojo_core.a
     strategy:
       fail-fast: false
@@ -1637,6 +1633,7 @@ jobs:
       CARGO_TERM_COLOR: always
       RUST_BACKTRACE: "1"
       RUSTC_WRAPPER: sccache
+      SCCACHE_GHA_RW_MODE: ${{ matrix.save_cache && 'READ_WRITE' || 'READ_ONLY' }}
       PRODEX_MOJO_ARCHIVE: ${{ github.workspace }}/.prodex-ci/mojo-runtime/x86_64-unknown-linux-gnu/libprodex_mojo_core.a
 
     steps:
@@ -1753,6 +1750,7 @@ jobs:
       CARGO_TERM_COLOR: always
       RUST_BACKTRACE: "1"
       RUSTC_WRAPPER: sccache
+      SCCACHE_GHA_RW_MODE: ${{ matrix.save_cache && 'READ_WRITE' || 'READ_ONLY' }}
       PRODEX_MOJO_ARCHIVE: ${{ github.workspace }}/.prodex-ci/mojo-runtime/x86_64-unknown-linux-gnu/libprodex_mojo_core.a
 
     steps:

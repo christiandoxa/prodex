@@ -2,6 +2,45 @@
 
 Prodex test speed should come from process-level sharding first, not from making every Rust test process run with high harness concurrency.
 
+## Workflow Performance and Cache Boundaries
+
+CI, nightly tests, release, and calibration workflows retain their complete
+correctness, platform, ABI, security, smoke, and provenance checks. Optimizations
+reuse immutable build inputs, not previous test outcomes or finished user binaries.
+
+- Main CI, scheduled main runs, release archive producers and fresh benchmarks
+  share the exact `mojo-static-v2` input key and archive path. The key binds Mojo
+  source, build owners, compiler version, native target and CPU. Prefix cache
+  restores are forbidden; cache misses retain strict compilation. Release and
+  CI always validate the linked archive ABI and absence of compiler-runtime
+  dependencies, and release publication still requires successful exact-SHA CI.
+- An exact-source main push CI run can report `queued` or `pending` while its
+  archive is already uploaded. Archive reuse checks identity and artifact
+  readiness independently from overall scheduling status; it rejects failed,
+  cancelled, foreign-source, expired and absent artifacts. This never authorizes
+  publication before all required CI checks succeed.
+- Hosted Ubuntu's complete versioned LLVM installation is used directly when
+  available. Missing tools retain the checked package-install fallback; discovery
+  never replaces the unconditional archive validation.
+- Nightly tests pack at most two disjoint filter groups per runner and cap active
+  test runners at 16. Every group still runs with its original skips, serial
+  test execution and zero-test rejection. The shared matrix cache writer and read-only sccache
+  consumers in CI and nightly tests reduce cache-service throttling. Workspace and remainder coverage
+  remain explicit, including new tests not yet assigned to a targeted filter.
+- Platform calibration shares release dependency caches only for the same
+  compiler, target, CPU, host architecture, ThinLTO/codegen profile and external
+  lockfile records. Workspace crates and binaries are not cached. Historical
+  sources without the fingerprint helper get a source-specific isolated key.
+  Codegen A/B variants remain separate; calibration never publishes a release.
+- The npm package smoke still compiles an optimized binary. Its separate
+  host-release dependency cache can be populated only by main pushes.
+
+Use workflow job/step duration artifacts to compare cold and warm runs, including
+queue time and runner-minutes. Do not interpret a cache hit as proof that code
+was tested, or remove required tests to achieve a timing target. The small
+upstream-compatibility watchdog intentionally keeps live upstream observations;
+stale network responses must not be cached to make a drift check appear faster.
+
 ## Strategy
 
 - Fast lanes should split safe suites across independent CI jobs or processes.

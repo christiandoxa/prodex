@@ -24,7 +24,7 @@ test("prodex-app shard manifest is disjoint and remainder-complete", () => {
   assert.deepEqual(validateShards(PRODEX_APP_FULL_TEST_SHARDS), []);
   assert.equal(PRODEX_APP_LIB_SHARDS.length, 11);
   assert.equal(
-    PRODEX_APP_FULL_TEST_SHARDS.filter((shard) => shard.filters?.length > 1).length,
+    PRODEX_APP_FULL_TEST_SHARDS.filter((shard) => shard.filters?.length > 2).length,
     0,
   );
   assert.deepEqual(
@@ -93,7 +93,7 @@ test("prodex-app shard manifest is disjoint and remainder-complete", () => {
   assert.deepEqual(new Set(fullFilters), new Set(PRODEX_APP_LIB_FILTERS));
   assert.equal(
     fullMatrix.include.filter((entry) => entry.suite.startsWith("launch-providers-")).length,
-    8,
+    4,
   );
   const windowsBaseFilters = windowsMatrix.include
     .slice(0, 8)
@@ -455,4 +455,21 @@ test("nightly full suite shards unassigned cases without changing ordinary app o
   assert.equal(dryRun.status, 0, dryRun.stderr);
   assert.match(dryRun.stdout, /full-remainder-selection: cargo test [^\n]+ --skip/);
   assert.match(dryRun.stdout, /full-remainder-foundation: cargo test /);
+});
+
+
+test("nightly packs at most two disjoint filters per runner without changing coverage", () => {
+  const grouped = PRODEX_APP_FULL_TEST_SHARDS.filter((shard) => shard.filters);
+  assert.ok(grouped.some((shard) => shard.filters.length === 2), "tiny shards must share compilation");
+  assert.ok(grouped.every((shard) => shard.filters.length <= 2));
+  assert.deepEqual(grouped.flatMap((shard) => shard.filters), PRODEX_APP_LIB_FILTERS);
+  assert.equal(new Set(grouped.flatMap((shard) => shard.filters)).size, PRODEX_APP_LIB_FILTERS.length);
+  const full = githubMatrix({ includeWorkspace: true });
+  assert.ok(full.include.length < 30, "runner fan-out must not recreate the old 43 compile/cache clients");
+  assert.equal(full.include.filter((entry) => entry.save_cache).length, 1);
+  const workflow = readFileSync(".github/workflows/full-test.yml", "utf8");
+  assert.match(workflow, /max-parallel: 16/);
+  assert.match(workflow, /SCCACHE_GHA_RW_MODE:.*matrix.save_cache.*READ_WRITE.*READ_ONLY/);
+  assert.match(workflow, /fail-fast: false/);
+  assert.match(workflow, /--test-threads=1/);
 });

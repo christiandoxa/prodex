@@ -78,6 +78,26 @@ jobs:
           node-version: 22
           package-manager-cache: false
 
+      - name: Restore exact-input benchmark Mojo archive from trusted main
+        if: ${{ inputs.log_source == 'fresh-benchmark' && github.ref == 'refs/heads/main' }}
+        id: mojo-archive-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
+        with:
+          path: target/mojo-runtime/x86_64-unknown-linux-gnu/libprodex_mojo_core.a
+          key: mojo-static-v2-${{ runner.os }}-x86_64-unknown-linux-gnu-x86-64-mojo-${{ env.MOJO_VERSION }}-rust1.99.1-${{ hashFiles('mojo/**/*.mojo', 'crates/prodex-mojo-core/build.rs', 'crates/prodex-mojo-core/build/*.rs', 'crates/prodex-mojo-core/Cargo.toml') }}
+
+      - name: Validate cached benchmark Mojo archive
+        if: ${{ steps.mojo-archive-cache.outputs.cache-hit == 'true' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          archive="${GITHUB_WORKSPACE}/target/mojo-runtime/x86_64-unknown-linux-gnu/libprodex_mojo_core.a"
+          test -s "${archive}"
+          nm -g "${archive}" | grep -F prodex_mojo_abi_version
+          nm -g "${archive}" | grep -F prodex_runtime_profile_rotation_order_batch
+          if nm -u "${archive}" | grep -F KGEN_CompilerRT_; then exit 1; fi
+          echo "PRODEX_MOJO_ARCHIVE=${archive}" >> "${GITHUB_ENV}"
+
       - name: Install Rust toolchain
         if: ${{ inputs.log_source == 'fresh-benchmark' }}
         uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
@@ -85,14 +105,14 @@ jobs:
           toolchain: 1.99.1
 
       - name: Install pinned uv
-        if: ${{ inputs.log_source == 'fresh-benchmark' }}
+        if: ${{ inputs.log_source == 'fresh-benchmark' && steps.mojo-archive-cache.outputs.cache-hit != 'true' }}
         uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
         with:
           version: ${{ env.UV_VERSION }}
           enable-cache: false
 
       - name: Install pinned Mojo toolchain
-        if: ${{ inputs.log_source == 'fresh-benchmark' }}
+        if: ${{ inputs.log_source == 'fresh-benchmark' && steps.mojo-archive-cache.outputs.cache-hit != 'true' }}
         shell: bash
         run: |
           set -euo pipefail
