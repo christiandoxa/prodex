@@ -28,7 +28,7 @@ pub use self::ops::{create_codex_home_if_missing, ensure_managed_profiles_root};
 pub use self::prepare::{
     maintain_managed_codex_session_file, maintain_managed_codex_sessions,
     maintain_recent_managed_codex_sessions, prepare_managed_codex_home,
-    prepare_managed_codex_home_for_runtime_launch,
+    prepare_managed_codex_home_for_auth_update, prepare_managed_codex_home_for_runtime_launch,
     prepare_managed_codex_home_for_runtime_launch_with_local_credentials,
     prepare_managed_codex_home_with_local_credentials, repair_managed_codex_goal_attachments,
 };

@@ -241,6 +241,18 @@ dry-run report templates. Rust prepares display DTOs, redacts model/UUID values,
 sanitizes platform paths and launcher commands, and performs overlay filesystem writes; renderer
 errors propagate without a Rust text-template fallback.
 
+Login credential commits use structural shared-home preparation only. They retain
+private auth files, validated shared links, atomic state persistence, and lifecycle
+journals, but do not scan historical rollouts or repair goal attachments under the
+profile lifecycle lock. Runtime launch and explicit maintenance still own those
+repairs. OpenAI account matching prefers identity from local auth and cached email;
+legacy network identity discovery during automatic login runs outside the global
+lifecycle lock. Before committing, login reloads state and rechecks both profile
+entries and local account identities; a changing snapshot is retried at most three
+times rather than overwriting another account. Concurrent quota commands can read
+state while that network lookup waits. Named-profile interactive authentication
+retains its existing lifecycle exclusion against remove/recreate races.
+
 ## Boundary Guard
 
 Run:

@@ -22,6 +22,7 @@ mod api_key;
 mod claude;
 mod copilot_import;
 mod home;
+mod identity_commit;
 pub(super) mod lifecycle_support;
 mod login_menu;
 mod profile_names;
@@ -48,13 +49,13 @@ use super::import_export::{
     write_profile_lifecycle_plan,
 };
 use super::manage::print_profile_panel;
-use super::{prepare_profile_codex_home, write_secret_text_file};
+use super::{prepare_profile_home_for_auth_update, write_secret_text_file};
 use crate::{
     AppPaths, AppState, AppStateIoExt, CodexPassthroughArgs, ProfileEntry, ProfileProvider,
     activate_profile, agy_bin, codex_child_plan, exit_with_status, fetch_profile_email,
     fetch_profile_identity, find_profile_by_identity, login_with_claude_oauth,
-    managed_profile_home_path, persist_login_home, prepare_managed_codex_home, read_auth_summary,
-    remove_dir_if_exists, required_auth_json_text, run_child_plan, unique_profile_name_for_email,
+    managed_profile_home_path, persist_login_home, read_auth_summary, remove_dir_if_exists,
+    required_auth_json_text, run_child_plan, unique_profile_name_for_email,
     update_existing_profile_auth, write_profile_openai_compatible_base_url,
 };
 use prodex_runtime_launch::ChildProcessPlan;
@@ -124,7 +125,7 @@ fn prepare_profile_login_home(
         .get(profile_name)
         .with_context(|| format!("profile '{}' is missing", profile_name))?;
     validate_profile_login_provider(profile_name, &profile.provider, login_method)?;
-    prepare_profile_codex_home(paths, profile)?;
+    prepare_profile_home_for_auth_update(paths, profile)?;
     Ok(profile.codex_home.clone())
 }
 
@@ -248,40 +249,14 @@ fn login_with_auto_profile(paths: &AppPaths, login_request: &LoginRequest) -> Re
             login_home.display()
         )
     })?;
-    let email = identity
-        .email
-        .as_deref()
-        .context("logged-in account identity did not include an email")?;
-
-    let _lock = acquire_profile_lifecycle_lock(paths)?;
-    let (mut state, _) = load_profile_state_with_profile_recovery_locked(paths, true)?;
-    let profile_name = find_profile_by_identity(&mut state, &identity)?;
-    match auto_login_transition(
+    identity_commit::finish_identity_login(
+        paths,
         login_request.method,
-        Some(&auth_label),
-        profile_name.is_some(),
-    ) {
-        prodex_mojo_core::profile_login_policy::AutoLoginTransition::IdentityExisting => {
-            let profile_name = profile_name
-                .as_deref()
-                .context("Mojo selected an existing login target without a profile")?;
-            finish_auto_login_for_existing_profile(
-                paths,
-                &mut state,
-                &login_home,
-                profile_name,
-                email,
-                &auth_json,
-            )?;
-        }
-        prodex_mojo_core::profile_login_policy::AutoLoginTransition::IdentityNew => {
-            if profile_name.is_some() {
-                bail!("Mojo selected a new login target for an existing profile");
-            }
-            finish_auto_login_for_new_profile(paths, &mut state, &login_home, email)?;
-        }
-        route => unreachable!("Mojo identity transition returned unexpected route {route:?}"),
-    }
+        &login_home,
+        &auth_label,
+        &auth_json,
+        &identity,
+    )?;
     Ok(status)
 }
 
@@ -373,7 +348,7 @@ fn finish_auto_login_for_new_profile(
         },
     )?;
     persist_login_home(login_home, &codex_home)?;
-    prepare_managed_codex_home(paths, &codex_home)?;
+    prodex_shared_codex_fs::prepare_managed_codex_home_for_auth_update(paths, &codex_home)?;
 
     state.profiles.insert(profile_name.clone(), desired_profile);
     activate_profile(state, &profile_name);
