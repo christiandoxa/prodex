@@ -52,11 +52,7 @@ impl EffectiveProviderModelCatalog {
         current_model: Option<&str>,
         discovered: &[String],
     ) -> Vec<ProviderModelChoice> {
-        let choices = if discovered.is_empty() {
-            resolve_provider_model_choices(provider, &[], current_model)
-        } else {
-            resolve_provider_snapshot_model_choices(provider, discovered, current_model)
-        };
+        let choices = provider_model_choices_from_discovery(provider, discovered, current_model);
         choices
             .into_iter()
             .filter(|choice| {
@@ -408,6 +404,29 @@ fn catalog_entry_with_id(mut value: Value, provider: ProviderId, id: &str, set_i
         );
     }
     value
+}
+
+/// Imported account inventories restrict selection; Prodex-generated runtime
+/// catalogs are derived metadata, not entitlement snapshots. They must not hide
+/// newly bundled IDs after an upgrade. Both pickers share this source boundary.
+pub(crate) fn provider_model_choices_from_discovery(
+    provider: ProviderId,
+    discovered: &[String],
+    current_model: Option<&str>,
+) -> Vec<ProviderModelChoice> {
+    let account_inventory = match provider {
+        ProviderId::OpenAi | ProviderId::Copilot | ProviderId::Kiro => true,
+        ProviderId::Anthropic | ProviderId::DeepSeek | ProviderId::Gemini | ProviderId::Local => {
+            false
+        }
+    };
+    if discovered.is_empty() {
+        canonical_sub_agent_model_choices(provider, current_model)
+    } else if account_inventory {
+        resolve_provider_snapshot_model_choices(provider, discovered, current_model)
+    } else {
+        resolve_provider_model_choices(provider, discovered, current_model)
+    }
 }
 
 pub(crate) fn canonical_sub_agent_model_choices(

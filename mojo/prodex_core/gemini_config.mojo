@@ -303,7 +303,7 @@ def gemini_config_put_json_string_literal(
 
 
 def gemini_config_model_uses_thinking_level(view: ProdexRichStringView) -> Bool:
-    return gemini_config_view_contains["gemini-3"](view, True) or gemini_config_view_contains[
+    return gemini_config_view_contains["gemini-4"](view, True) or gemini_config_view_contains["gemini-3"](view, True) or gemini_config_view_contains[
         "gemma-3"
     ](view, True) or gemini_config_view_contains["gemma-4"](view, True)
 
@@ -338,6 +338,8 @@ def gemini_config_thinking(
         )
     if gemini_config_model_uses_thinking_level(input.primary):
         var level = StringSlice("HIGH")
+        if effort.len == 0 and gemini_config_view_contains["gemini-4-argon"](input.primary, True):
+            level = StringSlice("MEDIUM")
         if gemini_config_effort_is(effort, StringSlice("low")):
             level = StringSlice("LOW")
         elif gemini_config_effort_is(effort, StringSlice("medium")):

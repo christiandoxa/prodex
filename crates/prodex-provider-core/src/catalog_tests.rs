@@ -210,7 +210,7 @@ fn retirement_does_not_cross_provider_entitlement_or_custom_boundaries_04393() {
         (ProviderId::OpenAi, "gpt-5.4"), // Still supported with API-key authentication.
         (ProviderId::Anthropic, "claude-opus-4-6"),
         (ProviderId::Copilot, "gpt-5.3-codex"), // Copilot's LTS model.
-        (ProviderId::Copilot, "claude-sonnet-4-6"), // Annual-plan entitlement.
+        (ProviderId::Copilot, "claude-sonnet-4.6"), // Annual-plan entitlement.
         (ProviderId::Gemini, "gemini-2.5-pro"),
         (ProviderId::Gemini, "gemini-3-flash-preview"),
         (ProviderId::Kiro, "gpt-5.6-luna"),
@@ -249,4 +249,52 @@ fn terra_api_metadata_and_supported_effort_are_not_inferred_from_old_terra_04394
             .id,
         "gpt-5.6-terra"
     );
+}
+
+#[test]
+fn provider_specific_new_models_preserve_wire_ids_and_aliases_04394() {
+    for (provider, id) in [
+        (ProviderId::Copilot, "gpt-6.1-terra"),
+        (ProviderId::Copilot, "claude-haiku-5.5"),
+        (ProviderId::Anthropic, "claude-haiku-5-5"),
+        (ProviderId::Copilot, "gemini-4-argon"),
+        (ProviderId::Gemini, "gemini-4-argon"),
+    ] {
+        assert!(
+            resolve_provider_model_choices(provider, &[], None)
+                .contains(&ProviderModelChoice::Model(id.into()))
+        );
+    }
+    assert_eq!(
+        provider_catalog_entry(ProviderId::Copilot, "terra")
+            .unwrap()
+            .id,
+        "gpt-6.1-terra"
+    );
+    for (alias, native) in [
+        ("claude-sonnet-5-5", "claude-sonnet-5.5"),
+        ("claude-opus-5-5", "claude-opus-5.5"),
+        ("claude-haiku-4-5", "claude-haiku-4.5"),
+    ] {
+        assert_eq!(
+            provider_catalog_entry(ProviderId::Copilot, alias)
+                .unwrap()
+                .id,
+            native
+        );
+        assert_eq!(
+            provider_catalog_entry(ProviderId::Anthropic, alias)
+                .unwrap()
+                .id,
+            alias
+        );
+    }
+    assert!(provider_model_is_retired(
+        ProviderId::Copilot,
+        "claude-opus-4.7"
+    ));
+    assert!(!provider_model_is_retired(
+        ProviderId::Copilot,
+        "claude-sonnet-4.6"
+    ));
 }

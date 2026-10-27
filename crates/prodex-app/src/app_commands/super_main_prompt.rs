@@ -1,8 +1,5 @@
 use super::super_prompt;
-use crate::{
-    AppPaths, canonical_sub_agent_model_choices, codex_cli_config_override_value,
-    effective_sub_agent_efforts,
-};
+use crate::{AppPaths, codex_cli_config_override_value, effective_sub_agent_efforts};
 #[path = "super_main_catalog.rs"]
 mod catalog;
 #[cfg(test)]
@@ -289,15 +286,7 @@ pub(super) fn super_sub_agent_model_choices(
     current_model: Option<&str>,
     configured_models: &[String],
 ) -> Vec<prodex_provider_core::ProviderModelChoice> {
-    if configured_models.is_empty() {
-        canonical_sub_agent_model_choices(provider, current_model)
-    } else {
-        prodex_provider_core::resolve_provider_snapshot_model_choices(
-            provider,
-            configured_models,
-            current_model,
-        )
-    }
+    crate::provider_model_choices_from_discovery(provider, configured_models, current_model)
 }
 
 pub(super) fn prompt_super_reasoning_effort(

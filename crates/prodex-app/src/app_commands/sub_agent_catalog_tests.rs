@@ -483,11 +483,16 @@ fn provider_matrix_uses_account_models_and_deduplicates_dynamic_ids() {
             "{provider:?} lost custom entry"
         );
         for model in prodex_provider_core::provider_model_catalog(provider) {
-            assert!(
-                !choices.contains(&prodex_provider_core::ProviderModelChoice::Model(
-                    model.id.to_string()
+            let account_bound = matches!(
+                provider,
+                ProviderId::OpenAi | ProviderId::Copilot | ProviderId::Kiro
+            );
+            assert_eq!(
+                choices.contains(&prodex_provider_core::ProviderModelChoice::Model(
+                    model.id.into()
                 )),
-                "{provider:?} reintroduced absent bundled model {}",
+                !account_bound,
+                "{provider:?}: incorrect discovery boundary for {}",
                 model.id
             );
         }
@@ -598,4 +603,22 @@ fn kiro_retirement_is_scoped_and_missing_account_models_are_not_reintroduced_043
         ))
     );
     let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn generated_gemini_catalog_does_not_hide_new_native_models_04394() {
+    let configured = vec!["gemini-3.8-flash".to_string()];
+    let choices = super_sub_agent_model_choices(ProviderId::Gemini, None, &configured);
+    assert!(
+        choices.contains(&prodex_provider_core::ProviderModelChoice::Model(
+            "gemini-4-argon".into()
+        ))
+    );
+    let account = super_sub_agent_model_choices(ProviderId::Copilot, None, &configured);
+    assert!(
+        !account.contains(&prodex_provider_core::ProviderModelChoice::Model(
+            "gemini-4-argon".into()
+        ))
+    );
+    assert_eq!(configured, ["gemini-3.8-flash"]);
 }

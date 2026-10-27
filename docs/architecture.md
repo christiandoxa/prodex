@@ -280,3 +280,11 @@ Kiro model-catalog array precedence, aliases, Unicode trimming, and optional
 metadata selection use a versioned Mojo plan. Rust retains Serde tree acquisition,
 checked output mapping, canonical catalog deduplication, and provider-limit checks;
 Mojo errors do not trigger a Rust catalog-policy fallback.
+
+
+Provider catalog refresh preserves the distinction between account inventories and
+Prodex-generated runtime metadata. OpenAI, Copilot, and Kiro account snapshots
+remain authoritative. Generated Gemini, DeepSeek, and local catalogs supplement
+current bundled choices instead of hiding newly supported models after upgrades.
+Copilot Claude wire IDs use dotted versions; native Anthropic IDs keep their
+hyphenated versions, and prior Copilot spellings remain explicit compatibility aliases.
