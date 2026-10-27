@@ -123,7 +123,7 @@ Schema composition; all other Codebase Memory tools remain available.
 Playwright MCP requires validated Node.js 18+, `npx`, and Playwright MCP `0.0.79` or newer. Prodex invokes `npx --no-install @playwright/mcp`, probes the installed package version, and rejects an installed version below the minimum. `0.0.83` is the current latest-stable release-qualified reference.
 Presidio remains an explicit service selection and is checked by its existing doctor path. Prodex accepts official Presidio analyzer/anonymizer images at `2.2.364` or newer; the release-qualified defaults remain digest-pinned, while newer official images can be supplied with `PRODEX_PRESIDIO_ANALYZER_IMAGE` and `PRODEX_PRESIDIO_ANONYMIZER_IMAGE`. `--require-tool presidio` additionally requires healthy services
 and `fail_mode = "closed"`, so an inspection failure cannot silently bypass
-redaction. The release-qualified 2.2.366 defaults are pinned to official image-index
+redaction. The release-qualified 2.2.365 defaults are pinned to official image-index
 SHA-256 digests. Isolated service probes verify email detection, replacement and
 health responses without exposing host ports or using user data. The anonymizer
 image contains `cryptography` 50.0.1, outside the previously documented

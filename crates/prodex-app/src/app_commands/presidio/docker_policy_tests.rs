@@ -60,7 +60,7 @@ fn image_policy_preserves_diagnostics_and_validation_precedence() {
         ),
         (
             "ghcr.io/data-privacy-stack/presidio-analyzer:2.2.363@wrong",
-            "Presidio analyzer 2.2.363 is incompatible; Prodex requires 2.2.364 or newer. Update Presidio to the latest stable release (release-qualified reference: 2.2.366)",
+            "Presidio analyzer 2.2.363 is incompatible; Prodex requires 2.2.364 or newer. Update Presidio to the latest stable release (release-qualified reference: 2.2.365)",
         ),
         (
             "ghcr.io/data-privacy-stack/presidio-analyzer:3.0.0@wrong",
