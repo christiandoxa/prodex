@@ -4,8 +4,9 @@ import test from "node:test";
 import { validateReleaseContainerPublication, validateReleaseMalwareGate } from "./supply-chain-guard.mjs";
 
 const workflow = readFileSync(".github/workflows/standalone-release.yml", "utf8");
+const targetWorkflow = readFileSync(".github/workflows/release-target.yml", "utf8");
 const jobs = new Map([...workflow.matchAll(/^  ([a-z][a-z0-9-]*):\n([\s\S]*?)(?=^  [a-z][a-z0-9-]*:|$(?![\s\S]))/gm)]
-  .filter(([, name, body]) => body.includes("    runs-on:"))
+  .filter(([, name, body]) => (body.includes("    runs-on:") || body.includes("    uses:")))
   .map(([, name, body]) => [name, body]));
 
 function needs(name) {
@@ -36,7 +37,7 @@ test("manual release workflow defaults to nonpublishing verification", () => {
 });
 
 test("read-only binaries, smoke and SBOM overlap full CI without losing source checks", () => {
-  for (const name of ["build-mojo-archives", "build", "artifact-smoke", "prepare-release", "validate-release-assets"]) {
+  for (const name of ["build", "artifact-smoke", "prepare-release", "validate-release-assets"]) {
     const dependencies = ancestors(name);
     assert.ok(dependencies.has("release-preflight"), `${name} needs validated immutable source`);
     assert.ok(!dependencies.has("verify-ci"), `${name} must not idle behind full CI`);
@@ -68,7 +69,7 @@ test("every publishing side effect waits for successful exact-source CI and asse
 });
 
 test("verification verdict waits for every build and smoke gate, not skipped publishing jobs", () => {
-  for (const name of ["verify-ci", "build-mojo-archives", "build", "artifact-smoke", "prepare-release", "validate-release-assets"]) {
+  for (const name of ["verify-ci", "build", "artifact-smoke", "prepare-release", "validate-release-assets"]) {
     assert.ok(needs("verify-release").includes(name), `verification verdict omits ${name}`);
   }
   assert.match(jobs.get("verify-release"), /always\(\)/);
@@ -81,7 +82,7 @@ test("verification verdict waits for every build and smoke gate, not skipped pub
 
 
 test("supply-chain guard rejects missing publication gates and unscanned asset substitution", () => {
-  assert.deepEqual(validateReleaseContainerPublication(workflow), []);
+  assert.deepEqual(validateReleaseContainerPublication(workflow, targetWorkflow), []);
   assert.deepEqual(validateReleaseMalwareGate(workflow), []);
   for (const marker of [
     "    if: ${{ inputs.publish }}",
@@ -92,7 +93,7 @@ test("supply-chain guard rejects missing publication gates and unscanned asset s
     'test "${RELEASE_PUBLISH}" = true',
   ]) {
     const damaged = workflow.replace(jobs.get("publish-github-release"), jobs.get("publish-github-release").replace(marker, ""));
-    assert.ok(validateReleaseContainerPublication(damaged).length > 0, `guard accepted removed ${marker}`);
+    assert.ok(validateReleaseContainerPublication(damaged, targetWorkflow).length > 0, `guard accepted removed ${marker}`);
   }
   for (const marker of ["- validate-release-assets", "name: validated-release-assets", "sha256sum --check SHA256SUMS"]) {
     const damaged = workflow.replace(jobs.get("publish-github-release"), jobs.get("publish-github-release").replace(marker, ""));
@@ -101,5 +102,5 @@ test("supply-chain guard rejects missing publication gates and unscanned asset s
   const damaged = workflow.replace("- name: Scan release assets for malware", "- name: Scan omitted");
   assert.ok(validateReleaseMalwareGate(damaged).length > 0);
   const writable = workflow.replace(jobs.get("prepare-release"), jobs.get("prepare-release").replace("contents: read", "contents: write"));
-  assert.ok(validateReleaseContainerPublication(writable).length > 0, "preparation must not gain publication authority");
+  assert.ok(validateReleaseContainerPublication(writable, targetWorkflow).length > 0, "preparation must not gain publication authority");
 });

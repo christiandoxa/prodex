@@ -107,6 +107,21 @@ The publisher downloads those same scanned bytes, checks their checksums again,
 and verifies provenance against the repository, workflow, source digest and main
 ref. It never rebuilds or substitutes assets after scanning.
 
+Release compilation is target-local. The six-target matrix calls the checked-in
+`release-target.yml` workflow once per platform, passing exactly one matrix row.
+Each called workflow builds and validates its Mojo archive, then immediately
+schedules its matching native binary. A cold Linux ARM64 or Windows ARM64 archive
+no longer holds back a ready target. The archive/binary commands, CPU settings,
+strict ABI checks, production profile, and native/emulated smoke tests are unchanged.
+The parent `build` result still requires every target to succeed before any final
+asset validation, signing or publication. The called workflow has read-only
+permissions and cannot be independently dispatched or publish anything.
+
+Verification runs use a separate per-source concurrency group and cancel an older
+verification of the same SHA. Real publications remain serialized and are never
+cancelled by this policy. Main CI, full-test, optional calibration and the upstream
+watchdog retain their existing coverage, cache and superseded-run cancellation rules.
+
 Manual `standalone-release.yml` dispatch defaults to `publish=false`. This runs
 all six production-profile builds, smoke checks, SBOM and security validation,
 plus the exact-source CI verdict, without signing, pushing docs, creating tags or

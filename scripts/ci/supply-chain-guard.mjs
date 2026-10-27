@@ -339,20 +339,42 @@ export function validateReleaseCiPolling(contents) {
     .map((marker) => `.github/workflows/standalone-release.yml: CI polling missing ${marker}`);
 }
 
-export function validateReleaseContainerPublication(contents) {
+export function validateReleaseContainerPublication(contents, targetWorkflow = "") {
   const preflight = workflowJob(contents, "release-preflight");
   const validation = workflowJob(contents, "validate-release-assets");
   const verify = workflowJob(contents, "verify-ci");
-  const build = workflowJob(contents, "build");
+  const caller = workflowJob(contents, "build");
+  const build = workflowJob(targetWorkflow, "build");
+  const archive = workflowJob(targetWorkflow, "build-mojo-archives");
   const attestBinaries = workflowJob(contents, "attest-binaries");
   const prepare = workflowJob(contents, "prepare-release");
   const syncDocs = workflowJob(contents, "sync-release-docs");
   const release = workflowJob(contents, "publish-github-release");
-  if (!preflight || !validation || !verify || !build || !attestBinaries || !prepare || !syncDocs || !release) {
+  if (!preflight || !validation || !verify || !caller || !archive || !build || !attestBinaries || !prepare || !syncDocs || !release) {
     return [".github/workflows/standalone-release.yml: missing required release job"];
   }
   const violations = [];
   violations.push(...validateReleaseCiPolling(contents));
+  for (const marker of [
+    "needs: release-preflight",
+    "uses: ./.github/workflows/release-target.yml",
+    "target_sha: ${{ needs.release-preflight.outputs.target_sha }}",
+    "version: ${{ needs.release-preflight.outputs.version }}",
+    "kiro_cli_version: ${{ needs.release-preflight.outputs.kiro_cli_version }}",
+    "platforms: ${{ format('[{0}]', toJSON(matrix)) }}",
+  ]) {
+    if (!caller.includes(marker)) violations.push(`.github/workflows/standalone-release.yml: target invocation missing ${marker}`);
+  }
+  if (!build.includes("needs: build-mojo-archives") ||
+      !build.includes("include: ${{ fromJSON(inputs.platforms) }}") ||
+      !archive.includes("include: ${{ fromJSON(inputs.platforms) }}")) {
+    violations.push(".github/workflows/release-target.yml: binaries must depend on their exact target archive");
+  }
+  if (!targetWorkflow.includes("workflow_call:") || /workflow_dispatch:|gh release|git push/.test(targetWorkflow) ||
+      /^\s+(?:artifact-metadata|attestations|id-token|packages|contents):\s*write\s*$/mu.test(targetWorkflow + caller)) {
+    violations.push(".github/workflows/release-target.yml: target preparation must remain local, called and read-only");
+  }
+
   const workflowHeader = contents.slice(0, contents.indexOf("\njobs:"));
   if (/^\s*(?:artifact-metadata|attestations|id-token):\s*write\s*$/mu.test(workflowHeader)) {
     violations.push(
@@ -403,6 +425,7 @@ export function validateReleaseContainerPublication(contents) {
     ["release-preflight", preflight],
     ["verify-ci", verify],
     ["validate-release-assets", validation],
+    ["build-mojo-archives", archive],
     ["build", build],
     ["prepare-release", prepare],
     ["sync-release-docs", syncDocs],
@@ -416,7 +439,7 @@ export function validateReleaseContainerPublication(contents) {
       );
     }
   }
-  for (const marker of ["inputs.publish && 'standalone-release'", "cancel-in-progress: false"]) {
+  for (const marker of ["inputs.publish && 'standalone-release'", "cancel-in-progress: ${{ !inputs.publish }}"]) {
     if (!contents.includes(marker)) {
       violations.push(`.github/workflows/standalone-release.yml: release concurrency missing ${marker}`);
     }
@@ -972,7 +995,7 @@ async function main() {
     if (fileName === "standalone-release.yml") {
       violations.push(
         ...validateReleaseMalwareGate(contents),
-        ...validateReleaseContainerPublication(contents),
+        ...validateReleaseContainerPublication(contents, await fs.readFile(path.join(workflowDir, "release-target.yml"), "utf8")),
         ...validateReleaseCodexExclusion(contents),
       );
     }
