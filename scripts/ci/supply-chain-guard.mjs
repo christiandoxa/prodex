@@ -55,7 +55,8 @@ export function validateWindowsSecurityJob(contents) {
   const job = workflowJob(contents, "windows-security");
   const workspace = workflowJob(contents, "windows-workspace");
   const app = workflowJob(contents, "windows-prodex-app");
-  if (!workspace || !app) return [".github/workflows/ci.yml: missing Windows test job"];
+  const producer = workflowJob(contents, "windows-app-test-build");
+  if (!workspace || !app || !producer) return [".github/workflows/ci.yml: missing Windows test job"];
   const violations = [];
   if (job) {
     violations.push(".github/workflows/ci.yml: windows-security duplicates windows-prodex-app coverage");
@@ -75,14 +76,25 @@ export function validateWindowsSecurityJob(contents) {
     "matrix: ${{ fromJSON(needs.changes.outputs.windows_prodex_app_matrix) }}",
     "PRODEX_APP_FILTERS:",
     "PRODEX_APP_SKIP_FILTERS:",
-    "cargo test --locked -q -p prodex-app --lib",
-    "--test-threads=1",
-    "save-if: ${{ matrix.save_cache }}",
-    "prodex-app filter matched no Windows tests",
+    "needs: [changes, windows-app-test-build]",
+    "TEST_MANIFEST_SHA256: ${{ needs.windows-app-test-build.outputs.manifest_sha256 }}",
+    "node scripts/ci/native-test-artifact.mjs run",
+    "name: windows-app-tests",
   ]) {
     if (!app.includes(marker)) {
       violations.push(`.github/workflows/ci.yml: windows-prodex-app job missing ${marker}`);
     }
+  }
+  for (const marker of [
+    "needs: [changes, mojo-runtime-platform-archives]",
+    "node scripts/ci/native-test-artifact.mjs pack",
+    "manifest_sha256: ${{ steps.pack.outputs.manifest_sha256 }}",
+    "name: windows-app-tests", "if-no-files-found: error", "overwrite: true",
+  ]) {
+    if (!producer.includes(marker)) violations.push(`.github/workflows/ci.yml: Windows test producer missing ${marker}`);
+  }
+  if (/cargo test|rust-cache@|sccache-action@/.test(app)) {
+    violations.push(".github/workflows/ci.yml: Windows shards must not rebuild the shared test executable");
   }
   return violations;
 }
@@ -275,7 +287,8 @@ export function validateKicsConfiguration(workflowContents) {
 export function validateReleaseMalwareGate(contents) {
   const job = workflowJob(contents, "validate-release-assets");
   const publisher = workflowJob(contents, "publish-github-release");
-  if (!job || !publisher) return [".github/workflows/standalone-release.yml: missing release validation or publication job"];
+  const health = workflowJob(contents, "antivirus-health");
+  if (!job || !publisher || !health) return [".github/workflows/standalone-release.yml: missing release validation or publication job"];
   const violations = [];
   const action =
     "hugoalh/scan-virus-ghaction/clamav@99c81e8991ad1074a14e5f22a21bce9be035e14e";
@@ -289,10 +302,7 @@ export function validateReleaseMalwareGate(contents) {
     );
   }
   for (const marker of [
-    "- name: Verify antivirus engine detects EICAR",
-    "- name: Require a working antivirus engine",
     `uses: ${action} # v0.20.1`,
-    "SCAN_OUTCOME: ${{ steps.antivirus_health.outcome }}",
     "Return ($ElementPreMeta.Path -notmatch '^release-assets[\\\\/]')",
     "SCAN_OUTCOME: ${{ steps.release_malware_scan.outcome }}",
     "SCAN_FINISH: ${{ steps.release_malware_scan.outputs.finish }}",
@@ -301,6 +311,29 @@ export function validateReleaseMalwareGate(contents) {
   ]) {
     if (!job.includes(marker)) {
       violations.push(`.github/workflows/standalone-release.yml: malware gate missing ${marker}`);
+    }
+  }
+  for (const marker of [
+    "needs: release-preflight", "- name: Verify antivirus engine detects EICAR",
+    "- name: Require a working antivirus engine", `uses: ${action} # v0.20.1`,
+    "SCAN_OUTCOME: ${{ steps.antivirus_health.outcome }}",
+    "SCAN_FINISH: ${{ steps.antivirus_health.outputs.finish }}",
+    "SCAN_FOUND: ${{ steps.antivirus_health.outputs.found }}",
+    '"${SCAN_OUTCOME}" != "failure"', '"${SCAN_FINISH}" != "true"', '"${SCAN_FOUND}" != "true"',
+  ]) {
+    if (!health.includes(marker)) violations.push(`.github/workflows/standalone-release.yml: engine proof missing ${marker}`);
+  }
+  if (!job.includes("      - antivirus-health")) violations.push(".github/workflows/standalone-release.yml: asset scan must wait for engine proof");
+  const digest = "806278ed1a2829743c4b9d92f29bdd49e384ab3cdc6bf19caea19b1390d4c085";
+  if (!contents.includes(`CLAMAV_IMAGE: ghcr.io/hugoalh/scan-virus-ghaction:0.20.1-clamav@sha256:${digest}`)) {
+    violations.push(".github/workflows/standalone-release.yml: antivirus image digest must stay pinned");
+  }
+  for (const body of [health, job]) {
+    for (const marker of ["Verify pinned antivirus image", "RepoDigests", "clamav_update: \"True\"", "${CLAMAV_IMAGE##*@}"]) {
+      if (!body.includes(marker)) violations.push(`.github/workflows/standalone-release.yml: scanner identity/freshness missing ${marker}`);
+    }
+    if (/contents: write|attestations: write|id-token: write/.test(body)) {
+      violations.push(".github/workflows/standalone-release.yml: antivirus checks must be read-only");
     }
   }
   for (const marker of ["- validate-release-assets", "name: validated-release-assets", "sha256sum --check SHA256SUMS"]) {
@@ -742,19 +775,27 @@ function selfTest() {
       - run: cargo test --locked -q -p 'prodex-runtime-*' -- --test-threads=4
       - name: Build Windows installer fixture binary
       - name: Test Windows installer
+  windows-app-test-build:
+    needs: [changes, mojo-runtime-platform-archives]
+    outputs:
+      manifest_sha256: \${{ steps.pack.outputs.manifest_sha256 }}
+    steps:
+      - run: node scripts/ci/native-test-artifact.mjs pack bundle
+      - name: windows-app-tests
+        if-no-files-found: error
+        overwrite: true
   windows-prodex-app:
+    needs: [changes, windows-app-test-build]
     runs-on: windows-latest
     strategy:
       matrix: \${{ fromJSON(needs.changes.outputs.windows_prodex_app_matrix) }}
     steps:
-      - uses: Swatinem/rust-cache@0123456789abcdef0123456789abcdef01234567 # v2
-        with:
-          save-if: \${{ matrix.save_cache }}
+      - name: windows-app-tests
       - env:
           PRODEX_APP_FILTERS: filters
           PRODEX_APP_SKIP_FILTERS: skips
-        run: cargo test --locked -q -p prodex-app --lib filter -- --test-threads=1
-      - run: echo "prodex-app filter matched no Windows tests"
+          TEST_MANIFEST_SHA256: \${{ needs.windows-app-test-build.outputs.manifest_sha256 }}
+        run: node scripts/ci/native-test-artifact.mjs run bundle
 `;
   assert.deepEqual(validateWindowsSecurityJob(windowsJobs), []);
   assert.equal(

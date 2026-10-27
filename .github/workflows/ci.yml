@@ -672,8 +672,8 @@ jobs:
         if: matrix.suite == 'installer'
         run: node --test scripts/install.test.mjs
 
-  windows-prodex-app:
-    name: Windows prodex-app tests (${{ matrix.label }})
+  windows-app-test-build:
+    name: Compile Windows application tests once
     needs: [changes, mojo-runtime-platform-archives]
     if: ${{ needs.changes.outputs.heavy == 'true' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
     runs-on: windows-latest
@@ -683,12 +683,10 @@ jobs:
       CARGO_PROFILE_DEV_DEBUG: "0"
       CARGO_PROFILE_TEST_DEBUG: "0"
       RUSTC_WRAPPER: sccache
-      SCCACHE_GHA_RW_MODE: ${{ matrix.save_cache && 'READ_WRITE' || 'READ_ONLY' }}
+      SCCACHE_GHA_RW_MODE: READ_WRITE
       PRODEX_MOJO_ARCHIVE: ${{ github.workspace }}/.prodex-ci/mojo-runtime/x86_64-pc-windows-msvc/prodex_mojo_core.lib
-    strategy:
-      fail-fast: false
-      matrix: ${{ fromJSON(needs.changes.outputs.windows_prodex_app_matrix) }}
-
+    outputs:
+      manifest_sha256: ${{ steps.pack.outputs.manifest_sha256 }}
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -711,57 +709,66 @@ jobs:
         uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
         with:
           cache-bin: false
-          save-if: ${{ matrix.save_cache }}
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      - name: Install Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+        with:
+          node-version: 22
+          package-manager-cache: false
+
+      - name: Compile and bind the exact-run native test executable
+        id: pack
+        run: node scripts/ci/native-test-artifact.mjs pack .prodex-ci/windows-app-tests
+
+      - name: Upload the exact-run native test executable
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: windows-app-tests
+          path: .prodex-ci/windows-app-tests
+          if-no-files-found: error
+          overwrite: true
+          retention-days: 7
+
+  windows-prodex-app:
+    name: Windows prodex-app tests (${{ matrix.label }})
+    needs: [changes, windows-app-test-build]
+    if: ${{ needs.changes.outputs.heavy == 'true' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
+    runs-on: windows-latest
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.changes.outputs.windows_prodex_app_matrix) }}
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Install Rust toolchain for existing runtime fixtures
+        uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
+        with:
+          toolchain: 1.99.1
+
+      - name: Install Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+        with:
+          node-version: 22
+          package-manager-cache: false
+
+      - name: Download this run's native test executable
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
+        with:
+          name: windows-app-tests
+          path: .prodex-ci/windows-app-tests
 
       - name: Run Windows prodex-app partition ${{ matrix.label }}
-        shell: bash
         env:
+          TEST_MANIFEST_SHA256: ${{ needs.windows-app-test-build.outputs.manifest_sha256 }}
           PRODEX_APP_FILTERS: ${{ matrix.filters }}
           PRODEX_APP_SKIP_FILTERS: ${{ matrix.skip_filters }}
           RUST_BACKTRACE: "1"
-        run: |
-          set -euo pipefail
-          test_log="$(mktemp)"
-          trap 'rm -f "${test_log}"' EXIT
-          windows_skips=(
-            --skip login::
-            --skip quota_doctor::
-            --skip run::
-            --skip shared_state::
-            --skip super_mode::
-            --skip continuity_failure_reason_metrics_
-            --skip rtk::tests::
-          )
-          # A dedicated Windows-only selection remainder overlaps base filter
-          # prefixes by name, but explicitly skips already-assigned cases.
-          # Apply the same skip contract to filtered and residual partitions.
-          shard_skips=()
-          while IFS= read -r filter; do
-            [[ -z "${filter}" ]] && continue
-            shard_skips+=(--skip "${filter}")
-          done <<< "${PRODEX_APP_SKIP_FILTERS}"
-          if [[ -n "${PRODEX_APP_FILTERS}" ]]; then
-            status=0
-            while IFS= read -r filter; do
-              [[ -z "${filter}" ]] && continue
-              if ! cargo test --locked -q -p prodex-app --lib \
-                "${filter}" -- --test-threads=1 "${shard_skips[@]}" "${windows_skips[@]}" 2>&1 | tee "${test_log}"; then
-                status=1
-              fi
-              if grep -Fq 'running 0 tests' "${test_log}"; then
-                echo "prodex-app filter matched no Windows tests: ${filter}"
-                status=1
-              fi
-            done <<< "${PRODEX_APP_FILTERS}"
-            exit "${status}"
-          else
-            cargo test --locked -q -p prodex-app --lib -- \
-              --test-threads=1 "${shard_skips[@]}" "${windows_skips[@]}" 2>&1 | tee "${test_log}"
-            if grep -Fq 'running 0 tests' "${test_log}"; then
-              echo "prodex-app Windows shard matched no tests"
-              exit 1
-            fi
-          fi
+        run: node scripts/ci/native-test-artifact.mjs run .prodex-ci/windows-app-tests
+
 
   macos-workspace:
     name: macOS full workspace tests
@@ -2096,6 +2103,7 @@ jobs:
       - secret-scan
       - windows-workspace
       - windows-prodex-app
+      - windows-app-test-build
       - macos-workspace
       - process-guard
       - compat-replay-gate

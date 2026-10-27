@@ -92,6 +92,12 @@ test("Windows CI partitions tests and installer work with one cache writer", () 
   assert.match(appBlock, /fromJSON\(needs\.changes\.outputs\.windows_prodex_app_matrix\)/);
   assert.match(appBlock, /PRODEX_APP_FILTERS/);
   assert.match(appBlock, /PRODEX_APP_SKIP_FILTERS/);
-  assert.match(appBlock, /--test-threads=1/);
-  assert.match(appBlock, /save-if: \$\{\{ matrix\.save_cache \}\}/);
+  assert.match(appBlock, /native-test-artifact\.mjs run/);
+  assert.doesNotMatch(appBlock, /rust-cache@|sccache-action@/);
+  const producer = workflow.match(/\n  windows-app-test-build:\n([\s\S]*?)\n  windows-prodex-app:/)?.[1];
+  assert.ok(producer, "one compiler/cache writer is required");
+  assert.match(producer, /native-test-artifact\.mjs pack/);
+  assert.match(producer, /save-if: \$\{\{ github\.ref == 'refs\/heads\/main' \}\}/);
+  const nativeRunner = readFileSync("scripts/ci/native-test-artifact.mjs", "utf8");
+  assert.match(nativeRunner, /--test-threads=1/);
 });
