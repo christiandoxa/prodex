@@ -2,6 +2,94 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.439.4 - 2026-10-27
+
+### Claude
+
+- Refresh Claude and Gemini catalogs with native wire metadata (`0a4f456`)
+
+### Docs
+
+- Link the 0.439.4 source comparison (`e993bea`)
+- Document provider catalog refresh for 0.439.4 (`57702ef`)
+
+### Deps
+
+- Qualify Kiro CLI 2.34.2 for native releases (`8efe337`)
+
+### Misc
+
+- Refresh DeepSeek and Kiro model capabilities (`c0c5317`)
+- Add GPT-6.1 Terra and honor account reasoning metadata (`5ea61c2`)
+# Prodex 0.439.4
+
+This release refreshes provider-scoped main-agent and sub-agent catalogs against
+upstream metadata reviewed on October 27, 2026. Running sessions and installed
+clients are not silently replaced, and model access still depends on the account.
+
+## New Features
+
+- Add GPT-6.1 Terra to OpenAI and GitHub Copilot, with the current `terra` alias.
+  Explicit GPT-5.6 Terra IDs remain available where the provider supports them.
+- Add Claude Haiku 5.5 to the native Anthropic and Copilot catalogs, and Gemini 4
+  Argon to native Gemini and Copilot. Copilot Claude wire IDs use dotted versions;
+  native Anthropic IDs retain hyphens, with legacy Copilot spellings accepted.
+- Add canonical `deepseek-flash`, with current DeepSeek context/output budgets
+  and `none`, `low`, `high`, and `max` reasoning choices. Keep the upstream-supported
+  `deepseek-v4-flash` compatibility ID; do not restore retired chat/reasoner models.
+- Expand Kiro's offline catalog with GPT-5.6 Sol/Terra and Claude Opus 5.5, Sonnet
+  5.5, Haiku 5.5, and Fable 5.1. Kiro account inventories remain authoritative;
+  region, plan, experimental access, and enterprise approvals are not bypassed.
+- Preserve Local/custom model independence. A cloud-provider lifecycle decision
+  never removes a user-defined local model.
+
+- Qualify Kiro CLI 2.34.2 for release packaging against its official manifest and
+  archive checksum. Isolated version/model-flag probes pass without account access.
+
+## Bug Fixes
+
+- Share account-specific reasoning metadata across main-agent selection,
+  sub-agent selection, worker validation, and Super MCP configuration. For example,
+  a ChatGPT Terra catalog can advertise effort/context metadata different from
+  the API-key catalog; neither surface silently overwrites the other.
+- Prefer the active OpenAI profile's usable model cache over a different shared
+  account cache. Broken caches retain the existing bounded offline fallback.
+- Distinguish authoritative account inventories from Prodex-generated runtime
+  catalogs. Old generated Gemini/DeepSeek/local catalogs cannot hide new bundled
+  models after an upgrade; imported account catalogs are not broadened silently.
+- Send Gemini 4 Argon thinking levels instead of the legacy thinking budget, keep
+  the documented medium default, and apply modern tool/signature classification.
+  The catalog does not claim unsupported long-decode continuation behavior.
+- Preserve DeepSeek low effort on the native wire rather than escalating it to
+  high. Existing explicit compatibility mappings remain isolated from the new
+  canonical picker suggestions.
+
+## Changelog
+
+See the generated changelog for the individual implementation and test commits.
+
+## Verification
+
+Regression coverage includes account-cache precedence, API-key isolation,
+main/sub-agent effort consistency, exact provider wire identifiers, dynamic and
+offline catalog boundaries, retired-model exclusions, and actual native request
+translation. Gemini 4 and DeepSeek low-effort regressions were reproduced before
+fixing their compiled owners. Provider catalog fixtures retain exact output
+comparison and explicit semantic checks. Release publication requires the CI gate,
+six-platform native builds, artifact smoke tests, checksums, and provenance.
+
+## Upstream References
+
+- OpenAI: <https://developers.openai.com/api/docs/models/gpt-6.1-terra>
+- Copilot Terra: <https://github.blog/changelog/2026-10-26-gpt-6-1-terra-in-github-copilot/>
+- Copilot model IDs: <https://github.com/github/gh-aw/issues/68834>
+- Anthropic: <https://platform.claude.com/docs/en/models/haiku-5-5/overview>
+- Gemini: <https://ai.google.dev/gemini-api/docs/generate-content/thinking>
+- DeepSeek: <https://api-docs.deepseek.com/api/list-models/>
+- Kiro: <https://kiro.dev/docs/models/available-models/> and <https://kiro.dev/docs/models/effort/>
+
+Full Changelog: [0.439.3...0.439.4](https://github.com/christiandoxa/prodex/compare/0.439.3...0.439.4)
+
 ## 0.439.3 - 2026-10-26
 
 ### CLI
@@ -16,68 +104,6 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 
 - Synchronize provider capability matrix (`7951f94`)
 - Filter provider-specific retired model entries (`98e8d8d`)
-# Prodex 0.439.3
-
-This patch removes confirmed upstream-retired model suggestions and makes
-main-agent and sub-agent selection use the same provider-specific lifecycle and
-account-availability rules. It does not replace models in running sessions or
-rewrite users' configuration, authentication, or cached provider files.
-
-## New Features
-
-- Reviewable lifecycle evidence records exact provider IDs, authentication scope,
-  and official upstream sources in
-  `crates/prodex-provider-core/catalog/retired-models.json`.
-- A usable account model snapshot is authoritative for picker membership. Models
-  missing from that snapshot are no longer restored by merging the entire
-  offline catalog or a remembered bundled model into it.
-- The same membership rules apply to main-agent and sub-agent pickers, while
-  retaining provider defaults, model-specific reasoning metadata, and explicit
-  unknown custom model IDs.
-
-## Bug Fixes
-
-- Remove 12 retired entries from the bundled hosted-provider catalog: Anthropic
-  Opus 4 (2025-05-14); retired Copilot GPT, Claude, and Gemini entries; and
-  DeepSeek's retired `deepseek-chat` and `deepseek-reasoner` endpoints.
-- Filter known provider retirements from imported snapshots, configured/current
-  picker candidates, generated runtime model catalogs, and model-list endpoints.
-  Stale cache files cannot restore these suggestions.
-- Keep Codex ChatGPT model retirements separate from API-key availability. Models
-  such as GPT-5.4 remain available for API-key users, and their choices are not
-  restricted by a shared ChatGPT-only model cache.
-- Prevent a retired remembered main-agent selection from becoming the automatic
-  default again. Preserve the existing compiled OpenAI Spark retirement policy.
-- Preserve bounded offline fallback for missing or malformed catalogs. Keep
-  provider-specific exceptions, including Copilot GPT-5.3-Codex LTS, eligible
-  Sonnet 4.6 plans, supported Gemini 2.5 models, Kiro models still available on
-  Kiro, callable DeepSeek compatibility aliases, and local/custom endpoints.
-
-## Changelog
-
-- Lifecycle matching reuses compiled Mojo identity, deduplication, and choice
-  planners; there is no second Rust string-normalization policy.
-- Deprecated-but-callable models and future retirement dates are not treated as
-  removals. A retirement on one provider does not remove the same ID from another.
-- Catalog reads do not perform provider network discovery, invoke model turns,
-  refresh credentials, rewrite caches, or change existing session settings.
-  Explicit custom/CLI model requests are not silently retargeted.
-- Add regression coverage for stale cached/current IDs, provider/authentication
-  boundaries, custom names, Unicode/case normalization, empty/malformed caches,
-  reasoning metadata, runtime catalogs, and matching main/sub-agent membership.
-
-## Verification
-
-The new retirement regressions fail on the previous implementation and pass
-with this patch. Provider-core and application catalog suites preserve bounds,
-exact metadata, and exception behavior. Deterministic runtime-catalog fixtures
-were reviewed for the intended retired-entry removals; unrelated Kiro fixture
-hashes remain unchanged. Authentication tests use synthetic private fixtures. The WebSocket completion
-fixture now deterministically exercises valid control-frame interleaving while
-retaining ordered application frames, successful completion and single-commit
-assertions.
-
-Full Changelog: [0.439.2...0.439.3](https://github.com/christiandoxa/prodex/compare/0.439.2...0.439.3)
 
 ## 0.439.2 - 2026-10-26
 
