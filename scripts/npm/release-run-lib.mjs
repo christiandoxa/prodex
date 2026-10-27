@@ -25,8 +25,8 @@ export const releaseSteps = [
   "test",
   "commit",
   "push",
-  "watch-ci",
   "trigger-publish",
+  "watch-ci",
   "watch-publish",
   "verify",
 ];
@@ -65,7 +65,7 @@ function usage() {
     "",
     "Examples:",
     "  npm run release -- --dry-run --version 0.93.0",
-    "  npm run release -- --resume --from watch-ci",
+    "  npm run release -- --resume --from trigger-publish",
     "  npm run release -- --only trigger-publish,watch-publish,verify --resume",
     "  npm run release -- --cargo-publish plan",
   ].join("\n");
@@ -713,7 +713,19 @@ async function findWorkflowRun(repo, workflow, branch, event, headSha, args) {
   if (!data) {
     return null;
   }
-  return data.workflow_runs?.find((run) => run.head_sha === headSha) ?? null;
+  return selectWorkflowRun(data.workflow_runs ?? [], headSha, {
+    publication: workflow === defaultPublishWorkflow && event === "workflow_dispatch",
+  });
+}
+
+// Rehearsals share the release workflow and source SHA, but must never satisfy
+// publication idempotency or the publication watcher. Legacy published runs
+// used the workflow name before explicit run-name modes were introduced.
+export function selectWorkflowRun(runs, headSha, { publication = false } = {}) {
+  return runs.find((run) => run.head_sha === headSha && (!publication ||
+    run.display_title === "standalone release" ||
+    (typeof run.display_title === "string" && run.display_title.startsWith("standalone publish ") &&
+      run.display_title.endsWith(` @ ${headSha}`)))) ?? null;
 }
 
 async function waitForWorkflow({ repo, workflow, branch, event, headSha, timeoutMinutes, args }) {
@@ -762,6 +774,7 @@ async function triggerPublish(repo, version, args) {
     ref: args.branch,
     "inputs[target_sha]": headSha,
     "inputs[version]": version,
+    "inputs[publish]": "true",
   };
   if (args.publishAt) fields["inputs[publish_at]"] = args.publishAt;
   await ghApi(`/repos/${repo}/actions/workflows/${args.publishWorkflow}/dispatches`, {

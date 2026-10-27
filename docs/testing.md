@@ -50,15 +50,15 @@ stale network responses must not be cached to make a drift check appear faster.
 - `node scripts/ci/runtime-test-manifest-guard.mjs` must fail when a `main_internal_tests::runtime_proxy_` test is neither covered by a manifest case nor intentionally covered by a broad runtime proxy CI shard filter.
 - `node scripts/ci/runtime-test-manifest-guard.mjs` must also fail when broad runtime shard labels or filters drift from the `main-internal-runtime-proxy` workflow matrix.
 - Full serial coverage should remain available as a scheduled or manual safety net.
-  The full workflow runs the workspace and forty-five disjoint `prodex-app` library
-  partitions concurrently; its workspace partition excludes `prodex-app`, and
+  The full workflow runs the workspace and twenty-six disjoint `prodex-app` library
+  partitions with at most sixteen active test runners; its workspace partition excludes `prodex-app`, and
   each risky partition remains internally serial. The independent provider-runtime
   and support/command filters are separate jobs so their serial cargo processes
   can run concurrently.
 - `node scripts/ci/prodex-app-test-shards.mjs --check` validates the shared app-library shard manifest;
   `node scripts/ci/prodex-app-test-shards.mjs --dry-run` prints its commands
   without compiling or running tests.
-- Push/PR CI runs nine generated generic `prodex-app` partitions. Dedicated parallel jobs
+- Push/PR CI runs eight generated generic `prodex-app` partitions. Dedicated parallel jobs
   own every `main_internal_tests::` and `profile_commands_internal_tests::`
   test, so the generic remainder excludes those namespaces instead of rerunning
   them. The weekly CI schedule skips those duplicate Ubuntu owners because the
@@ -88,12 +88,51 @@ macOS temp-path alias that previously exposed non-canonical test fixture paths.
 Windows runs native crate coverage, app-specific security regressions, and root
 tests concurrently. The root shard that already compiled `prodex` also builds
 the installer fixture, avoiding a second full Windows binary build. Large
-`prodex-app` coverage uses five balanced Windows groups instead of the twenty
-Linux partitions, retaining parallel execution while avoiding repeated Windows
+`prodex-app` coverage uses fifteen disjoint Windows groups, retaining parallel execution while avoiding repeated Windows
 compilations and late hosted-runner queueing. One group writes the shared
 dependency cache. High-fanout app, full-test, Windows, and macOS lanes disable
 incremental artifacts and test/dev debug symbols so sccache remains effective
 and linking is faster.
+
+## Release critical path and nonpublishing verification
+
+Release preparation and publication have separate trust boundaries. The
+read-only source/pin preflight starts archive and binary compilation while the
+exact-source CI gate is running. Linux artifact smoke and SBOM generation run
+independently. Asset assembly, checksum validation, EICAR engine validation and
+malware scanning produce one immutable `validated-release-assets` artifact.
+Signing, documentation pushes and GitHub Release creation require both that
+artifact validation and successful complete CI for the exact dispatched main SHA.
+The publisher downloads those same scanned bytes, checks their checksums again,
+and verifies provenance against the repository, workflow, source digest and main
+ref. It never rebuilds or substitutes assets after scanning.
+
+Manual `standalone-release.yml` dispatch defaults to `publish=false`. This runs
+all six production-profile builds, smoke checks, SBOM and security validation,
+plus the exact-source CI verdict, without signing, pushing docs, creating tags or
+creating/editing a release. It may verify the current already-published version:
+
+```bash
+gh workflow run standalone-release.yml --ref main \
+  -f target_sha="$(git rev-parse HEAD)" \
+  -f version="$(node -p 'require("./package.json").version')" \
+  -f publish=false
+```
+
+Use the exact current main checkout. `publish_at` is rejected in verification
+mode. Only an explicitly authorized publication uses `publish=true`; the
+canonical release runner sends that flag and dispatches before its CI wait.
+Its watcher/idempotency check distinguishes `standalone verify` from
+`standalone publish`, so a successful rehearsal cannot satisfy a real release.
+The original freshness, version-order, existing-release and tag guards still
+apply to actual publication. Verification-only and publication concurrency groups
+are separate; an unrelated rehearsal does not hold the real publication queue.
+
+Nightly and Windows test matrices create measured long-running partitions first.
+This scheduling hint changes no filters, exclusions, cache-writer identity or
+failure propagation; hosted runner availability still determines actual starts.
+All tests remain mandatory. Compare complete workflow and runner durations, not
+just compile time, and distinguish cold/warm caches and queueing in any report.
 
 ## CI Impact Gating
 
@@ -428,7 +467,7 @@ Use `node scripts/ci/churn-hygiene.mjs` for a lightweight churn gate. It fails o
 
 Large structural extraction is allowed when the commit has a clear mechanical `refactor`, `test`, `chore`, or `ci` split/move/reshape subject, or when the message declares `Mechanical-only: yes` or `[mechanical-only]`. For staged/worktree checks before committing, pass `--message-file .git/COMMIT_EDITMSG` or `--message "refactor: split foo"` when validating a prepared message. If behavior changes are needed, put them in a separate smaller commit after the mechanical extraction.
 
-Use `npm run release -- --version <semver>` as the official release path. Its normal sequence can bump/sync/test/commit/push/watch CI/trigger publish/watch publish/verify in order, stores resume state under `target/release-run/state.json` by default, supports `--resume`, `--from <step>`, `--to <step>`, and `--only <steps>`, and does not publish to npm or crates.io; `.github/workflows/standalone-release.yml` creates the standalone GitHub Release only after an EICAR engine proof and a clean ClamAV scan of every final asset. The separate `--cargo-publish` helper is explicit CI plumbing, not part of that sequence. Its sync/test path renders the final changelog with `--release-version` and validates generated release metadata before the release commit. Do not run `npm run changelog` after each small change just to commit updated notes; push-facing changelog checks intentionally defer generated changelog drift for non-release commits. Use `npm run release -- --dry-run` before mutating a real release.
+Use `npm run release -- --version <semver>` as the official release path. Its normal sequence can bump/sync/test/commit/push/trigger publish/watch CI/watch publish/verify in order, stores resume state under `target/release-run/state.json` by default, supports `--resume`, `--from <step>`, `--to <step>`, and `--only <steps>`, and does not publish to npm or crates.io; `.github/workflows/standalone-release.yml` creates the standalone GitHub Release only after an EICAR engine proof and a clean ClamAV scan of every final asset. The separate `--cargo-publish` helper is explicit CI plumbing, not part of that sequence. Its sync/test path renders the final changelog with `--release-version` and validates generated release metadata before the release commit. Do not run `npm run changelog` after each small change just to commit updated notes; push-facing changelog checks intentionally defer generated changelog drift for non-release commits. Use `npm run release -- --dry-run` before mutating a real release.
 
 Use `node scripts/ci/release-cut-fixture-tests.mjs` after changing low-level release-cut compatibility. `release:cut` remains as a deterministic backcompat helper covered by fixtures; normal human releases should use `npm run release`.
 

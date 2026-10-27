@@ -1,8 +1,14 @@
 name: standalone release
+run-name: standalone ${{ inputs.publish && 'publish' || 'verify' }} ${{ inputs.version }} @ ${{ inputs.target_sha }}
 
 on:
   workflow_dispatch:
     inputs:
+      publish:
+        description: Publish a release after all gates (false builds and verifies without any release/tag mutation)
+        required: false
+        default: false
+        type: boolean
       target_sha:
         description: Exact main commit to release
         required: true
@@ -18,7 +24,8 @@ on:
         type: string
 
 concurrency:
-  group: standalone-release
+  # Keep real publications serialized; rehearsals never block that queue.
+  group: ${{ inputs.publish && 'standalone-release' || format('standalone-verify-{0}', inputs.target_sha) }}
   cancel-in-progress: false
 
 permissions:
@@ -34,8 +41,8 @@ env:
   UV_VERSION: "0.11.7"
 
 jobs:
-  verify-ci:
-    name: Verify CI is green
+  release-preflight:
+    name: Validate release source and dependency pins
     runs-on: ubuntu-latest
     timeout-minutes: 90
     permissions:
@@ -60,6 +67,7 @@ jobs:
           RELEASE_PUBLISH_AT: ${{ inputs.publish_at }}
           RELEASE_TARGET_SHA: ${{ inputs.target_sha }}
           RELEASE_VERSION: ${{ inputs.version }}
+          RELEASE_PUBLISH: ${{ inputs.publish }}
         shell: bash
         run: |
           set -euo pipefail
@@ -98,26 +106,33 @@ jobs:
               print(parsed.astimezone(timezone.utc).isoformat().replace("+00:00", "Z"))
           PY
           )"
-          release_status="$(gh api --include "repos/${GITHUB_REPOSITORY}/releases/tags/${version}" 2>&1 | awk '/^HTTP\// { code = $2 } END { print code }')" || true
-          case "${release_status}" in
-            404) ;;
-            200) echo "release ${version} already exists; refusing to overwrite it" >&2; exit 1 ;;
-            *) echo "could not verify whether release ${version} exists" >&2; exit 1 ;;
-          esac
-          git fetch origin --tags --force
-          if release_tag_sha="$(git rev-list -n1 "${version}" 2>/dev/null)" \
-            && [ "${release_tag_sha}" != "${target_sha}" ]; then
-            echo "release tag ${version} targets ${release_tag_sha}, not ${target_sha}" >&2
-            exit 1
-          fi
-          if ! git rev-parse --verify --quiet "refs/tags/${version}" >/dev/null; then
-            latest_version="$(git tag --list '[0-9]*' --sort=-version:refname | head -n1)"
-            if [ -n "${latest_version}" ] \
-              && { [ "${version}" = "${latest_version}" ] \
-                || [ "$(printf '%s\n%s\n' "${latest_version}" "${version}" | sort -V | tail -n1)" != "${version}" ]; }; then
-              echo "release version ${version} must be newer than ${latest_version}" >&2
+          # Rehearsals may validate an already-published version, but never
+          # change its tag or release. Real publication retains every guard.
+          if [ "${RELEASE_PUBLISH}" = true ]; then
+            release_status="$(gh api --include "repos/${GITHUB_REPOSITORY}/releases/tags/${version}" 2>&1 | awk '/^HTTP\// { code = $2 } END { print code }')" || true
+            case "${release_status}" in
+              404) ;;
+              200) echo "release ${version} already exists; refusing to overwrite it" >&2; exit 1 ;;
+              *) echo "could not verify whether release ${version} exists" >&2; exit 1 ;;
+            esac
+            git fetch origin --tags --force
+            if release_tag_sha="$(git rev-list -n1 "${version}" 2>/dev/null)" \
+              && [ "${release_tag_sha}" != "${target_sha}" ]; then
+              echo "release tag ${version} targets ${release_tag_sha}, not ${target_sha}" >&2
               exit 1
             fi
+            if ! git rev-parse --verify --quiet "refs/tags/${version}" >/dev/null; then
+              latest_version="$(git tag --list '[0-9]*' --sort=-version:refname | head -n1)"
+              if [ -n "${latest_version}" ] \
+                && { [ "${version}" = "${latest_version}" ] \
+                  || [ "$(printf '%s\n%s\n' "${latest_version}" "${version}" | sort -V | tail -n1)" != "${version}" ]; }; then
+                echo "release version ${version} must be newer than ${latest_version}" >&2
+                exit 1
+              fi
+            fi
+          elif [ -n "${publish_at}" ]; then
+            echo "publish_at is valid only with publish=true" >&2
+            exit 1
           fi
           {
             echo "target_sha=${target_sha}"
@@ -167,10 +182,28 @@ jobs:
             exit 1
           fi
 
+  verify-ci:
+    name: Verify CI is green
+    needs: release-preflight
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    permissions:
+      actions: read
+      contents: read
+    outputs:
+      target_sha: ${{ needs.release-preflight.outputs.target_sha }}
+      version: ${{ needs.release-preflight.outputs.version }}
+      publish_at: ${{ needs.release-preflight.outputs.publish_at }}
+    steps:
+      - name: Check out exact release source for CI lookup
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
       - name: Wait for CI success
         env:
           GH_TOKEN: ${{ github.token }}
-          TARGET_SHA: ${{ steps.target.outputs.target_sha }}
+          TARGET_SHA: ${{ needs.release-preflight.outputs.target_sha }}
         shell: bash
         run: |
           set -euo pipefail
@@ -229,8 +262,9 @@ jobs:
 
   build-mojo-archives:
     name: Build Mojo archive ${{ matrix.target }}
-    # Speculative compilation of immutable source can overlap CI verification.
-    # No binary build or publication may bypass the verify-ci dependency.
+    # Only read-only preparation overlaps CI. Signing and publication still
+    # require the complete successful exact-commit CI and verified artifacts.
+    needs: release-preflight
     runs-on: ubuntu-24.04
     timeout-minutes: 90
     permissions:
@@ -412,7 +446,7 @@ jobs:
   build:
     name: Build ${{ matrix.target }}
     needs:
-      - verify-ci
+      - release-preflight
       - build-mojo-archives
     runs-on: ${{ matrix.runs-on }}
     timeout-minutes: 180
@@ -953,7 +987,7 @@ jobs:
   artifact-smoke:
     name: Smoke official Linux artifact
     needs:
-      - verify-ci
+      - release-preflight
       - build
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -980,7 +1014,7 @@ jobs:
 
       - name: Run official artifact smoke
         env:
-          RELEASE_VERSION: ${{ needs.verify-ci.outputs.version }}
+          RELEASE_VERSION: ${{ needs.release-preflight.outputs.version }}
         shell: bash
         run: |
           set -euo pipefail
@@ -993,51 +1027,15 @@ jobs:
             --binary "${binary}" \
             --version "${RELEASE_VERSION}"
 
-  attest-binaries:
-    name: Attest binaries
-    runs-on: ubuntu-latest
-    needs:
-      - build
-      - verify-ci
-    timeout-minutes: 15
-    permissions:
-      actions: read
-      artifact-metadata: write
-      attestations: write
-      contents: read
-      id-token: write
-
-    steps:
-      - name: Download binary artifacts
-        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
-        with:
-          path: artifacts
-
-      - name: Attest binary artifact provenance
-        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4
-        with:
-          subject-path: |
-            artifacts/x86_64-unknown-linux-gnu/prodex
-            artifacts/aarch64-unknown-linux-gnu/prodex
-            artifacts/x86_64-apple-darwin/prodex
-            artifacts/aarch64-apple-darwin/prodex
-            artifacts/x86_64-pc-windows-msvc/prodex.exe
-            artifacts/aarch64-pc-windows-msvc/prodex.exe
-
   prepare-release:
     name: Prepare release SBOM
     runs-on: ubuntu-latest
     needs:
-      - attest-binaries
-      - verify-ci
+      - release-preflight
       - build
-      - artifact-smoke
     timeout-minutes: 30
     permissions:
-      artifact-metadata: write
-      attestations: write
       contents: read
-      id-token: write
 
     steps:
       - name: Check out repository
@@ -1048,6 +1046,7 @@ jobs:
       - name: Download built binaries
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
+          pattern: '{aarch64,x86_64}-*'
           path: artifacts
 
       - name: Generate release SBOM
@@ -1082,11 +1081,6 @@ jobs:
             dir:/source -o spdx-json > release-sbom.spdx.json
           node scripts/ci/codex-purity-guard.mjs release-sbom.spdx.json
 
-      - name: Attest release SBOM provenance
-        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4
-        with:
-          subject-path: release-sbom.spdx.json
-
       - name: Upload release SBOM
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
@@ -1095,11 +1089,225 @@ jobs:
           if-no-files-found: error
           overwrite: true
 
-  sync-release-docs:
-    name: Sync release docs
+  validate-release-assets:
+    name: Validate release assets without publishing
     runs-on: ubuntu-latest
     needs:
+      - release-preflight
       - prepare-release
+      - artifact-smoke
+    timeout-minutes: 35
+    permissions:
+      contents: read
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      - name: Resolve release metadata
+        id: release
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="${{ needs.release-preflight.outputs.version }}"
+          ref_name="${GITHUB_REF_NAME}"
+          ref_type="${GITHUB_REF_TYPE:-branch}"
+          target_sha="${{ needs.release-preflight.outputs.target_sha }}"
+          if [ "${ref_type}" != "branch" ] || [ "${ref_name}" != "main" ]; then
+            echo "workflow_dispatch release runs must target main" >&2
+            exit 1
+          fi
+          {
+            echo "version=${version}"
+            echo "tag=${version}"
+            echo "target_sha=${target_sha}"
+          } >> "${GITHUB_OUTPUT}"
+
+      - name: Download built binaries
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
+        with:
+          pattern: '{aarch64,x86_64}-*'
+          path: artifacts
+
+      - name: Download release SBOM
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
+        with:
+          name: release-sbom
+          path: artifacts/release-sbom
+
+      - name: Prepare release assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p release-assets
+          while IFS= read -r -d '' file; do
+            parent="$(basename "$(dirname "${file}")")"
+            base="$(basename "${file}")"
+            ext=""
+            stem="${base}"
+            if [[ "${base}" == *.* ]]; then
+              ext=".${base##*.}"
+              stem="${base%.*}"
+            fi
+            cp "${file}" "release-assets/${stem}-${parent}${ext}"
+          done < <(find artifacts -mindepth 2 -maxdepth 2 -type f \( -name 'prodex' -o -name 'prodex.exe' \) -print0)
+          cp artifacts/release-sbom/release-sbom.spdx.json release-assets/release-sbom.spdx.json
+          cp install.sh release-assets/install.sh
+          cp install.ps1 release-assets/install.ps1
+          chmod 0755 release-assets/install.sh
+
+      - name: Generate release capability manifests
+        shell: bash
+        env:
+          RELEASE_VERSION: ${{ steps.release.outputs.version }}
+          RELEASE_SHA: ${{ steps.release.outputs.target_sha }}
+        run: |
+          set -euo pipefail
+          node scripts/release/render-release-manifest.mjs \
+            --version "${RELEASE_VERSION}" \
+            --commit "${RELEASE_SHA}" \
+            --input migration/release-target-matrix.tsv \
+            --output-tsv release-assets/release-manifest.tsv \
+            --output-json release-assets/release-manifest.json
+          awk -F '\t' -v sha="${RELEASE_SHA}" '$1 == "commit" && $2 == sha { found = 1 } END { exit found ? 0 : 1 }' release-assets/release-manifest.tsv
+          RELEASE_SHA="${RELEASE_SHA}" RELEASE_VERSION="${RELEASE_VERSION}" node -e 'const m=require("./release-assets/release-manifest.json"); if(m.commit!==process.env.RELEASE_SHA || m.version!==process.env.RELEASE_VERSION) process.exit(1)'
+
+      - name: Generate and verify release checksums
+        shell: bash
+        run: |
+          set -euo pipefail
+          node scripts/ci/codex-purity-guard.mjs release-assets
+          if find release-assets -type f -iname '*codex*' -print -quit | grep -q .; then
+            echo "release assets must not contain Codex executables or bundles" >&2
+            exit 1
+          fi
+          (
+            cd release-assets
+            sha256sum install.sh install.ps1 release-manifest.tsv release-manifest.json prodex-* release-sbom.spdx.json > SHA256SUMS
+            sha256sum --check SHA256SUMS
+          )
+
+      - name: Prepare antivirus engine health check
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p scan-health
+          printf '%s' 'X5O!P%@AP[4\PZX54(P^)7CC)7}$' 'EICAR-STANDARD-ANTIVIRUS-TEST-FILE!$H+H*' > scan-health/eicar.com
+
+      - name: Verify antivirus engine detects EICAR
+        id: antivirus_health
+        continue-on-error: true
+        uses: hugoalh/scan-virus-ghaction/clamav@99c81e8991ad1074a14e5f22a21bce9be035e14e # v0.20.1
+        with:
+          clamav_update: "True"
+          ignores_pre: |-
+            Param($ElementPreMeta)
+            Return ($ElementPreMeta.Path -notmatch '^scan-health[\\/]')
+
+      - name: Require a working antivirus engine
+        if: ${{ always() }}
+        env:
+          SCAN_OUTCOME: ${{ steps.antivirus_health.outcome }}
+          SCAN_FINISH: ${{ steps.antivirus_health.outputs.finish }}
+          SCAN_FOUND: ${{ steps.antivirus_health.outputs.found }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -f scan-health/eicar.com
+          rmdir scan-health
+          if [ "${SCAN_OUTCOME}" != "failure" ] || [ "${SCAN_FINISH}" != "true" ] || [ "${SCAN_FOUND}" != "true" ]; then
+            echo "antivirus engine health check did not detect EICAR" >&2
+            exit 1
+          fi
+
+      - name: Scan release assets for malware
+        id: release_malware_scan
+        uses: hugoalh/scan-virus-ghaction/clamav@99c81e8991ad1074a14e5f22a21bce9be035e14e # v0.20.1
+        with:
+          clamav_update: "True"
+          found_summary: "True"
+          statistics_summary: "True"
+          ignores_pre: |-
+            Param($ElementPreMeta)
+            Return ($ElementPreMeta.Path -notmatch '^release-assets[\\/]')
+
+      - name: Require clean release assets
+        env:
+          SCAN_OUTCOME: ${{ steps.release_malware_scan.outcome }}
+          SCAN_FINISH: ${{ steps.release_malware_scan.outputs.finish }}
+          SCAN_FOUND: ${{ steps.release_malware_scan.outputs.found }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "${SCAN_OUTCOME}" != "success" ] || [ "${SCAN_FINISH}" != "true" ] || [ "${SCAN_FOUND}" != "false" ]; then
+            echo "release asset malware scan did not finish cleanly" >&2
+            exit 1
+          fi
+          if ! find release-assets -maxdepth 1 -type f -print -quit | grep -q .; then
+            echo "release asset malware scan scope is empty" >&2
+            exit 1
+          fi
+
+      - name: Validate curated release notes before publishing
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="${{ steps.release.outputs.version }}"
+          curated_notes="docs/release-notes/${version}.md"
+          test -f "${curated_notes}" || {
+            echo "missing curated release notes: ${curated_notes}" >&2
+            exit 1
+          }
+          for heading in "## New Features" "## Bug Fixes" "## Changelog"; do
+            grep -Fqx "${heading}" "${curated_notes}" || {
+              echo "${curated_notes} is missing mandatory heading: ${heading}" >&2
+              exit 1
+            }
+          done
+
+      - name: Upload validated release assets for the gated publisher
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: validated-release-assets
+          path: release-assets/
+          if-no-files-found: error
+          retention-days: 7
+
+  attest-binaries:
+    name: Attest verified release assets
+    if: ${{ inputs.publish }}
+    runs-on: ubuntu-latest
+    needs:
+      - validate-release-assets
+      - verify-ci
+    timeout-minutes: 15
+    permissions:
+      actions: read
+      artifact-metadata: write
+      attestations: write
+      contents: read
+      id-token: write
+
+    steps:
+      - name: Download validated release assets
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
+        with:
+          name: validated-release-assets
+          path: release-assets
+
+      - name: Attest binary, installer, manifest and SBOM provenance together
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4
+        with:
+          subject-path: release-assets/*
+
+  sync-release-docs:
+    name: Sync release docs
+    if: ${{ inputs.publish }}
+    runs-on: ubuntu-latest
+    needs:
+      - validate-release-assets
       - verify-ci
     timeout-minutes: 15
     permissions:
@@ -1174,17 +1382,16 @@ jobs:
 
   publish-github-release:
     name: Publish GitHub release
+    if: ${{ inputs.publish }}
     runs-on: ubuntu-latest
     needs:
-      - prepare-release
+      - validate-release-assets
+      - attest-binaries
       - sync-release-docs
       - verify-ci
     timeout-minutes: 360
     permissions:
-      artifact-metadata: write
-      attestations: write
       contents: write
-      id-token: write
 
     steps:
       - name: Check out repository
@@ -1212,146 +1419,22 @@ jobs:
             echo "target_sha=${target_sha}"
           } >> "${GITHUB_OUTPUT}"
 
-      - name: Download built binaries
+      - name: Download validated release assets
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
-          path: artifacts
+          name: validated-release-assets
+          path: release-assets
 
-      - name: Download release SBOM
-        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
-        with:
-          name: release-sbom
-          path: artifacts/release-sbom
-
-      - name: Prepare release assets
+      - name: Verify unchanged release asset bytes before provenance checks
         shell: bash
         run: |
           set -euo pipefail
-          mkdir -p release-assets
-          while IFS= read -r -d '' file; do
-            parent="$(basename "$(dirname "${file}")")"
-            base="$(basename "${file}")"
-            ext=""
-            stem="${base}"
-            if [[ "${base}" == *.* ]]; then
-              ext=".${base##*.}"
-              stem="${base%.*}"
-            fi
-            cp "${file}" "release-assets/${stem}-${parent}${ext}"
-          done < <(find artifacts -mindepth 2 -maxdepth 2 -type f \( -name 'prodex' -o -name 'prodex.exe' \) -print0)
-          cp artifacts/release-sbom/release-sbom.spdx.json release-assets/release-sbom.spdx.json
-          cp install.sh release-assets/install.sh
-          cp install.ps1 release-assets/install.ps1
-          chmod 0755 release-assets/install.sh
-
-      - name: Generate release capability manifests
-        shell: bash
-        env:
-          RELEASE_VERSION: ${{ steps.release.outputs.version }}
-          RELEASE_SHA: ${{ steps.release.outputs.target_sha }}
-        run: |
-          set -euo pipefail
-          node scripts/release/render-release-manifest.mjs \
-            --version "${RELEASE_VERSION}" \
-            --commit "${RELEASE_SHA}" \
-            --input migration/release-target-matrix.tsv \
-            --output-tsv release-assets/release-manifest.tsv \
-            --output-json release-assets/release-manifest.json
-          awk -F '\t' -v sha="${RELEASE_SHA}" '$1 == "commit" && $2 == sha { found = 1 } END { exit found ? 0 : 1 }' release-assets/release-manifest.tsv
-          RELEASE_SHA="${RELEASE_SHA}" RELEASE_VERSION="${RELEASE_VERSION}" node -e 'const m=require("./release-assets/release-manifest.json"); if(m.commit!==process.env.RELEASE_SHA || m.version!==process.env.RELEASE_VERSION) process.exit(1)'
-
-      - name: Generate and verify release checksums
-        shell: bash
-        run: |
-          set -euo pipefail
-          node scripts/ci/codex-purity-guard.mjs release-assets
-          if find release-assets -type f -iname '*codex*' -print -quit | grep -q .; then
-            echo "release assets must not contain Codex executables or bundles" >&2
-            exit 1
-          fi
-          (
-            cd release-assets
-            sha256sum install.sh install.ps1 release-manifest.tsv release-manifest.json prodex-* release-sbom.spdx.json > SHA256SUMS
-            sha256sum --check SHA256SUMS
-          )
-
-      - name: Attest release checksum manifest
-        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4
-        with:
-          subject-path: release-assets/SHA256SUMS
-
-      - name: Prepare antivirus engine health check
-        shell: bash
-        run: |
-          set -euo pipefail
-          mkdir -p scan-health
-          printf '%s' 'X5O!P%@AP[4\PZX54(P^)7CC)7}$' 'EICAR-STANDARD-ANTIVIRUS-TEST-FILE!$H+H*' > scan-health/eicar.com
-
-      - name: Verify antivirus engine detects EICAR
-        id: antivirus_health
-        continue-on-error: true
-        uses: hugoalh/scan-virus-ghaction/clamav@99c81e8991ad1074a14e5f22a21bce9be035e14e # v0.20.1
-        with:
-          clamav_update: "True"
-          ignores_pre: |-
-            Param($ElementPreMeta)
-            Return ($ElementPreMeta.Path -notmatch '^scan-health[\\/]')
-
-      - name: Require a working antivirus engine
-        if: ${{ always() }}
-        env:
-          SCAN_OUTCOME: ${{ steps.antivirus_health.outcome }}
-          SCAN_FINISH: ${{ steps.antivirus_health.outputs.finish }}
-          SCAN_FOUND: ${{ steps.antivirus_health.outputs.found }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          rm -f scan-health/eicar.com
-          rmdir scan-health
-          if [ "${SCAN_OUTCOME}" != "failure" ] || [ "${SCAN_FINISH}" != "true" ] || [ "${SCAN_FOUND}" != "true" ]; then
-            echo "antivirus engine health check did not detect EICAR" >&2
-            exit 1
-          fi
-
-      - name: Scan release assets for malware
-        id: release_malware_scan
-        uses: hugoalh/scan-virus-ghaction/clamav@99c81e8991ad1074a14e5f22a21bce9be035e14e # v0.20.1
-        with:
-          clamav_update: "True"
-          found_summary: "True"
-          statistics_summary: "True"
-          ignores_pre: |-
-            Param($ElementPreMeta)
-            Return ($ElementPreMeta.Path -notmatch '^release-assets[\\/]')
-
-      - name: Require clean release assets
-        env:
-          SCAN_OUTCOME: ${{ steps.release_malware_scan.outcome }}
-          SCAN_FINISH: ${{ steps.release_malware_scan.outputs.finish }}
-          SCAN_FOUND: ${{ steps.release_malware_scan.outputs.found }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          if [ "${SCAN_OUTCOME}" != "success" ] || [ "${SCAN_FINISH}" != "true" ] || [ "${SCAN_FOUND}" != "false" ]; then
-            echo "release asset malware scan did not finish cleanly" >&2
-            exit 1
-          fi
-          if ! find release-assets -maxdepth 1 -type f -print -quit | grep -q .; then
-            echo "release asset malware scan scope is empty" >&2
-            exit 1
-          fi
-
-      - name: Attest installer provenance
-        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4
-        with:
-          subject-path: |
-            release-assets/install.sh
-            release-assets/install.ps1
-            release-assets/release-manifest.tsv
-            release-assets/release-manifest.json
+          cd release-assets
+          sha256sum --check SHA256SUMS
 
       - name: Verify release provenance
         env:
+          TARGET_SHA: ${{ needs.verify-ci.outputs.target_sha }}
           GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
@@ -1364,6 +1447,9 @@ jobs:
             index="${#pids[@]}"
             assets+=("${asset}")
             gh attestation verify "${asset}" --repo "${GITHUB_REPOSITORY}" \
+              --signer-workflow "${GITHUB_REPOSITORY}/.github/workflows/standalone-release.yml" \
+              --source-digest "${TARGET_SHA}" --source-ref refs/heads/main \
+              --deny-self-hosted-runners \
               >"${log_dir}/${index}.log" 2>&1 &
             pids+=("$!")
           done < <(find release-assets -maxdepth 1 -type f -print0)
@@ -1378,23 +1464,6 @@ jobs:
             cat "${log_dir}/${index}.log"
           done
           exit "${status}"
-
-      - name: Validate curated release notes before publishing
-        shell: bash
-        run: |
-          set -euo pipefail
-          version="${{ steps.release.outputs.version }}"
-          curated_notes="docs/release-notes/${version}.md"
-          test -f "${curated_notes}" || {
-            echo "missing curated release notes: ${curated_notes}" >&2
-            exit 1
-          }
-          for heading in "## New Features" "## Bug Fixes" "## Changelog"; do
-            grep -Fqx "${heading}" "${curated_notes}" || {
-              echo "${curated_notes} is missing mandatory heading: ${heading}" >&2
-              exit 1
-            }
-          done
 
       - name: Wait for the absolute publication target and revalidate
         env:
@@ -1466,11 +1535,13 @@ jobs:
 
       - name: Publish GitHub release
         env:
+          RELEASE_PUBLISH: ${{ inputs.publish }}
           GH_TOKEN: ${{ github.token }}
           TARGET_SHA: ${{ steps.release.outputs.target_sha }}
         shell: bash
         run: |
           set -euo pipefail
+          test "${RELEASE_PUBLISH}" = true
           tag="${{ steps.release.outputs.tag }}"
           version="${{ steps.release.outputs.version }}"
           title="${version}"
@@ -1521,10 +1592,46 @@ jobs:
             --notes-file "${notes_file}" \
             --latest
 
+  verify-release:
+    name: Release verification verdict
+    runs-on: ubuntu-latest
+    if: ${{ always() }}
+    needs:
+      - release-preflight
+      - verify-ci
+      - build-mojo-archives
+      - build
+      - artifact-smoke
+      - prepare-release
+      - validate-release-assets
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - name: Require all validation jobs to succeed
+        env:
+          RESULTS: ${{ toJSON(needs) }}
+          RELEASE_PUBLISH: ${{ inputs.publish }}
+          SOURCE_SHA: ${{ inputs.target_sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          jq -e 'all(.[]; .result == "success")' <<<"${RESULTS}"
+          {
+            echo "## Release verification"
+            echo "- Source: ${SOURCE_SHA}"
+            echo "- Publishing requested: ${RELEASE_PUBLISH}"
+            echo "- Six platform builds, exact-source CI, smoke, SBOM, checksums and malware gates passed."
+            if [ "${RELEASE_PUBLISH}" != true ]; then
+              echo "- Verification only: no release/tag mutation, documentation push or attestation performed."
+            fi
+          } >> "${GITHUB_STEP_SUMMARY}"
+
   publish-duration-telemetry:
     name: Publish duration telemetry
     runs-on: ubuntu-latest
     needs:
+      - verify-release
       - build
       - prepare-release
       - sync-release-docs

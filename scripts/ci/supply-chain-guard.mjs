@@ -2,6 +2,7 @@
 import assert from "node:assert/strict";
 import fs from "node:fs/promises";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
 import {
   platformPackages,
   repoRoot,
@@ -272,15 +273,16 @@ export function validateKicsConfiguration(workflowContents) {
 }
 
 export function validateReleaseMalwareGate(contents) {
-  const job = workflowJob(contents, "publish-github-release");
-  if (!job) return [".github/workflows/standalone-release.yml: missing publish-github-release job"];
+  const job = workflowJob(contents, "validate-release-assets");
+  const publisher = workflowJob(contents, "publish-github-release");
+  if (!job || !publisher) return [".github/workflows/standalone-release.yml: missing release validation or publication job"];
   const violations = [];
   const action =
     "hugoalh/scan-virus-ghaction/clamav@99c81e8991ad1074a14e5f22a21bce9be035e14e";
   const prepare = job.indexOf("- name: Prepare release assets");
   const scan = job.indexOf("- name: Scan release assets for malware");
   const requireClean = job.indexOf("- name: Require clean release assets");
-  const publish = job.indexOf("- name: Publish GitHub release");
+  const publish = job.indexOf("- name: Upload validated release assets for the gated publisher");
   if (!(prepare >= 0 && prepare < scan && scan < requireClean && requireClean < publish)) {
     violations.push(
       ".github/workflows/standalone-release.yml: malware scan must gate prepared assets before publication",
@@ -299,6 +301,11 @@ export function validateReleaseMalwareGate(contents) {
   ]) {
     if (!job.includes(marker)) {
       violations.push(`.github/workflows/standalone-release.yml: malware gate missing ${marker}`);
+    }
+  }
+  for (const marker of ["- validate-release-assets", "name: validated-release-assets", "sha256sum --check SHA256SUMS"]) {
+    if (!publisher.includes(marker)) {
+      violations.push(`.github/workflows/standalone-release.yml: publisher must consume immutable scanned assets: ${marker}`);
     }
   }
   const scanStep = scan >= 0 && requireClean > scan ? job.slice(scan, requireClean) : "";
@@ -333,13 +340,15 @@ export function validateReleaseCiPolling(contents) {
 }
 
 export function validateReleaseContainerPublication(contents) {
+  const preflight = workflowJob(contents, "release-preflight");
+  const validation = workflowJob(contents, "validate-release-assets");
   const verify = workflowJob(contents, "verify-ci");
   const build = workflowJob(contents, "build");
   const attestBinaries = workflowJob(contents, "attest-binaries");
   const prepare = workflowJob(contents, "prepare-release");
   const syncDocs = workflowJob(contents, "sync-release-docs");
   const release = workflowJob(contents, "publish-github-release");
-  if (!verify || !build || !attestBinaries || !prepare || !syncDocs || !release) {
+  if (!preflight || !validation || !verify || !build || !attestBinaries || !prepare || !syncDocs || !release) {
     return [".github/workflows/standalone-release.yml: missing required release job"];
   }
   const violations = [];
@@ -372,7 +381,7 @@ export function validateReleaseContainerPublication(contents) {
     }
   }
   for (const marker of [
-    "- build",
+    "- validate-release-assets",
     "- verify-ci",
     "artifact-metadata: write",
     "attestations: write",
@@ -391,7 +400,9 @@ export function validateReleaseContainerPublication(contents) {
     }
   }
   for (const [name, job] of [
+    ["release-preflight", preflight],
     ["verify-ci", verify],
+    ["validate-release-assets", validation],
     ["build", build],
     ["prepare-release", prepare],
     ["sync-release-docs", syncDocs],
@@ -405,7 +416,7 @@ export function validateReleaseContainerPublication(contents) {
       );
     }
   }
-  for (const marker of ["group: standalone-release", "cancel-in-progress: false"]) {
+  for (const marker of ["inputs.publish && 'standalone-release'", "cancel-in-progress: false"]) {
     if (!contents.includes(marker)) {
       violations.push(`.github/workflows/standalone-release.yml: release concurrency missing ${marker}`);
     }
@@ -426,7 +437,7 @@ export function validateReleaseContainerPublication(contents) {
     "git tag --list '[0-9]*' --sort=-version:refname",
     "release version ${version} must be newer than ${latest_version}",
   ]) {
-    if (!verify.includes(marker)) {
+    if (!preflight.includes(marker)) {
       violations.push(`.github/workflows/standalone-release.yml: release target safety missing ${marker}`);
     }
   }
@@ -447,19 +458,33 @@ export function validateReleaseContainerPublication(contents) {
     }
   }
   const nativeClientRetryFlags = "--retry 5 --retry-all-errors --retry-delay 2";
-  if (`${verify}\n${build}`.split(nativeClientRetryFlags).length - 1 !== 4) {
+  if (`${preflight}\n${build}`.split(nativeClientRetryFlags).length - 1 !== 4) {
     violations.push(
       ".github/workflows/standalone-release.yml: every native client download must retry transient failures",
     );
   }
-  if (!prepare.includes("- attest-binaries")) {
-    violations.push(
-      ".github/workflows/standalone-release.yml: release preparation must wait for binary attestations",
-    );
+  for (const [name, job] of [["attest-binaries", attestBinaries], ["sync-release-docs", syncDocs], ["publish-github-release", release]]) {
+    for (const marker of ["if: ${{ inputs.publish }}", "- verify-ci", "- validate-release-assets"]) {
+      if (!job.includes(marker)) violations.push(`.github/workflows/standalone-release.yml: ${name} missing publication gate ${marker}`);
+    }
+  }
+  for (const [name, job] of [["release-preflight", preflight], ["verify-ci", verify], ["prepare-release", prepare], ["validate-release-assets", validation]]) {
+    if (/^\s+(?:artifact-metadata|attestations|id-token|packages|contents):\s*write\s*$/mu.test(job)) {
+      violations.push(`.github/workflows/standalone-release.yml: ${name} must be read-only`);
+    }
+  }
+  if (!attestBinaries.includes("subject-path: release-assets/*")) {
+    violations.push(".github/workflows/standalone-release.yml: attestation must cover every scanned release asset");
+  }
+  if (!workflowHeader.includes("default: false\n        type: boolean") || !release.includes('test "${RELEASE_PUBLISH}" = true')) {
+    violations.push(".github/workflows/standalone-release.yml: publication must be explicit and independently checked");
   }
   for (const marker of [
     "- sync-release-docs",
-    "subject-path: release-assets/SHA256SUMS",
+    "- attest-binaries",
+    '--source-digest "${TARGET_SHA}"',
+    "--source-ref refs/heads/main",
+    "--deny-self-hosted-runners",
     "find release-assets -maxdepth 1 -type f -print0",
     'TARGET_SHA: $' + '{{ steps.release.outputs.target_sha }}',
     'gh release create "${tag}" release-assets/*',
@@ -591,7 +616,7 @@ export function validateReleaseCodexExclusion(contents) {
   }
   const artifactSmoke = workflowJob(contents, "artifact-smoke") ?? "";
   const prepare = workflowJob(contents, "prepare-release") ?? "";
-  const release = workflowJob(contents, "publish-github-release") ?? "";
+  const release = workflowJob(contents, "validate-release-assets") ?? "";
   for (const [surface, job, marker] of [
     ["artifact and installer", artifactSmoke, "codex-purity-guard.mjs package-lock.json install.sh install.ps1 artifact"],
     ["staged npm package", artifactSmoke, "npm-package-smoke.mjs --binary-dir artifact"],
@@ -676,7 +701,7 @@ function selfTest() {
   prepare-release:
     input: node scripts/ci/codex-purity-guard.mjs sbom-input
     output: node scripts/ci/codex-purity-guard.mjs release-sbom.spdx.json
-  publish-github-release:
+  validate-release-assets:
     scope: find release-assets -maxdepth 1 -type f
     run: node scripts/ci/codex-purity-guard.mjs release-assets
 `;
@@ -998,7 +1023,9 @@ async function main() {
   process.exitCode = 1;
 }
 
-main().catch((error) => {
-  process.stderr.write(`supply-chain-guard: ${error.message}\n`);
-  process.exitCode = 1;
-});
+if (import.meta.url === pathToFileURL(process.argv[1] ?? "").href) {
+  main().catch((error) => {
+    process.stderr.write(`supply-chain-guard: ${error.message}\n`);
+    process.exitCode = 1;
+  });
+}
