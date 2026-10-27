@@ -132,12 +132,13 @@ jobs:
       - name: Cache independent ARM64 Rust release dependencies
         uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
         with:
-          shared-key: production-release-deps-v1
           add-rust-environment-hash-key: "false"
           cache-workspace-crates: "false"
           cache-bin: false
           save-if: ${{ github.ref == 'refs/heads/main' }}
-          key: release-deps-v1-rust1.99.1-thinlto-cgu16-mojo${{ env.PRODEX_MOJO_VERSION }}-${{ runner.os }}-${{ runner.arch }}-aarch64-pc-windows-msvc-generic-arm64-native-${{ steps.rust-deps-cache-key.outputs.external_sha256 }}
+          # The pinned action ignores key when shared-key is set. Keep every
+          # target/profile/input discriminator in the effective shared key.
+          shared-key: production-release-deps-v2-rust1.99.1-thinlto-cgu16-mojo${{ env.PRODEX_MOJO_VERSION }}-${{ runner.os }}-${{ runner.arch }}-aarch64-pc-windows-msvc-generic-arm64-native-${{ steps.rust-deps-cache-key.outputs.external_sha256 }}
 
       - name: Measure genuine Thin-LTO production ARM64 binary build
         shell: pwsh

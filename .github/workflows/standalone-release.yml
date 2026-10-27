@@ -394,48 +394,6 @@ jobs:
       kiro_cli_version: ${{ needs.release-preflight.outputs.kiro_cli_version }}
       platforms: ${{ format('[{0}]', toJSON(matrix)) }}
 
-  artifact-smoke:
-    name: Smoke official Linux artifact
-    needs:
-      - release-preflight
-      - build
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    permissions:
-      contents: read
-
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-        with:
-          persist-credentials: false
-
-      - name: Install Node.js for artifact smoke
-        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
-        with:
-          node-version: 22
-          package-manager-cache: false
-
-      - name: Download official Linux artifact
-        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
-        with:
-          name: x86_64-unknown-linux-gnu
-          path: artifact
-
-      - name: Run official artifact smoke
-        env:
-          RELEASE_VERSION: ${{ needs.release-preflight.outputs.version }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          binary="artifact/prodex"
-          test -f "${binary}"
-          chmod 0755 "${binary}"
-          node scripts/ci/codex-purity-guard.mjs package-lock.json install.sh install.ps1 artifact
-          node scripts/ci/npm-package-smoke.mjs --binary-dir artifact
-          node scripts/ci/release-artifact-smoke.mjs \
-            --binary "${binary}" \
-            --version "${RELEASE_VERSION}"
 
   prepare-release:
     name: Prepare release SBOM
@@ -505,7 +463,6 @@ jobs:
     needs:
       - release-preflight
       - prepare-release
-      - artifact-smoke
       - antivirus-health
     timeout-minutes: 35
     permissions:
@@ -985,7 +942,6 @@ jobs:
       - release-preflight
       - verify-ci
       - build
-      - artifact-smoke
       - prepare-release
       - validate-release-assets
       - antivirus-health

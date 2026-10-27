@@ -28,19 +28,20 @@ test("artifact smoke requires an explicit artifact and release version", () => {
 test("standalone release runs downloaded artifact smoke and SBOM independently before asset validation", () => {
   const source = readFileSync(script, "utf8");
   const workflow = readFileSync(".github/workflows/standalone-release.yml", "utf8");
-  const smoke = workflow.match(/\n  artifact-smoke:\n([\s\S]*?)\n  prepare-release:/u)?.[1];
+  const target = readFileSync(".github/workflows/release-target.yml", "utf8");
+  const smoke = target.match(/\n  artifact-smoke:\n([\s\S]*)/u)?.[1];
   const prepare = workflow.match(/\n  prepare-release:\n([\s\S]*?)\n  validate-release-assets:/u)?.[1];
 
   assert.ok(smoke, "artifact smoke job missing");
   assert.ok(prepare, "release preparation job missing");
-  assert.match(smoke, /- release-preflight/);
-  assert.match(smoke, /- build/);
+  assert.match(smoke, /needs: build/);
+  assert.match(smoke, /fromJSON\(inputs.platforms\)\[0\].target/);
   assert.match(smoke, /name: x86_64-unknown-linux-gnu/);
   assert.match(smoke, /binary="artifact\/prodex"/u);
   assert.match(smoke, /node scripts\/ci\/release-artifact-smoke\.mjs \\\n\s+--binary/u);
   assert.doesNotMatch(prepare, /- artifact-smoke/);
   const validation = workflow.match(/\n  validate-release-assets:\n([\s\S]*?)\n  attest-binaries:/u)?.[1];
-  assert.match(validation, /- artifact-smoke/);
+  assert.match(prepare, /- build/);
   assert.match(validation, /- prepare-release/);
   assert.doesNotMatch(smoke, /cargo\s+(run|build)/u);
   assert.doesNotMatch(smoke, /Build patched Codex runtime|release-assets\/codex|codex_binary/iu);

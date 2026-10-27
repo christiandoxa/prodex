@@ -121,7 +121,7 @@ test("official Intel macOS release uses measured Apple Silicon cross-build with 
   assert.match(build, /name: Require Rosetta for Intel macOS cross-target smoke/);
   assert.match(build, /test "\$\(uname -m\)" = arm64/);
   assert.match(build, /softwareupdate --install-rosetta --agree-to-license/);
-  assert.match(build, /key: release-[^\n]*-arm64-cross/);
+  assert.match(build, /shared-key: production-release-[^\n]*-arm64-cross/);
   assert.match(build, /name: Verify macOS Intel artifact architecture and Rosetta execution/);
   assert.match(build, /test "\$\(lipo -archs "\$\{binary\}"\)" = x86_64/);
   assert.match(build, /arch -x86_64 "\$\{binary\}" --version/);
@@ -301,7 +301,7 @@ test("official Windows ARM64 release uses native benchmark, strict PE and runtim
   assert.match(arm, /can-mojo-runtime-smoke: true/);
   assert.match(arm, /mojo-release: true/);
   assert.match(arm, /mojo-features: mojo-core/);
-  assert.match(build, /key: release-[^\n]*-arm64-native/);
+  assert.match(build, /shared-key: production-release-[^\n]*-arm64-native/);
   assert.match(build, /matrix.target == 'x86_64-apple-darwin' \|\| matrix.target == 'aarch64-apple-darwin'/);
   assert.match(build, /if \[\[ "\$\{\{ matrix.target \}\}" == \*-pc-windows-msvc \]\]; then\n\s+cargo build --locked/);
   assert.match(build, /name: Verify native Windows ARM64 artifact architecture/);
@@ -454,7 +454,7 @@ test("stable cargo release dependency cache keeps version churn out without acce
   assert.match(cache, /Swatinem\/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0/);
   assert.match(cache, /add-rust-environment-hash-key: "false"/);
   assert.match(cache, /cache-workspace-crates: "false"/);
-  assert.match(cache, /release-deps-v1-rust1\.99\.1-thinlto-cgu16/);
+  assert.match(cache, /release-deps-v2-rust1\.99\.1-thinlto-cgu16/);
   assert.match(cache, /env\.MOJO_VERSION/);
   assert.match(cache, /runner\.os/);
   assert.match(cache, /runner\.arch/);
@@ -558,19 +558,19 @@ test("Windows ARM64-host x64 release calibration is opt-in and fails closed on A
 
 test("release and calibration dependency caches share only compatible native dependencies", () => {
   const build = workflowJob(release, "build", "attest-binaries");
-  assert.match(build, /shared-key: production-release-deps-v1/);
+  assert.match(build, /shared-key: production-release-deps-v2/);
   for (const filename of [
     "release-macos-cross-calibration.yml", "release-windows-arm64-calibration.yml",
     "release-windows-x64-arm-host-calibration.yml", "release-windows-x64-codegen-calibration.yml",
   ]) {
     const source = readFileSync(`.github/workflows/${filename}`, "utf8");
-    assert.match(source, /shared-key: production-release-deps-v1/);
+    assert.match(source, /shared-key: production-release-deps-v2/);
     assert.match(source, /cache-workspace-crates: "false"/);
     assert.match(source, /cache-bin: false/);
     assert.match(source, /save-if:.*github.ref == 'refs\/heads\/main'/);
     assert.match(source, /scripts\/ci\/release_cargo_deps_cache_key.py/);
     assert.match(source, /external_sha256=legacy-\$\(git rev-parse HEAD\)/);
-    assert.match(source, /key: release-deps-v1-rust1.99.1-thinlto-cgu/);
+    assert.match(source, /shared-key: production-release-deps-v2-rust1.99.1-thinlto-cgu/);
     assert.match(source, /runner.os.*runner.arch/);
     assert.match(source, /steps.rust-deps-cache-key.outputs.external_sha256/);
     assert.match(source, /cargo build --(?:release|locked)/);
@@ -595,7 +595,7 @@ test("benchmark reuses only a trusted exact-input archive and keeps a cold compi
 
 test("optimized npm package smoke retains real release compilation and a separate trusted cache", () => {
   const job = workflowJob(ci, "npm-package-smoke", "standalone-installer");
-  assert.match(job, /shared-key: npm-host-release-deps-v1/);
+  assert.match(job, /shared-key: npm-host-release-deps-v2/);
   assert.match(job, /cache-workspace-crates: "false"/);
   assert.match(job, /save-if:.*github.event_name == 'push'.*refs\/heads\/main/);
   assert.match(job, /cargo build --release --locked --target x86_64-unknown-linux-gnu --bin prodex/);

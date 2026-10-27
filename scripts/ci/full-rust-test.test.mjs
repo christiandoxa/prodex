@@ -192,9 +192,13 @@ test("push CI reuses the disjoint prodex-app library partitions", () => {
   assert.ok(telemetry, "ci-duration-telemetry job missing");
   assert.match(job, /matrix: \$\{\{ fromJSON\(needs\.changes\.outputs\.prodex_app_matrix\) \}\}/);
   assert.doesNotMatch(job, /include:/);
-  assert.match(job, /CARGO_INCREMENTAL: "0"/);
-  assert.match(job, /CARGO_PROFILE_TEST_DEBUG: "0"/);
-  assert.match(job, /save-if: \$\{\{ matrix\.save_cache \}\}/);
+  const producer = workflow.match(/\n  linux-app-test-build:\n([\s\S]*?)\n  prodex-app-lib:/)?.[1];
+  assert.ok(producer, "Linux native producer missing");
+  assert.match(producer, /CARGO_INCREMENTAL: "0"/);
+  assert.match(producer, /CARGO_PROFILE_TEST_DEBUG: "0"/);
+  assert.match(producer, /Cache Rust dependencies/);
+  assert.match(job, /TEST_MANIFEST_SHA256:/);
+  assert.match(job, /native-test-artifact\.mjs run/);
   assert.match(job, /PRODEX_APP_FILTER/);
   assert.doesNotMatch(job, /Test temp-backed state with a symlinked TMPDIR/);
   assert.match(telemetry, /- prodex-app-lib/);
@@ -208,8 +212,8 @@ test("direct targeted workflow lanes reject zero-test matches", () => {
   for (const [jobName, nextJob, stepName] of [
     ["windows-workspace", "windows-prodex-app", "Run Windows foundation member tests"],
     ["windows-workspace", "windows-prodex-app", "Run Windows runtime member tests"],
-    ["macos-workspace", "process-guard", "Run native macOS broker recovery tests"],
-    ["macos-workspace", "process-guard", "Run native macOS Kiro selector and resume tests"],
+    ["macos-native-regressions", "process-guard", "Run native macOS broker recovery tests"],
+    ["macos-native-regressions", "process-guard", "Run native macOS Kiro selector and resume tests"],
     ["profile-commands-internal", "main-internal-core", "Run profile command internal tests"],
   ]) {
     const job = workflow.match(new RegExp(`\\n  ${jobName}:\\n([\\s\\S]*?)\\n  ${nextJob}:`))?.[1];
@@ -258,7 +262,7 @@ test("release Mojo install activates the compiler in its current step", () => {
 test("release validates the Kiro pin before build fan-out", () => {
   const workflow = readFileSync(".github/workflows/standalone-release.yml", "utf8");
   const verifyCi = workflow.match(/\n  release-preflight:\n([\s\S]*?)\n  build:/)?.[1];
-  const build = workflow.match(/\n  build:\n([\s\S]*?)\n  artifact-smoke:/)?.[1];
+  const build = workflow.match(/\n  build:\n([\s\S]*?)\n  prepare-release:/)?.[1];
 
   assert.ok(verifyCi, "release CI verification job missing");
   assert.ok(build, "release build job missing");
@@ -275,7 +279,7 @@ test("release validates the Kiro pin before build fan-out", () => {
 
 test("release builds Prodex only and leaves Codex external", () => {
   const workflow = readFileSync(".github/workflows/release-target.yml", "utf8");
-  const build = workflow.match(/\n  build:\n([\s\S]*)/)?.[1];
+  const build = workflow.match(/\n  build:\n([\s\S]*?)\n  artifact-smoke:/)?.[1];
 
   assert.ok(build, "release build job missing");
   assert.doesNotMatch(build, /Codex|codex/);

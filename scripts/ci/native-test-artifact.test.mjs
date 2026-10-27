@@ -122,7 +122,9 @@ test("Windows security gate rejects unbound bundles and missing producer compila
     "TEST_MANIFEST_SHA256: ${{ needs.windows-app-test-build.outputs.manifest_sha256 }}",
     "native-test-artifact.mjs pack", "native-test-artifact.mjs run", "if-no-files-found: error",
   ]) {
-    const targeted = marker === "if-no-files-found: error" ? job("windows-app-test-build") : workflow;
+    const targeted = [job("windows-app-test-build"), job("windows-prodex-app")]
+      .find((body) => body.includes(marker));
+    assert.ok(targeted, `Windows fixture marker missing: ${marker}`);
     const damaged = workflow.replace(targeted, targeted.replace(marker, "missing-binding"));
     assert.ok(validateWindowsSecurityJob(damaged).length > 0, marker);
   }

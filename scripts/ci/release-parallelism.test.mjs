@@ -37,7 +37,7 @@ test("manual release workflow defaults to nonpublishing verification", () => {
 });
 
 test("read-only binaries, smoke and SBOM overlap full CI without losing source checks", () => {
-  for (const name of ["build", "artifact-smoke", "prepare-release", "validate-release-assets"]) {
+  for (const name of ["build", "prepare-release", "validate-release-assets"]) {
     const dependencies = ancestors(name);
     assert.ok(dependencies.has("release-preflight"), `${name} needs validated immutable source`);
     assert.ok(!dependencies.has("verify-ci"), `${name} must not idle behind full CI`);
@@ -69,7 +69,7 @@ test("every publishing side effect waits for successful exact-source CI and asse
 });
 
 test("verification verdict waits for every build and smoke gate, not skipped publishing jobs", () => {
-  for (const name of ["verify-ci", "build", "artifact-smoke", "prepare-release", "validate-release-assets"]) {
+  for (const name of ["verify-ci", "build", "prepare-release", "validate-release-assets"]) {
     assert.ok(needs("verify-release").includes(name), `verification verdict omits ${name}`);
   }
   assert.match(jobs.get("verify-release"), /always\(\)/);
