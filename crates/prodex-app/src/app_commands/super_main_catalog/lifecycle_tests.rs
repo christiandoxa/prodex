@@ -261,3 +261,63 @@ fn active_openai_account_catalog_precedes_unrelated_shared_cache_04394() {
         ["shared-account-only"]
     );
 }
+
+#[test]
+fn main_launch_uses_account_default_effort_and_keeps_explicit_override_04394() {
+    let fixture = Fixture::new("launch-default", chatgpt());
+    fs::write(fixture.home.join("models_cache.json"), json!({"models":[{
+        "slug":"gpt-6.1-terra", "visibility":"list", "supported_in_api":true,
+        "supported_reasoning_levels":[{"effort":"low"},{"effort":"medium"},{"effort":"max"},{"effort":"ultra"}],
+        "default_reasoning_level":"low"
+    }]}).to_string()).unwrap();
+    let crate::Commands::Super(args) =
+        crate::parse_cli_command_from(["prodex", "s", "--model", "gpt-6.1-terra"]).unwrap()
+    else {
+        panic!("expected Super command");
+    };
+    assert_eq!(
+        super::super::resolve_main_model_and_effort(&args, ProviderId::OpenAi, false).unwrap(),
+        (Some("gpt-6.1-terra".into()), Some("low".into()))
+    );
+    assert_eq!(
+        crate::effective_provider_model_reasoning_resolution(
+            ProviderId::OpenAi,
+            Some("gpt-6.1-terra"),
+            None
+        )
+        .unwrap()
+        .default_reasoning_effort,
+        Some(prodex_provider_core::ProviderReasoningEffort::Low)
+    );
+    let crate::Commands::Super(explicit) = crate::parse_cli_command_from([
+        "prodex",
+        "s",
+        "--model",
+        "gpt-6.1-terra",
+        "-c",
+        "model_reasoning_effort=\"max\"",
+    ])
+    .unwrap() else {
+        panic!("expected Super command");
+    };
+    assert_eq!(
+        super::super::resolve_main_model_and_effort(&explicit, ProviderId::OpenAi, false).unwrap(),
+        (Some("gpt-6.1-terra".into()), Some("max".into()))
+    );
+    assert_eq!(
+        super::super::prompt_openai_ping_model_and_effort(Some("gpt-6.1-terra"), Some("ultra"))
+            .unwrap(),
+        (Some("gpt-6.1-terra".into()), Some("ultra".into()))
+    );
+    secret_store::write_private_file_atomic(
+        &fixture.home.join("auth.json"),
+        json!({"auth_mode":"apikey","OPENAI_API_KEY":"synthetic-api-key"})
+            .to_string()
+            .as_bytes(),
+    )
+    .unwrap();
+    assert_eq!(
+        super::super::resolve_main_model_and_effort(&args, ProviderId::OpenAi, false).unwrap(),
+        (Some("gpt-6.1-terra".into()), Some("medium".into()))
+    );
+}
