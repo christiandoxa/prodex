@@ -180,6 +180,8 @@ fn gemini_catalog_models(
     })?;
     plan.into_iter()
         .map(|model| {
+            let metadata =
+                prodex_provider_core::provider_catalog_entry(ProviderId::Gemini, &model.slug);
             render_runtime_model_catalog(RuntimeModelCatalogInput {
                 provider: ProviderId::Gemini,
                 slug: &model.slug,
@@ -188,8 +190,9 @@ fn gemini_catalog_models(
                 priority: model.priority,
                 context_window: model.context_window,
                 auto_compact_token_limit: model.auto_compact_token_limit,
-                supported_reasoning_efforts: None,
-                default_reasoning_effort: None,
+                supported_reasoning_efforts: metadata
+                    .and_then(|entry| entry.supported_reasoning_efforts.as_deref()),
+                default_reasoning_effort: metadata.and_then(|entry| entry.default_reasoning_effort),
             })
             .context("failed to render Gemini model catalog")
         })

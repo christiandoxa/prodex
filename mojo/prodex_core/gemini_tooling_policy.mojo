@@ -303,6 +303,7 @@ def prodex_gemini_tool_name_policy_v1(
 def tooling_model_uses_gemini3(view: ProdexRichStringView) -> Bool:
     return (
         tooling_view_contains_folded["gemini-3"](view)
+        or tooling_view_contains_folded["gemini-4"](view)
         or tooling_view_range_equals_folded["auto"](view, 0, Int64(view.len))
         or tooling_view_contains_folded["auto-gemini-3"](view)
     )

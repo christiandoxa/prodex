@@ -6,8 +6,26 @@ mod gemini;
 use crate::ProviderId;
 
 pub fn provider_model_fallback_chain(provider: ProviderId, model: &str) -> Vec<String> {
-    prodex_mojo_core::rich::model_fallback_chain(provider.label(), model)
-        .expect("Mojo model fallback parser returned an invalid structured result")
+    prodex_mojo_core::rich::model_fallback_chain(
+        provider.label(),
+        provider_wire_model(provider, model),
+    )
+    .expect("Mojo model fallback parser returned an invalid structured result")
+}
+
+// Preserve generic fallback aliases (such as `sonnet`) while adapting explicit
+// legacy Claude IDs to the provider's reviewed wire ID via compiled identity lookup.
+fn provider_wire_model(provider: ProviderId, model: &str) -> &str {
+    if provider == ProviderId::Copilot
+        && prodex_mojo_core::rich::ascii_casefold_starts_with(model.trim(), "claude-")
+            .expect("compiled Copilot model-prefix classification failed")
+    {
+        crate::provider_catalog_entry(provider, model)
+            .map(|entry| entry.id.as_str())
+            .unwrap_or(model)
+    } else {
+        model
+    }
 }
 
 pub fn provider_gemini_retain_code_assist_models(model_chain: &mut Vec<String>) {
@@ -15,8 +33,11 @@ pub fn provider_gemini_retain_code_assist_models(model_chain: &mut Vec<String>) 
 }
 
 pub fn provider_canonical_model(provider: ProviderId, model: &str) -> String {
-    prodex_mojo_core::rich::model_fallback_head(provider.label(), model)
-        .expect("Mojo model fallback choice returned an invalid structured result")
+    prodex_mojo_core::rich::model_fallback_head(
+        provider.label(),
+        provider_wire_model(provider, model),
+    )
+    .expect("Mojo model fallback choice returned an invalid structured result")
 }
 
 pub fn provider_model_allows_session_memory(model: &str) -> bool {
@@ -61,7 +82,7 @@ fn rich_model_fallback_matches_expected_provider_cases() {
         (
             ProviderId::Copilot,
             "sonnet",
-            &["claude-sonnet-5-5", "gpt-6.1-sol", "gpt-5.3-codex"],
+            &["claude-sonnet-5.5", "gpt-6.1-sol", "gpt-5.3-codex"],
         ),
         (
             ProviderId::Copilot,
@@ -267,5 +288,31 @@ fn provider_fallback_head_and_code_assist_filter_are_mojo_owned_at_caller_bounda
         ]
         .map(str::to_string)
         .to_vec()
+    );
+}
+
+#[test]
+fn copilot_wire_spelling_preserves_legacy_ids_without_changing_native_anthropic_04394() {
+    for model in ["claude-sonnet-5-5", " CLAUDE-SONNET-5.5 "] {
+        assert_eq!(
+            provider_model_fallback_chain(ProviderId::Copilot, model),
+            ["claude-sonnet-5.5"]
+        );
+        assert_eq!(
+            provider_canonical_model(ProviderId::Copilot, model),
+            "claude-sonnet-5.5"
+        );
+    }
+    assert_eq!(
+        provider_canonical_model(ProviderId::Anthropic, "claude-sonnet-5-5"),
+        "claude-sonnet-5-5"
+    );
+    assert_eq!(
+        provider_canonical_model(ProviderId::Copilot, "sonnet"),
+        "claude-sonnet-5.5"
+    );
+    assert_eq!(
+        provider_canonical_model(ProviderId::Copilot, "terra"),
+        "gpt-6.1-terra"
     );
 }

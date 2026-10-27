@@ -380,3 +380,30 @@ fn runtime_catalog_filters_retired_launch_and_cached_ids_without_cross_provider_
     assert!(models.iter().any(|entry| entry.slug == "tenant/retained"));
     assert!(models.iter().any(|entry| entry.slug == "gpt-5.3-codex"));
 }
+
+#[test]
+fn gemini_4_runtime_catalog_keeps_only_its_supported_efforts_04394() {
+    let efforts = [
+        ProviderReasoningEffort::Low,
+        ProviderReasoningEffort::Medium,
+        ProviderReasoningEffort::High,
+    ];
+    let model = render_runtime_model_catalog(RuntimeModelCatalogInput {
+        provider: ProviderId::Gemini,
+        slug: "gemini-4-argon",
+        supported_reasoning_efforts: Some(&efforts),
+        default_reasoning_effort: Some(ProviderReasoningEffort::Medium),
+        ..observation()
+    })
+    .unwrap();
+    assert_eq!(model["default_reasoning_level"], "medium");
+    assert_eq!(
+        model["supported_reasoning_levels"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|value| value["effort"].as_str().unwrap())
+            .collect::<Vec<_>>(),
+        ["low", "medium", "high"]
+    );
+}

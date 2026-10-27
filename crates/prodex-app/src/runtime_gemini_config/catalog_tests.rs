@@ -33,6 +33,20 @@ fn gemini_catalog_preserves_original_complete_catalogs() {
     for (name, launch, context, compact) in cases {
         let models =
             gemini_catalog_models(launch, &RuntimeGeminiModelResolution, context, compact).unwrap();
+        let argon = models
+            .iter()
+            .find(|model| model["slug"] == "gemini-4-argon")
+            .unwrap();
+        assert_eq!(argon["default_reasoning_level"], "medium");
+        assert_eq!(
+            argon["supported_reasoning_levels"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|value| value["effort"].as_str().unwrap())
+                .collect::<Vec<_>>(),
+            ["low", "medium", "high"]
+        );
         let digest = Sha256::digest(serde_json::to_vec(&models).unwrap())
             .iter()
             .map(|byte| format!("{byte:02x}"))

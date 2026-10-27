@@ -2,37 +2,37 @@
   {
     "first_auto_compact_token_limit": 90000,
     "first_context_window": 100000,
-    "models": 25,
+    "models": 28,
     "name": "copilot-dynamic",
-    "sha256": "847bc0554a3e79a9071c61aabedfe193acb75973d2a2c9ca0fb4bb226c145772"
+    "sha256": "ab7b8ede7b619d9a360bba71566ae9de414fc54f0c22c260b6f347c3a6a19ae9"
   },
   {
     "first_auto_compact_token_limit": 90000,
     "first_context_window": 100000,
-    "models": 25,
+    "models": 28,
     "name": "copilot-untrimmed-query",
-    "sha256": "847bc0554a3e79a9071c61aabedfe193acb75973d2a2c9ca0fb4bb226c145772"
+    "sha256": "ab7b8ede7b619d9a360bba71566ae9de414fc54f0c22c260b6f347c3a6a19ae9"
   },
   {
     "first_auto_compact_token_limit": 997500,
     "first_context_window": 1050000,
-    "models": 25,
+    "models": 28,
     "name": "copilot-registry-fallback",
-    "sha256": "478e95ff23909f4b54faa13da998217882fb47abd543e12d02ab5d127871cceb"
+    "sha256": "cf2031b923b70bacb45a07bd55077c1f25623495b7acdeacf4a85493f5df24f2"
   },
   {
     "first_auto_compact_token_limit": 0,
     "first_context_window": 0,
-    "models": 25,
+    "models": 28,
     "name": "copilot-empty-launch",
-    "sha256": "bde2a89bf336836745387f0aef9aece7fdf3002b7544d2a992a6ea82a6420d06"
+    "sha256": "116b161315b99394e7ab6243db5d13f2bd45b0222b79b23a768990f833ea2d2a"
   },
   {
     "first_auto_compact_token_limit": 9,
     "first_context_window": 10,
-    "models": 25,
+    "models": 28,
     "name": "copilot-unicode-query",
-    "sha256": "e1d6f769bd848ca4dc53ee4dd8f25aae7cfbfc594465bd8620ffad13282a9976"
+    "sha256": "41dc4dd050a67ce0d378e061ca9396eb7c530f8ec7c9245140dbd4934a21c655"
   },
   {
     "first_auto_compact_token_limit": 10,
@@ -51,36 +51,36 @@
   {
     "first_auto_compact_token_limit": 190000,
     "first_context_window": 200000,
-    "models": 11,
+    "models": 12,
     "name": "anthropic-registry-alias",
-    "sha256": "d0a35fa3f0eb20a08b87156febb4005838edd68f941d471ff537b17a2849d63e"
+    "sha256": "c10fd2247b38ace8fb263c8bec696e06523dcc40b0c2dc9620abae5a73d1d641"
   },
   {
     "first_auto_compact_token_limit": 0,
     "first_context_window": 0,
-    "models": 12,
+    "models": 13,
     "name": "anthropic-unknown-zero",
-    "sha256": "11ddc4f27458f353807d5ab2c4694e2b3a346e7a0b83f7d242439b1b1bb9d31d"
+    "sha256": "0a92d8d58052a61932c014a0b9df5c8c72fe868a2c493e252b28bb39dc726e05"
   },
   {
     "first_auto_compact_token_limit": 18446744073709551614,
     "first_context_window": 18446744073709551615,
-    "models": 12,
+    "models": 13,
     "name": "anthropic-unknown-max",
-    "sha256": "bfd408e368a79f2a3457dfd6fcf9789d8c97b4bde236a16469f83ddd90fdd254"
+    "sha256": "bd1941665dcb625cff886f01badd93bf5bf33c31a155ba12019c2c3851b7fd08"
   },
   {
     "first_auto_compact_token_limit": 90000,
     "first_context_window": 100000,
-    "models": 26,
+    "models": 29,
     "name": "copilot-long-query",
-    "sha256": "530880c147c4b5d969e9df1b790ec8c21607900ab981ffce71e9f767645ad27b"
+    "sha256": "bcd3a532b87b03815a0114f636546acf2ad618c9d95585917298faef11ba0aa0"
   },
   {
     "first_auto_compact_token_limit": 997500,
     "first_context_window": 1050000,
-    "models": 25,
+    "models": 28,
     "name": "copilot-long-padded-alias",
-    "sha256": "478e95ff23909f4b54faa13da998217882fb47abd543e12d02ab5d127871cceb"
+    "sha256": "cf2031b923b70bacb45a07bd55077c1f25623495b7acdeacf4a85493f5df24f2"
   }
 ]

@@ -4166,9 +4166,11 @@ def gemini_bridge_request_write_thinking_config(
         return gemini_bridge_request_put_literal_field(
             writer, first, StringSlice("\"thinkingConfig\":{\"includeThoughts\":false,\"thinkingBudget\":0}")
         )
-    var thinking_level = gemini_bridge_request_string_contains(model, StringSlice("gemini-3")) or gemini_bridge_request_string_contains(model, StringSlice("gemma-3")) or gemini_bridge_request_string_contains(model, StringSlice("gemma-4"))
+    var thinking_level = gemini_bridge_request_string_contains(model, StringSlice("gemini-4")) or gemini_bridge_request_string_contains(model, StringSlice("gemini-3")) or gemini_bridge_request_string_contains(model, StringSlice("gemma-3")) or gemini_bridge_request_string_contains(model, StringSlice("gemma-4"))
     if thinking_level:
         var level = StringSlice("HIGH")
+        if effort.len == 0 and gemini_bridge_request_string_contains(model, StringSlice("gemini-4-argon")):
+            level = StringSlice("MEDIUM")
         if gemini_bridge_request_string_equals(effort, StringSlice("low")):
             level = StringSlice("LOW")
         elif gemini_bridge_request_string_equals(effort, StringSlice("medium")):

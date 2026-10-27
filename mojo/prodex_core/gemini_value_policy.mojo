@@ -401,7 +401,7 @@ def prodex_mojo_gemini_value_scalar_v1(
         if text.len >= 8:
             for index in range(Int64(text.len) - 7):
                 var fragment = ProdexRichStringView(text.ptr + UInt(index), UInt(8))
-                if rich_view_matches_literal["gemini-3"](fragment, False):
+                if rich_view_matches_literal["gemini-3"](fragment, False) or rich_view_matches_literal["gemini-4"](fragment, False):
                     result[unsafe_offset=0] = 1
                     break
         return 0

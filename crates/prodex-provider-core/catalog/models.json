@@ -627,6 +627,42 @@
   {
     "provider": "anthropic",
     "owned_by": "anthropic",
+    "id": "claude-haiku-5-5",
+    "display_name": "Claude Haiku 5.5",
+    "description": "Claude Haiku 5.5 available through anthropic; account catalogs determine entitlements and provider-specific limits.",
+    "context_window_tokens": 1000000,
+    "input_cost_per_million_microusd": null,
+    "output_cost_per_million_microusd": null,
+    "supported_endpoints": [
+      "responses",
+      "responses/compact",
+      "chat-completions",
+      "messages",
+      "models"
+    ],
+    "aliases": [],
+    "feature_flags": {
+      "tools": true,
+      "json_schema": false,
+      "vision": false,
+      "audio": false,
+      "web_search": false,
+      "reasoning": true
+    },
+    "pricing_known": false,
+    "max_output_tokens": 128000,
+    "supported_reasoning_efforts": [
+      "low",
+      "medium",
+      "high",
+      "xhigh",
+      "max"
+    ],
+    "default_reasoning_effort": "medium"
+  },
+  {
+    "provider": "anthropic",
+    "owned_by": "anthropic",
     "id": "claude-fable-5-1",
     "display_name": "Claude Fable 5.1",
     "description": "Anthropic Claude Fable 5.1 model.",
@@ -839,6 +875,45 @@
   {
     "provider": "copilot",
     "owned_by": "github-copilot",
+    "id": "gpt-6.1-terra",
+    "display_name": "GPT-6.1 Terra",
+    "description": "GPT-6.1 Terra available through copilot; account catalogs determine entitlements and provider-specific limits.",
+    "context_window_tokens": 1050000,
+    "supported_reasoning_efforts": [
+      "none",
+      "low",
+      "medium",
+      "high",
+      "xhigh",
+      "max"
+    ],
+    "default_reasoning_effort": "medium",
+    "input_cost_per_million_microusd": null,
+    "output_cost_per_million_microusd": null,
+    "supported_endpoints": [
+      "responses",
+      "responses/compact",
+      "chat-completions",
+      "messages",
+      "models"
+    ],
+    "aliases": [
+      "terra"
+    ],
+    "feature_flags": {
+      "tools": true,
+      "json_schema": false,
+      "vision": false,
+      "audio": false,
+      "web_search": true,
+      "reasoning": true
+    },
+    "pricing_known": false,
+    "max_output_tokens": 128000
+  },
+  {
+    "provider": "copilot",
+    "owned_by": "github-copilot",
     "id": "gpt-6-luna",
     "display_name": "GPT-6 Luna",
     "description": "GPT-6 Luna exposed through GitHub Copilot.",
@@ -915,7 +990,7 @@
   {
     "provider": "copilot",
     "owned_by": "github-copilot",
-    "id": "claude-opus-5-5",
+    "id": "claude-opus-5.5",
     "display_name": "Claude Opus 5.5",
     "description": "Claude Opus 5.5 exposed through GitHub Copilot.",
     "context_window_tokens": 1000000,
@@ -928,7 +1003,9 @@
       "messages",
       "models"
     ],
-    "aliases": [],
+    "aliases": [
+      "claude-opus-5-5"
+    ],
     "feature_flags": {
       "tools": true,
       "json_schema": false,
@@ -969,7 +1046,7 @@
   {
     "provider": "copilot",
     "owned_by": "github-copilot",
-    "id": "claude-sonnet-5-5",
+    "id": "claude-sonnet-5.5",
     "display_name": "Claude Sonnet 5.5",
     "description": "Claude Sonnet 5.5 exposed through GitHub Copilot.",
     "context_window_tokens": 1000000,
@@ -982,7 +1059,9 @@
       "messages",
       "models"
     ],
-    "aliases": [],
+    "aliases": [
+      "claude-sonnet-5-5"
+    ],
     "feature_flags": {
       "tools": true,
       "json_schema": false,
@@ -992,6 +1071,44 @@
       "reasoning": true
     },
     "pricing_known": false
+  },
+  {
+    "provider": "copilot",
+    "owned_by": "github-copilot",
+    "id": "claude-haiku-5.5",
+    "display_name": "Claude Haiku 5.5",
+    "description": "Claude Haiku 5.5 available through copilot; account catalogs determine entitlements and provider-specific limits.",
+    "context_window_tokens": 1000000,
+    "input_cost_per_million_microusd": null,
+    "output_cost_per_million_microusd": null,
+    "supported_endpoints": [
+      "responses",
+      "responses/compact",
+      "chat-completions",
+      "messages",
+      "models"
+    ],
+    "aliases": [
+      "claude-haiku-5-5"
+    ],
+    "feature_flags": {
+      "tools": true,
+      "json_schema": false,
+      "vision": false,
+      "audio": false,
+      "web_search": true,
+      "reasoning": true
+    },
+    "pricing_known": false,
+    "max_output_tokens": 128000,
+    "supported_reasoning_efforts": [
+      "low",
+      "medium",
+      "high",
+      "xhigh",
+      "max"
+    ],
+    "default_reasoning_effort": "medium"
   },
   {
     "provider": "copilot",
@@ -1023,7 +1140,7 @@
   {
     "provider": "copilot",
     "owned_by": "github-copilot",
-    "id": "claude-fable-5-1",
+    "id": "claude-fable-5.1",
     "display_name": "Claude Fable 5.1",
     "description": "Claude Fable 5.1 exposed through GitHub Copilot.",
     "context_window_tokens": 1000000,
@@ -1036,7 +1153,9 @@
       "messages",
       "models"
     ],
-    "aliases": [],
+    "aliases": [
+      "claude-fable-5-1"
+    ],
     "feature_flags": {
       "tools": true,
       "json_schema": false,
@@ -1073,6 +1192,40 @@
       "reasoning": true
     },
     "pricing_known": false
+  },
+  {
+    "provider": "copilot",
+    "owned_by": "github-copilot",
+    "id": "gemini-4-argon",
+    "display_name": "Gemini 4 Argon",
+    "description": "Gemini 4 Argon available through copilot; account catalogs determine entitlements and provider-specific limits.",
+    "context_window_tokens": 1048576,
+    "input_cost_per_million_microusd": null,
+    "output_cost_per_million_microusd": null,
+    "supported_endpoints": [
+      "responses",
+      "responses/compact",
+      "chat-completions",
+      "messages",
+      "models"
+    ],
+    "aliases": [],
+    "feature_flags": {
+      "tools": true,
+      "json_schema": false,
+      "vision": false,
+      "audio": false,
+      "web_search": true,
+      "reasoning": true
+    },
+    "pricing_known": false,
+    "max_output_tokens": 65536,
+    "supported_reasoning_efforts": [
+      "low",
+      "medium",
+      "high"
+    ],
+    "default_reasoning_effort": "medium"
   },
   {
     "provider": "copilot",
@@ -1325,7 +1478,7 @@
   {
     "provider": "copilot",
     "owned_by": "github-copilot",
-    "id": "claude-sonnet-4-6",
+    "id": "claude-sonnet-4.6",
     "display_name": "Claude Sonnet 4.6",
     "description": "GitHub Copilot model exposed through Prodex.",
     "context_window_tokens": 1000000,
@@ -1340,7 +1493,8 @@
     ],
     "aliases": [
       "claude",
-      "sonnet"
+      "sonnet",
+      "claude-sonnet-4-6"
     ],
     "feature_flags": {
       "tools": true,
@@ -1355,7 +1509,7 @@
   {
     "provider": "copilot",
     "owned_by": "github-copilot",
-    "id": "claude-opus-4-8",
+    "id": "claude-opus-4.8",
     "display_name": "Claude Opus 4.8",
     "description": "GitHub Copilot model exposed through Prodex.",
     "context_window_tokens": 1000000,
@@ -1369,7 +1523,8 @@
       "models"
     ],
     "aliases": [
-      "opus"
+      "opus",
+      "claude-opus-4-8"
     ],
     "feature_flags": {
       "tools": true,
@@ -1411,7 +1566,7 @@
   {
     "provider": "copilot",
     "owned_by": "github-copilot",
-    "id": "claude-haiku-4-5",
+    "id": "claude-haiku-4.5",
     "display_name": "Claude Haiku 4.5",
     "description": "GitHub Copilot model exposed through Prodex.",
     "context_window_tokens": 200000,
@@ -1425,7 +1580,8 @@
       "models"
     ],
     "aliases": [
-      "haiku"
+      "haiku",
+      "claude-haiku-4-5"
     ],
     "feature_flags": {
       "tools": true,
@@ -1721,6 +1877,40 @@
       "reasoning": true
     },
     "pricing_known": false
+  },
+  {
+    "provider": "gemini",
+    "owned_by": "google",
+    "id": "gemini-4-argon",
+    "display_name": "Gemini 4 Argon",
+    "description": "Google Gemini 4 Argon with thinking levels. The standard streaming hop supports 65536 output tokens; long-decode continuation is not claimed by this catalog.",
+    "context_window_tokens": 1048576,
+    "input_cost_per_million_microusd": null,
+    "output_cost_per_million_microusd": null,
+    "supported_endpoints": [
+      "responses",
+      "responses/compact",
+      "chat-completions",
+      "messages",
+      "models"
+    ],
+    "aliases": [],
+    "feature_flags": {
+      "tools": true,
+      "json_schema": true,
+      "vision": true,
+      "audio": false,
+      "web_search": true,
+      "reasoning": true
+    },
+    "pricing_known": false,
+    "max_output_tokens": 65536,
+    "supported_reasoning_efforts": [
+      "low",
+      "medium",
+      "high"
+    ],
+    "default_reasoning_effort": "medium"
   },
   {
     "provider": "gemini",

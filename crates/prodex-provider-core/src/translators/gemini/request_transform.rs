@@ -638,4 +638,30 @@ mod tests {
         ));
         assert!(rejection_reason(result).starts_with("failed to parse Responses request JSON:"),);
     }
+    #[test]
+    fn gemini_4_argon_uses_model_specific_thinking_levels_04394() {
+        assert!(crate::gemini_provider_core_model_uses_thinking_level(
+            "gemini-4-argon"
+        ));
+        assert!(crate::gemini_provider_core_model_uses_gemini3_toolset(
+            "gemini-4-argon"
+        ));
+        for (effort, expected) in [
+            (None, "MEDIUM"),
+            (Some("low"), "LOW"),
+            (Some("medium"), "MEDIUM"),
+            (Some("high"), "HIGH"),
+        ] {
+            let mut request = json!({"model":"gemini-4-argon","input":"synthetic task"});
+            if let Some(effort) = effort {
+                request["reasoning"] = json!({"effort":effort});
+            }
+            let result = transform(request);
+            let body: serde_json::Value = serde_json::from_slice(&result.body.unwrap()).unwrap();
+            assert_eq!(
+                body["request"]["generationConfig"]["thinkingConfig"],
+                json!({"includeThoughts":true,"thinkingLevel":expected})
+            );
+        }
+    }
 }
