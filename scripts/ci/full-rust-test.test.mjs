@@ -204,7 +204,7 @@ test("push CI reuses the disjoint prodex-app library partitions", () => {
 
 test("direct targeted workflow lanes reject zero-test matches", () => {
   const workflow = readFileSync(".github/workflows/ci.yml", "utf8");
-  const releaseWorkflow = readFileSync(".github/workflows/standalone-release.yml", "utf8");
+  const releaseWorkflow = readFileSync(".github/workflows/release-target.yml", "utf8");
   for (const [jobName, nextJob, stepName] of [
     ["windows-workspace", "windows-prodex-app", "Run Windows foundation member tests"],
     ["windows-workspace", "windows-prodex-app", "Run Windows runtime member tests"],
@@ -220,7 +220,7 @@ test("direct targeted workflow lanes reject zero-test matches", () => {
     assert.match(step, /grep -Fq 'running 0 tests'/, `${jobName}/${stepName} lacks zero-test guard`);
   }
 
-  const releaseBuild = releaseWorkflow.match(/\n  build:\n([\s\S]*?)\n  attest-binaries:/)?.[1];
+  const releaseBuild = releaseWorkflow.match(/\n  build:\n([\s\S]*)/)?.[1];
   assert.ok(releaseBuild, "standalone release build job missing");
   assert.doesNotMatch(releaseBuild, /Test native desktop launcher/);
   assert.doesNotMatch(releaseBuild, /runtime_desktop::tests::/);
@@ -240,7 +240,7 @@ test("release hygiene does not inherit an unavailable Rust compiler wrapper", ()
 });
 
 test("release Mojo install activates the compiler in its current step", () => {
-  const workflow = readFileSync(".github/workflows/standalone-release.yml", "utf8");
+  const workflow = readFileSync(".github/workflows/release-target.yml", "utf8");
   const mojoJob = workflow.match(
     /\n  build-mojo-archives:[\s\S]*?\n  build:\n/,
   )?.[0];
@@ -262,7 +262,7 @@ test("release validates the Kiro pin before build fan-out", () => {
 
   assert.ok(verifyCi, "release CI verification job missing");
   assert.ok(build, "release build job missing");
-  assert.match(build, /timeout-minutes:\s*180/);
+  assert.match(readFileSync(".github/workflows/release-target.yml", "utf8"), /timeout-minutes:\s*180/);
   assert.match(workflow, /KIRO_CLI_VERSION:\s*"2\.34\.2"/);
   assert.match(verifyCi, /Verify pinned Kiro CLI release/);
   assert.match(verifyCi, /manifest_version[\s\S]*KIRO_CLI_VERSION/);
@@ -270,12 +270,12 @@ test("release validates the Kiro pin before build fan-out", () => {
     verifyCi.indexOf("Verify pinned Kiro CLI release") < verifyCi.indexOf("Wait for CI success"),
     "known stale runtime pins must fail before waiting for the full CI matrix",
   );
-  assert.match(build, /needs:\s*[\s\S]*?- release-preflight/);
+  assert.match(build, /needs: release-preflight/);
 });
 
 test("release builds Prodex only and leaves Codex external", () => {
-  const workflow = readFileSync(".github/workflows/standalone-release.yml", "utf8");
-  const build = workflow.match(/\n  build:\n([\s\S]*?)\n  artifact-smoke:/)?.[1];
+  const workflow = readFileSync(".github/workflows/release-target.yml", "utf8");
+  const build = workflow.match(/\n  build:\n([\s\S]*)/)?.[1];
 
   assert.ok(build, "release build job missing");
   assert.doesNotMatch(build, /Codex|codex/);

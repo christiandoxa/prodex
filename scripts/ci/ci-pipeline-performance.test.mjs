@@ -4,8 +4,14 @@ import test from "node:test";
 
 const ci = readFileSync(".github/workflows/ci.yml", "utf8");
 const release = readFileSync(".github/workflows/standalone-release.yml", "utf8");
+const targetWorkflow = readFileSync(".github/workflows/release-target.yml", "utf8");
 
 function workflowJob(source, name) {
+  if (source === release && name === "build-mojo-archives") return workflowJob(targetWorkflow, name);
+  if (source === release && name === "build") {
+    // Inspect real called commands plus the caller's six-target policy matrix.
+    return workflowJob(String(source + "\n"), name) + workflowJob(targetWorkflow, name);
+  }
   const start = source.indexOf("\n  " + name + ":\n");
   assert.ok(start >= 0, "missing job " + name);
   const next = source.slice(start + 1).search(/\n  [a-z][a-z0-9-]*:\n/);
@@ -69,7 +75,7 @@ test("release archives overlap CI verification but binary publication remains ga
   assert.match(archive, /PRODEX_MOJO_REQUIRED=1/);
   assert.match(archive, /Build target Mojo archive/);
   assert.match(archive, /Verify target archive/);
-  assert.match(build, /needs:\s*\n\s*- release-preflight\n\s*- build-mojo-archives/);
+  assert.match(build, /needs: build-mojo-archives/);
   assert.match(build, /PRODEX_MOJO_ARCHIVE=/);
   assert.match(build, /Verify compiled-in Mojo release/);
   assert.match(attest, /needs:\s*\n\s*- validate-release-assets\n\s*- verify-ci/);
@@ -124,7 +130,7 @@ test("official Intel macOS release uses measured Apple Silicon cross-build with 
   assert.match(build, /"self_test": "passed"/);
   assert.match(build, /name: Native smoke test/);
   assert.match(build, /name: Upload binary artifact/);
-  assert.match(build, /needs:\s*\n\s*- release-preflight\n\s*- build-mojo-archives/);
+  assert.match(build, /needs: build-mojo-archives/);
 });
 
 
@@ -151,7 +157,7 @@ test("standalone release reuses only verified same-SHA CI Mojo archives with str
 
   assert.match(verification, /name: Wait for CI success/);
   assert.match(verification, /conclusion.*success/);
-  assert.match(build, /needs:\s*\n\s*- release-preflight\n\s*- build-mojo-archives/);
+  assert.match(build, /needs: build-mojo-archives/);
   assert.match(build, /name: Download target Mojo archive/);
   assert.match(build, /name: Verify compiled-in Mojo release/);
   assert.match(release, /Verify release provenance/);
@@ -246,8 +252,8 @@ test("shared release archive cache is exact-input and preserves all six gates", 
   assert.match(archive, /KGEN_CompilerRT_/);
   assert.match(archive, /duplicate_weak=/);
   assert.match(archive, /name: Upload target Mojo archive/);
-  assert.match(build, /needs:\s*\n\s*- release-preflight\n\s*- build-mojo-archives/);
-  assert.equal((archive.match(/^          - target: /gm) ?? []).length, 6);
+  assert.match(build, /needs: build-mojo-archives/);
+  assert.equal((build.match(/^          - target: /gm) ?? []).length, 6);
 });
 
 
@@ -307,7 +313,7 @@ test("official Windows ARM64 release uses native benchmark, strict PE and runtim
   assert.match(build, /"self_test": "passed"/);
   assert.match(build, /name: Native smoke test/);
   assert.match(build, /name: Upload binary artifact/);
-  assert.match(build, /needs:\s*\n\s*- release-preflight\n\s*- build-mojo-archives/);
+  assert.match(build, /needs: build-mojo-archives/);
   assert.equal((build.match(/^          - target: /gm) ?? []).length, 6);
 });
 
@@ -460,7 +466,7 @@ test("stable cargo release dependency cache keeps version churn out without acce
   assert.match(build, /"implementation": "mojo-compiled-in"/);
   assert.match(build, /name: Native smoke test/);
   assert.match(build, /name: Upload binary artifact/);
-  assert.match(build, /needs:\s*\n\s*- release-preflight\n\s*- build-mojo-archives/);
+  assert.match(build, /needs: build-mojo-archives/);
 });
 
 
@@ -493,7 +499,7 @@ test("official Windows x64 ThinLTO release omits cold sccache and retains native
   assert.match(build, /"self_test": "passed"/);
   assert.match(build, /name: Native smoke test/);
   assert.match(build, /name: Upload binary artifact/);
-  assert.match(build, /needs:\s*\n\s*- release-preflight\n\s*- build-mojo-archives/);
+  assert.match(build, /needs: build-mojo-archives/);
 });
 
 
@@ -512,7 +518,7 @@ test("release Mojo archive setup skips already-installed LLVM but still validate
   assert.match(archive, /duplicate_weak=/);
   assert.match(archive, /- name: Upload target Mojo archive/);
   const build = workflowJob(release, "build", "attest-binaries");
-  assert.match(build, /needs:\s*\n\s*- release-preflight\n\s*- build-mojo-archives/);
+  assert.match(build, /needs: build-mojo-archives/);
 });
 
 
