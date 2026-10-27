@@ -1,0 +1,43 @@
+{
+  "schema_version": 1,
+  "version": "2.34.2",
+  "manifest_url": "https://prod.download.cli.kiro.dev/stable/latest/manifest.json",
+  "manifest_sha256": "02b2d8176e0dedda4553e168d638aebd6dd335c04226e309136231f4789d44ad",
+  "archive_url": "https://prod.download.cli.kiro.dev/stable/2.34.2/kirocli-x86_64-linux.tar.gz",
+  "archive_sha256": "b30a6873fac7e66467e9908cd346cd0f7c54d32eed17cd80f9b81df3c17a9d16",
+  "archive_size": 155506136,
+  "qualification_scope": "Standalone native launcher discovery, version, model flag and isolated KIRO_DATA_DIR contract. No inference or account authorization performed.",
+  "probes": [
+    {
+      "binary": "kiro-cli",
+      "arguments": [
+        "--version"
+      ],
+      "exit_code": 0
+    },
+    {
+      "binary": "kiro-cli-chat",
+      "arguments": [
+        "--version"
+      ],
+      "exit_code": 0
+    },
+    {
+      "binary": "kiro-cli-chat",
+      "arguments": [
+        "chat",
+        "--help"
+      ],
+      "exit_code": 0
+    }
+  ],
+  "required_chat_flag": "--model",
+  "required_environment_contract": "KIRO_DATA_DIR",
+  "live_credentials_used": false,
+  "model_inference_performed": false,
+  "user_installation_changed": false,
+  "probe_environment": "Isolated HOME, XDG directories, KIRO_HOME and KIRO_DATA_DIR; stdin closed.",
+  "workflow_changes": [
+    "Advance the standalone packaging Kiro reference from 2.34.0 to qualified stable 2.34.2. All existing CI, binary, checksum and provenance gates remain required."
+  ]
+}
