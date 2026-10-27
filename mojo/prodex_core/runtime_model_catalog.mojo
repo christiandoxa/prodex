@@ -139,6 +139,7 @@ def runtime_catalog_emit(sink: Pointer[mut=True, JsonSink, _], tree: ParsedJson,
     var efforts = pj_field(tree, 0, StringSlice("supported_reasoning_efforts"))
     # Only explicit model metadata replaces the legacy Gemini-wide defaults.
     var gemini_specific = gemini and pj_kind(tree, efforts) == JSON_ARRAY and pj_child(tree, efforts) >= 0
+    var deepseek_specific = deepseek and pj_kind(tree, efforts) == JSON_ARRAY and pj_child(tree, efforts) >= 0
     if not local and pj_kind(tree, default) != JSON_NULL and not pj_is["unknown"](tree, default):
         if pj_kind(tree, default) != JSON_STRING or runtime_reasoning_description(pj_text(tree, default)).len == 0:
             return False
@@ -161,12 +162,12 @@ def runtime_catalog_emit(sink: Pointer[mut=True, JsonSink, _], tree: ParsedJson,
     else:
         js_raw(sink, tree, description)
     js_literal(sink, StringSlice(',"default_reasoning_level":'))
-    if deepseek or (gemini and not gemini_specific) or local or pj_kind(tree, default) == JSON_NULL or pj_is["unknown"](tree, default):
+    if (deepseek and not deepseek_specific) or (gemini and not gemini_specific) or local or pj_kind(tree, default) == JSON_NULL or pj_is["unknown"](tree, default):
         js_literal(sink, StringSlice('"high"'))
     else:
         js_raw(sink, tree, default)
     js_literal(sink, StringSlice(',"supported_reasoning_levels":['))
-    if deepseek:
+    if deepseek and not deepseek_specific:
         js_literal(sink, StringSlice(
             '{"effort":"low","description":"DeepSeek low reasoning effort"},'
             '{"effort":"medium","description":"DeepSeek medium reasoning effort"},'

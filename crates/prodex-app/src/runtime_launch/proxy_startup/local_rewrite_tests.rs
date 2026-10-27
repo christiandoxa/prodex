@@ -530,7 +530,7 @@ fn kiro_models_route_uses_kiro_canonical_catalog_when_snapshot_is_empty() {
     let models = list_body["data"]
         .as_array()
         .expect("models data should be an array");
-    assert_eq!(models.len(), 2);
+    assert_eq!(models.len(), 8);
     assert_eq!(models[0]["id"], "gpt-5.6-luna");
 
     let canonical = client

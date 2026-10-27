@@ -324,7 +324,8 @@ fn deepseek_catalog_plan_omits_retired_models_and_keeps_unclamped_budgets() {
             "auto",
             "flash",
             "deepseek-v4-pro",
-            "deepseek-v4-flash"
+            "deepseek-v4-flash",
+            "deepseek-flash"
         ]
     );
     assert_eq!(models[0].display_name, "DeepSeek Pro");

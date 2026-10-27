@@ -308,6 +308,7 @@ fn deepseek_catalog_model(
     context_window: u64,
     auto_compact_token_limit: u64,
 ) -> Result<serde_json::Value> {
+    let metadata = prodex_provider_core::provider_catalog_entry(ProviderId::DeepSeek, slug);
     Ok(render_runtime_model_catalog(RuntimeModelCatalogInput {
         provider: ProviderId::DeepSeek,
         slug,
@@ -316,8 +317,9 @@ fn deepseek_catalog_model(
         priority,
         context_window,
         auto_compact_token_limit,
-        supported_reasoning_efforts: None,
-        default_reasoning_effort: None,
+        supported_reasoning_efforts: metadata
+            .and_then(|entry| entry.supported_reasoning_efforts.as_deref()),
+        default_reasoning_effort: metadata.and_then(|entry| entry.default_reasoning_effort),
     })?)
 }
 
@@ -402,7 +404,7 @@ mod tests {
             .iter()
             .map(|level| level["effort"].as_str().unwrap())
             .collect::<Vec<_>>();
-        assert_eq!(efforts, vec!["low", "medium", "high", "xhigh"]);
+        assert_eq!(efforts, vec!["none", "low", "high", "max"]);
 
         let _ = fs::remove_dir_all(codex_home);
     }

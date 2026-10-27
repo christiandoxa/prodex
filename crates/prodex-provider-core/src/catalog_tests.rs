@@ -298,3 +298,55 @@ fn provider_specific_new_models_preserve_wire_ids_and_aliases_04394() {
         "claude-sonnet-4.6"
     ));
 }
+
+#[test]
+fn refreshed_agent_models_are_selectable_with_provider_scoped_metadata_04394() {
+    for (provider, model) in [
+        (ProviderId::OpenAi, "gpt-6.1-terra"),
+        (ProviderId::Copilot, "gpt-6.1-terra"),
+        (ProviderId::Anthropic, "claude-haiku-5-5"),
+        (ProviderId::Copilot, "claude-haiku-5.5"),
+        (ProviderId::Gemini, "gemini-4-argon"),
+        (ProviderId::Copilot, "gemini-4-argon"),
+        (ProviderId::DeepSeek, "deepseek-flash"),
+        (ProviderId::Kiro, "gpt-5.6-sol"),
+        (ProviderId::Kiro, "gpt-5.6-terra"),
+        (ProviderId::Kiro, "claude-opus-5.5"),
+        (ProviderId::Kiro, "claude-sonnet-5.5"),
+        (ProviderId::Kiro, "claude-haiku-5.5"),
+        (ProviderId::Kiro, "claude-fable-5.1"),
+    ] {
+        let choice = ProviderModelChoice::Model(model.into());
+        assert!(
+            resolve_provider_model_choices(provider, &[], None).contains(&choice),
+            "{} is missing {model}",
+            provider.label()
+        );
+        let catalog = provider_model_catalog_json(provider);
+        assert_eq!(
+            catalog.iter().filter(|entry| entry["id"] == model).count(),
+            1
+        );
+        assert!(!provider_model_is_retired(provider, model));
+    }
+    assert_eq!(
+        provider_catalog_entry(ProviderId::OpenAi, "terra")
+            .unwrap()
+            .id,
+        "gpt-6.1-terra"
+    );
+    assert_eq!(
+        provider_catalog_entry(ProviderId::Copilot, "terra")
+            .unwrap()
+            .id,
+        "gpt-6.1-terra"
+    );
+    assert_eq!(
+        provider_catalog_entry(ProviderId::Kiro, "terra")
+            .unwrap()
+            .id,
+        "gpt-5.6-terra"
+    );
+    assert!(provider_catalog_entry(ProviderId::Kiro, "gpt-6.1-terra").is_none());
+    assert!(provider_catalog_entry(ProviderId::Local, "gpt-6.1-terra").is_none());
+}

@@ -26,20 +26,20 @@
     "supported_in_api": true,
     "supported_reasoning_levels": [
       {
-        "description": "DeepSeek low reasoning effort",
+        "description": "No reasoning effort",
+        "effort": "none"
+      },
+      {
+        "description": "Low reasoning effort",
         "effort": "low"
       },
       {
-        "description": "DeepSeek medium reasoning effort",
-        "effort": "medium"
-      },
-      {
-        "description": "DeepSeek high reasoning effort",
+        "description": "High reasoning effort",
         "effort": "high"
       },
       {
-        "description": "DeepSeek max reasoning effort",
-        "effort": "xhigh"
+        "description": "Max reasoning effort",
+        "effort": "max"
       }
     ],
     "supports_image_detail_original": false,
@@ -67,7 +67,7 @@
     "default_service_tier": null,
     "default_verbosity": null,
     "description": "Description\t\\\"",
-    "display_name": "Display\n雪",
+    "display_name": "Display\n\u96ea",
     "effective_context_window_percent": 95,
     "experimental_supported_tools": [],
     "input_modalities": [
@@ -77,7 +77,7 @@
     "priority": 18446744073709551615,
     "service_tiers": [],
     "shell_type": "shell_command",
-    "slug": " whitespace\"\\雪 ",
+    "slug": " whitespace\"\\\u96ea ",
     "support_verbosity": false,
     "supported_in_api": true,
     "supported_reasoning_levels": [

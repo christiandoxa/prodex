@@ -1110,7 +1110,7 @@ def prodex_external_catalog_model_find_exact_v1(
 def prodex_deepseek_catalog_model_count_v1(
     abi_version: Int64,
 ) abi("C") -> Int64:
-    return 7 if abi_version == SUPER_PROVIDER_CONFIG_ABI_VERSION else -2
+    return 8 if abi_version == SUPER_PROVIDER_CONFIG_ABI_VERSION else -2
 
 
 @export("prodex_deepseek_catalog_model_at_v1")
@@ -1126,7 +1126,7 @@ def prodex_deepseek_catalog_model_at_v1(
     if (
         abi_version != SUPER_PROVIDER_CONFIG_ABI_VERSION
         or index < 0
-        or index >= 7
+        or index >= 8
         or output_address == 0
         or output_capacity < 1
         or records_address == 0
@@ -1161,7 +1161,7 @@ def prodex_deepseek_catalog_model_at_v1(
         ok = config_put_external_catalog_model[
             "flash",
             "DeepSeek Flash",
-            "Prodex DeepSeek Flash alias routed through DeepSeek V4 Flash.",
+            "Prodex DeepSeek Flash alias routed through current DeepSeek Flash.",
         ](output, output_capacity, records, written)
     elif index == 3:
         ok = config_put_external_catalog_model[
@@ -1181,11 +1181,17 @@ def prodex_deepseek_catalog_model_at_v1(
             "DeepSeek Chat",
             "DeepSeek chat compatibility model routed through the Prodex Responses adapter.",
         ](output, output_capacity, records, written)
-    else:
+    elif index == 6:
         ok = config_put_external_catalog_model[
             "deepseek-reasoner",
             "DeepSeek Reasoner",
             "DeepSeek reasoner compatibility model routed through the Prodex Responses adapter.",
+        ](output, output_capacity, records, written)
+    else:
+        ok = config_put_external_catalog_model[
+            "deepseek-flash",
+            "DeepSeek V4.1 Flash",
+            "Current DeepSeek Flash routed through the Prodex Responses adapter.",
         ](output, output_capacity, records, written)
     return SUPER_PROVIDER_CONFIG_OK if ok else SUPER_PROVIDER_CONFIG_CAPACITY
 
@@ -1216,4 +1222,6 @@ def prodex_deepseek_catalog_model_find_v1(
         return 5
     if config_range_equals["deepseek-reasoner"](view, bounds[0], bounds[1]):
         return 6
+    if config_range_equals["deepseek-flash"](view, bounds[0], bounds[1]):
+        return 7
     return -1

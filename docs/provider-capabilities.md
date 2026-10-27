@@ -7,9 +7,9 @@ Generated from the current prodex_provider_core implementation registry and tran
 | openai | 12 | passthrough | true | false | 7/7/1 | native | emulated | native | unsupported | native | native | native | native | native | unsupported | unsupported |
 | anthropic | 12 | translated | true | true | 12/5/4 | translated | emulated | passthrough | passthrough | emulated | unsupported | unsupported | unsupported | unsupported | unsupported | unsupported |
 | copilot | 24 | passthrough | true | true | 10/5/2 | native | passthrough | passthrough | passthrough | emulated | unsupported | unsupported | unsupported | unsupported | unsupported | unsupported |
-| deepseek | 2 | translated | true | true | 16/4/3 | translated | emulated | passthrough | passthrough | emulated | unsupported | unsupported | unsupported | unsupported | unsupported | unsupported |
+| deepseek | 3 | translated | true | true | 16/4/3 | translated | emulated | passthrough | passthrough | emulated | unsupported | unsupported | unsupported | unsupported | unsupported | unsupported |
 | gemini | 23 | translated | true | true | 18/14/3 | translated | emulated | passthrough | passthrough | emulated | passthrough | unsupported | unsupported | unsupported | unsupported | unsupported |
-| kiro | 2 | translated | true | false | 9/6/1 | translated | emulated | translated | translated | emulated | unsupported | unsupported | unsupported | unsupported | unsupported | unsupported |
+| kiro | 8 | translated | true | false | 9/6/1 | translated | emulated | translated | translated | emulated | unsupported | unsupported | unsupported | unsupported | unsupported | unsupported |
 | local | 1 | passthrough | true | false | 10/10/1 | passthrough | emulated | passthrough | passthrough | passthrough | passthrough | passthrough | passthrough | passthrough | passthrough | passthrough |
 
 Status values: `native`, `translated`, `passthrough`, `emulated`, `partial`, `untested`, `unsupported`.

@@ -37,16 +37,16 @@
   {
     "first_auto_compact_token_limit": 10,
     "first_context_window": 11,
-    "models": 7,
+    "models": 13,
     "name": "kiro-untrimmed-query",
-    "sha256": "c9f6e11b3d0b0be8f1783db79527e5c01ef4dee03663d792096394dc221c6399"
+    "sha256": "03efb2b957ab11bdde32691ee73343a79bc354b501d32e42565abe17364c8c25"
   },
   {
     "first_auto_compact_token_limit": 184467440737095516,
     "first_context_window": 18446744073709551615,
-    "models": 7,
+    "models": 13,
     "name": "kiro-saturated-budget",
-    "sha256": "72c2b253ff774960880c2c22a70ecc8c27abe458ead7f8370808840dc8a310ee"
+    "sha256": "b012fc9abc004414b96ace7136d4f73f2b1ce65dc5f66df54cca873182c4c36b"
   },
   {
     "first_auto_compact_token_limit": 190000,

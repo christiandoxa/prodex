@@ -449,7 +449,7 @@ mod tests {
         assert_eq!(model["supports_reasoning_summary_parameter"], false);
         let luna = &catalog["models"][2];
         assert_eq!(luna["slug"], "gpt-5.6-luna");
-        assert_eq!(luna["default_reasoning_level"], "medium");
+        assert_eq!(luna["default_reasoning_level"], "high");
         assert_eq!(
             luna["supported_reasoning_levels"]
                 .as_array()

@@ -1599,7 +1599,7 @@
     "id": "deepseek-v4-pro",
     "display_name": "DeepSeek V4 Pro",
     "description": "DeepSeek Pro alias routed through provider fallback.",
-    "context_window_tokens": 128000,
+    "context_window_tokens": 1048576,
     "input_cost_per_million_microusd": null,
     "output_cost_per_million_microusd": null,
     "supported_endpoints": [
@@ -1621,15 +1621,23 @@
       "web_search": true,
       "reasoning": true
     },
-    "pricing_known": false
+    "pricing_known": false,
+    "max_output_tokens": 393216,
+    "supported_reasoning_efforts": [
+      "none",
+      "low",
+      "high",
+      "max"
+    ],
+    "default_reasoning_effort": "high"
   },
   {
     "provider": "deepseek",
     "owned_by": "deepseek",
-    "id": "deepseek-v4-flash",
-    "display_name": "DeepSeek V4 Flash",
-    "description": "DeepSeek Flash alias routed through provider fallback.",
-    "context_window_tokens": 128000,
+    "id": "deepseek-flash",
+    "display_name": "DeepSeek V4.1 Flash",
+    "description": "Current DeepSeek Flash model, accessed through the native text/tool Responses adapter.",
+    "context_window_tokens": 1048576,
     "input_cost_per_million_microusd": null,
     "output_cost_per_million_microusd": null,
     "supported_endpoints": [
@@ -1650,7 +1658,50 @@
       "web_search": true,
       "reasoning": true
     },
-    "pricing_known": false
+    "pricing_known": false,
+    "max_output_tokens": 393216,
+    "supported_reasoning_efforts": [
+      "none",
+      "low",
+      "high",
+      "max"
+    ],
+    "default_reasoning_effort": "high"
+  },
+  {
+    "provider": "deepseek",
+    "owned_by": "deepseek",
+    "id": "deepseek-v4-flash",
+    "display_name": "DeepSeek V4 Flash",
+    "description": "Upstream compatibility ID routed to DeepSeek V4.1 Flash; prefer deepseek-flash for new selections.",
+    "context_window_tokens": 1048576,
+    "input_cost_per_million_microusd": null,
+    "output_cost_per_million_microusd": null,
+    "supported_endpoints": [
+      "responses",
+      "responses/compact",
+      "chat-completions",
+      "messages",
+      "models"
+    ],
+    "aliases": [],
+    "feature_flags": {
+      "tools": true,
+      "json_schema": false,
+      "vision": false,
+      "audio": false,
+      "web_search": true,
+      "reasoning": true
+    },
+    "pricing_known": false,
+    "max_output_tokens": 393216,
+    "supported_reasoning_efforts": [
+      "none",
+      "low",
+      "high",
+      "max"
+    ],
+    "default_reasoning_effort": "high"
   },
   {
     "provider": "gemini",
@@ -2370,7 +2421,7 @@
       "xhigh",
       "max"
     ],
-    "default_reasoning_effort": "medium",
+    "default_reasoning_effort": "high",
     "input_cost_per_million_microusd": null,
     "output_cost_per_million_microusd": null,
     "supported_endpoints": [
@@ -2383,6 +2434,226 @@
     "aliases": [
       "luna"
     ],
+    "feature_flags": {
+      "tools": true,
+      "json_schema": false,
+      "vision": false,
+      "audio": false,
+      "web_search": false,
+      "reasoning": true
+    },
+    "pricing_known": false,
+    "max_output_tokens": 128000
+  },
+  {
+    "provider": "kiro",
+    "owned_by": "kiro-cli",
+    "id": "gpt-5.6-sol",
+    "display_name": "GPT-5.6 Sol",
+    "description": "GPT-5.6 Sol through Kiro; availability depends on account, plan, region, and provider model policy.",
+    "context_window_tokens": 1000000,
+    "supported_reasoning_efforts": [
+      "none",
+      "low",
+      "medium",
+      "high",
+      "xhigh",
+      "max"
+    ],
+    "default_reasoning_effort": "high",
+    "input_cost_per_million_microusd": null,
+    "output_cost_per_million_microusd": null,
+    "supported_endpoints": [
+      "responses",
+      "responses/compact",
+      "chat-completions",
+      "messages",
+      "models"
+    ],
+    "aliases": [
+      "sol"
+    ],
+    "feature_flags": {
+      "tools": true,
+      "json_schema": false,
+      "vision": false,
+      "audio": false,
+      "web_search": false,
+      "reasoning": true
+    },
+    "pricing_known": false,
+    "max_output_tokens": 128000
+  },
+  {
+    "provider": "kiro",
+    "owned_by": "kiro-cli",
+    "id": "gpt-5.6-terra",
+    "display_name": "GPT-5.6 Terra",
+    "description": "GPT-5.6 Terra through Kiro; availability depends on account, plan, region, and provider model policy.",
+    "context_window_tokens": 1000000,
+    "supported_reasoning_efforts": [
+      "none",
+      "low",
+      "medium",
+      "high",
+      "xhigh",
+      "max"
+    ],
+    "default_reasoning_effort": "high",
+    "input_cost_per_million_microusd": null,
+    "output_cost_per_million_microusd": null,
+    "supported_endpoints": [
+      "responses",
+      "responses/compact",
+      "chat-completions",
+      "messages",
+      "models"
+    ],
+    "aliases": [
+      "terra"
+    ],
+    "feature_flags": {
+      "tools": true,
+      "json_schema": false,
+      "vision": false,
+      "audio": false,
+      "web_search": false,
+      "reasoning": true
+    },
+    "pricing_known": false,
+    "max_output_tokens": 128000
+  },
+  {
+    "provider": "kiro",
+    "owned_by": "kiro-cli",
+    "id": "claude-opus-5.5",
+    "display_name": "Claude Opus 5.5",
+    "description": "Claude Opus 5.5 through Kiro; availability depends on account, plan, region, and provider model policy.",
+    "context_window_tokens": 1000000,
+    "supported_reasoning_efforts": [
+      "low",
+      "medium",
+      "high",
+      "xhigh",
+      "max"
+    ],
+    "default_reasoning_effort": "medium",
+    "input_cost_per_million_microusd": null,
+    "output_cost_per_million_microusd": null,
+    "supported_endpoints": [
+      "responses",
+      "responses/compact",
+      "chat-completions",
+      "messages",
+      "models"
+    ],
+    "aliases": [],
+    "feature_flags": {
+      "tools": true,
+      "json_schema": false,
+      "vision": false,
+      "audio": false,
+      "web_search": false,
+      "reasoning": true
+    },
+    "pricing_known": false
+  },
+  {
+    "provider": "kiro",
+    "owned_by": "kiro-cli",
+    "id": "claude-sonnet-5.5",
+    "display_name": "Claude Sonnet 5.5",
+    "description": "Claude Sonnet 5.5 through Kiro; availability depends on account, plan, region, and provider model policy.",
+    "context_window_tokens": 1000000,
+    "supported_reasoning_efforts": [
+      "low",
+      "medium",
+      "high",
+      "xhigh",
+      "max"
+    ],
+    "default_reasoning_effort": "high",
+    "input_cost_per_million_microusd": null,
+    "output_cost_per_million_microusd": null,
+    "supported_endpoints": [
+      "responses",
+      "responses/compact",
+      "chat-completions",
+      "messages",
+      "models"
+    ],
+    "aliases": [],
+    "feature_flags": {
+      "tools": true,
+      "json_schema": false,
+      "vision": false,
+      "audio": false,
+      "web_search": false,
+      "reasoning": true
+    },
+    "pricing_known": false,
+    "max_output_tokens": 64000
+  },
+  {
+    "provider": "kiro",
+    "owned_by": "kiro-cli",
+    "id": "claude-haiku-5.5",
+    "display_name": "Claude Haiku 5.5",
+    "description": "Claude Haiku 5.5 through Kiro; availability depends on account, plan, region, and provider model policy.",
+    "context_window_tokens": 1000000,
+    "supported_reasoning_efforts": [
+      "low",
+      "medium",
+      "high",
+      "xhigh",
+      "max"
+    ],
+    "default_reasoning_effort": "medium",
+    "input_cost_per_million_microusd": null,
+    "output_cost_per_million_microusd": null,
+    "supported_endpoints": [
+      "responses",
+      "responses/compact",
+      "chat-completions",
+      "messages",
+      "models"
+    ],
+    "aliases": [],
+    "feature_flags": {
+      "tools": true,
+      "json_schema": false,
+      "vision": false,
+      "audio": false,
+      "web_search": false,
+      "reasoning": true
+    },
+    "pricing_known": false
+  },
+  {
+    "provider": "kiro",
+    "owned_by": "kiro-cli",
+    "id": "claude-fable-5.1",
+    "display_name": "Claude Fable 5.1",
+    "description": "Claude Fable 5.1 for approved Kiro Enterprise accounts in the US inference scope.",
+    "context_window_tokens": 1000000,
+    "supported_reasoning_efforts": [
+      "low",
+      "medium",
+      "high",
+      "xhigh",
+      "max"
+    ],
+    "default_reasoning_effort": "high",
+    "input_cost_per_million_microusd": null,
+    "output_cost_per_million_microusd": null,
+    "supported_endpoints": [
+      "responses",
+      "responses/compact",
+      "chat-completions",
+      "messages",
+      "models"
+    ],
+    "aliases": [],
     "feature_flags": {
       "tools": true,
       "json_schema": false,
