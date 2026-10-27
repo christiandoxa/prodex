@@ -147,12 +147,12 @@ fn rich_model_fallback_matches_expected_provider_cases() {
         (
             ProviderId::DeepSeek,
             "",
-            &["deepseek-v4-pro", "deepseek-v4-flash"],
+            &["deepseek-v4-pro", "deepseek-flash"],
         ),
         (
             ProviderId::DeepSeek,
             "flash",
-            &["deepseek-v4-flash", "deepseek-v4-pro"],
+            &["deepseek-flash", "deepseek-v4-pro"],
         ),
         (ProviderId::Kiro, "", &["auto"]),
         (ProviderId::Kiro, "claude", &["auto"]),

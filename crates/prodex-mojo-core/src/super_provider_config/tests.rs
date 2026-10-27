@@ -343,3 +343,16 @@ fn external_provider_token_limits_matches_rust_precedence_oracle() {
         assert_eq!(actual, expected, "{is_copilot}, {context:?}, {compact:?}");
     }
 }
+
+#[test]
+fn current_deepseek_catalog_is_reachable_without_reindexing_legacy_entries_04394() {
+    let models = deepseek_catalog_static_models().unwrap();
+    assert_eq!(models[6].slug, "deepseek-reasoner");
+    assert_eq!(models[7].slug, "deepseek-flash");
+    assert_eq!(
+        deepseek_catalog_model_metadata(" DEEPSEEK-FLASH ")
+            .unwrap()
+            .unwrap(),
+        models[7]
+    );
+}

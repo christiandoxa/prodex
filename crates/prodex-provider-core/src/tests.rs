@@ -194,11 +194,11 @@ fn fallback_chain_preserves_existing_gemini_aliases() {
     );
     assert_eq!(
         provider_model_fallback_chain(ProviderId::DeepSeek, "flash"),
-        vec!["deepseek-v4-flash", "deepseek-v4-pro"]
+        vec!["deepseek-flash", "deepseek-v4-pro"]
     );
     assert_eq!(
         provider_model_fallback_chain(ProviderId::DeepSeek, "auto"),
-        vec!["deepseek-v4-pro", "deepseek-v4-flash"]
+        vec!["deepseek-v4-pro", "deepseek-flash"]
     );
     assert_eq!(
         provider_model_fallback_chain(ProviderId::OpenAi, "combo:gpt-5,gpt-5;gpt-4o"),

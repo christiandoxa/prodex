@@ -21,7 +21,7 @@ fn deepseek_provider_core_reasoning_preserves_wire_mapping_and_errors() {
         (
             serde_json::json!({"reasoning_effort": "low"}),
             false,
-            serde_json::json!({"reasoning_effort": "high", "thinking": {"type": "enabled"}}),
+            serde_json::json!({"reasoning_effort": "low", "thinking": {"type": "enabled"}}),
             true,
         ),
         (

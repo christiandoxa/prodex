@@ -126,8 +126,8 @@ fn request_transform_maps_models_and_reasoning_in_the_mojo_plan() {
                 "reasoning_effort": "low",
                 "tool_choice": "required"
             }),
-            "deepseek-v4-flash",
-            json!({"thinking": {"type": "enabled"}, "reasoning_effort": "high"}),
+            "deepseek-flash",
+            json!({"thinking": {"type": "enabled"}, "reasoning_effort": "low"}),
             true,
         ),
         (
@@ -236,13 +236,13 @@ fn request_transform_selects_and_normalizes_model_in_mojo() {
         (
             json!({"model": "flash", "input": "x"}),
             Some("pro"),
-            "deepseek-v4-flash",
+            "deepseek-flash",
         ),
         (json!({"input": "x"}), Some("pro"), "deepseek-v4-pro"),
         (
             json!({"model": 7, "input": "x"}),
             Some("flash"),
-            "deepseek-v4-flash",
+            "deepseek-flash",
         ),
         (json!({"model": "", "input": "x"}), Some("flash"), ""),
         (json!({"model": "   ", "input": "x"}), Some("flash"), "   "),
@@ -433,7 +433,7 @@ fn raw_request_model_policy_is_owned_by_mojo() {
     input.model = Some(" flash ");
     let body = deepseek_kernel(input).expect("raw request kernel");
     let body: Value = serde_json::from_slice(&body).expect("JSON body");
-    assert_eq!(body["model"], "deepseek-v4-flash");
+    assert_eq!(body["model"], "deepseek-flash");
 }
 
 #[test]
@@ -611,4 +611,29 @@ fn request_transform_prioritizes_stop_limit_over_item_type() {
         panic!("request should be rejected");
     };
     assert_eq!(reason, "DeepSeek supports at most 16 stop sequences");
+}
+
+#[test]
+fn current_deepseek_efforts_reach_the_native_wire_without_silent_escalation_04394() {
+    for (effort, thinking) in [
+        ("none", "disabled"),
+        ("low", "enabled"),
+        ("high", "enabled"),
+        ("max", "enabled"),
+    ] {
+        let input = ProviderTransformInput::new(ProviderEndpoint::Responses,
+            serde_json::to_vec(&json!({"model":"deepseek-flash","input":"synthetic task","reasoning":{"effort":effort}})).unwrap());
+        let result = deepseek_transform_request(ProviderId::DeepSeek, input);
+        let body: Value = serde_json::from_slice(result.body.as_ref().unwrap()).unwrap();
+        assert_eq!(body["model"], "deepseek-flash");
+        assert_eq!(body["thinking"]["type"], thinking);
+        if effort == "none" {
+            assert!(body.get("reasoning_effort").is_none());
+        } else {
+            assert_eq!(
+                body["reasoning_effort"], effort,
+                "{effort} must not change silently"
+            );
+        }
+    }
 }

@@ -232,10 +232,11 @@ mod tests {
     fn provider_capability_catalogs_expose_standard_reasoning_efforts() {
         for (provider_id, model, supports_reasoning_summary_parameter) in [
             ("prodex-local", "local/qwen", false),
-            ("prodex-copilot", "gpt-5.5", true),
+            ("prodex-copilot", "gpt-6.1-terra", true),
             ("prodex-anthropic", "claude-sonnet-4-6", true),
             ("prodex-deepseek", "deepseek-v4-pro", false),
             ("prodex-gemini", "gemini-2.5-pro", true),
+            ("prodex-gemini", "gemini-4-argon", true),
         ] {
             let codex_home = temp_codex_home(provider_id);
             let user_args = vec![
@@ -248,7 +249,14 @@ mod tests {
             let args = prepare_provider_capability_codex_args(&codex_home, &user_args)
                 .expect("provider catalog should prepare");
             let catalog_path = catalog_path_from_args(&args);
-            assert_contains_standard_efforts(&catalog_efforts(&catalog_path));
+            let efforts = catalog_efforts(&catalog_path);
+            if provider_id == "prodex-deepseek" {
+                assert_eq!(efforts, ["none", "low", "high", "max"]);
+            } else if model == "gemini-4-argon" {
+                assert_eq!(efforts, ["low", "medium", "high"]);
+            } else {
+                assert_contains_standard_efforts(&efforts);
+            }
             let catalog: serde_json::Value =
                 serde_json::from_str(&fs::read_to_string(&catalog_path).unwrap()).unwrap();
             assert_eq!(

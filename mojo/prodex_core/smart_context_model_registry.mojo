@@ -278,7 +278,7 @@ def model_registry_context_window(view: ProdexRichStringView) -> Int64:
         return 200_000
     if model_registry_equals["claude-sonnet-4-6"](view):
         return 1_000_000
-    if model_registry_equals["deepseek-v4-pro"](view):
+    if model_registry_equals["deepseek-v4-pro"](view) or model_registry_equals["deepseek-flash"](view) or model_registry_equals["deepseek-v4-flash"](view):
         return 128_000
     if model_registry_prefix["claude-"](view):
         return 200_000

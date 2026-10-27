@@ -1258,8 +1258,10 @@ def deepseek_reasoning_mode(effort: ProdexRichStringView, gemini_compat: Bool) -
         return 0
     if is_xhigh or is_max:
         return 6
-    if is_high or is_medium or is_low:
+    if is_high or is_medium:
         return 7
+    if is_low:
+        return 9
     if is_minimal or is_none:
         return 8
     return 0
@@ -1282,6 +1284,8 @@ def deepseek_write_reasoning_parameters(
         return deepseek_put_literal(writer, StringSlice('{"thinking":{"type":"enabled"},"reasoning_effort":"max"}'))
     if mode == 7:
         return deepseek_put_literal(writer, StringSlice('{"thinking":{"type":"enabled"},"reasoning_effort":"high"}'))
+    if mode == 9:
+        return deepseek_put_literal(writer, StringSlice('{"thinking":{"type":"enabled"},"reasoning_effort":"low"}'))
     if mode == 8:
         return deepseek_put_literal(writer, StringSlice('{"thinking":{"type":"disabled"}}'))
     return False
@@ -1307,6 +1311,10 @@ def deepseek_put_request_reasoning_fields(
     if mode == 7:
         return deepseek_put_literal(
             writer, StringSlice(',"thinking":{"type":"enabled"},"reasoning_effort":"high"')
+        )
+    if mode == 9:
+        return deepseek_put_literal(
+            writer, StringSlice(',"thinking":{"type":"enabled"},"reasoning_effort":"low"')
         )
     if mode == 8:
         return deepseek_put_literal(
@@ -4151,7 +4159,7 @@ def deepseek_raw_put_model(
     ):
         return deepseek_put_literal(writer, StringSlice('"deepseek-v4-pro"'))
     if not combo and rich_view_matches_literal["flash"](model, True):
-        return deepseek_put_literal(writer, StringSlice('"deepseek-v4-flash"'))
+        return deepseek_put_literal(writer, StringSlice('"deepseek-flash"'))
     return deepseek_put_json_string(writer, model)
 
 def deepseek_raw_first_of(
@@ -4526,7 +4534,7 @@ def deepseek_raw_common_request_fields(
             or not deepseek_raw_put_function_tools(writer, source, tools)
         ):
             return False
-    if deepseek_raw_present(tool_choice) and reasoning_mode != 6 and reasoning_mode != 7:
+    if deepseek_raw_present(tool_choice) and reasoning_mode != 6 and reasoning_mode != 7 and reasoning_mode != 9:
         var saved = writer[].written
         if not deepseek_put_literal(writer, StringSlice(',"tool_choice":')):
             return False
@@ -4938,7 +4946,7 @@ def deepseek_responses_request_v1(
                                     tree, request, StringSlice("tool_choice")
                                 )
                                 if (
-                                    reasoning_mode == 6 or reasoning_mode == 7
+                                    reasoning_mode == 6 or reasoning_mode == 7 or reasoning_mode == 9
                                 ) and choice >= 0:
                                     if not deepseek_put_literal(
                                         writer_ptr,

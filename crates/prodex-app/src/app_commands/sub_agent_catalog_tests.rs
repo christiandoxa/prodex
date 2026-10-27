@@ -247,7 +247,11 @@ fn missing_or_malformed_kiro_snapshot_keeps_static_picker_safe() {
             .model_ids()
             .is_empty()
     );
-    assert_eq!(picker_model_ids(&[]), ["gpt-5.6-luna", "auto"]);
+    let offline = picker_model_ids(&[]);
+    assert_eq!(offline.first().map(String::as_str), Some("gpt-5.6-luna"));
+    for id in ["auto", "gpt-5.6-sol", "gpt-5.6-terra", "claude-haiku-5.5"] {
+        assert!(offline.iter().any(|model| model == id));
+    }
     fs::write(
         paths
             .managed_profiles_root
