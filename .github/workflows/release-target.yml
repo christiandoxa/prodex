@@ -318,11 +318,39 @@ jobs:
 
       - name: Install Linux ARM cross and emulation tools
         if: ${{ matrix.target == 'aarch64-unknown-linux-gnu' }}
+        timeout-minutes: 5
         shell: bash
         run: |
           set -euo pipefail
-          sudo apt-get update
-          sudo apt-get install -y gcc-aarch64-linux-gnu qemu-user
+          # A cloud image mirror stalled these small cross-tool packages for
+          # over ten minutes. Select official signed Ubuntu sources only for
+          # this invocation; never rewrite the runner's system configuration.
+          . /etc/os-release
+          [[ "${VERSION_CODENAME}" =~ ^[a-z]+$ ]]
+          sources="$(mktemp --suffix=.sources)"
+          trap 'rm -f "${sources}"' EXIT
+          cat > "${sources}" <<EOF
+          Types: deb
+          URIs: https://archive.ubuntu.com/ubuntu
+          Suites: ${VERSION_CODENAME} ${VERSION_CODENAME}-updates ${VERSION_CODENAME}-backports
+          Components: main universe restricted multiverse
+          Signed-By: /usr/share/keyrings/ubuntu-archive-keyring.gpg
+
+          Types: deb
+          URIs: https://security.ubuntu.com/ubuntu
+          Suites: ${VERSION_CODENAME}-security
+          Components: main universe restricted multiverse
+          Signed-By: /usr/share/keyrings/ubuntu-archive-keyring.gpg
+          EOF
+          apt_options=(
+            -o "Dir::Etc::sourcelist=${sources}" -o Dir::Etc::sourceparts=-
+            -o APT::Get::List-Cleanup=0 -o Acquire::Retries=2
+            -o Acquire::http::Timeout=20 -o Acquire::https::Timeout=20
+          )
+          sudo apt-get "${apt_options[@]}" update
+          sudo apt-get "${apt_options[@]}" install -y gcc-aarch64-linux-gnu qemu-user
+          aarch64-linux-gnu-gcc --version
+          qemu-aarch64 --version
 
       - name: Build prodex
         shell: bash
