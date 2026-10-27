@@ -47,15 +47,17 @@ fn resolve_main_model_and_effort_mojo(
             _ => None,
         })
         .collect::<Vec<_>>();
-    let defaults = owned_models
+    // The projected choice already carries its compiled, validated account or
+    // offline default. Re-reading API defaults here would overwrite account metadata.
+    let defaults = choices
         .iter()
-        .map(|(model, _, _)| {
-            prodex_provider_core::provider_model_reasoning_resolution(provider, Some(model), None)
-                .ok()
-                .and_then(|resolution| resolution.selected_reasoning_effort)
-                .and_then(|effort| effort.label())
-                .map(str::to_string)
+        .filter(|choice| {
+            matches!(
+                &choice.choice,
+                prodex_provider_core::ProviderModelChoice::Model(_)
+            )
         })
+        .map(|choice| choice.default_effort.clone())
         .collect::<Vec<_>>();
     let effort_views = owned_models
         .iter()
@@ -333,7 +335,7 @@ pub(super) fn prompt_openai_ping_model_and_effort(
     };
 
     let effort = if let Some(current_effort) = current_effort {
-        let resolution = prodex_provider_core::provider_model_reasoning_resolution(
+        let resolution = crate::effective_provider_model_reasoning_resolution(
             provider,
             model.as_deref(),
             Some(current_effort),
