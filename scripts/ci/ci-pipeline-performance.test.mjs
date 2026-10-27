@@ -140,9 +140,9 @@ test("standalone release reuses only verified same-SHA CI Mojo archives with str
   assert.match(archives, /RELEASE_TARGET_SHA:/);
   assert.match(archives, /python3 scripts\/ci\/reuse_mojo_ci_archive\.py/);
   assert.equal(
-    [...archives.matchAll(/if: \$\{\{ steps\.reuse-ci-archive\.outputs\.reused != 'true' && steps\.release-arm64-archive-cache\.outputs\.cache-hit != 'true' \}\}/g)].length,
+    [...archives.matchAll(/if: \$\{\{ steps\.reuse-ci-archive\.outputs\.reused != 'true' && steps\.release-archive-cache\.outputs\.cache-hit != 'true' \}\}/g)].length,
     4,
-    "both verified CI artifact and strict ARM cache must skip the four expensive install and compile steps",
+    "both verified CI artifact and exact-input cache must skip the four expensive install and compile steps",
   );
   assert.match(archives, /name: Verify target archive/);
   assert.match(archives, /llvm-nm --format=posix/);
@@ -172,7 +172,8 @@ test("trusted main archive cache preserves strict Mojo compile and ABI verificat
   for (const block of [linux, platform]) {
     assert.match(block, /uses: actions\/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9/);
     assert.match(block, /id: mojo-archive-cache/);
-    assert.match(block, /if: \$\{\{ github.event_name == 'push' && github.ref == 'refs\/heads\/main' \}\}/);
+    assert.match(block, /github.ref == 'refs\/heads\/main'/);
+    assert.match(block, /github.event_name == 'push'/);
     assert.match(block, /mojo-static-v2-/);
     assert.match(block, /rust1\.99\.1/);
     assert.match(block, /env\.MOJO_VERSION/);
@@ -190,10 +191,7 @@ test("trusted main archive cache preserves strict Mojo compile and ABI verificat
       "Rust/toolchain install, pinned Mojo install, and strict compilation must all run on cache miss",
     );
     assert.match(block, /- name: Ensure LLVM archive tools/);
-    assert.match(block, /command -v llvm-nm/);
-    assert.match(block, /command -v llvm-ar/);
-    assert.match(block, /command -v llvm-lib/);
-    assert.match(block, /sudo apt-get install -y llvm/);
+    assert.match(block, /bash scripts\/ci\/ensure-llvm-archive-tools.sh/);
     assert.match(block, /- name: Build strict runtime Mojo archive/);
     assert.match(block, /--features mojo-core/);
     assert.match(block, /- name: Upload (?:Linux|platform) runtime Mojo archive/);
@@ -212,19 +210,18 @@ test("trusted main archive cache preserves strict Mojo compile and ABI verificat
 });
 
 
-test("release-only ARM64 archive cache is bounded, source-addressed and preserves all six gates", () => {
+test("shared release archive cache is exact-input and preserves all six gates", () => {
   const archive = workflowJob(release, "build-mojo-archives", "build");
   const build = workflowJob(release, "build", "attest-binaries");
-  const cache = archive.match(/      - name: Restore strict release-only ARM64 Mojo archive cache\n([\s\S]*?)\n      - name: Install Rust target/)?.[1];
+  const cache = archive.match(/      - name: Restore exact-input archive shared with main CI\n([\s\S]*?)\n      - name: Install Rust target/)?.[1];
   assert.ok(cache);
-  assert.match(cache, /id: release-arm64-archive-cache/);
+  assert.match(cache, /id: release-archive-cache/);
   assert.match(cache, /uses: actions\/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9/);
   assert.match(cache, /github\.event_name == 'workflow_dispatch'/);
   assert.match(cache, /github\.ref == 'refs\/heads\/main'/);
-  for (const target of ["aarch64-unknown-linux-gnu", "aarch64-pc-windows-msvc"]) {
-    assert.match(cache, new RegExp("matrix.target == '" + target + "'"));
-  }
-  assert.match(cache, /mojo-release-arm64-v1-/);
+  assert.match(cache, /mojo-static-v2-/);
+  assert.match(cache, /path: target\/mojo-runtime\//);
+  assert.match(archive, /Save only ABI-validated archive into the shared cache path/);
   assert.match(cache, /matrix\.target/);
   assert.match(cache, /matrix\.mojo-target-cpu/);
   assert.match(cache, /env\.MOJO_VERSION/);
@@ -503,11 +500,11 @@ test("official Windows x64 ThinLTO release omits cold sccache and retains native
 test("release Mojo archive setup skips already-installed LLVM but still validates every platform", () => {
   const archive = workflowJob(release, "build-mojo-archives", "build");
   assert.match(archive, /- name: Ensure LLVM archive tools\n\s+shell: bash/);
-  for (const tool of ["llvm-nm", "llvm-ar", "llvm-lib"]) {
-    assert.match(archive, new RegExp("command -v " + tool));
-  }
-  assert.match(archive, /sudo apt-get update/);
-  assert.match(archive, /sudo apt-get install -y llvm/);
+  assert.match(archive, /bash scripts\/ci\/ensure-llvm-archive-tools.sh/);
+  const setup = readFileSync("scripts/ci/ensure-llvm-archive-tools.sh", "utf8");
+  for (const tool of ["llvm-nm", "llvm-ar", "llvm-lib"]) assert.ok(setup.includes(tool));
+  assert.match(setup, /sudo apt-get update/);
+  assert.match(setup, /sudo apt-get install -y llvm/);
   assert.match(archive, /- name: Verify target archive\n\s+shell: bash/);
   assert.doesNotMatch(archive, /- name: Verify target archive\n\s+if:/);
   assert.match(archive, /prodex_mojo_rich_abi_version/);
@@ -550,4 +547,63 @@ test("Windows ARM64-host x64 release calibration is opt-in and fails closed on A
   assert.doesNotMatch(workflow, /gh release (?:create|upload|edit)/);
   assert.doesNotMatch(workflow, /git push/);
   assert.doesNotMatch(workflow, /subject-path:|attest-build-provenance/);
+});
+
+
+test("release and calibration dependency caches share only compatible native dependencies", () => {
+  const build = workflowJob(release, "build", "attest-binaries");
+  assert.match(build, /shared-key: production-release-deps-v1/);
+  for (const filename of [
+    "release-macos-cross-calibration.yml", "release-windows-arm64-calibration.yml",
+    "release-windows-x64-arm-host-calibration.yml", "release-windows-x64-codegen-calibration.yml",
+  ]) {
+    const source = readFileSync(`.github/workflows/${filename}`, "utf8");
+    assert.match(source, /shared-key: production-release-deps-v1/);
+    assert.match(source, /cache-workspace-crates: "false"/);
+    assert.match(source, /cache-bin: false/);
+    assert.match(source, /save-if:.*github.ref == 'refs\/heads\/main'/);
+    assert.match(source, /scripts\/ci\/release_cargo_deps_cache_key.py/);
+    assert.match(source, /external_sha256=legacy-\$\(git rev-parse HEAD\)/);
+    assert.match(source, /key: release-deps-v1-rust1.99.1-thinlto-cgu/);
+    assert.match(source, /runner.os.*runner.arch/);
+    assert.match(source, /steps.rust-deps-cache-key.outputs.external_sha256/);
+    assert.match(source, /cargo build --(?:release|locked)/);
+    assert.doesNotMatch(source, /restore-keys:|gh release (?:create|upload|edit)/);
+  }
+  const ab = readFileSync(".github/workflows/release-windows-x64-codegen-calibration.yml", "utf8");
+  assert.match(ab, /thinlto-cgu\$\{\{ matrix.units \}\}/);
+});
+
+test("benchmark reuses only a trusted exact-input archive and keeps a cold compiler fallback", () => {
+  const source = readFileSync(".github/workflows/bench-calibration.yml", "utf8");
+  assert.match(source, /actions\/cache\/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9/);
+  assert.match(source, /inputs.log_source == 'fresh-benchmark' && github.ref == 'refs\/heads\/main'/);
+  assert.match(source, /key: mojo-static-v2-/);
+  assert.doesNotMatch(source, /restore-keys:/);
+  assert.match(source, /Validate cached benchmark Mojo archive/);
+  assert.match(source, /KGEN_CompilerRT_/);
+  assert.match(source, /PRODEX_MOJO_ARCHIVE=.*GITHUB_ENV/);
+  assert.match(source, /Install pinned Mojo toolchain[\s\S]*?cache-hit != 'true'/);
+  assert.match(source, /cargo bench --locked --features bench-support --bench runtime_proxy_hot_paths/);
+});
+
+test("optimized npm package smoke retains real release compilation and a separate trusted cache", () => {
+  const job = workflowJob(ci, "npm-package-smoke", "standalone-installer");
+  assert.match(job, /shared-key: npm-host-release-deps-v1/);
+  assert.match(job, /cache-workspace-crates: "false"/);
+  assert.match(job, /save-if:.*github.event_name == 'push'.*refs\/heads\/main/);
+  assert.match(job, /cargo build --release --locked --target x86_64-unknown-linux-gnu --bin prodex/);
+  assert.match(job, /node scripts\/ci\/npm-package-smoke.mjs --binary-dir target\/x86_64-unknown-linux-gnu\/release/);
+});
+
+
+test("matrix cache readers do not recreate a concurrent object-cache write storm", () => {
+  for (const source of [ci, readFileSync(".github/workflows/full-test.yml", "utf8")]) {
+    for (const job of source.split(/(?=^  [a-zA-Z0-9_-]+:\s*$)/m)) {
+      if (!job.includes("save-if: ${{ matrix.save_cache }}") || !job.includes("RUSTC_WRAPPER: sccache")) continue;
+      assert.match(job, /SCCACHE_GHA_RW_MODE: \$\{\{ matrix.save_cache && 'READ_WRITE' \|\| 'READ_ONLY' \}\}/);
+      assert.match(job, /cargo (?:test|build)|node scripts\/ci\/|full-rust-test/);
+      assert.match(job, /fail-fast: false/);
+    }
+  }
 });

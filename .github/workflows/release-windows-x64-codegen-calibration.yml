@@ -116,11 +116,30 @@ jobs:
           toolchain: 1.99.1
           targets: x86_64-pc-windows-msvc
 
+      - name: Fingerprint qualified native dependency cache
+        id: rust-deps-cache-key
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Old release targets may predate this helper. Such a target gets
+          # its own immutable key rather than borrowing an unverified cache.
+          if [ ! -f scripts/ci/release_cargo_deps_cache_key.py ]; then
+            echo "external_sha256=legacy-$(git rev-parse HEAD)" >> "${GITHUB_OUTPUT}"
+          elif [[ "${RUNNER_OS}" == Windows ]]; then
+            python scripts/ci/release_cargo_deps_cache_key.py --lockfile Cargo.lock --output "${GITHUB_OUTPUT}"
+          else
+            python3 scripts/ci/release_cargo_deps_cache_key.py --lockfile Cargo.lock --output "${GITHUB_OUTPUT}"
+          fi
+
       - name: Cache independent release dependency artifacts
         uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
         with:
-          key: windows-x64-codegen-${{ matrix.units }}-calibration
+          shared-key: production-release-deps-v1
+          add-rust-environment-hash-key: "false"
+          cache-workspace-crates: "false"
           cache-bin: false
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+          key: release-deps-v1-rust1.99.1-thinlto-cgu${{ matrix.units }}-mojo${{ env.PRODEX_MOJO_VERSION }}-${{ runner.os }}-${{ runner.arch }}-x86_64-pc-windows-msvc-x86-64-${{ steps.rust-deps-cache-key.outputs.external_sha256 }}
 
       - name: Measure cold ThinLTO release build without sccache
         shell: pwsh

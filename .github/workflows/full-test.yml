@@ -144,9 +144,13 @@ jobs:
     timeout-minutes: 90
     env:
       RUSTC_WRAPPER: sccache
+      # One warm-up shard writes; readers cannot flood the GHA cache with the
+      # same dependency objects during a cold full-suite fan-out.
+      SCCACHE_GHA_RW_MODE: ${{ matrix.save_cache && 'READ_WRITE' || 'READ_ONLY' }}
       PRODEX_MOJO_ARCHIVE: ${{ github.workspace }}/.prodex-ci/mojo-runtime/x86_64-unknown-linux-gnu/libprodex_mojo_core.a
     strategy:
       fail-fast: false
+      max-parallel: 16
       matrix: ${{ fromJSON(needs.full_test_shards.outputs.matrix) }}
 
     steps:
