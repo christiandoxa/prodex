@@ -234,8 +234,10 @@ fn active_openai_account_catalog_precedes_unrelated_shared_cache_04394() {
     fs::write(profile_home.join("models_cache.json"), json!({"models":[{
         "slug":"gpt-6.1-terra","visibility":"list","supported_reasoning_levels":[{"effort":"max"}]
     }]}).to_string()).unwrap();
-    let mut state = crate::AppState::default();
-    state.active_profile = Some("synthetic-account".into());
+    let mut state = crate::AppState {
+        active_profile: Some("synthetic-account".into()),
+        ..crate::AppState::default()
+    };
     state.profiles.insert(
         "synthetic-account".into(),
         crate::ProfileEntry {
