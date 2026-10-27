@@ -4,6 +4,10 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 
 ## 0.439.4 - 2026-10-27
 
+### CLI
+
+- Preserve account reasoning defaults at launch (`d3ddba2`)
+
 ### Claude
 
 - Refresh Claude and Gemini catalogs with native wire metadata (`0a4f456`)
@@ -52,6 +56,9 @@ clients are not silently replaced, and model access still depends on the account
   sub-agent selection, worker validation, and Super MCP configuration. For example,
   a ChatGPT Terra catalog can advertise effort/context metadata different from
   the API-key catalog; neither surface silently overwrites the other.
+- Preserve the account's default effort through actual main-agent launch planning
+  and explicit ping validation. User-selected effort overrides still take priority;
+  API-key launches retain their separate API defaults.
 - Prefer the active OpenAI profile's usable model cache over a different shared
   account cache. Broken caches retain the existing bounded offline fallback.
 - Distinguish authoritative account inventories from Prodex-generated runtime
