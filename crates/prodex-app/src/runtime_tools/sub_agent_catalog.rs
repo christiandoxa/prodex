@@ -106,17 +106,15 @@ pub(crate) fn effective_provider_model_catalog_from_paths(
     // Codex's shared cache is a ChatGPT account catalog, not an API-key model
     // entitlement list. Never let it erase still-supported API-key choices.
     let sources = if api_key {
-        Vec::new()
+        Ok(Vec::new())
     } else {
-        match catalog_sources(paths, provider) {
-            Ok(sources) => sources,
-            Err(_) => {
-                return EffectiveProviderModelCatalog {
-                    scope,
-                    ..degraded_catalog()
-                };
-            }
-        }
+        catalog_sources(paths, provider)
+    };
+    let Ok(sources) = sources else {
+        return EffectiveProviderModelCatalog {
+            scope,
+            ..degraded_catalog()
+        };
     };
     let mut models = Vec::new();
     let mut degraded = false;

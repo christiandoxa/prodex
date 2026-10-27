@@ -569,12 +569,25 @@ fn responses_hard_affinity_rate_limit_requests_full_context_replay_then_rotates(
 
 #[test]
 fn responses_hard_affinity_generic_429_requests_full_context_replay_then_rotates() {
-    run_retryable_hard_affinity_replay_case(
-        RuntimeProxyBackendFaultStep::plain_429(
+    run_retryable_hard_affinity_replay_script(
+        RuntimeProxyBackendFaultScript::new([RuntimeProxyBackendFaultStep::plain_429(
             RuntimeProxyBackendFaultRoute::Responses,
             "main-account",
-        ),
+        )]),
         "rate_limit_full_context_retry_signal",
+        |harness, _| {
+            // The generic response has no Retry-After. Its brief local cooldown
+            // may expire during Windows state I/O, after which reusing main is
+            // valid. Keep this fixture in the active-cooldown state explicitly.
+            let log = read_runtime_proxy_test_log(&harness.shared().log_path);
+            assert!(log.contains("profile_retry_backoff profile=main"), "{log}");
+            assert!(!log.contains("profile_quota_quarantine"), "{log}");
+            mark_runtime_profile_retry_backoff_for_delay(
+                harness.shared(), "main", Some(Duration::from_secs(30)),
+            ).expect("synthetic cooldown should remain active during replay");
+            thread::sleep(Duration::from_millis(2_200));
+        },
+        &["main-account", "second-account"],
     );
 }
 
