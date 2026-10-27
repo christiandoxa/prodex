@@ -105,7 +105,7 @@ pub use lifecycle::{
 mod reasoning;
 pub use reasoning::{
     ProviderModelReasoningError, ProviderModelReasoningResolution,
-    provider_model_reasoning_resolution,
+    provider_model_reasoning_resolution, provider_model_reasoning_resolution_with_catalog,
 };
 
 #[path = "catalog/serialization.rs"]
@@ -351,9 +351,15 @@ mod tests {
             Some("current-model"),
         );
         assert_eq!(choices[0], ProviderModelChoice::ProviderDefault);
-        for (index, model) in ["gpt-6-astra", "gpt-6.1-sol", "gpt-6-luna", "gpt-6-sol"]
-            .into_iter()
-            .enumerate()
+        for (index, model) in [
+            "gpt-6-astra",
+            "gpt-6.1-sol",
+            "gpt-6.1-terra",
+            "gpt-6-luna",
+            "gpt-6-sol",
+        ]
+        .into_iter()
+        .enumerate()
         {
             assert_eq!(
                 choices[index + 1],

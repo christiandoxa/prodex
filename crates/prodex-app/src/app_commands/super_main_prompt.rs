@@ -1,7 +1,7 @@
 use super::super_prompt;
 use crate::{
-    AppPaths, canonical_sub_agent_efforts, canonical_sub_agent_model_choices,
-    codex_cli_config_override_value,
+    AppPaths, canonical_sub_agent_model_choices, codex_cli_config_override_value,
+    effective_sub_agent_efforts,
 };
 #[path = "super_main_catalog.rs"]
 mod catalog;
@@ -306,7 +306,7 @@ pub(super) fn prompt_super_reasoning_effort(
     model: Option<&str>,
     current: Option<SubAgentReasoningEffort>,
 ) -> anyhow::Result<Option<SubAgentReasoningEffort>> {
-    prompt_reasoning_effort(title, canonical_sub_agent_efforts(provider, model), current)
+    prompt_reasoning_effort(title, effective_sub_agent_efforts(provider, model), current)
 }
 
 pub(super) fn prompt_openai_ping_model_and_effort(

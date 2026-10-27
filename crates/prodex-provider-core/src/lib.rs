@@ -43,8 +43,9 @@ pub use catalog::{
     provider_catalog_entries, provider_catalog_entries_for, provider_catalog_entry,
     provider_catalog_json, provider_model_catalog_json, provider_model_is_retired,
     provider_model_is_retired_in_scope, provider_model_json, provider_model_reasoning_resolution,
-    render_local_runtime_model_catalog, render_runtime_model_catalog,
-    resolve_provider_model_choices, resolve_provider_snapshot_model_choices,
+    provider_model_reasoning_resolution_with_catalog, render_local_runtime_model_catalog,
+    render_runtime_model_catalog, resolve_provider_model_choices,
+    resolve_provider_snapshot_model_choices,
 };
 pub use chat_tools_bridge::{
     provider_core_chat_request_body_without_web_search_options,

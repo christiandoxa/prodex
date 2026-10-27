@@ -194,6 +194,11 @@ snapshots, and provider runtime catalogs), reports bounded degraded state withou
 and leaves identity normalization, canonical ordering, deduplication, aliases, and known-model
 reasoning metadata to `prodex-provider-core`. Main-agent and sub-agent pickers consume this same
 source path; picker rendering never performs provider network discovery.
+The active OpenAI profile cache takes precedence over the shared cache; snapshots
+from different accounts are not unioned. Main-agent and sub-agent reasoning
+validation uses the same compiled account-metadata resolver, with canonical API
+metadata only when an account supplies no effort information. API-key access
+does not inherit ChatGPT-only catalog restrictions.
 
 A usable account catalog is authoritative for picker membership: offline models
 are not unioned back into it, and a remembered bundled model absent from it is

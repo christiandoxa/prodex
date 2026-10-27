@@ -4,7 +4,7 @@ Generated from the current prodex_provider_core implementation registry and tran
 
 | Provider | Models | Transform | Streaming | Fallback | Fixtures req/resp/stream | responses | responses/compact | chat-completions | messages | models | embeddings | images | audio | batches | rerank | a2a |
 |---|---:|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
-| openai | 11 | passthrough | true | false | 7/7/1 | native | emulated | native | unsupported | native | native | native | native | native | unsupported | unsupported |
+| openai | 12 | passthrough | true | false | 7/7/1 | native | emulated | native | unsupported | native | native | native | native | native | unsupported | unsupported |
 | anthropic | 11 | translated | true | true | 12/5/4 | translated | emulated | passthrough | passthrough | emulated | unsupported | unsupported | unsupported | unsupported | unsupported | unsupported |
 | copilot | 21 | passthrough | true | true | 10/5/2 | native | passthrough | passthrough | passthrough | emulated | unsupported | unsupported | unsupported | unsupported | unsupported | unsupported |
 | deepseek | 2 | translated | true | true | 16/4/3 | translated | emulated | passthrough | passthrough | emulated | unsupported | unsupported | unsupported | unsupported | unsupported | unsupported |

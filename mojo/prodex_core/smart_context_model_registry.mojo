@@ -263,6 +263,7 @@ def model_registry_context_window(view: ProdexRichStringView) -> Int64:
         model_registry_equals["gpt-5.6-luna"](view)
         or model_registry_equals["gpt-6-astra"](view)
         or model_registry_equals["gpt-6.1-sol"](view)
+        or model_registry_equals["gpt-6.1-terra"](view)
         or model_registry_equals["gpt-6-sol"](view)
         or model_registry_equals["gpt-6-luna"](view)
     ):
