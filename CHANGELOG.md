@@ -2,6 +2,73 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.439.5 - 2026-10-27
+
+### CLI
+
+- Keep credential commits off history and quota waits (`714b851`)
+
+### Docs
+
+- Record qualified Presidio dependency for 0.439.5 (`ca8e09e`)
+
+### Deps
+
+- Qualify Presidio 2.2.366 service images (`662781d`)
+
+### Misc
+
+- Separate Presidio qualification from release metadata (`0532b7b`)
+# Prodex 0.439.5
+
+This release fixes delayed OpenAI login completion after Codex has authenticated,
+and prevents automatic login identity discovery from holding up unrelated quota
+commands. Existing accounts, session history, and running processes are preserved.
+
+## New Features
+
+- Add a credential-persistence preparation path that wires shared Codex state
+  without reading historical rollouts or repairing unrelated goal attachments.
+  Existing runtime launch and explicit maintenance keep their repair behavior.
+
+## Bug Fixes
+
+- Do not perform full historical session maintenance before persisting new,
+  existing, or named OpenAI login credentials. API-key login uses the same path.
+- Prefer stored account claims and cached profile identity rather than querying
+  every account's quota endpoint during login finalization.
+- Move legacy identity network lookups outside automatic login's global profile
+  lifecycle lock, allowing independent quota commands to proceed while a lookup
+  is pending. Reload and validate the profile set and local account identities
+  before committing, with a bounded retry if another process changed them.
+- Preserve lifecycle journaling, private credential permissions, workspace/email
+  matching, stale-account rejection, and session/goal state. Named-profile browser
+  authentication retains its existing remove/recreate exclusion; this change does
+  not weaken its concurrency protections or terminate an unfinished OAuth flow.
+
+- Qualify Presidio 2.2.366 to satisfy the release freshness gate, pin both official
+  multi-platform container indexes, and verify health, analysis, and anonymization
+  on synthetic data without network access. Existing services are not restarted,
+  the compatible minimum remains 2.2.364, and redaction stays opt-in/fail-closed.
+
+## Changelog
+
+See the generated changelog for implementation, regression coverage, and the
+CI/CD improvements accumulated since the previous published release.
+
+## Verification
+
+Credential-free regressions exercise new and existing OpenAI profiles, named
+login, API-key login, and unchanged history timestamps. An isolated delayed
+identity endpoint verifies that quota finishes before the login response is
+released, and that a concurrently replaced account is never overwritten.
+Shared-home tests verify that goal repair is deferred to runtime launch without
+changing goal status or accounting, while symlink defenses remain enforced.
+Release publication requires exact-source CI, six-platform builds, artifact smoke,
+checksum validation, malware scanning, and build provenance.
+
+Full Changelog: [0.439.4...0.439.5](https://github.com/christiandoxa/prodex/compare/0.439.4...0.439.5)
+
 ## 0.439.4 - 2026-10-27
 
 ### CLI
@@ -25,77 +92,6 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 
 - Refresh DeepSeek and Kiro model capabilities (`c0c5317`)
 - Add GPT-6.1 Terra and honor account reasoning metadata (`5ea61c2`)
-# Prodex 0.439.4
-
-This release refreshes provider-scoped main-agent and sub-agent catalogs against
-upstream metadata reviewed on October 27, 2026. Running sessions and installed
-clients are not silently replaced, and model access still depends on the account.
-
-## New Features
-
-- Add GPT-6.1 Terra to OpenAI and GitHub Copilot, with the current `terra` alias.
-  Explicit GPT-5.6 Terra IDs remain available where the provider supports them.
-- Add Claude Haiku 5.5 to the native Anthropic and Copilot catalogs, and Gemini 4
-  Argon to native Gemini and Copilot. Copilot Claude wire IDs use dotted versions;
-  native Anthropic IDs retain hyphens, with legacy Copilot spellings accepted.
-- Add canonical `deepseek-flash`, with current DeepSeek context/output budgets
-  and `none`, `low`, `high`, and `max` reasoning choices. Keep the upstream-supported
-  `deepseek-v4-flash` compatibility ID; do not restore retired chat/reasoner models.
-- Expand Kiro's offline catalog with GPT-5.6 Sol/Terra and Claude Opus 5.5, Sonnet
-  5.5, Haiku 5.5, and Fable 5.1. Kiro account inventories remain authoritative;
-  region, plan, experimental access, and enterprise approvals are not bypassed.
-- Preserve Local/custom model independence. A cloud-provider lifecycle decision
-  never removes a user-defined local model.
-
-- Qualify Kiro CLI 2.34.2 for release packaging against its official manifest and
-  archive checksum. Isolated version/model-flag probes pass without account access.
-
-## Bug Fixes
-
-- Share account-specific reasoning metadata across main-agent selection,
-  sub-agent selection, worker validation, and Super MCP configuration. For example,
-  a ChatGPT Terra catalog can advertise effort/context metadata different from
-  the API-key catalog; neither surface silently overwrites the other.
-- Preserve the account's default effort through actual main-agent launch planning
-  and explicit ping validation. User-selected effort overrides still take priority;
-  API-key launches retain their separate API defaults.
-- Prefer the active OpenAI profile's usable model cache over a different shared
-  account cache. Broken caches retain the existing bounded offline fallback.
-- Distinguish authoritative account inventories from Prodex-generated runtime
-  catalogs. Old generated Gemini/DeepSeek/local catalogs cannot hide new bundled
-  models after an upgrade; imported account catalogs are not broadened silently.
-- Send Gemini 4 Argon thinking levels instead of the legacy thinking budget, keep
-  the documented medium default, and apply modern tool/signature classification.
-  The catalog does not claim unsupported long-decode continuation behavior.
-- Preserve DeepSeek low effort on the native wire rather than escalating it to
-  high. Existing explicit compatibility mappings remain isolated from the new
-  canonical picker suggestions.
-
-## Changelog
-
-See the generated changelog for the individual implementation and test commits.
-
-## Verification
-
-Regression coverage includes account-cache precedence, API-key isolation,
-main/sub-agent effort consistency, exact provider wire identifiers, dynamic and
-offline catalog boundaries, retired-model exclusions, and actual native request
-translation. Gemini 4 and DeepSeek low-effort regressions were reproduced before
-fixing their compiled owners. Provider catalog fixtures retain exact output
-comparison and explicit semantic checks. Release publication requires the CI gate,
-six-platform native builds, artifact smoke tests, checksums, and provenance.
-
-## Upstream References
-
-- OpenAI: <https://developers.openai.com/api/docs/models/gpt-6.1-terra>
-- Copilot Terra: <https://github.blog/changelog/2026-10-26-gpt-6-1-terra-in-github-copilot/>
-- Copilot model IDs: <https://github.com/github/gh-aw/issues/68834>
-- Anthropic: <https://platform.claude.com/docs/en/models/haiku-5-5/overview>
-- Gemini: <https://ai.google.dev/gemini-api/docs/generate-content/thinking>
-- DeepSeek: <https://api-docs.deepseek.com/api/list-models/>
-- Kiro: <https://kiro.dev/docs/models/available-models/> and <https://kiro.dev/docs/models/effort/>
-
-Full Changelog: [0.439.3...0.439.4](https://github.com/christiandoxa/prodex/compare/0.439.3...0.439.4)
 
 ## 0.439.3 - 2026-10-26
 
