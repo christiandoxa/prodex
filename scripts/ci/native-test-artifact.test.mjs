@@ -127,3 +127,9 @@ test("Windows security gate rejects unbound bundles and missing producer compila
     assert.ok(validateWindowsSecurityJob(damaged).length > 0, marker);
   }
 });
+
+
+test("native Windows preparation and execution retain the original Bash environment", () => {
+  assert.match(job("windows-app-test-build"), /id: pack\n\s+shell: bash\n\s+run: node scripts\/ci\/native-test-artifact\.mjs pack/);
+  assert.match(job("windows-prodex-app"), /Run Windows prodex-app partition.*\n\s+shell: bash\n/);
+});

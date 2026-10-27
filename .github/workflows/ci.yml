@@ -719,6 +719,7 @@ jobs:
 
       - name: Compile and bind the exact-run native test executable
         id: pack
+        shell: bash
         run: node scripts/ci/native-test-artifact.mjs pack .prodex-ci/windows-app-tests
 
       - name: Upload the exact-run native test executable
@@ -762,6 +763,7 @@ jobs:
           path: .prodex-ci/windows-app-tests
 
       - name: Run Windows prodex-app partition ${{ matrix.label }}
+        shell: bash
         env:
           TEST_MANIFEST_SHA256: ${{ needs.windows-app-test-build.outputs.manifest_sha256 }}
           PRODEX_APP_FILTERS: ${{ matrix.filters }}

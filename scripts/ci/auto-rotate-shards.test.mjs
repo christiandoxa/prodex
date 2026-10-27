@@ -53,7 +53,7 @@ test("auto-rotate CI shard index must be in range", () => {
 
 test("Windows CI partitions tests and installer work with one cache writer", () => {
   const workflow = readFileSync(".github/workflows/ci.yml", "utf8");
-  const block = workflow.match(/\n  windows-workspace:\n([\s\S]*?)\n  windows-prodex-app:/)?.[1];
+  const block = workflow.match(/\n  windows-workspace:\n([\s\S]*?)\n  windows-app-test-build:/)?.[1];
   assert.ok(block, "windows-workspace job missing");
 
   const suites = [...block.matchAll(/^\s+- suite: (\S+)$/gm)].map((match) => match[1]);
