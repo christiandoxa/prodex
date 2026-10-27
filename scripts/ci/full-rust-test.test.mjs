@@ -257,7 +257,7 @@ test("release Mojo install activates the compiler in its current step", () => {
 
 test("release validates the Kiro pin before build fan-out", () => {
   const workflow = readFileSync(".github/workflows/standalone-release.yml", "utf8");
-  const verifyCi = workflow.match(/\n  verify-ci:\n([\s\S]*?)\n  build:/)?.[1];
+  const verifyCi = workflow.match(/\n  release-preflight:\n([\s\S]*?)\n  build:/)?.[1];
   const build = workflow.match(/\n  build:\n([\s\S]*?)\n  artifact-smoke:/)?.[1];
 
   assert.ok(verifyCi, "release CI verification job missing");
@@ -270,7 +270,7 @@ test("release validates the Kiro pin before build fan-out", () => {
     verifyCi.indexOf("Verify pinned Kiro CLI release") < verifyCi.indexOf("Wait for CI success"),
     "known stale runtime pins must fail before waiting for the full CI matrix",
   );
-  assert.match(build, /needs:\s*[\s\S]*?- verify-ci/);
+  assert.match(build, /needs:\s*[\s\S]*?- release-preflight/);
 });
 
 test("release builds Prodex only and leaves Codex external", () => {
@@ -286,7 +286,7 @@ test("release builds Prodex only and leaves Codex external", () => {
 
 test("release verifies optional-tool freshness on the exact release SHA", () => {
   const workflow = readFileSync(".github/workflows/standalone-release.yml", "utf8");
-  const verifyCi = workflow.match(/\n  verify-ci:\n([\s\S]*?)\n  build:/)?.[1];
+  const verifyCi = workflow.match(/\n  release-preflight:\n([\s\S]*?)\n  build:/)?.[1];
 
   assert.ok(verifyCi, "release CI verification job missing");
   assert.match(verifyCi, /Verify optional-tool freshness at release cut/);

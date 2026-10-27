@@ -16,6 +16,7 @@ import {
   releaseSteps,
   releaseSubject,
   selectSteps,
+  selectWorkflowRun,
   shouldRequireCleanWorktree,
   shouldResolveGithubRepo,
 } from "./release-run.mjs";
@@ -117,7 +118,7 @@ test("parseArgs supports dry-run resume and bounded step selection", () => {
   assert.equal(args.resume, true);
   assert.equal(args.version, "0.93.0");
   assert.equal(args.publishAt, "2026-09-06T20:00:00Z");
-  assert.deepEqual(args.steps, ["watch-ci", "trigger-publish", "watch-publish", "verify"]);
+  assert.deepEqual(args.steps, ["watch-ci", "watch-publish", "verify"]);
   assert.equal(args.pollSeconds, 1);
 });
 
@@ -331,14 +332,14 @@ test("release-run dry-run covers mandatory release order without mutation or net
       "dry-run: node scripts/npm/changelog.mjs --check",
       "release-run: push (0.2.0)",
       "dry-run: git push origin HEAD:main",
-      "release-run: watch-ci (0.2.0)",
-      "dry-run: watch ci.yml event=push for ",
       "release-run: trigger-publish (0.2.0)",
       "dry-run: gh api --method GET /repos/example/prodex/actions/workflows/standalone-release.yml/runs?branch=main&event=workflow_dispatch&per_page=20",
       "dry-run: gh api --method POST /repos/example/prodex/actions/workflows/standalone-release.yml/dispatches -f ref=main -f inputs[target_sha]=",
       "-f inputs[version]=0.2.0",
       "-f inputs[publish_at]=2026-09-06T20:00:00Z",
       "trigger-publish: would dispatch standalone-release.yml for main (0.2.0) for publication at 2026-09-06T20:00:00Z",
+      "release-run: watch-ci (0.2.0)",
+      "dry-run: watch ci.yml event=push for ",
       "release-run: watch-publish (0.2.0)",
       "dry-run: watch standalone-release.yml event=workflow_dispatch for ",
       "release-run: verify (0.2.0)",
@@ -381,8 +382,8 @@ test("release-run dry-run resume skips completed steps without changing state", 
       "test: already complete; skipping",
       "release-run: commit (0.2.0)",
       "release-run: push (0.2.0)",
-      "release-run: watch-ci (0.2.0)",
       "release-run: trigger-publish (0.2.0)",
+      "release-run: watch-ci (0.2.0)",
       "release-run: watch-publish (0.2.0)",
       "release-run: verify (0.2.0)",
     ]);
@@ -430,4 +431,34 @@ test("release-run requires metadata changes to start from the published branch h
     await fs.rm(root, { recursive: true, force: true });
     await fs.rm(remote, { recursive: true, force: true });
   }
+});
+
+
+test("release preparation overlaps CI instead of dispatching after the CI wait", () => {
+  assert.ok(releaseSteps.indexOf("trigger-publish") < releaseSteps.indexOf("watch-ci"));
+});
+
+test("publication dispatch opts in explicitly while a manual workflow stays nonpublishing", async () => {
+  const root = await createReleaseRunFixture();
+  try {
+    const { stdout } = await runReleaseRun(root, ["--dry-run", "--only", "trigger-publish"]);
+    assert.match(stdout, /-f inputs\[publish\]=true/);
+  } finally {
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
+
+
+test("a successful rehearsal cannot suppress or satisfy a publication of the same commit", () => {
+  const sha = "a".repeat(40);
+  const rehearsal = { head_sha: sha, display_title: `standalone verify 0.1.0 @ ${sha}`, conclusion: "success" };
+  const publication = { head_sha: sha, display_title: `standalone publish 0.1.0 @ ${sha}`, conclusion: null };
+  assert.equal(selectWorkflowRun([rehearsal], sha, { publication: true }), null);
+  assert.equal(selectWorkflowRun([rehearsal, publication], sha, { publication: true }), publication);
+  assert.equal(selectWorkflowRun([rehearsal], sha), rehearsal, "ordinary CI selection is unchanged");
+  assert.equal(selectWorkflowRun([{ ...publication, head_sha: "b".repeat(40) }], sha, { publication: true }), null);
+  assert.equal(selectWorkflowRun([{ ...publication, display_title: `standalone publish 0.1.0 @ ${"b".repeat(40)}` }], sha, { publication: true }), null);
+  assert.equal(selectWorkflowRun([{ head_sha: sha }], sha, { publication: true }), null);
+  const legacy = { head_sha: sha, display_title: "standalone release" };
+  assert.equal(selectWorkflowRun([legacy], sha, { publication: true }), legacy);
 });

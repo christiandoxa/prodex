@@ -393,6 +393,15 @@ function matrixEntry(shard, index) {
   };
 }
 
+// Creation priority only: measured long-tail owners should not start after
+// shorter work consumes the runner pool. Filters, exclusions, failure behavior
+// and the single cache-writer identity are never changed by scheduling.
+function prioritizeMatrix(entries, firstSuites) {
+  const ranks = new Map(firstSuites.map((suite, index) => [suite, index]));
+  return entries.toSorted((left, right) =>
+    (ranks.get(left.suite) ?? firstSuites.length) - (ranks.get(right.suite) ?? firstSuites.length));
+}
+
 export function githubMatrix({ includeWorkspace = false } = {}) {
   const shards = includeWorkspace ? scheduledFullTestShards() : PRODEX_APP_LIB_SHARDS;
   const include = shards.map((shard, index) =>
@@ -407,7 +416,9 @@ export function githubMatrix({ includeWorkspace = false } = {}) {
       skip_filters: "",
     });
   }
-  return { include };
+  return { include: includeWorkspace ? prioritizeMatrix(include, [
+    "workspace", "full-remainder-selection", "full-remainder-continuations", "commands", "runtime",
+  ]) : include };
 }
 
 export function ciGithubMatrix() {
@@ -434,7 +445,10 @@ export function windowsGithubMatrix() {
     ],
   };
   return {
-    include: [...grouped, ...WINDOWS_REMAINDER_SHARDS, leftover].map(matrixEntry),
+    include: prioritizeMatrix([...grouped, ...WINDOWS_REMAINDER_SHARDS, leftover].map(matrixEntry), [
+      "remainder", "remainder-continuations-http", "remainder-selection-recovery",
+      "remainder-continuations-websocket", "remainder-continuations-other",
+    ]),
   };
 }
 
