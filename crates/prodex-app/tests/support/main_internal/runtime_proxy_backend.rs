@@ -571,10 +571,44 @@ impl Drop for RuntimeProxyBackend {
 
 #[test]
 fn runtime_proxy_backend_shutdown_closes_open_websocket_before_joining_handlers() {
+    use std::io::Read as _;
+
     let backend = RuntimeProxyBackend::start_websocket();
-    let (_client, _response) =
+    let (mut client, _response) =
         ws_connect(format!("ws://{}/backend-api/codex/responses", backend.addr))
             .expect("backend websocket client should connect");
+    let deadline = ci_timing_upper_bound_ms(2_000, 10_000);
+    let (stopped_tx, stopped_rx) = std::sync::mpsc::channel();
+    let shutdown = thread::spawn(move || {
+        drop(backend);
+        let _ = stopped_tx.send(());
+    });
 
-    drop(backend);
+    // Observe the server closing FIRST, then release the client before joining.
+    // Leaving that client alive until after drop(backend) made Winsock's pending
+    // receive wait for its 120-second fixture timeout. Closing the client before
+    // observing EOF would instead hide a missing server-side shutdown.
+    let close_result = match client.get_mut() {
+        MaybeTlsStream::Plain(stream) => {
+            stream
+                .set_read_timeout(Some(deadline))
+                .expect("shutdown observation must have a bounded read");
+            stream.read(&mut [0_u8; 1])
+        }
+        _ => panic!("loopback ws fixture must use a plain TCP stream"),
+    };
+    drop(client);
+    stopped_rx
+        .recv_timeout(deadline)
+        .expect("backend handlers must stop after the peer observes shutdown");
+    shutdown.join().expect("backend shutdown must not panic");
+    match close_result {
+        Ok(0) => {}
+        Err(error)
+            if matches!(
+                error.kind(),
+                std::io::ErrorKind::ConnectionReset | std::io::ErrorKind::ConnectionAborted
+            ) => {}
+        result => panic!("backend must close the open socket, not time out or send data: {result:?}"),
+    }
 }
