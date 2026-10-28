@@ -769,3 +769,10 @@ node scripts/ci/github-job-durations.mjs --run-id RUN_ID --json < ci-jobs.json
 Record the exact source, run attempt and measurement boundary when comparing
 runs. Summed runner time is not wall-clock latency. Keep cancelled/failed attempts
 visible; a warm-cache partial rerun does not represent a fresh full pipeline.
+
+The backend WebSocket-shutdown regression observes server EOF/reset before
+closing its client, then waits for the backend handlers with a bounded channel.
+Keeping the client alive while synchronously joining the server could consume
+the fixture's 120-second Windows receive timeout. The test still rejects a
+missing server shutdown, a read timeout, unexpected data, or incomplete teardown;
+production timeout/recovery policy is unchanged.
