@@ -36,7 +36,7 @@ function run(command, args, options = {}) {
 
 async function fixture(
   t,
-  { validChecksum = true, manifestImplementation = null, compilerRequired = false, existingVersion = null } = {},
+  { validChecksum = true, manifestImplementation = null, compilerRequired = false, existingVersion = null, releaseVersion = version } = {},
 ) {
   const target = targetForHost();
   if (!target) {
@@ -61,15 +61,15 @@ async function fixture(
   const asset = `prodex-${target}`;
   const binary = Buffer.from(
     manifestImplementation === null
-      ? `#!/bin/sh\nprintf 'prodex ${version}\\n'\n`
-      : `#!/bin/sh\nif [ "$1" = "doctor" ]; then\nprintf '%s\\n' '{'\nprintf '%s\\n' '  "implementation": "${manifestImplementation}",'\nprintf '%s\\n' '  "fallback": false,'\nprintf '%s\\n' '  "compiler_required": ${compilerRequired},'\nprintf '%s\\n' '  "self_test": "passed"'\nprintf '%s\\n' '}'\nelse\nprintf 'prodex ${version}\\n'\nfi\n`,
+      ? `#!/bin/sh\nprintf 'prodex ${releaseVersion}\\n'\n`
+      : `#!/bin/sh\nif [ "$1" = "doctor" ]; then\nprintf '%s\\n' '{'\nprintf '%s\\n' '  "implementation": "${manifestImplementation}",'\nprintf '%s\\n' '  "fallback": false,'\nprintf '%s\\n' '  "compiler_required": ${compilerRequired},'\nprintf '%s\\n' '  "self_test": "passed"'\nprintf '%s\\n' '}'\nelse\nprintf 'prodex ${releaseVersion}\\n'\nfi\n`,
   );
   const manifest =
     manifestImplementation === null
       ? null
       : [
           "schema_version\t1",
-          `version\t${version}`,
+          `version\t${releaseVersion}`,
           `commit\t${"0".repeat(40)}`,
           "target\tasset\timplementation\tmojo_version\tmojo_features\truntime_bundle\tminimum_glibc",
           `${target}\t${asset}\t${manifestImplementation}\t${manifestImplementation === "mojo-compiled-in" ? "1.2.0" : ""}\t${manifestImplementation === "mojo-compiled-in" ? "mojo-core" : ""}\tfalse\t`,
@@ -113,11 +113,11 @@ async function fixture(
     TEST_MANAGER_LOG: managerLog,
     npm_package_name: "",
   };
-  return { root, binDir, fakeBin, managerLog, requests, asset, env };
+  return { root, binDir, fakeBin, managerLog, requests, asset, env, releaseVersion };
 }
 
 async function runInstaller(fixtureState, extraEnv = {}) {
-  return run("sh", [installerPath, "--release", version], {
+  return run("sh", [installerPath, "--release", fixtureState.releaseVersion], {
     cwd: repoRoot,
     env: { ...fixtureState.env, ...extraEnv },
   });
@@ -316,4 +316,23 @@ test("updater migrates cargo-installed Prodex", async (t) => {
   });
   assert.equal(result.code, 0, result.stderr);
   assert.equal((await fs.readFile(state.managerLog, "utf8")).trim(), "uninstall prodex");
+});
+
+test("explicit verified installer performs the authorized numbering cutover", async (t) => {
+  const state = await fixture(t, { existingVersion: "0.439.5", releaseVersion: "0.165.0",
+    manifestImplementation: "mojo-compiled-in" });
+  if (!state) return;
+  const result = await runInstaller(state);
+  assert.equal(result.code, 0, result.stderr);
+  assert.equal((await run(path.join(state.binDir, "prodex"), ["--version"])).stdout, "prodex 0.165.0\n");
+  assert.equal(state.requests.filter((request) => request === `/release/${state.asset}`).length, 1);
+});
+
+test("numbering cutover still rejects corrupt artifacts without replacing the old binary", async (t) => {
+  const state = await fixture(t, { existingVersion: "0.439.5", releaseVersion: "0.165.0", validChecksum: false });
+  if (!state) return;
+  const result = await runInstaller(state);
+  assert.notEqual(result.code, 0);
+  assert.match(result.stderr, /checksum did not match/);
+  assert.equal((await run(path.join(state.binDir, "prodex"), ["--version"])).stdout, "prodex 0.439.5\n");
 });

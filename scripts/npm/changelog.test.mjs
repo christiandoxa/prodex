@@ -130,3 +130,36 @@ test("changelog release-version renders pending version as final release section
     await fs.rm(root, { recursive: true, force: true });
   }
 });
+
+
+test("renumbered releases stay chronological before and after tagging", async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "prodex-renumber-changelog-"));
+  try {
+    await git(root, ["init", "-q"]);
+    await git(root, ["config", "user.name", "Prodex Fixture"]);
+    await git(root, ["config", "user.email", "fixtures@example.invalid"]);
+    const manifest = (version) => `[package]\nname = "fixture"\nversion = "${version}"\nedition = "2024"\n`;
+    await writeFile(root, "Cargo.toml", manifest("0.439.5"));
+    await commit(root, "chore(release): release 0.439.5");
+    await git(root, ["tag", "0.439.5"]);
+    await writeFile(root, "src/lib.rs", "pub fn aligned() {}\n");
+    await commit(root, "feat(runtime): qualify aligned upstream");
+    await writeFile(root, "Cargo.toml", manifest("0.165.0"));
+    await commit(root, "chore(release): release 0.165.0");
+    const render = () => execFileAsync(process.execPath, [SCRIPT_PATH, "--print", "--releases", "3"], {
+      cwd: root, env: { ...process.env, PRODEX_REPO_ROOT: root },
+    });
+    const before = (await render()).stdout;
+    await git(root, ["tag", "-a", "0.165.0", "-m", "aligned release"]);
+    assert.equal((await render()).stdout, before, "tagging must not reorder or duplicate release notes");
+    assert.ok(before.indexOf("## 0.165.0") < before.indexOf("## 0.439.5"));
+    await writeFile(root, "Cargo.toml", manifest("0.165.1"));
+    await writeFile(root, "src/lib.rs", "pub fn aligned() {}\npub fn next() {}\n");
+    await commit(root, "fix(runtime): improve aligned transport");
+    const next = (await render()).stdout;
+    assert.match(next, /Changes after `0\.165\.0`/);
+    assert.equal((next.match(/Qualify aligned upstream/g) ?? []).length, 1);
+  } finally {
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});

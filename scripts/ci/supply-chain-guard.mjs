@@ -531,8 +531,7 @@ export function validateReleaseContainerPublication(contents, targetWorkflow = "
     "git fetch origin --tags --force",
     'release_tag_sha="$(git rev-list -n1 "${version}" 2>/dev/null)"',
     "release tag ${version} targets ${release_tag_sha}, not ${target_sha}",
-    "git tag --list '[0-9]*' --sort=-version:refname",
-    "release version ${version} must be newer than ${latest_version}",
+    'node scripts/ci/release-version-order.mjs --version "${version}" --head "${target_sha}"',
   ]) {
     if (!preflight.includes(marker)) {
       violations.push(`.github/workflows/standalone-release.yml: release target safety missing ${marker}`);

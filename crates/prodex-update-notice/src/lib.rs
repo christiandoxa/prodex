@@ -403,7 +403,9 @@ fn acquire_update_check_lock(paths: &AppPaths) -> Option<fs::File> {
 }
 
 fn update_check_cache_file_path(paths: &AppPaths) -> PathBuf {
-    paths.root.join("update-check.json")
+    // Pre-alignment binaries compare 0.439.x numerically. Never reuse their
+    // hint cache after the explicitly authorized 0.165.0 installation.
+    paths.root.join("update-check-codex-aligned-v1.json")
 }
 
 fn save_update_check_cache(paths: &AppPaths, cache: &UpdateCheckCache) -> Result<()> {
@@ -411,7 +413,7 @@ fn save_update_check_cache(paths: &AppPaths, cache: &UpdateCheckCache) -> Result
     let path = update_check_cache_file_path(paths);
     let temp_file = prodex_core::unique_root_temp_file_path(
         &path,
-        "update-check.json",
+        "update-check-codex-aligned-v1.json",
         &UPDATE_CHECK_TEMP_SEQUENCE,
     );
     let json =

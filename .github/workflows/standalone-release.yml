@@ -63,6 +63,12 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
+      - name: Install Node.js for release metadata checks
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+        with:
+          node-version: 22
+          package-manager-cache: false
+
       - name: Resolve release target
         id: target
         env:
@@ -125,13 +131,7 @@ jobs:
               exit 1
             fi
             if ! git rev-parse --verify --quiet "refs/tags/${version}" >/dev/null; then
-              latest_version="$(git tag --list '[0-9]*' --sort=-version:refname | head -n1)"
-              if [ -n "${latest_version}" ] \
-                && { [ "${version}" = "${latest_version}" ] \
-                  || [ "$(printf '%s\n%s\n' "${latest_version}" "${version}" | sort -V | tail -n1)" != "${version}" ]; }; then
-                echo "release version ${version} must be newer than ${latest_version}" >&2
-                exit 1
-              fi
+              node scripts/ci/release-version-order.mjs --version "${version}" --head "${target_sha}"
             fi
           elif [ -n "${publish_at}" ]; then
             echo "publish_at is valid only with publish=true" >&2
@@ -142,12 +142,6 @@ jobs:
             echo "version=${version}"
             echo "publish_at=${publish_at}"
           } >> "${GITHUB_OUTPUT}"
-
-      - name: Install Node.js for release metadata checks
-        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
-        with:
-          node-version: 22
-          package-manager-cache: false
 
       - name: Verify optional-tool freshness at release cut
         env:

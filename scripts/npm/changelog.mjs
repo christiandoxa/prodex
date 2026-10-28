@@ -5,6 +5,8 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { readCargoVersion, repoRoot } from "./common.mjs";
 
+import { mergedVersionTagsInReleaseOrder } from "../ci/release-lineage.mjs";
+
 const execFileAsync = promisify(execFile);
 const changelogPath = path.join(repoRoot, "CHANGELOG.md");
 const releaseNotesDirectory = path.join(repoRoot, "docs", "release-notes");
@@ -93,11 +95,7 @@ async function git(args) {
 }
 
 async function versionTags() {
-  const stdout = await git(["tag", "--merged", "HEAD", "--sort=version:refname"]);
-  return stdout
-    .split(/\r?\n/)
-    .map((tag) => tag.trim())
-    .filter((tag) => versionTagPattern.test(tag));
+  return mergedVersionTagsInReleaseOrder(repoRoot).map(({ tag }) => tag);
 }
 
 function tagVersion(tag) {
