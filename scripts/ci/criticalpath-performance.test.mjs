@@ -59,7 +59,7 @@ test("Linux release artifact smoke starts after its own binary, not unrelated pl
   assert.match(build, /persist-credentials: false/);
   assert.doesNotMatch(smoke, /contents: write|attestations: write|id-token: write|cargo (build|run)/);
   assert.doesNotMatch(parent, /\n  artifact-smoke:\n/);
-  for (const name of ["prepare-release", "verify-release"]) {
+  for (const name of ["validate-release-assets", "verify-release"]) {
     assert.match(job(parent, name), /      - build\n/);
   }
 });

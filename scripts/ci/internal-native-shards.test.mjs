@@ -6,20 +6,20 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { testInventory } from "./native-test-artifact.mjs";
-import { RUNTIME_CI_BROAD_SHARD_FILTERS } from "./runtime-test-manifest.mjs";
+import { RUNTIME_CI_BROAD_SHARD_FILTERS, RUNTIME_STRESS_SERIALIZED_TESTS, RUNTIME_STRESS_CONTINUATION_TESTS } from "./runtime-test-manifest.mjs";
 import { validateLinuxNativeTests } from "./supply-chain-guard.mjs";
 
 const root = process.cwd();
 const hash = (bytes) => createHash("sha256").update(bytes).digest("hex");
 const runtimeTest = RUNTIME_CI_BROAD_SHARD_FILTERS[0].filter + "fixture";
 const names = ["main_internal_tests::fixture::alpha", "main_internal_tests::fixture::beta", runtimeTest].sort();
-function fixture(t) {
+function fixture(t, testNames = names) {
   const dir = mkdtempSync(path.join(os.tmpdir(), "prodex-internal-bundle-"));
   t.after(() => rmSync(dir, {recursive:true, force:true}));
   const calls = path.join(dir, "calls.jsonl");
   const payload = `#!${process.execPath}
 import fs from 'node:fs';
-const names=${JSON.stringify(names)};
+const names=${JSON.stringify(testNames)};
 const args=process.argv.slice(2);
 if(args.includes('--list')) {console.log(names.map(n=>n+': test').join('\\n'));process.exit(0);}
 const skip=args.flatMap((v,i)=>v==='--skip'?[args[i+1]]:[]);
@@ -36,7 +36,7 @@ console.log('test result: ok. '+selected.length+' passed; 0 failed; 0 ignored');
     checkout_path_sha256:hash(path.resolve(root).replaceAll("\\", "/"))};
   writeFileSync(path.join(dir, "prodex-app-tests"), payload, {mode:0o700});
   const manifest = JSON.stringify({schema:1,package:"prodex-app",...expected,binary:"prodex-app-tests",
-    binary_sha256:hash(payload),inventory:testInventory(names.map(n=>n+": test").join("\n"))});
+    binary_sha256:hash(payload),inventory:testInventory(testNames.map(n=>n+": test").join("\n"))});
   writeFileSync(path.join(dir, "manifest.json"),manifest);
   const bin = path.join(dir, "bin");mkdirSync(bin);
   writeFileSync(path.join(bin, "cargo"), "#!/bin/sh\necho unexpected-cargo >&2\nexit 91\n",{mode:0o700});
@@ -81,7 +81,7 @@ test("bad native bundle cannot execute or silently fall back to Cargo",unixOnly,
 test("every internal Linux consumer is bound to its producer and cannot recompile",()=>{
   const source=readFileSync(".github/workflows/ci.yml","utf8");
   assert.deepEqual(validateLinuxNativeTests(source),[]);
-  for(const name of ["profile-commands-internal","main-internal-core","main-internal-runtime-proxy"]) {
+  for(const name of ["profile-commands-internal","main-internal-core","main-internal-runtime-proxy","runtime-stress"]) {
     const start=source.indexOf(`\n  ${name}:`);
     const next=source.slice(start+1).search(/\n  [a-z][a-z0-9_-]*:/u);
     const body=source.slice(start,next<0?source.length:start+1+next);
@@ -91,4 +91,58 @@ test("every internal Linux consumer is bound to its producer and cannot recompil
     }
     assert.doesNotMatch(body,/cargo test|rust-cache@|sccache-action@/);
   }
+});
+
+for (const [suite, manifest, repetitions] of [
+  ["serialized", RUNTIME_STRESS_SERIALIZED_TESTS, 1],
+  ["continuation", RUNTIME_STRESS_CONTINUATION_TESTS, 2],
+]) {
+  test(`native ${suite} stress preserves all filters, repetitions and process isolation`, unixOnly, (t) => {
+    const f = fixture(t, manifest);
+    for (let shard = 0; shard < 2; shard++) {
+      const r = run("runtime-stress.mjs", ["--suite", suite, "--shard-count", "2", "--shard-index", String(shard)], f.env);
+      assert.equal(r.status, 0, r.stdout + r.stderr);
+      assert.doesNotMatch(r.stdout + r.stderr, /unexpected-cargo/);
+    }
+    const calls = readFileSync(f.calls, "utf8").trim().split("\n").map(JSON.parse);
+    assert.equal(calls.length, manifest.length * repetitions);
+    for (const filter of manifest) assert.equal(calls.filter(c => c.args[0] === filter).length, repetitions);
+    assert.ok(calls.every(c => c.cwd === path.join(root, "crates/prodex-app") && c.args.includes("--test-threads=1")));
+  });
+}
+test("native broad stress partitions never select unrelated core tests", unixOnly, (t) => {
+  const runtime = [0, 1, 2, 3].map(i => `main_internal_tests::runtime_proxy_synthetic::case_${i}`);
+  const f = fixture(t, [...runtime, "main_internal_tests::unrelated::case"]);
+  for (const strategy of ["weighted", "modulo"]) {
+    for (let shard = 0; shard < 2; shard++) {
+      const r = run("runtime-stress.mjs", ["--suite", "stress", "--shard-count", "2", "--shard-index", String(shard),
+        "--shard-strategy", strategy], f.env);
+      assert.equal(r.status, 0, r.stdout + r.stderr);
+    }
+  }
+  const calls = readFileSync(f.calls, "utf8").trim().split("\n").map(JSON.parse);
+  for (let start = 0; start < 4; start += 2) assert.deepEqual(calls.slice(start, start + 2).flatMap(c => c.selected).sort(), runtime);
+});
+test("stress propagates one failure without replaying the suite or compiling a fallback", unixOnly, (t) => {
+  const f = fixture(t, RUNTIME_STRESS_SERIALIZED_TESTS);
+  const r = run("runtime-stress.mjs", ["--suite", "serialized"], {...f.env, NATIVE_FIXTURE_MODE:"fail"});
+  assert.notEqual(r.status, 0, r.stdout + r.stderr);
+  assert.match(r.stderr, /exited with code 7/);
+  assert.equal(readFileSync(f.calls, "utf8").trim().split("\n").length, 1);
+  assert.doesNotMatch(r.stdout + r.stderr, /retrying|unexpected-cargo/);
+});
+test("stress refuses a damaged bundle before test execution", unixOnly, (t) => {
+  const f = fixture(t);
+  const r = run("runtime-stress.mjs", ["--suite", "all"], {...f.env, TEST_MANIFEST_SHA256:"0".repeat(64)});
+  assert.notEqual(r.status, 0);
+  assert.match(r.stderr, /manifest differs/);
+  assert.ok(!existsSync(f.calls));
+});
+test("scheduled stress has an eligible producer and absolute diagnostics", () => {
+  const ci = readFileSync(".github/workflows/ci.yml", "utf8");
+  const producer = ci.match(/\n  linux-app-test-build:\n([\s\S]*?)\n  prodex-app-lib:/u)[1];
+  const stress = ci.match(/\n  runtime-stress:\n([\s\S]*?)\n  real-mojo:/u)[1];
+  assert.doesNotMatch(producer, /github.event_name != 'schedule'/);
+  assert.match(stress, /PRODEX_RUNTIME_LOG_DIR: \$\{\{ github.workspace \}\}\/target\//u);
+  assert.match(stress, /Upload runtime stress diagnostics/);
 });

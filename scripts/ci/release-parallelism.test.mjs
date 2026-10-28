@@ -37,7 +37,7 @@ test("manual release workflow defaults to nonpublishing verification", () => {
 });
 
 test("read-only binaries, smoke and SBOM overlap full CI without losing source checks", () => {
-  for (const name of ["build", "prepare-release", "validate-release-assets"]) {
+  for (const name of ["build", "validate-release-assets"]) {
     const dependencies = ancestors(name);
     assert.ok(dependencies.has("release-preflight"), `${name} needs validated immutable source`);
     assert.ok(!dependencies.has("verify-ci"), `${name} must not idle behind full CI`);
@@ -69,7 +69,7 @@ test("every publishing side effect waits for successful exact-source CI and asse
 });
 
 test("verification verdict waits for every build and smoke gate, not skipped publishing jobs", () => {
-  for (const name of ["verify-ci", "build", "prepare-release", "validate-release-assets"]) {
+  for (const name of ["verify-ci", "build", "validate-release-assets"]) {
     assert.ok(needs("verify-release").includes(name), `verification verdict omits ${name}`);
   }
   assert.match(jobs.get("verify-release"), /always\(\)/);
@@ -101,7 +101,7 @@ test("supply-chain guard rejects missing publication gates and unscanned asset s
   }
   const damaged = workflow.replace("- name: Scan release assets for malware", "- name: Scan omitted");
   assert.ok(validateReleaseMalwareGate(damaged).length > 0);
-  const writable = workflow.replace(jobs.get("prepare-release"), jobs.get("prepare-release").replace("contents: read", "contents: write"));
+  const writable = workflow.replace(jobs.get("validate-release-assets"), jobs.get("validate-release-assets").replace("contents: read", "contents: write"));
   assert.ok(validateReleaseContainerPublication(writable, targetWorkflow).length > 0, "preparation must not gain publication authority");
 });
 
@@ -123,4 +123,22 @@ test("the same pinned antivirus engine is proven during compilation, before fina
   assert.doesNotMatch(jobs.get("validate-release-assets"), /Prepare antivirus engine health check/);
   const noHealth=workflow.replace(jobs.get("validate-release-assets"),jobs.get("validate-release-assets").replace("      - antivirus-health\n", ""));
   assert.ok(validateReleaseMalwareGate(noHealth).length>0, "engine proof must gate clean assets");
+});
+
+test("one read-only artifact consumer generates mandatory SBOM before validating scanned assets", () => {
+  assert.ok(!jobs.has("prepare-release"));
+  const validation = jobs.get("validate-release-assets");
+  assert.equal((workflow.match(/- name: Download built binaries/g) ?? []).length, 1);
+  assert.doesNotMatch(workflow, /- name: (?:Upload|Download) release SBOM/);
+  assert.ok(needs("validate-release-assets").includes("build"));
+  for (const marker of ["- name: Generate release SBOM", "dir:/source -o spdx-json > release-sbom.spdx.json",
+    "codex-purity-guard.mjs sbom-input", "codex-purity-guard.mjs release-sbom.spdx.json",
+    "cp release-sbom.spdx.json release-assets/release-sbom.spdx.json"]) {
+    const damaged = workflow.replace(validation, validation.replace(marker, "removed"));
+    assert.ok(validateReleaseContainerPublication(damaged, targetWorkflow).length > 0, marker);
+  }
+  for (const control of ["if: false", "continue-on-error: true"]) {
+    const damaged = workflow.replace("- name: Generate release SBOM\n", `- name: Generate release SBOM\n        ${control}\n`);
+    assert.ok(validateReleaseContainerPublication(damaged, targetWorkflow).length > 0, control);
+  }
 });

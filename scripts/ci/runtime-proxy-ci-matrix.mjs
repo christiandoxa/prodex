@@ -97,7 +97,6 @@ function matrixEntry(shards, index) {
   return {
     suite: suites.join("+"),
     label: labels.join(" + "),
-    save_cache: index === 0,
     filters: shards.flatMap((shard) => shardFilters(shard, index)).join("\n"),
   };
 }
@@ -118,7 +117,7 @@ function githubStressMatrix(eventName) {
     ...RUNTIME_STRESS_QUARANTINE_SHARDS,
   ];
   return {
-    include: shards.map((shard, index) => ({ ...shard, save_cache: index === 0 })),
+    include: shards,
   };
 }
 
