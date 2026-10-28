@@ -12,6 +12,10 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 
 - Record Codex 0.165 qualification and numbering migration (`384a648`)
 
+### Deps
+
+- Qualify Kiro CLI 2.35.1 release packaging (`1c70757`)
+
 ### Misc
 
 - Qualify Codex 0.165 native provider boundaries (`22eb917`)
