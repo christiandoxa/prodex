@@ -871,6 +871,8 @@ jobs:
         shell: bash
         env:
           TEST_MANIFEST_SHA256: ${{ needs.windows-app-test-build.outputs.manifest_sha256 }}
+          PRODEX_APP_SHARD_INDEX: ${{ matrix.subshard_index }}
+          PRODEX_APP_SHARD_COUNT: ${{ matrix.subshard_count }}
           PRODEX_APP_FILTERS: ${{ matrix.filters }}
           PRODEX_APP_SKIP_FILTERS: ${{ matrix.skip_filters }}
           RUST_BACKTRACE: "1"
@@ -2220,110 +2222,3 @@ jobs:
             cat "${log_dir}/${labels[index]}.log"
           done
           exit "${status}"
-
-  ci-duration-telemetry:
-    name: CI duration telemetry
-    needs:
-      - changes
-      - fmt
-      - linux-app-test-build
-      - prodex-app-lib
-      - fuzz-build
-      - docs-lint
-      - observability-alerts
-      - secret-scan
-      - windows-workspace
-      - windows-integration-build
-      - windows-integration
-      - windows-prodex-app
-      - windows-app-test-build
-      - macos-workspace
-      - macos-native-regressions
-      - process-guard
-      - compat-replay-gate
-      - rust-quality
-      - kics
-      - supply-chain
-      - release-sync
-      - npm-package-smoke
-      - standalone-installer
-      - auto-rotate
-      - profile-commands-internal
-      - main-internal-core
-      - env-sensitive-parallel-guard
-      - main-internal-runtime-proxy
-      - runtime-load-smoke
-      - runtime-stress
-      - real-mojo
-      - real-mojo-parity
-    if: ${{ always() && github.event_name != 'pull_request' }}
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    continue-on-error: true
-    permissions:
-      actions: read
-      contents: read
-
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-
-      - name: Install Node.js
-        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
-        with:
-          node-version: 22
-          package-manager-cache: false
-
-      - name: Summarize CI job durations
-        continue-on-error: true
-        env:
-          GH_TOKEN: ${{ github.token }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          jobs_json="${RUNNER_TEMP}/ci-jobs.json"
-          summary_path="${RUNNER_TEMP}/ci-job-durations.txt"
-          json_path="${RUNNER_TEMP}/ci-job-durations.json"
-          gh run view "${{ github.run_id }}" \
-            --repo "${{ github.repository }}" \
-            --attempt "${{ github.run_attempt }}" \
-            --json jobs > "${jobs_json}"
-          set +e
-          node scripts/ci/github-job-durations.mjs \
-            --max-wall-minutes 6 \
-            --max-runner-minutes 75 \
-            --run-id "${{ github.run_id }}" \
-            --exclude-name "CI duration telemetry" \
-            --limit 12 < "${jobs_json}" \
-            | tee "${summary_path}"
-          text_status="${PIPESTATUS[0]}"
-          node scripts/ci/github-job-durations.mjs \
-            --max-wall-minutes 6 \
-            --max-runner-minutes 75 \
-            --run-id "${{ github.run_id }}" \
-            --exclude-name "CI duration telemetry" \
-            --limit 12 \
-            --json < "${jobs_json}" > "${json_path}"
-          json_status="$?"
-          set -e
-          {
-            echo "### CI job durations"
-            echo
-            echo '```text'
-            cat "${summary_path}"
-            echo '```'
-          } >> "${GITHUB_STEP_SUMMARY}"
-          if [ "${text_status}" -ne 0 ] || [ "${json_status}" -ne 0 ]; then
-            echo "CI duration budget exceeded; telemetry uploaded without failing this run."
-          fi
-
-      - name: Upload CI duration telemetry
-        if: always()
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
-        with:
-          name: ci-duration-telemetry
-          path: |
-            ${{ runner.temp }}/ci-job-durations.txt
-            ${{ runner.temp }}/ci-job-durations.json
-          if-no-files-found: ignore
-          retention-days: 14

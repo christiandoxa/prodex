@@ -116,12 +116,13 @@ libtest scheduling are unchanged. The producer and consumers use the same
 `native-test-artifact.mjs` verification as Windows: exact source, run, platform,
 architecture, checkout path, independently supplied manifest digest, executable
 checksum and test inventory. This is not a cache of executables across commits.
-Nightly full-test uses its own same-run producer; stress and other direct Cargo lanes remain independent.
+Nightly full-test uses its own same-run producer. Linux stress shares the CI
+producer; independent workspace and integration suites retain their own harnesses.
 
 The macOS workspace suite and focused native broker/Kiro regressions run in
 separate jobs on the same pinned runner/toolchain. They share compatible Cargo
 dependencies; only the workspace job writes the shared cache. All original native
-filters and zero-test guards remain mandatory, and duration telemetry waits for
+filters and zero-test guards remain mandatory. GitHub records durations for
 both jobs. A slow workspace suite no longer delays the focused native regressions.
 
 ## Release critical path and nonpublishing verification
@@ -731,3 +732,36 @@ The release CI gate queries push runs for the exact target commit, rather than
 searching only the most recent unrelated runs. Pending checks are polled every
 ten seconds; a completed failure still fails the gate. This reduces observation
 latency without approving an incomplete CI run or changing publication authority.
+
+### Bounded Windows catchall and terminal workflow gates
+
+The Windows application catchall runs as two source/run-bound, isolated runner
+partitions. Both start from the same verified native test census, apply the
+original substring exclusions, sort the eligible names, and assign alternating
+names to exactly one owner. Each runner uses exact libtest names and
+`--test-threads=1`; zero selections, invalid indices and a mismatched executed
+test count fail closed. The other fourteen Windows partition selectors remain
+unchanged. The Linux, stress, integration and full-test ownership plans are not
+altered by the Windows-only split.
+
+The release `verify-ci` job owns both the artifact verdict and exact-source CI
+approval. It allocates a runner only after preflight, all six builds, antivirus
+proof and asset validation finish. It rejects missing, skipped or failed
+prerequisites before checkout or polling. Its success summary is emitted only
+after CI succeeds. Every signing, documentation-write and publication job still
+requires that gate and the validated bundle. A cancelled workflow does not keep
+the verdict polling; verification-only dispatches never publish or create tags.
+
+Dedicated CI/release duration-report runners and the duplicate release-verdict
+runner have been removed. GitHub keeps job/step timing and failure logs, and the
+existing duration analyzer remains available on demand rather than delaying the
+workflow's terminal status. For a completed run:
+
+```sh
+gh run view RUN_ID --json jobs > ci-jobs.json
+node scripts/ci/github-job-durations.mjs --run-id RUN_ID --json < ci-jobs.json
+```
+
+Record the exact source, run attempt and measurement boundary when comparing
+runs. Summed runner time is not wall-clock latency. Keep cancelled/failed attempts
+visible; a warm-cache partial rerun does not represent a fresh full pipeline.

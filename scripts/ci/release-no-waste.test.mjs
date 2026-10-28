@@ -22,7 +22,7 @@ function shell(name) {
 }
 test("release CI verdict waits without allocating a runner before target builds", () => {
   const verify = job(parent, "verify-ci");
-  assert.match(verify, /needs: \[release-preflight, build\]/);
+  assert.match(verify, /needs:\n\s+- release-preflight\n\s+- build\n\s+- validate-release-assets\n\s+- antivirus-health/);
   assert.match(job(parent, "build"), /needs: release-preflight/);
   assert.doesNotMatch(job(parent, "build"), /needs:.*verify-ci/);
   assert.match(verify, /get\("headSha"\) == target/);

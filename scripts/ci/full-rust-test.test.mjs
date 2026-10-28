@@ -136,7 +136,7 @@ test("native builds link strict runtime archives while the real Mojo lane owns a
   const ci = readFileSync(".github/workflows/ci.yml", "utf8");
   const full = readFileSync(".github/workflows/full-test.yml", "utf8");
   const mojoJob = ci.match(/\n  real-mojo:\n([\s\S]*?)\n  real-mojo-parity:/);
-  const mojoParity = ci.match(/\n  real-mojo-parity:\n([\s\S]*?)\n  ci-duration-telemetry:/);
+  const mojoParity = ci.match(/\n  real-mojo-parity:\n([\s\S]*)$/);
   const linuxArchive = ci.match(/\n  mojo-runtime-linux-archive:\n([\s\S]*?)\n  mojo-runtime-platform-archives:/);
 
   assert.ok(mojoJob, "real-mojo lint and smoke job missing");
@@ -158,7 +158,7 @@ test("native builds link strict runtime archives while the real Mojo lane owns a
 test("slow independent CI phases fan out without dropping their gates", () => {
   const workflow = readFileSync(".github/workflows/ci.yml", "utf8");
   const supplyChain = workflow.match(/\n  supply-chain:\n([\s\S]*?)\n  release-sync:/)?.[1];
-  const mojo = workflow.match(/\n  real-mojo-parity:\n([\s\S]*?)\n  ci-duration-telemetry:/)?.[1];
+  const mojo = workflow.match(/\n  real-mojo-parity:\n([\s\S]*)$/)?.[1];
 
   assert.ok(supplyChain, "supply-chain job missing");
   assert.ok(mojo, "real-mojo job missing");
@@ -193,10 +193,8 @@ test("slow independent CI phases fan out without dropping their gates", () => {
 test("push CI reuses the disjoint prodex-app library partitions", () => {
   const workflow = readFileSync(".github/workflows/ci.yml", "utf8");
   const job = workflow.match(/\n  prodex-app-lib:\n([\s\S]*?)\n  fuzz-build:/)?.[1];
-  const telemetry = workflow.match(/\n  ci-duration-telemetry:\n([\s\S]*)/)?.[1];
 
   assert.ok(job, "prodex-app-lib job missing");
-  assert.ok(telemetry, "ci-duration-telemetry job missing");
   assert.match(job, /matrix: \$\{\{ fromJSON\(needs\.changes\.outputs\.prodex_app_matrix\) \}\}/);
   assert.doesNotMatch(job, /include:/);
   const producer = workflow.match(/\n  linux-app-test-build:\n([\s\S]*?)\n  prodex-app-lib:/)?.[1];
@@ -208,7 +206,6 @@ test("push CI reuses the disjoint prodex-app library partitions", () => {
   assert.match(job, /native-test-artifact\.mjs run/);
   assert.match(job, /PRODEX_APP_FILTER/);
   assert.doesNotMatch(job, /Test temp-backed state with a symlinked TMPDIR/);
-  assert.match(telemetry, /- prodex-app-lib/);
   assert.doesNotMatch(workflow, /\n  redis-integration:/);
   assert.doesNotMatch(workflow, /\n  backup-restore-drill:/);
 });
@@ -352,10 +349,8 @@ test("runtime proxy matrix is generated before fan-out without a runner barrier"
 test("push CI omits the skipped runtime proxy benchmark smoke lane", () => {
   const workflow = readFileSync(".github/workflows/ci.yml", "utf8");
   const calibration = readFileSync(".github/workflows/bench-calibration.yml", "utf8");
-  const telemetry = workflow.match(/\n  ci-duration-telemetry:\n([\s\S]*)/)?.[1];
 
   assert.doesNotMatch(workflow, /\n  runtime-proxy-bench-smoke:\n/);
-  assert.doesNotMatch(telemetry, /- runtime-proxy-bench-smoke/);
   assert.match(calibration, /runtime_proxy_hot_paths/);
   assert.match(calibration, /cargo bench --locked --features bench-support --bench runtime_proxy_hot_paths/);
 });

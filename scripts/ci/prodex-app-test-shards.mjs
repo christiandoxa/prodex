@@ -449,8 +449,18 @@ export function windowsGithubMatrix() {
     ],
   };
   return {
-    include: prioritizeMatrix([...grouped, ...WINDOWS_REMAINDER_SHARDS, leftover].map(matrixEntry), [
-      "remainder", "remainder-continuations-http", "remainder-selection-recovery",
+    include: prioritizeMatrix([
+      ...[...grouped, ...WINDOWS_REMAINDER_SHARDS].map(matrixEntry),
+      // The catchall was the measured Windows tail (144 tests / 130 seconds).
+      // Separate runners retain serial isolation while sharing the same binary.
+      ...Array.from({ length: 2 }, (_, index) => ({
+        ...matrixEntry(leftover, grouped.length + WINDOWS_REMAINDER_SHARDS.length),
+        suite: `remainder-${index + 1}`,
+        label: `${leftover.label} ${index + 1}/2`,
+        subshard_index: String(index), subshard_count: "2",
+      })),
+    ], [
+      "remainder-1", "remainder-2", "remainder-continuations-http", "remainder-selection-recovery",
       "remainder-continuations-websocket", "remainder-continuations-other",
     ]),
   };
@@ -521,7 +531,7 @@ function printHelp() {
       "",
       "Validates or prints the shared prodex-app library CI shard plan.",
       "--github-matrix emits the push/PR app matrix without runtime-owned filters.",
-      "--windows-github-matrix emits fifteen disjoint Windows partitions with one cache writer.",
+      "--windows-github-matrix emits sixteen disjoint Windows partitions with one cache writer.",
       "--full-test-app-matrix emits the same application partitions without the independent workspace job.",
       "--full-test-matrix emits the scheduled full-test matrix including workspace coverage.",
     ].join("\n") + "\n",

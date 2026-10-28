@@ -83,6 +83,8 @@ export function validateWindowsSecurityJob(contents) {
     "PRODEX_APP_SKIP_FILTERS:",
     "needs: [changes, windows-app-test-build]",
     "TEST_MANIFEST_SHA256: ${{ needs.windows-app-test-build.outputs.manifest_sha256 }}",
+    "PRODEX_APP_SHARD_INDEX: ${{ matrix.subshard_index }}",
+    "PRODEX_APP_SHARD_COUNT: ${{ matrix.subshard_count }}",
     "node scripts/ci/native-test-artifact.mjs run",
     "name: windows-app-tests",
   ]) {
@@ -130,8 +132,7 @@ export function validateWindowsIntegrationTests(contents) {
 export function validateLinuxNativeTests(contents) {
   const producer = workflowJob(contents, "linux-app-test-build");
   const consumer = workflowJob(contents, "prodex-app-lib");
-  const telemetry = workflowJob(contents, "ci-duration-telemetry");
-  if (!producer || !consumer || !telemetry) return ["CI requires the Linux native bundle producer and consumers"];
+  if (!producer || !consumer) return ["CI requires the Linux native bundle producer and consumers"];
   const violations = [];
   for (const [job, markers] of [
     [producer, ["needs: [changes, mojo-runtime-linux-archive]", "runs-on: ubuntu-latest",
@@ -141,7 +142,6 @@ export function validateLinuxNativeTests(contents) {
       "fromJSON(needs.changes.outputs.prodex_app_matrix)", "PRODEX_APP_FILTERS:", "PRODEX_APP_SKIP_FILTERS:",
       "TEST_MANIFEST_SHA256: ${{ needs.linux-app-test-build.outputs.manifest_sha256 }}",
       "name: linux-app-tests", "native-test-artifact.mjs run"]],
-    [telemetry, ["- linux-app-test-build", "- prodex-app-lib"]],
   ]) {
     for (const marker of markers) {
       if (!job.includes(marker)) violations.push(`CI Linux native-test binding missing ${marker}`);
@@ -285,7 +285,6 @@ export function validateSonarConfiguration(workflowContents, properties) {
 
 export function validateKicsConfiguration(workflowContents) {
   const job = workflowJob(workflowContents, "kics");
-  const telemetry = workflowJob(workflowContents, "ci-duration-telemetry");
   if (!job) return [".github/workflows/ci.yml: missing kics job"];
   const violations = [];
   for (const marker of [
@@ -339,9 +338,6 @@ export function validateKicsConfiguration(workflowContents) {
   const queryExclusions = [...job.matchAll(/--exclude-queries\s+([^\s]+)/gu)].map((match) => match[1]);
   if (queryExclusions.length !== 1 || queryExclusions[0] !== KICS_NON_ACTIONABLE_QUERY_IDS) {
     violations.push(".github/workflows/ci.yml: kics query exclusions must remain the exact reviewed INFO-only set");
-  }
-  if (!telemetry?.includes("- kics")) {
-    violations.push(".github/workflows/ci.yml: CI telemetry must wait for kics");
   }
   return violations;
 }
@@ -479,6 +475,28 @@ export function validateReleaseContainerPublication(contents, targetWorkflow = "
   const violations = [];
   violations.push(...validateReleaseCiPolling(contents), ...validateReleaseSbom(validation));
   for (const marker of [
+    "if: ${{ always() && !cancelled() }}", "      - release-preflight", "      - build",
+    "      - validate-release-assets", "      - antivirus-health",
+    "- name: Require all artifact gates to succeed", "RESULTS: ${{ toJSON(needs) }}",
+    'keys == ["antivirus-health", "build", "release-preflight", "validate-release-assets"] and all(.[]; .result == "success")',
+    "- name: Record release verification verdict",
+  ]) {
+    if (!verify.includes(marker)) violations.push(`release verdict missing ${marker}`);
+  }
+  const prerequisite = workflowStep(verify, "Require all artifact gates to succeed");
+  const ciWait = workflowStep(verify, "Wait for CI success");
+  for (const step of [prerequisite, ciWait]) {
+    if (!step || /\n\s+(?:if|continue-on-error):/u.test(step)) {
+      violations.push("release verdict prerequisite and CI checks must execute and fail closed");
+    }
+  }
+  if (verify.indexOf(prerequisite) >= verify.indexOf("      - name: Check out") ||
+      verify.indexOf(ciWait) >= verify.indexOf("      - name: Record release verification verdict") ||
+      /continue-on-error:/.test(verify.split("    steps:")[0])) {
+    violations.push("release verdict ordering or failure policy is unsafe");
+  }
+
+  for (const marker of [
     "needs: release-preflight",
     "uses: ./.github/workflows/release-target.yml",
     "target_sha: ${{ needs.release-preflight.outputs.target_sha }}",
@@ -521,7 +539,7 @@ export function validateReleaseContainerPublication(contents, targetWorkflow = "
       /continue-on-error: true/u.test(build.split("    steps:")[0])) {
     violations.push("release-target.yml: downloaded smoke must gate the successful owning binary build");
   }
-  for (const name of ["validate-release-assets", "verify-release"]) {
+  for (const name of ["validate-release-assets", "verify-ci"]) {
     if (!workflowJob(contents, name)?.includes("      - build\n")) {
       violations.push(`standalone-release.yml: ${name} must include all target builds and native smoke`);
     }
@@ -918,6 +936,8 @@ function selfTest() {
           PRODEX_APP_FILTERS: filters
           PRODEX_APP_SKIP_FILTERS: skips
           TEST_MANIFEST_SHA256: \${{ needs.windows-app-test-build.outputs.manifest_sha256 }}
+          PRODEX_APP_SHARD_INDEX: \${{ matrix.subshard_index }}
+          PRODEX_APP_SHARD_COUNT: \${{ matrix.subshard_count }}
         run: node scripts/ci/native-test-artifact.mjs run bundle
   windows-integration-build:
     needs: [changes, mojo-runtime-platform-archives]
@@ -1021,9 +1041,6 @@ function selfTest() {
         with:
           name: kics-iac-results
           if-no-files-found: error
-  ci-duration-telemetry:
-    needs:
-      - kics
 `;
   const sonarProperties = `sonar.sources=src,crates
 sonar.inclusions=src/**/*.rs,crates/**/*.rs

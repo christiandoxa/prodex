@@ -20,7 +20,7 @@ function workflowJob(source, name) {
 
 test("Mojo parity fans out without dropping production tests", () => {
   const lint = workflowJob(ci, "real-mojo", "real-mojo-parity");
-  const parity = workflowJob(ci, "real-mojo-parity", "ci-duration-telemetry");
+  const parity = workflowJob(ci, "real-mojo-parity");
   const archive = workflowJob(ci, "mojo-runtime-linux-archive", "mojo-runtime-platform-archives");
   assert.match(lint, /needs: \[changes, mojo-runtime-linux-archive\]/);
   assert.match(parity, /needs: \[changes, mojo-runtime-linux-archive\]/);
@@ -55,9 +55,6 @@ test("Mojo parity fans out without dropping production tests", () => {
   assert.match(parity, /PRODEX_MOJO_REQUIRED: "1"/);
   assert.match(parity, /PRODEX_MOJO_ARCHIVE:/);
   assert.match(parity, /fail-fast: false/);
-  const telemetry = ci.slice(ci.indexOf("\n  ci-duration-telemetry:\n"));
-  assert.match(telemetry, /- real-mojo-parity\n/);
-  assert.match(telemetry, /- real-mojo\n/);
 });
 
 test("release archives overlap CI verification but binary publication remains gated", () => {

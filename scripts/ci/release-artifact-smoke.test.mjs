@@ -88,7 +88,7 @@ test("release manifest, checksums, and SBOM accept Prodex assets only", () => {
 
 test("release stages immutable binary artifacts and waits before public version mutations", () => {
   const workflow = readFileSync(".github/workflows/standalone-release.yml", "utf8");
-  const publish = workflow.match(/\n  publish-github-release:\n([\s\S]*?)\n  publish-duration-telemetry:/u)?.[1];
+  const publish = workflow.match(/\n  publish-github-release:\n([\s\S]*)$/u)?.[1];
 
   assert.ok(publish, "release publication job missing");
   assert.match(workflow, /publish_at:/u);
