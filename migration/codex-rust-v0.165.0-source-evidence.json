@@ -1,0 +1,397 @@
+{
+  "release": "rust-v0.165.0",
+  "source_commit": "360319d8dee62d87e2d59fc0c21805d79519cfed",
+  "tag_object": "e374836b2728d9b7aa981c2902649e640a2edaa8",
+  "previous_source_commit": "6aaac694803004a63c6f393d153c96d22521a6b9",
+  "source_archive_sha256": "5537caa961b4222919acad358be5c7bdfb95f1e4c04c1f2314118e5e67401dd0",
+  "comparison": {
+    "added": 80,
+    "removed": 11,
+    "modified": 594,
+    "total": 685
+  },
+  "critical_files": 88,
+  "semantic_groups": 113,
+  "required_marker_occurrences": 1496,
+  "missing_markers": 0,
+  "native_assets": [
+    {
+      "name": "codex-app-server-x86_64-unknown-linux-musl.zst",
+      "sha256": "63a526e53a525e3753be5a31f2c9c6092abb82d449af6fd8aea2a9298f3b8005",
+      "binary": "codex-app-server",
+      "binary_sha256": "5e874c18162cf492481cef6e5dff5e88c91d3dc70bd0558738116b8723e1fb7c",
+      "bytes": 239920024
+    },
+    {
+      "name": "codex-x86_64-unknown-linux-musl.zst",
+      "sha256": "6a1dd543fb806e2e38046dde60278aeb1d20704b7b05b27b2723029ba341b7e4",
+      "binary": "codex",
+      "binary_sha256": "c06a67fd8ac76508dc78bd99ce20c9f317b8d568beda59485f3f4134df9962d5",
+      "bytes": 309732776
+    }
+  ],
+  "native_checks": [
+    "version/help for CLI and standalone app-server",
+    "isolated initialize/initialized/thread/list with no model turns",
+    "experimental JSON schemas contain attachToSource and attachedToThreadId",
+    "isolated startup config inspection"
+  ],
+  "limits": [
+    "No live model inference, account login, enterprise MCP provisioning, Google Cloud authentication or runtime memory migration",
+    "Native Linux x86-64 probes only; other platform Prodex qualification belongs to release CI"
+  ],
+  "critical_file_sha256": [
+    {
+      "path": "codex-rs/core/src/client.rs",
+      "sha256": "a8f9374064bd24cc421c3266f39f105aa8d287e350c72541f9dcde544665fae2"
+    },
+    {
+      "path": "codex-rs/core/src/compact_remote_v2.rs",
+      "sha256": "cb81ae523a2d3674ffe0acd12a492431d773e1148a420bbd99850b9081277673"
+    },
+    {
+      "path": "codex-rs/core/src/compact_remote_v2_attempt.rs",
+      "sha256": "e676bf438a7db18a168a837b3efa2e98b1c72fda2d629fe4a912cf833d921db3"
+    },
+    {
+      "path": "codex-rs/core/src/turn_metadata.rs",
+      "sha256": "2fac79a2d70ce18ad7bc0aa77f2259da8fbe85334a68d2f0e70188cd2f6bf28c"
+    },
+    {
+      "path": "codex-rs/core/src/responses_metadata.rs",
+      "sha256": "156e27f3eec1d34da04dd90b077b349addd5e62dc76359177b1cc74f1de36563"
+    },
+    {
+      "path": "codex-rs/models-manager/models.json",
+      "sha256": "1384625c0b6b3e67d3c60da29becea2b017f2c283fc1e2d05b8edafb4698eb10"
+    },
+    {
+      "path": "codex-rs/models-manager/src/cache.rs",
+      "sha256": "d17180f168b0c7f1cb202732d80a7da9d616125997919e9fe25f93c85d640840"
+    },
+    {
+      "path": "codex-rs/model-provider/src/auth.rs",
+      "sha256": "fcb210f36cc01f88b511305952aa36820bfa15d0afd0186fd49ac72e98c20153"
+    },
+    {
+      "path": "codex-rs/model-provider/src/models_identity.rs",
+      "sha256": "15a868295fe77020ee306baf5e820edf1573d1044483c8af7d72243c6a9501f8"
+    },
+    {
+      "path": "codex-rs/codex-mcp/src/tools.rs",
+      "sha256": "28d44b33ae3189a08521b0b9a4208f36952a844698db16dee69070df39719f38"
+    },
+    {
+      "path": "codex-rs/codex-mcp/src/connection_manager_tests.rs",
+      "sha256": "2a366b4c644a9867a19bbf2c831fe5634c938622a4005b8fc294b20de14d92c6"
+    },
+    {
+      "path": "codex-rs/model-provider-info/src/lib.rs",
+      "sha256": "82a6f8e34e9fbe1e31b9826e1d78505228c196884de87287a0c206098db5aec1"
+    },
+    {
+      "path": "codex-rs/model-provider/src/amazon_bedrock/catalog.rs",
+      "sha256": "e20394fea91002e8026350102679fb0fe3fa341f4034e1f4bccef0564e23dcf6"
+    },
+    {
+      "path": "codex-rs/model-provider/src/provider.rs",
+      "sha256": "7cb40f1019e0f84f70c273257a33030336359f3af6460d4b476f641e41b219fa"
+    },
+    {
+      "path": "codex-rs/core/src/realtime_conversation.rs",
+      "sha256": "b2548eee613203508c4ee1b39f758d1a9d7e3c531a29f346be7a14562d6d24ab"
+    },
+    {
+      "path": "codex-rs/codex-api/src/endpoint/realtime_call.rs",
+      "sha256": "c9a987c05dadabb620dfaea38e8b739735efaf3f931daeec7c59d69f56788252"
+    },
+    {
+      "path": "codex-rs/codex-api/src/safety_buffering.rs",
+      "sha256": "c30b4ea92060a3f6907528457cf8417dfa4f3811f6ae8efb6c89d84c8699bbf6"
+    },
+    {
+      "path": "codex-rs/codex-api/src/sse/responses.rs",
+      "sha256": "2516c7aee4ee4df70a86f642863b578566e59c1c2ff0b119c527ea95dda2373c"
+    },
+    {
+      "path": "codex-rs/codex-api/src/sse/responses_error.rs",
+      "sha256": "926abe67333a337f0fb788105827b890d82df89dcf9fe9015f3607c598573bbb"
+    },
+    {
+      "path": "codex-rs/codex-api/src/endpoint/responses.rs",
+      "sha256": "4f2fff3da4ca3ca9fcfa40ada8e98a0229af296094e03febb4d823f32ef932c8"
+    },
+    {
+      "path": "codex-rs/codex-api/src/endpoint/responses_websocket.rs",
+      "sha256": "4749421fca8c927a4a2fcf66510db3738e1da01ab1a1f902d80e81a662dd30af"
+    },
+    {
+      "path": "codex-rs/protocol/src/response_usage.rs",
+      "sha256": "d3f05c8a7845b965f1a2910080d5a9c00c7e05dd2f7be73146829bab82053dfb"
+    },
+    {
+      "path": "codex-rs/app-server-protocol/schema/json/v2/RawResponseCompletedNotification.json",
+      "sha256": "aba140e87952c900f96e0308a8849d3e313d985de1f1aa2b77f193884a76357c"
+    },
+    {
+      "path": "codex-rs/core/src/config/mod.rs",
+      "sha256": "e7bcb5c92c73308d7170da9d0c811fc1082973b9b074e52687dad5c3d38f77cc"
+    },
+    {
+      "path": "codex-rs/features/src/lib.rs",
+      "sha256": "da0ce349bfd99953e6f3e262d7883b579728beb553b1e01f95478a6b18ec250a"
+    },
+    {
+      "path": "codex-rs/http-client/src/outbound_proxy.rs",
+      "sha256": "b1409dc35afee9b92e2f7dc971fdd3fae0f610302c99f97a0428f0cf7c2e6088"
+    },
+    {
+      "path": "codex-rs/http-client/src/outbound_proxy/macos.rs",
+      "sha256": "b8d4c57317342aa1f134be3f72f6d035d478d29affd71781645ab9377c781db5"
+    },
+    {
+      "path": "codex-rs/http-client/src/outbound_proxy/windows.rs",
+      "sha256": "3a3cf365c0a22fb14b35ae620865349a204b79dd8c0aaf20fb01e4e7284f7136"
+    },
+    {
+      "path": "codex-rs/core-plugins/src/manifest.rs",
+      "sha256": "cb6cc5e8e2004d1533141a3f11f3460a1aa8c2e0295c9583ae9726c6a75b2802"
+    },
+    {
+      "path": "codex-rs/plugin/src/manifest.rs",
+      "sha256": "c65095113414f8f2a261ebf57faada52c8cdfe24a07baa46877afc914a81873e"
+    },
+    {
+      "path": "codex-rs/ext/web-search/src/extension.rs",
+      "sha256": "6af2bb8e013fa59faa056e862b0a1891c6658f4b8f7c3cd63dcf561f651e29f7"
+    },
+    {
+      "path": "codex-rs/ext/web-search/src/tool.rs",
+      "sha256": "9a10c0e2b6a3a065a3ce2c5b6aafa52dfee3aa5b975408cf9f5aa8d237233a50"
+    },
+    {
+      "path": "codex-rs/codex-api/src/endpoint/search.rs",
+      "sha256": "28c31b17215094c4651bf2dd2ae5c26c9dd2186db77c78ed6f318562d1c8af21"
+    },
+    {
+      "path": "codex-rs/tools/src/json_schema.rs",
+      "sha256": "c4597905597646de973d30ebb6f3164f663d09b4692201be957a18d6d6bb11ef"
+    },
+    {
+      "path": "codex-rs/tools/src/json_schema/compaction.rs",
+      "sha256": "1eb34677c6adf9eece7d1f89fcba6015af3cf3fd2b5315511f6aa2b284f91aa5"
+    },
+    {
+      "path": "codex-rs/exec/src/cli.rs",
+      "sha256": "66643e8b3d5964b70cb8f231fb309312376272fb3ea87bcb6849f44cf112f8f6"
+    },
+    {
+      "path": "codex-rs/exec/src/lib.rs",
+      "sha256": "4229c67ec7a4d9aa21f26c500f1206660f7ccb3a6c047843a3fa7295938a0848"
+    },
+    {
+      "path": "codex-rs/protocol/src/protocol.rs",
+      "sha256": "7b896ec457c55d6d8edb959cc08cc7e903fbc73b643cbe98cccec66c2325b1e4"
+    },
+    {
+      "path": "codex-rs/app-server/README.md",
+      "sha256": "b4a92cfab25bd7b96a16b8f9503a8aeae71fad9bad786ee0662efb2cddd1aeb6"
+    },
+    {
+      "path": "codex-rs/app-server-protocol/src/export.rs",
+      "sha256": "ab24806b1e490f0301965abf956bff480e11feeb8490a6ab98a2e319ffca876c"
+    },
+    {
+      "path": "codex-rs/app-server-protocol/src/rpc.rs",
+      "sha256": "78c516097c55b665e375807be6dcdceba232805c9ae9fa48420b0a537f0df705"
+    },
+    {
+      "path": "codex-rs/app-server-protocol/src/protocol/common.rs",
+      "sha256": "b9fff3f4317b0e976e8ddd3e4bf0dcb40a1c09e19a8cc54e42144d468e7f08da"
+    },
+    {
+      "path": "codex-rs/app-server-protocol/src/protocol/v2/mcp.rs",
+      "sha256": "71ff45af71302857a5637dee47d8f24b85e8660e145ceb8012d39db432944b12"
+    },
+    {
+      "path": "codex-rs/app-server-protocol/src/protocol/v2/thread.rs",
+      "sha256": "3532f87c9e55c9e539ed3c48c74701a14f4b9e401564b5cbafe624941302755c"
+    },
+    {
+      "path": "codex-rs/app-server/src/message_processor.rs",
+      "sha256": "aadaf2f4a99db6a4844a2e44c97ed8ba2718dfab4e460609a1408558875b8a74"
+    },
+    {
+      "path": "codex-rs/app-server/src/request_processors/initialize_processor.rs",
+      "sha256": "4535560b07ab10d1538acd461560a55c1bdf0c9b4049e72775d6b770421f117f"
+    },
+    {
+      "path": "codex-rs/app-server/src/request_processors/thread_processor.rs",
+      "sha256": "37ff0875e2b6d3def2fc727fd065574bd243cea2aa836021ebb218ac83b898e7"
+    },
+    {
+      "path": "codex-rs/app-server/src/request_processors/turn_processor.rs",
+      "sha256": "829219be3231b5a4f8bfae26b95dba1d58fae2a93a9d32b0de2d2b22fb01931d"
+    },
+    {
+      "path": "codex-rs/app-server/src/request_processors/mcp_event_stream.rs",
+      "sha256": "289a72f7fba07bcf5e36830ac86625d97fee5c7dd28a81dc0a84fa3744c99e42"
+    },
+    {
+      "path": "codex-rs/app-server/src/request_processors/account_processor/workspace_routing.rs",
+      "sha256": "b0977748a430cadd0555d4b904712b7bd3bfec3613da3f136a5cad67e8122ee5"
+    },
+    {
+      "path": "codex-rs/app-server/src/request_serialization.rs",
+      "sha256": "b624a9bac63d16f786939f3e9d2c8916faf5d4bc499af7ed099b1e3803f4632a"
+    },
+    {
+      "path": "codex-rs/config/src/project_trust.rs",
+      "sha256": "ed577aa57d3281b5047ed51b42aa04da96800c6e1184dcde1b8b644bbae7a001"
+    },
+    {
+      "path": "codex-rs/utils/process/src/lib.rs",
+      "sha256": "0427f409c2514143bde2e69313f4672dac8343f79e2f2c4f350a6bf460e0111d"
+    },
+    {
+      "path": "codex-rs/core/src/spawn.rs",
+      "sha256": "8313a1626031540776734f363ed6e077b7ddf3d817f328b32392b92ab0684781"
+    },
+    {
+      "path": "codex-rs/tui/src/security_setup.rs",
+      "sha256": "78dfc5c6d075a8c1c045a8d8c133fa9a478a3fc1e1ce1f7afa07b60d4f5213c9"
+    },
+    {
+      "path": "codex-rs/models-manager/src/manager.rs",
+      "sha256": "ac17941b4b06416b4fa3c6347f1663d301601903814f1f23e9044212a16af29f"
+    },
+    {
+      "path": "codex-rs/tui/src/app_server_session/provider_selection.rs",
+      "sha256": "9c5d5cf425b13af1a692f514f43e5831c5787f05ca20ac437f74b5f31ecdc42e"
+    },
+    {
+      "path": "codex-rs/tui/src/projectless.rs",
+      "sha256": "4023f5591fc7a279c17e80073bec317705438ad4a16e0e812a399bd8bc1a1a1b"
+    },
+    {
+      "path": "codex-rs/tui/src/resume_permissions.rs",
+      "sha256": "d2ec53e9ed7891a906d1f4637ee2a02d746584a9658affb39b6f68c29673ca91"
+    },
+    {
+      "path": "codex-rs/core/src/session/environment.rs",
+      "sha256": "d1638642fed94a429e38fd5581701f590071e5f810f47ab77bbaefe8f8f7992e"
+    },
+    {
+      "path": "codex-rs/core/src/agent/control/spawn.rs",
+      "sha256": "ef28e41960381a4c789904d8dec9cd6a1f3cf1baf7772d444c4061f731badc23"
+    },
+    {
+      "path": "codex-rs/rmcp-client/src/stdio_server_launcher.rs",
+      "sha256": "9395a9aacb0b0e936abef7b9be76df10532d1872f51d85e4178326cbf411f653"
+    },
+    {
+      "path": "codex-rs/core/src/responses_retry.rs",
+      "sha256": "8136a44f54b593cd9257658b1798418567e1e26928dc0ad1b3edf748e2a181fd"
+    },
+    {
+      "path": "codex-rs/codex-api/src/common.rs",
+      "sha256": "3ab2c9406e2e9b465b7b23756991bf7893bd884be9af3cff8c222bb26a8df4a0"
+    },
+    {
+      "path": "codex-rs/core/src/cyber_access_program.rs",
+      "sha256": "2acaaed16b90d913c2d867d0a4da9a9732b6d9bdf86b2ec75dcb79e49e4a4a5c"
+    },
+    {
+      "path": "codex-rs/model-provider-info/src/capabilities.rs",
+      "sha256": "ca6207cd2adbc699a5a274fbf3d2c02899ffe56383a311649fc71ed55459d422"
+    },
+    {
+      "path": "codex-rs/model-provider/src/capabilities.rs",
+      "sha256": "ccfc10889eaa5617686772b0620540387f8365b943e793f5a02df2adc70c5ecb"
+    },
+    {
+      "path": "codex-rs/core/src/context/base_instructions.rs",
+      "sha256": "62a326271c0dc7f413c2ffc8e0d684b08fac6c3d4c6348f968344fcdc72bbf6c"
+    },
+    {
+      "path": "codex-rs/core/src/context/world_state/model.rs",
+      "sha256": "86018bb56c9591f09c000747548c2cc5ec34d934db47396429899dc365a1cf42"
+    },
+    {
+      "path": "codex-rs/core/src/context/world_state/top_level_tools.rs",
+      "sha256": "6c241cfe0904af7595737dd5677a445e6d85f0191c59569dd5533edc8acf29b2"
+    },
+    {
+      "path": "codex-rs/core/src/tools/spec_plan.rs",
+      "sha256": "83a7601984e2c5723c938588a704e68fd9f36ccdac607804517ec18de66155bd"
+    },
+    {
+      "path": "codex-rs/protocol/src/turn_input.rs",
+      "sha256": "93b69518afdfe5cae66eae6c6a36410f72a445c5734b0aba20a53a4f265712aa"
+    },
+    {
+      "path": "codex-rs/protocol/src/environment.rs",
+      "sha256": "3197db299f0eab5e4aabf63b1b0afdbb4754723d36004c2db050396cb4a16f4d"
+    },
+    {
+      "path": "codex-rs/rollout-trace/src/reducer/conversation/normalize.rs",
+      "sha256": "aef6f879ec9f0b172a8697c012e81426d081ee253dbbcde521fa878cc1452f64"
+    },
+    {
+      "path": "codex-rs/app-server-protocol/src/protocol/v2/turn.rs",
+      "sha256": "f002e06cb8c505d737dd208ad3deab6fb837bc963d8462d24e98c010c242e9e0"
+    },
+    {
+      "path": "codex-rs/app-server-protocol/src/protocol/v2/environment.rs",
+      "sha256": "6fdeff43677b50e3997306c3168d84aa9e0878939765c45c95be26e6c6bd9a7e"
+    },
+    {
+      "path": "codex-rs/app-server/src/request_processors/environment_processor.rs",
+      "sha256": "816d6706c5f3c1c21b973dd412ed86bd117ca616a80d8f06cafd450921debe75"
+    },
+    {
+      "path": "codex-rs/cli/src/config_override_args.rs",
+      "sha256": "e26d6455ef6e5069bcd700fd4caefa2e00bb1b02a94ac7cc2e349ea44b4ef95a"
+    },
+    {
+      "path": "codex-rs/core/src/compact.rs",
+      "sha256": "8fdc85c3ccfb66cc41855622cd3219c43d3d55930c7a0e2595f29caaa74f895d"
+    },
+    {
+      "path": "codex-rs/core/src/session/async_compaction.rs",
+      "sha256": "275a1ea41773da9644e9f03d41548fed92cf4ad8891a0b4fcd61675ff64ef909"
+    },
+    {
+      "path": "codex-rs/thread-store/src/local/read_thread.rs",
+      "sha256": "a20101d62bedb87d63640a8723d84034bdf7dce9387c1daeb2387b14781dc335"
+    },
+    {
+      "path": "codex-rs/app-server/src/request_processors/persisted_resume_settings.rs",
+      "sha256": "026c95a1ee73af9e5d692898a8901caabf262de3f7570a2f73a3cfe3864e12fb"
+    },
+    {
+      "path": "codex-rs/model-provider/src/gcp/mod.rs",
+      "sha256": "a5de818d8e3235d3202ffd160d75ed0ce80cff77cd4a1acbeb3dee29739fdfcb"
+    },
+    {
+      "path": "codex-rs/models-manager/src/originator.rs",
+      "sha256": "093688076094b3e4bc64859a4d63334e1bcf464233609a7badcfac58da158cf5"
+    },
+    {
+      "path": "codex-rs/model-provider/src/models_endpoint.rs",
+      "sha256": "4614ec0f84fb030ff04eda1e6a40b99159da37f88ef762166b8624ef3d6e844f"
+    },
+    {
+      "path": "codex-rs/codex-api/src/error.rs",
+      "sha256": "dbb3dde2968c4aa02d45e9529c17d1e6cfd1b80791f61448b7c6414d3f808c73"
+    },
+    {
+      "path": "codex-rs/protocol/src/error.rs",
+      "sha256": "73252b4f22850de45650ac7271aa36903c889ca81b4f1f3baa6d4c4918fd4382"
+    },
+    {
+      "path": "codex-rs/rmcp-client/src/tool_request.rs",
+      "sha256": "3f6c6db6f7f69927251f71a8d142bbd137ebee5daa3943776c677d0325cb2553"
+    }
+  ]
+}
