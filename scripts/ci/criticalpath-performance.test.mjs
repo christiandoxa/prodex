@@ -47,14 +47,16 @@ test("macOS native regressions run independently of the workspace suite without 
 
 test("Linux release artifact smoke starts after its own binary, not unrelated platforms", () => {
   const parent = readFileSync(".github/workflows/standalone-release.yml", "utf8");
-  const smoke = job(release, "artifact-smoke");
-  assert.match(smoke, /needs: build\n/);
-  assert.match(smoke, /if: \$\{\{ fromJSON\(inputs.platforms\)\[0\].target == 'x86_64-unknown-linux-gnu' \}\}/);
+  const build = job(release, "build");
+  const smoke = build.slice(build.indexOf("      - name: Download official Linux artifact\n"));
+  assert.ok(build.indexOf("Upload binary artifact") < build.indexOf("Download official Linux artifact"));
+  assert.doesNotMatch(release, /\n  artifact-smoke:/);
+  assert.match(smoke, /if: \$\{\{ matrix.target == 'x86_64-unknown-linux-gnu' \}\}/);
   assert.match(smoke, /name: x86_64-unknown-linux-gnu/);
   assert.match(smoke, /RELEASE_VERSION: \$\{\{ inputs.version \}\}/);
   assert.match(smoke, /release-artifact-smoke\.mjs/);
   assert.match(smoke, /npm-package-smoke\.mjs --binary-dir artifact/);
-  assert.match(smoke, /persist-credentials: false/);
+  assert.match(build, /persist-credentials: false/);
   assert.doesNotMatch(smoke, /contents: write|attestations: write|id-token: write|cargo (build|run)/);
   assert.doesNotMatch(parent, /\n  artifact-smoke:\n/);
   for (const name of ["prepare-release", "verify-release"]) {
@@ -70,11 +72,12 @@ test("trust gates reject detached Linux artifacts and skipped release smoke", ()
   }
   assert.deepEqual(validateReleaseContainerPublication(parent, release), []);
   assert.deepEqual(validateReleaseCodexExclusion(parent, release), []);
-  const smoke = job(release, "artifact-smoke");
-  for (const marker of ["needs: build", "node scripts/ci/release-artifact-smoke.mjs", "inputs.platforms)[0].target"]) {
+  const build = job(release, "build");
+  const smoke = build.slice(build.indexOf("      - name: Download official Linux artifact\n"));
+  for (const marker of ["path: artifact", "node scripts/ci/release-artifact-smoke.mjs", "matrix.target"]) {
     const damaged = release.replace(smoke, smoke.replace(marker, "removed"));
     assert.ok(validateReleaseContainerPublication(parent, damaged).length > 0, marker);
   }
-  assert.ok(validateReleaseContainerPublication(parent, release.replace(smoke, smoke + "    continue-on-error: true\n")).length > 0);
+  assert.ok(validateReleaseContainerPublication(parent, release.replace("      - name: Run official artifact smoke\n", "      - name: Run official artifact smoke\n        continue-on-error: true\n")).length > 0);
   assert.ok(validateReleaseCodexExclusion(parent, release.replace("npm-package-smoke.mjs --binary-dir artifact", "removed")).length > 0);
 });

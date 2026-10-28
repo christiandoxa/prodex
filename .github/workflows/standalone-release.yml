@@ -181,7 +181,9 @@ jobs:
 
   verify-ci:
     name: Verify CI is green
-    needs: release-preflight
+    # Do not hold an idle runner while production targets are compiling.
+    # The exact-SHA gate still precedes every privileged publication job.
+    needs: [release-preflight, build]
     runs-on: ubuntu-latest
     timeout-minutes: 90
     permissions:
@@ -610,6 +612,7 @@ jobs:
           path: release-assets/
           if-no-files-found: error
           retention-days: 7
+          compression-level: 1
 
   attest-binaries:
     name: Attest verified release assets

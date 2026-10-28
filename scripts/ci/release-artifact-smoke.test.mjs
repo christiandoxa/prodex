@@ -29,13 +29,14 @@ test("standalone release runs downloaded artifact smoke and SBOM independently b
   const source = readFileSync(script, "utf8");
   const workflow = readFileSync(".github/workflows/standalone-release.yml", "utf8");
   const target = readFileSync(".github/workflows/release-target.yml", "utf8");
-  const smoke = target.match(/\n  artifact-smoke:\n([\s\S]*)/u)?.[1];
+  const smoke = target.match(/      - name: Download official Linux artifact\n([\s\S]*)/u)?.[1];
   const prepare = workflow.match(/\n  prepare-release:\n([\s\S]*?)\n  validate-release-assets:/u)?.[1];
 
-  assert.ok(smoke, "artifact smoke job missing");
+  assert.ok(smoke, "downloaded artifact smoke steps missing");
   assert.ok(prepare, "release preparation job missing");
-  assert.match(smoke, /needs: build/);
-  assert.match(smoke, /fromJSON\(inputs.platforms\)\[0\].target/);
+  assert.doesNotMatch(target, /\n  artifact-smoke:/);
+  assert.ok(target.indexOf("Upload binary artifact") < target.indexOf("Download official Linux artifact"));
+  assert.match(smoke, /matrix.target/);
   assert.match(smoke, /name: x86_64-unknown-linux-gnu/);
   assert.match(smoke, /binary="artifact\/prodex"/u);
   assert.match(smoke, /node scripts\/ci\/release-artifact-smoke\.mjs \\\n\s+--binary/u);

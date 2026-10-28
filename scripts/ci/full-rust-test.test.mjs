@@ -286,10 +286,11 @@ test("release validates the Kiro pin before build fan-out", () => {
 
 test("release builds Prodex only and leaves Codex external", () => {
   const workflow = readFileSync(".github/workflows/release-target.yml", "utf8");
-  const build = workflow.match(/\n  build:\n([\s\S]*?)\n  artifact-smoke:/)?.[1];
+  const build = workflow.match(/\n  build:\n([\s\S]*)/)?.[1];
 
   assert.ok(build, "release build job missing");
-  assert.doesNotMatch(build, /Codex|codex/);
+  assert.doesNotMatch(build, /cargo build[^\n]*codex|release-assets\/codex|Build patched Codex/);
+  assert.match(build, /codex-purity-guard.mjs/);
   assert.match(build, /cross build --locked/);
   assert.match(build, /cargo build --locked/);
   assert.match(build, /Prepare binary artifact/);

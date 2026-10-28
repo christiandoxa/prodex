@@ -394,6 +394,7 @@ jobs:
           if-no-files-found: error
           overwrite: true
           retention-days: 7
+          compression-level: 1
 
   prodex-app-lib:
     name: prodex-app library tests (${{ matrix.label }})
@@ -753,6 +754,7 @@ jobs:
           if-no-files-found: error
           overwrite: true
           retention-days: 7
+          compression-level: 1
 
   windows-prodex-app:
     name: Windows prodex-app tests (${{ matrix.label }})
