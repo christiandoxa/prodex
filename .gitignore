@@ -21,3 +21,7 @@ Thumbs.db
 /.token-savior-cache.json
 /deploy/gateway.env
 /deploy/secrets/
+
+# Python test/CI helper bytecode is reproducible local output.
+__pycache__/
+*.py[cod]
