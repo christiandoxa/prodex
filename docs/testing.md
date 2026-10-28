@@ -796,3 +796,14 @@ Keeping the client alive while synchronously joining the server could consume
 the fixture's 120-second Windows receive timeout. The test still rejects a
 missing server shutdown, a read timeout, unexpected data, or incomplete teardown;
 production timeout/recovery policy is unchanged.
+
+## Supported macOS runner host
+
+Native macOS CI and release builds use the pinned `macos-15` ARM64 host. GitHub
+is reducing the `macos-14` pool before its November 2, 2026 retirement; queued
+work on the retiring image is not a successful platform check. Both Apple
+Silicon and Intel/Rosetta release targets, compiler versions, CPU targets,
+production build profiles, and native smoke checks remain mandatory. The host
+migration explicitly preserves macOS 10.12 (Intel) and 11.0 (Apple Silicon)
+deployment floors. Final Mach-O load commands are checked before scanning and
+publication; a raised floor, wrong CPU, or missing deployment command fails closed.

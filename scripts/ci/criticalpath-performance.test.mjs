@@ -30,7 +30,7 @@ test("macOS native regressions run independently of the workspace suite without 
   const native = job(ci, "macos-native-regressions");
   for (const part of [workspace, native]) {
     assert.match(part, /needs: \[changes, mojo-runtime-platform-archives\]/);
-    assert.match(part, /runs-on: macos-14/);
+    assert.match(part, /runs-on: macos-15/);
     assert.match(part, /PRODEX_MOJO_ARCHIVE:/);
     assert.match(part, /shared-key: macos-workspace/);
   }

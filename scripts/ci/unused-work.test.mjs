@@ -17,7 +17,7 @@ test("every CI platform archive has a native consumer; Intel macOS stays in rele
   const targets = [...job(ci, "mojo-runtime-platform-archives").matchAll(/- target: ([\w-]+)/gu)].map(m => m[1]);
   assert.deepEqual(targets, ["x86_64-pc-windows-msvc", "aarch64-apple-darwin"]);
   for (const target of targets) assert.match(ci, new RegExp(`name: mojo-runtime-archive-${target}\\n`));
-  assert.match(job(ci, "macos-workspace"), /runs-on: macos-14/);
+  assert.match(job(ci, "macos-workspace"), /runs-on: macos-15/);
   assert.match(job(ci, "macos-workspace"), /name: mojo-runtime-archive-aarch64-apple-darwin/);
   assert.match(job(ci, "macos-native-regressions"), /name: mojo-runtime-archive-aarch64-apple-darwin/);
   const release = readFileSync(".github/workflows/standalone-release.yml", "utf8");
@@ -65,4 +65,20 @@ test("fast app and runtime launch lanes do not execute nested launch cases twice
     assert.ok(before > 0);
     assert.equal(after, 1, name);
   }
+});
+
+
+test("native macOS CI and both release targets avoid the retiring runner pool", () => {
+  for (const name of ["macos-workspace", "macos-native-regressions"]) {
+    assert.match(job(ci, name), /runs-on: macos-15/);
+    assert.match(job(ci, name), /aarch64-apple-darwin/);
+  }
+  const release = readFileSync(".github/workflows/standalone-release.yml", "utf8");
+  for (const target of ["x86_64-apple-darwin", "aarch64-apple-darwin"]) {
+    const row = release.split(`- target: ${target}\n`)[1].split("- target:")[0];
+    assert.match(row, /runs-on: macos-15/);
+    assert.match(row, /can-native-smoke: true/);
+    assert.match(row, /can-mojo-runtime-smoke: true/);
+  }
+  assert.doesNotMatch(ci + release, /runs-on: macos-14/);
 });

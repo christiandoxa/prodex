@@ -370,7 +370,7 @@ jobs:
             mojo-target-cpu: generic
             mojo-features: mojo-core
           - target: x86_64-apple-darwin
-            runs-on: macos-14
+            runs-on: macos-15
             artifact-name: x86_64-apple-darwin
             binary-name: prodex
             use-cross: false
@@ -380,7 +380,7 @@ jobs:
             mojo-target-cpu: x86-64
             mojo-features: mojo-core
           - target: aarch64-apple-darwin
-            runs-on: macos-14
+            runs-on: macos-15
             artifact-name: aarch64-apple-darwin
             binary-name: prodex
             use-cross: false
@@ -552,6 +552,13 @@ jobs:
           set -euo pipefail
           docker image inspect "${CLAMAV_IMAGE%@*}" --format '{{range .RepoDigests}}{{println .}}{{end}}' \
             | grep -Fx "ghcr.io/hugoalh/scan-virus-ghaction@${CLAMAV_IMAGE##*@}"
+
+      - name: Verify unchanged macOS minimum deployment targets
+        shell: bash
+        run: |
+          set -euo pipefail
+          node scripts/ci/macos-deployment-guard.mjs x86_64-apple-darwin release-assets/prodex-x86_64-apple-darwin
+          node scripts/ci/macos-deployment-guard.mjs aarch64-apple-darwin release-assets/prodex-aarch64-apple-darwin
 
       - name: Scan release assets for malware
         id: release_malware_scan
