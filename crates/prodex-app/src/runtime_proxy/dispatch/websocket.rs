@@ -36,7 +36,14 @@ pub(crate) fn proxy_runtime_responses_websocket_request(
     request_id: u64,
     request: tiny_http::Request,
     shared: &RuntimeRotationProxyShared,
+    sessions: Option<&RuntimeWebsocketSessionPool>,
 ) {
+    // The original ingress deadline still applies to connection establishment.
+    // Parked response messages acquire their own route/global/profile permits.
+    if shared.check_precommit_deadline().is_err() {
+        reject_runtime_proxy_recovery_timeout(request, shared, "websocket_handshake");
+        return;
+    }
     if !is_runtime_responses_path(request.url())
         && !is_runtime_realtime_websocket_path(request.url())
     {
@@ -111,6 +118,24 @@ pub(crate) fn proxy_runtime_responses_websocket_request(
             return;
         }
     };
+    let control = request.connection_control();
+    if sessions.is_some() && control.is_none() {
+        reject_runtime_proxy_overloaded_request(
+            request,
+            shared,
+            "websocket_transport_control_unavailable",
+        );
+        return;
+    }
+    if sessions.is_some()
+        && let Some(control) = &control
+        && control
+            .set_write_timeout(Some(Duration::from_secs(1)))
+            .is_err()
+    {
+        let _ = control.shutdown();
+        return;
+    }
     let upgraded = request.upgrade("websocket", response);
     let mut local_socket = WsSocket::from_raw_socket(upgraded, WsRole::Server, None);
     runtime_proxy_log(
@@ -146,6 +171,10 @@ pub(crate) fn proxy_runtime_responses_websocket_request(
     let compat_surface =
         runtime_detect_request_compatibility_surface(&handshake_request, "handshake", "websocket");
     runtime_proxy_log_request_compatibility(shared, request_id, &compat_surface);
+    if let (Some(sessions), Some(control)) = (sessions, control) {
+        sessions.park_new(request_id, local_socket, handshake_request, control, shared);
+        return;
+    }
     if let Err(err) = run_runtime_proxy_websocket_session(
         request_id,
         &mut local_socket,

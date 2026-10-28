@@ -213,7 +213,7 @@ fn expired_recovery_watchdog_does_not_enqueue_after_capacity_returns_04381() {
 
 #[test]
 fn queued_request_keeps_ingress_deadline_and_returns_504_before_upstream_04381() {
-    use crate::runtime_proxy::{RuntimeProxyQueuedRequest, enqueue_runtime_proxy_request,
+    use crate::runtime_proxy::{RuntimeProxyRequestQueue, enqueue_runtime_proxy_request,
         handle_runtime_rotation_proxy_request};
     use std::io::{Read, Write};
     let backend = RuntimeProxyBackend::start_http_buffered_json();
@@ -227,12 +227,12 @@ fn queued_request_keeps_ingress_deadline_and_returns_504_before_upstream_04381()
     client.set_read_timeout(Some(Duration::from_secs(2))).unwrap();
     client.write_all(b"POST /backend-api/codex/responses HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\nContent-Length: 2\r\n\r\n{}").unwrap();
     let request = server.recv_timeout(Duration::from_secs(2)).unwrap().unwrap();
-    let (sender, receiver) = std::sync::mpsc::sync_channel::<RuntimeProxyQueuedRequest>(1);
+    let sender = RuntimeProxyRequestQueue::new(1);
     let mut scope = harness.shared().clone();
     let deadline = Instant::now() + Duration::from_millis(80);
     scope.precommit_deadline = Some(deadline);
     assert!(enqueue_runtime_proxy_request(&sender, request, &scope).is_ok());
-    let queued = receiver.recv_timeout(Duration::from_secs(1)).unwrap();
+    let queued = sender.try_recv().unwrap();
     assert_eq!(queued.deadline, Some(deadline));
     thread::sleep(deadline.saturating_duration_since(Instant::now()) + Duration::from_millis(20));
     let mut worker_scope = harness.shared().clone();

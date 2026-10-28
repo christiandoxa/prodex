@@ -10,6 +10,8 @@ use super::{
 #[derive(Default)]
 pub(in crate::runtime_proxy) struct RuntimeWebsocketSessionState {
     upstream_socket: Option<RuntimeUpstreamWebSocket>,
+    pub(in crate::runtime_proxy) local_control: Option<tiny_http::ConnectionControl>,
+    pub(in crate::runtime_proxy) pending_local_frame: Option<tungstenite::Message>,
     realtime_duplex: bool,
     pub(in crate::runtime_proxy) profile_name: Option<String>,
     pub(in crate::runtime_proxy) turn_state: Option<String>,
@@ -43,6 +45,10 @@ impl RuntimeWebsocketSessionState {
 
     pub(in crate::runtime_proxy) fn take_socket(&mut self) -> Option<RuntimeUpstreamWebSocket> {
         self.upstream_socket.take()
+    }
+
+    pub(in crate::runtime_proxy) fn restore_socket(&mut self, socket: RuntimeUpstreamWebSocket) {
+        self.upstream_socket = Some(socket);
     }
 
     pub(in crate::runtime_proxy) fn has_socket(&self) -> bool {
