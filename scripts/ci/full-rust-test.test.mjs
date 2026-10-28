@@ -221,7 +221,6 @@ test("direct targeted workflow lanes reject zero-test matches", () => {
     ["windows-workspace", "windows-prodex-app", "Run Windows runtime member tests"],
     ["macos-native-regressions", "process-guard", "Run native macOS broker recovery tests"],
     ["macos-native-regressions", "process-guard", "Run native macOS Kiro selector and resume tests"],
-    ["profile-commands-internal", "main-internal-core", "Run profile command internal tests"],
   ]) {
     const job = workflow.match(new RegExp(`\\n  ${jobName}:\\n([\\s\\S]*?)\\n  ${nextJob}:`))?.[1];
     assert.ok(job, `${jobName} job missing`);
@@ -230,6 +229,11 @@ test("direct targeted workflow lanes reject zero-test matches", () => {
     const step = job.slice(stepOffset);
     assert.match(step, /grep -Fq 'running 0 tests'/, `${jobName}/${stepName} lacks zero-test guard`);
   }
+
+  const profile = workflow.match(/\n  profile-commands-internal:\n([\s\S]*?)\n  main-internal-core:/)?.[1];
+  assert.match(profile, /native-test-artifact\.mjs run/);
+  assert.match(profile, /PRODEX_APP_FILTERS: "profile_commands_internal_tests::"/);
+  assert.match(readFileSync("scripts/ci/native-test-artifact.mjs", "utf8"), /noTests/);
 
   const releaseBuild = releaseWorkflow.match(/\n  build:\n([\s\S]*)/)?.[1];
   assert.ok(releaseBuild, "standalone release build job missing");
@@ -340,7 +344,7 @@ test("runtime proxy matrix is generated before fan-out without a runner barrier"
   assert.ok(runtimeProxy, "main-internal-runtime-proxy job missing");
   assert.match(changes, /runtime_proxy_matrix: \$\{\{ steps\.runtime-matrix\.outputs\.matrix \}\}/);
   assert.match(changes, /node scripts\/ci\/runtime-proxy-ci-matrix\.mjs --github-matrix/);
-  assert.match(runtimeProxy, /needs: \[changes, mojo-runtime-linux-archive\]/);
+  assert.match(runtimeProxy, /needs: \[changes, linux-app-test-build\]/);
   assert.match(runtimeProxy, /fromJSON\(needs\.changes\.outputs\.runtime_proxy_matrix\)/);
   assert.doesNotMatch(workflow, /\n  runtime-proxy-shard-matrix:/);
 });
@@ -461,9 +465,11 @@ test("large CI matrices use one cache writer and retain failure diagnostics", ()
   const stress = workflow.match(/\n  runtime-stress:\n([\s\S]*?)\n  ci-duration-telemetry:/)?.[1];
   const processGuard = workflow.match(/\n  process-guard:\n([\s\S]*?)\n  supply-chain:/)?.[1];
 
-  assert.equal(core?.match(/save_cache: true/g)?.length, 1);
-  assert.match(core, /save-if: \$\{\{ matrix\.save_cache \}\}/);
-  assert.match(runtime, /save-if: \$\{\{ matrix\.save_cache \}\}/);
+  for (const job of [core, runtime]) {
+    assert.match(job, /needs: \[changes, linux-app-test-build\]/);
+    assert.doesNotMatch(job, /rust-cache@|sccache-action@/);
+    assert.match(job, /TEST_MANIFEST_SHA256:/);
+  }
   assert.match(stress, /fromJSON\(needs\.changes\.outputs\.runtime_stress_matrix\)/);
   assert.match(stress, /save-if: \$\{\{ matrix\.save_cache \}\}/);
   assert.match(processGuard, /save-if: \$\{\{ matrix\.lane == 'static' \}\}/);

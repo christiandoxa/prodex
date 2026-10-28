@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { spawn } from "node:child_process";
+import { environmentBundle } from "./native-test-artifact.mjs";
 import {
   createWriteStream,
   mkdirSync,
@@ -203,17 +204,15 @@ async function runShard(args) {
   rmSync(artifactDir, { recursive: true, force: true });
   mkdirSync(logDir, { recursive: true });
 
+  const bundle = environmentBundle();
+  const program = bundle?.executable ?? "cargo";
   const cargoArgs = [
-    "test",
-    "--locked",
-    "-p",
-    "prodex-app",
-    "--lib",
+    ...(bundle ? [] : ["test", "--locked", "-p", "prodex-app", "--lib"]),
     args.filter,
-    "--",
+    ...(bundle ? [] : ["--"]),
     `--test-threads=${args.testThreads}`,
   ];
-  const command = formatCommand("cargo", cargoArgs);
+  const command = formatCommand(program, cargoArgs);
   const cargoLogPath = path.join(artifactDir, "cargo-test.log");
   const metadataPath = path.join(artifactDir, "metadata.txt");
   const timeoutMs = Math.round(args.timeoutMinutes * 60_000);
@@ -233,8 +232,8 @@ async function runShard(args) {
   process.stdout.write(`runtime proxy shard: runtime logs -> ${logDir}\n`);
   process.stdout.write(`runtime proxy shard: timeout -> ${args.timeoutMinutes} minute(s)\n`);
 
-  const child = spawn("cargo", cargoArgs, {
-    cwd: process.cwd(),
+  const child = spawn(program, cargoArgs, {
+    cwd: bundle?.cwd ?? process.cwd(),
     detached: process.platform !== "win32",
     env: {
       ...process.env,

@@ -654,3 +654,26 @@ are not repeated with arbitrary sleeps. Native test and release binary bundles
 use compression level 1 to reduce compression CPU, while checksum validation
 still covers the same unmodified executable bytes. Neither cache nor compression
 is a substitute for tests, malware checks, provenance or release authorization.
+
+### Shared internal CI executables and release archive recovery
+
+The Linux profile-command, weighted main-internal core, and runtime-proxy shards
+consume the same source/run-bound native executable as the ordinary application
+partitions. Their existing filter ownership, package working directory, serial
+execution, timeout handling, and failure diagnostics remain intact. The native
+bundle is verified before listing or running tests; missing or invalid bindings
+fail closed rather than silently compiling a replacement. Local shard commands
+without an explicitly configured bundle continue to use Cargo.
+
+Release archive preparation first tries the exact-input dependency cache and
+same-source CI artifact. If neither is available, the bounded history lookup may
+reuse an archive from a successful main-branch release verification or publication.
+The lookup compares Git object identities for all Mojo/core/build inputs, root
+manifests and toolchain configuration, plus the producing compiler environment,
+archive build/ABI-validation steps, and complete target matrix. Only transport/cache
+steps are excluded from recipe comparison. The API artifact digest, source/run
+binding, archive member name, type and size are independently verified before
+atomic materialization. Current ABI and runtime checks still run, and release
+binaries are always built from the current source. Changed inputs, untrusted or
+expired artifacts, failed verification and unavailable history fall back to strict
+compilation; publication still requires green CI on the exact release commit.

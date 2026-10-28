@@ -214,7 +214,7 @@ async function runStepOnce(step) {
     }
     process.stdout.write(`${step.label}: ${formatStep(step)}\n`);
     const child = spawn(step.command, step.args, {
-      cwd: process.cwd(),
+      cwd: step.cwd ?? process.cwd(),
       env: {
         ...process.env,
         CARGO_TERM_COLOR: process.env.CARGO_TERM_COLOR ?? "always",
