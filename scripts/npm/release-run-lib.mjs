@@ -644,7 +644,7 @@ async function syncReleaseMetadata(version, args) {
   await runCommand("node", ["scripts/npm/changelog.mjs", "--check", "--release-version", version], args);
   await runCommand("cargo", ["update", "--workspace"], args);
   if (await pathExists(path.join(repoRoot, "fuzz/Cargo.toml"))) {
-    await runCommand("cargo", ["update", "--manifest-path", "fuzz/Cargo.toml"], args);
+    await runCommand("cargo", ["update", "--workspace", "--manifest-path", "fuzz/Cargo.toml"], args);
   }
 }
 
