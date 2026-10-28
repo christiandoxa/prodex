@@ -421,6 +421,10 @@ export function githubMatrix({ includeWorkspace = false } = {}) {
   ]) : include };
 }
 
+export function fullTestAppMatrix() {
+  return { include: githubMatrix({ includeWorkspace: true }).include.filter((shard) => shard.suite !== "workspace") };
+}
+
 export function ciGithubMatrix() {
   return {
     include: [...CI_TARGETED_SHARDS, CI_REMAINDER_SHARD].map(matrixEntry),
@@ -493,6 +497,10 @@ function parseArgs(argv) {
       args.windowsGithubMatrix = true;
       continue;
     }
+    if (value === "--full-test-app-matrix") {
+      args.fullTestAppMatrix = true;
+      continue;
+    }
     if (value === "--full-test-matrix") {
       args.fullTestMatrix = true;
       continue;
@@ -509,11 +517,12 @@ function parseArgs(argv) {
 function printHelp() {
   process.stdout.write(
     [
-      "Usage: node scripts/ci/prodex-app-test-shards.mjs --check|--dry-run|--github-matrix|--windows-github-matrix|--full-test-matrix",
+      "Usage: node scripts/ci/prodex-app-test-shards.mjs --check|--dry-run|--github-matrix|--windows-github-matrix|--full-test-matrix|--full-test-app-matrix",
       "",
       "Validates or prints the shared prodex-app library CI shard plan.",
       "--github-matrix emits the push/PR app matrix without runtime-owned filters.",
       "--windows-github-matrix emits fifteen disjoint Windows partitions with one cache writer.",
+      "--full-test-app-matrix emits the same application partitions without the independent workspace job.",
       "--full-test-matrix emits the scheduled full-test matrix including workspace coverage.",
     ].join("\n") + "\n",
   );
@@ -531,10 +540,11 @@ function main() {
     args.githubMatrix,
     args.windowsGithubMatrix,
     args.fullTestMatrix,
+    args.fullTestAppMatrix,
   ].filter(Boolean).length;
   if (selectedModes !== 1) {
     throw new Error(
-      "choose exactly one of --check, --dry-run, --github-matrix, --windows-github-matrix, or --full-test-matrix",
+      "choose exactly one of --check, --dry-run, --github-matrix, --windows-github-matrix, --full-test-matrix, or --full-test-app-matrix",
     );
   }
 
@@ -548,6 +558,10 @@ function main() {
   }
   if (args.githubMatrix) {
     process.stdout.write(`${JSON.stringify(ciGithubMatrix())}\n`);
+    return;
+  }
+  if (args.fullTestAppMatrix) {
+    process.stdout.write(`${JSON.stringify(fullTestAppMatrix())}\n`);
     return;
   }
   if (args.fullTestMatrix) {

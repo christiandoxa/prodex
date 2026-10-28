@@ -302,11 +302,11 @@ test("nightly full Rust suite reuses trusted main CI Mojo archive with strict fa
 
   // The producer and consumer are different runners. Preserve the original
   // download path and failure propagation of all production tests.
-  assert.match(nightly, /needs: \[full_test_shards, mojo-runtime-linux-archive\]/);
+  assert.match(nightly, /needs: full_test_shards/);
   assert.match(nightly, /path: \.prodex-ci\/mojo-runtime\/x86_64-unknown-linux-gnu/);
-  assert.match(nightly, /--test-threads=1/);
+  assert.match(readFileSync("scripts/ci/native-test-artifact.mjs", "utf8"), /--test-threads=1/);
   assert.match(nightly, /Run full test partition/);
-  assert.match(nightly, /if \[ "\$\{status\}" -eq 0 \]; then/);
+  assert.match(readFileSync("scripts/ci/full-test-partition.sh", "utf8"), /if \[ "\$\{status\}" -eq 0 \]; then/);
 });
 
 

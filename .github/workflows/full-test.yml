@@ -113,15 +113,44 @@ jobs:
           if-no-files-found: error
 
   full_test_shards:
-    name: Generate full-test shard plan
+    name: Compile and partition Linux application tests once
+    needs: mojo-runtime-linux-archive
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 60
+    env:
+      CARGO_INCREMENTAL: "0"
+      CARGO_PROFILE_DEV_DEBUG: "0"
+      CARGO_PROFILE_TEST_DEBUG: "0"
+      RUSTC_WRAPPER: sccache
+      SCCACHE_GHA_RW_MODE: READ_WRITE
+      PRODEX_MOJO_ARCHIVE: ${{ github.workspace }}/.prodex-ci/mojo-runtime/x86_64-unknown-linux-gnu/libprodex_mojo_core.a
     outputs:
       matrix: ${{ steps.matrix.outputs.matrix }}
-
+      manifest_sha256: ${{ steps.pack.outputs.manifest_sha256 }}
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Download Linux runtime Mojo archive
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
+        with:
+          name: mojo-runtime-archive-x86_64-unknown-linux-gnu
+          path: .prodex-ci/mojo-runtime/x86_64-unknown-linux-gnu
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
+        with:
+          toolchain: 1.99.1
+
+      - name: Install sccache
+        uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
+        with:
+          cache-bin: false
+          shared-key: prodex-app-lib
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Install Node.js
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
@@ -129,24 +158,93 @@ jobs:
           node-version: 22
           package-manager-cache: false
 
-      - name: Generate full-test shard matrix
+      - name: Generate complete application shard matrix
         id: matrix
         shell: bash
         run: |
           set -euo pipefail
-          matrix="$(node scripts/ci/prodex-app-test-shards.mjs --full-test-matrix)"
+          matrix="$(node scripts/ci/prodex-app-test-shards.mjs --full-test-app-matrix)"
           echo "matrix=${matrix}" >> "${GITHUB_OUTPUT}"
 
-  full-test:
-    name: Full tests (${{ matrix.label }})
-    needs: [full_test_shards, mojo-runtime-linux-archive]
+      - name: Compile and bind the exact-run native test executable
+        id: pack
+        shell: bash
+        run: node scripts/ci/native-test-artifact.mjs pack .prodex-ci/full-app-tests
+
+      - name: Upload the exact-run native test executable
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: full-app-tests
+          path: .prodex-ci/full-app-tests
+          if-no-files-found: error
+          overwrite: true
+          retention-days: 7
+          compression-level: 1
+
+  full-workspace:
+    name: Full tests (workspace and auto-rotate)
+    needs: mojo-runtime-linux-archive
     runs-on: ubuntu-latest
     timeout-minutes: 90
     env:
       RUSTC_WRAPPER: sccache
-      # One warm-up shard writes; readers cannot flood the GHA cache with the
-      # same dependency objects during a cold full-suite fan-out.
-      SCCACHE_GHA_RW_MODE: ${{ matrix.save_cache && 'READ_WRITE' || 'READ_ONLY' }}
+      SCCACHE_GHA_RW_MODE: READ_WRITE
+      PRODEX_MOJO_ARCHIVE: ${{ github.workspace }}/.prodex-ci/mojo-runtime/x86_64-unknown-linux-gnu/libprodex_mojo_core.a
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Download runtime Mojo archive
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
+        with:
+          name: mojo-runtime-archive-x86_64-unknown-linux-gnu
+          path: .prodex-ci/mojo-runtime/x86_64-unknown-linux-gnu
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
+        with:
+          toolchain: 1.99.1
+
+      - name: Install sccache
+        uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
+
+      - name: Install Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+        with:
+          node-version: 22
+          package-manager-cache: false
+
+      - name: Cache workspace dependencies
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
+        with:
+          cache-bin: false
+          shared-key: full-test
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      - name: Run workspace and auto-rotate coverage
+        shell: bash
+        env:
+          PRODEX_FULL_TEST_SUITE: workspace
+          PRODEX_APP_FILTERS: ""
+          PRODEX_APP_SKIP_FILTERS: ""
+          RUST_BACKTRACE: "1"
+        run: bash scripts/ci/full-test-partition.sh
+
+      - name: Upload workspace diagnostics
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: full-test-workspace-diagnostics-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/full-test-workspace-diagnostics
+          if-no-files-found: ignore
+          retention-days: 14
+
+  full-test:
+    name: Full tests (${{ matrix.label }})
+    needs: full_test_shards
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
       PRODEX_MOJO_ARCHIVE: ${{ github.workspace }}/.prodex-ci/mojo-runtime/x86_64-unknown-linux-gnu/libprodex_mojo_core.a
     strategy:
       fail-fast: false
@@ -168,174 +266,33 @@ jobs:
         with:
           toolchain: 1.99.1
 
-      - name: Install sccache
-        uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
-
       - name: Install Node.js
-        if: matrix.suite == 'workspace'
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
         with:
           node-version: 22
           package-manager-cache: false
 
-      - name: Cache Rust dependencies
-        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
+      - name: Download this run's native test executable
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
-          cache-bin: false
-          save-if: ${{ matrix.save_cache }}
+          name: full-app-tests
+          path: .prodex-ci/full-app-tests
 
       - name: Run full test partition
         shell: bash
         env:
+          PRODEX_FULL_TEST_SUITE: ${{ matrix.suite }}
+          TEST_MANIFEST_SHA256: ${{ needs.full_test_shards.outputs.manifest_sha256 }}
           PRODEX_APP_FILTERS: ${{ matrix.filters }}
           PRODEX_APP_SKIP_FILTERS: ${{ matrix.skip_filters }}
           RUST_BACKTRACE: "1"
-        run: |
-          set -euo pipefail
-          artifact_dir="${RUNNER_TEMP}/full-test-${{ matrix.suite }}-diagnostics"
-          cargo_log="${artifact_dir}/cargo-test.log"
-          runtime_pointer="/tmp/prodex-runtime-latest.path"
-          suite="${{ matrix.suite }}"
-
-          case "${suite}" in
-            workspace)
-              command_description="node scripts/ci/full-rust-test.mjs --jobs 6 --test-threads 4 --timings --timings-json --no-prodex-app-lib (workspace passes --exclude prodex-app)"
-              ;;
-            remainder)
-              command_description="prodex-app library remainder after the shared disjoint filters"
-              ;;
-            *)
-              command_description="prodex-app filters: ${PRODEX_APP_FILTERS//$'\n'/, }"
-              ;;
-          esac
-
-          rm -rf "${artifact_dir}"
-          mkdir -p "${artifact_dir}"
-
-          cat > "${artifact_dir}/metadata.txt" <<EOF
-          event_name=${GITHUB_EVENT_NAME}
-          ref=${GITHUB_REF}
-          sha=${GITHUB_SHA}
-          run_id=${GITHUB_RUN_ID}
-          run_attempt=${GITHUB_RUN_ATTEMPT}
-          runner_os=${RUNNER_OS}
-          suite=${suite}
-          command=${command_description}
-          started_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-          EOF
-
-          rustc -Vv > "${artifact_dir}/rustc-version.txt"
-          cargo -Vv > "${artifact_dir}/cargo-version.txt"
-
-          set +e
-          status=0
-          case "${suite}" in
-            workspace)
-              node scripts/ci/full-rust-test.mjs \
-                --jobs 6 \
-                --test-threads 4 \
-                --timings \
-                --timings-json \
-                --no-prodex-app-lib \
-                > "${cargo_log}" 2>&1
-              status=$?
-              ;;
-            remainder)
-              skip_args=()
-              while IFS= read -r filter; do
-                [ -z "${filter}" ] && continue
-                skip_args+=(--skip "${filter}")
-              done <<< "${PRODEX_APP_SKIP_FILTERS}"
-              cargo test --locked -q -p prodex-app --lib -- \
-                --test-threads=1 \
-                "${skip_args[@]}" \
-                > "${cargo_log}" 2>&1
-              status=$?
-              ;;
-            *)
-              : > "${cargo_log}"
-              filter_log="${artifact_dir}/filter.log"
-              # Broad remainder families must skip already-owned selectors.
-              # They remain serial within each runner to protect native state.
-              skip_args=()
-              while IFS= read -r skip; do
-                [ -z "${skip}" ] && continue
-                skip_args+=(--skip "${skip}")
-              done <<< "${PRODEX_APP_SKIP_FILTERS}"
-              while IFS= read -r filter; do
-                [ -z "${filter}" ] && continue
-                cargo test --locked -q -p prodex-app --lib \
-                  "${filter}" -- --test-threads=1 "${skip_args[@]}" \
-                  > "${filter_log}" 2>&1
-                filter_status=$?
-                cat "${filter_log}" >> "${cargo_log}"
-                if [ "${filter_status}" -ne 0 ]; then
-                  status=1
-                fi
-                if grep -Fq 'running 0 tests' "${filter_log}"; then
-                  echo "prodex-app filter matched no tests: ${filter}" >> "${cargo_log}"
-                  status=1
-                fi
-              done <<< "${PRODEX_APP_FILTERS}"
-              ;;
-          esac
-          set -e
-
-          if [ "${status}" -eq 0 ] && [ "${suite}" = "remainder" ] && \
-             grep -Fq 'running 0 tests' "${cargo_log}"; then
-            echo "prodex-app shard matched no tests" >> "${cargo_log}"
-            status=1
-          fi
-
-          printf 'exit_code=%s\nfinished_at=%s\n' \
-            "${status}" \
-            "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-            >> "${artifact_dir}/metadata.txt"
-
-          if [ "${status}" -eq 0 ]; then
-            rm -rf "${artifact_dir}"
-            exit 0
-          fi
-
-          tail -n 200 "${cargo_log}" > "${artifact_dir}/cargo-test-tail.txt"
-
-          if [ -f "${runtime_pointer}" ]; then
-            cp "${runtime_pointer}" "${artifact_dir}/prodex-runtime-latest.path"
-            latest_runtime_log="$(tr -d '\r' < "${runtime_pointer}")"
-            printf 'runtime_log_pointer=%s\nruntime_log_target=%s\n' \
-              "${runtime_pointer}" \
-              "${latest_runtime_log}" \
-              >> "${artifact_dir}/metadata.txt"
-            if [ -n "${latest_runtime_log}" ] && [ -f "${latest_runtime_log}" ]; then
-              cp "${latest_runtime_log}" "${artifact_dir}/$(basename "${latest_runtime_log}")"
-              tail -n 200 "${latest_runtime_log}" > "${artifact_dir}/latest-runtime-log-tail.txt"
-            fi
-          else
-            printf 'runtime_log_pointer=%s\nruntime_log_target=missing\n' \
-              "${runtime_pointer}" \
-              >> "${artifact_dir}/metadata.txt"
-          fi
-
-          find /tmp -maxdepth 1 -type f \
-            \( -name 'prodex-runtime-*.log' -o -name 'prodex-runtime-latest.path' \) \
-            | sort > "${artifact_dir}/runtime-log-files.txt" || true
-
-          cargo run --locked -q --bin prodex -- doctor --runtime > "${artifact_dir}/doctor-runtime.txt" 2>&1 || true
-          cargo run --locked -q --bin prodex -- doctor --runtime --json > "${artifact_dir}/doctor-runtime.json" 2> "${artifact_dir}/doctor-runtime-json.stderr" || true
-
-          echo "Full test suite failed. Recent cargo output:"
-          cat "${artifact_dir}/cargo-test-tail.txt"
-
-          if [ -f "${artifact_dir}/latest-runtime-log-tail.txt" ]; then
-            echo
-            echo "Latest runtime log tail:"
-            cat "${artifact_dir}/latest-runtime-log-tail.txt"
-          fi
-
-          exit "${status}"
+        run: bash scripts/ci/full-test-partition.sh
 
       - name: Test temp-backed state with a symlinked TMPDIR
         if: matrix.suite == 'remainder'
+        env:
+          TEST_MANIFEST_SHA256: ${{ needs.full_test_shards.outputs.manifest_sha256 }}
+          PRODEX_APP_SKIP_FILTERS: ""
         shell: bash
         run: |
           set -euo pipefail
@@ -343,12 +300,9 @@ jobs:
           trap 'find "${tmp_root}" -depth -delete' EXIT
           mkdir -m 700 "${tmp_root}/real"
           ln -s "${tmp_root}/real" "${tmp_root}/alias"
-          TMPDIR="${tmp_root}/alias" cargo test --locked -q -p prodex-app \
-            --lib 'runtime_tools::desktop_tests::' -- --test-threads=1
-          TMPDIR="${tmp_root}/alias" cargo test --locked -q -p prodex-app \
-            --lib \
-            'runtime_proxy::smart_context::self_test::tests::offline_self_test_accepts_system_temp_symlink_alias' \
-            -- --test-threads=1
+          TMPDIR="${tmp_root}/alias" \
+          PRODEX_APP_FILTERS=$'runtime_tools::desktop_tests::\nruntime_proxy::smart_context::self_test::tests::offline_self_test_accepts_system_temp_symlink_alias' \
+            node scripts/ci/native-test-artifact.mjs run .prodex-ci/full-app-tests
 
       - name: Upload full-test diagnostics
         if: failure()
