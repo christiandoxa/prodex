@@ -31,21 +31,25 @@ in `codex-rust-v0.165.0-source-evidence.json` beside this audit.
   namespace descriptions remain empty; only MCP namespaces receive defaults.
 - Fresh memory-enabled profiles select v2 only when no explicit version or
   opt-out exists and the old memory directory is absent. I/O errors do not
-  authorize migration. Existing memory/session state is not rewritten here.
+  authorize migration. Shared-home preparation now includes `memories_v2` through the same guarded
+  merge/link owner as v1, without converting formats or overriding native
+  memory-version selection. Existing data stays in its own versioned root.
 - New directory/session pickers, TUI preferences, reviewer defaults, message
   wake boundaries and marketplace URL validation remain upstream-owned.
   Experimental Guardian features are not enabled by this qualification.
 
 ## Verification scope
 
-The offline source guard checks 88 critical files and 113 semantic groups.
+The offline source guard checks 89 critical files and 114 semantic groups.
 Each new mandatory group has a negative marker-removal self-test. The old
 namespace-call marker was updated to the actual two-argument source owner,
 not waived. Existing required transport/header/authentication checks remain.
 Official Linux CLI and app-server assets were checked against release digest
 metadata. Isolated version/help, startup-config, JSON-schema and stdio
 initialize/thread-list probes succeeded without account access or model turns.
-Wrapper tests cover native GCP routing and quota isolation, default-catalog
+A real-process regression reproduced loss of v2 visibility after switching
+profiles before the shared-root fix. Separate v1/v2 content and symlink
+containment are covered. Wrapper tests cover native GCP routing and quota isolation, default-catalog
 partition isolation, terminal error forwarding, and existing resume boundaries.
 All-platform and security qualification remains mandatory in release CI.
 

@@ -174,3 +174,27 @@ fn run_shares_housekeeping_memories_across_managed_profiles() {
         );
     }
 }
+
+#[test]
+fn run_shares_memory_v2_without_merging_v1_namespace_01650() {
+    let fixture = setup_fixture();
+    for home in [&fixture.main_home, &fixture.second_home] {
+        fs::create_dir_all(home.join("memories_v2")).unwrap();
+    }
+    fs::create_dir_all(fixture.main_home.join("memories")).unwrap();
+    fs::write(fixture.main_home.join("memories/summary.md"), "legacy memory").unwrap();
+    fs::write(fixture.main_home.join("memories_v2/summary.md"), "new memory").unwrap();
+    fs::write(fixture.second_home.join("memories_v2/second.md"), "second profile memory").unwrap();
+    for profile in ["main", "second"] {
+        let output = run_prodex_with_direct_provider(
+            &fixture, &["run", "--profile", profile, "--skip-quota-check"],
+        );
+        assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    }
+    for home in [&fixture.main_home, &fixture.second_home, &fixture.shared_codex_home] {
+        assert_eq!(fs::read_to_string(home.join("memories_v2/summary.md")).unwrap(), "new memory");
+        assert_eq!(fs::read_to_string(home.join("memories_v2/second.md")).unwrap(), "second profile memory");
+        assert_eq!(fs::read_to_string(home.join("memories/summary.md")).unwrap(), "legacy memory");
+        assert!(!home.join("memories/second.md").exists(), "v2 must not enter the v1 namespace");
+    }
+}

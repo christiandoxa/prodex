@@ -40,6 +40,7 @@ const SHARED_CODEX_DIR_NAMES: &[&str] = &[
     "image_attachments",
     "shell_snapshots",
     "memories",
+    "memories_v2",
     "memories_extensions",
     "rules",
     "skills",

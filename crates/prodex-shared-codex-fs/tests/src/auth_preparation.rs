@@ -101,3 +101,22 @@ fn auth_preparation_keeps_managed_home_symlink_defenses() {
     assert!(prepare_managed_codex_home_for_auth_update(&paths, &home).is_err());
     assert_eq!(fs::read_dir(&outside).unwrap().count(), 0);
 }
+
+#[test]
+fn memory_v2_sharing_keeps_destination_symlink_defenses_01650() {
+    let root = AuthTestDir::new();
+    let paths = root.paths();
+    let outside = root.0.join("outside-memories");
+    fs::create_dir_all(&outside).unwrap();
+    fs::create_dir_all(&paths.shared_codex_root).unwrap();
+    symlink(&outside, paths.shared_codex_root.join("memories_v2")).unwrap();
+    let home = paths.managed_profiles_root.join("account");
+    fs::create_dir_all(home.join("memories_v2")).unwrap();
+    fs::write(home.join("memories_v2/summary.md"), "local memory").unwrap();
+    assert!(prepare_managed_codex_home_for_auth_update(&paths, &home).is_err());
+    assert_eq!(
+        fs::read_to_string(home.join("memories_v2/summary.md")).unwrap(),
+        "local memory"
+    );
+    assert_eq!(fs::read_dir(&outside).unwrap().count(), 0);
+}

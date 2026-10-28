@@ -10,9 +10,9 @@
     "modified": 594,
     "total": 685
   },
-  "critical_files": 88,
-  "semantic_groups": 113,
-  "required_marker_occurrences": 1496,
+  "critical_files": 89,
+  "semantic_groups": 114,
+  "required_marker_occurrences": 1500,
   "missing_markers": 0,
   "native_assets": [
     {
@@ -392,6 +392,10 @@
     {
       "path": "codex-rs/rmcp-client/src/tool_request.rs",
       "sha256": "3f6c6db6f7f69927251f71a8d142bbd137ebee5daa3943776c677d0325cb2553"
+    },
+    {
+      "path": "codex-rs/protocol/src/memory_version.rs",
+      "sha256": "4daa1daac8ec42f61e0b2f6391aab172abff8c3052758433becf2081f7476f82"
     }
   ]
 }
