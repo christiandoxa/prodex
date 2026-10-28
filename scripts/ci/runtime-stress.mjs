@@ -1,5 +1,7 @@
 #!/usr/bin/env node
 import { spawn } from "node:child_process";
+import assert from "node:assert/strict";
+import { environmentBundle } from "./native-test-artifact.mjs";
 import { pathToFileURL } from "node:url";
 import {
   RUNTIME_STRESS_DEFAULT_WEIGHT_SECONDS,
@@ -109,10 +111,10 @@ function dryRun(command, args, label) {
   process.stdout.write(`dry-run ${label}: ${formatCommand(command, args)}\n`);
 }
 
-function run(command, args, label) {
+function run(command, args, label, cwd = process.cwd()) {
   return new Promise((resolve, reject) => {
     process.stdout.write(`${label}: ${formatCommand(command, args)}\n`);
-    const child = spawn(command, args, { stdio: ["inherit", "pipe", "pipe"] });
+    const child = spawn(command, args, { cwd, stdio: ["inherit", "pipe", "pipe"] });
     let sawZeroTests = false;
     let outputTail = "";
     const inspectOutput = (chunk) => {
@@ -181,19 +183,16 @@ function capture(command, args, label) {
   });
 }
 
-async function retry(label, attemptCount, action) {
-  for (let attempt = 1; attempt <= attemptCount; attempt += 1) {
-    try {
-      await action(attempt);
-      return;
-    } catch (error) {
-      if (attempt === attemptCount) {
-        throw error;
-      }
-      process.stdout.write(`${label}: retrying after transient failure\n`);
-      await new Promise((resolve) => setTimeout(resolve, 5000));
-    }
-  }
+// Only a verified same-run bundle may replace Cargo. Keep every libtest
+// argument and the package working directory; no automatic fallback on damage.
+async function runApplicationTests(args, label, dryRunMode, bundle) {
+  assert.deepEqual(args.slice(0, 5), ["test", "--locked", "-p", "prodex-app", "--lib"]);
+  const separator = args.indexOf("--", 5);
+  assert.equal(separator, 6, "one application filter before libtest arguments required");
+  const command = bundle?.executable ?? "cargo";
+  const commandArgs = bundle ? [args[5], ...args.slice(separator + 1)] : args;
+  if (dryRunMode) dryRun(command, commandArgs, label);
+  else await run(command, commandArgs, label, bundle?.cwd);
 }
 
 function skipArgs(testNames) {
@@ -361,31 +360,27 @@ function assertShardSkipSafety(selectedTests, nonSelectedTests) {
   }
 }
 
-async function listRuntimeStressTests() {
-  const output = await capture(
+async function listRuntimeStressTests(bundle) {
+  const output = bundle?.listing ?? await capture(
     "cargo",
     ["test", "--locked", "-p", "prodex-app", "--lib", "main_internal_tests::runtime_proxy_", "--", "--list"],
     "runtime-stress:list",
   );
-  const tests = parseListedTests(output);
+  const tests = parseListedTests(output).filter((name) => name.startsWith("main_internal_tests::runtime_proxy_"));
   if (tests.length === 0) {
     throw new Error("runtime-stress:list matched no runtime proxy tests");
   }
   return tests;
 }
 
-async function runStressSuite({ shardIndex, shardCount, shardStrategy, dryRun: dryRunMode }) {
+async function runStressSuite({ shardIndex, shardCount, shardStrategy, dryRun: dryRunMode }, bundle) {
   if (shardCount === 1) {
     const args = baseStressArgs();
-    if (dryRunMode) {
-      dryRun("cargo", args, "runtime-stress");
-      return;
-    }
-    await run("cargo", args, "runtime-stress");
+    await runApplicationTests(args, "runtime-stress", dryRunMode, bundle);
     return;
   }
 
-  const listedTests = await listRuntimeStressTests();
+  const listedTests = await listRuntimeStressTests(bundle);
   const runnableTests = listedTests.filter((testName) => !skippedByManifest(testName));
   const shards = runtimeStressShardPlan(runnableTests, shardCount, shardStrategy);
   const selectedShard = shards[shardIndex];
@@ -407,10 +402,8 @@ async function runStressSuite({ shardIndex, shardCount, shardStrategy, dryRun: d
   const args = baseStressArgs(nonSelectedTests);
   if (dryRunMode) {
     process.stdout.write(`runtime-stress: first selected test: ${selectedTests[0]}\n`);
-    dryRun("cargo", args, `runtime-stress:${shardIndex + 1}/${shardCount}`);
-    return;
   }
-  await run("cargo", args, "runtime-stress");
+  await runApplicationTests(args, `runtime-stress:${shardIndex + 1}/${shardCount}`, dryRunMode, bundle);
 }
 
 function testsForShard(testNames, shardIndex, shardCount, label) {
@@ -424,27 +417,22 @@ function testsForShard(testNames, shardIndex, shardCount, label) {
   return selectedTests;
 }
 
-async function runSerializedSuite({ shardIndex, shardCount, dryRun: dryRunMode }) {
+async function runSerializedSuite({ shardIndex, shardCount, dryRun: dryRunMode }, bundle) {
   const serializedTests = testsForShard(
     RUNTIME_STRESS_SERIALIZED_TESTS,
     shardIndex,
     shardCount,
     "serialized runtime stress",
   );
-  await retry("serialized runtime stress", 2, async (attempt) => {
-    process.stdout.write(`serialized runtime stress attempt ${attempt}\n`);
-    for (const testName of serializedTests) {
-      const args = ["test", "--locked", "-p", "prodex-app", "--lib", testName, "--", "--test-threads=1"];
-      if (dryRunMode) {
-        dryRun("cargo", args, testName);
-      } else {
-        await run("cargo", args, testName);
-      }
-    }
-  });
+  // Repeating a failed suite could hide deterministic failures. Explicit
+  // continuation stress repetitions below are coverage, not success retries.
+  for (const testName of serializedTests) {
+    const args = ["test", "--locked", "-p", "prodex-app", "--lib", testName, "--", "--test-threads=1"];
+    await runApplicationTests(args, testName, dryRunMode, bundle);
+  }
 }
 
-async function runContinuationSuite({ shardIndex, shardCount, dryRun: dryRunMode }) {
+async function runContinuationSuite({ shardIndex, shardCount, dryRun: dryRunMode }, bundle) {
   const continuationTests = testsForShard(
     RUNTIME_STRESS_CONTINUATION_TESTS,
     shardIndex,
@@ -455,11 +443,7 @@ async function runContinuationSuite({ shardIndex, shardCount, dryRun: dryRunMode
     process.stdout.write(`continuation-heavy iteration ${iteration}\n`);
     for (const testName of continuationTests) {
       const args = ["test", "--locked", "-p", "prodex-app", "--lib", testName, "--", "--test-threads=1"];
-      if (dryRunMode) {
-        dryRun("cargo", args, testName);
-      } else {
-        await run("cargo", args, testName);
-      }
+      await runApplicationTests(args, testName, dryRunMode, bundle);
     }
   }
 }
@@ -485,14 +469,15 @@ async function main() {
     );
   }
 
+  const bundle = environmentBundle();
   if (args.suite === "stress" || args.suite === "all") {
-    await runStressSuite(args);
+    await runStressSuite(args, bundle);
   }
   if (args.suite === "serialized" || args.suite === "all") {
-    await runSerializedSuite(args);
+    await runSerializedSuite(args, bundle);
   }
   if (args.suite === "continuation" || args.suite === "all") {
-    await runContinuationSuite(args);
+    await runContinuationSuite(args, bundle);
   }
 }
 

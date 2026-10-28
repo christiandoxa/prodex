@@ -273,7 +273,7 @@ test("release Mojo install activates the compiler in its current step", () => {
 test("release validates the Kiro pin before build fan-out", () => {
   const workflow = readFileSync(".github/workflows/standalone-release.yml", "utf8");
   const verifyCi = workflow.match(/\n  release-preflight:\n([\s\S]*?)\n  build:/)?.[1];
-  const build = workflow.match(/\n  build:\n([\s\S]*?)\n  prepare-release:/)?.[1];
+  const build = workflow.match(/\n  build:\n([\s\S]*?)\n  validate-release-assets:/)?.[1];
 
   assert.ok(verifyCi, "release CI verification job missing");
   assert.ok(build, "release build job missing");
@@ -386,7 +386,7 @@ test("runtime proxy logical suites pack without losing filters", () => {
     expectedSuites,
   );
   assert.ok(matrix.include.every((entry) => entry.filters.trim() !== ""));
-  assert.equal(matrix.include.filter((entry) => entry.save_cache).length, 1);
+  assert.ok(matrix.include.every((entry) => !Object.hasOwn(entry, "save_cache")));
   assert.deepEqual(new Set(filters), new Set(expectedFilters));
   const admissionCorePack = matrix.include.find((entry) =>
     entry.filters.includes(
@@ -424,8 +424,8 @@ test("push CI keeps runtime quarantine while broad stress stays scheduled", () =
   assert.deepEqual(new Set(push.map((entry) => entry.suite)), new Set(["serialized", "continuation"]));
   assert.equal(push.length, 4);
   assert.equal(schedule.length, 9);
-  assert.equal(push.filter((entry) => entry.save_cache).length, 1);
-  assert.equal(schedule.filter((entry) => entry.save_cache).length, 1);
+  assert.ok(push.every((entry) => !Object.hasOwn(entry, "save_cache")));
+  assert.ok(schedule.every((entry) => !Object.hasOwn(entry, "save_cache")));
 
   const invalid = spawnSync(
     process.execPath,
@@ -462,16 +462,15 @@ test("large CI matrices use one cache writer and retain failure diagnostics", ()
   const workflow = readFileSync(".github/workflows/ci.yml", "utf8");
   const core = workflow.match(/\n  main-internal-core:\n([\s\S]*?)\n  env-sensitive-parallel-guard:/)?.[1];
   const runtime = workflow.match(/\n  main-internal-runtime-proxy:\n([\s\S]*?)\n  runtime-load-smoke:/)?.[1];
-  const stress = workflow.match(/\n  runtime-stress:\n([\s\S]*?)\n  ci-duration-telemetry:/)?.[1];
+  const stress = workflow.match(/\n  runtime-stress:\n([\s\S]*?)\n  real-mojo:/)?.[1];
   const processGuard = workflow.match(/\n  process-guard:\n([\s\S]*?)\n  supply-chain:/)?.[1];
 
-  for (const job of [core, runtime]) {
+  for (const job of [core, runtime, stress]) {
     assert.match(job, /needs: \[changes, linux-app-test-build\]/);
     assert.doesNotMatch(job, /rust-cache@|sccache-action@/);
     assert.match(job, /TEST_MANIFEST_SHA256:/);
   }
   assert.match(stress, /fromJSON\(needs\.changes\.outputs\.runtime_stress_matrix\)/);
-  assert.match(stress, /save-if: \$\{\{ matrix\.save_cache \}\}/);
   assert.match(processGuard, /save-if: \$\{\{ matrix\.lane == 'static' \}\}/);
   assert.match(runtime, /status=0[\s\S]*?status=1[\s\S]*?exit "\$\{status\}"/);
 });

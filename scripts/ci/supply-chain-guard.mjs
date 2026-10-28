@@ -126,7 +126,7 @@ export function validateLinuxNativeTests(contents) {
       if (!job.includes(marker)) violations.push(`CI Linux native-test binding missing ${marker}`);
     }
   }
-  for (const name of ["profile-commands-internal", "main-internal-core", "main-internal-runtime-proxy"]) {
+  for (const name of ["profile-commands-internal", "main-internal-core", "main-internal-runtime-proxy", "runtime-stress"]) {
     const internal = workflowJob(contents, name) ?? "";
     for (const marker of ["needs: [changes, linux-app-test-build]", "name: linux-app-tests",
       "PRODEX_TEST_BUNDLE: .prodex-ci/linux-app-tests",
@@ -413,6 +413,35 @@ export function validateReleaseCiPolling(contents) {
     .map((marker) => `.github/workflows/standalone-release.yml: CI polling missing ${marker}`);
 }
 
+function validateReleaseSbom(validation) {
+  const violations = [];
+  const sbom = workflowStep(validation, "Generate release SBOM");
+  const required = [
+    'find artifacts -mindepth 2 -maxdepth 2 -type f',
+    'codex-purity-guard.mjs sbom-input',
+    'anchore/syft:v1.41.2@sha256:962c5626d30cdfb814802598cbb7b63cb690bf979a4bc0ff1d9c6e0cb441db7f',
+    'sbom-input:/source:ro', 'dir:/source -o spdx-json > release-sbom.spdx.json',
+    'codex-purity-guard.mjs release-sbom.spdx.json',
+  ];
+  for (const marker of required) {
+    if (!sbom.includes(marker)) violations.push(`release asset validation missing SBOM proof: ${marker}`);
+  }
+  if (/^        (?:if:|continue-on-error:)/mu.test(sbom)) {
+    violations.push("release SBOM must execute unconditionally and fail closed");
+  }
+  const steps = ["Download built binaries", "Generate release SBOM", "Prepare release assets",
+    "Generate and verify release checksums", "Scan release assets for malware"];
+  const positions = steps.map((name) => validation.indexOf(`      - name: ${name}\n`));
+  if (positions.some((index, i) => index < 0 || (i > 0 && positions[i - 1] >= index))) {
+    violations.push("release SBOM must use downloaded binaries before checksums and malware scan");
+  }
+  if (!workflowStep(validation, "Prepare release assets").includes(
+    "cp release-sbom.spdx.json release-assets/release-sbom.spdx.json")) {
+    violations.push("generated SBOM must enter the final scanned asset bundle");
+  }
+  return violations;
+}
+
 export function validateReleaseContainerPublication(contents, targetWorkflow = "") {
   const preflight = workflowJob(contents, "release-preflight");
   const validation = workflowJob(contents, "validate-release-assets");
@@ -421,14 +450,13 @@ export function validateReleaseContainerPublication(contents, targetWorkflow = "
   const build = workflowJob(targetWorkflow, "build");
   const archive = workflowJob(targetWorkflow, "build-mojo-archives");
   const attestBinaries = workflowJob(contents, "attest-binaries");
-  const prepare = workflowJob(contents, "prepare-release");
   const syncDocs = workflowJob(contents, "sync-release-docs");
   const release = workflowJob(contents, "publish-github-release");
-  if (!preflight || !validation || !verify || !caller || !archive || !build || !attestBinaries || !prepare || !syncDocs || !release) {
+  if (!preflight || !validation || !verify || !caller || !archive || !build || !attestBinaries || !syncDocs || !release) {
     return [".github/workflows/standalone-release.yml: missing required release job"];
   }
   const violations = [];
-  violations.push(...validateReleaseCiPolling(contents));
+  violations.push(...validateReleaseCiPolling(contents), ...validateReleaseSbom(validation));
   for (const marker of [
     "needs: release-preflight",
     "uses: ./.github/workflows/release-target.yml",
@@ -472,7 +500,7 @@ export function validateReleaseContainerPublication(contents, targetWorkflow = "
       /continue-on-error: true/u.test(build.split("    steps:")[0])) {
     violations.push("release-target.yml: downloaded smoke must gate the successful owning binary build");
   }
-  for (const name of ["prepare-release", "verify-release"]) {
+  for (const name of ["validate-release-assets", "verify-release"]) {
     if (!workflowJob(contents, name)?.includes("      - build\n")) {
       violations.push(`standalone-release.yml: ${name} must include all target builds and native smoke`);
     }
@@ -497,7 +525,7 @@ export function validateReleaseContainerPublication(contents, targetWorkflow = "
   for (const [name, job, timeout] of [
     ["build", build, 180],
     ["attest-binaries", attestBinaries, 15],
-    ["prepare-release", prepare, 30],
+    ["validate-release-assets", validation, 35],
     ["sync-release-docs", syncDocs, 15],
     ["publish-github-release", release, 360],
   ]) {
@@ -530,7 +558,6 @@ export function validateReleaseContainerPublication(contents, targetWorkflow = "
     ["validate-release-assets", validation],
     ["build-mojo-archives", archive],
     ["build", build],
-    ["prepare-release", prepare],
     ["sync-release-docs", syncDocs],
     ["publish-github-release", release],
   ]) {
@@ -593,7 +620,7 @@ export function validateReleaseContainerPublication(contents, targetWorkflow = "
       if (!job.includes(marker)) violations.push(`.github/workflows/standalone-release.yml: ${name} missing publication gate ${marker}`);
     }
   }
-  for (const [name, job] of [["release-preflight", preflight], ["verify-ci", verify], ["prepare-release", prepare], ["validate-release-assets", validation]]) {
+  for (const [name, job] of [["release-preflight", preflight], ["verify-ci", verify], ["validate-release-assets", validation]]) {
     if (/^\s+(?:artifact-metadata|attestations|id-token|packages|contents):\s*write\s*$/mu.test(job)) {
       violations.push(`.github/workflows/standalone-release.yml: ${name} must be read-only`);
     }
@@ -746,13 +773,12 @@ export function validateReleaseCodexExclusion(contents, targetWorkflow = content
     violations.push(".github/workflows/standalone-release.yml: release asset scope must be explicit");
   }
   const artifactSmoke = workflowStep(workflowJob(targetWorkflow, "build") ?? "", "Run official artifact smoke");
-  const prepare = workflowJob(contents, "prepare-release") ?? "";
   const release = workflowJob(contents, "validate-release-assets") ?? "";
   for (const [surface, job, marker] of [
     ["artifact and installer", artifactSmoke, "codex-purity-guard.mjs package-lock.json install.sh install.ps1 artifact"],
     ["staged npm package", artifactSmoke, "npm-package-smoke.mjs --binary-dir artifact"],
-    ["SBOM input", prepare, "codex-purity-guard.mjs sbom-input"],
-    ["SBOM output", prepare, "codex-purity-guard.mjs release-sbom.spdx.json"],
+    ["SBOM input", release, "codex-purity-guard.mjs sbom-input"],
+    ["SBOM output", release, "codex-purity-guard.mjs release-sbom.spdx.json"],
     ["GitHub release assets", release, "codex-purity-guard.mjs release-assets"],
   ]) {
     if (!job.includes(marker)) {
@@ -831,10 +857,9 @@ function selfTest() {
       - name: Run official artifact smoke
         run: node scripts/ci/codex-purity-guard.mjs package-lock.json install.sh install.ps1 artifact
         npm: node scripts/ci/npm-package-smoke.mjs --binary-dir artifact
-  prepare-release:
+  validate-release-assets:
     input: node scripts/ci/codex-purity-guard.mjs sbom-input
     output: node scripts/ci/codex-purity-guard.mjs release-sbom.spdx.json
-  validate-release-assets:
     scope: find release-assets -maxdepth 1 -type f
     run: node scripts/ci/codex-purity-guard.mjs release-assets
 `;

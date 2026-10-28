@@ -338,7 +338,7 @@ jobs:
   linux-app-test-build:
     name: Compile Linux application tests once
     needs: [changes, mojo-runtime-linux-archive]
-    if: ${{ github.event_name != 'schedule' && (needs.changes.outputs.heavy == 'true' || github.event_name == 'workflow_dispatch') }}
+    if: ${{ needs.changes.outputs.heavy == 'true' || github.event_name == 'workflow_dispatch' }}
     runs-on: ubuntu-latest
     timeout-minutes: 60
     env:
@@ -1797,7 +1797,7 @@ jobs:
 
   runtime-stress:
     name: Runtime stress (${{ matrix.label }})
-    needs: [changes, mojo-runtime-linux-archive]
+    needs: [changes, linux-app-test-build]
     if: needs.changes.outputs.heavy == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -1805,36 +1805,33 @@ jobs:
       fail-fast: false
       matrix: ${{ fromJSON(needs.changes.outputs.runtime_stress_matrix) }}
     env:
-      RUNTIME_STRESS_ARTIFACT_DIR: target/ci/runtime-stress/${{ matrix.id }}
-      PRODEX_RUNTIME_LOG_DIR: target/ci/runtime-stress/${{ matrix.id }}/runtime-logs
+      RUNTIME_STRESS_ARTIFACT_DIR: ${{ github.workspace }}/target/ci/runtime-stress/${{ matrix.id }}
+      PRODEX_RUNTIME_LOG_DIR: ${{ github.workspace }}/target/ci/runtime-stress/${{ matrix.id }}/runtime-logs
       CARGO_TERM_COLOR: always
       RUST_BACKTRACE: "1"
-      RUSTC_WRAPPER: sccache
-      SCCACHE_GHA_RW_MODE: ${{ matrix.save_cache && 'READ_WRITE' || 'READ_ONLY' }}
-      PRODEX_MOJO_ARCHIVE: ${{ github.workspace }}/.prodex-ci/mojo-runtime/x86_64-unknown-linux-gnu/libprodex_mojo_core.a
+      PRODEX_TEST_BUNDLE: .prodex-ci/linux-app-tests
+      TEST_MANIFEST_SHA256: ${{ needs.linux-app-test-build.outputs.manifest_sha256 }}
 
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-
-      - name: Download runtime Mojo archive
-        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
-        with:
-          name: mojo-runtime-archive-x86_64-unknown-linux-gnu
-          path: .prodex-ci/mojo-runtime/x86_64-unknown-linux-gnu
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
         with:
           toolchain: 1.99.1
 
-      - name: Install sccache
-        uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
-
-      - name: Cache Rust dependencies
-        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
+      - name: Install Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
         with:
-          save-if: ${{ matrix.save_cache }}
+          node-version: 22
+          package-manager-cache: false
+
+      - name: Download this run's native test executable
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
+        with:
+          name: linux-app-tests
+          path: .prodex-ci/linux-app-tests
 
       - name: Prepare runtime stress diagnostics
         shell: bash

@@ -677,3 +677,35 @@ atomic materialization. Current ABI and runtime checks still run, and release
 binaries are always built from the current source. Changed inputs, untrusted or
 expired artifacts, failed verification and unavailable history fall back to strict
 compilation; publication still requires green CI on the exact release commit.
+
+### Runtime stress without repeated compilation
+
+Runtime stress uses the existing verified Linux application executable on push,
+pull-request, manual, and scheduled runs. The producer remains enabled for the
+scheduled broad-stress matrix, even when ordinary application partitions are
+delegated to the daily full suite. Every filter, weighted/modulo selection, serial
+process boundary, and two-iteration continuation stress check is preserved.
+Consumers keep absolute diagnostic paths and no longer install or write compiler
+caches. Local commands without a bundle still use Cargo; an explicitly supplied
+invalid bundle fails before any tests run, never falling back to compilation.
+
+The serialized suite no longer retries its entire test sequence after an arbitrary
+failure. It reports the first failure instead of possibly concealing it behind a
+second successful run. Deliberate continuation stress iterations are retained.
+Diagnose failures from the source-bound logs; only confirmed transient
+infrastructure errors justify a narrowly scoped rerun.
+
+### One release asset preparation and validation owner
+
+`validate-release-assets` downloads all six production binary artifacts once,
+generates the pinned Syft SBOM from those files, prepares the final asset names,
+verifies checksums, and scans the resulting bundle. The old `prepare-release`
+job and intermediate SBOM upload/download are removed. SBOM generation and purity
+checks remain mandatory, read-only, and ordered before checksums and malware
+validation; signing and publication still require this job and exact-source CI.
+
+The six remaining workflows all have active distinct owners: push/PR/native CI,
+daily full tests, release orchestration, reusable target builds, opt-in runtime
+benchmarking, and the upstream compatibility watchdog. A manual workflow, a
+failure-only diagnostic step, or a publication job skipped during verification
+is not obsolete. Remove only redundant work, not its required validation.
