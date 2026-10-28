@@ -11,8 +11,8 @@
   },
   {
     "file": "crates/prodex-app/tests/src/app_commands/runtime_launch.rs",
-    "maxLines": 2047,
-    "reason": "Runtime launch command tests remain capped after admin-token, secure credential, and post-exit session maintenance coverage moved into focused sibling modules."
+    "maxLines": 1928,
+    "reason": "Runtime launch command tests are ratcheted after native provider routing and forced-proxy rejection coverage moved to its focused sibling module."
   },
   {
     "file": "crates/prodex-app/tests/support/main_internal/runtime_proxy_continuations/http_tool_and_compact.rs",

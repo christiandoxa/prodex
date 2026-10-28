@@ -2,7 +2,7 @@
   "codex": {
     "compatibility": {
       "upstream_repository": "https://github.com/openai/codex",
-      "baseline_source": "openai/codex rust-v0.164.0 release",
+      "baseline_source": "openai/codex rust-v0.165.0 release",
       "guard_command": "node scripts/compat/check-upstream-baseline.mjs",
       "format_version": 2,
       "critical_files": [
@@ -178,7 +178,9 @@
             "\"model_messages\":",
             "\"instructions_template\":",
             "\"effort\": \"max\"",
-            "\"effort\": \"ultra\""
+            "\"effort\": \"ultra\"",
+            "\"slug\": \"gpt-6.1-terra\"",
+            "\"display_name\": \"GPT-6.1 Terra\""
           ]
         },
         {
@@ -190,7 +192,11 @@
             "refresh_ttl",
             "entry.identity",
             "client_version",
-            "etag"
+            "etag",
+            "fn for_originator(&self, originator: ModelCatalogOriginator)",
+            "with_extension(format!(\"{}.json\", originator.as_str()))",
+            "entry.identity.as_deref() != Some(identity)",
+            "entry.etag.as_deref() != Some(etag)"
           ]
         },
         {
@@ -264,7 +270,10 @@
             "AMAZON_BEDROCK_GPT_6_SOL_MODEL_ID",
             "openai.gpt-6-sol",
             "AMAZON_BEDROCK_GPT_6_LUNA_MODEL_ID",
-            "openai.gpt-6-luna"
+            "openai.gpt-6-luna",
+            "pub fn create_gcp_provider()",
+            "pub fn is_gcp(&self)",
+            "(GCP_PROVIDER_ID, gcp_provider)"
           ]
         },
         {
@@ -497,7 +506,11 @@
             "http_client_factory",
             "OutboundProxyPolicy::RespectSystemProxy",
             "features.enabled",
-            "feature_requirements"
+            "feature_requirements",
+            "if features.enabled(Feature::MemoryTool)\n            && memories.version.is_none()",
+            "&& memories.dual_write != Some(false)",
+            "tokio::fs::try_exists(codex_home.join(MemoryVersion::V1.directory_name())).await",
+            "memories.version = Some(MemoryVersion::V2)"
           ]
         },
         {
@@ -516,7 +529,8 @@
             "Stage::UnderDevelopment",
             "default_enabled: false",
             "id: Feature::CliDaybreak,\n        key: \"cli_daybreak\",\n        stage: Stage::Stable,\n        default_enabled: true,",
-            "id: Feature::InstantInterrupt,\n        key: \"instant_interrupt\",\n        stage: Stage::UnderDevelopment,\n        default_enabled: true,"
+            "id: Feature::InstantInterrupt,\n        key: \"instant_interrupt\",\n        stage: Stage::UnderDevelopment,\n        default_enabled: true,",
+            "id: Feature::ReasoningEffortOverride,\n        key: \"reasoning_effort_override\",\n        stage: Stage::Stable,\n        default_enabled: true"
           ]
         },
         {
@@ -778,7 +792,11 @@
             "ThreadItemsListCursor",
             "Anchor(ThreadItemsListAnchor)",
             "ThreadItemsListAnchor",
-            "item_id: String"
+            "item_id: String",
+            "#[experimental(\"thread/fork.attachToSource\")]",
+            "pub attach_to_source: bool",
+            "#[experimental(\"thread/list.attachedToThreadId\")]",
+            "pub attached_to_thread_id: Option<String>"
           ]
         },
         {
@@ -1150,12 +1168,13 @@
           "path": "codex-rs/core/src/tools/spec_plan.rs",
           "reason": "Owns tool exposure planning after removal of the provider namespace_tools gate.",
           "required_contains": [
-            "merge_into_namespaces(specs)",
+            "merge_into_namespaces(specs, &mcp_namespaces)",
             "model_info.supports_search_tool",
             "tool_exposure_with_namespace_override",
             "code_mode_only_strict_3p_tools",
             "turn_context.config.multi_agent_v2.tool_namespace.as_deref()",
-            "turn_context.provider.capabilities().image_generation"
+            "turn_context.provider.capabilities().image_generation",
+            "&& mcp_namespaces.contains(namespace.name.as_str())"
           ]
         },
         {
@@ -1276,6 +1295,74 @@
             "thread_id == history.conversation_id",
             "Some(_) => crossed_foreign_snapshot = true",
             "None if !crossed_foreign_snapshot => return Some(&event.thread_settings)"
+          ]
+        },
+        {
+          "path": "codex-rs/model-provider/src/gcp/mod.rs",
+          "reason": "Vertex routing, model filtering and credentials stay native, outside the OpenAI account pool.",
+          "required_contains": [
+            "struct GcpModelProvider",
+            "GOOGLE_CLOUD_PROJECT",
+            "GOOGLE_CLOUD_LOCATION",
+            "ProviderAccount::Gcp",
+            "requires_openai_auth: false",
+            "RemoteCompactionSupport::V2",
+            "model.use_responses_lite = false",
+            "model.tool_mode = Some(ToolMode::Direct)",
+            "model.apply_patch_tool_type = None"
+          ]
+        },
+        {
+          "path": "codex-rs/models-manager/src/originator.rs",
+          "reason": "Only named CCA callers select a separate catalog; ordinary CLI callers retain the default.",
+          "required_contains": [
+            "pub enum ModelCatalogOriginator",
+            "\"codex_work_cca\"",
+            "\"codex_work_web\"",
+            "\"codex_work_desktop\"",
+            "\"codex_work_mobile\"",
+            "\"chatgpt_cca\"",
+            "_ => None"
+          ]
+        },
+        {
+          "path": "codex-rs/model-provider/src/models_endpoint.rs",
+          "reason": "Originator identity removes conflicting configured headers before assigning its own.",
+          "required_contains": [
+            "fn for_originator(",
+            "headers.retain(|name, _| !name.eq_ignore_ascii_case(\"originator\"))",
+            "headers.insert(\"originator\".to_string(), originator.as_str().into())"
+          ]
+        },
+        {
+          "path": "codex-rs/codex-api/src/error.rs",
+          "reason": "Typed model-not-found is terminal and preserves its message and HTTP status.",
+          "required_contains": [
+            "pub(crate) fn parse_terminal_provider_error(",
+            "\"model_not_found\"",
+            "None | Some(StatusCode::BAD_REQUEST | StatusCode::FORBIDDEN | StatusCode::NOT_FOUND)",
+            "Some(ApiError::ModelNotFound {",
+            "unwrap_or(code)"
+          ]
+        },
+        {
+          "path": "codex-rs/protocol/src/error.rs",
+          "reason": "Native retry classification and status propagation preserve terminal model failures.",
+          "required_contains": [
+            "| CodexErrorDetails::ModelNotFound { .. }",
+            "CodexErrorDetails::ModelNotFound { .. } => CodexErrorInfo::ModelNotFound",
+            "CodexErrorDetails::ModelNotFound { status, .. } => *status"
+          ]
+        },
+        {
+          "path": "codex-rs/rmcp-client/src/tool_request.rs",
+          "reason": "Dropping a native response future cancels remote tool work without inventing a result.",
+          "required_contains": [
+            "struct CancelOnDrop",
+            "let mut cancellation = CancelOnDrop",
+            "let result = handle.await_response().await",
+            "cancellation.0 = None",
+            "notify_cancelled(CancelledNotificationParam::new("
           ]
         }
       ],
@@ -2544,7 +2631,7 @@
           "file": "codex-rs/core/src/tools/spec_plan.rs",
           "reason": "Namespace exposure is now governed by tool policy and model search support; the removed provider namespace_tools capability must not return as a hidden gate.",
           "file_contains_all": [
-            "merge_into_namespaces(specs)",
+            "merge_into_namespaces(specs, &mcp_namespaces)",
             "model_info.supports_search_tool",
             "tool_exposure_with_namespace_override",
             "code_mode_only_strict_3p_tools",
@@ -2880,9 +2967,155 @@
             "config.model_reasoning_summary = settings.reasoning_summary",
             "existing_thread.resume_config_snapshot().await"
           ]
+        },
+        {
+          "id": "model-provider.gcp-native",
+          "kind": "provider_boundary",
+          "file": "codex-rs/model-provider/src/gcp/mod.rs",
+          "reason": "Vertex routing, model filtering and credentials stay native, outside the OpenAI account pool.",
+          "file_contains_all": [
+            "struct GcpModelProvider",
+            "GOOGLE_CLOUD_PROJECT",
+            "GOOGLE_CLOUD_LOCATION",
+            "ProviderAccount::Gcp",
+            "requires_openai_auth: false",
+            "RemoteCompactionSupport::V2",
+            "model.use_responses_lite = false",
+            "model.tool_mode = Some(ToolMode::Direct)",
+            "model.apply_patch_tool_type = None"
+          ]
+        },
+        {
+          "id": "model-provider.gcp-registration",
+          "kind": "provider_selection",
+          "file": "codex-rs/model-provider-info/src/lib.rs",
+          "reason": "The gcp provider is registered by Codex rather than a Prodex translation.",
+          "file_contains_all": [
+            "pub fn create_gcp_provider()",
+            "pub fn is_gcp(&self)",
+            "(GCP_PROVIDER_ID, gcp_provider)"
+          ]
+        },
+        {
+          "id": "models.originator-partitions",
+          "kind": "cache_identity",
+          "file": "codex-rs/models-manager/src/originator.rs",
+          "reason": "Only named CCA callers select a separate catalog; ordinary CLI callers retain the default.",
+          "file_contains_all": [
+            "pub enum ModelCatalogOriginator",
+            "\"codex_work_cca\"",
+            "\"codex_work_web\"",
+            "\"codex_work_desktop\"",
+            "\"codex_work_mobile\"",
+            "\"chatgpt_cca\"",
+            "_ => None"
+          ]
+        },
+        {
+          "id": "models.originator-cache-isolation",
+          "kind": "cache_identity",
+          "file": "codex-rs/models-manager/src/cache.rs",
+          "reason": "Originator caches isolate storage and TTL without changing the default cache payload.",
+          "file_contains_all": [
+            "fn for_originator(&self, originator: ModelCatalogOriginator)",
+            "with_extension(format!(\"{}.json\", originator.as_str()))",
+            "entry.identity.as_deref() != Some(identity)",
+            "entry.etag.as_deref() != Some(etag)"
+          ]
+        },
+        {
+          "id": "models.originator-request-isolation",
+          "kind": "header_behavior",
+          "file": "codex-rs/model-provider/src/models_endpoint.rs",
+          "reason": "Originator identity removes conflicting configured headers before assigning its own.",
+          "file_contains_all": [
+            "fn for_originator(",
+            "headers.retain(|name, _| !name.eq_ignore_ascii_case(\"originator\"))",
+            "headers.insert(\"originator\".to_string(), originator.as_str().into())"
+          ]
+        },
+        {
+          "id": "responses.terminal-model-not-found",
+          "kind": "retry_lifecycle",
+          "file": "codex-rs/codex-api/src/error.rs",
+          "reason": "Typed model-not-found is terminal and preserves its message and HTTP status.",
+          "file_contains_all": [
+            "pub(crate) fn parse_terminal_provider_error(",
+            "\"model_not_found\"",
+            "None | Some(StatusCode::BAD_REQUEST | StatusCode::FORBIDDEN | StatusCode::NOT_FOUND)",
+            "Some(ApiError::ModelNotFound {",
+            "unwrap_or(code)"
+          ]
+        },
+        {
+          "id": "responses.model-not-found-nonretryable",
+          "kind": "retry_lifecycle",
+          "file": "codex-rs/protocol/src/error.rs",
+          "reason": "Native retry classification and status propagation preserve terminal model failures.",
+          "file_contains_all": [
+            "| CodexErrorDetails::ModelNotFound { .. }",
+            "CodexErrorDetails::ModelNotFound { .. } => CodexErrorInfo::ModelNotFound",
+            "CodexErrorDetails::ModelNotFound { status, .. } => *status"
+          ]
+        },
+        {
+          "id": "app-server.attached-fork-fields",
+          "kind": "thread_lifecycle",
+          "file": "codex-rs/app-server-protocol/src/protocol/v2/thread.rs",
+          "reason": "Attached forks are explicit experimental fields, not wrapper defaults.",
+          "file_contains_all": [
+            "#[experimental(\"thread/fork.attachToSource\")]",
+            "pub attach_to_source: bool",
+            "#[experimental(\"thread/list.attachedToThreadId\")]",
+            "pub attached_to_thread_id: Option<String>"
+          ]
+        },
+        {
+          "id": "mcp.cancel-dropped-tool-response",
+          "kind": "turn_lifecycle",
+          "file": "codex-rs/rmcp-client/src/tool_request.rs",
+          "reason": "Dropping a native response future cancels remote tool work without inventing a result.",
+          "file_contains_all": [
+            "struct CancelOnDrop",
+            "let mut cancellation = CancelOnDrop",
+            "let result = handle.await_response().await",
+            "cancellation.0 = None",
+            "notify_cancelled(CancelledNotificationParam::new("
+          ]
+        },
+        {
+          "id": "features.reasoning-effort-default",
+          "kind": "feature_gate",
+          "file": "codex-rs/features/src/lib.rs",
+          "reason": "Supported native conversations enable reasoning-effort changes by default.",
+          "file_contains_all": [
+            "id: Feature::ReasoningEffortOverride,\n        key: \"reasoning_effort_override\",\n        stage: Stage::Stable,\n        default_enabled: true"
+          ]
+        },
+        {
+          "id": "memory.fresh-profile-v2-default",
+          "kind": "session_lifecycle",
+          "file": "codex-rs/core/src/config/mod.rs",
+          "reason": "Fresh profiles use memory v2 only when enabled, unselected and not opted out; IO errors do not authorize migration.",
+          "file_contains_all": [
+            "if features.enabled(Feature::MemoryTool)\n            && memories.version.is_none()",
+            "&& memories.dual_write != Some(false)",
+            "tokio::fs::try_exists(codex_home.join(MemoryVersion::V1.directory_name())).await",
+            "memories.version = Some(MemoryVersion::V2)"
+          ]
+        },
+        {
+          "id": "tools.namespace-native-description",
+          "kind": "tool_schema",
+          "file": "codex-rs/core/src/tools/spec_plan.rs",
+          "reason": "Only MCP namespaces receive automatic descriptions; intentional native empty descriptions remain.",
+          "file_contains_all": [
+            "merge_into_namespaces(specs, &mcp_namespaces)",
+            "&& mcp_namespaces.contains(namespace.name.as_str())"
+          ]
         }
       ],
-      "tested_codex_release": "rust-v0.164.0",
+      "tested_codex_release": "rust-v0.165.0",
       "patch_deltas": [
         {
           "from": "rust-v0.150.0",
@@ -3281,6 +3514,13 @@
           "tag_object": "fe3b29455488c2e189e43ad5526a107900c5e1b7",
           "audit_note": "migration/codex-rust-v0.164.0-audit.md",
           "summary": "Qualifies independent prompt-cache/session identities, metadata replacement+patch, transient provider-catalog retention, moved incremental base-instruction ownership, scoped CLI config overrides, compressed resume/saved settings, and isolated failed compaction. Native presets, images, MCP enterprise auth and credential masking remain upstream-owned."
+        },
+        {
+          "from": "rust-v0.164.0",
+          "to": "rust-v0.165.0",
+          "source_commit": "360319d8dee62d87e2d59fc0c21805d79519cfed",
+          "audit_note": "migration/codex-rust-v0.165.0-audit.md",
+          "summary": "Qualifies native Vertex routing, originator-scoped catalogs, terminal model-not-found errors, experimental attached forks, cancellation on dropped MCP responses, native namespace descriptions, reasoning effort changes and fresh-profile memory v2. Prodex preserves direct GCP resume and separates its authorized release-number transition from ordinary SemVer comparison."
         }
       ],
       "app_server_protocol": {
@@ -3303,30 +3543,30 @@
       }
     },
     "latestRelease": {
-      "tag_name": "rust-v0.164.0",
-      "name": "0.164.0",
-      "published_at": "2026-10-23T04:48:10Z",
-      "html_url": "https://github.com/openai/codex/releases/tag/rust-v0.164.0",
+      "tag_name": "rust-v0.165.0",
+      "name": "0.165.0",
+      "published_at": "2026-10-27T20:09:38Z",
+      "html_url": "https://github.com/openai/codex/releases/tag/rust-v0.165.0",
       "body_head": [
         "## New Features",
         "",
-        "- Save reusable prompts and slash commands in ten numbered `/presets` slots, with a keyboard menu for quick access. (#54380, #54381)",
-        "- Set model, reasoning effort, speed, and permission profiles directly with inline `/model` and `/permissions` arguments. (#54378, #54383)",
-        "- Preview viewed and generated images in the fullscreen transcript on terminals supporting Kitty or Sixel graphics. (#54216)",
-        "- Authenticate enterprise MCP connections using eligible Codex account grants or dedicated sign-in, including OAuth clients requiring secrets. (#55334, #55859, #56001)",
-        "- Mask credentials during supported remote Bash commands and Zsh snapshot sessions, including credentials from custom providers. (#54309, #54432, #56049)",
-        "- The Amazon Bedrock setup wizard is now enabled by default, with API key entry grouped alongside other AWS sign-in methods when credentials are detected. (#56033, #56023)",
+        "- Added a built-in Google Cloud Vertex AI provider, configured with `model_provider = \"gcp\"`. (#56265)",
+        "- Added GPT-6.1 Terra to the model catalogs. (#57337)",
+        "- Added a repository filter to the session picker and directory grouping to the agent command center, making it easier to navigate sessions across linked worktrees. (#56308)",
+        "- Added experimental attached thread forks to the app-server API. (#56351)",
+        "- Enabled reasoning effort changes during a conversation by default for supported models. (#56163)",
+        "- Enabled memory v2 by default for fresh profiles and added support for importing external-agent memories into it. (#56211, #56414)",
         "",
         "## Bug Fixes",
         "",
-        "- Failed compaction no longer leaves partial summaries in conversation history, and background compaction failures fall back without panicking. (#53932, #55581)",
-        "- Resuming sessions now finds compressed histories and restores saved thread settings instead of replacing them with global defaults. (#54008, #55923)",
-        "- Windows HTTPS and WebSocket connections now handle proxy authentication challenges using the signed-in user’s Negotiate or NTLM credentials. (#55994, #56000)",
-        "- CLI configuration overrides are preserved when `-c` or `--config` appears at multiple subcommand levels. (#56022)",
-        "- Queued prompts now wait for pending permission selections to resolve before continuing. (#55682)",
-        "- Hardened sandbox checks for case-variant metadata paths on macOS and replaceable symlinks used to locate executables. (#54273, #55384)",
+        "- Fixed fresh TUI sessions to honor the server’s default approval reviewer when no explicit override is provided. (#56090)",
+        "- Kept TUI preferences editable and immediately applicable when execution settings are invalid. (#56091)",
+        "- Cancelled remote MCP tool requests when their local response futures are dropped. (#56132)",
+        "- Prevented queued agent messages from restarting work after an interrupt or a switch to Plan mode. (#56330)",
+        "- Stopped retrying when a provider reports that a model was not found, preserving its error message. (#56445)",
+        "- Closed a marketplace URL validation gap that could allow Git to connect to a different host than the one checked against allowed patterns. (#56263)",
         "",
-        "## Chores",
+        "## Changelog",
         ""
       ]
     }

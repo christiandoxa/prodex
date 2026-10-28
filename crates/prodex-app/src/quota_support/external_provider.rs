@@ -182,6 +182,11 @@ fn custom_model_provider_display_name(provider_id: &str) -> String {
         {
             "Amazon Bedrock".to_string()
         }
+        _ if ascii_casefold_equal_exact(provider_id, "gcp")
+            .expect("Mojo Vertex provider comparison failed") =>
+        {
+            "Google Cloud Vertex AI".to_string()
+        }
         _ => format!("Custom provider ({provider_id})"),
     }
 }

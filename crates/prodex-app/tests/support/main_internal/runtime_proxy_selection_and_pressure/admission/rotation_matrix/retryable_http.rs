@@ -168,3 +168,30 @@ fn compact_rate_limit_pool_recovery_retries_until_success() {
         "compact must wait for a retryable profile instead of surfacing temporary 429: {log}"
     );
 }
+
+#[test]
+fn runtime_proxy_terminal_model_not_found_preserves_status_without_rotation_01650() {
+    for (status_line, expected_status) in [
+        ("HTTP/1.1 400 Bad Request", 400),
+        ("HTTP/1.1 403 Forbidden", 403),
+        ("HTTP/1.1 404 Not Found", 404),
+    ] {
+        let backend = RuntimeProxyBackend::start_with_fault_script(
+            RuntimeProxyBackendFaultScript::new([RuntimeProxyBackendFaultStep::model_not_found(
+                RuntimeProxyBackendFaultRoute::Responses, "main-account", status_line,
+            )]),
+        );
+        let harness = ready_profiles(&backend);
+        let reply = proxy_runtime_responses_request(
+            165, &responses_request(br#"{"input":[],"model":"missing-fixture-model"}"#),
+            harness.shared(),
+        ).expect("native terminal model error should remain observable");
+        let (status, body, profile) = consume_responses_reply(reply);
+        assert_eq!(status, expected_status, "{body}");
+        assert_eq!(serde_json::from_str::<serde_json::Value>(&body).unwrap(),
+            serde_json::json!({"error": {"type": "invalid_request_error", "code": "model_not_found",
+                "message": "Requested fixture model is unavailable"}}));
+        assert_eq!(profile, None);
+        assert_eq!(backend.responses_accounts(), ["main-account"], "terminal failure must not replay");
+    }
+}

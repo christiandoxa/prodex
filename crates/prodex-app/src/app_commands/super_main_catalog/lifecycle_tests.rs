@@ -321,3 +321,41 @@ fn main_launch_uses_account_default_effort_and_keeps_explicit_override_04394() {
         (Some("gpt-6.1-terra".into()), Some("medium".into()))
     );
 }
+
+#[test]
+fn cca_originator_catalogs_do_not_pollute_cli_main_or_subagent_01650() {
+    let fixture = Fixture::new("originator-scope", chatgpt());
+    fixture.cache(&["gpt-6.1-sol"]);
+    let partition = json!({"models":[{
+        "slug":"cca-only-model", "visibility":"list", "supported_in_api":true
+    }]})
+    .to_string();
+    for originator in [
+        "codex_work_cca",
+        "codex_work_web",
+        "codex_work_desktop",
+        "codex_work_mobile",
+        "chatgpt_cca",
+    ] {
+        let path = fixture.home.join(format!("models_cache.{originator}.json"));
+        fs::write(&path, &partition).unwrap();
+        let catalog = effective_provider_model_catalog(ProviderId::OpenAi);
+        let main = main_model_choices(ProviderId::OpenAi, None);
+        assert_eq!(catalog.model_ids(), ["gpt-6.1-sol"]);
+        assert_eq!(ids(&main), ["gpt-6.1-sol"]);
+        assert_eq!(
+            main.iter()
+                .map(|choice| choice.choice.clone())
+                .collect::<Vec<_>>(),
+            catalog.choices(ProviderId::OpenAi, None, &catalog.model_ids())
+        );
+        assert_eq!(fs::read_to_string(path).unwrap(), partition);
+    }
+    fs::remove_file(fixture.home.join("models_cache.json")).unwrap();
+    assert!(
+        effective_provider_model_catalog(ProviderId::OpenAi)
+            .model_ids()
+            .is_empty(),
+        "missing default cache must not fall back into a CCA partition"
+    );
+}

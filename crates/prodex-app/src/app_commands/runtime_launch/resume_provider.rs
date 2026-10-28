@@ -127,6 +127,7 @@ fn resolve_bound_provider_identity(value: Option<&str>) -> Result<Option<Provide
         .expect("Mojo Bedrock provider comparison failed")
         || ascii_casefold_equal_exact(value, "amazon-bedrock-runtime")
             .expect("Mojo Bedrock provider comparison failed")
+        || ascii_casefold_equal_exact(value, "gcp").expect("Mojo Vertex provider comparison failed")
     {
         return Ok(None);
     }
@@ -184,8 +185,8 @@ mod tests {
     }
 
     #[test]
-    fn upstream_bedrock_provider_ids_remain_direct_on_resume() {
-        for provider in ["amazon-bedrock", "amazon-bedrock-runtime"] {
+    fn upstream_cloud_provider_ids_remain_direct_on_resume() {
+        for provider in ["amazon-bedrock", "amazon-bedrock-runtime", "gcp", "GCP"] {
             assert_eq!(
                 resolve_bound_provider_identity(Some(provider)).unwrap(),
                 None

@@ -86,6 +86,12 @@ const REQUIRED_CRITICAL_FILES = [
   "codex-rs/core/src/session/async_compaction.rs",
   "codex-rs/thread-store/src/local/read_thread.rs",
   "codex-rs/app-server/src/request_processors/persisted_resume_settings.rs",
+  "codex-rs/model-provider/src/gcp/mod.rs",
+  "codex-rs/models-manager/src/originator.rs",
+  "codex-rs/model-provider/src/models_endpoint.rs",
+  "codex-rs/codex-api/src/error.rs",
+  "codex-rs/protocol/src/error.rs",
+  "codex-rs/rmcp-client/src/tool_request.rs",
 ];
 
 const REQUIRED_FILE_CONTAINS = {
@@ -222,6 +228,10 @@ const REQUIRED_FILE_CONTAINS = {
     "to_ascii_json_string",
   ],
   "codex-rs/models-manager/src/cache.rs": [
+    "fn for_originator(&self, originator: ModelCatalogOriginator)",
+    "with_extension(format!(\"{}.json\", originator.as_str()))",
+    "entry.identity.as_deref() != Some(identity)",
+    "entry.etag.as_deref() != Some(etag)",
     "ModelsCacheEntry",
     "identity: Option<String>",
     "refresh_ttl",
@@ -243,6 +253,8 @@ const REQUIRED_FILE_CONTAINS = {
     "has_stable_account",
   ],
   "codex-rs/models-manager/models.json": [
+    "\"slug\": \"gpt-6.1-terra\"",
+    "\"display_name\": \"GPT-6.1 Terra\"",
     "\"slug\": \"gpt-6.1-sol\"",
     "\"display_name\": \"GPT-6.1-Sol\"",
     "\"slug\": \"gpt-6-sol\"",
@@ -283,6 +295,9 @@ const REQUIRED_FILE_CONTAINS = {
     "model_tool_name_len(&model_name), 128",
   ],
   "codex-rs/model-provider-info/src/lib.rs": [
+    "pub fn create_gcp_provider()",
+    "pub fn is_gcp(&self)",
+    "(GCP_PROVIDER_ID, gcp_provider)",
     "ModelProviderInfo",
     "supports_standalone_web_search",
     "pub fn is_openai",
@@ -509,7 +524,8 @@ const REQUIRED_FILE_CONTAINS = {
     "Some(self.hashes.clone())",
   ],
   "codex-rs/core/src/tools/spec_plan.rs": [
-    "merge_into_namespaces(specs)",
+    "&& mcp_namespaces.contains(namespace.name.as_str())",
+    "merge_into_namespaces(specs, &mcp_namespaces)",
     "model_info.supports_search_tool",
     "tool_exposure_with_namespace_override",
     "code_mode_only_strict_3p_tools",
@@ -548,6 +564,10 @@ const REQUIRED_FILE_CONTAINS = {
     "normalize_lookup_key",
   ],
   "codex-rs/core/src/config/mod.rs": [
+    "if features.enabled(Feature::MemoryTool)\n            && memories.version.is_none()",
+    "&& memories.dual_write != Some(false)",
+    "tokio::fs::try_exists(codex_home.join(MemoryVersion::V1.directory_name())).await",
+    "memories.version = Some(MemoryVersion::V2)",
     "respect_system_proxy",
     "Feature::RespectSystemProxy",
     "resolve_bootstrap_respect_system_proxy",
@@ -558,6 +578,7 @@ const REQUIRED_FILE_CONTAINS = {
     "feature_requirements",
   ],
   "codex-rs/features/src/lib.rs": [
+    "id: Feature::ReasoningEffortOverride,\n        key: \"reasoning_effort_override\",\n        stage: Stage::Stable,\n        default_enabled: true",
     "RespectSystemProxy",
     "respect_system_proxy",
     "key: \"respect_system_proxy\"",
@@ -762,6 +783,10 @@ const REQUIRED_FILE_CONTAINS = {
     "ServerNotification",
   ],
   "codex-rs/app-server-protocol/src/protocol/v2/thread.rs": [
+    "#[experimental(\"thread/fork.attachToSource\")]",
+    "pub attach_to_source: bool",
+    "#[experimental(\"thread/list.attachedToThreadId\")]",
+    "pub attached_to_thread_id: Option<String>",
     "ThreadStartParams",
     "ThreadForkParams",
     "pub thread_source: Option<ThreadSource>",
@@ -1016,6 +1041,50 @@ const REQUIRED_FILE_CONTAINS = {
       "thread_id == history.conversation_id",
       "Some(_) => crossed_foreign_snapshot = true",
       "None if !crossed_foreign_snapshot => return Some(&event.thread_settings)"
+  ],
+  "codex-rs/model-provider/src/gcp/mod.rs": [
+    "struct GcpModelProvider",
+    "GOOGLE_CLOUD_PROJECT",
+    "GOOGLE_CLOUD_LOCATION",
+    "ProviderAccount::Gcp",
+    "requires_openai_auth: false",
+    "RemoteCompactionSupport::V2",
+    "model.use_responses_lite = false",
+    "model.tool_mode = Some(ToolMode::Direct)",
+    "model.apply_patch_tool_type = None"
+  ],
+  "codex-rs/models-manager/src/originator.rs": [
+    "pub enum ModelCatalogOriginator",
+    "\"codex_work_cca\"",
+    "\"codex_work_web\"",
+    "\"codex_work_desktop\"",
+    "\"codex_work_mobile\"",
+    "\"chatgpt_cca\"",
+    "_ => None"
+  ],
+  "codex-rs/model-provider/src/models_endpoint.rs": [
+    "fn for_originator(",
+    "headers.retain(|name, _| !name.eq_ignore_ascii_case(\"originator\"))",
+    "headers.insert(\"originator\".to_string(), originator.as_str().into())"
+  ],
+  "codex-rs/codex-api/src/error.rs": [
+    "pub(crate) fn parse_terminal_provider_error(",
+    "\"model_not_found\"",
+    "None | Some(StatusCode::BAD_REQUEST | StatusCode::FORBIDDEN | StatusCode::NOT_FOUND)",
+    "Some(ApiError::ModelNotFound {",
+    "unwrap_or(code)"
+  ],
+  "codex-rs/protocol/src/error.rs": [
+    "| CodexErrorDetails::ModelNotFound { .. }",
+    "CodexErrorDetails::ModelNotFound { .. } => CodexErrorInfo::ModelNotFound",
+    "CodexErrorDetails::ModelNotFound { status, .. } => *status"
+  ],
+  "codex-rs/rmcp-client/src/tool_request.rs": [
+    "struct CancelOnDrop",
+    "let mut cancellation = CancelOnDrop",
+    "let result = handle.await_response().await",
+    "cancellation.0 = None",
+    "notify_cancelled(CancelledNotificationParam::new("
   ],
 };
 
@@ -2055,7 +2124,7 @@ const REQUIRED_SEMANTIC_CHECKS = [
     kind: "tool_capability",
     file: "codex-rs/core/src/tools/spec_plan.rs",
     file_contains_all: [
-      "merge_into_namespaces(specs)",
+      "merge_into_namespaces(specs, &mcp_namespaces)",
       "model_info.supports_search_tool",
       "tool_exposure_with_namespace_override",
       "code_mode_only_strict_3p_tools",
@@ -2408,6 +2477,140 @@ const REQUIRED_SEMANTIC_CHECKS = [
       "config.service_tier.clone_from(&settings.service_tier)",
       "config.model_reasoning_summary = settings.reasoning_summary",
       "existing_thread.resume_config_snapshot().await"
+    ]
+  },
+  {
+    "id": "model-provider.gcp-native",
+    "kind": "provider_boundary",
+    "file": "codex-rs/model-provider/src/gcp/mod.rs",
+    "file_contains_all": [
+      "struct GcpModelProvider",
+      "GOOGLE_CLOUD_PROJECT",
+      "GOOGLE_CLOUD_LOCATION",
+      "ProviderAccount::Gcp",
+      "requires_openai_auth: false",
+      "RemoteCompactionSupport::V2",
+      "model.use_responses_lite = false",
+      "model.tool_mode = Some(ToolMode::Direct)",
+      "model.apply_patch_tool_type = None"
+    ]
+  },
+  {
+    "id": "model-provider.gcp-registration",
+    "kind": "provider_selection",
+    "file": "codex-rs/model-provider-info/src/lib.rs",
+    "file_contains_all": [
+      "pub fn create_gcp_provider()",
+      "pub fn is_gcp(&self)",
+      "(GCP_PROVIDER_ID, gcp_provider)"
+    ]
+  },
+  {
+    "id": "models.originator-partitions",
+    "kind": "cache_identity",
+    "file": "codex-rs/models-manager/src/originator.rs",
+    "file_contains_all": [
+      "pub enum ModelCatalogOriginator",
+      "\"codex_work_cca\"",
+      "\"codex_work_web\"",
+      "\"codex_work_desktop\"",
+      "\"codex_work_mobile\"",
+      "\"chatgpt_cca\"",
+      "_ => None"
+    ]
+  },
+  {
+    "id": "models.originator-cache-isolation",
+    "kind": "cache_identity",
+    "file": "codex-rs/models-manager/src/cache.rs",
+    "file_contains_all": [
+      "fn for_originator(&self, originator: ModelCatalogOriginator)",
+      "with_extension(format!(\"{}.json\", originator.as_str()))",
+      "entry.identity.as_deref() != Some(identity)",
+      "entry.etag.as_deref() != Some(etag)"
+    ]
+  },
+  {
+    "id": "models.originator-request-isolation",
+    "kind": "header_behavior",
+    "file": "codex-rs/model-provider/src/models_endpoint.rs",
+    "file_contains_all": [
+      "fn for_originator(",
+      "headers.retain(|name, _| !name.eq_ignore_ascii_case(\"originator\"))",
+      "headers.insert(\"originator\".to_string(), originator.as_str().into())"
+    ]
+  },
+  {
+    "id": "responses.terminal-model-not-found",
+    "kind": "retry_lifecycle",
+    "file": "codex-rs/codex-api/src/error.rs",
+    "file_contains_all": [
+      "pub(crate) fn parse_terminal_provider_error(",
+      "\"model_not_found\"",
+      "None | Some(StatusCode::BAD_REQUEST | StatusCode::FORBIDDEN | StatusCode::NOT_FOUND)",
+      "Some(ApiError::ModelNotFound {",
+      "unwrap_or(code)"
+    ]
+  },
+  {
+    "id": "responses.model-not-found-nonretryable",
+    "kind": "retry_lifecycle",
+    "file": "codex-rs/protocol/src/error.rs",
+    "file_contains_all": [
+      "| CodexErrorDetails::ModelNotFound { .. }",
+      "CodexErrorDetails::ModelNotFound { .. } => CodexErrorInfo::ModelNotFound",
+      "CodexErrorDetails::ModelNotFound { status, .. } => *status"
+    ]
+  },
+  {
+    "id": "app-server.attached-fork-fields",
+    "kind": "thread_lifecycle",
+    "file": "codex-rs/app-server-protocol/src/protocol/v2/thread.rs",
+    "file_contains_all": [
+      "#[experimental(\"thread/fork.attachToSource\")]",
+      "pub attach_to_source: bool",
+      "#[experimental(\"thread/list.attachedToThreadId\")]",
+      "pub attached_to_thread_id: Option<String>"
+    ]
+  },
+  {
+    "id": "mcp.cancel-dropped-tool-response",
+    "kind": "turn_lifecycle",
+    "file": "codex-rs/rmcp-client/src/tool_request.rs",
+    "file_contains_all": [
+      "struct CancelOnDrop",
+      "let mut cancellation = CancelOnDrop",
+      "let result = handle.await_response().await",
+      "cancellation.0 = None",
+      "notify_cancelled(CancelledNotificationParam::new("
+    ]
+  },
+  {
+    "id": "features.reasoning-effort-default",
+    "kind": "feature_gate",
+    "file": "codex-rs/features/src/lib.rs",
+    "file_contains_all": [
+      "id: Feature::ReasoningEffortOverride,\n        key: \"reasoning_effort_override\",\n        stage: Stage::Stable,\n        default_enabled: true"
+    ]
+  },
+  {
+    "id": "memory.fresh-profile-v2-default",
+    "kind": "session_lifecycle",
+    "file": "codex-rs/core/src/config/mod.rs",
+    "file_contains_all": [
+      "if features.enabled(Feature::MemoryTool)\n            && memories.version.is_none()",
+      "&& memories.dual_write != Some(false)",
+      "tokio::fs::try_exists(codex_home.join(MemoryVersion::V1.directory_name())).await",
+      "memories.version = Some(MemoryVersion::V2)"
+    ]
+  },
+  {
+    "id": "tools.namespace-native-description",
+    "kind": "tool_schema",
+    "file": "codex-rs/core/src/tools/spec_plan.rs",
+    "file_contains_all": [
+      "merge_into_namespaces(specs, &mcp_namespaces)",
+      "&& mcp_namespaces.contains(namespace.name.as_str())"
     ]
   },
 ];
@@ -2978,8 +3181,20 @@ function runSelfTest() {
     throw new Error(`self-test valid baseline failed: ${valid.errors.join("; ")}`);
   }
 
-  // Every 0.164 contract must stay mandatory; losing its decisive marker fails closed.
+  // Every new 0.165 contract and retained 0.164 contract stays mandatory.
   for (const id of [
+    "model-provider.gcp-native",
+    "model-provider.gcp-registration",
+    "models.originator-partitions",
+    "models.originator-cache-isolation",
+    "models.originator-request-isolation",
+    "responses.terminal-model-not-found",
+    "responses.model-not-found-nonretryable",
+    "app-server.attached-fork-fields",
+    "mcp.cancel-dropped-tool-response",
+    "features.reasoning-effort-default",
+    "memory.fresh-profile-v2-default",
+    "tools.namespace-native-description",
     "responses.prompt-cache-key-independent",
     "turn-metadata.replacement-then-patch",
     "app-server.client-metadata-patch-wire",
@@ -3134,11 +3349,11 @@ function runSelfTest() {
     mutate: (compat) => {
       const check = semanticCheck(compat, "tools.namespace-gate-removal");
       check.file_contains_all = check.file_contains_all.filter(
-        (value) => value !== "merge_into_namespaces(specs)",
+        (value) => value !== "merge_into_namespaces(specs, &mcp_namespaces)",
       );
     },
     expectedMessage:
-      'codex.compatibility.semantic_checks.tools.namespace-gate-removal.file_contains_all missing "merge_into_namespaces(specs)"',
+      'codex.compatibility.semantic_checks.tools.namespace-gate-removal.file_contains_all missing "merge_into_namespaces(specs, &mcp_namespaces)"',
   });
 
   assertSelfTestError({
