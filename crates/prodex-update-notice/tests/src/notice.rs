@@ -361,3 +361,47 @@ fn update_cache_reader_rejects_symlink() {
 
     let _ = fs::remove_dir_all(paths.root);
 }
+
+#[test]
+fn codex_aligned_update_cache_never_reuses_legacy_release_numbers() {
+    let paths = test_paths("aligned-cache-migration");
+    fs::create_dir_all(&paths.root).unwrap();
+    let legacy = paths.root.join("update-check.json");
+    let old = serde_json::json!({
+        "source": "GitHub", "latest_version": "0.439.5",
+        "checked_at": Local::now().timestamp(),
+        "codex_latest_version": "0.164.0", "codex_checked_at": Local::now().timestamp()
+    })
+    .to_string();
+    fs::write(&legacy, &old).unwrap();
+    assert_eq!(
+        cached_latest_prodex_version(&paths, ProdexReleaseSource::GitHub).unwrap(),
+        None
+    );
+    assert_eq!(
+        cached_latest_codex_version(&paths, "0.165.0").unwrap(),
+        None
+    );
+    save_update_check_cache(
+        &paths,
+        &UpdateCheckCache {
+            source: ProdexReleaseSource::GitHub,
+            latest_version: "0.165.0".into(),
+            checked_at: Local::now().timestamp(),
+            ..UpdateCheckCache::default()
+        },
+    )
+    .unwrap();
+    assert_eq!(
+        cached_latest_prodex_version(&paths, ProdexReleaseSource::GitHub)
+            .unwrap()
+            .as_deref(),
+        Some("0.165.0")
+    );
+    assert_eq!(
+        fs::read_to_string(&legacy).unwrap(),
+        old,
+        "legacy cache is not rewritten"
+    );
+    let _ = fs::remove_dir_all(&paths.root);
+}

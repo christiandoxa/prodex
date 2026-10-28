@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import fs from "node:fs/promises";
+import { mergedVersionTagsInReleaseOrder } from "./release-lineage.mjs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { fileMatchesAnyPattern, git, parseNumstat, parsePositiveInteger } from "./guard-common.mjs";
@@ -294,11 +295,8 @@ async function resolveIgnoreBefore(ignoreBefore, rangeBase, head) {
     return { value: ignoreBefore };
   }
 
-  const { stdout } = await git(["tag", "--merged", head, "--sort=-version:refname"], { cwd: repoRoot });
-  const versionTags = stdout
-    .split(/\r?\n/)
-    .map((tag) => tag.trim())
-    .filter((tag) => VERSION_TAG_PATTERN.test(tag));
+  const versionTags = mergedVersionTagsInReleaseOrder(repoRoot, head)
+    .map(({ tag }) => tag).filter((tag) => VERSION_TAG_PATTERN.test(tag)).reverse();
 
   for (const tag of versionTags) {
     if ((await mergeBaseIsAncestor(rangeBase, tag)) && (await mergeBaseIsAncestor(tag, head))) {

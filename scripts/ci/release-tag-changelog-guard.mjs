@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import fs from "node:fs/promises";
+import { mergedVersionTagsInReleaseOrder } from "./release-lineage.mjs";
 import path from "node:path";
 import { repoRoot } from "../npm/common.mjs";
 import {
@@ -167,11 +168,8 @@ function isAcceptedReleaseMarkerSubject(subject, version) {
 }
 
 async function mergedVersionTags(commit) {
-  const { stdout } = await git(["tag", "--merged", commit, "--sort=version:refname"], { cwd: repoRoot });
-  return stdout
-    .split(/\r?\n/)
-    .filter(Boolean)
-    .map((tag) => ({ tag, version: normalizeVersionTag(tag) }))
+  return mergedVersionTagsInReleaseOrder(repoRoot, commit)
+    .map(({ tag }) => ({ tag, version: normalizeVersionTag(tag) }))
     .filter(({ version }) => version);
 }
 
