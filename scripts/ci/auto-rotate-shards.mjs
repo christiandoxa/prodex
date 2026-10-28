@@ -1,4 +1,6 @@
 #!/usr/bin/env node
+import assert from "node:assert/strict";
+import { environmentIntegrationBundle } from "./integration-test-artifact.mjs";
 import {
   cargoIntegrationTestFilterStep,
   defaultJobCount,
@@ -207,6 +209,12 @@ function shardSteps(shard, options) {
       ["--test-threads=1"],
       options,
     );
+    if (options.bundle) {
+      assert.equal(options.allFeatures, false, "bundled integration tests require default features");
+      step.command = options.bundle.executable;
+      step.args = [filter, "--test-threads=1"];
+      step.cwd = options.bundle.cwd;
+    }
     if (shard.timeoutMs) {
       step.timeoutMs = shard.timeoutMs;
     }
@@ -319,6 +327,10 @@ async function main() {
   if (selectedShards.length === 0) {
     throw new Error(`No auto-rotate shards selected for ${args.shardIndex}/${args.shardCount}`);
   }
+  if (process.env.PRODEX_INTEGRATION_BUNDLE !== undefined) {
+    assert.equal(args.allFeatures, false, "bundled integration tests require default features");
+  }
+  args.bundle = environmentIntegrationBundle();
   await runShardsParallel(selectedShards, args);
 }
 

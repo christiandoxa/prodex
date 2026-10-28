@@ -12,10 +12,10 @@ export const WINDOWS_SKIPS = Object.freeze([
   "login::", "quota_doctor::", "run::", "shared_state::", "super_mode::",
   "continuity_failure_reason_metrics_", "rtk::tests::",
 ]);
-const sha256 = (value) => createHash("sha256").update(value).digest("hex");
+export const sha256 = (value) => createHash("sha256").update(value).digest("hex");
 const lines = (value = "") => value.split(/\r?\n/u).map((line) => line.trim()).filter(Boolean);
 
-function command(program, args, cwd, options = {}) {
+export function command(program, args, cwd, options = {}) {
   const result = spawnSync(program, args, {
     cwd, encoding: "utf8", maxBuffer: 64 * 1024 * 1024,
     timeout: 30 * 60 * 1000, windowsHide: true, ...options,
@@ -25,7 +25,7 @@ function command(program, args, cwd, options = {}) {
   return result.stdout;
 }
 
-function identity(env, repository) {
+export function identity(env, repository) {
   assert.match(env.GITHUB_SHA ?? "", /^[a-f0-9]{40}$/u, "exact GitHub source SHA required");
   for (const key of ["GITHUB_RUN_ID", "GITHUB_RUN_ATTEMPT"]) {
     assert.match(env[key] ?? "", /^[1-9][0-9]*$/u, `${key} required`);
@@ -57,15 +57,19 @@ export function selectTestExecutable(output) {
   return artifacts[0].executable;
 }
 
-export function validateManifest(manifest, expected, binary, inventory) {
-  assert.equal(manifest.schema, 1);
-  assert.equal(manifest.package, "prodex-app");
+export function validateRunIdentity(manifest, expected) {
   for (const key of ["source_sha", "run_id", "platform", "arch", "checkout_path_sha256"]) {
     assert.equal(manifest[key], expected[key], `test artifact ${key} mismatch`);
   }
   // Rerun-failed may reuse the successful producer from the SAME workflow run.
   assert.ok(Number.isSafeInteger(manifest.attempt) && manifest.attempt >= 1 && manifest.attempt <= expected.attempt,
     "invalid or future producing attempt");
+}
+
+export function validateManifest(manifest, expected, binary, inventory) {
+  assert.equal(manifest.schema, 1);
+  assert.equal(manifest.package, "prodex-app");
+  validateRunIdentity(manifest, expected);
   assert.equal(manifest.binary, expected.platform === "win32" ? "prodex-app-tests.exe" : "prodex-app-tests");
   assert.ok(binary.length > 0, "empty test executable");
   assert.equal(manifest.binary_sha256, sha256(binary), "test executable checksum mismatch");

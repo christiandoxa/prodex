@@ -208,7 +208,7 @@ jobs:
           set -euo pipefail
           deadline=$((SECONDS + 75 * 60))
           while true; do
-            runs_json="$(gh run list --workflow ci.yml --event push --limit 50 --json headSha,status,conclusion,url)"
+            runs_json="$(gh run list --workflow ci.yml --event push --commit "${TARGET_SHA}" --limit 50 --json headSha,status,conclusion,url)"
             set +e
             result="$(
               RUNS_JSON="${runs_json}" python - <<'PY'
@@ -254,8 +254,8 @@ jobs:
               echo "timed out waiting for CI success for ${TARGET_SHA}: ${result}" >&2
               exit 1
             fi
-            echo "CI for ${TARGET_SHA}: ${result}; polling again in 30s"
-            sleep 30
+            echo "CI for ${TARGET_SHA}: ${result}; polling again in 10s"
+            sleep 10
           done
 
 

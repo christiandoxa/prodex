@@ -51,53 +51,30 @@ test("auto-rotate CI shard index must be in range", () => {
   assert.match(result.stderr, /--shard-index must be an integer between 0 and 1/);
 });
 
-test("Windows CI partitions tests and installer work with one cache writer", () => {
+test("Windows tests retain every lane while integration consumers share one build", () => {
   const workflow = readFileSync(".github/workflows/ci.yml", "utf8");
-  const block = workflow.match(/\n  windows-workspace:\n([\s\S]*?)\n  windows-app-test-build:/)?.[1];
-  assert.ok(block, "windows-workspace job missing");
-
-  const suites = [...block.matchAll(/^\s+- suite: (\S+)$/gm)].map((match) => match[1]);
-  assert.deepEqual(suites, WINDOWS_TEST_SUITES);
-  assert.equal(new Set(suites).size, WINDOWS_TEST_SUITES.length);
-  assert.equal(block.match(/save_cache: true/g)?.length, 1);
-  assert.equal(block.match(/save_cache: false/g)?.length, 5);
-  assert.match(block, /CARGO_INCREMENTAL: "0"/);
-  assert.match(block, /CARGO_PROFILE_TEST_DEBUG: "0"/);
-  assert.equal(block.match(/shell: bash/g)?.length, 3);
-  assert.match(block, /--workspace --exclude prodex --exclude prodex-app/);
-  assert.match(
-    block,
-    /-p prodex --lib --bins --examples --test internal_commands/,
-  );
-  assert.doesNotMatch(block, /-p prodex --all-features -- --test-threads/);
-  assert.match(block, /--workspace --exclude prodex --exclude prodex-app --exclude 'prodex-runtime-\*' -- --test-threads/);
-  assert.match(block, /-p 'prodex-runtime-\*' -- --test-threads/);
-  assert.doesNotMatch(block, /Run Windows prodex-app tests/);
-  assert.match(block, /Run Windows non-sharded root tests\n\s+if: matrix\.suite == 'root-tests'/);
-  assert.match(
-    block,
-    /Build Windows installer fixture binary\n\s+if: matrix\.suite == 'installer'/,
-  );
-  assert.match(
-    block,
-    /Test Windows installer\n\s+if: matrix\.suite == 'installer'/,
-  );
-  assert.match(block, /Prebuild Windows auto-rotate tests\n\s+if: matrix\.suite == 'root-0' \|\| matrix\.suite == 'root-1'/);
-  assert.match(block, /Run Windows auto-rotate shard .*\n\s+if: matrix\.suite == 'root-0' \|\| matrix\.suite == 'root-1'/);
-  assert.match(block, /auto-rotate-shards\.mjs --jobs 4 --shard-index/);
-  assert.match(block, /--shard-index \$\{\{ matrix\.auto_rotate_shard \}\} --shard-count 2/);
-
-  const appBlock = workflow.match(/\n  windows-prodex-app:\n([\s\S]*?)\n  macos-workspace:/)?.[1];
-  assert.ok(appBlock, "windows-prodex-app job missing");
-  assert.match(appBlock, /fromJSON\(needs\.changes\.outputs\.windows_prodex_app_matrix\)/);
-  assert.match(appBlock, /PRODEX_APP_FILTERS/);
-  assert.match(appBlock, /PRODEX_APP_SKIP_FILTERS/);
-  assert.match(appBlock, /native-test-artifact\.mjs run/);
-  assert.doesNotMatch(appBlock, /rust-cache@|sccache-action@/);
-  const producer = workflow.match(/\n  windows-app-test-build:\n([\s\S]*?)\n  windows-prodex-app:/)?.[1];
-  assert.ok(producer, "one compiler/cache writer is required");
-  assert.match(producer, /native-test-artifact\.mjs pack/);
-  assert.match(producer, /save-if: \$\{\{ github\.ref == 'refs\/heads\/main' \}\}/);
-  const nativeRunner = readFileSync("scripts/ci/native-test-artifact.mjs", "utf8");
-  assert.match(nativeRunner, /--test-threads=1/);
+  const job = (name) => workflow.match(new RegExp(`^  ${name}:\\n[\\s\\S]*?(?=^  [a-z][a-z0-9_-]*:|$(?![\\s\\S]))`, "gm"))?.[0];
+  const workspace = job("windows-workspace");
+  const consumer = job("windows-integration");
+  const producer = job("windows-integration-build");
+  const suites = (body) => [...body.matchAll(/^\s+- suite: (\S+)$/gm)].map((match) => match[1]);
+  assert.deepEqual(new Set([...suites(workspace), ...suites(consumer)]), new Set(WINDOWS_TEST_SUITES));
+  assert.equal(suites(workspace).length + suites(consumer).length, WINDOWS_TEST_SUITES.length);
+  assert.equal(workspace.match(/save_cache: true/g)?.length, 1);
+  assert.match(workspace, /-p prodex --lib --bins --examples --test internal_commands/);
+  assert.match(workspace, /-p prodex --doc/);
+  assert.match(workspace, /--workspace --exclude prodex --exclude prodex-app --exclude 'prodex-runtime-\*'/);
+  assert.match(workspace, /-p 'prodex-runtime-\*' -- --test-threads/);
+  assert.doesNotMatch(workspace, /auto-rotate-shards|Build Windows installer fixture binary/);
+  assert.match(consumer, /needs: \[changes, windows-integration-build\]/);
+  assert.match(consumer, /auto-rotate-shards\.mjs --jobs 4 --shard-index/);
+  assert.match(consumer, /--shard-index \$\{\{ matrix\.auto_rotate_shard \}\} --shard-count 2/);
+  assert.match(consumer, /integration-test-artifact\.mjs restore/);
+  assert.match(consumer, /node --test scripts\/install\.test\.mjs/);
+  assert.doesNotMatch(consumer, /cargo (?:test|build)|rust-cache@|sccache-action@/);
+  assert.match(producer, /integration-test-artifact\.mjs pack/);
+  assert.match(producer, /if-no-files-found: error/);
+  const app = job("windows-prodex-app");
+  assert.match(app, /native-test-artifact\.mjs run/);
+  assert.doesNotMatch(app, /rust-cache@|sccache-action@/);
 });
