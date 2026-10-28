@@ -17,3 +17,12 @@ test("release Mojo CI archive reuse rejects bad provenance and keeps a strict co
   assert.equal(result.status, 0, result.stdout + "\n" + result.stderr);
   assert.match(result.stderr, /Ran 11 tests/);
 });
+
+test("historical main archive reuse verifies inputs, recipe, artifact digest and atomic fallback", () => {
+  const result = spawnSync("python3", ["-m", "unittest", "discover", "-s", "scripts/ci", "-p", "reuse_mojo_release_archive_test.py"], {
+    encoding: "utf8", env: { ...process.env, PYTHONDONTWRITEBYTECODE: "1" }, timeout: 20_000,
+  });
+  if (result.error) throw result.error;
+  assert.equal(result.status, 0, result.stdout + result.stderr);
+  assert.match(result.stderr, /Ran 10 tests/);
+});

@@ -97,7 +97,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          python3 scripts/ci/reuse_mojo_ci_archive.py             --target '${{ matrix.target }}'             --sha "${RELEASE_TARGET_SHA}"             --output-dir 'target/mojo-release/${{ matrix.target }}'
+          python3 scripts/ci/reuse_mojo_ci_archive.py --release-history             --target '${{ matrix.target }}'             --sha "${RELEASE_TARGET_SHA}"             --output-dir 'target/mojo-release/${{ matrix.target }}'
 
       - name: Install Rust target
         if: ${{ steps.reuse-ci-archive.outputs.reused != 'true' && steps.release-archive-cache.outputs.cache-hit != 'true' }}

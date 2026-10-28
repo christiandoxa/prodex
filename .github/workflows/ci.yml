@@ -1554,59 +1554,49 @@ jobs:
         run: node scripts/ci/auto-rotate-shards.mjs --jobs 6 --timings --timings-json
 
   profile-commands-internal:
-    needs: [changes, mojo-runtime-linux-archive]
+    needs: [changes, linux-app-test-build]
     if: ${{ github.event_name != 'schedule' && needs.changes.outputs.heavy == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
-      RUSTC_WRAPPER: sccache
-      PRODEX_MOJO_ARCHIVE: ${{ github.workspace }}/.prodex-ci/mojo-runtime/x86_64-unknown-linux-gnu/libprodex_mojo_core.a
-
+      PRODEX_TEST_BUNDLE: .prodex-ci/linux-app-tests
+      TEST_MANIFEST_SHA256: ${{ needs.linux-app-test-build.outputs.manifest_sha256 }}
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-
-      - name: Download runtime Mojo archive
-        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
-        with:
-          name: mojo-runtime-archive-x86_64-unknown-linux-gnu
-          path: .prodex-ci/mojo-runtime/x86_64-unknown-linux-gnu
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
         with:
           toolchain: 1.99.1
 
-      - name: Install sccache
-        uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
+      - name: Install Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+        with:
+          node-version: 22
+          package-manager-cache: false
 
-      - name: Cache Rust dependencies
-        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
+      - name: Download this run's native test executable
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
+        with:
+          name: linux-app-tests
+          path: .prodex-ci/linux-app-tests
 
       - name: Run profile command internal tests
         shell: bash
-        run: |
-          set -euo pipefail
-          test_log="$(mktemp)"
-          trap 'rm -f "${test_log}"' EXIT
-          if ! cargo test --locked -p prodex-app --lib profile_commands_internal_tests:: -- --test-threads=1 2>&1 | tee "${test_log}"; then
-            exit 1
-          fi
-          if grep -Fq 'running 0 tests' "${test_log}"; then
-            echo "profile command internal tests matched no tests" >&2
-            exit 1
-          fi
+        env:
+          PRODEX_APP_FILTERS: "profile_commands_internal_tests::"
+        run: node scripts/ci/native-test-artifact.mjs run .prodex-ci/linux-app-tests
 
   main-internal-core:
     name: Main internal core (${{ matrix.label }})
-    needs: [changes, mojo-runtime-linux-archive]
+    needs: [changes, linux-app-test-build]
     if: ${{ github.event_name != 'schedule' && needs.changes.outputs.heavy == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
-      RUSTC_WRAPPER: sccache
-      SCCACHE_GHA_RW_MODE: ${{ matrix.save_cache && 'READ_WRITE' || 'READ_ONLY' }}
-      PRODEX_MOJO_ARCHIVE: ${{ github.workspace }}/.prodex-ci/mojo-runtime/x86_64-unknown-linux-gnu/libprodex_mojo_core.a
+      PRODEX_TEST_BUNDLE: .prodex-ci/linux-app-tests
+      TEST_MANIFEST_SHA256: ${{ needs.linux-app-test-build.outputs.manifest_sha256 }}
     strategy:
       fail-fast: false
       matrix:
@@ -1614,46 +1604,39 @@ jobs:
           - shard: 0
             shard_count: 5
             label: weighted shard 1 of 5
-            save_cache: true
           - shard: 1
             shard_count: 5
             label: weighted shard 2 of 5
-            save_cache: false
           - shard: 2
             shard_count: 5
             label: weighted shard 3 of 5
-            save_cache: false
           - shard: 3
             shard_count: 5
             label: weighted shard 4 of 5
-            save_cache: false
           - shard: 4
             shard_count: 5
             label: weighted shard 5 of 5
-            save_cache: false
 
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-
-      - name: Download runtime Mojo archive
-        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
-        with:
-          name: mojo-runtime-archive-x86_64-unknown-linux-gnu
-          path: .prodex-ci/mojo-runtime/x86_64-unknown-linux-gnu
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
         with:
           toolchain: 1.99.1
 
-      - name: Install sccache
-        uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
-
-      - name: Cache Rust dependencies
-        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
+      - name: Install Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
         with:
-          save-if: ${{ matrix.save_cache }}
+          node-version: 22
+          package-manager-cache: false
+
+      - name: Download this run's native test executable
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
+        with:
+          name: linux-app-tests
+          path: .prodex-ci/linux-app-tests
 
       - name: Run main internal core tests ${{ matrix.label }}
         shell: bash
@@ -1701,7 +1684,7 @@ jobs:
 
   main-internal-runtime-proxy:
     name: Main internal runtime proxy (${{ matrix.label }})
-    needs: [changes, mojo-runtime-linux-archive]
+    needs: [changes, linux-app-test-build]
     if: ${{ github.event_name != 'schedule' && needs.changes.outputs.heavy == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -1709,35 +1692,32 @@ jobs:
       fail-fast: false
       matrix: ${{ fromJSON(needs.changes.outputs.runtime_proxy_matrix) }}
     env:
+      PRODEX_TEST_BUNDLE: .prodex-ci/linux-app-tests
+      TEST_MANIFEST_SHA256: ${{ needs.linux-app-test-build.outputs.manifest_sha256 }}
       RUNTIME_PROXY_ARTIFACT_DIR: target/ci/runtime-proxy/${{ matrix.suite }}
       CARGO_TERM_COLOR: always
       RUST_BACKTRACE: "1"
-      RUSTC_WRAPPER: sccache
-      SCCACHE_GHA_RW_MODE: ${{ matrix.save_cache && 'READ_WRITE' || 'READ_ONLY' }}
-      PRODEX_MOJO_ARCHIVE: ${{ github.workspace }}/.prodex-ci/mojo-runtime/x86_64-unknown-linux-gnu/libprodex_mojo_core.a
 
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-
-      - name: Download runtime Mojo archive
-        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
-        with:
-          name: mojo-runtime-archive-x86_64-unknown-linux-gnu
-          path: .prodex-ci/mojo-runtime/x86_64-unknown-linux-gnu
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
         with:
           toolchain: 1.99.1
 
-      - name: Install sccache
-        uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
-
-      - name: Cache Rust dependencies
-        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
+      - name: Install Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
         with:
-          save-if: ${{ matrix.save_cache }}
+          node-version: 22
+          package-manager-cache: false
+
+      - name: Download this run's native test executable
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
+        with:
+          name: linux-app-tests
+          path: .prodex-ci/linux-app-tests
 
       - name: Run runtime proxy internal test shard ${{ matrix.label }}
         shell: bash

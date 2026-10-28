@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { spawnSync } from "node:child_process";
+import { environmentBundle } from "./native-test-artifact.mjs";
 import { parsePositiveInteger, runStep } from "./main-internal-test-runner.mjs";
 import { RUNTIME_CI_BROAD_SHARD_FILTERS } from "./runtime-test-manifest.mjs";
 
@@ -91,7 +92,10 @@ function printHelp() {
   );
 }
 
-function listedMainInternalTests() {
+function listedMainInternalTests(bundle) {
+  if (bundle) return bundle.listing.split(/\r?\n/u)
+    .filter((line) => MAIN_INTERNAL_TEST_PATTERN.test(line))
+    .map((line) => line.replace(/: test$/, ""));
   const result = spawnSync("cargo", ["test", "--locked", "-p", "prodex-app", "--lib", MAIN_INTERNAL_FILTER, "--", "--list"], {
     encoding: "utf8",
     stdio: ["ignore", "pipe", "inherit"],
@@ -180,7 +184,8 @@ async function main() {
     return;
   }
 
-  const allTestNames = listedMainInternalTests();
+  const bundle = environmentBundle();
+  const allTestNames = listedMainInternalTests(bundle);
   const testNames = allTestNames.filter((testName) => !runtimeWorkflowOwns(testName));
   if (testNames.length === 0) {
     throw new Error("No main internal core tests found");
@@ -207,15 +212,10 @@ async function main() {
 
   const step = {
     label: `main-internal-core:${args.shardIndex + 1}/${args.shardCount}`,
-    command: "cargo",
+    command: bundle?.executable ?? "cargo",
+    cwd: bundle?.cwd,
     args: [
-      "test",
-      "--locked",
-      "-p",
-      "prodex-app",
-      "--lib",
-      MAIN_INTERNAL_FILTER,
-      "--",
+      ...(bundle ? [MAIN_INTERNAL_FILTER] : ["test", "--locked", "-p", "prodex-app", "--lib", MAIN_INTERNAL_FILTER, "--"]),
       "--test-threads=1",
       ...skipArgs(nonSelectedTests),
     ],

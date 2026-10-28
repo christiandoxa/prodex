@@ -104,7 +104,7 @@ function pack(directory, env = process.env) {
   process.stdout.write(`Packed ${inventory.count} ${expected.platform}/${expected.arch} tests from ${expected.source_sha}\n`);
 }
 
-export function runBundle(directory, expected, manifestDigest, { repository = root, filters = "", skips = "" } = {}) {
+export function verifiedBundle(directory, expected, manifestDigest, { repository = root } = {}) {
   assert.match(manifestDigest ?? "", /^[a-f0-9]{64}$/u, "independent producer manifest digest required");
   const manifestPath = path.join(directory, "manifest.json");
   assert.ok(lstatSync(manifestPath).isFile() && !lstatSync(manifestPath).isSymbolicLink());
@@ -121,8 +121,22 @@ export function runBundle(directory, expected, manifestDigest, { repository = ro
   // Match Cargo's documented package-root working directory. Test fixtures and
   // compile-time source paths still refer to this exact same-source checkout.
   const cwd = path.join(repository, "crates/prodex-app");
-  const inventory = testInventory(command(executable, ["--list", "--format", "terse"], cwd));
+  const listing = command(executable, ["--list", "--format", "terse"], cwd);
+  const inventory = testInventory(listing);
   validateManifest(manifest, expected, binary, inventory);
+  return { executable, cwd, inventory, listing };
+}
+
+// Supplying a bundle opts in to strict same-run verification. A broken binding
+// must never silently fall back to compiling or executing an unverified file.
+export function environmentBundle(env = process.env) {
+  if (env.PRODEX_TEST_BUNDLE === undefined) return null;
+  assert.ok(env.PRODEX_TEST_BUNDLE.trim(), "native test bundle path required");
+  return verifiedBundle(path.resolve(root, env.PRODEX_TEST_BUNDLE), identity(env, root), env.TEST_MANIFEST_SHA256);
+}
+
+export function runBundle(directory, expected, manifestDigest, { repository = root, filters = "", skips = "" } = {}) {
+  const { executable, cwd, inventory } = verifiedBundle(directory, expected, manifestDigest, { repository });
   let failed = false;
   for (const entry of testPlan(filters, skips, expected.platform === "win32")) {
     process.stdout.write(`Native test partition: ${entry.filter ?? "remainder"}\n`);

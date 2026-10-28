@@ -126,6 +126,17 @@ export function validateLinuxNativeTests(contents) {
       if (!job.includes(marker)) violations.push(`CI Linux native-test binding missing ${marker}`);
     }
   }
+  for (const name of ["profile-commands-internal", "main-internal-core", "main-internal-runtime-proxy"]) {
+    const internal = workflowJob(contents, name) ?? "";
+    for (const marker of ["needs: [changes, linux-app-test-build]", "name: linux-app-tests",
+      "PRODEX_TEST_BUNDLE: .prodex-ci/linux-app-tests",
+      "TEST_MANIFEST_SHA256: ${{ needs.linux-app-test-build.outputs.manifest_sha256 }}"]) {
+      if (!internal.includes(marker)) violations.push(`CI ${name} missing verified native bundle binding: ${marker}`);
+    }
+    if (/cargo test|rust-cache@|sccache-action@/.test(internal)) {
+      violations.push(`CI ${name} must not rebuild the shared test executable`);
+    }
+  }
   return violations;
 }
 
