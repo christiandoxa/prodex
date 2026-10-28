@@ -1,6 +1,6 @@
 use super::*;
 
-enum RuntimeWebsocketSessionReadAction {
+pub(super) enum RuntimeWebsocketSessionReadAction {
     Continue,
     Break,
     Return(Result<()>),
@@ -38,8 +38,42 @@ fn handle_runtime_proxy_websocket_read(
     shared: &RuntimeRotationProxyShared,
     websocket_session: &mut RuntimeWebsocketSessionState,
 ) -> Result<RuntimeWebsocketSessionReadAction> {
-    match local_socket.read() {
-        Ok(WsMessage::Text(text)) => handle_runtime_proxy_websocket_text_message(
+    let next = websocket_session
+        .pending_local_frame
+        .take()
+        .map(Ok)
+        .unwrap_or_else(|| local_socket.read());
+    let message = match next {
+        Ok(message) => message,
+        Err(error) => {
+            return handle_runtime_proxy_websocket_read_error(
+                session_id,
+                shared,
+                websocket_session,
+                &error,
+            );
+        }
+    };
+    handle_runtime_proxy_websocket_frame(
+        session_id,
+        local_socket,
+        handshake_request,
+        shared,
+        websocket_session,
+        message,
+    )
+}
+
+pub(super) fn handle_runtime_proxy_websocket_frame(
+    session_id: u64,
+    local_socket: &mut RuntimeLocalWebSocket,
+    handshake_request: &RuntimeProxyRequest,
+    shared: &RuntimeRotationProxyShared,
+    websocket_session: &mut RuntimeWebsocketSessionState,
+    message: WsMessage,
+) -> Result<RuntimeWebsocketSessionReadAction> {
+    match message {
+        WsMessage::Text(text) => handle_runtime_proxy_websocket_text_message(
             session_id,
             local_socket,
             handshake_request,
@@ -47,7 +81,7 @@ fn handle_runtime_proxy_websocket_read(
             websocket_session,
             text.as_ref(),
         ),
-        Ok(WsMessage::Binary(_)) => {
+        WsMessage::Binary(_) => {
             runtime_proxy_log(
                 shared,
                 format!("websocket_session={session_id} inbound_binary_rejected"),
@@ -65,7 +99,7 @@ fn handle_runtime_proxy_websocket_read(
                 )),
             }
         }
-        Ok(WsMessage::Ping(payload)) => {
+        WsMessage::Ping(payload) => {
             local_socket
                 .send(WsMessage::Pong(payload))
                 .context("failed to respond to runtime websocket ping")?;
@@ -76,7 +110,7 @@ fn handle_runtime_proxy_websocket_read(
                 )),
             }
         }
-        Ok(WsMessage::Pong(_)) => {
+        WsMessage::Pong(_) => {
             match runtime_websocket_read_action(WebsocketReadFrame::Pong, false, false)? {
                 WebsocketReadAction::Continue => Ok(RuntimeWebsocketSessionReadAction::Continue),
                 action => Err(anyhow::anyhow!(
@@ -84,7 +118,7 @@ fn handle_runtime_proxy_websocket_read(
                 )),
             }
         }
-        Ok(WsMessage::Frame(_)) => {
+        WsMessage::Frame(_) => {
             match runtime_websocket_read_action(WebsocketReadFrame::Raw, false, false)? {
                 WebsocketReadAction::Continue => Ok(RuntimeWebsocketSessionReadAction::Continue),
                 action => Err(anyhow::anyhow!(
@@ -92,7 +126,7 @@ fn handle_runtime_proxy_websocket_read(
                 )),
             }
         }
-        Ok(WsMessage::Close(frame)) => {
+        WsMessage::Close(frame) => {
             let action = runtime_websocket_read_action(WebsocketReadFrame::Close, false, false)?;
             runtime_proxy_log(
                 shared,
@@ -106,9 +140,6 @@ fn handle_runtime_proxy_websocket_read(
                     "unexpected Mojo websocket close-frame action: {action:?}"
                 )),
             }
-        }
-        Err(err) => {
-            handle_runtime_proxy_websocket_read_error(session_id, shared, websocket_session, &err)
         }
     }
 }

@@ -19,7 +19,7 @@ fn transport(socket: &RuntimeUpstreamWebSocket) -> io::Result<&TcpStream> {
     }
 }
 
-pub(super) fn read_response_frame(
+pub(in crate::runtime_proxy::websocket) fn read_response_frame(
     socket: &mut RuntimeUpstreamWebSocket,
     wait: Duration,
 ) -> Result<Option<WsMessage>, WsError> {

@@ -1,4 +1,6 @@
+mod admission;
 use super::*;
+use admission::reject_runtime_proxy_admission_rejection;
 use std::fmt;
 use std::io::Read;
 
@@ -140,8 +142,16 @@ fn reject_runtime_proxy_capture_error(
 }
 
 pub(crate) fn handle_runtime_rotation_proxy_request(
+    request: tiny_http::Request,
+    shared: &RuntimeRotationProxyShared,
+) {
+    handle_runtime_rotation_proxy_request_with_sessions(request, shared, None);
+}
+
+pub(crate) fn handle_runtime_rotation_proxy_request_with_sessions(
     mut request: tiny_http::Request,
     shared: &RuntimeRotationProxyShared,
+    sessions: Option<&RuntimeWebsocketSessionPool>,
 ) {
     if let Some(response) = handle_runtime_proxy_admin_request(&mut request, shared) {
         let _ = request.respond(response);
@@ -161,6 +171,11 @@ pub(crate) fn handle_runtime_rotation_proxy_request(
             runtime_startup_metadata_admission_pressure_response(request_id, &request_path, shared)
     {
         let _ = request.respond(response);
+        return;
+    }
+    // Parked handshakes have bounded connection ownership, not inference permits.
+    if websocket && sessions.is_some() {
+        proxy_runtime_responses_websocket_request(request_id, request, shared, sessions);
         return;
     }
     let (active_request_guard, request, captured_after_lane_limit) =
@@ -192,7 +207,7 @@ pub(crate) fn handle_runtime_rotation_proxy_request(
         );
         let mut session_shared = shared.clone();
         session_shared.precommit_deadline = None;
-        proxy_runtime_responses_websocket_request(request_id, request, &session_shared);
+        proxy_runtime_responses_websocket_request(request_id, request, &session_shared, sessions);
         return;
     }
 
@@ -257,36 +272,6 @@ fn acquire_runtime_proxy_request_slot(
                     unreachable!("an admission plan cannot allow an already rejected request")
                 }
             }
-        }
-    }
-}
-
-fn reject_runtime_proxy_admission_rejection(
-    request: tiny_http::Request,
-    shared: &RuntimeRotationProxyShared,
-    rejection: RuntimeProxyAdmissionRejection,
-) {
-    let plan = runtime_proxy_dispatch_admission_plan(rejection, false, true);
-    debug_assert!(matches!(
-        plan.action,
-        prodex_mojo_core::runtime_proxy_dispatch::RuntimeProxyAdmissionAction::Reject
-    ));
-    match rejection {
-        RuntimeProxyAdmissionRejection::DeadlineExceeded => {
-            reject_runtime_proxy_recovery_timeout(request, shared, "admission");
-        }
-        RuntimeProxyAdmissionRejection::GlobalLimit => {
-            if plan.marks_global_overload {
-                mark_runtime_proxy_local_overload(shared, "active_request_limit");
-            }
-            reject_runtime_proxy_overloaded_request(request, shared, "active_request_limit");
-        }
-        RuntimeProxyAdmissionRejection::LaneLimit(lane) => {
-            let reason = format!("lane_limit:{}", runtime_route_kind_label(lane));
-            if plan.marks_global_overload {
-                mark_runtime_proxy_local_overload(shared, &reason);
-            }
-            reject_runtime_proxy_overloaded_request(request, shared, &reason);
         }
     }
 }

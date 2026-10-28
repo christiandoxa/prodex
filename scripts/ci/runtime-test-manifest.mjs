@@ -126,6 +126,11 @@ export const RUNTIME_CI_WORKFLOW_SHARDS = [
         label: "admission-compact",
       },
       {
+        id: "admission-websocket-capacity",
+        filter: `${ADMISSION_PREFIX}websocket_capacity::`,
+        label: "admission-websocket-capacity",
+      },
+      {
         id: "admission-continuation-store",
         filter: `${ADMISSION_PREFIX}continuation_store::`,
         label: "admission-continuation-store",

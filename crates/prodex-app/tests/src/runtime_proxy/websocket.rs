@@ -13,6 +13,8 @@ fn attempt_runtime_websocket_request(
 
 #[path = "websocket/connect.rs"]
 mod connect;
+#[path = "websocket/control.rs"]
+mod control;
 #[path = "websocket/precommit_hold.rs"]
 mod precommit_hold;
 #[path = "websocket/precommit_regressions.rs"]

@@ -53,8 +53,13 @@ pub(super) fn run_runtime_websocket_response_loop(
 ) -> Result<RuntimeWebsocketAttempt> {
     let mut last_upstream_frame = Instant::now();
     let mut last_client_heartbeat = Instant::now();
+    let mut interrupt = super::control::ResponseInterrupt::default();
     loop {
         check_response_deadline(&mut flow)?;
+        if let Err(error) = interrupt.pump(&mut flow) {
+            flow.websocket_session.reset();
+            return Err(error);
+        }
         // Drain an already-buffered frame before declaring upstream idle.
         // Host commit/persistence or downstream writes may take longer than
         // the idle budget while the terminal frame is already waiting. The
@@ -74,6 +79,11 @@ pub(super) fn run_runtime_websocket_response_loop(
         };
         let frame = match frame {
             Ok(None) => {
+                let wait = if flow.websocket_session.local_control.is_some() {
+                    wait.min(Duration::from_millis(50))
+                } else {
+                    wait
+                };
                 if let Err(error) = wait_response_readiness(&flow.upstream_socket, wait) {
                     return flow.handle_read_error(WsError::Io(error));
                 }
@@ -83,13 +93,23 @@ pub(super) fn run_runtime_websocket_response_loop(
             Err(error) => Err(error),
         };
         match frame {
-            Ok(WsMessage::Text(text)) => match flow.handle_text(text.to_string())? {
-                RuntimeWebsocketTextResult::Continue => {}
-                RuntimeWebsocketTextResult::Terminal(terminal) => {
-                    return Ok(flow.finish_terminal(terminal));
+            Ok(WsMessage::Text(text)) => {
+                if interrupt.observe_ack(&mut flow, &text)? {
+                    if let Some(terminal) = interrupt.take_terminal() {
+                        return Ok(flow.finish_terminal(terminal));
+                    }
+                    continue;
                 }
-                RuntimeWebsocketTextResult::Attempt(attempt) => return Ok(attempt),
-            },
+                match flow.handle_text(text.to_string())? {
+                    RuntimeWebsocketTextResult::Continue => {}
+                    RuntimeWebsocketTextResult::Terminal(terminal) => {
+                        if let Some(terminal) = interrupt.defer_terminal(terminal) {
+                            return Ok(flow.finish_terminal(terminal));
+                        }
+                    }
+                    RuntimeWebsocketTextResult::Attempt(attempt) => return Ok(attempt),
+                }
+            }
             Ok(WsMessage::Binary(payload)) => flow.handle_binary(payload)?,
             Ok(WsMessage::Ping(payload)) => flow.handle_ping(payload)?,
             Ok(WsMessage::Pong(_)) | Ok(WsMessage::Frame(_)) => flow.handle_keepalive()?,

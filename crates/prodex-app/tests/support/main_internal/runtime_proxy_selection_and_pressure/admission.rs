@@ -57,3 +57,6 @@ mod quota_transition_043714;
 
 #[path = "admission/quota_handoff.rs"]
 mod quota_handoff;
+
+#[path = "admission/websocket_capacity.rs"]
+mod websocket_capacity;

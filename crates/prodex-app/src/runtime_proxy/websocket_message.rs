@@ -69,6 +69,18 @@ pub(super) fn proxy_runtime_websocket_text_message(
         return Ok(());
     }
 
+    if !websocket_session.is_realtime_duplex()
+        && super::is_runtime_responses_path(&handshake_request.path_and_query)
+        && super::forward_runtime_websocket_interrupt(
+            request_text,
+            local_socket,
+            websocket_session,
+            shared,
+        )?
+    {
+        return Ok(());
+    }
+
     let scoped_shared = shared.for_precommit_request();
     let shared = &scoped_shared;
     let result = RuntimeWebsocketTextMessageFlow::new(RuntimeWebsocketTextMessageInput {

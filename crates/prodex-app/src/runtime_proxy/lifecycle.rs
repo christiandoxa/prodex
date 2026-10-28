@@ -2,9 +2,11 @@ use super::*;
 
 #[path = "lifecycle/audit.rs"]
 mod audit;
+mod queue;
 #[path = "lifecycle/wait.rs"]
 mod wait;
 pub(crate) use audit::audit_runtime_proxy_startup_state;
+pub(crate) use queue::RuntimeProxyRequestQueue;
 #[cfg(test)]
 pub(crate) use wait::wait_for_runtime_probe_refresh_since;
 pub(crate) use wait::{
@@ -434,24 +436,20 @@ pub(crate) struct RuntimeProxyQueuedRequest {
 
 #[allow(clippy::result_large_err)]
 pub(crate) fn enqueue_runtime_proxy_request(
-    sender: &mpsc::SyncSender<RuntimeProxyQueuedRequest>,
+    sender: &RuntimeProxyRequestQueue,
     request: tiny_http::Request,
     shared: &RuntimeRotationProxyShared,
 ) -> Result<(), (RuntimeProxyQueueRejection, tiny_http::Request)> {
     let scoped_shared = shared.for_precommit_request();
+    // Keep the ingress watchdog. Upstream connection timeout is a different
+    // budget and must not shorten healthy local queueing or fanout admission.
     let queued = RuntimeProxyQueuedRequest {
         request,
         deadline: scoped_shared.precommit_deadline,
         queued_at: Instant::now(),
     };
     try_enqueue_runtime_proxy_work(queued, &scoped_shared, |queued| {
-        match sender.try_send(queued) {
-            Ok(()) => Ok(()),
-            Err(TrySendError::Full(returned)) => Err((RuntimeProxyQueueRejection::Full, returned)),
-            Err(TrySendError::Disconnected(returned)) => {
-                Err((RuntimeProxyQueueRejection::Disconnected, returned))
-            }
-        }
+        sender.try_send(queued).map_err(|returned| *returned)
     })
     .map_err(|(reason, queued)| (reason, queued.request))
 }
