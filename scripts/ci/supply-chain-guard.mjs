@@ -51,6 +51,13 @@ function workflowJob(contents, name) {
   return lines.slice(start, end < 0 ? lines.length : end).join("\n");
 }
 
+function workflowStep(job, name) {
+  const start = job.indexOf(`      - name: ${name}\n`);
+  if (start < 0) return "";
+  const next = job.indexOf("\n      - name:", start + 1);
+  return job.slice(start, next < 0 ? job.length : next);
+}
+
 export function validateWindowsSecurityJob(contents) {
   const job = workflowJob(contents, "windows-security");
   const workspace = workflowJob(contents, "windows-workspace");
@@ -431,17 +438,28 @@ export function validateReleaseContainerPublication(contents, targetWorkflow = "
     violations.push(".github/workflows/release-target.yml: target preparation must remain local, called and read-only");
   }
 
-  const smoke = workflowJob(targetWorkflow, "artifact-smoke") ?? "";
+  const download = workflowStep(build, "Download official Linux artifact");
+  const smoke = workflowStep(build, "Run official artifact smoke");
+  const linuxCondition = "if: ${{ matrix.target == 'x86_64-unknown-linux-gnu' }}";
+  for (const step of [download, smoke]) {
+    if (!step.includes(linuxCondition) || /continue-on-error: true|if:.*always\(/u.test(step)) {
+      violations.push("release-target.yml: native artifact smoke must run and fail closed on the Linux target");
+    }
+  }
+  for (const marker of ["name: x86_64-unknown-linux-gnu", "path: artifact", "uses: actions/download-artifact@"]) {
+    if (!download.includes(marker)) violations.push(`release-target.yml: native artifact download missing ${marker}`);
+  }
   for (const marker of [
-    "needs: build", "if: ${{ fromJSON(inputs.platforms)[0].target == 'x86_64-unknown-linux-gnu' }}",
-    "persist-credentials: false", "name: x86_64-unknown-linux-gnu",
     "RELEASE_VERSION: ${{ inputs.version }}", "node scripts/ci/release-artifact-smoke.mjs",
     '--binary "${binary}"', '--version "${RELEASE_VERSION}"',
   ]) {
     if (!smoke.includes(marker)) violations.push(`release-target.yml: native artifact smoke missing ${marker}`);
   }
-  if (/continue-on-error: true|if:.*always\(/u.test(smoke)) {
-    violations.push("release-target.yml: artifact smoke must fail closed after successful native build");
+  if (!build.includes("persist-credentials: false") ||
+      build.indexOf("      - name: Upload binary artifact\n") >= build.indexOf(download) ||
+      build.indexOf(download) >= build.indexOf(smoke) ||
+      /continue-on-error: true/u.test(build.split("    steps:")[0])) {
+    violations.push("release-target.yml: downloaded smoke must gate the successful owning binary build");
   }
   for (const name of ["prepare-release", "verify-release"]) {
     if (!workflowJob(contents, name)?.includes("      - build\n")) {
@@ -716,7 +734,7 @@ export function validateReleaseCodexExclusion(contents, targetWorkflow = content
   if (!contents.includes("find release-assets -maxdepth 1 -type f")) {
     violations.push(".github/workflows/standalone-release.yml: release asset scope must be explicit");
   }
-  const artifactSmoke = workflowJob(targetWorkflow, "artifact-smoke") ?? "";
+  const artifactSmoke = workflowStep(workflowJob(targetWorkflow, "build") ?? "", "Run official artifact smoke");
   const prepare = workflowJob(contents, "prepare-release") ?? "";
   const release = workflowJob(contents, "validate-release-assets") ?? "";
   for (const [surface, job, marker] of [
@@ -797,9 +815,11 @@ function selfTest() {
     true,
   );
   const releasePurityFixture = `
-  artifact-smoke:
-    run: node scripts/ci/codex-purity-guard.mjs package-lock.json install.sh install.ps1 artifact
-    npm: node scripts/ci/npm-package-smoke.mjs --binary-dir artifact
+  build:
+    steps:
+      - name: Run official artifact smoke
+        run: node scripts/ci/codex-purity-guard.mjs package-lock.json install.sh install.ps1 artifact
+        npm: node scripts/ci/npm-package-smoke.mjs --binary-dir artifact
   prepare-release:
     input: node scripts/ci/codex-purity-guard.mjs sbom-input
     output: node scripts/ci/codex-purity-guard.mjs release-sbom.spdx.json

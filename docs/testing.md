@@ -128,13 +128,17 @@ both jobs. A slow workspace suite no longer delays the focused native regression
 
 Release preparation and publication have separate trust boundaries. The
 read-only source/pin preflight starts archive and binary compilation while the
-exact-source CI gate is running. Linux artifact smoke runs immediately after its own target binary is uploaded,
-inside the target-local reusable workflow. It downloads and tests those exact
-artifact bytes with the same commands as before, while other platforms may still
-compile. The other five target calls skip only this Linux-only job, not their
-native platform checks. The parent build result includes the Linux artifact smoke;
-SBOM generation and final verification still require successful results from all
-six target calls. The EICAR engine proof runs during target compilation on a read-only
+exact-source push CI is running. The CI verdict job is scheduled only after
+all target builds finish; it no longer holds a hosted runner idle during
+compilation. It can still overlap final asset preparation and malware scanning,
+and every privileged publication job requires its successful exact-SHA verdict.
+Linux artifact smoke runs as mandatory target-conditioned steps inside the
+Linux x64 build. Those steps download the already-uploaded binary and run the
+same package purity and runtime checks, without compiling a substitute. The
+five permanently skipped non-Linux copies of that job are removed. Every
+platform retains its applicable native/emulated architecture and Mojo smoke;
+there is no compile-only fallback for a supported release target.
+The EICAR engine proof runs during target compilation on a read-only
 runner. It and the final scanner must use the same explicitly pinned container
 digest, and both retain database updates. Asset assembly, checksum validation and
 malware scanning still wait for that successful engine proof and produce one
@@ -153,11 +157,11 @@ Each called workflow builds and validates its Mojo archive, then immediately
 schedules its matching native binary. A cold Linux ARM64 or Windows ARM64 archive
 no longer holds back a ready target. The archive/binary commands, CPU settings,
 strict ABI checks, production profile, and native/emulated smoke tests are unchanged.
-Production and calibration dependency caches put every compiler, Mojo version,
+Production dependency caches put every compiler, Mojo version,
 host, target, CPU, codegen and external-dependency discriminator in `shared-key`.
 The pinned Rust cache action ignores its separate `key` input when `shared-key`
 is present; a constant shared prefix would merge incompatible target caches.
-Matching calibrated profiles still share dependencies, but different targets,
+The qualified profiles retain their dependency caches, but different targets,
 codegen units or dependency graphs cannot collide. Application production crates
 remain excluded, and Cargo still validates its fingerprints after restoration.
 The corrected namespaces initially require a cold dependency build.
@@ -638,3 +642,15 @@ regressions through the verified native harness, preserving serial execution.
 Both selections must execute real tests; their output is retained on failure.
 Do not turn missing selectors into success or reconnect obsolete production code
 merely to preserve an outdated test command.
+
+### Bounded release setup and artifact transfer
+
+The pinned cross 0.2.5 driver is cached separately from product binaries, using
+an exact Rust/host/platform key on trusted main. Its executable version is
+checked on every restore; a miss uses the locked pinned Cargo installation.
+Product compilation runs once per target and propagates errors immediately.
+Cargo retains three bounded network retries; deterministic compiler failures
+are not repeated with arbitrary sleeps. Native test and release binary bundles
+use compression level 1 to reduce compression CPU, while checksum validation
+still covers the same unmodified executable bytes. Neither cache nor compression
+is a substitute for tests, malware checks, provenance or release authorization.

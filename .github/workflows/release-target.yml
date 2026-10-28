@@ -26,6 +26,7 @@ permissions:
 env:
   CARGO_INCREMENTAL: "0"
   CARGO_HTTP_MULTIPLEXING: "false"
+  CARGO_NET_RETRY: "3"
   SCCACHE_CACHE_SIZE: 2G
   SCCACHE_GHA_ENABLED: "true"
   KIRO_CLI_VERSION: ${{ inputs.kiro_cli_version }}
@@ -200,6 +201,7 @@ jobs:
           path: target/mojo-release/${{ matrix.target }}
           if-no-files-found: error
           retention-days: 7
+          compression-level: 1
 
   build:
     name: Build ${{ matrix.target }}
@@ -298,23 +300,28 @@ jobs:
         if: ${{ matrix.use-cross == false && (matrix.target == 'x86_64-apple-darwin' || matrix.target == 'aarch64-apple-darwin') }}
         uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
 
+      - name: Cache pinned cross tool
+        if: ${{ matrix.use-cross && github.ref == 'refs/heads/main' }}
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
+        with:
+          path: ~/.cache/prodex-ci/cross-0.2.5
+          key: prodex-cross-tool-v1-0.2.5-rust1.99.1-${{ runner.os }}-${{ runner.arch }}
+
       - name: Install cross
         if: ${{ matrix.use-cross }}
         shell: bash
         run: |
           set -euo pipefail
-          if command -v cross >/dev/null 2>&1; then
-            exit 0
+          cross_root="${HOME}/.cache/prodex-ci/cross-0.2.5"
+          if [ ! -x "${cross_root}/bin/cross" ]; then
+            cargo install cross --version 0.2.5 --locked --root "${cross_root}"
           fi
-          for attempt in 1 2 3; do
-            if CARGO_HTTP_MULTIPLEXING=false cargo install cross --version 0.2.5 --locked; then
-              exit 0
-            fi
-            if [ "${attempt}" = "3" ]; then
-              exit 1
-            fi
-            sleep "$((attempt * 10))"
-          done
+          cross_version="$("${cross_root}/bin/cross" --version)"
+          case "${cross_version}" in
+            'cross 0.2.5'|'cross 0.2.5 ('*) ;;
+            *) echo "cached cross version did not match the pinned driver" >&2; exit 1 ;;
+          esac
+          echo "${cross_root}/bin" >> "${GITHUB_PATH}"
 
       - name: Install Linux ARM cross and emulation tools
         if: ${{ matrix.target == 'aarch64-unknown-linux-gnu' }}
@@ -375,21 +382,15 @@ jobs:
             test -s "${PRODEX_MOJO_ARCHIVE}"
             build_args+=(--features "${{ matrix.mojo-features }}")
           fi
-          for attempt in 1 2 3; do
-            if [ "${{ matrix.use-cross }}" = "true" ]; then
-              cross build --locked "${build_args[@]}" && exit 0
+          if [ "${{ matrix.use-cross }}" = "true" ]; then
+            cross build --locked "${build_args[@]}"
+          else
+            if [[ "${{ matrix.target }}" == *-pc-windows-msvc ]]; then
+              cargo build --locked "${build_args[@]}"
             else
-              if [[ "${{ matrix.target }}" == *-pc-windows-msvc ]]; then
-                cargo build --locked "${build_args[@]}" && exit 0
-              else
-                RUSTC_WRAPPER=sccache cargo build --locked "${build_args[@]}" && exit 0
-              fi
+              RUSTC_WRAPPER=sccache cargo build --locked "${build_args[@]}"
             fi
-            if [ "${attempt}" = "3" ]; then
-              exit 1
-            fi
-            sleep "$((attempt * 10))"
-          done
+          fi
 
       - name: Verify emulated Windows x64 artifact on native ARM64 host
         if: ${{ matrix.target == 'x86_64-pc-windows-msvc' }}
@@ -545,15 +546,6 @@ jobs:
           grep -F '"compiler_required": false' "${clean_root}/diagnostics.json"
           grep -F '"self_test": "passed"' "${clean_root}/diagnostics.json"
 
-      - name: Verify non-native Mojo release artifact
-        if: ${{ matrix.mojo-release && !matrix.can-mojo-runtime-smoke }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          binary="target/${{ matrix.target }}/release/${{ matrix.binary-name }}"
-          test -s "${binary}"
-          echo "${{ matrix.target }} is compile/link verified; runtime smoke requires a native runner"
-
       - name: Verify Linux GLIBC baseline
         if: ${{ contains(matrix.target, 'unknown-linux-gnu') }}
         shell: bash
@@ -597,6 +589,7 @@ jobs:
           if-no-files-found: error
           overwrite: true
           retention-days: 7
+          compression-level: 1
 
       - name: Install Node.js for native client probe
         if: ${{ matrix.target == 'x86_64-unknown-linux-gnu' }}
@@ -705,34 +698,16 @@ jobs:
           fi
           grep -q -- "--presidio is unsupported" "${RUNNER_TEMP}/presidio-error.txt"
 
-  artifact-smoke:
-    name: Smoke official Linux artifact
-    needs: build
-    if: ${{ fromJSON(inputs.platforms)[0].target == 'x86_64-unknown-linux-gnu' }}
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    permissions:
-      contents: read
-
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-        with:
-          persist-credentials: false
-
-      - name: Install Node.js for artifact smoke
-        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
-        with:
-          node-version: 22
-          package-manager-cache: false
-
       - name: Download official Linux artifact
+        if: ${{ matrix.target == 'x86_64-unknown-linux-gnu' }}
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
           name: x86_64-unknown-linux-gnu
           path: artifact
 
       - name: Run official artifact smoke
+        timeout-minutes: 20
+        if: ${{ matrix.target == 'x86_64-unknown-linux-gnu' }}
         env:
           RELEASE_VERSION: ${{ inputs.version }}
         shell: bash
