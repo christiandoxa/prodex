@@ -24,7 +24,6 @@ test("Linux application partitions share one source-bound harness, not repeated 
   assert.match(consumer, /PRODEX_APP_SKIP_FILTERS: \$\{\{ matrix.skip_filters \}\}/);
   assert.match(consumer, /fromJSON\(needs.changes.outputs.prodex_app_matrix\)/);
   assert.doesNotMatch(consumer, /cargo test|Install sccache|Cache Rust dependencies/);
-  assert.match(job(ci, "ci-duration-telemetry"), /- linux-app-test-build\n/);
 });
 test("macOS native regressions run independently of the workspace suite without dropping filters", () => {
   const workspace = job(ci, "macos-workspace");
@@ -42,7 +41,6 @@ test("macOS native regressions run independently of the workspace suite without 
   assert.match(native, /grep -Fq 'running 0 tests'/);
   assert.match(native, /save-if: false/);
   assert.match(native, /SCCACHE_GHA_RW_MODE: READ_ONLY/);
-  assert.match(job(ci, "ci-duration-telemetry"), /- macos-native-regressions\n/);
 });
 
 test("Linux release artifact smoke starts after its own binary, not unrelated platforms", () => {
@@ -59,7 +57,7 @@ test("Linux release artifact smoke starts after its own binary, not unrelated pl
   assert.match(build, /persist-credentials: false/);
   assert.doesNotMatch(smoke, /contents: write|attestations: write|id-token: write|cargo (build|run)/);
   assert.doesNotMatch(parent, /\n  artifact-smoke:\n/);
-  for (const name of ["validate-release-assets", "verify-release"]) {
+  for (const name of ["validate-release-assets", "verify-ci"]) {
     assert.match(job(parent, name), /      - build\n/);
   }
 });

@@ -7,7 +7,8 @@ import test from "node:test";
 
 const source=readFileSync(".github/workflows/standalone-release.yml","utf8");
 const job=source.match(/\n  verify-ci:\n([\s\S]*?)\n  antivirus-health:/)?.[1];
-const block=job.slice(job.indexOf("          set -euo pipefail"));
+const waitStep=job.split("      - name: Wait for CI success\n")[1].split("\n      - name:")[0];
+const block=waitStep.slice(waitStep.indexOf("          set -euo pipefail"));
 const script=block.split("\n").map(line=>line.replace(/^          /,"")).join("\n");
 const sha="a".repeat(40);
 for(const scenario of ["success","pending","failure","foreign"]) {

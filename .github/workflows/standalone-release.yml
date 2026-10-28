@@ -181,9 +181,14 @@ jobs:
 
   verify-ci:
     name: Verify CI is green
-    # Do not hold an idle runner while production targets are compiling.
-    # The exact-SHA gate still precedes every privileged publication job.
-    needs: [release-preflight, build]
+    # Wait without reserving a runner until every local asset gate is done.
+    # This job owns the fail-closed verdict and exact-source CI approval.
+    if: ${{ always() && !cancelled() }}
+    needs:
+      - release-preflight
+      - build
+      - validate-release-assets
+      - antivirus-health
     runs-on: ubuntu-latest
     timeout-minutes: 90
     permissions:
@@ -194,6 +199,14 @@ jobs:
       version: ${{ needs.release-preflight.outputs.version }}
       publish_at: ${{ needs.release-preflight.outputs.publish_at }}
     steps:
+      - name: Require all artifact gates to succeed
+        env:
+          RESULTS: ${{ toJSON(needs) }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          jq -e 'keys == ["antivirus-health", "build", "release-preflight", "validate-release-assets"] and all(.[]; .result == "success")' <<<"${RESULTS}"
+
       - name: Check out exact release source for CI lookup
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
@@ -258,6 +271,22 @@ jobs:
             sleep 10
           done
 
+      - name: Record release verification verdict
+        env:
+          RELEASE_PUBLISH: ${{ inputs.publish }}
+          SOURCE_SHA: ${{ inputs.target_sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          {
+            echo "## Release verification"
+            echo "- Source: ${SOURCE_SHA}"
+            echo "- Publishing requested: ${RELEASE_PUBLISH}"
+            echo "- Six platform builds, exact-source CI, smoke, SBOM, checksums and malware gates passed."
+            if [ "${RELEASE_PUBLISH}" != true ]; then
+              echo "- Verification only: no release/tag mutation, documentation push or attestation performed."
+            fi
+          } >> "${GITHUB_STEP_SUMMARY}"
 
   antivirus-health:
     name: Prove antivirus engine while targets compile
@@ -894,119 +923,3 @@ jobs:
             --title "${title}" \
             --notes-file "${notes_file}" \
             --latest
-
-  verify-release:
-    name: Release verification verdict
-    runs-on: ubuntu-latest
-    if: ${{ always() }}
-    needs:
-      - release-preflight
-      - verify-ci
-      - build
-      - validate-release-assets
-      - antivirus-health
-    timeout-minutes: 5
-    permissions:
-      contents: read
-    steps:
-      - name: Require all validation jobs to succeed
-        env:
-          RESULTS: ${{ toJSON(needs) }}
-          RELEASE_PUBLISH: ${{ inputs.publish }}
-          SOURCE_SHA: ${{ inputs.target_sha }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          jq -e 'all(.[]; .result == "success")' <<<"${RESULTS}"
-          {
-            echo "## Release verification"
-            echo "- Source: ${SOURCE_SHA}"
-            echo "- Publishing requested: ${RELEASE_PUBLISH}"
-            echo "- Six platform builds, exact-source CI, smoke, SBOM, checksums and malware gates passed."
-            if [ "${RELEASE_PUBLISH}" != true ]; then
-              echo "- Verification only: no release/tag mutation, documentation push or attestation performed."
-            fi
-          } >> "${GITHUB_STEP_SUMMARY}"
-
-  publish-duration-telemetry:
-    name: Publish duration telemetry
-    runs-on: ubuntu-latest
-    needs:
-      - verify-release
-      - build
-      - sync-release-docs
-      - publish-github-release
-    if: ${{ always() }}
-    timeout-minutes: 10
-    continue-on-error: true
-    permissions:
-      actions: read
-      contents: read
-
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-        with:
-          persist-credentials: false
-
-      - name: Install Node.js
-        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
-        with:
-          node-version: 22
-          package-manager-cache: false
-
-      - name: Summarize publish job durations
-        continue-on-error: true
-        env:
-          GH_TOKEN: ${{ github.token }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          jobs_json="${RUNNER_TEMP}/publish-jobs.json"
-          summary_path="${RUNNER_TEMP}/publish-job-durations.txt"
-          json_path="${RUNNER_TEMP}/publish-job-durations.json"
-          gh run view "${{ github.run_id }}" \
-            --repo "${{ github.repository }}" \
-            --attempt "${{ github.run_attempt }}" \
-            --json jobs > "${jobs_json}"
-          set +e
-          node scripts/ci/github-job-durations.mjs \
-            --max-wall-minutes 12 \
-            --max-runner-minutes 50 \
-            --run-id "${{ github.run_id }}" \
-            --exclude-name "Publish duration telemetry" \
-            --limit 12 < "${jobs_json}" \
-            | tee "${summary_path}"
-          text_status="${PIPESTATUS[0]}"
-          node scripts/ci/github-job-durations.mjs \
-            --max-wall-minutes 12 \
-            --max-runner-minutes 50 \
-            --run-id "${{ github.run_id }}" \
-            --exclude-name "Publish duration telemetry" \
-            --limit 12 \
-            --json < "${jobs_json}" > "${json_path}"
-          json_status="$?"
-          set -e
-          {
-            echo "### Publish job durations"
-            echo
-            echo '```text'
-            cat "${summary_path}"
-            echo '```'
-          } >> "${GITHUB_STEP_SUMMARY}"
-          if [ "${text_status}" -ne 0 ]; then
-            exit "${text_status}"
-          fi
-          exit "${json_status}"
-
-      - name: Upload publish duration telemetry
-        if: always()
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
-        with:
-          name: publish-duration-telemetry
-          path: |
-            ${{ runner.temp }}/publish-job-durations.txt
-            ${{ runner.temp }}/publish-job-durations.json
-          if-no-files-found: ignore
-          overwrite: true
-          retention-days: 14

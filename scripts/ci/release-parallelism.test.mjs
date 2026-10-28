@@ -69,11 +69,11 @@ test("every publishing side effect waits for successful exact-source CI and asse
 });
 
 test("verification verdict waits for every build and smoke gate, not skipped publishing jobs", () => {
-  for (const name of ["verify-ci", "build", "validate-release-assets"]) {
-    assert.ok(needs("verify-release").includes(name), `verification verdict omits ${name}`);
+  for (const name of ["release-preflight", "build", "validate-release-assets"]) {
+    assert.ok(needs("verify-ci").includes(name), `verification verdict omits ${name}`);
   }
-  assert.match(jobs.get("verify-release"), /always\(\)/);
-  assert.match(jobs.get("verify-release"), /result == "success"/);
+  assert.match(jobs.get("verify-ci"), /always\(\)/);
+  assert.match(jobs.get("verify-ci"), /result == "success"/);
   assert.match(jobs.get("validate-release-assets"), /name: validated-release-assets/);
   for (const body of jobs.values()) {
     assert.doesNotMatch(body, /gh release (?:edit|upload)|git tag ["']|push origin.*refs\/tags/);
@@ -111,7 +111,7 @@ test("the same pinned antivirus engine is proven during compilation, before fina
   assert.deepEqual(needs("antivirus-health"), ["release-preflight"]);
   assert.ok(!ancestors("antivirus-health").has("build"));
   assert.ok(ancestors("validate-release-assets").has("antivirus-health"));
-  assert.ok(needs("verify-release").includes("antivirus-health"));
+  assert.ok(needs("verify-ci").includes("antivirus-health"));
   for (const name of ["antivirus-health", "validate-release-assets"]) {
     const body=jobs.get(name);
     assert.match(body, /Verify pinned antivirus image/);
