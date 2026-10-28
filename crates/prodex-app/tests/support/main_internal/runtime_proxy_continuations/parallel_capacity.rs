@@ -168,24 +168,13 @@ fn runtime_proxy_saturated_idle_websocket_workers_do_not_block_unary_compact_043
         &[],
         Vec::new(),
     );
-    // Native parent and sub-agent clients retain these connections while idle.
-    // Fill the entire connection pool, not just the per-profile execution cap.
-    let mut sockets = (0..2)
+    // Native parent/subagents retain idle sockets. With parking, these no longer
+    // fill an inference queue. Exceed the bounded idle cache deterministically
+    // and prove its reclamation still leaves compact/control independently live.
+    let mut sockets = (0..4)
         .map(|_| fixture.connect_websocket("backend-api/prodex/responses"))
         .collect::<Vec<_>>();
-    // One retry fills the queue; the next previously blocked the only acceptor.
-    let pending = (0..2).map(|_| {
-        let mut stream = TcpStream::connect(fixture.listen_addr()).unwrap();
-        // WebSocket handshake nonces are ephemeral protocol values, not credentials.
-        let nonce = tungstenite::handshake::client::generate_key();
-        let handshake = format!("GET /backend-api/prodex/responses HTTP/1.1\r\nHost: localhost\r\nConnection: Upgrade\r\nUpgrade: websocket\r\nSec-WebSocket-Version: 13\r\nSec-WebSocket-Key: {nonce}\r\n\r\n");
-        stream.write_all(handshake.as_bytes()).unwrap();
-        stream
-    }).collect::<Vec<_>>();
-    let pressure = fixture.wait_for_log(|log| {
-        log.contains("runtime_proxy_queue_wait_started")
-            || log.contains("runtime_proxy_queue_overloaded")
-    });
+    let pressure = fixture.wait_for_log(|log| log.contains("websocket_idle_evicted"));
     let health = Client::builder()
         .no_proxy()
         .timeout(Duration::from_secs(2))
@@ -217,11 +206,9 @@ fn runtime_proxy_saturated_idle_websocket_workers_do_not_block_unary_compact_043
         let _ = socket.close(None);
     }
     drop(sockets);
-    drop(pending);
     assert!(
-        pressure.contains("runtime_proxy_queue_wait_started")
-            || pressure.contains("runtime_proxy_queue_overloaded"),
-        "the regression must exercise an actually full queue"
+        pressure.contains("websocket_idle_evicted"),
+        "the regression must exercise actual bounded idle-cache pressure"
     );
     assert!(
         health.as_ref().is_ok_and(|status| status.is_client_error()),
