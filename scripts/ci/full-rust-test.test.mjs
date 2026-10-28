@@ -86,7 +86,7 @@ test("scheduled full suite runs disjoint workspace and prodex-app partitions in 
 
   assert.ok(archive, "full-test Mojo runtime archive job missing");
   assert.match(archive, /PRODEX_MOJO_REQUIRED=1/);
-  assert.match(workflow, /needs: \[full_test_shards, mojo-runtime-linux-archive\]/);
+  assert.match(workflow, /needs: full_test_shards/);
   assert.match(workflow, /name: Download runtime Mojo archive/);
   assert.match(archive, /mkdir -p "target\/mojo-runtime\/\$\{target\}"/);
   assert.match(archive, /cp "\$\{archive\}" "target\/mojo-runtime\/\$\{target\}\/libprodex_mojo_core\.a"/);
@@ -94,15 +94,22 @@ test("scheduled full suite runs disjoint workspace and prodex-app partitions in 
   assert.match(workflow, /path: \.prodex-ci\/mojo-runtime\/x86_64-unknown-linux-gnu/);
   assert.match(workflow, /name: Full tests \(\$\{\{ matrix\.label \}\}\)/);
   assert.match(workflow, /full_test_shards:/);
-  assert.match(workflow, /--full-test-matrix/);
+  assert.match(workflow, /--full-test-app-matrix/);
   assert.match(workflow, /matrix: \$\{\{ fromJSON\(needs\.full_test_shards\.outputs\.matrix\) \}\}/);
-  assert.match(workflow, /--timings-json \\\n\s+--no-prodex-app-lib/);
+  const partition = readFileSync("scripts/ci/full-test-partition.sh", "utf8");
+  const native = readFileSync("scripts/ci/native-test-artifact.mjs", "utf8");
+  assert.match(partition, /--timings-json \\\n\s+--no-prodex-app-lib/);
   assert.match(workflow, /matrix\.skip_filters/);
-  assert.match(workflow, /--test-threads=1/);
-  assert.match(workflow, /skip_args\+=\(--skip "\$\{skip\}"\)/);
-  assert.match(workflow, /"\$\{filter\}" -- --test-threads=1 "\$\{skip_args\[@\]\}"/);
+
+
+
   assert.match(workflow, /Test temp-backed state with a symlinked TMPDIR[\s\S]*?if: matrix\.suite == 'remainder'/);
-  assert.match(workflow, /filter_status=\$\?/);
+
+  assert.match(native, /--test-threads=1/);
+  assert.match(native, /excluded.flatMap/);
+  assert.match(native, /Native test partition failed or matched no tests/);
+  assert.match(partition, /native-test-artifact.mjs run/);
+  assert.match(workflow, /TEST_MANIFEST_SHA256:.*needs.full_test_shards.outputs.manifest_sha256/);
   assert.doesNotMatch(workflow, /if \[ "\$\{status\}" -ne 0 \]; then\n\s+break/);
 });
 

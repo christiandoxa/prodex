@@ -238,7 +238,7 @@ test("CI consumes generated app shards and retains required safety gates", () =>
   );
   assert.match(workflow, /PRODEX_APP_SKIP_FILTERS/);
   assert.match(workflow, /PRODEX_APP_FILTERS/);
-  assert.match(workflow, /--test-threads=1/);
+  assert.match(workflow + readFileSync("scripts/ci/native-test-artifact.mjs", "utf8"), /--test-threads=1/);
   assert.match(workflow, /save-if: \$\{\{ matrix\.save_cache \}\}/);
   const bundle = readFileSync("scripts/ci/native-test-artifact.mjs", "utf8");
   assert.match(workflow, /native-test-artifact\.mjs run/);
@@ -249,10 +249,10 @@ test("CI consumes generated app shards and retains required safety gates", () =>
   assert.match(workflow, /^  main-internal-core:/m);
   assert.match(workflow, /^  main-internal-runtime-proxy:/m);
   assert.match(fullWorkflow, /full_test_shards:/);
-  assert.match(fullWorkflow, /--full-test-matrix/);
+  assert.match(fullWorkflow, /--full-test-app-matrix/);
   assert.match(fullWorkflow, /fromJSON\(needs\.full_test_shards\.outputs\.matrix\)/);
-  assert.match(fullWorkflow, /prodex-app shard matched no tests/);
-  assert.match(fullWorkflow, /- name: Install Node\.js\n        if: matrix\.suite == 'workspace'/);
+  assert.match(readFileSync("scripts/ci/full-test-partition.sh", "utf8"), /prodex-app shard matched no tests/);
+  assert.match(fullWorkflow, /name: Full tests \(workspace and auto-rotate\)/);
   assert.match(fullWorkflow, /^  CARGO_PROFILE_DEV_DEBUG: "0"$/m);
   assert.match(fullWorkflow, /^  CARGO_PROFILE_TEST_DEBUG: "0"$/m);
 
@@ -473,9 +473,10 @@ test("nightly packs at most two disjoint filters per runner without changing cov
   assert.equal(full.include.filter((entry) => entry.save_cache).length, 1);
   const workflow = readFileSync(".github/workflows/full-test.yml", "utf8");
   assert.match(workflow, /max-parallel: 16/);
-  assert.match(workflow, /SCCACHE_GHA_RW_MODE:.*matrix.save_cache.*READ_WRITE.*READ_ONLY/);
+  assert.match(workflow, /SCCACHE_GHA_RW_MODE: READ_WRITE/);
+  assert.doesNotMatch(workflow.slice(workflow.indexOf("  full-test:")), /Install sccache|Cache Rust dependencies/);
   assert.match(workflow, /fail-fast: false/);
-  assert.match(workflow, /--test-threads=1/);
+  assert.match(workflow + readFileSync("scripts/ci/native-test-artifact.mjs", "utf8"), /--test-threads=1/);
 });
 
 

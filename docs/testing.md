@@ -22,11 +22,14 @@ reuse immutable build inputs, not previous test outcomes or finished user binari
 - Hosted Ubuntu's complete versioned LLVM installation is used directly when
   available. Missing tools retain the checked package-install fallback; discovery
   never replaces the unconditional archive validation.
-- Nightly tests pack at most two disjoint filter groups per runner and cap active
-  test runners at 16. Every group still runs with its original skips, serial
-  test execution and zero-test rejection. The shared matrix cache writer and read-only sccache
-  consumers in CI and nightly tests reduce cache-service throttling. Workspace and remainder coverage
-  remain explicit, including new tests not yet assigned to a targeted filter.
+- Nightly tests retain the same 26 disjoint application partitions but compile
+  their executable once. All consumers verify same-source/run/target identity,
+  an independent producer manifest digest, executable checksum and test census.
+  They neither restore compiler caches nor recompile the application. The
+  workspace/auto-rotate job starts independently after the Mojo archive, while
+  internally serial app filters fan out with at most 16 consumers. Failure
+  diagnostics and the symlinked-TMPDIR regression still run through maintained
+  helpers. Matrix CI jobs keep a single object-cache writer where applicable.
 - The four one-shot platform/codegen calibration workflows were retired after
   their measured decisions became production defaults: Apple Silicon/Rosetta
   for Intel macOS, native Windows ARM64, ARM-host Windows x64, and ThinLTO with
@@ -113,7 +116,7 @@ libtest scheduling are unchanged. The producer and consumers use the same
 `native-test-artifact.mjs` verification as Windows: exact source, run, platform,
 architecture, checkout path, independently supplied manifest digest, executable
 checksum and test inventory. This is not a cache of executables across commits.
-The scheduled full-test, stress and other direct Cargo lanes remain independent.
+Nightly full-test uses its own same-run producer; stress and other direct Cargo lanes remain independent.
 
 The macOS workspace suite and focused native broker/Kiro regressions run in
 separate jobs on the same pinned runner/toolchain. They share compatible Cargo
