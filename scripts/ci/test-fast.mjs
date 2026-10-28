@@ -69,7 +69,9 @@ function safeTestSteps(options) {
     cargoTestStep("lib:runtime-background", "runtime_background::", [], options),
     cargoTestStep("lib:runtime-claude-auth", "runtime_claude_auth::", [], options),
     cargoTestStep("lib:runtime-doctor", "runtime_doctor::", [], options),
-    cargoTestStep("lib:runtime-launch", "runtime_launch::", [], options),
+    // The app-commands lane already owns nested app_commands::runtime_launch
+    // cases; libtest filters are substrings, not module-root selectors.
+    cargoTestStep("lib:runtime-launch", "runtime_launch::", ["--skip", "app_commands::"], options),
     cargoTestStep("lib:test-env-guard", "test_env_guard_tests::", [], options),
     cargoIntegrationTestStep("test:auto-rotate", "auto_rotate", [], options),
   ];

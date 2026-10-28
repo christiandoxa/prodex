@@ -19,7 +19,6 @@ import tempfile
 
 CI_ARCHIVE_TARGETS = frozenset({
     "x86_64-unknown-linux-gnu",
-    "x86_64-apple-darwin",
     "aarch64-apple-darwin",
     "x86_64-pc-windows-msvc",
 })
@@ -87,7 +86,7 @@ def try_reuse(target, target_sha, repository, output_dir):
         return False
     run_listing = gh_json(
         "run", "list", "--repo", repository, "--workflow", "ci.yml", "--event", "push",
-        "--limit", "50", "--json",
+        "--commit", target_sha, "--limit", "50", "--json",
         "databaseId,headSha,status,conclusion",
     )
     if not isinstance(run_listing, list):
@@ -142,7 +141,7 @@ def try_reuse(target, target_sha, repository, output_dir):
 # Reuse older main-run archives only when both inputs AND the producing recipe
 # are identical. Release binaries are still rebuilt from the current source.
 RELEASE_ARCHIVE_TARGETS = CI_ARCHIVE_TARGETS | {
-    "aarch64-unknown-linux-gnu", "aarch64-pc-windows-msvc",
+    "x86_64-apple-darwin", "aarch64-unknown-linux-gnu", "aarch64-pc-windows-msvc",
 }
 ARCHIVE_INPUT_PATHS = (
     "mojo", "crates/prodex-mojo-core", "Cargo.toml", "Cargo.lock", ".cargo",
