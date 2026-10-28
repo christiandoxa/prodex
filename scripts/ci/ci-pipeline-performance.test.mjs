@@ -88,7 +88,7 @@ test("official Intel macOS release uses measured Apple Silicon cross-build with 
   const build = workflowJob(release, "build", "attest-binaries");
   const intel = build.match(/- target: x86_64-apple-darwin\n([\s\S]*?)- target: aarch64-apple-darwin/)?.[1];
   assert.ok(intel, "x86_64 macOS release matrix entry missing");
-  assert.match(intel, /runs-on: macos-14/);
+  assert.match(intel, /runs-on: macos-15/);
   assert.doesNotMatch(intel, /macos-15-intel/);
   assert.match(intel, /can-native-smoke: true/);
   assert.match(intel, /can-mojo-runtime-smoke: true/);
