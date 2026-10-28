@@ -1364,6 +1364,14 @@
             "cancellation.0 = None",
             "notify_cancelled(CancelledNotificationParam::new("
           ]
+        },
+        {
+          "path": "codex-rs/protocol/src/memory_version.rs",
+          "reason": "Memory v1 and v2 occupy distinct sibling roots; profile sharing must preserve both without converting formats.",
+          "required_contains": [
+            "Self::V1 => \"memories\"",
+            "Self::V2 => \"memories_v2\""
+          ]
         }
       ],
       "expected_headers": [
@@ -3112,6 +3120,16 @@
           "file_contains_all": [
             "merge_into_namespaces(specs, &mcp_namespaces)",
             "&& mcp_namespaces.contains(namespace.name.as_str())"
+          ]
+        },
+        {
+          "id": "memory.versioned-shared-roots",
+          "kind": "session_lifecycle",
+          "file": "codex-rs/protocol/src/memory_version.rs",
+          "reason": "Memory v1 and v2 occupy distinct sibling roots; profile sharing must preserve both without converting formats.",
+          "file_contains_all": [
+            "Self::V1 => \"memories\"",
+            "Self::V2 => \"memories_v2\""
           ]
         }
       ],

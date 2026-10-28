@@ -92,6 +92,7 @@ const REQUIRED_CRITICAL_FILES = [
   "codex-rs/codex-api/src/error.rs",
   "codex-rs/protocol/src/error.rs",
   "codex-rs/rmcp-client/src/tool_request.rs",
+  "codex-rs/protocol/src/memory_version.rs",
 ];
 
 const REQUIRED_FILE_CONTAINS = {
@@ -1085,6 +1086,10 @@ const REQUIRED_FILE_CONTAINS = {
     "let result = handle.await_response().await",
     "cancellation.0 = None",
     "notify_cancelled(CancelledNotificationParam::new("
+  ],
+  "codex-rs/protocol/src/memory_version.rs": [
+    "Self::V1 => \"memories\"",
+    "Self::V2 => \"memories_v2\""
   ],
 };
 
@@ -2613,6 +2618,15 @@ const REQUIRED_SEMANTIC_CHECKS = [
       "&& mcp_namespaces.contains(namespace.name.as_str())"
     ]
   },
+  {
+    "id": "memory.versioned-shared-roots",
+    "kind": "session_lifecycle",
+    "file": "codex-rs/protocol/src/memory_version.rs",
+    "file_contains_all": [
+      "Self::V1 => \"memories\"",
+      "Self::V2 => \"memories_v2\""
+    ]
+  },
 ];
 
 const SEMANTIC_LIST_FIELDS = [
@@ -3183,6 +3197,7 @@ function runSelfTest() {
 
   // Every new 0.165 contract and retained 0.164 contract stays mandatory.
   for (const id of [
+    "memory.versioned-shared-roots",
     "model-provider.gcp-native",
     "model-provider.gcp-registration",
     "models.originator-partitions",
