@@ -31,15 +31,21 @@
   },
   "patched_files": [
     "src/lib.rs",
-    "src/util/refined_tcp_stream.rs"
+    "src/util/refined_tcp_stream.rs",
+    "src/connection.rs",
+    "src/client.rs",
+    "src/request.rs"
   ],
   "new_files": [
     "src/accept_retry.rs"
   ],
-  "scope": "Retry failed accept and descriptor duplication under bounded backoff without losing the listening socket or replaying accepted HTTP requests. No protocol or TLS semantic changes.",
+  "scope": "Bounded accept/split recovery plus opt-in plain-socket mode, write timeout and shutdown control for exclusively owned requests/upgrades. Original HTTP parsing, TLS, framing and licenses are unchanged. Control handles never close a connection on drop.",
   "patched_sha256": {
-    "src/lib.rs": "135219f0b822fbe8002105ed56dbccd3f3f0445868f01c662e3fe3ad548a56a2",
-    "src/util/refined_tcp_stream.rs": "10f743e2316070993f745c8f51eda6c86e00ebd446f73faee401330103d7bd48",
-    "src/accept_retry.rs": "40307c726989d1f60491f3aa3ce96f6869d3d382d23cfd549096ffe8c9c9b298"
+    "src/lib.rs": "26471bd42220210319bee3a4c05458b5bb9f201ea8b3105319200b4b2d6f32d5",
+    "src/util/refined_tcp_stream.rs": "e792a154abe1fef24132c4b7632e2c54a7e69b9e48f8c43ee8ab2cca46b71e67",
+    "src/accept_retry.rs": "40307c726989d1f60491f3aa3ce96f6869d3d382d23cfd549096ffe8c9c9b298",
+    "src/connection.rs": "cc24c6ea6c7d1d346f5e5ef61fc07da0ef2ae015e42d4d8f6c50919cf1a10900",
+    "src/client.rs": "cedd5ad19a1bd47506b98105f318c8a4ff5d74f9cd32b40d1aeff978bbbad2fa",
+    "src/request.rs": "a5049bafac3a2f6eaf33f2d4ecb32f00fefe680dac8107d7a326eea72cedf298"
   }
 }

@@ -48,6 +48,7 @@ use chunked_transfer::Decoder;
 ///
 /// If you want to build fake requests to test your server, use [`TestRequest`](crate::test::TestRequest).
 pub struct Request {
+    control: Option<crate::ConnectionControl>,
     // where to read the body from
     data_reader: Option<Box<dyn Read + Send + 'static>>,
 
@@ -227,6 +228,7 @@ where
     };
 
     Ok(Request {
+        control: None,
         data_reader: Some(reader),
         response_writer: Some(Box::new(writer) as Box<dyn Write + Send + 'static>),
         remote_addr,
@@ -242,6 +244,17 @@ where
 }
 
 impl Request {
+    pub(crate) fn with_connection_control(mut self, control: Option<crate::ConnectionControl>) -> Self {
+        self.control = control;
+        self
+    }
+
+    /// Control the underlying plain socket while owning this request/upgrade.
+    /// Synthetic requests and TLS streams do not expose a raw control handle.
+    pub fn connection_control(&self) -> Option<crate::ConnectionControl> {
+        self.control.clone()
+    }
+
     /// Returns true if the request was made through HTTPS.
     #[inline]
     pub fn secure(&self) -> bool {

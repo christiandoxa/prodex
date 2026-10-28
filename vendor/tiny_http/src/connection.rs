@@ -192,3 +192,34 @@ impl std::fmt::Display for ListenAddr {
         }
     }
 }
+
+/// A control-only handle to a plain connection. It neither reads request bytes nor
+/// shuts down the connection when dropped. Callers must own the request/upgrade
+/// exclusively while changing nonblocking mode.
+#[derive(Clone, Debug)]
+pub struct ConnectionControl(std::sync::Arc<Connection>);
+
+impl ConnectionControl {
+    pub(crate) fn new(connection: Connection) -> Self { Self(std::sync::Arc::new(connection)) }
+
+    /// Change socket mode while the associated request/upgrade is exclusively held.
+    pub fn set_nonblocking(&self, nonblocking: bool) -> std::io::Result<()> {
+        match self.0.as_ref() {
+            Connection::Tcp(s) => s.set_nonblocking(nonblocking),
+            #[cfg(unix)]
+            Connection::Unix(s) => s.set_nonblocking(nonblocking),
+        }
+    }
+
+    /// Bound writes to a peer that stopped receiving, without timing out inference.
+    pub fn set_write_timeout(&self, timeout: Option<std::time::Duration>) -> std::io::Result<()> {
+        match self.0.as_ref() {
+            Connection::Tcp(s) => s.set_write_timeout(timeout),
+            #[cfg(unix)]
+            Connection::Unix(s) => s.set_write_timeout(timeout),
+        }
+    }
+
+    /// Cancel only this connection; used for expired, never-dispatched work.
+    pub fn shutdown(&self) -> std::io::Result<()> { self.0.shutdown(Shutdown::Both) }
+}

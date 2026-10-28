@@ -124,6 +124,14 @@ impl RefinedTcpStream {
         self.stream.secure()
     }
 
+    pub(crate) fn plain_connection_control(&self) -> IoResult<Option<crate::ConnectionControl>> {
+        match &self.stream {
+            Stream::Http(connection) => connection.try_clone().map(crate::ConnectionControl::new).map(Some),
+            #[cfg(any(feature = "ssl-openssl", feature = "ssl-rustls"))]
+            Stream::Https(_) => Ok(None),
+        }
+    }
+
     pub(crate) fn peer_addr(&mut self) -> IoResult<Option<SocketAddr>> {
         self.stream.peer_addr()
     }
