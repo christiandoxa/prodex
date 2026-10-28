@@ -2,6 +2,64 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.165.1 - 2026-10-28
+
+### Runtime
+
+- Park idle sockets and preserve interrupt transport ownership (`613a19a`)
+
+### Misc
+
+- Expose bounded controls for upgraded local sockets (`1b3037e`)
+# Prodex 0.165.1
+
+This patch release fixes local Responses WebSocket capacity exhaustion and
+connection-bound interruption handling. The qualified Codex baseline remains
+0.165.0; previous login, catalog, quota and continuation protections are retained.
+
+## New Features
+
+No new provider or model features are introduced in this patch. It retains the
+Codex 0.165.0 compatibility baseline while improving existing WebSocket behavior.
+
+## Bug Fixes
+
+- Park idle local WebSockets in a bounded cache instead of holding an inference
+  worker and active-request permit for the entire connection lifetime. Parser
+  fragments, cached upstream sockets and continuation ownership stay together.
+- Expire abandoned queued handshakes independently of busy inference workers.
+  Keep original request deadlines and separate bounded handshake execution
+  from inference; local pressure does not exhaust or penalize account quota.
+- Handle `response.interrupt` on the original response connection rather than
+  sending it through model selection, retry or rotation as a new inference.
+  Forward live steering/cancellation while streaming, preserve real interrupt
+  acknowledgements in either completion order, and retain queued follow-up frames.
+- Reject an interruption whose owning transport is gone without sending it as
+  the first event on a new upstream socket. Never turn it into a fabricated
+  `response.create`, acknowledge it locally, or replay output already committed.
+
+## Verification
+
+Regression coverage includes worker saturation from idle connections, incomplete
+WebSocket frames, bounded idle-cache eviction, independently reclaimed queue
+capacity, original deadlines, active and late interruptions, transport ownership,
+and unchanged output/acknowledgement payloads. Tests use synthetic accounts and
+loopback peers, not live cloud inference or user credentials. Publication requires
+exact-source CI, six-platform production builds, artifact smoke tests, checksums,
+malware scanning and signed build provenance.
+
+## Upgrade
+
+Install the new standalone binary and start a new Prodex runtime to activate the
+fixes. Downloading or replacing a binary does not patch an already-running
+process. User sessions, credentials, goals and profile state are not migrated by
+this release. For installations still using the older 0.439.x numbering, use the
+verified installer with an explicit `0.165.1` release selection.
+
+## Changelog
+
+Full Changelog: [0.165.0...0.165.1](https://github.com/christiandoxa/prodex/compare/0.165.0...0.165.1)
+
 ## 0.165.0 - 2026-10-28
 
 ### CLI
@@ -20,159 +78,16 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 
 - Qualify Codex 0.165 native provider boundaries (`22eb917`)
 - Support the explicit Codex-aligned release transition (`ec0870f`)
-# Prodex 0.165.0
-
-This stable release follows 0.439.5 and intentionally aligns Prodex numbering
-with the qualified Codex 0.165.0 release. The smaller version number is not a
-rollback: prior login, catalog, recovery and CI improvements remain included.
-
-## New Features
-
-- Qualify the exact official Codex `rust-v0.165.0` source and Linux artifacts.
-  Preserve native attached-fork fields, model error handling, MCP cancellation,
-  reasoning-effort changes and originator-scoped model catalogs.
-- Support native Vertex AI `gcp` provider restoration on resume without routing
-  it through the OpenAI profile pool. Cloud authentication remains Codex-owned;
-  the quota screen describes native handling rather than inventing availability.
-- Render release history by source ancestry so aligned versions remain in the
-  correct order before and after tagging. Permit only the explicitly reviewed
-  numbering transition; unrelated publication downgrades are still rejected.
-
-## Bug Fixes
-
-- Share native `memories_v2` across managed profiles using existing guarded
-  filesystem merging. Keep legacy and v2 memory namespaces separate without
-  overriding Codex memory selection or migrating a v1 memory into v2.
-
-- Isolate update-check caches from pre-alignment release hints.
-- Preserve CLI main/sub-agent catalog boundaries when native CCA-specific
-  cache files exist alongside the default account catalog.
-- Verify terminal model-not-found status/body forwarding without account
-  rotation or replay. Existing quota and continuation safeguards remain.
-
-## One-time migration from 0.439.x
-
-The legacy `prodex update` command compares version numbers and may regard
-0.439.x as newer than 0.165.0. Install this release explicitly once using the
-checksum-verified official standalone installer:
-`sh install.sh --release 0.165.0` on Unix or
-`./install.ps1 -Release 0.165.0` on Windows. Download and
-verify the script before running it, rather than piping it into a shell.
-Later aligned releases use increasing version numbers normally. Codex is a
-separate installation; neither this release nor the installer replaces an
-already-running Codex or Prodex process.
-
-## Changelog
-
-See the generated changelog for the compatibility, memory-sharing and
-release-numbering implementation commits.
-
-## Verification
-
-Source guards, negative fixtures, native credential-free app-server probes,
-GCP isolation, catalog partitioning, terminal forwarding, installer cutover
-and corruption rejection cover the changed boundaries. Publication requires
-exact-source CI, six-platform builds, artifact smoke tests, checksums,
-malware scanning and signed build provenance. No live cloud inference or
-account login was used for compatibility testing.
-
-Full Changelog: [0.439.5...0.165.0](https://github.com/christiandoxa/prodex/compare/0.439.5...0.165.0)
 
 ## 0.439.5 - 2026-10-27
-
-### CLI
-
-- Keep credential commits off history and quota waits (`714b851`)
-
-### Docs
-
-- Record qualified Presidio dependency for 0.439.5 (`ca8e09e`)
-
-### Deps
-
-- Qualify Presidio 2.2.366 service images (`662781d`)
-
-### Misc
-
-- Separate Presidio qualification from release metadata (`0532b7b`)
-
-## 0.439.4 - 2026-10-27
-
-### CLI
-
-- Preserve account reasoning defaults at launch (`d3ddba2`)
-
-### Claude
-
-- Refresh Claude and Gemini catalogs with native wire metadata (`0a4f456`)
-
-### Docs
-
-- Link the 0.439.4 source comparison (`e993bea`)
-- Document provider catalog refresh for 0.439.4 (`57702ef`)
-
-### Deps
-
-- Qualify Kiro CLI 2.34.2 for native releases (`8efe337`)
-
-### Misc
-
-- Refresh DeepSeek and Kiro model capabilities (`c0c5317`)
-- Add GPT-6.1 Terra and honor account reasoning metadata (`5ea61c2`)
-
-## 0.439.3 - 2026-10-26
-
-### CLI
-
-- Honor account catalogs in main and subagent pickers (`3d1a386`)
-
-### Docs
-
-- Document model lifecycle cleanup for 0.439.3 (`98da019`)
-
-### Misc
-
-- Synchronize provider capability matrix (`7951f94`)
-- Filter provider-specific retired model entries (`98e8d8d`)
-
-## 0.439.2 - 2026-10-26
 
 ### Runtime
 
 - Recover quota-bound continuations before throttled sends (`f27c491`)
-
-### Deps
-
-- Bump the cargo group with 3 updates (`02fe608`)
-
-### Misc
-
-- Qualify current RTK and Presidio releases (`7984b0d`)
-- Merge Dependabot GitHub Actions updates (#119) (`e5c5a62`)
-- Merge Dependabot Cargo updates (#118) (`b6d641b`)
-
-## 0.439.1 - 2026-10-25
-
-### Runtime
-
 - Simplify progress evidence and stabilize deadline coverage (`e1348f6`)
 - Keep recovery acknowledgment lint clean (`e920e81`)
 - Back off native retries until actual workflow progress (`9361786`)
 - Isolate proxy worker lanes and keep ingress responsive (`34d78fd`)
-
-### Docs
-
-- Refresh agent guidance from repository history (`d52db7d`)
-- Retire migration notes and collapse README details (`0782b86`)
-
-### Misc
-
-- Qualify tunnel-client 0.0.18 and isolate auth selection (`579c7e4`)
-
-## 0.439.0 - 2026-10-23
-
-### Runtime
-
 - Qualify Codex 0.164.0 and refresh runtime release pins (`200c35d`)
 - Declare rich runtime dependency (`c9c41d9`)
 - Consume buffered terminal frames before idle expiry (`528c90a`)
@@ -449,6 +364,9 @@ Full Changelog: [0.439.5...0.165.0](https://github.com/christiandoxa/prodex/comp
 
 ### CLI
 
+- Keep credential commits off history and quota waits (`714b851`)
+- Preserve account reasoning defaults at launch (`d3ddba2`)
+- Honor account catalogs in main and subagent pickers (`3d1a386`)
 - Show nearest OpenAI reset-credit expiry (`4c8b44b`)
 - Allow ABI test argument shape (`139f674`)
 - Move profile import identity email policy (`5576854`)
@@ -594,6 +512,7 @@ Full Changelog: [0.439.5...0.165.0](https://github.com/christiandoxa/prodex/comp
 
 ### Claude
 
+- Refresh Claude and Gemini catalogs with native wire metadata (`0a4f456`)
 - Migrate MCP stdio first-line classification (`ccd6f84`)
 - Migrate Anthropic retry transition (`3f7b187`)
 - Migrate Kiro Anthropic response (`2bb110c`)
@@ -626,6 +545,12 @@ Full Changelog: [0.439.5...0.165.0](https://github.com/christiandoxa/prodex/comp
 
 ### Docs
 
+- Record qualified Presidio dependency for 0.439.5 (`ca8e09e`)
+- Link the 0.439.4 source comparison (`e993bea`)
+- Document provider catalog refresh for 0.439.4 (`57702ef`)
+- Document model lifecycle cleanup for 0.439.3 (`98da019`)
+- Refresh agent guidance from repository history (`d52db7d`)
+- Retire migration notes and collapse README details (`0782b86`)
 - Curate Codex compatibility release notes (`b7c08e5`)
 - Structure 0.438.2 notes for the release renderer (`96a86ca`)
 - Record verified Kiro native client qualification (`bbe0d02`)
@@ -711,6 +636,9 @@ Full Changelog: [0.439.5...0.165.0](https://github.com/christiandoxa/prodex/comp
 
 ### Deps
 
+- Qualify Presidio 2.2.366 service images (`662781d`)
+- Qualify Kiro CLI 2.34.2 for native releases (`8efe337`)
+- Bump the cargo group with 3 updates (`02fe608`)
 - Patch distrusted TLS certificate verification (`c09b7fc`)
 - Integrate Dependabot fuzz serde_json update (#113) (`077dfb0`)
 - Integrate Dependabot Cargo updates (#112) (`5cec445`)
@@ -768,6 +696,15 @@ Full Changelog: [0.439.5...0.165.0](https://github.com/christiandoxa/prodex/comp
 
 ### Misc
 
+- Separate Presidio qualification from release metadata (`0532b7b`)
+- Refresh DeepSeek and Kiro model capabilities (`c0c5317`)
+- Add GPT-6.1 Terra and honor account reasoning metadata (`5ea61c2`)
+- Synchronize provider capability matrix (`7951f94`)
+- Filter provider-specific retired model entries (`98e8d8d`)
+- Qualify current RTK and Presidio releases (`7984b0d`)
+- Merge Dependabot GitHub Actions updates (#119) (`e5c5a62`)
+- Merge Dependabot Cargo updates (#118) (`b6d641b`)
+- Qualify tunnel-client 0.0.18 and isolate auth selection (`579c7e4`)
 - Align ABI regression coverage and simplify child environment validation (`1fb93e5`)
 - Separate Kiro source qualification from release metadata (`78827db`)
 - Preserve portable paths and isolate host prompt adapters (`2adc881`)
