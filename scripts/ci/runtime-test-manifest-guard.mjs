@@ -23,7 +23,6 @@ const SERIAL_OR_QUARANTINE_TAGS = new Set([RUNTIME_TEST_TAGS.serial, RUNTIME_TES
 const LEGACY_QUARANTINE_EVIDENCE_TAGS = new Set([
   RUNTIME_TEST_TAGS.stressSerialized,
   RUNTIME_TEST_TAGS.stressContinuation,
-  RUNTIME_TEST_TAGS.envParallel,
 ]);
 
 function parseArgs(argv) {

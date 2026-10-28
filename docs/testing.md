@@ -38,6 +38,21 @@ reuse immutable build inputs, not previous test outcomes or finished user binari
   verification path; architecture, ABI, runtime and security checks are retained.
   The separate runtime proxy benchmark remains available because it measures
   product performance rather than duplicating release builds.
+- CI produces only runtime archives consumed by its native jobs: Linux x64,
+  Windows x64 and macOS ARM64. Intel macOS is not a main-CI consumer and retains
+  its mandatory release archive, Rosetta architecture and runtime checks in the
+  six-platform release workflow. Removing the unused CI artifact does not remove
+  release platform coverage.
+- The Linux installer tests run once in the unconditional Node-test matrix lane,
+  through `scripts/*.test.mjs`; the duplicate standalone installer job is removed.
+  The Windows native installer and downloaded release-artifact smoke stay separate.
+- The obsolete environment-parallel runner was removed because its manifest
+  selected zero cases. The runtime manifest guard, active serial/quarantine cases,
+  stress repetitions and full-test ownership are unchanged; a no-op job is not
+  evidence of additional race coverage.
+- The local fast runner gives nested `app_commands::runtime_launch` tests to
+  the app-commands lane only. Its generic runtime-launch lane excludes that
+  namespace, removing duplicate execution while keeping the same union of tests.
 - The npm package smoke still compiles an optimized binary. Its separate
   host-release dependency cache can be populated only by main pushes.
 
@@ -133,6 +148,12 @@ exact-source push CI is running. The CI verdict job is scheduled only after
 all target builds finish; it no longer holds a hosted runner idle during
 compilation. It can still overlap final asset preparation and malware scanning,
 and every privileged publication job requires its successful exact-SHA verdict.
+The Linux release fixture installs its four pinned clients concurrently in the
+same runner, with a ten-minute setup bound. Each downloaded installer must pass
+its original checksum before execution, credentials are removed before any worker
+starts, and all four exits are collected. A failed download, checksum or installer
+fails the step; later runtime/discovery checks remain mandatory. This reduces
+serial preparation, not platform or supply-chain coverage.
 Linux artifact smoke runs as mandatory target-conditioned steps inside the
 Linux x64 build. Those steps download the already-uploaded binary and run the
 same package purity and runtime checks, without compiling a substitute. The
@@ -412,7 +433,6 @@ node scripts/ci/runtime-stress.mjs --suite stress
 node scripts/ci/runtime-stress.mjs --suite serialized
 node scripts/ci/runtime-stress.mjs --suite continuation
 node tests/load/mock-upstream.mjs --self-test && node tests/load/runtime-proxy-load.mjs --self-test && node scripts/ci/runtime-load-smoke.mjs
-node scripts/ci/runtime-env-parallel.mjs --runs 2 --test-threads 4
 cargo test -q --workspace --all-features -- --test-threads=1
 ```
 

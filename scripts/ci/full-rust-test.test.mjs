@@ -441,7 +441,7 @@ test("scheduled CI delegates duplicate Ubuntu suites to the daily full test", ()
     ["prodex-app-lib", "fuzz-build"],
     ["auto-rotate", "profile-commands-internal"],
     ["profile-commands-internal", "main-internal-core"],
-    ["main-internal-core", "env-sensitive-parallel-guard"],
+    ["main-internal-core", "main-internal-runtime-proxy"],
     ["main-internal-runtime-proxy", "runtime-load-smoke"],
   ]) {
     const job = workflow.match(new RegExp(`\\n  ${jobName}:\\n([\\s\\S]*?)\\n  ${nextJob}:`))?.[1];
@@ -455,7 +455,7 @@ test("scheduled CI delegates duplicate Ubuntu suites to the daily full test", ()
 
 test("large CI matrices use one cache writer and retain failure diagnostics", () => {
   const workflow = readFileSync(".github/workflows/ci.yml", "utf8");
-  const core = workflow.match(/\n  main-internal-core:\n([\s\S]*?)\n  env-sensitive-parallel-guard:/)?.[1];
+  const core = workflow.match(/\n  main-internal-core:\n([\s\S]*?)\n  main-internal-runtime-proxy:/)?.[1];
   const runtime = workflow.match(/\n  main-internal-runtime-proxy:\n([\s\S]*?)\n  runtime-load-smoke:/)?.[1];
   const stress = workflow.match(/\n  runtime-stress:\n([\s\S]*?)\n  real-mojo:/)?.[1];
   const processGuard = workflow.match(/\n  process-guard:\n([\s\S]*?)\n  supply-chain:/)?.[1];

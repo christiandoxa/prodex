@@ -19,7 +19,7 @@ SPEC.loader.exec_module(MODULE)
 SHA = "a" * 40
 REPO = "christiandoxa/prodex"
 RUN_ID = 12345
-TARGET = "x86_64-apple-darwin"
+TARGET = "aarch64-apple-darwin"
 ARCHIVE_NAME = "libprodex_mojo_core.a"
 
 
@@ -131,10 +131,15 @@ class MojoArchiveReuseTests(unittest.TestCase):
                 entry, "mojo-runtime-archive-" + TARGET,
             ))
 
-    def test_four_ci_targets_are_explicitly_bounded(self):
-        self.assertEqual(len(MODULE.CI_ARCHIVE_TARGETS), 4)
-        self.assertNotIn("aarch64-unknown-linux-gnu", MODULE.CI_ARCHIVE_TARGETS)
-        self.assertNotIn("aarch64-pc-windows-msvc", MODULE.CI_ARCHIVE_TARGETS)
+    def test_ci_targets_match_consumers_without_dropping_release_platforms(self):
+        self.assertEqual(MODULE.CI_ARCHIVE_TARGETS, {
+            "x86_64-unknown-linux-gnu", "aarch64-apple-darwin", "x86_64-pc-windows-msvc",
+        })
+        self.assertEqual(len(MODULE.RELEASE_ARCHIVE_TARGETS), 6)
+        self.assertIn("x86_64-apple-darwin", MODULE.RELEASE_ARCHIVE_TARGETS)
+        with mock.patch.object(MODULE, "gh_json") as remote:
+            self.assertFalse(MODULE.try_reuse("x86_64-apple-darwin", SHA, REPO, Path("unused")))
+            remote.assert_not_called()
 
     def test_exact_source_archive_download_is_atomic_and_reuses_bytes(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -144,6 +149,7 @@ class MojoArchiveReuseTests(unittest.TestCase):
             def fake_gh_json(*args):
                 calls.append(args)
                 if args[:2] == ("run", "list"):
+                    self.assertEqual(args[args.index("--commit") + 1], SHA)
                     return listing()
                 if args[-1].endswith(f"/runs/{RUN_ID}"):
                     return run_details()

@@ -140,7 +140,7 @@ test("standalone release reuses only verified same-SHA CI Mojo archives with str
 });
 
 
-test("trusted main archive cache preserves strict Mojo compile and ABI verification for all four targets", () => {
+test("trusted main archive cache preserves strict Mojo compile and ABI verification for every consumed CI target", () => {
   const linux = workflowJob(ci, "mojo-runtime-linux-archive", "mojo-runtime-platform-archives");
   const platform = workflowJob(ci, "mojo-runtime-platform-archives", "fmt");
   const cacheSource = "mojo/**/*.mojo";

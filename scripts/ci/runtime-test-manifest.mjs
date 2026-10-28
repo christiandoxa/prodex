@@ -7,10 +7,8 @@ const TAGS = Object.freeze({
   stressSkip: "runtime-stress:skip",
   stressSerialized: "runtime-stress:serialized",
   stressContinuation: "runtime-stress:continuation",
-  envParallel: "runtime-env:parallel",
 });
 
-const ENV_PARALLEL_TAGS = Object.freeze([TAGS.env, TAGS.envParallel, TAGS.quarantine]);
 const SERIALIZED_TAGS = Object.freeze([
   TAGS.stress,
   TAGS.stressSkip,
@@ -938,8 +936,3 @@ function cargoFilterFor(testCase) {
 export const RUNTIME_STRESS_SKIP_TESTS = testNamesWithTag(TAGS.stressSkip);
 export const RUNTIME_STRESS_SERIALIZED_TESTS = testNamesWithTag(TAGS.stressSerialized);
 export const RUNTIME_STRESS_CONTINUATION_TESTS = testNamesWithTag(TAGS.stressContinuation);
-
-export const RUNTIME_ENV_PARALLEL_CASES = casesWithTag(TAGS.envParallel).map((testCase) => ({
-  label: testCase.label ?? testCase.name,
-  filter: cargoFilterFor(testCase),
-}));
