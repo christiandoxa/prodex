@@ -627,3 +627,14 @@ Use `node scripts/ci/test-fast.mjs --no-prebuild` when measuring cold parallel b
 Run `node scripts/ci/domain-boundary-guard.mjs --self-test && node scripts/ci/domain-boundary-guard.mjs` after changing `crates/prodex-domain/Cargo.toml` or moving security/accounting identifiers between crates. The guard keeps `prodex-domain` pure by rejecting HTTP, CLI, database, async-runtime, transport, filesystem/process/network, and provider/runtime dependencies and source imports; use `node scripts/ci/domain-boundary-guard.mjs --self-test` after changing the guard itself.
 
 Use `cargo test --locked -q -p prodex-app --lib gateway_admin_auth -- --test-threads=1 && cargo test --locked -q -p prodex-app --lib gateway_usage -- --test-threads=1` after touching gateway admin authentication, OIDC/JWKS admin auth, data-plane auth separation, or gateway usage/budget enforcement. It runs the focused `gateway_admin_auth` and `gateway_usage` `prodex-app` suites that cover missing/unknown role fallback, stale JWKS request-path behavior, admin-token rejection on inference routes, and gateway usage/accounting auth invariants.
+
+### Nonempty auxiliary test selections
+
+The native-harness zero-test guard exposed two obsolete nightly TMPDIR filters:
+`runtime_tools::desktop_tests::` is no longer a registered module, and the old
+Smart Context self-test file is not linked by the active runtime. The alias
+check now runs the active overlay configuration and Smart Context store-retention
+regressions through the verified native harness, preserving serial execution.
+Both selections must execute real tests; their output is retained on failure.
+Do not turn missing selectors into success or reconnect obsolete production code
+merely to preserve an outdated test command.

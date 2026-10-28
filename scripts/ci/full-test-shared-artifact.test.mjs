@@ -33,7 +33,10 @@ test("workspace starts independently while all app shards require the verified p
   assert.match(consumer, /max-parallel: 16/);
   assert.match(consumer, /full-test-partition.sh/);
   assert.doesNotMatch(consumer, /cargo test|Cache Rust|Install sccache/);
-  assert.match(consumer, /TMPDIR=.*[\s\S]*PRODEX_APP_FILTERS=\$'runtime_tools::desktop_tests/);
+  assert.match(consumer, /TMPDIR=.*[\s\S]*PRODEX_APP_FILTERS=\$'runtime_tools::overlay::overlay_tests/);
+  assert.match(consumer, /compiled_store_retention_caller_tests::/);
+  assert.match(consumer, /tee "\$\{diagnostics\}\/symlink-temp-tests.log"/);
+  assert.doesNotMatch(consumer, /desktop_tests|offline_self_test_accepts_system_temp_symlink_alias/);
   assert.match(workspace + consumer, /if: failure\(\)/);
 });
 for (const [suite, exitCode, output] of [
