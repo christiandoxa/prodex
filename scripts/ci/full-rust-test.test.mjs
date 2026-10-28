@@ -324,8 +324,9 @@ test("release waits for every asset provenance check before API publication", ()
   assert.ok(publish > provenance, "release provenance must precede publication");
   const step = workflow.slice(provenance, publish);
   assert.match(step, /gh attestation verify "\$\{asset\}"/);
-  assert.match(step, /pids=\(\)/);
-  assert.match(step, /wait "\$\{pids\[index\]\}"/);
+  assert.match(step, /count=0/);
+  assert.match(step, /if \[ "\$\{count\}" -eq 0 \]/);
+  assert.doesNotMatch(step, /&\s*$/m);
   assert.match(step, /exit "\$\{status\}"/);
   assert.doesNotMatch(workflow, /git tag "\$\{version\}"/);
   assert.doesNotMatch(workflow, /push origin "refs\/tags\/\$\{version\}"/);

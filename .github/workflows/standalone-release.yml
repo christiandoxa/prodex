@@ -765,6 +765,7 @@ jobs:
           sha256sum --check SHA256SUMS
 
       - name: Verify release provenance
+        timeout-minutes: 10
         env:
           TARGET_SHA: ${{ needs.verify-ci.outputs.target_sha }}
           GH_TOKEN: ${{ github.token }}
@@ -773,28 +774,28 @@ jobs:
           set -euo pipefail
           log_dir="${RUNNER_TEMP}/release-provenance"
           mkdir -p "${log_dir}"
-          pids=()
-          assets=()
+          # gh initializes shared Sigstore/TUF metadata. Concurrent fresh-cache
+          # initializers can fail before verification; serialize, never bypass it.
+          status=0
+          count=0
           while IFS= read -r -d '' asset; do
-            index="${#pids[@]}"
-            assets+=("${asset}")
-            gh attestation verify "${asset}" --repo "${GITHUB_REPOSITORY}" \
+            count=$((count + 1))
+            if gh attestation verify "${asset}" --repo "${GITHUB_REPOSITORY}" \
               --signer-workflow "${GITHUB_REPOSITORY}/.github/workflows/standalone-release.yml" \
               --source-digest "${TARGET_SHA}" --source-ref refs/heads/main \
               --deny-self-hosted-runners \
-              >"${log_dir}/${index}.log" 2>&1 &
-            pids+=("$!")
-          done < <(find release-assets -maxdepth 1 -type f -print0)
-          status=0
-          for index in "${!pids[@]}"; do
-            if wait "${pids[index]}"; then
-              echo "Verified release provenance: ${assets[index]}"
+              >"${log_dir}/${count}.log" 2>&1; then
+              echo "Verified release provenance: ${asset}"
             else
               status=1
-              echo "Release provenance verification failed: ${assets[index]}" >&2
+              echo "Release provenance verification failed: ${asset}" >&2
             fi
-            cat "${log_dir}/${index}.log"
-          done
+            cat "${log_dir}/${count}.log"
+          done < <(find release-assets -maxdepth 1 -type f -print0)
+          if [ "${count}" -eq 0 ]; then
+            echo "No release assets available for provenance verification" >&2
+            exit 1
+          fi
           exit "${status}"
 
       - name: Wait for the absolute publication target and revalidate
