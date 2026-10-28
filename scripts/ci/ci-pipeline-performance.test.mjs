@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import test from "node:test";
 
 const ci = readFileSync(".github/workflows/ci.yml", "utf8");
@@ -85,28 +85,6 @@ test("release archives overlap CI verification but binary publication remains ga
 });
 
 
-test("Apple Silicon Intel release benchmark is opt-in, source-pinned and cannot publish", () => {
-  const workflow = readFileSync(".github/workflows/release-macos-cross-calibration.yml", "utf8");
-  assert.match(workflow, /name: macOS Intel cross-build calibration/);
-  assert.match(workflow, /workflow_dispatch:/);
-  assert.doesNotMatch(workflow, /^  push:/m);
-  assert.match(workflow, /runs-on: macos-14/);
-  assert.match(workflow, /permissions:\n  contents: read\n  actions: read/);
-  assert.match(workflow, /\.head_sha == \$sha/);
-  assert.match(workflow, /\.conclusion == "success"/);
-  assert.match(workflow, /\.event == "push"/);
-  assert.match(workflow, /- name: Check out exact CI source/);
-  assert.match(workflow, /run-id:/);
-  assert.match(workflow, /name: mojo-runtime-archive-x86_64-apple-darwin/);
-  assert.match(workflow, /PRODEX_MOJO_REQUIRED: "1"/);
-  assert.match(workflow, /cargo build --release --locked --target x86_64-apple-darwin/);
-  assert.match(workflow, /lipo -archs/);
-  assert.match(workflow, /arch -x86_64/);
-  assert.match(workflow, /"implementation": "mojo-compiled-in"/);
-  assert.doesNotMatch(workflow, /gh release (?:create|upload|edit)/);
-  assert.doesNotMatch(workflow, /git push/);
-  assert.doesNotMatch(workflow, /attest-build-provenance/);
-});
 
 
 test("official Intel macOS release uses measured Apple Silicon cross-build with Rosetta safety", () => {
@@ -257,36 +235,6 @@ test("shared release archive cache is exact-input and preserves all six gates", 
 });
 
 
-test("native Windows ARM64 release calibration is source-pinned, opt-in and cannot publish", () => {
-  const workflow = readFileSync(".github/workflows/release-windows-arm64-calibration.yml", "utf8");
-  assert.match(workflow, /name: Windows ARM64 native release build calibration/);
-  assert.match(workflow, /workflow_dispatch:/);
-  assert.match(workflow, /runs-on: windows-11-arm/);
-  assert.doesNotMatch(workflow, /^  push:/m);
-  assert.match(workflow, /permissions:\n  contents: read\n  actions: read/);
-  assert.match(workflow, /\.head_sha -cne \$env:TARGET_SHA/);
-  assert.match(workflow, /\.event -cne 'workflow_dispatch'/);
-  assert.match(workflow, /\.path -cne '\.github\/workflows\/standalone-release.yml'/);
-  assert.match(workflow, /\.conclusion -cne 'success'/);
-  assert.match(workflow, /\.repository\.full_name -cne \$env:GITHUB_REPOSITORY/);
-  assert.match(workflow, /- name: Check out exact release source/);
-  assert.match(workflow, /ref: \$\{\{ inputs\.target_sha \}\}/);
-  assert.match(workflow, /name: mojo-archive-aarch64-pc-windows-msvc/);
-  assert.match(workflow, /run-id: \$\{\{ inputs\.source_release_run_id \}\}/);
-  assert.match(workflow, /PRODEX_MOJO_REQUIRED: "1"/);
-  assert.match(workflow, /PRODEX_MOJO_ARCHIVE:/);
-  assert.match(workflow, /llvm-nm -g/);
-  assert.match(workflow, /KGEN_CompilerRT_/);
-  assert.match(workflow, /cargo build --release --locked --target aarch64-pc-windows-msvc --features mojo-core --bin prodex/);
-  assert.match(workflow, /\$machine -ne 0xAA64/);
-  assert.match(workflow, /- name: Run real native ARM64 Mojo smoke/);
-  assert.match(workflow, /"implementation": "mojo-compiled-in"/);
-  assert.match(workflow, /"fallback": false/);
-  assert.match(workflow, /"self_test": "passed"/);
-  assert.doesNotMatch(workflow, /gh release (?:create|edit|upload)/);
-  assert.doesNotMatch(workflow, /git push/);
-  assert.doesNotMatch(workflow, /- name: Upload binary artifact/);
-});
 
 
 test("official Windows ARM64 release uses native benchmark, strict PE and runtime smoke", () => {
@@ -362,39 +310,6 @@ test("nightly full Rust suite reuses trusted main CI Mojo archive with strict fa
 });
 
 
-test("Windows x64 codegen A/B is opt-in, same official source and cannot publish", () => {
-  const workflow = readFileSync(".github/workflows/release-windows-x64-codegen-calibration.yml", "utf8");
-  assert.match(workflow, /name: Windows x64 ThinLTO codegen calibration/);
-  assert.match(workflow, /workflow_dispatch:/);
-  assert.doesNotMatch(workflow, /^  push:/m);
-  assert.match(workflow, /permissions:\n  contents: read\n  actions: read/);
-  assert.match(workflow, /runs-on: windows-latest/);
-  assert.match(workflow, /units: \[16, 64\]/);
-  assert.match(workflow, /CARGO_PROFILE_RELEASE_CODEGEN_UNITS: \$\{\{ matrix.units \}\}/);
-  assert.match(workflow, /\.head_sha -cne \$env:TARGET_SHA/);
-  assert.match(workflow, /\.event -cne 'workflow_dispatch'/);
-  assert.match(workflow, /\.head_branch -cne 'main'/);
-  assert.match(workflow, /\.path -cne '\.github\/workflows\/standalone-release.yml'/);
-  assert.match(workflow, /\.conclusion -cne 'success'/);
-  assert.match(workflow, /\.repository.full_name -cne \$env:GITHUB_REPOSITORY/);
-  assert.match(workflow, /Check out exact source/);
-  assert.match(workflow, /ref: \$\{\{ inputs.target_sha \}\}/);
-  assert.match(workflow, /name: mojo-archive-x86_64-pc-windows-msvc/);
-  assert.match(workflow, /run-id: \$\{\{ inputs.source_release_run_id \}\}/);
-  assert.match(workflow, /PRODEX_MOJO_REQUIRED: "1"/);
-  assert.match(workflow, /KGEN_CompilerRT_/);
-  assert.match(workflow, /cargo build --locked --release --target x86_64-pc-windows-msvc --features mojo-core/);
-  assert.doesNotMatch(workflow, /cargo build[^\n]* --bin prodex/);
-  assert.match(workflow, /\$machine -ne 0x8664/);
-  assert.match(workflow, /Real native compiled-in Mojo smoke/);
-  assert.match(workflow, /"implementation": "mojo-compiled-in"/);
-  assert.match(workflow, /"fallback": false/);
-  assert.match(workflow, /"self_test": "passed"/);
-  assert.match(workflow, /Upload text timings only/);
-  assert.doesNotMatch(workflow, /gh release (?:create|upload|edit)/);
-  assert.doesNotMatch(workflow, /git push/);
-  assert.doesNotMatch(workflow, /subject-path:|attest-build-provenance/);
-});
 
 
 test("Windows fake Kiro ACP timing remains bounded without relaxing production deadlines", () => {
@@ -522,63 +437,8 @@ test("release Mojo archive setup skips already-installed LLVM but still validate
 });
 
 
-test("Windows ARM64-host x64 release calibration is opt-in and fails closed on ABI/runtime", () => {
-  const workflow = readFileSync(".github/workflows/release-windows-x64-arm-host-calibration.yml", "utf8");
-  assert.match(workflow, /name: Windows x64 ARM-host cross-release calibration/);
-  assert.match(workflow, /workflow_dispatch:/);
-  assert.doesNotMatch(workflow, /^  push:/m);
-  assert.match(workflow, /permissions:\n  contents: read\n  actions: read/);
-  assert.match(workflow, /runs-on: windows-11-arm/);
-  assert.match(workflow, /CARGO_PROFILE_RELEASE_CODEGEN_UNITS: "16"/);
-  assert.match(workflow, /\.head_sha -cne \$env:TARGET_SHA/);
-  assert.match(workflow, /\.event -cne 'workflow_dispatch'/);
-  assert.match(workflow, /\.head_branch -cne 'main'/);
-  assert.match(workflow, /\.path -cne '\.github\/workflows\/standalone-release.yml'/);
-  assert.match(workflow, /\.repository.full_name -cne \$env:GITHUB_REPOSITORY/);
-  assert.match(workflow, /\.conclusion -cne 'success'/);
-  assert.match(workflow, /ref: .*inputs.target_sha/);
-  assert.match(workflow, /name: mojo-archive-x86_64-pc-windows-msvc/);
-  assert.match(workflow, /run-id: .*inputs.source_release_run_id/);
-  assert.match(workflow, /\$env:PROCESSOR_ARCHITECTURE -cne 'ARM64'/);
-  assert.match(workflow, /llvm-nm -g/);
-  assert.match(workflow, /KGEN_CompilerRT_/);
-  assert.match(workflow, /CARGO_INCREMENTAL: "0"/);
-  assert.match(workflow, /cargo build --locked --release --target x86_64-pc-windows-msvc --features mojo-core/);
-  assert.match(workflow, /\$machine -ne 0x8664/);
-  assert.match(workflow, /Emulated x64 compiled-in Mojo smoke on ARM64/);
-  assert.match(workflow, /"implementation": "mojo-compiled-in"/);
-  assert.match(workflow, /"fallback": false/);
-  assert.match(workflow, /"self_test": "passed"/);
-  assert.match(workflow, /Upload text timings only/);
-  assert.doesNotMatch(workflow, /gh release (?:create|upload|edit)/);
-  assert.doesNotMatch(workflow, /git push/);
-  assert.doesNotMatch(workflow, /subject-path:|attest-build-provenance/);
-});
 
 
-test("release and calibration dependency caches share only compatible native dependencies", () => {
-  const build = workflowJob(release, "build", "attest-binaries");
-  assert.match(build, /shared-key: production-release-deps-v2/);
-  for (const filename of [
-    "release-macos-cross-calibration.yml", "release-windows-arm64-calibration.yml",
-    "release-windows-x64-arm-host-calibration.yml", "release-windows-x64-codegen-calibration.yml",
-  ]) {
-    const source = readFileSync(`.github/workflows/${filename}`, "utf8");
-    assert.match(source, /shared-key: production-release-deps-v2/);
-    assert.match(source, /cache-workspace-crates: "false"/);
-    assert.match(source, /cache-bin: false/);
-    assert.match(source, /save-if:.*github.ref == 'refs\/heads\/main'/);
-    assert.match(source, /scripts\/ci\/release_cargo_deps_cache_key.py/);
-    assert.match(source, /external_sha256=legacy-\$\(git rev-parse HEAD\)/);
-    assert.match(source, /shared-key: production-release-deps-v2-rust1.99.1-thinlto-cgu/);
-    assert.match(source, /runner.os.*runner.arch/);
-    assert.match(source, /steps.rust-deps-cache-key.outputs.external_sha256/);
-    assert.match(source, /cargo build --(?:release|locked)/);
-    assert.doesNotMatch(source, /restore-keys:|gh release (?:create|upload|edit)/);
-  }
-  const ab = readFileSync(".github/workflows/release-windows-x64-codegen-calibration.yml", "utf8");
-  assert.match(ab, /thinlto-cgu\$\{\{ matrix.units \}\}/);
-});
 
 test("benchmark reuses only a trusted exact-input archive and keeps a cold compiler fallback", () => {
   const source = readFileSync(".github/workflows/bench-calibration.yml", "utf8");
@@ -612,4 +472,19 @@ test("matrix cache readers do not recreate a concurrent object-cache write storm
       assert.match(job, /fail-fast: false/);
     }
   }
+});
+
+// These one-shot host/codegen experiments are now the production defaults.
+// Keep the target checks above; deleting a retired experiment is not a test waiver.
+test("retired one-shot calibration workflows stay removed while production verification remains", () => {
+  for (const file of [
+    "release-macos-cross-calibration.yml", "release-windows-arm64-calibration.yml",
+    "release-windows-x64-arm-host-calibration.yml", "release-windows-x64-codegen-calibration.yml",
+  ]) assert.equal(existsSync(`.github/workflows/${file}`), false, file);
+  const build = workflowJob(release, "build");
+  for (const marker of ["Require Rosetta", "Verify native Windows ARM64", "Verify emulated Windows x64",
+    "Verify compiled-in Mojo release", "Verify Linux GLIBC baseline"]) assert.ok(build.includes(marker));
+  assert.match(release, /publish:[\s\S]*?default: false/);
+  assert.equal((build.match(/^          - target: /gm) ?? []).length, 6);
+  assert.ok(existsSync(".github/workflows/bench-calibration.yml"), "unique runtime benchmark remains available");
 });

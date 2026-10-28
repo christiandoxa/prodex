@@ -3,11 +3,7 @@ import { readdirSync, readFileSync } from "node:fs";
 import test from "node:test";
 import { validateWorkflow } from "./supply-chain-guard.mjs";
 
-const workflows = [
-  "release-target.yml", "release-macos-cross-calibration.yml",
-  "release-windows-arm64-calibration.yml", "release-windows-x64-arm-host-calibration.yml",
-  "release-windows-x64-codegen-calibration.yml",
-];
+const workflows = ["release-target.yml"];
 function cache(file) {
   const source = readFileSync(`.github/workflows/${file}`, "utf8");
   const block = source.split(/\n      - name:/u).find((value) => value.includes("Swatinem/rust-cache@"));
@@ -35,7 +31,7 @@ function identity(file, overrides = {}) {
   });
 }
 
-test("release and calibration use the discriminated shared key, never an ignored additional key", () => {
+test("production release uses the discriminated shared key, never an ignored additional key", () => {
   for (const file of workflows) {
     const block = cache(file);
     assert.match(block, /shared-key: production-release-deps-v2-rust1\.99\.1-thinlto-cgu/);
@@ -53,16 +49,24 @@ test("different release targets, CPUs, dependencies, and codegen profiles cannot
     { "steps.rust-deps-cache-key.outputs.external_sha256": "b".repeat(64) },
     { "runner.arch": "X64" },
   ]) assert.notEqual(identity("release-target.yml", overrides), base);
-  assert.notEqual(identity("release-windows-x64-codegen-calibration.yml", { "matrix.units": "1" }),
-    identity("release-windows-x64-codegen-calibration.yml", { "matrix.units": "16" }));
 });
-test("only identical production and calibration target profiles share a namespace", () => {
-  assert.equal(identity("release-target.yml"), identity("release-windows-x64-arm-host-calibration.yml"));
-  assert.equal(identity("release-target.yml"), identity("release-windows-x64-codegen-calibration.yml"));
-  assert.equal(identity("release-target.yml", { "matrix.target": "aarch64-pc-windows-msvc", "matrix.mojo-target-cpu": "generic" }),
-    identity("release-windows-arm64-calibration.yml"));
-  const apple = { "runner.os": "macOS", "matrix.target": "x86_64-apple-darwin" };
-  assert.equal(identity("release-target.yml", apple), identity("release-macos-cross-calibration.yml", apple));
+test("all six production targets have distinct effective cache identities", () => {
+  const targets = [
+    ["Linux", "X64", "x86_64-unknown-linux-gnu", "x86-64"],
+    ["Linux", "X64", "aarch64-unknown-linux-gnu", "generic"],
+    ["macOS", "ARM64", "x86_64-apple-darwin", "x86-64"],
+    ["macOS", "ARM64", "aarch64-apple-darwin", "generic"],
+    ["Windows", "ARM64", "x86_64-pc-windows-msvc", "x86-64"],
+    ["Windows", "ARM64", "aarch64-pc-windows-msvc", "generic"],
+  ];
+  const keys = targets.map(([os, arch, target, cpu]) => identity("release-target.yml", {
+    "runner.os": os, "runner.arch": arch, "matrix.target": target, "matrix.mojo-target-cpu": cpu,
+  }));
+  assert.equal(new Set(keys).size, targets.length);
+  const profile = readFileSync("Cargo.toml", "utf8").split("[profile.release]")[1].split("\n[")[0];
+  assert.match(profile, /lto = "thin"/);
+  // Non-incremental Cargo release defaults to 16 codegen units.
+  assert.equal(profile.match(/codegen-units\s*=\s*(\d+)/u)?.[1] ?? "16", "16");
 });
 
 test("no Rust cache action silently discards a target/input key in any pipeline", () => {
