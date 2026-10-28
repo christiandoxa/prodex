@@ -89,28 +89,28 @@ console.log('running 1 test\\ntest result: ok. 1 passed; 0 failed; 0 ignored');
   return {dir, record, digest:hash(record)};
 }
 
-test("verified bundle runs every filter from Cargo package cwd and fails closed on zero or failed tests", {skip:process.platform==='win32'}, (t) => {
+test("verified bundle runs every filter from Cargo package cwd and fails closed on zero or failed tests", {skip:process.platform==='win32'}, async (t) => {
   const {dir,digest}=fixture(t);
   const plan={repository:dir,filters:"a\nb",skips:"owned"};
-  assert.deepEqual(runBundle(dir,expected,digest,plan),inventory);
+  assert.deepEqual(await runBundle(dir,expected,digest,plan),inventory);
   const calls=readFile(path.join(dir,"calls"),'utf8').trim().split('\n').map(JSON.parse);
   assert.equal(calls.length,2);
   assert.ok(calls.every(call=>call.cwd===path.join(dir,'crates/prodex-app')));
   assert.deepEqual(calls[0].args,['a','--test-threads=1','--skip','owned']);
-  assert.throws(()=>runBundle(dir,expected,digest,{repository:dir,filters:"zero"}));
-  assert.throws(()=>runBundle(dir,expected,digest,{repository:dir,filters:"fail\na"}));
+  await assert.rejects(()=>runBundle(dir,expected,digest,{repository:dir,filters:"zero"}));
+  await assert.rejects(()=>runBundle(dir,expected,digest,{repository:dir,filters:"fail\na"}));
   const all=readFile(path.join(dir,"calls"),'utf8').trim().split('\n').map(JSON.parse);
   assert.deepEqual(all.slice(-2).map(call=>call.args[0]),['fail','a'],"later filters must still run after failure");
 });
 
-test("tampered and symlinked bundle members cannot run", {skip:process.platform==='win32'}, (t) => {
+test("tampered and symlinked bundle members cannot run", {skip:process.platform==='win32'}, async (t) => {
   const {dir,digest}=fixture(t);
-  assert.throws(()=>runBundle(dir,expected,'0'.repeat(64),{repository:dir}));
+  await assert.rejects(()=>runBundle(dir,expected,'0'.repeat(64),{repository:dir}));
   writeFileSync(path.join(dir,"prodex-app-tests"),'corrupt');
-  assert.throws(()=>runBundle(dir,expected,digest,{repository:dir}));
+  await assert.rejects(()=>runBundle(dir,expected,digest,{repository:dir}));
   rmSync(path.join(dir,"prodex-app-tests"));
   symlinkSync(process.execPath,path.join(dir,"prodex-app-tests"));
-  assert.throws(()=>runBundle(dir,expected,digest,{repository:dir}));
+  await assert.rejects(()=>runBundle(dir,expected,digest,{repository:dir}));
 });
 
 
@@ -134,4 +134,38 @@ test("Windows security gate rejects unbound bundles and missing producer compila
 test("native Windows preparation and execution retain the original Bash environment", () => {
   assert.match(job("windows-app-test-build"), /id: pack\n\s+shell: bash\n\s+run: node scripts\/ci\/native-test-artifact\.mjs pack/);
   assert.match(job("windows-prodex-app"), /Run Windows prodex-app partition.*\n\s+shell: bash\n/);
+});
+
+
+test("native progress is visible before the executable finishes", {skip: process.platform === "win32"}, async (t) => {
+  const {dir} = fixture(t);
+  const ack = path.join(dir, "progress-ack");
+  const payload = `#!${process.execPath}
+import fs from 'node:fs';
+if(process.argv.includes('--list')) {console.log('a::case: test\\nb::case: test');process.exit(0);}
+console.log('running 1 test\\nNATIVE_PROGRESS_READY');
+const started=Date.now();
+const timer=setInterval(()=>{
+ if(fs.existsSync(${JSON.stringify(ack)})) {clearInterval(timer);console.log('test result: ok. 1 passed; 0 failed; 0 ignored');}
+ else if(Date.now()-started>3000) {clearInterval(timer);process.exitCode=7;}
+},10);
+`;
+  writeFileSync(path.join(dir,"prodex-app-tests"),payload,{mode:0o700});
+  const record=JSON.stringify({...manifest,binary_sha256:hash(payload)});
+  writeFileSync(path.join(dir,"manifest.json"),record);
+  const {spawn} = await import("node:child_process");
+  const source = `import {runBundle} from ${JSON.stringify(new URL("./native-test-artifact.mjs",import.meta.url).href)};
+await runBundle(${JSON.stringify(dir)},${JSON.stringify(expected)},${JSON.stringify(hash(record))},{repository:${JSON.stringify(dir)},filters:'a'});`;
+  const child=spawn(process.execPath,["--input-type=module","-e",source],{stdio:["ignore","pipe","pipe"]});
+  let output="",errors="",acknowledged=false;
+  const timer=setTimeout(()=>child.kill("SIGKILL"),10000);
+  child.stdout.on("data",chunk=>{
+    output+=chunk;
+    if(output.includes("NATIVE_PROGRESS_READY")&&!acknowledged){acknowledged=true;writeFileSync(ack,"continue");}
+  });
+  child.stderr.on("data",chunk=>{errors+=chunk;});
+  const code=await new Promise((resolve,reject)=>{child.on("error",reject);child.on("close",resolve);}).finally(()=>clearTimeout(timer));
+  assert.equal(code,0,output+errors);
+  assert.ok(acknowledged,"test progress was held until exit");
+  assert.match(output,/test result: ok/);
 });

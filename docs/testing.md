@@ -733,16 +733,20 @@ searching only the most recent unrelated runs. Pending checks are polled every
 ten seconds; a completed failure still fails the gate. This reduces observation
 latency without approving an incomplete CI run or changing publication authority.
 
-### Bounded Windows catchall and terminal workflow gates
+### Streaming native tests and terminal workflow gates
 
-The Windows application catchall runs as two source/run-bound, isolated runner
-partitions. Both start from the same verified native test census, apply the
-original substring exclusions, sort the eligible names, and assign alternating
-names to exactly one owner. Each runner uses exact libtest names and
-`--test-threads=1`; zero selections, invalid indices and a mismatched executed
-test count fail closed. The other fourteen Windows partition selectors remain
-unchanged. The Linux, stress, integration and full-test ownership plans are not
-altered by the Windows-only split.
+Native application test execution streams progress as each test completes,
+rather than buffering the entire partition until the executable exits. The
+shared process runner preserves package working directory, serial scheduling,
+existing filters/exclusions, a finite deadline, process-tree cleanup, and failure
+propagation without retries. Output inspection retains a bounded summary tail;
+zero tests or a missing success summary still fail. GitHub timestamps can now
+identify a slow native case without experimental libtest flags or another job.
+
+The fifteen Windows application partitions and their exact ownership remain
+unchanged. Splitting the former catchall by test count did not balance actual
+Windows execution and was removed after measurement instead of retaining an
+unproductive extra runner. Do not equate equal test counts with equal duration.
 
 The release `verify-ci` job owns both the artifact verdict and exact-source CI
 approval. It allocates a runner only after preflight, all six builds, antivirus

@@ -871,8 +871,6 @@ jobs:
         shell: bash
         env:
           TEST_MANIFEST_SHA256: ${{ needs.windows-app-test-build.outputs.manifest_sha256 }}
-          PRODEX_APP_SHARD_INDEX: ${{ matrix.subshard_index }}
-          PRODEX_APP_SHARD_COUNT: ${{ matrix.subshard_count }}
           PRODEX_APP_FILTERS: ${{ matrix.filters }}
           PRODEX_APP_SKIP_FILTERS: ${{ matrix.skip_filters }}
           RUST_BACKTRACE: "1"

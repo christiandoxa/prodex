@@ -42,7 +42,7 @@ test("prodex-app shard manifest is disjoint and remainder-complete", () => {
   assert.equal(appMatrix.include.length, 11);
   assert.equal(ciMatrix.include.length, 8);
   assert.equal(fullMatrix.include.length, PRODEX_APP_FULL_TEST_SHARDS.length + 4);
-  assert.equal(windowsMatrix.include.length, 16);
+  assert.equal(windowsMatrix.include.length, 15);
   assert.equal(appMatrix.include.filter((entry) => entry.save_cache).length, 1);
   assert.equal(ciMatrix.include.filter((entry) => entry.save_cache).length, 1);
   assert.equal(fullMatrix.include.filter((entry) => entry.save_cache).length, 1);
@@ -124,13 +124,13 @@ test("prodex-app shard manifest is disjoint and remainder-complete", () => {
     ],
   );
   assert.deepEqual(
-    windowsMatrix.include.find((entry) => entry.suite === "remainder-1").skip_filters.split("\n"),
+    windowsMatrix.include.find((entry) => entry.suite === "remainder").skip_filters.split("\n"),
     [...PRODEX_APP_LIB_FILTERS, ...extraFilters],
   );
 });
 
 test("Windows critical-path partitions preserve targeted and recovery ownership without overlap", () => {
-  const entries = windowsGithubMatrix().include.filter((entry) => entry.suite !== "remainder-2").map((entry) => entry.suite === "remainder-1" ? {...entry, suite: "remainder"} : entry);
+  const entries = windowsGithubMatrix().include;
   assert.equal(entries.length, 15);
   assert.equal(entries.filter((entry) => entry.save_cache).length, 1);
   assert.deepEqual(entries.filter((entry) => !entry.suite.startsWith("remainder") && entry.suite !== "commands-gemini").map((entry) => entry.suite), [
@@ -191,7 +191,7 @@ test("Windows critical-path partitions preserve targeted and recovery ownership 
 test("Windows matrix help documents the active partition count", () => {
   const help = runPlanner("--help");
   assert.equal(help.status, 0, help.stderr);
-  assert.match(help.stdout, /--windows-github-matrix emits sixteen disjoint Windows partitions/);
+  assert.match(help.stdout, /--windows-github-matrix emits fifteen disjoint Windows partitions/);
 });
 
 test("shard planner dry-run and matrix output are compile-free", () => {
@@ -320,7 +320,7 @@ test("manifest rejects a remainder that drops a targeted filter", () => {
 
 
 test("Windows remainder slices stay disjoint with substring-based libtest filters", () => {
-  const entries = windowsGithubMatrix().include.filter((entry) => entry.suite !== "remainder-2").map((entry) => entry.suite === "remainder-1" ? {...entry, suite: "remainder"} : entry);
+  const entries = windowsGithubMatrix().include;
   const representativeNames = [
     "app_commands::tests::pings_all_profiles",
     "main_internal_tests::runtime_proxy_selection_and_pressure::admission::guards::never_rotate_after_commit",
@@ -355,7 +355,7 @@ test("Windows remainder slices stay disjoint with substring-based libtest filter
 
 
 test("Windows HTTP/WebSocket/other continuation partitions preserve exactly one serial owner", () => {
-  const entries = windowsGithubMatrix().include.filter((entry) => entry.suite !== "remainder-2").map((entry) => entry.suite === "remainder-1" ? {...entry, suite: "remainder"} : entry);
+  const entries = windowsGithubMatrix().include;
   const prefix = "main_internal_tests::runtime_proxy_continuations::";
   const sampleCases = [
     ["http_followups::quota::ready_profile", "remainder-continuations-http"],
@@ -398,7 +398,7 @@ test("nightly full suite shards unassigned cases without changing ordinary app o
   assert.deepEqual(extras.map((entry) => entry.suite), names);
   assert.equal(full.include.filter((entry) => entry.save_cache).length, 1);
   assert.deepEqual(app.include.map((entry) => entry.suite), PRODEX_APP_LIB_SHARDS.map((entry) => entry.suite));
-  assert.equal(windows.include.length, 16, "nightly sharding cannot alter Windows CI");
+  assert.equal(windows.include.length, 15, "nightly sharding cannot alter Windows CI");
 
   const foundation = extras.find((entry) => entry.suite === "full-remainder-foundation");
   assert.equal(foundation.filters.split("\n").length, 6);
@@ -485,11 +485,11 @@ test("long measured partitions are created first without changing cache ownershi
     "workspace", "full-remainder-selection", "full-remainder-continuations", "commands", "runtime",
   ]);
   const windows = windowsGithubMatrix().include;
-  assert.deepEqual(windows.slice(0, 4).map((entry) => entry.suite), [
-    "remainder-1", "remainder-2", "remainder-continuations-http", "remainder-selection-recovery",
+  assert.deepEqual(windows.slice(0, 3).map((entry) => entry.suite), [
+    "remainder", "remainder-continuations-http", "remainder-selection-recovery",
   ]);
   assert.deepEqual(full.filter((entry) => entry.save_cache).map((entry) => entry.suite), ["workspace"]);
   assert.deepEqual(windows.filter((entry) => entry.save_cache).map((entry) => entry.suite), ["commands-gemini"]);
   assert.equal(full.length, 27);
-  assert.equal(windows.length, 16);
+  assert.equal(windows.length, 15);
 });
