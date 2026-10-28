@@ -8,7 +8,7 @@ import { verifyTinyHttpPatch } from "./tiny-http-patch-guard.mjs";
 
 test("tiny_http repair preserves audited vendor source and bounded retry", async () => {
   const result = await verifyTinyHttpPatch();
-  assert.equal(result.patchedFiles, 2);
+  assert.equal(result.patchedFiles, 5);
   assert.ok(result.sourceFilesVerified >= 20);
 });
 

@@ -15,6 +15,7 @@ use crate::Request;
 /// A ClientConnection is an object that will store a socket to a client
 /// and return Request objects.
 pub struct ClientConnection {
+    control: Option<crate::ConnectionControl>,
     // address of the client
     remote_addr: IoResult<Option<SocketAddr>>,
 
@@ -52,6 +53,7 @@ impl ClientConnection {
         write_socket: RefinedTcpStream,
         mut read_socket: RefinedTcpStream,
     ) -> ClientConnection {
+        let control = read_socket.plain_connection_control().ok().flatten();
         let remote_addr = read_socket.peer_addr();
         let secure = read_socket.secure();
 
@@ -59,6 +61,7 @@ impl ClientConnection {
         let first_header = source.next().unwrap();
 
         ClientConnection {
+            control,
             source,
             sink: SequentialWriterBuilder::new(BufWriter::with_capacity(1024, write_socket)),
             remote_addr,
@@ -165,7 +168,7 @@ impl ClientConnection {
         })?;
 
         // return the request
-        Ok(request)
+        Ok(request.with_connection_control(self.control.clone()))
     }
 }
 

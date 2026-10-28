@@ -12,7 +12,7 @@ export async function verifyTinyHttpPatch(root = repoRoot) {
   assert.equal(manifest.crate, "tiny_http");
   assert.equal(manifest.version, "0.12.0");
   assert.equal(manifest.crate_archive_sha256, "389915df6413a2e74fb181895f933386023c71110878cd0825588928e64cdc82");
-  assert.deepEqual(manifest.patched_files, ["src/lib.rs", "src/util/refined_tcp_stream.rs"]);
+  assert.deepEqual(manifest.patched_files, ["src/lib.rs", "src/util/refined_tcp_stream.rs", "src/connection.rs", "src/client.rs", "src/request.rs"]);
   assert.deepEqual(manifest.new_files, ["src/accept_retry.rs"]);
   assert.ok(manifest.original_files["LICENSE-APACHE"]);
   assert.ok(manifest.original_files["LICENSE-MIT"]);
