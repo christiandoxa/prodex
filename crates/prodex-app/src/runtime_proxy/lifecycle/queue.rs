@@ -36,6 +36,7 @@ impl RuntimeProxyRequestQueue {
         Ok(())
     }
 
+    #[cfg(test)]
     pub(crate) fn try_recv(&self) -> Option<RuntimeProxyQueuedRequest> {
         self.items
             .lock()

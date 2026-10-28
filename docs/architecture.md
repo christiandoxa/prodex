@@ -77,6 +77,20 @@ Hot path invariants:
 - Keep endpoint health scoped where possible: `responses`, `/responses/compact`, websocket, and other lanes should not poison each other without a deliberate reason.
 - Reload runtime policy only from publication consumers or other bounded background paths. Validate the candidate before atomically replacing the normalized per-root cache entry; failed reloads leave the previous entry untouched.
 
+Local Responses WebSockets park in a bounded connection cache between messages.
+A fixed executor owns the socket, parser fragments and upstream lineage exclusively
+while handling a message; idle connections do not reserve an executor or active
+request admission. A separate expiry worker removes expired WebSocket handshakes
+without waiting for inference work to finish. Only non-executing cached connections
+are evicted when that cache is full; quota and continuation ownership remain intact.
+
+`response.interrupt` is a connection-bound control, not a new inference request.
+Live interrupts are forwarded alongside upstream output on the owning socket.
+Both acknowledgement/completion orders preserve the actual acknowledgement and
+exactly-once output. Late interrupts may use the matching cached transport, but
+missing or replaced owners fail closed without opening a connection, rotating an
+account, fabricating an acknowledgement, or replaying a committed response.
+
 Runtime proxy edit points:
 
 - Live orchestration: `crates/prodex-app/src/runtime_proxy`.
