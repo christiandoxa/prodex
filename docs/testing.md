@@ -27,11 +27,14 @@ reuse immutable build inputs, not previous test outcomes or finished user binari
   test execution and zero-test rejection. The shared matrix cache writer and read-only sccache
   consumers in CI and nightly tests reduce cache-service throttling. Workspace and remainder coverage
   remain explicit, including new tests not yet assigned to a targeted filter.
-- Platform calibration shares release dependency caches only for the same
-  compiler, target, CPU, host architecture, ThinLTO/codegen profile and external
-  lockfile records. Workspace crates and binaries are not cached. Historical
-  sources without the fingerprint helper get a source-specific isolated key.
-  Codegen A/B variants remain separate; calibration never publishes a release.
+- The four one-shot platform/codegen calibration workflows were retired after
+  their measured decisions became production defaults: Apple Silicon/Rosetta
+  for Intel macOS, native Windows ARM64, ARM-host Windows x64, and ThinLTO with
+  16 codegen units. Their original runs and source history remain available.
+  `standalone-release.yml` with `publish=false` is the maintained six-platform
+  verification path; architecture, ABI, runtime and security checks are retained.
+  The separate runtime proxy benchmark remains available because it measures
+  product performance rather than duplicating release builds.
 - The npm package smoke still compiles an optimized binary. Its separate
   host-release dependency cache can be populated only by main pushes.
 
