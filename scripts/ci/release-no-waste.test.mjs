@@ -51,7 +51,7 @@ test("cross driver cache is version/host pinned and validates the restored execu
   assert.doesNotMatch(step("Cache pinned cross tool"), /restore-keys:/);
   const install = shell("Install cross");
   assert.match(install, /cargo install cross --version 0.2.5 --locked --root/);
-  assert.match(install, /cross_version=.*bin\/cross.*--version/);
+  assert.match(install, /cross_version=.*bin\/cross-util.*--version/);
   assert.match(install, /cached cross version did not match/);
   assert.doesNotMatch(install, /command -v cross|for attempt|sleep/);
 });
@@ -84,6 +84,23 @@ for (const [platform, cross] of [["x86_64-unknown-linux-gnu", true], ["x86_64-pc
       assert.match(lines[0], /build --locked --release --target/);
       assert.match(lines[0], /--features mojo-core/);
       assert.match(target, /CARGO_NET_RETRY: "3"/);
+    } finally { rmSync(root, { recursive: true, force: true }); }
+  });
+}
+
+for (const version of ["cross 0.2.5", "cross 0.3.0"]) {
+  test(`cross cache ${version} uses the pure companion probe, never Cargo delegation`, { skip: process.platform === "win32" }, () => {
+    const root = mkdtempSync(path.join(os.tmpdir(), "prodex-cross-cache-"));
+    try {
+      const bin = path.join(root, ".cache/prodex-ci/cross-0.2.5/bin"); mkdirSync(bin, { recursive: true });
+      writeFileSync(path.join(bin, "cross"), '#!/bin/sh\necho "cross version must not launch Cargo" >&2\nexit 99\n', { mode: 0o755 });
+      writeFileSync(path.join(bin, "cross-util"), `#!/bin/sh\nprintf '%s\n' '${version}'\n`, { mode: 0o755 });
+      const output = path.join(root, "github-path");
+      const result = spawnSync("bash", ["-c", shell("Install cross")], { cwd: root, encoding: "utf8", timeout: 5000,
+        env: { ...process.env, HOME: root, GITHUB_PATH: output } });
+      assert.equal(result.status, version === "cross 0.2.5" ? 0 : 1, result.stderr);
+      if (version === "cross 0.2.5") assert.equal(readFileSync(output, "utf8").trim(), bin);
+      else assert.match(result.stderr, /cached cross version did not match/);
     } finally { rmSync(root, { recursive: true, force: true }); }
   });
 }
