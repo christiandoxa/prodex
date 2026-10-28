@@ -462,3 +462,18 @@ test("a successful rehearsal cannot suppress or satisfy a publication of the sam
   const legacy = { head_sha: sha, display_title: "standalone release" };
   assert.equal(selectWorkflowRun([legacy], sha, { publication: true }), legacy);
 });
+
+
+test("release sync refreshes fuzz workspace versions without updating registry pins", async () => {
+  const root = await createReleaseRunFixture();
+  try {
+    await fs.mkdir(path.join(root, "fuzz"), { recursive: true });
+    await fs.writeFile(path.join(root, "fuzz", "Cargo.toml"), "[workspace]\n");
+    const { stdout, stderr } = await runReleaseRun(root, ["--dry-run", "--only", "sync"]);
+    assert.equal(stderr, "");
+    assert.match(stdout, /dry-run: cargo update --workspace --manifest-path fuzz\/Cargo.toml/);
+    assert.doesNotMatch(stdout, /dry-run: cargo update --manifest-path fuzz\/Cargo.toml/);
+  } finally {
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
