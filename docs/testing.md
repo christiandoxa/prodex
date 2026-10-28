@@ -709,3 +709,25 @@ daily full tests, release orchestration, reusable target builds, opt-in runtime
 benchmarking, and the upstream compatibility watchdog. A manual workflow, a
 failure-only diagnostic step, or a publication job skipped during verification
 is not obsolete. Remove only redundant work, not its required validation.
+
+### Shared Windows integration binaries
+
+The two Windows auto-rotate shards and the native installer lane consume one
+same-run integration bundle. Its producer builds the default-feature `auto_rotate`
+harness and the actual Prodex CLI together. Consumers verify the source SHA, run,
+attempt, checkout path, platform, architecture, independent manifest digest,
+both executable checksums and native test inventory. The CLI is restored only to
+its original `target/debug` path because the integration harness embeds Cargo's
+`CARGO_BIN_EXE_prodex`; a foreign existing binary or symlink is rejected.
+
+The original Windows shard groups, four-worker limit, exclusive broker phase,
+serial filter execution, login timeouts and installer tests are unchanged.
+Consumer jobs no longer compile or restore compiler caches. Other workspace and
+root coverage remains independent. Local commands without an explicit bundle use
+Cargo; requesting all features with a default-feature bundle fails rather than
+silently changing coverage.
+
+The release CI gate queries push runs for the exact target commit, rather than
+searching only the most recent unrelated runs. Pending checks are polled every
+ten seconds; a completed failure still fails the gate. This reduces observation
+latency without approving an incomplete CI run or changing publication authority.

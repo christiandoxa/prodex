@@ -577,19 +577,8 @@ jobs:
           - suite: members-runtime
             label: workspace runtime members
             save_cache: false
-          - suite: root-0
-            label: root shard 1 of 2
-            auto_rotate_shard: 0
-            save_cache: false
-          - suite: root-1
-            label: root shard 2 of 2
-            auto_rotate_shard: 1
-            save_cache: false
           - suite: root-tests
             label: root non-sharded tests
-            save_cache: false
-          - suite: installer
-            label: native installer
             save_cache: false
 
     steps:
@@ -615,13 +604,6 @@ jobs:
         with:
           cache-bin: false
           save-if: ${{ matrix.save_cache }}
-
-      - name: Install Node.js
-        if: matrix.suite == 'root-0' || matrix.suite == 'root-1' || matrix.suite == 'installer'
-        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
-        with:
-          node-version: 22
-          package-manager-cache: false
 
       - name: Run Windows foundation member tests
         if: matrix.suite == 'members-foundation'
@@ -669,10 +651,6 @@ jobs:
           cargo test --locked -q -p 'prodex-runtime-*' -- --test-threads=4 --skip continuity_failure_reason_metrics_
           run_targeted_test "Windows broker-log continuity tests" cargo test --locked -q -p prodex-runtime-broker-log --lib continuity_failure_reason_metrics_ -- --test-threads=1
 
-      - name: Prebuild Windows auto-rotate tests
-        if: matrix.suite == 'root-0' || matrix.suite == 'root-1'
-        run: cargo test --locked --test auto_rotate --no-run
-
       - name: Run Windows non-sharded root tests
         if: matrix.suite == 'root-tests'
         shell: bash
@@ -682,15 +660,117 @@ jobs:
           cargo test --locked -q -p prodex --lib --bins --examples --test internal_commands -- --test-threads=4
           cargo test --locked -q -p prodex --doc
 
+  windows-integration-build:
+    name: Compile Windows integration tests and CLI once
+    needs: [changes, mojo-runtime-platform-archives]
+    if: ${{ needs.changes.outputs.heavy == 'true' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
+    runs-on: windows-latest
+    timeout-minutes: 60
+    env:
+      CARGO_INCREMENTAL: "0"
+      CARGO_PROFILE_DEV_DEBUG: "0"
+      CARGO_PROFILE_TEST_DEBUG: "0"
+      RUSTC_WRAPPER: sccache
+      SCCACHE_GHA_RW_MODE: READ_WRITE
+      PRODEX_MOJO_ARCHIVE: ${{ github.workspace }}/.prodex-ci/mojo-runtime/x86_64-pc-windows-msvc/prodex_mojo_core.lib
+    outputs:
+      manifest_sha256: ${{ steps.pack.outputs.manifest_sha256 }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Download Windows runtime Mojo archive
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
+        with:
+          name: mojo-runtime-archive-x86_64-pc-windows-msvc
+          path: .prodex-ci/mojo-runtime/x86_64-pc-windows-msvc
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
+        with:
+          toolchain: 1.99.1
+
+      - name: Install sccache
+        uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
+        with:
+          cache-bin: false
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      - name: Install Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+        with:
+          node-version: 22
+          package-manager-cache: false
+
+      - name: Compile and bind integration tests and their CLI
+        id: pack
+        run: node scripts/ci/integration-test-artifact.mjs pack .prodex-ci/windows-integration-tests
+
+      - name: Upload the exact-run integration bundle
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: windows-integration-tests
+          path: .prodex-ci/windows-integration-tests
+          if-no-files-found: error
+          overwrite: true
+          retention-days: 7
+          compression-level: 1
+
+  windows-integration:
+    name: Windows tests (${{ matrix.label }})
+    needs: [changes, windows-integration-build]
+    if: ${{ needs.changes.outputs.heavy == 'true' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
+    runs-on: windows-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - suite: root-0
+            label: root shard 1 of 2
+            auto_rotate_shard: 0
+          - suite: root-1
+            label: root shard 2 of 2
+            auto_rotate_shard: 1
+          - suite: installer
+            label: native installer
+    env:
+      PRODEX_INTEGRATION_BUNDLE: .prodex-ci/windows-integration-tests
+      INTEGRATION_MANIFEST_SHA256: ${{ needs.windows-integration-build.outputs.manifest_sha256 }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Install Rust toolchain for existing runtime fixtures
+        if: matrix.suite != 'installer'
+        uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
+        with:
+          toolchain: 1.99.1
+
+      - name: Install Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+        with:
+          node-version: 22
+          package-manager-cache: false
+
+      - name: Download this run's integration bundle
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
+        with:
+          name: windows-integration-tests
+          path: .prodex-ci/windows-integration-tests
+
       - name: Run Windows auto-rotate shard ${{ matrix.auto_rotate_shard }}
         if: matrix.suite == 'root-0' || matrix.suite == 'root-1'
         env:
           RUST_BACKTRACE: "1"
         run: node scripts/ci/auto-rotate-shards.mjs --jobs 4 --shard-index ${{ matrix.auto_rotate_shard }} --shard-count 2 --timings --timings-json
 
-      - name: Build Windows installer fixture binary
+      - name: Restore the verified Windows installer fixture binary
         if: matrix.suite == 'installer'
-        run: cargo build --locked --bin prodex
+        run: node scripts/ci/integration-test-artifact.mjs restore .prodex-ci/windows-integration-tests
 
       - name: Test Windows installer
         if: matrix.suite == 'installer'
@@ -2153,6 +2233,8 @@ jobs:
       - observability-alerts
       - secret-scan
       - windows-workspace
+      - windows-integration-build
+      - windows-integration
       - windows-prodex-app
       - windows-app-test-build
       - macos-workspace

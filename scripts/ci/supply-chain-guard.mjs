@@ -71,8 +71,6 @@ export function validateWindowsSecurityJob(contents) {
   for (const marker of [
     "cargo test --locked -q --workspace --exclude prodex --exclude prodex-app --exclude 'prodex-runtime-*' -- --test-threads=4",
     "cargo test --locked -q -p 'prodex-runtime-*' -- --test-threads=4",
-    "- name: Build Windows installer fixture binary",
-    "- name: Test Windows installer",
   ]) {
     if (!workspace.includes(marker)) {
       violations.push(`.github/workflows/ci.yml: windows-workspace job missing ${marker}`);
@@ -102,6 +100,29 @@ export function validateWindowsSecurityJob(contents) {
   }
   if (/cargo test|rust-cache@|sccache-action@/.test(app)) {
     violations.push(".github/workflows/ci.yml: Windows shards must not rebuild the shared test executable");
+  }
+  violations.push(...validateWindowsIntegrationTests(contents));
+  return violations;
+}
+
+export function validateWindowsIntegrationTests(contents) {
+  const producer = workflowJob(contents, "windows-integration-build") ?? "";
+  const consumer = workflowJob(contents, "windows-integration") ?? "";
+  const violations = [];
+  for (const [job, markers] of [
+    [producer, ["needs: [changes, mojo-runtime-platform-archives]", "runs-on: windows-latest",
+      "integration-test-artifact.mjs pack", "manifest_sha256: ${{ steps.pack.outputs.manifest_sha256 }}",
+      "name: windows-integration-tests", "if-no-files-found: error", "overwrite: true"]],
+    [consumer, ["needs: [changes, windows-integration-build]", "runs-on: windows-latest",
+      "PRODEX_INTEGRATION_BUNDLE: .prodex-ci/windows-integration-tests",
+      "INTEGRATION_MANIFEST_SHA256: ${{ needs.windows-integration-build.outputs.manifest_sha256 }}",
+      "name: windows-integration-tests", "auto-rotate-shards.mjs --jobs 4 --shard-index",
+      "--shard-count 2", "integration-test-artifact.mjs restore", "node --test scripts/install.test.mjs"]],
+  ]) {
+    for (const marker of markers) if (!job.includes(marker)) violations.push(`Windows integration binding missing ${marker}`);
+  }
+  if (/cargo (?:test|build)|rust-cache@|sccache-action@/.test(consumer)) {
+    violations.push("Windows integration consumers must not recompile the verified CLI or harness");
   }
   return violations;
 }
@@ -898,6 +919,23 @@ function selfTest() {
           PRODEX_APP_SKIP_FILTERS: skips
           TEST_MANIFEST_SHA256: \${{ needs.windows-app-test-build.outputs.manifest_sha256 }}
         run: node scripts/ci/native-test-artifact.mjs run bundle
+  windows-integration-build:
+    needs: [changes, mojo-runtime-platform-archives]
+    runs-on: windows-latest
+    manifest_sha256: \${{ steps.pack.outputs.manifest_sha256 }}
+    run: node scripts/ci/integration-test-artifact.mjs pack bundle
+    name: windows-integration-tests
+    if-no-files-found: error
+    overwrite: true
+  windows-integration:
+    needs: [changes, windows-integration-build]
+    runs-on: windows-latest
+    PRODEX_INTEGRATION_BUNDLE: .prodex-ci/windows-integration-tests
+    INTEGRATION_MANIFEST_SHA256: \${{ needs.windows-integration-build.outputs.manifest_sha256 }}
+    name: windows-integration-tests
+    run: node scripts/ci/auto-rotate-shards.mjs --jobs 4 --shard-index 0 --shard-count 2
+    restore: node scripts/ci/integration-test-artifact.mjs restore bundle
+    test: node --test scripts/install.test.mjs
 `;
   assert.deepEqual(validateWindowsSecurityJob(windowsJobs), []);
   assert.equal(
