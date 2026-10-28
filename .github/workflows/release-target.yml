@@ -316,11 +316,14 @@ jobs:
           if [ ! -x "${cross_root}/bin/cross" ]; then
             cargo install cross --version 0.2.5 --locked --root "${cross_root}"
           fi
-          cross_version="$("${cross_root}/bin/cross" --version)"
-          case "${cross_version}" in
-            'cross 0.2.5'|'cross 0.2.5 ('*) ;;
-            *) echo "cached cross version did not match the pinned driver" >&2; exit 1 ;;
-          esac
+          # cross --version delegates to Cargo and prints both versions. The
+          # same package's companion reports its own version without toolchain I/O.
+          test -x "${cross_root}/bin/cross-util"
+          cross_version="$("${cross_root}/bin/cross-util" --version)"
+          if [ "${cross_version}" != 'cross 0.2.5' ]; then
+            echo "cached cross version did not match the pinned driver" >&2
+            exit 1
+          fi
           echo "${cross_root}/bin" >> "${GITHUB_PATH}"
 
       - name: Install Linux ARM cross and emulation tools
