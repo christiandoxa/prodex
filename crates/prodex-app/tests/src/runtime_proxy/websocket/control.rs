@@ -183,9 +183,12 @@ fn active_interrupt_case(ack_first: bool) {
         },
         listener.local_addr().unwrap(),
     );
-    Arc::make_mut(&mut shared.runtime_config)
-        .tuning
-        .websocket_precommit_progress_timeout_ms = 5_000;
+    // This is an interactive control-ordering test, not a 250ms idle-timeout
+    // test. Match both fixture progress budgets to its bounded peer handshake;
+    // the deliberately delayed steering below still fails the old 250ms setup.
+    let tuning = &mut Arc::make_mut(&mut shared.runtime_config).tuning;
+    tuning.websocket_precommit_progress_timeout_ms = 5_000;
+    tuning.stream_idle_timeout_ms = 5_000;
     let (_server, mut local, mut client, control) = controlled_local_pair();
     let mut session = RuntimeWebsocketSessionState::default();
     session.local_control = Some(control);
@@ -224,6 +227,10 @@ fn active_interrupt_case(ack_first: bool) {
             if is_delta {
                 break;
             }
+        }
+        if ack_first {
+            // Exercise real user steering latency, not an immediate same-tick reply.
+            thread::sleep(Duration::from_millis(350));
         }
         client.send(WsMessage::Text(INTERRUPT.into())).unwrap();
         while !messages
