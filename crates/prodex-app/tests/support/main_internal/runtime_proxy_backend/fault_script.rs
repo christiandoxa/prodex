@@ -122,6 +122,20 @@ impl RuntimeProxyBackendFaultStep {
         }
     }
 
+    pub(crate) fn model_not_found(
+        route: RuntimeProxyBackendFaultRoute,
+        account_id: &str,
+        status_line: &'static str,
+    ) -> Self {
+        let mut step = Self::invalid_request(route, account_id);
+        step.status_line = status_line;
+        step.body = serde_json::json!({"error": {
+            "type": "invalid_request_error", "code": "model_not_found",
+            "message": "Requested fixture model is unavailable"
+        }}).to_string();
+        step
+    }
+
     pub(crate) fn sse_quota(route: RuntimeProxyBackendFaultRoute, account_id: &str) -> Self {
         Self {
             route,

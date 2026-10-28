@@ -26,23 +26,25 @@ fn chatgpt_refresh_request_debug_redacts_refresh_token() {
 
 #[test]
 fn non_openai_model_provider_disables_quota_summary() {
-    let root = temp_dir("non-openai-model-provider");
-    fs::create_dir_all(&root).unwrap();
-    fs::write(
-        root.join("config.toml"),
-        "model_provider = 'amazon-bedrock'\n",
-    )
-    .unwrap();
-    fs::write(
-        secret_store::auth_json_path(&root),
-        r#"{"tokens":{"access_token":"test-token"}}"#,
-    )
-    .unwrap();
+    for provider in ["amazon-bedrock", "gcp"] {
+        let root = temp_dir("non-openai-model-provider");
+        fs::create_dir_all(&root).unwrap();
+        fs::write(
+            root.join("config.toml"),
+            format!("model_provider = '{provider}'\n"),
+        )
+        .unwrap();
+        fs::write(
+            secret_store::auth_json_path(&root),
+            r#"{"tokens":{"access_token":"test-token"}}"#,
+        )
+        .unwrap();
 
-    let summary = read_auth_summary(&root);
+        let summary = read_auth_summary(&root);
 
-    assert_eq!(summary.label, "model-provider:amazon-bedrock");
-    assert!(!summary.quota_compatible);
+        assert_eq!(summary.label, format!("model-provider:{provider}"));
+        assert!(!summary.quota_compatible);
+    }
 }
 
 #[test]
@@ -426,3 +428,28 @@ fn temp_dir(name: &str) -> PathBuf {
 
 #[path = "reset_credit_details.rs"]
 mod reset_credit_details;
+
+#[test]
+fn gcp_quota_remains_native_without_openai_credentials_01650() {
+    let root = temp_dir("gcp-native-quota");
+    fs::create_dir_all(&root).unwrap();
+    fs::write(root.join("config.toml"), "model_provider = 'gcp'\n").unwrap();
+    // No auth.json exists. A mistaken OpenAI fetch would fail before returning a report.
+    let report =
+        crate::fetch_profile_quota_json(&crate::ProfileProvider::Openai, &root, Some("not-a-url"))
+            .expect("native provider reporting does not query OpenAI");
+    assert_eq!(
+        report,
+        serde_json::json!({
+            "provider": "Google Cloud Vertex AI", "account": "gcp", "plan": "config.toml",
+            "status": "Configured", "main": "quota handled by provider/Codex",
+            "reset": null, "available": null,
+            "details": [
+                {"label": "Model provider", "value": "gcp"},
+                {"label": "Source", "value": "config.toml"}
+            ]
+        })
+    );
+    assert!(!root.join("auth.json").exists());
+    let _ = fs::remove_dir_all(root);
+}
