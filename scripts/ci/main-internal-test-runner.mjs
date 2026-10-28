@@ -256,6 +256,7 @@ async function runStepOnce(step) {
     child.stderr?.setEncoding("utf8");
     child.stdout?.on("data", (chunk) => {
       inspectOutput(chunk);
+      step.observeStdout?.(chunk);
       stdout.write(chunk);
     });
     child.stderr?.on("data", (chunk) => {

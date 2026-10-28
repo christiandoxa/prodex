@@ -230,7 +230,7 @@ test("direct targeted workflow lanes reject zero-test matches", () => {
   const profile = workflow.match(/\n  profile-commands-internal:\n([\s\S]*?)\n  main-internal-core:/)?.[1];
   assert.match(profile, /native-test-artifact\.mjs run/);
   assert.match(profile, /PRODEX_APP_FILTERS: "profile_commands_internal_tests::"/);
-  assert.match(readFileSync("scripts/ci/native-test-artifact.mjs", "utf8"), /noTests/);
+  assert.match(readFileSync("scripts/ci/native-test-artifact.mjs", "utf8"), /sawZeroTests/);
 
   const releaseBuild = releaseWorkflow.match(/\n  build:\n([\s\S]*)/)?.[1];
   assert.ok(releaseBuild, "standalone release build job missing");

@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 // Same-run native test executables are artifacts, never cross-source caches.
 import assert from "node:assert/strict";
+import { runStep } from "./main-internal-test-runner.mjs";
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { appendFileSync, chmodSync, copyFileSync, lstatSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
@@ -86,29 +87,6 @@ export function testPlan(filters, skips, windows = false) {
   }));
 }
 
-// Split a long serial partition using the verified executable's complete census.
-// Apply the original substring exclusions BEFORE exact-name selection: --exact
-// changes libtest skip semantics too, so carrying substring skips would be wrong.
-export function partitionTestPlan(plan, listing, { index, count } = {}) {
-  if ((index === undefined || index === "") && (count === undefined || count === "")) return plan;
-  assert.match(String(index), /^(0|[1-9][0-9]*)$/u, "subshard index required");
-  assert.match(String(count), /^[1-9][0-9]*$/u, "subshard count required");
-  const shard = Number(index), total = Number(count);
-  assert.ok(Number.isSafeInteger(shard) && Number.isSafeInteger(total) && shard < total,
-    "subshard index must be smaller than count");
-  const names = lines(listing).filter((line) => line.endsWith(": test")).map((line) => line.slice(0, -6)).sort();
-  testInventory(listing); // Reject empty or ambiguous censuses before selection.
-  return plan.map((entry) => {
-    const skips = entry.args.flatMap((arg, i) => arg === "--skip" ? [entry.args[i + 1]] : []);
-    const eligible = names.filter((name) => (!entry.filter || name.includes(entry.filter)) &&
-      !skips.some((skip) => name.includes(skip)));
-    const selected = eligible.filter((_, i) => i % total === shard);
-    assert.ok(selected.length > 0, "native subshard matched no tests");
-    return { filter: `${entry.filter ?? "remainder"} ${shard + 1}/${total}`,
-      args: ["--test-threads=1", "--exact", ...selected], expectedCount: selected.length };
-  });
-}
-
 function pack(directory, env = process.env) {
   const expected = identity(env, root);
   const output = command("cargo", ["test", "--locked", "-p", "prodex-app", "--lib", "--no-run",
@@ -162,24 +140,29 @@ export function environmentBundle(env = process.env) {
   return verifiedBundle(path.resolve(root, env.PRODEX_TEST_BUNDLE), identity(env, root), env.TEST_MANIFEST_SHA256);
 }
 
-export function runBundle(directory, expected, manifestDigest, { repository = root, filters = "", skips = "", subshard = {} } = {}) {
-  const { executable, cwd, inventory, listing } = verifiedBundle(directory, expected, manifestDigest, { repository });
+export async function runBundle(directory, expected, manifestDigest, { repository = root, filters = "", skips = "" } = {}) {
+  const { executable, cwd, inventory } = verifiedBundle(directory, expected, manifestDigest, { repository });
   let failed = false;
-  for (const entry of partitionTestPlan(testPlan(filters, skips, expected.platform === "win32"), listing, subshard)) {
+  for (const entry of testPlan(filters, skips, expected.platform === "win32")) {
     process.stdout.write(`Native test partition: ${entry.filter ?? "remainder"}\n`);
-    const result = spawnSync(executable, entry.args, {
-      cwd, encoding: "utf8", maxBuffer: 64 * 1024 * 1024, timeout: 30 * 60 * 1000, windowsHide: true,
-    });
-    process.stdout.write(result.stdout ?? "");
-    process.stderr.write(result.stderr ?? "");
-    const noTests = /\brunning 0 tests\b/u.test(result.stdout ?? "") || !/test result: ok\./u.test(result.stdout ?? "");
-    const summary = [...(result.stdout ?? "").matchAll(/test result: ok\. (\d+) passed; 0 failed; (\d+) ignored/gu)].at(-1);
-    const wrongCount = entry.expectedCount !== undefined &&
-      (!summary || Number(summary[1]) + Number(summary[2]) !== entry.expectedCount);
-    if (result.error || result.status !== 0 || noTests || wrongCount) {
+    let stdoutTail = "", sawZeroTests = false;
+    try {
+      // Stream progress immediately instead of buffering minutes of native test
+      // output. Reuse the existing deadline/process-tree runner, without retries.
+      await runStep({
+        label: `native:${entry.filter ?? "remainder"}`, command: executable,
+        args: entry.args, cwd, timeoutMs: 30 * 60 * 1000, failOnZeroTests: true,
+        observeStdout(chunk) {
+          const text = stdoutTail + chunk;
+          sawZeroTests ||= /\brunning 0 tests\b/u.test(text);
+          stdoutTail = text.slice(-65536);
+        },
+      });
+      const summary = [...stdoutTail.matchAll(/test result: ok\. (\d+) passed; 0 failed; (\d+) ignored/gu)].at(-1);
+      assert.ok(!sawZeroTests && summary, "native partition must report successful nonempty execution");
+    } catch (error) {
       failed = true;
-      process.stderr.write(`Native test partition failed or matched no tests: ${entry.filter ?? "remainder"}\n`);
-      if (result.error) process.stderr.write(`${result.error.message}\n`);
+      process.stderr.write(`Native test partition failed or matched no tests: ${entry.filter ?? "remainder"}\n${error.message}\n`);
     }
   }
   assert.equal(failed, false, "one or more native test partitions failed");
@@ -193,9 +176,8 @@ if (import.meta.url === pathToFileURL(process.argv[1] ?? "").href) {
       "usage: node scripts/ci/native-test-artifact.mjs pack|run BUNDLE_DIRECTORY");
     const directory = path.resolve(root, bundle);
     if (mode === "pack") pack(directory);
-    else runBundle(directory, identity(process.env, root), process.env.TEST_MANIFEST_SHA256, {
+    else await runBundle(directory, identity(process.env, root), process.env.TEST_MANIFEST_SHA256, {
       filters: process.env.PRODEX_APP_FILTERS, skips: process.env.PRODEX_APP_SKIP_FILTERS,
-      subshard: { index: process.env.PRODEX_APP_SHARD_INDEX, count: process.env.PRODEX_APP_SHARD_COUNT },
     });
   } catch (error) {
     process.stderr.write(`native-test-artifact: ${error.message}\n`);

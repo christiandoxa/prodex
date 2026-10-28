@@ -83,8 +83,6 @@ export function validateWindowsSecurityJob(contents) {
     "PRODEX_APP_SKIP_FILTERS:",
     "needs: [changes, windows-app-test-build]",
     "TEST_MANIFEST_SHA256: ${{ needs.windows-app-test-build.outputs.manifest_sha256 }}",
-    "PRODEX_APP_SHARD_INDEX: ${{ matrix.subshard_index }}",
-    "PRODEX_APP_SHARD_COUNT: ${{ matrix.subshard_count }}",
     "node scripts/ci/native-test-artifact.mjs run",
     "name: windows-app-tests",
   ]) {
@@ -936,8 +934,6 @@ function selfTest() {
           PRODEX_APP_FILTERS: filters
           PRODEX_APP_SKIP_FILTERS: skips
           TEST_MANIFEST_SHA256: \${{ needs.windows-app-test-build.outputs.manifest_sha256 }}
-          PRODEX_APP_SHARD_INDEX: \${{ matrix.subshard_index }}
-          PRODEX_APP_SHARD_COUNT: \${{ matrix.subshard_count }}
         run: node scripts/ci/native-test-artifact.mjs run bundle
   windows-integration-build:
     needs: [changes, mojo-runtime-platform-archives]
