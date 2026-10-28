@@ -1,5 +1,8 @@
 use super::readiness::{read_response_frame, wait_response_readiness};
-use super::{RuntimeWebsocketAttempt, RuntimeWebsocketResponseLoop, RuntimeWebsocketTextResult};
+use super::{
+    RuntimeWebsocketAttempt, RuntimeWebsocketResponseLoop, RuntimeWebsocketTextResult,
+    RuntimeWebsocketTextTerminal,
+};
 use tungstenite::{Error as WsError, Message as WsMessage};
 
 use crate::{RuntimeUpstreamWebSocket, runtime_set_upstream_websocket_io_timeout};
@@ -79,12 +82,7 @@ pub(super) fn run_runtime_websocket_response_loop(
         };
         let frame = match frame {
             Ok(None) => {
-                let wait = if flow.websocket_session.local_control.is_some() {
-                    wait.min(Duration::from_millis(50))
-                } else {
-                    wait
-                };
-                if let Err(error) = wait_response_readiness(&flow.upstream_socket, wait) {
+                if let Err(error) = wait_for_response_or_control(&flow, wait) {
                     return flow.handle_read_error(WsError::Io(error));
                 }
                 continue;
@@ -92,37 +90,76 @@ pub(super) fn run_runtime_websocket_response_loop(
             Ok(Some(frame)) => Ok(frame),
             Err(error) => Err(error),
         };
-        match frame {
-            Ok(WsMessage::Text(text)) => {
-                if interrupt.observe_ack(&mut flow, &text)? {
-                    if let Some(terminal) = interrupt.take_terminal() {
-                        return Ok(flow.finish_terminal(terminal));
-                    }
-                    continue;
-                }
-                match flow.handle_text(text.to_string())? {
-                    RuntimeWebsocketTextResult::Continue => {}
-                    RuntimeWebsocketTextResult::Terminal(terminal) => {
-                        if let Some(terminal) = interrupt.defer_terminal(terminal) {
-                            return Ok(flow.finish_terminal(terminal));
-                        }
-                    }
-                    RuntimeWebsocketTextResult::Attempt(attempt) => return Ok(attempt),
-                }
-            }
-            Ok(WsMessage::Binary(payload)) => flow.handle_binary(payload)?,
-            Ok(WsMessage::Ping(payload)) => flow.handle_ping(payload)?,
-            Ok(WsMessage::Pong(_)) | Ok(WsMessage::Frame(_)) => flow.handle_keepalive()?,
-            Ok(WsMessage::Close(frame)) => {
-                let _ = frame;
-                return flow.handle_close();
-            }
-            Err(WsError::ConnectionClosed) | Err(WsError::AlreadyClosed) => {
-                return flow.handle_connection_closed();
-            }
-            Err(err) => return flow.handle_read_error(err),
+        match process_response_frame(&mut flow, &mut interrupt, frame)? {
+            ResponseFrameAction::Continue => {}
+            ResponseFrameAction::Terminal(terminal) => return Ok(flow.finish_terminal(terminal)),
+            ResponseFrameAction::Attempt(attempt) => return Ok(attempt),
+            ResponseFrameAction::Close => return flow.handle_close(),
+            ResponseFrameAction::ConnectionClosed => return flow.handle_connection_closed(),
+            ResponseFrameAction::ReadError(error) => return flow.handle_read_error(error),
         }
     }
+}
+
+enum ResponseFrameAction {
+    Continue,
+    Terminal(RuntimeWebsocketTextTerminal),
+    Attempt(RuntimeWebsocketAttempt),
+    Close,
+    ConnectionClosed,
+    ReadError(WsError),
+}
+
+fn wait_for_response_or_control(
+    flow: &RuntimeWebsocketResponseLoop<'_>,
+    wait: Duration,
+) -> std::io::Result<()> {
+    let wait = if flow.websocket_session.local_control.is_some() {
+        wait.min(Duration::from_millis(50))
+    } else {
+        wait
+    };
+    wait_response_readiness(&flow.upstream_socket, wait)
+}
+
+fn process_response_frame(
+    flow: &mut RuntimeWebsocketResponseLoop<'_>,
+    interrupt: &mut super::control::ResponseInterrupt,
+    frame: std::result::Result<WsMessage, WsError>,
+) -> Result<ResponseFrameAction> {
+    match frame {
+        Ok(WsMessage::Text(text)) => return process_response_text(flow, interrupt, &text),
+        Ok(WsMessage::Binary(payload)) => flow.handle_binary(payload)?,
+        Ok(WsMessage::Ping(payload)) => flow.handle_ping(payload)?,
+        Ok(WsMessage::Pong(_) | WsMessage::Frame(_)) => flow.handle_keepalive()?,
+        Ok(WsMessage::Close(_)) => return Ok(ResponseFrameAction::Close),
+        Err(WsError::ConnectionClosed | WsError::AlreadyClosed) => {
+            return Ok(ResponseFrameAction::ConnectionClosed);
+        }
+        Err(error) => return Ok(ResponseFrameAction::ReadError(error)),
+    }
+    Ok(ResponseFrameAction::Continue)
+}
+
+fn process_response_text(
+    flow: &mut RuntimeWebsocketResponseLoop<'_>,
+    interrupt: &mut super::control::ResponseInterrupt,
+    text: &str,
+) -> Result<ResponseFrameAction> {
+    if interrupt.observe_ack(flow, text)? {
+        return Ok(interrupt
+            .take_terminal()
+            .map(ResponseFrameAction::Terminal)
+            .unwrap_or(ResponseFrameAction::Continue));
+    }
+    Ok(match flow.handle_text(text.to_string())? {
+        RuntimeWebsocketTextResult::Continue => ResponseFrameAction::Continue,
+        RuntimeWebsocketTextResult::Terminal(terminal) => interrupt
+            .defer_terminal(terminal)
+            .map(ResponseFrameAction::Terminal)
+            .unwrap_or(ResponseFrameAction::Continue),
+        RuntimeWebsocketTextResult::Attempt(attempt) => ResponseFrameAction::Attempt(attempt),
+    })
 }
 
 fn check_response_deadline(flow: &mut RuntimeWebsocketResponseLoop<'_>) -> Result<()> {

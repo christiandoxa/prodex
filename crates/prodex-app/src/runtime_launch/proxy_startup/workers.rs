@@ -78,75 +78,12 @@ pub(super) fn spawn_runtime_rotation_proxy_workers(
     }
 
     if let Some(queue) = queues.get(&RuntimeRouteKind::Websocket) {
-        // Handshakes never wait for a model executor or a profile permit.
-        // Keep a bounded, separate host lane so active fanout cannot strand
-        // newly arriving main-agent or compaction connections.
-        for index in 0..worker_count.clamp(1, 2) {
-            let queue = Arc::clone(queue);
-            let shared = shared.clone();
-            let sessions = Arc::clone(&sessions);
-            let worker_shutdown = Arc::clone(shutdown);
-            worker_threads.push(try_spawn_runtime_supervised_worker(
-                format!("prodex-runtime-websocket-handshake-{index}"),
-                shared.log_path.clone(),
-                Arc::clone(shutdown),
-                move || {
-                    while let Some(queued) = queue.recv(&worker_shutdown) {
-                        let mut scoped = shared.clone();
-                        scoped.precommit_deadline = queued.deadline;
-                        scoped
-                            .lane_admission
-                            .long_lived_queue_wait_metric_counters()
-                            .record_wait(queued.queued_at.elapsed());
-                        let result = crate::runtime_panic::catch_runtime_unwind_silently(|| {
-                            handle_runtime_rotation_proxy_request_with_sessions(
-                                queued.request,
-                                &scoped,
-                                Some(&sessions),
-                            );
-                        });
-                        if result.is_err() {
-                            runtime_proxy_log(
-                                &shared,
-                                "runtime_proxy_worker_panic lane=websocket-handshake",
-                            );
-                        }
-                    }
-                },
-            )?);
-        }
-        let queue = Arc::clone(queue);
-        let shared = shared.clone();
-        let worker_shutdown = Arc::clone(shutdown);
-        worker_threads.push(try_spawn_runtime_supervised_worker(
-            "prodex-runtime-websocket-expiry".to_string(),
-            shared.log_path.clone(),
-            Arc::clone(shutdown),
-            move || {
-                while !worker_shutdown.load(Ordering::SeqCst) {
-                    for queued in queue.take_expired(Instant::now()) {
-                        let control = queued.request.connection_control();
-                        if let Some(control) = &control {
-                            // Never let an abandoned peer pin the expiry worker.
-                            if control
-                                .set_write_timeout(Some(Duration::from_millis(100)))
-                                .is_err()
-                            {
-                                let _ = control.shutdown();
-                            }
-                        }
-                        reject_runtime_proxy_recovery_timeout(
-                            queued.request,
-                            &shared,
-                            "websocket_ingress_queue",
-                        );
-                        if let Some(control) = control {
-                            let _ = control.shutdown();
-                        }
-                    }
-                    thread::sleep(Duration::from_millis(50));
-                }
-            },
+        worker_threads.extend(spawn_websocket_auxiliary_workers(
+            queue,
+            shared,
+            &sessions,
+            shutdown,
+            worker_count,
         )?);
     }
 
@@ -172,6 +109,100 @@ pub(super) fn spawn_runtime_rotation_proxy_workers(
 
     startup_guard.disarm();
     Ok(worker_threads)
+}
+
+fn spawn_websocket_auxiliary_workers(
+    queue: &Arc<RuntimeProxyRequestQueue>,
+    shared: &RuntimeRotationProxyShared,
+    sessions: &Arc<RuntimeWebsocketSessionPool>,
+    shutdown: &Arc<AtomicBool>,
+    worker_count: usize,
+) -> Result<Vec<thread::JoinHandle<()>>> {
+    let mut workers = Vec::new();
+    // These fixed handshake workers never wait for inference or profile permits.
+    for index in 0..worker_count.clamp(1, 2) {
+        let queue = Arc::clone(queue);
+        let shared = shared.clone();
+        let sessions = Arc::clone(sessions);
+        let worker_shutdown = Arc::clone(shutdown);
+        workers.push(try_spawn_runtime_supervised_worker(
+            format!("prodex-runtime-websocket-handshake-{index}"),
+            shared.log_path.clone(),
+            Arc::clone(shutdown),
+            move || {
+                runtime_websocket_handshake_loop(&queue, &shared, &sessions, &worker_shutdown);
+            },
+        )?);
+    }
+    let queue = Arc::clone(queue);
+    let shared = shared.clone();
+    let worker_shutdown = Arc::clone(shutdown);
+    workers.push(try_spawn_runtime_supervised_worker(
+        "prodex-runtime-websocket-expiry".to_string(),
+        shared.log_path.clone(),
+        Arc::clone(shutdown),
+        move || {
+            runtime_websocket_expiry_loop(&queue, &shared, &worker_shutdown);
+        },
+    )?);
+    Ok(workers)
+}
+
+fn runtime_websocket_handshake_loop(
+    queue: &RuntimeProxyRequestQueue,
+    shared: &RuntimeRotationProxyShared,
+    sessions: &RuntimeWebsocketSessionPool,
+    shutdown: &AtomicBool,
+) {
+    while let Some(queued) = queue.recv(shutdown) {
+        let mut scoped = shared.clone();
+        scoped.precommit_deadline = queued.deadline;
+        scoped
+            .lane_admission
+            .long_lived_queue_wait_metric_counters()
+            .record_wait(queued.queued_at.elapsed());
+        let result = crate::runtime_panic::catch_runtime_unwind_silently(|| {
+            handle_runtime_rotation_proxy_request_with_sessions(
+                queued.request,
+                &scoped,
+                Some(sessions),
+            );
+        });
+        if result.is_err() {
+            runtime_proxy_log(
+                shared,
+                "runtime_proxy_worker_panic lane=websocket-handshake",
+            );
+        }
+    }
+}
+
+fn runtime_websocket_expiry_loop(
+    queue: &RuntimeProxyRequestQueue,
+    shared: &RuntimeRotationProxyShared,
+    shutdown: &AtomicBool,
+) {
+    while !shutdown.load(Ordering::SeqCst) {
+        for queued in queue.take_expired(Instant::now()) {
+            let control = queued.request.connection_control();
+            if let Some(control) = &control
+                && control
+                    .set_write_timeout(Some(Duration::from_millis(100)))
+                    .is_err()
+            {
+                let _ = control.shutdown();
+            }
+            reject_runtime_proxy_recovery_timeout(
+                queued.request,
+                shared,
+                "websocket_ingress_queue",
+            );
+            if let Some(control) = control {
+                let _ = control.shutdown();
+            }
+        }
+        thread::sleep(Duration::from_millis(50));
+    }
 }
 
 fn runtime_rotation_request_worker_loop(
