@@ -2,6 +2,78 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.165.0 - 2026-10-28
+
+### CLI
+
+- Retain Codex memory v2 across account switches (`5628fb8`)
+
+### Docs
+
+- Record Codex 0.165 qualification and numbering migration (`384a648`)
+
+### Misc
+
+- Qualify Codex 0.165 native provider boundaries (`22eb917`)
+- Support the explicit Codex-aligned release transition (`ec0870f`)
+# Prodex 0.165.0
+
+This stable release follows 0.439.5 and intentionally aligns Prodex numbering
+with the qualified Codex 0.165.0 release. The smaller version number is not a
+rollback: prior login, catalog, recovery and CI improvements remain included.
+
+## New Features
+
+- Qualify the exact official Codex `rust-v0.165.0` source and Linux artifacts.
+  Preserve native attached-fork fields, model error handling, MCP cancellation,
+  reasoning-effort changes and originator-scoped model catalogs.
+- Support native Vertex AI `gcp` provider restoration on resume without routing
+  it through the OpenAI profile pool. Cloud authentication remains Codex-owned;
+  the quota screen describes native handling rather than inventing availability.
+- Render release history by source ancestry so aligned versions remain in the
+  correct order before and after tagging. Permit only the explicitly reviewed
+  numbering transition; unrelated publication downgrades are still rejected.
+
+## Bug Fixes
+
+- Share native `memories_v2` across managed profiles using existing guarded
+  filesystem merging. Keep legacy and v2 memory namespaces separate without
+  overriding Codex memory selection or migrating a v1 memory into v2.
+
+- Isolate update-check caches from pre-alignment release hints.
+- Preserve CLI main/sub-agent catalog boundaries when native CCA-specific
+  cache files exist alongside the default account catalog.
+- Verify terminal model-not-found status/body forwarding without account
+  rotation or replay. Existing quota and continuation safeguards remain.
+
+## One-time migration from 0.439.x
+
+The legacy `prodex update` command compares version numbers and may regard
+0.439.x as newer than 0.165.0. Install this release explicitly once using the
+checksum-verified official standalone installer:
+`sh install.sh --release 0.165.0` on Unix or
+`./install.ps1 -Release 0.165.0` on Windows. Download and
+verify the script before running it, rather than piping it into a shell.
+Later aligned releases use increasing version numbers normally. Codex is a
+separate installation; neither this release nor the installer replaces an
+already-running Codex or Prodex process.
+
+## Changelog
+
+See the generated changelog for the compatibility, memory-sharing and
+release-numbering implementation commits.
+
+## Verification
+
+Source guards, negative fixtures, native credential-free app-server probes,
+GCP isolation, catalog partitioning, terminal forwarding, installer cutover
+and corruption rejection cover the changed boundaries. Publication requires
+exact-source CI, six-platform builds, artifact smoke tests, checksums,
+malware scanning and signed build provenance. No live cloud inference or
+account login was used for compatibility testing.
+
+Full Changelog: [0.439.5...0.165.0](https://github.com/christiandoxa/prodex/compare/0.439.5...0.165.0)
+
 ## 0.439.5 - 2026-10-27
 
 ### CLI
@@ -19,55 +91,6 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 ### Misc
 
 - Separate Presidio qualification from release metadata (`0532b7b`)
-# Prodex 0.439.5
-
-This release fixes delayed OpenAI login completion after Codex has authenticated,
-and prevents automatic login identity discovery from holding up unrelated quota
-commands. Existing accounts, session history, and running processes are preserved.
-
-## New Features
-
-- Add a credential-persistence preparation path that wires shared Codex state
-  without reading historical rollouts or repairing unrelated goal attachments.
-  Existing runtime launch and explicit maintenance keep their repair behavior.
-
-## Bug Fixes
-
-- Do not perform full historical session maintenance before persisting new,
-  existing, or named OpenAI login credentials. API-key login uses the same path.
-- Prefer stored account claims and cached profile identity rather than querying
-  every account's quota endpoint during login finalization.
-- Move legacy identity network lookups outside automatic login's global profile
-  lifecycle lock, allowing independent quota commands to proceed while a lookup
-  is pending. Reload and validate the profile set and local account identities
-  before committing, with a bounded retry if another process changed them.
-- Preserve lifecycle journaling, private credential permissions, workspace/email
-  matching, stale-account rejection, and session/goal state. Named-profile browser
-  authentication retains its existing remove/recreate exclusion; this change does
-  not weaken its concurrency protections or terminate an unfinished OAuth flow.
-
-- Qualify Presidio 2.2.366 to satisfy the release freshness gate, pin both official
-  multi-platform container indexes, and verify health, analysis, and anonymization
-  on synthetic data without network access. Existing services are not restarted,
-  the compatible minimum remains 2.2.364, and redaction stays opt-in/fail-closed.
-
-## Changelog
-
-See the generated changelog for implementation, regression coverage, and the
-CI/CD improvements accumulated since the previous published release.
-
-## Verification
-
-Credential-free regressions exercise new and existing OpenAI profiles, named
-login, API-key login, and unchanged history timestamps. An isolated delayed
-identity endpoint verifies that quota finishes before the login response is
-released, and that a concurrently replaced account is never overwritten.
-Shared-home tests verify that goal repair is deferred to runtime launch without
-changing goal status or accounting, while symlink defenses remain enforced.
-Release publication requires exact-source CI, six-platform builds, artifact smoke,
-checksum validation, malware scanning, and build provenance.
-
-Full Changelog: [0.439.4...0.439.5](https://github.com/christiandoxa/prodex/compare/0.439.4...0.439.5)
 
 ## 0.439.4 - 2026-10-27
 
