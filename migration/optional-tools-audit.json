@@ -103,11 +103,11 @@
     {
       "id": "ponytail",
       "repository": "https://github.com/DietrichGebert/ponytail",
-      "latest_stable": "5.3.2",
-      "release": "v5.3.2",
-      "commit": "16352ac229eb08a9598dcae48fe9f2b342567d86",
-      "git_tree": "e4f281dcbb2eeefa13b330a8161478ddd3057160",
-      "prodex_tree_sha256": "8609325761024ea38a22f782fa49feae2c068ede9b31b42f03c224fd990f640e",
+      "latest_stable": "5.3.3",
+      "release": "v5.3.3",
+      "commit": "7801d061243d7b753bad0e0b3c057cd250b11755",
+      "git_tree": "f5b46ca29f49b07da6390dc57803d3d0e7856bad",
+      "prodex_tree_sha256": "3bd59937f9375a418f9f85c92b30b5d1404491578b784afa76d32ab2c1173af3",
       "license": "MIT",
       "runtime": "Node.js plugin; externally managed immutable checkout",
       "platforms": [
@@ -116,9 +116,9 @@
         "windows"
       ],
       "decision": "ADOPT_PACKAGE",
-      "notes": "Re-audited for Prodex 0.438.1 after the publication freshness gate found v5.3.2. All 213 regular source-archive files (12055164 bytes) match the official recursive Git tree; no symlinks or tree-limit exceptions. Codex and Claude plugin identities, shared hooks and skills remain compatible. No hooks, session imports or installers were executed; existing managed checkouts and minimum/legacy support rules are unchanged.",
-      "source_archive_sha256": "9bbd351988e54c28691750752316acbaffc76778e04b19bc580f067ff77e4747",
-      "audited_at": "2026-10-17T02:48:43.982835+00:00"
+      "notes": "Re-audited for Prodex 0.166.0 after the publication freshness gate found v5.3.3. All 214 regular source-archive files (12072835 bytes) match the official recursive Git tree; no symlinks or tree-limit exceptions. Codex and Claude plugin identities, shared hooks and skills remain compatible. No hooks, session imports or installers were executed; existing managed checkouts and minimum/legacy support rules are unchanged.",
+      "source_archive_sha256": "912e6981fb3e883bf33fe8a13e4af5f3ffb1481423ff16f3251c8b181ef5d5e1",
+      "audited_at": "2026-10-29T23:40:12.587623+00:00"
     },
     {
       "id": "presidio",
