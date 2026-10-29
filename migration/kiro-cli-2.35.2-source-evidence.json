@@ -1,0 +1,37 @@
+{
+  "schema_version": 1,
+  "version": "2.35.2",
+  "manifest_url": "https://prod.download.cli.kiro.dev/stable/latest/manifest.json",
+  "manifest_snapshot_sha256": "035a5b5b2530b3abe59615e96479588bdc173ef47d12d0bbf258c036019f1587",
+  "manifest_snapshot_format": "Parsed official JSON serialized as two-space UTF-8 JSON; digest identifies the inspected snapshot, not raw HTTP bytes.",
+  "archive_url": "https://prod.download.cli.kiro.dev/stable/2.35.2/kirocli-x86_64-linux.tar.gz",
+  "archive_sha256": "94341a969744b55945084bfff2e29d480959dd74a0d4e9f921b7b58d5beac891",
+  "archive_size": 155515421,
+  "qualification_scope": "Actual Linux launcher/chat version and native chat help on isolated HOME/KIRO_HOME/KIRO_DATA_DIR. No inference, account login or user-installation changes.",
+  "probes": [
+    {
+      "binary": "kiro-cli",
+      "arguments": [
+        "--version"
+      ],
+      "exit_code": 0
+    },
+    {
+      "binary": "kiro-cli-chat",
+      "arguments": [
+        "--version"
+      ],
+      "exit_code": 0
+    },
+    {
+      "binary": "kiro-cli-chat",
+      "arguments": [
+        "chat",
+        "--help"
+      ],
+      "exit_code": 0
+    }
+  ],
+  "required_chat_flag": "--model",
+  "freshness_reason": "The official stable manifest advanced after 2.35.1 qualification. Keep the release freshness gate enforced and qualify 2.35.2 before publication."
+}
