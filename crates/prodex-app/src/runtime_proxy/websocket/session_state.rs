@@ -10,6 +10,10 @@ use super::{
 #[derive(Default)]
 pub(in crate::runtime_proxy) struct RuntimeWebsocketSessionState {
     upstream_socket: Option<RuntimeUpstreamWebSocket>,
+    pub(in crate::runtime_proxy) routing_pin:
+        Option<std::sync::Arc<prodex_runtime_cookies::RuntimeProxyRoutingPin>>,
+    pub(in crate::runtime_proxy) parent_pin:
+        Option<std::sync::Arc<prodex_runtime_cookies::RuntimeProxyRoutingPin>>,
     pub(in crate::runtime_proxy) local_control: Option<tiny_http::ConnectionControl>,
     pub(in crate::runtime_proxy) pending_local_frame: Option<tungstenite::Message>,
     realtime_duplex: bool,
@@ -41,6 +45,17 @@ impl RuntimeWebsocketSessionState {
         self.upstream_socket.is_some()
             && self.profile_name.as_deref() == Some(profile_name)
             && turn_state_override.is_none_or(|value| self.turn_state.as_deref() == Some(value))
+    }
+
+    pub(in crate::runtime_proxy) fn parent_pin_matches(
+        &self,
+        pin: Option<&std::sync::Arc<prodex_runtime_cookies::RuntimeProxyRoutingPin>>,
+    ) -> bool {
+        match (self.parent_pin.as_ref(), pin) {
+            (None, None) => true,
+            (Some(current), Some(requested)) => std::sync::Arc::ptr_eq(current, requested),
+            _ => false,
+        }
     }
 
     pub(in crate::runtime_proxy) fn take_socket(&mut self) -> Option<RuntimeUpstreamWebSocket> {
@@ -119,6 +134,8 @@ impl RuntimeWebsocketSessionState {
 
     pub(in crate::runtime_proxy) fn reset(&mut self) {
         self.upstream_socket = None;
+        self.routing_pin = None;
+        self.parent_pin = None;
         self.profile_name = None;
         self.turn_state = None;
         self.inflight_guard = None;
@@ -129,6 +146,8 @@ impl RuntimeWebsocketSessionState {
             let _ = socket.close(None);
         }
         self.profile_name = None;
+        self.routing_pin = None;
+        self.parent_pin = None;
         self.turn_state = None;
         self.inflight_guard = None;
     }
@@ -171,4 +190,40 @@ pub(crate) fn try_acquire_runtime_profile_inflight_guard(
         context,
         weight,
     }))
+}
+
+#[cfg(test)]
+mod guardian_tests {
+    use super::*;
+    use std::sync::Arc;
+    use tungstenite::http::{HeaderMap, HeaderValue, header::SET_COOKIE};
+
+    #[test]
+    fn reuse_requires_the_same_parent_pin_identity() {
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            SET_COOKIE,
+            HeaderValue::from_static("__oailb=synthetic; Path=/; Secure"),
+        );
+        let endpoint = format!(
+            "{}/codex/responses",
+            crate::DEFAULT_CHATGPT_BASE_URL.replacen("https://", "wss://", 1)
+        );
+        let url = endpoint.as_str();
+        let first = Arc::new(
+            prodex_runtime_cookies::RuntimeProxyRoutingPin::from_handshake(url, &headers).unwrap(),
+        );
+        let second = Arc::new(
+            prodex_runtime_cookies::RuntimeProxyRoutingPin::from_handshake(url, &headers).unwrap(),
+        );
+        let mut session = RuntimeWebsocketSessionState::default();
+        assert!(session.parent_pin_matches(None));
+        assert!(!session.parent_pin_matches(Some(&first)));
+        session.parent_pin = Some(Arc::clone(&first));
+        assert!(session.parent_pin_matches(Some(&first)));
+        assert!(!session.parent_pin_matches(Some(&second)));
+        assert!(!session.parent_pin_matches(None));
+        session.reset();
+        assert!(session.parent_pin_matches(None));
+    }
 }

@@ -199,6 +199,16 @@ pub(super) fn start_runtime_continuation_fixture(
 }
 
 impl RuntimeContinuationFixture {
+    pub(super) fn restart_with_upstream(self, upstream: String) -> Self {
+        let Self { proxy, backend, paths, _temp_dir } = self;
+        drop(proxy);
+        let state = AppState::load(&paths).expect("runtime state should load");
+        let active_profile = state.active_profile.as_deref().expect("active profile");
+        let proxy = start_runtime_rotation_proxy(&paths, &state, active_profile, upstream, false)
+            .expect("runtime proxy should restart");
+        Self { proxy, backend, paths, _temp_dir }
+    }
+
     pub(super) fn listen_addr(&self) -> SocketAddr {
         self.proxy.listen_addr
     }

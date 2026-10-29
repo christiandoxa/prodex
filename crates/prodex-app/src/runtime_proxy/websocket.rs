@@ -82,6 +82,7 @@ pub(super) fn connect_runtime_proxy_upstream_websocket(
     shared: &RuntimeRotationProxyShared,
     profile_name: &str,
     turn_state_override: Option<&str>,
+    guardian_parent_pin: Option<&std::sync::Arc<prodex_runtime_cookies::RuntimeProxyRoutingPin>>,
 ) -> Result<RuntimeWebsocketConnectResult> {
     let upstream_base_url = shared
         .lock_runtime_state()
@@ -101,9 +102,9 @@ pub(super) fn connect_runtime_proxy_upstream_websocket(
             shared,
             profile_name,
             turn_state_override,
+            guardian_parent_pin,
             auth,
             &upstream_url,
-            &log_url,
         )?;
 
         runtime_proxy_log(
@@ -156,13 +157,16 @@ fn build_runtime_proxy_websocket_request(
     shared: &RuntimeRotationProxyShared,
     profile_name: &str,
     turn_state_override: Option<&str>,
+    guardian_parent_pin: Option<&std::sync::Arc<prodex_runtime_cookies::RuntimeProxyRoutingPin>>,
     auth: UsageAuth,
     upstream_url: &str,
-    log_url: &str,
 ) -> Result<tungstenite::http::Request<()>> {
-    let mut request = upstream_url
-        .into_client_request()
-        .with_context(|| format!("failed to build runtime websocket request for {log_url}"))?;
+    let mut request = upstream_url.into_client_request().with_context(|| {
+        format!(
+            "failed to build runtime websocket request for {}",
+            runtime_proxy_log_url(upstream_url)
+        )
+    })?;
     append_runtime_proxy_websocket_forwarded_headers(
         &mut request,
         handshake_request,
@@ -186,6 +190,7 @@ fn build_runtime_proxy_websocket_request(
             .headers_mut()
             .insert(WsHeaderName::from_static("cookie"), cookie_header);
     }
+    apply_runtime_guardian_pin(&mut request, guardian_parent_pin, upstream_url)?;
     request.headers_mut().insert(
         WsHeaderName::from_static("authorization"),
         WsHeaderValue::from_str(&format!("Bearer {}", auth.access_token))
@@ -199,6 +204,26 @@ fn build_runtime_proxy_websocket_request(
         );
     }
     Ok(request)
+}
+
+fn apply_runtime_guardian_pin(
+    request: &mut tungstenite::http::Request<()>,
+    pin: Option<&std::sync::Arc<prodex_runtime_cookies::RuntimeProxyRoutingPin>>,
+    upstream_url: &str,
+) -> Result<()> {
+    let existing = request
+        .headers()
+        .get("cookie")
+        .and_then(|value| value.to_str().ok());
+    if let Some(cookies) = pin.and_then(|pin| pin.merge_cookie_header(upstream_url, existing)) {
+        let mut header = WsHeaderValue::from_str(&cookies)
+            .context("failed to encode guardian routing cookies")?;
+        header.set_sensitive(true);
+        request
+            .headers_mut()
+            .insert(WsHeaderName::from_static("cookie"), header);
+    }
+    Ok(())
 }
 
 fn append_runtime_proxy_websocket_forwarded_headers(
@@ -285,6 +310,11 @@ fn handle_runtime_proxy_websocket_connect_attempt(
             Ok(Some(RuntimeWebsocketConnectResult::Connected {
                 socket,
                 turn_state,
+                routing_pin: prodex_runtime_cookies::RuntimeProxyRoutingPin::from_handshake(
+                    upstream_url,
+                    response.headers(),
+                )
+                .map(std::sync::Arc::new),
             }))
         }
         Err(WsError::Http(response)) => {
@@ -535,6 +565,43 @@ pub(super) fn runtime_configure_upstream_tcp_stream(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn guardian_handshake_uses_parent_pin_and_preserves_other_cookies() {
+        let endpoint = format!(
+            "{}/codex/responses",
+            crate::DEFAULT_CHATGPT_BASE_URL.replacen("https://", "wss://", 1)
+        );
+        let url = endpoint.as_str();
+        let mut response_headers = tungstenite::http::HeaderMap::new();
+        response_headers.insert(
+            "set-cookie",
+            WsHeaderValue::from_static("__oailb=parent; Path=/; Secure"),
+        );
+        let pin = std::sync::Arc::new(
+            prodex_runtime_cookies::RuntimeProxyRoutingPin::from_handshake(url, &response_headers)
+                .unwrap(),
+        );
+        let mut request = url.into_client_request().unwrap();
+        request.headers_mut().insert(
+            "cookie",
+            WsHeaderValue::from_static("other=keep; __oailb=newer; __cflb=newer"),
+        );
+        apply_runtime_guardian_pin(&mut request, Some(&pin), url).unwrap();
+        let cookie = &request.headers()["cookie"];
+        assert_eq!(cookie, "other=keep; __oailb=parent");
+        assert!(cookie.is_sensitive());
+        let wrong_url = format!(
+            "{}/other",
+            crate::DEFAULT_CHATGPT_BASE_URL.replacen("https://", "wss://", 1)
+        );
+        let mut wrong_endpoint = wrong_url.as_str().into_client_request().unwrap();
+        wrong_endpoint
+            .headers_mut()
+            .insert("cookie", WsHeaderValue::from_static("__oailb=newer"));
+        apply_runtime_guardian_pin(&mut wrong_endpoint, Some(&pin), wrong_url.as_str()).unwrap();
+        assert_eq!(wrong_endpoint.headers()["cookie"], "__oailb=newer");
+    }
 
     #[test]
     fn websocket_error_log_value_redacts_secret_like_material() {

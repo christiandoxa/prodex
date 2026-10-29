@@ -3,6 +3,7 @@ use super::*;
 #[derive(Debug)]
 pub(super) struct RuntimeResponsesAffinityState {
     bound_profile: Option<String>,
+    guardian_parent_profile: Option<String>,
     trusted_previous_response_affinity: bool,
     turn_state_profile: Option<String>,
     route_affinity: RuntimeResponseRouteAffinity,
@@ -28,9 +29,11 @@ impl RuntimeResponsesAffinityState {
         bound_profile: Option<String>,
         trusted_previous_response_affinity: bool,
         turn_state_profile: Option<String>,
+        guardian_parent_profile: Option<String>,
     ) -> Self {
         Self {
             bound_profile,
+            guardian_parent_profile,
             trusted_previous_response_affinity,
             turn_state_profile,
             route_affinity: RuntimeResponseRouteAffinity::default(),
@@ -118,7 +121,8 @@ impl RuntimeResponsesAffinityState {
     ) -> bool {
         runtime_proxy_has_continuation_priority(
             previous_response_id,
-            self.pinned_profile(),
+            self.pinned_profile()
+                .or(self.guardian_parent_profile.as_deref()),
             request_turn_state,
             self.turn_state_profile(),
             self.noncompact_session_priority_profile(),
@@ -132,7 +136,8 @@ impl RuntimeResponsesAffinityState {
             return None;
         }
         runtime_wait_affinity_owner(
-            self.compact_followup_profile_name(),
+            self.compact_followup_profile_name()
+                .or(self.guardian_parent_profile.as_deref()),
             self.pinned_profile(),
             self.turn_state_profile(),
             self.noncompact_session_priority_profile(),
@@ -148,6 +153,7 @@ impl RuntimeResponsesAffinityState {
         saw_upstream_failure: bool,
     ) -> bool {
         if self.compact_followup_profile_name().is_some()
+            || self.guardian_parent_profile.is_some()
             || self.pinned_profile().is_some()
             || self.turn_state_profile().is_some()
             || self.session_profile().is_some()
@@ -173,7 +179,9 @@ impl RuntimeResponsesAffinityState {
     ) -> RuntimeResponseCandidateSelection<'a> {
         RuntimeResponseCandidateSelection {
             excluded_profiles,
-            strict_affinity_profile: self.compact_followup_profile_name(),
+            strict_affinity_profile: self
+                .compact_followup_profile_name()
+                .or(self.guardian_parent_profile.as_deref()),
             pinned_profile: self.pinned_profile(),
             turn_state_profile: self.turn_state_profile(),
             session_profile: self.session_profile(),
@@ -192,7 +200,9 @@ impl RuntimeResponsesAffinityState {
         RuntimeCandidateAffinity {
             route_kind: RuntimeRouteKind::Responses,
             candidate_name,
-            strict_affinity_profile: self.compact_followup_profile_name(),
+            strict_affinity_profile: self
+                .compact_followup_profile_name()
+                .or(self.guardian_parent_profile.as_deref()),
             pinned_profile: self.pinned_profile(),
             turn_state_profile: self.turn_state_profile(),
             session_profile: self.session_profile(),
@@ -203,6 +213,10 @@ impl RuntimeResponsesAffinityState {
     pub(super) fn candidate_has_hard_affinity(&self, candidate_name: &str) -> bool {
         self.bound_profile.as_deref() == Some(candidate_name)
             || runtime_candidate_has_hard_affinity(self.candidate_affinity(candidate_name))
+    }
+
+    pub(super) fn guardian_parent_profile(&self) -> Option<&str> {
+        self.guardian_parent_profile.as_deref()
     }
 
     pub(super) fn quota_blocked_affinity_is_releasable(
@@ -298,7 +312,7 @@ mod tests {
 
     #[test]
     fn bound_previous_response_stays_hard_when_continuation_status_is_untrusted() {
-        let state = RuntimeResponsesAffinityState::new(Some("main".to_string()), false, None);
+        let state = RuntimeResponsesAffinityState::new(Some("main".to_string()), false, None, None);
 
         assert!(state.candidate_has_hard_affinity("main"));
         assert!(!state.candidate_has_hard_affinity("second"));

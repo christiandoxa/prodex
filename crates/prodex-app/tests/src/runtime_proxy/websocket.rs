@@ -15,6 +15,70 @@ fn attempt_runtime_websocket_request(
 mod connect;
 #[path = "websocket/control.rs"]
 mod control;
+mod guardian {
+    use super::*;
+    use tungstenite::http::{HeaderMap, HeaderValue, header::SET_COOKIE};
+
+    #[test]
+    fn guardian_builds_reviewer_handshake_from_parent_snapshot() {
+        let shared = websocket_test_shared("guardian-pin-handshake");
+        let upstream_url = format!(
+            "{}/codex/responses",
+            crate::DEFAULT_CHATGPT_BASE_URL.replacen("https://", "wss://", 1)
+        );
+        let mut parent_headers = HeaderMap::new();
+        parent_headers.insert(
+            SET_COOKIE,
+            HeaderValue::from_static("__oailb=parent; Path=/; Secure"),
+        );
+        let pin = std::sync::Arc::new(
+            prodex_runtime_cookies::RuntimeProxyRoutingPin::from_handshake(
+                &upstream_url,
+                &parent_headers,
+            )
+            .unwrap(),
+        );
+        runtime_proxy_remember_guardian_pins(&shared, "main", &["resp-parent".into()], Some(&pin));
+        let mut later_headers = HeaderMap::new();
+        later_headers.insert(
+            SET_COOKIE,
+            HeaderValue::from_static("__oailb=later; Path=/; Secure"),
+        );
+        runtime_proxy_capture_websocket_cookies(&shared, "main", &upstream_url, &later_headers);
+        let handshake = RuntimeProxyRequest {
+            method: "GET".into(),
+            path_and_query: "/backend-api/prodex/responses".into(),
+            headers: vec![
+                ("x-codex-guardian".into(), "reviewer".into()),
+                ("cookie".into(), "other=keep".into()),
+            ],
+            body: Vec::new(),
+        };
+        let request_text = r#"{"client_metadata":{"parent_response_id":"resp-parent"}}"#;
+        let id = runtime_guardian_parent_response_id(&handshake, request_text).unwrap();
+        let selected_pin = runtime_proxy_guardian_pin(&shared, "main", &id).unwrap();
+        let request = super::super::super::build_runtime_proxy_websocket_request(
+            &handshake,
+            &shared,
+            "main",
+            None,
+            Some(&selected_pin),
+            UsageAuth {
+                access_token: "test-token".into(),
+                account_id: None,
+                refresh_token: None,
+                expires_at: None,
+                last_refresh: None,
+            },
+            &upstream_url,
+        )
+        .unwrap();
+        assert_eq!(request.headers()["cookie"], "other=keep; __oailb=parent");
+        assert!(request.headers()["cookie"].is_sensitive());
+        assert_eq!(request.headers()["x-codex-guardian"], "reviewer");
+        assert!(runtime_proxy_guardian_pin(&shared, "second", &id).is_none());
+    }
+}
 #[path = "websocket/precommit_hold.rs"]
 mod precommit_hold;
 #[path = "websocket/precommit_regressions.rs"]

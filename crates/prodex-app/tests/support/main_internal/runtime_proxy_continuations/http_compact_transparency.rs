@@ -1,6 +1,55 @@
 use super::*;
 
 #[test]
+fn runtime_proxy_guardian_http_prefers_parent_response_profile() {
+    let _test_guard = crate::acquire_test_runtime_lock();
+    let fixture = start_runtime_continuation_fixture(
+        RuntimeProxyBackend::start(), "main", &["main", "second"],
+        &[("resp-parent", "second")], Vec::new(),
+    );
+    let response = fixture.post_json_with_headers(
+        "backend-api/codex/responses",
+        &[runtime_continuation_header("x-codex-guardian", "reviewer")],
+        serde_json::json!({"input": [], "client_metadata": {"parent_response_id": "resp-parent"}}),
+    );
+    let _ = response.text().expect("response body");
+    assert_eq!(fixture.backend.responses_accounts(), ["second-account"]);
+}
+
+#[test]
+fn runtime_proxy_guardian_http_quota_does_not_rotate_away_from_parent() {
+    let _test_guard = crate::acquire_test_runtime_lock();
+    let backend = RuntimeProxyBackend::start_with_fault_script(RuntimeProxyBackendFaultScript::new([
+        RuntimeProxyBackendFaultStep::explicit_quota_429(RuntimeProxyBackendFaultRoute::Responses, "second-account"),
+        RuntimeProxyBackendFaultStep::success(RuntimeProxyBackendFaultRoute::Responses, "main-account"),
+    ]));
+    let fixture = start_runtime_continuation_fixture(backend, "main", &["main", "second"], &[("resp-parent", "second")], Vec::new());
+    let response = fixture.post_json_with_headers(
+        "backend-api/codex/responses",
+        &[runtime_continuation_header("x-codex-guardian", "reviewer")],
+        serde_json::json!({"input": [], "client_metadata": {"parent_response_id": "resp-parent"}}),
+    );
+    assert_eq!(response.status().as_u16(), 429);
+    assert_eq!(fixture.backend.responses_accounts(), ["second-account"]);
+}
+
+#[test]
+fn runtime_proxy_guardian_http_previous_response_keeps_its_owner() {
+    let _test_guard = crate::acquire_test_runtime_lock();
+    let fixture = start_runtime_continuation_fixture(
+        RuntimeProxyBackend::start(), "main", &["main", "second"],
+        &[("resp-parent", "second"), ("resp-previous", "main")], Vec::new(),
+    );
+    let response = fixture.post_json_with_headers(
+        "backend-api/codex/responses",
+        &[runtime_continuation_header("x-codex-guardian", "reviewer")],
+        serde_json::json!({"previous_response_id": "resp-previous", "input": [], "client_metadata": {"parent_response_id": "resp-parent"}}),
+    );
+    let _ = response.text().expect("response body");
+    assert_eq!(fixture.backend.responses_accounts().first().map(String::as_str), Some("main-account"));
+}
+
+#[test]
 fn runtime_proxy_policy_capacity_503_is_forwarded_without_profile_retry() {
     let _test_guard = crate::acquire_test_runtime_lock();
     for (route, path) in [

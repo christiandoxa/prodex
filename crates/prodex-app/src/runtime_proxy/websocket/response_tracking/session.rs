@@ -20,6 +20,8 @@ pub(super) struct RuntimeWebsocketSessionStartRequest<'a> {
     pub(super) request_previous_response_id: Option<&'a str>,
     pub(super) request_session_id: Option<&'a str>,
     pub(super) request_turn_state: Option<&'a str>,
+    pub(super) guardian_parent_pin:
+        Option<&'a std::sync::Arc<prodex_runtime_cookies::RuntimeProxyRoutingPin>>,
     pub(super) shared: &'a RuntimeRotationProxyShared,
     pub(super) websocket_session: &'a mut RuntimeWebsocketSessionState,
     pub(super) profile_name: &'a str,
@@ -71,6 +73,7 @@ fn connect_runtime_websocket_session_with_auto_redeem(
     shared: &RuntimeRotationProxyShared,
     profile_name: &str,
     turn_state_override: Option<&str>,
+    guardian_parent_pin: Option<&std::sync::Arc<prodex_runtime_cookies::RuntimeProxyRoutingPin>>,
     auto_redeem_allowed: bool,
 ) -> Result<RuntimeWebsocketConnectResult> {
     let requested_model = runtime_smart_context_model_name_from_body(&handshake_request.body);
@@ -82,6 +85,7 @@ fn connect_runtime_websocket_session_with_auto_redeem(
             shared,
             profile_name,
             turn_state_override,
+            guardian_parent_pin,
         )?;
         if matches!(result, RuntimeWebsocketConnectResult::QuotaBlocked(_))
             && !auto_redeem_attempted
@@ -116,6 +120,7 @@ pub(super) fn start_runtime_websocket_upstream_session(
         request_previous_response_id,
         request_session_id,
         request_turn_state,
+        guardian_parent_pin,
         shared,
         websocket_session,
         profile_name,
@@ -124,7 +129,8 @@ pub(super) fn start_runtime_websocket_upstream_session(
         hard_affinity,
     } = request;
 
-    let reuse_existing_session = websocket_session.can_reuse(profile_name, turn_state_override);
+    let reuse_existing_session = websocket_session.can_reuse(profile_name, turn_state_override)
+        && websocket_session.parent_pin_matches(guardian_parent_pin);
     let precommit_hold_promotion_allowed = runtime_websocket_precommit_hold_promotion_allowed(
         reuse_existing_session,
         request_previous_response_id,
@@ -219,11 +225,18 @@ pub(super) fn start_runtime_websocket_upstream_session(
             shared,
             profile_name,
             turn_state_override,
+            guardian_parent_pin,
             request_previous_response_id.is_none()
                 && request_session_id.is_none()
                 && request_turn_state.is_none(),
         ) {
-            Ok(RuntimeWebsocketConnectResult::Connected { socket, turn_state }) => {
+            Ok(RuntimeWebsocketConnectResult::Connected {
+                socket,
+                turn_state,
+                routing_pin,
+            }) => {
+                websocket_session.routing_pin = routing_pin;
+                websocket_session.parent_pin = guardian_parent_pin.cloned();
                 (socket, turn_state, inflight_guard.take())
             }
             Ok(RuntimeWebsocketConnectResult::QuotaBlocked(payload)) => {

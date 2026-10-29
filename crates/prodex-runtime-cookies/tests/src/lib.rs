@@ -1,5 +1,171 @@
 use super::*;
 
+#[test]
+fn guardian_parent_cookie_survives_another_handshake() {
+    use tungstenite::http::{HeaderMap, HeaderValue, header::SET_COOKIE};
+    let endpoint = format!(
+        "wss://{}/backend-api/codex/responses",
+        super::routing_pin::CHATGPT_HOST
+    );
+    let url = endpoint.as_str();
+    let mut headers = HeaderMap::new();
+    headers.append(
+        SET_COOKIE,
+        HeaderValue::from_static("__oailb=parent; Path=/; Secure"),
+    );
+    let pin = RuntimeProxyRoutingPin::from_handshake(url, &headers).expect("parent pin");
+    let jar = RuntimeProxyCookieJar::new();
+    capture(
+        &jar,
+        "alpha",
+        super::routing_pin::CHATGPT_HOST,
+        "/backend-api/codex/responses",
+        &["__oailb=other; Path=/; Secure"],
+    );
+    assert_eq!(pin.cookie_header(url).as_deref(), Some("__oailb=parent"));
+    assert_eq!(
+        merged(
+            &jar,
+            "alpha",
+            &format!(
+                "https://{}/backend-api/codex/responses",
+                super::routing_pin::CHATGPT_HOST
+            ),
+            &[]
+        )
+        .as_deref(),
+        Some("__oailb=other")
+    );
+}
+
+#[test]
+fn guardian_pin_rejects_wrong_scope_and_ambiguous_cookies() {
+    use tungstenite::http::{HeaderMap, HeaderValue, header::SET_COOKIE};
+    let endpoint = format!(
+        "wss://{}/backend-api/codex/responses",
+        super::routing_pin::CHATGPT_HOST
+    );
+    let url = endpoint.as_str();
+    let mut headers = HeaderMap::new();
+    headers.append(
+        SET_COOKIE,
+        HeaderValue::from_str(&format!(
+            "__oailb=pin; Domain={}; Path=/; Secure",
+            super::routing_pin::CHATGPT_HOST
+        ))
+        .unwrap(),
+    );
+    let pin = RuntimeProxyRoutingPin::from_handshake(url, &headers).expect("valid pin");
+    assert_eq!(
+        pin.merge_cookie_header(url, Some("other=kept; __oailb=old; __cflb=old"))
+            .as_deref(),
+        Some("other=kept; __oailb=pin")
+    );
+    for other in [
+        format!(
+            "ws://{}/backend-api/codex/responses",
+            super::routing_pin::CHATGPT_HOST
+        ),
+        format!("wss://{}/other", super::routing_pin::CHATGPT_HOST),
+        format!(
+            "wss://{}:444/backend-api/codex/responses",
+            super::routing_pin::CHATGPT_HOST
+        ),
+        format!(
+            "wss://other.{}/backend-api/codex/responses",
+            super::routing_pin::CHATGPT_HOST
+        ),
+        "wss://example.com/backend-api/codex/responses".to_owned(),
+    ] {
+        assert!(pin.cookie_header(&other).is_none(), "{other}");
+    }
+    headers.append(
+        SET_COOKIE,
+        HeaderValue::from_static("__oailb=ambiguous; Path=/; Secure"),
+    );
+    assert!(RuntimeProxyRoutingPin::from_handshake(url, &headers).is_none());
+    headers.clear();
+    headers.append(
+        SET_COOKIE,
+        HeaderValue::from_static("__oailb=wrong-domain; Domain=example.com; Path=/; Secure"),
+    );
+    assert!(RuntimeProxyRoutingPin::from_handshake(url, &headers).is_none());
+    headers.clear();
+    headers.append(
+        SET_COOKIE,
+        HeaderValue::from_static("__oailb=expired; Max-Age=0; Path=/; Secure"),
+    );
+    assert!(RuntimeProxyRoutingPin::from_handshake(url, &headers).is_none());
+}
+
+#[test]
+fn guardian_registry_is_scoped_by_runtime_and_profile() {
+    use std::sync::Arc;
+    use tungstenite::http::{HeaderMap, HeaderValue, header::SET_COOKIE};
+    let mut headers = HeaderMap::new();
+    headers.insert(
+        SET_COOKIE,
+        HeaderValue::from_static("__oailb=synthetic; Secure; Path=/"),
+    );
+    let pin = Arc::new(
+        RuntimeProxyRoutingPin::from_handshake(
+            &format!(
+                "wss://{}/backend-api/codex/responses",
+                super::routing_pin::CHATGPT_HOST
+            ),
+            &headers,
+        )
+        .expect("pin"),
+    );
+    remember_runtime_guardian_pins(
+        "guardian-test-runtime",
+        "alpha",
+        &["response-test".into()],
+        Some(&pin),
+    );
+    assert!(Arc::ptr_eq(
+        &pin,
+        &runtime_guardian_pin("guardian-test-runtime", "alpha", "response-test")
+            .expect("matching pin")
+    ));
+    assert!(runtime_guardian_pin("guardian-test-runtime", "beta", "response-test").is_none());
+    assert!(runtime_guardian_pin("other-runtime", "alpha", "response-test").is_none());
+    remember_runtime_guardian_pins(
+        "guardian-test-runtime",
+        "alpha",
+        &["response-test".into()],
+        None,
+    );
+    assert!(runtime_guardian_pin("guardian-test-runtime", "alpha", "response-test").is_none());
+}
+
+#[test]
+fn guardian_accepts_upstream_sized_routing_cookie_only() {
+    use tungstenite::http::{HeaderMap, HeaderValue, header::SET_COOKIE};
+    let endpoint = format!(
+        "wss://{}/backend-api/codex/responses",
+        super::routing_pin::CHATGPT_HOST
+    );
+    let url = endpoint.as_str();
+    let value = "a".repeat(6000);
+    let mut headers = HeaderMap::new();
+    headers.insert(
+        SET_COOKIE,
+        HeaderValue::from_str(&format!("__oailb={value}; Path=/; Secure")).unwrap(),
+    );
+    let pin = RuntimeProxyRoutingPin::from_handshake(url, &headers).expect("upstream-sized cookie");
+    assert_eq!(pin.cookie_header(url), Some(format!("__oailb={value}")));
+    let jar = RuntimeProxyCookieJar::new();
+    capture(
+        &jar,
+        "alpha",
+        "example.com",
+        "/",
+        &[&format!("unrelated={value}; Path=/; Secure")],
+    );
+    assert_eq!(merged(&jar, "alpha", "https://example.com/", &[]), None);
+}
+
 fn capture(jar: &RuntimeProxyCookieJar, profile: &str, host: &str, path: &str, headers: &[&str]) {
     jar.capture_set_cookie_headers("", profile, host, path, true, headers.iter().copied());
 }

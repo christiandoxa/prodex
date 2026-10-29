@@ -1,8 +1,29 @@
 use super::{
-    RuntimeResponsesReply, observe_runtime_prompt_cache_profile_hit,
+    RuntimeProxyRequest, RuntimeResponsesReply, observe_runtime_prompt_cache_profile_hit,
     observe_runtime_smart_context_token_usage_for_bucket, runtime_route_kind_label,
     runtime_smart_context_normalized_model_name,
 };
+
+pub(crate) fn runtime_guardian_parent_response_id(
+    request: &RuntimeProxyRequest,
+    request_text: &str,
+) -> Option<String> {
+    if !request
+        .headers
+        .iter()
+        .any(|(name, value)| name.eq_ignore_ascii_case("x-codex-guardian") && value == "reviewer")
+    {
+        return None;
+    }
+    serde_json::from_str::<serde_json::Value>(request_text)
+        .ok()?
+        .get("client_metadata")?
+        .get("parent_response_id")?
+        .as_str()
+        .map(str::trim)
+        .filter(|id| !id.is_empty() && id.len() <= 512)
+        .map(str::to_owned)
+}
 use crate::{RuntimeRotationProxyShared, runtime_proxy_log};
 use prodex_mojo_core::rich::ascii_casefold_contains;
 use prodex_runtime_state::RuntimeRouteKind;

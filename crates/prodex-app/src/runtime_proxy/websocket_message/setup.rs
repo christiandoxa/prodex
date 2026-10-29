@@ -10,8 +10,8 @@ use super::super::{
     mark_runtime_profile_retry_backoff,
     refresh_and_log_runtime_response_route_affinity_for_request,
     release_runtime_quota_blocked_affinity, release_runtime_rotated_session_affinity,
-    runtime_candidate_has_hard_affinity, runtime_noncompact_session_priority_profile,
-    runtime_previous_response_affinity_is_trusted,
+    runtime_candidate_has_hard_affinity, runtime_guardian_parent_response_id,
+    runtime_noncompact_session_priority_profile, runtime_previous_response_affinity_is_trusted,
     runtime_previous_response_fresh_fallback_shape_with_session,
     runtime_previous_response_turn_state, runtime_profile_inflight_hard_limited_for_context,
     runtime_proxy_has_continuation_priority, runtime_proxy_log, runtime_proxy_log_field,
@@ -106,6 +106,19 @@ impl<'a> RuntimeWebsocketTextMessageFlow<'a> {
             })
             .transpose()?
             .flatten();
+        let guardian_parent_id =
+            runtime_guardian_parent_response_id(&handshake_request, &request_text);
+        let guardian_owner = guardian_parent_id
+            .as_deref()
+            .map(|id| runtime_response_bound_profile(shared, id, RuntimeRouteKind::Websocket))
+            .transpose()?
+            .flatten();
+        let guardian_parent_profile =
+            if previous_response_id.is_none() && request_turn_state.is_none() {
+                guardian_owner
+            } else {
+                None
+            };
         let trusted_previous_response_affinity = runtime_previous_response_affinity_is_trusted(
             shared,
             previous_response_id.as_deref(),
@@ -150,6 +163,7 @@ impl<'a> RuntimeWebsocketTextMessageFlow<'a> {
             previous_response_fresh_fallback_shape,
             request_session_id,
             bound_profile,
+            guardian_parent_profile,
             trusted_previous_response_affinity,
             turn_state_profile,
             bound_session_profile: None,
@@ -209,7 +223,9 @@ impl<'a> RuntimeWebsocketTextMessageFlow<'a> {
     pub(super) fn has_continuation_priority(&self) -> bool {
         runtime_proxy_has_continuation_priority(
             self.previous_response_id.as_deref(),
-            self.pinned_profile.as_deref(),
+            self.pinned_profile
+                .as_deref()
+                .or(self.guardian_parent_profile.as_deref()),
             self.request_turn_state.as_deref(),
             self.turn_state_profile.as_deref(),
             runtime_noncompact_session_priority_profile(
@@ -233,7 +249,8 @@ impl<'a> RuntimeWebsocketTextMessageFlow<'a> {
                     strict_affinity_profile: self
                         .compact_followup_profile
                         .as_ref()
-                        .map(|(profile_name, _)| profile_name.as_str()),
+                        .map(|(profile_name, _)| profile_name.as_str())
+                        .or(self.guardian_parent_profile.as_deref()),
                     pinned_profile: self.pinned_profile.as_deref(),
                     turn_state_profile: self.turn_state_profile.as_deref(),
                     session_profile: self.session_profile.as_deref(),
@@ -290,6 +307,7 @@ impl<'a> RuntimeWebsocketTextMessageFlow<'a> {
             && self.pinned_profile.is_none()
             && self.turn_state_profile.is_none()
             && !session_affinity_candidate
+            && !self.candidate_has_hard_affinity(candidate_name)
             && runtime_profile_inflight_hard_limited_for_context(
                 self.shared,
                 candidate_name,
@@ -411,7 +429,8 @@ impl<'a> RuntimeWebsocketTextMessageFlow<'a> {
             strict_affinity_profile: self
                 .compact_followup_profile
                 .as_ref()
-                .map(|(profile_name, _)| profile_name.as_str()),
+                .map(|(profile_name, _)| profile_name.as_str())
+                .or(self.guardian_parent_profile.as_deref()),
             pinned_profile: self.pinned_profile.as_deref(),
             turn_state_profile: self.turn_state_profile.as_deref(),
             session_profile: self.session_profile.as_deref(),

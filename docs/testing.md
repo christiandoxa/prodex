@@ -451,6 +451,13 @@ The deterministic upstream asserts that turn two sends the `response.id` from
 turn one as `previous_response_id`. It uses only synthetic credentials and
 never contacts a live provider.
 
+For the Guardian routing-cookie handshake, run
+`node scripts/compat/guardian-tls-smoke.mjs` with OpenSSL, the pinned Mojo toolchain,
+and cached Cargo dependencies installed. The test creates a temporary CA and
+intercepts the configured upstream through a loopback-only CONNECT proxy; it
+uses synthetic credentials and verifies the parent pin after another handshake.
+This focused test is separate from the default CI suite.
+
 `npm run test:node` discovers every checked-in `*.test.mjs` module under the
 repository scripts and gateway SDK. The fast lane and CI process guard both run
 this command, so adding a test file cannot leave it outside the default gate.

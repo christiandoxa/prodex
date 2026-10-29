@@ -226,6 +226,11 @@ pub(super) fn handle_runtime_responses_quota_blocked(
         RuntimeRouteKind::Responses,
         quota_message.as_deref(),
     )?;
+    if affinity_state.guardian_parent_profile().is_some() {
+        return Ok(RuntimeResponsesQuotaBlockedAction::Return(Box::new(
+            response,
+        )));
+    }
     if !affinity_state.quota_blocked_affinity_is_releasable(
         &profile_name,
         request_requires_previous_response_affinity,

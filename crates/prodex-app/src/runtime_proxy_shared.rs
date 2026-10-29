@@ -251,6 +251,7 @@ pub(super) enum RuntimeWebsocketConnectResult {
     Connected {
         socket: RuntimeUpstreamWebSocket,
         turn_state: Option<String>,
+        routing_pin: Option<std::sync::Arc<prodex_runtime_cookies::RuntimeProxyRoutingPin>>,
     },
     QuotaBlocked(RuntimeWebsocketErrorPayload),
     RateLimited(RuntimeWebsocketErrorPayload, Option<Duration>),
