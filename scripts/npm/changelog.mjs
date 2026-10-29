@@ -95,7 +95,10 @@ async function git(args) {
 }
 
 async function versionTags() {
-  return mergedVersionTagsInReleaseOrder(repoRoot).map(({ tag }) => tag);
+  // This historical release tag is absent from the current public remote.
+  return mergedVersionTagsInReleaseOrder(repoRoot, "HEAD", [
+    { tag: "0.439.5", commit: "ac9aad08f25d6dc8cda96463ce2045b40f35f510" },
+  ]);
 }
 
 function tagVersion(tag) {
@@ -371,11 +374,11 @@ async function renderChangelog({ releaseVersion, releases }) {
   let pendingReleaseRendered = false;
 
   if (latestTag) {
-    const unreleasedCommits = await commitsForRange(`${latestTag}..HEAD`);
+    const unreleasedCommits = await commitsForRange(`${latestTag.commit}..HEAD`);
     const unreleasedGroups = groupedEntries(unreleasedCommits);
-    const latestVersion = tagVersion(latestTag);
+    const latestVersion = tagVersion(latestTag.tag);
     const pendingVersion =
-      currentVersion !== latestVersion && !tags.some((tag) => tagVersion(tag) === currentVersion)
+      currentVersion !== latestVersion && !tags.some(({ tag }) => tagVersion(tag) === currentVersion)
         ? currentVersion
         : null;
     // Release commits must render the same section before and after the tag is created.
@@ -393,19 +396,20 @@ async function renderChangelog({ releaseVersion, releases }) {
       pendingReleaseRendered = true;
     } else if (hasEntries(unreleasedGroups)) {
       lines.push(pendingVersion ? `## ${pendingVersion} - Unreleased` : "## Unreleased", "");
-      lines.push(`Changes after \`${latestTag}\`.`, "");
+      lines.push(`Changes after \`${latestTag.tag}\`.`, "");
       lines.push(...renderGroups(unreleasedGroups));
     }
   }
 
   const selectedReleaseCount = Math.max(0, releases - (pendingReleaseRendered ? 1 : 0));
   const selectedTags = tags.slice(Math.max(0, tags.length - selectedReleaseCount)).reverse();
-  for (const tag of selectedTags) {
-    const tagIndex = tags.indexOf(tag);
+  for (const entry of selectedTags) {
+    const { tag, commit } = entry;
+    const tagIndex = tags.indexOf(entry);
     const previousTag = tagIndex > 0 ? tags[tagIndex - 1] : null;
-    const range = previousTag ? `${previousTag}..${tag}` : tag;
+    const range = previousTag ? `${previousTag.commit}..${commit}` : commit;
     const groups = groupedEntries(await commitsForRange(range));
-    const date = await tagDate(tag);
+    const date = await tagDate(commit);
 
     appendReleasedVersion(lines, tagVersion(tag), date, groups);
     if (

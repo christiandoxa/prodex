@@ -90,6 +90,20 @@ fn candidate() -> Result<Option<(PathBuf, PathBuf)>> {
 }
 
 fn validate_manifest_content(manifest: &ToolInstallManifest, actual_digest: &str) -> Result<()> {
+    // Retain the previously audited identity while Mojo validates the selected release.
+    let qualified = if manifest.version == "5.3.2" {
+        OptionalToolReleaseIdentity {
+            version: "5.3.2",
+            commit: "16352ac229eb08a9598dcae48fe9f2b342567d86",
+            tree_sha256: "8609325761024ea38a22f782fa49feae2c068ede9b31b42f03c224fd990f640e",
+        }
+    } else {
+        OptionalToolReleaseIdentity {
+            version: crate::PONYTAIL_LATEST_STABLE_REFERENCE,
+            commit: crate::PONYTAIL_LATEST_STABLE_COMMIT,
+            tree_sha256: crate::PONYTAIL_LATEST_STABLE_TREE_SHA256,
+        }
+    };
     validate_manifest_policy(optional_tool_manifest_content_error(
         OptionalToolPolicyId::Ponytail,
         OptionalToolManifestContent {
@@ -97,11 +111,7 @@ fn validate_manifest_content(manifest: &ToolInstallManifest, actual_digest: &str
             commit: &manifest.commit,
             tree_sha256: &manifest.tree_sha256,
             actual_tree_sha256: actual_digest,
-            latest: OptionalToolReleaseIdentity {
-                version: crate::PONYTAIL_LATEST_STABLE_REFERENCE,
-                commit: crate::PONYTAIL_LATEST_STABLE_COMMIT,
-                tree_sha256: crate::PONYTAIL_LATEST_STABLE_TREE_SHA256,
-            },
+            latest: qualified,
             previous: OptionalToolReleaseIdentity {
                 version: crate::PONYTAIL_PREVIOUS_STABLE_REFERENCE,
                 commit: crate::PONYTAIL_PREVIOUS_STABLE_COMMIT,
@@ -236,6 +246,22 @@ mod tests {
                 .to_string(),
             "Ponytail previous-stable metadata does not match release-qualified compatibility metadata"
         );
+    }
+
+    #[test]
+    fn previously_qualified_release_still_requires_its_audited_identity() {
+        let mut manifest = ToolInstallManifest {
+            schema_version: 1,
+            id: "ponytail".to_string(),
+            version: "5.3.2".to_string(),
+            source: PONYTAIL_SOURCE.to_string(),
+            commit: "16352ac229eb08a9598dcae48fe9f2b342567d86".to_string(),
+            tree_sha256: "8609325761024ea38a22f782fa49feae2c068ede9b31b42f03c224fd990f640e"
+                .to_string(),
+        };
+        assert!(validate_manifest_content(&manifest, &manifest.tree_sha256).is_ok());
+        manifest.commit = "0123456789abcdef0123456789abcdef01234567".to_string();
+        assert!(validate_manifest_content(&manifest, &manifest.tree_sha256).is_err());
     }
 
     #[test]

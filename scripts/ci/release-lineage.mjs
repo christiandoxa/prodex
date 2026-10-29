@@ -4,13 +4,13 @@ const VERSION_TAG = /^v?\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/u;
 
 // Release history follows ancestry, not version magnitude: 0.165.0 deliberately
 // succeeds 0.439.5. Retain numeric ordering only for tags on the same commit.
-export function mergedVersionTagsInReleaseOrder(root, revision = "HEAD") {
+export function mergedVersionTagsInReleaseOrder(root, revision = "HEAD", historicalAnchors = []) {
   const git = (args) => runChecked("git", args, { cwd: root }).stdout.trim();
   const tags = git(["tag", "--merged", revision, "--sort=version:refname"])
     .split(/\r?\n/u).filter((tag) => VERSION_TAG.test(tag));
-  if (tags.length === 0) return [];
+  if (tags.length === 0 && historicalAnchors.length === 0) return [];
   const objects = new Map();
-  for (const line of git(["show-ref", "--tags", "--dereference"]).split(/\r?\n/u)) {
+  for (const line of (tags.length ? git(["show-ref", "--tags", "--dereference"]) : "").split(/\r?\n/u)) {
     const [sha, ref] = line.split(/\s+/u);
     objects.set(ref, sha);
   }
@@ -23,6 +23,13 @@ export function mergedVersionTagsInReleaseOrder(root, revision = "HEAD") {
     if (position === undefined) throw new Error(`release tag ${tag} has no reachable commit`);
     return { tag, commit, position };
   });
+  for (const { tag, commit } of historicalAnchors) {
+    const position = positions.get(commit);
+    if (position === undefined) continue;
+    const existing = records.find((record) => record.tag === tag);
+    if (existing && existing.commit !== commit) throw new Error(`release tag ${tag} does not match its historical anchor`);
+    if (!existing) records.push({ tag, commit, position });
+  }
   return records.sort((left, right) => right.position - left.position)
     .map(({ tag, commit }) => ({ tag, commit }));
 }

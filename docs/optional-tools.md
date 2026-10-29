@@ -96,13 +96,13 @@ Claude plugin hooks can use Caveman's documented `caveman telemetry off` or
 
 ## Ponytail
 
-Ponytail uses the same versioned manifest/tree contract, accepts stable 4.9.0 or newer, and selects the newest compatible managed directory. The current release-qualified reference is `<managed-root>/ponytail/5.3.2/` with metadata:
+Ponytail uses the same versioned manifest/tree contract, accepts stable 4.9.0 or newer, and selects the newest compatible managed directory. The current release-qualified reference is `<managed-root>/ponytail/5.3.3/` with metadata:
 
 - source: `https://github.com/DietrichGebert/ponytail`
-- commit: `16352ac229eb08a9598dcae48fe9f2b342567d86`
-- tree SHA-256: `8609325761024ea38a22f782fa49feae2c068ede9b31b42f03c224fd990f640e`
+- commit: `7801d061243d7b753bad0e0b3c057cd250b11755`
+- tree SHA-256: `3bd59937f9375a418f9f85c92b30b5d1404491578b784afa76d32ab2c1173af3`
 
-The 5.3.2 qualified reference requires its exact audited commit and complete tree digest. Existing stable 4.10.x checkouts remain accepted through the minimum-version and manifest-digest compatibility rules, including the previously qualified 4.10.0 legacy-manifest rule. Future stable releases are accepted when the plugin version matches the managed manifest and the recomputed tree digest matches that manifest.
+The 5.3.3 and previously qualified 5.3.2 references require their exact audited commits and complete tree digests. Existing stable 4.10.x checkouts remain accepted through the minimum-version and manifest-digest compatibility rules, including the previously qualified 4.10.0 legacy-manifest rule. Future stable releases are accepted when the plugin version matches the managed manifest and the recomputed tree digest matches that manifest.
 
 RTK requires `0.46.0` or newer; `1.1.0` is the latest stable release-qualified reference for this Prodex release. It remains externally managed and version-compatible rather than latest-only. Codebase Memory MCP
 `0.12.1` is the latest stable release validated for this Prodex release. Both resolve from

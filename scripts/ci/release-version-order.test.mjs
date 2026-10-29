@@ -47,5 +47,9 @@ test("release ordering is topological, handles annotated tags, and excludes unme
     assert.deepEqual(mergedVersionTagsInReleaseOrder(root, aligned), [
       { tag: "0.439.5", commit: old }, { tag: "0.165.0", commit: aligned },
     ]);
+    git(["tag", "-d", "0.439.5"]);
+    assert.deepEqual(mergedVersionTagsInReleaseOrder(root, aligned, [{ tag: "0.439.5", commit: old }]), [
+      { tag: "0.439.5", commit: old }, { tag: "0.165.0", commit: aligned },
+    ]);
   } finally { await fs.rm(root, { recursive: true, force: true }); }
 });
