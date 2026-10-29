@@ -1,6 +1,37 @@
 use super::*;
 
 #[test]
+fn runtime_proxy_policy_capacity_503_is_forwarded_without_profile_retry() {
+    let _test_guard = crate::acquire_test_runtime_lock();
+    for (route, path) in [
+        (RuntimeProxyBackendFaultRoute::Responses, "backend-api/codex/responses"),
+        (RuntimeProxyBackendFaultRoute::Compact, "backend-api/codex/responses/compact"),
+    ] {
+        let backend = RuntimeProxyBackend::start_with_fault_script(RuntimeProxyBackendFaultScript::new([
+            RuntimeProxyBackendFaultStep::policy_capacity_503(route, "main-account"),
+            RuntimeProxyBackendFaultStep::success(route, "main-account"),
+        ]));
+        let fixture = start_runtime_continuation_fixture(
+            backend,
+            "main",
+            &["main", "second"],
+            &[],
+            Vec::new(),
+        );
+        let response = fixture.post_json(path, serde_json::json!({"input": []}));
+        assert_eq!(response.status().as_u16(), 503);
+        assert_eq!(
+            response.json::<serde_json::Value>().expect("policy response JSON"),
+            serde_json::json!({"error": {
+                "code": "policy_capacity_unavailable",
+                "message": "This model is disabled."
+            }})
+        );
+        assert_eq!(fixture.backend.responses_accounts(), ["main-account"]);
+    }
+}
+
+#[test]
 fn runtime_proxy_http_compact_preserves_rich_codex_01491_payload_and_session_affinity() {
     let session_id = "sess-compact-01491";
     let fixture = start_runtime_continuation_fixture(

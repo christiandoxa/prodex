@@ -56,10 +56,10 @@ async function createReleaseRunFixture() {
   return root;
 }
 
-async function runReleaseRun(root, args) {
+async function runReleaseRun(root, args, env = {}) {
   return execFileAsync(process.execPath, [SCRIPT_PATH, ...args], {
     cwd: root,
-    env: { ...process.env, PRODEX_REPO_ROOT: root },
+    env: { ...process.env, ...env, PRODEX_REPO_ROOT: root },
     maxBuffer: 4 * 1024 * 1024,
   });
 }
@@ -317,7 +317,7 @@ test("release-run dry-run covers mandatory release order without mutation or net
       "release-run: bump (0.2.0)",
       "dry-run: bump Cargo.toml 0.1.0 -> 0.2.0",
       "release-run: sync (0.2.0)",
-      "dry-run: git fetch origin --prune --prune-tags --tags",
+      "dry-run: git fetch origin --prune --no-prune-tags --tags",
       "dry-run: npm run npm:sync-version",
       "dry-run: npm run changelog -- --release-version 0.2.0",
       "dry-run: node scripts/npm/changelog.mjs --check --release-version 0.2.0",
@@ -433,6 +433,33 @@ test("release-run requires metadata changes to start from the published branch h
   }
 });
 
+
+test("release sync preserves local-only tags even when tag pruning is configured", async () => {
+  const root = await createReleaseRunFixture();
+  const remote = await fs.mkdtemp(path.join(os.tmpdir(), "prodex-release-tags-"));
+  try {
+    await writeFile(root, "scripts/npm/changelog.mjs", "process.exit(0);\n");
+    await git(root, ["add", "scripts/npm/changelog.mjs"]);
+    await git(root, ["commit", "-m", "chore: add fixture script"]);
+    await git(remote, ["init", "--bare", "-q"]);
+    await git(root, ["remote", "set-url", "origin", remote]);
+    await git(root, ["push", "-q", "origin", "HEAD:main"]);
+    await git(root, ["tag", "local-evidence"]);
+    await git(root, ["config", "fetch.pruneTags", "true"]);
+    const bin = path.join(remote, "bin");
+    await fs.mkdir(bin);
+    for (const command of ["npm", "cargo"]) {
+      await fs.writeFile(path.join(bin, command), "#!/bin/sh\nexit 0\n", { mode: 0o755 });
+    }
+    await runReleaseRun(root, ["--only", "sync", "--state-file", path.join(remote, "state.json")], {
+      PATH: `${bin}${path.delimiter}${process.env.PATH}`,
+    });
+    await git(root, ["rev-parse", "--verify", "refs/tags/local-evidence"]);
+  } finally {
+    await fs.rm(root, { recursive: true, force: true });
+    await fs.rm(remote, { recursive: true, force: true });
+  }
+});
 
 test("release preparation overlaps CI instead of dispatching after the CI wait", () => {
   assert.ok(releaseSteps.indexOf("trigger-publish") < releaseSteps.indexOf("watch-ci"));

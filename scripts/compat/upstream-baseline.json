@@ -2,7 +2,7 @@
   "codex": {
     "compatibility": {
       "upstream_repository": "https://github.com/openai/codex",
-      "baseline_source": "openai/codex rust-v0.165.0 release",
+      "baseline_source": "openai/codex rust-v0.166.0 release",
       "guard_command": "node scripts/compat/check-upstream-baseline.mjs",
       "format_version": 2,
       "critical_files": [
@@ -398,7 +398,9 @@
             "if reason != \"interrupted\"",
             "ApiError::ResponseIncomplete(",
             "response_id,",
-            "token_usage,"
+            "token_usage,",
+            "pub(crate) fn metadata_events(",
+            "safety_buffering.map(ResponseEvent::SafetyBuffering)"
           ]
         },
         {
@@ -423,7 +425,9 @@
             ".and_then(|error| error.get(\"headers\"))",
             "RetryAfter::from_headers(&json_headers_to_http_headers(headers))",
             "Duration::try_from_secs_f64(value).ok()",
-            "retry_after_header\n                .or_else"
+            "retry_after_header\n                .or_else",
+            "policy_capacity_unavailable",
+            "ApiError::PolicyCapacityUnavailable"
           ]
         },
         {
@@ -444,9 +448,9 @@
           "reason": "Owns websocket Responses connection setup, request header merging, stream completion boundary, rate limit events, and wrapped websocket errors.",
           "required_contains": [
             "ResponsesWebsocketConnection",
-            "websocket_url_for_path(\"/responses\")",
+            "websocket_url_for_path(RESPONSES_PATH)",
             "merge_request_headers",
-            "add_auth_headers",
+            "apply_auth_headers",
             "x-codex-turn-state",
             "response.completed",
             "codex.rate_limits",
@@ -461,7 +465,7 @@
             "serialize_websocket_request",
             "SafetyBuffering",
             "safety_buffering",
-            "ResponseEvent::SafetyBuffering",
+            "event.metadata_events(safety_buffering)",
             "treatment_from_headers",
             "SafetyBufferingTreatment",
             "safety_buffering(treatment)",
@@ -807,7 +811,8 @@
             "reject_removed_permission_profile",
             "thread/start\" | \"thread/resume\" | \"thread/fork\" | \"turn/start",
             "permissionProfile",
-            "use `permissions` with a named profile id instead"
+            "use `permissions` with a named profile id instead",
+            "send_initialize_notifications_to_connection"
           ]
         },
         {
@@ -817,7 +822,6 @@
             "InitializeRequestProcessor",
             "initialize",
             "Already initialized",
-            "send_initialize_notifications_to_connection",
             "track_initialized_request"
           ]
         },
@@ -955,7 +959,7 @@
             "Only explicit catalogs serialize refresh and suppress bundled fallback.",
             "Self::ExplicitProvider(_) => None",
             "pub fn with_provider_catalog(mut self) -> Self",
-            "self.remote_models.get_mut().models.clear();",
+            "self.remote_models.get_mut().entry.models.clear();",
             "matches!(&self.catalog_source, CatalogSource::ExplicitProvider(_))",
             "current.models.clear();",
             "if !remote_only && let Some(mut models) = self.catalog_source.fallback_models()",
@@ -1246,11 +1250,7 @@
           "reason": "Repeated -c/--config values at root and child scopes are retained in order. Prodex launch normalization must preserve each override and leave native precedence to Codex.",
           "required_contains": [
             "pub(super) fn try_parse_from",
-            "localize_config_arg(MultitoolCli::command()).try_get_matches_from(args)?",
-            "std::iter::successors(Some(&matches)",
-            "scope.get_many::<String>(\"raw_overrides\")",
-            ".mut_arg(\"raw_overrides\", |arg| arg.global(false))",
-            ".mut_subcommands(localize_config_arg)"
+            "collect_config_overrides(MultitoolCli::command(), args)?"
           ]
         },
         {
@@ -1355,7 +1355,7 @@
           ]
         },
         {
-          "path": "codex-rs/rmcp-client/src/tool_request.rs",
+          "path": "codex-rs/rmcp-client/src/request_cancellation.rs",
           "reason": "Dropping a native response future cancels remote tool work without inventing a result.",
           "required_contains": [
             "struct CancelOnDrop",
@@ -1371,6 +1371,36 @@
           "required_contains": [
             "Self::V1 => \"memories\"",
             "Self::V2 => \"memories_v2\""
+          ]
+        },
+        {
+          "path": "codex-rs/codex-api/src/lib.rs",
+          "reason": "Defines the fixed Responses route used by WebSocket connections.",
+          "required_contains": [
+            "pub const RESPONSES_PATH: &str = \"/responses\";"
+          ]
+        },
+        {
+          "path": "codex-rs/codex-api/src/endpoint/responses_websocket/connector.rs",
+          "reason": "Owns the normal WebSocket connection, including per-connection authentication and header merge.",
+          "required_contains": [
+            "connect_with_connector",
+            "websocket_url_for_path(RESPONSES_PATH)",
+            "merge_request_headers",
+            "apply_auth_headers",
+            "connect_websocket(ws_url, headers, connector, turn_state)"
+          ]
+        },
+        {
+          "path": "codex-rs/utils/cli/src/config_override.rs",
+          "reason": "Collects ordered config overrides across root and subcommand scopes.",
+          "required_contains": [
+            "pub fn collect_config_overrides",
+            "localize_config_arg(command).try_get_matches_from(args)?",
+            "std::iter::successors(Some(&matches)",
+            "scope.get_many::<String>(\"raw_overrides\")",
+            ".mut_arg(\"raw_overrides\", |arg| arg.global(false))",
+            ".mut_subcommands(localize_config_arg)"
           ]
         }
       ],
@@ -1408,7 +1438,7 @@
         "/responses",
         "alpha/search",
         "/memories/trace_summarize",
-        "websocket_url_for_path(\"/responses\")",
+        "websocket_url_for_path(RESPONSES_PATH)",
         "/realtime/calls"
       ],
       "expected_stream_events": [
@@ -1886,10 +1916,10 @@
           "reason": "Codex 0.156 removes ResponsesEndpoint selection and connects WebSocket sessions directly to the fixed /responses route.",
           "file_contains_all": [
             "ResponsesWebsocketConnection",
-            "websocket_url_for_path(\"/responses\")"
+            "websocket_url_for_path(RESPONSES_PATH)"
           ],
           "expected_routes_all": [
-            "websocket_url_for_path(\"/responses\")"
+            "websocket_url_for_path(RESPONSES_PATH)"
           ]
         },
         {
@@ -1899,9 +1929,9 @@
           "reason": "Websocket sessions must preserve upstream route selection, request metadata merge behavior, turn-state affinity, lifecycle events, and wrapped error handling.",
           "file_contains_all": [
             "ResponsesWebsocketConnection",
-            "websocket_url_for_path(\"/responses\")",
+            "websocket_url_for_path(RESPONSES_PATH)",
             "merge_request_headers",
-            "add_auth_headers",
+            "apply_auth_headers",
             "x-codex-turn-state",
             "parse_wrapped_websocket_error_event",
             "websocket_connection_limit_reached",
@@ -1911,13 +1941,13 @@
             "serialize_websocket_request",
             "SafetyBuffering",
             "safety_buffering",
-            "ResponseEvent::SafetyBuffering",
+            "event.metadata_events(safety_buffering)",
             "treatment_from_headers",
             "SafetyBufferingTreatment",
             "safety_buffering(treatment)"
           ],
           "expected_routes_all": [
-            "websocket_url_for_path(\"/responses\")"
+            "websocket_url_for_path(RESPONSES_PATH)"
           ],
           "expected_headers_all": [
             "x-codex-turn-state"
@@ -1946,7 +1976,7 @@
             "codex.rate_limits",
             "SafetyBuffering",
             "safety_buffering",
-            "ResponseEvent::SafetyBuffering",
+            "event.metadata_events(safety_buffering)",
             "treatment_from_headers",
             "SafetyBufferingTreatment",
             "safety_buffering(treatment)"
@@ -1984,7 +2014,7 @@
           "reason": "Websocket request metadata should merge upstream headers while auth remains profile-owned.",
           "file_contains_all": [
             "merge_request_headers",
-            "add_auth_headers",
+            "apply_auth_headers",
             "x-codex-turn-state"
           ],
           "expected_headers_all": [
@@ -2002,7 +2032,7 @@
           "reason": "Selected Prodex profiles replace upstream auth/account headers instead of forwarding caller-supplied values.",
           "file_contains_all": [
             "merge_request_headers",
-            "add_auth_headers"
+            "apply_auth_headers"
           ],
           "proxy_replaced_headers_all": [
             "Authorization",
@@ -2220,8 +2250,7 @@
           "reason": "Broker mode must preserve initialize/initialized ordering and duplicate initialize rejection.",
           "file_contains_all": [
             "InitializeRequestProcessor",
-            "Already initialized",
-            "send_initialize_notifications_to_connection"
+            "Already initialized"
           ]
         },
         {
@@ -2398,7 +2427,7 @@
             "Only explicit catalogs serialize refresh and suppress bundled fallback.",
             "Self::ExplicitProvider(_) => None",
             "pub fn with_provider_catalog(mut self) -> Self",
-            "self.remote_models.get_mut().models.clear();",
+            "self.remote_models.get_mut().entry.models.clear();",
             "matches!(&self.catalog_source, CatalogSource::ExplicitProvider(_))",
             "current.models.clear();",
             "if !remote_only && let Some(mut models) = self.catalog_source.fallback_models()"
@@ -2903,11 +2932,7 @@
           "reason": "Repeated -c/--config values at root and child scopes are retained in order. Prodex launch normalization must preserve each override and leave native precedence to Codex.",
           "file_contains_all": [
             "pub(super) fn try_parse_from",
-            "localize_config_arg(MultitoolCli::command()).try_get_matches_from(args)?",
-            "std::iter::successors(Some(&matches)",
-            "scope.get_many::<String>(\"raw_overrides\")",
-            ".mut_arg(\"raw_overrides\", |arg| arg.global(false))",
-            ".mut_subcommands(localize_config_arg)"
+            "collect_config_overrides(MultitoolCli::command(), args)?"
           ]
         },
         {
@@ -3081,7 +3106,7 @@
         {
           "id": "mcp.cancel-dropped-tool-response",
           "kind": "turn_lifecycle",
-          "file": "codex-rs/rmcp-client/src/tool_request.rs",
+          "file": "codex-rs/rmcp-client/src/request_cancellation.rs",
           "reason": "Dropping a native response future cancels remote tool work without inventing a result.",
           "file_contains_all": [
             "struct CancelOnDrop",
@@ -3131,9 +3156,74 @@
             "Self::V1 => \"memories\"",
             "Self::V2 => \"memories_v2\""
           ]
+        },
+        {
+          "id": "websocket.responses-path-constant",
+          "kind": "route",
+          "file": "codex-rs/codex-api/src/lib.rs",
+          "file_contains_all": [
+            "pub const RESPONSES_PATH: &str = \"/responses\";"
+          ],
+          "reason": "Defines the fixed Responses route used by WebSocket connections."
+        },
+        {
+          "id": "websocket.connector-route-auth",
+          "kind": "header_group",
+          "file": "codex-rs/codex-api/src/endpoint/responses_websocket/connector.rs",
+          "file_contains_all": [
+            "connect_with_connector",
+            "websocket_url_for_path(RESPONSES_PATH)",
+            "merge_request_headers",
+            "apply_auth_headers",
+            "connect_websocket(ws_url, headers, connector, turn_state)"
+          ],
+          "reason": "Owns the normal WebSocket connection, including per-connection authentication and header merge."
+        },
+        {
+          "id": "app-server.connection-startup-notifications",
+          "kind": "jsonrpc_handshake",
+          "file": "codex-rs/app-server/src/message_processor.rs",
+          "file_contains_all": [
+            "send_initialize_notifications_to_connection"
+          ],
+          "reason": "Initialization notifications stay scoped to their owning connection."
+        },
+        {
+          "id": "cli.config-overrides-collector",
+          "kind": "cli_contract",
+          "file": "codex-rs/utils/cli/src/config_override.rs",
+          "file_contains_all": [
+            "pub fn collect_config_overrides",
+            "localize_config_arg(command).try_get_matches_from(args)?",
+            "std::iter::successors(Some(&matches)",
+            "scope.get_many::<String>(\"raw_overrides\")",
+            ".mut_arg(\"raw_overrides\", |arg| arg.global(false))",
+            ".mut_subcommands(localize_config_arg)"
+          ],
+          "reason": "Collects ordered config overrides across root and subcommand scopes."
+        },
+        {
+          "id": "responses.policy-capacity-unavailable",
+          "kind": "error_class",
+          "file": "codex-rs/codex-api/src/sse/responses_error.rs",
+          "file_contains_all": [
+            "policy_capacity_unavailable",
+            "ApiError::PolicyCapacityUnavailable"
+          ],
+          "reason": "Codex preserves policy-restricted capacity separately from account quota."
+        },
+        {
+          "id": "responses.safety-metadata-events",
+          "kind": "event_group",
+          "file": "codex-rs/codex-api/src/sse/responses.rs",
+          "file_contains_all": [
+            "pub(crate) fn metadata_events(",
+            "safety_buffering.map(ResponseEvent::SafetyBuffering)"
+          ],
+          "reason": "Shared metadata construction preserves safety buffering for Responses streams."
         }
       ],
-      "tested_codex_release": "rust-v0.165.0",
+      "tested_codex_release": "rust-v0.166.0",
       "patch_deltas": [
         {
           "from": "rust-v0.150.0",
@@ -3539,6 +3629,24 @@
           "source_commit": "360319d8dee62d87e2d59fc0c21805d79519cfed",
           "audit_note": "migration/codex-rust-v0.165.0-audit.md",
           "summary": "Qualifies native Vertex routing, originator-scoped catalogs, terminal model-not-found errors, experimental attached forks, cancellation on dropped MCP responses, native namespace descriptions, reasoning effort changes and fresh-profile memory v2. Prodex preserves direct GCP resume and separates its authorized release-number transition from ordinary SemVer comparison."
+        },
+        {
+          "from": "rust-v0.165.0",
+          "to": "rust-v0.166.0",
+          "source_commit": "6ff1e1ca3b30fc8b914720681fcf5fe62e95f856",
+          "tag_object": "593389380740f7b4762771573c447ccfdc59742f",
+          "source_archive_sha256": "1e33229b8b63237f666d62ba1476134383400d66032cdfde10b7f79debd15d28",
+          "tree_comparison": {
+            "added": 253,
+            "removed": 28,
+            "modified": 1426
+          },
+          "summary": "Qualifies relocated MCP cancellation and config override collection, the Responses WebSocket connector and route constant, safety metadata and policy-restricted capacity errors. The local proxy delegates policy-capacity retries to Codex.",
+          "native_linux_asset_sha256": {
+            "codex": "5a2832a53f9366c5f57a1fee7639822d2a7b4527bc26cfb2ea67b00ef2bca87d",
+            "app_server": "0df26e82c8368f089c0ac6759c8929df983b4db35e35d6200c1e4a5a49a10a2b"
+          },
+          "compatibility_evidence": "Exact release source and asset digests, offline source guard and replay, isolated Linux app-server handshake, and local two-turn mock WebSocket smoke. Platform release CI and Guardian parent routing affinity require separate qualification."
         }
       ],
       "app_server_protocol": {
@@ -3561,31 +3669,19 @@
       }
     },
     "latestRelease": {
-      "tag_name": "rust-v0.165.0",
-      "name": "0.165.0",
-      "published_at": "2026-10-27T20:09:38Z",
-      "html_url": "https://github.com/openai/codex/releases/tag/rust-v0.165.0",
+      "tag_name": "rust-v0.166.0",
+      "name": "0.166.0",
+      "published_at": "2026-10-29T19:47:53Z",
+      "html_url": "https://github.com/openai/codex/releases/tag/rust-v0.166.0",
       "body_head": [
         "## New Features",
-        "",
-        "- Added a built-in Google Cloud Vertex AI provider, configured with `model_provider = \"gcp\"`. (#56265)",
-        "- Added GPT-6.1 Terra to the model catalogs. (#57337)",
-        "- Added a repository filter to the session picker and directory grouping to the agent command center, making it easier to navigate sessions across linked worktrees. (#56308)",
-        "- Added experimental attached thread forks to the app-server API. (#56351)",
-        "- Enabled reasoning effort changes during a conversation by default for supported models. (#56163)",
-        "- Enabled memory v2 by default for fresh profiles and added support for importing external-agent memories into it. (#56211, #56414)",
-        "",
-        "## Bug Fixes",
-        "",
-        "- Fixed fresh TUI sessions to honor the server’s default approval reviewer when no explicit override is provided. (#56090)",
-        "- Kept TUI preferences editable and immediately applicable when execution settings are invalid. (#56091)",
-        "- Cancelled remote MCP tool requests when their local response futures are dropped. (#56132)",
-        "- Prevented queued agent messages from restarting work after an interrupt or a switch to Plan mode. (#56330)",
-        "- Stopped retrying when a provider reports that a model was not found, preserving its error message. (#56445)",
-        "- Closed a marketplace URL validation gap that could allow Git to connect to a different host than the one checked against allowed patterns. (#56263)",
-        "",
-        "## Changelog",
-        ""
+        "- Added keyboard-driven transcript selection with word, line, and page motions, integrated search, and configurable shortcuts. (#57221, #57222, #57223, #57224)",
+        "- Rendered Markdown consistently in async questions, choices, answers, and transcript replies. (#57259, #57292)",
+        "- Added GPT-6.1 Terra to the bundled, Vertex AI, and Amazon Bedrock model catalogs. (#57293)",
+        "- Added `codex queue --resume` to resume unloaded threads after queueing a message. (#57232)",
+        "- Added clearer safety-block explanations and selectable safer follow-up prompts in the TUI. (#57363, #57365)",
+        "- Added `codex doctor --network-only` for focused configuration, connectivity, and WebSocket diagnostics. (#57606)",
+        "## Bug Fixes"
       ]
     }
   },

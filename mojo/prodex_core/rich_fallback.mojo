@@ -580,6 +580,7 @@ comptime RUNTIME_ERROR_MODE_CODE_QUOTA: Int64 = 12
 comptime RUNTIME_ERROR_MODE_CODE_RATE: Int64 = 13
 comptime RUNTIME_ERROR_MODE_CODE_OVERLOAD: Int64 = 14
 comptime RUNTIME_ERROR_MODE_SESSION_USAGE_LIMIT: Int64 = 15
+comptime RUNTIME_ERROR_MODE_POLICY_CAPACITY: Int64 = 16
 comptime RUNTIME_ERROR_SESSION_USAGE_LIMIT_MAX_BYTES: Int64 = 67_108_864
 comptime RUNTIME_ERROR_SESSION_USAGE_LIMIT_MAX_NODES: Int64 = 2_048
 
@@ -589,6 +590,7 @@ comptime RUNTIME_ERROR_CLASS_RATE: Int64 = 2
 comptime RUNTIME_ERROR_CLASS_PROFILE: Int64 = 3
 comptime RUNTIME_ERROR_CLASS_OVERLOAD: Int64 = 4
 comptime RUNTIME_ERROR_CLASS_TRANSIENT: Int64 = 5
+comptime RUNTIME_ERROR_CLASS_POLICY_CAPACITY: Int64 = 6
 comptime RUNTIME_ERROR_ACTION_PASS: Int64 = 0
 comptime RUNTIME_ERROR_ACTION_ROTATE: Int64 = 1
 comptime RUNTIME_ERROR_ACTION_RETRY: Int64 = 2
@@ -1299,6 +1301,7 @@ def runtime_error_json_scan_object(
     var profile = False
     var overload = False
     var error_quota = False
+    var policy_capacity = False
     var message_start: Int64 = -1
     var message_end: Int64 = -1
     var detail_start: Int64 = -1
@@ -1323,11 +1326,15 @@ def runtime_error_json_scan_object(
         if index >= end:
             return runtime_error_invalid()
         var value_start = index
+        if mode == RUNTIME_ERROR_MODE_HTTP and status == 503 and depth == 0 and runtime_error_range_matches(ptr, key_start, key_end, StringSlice("error"), False):
+            policy_capacity = False
         if ptr[unsafe_offset=index] == 34:
             var value_end = runtime_error_string_end(ptr, index, end)
             if value_end < 0:
                 return runtime_error_invalid()
             var code_field = runtime_error_range_matches(ptr, key_start, key_end, StringSlice("code"), False) or runtime_error_range_matches(ptr, key_start, key_end, StringSlice("type"), False) or runtime_error_range_matches(ptr, key_start, key_end, StringSlice("status"), False) or runtime_error_range_matches(ptr, key_start, key_end, StringSlice("reason"), False)
+            if mode == RUNTIME_ERROR_MODE_POLICY_CAPACITY and depth == 1 and runtime_error_range_matches(ptr, key_start, key_end, StringSlice("code"), False):
+                policy_capacity = runtime_error_range_matches(ptr, value_start + 1, value_end, StringSlice("policy_capacity_unavailable"), False)
             if code_field:
                 var class_tag = runtime_error_code_class(ptr, value_start + 1, value_end, mode)
                 if class_tag == RUNTIME_ERROR_CLASS_QUOTA:
@@ -1354,6 +1361,12 @@ def runtime_error_json_scan_object(
             index = value_end + 1
         else:
             cursor[] = index
+            if mode == RUNTIME_ERROR_MODE_HTTP and status == 503 and depth == 0 and runtime_error_range_matches(ptr, key_start, key_end, StringSlice("error"), False):
+                var policy_cursor = index
+                var policy_record = runtime_error_json_scan_value(view, Pointer(to=policy_cursor), end, RUNTIME_ERROR_MODE_POLICY_CAPACITY, status, depth + 1)
+                if runtime_error_is_invalid(policy_record):
+                    return policy_record^
+                policy_capacity = runtime_error_is_match(policy_record)
             var child = runtime_error_json_scan_value(view, cursor, end, mode, status, depth + 1)
             if runtime_error_is_invalid(child):
                 return child^
@@ -1369,6 +1382,8 @@ def runtime_error_json_scan_object(
             break
         return runtime_error_invalid()
     cursor[] = index
+    if policy_capacity:
+        return runtime_error_match(RUNTIME_ERROR_CLASS_POLICY_CAPACITY, -1, -1)
     var direct = runtime_error_json_direct_record(
         mode,
         status,
@@ -1689,6 +1704,8 @@ def prodex_mojo_rich_runtime_error_policy_v1(
         unsafe_from_address=Int(output_address)
     )
     var record = runtime_error_scan_body(body, operation, status)
+    if record.source_kind == RUNTIME_ERROR_CLASS_POLICY_CAPACITY:
+        return RICH_STATUS_OK
     if runtime_error_is_match(record) and operation == RUNTIME_ERROR_MODE_SESSION_USAGE_LIMIT:
         output_records[unsafe_offset=0].model = ProdexRichSlice(0, 0)
         output_records[unsafe_offset=0].source_kind = record.source_kind

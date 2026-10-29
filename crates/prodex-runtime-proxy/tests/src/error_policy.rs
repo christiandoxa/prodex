@@ -73,6 +73,36 @@ fn codex_content_policy_errors_pass_through_without_quota_rotation() {
 }
 
 #[test]
+fn codex_policy_capacity_failure_is_not_account_quota() {
+    for body in [
+        br#"{"type":"response.failed","response":{"error":{"code":"policy_capacity_unavailable","message":"Policy-restricted capacity is unavailable. Please try again later."}}}"#.as_slice(),
+        br#"{"type":"error","error":{"code":"policy_capacity_unavailable"}}"#.as_slice(),
+    ] {
+        for phase in [RuntimeHttpErrorPhase::PreCommit, RuntimeHttpErrorPhase::Committed] {
+            let policy = runtime_stream_error_policy(body, phase);
+            assert_eq!(policy.class, RuntimeHttpErrorClass::Other);
+            assert_eq!(policy.action, RuntimeHttpErrorAction::PassThrough);
+        }
+    }
+
+    let body =
+        br#"{"error":{"code":"policy_capacity_unavailable","message":"This model is disabled."}}"#;
+    for phase in [
+        RuntimeHttpErrorPhase::PreCommit,
+        RuntimeHttpErrorPhase::Committed,
+    ] {
+        let policy = runtime_http_error_policy(503, body, phase);
+        assert_eq!(policy.class, RuntimeHttpErrorClass::Other);
+        assert_eq!(policy.action, RuntimeHttpErrorAction::PassThrough);
+    }
+
+    let unrelated = br#"{"metadata":{"code":"policy_capacity_unavailable"},"error":{"code":"server_is_overloaded"}}"#;
+    let policy = runtime_http_error_policy(503, unrelated, RuntimeHttpErrorPhase::PreCommit);
+    assert_eq!(policy.class, RuntimeHttpErrorClass::Overload);
+    assert_eq!(policy.action, RuntimeHttpErrorAction::RetryProfile);
+}
+
+#[test]
 fn explicit_quota_payload_corpus_rotates_only_before_commit_for_supported_statuses() {
     for (code, message) in [
         ("insufficient_quota", "Quota exhausted"),

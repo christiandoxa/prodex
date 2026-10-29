@@ -29,6 +29,9 @@ const REQUIRED_CRITICAL_FILES = [
   "codex-rs/codex-api/src/sse/responses_error.rs",
   "codex-rs/codex-api/src/endpoint/responses.rs",
   "codex-rs/codex-api/src/endpoint/responses_websocket.rs",
+  "codex-rs/codex-api/src/lib.rs",
+  "codex-rs/codex-api/src/endpoint/responses_websocket/connector.rs",
+  "codex-rs/utils/cli/src/config_override.rs",
   "codex-rs/core/src/context/base_instructions.rs",
   "codex-rs/core/src/context/world_state/model.rs",
   "codex-rs/core/src/context/world_state/top_level_tools.rs",
@@ -91,11 +94,29 @@ const REQUIRED_CRITICAL_FILES = [
   "codex-rs/model-provider/src/models_endpoint.rs",
   "codex-rs/codex-api/src/error.rs",
   "codex-rs/protocol/src/error.rs",
-  "codex-rs/rmcp-client/src/tool_request.rs",
+  "codex-rs/rmcp-client/src/request_cancellation.rs",
   "codex-rs/protocol/src/memory_version.rs",
 ];
 
 const REQUIRED_FILE_CONTAINS = {
+  "codex-rs/codex-api/src/lib.rs": [
+    "pub const RESPONSES_PATH: &str = \"/responses\";",
+  ],
+  "codex-rs/codex-api/src/endpoint/responses_websocket/connector.rs": [
+    "connect_with_connector",
+    "websocket_url_for_path(RESPONSES_PATH)",
+    "merge_request_headers",
+    "apply_auth_headers",
+    "connect_websocket(ws_url, headers, connector, turn_state)"
+  ],
+  "codex-rs/utils/cli/src/config_override.rs": [
+    "pub fn collect_config_overrides",
+    "localize_config_arg(command).try_get_matches_from(args)?",
+    "std::iter::successors(Some(&matches)",
+    "scope.get_many::<String>(\"raw_overrides\")",
+    ".mut_arg(\"raw_overrides\", |arg| arg.global(false))",
+    ".mut_subcommands(localize_config_arg)"
+  ],
   "codex-rs/core/src/client.rs": [
     "build_responses_headers",
     "build_responses_compatibility_headers",
@@ -425,6 +446,8 @@ const REQUIRED_FILE_CONTAINS = {
     "SafetyBuffering",
     "safety_buffering",
     "ResponseEvent::SafetyBuffering",
+    "pub(crate) fn metadata_events(",
+    "safety_buffering.map(ResponseEvent::SafetyBuffering)",
     "invalid_prompt",
     "ApiError::InvalidPrompt",
     "response.output_item.added",
@@ -447,6 +470,8 @@ const REQUIRED_FILE_CONTAINS = {
     "rate_limit_exceeded",
     "slow_down",
     "server_is_overloaded",
+    "policy_capacity_unavailable",
+    "ApiError::PolicyCapacityUnavailable",
     "invalid_prompt",
     "ApiError::InvalidPrompt",
     "json_headers_to_http_headers",
@@ -467,9 +492,9 @@ const REQUIRED_FILE_CONTAINS = {
   ],
   "codex-rs/codex-api/src/endpoint/responses_websocket.rs": [
     "ResponsesWebsocketConnection",
-    "websocket_url_for_path(\"/responses\")",
+    "websocket_url_for_path(RESPONSES_PATH)",
     "merge_request_headers",
-    "add_auth_headers",
+    "apply_auth_headers",
     "x-codex-turn-state",
     "response.completed",
     "codex.rate_limits",
@@ -484,7 +509,7 @@ const REQUIRED_FILE_CONTAINS = {
     "serialize_websocket_request",
     "SafetyBuffering",
     "safety_buffering",
-    "ResponseEvent::SafetyBuffering",
+    "event.metadata_events(safety_buffering)",
     "treatment_from_headers",
     "SafetyBufferingTreatment",
     "safety_buffering(treatment)",
@@ -823,12 +848,12 @@ const REQUIRED_FILE_CONTAINS = {
     "thread/start\" | \"thread/resume\" | \"thread/fork\" | \"turn/start",
     "permissionProfile",
     "use `permissions` with a named profile id instead",
+    "send_initialize_notifications_to_connection",
   ],
   "codex-rs/app-server/src/request_processors/initialize_processor.rs": [
     "InitializeRequestProcessor",
     "initialize",
     "Already initialized",
-    "send_initialize_notifications_to_connection",
     "track_initialized_request",
   ],
   "codex-rs/app-server/src/request_processors/thread_processor.rs": [
@@ -903,7 +928,7 @@ const REQUIRED_FILE_CONTAINS = {
     "Only explicit catalogs serialize refresh and suppress bundled fallback.",
     "Self::ExplicitProvider(_) => None",
     "pub fn with_provider_catalog(mut self) -> Self",
-    "self.remote_models.get_mut().models.clear();",
+    "self.remote_models.get_mut().entry.models.clear();",
     "matches!(&self.catalog_source, CatalogSource::ExplicitProvider(_))",
     "current.models.clear();",
     "if !remote_only && let Some(mut models) = self.catalog_source.fallback_models()",
@@ -1009,11 +1034,7 @@ const REQUIRED_FILE_CONTAINS = {
   ],
   "codex-rs/cli/src/config_override_args.rs": [
       "pub(super) fn try_parse_from",
-      "localize_config_arg(MultitoolCli::command()).try_get_matches_from(args)?",
-      "std::iter::successors(Some(&matches)",
-      "scope.get_many::<String>(\"raw_overrides\")",
-      ".mut_arg(\"raw_overrides\", |arg| arg.global(false))",
-      ".mut_subcommands(localize_config_arg)"
+      "collect_config_overrides(MultitoolCli::command(), args)?"
   ],
   "codex-rs/core/src/compact.rs": [
       "Keep each attempt isolated until the response completes successfully.",
@@ -1080,7 +1101,7 @@ const REQUIRED_FILE_CONTAINS = {
     "CodexErrorDetails::ModelNotFound { .. } => CodexErrorInfo::ModelNotFound",
     "CodexErrorDetails::ModelNotFound { status, .. } => *status"
   ],
-  "codex-rs/rmcp-client/src/tool_request.rs": [
+  "codex-rs/rmcp-client/src/request_cancellation.rs": [
     "struct CancelOnDrop",
     "let mut cancellation = CancelOnDrop",
     "let result = handle.await_response().await",
@@ -1140,7 +1161,7 @@ const REQUIRED_EXPECTED_ROUTES = [
   "/realtime/calls",
   "alpha/search",
   "/memories/trace_summarize",
-  "websocket_url_for_path(\"/responses\")",
+  "websocket_url_for_path(RESPONSES_PATH)",
 ];
 
 const REQUIRED_APP_SERVER_METHODS = [
@@ -1571,8 +1592,8 @@ const REQUIRED_SEMANTIC_CHECKS = [
     id: "websocket.responses-route",
     kind: "route",
     file: "codex-rs/codex-api/src/endpoint/responses_websocket.rs",
-    file_contains_all: ["ResponsesWebsocketConnection", "websocket_url_for_path(\"/responses\")"],
-    expected_routes_all: ["websocket_url_for_path(\"/responses\")"],
+    file_contains_all: ["ResponsesWebsocketConnection", "websocket_url_for_path(RESPONSES_PATH)"],
+    expected_routes_all: ["websocket_url_for_path(RESPONSES_PATH)"],
   },
   {
     id: "websocket.session-behavior",
@@ -1580,9 +1601,9 @@ const REQUIRED_SEMANTIC_CHECKS = [
     file: "codex-rs/codex-api/src/endpoint/responses_websocket.rs",
     file_contains_all: [
       "ResponsesWebsocketConnection",
-      "websocket_url_for_path(\"/responses\")",
+      "websocket_url_for_path(RESPONSES_PATH)",
       "merge_request_headers",
-      "add_auth_headers",
+      "apply_auth_headers",
       "treatment_from_headers",
       "SafetyBufferingTreatment",
       "safety_buffering(treatment)",
@@ -1590,14 +1611,14 @@ const REQUIRED_SEMANTIC_CHECKS = [
       "serialize_websocket_request",
       "SafetyBuffering",
       "safety_buffering",
-      "ResponseEvent::SafetyBuffering",
+      "event.metadata_events(safety_buffering)",
       "parse_wrapped_websocket_error_event",
       "websocket_connection_limit_reached",
       "PREVIOUS_RESPONSE_NOT_FOUND_CODE",
       "previous_response_not_found",
       "PREVIOUS_RESPONSE_NOT_FOUND_MESSAGE",
     ],
-    expected_routes_all: ["websocket_url_for_path(\"/responses\")"],
+    expected_routes_all: ["websocket_url_for_path(RESPONSES_PATH)"],
     expected_headers_all: ["x-codex-turn-state"],
     expected_stream_events_all: [
       "response.created",
@@ -1623,7 +1644,7 @@ const REQUIRED_SEMANTIC_CHECKS = [
       "safety_buffering(treatment)",
       "SafetyBuffering",
       "safety_buffering",
-      "ResponseEvent::SafetyBuffering",
+      "event.metadata_events(safety_buffering)",
     ],
     expected_stream_events_all: [
       "response.created",
@@ -1641,7 +1662,7 @@ const REQUIRED_SEMANTIC_CHECKS = [
     id: "websocket.header-auth-merge",
     kind: "header_group",
     file: "codex-rs/codex-api/src/endpoint/responses_websocket.rs",
-    file_contains_all: ["merge_request_headers", "add_auth_headers", "x-codex-turn-state"],
+    file_contains_all: ["merge_request_headers", "apply_auth_headers", "x-codex-turn-state"],
     expected_headers_all: ["x-codex-turn-state"],
     proxy_replaced_headers_all: ["Authorization", "ChatGPT-Account-Id"],
   },
@@ -1649,7 +1670,7 @@ const REQUIRED_SEMANTIC_CHECKS = [
     id: "proxy.replaced-headers",
     kind: "header_group",
     file: "codex-rs/codex-api/src/endpoint/responses_websocket.rs",
-    file_contains_all: ["merge_request_headers", "add_auth_headers"],
+    file_contains_all: ["merge_request_headers", "apply_auth_headers"],
     proxy_replaced_headers_all: ["Authorization", "ChatGPT-Account-Id"],
   },
   {
@@ -1879,7 +1900,7 @@ const REQUIRED_SEMANTIC_CHECKS = [
     id: "app-server.initialize-handshake",
     kind: "jsonrpc_handshake",
     file: "codex-rs/app-server/src/request_processors/initialize_processor.rs",
-    file_contains_all: ["InitializeRequestProcessor", "Already initialized", "send_initialize_notifications_to_connection"],
+    file_contains_all: ["InitializeRequestProcessor", "Already initialized"],
   },
   {
     id: "app-server.thread-lifecycle-processors",
@@ -1953,7 +1974,7 @@ const REQUIRED_SEMANTIC_CHECKS = [
       "Only explicit catalogs serialize refresh and suppress bundled fallback.",
       "Self::ExplicitProvider(_) => None",
       "pub fn with_provider_catalog(mut self) -> Self",
-      "self.remote_models.get_mut().models.clear();",
+      "self.remote_models.get_mut().entry.models.clear();",
       "matches!(&self.catalog_source, CatalogSource::ExplicitProvider(_))",
       "current.models.clear();",
       "if !remote_only && let Some(mut models) = self.catalog_source.fallback_models()",
@@ -2416,11 +2437,7 @@ const REQUIRED_SEMANTIC_CHECKS = [
     "file": "codex-rs/cli/src/config_override_args.rs",
     "file_contains_all": [
       "pub(super) fn try_parse_from",
-      "localize_config_arg(MultitoolCli::command()).try_get_matches_from(args)?",
-      "std::iter::successors(Some(&matches)",
-      "scope.get_many::<String>(\"raw_overrides\")",
-      ".mut_arg(\"raw_overrides\", |arg| arg.global(false))",
-      ".mut_subcommands(localize_config_arg)"
+      "collect_config_overrides(MultitoolCli::command(), args)?"
     ]
   },
   {
@@ -2581,7 +2598,7 @@ const REQUIRED_SEMANTIC_CHECKS = [
   {
     "id": "mcp.cancel-dropped-tool-response",
     "kind": "turn_lifecycle",
-    "file": "codex-rs/rmcp-client/src/tool_request.rs",
+    "file": "codex-rs/rmcp-client/src/request_cancellation.rs",
     "file_contains_all": [
       "struct CancelOnDrop",
       "let mut cancellation = CancelOnDrop",
@@ -2625,6 +2642,65 @@ const REQUIRED_SEMANTIC_CHECKS = [
     "file_contains_all": [
       "Self::V1 => \"memories\"",
       "Self::V2 => \"memories_v2\""
+    ]
+  },
+  {
+    "id": "websocket.responses-path-constant",
+    "kind": "route",
+    "file": "codex-rs/codex-api/src/lib.rs",
+    "file_contains_all": [
+      "pub const RESPONSES_PATH: &str = \"/responses\";"
+    ]
+  },
+  {
+    "id": "websocket.connector-route-auth",
+    "kind": "header_group",
+    "file": "codex-rs/codex-api/src/endpoint/responses_websocket/connector.rs",
+    "file_contains_all": [
+      "connect_with_connector",
+      "websocket_url_for_path(RESPONSES_PATH)",
+      "merge_request_headers",
+      "apply_auth_headers",
+      "connect_websocket(ws_url, headers, connector, turn_state)"
+    ]
+  },
+  {
+    "id": "app-server.connection-startup-notifications",
+    "kind": "jsonrpc_handshake",
+    "file": "codex-rs/app-server/src/message_processor.rs",
+    "file_contains_all": [
+      "send_initialize_notifications_to_connection"
+    ]
+  },
+  {
+    "id": "cli.config-overrides-collector",
+    "kind": "cli_contract",
+    "file": "codex-rs/utils/cli/src/config_override.rs",
+    "file_contains_all": [
+      "pub fn collect_config_overrides",
+      "localize_config_arg(command).try_get_matches_from(args)?",
+      "std::iter::successors(Some(&matches)",
+      "scope.get_many::<String>(\"raw_overrides\")",
+      ".mut_arg(\"raw_overrides\", |arg| arg.global(false))",
+      ".mut_subcommands(localize_config_arg)"
+    ]
+  },
+  {
+    "id": "responses.policy-capacity-unavailable",
+    "kind": "error_class",
+    "file": "codex-rs/codex-api/src/sse/responses_error.rs",
+    "file_contains_all": [
+      "policy_capacity_unavailable",
+      "ApiError::PolicyCapacityUnavailable"
+    ]
+  },
+  {
+    "id": "responses.safety-metadata-events",
+    "kind": "event_group",
+    "file": "codex-rs/codex-api/src/sse/responses.rs",
+    "file_contains_all": [
+      "pub(crate) fn metadata_events(",
+      "safety_buffering.map(ResponseEvent::SafetyBuffering)"
     ]
   },
 ];
@@ -3216,6 +3292,12 @@ function runSelfTest() {
     "models.provider-transient-refresh-retains-snapshot",
     "context.incremental-model-instructions",
     "cli.config-overrides-across-scopes",
+    "responses.policy-capacity-unavailable",
+    "responses.safety-metadata-events",
+    "websocket.responses-path-constant",
+    "websocket.connector-route-auth",
+    "app-server.connection-startup-notifications",
+    "cli.config-overrides-collector",
     "compact.failed-attempt-history-isolation",
     "compact.background-closed-receiver",
     "resume.compressed-rollout-resolution",

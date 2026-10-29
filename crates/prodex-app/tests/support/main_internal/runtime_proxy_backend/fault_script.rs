@@ -136,6 +136,20 @@ impl RuntimeProxyBackendFaultStep {
         step
     }
 
+    pub(crate) fn policy_capacity_503(
+        route: RuntimeProxyBackendFaultRoute,
+        account_id: &str,
+    ) -> Self {
+        let mut step = Self::invalid_request(route, account_id);
+        step.status_line = "HTTP/1.1 503 Service Unavailable";
+        step.body = serde_json::json!({"error": {
+            "code": "policy_capacity_unavailable",
+            "message": "This model is disabled."
+        }})
+        .to_string();
+        step
+    }
+
     pub(crate) fn sse_quota(route: RuntimeProxyBackendFaultRoute, account_id: &str) -> Self {
         Self {
             route,
