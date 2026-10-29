@@ -1,5 +1,8 @@
 use super::*;
 
+#[path = "guardian.rs"]
+mod guardian;
+
 #[test]
 fn runtime_proxy_websocket_owner_retry_survives_expired_budget_after_reuse_watchdog() {
     let _test_guard = crate::acquire_test_runtime_lock();

@@ -169,10 +169,22 @@ pub(crate) fn proxy_runtime_responses_request(
         request_turn_state.as_deref(),
         bound_profile.as_deref(),
     )?;
+    let guardian_parent_profile = if previous_response_id.is_none() && request_turn_state.is_none()
+    {
+        std::str::from_utf8(&request.body)
+            .ok()
+            .and_then(|body| runtime_guardian_parent_response_id(&request, body))
+            .map(|id| runtime_response_bound_profile(shared, &id, RuntimeRouteKind::Responses))
+            .transpose()?
+            .flatten()
+    } else {
+        None
+    };
     let mut affinity_state = RuntimeResponsesAffinityState::new(
         bound_profile,
         trusted_previous_response_affinity,
         turn_state_profile,
+        guardian_parent_profile,
     );
     affinity_state.refresh_route_affinity(RuntimeResponsesRefreshRouteAffinityInput {
         shared,

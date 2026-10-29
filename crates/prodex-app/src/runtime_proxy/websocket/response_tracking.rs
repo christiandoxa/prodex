@@ -46,6 +46,8 @@ pub(crate) fn attempt_runtime_websocket_request_with_hard_affinity(
         promote_committed_profile,
     } = attempt;
     let request_model_name = runtime_smart_context_model_name_from_body(request_text.as_bytes());
+    let guardian_parent_pin = runtime_guardian_parent_response_id(handshake_request, request_text)
+        .and_then(|id| runtime_proxy_guardian_pin(shared, profile_name, &id));
     let request_turn_id = runtime_proxy_crate::runtime_request_turn_id(handshake_request);
     let request_thread_id = runtime_proxy_crate::runtime_request_thread_id(handshake_request);
     let compaction_generation =
@@ -75,6 +77,7 @@ pub(crate) fn attempt_runtime_websocket_request_with_hard_affinity(
             request_previous_response_id,
             request_session_id,
             request_turn_state,
+            guardian_parent_pin: guardian_parent_pin.as_ref(),
             shared,
             websocket_session,
             profile_name,
@@ -476,9 +479,16 @@ impl RuntimeWebsocketResponseLoop<'_> {
     }
 
     fn commit(&mut self, log_event: &'static str) -> Result<()> {
+        // Register routing pins before forwarding the buffered response IDs.
         for frame in &self.buffered_precommit_text_frames {
             self.committed_response_ids
                 .extend(frame.response_ids.iter().cloned());
+            runtime_proxy_remember_guardian_pins(
+                self.shared,
+                self.profile_name,
+                &frame.response_ids,
+                self.websocket_session.routing_pin.as_ref(),
+            );
         }
         self.websocket_session
             .remember_response_transport_generation(
@@ -516,6 +526,12 @@ impl RuntimeWebsocketResponseLoop<'_> {
             .then(|| runtime_proxy_crate::runtime_generation_elapsed_ms(self.generation_started_at))
             .flatten();
         if plan.record_response_ids {
+            runtime_proxy_remember_guardian_pins(
+                self.shared,
+                self.profile_name,
+                &inspected.response_ids,
+                self.websocket_session.routing_pin.as_ref(),
+            );
             self.committed_response_ids
                 .extend(inspected.response_ids.iter().cloned());
             self.websocket_session

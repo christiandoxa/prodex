@@ -176,6 +176,9 @@ impl<'a> RuntimeWebsocketTextMessageFlow<'a> {
         profile_name: &str,
         has_context_constraint: bool,
     ) -> Result<bool> {
+        if self.guardian_parent_profile.is_some() {
+            return Ok(false);
+        }
         let mut excluded_profiles = self.excluded_profiles.clone();
         excluded_profiles.insert(profile_name.to_string());
         let route_eligible_fallback = runtime_has_route_eligible_quota_fallback_for_model(

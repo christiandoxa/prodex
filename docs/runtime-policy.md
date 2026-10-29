@@ -653,6 +653,14 @@ fork, archive, restore, compaction, and model/effort semantics remain
 upstream-owned; Prodex only supplies profile affinity, provider routing, and
 shared-state integration around those operations.
 
+For Guardian reviewer requests with a known parent response and no stronger
+continuation binding, Prodex selects the parent's profile for HTTP and
+WebSocket. A successful secure ChatGPT WebSocket handshake can also supply a
+private routing-cookie snapshot for that response. Reviewer handshakes use the
+snapshot only for the same profile, secure origin, and endpoint path. Snapshots
+are held in memory, expire with their cookies, and are bounded to 256 recent
+responses per process; after eviction or restart, normal cookie relay applies.
+
 ## Runtime Proxy Contract
 
 `runtime_proxy` tuning must preserve these invariants:
@@ -684,7 +692,9 @@ shared-state integration around those operations.
 - An explicit `rate_limit_exceeded` response uses its bounded `Retry-After` signal and remains
   distinct from provider overload. Generic 429 responses pass through unless their structured
   payload proves a retry or quota class; 503 remains overload/service availability, never proof
-  that an account bucket is empty. Hard-affinity and post-commit responses are not replayed.
+  that an account bucket is empty. A 503 with the top-level error code
+  `policy_capacity_unavailable` passes through for Codex to handle. Hard-affinity and
+  post-commit responses are not replayed.
 - Fresh requests that exhaust a sweep on retryable upstream overload wait for endpoint
   backoff or an observed profile-readiness/inflight-release notification, then recheck
   eligibility under the bounded recovery budget. A projected cooldown is not an

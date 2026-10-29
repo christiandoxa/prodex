@@ -54,6 +54,25 @@ fn direct_current_profile_fallback_requires_fresh_request_context() {
 }
 
 #[test]
+fn guardian_parent_owner_blocks_fresh_fallback_and_load_gate() {
+    let _guard = acquire_test_runtime_lock();
+    let shared = capacity_ready_shared("guardian-parent-load");
+    shared.lane_admission.set_profile_inflight("main", 2);
+    let (mut local_socket, _client_socket) = test_runtime_local_websocket_pair();
+    let mut websocket_session = RuntimeWebsocketSessionState::default();
+    let mut flow = test_runtime_websocket_flow(&mut local_socket, &shared, &mut websocket_session);
+    flow.guardian_parent_profile = Some("main".to_owned());
+    assert!(flow.has_continuation_priority());
+    assert!(flow.candidate_has_hard_affinity("main"));
+    assert!(!flow.allows_direct_current_profile_fallback());
+    assert!(
+        !flow
+            .candidate_inflight_saturated("main", &mut Instant::now())
+            .unwrap()
+    );
+}
+
+#[test]
 fn pending_websocket_reuse_retry_bypasses_expired_budget_once() {
     let _guard = acquire_test_runtime_lock();
     let shared = test_runtime_shared("loop-reuse-retry-budget");

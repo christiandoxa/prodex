@@ -10,10 +10,16 @@ use std::fmt;
 use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+mod routing_pin;
+pub use routing_pin::{
+    RuntimeProxyRoutingPin, remember_runtime_guardian_pins, runtime_guardian_pin,
+};
+
 const RUNTIME_PROXY_COOKIE_MAX_HOSTS: usize = 128;
 const RUNTIME_PROXY_COOKIE_MAX_PER_HOST: usize = 32;
 const RUNTIME_PROXY_COOKIE_MAX_NAME_BYTES: usize = 128;
 const RUNTIME_PROXY_COOKIE_MAX_VALUE_BYTES: usize = 4096;
+const RUNTIME_PROXY_ROUTING_COOKIE_MAX_VALUE_BYTES: usize = 8192;
 const RUNTIME_PROXY_COOKIE_MAX_PATH_BYTES: usize = 512;
 
 #[derive(Debug, Clone, Eq, Ord, PartialEq, PartialOrd)]
@@ -311,10 +317,18 @@ impl RuntimeProxyCookieChange {
 
         let mut parts = header.split(';');
         let first = parts.next()?.trim();
+        let max_value_bytes = if first
+            .split_once('=')
+            .is_some_and(|(name, _)| matches!(name.trim(), "__oailb" | "__cflb"))
+        {
+            RUNTIME_PROXY_ROUTING_COOKIE_MAX_VALUE_BYTES
+        } else {
+            RUNTIME_PROXY_COOKIE_MAX_VALUE_BYTES
+        };
         let pair = prodex_mojo_core::runtime_cookie_policy::set_cookie_pair(
             first,
             RUNTIME_PROXY_COOKIE_MAX_NAME_BYTES,
-            RUNTIME_PROXY_COOKIE_MAX_VALUE_BYTES,
+            max_value_bytes,
         )
         .expect("Mojo Set-Cookie pair policy returned invalid output")?;
         let name = &first[pair.name];

@@ -54,9 +54,15 @@ fn websocket_upstream_handshake_rejection_preserves_available_details() {
         body: Vec::new(),
     };
 
-    let result =
-        connect_runtime_proxy_upstream_websocket(36, &handshake_request, &shared, "main", None)
-            .expect("upstream HTTP rejection should remain a proxy result");
+    let result = connect_runtime_proxy_upstream_websocket(
+        36,
+        &handshake_request,
+        &shared,
+        "main",
+        None,
+        None,
+    )
+    .expect("upstream HTTP rejection should remain a proxy result");
 
     assert!(
         matches!(

@@ -4,6 +4,32 @@ fn runtime_proxy_cookie_namespace(shared: &RuntimeRotationProxyShared) -> String
     shared.log_path.display().to_string()
 }
 
+pub(crate) fn runtime_proxy_remember_guardian_pins(
+    shared: &RuntimeRotationProxyShared,
+    profile: &str,
+    response_ids: &[String],
+    pin: Option<&std::sync::Arc<prodex_runtime_cookies::RuntimeProxyRoutingPin>>,
+) {
+    prodex_runtime_cookies::remember_runtime_guardian_pins(
+        &runtime_proxy_cookie_namespace(shared),
+        profile,
+        response_ids,
+        pin,
+    );
+}
+
+pub(crate) fn runtime_proxy_guardian_pin(
+    shared: &RuntimeRotationProxyShared,
+    profile: &str,
+    response_id: &str,
+) -> Option<std::sync::Arc<prodex_runtime_cookies::RuntimeProxyRoutingPin>> {
+    prodex_runtime_cookies::runtime_guardian_pin(
+        &runtime_proxy_cookie_namespace(shared),
+        profile,
+        response_id,
+    )
+}
+
 pub(crate) fn runtime_proxy_cookie_header_for_reqwest(
     shared: &RuntimeRotationProxyShared,
     profile_name: &str,

@@ -244,7 +244,9 @@ impl<'a> RuntimeWebsocketTextMessageFlow<'a> {
         // opaque previous-response/turn-state and compact owners stay pinned.
         let has_hard_recovery_owner = crate::runtime_proxy_has_continuation_priority(
             self.previous_response_id.as_deref(),
-            self.pinned_profile.as_deref(),
+            self.pinned_profile
+                .as_deref()
+                .or(self.guardian_parent_profile.as_deref()),
             self.request_turn_state.as_deref(),
             self.turn_state_profile.as_deref(),
             self.compact_followup_profile
@@ -429,7 +431,8 @@ impl<'a> RuntimeWebsocketTextMessageFlow<'a> {
             wait_affinity_owner: crate::runtime_wait_affinity_owner(
                 self.compact_followup_profile
                     .as_ref()
-                    .map(|(profile, _)| profile.as_str()),
+                    .map(|(profile, _)| profile.as_str())
+                    .or(self.guardian_parent_profile.as_deref()),
                 self.pinned_profile.as_deref(),
                 self.turn_state_profile.as_deref(),
                 None,
@@ -516,6 +519,9 @@ impl<'a> RuntimeWebsocketTextMessageFlow<'a> {
     }
 
     pub(super) fn allows_direct_current_profile_fallback(&self) -> bool {
+        if self.guardian_parent_profile.is_some() {
+            return false;
+        }
         runtime_proxy_allows_direct_current_profile_fallback(
             self.previous_response_id.as_deref(),
             self.pinned_profile.as_deref(),
