@@ -2,6 +2,13 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.166.0 - 2026-10-30
+
+### Misc
+
+- Preserve Guardian parent routing affinity (`203a622`)
+- Accommodate Codex 0.166.0 policy responses (`1831d9f`)
+
 ## 0.165.1 - 2026-10-28
 
 ### Runtime
@@ -11,61 +18,6 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 ### Misc
 
 - Expose bounded controls for upgraded local sockets (`1b3037e`)
-# Prodex 0.165.1
-
-This patch release fixes local Responses WebSocket capacity exhaustion and
-connection-bound interruption handling. The qualified Codex baseline remains
-0.165.0; previous login, catalog, quota and continuation protections are retained.
-
-## New Features
-
-No new provider or model features are introduced in this patch. It retains the
-Codex 0.165.0 compatibility baseline while improving existing WebSocket behavior.
-
-## Bug Fixes
-
-- Park idle local WebSockets in a bounded cache instead of holding an inference
-  worker and active-request permit for the entire connection lifetime. Parser
-  fragments, cached upstream sockets and continuation ownership stay together.
-- Expire abandoned queued handshakes independently of busy inference workers.
-  Keep original request deadlines and separate bounded handshake execution
-  from inference; local pressure does not exhaust or penalize account quota.
-- Handle `response.interrupt` on the original response connection rather than
-  sending it through model selection, retry or rotation as a new inference.
-  Forward live steering/cancellation while streaming, preserve real interrupt
-  acknowledgements in either completion order, and retain queued follow-up frames.
-- Reject an interruption whose owning transport is gone without sending it as
-  the first event on a new upstream socket. Never turn it into a fabricated
-  `response.create`, acknowledge it locally, or replay output already committed.
-
-- Serialize release provenance verification against the shared Sigstore trust
-  cache. Every asset must still pass the original source/workflow/signature
-  requirements; empty asset directories and any failed verification block release.
-
-- Move native macOS CI and release build hosts to supported `macos-15`; retain
-  Apple Silicon and Intel/Rosetta targets and every native smoke requirement.
-
-## Verification
-
-Regression coverage includes worker saturation from idle connections, incomplete
-WebSocket frames, bounded idle-cache eviction, independently reclaimed queue
-capacity, original deadlines, active and late interruptions, transport ownership,
-and unchanged output/acknowledgement payloads. Tests use synthetic accounts and
-loopback peers, not live cloud inference or user credentials. Publication requires
-exact-source CI, six-platform production builds, artifact smoke tests, checksums,
-malware scanning and signed build provenance.
-
-## Upgrade
-
-Install the new standalone binary and start a new Prodex runtime to activate the
-fixes. Downloading or replacing a binary does not patch an already-running
-process. User sessions, credentials, goals and profile state are not migrated by
-this release. For installations still using the older 0.439.x numbering, use the
-verified installer with an explicit `0.165.1` release selection.
-
-## Changelog
-
-Full Changelog: [0.165.0...0.165.1](https://github.com/christiandoxa/prodex/compare/0.165.0...0.165.1)
 
 ## 0.165.0 - 2026-10-28
 
