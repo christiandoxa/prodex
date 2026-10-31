@@ -2,6 +2,58 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.166.2 - 2026-10-31
+
+### Misc
+
+- Preserve native root session ownership (`9328dfc`)
+# Prodex 0.166.2
+
+This release fixes native multi-agent session resume and saved-session identity.
+It preserves the automatic Super optional-tool stack and Presidio consent prompt.
+
+## New Features
+
+- Local interactive `prodex s <uuid>` recognizes parent-owned native V2 workers
+  and resumes their verified root conversation before selecting provider/model
+  settings. Native `/resume` remains the conversation picker.
+
+## Bug Fixes
+
+- Resolve the first legacy child notification to its root instead of publishing
+  a worker UUID as the saved conversation. Later child notifications cannot
+  redirect another root or consume its unread recovery cursor.
+- Resolve old child markers in exit guidance without changing rollout metadata,
+  ancestry, instructions, attachments, or goal state.
+- Read only initial metadata and plain-file length when creating recovery
+  markers, avoiding full-history scans inside the SessionStart hook deadline.
+- Match compressed `.jsonl.zst` session names using the existing compound-suffix
+  policy, including archived parents.
+
+## Compatibility
+
+Native V2 workers remain parent-owned; the fix does not bypass Codex's child
+loading rules, flatten workers into independent sessions, or copy history.
+Missing, cyclic, ambiguous, or conflicting ancestry fails safely. Explicit
+remote session namespaces, V1 direct resumes, independent forks, and all other
+command arguments retain their existing behavior.
+
+RTK, Codebase Memory MCP, Playwright MCP, and Ponytail remain automatic.
+Presidio still asks for consent on interactive launches unless explicitly set.
+No model inference or user-session mutation is needed for regression validation.
+
+## Verification
+
+Regression coverage includes first-child bootstrap, nested ancestry, old footer
+markers, compound compressed filenames, malformed ancestry, argument preservation,
+and large rollouts. Isolated Codex 0.166.0 tests reproduce the rejected cold child
+and verify root resume through the same native picker API without model requests.
+Publication requires exact-source CI and all six platform/security gates.
+
+## Changelog
+
+Full Changelog: [0.166.1...0.166.2](https://github.com/christiandoxa/prodex/compare/0.166.1...0.166.2)
+
 ## 0.166.1 - 2026-10-31
 
 ### Docs
@@ -12,73 +64,6 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 
 - Qualify tunnel-client 0.0.19 and isolate stdio policy (`d423fe2`)
 - Retire Caveman and harden automatic launch (`eb15764`)
-# Prodex 0.166.1
-
-This release removes the Caveman integration while preserving the automatic
-Super workflow and the existing Presidio consent prompt. Codex remains a
-separate installation.
-
-## New Features
-
-- Refresh the five-tool release-qualified inventory and installation examples.
-- Report the health of all four automatic tools in `prodex doctor --install`,
-  including package, shared-daemon, and plugin-tree validation.
-
-## Bug Fixes
-
-- Retire Caveman from discovery, activation, CLI tool selection, remote aliases,
-  and release qualification. Preserve the ABI ids of the remaining tools.
-- Remove only generated legacy Caveman configuration and managed instruction
-  references from temporary overlays; leave user instructions and base homes intact.
-- Validate managed executable confinement before executing version or health
-  probes. Reject an escaping symlink without executing its target.
-- Apply the same Node.js 18+ validation to ordinary Playwright launch and full
-  health checks, before probing the installed MCP package.
-- Qualify official tunnel-client 0.0.19 and isolate its new stdio failure-policy
-  environment setting from the HTTP tunnel. Keep the 0.0.13 runtime minimum and
-  existing static-key isolation; qualification uses only synthetic loopback probes.
-- Refresh the Kiro CLI release fixture to verified stable 2.37.0 without changing
-  installed user clients, native routing, or the stable-version freshness gate.
-
-## Compatibility
-
-`prodex s` and `prodex super` continue to select RTK, Codebase Memory MCP,
-Playwright MCP, and Ponytail automatically when installed and compatible.
-Presidio retains its interactive prompt and explicit enable/disable flags.
-
-| Tool | Release-qualified reference |
-| --- | --- |
-| RTK | 1.1.0 |
-| Codebase Memory MCP | 0.12.1 |
-| Playwright MCP | 0.0.83 |
-| Ponytail | 5.3.3 |
-| Presidio | 2.2.366 |
-
-Compatible minimum versions remain supported. Normal launches do not download,
-upgrade, or replace external tools. This release does not add TokenEconomizer
-or change provider routing.
-
-## Verification
-
-Local validation covers the full preflight, workspace compilation and Clippy,
-retired-tool rejection, exact automatic selection, Presidio preferences,
-pre-probe confinement, Node version gates, and non-destructive overlay cleanup.
-Isolated smoke checks cover a real headless browser, the Codebase Memory MCP
-bridge, RTK exit propagation, Ponytail startup/resume/sub-agent hooks, and
-synthetic Presidio email redaction. No live model inference is required.
-Publication requires the exact-SHA CI gate, all six platform builds, checksums,
-malware scanning, provenance, and signing.
-
-## Upgrade
-
-Start a new Prodex runtime after upgrading. Existing expose endpoints must
-restart to refresh their snapshotted tool inventory. Externally installed
-Caveman files are not uninstalled or modified; the new Prodex runtime no longer
-loads that integration.
-
-## Changelog
-
-Full Changelog: [0.166.0...0.166.1](https://github.com/christiandoxa/prodex/compare/0.166.0...0.166.1)
 
 ## 0.166.0 - 2026-10-30
 
