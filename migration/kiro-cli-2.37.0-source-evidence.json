@@ -1,0 +1,48 @@
+{
+  "schema_version": 1,
+  "version": "2.37.0",
+  "qualified_at": "2026-10-31T03:39:59.794280+00:00",
+  "manifest_url": "https://prod.download.cli.kiro.dev/stable/latest/manifest.json",
+  "manifest_snapshot_sha256": "517675df07ca7ae14ef5fba458b86f97818b767756b0b081838955673cd2a6bf",
+  "manifest_snapshot_format": "Raw official manifest response bytes, fetched with Cache-Control: no-cache.",
+  "archive_url": "https://prod.download.cli.kiro.dev/stable/2.37.0/kirocli-x86_64-linux.tar.gz",
+  "archive_sha256": "02c49873ba64285f34048aac377ccf0b546b5627f39dd775bae9fa306112ff19",
+  "archive_size": 167257373,
+  "qualification_scope": "Actual Linux launcher/chat versions, chat and ACP help in isolated HOME/KIRO_HOME/KIRO_DATA_DIR. No inference, login, installer execution or user-installation changes. Foreign platform execution is not claimed.",
+  "probes": [
+    {
+      "binary": "kiro-cli",
+      "arguments": [
+        "--version"
+      ],
+      "exit_code": 0
+    },
+    {
+      "binary": "kiro-cli-chat",
+      "arguments": [
+        "--version"
+      ],
+      "exit_code": 0
+    },
+    {
+      "binary": "kiro-cli-chat",
+      "arguments": [
+        "chat",
+        "--help"
+      ],
+      "exit_code": 0
+    },
+    {
+      "binary": "kiro-cli-chat",
+      "arguments": [
+        "acp",
+        "--help"
+      ],
+      "exit_code": 0
+    }
+  ],
+  "required_chat_flag": "--model",
+  "required_binary_marker": "KIRO_DATA_DIR",
+  "installer_sha256": "d8dd659c11c156002942f09443b6cb7904959004d4e7f1f73777fdbb2d909b54",
+  "freshness_reason": "The official stable download manifest advanced after 2.35.2 qualification. Keep the exact stable-version release gate enforced and qualify 2.37.0 before publication."
+}
