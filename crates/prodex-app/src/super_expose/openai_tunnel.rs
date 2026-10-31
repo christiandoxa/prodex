@@ -12,7 +12,7 @@ use std::time::{Duration, Instant};
 use zeroize::Zeroizing;
 
 const OPENAI_TUNNEL_CLIENT_MINIMUM_VERSION: &str = "0.0.13";
-const OPENAI_TUNNEL_CLIENT_LATEST_STABLE_REFERENCE: &str = "0.0.18";
+const OPENAI_TUNNEL_CLIENT_LATEST_STABLE_REFERENCE: &str = "0.0.19";
 const OPENAI_TUNNEL_CLIENT_RELEASE_URL: &str =
     "https://github.com/openai/tunnel-client/releases/latest";
 const OPENAI_TUNNEL_CLIENT_READY_TIMEOUT: Duration = if cfg!(all(test, windows)) {
@@ -339,6 +339,8 @@ fn remove_inherited_tunnel_configuration(command: &mut Command) {
         "CONTROL_PLANE_POLL_CHANNELS",
         "MCP_SERVER_URL",
         "MCP_COMMAND",
+        // This wrapper selects HTTP; unrelated stdio policies must not affect it.
+        "MCP_STDIO_FAILURE_POLICY",
         "HEALTH_LISTEN_ADDR",
         "HEALTH_UNIX_SOCKET",
         "HEALTH_URL_FILE",
@@ -603,8 +605,12 @@ mod version_policy_tests {
                 "0.0.18",
             ),
             (
-                "0.0.19+1111111111111111111111111111111111111111 (git sha: 1111111111111111111111111111111111111111)",
+                "0.0.19+01d67bb4da0d8359b808b4761f8db171ab682cd7 (git sha: 01d67bb4da0d8359b808b4761f8db171ab682cd7)",
                 "0.0.19",
+            ),
+            (
+                "0.0.20+1111111111111111111111111111111111111111 (git sha: 1111111111111111111111111111111111111111)",
+                "0.0.20",
             ),
         ] {
             assert_eq!(
@@ -643,6 +649,26 @@ mod version_policy_tests {
             overrides.get(std::ffi::OsStr::new("PATH")),
             Some(&Some(std::ffi::OsStr::new("synthetic-search-path"))),
             "identity isolation must not clear unrelated process configuration",
+        );
+    }
+
+    #[test]
+    fn http_tunnel_child_does_not_inherit_stdio_failure_policy() {
+        let mut command = Command::new("tunnel-client-not-launched");
+        command.env("MCP_STDIO_FAILURE_POLICY", "unrelated-stdio-policy");
+        command.env("PATH", "synthetic-search-path");
+        remove_inherited_tunnel_configuration(&mut command);
+        let overrides = command
+            .get_envs()
+            .collect::<std::collections::BTreeMap<_, _>>();
+        assert_eq!(
+            overrides.get(std::ffi::OsStr::new("MCP_STDIO_FAILURE_POLICY")),
+            Some(&None),
+            "the HTTP tunnel must not inherit another client's stdio recovery policy",
+        );
+        assert_eq!(
+            overrides.get(std::ffi::OsStr::new("PATH")),
+            Some(&Some(std::ffi::OsStr::new("synthetic-search-path"))),
         );
     }
 
