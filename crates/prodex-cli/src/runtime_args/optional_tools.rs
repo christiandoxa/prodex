@@ -201,7 +201,6 @@ impl RuntimeToolArgs {
                 break;
             };
             let tool = match prefix {
-                "caveman" => OptionalToolId::Caveman,
                 "rtk" => OptionalToolId::Rtk,
                 "playwright" => OptionalToolId::PlaywrightMcp,
                 "ponytail" => OptionalToolId::Ponytail,

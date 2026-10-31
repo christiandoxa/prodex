@@ -1,12 +1,11 @@
-use crate::caveman::caveman_tool_status;
 use crate::discovery::{
     managed_optimizer_command_candidates, managed_optimizer_roots, path_dirs_from_env,
 };
 use anyhow::{Context, Result};
 use prodex_mojo_core::optional_tools_policy::{
-    CAP_BROWSER_AUTOMATION, CAP_CLAUDE, CAP_CODEX, CAP_REDACTION, CAP_SHELL_COMPRESSION,
-    CAP_SIMPLICITY_REVIEW, CAP_STRUCTURAL_NAVIGATION, OptionalToolPolicyId, OptionalToolPolicyKind,
-    optional_tool_class, optional_tool_descriptor_policy, optional_tool_hex_encode,
+    CAP_BROWSER_AUTOMATION, CAP_REDACTION, CAP_SHELL_COMPRESSION, CAP_SIMPLICITY_REVIEW,
+    CAP_STRUCTURAL_NAVIGATION, OptionalToolPolicyId, OptionalToolPolicyKind, optional_tool_class,
+    optional_tool_descriptor_policy, optional_tool_hex_encode,
 };
 use prodex_mojo_core::rich::ascii_casefold_contains;
 use sha2::{Digest, Sha256};
@@ -58,7 +57,6 @@ fn probe_version_line(program: &Path, args: &[&str]) -> Result<String> {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum OptionalToolId {
-    Caveman,
     Rtk,
     CodebaseMemoryMcp,
     PlaywrightMcp,
@@ -67,8 +65,7 @@ pub enum OptionalToolId {
 }
 
 impl OptionalToolId {
-    pub const ALL: [Self; 6] = [
-        Self::Caveman,
+    pub const ALL: [Self; 5] = [
         Self::Rtk,
         Self::CodebaseMemoryMcp,
         Self::PlaywrightMcp,
@@ -78,7 +75,6 @@ impl OptionalToolId {
 
     pub const fn as_str(self) -> &'static str {
         match self {
-            Self::Caveman => "caveman",
             Self::Rtk => "rtk",
             Self::CodebaseMemoryMcp => "codebase-memory-mcp",
             Self::PlaywrightMcp => "playwright-mcp",
@@ -115,8 +111,6 @@ pub enum ToolKind {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum ToolCapability {
-    Codex,
-    Claude,
     ShellCompression,
     StructuralNavigation,
     BrowserAutomation,
@@ -133,7 +127,6 @@ pub struct ToolDescriptor {
 
 fn optional_tool_policy_id(id: OptionalToolId) -> OptionalToolPolicyId {
     match id {
-        OptionalToolId::Caveman => OptionalToolPolicyId::Caveman,
         OptionalToolId::Rtk => OptionalToolPolicyId::Rtk,
         OptionalToolId::CodebaseMemoryMcp => OptionalToolPolicyId::CodebaseMemoryMcp,
         OptionalToolId::PlaywrightMcp => OptionalToolPolicyId::PlaywrightMcp,
@@ -144,7 +137,6 @@ fn optional_tool_policy_id(id: OptionalToolId) -> OptionalToolPolicyId {
 
 fn optional_tool_id_from_policy(id: OptionalToolPolicyId) -> OptionalToolId {
     match id {
-        OptionalToolPolicyId::Caveman => OptionalToolId::Caveman,
         OptionalToolPolicyId::Rtk => OptionalToolId::Rtk,
         OptionalToolPolicyId::CodebaseMemoryMcp => OptionalToolId::CodebaseMemoryMcp,
         OptionalToolPolicyId::PlaywrightMcp => OptionalToolId::PlaywrightMcp,
@@ -164,7 +156,6 @@ fn optional_tool_kind_from_policy(kind: OptionalToolPolicyKind) -> ToolKind {
 
 fn optional_tool_capabilities_from_mask(mask: u64) -> &'static [ToolCapability] {
     match mask {
-        mask if mask == CAP_CODEX | CAP_CLAUDE => &[ToolCapability::Codex, ToolCapability::Claude],
         CAP_SHELL_COMPRESSION => &[ToolCapability::ShellCompression],
         CAP_STRUCTURAL_NAVIGATION => &[ToolCapability::StructuralNavigation],
         CAP_BROWSER_AUTOMATION => &[ToolCapability::BrowserAutomation],
@@ -312,17 +303,6 @@ pub fn resolve_optional_tools(
     let mut plan = ToolActivationPlan::default();
     for id in selected.iter() {
         let started = Instant::now();
-        if id == OptionalToolId::Caveman {
-            match crate::resolve_caveman() {
-                Ok(tool) => plan.activations.push(ToolActivation {
-                    tool,
-                    required: required.contains(id),
-                }),
-                Err(_) => plan.unavailable.push(caveman_tool_status()),
-            }
-            emit_optional_tool_timing(id, started);
-            continue;
-        }
         let health = optional_tool_status(id);
         if health.status == ToolHealthStatus::Installed {
             plan.activations.push(ToolActivation {
@@ -356,7 +336,6 @@ fn emit_optional_tool_timing(id: OptionalToolId, started: Instant) {
 
 pub fn optional_tool_status(id: OptionalToolId) -> ToolHealth {
     match id {
-        OptionalToolId::Caveman => caveman_tool_status(),
         OptionalToolId::Rtk => command_tool_status(id, "rtk"),
         OptionalToolId::CodebaseMemoryMcp => command_tool_status(id, "codebase-memory-mcp"),
         OptionalToolId::PlaywrightMcp => playwright_tool_status(),
@@ -504,23 +483,28 @@ fn resolved_managed_command(
     path: PathBuf,
     args: &[&str],
 ) -> Result<ResolvedTool> {
-    let root_metadata = fs::symlink_metadata(root)
+    let program = validated_managed_tool_file(root, &path)?;
+    resolved_command_tool(id, program, ToolDiscoverySource::ManagedRoot, args)
+}
+
+// Confinement is checked before executing version/health probes. A rejected
+// symlink must never run code outside the managed installation root.
+fn validated_managed_tool_file(root: &Path, path: &Path) -> Result<PathBuf> {
+    let metadata = fs::symlink_metadata(root)
         .with_context(|| format!("failed to inspect {}", root.display()))?;
     anyhow::ensure!(
-        root_metadata.is_dir() && !root_metadata.file_type().is_symlink(),
+        metadata.is_dir() && !metadata.file_type().is_symlink(),
         "optional-tool root {} must be a real directory",
         root.display()
     );
     let root = root.canonicalize()?;
-    let tool = resolved_command_tool(id, path, ToolDiscoverySource::ManagedRoot, args)?;
+    let program = validated_tool_file(path)?;
     anyhow::ensure!(
-        tool.path
-            .as_deref()
-            .is_some_and(|path| path.starts_with(&root)),
+        program.starts_with(&root) && program != root,
         "managed optional-tool command escapes {}",
         root.display()
     );
-    Ok(tool)
+    Ok(program)
 }
 
 fn resolved_command_tool(

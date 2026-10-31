@@ -1,11 +1,9 @@
 use super::*;
 
 #[test]
-fn manifest_header_and_version_diagnostics_preserve_both_tool_contracts() {
-    for (kind, name, id) in [
-        (OptionalToolPolicyId::Caveman, "Caveman", "caveman"),
-        (OptionalToolPolicyId::Ponytail, "Ponytail", "ponytail"),
-    ] {
+fn manifest_header_and_version_diagnostics_preserve_managed_plugin_contract() {
+    {
+        let (kind, name, id) = (OptionalToolPolicyId::Ponytail, "Ponytail", "ponytail");
         assert_eq!(optional_tool_manifest_header_error(kind, 1, id), Ok(None));
         assert_eq!(
             optional_tool_manifest_header_error(kind, 0, "wrong"),
@@ -62,10 +60,8 @@ fn manifest_identity_preserves_first_issue_and_ascii_digest_rules() {
         commit: &commit,
         tree_sha256: &digest,
     };
-    for (kind, name) in [
-        (OptionalToolPolicyId::Caveman, "Caveman"),
-        (OptionalToolPolicyId::Ponytail, "Ponytail"),
-    ] {
+    {
+        let (kind, name) = (OptionalToolPolicyId::Ponytail, "Ponytail");
         assert_eq!(optional_tool_manifest_identity_error(kind, input), Ok(None));
         for (invalid, expected) in [
             (
@@ -147,15 +143,8 @@ fn manifest_content_preserves_release_precedence_and_compatibility_rules() {
         commit: "previous-commit",
         tree_sha256: "previous-tree",
     };
-    let legacy = OptionalToolReleaseIdentity {
-        version: "7.0.0",
-        commit: "legacy-commit",
-        tree_sha256: "legacy-tree",
-    };
-    for (kind, name, legacy_identity) in [
-        (OptionalToolPolicyId::Caveman, "Caveman", Some(legacy)),
-        (OptionalToolPolicyId::Ponytail, "Ponytail", None),
-    ] {
+    {
+        let (kind, name, legacy_identity) = (OptionalToolPolicyId::Ponytail, "Ponytail", None);
         let input = OptionalToolManifestContent {
             version: latest.version,
             commit: latest.commit,
@@ -227,11 +216,7 @@ fn manifest_content_preserves_release_precedence_and_compatibility_rules() {
             ..input
         };
         assert_eq!(optional_tool_manifest_content_error(kind, prior), Ok(None));
-        let previous_error = if kind == OptionalToolPolicyId::Caveman {
-            "previously release-qualified Caveman 3.2.0 identity or content changed"
-        } else {
-            "Ponytail previous-stable metadata does not match release-qualified compatibility metadata"
-        };
+        let previous_error = "Ponytail previous-stable metadata does not match release-qualified compatibility metadata";
         for invalid in [
             OptionalToolManifestContent {
                 commit: "changed",
@@ -252,11 +237,6 @@ fn manifest_content_preserves_release_precedence_and_compatibility_rules() {
                 Ok(Some(previous_error.to_string()))
             );
         }
-        let expected_alias = if kind == OptionalToolPolicyId::Caveman {
-            Some(previous_error.to_string())
-        } else {
-            None
-        };
         assert_eq!(
             optional_tool_manifest_content_error(
                 kind,
@@ -265,54 +245,8 @@ fn manifest_content_preserves_release_precedence_and_compatibility_rules() {
                     ..prior
                 }
             ),
-            Ok(expected_alias)
+            Ok(None)
         );
-        if kind == OptionalToolPolicyId::Caveman {
-            let old = OptionalToolManifestContent {
-                version: legacy.version,
-                commit: legacy.commit,
-                tree_sha256: "vetted-alias",
-                actual_tree_sha256: legacy.tree_sha256,
-                ..input
-            };
-            assert_eq!(optional_tool_manifest_content_error(kind, old), Ok(None));
-            assert_eq!(
-                optional_tool_manifest_content_error(
-                    kind,
-                    OptionalToolManifestContent {
-                        tree_sha256: legacy.tree_sha256,
-                        ..old
-                    }
-                ),
-                Ok(None)
-            );
-            // A failed Caveman legacy exception still allows ordinary digest equality.
-            assert_eq!(
-                optional_tool_manifest_content_error(
-                    kind,
-                    OptionalToolManifestContent {
-                        commit: "changed",
-                        tree_sha256: "self-consistent",
-                        actual_tree_sha256: "self-consistent",
-                        ..old
-                    }
-                ),
-                Ok(None)
-            );
-            assert_eq!(
-                optional_tool_manifest_content_error(
-                    kind,
-                    OptionalToolManifestContent {
-                        commit: "changed",
-                        ..old
-                    }
-                ),
-                Ok(Some(
-                    "Caveman tree digest mismatch: manifest vetted-alias, got legacy-tree"
-                        .to_string()
-                ))
-            );
-        }
     }
 }
 
@@ -326,7 +260,7 @@ fn manifest_content_abi_rejects_reserved_views_and_wrong_tags() {
     };
     let mut output = [77_u8; 32];
     let mut written = 99_i64;
-    for (tool, tag, count) in [(4, 0, 14), (0, 1, 14), (0, 0, 13)] {
+    for (tool, tag, count) in [(4, 0, 14), (4, 1, 14), (4, 0, 13), (0, 0, 14)] {
         assert_eq!(
             unsafe {
                 prodex_optional_tool_install_policy_v1(
@@ -351,7 +285,7 @@ fn manifest_content_abi_rejects_reserved_views_and_wrong_tags() {
 
 #[test]
 fn manifest_abi_rejects_invalid_headers_and_views_without_output_writes() {
-    let id = "caveman";
+    let id = "ponytail";
     let mut fields = [OptionalToolStringView { ptr: 0, len: 0 }; 6];
     fields[0] = OptionalToolStringView {
         ptr: id.as_ptr() as u64,
@@ -360,13 +294,13 @@ fn manifest_abi_rejects_invalid_headers_and_views_without_output_writes() {
     let mut output = [77_u8; 32];
     let mut written = 99_i64;
     for (abi, tool, phase, tag, count, measuring, expected) in [
-        (2, 0, 0, 1, 6, 0, 4),
+        (2, 4, 0, 1, 6, 0, 4),
         (1, 2, 0, 1, 6, 0, 1),
-        (1, 0, 3, 1, 6, 0, 1),
-        (1, 0, 1, 3, 6, 0, 1),
-        (1, 0, 2, 2, 6, 0, 1),
-        (1, 0, 0, 1, 5, 0, 1),
-        (1, 0, 0, 1, 6, 2, 1),
+        (1, 4, 3, 1, 6, 0, 1),
+        (1, 4, 1, 3, 6, 0, 1),
+        (1, 4, 2, 2, 6, 0, 1),
+        (1, 4, 0, 1, 5, 0, 1),
+        (1, 4, 0, 1, 6, 2, 1),
     ] {
         assert_eq!(
             unsafe {
@@ -397,7 +331,7 @@ fn manifest_abi_rejects_invalid_headers_and_views_without_output_writes() {
         unsafe {
             prodex_optional_tool_install_policy_v1(
                 1,
-                0,
+                4,
                 0,
                 1,
                 fields.as_ptr() as u64,

@@ -2,7 +2,7 @@
 
 This guide is for running Prodex against a self-hosted local model instead of the OpenAI/Codex profile pool.
 
-Use this path when you want the Prodex/Codex front end, Caveman/Super mode, and local inference from a server you run yourself.
+Use this path when you want the Prodex/Codex front end, Super mode, and local inference from a server you run yourself.
 
 ## What Prodex Expects
 

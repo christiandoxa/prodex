@@ -68,7 +68,6 @@ function normalizeVersion(value) {
 
 export function runtimeReferenceVersions(source) {
   const constants = new Map([
-    ["caveman", ["CAVEMAN_LATEST_STABLE_REFERENCE", ""]],
     ["rtk", ["RTK_LATEST_STABLE_REFERENCE", ""]],
     ["codebase-memory-mcp", ["CODEBASE_MEMORY_LATEST_STABLE_REFERENCE", ""]],
     ["playwright-mcp", ["PLAYWRIGHT_MCP_LATEST_STABLE_REFERENCE", ""]],
@@ -162,8 +161,8 @@ function validateAudit(audit) {
   if (audit?.schema_version !== FRESHNESS_SCHEMA_VERSION) {
     throw new Error(`optional-tool audit schema must be ${FRESHNESS_SCHEMA_VERSION}`);
   }
-  if (!Array.isArray(audit.tools) || audit.tools.length !== 6) {
-    throw new Error("optional-tool audit must contain six tools");
+  if (!Array.isArray(audit.tools) || audit.tools.length !== 5) {
+    throw new Error("optional-tool audit must contain five tools");
   }
   if (new Set(audit.tools.map((tool) => tool.id)).size !== audit.tools.length) {
     throw new Error("optional-tool audit tool ids must be unique");

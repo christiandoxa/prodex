@@ -52,18 +52,6 @@ fn compiled_optional_alias_plans_preserve_executables_prefixes_and_playwright_sp
             ],
         ),
         (
-            "optional:caveman",
-            OptionalToolId::Caveman,
-            "/synthetic/prodex",
-            &[
-                "super",
-                "--no-sub-agent",
-                "--no-presidio",
-                "--tool",
-                "caveman",
-            ],
-        ),
-        (
             "optional:ponytail",
             OptionalToolId::Ponytail,
             "/synthetic/prodex",
@@ -104,6 +92,12 @@ fn compiled_optional_alias_plans_preserve_executables_prefixes_and_playwright_sp
 #[test]
 fn compiled_optional_alias_preserves_unknown_unavailable_and_missing_path_errors() {
     let context = ExposeOptionalTools::empty_for_tests();
+    assert_eq!(
+        context
+            .resolve_exec("optional:caveman", vec![])
+            .unwrap_err(),
+        "unknown optional-tool exec alias: caveman"
+    );
     assert_eq!(
         context
             .resolve_exec("optional:unknown", vec![])
@@ -160,13 +154,13 @@ fn compiled_optional_alias_boundary_preserves_plain_os_programs() {
 fn compiled_optional_alias_keeps_non_utf8_os_argument_bytes() {
     use std::os::unix::ffi::OsStringExt;
     let context = ExposeOptionalTools::with_tool_for_tests(
-        OptionalToolId::Caveman,
+        OptionalToolId::Ponytail,
         None,
         PathBuf::from("/synthetic/prodex"),
     );
     let argument = OsString::from_vec(vec![255, b'-', b'x']);
     let result = context
-        .resolve_exec("optional:caveman", vec![argument.clone()])
+        .resolve_exec("optional:ponytail", vec![argument.clone()])
         .unwrap();
     assert_eq!(result.args.last(), Some(&argument));
 }

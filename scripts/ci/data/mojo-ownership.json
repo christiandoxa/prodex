@@ -9,6 +9,14 @@
   "minimum_percent": 20,
   "target_percent": 23,
   "release_operation_overrides": {
+    "optional_tool_manifest_tree_compatibility": {
+      "consumer": "crates/prodex-optional-tools/src/optional_tools/ponytail.rs",
+      "production_consumers": [
+        "crates/prodex-optional-tools/src/optional_tools/ponytail.rs"
+      ],
+      "production_reachability_test": "crates/prodex-optional-tools/src/optional_tools/ponytail.rs",
+      "rust_adapter_scope": "Ponytail manifest acquisition and compiled Mojo integrity validation; Caveman integration is retired in 0.166.1, with ABI id 0 reserved"
+    },
     "smart_context_artifact_reference_policy": {
       "mojo_entry": "prodex_smart_context_artifact_projection_v1",
       "mojo_source": "mojo/prodex_core/smart_context_artifact_projection.mojo",

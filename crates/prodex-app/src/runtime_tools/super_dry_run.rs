@@ -98,7 +98,7 @@ pub(crate) fn handle_super_runtime_tools_dry_run(
     print_runtime_launch_dry_run(
         "optional-tools",
         request,
-        RuntimeLaunchDryRunChild::Caveman { codex_args },
+        RuntimeLaunchDryRunChild::Super { codex_args },
         Some(&extra_report),
     )
 }

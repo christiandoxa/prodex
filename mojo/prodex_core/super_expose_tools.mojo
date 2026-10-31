@@ -9,7 +9,7 @@ from rich_text import rich_view_ptr
 from json_sink import JsonSink, js_byte, js_literal, js_string, js_view, js_escaped, js_u64, js_raw
 from optional_tools_policy import (
     optional_tool_class, OPTIONAL_TOOL_RTK, OPTIONAL_TOOL_CODEBASE_MEMORY,
-    OPTIONAL_TOOL_PLAYWRIGHT, OPTIONAL_TOOL_CAVEMAN, OPTIONAL_TOOL_PONYTAIL,
+    OPTIONAL_TOOL_PLAYWRIGHT, OPTIONAL_TOOL_PONYTAIL,
 )
 from super_expose import (
     super_expose_tool, super_expose_tool_is_allowed, SUPER_EXPOSE_TOOL_EXEC,
@@ -225,8 +225,6 @@ def optional_invocation(kind: Int64) -> ProdexRichStringView:
         return pj_literal(StringSlice("program optional:codebase-memory-mcp; one-shot structural navigation is available with args cli --json <tool> ..."))
     if kind == OPTIONAL_TOOL_PLAYWRIGHT:
         return pj_literal(StringSlice("program optional:playwright-mcp starts the validated MCP package via npx; program optional:playwright launches noninteractive Prodex Super with Playwright enabled"))
-    if kind == OPTIONAL_TOOL_CAVEMAN:
-        return pj_literal(StringSlice("program optional:caveman launches noninteractive Prodex Super with the validated Caveman plugin enabled"))
     if kind == OPTIONAL_TOOL_PONYTAIL:
         return pj_literal(StringSlice("program optional:ponytail launches noninteractive Prodex Super with the validated Ponytail plugin enabled"))
     return pj_literal(StringSlice("program optional:presidio launches noninteractive Prodex Super with Presidio enabled; this alias exists only while Analyzer and Anonymizer are healthy"))

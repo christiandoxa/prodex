@@ -38,19 +38,12 @@ pub fn resolve_optional_tools_for_launch(
 
 fn optional_tool_launch_status(id: OptionalToolId) -> ToolHealth {
     match id {
-        OptionalToolId::Caveman => fast_caveman_tool_status(),
         OptionalToolId::Rtk => fast_command_tool_status(id, "rtk"),
         OptionalToolId::CodebaseMemoryMcp => fast_command_tool_status(id, "codebase-memory-mcp"),
-        OptionalToolId::PlaywrightMcp => fast_playwright_tool_status(),
+        OptionalToolId::PlaywrightMcp => playwright_tool_status(),
         OptionalToolId::Ponytail => ponytail_tool_status(),
         OptionalToolId::Presidio => optional_tool_status(id),
     }
-}
-
-fn fast_caveman_tool_status() -> ToolHealth {
-    crate::resolve_caveman()
-        .map(ToolHealth::installed)
-        .unwrap_or_else(|_| crate::caveman::caveman_tool_status())
 }
 
 fn fast_command_tool_status(id: OptionalToolId, command: &str) -> ToolHealth {
@@ -86,47 +79,13 @@ fn fast_command_tool_status(id: OptionalToolId, command: &str) -> ToolHealth {
     )
 }
 
-fn fast_playwright_tool_status() -> ToolHealth {
-    let id = OptionalToolId::PlaywrightMcp;
-    if find_path_command("node").is_none() {
-        return ToolHealth::missing(id, "Node.js 18+ was not found on PATH");
-    }
-    let Some(npx) = find_path_command("npx") else {
-        return ToolHealth::missing(id, "npx was not found on PATH");
-    };
-    match resolved_command_tool(
-        id,
-        npx,
-        ToolDiscoverySource::Path,
-        &PLAYWRIGHT_MCP_PROBE_ARGS,
-    ) {
-        Ok(tool) => ToolHealth::installed(tool),
-        Err(error) => playwright_probe_failure(error),
-    }
-}
-
 fn fast_resolved_managed_command(
     id: OptionalToolId,
     root: &Path,
     path: PathBuf,
 ) -> Result<ResolvedTool> {
-    let root_metadata = fs::symlink_metadata(root)
-        .with_context(|| format!("failed to inspect {}", root.display()))?;
-    anyhow::ensure!(
-        root_metadata.is_dir() && !root_metadata.file_type().is_symlink(),
-        "optional-tool root {} must be a real directory",
-        root.display()
-    );
-    let root = root.canonicalize()?;
-    let tool = resolved_command_tool_for_launch(id, path, ToolDiscoverySource::ManagedRoot)?;
-    anyhow::ensure!(
-        tool.path
-            .as_deref()
-            .is_some_and(|path| path.starts_with(&root)),
-        "managed optional-tool command escapes {}",
-        root.display()
-    );
-    Ok(tool)
+    let program = validated_managed_tool_file(root, &path)?;
+    resolved_command_tool_for_launch(id, program, ToolDiscoverySource::ManagedRoot)
 }
 
 fn fast_resolved_command(
@@ -135,4 +94,102 @@ fn fast_resolved_command(
     source: ToolDiscoverySource,
 ) -> Result<ResolvedTool> {
     resolved_command_tool_for_launch(id, path, source)
+}
+
+#[cfg(all(test, unix))]
+mod managed_probe_tests {
+    use super::*;
+    use std::os::unix::{fs::PermissionsExt, fs::symlink};
+
+    #[test]
+    fn managed_path_escape_is_rejected_before_any_optional_or_required_probe() {
+        let root = crate::tests::temp_dir("managed-preflight");
+        let managed = root.join("managed");
+        fs::create_dir_all(&managed).unwrap();
+        let outside = root.join("outside");
+        fs::write(
+            &outside,
+            "#!/bin/sh\n: > \"$0.executed\"\nprintf 'rtk 1.1.0\\n'\n",
+        )
+        .unwrap();
+        fs::set_permissions(&outside, fs::Permissions::from_mode(0o700)).unwrap();
+        let candidate = managed.join("rtk");
+        symlink(&outside, &candidate).unwrap();
+        let marker = root.join("outside.executed");
+        let required = resolved_managed_command(
+            OptionalToolId::Rtk,
+            &managed,
+            candidate.clone(),
+            &["--version"],
+        );
+        let optional = fast_resolved_managed_command(OptionalToolId::Rtk, &managed, candidate);
+        let executed = marker.exists();
+        fs::remove_dir_all(root).unwrap();
+        assert!(required.unwrap_err().to_string().contains("escapes"));
+        assert!(optional.unwrap_err().to_string().contains("escapes"));
+        assert!(
+            !executed,
+            "a rejected managed path must never execute a probe"
+        );
+    }
+
+    #[test]
+    fn playwright_launch_checks_node_before_package_probe() {
+        const CHILD: &str = "PRODEX_TEST_PLAYWRIGHT_EXPECTED";
+        if let Ok(expected) = std::env::var(CHILD) {
+            let selected = [OptionalToolId::PlaywrightMcp].into_iter().collect();
+            let plan = resolve_optional_tools_for_launch(&selected, &OptionalToolSet::default());
+            assert_eq!(plan.activations.len(), usize::from(expected == "ready"));
+            if expected != "ready" {
+                assert_eq!(plan.unavailable.len(), 1);
+                assert!(plan.unavailable[0].detail.contains("Node.js 18+"));
+            }
+            return;
+        }
+        let root = crate::tests::temp_dir("playwright-node-preflight");
+        fs::create_dir_all(&root).unwrap();
+        let node = root.join("node");
+        let npx = root.join("npx");
+        fs::write(
+            &npx,
+            "#!/bin/sh\n: > \"$0.executed\"\nprintf 'Version 0.0.83\\n'\n",
+        )
+        .unwrap();
+        fs::set_permissions(&npx, fs::Permissions::from_mode(0o700)).unwrap();
+        let test = format!(
+            "{}::playwright_launch_checks_node_before_package_probe",
+            module_path!()
+        );
+        let test = test.split_once("::").unwrap().1;
+        let mut outcomes = Vec::new();
+        for (version, expected) in [("v17.9.1", "unavailable"), ("v18.0.0", "ready")] {
+            fs::write(&node, format!("#!/bin/sh\nprintf '{version}\\n'\n")).unwrap();
+            fs::set_permissions(&node, fs::Permissions::from_mode(0o700)).unwrap();
+            let result = std::process::Command::new(std::env::current_exe().unwrap())
+                .args(["--exact", test, "--test-threads=1"])
+                .env(CHILD, expected)
+                .env("PATH", &root)
+                .env("HOME", &root)
+                .env("USERPROFILE", &root)
+                .env("XDG_DATA_HOME", &root)
+                .env(crate::PRODEX_OPTIMIZERS_HOME_ENV, &root)
+                .output()
+                .unwrap();
+            let probed = root.join("npx.executed").exists();
+            if probed {
+                fs::remove_file(root.join("npx.executed")).unwrap();
+            }
+            outcomes.push((result, probed, expected));
+        }
+        fs::remove_dir_all(root).unwrap();
+        for (result, probed, expected) in outcomes {
+            assert!(
+                result.status.success(),
+                "{}\n{}",
+                String::from_utf8_lossy(&result.stdout),
+                String::from_utf8_lossy(&result.stderr)
+            );
+            assert_eq!(probed, expected == "ready");
+        }
+    }
 }

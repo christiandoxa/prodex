@@ -58,7 +58,7 @@ pub fn cleanup_runtime_launch_plan(plan: &RuntimeLaunchPlan) {
 #[derive(Debug, Clone)]
 pub enum RuntimeLaunchDryRunChild {
     Codex { codex_args: Vec<OsString> },
-    Caveman { codex_args: Vec<OsString> },
+    Super { codex_args: Vec<OsString> },
 }
 
 pub fn runtime_launch_dry_run_plan(
@@ -72,16 +72,16 @@ pub fn runtime_launch_dry_run_plan(
 ) -> RuntimeLaunchPlan {
     let runtime_args = match &child {
         RuntimeLaunchDryRunChild::Codex { codex_args }
-        | RuntimeLaunchDryRunChild::Caveman { codex_args } => {
+        | RuntimeLaunchDryRunChild::Super { codex_args } => {
             runtime_proxy_codex_passthrough_args(runtime_proxy, codex_args)
         }
     };
     let (codex_home, cleanup_path) = match child {
         RuntimeLaunchDryRunChild::Codex { .. } => (base_codex_home.to_path_buf(), None),
-        RuntimeLaunchDryRunChild::Caveman { .. } => {
-            let caveman_home =
+        RuntimeLaunchDryRunChild::Super { .. } => {
+            let super_home =
                 dry_run_prodex_overlay_home_placeholder(managed_profiles_root, base_codex_home);
-            (caveman_home.clone(), Some(caveman_home))
+            (super_home.clone(), Some(super_home))
         }
     };
     let mut child = codex_tui_child_plan(binary, codex_home, runtime_args, local_provider_id);

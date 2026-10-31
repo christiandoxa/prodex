@@ -5,7 +5,8 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use crate::fs_ops::{
-    copy_file_streaming, read_text_file_limited, remove_existing_dir_path, write_text_file,
+    copy_file_streaming, read_canonical_text_file_limited, read_text_file_limited,
+    remove_existing_dir_path, write_text_file,
 };
 use crate::localization::localize_text_file;
 
@@ -120,11 +121,51 @@ pub fn configure_prodex_overlay_home(codex_home: &Path) -> Result<()> {
     let config_path = codex_home.join("config.toml");
     localize_text_file(&config_path)?;
     remove_legacy_caveman_config(&config_path)?;
+    remove_retired_caveman_references(codex_home, &crate::discovery::managed_optimizer_roots())?;
     for relative in [
         ".tmp/marketplaces/prodex-caveman",
         "plugins/cache/prodex-caveman",
     ] {
         remove_existing_dir_path(&codex_home.join(relative))?;
+    }
+    Ok(())
+}
+
+// Remove only references emitted by the retired managed integration. Keep
+// user-authored instructions, similarly named files, and source homes intact.
+fn remove_retired_caveman_references(codex_home: &Path, managed_roots: &[PathBuf]) -> Result<()> {
+    let mut roots = Vec::new();
+    for root in managed_roots {
+        roots.push(root.join("caveman"));
+        if let Ok(canonical) = root.canonicalize() {
+            roots.push(canonical.join("caveman"));
+        }
+    }
+    for name in ["AGENTS.md", "AGENTS.override.md"] {
+        let path = codex_home.join(name);
+        let Some(contents) = read_canonical_text_file_limited(&path)? else {
+            continue;
+        };
+        let retained = contents
+            .split_inclusive('\n')
+            .filter(|line| {
+                let Some(reference) = line.trim().strip_prefix('@') else {
+                    return true;
+                };
+                !roots.iter().any(|root| {
+                    Path::new(reference)
+                        .strip_prefix(root)
+                        .is_ok_and(|relative| {
+                            relative.components().count() == 2
+                                && relative.file_name() == Some(std::ffi::OsStr::new("AGENTS.md"))
+                        })
+                })
+            })
+            .collect::<String>();
+        if retained != contents {
+            // This writer replaces a symlink; it never edits its shared target.
+            write_text_file(&path, &retained)?;
+        }
     }
     Ok(())
 }
@@ -518,5 +559,33 @@ mod legacy_caveman_paragraph_tests {
             Some(instructions)
         );
         assert!(!remove_legacy_caveman_instructions(&mut toml::Table::new()));
+    }
+
+    #[test]
+    fn retired_managed_references_are_removed_without_changing_source_instructions() {
+        let root = crate::tests::temp_dir("retired-reference-cleanup");
+        let managed = root.join("tools");
+        let overlay = root.join("overlay");
+        fs::create_dir_all(&managed).unwrap();
+        fs::create_dir_all(&overlay).unwrap();
+        let retired = format!("@{}\n", managed.join("caveman/4.0.1/AGENTS.md").display());
+        let unrelated = format!("@{}\n", root.join("user/caveman/4.0.1/AGENTS.md").display());
+        let expected = format!("Keep project policy.\r\n{unrelated}Preserve this line.");
+        let original = format!("Keep project policy.\r\n{retired}{unrelated}Preserve this line.");
+        let source = root.join("source-agents.md");
+        fs::write(&source, &original).unwrap();
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(&source, overlay.join("AGENTS.md")).unwrap();
+        #[cfg(not(unix))]
+        fs::copy(&source, overlay.join("AGENTS.md")).unwrap();
+        fs::write(overlay.join("AGENTS.override.md"), &original).unwrap();
+        for _ in 0..2 {
+            remove_retired_caveman_references(&overlay, std::slice::from_ref(&managed)).unwrap();
+            for name in ["AGENTS.md", "AGENTS.override.md"] {
+                assert_eq!(fs::read_to_string(overlay.join(name)).unwrap(), expected);
+            }
+            assert_eq!(fs::read_to_string(&source).unwrap(), original);
+        }
+        fs::remove_dir_all(root).unwrap();
     }
 }

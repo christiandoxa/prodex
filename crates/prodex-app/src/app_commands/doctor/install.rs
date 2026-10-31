@@ -12,17 +12,15 @@ pub(super) fn collect_install_check_rows(paths: &AppPaths) -> Vec<(String, Strin
         version_check_row("GitHub Copilot CLI", copilot_bin(), "--version"),
         version_check_row("Kiro CLI", kiro_bin(), "--version"),
         version_check_row("Antigravity CLI", agy_bin(), "--version"),
-        version_check_row("RTK", "rtk", "--version"),
         version_check_row("Node.js", "node", "--version"),
         version_check_row("npx", "npx", "--version"),
-        probe_check_row("codebase-memory-mcp"),
     ];
-    rows.push((
-        "Caveman".to_string(),
-        optional_tool_health_status(&prodex_optional_tools::optional_tool_status(
-            prodex_optional_tools::OptionalToolId::Caveman,
-        )),
-    ));
+    for id in prodex_optional_tools::OptionalToolSet::super_defaults().iter() {
+        rows.push((
+            id.to_string(),
+            optional_tool_health_status(&prodex_optional_tools::optional_tool_status(id)),
+        ));
+    }
     rows.push(("Prodex home".to_string(), paths.root.display().to_string()));
     rows.push((
         "Shared CODEX_HOME".to_string(),
@@ -51,13 +49,6 @@ fn optional_tool_health_status(health: &prodex_optional_tools::ToolHealth) -> St
     redaction_redact_secret_like_text(&fields.join(", "))
 }
 
-fn command_capability_probe_args(command: &str) -> &'static [&'static str] {
-    match command {
-        "codebase-memory-mcp" => &["--help"],
-        _ => &["--version"],
-    }
-}
-
 fn command_version_status(command: impl AsRef<std::ffi::OsStr>, version_arg: &str) -> String {
     let command = command.as_ref();
     let mut probe = std::process::Command::new(command);
@@ -82,20 +73,6 @@ fn command_version_status(command: impl AsRef<std::ffi::OsStr>, version_arg: &st
     }
 }
 
-fn command_probe_status(command: impl AsRef<std::ffi::OsStr>, args: &[&str]) -> String {
-    let command = command.as_ref();
-    let mut probe = std::process::Command::new(command);
-    probe.args(args);
-    match crate::command_probe_output(&mut probe, &command.to_string_lossy()) {
-        Ok(output) if output.status.success() => "ok (available)".to_string(),
-        Ok(output) => format!("warn (exit {})", output.status),
-        Err(error) => format!(
-            "missing ({})",
-            redaction_redact_secret_like_text(&error.to_string())
-        ),
-    }
-}
-
 fn version_check_row(
     name: &str,
     command: impl AsRef<std::ffi::OsStr>,
@@ -104,13 +81,6 @@ fn version_check_row(
     (
         name.to_string(),
         command_version_status(command, version_arg),
-    )
-}
-
-fn probe_check_row(command: &'static str) -> (String, String) {
-    (
-        command.to_string(),
-        command_probe_status(command, command_capability_probe_args(command)),
     )
 }
 

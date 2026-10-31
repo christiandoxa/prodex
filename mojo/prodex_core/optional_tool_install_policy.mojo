@@ -4,7 +4,7 @@ from rich_types import ProdexRichStringView
 from rich_text import rich_view_valid, rich_view_ptr, rich_ascii_hex
 from parsed_json import pj_equal, pj_literal
 from json_sink import JsonSink, js_literal, js_view
-from optional_tools_policy import OPTIONAL_TOOL_CAVEMAN, OPTIONAL_TOOL_PONYTAIL
+from optional_tools_policy import OPTIONAL_TOOL_PONYTAIL
 
 
 def optional_tool_manifest_hex(view: ProdexRichStringView, width: Int64) -> Bool:
@@ -43,8 +43,6 @@ def optional_tool_manifest_content_issue(
         return Int64(0) if pj_equal(fields[unsafe_offset=3], fields[unsafe_offset=6]) else Int64(11)
     if pj_equal(fields[unsafe_offset=0], fields[unsafe_offset=7]):
         return Int64(0) if optional_tool_manifest_release_matches(fields, 7, tool == OPTIONAL_TOOL_PONYTAIL) else Int64(12)
-    if tool == OPTIONAL_TOOL_CAVEMAN and optional_tool_manifest_release_matches(fields, 10, True):
-        return 0
     return Int64(0) if pj_equal(fields[unsafe_offset=2], fields[unsafe_offset=3]) else Int64(13)
 
 
@@ -55,7 +53,7 @@ def optional_tool_manifest_issue(
     if phase == 0:
         if tag != 1:
             return 1
-        var expected = pj_literal("caveman") if tool == OPTIONAL_TOOL_CAVEMAN else pj_literal("ponytail")
+        var expected = pj_literal("ponytail")
         return Int64(0) if pj_equal(fields[unsafe_offset=0], expected) else Int64(2)
     if phase == 1:
         return Int64(3) if tag == 0 else Int64(4) if tag == 1 else Int64(0)
@@ -79,9 +77,9 @@ def optional_tool_manifest_diagnostic(
     if issue == 0:
         return
     if issue == 12:
-        js_literal(sink, StringSlice("previously release-qualified Caveman 3.2.0 identity or content changed") if tool == OPTIONAL_TOOL_CAVEMAN else StringSlice("Ponytail previous-stable metadata does not match release-qualified compatibility metadata"))
+        js_literal(sink, StringSlice("Ponytail previous-stable metadata does not match release-qualified compatibility metadata"))
         return
-    var name = StringSlice("Caveman") if tool == OPTIONAL_TOOL_CAVEMAN else StringSlice("Ponytail")
+    var name = StringSlice("Ponytail")
     if issue == 1:
         js_literal(sink, StringSlice("unsupported "))
     elif issue == 3:
@@ -93,7 +91,7 @@ def optional_tool_manifest_diagnostic(
         js_literal(sink, StringSlice(" manifest schema"))
     elif issue == 2:
         js_literal(sink, StringSlice(" manifest id must be "))
-        js_literal(sink, StringSlice("caveman") if tool == OPTIONAL_TOOL_CAVEMAN else StringSlice("ponytail"))
+        js_literal(sink, StringSlice("ponytail"))
     elif issue == 3:
         js_literal(sink, StringSlice(" version "))
         js_view(sink, fields[unsafe_offset=0])
@@ -137,7 +135,7 @@ def prodex_optional_tool_install_policy_v1(
     if abi_version != 1:
         return 4
     if (
-        tool != OPTIONAL_TOOL_CAVEMAN and tool != OPTIONAL_TOOL_PONYTAIL
+        tool != OPTIONAL_TOOL_PONYTAIL
         or phase < 0 or phase > 3 or tag < 0
         or phase == 0 and tag > 0xFFFFFFFF
         or phase == 1 and tag > 2 or phase == 2 and tag > 1
