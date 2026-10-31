@@ -82,7 +82,14 @@ fn session_path_id_span(
     exact: bool,
     require_full: bool,
 ) -> Option<String> {
-    let stem = path.file_stem().and_then(|stem| stem.to_str())?;
+    let name = path.file_name().and_then(|name| name.to_str())?;
+    let name_plan = prodex_mojo_core::json::session_file_name_plan(name)
+        .expect("Mojo session-file name policy returned invalid output");
+    let stem = if name_plan.is_metadata {
+        name.get(..name_plan.stem_length)?
+    } else {
+        path.file_stem().and_then(|stem| stem.to_str())?
+    };
     let (start, end) =
         prodex_mojo_core::json::session_selector_path_span(stem, selector, exact, require_full)
             .expect("Mojo session selector path scan failed")?;

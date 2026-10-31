@@ -31,11 +31,21 @@ fn saved_session_id(plan: &RuntimeLaunchPlan) -> Option<Uuid> {
         if file.take(128).read_to_string(&mut raw).is_ok()
             && let Ok(id) = Uuid::parse_str(raw.trim())
         {
-            return Some(id);
+            return resumable_root_id(&plan.child.codex_home, id);
         }
     }
     prodex_runtime_launch::codex_resume_session_id(&plan.child.args)
         .and_then(|id| Uuid::parse_str(id).ok())
+        .and_then(|id| resumable_root_id(&plan.child.codex_home, id))
+}
+
+fn resumable_root_id(home: &std::path::Path, id: Uuid) -> Option<Uuid> {
+    // Old markers may contain a child. Never print a known broken parent chain.
+    match prodex_session_store::resolve_session_root(home, &id.to_string()) {
+        Ok(Some(root)) => Uuid::parse_str(&root.id).ok(),
+        Ok(None) => Some(id),
+        Err(_) => None,
+    }
 }
 
 fn write_saved_session_guidance(

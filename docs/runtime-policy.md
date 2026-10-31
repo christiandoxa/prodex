@@ -827,6 +827,20 @@ rollout cursor instead of seeking past a terminal error. A genuine new SessionSt
 can switch roots; the existing app-server still verifies identity, workspace,
 persistence, quiescence and goal policy before any in-place continuation RPC.
 
+Legacy first-notification bootstrap resolves persisted parent ancestry before
+publishing the marker. Resolution reads only the initial rollout metadata;
+plain-file recovery offsets use file length rather than parsing conversation
+history inside the hook deadline. Compressed rollout selectors use the same
+compound-extension policy as session discovery. Ancestry is limited to 32
+headers and rejects cycles, conflicting roots, and missing parents.
+
+Local interactive `prodex s <uuid>` resolves a parent-owned V2 worker to its
+conversation root before provider/model and recovery selection. The native
+`/resume` picker continues to select user-resumable roots. Only the identified
+session argument changes; prompts, explicit overrides, independent forks, V1
+resume behavior, and remote session namespaces are preserved. Exit guidance
+also validates old markers against persisted ancestry without rewriting it.
+
 
 ### Quota-aware continuation handoff
 

@@ -12,6 +12,7 @@ mod report;
 mod resolve_error;
 mod session_file;
 mod session_meta;
+mod session_root;
 mod session_selector;
 mod state_db_index;
 
@@ -22,6 +23,7 @@ pub use report::{
     sort_session_reports, timestamp_label_sort_key, value_at_path,
 };
 pub use resolve_error::*;
+pub use session_root::{SessionResumeTarget, resolve_native_resume_target, resolve_session_root};
 
 use repair_candidates::{
     collect_exact_repair_candidates, collect_prefix_repair_candidates,

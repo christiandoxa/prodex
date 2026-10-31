@@ -7,6 +7,49 @@ use anyhow::{Result, bail};
 
 use crate::{AppPaths, AppState, AppStateIoExt};
 
+/// Select the owning conversation before provider/model selection or recovery setup.
+/// The native /resume picker already lists user-resumable roots, not V2 workers.
+pub(crate) fn normalize_super_resume_root(codex_args: &mut Vec<OsString>) -> Result<()> {
+    let paths = AppPaths::discover()?;
+    if let Some(root) = normalize_super_resume_root_in_home(&paths.shared_codex_root, codex_args)? {
+        crate::print_launch_status(&format!(
+            "resuming parent-owned sub-agent through root session {root}..."
+        ));
+    }
+    Ok(())
+}
+
+fn normalize_super_resume_root_in_home(
+    home: &Path,
+    codex_args: &mut Vec<OsString>,
+) -> Result<Option<String>> {
+    let mut normalized = prodex_runtime_launch::normalize_run_codex_args(codex_args);
+    let views = normalized
+        .iter()
+        .map(|arg| arg.to_str())
+        .collect::<Vec<_>>();
+    let transport = prodex_mojo_core::runtime_overlay_policy::transport_flags(&views)
+        .map_err(|error| anyhow::anyhow!("failed to inspect resume transport: {error:?}"))?;
+    if transport.remote || prodex_runtime_launch::is_codex_exec_invocation(&normalized) {
+        return Ok(None);
+    }
+    let inspection = prodex_mojo_core::launch::inspect_launch_arguments(&views)
+        .map_err(|error| anyhow::anyhow!("failed to inspect resume arguments: {error:?}"))?;
+    let (Some(id), Some(index)) = (inspection.resume_session, inspection.resume_session_index)
+    else {
+        return Ok(None);
+    };
+    let Some(target) = prodex_session_store::resolve_native_resume_target(home, id)? else {
+        return Ok(None);
+    };
+    if target.id.eq_ignore_ascii_case(id) {
+        return Ok(None);
+    }
+    normalized[index] = OsString::from(&target.id);
+    *codex_args = normalized;
+    Ok(Some(target.id))
+}
+
 pub(crate) fn repair_resume_session_metadata_prefix_from_codex_args(
     codex_args: &[OsString],
 ) -> Result<Option<std::path::PathBuf>> {
@@ -336,3 +379,7 @@ mod tests {
 #[cfg(test)]
 #[path = "resume_repair_media_tests.rs"]
 mod media_tests;
+
+#[cfg(test)]
+#[path = "resume_root_tests.rs"]
+mod root_tests;
