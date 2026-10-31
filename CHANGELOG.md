@@ -10,6 +10,7 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 
 ### Misc
 
+- Qualify tunnel-client 0.0.19 and isolate stdio policy (`d423fe2`)
 - Retire Caveman and harden automatic launch (`eb15764`)
 # Prodex 0.166.1
 
@@ -33,6 +34,11 @@ separate installation.
   probes. Reject an escaping symlink without executing its target.
 - Apply the same Node.js 18+ validation to ordinary Playwright launch and full
   health checks, before probing the installed MCP package.
+- Qualify official tunnel-client 0.0.19 and isolate its new stdio failure-policy
+  environment setting from the HTTP tunnel. Keep the 0.0.13 runtime minimum and
+  existing static-key isolation; qualification uses only synthetic loopback probes.
+- Refresh the Kiro CLI release fixture to verified stable 2.37.0 without changing
+  installed user clients, native routing, or the stable-version freshness gate.
 
 ## Compatibility
 
