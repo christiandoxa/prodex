@@ -4,7 +4,7 @@ use std::fs;
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-fn temp_dir(name: &str) -> PathBuf {
+pub(crate) fn temp_dir(name: &str) -> PathBuf {
     let stamp = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
@@ -20,7 +20,7 @@ fn temp_dir(name: &str) -> PathBuf {
 
 #[test]
 fn optional_tool_ids_parse_to_typed_values() {
-    assert_eq!("caveman".parse(), Ok(OptionalToolId::Caveman));
+    assert!("caveman".parse::<OptionalToolId>().is_err());
     assert_eq!(" CBM ".parse(), Ok(OptionalToolId::CodebaseMemoryMcp));
     assert_eq!("PLAYWRIGHT".parse(), Ok(OptionalToolId::PlaywrightMcp));
     assert_eq!("playwright-mcp".parse(), Ok(OptionalToolId::PlaywrightMcp));
@@ -30,7 +30,7 @@ fn optional_tool_ids_parse_to_typed_values() {
 #[test]
 fn managed_version_discovery_batches_exact_stable_directory_names() {
     let root = temp_dir("version-directory-batch");
-    let tool = root.join("caveman");
+    let tool = root.join("ponytail");
     for name in [
         "1.9.0",
         "1.10.0+build.1",
@@ -48,7 +48,7 @@ fn managed_version_discovery_batches_exact_stable_directory_names() {
         std::os::unix::fs::symlink(tool.join("1.10.0+build.2"), tool.join("999.0.0")).unwrap();
     }
     assert_eq!(
-        crate::discovery::newest_stable_managed_version(&root, "caveman").unwrap(),
+        crate::discovery::newest_stable_managed_version(&root, "ponytail").unwrap(),
         Some(("1.10.0+build.2".to_owned(), tool.join("1.10.0+build.2")))
     );
     assert_eq!(
@@ -56,7 +56,7 @@ fn managed_version_discovery_batches_exact_stable_directory_names() {
         None
     );
     assert!(
-        crate::discovery::newest_stable_managed_version(&tool.join("99.0.0"), "caveman").is_err()
+        crate::discovery::newest_stable_managed_version(&tool.join("99.0.0"), "ponytail").is_err()
     );
     fs::remove_dir_all(root).unwrap();
 }
@@ -123,12 +123,9 @@ fn compiled_stable_version_and_directory_selection_match_semver_oracle() {
 
 #[test]
 fn optional_tool_descriptors_follow_mojo_policy() {
-    let caveman = optional_tool_descriptor(OptionalToolId::Caveman);
-    assert_eq!(caveman.kind, ToolKind::CodexPlugin);
-    assert_eq!(
-        caveman.capabilities,
-        &[ToolCapability::Codex, ToolCapability::Claude]
-    );
+    let ponytail = optional_tool_descriptor(OptionalToolId::Ponytail);
+    assert_eq!(ponytail.kind, ToolKind::CodexPlugin);
+    assert_eq!(ponytail.capabilities, &[ToolCapability::SimplicityReview]);
 
     let presidio = optional_tool_descriptor(OptionalToolId::Presidio);
     assert_eq!(presidio.kind, ToolKind::Service);
@@ -138,7 +135,9 @@ fn optional_tool_descriptors_follow_mojo_policy() {
 #[test]
 fn super_defaults_are_typed_and_presidio_is_opt_in() {
     let tools = OptionalToolSet::super_defaults();
-    assert!(tools.contains(OptionalToolId::Caveman));
+    assert!(tools.contains(OptionalToolId::CodebaseMemoryMcp));
+    assert!(tools.contains(OptionalToolId::Ponytail));
+    assert_eq!(tools.iter().count(), 4);
     assert!(tools.contains(OptionalToolId::Rtk));
     assert!(tools.contains(OptionalToolId::PlaywrightMcp));
     assert!(!tools.contains(OptionalToolId::Presidio));

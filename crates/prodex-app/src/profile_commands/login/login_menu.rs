@@ -68,7 +68,7 @@ fn login_menu_entries() -> &'static [LoginMenuEntry] {
             title: "Sign in with ChatGPT (OpenAI OAuth)",
             provider: "OpenAI / Codex",
             auth: "ChatGPT OAuth",
-            usage: "Default quota-aware profile pool for prodex run, prodex s, and prodex caveman.",
+            usage: "Default quota-aware profile pool for prodex run and prodex s.",
             command: "prodex login",
             action: LoginMenuAction::Method(LoginMethod::ChatGpt),
         },

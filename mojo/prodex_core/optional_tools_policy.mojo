@@ -9,7 +9,7 @@ from rich_types import ProdexRichStringView
 
 comptime OPTIONAL_TOOLS_POLICY_ABI_VERSION: Int64 = 1
 
-comptime OPTIONAL_TOOL_CAVEMAN: Int64 = 0
+# ABI tool id 0 is retired. Existing tool ids stay stable.
 comptime OPTIONAL_TOOL_RTK: Int64 = 1
 comptime OPTIONAL_TOOL_CODEBASE_MEMORY: Int64 = 2
 comptime OPTIONAL_TOOL_PLAYWRIGHT: Int64 = 3
@@ -21,8 +21,6 @@ comptime OPTIONAL_TOOL_KIND_CODEX_PLUGIN: Int64 = 1
 comptime OPTIONAL_TOOL_KIND_MCP_SERVER: Int64 = 2
 comptime OPTIONAL_TOOL_KIND_SERVICE: Int64 = 3
 
-comptime OPTIONAL_TOOL_CAP_CODEX: Int64 = 1
-comptime OPTIONAL_TOOL_CAP_CLAUDE: Int64 = 2
 comptime OPTIONAL_TOOL_CAP_SHELL_COMPRESSION: Int64 = 4
 comptime OPTIONAL_TOOL_CAP_STRUCTURAL_NAVIGATION: Int64 = 8
 comptime OPTIONAL_TOOL_CAP_BROWSER_AUTOMATION: Int64 = 16
@@ -242,8 +240,6 @@ def prodex_optional_tool_awareness_v1(
 
 def optional_tool_class(value: ProdexRichStringView) -> Int64:
     var bounds = rich_trim_bounds(value)
-    if optional_tool_range_equals["caveman"](value, bounds[0], bounds[1]):
-        return OPTIONAL_TOOL_CAVEMAN
     if optional_tool_range_equals["rtk"](value, bounds[0], bounds[1]):
         return OPTIONAL_TOOL_RTK
     if (
@@ -282,15 +278,12 @@ def prodex_optional_tool_descriptor_policy_v1(
     abi_version: Int64,
     tool_id: Int64,
 ) abi("C") -> Int64:
-    if abi_version != OPTIONAL_TOOLS_POLICY_ABI_VERSION or tool_id < 0 or tool_id > 5:
+    if abi_version != OPTIONAL_TOOLS_POLICY_ABI_VERSION or tool_id < 1 or tool_id > 5:
         return -2
     var kind: Int64 = OPTIONAL_TOOL_KIND_COMMAND
     var capabilities: Int64 = 0
     var super_default: Int64 = 1
-    if tool_id == OPTIONAL_TOOL_CAVEMAN:
-        kind = OPTIONAL_TOOL_KIND_CODEX_PLUGIN
-        capabilities = OPTIONAL_TOOL_CAP_CODEX | OPTIONAL_TOOL_CAP_CLAUDE
-    elif tool_id == OPTIONAL_TOOL_RTK:
+    if tool_id == OPTIONAL_TOOL_RTK:
         kind = OPTIONAL_TOOL_KIND_COMMAND
         capabilities = OPTIONAL_TOOL_CAP_SHELL_COMPRESSION
     elif tool_id == OPTIONAL_TOOL_CODEBASE_MEMORY:

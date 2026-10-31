@@ -396,7 +396,7 @@ pub(crate) fn print_runtime_launch_dry_run(
         profile_openai_compatible_dry_run_child(&prepared.paths, &prepared.codex_home, child)?;
     let child_args = match &child {
         RuntimeLaunchDryRunChild::Codex { codex_args }
-        | RuntimeLaunchDryRunChild::Caveman { codex_args } => codex_args,
+        | RuntimeLaunchDryRunChild::Super { codex_args } => codex_args,
     };
     let runtime_proxy = runtime_proxy_codex_endpoint(prepared.runtime_proxy.as_ref(), child_args);
     let plan = prodex_runtime_launch::runtime_launch_dry_run_plan(
@@ -501,7 +501,7 @@ fn profile_openai_compatible_dry_run_child(
         RuntimeLaunchDryRunChild::Codex { codex_args } => Ok(RuntimeLaunchDryRunChild::Codex {
             codex_args: dry_run_provider_args(paths, codex_home, codex_args)?,
         }),
-        RuntimeLaunchDryRunChild::Caveman { codex_args } => Ok(RuntimeLaunchDryRunChild::Caveman {
+        RuntimeLaunchDryRunChild::Super { codex_args } => Ok(RuntimeLaunchDryRunChild::Super {
             codex_args: dry_run_provider_args(paths, codex_home, codex_args)?,
         }),
     }

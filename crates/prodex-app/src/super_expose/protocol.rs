@@ -467,8 +467,8 @@ mod tests {
                 .as_str()
                 .is_some_and(|value| value.contains("optional:rtk"))
         );
-        assert_eq!(exec["_meta"]["prodex/optionalTools"][1]["id"], "rtk");
-        assert_eq!(exec["_meta"]["prodex/optionalTools"][1]["available"], true);
+        assert_eq!(exec["_meta"]["prodex/optionalTools"][0]["id"], "rtk");
+        assert_eq!(exec["_meta"]["prodex/optionalTools"][0]["available"], true);
     }
 
     #[test]

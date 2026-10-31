@@ -1,4 +1,3 @@
-mod caveman;
 mod discovery;
 mod fs_ops;
 mod launch_home;
@@ -10,7 +9,6 @@ mod super_optimizers;
 mod toml_helpers;
 mod tree;
 
-pub use caveman::{activate_caveman_for_codex, resolve_caveman, resolve_caveman_claude_plugin_dir};
 pub use launch_home::{
     configure_prodex_overlay_home, prepare_desktop_overlay_home,
     prepare_desktop_overlay_home_from_prepared_base, prepare_prodex_overlay_home,
@@ -31,22 +29,6 @@ pub use super_optimizers::{
 };
 
 pub const PRODEX_OPTIMIZERS_HOME_ENV: &str = "PRODEX_OPTIMIZERS_HOME";
-
-pub const CAVEMAN_MINIMUM_SUPPORTED_VERSION: &str = "2.3.1";
-pub const CAVEMAN_LATEST_STABLE_REFERENCE: &str = "4.0.1";
-pub const CAVEMAN_LATEST_STABLE_COMMIT: &str = "d262ab3882952a59312ff3537cd86d894523c5ab";
-pub const CAVEMAN_LATEST_STABLE_TREE_SHA256: &str =
-    "2f3e5052f81cf47c85db4b710908b72e45ce73aeaea7ef2dc1e5c177af5cf6ce";
-pub(crate) const CAVEMAN_PREVIOUS_STABLE_REFERENCE: &str = "3.2.0";
-pub(crate) const CAVEMAN_PREVIOUS_STABLE_COMMIT: &str = "e20f07e8152a0c0360f58c09e79d30ac94329991";
-pub(crate) const CAVEMAN_PREVIOUS_STABLE_TREE_SHA256: &str =
-    "061fb970ee293e1ccce02e0a7fa19a94c73299ca6df52701dd3feeea204df927";
-pub(crate) const CAVEMAN_LEGACY_REFERENCE: &str = "2.7.0";
-pub(crate) const CAVEMAN_LEGACY_COMMIT: &str = "8b0c1d3699b8d83e87fe4605b378da20c41555e0";
-pub(crate) const CAVEMAN_LEGACY_TREE_SHA256: &str =
-    "09127915a13a493146ed0392b6895bbbd5f620d276dda9f4e68a6722f96df950";
-pub(crate) const CAVEMAN_LEGACY_MANIFEST_TREE_SHA256: &str =
-    "26d587fc179e79f76f4e2b42edec0266a7af40cf08bf15eb4609de310fabd8fb";
 
 pub const RTK_MINIMUM_SUPPORTED_VERSION: &str = "0.46.0";
 pub const RTK_LATEST_STABLE_REFERENCE: &str = "1.1.0";
@@ -75,7 +57,6 @@ pub const PRESIDIO_LATEST_STABLE_REFERENCE: &str = "2.2.366";
 
 pub fn optional_tool_recommended_version(id: OptionalToolId) -> &'static str {
     match id {
-        OptionalToolId::Caveman => CAVEMAN_LATEST_STABLE_REFERENCE,
         OptionalToolId::Rtk => RTK_LATEST_STABLE_REFERENCE,
         OptionalToolId::CodebaseMemoryMcp => CODEBASE_MEMORY_LATEST_STABLE_REFERENCE,
         OptionalToolId::PlaywrightMcp => PLAYWRIGHT_MCP_LATEST_STABLE_REFERENCE,
@@ -86,7 +67,6 @@ pub fn optional_tool_recommended_version(id: OptionalToolId) -> &'static str {
 
 pub fn optional_tool_minimum_supported_version(id: OptionalToolId) -> &'static str {
     match id {
-        OptionalToolId::Caveman => CAVEMAN_MINIMUM_SUPPORTED_VERSION,
         OptionalToolId::Rtk => RTK_MINIMUM_SUPPORTED_VERSION,
         OptionalToolId::CodebaseMemoryMcp => CODEBASE_MEMORY_MINIMUM_SUPPORTED_VERSION,
         OptionalToolId::PlaywrightMcp => PLAYWRIGHT_MCP_MINIMUM_SUPPORTED_VERSION,

@@ -6,7 +6,7 @@ from parsed_json import pj_literal
 from json_sink import JsonSink, js_literal, js_escaped, js_string
 from optional_tools_policy import (
     optional_tool_class, OPTIONAL_TOOL_RTK, OPTIONAL_TOOL_CODEBASE_MEMORY,
-    OPTIONAL_TOOL_PLAYWRIGHT, OPTIONAL_TOOL_CAVEMAN, OPTIONAL_TOOL_PONYTAIL, OPTIONAL_TOOL_PRESIDIO,
+    OPTIONAL_TOOL_PLAYWRIGHT, OPTIONAL_TOOL_PONYTAIL, OPTIONAL_TOOL_PRESIDIO,
 )
 
 comptime SUPER_EXPOSE_EXEC_ABI_VERSION: Int64 = 1
@@ -244,15 +244,12 @@ def super_expose_write_optional_alias_plan(
     if kind == OPTIONAL_TOOL_PRESIDIO:
         js_literal(sink, StringSlice('{"tool":"presidio","program":{"kind":"prodex"},"prefix":["super","--no-sub-agent","--presidio"]}'))
         return
-    if kind != OPTIONAL_TOOL_CAVEMAN and kind != OPTIONAL_TOOL_PONYTAIL and kind != OPTIONAL_TOOL_PLAYWRIGHT:
+    if kind != OPTIONAL_TOOL_PONYTAIL and kind != OPTIONAL_TOOL_PLAYWRIGHT:
         js_literal(sink, StringSlice("null"))
         return
-    var name = pj_literal(StringSlice("caveman"))
+    var name = pj_literal(StringSlice("ponytail"))
     var activation = name.copy()
-    if kind == OPTIONAL_TOOL_PONYTAIL:
-        name = pj_literal(StringSlice("ponytail"))
-        activation = name.copy()
-    elif kind == OPTIONAL_TOOL_PLAYWRIGHT:
+    if kind == OPTIONAL_TOOL_PLAYWRIGHT:
         name = pj_literal(StringSlice("playwright-mcp"))
         activation = pj_literal(StringSlice("playwright"))
     js_literal(sink, StringSlice('{"tool":'))

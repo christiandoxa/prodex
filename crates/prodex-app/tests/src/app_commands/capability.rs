@@ -154,17 +154,17 @@ fn setup_dry_run_verify_tools_rejects_before_json_output() {
 }
 
 #[test]
-fn setup_optional_tool_verification_includes_non_caveman_catalog_entries() {
+fn setup_optional_tool_verification_includes_automatic_catalog_entries() {
     let ids = prodex_optional_tools::OptionalToolSet::super_defaults()
         .iter()
         .collect::<Vec<_>>();
 
-    assert!(ids.contains(&prodex_optional_tools::OptionalToolId::Caveman));
+    assert!(ids.contains(&prodex_optional_tools::OptionalToolId::Ponytail));
     assert!(ids.contains(&prodex_optional_tools::OptionalToolId::Rtk));
     assert!(ids.contains(&prodex_optional_tools::OptionalToolId::PlaywrightMcp));
 
-    let caveman = prodex_optional_tools::ToolHealth {
-        id: prodex_optional_tools::OptionalToolId::Caveman,
+    let ponytail = prodex_optional_tools::ToolHealth {
+        id: prodex_optional_tools::OptionalToolId::Ponytail,
         status: prodex_optional_tools::ToolHealthStatus::Installed,
         source: None,
         path: None,
@@ -173,8 +173,8 @@ fn setup_optional_tool_verification_includes_non_caveman_catalog_entries() {
         can_activate: true,
         detail: "installed and validated".to_string(),
     };
-    let report = setup_optional_tool_verification_json(Some(&caveman), None, true, true);
-    assert_eq!(report["id"], "caveman");
+    let report = setup_optional_tool_verification_json(Some(&ponytail), None, true, true);
+    assert_eq!(report["id"], "ponytail");
     assert_eq!(report["status"], "installed");
     assert_eq!(report["ready"], serde_json::Value::Null);
     let report_ids = report["tools"]
@@ -203,7 +203,7 @@ fn setup_optional_tool_verification_reports_dry_run_without_a_probe() {
 }
 
 #[test]
-fn setup_optional_tool_verification_exit_checks_non_caveman_tools() {
+fn setup_optional_tool_verification_exit_checks_automatic_tools() {
     let missing_rtk = prodex_optional_tools::ToolHealth {
         id: prodex_optional_tools::OptionalToolId::Rtk,
         status: prodex_optional_tools::ToolHealthStatus::Missing,
@@ -216,6 +216,6 @@ fn setup_optional_tool_verification_exit_checks_non_caveman_tools() {
     };
 
     let error = ensure_optional_tools_installed(&[missing_rtk])
-        .expect_err("missing non-Caveman tools must fail verification");
+        .expect_err("missing automatic tools must fail verification");
     assert!(error.to_string().contains("rtk"));
 }

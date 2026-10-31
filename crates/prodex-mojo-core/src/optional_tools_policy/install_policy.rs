@@ -40,9 +40,9 @@ pub struct OptionalToolManifestContent<'a> {
     pub actual_tree_sha256: &'a str,
     pub latest: OptionalToolReleaseIdentity<'a>,
     pub previous: OptionalToolReleaseIdentity<'a>,
-    /// Caveman's additional compatibility release; absent for Ponytail.
+    /// Reserved ABI fields; must be absent for supported managed plugins.
     pub legacy: Option<OptionalToolReleaseIdentity<'a>>,
-    /// Vetted manifest alias for Caveman's legacy or Ponytail's previous release.
+    /// Vetted manifest alias for Ponytail's previous release.
     pub legacy_manifest_tree_sha256: &'a str,
 }
 
@@ -93,7 +93,7 @@ fn diagnostic<const N: usize>(
 }
 
 /// Check schema and ID before evaluating versions or opening further files.
-/// Only Caveman and Ponytail are managed plugin manifest kinds.
+/// Ponytail is the supported managed plugin manifest kind.
 pub fn optional_tool_manifest_header_error(
     tool: OptionalToolPolicyId,
     schema_version: u32,

@@ -47,7 +47,7 @@ test("stable component selector ignores prereleases and unrelated monorepo relea
   assert.equal(latestStableReleaseTag(releases.slice(1, 2), ""), null);
 });
 
-test("JSON evidence is real JSON and contains all six results", async () => {
+test("JSON evidence is real JSON and contains exactly the five supported tools", async () => {
   const { inventorySource, observed } = await auditedFixture();
   const { chunks, output } = outputBuffer();
   const evidence = await runFreshnessCheck({
@@ -75,7 +75,9 @@ test("JSON evidence is real JSON and contains all six results", async () => {
       audited_at: "2026-09-06T05:31:00.000Z",
     },
   );
-  assert.equal(parsed.results.length, 6);
+  assert.deepEqual(parsed.results.map((result) => result.id), [
+    "rtk", "codebase-memory-mcp", "playwright-mcp", "ponytail", "presidio",
+  ]);
   assert.ok(parsed.results.every((result) => result.status === "latest"));
 });
 

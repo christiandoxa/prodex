@@ -1,7 +1,7 @@
 use super::*;
 
 #[test]
-fn runtime_launch_dry_run_plan_builds_caveman_placeholder_cleanup() {
+fn runtime_launch_dry_run_plan_builds_super_placeholder_cleanup() {
     let base_home = PathBuf::from("/tmp/prodex/profiles/main");
     let managed_root = PathBuf::from("/tmp/prodex/profiles");
     let plan = runtime_launch_dry_run_plan(
@@ -11,7 +11,7 @@ fn runtime_launch_dry_run_plan_builds_caveman_placeholder_cleanup() {
         None,
         false,
         "prodex-local",
-        RuntimeLaunchDryRunChild::Caveman {
+        RuntimeLaunchDryRunChild::Super {
             codex_args: vec![OsString::from("exec")],
         },
     );

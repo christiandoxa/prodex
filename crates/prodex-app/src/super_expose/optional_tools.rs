@@ -276,9 +276,6 @@ impl ExposeOptionalTools {
                     "PRODEX_EXPOSE_PLAYWRIGHT_NPX",
                     tool.path.as_deref(),
                 ),
-                OptionalToolId::Caveman => {
-                    set_path_env(command, "PRODEX_EXPOSE_CAVEMAN_ROOT", tool.path.as_deref())
-                }
                 OptionalToolId::Ponytail => {
                     set_path_env(command, "PRODEX_EXPOSE_PONYTAIL_ROOT", tool.path.as_deref())
                 }
@@ -356,13 +353,13 @@ mod tests {
     #[test]
     fn plugin_alias_uses_prodex_super_activation() {
         let context = ExposeOptionalTools::with_tool_for_tests(
-            OptionalToolId::Caveman,
-            Some(PathBuf::from("/validated/caveman")),
+            OptionalToolId::Ponytail,
+            Some(PathBuf::from("/validated/ponytail")),
             PathBuf::from("/prodex"),
         );
         let resolved = context
             .resolve_exec(
-                "optional:caveman",
+                "optional:ponytail",
                 vec![OsString::from("exec"), OsString::from("task")],
             )
             .unwrap();
@@ -374,7 +371,7 @@ mod tests {
                 "--no-sub-agent",
                 "--no-presidio",
                 "--tool",
-                "caveman",
+                "ponytail",
                 "exec",
                 "task",
             ]

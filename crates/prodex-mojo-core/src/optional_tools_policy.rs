@@ -35,8 +35,6 @@ pub use install_policy::{
 const ABI_VERSION: i64 = 1;
 const AWARENESS_TEXT_COUNT: usize = 4;
 
-pub const CAP_CODEX: u64 = 1;
-pub const CAP_CLAUDE: u64 = 2;
 pub const CAP_SHELL_COMPRESSION: u64 = 4;
 pub const CAP_STRUCTURAL_NAVIGATION: u64 = 8;
 pub const CAP_BROWSER_AUTOMATION: u64 = 16;
@@ -46,7 +44,7 @@ pub const CAP_REDACTION: u64 = 64;
 #[repr(i64)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OptionalToolPolicyId {
-    Caveman = 0,
+    // ABI value 0 is retired; do not renumber the remaining tools.
     Rtk = 1,
     CodebaseMemoryMcp = 2,
     PlaywrightMcp = 3,
@@ -278,7 +276,6 @@ pub fn optional_tool_class(value: &str) -> Result<Option<OptionalToolPolicyId>, 
     match result {
         -1 => Ok(None),
         -2 => Err(MojoError::InvalidInput),
-        0 => Ok(Some(OptionalToolPolicyId::Caveman)),
         1 => Ok(Some(OptionalToolPolicyId::Rtk)),
         2 => Ok(Some(OptionalToolPolicyId::CodebaseMemoryMcp)),
         3 => Ok(Some(OptionalToolPolicyId::PlaywrightMcp)),
@@ -668,10 +665,10 @@ mod tests {
         );
         assert_eq!(optional_tool_class("unknown").unwrap(), None);
 
-        let caveman = optional_tool_descriptor_policy(OptionalToolPolicyId::Caveman).unwrap();
-        assert_eq!(caveman.kind, OptionalToolPolicyKind::CodexPlugin);
-        assert_eq!(caveman.capability_mask, CAP_CODEX | CAP_CLAUDE);
-        assert!(caveman.super_default);
+        let ponytail = optional_tool_descriptor_policy(OptionalToolPolicyId::Ponytail).unwrap();
+        assert_eq!(ponytail.kind, OptionalToolPolicyKind::CodexPlugin);
+        assert_eq!(ponytail.capability_mask, CAP_SIMPLICITY_REVIEW);
+        assert!(ponytail.super_default);
 
         let presidio = optional_tool_descriptor_policy(OptionalToolPolicyId::Presidio).unwrap();
         assert_eq!(presidio.kind, OptionalToolPolicyKind::Service);

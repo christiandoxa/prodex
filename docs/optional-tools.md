@@ -21,11 +21,14 @@ Managed roots are searched in this order:
 3. `$HOME/.local/share/prodex-optimizers`, or
    `%USERPROFILE%\.local\share\prodex-optimizers` on Windows when `HOME` is unset
 
-Command tools may also be resolved from `PATH`. Managed paths are canonicalized;
+Command tools may also be resolved from `PATH`. Managed executable paths are canonicalized and confined before any version or
+health probe executes;
 paths escaping a managed root, symlinks in plugin trees, unsupported file types,
 oversized files, oversized trees, and invalid manifests are rejected.
 
-Run this bounded, offline check:
+The install doctor checks all four automatically selected tools, including their
+version, shared-daemon, package, or plugin-tree contracts as appropriate. Run this
+bounded local check:
 
 ```bash
 prodex doctor --install
@@ -35,7 +38,7 @@ Missing optional tools do not fail the general doctor or `prodex super`. Use a
 required set when absence must be fatal:
 
 ```bash
-prodex super --require-tool caveman
+prodex super --require-tool ponytail
 prodex super --require-tool rtk --dry-run
 ```
 
@@ -45,58 +48,36 @@ Release maintainers can recheck official stable versions with
 asset checksums, trust model, and cross-platform validation decisions. Normal
 Prodex launches never run this online check or update an external tool. Runtime compatibility is minimum/capability-based: missing tools remain optional, compatible stable releases at or above the minimum are accepted, and an installed-but-incompatible tool fails with an upgrade instruction. The audited latest-stable versions below are release-qualified references, not exact runtime allowlists.
 
-## Caveman
+## Automatic Super stack
 
-Caveman is not embedded in Prodex. Runtime accepts stable Caveman 2.3.1 or newer from a validated managed version directory. The table below records the current latest-stable release-qualified reference:
+`prodex s` and `prodex super` automatically select RTK, Codebase Memory MCP,
+Playwright MCP, and Ponytail. They do not require a `--tool` flag. Existing
+explicit user MCP configuration remains authoritative; absent default entries
+are created in the temporary overlay. Presidio still asks for consent before
+an interactive launch; `--presidio` and `--no-presidio` keep their existing
+non-interactive meanings. `--tool` adds to the automatic set, not replaces it.
 
-| Field | Current release-qualified reference |
-| --- | --- |
-| Version | `4.0.1` |
-| Source | `https://github.com/JuliusBrussee/caveman` |
-| Commit | `d262ab3882952a59312ff3537cd86d894523c5ab` |
-| Prodex tree SHA-256 | `2f3e5052f81cf47c85db4b710908b72e45ce73aeaea7ef2dc1e5c177af5cf6ce` |
+The release-qualified references for 0.166.1 are RTK 1.1.0, Codebase Memory MCP
+0.12.1, Playwright MCP 0.0.83, Ponytail 5.3.3, and Presidio 2.2.366. The freshness
+gate verifies upstream GitHub releases and the applicable npm/PyPI metadata.
+Qualification does not automatically replace running tools or services.
 
-For the current release-qualified reference, the managed path is:
+## Retired Caveman integration
 
-```text
-<managed-root>/caveman/4.0.1/
-```
+Caveman is no longer an optional tool as of 0.166.1. Explicit `--tool caveman`,
+`--require-tool caveman`, and `optional:caveman` are rejected. The Super overlay
+removes old Prodex Caveman marketplace entries, exact legacy instruction
+paragraphs, and managed versioned `AGENTS.md` references. User-authored
+instructions and the base Codex home remain unchanged. Externally installed
+Caveman files are not uninstalled or modified by Prodex.
 
-The directory must contain the upstream `AGENTS.md`,
-`skills/caveman/SKILL.md`, `.claude-plugin/plugin.json`, and this strict
-manifest as `prodex-tool.json`:
-
-```json
-{
-  "schema_version": 1,
-  "id": "caveman",
-  "version": "4.0.1",
-  "source": "https://github.com/JuliusBrussee/caveman",
-  "commit": "d262ab3882952a59312ff3537cd86d894523c5ab",
-  "tree_sha256": "2f3e5052f81cf47c85db4b710908b72e45ce73aeaea7ef2dc1e5c177af5cf6ce"
-}
-```
-
-Fetch and installation are explicit user operations. Prodex only validates the
-finished tree. Standalone optimizer and Claude-plugin command paths are retired;
-`prodex super` skips an optional tool unless `--require-tool <tool>` is present.
-
-Unversioned managed directories are rejected. Prodex chooses the newest stable version directory at or above 2.3.1. A newer stable release is accepted when the official source, manifest schema, required files, commit shape, and recomputed tree digest are self-consistent; the current latest-stable reference keeps the stronger audited commit/tree check.
-
-Prodex recomputes the complete tree digest before activation and treats that
-recomputed digest as authoritative. The current 4.0.1 reference requires its exact audited manifest digest. The previously qualified 3.2.0 release at commit `e20f07e8152a0c0360f58c09e79d30ac94329991` remains accepted only with its exact audited tree digest. For backward compatibility, a vetted 2.7.0
-checkout at commit `8b0c1d3699b8d83e87fe4605b378da20c41555e0` still accepts the
-legacy manifest digest written by earlier installers, while its actual tree
-must match `09127915a13a493146ed0392b6895bbbd5f620d276dda9f4e68a6722f96df950`.
-
-Caveman 4.0.1 documents telemetry as enabled by default for its CLI and agent
-hooks; its skill-only integration sends no telemetry. Users of the CLI or
-Claude plugin hooks can use Caveman's documented `caveman telemetry off` or
-`DO_NOT_TRACK=1` controls when telemetry is not desired.
+Restart an existing expose endpoint after upgrading to refresh its startup-time
+optional-tool inventory. Retired ABI id 0 remains reserved rather than being
+reused for another tool.
 
 ## Ponytail
 
-Ponytail uses the same versioned manifest/tree contract, accepts stable 4.9.0 or newer, and selects the newest compatible managed directory. The current release-qualified reference is `<managed-root>/ponytail/5.3.3/` with metadata:
+Ponytail uses a versioned manifest/tree contract, accepts stable 4.9.0 or newer, and selects the newest compatible managed directory. The current release-qualified reference is `<managed-root>/ponytail/5.3.3/` with metadata:
 
 - source: `https://github.com/DietrichGebert/ponytail`
 - commit: `7801d061243d7b753bad0e0b3c057cd250b11755`
@@ -120,13 +101,15 @@ override is inherited unchanged.
 Kiro launches retain that shared server but add `check_index_coverage` to the
 server's `disabledTools` list because Kiro/Bedrock rejects its top-level JSON
 Schema composition; all other Codebase Memory tools remain available.
-Playwright MCP requires validated Node.js 18+, `npx`, and Playwright MCP `0.0.79` or newer. Prodex invokes `npx --no-install @playwright/mcp`, probes the installed package version, and rejects an installed version below the minimum. `0.0.83` is the current latest-stable release-qualified reference.
-Presidio remains an explicit service selection and is checked by its existing doctor path. Prodex accepts official Presidio analyzer/anonymizer images at `2.2.364` or newer; the release-qualified defaults remain digest-pinned, while newer official images can be supplied with `PRODEX_PRESIDIO_ANALYZER_IMAGE` and `PRODEX_PRESIDIO_ANONYMIZER_IMAGE`. `--require-tool presidio` additionally requires healthy services
+Both ordinary launch and required-tool checks verify the Node runtime before
+probing the installed Playwright package. Playwright MCP requires validated Node.js 18+, `npx`, and Playwright MCP `0.0.79` or newer. Prodex invokes `npx --no-install @playwright/mcp`, probes the installed package version, and rejects an installed version below the minimum. `0.0.83` is the current latest-stable release-qualified reference.
+Presidio remains a consent-controlled service selection and uses the existing
+launch/expose health checks. Prodex accepts official Presidio analyzer/anonymizer images at `2.2.364` or newer; the release-qualified defaults remain digest-pinned, while newer official images can be supplied with `PRODEX_PRESIDIO_ANALYZER_IMAGE` and `PRODEX_PRESIDIO_ANONYMIZER_IMAGE`. `--require-tool presidio` additionally requires healthy services
 and `fail_mode = "closed"`, so an inspection failure cannot silently bypass
 redaction. The release-qualified 2.2.366 defaults are pinned to official image-index
 SHA-256 digests. Isolated service probes verify email detection, replacement and
 health responses without exposing host ports or using user data. The anonymizer
-image contains `cryptography` 50.0.1, outside the previously documented
+image contains `cryptography` 50.0.2, outside the previously documented
 GHSA-g6cj-pr64-35w5 affected range; this is not a blanket clean-image claim.
 Existing compatible 2.2.364 deployments are not automatically replaced, and
 English images still do not imply Indonesian recognizer support.

@@ -69,15 +69,11 @@ pub fn activate_optional_tools_for_codex(
         false,
     )?;
     for activation in &plan.activations {
-        match activation.tool.descriptor.id {
-            OptionalToolId::Caveman => {
-                crate::activate_caveman_for_codex(codex_home, &activation.tool)?;
-            }
-            OptionalToolId::Rtk => crate::rtk::configure_rtk_codex_home_with_command(
+        if activation.tool.descriptor.id == OptionalToolId::Rtk {
+            crate::rtk::configure_rtk_codex_home_with_command(
                 codex_home,
                 activation.tool.path.as_deref(),
-            )?,
-            _ => {}
+            )?;
         }
     }
     configure_selected_optimizer_codex_home(codex_home, &plan.activations, presidio_enabled)

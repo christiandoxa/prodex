@@ -27,7 +27,7 @@ fn compiled_optional_unavailable_instructions_hide_versions_while_manifest_keeps
         concat!(
             "Optional tools are validated once when this expose endpoint starts. Use only entries marked available; unavailable or incompatible tools are not active.\n",
             "Use program optional:<name> for validated aliases. Normal program names and paths keep their existing behavior.\n",
-            "- caveman: unavailable.\n- rtk: unavailable.\n- codebase-memory-mcp: unavailable.\n- playwright-mcp: unavailable.\n- ponytail: unavailable.\n- presidio: unavailable."
+            "- rtk: unavailable.\n- codebase-memory-mcp: unavailable.\n- playwright-mcp: unavailable.\n- ponytail: unavailable.\n- presidio: unavailable."
         )
     );
     let mut expected: Value =

@@ -1,47 +1,40 @@
 {
-  "instructions": "Optional tools are validated once when this expose endpoint starts. Use only entries marked available; unavailable or incompatible tools are not active.\nUse program optional:<name> for validated aliases. Normal program names and paths keep their existing behavior.\n- caveman [CodexPlugin]: program optional:caveman launches noninteractive Prodex Super with the validated Caveman plugin enabled.\n- rtk () [Command]: program optional:rtk; use it for noisy shell output.\n- codebase-memory-mcp (1.2.3) [McpServer]: program optional:codebase-memory-mcp; one-shot structural navigation is available with args cli --json <tool> ....\n- playwright-mcp (v\"quoted\"\nβ\u0000) [McpServer]: program optional:playwright-mcp starts the validated MCP package via npx; program optional:playwright launches noninteractive Prodex Super with Playwright enabled.\n- ponytail [CodexPlugin]: program optional:ponytail launches noninteractive Prodex Super with the validated Ponytail plugin enabled.\n- presidio () [Service]: program optional:presidio launches noninteractive Prodex Super with Presidio enabled; this alias exists only while Analyzer and Anonymizer are healthy.",
+  "instructions": "Optional tools are validated once when this expose endpoint starts. Use only entries marked available; unavailable or incompatible tools are not active.\nUse program optional:<name> for validated aliases. Normal program names and paths keep their existing behavior.\n- rtk [Command]: program optional:rtk; use it for noisy shell output.\n- codebase-memory-mcp () [McpServer]: program optional:codebase-memory-mcp; one-shot structural navigation is available with args cli --json <tool> ....\n- playwright-mcp (1.2.3) [McpServer]: program optional:playwright-mcp starts the validated MCP package via npx; program optional:playwright launches noninteractive Prodex Super with Playwright enabled.\n- ponytail (v\"quoted\"\nβ\u0000) [CodexPlugin]: program optional:ponytail launches noninteractive Prodex Super with the validated Ponytail plugin enabled.\n- presidio [Service]: program optional:presidio launches noninteractive Prodex Super with Presidio enabled; this alias exists only while Analyzer and Anonymizer are healthy.",
   "manifest": [
-    {
-      "alias": "optional:caveman",
-      "available": true,
-      "id": "caveman",
-      "kind": "CodexPlugin",
-      "version": null
-    },
     {
       "alias": "optional:rtk",
       "available": true,
       "id": "rtk",
       "kind": "Command",
-      "version": ""
+      "version": null
     },
     {
       "alias": "optional:codebase-memory-mcp",
       "available": true,
       "id": "codebase-memory-mcp",
       "kind": "McpServer",
-      "version": "1.2.3"
+      "version": ""
     },
     {
       "alias": "optional:playwright-mcp",
       "available": true,
       "id": "playwright-mcp",
       "kind": "McpServer",
-      "version": "v\"quoted\"\nβ\u0000"
+      "version": "1.2.3"
     },
     {
       "alias": "optional:ponytail",
       "available": true,
       "id": "ponytail",
       "kind": "CodexPlugin",
-      "version": null
+      "version": "v\"quoted\"\nβ\u0000"
     },
     {
       "alias": "optional:presidio",
       "available": true,
       "id": "presidio",
       "kind": "Service",
-      "version": ""
+      "version": null
     }
   ]
 }

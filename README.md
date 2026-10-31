@@ -176,7 +176,6 @@ The npm package installs the Prodex wrapper and platform binary only; it require
 
 Prodex Super keeps a deliberately small optional stack:
 
-- [Caveman](https://github.com/JuliusBrussee/caveman) for an optional response-style plugin.
 - [RTK](https://github.com/rtk-ai/rtk) for noisy shell output.
 - [Codebase Memory MCP](https://github.com/DeusData/codebase-memory-mcp) for structural code navigation.
 - [Playwright MCP](https://github.com/microsoft/playwright-mcp) for browser inspection and automation.
@@ -186,48 +185,21 @@ Prodex Super keeps a deliberately small optional stack:
 <details>
 <summary>Tool discovery and compatibility</summary>
 
-Caveman is externally installed and validated; Smart Context is built into the Codex runtime proxy, not guaranteed for native opaque CLIs. Every default Codex-based `prodex s` launch adds the installed compatible Playwright MCP package to its temporary overlay when Node.js 18+ and `npx` pass launch-time validation. Prodex does not require one exact optional-tool version at runtime: missing tools are skipped, compatible releases at or above each minimum are accepted, and an installed-but-incompatible tool fails with an upgrade instruction. Release qualification still tracks the latest stable references. See [Optional Tools](docs/optional-tools.md) for minimum versions, latest-stable references, managed paths, and validation rules.
+The four installed, compatible coding tools are selected automatically; Presidio still asks for consent at interactive launch. Smart Context is built into the Codex runtime proxy, not guaranteed for native opaque CLIs. Every default Codex-based `prodex s` launch adds the installed compatible Playwright MCP package to its temporary overlay when Node.js 18+ and `npx` pass launch-time validation. Prodex does not require one exact optional-tool version at runtime: missing tools are skipped, compatible releases at or above each minimum are accepted, and an installed-but-incompatible tool fails with an upgrade instruction. Release qualification still tracks the latest stable references. See [Optional Tools](docs/optional-tools.md) for minimum versions, latest-stable references, managed paths, and validation rules.
 
 </details>
 
 <details>
 <summary>Remote optional-tool aliases</summary>
 
-`prodex s expose exec` snapshots the same launch-resolved optional-tool stack when the endpoint starts and advertises the usable entries in MCP initialize instructions and the `prodex_super_exec` tool metadata. Remote callers can use explicit `program: "optional:<tool>"` aliases without guessing installation paths: `optional:rtk` and `optional:codebase-memory-mcp` run their validated executables directly, `optional:playwright-mcp` runs the validated Playwright MCP package through `npx --no-install`, and `optional:caveman`, `optional:ponytail`, `optional:playwright`, and `optional:presidio` launch the corresponding Prodex Super integration. Presidio is advertised only while both configured services pass a bounded health probe. Ordinary `program` names and absolute paths keep their existing behavior and are never silently remapped.
+`prodex s expose exec` snapshots the same launch-resolved optional-tool stack when the endpoint starts and advertises the usable entries in MCP initialize instructions and the `prodex_super_exec` tool metadata. Remote callers can use explicit `program: "optional:<tool>"` aliases without guessing installation paths: `optional:rtk` and `optional:codebase-memory-mcp` run their validated executables directly, `optional:playwright-mcp` runs the validated Playwright MCP package through `npx --no-install`, and `optional:ponytail`, `optional:playwright`, and `optional:presidio` launch the corresponding Prodex Super integration. Presidio is advertised only while both configured services pass a bounded health probe. Ordinary `program` names and absolute paths keep their existing behavior and are never silently remapped.
 
 </details>
 
 <details>
 <summary>Install and verify the Super tools</summary>
 
-Caveman (Prodex-vetted `3.1.0` checkout):
-
-```bash
-export PRODEX_OPTIMIZERS_HOME="${PRODEX_OPTIMIZERS_HOME:-${XDG_DATA_HOME:-$HOME/.local/share}/prodex-optimizers}"
-install -d "$PRODEX_OPTIMIZERS_HOME/caveman"
-git clone --no-checkout https://github.com/JuliusBrussee/caveman \
-  "$PRODEX_OPTIMIZERS_HOME/caveman/3.1.0"
-git -C "$PRODEX_OPTIMIZERS_HOME/caveman/3.1.0" config core.autocrlf false
-git -C "$PRODEX_OPTIMIZERS_HOME/caveman/3.1.0" checkout --detach \
-  8af1f1b9b1346bca0722a1556f119b4e6675cc96
-cat >"$PRODEX_OPTIMIZERS_HOME/caveman/3.1.0/prodex-tool.json" <<'JSON'
-{
-  "schema_version": 1,
-  "id": "caveman",
-  "version": "3.1.0",
-  "source": "https://github.com/JuliusBrussee/caveman",
-  "commit": "8af1f1b9b1346bca0722a1556f119b4e6675cc96",
-  "tree_sha256": "2ca3549a88da2fc49b2abda20c90a1a8701f56833e2b19e60bdcede3ce68b316"
-}
-JSON
-
-prodex doctor --install
-prodex super --tool caveman --dry-run
-```
-
-The target directory must not already exist. Prodex validates the commit metadata and complete tree digest before activating Caveman. Caveman 3.1.0 documents telemetry as enabled by default for its CLI and agent hooks; its skill-only integration sends no telemetry. Use Caveman's documented `caveman telemetry off` or `DO_NOT_TRACK=1` controls when running its CLI/plugin hooks if telemetry is not desired.
-
-RTK (latest stable `0.52.0`, externally managed):
+RTK (latest stable `1.1.0`, externally managed):
 
 ```bash
 brew install rtk
@@ -235,11 +207,11 @@ brew install rtk
 rtk_dir="$(mktemp -d)"
 trap 'rm -rf "$rtk_dir"' EXIT
 curl -fsSLo "$rtk_dir/checksums.txt" \
-  https://github.com/rtk-ai/rtk/releases/download/v0.52.0/checksums.txt
-curl -fsSLo "$rtk_dir/rtk.tar.gz" \
-  https://github.com/rtk-ai/rtk/releases/download/v0.52.0/rtk-x86_64-unknown-linux-musl.tar.gz
+  https://github.com/rtk-ai/rtk/releases/download/v1.1.0/checksums.txt
+curl -fsSLo "$rtk_dir/rtk-x86_64-unknown-linux-musl.tar.gz" \
+  https://github.com/rtk-ai/rtk/releases/download/v1.1.0/rtk-x86_64-unknown-linux-musl.tar.gz
 (cd "$rtk_dir" && grep '  rtk-x86_64-unknown-linux-musl.tar.gz$' checksums.txt | sha256sum --check)
-tar -xzf "$rtk_dir/rtk.tar.gz" -C "$rtk_dir"
+tar -xzf "$rtk_dir/rtk-x86_64-unknown-linux-musl.tar.gz" -C "$rtk_dir"
 install -m 0755 "$rtk_dir/rtk" "$HOME/.local/bin/rtk"
 
 rtk --version
@@ -247,18 +219,20 @@ rtk gain
 prodex doctor --install
 ```
 
-Use the matching archive and checksum row from the official v0.52.0 release on
+The full RTK distribution includes a BUSL-1.1 engine; the separately published
+`rtk-oss` edition is Apache-2.0-only. Choose the distribution deliberately.
+Use the matching archive and checksum row from the official v1.1.0 release on
 other architectures. Finish any process using the old executable before an
 explicit upgrade; Prodex never replaces RTK during startup.
 
-Codebase Memory MCP (latest stable `0.11.0`):
+Codebase Memory MCP (latest stable `0.12.1`):
 
 ```bash
 cbm_install_dir="$(mktemp -d)"
 trap 'rm -rf "$cbm_install_dir"' EXIT
 curl -fsSLo "$cbm_install_dir/install.sh" \
-  https://raw.githubusercontent.com/DeusData/codebase-memory-mcp/v0.11.0/install.sh
-CBM_DOWNLOAD_URL=https://github.com/DeusData/codebase-memory-mcp/releases/download/v0.11.0 \
+  https://raw.githubusercontent.com/DeusData/codebase-memory-mcp/a7158ac2f48ca646b4527341b76f930f2aeff87e/install.sh
+CBM_DOWNLOAD_URL=https://github.com/DeusData/codebase-memory-mcp/releases/download/v0.12.1 \
   bash "$cbm_install_dir/install.sh" --skip-config
 codebase-memory-mcp daemon status || true
 prodex doctor --install
@@ -277,7 +251,7 @@ Playwright MCP (minimum supported `0.0.79`; current latest-stable reference `0.0
 ```bash
 node --version
 npx --version
-npm install -g @playwright/mcp@latest
+npm install -g @playwright/mcp@0.0.83
 npx --no-install @playwright/mcp install-browser chrome
 npx --no-install @playwright/mcp --version
 prodex doctor --install
@@ -288,24 +262,24 @@ The browser install command above installs the Chrome channel used by Prodex's d
 
 Prodex preserves inherited `[mcp_servers.playwright]` entries. Add a custom entry to the base profile's `config.toml` to change flags, use a persistent/headed browser, or set `enabled = false`; the temporary Super overlay will not replace it.
 
-Ponytail (Prodex-vetted `4.13.0` checkout):
+Ponytail (Prodex-vetted `5.3.3` checkout):
 
 ```bash
 export PRODEX_OPTIMIZERS_HOME="${PRODEX_OPTIMIZERS_HOME:-${XDG_DATA_HOME:-$HOME/.local/share}/prodex-optimizers}"
 install -d "$PRODEX_OPTIMIZERS_HOME/ponytail"
 git clone --no-checkout https://github.com/DietrichGebert/ponytail \
-  "$PRODEX_OPTIMIZERS_HOME/ponytail/4.13.0"
-git -C "$PRODEX_OPTIMIZERS_HOME/ponytail/4.13.0" config core.autocrlf false
-git -C "$PRODEX_OPTIMIZERS_HOME/ponytail/4.13.0" checkout --detach \
-  08e952d7a8057a57ce561ff1330d093fd92eec67
-cat >"$PRODEX_OPTIMIZERS_HOME/ponytail/4.13.0/prodex-tool.json" <<'JSON'
+  "$PRODEX_OPTIMIZERS_HOME/ponytail/5.3.3"
+git -C "$PRODEX_OPTIMIZERS_HOME/ponytail/5.3.3" config core.autocrlf false
+git -C "$PRODEX_OPTIMIZERS_HOME/ponytail/5.3.3" checkout --detach \
+  7801d061243d7b753bad0e0b3c057cd250b11755
+cat >"$PRODEX_OPTIMIZERS_HOME/ponytail/5.3.3/prodex-tool.json" <<'JSON'
 {
   "schema_version": 1,
   "id": "ponytail",
-  "version": "4.13.0",
+  "version": "5.3.3",
   "source": "https://github.com/DietrichGebert/ponytail",
-  "commit": "08e952d7a8057a57ce561ff1330d093fd92eec67",
-  "tree_sha256": "4187a87a014975e268d1e6a0ea553382e7d53232a2f2ea741941c0b1c412dd2f"
+  "commit": "7801d061243d7b753bad0e0b3c057cd250b11755",
+  "tree_sha256": "3bd59937f9375a418f9f85c92b30b5d1404491578b784afa76d32ab2c1173af3"
 }
 JSON
 
@@ -322,12 +296,12 @@ docker run -d --name presidio-analyzer \
   --label com.prodex.presidio.managed=true \
   --label com.prodex.presidio.service=presidio-analyzer \
   -p 127.0.0.1:5002:3000 \
-  ghcr.io/data-privacy-stack/presidio-analyzer:2.2.364@sha256:ae8f6f111ac2f04e3fec552f7f80edd0dcbfa2dd69ee1b9e030475be31669885
+  ghcr.io/data-privacy-stack/presidio-analyzer:2.2.366@sha256:036d2f9b3c274fb36497383acef8f2d5aea528a014801c2c3040fb067990c79c
 docker run -d --name presidio-anonymizer \
   --label com.prodex.presidio.managed=true \
   --label com.prodex.presidio.service=presidio-anonymizer \
   -p 127.0.0.1:5001:3000 \
-  ghcr.io/data-privacy-stack/presidio-anonymizer:2.2.364@sha256:e567013893ebc80994e3799f6f55c86aa1f0b0fadb779571ab346f0ec45365c1
+  ghcr.io/data-privacy-stack/presidio-anonymizer:2.2.366@sha256:b4d9ec900135c694b84353e03e1abd5127ccdfcd916d32db73002c28f0eaddc7
 prodex super --require-tool presidio --dry-run
 ```
 
@@ -443,12 +417,12 @@ This reads the installed Kiro CLI state from the local auth database, snapshots 
 
 `prodex s` is the daily alias for `prodex super`. It enables:
 
-- Caveman and Ponytail.
-- RTK shell-output guidance.
+- Ponytail plugin and lifecycle hooks when installed.
+- RTK shell-output wrappers and guidance when installed.
 - Codebase Memory MCP when installed.
-- Playwright MCP when Node.js 18+ and `npx` are available.
+- Playwright MCP when Node.js 18+, `npx`, and a compatible package are installed.
 - Smart Context Autopilot on Codex/provider-bridge paths.
-- optional Presidio redaction.
+- Presidio redaction after the existing interactive consent prompt.
 
 ```bash
 prodex s
@@ -463,7 +437,7 @@ prodex super --require-tool presidio --dry-run
 Select or require tools explicitly when needed:
 
 ```bash
-prodex super --tool caveman --require-tool rtk
+prodex super --tool ponytail --require-tool rtk
 prodex super --presidio
 ```
 
@@ -753,7 +727,7 @@ Codex `rust-v0.153.2` thread classification remains transparent passthrough. `--
 ```bash
 prodex exec --thread-source automated_review "review this repository"
 prodex run exec --thread-source automated_review "review this repository"
-prodex super --tool caveman exec --thread-source automated_review "review this repository"
+prodex super --tool ponytail exec --thread-source automated_review "review this repository"
 prodex s --no-presidio --no-sub-agent exec --thread-source automated_review "review this repository"
 prodex exec fork THREAD_ID --thread-source automated_review "continue the review"
 ```
@@ -763,7 +737,7 @@ Prodex preserves the value and its position in Codex argv. It does not inject Co
 ```bash
 prodex -c features.compaction_image_budget=true exec "review this repository"
 prodex run -c features.compaction_image_budget=true exec "review this repository"
-prodex super --tool caveman -c features.compaction_image_budget=true exec "review this repository"
+prodex super --tool ponytail -c features.compaction_image_budget=true exec "review this repository"
 prodex s --no-presidio --no-sub-agent -c features.compaction_image_budget=true exec "review this repository"
 prodex s --provider gemini -c features.compaction_image_budget=true exec "review this repository"
 prodex -c features.compaction_image_budget=false exec "review this repository"
@@ -803,8 +777,8 @@ prodex plugin marketplace
 | Mode | Command | Description |
 |---|---|---|
 | Normal Codex | `prodex` or `prodex run` | Managed Codex launch with profile selection and quota routing. |
-| Optional tools | `prodex super --tool caveman` | Selects tools for the Super invocation. |
-| Super | `prodex s` or `prodex super` | Daily mode with Caveman, RTK guidance, full access, and deterministic/local token optimizations. |
+| Optional tools | `prodex super --tool ponytail` | Selects tools for the Super invocation. |
+| Super | `prodex s` or `prodex super` | Daily mode with RTK, Codebase Memory, Playwright, Ponytail, full access, and deterministic/local token optimizations. |
 
 <details>
 <summary>Normal Codex — managed Codex launch</summary>

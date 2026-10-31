@@ -1,29 +1,8 @@
 {
   "schema_version": 1,
   "audited_at": "2026-10-27T15:33:13.729228+00:00",
-  "release": "0.439.5",
+  "release": "0.166.1",
   "tools": [
-    {
-      "id": "caveman",
-      "repository": "https://github.com/JuliusBrussee/caveman",
-      "latest_stable": "4.0.1",
-      "release": "v4.0.1",
-      "tag_object": "d0be14f2dc92a99d12e717465d6908723ab9bfdb",
-      "commit": "d262ab3882952a59312ff3537cd86d894523c5ab",
-      "git_tree": "bb019ab94786b5e2fe97a3e4965454fa9ed40253",
-      "source_archive_sha256": "56cfa149b6c5e52560dd720df022b2c70fe9a21a9708621ca420d8bd0dfea531",
-      "prodex_tree_sha256": "2f3e5052f81cf47c85db4b710908b72e45ce73aeaea7ef2dc1e5c177af5cf6ce",
-      "license": "Apache-2.0",
-      "runtime": "Node.js >=18; externally managed immutable checkout",
-      "platforms": [
-        "linux",
-        "macos",
-        "windows"
-      ],
-      "decision": "ADOPT_PACKAGE",
-      "notes": "Re-audited for Prodex 0.437.11 against official v4.0.1 tag, commit and tree after freshness drift. Canonical Prodex digest covers 1785 regular files / 22272181 bytes with no symlinks or tree-limit exceptions. Required AGENTS, skill and Claude plugin hook object remain compatible. No Caveman installer or upstream hook was executed and no user tool was upgraded. The prior 3.2.0 identity remains strictly pinned; minimum version stays 2.3.1.",
-      "audited_at": "2026-10-14T01:12:55.286737+00:00"
-    },
     {
       "id": "rtk",
       "repository": "https://github.com/rtk-ai/rtk",
@@ -149,5 +128,6 @@
       "notes": "Verified official multi-platform image indexes and shipped 2.2.366 project metadata. Actual Flask health/analyze/anonymize routes passed synthetic email detection and replacement with network disabled, no host mounts or published ports. Missing text remains a 500 service error; no assertion was relaxed. Response item score remains compatible. The images now use their Python-based healthcheck rather than curl; Prodex HTTP health checks are unchanged. Existing user services were not restarted. Opt-in, English model scope, and the 2.2.364 compatible minimum are unchanged.",
       "audited_at": "2026-10-27T15:33:13.729228+00:00"
     }
-  ]
+  ],
+  "freshness_checked_at": "2026-10-31T00:48:35.767837+00:00"
 }

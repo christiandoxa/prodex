@@ -70,7 +70,9 @@ fn super_defaults_to_yolo_access_with_minimal_super_prefixes() {
     assert!(args.full_access);
     assert!(args.smart_context);
     let tools = args.selected_tool_set();
-    assert!(tools.contains(prodex_optional_tools::OptionalToolId::Caveman));
+    assert!(tools.contains(prodex_optional_tools::OptionalToolId::CodebaseMemoryMcp));
+    assert_eq!(tools.iter().count(), 4);
+    assert!(!tools.contains(prodex_optional_tools::OptionalToolId::Presidio));
     assert!(tools.contains(prodex_optional_tools::OptionalToolId::Rtk));
     assert!(tools.contains(prodex_optional_tools::OptionalToolId::Ponytail));
     assert!(tools.contains(prodex_optional_tools::OptionalToolId::PlaywrightMcp));
@@ -294,4 +296,34 @@ fn super_presidio_flags_conflict() {
     assert!(
         parse_cli_command_from(["prodex", "super", "--presidio", "--no-presidio", "exec"]).is_err()
     );
+}
+
+#[test]
+fn super_rejects_retired_plugin_selection_and_keeps_presidio_prompt_preference() {
+    for command in ["s", "super"] {
+        for flag in ["--tool", "--require-tool"] {
+            assert!(parse_cli_command_from(["prodex", command, flag, "caveman"]).is_err());
+        }
+        let Commands::Super(args) = parse_cli_command_from(["prodex", command]).unwrap() else {
+            panic!("expected Super command");
+        };
+        assert_eq!(args.presidio_preference(), None);
+        for enabled in [false, true] {
+            let Commands::Super(args) = parse_cli_command_from(["prodex", command]).unwrap() else {
+                panic!("expected Super command");
+            };
+            let runtime = args.into_runtime_tool_args_with_presidio(enabled).unwrap();
+            let mut expected = vec![
+                prodex_optional_tools::OptionalToolId::Rtk,
+                prodex_optional_tools::OptionalToolId::CodebaseMemoryMcp,
+                prodex_optional_tools::OptionalToolId::PlaywrightMcp,
+                prodex_optional_tools::OptionalToolId::Ponytail,
+            ];
+            if enabled {
+                expected.push(prodex_optional_tools::OptionalToolId::Presidio);
+            }
+            assert_eq!(runtime.tools, expected);
+            assert_eq!(runtime.presidio, enabled);
+        }
+    }
 }

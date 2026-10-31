@@ -143,11 +143,13 @@ prodex s --no-presidio
 Use `prodex run` when normal Codex approvals and workspace-trust prompts are
 preferred.
 
-Optional tools are typed and session-local:
+RTK, Codebase Memory MCP, Playwright MCP, and Ponytail are selected automatically
+when installed and compatible. Presidio keeps the interactive prompt above.
+Optional-tool flags are additive and session-local:
 
 ```bash
 prodex super --tool rtk --tool ponytail
-prodex super --require-tool caveman
+prodex super --require-tool ponytail
 ```
 
 Missing tools are skipped unless required. Optional tools are external, never
