@@ -2,6 +2,78 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.166.1 - 2026-10-31
+
+### Docs
+
+- Describe the 0.166.1 optional-tool changes (`94b40bd`)
+
+### Misc
+
+- Retire Caveman and harden automatic launch (`eb15764`)
+# Prodex 0.166.1
+
+This release removes the Caveman integration while preserving the automatic
+Super workflow and the existing Presidio consent prompt. Codex remains a
+separate installation.
+
+## New Features
+
+- Refresh the five-tool release-qualified inventory and installation examples.
+- Report the health of all four automatic tools in `prodex doctor --install`,
+  including package, shared-daemon, and plugin-tree validation.
+
+## Bug Fixes
+
+- Retire Caveman from discovery, activation, CLI tool selection, remote aliases,
+  and release qualification. Preserve the ABI ids of the remaining tools.
+- Remove only generated legacy Caveman configuration and managed instruction
+  references from temporary overlays; leave user instructions and base homes intact.
+- Validate managed executable confinement before executing version or health
+  probes. Reject an escaping symlink without executing its target.
+- Apply the same Node.js 18+ validation to ordinary Playwright launch and full
+  health checks, before probing the installed MCP package.
+
+## Compatibility
+
+`prodex s` and `prodex super` continue to select RTK, Codebase Memory MCP,
+Playwright MCP, and Ponytail automatically when installed and compatible.
+Presidio retains its interactive prompt and explicit enable/disable flags.
+
+| Tool | Release-qualified reference |
+| --- | --- |
+| RTK | 1.1.0 |
+| Codebase Memory MCP | 0.12.1 |
+| Playwright MCP | 0.0.83 |
+| Ponytail | 5.3.3 |
+| Presidio | 2.2.366 |
+
+Compatible minimum versions remain supported. Normal launches do not download,
+upgrade, or replace external tools. This release does not add TokenEconomizer
+or change provider routing.
+
+## Verification
+
+Local validation covers the full preflight, workspace compilation and Clippy,
+retired-tool rejection, exact automatic selection, Presidio preferences,
+pre-probe confinement, Node version gates, and non-destructive overlay cleanup.
+Isolated smoke checks cover a real headless browser, the Codebase Memory MCP
+bridge, RTK exit propagation, Ponytail startup/resume/sub-agent hooks, and
+synthetic Presidio email redaction. No live model inference is required.
+Publication requires the exact-SHA CI gate, all six platform builds, checksums,
+malware scanning, provenance, and signing.
+
+## Upgrade
+
+Start a new Prodex runtime after upgrading. Existing expose endpoints must
+restart to refresh their snapshotted tool inventory. Externally installed
+Caveman files are not uninstalled or modified; the new Prodex runtime no longer
+loads that integration.
+
+## Changelog
+
+Full Changelog: [0.166.0...0.166.1](https://github.com/christiandoxa/prodex/compare/0.166.0...0.166.1)
+
 ## 0.166.0 - 2026-10-30
 
 ### Docs
@@ -12,46 +84,6 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 
 - Preserve Guardian parent routing affinity (`203a622`)
 - Accommodate Codex 0.166.0 policy responses (`1831d9f`)
-# Prodex 0.166.0
-
-This release aligns Prodex with the Codex 0.166.0 runtime compatibility
-baseline and preserves Guardian reviewer ownership across profile routing.
-Codex remains a separate installation.
-
-## New Features
-
-- Qualify the Codex 0.166.0 upstream baseline and offline compatibility replay.
-- Route Guardian reviewer requests to the known parent response's profile when
-  stronger continuation affinity is absent. Preserve the parent's applicable
-  upstream routing cookies for reviewer WebSocket handshakes.
-
-## Bug Fixes
-
-- Forward upstream `policy_capacity_unavailable` HTTP 503 responses so Codex
-  can decide whether to retry without rotating the account as a quota failure.
-- Keep an existing reviewer on its parent profile when that profile encounters
-  a quota error, and reuse an upstream socket only for the same routing pin.
-- Preserve local tags that are absent from the remote during release metadata
-  synchronization and render historical changelog entries consistently on
-  clean clones.
-
-## Verification
-
-Regression coverage includes HTTP and compact response transparency, Guardian
-profile affinity and quota handling, bounded cookie storage, WebSocket reuse,
-and a loopback TLS handshake fixture. The release qualifies Ponytail 5.3.3
-and the Kiro CLI 2.35.2 native client reference. Compatibility tests use local
-fixtures rather than live inference or user credentials. Publication requires
-CI, six-platform builds, artifact checksums, malware scanning, and provenance.
-
-## Upgrade
-
-Install the standalone Prodex release and start a new runtime to use these
-changes. Codex and already-running processes are not replaced by this release.
-
-## Changelog
-
-Full Changelog: [0.165.1...0.166.0](https://github.com/christiandoxa/prodex/compare/0.165.1...0.166.0)
 
 ## 0.165.1 - 2026-10-28
 
