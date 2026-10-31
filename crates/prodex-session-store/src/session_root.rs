@@ -149,15 +149,13 @@ fn read_identity(home: &Path, id: &str) -> Result<Option<SessionIdentity>> {
         ]
         .into_iter()
         .flatten()
+        .filter(|value| !value.is_null())
         {
-            if !value.is_null() {
-                let value =
-                    validated_id(value.as_str().context("invalid session parent identity")?)?;
-                ensure!(
-                    parent.as_deref() == Some(&value),
-                    "session parent identities disagree"
-                );
-            }
+            let value = validated_id(value.as_str().context("invalid session parent identity")?)?;
+            ensure!(
+                parent.as_deref() == Some(&value),
+                "session parent identities disagree"
+            );
         }
         let root_hint = fields
             .get("session_id")
