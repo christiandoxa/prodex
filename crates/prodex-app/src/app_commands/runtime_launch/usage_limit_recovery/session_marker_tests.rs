@@ -230,3 +230,123 @@ fn concurrent_descendant_notifications_do_not_replace_the_root_marker() {
     drop(monitor);
     fs::remove_dir_all(root).unwrap();
 }
+
+#[test]
+fn first_legacy_child_notification_resolves_persisted_root() {
+    let root = fixture_root("legacy-child-first-root");
+    let (_home, _shared) = configured_env(&root);
+    let paths = AppPaths::discover().unwrap();
+    let parent_path = populate_fixture(&root, &paths, &["a", "b"]);
+    let child_id = "01900000-0000-7000-8000-000000000714";
+    let child_path = parent_path
+        .parent()
+        .unwrap()
+        .join(format!("rollout-2026-08-29T01-01-00-{child_id}.jsonl"));
+    let child = serde_json::json!({
+        "type":"session_meta", "payload":{
+            "id":child_id, "session_id":SESSION_ID, "parent_thread_id":SESSION_ID,
+            "multi_agent_version":"v2", "source":{"subagent":{"thread_spawn":{
+                "parent_thread_id":SESSION_ID, "depth":1
+            }}}, "cwd":"/tmp/prodex-p0"
+        }
+    });
+    fs::write(&child_path, format!("{child}\n")).unwrap();
+    let monitor = prepare_runtime_usage_limit_monitor(&[], false)
+        .unwrap()
+        .unwrap();
+    let payload = serde_json::json!({"type":"agent-turn-complete", "thread-id":child_id});
+    goal_resume::write_runtime_goal_session_marker(
+        &monitor.marker_path,
+        std::ffi::OsStr::new(&payload.to_string()),
+    )
+    .unwrap();
+    assert_eq!(
+        fs::read_to_string(&monitor.marker_path).unwrap().trim(),
+        SESSION_ID
+    );
+    assert_eq!(
+        fs::read_to_string(runtime_goal_session_offset_path(&monitor.marker_path))
+            .unwrap()
+            .trim(),
+        fs::metadata(&parent_path).unwrap().len().to_string(),
+        "the recovery cursor must refer to the parent, not its descendant"
+    );
+    drop(monitor);
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn session_start_marker_uses_header_and_length_not_full_rollout_history() {
+    let root = fixture_root("header-only-marker");
+    let (_home, _shared) = configured_env(&root);
+    let paths = AppPaths::discover().unwrap();
+    let session_path = populate_fixture(&root, &paths, &["a", "b"]);
+    let monitor = prepare_runtime_usage_limit_monitor(&[], false)
+        .unwrap()
+        .unwrap();
+    let length = 100 * 1024 * 1024;
+    fs::OpenOptions::new()
+        .write(true)
+        .open(&session_path)
+        .unwrap()
+        .set_len(length)
+        .unwrap();
+    goal_resume::write_runtime_goal_session_marker(
+        &monitor.marker_path,
+        std::ffi::OsStr::new(&serde_json::json!({"session_id":SESSION_ID}).to_string()),
+    )
+    .unwrap();
+    assert_eq!(
+        fs::read_to_string(&monitor.marker_path).unwrap().trim(),
+        SESSION_ID
+    );
+    assert_eq!(
+        fs::read_to_string(runtime_goal_session_offset_path(&monitor.marker_path))
+            .unwrap()
+            .trim(),
+        length.to_string()
+    );
+    assert_eq!(fs::metadata(session_path).unwrap().len(), length);
+    drop(monitor);
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn established_root_skips_unrelated_legacy_ancestry_io() {
+    let root = fixture_root("established-marker-noop");
+    let (_home, _shared) = configured_env(&root);
+    let paths = AppPaths::discover().unwrap();
+    let parent_path = populate_fixture(&root, &paths, &["a", "b"]);
+    let monitor = prepare_runtime_usage_limit_monitor(&[], false)
+        .unwrap()
+        .unwrap();
+    let payload = serde_json::json!({"session_id":SESSION_ID});
+    goal_resume::write_runtime_goal_session_marker(
+        &monitor.marker_path,
+        std::ffi::OsStr::new(&payload.to_string()),
+    )
+    .unwrap();
+    let offset_path = runtime_goal_session_offset_path(&monitor.marker_path);
+    let offset = fs::read(&offset_path).unwrap();
+    let child_id = "01900000-0000-7000-8000-000000000714";
+    let child_path = parent_path
+        .parent()
+        .unwrap()
+        .join(format!("rollout-2026-08-29T01-01-00-{child_id}.jsonl"));
+    fs::write(child_path, format!("{}\n", serde_json::json!({"type":"session_meta","payload":{
+        "id":child_id,"parent_thread_id":"01900000-0000-7000-8000-000000000999","multi_agent_version":"v2"
+    }}))).unwrap();
+    let payload = serde_json::json!({"thread-id":child_id});
+    goal_resume::write_runtime_goal_session_marker(
+        &monitor.marker_path,
+        std::ffi::OsStr::new(&payload.to_string()),
+    )
+    .unwrap();
+    assert_eq!(
+        fs::read_to_string(&monitor.marker_path).unwrap().trim(),
+        SESSION_ID
+    );
+    assert_eq!(fs::read(offset_path).unwrap(), offset);
+    drop(monitor);
+    fs::remove_dir_all(root).unwrap();
+}

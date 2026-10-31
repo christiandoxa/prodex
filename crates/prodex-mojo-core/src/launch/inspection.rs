@@ -11,6 +11,8 @@ pub struct LaunchArgumentInspection<'a> {
     pub first_positional: Option<usize>,
     pub resume_command: Option<usize>,
     pub resume_session: Option<&'a str>,
+    /// Exact argv slot selected by the compiled inspector, not a value-based search.
+    pub resume_session_index: Option<usize>,
     pub config_insertion: usize,
     pub governed_insertion: usize,
     pub is_exec: bool,
@@ -55,6 +57,7 @@ pub fn inspect_launch_arguments<'a>(
         first_positional: optional_index(meta[0], input.len())?,
         resume_command: optional_index(meta[1], input.len())?,
         resume_session: session,
+        resume_session_index: optional_index(meta[2], input.len())?,
         config_insertion: index(meta[3], input.len() + 1)?,
         governed_insertion: index(meta[4], input.len() + 1)?,
         is_exec: boolean(meta[5])?,

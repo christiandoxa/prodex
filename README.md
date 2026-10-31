@@ -661,7 +661,17 @@ The detailed live pool view (`prodex quota` or `prodex quota --all --detail`) ac
 prodex session list
 prodex session current
 prodex session current --parent-only
+prodex s 00000000-0000-7000-8000-000000000042
 ```
+
+Resume directly with `prodex s <uuid>`, or start `prodex s` and select the
+conversation with native `/resume`. A UUID belonging to a parent-owned native
+multi-agent V2 worker is resolved to its verified conversation root before
+provider/model selection. The saved-session footer also reports that root,
+including when a legacy child notification arrived first. Parent and child
+rollouts remain unchanged; workers are not converted into independent sessions.
+Missing or conflicting parent metadata is reported instead of guessing another
+conversation. Explicit remote endpoints retain their own session namespace.
 
 </details>
 

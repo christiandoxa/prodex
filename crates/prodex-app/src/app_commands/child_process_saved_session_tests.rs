@@ -122,3 +122,36 @@ fn saved_session_guidance_preserves_broken_pipe_errors() {
         io::ErrorKind::BrokenPipe
     );
 }
+
+#[test]
+fn saved_session_guidance_repairs_legacy_child_marker_but_not_history() {
+    let fixture = Fixture::new();
+    let sessions = fixture.0.join("sessions/2026/10/01");
+    fs::create_dir_all(&sessions).unwrap();
+    let root = sessions.join(format!("rollout-2026-10-01T01-00-00-{ID}.jsonl"));
+    let child = sessions.join(format!("rollout-2026-10-01T01-00-00-{OTHER}.jsonl"));
+    let root_content = format!(
+        "{}\n",
+        serde_json::json!({"type":"session_meta","payload":{"id":ID,"session_id":ID,"source":"cli"}})
+    );
+    let child_content = format!(
+        "{}\n",
+        serde_json::json!({"type":"session_meta","payload":{"id":OTHER,"session_id":ID,"parent_thread_id":ID,"multi_agent_version":"v2"}})
+    );
+    fs::write(&root, &root_content).unwrap();
+    fs::write(&child, &child_content).unwrap();
+    fs::write(fixture.0.join("owned.id"), OTHER).unwrap();
+    assert_eq!(
+        saved_session_id(&fixture.plan(&[])),
+        Some(Uuid::parse_str(ID).unwrap())
+    );
+    fs::remove_file(fixture.0.join("owned.id")).unwrap();
+    assert_eq!(
+        saved_session_id(&fixture.plan(&["resume", OTHER])),
+        Some(Uuid::parse_str(ID).unwrap())
+    );
+    assert_eq!(fs::read_to_string(&root).unwrap(), root_content);
+    assert_eq!(fs::read_to_string(&child).unwrap(), child_content);
+    fs::remove_file(root).unwrap();
+    assert_eq!(saved_session_id(&fixture.plan(&["resume", OTHER])), None);
+}

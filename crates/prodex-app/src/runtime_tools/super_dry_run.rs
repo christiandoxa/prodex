@@ -16,6 +16,9 @@ pub(crate) fn handle_super_runtime_tools_dry_run(
     sub_agent: Option<&ResolvedSuperSubAgent>,
 ) -> Result<()> {
     let mut args = args;
+    crate::app_commands::runtime_launch::resume_repair::normalize_super_resume_root(
+        &mut args.codex_args,
+    )?;
     crate::app_commands::runtime_launch::resolve_super_dry_run_main_agent(&mut args)?;
     let args =
         crate::app_commands::runtime_launch::resolved_super_runtime_tool_args(args, presidio)?;
