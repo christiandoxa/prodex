@@ -1,0 +1,66 @@
+{
+  "schema_version": 1,
+  "release": "v0.0.19",
+  "release_url": "https://github.com/openai/tunnel-client/releases/tag/v0.0.19",
+  "published_at": "2026-10-30T20:26:10Z",
+  "qualified_at": "2026-10-31T03:30:39.368762+00:00",
+  "source_commit": "01d67bb4da0d8359b808b4761f8db171ab682cd7",
+  "previous_release": "v0.0.18",
+  "delta_commits": 14,
+  "runtime_minimum": "0.0.13",
+  "qualification_scope": "Official Linux binary identity and CLI capabilities, upstream wrapper-relevant source delta review, loopback-only doctor probes, and deterministic child-environment regression. No live provider authentication, tunnel provisioning, or foreign-platform execution.",
+  "reviewed_upstream_owners": [
+    "pkg/runtimeconfig/config.go",
+    "pkg/runtimeconfig/file_config.go",
+    "pkg/controlplane/internal/roundtripper.go",
+    "pkg/controlplane/internal/dns_diagnostics.go",
+    "pkg/controlplane/internal/tunnel_service_client.go",
+    "pkg/mcpclient/forwarding_transport_impl.go",
+    "pkg/mcpclient/shared_connection_transport.go",
+    "pkg/mcpclient/serialized_forwarding_transport.go",
+    "pkg/mcpclient/transport_provider.go",
+    "docs/protocol.md"
+  ],
+  "compatibility_findings": [
+    "The existing run/config/static-key/health/log CLI capabilities remain available; the runtime minimum is unchanged.",
+    "The new stdio failure policy is parsed even with an HTTP MCP target. An unrelated invalid MCP_STDIO_FAILURE_POLICY blocks startup. Prodex now removes that ambient setting alongside its existing transport configuration isolation, without adding a new flag or YAML key that older compatible clients would reject.",
+    "Request-ID response metadata is additive. DNS diagnostics are bounded and do not change resolver or retry behavior. The reviewed generation changes fence stale stdio-child connections; Prodex continues to use its existing HTTP MCP endpoint.",
+    "Redis development-proxy retirement does not change the run invocation used by Prodex."
+  ],
+  "official_binary": {
+    "platform": "linux-amd64",
+    "asset": "tunnel-client-v0.0.19-linux-amd64.zip",
+    "sha256": "9ee9448592345a9dd1517fb79791ab54d24f051142eb92bcbe8cd355effc9142",
+    "published_digest": "sha256:9ee9448592345a9dd1517fb79791ab54d24f051142eb92bcbe8cd355effc9142",
+    "checksum_manifest_sha256": "797c7a4e5790fad997739d5b520a7f4e5530d2d5886badfa1539142e3b048aac",
+    "binary_sha256": "56d0120886ce91bfe31e7a5600f6a6594199a02e9b3eac671d5da0d7480c97a3"
+  },
+  "successful_probes": [
+    "--version",
+    "--help",
+    "run --help",
+    "codex --help",
+    "doctor --help",
+    "doctor --json with the exact Prodex YAML shape, synthetic static key and loopback-only MCP/OAuth endpoints"
+  ],
+  "required_run_flags_verified": [
+    "--config",
+    "--control-plane.base-url",
+    "--control-plane.tunnel-id",
+    "--control-plane.api-key",
+    "--health.listen-addr",
+    "--health.url-file",
+    "--log.level",
+    "--log.format"
+  ],
+  "regression": {
+    "test": "super_expose::openai_tunnel::version_policy_tests::http_tunnel_child_does_not_inherit_stdio_failure_policy",
+    "baseline": "Failed before the environment filter change: the conflicting stdio policy remained in the child environment.",
+    "after_fix": "All four openai_tunnel version/environment policy tests pass with real Mojo required.",
+    "official_binary_confirmation": "The official binary reports invalid MCP_STDIO_FAILURE_POLICY with an unrelated ambient value, then passes all mandatory doctor checks without it. The optional Codex plugin discovery check was skipped in the deliberately isolated HOME/PATH."
+  },
+  "live_tunnel_created": false,
+  "installed_binary_replaced": false,
+  "live_credentials_provided": false,
+  "synthetic_credentials_used": true
+}
