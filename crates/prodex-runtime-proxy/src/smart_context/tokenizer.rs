@@ -39,14 +39,17 @@ pub fn smart_context_count_serialized_request(
     let Some(text) = std::str::from_utf8(body).ok() else {
         return estimated_count(body);
     };
-    let Some(Tokenizer::O200kBase) = model.and_then(get_tokenizer) else {
-        return estimated_count(body);
+    let (bpe, family) = match model.and_then(get_tokenizer) {
+        Some(Tokenizer::O200kBase) => (tiktoken_rs::o200k_base_singleton(), "o200k_base"),
+        Some(Tokenizer::Cl100kBase) => (tiktoken_rs::cl100k_base_singleton(), "cl100k_base"),
+        Some(Tokenizer::O200kHarmony) => (tiktoken_rs::o200k_harmony_singleton(), "o200k_harmony"),
+        _ => return estimated_count(body),
     };
-    let bpe = tiktoken_rs::o200k_base_singleton();
     SmartContextTokenCount {
-        tokens: bpe.encode_with_special_tokens(text).len() as u64,
+        // Literal special-token spellings inside JSON are data, not control tokens.
+        tokens: bpe.count_ordinary(text) as u64,
         source: SmartContextTokenCountSource::TokenizerCounted,
-        tokenizer_family: Some("o200k_base"),
+        tokenizer_family: Some(family),
         confidence_basis_points: 10_000,
         error_bound_tokens: 0,
     }
@@ -75,13 +78,23 @@ mod tests {
         assert_eq!(counted.tokenizer_family, Some("o200k_base"));
         assert_eq!(counted.error_bound_tokens, 0);
 
-        let unsupported_family =
-            smart_context_count_serialized_request(b"hello world", Some("gpt-4"));
-        assert!(!unsupported_family.is_proven());
+        for (model, family) in [("gpt-4", "cl100k_base"), ("gpt-oss-120b", "o200k_harmony")] {
+            let counted = smart_context_count_serialized_request(b"hello world", Some(model));
+            assert!(counted.is_proven());
+            assert_eq!(counted.tokenizer_family, Some(family));
+        }
 
         let estimated =
             smart_context_count_serialized_request(b"hello world", Some("unknown-model"));
         assert!(!estimated.is_proven());
         assert!(estimated.error_bound_tokens > 0);
+    }
+
+    #[test]
+    fn smart_context_audit_literal_special_tokens_are_ordinary_text() {
+        let text = r#"{"input":"literal <|endoftext|> and <|fim_prefix|> are user data"}"#;
+        let actual = smart_context_count_serialized_request(text.as_bytes(), Some("gpt-5.4"));
+        let expected = tiktoken_rs::o200k_base_singleton().count_ordinary(text) as u64;
+        assert_eq!(actual.tokens, expected);
     }
 }

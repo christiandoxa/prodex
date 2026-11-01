@@ -75,7 +75,9 @@ pub(super) fn prepare_runtime_smart_context_body<'a>(
             token_count_after: &prepared.request_token_count,
             self_check: "pass_through_exact",
         });
-        if !commit_runtime_smart_context_static_context_observation(shared, &mut prepared) {
+        if !rollout.computes_shadow()
+            && !commit_runtime_smart_context_static_context_observation(shared, &mut prepared)
+        {
             return Ok(Cow::Borrowed(&request.body));
         }
         return Ok(Cow::Borrowed(&request.body));
@@ -106,7 +108,9 @@ pub(super) fn prepare_runtime_smart_context_body<'a>(
             token_count_after: &prepared.request_token_count,
             self_check: "noop",
         });
-        if !commit_runtime_smart_context_static_context_observation(shared, &mut prepared) {
+        if !rollout.computes_shadow()
+            && !commit_runtime_smart_context_static_context_observation(shared, &mut prepared)
+        {
             return Ok(Cow::Borrowed(&request.body));
         }
         return Ok(Cow::Borrowed(&request.body));
@@ -270,11 +274,24 @@ fn prepare_runtime_smart_context_body_input(
             static_context.fingerprints.clone(),
         );
     }
+    let missing_rehydrate_refs = runtime_smart_context_missing_artifact_refs_in_store(
+        runtime_smart_context_collect_rehydratable_artifact_ref_ids(&value),
+        &planned_state.artifacts,
+    );
+    if !missing_rehydrate_refs.is_empty() {
+        return Err(RuntimeSmartContextPrepareError {
+            missing_artifact_count: missing_rehydrate_refs.len(),
+        });
+    }
     let model_name = runtime_smart_context_normalized_model_name(
         value.get("model").and_then(serde_json::Value::as_str),
     );
+    // Wire indentation is not model context. Compare both candidates in the
+    // same canonical JSON representation while retaining original fallback bytes.
+    let canonical_body =
+        serde_json::to_vec(&value).expect("parsed Smart Context request must serialize");
     let request_token_count = runtime_proxy_crate::smart_context_count_serialized_request(
-        &request.body,
+        &canonical_body,
         model_name.as_deref(),
     );
     if !request_token_count.is_proven() {
@@ -288,15 +305,6 @@ fn prepare_runtime_smart_context_body_input(
             "unsupported_tokenizer",
         );
         return Ok(None);
-    }
-    let missing_rehydrate_refs = runtime_smart_context_missing_artifact_refs_in_store(
-        runtime_smart_context_collect_rehydratable_artifact_ref_ids(&value),
-        &planned_state.artifacts,
-    );
-    if !missing_rehydrate_refs.is_empty() {
-        return Err(RuntimeSmartContextPrepareError {
-            missing_artifact_count: missing_rehydrate_refs.len(),
-        });
     }
     let static_context_planned_state = static_context.state_changed.then(|| planned_state.clone());
     let exactness = runtime_proxy_crate::smart_context_exactness_guard(

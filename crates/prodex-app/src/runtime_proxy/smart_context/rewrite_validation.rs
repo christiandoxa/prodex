@@ -225,8 +225,8 @@ mod tests {
         let original = serde_json::json!({"input": [
             {"role": "system", "content": text},
             {"role": "developer", "content": text},
-            {"role": "user", "payload": {"a": [text, text]}},
-            {"output": {"escaped\"key": text}},
+            {"type":"function_call_output", "call_id":"first", "output":[{"type":"input_text", "text":text}, {"type":"input_text", "text":text}]},
+            {"type":"custom_tool_call_output", "call_id":"second", "output":text},
         ]});
         let mut candidate = original.clone();
         let mut stats = RuntimeSmartContextTransformStats::default();
@@ -236,9 +236,7 @@ mod tests {
         for index in 0..3 {
             assert_eq!(candidate["input"][index], original["input"][index]);
         }
-        let marker = candidate["input"][3]["output"]["escaped\"key"]
-            .as_str()
-            .unwrap();
+        let marker = candidate["input"][3]["output"].as_str().unwrap();
         assert_eq!(
             marker,
             format!(
@@ -255,7 +253,7 @@ mod tests {
             &mut expanded
         ));
         assert_eq!(expanded, original);
-        candidate["input"][3]["output"]["escaped\"key"] = serde_json::json!(format!(
+        candidate["input"][3]["output"] = serde_json::json!(format!(
             "[prodex-context-ref v=1 source=original-input[18446744073709551616] digest={} bytes={}]",
             runtime_proxy_crate::smart_context_hash_text(&text),
             text.len(),
@@ -266,7 +264,7 @@ mod tests {
     #[test]
     fn compiled_inline_probe_limit_does_not_invent_rewrite_candidates() {
         let mut value = serde_json::json!({"input": (0..257).map(|index| {
-            serde_json::json!({"output": format!("{index}: {}", "unique tool data ".repeat(80))})
+            serde_json::json!({"type":"function_call_output", "call_id":format!("call_{index}"), "output": format!("{index}: {}", "unique tool data ".repeat(80))})
         }).collect::<Vec<_>>()});
         let original = value.clone();
         let mut stats = RuntimeSmartContextTransformStats::default();
@@ -280,8 +278,8 @@ mod tests {
     fn duplicate_admission_requires_exact_text_in_distinct_input_items() {
         let text = "same exact tool output".repeat(64);
         let duplicate = serde_json::json!({"input": [
-            {"output": text.clone()},
-            {"output": text.clone()},
+            {"type":"function_call_output", "call_id":"call_a", "output": text.clone()},
+            {"type":"function_call_output", "call_id":"call_a", "output": text.clone()},
         ]});
         assert!(runtime_smart_context_has_duplicate_input_text(&duplicate));
 
@@ -290,8 +288,8 @@ mod tests {
         assert!(!runtime_smart_context_has_duplicate_input_text(&same_item));
 
         let distinct = serde_json::json!({"input": [
-            {"output": text},
-            {"output": "different tool output".repeat(64)},
+            {"type":"function_call_output", "call_id":"call_b", "output": text},
+            {"type":"function_call_output", "call_id":"call_b", "output": "different tool output".repeat(64)},
         ]});
         assert!(!runtime_smart_context_has_duplicate_input_text(&distinct));
     }
@@ -301,7 +299,7 @@ mod tests {
         let text = "same exact tool output".repeat(64);
         let original = serde_json::json!({
             "model": "gpt-5.4",
-            "input": [{"output": text.clone()}, {"output": text}],
+            "input": [{"type":"function_call_output", "call_id":"call_a", "output": text.clone()}, {"type":"function_call_output", "call_id":"call_b", "output": text}],
         });
         let mut candidate = original.clone();
         let mut stats = RuntimeSmartContextTransformStats::default();

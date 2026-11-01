@@ -56,8 +56,8 @@ fn smart_context_dedupes_repeated_input_text() {
     let repeated = "same ".repeat(300);
     let mut value = serde_json::json!({
         "input": [
-            {"type": "message", "content": repeated},
-            {"type": "message", "content": repeated}
+            {"type": "function_call_output", "call_id":"call_fixture", "output": repeated},
+            {"type": "function_call_output", "call_id":"call_fixture", "output": repeated}
         ]
     });
     let original = value.clone();
@@ -68,13 +68,13 @@ fn smart_context_dedupes_repeated_input_text() {
         &mut value, &stats
     ));
 
-    let reference = value["input"][1]["content"].as_str().unwrap();
+    let reference = value["input"][1]["output"].as_str().unwrap();
     assert!(reference.starts_with("[prodex-context-ref v=1 source=original-input[0]"));
     assert!(!reference.contains("psc"));
     assert_eq!(value["input"][2]["role"].as_str(), Some("developer"));
     assert_eq!(
         runtime_smart_context_expand_inline_references(&original, &value).unwrap()["input"][1]
-            ["content"]
+            ["output"]
             .as_str(),
         Some(repeated.as_str())
     );
@@ -86,15 +86,15 @@ fn smart_context_inline_reference_rejects_tampered_digest() {
     let repeated = "same ".repeat(300);
     let original = serde_json::json!({
         "input": [
-            {"type": "message", "content": repeated},
-            {"type": "message", "content": repeated}
+            {"type": "function_call_output", "call_id":"call_fixture", "output": repeated},
+            {"type": "function_call_output", "call_id":"call_fixture", "output": repeated}
         ]
     });
     let mut candidate = original.clone();
     let mut stats = RuntimeSmartContextTransformStats::default();
     runtime_smart_context_dedupe_input_text_within_request(&mut candidate, &mut stats);
-    let reference = candidate["input"][1]["content"].as_str().unwrap();
-    candidate["input"][1]["content"] =
+    let reference = candidate["input"][1]["output"].as_str().unwrap();
+    candidate["input"][1]["output"] =
         serde_json::Value::String(reference.replacen("sc2:", "sc2:0", 1));
 
     assert!(runtime_smart_context_expand_inline_references(&original, &candidate).is_none());
@@ -107,8 +107,8 @@ fn smart_context_dedupe_preserves_static_prompt_prefix() {
         "input": [
             {"role": "system", "content": repeated},
             {"role": "developer", "content": repeated},
-            {"type": "message", "content": repeated},
-            {"type": "message", "content": repeated}
+            {"type": "function_call_output", "call_id":"call_fixture", "output": repeated},
+            {"type": "function_call_output", "call_id":"call_fixture", "output": repeated}
         ]
     });
     let mut stats = RuntimeSmartContextTransformStats::default();
@@ -124,7 +124,7 @@ fn smart_context_dedupe_preserves_static_prompt_prefix() {
         Some(repeated.as_str())
     );
     assert!(
-        value["input"][3]["content"]
+        value["input"][3]["output"]
             .as_str()
             .unwrap()
             .contains("prodex-context-ref v=1")

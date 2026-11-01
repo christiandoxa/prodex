@@ -1,6 +1,10 @@
 use super::*;
 use std::borrow::Cow;
 
+#[cfg(feature = "mojo-quota")]
+#[path = "smart_context/audit.rs"]
+mod audit;
+
 #[path = "smart_context/budget.rs"]
 #[cfg(feature = "mojo-quota")]
 mod budget;

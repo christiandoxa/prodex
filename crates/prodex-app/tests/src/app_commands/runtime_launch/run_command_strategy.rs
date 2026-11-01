@@ -54,6 +54,7 @@ fn run_strategy_passes_explicit_model_to_runtime_preflight() {
     })
     .expect("run strategy should accept an explicit model");
 
+    assert!(strategy.runtime_request().smart_context_enabled);
     assert_eq!(
         strategy.runtime_request().requested_model.as_deref(),
         Some("gpt-5.6-luna")
@@ -747,7 +748,7 @@ fn run_strategy_auto_routes_explicit_exec_gemini_resume_sessions_to_provider_bri
 }
 
 #[test]
-fn run_command_strategy_keeps_smart_context_autopilot_disabled() {
+fn run_command_strategy_enables_smart_context_autopilot_for_ordinary_launch() {
     let strategy = RunCommandStrategy::new(RunArgs {
         profile: None,
         auto_rotate: false,
@@ -763,7 +764,7 @@ fn run_command_strategy_keeps_smart_context_autopilot_disabled() {
     })
     .unwrap();
 
-    assert!(!strategy.runtime_request().smart_context_enabled);
+    assert!(strategy.runtime_request().smart_context_enabled);
 }
 
 #[test]

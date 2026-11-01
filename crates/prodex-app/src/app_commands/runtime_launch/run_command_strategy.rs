@@ -201,7 +201,7 @@ impl RuntimeLaunchStrategy for RunCommandStrategy {
             include_code_review: self.include_code_review,
             requested_model: runtime_launch_cli_model(&self.codex_args)
                 .or_else(|| codex_cli_config_override_value(&self.codex_args, "model")),
-            smart_context_enabled: self.auto_external_provider.is_some(),
+            smart_context_enabled: true,
             presidio_redaction_enabled: false,
             model_context_window_tokens: self.model_context_window_tokens,
             gemini_thinking_budget_tokens: self.gemini_thinking_budget_tokens,

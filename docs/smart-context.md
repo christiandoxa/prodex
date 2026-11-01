@@ -2,12 +2,18 @@
 
 Smart Context is a conservative request rewrite inside the runtime proxy. It
 preserves protocol and continuation fields and returns the original bytes when
-a rewrite cannot be proved safe and token-positive.
+a rewrite cannot be proved safe and token-positive. Both ordinary `prodex` /
+`prodex run` and `prodex s` enable this same pre-commit engine. This does not
+enable optional tools in an ordinary launch or change Presidio consent.
 
 ## Current Rewrite Contract
 
 The active engine currently performs one production rewrite: exact duplicate
-text inside the same supported Responses request. The first occurrence stays
+tool-output text inside the same supported Responses request: `output` strings
+of `function_call_output` and `custom_tool_call_output`, or their direct
+`input_text` content parts. User/system/developer messages, assistant reasoning,
+tool arguments, call identities, media, and unknown future fields stay intact.
+The first eligible occurrence stays
 inline. Later occurrences become versioned inline references, and a
 `developer` message explains deterministic local expansion. Validation expands
 those references and compares the result with the original request before
@@ -79,8 +85,13 @@ request ID.
 
 ## Token Policy
 
-Known OpenAI model families use `tiktoken-rs` tokenizer counts over the exact
-serialized request, including the inline protocol. An applied rewrite must save
+Known OpenAI model families use `tiktoken-rs` tokenizer counts over canonical
+serialized JSON on both sides, including the inline protocol. Wire indentation
+is excluded and literal special-token spellings are counted as ordinary data.
+The library-proven `o200k_base`, `cl100k_base`, and `o200k_harmony` model
+mappings are supported; an unrecognized model is not assigned an encoding by
+guesswork. These are comparable reference-token counts, not a claim to reproduce
+the provider's hidden message framing, cached-input accounting, or bill. An applied rewrite must save
 more than `max(128 tokens, 3% of the original request)`. Unknown tokenizers and
 low-confidence estimates decline rewriting. Provider-observed usage,
 tokenizer-counted values, and estimates remain separately labeled.

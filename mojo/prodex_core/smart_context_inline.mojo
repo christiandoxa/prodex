@@ -2,7 +2,7 @@
 # strict parsing and source verification. SHA-256 acquisition stays in Rust.
 from std.memory import Pointer
 from rich_types import ProdexRichStringView
-from rich_text import rich_view_ptr, rich_view_prefix, rich_view_valid
+from rich_text import rich_view_ptr, rich_view_prefix, rich_view_valid, rich_view_matches_literal
 from parsed_json import (
     ParsedJson, ParsedJsonNode, JSON_ARRAY, JSON_STRING,
     pj_valid, pj_kind, pj_text, pj_field, pj_child, pj_next, pj_equal,
@@ -177,6 +177,30 @@ def inline_write(
     js_view(sink, ProdexRichStringView(tree.raw.ptr + UInt(cursor), tree.raw.len - UInt(cursor)))
 
 
+
+def inline_tool_output_text(source: ParsedJson, root: Int64, node: Int64) -> Bool:
+    # Protocol fields, tool arguments, user instructions, assistant reasoning and
+    # media are not interchangeable text, even when their bytes happen to match.
+    var kind = pj_text(source, pj_field(source, root, StringSlice("type")))
+    if not (
+        rich_view_matches_literal["function_call_output"](kind, False)
+        or rich_view_matches_literal["custom_tool_call_output"](kind, False)
+    ):
+        return False
+    var output = pj_field(source, root, StringSlice("output"))
+    if node == output:
+        return pj_kind(source, node) == JSON_STRING
+    if pj_kind(source, output) != JSON_ARRAY:
+        return False
+    var part = source.nodes[unsafe_offset=node].parent
+    if part < 0 or source.nodes[unsafe_offset=part].parent != output:
+        return False
+    var part_kind = pj_text(source, pj_field(source, part, StringSlice("type")))
+    return (
+        rich_view_matches_literal["input_text"](part_kind, False)
+        and pj_field(source, part, StringSlice("text")) == node
+    )
+
 def inline_kernel(
     input: InlineInput,
     measuring: Bool,
@@ -251,7 +275,7 @@ def inline_kernel(
             var role = pj_text(source, pj_field(source, root, StringSlice("role")))
             var end = inline_subtree_end(source, root)
             for node in range(root, end):
-                if pj_kind(source, node) == JSON_STRING:
+                if pj_kind(source, node) == JSON_STRING and inline_tool_output_text(source, root, node):
                     if candidate_count >= source.count:
                         return 1
                     candidates[unsafe_offset=candidate_count] = SmartContextDuplicateTextCandidate(

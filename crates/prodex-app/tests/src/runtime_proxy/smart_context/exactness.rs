@@ -80,8 +80,8 @@ fn smart_context_subthreshold_rewrite_discards_planned_state() {
     let request = smart_context_test_request(serde_json::json!({
         "instructions": "Keep this static instruction.",
         "input": [
-            {"role": "user", "content": repeated},
-            {"role": "user", "content": repeated}
+            {"type":"function_call_output", "call_id":"audit", "output": repeated},
+            {"type":"function_call_output", "call_id":"audit", "output": repeated}
         ]
     }));
 
