@@ -40,7 +40,7 @@ env:
   SCCACHE_GHA_ENABLED: "true"
   KIRO_CLI_VERSION: "2.37.0"
   MOJO_VERSION: "1.2.0"
-  UV_VERSION: "0.11.7"
+  UV_VERSION: "0.13.6"
 
 jobs:
   release-preflight:
@@ -66,7 +66,7 @@ jobs:
       - name: Install Node.js for release metadata checks
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
         with:
-          node-version: 22
+          node-version: 26.13.0
           package-manager-cache: false
 
       - name: Resolve release target
@@ -478,7 +478,7 @@ jobs:
             echo "release SBOM input is empty" >&2
             exit 1
           fi
-          syft_image="anchore/syft:v1.41.2@sha256:962c5626d30cdfb814802598cbb7b63cb690bf979a4bc0ff1d9c6e0cb441db7f"
+          syft_image="anchore/syft:v1.55.0@sha256:4cc92b64ca74ffca4c94d4c8fcc01f217731375300be14d0b6eeb2e82eaa110a"
           for attempt in 1 2 3; do
             if docker pull "$syft_image"; then
               break
@@ -682,7 +682,7 @@ jobs:
       - name: Install Node.js
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
         with:
-          node-version: 22
+          node-version: 26.13.0
           package-manager-cache: false
 
       - name: Sync documentation version metadata

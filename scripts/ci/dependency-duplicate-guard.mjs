@@ -41,11 +41,6 @@ export const DEFAULT_DUPLICATE_BUDGET = Object.freeze([
     reason: "tungstenite/sha1 and export crypto use different digest major lines.",
   },
   {
-    name: "hashbrown",
-    maxVersions: 2,
-    reason: "ratatui-core/kasuari and rusqlite/hashlink currently resolve separate hashbrown minor lines.",
-  },
-  {
     name: "hmac",
     maxVersions: 2,
     reason: "the native Secret Service keyring backend and current export/PostgreSQL crypto resolve hmac 0.12 and 0.13.",

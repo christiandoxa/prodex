@@ -53,12 +53,6 @@ digest v0.10.7 (*)
 
 digest v0.11.3 (*)
 
-hashbrown v0.16.1
-    kasuari v0.4.12
-
-hashbrown v0.17.1
-    hashlink v0.12.1
-
 hmac v0.12.1
     secret-service v5.1.0
 
@@ -106,7 +100,6 @@ test("default budget accepts current duplicate families", () => {
       ["cpufeatures", 2],
       ["crypto-common", 2],
       ["digest", 2],
-      ["hashbrown", 2],
       ["hmac", 2],
       ["inout", 2],
       ["itertools", 2],
@@ -187,4 +180,11 @@ test("CLI accepts fixture input and exits nonzero on new duplicate family", asyn
   } finally {
     await fs.rm(root, { recursive: true, force: true });
   }
+});
+
+test("removed hashbrown family cannot return without review", () => {
+  const families = parseCargoTreeDuplicates(`${CURRENT_TREE_OUTPUT}\nhashbrown v0.16.1\n\nhashbrown v0.17.1\n`);
+  const summary = evaluateDuplicateBudget(families);
+  assert.equal(summary.status, "failed");
+  assert.deepEqual(summary.unallowlistedFamilies.map((entry) => entry.name), ["hashbrown"]);
 });

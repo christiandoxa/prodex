@@ -164,8 +164,8 @@ test("slow independent CI phases fan out without dropping their gates", () => {
   assert.ok(mojo, "real-mojo job missing");
   assert.match(supplyChain, /Install cargo supply-chain tools in parallel/);
   for (const command of [
-    "run_install cargo-audit install_tool cargo-audit cargo-audit --locked --version 0.22.1",
-    "run_install cargo-deny install_tool cargo-deny cargo-deny --locked --version 0.19.0",
+    "run_install cargo-audit install_tool cargo-audit cargo-audit --locked --version 0.22.2",
+    "run_install cargo-deny install_tool cargo-deny cargo-deny --locked --version 0.20.2",
     "run_install cargo-machete install_tool cargo-machete cargo-machete --locked --version 0.9.2",
   ]) {
     assert.ok(supplyChain.includes(command));

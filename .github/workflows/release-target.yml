@@ -31,7 +31,7 @@ env:
   SCCACHE_GHA_ENABLED: "true"
   KIRO_CLI_VERSION: ${{ inputs.kiro_cli_version }}
   MOJO_VERSION: "1.2.0"
-  UV_VERSION: "0.11.7"
+  UV_VERSION: "0.13.6"
 
 jobs:
   build-mojo-archives:
@@ -118,7 +118,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          uv venv --python 3.12 .venv
+          uv venv --python 3.15.2 .venv
           uv pip install --python .venv/bin/python "mojo==${MOJO_VERSION}"
           export PATH="${GITHUB_WORKSPACE}/.venv/bin:${PATH}"
           echo "${GITHUB_WORKSPACE}/.venv/bin" >> "${GITHUB_PATH}"
@@ -603,7 +603,7 @@ jobs:
         if: ${{ matrix.target == 'x86_64-unknown-linux-gnu' }}
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
         with:
-          node-version: 22
+          node-version: 26.13.0
           package-manager-cache: false
 
       - name: Install pinned native clients

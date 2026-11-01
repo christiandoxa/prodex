@@ -14,9 +14,9 @@ const CONTAINER = /\b((?:ghcr\.io|quay\.io|docker\.io)\/[a-z0-9._/-]+|anchore\/[
 const SONAR_ACTION =
   "SonarSource/sonarqube-scan-action@d209202bc7d53ff1cc128f7f907dac145c9d6ae9 # v8.3.0";
 const SONAR_IMAGE =
-  "docker.io/library/sonarqube:26.7.0.124771-community@sha256:160bd2f6a3485bd09b655ef22dd63c02bd1fa7ba82aa5d9973fd010b8bcca0b3";
+  "docker.io/library/sonarqube:26.10.0.133078-community@sha256:f95aaa9016dd4e92c7d70691167a6d96dbb5d8acffd61eba1cb4335d364a7840";
 const KICS_IMAGE =
-  "docker.io/checkmarx/kics:v2.1.20@sha256:3e5a268eb8adda2e5a483c9359ddfc4cd520ab856a7076dc0b1d8784a37e2602";
+  "docker.io/checkmarx/kics:v2.2.0@sha256:ef29dbac14b046b1ef65f3280646112e927a61781c5f01bca1aeb723e0b96003";
 const KICS_NON_ACTIONABLE_QUERY_IDS =
   "e84eaf4d-2f45-47b2-abe8-e581b06deb66,8c978947-0ff6-485c-b0c2-0bfca6026466";
 const CLIPPY_QUALITY_COMMAND =
@@ -434,7 +434,7 @@ function validateReleaseSbom(validation) {
   const required = [
     'find artifacts -mindepth 2 -maxdepth 2 -type f',
     'codex-purity-guard.mjs sbom-input',
-    'anchore/syft:v1.41.2@sha256:962c5626d30cdfb814802598cbb7b63cb690bf979a4bc0ff1d9c6e0cb441db7f',
+    'anchore/syft:v1.55.0@sha256:4cc92b64ca74ffca4c94d4c8fcc01f217731375300be14d0b6eeb2e82eaa110a',
     'sbom-input:/source:ro', 'dir:/source -o spdx-json > release-sbom.spdx.json',
     'codex-purity-guard.mjs release-sbom.spdx.json',
   ];

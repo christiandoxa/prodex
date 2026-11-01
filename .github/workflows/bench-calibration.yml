@@ -66,7 +66,7 @@ jobs:
     env:
       GH_TOKEN: ${{ github.token }}
       MOJO_VERSION: "1.2.0"
-      UV_VERSION: "0.11.7"
+      UV_VERSION: "0.13.6"
 
     steps:
       - name: Check out repository
@@ -75,7 +75,7 @@ jobs:
       - name: Install Node.js
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
         with:
-          node-version: 22
+          node-version: 26.13.0
           package-manager-cache: false
 
       - name: Restore exact-input benchmark Mojo archive from trusted main
@@ -116,7 +116,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          uv venv --python 3.12 .venv
+          uv venv --python 3.15.2 .venv
           uv pip install --python .venv/bin/python "mojo==${MOJO_VERSION}"
           echo "${GITHUB_WORKSPACE}/.venv/bin" >> "${GITHUB_PATH}"
 

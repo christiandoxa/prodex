@@ -1,5 +1,5 @@
 # rust:1.99.1-bookworm; Dependabot updates the tag and digest together.
-FROM rust:1.99.1-bookworm@sha256:48b7f435b8fc6378ce43b44f15e3a47fd8919b2825f835c39bd4bd3da50af5b8 AS builder
+FROM rust:1.99.1-bookworm@sha256:9181b56c2a21ab1d5e73cffe04fc762426d30aa7fac3c91141dd033f49a7fc8b AS builder
 
 WORKDIR /workspace
 COPY Cargo.toml Cargo.lock ./
@@ -12,7 +12,7 @@ COPY install.sh install.ps1 ./
 RUN cargo build --locked --release
 
 # debian:bookworm-slim; Dependabot updates the tag and digest together.
-FROM debian:bookworm-slim@sha256:abd67ffcfa541b485a3dff59865ab629aa048a6c613e639d36e7456b0b229241 AS runtime
+FROM debian:bookworm-slim@sha256:99c0b25c46d0214d5a2091092e7908907dcaecd6a962cde0ac700acee222b6f3 AS runtime
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
