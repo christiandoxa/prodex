@@ -621,8 +621,8 @@ jobs:
           }
           install_kiro() {
             curl --proto '=https' --tlsv1.2 --retry 5 --retry-all-errors --retry-delay 2 -fsSLo "${RUNNER_TEMP}/kiro-install.sh" https://cli.kiro.dev/install
-            echo "d8dd659c11c156002942f09443b6cb7904959004d4e7f1f73777fdbb2d909b54  ${RUNNER_TEMP}/kiro-install.sh" | sha256sum --check --strict
-            bash "${RUNNER_TEMP}/kiro-install.sh" --force --channel stable
+            echo "a8bce4c6b740deb61009e3ad10995ec3027a51e6345025f1a2e5048ffdbf4b84  ${RUNNER_TEMP}/kiro-install.sh" | sha256sum --check --strict
+            bash "${RUNNER_TEMP}/kiro-install.sh" --force --channel stable --version "${KIRO_CLI_VERSION}" --no-modify-path
           }
           install_copilot() {
             curl --proto '=https' --tlsv1.2 --retry 5 --retry-all-errors --retry-delay 2 -fsSLo "${RUNNER_TEMP}/copilot-install.sh" https://gh.io/copilot-install

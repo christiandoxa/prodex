@@ -11,10 +11,14 @@ const parent = readFileSync(".github/workflows/standalone-release.yml", "utf8");
 const step = target.split("      - name: Install pinned native clients\n")[1].split("\n      - name:")[0];
 const shell = step.split("        run: |\n")[1].replace(/^          /gmu, "");
 const pins = {
-  kiro: "d8dd659c11c156002942f09443b6cb7904959004d4e7f1f73777fdbb2d909b54",
+  kiro: "a8bce4c6b740deb61009e3ad10995ec3027a51e6345025f1a2e5048ffdbf4b84",
   copilot: "00efcc2e196f0793d097935d6230062fc66e8247dc01334d2ac3eae4e26a1c7f",
   claude: "3a68d3406cf674e17bed1733a4dcf37805e2e47d87417700007d7e1aa766a944",
 };
+
+test("Kiro setup pins the qualified version without changing shell profiles", () => {
+  assert.ok(shell.includes('kiro-install.sh" --force --channel stable --version "${KIRO_CLI_VERSION}" --no-modify-path'));
+});
 
 test("release client setup is bounded, pinned, credential-free, and fail-closed", () => {
   assert.match(step, /timeout-minutes: 10/);
@@ -68,6 +72,7 @@ fs.writeFileSync(path.join(${JSON.stringify(dir)},'verified-'+id),'checked');
 `, {mode:0o700});
     const env = {...process.env, PATH:path.join(dir,"bin")+path.delimiter+process.env.PATH,
       HOME:path.join(dir,"home"),RUNNER_TEMP:path.join(dir,"tmp"),GITHUB_PATH:path.join(dir,"github-path"),
+      KIRO_CLI_VERSION:"2.37.0",
       GITHUB_TOKEN:"synthetic-ci-value",GH_TOKEN:"synthetic-ci-value",ACTIONS_ID_TOKEN_REQUEST_TOKEN:"synthetic-ci-value",ACTIONS_RUNTIME_TOKEN:"synthetic-ci-value"};
     const result = spawnSync("bash", ["-c", shell], {env, encoding:"utf8", timeout:10000});
     assert.equal(result.status, scenario === "parallel" ? 0 : 1, result.stdout + result.stderr);
@@ -78,7 +83,7 @@ fs.writeFileSync(path.join(${JSON.stringify(dir)},'verified-'+id),'checked');
     else {
       const record = id => JSON.parse(readFileSync(path.join(dir,"started-"+id),"utf8"));
       assert.deepEqual(record("gemini").args,["install","--global","--ignore-scripts","@google/gemini-cli@0.53.0"]);
-      assert.deepEqual(record("kiro").args,["--force","--channel","stable"]);
+      assert.deepEqual(record("kiro").args,["--force","--channel","stable","--version","2.37.0","--no-modify-path"]);
       assert.equal(record("copilot").version,"v1.0.77");
       assert.deepEqual(record("claude").args,["2.1.220"]);
       assert.equal(readFileSync(path.join(dir,"github-path"),"utf8").trim(),path.join(dir,"home/.local/bin"));
