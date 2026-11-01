@@ -32,6 +32,16 @@ export function privacyViolations(filePath, contents, denied = privateIdentifier
   return violations;
 }
 
+// Check the sanitized root, not a tainted commit ID that would advertise old data.
+const sanitizedRoot = "01b35d879d45c6f1f5f0f983f91a7b6ed241a26e";
+
+export function assertSanitizedHistory(root, approvedRoot = sanitizedRoot) {
+  const git = (args) => execFileSync("git", ["--no-replace-objects", ...args], { cwd: root, encoding: "utf8" }).trim();
+  assert.equal(git(["rev-parse", "--is-shallow-repository"]), "false", "Privacy history verification requires a full clone; fetch the complete history first.");
+  const roots = git(["rev-list", "--max-parents=0", "HEAD"]).split("\n").filter(Boolean);
+  assert.deepEqual(roots, [approvedRoot], "Repository history contains an unreviewed root. Do not merge pre-cleanup history; preserve work and rebase onto a fresh clone.");
+}
+
 export function selfTest() {
   const denied = new Set([digest("private-machine")]);
   assert.equal(privacyViolations("docs/example.md", "Checked PRIVATE-MACHINE", denied).length, 1);
@@ -43,6 +53,7 @@ export function selfTest() {
 
 function main() {
   selfTest();
+  assertSanitizedHistory(repoRoot);
   const files = execFileSync("git", ["ls-files", "-z"], { cwd: repoRoot }).toString().split("\0").filter(Boolean);
   const violations = [];
   for (const filePath of files) {
