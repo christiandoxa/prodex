@@ -12,14 +12,24 @@ fn request<'a>(left: &'a str, right: &'a str) -> (Vec<JsonNode<'a>>, String) {
             raw.push(',');
         }
         let object_start = raw.len();
-        raw.push_str("{\"output\":");
+        raw.push_str("{\"type\":");
+        let kind_start = raw.len();
+        raw.push_str("\"function_call_output\",\"output\":");
+        let kind_end = kind_start + "\"function_call_output\"".len();
         let text_start = raw.len();
         raw.push('"');
         raw.push_str(text);
         raw.push('"');
         let text_end = raw.len();
         raw.push('}');
-        spans.push((object_start, raw.len(), text_start, text_end));
+        spans.push((
+            object_start,
+            raw.len(),
+            kind_start,
+            kind_end,
+            text_start,
+            text_end,
+        ));
     }
     raw.push(']');
     let array_end = raw.len();
@@ -45,7 +55,7 @@ fn request<'a>(left: &'a str, right: &'a str) -> (Vec<JsonNode<'a>>, String) {
             array_end,
         ),
     ];
-    for (text, (object_start, object_end, text_start, text_end)) in
+    for (text, (object_start, object_end, kind_start, kind_end, text_start, text_end)) in
         [left, right].into_iter().zip(spans)
     {
         let parent = nodes.len();
@@ -60,16 +70,25 @@ fn request<'a>(left: &'a str, right: &'a str) -> (Vec<JsonNode<'a>>, String) {
         nodes.push(node(
             JsonKind::String,
             Some(parent),
+            "type",
+            "function_call_output",
+            kind_start,
+            kind_end,
+        ));
+        nodes.push(node(
+            JsonKind::String,
+            Some(parent),
             "output",
             text,
             text_start,
             text_end,
         ));
         nodes[parent].first_child = Some(parent + 1);
+        nodes[parent + 1].next_sibling = Some(parent + 2);
     }
     nodes[0].first_child = Some(1);
     nodes[1].first_child = Some(2);
-    nodes[2].next_sibling = Some(4);
+    nodes[2].next_sibling = Some(5);
     (nodes, raw)
 }
 

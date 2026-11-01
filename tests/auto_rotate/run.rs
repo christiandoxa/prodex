@@ -103,13 +103,22 @@ fn run_exec_preserves_prompt_and_piped_stdin() {
             .trim(),
         fixture.main_home.display().to_string()
     );
-    assert_eq!(
-        fs::read_to_string(&fixture.codex_args_log)
-            .expect("failed to read codex args log")
-            .lines()
-            .collect::<Vec<_>>(),
-        vec!["exec", "summarize concisely"]
-    );
+    let recorded_args =
+        fs::read_to_string(&fixture.codex_args_log).expect("failed to read codex args log");
+    let recorded_args = recorded_args.lines().collect::<Vec<_>>();
+    assert_eq!(recorded_args.first(), Some(&"exec"));
+    assert_eq!(recorded_args.last(), Some(&"summarize concisely"));
+    let generated = &recorded_args[1..recorded_args.len() - 1];
+    assert_eq!(generated.len() % 2, 0);
+    assert!(generated.chunks_exact(2).all(|pair| {
+        pair[0] == "-c"
+            && (pair[1] == "model_provider=\"prodex-openai-governed-http\""
+                || pair[1].starts_with("model_providers.prodex-openai-governed-http.")
+                || pair[1].starts_with("experimental_realtime_ws_base_url=\"http://127.0.0.1:"))
+    }));
+    assert!(generated.iter().any(|arg| {
+        arg.starts_with("model_providers.prodex-openai-governed-http.base_url=\"http://127.0.0.1:")
+    }));
     assert_eq!(
         fs::read_to_string(&fixture.codex_stdin_log)
             .expect("failed to read codex stdin log")
@@ -236,8 +245,26 @@ fn run_recovers_when_runtime_broker_registry_points_to_a_dead_pid() {
         std::time::Duration::from_secs(30),
         std::time::Duration::from_millis(10),
         || {
-            let registry: Value = serde_json::from_slice(&fs::read(&registry_path).ok()?).ok()?;
-            (registry["pid"].as_u64()? as u32 != initial_pid).then_some(registry)
+            // Smart Context owns a launch-local runtime and its registration key.
+            // A killed process leaves its old file behind; the recovered launch
+            // must publish a new live registration, not overwrite that dead key.
+            fs::read_dir(&fixture.prodex_home)
+                .ok()?
+                .flatten()
+                .map(|entry| entry.path())
+                .filter(|path| {
+                    path.file_name()
+                        .and_then(|name| name.to_str())
+                        .is_some_and(|name| {
+                            name.starts_with("runtime-broker-") && name.ends_with(".json")
+                        })
+                })
+                .filter_map(|path| serde_json::from_slice::<Value>(&fs::read(path).ok()?).ok())
+                .find(|registry| {
+                    registry["pid"]
+                        .as_u64()
+                        .is_some_and(|pid| pid > 0 && pid != u64::from(initial_pid))
+                })
         },
     );
     let recovered_pid = recovered_registry["pid"]
