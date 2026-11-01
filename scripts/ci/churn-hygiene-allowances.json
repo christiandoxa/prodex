@@ -103,7 +103,7 @@
       "maxLines": 1200,
       "maxFileLines": 500
     },
-    "reason": "Reviewed exact integration train from 0.429.2 main 2647fb5dfad20c557122e40f6b868278a527d3f3: fifteen behavior-preserving refactor commits plus the ledger and measured production-share fixture update. The train is bounded at 31 files, 1,200 changed lines, and 500 changed lines in the largest file; default churn thresholds remain unchanged and all security, release, correctness, compatibility, and boundary guards remain mandatory."
+    "reason": "Reviewed exact integration train from 0.429.2 main 8100306515dc70fb9e5cf6bba336d5d6d4adac05: fifteen behavior-preserving refactor commits plus the ledger and measured production-share fixture update. The train is bounded at 31 files, 1,200 changed lines, and 500 changed lines in the largest file; default churn thresholds remain unchanged and all security, release, correctness, compatibility, and boundary guards remain mandatory."
   },
   {
     "id": "audited-prodex-0.429.1-integration-train",
@@ -265,7 +265,7 @@
       "maxLines": 42800,
       "maxFileLines": 3225
     },
-    "reason": "Reviewed the exact frozen 0.420.0 migration tail dff2b7442b60ff9d2a1d735b8d6d52de4dd839bf..HEAD: the contiguous Mojo migration, release-waiver, optional-tool freshness, test-split, feature-oracle, lint-repair, typed-bridge, super-wildcard repair, domain-boundary repair, pure Mojo application-kernel guard alignment, route-aware probe repair, test-budget repair, and integration-history commits in this train. The measured final tail is 203 files, 171 behavior files, and 42,697 changed lines; the 3,225-line context_text Mojo module remains intentional migration ownership, not incidental churn. Exact required subjects and narrow caps cover this train only; global churn thresholds and release behavior remain unchanged."
+    "reason": "Reviewed the exact frozen 0.420.0 migration tail 13f1e80ace7f7b7e2d0443a5d44afb1a99b7e0b8..HEAD: the contiguous Mojo migration, release-waiver, optional-tool freshness, test-split, feature-oracle, lint-repair, typed-bridge, super-wildcard repair, domain-boundary repair, pure Mojo application-kernel guard alignment, route-aware probe repair, test-budget repair, and integration-history commits in this train. The measured final tail is 203 files, 171 behavior files, and 42,697 changed lines; the 3,225-line context_text Mojo module remains intentional migration ownership, not incidental churn. Exact required subjects and narrow caps cover this train only; global churn thresholds and release behavior remain unchanged."
   },
   {
     "id": "audited-prodex-0.420.0-integration-train",

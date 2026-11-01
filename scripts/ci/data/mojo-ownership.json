@@ -1,6 +1,6 @@
 {
   "schema_version": 3,
-  "baseline_sha": "2531c7a345f1607a18aa926e204b4d02cc322167",
+  "baseline_sha": "581d76c0307d41c5284998fad2738d2bc24daedf",
   "release_target": "0.420.0",
   "baseline_snapshot": "scripts/ci/data/mojo-ownership-baseline-0.419.2.json",
   "migration_rate_percent": 10,

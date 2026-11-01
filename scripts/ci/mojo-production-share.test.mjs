@@ -16,8 +16,8 @@ import {
   validateManifestMetadata,
 } from "./mojo-production-share.mjs";
 
-const BASE_SHA = "2531c7a345f1607a18aa926e204b4d02cc322167";
-const NON_REGRESSION_BASELINE_SHA = "731d7a776527ac65c72384cc68459200715d8793";
+const BASE_SHA = "581d76c0307d41c5284998fad2738d2bc24daedf";
+const NON_REGRESSION_BASELINE_SHA = "cebb3947583d607297269d8395fd896424596599";
 
 function manifest(overrides = {}) {
   return {
@@ -110,7 +110,7 @@ test("manifest separates general release floor, project target, and frozen polic
       ...current,
       mojo_non_regression: { ...current.mojo_non_regression, baseline_sha: BASE_SHA },
     }),
-    /non-regression baseline must be 731d7a776527ac65c72384cc68459200715d8793/u,
+    /non-regression baseline must be cebb3947583d607297269d8395fd896424596599/u,
   );
 });
 
@@ -214,7 +214,7 @@ test("historical waiver remains expired, scoped to 0.421.0, and cannot lower the
 });
 
 test("historical 0.429.3 report retains its exact production inventory", () => {
-  const report = JSON.parse(runShare("--release-sha", "149e99d358e57ce9b9d5cf7b49376aad3aa0d08f", "--json"));
+  const report = JSON.parse(runShare("--release-sha", "60d260bf76176f7ad3f4cd5c273e1bd1ebf482e9", "--json"));
   assert.equal(report.current_prodex_version, "0.429.3");
   assert.equal(report.final.broad_mojo_production_loc, 26_420);
   assert.equal(report.final.broad_rust_production_loc, 348_775);

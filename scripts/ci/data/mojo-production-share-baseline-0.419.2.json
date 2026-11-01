@@ -1,8 +1,8 @@
 {
   "schema_version": 1,
   "release_target": "0.420.0",
-  "baseline_sha": "2531c7a345f1607a18aa926e204b4d02cc322167",
-  "baseline_tree": "afc6e14d3bca6bead6e0def3a8f928aa7e2bd356",
+  "baseline_sha": "581d76c0307d41c5284998fad2738d2bc24daedf",
+  "baseline_tree": "b475c01da5103f940b9a345583419e6750af54ae",
   "counting_rules_version": 1,
   "counting_rules": {
     "rust": "Tracked crates/**/src/**/*.rs and src/**/*.rs in the shipped workspace graph, excluding test/bench/example/fixture/snapshot/generated/vendor/target/fuzz paths, bench_support and the bench-only prodex-bench-support crate, plus test-named source files; count non-blank, non-comment, non-import/directive lines and omit cfg(test)/cfg(not(feature=...)) bodies.",

@@ -6,7 +6,7 @@ import test from "node:test";
 import { runChecked } from "../lib/checked-subprocess.mjs";
 import { assertReleaseAdvance, mergedVersionTagsInReleaseOrder } from "./release-lineage.mjs";
 
-const legacy = { tag: "0.439.5", commit: "ac9aad08f25d6dc8cda96463ce2045b40f35f510" };
+const legacy = { tag: "0.439.5", commit: "bf6b917bbd7cc24753b30c6f5d64199eca7c5a69" };
 test("only the exact reviewed cutover authorizes decreasing release numbers", () => {
   assert.doesNotThrow(() => assertReleaseAdvance("0.165.0", legacy, "rust-v0.165.0"));
   for (const [version, before, upstream] of [

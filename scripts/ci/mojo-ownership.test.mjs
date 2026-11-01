@@ -9,7 +9,7 @@ import {
   validateManifest,
 } from "./mojo-ownership.mjs";
 
-const BASE_SHA = "2531c7a345f1607a18aa926e204b4d02cc322167";
+const BASE_SHA = "581d76c0307d41c5284998fad2738d2bc24daedf";
 
 function releaseManifest() {
   return JSON.parse(fs.readFileSync("scripts/ci/data/mojo-ownership.json", "utf8"));

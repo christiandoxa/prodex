@@ -8,7 +8,7 @@ import { pathToFileURL } from "node:url";
 import { repoRoot } from "../npm/common.mjs";
 
 const MANIFEST_PATH = path.join(repoRoot, "scripts", "ci", "data", "mojo-ownership.json");
-const BASELINE_SHA = "2531c7a345f1607a18aa926e204b4d02cc322167";
+const BASELINE_SHA = "581d76c0307d41c5284998fad2738d2bc24daedf";
 const RELEASE_TARGET = "0.420.0";
 const VALID_RUST_STATES = new Set(["deleted", "adapter-only"]);
 const FORBIDDEN_FALLBACK_MARKERS = [

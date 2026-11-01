@@ -35,7 +35,7 @@ export function mergedVersionTagsInReleaseOrder(root, revision = "HEAD", histori
 }
 
 const STABLE_VERSION = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/u;
-const LEGACY_TIP = "ac9aad08f25d6dc8cda96463ce2045b40f35f510";
+const LEGACY_TIP = "bf6b917bbd7cc24753b30c6f5d64199eca7c5a69";
 
 export function assertReleaseAdvance(version, previous, upstreamRelease) {
   if (!STABLE_VERSION.test(version)) throw new Error("release version must be an exact stable SemVer");
