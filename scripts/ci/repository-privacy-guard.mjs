@@ -8,7 +8,7 @@ import { fileURLToPath } from "node:url";
 import { repoRoot } from "../npm/common.mjs";
 
 // Hashes prevent the denylist itself from republishing incident identifiers.
-const privateIdentifiers = new Set(["286340c0669139cdef633cbb1d12b3a4bbdc657a6ae52978f0461152a6b16313", "bd3b7cabce4e9d2bc95dc2424a4570482c425f39c5eced19c8cef50278006fbe", "f576e2a210b863184ed8e1fe167f9ceb9cbeaae8114df75f29d634786e8548c1", "8547cd0c2cf0b6ad60ecff4a3e3bd46ea55f5ef4e01c1a8ce171b7699b39611d", "310181da6e5bdd26997b001fa254cee06f0822041922e1cb9d641ca2261f4468", "45d34cc2c2be31b0c1c4dd5b38249ebabe1e8b6af9420b8b2a80c2c3c68a0de3"]);
+const privateIdentifiers = new Set(["7ed89d9cdca0c3d2527075b3cbb11ba7be8d40941e72b486ee65e6c7b11a07c4", "286340c0669139cdef633cbb1d12b3a4bbdc657a6ae52978f0461152a6b16313", "bd3b7cabce4e9d2bc95dc2424a4570482c425f39c5eced19c8cef50278006fbe", "f576e2a210b863184ed8e1fe167f9ceb9cbeaae8114df75f29d634786e8548c1", "8547cd0c2cf0b6ad60ecff4a3e3bd46ea55f5ef4e01c1a8ce171b7699b39611d", "310181da6e5bdd26997b001fa254cee06f0822041922e1cb9d641ca2261f4468", "45d34cc2c2be31b0c1c4dd5b38249ebabe1e8b6af9420b8b2a80c2c3c68a0de3"]);
 const syntheticUsers = new Set(["test", "test-user", "example-user", "user", "user-1", "workspace", "x", "runner", "root", "build", "ci", "vscode", "ubuntu", "node"]);
 const digest = (value) => createHash("sha256").update(value.toLowerCase()).digest("hex");
 
