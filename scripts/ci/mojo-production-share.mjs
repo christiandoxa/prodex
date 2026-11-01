@@ -10,8 +10,8 @@ import { parseCargoVersion, repoRoot } from "../npm/common.mjs";
 
 const manifestPath = path.join(repoRoot, "scripts", "ci", "data", "mojo-production-share.json");
 const COUNTING_RULES_VERSION = 1;
-const REQUIRED_BASELINE_SHA = "581d76c0307d41c5284998fad2738d2bc24daedf";
-const REQUIRED_MOJO_NON_REGRESSION_BASELINE_SHA = "cebb3947583d607297269d8395fd896424596599";
+const REQUIRED_BASELINE_SHA = "3708689b38883b60eca292ff6c8d884be31f49e6";
+const REQUIRED_MOJO_NON_REGRESSION_BASELINE_SHA = "c514602a45dfff637bc71bdd338a7b50e7cf06ef";
 const REQUIRED_HISTORICAL_RELEASE_TARGET = "0.421.0";
 const REQUIRED_RELEASE_FLOOR_PERCENT = 7;
 const REQUIRED_PROJECT_TARGET_PERCENT = 75;

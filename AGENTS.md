@@ -338,6 +338,8 @@ files and a directory may have at most 9 near-limit production siblings.
   paths, overlay/session/attachment IDs, logs, auth data, credentials, or customer identifiers.
   Intentional public ownership metadata and the maintainer identity configured for Git commits
   are allowed; still scan every tracked diff for secrets and personal or operational data.
+  Privacy cleanup must preserve legitimate author attribution and the configured maintainer
+  committer/signing identity; do not replace Git identities with placeholder maintainers.
 - Never pipe a remote script into a shell. Pin external CI actions and downloaded tools to full
   immutable SHAs or explicit versions. Review dependency and lockfile changes; add no dependency
   when an existing crate or the standard library is sufficient.

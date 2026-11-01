@@ -37,7 +37,7 @@ export function mergedVersionTagsInReleaseOrder(root, revision = "HEAD", histori
 const STABLE_VERSION = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/u;
 export const legacyCodexAlignedRelease = Object.freeze({
   tag: "0.439.5",
-  commit: "bf6b917bbd7cc24753b30c6f5d64199eca7c5a69",
+  commit: "aad6911f148c9f2409f9ab5ddcb800311c1bf182",
 });
 
 export function assertReleaseAdvance(version, previous, upstreamRelease) {

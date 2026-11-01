@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "release_target": "0.420.0",
-  "baseline_sha": "581d76c0307d41c5284998fad2738d2bc24daedf",
+  "baseline_sha": "3708689b38883b60eca292ff6c8d884be31f49e6",
   "baseline_tree": "b475c01da5103f940b9a345583419e6750af54ae",
   "counting_rules_version": 1,
   "counting_rules": {

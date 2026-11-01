@@ -31,7 +31,7 @@ test("authority guard rejects zero cleanup and duplicate reductions", () => {
     cleanup_loc: 1,
   };
   const manifest = {
-    baseline_sha: "581d76c0307d41c5284998fad2738d2bc24daedf",
+    baseline_sha: "3708689b38883b60eca292ff6c8d884be31f49e6",
     release_target: "0.420.0",
     authoritative_operations: [operation],
     rust_semantic_reductions: [reduction],

@@ -1,13 +1,13 @@
 {
   "schema_version": 1,
   "release_target": "0.421.0",
-  "baseline_sha": "581d76c0307d41c5284998fad2738d2bc24daedf",
+  "baseline_sha": "3708689b38883b60eca292ff6c8d884be31f49e6",
   "baseline_snapshot": "scripts/ci/data/mojo-production-share-baseline-0.419.2.json",
   "counting_rules_version": 1,
   "release_floor_percent": 7,
   "project_target_percent": 75,
   "mojo_non_regression": {
-    "baseline_sha": "cebb3947583d607297269d8395fd896424596599",
+    "baseline_sha": "c514602a45dfff637bc71bdd338a7b50e7cf06ef",
     "baseline_source_inventory_sha256": "48cddc617b019666bd72efa5c2fb91c2e1b40400ded1dfeee73877240662c27e",
     "baseline_mojo_production_loc": 26420,
     "approved_reductions": [
@@ -36,7 +36,7 @@
   "production_build_feature": "mojo-core",
   "temporary_release_waiver": {
     "release_target": "0.421.0",
-    "baseline_sha": "581d76c0307d41c5284998fad2738d2bc24daedf",
+    "baseline_sha": "3708689b38883b60eca292ff6c8d884be31f49e6",
     "temporary_release_floor_percent": 7,
     "scope": "0.421.0 only",
     "expiration": "immediately after 0.421.0",

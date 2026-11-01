@@ -33,7 +33,7 @@ export function privacyViolations(filePath, contents, denied = privateIdentifier
 }
 
 // Check the sanitized root, not a tainted commit ID that would advertise old data.
-const sanitizedRoot = "01b35d879d45c6f1f5f0f983f91a7b6ed241a26e";
+const sanitizedRoot = "2d5a607b19920758cddd84192ff445127ca7b716";
 
 export function assertSanitizedHistory(root, approvedRoot = sanitizedRoot) {
   const git = (args) => execFileSync("git", ["--no-replace-objects", ...args], { cwd: root, encoding: "utf8" }).trim();

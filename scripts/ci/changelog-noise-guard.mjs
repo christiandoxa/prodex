@@ -12,7 +12,7 @@ const GENERATED_CHANGELOG_SYNC_SUBJECT = "docs(changelog): sync generated releas
 // release notes with the ABI correction. Keep the exception commit-scoped;
 // ordinary non-release commits remain rejected.
 const APPROVED_GENERATED_CHANGELOG_COMMITS = new Set([
-  "9679dbada86541beefe6fde670f9149069217e46",
+  "49f08833e4f477ad6199830bd8ed853b85b2974e",
 ]);
 function printHelp() {
   process.stdout.write(
