@@ -1013,7 +1013,7 @@
         },
         {
           "path": "codex-rs/core/src/session/environment.rs",
-          "reason": "Codex 0.160.0 child sessions inheriting a pending environment must follow the original owner’s first configuration or failure without overwriting a child configuration that already won.",
+          "reason": "Codex 0.160.0 child sessions inheriting a pending environment must follow the original owner\u2019s first configuration or failure without overwriting a child configuration that already won.",
           "required_contains": [
             "follow_inherited_environment_configurations",
             "starting.owner_configuration()",
@@ -2483,7 +2483,7 @@
           "id": "core.subagent-pending-environment-inheritance",
           "kind": "environment_inheritance",
           "file": "codex-rs/core/src/session/environment.rs",
-          "reason": "Pending subagent environments must inherit the owner’s first ready/failure result without overwriting a child winner.",
+          "reason": "Pending subagent environments must inherit the owner\u2019s first ready/failure result without overwriting a child winner.",
           "file_contains_all": [
             "follow_inherited_environment_configurations",
             "starting.owner_configuration()",
@@ -3303,7 +3303,7 @@
             "Guardian scoring and elicitation-decline handling use upstream model/security policy; the remaining changes are tests, fixtures, and an allowlist entry."
           ],
           "prodex_action": "Pin the 0.153.2 package after the complete patch audit, preserve additive model and Guardian metadata opaquely, and do not change Prodex defaults or duplicate upstream policy.",
-          "compatibility_evidence": "Exact codeload archives and per-file diff from rust-v0.153.0 to rust-v0.153.1 are recorded in migration/codex-rust-v0.153.2-audit.md; no Prodex-owned transport, session, MCP, or TPS source changed."
+          "compatibility_evidence": "Archived implementation notes were retired for privacy. The pinned upstream revision, critical-file assertions, and synthetic offline replay fixtures remain the maintained compatibility evidence."
         },
         {
           "from": "rust-v0.153.1",
@@ -3317,7 +3317,7 @@
             "The GPT-6-Astra Fast-tier description changes from 1.5x to 2x speed; request behavior is unchanged."
           ],
           "prodex_action": "Use the 0.153.2 package and preserve the model catalog as upstream-owned metadata; no compatibility repair or default change is required.",
-          "compatibility_evidence": "Exact codeload archive and per-file diff are recorded in migration/codex-rust-v0.153.2-audit.md; all Prodex contract source areas are unchanged."
+          "compatibility_evidence": "Archived implementation notes were retired for privacy. The pinned upstream revision, critical-file assertions, and synthetic offline replay fixtures remain the maintained compatibility evidence."
         },
         {
           "from": "rust-v0.153.2",
@@ -3346,7 +3346,7 @@
             "Daemon/PID lifecycle, plugin/MCP refresh, managed worktree, and updater changes remain upstream-owned and are not enabled or reimplemented by Prodex."
           ],
           "prodex_action": "Use the official unmodified Codex 0.154.0 release through the existing app-server and quota boundaries. Keep capability detection, exact thread/cwd/status validation, opaque additive fields, fail-closed process identity, and QUEUED-versus-APPLIED reporting unchanged; no production compatibility repair is required.",
-          "compatibility_evidence": "Exact source archives, release metadata, isolated official Linux binary, baseline 0.153.4 comparison, session/thread and queue smokes, upstream baseline guard, runtime manifest guard, app-server broker compatibility tests, and session Prompt Write tests are recorded in migration/codex-rust-v0.154.0-audit.md."
+          "compatibility_evidence": "Archived implementation notes were retired for privacy. The pinned upstream revision, critical-file assertions, and synthetic offline replay fixtures remain the maintained compatibility evidence."
         },
         {
           "from": "rust-v0.154.0",
@@ -3362,7 +3362,7 @@
             "App-server adds daemon recovery/update, user-verification cancellation, memory/status, and durable thread attachment surfaces; these remain upstream-owned optional APIs."
           ],
           "prodex_action": "Preserve normal Responses metadata and compaction-trigger payloads opaquely, keep hard session/continuation affinity and pre-commit rotation rules, retain legacy /responses/compact compatibility for older clients, and do not duplicate Codex model-cache identity, daemon, voice, or verification semantics.",
-          "compatibility_evidence": "Exact 0.154.0 and 0.155.0 source archives, upstream release metadata, the existing Prodex normal-/responses compaction-v2 affinity regression, offline baseline guard, and focused runtime proxy replay/compatibility checks are recorded in migration/codex-rust-v0.155.0-audit.md."
+          "compatibility_evidence": "Archived implementation notes were retired for privacy. The pinned upstream revision, critical-file assertions, and synthetic offline replay fixtures remain the maintained compatibility evidence."
         },
         {
           "from": "rust-v0.155.0",
@@ -3376,7 +3376,7 @@
             "Explicit model_reasoning_summary settings remain respected; Responses transport, compaction, metadata/header ownership, model-cache identity, provider auth, MCP normalization, and app-server protocol schemas are unchanged."
           ],
           "prodex_action": "Keep Prodex provider bridges explicit with model_reasoning_summary=none, preserve ordinary Codex passthrough semantics, and make no runtime proxy or compatibility rewrite for 0.155.1.",
-          "compatibility_evidence": "Exact 0.155.0 and 0.155.1 source archives, official release metadata and Linux binary digests, isolated app-server initialize smoke, provider-bridge reasoning-summary regression, and offline baseline guard are recorded in migration/codex-rust-v0.155.1-audit.md."
+          "compatibility_evidence": "Archived implementation notes were retired for privacy. The pinned upstream revision, critical-file assertions, and synthetic offline replay fixtures remain the maintained compatibility evidence."
         },
         {
           "from": "rust-v0.155.1",
@@ -3394,7 +3394,7 @@
             "App-server account/read workspace routing validates the effective ChatGPT bootstrap URL as a credential-free HTTPS origin before returning workspace routing."
           ],
           "prodex_action": "Align explicit quota/rate classification with Codex 0.156, preserve /responses and WebSocket payload/header transparency, treat session_id as an opaque affinity key, keep chatgpt_base_url Codex-owned and HTTPS for account/read workspace routing, route Prodex model traffic through an authenticated custom model provider, retain legacy /responses/compact support for older clients, and keep upstream daemon/workspace/provider semantics external.",
-          "compatibility_evidence": "Exact 0.155.1 and 0.156.0 tagged source archives, official release/tag metadata, 50 critical-file assertion replay checks including the workspace-routing HTTPS boundary, an exact official-0.156 synthetic account/read reproduction of the former HTTP-origin failure, official Linux binary smoke, upstream baseline guard, capture replay, and focused runtime/provider compatibility tests are recorded in migration/codex-rust-v0.156.0-audit.md."
+          "compatibility_evidence": "Archived implementation notes were retired for privacy. The pinned upstream revision, critical-file assertions, and synthetic offline replay fixtures remain the maintained compatibility evidence."
         },
         {
           "from": "rust-v0.156.0",
@@ -3411,7 +3411,7 @@
             "Responses routing, provider authentication, account/read workspace-routing HTTPS validation, compaction, and app-server transport contracts are unchanged from 0.156.0."
           ],
           "prodex_action": "Retain the 0.431.1 workspace-routing hotfix, preserve upstream model-list metadata opaquely, and recognize GPT-6 Sol/Luna as 872,000-token models when Prodex derives runtime and Smart Context budgets. No quota-reserve remapping is inferred for GPT-6 Luna.",
-          "compatibility_evidence": "Exact 0.156.0 and 0.156.1 tagged source archives, official release/tag metadata, official Linux binary checksum and model/list smoke, repeated synthetic account/read workspace-routing failure reproduction, upstream baseline replay, and focused GPT-6 context tests are recorded in migration/codex-rust-v0.156.1-audit.md."
+          "compatibility_evidence": "Archived implementation notes were retired for privacy. The pinned upstream revision, critical-file assertions, and synthetic offline replay fixtures remain the maintained compatibility evidence."
         },
         {
           "from": "rust-v0.156.1",
@@ -3429,7 +3429,7 @@
             "Codex enables automatic background app-server startup for eligible interactive sessions, enables /import in remote/local daemon sessions, and expands TUI behavior; these remain upstream-owned."
           ],
           "prodex_action": "Preserve Codex 0.157 additive app-server fields and typed invalid_prompt behavior; track GPT-6 Sol/Luna Bedrock IDs/default without reimplementing the Bedrock catalog; respect the upstream first-party-only internal metadata gate rather than reconstructing filtered metadata in the Prodex custom provider; retain the 0.431.1 workspace-routing projection and existing proxy affinity/rotation boundaries. Super direct resume additionally trusts the persisted session cwd before TUI startup so prodex s <uuid> remains zero-prompt across workspaces.",
-          "compatibility_evidence": "Exact 0.156.1 and 0.157.0 tagged source archives, official release/tag metadata, official Linux musl binary checksum/version smoke, updated critical-file/semantic baseline guards, focused direct-Super-resume trust regression coverage, and runtime/provider compatibility tests are recorded in migration/codex-rust-v0.157.0-audit.md."
+          "compatibility_evidence": "Archived implementation notes were retired for privacy. The pinned upstream revision, critical-file assertions, and synthetic offline replay fixtures remain the maintained compatibility evidence."
         },
         {
           "from": "rust-v0.157.0",
@@ -3445,7 +3445,7 @@
             "Linux runtime, Responses transport, session persistence, provider routing, model metadata, and app-server protocol surfaces tracked by Prodex are unchanged from 0.157.0."
           ],
           "prodex_action": "Advance the tested upstream baseline to 0.157.1 without changing Linux proxy/session semantics. Preserve the upstream Windows process-lifecycle fixes. Separately fix Prodex direct Super resume so the persisted internal model_provider prodex-openai-governed-http resolves to canonical OpenAI instead of being rejected before Codex can resume the thread.",
-          "compatibility_evidence": "Exact 0.157.0 and 0.157.1 source archives, official release/tag metadata, official Linux musl binary checksum/version smoke, all 797 critical-file/semantic markers replayed with zero misses, isolated app-server initialize, focused provider-registry and resume tests, and a dry-run of the originally failing governed-OpenAI Super session are recorded in migration/codex-rust-v0.157.1-audit.md."
+          "compatibility_evidence": "Archived implementation notes were retired for privacy. The pinned upstream revision, critical-file assertions, and synthetic offline replay fixtures remain the maintained compatibility evidence."
         },
         {
           "from": "rust-v0.157.1",
@@ -3462,7 +3462,7 @@
             "App-server/exec-server add authenticated WebSocket support, MCP OAuth client secrets, richer image generation/editing controls, and additive command-completion behavior."
           ],
           "prodex_action": "Advance the tested Codex baseline to 0.158.0. Preserve upstream project-trust lookup semantics by emitting both canonical and original Super workspace keys, keep Super approval_policy=never and danger-full-access so the new default terminal-input approval does not add prompts, remove only the obsolete GPT-5.4 Bedrock compatibility marker, track the parameterized 5000-byte schema-compaction default without reimplementing Codex compaction, and keep new MCP/WebSocket/image/app-server surfaces upstream-owned and pass-through unless Prodex already owns the corresponding boundary.",
-          "compatibility_evidence": "Exact 0.157.1 and 0.158.0 source archives, tag/release metadata, official Linux musl binary checksum/version smoke, 811 current critical/semantic markers including the new canonical project-trust lookup contract, isolated app-server initialize, and focused Super trust regressions are recorded in migration/codex-rust-v0.158.0-audit.md."
+          "compatibility_evidence": "Archived implementation notes were retired for privacy. The pinned upstream revision, critical-file assertions, and synthetic offline replay fixtures remain the maintained compatibility evidence."
         },
         {
           "from": "rust-v0.158.0",
@@ -3479,7 +3479,7 @@
             "Blank-session draft persistence, refreshed TUI onboarding, and Windows console/process-launch fixes are upstream-owned behavior changes."
           ],
           "prodex_action": "Advance the tested Codex baseline to 0.159.0; preserve instant_interrupt as upstream opt-in, pass through additive app-server item-anchor cursors, move compatibility guards to the new provider/error owner files without weakening security or quota semantics, and repair stale Super attachment paths before resume so pasted text/media remain durable across overlay cleanup.",
-          "compatibility_evidence": "Exact 0.158.0 and 0.159.0 tagged source archives, tag/release metadata, official Linux musl binary checksum/version smoke, relocated security/quota semantic markers, focused attachment resume regressions, and baseline replay are recorded in migration/codex-rust-v0.159.0-audit.md."
+          "compatibility_evidence": "Archived implementation notes were retired for privacy. The pinned upstream revision, critical-file assertions, and synthetic offline replay fixtures remain the maintained compatibility evidence."
         },
         {
           "from": "rust-v0.159.0",
@@ -3494,7 +3494,7 @@
             "Responses transport, provider authentication, quota/error classification, session persistence, workspace routing, compaction, and app-server protocol files tracked by Prodex retain every existing compatibility marker."
           ],
           "prodex_action": "Advance the tested Codex baseline to 0.159.1, recognize GPT-6.1 Sol as an 872,000-token large/max-context OpenAI model for runtime launch and Smart Context budgeting, track the new Bedrock default without duplicating the upstream catalog, and preserve existing transport/auth/quota/session semantics.",
-          "compatibility_evidence": "Exact 0.159.0 and 0.159.1 tagged source archives, release/tag metadata, official Linux musl binary checksum/version smoke, 858 current critical-file/semantic markers replayed with zero misses, isolated app-server initialize, focused GPT-6.1 context-policy tests, and baseline guards are recorded in migration/codex-rust-v0.159.1-audit.md."
+          "compatibility_evidence": "Archived implementation notes were retired for privacy. The pinned upstream revision, critical-file assertions, and synthetic offline replay fixtures remain the maintained compatibility evidence."
         },
         {
           "from": "rust-v0.159.1",
@@ -3509,7 +3509,7 @@
             "Responses transport, model catalogs (including GPT-6.1 Sol), provider authentication, quota/error classification, project trust, session persistence, and app-server protocol contracts remain compatible with the 0.159.1 baseline."
           ],
           "prodex_action": "Advance the tested Codex baseline to 0.159.2, track the upstream Windows console-suppression process helper and redirected-shell call site, preserve the existing GPT-6.1 Sol context policy, and keep all transport/auth/quota/session/protocol boundaries unchanged.",
-          "compatibility_evidence": "Exact 0.159.1 and 0.159.2 tagged source archives, release/tag metadata, official Linux musl CLI and app-server asset checksum/version verification, zero-miss baseline replay plus new process markers, isolated app-server initialize, and baseline guards are recorded in migration/codex-rust-v0.159.2-audit.md."
+          "compatibility_evidence": "Archived implementation notes were retired for privacy. The pinned upstream revision, critical-file assertions, and synthetic offline replay fixtures remain the maintained compatibility evidence."
         },
         {
           "from": "rust-v0.159.2",
@@ -3524,7 +3524,7 @@
             "Responses HTTP/WebSocket transport, GPT-6.1 Sol model metadata, provider authentication for model traffic, quota/error classification, project trust, session persistence, compaction, and app-server protocol contracts retain the 0.159.2 compatibility markers."
           ],
           "prodex_action": "Advance the tested Codex baseline to 0.159.3, keep chatgpt_base_url Codex-owned and HTTPS so the new security-setup account/read request stays outside the Prodex model proxy, and guard the upstream auth-identity and action-URL validation contract without changing runtime routing.",
-          "compatibility_evidence": "Exact 0.159.2 and 0.159.3 tagged source archives, release/tag metadata, 511 existing critical-file markers replayed with zero misses, official Linux musl CLI and app-server checksum/version verification, isolated app-server initialize, runtime-launch bootstrap-preservation tests, and baseline guards are recorded in migration/codex-rust-v0.159.3-audit.md."
+          "compatibility_evidence": "Archived implementation notes were retired for privacy. The pinned upstream revision, critical-file assertions, and synthetic offline replay fixtures remain the maintained compatibility evidence."
         },
         {
           "from": "rust-v0.159.3",
@@ -3541,7 +3541,7 @@
             "The existing 0.159.3 account-security reminder identity/origin boundary, Responses HTTP/WebSocket routing, quota/error/session/protocol markers, and background-process protections remain present."
           ],
           "prodex_action": "Advance the tested Codex baseline to 0.160.0 without changing Prodex model transport. Guard authoritative provider catalogs, provider/history restoration, projectless workspace defaults, saved permission restoration, and pending subagent environment inheritance while retaining the 0.159.3 authenticated security-reminder boundary.",
-          "compatibility_evidence": "Exact 0.159.3 and 0.160.0 tagged source archives, 0.160.0 release/tag metadata, full critical/semantic marker replay with zero misses, official Linux musl CLI and app-server checksum/version verification, and isolated app-server initialize are recorded in migration/codex-rust-v0.160.0-audit.md."
+          "compatibility_evidence": "Archived implementation notes were retired for privacy. The pinned upstream revision, critical-file assertions, and synthetic offline replay fixtures remain the maintained compatibility evidence."
         },
         {
           "from": "rust-v0.160.0",
@@ -3557,7 +3557,7 @@
             "Responses HTTP/WebSocket routing, model/provider catalogs, quota/error/session recovery, app-server protocol, security reminders, and 0.160.0 environment inheritance contracts are otherwise unchanged."
           ],
           "prodex_action": "Advance the tested Codex baseline to 0.160.1, guard the remote stdio MCP Windows bootstrap environment allowlist, and keep Prodex routing/auth/quota/session behavior unchanged.",
-          "compatibility_evidence": "Exact 0.160.0 and 0.160.1 tagged source archives, GitHub release/tag metadata, upstream remote-MCP semantic markers, official Linux musl CLI and app-server checksum/version verification, isolated app-server initialize, and Prodex compatibility guards are recorded in migration/codex-rust-v0.160.1-audit.md."
+          "compatibility_evidence": "Archived implementation notes were retired for privacy. The pinned upstream revision, critical-file assertions, and synthetic offline replay fixtures remain the maintained compatibility evidence."
         },
         {
           "from": "rust-v0.160.1",
@@ -3573,7 +3573,7 @@
             "The 0.161 tagged remote stdio MCP implementation lacks the 0.160.1 explicit SYSTEMROOT/TEMP/TMP cross-OS preservation. This is a documented upstream limitation, not a Prodex guarantee."
           ],
           "prodex_action": "Qualify the current OpenAI runtime transport and app-server surfaces, add retry/serialization baseline checks, and document the cross-OS remote-MCP limitation. Do not replace user Codex binaries, change the capability-based minimum, or duplicate Codex retry/compaction semantics.",
-          "compatibility_evidence": "migration/codex-rust-v0.161.0-audit.md records exact tag/source provenance, marker replay, official binary digest verification, isolated credential-free app-server initialize, and Prodex boundary tests."
+          "compatibility_evidence": "Archived implementation notes were retired for privacy. The pinned upstream revision, critical-file assertions, and synthetic offline replay fixtures remain the maintained compatibility evidence."
         },
         {
           "from": "rust-v0.161.0",
@@ -3591,7 +3591,7 @@
             "App-server turns retain parent/root lineage and environment requests; environment registration can carry required skill names checked before model inference."
           ],
           "prodex_action": "Advance the tested Codex baseline to 0.162.0, move the Azure capability marker to model-provider/src/capabilities.rs, and guard the new retry, provider-capability, namespace, context, partial-answer, remote-MCP, and app-server contracts. Keep Prodex transport, hard affinity, no-midstream-rotate, and existing 0.436.1 capacity fixes unchanged.",
-          "compatibility_evidence": "migration/codex-rust-v0.162.0-audit.md and migration/codex-rust-v0.162.0-source-evidence.json record exact tag/source provenance, full archive comparison, critical/semantic marker replay, negative baseline self-tests, and offline capture replay. Runtime-launch and binary smoke evidence remain coordinator-owned."
+          "compatibility_evidence": "Archived implementation notes were retired for privacy. The pinned upstream revision, critical-file assertions, and synthetic offline replay fixtures remain the maintained compatibility evidence."
         },
         {
           "from": "rust-v0.162.0",
@@ -3606,13 +3606,12 @@
             "Responses HTTP/WebSocket transport, retry and quota classification, hard affinity, session persistence, compaction, and app-server protocol contracts remain compatible with the 0.162.0 baseline."
           ],
           "prodex_action": "Advance the tested Codex baseline to 0.162.1, preserve Codex-owned multiline question rendering and daemon feature-compatibility behavior, and keep Prodex transport, hard affinity, no-midstream-rotate, and capacity recovery unchanged.",
-          "compatibility_evidence": "migration/codex-rust-v0.162.1-audit.md and migration/codex-rust-v0.162.1-source-evidence.json record exact tag/source provenance, archive comparison, critical/semantic marker replay, and focused Prodex capacity recovery validation. Runtime-launch and official binary smoke evidence remain coordinator-owned."
+          "compatibility_evidence": "Archived implementation notes were retired for privacy. The pinned upstream revision, critical-file assertions, and synthetic offline replay fixtures remain the maintained compatibility evidence."
         },
         {
           "from": "rust-v0.162.1",
           "to": "rust-v0.163.0",
           "source_commit": "83086188ae0614bd882818ff1aa23f3194962012",
-          "audit_note": "migration/codex-rust-v0.163.0-audit.md",
           "summary": "Qualifies native default instant interrupt and Daybreak, response.incomplete terminal usage retention, foreground/background v2 compaction, reasoned websocket continuation mismatch, connection-scoped app-server replies, remote MCP Windows overrides and resolved tool message catalogs. Local listener resilience is fixed without overriding native retry/continuation ownership."
         },
         {
@@ -3620,14 +3619,12 @@
           "to": "rust-v0.164.0",
           "source_commit": "6aaac694803004a63c6f393d153c96d22521a6b9",
           "tag_object": "fe3b29455488c2e189e43ad5526a107900c5e1b7",
-          "audit_note": "migration/codex-rust-v0.164.0-audit.md",
           "summary": "Qualifies independent prompt-cache/session identities, metadata replacement+patch, transient provider-catalog retention, moved incremental base-instruction ownership, scoped CLI config overrides, compressed resume/saved settings, and isolated failed compaction. Native presets, images, MCP enterprise auth and credential masking remain upstream-owned."
         },
         {
           "from": "rust-v0.164.0",
           "to": "rust-v0.165.0",
           "source_commit": "360319d8dee62d87e2d59fc0c21805d79519cfed",
-          "audit_note": "migration/codex-rust-v0.165.0-audit.md",
           "summary": "Qualifies native Vertex routing, originator-scoped catalogs, terminal model-not-found errors, experimental attached forks, cancellation on dropped MCP responses, native namespace descriptions, reasoning effort changes and fresh-profile memory v2. Prodex preserves direct GCP resume and separates its authorized release-number transition from ordinary SemVer comparison."
         },
         {

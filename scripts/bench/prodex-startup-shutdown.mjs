@@ -11,7 +11,7 @@ const value = (name, fallback) => {
   const index = argv.indexOf(name);
   return index < 0 ? fallback : argv[index + 1];
 };
-const before = value("--before", "/home/test-user/.local/bin/prodex");
+const before = value("--before", "prodex");
 const after = value("--after", "./target/debug/prodex");
 const mode = value("--mode", "run");
 const samples = Number(value("--samples", "5"));

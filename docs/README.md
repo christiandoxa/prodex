@@ -28,7 +28,7 @@ not retained here; Git history is the record for obsolete material.
 | [Security test matrix](security-test-matrix.md) | Canonical control-to-test evidence |
 | [Testing](testing.md) | Test commands and evidence levels |
 | [Supply chain](supply-chain.md) | Pins, provenance, and release gates |
-| [Release targets](../docs/release-targets.md) | Supported target archives, linking, and installer verification |
+| [Release targets](release-targets.md) | Supported target archives, linking, and installer verification |
 | [Deployment](deployment.md) | Supported deployment patterns |
 | [Backup and restore](backup-restore.md) | Recovery contract |
 

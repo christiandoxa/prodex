@@ -1,6 +1,6 @@
 # Release target matrix
 
-The release workflow consumes `release-target-matrix.tsv`. The installer-facing
+The release workflow consumes `scripts/release/release-target-matrix.tsv`. The installer-facing
 manifest is rendered from that file and is published beside `SHA256SUMS`.
 
 | Rust target | Runner | Implementation | Mojo target/CPU | Link and execution evidence | Recommendation |
