@@ -1073,6 +1073,10 @@ jobs:
           cache-bin: false
           save-if: ${{ matrix.lane == 'static' }}
 
+      - name: Reject private incident data
+        if: matrix.lane == 'hygiene'
+        run: node scripts/ci/repository-privacy-guard.mjs
+
       - name: Enforce churn hygiene
         if: matrix.lane == 'hygiene'
         shell: bash

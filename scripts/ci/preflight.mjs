@@ -128,6 +128,11 @@ export function preflightSteps(args) {
       args: ["scripts/ci/tiny-http-patch-guard.mjs"],
     },
     {
+      label: "repository-privacy",
+      command: "node",
+      args: ["scripts/ci/repository-privacy-guard.mjs"],
+    },
+    {
       label: "size-guard",
       command: "node",
       args: ["scripts/ci/size-guard.mjs"],

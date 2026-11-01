@@ -25,3 +25,6 @@ Thumbs.db
 # Python test/CI helper bytecode is reproducible local output.
 __pycache__/
 *.py[cod]
+
+# Retired incident archive: never commit personal operational notes.
+/migration/

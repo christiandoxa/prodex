@@ -40,6 +40,9 @@ Shadow is sampled at 1% of eligible traffic. A sampled shadow request analyzes a
 disposable state snapshot, returns the original bytes, and commits nothing.
 Unsampled shadow requests decline before JSON parsing.
 
+The selected model's known tokenizer is initialized during launch preparation,
+before request deadlines. Unsupported encodings still decline rewriting.
+
 Active work is capped at 256 KiB for HTTP and 96 KiB for WebSocket. A release
 rewrite that reaches 100 ms returns the original bytes instead of committing;
 debug builds use 5 seconds because tokenizer execution is unoptimized. An
