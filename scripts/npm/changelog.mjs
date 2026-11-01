@@ -5,7 +5,7 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { readCargoVersion, repoRoot } from "./common.mjs";
 
-import { mergedVersionTagsInReleaseOrder } from "../ci/release-lineage.mjs";
+import { legacyCodexAlignedRelease, mergedVersionTagsInReleaseOrder } from "../ci/release-lineage.mjs";
 
 const execFileAsync = promisify(execFile);
 const changelogPath = path.join(repoRoot, "CHANGELOG.md");
@@ -97,7 +97,7 @@ async function git(args) {
 async function versionTags() {
   // This historical release tag is absent from the current public remote.
   return mergedVersionTagsInReleaseOrder(repoRoot, "HEAD", [
-    { tag: "0.439.5", commit: "ac9aad08f25d6dc8cda96463ce2045b40f35f510" },
+    legacyCodexAlignedRelease,
   ]);
 }
 

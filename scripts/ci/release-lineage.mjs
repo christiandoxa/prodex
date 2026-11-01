@@ -35,7 +35,10 @@ export function mergedVersionTagsInReleaseOrder(root, revision = "HEAD", histori
 }
 
 const STABLE_VERSION = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/u;
-const LEGACY_TIP = "bf6b917bbd7cc24753b30c6f5d64199eca7c5a69";
+export const legacyCodexAlignedRelease = Object.freeze({
+  tag: "0.439.5",
+  commit: "bf6b917bbd7cc24753b30c6f5d64199eca7c5a69",
+});
 
 export function assertReleaseAdvance(version, previous, upstreamRelease) {
   if (!STABLE_VERSION.test(version)) throw new Error("release version must be an exact stable SemVer");
@@ -45,7 +48,7 @@ export function assertReleaseAdvance(version, previous, upstreamRelease) {
   // Only the explicitly authorized numbering transition may decrease SemVer.
   // Binding the old tag to its immutable commit rejects a moved/foreign anchor.
   if (version === "0.165.0" && previous.tag === "0.439.5"
-      && previous.commit === LEGACY_TIP && upstreamRelease === "rust-v0.165.0") return;
+      && previous.commit === legacyCodexAlignedRelease.commit && upstreamRelease === "rust-v0.165.0") return;
   const candidate = version.split(".").map(BigInt);
   const current = before.split(".").map(BigInt);
   for (let index = 0; index < candidate.length; index += 1) {
