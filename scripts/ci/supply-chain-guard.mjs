@@ -303,7 +303,6 @@ export function validateKicsConfiguration(workflowContents) {
     "--output-name prodex-kics",
     "--report-formats json,sarif",
     "--disable-secrets",
-    "--disable-full-descriptions",
     `--exclude-queries ${KICS_NON_ACTIONABLE_QUERY_IDS}`,
     "--fail-on critical,high,medium,low,info",
     "'.total_counter | select(type == \"number\")'",
@@ -332,6 +331,9 @@ export function validateKicsConfiguration(workflowContents) {
     if (job.includes(broadExclusion)) {
       violations.push(`.github/workflows/ci.yml: kics must not use broad or inline exclusions: ${broadExclusion}`);
     }
+  }
+  if (job.includes("--disable-full-descriptions")) {
+    violations.push(".github/workflows/ci.yml: KICS 2.2 removed --disable-full-descriptions");
   }
   const queryExclusions = [...job.matchAll(/--exclude-queries\s+([^\s]+)/gu)].map((match) => match[1]);
   if (queryExclusions.length !== 1 || queryExclusions[0] !== KICS_NON_ACTIONABLE_QUERY_IDS) {
@@ -1028,7 +1030,7 @@ function selfTest() {
       - run: |
           kics_image="${KICS_IMAGE}"
           docker pull "\${kics_image}"
-          docker run --rm --user "$(id -u):$(id -g)" --read-only --cap-drop ALL --security-opt no-new-privileges:true --network none --tmpfs /tmp:rw,noexec,nosuid,size=64m --volume "\${PWD}:/path:ro" --volume "\${PWD}/target/kics:/results" "\${kics_image}" scan -p /path -o /results --output-name prodex-kics --report-formats json,sarif --disable-secrets --disable-full-descriptions --exclude-queries ${KICS_NON_ACTIONABLE_QUERY_IDS} --fail-on critical,high,medium,low,info
+          docker run --rm --user "$(id -u):$(id -g)" --read-only --cap-drop ALL --security-opt no-new-privileges:true --network none --tmpfs /tmp:rw,noexec,nosuid,size=64m --volume "\${PWD}:/path:ro" --volume "\${PWD}/target/kics:/results" "\${kics_image}" scan -p /path -o /results --output-name prodex-kics --report-formats json,sarif --disable-secrets --exclude-queries ${KICS_NON_ACTIONABLE_QUERY_IDS} --fail-on critical,high,medium,low,info
           kics_total="$(jq -er '.total_counter | select(type == \"number\")' target/kics/prodex-kics.json)"
           test "\${kics_total}" -eq 0
           echo "KICS zero-finding JSON gate: passed."
@@ -1067,6 +1069,7 @@ sonar.qualitygate.wait=true
     1,
   );
   assert.equal(validateKicsConfiguration(sonarWorkflow.replace(KICS_IMAGE, "checkmarx/kics:latest")).length, 1);
+  assert.equal(validateKicsConfiguration(sonarWorkflow.replace("scan -p /path", "scan --disable-full-descriptions -p /path")).length, 2);
   assert.equal(validateKicsConfiguration(sonarWorkflow.replace("--fail-on critical,high,medium,low,info", "--fail-on critical,high,medium,low")).length, 1);
   assert.equal(
     validateKicsConfiguration(sonarWorkflow.replace(`--exclude-queries ${KICS_NON_ACTIONABLE_QUERY_IDS}`, "--exclude-queries wrong")).length > 0,

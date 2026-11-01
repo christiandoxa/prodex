@@ -1336,7 +1336,6 @@ jobs:
             --output-name prodex-kics \
             --report-formats json,sarif \
             --disable-secrets \
-            --disable-full-descriptions \
             --exclude-queries e84eaf4d-2f45-47b2-abe8-e581b06deb66,8c978947-0ff6-485c-b0c2-0bfca6026466 \
             --fail-on critical,high,medium,low,info \
             --minimal-ui \
