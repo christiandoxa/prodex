@@ -34,16 +34,24 @@ fn stalled_heartbeat_write_returns_bounded_unhealthy_error() {
     heartbeat_test_set_stalled_ids([id]);
     thread::sleep(HEARTBEAT_WRITE_DEADLINE + HEARTBEAT_SCHEDULER_TICK * 3);
 
+    // Measure only heartbeat shutdown, not result publication and ACL/file I/O.
+    // Retain the owner's handle to assert commit_result still publishes its result
+    // and reports the shared unhealthy state after the bounded stop check.
+    let heartbeat = owner.heartbeat.as_ref().expect("heartbeat is active");
+    let shutdown = RefreshLeaseHeartbeat {
+        id: heartbeat.id,
+        commands: heartbeat.commands.clone(),
+        control: Arc::clone(&heartbeat.control),
+    };
     let (finished, received) = mpsc::sync_channel(1);
     let handle = thread::spawn(move || {
-        finished
-            .send(owner.commit_result("{\"access_token\":\"stall\"}"))
-            .unwrap();
+        let started = Instant::now();
+        let result = shutdown.stop();
+        finished.send((result, started.elapsed())).unwrap();
     });
-    let elapsed_start = Instant::now();
     let result = received.recv_timeout(Duration::from_secs(1));
     heartbeat_test_set_stalled_ids([]);
-    let result = match result {
+    let (shutdown_result, elapsed) = match result {
         Ok(result) => result,
         Err(error) => {
             let _ = handle.join();
@@ -53,9 +61,10 @@ fn stalled_heartbeat_write_returns_bounded_unhealthy_error() {
     handle.join().unwrap();
     wait_for_test_writes_to_finish();
 
-    assert!(elapsed_start.elapsed() < Duration::from_secs(1));
+    assert!(elapsed < Duration::from_secs(1));
+    assert_eq!(shutdown_result.unwrap_err().kind(), io::ErrorKind::TimedOut);
     assert!(matches!(
-        result,
+        owner.commit_result("{\"access_token\":\"stall\"}"),
         Err(RefreshLeaseError::Io {
             kind: RefreshLeaseIoKind::Generic,
             ..
