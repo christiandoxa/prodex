@@ -111,14 +111,25 @@ fn run_exec_preserves_prompt_and_piped_stdin() {
     let generated = &recorded_args[1..recorded_args.len() - 1];
     assert_eq!(generated.len() % 2, 0);
     assert!(generated.chunks_exact(2).all(|pair| {
+        let Some((key, value)) = pair[1].split_once('=') else {
+            return false;
+        };
+        // The Windows batch fixture doubles quotes while logging arguments.
+        let value = value.trim_matches('"');
         pair[0] == "-c"
-            && (pair[1] == "model_provider=\"prodex-openai-governed-http\""
-                || pair[1].starts_with("model_providers.prodex-openai-governed-http.")
-                || pair[1].starts_with("experimental_realtime_ws_base_url=\"http://127.0.0.1:"))
+            && ((key == "model_provider" && value == "prodex-openai-governed-http")
+                || key.starts_with("model_providers.prodex-openai-governed-http.")
+                || (key == "experimental_realtime_ws_base_url"
+                    && value.starts_with("http://127.0.0.1:")))
     }));
-    assert!(generated.iter().any(|arg| {
-        arg.starts_with("model_providers.prodex-openai-governed-http.base_url=\"http://127.0.0.1:")
-    }));
+    assert!(
+        generated
+            .iter()
+            .any(|arg| arg.split_once('=').is_some_and(|(key, value)| {
+                key == "model_providers.prodex-openai-governed-http.base_url"
+                    && value.trim_matches('"').starts_with("http://127.0.0.1:")
+            }))
+    );
     assert_eq!(
         fs::read_to_string(&fixture.codex_stdin_log)
             .expect("failed to read codex stdin log")

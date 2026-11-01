@@ -168,7 +168,9 @@ async function main() {
       publishArgs.push("--provenance");
     }
     if (args.dryRun) {
-      publishArgs.push("--dry-run");
+      // Version numbers were realigned with Codex. npm 12 rejects an implicit
+      // latest tag below old registry versions, even for nonpublishing checks.
+      publishArgs.push("--dry-run", "--tag", "prodex-ci-dry-run");
     }
 
     process.stdout.write(`publishing ${packageJson.name}@${packageJson.version}\n`);

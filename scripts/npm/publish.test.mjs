@@ -44,6 +44,11 @@ if (args[0] === "view" && args[2] === "version") {
 }
 
 if (args[0] === "publish") {
+  if (process.env.NPM_REQUIRE_DRY_RUN_TAG === "1" && args.includes("--dry-run") &&
+      !(args.includes("--tag") && args[args.indexOf("--tag") + 1] === "prodex-ci-dry-run")) {
+    console.error("Cannot implicitly apply latest when a higher historical version exists");
+    process.exit(1);
+  }
   const packageJson = JSON.parse(fs.readFileSync(path.join(process.cwd(), "package.json"), "utf8"));
   fs.appendFileSync(logPath, \`publish \${packageJson.name}@\${packageJson.version} \${args.slice(1).join(" ")}\\n\`);
   process.exit(0);
@@ -101,6 +106,27 @@ test("publish skips package versions that already exist in npm", async () => {
       log,
       "publish @christiandoxa/prodex-win32-x64@1.2.3 --access public --provenance\n",
     );
+  } finally {
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
+
+
+test("publish dry-run names an isolated tag without changing real publication", async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "prodex-publish-dry-run-"));
+  try {
+    const staging = path.join(root, "release");
+    const binDir = path.join(root, "bin");
+    const logPath = path.join(root, "calls.log");
+    await writePackage(staging, "sdk", "@christiandoxa/prodex-gateway-sdk", "0.166.2");
+    await writeFakeNpm(binDir);
+    await execFileAsync(process.execPath, [SCRIPT_PATH, "--root", staging, "--dry-run"], {
+      cwd: root,
+      env: { ...process.env, PATH: `${binDir}${path.delimiter}${process.env.PATH}`,
+        NPM_CALL_LOG: logPath, NPM_REQUIRE_DRY_RUN_TAG: "1" },
+    });
+    assert.equal(await fs.readFile(logPath, "utf8"),
+      "publish @christiandoxa/prodex-gateway-sdk@0.166.2 --access public --dry-run --tag prodex-ci-dry-run\n");
   } finally {
     await fs.rm(root, { recursive: true, force: true });
   }

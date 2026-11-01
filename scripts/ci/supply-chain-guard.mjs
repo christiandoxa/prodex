@@ -204,6 +204,7 @@ export function validateSonarConfiguration(workflowContents, properties) {
     "Sonar unresolved issues:",
     'if [ "${total}" -ne 0 ]',
     "/api/hotspots/search",
+    '--data-urlencode "project=prodex-ci"',
     '--data-urlencode "status=TO_REVIEW"',
     "unreviewed security hotspot(s)",
     "/api/measures/component",
@@ -1009,7 +1010,7 @@ function selfTest() {
           jq '.projectStatus.status == "OK"'
           curl --data-urlencode "resolved=false" /api/issues/search
           if [ "\${total}" -ne 0 ]; then echo "Sonar unresolved issues:"; exit 1; fi
-          curl --data-urlencode "status=TO_REVIEW" /api/hotspots/search
+          curl --data-urlencode "project=prodex-ci" --data-urlencode "status=TO_REVIEW" /api/hotspots/search
           echo "unreviewed security hotspot(s)"
           curl /api/measures/component
           echo "security_rating,reliability_rating,sqale_rating,duplicated_lines_density"
@@ -1048,6 +1049,7 @@ sonar.rust.clippyReport.reportPaths=target/sonar/clippy-report.json
 sonar.qualitygate.wait=true
 `;
   assert.deepEqual(validateSonarConfiguration(sonarWorkflow, sonarProperties), []);
+  assert.equal(validateSonarConfiguration(sonarWorkflow.replace("project=prodex-ci", "projectKey=prodex-ci"), sonarProperties).length, 1);
   assert.deepEqual(validateKicsConfiguration(sonarWorkflow), []);
   assert.equal(
     validateSonarConfiguration(

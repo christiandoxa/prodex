@@ -1269,7 +1269,7 @@ jobs:
           fi
           hotspots_response="$(curl --fail --silent --show-error --get \
             --header "Authorization: Bearer ${SONAR_TOKEN}" \
-            --data-urlencode "projectKey=prodex-ci" \
+            --data-urlencode "project=prodex-ci" \
             --data-urlencode "status=TO_REVIEW" \
             --data-urlencode "ps=1" \
             "${SONAR_HOST_URL}/api/hotspots/search")"

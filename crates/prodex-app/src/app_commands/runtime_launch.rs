@@ -373,6 +373,20 @@ impl RuntimeProxyStartupFactory {
         request: &RuntimeLaunchRequest<'_>,
         preferred_listen_addr: Option<&str>,
     ) -> Result<Option<RuntimeProxyEndpoint>> {
+        if request.smart_context_enabled {
+            // Initialize only the selected model's proven tokenizer before any
+            // request deadline starts. Cold encoder setup is not per-turn work.
+            let model = match request.requested_model.as_deref() {
+                Some(model) => Some(model.to_owned()),
+                None => crate::codex_config_value_with_profile_v2(
+                    &selection.codex_home,
+                    "model",
+                    request.profile_v2_name,
+                )?,
+            };
+            let model = runtime_proxy_crate::smart_context_normalized_model_name(model.as_deref());
+            runtime_proxy_crate::smart_context_count_serialized_request(b"", model.as_deref());
+        }
         if let Some(local_upstream_base_url) =
             local_rewrite_proxy_upstream_base_url(selection, request)?
         {
