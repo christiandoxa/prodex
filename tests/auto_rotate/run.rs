@@ -110,7 +110,7 @@ fn run_exec_preserves_prompt_and_piped_stdin() {
     assert_eq!(recorded_args.last(), Some(&"summarize concisely"));
     let generated = &recorded_args[1..recorded_args.len() - 1];
     assert_eq!(generated.len() % 2, 0);
-    assert!(generated.chunks_exact(2).all(|pair| {
+    assert!(generated.as_chunks::<2>().0.iter().all(|pair| {
         let Some((key, value)) = pair[1].split_once('=') else {
             return false;
         };
