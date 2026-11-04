@@ -1,5 +1,6 @@
 use super::*;
 use prodex_mojo_core::rich::ascii_casefold_equal_exact;
+use std::borrow::Cow;
 
 struct RuntimeProxyUpstreamRequestEvents {
     route_kind: RuntimeRouteKind,
@@ -9,12 +10,13 @@ struct RuntimeProxyUpstreamRequestEvents {
 
 pub(super) async fn send_runtime_proxy_upstream_request(
     request_id: u64,
-    request: &RuntimeProxyRequest,
+    request: RuntimeProxyRequest,
     shared: &RuntimeRotationProxyShared,
     profile_name: &str,
     turn_state_override: Option<&str>,
     auth: UsageAuth,
 ) -> Result<reqwest::Response> {
+    let route_kind = runtime_proxy_request_lane(&request.path_and_query, false);
     send_runtime_proxy_upstream_request_with_events(
         request_id,
         request,
@@ -23,7 +25,7 @@ pub(super) async fn send_runtime_proxy_upstream_request(
         turn_state_override,
         auth,
         RuntimeProxyUpstreamRequestEvents {
-            route_kind: runtime_proxy_request_lane(&request.path_and_query, false),
+            route_kind,
             start: "upstream_start",
             response: "upstream_response",
         },
@@ -33,7 +35,7 @@ pub(super) async fn send_runtime_proxy_upstream_request(
 
 pub(crate) async fn send_runtime_proxy_upstream_responses_request(
     request_id: u64,
-    request: &RuntimeProxyRequest,
+    request: RuntimeProxyRequest,
     shared: &RuntimeRotationProxyShared,
     profile_name: &str,
     turn_state_override: Option<&str>,
@@ -57,7 +59,7 @@ pub(crate) async fn send_runtime_proxy_upstream_responses_request(
 
 async fn send_runtime_proxy_upstream_request_with_events(
     request_id: u64,
-    request: &RuntimeProxyRequest,
+    mut request: RuntimeProxyRequest,
     shared: &RuntimeRotationProxyShared,
     profile_name: &str,
     turn_state_override: Option<&str>,
@@ -78,10 +80,12 @@ async fn send_runtime_proxy_upstream_request_with_events(
             request.method
         )
     })?;
+    // The original body may be moved into the HTTP client during preparation.
+    let has_previous_response_id = runtime_request_previous_response_id(&request).is_some();
     let upstream_request =
         build_runtime_proxy_upstream_request(RuntimeProxyUpstreamRequestContext {
             request_id,
-            request,
+            request: &mut request,
             shared,
             profile_name,
             turn_state_override,
@@ -111,7 +115,7 @@ async fn send_runtime_proxy_upstream_request_with_events(
                 ),
                 runtime_proxy_log_field(
                     "previous_response_id",
-                    if runtime_request_previous_response_id(request).is_some() {
+                    if has_previous_response_id {
                         "present"
                     } else {
                         "none"
@@ -154,7 +158,7 @@ async fn send_runtime_proxy_upstream_request_with_events(
 
 struct RuntimeProxyUpstreamRequestContext<'a> {
     request_id: u64,
-    request: &'a RuntimeProxyRequest,
+    request: &'a mut RuntimeProxyRequest,
     shared: &'a RuntimeRotationProxyShared,
     profile_name: &'a str,
     turn_state_override: Option<&'a str>,
@@ -219,7 +223,7 @@ fn build_runtime_proxy_upstream_request(
         upstream_body.as_ref(),
         runtime_luna_reserve_http_rewrite_allowed(request, route_kind, turn_state_override),
     )? {
-        upstream_body = std::borrow::Cow::Owned(reserve_body);
+        upstream_body = Cow::Owned(reserve_body);
     }
     log_runtime_upstream_payload_snapshot(
         shared,
@@ -229,9 +233,17 @@ fn build_runtime_proxy_upstream_request(
         profile_name,
         upstream_body.as_ref(),
     );
+    let upstream_body = match upstream_body {
+        Cow::Borrowed(body) if std::ptr::eq(body, request.body.as_slice()) => {
+            std::mem::take(&mut request.body)
+        }
+        Cow::Borrowed(body) => body.to_vec(),
+        Cow::Owned(body) => body,
+    };
+    drop(std::mem::take(&mut request.body));
     upstream_request = upstream_request
         .header("Authorization", format!("Bearer {}", auth.access_token))
-        .body(upstream_body.into_owned());
+        .body(upstream_body);
     if let Some(cookie_header) = runtime_proxy_cookie_header_for_reqwest(
         shared,
         profile_name,

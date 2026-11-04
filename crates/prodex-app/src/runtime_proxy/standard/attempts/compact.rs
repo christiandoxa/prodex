@@ -84,7 +84,7 @@ fn run_runtime_compact_request_loop(
             match await_runtime_proxy_async_task(shared, "compact_upstream_request", async move {
                 send_runtime_proxy_upstream_request(
                     request_id,
-                    &upstream_request,
+                    upstream_request,
                     &upstream_shared,
                     &upstream_profile_name,
                     None,

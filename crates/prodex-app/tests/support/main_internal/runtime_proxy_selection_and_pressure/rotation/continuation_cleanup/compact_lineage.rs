@@ -212,7 +212,7 @@ fn http_responses_success_without_turn_state_keeps_compact_lineage_alive() {
         .block_on(async {
             let response =
                 send_runtime_proxy_upstream_responses_request(
-                    1, &request, &shared, "second", None, auth,
+                    1, request, &shared, "second", None, auth,
                 )
                 .await
                 .expect("responses follow-up should reach upstream");
@@ -266,6 +266,11 @@ fn http_responses_success_without_turn_state_keeps_compact_lineage_alive() {
     }
 
     let log = read_runtime_proxy_test_log(&shared.log_path);
+    assert!(
+        log.lines().any(|line| line.contains("upstream_async_start")
+            && line.contains("previous_response_id=present")),
+        "upstream logging should retain previous-response metadata after body ownership moves"
+    );
     assert!(
         log.contains("turn_state_coverage route=responses profile=second status=missing"),
         "missing responses turn_state should be logged: {log}"
@@ -470,7 +475,7 @@ fn http_responses_success_with_turn_state_releases_compact_lineage() {
         .block_on(async {
             let response =
                 send_runtime_proxy_upstream_responses_request(
-                    1, &request, &shared, "second", None, auth,
+                    1, request, &shared, "second", None, auth,
                 )
                 .await
                 .expect("responses request should reach upstream");

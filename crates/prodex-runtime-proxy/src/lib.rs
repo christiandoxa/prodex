@@ -35,6 +35,7 @@ mod payload_detection;
 mod previous_response_log;
 mod previous_response_orchestration;
 mod quota;
+mod request_shape;
 mod response_forwarding;
 mod route_affinity_log;
 mod route_decision_trace;
@@ -139,7 +140,7 @@ fn runtime_request_semantic_plan(value: &serde_json::Value) -> RuntimeRequestSem
             .map(str::to_owned)
     };
     let session_id = string_field("session_id", Some("session_id"));
-    let raw = serde_json::to_string(value).expect("runtime request JSON serializes");
+    let raw = request_shape::runtime_request_shape_json(value);
     let semantics = prodex_mojo_core::json::runtime_proxy_request_shape(&raw, session_id.is_some())
         .expect("Mojo runtime request shape returned invalid output");
     RuntimeRequestSemanticPlan {
@@ -307,13 +308,11 @@ pub fn runtime_request_previous_response_id(request: &RuntimeProxyRequest) -> Op
 }
 
 pub fn runtime_request_prompt_cache_key(request: &RuntimeProxyRequest) -> Option<String> {
-    let value = serde_json::from_slice::<serde_json::Value>(&request.body).ok()?;
-    runtime_request_semantic_plan(&value).prompt_cache_key
+    request_shape::runtime_request_body_plan(&request.body)?.prompt_cache_key
 }
 
 pub fn runtime_request_previous_response_id_from_bytes(body: &[u8]) -> Option<String> {
-    let value = serde_json::from_slice::<serde_json::Value>(body).ok()?;
-    runtime_request_semantic_plan(&value).previous_response_id
+    request_shape::runtime_request_body_plan(body)?.previous_response_id
 }
 
 pub fn runtime_request_previous_response_id_from_value(
@@ -373,9 +372,8 @@ pub fn runtime_request_value_previous_response_fresh_fallback_shape(
 pub fn runtime_request_previous_response_fresh_fallback_shape(
     request: &RuntimeProxyRequest,
 ) -> Option<RuntimePreviousResponseFreshFallbackShape> {
-    let body_shape = serde_json::from_slice::<serde_json::Value>(&request.body)
-        .ok()
-        .and_then(|value| runtime_request_semantic_plan(&value).fresh_fallback_shape);
+    let body_shape = request_shape::runtime_request_body_plan(&request.body)
+        .and_then(|plan| plan.fresh_fallback_shape);
     runtime_previous_response_fresh_fallback_shape_with_session(
         body_shape,
         runtime_request_explicit_session_id(request).is_some()
@@ -384,8 +382,8 @@ pub fn runtime_request_previous_response_fresh_fallback_shape(
 }
 
 pub fn runtime_request_requires_previous_response_affinity(request: &RuntimeProxyRequest) -> bool {
-    serde_json::from_slice::<serde_json::Value>(&request.body)
-        .map(|value| runtime_request_semantic_plan(&value).requires_previous_response_affinity)
+    request_shape::runtime_request_body_plan(&request.body)
+        .map(|plan| plan.requires_previous_response_affinity)
         .unwrap_or(false)
 }
 
@@ -432,8 +430,8 @@ pub fn runtime_request_text_without_turn_state(request_text: &str) -> Option<Str
 }
 
 pub fn runtime_request_has_reconstructable_full_history(request: &RuntimeProxyRequest) -> bool {
-    serde_json::from_slice::<serde_json::Value>(&request.body)
-        .map(|value| runtime_request_semantic_plan(&value).reconstructable_full_history)
+    request_shape::runtime_request_body_plan(&request.body)
+        .map(|plan| plan.reconstructable_full_history)
         .unwrap_or(false)
 }
 
@@ -502,9 +500,7 @@ pub fn runtime_request_session_id(request: &RuntimeProxyRequest) -> Option<Strin
         .map(RuntimeExplicitSessionId::into_string)
         .or_else(|| runtime_request_session_id_from_turn_metadata(request))
         .or_else(|| {
-            serde_json::from_slice::<serde_json::Value>(&request.body)
-                .ok()
-                .and_then(|value| runtime_request_session_id_from_value(&value))
+            request_shape::runtime_request_body_plan(&request.body).and_then(|plan| plan.session_id)
         })
 }
 
@@ -524,9 +520,7 @@ pub fn runtime_request_turn_id(request: &RuntimeProxyRequest) -> Option<String> 
         .and_then(|value| serde_json::from_str::<serde_json::Value>(value).ok())
         .and_then(|value| runtime_request_semantic_plan(&value).turn_id)
         .or_else(|| {
-            serde_json::from_slice::<serde_json::Value>(&request.body)
-                .ok()
-                .and_then(|value| runtime_request_semantic_plan(&value).turn_id)
+            request_shape::runtime_request_body_plan(&request.body).and_then(|plan| plan.turn_id)
         })
 }
 
@@ -559,9 +553,7 @@ pub fn runtime_request_compaction_generation(request: &RuntimeProxyRequest) -> O
         .and_then(|value| serde_json::from_str::<serde_json::Value>(value).ok())
         .and_then(|value| runtime_request_semantic_plan(&value).window_id)
         .or_else(|| {
-            serde_json::from_slice::<serde_json::Value>(&request.body)
-                .ok()
-                .and_then(|value| runtime_request_semantic_plan(&value).window_id)
+            request_shape::runtime_request_body_plan(&request.body).and_then(|plan| plan.window_id)
         })?;
     window_id.rsplit_once(':')?.1.parse().ok()
 }

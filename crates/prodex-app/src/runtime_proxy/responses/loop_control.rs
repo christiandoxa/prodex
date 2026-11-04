@@ -1,9 +1,10 @@
 use super::*;
 use prodex_mojo_core::runtime::ResponsesLoopAction::*;
+use std::borrow::Cow;
 
 pub(super) struct RuntimeResponsesRequestContext<'a> {
     pub(super) request_id: u64,
-    pub(super) request: RuntimeProxyRequest,
+    pub(super) request: Cow<'a, RuntimeProxyRequest>,
     pub(super) shared: &'a RuntimeRotationProxyShared,
     pub(super) request_requires_previous_response_affinity: bool,
     pub(super) previous_response_fresh_fallback_shape:
@@ -100,12 +101,14 @@ pub(crate) fn proxy_runtime_responses_request(
 ) -> Result<RuntimeResponsesReply> {
     let scoped_shared = shared.for_precommit_request();
     let shared = &scoped_shared;
-    let mut request = request.clone();
+    let mut request = Cow::Borrowed(request);
     let mut request_turn_state = runtime_request_turn_state(&request);
     if let Some(turn_state) = request_turn_state.as_deref()
         && runtime_turn_state_is_dead_recovery_token(shared, turn_state)?
     {
-        request = runtime_proxy_crate::runtime_request_without_turn_state(&request);
+        request = Cow::Owned(runtime_proxy_crate::runtime_request_without_turn_state(
+            &request,
+        ));
         runtime_proxy_log(
             shared,
             format!("request={request_id} transport=http dead_turn_state_replay scrubbed=true"),

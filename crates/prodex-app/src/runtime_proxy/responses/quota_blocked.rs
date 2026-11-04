@@ -426,8 +426,9 @@ pub(super) fn handle_runtime_responses_quota_attempt(
         RuntimeResponsesQuotaBlockedAction::Continue => Ok(None),
         RuntimeResponsesQuotaBlockedAction::Return(response) => Ok(Some(*response)),
         RuntimeResponsesQuotaBlockedAction::ReplayWithoutTurnState => {
-            context.request =
-                runtime_proxy_crate::runtime_request_without_turn_state(&context.request);
+            context.request = std::borrow::Cow::Owned(
+                runtime_proxy_crate::runtime_request_without_turn_state(&context.request),
+            );
             context.request_turn_state = None;
             runtime_proxy_log(
                 context.shared,

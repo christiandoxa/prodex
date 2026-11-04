@@ -2,6 +2,7 @@ use super::success::{
     RuntimeResponsesSuccessAttemptContext, prepare_runtime_responses_success_attempt,
 };
 use super::*;
+use std::borrow::Cow;
 
 mod bound_overload;
 use bound_overload::BoundOverloadRetry;
@@ -319,7 +320,7 @@ pub(crate) fn attempt_runtime_responses_request(
         .ok()
         .and_then(|body| body.get("stream").and_then(serde_json::Value::as_bool))
         == Some(true);
-    let mut request_for_attempt = request.clone();
+    let mut request_for_attempt = Cow::Borrowed(request);
     let mut previous_response_id_for_attempt = request_previous_response_id.clone();
     let mut full_history_fallback_used = false;
     let quota_gate = runtime_precommit_quota_gate(RuntimePrecommitQuotaGateRequest {
@@ -404,7 +405,7 @@ pub(crate) fn attempt_runtime_responses_request(
                     err,
                 );
             })?;
-        let upstream_request = request_for_attempt.clone();
+        let upstream_request = request_for_attempt.as_ref().clone();
         let upstream_shared = shared.clone();
         let upstream_profile_name = profile_name.to_string();
         let upstream_turn_state_override = turn_state_override.map(str::to_string);
@@ -412,7 +413,7 @@ pub(crate) fn attempt_runtime_responses_request(
             match await_runtime_proxy_async_task(shared, "responses_upstream_request", async move {
                 send_runtime_proxy_upstream_responses_request(
                     request_id,
-                    &upstream_request,
+                    upstream_request,
                     &upstream_shared,
                     &upstream_profile_name,
                     upstream_turn_state_override.as_deref(),
@@ -493,7 +494,7 @@ pub(crate) fn attempt_runtime_responses_request(
                         ],
                     ),
                 );
-                request_for_attempt = fallback_request;
+                request_for_attempt = Cow::Owned(fallback_request);
                 previous_response_id_for_attempt = None;
                 full_history_fallback_used = true;
                 retry_number = retry_number.saturating_add(1);
@@ -585,7 +586,7 @@ pub(crate) fn attempt_runtime_responses_request(
             );
             drop(prepared);
             inflight_guard = Some(recovery_guard);
-            request_for_attempt = fallback_request;
+            request_for_attempt = Cow::Owned(fallback_request);
             previous_response_id_for_attempt = None;
             full_history_fallback_used = true;
             retry_number = retry_number.saturating_add(1);
