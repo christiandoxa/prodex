@@ -2,6 +2,41 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.166.4 - 2026-11-05
+
+### Runtime
+
+- Remove default request body size ceiling (`616792a`)
+- Preserve large payloads during request handling (`d59e47e`)
+# Prodex 0.166.4
+
+This release removes the default request-size ceiling that could reject large
+Codex image requests before they reached the upstream service.
+
+## New Features
+
+- The proxy accepts request bodies without a fixed default size limit, subject
+  to available local resources and any limit explicitly configured by the user.
+
+## Bug Fixes
+
+- Preserve request bytes and profile affinity for large image continuations.
+- Forward large upstream stream chunks in bounded pieces instead of terminating
+  the stream solely because a chunk exceeded the prefetch size.
+- Pass upstream payload-too-large responses through without profile rotation.
+- Return a local service-unavailable response when request capture runs out of
+  its memory budget, instead of reporting a synthetic payload-too-large error.
+
+## Compatibility
+
+Explicit `PRODEX_RUNTIME_PROXY_MAX_REQUEST_BODY_BYTES` limits remain supported.
+Memory availability is estimated per process; it is not a reservation shared
+across processes.
+
+## Changelog
+
+Full Changelog: [0.166.3...0.166.4](https://github.com/christiandoxa/prodex/compare/0.166.3...0.166.4)
+
 ## 0.166.3 - 2026-11-01
 
 ### Misc
@@ -11,61 +46,6 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 - Prevent incident data from returning to tracked source (`ff640fc`)
 - Qualify warm tokenizer startup and stable tool integration (`d437f5e`)
 - Enforce safe automatic Smart Context on all launches (`f9a8af2`)
-# Prodex 0.166.3
-
-Smart Context is now automatic on both ordinary Prodex and Super launches, with
-stricter request preservation and stable dependency qualification. This release
-also removes private incident material from the maintained repository.
-
-## New Features
-
-- Use the same conservative pre-commit Smart Context engine for `prodex`,
-  `prodex run`, and `prodex s`; ordinary launches do not gain Super tools.
-- Prepare the selected model's supported tokenizer before request deadlines,
-  preventing cold initialization from suppressing the first eligible rewrite.
-- Enforce a repository privacy guard for incident identifiers and local paths.
-
-## Bug Fixes
-
-- Deduplicate only exact repeated tool-result text. Preserve user, developer,
-  system, and assistant messages; tool arguments and identities; media; and
-  unknown protocol fields.
-- Require comparable canonical-JSON tokenizer counts, including reference
-  overhead. Whitespace removal is not reported as token savings, and literal
-  special-token spellings are counted as ordinary data.
-- Keep shadow evaluation free of committed state changes, and fail closed when
-  a required legacy artifact cannot be recovered, even for unknown tokenizers.
-- Update stable libraries, CI tools, and pinned build images; adapt SonarQube,
-  KICS, npm dry-run publishing, and native-platform launch fixtures without
-  weakening their gates. Update the qualified Playwright MCP reference.
-- Remove the obsolete incident archive. Keep only sanitized, active build
-  contracts under CI/release ownership and replace personal paths with generic
-  examples.
-
-## Compatibility
-
-The automatic RTK, Codebase Memory MCP, Playwright MCP, and Ponytail integrations
-are unchanged. Presidio still requests interactive consent. Unsupported model
-encodings and unsafe or low-value rewrites preserve original request bytes.
-The rewrite does not claim exact provider billing or live-model quality parity.
-
-Repository history has been sanitized. Existing clones must not merge the old
-history back into the cleaned branch. Historical artifact attestations refer to
-their original build commits, not the rewritten tag commits. This release has
-new provenance tied to the cleaned release source.
-
-## Verification
-
-Synthetic end-to-end CLI tests cover ordinary and Super launch paths. The
-repeated-tool-output fixture reconstructs the original JSON exactly and reduces
-reference-token counts from 23,440 to 11,873; exact-mode, opaque tool arguments,
-and unsupported models pass through unchanged. This fixture is not a forecast
-of provider charges or general task performance. Publication requires passing
-exact-source CI, six platform builds, checksum/SBOM/malware checks, and provenance.
-
-## Changelog
-
-Full Changelog: [0.166.2...0.166.3](https://github.com/christiandoxa/prodex/compare/0.166.2...0.166.3)
 
 ## 0.166.2 - 2026-10-31
 
