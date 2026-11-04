@@ -46,7 +46,6 @@ fn captured_body_memory_is_bounded_and_released() {
     write!(client, "POST /responses HTTP/1.1\r\nHost: localhost\r\nContent-Length: 4\r\nConnection: close\r\n\r\nabcd").expect("send");
     let mut request = server.recv().expect("request");
     let first = capture_runtime_proxy_request_with_memory(&mut request, u64::MAX, budget.guard())
-        .ok()
         .expect("body fits exactly");
     assert_eq!(first.request.body, b"abcd");
     request
