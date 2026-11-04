@@ -20,6 +20,9 @@ impl Drop for RuntimeRotationProxy {
     fn drop(&mut self) {
         self.draining.store(true, Ordering::SeqCst);
         self.shutdown.store(true, Ordering::SeqCst);
+        for worker in &self.worker_threads {
+            worker.thread().unpark();
+        }
         for _ in 0..self.accept_worker_count {
             self.server.unblock();
         }

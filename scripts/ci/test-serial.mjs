@@ -114,6 +114,7 @@ function coreSteps(stressSkipTests, options) {
 function runtimeSteps(stressSkipTests, options) {
   return [
     cargoTestStep("serial:runtime-proxy-units", "runtime_proxy::", [], options),
+    cargoTestStep("serial:runtime-request-memory-units", "runtime_request_memory::", [], options),
     cargoTestStep("serial:runtime-broker-units", "runtime_broker::", [], options),
     cargoTestStep("serial:runtime-core-shared-units", "runtime_core_shared::", [], options),
     ...MAIN_INTERNAL_RUNTIME_PROXY_SHARDS.map(([label, filter]) =>

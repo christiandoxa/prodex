@@ -12,7 +12,7 @@ pub(super) use prodex_runtime_tuning::{
     runtime_websocket_tcp_connect_queue_capacity_default,
 };
 
-const RUNTIME_PROXY_DEFAULT_MAX_REQUEST_BODY_BYTES: u64 = 64 * 1024 * 1024;
+const RUNTIME_PROXY_DEFAULT_MAX_REQUEST_BODY_BYTES: u64 = u64::MAX;
 
 mod config;
 mod environment;

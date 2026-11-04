@@ -123,6 +123,7 @@ pub(crate) struct RuntimeRotationProxyStartOptions<'a> {
 pub(crate) fn start_runtime_rotation_proxy_with_options(
     options: RuntimeRotationProxyStartOptions<'_>,
 ) -> Result<RuntimeRotationProxy> {
+    crate::runtime_request_memory::initialize_request_memory_budget();
     let RuntimeRotationProxyStartOptions {
         paths,
         state,

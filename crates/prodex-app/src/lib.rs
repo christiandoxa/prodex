@@ -78,6 +78,7 @@ mod runtime_persistence;
 mod runtime_policy;
 mod runtime_proxy;
 mod runtime_proxy_shared;
+mod runtime_request_memory;
 mod runtime_save_shared;
 mod runtime_secret_backend;
 mod runtime_state_shared;

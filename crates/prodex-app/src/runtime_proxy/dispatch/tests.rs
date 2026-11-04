@@ -7,6 +7,69 @@ use super::{
 };
 
 #[test]
+fn captured_body_memory_is_bounded_and_released() {
+    let budget = crate::runtime_request_memory::RequestMemoryBudget::new(32);
+    let server = tiny_http::Server::http("127.0.0.1:0").expect("server");
+    let address = server.server_addr().to_ip().expect("address");
+    for (framing, body) in [
+        ("Content-Length: 5\r\n", "abcde"),
+        (
+            "Transfer-Encoding: chunked\r\n",
+            "3\r\nabc\r\n2\r\nde\r\n0\r\n\r\n",
+        ),
+    ] {
+        let mut client = std::net::TcpStream::connect(address).expect("connect");
+        write!(client, "POST /responses HTTP/1.1\r\nHost: localhost\r\n{framing}Connection: close\r\n\r\n{body}")
+            .expect("send");
+        let mut request = server.recv().expect("request");
+        let result =
+            capture_runtime_proxy_request_with_memory(&mut request, u64::MAX, budget.guard());
+        let error = result.err().expect("memory exhaustion");
+        request
+            .respond(runtime_proxy_capture_memory_response(&error).expect("resource response"))
+            .expect("respond");
+        let mut response = String::new();
+        client.read_to_string(&mut response).expect("read response");
+        assert!(response.starts_with("HTTP/1.1 503"), "{response}");
+        assert!(
+            response.contains("\"code\":\"service_unavailable\""),
+            "{response}"
+        );
+        assert!(!response.contains("abcde"));
+        assert!(
+            budget.guard().reserve_body_bytes(4).is_ok(),
+            "failed capture must release its reservation"
+        );
+    }
+
+    let mut client = std::net::TcpStream::connect(address).expect("connect");
+    write!(client, "POST /responses HTTP/1.1\r\nHost: localhost\r\nContent-Length: 4\r\nConnection: close\r\n\r\nabcd").expect("send");
+    let mut request = server.recv().expect("request");
+    let first = capture_runtime_proxy_request_with_memory(&mut request, u64::MAX, budget.guard())
+        .ok()
+        .expect("body fits exactly");
+    assert_eq!(first.request.body, b"abcd");
+    request
+        .respond(tiny_http::Response::empty(200))
+        .expect("respond");
+
+    let mut client = std::net::TcpStream::connect(address).expect("connect");
+    write!(client, "POST /responses HTTP/1.1\r\nHost: localhost\r\nContent-Length: 1\r\nConnection: close\r\n\r\nx").expect("send");
+    let mut request = server.recv().expect("request");
+    let error = capture_runtime_proxy_request_with_memory(&mut request, u64::MAX, budget.guard())
+        .err()
+        .expect("concurrent capture is bounded");
+    request
+        .respond(runtime_proxy_capture_memory_response(&error).expect("resource response"))
+        .expect("respond");
+    drop(first);
+    assert!(
+        budget.guard().reserve_body_bytes(4).is_ok(),
+        "completed capture must release its reservation"
+    );
+}
+
+#[test]
 fn runtime_proxy_max_request_body_bytes_rejects_invalid_env_values() {
     for (value, message) in [
         (

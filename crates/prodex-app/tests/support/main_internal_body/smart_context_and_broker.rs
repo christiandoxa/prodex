@@ -508,3 +508,96 @@ fn runtime_proxy_oversized_request_body_uses_generic_response_and_redacted_log()
     assert!(!runtime_log.contains(&oversized_input));
     assert!(!runtime_log.contains("bytes exceeds"));
 }
+
+#[test]
+fn large_codex_image_request_preserves_profile_affinity() {
+    let _limit = TestEnvVarGuard::unset("PRODEX_RUNTIME_PROXY_MAX_REQUEST_BODY_BYTES");
+    let _idle_timeout = TestEnvVarGuard::set("PRODEX_RUNTIME_PROXY_STREAM_IDLE_TIMEOUT_MS", "120000");
+    let backend = RuntimeProxyBackend::start_http_buffered_json();
+    let temp_dir = TestDir::new();
+    let home = temp_dir.path.join("homes/primary");
+    write_auth_json(&home.join("auth.json"), "second-account");
+    let other_home = temp_dir.path.join("homes/other");
+    write_auth_json(&other_home.join("auth.json"), "third-account");
+    let paths = AppPaths {
+        state_file: temp_dir.path.join("state.json"),
+        managed_profiles_root: temp_dir.path.join("homes"),
+        shared_codex_root: temp_dir.path.join("shared-codex"),
+        legacy_shared_codex_root: temp_dir.path.join("shared"),
+        root: temp_dir.path.clone(),
+    };
+    let state = AppState {
+        active_profile: Some("primary".to_string()),
+        profiles: BTreeMap::from([
+            (
+                "primary".to_string(),
+                ProfileEntry {
+                    codex_home: home,
+                    managed: true,
+                    email: Some("second@example.com".to_string()),
+                    provider: ProfileProvider::Openai,
+                },
+            ),
+            (
+                "other".to_string(),
+                ProfileEntry {
+                    codex_home: other_home,
+                    managed: true,
+                    email: Some("third@example.com".to_string()),
+                    provider: ProfileProvider::Openai,
+                },
+            ),
+        ]),
+        ..AppState::default()
+    };
+    let proxy = start_runtime_rotation_proxy_with_options(RuntimeRotationProxyStartOptions {
+        paths: &paths,
+        state: &state,
+        current_profile: "primary",
+        upstream_base_url: backend.base_url(),
+        include_code_review: false,
+        upstream_no_proxy: false,
+        auto_redeem: false,
+        smart_context_enabled: false,
+        presidio_redaction_enabled: false,
+        model_context_window_tokens: None,
+        preferred_listen_addr: None,
+    })
+    .expect("runtime proxy should start");
+
+    let client = reqwest::blocking::Client::builder()
+        .timeout(Duration::from_secs(120))
+        .build()
+        .expect("client");
+    let bootstrap: serde_json::Value = client
+        .post(format!("http://{}/backend-api/prodex/responses", proxy.listen_addr))
+        .json(&serde_json::json!({"model":"gpt-5","input":[]}))
+        .send()
+        .expect("bootstrap request")
+        .json()
+        .expect("bootstrap response");
+    let previous = bootstrap["id"].as_str().expect("response id");
+    let mut body = format!("{{\"previous_response_id\":\"{previous}\",\"model\":\"gpt-5\",\"input\":[{{\"type\":\"function_call_output\",\"call_id\":\"call-1\",\"output\":\"done\"}},{{\"role\":\"user\",\"content\":[{{\"type\":\"input_image\",\"image_url\":\"data:image/png;base64,").into_bytes();
+    body.resize(body.len() + 64 * 1024 * 1024 + 4, b'A');
+    body.extend_from_slice(b"\"}]}]}");
+    for chunked in [false, true] {
+        let request_body = if chunked {
+            reqwest::blocking::Body::new(std::io::Cursor::new(body.clone()))
+        } else {
+            reqwest::blocking::Body::from(body.clone())
+        };
+        let response = client
+            .post(format!("http://{}/backend-api/prodex/responses", proxy.listen_addr))
+            .header(reqwest::header::CONTENT_TYPE, "application/json")
+            .body(request_body)
+            .send()
+            .expect("large request should reach the upstream");
+        assert_eq!(response.status().as_u16(), 200, "chunked={chunked}");
+    }
+    let received = backend.responses_bodies();
+    assert_eq!(received.len(), 3);
+    assert!(received.iter().skip(1).all(|entry| entry.as_bytes() == body.as_slice()), "upstream body changed");
+    let accounts = backend.responses_accounts();
+    assert_eq!(accounts.len(), 3);
+    assert!(accounts.iter().all(|account| account == &accounts[0]), "continuation must stay on its owner");
+}

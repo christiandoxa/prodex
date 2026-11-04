@@ -262,6 +262,7 @@ pub(super) fn prepare_runtime_local_rewrite_application(
     allow_local_file_access: bool,
     transport: (&str, Option<std::net::SocketAddr>),
 ) -> Result<RuntimeLocalRewritePrepared> {
+    crate::runtime_request_memory::initialize_request_memory_budget();
     let (transport, listen_addr) = transport;
     let RuntimeLocalRewriteProxyStartOptions {
         paths,

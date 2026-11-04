@@ -107,6 +107,9 @@ pub(super) fn spawn_runtime_rotation_proxy_workers(
         )?);
     }
 
+    worker_threads.push(crate::runtime_request_memory::spawn_request_memory_sampler(
+        Arc::clone(shutdown),
+    )?);
     startup_guard.disarm();
     Ok(worker_threads)
 }

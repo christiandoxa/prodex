@@ -7,16 +7,15 @@ use std::io::Read;
 const RUNTIME_PROXY_REQUEST_CAPTURE_FAILED_MESSAGE: &str = "proxied request could not be captured";
 const RUNTIME_PROXY_REQUEST_REWRITE_FAILED_MESSAGE: &str = "proxied request could not be prepared";
 
-#[derive(Debug)]
-pub(crate) struct RuntimeProxyBodyTooLarge {
-    limit: u64,
-    actual: Option<u64>,
+pub(crate) struct RuntimeCapturedRequest<'a> {
+    pub(crate) request: RuntimeProxyRequest,
+    pub(crate) memory: crate::runtime_request_memory::RequestMemoryGuard<'a>,
 }
 
-impl RuntimeProxyBodyTooLarge {
-    pub(crate) const fn new(limit: u64, actual: Option<u64>) -> Self {
-        Self { limit, actual }
-    }
+#[derive(Debug)]
+struct RuntimeProxyBodyTooLarge {
+    limit: u64,
+    actual: Option<u64>,
 }
 
 impl fmt::Display for RuntimeProxyBodyTooLarge {
@@ -114,6 +113,16 @@ fn reject_runtime_proxy_capture_error(
     request_id: u64,
     err: &anyhow::Error,
 ) {
+    if let Some(response) = runtime_proxy_capture_memory_response(err) {
+        runtime_proxy_log_dispatch_error(
+            shared,
+            request_id,
+            "request_memory_unavailable",
+            "request_memory_unavailable".to_string(),
+        );
+        let _ = request.respond(response);
+        return;
+    }
     match runtime_proxy_capture_error_response(runtime_proxy_error_is_body_too_large(err)) {
         prodex_mojo_core::runtime_proxy_dispatch::RuntimeProxyErrorResponse::BodyTooLarge => {
             runtime_proxy_log_dispatch_error(
@@ -226,7 +235,7 @@ fn acquire_runtime_proxy_request_slot(
     (
         RuntimeProxyActiveRequestGuard,
         tiny_http::Request,
-        Option<RuntimeProxyRequest>,
+        Option<RuntimeCapturedRequest<'static>>,
     ),
     (),
 > {
@@ -255,7 +264,7 @@ fn acquire_runtime_proxy_request_slot(
                         shared,
                         transport,
                         path,
-                        Some(&captured),
+                        Some(&captured.request),
                     ) {
                         Ok(guard) => Ok((guard, request, Some(captured))),
                         Err(rejection) => {
@@ -280,9 +289,12 @@ fn dispatch_runtime_http_proxy_request(
     request_id: u64,
     mut request: tiny_http::Request,
     shared: &RuntimeRotationProxyShared,
-    captured: Option<RuntimeProxyRequest>,
+    captured: Option<RuntimeCapturedRequest<'static>>,
 ) {
-    let mut captured = match captured {
+    let RuntimeCapturedRequest {
+        request: mut captured,
+        memory: _memory,
+    } = match captured {
         Some(captured) => captured,
         None => match capture_runtime_proxy_request(
             &mut request,
@@ -487,6 +499,23 @@ pub(crate) fn runtime_proxy_error_is_body_too_large(err: &anyhow::Error) -> bool
         .any(|cause| cause.downcast_ref::<RuntimeProxyBodyTooLarge>().is_some())
 }
 
+pub(crate) fn runtime_proxy_capture_memory_response(
+    err: &anyhow::Error,
+) -> Option<tiny_http::ResponseBox> {
+    let exhausted = err.chain().any(|cause| {
+        cause
+            .downcast_ref::<crate::runtime_request_memory::RequestMemoryExhausted>()
+            .is_some()
+    });
+    exhausted.then(|| {
+        build_runtime_proxy_json_error_response(
+            503,
+            "service_unavailable",
+            "runtime request memory is temporarily unavailable",
+        )
+    })
+}
+
 pub(crate) fn respond_runtime_responses_reply(
     request: tiny_http::Request,
     response: RuntimeResponsesReply,
@@ -505,14 +534,19 @@ pub(crate) fn respond_runtime_responses_reply(
 pub(crate) fn capture_runtime_proxy_request(
     request: &mut tiny_http::Request,
     max_body_bytes: u64,
-) -> Result<RuntimeProxyRequest> {
-    capture_runtime_proxy_request_with_max(request, max_body_bytes)
+) -> Result<RuntimeCapturedRequest<'static>> {
+    capture_runtime_proxy_request_with_memory(
+        request,
+        max_body_bytes,
+        crate::runtime_request_memory::request_memory_guard()?,
+    )
 }
 
-fn capture_runtime_proxy_request_with_max(
+fn capture_runtime_proxy_request_with_memory<'a>(
     request: &mut tiny_http::Request,
     max_body_bytes: u64,
-) -> Result<RuntimeProxyRequest> {
+    mut memory: crate::runtime_request_memory::RequestMemoryGuard<'a>,
+) -> Result<RuntimeCapturedRequest<'a>> {
     if let Some(content_length) = runtime_proxy_request_content_length(request)?
         && runtime_proxy_request_body_exceeds_limit(max_body_bytes, content_length)?
     {
@@ -524,24 +558,36 @@ fn capture_runtime_proxy_request_with_max(
     }
 
     let mut body = Vec::new();
-    request
-        .as_reader()
-        .take(max_body_bytes.saturating_add(1))
-        .read_to_end(&mut body)
-        .context("failed to read proxied Codex request body")?;
-    if runtime_proxy_request_body_exceeds_limit(max_body_bytes, body.len() as u64)? {
-        return Err(RuntimeProxyBodyTooLarge {
-            limit: max_body_bytes,
-            actual: None,
+    let mut reader = request.as_reader().take(max_body_bytes.saturating_add(1));
+    let mut buffer = [0_u8; 64 * 1024];
+    loop {
+        let count = match reader.read(&mut buffer) {
+            Ok(0) => break,
+            Ok(count) => count,
+            Err(error) if error.kind() == std::io::ErrorKind::Interrupted => continue,
+            Err(error) => return Err(error).context("failed to read proxied Codex request body"),
+        };
+        let observed = (body.len() as u64).saturating_add(count as u64);
+        if runtime_proxy_request_body_exceeds_limit(max_body_bytes, observed)? {
+            return Err(RuntimeProxyBodyTooLarge {
+                limit: max_body_bytes,
+                actual: None,
+            }
+            .into());
         }
-        .into());
+        memory.reserve_body_bytes(observed)?;
+        body.try_reserve(count)
+            .map_err(|_| crate::runtime_request_memory::RequestMemoryExhausted)?;
+        body.extend_from_slice(&buffer[..count]);
     }
-
-    Ok(RuntimeProxyRequest {
-        method: request.method().as_str().to_string(),
-        path_and_query: request.url().to_string(),
-        headers: runtime_proxy_request_headers(request),
-        body,
+    Ok(RuntimeCapturedRequest {
+        request: RuntimeProxyRequest {
+            method: request.method().as_str().to_string(),
+            path_and_query: request.url().to_string(),
+            headers: runtime_proxy_request_headers(request),
+            body,
+        },
+        memory,
     })
 }
 

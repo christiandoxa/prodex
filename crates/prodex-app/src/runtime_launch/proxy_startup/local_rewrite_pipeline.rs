@@ -19,8 +19,9 @@ use super::local_rewrite_request::runtime_api_route_kind;
 use crate::runtime_proxy::{
     RuntimeProxyAdmissionRejection, acquire_runtime_proxy_active_request_slot_with_wait,
     build_runtime_proxy_json_error_response, build_runtime_proxy_text_response,
-    mark_runtime_proxy_local_overload, runtime_proxy_error_is_body_too_large,
-    runtime_proxy_overloaded_response, runtime_route_kind_label,
+    mark_runtime_proxy_local_overload, runtime_proxy_capture_memory_response,
+    runtime_proxy_error_is_body_too_large, runtime_proxy_overloaded_response,
+    runtime_route_kind_label,
 };
 use crate::runtime_proxy_shared::RuntimeProxyActiveRequestGuard;
 use crate::{runtime_proxy_log, runtime_proxy_next_request_id};
@@ -35,6 +36,7 @@ const RUNTIME_LOCAL_REWRITE_UPSTREAM_REQUEST_FAILED_MESSAGE: &str = "upstream re
 #[derive(Default)]
 pub(super) struct RuntimeLocalRewritePipelineGuards {
     pub(super) active: Option<RuntimeProxyActiveRequestGuard>,
+    pub(super) request_memory: Option<crate::runtime_request_memory::RequestMemoryGuard<'static>>,
 }
 
 pub(super) struct RuntimeLocalRewriteRequestState {
@@ -234,7 +236,10 @@ fn runtime_local_rewrite_capture_body(
             .request
             .capture(shared.runtime_shared.runtime_config.max_request_body_bytes)
         {
-            Ok(captured) => captured,
+            Ok(captured) => {
+                state.guards.request_memory = Some(captured.memory);
+                captured.request
+            }
             Err(err) => {
                 let response = runtime_local_rewrite_capture_rejection(&state, shared, &err);
                 return Err(state.reject(response));
@@ -251,11 +256,15 @@ fn runtime_local_rewrite_capture_rejection(
     err: &anyhow::Error,
 ) -> tiny_http::ResponseBox {
     let body_too_large = runtime_proxy_error_is_body_too_large(err);
+    let memory_response = runtime_proxy_capture_memory_response(err);
+    let memory_exhausted = memory_response.is_some();
     runtime_proxy_log(
         &shared.runtime_shared,
         runtime_proxy_structured_log_message(
             if body_too_large {
                 "local_rewrite_request_body_too_large"
+            } else if memory_exhausted {
+                "local_rewrite_request_memory_unavailable"
             } else {
                 "local_rewrite_capture_error"
             },
@@ -268,6 +277,8 @@ fn runtime_local_rewrite_capture_rejection(
     );
     if body_too_large {
         build_runtime_proxy_text_response(413, "proxied request body is too large")
+    } else if let Some(response) = memory_response {
+        response
     } else {
         build_runtime_proxy_text_response(502, "gateway request capture failed")
     }

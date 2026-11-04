@@ -1,13 +1,13 @@
 use prodex_mojo_core::rich::ascii_casefold_equal_exact;
-use std::{
-    io::{self, Read},
-    time::Instant,
-};
+use std::{io, time::Instant};
 
 use prodex_observability::{ApiRouteKind, ApiStatusClass};
 
 use super::local_rewrite_response::runtime_local_rewrite_append_call_id_header;
-use crate::{RuntimeProxyBodyTooLarge, RuntimeProxyRequest, RuntimeStreamingResponse};
+use crate::{
+    RuntimeCapturedRequest, RuntimeProxyRequest, RuntimeStreamingResponse,
+    capture_runtime_proxy_request,
+};
 
 pub(super) struct RuntimeLocalRewriteRequest {
     method: String,
@@ -62,26 +62,11 @@ impl RuntimeLocalRewriteRequest {
         }
     }
 
-    pub(super) fn capture(&mut self, max_body_bytes: u64) -> anyhow::Result<RuntimeProxyRequest> {
-        if let Some(content_length) = self.content_length()
-            && content_length > max_body_bytes
-        {
-            return Err(RuntimeProxyBodyTooLarge::new(max_body_bytes, Some(content_length)).into());
-        }
-        let mut body = Vec::new();
-        self.request
-            .as_reader()
-            .take(max_body_bytes.saturating_add(1))
-            .read_to_end(&mut body)?;
-        if body.len() as u64 > max_body_bytes {
-            return Err(RuntimeProxyBodyTooLarge::new(max_body_bytes, None).into());
-        }
-        Ok(RuntimeProxyRequest {
-            method: self.method.clone(),
-            path_and_query: self.path_and_query.clone(),
-            headers: self.headers.clone(),
-            body,
-        })
+    pub(super) fn capture(
+        &mut self,
+        max_body_bytes: u64,
+    ) -> anyhow::Result<RuntimeCapturedRequest<'static>> {
+        capture_runtime_proxy_request(&mut self.request, max_body_bytes)
     }
 
     pub(super) fn respond(self, response: tiny_http::ResponseBox) -> io::Result<()> {
@@ -103,15 +88,6 @@ impl RuntimeLocalRewriteRequest {
             );
         }
         crate::write_runtime_streaming_response(self.request.into_writer(), response)
-    }
-
-    fn content_length(&self) -> Option<u64> {
-        self.headers.iter().find_map(|(name, value)| {
-            ascii_casefold_equal_exact(name, "content-length")
-                .expect("Mojo content-length header-name comparison failed")
-                .then(|| value.trim().parse().ok())
-                .flatten()
-        })
     }
 
     fn record_api_red_metric(&self, status: u16) {
@@ -150,5 +126,52 @@ fn runtime_api_status_class(status: u16) -> ApiStatusClass {
         300..=399 => ApiStatusClass::Redirection,
         400..=499 => ApiStatusClass::ClientError,
         _ => ApiStatusClass::ServerError,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::{Read, Write};
+    use std::net::TcpStream;
+
+    #[test]
+    fn capture_enforces_explicit_limit_for_declared_and_chunked_bodies() {
+        crate::runtime_request_memory::initialize_request_memory_budget();
+        for (framing, payload) in [
+            ("Content-Length: 4\r\n", "abcd"),
+            ("Content-Length: 5\r\n", "abcde"),
+            ("Transfer-Encoding: chunked\r\n", "4\r\nabcd\r\n0\r\n\r\n"),
+            ("Transfer-Encoding: chunked\r\n", "5\r\nabcde\r\n0\r\n\r\n"),
+        ] {
+            let server = tiny_http::Server::http("127.0.0.1:0").expect("server");
+            let addr = server.server_addr().to_ip().expect("address");
+            let client = std::thread::spawn(move || {
+                let mut stream = TcpStream::connect(addr).expect("connect");
+                write!(stream, "POST /v1/responses?x=1 HTTP/1.1\r\nHost: localhost\r\nX-Test: preserved\r\n{framing}Connection: close\r\n\r\n{payload}")
+                    .expect("send");
+                let mut response = Vec::new();
+                let _ = stream.read_to_end(&mut response);
+            });
+            let mut request = RuntimeLocalRewriteRequest::tiny(server.recv().expect("request"));
+            let result = request.capture(4);
+            if payload.contains("abcde") {
+                assert!(crate::runtime_proxy::runtime_proxy_error_is_body_too_large(
+                    &result.err().expect("oversized body")
+                ));
+            } else {
+                let captured = result.expect("body at limit").request;
+                assert_eq!(captured.body, b"abcd");
+                assert_eq!(captured.method, "POST");
+                assert_eq!(captured.path_and_query, "/v1/responses?x=1");
+                assert!(captured.headers.iter().any(|(name, value)| {
+                    name.eq_ignore_ascii_case("x-test") && value == "preserved"
+                }));
+            }
+            request
+                .respond(tiny_http::Response::empty(200).boxed())
+                .expect("respond");
+            client.join().expect("client");
+        }
     }
 }

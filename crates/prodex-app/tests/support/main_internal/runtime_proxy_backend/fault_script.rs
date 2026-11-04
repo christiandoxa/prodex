@@ -83,6 +83,13 @@ impl RuntimeProxyBackendFaultStep {
         }
     }
 
+    pub(crate) fn payload_too_large(route: RuntimeProxyBackendFaultRoute, account_id: &str) -> Self {
+        let mut step = Self::success(route, account_id);
+        step.status_line = "HTTP/1.1 413 Payload Too Large";
+        step.body = r#"{"error":{"code":"payload_too_large","message":"upstream limit"}}"#.to_string();
+        step
+    }
+
     pub(crate) fn quota_snapshot(account_id: &str, value: serde_json::Value) -> Self {
         let mut step = Self::success(RuntimeProxyBackendFaultRoute::Usage, account_id);
         step.body = value.to_string();

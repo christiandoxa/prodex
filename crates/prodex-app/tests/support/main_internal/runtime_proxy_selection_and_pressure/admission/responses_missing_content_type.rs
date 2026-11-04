@@ -49,6 +49,23 @@ fn missing_content_type_capacity_must_not_commit_as_unary_success() {
 }
 
 #[test]
+fn upstream_payload_too_large_is_passed_through_without_rotation() {
+    let step = RuntimeProxyBackendFaultStep::payload_too_large(
+        RuntimeProxyBackendFaultRoute::Responses,
+        "main-account",
+    );
+    let backend = RuntimeProxyBackend::start_with_fault_script(RuntimeProxyBackendFaultScript::new([step]));
+    let harness = ready_harness(&backend);
+    let response = proxy_runtime_responses_request(437108, &request(false), harness.shared()).unwrap();
+    let RuntimeResponsesReply::Buffered(parts) = response else {
+        panic!("upstream 413 should be buffered");
+    };
+    assert_eq!(parts.status, 413);
+    assert_eq!(parts.body.as_slice(), br#"{"error":{"code":"payload_too_large","message":"upstream limit"}}"#);
+    assert_eq!(backend.responses_accounts(), ["main-account"]);
+}
+
+#[test]
 fn missing_content_type_capacity_rotates_before_stream_commit() {
     let backend = RuntimeProxyBackend::start_with_fault_script(RuntimeProxyBackendFaultScript::new([
         RuntimeProxyBackendFaultStep::sse_overloaded(RuntimeProxyBackendFaultRoute::Responses, "main-account")

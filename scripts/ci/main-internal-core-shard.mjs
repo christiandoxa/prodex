@@ -19,6 +19,7 @@ const TEST_WEIGHT_SECONDS = new Map([
     6.5,
   ],
   ["main_internal_tests::smart_context_and_broker::runtime_rotation_proxy_can_bind_a_requested_listen_addr", 5.5],
+  ["main_internal_tests::smart_context_and_broker::large_codex_image_request_preserves_profile_affinity", 20],
   [
     "main_internal_tests::smart_context_and_broker::runtime_smart_context_proxy_disabled_passes_large_tool_output_unchanged",
     5.5,

@@ -543,7 +543,7 @@ Specific environment overrides for individual keys still have highest priority.
 Unknown policy preset values are rejected when `policy.toml` is parsed. Unknown environment preset values are ignored so the configured policy or built-in defaults still apply.
 The preset changes only local concurrency and admission tuning; transport timeouts remain on their normal defaults unless configured directly.
 Runtime proxy numeric environment overrides are exact values: unset means use policy/default tuning, while empty, whitespace-bearing, malformed, or non-positive values for positive-only settings fail closed. Overflow-capacity overrides that explicitly allow zero keep zero as the documented escape hatch.
-`PRODEX_RUNTIME_PROXY_MAX_REQUEST_BODY_BYTES` follows the same exact positive-integer boundary for the HTTP request capture limit.
+`PRODEX_RUNTIME_PROXY_MAX_REQUEST_BODY_BYTES` sets an explicit positive-integer HTTP request capture limit; requests above it receive `413`. By default there is no fixed body-size rejection. Captured bodies reserve a process-wide share of available memory, including headroom for inspection, rewriting and retries. A bounded runtime worker refreshes the available-memory estimate; Linux also considers cgroup limits and Windows considers the current job's limits. If memory cannot be reserved, the proxy returns `503 service_unavailable` before contacting upstream. If memory capacity cannot be measured, a conservative 512 MiB memory budget is used. The estimate is not a cross-process reservation: competing processes and operating-system memory pressure can change capacity between samples.
 
 ## Interactive session state
 

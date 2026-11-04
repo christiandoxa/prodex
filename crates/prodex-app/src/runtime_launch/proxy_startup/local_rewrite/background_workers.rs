@@ -56,7 +56,9 @@ pub(in crate::runtime_launch::proxy_startup) fn spawn_runtime_local_rewrite_work
     #[cfg(test)] listener_ready: Option<std::sync::mpsc::Sender<()>>,
     spawn_gemini_sidecar_listener: bool,
 ) -> Result<RuntimeLocalRewriteWorkers> {
-    let mut worker_threads = Vec::new();
+    let mut worker_threads = vec![crate::runtime_request_memory::spawn_request_memory_sampler(
+        Arc::clone(shutdown),
+    )?];
     if let Some(pool) = shared.gemini_oauth_pool.as_ref()
         && let Some(worker) = pool.spawn_quota_refresh(shared.runtime_shared.log_path.clone())
     {

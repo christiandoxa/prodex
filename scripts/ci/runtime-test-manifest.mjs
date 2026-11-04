@@ -30,6 +30,14 @@ export const RUNTIME_TEST_TAGS = TAGS;
 
 export const RUNTIME_SMOKE_TESTS = [
   {
+    label: "large-request-affinity",
+    filter: "large_codex_image_request_preserves_profile_affinity",
+  },
+  {
+    label: "request-memory-budget",
+    filter: "runtime_request_memory::",
+  },
+  {
     label: "quota-aware-continuation-handoff",
     package: "prodex-app",
     filter: "quota_handoff::",
@@ -205,6 +213,11 @@ export const RUNTIME_CI_WORKFLOW_SHARDS = [
         id: "admission-sse-tap",
         filter: `${ADMISSION_PREFIX}sse_tap::`,
         label: "admission-sse-tap",
+      },
+      {
+        id: "upstream-payload-too-large",
+        filter: `${ADMISSION_PREFIX}responses_missing_content_type::upstream_payload_too_large_is_passed_through_without_rotation`,
+        label: "upstream-payload-too-large",
       },
     ],
   },
