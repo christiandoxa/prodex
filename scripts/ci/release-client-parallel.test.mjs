@@ -20,6 +20,18 @@ test("Kiro setup pins the qualified version without changing shell profiles", ()
   assert.ok(shell.includes('kiro-install.sh" --force --channel stable --version "${KIRO_CLI_VERSION}" --no-modify-path'));
 });
 
+test("release probe selects the Kiro executable used by Prodex", {skip:process.platform === "win32"}, t => {
+  const dir = mkdtempSync(path.join(os.tmpdir(), "prodex-kiro-probe-"));
+  t.after(() => rmSync(dir, {recursive:true, force:true}));
+  const discovery = target.split('          kiro_chat_bin="kiro-cli"\n')[1].split('          kiro_version=')[0];
+  const probe = `kiro_chat_bin="kiro-cli"\n${discovery.replace(/^          /gmu, "")}printf '%s' "$kiro_chat_bin"`;
+  writeFileSync(path.join(dir, "kiro-cli"), "#!/bin/sh\nexit 0\n", {mode:0o700});
+  const select = () => spawnSync("/bin/bash", ["-c", probe], {env:{...process.env, PATH:dir}, encoding:"utf8"});
+  assert.equal(select().stdout, "kiro-cli");
+  writeFileSync(path.join(dir, "kiro-cli-chat"), "#!/bin/sh\nexit 0\n", {mode:0o700});
+  assert.equal(select().stdout, "kiro-cli-chat");
+});
+
 test("release client setup is bounded, pinned, credential-free, and fail-closed", () => {
   assert.match(step, /timeout-minutes: 10/);
   assert.match(shell, /clients=\(gemini kiro copilot claude\)/);
@@ -72,7 +84,7 @@ fs.writeFileSync(path.join(${JSON.stringify(dir)},'verified-'+id),'checked');
 `, {mode:0o700});
     const env = {...process.env, PATH:path.join(dir,"bin")+path.delimiter+process.env.PATH,
       HOME:path.join(dir,"home"),RUNNER_TEMP:path.join(dir,"tmp"),GITHUB_PATH:path.join(dir,"github-path"),
-      KIRO_CLI_VERSION:"2.37.0",
+      KIRO_CLI_VERSION:"3.0.0",
       GITHUB_TOKEN:"synthetic-ci-value",GH_TOKEN:"synthetic-ci-value",ACTIONS_ID_TOKEN_REQUEST_TOKEN:"synthetic-ci-value",ACTIONS_RUNTIME_TOKEN:"synthetic-ci-value"};
     const result = spawnSync("bash", ["-c", shell], {env, encoding:"utf8", timeout:10000});
     assert.equal(result.status, scenario === "parallel" ? 0 : 1, result.stdout + result.stderr);
@@ -83,7 +95,7 @@ fs.writeFileSync(path.join(${JSON.stringify(dir)},'verified-'+id),'checked');
     else {
       const record = id => JSON.parse(readFileSync(path.join(dir,"started-"+id),"utf8"));
       assert.deepEqual(record("gemini").args,["install","--global","--ignore-scripts","@google/gemini-cli@0.53.0"]);
-      assert.deepEqual(record("kiro").args,["--force","--channel","stable","--version","2.37.0","--no-modify-path"]);
+      assert.deepEqual(record("kiro").args,["--force","--channel","stable","--version","3.0.0","--no-modify-path"]);
       assert.equal(record("copilot").version,"v1.0.77");
       assert.deepEqual(record("claude").args,["2.1.220"]);
       assert.equal(readFileSync(path.join(dir,"github-path"),"utf8").trim(),path.join(dir,"home/.local/bin"));

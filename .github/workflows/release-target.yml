@@ -663,17 +663,21 @@ jobs:
         run: |
           set -euo pipefail
           export PATH="${HOME}/.local/bin:${PATH}"
-          for command in gemini kiro-cli-chat copilot claude; do
+          for command in gemini kiro-cli copilot claude; do
             command -v "${command}"
             "${command}" --version
           done
+          kiro_chat_bin="kiro-cli"
+          if command -v kiro-cli-chat >/dev/null 2>&1; then
+            kiro_chat_bin="kiro-cli-chat"
+          fi
           kiro_version="$(kiro-cli --version | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -n1)"
           test "${kiro_version}" = "${KIRO_CLI_VERSION}"
           gemini --help > "${RUNNER_TEMP}/gemini-help.txt"
           grep -q -- "--yolo" "${RUNNER_TEMP}/gemini-help.txt"
-          kiro-cli-chat chat --help > "${RUNNER_TEMP}/kiro-help.txt"
+          "${kiro_chat_bin}" chat --help > "${RUNNER_TEMP}/kiro-help.txt"
           grep -q -- "--model" "${RUNNER_TEMP}/kiro-help.txt"
-          grep -a -q -- "KIRO_DATA_DIR" "$(command -v kiro-cli-chat)"
+          grep -a -q -- "KIRO_DATA_DIR" "$(command -v "${kiro_chat_bin}")"
           copilot help environment > "${RUNNER_TEMP}/copilot-environment.txt"
           for variable in COPILOT_PROVIDER_BASE_URL COPILOT_PROVIDER_TYPE COPILOT_PROVIDER_API_KEY COPILOT_PROVIDER_WIRE_API COPILOT_PROVIDER_TRANSPORT COPILOT_MODEL; do
             grep -q -- "${variable}" "${RUNNER_TEMP}/copilot-environment.txt"
