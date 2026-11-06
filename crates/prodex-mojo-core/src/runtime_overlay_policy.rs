@@ -478,6 +478,14 @@ mod tests {
             }
         );
 
+        assert_eq!(
+            transport_flags(&[Some("--"), Some("--no-daemon"), Some("--remote=x")]).unwrap(),
+            OverlayTransportFlags {
+                remote: false,
+                no_daemon: false,
+            }
+        );
+
         let fresh = [
             Some("-c"),
             Some("model='x'"),

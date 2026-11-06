@@ -49,12 +49,11 @@ pub(super) fn session_app_server_companion_eligible(
     strategy: &RuntimeToolLaunchStrategy,
     runtime_args: &[OsString],
 ) -> bool {
-    strategy.args.super_mode
-        && !prodex_runtime_launch::is_codex_exec_invocation(runtime_args)
-        && !runtime_args.iter().any(|arg| {
-            let arg = arg.to_string_lossy();
-            arg == "--remote" || arg.starts_with("--remote=")
-        })
+    if !strategy.args.super_mode || prodex_runtime_launch::is_codex_exec_invocation(runtime_args) {
+        return false;
+    }
+    let transport = overlay::runtime_overlay_transport_flags(runtime_args);
+    !transport.remote && !transport.no_daemon
 }
 
 pub(crate) struct RuntimeToolLaunchStrategy {
@@ -348,17 +347,19 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
-    fn explicit_remote_equals_skips_private_app_server_companion() {
-        let strategy = RuntimeToolLaunchStrategy::new_with_sub_agent(
-            super_as_caveman_args(&["prodex", "s", "--remote=unix:///tmp/user-selected.sock"]),
-            None,
-        )
-        .expect("Codex feature plan should succeed");
-
-        assert!(!session_app_server_companion_eligible(
-            &strategy,
-            &strategy.codex_args
-        ));
+    fn explicit_transport_skips_private_app_server_companion() {
+        for argv in [
+            &["prodex", "s", "--remote=unix:///tmp/user-selected.sock"][..],
+            &["prodex", "s", "agents", "--no-daemon"],
+        ] {
+            let strategy =
+                RuntimeToolLaunchStrategy::new_with_sub_agent(super_as_caveman_args(argv), None)
+                    .expect("Codex feature plan should succeed");
+            assert!(!session_app_server_companion_eligible(
+                &strategy,
+                &strategy.codex_args
+            ));
+        }
     }
 
     #[cfg(unix)]

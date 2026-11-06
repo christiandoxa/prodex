@@ -277,6 +277,8 @@ def prodex_runtime_overlay_transport_flags_v1(
         var view = runtime_overlay_view(arg)
         if not rich_view_valid(view, Int64(arg.length)):
             return RUNTIME_OVERLAY_INVALID
+        if rich_view_matches_literal["--"](view, False):
+            break
         if (
             rich_view_matches_literal["--remote"](view, False)
             or rich_view_prefix["--remote="](view, False)
