@@ -189,3 +189,124 @@ fn smart_context_self_check_passes_through_growth_without_rehydrate() {
         "growth"
     );
 }
+
+#[test]
+fn smart_context_prepare_preserves_deferred_tool_catalog_during_rewrite() {
+    let shared = smart_context_test_shared("rewrite-valid-json");
+    register_runtime_smart_context_proxy_state(&shared, true, None, None);
+    smart_context_observe_minimal_budget(&shared);
+    let output = std::iter::once("error[E0425]: missing symbol at src/lib.rs:42:13".to_string())
+        .chain((0..650).map(|index| format!("line {index}: noisy build output")))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let original = serde_json::json!({
+        "model": "gpt-4o",
+        "tools": [{"type": "tool_search", "execution": "client",
+            "parameters": {"type": "object", "properties": {"query": {"type": "string"}}}}],
+        "input": [
+            {"type": "message", "role": "developer", "content": [
+                {"type": "input_text", "text": "Use tools within their documented scope."},
+                {"type": "input_text", "text": "<tools>\nDeferred tool namespaces:\n- mcp__notes: Tools for working with notes.\n</tools>"}
+            ]},
+            {"type": "function_call_output", "call_id": "call_json_valid_1", "output": output},
+            {"type": "function_call_output", "call_id": "call_json_valid_2", "output": output}
+        ]
+    });
+    let request = smart_context_test_request(original.clone());
+
+    let rewritten = prepare_runtime_smart_context_http_body(
+        142,
+        &request,
+        &shared,
+        RuntimeRouteKind::Responses,
+    )
+    .expect("smart context prepare");
+
+    let Cow::Owned(body) = rewritten else {
+        panic!("expected smart-context rewrite");
+    };
+    let value = serde_json::from_slice::<serde_json::Value>(&body)
+        .expect("rewritten prepare body must remain valid JSON");
+    assert_eq!(value["tools"], original["tools"]);
+    assert_eq!(value["input"][0], original["input"][0]);
+    assert_eq!(value["input"][3]["role"].as_str(), Some("developer"));
+    assert!(
+        value["input"][1]["output"]
+            .as_str()
+            .unwrap()
+            .contains("error[E0425]: missing symbol at src/lib.rs:42:13")
+    );
+    assert!(
+        value["input"][2]["output"]
+            .as_str()
+            .unwrap()
+            .contains("prodex-context-ref v=1")
+    );
+    let mut expanded = runtime_smart_context_expand_inline_references(&original, &value).unwrap();
+    assert!(runtime_smart_context_inline_reference_round_trip_is_exact(
+        &original,
+        &mut expanded
+    ));
+}
+
+#[test]
+fn smart_context_prepare_rewrite_preserves_static_prompt_prefix_text() {
+    let shared = smart_context_test_shared("rewrite-static-prefix");
+    register_runtime_smart_context_proxy_state(&shared, true, None, None);
+    smart_context_observe_minimal_budget(&shared);
+    let instructions = "Generated at: 2026-05-04T01:02:03Z\nKeep exact static prefix.  ";
+    let system = "System prefix line one.\n\nSystem prefix line two.  ";
+    let developer = "Developer prefix stays exact.\nUse repo rules.  ";
+    let input_system = "Input system prefix\nwith blank lines.\n\nDo not rewrite.  ";
+    let output = std::iter::once("error: failed at src/main.rs:10:5".to_string())
+        .chain((0..500).map(|index| format!("line {index}: noisy build output")))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let request = smart_context_test_request(serde_json::json!({
+        "instructions": instructions,
+        "system": system,
+        "developer": developer,
+        "input": [
+            {
+                "role": "system",
+                "content": input_system,
+            },
+            {
+                "type": "function_call_output",
+                "call_id": "call_1",
+                "output": output,
+            },
+            {
+                "type": "function_call_output",
+                "call_id": "call_2",
+                "output": output,
+            }
+        ]
+    }));
+
+    let rewritten =
+        prepare_runtime_smart_context_http_body(42, &request, &shared, RuntimeRouteKind::Responses)
+            .expect("smart context prepare");
+
+    let Cow::Owned(body) = rewritten else {
+        panic!("expected rewritten body");
+    };
+    let value = serde_json::from_slice::<serde_json::Value>(&body).unwrap();
+    assert_eq!(value["instructions"].as_str(), Some(instructions));
+    assert_eq!(value["system"].as_str(), Some(system));
+    assert_eq!(value["developer"].as_str(), Some(developer));
+    assert_eq!(value["input"][3]["role"].as_str(), Some("developer"));
+    assert_eq!(value["input"][0]["content"].as_str(), Some(input_system));
+    assert!(
+        value["input"][1]["output"]
+            .as_str()
+            .unwrap()
+            .contains("error: failed")
+    );
+    assert!(
+        value["input"][2]["output"]
+            .as_str()
+            .unwrap()
+            .contains("prodex-context-ref v=1")
+    );
+}
