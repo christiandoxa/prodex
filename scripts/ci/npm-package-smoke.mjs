@@ -66,7 +66,13 @@ function runPublishDryRun(stagingDir) {
   const result = spawnSync(
     process.execPath,
     [path.join(repoRoot, "scripts/npm/publish.mjs"), "--root", stagingDir, "--dry-run"],
-    { cwd: repoRoot, encoding: "utf8" },
+    {
+      cwd: repoRoot,
+      encoding: "utf8",
+      // npm checks version availability even for dry runs. Qualify the new
+      // tarballs independently of public registry history and cached metadata.
+      env: { ...process.env, npm_config_offline: "true", npm_config_cache: path.join(stagingDir, ".npm-cache") },
+    },
   );
   if (result.error) {
     throw result.error;
