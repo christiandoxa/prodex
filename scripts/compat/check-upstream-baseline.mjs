@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { createHash } from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { repoRoot } from "../npm/common.mjs";
@@ -96,6 +97,10 @@ const REQUIRED_CRITICAL_FILES = [
   "codex-rs/protocol/src/error.rs",
   "codex-rs/rmcp-client/src/request_cancellation.rs",
   "codex-rs/protocol/src/memory_version.rs",
+  "codex-rs/tui/src/resume_picker.rs",
+  "codex-rs/core/src/session/turn.rs",
+  "codex-rs/core/src/context_manager/history.rs",
+  "codex-rs/core/src/context/world_state/tools.rs",
 ];
 
 const REQUIRED_FILE_CONTAINS = {
@@ -317,6 +322,9 @@ const REQUIRED_FILE_CONTAINS = {
     "model_tool_name_len(&model_name), 128",
   ],
   "codex-rs/model-provider-info/src/lib.rs": [
+    "pub fn supports_cyber_access_programs(&self, provider_id: &str) -> bool",
+    "capabilities.cyber_access_programs",
+    ".unwrap_or(provider_id == OPENAI_PROVIDER_ID)",
     "pub fn create_gcp_provider()",
     "pub fn is_gcp(&self)",
     "(GCP_PROVIDER_ID, gcp_provider)",
@@ -604,6 +612,7 @@ const REQUIRED_FILE_CONTAINS = {
     "feature_requirements",
   ],
   "codex-rs/features/src/lib.rs": [
+    "id: Feature::DeferredToolWorldState,\n        key: \"deferred_tool_world_state\",\n        stage: Stage::Stable,\n        default_enabled: true,",
     "id: Feature::ReasoningEffortOverride,\n        key: \"reasoning_effort_override\",\n        stage: Stage::Stable,\n        default_enabled: true",
     "RespectSystemProxy",
     "respect_system_proxy",
@@ -976,6 +985,9 @@ const REQUIRED_FILE_CONTAINS = {
     "if inherited && matches!(environments, (None, None))",
   ],
   "codex-rs/core/src/agent/control/spawn.rs": [
+    "start_options.reserved_thread_id = Some(child_thread_id);",
+    ".persist_thread_spawn_edge_for_source(ephemeral, child_thread_id, source.as_ref())",
+    "pending_spawn.wait_for_edge().await?;\n        let edge_write = edge_write_started_at.elapsed();\n        let child_create_started_at = Instant::now();\n        let new_thread = state\n            .spawn_child_thread(",
     "inherited_environments_for_source",
     "let inherited_environments = self",
     "environment_selections: None",
@@ -1026,8 +1038,8 @@ const REQUIRED_FILE_CONTAINS = {
   ],
   "codex-rs/core/src/cyber_access_program.rs": [
     "pub(crate) fn for_provider(",
-    "program.filter(|_| provider_id == OPENAI_PROVIDER_ID)",
-    "if config.model_provider_id != OPENAI_PROVIDER_ID {",
+    "program.filter(|_| {",
+    ".supports_cyber_access_programs(&config.model_provider_id)",
     "Feature::ApiKeyCyberAccessPrograms",
     "if auth.is_chatgpt_auth()",
     "if !auth.is_api_key_auth()",
@@ -1112,6 +1124,28 @@ const REQUIRED_FILE_CONTAINS = {
     "Self::V1 => \"memories\"",
     "Self::V2 => \"memories_v2\""
   ],
+  "codex-rs/tui/src/resume_picker.rs": [
+    "let provider_filter = ProviderFilter::All;",
+    "spawn_app_server_page_loaders(app_servers, bg_tx)",
+    "let provider_filter = picker_provider_filter(config, &app_server).await?;",
+  ],
+  "codex-rs/core/src/session/turn.rs": [
+    ".enabled(Feature::InterruptOnCancel)\n        && step_context.settings.model_info.use_responses_lite\n        && stream.interrupt.is_some()",
+    "if cancellation_token.is_cancelled() && !response_completed && can_interrupt",
+    "let deadline = tokio::time::Instant::now() + Duration::from_secs(1);",
+    "interrupt.send(codex_api::ResponseInterrupt::Cancel { deadline })",
+  ],
+  "codex-rs/core/src/context_manager/history.rs": [
+    "last_server_reported_usage_item_count: usize",
+    "self.last_model_output_item_count = Some(self.items.len() + 1);",
+    "self.set_token_info_with_boundary(Some(info), covered_item_count);",
+  ],
+  "codex-rs/core/src/context/world_state/tools.rs": [
+    "(\"Added deferred tool namespaces\", &added)",
+    "(\"Removed deferred tool namespaces\", &removed)",
+    "\"developer\",\n                        (TOOLS_OPEN_TAG, TOOLS_CLOSE_TAG)",
+    "ContentItemKind(\"tools.deferred_namespaces\".to_string())",
+  ],
 };
 
 const REQUIRED_EXPECTED_HEADERS = [
@@ -1164,6 +1198,22 @@ const REQUIRED_EXPECTED_ROUTES = [
   "websocket_url_for_path(RESPONSES_PATH)",
 ];
 
+const STABLE_LIFECYCLE_SCHEMAS = [
+  "ThreadForkParams.json",
+  "ThreadForkResponse.json",
+  "ThreadResumeParams.json",
+  "ThreadResumeResponse.json",
+  "ThreadStartParams.json",
+  "ThreadStartResponse.json",
+  "ThreadStartedNotification.json",
+  "TurnCompletedNotification.json",
+  "TurnInterruptParams.json",
+  "TurnInterruptResponse.json",
+  "TurnStartParams.json",
+  "TurnStartResponse.json",
+  "TurnStartedNotification.json",
+];
+
 const REQUIRED_APP_SERVER_METHODS = [
   "initialize",
   "initialized",
@@ -1173,7 +1223,7 @@ const REQUIRED_APP_SERVER_METHODS = [
   "thread/queue/add",
   "thread/queue/changed",
   "turn/start",
-  "turn/cancel",
+  "turn/interrupt",
   "mcpServer/event/stream/start",
   "mcpServer/event/stream/stop",
 ];
@@ -2314,8 +2364,8 @@ const REQUIRED_SEMANTIC_CHECKS = [
     "file": "codex-rs/core/src/cyber_access_program.rs",
     "file_contains_all": [
       "pub(crate) fn for_provider(",
-      "program.filter(|_| provider_id == OPENAI_PROVIDER_ID)",
-      "if config.model_provider_id != OPENAI_PROVIDER_ID {",
+      "program.filter(|_| {",
+      ".supports_cyber_access_programs(&config.model_provider_id)",
       "Feature::ApiKeyCyberAccessPrograms",
       "if auth.is_chatgpt_auth()",
       "if !auth.is_api_key_auth()"
@@ -2703,6 +2753,76 @@ const REQUIRED_SEMANTIC_CHECKS = [
       "safety_buffering.map(ResponseEvent::SafetyBuffering)"
     ]
   },
+  {
+    "id": "cyber-access-program.provider-capability",
+    "kind": "provider_capabilities",
+    "file": "codex-rs/model-provider-info/src/lib.rs",
+    "file_contains_all": [
+      "pub fn supports_cyber_access_programs(&self, provider_id: &str) -> bool",
+      "capabilities.cyber_access_programs",
+      ".unwrap_or(provider_id == OPENAI_PROVIDER_ID)"
+    ]
+  },
+  {
+    "id": "tui.resume-across-providers",
+    "kind": "session_lifecycle",
+    "file": "codex-rs/tui/src/resume_picker.rs",
+    "file_contains_all": [
+      "let provider_filter = ProviderFilter::All;",
+      "spawn_app_server_page_loaders(app_servers, bg_tx)",
+      "let provider_filter = picker_provider_filter(config, &app_server).await?;"
+    ]
+  },
+  {
+    "id": "core.subagent-spawn-edge",
+    "kind": "session_lifecycle",
+    "file": "codex-rs/core/src/agent/control/spawn.rs",
+    "file_contains_all": [
+      "start_options.reserved_thread_id = Some(child_thread_id);",
+      ".persist_thread_spawn_edge_for_source(ephemeral, child_thread_id, source.as_ref())",
+      "pending_spawn.wait_for_edge().await?;\n        let edge_write = edge_write_started_at.elapsed();\n        let child_create_started_at = Instant::now();\n        let new_thread = state\n            .spawn_child_thread("
+    ]
+  },
+  {
+    "id": "responses.lite-cancel-interrupt",
+    "kind": "retry_lifecycle",
+    "file": "codex-rs/core/src/session/turn.rs",
+    "file_contains_all": [
+      ".enabled(Feature::InterruptOnCancel)\n        && step_context.settings.model_info.use_responses_lite\n        && stream.interrupt.is_some()",
+      "if cancellation_token.is_cancelled() && !response_completed && can_interrupt",
+      "let deadline = tokio::time::Instant::now() + Duration::from_secs(1);",
+      "interrupt.send(codex_api::ResponseInterrupt::Cancel { deadline })"
+    ]
+  },
+  {
+    "id": "context.retained-usage-boundary",
+    "kind": "context_boundary",
+    "file": "codex-rs/core/src/context_manager/history.rs",
+    "file_contains_all": [
+      "last_server_reported_usage_item_count: usize",
+      "self.last_model_output_item_count = Some(self.items.len() + 1);",
+      "self.set_token_info_with_boundary(Some(info), covered_item_count);"
+    ]
+  },
+  {
+    "id": "features.deferred-tool-world-state",
+    "kind": "feature_gate",
+    "file": "codex-rs/features/src/lib.rs",
+    "file_contains_all": [
+      "id: Feature::DeferredToolWorldState,\n        key: \"deferred_tool_world_state\",\n        stage: Stage::Stable,\n        default_enabled: true,"
+    ]
+  },
+  {
+    "id": "context.deferred-tool-fragment",
+    "kind": "context_boundary",
+    "file": "codex-rs/core/src/context/world_state/tools.rs",
+    "file_contains_all": [
+      "(\"Added deferred tool namespaces\", &added)",
+      "(\"Removed deferred tool namespaces\", &removed)",
+      "\"developer\",\n                        (TOOLS_OPEN_TAG, TOOLS_CLOSE_TAG)",
+      "ContentItemKind(\"tools.deferred_namespaces\".to_string())"
+    ]
+  },
 ];
 
 const SEMANTIC_LIST_FIELDS = [
@@ -2740,12 +2860,12 @@ function parseArgs(argv) {
       args.report = argv[index];
       continue;
     }
-    if (value === "--source") {
+    if (["--source", "--schemas", "--experimental-schemas"].includes(value)) {
       index += 1;
       if (!argv[index]) {
-        throw new Error("--source requires a directory");
+        throw new Error(`${value} requires a directory`);
       }
-      args.source = argv[index];
+      args[value.slice(2)] = argv[index];
       continue;
     }
     if (value === "--json") {
@@ -3113,6 +3233,11 @@ function validateBaseline(baseline) {
     if (appServerProtocol.schema_hash !== null && typeof appServerProtocol.schema_hash !== "string") {
       errors.push("codex.compatibility.app_server_protocol.schema_hash must be a string or null");
     }
+    for (const name of STABLE_LIFECYCLE_SCHEMAS) {
+      if (!/^[a-f0-9]{64}$/.test(appServerProtocol.stable_v2_sha256?.[name] ?? "")) {
+        errors.push(`missing or invalid stable v2 schema SHA-256 for ${name}`);
+      }
+    }
     if (!Array.isArray(appServerProtocol.required_methods)) {
       errors.push("codex.compatibility.app_server_protocol.required_methods must be an array");
     } else {
@@ -3178,6 +3303,33 @@ async function validateSourceMarkers({ compat, sourceRoot }) {
   return errors;
 }
 
+async function validateGeneratedSchemas({ protocol, stableRoot, experimentalRoot }) {
+  const errors = [];
+  if (stableRoot) {
+    for (const name of STABLE_LIFECYCLE_SCHEMAS) {
+      const data = await fs.readFile(path.join(stableRoot, "v2", name));
+      if (createHash("sha256").update(data).digest("hex") !== protocol.stable_v2_sha256?.[name]) {
+        errors.push(`generated stable v2 schema SHA-256 mismatch: ${name}`);
+      }
+    }
+  }
+  if (experimentalRoot) {
+    const methods = new Set();
+    for (const name of ["ClientRequest", "ClientNotification", "ServerNotification"]) {
+      const data = JSON.parse(await fs.readFile(path.join(experimentalRoot, `${name}.json`), "utf8"));
+      for (const variant of data.oneOf) {
+        for (const method of variant.properties?.method?.enum ?? []) {
+          methods.add(method);
+        }
+      }
+    }
+    for (const method of protocol.required_methods) {
+      if (!methods.has(method)) errors.push(`generated app-server schema missing method ${method}`);
+    }
+  }
+  return errors;
+}
+
 function renderReport(report) {
   const lines = [];
   lines.push("Upstream Codex baseline guard");
@@ -3221,6 +3373,7 @@ function buildSelfTestBaseline() {
         app_server_protocol: {
           schema_command: "codex app-server generate-json-schema --out DIR",
           schema_hash: null,
+          stable_v2_sha256: Object.fromEntries(STABLE_LIFECYCLE_SCHEMAS.map((name) => [name, "0".repeat(64)])),
           required_methods: REQUIRED_APP_SERVER_METHODS,
         },
         critical_files: REQUIRED_CRITICAL_FILES.map((filePath) => ({
@@ -3271,8 +3424,15 @@ function runSelfTest() {
     throw new Error(`self-test valid baseline failed: ${valid.errors.join("; ")}`);
   }
 
-  // Every new 0.165 contract and retained 0.164 contract stays mandatory.
+  // Retained and newly qualified contracts must reject the loss of a source marker.
   for (const id of [
+    "cyber-access-program.provider-capability",
+    "tui.resume-across-providers",
+    "core.subagent-spawn-edge",
+    "responses.lite-cancel-interrupt",
+    "context.retained-usage-boundary",
+    "features.deferred-tool-world-state",
+    "context.deferred-tool-fragment",
     "memory.versioned-shared-roots",
     "model-provider.gcp-native",
     "model-provider.gcp-registration",
@@ -3509,6 +3669,12 @@ function runSelfTest() {
   });
 
   assertSelfTestError({
+    name: "missing pinned lifecycle schema",
+    mutate: (compat) => { delete compat.app_server_protocol.stable_v2_sha256["ThreadResumeParams.json"]; },
+    expectedMessage: "missing or invalid stable v2 schema SHA-256 for ThreadResumeParams.json",
+  });
+
+  assertSelfTestError({
     name: "missing app-server lifecycle method",
     mutate: (compat) => {
       compat.app_server_protocol.required_methods = compat.app_server_protocol.required_methods.filter(
@@ -3524,7 +3690,7 @@ async function main() {
   if (args.help) {
     process.stdout.write(
       [
-        "Usage: node scripts/compat/check-upstream-baseline.mjs [--baseline <path>] [--source <dir>] [--report <path>] [--json] [--self-test]",
+        "Usage: node scripts/compat/check-upstream-baseline.mjs [--baseline <path>] [--source <dir>] [--schemas <dir>] [--experimental-schemas <dir>] [--report <path>] [--json] [--self-test]",
         "",
         "Offline guard for critical upstream Codex runtime assumptions recorded in scripts/compat/upstream-baseline.json.",
       ].join("\n") + "\n",
@@ -3550,6 +3716,13 @@ async function main() {
         sourceRoot: args.source,
       })),
     );
+  }
+  if (args.schemas || args["experimental-schemas"]) {
+    errors.push(...await validateGeneratedSchemas({
+      protocol: baseline.codex.compatibility.app_server_protocol,
+      stableRoot: args.schemas,
+      experimentalRoot: args["experimental-schemas"],
+    }));
   }
   const report = {
     baselinePath: args.baseline,

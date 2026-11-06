@@ -2,7 +2,7 @@
   "codex": {
     "compatibility": {
       "upstream_repository": "https://github.com/openai/codex",
-      "baseline_source": "openai/codex rust-v0.166.0 release",
+      "baseline_source": "openai/codex rust-v0.167.0 release",
       "guard_command": "node scripts/compat/check-upstream-baseline.mjs",
       "format_version": 2,
       "critical_files": [
@@ -273,7 +273,10 @@
             "openai.gpt-6-luna",
             "pub fn create_gcp_provider()",
             "pub fn is_gcp(&self)",
-            "(GCP_PROVIDER_ID, gcp_provider)"
+            "(GCP_PROVIDER_ID, gcp_provider)",
+            "pub fn supports_cyber_access_programs(&self, provider_id: &str) -> bool",
+            "capabilities.cyber_access_programs",
+            ".unwrap_or(provider_id == OPENAI_PROVIDER_ID)"
           ]
         },
         {
@@ -534,7 +537,8 @@
             "default_enabled: false",
             "id: Feature::CliDaybreak,\n        key: \"cli_daybreak\",\n        stage: Stage::Stable,\n        default_enabled: true,",
             "id: Feature::InstantInterrupt,\n        key: \"instant_interrupt\",\n        stage: Stage::UnderDevelopment,\n        default_enabled: true,",
-            "id: Feature::ReasoningEffortOverride,\n        key: \"reasoning_effort_override\",\n        stage: Stage::Stable,\n        default_enabled: true"
+            "id: Feature::ReasoningEffortOverride,\n        key: \"reasoning_effort_override\",\n        stage: Stage::Stable,\n        default_enabled: true",
+            "id: Feature::DeferredToolWorldState,\n        key: \"deferred_tool_world_state\",\n        stage: Stage::Stable,\n        default_enabled: true,"
           ]
         },
         {
@@ -1031,7 +1035,10 @@
             "let inherited_environments = self",
             "environment_selections: None",
             "inherited_environments,",
-            "resume_thread_with_history_with_source"
+            "resume_thread_with_history_with_source",
+            "start_options.reserved_thread_id = Some(child_thread_id);",
+            ".persist_thread_spawn_edge_for_source(ephemeral, child_thread_id, source.as_ref())",
+            "pending_spawn.wait_for_edge().await?;\n        let edge_write = edge_write_started_at.elapsed();\n        let child_create_started_at = Instant::now();\n        let new_thread = state\n            .spawn_child_thread("
           ]
         },
         {
@@ -1089,11 +1096,11 @@
         },
         {
           "path": "codex-rs/core/src/cyber_access_program.rs",
-          "reason": "Codex filters explicit programs to the built-in OpenAI provider and owns authentication eligibility. Preserving CLI arguments does not enable Cyber routing for the Prodex governed custom provider; do not synthesize access-program policy or bypass this restriction.",
+          "reason": "Codex uses configured provider identity and capability overrides for explicit Cyber programs. Its authentication and feature gates still govern forwarding.",
           "required_contains": [
             "pub(crate) fn for_provider(",
-            "program.filter(|_| provider_id == OPENAI_PROVIDER_ID)",
-            "if config.model_provider_id != OPENAI_PROVIDER_ID {",
+            "program.filter(|_| {",
+            ".supports_cyber_access_programs(&config.model_provider_id)",
             "Feature::ApiKeyCyberAccessPrograms",
             "if auth.is_chatgpt_auth()",
             "if !auth.is_api_key_auth()"
@@ -1401,6 +1408,44 @@
             "scope.get_many::<String>(\"raw_overrides\")",
             ".mut_arg(\"raw_overrides\", |arg| arg.global(false))",
             ".mut_subcommands(localize_config_arg)"
+          ]
+        },
+        {
+          "path": "codex-rs/tui/src/resume_picker.rs",
+          "reason": "The native resume picker lists all providers across connected backends. The fork picker keeps its own provider filter.",
+          "required_contains": [
+            "let provider_filter = ProviderFilter::All;",
+            "spawn_app_server_page_loaders(app_servers, bg_tx)",
+            "let provider_filter = picker_provider_filter(config, &app_server).await?;"
+          ]
+        },
+        {
+          "path": "codex-rs/core/src/session/turn.rs",
+          "reason": "Native opt-in cancellation sends an interrupt to the active Responses Lite stream with a bounded deadline.",
+          "required_contains": [
+            ".enabled(Feature::InterruptOnCancel)\n        && step_context.settings.model_info.use_responses_lite\n        && stream.interrupt.is_some()",
+            "if cancellation_token.is_cancelled() && !response_completed && can_interrupt",
+            "let deadline = tokio::time::Instant::now() + Duration::from_secs(1);",
+            "interrupt.send(codex_api::ResponseInterrupt::Cancel { deadline })"
+          ]
+        },
+        {
+          "path": "codex-rs/core/src/context_manager/history.rs",
+          "reason": "Native context budgeting tracks retained model output beyond the last reported usage boundary.",
+          "required_contains": [
+            "last_server_reported_usage_item_count: usize",
+            "self.last_model_output_item_count = Some(self.items.len() + 1);",
+            "self.set_token_info_with_boundary(Some(info), covered_item_count);"
+          ]
+        },
+        {
+          "path": "codex-rs/core/src/context/world_state/tools.rs",
+          "reason": "Deferred MCP namespaces reach the model in developer-role tool catalog updates, including added and removed namespaces.",
+          "required_contains": [
+            "(\"Added deferred tool namespaces\", &added)",
+            "(\"Removed deferred tool namespaces\", &removed)",
+            "\"developer\",\n                        (TOOLS_OPEN_TAG, TOOLS_CLOSE_TAG)",
+            "ContentItemKind(\"tools.deferred_namespaces\".to_string())"
           ]
         }
       ],
@@ -2609,11 +2654,11 @@
           "id": "cyber-access-program.provider-eligibility",
           "kind": "provider_boundary",
           "file": "codex-rs/core/src/cyber_access_program.rs",
-          "reason": "Codex filters explicit programs to the built-in OpenAI provider and owns authentication eligibility. Preserving CLI arguments does not enable Cyber routing for the Prodex governed custom provider; do not synthesize access-program policy or bypass this restriction.",
+          "reason": "Codex uses configured provider identity and capability overrides for explicit Cyber programs. Its authentication and feature gates still govern forwarding.",
           "file_contains_all": [
             "pub(crate) fn for_provider(",
-            "program.filter(|_| provider_id == OPENAI_PROVIDER_ID)",
-            "if config.model_provider_id != OPENAI_PROVIDER_ID {",
+            "program.filter(|_| {",
+            ".supports_cyber_access_programs(&config.model_provider_id)",
             "Feature::ApiKeyCyberAccessPrograms",
             "if auth.is_chatgpt_auth()",
             "if !auth.is_api_key_auth()"
@@ -3221,9 +3266,86 @@
             "safety_buffering.map(ResponseEvent::SafetyBuffering)"
           ],
           "reason": "Shared metadata construction preserves safety buffering for Responses streams."
+        },
+        {
+          "id": "cyber-access-program.provider-capability",
+          "kind": "provider_capabilities",
+          "file": "codex-rs/model-provider-info/src/lib.rs",
+          "reason": "Explicit provider capability overrides take precedence. Only the built-in OpenAI provider ID defaults on.",
+          "file_contains_all": [
+            "pub fn supports_cyber_access_programs(&self, provider_id: &str) -> bool",
+            "capabilities.cyber_access_programs",
+            ".unwrap_or(provider_id == OPENAI_PROVIDER_ID)"
+          ]
+        },
+        {
+          "id": "tui.resume-across-providers",
+          "kind": "session_lifecycle",
+          "file": "codex-rs/tui/src/resume_picker.rs",
+          "reason": "The native resume picker lists all providers across connected backends. The fork picker keeps its own provider filter.",
+          "file_contains_all": [
+            "let provider_filter = ProviderFilter::All;",
+            "spawn_app_server_page_loaders(app_servers, bg_tx)",
+            "let provider_filter = picker_provider_filter(config, &app_server).await?;"
+          ]
+        },
+        {
+          "id": "core.subagent-spawn-edge",
+          "kind": "session_lifecycle",
+          "file": "codex-rs/core/src/agent/control/spawn.rs",
+          "reason": "A child receives a reserved identity and its parent edge must finish persisting before child storage is created.",
+          "file_contains_all": [
+            "start_options.reserved_thread_id = Some(child_thread_id);",
+            ".persist_thread_spawn_edge_for_source(ephemeral, child_thread_id, source.as_ref())",
+            "pending_spawn.wait_for_edge().await?;\n        let edge_write = edge_write_started_at.elapsed();\n        let child_create_started_at = Instant::now();\n        let new_thread = state\n            .spawn_child_thread("
+          ]
+        },
+        {
+          "id": "responses.lite-cancel-interrupt",
+          "kind": "retry_lifecycle",
+          "file": "codex-rs/core/src/session/turn.rs",
+          "reason": "Native opt-in cancellation sends an interrupt to the active Responses Lite stream with a bounded deadline.",
+          "file_contains_all": [
+            ".enabled(Feature::InterruptOnCancel)\n        && step_context.settings.model_info.use_responses_lite\n        && stream.interrupt.is_some()",
+            "if cancellation_token.is_cancelled() && !response_completed && can_interrupt",
+            "let deadline = tokio::time::Instant::now() + Duration::from_secs(1);",
+            "interrupt.send(codex_api::ResponseInterrupt::Cancel { deadline })"
+          ]
+        },
+        {
+          "id": "context.retained-usage-boundary",
+          "kind": "context_boundary",
+          "file": "codex-rs/core/src/context_manager/history.rs",
+          "reason": "Native context budgeting tracks retained model output beyond the last reported usage boundary.",
+          "file_contains_all": [
+            "last_server_reported_usage_item_count: usize",
+            "self.last_model_output_item_count = Some(self.items.len() + 1);",
+            "self.set_token_info_with_boundary(Some(info), covered_item_count);"
+          ]
+        },
+        {
+          "id": "features.deferred-tool-world-state",
+          "kind": "feature_gate",
+          "file": "codex-rs/features/src/lib.rs",
+          "reason": "Codex now enables deferred namespace world state by default.",
+          "file_contains_all": [
+            "id: Feature::DeferredToolWorldState,\n        key: \"deferred_tool_world_state\",\n        stage: Stage::Stable,\n        default_enabled: true,"
+          ]
+        },
+        {
+          "id": "context.deferred-tool-fragment",
+          "kind": "context_boundary",
+          "file": "codex-rs/core/src/context/world_state/tools.rs",
+          "reason": "Deferred MCP namespaces reach the model in developer-role tool catalog updates, including added and removed namespaces.",
+          "file_contains_all": [
+            "(\"Added deferred tool namespaces\", &added)",
+            "(\"Removed deferred tool namespaces\", &removed)",
+            "\"developer\",\n                        (TOOLS_OPEN_TAG, TOOLS_CLOSE_TAG)",
+            "ContentItemKind(\"tools.deferred_namespaces\".to_string())"
+          ]
         }
       ],
-      "tested_codex_release": "rust-v0.166.0",
+      "tested_codex_release": "rust-v0.167.0",
       "patch_deltas": [
         {
           "from": "rust-v0.150.0",
@@ -3644,12 +3766,23 @@
             "app_server": "0df26e82c8368f089c0ac6759c8929df983b4db35e35d6200c1e4a5a49a10a2b"
           },
           "compatibility_evidence": "Exact release source and asset digests, offline source guard and replay, isolated Linux app-server handshake, and local two-turn mock WebSocket smoke. Platform release CI and Guardian parent routing affinity require separate qualification."
+        },
+        {
+          "from": "rust-v0.166.0",
+          "to": "rust-v0.167.0",
+          "source_commit": "086ccc833bc9cf01024ad2dd6af7dbd421b6bf9a",
+          "tag_object": "cb41599ccbe371272892f156286a236aa097bada",
+          "source_archive_sha256": "313e49728fba6c3d44683554c28018f36781f9f9b6bd09eaa65dccdd6c13b1a7",
+          "native_linux_asset_sha256": {
+            "codex": "9d64836106d5b374e90ee4454c7ebcde7ca7106558bd7e41a34b9f26ebda251a"
+          },
+          "summary": "Codex resumes across providers, persists the parent edge before child storage, gates cancelled Responses Lite interruption, accounts for unreported model output, and emits deferred tool namespaces in developer input. Custom providers may explicitly opt into Cyber programs."
         }
       ],
       "app_server_protocol": {
         "schema_command": "codex app-server generate-json-schema --out DIR",
         "schema_hash": null,
-        "schema_hash_note": "Selected lifecycle schemas are vendored for compatibility replay; the complete upstream schema set is not.",
+        "schema_hash_note": "The selected stable v2 lifecycle schema hashes come from the tested binary. The vendored JSON examples are historical fixtures last qualified for Codex 0.146.0. Experimental queue and MCP RPCs are validated with --experimental-schemas.",
         "required_methods": [
           "initialize",
           "initialized",
@@ -3659,25 +3792,40 @@
           "thread/queue/add",
           "thread/queue/changed",
           "turn/start",
-          "turn/cancel",
+          "turn/interrupt",
           "mcpServer/event/stream/start",
           "mcpServer/event/stream/stop"
-        ]
+        ],
+        "stable_v2_sha256": {
+          "ThreadForkParams.json": "60540b97d453ddbc5e12bfaa007a3718f31847d18dec0da59a5e4b89be4717ad",
+          "ThreadForkResponse.json": "0683787777b74c158f6c9044f1eea805426c16022cea6fcdef60438ce5954bcf",
+          "ThreadResumeParams.json": "cba2b0a25e99cc2a9ea083f3ad8cea4d1a3a198922d8c2ba5224b6414eff7334",
+          "ThreadResumeResponse.json": "f450bafe946842b04e49db3e661738b52d8a64f32089fe4fe9ae9c5eab5b8498",
+          "ThreadStartParams.json": "e9c6d3cc18d049bfbc0249add3808fb8e5a27e1a0b5a423767aafbc3859a9428",
+          "ThreadStartResponse.json": "dfacf835b6b46a9f087b3e89a81f44f1ed0620518a7a957a3d06681bd86b6944",
+          "ThreadStartedNotification.json": "8ca73cc588ebc155a570cd0794abc4250dee58d1b2129ffb1ff9c5c0fe1b1a46",
+          "TurnCompletedNotification.json": "00b691508bb0187ecc5f080bb1608add7137672698daed6922967ad90bcb16e1",
+          "TurnInterruptParams.json": "6dff382dae73d1dbc58406ed045605f647e7a49660e2540fbd2c6c24d60c5f2b",
+          "TurnInterruptResponse.json": "531de6be06fe979b5963f249bab82498a175e614bf65ac12fb2e849dfe60bcf1",
+          "TurnStartParams.json": "4e25cd48986f73e600d9949a055ddb994a75b4a38790e935274646f0fece00ad",
+          "TurnStartResponse.json": "b75b88c2f507685b948d06166b5436678fd320c9878883d97f5a17f620a25116",
+          "TurnStartedNotification.json": "628bc9c1b9dc14f2e33ab374cc6203ca1e405ec1e7b5426d110cfa7f26904592"
+        }
       }
     },
     "latestRelease": {
-      "tag_name": "rust-v0.166.0",
-      "name": "0.166.0",
-      "published_at": "2026-10-29T19:47:53Z",
-      "html_url": "https://github.com/openai/codex/releases/tag/rust-v0.166.0",
+      "tag_name": "rust-v0.167.0",
+      "name": "0.167.0",
+      "published_at": "2026-11-06T01:40:00Z",
+      "html_url": "https://github.com/openai/codex/releases/tag/rust-v0.167.0",
       "body_head": [
         "## New Features",
-        "- Added keyboard-driven transcript selection with word, line, and page motions, integrated search, and configurable shortcuts. (#57221, #57222, #57223, #57224)",
-        "- Rendered Markdown consistently in async questions, choices, answers, and transcript replies. (#57259, #57292)",
-        "- Added GPT-6.1 Terra to the bundled, Vertex AI, and Amazon Bedrock model catalogs. (#57293)",
-        "- Added `codex queue --resume` to resume unloaded threads after queueing a message. (#57232)",
-        "- Added clearer safety-block explanations and selectable safer follow-up prompts in the TUI. (#57363, #57365)",
-        "- Added `codex doctor --network-only` for focused configuration, connectivity, and WebSocket diagnostics. (#57606)",
+        "- Open the agent command center with `codex agents --no-daemon`. The command center and session picker now mark unread results (#58238, #58239, #58263, #58264).",
+        "- Switch between connected backends from the terminal session picker and keep your drafts when switching (#58280, #58457).",
+        "- Preview local image attachments while composing on supported terminals, and open viewed local images from clickable transcript paths (#58261, #58446).",
+        "- Find API key and cloud provider options under \u201cSign in another way.\u201d Enable `gcp_setup_wizard` to set up Google Cloud Vertex AI with Application Default Credentials or a credential file (#57857, #58427).",
+        "- Opt into macOS or Windows system proxy settings from `/experimental` (#58157).",
+        "- Expand patch details directly in the transcript while an approval prompt is open (#58281).",
         "## Bug Fixes"
       ]
     }

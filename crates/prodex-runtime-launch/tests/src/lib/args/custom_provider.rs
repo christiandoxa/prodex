@@ -14,6 +14,7 @@ fn runtime_proxy_passthrough_keeps_supported_custom_provider_configuration() {
             "--config=model_providers.openai-custom.capabilities.external_web_access=false",
         ),
         OsString::from("-cmodel_providers.openai-custom.capabilities.remote_compaction=\"v2\""),
+        OsString::from("-cmodel_providers.openai-custom.capabilities.cyber_access_programs=true"),
         OsString::from("hello"),
     ];
 
@@ -34,6 +35,9 @@ fn runtime_proxy_codex_args_keep_explicit_governed_capabilities_and_resume_ident
                 "-cmodel_providers.prodex-openai-governed-http.capabilities.external_web_access=false",
             ),
             OsString::from(
+                "-cmodel_providers.prodex-openai-governed-http.capabilities.cyber_access_programs=false",
+            ),
+            OsString::from(
                 "--config=model_providers.prodex-openai-governed-http.capabilities.remote_compaction=\"unsupported\"",
             ),
         ],
@@ -45,6 +49,9 @@ fn runtime_proxy_codex_args_keep_explicit_governed_capabilities_and_resume_ident
     );
     assert!(args.iter().any(|arg| {
         arg == "-cmodel_providers.prodex-openai-governed-http.capabilities.external_web_access=false"
+    }));
+    assert!(args.iter().any(|arg| {
+        arg == "-cmodel_providers.prodex-openai-governed-http.capabilities.cyber_access_programs=false"
     }));
     assert!(args.iter().any(|arg| {
         arg == "--config=model_providers.prodex-openai-governed-http.capabilities.remote_compaction=\"unsupported\""

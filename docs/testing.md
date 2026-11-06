@@ -593,6 +593,15 @@ Use `node scripts/compat/check-upstream-baseline.mjs && node scripts/compat/capt
 
 Use `node scripts/compat/watch-upstream.mjs` when network access is available. It fetches current upstream Codex critical files from the latest release tag, falls back to `main` only when the tag raw file is unavailable, and reports missing required tokens or semantic groups as upstream drift.
 
+To qualify a new native Codex binary, generate both app-server schema surfaces and check the selected stable lifecycle hashes and RPC method names against the same tagged source:
+
+```sh
+codex app-server generate-json-schema --out "$qualification_dir/stable"
+codex app-server generate-json-schema --experimental --out "$qualification_dir/experimental"
+node scripts/compat/check-upstream-baseline.mjs --source "$codex_source_dir" \
+  --schemas "$qualification_dir/stable" --experimental-schemas "$qualification_dir/experimental"
+```
+
 Use `node scripts/compat/watch-upstream-ci.mjs` to run the same artifact-producing wrapper used by `.github/workflows/upstream-compat.yml`. It writes `report.json`, text logs, metadata, and `summary.md` under `RUNNER_TEMP/upstream-compat` or `target/upstream-compat`.
 
 Use `node scripts/compat/watch-upstream-fixture-tests.mjs` after changing upstream watch logic or fixtures. It runs the offline fixture regression tests for the upstream watch tool. Release hygiene fixtures are synthetic temp git repos, so they no longer depend on preserving specific historical bad commits.
