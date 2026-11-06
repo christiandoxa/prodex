@@ -2,40 +2,56 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.167.0 - 2026-11-06
+
+### CLI
+
+- Honor the native Codex embedded transport (`4a418a2`)
+
+### Docs
+
+- Describe the Codex 0.167.0 upgrade (`b2a5970`)
+
+### Misc
+
+- Qualify Codex 0.167.0 lifecycle and request contracts (`4da2c28`)
+# Prodex 0.167.0
+
+Prodex now targets the stable Codex CLI 0.167.0 release. Install Codex 0.167.0
+separately to use its new agent command center and session picker.
+
+## New Features
+
+Run `prodex s agents --no-daemon` to open the native command center with its
+embedded backend.
+
+## Bug Fixes
+
+On Unix, Super previously added a private `--remote` socket
+even when the user requested `--no-daemon`, causing Codex to exit at startup.
+Super now honors the explicit transport. An ordinary interactive `prodex s`
+launch still uses its private companion where supported.
+
+## Compatibility
+
+- Align the upstream source contracts with Codex 0.167.0, including explicit
+  provider opt-in for Cyber access programs. Codex owns the eligibility checks.
+- Check that Smart Context preserves the developer message listing deferred
+  tools and the tool search schema when deduplicating repeated tool output.
+- Qualify Kiro CLI 3.1.0 for the release's native client checks.
+
+[Upstream Codex release](https://github.com/openai/codex/releases/tag/rust-v0.167.0)
+
+## Changelog
+
+Full Changelog: [0.166.4...0.167.0](https://github.com/christiandoxa/prodex/compare/0.166.4...0.167.0)
+
 ## 0.166.4 - 2026-11-05
 
 ### Runtime
 
 - Remove default request body size ceiling (`616792a`)
 - Preserve large payloads during request handling (`d59e47e`)
-# Prodex 0.166.4
-
-This release removes the default request-size ceiling that could reject large
-Codex image requests before they reached the upstream service.
-
-## New Features
-
-- The proxy accepts request bodies without a fixed default size limit, subject
-  to available local resources and any limit explicitly configured by the user.
-
-## Bug Fixes
-
-- Preserve request bytes and profile affinity for large image continuations.
-- Forward large upstream stream chunks in bounded pieces instead of terminating
-  the stream solely because a chunk exceeded the prefetch size.
-- Pass upstream payload-too-large responses through without profile rotation.
-- Return a local service-unavailable response when request capture runs out of
-  its memory budget, instead of reporting a synthetic payload-too-large error.
-
-## Compatibility
-
-Explicit `PRODEX_RUNTIME_PROXY_MAX_REQUEST_BODY_BYTES` limits remain supported.
-Memory availability is estimated per process; it is not a reservation shared
-across processes.
-
-## Changelog
-
-Full Changelog: [0.166.3...0.166.4](https://github.com/christiandoxa/prodex/compare/0.166.3...0.166.4)
 
 ## 0.166.3 - 2026-11-01
 
