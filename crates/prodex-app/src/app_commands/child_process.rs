@@ -29,7 +29,7 @@ pub(crate) use prodex_runtime_launch::{
     prodex_dry_run_requested, remove_upstream_proxy_env,
 };
 
-pub(crate) const PROVIDER_SECRET_ENV_KEYS: [&str; 12] = [
+pub(crate) const PROVIDER_SECRET_ENV_KEYS: [&str; 13] = [
     "OPENAI_API_KEYS",
     "OPENAI_API_KEY",
     "ANTHROPIC_API_KEYS",
@@ -42,6 +42,7 @@ pub(crate) const PROVIDER_SECRET_ENV_KEYS: [&str; 12] = [
     "GOOGLE_API_KEY",
     "GITHUB_COPILOT_API_KEYS",
     "GITHUB_COPILOT_API_KEY",
+    "PRODEX_LOCAL_API_KEY",
 ];
 #[path = "child_process_control.rs"]
 mod process_control;

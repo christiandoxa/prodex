@@ -372,10 +372,19 @@ fn runtime_local_rewrite_single_binding_identity(
             &shared.upstream_base_url,
         );
     }
-    if matches!(
-        shared.provider.as_ref(),
-        RuntimeLocalRewriteProviderOptions::OpenAiResponses { local: true, .. }
-    ) {
+    if let RuntimeLocalRewriteProviderOptions::OpenAiResponses {
+        local: true,
+        api_keys,
+    } = shared.provider.as_ref()
+    {
+        if let Some(key) = api_keys.first() {
+            return RuntimeProviderBindingIdentity::from_raw_key(
+                provider,
+                key,
+                &shared.upstream_base_url,
+                None,
+            );
+        }
         return RuntimeProviderBindingIdentity::from_public_credential_identity(
             provider,
             "prodex-local",

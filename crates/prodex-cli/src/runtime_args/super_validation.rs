@@ -92,7 +92,7 @@ fn validate(
                 "--base-url conflicts with --url"
             }
             prodex_mojo_core::launch::SuperValidationViolation::ApiKeyRequiresProvider => {
-                "--api-key requires --provider"
+                "--api-key requires --provider or --url"
             }
             prodex_mojo_core::launch::SuperValidationViolation::ContextWindowRequiresProviderOrUrl => {
                 "context-window options require --provider or --url"

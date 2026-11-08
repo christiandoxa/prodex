@@ -286,3 +286,6 @@ fn local_chat_compaction_accepts_history_without_new_tool_definitions() {
 
 #[path = "local_resume.rs"]
 mod local_resume;
+
+#[path = "local_auth.rs"]
+mod local_auth;

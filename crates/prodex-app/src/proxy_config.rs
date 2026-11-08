@@ -13,30 +13,60 @@ pub(crate) fn build_runtime_upstream_async_http_client(
     explicit_no_proxy: bool,
     runtime_config: &RuntimeConfig,
 ) -> Result<reqwest::Client> {
-    client::build_runtime_upstream_async_http_client(client::AsyncUpstreamClientConfig {
-        proxy_mode: client::UpstreamProxyMode::from_explicit_no_proxy(explicit_no_proxy),
-        connect_timeout: std::time::Duration::from_millis(
-            runtime_config.tuning.http_connect_timeout_ms,
-        ),
-        response_timeout: client::AsyncResponseTimeout::ReadIdle(std::time::Duration::from_millis(
-            runtime_config.tuning.stream_idle_timeout_ms,
-        )),
-    })
+    build_runtime_streaming_http_client(
+        explicit_no_proxy,
+        runtime_config,
+        reqwest::redirect::Policy::default(),
+    )
+}
+
+/// Local URL authentication is scoped to the configured endpoint, never a redirect target.
+pub(crate) fn build_runtime_local_upstream_http_client(
+    explicit_no_proxy: bool,
+    runtime_config: &RuntimeConfig,
+) -> Result<reqwest::Client> {
+    build_runtime_streaming_http_client(
+        explicit_no_proxy,
+        runtime_config,
+        reqwest::redirect::Policy::none(),
+    )
+}
+
+fn build_runtime_streaming_http_client(
+    explicit_no_proxy: bool,
+    runtime_config: &RuntimeConfig,
+    redirects: reqwest::redirect::Policy,
+) -> Result<reqwest::Client> {
+    client::build_runtime_upstream_async_http_client(
+        client::AsyncUpstreamClientConfig {
+            proxy_mode: client::UpstreamProxyMode::from_explicit_no_proxy(explicit_no_proxy),
+            connect_timeout: std::time::Duration::from_millis(
+                runtime_config.tuning.http_connect_timeout_ms,
+            ),
+            response_timeout: client::AsyncResponseTimeout::ReadIdle(
+                std::time::Duration::from_millis(runtime_config.tuning.stream_idle_timeout_ms),
+            ),
+        },
+        redirects,
+    )
 }
 
 pub(crate) fn build_runtime_upstream_async_http_compact_client(
     explicit_no_proxy: bool,
     runtime_config: &RuntimeConfig,
 ) -> Result<reqwest::Client> {
-    client::build_runtime_upstream_async_http_client(client::AsyncUpstreamClientConfig {
-        proxy_mode: client::UpstreamProxyMode::from_explicit_no_proxy(explicit_no_proxy),
-        connect_timeout: std::time::Duration::from_millis(
-            runtime_config.tuning.http_connect_timeout_ms,
-        ),
-        response_timeout: client::AsyncResponseTimeout::Request(std::time::Duration::from_millis(
-            runtime_config.compact_request_timeout_ms,
-        )),
-    })
+    client::build_runtime_upstream_async_http_client(
+        client::AsyncUpstreamClientConfig {
+            proxy_mode: client::UpstreamProxyMode::from_explicit_no_proxy(explicit_no_proxy),
+            connect_timeout: std::time::Duration::from_millis(
+                runtime_config.tuning.http_connect_timeout_ms,
+            ),
+            response_timeout: client::AsyncResponseTimeout::Request(
+                std::time::Duration::from_millis(runtime_config.compact_request_timeout_ms),
+            ),
+        },
+        reqwest::redirect::Policy::default(),
+    )
 }
 
 pub(crate) fn build_upstream_blocking_http_client(

@@ -484,3 +484,43 @@ fn super_url_validation_rejects_secrets_without_echoing_them() {
         assert!(!error.contains("secret-sentinel"), "{error}");
     }
 }
+
+#[test]
+fn local_api_key_tail_extraction_preserves_uuid_and_does_not_forward_secret() {
+    let id = "00000000-0000-7000-8000-000000000043";
+    let mut args = super_args_from(&[
+        id,
+        "--url",
+        "https://example.com/v1",
+        "--api-key",
+        "local-fixture-secret",
+        "--model",
+        "offrail-27b",
+    ]);
+    args.extract_super_overrides_from_codex_args().unwrap();
+    args.validate_urls().unwrap();
+    assert_eq!(args.api_key.as_deref(), Some("local-fixture-secret"));
+    assert_eq!(args.codex_args, vec![OsString::from(id)]);
+    assert!(!format!("{args:?}").contains("local-fixture-secret"));
+    let runtime = args.into_runtime_tool_args().unwrap();
+    assert_eq!(
+        runtime.external_provider_api_key.as_deref(),
+        Some("local-fixture-secret")
+    );
+    assert!(
+        runtime
+            .codex_args
+            .iter()
+            .all(|arg| !arg.to_string_lossy().contains("local-fixture-secret"))
+    );
+    assert!(!format!("{runtime:?}").contains("local-fixture-secret"));
+}
+
+#[test]
+fn local_api_key_still_requires_an_explicit_endpoint() {
+    let mut args = super_args_from(&["--api-key", "local-fixture-secret"]);
+    args.extract_super_overrides_from_codex_args().unwrap();
+    let error = args.validate_urls().unwrap_err();
+    assert!(error.contains("--provider or --url"));
+    assert!(!error.contains("local-fixture-secret"));
+}

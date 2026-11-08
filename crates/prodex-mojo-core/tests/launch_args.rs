@@ -754,3 +754,20 @@ fn super_prompt_choice_preselection_and_labels_use_real_mojo() {
         "Enter maximum active sub-agents (1-64)"
     );
 }
+
+#[test]
+fn super_validation_accepts_api_key_for_local_url_without_hosted_provider() {
+    assert_eq!(
+        plan_super_validation(
+            SuperValidationInput {
+                url: true,
+                api_key: true,
+                ..Default::default()
+            },
+            &[],
+            SuperValidationScope::Full
+        )
+        .unwrap(),
+        None
+    );
+}

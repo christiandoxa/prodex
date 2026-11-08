@@ -221,8 +221,8 @@ pub struct SuperArgs {
     /// Compatibility native CLI. Prodex 0.430 retains Antigravity (agy) only.
     #[arg(long, value_name = "CLI", value_enum)]
     pub cli: Option<SuperCliAgent>,
-    /// API key for --provider. Prefer the provider-specific environment variable for shells/history.
-    #[arg(long = "api-key", value_name = "KEY", requires = "provider")]
+    /// API key for --provider or --url. For --url, prefer PRODEX_LOCAL_API_KEY to avoid argv/history exposure.
+    #[arg(long = "api-key", value_name = "KEY", requires = "provider_or_url")]
     pub api_key: Option<String>,
     /// Model id to use with Codex, --url, or --provider.
     #[arg(long = "model", visible_alias = "local-model", value_name = "MODEL")]

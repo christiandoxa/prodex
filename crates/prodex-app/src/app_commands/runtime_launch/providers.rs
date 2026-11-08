@@ -158,10 +158,18 @@ pub(super) fn runtime_local_rewrite_provider_options(
             Ok(RuntimeLocalRewriteProviderOptions::Kiro { auth })
         }
         Some(provider) => bail!("unsupported external provider '{provider}'"),
-        None => Ok(RuntimeLocalRewriteProviderOptions::OpenAiResponses {
-            local: request.model_provider_override == Some(prodex_cli::SUPER_LOCAL_PROVIDER_ID),
-            api_keys: Vec::new(),
-        }),
+        None => {
+            let local =
+                request.model_provider_override == Some(prodex_cli::SUPER_LOCAL_PROVIDER_ID);
+            let api_keys = if local {
+                providers_env::runtime_local_api_keys_from_request_or_env(
+                    request.external_provider_api_key,
+                )?
+            } else {
+                Vec::new()
+            };
+            Ok(RuntimeLocalRewriteProviderOptions::OpenAiResponses { local, api_keys })
+        }
     }
 }
 

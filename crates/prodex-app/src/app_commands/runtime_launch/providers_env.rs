@@ -5,6 +5,31 @@ use std::env;
 use std::fs;
 use std::path::Path;
 
+/// An explicit local credential must never fall back to a hosted account's key.
+pub(super) fn runtime_local_api_keys_from_request_or_env(
+    value: Option<&str>,
+) -> Result<Vec<String>> {
+    let environment;
+    let (value, label) = if let Some(value) = value {
+        (value, "--api-key")
+    } else {
+        environment = match env::var("PRODEX_LOCAL_API_KEY") {
+            Ok(value) => value,
+            Err(env::VarError::NotPresent) => return Ok(Vec::new()),
+            Err(env::VarError::NotUnicode(_)) => bail!("PRODEX_LOCAL_API_KEY must be valid UTF-8"),
+        };
+        (environment.as_str(), "PRODEX_LOCAL_API_KEY")
+    };
+    let key = runtime_provider_single_api_key(value, label)?;
+    anyhow::ensure!(
+        key.len() <= 16 * 1024,
+        "local API key exceeds the supported length"
+    );
+    reqwest::header::HeaderValue::from_str(&format!("Bearer {key}"))
+        .map_err(|_| anyhow::anyhow!("local API key contains invalid HTTP header bytes"))?;
+    Ok(vec![key])
+}
+
 pub(crate) fn runtime_deepseek_api_keys_from_request_or_env(
     value: Option<&str>,
 ) -> Result<Option<Vec<String>>> {
@@ -352,5 +377,48 @@ mod tests {
             .unwrap();
 
         assert_eq!(keys, vec!["one", "two"]);
+    }
+}
+
+#[cfg(test)]
+mod local_key_tests {
+    use super::runtime_local_api_keys_from_request_or_env;
+    use crate::test_support::TestEnvVarGuard;
+
+    #[test]
+    fn local_api_key_resolver_is_explicit_and_does_not_inherit_cloud_credentials() {
+        let _cloud = TestEnvVarGuard::set("OPENAI_API_KEY", "unrelated-cloud-fixture");
+        let _local = TestEnvVarGuard::unset("PRODEX_LOCAL_API_KEY");
+        assert!(
+            runtime_local_api_keys_from_request_or_env(None)
+                .unwrap()
+                .is_empty()
+        );
+        let _local = TestEnvVarGuard::set("PRODEX_LOCAL_API_KEY", "environment-fixture");
+        assert_eq!(
+            runtime_local_api_keys_from_request_or_env(None).unwrap(),
+            vec!["environment-fixture"]
+        );
+        assert_eq!(
+            runtime_local_api_keys_from_request_or_env(Some("explicit-fixture")).unwrap(),
+            vec!["explicit-fixture"]
+        );
+    }
+
+    #[test]
+    fn local_api_key_rejects_empty_control_and_oversized_values_without_echo() {
+        for value in [
+            String::new(),
+            "secret\r\nInjected: value".into(),
+            "secret\0value".into(),
+            "s".repeat(16 * 1024 + 1),
+        ] {
+            let error = runtime_local_api_keys_from_request_or_env(Some(&value)).unwrap_err();
+            if !value.is_empty() {
+                assert!(!error.to_string().contains(&value));
+            }
+        }
+        let _local = TestEnvVarGuard::set("PRODEX_LOCAL_API_KEY", "");
+        assert!(runtime_local_api_keys_from_request_or_env(None).is_err());
     }
 }

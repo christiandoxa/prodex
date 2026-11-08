@@ -507,7 +507,7 @@ def launch_super_validation_policy(
         return
     if (
         (flags & SUPER_VALIDATE_API_KEY) != 0
-        and (flags & SUPER_VALIDATE_PROVIDER) == 0
+        and (flags & (SUPER_VALIDATE_PROVIDER | SUPER_VALIDATE_URL)) == 0
     ):
         metadata[unsafe_offset=0] = SUPER_VALIDATION_API_KEY_REQUIRES_PROVIDER
         return

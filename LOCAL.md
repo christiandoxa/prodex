@@ -106,6 +106,58 @@ activation. Presidio still asks for consent. Missing/incompatible external tools
 retain their existing launch diagnostics. Other local model aliases and cloud
 providers keep their existing protocol behavior.
 
+## Authenticated endpoints and Cloudflare Tunnel
+
+`--api-key` works with `--url` for fresh sessions and UUID/picker resumes.
+The key is sent as `Authorization: Bearer ...` to the selected upstream for
+inference, streaming, and compaction. Codex model discovery continues to use
+Prodex's configured catalog locally. Explicit `--api-key`
+uses the supplied value; otherwise local mode reads `PRODEX_LOCAL_API_KEY`.
+It never falls back to `OPENAI_API_KEY` or a saved hosted-provider credential.
+
+Prefer the dedicated environment variable so the key is not placed in the
+process argument list or shell history:
+
+```bash
+read -rs -p "Local endpoint API key: " PRODEX_LOCAL_API_KEY
+printf '\n'
+export PRODEX_LOCAL_API_KEY
+
+prodex s \
+  --url https://llm.example.com \
+  --model offrail-27b \
+  --context-window 169984 \
+  --auto-compact-token-limit 150000
+
+unset PRODEX_LOCAL_API_KEY
+```
+
+The explicit flag is also supported, including after a session UUID:
+
+```bash
+prodex s <SESSION_UUID> \
+  --url https://llm.example.com \
+  --model offrail-27b \
+  --context-window 169984 \
+  --auto-compact-token-limit 150000 \
+  --api-key "$OFFRAIL_KEY"
+```
+
+In the flag example, `OFFRAIL_KEY` must already hold the key; its expanded value
+can be visible to process-list inspection. Prodex keeps local credentials in
+the proxy process, not in Codex configuration, saved session metadata, or
+runtime diagnostics, and removes the dedicated environment variable from
+normal Codex/optional-tool child launches. Requests do not follow redirects;
+configure the final HTTPS endpoint rather than a login/redirect URL. A `401`
+from the server remains an authentication error, not a quota/overload signal.
+
+Cloudflare Tunnel transports the API connection; it does not generate or
+configure the model server's API key. Configure the server to require the same
+key, use HTTPS for a remote hostname, and verify SSE streaming on that route.
+Cloudflare Access login/service-token headers are separate from the model API
+Bearer key and are not provided by this flag. Do not expose an unauthenticated
+model server publicly.
+
 ## Example: llama.cpp Server
 
 Install a recent `llama.cpp` build with a backend suitable for your GPU. For NVIDIA systems without a CUDA toolkit, the Vulkan build is often the simplest option.

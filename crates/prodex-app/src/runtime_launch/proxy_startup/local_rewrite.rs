@@ -299,7 +299,14 @@ pub(super) fn prepare_runtime_local_rewrite_application(
         runtime_config: Arc::clone(&runtime_config),
         upstream_no_proxy,
         auto_redeem_enabled: false,
-        async_client: build_runtime_upstream_async_http_client(true, &runtime_config)?,
+        async_client: if matches!(
+            &provider,
+            RuntimeLocalRewriteProviderOptions::OpenAiResponses { local: true, .. }
+        ) {
+            crate::proxy_config::build_runtime_local_upstream_http_client(true, &runtime_config)?
+        } else {
+            build_runtime_upstream_async_http_client(true, &runtime_config)?
+        },
         compact_client: build_runtime_upstream_async_http_compact_client(
             upstream_no_proxy,
             &runtime_config,

@@ -42,8 +42,11 @@ pub struct AsyncUpstreamClientConfig {
 
 pub fn build_runtime_upstream_async_http_client(
     config: AsyncUpstreamClientConfig,
+    redirects: reqwest::redirect::Policy,
 ) -> Result<reqwest::Client> {
-    let mut builder = reqwest::Client::builder().connect_timeout(config.connect_timeout);
+    let mut builder = reqwest::Client::builder()
+        .connect_timeout(config.connect_timeout)
+        .redirect(redirects);
     builder = match config.response_timeout {
         AsyncResponseTimeout::ReadIdle(timeout) => builder.read_timeout(timeout),
         AsyncResponseTimeout::Request(timeout) => builder.timeout(timeout),
@@ -91,13 +94,16 @@ mod tests {
     fn streaming_async_client_keeps_read_idle_timeout() {
         let idle_timeout_ms = 200;
         let url = spawn_delayed_response_server(Duration::from_millis(450));
-        let client = build_runtime_upstream_async_http_client(AsyncUpstreamClientConfig {
-            proxy_mode: UpstreamProxyMode::Disabled,
-            connect_timeout: Duration::from_millis(500),
-            response_timeout: AsyncResponseTimeout::ReadIdle(Duration::from_millis(
-                idle_timeout_ms,
-            )),
-        })
+        let client = build_runtime_upstream_async_http_client(
+            AsyncUpstreamClientConfig {
+                proxy_mode: UpstreamProxyMode::Disabled,
+                connect_timeout: Duration::from_millis(500),
+                response_timeout: AsyncResponseTimeout::ReadIdle(Duration::from_millis(
+                    idle_timeout_ms,
+                )),
+            },
+            reqwest::redirect::Policy::default(),
+        )
         .expect("streaming client should build");
         let runtime = test_tokio_runtime();
 
@@ -116,13 +122,16 @@ mod tests {
     fn compact_async_client_allows_full_response_timeout_past_idle_timeout() {
         let url = spawn_delayed_response_server(Duration::from_millis(450));
         let compact_timeout_ms = 800;
-        let client = build_runtime_upstream_async_http_client(AsyncUpstreamClientConfig {
-            proxy_mode: UpstreamProxyMode::Disabled,
-            connect_timeout: Duration::from_millis(500),
-            response_timeout: AsyncResponseTimeout::Request(Duration::from_millis(
-                compact_timeout_ms,
-            )),
-        })
+        let client = build_runtime_upstream_async_http_client(
+            AsyncUpstreamClientConfig {
+                proxy_mode: UpstreamProxyMode::Disabled,
+                connect_timeout: Duration::from_millis(500),
+                response_timeout: AsyncResponseTimeout::Request(Duration::from_millis(
+                    compact_timeout_ms,
+                )),
+            },
+            reqwest::redirect::Policy::default(),
+        )
         .expect("compact client should build");
         let runtime = test_tokio_runtime();
 
@@ -137,11 +146,14 @@ mod tests {
     #[test]
     fn compact_async_client_uses_explicit_request_timeout() {
         let url = spawn_delayed_response_server(Duration::from_millis(450));
-        let client = build_runtime_upstream_async_http_client(AsyncUpstreamClientConfig {
-            proxy_mode: UpstreamProxyMode::Disabled,
-            connect_timeout: Duration::from_millis(500),
-            response_timeout: AsyncResponseTimeout::Request(Duration::from_millis(200)),
-        })
+        let client = build_runtime_upstream_async_http_client(
+            AsyncUpstreamClientConfig {
+                proxy_mode: UpstreamProxyMode::Disabled,
+                connect_timeout: Duration::from_millis(500),
+                response_timeout: AsyncResponseTimeout::Request(Duration::from_millis(200)),
+            },
+            reqwest::redirect::Policy::default(),
+        )
         .expect("compact client should build");
         let runtime = test_tokio_runtime();
 

@@ -177,11 +177,20 @@ fn runtime_local_rewrite_apply_prepared_auth(
     auth: RuntimeLocalRewritePreparedAuth<'_>,
 ) -> Result<reqwest::RequestBuilder> {
     match auth {
-        RuntimeLocalRewritePreparedAuth::LocalChat => runtime_local_rewrite_copy_openai_headers(
-            request,
-            runtime_local_rewrite_provider_headers(upstream_request),
-            true,
-        ),
+        RuntimeLocalRewritePreparedAuth::LocalChat => {
+            let super::local_rewrite_options::RuntimeLocalRewriteProviderOptions::OpenAiResponses {
+                local: true,
+                api_keys,
+            } = shared.provider.as_ref()
+            else {
+                anyhow::bail!("local chat authentication requires an explicit local endpoint");
+            };
+            runtime_local_rewrite_apply_local_auth(
+                upstream_request,
+                request,
+                api_keys.first().map(String::as_str),
+            )
+        }
         RuntimeLocalRewritePreparedAuth::Anthropic {
             auth,
             native_messages,
@@ -202,7 +211,17 @@ fn runtime_local_rewrite_apply_prepared_auth(
             )
         }
         RuntimeLocalRewritePreparedAuth::OpenAiResponses { api_key } => {
-            runtime_local_rewrite_apply_openai_auth(upstream_request, request, api_key)
+            if matches!(
+                shared.provider.as_ref(),
+                super::local_rewrite_options::RuntimeLocalRewriteProviderOptions::OpenAiResponses {
+                    local: true,
+                    ..
+                }
+            ) {
+                runtime_local_rewrite_apply_local_auth(upstream_request, request, api_key)
+            } else {
+                runtime_local_rewrite_apply_openai_auth(upstream_request, request, api_key)
+            }
         }
         RuntimeLocalRewritePreparedAuth::DeepSeek {
             api_key,
@@ -226,6 +245,23 @@ fn runtime_local_rewrite_apply_prepared_auth(
             )
         }
     }
+}
+
+/// Local requests replace, never inherit, Codex/account authorization.
+fn runtime_local_rewrite_apply_local_auth(
+    upstream: reqwest::RequestBuilder,
+    request: &RuntimeProxyRequest,
+    api_key: Option<&str>,
+) -> Result<reqwest::RequestBuilder> {
+    let upstream = runtime_local_rewrite_copy_openai_headers(
+        request,
+        runtime_local_rewrite_provider_headers(upstream),
+        true,
+    )?;
+    Ok(match api_key {
+        Some(key) => upstream.bearer_auth(key),
+        None => upstream,
+    })
 }
 
 fn runtime_local_rewrite_provider_headers(
