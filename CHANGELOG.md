@@ -2,6 +2,76 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.167.1 - 2026-11-08
+
+### Runtime
+
+- Preserve upstream proxy routing during account discovery (`5b70596`)
+
+### CLI
+
+- Preserve native OpenAI session identity (`0263c42`)
+
+### Misc
+
+- Flush retained backups with writable Windows handles (`db90906`)
+- Add bounded legacy OpenAI identity repair (`eb7cf48`)
+# Prodex 0.167.1
+
+Fix OpenAI session resume and proxy-based account discovery with Codex 0.167.0.
+
+## New Features
+
+Automatically prepare historical Prodex OpenAI sessions for native provider
+identity checks during local startup.
+
+## Bug Fixes
+
+- Keep the native `openai` provider identity when routing inference through
+  Prodex. Native OpenAI histories can continue through UUID resume and the
+  interactive `/resume` picker.
+- Repair the reserved historical `prodex-openai-governed-http` metadata and
+  matching native SQLite index using publication locks, a private exact backup,
+  and atomic replacement.
+- Restrict automatic proxy bypass for Codex backend URL overrides to loopback
+  hosts. External account-discovery origins use the configured upstream proxy.
+- Normalize IPv6 loopback bypass entries with valid host-port formatting.
+- Allow Windows to flush verified existing backups before session replacement.
+
+[Issue #123](https://github.com/christiandoxa/prodex/issues/123)
+
+## Compatibility
+
+- Preserve forced HTTP for governed and recursive sub-agent Responses launches
+  using a local transport marker and native Codex's HTTP 426 fallback.
+- Scope Observe fallback to marked launches so other clients sharing the
+  runtime daemon can use their existing WebSocket transport.
+- Qualify official tunnel-client 0.0.20 and isolate its ambient OAuth forwarding
+  configuration in the managed tunnel.
+- The release-qualified upstream Codex version is 0.167.0.
+
+## Upgrade
+
+Start a new Prodex runtime after upgrading. Legacy provider repair prioritizes
+an explicit resume UUID and attempts at most 32 sessions per launch. Busy
+sessions, files above the 64 MiB repair limit, and conflicting provider backups
+defer repair with a launch diagnostic. Large unindexed homes can need another
+launch after native index backfill completes.
+
+Each provider migration stores its exact original bytes in a private
+`.prodex-provider-identity-bak` file beside the rollout.
+
+## Verification
+
+Regression coverage exercises provider identity, scoped CLI overrides, proxy
+environment routing, native Responses fallback, index recovery, and
+cross-process writer contention. Isolated tests use official Codex 0.167.0
+with synthetic authentication and local HTTP/WebSocket services.
+
+## Changelog
+
+Full Changelog: [0.167.0...0.167.1](https://github.com/christiandoxa/prodex/compare/0.167.0...0.167.1)
+
 ## 0.167.0 - 2026-11-06
 
 ### CLI
@@ -15,36 +85,6 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 ### Misc
 
 - Qualify Codex 0.167.0 lifecycle and request contracts (`4da2c28`)
-# Prodex 0.167.0
-
-Prodex now targets the stable Codex CLI 0.167.0 release. Install Codex 0.167.0
-separately to use its new agent command center and session picker.
-
-## New Features
-
-Run `prodex s agents --no-daemon` to open the native command center with its
-embedded backend.
-
-## Bug Fixes
-
-On Unix, Super previously added a private `--remote` socket
-even when the user requested `--no-daemon`, causing Codex to exit at startup.
-Super now honors the explicit transport. An ordinary interactive `prodex s`
-launch still uses its private companion where supported.
-
-## Compatibility
-
-- Align the upstream source contracts with Codex 0.167.0, including explicit
-  provider opt-in for Cyber access programs. Codex owns the eligibility checks.
-- Check that Smart Context preserves the developer message listing deferred
-  tools and the tool search schema when deduplicating repeated tool output.
-- Qualify Kiro CLI 3.1.0 for the release's native client checks.
-
-[Upstream Codex release](https://github.com/openai/codex/releases/tag/rust-v0.167.0)
-
-## Changelog
-
-Full Changelog: [0.166.4...0.167.0](https://github.com/christiandoxa/prodex/compare/0.166.4...0.167.0)
 
 ## 0.166.4 - 2026-11-05
 
